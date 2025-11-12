@@ -5,15 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import Dict, Any, List
 from pydantic import BaseModel
-import sys
-import os
-
-# 添加根目录到系统路径
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../..')))
 
 from app.db.base import get_db
 from app.core.security import get_current_user
-from knowledge_base import NovelKnowledgeBase
+from app.services.agents.knowledge_base import NovelKnowledgeBase
 
 # 请求模型
 class SearchRequest(BaseModel):

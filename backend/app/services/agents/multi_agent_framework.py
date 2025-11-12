@@ -2,9 +2,9 @@
 多Agent框架 - 协调多个专业化Agent完成小说创作
 """
 from typing import Dict, Any, List, Optional
-from agent_coordinator import CreativeDirectorCoordinator
-from knowledge_base import NovelKnowledgeBase
-from memory_manager import NovelMemoryManager
+from .agent_coordinator import CreativeDirectorCoordinator
+from .knowledge_base import NovelKnowledgeBase
+from .memory_manager import NovelMemoryManager
 
 
 class MultiAgentNovelWritingFramework:

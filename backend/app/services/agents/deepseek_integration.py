@@ -7,9 +7,9 @@ import threading
 import queue
 from typing import Dict, Any, Callable, Optional
 from datetime import datetime
-from multi_agent_framework import MultiAgentNovelWritingFramework
-from knowledge_base import NovelKnowledgeBase
-from memory_manager import NovelMemoryManager
+from .multi_agent_framework import MultiAgentNovelWritingFramework
+from .knowledge_base import NovelKnowledgeBase
+from .memory_manager import NovelMemoryManager
 
 
 class GenerationTask:

@@ -8,7 +8,7 @@ import requests
 import os
 import json
 import numpy as np
-from config import Config
+from .config import Config
 
 
 class AliyunEmbeddings(Embeddings):
