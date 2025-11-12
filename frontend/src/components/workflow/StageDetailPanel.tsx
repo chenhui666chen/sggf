@@ -1,9 +1,11 @@
+import { useSelector } from 'react-redux'
 import {
   Card,
   CardContent,
   Typography,
   Box,
   Chip,
+  LinearProgress,
   Divider,
   Paper,
   List,
@@ -13,7 +15,6 @@ import {
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'
-import { useSelector } from 'react-redux'
 import { RootState } from '@/store/store'
 import { StageType } from '@/store/slices/workflowSlice'
 
@@ -79,34 +80,6 @@ export default function StageDetailPanel({ stage }: StageDetailPanelProps) {
   const stageData = workflow.stages[stage]
   const description = stageDescriptions[stage]
 
-  // 处理显示内容，添加适当的排版
-  const displayContent = stageData.output
-  const formatContent = (content: any) => {
-    if (!content) return ''
-    
-    // 如果是字符串，直接返回
-    if (typeof content === 'string') {
-      return content
-    }
-    
-    // 如果是对象，尝试格式化
-    if (typeof content === 'object') {
-      // 如果有特定的字段，优先显示这些字段
-      if (content.concept) return content.concept
-      if (content.worldview || content.world_setting) return content.worldview || content.world_setting
-      if (content.characters) return content.characters
-      if (content.plot_outline) return content.plot_outline
-      if (content.content || content.chapters) return content.content || content.chapters
-      if (content.review) return content.review
-      if (content.revised_content || content.final_review) return content.revised_content || content.final_review
-      
-      // 否则返回格式化的JSON
-      return JSON.stringify(content, null, 2)
-    }
-    
-    return String(content)
-  }
-
   const getStatusIcon = () => {
     switch (stageData.status) {
       case 'completed':
@@ -169,6 +142,15 @@ export default function StageDetailPanel({ stage }: StageDetailPanelProps) {
 
         <Divider sx={{ my: 2 }} />
 
+        {/* 进度条 */}
+        <Box sx={{ mb: 3 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+            <Typography variant="body2">阶段进度</Typography>
+            <Typography variant="body2">{stageData.progress}%</Typography>
+          </Box>
+          <LinearProgress variant="determinate" value={stageData.progress} />
+        </Box>
+
         {/* 步骤列表 */}
         <Box sx={{ mb: 3 }}>
           <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
@@ -187,7 +169,7 @@ export default function StageDetailPanel({ stage }: StageDetailPanelProps) {
         </Box>
 
         {/* 输出预览 */}
-        {displayContent && (
+        {stageData.output && (
           <Box>
             <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
               📄 输出预览
@@ -200,17 +182,10 @@ export default function StageDetailPanel({ stage }: StageDetailPanelProps) {
                 overflow: 'auto',
               }}
             >
-              <Typography 
-                variant="body2" 
-                component="div" 
-                sx={{ 
-                  whiteSpace: 'pre-wrap',
-                  fontFamily: 'monospace',
-                  fontSize: '0.875rem',
-                  lineHeight: 1.5
-                }}
-              >
-                {formatContent(displayContent)}
+              <Typography variant="body2" component="pre" sx={{ whiteSpace: 'pre-wrap' }}>
+                {typeof stageData.output === 'string'
+                  ? stageData.output
+                  : JSON.stringify(stageData.output, null, 2)}
               </Typography>
             </Paper>
           </Box>
@@ -233,3 +208,4 @@ export default function StageDetailPanel({ stage }: StageDetailPanelProps) {
     </Card>
   )
 }
+

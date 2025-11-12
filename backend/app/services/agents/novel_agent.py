@@ -2,12 +2,12 @@
 小说写作Agent - 整合知识库和记忆管理的智能写作助手
 """
 from typing import Dict, Any, List, Optional
-from langchain.chat_models import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.schema import HumanMessage, SystemMessage, BaseMessage
-from config import Config
-from knowledge_base import NovelKnowledgeBase
-from memory_manager import NovelMemoryManager
+from langchain_community.chat_models import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
+from .config import Config
+from .knowledge_base import NovelKnowledgeBase
+from .memory_manager import NovelMemoryManager
 
 
 def create_deepseek_llm():
@@ -123,7 +123,7 @@ class NovelWritingAgent:
     
     def _generate_response(self, messages: List[BaseMessage]) -> str:
         """调用LLM生成响应"""
-        response = self.llm(messages)  # type: ignore
+        response = self.llm.invoke(messages)  # type: ignore
         return response.content
     
     def set_context(self, **kwargs):

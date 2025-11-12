@@ -3,17 +3,17 @@
 """
 from typing import Dict, Any, List, Optional, Union
 from abc import ABC, abstractmethod
-from langchain.chat_models import ChatOpenAI
-from langchain.schema import HumanMessage, SystemMessage, BaseMessage
-from config import Config
-from knowledge_base import NovelKnowledgeBase
-from memory_manager import NovelMemoryManager
-from quality_assessment import (
+from langchain_community.chat_models import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
+from .config import Config
+from .knowledge_base import NovelKnowledgeBase
+from .memory_manager import NovelMemoryManager
+from .quality_assessment import (
     QualityAssessmentFramework, QualityAssessmentReport, QualityMetric,
     create_story_metrics, create_character_metrics, create_language_metrics,
     create_structure_metrics, create_innovation_metrics
 )
-from context_aware_optimizer import ContextAwareOptimizer
+from .context_aware_optimizer import ContextAwareOptimizer
 
 
 def create_deepseek_llm():  # type: ignore
@@ -95,8 +95,8 @@ class BaseAgent(ABC):
         messages.extend(history[:-1])
         
         messages.append(HumanMessage(content=user_input))
-        
-        response = self.llm(messages)
+
+        response = self.llm.invoke(messages)
         self.memory_manager.add_ai_message(response.content)
         self.conversation_history.append({"input": user_input, "output": response.content})
         
@@ -237,7 +237,7 @@ class ContentCreatorAgent(BaseAgent):
         messages.append(HumanMessage(content=optimized_prompt))
 
         # 5. 调用LLM生成内容
-        response = self.llm(messages)
+        response = self.llm.invoke(messages)
         chapter_content = response.content
 
         # 6. 记录到记忆管理器
@@ -292,7 +292,7 @@ class ContentCreatorAgent(BaseAgent):
         messages.append(HumanMessage(content=optimized_prompt))
 
         # 5. 调用LLM生成内容
-        response = self.llm(messages)
+        response = self.llm.invoke(messages)
         scene_content = response.content
 
         # 6. 记录到记忆管理器

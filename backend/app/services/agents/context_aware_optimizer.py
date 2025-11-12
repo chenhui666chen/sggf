@@ -2,11 +2,11 @@
 上下文感知优化器 - 基于记忆管理器优化提示词，准确捕捉作者创作意图
 """
 from typing import Dict, Any, List, Optional
-from langchain.chat_models import ChatOpenAI
-from langchain.schema import SystemMessage, HumanMessage
-from config import Config
-from memory_manager import NovelMemoryManager
-from knowledge_base import NovelKnowledgeBase
+from langchain_community.chat_models import ChatOpenAI
+from langchain_core.messages import SystemMessage, HumanMessage
+from .config import Config
+from .memory_manager import NovelMemoryManager
+from .knowledge_base import NovelKnowledgeBase
 
 
 def create_deepseek_llm():  # type: ignore
@@ -56,9 +56,9 @@ class ContextAwareOptimizer:
     "pacing": "...",
     "special_requirements": "..."
 }}"""
-        
+
         messages = [HumanMessage(content=intent_prompt)]
-        response = self.llm(messages)
+        response = self.llm.invoke(messages)
         
         # 解析响应
         try:
@@ -243,9 +243,9 @@ class ContextAwareOptimizer:
     "timeline_consistency": "...",
     "suggestions": ["...", "..."]
 }}"""
-        
+
         messages = [HumanMessage(content=consistency_prompt)]
-        response = self.llm(messages)
+        response = self.llm.invoke(messages)
         
         try:
             import json

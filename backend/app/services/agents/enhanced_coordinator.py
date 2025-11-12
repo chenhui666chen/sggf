@@ -13,9 +13,9 @@
     )
 """
 from typing import Optional
-from agent_coordinator import CreativeDirectorCoordinator
-from knowledge_base import NovelKnowledgeBase
-from memory_manager import NovelMemoryManager
+from .agent_coordinator import CreativeDirectorCoordinator
+from .knowledge_base import NovelKnowledgeBase
+from .memory_manager import NovelMemoryManager
 
 
 def create_enhanced_coordinator(

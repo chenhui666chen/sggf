@@ -3,10 +3,10 @@ Knowledge Base Management - Store and retrieve novel settings using vector datab
 """
 from typing import List, Dict, Any, Optional
 from langchain_community.vectorstores import Chroma
-from langchain.embeddings.base import Embeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import Document
-from config import Config
+from langchain_core.embeddings import Embeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
+from .config import Config
 import os
 import requests
 import numpy as np

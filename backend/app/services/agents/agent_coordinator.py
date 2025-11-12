@@ -1,23 +1,24 @@
 """
 创意总监协调器 - 协调多个Agent的五阶段工作流程
 """
+import os
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-from langchain.chat_models import ChatOpenAI
-from langchain.schema import HumanMessage, SystemMessage
-from config import Config
-from knowledge_base import NovelKnowledgeBase
-from memory_manager import NovelMemoryManager
-from agents import (
+from langchain_community.chat_models import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
+from .config import Config
+from .knowledge_base import NovelKnowledgeBase
+from .memory_manager import NovelMemoryManager
+from .agents import (
     WorldArchitectAgent, CharacterDesignerAgent, PlotArchitectAgent,
     ContentCreatorAgent, QualityReviewerAgent, CreativeDirectorAgent, create_deepseek_llm
 )
-from agent_communication import AgentCommunicationHub
+from .agent_communication import AgentCommunicationHub
 
 # 🆕 AI痕迹降低：导入AI痕迹降低处理器
 try:
-    from ai_trace_reduction_processor import AITraceReductionProcessor
-    from author_voice_system import get_voice_manager, create_voice_profile
+    from .ai_trace_reduction_processor import AITraceReductionProcessor
+    from .author_voice_system import get_voice_manager, create_voice_profile
     AI_TRACE_REDUCTION_AVAILABLE = True
     print("✅ AI痕迹降低模块已加载")
 except ImportError as e:
@@ -25,14 +26,7 @@ except ImportError as e:
     print(f"⚠️  AI痕迹降低模块未加载: {e}")
 
 # 🆕 模型优化：导入优化的LLM客户端
-import sys
-import os
 from typing import TYPE_CHECKING
-
-# 添加 backend 目录到 Python 路径（运行时和类型检查都能识别）
-_backend_path = os.path.join(os.path.dirname(__file__), 'backend')
-if _backend_path not in sys.path:
-    sys.path.insert(0, _backend_path)
 
 if TYPE_CHECKING:
     from app.services.llm_client import get_llm_client  # type: ignore

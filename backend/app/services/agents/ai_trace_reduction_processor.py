@@ -4,9 +4,9 @@ AI痕迹降低处理器 - 对生成的小说文本进行二次精修，降低AI�
 """
 from typing import Dict, Any, List, Optional
 import re
-from langchain.chat_models import ChatOpenAI
-from langchain.schema import HumanMessage, SystemMessage
-from config import Config
+from langchain_community.chat_models import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
+from .config import Config
 
 
 def create_deepseek_llm():
@@ -92,8 +92,8 @@ class AITraceReductionProcessor:
             SystemMessage(content="你是一位文学编辑，专门为AI生成的文本注入人性化的灵魂。"),
             HumanMessage(content=soul_prompt)
         ]
-        
-        response = self.llm(messages)
+
+        response = self.llm.invoke(messages)
         return response.content
     
     def _optimize_narrative_structure(self, content: str, context: Optional[Dict] = None) -> str:
@@ -126,8 +126,8 @@ class AITraceReductionProcessor:
             SystemMessage(content="你是一位叙事结构专家，专门优化故事的真实感和节奏。"),
             HumanMessage(content=structure_prompt)
         ]
-        
-        response = self.llm(messages)
+
+        response = self.llm.invoke(messages)
         return response.content
     
     def _enhance_dialogue_authenticity(self, content: str, context: Optional[Dict] = None) -> str:
@@ -163,8 +163,8 @@ class AITraceReductionProcessor:
             SystemMessage(content="你是一位对话编剧，专门为文本增强对话的真实性和潜台词。"),
             HumanMessage(content=dialogue_prompt)
         ]
-        
-        response = self.llm(messages)
+
+        response = self.llm.invoke(messages)
         return response.content
     
     def _refine_language_details(self, content: str, context: Optional[Dict] = None) -> str:
@@ -210,8 +210,8 @@ class AITraceReductionProcessor:
             SystemMessage(content="你是一位文学语言大师，专门精修文本的语言细节和五感描写。"),
             HumanMessage(content=language_prompt)
         ]
-        
-        response = self.llm(messages)
+
+        response = self.llm.invoke(messages)
         return response.content
     
     def get_processing_history(self) -> List[Dict[str, Any]]:

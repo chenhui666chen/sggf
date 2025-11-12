@@ -24,6 +24,25 @@ export default defineConfig({
       cachedChecks: true,
     },
     proxy: {
+      // 特殊处理 /api/workflow 路径，重写为 /api/v1/workflow
+      '/api/workflow': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/workflow/, '/api/v1/workflow'),
+        headers: {
+          'Connection': 'keep-alive',
+        },
+        configure: (proxy, _options) => {
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            // 确保Authorization头被传递
+            if (req.headers.authorization) {
+              proxyReq.setHeader('Authorization', req.headers.authorization)
+              console.log('🔑 Vite代理传递Authorization头 (workflow):', req.headers.authorization.substring(0, 20) + '...')
+            }
+          })
+        },
+      },
+      // 其他 /api 请求保持不变
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,

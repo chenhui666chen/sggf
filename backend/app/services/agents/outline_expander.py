@@ -2,9 +2,9 @@
 情节大纲和人物扩展器 - 自动扩展简短大纲和增加人物数量
 """
 from typing import Dict, Any, List, Optional
-from agents import CreativeDirectorAgent, PlotArchitectAgent, CharacterDesignerAgent, create_deepseek_llm
-from knowledge_base import NovelKnowledgeBase
-from memory_manager import NovelMemoryManager
+from .agents import CreativeDirectorAgent, PlotArchitectAgent, CharacterDesignerAgent, create_deepseek_llm
+from .knowledge_base import NovelKnowledgeBase
+from .memory_manager import NovelMemoryManager
 
 
 class OutlineExpander:

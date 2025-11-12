@@ -3,9 +3,9 @@
 """
 from typing import Dict, Any, List, Optional
 import json
-from agents import CreativeDirectorAgent, create_deepseek_llm
-from knowledge_base import NovelKnowledgeBase
-from memory_manager import NovelMemoryManager
+from .agents import CreativeDirectorAgent, create_deepseek_llm
+from .knowledge_base import NovelKnowledgeBase
+from .memory_manager import NovelMemoryManager
 
 
 class ChapterSummarizer:

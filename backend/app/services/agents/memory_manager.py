@@ -3,10 +3,10 @@
 增加持久化功能
 """
 from typing import List, Dict, Any
-from langchain.memory import ConversationBufferMemory, ConversationSummaryMemory
-from langchain.schema import BaseMessage, HumanMessage, AIMessage
-from langchain.chat_models import ChatOpenAI
-from config import Config
+from langchain_classic.memory import ConversationBufferMemory, ConversationSummaryMemory
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from langchain_community.chat_models import ChatOpenAI
+from .config import Config
 import pickle
 import json
 import os

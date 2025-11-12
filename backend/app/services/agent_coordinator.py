@@ -3,15 +3,10 @@ Agent协调系统 - 管理多个Agent的协调和通信
 集成真实的CreativeDirectorCoordinator
 """
 import asyncio
-import sys
-import os
 from typing import Dict, List, Any, Optional
 from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime
-
-# 添加根目录到系统路径，以便导入根目录模块
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
 
 class AgentType(str, Enum):
@@ -90,7 +85,7 @@ class AgentCoordinator:
                 # 🆕 导入并初始化真实的协调器
                 print("🔍 开始初始化真实协调器...")
                 print("   步骤1: 导入 enhanced_coordinator 模块...")
-                from enhanced_coordinator import create_enhanced_coordinator
+                from .agents.enhanced_coordinator import create_enhanced_coordinator
                 print("   ✅ 步骤1完成: enhanced_coordinator 模块导入成功")
                 
                 print("   步骤2: 创建协调器实例...")
@@ -112,8 +107,8 @@ class AgentCoordinator:
                 import traceback
                 traceback.print_exc()
                 print("\n⚠️  请检查:")
-                print("   1. enhanced_coordinator.py 是否存在于项目根目录")
-                print("   2. agent_coordinator.py 是否存在于项目根目录")
+                print("   1. enhanced_coordinator.py 是否存在于 backend/app/services/agents/")
+                print("   2. agent_coordinator.py 是否存在于 backend/app/services/agents/")
                 print("   3. 依赖模块是否都存在：")
                 print("      - config.py")
                 print("      - knowledge_base.py")

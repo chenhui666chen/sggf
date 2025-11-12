@@ -3,9 +3,9 @@
 """
 from typing import Dict, Any, List, Optional
 import re
-from langchain.chat_models import ChatOpenAI
-from langchain.schema import HumanMessage, SystemMessage
-from config import Config
+from langchain_community.chat_models import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
+from .config import Config
 
 
 def create_deepseek_llm():
@@ -182,8 +182,8 @@ class DialogueAuthenticityEngine:
             SystemMessage(content="你是一位对话编剧，专门优化对话的真实性和节奏。"),
             HumanMessage(content=optimization_prompt)
         ]
-        
-        response = self.llm(messages)
+
+        response = self.llm.invoke(messages)
         return response.content
     
     def analyze_dialogue_authenticity(self, content: str) -> Dict[str, Any]:
