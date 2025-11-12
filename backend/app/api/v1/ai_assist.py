@@ -5,18 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-import sys
-import os
-
-# 添加根目录到系统路径
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../..')))
 
 from app.core.security import get_current_user
 from app.models.user import User
 
 # 导入Agent
 try:
-    from agents import CharacterDesignerAgent, EventValidatorAgent, WorldArchitectAgent
+    from app.services.agents.agents import CharacterDesignerAgent, EventValidatorAgent, WorldArchitectAgent
     AGENTS_AVAILABLE = True
     _CharacterAgent = CharacterDesignerAgent
     _EventAgent = EventValidatorAgent
