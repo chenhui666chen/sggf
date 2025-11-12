@@ -5,14 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List
-import sys
-import os
 import json
 import csv
 import io
-
-# 添加根目录到系统路径
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../..')))
 
 from app.db.base import get_db
 from app.models.user import User
@@ -25,13 +20,14 @@ from app.core.security import get_current_user
 
 # 导入向量库
 try:
-    from knowledge_base import NovelKnowledgeBase
+    from app.services.agents.knowledge_base import NovelKnowledgeBase
     VECTOR_DB_AVAILABLE = True
     _VectorKBType = NovelKnowledgeBase
-except ImportError:
+except ImportError as e:
     VECTOR_DB_AVAILABLE = False
     _VectorKBType = None  # type: ignore
-    print("⚠️ 向量库未启用，只使用数据库存储")
+    print(f"⚠️ 向量库未启用: {e}")
+    print("   只使用数据库存储，语义搜索功能将不可用")
 
 router = APIRouter(prefix="/api/v1/projects", tags=["knowledge_base"])
 
