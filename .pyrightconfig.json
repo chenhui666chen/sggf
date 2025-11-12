@@ -1,0 +1,25 @@
+{
+    "include": [
+        "backend",
+        "."
+    ],
+    "extraPaths": [
+        "backend"
+    ],
+    "pythonVersion": "3.8",
+    "pythonPlatform": "All",
+    "executionEnvironments": [
+        {
+            "root": ".",
+            "extraPaths": [
+                "backend"
+            ]
+        },
+        {
+            "root": "backend",
+            "extraPaths": [
+                "backend"
+            ]
+        }
+    ]
+}

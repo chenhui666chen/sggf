@@ -1,0 +1,79 @@
+@echo off
+cd /d "%~dp0"
+cls
+
+echo ================================================================
+echo Start Novel Writing System - FastAPI + WebSocket
+echo ================================================================
+echo.
+echo WebSocket Support: YES
+echo Real-time Communication: YES
+echo.
+echo ================================================================
+echo.
+
+:: Check Python
+python --version >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Python not found in PATH
+    pause
+    exit /b 1
+)
+
+:: Check Node.js
+node --version >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Node.js not found in PATH
+    pause
+    exit /b 1
+)
+
+echo [OK] Python Ready
+echo [OK] Node.js Ready
+echo.
+
+:: Start Backend
+echo [1/2] Starting FastAPI Backend Server (WebSocket Enabled)...
+echo.
+echo 验证配置...
+cd /d %~dp0\backend
+python -c "from app.core.config import settings; print('✅ 数据库:', settings.DATABASE_URL); print('✅ CORS:', settings.CORS_ORIGINS[:2] if len(settings.CORS_ORIGINS) > 2 else settings.CORS_ORIGINS)"
+cd /d %~dp0
+echo.
+start "Novel System - Backend (FastAPI + WebSocket)" cmd /k "cd /d %~dp0\backend && python -m uvicorn app.main:application --host 0.0.0.0 --port 8000 --reload"
+
+:: Wait for backend
+echo [WAIT] Waiting for backend to start...
+timeout /t 3 /nobreak >nul
+
+:: Start Frontend
+echo [2/2] Starting Frontend Dev Server...
+start "Novel System - Frontend" cmd /k "cd /d %~dp0\frontend && npm run dev"
+
+echo.
+echo ================================================================
+echo [SUCCESS] System Started!
+echo ================================================================
+echo.
+echo Service URLs:
+echo    - Frontend: http://localhost:5173
+echo    - Backend: http://localhost:8000
+echo    - API Docs: http://localhost:8000/docs
+echo    - WebSocket: ws://localhost:8000/socket.io/
+echo.
+echo Tips:
+echo    - Two new windows opened (Backend + Frontend)
+echo    - Close window to stop service
+echo    - Press any key to open browser...
+echo.
+echo ================================================================
+
+pause
+
+:: Open browser
+start http://localhost:5173
+
+echo.
+echo [DONE] Browser opened, enjoy!
+echo.
+pause
