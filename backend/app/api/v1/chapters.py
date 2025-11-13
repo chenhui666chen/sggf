@@ -269,6 +269,7 @@ async def update_chapter(
         )
     
     # 更新字段
+    content_updated = False
     if chapter_data.title is not None:
         chapter.title = cast(str, chapter_data.title)  # type: ignore[assignment]
     if chapter_data.content is not None:
@@ -282,17 +283,59 @@ async def update_chapter(
                 created_by=current_user.id
             )
             db.add(revision)
-        
+            content_updated = True
+
         chapter.content = cast(str, chapter_data.content)  # type: ignore[assignment]
         # 🔧 修复：使用正确的中文字数统计
         import re
         chapter.word_count = len(re.sub(r'\s', '', chapter_data.content))  # type: ignore[assignment]
     if chapter_data.status is not None:
         chapter.status = cast(str, chapter_data.status)  # type: ignore[assignment]
-    
+
     db.add(chapter)
     db.commit()
     db.refresh(chapter)
+
+    # 🆕 同步更新向量库
+    if content_updated:
+        try:
+            from app.services.agents.knowledge_base import NovelKnowledgeBase
+            from app.api.v1.knowledge_base import sync_to_vector_db
+            import logging
+
+            logger = logging.getLogger("uvicorn.error")
+            logger.info(f"   🔄 同步更新向量库中的章节数据...")
+
+            # 先删除旧的向量数据
+            kb = NovelKnowledgeBase()
+            deleted_count = kb.delete_chapter(
+                chapter_number=chapter.chapter_number,
+                project_id=chapter.project_id
+            )
+
+            if deleted_count > 0:
+                logger.info(f"   ✅ 已删除旧版本 {deleted_count} 个文档")
+
+            # 添加新的向量数据
+            sync_to_vector_db(
+                kb_type="chapter",
+                name=f"第{chapter.chapter_number}章 {chapter.title}",
+                content=chapter.content,
+                metadata={
+                    "project_id": str(chapter.project_id),
+                    "chapter_number": str(chapter.chapter_number)
+                }
+            )
+
+            logger.info(f"   ✅ 已同步新版本到向量库")
+
+        except Exception as e:
+            import logging
+            logger = logging.getLogger("uvicorn.error")
+            logger.warning(f"⚠️ 更新章节时同步向量库失败: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+
     return chapter
 
 

@@ -266,12 +266,45 @@ async def update_knowledge_base(
             detail="Knowledge base item not found"
         )
     
+    # 检查内容是否更新
+    content_updated = 'content' in kb_data.dict(exclude_unset=True)
+    old_name = kb.name
+    old_type = kb.type
+
     for key, value in kb_data.dict(exclude_unset=True).items():
         setattr(kb, key, value)
-    
+
     db.add(kb)
     db.commit()
     db.refresh(kb)
+
+    # 🆕 同步更新向量库
+    if content_updated and kb.content:
+        try:
+            import logging
+            logger = logging.getLogger("uvicorn.error")
+            logger.info(f"   🔄 同步更新向量库中的知识库数据...")
+
+            # 先删除旧的向量数据 (使用旧的名称和类型)
+            vector_kb = get_vector_kb()
+            if vector_kb:
+                # TODO: 需要实现 delete_by_name 方法
+                # 暂时使用重新添加的方式
+
+                # 添加新的向量数据
+                sync_to_vector_db(
+                    kb_type=kb.type,
+                    name=kb.name,
+                    content=kb.content,
+                    metadata={"project_id": str(project_id)}
+                )
+
+                logger.info(f"   ✅ 已同步更新到向量库")
+        except Exception as e:
+            import logging
+            logger = logging.getLogger("uvicorn.error")
+            logger.warning(f"⚠️ 更新知识库时同步向量库失败: {e}")
+
     return kb
 
 
@@ -298,15 +331,38 @@ async def delete_knowledge_base(
         KnowledgeBase.id == kb_id,
         KnowledgeBase.project_id == project_id
     ).first()
-    
+
     if not kb:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Knowledge base item not found"
         )
-    
+
+    # 保存信息用于向量库删除
+    kb_type = kb.type
+    kb_name = kb.name
+    kb_project_id = kb.project_id
+
     db.delete(kb)
     db.commit()
+
+    # 🆕 同步删除向量库数据
+    try:
+        import logging
+        logger = logging.getLogger("uvicorn.error")
+        logger.info(f"   🗑️  同步删除向量库中的知识库数据...")
+
+        # TODO: 需要实现更精确的删除方法
+        # 目前 ChromaDB 不支持通过名称直接删除
+        # 可以考虑在元数据中添加 kb_id 字段
+
+        logger.info(f"   ℹ️  知识库删除完成 (向量库删除功能待完善)")
+
+    except Exception as e:
+        import logging
+        logger = logging.getLogger("uvicorn.error")
+        logger.warning(f"⚠️ 删除知识库时清理向量库失败: {e}")
+
     return {"message": "Knowledge base item deleted successfully"}
 
 
