@@ -112,10 +112,6 @@ export default function WorkflowControlPage() {
   const [snackbarMessage, setSnackbarMessage] = useState('')
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
 
-  // 保存章节状态
-  const [savingChapter, setSavingChapter] = useState(false)
-  const [chapterTitleInput, setChapterTitleInput] = useState('')
-
   useEffect(() => {
     if (projectId) {
       dispatch(setCurrentStage('concept'))
@@ -1304,117 +1300,6 @@ export default function WorkflowControlPage() {
     }
   }
 
-  // 保存为章节（从最终版本）
-  const handleSaveAsChapterFromFinalVersion = async (action: 'list' | 'edit' = 'list') => {
-    if (!projectId || !editedFinalVersionContent) {
-      setSnackbarMessage('没有可保存的内容')
-      setSnackbarSeverity('error')
-      setSnackbarOpen(true)
-      return
-    }
-
-    setSavingChapter(true)
-
-    try {
-      console.log('📏 开始保存最终版本为章节...', {
-        projectId,
-        contentLength: editedFinalVersionContent.length,
-        title: chapterTitleInput,
-        action,
-        token: localStorage.getItem('access_token') ? '存在' : '不存在'
-      })
-      
-      // 1. 先保存到工作流（project_settings）
-      await fetch(`/api/workflow/${projectId}/stage/iteration/content`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          content: editedFinalVersionContent,
-          continue_workflow: false,
-        }),
-      })
-
-      // 2. 创建独立章节记录
-      const response = await fetch('/api/v1/chapters', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          project_id: parseInt(projectId),
-          content: editedFinalVersionContent,
-          title: chapterTitleInput || undefined, // 如果为空则自动生成
-        }),
-      })
-
-      if (response.ok) {
-        const chapter = await response.json()
-        console.log('✅ 章节创建成功:', chapter)
-        
-        setSnackbarMessage(`✅ 章节已保存：${chapter.title} (${chapter.word_count} 字)`)
-        setSnackbarSeverity('success')
-        setSnackbarOpen(true)
-
-        // 清空标题输入
-        setChapterTitleInput('')
-
-        // 关闭对话框
-        handleCloseFinalVersionDialog()
-
-        // 🔧 根据用户选择的action导航到不同页面
-        setTimeout(() => {
-          if (action === 'list') {
-            // 跳转到项目详情页的章节列表标签
-            navigate(`/project/${projectId}?tab=4`)
-          } else if (action === 'edit') {
-            // 直接打开编辑器
-            navigate(`/editor/${projectId}/${chapter.id}`)
-          }
-        }, 1000) // 延迟1秒让用户看到成功提示
-      } else {
-        // 🔧 修复：先读取为text，然后尝试解析JSON
-        let errorMessage = '保存章节失败，请重试'
-        try {
-          const responseText = await response.text()
-          console.log('📝 响应文本:', responseText)
-          
-          // 尝试解析为JSON
-          if (responseText) {
-            try {
-              const errorData = JSON.parse(responseText)
-              console.error('❌ 创建章节失败:', errorData)
-              errorMessage = errorData.error || errorMessage
-            } catch (jsonError) {
-              // 不是JSON，使用原始文本
-              console.error('❌ 创建章节失败(非JSON响应):', responseText)
-              errorMessage = `服务器错误(${response.status}): ${responseText.substring(0, 100)}`
-            }
-          } else {
-            errorMessage = `服务器错误(${response.status}): 空响应`
-          }
-        } catch (textError) {
-          console.error('❌ 读取响应失败:', textError)
-          errorMessage = `无法读取服务器响应(${response.status})`
-        }
-        
-        setSnackbarMessage(errorMessage)
-        setSnackbarSeverity('error')
-        setSnackbarOpen(true)
-      }
-    } catch (error) {
-      console.error('❌ 保存章节异常:', error)
-      setSnackbarMessage('保存章节失败，请重试')
-      setSnackbarSeverity('error')
-      setSnackbarOpen(true)
-    } finally {
-      setSavingChapter(false)
-    }
-  }
-
   const currentStageIndex = stages.indexOf(workflow.currentStage)
 
   return (
@@ -1982,53 +1867,24 @@ export default function WorkflowControlPage() {
                 onChange={(e) => setEditedFinalVersionContent(e.target.value)}
                 placeholder="最终版本文本内容..."
                 sx={{ mb: 2 }}
-                disabled={finalVersionSaving || savingChapter}
-              />
-
-              {/* 章节标题输入框 */}
-              <TextField
-                fullWidth
-                label="章节标题（可选）"
-                placeholder="例如：冒险开始（留空则自动生成）"
-                value={chapterTitleInput}
-                onChange={(e) => setChapterTitleInput(e.target.value)}
-                sx={{ mb: 2 }}
-                disabled={finalVersionSaving || savingChapter}
-                helperText="如果不输入标题，系统会根据章节内容自动生成标题"
+                disabled={finalVersionSaving}
               />
 
               <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
                 <Button
                   onClick={handleCloseFinalVersionDialog}
-                  disabled={finalVersionSaving || savingChapter}
+                  disabled={finalVersionSaving}
                 >
                   取消
                 </Button>
                 <Button
-                  variant="outlined"
-                  onClick={handleSaveOnlyFinalVersion}
-                  disabled={finalVersionSaving || savingChapter}
-                  startIcon={finalVersionSaving ? <CircularProgress size={20} /> : <SaveIcon />}
-                >
-                  {finalVersionSaving ? '保存中...' : '仅保存'}
-                </Button>
-                <Button
                   variant="contained"
                   color="primary"
-                  onClick={() => handleSaveAsChapterFromFinalVersion('list')}
-                  disabled={finalVersionSaving || savingChapter || !editedFinalVersionContent}
-                  startIcon={savingChapter ? <CircularProgress size={20} /> : <SaveIcon />}
+                  onClick={handleSaveOnlyFinalVersion}
+                  disabled={finalVersionSaving}
+                  startIcon={finalVersionSaving ? <CircularProgress size={20} /> : <SaveIcon />}
                 >
-                  {savingChapter ? '保存中...' : '📚 保存并查看列表'}
-                </Button>
-                <Button
-                  variant="contained"
-                  color="secondary"
-                  onClick={() => handleSaveAsChapterFromFinalVersion('edit')}
-                  disabled={finalVersionSaving || savingChapter || !editedFinalVersionContent}
-                  startIcon={savingChapter ? <CircularProgress size={20} /> : <EditNoteIcon />}
-                >
-                  {savingChapter ? '保存中...' : '✏️ 保存并编辑'}
+                  {finalVersionSaving ? '保存中...' : '保存'}
                 </Button>
               </Box>
             </>
