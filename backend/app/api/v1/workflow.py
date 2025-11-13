@@ -465,8 +465,11 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
         
         # 🆕 为 coordinator 设置进度回调（如果支持）
         if hasattr(coordinator, 'set_progress_callback'):
+            logger.info(f"   🔍 检测到 set_progress_callback 方法，正在设置...")
             coordinator.set_progress_callback(progress_callback, task_id, project_id)  # type: ignore
-            logger.info(f"   ✅ 已启用任务分块执行模式")
+            logger.info(f"   ✅ 已启用任务分块执行模式 (task_id={task_id}, project_id={project_id})")
+        else:
+            logger.warning(f"   ⚠️  coordinator 没有 set_progress_callback 方法!")
         
         # 🔧 关键修复：将 requirement 传递给 execute_stage
         stage_output = await coordinator.execute_stage(
