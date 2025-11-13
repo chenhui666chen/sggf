@@ -353,64 +353,85 @@ class AgentCoordinator:
                 print(f"✅ 已为真实协调器设置项目上下文: {project_id}")
             
             # 调用真实的五阶段工作流程
+            # 🔧 关键修复：使用 asyncio.to_thread() 在线程池中运行同步函数
+            # 这样可以避免阻塞事件循环，同时允许 _send_progress_update() 正常工作
+            import asyncio
+
             if stage == StageType.CONCEPT:
                 # 阶段1: 概念开发
-                result = self._real_coordinator._stage_one_concept_development(requirement)
+                print(f"🔄 在线程池中执行概念开发阶段...")
+                result = await asyncio.to_thread(
+                    self._real_coordinator._stage_one_concept_development,
+                    requirement
+                )
                 return {
                     "concept": result.get("concept", ""),
                     "worldview": result.get("world_setting", ""),
                     "characters": result.get("characters", ""),
                 }
-            
+
             elif stage == StageType.STRUCTURE:
                 # 阶段2: 结构设计
+                print(f"🔄 在线程池中执行结构设计阶段...")
                 concept_result = self._real_coordinator.project_context
-                result = self._real_coordinator._stage_two_structure_design(concept_result)
+                result = await asyncio.to_thread(
+                    self._real_coordinator._stage_two_structure_design,
+                    concept_result
+                )
                 return {
                     "plot_outline": result.get("plot_outline", ""),
                     "structure": str(result),
                 }
-            
+
             elif stage == StageType.CONTENT:
                 # 阶段3: 内容创作
+                print(f"🔄 在线程池中执行内容创作阶段...")
                 structure_result = self._real_coordinator.project_context
-                result = self._real_coordinator._stage_three_content_creation(structure_result)
+                result = await asyncio.to_thread(
+                    self._real_coordinator._stage_three_content_creation,
+                    structure_result
+                )
                 return {
                     "content": result.get("content", ""),
                 }
             
             elif stage == StageType.REVIEW:
                 # 阶段4: 质量评审
+                print(f"🔄 在线程池中执行质量评审阶段...")
                 # 🔧 修复: 获取前一阶段的输出作为评审内容
                 # 优先从 project_context 中获取 chapters 或 content
                 content_to_review = (
-                    self._real_coordinator.project_context.get('chapters') or 
-                    self._real_coordinator.project_context.get('content') or 
+                    self._real_coordinator.project_context.get('chapters') or
+                    self._real_coordinator.project_context.get('content') or
                     self._real_coordinator.project_context.get('plot_outline', '正在生成中...')
                 )
-                
+
                 content_result = {
                     'content': content_to_review
                 }
-                
-                result = self._real_coordinator._stage_four_quality_review(content_result)
+
+                result = await asyncio.to_thread(
+                    self._real_coordinator._stage_four_quality_review,
+                    content_result
+                )
                 return {
                     "review": result.get("review", ""),
                     "needs_revision": result.get("needs_revision", False),
                 }
-            
+
             elif stage == StageType.ITERATION:
                 # 阶段5: 迭代优化
+                print(f"🔄 在线程池中执行迭代优化阶段...")
                 # 🔥 关键修复：构造正确的 review_result 结构，确保 content 是嵌套字典
                 chapter_draft_content = (
                     self._real_coordinator.project_context.get('content') or
                     self._real_coordinator.project_context.get('chapter_draft') or
                     self._real_coordinator.project_context.get('plot_outline', '')
                 )
-                
+
                 # 📝 记录日志，方便调试
                 print(f"📝 迭代优化阶段 - 章节初稿字数: {len(chapter_draft_content) if isinstance(chapter_draft_content, str) else 0}")
-                
+
                 review_result = {
                     'review': (
                         self._real_coordinator.project_context.get('review') or
@@ -423,8 +444,11 @@ class AgentCoordinator:
                         'content': chapter_draft_content  # ← 这里是关键！
                     }
                 }
-                
-                result = self._real_coordinator._stage_five_iteration_optimization(review_result)
+
+                result = await asyncio.to_thread(
+                    self._real_coordinator._stage_five_iteration_optimization,
+                    review_result
+                )
                 return {
                     "revised_content": result.get("revised_content", ""),
                     "final_review": result.get("final_review", ""),
