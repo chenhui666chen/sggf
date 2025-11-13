@@ -15,16 +15,6 @@ from .agents import (
 )
 from .agent_communication import AgentCommunicationHub
 
-# 🆕 AI痕迹降低：导入AI痕迹降低处理器
-try:
-    from .ai_trace_reduction_processor import AITraceReductionProcessor
-    from .author_voice_system import get_voice_manager, create_voice_profile
-    AI_TRACE_REDUCTION_AVAILABLE = True
-    print("✅ AI痕迹降低模块已加载")
-except ImportError as e:
-    AI_TRACE_REDUCTION_AVAILABLE = False
-    print(f"⚠️  AI痕迹降低模块未加载: {e}")
-
 # 🆕 模型优化：导入优化的LLM客户端
 from typing import TYPE_CHECKING
 
@@ -99,16 +89,6 @@ class CreativeDirectorCoordinator:
             "chapters": [],
             "current_stage": None
         }
-
-        # 🆕 AI痕迹降低：初始化处理器和作者腔调
-        self.ai_trace_processor: Optional['AITraceReductionProcessor'] = None
-        self.author_voice_profile = None
-        if AI_TRACE_REDUCTION_AVAILABLE:
-            try:
-                self.ai_trace_processor = AITraceReductionProcessor()  # type: ignore
-                print("✅ AI痕迹降低处理器已初始化")
-            except Exception as e:
-                print(f"⚠️  AI痕迹降低处理器初始化失败: {e}")
 
         self.workflow_log = []
         self.iteration_count = 0
@@ -688,7 +668,7 @@ class CreativeDirectorCoordinator:
 7. 对话设计：通过对话推进情节和展现人物性格"""
             chapter_instruction = f"请开始创作第{current_chapter_number}章内容："
 
-        # 🆕 构建增强版提示词
+        # 🆕 构建增强版提示词（内置AI痕迹去除指导）
         content_prompt = f"""你是一位经验丰富的小说作家。请基于以下信息创作第{current_chapter_number}章内容：
 
 【情节大纲】
@@ -712,21 +692,37 @@ class CreativeDirectorCoordinator:
 - 细节丰富：注重细节描写，增强真实感
 {f'- 承接自然：与第{current_chapter_number-1}章无缝衔接' if current_chapter_number > 1 else ''}
 
+【创作风格要求 - 去除AI痕迹】
+在创作时请特别注意以下几点，使文本更加自然、真实：
+
+1. 语言表达：
+   - 避免使用过于程式化、模板化的表达方式
+   - 减少重复的句式结构，增加语言的多样性
+   - 使用自然、口语化的语言，而非书面化的正式表达
+   - 避免过度使用形容词和副词堆砌
+   - 用具体的细节替代抽象的概括
+
+2. 人物对话：
+   - 让对话更加真实、有人情味，符合人物性格
+   - 添加适当的停顿、犹豫、重复等真实对话特征
+   - 避免对话过于完美、信息密度过高
+   - 通过对话展现人物的矛盾和复杂性
+
+3. 情节推进：
+   - 避免情节过于完美、顺利
+   - 适当加入意外、阻碍、误会等真实生活元素
+   - 让转折点更加自然，而非生硬
+   - 保持叙事节奏的张弛有度
+
+4. 场景描写：
+   - 运用五感描写（视觉、听觉、嗅觉、触觉、味觉）
+   - 添加具体的细节，而非笼统的描述
+   - 让场景描写更有画面感和沉浸感
+   - 避免陈词滥调和套路化的表述
+
 {chapter_instruction}"""
 
         content_result = self.content_creator.process(content_prompt, self.project_context)
-
-        # 🆕 AI痕迹降低：对生成的内容进行四层精修
-        if AI_TRACE_REDUCTION_AVAILABLE and self.ai_trace_processor:
-            try:
-                print(f"【{self.name}】启动AI痕迹降低处理...")
-                content_result = self.ai_trace_processor.reduce_ai_traces(
-                    content_result,
-                    self.project_context
-                )
-                print(f"【{self.name}】AI痕迹降低完成")
-            except Exception as e:
-                print(f"⚠️  AI痕迹降低处理失败: {e}，继续使用原始内容")
 
         # ✅ 安全地添加章节，确保 chapters 列表存在
         if "chapters" not in self.project_context:
@@ -764,29 +760,9 @@ class CreativeDirectorCoordinator:
                 quality_reference += "\n📊 请参照以上优秀章节的标准进行评审。\n"
                 print(f"✓ 找到 1 个优秀章节范例")
 
-        # 🆕 AI痕迹降低：添加AI痕迹一致性检查
-        ai_trace_assessment = ""
-        if AI_TRACE_REDUCTION_AVAILABLE and self.author_voice_profile:
-            try:
-                voice_manager = get_voice_manager()  # type: ignore
-                consistency = voice_manager.validate_voice_consistency(
-                    content_result.get('content', content_result.get('chapters', content_result)),
-                    self.author_voice_profile
-                )
-                ai_trace_assessment = f"""
-【AI痕迹一致性评估】
-- 一致性评分：{consistency['consistency_score']:.1f}/100
-- 问题：{', '.join(consistency['issues']) if consistency['issues'] else '无'}
-- 建议：{', '.join(consistency['suggestions']) if consistency['suggestions'] else '无'}
-"""
-                print(f"✓ AI痕迹一致性评分：{consistency['consistency_score']:.1f}/100")
-            except Exception as e:
-                print(f"⚠️  AI痕迹一致性检查失败: {e}")
-
         review_prompt = f"""请对以下内容进行全面质量评审：
 内容: {content_result.get('content', content_result.get('chapters', content_result))}
 {quality_reference}
-{ai_trace_assessment}
 Please assess：
 1. 逻辑一致性
 2. 人物塑造
@@ -923,6 +899,33 @@ Please assess：
 6. 只输出：章节标题 + 章节正文内容
 7. ❗ 特别注意：保持原有章节的字数长度，不要大幅缩减内容
 
+【优化风格要求 - 去除AI痕迹】
+在优化时请重点关注以下几点，使文本更加自然、真实：
+
+1. 语言自然度：
+   - 检查并修改过于机械化、程式化的表达
+   - 增加语言的多样性和自然度
+   - 删除冗余的描述和说明
+   - 让文本更具人性化和真实感
+
+2. 人物对话优化：
+   - 确保人物对话符合其性格特点
+   - 添加真实对话的特征（停顿、犹豫、口语化等）
+   - 避免对话过于完美、信息密度过高
+   - 通过对话展现人物的复杂性和矛盾
+
+3. 情节真实性：
+   - 检查情节是否过于顺利、完美
+   - 适当保留或增加意外、阻碍等真实元素
+   - 确保转折点自然而非生硬
+   - 保持叙事节奏的张弛有度
+
+4. 细节描写：
+   - 增强五感描写（视觉、听觉、嗅觉、触觉、味觉）
+   - 用具体细节替代抽象概括
+   - 避免陈词滥调和套路化表述
+   - 让场景更有画面感和沉浸感
+
 示例格式：
 **第1章：数据幽灵**
 
@@ -932,18 +935,6 @@ Please assess：
 
         # 🔥 关键修复：清理输出内容，移除额外的评审话语
         revised_content = self._clean_final_output(revised_content)
-
-        # 🆕 AI痕迹降低：对修改后的内容再次进行AI痕迹降低处理
-        if AI_TRACE_REDUCTION_AVAILABLE and self.ai_trace_processor:
-            try:
-                print(f"【{self.name}】对修改后的内容进行AI痕迹降低处理...")
-                revised_content = self.ai_trace_processor.reduce_ai_traces(
-                    revised_content,
-                    self.project_context
-                )
-                print(f"【{self.name}】修改后的内容AI痕迹降低完成")
-            except Exception as e:
-                print(f"⚠️  修改后的内容AI痕迹降低失败: {e}")
 
         # 重新评审修改后的内容
         re_review_prompt = f"""请对修改后的内容进行评审：
@@ -1214,36 +1205,7 @@ Please assess：
         print(f"【{self.name}】第{chapter_number}章内容创作完成，字数：{len(chapter_content)}")
         return chapter_content
     
-    def set_author_voice(self, template_name: Optional[str] = None,
-                        custom_config: Optional[Dict[str, Any]] = None) -> bool:
-        """设置作者腔调
 
-        Args:
-            template_name: 使用的模板名称（可选）
-                - "冷静克制"：黑色幽默，质疑权威
-                - "诗意浪漫"：充满意象，相信美好
-                - "激情澎湃"：充满能量，正义必胜
-            custom_config: 自定义配置（可选）
-
-        Returns:
-            是否设置成功
-        """
-        if not AI_TRACE_REDUCTION_AVAILABLE:
-            print("⚠️  AI痕迹降低模块未加载，无法设置作者腔调")
-            return False
-
-        try:
-            project_id = self.current_project_id or 1
-            self.author_voice_profile = create_voice_profile(  # type: ignore
-                project_id=project_id,
-                template_name=template_name,
-                custom_config=custom_config
-            )
-            print(f"✅ 作者腔调已设置：{template_name or '自定义'}")
-            return True
-        except Exception as e:
-            print(f"⚠️  设置作者腔调失败: {e}")
-            return False
 
     def review_chapter(self, chapter_draft: str, chapter_plan: str, plot_outline: str) -> str:
         """评审章节内容
