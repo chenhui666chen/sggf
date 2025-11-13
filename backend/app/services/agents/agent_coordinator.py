@@ -172,50 +172,33 @@ class CreativeDirectorCoordinator:
     
     def set_progress_callback(self, callback, task_id: str, project_id: int):
         """🆕 设置进度回调函数（用于WebSocket实时推送）
-
+        
         Args:
             callback: 异步回调函数，接收 (project_id, task_id, progress, message) 参数
             task_id: 当前任务ID
             project_id: 当前项目ID
         """
-        import asyncio
         self.progress_callback = callback
         self.current_task_id = task_id
         if not self.current_project_id:
             self.current_project_id = project_id
-
-        # 🔥 关键修复：保存主线程的事件循环引用
-        try:
-            self.main_event_loop = asyncio.get_running_loop()
-            print(f"✅ 已保存主线程事件循环引用")
-        except RuntimeError:
-            # 如果当前没有运行的事件循环，尝试获取当前线程的事件循环
-            try:
-                self.main_event_loop = asyncio.get_event_loop()
-                print(f"✅ 已保存事件循环引用")
-            except Exception as e:
-                print(f"⚠️ 无法获取事件循环: {e}")
-                self.main_event_loop = None
-
         print(f"✅ 已设置进度回调: task_id={task_id}, project_id={project_id}")
     
     def _send_progress_update(self, progress: int, message: str):
         """🆕 发送进度更新（如果设置了回调）
-
+        
         Args:
             progress: 进度百分比 (0-100)
             message: 进度消息
         """
         if self.progress_callback and self.current_task_id and self.current_project_id:
             import asyncio
-            import threading
             try:
                 # 如果在异步上下文中，直接await
                 # 否则创建任务
                 if asyncio.iscoroutinefunction(self.progress_callback):
-                    try:
-                        # 尝试获取当前事件循环
-                        loop = asyncio.get_running_loop()
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
                         # 在运行的事件循环中创建任务
                         asyncio.create_task(
                             self.progress_callback(
@@ -225,31 +208,16 @@ class CreativeDirectorCoordinator:
                                 message
                             )
                         )
-                        print(f"📊 进度更新已发送: {progress}% - {message}")
-                    except RuntimeError:
-                        # 没有运行的事件循环，使用 run_coroutine_threadsafe
-                        # 这通常发生在后台线程中
-                        # 🔥 关键修复：使用保存的主线程事件循环
-                        if hasattr(self, 'main_event_loop') and self.main_event_loop:
-                            try:
-                                # 使用 run_coroutine_threadsafe 在主线程的事件循环中执行
-                                future = asyncio.run_coroutine_threadsafe(
-                                    self.progress_callback(
-                                        self.current_project_id,
-                                        self.current_task_id,
-                                        progress,
-                                        message
-                                    ),
-                                    self.main_event_loop
-                                )
-                                # 不等待结果，让它在后台执行
-                                print(f"📊 进度更新已提交到主线程事件循环: {progress}% - {message}")
-                            except Exception as e:
-                                print(f"⚠️ 提交进度更新失败: {e}")
-                                print(f"📊 进度: {progress}% - {message} (仅日志)")
-                        else:
-                            print(f"⚠️ 没有保存的事件循环引用，无法发送进度更新")
-                            print(f"📊 进度: {progress}% - {message} (仅日志)")
+                    else:
+                        # 没有运行的事件循环，使用run_until_complete
+                        loop.run_until_complete(
+                            self.progress_callback(
+                                self.current_project_id,
+                                self.current_task_id,
+                                progress,
+                                message
+                            )
+                        )
                 else:
                     # 同步回调
                     self.progress_callback(
@@ -258,11 +226,9 @@ class CreativeDirectorCoordinator:
                         progress,
                         message
                     )
-                    print(f"📊 进度更新: {progress}% - {message}")
+                print(f"📊 进度更新: {progress}% - {message}")
             except Exception as e:
                 print(f"⚠️ 进度回调失败: {e}")
-                import traceback
-                traceback.print_exc()
         else:
             # 没有设置回调，仅打印日志
             print(f"📊 进度: {progress}% - {message}")

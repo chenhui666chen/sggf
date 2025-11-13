@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.db.base import Base, engine
-from app.api.v1 import auth, projects, chapters, knowledge_base, reviews, workflow, knowledge, memories, ai_assist
+from app.api.v1 import auth, projects, chapters, knowledge_base, reviews, workflow, knowledge, memories, ai_assist, statistics
 import socketio
 
 # 创建数据库表
@@ -46,6 +46,7 @@ app.include_router(memories.router)  # 记忆管理API
 app.include_router(ai_assist.router)  # AI辅助功能API
 app.include_router(reviews.router)
 app.include_router(workflow.router)
+app.include_router(statistics.router)
 
 # 🔌 挂载 Socket.IO
 # 导入 WebSocket 事件处理器

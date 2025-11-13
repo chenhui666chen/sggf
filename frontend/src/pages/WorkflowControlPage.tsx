@@ -75,6 +75,8 @@ import {
   exportChapterBreakdownToCSV,
   downloadFile,
 } from '@/utils/expansionHelpers'
+import { ProgressEstimator, type StageDurations, type ProgressState } from '@/utils/progressEstimator'
+import { statisticsService } from '@/services/statistics'
 
 
 const stages: StageType[] = ['concept', 'structure', 'content', 'review', 'iteration']
@@ -195,6 +197,30 @@ export default function WorkflowControlPage() {
   // 🆕 添加大纲编辑状态
   const [isEditingOutline, setIsEditingOutline] = useState(false)
 
+  // 🆕 进度估算器相关状态
+  const [progressEstimator, setProgressEstimator] = useState<ProgressEstimator | null>(null)
+  const [stageDurations, setStageDurations] = useState<StageDurations | null>(null)
+  const [estimatedProgress, setEstimatedProgress] = useState(0)
+  const [estimatedRemainingTime, setEstimatedRemainingTime] = useState(0)
+
+  // 🆕 初始化进度估算器
+  useEffect(() => {
+    const initProgressEstimator = async () => {
+      try {
+        const durations = await statisticsService.getStageDurations(projectId ? Number(projectId) : undefined)
+        console.log('📊 获取到阶段耗时统计:', durations)
+        setStageDurations(durations)
+
+        const estimator = new ProgressEstimator(durations)
+        setProgressEstimator(estimator)
+      } catch (error) {
+        console.error('初始化进度估算器失败:', error)
+      }
+    }
+
+    initProgressEstimator()
+  }, [projectId])
+
   useEffect(() => {
     if (projectId) {
       // 🔧 修复：不再从 localStorage 恢复阶段
@@ -227,6 +253,34 @@ export default function WorkflowControlPage() {
     setCharacterHistory(characterHistoryData)
     console.log(`💾 已加载历史记录: 大纲${outlineHistoryData.length}条, 人物${characterHistoryData.length}条`)
   }, [])
+
+  // 🆕 计算基于时间权重的总体进度
+  useEffect(() => {
+    if (!stageDurations) return
+
+    // 计算总预估时间
+    const totalDuration = Object.values(stageDurations).reduce((sum, duration) => sum + duration, 0)
+
+    // 计算已完成阶段的时间
+    let completedDuration = 0
+    stages.forEach((stage) => {
+      const stageStatus = workflow.stages[stage].status
+      if (stageStatus === 'completed') {
+        completedDuration += stageDurations[stage]
+      } else if (stageStatus === 'active' && stage === workflow.currentStage) {
+        // 当前阶段的进度
+        completedDuration += (stageDurations[stage] * taskProgress) / 100
+      }
+    })
+
+    // 计算总体进度
+    const overallProgress = Math.round((completedDuration / totalDuration) * 100)
+
+    // 更新 Redux 状态
+    if (overallProgress !== workflow.overallProgress) {
+      dispatch({ type: 'workflow/updateOverallProgress', payload: overallProgress })
+    }
+  }, [stageDurations, workflow.stages, workflow.currentStage, taskProgress, dispatch])
 
 
 
@@ -310,8 +364,15 @@ export default function WorkflowControlPage() {
     // 监听任务进度
     workflowWebSocket.onTaskProgress((data) => {
       console.log('📈 收到任务进度:', data)
-      setTaskProgress(data.progress)
-      
+
+      // 🆕 更新进度估算器的真实进度
+      if (progressEstimator) {
+        progressEstimator.updateRealProgress(data.progress)
+      } else {
+        // 如果没有进度估算器，直接设置进度
+        setTaskProgress(data.progress)
+      }
+
       if (data.message) {
         setSnackbarMessage(data.message)
         setSnackbarSeverity('info' as any)
@@ -322,7 +383,12 @@ export default function WorkflowControlPage() {
     // 监听任务完成
     workflowWebSocket.onTaskComplete((data) => {
       console.log('✅ 收到任务完成:', data)
-      
+
+      // 🆕 完成进度估算器
+      if (progressEstimator) {
+        progressEstimator.complete()
+      }
+
       // 🆕 清除任务状态
       setCurrentTaskId(null)
       setTaskProgress(100)
@@ -348,13 +414,19 @@ export default function WorkflowControlPage() {
     // 监听任务错误
     workflowWebSocket.onTaskError((data) => {
       console.log('❌ 收到任务错误:', data)
+
+      // 🆕 停止进度估算器
+      if (progressEstimator) {
+        progressEstimator.stop()
+      }
+
       setCurrentTaskId(null)
       setTaskProgress(0)
-      
+
       setSnackbarMessage(`任务失败: ${data.error}`)
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
-      
+
       setIsRunning(false)
     })
 
@@ -798,6 +870,16 @@ export default function WorkflowControlPage() {
       console.log(`✅ 任务已提交: ${taskId}`)
       setCurrentTaskId(taskId)
       setTaskProgress(0)
+
+      // 🆕 启动进度估算器
+      if (progressEstimator) {
+        progressEstimator.startStage(stage, (state: ProgressState) => {
+          setEstimatedProgress(Math.round(state.displayProgress))
+          setEstimatedRemainingTime(Math.round(state.remainingTime))
+          setTaskProgress(Math.round(state.displayProgress))
+        })
+        console.log(`📊 进度估算器已启动: ${stage}`)
+      }
 
       // 🆕 检查 WebSocket 是否连接
       if (workflowWebSocket.isConnected()) {
@@ -2326,9 +2408,16 @@ export default function WorkflowControlPage() {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <CircularProgress size={20} />
             <Box sx={{ flex: 1 }}>
-              <Typography variant="body2" sx={{ mb: 1 }}>
-                正在执行 {stageNames[workflow.currentStage]}... ({taskProgress}%)
-              </Typography>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant="body2">
+                  正在执行 {stageNames[workflow.currentStage]}... ({taskProgress}%)
+                </Typography>
+                {estimatedRemainingTime > 0 && (
+                  <Typography variant="caption" color="text.secondary">
+                    预计剩余: {Math.ceil(estimatedRemainingTime)}秒
+                  </Typography>
+                )}
+              </Box>
               <LinearProgress variant="determinate" value={taskProgress} />
             </Box>
           </Box>
