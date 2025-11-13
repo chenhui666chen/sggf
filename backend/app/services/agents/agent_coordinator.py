@@ -186,19 +186,21 @@ class CreativeDirectorCoordinator:
     
     def _send_progress_update(self, progress: int, message: str):
         """🆕 发送进度更新（如果设置了回调）
-        
+
         Args:
             progress: 进度百分比 (0-100)
             message: 进度消息
         """
         if self.progress_callback and self.current_task_id and self.current_project_id:
             import asyncio
+            import threading
             try:
                 # 如果在异步上下文中，直接await
                 # 否则创建任务
                 if asyncio.iscoroutinefunction(self.progress_callback):
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
+                    try:
+                        # 尝试获取当前事件循环
+                        loop = asyncio.get_running_loop()
                         # 在运行的事件循环中创建任务
                         asyncio.create_task(
                             self.progress_callback(
@@ -208,16 +210,31 @@ class CreativeDirectorCoordinator:
                                 message
                             )
                         )
-                    else:
-                        # 没有运行的事件循环，使用run_until_complete
-                        loop.run_until_complete(
-                            self.progress_callback(
-                                self.current_project_id,
-                                self.current_task_id,
-                                progress,
-                                message
-                            )
-                        )
+                        print(f"📊 进度更新已发送: {progress}% - {message}")
+                    except RuntimeError:
+                        # 没有运行的事件循环，使用 run_coroutine_threadsafe
+                        # 这通常发生在后台线程中
+                        try:
+                            # 尝试获取主线程的事件循环
+                            loop = asyncio.get_event_loop()
+                            if loop.is_running():
+                                # 使用 run_coroutine_threadsafe 在主线程的事件循环中执行
+                                future = asyncio.run_coroutine_threadsafe(
+                                    self.progress_callback(
+                                        self.current_project_id,
+                                        self.current_task_id,
+                                        progress,
+                                        message
+                                    ),
+                                    loop
+                                )
+                                # 不等待结果，让它在后台执行
+                                print(f"📊 进度更新已提交到事件循环: {progress}% - {message}")
+                            else:
+                                print(f"⚠️ 事件循环未运行，无法发送进度更新: {progress}% - {message}")
+                        except Exception as e:
+                            print(f"⚠️ 无法获取事件循环: {e}")
+                            print(f"📊 进度: {progress}% - {message} (仅日志)")
                 else:
                     # 同步回调
                     self.progress_callback(
@@ -226,9 +243,11 @@ class CreativeDirectorCoordinator:
                         progress,
                         message
                     )
-                print(f"📊 进度更新: {progress}% - {message}")
+                    print(f"📊 进度更新: {progress}% - {message}")
             except Exception as e:
                 print(f"⚠️ 进度回调失败: {e}")
+                import traceback
+                traceback.print_exc()
         else:
             # 没有设置回调，仅打印日志
             print(f"📊 进度: {progress}% - {message}")
