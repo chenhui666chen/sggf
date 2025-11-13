@@ -351,7 +351,16 @@ class AgentCoordinator:
             if project_id and hasattr(self._real_coordinator, 'set_project_context'):
                 self._real_coordinator.set_project_context(project_id)
                 print(f"✅ 已为真实协调器设置项目上下文: {project_id}")
-            
+
+            # 🔥 关键修复：将进度回调传递给真实协调器
+            if hasattr(self._real_coordinator, 'set_progress_callback'):
+                self._real_coordinator.set_progress_callback(
+                    self.progress_callback,
+                    self.current_task_id,
+                    self.current_project_id
+                )
+                print(f"✅ 已为真实协调器设置进度回调")
+
             # 调用真实的五阶段工作流程
             # 🔧 关键修复：使用 asyncio.to_thread() 在线程池中运行同步函数
             # 这样可以避免阻塞事件循环，同时允许 _send_progress_update() 正常工作
