@@ -172,16 +172,31 @@ class CreativeDirectorCoordinator:
     
     def set_progress_callback(self, callback, task_id: str, project_id: int):
         """🆕 设置进度回调函数（用于WebSocket实时推送）
-        
+
         Args:
             callback: 异步回调函数，接收 (project_id, task_id, progress, message) 参数
             task_id: 当前任务ID
             project_id: 当前项目ID
         """
+        import asyncio
         self.progress_callback = callback
         self.current_task_id = task_id
         if not self.current_project_id:
             self.current_project_id = project_id
+
+        # 🔥 关键修复：保存主线程的事件循环引用
+        try:
+            self.main_event_loop = asyncio.get_running_loop()
+            print(f"✅ 已保存主线程事件循环引用")
+        except RuntimeError:
+            # 如果当前没有运行的事件循环，尝试获取当前线程的事件循环
+            try:
+                self.main_event_loop = asyncio.get_event_loop()
+                print(f"✅ 已保存事件循环引用")
+            except Exception as e:
+                print(f"⚠️ 无法获取事件循环: {e}")
+                self.main_event_loop = None
+
         print(f"✅ 已设置进度回调: task_id={task_id}, project_id={project_id}")
     
     def _send_progress_update(self, progress: int, message: str):
@@ -214,10 +229,9 @@ class CreativeDirectorCoordinator:
                     except RuntimeError:
                         # 没有运行的事件循环，使用 run_coroutine_threadsafe
                         # 这通常发生在后台线程中
-                        try:
-                            # 尝试获取主线程的事件循环
-                            loop = asyncio.get_event_loop()
-                            if loop.is_running():
+                        # 🔥 关键修复：使用保存的主线程事件循环
+                        if hasattr(self, 'main_event_loop') and self.main_event_loop:
+                            try:
                                 # 使用 run_coroutine_threadsafe 在主线程的事件循环中执行
                                 future = asyncio.run_coroutine_threadsafe(
                                     self.progress_callback(
@@ -226,14 +240,15 @@ class CreativeDirectorCoordinator:
                                         progress,
                                         message
                                     ),
-                                    loop
+                                    self.main_event_loop
                                 )
                                 # 不等待结果，让它在后台执行
-                                print(f"📊 进度更新已提交到事件循环: {progress}% - {message}")
-                            else:
-                                print(f"⚠️ 事件循环未运行，无法发送进度更新: {progress}% - {message}")
-                        except Exception as e:
-                            print(f"⚠️ 无法获取事件循环: {e}")
+                                print(f"📊 进度更新已提交到主线程事件循环: {progress}% - {message}")
+                            except Exception as e:
+                                print(f"⚠️ 提交进度更新失败: {e}")
+                                print(f"📊 进度: {progress}% - {message} (仅日志)")
+                        else:
+                            print(f"⚠️ 没有保存的事件循环引用，无法发送进度更新")
                             print(f"📊 进度: {progress}% - {message} (仅日志)")
                 else:
                     # 同步回调

@@ -205,9 +205,24 @@ class AgentCoordinator:
             task_id: 任务ID
             project_id: 项目ID
         """
+        import asyncio
         self.progress_callback = callback
         self.current_task_id = task_id
         self.current_project_id = project_id
+
+        # 🔥 关键修复：保存主线程的事件循环引用
+        try:
+            self.main_event_loop = asyncio.get_running_loop()
+            print(f"✅ 已保存主线程事件循环引用")
+        except RuntimeError:
+            # 如果当前没有运行的事件循环，尝试获取当前线程的事件循环
+            try:
+                self.main_event_loop = asyncio.get_event_loop()
+                print(f"✅ 已保存事件循环引用")
+            except Exception as e:
+                print(f"⚠️ 无法获取事件循环: {e}")
+                self.main_event_loop = None
+
         print(f"✅ 已设置进度回调: task_id={task_id}, project_id={project_id}")
 
     async def execute_stage(
@@ -376,7 +391,12 @@ class AgentCoordinator:
                     self.current_task_id,
                     self.current_project_id
                 )
-                print(f"✅ 已为真实协调器设置进度回调")
+                # 🔥 同时传递事件循环引用
+                if hasattr(self, 'main_event_loop') and self.main_event_loop:
+                    self._real_coordinator.main_event_loop = self.main_event_loop
+                    print(f"✅ 已为真实协调器设置进度回调和事件循环引用")
+                else:
+                    print(f"✅ 已为真实协调器设置进度回调")
 
             # 调用真实的五阶段工作流程
             # 🔧 关键修复：使用 asyncio.to_thread() 在线程池中运行同步函数
