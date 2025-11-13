@@ -1713,9 +1713,9 @@ async def generate_next_chapter(
         # 8.1 自动生成并保存章节摘要
         try:
             logger.info(f"   📍 自动生成章节摘要...")
-            
+
             # 导入章节摘要生成器
-            from chapter_summarizer import create_chapter_summarizer
+            from app.services.agents.chapter_summarizer import create_chapter_summarizer
             
             # 创建摘要生成器实例（带数据库会话）
             summarizer = create_chapter_summarizer(db_session=db)
