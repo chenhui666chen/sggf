@@ -254,7 +254,7 @@ class AgentCoordinator:
         在触发异步工作流执行前，必须从数据库加载完整的项目上下文数据
         """
         from sqlalchemy import text
-        from backend.app.db.base import get_db
+        from app.db.base import get_db
         import json
         
         try:
