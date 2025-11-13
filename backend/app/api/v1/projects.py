@@ -176,49 +176,29 @@ async def delete_project(
     
     # 🧹 步骤1：清理 ChromaDB 向量数据
     try:
-        from langchain.vectorstores import Chroma
-        from config import Config
-        
-        # 获取 ChromaDB 目录
-        chroma_dir = os.getenv('CHROMA_PERSIST_DIRECTORY', 'chroma_db')
-        project_namespace = f"project_{project_id}"
-        
-        logger.info(f"   💾 步骤1: 清理 ChromaDB 向量数据 (namespace: {project_namespace})")
-        
-        # 方法1：删除整个 collection（如果使用项目隔离的 collection）
+        from app.services.agents.knowledge_base import NovelKnowledgeBase
+
+        logger.info(f"   💾 步骤1: 清理 ChromaDB 向量数据 (project_id: {project_id})")
+
+        # 使用 NovelKnowledgeBase 的 delete_project 方法
         try:
-            vectorstore = Chroma(
-                collection_name=project_namespace,
-                persist_directory=chroma_dir
-            )
-            vectorstore.delete_collection()
-            logger.info(f"   ✅ 已删除 ChromaDB collection: {project_namespace}")
+            kb = NovelKnowledgeBase()
+            deleted_count = kb.delete_project(project_id)
+
+            if deleted_count > 0:
+                logger.info(f"   ✅ 已从向量库删除 {deleted_count} 个文档")
+            else:
+                logger.info(f"   ℹ️  没有找到需要删除的向量文档")
+
         except Exception as e:
-            logger.warning(f"   ⚠️ ChromaDB collection 删除失败: {e}")
-        
-        # 方法2：删除整个项目目录（如果使用项目独立目录）
-        project_chroma_dir = Path(chroma_dir) / project_namespace
-        if project_chroma_dir.exists():
-            try:
-                shutil.rmtree(project_chroma_dir)
-                logger.info(f"   ✅ 已删除 ChromaDB 项目目录: {project_chroma_dir}")
-            except Exception as e:
-                logger.warning(f"   ⚠️ ChromaDB 目录删除失败: {e}")
-        
-        # 方法3：通过元数据过滤器删除（如果使用共享 collection 但通过 metadata 隔离）
-        try:
-            shared_vectorstore = Chroma(
-                collection_name="novel_knowledge",
-                persist_directory=chroma_dir
-            )
-            # 尝试根据 project_id 删除
-            # 注意：Chroma 不直接支持批量删除，这个只是备用方案
-            logger.info(f"   📝 备注：如果使用共享 collection，请确保通过 metadata 过滤器正确隔离")
-        except Exception as e:
-            logger.debug(f"   ℹ️ 共享 collection 检查: {e}")
-        
+            logger.warning(f"   ⚠️ 向量库清理失败: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+
     except Exception as e:
         logger.error(f"   ❌ ChromaDB 清理失败: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
         # 不阻塞删除流程，继续执行
     
     # 📁 步骤3：删除项目（数据库级联会自动删除关联数据）

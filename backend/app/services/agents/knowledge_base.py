@@ -314,6 +314,36 @@ class NovelKnowledgeBase:
             print(f"Error deleting chapter from vector database: {e}")
             return 0
 
+    def delete_project(self, project_id: int) -> int:
+        """Delete all vector data for a project
+
+        Args:
+            project_id: 项目ID
+
+        Returns:
+            int: 删除的文档数量
+        """
+        try:
+            collection = self.vectorstore._collection
+
+            # 获取该项目的所有文档
+            results = collection.get(
+                where={"project_id": str(project_id)}
+            )
+
+            if results and results['ids']:
+                deleted_count = len(results['ids'])
+                collection.delete(ids=results['ids'])
+                print(f"Deleted {deleted_count} documents for project {project_id}")
+                return deleted_count
+            else:
+                print(f"No documents found for project {project_id}")
+                return 0
+
+        except Exception as e:
+            print(f"Error deleting project from vector database: {e}")
+            return 0
+
     def clear_database(self):
         """Clear knowledge base (use with caution)"""
         self.vectorstore.delete_collection()
