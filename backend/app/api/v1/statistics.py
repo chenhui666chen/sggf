@@ -17,17 +17,20 @@ router = APIRouter()
 @router.get("/workflow/stage-durations")
 async def get_stage_durations(
     project_id: int | None = None,
+    recent_count: int | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> Dict[str, float]:
     """
     获取工作流各阶段的平均耗时（秒）
-    
+
     Args:
         project_id: 可选，指定项目ID则只统计该项目的数据
+        recent_count: 可选，只统计最近N次任务（默认为None，统计所有任务）
+                     如果设置为3，则优先使用最近3次任务的平均耗时（自适应学习）
         current_user: 当前用户
         db: 数据库会话
-    
+
     Returns:
         Dict[str, float]: 各阶段的平均耗时（秒）
         {
@@ -39,44 +42,94 @@ async def get_stage_durations(
         }
     """
     try:
-        # 构建查询
-        if project_id:
-            # 只统计指定项目的数据
-            query = text("""
-                SELECT 
-                    task_type,
-                    AVG(
-                        CAST((julianday(completed_at) - julianday(created_at)) * 86400 AS REAL)
-                    ) as avg_duration_seconds
-                FROM generation_history
-                WHERE 
-                    project_id = :project_id
-                    AND status = 'completed'
-                    AND completed_at IS NOT NULL
-                    AND created_at IS NOT NULL
-                    AND task_type LIKE 'workflow_stage_%'
-                GROUP BY task_type
-            """)
-            result = db.execute(query, {"project_id": project_id}).fetchall()
+        # 🆕 如果指定了 recent_count，使用子查询获取每个阶段最近N次任务
+        if recent_count:
+            if project_id:
+                # 只统计指定项目的最近N次任务
+                query = text("""
+                    SELECT
+                        task_type,
+                        AVG(duration_seconds) as avg_duration_seconds
+                    FROM (
+                        SELECT
+                            task_type,
+                            CAST((julianday(completed_at) - julianday(created_at)) * 86400 AS REAL) as duration_seconds,
+                            ROW_NUMBER() OVER (PARTITION BY task_type ORDER BY completed_at DESC) as rn
+                        FROM generation_history
+                        WHERE
+                            project_id = :project_id
+                            AND status = 'completed'
+                            AND completed_at IS NOT NULL
+                            AND created_at IS NOT NULL
+                            AND task_type LIKE 'workflow_stage_%'
+                    ) ranked
+                    WHERE rn <= :recent_count
+                    GROUP BY task_type
+                """)
+                result = db.execute(query, {"project_id": project_id, "recent_count": recent_count}).fetchall()
+            else:
+                # 统计当前用户所有项目的最近N次任务
+                query = text("""
+                    SELECT
+                        task_type,
+                        AVG(duration_seconds) as avg_duration_seconds
+                    FROM (
+                        SELECT
+                            gh.task_type,
+                            CAST((julianday(gh.completed_at) - julianday(gh.created_at)) * 86400 AS REAL) as duration_seconds,
+                            ROW_NUMBER() OVER (PARTITION BY gh.task_type ORDER BY gh.completed_at DESC) as rn
+                        FROM generation_history gh
+                        INNER JOIN projects p ON gh.project_id = p.id
+                        WHERE
+                            p.user_id = :user_id
+                            AND gh.status = 'completed'
+                            AND gh.completed_at IS NOT NULL
+                            AND gh.created_at IS NOT NULL
+                            AND gh.task_type LIKE 'workflow_stage_%'
+                    ) ranked
+                    WHERE rn <= :recent_count
+                    GROUP BY task_type
+                """)
+                result = db.execute(query, {"user_id": current_user.id, "recent_count": recent_count}).fetchall()
         else:
-            # 统计当前用户所有项目的数据
-            query = text("""
-                SELECT 
-                    gh.task_type,
-                    AVG(
-                        CAST((julianday(gh.completed_at) - julianday(gh.created_at)) * 86400 AS REAL)
-                    ) as avg_duration_seconds
-                FROM generation_history gh
-                INNER JOIN projects p ON gh.project_id = p.id
-                WHERE 
-                    p.user_id = :user_id
-                    AND gh.status = 'completed'
-                    AND gh.completed_at IS NOT NULL
-                    AND gh.created_at IS NOT NULL
-                    AND gh.task_type LIKE 'workflow_stage_%'
-                GROUP BY gh.task_type
-            """)
-            result = db.execute(query, {"user_id": current_user.id}).fetchall()
+            # 原有逻辑：统计所有历史数据
+            if project_id:
+                # 只统计指定项目的数据
+                query = text("""
+                    SELECT
+                        task_type,
+                        AVG(
+                            CAST((julianday(completed_at) - julianday(created_at)) * 86400 AS REAL)
+                        ) as avg_duration_seconds
+                    FROM generation_history
+                    WHERE
+                        project_id = :project_id
+                        AND status = 'completed'
+                        AND completed_at IS NOT NULL
+                        AND created_at IS NOT NULL
+                        AND task_type LIKE 'workflow_stage_%'
+                    GROUP BY task_type
+                """)
+                result = db.execute(query, {"project_id": project_id}).fetchall()
+            else:
+                # 统计当前用户所有项目的数据
+                query = text("""
+                    SELECT
+                        gh.task_type,
+                        AVG(
+                            CAST((julianday(gh.completed_at) - julianday(gh.created_at)) * 86400 AS REAL)
+                        ) as avg_duration_seconds
+                    FROM generation_history gh
+                    INNER JOIN projects p ON gh.project_id = p.id
+                    WHERE
+                        p.user_id = :user_id
+                        AND gh.status = 'completed'
+                        AND gh.completed_at IS NOT NULL
+                        AND gh.created_at IS NOT NULL
+                        AND gh.task_type LIKE 'workflow_stage_%'
+                    GROUP BY gh.task_type
+                """)
+                result = db.execute(query, {"user_id": current_user.id}).fetchall()
         
         # 解析结果
         stage_durations = {}

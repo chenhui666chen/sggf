@@ -248,10 +248,81 @@ useEffect(() => {
 
 ---
 
+## 🆕 增强功能
+
+### 功能 1: 自适应学习 ✅
+
+**实现**: 基于最近3次任务动态调整预估时间
+
+**后端 API 增强**:
+- 添加 `recent_count` 参数到 `/api/v1/statistics/workflow/stage-durations`
+- 使用 `ROW_NUMBER() OVER (PARTITION BY task_type ORDER BY completed_at DESC)` 获取最近N次任务
+- 如果最近N次任务数据不足，自动回退到全局平均
+
+**前端逻辑**:
+```typescript
+// 优先使用最近3次任务的平均耗时
+let durations = await statisticsService.getStageDurations(projectId, 3)
+
+// 检查是否有足够的数据
+const hasEnoughData = Object.values(durations).every(d => d > 0)
+
+if (!hasEnoughData) {
+  // 回退到全局平均
+  durations = await statisticsService.getStageDurations(projectId)
+}
+```
+
+**日志输出**:
+- `📊 使用自适应预估（最近3次任务）: {...}`
+- `📊 使用全局平均耗时: {...}`
+- `⚠️ 最近3次任务数据不足，回退到全局平均耗时`
+
+**效果**:
+- 如果用户最近的任务执行速度变快/变慢，进度条预估会自动适应
+- 提高预估准确性，减少预估时间与实际时间的偏差
+
+---
+
+### 功能 2: 置信区间 ✅
+
+**实现**: 显示预估时间范围（例如 "预计剩余: 30-60秒"）
+
+**后端 API**:
+- `/api/v1/statistics/workflow/stage-durations/detailed` 返回 `min` 和 `max` 字段
+
+**前端增强**:
+- `ProgressEstimator` 类添加 `remainingTimeMin` 和 `remainingTimeMax` 属性
+- 构造函数接受 `StageDurationRanges` 参数
+- 动态计算置信区间：
+  ```typescript
+  remainingTimeMin = (remainingProgress / 100) * minDuration
+  remainingTimeMax = (remainingProgress / 100) * maxDuration
+  ```
+
+**UI 显示逻辑**:
+```typescript
+const timeDiff = estimatedRemainingTimeMax - estimatedRemainingTimeMin
+const showRange = timeDiff >= 10  // 差距大于10秒才显示范围
+
+if (showRange) {
+  显示: "预计剩余: {最小值}-{最大值}秒"
+} else {
+  显示: "预计剩余: {平均值}秒"
+}
+```
+
+**效果**:
+- 用户可以看到预估时间的不确定性范围
+- 提供更真实的预期，避免单一值可能带来的误导
+- 例如显示 "预计剩余: 30-60秒" 比 "预计剩余: 45秒" 更准确
+
+---
+
 ## 🔧 后续优化建议
 
-1. **自适应学习**: 根据最近N次任务动态调整预估时间
-2. **置信区间**: 显示预估时间的置信区间（例如 "预计剩余: 30-60秒"）
+1. ✅ **自适应学习**: 根据最近N次任务动态调整预估时间（已实现）
+2. ✅ **置信区间**: 显示预估时间的置信区间（已实现）
 3. **异常检测**: 如果实际耗时远超预估，发出警告
 4. **用户反馈**: 允许用户手动调整预估时间
 

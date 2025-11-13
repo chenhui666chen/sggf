@@ -10,6 +10,14 @@ export interface StageDurations {
   iteration: number
 }
 
+export interface StageDurationRanges {
+  concept: { min: number; max: number }
+  structure: { min: number; max: number }
+  content: { min: number; max: number }
+  review: { min: number; max: number }
+  iteration: { min: number; max: number }
+}
+
 export interface ProgressState {
   stage: string
   estimatedProgress: number  // 基于时间的预估进度 (0-100)
@@ -19,16 +27,20 @@ export interface ProgressState {
   estimatedDuration: number   // 预估耗时（秒）
   elapsedTime: number         // 已经过时间（秒）
   remainingTime: number       // 预估剩余时间（秒）
+  remainingTimeMin: number    // 🆕 预估剩余时间最小值（秒）
+  remainingTimeMax: number    // 🆕 预估剩余时间最大值（秒）
 }
 
 export class ProgressEstimator {
   private stageDurations: StageDurations
+  private stageDurationRanges: StageDurationRanges | null = null  // 🆕 置信区间
   private currentState: ProgressState | null = null
   private animationFrameId: number | null = null
   private onProgressUpdate: ((state: ProgressState) => void) | null = null
 
-  constructor(stageDurations: StageDurations) {
+  constructor(stageDurations: StageDurations, stageDurationRanges?: StageDurationRanges) {
     this.stageDurations = stageDurations
+    this.stageDurationRanges = stageDurationRanges || null
   }
 
   /**
@@ -40,6 +52,11 @@ export class ProgressEstimator {
 
     const estimatedDuration = this.stageDurations[stage as keyof StageDurations] || 120
 
+    // 🆕 获取置信区间
+    const durationRange = this.stageDurationRanges?.[stage as keyof StageDurationRanges]
+    const minDuration = durationRange?.min || estimatedDuration * 0.7
+    const maxDuration = durationRange?.max || estimatedDuration * 1.3
+
     this.currentState = {
       stage,
       estimatedProgress: 0,
@@ -48,7 +65,9 @@ export class ProgressEstimator {
       startTime: Date.now(),
       estimatedDuration,
       elapsedTime: 0,
-      remainingTime: estimatedDuration
+      remainingTime: estimatedDuration,
+      remainingTimeMin: minDuration,  // 🆕
+      remainingTimeMax: maxDuration   // 🆕
     }
 
     this.onProgressUpdate = onProgressUpdate
@@ -89,6 +108,8 @@ export class ProgressEstimator {
     this.currentState.realProgress = 100
     this.currentState.displayProgress = 100
     this.currentState.remainingTime = 0
+    this.currentState.remainingTimeMin = 0  // 🆕
+    this.currentState.remainingTimeMax = 0  // 🆕
 
     if (this.onProgressUpdate) {
       this.onProgressUpdate({ ...this.currentState })
@@ -122,13 +143,25 @@ export class ProgressEstimator {
       this.currentState.estimatedProgress = timeProgress
     }
 
-    // 更新剩余时间
+    // 更新剩余时间（包括置信区间）
     if (this.currentState.estimatedProgress < 100) {
-      const remainingProgress = 100 - this.currentState.estimatedProgress
-      const progressRate = this.currentState.estimatedProgress / elapsedSeconds
-      this.currentState.remainingTime = remainingProgress / progressRate
+      const remainingProgress = 100 - this.currentState.displayProgress
+
+      // 🆕 获取置信区间
+      const durationRange = this.stageDurationRanges?.[this.currentState.stage as keyof StageDurationRanges]
+      const minDuration = durationRange?.min || this.currentState.estimatedDuration * 0.7
+      const maxDuration = durationRange?.max || this.currentState.estimatedDuration * 1.3
+
+      // 计算剩余时间的置信区间
+      this.currentState.remainingTimeMin = (remainingProgress / 100) * minDuration
+      this.currentState.remainingTimeMax = (remainingProgress / 100) * maxDuration
+
+      // 平均剩余时间
+      this.currentState.remainingTime = (this.currentState.remainingTimeMin + this.currentState.remainingTimeMax) / 2
     } else {
       this.currentState.remainingTime = 0
+      this.currentState.remainingTimeMin = 0
+      this.currentState.remainingTimeMax = 0
     }
 
     // 更新显示进度

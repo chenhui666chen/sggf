@@ -75,7 +75,7 @@ import {
   exportChapterBreakdownToCSV,
   downloadFile,
 } from '@/utils/expansionHelpers'
-import { ProgressEstimator, type StageDurations, type ProgressState } from '@/utils/progressEstimator'
+import { ProgressEstimator, type StageDurations, type StageDurationRanges, type ProgressState } from '@/utils/progressEstimator'
 import { statisticsService } from '@/services/statistics'
 
 
@@ -202,16 +202,40 @@ export default function WorkflowControlPage() {
   const [stageDurations, setStageDurations] = useState<StageDurations | null>(null)
   const [estimatedProgress, setEstimatedProgress] = useState(0)
   const [estimatedRemainingTime, setEstimatedRemainingTime] = useState(0)
+  const [estimatedRemainingTimeMin, setEstimatedRemainingTimeMin] = useState(0)  // 🆕
+  const [estimatedRemainingTimeMax, setEstimatedRemainingTimeMax] = useState(0)  // 🆕
 
-  // 🆕 初始化进度估算器
+  // 🆕 初始化进度估算器（自适应学习 + 置信区间）
   useEffect(() => {
     const initProgressEstimator = async () => {
       try {
-        const durations = await statisticsService.getStageDurations(projectId ? Number(projectId) : undefined)
-        console.log('📊 获取到阶段耗时统计:', durations)
+        // 🆕 优先使用最近3次任务的平均耗时（自适应学习）
+        let durations = await statisticsService.getStageDurations(
+          projectId ? Number(projectId) : undefined,
+          3  // 最近3次任务
+        )
+
+        // 检查是否有足够的数据
+        const hasEnoughData = Object.values(durations).every(d => d > 0)
+
+        if (!hasEnoughData) {
+          // 如果最近3次任务数据不足，回退到全局平均
+          console.log('⚠️ 最近3次任务数据不足，回退到全局平均耗时')
+          durations = await statisticsService.getStageDurations(
+            projectId ? Number(projectId) : undefined
+          )
+        }
+
+        console.log('📊 最终使用的阶段耗时:', durations)
         setStageDurations(durations)
 
-        const estimator = new ProgressEstimator(durations)
+        // 🆕 获取置信区间
+        const durationRanges = await statisticsService.getStageDurationRanges(
+          projectId ? Number(projectId) : undefined
+        )
+
+        // 创建进度估算器（传入置信区间）
+        const estimator = new ProgressEstimator(durations, durationRanges || undefined)
         setProgressEstimator(estimator)
       } catch (error) {
         console.error('初始化进度估算器失败:', error)
@@ -876,6 +900,8 @@ export default function WorkflowControlPage() {
         progressEstimator.startStage(stage, (state: ProgressState) => {
           setEstimatedProgress(Math.round(state.displayProgress))
           setEstimatedRemainingTime(Math.round(state.remainingTime))
+          setEstimatedRemainingTimeMin(Math.round(state.remainingTimeMin))  // 🆕
+          setEstimatedRemainingTimeMax(Math.round(state.remainingTimeMax))  // 🆕
           setTaskProgress(Math.round(state.displayProgress))
         })
         console.log(`📊 进度估算器已启动: ${stage}`)
@@ -2412,11 +2438,25 @@ export default function WorkflowControlPage() {
                 <Typography variant="body2">
                   正在执行 {stageNames[workflow.currentStage]}... ({taskProgress}%)
                 </Typography>
-                {estimatedRemainingTime > 0 && (
-                  <Typography variant="caption" color="text.secondary">
-                    预计剩余: {Math.ceil(estimatedRemainingTime)}秒
-                  </Typography>
-                )}
+                {estimatedRemainingTime > 0 && (() => {
+                  // 🆕 置信区间显示逻辑
+                  const timeDiff = estimatedRemainingTimeMax - estimatedRemainingTimeMin
+                  const showRange = timeDiff >= 10  // 差距大于10秒才显示范围
+
+                  if (showRange) {
+                    return (
+                      <Typography variant="caption" color="text.secondary">
+                        预计剩余: {Math.ceil(estimatedRemainingTimeMin)}-{Math.ceil(estimatedRemainingTimeMax)}秒
+                      </Typography>
+                    )
+                  } else {
+                    return (
+                      <Typography variant="caption" color="text.secondary">
+                        预计剩余: {Math.ceil(estimatedRemainingTime)}秒
+                      </Typography>
+                    )
+                  }
+                })()}
               </Box>
               <LinearProgress variant="determinate" value={taskProgress} />
             </Box>
