@@ -197,6 +197,19 @@ class AgentCoordinator:
                 "message": "",
             }
 
+    def set_progress_callback(self, callback, task_id: str, project_id: int):
+        """设置进度回调函数
+
+        Args:
+            callback: 进度回调函数 (async function)
+            task_id: 任务ID
+            project_id: 项目ID
+        """
+        self.progress_callback = callback
+        self.current_task_id = task_id
+        self.current_project_id = project_id
+        print(f"✅ 已设置进度回调: task_id={task_id}, project_id={project_id}")
+
     async def execute_stage(
         self, stage: StageType, input_data: Dict[str, Any]
     ) -> StageOutput:
