@@ -101,7 +101,44 @@ async def _execute_with_real_coordinator(self, stage: StageType, input_data: Dic
 
 ---
 
-### 修复 2: 改进 _send_progress_update() 的跨线程调用
+### 修复 2: 传递进度回调给真实协调器 (🔥 关键修复!)
+
+**文件**: `backend/app/services/agent_coordinator.py`
+**方法**: `_execute_with_real_coordinator()`
+
+**修改后** ✅:
+```python
+async def _execute_with_real_coordinator(self, stage: StageType, input_data: Dict[str, Any]):
+    # 🎯 设置项目上下文
+    if project_id and hasattr(self._real_coordinator, 'set_project_context'):
+        self._real_coordinator.set_project_context(project_id)
+        print(f"✅ 已为真实协调器设置项目上下文: {project_id}")
+
+    # 🔥 关键修复：将进度回调传递给真实协调器
+    if hasattr(self._real_coordinator, 'set_progress_callback'):
+        self._real_coordinator.set_progress_callback(
+            self.progress_callback,
+            self.current_task_id,
+            self.current_project_id
+        )
+        print(f"✅ 已为真实协调器设置进度回调")
+
+    # 在线程池中执行阶段函数
+    result = await asyncio.to_thread(
+        self._real_coordinator._stage_one_concept_development,
+        requirement
+    )
+```
+
+**关键改进**:
+1. ✅ 检查真实协调器是否有 `set_progress_callback` 方法
+2. ✅ 传递 `progress_callback`, `task_id`, `project_id` 给真实协调器
+3. ✅ 真实协调器现在可以发送进度更新
+4. ✅ 添加日志确认设置成功
+
+---
+
+### 修复 3: 改进 _send_progress_update() 的跨线程调用
 
 **文件**: `backend/app/services/agents/agent_coordinator.py`
 **方法**: `_send_progress_update()`
@@ -258,20 +295,41 @@ future = asyncio.run_coroutine_threadsafe(
 
 ## 🎊 总结
 
-### 问题根源
+### 问题根源 (3层问题)
+
+#### 问题 1: 同步函数阻塞事件循环
 - 同步阶段函数在 async 函数中被直接调用,阻塞事件循环
 - 事件循环被阻塞时,WebSocket 无法发送进度更新
+
+#### 问题 2: 进度回调未传递给真实协调器
+- `set_progress_callback()` 只在包装器协调器中设置
+- 真实协调器 (`CreativeDirectorCoordinator`) 没有收到回调
+- `_stage_one_concept_development()` 在真实协调器中执行
+- 真实协调器调用 `_send_progress_update()` 时,没有回调函数
+- 进度更新只打印日志,不发送 WebSocket 消息
+
+#### 问题 3: 跨线程异步调用
 - `_send_progress_update()` 虽然提交了任务,但事件循环无法执行
 - 进度更新丢失,前端显示 0%
 
-### 解决方案
-- ✅ 使用 `asyncio.to_thread()` 在线程池中运行同步阶段函数
+### 解决方案 (3个修复)
+
+#### 修复 1: 使用 asyncio.to_thread()
+- ✅ 在线程池中运行同步阶段函数
 - ✅ 不阻塞事件循环,WebSocket 可以正常工作
+
+#### 修复 2: 传递进度回调给真实协调器 (关键!)
+- ✅ 在 `_execute_with_real_coordinator()` 中设置回调
+- ✅ 将 `progress_callback`, `task_id`, `project_id` 传递给真实协调器
+- ✅ 真实协调器现在可以发送进度更新
+
+#### 修复 3: 改进跨线程调用
 - ✅ 使用 `run_coroutine_threadsafe()` 跨线程调用进度回调
 - ✅ 添加详细的错误处理和日志
 
 ### 修复效果
 - ✅ 事件循环不被阻塞
+- ✅ 真实协调器可以发送进度更新
 - ✅ WebSocket 进度更新正常发送
 - ✅ 前端进度条实时更新
 - ✅ 显示子任务消息
@@ -281,12 +339,13 @@ future = asyncio.run_coroutine_threadsafe(
 - **asyncio.to_thread()**: 在线程池中运行同步函数,不阻塞事件循环
 - **run_coroutine_threadsafe()**: 从后台线程安全地调用协程
 - **get_running_loop()**: 检测当前线程是否有运行的事件循环
+- **回调传递**: 确保真实执行者有进度回调函数
 
 ---
 
 **修复人员**: AI Assistant
 **修复日期**: 2025-11-13
 **修复文件**: 2 个文件
-**Git Commits**: 2 个提交
+**Git Commits**: 3 个提交
 **状态**: ✅ 完成,需要重启后端验证
 
