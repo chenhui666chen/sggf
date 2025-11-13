@@ -355,25 +355,31 @@ async def delete_chapter(
     
     # 🆕 同步删除向量库中的相关向量数据
     try:
-        from langchain.vectorstores import Chroma
-        import os
-        
-        chroma_dir = os.getenv('CHROMA_PERSIST_DIRECTORY', 'chroma_db')
-        project_namespace = f"project_{chapter.project_id}"
-        
-        vectorstore = Chroma(
-            collection_name=project_namespace,
-            persist_directory=chroma_dir
+        from app.services.agents.knowledge_base import NovelKnowledgeBase
+        import logging
+        logger = logging.getLogger("uvicorn.error")
+
+        logger.info(f"   🗑️  同步删除向量库中的章节数据...")
+
+        # 使用知识库的删除方法
+        kb = NovelKnowledgeBase()
+        deleted_count = kb.delete_chapter(
+            chapter_number=chapter.chapter_number,
+            project_id=chapter.project_id
         )
-        
-        # 通过元数据过滤器删除与该章节相关的向量数据
-        # 注意：Chroma的删除功能有限，这里尝试删除
-        # 在实际应用中，可能需要重新创建collection来完全清理
+
+        if deleted_count > 0:
+            logger.info(f"   ✅ 已从向量库删除 {deleted_count} 个文档")
+        else:
+            logger.info(f"   ℹ️  向量库中未找到第{chapter.chapter_number}章的数据")
+
     except Exception as e:
         # 不中断主流程，记录错误
         import logging
         logger = logging.getLogger("uvicorn.error")
         logger.warning(f"⚠️ 删除章节时清理向量库失败: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
     
     # 删除章节（评审数据会自动级联删除）
     db.delete(chapter)

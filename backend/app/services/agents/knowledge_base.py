@@ -267,6 +267,53 @@ class NovelKnowledgeBase:
             print(f"Warning: Chroma filter error in get_chapter_summary: {e}, falling back to unfiltered search")
             return self.vectorstore.similarity_search(f"Chapter {chapter_num}", k=10)
     
+    def delete_chapter(self, chapter_number: int, project_id: Optional[int] = None) -> int:
+        """Delete chapter from vector database
+
+        Args:
+            chapter_number: 章节号
+            project_id: 项目ID (可选,用于更精确的过滤)
+
+        Returns:
+            int: 删除的文档数量
+        """
+        try:
+            collection = self.vectorstore._collection
+
+            # 构建过滤条件
+            where_filter = {"type": "chapter"}
+            if project_id is not None:
+                where_filter["project_id"] = str(project_id)
+
+            # 获取所有章节文档
+            results = collection.get(where=where_filter)
+
+            if not results or not results['ids']:
+                print(f"No chapter documents found in vector database")
+                return 0
+
+            # 筛选出该章节的文档
+            ids_to_delete = []
+            for doc_id, metadata in zip(results['ids'], results['metadatas']):
+                if metadata and (
+                    metadata.get('chapter_number') == chapter_number or
+                    metadata.get('chapter_number') == str(chapter_number) or
+                    f'第{chapter_number}章' in str(metadata.get('title', ''))
+                ):
+                    ids_to_delete.append(doc_id)
+
+            if ids_to_delete:
+                collection.delete(ids=ids_to_delete)
+                print(f"Deleted {len(ids_to_delete)} documents for chapter {chapter_number}")
+                return len(ids_to_delete)
+            else:
+                print(f"No documents found for chapter {chapter_number}")
+                return 0
+
+        except Exception as e:
+            print(f"Error deleting chapter from vector database: {e}")
+            return 0
+
     def clear_database(self):
         """Clear knowledge base (use with caution)"""
         self.vectorstore.delete_collection()
