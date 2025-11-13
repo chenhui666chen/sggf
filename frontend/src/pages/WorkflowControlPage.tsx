@@ -197,32 +197,27 @@ export default function WorkflowControlPage() {
 
   useEffect(() => {
     if (projectId) {
-      // 🆕 阶段持久化：先恢复阶段，再设置projectId
-      const savedStage = localStorage.getItem(`project_${projectId}_currentStage`)
-      if (savedStage && ['concept', 'structure', 'content', 'review', 'iteration'].includes(savedStage)) {
-        console.log(`💾 页面加载：恢复项目 ${projectId} 的上次阶段: ${savedStage}`)
-        // 先设置阶段，再设置projectId，避免setProjectId的重置逻辑覆盖
-        dispatch(setCurrentStage(savedStage as StageType))
-      }
-      
+      // 🔧 修复：不再从 localStorage 恢复阶段
+      // 原因：localStorage 中的阶段可能与后端实际状态不一致
+      // 改为从后端 API 获取实际的工作流状态
+
       // 🎯 任务2：项目切换时设置新的项目上下文
       dispatch(setProjectId(Number(projectId)))
-      // 🔧 修复：移除强制设置为concept阶段，避免重新渲染后阶段被重置
-      // 项目切换时，setProjectId已经处理了阶段重置逻辑
-      // dispatch(setCurrentStage('concept'))  // ✖️ 删除：导致扩展功能执行后页面跳转到concept阶段
-      
+
       // 🎯 任务3：加载项目信息用于显示
       dispatch(fetchProject(Number(projectId)))
     }
   }, [projectId, dispatch])
 
-  // 🆕 监听当前阶段变化，保存到localStorage
-  useEffect(() => {
-    if (projectId && workflow.currentStage) {
-      localStorage.setItem(`project_${projectId}_currentStage`, workflow.currentStage)
-      console.log(`💾 保存项目 ${projectId} 的当前阶段: ${workflow.currentStage}`)
-    }
-  }, [projectId, workflow.currentStage])
+  // 🔧 修复：移除 localStorage 阶段保存逻辑
+  // 原因：localStorage 中的阶段可能与后端实际状态不一致
+  // 改为完全依赖后端 API 返回的状态
+  // useEffect(() => {
+  //   if (projectId && workflow.currentStage) {
+  //     localStorage.setItem(`project_${projectId}_currentStage`, workflow.currentStage)
+  //     console.log(`💾 保存项目 ${projectId} 的当前阶段: ${workflow.currentStage}`)
+  //   }
+  // }, [projectId, workflow.currentStage])
 
   // 🔥 初始化加载历史记录
   useEffect(() => {
@@ -480,6 +475,14 @@ export default function WorkflowControlPage() {
                 setSnackbarOpen(true)
               } else {
                 console.log('✅ 没有正在运行的任务')
+                // 🔧 修复：如果没有正在运行的任务，确保停止运行状态
+                setIsRunning(false)
+                setCurrentTaskId(null)
+                // 清理可能存在的轮询定时器
+                if (taskPollingInterval) {
+                  clearInterval(taskPollingInterval)
+                  setTaskPollingInterval(null)
+                }
               }
             }
           } catch (error) {
@@ -568,13 +571,40 @@ export default function WorkflowControlPage() {
                 'stage_five_status': 'iteration'
               }
 
+              // 🔧 修复：根据后端状态确定当前应该显示的阶段
+              let lastCompletedStage: StageType | null = null
+              const stageOrder: StageType[] = ['concept', 'structure', 'content', 'review', 'iteration']
+
               Object.entries(stageStatusMap).forEach(([dbField, stageName]) => {
                 const status = statusData[dbField]
                 if (status === 'completed') {
                   dispatch(updateStageStatus({ stage: stageName, status: 'completed' }))
                   console.log(`✅ 阶段状态已更新: ${stageName} = completed`)
+                  lastCompletedStage = stageName
                 }
               })
+
+              // 🔧 修复：如果没有正在运行的任务,设置当前阶段为最后完成的阶段的下一个阶段
+              // 如果所有阶段都完成了,则显示最后一个阶段
+              if (!isRunning && !currentTaskId) {
+                if (lastCompletedStage) {
+                  const lastCompletedIndex = stageOrder.indexOf(lastCompletedStage)
+                  if (lastCompletedIndex < stageOrder.length - 1) {
+                    // 还有未完成的阶段,显示下一个阶段
+                    const nextStage = stageOrder[lastCompletedIndex + 1]
+                    dispatch(setCurrentStage(nextStage))
+                    console.log(`📍 设置当前阶段为: ${nextStage} (最后完成阶段 ${lastCompletedStage} 的下一个)`)
+                  } else {
+                    // 所有阶段都完成了,显示最后一个阶段
+                    dispatch(setCurrentStage(lastCompletedStage))
+                    console.log(`📍 所有阶段已完成,显示最后阶段: ${lastCompletedStage}`)
+                  }
+                } else {
+                  // 没有完成的阶段,显示第一个阶段
+                  dispatch(setCurrentStage('concept'))
+                  console.log(`📍 没有完成的阶段,显示第一个阶段: concept`)
+                }
+              }
             } else {
               console.warn('⚠️  无法加载阶段状态')
             }

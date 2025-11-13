@@ -93,29 +93,12 @@ const initialStages: Record<StageType, Stage> = {
   },
 }
 
-// 🆕 从 localStorage 读取初始阶段（如果存在）
-const getInitialStage = (): StageType => {
-  // 从 URL 读取 projectId
-  const urlParams = new URLSearchParams(window.location.search)
-  const pathParts = window.location.pathname.split('/')
-  const projectIdFromPath = pathParts[pathParts.indexOf('workflow') + 1]
-  const projectId = projectIdFromPath || urlParams.get('projectId')
-  
-  if (projectId) {
-    const savedStage = localStorage.getItem(`project_${projectId}_currentStage`)
-    if (savedStage && ['concept', 'structure', 'content', 'review', 'iteration'].includes(savedStage)) {
-      console.log(`💾 Redux初始化：恢复项目 ${projectId} 的上次阶段: ${savedStage}`)
-      return savedStage as StageType
-    }
-  }
-  
-  // 默认返回 concept
-  return 'concept'
-}
-
+// 🔧 修复：不再从 localStorage 读取初始阶段
+// 原因：localStorage 中的阶段可能与后端实际状态不一致
+// 改为从后端 API 获取实际的工作流状态
 const initialState: WorkflowState = {
   projectId: null,
-  currentStage: getInitialStage(),  // 🔧 修复：从 localStorage 读取初始阶段
+  currentStage: 'concept',  // 默认为 concept,后续从后端 API 获取实际状态
   stages: initialStages,
   isRunning: false,
   overallProgress: 0,
