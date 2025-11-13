@@ -70,13 +70,17 @@ class AgentCoordinator:
         self.stage_outputs: Dict[StageType, StageOutput] = {}
         self.message_queue: List[AgentMessage] = []
         self.workflow_state: Dict[str, Any] = {}
-        
+
         # 🆕 集成真实的Agent协调器
         self._real_coordinator = None
         self._coordinator_initialized = False
-        
+
         # 🎯 新增：项目上下文管理
         self.current_project_id: Optional[int] = None
+
+        # 🆕 进度回调相关属性
+        self.progress_callback = None
+        self.current_task_id: Optional[str] = None
 
     async def initialize_agents(self) -> None:
         """初始化所有Agent"""
