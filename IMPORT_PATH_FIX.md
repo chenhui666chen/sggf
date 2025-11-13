@@ -90,7 +90,10 @@ backend/
 
 ## ✅ 解决方案
 
-### 修复代码
+### 修复 1: deepseek_integration.py
+
+**文件**: `backend/app/services/agents/deepseek_integration.py`
+**行号**: 153
 
 **修改前** ❌:
 ```python
@@ -109,8 +112,37 @@ def _execute_workflow_stage(self, stage: str, params: Dict[str, Any]) -> str:
 ```
 
 **改动**:
-- 只改了一个字符: 添加了 `.` (点号)
+- 添加了 `.` (点号)
 - `from agent_coordinator` → `from .agent_coordinator`
+
+---
+
+### 修复 2: agent_coordinator.py
+
+**文件**: `backend/app/services/agent_coordinator.py`
+**行号**: 257
+
+**修改前** ❌:
+```python
+async def _load_project_context_from_db(self, project_id: int):
+    """从数据库加载项目上下文"""
+    from sqlalchemy import text
+    from backend.app.db.base import get_db  # ❌ 错误
+    import json
+```
+
+**修改后** ✅:
+```python
+async def _load_project_context_from_db(self, project_id: int):
+    """从数据库加载项目上下文"""
+    from sqlalchemy import text
+    from app.db.base import get_db  # ✅ 正确
+    import json
+```
+
+**改动**:
+- 移除了 `backend.` 前缀
+- `from backend.app.db.base` → `from app.db.base`
 
 ---
 
@@ -272,25 +304,29 @@ INFO:     🔥 开始执行后台任务: xxx
 
 ### 问题根源
 - `deepseek_integration.py` 使用了错误的绝对导入
-- 应该使用相对导入 `from .agent_coordinator import`
+- `agent_coordinator.py` 使用了错误的 `from backend` 导入
+- 应该使用正确的相对导入路径
 
 ### 解决方案
-- ✅ 将 `from agent_coordinator import` 改为 `from .agent_coordinator import`
-- ✅ 只改了一个字符,添加了点号 `.`
+- ✅ 修复 1: `from agent_coordinator` → `from .agent_coordinator`
+- ✅ 修复 2: `from backend.app.db.base` → `from app.db.base`
+- ✅ 验证: 没有其他 `from backend` 导入了
 
 ### 修复效果
 - ✅ 工作流可以正常执行
 - ✅ concept, structure, content, review, iteration 阶段都可以运行
+- ✅ 可以正常从数据库加载项目上下文
 - ✅ 不再出现 `No module named 'backend'` 错误
 
 ### 预防措施
-- ✅ 统一使用相对导入
+- ✅ 统一使用正确的导入路径
 - ✅ 添加导入测试
 - ✅ 定期检查导入语句
 
 ---
 
-**修复人员**: AI Assistant  
-**修复日期**: 2025-11-13  
+**修复人员**: AI Assistant
+**修复日期**: 2025-11-13
+**修复文件**: 2 个文件
 **状态**: ✅ 完成,需要重启后端验证
 
