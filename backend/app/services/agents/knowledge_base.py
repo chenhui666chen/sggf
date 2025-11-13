@@ -134,7 +134,7 @@ class NovelKnowledgeBase:
 
             if documents:
                 self.vectorstore.add_documents(documents)
-                self.vectorstore.persist()
+                # Note: Chroma 0.4.x+ auto-persists, no need to call persist()
                 print(f"Added world setting: {title}")
             else:
                 print(f"Warning: Cannot create documents: {title}")
@@ -156,7 +156,7 @@ class NovelKnowledgeBase:
 
             if documents:
                 self.vectorstore.add_documents(documents)
-                self.vectorstore.persist()
+                # Note: Chroma 0.4.x+ auto-persists, no need to call persist()
                 print(f"Added character profile: {name}")
             else:
                 print(f"Warning: Cannot create documents: {name}")
@@ -178,7 +178,7 @@ class NovelKnowledgeBase:
 
             if documents:
                 self.vectorstore.add_documents(documents)
-                self.vectorstore.persist()
+                # Note: Chroma 0.4.x+ auto-persists, no need to call persist()
                 print(f"Added chapter: Chapter {chapter_num} - {title}")
             else:
                 print(f"Warning: Cannot create documents: Chapter {chapter_num} - {title}")
