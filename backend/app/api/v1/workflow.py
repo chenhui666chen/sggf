@@ -14,6 +14,7 @@ from app.services.agent_coordinator import (
 from app.core.security import get_current_user
 from app.models.project import Project
 from app.websocket.manager import ws_manager
+from app.services.setting_templates import build_project_settings_summary
 import uuid
 from datetime import datetime
 import json
@@ -22,6 +23,8 @@ import json
 class StartWorkflowRequest(BaseModel):
     project_id: int
     requirement: str
+    # 🆕 可选的目标章节数配置，用于长篇规划（默认100章）
+    target_chapter_count: Optional[int] = 100
 
 class ExecuteStageRequest(BaseModel):
     project_id: int
@@ -42,6 +45,7 @@ class ExpandOutlineRequest(BaseModel):
     characters: str
     current_chapter_count: int = 0  # 🆕 当前已有的章节数
     increment: int = 10  # 🆕 本次扩展的章节数（5-10章）
+    target_total_chapters: Optional[int] = 100  # 🆕 长篇小说目标总章节数（默认按100章规划）
 
 class ExpandCharactersRequest(BaseModel):
     project_id: int
@@ -50,6 +54,7 @@ class ExpandCharactersRequest(BaseModel):
     plot_outline: str
     current_character_count: int = 0  # 🆕 当前已有的人物数
     increment: int = 5  # 🆕 本次扩展的人物数（3-6个）
+    target_total_characters: Optional[int] = 25  # 🆕 长篇小说目标人物数（默认按25人规划）
 
 router = APIRouter(prefix="/api/v1/workflow", tags=["workflow"])
 
@@ -80,6 +85,10 @@ async def start_workflow(
         
         project_id = request.project_id
         requirement = request.requirement
+        # 目标章节数配置（可选）
+        target_chapter_count = request.target_chapter_count
+        if target_chapter_count is None or target_chapter_count <= 0:
+            target_chapter_count = 100
 
         if not project_id or not requirement:
             raise HTTPException(
@@ -91,6 +100,7 @@ async def start_workflow(
         logger.info("   正在初始化Agent...")
         await coordinator.initialize_agents()
         logger.info("   ✅ Agent初始化完成")
+        logger.info(f"   目标章节数: {target_chapter_count}")
 
         # 🔧 关键修复：保存requirement到数据库
         from sqlalchemy import text
@@ -139,6 +149,7 @@ async def start_workflow(
             "user_id": current_user.id,
             "requirement": requirement,
             "status": "running",
+            "target_chapter_count": target_chapter_count,
         }
 
         # 返回初始化的阶段信息
@@ -723,12 +734,27 @@ async def get_workflow_status(
 ):
     """获取工作流程状态"""
     try:
+        # ✅ 验证项目所有权
+        from app.models.project import Project
+        project = db.query(Project).filter(
+            Project.id == project_id,
+            Project.user_id == current_user.id
+        ).first()
+
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found or access denied"
+            )
+
         status_data = await coordinator.get_workflow_status()
         return {
             "status": "success",
             "project_id": project_id,
             "workflow": status_data,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -802,7 +828,7 @@ async def get_stage_content(
             }
 
         content = result[0] or ""
-        
+
         # 🔧 修复JSON解码错误：如果内容是JSON字符串，先解析
         import json
         try:
@@ -811,8 +837,11 @@ async def get_stage_content(
                 # 如果是字符串，直接使用；如果是对象/数组，转回字符串
                 if isinstance(parsed_content, str):
                     content = parsed_content
+                elif isinstance(parsed_content, (dict, list)):
+                    # 如果是对象或数组，转回格式化的字符串
+                    content = json.dumps(parsed_content, ensure_ascii=False, indent=2)
                 else:
-                    content = json.dumps(parsed_content, ensure_ascii=False)
+                    content = str(parsed_content)
         except json.JSONDecodeError:
             # 如枟解析失败，直接使用原内容
             pass
@@ -1099,19 +1128,23 @@ async def get_task_status(
     try:
         from sqlalchemy import text
 
-        # 查询任务状态
+        # ✅ 查询任务状态并验证项目所有权
         query = text("""
-            SELECT task_id, status, result, error, created_at, completed_at
-            FROM generation_history
-            WHERE task_id = :task_id
+            SELECT gh.task_id, gh.status, gh.result, gh.error, gh.created_at, gh.completed_at
+            FROM generation_history gh
+            INNER JOIN projects p ON gh.project_id = p.id
+            WHERE gh.task_id = :task_id AND p.user_id = :user_id
         """)
 
-        result = db.execute(query, {"task_id": task_id}).fetchone()
+        result = db.execute(query, {
+            "task_id": task_id,
+            "user_id": current_user.id
+        }).fetchone()
 
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Task {task_id} not found"
+                detail=f"Task {task_id} not found or access denied"
             )
 
         # 计算进度
@@ -1260,16 +1293,35 @@ async def get_all_stages_content(
         result = db.execute(query, {"project_id": project_id}).fetchone()
 
         if result:
+            import json
+
+            # 辅助函数：解析 JSON 存储的内容
+            def parse_json_content(content):
+                if not content:
+                    return ""
+                try:
+                    if content.startswith('{') or content.startswith('[') or content.startswith('"'):
+                        parsed = json.loads(content)
+                        if isinstance(parsed, str):
+                            return parsed
+                        elif isinstance(parsed, (dict, list)):
+                            return json.dumps(parsed, ensure_ascii=False, indent=2)
+                        else:
+                            return str(parsed)
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+                return content
+
             response = {
                 "project_id": project_id,
                 "stages": {
-                    "concept": result[0] or "",
-                    "world_setting": result[1] or "",
-                    "characters": result[2] or "",
-                    "plot_outline": result[3] or "",
-                    "chapter_draft": result[4] or "",
-                    "review_report": result[5] or "",
-                    "final_version": result[6] or ""
+                    "concept": parse_json_content(result[0]),
+                    "world_setting": parse_json_content(result[1]),
+                    "characters": parse_json_content(result[2]),
+                    "plot_outline": parse_json_content(result[3]),
+                    "chapter_draft": parse_json_content(result[4]),
+                    "review_report": parse_json_content(result[5]),
+                    "final_version": parse_json_content(result[6])
                 }
             }
         else:
@@ -1457,14 +1509,14 @@ async def generate_next_chapter(
         
         # 3. 获取已生成章节
         query = text("""
-            SELECT id, chapter_number, title, content 
-            FROM chapters 
-            WHERE project_id = :project_id 
+            SELECT id, chapter_number, title, content, summary
+            FROM chapters
+            WHERE project_id = :project_id
             ORDER BY chapter_number ASC
         """)
         chapters_result = db.execute(query, {"project_id": project_id}).fetchall()
-        existing_chapters = [(r[0], r[1], r[2], r[3]) for r in chapters_result]
-        
+        existing_chapters = [(r[0], r[1], r[2], r[3], r[4]) for r in chapters_result]
+
         # 计算下一章编号
         next_chapter_number = len(existing_chapters) + 1
         logger.info(f"   ✓ 当前已有 {len(existing_chapters)} 章，即将生成第 {next_chapter_number} 章")
@@ -1478,23 +1530,66 @@ async def generate_next_chapter(
                 content = previous_chapter[3]
                 previous_ending = content[-500:] if len(content) > 500 else content
         
-        # 5. 生成已完成章节摘要
+        # 5. 生成已完成章节摘要，并为内容创作准备结构化的上一章信息
         def summarize_chapters(chapters):
-            """生成已完成章节的摘要"""
+            """生成已完成章节的摘要，并构造供内容生成使用的高层摘要列表。"""
             if not chapters:
-                return "这是第一章，之前没有章节。"
-            
+                return "这是第一章，之前没有章节。", []
+
+            # 局部导入，避免潜在的循环依赖
+            from app.services.agents.chapter_summarizer import create_chapter_summarizer
+
             summaries = []
-            for chapter in chapters:
-                chapter_id, chapter_num, title, content = chapter
-                # 提取前200字作为摘要
-                summary = content[:200] if content and len(content) > 200 else (content or "")
-                summaries.append(f"第{chapter_num}章 《{title}》: {summary}...")
-            
-            return "\n\n".join(summaries)
-        
-        previous_chapters_summary = summarize_chapters(existing_chapters)
-        
+            previous_chapters_payload = []
+
+            summarizer = None
+            try:
+                summarizer = create_chapter_summarizer(db_session=db)
+            except Exception as e:
+                logger.error(f"   ⚠️ 创建章节摘要生成器失败，将回退到内容前200字: {e}")
+
+            total = len(chapters)
+            recent_limit = 10  # 对最近若干部章节优先使用结构化摘要
+
+            for idx, chapter in enumerate(chapters):
+                chapter_id, chapter_num, title, content, existing_summary = chapter
+                content = content or ""
+                title = title or ""
+                summary_text = (existing_summary or "").strip()
+
+                # 仅对最近若干部章节尝试使用结构化摘要，其他章节直接使用已存在摘要或前200字
+                is_recent = (total - idx) <= recent_limit
+
+                if summarizer and is_recent:
+                    try:
+                        summary_data = summarizer.get_or_generate_summary(
+                            chapter_id=chapter_id,
+                            chapter_number=chapter_num,
+                            chapter_title=title or f"第{chapter_num}章",
+                            chapter_content=content,
+                            summary_length=200,
+                        )
+                        summary_text = summary_data.get("core_summary", "").strip() or summary_text
+                    except Exception as e:
+                        logger.error(f"   ⚠️ 生成第{chapter_num}章摘要失败，将回退简要摘要: {e}")
+
+                if not summary_text:
+                    summary_text = content[:200] if content and len(content) > 200 else content
+
+                summaries.append(f"第{chapter_num}章 《{title}》: {summary_text}...")
+                previous_chapters_payload.append(
+                    {
+                        "chapter_number": chapter_num,
+                        "title": title,
+                        "content": content,
+                        "summary": summary_text,
+                    }
+                )
+
+            return "\n\n".join(summaries), previous_chapters_payload
+
+        previous_chapters_summary, previous_chapters_payload = summarize_chapters(existing_chapters)
+
         # 6. 调用Agent协调器生成章节
         chapter_plan = ""
         chapter_draft = ""
@@ -1548,7 +1643,8 @@ async def generate_next_chapter(
                     world_setting=world_setting or '',
                     characters=characters or '',
                     previous_ending=previous_ending,
-                    target_word_count=3000
+                    target_word_count=3000,
+                    previous_chapters=previous_chapters_payload,
                 )
                 logger.info(f"     ✓ 章节初稿已完成，字数: {len(chapter_draft)}")
             else:
@@ -1833,12 +1929,8 @@ async def expand_outline(
             )
         
         # 2. 导入大纲扩展器
-        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../..'))
-        if root_dir not in sys.path:
-            sys.path.insert(0, root_dir)
-        
         try:
-            from outline_expander import create_outline_expander
+            from app.services.agents.outline_expander import create_outline_expander
             logger.info("   ✅ 成功导入 outline_expander")
         except ImportError as e:
             logger.error(f"   ❌ 导入失败: {e}")
@@ -1850,19 +1942,31 @@ async def expand_outline(
         # 3. 创建扩展器实例
         expander = create_outline_expander()
         logger.info("   ✅ 扩展器实例已创建")
-        
+
+        # 3.5 生成类型化设定摘要并注入世界观
+        settings_summary = build_project_settings_summary(request.project_id, db)
+        combined_world_setting = request.world_setting or ""
+        if settings_summary:
+            combined_world_setting = (
+                f"{combined_world_setting}\n\n{settings_summary}"
+                if combined_world_setting
+                else settings_summary
+            )
+        logger.info("   📚 已生成设定摘要并合并到世界观上下文")
+
         # 4. 执行大纲扩展（渐进式）
         target_chapters = request.current_chapter_count + request.increment
         logger.info(f"   🚀 开始扩展大纲（从 {request.current_chapter_count} 章扩展到 {target_chapters} 章）...")
-        
+
         result = expander.expand_plot_outline_incremental(
             current_outline=request.current_outline,
-            world_setting=request.world_setting,
+            world_setting=combined_world_setting,
             characters=request.characters,
             current_chapter_count=request.current_chapter_count,
-            increment=request.increment
+            increment=request.increment,
+            target_total_chapters=request.target_total_chapters,
         )
-        
+
         logger.info("   ✅ 大纲扩展完成")
         
         # 5. 保存扩展结果到project_settings
@@ -1978,12 +2082,8 @@ async def expand_characters(
             )
         
         # 2. 导入扩展器
-        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../..'))
-        if root_dir not in sys.path:
-            sys.path.insert(0, root_dir)
-        
         try:
-            from outline_expander import create_outline_expander
+            from app.services.agents.outline_expander import create_outline_expander
             logger.info("   ✅ 成功导入 outline_expander")
         except ImportError as e:
             logger.error(f"   ❌ 导入失败: {e}")
@@ -1995,19 +2095,31 @@ async def expand_characters(
         # 3. 创建扩展器实例
         expander = create_outline_expander()
         logger.info("   ✅ 扩展器实例已创建")
-        
+
+        # 3.5 生成类型化设定摘要并注入世界观
+        settings_summary = build_project_settings_summary(request.project_id, db)
+        combined_world_setting = request.world_setting or ""
+        if settings_summary:
+            combined_world_setting = (
+                f"{combined_world_setting}\n\n{settings_summary}"
+                if combined_world_setting
+                else settings_summary
+            )
+        logger.info("   📚 已生成设定摘要并合并到世界观上下文")
+
         # 4. 执行人物扩展（渐进式）
         target_count = request.current_character_count + request.increment
         logger.info(f"   🚀 开始扩展人物（从 {request.current_character_count} 个扩展到 {target_count} 个）...")
-        
+
         result = expander.expand_characters_incremental(
             main_characters=request.main_characters,
-            world_setting=request.world_setting,
+            world_setting=combined_world_setting,
             plot_outline=request.plot_outline,
             current_character_count=request.current_character_count,
-            increment=request.increment
+            increment=request.increment,
+            target_total_characters=request.target_total_characters,
         )
-        
+
         logger.info("   ✅ 人物扩展完成")
         
         # 5. 保存扩展结果到project_settings

@@ -43,7 +43,7 @@ class CreativeDirectorCoordinator:
                  enable_conflict_detection: bool = False,
                  enable_detailed_logging: bool = False):
         """初始化创意总监协调器
-        
+
         Args:
             knowledge_base: 知识库实例
             memory_manager: 记忆管理器实例
@@ -66,7 +66,7 @@ class CreativeDirectorCoordinator:
         self.quality_reviewer = QualityReviewerAgent(self.knowledge_base, self.memory_manager)
 
         self.llm = create_deepseek_llm()
-        
+
         # 🆕 模型优化：初始化优化的LLM客户端
         if OPTIMIZER_AVAILABLE and get_llm_client is not None:
             try:
@@ -90,69 +90,89 @@ class CreativeDirectorCoordinator:
             "current_stage": None
         }
 
+        # 🆕 长篇创作配置：默认目标章节数
+        self.target_chapter_count: int = 100
+        self.project_context["target_chapter_count"] = self.target_chapter_count
+
         self.workflow_log = []
         self.iteration_count = 0
         self.max_iterations = 3
-        
+
         # 🎯 新增：项目上下文管理
         self.current_project_id: Optional[int] = None
-        
+
         # 🆕 WebSocket进度回调相关属性
         self.progress_callback = None  # 进度回调函数
         self.current_task_id: Optional[str] = None  # 当前任务ID
-        
+
         # 🚀 优化：智能缓存机制
         self._kb_cache: Dict[str, tuple[List, float]] = {}  # 缓存：{查询键: (结果, 时间戳)}
         self._cache_ttl = 300  # 缓存生存时间：5分钟
         self._cache_max_size = 100  # 最大缓存条目数
-        
+
         # 🚀 优化：相关性评分配置
         self._relevance_threshold = 0.5  # 相关性阈值（0-1），低于此值的结果会被过滤
-        
+
         # 🚀 优化：动态k值配置
         self._enable_dynamic_k = True  # 是否启用动态k值
         self._min_k = 1  # 最小返回结果数
         self._max_k = 5  # 最大返回结果数
-        
+
         # 🆕 方案A新增：可选的Agent通信中心
         self.enable_communication = enable_communication
         self.enable_conflict_detection = enable_conflict_detection
         self.enable_detailed_logging = enable_detailed_logging
         self.communication_hub: Optional[AgentCommunicationHub] = None
         self.execution_log: List[Dict[str, Any]] = []  # 详细执行日志
-        
+
         if self.enable_communication:
             self.communication_hub = AgentCommunicationHub()
             self._register_all_agents()
             print(f"✓ Agent通信中心已启用")
-        
+
         if self.enable_conflict_detection and not self.enable_communication:
             print(f"⚠️ 冲突检测需要启用通信中心，已自动启用通信中心")
             self.enable_communication = True
             self.communication_hub = AgentCommunicationHub()
             self._register_all_agents()
-        
+
         if self.enable_detailed_logging:
             print(f"✓ 详细执行日志已启用")
-    
+
     def set_project_context(self, project_id: int):
         """🎯 设置当前项目上下文"""
         self.current_project_id = project_id
         print(f"🎯 已设置项目上下文: project_id={project_id}")
-        
+
         # 同步更新 project_context
         if "project_id" not in self.project_context:
             self.project_context["project_id"] = project_id
-        
+
         # 🎯 为所有Agent设置项目上下文
-        for agent in [self.creative_director, self.world_architect, 
+        for agent in [self.creative_director, self.world_architect,
+
                      self.character_designer, self.plot_architect,
                      self.content_creator, self.quality_reviewer]:
             agent.set_project_context(project_id)
-    
+
+    def set_longform_config(self, target_chapter_count: Optional[int] = None):
+        """🆕 设置长篇创作相关配置（例如目标章节数）"""
+        if target_chapter_count is None:
+            return
+        try:
+            value = int(target_chapter_count)
+        except (TypeError, ValueError):
+            return
+        if value <= 0:
+            return
+        self.target_chapter_count = value
+        self.project_context["target_chapter_count"] = value
+        print(f"🎯 已设置长篇目标章节数: {value}")
+
+
     def set_progress_callback(self, callback, task_id: str, project_id: int):
         """🆕 设置进度回调函数（用于WebSocket实时推送）
-        
+
         Args:
             callback: 异步回调函数，接收 (project_id, task_id, progress, message) 参数
             task_id: 当前任务ID
@@ -163,10 +183,10 @@ class CreativeDirectorCoordinator:
         if not self.current_project_id:
             self.current_project_id = project_id
         print(f"✅ 已设置进度回调: task_id={task_id}, project_id={project_id}")
-    
+
     def _send_progress_update(self, progress: int, message: str):
         """🆕 发送进度更新（如果设置了回调）
-        
+
         Args:
             progress: 进度百分比 (0-100)
             message: 进度消息
@@ -212,24 +232,24 @@ class CreativeDirectorCoordinator:
         else:
             # 没有设置回调，仅打印日志
             print(f"📊 进度: {progress}% - {message}")
-    
+
     def _search_knowledge(self, query: str, filter_type: Optional[str] = None, k: int = 5) -> List:
         """🚀 增强版知识库搜索，自动带上项目ID，支持缓存、相关性过滤、动态k值
-        
+
         Args:
             query: 搜索查询
             filter_type: 类型过滤
             k: 返回结果数量
-            
+
         Returns:
             搜索结果列表
         """
         import time
-        
+
         # 🚀 优化1：智能缓存机制
         cache_key = f"{self.current_project_id}:{filter_type}:{query}:{k}"
         current_time = time.time()
-        
+
         # 检查缓存
         if cache_key in self._kb_cache:
             cached_results, cached_time = self._kb_cache[cache_key]
@@ -239,7 +259,7 @@ class CreativeDirectorCoordinator:
             else:
                 # 缓存过期，删除
                 del self._kb_cache[cache_key]
-        
+
         # 🚀 优化3：动态k值
         if self._enable_dynamic_k:
             # 根据知识库中的内容数量动态调整k值
@@ -249,7 +269,7 @@ class CreativeDirectorCoordinator:
             elif filter_type == "character":
                 k = min(k, 4)  # 人物设定可能较多，限制为4
             k = max(k, self._min_k)  # 确保不低于最小值
-        
+
         # 执行搜索
         results = self.knowledge_base.search(
             query=query,
@@ -257,7 +277,7 @@ class CreativeDirectorCoordinator:
             filter_type=filter_type,
             project_id=self.current_project_id  # 🎯 自动注入项目ID
         )
-        
+
         # 🚀 优化2：相关性评分过滤
         # 注：chromadb返回的document对象可能包含metadata中的相似度分数
         filtered_results = []
@@ -270,38 +290,38 @@ class CreativeDirectorCoordinator:
             else:
                 # 如果没有分数，则保留（向后兼容）
                 filtered_results.append(doc)
-        
+
         # 限制最终结果数量
         filtered_results = filtered_results[:k]
-        
+
         # 存入缓存
         self._kb_cache[cache_key] = (filtered_results, current_time)
-        
+
         # 缓存大小控制：LRU策略
         if len(self._kb_cache) > self._cache_max_size:
             # 删除最旧的缓存条目
             oldest_key = min(self._kb_cache.keys(), key=lambda k: self._kb_cache[k][1])
             del self._kb_cache[oldest_key]
-        
+
         return filtered_results
-    
+
     def _register_all_agents(self):
         """🆕 注册所有Agent到通信中心"""
         if not self.communication_hub:
             return
-        
+
         self.communication_hub.register_agent("创意总监", self.creative_director)
         self.communication_hub.register_agent("世界观架构师", self.world_architect)
         self.communication_hub.register_agent("人物设计师", self.character_designer)
         self.communication_hub.register_agent("情节架构师", self.plot_architect)
         self.communication_hub.register_agent("内容创作师", self.content_creator)
         self.communication_hub.register_agent("质量评审官", self.quality_reviewer)
-    
+
     def _log_agent_execution(self, agent_name: str, stage: str, input_data: str, output: str, duration: float = 0.0):
         """🆕 记录Agent执行详情"""
         if not self.enable_detailed_logging:
             return
-        
+
         log_entry = {
             "timestamp": datetime.now().isoformat(),
             "stage": stage,
@@ -311,75 +331,75 @@ class CreativeDirectorCoordinator:
             "duration": f"{duration:.2f}s" if duration > 0 else "N/A"
         }
         self.execution_log.append(log_entry)
-        
+
         print(f"📝 [{log_entry['timestamp']}] {agent_name} - {stage}")
         print(f"   输入: {log_entry['input']}")
         print(f"   输出: {log_entry['output']}")
         if duration > 0:
             print(f"   耗时: {log_entry['duration']}")
-    
+
     def _detect_and_resolve_conflicts(self, outputs: Dict[str, str], stage_name: str) -> Optional[Dict[str, str]]:
         """🆕 检测并解决Agent输出之间的冲突
-        
+
         Args:
             outputs: Agent输出字典，key为Agent名称，value为输出内容
             stage_name: 阶段名称
-            
+
         Returns:
             如果有冲突并成功调解，返回调解结果；否则返回None
         """
         if not self.enable_conflict_detection or not self.communication_hub:
             return None
-        
+
         # 检测冲突
         conflicts = self.communication_hub.detect_conflicts(outputs)
-        
+
         if conflicts:
             print(f"\n⚠️ 在{stage_name}阶段检测到 {len(conflicts)} 个冲突")
             for conflict in conflicts:
                 print(f"   - {conflict['agent1']} vs {conflict['agent2']}: {conflict['pattern']}")
-            
+
             # 调解冲突
             print(f"\n🔧 启动创意总监进行冲突调解...")
             resolutions = self.communication_hub.resolve_conflicts(conflicts, mediator="创意总监")
-            
+
             print(f"✓ 冲突调解完成")
             return resolutions
-        
+
         return None
-    
+
     def print_execution_log(self):
         """🆕 打印详细执行日志"""
         if not self.execution_log:
             print("\n暂无执行日志")
             return
-        
+
         print(f"\n{'='*70}")
         print("【执行日志】")
         print(f"{'='*70}\n")
-        
+
         for log in self.execution_log:
             print(f"[{log['timestamp']}] {log['stage']} - {log['agent']}")
             print(f"  输入: {log['input']}")
             print(f"  输出: {log['output']}")
             print(f"  耗时: {log['duration']}")
             print()
-        
+
         print(f"{'='*70}\n")
-    
+
     def get_communication_log(self) -> Optional[List]:
         """🆕 获取通信日志"""
         if not self.communication_hub:
             return None
         return self.communication_hub.get_message_history()
-    
+
     def print_communication_log(self):
         """🆕 打印通信日志"""
         if not self.communication_hub:
             print("\n通信中心未启用")
             return
         self.communication_hub.print_communication_log()
-    
+
     def process_user_request(self, user_input: str) -> str:
         """处理用户请求的主工作流程 - 五阶段工作流程"""
         print(f"\n{'='*70}")
@@ -426,7 +446,7 @@ class CreativeDirectorCoordinator:
         print(f"{'='*70}\n")
 
         return str(final_result)
-    
+
     def _stage_one_concept_development(self, user_input: str) -> Dict[str, Any]:
         """阶段1：概念开发阶段
         创意总监接收用户输入，并行调用世界观架构师和人物设计师
@@ -435,7 +455,7 @@ class CreativeDirectorCoordinator:
         """
         import time
         start_time = time.time()
-        
+
         print(f"【{self.name}】分析创作需求...")
         print(f"💡 概念开发阶段：完全基于用户需求创作，不参考知识库")
         print(f"📝 用户需求: {user_input[:100]}...")
@@ -445,7 +465,7 @@ class CreativeDirectorCoordinator:
 
         # 🆕 子任务1：创意总监分析需求（10%）
         self._send_progress_update(10, "💡 正在分析用户创作需求...")
-        
+
         # 创意总监分析需求 - 100%基于用户输入
         concept_prompt = f"""你是一位资深创意总监。请严格基于用户的实际创作需求进行创作。
 
@@ -493,17 +513,17 @@ class CreativeDirectorCoordinator:
 
         # 🆕 子任务2：生成核心概念（30%）
         self._send_progress_update(30, "🎨 正在生成故事核心概念...")
-        
+
         concept = self.creative_director.process(concept_prompt, self.project_context)
         self.project_context["concept"] = concept
-        
+
         # 🆕 记录创意总监执行
         self._log_agent_execution("创意总监", "阶段1-概念开发", concept_prompt, concept, time.time() - start_time)
 
         # 🆕 子任务3：启动并行Agent（50%）
         self._send_progress_update(50, "🚀 并行启动世界观架构师和人物设计师...")
         print(f"【{self.name}】并行启动世界观架构师和人物设计师...")
-        
+
         # 并行调用世界观架构师
         world_start = time.time()
         world_prompt = f"""基于以下故事概念，设计世界观设定：
@@ -511,23 +531,72 @@ class CreativeDirectorCoordinator:
 {kb_reference}"""
         world_result = self.world_architect.process(world_prompt, self.project_context)
         self.project_context["world_setting"] = world_result
-        
+
         self._log_agent_execution("世界观架构师", "阶段1-概念开发", world_prompt, world_result, time.time() - world_start)
 
         # 🆕 子任务4：人物设计师工作（70%）
         self._send_progress_update(70, "👥 正在设计主要人物...")
-        
+
         # 并行调用人物设计师
         character_start = time.time()
-        character_prompt = f"基于以下故事概念，设计主要人物：\n{concept}"
+        character_prompt = f"""基于以下故事概念，设计完整的人物体系。
+
+【故事概念】
+{concept}
+
+【任务说明】
+1. 结合故事概念，设计主角、对手、支持角色和中立角色，构成一个适合长篇小说的完整人物阵容，总人数不少于 15-20 人。
+2. 每个角色需包含：姓名、年龄/性别、角色定位、性格特点、在情节中的作用、与主要角色的关系；鼓励补充背景故事、核心动机和弱点/缺陷等信息，以便后续深入刻画。
+3. 按阵营分类输出人物列表，并合理分配：主角阵营 3-5 人，对手阵营 2-4 人，支持角色和中立角色合计 8-12 人。
+
+【输出格式要求】
+请严格使用以下 Markdown 结构化格式输出，确保与后续“人物扩展”功能兼容：
+
+## 主角阵营
+
+### 【姓名】：林墨
+【年龄/性别】：28岁/男
+【角色定位】：主角
+【性格特点】：...
+【在情节中的作用】：...
+【与主要角色的关系】：...
+
+## 对手阵营
+
+### 【姓名】：陈朔
+【年龄/性别】：35岁/男
+【角色定位】：主要对手
+【性格特点】：...
+【在情节中的作用】：...
+【与主要角色的关系】：...
+
+## 支持角色
+
+### 【姓名】：老周
+【年龄/性别】：50岁/男
+【角色定位】：支持角色
+【性格特点】：...
+【在情节中的作用】：...
+【与主要角色的关系】：...
+
+## 中立角色
+
+### 【姓名】：张伟
+【年龄/性别】：32岁/男
+【角色定位】：中立角色
+【性格特点】：...
+【在情节中的作用】：...
+【与主要角色的关系】：...
+
+请只输出以上结构化人物设定内容，不要添加额外的解释性文字。"""
         character_result = self.character_designer.process(character_prompt, self.project_context)
         self.project_context["characters"] = character_result
-        
+
         self._log_agent_execution("人物设计师", "阶段1-概念开发", character_prompt, character_result, time.time() - character_start)
 
         # 🆕 子任务5：冲突检测与解决（90%）
         self._send_progress_update(90, "🔍 正在检测并解决潜在冲突...")
-        
+
         # 🆕 冲突检测与解决
         conflict_resolutions = self._detect_and_resolve_conflicts(
             {
@@ -546,11 +615,11 @@ class CreativeDirectorCoordinator:
             "world_setting": world_result,
             "characters": character_result
         }
-        
+
         # 如果有冲突调解结果，添加到返回值
         if conflict_resolutions:
             result["conflict_resolutions"] = conflict_resolutions
-        
+
         return result
 
     def _stage_two_structure_design(self, concept_result: Dict[str, Any]) -> Dict[str, Any]:
@@ -559,6 +628,18 @@ class CreativeDirectorCoordinator:
         🆕 集成知识库：搜索经典情节结构和叙事模式参考
         """
         print(f"【{self.name}】启动情节架构师生成事件序列...")
+
+        # 🆕 确定长篇目标章节数（默认100章，可通过 set_longform_config 动态调整）
+        target_chapters = getattr(self, "target_chapter_count", 100)
+        try:
+            target_chapters = int(target_chapters)
+        except (TypeError, ValueError):
+            target_chapters = 100
+        if target_chapters <= 0:
+            target_chapters = 100
+        # 保持成员属性与上下文一致
+        self.target_chapter_count = target_chapters
+        self.project_context["target_chapter_count"] = target_chapters
 
         # 🆕 知识库增强：搜索经典情节结构参考
         structure_reference = ""
@@ -570,7 +651,7 @@ class CreativeDirectorCoordinator:
                 filter_type="chapter",
                 k=2
             )
-            
+
             if similar_plots:
                 structure_reference = "\n\n【知识库参考 - 经典情节结构】\n"
                 for i, doc in enumerate(similar_plots, 1):
@@ -578,7 +659,7 @@ class CreativeDirectorCoordinator:
                 structure_reference += "\n💡 可以参考以上结构的叙事节奏，但要根据本故事特点调整。\n"
                 print(f"✓ 找到 {len(similar_plots)} 个情节结构参考")
 
-        plot_prompt = f"""基于以下故事设定，设计完整的情节结构：
+        plot_prompt = f"""基于以下故事设定，设计**适合约{target_chapters}章长篇小说**的完整情节结构：
 
 【世界观设定】
 {concept_result['world_setting']}
@@ -588,11 +669,18 @@ class CreativeDirectorCoordinator:
 
 {structure_reference}
 
+【长篇篇幅硬性要求】
+- 本书整体规划为**约{target_chapters}章**的长篇小说，是后续章节创作和大纲扩展（/expand-outline）的基础。
+- 三幕合计章节数应整体接近 {target_chapters} 章（允许在该数值上下约10%的浮动），不要只规划成20～30章的中短篇结构。
+- 请在每一幕的【时间跨度】中用“第A-B章”的形式明确这一幕大致覆盖的章节范围，并保证三幕首尾衔接、范围连续且整体≈{target_chapters}章。
+- 在后文“情节线索总览”中，各情节线的【章节跨度】也要以第1-{target_chapters}章为全书范围进行规划。
+
 请提供：
-1. 三幕剧结构
+1. 三幕剧结构（基于约{target_chapters}章的长篇篇幅进行分配）
 2. 关键情节点
 3. 情节转折
 4. 高潮和结局
+5. 情节线索规划：至少包含一条主线和 2-3 条重要支线。请为每条情节线标注大致章节跨度（如主线：第1-{target_chapters}章，支线：第10-40章），说明其核心冲突、推进方式以及与主线的关联。
 
 【输出格式要求】
 请使用以下Markdown格式输出，确保结构清晰、层次分明：
@@ -600,7 +688,7 @@ class CreativeDirectorCoordinator:
 ## 一、三幕剧结构
 
 ### 第一幕：开端（Setup）
-**时间跨度**：第1-X章
+**时间跨度**：第1-20章（示例，实际可在第1-25章范围内，但整体需为长篇结构做铺垫）
 **核心任务**：
 - 建立世界观
 - 介绍主要人物
@@ -614,7 +702,7 @@ class CreativeDirectorCoordinator:
 ---
 
 ### 第二幕：对抗（Confrontation）
-**时间跨度**：第X-Y章
+**时间跨度**：第21-80章（示例，主要承载大部分冲突和发展）
 **核心任务**：
 - 冲突升级
 - 人物成长
@@ -628,7 +716,7 @@ class CreativeDirectorCoordinator:
 ---
 
 ### 第三幕：结局（Resolution）
-**时间跨度**：第Y-Z章
+**时间跨度**：最后若干章（示例，用于高潮与收束，实际章节范围请根据总篇幅灵活调整）
 **核心任务**：
 - 高潮对决
 - 解决冲突
@@ -672,6 +760,16 @@ class CreativeDirectorCoordinator:
 ### 结局部分（第Y章）
 （描述结局，2-3段）
 
+---
+
+## 五、情节线索总览
+
+| 情节线 | 类型（主线/支线） | 章节跨度 | 核心冲突 | 与主线的关联 |
+|--------|-------------------|----------|----------|--------------|
+| 情节线A | 主线 | 第1-100章 | ... | ... |
+| 情节线B | 支线 | 第10-40章 | ... | ... |
+
+
 **格式规范**：
 - 使用Markdown标题层级（##、###）
 - 章节之间使用分隔线 `---`
@@ -681,6 +779,59 @@ class CreativeDirectorCoordinator:
 
         plot_result = self.plot_architect.process(plot_prompt, self.project_context)
         self.project_context["plot_outline"] = plot_result
+
+        # 🆕 自动调用大纲扩展器：将结构大纲扩展为接近目标章节数的长篇细纲
+        try:
+            from app.services.agents.outline_expander import create_outline_expander
+            print(f"🔄 正在自动扩展情节大纲为长篇结构（目标约{target_chapters}章）...")
+            expander = create_outline_expander()
+
+            # 🆕 智能识别当前已有章节数，并根据差值动态确定扩展步长
+            try:
+                detected_chapters = expander.count_chapters_in_outline(plot_result)
+            except Exception:
+                detected_chapters = 0
+
+            current_chapters = detected_chapters or 0
+            gap = max(0, target_chapters - current_chapters)
+
+            if gap <= 0:
+                print(f"ℹ️ 当前大纲章节数（约{current_chapters}章）已不低于目标{target_chapters}章，跳过自动扩展。")
+                expanded_outline = plot_result
+                expansion_result = {
+                    "expanded_outline": expanded_outline,
+                    "chapter_breakdown": "",
+                    "plot_arcs": {},
+                    "current_chapter_count": current_chapters,
+                    "should_continue": False,
+                    "continue_reason": "当前大纲章节数已接近或超过目标，无需额外扩展",
+                }
+            else:
+                # 自动扩展场景下更激进：直接按「差值」一步扩到目标附近
+                increment = gap
+                print(f"   📊 检测到当前约{current_chapters}章，目标{target_chapters}章，本轮计划扩展{increment}章。")
+
+                expansion_result = expander.expand_plot_outline_incremental(
+                    current_outline=plot_result,
+                    world_setting=concept_result.get('world_setting', ''),
+                    characters=concept_result.get('characters', ''),
+                    current_chapter_count=current_chapters,
+                    increment=increment,
+                    target_total_chapters=target_chapters,
+                )
+
+                # 使用扩展后的章节数更新 gap 认知
+                current_chapters = expansion_result.get("current_chapter_count", current_chapters + increment)
+                print(f"   ✅ 自动扩展完成，本轮达到约{current_chapters}章（目标{target_chapters}章）")
+
+            expanded_outline = expansion_result.get("expanded_outline") or plot_result
+            # 更新上下文，供后续阶段使用
+            self.project_context["plot_outline"] = expanded_outline
+            self.project_context["outline_expansion_result"] = expansion_result
+            plot_result = expanded_outline
+            print(f"✅ 自动扩展大纲完成：已生成约{current_chapters or target_chapters}章的章节细纲")
+        except Exception as e:
+            print(f"⚠️ 自动扩展大纲失败，将使用基础结构大纲继续后续流程：{e}")
 
         print(f"【{self.name}】阶段二完成：情节结构设计完成")
 
@@ -704,44 +855,44 @@ class CreativeDirectorCoordinator:
         kb_settings = ""
         if self.current_project_id:
             print(f"🔍 正在搜索知识库中的相关设定...")
-            
+
             # 搜索世界观设定
             world_setting_text = self.project_context.get('world_setting', '')
             # 🔥 确保 query 是字符串类型
             if isinstance(world_setting_text, (list, dict)):
                 world_setting_text = str(world_setting_text)
-            
+
             world_docs = self._search_knowledge(
                 query=world_setting_text,
                 filter_type="world_setting",
                 k=2
             )
-            
+
             # 搜索人物设定
             characters_text = self.project_context.get('characters', '')
             # 🔥 确保 query 是字符串类型
             if isinstance(characters_text, (list, dict)):
                 characters_text = str(characters_text)
-            
+
             character_docs = self._search_knowledge(
                 query=characters_text,
                 filter_type="character",
                 k=2
             )
-            
+
             if world_docs or character_docs:
                 kb_settings = "\n\n【知识库参考 - 已存储的设定】\n"
-                
+
                 if world_docs:
                     kb_settings += "世界观设定：\n"
                     for doc in world_docs:
                         kb_settings += f"- {doc.page_content[:150]}...\n"
-                
+
                 if character_docs:
                     kb_settings += "\n人物设定：\n"
                     for doc in character_docs:
                         kb_settings += f"- {doc.page_content[:150]}...\n"
-                
+
                 kb_settings += "\n⚠️ 请严格遵守以上设定，确保内容一致性。\n"
                 print(f"✓ 找到 {len(world_docs) + len(character_docs)} 条相关设定")
 
@@ -911,7 +1062,7 @@ class CreativeDirectorCoordinator:
                 filter_type="chapter",
                 k=1
             )
-            
+
             if quality_chapters:
                 quality_reference = "\n\n【知识库参考 - 优秀章节范例】\n"
                 quality_reference += f"参考章节：{quality_chapters[0].page_content[:200]}...\n"
@@ -1062,16 +1213,19 @@ class CreativeDirectorCoordinator:
 
     def _clean_final_output(self, content: str) -> str:
         """清理最终输出，移除额外的评审话语和说明文字
-        
+
         Args:
             content: 原始输出内容
-            
+
         Returns:
             清理后的章节内容（仅包含标题+正文）
         """
         import re
-        
-        # 移除常见的额外标题
+
+        # 原始文本副本，用于安全回退
+        original_text = content or ""
+
+        # 1. 精准移除常见的额外标题/说明块
         patterns_to_remove = [
             r'【迭代优化完成】.*?\n*',
             r'【优化要点说明】.*',
@@ -1081,28 +1235,30 @@ class CreativeDirectorCoordinator:
             r'\n---\n+\*\*优化.*',
             r'\n\*\*\*\n+\*\*优化.*',
         ]
-        
-        cleaned = content
+
+        cleaned = original_text
         for pattern in patterns_to_remove:
             cleaned = re.sub(pattern, '', cleaned, flags=re.DOTALL | re.MULTILINE)
-        
-        # 移除分隔线后的所有内容（通常是说明文字）
-        # 匹配 --- 或 *** 后的内容
-        if '---' in cleaned:
-            parts = cleaned.split('---')
-            # 只保留第一部分（章节正文）
-            cleaned = parts[0]
-        
-        if '***' in cleaned and '优化' in cleaned:
-            parts = cleaned.split('***')
-            cleaned = parts[0]
-        
-        # 清理多余的空行（保留最多2个连续换行）
+
+        # 2. 清理多余的空行（保留最多2个连续换行）
         cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
-        
-        # 移除开头和结尾的空白
+
+        # 3. 移除开头和结尾的空白
         cleaned = cleaned.strip()
-        
+
+        # 4. 安全保护：如果清理后内容明显变短，则回退到原始内容，避免误删正文
+        try:
+            original_len = len(original_text)
+            cleaned_len = len(cleaned)
+        except Exception:
+            return cleaned
+
+        if original_len > 0 and cleaned_len > 0 and cleaned_len < original_len * 0.6:
+            print(
+                f"⚠️ _clean_final_output 清理后长度({cleaned_len}) 远小于原始长度({original_len})，疑似误删正文，已回退为原始内容"
+            )
+            return original_text.strip()
+
         return cleaned
 
     def _stage_five_iteration_optimization(self, review_result: Dict[str, Any]) -> Dict[str, Any]:
@@ -1120,25 +1276,25 @@ class CreativeDirectorCoordinator:
                 "needs_revision": True,
                 "content": {}
             }
-        
+
         # 获取原始章节内容
         original_content = ""
         if isinstance(review_result.get('content'), dict):
             original_content = review_result.get('content', {}).get('content', '')
         elif isinstance(review_result.get('content'), str):
             original_content = review_result.get('content', '')
-        
+
         # 如果还是没有原始内容，尝试从 project_context 中获取
         if not original_content:
             # 尝试从 chapters 列表中获取最后一章
             if "chapters" in self.project_context and self.project_context["chapters"]:
                 original_content = self.project_context["chapters"][-1]
                 print(f"📝 从 project_context.chapters 获取原始内容")
-        
+
         if not original_content:
             print("⚠️  警告：未找到原始章节内容，直接返回评审结果")
             return review_result
-        
+
         print(f"📝 原始章节字数: {len(original_content)}")
 
         # 获取评审意见
@@ -1265,40 +1421,40 @@ class CreativeDirectorCoordinator:
             "final_review": final_review,
             "iteration": self.iteration_count
         }
-    
+
     def get_project_context(self) -> Dict[str, Any]:
         """获取项目上下文"""
         return self.project_context
-    
+
     def update_project_context(self, **kwargs):
         """更新项目上下文"""
         self.project_context.update(kwargs)
         print(f"【主编】项目上下文已更新")
-    
+
     def get_workflow_log(self) -> List[Dict[str, Any]]:
         """获取工作流程日志"""
         return self.workflow_log
-    
+
     def clear_kb_cache(self):
         """🚀 清除知识库缓存"""
         cache_count = len(self._kb_cache)
         self._kb_cache.clear()
         print(f"✅ 已清除 {cache_count} 条知识库缓存")
-    
+
     def get_kb_cache_stats(self) -> Dict[str, Any]:
         """🚀 获取知识库缓存统计信息"""
         import time
         current_time = time.time()
-        
+
         active_count = 0
         expired_count = 0
-        
+
         for key, (_, cached_time) in self._kb_cache.items():
             if current_time - cached_time < self._cache_ttl:
                 active_count += 1
             else:
                 expired_count += 1
-        
+
         return {
             "total_entries": len(self._kb_cache),
             "active_entries": active_count,
@@ -1306,103 +1462,185 @@ class CreativeDirectorCoordinator:
             "cache_ttl_seconds": self._cache_ttl,
             "max_cache_size": self._cache_max_size
         }
-    
+
     def set_relevance_threshold(self, threshold: float):
         """🚀 设置相关性阈值
-        
+
         Args:
             threshold: 相关性阈值（0.0-1.0），低于此值的结果会被过滤
         """
         if not 0.0 <= threshold <= 1.0:
             raise ValueError("相关性阈值必须在 0.0-1.0 之间")
-        
+
         old_threshold = self._relevance_threshold
         self._relevance_threshold = threshold
         print(f"✅ 相关性阈值已从 {old_threshold} 调整为 {threshold}")
         # 清除缓存以应用新阈值
         self.clear_kb_cache()
-    
+
     def set_cache_ttl(self, ttl_seconds: int):
         """🚀 设置缓存生存时间
-        
+
         Args:
             ttl_seconds: 缓存生存时间（秒）
         """
         if ttl_seconds <= 0:
             raise ValueError("缓存生存时间必须大于0")
-        
+
         old_ttl = self._cache_ttl
         self._cache_ttl = ttl_seconds
         print(f"✅ 缓存生存时间已从 {old_ttl}秒 调整为 {ttl_seconds}秒")
-    
+
     def enable_dynamic_k(self, enabled: bool = True):
         """🚀 启用/禁用动态k值
-        
+
         Args:
             enabled: 是否启用动态k值
         """
         self._enable_dynamic_k = enabled
         status = "已启用" if enabled else "已禁用"
         print(f"✅ 动态k值 {status}")
-    
-    def _analyze_previous_chapters(self, chapters: List[str]) -> str:
+
+    def _analyze_previous_chapters(self, chapters: List[Any]) -> str:
         """🆕 分析已完成章节，提取关键信息用于新章节创作
-        
+
         Args:
-            chapters: 已完成的章节列表
-            
+            chapters: 已完成的章节列表，可以是纯正文字符串，
+                      或包含 chapter_number/title/content/summary 的字典
+
         Returns:
-            格式化的章节分析文本
+            格式化的章节分析文本（以高层摘要为主，避免复制整段开头原文）
         """
-        if not chapters or len(chapters) == 0:
+        if not chapters:
             return ""
-        
-        # 提取最近3章的摘要（避免prompt过长）
+
+        # 仅分析最近 3 章，避免 prompt 过长
         recent_chapters = chapters[-3:] if len(chapters) > 3 else chapters
-        
-        analysis_parts = []
-        analysis_parts.append("【已完成章节分析】")
-        
-        for i, chapter_content in enumerate(recent_chapters, 1):
+
+        analysis_parts: List[str] = []
+        analysis_parts.append("【已完成章节分析（高层摘要）】")
+
+        for i, chapter_item in enumerate(recent_chapters, 1):
             # 计算实际章节编号
             actual_chapter_num = len(chapters) - len(recent_chapters) + i
-            
-            # 提取章节摘要（前300字）
-            summary = chapter_content[:300] if len(chapter_content) > 300 else chapter_content
-            
-            # 提取章节结尾（最后200字，用于衔接）
-            ending = chapter_content[-200:] if len(chapter_content) > 200 else chapter_content
-            
-            analysis_parts.append(f"\n第{actual_chapter_num}章分析：")
-            analysis_parts.append(f"- 开篇内容：{summary}...")
-            analysis_parts.append(f"- 结尾内容：{ending}")
-            
-            # 简单的内容分析
-            if "对话" in chapter_content or """ in chapter_content or """ in chapter_content:
-                analysis_parts.append(f"- 特点：包含人物对话")
-            if "场景" in chapter_content or "环境" in chapter_content:
-                analysis_parts.append(f"- 特点：包含场景描写")
-            if "心理" in chapter_content or "想到" in chapter_content or "觉得" in chapter_content:
-                analysis_parts.append(f"- 特点：包含心理描写")
-        
+
+            # 兼容不同输入形式：字符串 or 字典
+            chapter_number = actual_chapter_num
+            title = ""
+            content = ""
+            summary_text = ""
+
+            if isinstance(chapter_item, dict):
+                chapter_number = chapter_item.get("chapter_number", actual_chapter_num)
+                title = (chapter_item.get("title") or "").strip()
+                content = (chapter_item.get("content") or "").strip()
+                summary_text = (chapter_item.get("summary") or "").strip()
+            else:
+                content = str(chapter_item or "").strip()
+
+            # 若没有显式摘要，则退化为从正文中提取一段“概要式片段”
+            # 注意这里不再强调“开篇内容”，而是作为事件概括使用，降低开头模板化风险
+            if summary_text:
+                core_summary = summary_text
+            else:
+                if not content:
+                    core_summary = ""
+                elif len(content) <= 300:
+                    core_summary = content
+                else:
+                    # 取中间偏后的片段，避免总是重复章节首句
+                    start_idx = len(content) // 4
+                    end_idx = min(start_idx + 300, len(content))
+                    core_summary = content[start_idx:end_idx]
+
+            # 提取章节结尾（最后 200 字，用于衔接）
+            ending = ""
+            if content:
+                ending = content[-200:] if len(content) > 200 else content
+
+            header = f"\n第{chapter_number}章分析："
+            if title:
+                header += f"《{title}》"
+            analysis_parts.append(header)
+
+            if core_summary:
+                analysis_parts.append(f"- 核心摘要：{core_summary}...")
+
+            if ending:
+                analysis_parts.append(f"- 结尾关键场景：{ending}")
+
+            # 简单的内容特征分析（对话 / 场景 / 心理描写）
+            if any(mark in content for mark in ["“", "”", "\""]):
+                analysis_parts.append("- 特点：包含人物对话")
+            if any(word in content for word in ["场景", "环境", "街道", "房间", "天空"]):
+                analysis_parts.append("- 特点：包含场景描写")
+            if any(word in content for word in ["心理", "想到", "觉得", "心里", "内心"]):
+                analysis_parts.append("- 特点：包含心理描写")
+
         # 添加连贯性提示
         analysis_parts.append("\n【内容连贯性要求】")
         analysis_parts.append("⚠️ 请确保新章节内容：")
         analysis_parts.append("1. 情节上与前面章节自然衔接，不出现跳跃或矛盾")
         analysis_parts.append("2. 人物性格、言行举止与前面章节保持一致")
         analysis_parts.append("3. 已提及的设定、规则、背景不能自相矛盾")
-        analysis_parts.append("4. 叙事风格、文笔特点延续前面章节的特色")
+        analysis_parts.append("4. 叙事风格、文笔特点延续前面章节的特色，但开头段落的具体句式应有所变化")
         analysis_parts.append("5. 时间线、地点转换逻辑清晰合理")
-        
+
         return "\n".join(analysis_parts)
-    
+
+    # 🆕 开头防重复相关工具方法
+    def _get_opening_prefix(self, text: str, length: int = 80) -> str:
+        """提取用于比较的开头片段，去掉换行和多余空白。"""
+        if not text:
+            return ""
+        prefix = text.strip().replace("\r", "").replace("\n", "")
+        return prefix[:length]
+
+    def _rewrite_opening_to_avoid_repetition(
+        self,
+        chapter_number: int,
+        chapter_content: str,
+        similar_openings: List[str],
+    ) -> str:
+        """当开头与前几章过于相似时，请求模型只重写开头 1–2 段。"""
+        if not chapter_content or not similar_openings:
+            return chapter_content
+
+        examples = "\n".join(
+            f"示例{i}：{opening[:120]}" for i, opening in enumerate(similar_openings, 1)
+        )
+
+        prompt = f"""你是一位专业小说作者。下面是第{chapter_number}章当前的完整内容，
+以及前几章的开头片段。当前章节的开头和前几章过于相似，请在保持
+时间线、地点和剧情连续性的前提下，只改写本章的开头 1-2 个自然段，
+让开场方式更有变化，避免与前几章在句式和用语上高度重复。
+
+【前几章开头示例】
+{examples}
+
+【当前第{chapter_number}章全文】
+{chapter_content}
+
+【改写要求】
+1. 只改写开头 1-2 个自然段，其余内容尽量保持不变；
+2. 可以更换时间切入点、视角、动作描写方式等，但不要改变已经发生的事件与信息；
+3. 不要直接重复前几章的首句或明显相同的比喻/意象；
+4. 输出完整修改后的第{chapter_number}章（标题 + 正文），不要输出任何说明文字。
+
+请给出修改后的完整章节内容：
+"""
+        revised = self.content_creator.process(prompt, self.project_context)
+        revised = self._clean_final_output(revised)
+        return revised or chapter_content
+
+
     # ========== 🆕 章节生成专用方法 ==========
-    
-    def generate_chapter_plan(self, chapter_number: int, project_concept: str, 
+
+    def generate_chapter_plan(self, chapter_number: int, project_concept: str,
                             plot_outline: str, world_setting: str, characters: str,
                             previous_chapters_summary: str, previous_ending: str) -> str:
         """生成章节规划
-        
+
         Args:
             chapter_number: 章节编号
             project_concept: 整本书的故事概念
@@ -1411,12 +1649,12 @@ class CreativeDirectorCoordinator:
             characters: 人物设定
             previous_chapters_summary: 已完成章节的摘要
             previous_ending: 前一章的结尾内容（用于衔接）
-            
+
         Returns:
             章节规划内容
         """
         print(f"【{self.name}】为第{chapter_number}章制定创作计划...")
-        
+
         # 构建章节规划提示词
         chapter_plan_prompt = f"""你是一位资深小说情节规划师。请为第{chapter_number}章制定创作计划。
 
@@ -1445,19 +1683,19 @@ class CreativeDirectorCoordinator:
 - 推进故事发展，不能原地踏步
 - 提供具体、可执行的创作指导
 """
-        
+
         # 使用创意总监生成章节规划
         chapter_plan = self.creative_director.process(chapter_plan_prompt, self.project_context)
-        
+
         print(f"【{self.name}】第{chapter_number}章创作计划已完成")
         return chapter_plan
-    
-    def generate_chapter_content(self, chapter_number: int, chapter_plan: str, 
-                               world_setting: str, characters: str, 
+
+    def generate_chapter_content(self, chapter_number: int, chapter_plan: str,
+                               world_setting: str, characters: str,
                                previous_ending: str, target_word_count: int = 3000,
-                               previous_chapters: Optional[List[str]] = None) -> str:
+                               previous_chapters: Optional[List[Any]] = None) -> str:
         """生成章节内容（增强版 - 包含已生成章节分析）
-        
+
         Args:
             chapter_number: 章节编号
             chapter_plan: 章节规划
@@ -1466,18 +1704,18 @@ class CreativeDirectorCoordinator:
             previous_ending: 前一章的结尾内容（用于衔接）
             target_word_count: 目标字数
             previous_chapters: 已完成的章节列表（用于分析）
-            
+
         Returns:
             章节内容
         """
         print(f"【{self.name}】启动内容创作师创作第{chapter_number}章...")
-        
+
         # 🆕 分析已完成的章节
         chapters_analysis = ""
         if previous_chapters and len(previous_chapters) > 0:
             chapters_analysis = self._analyze_previous_chapters(previous_chapters)
             print(f"✅ 已分析 {len(previous_chapters)} 个已完成章节")
-        
+
         # 🆕 构建增强版内容创作提示词
         content_creation_prompt = f"""你是一位经验丰富的小说作家。请根据以下信息创作第{chapter_number}章内容。
 
@@ -1512,13 +1750,52 @@ class CreativeDirectorCoordinator:
 
 请开始创作第{chapter_number}章内容：
 """
-        
+
         # 使用内容创作者生成章节内容
         chapter_content = self.content_creator.process(content_creation_prompt, self.project_context)
-        
+
+        # 🆕 防重复：检查开头是否与最近章节过于相似
+        if previous_chapters and len(previous_chapters) > 0 and chapter_content:
+            current_prefix = self._get_opening_prefix(chapter_content, length=80)
+            recent_chapters = previous_chapters[-3:] if len(previous_chapters) > 3 else previous_chapters
+
+            # 兼容 previous_chapters 既可能是正文字符串列表，也可能是包含 content 的字典列表
+            previous_prefixes: List[str] = []
+            for item in recent_chapters:
+                if not item:
+                    continue
+                if isinstance(item, dict):
+                    prev_text = (item.get("content") or "").strip()
+                else:
+                    prev_text = str(item or "").strip()
+                if prev_text:
+                    previous_prefixes.append(self._get_opening_prefix(prev_text, length=80))
+
+            similar_openings = []
+            for prev_prefix in previous_prefixes:
+                if not prev_prefix:
+                    continue
+                max_len = min(len(current_prefix), len(prev_prefix))
+                common_len = 0
+                for i in range(max_len):
+                    if current_prefix[i] == prev_prefix[i]:
+                        common_len += 1
+                    else:
+                        break
+                if common_len >= 25:  # 至少 25 个字符完全相同，视为开头高度重复
+                    similar_openings.append(prev_prefix)
+
+            if similar_openings:
+                print(
+                    f"⚠️ 第{chapter_number}章开头与前几章过于相似，匹配到 {len(similar_openings)} 个相似开头，尝试改写开头。"
+                )
+                chapter_content = self._rewrite_opening_to_avoid_repetition(
+                    chapter_number, chapter_content, similar_openings
+                )
+
         print(f"【{self.name}】第{chapter_number}章内容创作完成，字数：{len(chapter_content)}")
         return chapter_content
-    
+
 
 
     def review_chapter(self, chapter_draft: str, chapter_plan: str, plot_outline: str) -> str:
@@ -1533,7 +1810,7 @@ class CreativeDirectorCoordinator:
             评审报告
         """
         print(f"【{self.name}】启动质量评审官进行章节评审...")
-        
+
         review_prompt = f"""请对以下章节内容进行全面质量评审：
 
 【章节规划】
@@ -1559,24 +1836,24 @@ class CreativeDirectorCoordinator:
 - 改进建议（如何修改）
 - 质量评分（1-10分）
 """
-        
+
         review_report = self.quality_reviewer.process(review_prompt, self.project_context)
-        
+
         print(f"【{self.name}】章节评审完成")
         return review_report
-    
+
     def optimize_chapter(self, chapter_draft: str, review_report: str) -> str:
         """优化章节内容
-        
+
         Args:
             chapter_draft: 章节初稿
             review_report: 评审报告
-            
+
         Returns:
             优化后的章节内容
         """
         print(f"【{self.name}】启动内容优化...")
-        
+
         optimization_prompt = f"""根据以下评审意见，对章节内容进行优化和改进。
 
 【章节初稿】
@@ -1585,14 +1862,19 @@ class CreativeDirectorCoordinator:
 【评审意见】
 {review_report}
 
-Please根据评审意见：
+请根据评审意见：
 1. 修正指出的问题
 2. 保留做得好的部分
 3. 优化文笔和叙事节奏
 4. 增强场景描写和人物塑造
 5. 确保逻辑连贯性
+6. 在不删除重要情节、不丢失关键信息的前提下进行润色，而不是改写成摘要
 
 【重要要求】
+- 优化后的章节应完整保留原有情节发展，除非原文存在明显冗余，否则篇幅不应少于章节初稿字数的 80%；
+- 不要将长篇内容压缩成简要梗概或概述；
+- 这是“编辑”和“润色”任务，而不是“总结”任务。
+
 请直接输出优化后的章节内容，格式如下：
 
 **第X章 章节标题**
@@ -1602,12 +1884,21 @@ Please根据评审意见：
 不要包含任何额外的说明文字、评审话语、优化要点说明等内容。
 只输出：章节标题 + 章节正文内容。
 """
-        
+
         optimized_content = self.content_creator.process(optimization_prompt, self.project_context)
-        
+
         # 🔥 关键修复：清理输出内容，移除额外的评审话语
         optimized_content = self._clean_final_output(optimized_content)
-        
+
+        # 🔒 安全保护：如果优化后字数远小于原稿，则认为可能被压缩成摘要，回退为原始章节内容
+        original_len = len(chapter_draft or "")
+        optimized_len = len(optimized_content or "")
+        if original_len >= 500 and optimized_len > 0 and optimized_len < original_len * 0.6:
+            print(
+                f"⚠️ 优化后长度({optimized_len}) 远小于原稿({original_len})，疑似被压缩为摘要，本次将保留原始章节内容"
+            )
+            optimized_content = chapter_draft
+
         print(f"【{self.name}】章节优化完成")
         return optimized_content
 
