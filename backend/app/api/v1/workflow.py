@@ -2045,26 +2045,55 @@ async def expand_outline(
         db.commit()
         logger.info("   💾 扩展大纲已保存到数据库")
         
-        # 6. 可选：保存到知识库
+        # 6. 可选：保存到知识库（更新已存在的条目，避免重复创建）
         try:
             from app.models.knowledge_base import KnowledgeBase
-            
-            kb_outline = KnowledgeBase(
-                project_id=request.project_id,
-                type="plot_outline",
-                name=f"扩展大纲({result['current_chapter_count']}章)",
-                content=result["expanded_outline"]
-            )
-            db.add(kb_outline)
-            
-            kb_breakdown = KnowledgeBase(
-                project_id=request.project_id,
-                type="plot_outline",
-                name="章节分解",
-                content=result["chapter_breakdown"]
-            )
-            db.add(kb_breakdown)
-            
+
+            # 🔥 修复：查找已存在的"扩展大纲"条目并更新，而不是创建新的
+            existing_outline = db.query(KnowledgeBase).filter(
+                KnowledgeBase.project_id == request.project_id,
+                KnowledgeBase.type == "plot_outline",
+                KnowledgeBase.name.like("扩展大纲%")
+            ).first()
+
+            if existing_outline:
+                # 更新已存在的条目
+                existing_outline.name = f"扩展大纲({result['current_chapter_count']}章)"
+                existing_outline.content = result["expanded_outline"]
+                logger.info("   📝 更新已存在的扩展大纲条目")
+            else:
+                # 创建新条目
+                kb_outline = KnowledgeBase(
+                    project_id=request.project_id,
+                    type="plot_outline",
+                    name=f"扩展大纲({result['current_chapter_count']}章)",
+                    content=result["expanded_outline"]
+                )
+                db.add(kb_outline)
+                logger.info("   ➕ 创建新的扩展大纲条目")
+
+            # 🔥 修复：查找已存在的"章节分解"条目并更新
+            existing_breakdown = db.query(KnowledgeBase).filter(
+                KnowledgeBase.project_id == request.project_id,
+                KnowledgeBase.type == "plot_outline",
+                KnowledgeBase.name == "章节分解"
+            ).first()
+
+            if existing_breakdown:
+                # 更新已存在的条目
+                existing_breakdown.content = result["chapter_breakdown"]
+                logger.info("   📝 更新已存在的章节分解条目")
+            else:
+                # 创建新条目
+                kb_breakdown = KnowledgeBase(
+                    project_id=request.project_id,
+                    type="plot_outline",
+                    name="章节分解",
+                    content=result["chapter_breakdown"]
+                )
+                db.add(kb_breakdown)
+                logger.info("   ➕ 创建新的章节分解条目")
+
             db.commit()
             logger.info("   💾 扩展结果已保存到知识库")
         except Exception as e:
@@ -2198,31 +2227,77 @@ async def expand_characters(
         db.commit()
         logger.info("   💾 扩展人物已保存到数据库")
         
-        # 6. 可选：保存到知识库
+        # 6. 可选：保存到知识库（更新已存在的条目，避免重复创建）
         try:
             from app.models.knowledge_base import KnowledgeBase
-            
-            kb_characters = KnowledgeBase(
-                project_id=request.project_id,
-                type="character",
-                name=f"完整人物体系({result['current_character_count']}个)",
-                content=result["all_characters"]
-            )
-            db.add(kb_characters)
-            
-            kb_relationships = KnowledgeBase(
-                project_id=request.project_id,
-                type="character",
-                name="人物关系网络",
-                content=result["character_relationships"]
-            )
-            db.add(kb_relationships)
-            
+
+            # 🔥 修复：查找已存在的"完整人物体系"条目并更新，而不是创建新的
+            existing_characters = db.query(KnowledgeBase).filter(
+                KnowledgeBase.project_id == request.project_id,
+                KnowledgeBase.type == "character",
+                KnowledgeBase.name.like("完整人物体系%")
+            ).first()
+
+            if existing_characters:
+                # 更新已存在的条目
+                existing_characters.name = f"完整人物体系({result['current_character_count']}个)"
+                existing_characters.content = result["all_characters"]
+                logger.info("   📝 更新已存在的人物体系条目")
+            else:
+                # 创建新条目
+                kb_characters = KnowledgeBase(
+                    project_id=request.project_id,
+                    type="character",
+                    name=f"完整人物体系({result['current_character_count']}个)",
+                    content=result["all_characters"]
+                )
+                db.add(kb_characters)
+                logger.info("   ➕ 创建新的人物体系条目")
+
+            # 🔥 修复：查找已存在的"人物关系网络"条目并更新
+            existing_relationships = db.query(KnowledgeBase).filter(
+                KnowledgeBase.project_id == request.project_id,
+                KnowledgeBase.type == "character",
+                KnowledgeBase.name == "人物关系网络"
+            ).first()
+
+            if existing_relationships:
+                # 更新已存在的条目
+                existing_relationships.content = result["character_relationships"]
+                logger.info("   📝 更新已存在的人物关系网络条目")
+            else:
+                # 创建新条目
+                kb_relationships = KnowledgeBase(
+                    project_id=request.project_id,
+                    type="character",
+                    name="人物关系网络",
+                    content=result["character_relationships"]
+                )
+                db.add(kb_relationships)
+                logger.info("   ➕ 创建新的人物关系网络条目")
+
             db.commit()
             logger.info("   💾 扩展结果已保存到知识库")
         except Exception as e:
             logger.warning(f"   ⚠️  保存到知识库失败: {e}")
-        
+
+        # 7. 🆕 自动解析人物卡并同步到结构化characters表
+        sync_result = {"parsed": 0, "created": 0, "updated": 0, "skipped": 0}
+        try:
+            from app.services.character_parser import parse_and_sync_characters
+
+            sync_result = parse_and_sync_characters(
+                project_id=request.project_id,
+                characters_text=result["all_characters"],
+                db_session=db
+            )
+            logger.info(f"   🔄 人物卡同步完成: 解析 {sync_result['parsed']} 个, "
+                       f"创建 {sync_result['created']} 个, 更新 {sync_result['updated']} 个")
+        except Exception as e:
+            logger.warning(f"   ⚠️  自动同步人物卡失败: {e}")
+            import traceback
+            traceback.print_exc()
+
         return {
             "success": True,
             "all_characters": result["all_characters"],
@@ -2230,7 +2305,8 @@ async def expand_characters(
             "role_distribution": result.get("role_distribution", ""),
             "current_character_count": result["current_character_count"],
             "should_continue": result["should_continue"],  # 🆕 AI建议是否继续扩展
-            "continue_reason": result.get("continue_reason", "")  # 🆕 继续扩展的原因
+            "continue_reason": result.get("continue_reason", ""),  # 🆕 继续扩展的原因
+            "character_sync": sync_result  # 🆕 人物卡同步统计
         }
         
     except HTTPException:

@@ -780,58 +780,11 @@ class CreativeDirectorCoordinator:
         plot_result = self.plot_architect.process(plot_prompt, self.project_context)
         self.project_context["plot_outline"] = plot_result
 
-        # 🆕 自动调用大纲扩展器：将结构大纲扩展为接近目标章节数的长篇细纲
-        try:
-            from app.services.agents.outline_expander import create_outline_expander
-            print(f"🔄 正在自动扩展情节大纲为长篇结构（目标约{target_chapters}章）...")
-            expander = create_outline_expander()
-
-            # 🆕 智能识别当前已有章节数，并根据差值动态确定扩展步长
-            try:
-                detected_chapters = expander.count_chapters_in_outline(plot_result)
-            except Exception:
-                detected_chapters = 0
-
-            current_chapters = detected_chapters or 0
-            gap = max(0, target_chapters - current_chapters)
-
-            if gap <= 0:
-                print(f"ℹ️ 当前大纲章节数（约{current_chapters}章）已不低于目标{target_chapters}章，跳过自动扩展。")
-                expanded_outline = plot_result
-                expansion_result = {
-                    "expanded_outline": expanded_outline,
-                    "chapter_breakdown": "",
-                    "plot_arcs": {},
-                    "current_chapter_count": current_chapters,
-                    "should_continue": False,
-                    "continue_reason": "当前大纲章节数已接近或超过目标，无需额外扩展",
-                }
-            else:
-                # 自动扩展场景下更激进：直接按「差值」一步扩到目标附近
-                increment = gap
-                print(f"   📊 检测到当前约{current_chapters}章，目标{target_chapters}章，本轮计划扩展{increment}章。")
-
-                expansion_result = expander.expand_plot_outline_incremental(
-                    current_outline=plot_result,
-                    world_setting=concept_result.get('world_setting', ''),
-                    characters=concept_result.get('characters', ''),
-                    current_chapter_count=current_chapters,
-                    increment=increment,
-                    target_total_chapters=target_chapters,
-                )
-
-                # 使用扩展后的章节数更新 gap 认知
-                current_chapters = expansion_result.get("current_chapter_count", current_chapters + increment)
-                print(f"   ✅ 自动扩展完成，本轮达到约{current_chapters}章（目标{target_chapters}章）")
-
-            expanded_outline = expansion_result.get("expanded_outline") or plot_result
-            # 更新上下文，供后续阶段使用
-            self.project_context["plot_outline"] = expanded_outline
-            self.project_context["outline_expansion_result"] = expansion_result
-            plot_result = expanded_outline
-            print(f"✅ 自动扩展大纲完成：已生成约{current_chapters or target_chapters}章的章节细纲")
-        except Exception as e:
-            print(f"⚠️ 自动扩展大纲失败，将使用基础结构大纲继续后续流程：{e}")
+        # 📝 注意：自动大纲扩展已移除
+        # 大纲扩展功能仍然可用，但需要用户通过前端按钮或 API 手动触发
+        # 调用端点：POST /api/v1/workflow/expand-outline
+        # 这样可以显著加快项目创建速度，提升用户体验
+        print(f"ℹ️ 项目创建完成。如需扩展大纲至更多章节，请手动调用大纲扩展功能。")
 
         print(f"【{self.name}】阶段二完成：情节结构设计完成")
 

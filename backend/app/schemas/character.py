@@ -1,9 +1,10 @@
 """角色与角色功法相关Schema
 """
+import json
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Any, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class CharacterBase(BaseModel):
@@ -33,15 +34,48 @@ class CharacterBase(BaseModel):
     tags: Optional[list] = None
     relations: Optional[dict] = None
 
+    @field_validator('tags', mode='before')
+    @classmethod
+    def parse_tags(cls, v: Any) -> Optional[list]:
+        """将数据库中的 JSON 字符串反序列化为列表"""
+        if v is None:
+            return None
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                return parsed if isinstance(parsed, list) else None
+            except (json.JSONDecodeError, TypeError):
+                return None
+        return None
+
+    @field_validator('relations', mode='before')
+    @classmethod
+    def parse_relations(cls, v: Any) -> Optional[dict]:
+        """将数据库中的 JSON 字符串反序列化为字典"""
+        if v is None:
+            return None
+        if isinstance(v, dict):
+            return v
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                return parsed if isinstance(parsed, dict) else None
+            except (json.JSONDecodeError, TypeError):
+                return None
+        return None
+
 
 class CharacterCreate(CharacterBase):
     """创建角色时使用的Schema
 
-    - project_id 必填
+    - project_id 由 API 路径参数提供，不在请求体中要求
     - name 在 CharacterBase 中已设为必填
     """
 
-    project_id: int
+    # 注意：project_id 已从 API 路径参数获取，无需在请求体中重复提供
+    pass
 
 
 class CharacterUpdate(BaseModel):
