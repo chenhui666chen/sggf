@@ -3554,9 +3554,34 @@ export default function WorkflowControlPage() {
       {/* 阶段导航 */}
       <Paper sx={{ p: 3, mb: 4 }}>
         <Stepper activeStep={currentStageIndex}>
-          {stages.map((stage) => (
-            <Step key={stage} completed={workflow.stages[stage].status === 'completed'}>
-              <StepLabel>{stageNames[stage]}</StepLabel>
+          {stages.map((stage, index) => (
+            <Step
+              key={stage}
+              completed={workflow.stages[stage].status === 'completed'}
+              sx={{ cursor: 'pointer' }}
+              onClick={() => {
+                // 跳转到对应阶段
+                dispatch(setCurrentStage(stage))
+                // 显示提示
+                setSnackbarMessage(`已切换到 ${stageNames[stage]}`)
+                setSnackbarSeverity('info')
+                setSnackbarOpen(true)
+              }}
+            >
+              <StepLabel
+                sx={{
+                  '& .MuiStepLabel-label': {
+                    cursor: 'pointer',
+                    transition: 'color 0.2s, transform 0.2s',
+                    '&:hover': {
+                      color: 'primary.main',
+                      transform: 'scale(1.05)',
+                    },
+                  },
+                }}
+              >
+                {stageNames[stage]}
+              </StepLabel>
             </Step>
           ))}
         </Stepper>
