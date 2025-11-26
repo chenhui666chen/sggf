@@ -1212,6 +1212,22 @@ async def get_running_tasks(
     try:
         logger.info(f"🔍 查询项目 {project_id} 的正在运行任务...")
 
+        # 🆕 首先检查 project_settings 中的 stage 状态
+        # 如果所有 stage 都已完成，则将 running 任务标记为 completed（状态不一致修复）
+        stage_query = text("""
+            SELECT stage_one_status, stage_two_status, stage_three_status,
+                   stage_four_status, stage_five_status
+            FROM project_settings
+            WHERE project_id = :project_id
+        """)
+        stage_result = db.execute(stage_query, {"project_id": project_id}).fetchone()
+
+        all_stages_completed = False
+        if stage_result:
+            statuses = [stage_result[i] for i in range(5)]
+            all_stages_completed = all(s == 'completed' for s in statuses if s)
+            logger.debug(f"   Stage 状态: {statuses}, 全部完成: {all_stages_completed}")
+
         # 查询status='running'的任务
         query = text("""
             SELECT task_id, task_type, status, created_at
@@ -1224,6 +1240,7 @@ async def get_running_tasks(
 
         running_tasks = []
         timeout_tasks = []
+        stale_tasks = []  # 🆕 已过时的任务（stage 已完成但任务状态仍为 running）
         now = datetime.now()
 
         for row in results:
@@ -1244,7 +1261,35 @@ async def get_running_tasks(
             # 🔧 检测超时：如果任务运行超过30分钟，标记为超时
             task_age_minutes = (now - created_at).total_seconds() / 60
 
-            if task_age_minutes > TASK_TIMEOUT_MINUTES:
+            # 🆕 优先检查：如果所有 stage 都已完成，将 running 任务标记为 completed（状态不一致修复）
+            if all_stages_completed:
+                logger.warning(f"🔄 检测到过时任务: {task_id}（所有阶段已完成，但任务仍为 running）")
+
+                update_query = text("""
+                    UPDATE generation_history
+                    SET status = 'completed',
+                        completed_at = :completed_at
+                    WHERE task_id = :task_id
+                """)
+
+                db.execute(update_query, {
+                    "completed_at": now.isoformat(),
+                    "task_id": task_id
+                })
+                db.commit()
+
+                stale_tasks.append({
+                    "task_id": task_id,
+                    "task_type": task_type,
+                    "status": "completed",
+                    "created_at": created_at_str,
+                    "age_minutes": round(task_age_minutes, 1),
+                    "reason": "所有阶段已完成，自动同步任务状态"
+                })
+
+                logger.info(f"   ✅ 已将过时任务 {task_id} 标记为 completed")
+
+            elif task_age_minutes > TASK_TIMEOUT_MINUTES:
                 # 标记为超时
                 logger.warning(f"⏰ 检测到超时任务: {task_id}, 运行时间: {task_age_minutes:.1f}分钟")
 
@@ -1281,11 +1326,12 @@ async def get_running_tasks(
                     "age_minutes": round(task_age_minutes, 1)
                 })
 
-        logger.info(f"   ✅ 找到 {len(running_tasks)} 个正在运行的任务, {len(timeout_tasks)} 个超时任务")
+        logger.info(f"   ✅ 找到 {len(running_tasks)} 个正在运行的任务, {len(timeout_tasks)} 个超时任务, {len(stale_tasks)} 个已同步的过时任务")
 
         return {
             "running_tasks": running_tasks,
-            "timeout_tasks": timeout_tasks
+            "timeout_tasks": timeout_tasks,
+            "stale_tasks": stale_tasks  # 🆕 已同步的过时任务
         }
 
     except Exception as e:
