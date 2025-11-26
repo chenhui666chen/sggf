@@ -902,9 +902,64 @@ async def save_stage_content(
                 detail="Project not found"
             )
 
-        # 🆕 2. 智能章节覆盖：如果是内容创作阶段
+        # 🆕 2. 智能章节覆盖：如果是内容创作阶段或质量评审阶段
         deleted_chapter = None
-        if stage == 'content':
+        deleted_chapters_count = 0
+
+        # 质量评审阶段：用户修改评审报告后继续，需要删除所有现有章节重新生成
+        if stage == 'review' and request.continue_workflow:
+            logger.info(f"🔍 检测到质量评审阶段继续工作流，检查是否需要清理现有章节...")
+
+            from sqlalchemy import text
+            # 获取当前已保存的所有章节
+            chapters_query = text("""
+                SELECT id, chapter_number, title, word_count
+                FROM chapters
+                WHERE project_id = :project_id
+                ORDER BY chapter_number
+            """)
+            chapters_result = db.execute(chapters_query, {"project_id": project_id}).fetchall()
+            chapters = [{"id": r[0], "chapter_number": r[1], "title": r[2], "word_count": r[3]} for r in chapters_result]
+
+            if chapters:
+                logger.info(f"   📊 发现 {len(chapters)} 个已保存章节，准备清理...")
+
+                # 清理所有章节相关的知识库条目
+                try:
+                    from app.models.knowledge_base import KnowledgeBase
+                    kb_deleted = db.query(KnowledgeBase).filter(
+                        (KnowledgeBase.project_id == project_id) &
+                        (KnowledgeBase.type == 'chapter')
+                    ).delete(synchronize_session=False)
+                    logger.info(f"      ✅ 已删除 {kb_deleted} 个知识库条目")
+                except Exception as e:
+                    logger.warning(f"   ⚠️  知识库清理失败（非致命错误）: {e}")
+
+                # 清理记忆管理中的章节引用
+                try:
+                    from app.models.memory import Memory
+                    db.query(Memory).filter(
+                        Memory.project_id == project_id
+                    ).update({Memory.current_chapter: None}, synchronize_session=False)
+                    logger.info(f"      ✅ 已清理记忆管理中的章节引用")
+                except Exception as e:
+                    logger.warning(f"   ⚠️  记忆清理失败（非致命错误）: {e}")
+
+                # 删除所有章节记录
+                delete_chapters_query = text("""
+                    DELETE FROM chapters
+                    WHERE project_id = :project_id
+                """)
+                db.execute(delete_chapters_query, {"project_id": project_id})
+                db.commit()
+
+                deleted_chapters_count = len(chapters)
+                logger.info(f"   ✅ 已删除 {deleted_chapters_count} 个章节，准备重新生成")
+            else:
+                logger.info(f"   ✅ 未发现已保存章节，无需清理")
+
+        # 内容创作阶段：智能覆盖最后一章
+        elif stage == 'content':
             logger.info(f"🔍 检测到内容创作阶段，检查是否需要更新现有章节...")
             
             # 获取当前已保存的章节列表
@@ -1089,12 +1144,17 @@ async def save_stage_content(
             "task_id": task_id,
             "continue_workflow": request.continue_workflow
         }
-        
+
         # 🆕 如果删除了章节，包含在响应中
         if deleted_chapter:
             response["deleted_chapter"] = deleted_chapter
             response["message"] = f"已删除第{deleted_chapter['chapter_number']}章并保存新内容"
-        
+
+        # 🆕 如果是评审阶段删除了多个章节
+        if deleted_chapters_count > 0:
+            response["deleted_chapters_count"] = deleted_chapters_count
+            response["message"] = f"已删除 {deleted_chapters_count} 个章节，准备重新生成"
+
         return response
 
     except HTTPException:

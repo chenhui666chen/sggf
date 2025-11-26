@@ -2724,7 +2724,12 @@ export default function WorkflowControlPage() {
       // ✅ 重置后续阶段状态
       dispatch(resetFollowingStages('review'))
 
-      setSnackbarMessage('评审报告已保存，正在启动迭代优化...')
+      // ✅ 显示删除章节的消息（如果有的话）
+      if (saveData.deleted_chapters_count) {
+        setSnackbarMessage(`已删除 ${saveData.deleted_chapters_count} 个章节，正在重新生成...`)
+      } else {
+        setSnackbarMessage('评审报告已保存，正在启动迭代优化...')
+      }
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
 
