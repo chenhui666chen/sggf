@@ -1182,9 +1182,11 @@ async def get_running_tasks(
 ):
     """
     🆕 获取项目的正在运行的任务
-    
+
     用于页面重新加载时恢复工作流状态
-    
+
+    🔧 新增：自动检测并标记超时任务（超过30分钟的任务自动标记为 timeout）
+
     响应:
     {
         "running_tasks": [
@@ -1194,17 +1196,22 @@ async def get_running_tasks(
                 "status": "running",
                 "created_at": "2024-01-01T00:00:00"
             }
-        ]
+        ],
+        "timeout_tasks": [...]  // 被标记为超时的任务
     }
     """
     import logging
     from sqlalchemy import text
-    
+    from datetime import datetime, timedelta
+
     logger = logging.getLogger("uvicorn.error")
-    
+
+    # 🔧 超时阈值：30分钟
+    TASK_TIMEOUT_MINUTES = 30
+
     try:
         logger.info(f"🔍 查询项目 {project_id} 的正在运行任务...")
-        
+
         # 查询status='running'的任务
         query = text("""
             SELECT task_id, task_type, status, created_at
@@ -1212,24 +1219,75 @@ async def get_running_tasks(
             WHERE project_id = :project_id AND status = 'running'
             ORDER BY created_at DESC
         """)
-        
+
         results = db.execute(query, {"project_id": project_id}).fetchall()
-        
+
         running_tasks = []
+        timeout_tasks = []
+        now = datetime.now()
+
         for row in results:
-            running_tasks.append({
-                "task_id": row[0],
-                "task_type": row[1],
-                "status": row[2],
-                "created_at": row[3]
-            })
-        
-        logger.info(f"   ✅ 找到 {len(running_tasks)} 个正在运行的任务")
-        
+            task_id = row[0]
+            task_type = row[1]
+            status = row[2]
+            created_at_str = row[3]
+
+            # 解析创建时间
+            try:
+                if isinstance(created_at_str, str):
+                    created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00').replace('+00:00', ''))
+                else:
+                    created_at = created_at_str
+            except:
+                created_at = now  # 解析失败时使用当前时间
+
+            # 🔧 检测超时：如果任务运行超过30分钟，标记为超时
+            task_age_minutes = (now - created_at).total_seconds() / 60
+
+            if task_age_minutes > TASK_TIMEOUT_MINUTES:
+                # 标记为超时
+                logger.warning(f"⏰ 检测到超时任务: {task_id}, 运行时间: {task_age_minutes:.1f}分钟")
+
+                update_query = text("""
+                    UPDATE generation_history
+                    SET status = 'timeout',
+                        error = :error,
+                        completed_at = :completed_at
+                    WHERE task_id = :task_id
+                """)
+
+                db.execute(update_query, {
+                    "error": f"任务超时（运行超过{TASK_TIMEOUT_MINUTES}分钟）",
+                    "completed_at": now.isoformat(),
+                    "task_id": task_id
+                })
+                db.commit()
+
+                timeout_tasks.append({
+                    "task_id": task_id,
+                    "task_type": task_type,
+                    "status": "timeout",
+                    "created_at": created_at_str,
+                    "age_minutes": round(task_age_minutes, 1)
+                })
+
+                logger.info(f"   ✅ 已将任务 {task_id} 标记为超时")
+            else:
+                running_tasks.append({
+                    "task_id": task_id,
+                    "task_type": task_type,
+                    "status": status,
+                    "created_at": created_at_str,
+                    "age_minutes": round(task_age_minutes, 1)
+                })
+
+        logger.info(f"   ✅ 找到 {len(running_tasks)} 个正在运行的任务, {len(timeout_tasks)} 个超时任务")
+
         return {
-            "running_tasks": running_tasks
+            "running_tasks": running_tasks,
+            "timeout_tasks": timeout_tasks
         }
-        
+
     except Exception as e:
         logger.error(f"❌ 查询运行中任务失败: {str(e)}")
         raise HTTPException(

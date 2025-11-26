@@ -1138,6 +1138,10 @@ export default function WorkflowControlPage() {
 
           console.log('📍 开始加载所有阶段内容...')
 
+          // 🔧 关键修复：使用局部变量跟踪恢复状态，避免异步状态更新问题
+          let hasRestoredRunningTask = false
+          let restoredStage: StageType | null = null
+
           // 🔔 步骤1：检查是否有正在运行的任务
           try {
             const runningTasksResponse = await fetch(
@@ -1152,6 +1156,15 @@ export default function WorkflowControlPage() {
             if (runningTasksResponse.ok) {
               const runningTasksData = await runningTasksResponse.json()
               const runningTasks = runningTasksData.running_tasks || []
+              const timeoutTasks = runningTasksData.timeout_tasks || []
+
+              // 🔧 新增：显示超时任务提示
+              if (timeoutTasks.length > 0) {
+                console.log(`⏰ 检测到 ${timeoutTasks.length} 个超时任务已被自动清理`)
+                setSnackbarMessage(`⏰ 检测到 ${timeoutTasks.length} 个超时任务已被自动清理`)
+                setSnackbarSeverity('warning')
+                setSnackbarOpen(true)
+              }
 
               if (runningTasks.length > 0) {
                 console.log(`🔍 发现 ${runningTasks.length} 个正在运行的任务，开始恢复...`)
@@ -1164,25 +1177,37 @@ export default function WorkflowControlPage() {
                 const stageName = taskType.replace('workflow_stage_', '')
                 const stageType = stageName as StageType
 
-                console.log(`📌 恢复任务: ${latestTask.task_id}, 阶段: ${stageType}`)
-
-                // 更新状态
-                setCurrentTaskId(latestTask.task_id)
-                setIsRunning(true)
-                dispatch(setCurrentStage(stageType))
-                dispatch(updateStageStatus({ stage: stageType, status: 'active' }))
-
-                // 🔔 关键：开始轮询任务状态（如果 WebSocket 未连接）
-                if (!workflowWebSocket.isConnected()) {
-                  console.log('⚠️  WebSocket 未连接，启动轮询模式')
-                  pollTaskStatus(latestTask.task_id, stageType)
+                // 🔧 验证 stageType 是否有效
+                const validStages: StageType[] = ['concept', 'structure', 'content', 'review', 'iteration']
+                if (!validStages.includes(stageType)) {
+                  console.warn(`⚠️  无效的阶段类型: ${stageType}，跳过恢复`)
                 } else {
-                  console.log('✅ WebSocket 已连接，等待实时通知')
-                }
+                  // 🔧 新增：显示任务运行时间
+                  const ageMinutes = latestTask.age_minutes || 0
+                  console.log(`📌 恢复任务: ${latestTask.task_id}, 阶段: ${stageType}, 已运行: ${ageMinutes.toFixed(1)}分钟`)
 
-                setSnackbarMessage(`✅ 工作流已恢复，继续执行 ${stageNames[stageType]}`)
-                setSnackbarSeverity('success')
-                setSnackbarOpen(true)
+                  // 更新状态
+                  setCurrentTaskId(latestTask.task_id)
+                  setIsRunning(true)
+                  // 🔧 关键修复：使用局部变量记录恢复状态，避免后续代码覆盖
+                  hasRestoredRunningTask = true
+                  restoredStage = stageType
+
+                  dispatch(setCurrentStage(stageType))
+                  dispatch(updateStageStatus({ stage: stageType, status: 'active' }))
+
+                  // 🔔 关键：开始轮询任务状态（如果 WebSocket 未连接）
+                  if (!workflowWebSocket.isConnected()) {
+                    console.log('⚠️  WebSocket 未连接，启动轮询模式')
+                    pollTaskStatus(latestTask.task_id, stageType)
+                  } else {
+                    console.log('✅ WebSocket 已连接，等待实时通知')
+                  }
+
+                  setSnackbarMessage(`✅ 工作流已恢复，继续执行 ${stageNames[stageType]}（已运行${ageMinutes.toFixed(0)}分钟）`)
+                  setSnackbarSeverity('success')
+                  setSnackbarOpen(true)
+                }
               } else {
                 console.log('✅ 没有正在运行的任务')
                 // 🔧 修复：如果没有正在运行的任务，确保停止运行状态
@@ -1288,15 +1313,24 @@ export default function WorkflowControlPage() {
               Object.entries(stageStatusMap).forEach(([dbField, stageName]) => {
                 const status = statusData[dbField]
                 if (status === 'completed') {
-                  dispatch(updateStageStatus({ stage: stageName, status: 'completed' }))
-                  console.log(`✅ 阶段状态已更新: ${stageName} = completed`)
-                  lastCompletedStage = stageName
+                  // 🔧 关键修复：如果该阶段正在运行，不要覆盖为 completed
+                  if (hasRestoredRunningTask && stageName === restoredStage) {
+                    console.log(`⚠️ 跳过更新阶段状态: ${stageName} (当前正在运行)`)
+                    // 保持 active 状态，不更新为 completed
+                  } else {
+                    dispatch(updateStageStatus({ stage: stageName, status: 'completed' }))
+                    console.log(`✅ 阶段状态已更新: ${stageName} = completed`)
+                    lastCompletedStage = stageName
+                  }
                 }
               })
 
-              // 🔧 修复：如果没有正在运行的任务,设置当前阶段为最后完成的阶段的下一个阶段
-              // 如果所有阶段都完成了,则显示最后一个阶段
-              if (!isRunning && !currentTaskId) {
+              // 🔧 关键修复：使用局部变量判断，避免 React 状态异步更新问题
+              // 如果已经恢复了运行中的任务，就不要再设置当前阶段了
+              if (hasRestoredRunningTask) {
+                console.log(`🔒 跳过设置当前阶段，因为已恢复运行中的任务: ${restoredStage}`)
+              } else if (!isRunning && !currentTaskId) {
+                // 只有在没有恢复运行中任务时，才根据完成状态设置当前阶段
                 if (lastCompletedStage) {
                   const lastCompletedIndex = stageOrder.indexOf(lastCompletedStage)
                   if (lastCompletedIndex < stageOrder.length - 1) {
