@@ -148,7 +148,9 @@ export default function WorkflowControlPage() {
   // 评审报告对话框状态
   const [showReviewDialog, setShowReviewDialog] = useState(false)
   const [reviewReportContent, setReviewReportContent] = useState('')
+  const [editedReviewReportContent, setEditedReviewReportContent] = useState('')
   const [reviewLoading, setReviewLoading] = useState(false)
+  const [reviewSaving, setReviewSaving] = useState(false)
 
   // 世界观设定对话框状态
   const [showWorldDialog, setShowWorldDialog] = useState(false)
@@ -2593,6 +2595,7 @@ export default function WorkflowControlPage() {
     // ⚡ 优化：如果已经有缓存内容，直接使用，不再请求
     if (reviewReportContent && reviewReportContent.trim() !== '') {
       console.log('⚡ 使用缓存的评审报告内容，长度:', reviewReportContent.length)
+      setEditedReviewReportContent(reviewReportContent)
       return
     }
 
@@ -2612,6 +2615,7 @@ export default function WorkflowControlPage() {
         const content = data.content || ''
         console.log('✅ 评审报告已加载，长度:', content.length)
         setReviewReportContent(content)
+        setEditedReviewReportContent(content)
       } else {
         console.error('❌ 获取评审报告失败，状态码:', response.status)
         setSnackbarMessage('获取评审报告失败')
@@ -2631,6 +2635,97 @@ export default function WorkflowControlPage() {
   // 关闭评审报告对话框
   const handleCloseReviewDialog = () => {
     setShowReviewDialog(false)
+    setEditedReviewReportContent('')  // 清空编辑状态
+  }
+
+  // 仅保存评审报告
+  const handleSaveOnlyReview = async () => {
+    if (!projectId) return
+
+    setReviewSaving(true)
+
+    try {
+      const response = await fetch(`/api/v1/workflow/${projectId}/stage/review/content`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content: editedReviewReportContent,
+          continue_workflow: false,
+        }),
+      })
+
+      if (response.ok) {
+        // 更新缓存
+        setReviewReportContent(editedReviewReportContent)
+        setSnackbarMessage('评审报告已保存')
+        setSnackbarSeverity('success')
+        setSnackbarOpen(true)
+      } else {
+        const errorData = await response.json().catch(() => ({}))
+        setSnackbarMessage(errorData.detail || '保存失败')
+        setSnackbarSeverity('error')
+        setSnackbarOpen(true)
+      }
+    } catch (error) {
+      console.error('保存评审报告失败:', error)
+      setSnackbarMessage('保存失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    } finally {
+      setReviewSaving(false)
+    }
+  }
+
+  // 保存并继续（评审报告）
+  const handleSaveAndContinueReview = async () => {
+    if (!projectId) return
+
+    setReviewSaving(true)
+
+    try {
+      // 1. 保存内容并指示继续工作流
+      const saveResponse = await fetch(`/api/v1/workflow/${projectId}/stage/review/content`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content: editedReviewReportContent,
+          continue_workflow: true,
+        }),
+      })
+
+      if (saveResponse.ok) {
+        // 更新缓存
+        setReviewReportContent(editedReviewReportContent)
+        setSnackbarMessage('评审报告已保存，工作流继续执行')
+        setSnackbarSeverity('success')
+        setSnackbarOpen(true)
+
+        // 关闭对话框
+        setShowReviewDialog(false)
+        setEditedReviewReportContent('')
+
+        // 刷新工作流状态
+        await fetchWorkflowStatus()
+      } else {
+        const errorData = await saveResponse.json().catch(() => ({}))
+        setSnackbarMessage(errorData.detail || '保存失败')
+        setSnackbarSeverity('error')
+        setSnackbarOpen(true)
+      }
+    } catch (error) {
+      console.error('保存评审报告失败:', error)
+      setSnackbarMessage('保存失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    } finally {
+      setReviewSaving(false)
+    }
   }
 
   // 保存并继续（章节初稿）
@@ -3940,34 +4035,46 @@ export default function WorkflowControlPage() {
             </Box>
           ) : (
             <>
-              <Box
-                sx={{
-                  p: 2,
-                  bgcolor: 'grey.50',
-                  borderRadius: 1,
-                  border: '1px solid',
-                  borderColor: 'grey.200',
-                  maxHeight: '60vh',
-                  overflow: 'auto',
-                }}
-              >
-                <Typography
-                  component="pre"
-                  sx={{
-                    fontFamily: 'inherit',
+              <TextField
+                fullWidth
+                multiline
+                rows={12}
+                value={editedReviewReportContent}
+                onChange={(e) => setEditedReviewReportContent(e.target.value)}
+                placeholder="评审报告内容..."
+                sx={{ mb: 2 }}
+                disabled={reviewSaving}
+                InputProps={{
+                  style: {
+                    fontFamily: 'monospace',
                     fontSize: '0.875rem',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                    m: 0,
-                  }}
-                >
-                  {reviewReportContent || '暂无评审报告内容'}
-                </Typography>
-              </Box>
+                  }
+                }}
+              />
 
-              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 2 }}>
-                <Button onClick={handleCloseReviewDialog}>
-                  关闭
+              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+                <Button
+                  onClick={handleCloseReviewDialog}
+                  disabled={reviewSaving}
+                >
+                  取消
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={handleSaveOnlyReview}
+                  disabled={reviewSaving}
+                  startIcon={reviewSaving ? <CircularProgress size={20} /> : <SaveIcon />}
+                >
+                  {reviewSaving ? '保存中...' : '仅保存'}
+                </Button>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={handleSaveAndContinueReview}
+                  disabled={reviewSaving}
+                  startIcon={reviewSaving ? <CircularProgress size={20} /> : <SaveIcon />}
+                >
+                  {reviewSaving ? '保存中...' : '保存并继续'}
                 </Button>
               </Box>
             </>
