@@ -16,6 +16,7 @@ import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty'
 import { useSelector } from 'react-redux'
 import { RootState } from '@/store/store'
 import { StageType } from '@/store/slices/workflowSlice'
+import FormattedContent from '../common/FormattedContent'
 
 const stageDescriptions = {
   concept: {
@@ -196,22 +197,16 @@ export default function StageDetailPanel({ stage }: StageDetailPanelProps) {
               sx={{
                 p: 2,
                 bgcolor: 'grey.50',
-                maxHeight: 300,
+                maxHeight: 400,
                 overflow: 'auto',
               }}
             >
-              <Typography 
-                variant="body2" 
-                component="div" 
-                sx={{ 
-                  whiteSpace: 'pre-wrap',
-                  fontFamily: 'monospace',
+              <FormattedContent
+                content={formatContent(displayContent)}
+                sx={{
                   fontSize: '0.875rem',
-                  lineHeight: 1.5
                 }}
-              >
-                {formatContent(displayContent)}
-              </Typography>
+              />
             </Paper>
           </Box>
         )}

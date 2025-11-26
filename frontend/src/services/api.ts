@@ -9,7 +9,7 @@ class ApiClient {
   constructor() {
     // 使用环境变量或默认值
     const baseURL = API_URL
-    
+
     this.client = axios.create({
       baseURL: baseURL,
       timeout: 120000, // ✅ 增加到120秒，防止大数据传输超时
@@ -19,7 +19,7 @@ class ApiClient {
       // ✅ 禁用自动重试，避免重复请求
       maxRedirects: 0,
     })
-    
+
     console.log('🔧 ApiClient初始化, baseURL:', baseURL)
 
     // 请求拦截器
@@ -145,6 +145,58 @@ class ApiClient {
     return this.client.delete(`/api/v1/projects/${projectId}/knowledge-base/${kbId}`)
   }
 
+  // 设定管理API
+  getSettingCollections(projectId: number) {
+    return this.client.get(`/api/v1/projects/${projectId}/setting-collections`)
+  }
+
+  createSettingCollection(projectId: number, data: any) {
+    return this.client.post(`/api/v1/projects/${projectId}/setting-collections`, data)
+  }
+
+  updateSettingCollection(collectionId: number, data: any) {
+    return this.client.put(`/api/v1/setting-collections/${collectionId}`, data)
+  }
+
+  deleteSettingCollection(collectionId: number) {
+    return this.client.delete(`/api/v1/setting-collections/${collectionId}`)
+  }
+
+  getSettingItems(collectionId: number) {
+    return this.client.get(`/api/v1/setting-collections/${collectionId}/items`)
+  }
+
+  createSettingItem(collectionId: number, data: any) {
+    return this.client.post(`/api/v1/setting-collections/${collectionId}/items`, data)
+  }
+
+  updateSettingItem(itemId: number, data: any) {
+    return this.client.put(`/api/v1/setting-items/${itemId}`, data)
+  }
+
+  deleteSettingItem(itemId: number) {
+    return this.client.delete(`/api/v1/setting-items/${itemId}`)
+  }
+
+  reorderSettingItems(collectionId: number, items: { id: number; order: number }[]) {
+    return this.client.patch(`/api/v1/setting-collections/${collectionId}/items/reorder`, {
+      items,
+    })
+  }
+
+  // 设定模板与摘要
+  getSettingTemplates() {
+    return this.client.get('/api/v1/setting-templates')
+  }
+
+  applySettingTemplate(projectId: number, payload: { template_key: string; clear_existing?: boolean }) {
+    return this.client.post(`/api/v1/projects/${projectId}/setting-templates/apply`, payload)
+  }
+
+  getSettingsSummary(projectId: number) {
+    return this.client.get(`/api/v1/projects/${projectId}/settings-summary`)
+  }
+
   // 评审API
   createReview(chapterId: number, data: any) {
     return this.client.post(`/api/v1/chapters/${chapterId}/review`, data)
@@ -160,6 +212,48 @@ class ApiClient {
 
   deleteReview(chapterId: number) {
     return this.client.delete(`/api/v1/chapters/${chapterId}/review`)
+  }
+
+  // 角色管理API
+  getCharacters(projectId: number) {
+    return this.client.get(`/api/v1/projects/${projectId}/characters`)
+  }
+
+  createCharacter(projectId: number, data: any) {
+    return this.client.post(`/api/v1/projects/${projectId}/characters`, data)
+  }
+
+  getCharacter(characterId: number) {
+    return this.client.get(`/api/v1/characters/${characterId}`)
+  }
+
+  updateCharacter(characterId: number, data: any) {
+    return this.client.put(`/api/v1/characters/${characterId}`, data)
+  }
+
+  deleteCharacter(characterId: number) {
+    return this.client.delete(`/api/v1/characters/${characterId}`)
+  }
+
+  // 角色功法管理API
+  getCharacterTechniques(characterId: number) {
+    return this.client.get(`/api/v1/characters/${characterId}/techniques`)
+  }
+
+  updateCharacterTechniques(characterId: number, data: any) {
+    return this.client.put(`/api/v1/characters/${characterId}/techniques`, data)
+  }
+
+  getProjectTechniques(projectId: number) {
+    return this.client.get(`/api/v1/projects/${projectId}/techniques`)
+  }
+
+  // 章节逻辑检查API
+  checkChapterLogic(chapterId: number, projectId: number) {
+    return this.client.post('/api/v1/ai/check-chapter-logic', {
+      chapter_id: chapterId,
+      project_id: projectId,
+    })
   }
 
   // 通用API方法

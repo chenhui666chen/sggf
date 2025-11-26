@@ -40,6 +40,7 @@ import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import { clearEditorState } from '@/store/slices/editorSlice'
 import { generationService } from '@/services/generation'
 import { apiClient } from '@/services/api'
+import FormattedContent from '@/components/common/FormattedContent'
 
 interface TabPanelProps {
   children?: React.ReactNode
@@ -355,9 +356,7 @@ export default function ProjectDetailPage() {
       <TabPanel value={tabValue} index={0}>
         {settings.concept ? (
           <Paper sx={{ p: 2, backgroundColor: '#f5f5f5', maxHeight: 500, overflow: 'auto' }}>
-            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-              {settings.concept}
-            </Typography>
+            <FormattedContent content={settings.concept} />
           </Paper>
         ) : (
           <Alert severity="info">暂无项目概念</Alert>
@@ -368,17 +367,7 @@ export default function ProjectDetailPage() {
       <TabPanel value={tabValue} index={1}>
         {settings.world_setting ? (
           <Paper sx={{ p: 2, backgroundColor: '#f5f5f5', maxHeight: 500, overflow: 'auto' }}>
-            <Typography 
-              variant="body2" 
-              sx={{ 
-                whiteSpace: 'pre-wrap',
-                fontFamily: 'monospace',
-                fontSize: '0.875rem',
-                lineHeight: 1.6
-              }}
-            >
-              {settings.world_setting}
-            </Typography>
+            <FormattedContent content={settings.world_setting} />
           </Paper>
         ) : (
           <Alert severity="info">暂无世界观设定</Alert>
@@ -389,17 +378,7 @@ export default function ProjectDetailPage() {
       <TabPanel value={tabValue} index={2}>
         {settings.characters ? (
           <Paper sx={{ p: 2, backgroundColor: '#f5f5f5', maxHeight: 500, overflow: 'auto' }}>
-            <Typography 
-              variant="body2" 
-              sx={{ 
-                whiteSpace: 'pre-wrap',
-                fontFamily: 'monospace',
-                fontSize: '0.875rem',
-                lineHeight: 1.6
-              }}
-            >
-              {settings.characters}
-            </Typography>
+            <FormattedContent content={settings.characters} />
           </Paper>
         ) : (
           <Alert severity="info">暂无人物设定</Alert>
@@ -410,17 +389,7 @@ export default function ProjectDetailPage() {
       <TabPanel value={tabValue} index={3}>
         {settings.plot_outline ? (
           <Paper sx={{ p: 2, backgroundColor: '#f5f5f5', maxHeight: 500, overflow: 'auto' }}>
-            <Typography 
-              variant="body2" 
-              sx={{ 
-                whiteSpace: 'pre-wrap',
-                fontFamily: 'monospace',
-                fontSize: '0.875rem',
-                lineHeight: 1.6
-              }}
-            >
-              {settings.plot_outline}
-            </Typography>
+            <FormattedContent content={settings.plot_outline} />
           </Paper>
         ) : (
           <Alert severity="info">暂无情节大纲</Alert>

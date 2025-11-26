@@ -9,9 +9,10 @@ from datetime import datetime
 
 from app.db.base import get_db
 from app.models.user import User
+from app.models.project import Project
 from app.api.v1.auth import get_current_user
 
-router = APIRouter()
+router = APIRouter(prefix="/api/v1/statistics", tags=["statistics"])
 
 
 @router.get("/workflow/stage-durations")
@@ -42,6 +43,19 @@ async def get_stage_durations(
         }
     """
     try:
+        # ✅ 如果指定了 project_id，验证项目所有权
+        if project_id:
+            project = db.query(Project).filter(
+                Project.id == project_id,
+                Project.user_id == current_user.id
+            ).first()
+
+            if not project:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Project not found or access denied"
+                )
+
         # 🆕 如果指定了 recent_count，使用子查询获取每个阶段最近N次任务
         if recent_count:
             if project_id:
@@ -187,6 +201,19 @@ async def get_stage_durations_detailed(
         }
     """
     try:
+        # ✅ 如果指定了 project_id，验证项目所有权
+        if project_id:
+            project = db.query(Project).filter(
+                Project.id == project_id,
+                Project.user_id == current_user.id
+            ).first()
+
+            if not project:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Project not found or access denied"
+                )
+
         # 构建查询
         if project_id:
             query = text("""

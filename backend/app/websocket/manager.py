@@ -2,8 +2,13 @@
 WebSocket 管理器 - 基于 Socket.IO
 """
 import socketio
-from typing import Dict, Set
+from typing import Dict, Set, Optional
 import logging
+from jose import JWTError, jwt
+from app.core.config import settings
+from app.db.base import get_db
+from app.models.project import Project
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -127,28 +132,90 @@ async def disconnect(sid):
             logger.info(f"📤 从项目房间移除: project_{project_id}")
 
 
+def verify_websocket_token(token: str) -> Optional[dict]:
+    """验证 WebSocket JWT token"""
+    try:
+        # 尝试解码标准JWT
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET,
+            algorithms=[settings.JWT_ALGORITHM]
+        )
+        return payload
+    except JWTError as e:
+        # JWT解码失败，尝试Base64旧格式
+        try:
+            import base64
+            decoded = base64.b64decode(token).decode()
+            # 旧格式: "user_id:username"
+            if ':' in decoded:
+                user_id, username = decoded.split(':', 1)
+                return {"sub": user_id, "username": username}
+        except Exception:
+            pass
+
+        logger.error(f"❌ Token验证失败: {e}")
+        return None
+
+
 @sio.event
 async def join_project(sid, data):
-    """加入项目房间"""
+    """加入项目房间 - 带项目所有权验证"""
     try:
         project_id = data.get('project_id')
+        token = data.get('token')
+
+        # 验证必要参数
         if not project_id:
             await sio.emit('error', {'message': '缺少 project_id'}, room=sid)
             return
-        
-        room = f'project_{project_id}'
-        await sio.enter_room(sid, room)
-        
-        # 记录房间成员
-        if project_id not in project_rooms:
-            project_rooms[project_id] = set()
-        project_rooms[project_id].add(sid)
-        
-        logger.info(f"📥 客户端 {sid} 加入房间: {room}")
-        await sio.emit('joined_project', {'project_id': project_id, 'room': room}, room=sid)
+
+        if not token:
+            await sio.emit('error', {'message': '缺少认证令牌'}, room=sid)
+            return
+
+        # 验证 token
+        payload = verify_websocket_token(token)
+        if not payload:
+            await sio.emit('error', {'message': '无效的认证令牌'}, room=sid)
+            return
+
+        user_id = payload.get("sub")
+        if not user_id:
+            await sio.emit('error', {'message': '令牌中缺少用户信息'}, room=sid)
+            return
+
+        # 验证项目所有权
+        db = next(get_db())
+        try:
+            project = db.query(Project).filter(
+                Project.id == project_id,
+                Project.user_id == int(user_id)
+            ).first()
+
+            if not project:
+                logger.warning(f"⚠️ 用户 {user_id} 尝试加入未授权的项目 {project_id}")
+                await sio.emit('error', {'message': '无权访问该项目'}, room=sid)
+                return
+
+            # 验证通过，加入房间
+            room = f'project_{project_id}'
+            await sio.enter_room(sid, room)
+
+            # 记录房间成员
+            if project_id not in project_rooms:
+                project_rooms[project_id] = set()
+            project_rooms[project_id].add(sid)
+
+            logger.info(f"📥 客户端 {sid} (用户 {user_id}) 加入房间: {room}")
+            await sio.emit('joined_project', {'project_id': project_id, 'room': room}, room=sid)
+
+        finally:
+            db.close()
+
     except Exception as e:
         logger.error(f"❌ 加入房间失败: {e}")
-        await sio.emit('error', {'message': str(e)}, room=sid)
+        await sio.emit('error', {'message': f'加入房间失败: {str(e)}'}, room=sid)
 
 
 @sio.event

@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from app.db.base import get_db
 from app.core.security import get_current_user
+from app.models.project import Project
 from app.services.agents.knowledge_base import NovelKnowledgeBase
 
 # 请求模型
@@ -15,7 +16,7 @@ class SearchRequest(BaseModel):
     query: str
     k: int = 5
     filter_type: str | None = None
-    project_id: int | None = None  # 🆕 新增：项目隔离
+    project_id: int  # ✅ 必需：项目隔离
 
 class AddWorldSettingRequest(BaseModel):
     title: str
@@ -50,27 +51,40 @@ def get_knowledge_base() -> NovelKnowledgeBase:
 async def search_knowledge(
     request: SearchRequest,
     current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     向量搜索知识库
-    
+
     请求体:
     {
         "query": "搜索查询",
         "k": 5,
         "filter_type": "character",  // 可选: world_setting, character, chapter
-        "project_id": 1  // 🆕 强烈推荐：确保项目隔离
+        "project_id": 1  // ✅ 必需：确保项目隔离
     }
     """
     try:
+        # ✅ 验证项目所有权
+        project = db.query(Project).filter(
+            Project.id == request.project_id,
+            Project.user_id == current_user.id
+        ).first()
+
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found or access denied"
+            )
+
         kb = get_knowledge_base()
         results = kb.search(
-            request.query, 
-            k=request.k, 
+            request.query,
+            k=request.k,
             filter_type=request.filter_type,
-            project_id=request.project_id  # 🎯 使用项目过滤
+            project_id=request.project_id  # ✅ 已验证的项目ID
         )
-        
+
         # 转换结果为JSON格式
         search_results = [
             {
@@ -79,13 +93,15 @@ async def search_knowledge(
             }
             for doc in results
         ]
-        
+
         return {
             "status": "success",
             "query": request.query,
             "count": len(search_results),
             "results": search_results,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -97,10 +113,11 @@ async def search_knowledge(
 async def add_world_setting(
     request: AddWorldSettingRequest,
     current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     添加世界观设定
-    
+
     请求体:
     {
         "title": "世界观标题",
@@ -109,18 +126,33 @@ async def add_world_setting(
     }
     """
     try:
-        kb = get_knowledge_base()
-        
-        # 添加用户ID到元数据
+        # ✅ 验证项目所有权（如果提供了 project_id）
         metadata = request.metadata or {}
+        if "project_id" in metadata:
+            project = db.query(Project).filter(
+                Project.id == metadata["project_id"],
+                Project.user_id == current_user.id
+            ).first()
+
+            if not project:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Project not found or access denied"
+                )
+
+        kb = get_knowledge_base()
+
+        # 添加用户ID到元数据
         metadata["user_id"] = current_user.get("id")
-        
+
         kb.add_world_setting(request.title, request.content, metadata)
-        
+
         return {
             "status": "success",
             "message": f"世界观设定 '{request.title}' 已添加",
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -132,10 +164,11 @@ async def add_world_setting(
 async def add_character(
     request: AddCharacterRequest,
     current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     添加角色档案
-    
+
     请求体:
     {
         "name": "角色名称",
@@ -144,18 +177,33 @@ async def add_character(
     }
     """
     try:
-        kb = get_knowledge_base()
-        
-        # 添加用户ID到元数据
+        # ✅ 验证项目所有权（如果提供了 project_id）
         metadata = request.metadata or {}
+        if "project_id" in metadata:
+            project = db.query(Project).filter(
+                Project.id == metadata["project_id"],
+                Project.user_id == current_user.id
+            ).first()
+
+            if not project:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Project not found or access denied"
+                )
+
+        kb = get_knowledge_base()
+
+        # 添加用户ID到元数据
         metadata["user_id"] = current_user.get("id")
-        
+
         kb.add_character(request.name, request.profile, metadata)
-        
+
         return {
             "status": "success",
             "message": f"角色 '{request.name}' 已添加",
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -167,10 +215,11 @@ async def add_character(
 async def add_chapter(
     request: AddChapterRequest,
     current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     添加章节内容
-    
+
     请求体:
     {
         "chapter_num": 1,
@@ -180,18 +229,33 @@ async def add_chapter(
     }
     """
     try:
-        kb = get_knowledge_base()
-        
-        # 添加用户ID到元数据
+        # ✅ 验证项目所有权（如果提供了 project_id）
         metadata = request.metadata or {}
+        if "project_id" in metadata:
+            project = db.query(Project).filter(
+                Project.id == metadata["project_id"],
+                Project.user_id == current_user.id
+            ).first()
+
+            if not project:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Project not found or access denied"
+                )
+
+        kb = get_knowledge_base()
+
+        # 添加用户ID到元数据
         metadata["user_id"] = current_user.get("id")
-        
+
         kb.add_chapter(request.chapter_num, request.title, request.content, metadata)
-        
+
         return {
             "status": "success",
             "message": f"第{request.chapter_num}章 '{request.title}' 已添加",
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

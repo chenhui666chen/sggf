@@ -115,10 +115,19 @@ const initialState: WorkflowState = {
 // 异步Thunk
 export const startWorkflow = createAsyncThunk(
   'workflow/start',
-  async ({ projectId, requirement }: { projectId: number; requirement: string }) => {
+  async ({
+    projectId,
+    requirement,
+    targetChapterCount,
+  }: {
+    projectId: number
+    requirement: string
+    targetChapterCount?: number
+  }) => {
     const response = await apiClient.post('/api/v1/workflow/start', {
-      project_id: projectId,  // 🎯 确保传递project_id
+      project_id: projectId, // 🎯 确保传递project_id
       requirement,
+      target_chapter_count: targetChapterCount,
     })
     return response.data
   }

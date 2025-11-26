@@ -11,3 +11,11 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+
+// 提供 vitest 的最小类型声明，避免 tsc 报错
+declare module 'vitest' {
+  export const describe: (...args: any[]) => void
+  export const it: (...args: any[]) => void
+  export const expect: (...args: any[]) => any
+}

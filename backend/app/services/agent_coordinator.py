@@ -346,12 +346,21 @@ class AgentCoordinator:
         try:
             requirement = input_data.get("requirement", "根据项目设定进行创作")
             project_id = input_data.get("project_id")
-            
+            target_chapter_count = self.workflow_state.get("target_chapter_count")
+
             # 🎯 设置项目上下文（关键！）
             if project_id and hasattr(self._real_coordinator, 'set_project_context'):
                 self._real_coordinator.set_project_context(project_id)
                 print(f"✅ 已为真实协调器设置项目上下文: {project_id}")
-            
+
+            # 🆕 设置长篇创作配置（例如目标章节数）
+            if target_chapter_count is not None and hasattr(self._real_coordinator, "set_longform_config"):
+                try:
+                    self._real_coordinator.set_longform_config(target_chapter_count=target_chapter_count)
+                    print(f"✅ 已为真实协调器设置目标章节数: {target_chapter_count}")
+                except Exception as e:
+                    print(f"⚠️ 设置目标章节数失败，将使用默认配置: {e}")
+
             # 调用真实的五阶段工作流程
             if stage == StageType.CONCEPT:
                 # 阶段1: 概念开发

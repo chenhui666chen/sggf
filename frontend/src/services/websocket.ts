@@ -172,9 +172,19 @@ class WorkflowWebSocket {
       return
     }
 
+    // 获取认证 token
+    const token = localStorage.getItem('access_token')
+    if (!token) {
+      console.error('❌ 缺少认证令牌，无法加入房间')
+      return
+    }
+
     this.projectId = projectId
     console.log('📥 加入项目房间:', projectId)
-    this.socket.emit('join_project', { project_id: projectId })
+    this.socket.emit('join_project', {
+      project_id: projectId,
+      token: token  // ✅ 传递认证令牌
+    })
   }
 
   /**

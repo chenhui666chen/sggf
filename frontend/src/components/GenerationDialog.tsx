@@ -22,19 +22,15 @@ import {
 
 interface GenerationDialogProps {
   open: boolean
+  // projectId 暂时未使用，保留以便未来扩展
   projectId: number
   onClose: () => void
   onGenerate: (taskType: string, params: Record<string, any>) => void
   isLoading?: boolean
 }
 
-export default function GenerationDialog({
-  open,
-  projectId,
-  onClose,
-  onGenerate,
-  isLoading = false,
-}: GenerationDialogProps) {
+export default function GenerationDialog(props: GenerationDialogProps) {
+  const { open, onClose, onGenerate, isLoading = false } = props
   const [taskType, setTaskType] = useState('world')
   const [requirements, setRequirements] = useState('')
 

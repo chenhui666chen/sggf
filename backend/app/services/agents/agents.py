@@ -599,3 +599,108 @@ class IterationCoordinatorAgent(BaseAgent):
             "status": "completed"
         }
 
+
+class ChapterLogicChecker(BaseAgent):
+    """章节逻辑检查官Agent - 检查角色功法使用的合理性与境界要求"""
+
+    def __init__(self, knowledge_base: Optional[NovelKnowledgeBase] = None,
+                 memory_manager: Optional[NovelMemoryManager] = None):
+        super().__init__("章节逻辑检查官", "chapter_logic_checker", knowledge_base, memory_manager)
+
+    def get_system_prompt(self) -> str:
+        return """你是一位严谨的章节逻辑检查官，精通小说逻辑一致性分析和人物设定校验。
+你的核心职责是：
+1. 功法使用检查：检查章节中角色是否使用了未掌握的功法
+2. 境界要求验证：检查角色当前境界是否满足功法使用要求
+3. 逻辑错误标注：标出具体段落和问题所在
+4. 改进建议：提供具体的修改建议
+
+请以JSON格式返回检查结果，包含：
+- issues: 问题列表，每个问题包含 character_name, technique_name, issue_type, description, suggestion
+- summary: 总体评估
+- has_issues: 是否存在问题"""
+
+    def check_chapter_logic(self, chapter_content: str, character_techniques_map: Dict[str, List[str]],
+                           character_realms: Dict[str, str], technique_requirements: Dict[str, str],
+                           context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """检查章节逻辑
+
+        Args:
+            chapter_content: 章节正文
+            character_techniques_map: 角色-功法映射表 {角色名: [功法名1, 功法名2, ...]}
+            character_realms: 角色当前境界 {角色名: 境界名}
+            technique_requirements: 功法需求境界 {功法名: 需求境界}
+            context: 额外上下文
+
+        Returns:
+            检查结果字典
+        """
+        # 构造角色功法约束摘要
+        techniques_summary = "## 角色功法与境界约束\n"
+        for char_name, techniques in character_techniques_map.items():
+            realm = character_realms.get(char_name, "未知")
+            techniques_summary += f"- {char_name}（当前境界：{realm}）：已掌握功法：{', '.join(techniques) if techniques else '无'}\n"
+
+        # 构造功法需求摘要
+        requirements_summary = "## 功法需求境界\n"
+        for tech_name, req_realm in technique_requirements.items():
+            requirements_summary += f"- {tech_name}：需求境界 {req_realm}\n"
+
+        # 构造检查提示词
+        check_prompt = f"""请对以下章节内容进行逻辑检查，重点关注角色功法使用的合理性：
+
+【章节内容】
+{chapter_content}
+
+【角色功法与境界约束】
+{techniques_summary}
+
+【功法需求境界】
+{requirements_summary}
+
+【检查要求】
+请进行以下分析：
+1. 逐段分析章节内容，识别出所有出现的角色和他们使用的功法/术法
+2. 对比角色已掌握的功法列表，标记出任何未登记的功法使用
+3. 检查角色当前境界是否满足所使用功法的需求
+4. 标出具体的段落位置和问题描述
+5. 提供修改建议
+
+请以以下JSON格式返回结果：
+{{
+    "has_issues": true/false,
+    "issues": [
+        {{
+            "character_name": "角色名",
+            "technique_name": "功法名",
+            "issue_type": "未掌握功法" | "境界不足",
+            "description": "问题描述",
+            "suggestion": "修改建议"
+        }}
+    ],
+    "summary": "总体评估"
+}}"""
+
+        result = self.process(check_prompt, context)
+
+        # 尝试解析JSON结果
+        import json
+        try:
+            # 尝试从结果中提取JSON
+            json_start = result.find('{')
+            json_end = result.rfind('}') + 1
+            if json_start >= 0 and json_end > json_start:
+                json_str = result[json_start:json_end]
+                parsed_result = json.loads(json_str)
+                return parsed_result
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # 如果JSON解析失败，返回原始结果
+        return {
+            "has_issues": "问题" in result or "错误" in result,
+            "issues": [],
+            "summary": result,
+            "raw_result": result
+        }
+

@@ -57,11 +57,16 @@ export default function EditorPage() {
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false)
   const [revisions, setRevisions] = useState<any[]>([])
   const [loadingRevisions, setLoadingRevisions] = useState(false)
-  
+
   // 确认恢复对话框状态
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
   const [selectedRevision, setSelectedRevision] = useState<any>(null)
   const [restoringRevision, setRestoringRevision] = useState(false)
+
+  // 章节逻辑检查状态
+  const [logicCheckDialogOpen, setLogicCheckDialogOpen] = useState(false)
+  const [logicCheckResult, setLogicCheckResult] = useState<any | null>(null)
+  const [checkingLogic, setCheckingLogic] = useState(false)
 
   // 导出菜单状态
   const [exportAnchorEl, setExportAnchorEl] = useState<null | HTMLElement>(null)
@@ -142,10 +147,41 @@ export default function EditorPage() {
         setRevisions(data)
       }
     } catch (error) {
-      console.error('获取版本历史失败:', error)
-      setSaveError('获取版本历史失败')
+      console.error('加载版本历史失败:', error)
     } finally {
       setLoadingRevisions(false)
+    }
+  }
+
+  // 运行章节逻辑检查
+  const handleCheckLogic = async () => {
+    if (!chapterId || !projectId) return
+    setCheckingLogic(true)
+    try {
+      const response = await fetch('/api/v1/ai/check-chapter-logic', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+        body: JSON.stringify({
+          chapter_id: parseInt(chapterId),
+          project_id: parseInt(projectId),
+        }),
+      })
+      if (!response.ok) {
+        console.error('章节逻辑检查失败:', response.status)
+        setSaveError('章节逻辑检查失败，请稍后重试')
+        return
+      }
+      const data = await response.json()
+      setLogicCheckResult(data)
+      setLogicCheckDialogOpen(true)
+    } catch (error) {
+      console.error('调用章节逻辑检查接口时出错:', error)
+      setSaveError('调用章节逻辑检查接口时出错，请检查网络连接')
+    } finally {
+      setCheckingLogic(false)
     }
   }
 
@@ -298,6 +334,17 @@ export default function EditorPage() {
             版本历史
           </Button>
 
+          {/* 章节逻辑检查按钮 */}
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={handleCheckLogic}
+            disabled={checkingLogic}
+            startIcon={checkingLogic ? <CircularProgress size={16} /> : undefined}
+          >
+            {checkingLogic ? '检查中...' : '逻辑检查'}
+          </Button>
+
           {/* 导出按钮 */}
           <Button
             variant="outlined"
@@ -406,8 +453,8 @@ export default function EditorPage() {
       </Snackbar>
 
       {/* 版本历史对话框 */}
-      <Dialog 
-        open={historyDialogOpen} 
+      <Dialog
+        open={historyDialogOpen}
         onClose={() => setHistoryDialogOpen(false)}
         maxWidth="md"
         fullWidth
@@ -418,8 +465,8 @@ export default function EditorPage() {
           }
         }}
       >
-        <DialogTitle sx={{ 
-          borderBottom: 1, 
+        <DialogTitle sx={{
+          borderBottom: 1,
           borderColor: 'divider',
           display: 'flex',
           alignItems: 'center',
@@ -440,8 +487,8 @@ export default function EditorPage() {
               <CircularProgress />
             </Box>
           ) : revisions.length === 0 ? (
-            <Box sx={{ 
-              py: 6, 
+            <Box sx={{
+              py: 6,
               textAlign: 'center',
               color: 'text.secondary'
             }}>
@@ -465,8 +512,8 @@ export default function EditorPage() {
                       },
                     }}
                     secondaryAction={
-                      <Button 
-                        size="small" 
+                      <Button
+                        size="small"
                         variant="outlined"
                         startIcon={<RestoreIcon />}
                         onClick={() => handleOpenRestoreConfirm(revision)}
@@ -484,11 +531,11 @@ export default function EditorPage() {
                           <Typography variant="body1" fontWeight={500}>
                             {revision.revision_note || '自动保存'}
                           </Typography>
-                          <Box 
-                            sx={{ 
-                              px: 1, 
-                              py: 0.25, 
-                              bgcolor: 'primary.main', 
+                          <Box
+                            sx={{
+                              px: 1,
+                              py: 0.25,
+                              bgcolor: 'primary.main',
                               color: 'white',
                               borderRadius: 1,
                               fontSize: '0.75rem'
@@ -514,6 +561,7 @@ export default function EditorPage() {
                   </ListItem>
                   {index < revisions.length - 1 && <Divider />}
                 </div>
+
               ))}
             </List>
           )}
@@ -524,6 +572,103 @@ export default function EditorPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* 章节逻辑检查结果对话框 */}
+      <Dialog
+        open={logicCheckDialogOpen}
+        onClose={() => setLogicCheckDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <WarningIcon color={logicCheckResult?.has_issues ? 'warning' : 'success'} />
+          章节逻辑检查结果
+        </DialogTitle>
+        <DialogContent dividers>
+          {!logicCheckResult && (
+            <Box sx={{ py: 3 }}>
+              <Typography variant="body2" color="text.secondary">
+                暂无检查结果，请先点击顶部的「逻辑检查」按钮。
+              </Typography>
+            </Box>
+          )}
+
+          {logicCheckResult && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Box sx={{ p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
+                <Typography variant="subtitle1" gutterBottom>
+                  总体评估
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {logicCheckResult.summary || (logicCheckResult.has_issues ? '发现了一些逻辑问题，请参考下方列表。' : '未发现明显逻辑问题。')}
+                </Typography>
+              </Box>
+
+              {!logicCheckResult.has_issues && (
+                <Box sx={{ p: 2, bgcolor: 'success.light', borderRadius: 1 }}>
+                  <Typography variant="body2" color="success.contrastText">
+                    ✅ 未发现角色功法使用或境界相关的逻辑问题。
+                  </Typography>
+                </Box>
+              )}
+
+              {logicCheckResult.has_issues && Array.isArray(logicCheckResult.issues) && logicCheckResult.issues.length > 0 && (
+                <Box>
+                  <Typography variant="subtitle1" gutterBottom>
+                    发现的问题（共 {logicCheckResult.issues.length} 条）
+                  </Typography>
+                  <List sx={{ maxHeight: 360, overflow: 'auto' }}>
+                    {logicCheckResult.issues.map((issue: any, index: number) => (
+                      <Box key={index} sx={{ mb: 1 }}>
+                        <ListItem alignItems="flex-start">
+                          <ListItemText
+                            primary={
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <Typography variant="body1" fontWeight={500}>
+                                  {issue.character_name || '未知角色'} 使用 {issue.technique_name || '未知功法'}
+                                </Typography>
+                                <Typography
+                                  variant="caption"
+                                  sx={{
+                                    px: 1,
+                                    py: 0.25,
+                                    borderRadius: 1,
+                                    bgcolor: issue.issue_type === '境界不足' ? 'error.light' : 'warning.light',
+                                    color: 'text.primary',
+                                  }}
+                                >
+                                  {issue.issue_type || '逻辑问题'}
+                                </Typography>
+                              </Box>
+                            }
+                            secondary={
+                              <Box sx={{ mt: 0.5 }}>
+                                <Typography variant="body2" color="text.secondary">
+                                  {issue.description}
+                                </Typography>
+                                {issue.suggestion && (
+                                  <Typography variant="body2" color="primary.main" sx={{ mt: 0.5 }}>
+                                    建议：{issue.suggestion}
+                                  </Typography>
+                                )}
+                              </Box>
+                            }
+                          />
+                        </ListItem>
+                        {index < logicCheckResult.issues.length - 1 && <Divider />}
+                      </Box>
+                    ))}
+                  </List>
+                </Box>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setLogicCheckDialogOpen(false)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
+
 
       {/* 确认恢复对话框 */}
       <Dialog
@@ -546,10 +691,10 @@ export default function EditorPage() {
             确定要恢夏到这个版本吗？
           </Typography>
           {selectedRevision && (
-            <Box sx={{ 
-              mt: 2, 
-              p: 2, 
-              bgcolor: 'action.hover', 
+            <Box sx={{
+              mt: 2,
+              p: 2,
+              bgcolor: 'action.hover',
               borderRadius: 1,
               borderLeft: 4,
               borderColor: 'primary.main'
@@ -573,13 +718,13 @@ export default function EditorPage() {
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button 
-            onClick={() => setConfirmDialogOpen(false)} 
+          <Button
+            onClick={() => setConfirmDialogOpen(false)}
             disabled={restoringRevision}
           >
             取消
           </Button>
-          <Button 
+          <Button
             onClick={handleConfirmRestore}
             variant="contained"
             color="primary"

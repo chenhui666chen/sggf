@@ -9,59 +9,59 @@ from .memory_manager import NovelMemoryManager
 
 class OutlineExpander:
     """情节大纲和人物扩展器"""
-    
+
     def __init__(self, knowledge_base: Optional[NovelKnowledgeBase] = None,
                  memory_manager: Optional[NovelMemoryManager] = None):
         """初始化扩展器
-        
+
         Args:
             knowledge_base: 知识库实例
             memory_manager: 记忆管理器实例
         """
         self.knowledge_base = knowledge_base or NovelKnowledgeBase()
         self.memory_manager = memory_manager or NovelMemoryManager()
-        
+
         # 初始化AI Agent
         self.creative_director = CreativeDirectorAgent(self.knowledge_base, self.memory_manager)
         self.plot_architect = PlotArchitectAgent(self.knowledge_base, self.memory_manager)
         self.character_designer = CharacterDesignerAgent(self.knowledge_base, self.memory_manager)
-        
+
         self.llm = create_deepseek_llm()
-    
+
     def count_chapters_in_outline(self, outline: str) -> int:
         """智能识别大纲中的章节数
-        
+
         通过正则表达式和AI判断识别当前大纲有多少章
-        
+
         Args:
             outline: 当前的情节大纲
-            
+
         Returns:
             识别到的章节数
         """
         import re
-        
+
         if not outline or outline.strip() == '':
             return 0
-        
+
         # 方法1：正则表达式匹配
         # 匹配形如：“第N章”、“Chapter N”、“第N回”等
         patterns = [
             r'第(\d+)章',
-            r'第(\d+)回', 
+            r'第(\d+)回',
             r'Chapter\s+(\d+)',
             r'第([一二三四五六七八九十百]+)章',  # 中文数字
         ]
-        
+
         chapter_numbers = []
         for pattern in patterns:
             matches = re.findall(pattern, outline)
             chapter_numbers.extend(matches)
-        
+
         if chapter_numbers:
             # 转换中文数字为阿拉伯数字
             chinese_nums = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
-            
+
             max_chapter = 0
             for num_str in chapter_numbers:
                 try:
@@ -71,14 +71,14 @@ class OutlineExpander:
                         max_chapter = max(max_chapter, chinese_nums[num_str])
                 except:
                     continue
-            
+
             if max_chapter > 0:
                 print(f"✅ 正则识别到章节数: {max_chapter}")
                 return max_chapter
-        
+
         # 方法2：如果正则没有匹配到，使用AI判断
         print("⚠️  正则无法识别章节数，使用AI判断...")
-        
+
         ai_prompt = f"""请分析以下大纲有多少章。
 
 【大纲】
@@ -92,7 +92,7 @@ class OutlineExpander:
 - 如果是简要描述无章节，返回：0
 
 只返回数字，不要其他内容。"""
-        
+
         try:
             ai_result = self.creative_director.process(ai_prompt, {})
             # 提取数字
@@ -104,75 +104,75 @@ class OutlineExpander:
                 return chapter_count
         except Exception as e:
             print(f"❌ AI识别失败: {e}")
-        
+
         print("⚠️  无法识别章节数，默认返回0")
         return 0
-    
+
     def count_characters_in_text(self, characters_text: str) -> int:
         """智能识别人物文本中的人物数
-        
+
         通过正则表达式和AI判断识别当前有多少个人物
-        
+
         Args:
             characters_text: 当前的人物设定文本
-            
+
         Returns:
             识别到的人物数
         """
         import re
-        
+
         if not characters_text or characters_text.strip() == '':
             return 0
-        
+
         # 方法1：正则表达式匹配 - 优化识别逻辑
         # 🔥 关键修复：排除标题性关键词，只匹配真实人物名
-        
+
         # 匹配【姓名】格式（最常见的人物档案格式）
-        bracket_names = re.findall(r'【姓名】[：:]s*([\u4e00-\u9fa5]{2,4})', characters_text)
-        
+        bracket_names = re.findall(r'【姓名】[：:]\s*([\u4e00-\u9fa5]{2,4})', characters_text)
+
         if bracket_names:
             count = len(bracket_names)
             print(f"✅ 正则识别到人物数: {count} ({', '.join(bracket_names[:5])}...)")
             return count
-        
+
         # 备用方案：匹配其他格式
         character_names = set()
-        
+
         # 排除的关键词列表（这些不是人物名）
         exclude_keywords = [
-            '人物', '角色', '主角', '配角', '对手', '支持', '新增', '完整', 
+            '人物', '角色', '主角', '配角', '对手', '支持', '新增', '完整',
             '列表', '档案', '体系', '关系', '分布', '阵营', '所有', '更新',
             '姓名', '年龄', '性别', '外貌', '性格', '背景', '动机', '能力',
             '弱点', '成长', '关键'
         ]
-        
+
         # 匹配格式：
         # 1. 林墨、苏娜（顿号分隔）
         comma_names = re.findall(r'([\u4e00-\u9fa5]{2,4})、', characters_text)
         for name in comma_names:
             if name not in exclude_keywords and len(name) >= 2:
                 character_names.add(name)
-        
+
         # 2. 姓名：张三
         colon_names = re.findall(r'(?:姓名|角色)[：:]s*([\u4e00-\u9fa5]{2,4})', characters_text)
         for name in colon_names:
             if name not in exclude_keywords:
                 character_names.add(name)
-        
+
         # 3. **姓名** 或 **张三**
         bold_names = re.findall(r'\*\*([\u4e00-\u9fa5]{2,4})\*\*', characters_text)
         for name in bold_names:
             if name not in exclude_keywords and len(name) >= 2:
                 character_names.add(name)
-        
+
         if character_names:
             count = len(character_names)
             print(f"✅ 正则识别到人物数: {count} ({', '.join(list(character_names)[:5])}...)")
             return count
-        
+
         # 方法2：如果正则没有匹配到，使用AI判断
         print("⚠️  正则无法识别人物数，使用AI判断...")
-        
+
         ai_prompt = f"""请分析以下文本中有多少个具体的人物角色（有姓名的角色）。
 
 【人物文本】
@@ -186,7 +186,7 @@ class OutlineExpander:
 - 如果只是标题和分类，没有具体人物，返回：0
 
 只返回一个数字，不要其他内容。"""
-        
+
         try:
             ai_result = self.character_designer.process(ai_prompt, {})
             # 提取数字
@@ -198,22 +198,22 @@ class OutlineExpander:
                 return character_count
         except Exception as e:
             print(f"❌ AI识别失败: {e}")
-        
+
         print("⚠️  无法识别人物数，默认返回0")
         return 0
-    
-    def expand_plot_outline(self, current_outline: str, world_setting: str, 
+
+    def expand_plot_outline(self, current_outline: str, world_setting: str,
                           characters: str, target_chapters: int = 50) -> Dict[str, Any]:
         """扩展情节大纲
-        
+
         将简短大纲扩展为适合长篇小说的详细章节规划
-        
+
         Args:
             current_outline: 当前的情节大纲
             world_setting: 世界观设定
             characters: 人物设定
             target_chapters: 目标章节数（默认50章，约150万字）
-            
+
         Returns:
             扩展后的大纲字典，包含:
             - expanded_outline: 扩展后的完整大纲
@@ -224,7 +224,7 @@ class OutlineExpander:
         print(f"\n{'='*70}")
         print(f"【情节大纲扩展器】启动大纲扩展，目标章节数: {target_chapters}")
         print(f"{'='*70}\n")
-        
+
         # 第一步：分析当前大纲的可扩展点
         analysis_prompt = f"""你是一位资深小说策划师。请分析以下简短大纲的扩展潜力。
 
@@ -245,11 +245,11 @@ class OutlineExpander:
 5. **伏笔埋设点**：可以在哪些地方设置伏笔
 
 请给出具体分析，为扩展到{target_chapters}章提供依据。"""
-        
+
         print("【第一步】分析大纲扩展潜力...")
         expansion_analysis = self.creative_director.process(analysis_prompt, {})
         print("✅ 扩展潜力分析完成\n")
-        
+
         # 第二步：生成情节线索
         plot_arcs_prompt = f"""基于以下分析，设计长篇小说的情节线索体系。
 
@@ -273,11 +273,11 @@ class OutlineExpander:
 - 高潮和解决方案
 
 目标章节数：{target_chapters}章"""
-        
+
         print("【第二步】设计多线索情节体系...")
         plot_arcs = self.plot_architect.process(plot_arcs_prompt, {})
         print("✅ 情节线索设计完成\n")
-        
+
         # 第三步：生成章节分解
         chapter_breakdown_prompt = f"""基于以下情节线索，生成详细的章节分解（{target_chapters}章）。
 
@@ -288,17 +288,23 @@ class OutlineExpander:
 - 世界观: {world_setting}
 - 人物: {characters}
 
-请为每一章生成简要说明（2-3句话），格式如下：
+请为每一章生成结构清晰的简要说明（2-4句话），格式如下：
 
 第1章：[标题]
 - 主要内容：...
-- 涉及线索：主线
 - 关键事件：...
+- 涉及人物：[列出主要出场角色]
+- 人物发展：[本章人物的重要变化或关系进展]
+- 情节定位：[开端/发展/高潮/结局中的哪个部分]
+- 所属线索：[本章涉及的主线/支线（可多条，例如：主线；主线 + A支线）]
 
 第2章：[标题]
 - 主要内容：...
-- 涉及线索：主线 + A支线
 - 关键事件：...
+- 涉及人物：...
+- 人物发展：...
+- 情节定位：...
+- 所属线索：...
 
 ...（直到第{target_chapters}章）
 
@@ -307,12 +313,13 @@ class OutlineExpander:
 2. 适当分布高潮章节（每10-15章一个小高潮）
 3. 支线穿插自然，不影响主线推进
 4. 伏笔和回收配对明确
+5. 确保所有主要角色在不同阶段都有出场与推进，避免长时间“消失”。
 """
-        
+
         print(f"【第三步】生成{target_chapters}章详细分解...")
         chapter_breakdown = self.plot_architect.process(chapter_breakdown_prompt, {})
         print("✅ 章节分解完成\n")
-        
+
         # 第四步：生成完整扩展大纲
         expanded_outline_prompt = f"""基于以下信息，撰写完整的长篇小说情节大纲。
 
@@ -330,15 +337,15 @@ class OutlineExpander:
 5. **结局规划**（开放式/封闭式，是否留续集空间）
 
 这份大纲将指导{target_chapters}章的创作。"""
-        
+
         print("【第四步】生成完整扩展大纲...")
         expanded_outline = self.creative_director.process(expanded_outline_prompt, {})
         print("✅ 完整大纲生成完成\n")
-        
+
         print(f"{'='*70}")
         print(f"【情节大纲扩展器】扩展完成！")
         print(f"{'='*70}\n")
-        
+
         return {
             "expanded_outline": expanded_outline,
             "chapter_breakdown": chapter_breakdown,
@@ -346,19 +353,19 @@ class OutlineExpander:
             "expansion_analysis": expansion_analysis,
             "target_chapters": target_chapters
         }
-    
-    def expand_characters(self, main_characters: str, world_setting: str, 
+
+    def expand_characters(self, main_characters: str, world_setting: str,
                         plot_outline: str, target_count: int = 15) -> Dict[str, Any]:
         """扩展人物体系
-        
+
         基于主要人物自动生成配角、对手、辅助角色等
-        
+
         Args:
             main_characters: 当前主要人物设定
             world_setting: 世界观设定
             plot_outline: 情节大纲
             target_count: 目标人物总数（默认15个）
-            
+
         Returns:
             扩展后的人物体系字典，包含:
             - all_characters: 完整人物列表
@@ -369,7 +376,7 @@ class OutlineExpander:
         print(f"\n{'='*70}")
         print(f"【人物体系扩展器】启动人物扩展，目标人物数: {target_count}")
         print(f"{'='*70}\n")
-        
+
         # 第一步：分析现有人物和需求
         analysis_prompt = f"""你是一位资深人物设计师。请分析以下人物体系的扩展需求。
 
@@ -390,11 +397,11 @@ class OutlineExpander:
 5. **多样性建议**：如何增加人物的多样性和丰富性
 
 目标人物总数：{target_count}个（包括主角、配角、次要角色）"""
-        
+
         print("【第一步】分析人物扩展需求...")
         character_analysis = self.character_designer.process(analysis_prompt, {})
         print("✅ 人物需求分析完成\n")
-        
+
         # 第二步：设计角色定位分布
         role_distribution_prompt = f"""基于以下分析，设计人物角色定位体系。
 
@@ -426,13 +433,12 @@ class OutlineExpander:
 - 姓名和基本设定（1句话）
 - 在故事中的作用
 - 与主角的关系
-- 主要出场章节范围
 """
-        
+
         print("【第二步】设计角色定位体系...")
         role_distribution = self.character_designer.process(role_distribution_prompt, {})
         print("✅ 角色定位设计完成\n")
-        
+
         # 第三步：生成完整人物档案
         character_profiles_prompt = f"""基于以下角色定位，为每个人物生成完整档案。
 
@@ -448,14 +454,18 @@ class OutlineExpander:
 ---
 【姓名】：...
 【年龄/性别】：...
+【角色定位】：（主角/配角/对手/支持角色/中立角色等）
 【外貌特征】：（2-3句）
 【性格特点】：（核心性格 + 矛盾性格）
 【背景故事】：（3-5句，简要说明过去经历）
+【世界观/价值观立场】：（例如对系统/秩序/自由/科技的态度，1-2句）
 【核心动机】：（为什么参与故事，想要什么）
 【能力/特长】：（在故事中的优势）
 【弱点/缺陷】：（人物的局限性）
-【人物成长线】：（在故事中会有怎样的变化）
+【在情节中的作用】：（与主线/支线的关系，2-3句）
+【人物成长线】：（在故事中的变化，尽量用“从……到……”描述）
 【关键关系】：（与3-5个其他人物的关系）
+【关联线索】：（本角色主要参与的情节线，可简要命名主线/支线）
 ---
 
 要求：
@@ -464,11 +474,11 @@ class OutlineExpander:
 3. 确保人物之间有化学反应
 4. 每个人物都要有存在的价值
 """
-        
+
         print(f"【第三步】生成{target_count}个人物完整档案...")
         all_characters = self.character_designer.process(character_profiles_prompt, {})
         print("✅ 人物档案生成完成\n")
-        
+
         # 第四步：生成人物关系网络
         relationships_prompt = f"""基于以下人物档案，设计人物关系网络图。
 
@@ -500,15 +510,15 @@ class OutlineExpander:
 - 主角 → 导师B：单向崇拜，导师引导（第5章出现）
 - 主角 ⇄ 反派C：宿敌关系，理念冲突（第10章首次交锋）
 """
-        
+
         print("【第四步】生成人物关系网络...")
         character_relationships = self.character_designer.process(relationships_prompt, {})
         print("✅ 人物关系网络完成\n")
-        
+
         print(f"{'='*70}")
         print(f"【人物体系扩展器】扩展完成！")
         print(f"{'='*70}\n")
-        
+
         return {
             "all_characters": all_characters,
             "character_relationships": character_relationships,
@@ -516,15 +526,15 @@ class OutlineExpander:
             "character_analysis": character_analysis,
             "target_count": target_count
         }
-    
-    def generate_expansion_summary(self, outline_expansion: Dict[str, Any], 
+
+    def generate_expansion_summary(self, outline_expansion: Dict[str, Any],
                                   character_expansion: Dict[str, Any]) -> str:
         """生成扩展总结报告
-        
+
         Args:
             outline_expansion: 情节扩展结果
             character_expansion: 人物扩展结果
-            
+
         Returns:
             格式化的扩展总结报告
         """
@@ -582,18 +592,20 @@ class OutlineExpander:
 
     def expand_plot_outline_incremental(self, current_outline: str, world_setting: str,
                                        characters: str, current_chapter_count: int,
-                                       increment: int = 10) -> Dict[str, Any]:
+                                       increment: int = 10,
+                                       target_total_chapters: Optional[int] = None) -> Dict[str, Any]:
         """渐进式扩展情节大纲
-        
+
         每次增加5-10章，直到AI判断不再需要扩展
-        
+
         Args:
             current_outline: 当前的情节大纲
             world_setting: 世界观设定
             characters: 人物设定
             current_chapter_count: 当前已有的章节数（如为0则自动识别）
             increment: 本次扩展的章节数（默认10章）
-            
+            target_total_chapters: 长篇小说目标总章节数（如未提供则按100章进行规划判断）
+
         Returns:
             扩展后的大纲字典，包含:
             - expanded_outline: 扩展后的完整大纲
@@ -612,13 +624,13 @@ class OutlineExpander:
                 print(f"🎯 识别成功！当前大纲已有 {current_chapter_count} 章\n")
             else:
                 print("🆕 未识别到章节，从 0 章开始扩展\n")
-        
+
         print(f"\n{'='*70}")
         print(f"【渐进式大纲扩展】从 {current_chapter_count} 章扩展到 {current_chapter_count + increment} 章")
         print(f"{'='*70}\n")
-        
+
         target_chapters = current_chapter_count + increment
-        
+
         # 🔥 修改：先执行扩展，再判断是否继续
         # 第一步：执行扩展
         expansion_prompt = f"""基于当前大纲和人物设定，进行整体性扩展到{target_chapters}章。
@@ -673,21 +685,22 @@ class OutlineExpander:
 - 涉及人物：[列出主要出场角色]
 - 人物发展：[本章人物的重要变化或关系进展]
 - 情节定位：[开端/发展/高潮/结局中的哪个部分]
+- 所属线索：[本章涉及的主线/支线（可多条，例如：主线；主线 + A支线）]
 
 ...（依次到第{target_chapters}章）
 
 ## 人物出场统计
-[每个主要角色在哪些章节出场，承担什么功能]
+[为每个主要角色列出：出场章节列表、关键节点（起点/中点/收束）、以及在各阶段承担的功能（如：引发冲突、推动转折、承担牺牲、完成传承等）]
 
 ## 情节线索交织
-[主线和支线如何在各章节中交织发展]"""
-        
+[为每条主线/支线标注：起点章节区间、中段升级节点、收束章节，以及在哪些章节与主线/其他支线发生汇聚或冲突]"""
+
         print(f"【第一步】整体性扩展章节（重新规划第1-{target_chapters}章）...")
         print(f"   📌 参考完整人物设定（{len(characters)}字符）")
         print(f"   🔄 从{current_chapter_count}章整体扩展到{target_chapters}章")
         expansion_content = self.plot_architect.process(expansion_prompt, {})
         print("✅ 章节扩展完成\n")
-        
+
         # 第二步：整合更新大纲（不是简单追加，而是整体重构）
         integration_prompt = f"""基于当前大纲和新扩展的章节规划，生成一份完整的、结构清晰的大纲。
 
@@ -723,7 +736,7 @@ class OutlineExpander:
 
 5. **统一格式**：
    - 所有章节使用相同的描述格式
-   - 每章包含：主要内容、关键事件、涉及人物、人物发展、情节定位
+   - 每章包含：主要内容、关键事件、涉及人物、人物发展、情节定位、所属线索
 
 请输出完整的、重新整合后的大纲：
 
@@ -738,23 +751,29 @@ class OutlineExpander:
 - 涉及人物：...
 - 人物发展：...
 - 情节定位：[开端/发展/高潮/结局]
+- 所属线索：[本章涉及的主线/支线（可多条，例如：主线；主线 + 某支线）]
 
 ...（依次到第{target_chapters}章，不要省略）
 
 ## 情节线索交织
-[主线和支线在各章节中的完整规划]
+[为每条主线/支线列出：起点章节区间、中段升级节点、收束章节，以及在哪些章节与主线/其他支线发生汇聚或冲突]
 
 ## 人物出场统计
-[每个主要角色的出场章节、重要时刻和成长轨迹]
+[为每个主要角色总结：出场章节列表、重要时刻（包括起点/中点/收束）、角色弧光的关键节点，以及在整体结构中的功能]
 
 ## 章节容量分布
 [开端、发展、高潮、结局各阶段的章节数分布]"""
-        
+
         print(f"【第二步】整体重构大纲（不是简单拼接）...")
         print(f"   🔄 重新组织所有{target_chapters}章的内容")
         integrated_outline = self.plot_architect.process(integration_prompt, {})
         print("✅ 大纲整体重构完成\n")
-        
+        # 🆕 长篇小说目标章节数（用于判断是否继续扩展）
+        long_novel_target = target_total_chapters or 100
+        lower_threshold = int(long_novel_target * 0.5)
+        upper_threshold = int(long_novel_target * 0.9)
+
+
         # 🔥 第三步：AI判断是否需要继续扩展（在扩展完成后判断）
         analysis_prompt = f"""你是一位资深小说策划师。请分析以下大纲是否需要继续扩展。
 
@@ -770,6 +789,7 @@ class OutlineExpander:
 【当前状态】
 - 当前已有章节数：{target_chapters}
 - 刚完成扩展：从{current_chapter_count}章扩展到{target_chapters}章
+- 长篇目标总章节数：{long_novel_target}章
 
 请分析：
 1. **当前大纲的完整性**：是否已经覆盖了完整的故事线（开端、发展、高潮、结局）
@@ -783,24 +803,24 @@ class OutlineExpander:
   "reason": "原因说明（100字以内）"
 }}
 
-判断标准：
-- 如果当前章节数 < 20，通常建议继续扩展
-- 如果 20-40章，根据内容完整性判断
-- 如果 > 40章，需要非常充分的理由才继续扩展
+判断标准（面向长篇小说）：
+- 如果当前章节数 < {lower_threshold}，通常建议继续扩展（重点补充主线和支线）
+- 如果 {lower_threshold}-{upper_threshold} 章，根据故事完整性和情节复杂度判断
+- 如果 > {upper_threshold} 章，需要非常充分的理由才继续扩展（例如仍有重要支线或伏笔尚未完成）
 - 如果已有完整的故事结构，应该停止扩展"""
-        
+
         print("【第三步】AI判断是否需要继续扩展...")
         analysis_result = self.creative_director.process(analysis_prompt, {})
-        
+
         # 解析JSON结果
         import json
         import re
-        
+
         # 提取JSON内容
         json_match = re.search(r'\{[\s\S]*?"should_continue"[\s\S]*?\}', analysis_result)
         should_continue = True
         continue_reason = ""
-        
+
         if json_match:
             try:
                 decision = json.loads(json_match.group())
@@ -812,11 +832,11 @@ class OutlineExpander:
                 print("⚠️  无法解析AI结果，默认继续扩展")
         else:
             print("⚠️  无法解析AI结果，默认继续扩展")
-        
+
         print(f"{'='*70}")
         print(f"【渐进式大纲扩展】本轮完成！")
         print(f"{'='*70}\n")
-        
+
         return {
             "expanded_outline": integrated_outline,  # 🔥 返回整合后的大纲
             "chapter_breakdown": expansion_content,
@@ -825,21 +845,23 @@ class OutlineExpander:
             "should_continue": should_continue,
             "continue_reason": continue_reason
         }
-    
+
     def expand_characters_incremental(self, main_characters: str, world_setting: str,
                                      plot_outline: str, current_character_count: int,
-                                     increment: int = 5) -> Dict[str, Any]:
+                                     increment: int = 5,
+                                     target_total_characters: Optional[int] = None) -> Dict[str, Any]:
         """渐进式扩展人物体系
-        
+
         每次增加3-6个角色，直到AI判断不再需要扩展
-        
+
         Args:
             main_characters: 当前主要人物设定
             world_setting: 世界观设定
             plot_outline: 情节大纲
             current_character_count: 当前已有的人物数（如为0则自动识别）
             increment: 本次扩展的人物数（默认5个）
-            
+            target_total_characters: 长篇小说目标人物总数（如未提供则按25人进行规划判断）
+
         Returns:
             扩展后的人物体系字典，包含:
             - all_characters: 完整人物列表
@@ -858,13 +880,13 @@ class OutlineExpander:
                 print(f"🎯 识别成功！当前已有 {current_character_count} 个人物\n")
             else:
                 print("🆕 未识别到人物，从 0 个开始扩展\n")
-        
+
         print(f"\n{'='*70}")
         print(f"【渐进式人物扩展】从 {current_character_count} 个扩展到 {current_character_count + increment} 个")
         print(f"{'='*70}\n")
-        
+
         target_count = current_character_count + increment
-        
+
         # 🔥 修改：先执行扩展，再判断是否继续
         # 第一步：执行扩展
         expansion_prompt = f"""基于当前人物，扩展到{target_count}个角色。
@@ -877,24 +899,40 @@ class OutlineExpander:
 
 【扩展要求】
 - 新增 {increment} 个角色（从第{current_character_count + 1}个开始）
-- 每个新角色需要：
+- 每个新角色需要完整的人物卡信息，包括：
   * 姓名、年龄、性别
-  * 角色定位（主角/配角/对手/支持角色等）
-  * 性格特点（2-3句）
-  * 在情节中的作用（2-3句）
-  * 与主要角色的关系
+  * 角色定位（主角/配角/对手/支持角色/中立角色等）
+  * 外貌特征（2-3句）
+  * 性格特点（2-3句），包括典型行为与矛盾性格
+  * 背景故事（关键人生经历，3-5句）
+  * 世界观/价值观立场（例如对系统/秩序/自由/科技的态度，1-2句）
+  * 核心动机（推动其行动的内在驱动力，1-2句）
+  * 能力/特长（在故事中的优势）
+  * 弱点/缺陷（性格或能力上的短板，1-2句）
+  * 在情节中的作用（2-3句），以及与主线/支线的关联
+  * 人物成长线（在故事中的变化与发展方向，1-2句）
+  * 与主要角色及关键配角的关系（3-5个关键关系）
+  * 关联线索（本角色主要参与的情节线，可简要命名主线/支线）
 
 🔥 重要输出格式要求：
-请直接按阵营分类输出，格式如下：
+请直接按阵营分类输出，格式如下（每个人物必须包含完整人物卡字段）：
 
 ## 主角阵营
 
 ### 【姓名】：林墨
 【年龄/性别】：28岁/男
 【角色定位】：主角
+【外貌特征】：...
 【性格特点】：...
+【背景故事】：...
+【世界观/价值观立场】：...
+【核心动机】：...
+【能力/特长】：...
+【弱点/缺陷】：...
 【在情节中的作用】：...
-【与主要角色的关系】：...
+【人物成长线】：...
+【关键关系】：...
+【关联线索】：...
 
 ### 【姓名】：苏娜
 ...
@@ -919,11 +957,11 @@ class OutlineExpander:
 2. 使用【姓名】格式，方便识别和统计
 3. 每个阵营的角色按重要性排序
 4. 确保所有{target_count}个角色都包含在内"""
-        
+
         print(f"【第一步】扩展角色（{current_character_count + 1}-{target_count}个）...")
         expansion_content = self.character_designer.process(expansion_prompt, {})
         print("✅ 角色扩展完成\n")
-        
+
         # 第二步：整合更新人物体系（而不是简单追加）
         integration_prompt = f"""请将新扩展的角色整合到现有人物体系中，生成一份完整的、结构清晰的人物档案。
 
@@ -936,9 +974,10 @@ class OutlineExpander:
 【整合要求】
 1. **不要简单堆码**：不要直接把新内容追加在后面
 2. **按阵营重新组织**：所有角色按阵营分类（主角、对手、支持、中立）
-3. **信息完整**：保留原有角色的所有信息，增加新角色的详细信息
-4. **统一格式**：所有角色使用相同的档案格式
+3. **信息完整 & 深度塑造**：保留原有角色的所有信息，并为每个角色补充背景故事、世界观/价值观立场、核心动机、能力/特长、弱点/缺陷和人物成长线等关键字段
+4. **统一档案格式**：所有角色使用相同的详细档案格式，包含：基础信息、内在构成、背景与世界观立场、在情节中的作用、成长线、关系网络、关联线索
 5. **去重去重复**：如果有重复的角色，只保留一份最完整的
+6. **规模控制**：在保证角色完整性的前提下，尽量让总人数接近{target_count}个（允许±2人的浮动）
 
 请输出完整的、重新整合后的人物档案，格式如下：
 
@@ -946,10 +985,18 @@ class OutlineExpander:
 
 ### 【姓名】：[姓名]
 【年龄/性别】：...
-【角色定位】：...
+【角色定位】：主角/核心配角 等
+【外貌特征】：...
 【性格特点】：...
+【背景故事】：...
+【世界观/价值观立场】：...
+【核心动机】：...
+【能力/特长】：...
+【弱点/缺陷】：...
 【在情节中的作用】：...
-【与主要角色的关系】：...
+【人物成长线】：...
+【关键关系】：（与主要角色及重要配角的关系）
+【关联线索】：（本角色主要参与的情节线）
 
 ...（所有主角阵营角色）
 
@@ -969,11 +1016,11 @@ class OutlineExpander:
 ...
 
 确保所有{target_count}个角色都包含在内，按重要性排序。"""
-        
+
         print(f"【第二步】整合更新人物体系（不进行简单堆码）...")
         integrated_characters = self.character_designer.process(integration_prompt, {})
         print("✅ 人物体系整合完成\n")
-        
+
         # 第三步：生成人物关系网络
         relationship_prompt = f"""基于以下完整的人物体系，生成完整的人物关系网络。
 
@@ -1000,11 +1047,11 @@ class OutlineExpander:
 1. 包含所有{target_count}个角色
 2. 关系类型包括：师徒、盟友、对手、亲人、同事、竞争等
 3. 每个关系都有简短描述（20字以内）"""
-        
+
         print(f"【第三步】生成人物关系网络...")
         relationships = self.character_designer.process(relationship_prompt, {})
         print("✅ 关系网络生成完成\n")
-        
+
         # 第四步：统计角色分布
         distribution_prompt = f"""基于以下完整的人物体系，统计角色分布。
 
@@ -1022,15 +1069,15 @@ class OutlineExpander:
 
 请确保所有数量加起来等于{target_count}。
 只返回JSON，不要其他文字。"""
-        
+
         print(f"【第四步】统计角色分布...")
         distribution_result = self.character_designer.process(distribution_prompt, {})
         print("✅ 角色分布统计完成\n")
-        
+
         # 解析角色分布JSON
         import json
         import re
-        
+
         distribution_dict = {}
         json_match = re.search(r'\{[\s\S]*?\}', distribution_result)
         if json_match:
@@ -1039,7 +1086,13 @@ class OutlineExpander:
                 print(f"✅ 角色分布：{distribution_dict}")
             except:
                 print("⚠️  无法解析角色分布JSON")
-        
+
+
+        # 🆕 长篇小说目标人物数量（用于判断是否继续扩展）
+        character_target = target_total_characters or 25
+        lower_threshold = max(15, character_target - 10)
+        upper_threshold = character_target + 5
+
         # 🔥 第五步：AI判断是否需要继续扩展（在扩展完成后判断）
         analysis_prompt = f"""你是一位资深人物设计师。请分析以下人物体系是否需要继续扩展。
 
@@ -1052,6 +1105,7 @@ class OutlineExpander:
 【当前状态】
 - 当前已有人物数：{target_count}
 - 刚完成扩展：从{current_character_count}个扩展到{target_count}个
+- 长篇目标人物数：{character_target}个
 
 请分析：
 1. **主要角色覆盖**：主角、配角、对手、师友等关键角色是否齐全
@@ -1065,23 +1119,23 @@ class OutlineExpander:
   "reason": "原因说明（100字以内）"
 }}
 
-判断标准：
-- 如果当前人物数 < 8，通常建议继续扩展
-- 如果 8-12个，根据情节需求判断
-- 如果 > 12个，需要非常充分的理由才继续扩展
-- 如果主要角色都已齐全，应该停止扩展"""
-        
+判断标准（面向长篇小说人物体系）：
+- 如果当前人物数 < {lower_threshold}，通常建议继续扩展，补足主要角色和关键配角
+- 如果 {lower_threshold}-{character_target} 个，根据情节复杂度和人物关系网丰富程度判断
+- 如果 {character_target}-{upper_threshold} 个，偏向于收束人物，只在确有需要时少量补充
+- 如果 > {upper_threshold} 个，需要非常充分的理由才继续扩展，避免角色过多导致人物形象被稀释"""
+
         print("【第五步】AI判断是否需要继续扩展...")
         analysis_result = self.character_designer.process(analysis_prompt, {})
-        
+
         # 解析JSON结果
         import json
         import re
-        
+
         json_match = re.search(r'\{[\s\S]*?"should_continue"[\s\S]*?\}', analysis_result)
         should_continue = True
         continue_reason = ""
-        
+
         if json_match:
             try:
                 decision = json.loads(json_match.group())
@@ -1093,11 +1147,11 @@ class OutlineExpander:
                 print("⚠️  无法解析AI结果，默认继续扩展")
         else:
             print("⚠️  无法解析AI结果，默认继续扩展")
-        
+
         print(f"{'='*70}")
         print(f"【渐进式人物扩展】本轮完成！")
         print(f"{'='*70}\n")
-        
+
         return {
             "all_characters": integrated_characters,  # 🔥 返回整合后的人物体系
             "character_relationships": relationships,  # 🔥 现在生成完整的关系网络
@@ -1111,11 +1165,11 @@ class OutlineExpander:
 def create_outline_expander(knowledge_base: Optional[NovelKnowledgeBase] = None,
                            memory_manager: Optional[NovelMemoryManager] = None) -> OutlineExpander:
     """创建大纲扩展器的工厂函数
-    
+
     Args:
         knowledge_base: 知识库实例
         memory_manager: 记忆管理器实例
-        
+
     Returns:
         配置好的OutlineExpander实例
     """

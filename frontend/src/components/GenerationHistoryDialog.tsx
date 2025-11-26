@@ -18,7 +18,6 @@ import {
   Divider,
 } from '@mui/material'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
-import DeleteIcon from '@mui/icons-material/Delete'
 import { generationService } from '@/services/generation'
 
 export interface GenerationHistoryItem {

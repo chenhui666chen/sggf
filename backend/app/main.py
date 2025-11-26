@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.db.base import Base, engine
-from app.api.v1 import auth, projects, chapters, knowledge_base, reviews, workflow, knowledge, memories, ai_assist, statistics
+from app.api.v1 import auth, projects, chapters, knowledge_base, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters
 import socketio
 
 # 创建数据库表
@@ -46,7 +46,10 @@ app.include_router(memories.router)  # 记忆管理API
 app.include_router(ai_assist.router)  # AI辅助功能API
 app.include_router(reviews.router)
 app.include_router(workflow.router)
+app.include_router(settings_api.router)
 app.include_router(statistics.router)
+app.include_router(characters.router)
+
 
 # 🔌 挂载 Socket.IO
 # 导入 WebSocket 事件处理器
@@ -64,14 +67,14 @@ async def global_exception_handler(request, exc):
     """全局异常处理"""
     import traceback
     import logging
-    
+
     # 记录详细错误日志
     logger = logging.getLogger("uvicorn.error")
     logger.error(f"❌ 全局异常捕获: {str(exc)}")
     logger.error(f"请求路径: {request.url.path}")
     logger.error(f"请求方法: {request.method}")
     logger.error(f"详细追踪:\n{traceback.format_exc()}")
-    
+
     return JSONResponse(
         status_code=500,
         content={

@@ -93,7 +93,11 @@ export default function AgentStatusIndicator({ agent }: AgentStatusIndicatorProp
               {agent.progress}%
             </Typography>
           </Box>
-          <LinearProgress variant="determinate" value={agent.progress} size="small" />
+          <LinearProgress
+            variant="determinate"
+            value={agent.progress}
+            sx={{ height: 6, borderRadius: 3 }}
+          />
         </Box>
       )}
 

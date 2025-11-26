@@ -32,6 +32,16 @@ echo [OK] Python Ready
 echo [OK] Node.js Ready
 echo.
 
+:: Activate Virtual Environment
+echo [INIT] Activating virtual environment...
+if exist ".venv\Scripts\Activate.ps1" (
+    powershell -Command "& '.venv\Scripts\Activate.ps1'"
+    echo [OK] Virtual environment activated
+) else (
+    echo [WARNING] Virtual environment not found, using global Python
+)
+echo.
+
 :: Start Backend
 echo [1/2] Starting FastAPI Backend Server (WebSocket Enabled)...
 echo.
@@ -40,7 +50,7 @@ cd /d %~dp0\backend
 python -c "from app.core.config import settings; print('✅ 数据库:', settings.DATABASE_URL); print('✅ CORS:', settings.CORS_ORIGINS[:2] if len(settings.CORS_ORIGINS) > 2 else settings.CORS_ORIGINS)"
 cd /d %~dp0
 echo.
-start "Novel System - Backend (FastAPI + WebSocket)" cmd /k "cd /d %~dp0\backend && python -m uvicorn app.main:application --host 0.0.0.0 --port 8000 --reload"
+start "Novel System - Backend (FastAPI + WebSocket)" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && cd backend && python -m uvicorn app.main:application --host 0.0.0.0 --port 8000 --reload"
 
 :: Wait for backend
 echo [WAIT] Waiting for backend to start...
@@ -48,7 +58,7 @@ timeout /t 3 /nobreak >nul
 
 :: Start Frontend
 echo [2/2] Starting Frontend Dev Server...
-start "Novel System - Frontend" cmd /k "cd /d %~dp0\frontend && npm run dev"
+start "Novel System - Frontend" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && cd frontend && npm run dev"
 
 echo.
 echo ================================================================
