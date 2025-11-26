@@ -25,6 +25,9 @@ import {
   DialogTitle,
   List,
   ListItem,
+  Tabs,
+  Tab,
+  MenuItem,
 } from '@mui/material'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import PauseIcon from '@mui/icons-material/Pause'
@@ -40,9 +43,14 @@ import PeopleIcon from '@mui/icons-material/People'
 import NavigateNextIcon from '@mui/icons-material/NavigateNext'
 import EditIcon from '@mui/icons-material/Edit'
 import DownloadIcon from '@mui/icons-material/Download'
+import AddIcon from '@mui/icons-material/Add'
+import DeleteIcon from '@mui/icons-material/Delete'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+
 import HistoryIcon from '@mui/icons-material/History'
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows'
 import Switch from '@mui/material/Switch'
+import Checkbox from '@mui/material/Checkbox'
 import FormControlLabel from '@mui/material/FormControlLabel'
 import Chip from '@mui/material/Chip'
 import Snackbar from '@mui/material/Snackbar'
@@ -64,6 +72,7 @@ import StageDetailPanel from '@/components/workflow/StageDetailPanel'
 import AgentStatusIndicator from '@/components/workflow/AgentStatusIndicator'
 import { workflowWebSocket } from '@/services/websocket'
 import { apiClient } from '@/services/api'  // ✅ 添加apiClient导入
+import FormattedContent from '@/components/common/FormattedContent'
 import {
   calculateProgress,
   estimateRemainingTime,
@@ -75,7 +84,7 @@ import {
   exportChapterBreakdownToCSV,
   downloadFile,
 } from '@/utils/expansionHelpers'
-import { ProgressEstimator, type StageDurations, type StageDurationRanges, type ProgressState } from '@/utils/progressEstimator'
+import { ProgressEstimator, type StageDurations, type ProgressState } from '@/utils/progressEstimator'
 import { statisticsService } from '@/services/statistics'
 
 
@@ -87,6 +96,13 @@ const stageNames = {
   review: '质量评审',
   iteration: '迭代优化',
 }
+
+type ItemRelationForm = {
+  type: string
+  targetId: number | null
+}
+
+const RELATION_TYPES = ['前置', '对立', '包含', '相关'] as const
 
 export default function WorkflowControlPage() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -131,6 +147,51 @@ export default function WorkflowControlPage() {
 
   // 世界观设定对话框状态
   const [showWorldDialog, setShowWorldDialog] = useState(false)
+
+  // 类型化设定管理状态（世界观相关）
+  const [worldSettingsTab, setWorldSettingsTab] = useState<'text' | 'settings'>('text')
+  const [settingCollections, setSettingCollections] = useState<any[]>([])
+  const [settingCollectionsLoading, setSettingCollectionsLoading] = useState(false)
+  const [selectedCollectionId, setSelectedCollectionId] = useState<number | null>(null)
+  const [settingItems, setSettingItems] = useState<any[]>([])
+  const [settingTemplates, setSettingTemplates] = useState<any[]>([])
+  const [settingTemplatesLoading, setSettingTemplatesLoading] = useState(false)
+  const [showTemplateDialog, setShowTemplateDialog] = useState(false)
+  const [selectedTemplateKey, setSelectedTemplateKey] = useState<string | null>(null)
+  const [clearExistingSettings, setClearExistingSettings] = useState(false)
+  const [applyingTemplate, setApplyingTemplate] = useState(false)
+  const [settingItemsLoading, setSettingItemsLoading] = useState(false)
+
+  // 类型设定：集合/设定项编辑对话框 & 删除确认
+  const [collectionDialogOpen, setCollectionDialogOpen] = useState(false)
+  const [collectionDialogMode, setCollectionDialogMode] = useState<'create' | 'edit'>('create')
+  const [editingCollection, setEditingCollection] = useState<any | null>(null)
+  const [collectionForm, setCollectionForm] = useState({ name: '', category: '' })
+  const [collectionDialogSaving, setCollectionDialogSaving] = useState(false)
+  const [collectionDialogSubmitted, setCollectionDialogSubmitted] = useState(false)
+
+  const [itemDialogOpen, setItemDialogOpen] = useState(false)
+  const [itemDialogMode, setItemDialogMode] = useState<'create' | 'edit'>('create')
+  const [editingItem, setEditingItem] = useState<any | null>(null)
+  const [itemDialogSaving, setItemDialogSaving] = useState(false)
+  const [itemDialogSubmitted, setItemDialogSubmitted] = useState(false)
+  const [itemForm, setItemForm] = useState({
+    name: '',
+    level: '',
+    code: '',
+    content: '',
+    tags: [] as string[],
+    tagsInput: '',
+    relations: [] as ItemRelationForm[],
+  })
+
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'collection' | 'item'; id: number } | null>(null)
+  const [deleteLoading, setDeleteLoading] = useState(false)
+
+  const [draggingCollectionId, setDraggingCollectionId] = useState<number | null>(null)
+  const [draggingItemId, setDraggingItemId] = useState<number | null>(null)
+
   const [worldContent, setWorldContent] = useState('')
   const [editedWorldContent, setEditedWorldContent] = useState('')
   const [worldLoading, setWorldLoading] = useState(false)
@@ -142,6 +203,21 @@ export default function WorkflowControlPage() {
   const [editedCharacterContent, setEditedCharacterContent] = useState('')
   const [characterLoading, setCharacterLoading] = useState(false)
   const [characterSaving, setCharacterSaving] = useState(false)
+
+  // 结构化人物管理状态
+  const [characterTab, setCharacterTab] = useState<'text' | 'structured'>('text')
+  const [structuredCharacters, setStructuredCharacters] = useState<any[]>([])
+  const [structuredCharactersLoading, setStructuredCharactersLoading] = useState(false)
+
+  const [showCharacterEditDialog, setShowCharacterEditDialog] = useState(false)
+  const [characterFormData, setCharacterFormData] = useState<any>({})
+  const [characterFormLoading, setCharacterFormLoading] = useState(false)
+  const [characterFormSaving, setCharacterFormSaving] = useState(false)
+
+  const [availableTechniques, setAvailableTechniques] = useState<any[]>([])
+  const [availableRealms, setAvailableRealms] = useState<any[]>([])
+  const [characterTechniques, setCharacterTechniques] = useState<any[]>([])
+  const [selectedTechniqueId, setSelectedTechniqueId] = useState<number | ''>('')
 
   const [snackbarOpen, setSnackbarOpen] = useState(false)
   const [snackbarMessage, setSnackbarMessage] = useState('')
@@ -173,34 +249,572 @@ export default function WorkflowControlPage() {
   const [expandingOutline, setExpandingOutline] = useState(false)
   const [expandedOutlineData, setExpandedOutlineData] = useState<any>(null)
   const [currentChapterCount, setCurrentChapterCount] = useState(0)  // 🆕 当前章节数
-  
+  const [targetChapterCount, setTargetChapterCount] = useState<number>(100)  // 🆕 目标章节数（默认长篇：100章）
+
+
   const [showExpandCharactersDialog, setShowExpandCharactersDialog] = useState(false)
   const [expandingCharacters, setExpandingCharacters] = useState(false)
   const [expandedCharactersData, setExpandedCharactersData] = useState<any>(null)
   const [currentCharacterCount, setCurrentCharacterCount] = useState(0)  // 🆕 当前人物数
+  const [targetCharacterCount, setTargetCharacterCount] = useState<number>(25)  // 🆕 目标人物数（默认长篇：25人）
 
   // 🆕 进度显示优化
   const [expansionProgress, setExpansionProgress] = useState(0)  // 扩展进度 0-100
   const [expansionStartTime, setExpansionStartTime] = useState<number | null>(null)  // 开始时间
   const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState<number | null>(null)  // 预计剩余时间（秒）
-  
+
   // 🆕 历史版本管理
   const [outlineHistory, setOutlineHistory] = useState<Array<{timestamp: number, content: string, chapterCount: number}>>([])
   const [characterHistory, setCharacterHistory] = useState<Array<{timestamp: number, content: string, characterCount: number}>>([])
   const [showHistoryDialog, setShowHistoryDialog] = useState(false)
   const [historyType, setHistoryType] = useState<'outline' | 'character'>('outline')
-  
+
+  // 类型化设定管理：加载集合和设定项
+  const loadSettingItems = async (collectionId: number) => {
+    if (!collectionId) return
+
+    setSettingItemsLoading(true)
+    try {
+      const response = await apiClient.getSettingItems(collectionId)
+      const items = (response.data || []).slice().sort(
+        (a: any, b: any) => (a.order ?? 0) - (b.order ?? 0),
+      )
+      setSettingItems(items)
+    } catch (error) {
+      console.error('获取设定项失败:', error)
+      setSnackbarMessage('获取设定项失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    } finally {
+      setSettingItemsLoading(false)
+    }
+  }
+
+  const loadSettingCollections = async (projectIdNum: number) => {
+    setSettingCollectionsLoading(true)
+    try {
+      const response = await apiClient.getSettingCollections(projectIdNum)
+      const collections = (response.data || []).slice().sort(
+        (a: any, b: any) => (a.order ?? 0) - (b.order ?? 0),
+      )
+      setSettingCollections(collections)
+
+      if (collections.length > 0) {
+        const firstId = collections[0].id as number
+        setSelectedCollectionId(firstId)
+        await loadSettingItems(firstId)
+      } else {
+        setSelectedCollectionId(null)
+        setSettingItems([])
+      }
+    } catch (error) {
+      console.error('获取设定集合失败:', error)
+      setSnackbarMessage('获取设定集合失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    } finally {
+      setSettingCollectionsLoading(false)
+    }
+  }
+
+  // 🧬 结构化人物：加载角色列表
+  const loadStructuredCharacters = async () => {
+    if (!projectId) return
+
+    const projectIdNum = Number(projectId)
+    if (Number.isNaN(projectIdNum)) return
+
+    setStructuredCharactersLoading(true)
+    try {
+      const response = await apiClient.getCharacters(projectIdNum)
+      setStructuredCharacters(response.data || [])
+    } catch (error) {
+      console.error('获取角色列表失败:', error)
+      setSnackbarMessage('获取角色列表失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    } finally {
+      setStructuredCharactersLoading(false)
+    }
+  }
+
+  // 🧬 结构化人物：加载可用功法（来自项目功法体系）
+  const loadAvailableTechniques = async () => {
+    if (!projectId) return
+
+    const projectIdNum = Number(projectId)
+    if (Number.isNaN(projectIdNum)) return
+
+    try {
+      const response = await apiClient.getProjectTechniques(projectIdNum)
+      setAvailableTechniques(response.data || [])
+    } catch (error) {
+      console.error('获取功法列表失败:', error)
+    }
+  }
+
+  // 🧬 结构化人物：加载可用境界（来自境界体系设定集合）
+  const loadAvailableRealms = async () => {
+    if (!projectId) return
+
+    const projectIdNum = Number(projectId)
+    if (Number.isNaN(projectIdNum)) return
+
+    try {
+      const collectionsResponse = await apiClient.getSettingCollections(projectIdNum)
+      const collections = collectionsResponse.data || []
+      const realmCollection = collections.find((c: any) => c.category === 'cultivation_system')
+      if (realmCollection) {
+        const itemsResponse = await apiClient.getSettingItems(realmCollection.id)
+        setAvailableRealms(itemsResponse.data || [])
+      } else {
+        setAvailableRealms([])
+      }
+    } catch (error) {
+      console.error('获取境界列表失败:', error)
+    }
+  }
+
+  const loadSettingTemplates = async () => {
+    setSettingTemplatesLoading(true)
+    try {
+      const response = await apiClient.getSettingTemplates()
+      setSettingTemplates(response.data || [])
+    } catch (error) {
+      console.error('获取设定模板列表失败:', error)
+      setSnackbarMessage('获取设定模板列表失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    } finally {
+      setSettingTemplatesLoading(false)
+    }
+  }
+
+  const handleOpenTemplateDialog = () => {
+    if (!projectId) {
+      setSnackbarMessage('请先选择一个项目')
+      setSnackbarSeverity('warning')
+      setSnackbarOpen(true)
+      return
+    }
+
+    setShowTemplateDialog(true)
+    setSelectedTemplateKey(null)
+    setClearExistingSettings(false)
+    loadSettingTemplates()
+  }
+
+  const handleApplyTemplate = async () => {
+    if (!projectId || !selectedTemplateKey) return
+
+    const projectIdNum = Number(projectId)
+    if (Number.isNaN(projectIdNum)) return
+
+    setApplyingTemplate(true)
+    try {
+      await apiClient.applySettingTemplate(projectIdNum, {
+        template_key: selectedTemplateKey,
+        clear_existing: clearExistingSettings,
+      })
+
+      await loadSettingCollections(projectIdNum)
+
+      setShowTemplateDialog(false)
+      setSnackbarMessage('已应用设定模板')
+      setSnackbarSeverity('success')
+      setSnackbarOpen(true)
+    } catch (error) {
+      console.error('应用设定模板失败:', error)
+      setSnackbarMessage('应用设定模板失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    } finally {
+      setApplyingTemplate(false)
+    }
+  }
+
+  const handleCreateCollection = () => {
+    if (!projectId) return
+
+    setCollectionDialogMode('create')
+    setEditingCollection(null)
+    setCollectionForm({ name: '', category: '' })
+    setCollectionDialogSubmitted(false)
+    setCollectionDialogOpen(true)
+  }
+
+  const handleEditCollection = (collection: any) => {
+    setCollectionDialogMode('edit')
+    setEditingCollection(collection)
+    setCollectionForm({
+      name: collection.name || '',
+      category: collection.category || '',
+    })
+    setCollectionDialogSubmitted(false)
+    setCollectionDialogOpen(true)
+  }
+
+  const handleDeleteCollection = (collectionId: number) => {
+    setDeleteTarget({ type: 'collection', id: collectionId })
+    setDeleteDialogOpen(true)
+  }
+
+  const handleCreateItem = () => {
+    if (!selectedCollectionId) return
+
+    setItemDialogMode('create')
+    setEditingItem(null)
+    setItemForm({
+      name: '',
+      level: '',
+      code: '',
+      content: '',
+      tags: [],
+      tagsInput: '',
+      relations: [],
+    })
+    setItemDialogSubmitted(false)
+    setItemDialogOpen(true)
+  }
+
+  const handleEditItem = (item: any) => {
+    setItemDialogMode('edit')
+    setEditingItem(item)
+    setItemForm({
+      name: item.name || '',
+      level: item.level != null ? String(item.level) : '',
+      code: item.code || '',
+      content: item.content || '',
+      tags: item.tags || [],
+      tagsInput: '',
+      relations: parseRelationsFromApi(item.relations),
+    })
+    setItemDialogSubmitted(false)
+    setItemDialogOpen(true)
+  }
+
+  const handleDeleteItem = (itemId: number) => {
+    setDeleteTarget({ type: 'item', id: itemId })
+    setDeleteDialogOpen(true)
+  }
+
+
+
   // 🆕 编辑功能
   const [isEditingExpansion, setIsEditingExpansion] = useState(false)
-  const [editedExpansionContent, setEditedExpansionContent] = useState('')
 
-  // 🆕 添加大纲编辑状态
-  const [isEditingOutline, setIsEditingOutline] = useState(false)
+  const parseRelationsFromApi = (value: any): ItemRelationForm[] => {
+    if (!value || !Array.isArray(value.links)) return []
+    return value.links.map((link: any) => ({
+      type: link.type || '相关',
+      targetId: typeof link.target_id === 'number' ? link.target_id : null,
+    }))
+  }
+
+  const buildRelationsPayload = (relations: ItemRelationForm[]) => {
+    const links = relations
+      .filter((r) => r.targetId != null && r.type)
+      .map((r) => ({ type: r.type, target_id: r.targetId }))
+    return links.length > 0 ? { links } : null
+  }
+
+  const handleTagInputKeyDown = (event: any) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    const raw = (itemForm.tagsInput || '').trim()
+    if (!raw) return
+    if (!itemForm.tags.includes(raw)) {
+      setItemForm((prev) => ({
+        ...prev,
+        tags: [...prev.tags, raw],
+        tagsInput: '',
+      }))
+    } else {
+      setItemForm((prev) => ({ ...prev, tagsInput: '' }))
+    }
+  }
+
+  const handleRemoveTag = (tag: string) => {
+    setItemForm((prev) => ({
+      ...prev,
+      tags: prev.tags.filter((t) => t !== tag),
+    }))
+  }
+
+	  const handleAddRelation = () => {
+	    setItemForm((prev) => ({
+	      ...prev,
+	      relations: [...prev.relations, { type: '相关', targetId: null }],
+	    }))
+	  }
+
+	  const handleChangeRelation = (
+	    index: number,
+	    field: keyof ItemRelationForm,
+	    value: any,
+	  ) => {
+	    setItemForm((prev) => {
+	      const relations = [...prev.relations]
+	      relations[index] = { ...relations[index], [field]: value }
+	      return { ...prev, relations }
+	    })
+	  }
+
+	  const handleRemoveRelationRow = (index: number) => {
+	    setItemForm((prev) => ({
+	      ...prev,
+	      relations: prev.relations.filter((_, i) => i !== index),
+	    }))
+	  }
+
+
+  const handleCloseCollectionDialog = () => {
+    if (collectionDialogSaving) return
+    setCollectionDialogOpen(false)
+  }
+
+  const handleSubmitCollectionDialog = async () => {
+    if (!projectId) return
+    setCollectionDialogSubmitted(true)
+    if (!collectionForm.name.trim()) return
+
+    const projectIdNum = Number(projectId)
+    if (Number.isNaN(projectIdNum)) return
+
+    setCollectionDialogSaving(true)
+    try {
+      if (collectionDialogMode === 'create') {
+        await apiClient.createSettingCollection(projectIdNum, {
+          name: collectionForm.name.trim(),
+          category: collectionForm.category.trim() || undefined,
+          description: '',
+          order: settingCollections.length,
+        })
+        setSnackbarMessage('创建设定集合成功')
+      } else if (editingCollection) {
+        await apiClient.updateSettingCollection(editingCollection.id, {
+          name: collectionForm.name.trim(),
+          category: collectionForm.category.trim() || undefined,
+        })
+        setSnackbarMessage('更新设定集合成功')
+      }
+      setSnackbarSeverity('success')
+      setSnackbarOpen(true)
+      await loadSettingCollections(projectIdNum)
+      setCollectionDialogOpen(false)
+    } catch (error) {
+      console.error('保存设定集合失败:', error)
+      setSnackbarMessage('保存设定集合失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    } finally {
+      setCollectionDialogSaving(false)
+    }
+  }
+
+  const handleCloseItemDialog = () => {
+    if (itemDialogSaving) return
+    setItemDialogOpen(false)
+  }
+
+  const handleSubmitItemDialog = async () => {
+    if (!selectedCollectionId) return
+    setItemDialogSubmitted(true)
+    if (!itemForm.name.trim()) return
+
+    const levelTrimmed = itemForm.level.trim()
+    const levelValue = levelTrimmed ? Number(levelTrimmed) : undefined
+
+    const payload: any = {
+      name: itemForm.name.trim(),
+      level:
+        typeof levelValue === 'number' && !Number.isNaN(levelValue) ? levelValue : undefined,
+      code: itemForm.code.trim() || undefined,
+      content: itemForm.content || '',
+      tags: itemForm.tags,
+      relations: buildRelationsPayload(itemForm.relations),
+    }
+
+    setItemDialogSaving(true)
+    try {
+      if (itemDialogMode === 'create') {
+        payload.order = settingItems.length
+        await apiClient.createSettingItem(selectedCollectionId, payload)
+        setSnackbarMessage('创建设定项成功')
+      } else if (editingItem) {
+        await apiClient.updateSettingItem(editingItem.id, payload)
+        setSnackbarMessage('更新设定项成功')
+      }
+      setSnackbarSeverity('success')
+      setSnackbarOpen(true)
+      await loadSettingItems(selectedCollectionId)
+      setItemDialogOpen(false)
+    } catch (error) {
+      console.error('保存设定项失败:', error)
+      setSnackbarMessage('保存设定项失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    } finally {
+      setItemDialogSaving(false)
+    }
+  }
+
+  const handleCopyItem = async (item: any) => {
+    if (!selectedCollectionId) return
+    try {
+      await apiClient.createSettingItem(selectedCollectionId, {
+        name: `${item.name} (副本)`,
+        level: item.level,
+        code: item.code,
+        content: item.content,
+        tags: item.tags || [],
+        relations: item.relations || null,
+        order: settingItems.length,
+      })
+      await loadSettingItems(selectedCollectionId)
+      setSnackbarMessage('已复制设定项')
+      setSnackbarSeverity('success')
+      setSnackbarOpen(true)
+    } catch (error) {
+      console.error('复制设定项失败:', error)
+      setSnackbarMessage('复制设定项失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    }
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return
+
+    setDeleteLoading(true)
+    try {
+      if (deleteTarget.type === 'collection') {
+        await apiClient.deleteSettingCollection(deleteTarget.id)
+        if (projectId) {
+          const projectIdNum = Number(projectId)
+          if (!Number.isNaN(projectIdNum)) {
+            await loadSettingCollections(projectIdNum)
+          }
+        }
+      } else {
+        await apiClient.deleteSettingItem(deleteTarget.id)
+        if (selectedCollectionId) {
+          await loadSettingItems(selectedCollectionId)
+        }
+      }
+      setSnackbarMessage('删除成功')
+      setSnackbarSeverity('success')
+      setSnackbarOpen(true)
+      setDeleteDialogOpen(false)
+      setDeleteTarget(null)
+    } catch (error) {
+      console.error('删除失败:', error)
+      setSnackbarMessage('删除失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    } finally {
+      setDeleteLoading(false)
+    }
+  }
+
+  const handleCancelDelete = () => {
+    if (deleteLoading) return
+    setDeleteDialogOpen(false)
+    setDeleteTarget(null)
+  }
+
+  const handleDropCollection = async (targetCollectionId: number) => {
+    if (!projectId || draggingCollectionId == null || draggingCollectionId === targetCollectionId) {
+      return
+    }
+
+    const reordered = [...settingCollections]
+    const fromIndex = reordered.findIndex((c) => c.id === draggingCollectionId)
+    const toIndex = reordered.findIndex((c) => c.id === targetCollectionId)
+    if (fromIndex === -1 || toIndex === -1) {
+      setDraggingCollectionId(null)
+      return
+    }
+
+    const [moved] = reordered.splice(fromIndex, 1)
+    reordered.splice(toIndex, 0, moved)
+
+    const withOrder = reordered.map((c, index) => ({
+      ...c,
+      order: index,
+    }))
+    setSettingCollections(withOrder)
+
+    try {
+      await Promise.all(
+        withOrder.map((c, index) => apiClient.updateSettingCollection(c.id, { order: index })),
+      )
+      setSnackbarMessage('已更新集合顺序')
+      setSnackbarSeverity('success')
+      setSnackbarOpen(true)
+    } catch (error) {
+      console.error('更新集合排序失败:', error)
+      setSnackbarMessage('更新集合排序失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+      if (projectId) {
+        const projectIdNum = Number(projectId)
+        if (!Number.isNaN(projectIdNum)) {
+          loadSettingCollections(projectIdNum)
+        }
+      }
+    } finally {
+      setDraggingCollectionId(null)
+    }
+  }
+
+  const handleDropItem = async (targetItemId: number) => {
+    if (!selectedCollectionId || draggingItemId == null || draggingItemId === targetItemId) {
+      return
+    }
+
+    const reordered = [...settingItems]
+    const fromIndex = reordered.findIndex((i) => i.id === draggingItemId)
+    const toIndex = reordered.findIndex((i) => i.id === targetItemId)
+    if (fromIndex === -1 || toIndex === -1) {
+      setDraggingItemId(null)
+      return
+    }
+
+    const [moved] = reordered.splice(fromIndex, 1)
+    reordered.splice(toIndex, 0, moved)
+
+    const withOrder = reordered.map((item, index) => ({
+      ...item,
+      order: index,
+    }))
+    setSettingItems(withOrder)
+
+    try {
+      await apiClient.reorderSettingItems(
+        selectedCollectionId,
+        withOrder.map((item, index) => ({ id: item.id, order: index })),
+      )
+      setSnackbarMessage('已更新设定项顺序')
+      setSnackbarSeverity('success')
+      setSnackbarOpen(true)
+    } catch (error) {
+      console.error('更新设定项排序失败:', error)
+      setSnackbarMessage('更新设定项排序失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+      await loadSettingItems(selectedCollectionId)
+    } finally {
+      setDraggingItemId(null)
+    }
+  }
+
+
+  const [editedExpansionContent, setEditedExpansionContent] = useState('')
 
   // 🆕 进度估算器相关状态
   const [progressEstimator, setProgressEstimator] = useState<ProgressEstimator | null>(null)
   const [stageDurations, setStageDurations] = useState<StageDurations | null>(null)
-  const [estimatedProgress, setEstimatedProgress] = useState(0)
   const [estimatedRemainingTime, setEstimatedRemainingTime] = useState(0)
   const [estimatedRemainingTimeMin, setEstimatedRemainingTimeMin] = useState(0)  // 🆕
   const [estimatedRemainingTimeMax, setEstimatedRemainingTimeMax] = useState(0)  // 🆕
@@ -313,7 +927,7 @@ export default function WorkflowControlPage() {
     if (!projectId) return
 
     console.log('🔌 初始化 WebSocket 连接...')
-    
+
     // 连接 WebSocket （异步）
     workflowWebSocket.connect().then(() => {
       console.log('✅ WebSocket 连接就绪，加入项目房间')
@@ -325,13 +939,13 @@ export default function WorkflowControlPage() {
     // 监听阶段更新
     workflowWebSocket.onStageUpdate((data) => {
       console.log('📊 收到阶段更新:', data)
-      
+
       const stageType = data.stage as StageType
-      
+
       // 更新 Redux 状态
       if (data.status === 'active') {
         dispatch(updateStageStatus({ stage: stageType, status: 'active' }))
-        
+
         // ✅ 临时方案：将该阶段的所有 Agent 设置为工作中
         const agents = workflow.stages[stageType].agents
         agents.forEach(agent => {
@@ -346,7 +960,7 @@ export default function WorkflowControlPage() {
         console.log(`✅ 阶段 ${stageType} 开始，所有 Agent 设置为工作中`)
       } else if (data.status === 'completed') {
         dispatch(updateStageStatus({ stage: stageType, status: 'completed' }))
-        
+
         // ✅ 临时方案：将该阶段的所有 Agent 设置为完成
         const agents = workflow.stages[stageType].agents
         agents.forEach(agent => {
@@ -359,16 +973,16 @@ export default function WorkflowControlPage() {
           }))
         })
         console.log(`✅ 阶段 ${stageType} 完成，所有 Agent 设置为完成`)
-        
+
         if (data.output) {
           dispatch(updateStageOutput({ stage: stageType, output: data.output }))
         }
       }
-      
+
       // 更新进度
       if (data.progress !== undefined) {
         setTaskProgress(data.progress)
-        
+
         // ✅ 临时方案：根据阶段进度更新 Agent 进度
         const agents = workflow.stages[stageType].agents
         agents.forEach(agent => {
@@ -416,7 +1030,7 @@ export default function WorkflowControlPage() {
       // 🆕 清除任务状态
       setCurrentTaskId(null)
       setTaskProgress(100)
-      
+
       // 🆕 尝试从 data 中提取阶段信息并更新 Redux
       // 注意：需要后端在 send_task_complete 中传递 stage 和 output
       if (data.result && typeof data.result === 'object') {
@@ -427,11 +1041,11 @@ export default function WorkflowControlPage() {
           // dispatch(updateStageOutput({ stage: data.stage, output: result.output }))
         }
       }
-      
+
       setSnackbarMessage('任务完成！')
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
-      
+
       console.log('💡 WebSocket 任务完成通知已处理，无需轮询')
     })
 
@@ -457,12 +1071,12 @@ export default function WorkflowControlPage() {
     // 监听 Agent 状态
     workflowWebSocket.onAgentStatus((data) => {
       console.log('🤖 收到 Agent 状态:', data)
-      
+
       // ✅ 更新 Redux 状态
       // 尝试从 agent_id 或 agent_name 推断阶段
       let stage: StageType | null = data.stage as StageType || null
       const agentId = data.agent_id || data.agent_name.toLowerCase().replace(/\s+/g, '-')
-      
+
       // 如果没有阶段信息，尝试从 agent_id 推断
       if (!stage) {
         // 根据 agent_id 推断阶段
@@ -481,7 +1095,7 @@ export default function WorkflowControlPage() {
           stage = workflow.currentStage
         }
       }
-      
+
       if (stage) {
         dispatch(updateAgentStatus({
           stage: stage,
@@ -734,7 +1348,7 @@ export default function WorkflowControlPage() {
 
     // 检查当前阶段是否已完成
     const currentStageData = workflow.stages[workflow.currentStage]
-    
+
     if (currentStageData.status === 'pending') {
       console.log(`🚀 自动执行阶段（异步模式）: ${workflow.currentStage}`)
       executeStageAsync(workflow.currentStage)
@@ -751,7 +1365,7 @@ export default function WorkflowControlPage() {
         // 所有阶段都已完成
         console.log('🎉 所有阶段已完成！')
         setIsRunning(false)
-        
+
         // 🔧 关键修复：只有在“非生成下一章”流程才自动保存
         if (isGenerateNextChapterFlow) {
           console.log('💾 跳过自动保存（生成下一章已经保存）')
@@ -842,7 +1456,7 @@ export default function WorkflowControlPage() {
         const savedMemory = await response.json()
         setLastSaveTime(new Date(savedMemory.updated_at))
         console.log(`✅ 记忆快照已保存 [${trigger}]:`, savedMemory.id)
-        
+
         // 仅在手动保存时显示提示
         if (trigger === 'manual') {
           setSnackbarMessage('✅ 记忆快照已保存')
@@ -863,10 +1477,10 @@ export default function WorkflowControlPage() {
 
     try {
       console.log(`🚀 开始异步执行阶段: ${stage}`)
-      
+
       // 🔧 立即更新阶段状态为 'active'，显示执行中的UI
       dispatch(updateStageStatus({ stage, status: 'active' }))
-      
+
       const response = await fetch('/api/v1/workflow/execute-stage-async', {
         method: 'POST',
         headers: {
@@ -898,7 +1512,6 @@ export default function WorkflowControlPage() {
       // 🆕 启动进度估算器
       if (progressEstimator) {
         progressEstimator.startStage(stage, (state: ProgressState) => {
-          setEstimatedProgress(Math.round(state.displayProgress))
           setEstimatedRemainingTime(Math.round(state.remainingTime))
           setEstimatedRemainingTimeMin(Math.round(state.remainingTimeMin))  // 🆕
           setEstimatedRemainingTimeMax(Math.round(state.remainingTimeMax))  // 🆕
@@ -952,32 +1565,32 @@ export default function WorkflowControlPage() {
           if (response.status === 404) {
             consecutiveErrors++
             console.warn(`⚠️  任务不存在 (${consecutiveErrors}/${maxConsecutiveErrors}): ${taskId}`)
-            
+
             if (consecutiveErrors >= maxConsecutiveErrors) {
               clearInterval(interval)
               setTaskPollingInterval(null)
               setTaskProgress(0)
               setCurrentTaskId(null)
-              
+
               dispatch(updateStageStatus({ stage, status: 'error' }))
-              
+
               setSnackbarMessage(`❌ 任务查询失败：后端未找到任务，请检查后端服务是否正常`)
               setSnackbarSeverity('error')
               setSnackbarOpen(true)
-              
+
               console.error(`❌ 连续${maxConsecutiveErrors}次404错误，停止轮询`)
               return
             }
             // 继续轮询，等待后端任务初始化
             return
           }
-          
+
           throw new Error(`查询任务状态失败: ${response.status}`)
         }
 
         // 🔧 成功响应，重置错误计数
         consecutiveErrors = 0
-        
+
         const data = await response.json()
         console.log(`📊 任务状态:`, data)
 
@@ -1015,7 +1628,7 @@ export default function WorkflowControlPage() {
               }, 1000)
             } else {
               setIsRunning(false)
-              
+
               // 🔧 关键修复：只有在“非生成下一章”流程才自动保存
               if (isGenerateNextChapterFlow) {
                 console.log('💾 跳过自动保存（生成下一章已经保存）')
@@ -1057,7 +1670,7 @@ export default function WorkflowControlPage() {
           console.error(`❌ 轮询超时`)
 
           dispatch(updateStageStatus({ stage, status: 'error' }))
-          
+
           setSnackbarMessage(`❌ ${stageNames[stage]}超时，请重试`)
           setSnackbarSeverity('error')
           setSnackbarOpen(true)
@@ -1068,15 +1681,15 @@ export default function WorkflowControlPage() {
         console.error(`❌ 轮询任务状态失败:`, error)
         // 🔧 其他错误也计入连续错误
         consecutiveErrors++
-        
+
         if (consecutiveErrors >= maxConsecutiveErrors) {
           clearInterval(interval)
           setTaskPollingInterval(null)
           setTaskProgress(0)
           setCurrentTaskId(null)
-          
+
           dispatch(updateStageStatus({ stage, status: 'error' }))
-          
+
           setSnackbarMessage(`❌ 轮询失败: ${error}`)
           setSnackbarSeverity('error')
           setSnackbarOpen(true)
@@ -1087,7 +1700,7 @@ export default function WorkflowControlPage() {
     setTaskPollingInterval(interval)
   }
 
-  // 🆕 渐进式扩展大纲函数（每次扩展5-10章）
+  // 🆕 渐进式扩展大纲函数（步长根据目标和差值动态调整，通常每次扩展3-15章）
   const handleExpandOutline = async () => {
     if (!projectId) return
 
@@ -1096,11 +1709,11 @@ export default function WorkflowControlPage() {
       setExpansionProgress(0)
       setExpansionStartTime(Date.now())
       setEstimatedTimeRemaining(null)
-      
+
       // 🔥 关键修复：先打开对话框，再开始扩展
       setShowExpandOutlineDialog(true)
       setExpandedOutlineData(null)  // 清空旧数据
-      
+
       console.log('📖 开始渐进式扩展大纲...')
 
       // 从当前阶段获取数据
@@ -1123,21 +1736,52 @@ export default function WorkflowControlPage() {
       let totalIterations = 0
       const maxIterations = 10  // 防止无限循环
 
-      while (shouldContinue && totalIterations < maxIterations) {
+      // 🆕 根据用户配置或默认值确定目标章节数（默认按长篇小说 100 章处理）
+      const targetChapters = targetChapterCount && targetChapterCount > 0 ? targetChapterCount : 100
+
+      while (shouldContinue && totalIterations < maxIterations && chapterCount < targetChapters) {
         totalIterations++
-        const increment = Math.floor(Math.random() * 6) + 5  // 随机5-10章
-        
+        const remaining = targetChapters - chapterCount
+        if (remaining <= 0) {
+          break
+        }
+        // 🆕 基于目标章节数和当前差值的动态扩展步长：自动在小步稳健和大步提速之间折中
+        let increment: number
+        const gapRatio = remaining / targetChapters
+
+        if (remaining <= 3) {
+          // 差值很小，直接补齐
+          increment = remaining
+        } else if (targetChapters <= 40) {
+          // 短篇/中篇：更细腻的小步扩展
+          increment = Math.min(5, remaining)
+        } else {
+          // 长篇：根据与目标的差值动态调整步长
+          if (gapRatio > 0.6) {
+            // 离目标还很远，步长稍大一些，但不要一次跳太多
+            increment = Math.min(15, Math.max(5, Math.round(remaining * 0.4)))
+          } else if (gapRatio > 0.3) {
+            increment = Math.min(10, Math.max(4, Math.round(remaining * 0.3)))
+          } else {
+            // 接近目标时，收窄步长，避免大幅度震荡
+            increment = Math.min(8, Math.max(3, Math.round(remaining * 0.2)))
+          }
+        }
+
+        // 最后再做一次安全收敛，保证不超出剩余章节
+        increment = Math.max(1, Math.min(increment, remaining))
+
         // 🔥 更新进度
         const progress = calculateProgress(totalIterations, maxIterations)
         setExpansionProgress(progress)
-        
+
         // 🔥 估算剩余时间
         if (expansionStartTime) {
-          const remaining = estimateRemainingTime(expansionStartTime, totalIterations, maxIterations)
-          setEstimatedTimeRemaining(remaining)
+          const remainingTime = estimateRemainingTime(expansionStartTime, totalIterations, maxIterations)
+          setEstimatedTimeRemaining(remainingTime)
         }
-        
-        console.log(`🔄 第${totalIterations}次扩展：从 ${chapterCount} 章扩展 ${increment} 章... (进度: ${progress}%)`)
+
+        console.log(`🔄 第${totalIterations}次扩展：从 ${chapterCount} 章扩展 ${increment} 章（目标：${targetChapters} 章）... (进度: ${progress}%)`)
 
         const response = await fetch('/api/v1/workflow/expand-outline', {
           method: 'POST',
@@ -1151,7 +1795,8 @@ export default function WorkflowControlPage() {
             world_setting: worldSetting,
             characters: characters,
             current_chapter_count: chapterCount,
-            increment: increment
+            increment: increment,
+            target_total_chapters: targetChapters,
           }),
         })
 
@@ -1187,10 +1832,10 @@ export default function WorkflowControlPage() {
 
       // 保存最终结果
       console.log('💾 开始保存扩展结果...')
-      
+
       setStructureContent(currentOutline)
       setCurrentChapterCount(chapterCount)
-      
+
       // 🔥 保存到历史记录
       const historyRecord = {
         timestamp: Date.now(),
@@ -1199,7 +1844,7 @@ export default function WorkflowControlPage() {
       }
       saveHistory('outline', currentOutline, chapterCount)
       setOutlineHistory(prev => [...prev, historyRecord])
-      
+
       console.log('✅ 状态已更新，当前阶段:', workflow.currentStage)
       setExpansionProgress(100)
 
@@ -1218,7 +1863,7 @@ export default function WorkflowControlPage() {
     }
   }
 
-  // 🆕 渐进式扩展人物函数（每次扩展3-6个）
+  // 🆕 渐进式扩展人物函数（步长根据目标和差值动态调整，通常每次扩展2-7人）
   const handleExpandCharacters = async () => {
     if (!projectId) return
 
@@ -1251,11 +1896,42 @@ export default function WorkflowControlPage() {
       let totalIterations = 0
       const maxIterations = 8  // 防止无限循环
 
-      while (shouldContinue && totalIterations < maxIterations) {
+      // 🆕 根据用户配置或默认值确定目标人物数（默认按长篇小说 25 人处理）
+      const targetCharacters = targetCharacterCount && targetCharacterCount > 0 ? targetCharacterCount : 25
+
+      while (shouldContinue && totalIterations < maxIterations && characterCount < targetCharacters) {
         totalIterations++
-        const increment = Math.floor(Math.random() * 4) + 3  // 随机3-6个
-        
-        console.log(`🔄 第${totalIterations}次扩展：从 ${characterCount} 个扩展 ${increment} 个...`)
+        const remaining = targetCharacters - characterCount
+        if (remaining <= 0) {
+          break
+        }
+        // 🆕 基于目标人物数和当前差值的动态扩展步长：在小步精修和中步提速之间折中
+        let increment: number
+        const gapRatio = remaining / targetCharacters
+
+        if (remaining <= 2) {
+          // 差值很小，直接补齐
+          increment = remaining
+        } else if (targetCharacters <= 12) {
+          // 人物总目标较小：保持更细腻的小步扩展
+          increment = Math.min(3, remaining)
+        } else {
+          // 长篇人物体系：根据差值动态调整步长
+          if (gapRatio > 0.6) {
+            // 离目标还比较远，适当放大步长
+            increment = Math.min(7, Math.max(3, Math.round(remaining * 0.5)))
+          } else if (gapRatio > 0.3) {
+            increment = Math.min(5, Math.max(3, Math.round(remaining * 0.4)))
+          } else {
+            // 接近目标时收窄步长，避免一次性加太多人
+            increment = Math.min(4, Math.max(2, Math.round(remaining * 0.3)))
+          }
+        }
+
+        // 最后安全收敛，确保不超过剩余人数
+        increment = Math.max(1, Math.min(increment, remaining))
+
+        console.log(`🔄 第${totalIterations}次扩展：从 ${characterCount} 个扩展 ${increment} 个（目标：${targetCharacters} 个）...`)
 
         const response = await fetch('/api/v1/workflow/expand-characters', {
           method: 'POST',
@@ -1269,7 +1945,8 @@ export default function WorkflowControlPage() {
             world_setting: worldSetting,
             plot_outline: plotOutline,
             current_character_count: characterCount,
-            increment: increment
+            increment: increment,
+            target_total_characters: targetCharacters,
           }),
         })
 
@@ -1310,10 +1987,10 @@ export default function WorkflowControlPage() {
       }
 
       // 保存最终结果
-      const charactersText = Array.isArray(mainCharacters) 
+      const charactersText = Array.isArray(mainCharacters)
         ? JSON.stringify(mainCharacters, null, 2)
         : mainCharacters
-      
+
       setCharacterContent(charactersText)
       setCurrentCharacterCount(characterCount)
 
@@ -1348,6 +2025,7 @@ export default function WorkflowControlPage() {
         startWorkflow({
           projectId: parseInt(projectId),
           requirement,
+          targetChapterCount,
         })
       ).unwrap()
       setOpenDialog(false)
@@ -1365,7 +2043,7 @@ export default function WorkflowControlPage() {
   // 🔥 导出大纲为Markdown
   const handleExportOutlineMarkdown = () => {
     if (!expandedOutlineData) return
-    
+
     const markdown = exportToMarkdown(
       expandedOutlineData.expanded_outline,
       `${currentProject?.title || '小说'} - 大纲扩展`,
@@ -1376,7 +2054,7 @@ export default function WorkflowControlPage() {
       }
     )
     downloadFile(markdown, `大纲扩展_${currentChapterCount}章_${Date.now()}.md`, 'text/markdown')
-    
+
     setSnackbarMessage('✅ 已导出为 Markdown')
     setSnackbarSeverity('success')
     setSnackbarOpen(true)
@@ -1385,14 +2063,14 @@ export default function WorkflowControlPage() {
   // 🔥 导出章节分解为CSV
   const handleExportChapterCSV = () => {
     if (!expandedOutlineData?.chapter_breakdown) return
-    
+
     const chapterBreakdown = typeof expandedOutlineData.chapter_breakdown === 'string'
       ? expandedOutlineData.chapter_breakdown
       : JSON.stringify(expandedOutlineData.chapter_breakdown)
-    
+
     const csv = exportChapterBreakdownToCSV(chapterBreakdown)
     downloadFile(csv, `章节分解_${currentChapterCount}章_${Date.now()}.csv`, 'text/csv')
-    
+
     setSnackbarMessage('✅ 已导出为 Excel/CSV')
     setSnackbarSeverity('success')
     setSnackbarOpen(true)
@@ -1409,13 +2087,13 @@ export default function WorkflowControlPage() {
   const handleSaveEditedOutline = () => {
     setStructureContent(editedExpansionContent)
     setIsEditingExpansion(false)
-    
+
     // 更新当前对话框数据
     setExpandedOutlineData({
       ...expandedOutlineData,
       expanded_outline: editedExpansionContent
     })
-    
+
     // 保存到历史
     const historyRecord = {
       timestamp: Date.now(),
@@ -1424,7 +2102,7 @@ export default function WorkflowControlPage() {
     }
     saveHistory('outline', editedExpansionContent, currentChapterCount)
     setOutlineHistory(prev => [...prev, historyRecord])
-    
+
     setSnackbarMessage('✅ 编辑已保存')
     setSnackbarSeverity('success')
     setSnackbarOpen(true)
@@ -1486,7 +2164,7 @@ export default function WorkflowControlPage() {
 
       const contentData = getContentResponse.data
       const content = contentData.content || ''
-      
+
       if (!content || content.trim() === '') {
         console.error('❌ 章节内容为空')
         setSnackbarMessage('没有可保存的章节内容')
@@ -1495,10 +2173,10 @@ export default function WorkflowControlPage() {
         setSavingChapter(false)  // ✅ 重置保存状态
         return
       }
-      
+
       console.log('✅ 成功获取迭代阶段内容，长度:', content.length)
 
-      
+
       // 如果用户没有输入标题，后端会自动生成
       const titleToSave = chapterTitle.trim() || ''
       console.log('📍 章节标题:', titleToSave || '(自动生成)')
@@ -1514,11 +2192,11 @@ export default function WorkflowControlPage() {
       // axios成功响应（2xx状态码）
       const data = response.data
       console.log('✅ 章节创建成功:', data)
-      
+
       setSnackbarMessage(`✅ 章节已保存：${data.title} (${data.word_count} 字)`)
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
-      
+
       // 关闭对话框，清空标题
       setShowSaveDialog(false)
       setChapterTitle('')
@@ -1531,9 +2209,9 @@ export default function WorkflowControlPage() {
       }, 1500)
     } catch (error: any) {
       console.error('❌ 保存章节异常:', error)
-      
+
       let errorMessage = '保存章节失败，请重试'
-      
+
       if (error.response) {
         // 服务器返回错误响应
         errorMessage = error.response.data?.error || error.response.data?.detail || errorMessage
@@ -1547,7 +2225,7 @@ export default function WorkflowControlPage() {
         errorMessage = error.message || errorMessage
         console.error('❌ 请求配置错误:', error.message)
       }
-      
+
       setSnackbarMessage(errorMessage)
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
@@ -1572,7 +2250,7 @@ export default function WorkflowControlPage() {
       const getContentResponse = await apiClient.get(`/api/v1/workflow/${projectId}/stage/iteration/content`)
       const contentData = getContentResponse.data
       const content = contentData.content || ''
-      
+
       if (!content || content.trim() === '') {
         console.error('❌ 章节内容为空，跳过自动保存')
         setSnackbarMessage('⚠️ 没有可保存的章节内容')
@@ -1580,7 +2258,7 @@ export default function WorkflowControlPage() {
         setSnackbarOpen(true)
         return
       }
-      
+
       console.log('✅ 获取内容成功，长度:', content.length)
 
       // 创建章节记录（标题自动生成）
@@ -1592,29 +2270,29 @@ export default function WorkflowControlPage() {
 
       const data = response.data
       console.log('✅ 自动保存成功:', data)
-      
+
       // 显示成功提示
       setSnackbarMessage(`✅ 章节已自动保存：${data.title} (${data.word_count} 字)`)
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
-      
+
       // 1.5秒后跳转到Dashboard
       console.log('📍 1.5秒后跳转到Dashboard...')
       setTimeout(() => {
         navigate(`/dashboard?projectId=${projectId}`)
       }, 1500)
-      
+
     } catch (error: any) {
       console.error('❌ 自动保存章节失败:', error)
-      
+
       let errorMessage = '自动保存失败'
-      
+
       if (error.response) {
         errorMessage = error.response.data?.error || error.response.data?.detail || errorMessage
       } else if (error.request) {
         errorMessage = '无法连接到服务器'
       }
-      
+
       setSnackbarMessage(`❌ ${errorMessage}`)
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
@@ -1626,14 +2304,14 @@ export default function WorkflowControlPage() {
   // 打开故事概念对话框
   const handleOpenConceptDialog = async () => {
     setShowConceptDialog(true)
-    
+
     // ⚡ 优化：如果已经有缓存内容，直接使用，不再请求
     if (conceptContent && conceptContent.trim() !== '') {
       console.log('⚡ 使用缓存的故事概念内容，长度:', conceptContent.length)
       setEditedContent(conceptContent)
       return
     }
-    
+
     // 如果没有缓存，才从API获取
     setConceptLoading(true)
 
@@ -1698,7 +2376,7 @@ export default function WorkflowControlPage() {
       if (response.ok) {
         // ✅ 更新state，保持已保存的内容
         setConceptContent(editedContent)
-        
+
         setSnackbarMessage('内容已保存')
         setSnackbarSeverity('success')
         setSnackbarOpen(true)
@@ -1723,14 +2401,14 @@ export default function WorkflowControlPage() {
   // 打开情节大纲对话框
   const handleOpenStructureDialog = async () => {
     setShowStructureDialog(true)
-    
+
     // ⚡ 优化：如果已经有缓存内容，直接使用，不再请求
     if (structureContent && structureContent.trim() !== '') {
       console.log('⚡ 使用缓存的情节大纲内容，长度:', structureContent.length)
       setEditedStructureContent(structureContent)
       return
     }
-    
+
     // 如果没有缓存，才从API获取
     setStructureLoading(true)
 
@@ -1793,7 +2471,7 @@ export default function WorkflowControlPage() {
       if (response.ok) {
         // ✅ 更新state，保持已保存的内容
         setStructureContent(editedStructureContent)
-        
+
         setSnackbarMessage('内容已保存')
         setSnackbarSeverity('success')
         setSnackbarOpen(true)
@@ -1817,14 +2495,14 @@ export default function WorkflowControlPage() {
   // 打开章节初稿对话框
   const handleOpenContentDialog = async () => {
     setShowContentDialog(true)
-    
+
     // ⚡ 优化：如果已经有缓存内容，直接使用，不再请求
     if (contentDraftContent && contentDraftContent.trim() !== '') {
       console.log('⚡ 使用缓存的章节初稿内容，长度:', contentDraftContent.length)
       setEditedContentDraftContent(contentDraftContent)
       return
     }
-    
+
     // 如果没有缓存，才从API获取
     setContentLoading(true)
 
@@ -1896,21 +2574,21 @@ export default function WorkflowControlPage() {
 
       // ✅ 更新state，保持已保存的内容
       setContentDraftContent(editedContentDraftContent)
-      
+
       // ✅ 更新 Redux store
       dispatch(updateStageOutput({ stage: 'content', output: editedContentDraftContent }))
       dispatch(updateStageStatus({ stage: 'content', status: 'completed' }))
-      
+
       // ✅ 关键修复：重置后续阶段状态
       dispatch(resetFollowingStages('content'))
-      
+
       // ✅ 显示删除成功的消息（如果有的话）
       if (saveData.deleted_chapter) {
         setSnackbarMessage(`已更新第${saveData.deleted_chapter.chapter_number}章并启动后续工作流...`)
       } else {
         setSnackbarMessage('内容已保存，正在启动后续工作流...')
       }
-      
+
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
 
@@ -1921,7 +2599,7 @@ export default function WorkflowControlPage() {
       setTimeout(async () => {
         const nextStage: StageType = 'review'
         dispatch(setCurrentStage(nextStage))
-        
+
         console.log('🚀 使用异步模式继续工作流...')
         executeStageAsync(nextStage)
       }, 1000)
@@ -1958,7 +2636,7 @@ export default function WorkflowControlPage() {
       if (response.ok) {
         // ✅ 更新state，保持已保存的内容
         setContentDraftContent(editedContentDraftContent)
-        
+
         setSnackbarMessage('内容已保存')
         setSnackbarSeverity('success')
         setSnackbarOpen(true)
@@ -1982,14 +2660,23 @@ export default function WorkflowControlPage() {
   // 打开世界观设定对话框
   const handleOpenWorldDialog = async () => {
     setShowWorldDialog(true)
-    
+    setWorldSettingsTab('text')
+
+    if (projectId) {
+      const projectIdNum = Number(projectId)
+      if (!Number.isNaN(projectIdNum)) {
+        // 每次打开时刷新类型化设定集合
+        loadSettingCollections(projectIdNum)
+      }
+    }
+
     // ⚡ 优化：如果已经有缓存内容，直接使用，不再请求
     if (worldContent && worldContent.trim() !== '') {
       console.log('⚡ 使用缓存的世界观设定内容，长度:', worldContent.length)
       setEditedWorldContent(worldContent)
       return
     }
-    
+
     // 如果没有缓存，才从API获取
     setWorldLoading(true)
 
@@ -2026,6 +2713,7 @@ export default function WorkflowControlPage() {
   // 关闭世界观设定对话框
   const handleCloseWorldDialog = () => {
     setShowWorldDialog(false)
+    setShowTemplateDialog(false)
     // 不清空 worldContent，保持已保存的内容
     setEditedWorldContent('')  // 只清空编辑状态
   }
@@ -2054,7 +2742,7 @@ export default function WorkflowControlPage() {
       if (response.ok) {
         // ✅ 更新state，保持已保存的内容
         setWorldContent(editedWorldContent)
-        
+
         setSnackbarMessage('内容已保存')
         setSnackbarSeverity('success')
         setSnackbarOpen(true)
@@ -2078,14 +2766,19 @@ export default function WorkflowControlPage() {
   // 打开人物设定对话框
   const handleOpenCharacterDialog = async () => {
     setShowCharacterDialog(true)
-    
+
+    // 打开时默认回到文本模式，且异步加载结构化人物列表/境界列表
+    setCharacterTab('text')
+    loadStructuredCharacters()
+    loadAvailableRealms()
+
     // ⚡ 优化：如果已经有缓存内容，直接使用，不再请求
     if (characterContent && characterContent.trim() !== '') {
       console.log('⚡ 使用缓存的人物设定内容，长度:', characterContent.length)
       setEditedCharacterContent(characterContent)
       return
     }
-    
+
     // 如果没有缓存，才从API获取
     setCharacterLoading(true)
 
@@ -2125,6 +2818,189 @@ export default function WorkflowControlPage() {
     // 不清空 characterContent，保持已保存的内容
     setEditedCharacterContent('')  // 只清空编辑状态
   }
+  // 🧬 结构化人物：打开角色编辑对话框（新建/编辑）
+  const handleOpenCharacterEditDialog = async (character?: any) => {
+    if (!projectId) {
+      setSnackbarMessage('请先选择一个项目')
+      setSnackbarSeverity('warning')
+      setSnackbarOpen(true)
+      return
+    }
+
+    const projectIdNum = Number(projectId)
+    if (Number.isNaN(projectIdNum)) return
+
+    setCharacterFormLoading(true)
+    setShowCharacterEditDialog(true)
+
+    try {
+      // 基础表单
+      if (character) {
+        setCharacterFormData({ ...character })
+        // 加载该角色已掌握的功法
+        const techRes = await apiClient.getCharacterTechniques(character.id)
+        setCharacterTechniques(techRes.data || [])
+      } else {
+        setCharacterFormData({
+          project_id: projectIdNum,
+          name: '',
+          role: '',
+          gender: '',
+          age: undefined,
+          faction: '',
+          importance_level: '',
+          appearance_status: '',
+          life_status: '',
+          current_realm_item_id: undefined,
+          first_appearance_chapter: undefined,
+          summary: '',
+          profile: '',
+          tags: [],
+          relations: {},
+        })
+        setCharacterTechniques([])
+      }
+
+      // 保证功法 / 境界下拉列表已加载
+      await Promise.all([loadAvailableTechniques(), loadAvailableRealms()])
+    } catch (error) {
+      console.error('打开角色编辑对话框失败:', error)
+      setSnackbarMessage('加载角色信息失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    } finally {
+      setCharacterFormLoading(false)
+    }
+  }
+
+  const handleCloseCharacterEditDialog = () => {
+    if (characterFormSaving) return
+    setShowCharacterEditDialog(false)
+    setCharacterFormData({})
+    setCharacterTechniques([])
+    setSelectedTechniqueId('')
+  }
+
+  // 保存角色基础信息 + 功法列表
+  const handleSaveCharacterForm = async () => {
+    if (!projectId) return
+
+    const projectIdNum = Number(projectId)
+    if (Number.isNaN(projectIdNum)) return
+
+    setCharacterFormSaving(true)
+    try {
+      let savedCharacter = characterFormData
+
+      if (characterFormData.id) {
+        // 更新角色
+        const { id, project_id, created_at, updated_at, ...updatePayload } = characterFormData
+        const res = await apiClient.updateCharacter(characterFormData.id, updatePayload)
+        savedCharacter = res.data
+      } else {
+        // 新建角色
+        const createPayload = {
+          ...characterFormData,
+          project_id: projectIdNum,
+        }
+        const res = await apiClient.createCharacter(projectIdNum, createPayload)
+        savedCharacter = res.data
+      }
+
+      // 保存功法列表（覆盖式）
+      if (savedCharacter.id != null) {
+        const payload = {
+          techniques: characterTechniques.map((t: any) => ({
+            technique_item_id: t.technique_item_id,
+            proficiency: t.proficiency || null,
+            learned_at_chapter: t.learned_at_chapter ?? null,
+            notes: t.notes || null,
+          })),
+        }
+        await apiClient.updateCharacterTechniques(savedCharacter.id, payload)
+      }
+
+      setSnackbarMessage('角色已保存')
+      setSnackbarSeverity('success')
+      setSnackbarOpen(true)
+
+      setShowCharacterEditDialog(false)
+      setCharacterFormData({})
+      setCharacterTechniques([])
+      setSelectedTechniqueId('')
+
+      // 刷新列表
+      await loadStructuredCharacters()
+    } catch (error) {
+      console.error('保存角色失败:', error)
+      setSnackbarMessage('保存角色失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    } finally {
+      setCharacterFormSaving(false)
+    }
+  }
+
+  // 删除角色
+  const handleDeleteCharacter = async (characterId: number) => {
+    if (!window.confirm('确定要删除该角色及其功法关联吗？')) return
+
+    try {
+      await apiClient.deleteCharacter(characterId)
+      setSnackbarMessage('角色已删除')
+      setSnackbarSeverity('success')
+      setSnackbarOpen(true)
+      await loadStructuredCharacters()
+    } catch (error) {
+      console.error('删除角色失败:', error)
+      setSnackbarMessage('删除角色失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    }
+  }
+
+  // 向当前角色功法列表中添加一条记录
+  const handleAddTechniqueToCharacter = () => {
+    if (!selectedTechniqueId) return
+    const techniqueIdNumber = Number(selectedTechniqueId)
+
+    // 防止重复添加
+    if (characterTechniques.some((t: any) => t.technique_item_id === techniqueIdNumber)) {
+      setSnackbarMessage('该功法已在角色列表中')
+      setSnackbarSeverity('warning')
+      setSnackbarOpen(true)
+      return
+    }
+
+    const techniqueMeta = availableTechniques.find((t: any) => t.technique_item_id === techniqueIdNumber || t.id === techniqueIdNumber)
+    const techniqueName = techniqueMeta?.technique_name || techniqueMeta?.name || '未知功法'
+
+    setCharacterTechniques((prev: any[]) => [
+      ...prev,
+      {
+        technique_item_id: techniqueIdNumber,
+        proficiency: '',
+        learned_at_chapter: undefined,
+        notes: '',
+        technique_name: techniqueName,
+      },
+    ])
+
+    setSelectedTechniqueId('')
+  }
+
+  const handleUpdateCharacterTechniqueField = (index: number, field: string, value: any) => {
+    setCharacterTechniques((prev: any[]) => {
+      const next = [...prev]
+      next[index] = { ...next[index], [field]: value }
+      return next
+    })
+  }
+
+  const handleRemoveCharacterTechnique = (index: number) => {
+    setCharacterTechniques((prev: any[]) => prev.filter((_, i) => i !== index))
+  }
+
 
   // 保存并继续（人物设定）
 
@@ -2150,7 +3026,7 @@ export default function WorkflowControlPage() {
       if (response.ok) {
         // ✅ 更新state，保持已保存的内容
         setCharacterContent(editedCharacterContent)
-        
+
         setSnackbarMessage('内容已保存')
         setSnackbarSeverity('success')
         setSnackbarOpen(true)
@@ -2174,14 +3050,14 @@ export default function WorkflowControlPage() {
   // 打开最终版本对话框
   const handleOpenFinalProduct = async () => {
     setShowFinalVersionDialog(true)
-    
+
     // ⚡ 优化：如果已经有缓存内容，直接使用，不再请求
     if (finalVersionContent && finalVersionContent.trim() !== '') {
       console.log('⚡ 使用缓存的最终版本内容，长度:', finalVersionContent.length)
       setEditedFinalVersionContent(finalVersionContent)
       return
     }
-    
+
     // 如果没有缓存，才从API获取
     setFinalVersionLoading(true)
 
@@ -2223,7 +3099,7 @@ export default function WorkflowControlPage() {
 
     try {
       console.log('📍 开始生成下一章...')
-      
+
       const response = await fetch(`/api/v1/workflow/${projectId}/generate-next-chapter`, {
         method: 'POST',
         headers: {
@@ -2235,10 +3111,10 @@ export default function WorkflowControlPage() {
       if (response.ok) {
         const data = await response.json()
         console.log('✅ 生成下一章成功:', data)
-        
+
         // 🔧 关键修复：设置标记，表示这是“生成下一章”流程（已经保存）
         setIsGenerateNextChapterFlow(true)
-        
+
         setSnackbarMessage(`✅ 已开始生成第${data.next_chapter_number}章，正在跳转到内容创作阶段...`)
         setSnackbarSeverity('success')
         setSnackbarOpen(true)
@@ -2251,7 +3127,7 @@ export default function WorkflowControlPage() {
       } else {
         const errorData = await response.json()
         console.error('❌ 生成下一章失败:', errorData)
-        
+
         setSnackbarMessage(errorData.error || '生成下一章失败，请重试')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
@@ -2293,7 +3169,7 @@ export default function WorkflowControlPage() {
         title: chapterTitleInput,
         token: localStorage.getItem('access_token') ? '存在' : '不存在'
       })
-      
+
       // ✅ 更新state，保持已保存的内容
       setFinalVersionContent(editedFinalVersionContent)
 
@@ -2307,10 +3183,10 @@ export default function WorkflowControlPage() {
       // axios成功响应（2xx状态码）
       const data = response.data
       console.log('✅ 章节保存成功:', data)
-      
+
       // ✅ 关闭对话框
       handleCloseFinalVersionDialog()
-      
+
       // 显示成功消息（后端直接返回章节对象，不是嵌套在chapter字段中）
       setSnackbarMessage(`✅ 第${data.chapter_number}章已保存：${data.title} (${data.word_count}字)`)
       setSnackbarSeverity('success')
@@ -2324,9 +3200,9 @@ export default function WorkflowControlPage() {
     } catch (error: any) {
       // axios错误响应（非2xx状态码或网络错误）
       console.error('❌ 保存章节异常:', error)
-      
+
       let errorMessage = '保存章节失败，请重试'
-      
+
       if (error.response) {
         // 服务器返回错误响应
         errorMessage = error.response.data?.error || error.response.data?.detail || errorMessage
@@ -2340,7 +3216,7 @@ export default function WorkflowControlPage() {
         errorMessage = error.message || errorMessage
         console.error('❌ 请求配置错误:', error.message)
       }
-      
+
       setSnackbarMessage(errorMessage)
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
@@ -2479,7 +3355,7 @@ export default function WorkflowControlPage() {
       <Grid container spacing={3}>
         {/* 左侧：阶段详情 */}
         <Grid item xs={12} md={8}>
-          <StageDetailPanel 
+          <StageDetailPanel
             stage={workflow.currentStage}
           />
         </Grid>
@@ -2503,7 +3379,7 @@ export default function WorkflowControlPage() {
               <Typography variant="h6" sx={{ mb: 2 }}>
                 🧠 记忆管理
               </Typography>
-              
+
               {/* 自动保存开关 */}
               <FormControlLabel
                 control={
@@ -2516,14 +3392,14 @@ export default function WorkflowControlPage() {
                 label="自动保存"
                 sx={{ mb: 1 }}
               />
-              
+
               {/* 最后保存时间 */}
               {lastSaveTime && (
                 <Typography variant="caption" display="block" sx={{ mb: 2, color: 'text.secondary' }}>
                   最后保存：{lastSaveTime.toLocaleTimeString()}
                 </Typography>
               )}
-              
+
               {/* 手动保存按钮 */}
               <Button
                 fullWidth
@@ -2535,7 +3411,7 @@ export default function WorkflowControlPage() {
               >
                 手动保存快照
               </Button>
-              
+
               {/* 设置提示 */}
               <Typography variant="caption" display="block" sx={{ color: 'text.secondary' }}>
                 {autoSaveEnabled ? '✅ 每5分钟自动保存' : '⚠️ 自动保存已关闭'}
@@ -2585,24 +3461,6 @@ export default function WorkflowControlPage() {
             >
               人物设定
             </Button>
-            {/* 🆕 扩展人物按钮 */}
-            <Tooltip 
-              title="💡 建议先点击下方'📖 扩展情节大纲'，再扩展人物，这样生成的角色会更契合剧情需求。每次增加3-6个角色，直到AI判断不需要继续扩展。" 
-              placement="top"
-              arrow
-            >
-              <span>
-                <Button
-                  variant="contained"
-                  color="secondary"
-                  onClick={handleExpandCharacters}
-                  disabled={!characterContent || !worldContent || !structureContent || expandingCharacters}
-                  startIcon={expandingCharacters ? <CircularProgress size={20} /> : <PeopleIcon />}
-                >
-                  {expandingCharacters ? '扩展中...' : `👥 扩展人物${currentCharacterCount > 0 ? ` (当前${currentCharacterCount}个)` : ''}`}
-                </Button>
-              </span>
-            </Tooltip>
           </Box>
         ) : workflow.currentStage === 'structure' ? (
           /* 结构设计阶段：显示"情节大纲"按钮 */
@@ -2615,24 +3473,6 @@ export default function WorkflowControlPage() {
             >
               情节大纲
             </Button>
-            {/* 🆕 扩展大纲按钮 */}
-            <Tooltip 
-              title="💡 渐进式扩展大纲，每次增加5-10章，直到AI判断不需要继续扩展。建议在有一定内容后再扩展人物。" 
-              placement="top"
-              arrow
-            >
-              <span>
-                <Button
-                  variant="contained"
-                  color="secondary"
-                  onClick={handleExpandOutline}
-                  disabled={!structureContent || !worldContent || !characterContent || expandingOutline}
-                  startIcon={expandingOutline ? <CircularProgress size={20} /> : <ArticleIcon />}
-                >
-                  {expandingOutline ? '扩展中...' : `📖 扩展情节大纲${currentChapterCount > 0 ? ` (当前${currentChapterCount}章)` : ''}`}
-                </Button>
-              </span>
-            </Tooltip>
           </Box>
         ) : workflow.currentStage === 'content' ? (
           /* 内容创作阶段：显示“章节初稿”按钮 */
@@ -2691,17 +3531,17 @@ export default function WorkflowControlPage() {
       </Box>
 
       {/* 开始创作对话框 */}
-      <Dialog 
-        open={openDialog} 
-        onClose={() => !isStarting && setOpenDialog(false)} 
-        maxWidth="sm" 
+      <Dialog
+        open={openDialog}
+        onClose={() => !isStarting && setOpenDialog(false)}
+        maxWidth="sm"
         fullWidth
       >
         <Box sx={{ p: 3 }}>
           <Typography variant="h6" sx={{ mb: 2 }}>
             输入创作需求
           </Typography>
-          
+
           {/* 启动中的加载提示 */}
           {isStarting && (
             <Alert severity="info" sx={{ mb: 2 }}>
@@ -2713,7 +3553,7 @@ export default function WorkflowControlPage() {
               </Box>
             </Alert>
           )}
-          
+
           <TextField
             fullWidth
             multiline
@@ -2725,7 +3565,7 @@ export default function WorkflowControlPage() {
             disabled={isStarting}
           />
           <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
-            <Button 
+            <Button
               onClick={() => setOpenDialog(false)}
               disabled={isStarting}
             >
@@ -2851,39 +3691,79 @@ export default function WorkflowControlPage() {
             </Box>
           ) : (
             <>
-              <TextField
-                fullWidth
-                multiline
-                rows={12}
-                value={editedStructureContent}
-                onChange={(e) => setEditedStructureContent(e.target.value)}
-                placeholder="情节大纲文本内容..."
-                sx={{ mb: 2 }}
-                disabled={structureSaving}
-                InputProps={{
-                  style: {
-                    fontFamily: 'monospace',
-                    fontSize: '0.875rem',
-                  }
-                }}
-              />
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={12}
+                  value={editedStructureContent}
+                  onChange={(e) => setEditedStructureContent(e.target.value)}
+                  placeholder="情节大纲文本内容..."
+                  sx={{ mb: 2 }}
+                  disabled={structureSaving}
+                  InputProps={{
+                    style: {
+                      fontFamily: 'monospace',
+                      fontSize: '0.875rem',
+                    }
+                  }}
+                />
 
-              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
-                <Button
-                  onClick={handleCloseStructureDialog}
-                  disabled={structureSaving}
-                >
-                  取消
-                </Button>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={handleSaveOnlyStructure}
-                  disabled={structureSaving}
-                  startIcon={structureSaving ? <CircularProgress size={20} /> : <SaveIcon />}
-                >
-                  {structureSaving ? '保存中...' : '保存'}
-                </Button>
+                {/* 底部一行：左侧为目标章节数+扩展按钮，右侧为取消/保存 */}
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1 }}>
+                  {/* 左侧：目标章节数 + 扩展情节大纲 */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <TextField
+                      label="目标章节数"
+                      type="number"
+                      size="small"
+                      value={targetChapterCount}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value, 10)
+                        setTargetChapterCount(Number.isNaN(value) ? 0 : value)
+                      }}
+                      inputProps={{ min: 1 }}
+                      sx={{ width: 150 }}
+                    />
+
+                    <Tooltip
+                      title="💡默认目标为100章，可在右侧输入框中调整。"
+                      placement="top"
+                      arrow
+                    >
+                      <span>
+                        <Button
+                          variant="contained"
+                          color="secondary"
+                          onClick={handleExpandOutline}
+                          disabled={!structureContent || !worldContent || !characterContent || expandingOutline}
+                          startIcon={expandingOutline ? <CircularProgress size={20} /> : <ArticleIcon />}
+                        >
+                          {expandingOutline ? '扩展中...' : `📖 扩展情节大纲${currentChapterCount > 0 ? ` (当前${currentChapterCount}章)` : ''}`}
+                        </Button>
+                      </span>
+                    </Tooltip>
+                  </Box>
+
+                  {/* 右侧：取消 + 保存 */}
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Button
+                      onClick={handleCloseStructureDialog}
+                      disabled={structureSaving}
+                    >
+                      取消
+                    </Button>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      onClick={handleSaveOnlyStructure}
+                      disabled={structureSaving}
+                      startIcon={structureSaving ? <CircularProgress size={20} /> : <SaveIcon />}
+                    >
+                      {structureSaving ? '保存中...' : '保存'}
+                    </Button>
+                  </Box>
+                </Box>
               </Box>
             </>
           )}
@@ -2963,24 +3843,234 @@ export default function WorkflowControlPage() {
             </Box>
           ) : (
             <>
-              <TextField
-                fullWidth
-                multiline
-                rows={12}
-                value={editedWorldContent}
-                onChange={(e) => setEditedWorldContent(e.target.value)}
-                placeholder="世界观设定文本内容..."
+              <Tabs
+                value={worldSettingsTab}
+                onChange={(_, value) => setWorldSettingsTab(value)}
                 sx={{ mb: 2 }}
-                disabled={worldSaving}
-                InputProps={{
-                  style: {
-                    fontFamily: 'monospace',
-                    fontSize: '0.875rem',
-                  }
-                }}
-              />
+              >
+                <Tab label="文本内容" value="text" />
+                <Tab label="类型设定" value="settings" />
+              </Tabs>
 
-              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+              {worldSettingsTab === 'text' && (
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={12}
+                  value={editedWorldContent}
+                  onChange={(e) => setEditedWorldContent(e.target.value)}
+                  placeholder="世界观设定文本内容..."
+                  sx={{ mb: 2 }}
+                  disabled={worldSaving}
+                  InputProps={{
+                    style: {
+                      fontFamily: 'monospace',
+                      fontSize: '0.875rem',
+                    }
+                  }}
+                />
+              )}
+
+              {worldSettingsTab === 'settings' && (
+                <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', mt: 1 }}>
+                  {/* 左侧：设定集合列表 */}
+                  <Box sx={{ width: 260, flexShrink: 0 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                      <Typography variant="subtitle1">设定集合</Typography>
+                      <Box sx={{ display: 'flex', gap: 1 }}>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={handleOpenTemplateDialog}
+                          disabled={!projectId}
+                        >
+                          从模板创建
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<AddIcon />}
+                          onClick={handleCreateCollection}
+                          disabled={!projectId}
+                        >
+                          新建
+                        </Button>
+                      </Box>
+                    </Box>
+
+                    {settingCollectionsLoading ? (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+                        <CircularProgress size={24} />
+                      </Box>
+                    ) : (
+                      <List dense sx={{ maxHeight: 360, overflow: 'auto' }}>
+                        {settingCollections.length === 0 ? (
+                          <ListItem>
+                            <Typography variant="body2" color="text.secondary">
+                              暂无设定集合，可点击右上角“新建”创建。
+                            </Typography>
+                          </ListItem>
+                        ) : (
+                          settingCollections.map((collection: any) => (
+                            <ListItem
+                              key={collection.id}
+                              selected={collection.id === selectedCollectionId}
+                              button
+                              draggable
+                              onDragStart={() => setDraggingCollectionId(collection.id)}
+                              onDragOver={(e) => e.preventDefault()}
+                              onDrop={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                handleDropCollection(collection.id)
+                              }}
+                              onClick={() => {
+                                setSelectedCollectionId(collection.id)
+                                loadSettingItems(collection.id)
+                              }}
+                              secondaryAction={
+                                <Box sx={{ display: 'flex', gap: 0.5 }}>
+                                  <Tooltip title="编辑">
+                                    <IconButton
+                                      edge="end"
+                                      size="small"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        handleEditCollection(collection)
+                                      }}
+                                    >
+                                      <EditIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title="删除">
+                                    <IconButton
+                                      edge="end"
+                                      size="small"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        handleDeleteCollection(collection.id)
+                                      }}
+                                    >
+                                      <DeleteIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                </Box>
+                              }
+                              sx={{ cursor: 'grab' }}
+                            >
+                              <Box>
+                                <Typography variant="body2">{collection.name}</Typography>
+                                {collection.category && (
+                                  <Typography variant="caption" color="text.secondary">
+                                    {collection.category}
+                                  </Typography>
+                                )}
+                              </Box>
+                            </ListItem>
+                          ))
+                        )}
+                      </List>
+                    )}
+                  </Box>
+
+                  {/* 右侧：设定项列表 */}
+                  <Box sx={{ flex: 1, minHeight: 320 }}>
+                    {selectedCollectionId ? (
+                      <>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                          <Typography variant="subtitle1">设定项</Typography>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<AddIcon />}
+                            onClick={handleCreateItem}
+                          >
+                            新建设定项
+                          </Button>
+                        </Box>
+
+                        {settingItemsLoading ? (
+                          <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+                            <CircularProgress size={24} />
+                          </Box>
+                        ) : settingItems.length === 0 ? (
+                          <Typography variant="body2" color="text.secondary">
+                            暂无设定项，可点击右上角“新建设定项”创建。
+                          </Typography>
+                        ) : (
+                          <List dense sx={{ maxHeight: 360, overflow: 'auto' }}>
+                            {settingItems.map((item: any) => (
+                              <ListItem
+                                key={item.id}
+                                button
+                                draggable
+                                onDragStart={() => setDraggingItemId(item.id)}
+                                onDragOver={(e) => e.preventDefault()}
+                                onDrop={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  handleDropItem(item.id)
+                                }}
+                                onClick={() => handleEditItem(item)}
+                                secondaryAction={
+                                  <Box sx={{ display: 'flex', gap: 0.5 }}>
+                                    <Tooltip title="复制">
+                                      <IconButton
+                                        edge="end"
+                                        size="small"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          handleCopyItem(item)
+                                        }}
+                                      >
+                                        <ContentCopyIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
+                                    <Tooltip title="删除">
+                                      <IconButton
+                                        edge="end"
+                                        size="small"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          handleDeleteItem(item.id)
+                                        }}
+                                      >
+                                        <DeleteIcon fontSize="small" />
+                                      </IconButton>
+                                    </Tooltip>
+                                  </Box>
+                                }
+                                sx={{ cursor: 'grab' }}
+                              >
+                                <Box>
+                                  <Typography variant="body2">
+                                    {item.level != null ? `Lv.${item.level} ` : ''}
+                                    {item.name}
+                                  </Typography>
+                                  {item.code && (
+                                    <Typography variant="caption" color="text.secondary">
+                                      {item.code}
+                                    </Typography>
+                                  )}
+                                </Box>
+                              </ListItem>
+                            ))}
+                          </List>
+
+                        )}
+                      </>
+                    ) : (
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                        <Typography variant="body2" color="text.secondary">
+                          请先在左侧选择一个设定集合，或新建集合。
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                </Box>
+              )}
+
+              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 3 }}>
                 <Button
                   onClick={handleCloseWorldDialog}
                   disabled={worldSaving}
@@ -3002,48 +4092,775 @@ export default function WorkflowControlPage() {
         </Box>
       </Dialog>
 
+      {/* 模板选择对话框 */}
+      <Dialog
+        open={showTemplateDialog}
+        onClose={() => !applyingTemplate && setShowTemplateDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>选择设定模板</DialogTitle>
+        <DialogContent dividers>
+          {settingTemplatesLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : (
+            <List>
+              {settingTemplates.length === 0 ? (
+                <ListItem>
+                  <Typography variant="body2" color="text.secondary">
+                    暂无可用模板。
+                  </Typography>
+                </ListItem>
+              ) : (
+                settingTemplates.map((tpl: any) => (
+                  <ListItem
+                    key={tpl.key}
+                    button
+                    selected={selectedTemplateKey === tpl.key}
+                    onClick={() => setSelectedTemplateKey(tpl.key)}
+                  >
+                    <Box>
+                      <Typography variant="subtitle1">{tpl.name}</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {tpl.description}
+                      </Typography>
+                    </Box>
+                  </ListItem>
+                ))
+              )}
+            </List>
+          )}
+
+          <FormControlLabel
+            sx={{ mt: 2 }}
+            control={
+              <Checkbox
+                checked={clearExistingSettings}
+                onChange={(e) => setClearExistingSettings(e.target.checked)}
+              />
+            }
+            label="清空当前项目下已有的设定集合（谨慎操作）"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowTemplateDialog(false)} disabled={applyingTemplate}>
+            取消
+          </Button>
+          <Button
+            onClick={handleApplyTemplate}
+            variant="contained"
+            disabled={!selectedTemplateKey || applyingTemplate}
+            startIcon={applyingTemplate ? <CircularProgress size={20} /> : undefined}
+          >
+            {applyingTemplate ? '应用中...' : '应用模板'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+
+      {/* 设定集合编辑对话框 */}
+      <Dialog
+        open={collectionDialogOpen}
+        onClose={handleCloseCollectionDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          {collectionDialogMode === 'create' ? '新建设定集合' : '编辑设定集合'}
+        </DialogTitle>
+        <DialogContent dividers>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+            <TextField
+              label="集合名称"
+              fullWidth
+              required
+              value={collectionForm.name}
+              onChange={(e) =>
+                setCollectionForm((prev) => ({ ...prev, name: e.target.value }))
+              }
+              error={collectionDialogSubmitted && !collectionForm.name.trim()}
+              helperText={
+                collectionDialogSubmitted && !collectionForm.name.trim()
+                  ? '集合名称不能为空'
+                  : '例如：境界体系、功法体系'
+              }
+              disabled={collectionDialogSaving}
+            />
+            <TextField
+              label="集合分类标识（可选）"
+              fullWidth
+              value={collectionForm.category}
+              onChange={(e) =>
+                setCollectionForm((prev) => ({ ...prev, category: e.target.value }))
+              }
+              helperText="用于内部区分，如 cultivation_system / power_system / custom"
+              disabled={collectionDialogSaving}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseCollectionDialog} disabled={collectionDialogSaving}>
+            取消
+          </Button>
+          <Button
+            onClick={handleSubmitCollectionDialog}
+            variant="contained"
+            disabled={collectionDialogSaving}
+            startIcon={collectionDialogSaving ? <CircularProgress size={20} /> : undefined}
+          >
+            {collectionDialogSaving ? '保存中...' : '保存'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+
+      {/* 设定项编辑对话框 */}
+      <Dialog
+        open={itemDialogOpen}
+        onClose={handleCloseItemDialog}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>{itemDialogMode === 'create' ? '新建设定项' : '编辑设定项'}</DialogTitle>
+        <DialogContent dividers>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+            <TextField
+              label="名称"
+              fullWidth
+              required
+              value={itemForm.name}
+              onChange={(e) =>
+                setItemForm((prev) => ({
+                  ...prev,
+                  name: e.target.value,
+                }))
+              }
+              error={itemDialogSubmitted && !itemForm.name.trim()}
+              helperText={
+                itemDialogSubmitted && !itemForm.name.trim()
+                  ? '名称不能为空'
+                  : '例如：炼气一层、金丹期、A级异能者'
+              }
+              disabled={itemDialogSaving}
+            />
+
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <TextField
+                label="等级（可选）"
+                type="number"
+                value={itemForm.level}
+                onChange={(e) =>
+                  setItemForm((prev) => ({
+                    ...prev,
+                    level: e.target.value,
+                  }))
+                }
+                helperText="可用于排序和展示，如 1、2、3..."
+                disabled={itemDialogSaving}
+                sx={{ width: 160 }}
+              />
+              <TextField
+                label="编码（可选）"
+                value={itemForm.code}
+                onChange={(e) =>
+                  setItemForm((prev) => ({
+                    ...prev,
+                    code: e.target.value,
+                  }))
+                }
+                helperText="内部唯一标识，如 QI_1 / POWER_A"
+                disabled={itemDialogSaving}
+                fullWidth
+              />
+            </Box>
+
+            <TextField
+              label="设定内容"
+              fullWidth
+              multiline
+              minRows={4}
+              value={itemForm.content}
+              onChange={(e) =>
+                setItemForm((prev) => ({
+                  ...prev,
+                  content: e.target.value,
+                }))
+              }
+              helperText="支持多行文本，可使用简单的 Markdown 结构来组织信息。"
+              disabled={itemDialogSaving}
+            />
+
+            {/* 标签管理 */}
+            <Box sx={{ mt: 1 }}>
+              <Typography variant="subtitle2" gutterBottom>
+                标签
+              </Typography>
+              <TextField
+                fullWidth
+                size="small"
+                placeholder="输入标签后按 Enter 或空格添加，如：主线/重要/高危"
+                value={itemForm.tagsInput}
+                onChange={(e) =>
+                  setItemForm((prev) => ({
+                    ...prev,
+                    tagsInput: e.target.value,
+                  }))
+                }
+                onKeyDown={handleTagInputKeyDown}
+                disabled={itemDialogSaving}
+              />
+              <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {itemForm.tags.map((tag) => (
+                  <Chip
+                    key={tag}
+                    label={tag}
+                    onDelete={() => handleRemoveTag(tag)}
+                    size="small"
+                  />
+                ))}
+                {itemForm.tags.length === 0 && (
+                  <Typography variant="body2" color="text.secondary">
+                    暂无标签。
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+
+            {/* 关联关系管理 */}
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="subtitle2" gutterBottom>
+                关联关系
+              </Typography>
+              {itemForm.relations.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  当前暂无关联，可点击“添加关联”来建立设定之间的前置、对立、包含等关系。
+                </Typography>
+              ) : (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  {itemForm.relations.map((rel, index) => (
+                    <Box
+                      key={index}
+                      sx={{ display: 'flex', gap: 1, alignItems: 'center' }}
+                    >
+                      <TextField
+                        select
+                        label="关系类型"
+                        size="small"
+                        sx={{ minWidth: 120 }}
+                        value={rel.type}
+                        onChange={(e) =>
+                          handleChangeRelation(index, 'type', e.target.value)
+                        }
+                      >
+                        {RELATION_TYPES.map((type) => (
+                          <MenuItem key={type} value={type}>
+                            {type}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                      <TextField
+                        select
+                        label="关联目标"
+                        size="small"
+                        sx={{ flex: 1, minWidth: 180 }}
+                        value={rel.targetId ?? ''}
+                        onChange={(e) =>
+                          handleChangeRelation(
+                            index,
+                            'targetId',
+                            e.target.value ? Number(e.target.value) : null,
+                          )
+                        }
+                      >
+                        <MenuItem value="">（未选择）</MenuItem>
+                        {settingItems
+                          .filter((i: any) => !editingItem || i.id !== editingItem.id)
+                          .map((i: any) => (
+                            <MenuItem key={i.id} value={i.id}>
+                              {i.name}
+                            </MenuItem>
+                          ))}
+                      </TextField>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleRemoveRelationRow(index)}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  ))}
+                </Box>
+              )}
+              <Box sx={{ mt: 1 }}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={handleAddRelation}
+                  disabled={itemDialogSaving}
+                >
+                  添加关联
+                </Button>
+              </Box>
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseItemDialog} disabled={itemDialogSaving}>
+            取消
+          </Button>
+          <Button
+            onClick={handleSubmitItemDialog}
+            variant="contained"
+            disabled={itemDialogSaving}
+            startIcon={itemDialogSaving ? <CircularProgress size={20} /> : undefined}
+          >
+            {itemDialogSaving ? '保存中...' : '保存'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+
+      {/* 删除确认对话框 */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={handleCancelDelete}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>确认删除</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2">
+            {deleteTarget?.type === 'collection'
+              ? '删除集合会同时删除其下所有设定项，此操作不可撤销，确认继续？'
+              : '删除后不可恢复，确定要删除该设定项吗？'}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancelDelete} disabled={deleteLoading}>
+            取消
+          </Button>
+          <Button
+            onClick={handleConfirmDelete}
+            color="error"
+            variant="contained"
+            disabled={deleteLoading}
+            startIcon={deleteLoading ? <CircularProgress size={20} /> : undefined}
+          >
+            {deleteLoading ? '删除中...' : '删除'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+
+
+
+
       {/* 人物设定对话框 */}
-      <Dialog open={showCharacterDialog} onClose={handleCloseCharacterDialog} maxWidth="md" fullWidth>
+      <Dialog open={showCharacterDialog} onClose={handleCloseCharacterDialog} maxWidth="lg" fullWidth>
         <Box sx={{ p: 3 }}>
           <Typography variant="h6" sx={{ mb: 2 }}>
-            👥 人物设定文档
+            👥 人物设定
           </Typography>
 
-          {characterLoading ? (
+          {/* Tab 切换：文本模式 vs 结构化管理 */}
+          <Tabs
+            value={characterTab}
+            onChange={(_, value) => setCharacterTab(value)}
+            sx={{ mb: 2 }}
+          >
+            <Tab label="文本模式" value="text" />
+            <Tab label="结构化管理（人物卡）" value="structured" />
+          </Tabs>
+
+          {characterTab === 'text' && (
+            <>
+              {characterLoading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 4 }}>
+                  <CircularProgress />
+                </Box>
+              ) : (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <TextField
+                    fullWidth
+                    multiline
+                    rows={12}
+                    value={editedCharacterContent}
+                    onChange={(e) => setEditedCharacterContent(e.target.value)}
+                    placeholder="人物设定文本内容..."
+                    sx={{ mb: 2 }}
+                    disabled={characterSaving}
+                  />
+
+                  {/* 底部一行：左侧为目标人物数+扩展按钮，右侧为取消/保存 */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1 }}>
+                    {/* 左侧：目标人物数 + 扩展人物 */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <TextField
+                        label="目标人物数"
+                        type="number"
+                        size="small"
+                        value={targetCharacterCount}
+                        onChange={(e) => {
+                          const value = parseInt(e.target.value, 10)
+                          setTargetCharacterCount(Number.isNaN(value) ? 0 : value)
+                        }}
+                        inputProps={{ min: 1 }}
+                        sx={{ width: 150 }}
+                      />
+
+                      <Tooltip
+                        title="💡默认目标为25个人物，可在右侧输入框中调整。"
+                        placement="top"
+                        arrow
+                      >
+                        <span>
+                          <Button
+                            variant="contained"
+                            color="secondary"
+                            onClick={handleExpandCharacters}
+                            disabled={!characterContent || !worldContent || !structureContent || expandingCharacters}
+                            startIcon={expandingCharacters ? <CircularProgress size={20} /> : <PeopleIcon />}
+                          >
+                            {expandingCharacters ? '扩展中...' : `👥 扩展人物${currentCharacterCount > 0 ? ` (当前${currentCharacterCount}个)` : ''}`}
+                          </Button>
+                        </span>
+                      </Tooltip>
+                    </Box>
+
+                    {/* 右侧：取消 + 保存 */}
+                    <Box sx={{ display: 'flex', gap: 2 }}>
+                      <Button
+                        onClick={handleCloseCharacterDialog}
+                        disabled={characterSaving}
+                      >
+                        取消
+                      </Button>
+                      <Button
+                        variant="contained"
+                        color="primary"
+                        onClick={handleSaveOnlyCharacter}
+                        disabled={characterSaving}
+                        startIcon={characterSaving ? <CircularProgress size={20} /> : <SaveIcon />}
+                      >
+                        {characterSaving ? '保存中...' : '保存'}
+                      </Button>
+                    </Box>
+                  </Box>
+                </Box>
+              )}
+            </>
+          )}
+
+          {characterTab === 'structured' && (
+            <Box sx={{ display: 'flex', gap: 3, mt: 1 }}>
+              {/* 左侧：角色列表 */}
+              <Box sx={{ flex: 1, minWidth: 260 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                  <Typography variant="subtitle1">角色列表</Typography>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    startIcon={<AddIcon />}
+                    onClick={() => handleOpenCharacterEditDialog()}
+                  >
+                    新建角色
+                  </Button>
+                </Box>
+
+                {structuredCharactersLoading ? (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+                    <CircularProgress size={24} />
+                  </Box>
+                ) : (
+                  <List dense sx={{ maxHeight: 420, overflowY: 'auto', border: '1px solid #eee', borderRadius: 1 }}>
+                    {structuredCharacters.length === 0 && (
+                      <Typography variant="body2" sx={{ p: 2, color: 'text.secondary' }}>
+                        还没有创建任何结构化角色。可以点击右上角“新建角色”开始。
+                      </Typography>
+                    )}
+                    {structuredCharacters.map((ch: any) => (
+                      <ListItem
+                        key={ch.id}
+                        secondaryAction={
+                          <Box sx={{ display: 'flex', gap: 1 }}>
+                            <Tooltip title="编辑">
+                              <IconButton size="small" onClick={() => handleOpenCharacterEditDialog(ch)}>
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="删除">
+                              <IconButton size="small" onClick={() => handleDeleteCharacter(ch.id)}>
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </Box>
+                        }
+                      >
+                        <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                          <Typography variant="subtitle2">{ch.name}</Typography>
+                          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 0.5 }}>
+                            {ch.role && <Chip size="small" label={ch.role} />}
+                            {ch.faction && <Chip size="small" label={ch.faction} />}
+                            {ch.current_realm_item_id && (
+                              <Chip
+                                size="small"
+                                color="primary"
+                                label={
+                                  availableRealms.find((r: any) => r.id === ch.current_realm_item_id)?.name ||
+                                  '未知境界'
+                                }
+                              />
+                            )}
+                          </Box>
+                        </Box>
+                      </ListItem>
+                    ))}
+                  </List>
+                )}
+              </Box>
+
+              {/* 右侧：提示 */}
+              <Box sx={{ flex: 1.2, color: 'text.secondary', fontSize: 14 }}>
+                <Typography variant="subtitle1" sx={{ mb: 1 }}>
+                  使用说明
+                </Typography>
+                <Typography variant="body2" paragraph>
+                  这里是结构化人物卡管理区：你可以为每个角色维护基础信息（阵营、境界、出场状态等）以及“已掌握功法列表”。
+                </Typography>
+                <Typography variant="body2" paragraph>
+                  保存后，这些信息会参与到后端的章节逻辑检查 Agent 中，帮助检查“角色是否使用了未登记的功法”以及“境界是否达标”。
+                </Typography>
+                <Typography variant="body2" paragraph>
+                  详细编辑（包括功法列表）请通过“新建/编辑角色”按钮打开单独的编辑对话框。
+                </Typography>
+
+                <Box sx={{ mt: 2 }}>
+                  <Alert severity="info" variant="outlined">
+                    文本模式中的人物设定依然有效，可以与结构化人物卡并行使用；后续如需完全切换到结构化模式，也可以逐步迁移内容。
+                  </Alert>
+                </Box>
+              </Box>
+            </Box>
+          )}
+        </Box>
+      </Dialog>
+
+      {/* 角色编辑对话框（结构化） */}
+      <Dialog open={showCharacterEditDialog} onClose={handleCloseCharacterEditDialog} maxWidth="md" fullWidth>
+        <Box sx={{ p: 3 }}>
+          <Typography variant="h6" sx={{ mb: 2 }}>
+            {characterFormData?.id ? '编辑角色' : '新建角色'}
+          </Typography>
+
+          {characterFormLoading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 4 }}>
               <CircularProgress />
             </Box>
           ) : (
-            <>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {/* 基础信息 */}
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 2 }}>
+                <TextField
+                  label="姓名"
+                  required
+                  value={characterFormData?.name || ''}
+                  onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, name: e.target.value }))}
+                />
+                <TextField
+                  label="角色定位（主角/反派/配角等）"
+                  value={characterFormData?.role || ''}
+                  onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, role: e.target.value }))}
+                />
+                <TextField
+                  label="性别"
+                  value={characterFormData?.gender || ''}
+                  onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, gender: e.target.value }))}
+                />
+                <TextField
+                  label="年龄"
+                  type="number"
+                  value={characterFormData?.age ?? ''}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setCharacterFormData((prev: any) => ({
+                      ...prev,
+                      age: value === '' ? undefined : Number(value),
+                    }))
+                  }}
+                />
+                <TextField
+                  label="阵营/势力"
+                  value={characterFormData?.faction || ''}
+                  onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, faction: e.target.value }))}
+                />
+                <TextField
+                  label="重要性（主角/关键配角/龙套等）"
+                  value={characterFormData?.importance_level || ''}
+                  onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, importance_level: e.target.value }))}
+                />
+                <TextField
+                  label="出场状态（未出场/已出场/已退场）"
+                  value={characterFormData?.appearance_status || ''}
+                  onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, appearance_status: e.target.value }))}
+                />
+                <TextField
+                  label="生死状态（存活/死亡/失踪/未知）"
+                  value={characterFormData?.life_status || ''}
+                  onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, life_status: e.target.value }))}
+                />
+                <TextField
+                  label="首次出场章节编号"
+                  type="number"
+                  value={characterFormData?.first_appearance_chapter ?? ''}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setCharacterFormData((prev: any) => ({
+                      ...prev,
+                      first_appearance_chapter: value === '' ? undefined : Number(value),
+                    }))
+                  }}
+                />
+                <TextField
+                  select
+                  label="当前境界"
+                  value={characterFormData?.current_realm_item_id ?? ''}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setCharacterFormData((prev: any) => ({
+                      ...prev,
+                      current_realm_item_id: value === '' ? undefined : Number(value),
+                    }))
+                  }}
+                >
+                  <MenuItem value="">
+                    <em>未设置</em>
+                  </MenuItem>
+                  {availableRealms.map((realm: any) => (
+                    <MenuItem key={realm.id} value={realm.id}>
+                      {realm.name}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Box>
+
               <TextField
-                fullWidth
+                label="人物简介（1-3句话）"
                 multiline
-                rows={12}
-                value={editedCharacterContent}
-                onChange={(e) => setEditedCharacterContent(e.target.value)}
-                placeholder="人物设定文本内容..."
-                sx={{ mb: 2 }}
-                disabled={characterSaving}
+                minRows={2}
+                value={characterFormData?.summary || ''}
+                onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, summary: e.target.value }))}
               />
 
-              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
-                <Button
-                  onClick={handleCloseCharacterDialog}
-                  disabled={characterSaving}
-                >
+              <TextField
+                label="完整人物档案"
+                multiline
+                minRows={4}
+                value={characterFormData?.profile || ''}
+                onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, profile: e.target.value }))}
+              />
+
+              {/* 功法管理 */}
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle1" sx={{ mb: 1 }}>
+                  已掌握功法
+                </Typography>
+
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                  <TextField
+                    select
+                    label="选择功法添加"
+                    size="small"
+                    sx={{ minWidth: 260 }}
+                    value={selectedTechniqueId}
+                    onChange={(e) => setSelectedTechniqueId(e.target.value)}
+                  >
+                    <MenuItem value="">
+                      <em>请选择功法</em>
+                    </MenuItem>
+                    {availableTechniques.map((t: any) => (
+                      <MenuItem key={t.technique_item_id || t.id} value={t.technique_item_id || t.id}>
+                        {t.technique_name || t.name}{t.technique_code ? `（${t.technique_code}）` : ''}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={handleAddTechniqueToCharacter}
+                    disabled={!selectedTechniqueId}
+                  >
+                    添加
+                  </Button>
+                </Box>
+
+                <Box sx={{ maxHeight: 260, overflowY: 'auto', border: '1px solid #eee', borderRadius: 1, p: 1 }}>
+                  {characterTechniques.length === 0 && (
+                    <Typography variant="body2" sx={{ color: 'text.secondary', p: 1 }}>
+                      尚未为该角色添加任何功法。
+                    </Typography>
+                  )}
+
+                  {characterTechniques.map((t: any, index: number) => (
+                    <Box
+                      key={`${t.technique_item_id}-${index}`}
+                      sx={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr auto', gap: 1, alignItems: 'center', mb: 1 }}
+                    >
+                      <TextField
+                        label="功法名称"
+                        value={t.technique_name ||
+                          availableTechniques.find((meta: any) =>
+                            meta.technique_item_id === t.technique_item_id || meta.id === t.technique_item_id,
+                          )?.technique_name || '未知功法'
+                        }
+                        InputProps={{ readOnly: true }}
+                      />
+                      <TextField
+                        label="熟练度（入门/小成/大成/圆满等）"
+                        value={t.proficiency || ''}
+                        onChange={(e) => handleUpdateCharacterTechniqueField(index, 'proficiency', e.target.value)}
+                      />
+                      <TextField
+                        label="学会章节"
+                        type="number"
+                        value={t.learned_at_chapter ?? ''}
+                        onChange={(e) => {
+                          const value = e.target.value
+                          handleUpdateCharacterTechniqueField(index, 'learned_at_chapter', value === '' ? undefined : Number(value))
+                        }}
+                      />
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <TextField
+                          label="备注"
+                          value={t.notes || ''}
+                          onChange={(e) => handleUpdateCharacterTechniqueField(index, 'notes', e.target.value)}
+                          size="small"
+                        />
+                        <IconButton size="small" color="error" onClick={() => handleRemoveCharacterTechnique(index)}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    </Box>
+                  ))}
+                </Box>
+              </Box>
+
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2, mt: 2 }}>
+                <Button onClick={handleCloseCharacterEditDialog} disabled={characterFormSaving}>
                   取消
                 </Button>
                 <Button
                   variant="contained"
                   color="primary"
-                  onClick={handleSaveOnlyCharacter}
-                  disabled={characterSaving}
-                  startIcon={characterSaving ? <CircularProgress size={20} /> : <SaveIcon />}
+                  onClick={handleSaveCharacterForm}
+                  disabled={characterFormSaving}
+                  startIcon={characterFormSaving ? <CircularProgress size={20} /> : <SaveIcon />}
                 >
-                  {characterSaving ? '保存中...' : '保存'}
+                  {characterFormSaving ? '保存中...' : '保存'}
                 </Button>
               </Box>
-            </>
+            </Box>
           )}
         </Box>
       </Dialog>
@@ -3122,134 +4939,7 @@ export default function WorkflowControlPage() {
         </MuiAlert>
       </Snackbar>
 
-      {/* 🆕 扩展大纲结果对话框 */}
-      <Dialog open={showExpandOutlineDialog} onClose={() => {
-        console.log('🔒 关闭扩展大纲对话框...')
-        console.log('   关闭前当前阶段:', workflow.currentStage)
-        setShowExpandOutlineDialog(false)
-        console.log('   关闭后当前阶段:', workflow.currentStage)
-      }} maxWidth="lg" fullWidth>
-        <Box sx={{ p: 3 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h6">
-              📖 扩展大纲结果 - 已扩展至{currentChapterCount}章
-            </Typography>
-            
-            {/* 🔥 工具栏按钮组 */}
-            <Box sx={{ display: 'flex', gap: 1 }}>
-              <Tooltip title="编辑大纲">
-                <span>
-                  <IconButton
-                    onClick={() => {
-                      setIsEditingOutline(true)
-                      setEditedExpansionContent(expandedOutlineData || '')
-                    }}
-                    color="primary"
-                    disabled={expandingOutline || !expandedOutlineData}
-                  >
-                    <EditIcon />
-                  </IconButton>
-                </span>
-              </Tooltip>
-              
-              <Tooltip title="导出为 Markdown">
-                <IconButton
-                  onClick={handleExportOutlineMarkdown}
-                  color="primary"
-                  disabled={expandingOutline || !expandedOutlineData}
-                >
-                  <DownloadIcon />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          </Box>
 
-          {/* 🔥 进度条 */}
-          {expandingOutline && (
-            <Box sx={{ mb: 2 }}>
-              <LinearProgress variant="determinate" value={expansionProgress} />
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
-                <Typography variant="body2" color="textSecondary">
-                  扩展进度: {expansionProgress}%
-                </Typography>
-                {estimatedTimeRemaining && (
-                  <Typography variant="body2" color="textSecondary">
-                    预计剩余时间: {Math.round(estimatedTimeRemaining / 1000)}秒
-                  </Typography>
-                )}
-              </Box>
-            </Box>
-          )}
-
-          {/* 🔥 扩展结果展示 */}
-          {expandedOutlineData ? (
-            <TextField
-              fullWidth
-              multiline
-              rows={15}
-              value={isEditingOutline ? editedExpansionContent : expandedOutlineData}
-              onChange={(e) => setEditedExpansionContent(e.target.value)}
-              disabled={!isEditingOutline || expandingOutline}
-              sx={{ mb: 2 }}
-              InputProps={{
-                style: {
-                  fontFamily: 'monospace',
-                  fontSize: '0.875rem',
-                }
-              }}
-            />
-          ) : expandingOutline ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 4 }}>
-              <CircularProgress />
-            </Box>
-          ) : (
-            <Alert severity="info">暂无扩展结果</Alert>
-          )}
-
-          {/* 🔥 按钮组 */}
-          <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 3 }}>
-            <Button
-              onClick={() => {
-                console.log('👉 点击"取消"按钮...')
-                console.log('   关闭前当前阶段:', workflow.currentStage)
-                setShowExpandOutlineDialog(false)
-                console.log('   关闭后当前阶段:', workflow.currentStage)
-              }}
-              disabled={expandingOutline}
-            >
-              取消
-            </Button>
-            
-            {isEditingOutline ? (
-              <Button
-                variant="contained"
-                onClick={async () => {
-                  // 保存编辑后的内容
-                  setExpandedOutlineData(editedExpansionContent)
-                  setIsEditingOutline(false)
-                  // 可以在这里添加保存到服务器的逻辑
-                }}
-                disabled={expandingOutline}
-                startIcon={expandingOutline ? <CircularProgress size={20} /> : <SaveIcon />}
-              >
-                {expandingOutline ? '保存中...' : '保存'}
-              </Button>
-            ) : (
-              <Button
-                variant="contained"
-                onClick={() => {
-                  console.log('👉 点击"关闭"按钮...')
-                  console.log('   关闭前当前阶段:', workflow.currentStage)
-                  setShowExpandOutlineDialog(false)
-                  console.log('   关闭后当前阶段:', workflow.currentStage)
-                }}
-              >
-                关闭
-              </Button>
-            )}
-          </Box>
-        </Box>
-      </Dialog>
 
       {/* 🆕 扩展大纲结果对话框 */}
       <Dialog open={showExpandOutlineDialog} onClose={() => {
@@ -3263,7 +4953,7 @@ export default function WorkflowControlPage() {
             <Typography variant="h6">
               📖 扩展大纲结果 - 已扩展至{currentChapterCount}章
             </Typography>
-            
+
             {/* 🔥 工具栏按钮组 */}
             <Box sx={{ display: 'flex', gap: 1 }}>
               <Tooltip title="编辑大纲">
@@ -3277,7 +4967,7 @@ export default function WorkflowControlPage() {
                   </IconButton>
                 </span>
               </Tooltip>
-              
+
               <Tooltip title="导出为 Markdown">
                 <IconButton
                   onClick={handleExportOutlineMarkdown}
@@ -3287,7 +4977,7 @@ export default function WorkflowControlPage() {
                   <DownloadIcon />
                 </IconButton>
               </Tooltip>
-              
+
               <Tooltip title="导出章节为 CSV">
                 <IconButton
                   onClick={handleExportChapterCSV}
@@ -3297,7 +4987,7 @@ export default function WorkflowControlPage() {
                   <DownloadIcon />
                 </IconButton>
               </Tooltip>
-              
+
               <Tooltip title="查看历史版本">
                 <IconButton
                   onClick={() => handleShowHistory('outline')}
@@ -3323,7 +5013,7 @@ export default function WorkflowControlPage() {
                 )}
               </Box>
               <LinearProgress variant="determinate" value={expansionProgress} sx={{ height: 8, borderRadius: 1 }} />
-              
+
               {/* 🔥 扩展中占位内容 */}
               <Box sx={{ mt: 3, textAlign: 'center', py: 4 }}>
                 <CircularProgress size={60} />
@@ -3344,21 +5034,22 @@ export default function WorkflowControlPage() {
                 <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>
                   📊 大纲摘要
                 </Typography>
-                <Box sx={{ 
-                  bgcolor: 'background.default', 
-                  p: 2, 
+                <Box sx={{
+                  bgcolor: 'background.default',
+                  p: 2,
                   borderRadius: 1,
                   maxHeight: 200,
                   overflow: 'auto'
                 }}>
-                  <Typography variant="body2" sx={{ whiteSpace: 'pre-line', color: 'text.secondary', lineHeight: 1.8 }}>
-                    {(() => {
+                  <FormattedContent
+                    content={(() => {
                       const outline = expandedOutlineData.expanded_outline || '';
                       // 智能提取前500字作为摘要
                       const summary = outline.substring(0, 500).trim();
                       return summary ? summary + (outline.length > 500 ? '...' : '') : '大纲内容为空';
                     })()}
-                  </Typography>
+                    sx={{ fontSize: '0.875rem', color: 'text.secondary' }}
+                  />
                 </Box>
                 <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'text.disabled' }}>
                   💡 提示：完整内容请查看下方"完整扩展大纲"
@@ -3371,8 +5062,8 @@ export default function WorkflowControlPage() {
                   <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
                     📚 章节概览（共{expandedOutlineData.current_chapter_count || expandedOutlineData.target_chapters || 0}章）
                   </Typography>
-                  <Button 
-                    size="small" 
+                  <Button
+                    size="small"
                     onClick={() => {
                       const elem = document.getElementById('chapter-breakdown-content');
                       if (elem) {
@@ -3391,9 +5082,10 @@ export default function WorkflowControlPage() {
                   {typeof expandedOutlineData.chapter_breakdown === 'string' && expandedOutlineData.chapter_breakdown ? (
                     // 渐进式扩展返回的是字符串
                     <Box sx={{ bgcolor: 'background.default', p: 2, borderRadius: 1 }}>
-                      <Typography variant="body2" sx={{ whiteSpace: 'pre-line', fontSize: '0.875rem', lineHeight: 1.6 }}>
-                        {expandedOutlineData.chapter_breakdown}
-                      </Typography>
+                      <FormattedContent
+                        content={expandedOutlineData.chapter_breakdown}
+                        sx={{ fontSize: '0.875rem' }}
+                      />
                     </Box>
                   ) : Array.isArray(expandedOutlineData.chapter_breakdown) ? (
                     // 一次性扩展返回的是数组
@@ -3430,8 +5122,8 @@ export default function WorkflowControlPage() {
                     <Typography variant="caption" color="text.secondary">
                       {expandedOutlineData.expanded_outline?.length || 0} 字
                     </Typography>
-                    <Button 
-                      size="small" 
+                    <Button
+                      size="small"
                       onClick={() => {
                         navigator.clipboard.writeText(expandedOutlineData.expanded_outline || '');
                         setSnackbarMessage('✅ 已复制到剪贴板');
@@ -3443,7 +5135,7 @@ export default function WorkflowControlPage() {
                     </Button>
                   </Box>
                 </Box>
-                
+
                 {/* 🔥 编辑模式切换 */}
                 {isEditingExpansion ? (
                   <Box>
@@ -3454,8 +5146,8 @@ export default function WorkflowControlPage() {
                       maxRows={20}
                       value={editedExpansionContent}
                       onChange={(e) => setEditedExpansionContent(e.target.value)}
-                      sx={{ 
-                        mb: 2, 
+                      sx={{
+                        mb: 2,
                         bgcolor: 'background.paper',
                         '& .MuiInputBase-root': {
                           fontSize: '0.9rem',
@@ -3490,26 +5182,19 @@ export default function WorkflowControlPage() {
                     </Box>
                   </Box>
                 ) : (
-                  <Box sx={{ 
-                    bgcolor: 'background.default', 
-                    p: 2, 
+                  <Box sx={{
+                    bgcolor: 'background.default',
+                    p: 2,
                     borderRadius: 1,
                     maxHeight: 400,
                     overflow: 'auto',
                     border: '1px solid',
                     borderColor: 'divider'
                   }}>
-                    <Typography 
-                      variant="body2" 
-                      sx={{ 
-                        whiteSpace: 'pre-line', 
-                        fontSize: '0.9rem', 
-                        lineHeight: 1.8,
-                        color: 'text.primary'
-                      }}
-                    >
-                      {expandedOutlineData.expanded_outline || '大纲内容为空'}
-                    </Typography>
+                    <FormattedContent
+                      content={expandedOutlineData.expanded_outline || '大纲内容为空'}
+                      sx={{ fontSize: '0.9rem' }}
+                    />
                   </Box>
                 )}
               </Paper>
@@ -3539,7 +5224,7 @@ export default function WorkflowControlPage() {
             <Typography variant="h6">
               👥 扩展人物结果 - 已扩展至{currentCharacterCount}个角色
             </Typography>
-            
+
             {/* 🔥 工具栏按钮组 */}
             <Box sx={{ display: 'flex', gap: 1 }}>
               <Tooltip title="查看历史版本">
@@ -3563,12 +5248,12 @@ export default function WorkflowControlPage() {
                 {expandedCharactersData.role_distribution && typeof expandedCharactersData.role_distribution === 'object' && Object.keys(expandedCharactersData.role_distribution).length > 0 ? (
                   <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
                     {Object.entries(expandedCharactersData.role_distribution).map(([role, count]: [string, any]) => (
-                      <Box key={role} sx={{ 
-                        bgcolor: 'primary.main', 
-                        color: 'white', 
-                        px: 2, 
-                        py: 1, 
-                        borderRadius: 1 
+                      <Box key={role} sx={{
+                        bgcolor: 'primary.main',
+                        color: 'white',
+                        px: 2,
+                        py: 1,
+                        borderRadius: 1
                       }}>
                         <Typography variant="body2">
                           {role}: {count}人
@@ -3578,8 +5263,8 @@ export default function WorkflowControlPage() {
                   </Box>
                 ) : (
                   <Typography variant="body2" color="text.secondary">
-                    {typeof expandedCharactersData.role_distribution === 'string' && expandedCharactersData.role_distribution 
-                      ? expandedCharactersData.role_distribution 
+                    {typeof expandedCharactersData.role_distribution === 'string' && expandedCharactersData.role_distribution
+                      ? expandedCharactersData.role_distribution
                       : '暂无角色分布数据'}
                   </Typography>
                 )}
@@ -3594,14 +5279,12 @@ export default function WorkflowControlPage() {
                   {/* 🔧 兼容性处理：支持字符串和数组两种格式 */}
                   {typeof expandedCharactersData.all_characters === 'string' ? (
                     // 渐进式扩展返回的是字符串
-                    <TextField
-                      fullWidth
-                      multiline
-                      rows={12}
-                      value={expandedCharactersData.all_characters}
-                      InputProps={{ readOnly: true }}
-                      sx={{ bgcolor: 'background.default' }}
-                    />
+                    <Box sx={{ bgcolor: 'background.default', p: 2, borderRadius: 1, maxHeight: 400, overflow: 'auto' }}>
+                      <FormattedContent
+                        content={expandedCharactersData.all_characters}
+                        sx={{ fontSize: '0.875rem' }}
+                      />
+                    </Box>
                   ) : Array.isArray(expandedCharactersData.all_characters) ? (
                     // 一次性扩展返回的是数组
                     expandedCharactersData.all_characters.map((character: any, index: number) => (
@@ -3631,14 +5314,12 @@ export default function WorkflowControlPage() {
                   🔗 人物关系网络
                 </Typography>
                 {expandedCharactersData.character_relationships && expandedCharactersData.character_relationships.trim() !== '' ? (
-                  <TextField
-                    fullWidth
-                    multiline
-                    rows={12}
-                    value={expandedCharactersData.character_relationships}
-                    InputProps={{ readOnly: true }}
-                    sx={{ bgcolor: 'background.default' }}
-                  />
+                  <Box sx={{ bgcolor: 'background.default', p: 2, borderRadius: 1, maxHeight: 400, overflow: 'auto' }}>
+                    <FormattedContent
+                      content={expandedCharactersData.character_relationships}
+                      sx={{ fontSize: '0.875rem' }}
+                    />
+                  </Box>
                 ) : (
                   <Typography variant="body2" color="text.secondary">
                     正在生成人物关系网络...
@@ -3669,11 +5350,11 @@ export default function WorkflowControlPage() {
             </Typography>
           </Box>
         </DialogTitle>
-        
+
         <DialogContent dividers>
           {(() => {
             const history = historyType === 'outline' ? outlineHistory : characterHistory
-            
+
             if (history.length === 0) {
               return (
                 <Box sx={{ py: 4, textAlign: 'center' }}>
@@ -3683,15 +5364,15 @@ export default function WorkflowControlPage() {
                 </Box>
               )
             }
-            
+
             return (
               <List>
                 {history.slice().reverse().map((record, index) => {
                   const actualIndex = history.length - 1 - index
-                  const count = historyType === 'outline' 
-                    ? (record as any).chapterCount 
+                  const count = historyType === 'outline'
+                    ? (record as any).chapterCount
                     : (record as any).characterCount
-                  
+
                   return (
                     <ListItem
                       key={record.timestamp}
@@ -3711,7 +5392,7 @@ export default function WorkflowControlPage() {
                           {historyType === 'outline' ? `${count}章` : `${count}人`}
                         </Typography>
                       </Box>
-                      
+
                       <TextField
                         fullWidth
                         multiline
@@ -3721,7 +5402,7 @@ export default function WorkflowControlPage() {
                         size="small"
                         sx={{ bgcolor: 'background.default' }}
                       />
-                      
+
                       <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
                         <Button
                           size="small"
@@ -3743,7 +5424,7 @@ export default function WorkflowControlPage() {
                         >
                           回滚到此版本
                         </Button>
-                        
+
                         <Button
                           size="small"
                           onClick={() => {
@@ -3772,7 +5453,7 @@ export default function WorkflowControlPage() {
             )
           })()}
         </DialogContent>
-        
+
         <DialogActions>
           <Button onClick={() => setShowHistoryDialog(false)}>
             关闭
