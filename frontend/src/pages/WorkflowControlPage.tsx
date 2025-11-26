@@ -2687,6 +2687,7 @@ export default function WorkflowControlPage() {
 
     try {
       // 1. 保存内容并指示继续工作流
+      console.log('📍 开始保存评审报告并继续工作流...')
       const saveResponse = await fetch(`/api/v1/workflow/${projectId}/stage/review/content`, {
         method: 'PUT',
         headers: {
@@ -2699,28 +2700,48 @@ export default function WorkflowControlPage() {
         }),
       })
 
-      if (saveResponse.ok) {
-        // 更新缓存
-        setReviewReportContent(editedReviewReportContent)
-        setSnackbarMessage('评审报告已保存，工作流继续执行')
-        setSnackbarSeverity('success')
-        setSnackbarOpen(true)
+      console.log('📍 保存响应状态:', saveResponse.status, saveResponse.ok)
 
-        // 关闭对话框
-        setShowReviewDialog(false)
-        setEditedReviewReportContent('')
-
-        // 刷新工作流状态
-        await fetchWorkflowStatus()
-      } else {
+      if (!saveResponse.ok) {
         const errorData = await saveResponse.json().catch(() => ({}))
-        setSnackbarMessage(errorData.detail || '保存失败')
+        console.error('❌ 保存失败:', errorData)
+        setSnackbarMessage(errorData.detail || '保存失败，请重试')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
+        return
       }
+
+      const saveData = await saveResponse.json()
+      console.log('✅ 保存成功，响应数据:', saveData)
+
+      // ✅ 更新缓存
+      setReviewReportContent(editedReviewReportContent)
+
+      // ✅ 更新 Redux store
+      dispatch(updateStageOutput({ stage: 'review', output: editedReviewReportContent }))
+      dispatch(updateStageStatus({ stage: 'review', status: 'completed' }))
+
+      // ✅ 重置后续阶段状态
+      dispatch(resetFollowingStages('review'))
+
+      setSnackbarMessage('评审报告已保存，正在启动迭代优化...')
+      setSnackbarSeverity('success')
+      setSnackbarOpen(true)
+
+      handleCloseReviewDialog()
+
+      // ✅ 关键修复：真正调用后端API执行下一阶段（迭代优化）
+      setIsRunning(true)
+      setTimeout(async () => {
+        const nextStage: StageType = 'iteration'
+        dispatch(setCurrentStage(nextStage))
+
+        console.log('🚀 使用异步模式继续工作流，下一阶段: iteration')
+        executeStageAsync(nextStage)
+      }, 1000)
     } catch (error) {
-      console.error('保存评审报告失败:', error)
-      setSnackbarMessage('保存失败')
+      console.error('❌ 保存评审报告失败:', error)
+      setSnackbarMessage('保存失败，请重试')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     } finally {
