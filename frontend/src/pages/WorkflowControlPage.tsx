@@ -145,6 +145,11 @@ export default function WorkflowControlPage() {
   const [editedFinalVersionContent, setEditedFinalVersionContent] = useState('')
   const [finalVersionLoading, setFinalVersionLoading] = useState(false)
 
+  // 评审报告对话框状态
+  const [showReviewDialog, setShowReviewDialog] = useState(false)
+  const [reviewReportContent, setReviewReportContent] = useState('')
+  const [reviewLoading, setReviewLoading] = useState(false)
+
   // 世界观设定对话框状态
   const [showWorldDialog, setShowWorldDialog] = useState(false)
 
@@ -1259,6 +1264,10 @@ export default function WorkflowControlPage() {
             if (stages.final_version) {
               setFinalVersionContent(stages.final_version)
               console.log(`✅ 最终版本已加载，内容长度: ${stages.final_version.length}`)
+            }
+            if (stages.review_report) {
+              setReviewReportContent(stages.review_report)
+              console.log(`✅ 评审报告已加载，内容长度: ${stages.review_report.length}`)
             }
 
             // 更新Redux store的output字段，用于输出预览显示
@@ -2577,6 +2586,53 @@ export default function WorkflowControlPage() {
     setEditedContentDraftContent('')  // 只清空编辑状态
   }
 
+  // 打开评审报告对话框
+  const handleOpenReviewDialog = async () => {
+    setShowReviewDialog(true)
+
+    // ⚡ 优化：如果已经有缓存内容，直接使用，不再请求
+    if (reviewReportContent && reviewReportContent.trim() !== '') {
+      console.log('⚡ 使用缓存的评审报告内容，长度:', reviewReportContent.length)
+      return
+    }
+
+    // 如果没有缓存，才从API获取
+    setReviewLoading(true)
+
+    try {
+      console.log('📍 从API获取最新的评审报告内容...')
+      const response = await fetch(`/api/workflow/${projectId}/stage/review/content`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        const content = data.content || ''
+        console.log('✅ 评审报告已加载，长度:', content.length)
+        setReviewReportContent(content)
+      } else {
+        console.error('❌ 获取评审报告失败，状态码:', response.status)
+        setSnackbarMessage('获取评审报告失败')
+        setSnackbarSeverity('error')
+        setSnackbarOpen(true)
+      }
+    } catch (error) {
+      console.error('❌ 获取评审报告异常:', error)
+      setSnackbarMessage('获取评审报告失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    } finally {
+      setReviewLoading(false)
+    }
+  }
+
+  // 关闭评审报告对话框
+  const handleCloseReviewDialog = () => {
+    setShowReviewDialog(false)
+  }
+
   // 保存并继续（章节初稿）
   const handleSaveAndContinueContent = async () => {
     if (!projectId) return
@@ -3519,8 +3575,15 @@ export default function WorkflowControlPage() {
             章节初稿
           </Button>
         ) : workflow.currentStage === 'review' ? (
-          /* 质量评审阶段：不显示任何按钮 */
-          null
+          /* 质量评审阶段：显示"评审报告"按钮 */
+          <Button
+            variant="outlined"
+            onClick={handleOpenReviewDialog}
+            disabled={!reviewReportContent && workflow.stages.review.status !== 'completed'}
+            startIcon={<ArticleIcon />}
+          >
+            评审报告
+          </Button>
         ) : workflow.currentStage === 'iteration' ? (
           /* 迭代优化阶段：显示“最终成品”和“生成下一章”按钮 */
           <Box sx={{ display: 'flex', gap: 1 }}>
@@ -3857,6 +3920,54 @@ export default function WorkflowControlPage() {
                   startIcon={contentSaving ? <CircularProgress size={20} /> : <SaveIcon />}
                 >
                   {contentSaving ? '保存中...' : '保存并继续'}
+                </Button>
+              </Box>
+            </>
+          )}
+        </Box>
+      </Dialog>
+
+      {/* 评审报告对话框 */}
+      <Dialog open={showReviewDialog} onClose={handleCloseReviewDialog} maxWidth="md" fullWidth>
+        <Box sx={{ p: 3 }}>
+          <Typography variant="h6" sx={{ mb: 2 }}>
+            📋 质量评审报告
+          </Typography>
+
+          {reviewLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 4 }}>
+              <CircularProgress />
+            </Box>
+          ) : (
+            <>
+              <Box
+                sx={{
+                  p: 2,
+                  bgcolor: 'grey.50',
+                  borderRadius: 1,
+                  border: '1px solid',
+                  borderColor: 'grey.200',
+                  maxHeight: '60vh',
+                  overflow: 'auto',
+                }}
+              >
+                <Typography
+                  component="pre"
+                  sx={{
+                    fontFamily: 'inherit',
+                    fontSize: '0.875rem',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    m: 0,
+                  }}
+                >
+                  {reviewReportContent || '暂无评审报告内容'}
+                </Typography>
+              </Box>
+
+              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 2 }}>
+                <Button onClick={handleCloseReviewDialog}>
+                  关闭
                 </Button>
               </Box>
             </>
