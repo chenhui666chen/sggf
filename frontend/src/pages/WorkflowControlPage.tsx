@@ -2553,7 +2553,7 @@ export default function WorkflowControlPage() {
 
     try {
       console.log('📍 从API获取最新的章节初稿内容...')
-      const response = await fetch(`/api/workflow/${projectId}/stage/content/content`, {
+      const response = await fetch(`/api/v1/workflow/${projectId}/stage/content/content`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
         },
@@ -2604,7 +2604,7 @@ export default function WorkflowControlPage() {
 
     try {
       console.log('📍 从API获取最新的评审报告内容...')
-      const response = await fetch(`/api/workflow/${projectId}/stage/review/content`, {
+      const response = await fetch(`/api/v1/workflow/${projectId}/stage/review/content`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
         },
