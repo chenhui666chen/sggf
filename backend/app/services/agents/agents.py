@@ -76,30 +76,54 @@ class BaseAgent(ABC):
         """获取Agent的系统提示词"""
         pass
     
-    def process(self, user_input: str, context: Optional[Dict[str, Any]] = None) -> str:
-        """处理输入并生成响应"""
+    def process(self, user_input: str, context: Optional[Dict[str, Any]] = None,
+                temperature: Optional[float] = None) -> str:
+        """处理输入并生成响应
+
+        Args:
+            user_input: 用户输入
+            context: 上下文信息
+            temperature: 可选的温度参数，用于控制创造性（0.0-1.0）
+                        None: 使用默认值（0.7）
+                        高值（0.8-1.0）: 更有创造性，适合扩展创作
+                        低值（0.1-0.5）: 更确定性，适合优化润色
+        """
         self.memory_manager.add_user_message(user_input)
-        
+
         system_prompt = self.get_system_prompt()
         messages: List[BaseMessage] = [SystemMessage(content=system_prompt)]
-        
+
         # 添加上下文信息
         if context:
             context_str = self._format_context(context)
             messages.append(SystemMessage(content=context_str))
-        
+
         # 添加对话历史
         history = self.memory_manager.get_chat_history()
         if len(history) > 10:
             history = history[-10:]
         messages.extend(history[:-1])
-        
+
         messages.append(HumanMessage(content=user_input))
 
-        response = self.llm.invoke(messages)
+        # 🔥 关键修复：支持动态设置 temperature
+        if temperature is not None:
+            # 创建一个临时的 LLM 实例，使用指定的 temperature
+            from langchain_community.chat_models import ChatOpenAI
+            temp_llm = ChatOpenAI(
+                model_name=Config.MODEL_NAME or "deepseek-reasoner",
+                temperature=temperature,
+                openai_api_key=Config.DEEPSEEK_API_KEY or "",
+                openai_api_base=Config.DEEPSEEK_API_BASE or "https://api.deepseek.com/v1"
+            )
+            print(f"🎲 使用自定义 temperature={temperature}")
+            response = temp_llm.invoke(messages)
+        else:
+            response = self.llm.invoke(messages)
+
         self.memory_manager.add_ai_message(response.content)
         self.conversation_history.append({"input": user_input, "output": response.content})
-        
+
         return response.content
     
     def _format_context(self, context: Dict[str, Any]) -> str:
