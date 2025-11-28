@@ -983,6 +983,18 @@ export default function WorkflowControlPage() {
 
         if (data.output) {
           dispatch(updateStageOutput({ stage: stageType, output: data.output }))
+
+          // 🔥 关键修复：同步更新组件本地状态
+          if (stageType === 'iteration') {
+            setFinalVersionContent(data.output)
+            console.log(`🔄 迭代优化阶段完成，已同步 finalVersionContent，长度: ${data.output.length}`)
+          } else if (stageType === 'review') {
+            setReviewReportContent(data.output)
+            console.log(`🔄 质量评审阶段完成，已同步 reviewReportContent，长度: ${data.output.length}`)
+          } else if (stageType === 'content') {
+            setContentDraftContent(data.output)
+            console.log(`🔄 内容创作阶段完成，已同步 contentDraftContent，长度: ${data.output.length}`)
+          }
         }
       }
 
@@ -1652,6 +1664,19 @@ export default function WorkflowControlPage() {
 
           dispatch(updateStageStatus({ stage, status: 'completed' }))
           dispatch(updateStageOutput({ stage, output: data.result || '' }))
+
+          // 🔥 关键修复：同步更新组件本地状态（轮询模式）
+          const resultContent = data.result || ''
+          if (stage === 'iteration' && resultContent) {
+            setFinalVersionContent(resultContent)
+            console.log(`🔄 [轮询] 迭代优化阶段完成，已同步 finalVersionContent，长度: ${resultContent.length}`)
+          } else if (stage === 'review' && resultContent) {
+            setReviewReportContent(resultContent)
+            console.log(`🔄 [轮询] 质量评审阶段完成，已同步 reviewReportContent，长度: ${resultContent.length}`)
+          } else if (stage === 'content' && resultContent) {
+            setContentDraftContent(resultContent)
+            console.log(`🔄 [轮询] 内容创作阶段完成，已同步 contentDraftContent，长度: ${resultContent.length}`)
+          }
 
           setSnackbarMessage(`✅ ${stageNames[stage]}完成！`)
           setSnackbarSeverity('success')
