@@ -1144,7 +1144,7 @@ class CreativeDirectorCoordinator:
                 quality_reference += "\n📊 请参照以上优秀章节的标准进行评审。\n"
                 print(f"✓ 找到 1 个优秀章节范例")
 
-        # 🆕 获取一致性检查所需的参考信息
+        # 🆕 获取一致性检查所需的参考信息（优化版：优先使用结构化摘要）
         consistency_reference = ""
         chapters_list = self.project_context.get("chapters", [])
         current_chapter_num = len(chapters_list)
@@ -1154,7 +1154,7 @@ class CreativeDirectorCoordinator:
             world_setting = self.project_context.get('world_setting', '')
             characters = self.project_context.get('characters', '')
 
-            # 获取最近3章的摘要（用于检查连贯性）
+            # 🆕 优化：优先使用结构化摘要，获取最近3章的摘要（用于检查连贯性）
             recent_chapters_summary = ""
             recent_count = min(3, len(chapters_list) - 1)  # 不包括当前章
             if recent_count > 0:
@@ -1162,10 +1162,51 @@ class CreativeDirectorCoordinator:
                 for i in range(recent_count):
                     idx = len(chapters_list) - 1 - recent_count + i
                     if idx >= 0:
-                        chapter_content = chapters_list[idx] if isinstance(chapters_list[idx], str) else str(chapters_list[idx])
-                        # 提取前200字作为摘要
-                        summary = chapter_content[:200].replace('\n', ' ')
-                        recent_chapters_summary += f"第{idx + 1}章摘要：{summary}...\n"
+                        chapter_item = chapters_list[idx]
+                        chapter_num = idx + 1
+
+                        # 🆕 优先使用结构化摘要
+                        if isinstance(chapter_item, dict):
+                            # 字典格式：优先使用 summary 字段
+                            summary_text = (chapter_item.get("summary") or "").strip()
+                            title = (chapter_item.get("title") or "").strip()
+                            content = (chapter_item.get("content") or "").strip()
+                            chapter_num = chapter_item.get("chapter_number", idx + 1)
+
+                            # 尝试解析结构化摘要数据
+                            summary_data = chapter_item.get("summary_data")
+                            if summary_data and isinstance(summary_data, str):
+                                try:
+                                    import json
+                                    parsed_data = json.loads(summary_data)
+                                    # 构建丰富的摘要信息
+                                    key_chars = parsed_data.get("key_characters", [])
+                                    key_events = parsed_data.get("key_events", [])
+                                    if key_chars or key_events:
+                                        rich_summary = f"{summary_text}"
+                                        if key_chars:
+                                            rich_summary += f" | 关键人物：{', '.join(key_chars[:3])}"
+                                        if key_events:
+                                            rich_summary += f" | 核心事件：{', '.join(key_events[:2])}"
+                                        summary_text = rich_summary
+                                except:
+                                    pass  # JSON解析失败，使用原始摘要
+
+                            # 回退：如果没有摘要，使用内容片段
+                            if not summary_text and content:
+                                summary_text = content[:200].replace('\n', ' ')
+
+                            if title:
+                                recent_chapters_summary += f"第{chapter_num}章《{title}》：{summary_text}...\n"
+                            else:
+                                recent_chapters_summary += f"第{chapter_num}章：{summary_text}...\n"
+                        else:
+                            # 字符串格式：回退到前200字
+                            chapter_content = str(chapter_item) if chapter_item else ""
+                            summary = chapter_content[:200].replace('\n', ' ')
+                            recent_chapters_summary += f"第{chapter_num}章摘要：{summary}...\n"
+
+                print(f"✅ 一致性检查：已加载最近{recent_count}章的结构化摘要")
 
             consistency_reference = f"""
 【一致性检查参考信息】
