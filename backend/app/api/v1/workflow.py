@@ -495,8 +495,25 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
             SET status = :status, result = :result, completed_at = :completed_at
             WHERE task_id = :task_id
         """)
-        
-        result_str = str(stage_output.output) if stage_output.output else ""
+
+        # 🔥 关键修复：根据阶段类型提取正确的内容字段
+        output_data = stage_output.output if isinstance(stage_output.output, dict) else {}
+        if stage_enum == StageType.ITERATION:
+            # 迭代优化阶段：提取 revised_content
+            result_str = output_data.get("revised_content", "") or output_data.get("final_review", "")
+            logger.info(f"   📝 迭代优化结果字数: {len(result_str) if result_str else 0}")
+        elif stage_enum == StageType.CONTENT:
+            # 内容创作阶段：提取 content 或 chapters
+            result_str = output_data.get("content", "") or output_data.get("chapters", "")
+            logger.info(f"   📝 章节内容字数: {len(result_str) if isinstance(result_str, str) else 0}")
+        elif stage_enum == StageType.REVIEW:
+            # 质量评审阶段：提取 review
+            result_str = output_data.get("review", "")
+            logger.info(f"   📝 评审报告字数: {len(result_str) if result_str else 0}")
+        else:
+            # 其他阶段：使用整个输出的字符串表示
+            result_str = str(stage_output.output) if stage_output.output else ""
+
         db.execute(update_query, {
             "status": "completed",
             "result": result_str,
@@ -504,7 +521,7 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
             "task_id": task_id
         })
         db.commit()
-        
+
         logger.info(f"   ✅ 任务完成: {task_id}")
         
         # 🆕 保存阶段输出到 project_settings（关键修复！）
@@ -593,7 +610,9 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
             
             elif stage_enum == StageType.ITERATION:
                 # 保存迭代优化结果
-                output_data = stage_output.output if isinstance(stage_output.output, dict) else {}
+                # 🔥 关键修复：直接使用已经解析好的 result_str，而不是重新解析
+                final_version_content = result_str  # result_str 已经是正确的 revised_content
+
                 save_query = text("""
                     UPDATE project_settings
                     SET final_version = :final_version,
@@ -601,19 +620,14 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
                         updated_at = :updated_at
                     WHERE project_id = :project_id
                 """)
-                
+
                 db.execute(save_query, {
-                    "final_version": json.dumps(
-                        output_data.get("revised_content") or 
-                        output_data.get("content", {}).get("content") or 
-                        output_data.get("final_review", ""), 
-                        ensure_ascii=False
-                    ),
+                    "final_version": json.dumps(final_version_content, ensure_ascii=False),
                     "updated_at": datetime.now().isoformat(),
                     "project_id": project_id
                 })
                 db.commit()
-                logger.info(f"   💾 已保存迭代优化结果到 project_settings")
+                logger.info(f"   💾 已保存迭代优化结果到 project_settings，内容字数: {len(final_version_content) if final_version_content else 0}")
         
         except Exception as save_error:
             logger.error(f"   ⚠️  保存到 project_settings 失败: {save_error}")
