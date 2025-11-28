@@ -416,27 +416,42 @@ class AgentCoordinator:
                     self._real_coordinator.project_context.get('chapter_draft') or
                     self._real_coordinator.project_context.get('plot_outline', '')
                 )
-                
-                # 📝 记录日志，方便调试
+
+                # 📝 详细调试日志
                 print(f"📝 迭代优化阶段 - 章节初稿字数: {len(chapter_draft_content) if isinstance(chapter_draft_content, str) else 0}")
-                
+                print(f"📝 project_context keys: {list(self._real_coordinator.project_context.keys())}")
+
                 review_result = {
                     'review': (
                         self._real_coordinator.project_context.get('review') or
                         self._real_coordinator.project_context.get('review_report') or
                         "质量评审结果待补充"
                     ),
-                    'needs_revision': self._real_coordinator.project_context.get('needs_revision', False),
+                    # 🔥 关键修复：强制设置 needs_revision=True，确保进入优化逻辑
+                    'needs_revision': True,
                     # 🔥 关键修复：将 content 包装为嵌套字典结构
                     'content': {
                         'content': chapter_draft_content  # ← 这里是关键！
                     }
                 }
-                
+
                 result = self._real_coordinator._stage_five_iteration_optimization(review_result)
+
+                # 📝 关键调试：输出返回结果的结构
+                print(f"📝 _stage_five_iteration_optimization 返回结果:")
+                print(f"   - result type: {type(result)}")
+                print(f"   - result keys: {result.keys() if isinstance(result, dict) else 'N/A'}")
+                revised = result.get("revised_content", "") if isinstance(result, dict) else ""
+                print(f"   - revised_content 字数: {len(revised) if revised else 0}")
+
+                # 🔥 关键修复：如果 revised_content 为空，使用原始章节内容
+                if not revised and chapter_draft_content:
+                    print(f"⚠️  revised_content 为空，使用原始章节内容作为最终版本")
+                    revised = chapter_draft_content
+
                 return {
-                    "revised_content": result.get("revised_content", ""),
-                    "final_review": result.get("final_review", ""),
+                    "revised_content": revised,
+                    "final_review": result.get("final_review", "") if isinstance(result, dict) else "",
                 }
             
             return {}

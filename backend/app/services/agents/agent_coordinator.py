@@ -1245,8 +1245,13 @@ class CreativeDirectorCoordinator:
                 print(f"📝 从 project_context.chapters 获取原始内容")
 
         if not original_content:
-            print("⚠️  警告：未找到原始章节内容，直接返回评审结果")
-            return review_result
+            print("⚠️  警告：未找到原始章节内容，返回空的 revised_content")
+            # 🔥 关键修复：即使没有原始内容，也要返回正确的字典结构
+            return {
+                "revised_content": "",
+                "final_review": review_result.get("review", "无法获取原始内容进行优化"),
+                "iteration": self.iteration_count
+            }
 
         print(f"📝 原始章节字数: {len(original_content)}")
 
