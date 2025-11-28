@@ -1753,7 +1753,7 @@ class CreativeDirectorCoordinator:
                                world_setting: str, characters: str,
                                previous_ending: str, target_word_count: int = 3000,
                                previous_chapters: Optional[List[Any]] = None) -> str:
-        """生成章节内容（增强版 - 包含已生成章节分析）
+        """生成章节内容（增强版 - 包含已生成章节分析 + 开头/结尾技巧）
 
         Args:
             chapter_number: 章节编号
@@ -1775,7 +1775,70 @@ class CreativeDirectorCoordinator:
             chapters_analysis = self._analyze_previous_chapters(previous_chapters)
             print(f"✅ 已分析 {len(previous_chapters)} 个已完成章节")
 
-        # 🆕 构建增强版内容创作提示词
+        # 🆕 章节开头/结尾方式定义（与 _execute_content_stage 保持同步）
+        opening_styles = {
+            "对话开头": ("对话开头", "直接进入冲突或紧张场景", "'站住！'身后传来一声厉喝。"),
+            "动作开头": ("动作开头", "正在发生的动态事件", "刀光闪过，血珠在空中划出一道弧线。"),
+            "悬念开头": ("悬念开头", "抛出问题，引发好奇", "三天后回想起这个决定时，她依然后悔不已。"),
+            "场景开头": ("场景开头", "氛围渲染，快速建立情境", "暴雨倾盆，整个长安城笼罩在一片灰蒙蒙的水雾中。"),
+            "反转开头": ("反转开头", "与上章结尾形成对比或反差", "然而他睁开眼时，发现自己躺在一张软榻上。"),
+        }
+        ending_styles = {
+            "悬念式": ("悬念式", "关键信息揭露一半", "信封里只有一张纸，上面写着三个字——"),
+            "转折式": ("转折式", "意外事件发生", "就在她以为一切结束时，门外响起了敲门声。来人是——"),
+            "动作中断式": ("动作中断式", "危机时刻戛然而止", "刀锋距离她的咽喉只有一寸。她闭上眼睛——"),
+            "信息炸弹式": ("信息炸弹式", "惊人真相揭露", "'你以为我是谁？'他摘下面具，露出一张与她父亲一模一样的脸。"),
+            "选择困境式": ("选择困境式", "主角面临艰难抉择", "救左边的师父，还是右边的爱人？她只有三秒钟做出决定。"),
+        }
+
+        # 🆕 情节类型 → 推荐的开头/结尾方式（关键词规则匹配）
+        scene_style_rules = {
+            "战斗": {"keywords": ["战斗", "打斗", "厮杀", "对决", "交手", "出招", "攻击", "防御", "刀剑", "拳脚"],
+                    "opening": "动作开头", "ending": "动作中断式"},
+            "悬疑": {"keywords": ["悬疑", "推理", "谜团", "线索", "真相", "秘密", "调查", "疑点", "隐情", "身世"],
+                    "opening": "悬念开头", "ending": "悬念式"},
+            "转折": {"keywords": ["转折", "揭秘", "真相大白", "身份", "背叛", "反转", "意外", "惊人", "原来", "竟然"],
+                    "opening": "反转开头", "ending": "信息炸弹式"},
+            "情感": {"keywords": ["告别", "离别", "重逢", "表白", "感情", "思念", "回忆", "温情", "感动", "眼泪"],
+                    "opening": "场景开头", "ending": "选择困境式"},
+            "危机": {"keywords": ["危机", "危险", "生死", "逃亡", "追杀", "困境", "绝境", "险境", "紧急", "千钧一发"],
+                    "opening": "动作开头", "ending": "动作中断式"},
+            "对话": {"keywords": ["谈判", "对话", "交涉", "质问", "争执", "辩论", "说服", "威胁", "警告", "摊牌"],
+                    "opening": "对话开头", "ending": "转折式"},
+            "日常": {"keywords": ["日常", "休息", "准备", "旅途", "修炼", "学习", "训练", "恢复", "整顿", "计划"],
+                    "opening": "场景开头", "ending": "悬念式"},
+            "升级": {"keywords": ["突破", "升级", "进阶", "觉醒", "获得", "传承", "机缘", "宝物", "功法", "神通"],
+                    "opening": "悬念开头", "ending": "信息炸弹式"},
+        }
+
+        # 🆕 分析章节规划，匹配情节类型
+        matched_scene_type = None
+        max_keyword_count = 0
+        for scene_type, rule in scene_style_rules.items():
+            keyword_count = sum(1 for kw in rule["keywords"] if kw in chapter_plan)
+            if keyword_count > max_keyword_count:
+                max_keyword_count = keyword_count
+                matched_scene_type = scene_type
+
+        # 🆕 根据匹配结果选择开头/结尾方式
+        if matched_scene_type and max_keyword_count >= 1:
+            rule = scene_style_rules[matched_scene_type]
+            selected_opening = opening_styles[rule["opening"]]
+            selected_ending = ending_styles[rule["ending"]]
+            match_method = f"关键词匹配({matched_scene_type}场景, 命中{max_keyword_count}个关键词)"
+        else:
+            # 回退到章节编号轮换
+            opening_list = list(opening_styles.values())
+            ending_list = list(ending_styles.values())
+            opening_index = (chapter_number - 1) % len(opening_list)
+            ending_index = (chapter_number + 2) % len(ending_list)
+            selected_opening = opening_list[opening_index]
+            selected_ending = ending_list[ending_index]
+            match_method = "章节编号轮换(未匹配到关键词)"
+
+        print(f"📝 第{chapter_number}章 - 开头: {selected_opening[0]}, 结尾: {selected_ending[0]} [{match_method}]")
+
+        # 🆕 构建增强版内容创作提示词（包含开头/结尾技巧）
         content_creation_prompt = f"""你是一位经验丰富的小说作家。请根据以下信息创作第{chapter_number}章内容。
 
 【章节规划】
@@ -1806,6 +1869,21 @@ class CreativeDirectorCoordinator:
 - ✅ 延续已有的叙事风格和文笔特点
 - ✅ 推进主线情节，避免原地踏步
 - ✅ 注重细节的合理性和真实感
+
+【本章开头方式 - 强制要求】⚠️
+本章必须使用【{selected_opening[0]}】方式开头！
+- 技巧说明：{selected_opening[1]}
+- 参考示例：{selected_opening[2]}
+
+❌ 禁止使用：每章都用"XXX醒来/睁开眼睛/阳光照进房间"开头
+
+【本章结尾方式 - 强制要求】⚠️
+本章必须使用【{selected_ending[0]}】结尾！
+- 技巧说明：{selected_ending[1]}
+- 参考示例：{selected_ending[2]}
+
+❌ 禁止使用：总结式内心独白 + 对未来的展望（如"她知道，从这一刻起..."）
+✅ 结尾要制造钩子，让读者想点下一章
 
 请开始创作第{chapter_number}章内容：
 """
