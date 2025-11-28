@@ -1084,6 +1084,7 @@ class CreativeDirectorCoordinator:
         """阶段四：质量评审阶段
         质量评审官对内容进行全面评审
         🆕 集成知识库：搜索质量标准和优秀章节范例
+        🆕 增加内容一致性检查：确保长篇小说前后内容不矛盾
         """
         print(f"【{self.name}】启动质量评审官进行全面评审...")
 
@@ -1104,29 +1105,65 @@ class CreativeDirectorCoordinator:
                 quality_reference += "\n📊 请参照以上优秀章节的标准进行评审。\n"
                 print(f"✓ 找到 1 个优秀章节范例")
 
+        # 🆕 获取一致性检查所需的参考信息
+        consistency_reference = ""
+        chapters_list = self.project_context.get("chapters", [])
+        current_chapter_num = len(chapters_list)
+
+        if current_chapter_num > 0:
+            # 提取世界观和人物设定的关键信息
+            world_setting = self.project_context.get('world_setting', '')
+            characters = self.project_context.get('characters', '')
+
+            # 获取最近3章的摘要（用于检查连贯性）
+            recent_chapters_summary = ""
+            recent_count = min(3, len(chapters_list) - 1)  # 不包括当前章
+            if recent_count > 0:
+                recent_chapters_summary = "\n【最近章节摘要】\n"
+                for i in range(recent_count):
+                    idx = len(chapters_list) - 1 - recent_count + i
+                    if idx >= 0:
+                        chapter_content = chapters_list[idx] if isinstance(chapters_list[idx], str) else str(chapters_list[idx])
+                        # 提取前200字作为摘要
+                        summary = chapter_content[:200].replace('\n', ' ')
+                        recent_chapters_summary += f"第{idx + 1}章摘要：{summary}...\n"
+
+            consistency_reference = f"""
+【一致性检查参考信息】
+
+【核心设定摘要】
+- 世界观关键词：{world_setting[:300] if isinstance(world_setting, str) else str(world_setting)[:300]}...
+- 人物设定关键词：{characters[:300] if isinstance(characters, str) else str(characters)[:300]}...
+{recent_chapters_summary}
+
+⚠️ 请特别注意检查本章是否与以上设定和前文存在矛盾！
+"""
+            print(f"📋 已加载一致性检查参考（当前第{current_chapter_num}章）")
+
         review_prompt = f"""你是一位资深网络小说编辑。请对以下章节内容进行专业评审。
 
 【待评审内容】
 {content_result.get('content', content_result.get('chapters', content_result))}
 
 {quality_reference}
+{consistency_reference}
 
 【网文评审维度】
-请从以下5个维度进行评审，这些是网络小说读者最关注的核心要素：
+请从以下6个维度进行评审，前5个是网文核心要素，第6个是长篇小说必须检查的一致性：
 
-## 1. 爽点效果（权重30%）
+## 1. 爽点效果（权重25%）
 - 本章是否有明确的爽点（打脸、升级、获得、反转等）？
 - 爽点设计是否有足够的铺垫和释放？
 - 读者情绪曲线是否有高潮？
 - 爽感是否足够强烈？
 
-## 2. 节奏把控（权重25%）
+## 2. 节奏把控（权重20%）
 - 是否有拖沓、注水、废话连篇？
 - 紧张与舒缓是否平衡？
 - 信息密度是否适中（不过载也不空洞）？
 - 场景转换是否流畅？
 
-## 3. 钩子效果（权重20%）
+## 3. 钩子效果（权重15%）
 - 章节开头是否吸引人？
 - 章节结尾是否有悬念/钩子？
 - 读者是否有"想点下一章"的冲动？
@@ -1143,6 +1180,14 @@ class CreativeDirectorCoordinator:
 - 对话是否自然、符合人物性格？
 - 是否有病句、重复、啰嗦？
 - 描写是否生动有画面感？
+
+## 6. 内容一致性（权重15%）⚠️ 长篇必查
+- 人物设定是否与前文一致（性格、能力、外貌、背景）？
+- 世界观规则是否与前文一致（修炼体系、社会规则等）？
+- 时间线是否合理（事件发生顺序、时间间隔）？
+- 道具/物品是否与前文一致（已获得/已使用的物品）？
+- 人物关系是否与前文一致（敌友关系、称呼方式）？
+- 如发现矛盾，必须明确指出具体位置和修正建议！
 
 【输出格式】
 请使用以下简洁格式输出评审报告：
@@ -1162,6 +1207,19 @@ class CreativeDirectorCoordinator:
 | 钩子效果 | X/10 | （点评） |
 | 代入感 | X/10 | （点评） |
 | 文笔流畅度 | X/10 | （点评） |
+| 内容一致性 | X/10 | （点评，如有矛盾必须说明） |
+
+---
+
+### ⚠️ 一致性问题（如有）
+
+如发现与前文/设定矛盾的内容，请在此列出：
+1. **矛盾点**：（具体描述矛盾内容）
+   **前文/设定**：（前文怎么写的）
+   **本章内容**：（本章怎么写的）
+   **修正建议**：（如何修改）
+
+（如无一致性问题，可写"未发现明显矛盾"）
 
 ---
 
