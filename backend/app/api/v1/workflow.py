@@ -25,6 +25,8 @@ class StartWorkflowRequest(BaseModel):
     requirement: str
     # 🆕 可选的目标章节数配置，用于长篇规划（默认100章）
     target_chapter_count: Optional[int] = 100
+    # 🆕 是否清空现有内容（重新开始时使用）
+    clear_existing: bool = False
 
 class ExecuteStageRequest(BaseModel):
     project_id: int
@@ -105,18 +107,82 @@ async def start_workflow(
         # 🔧 关键修复：保存requirement到数据库
         from sqlalchemy import text
         from datetime import datetime
-        
+
+        # 🆕 如果是重新开始模式，清空所有旧数据
+        cleared_data = {"chapters": 0, "settings": False}
+        if request.clear_existing:
+            logger.info("🗑️  重新开始模式：开始清空现有内容...")
+            try:
+                # 1. 删除所有章节
+                delete_chapters_query = text("DELETE FROM chapters WHERE project_id = :project_id")
+                result = db.execute(delete_chapters_query, {"project_id": project_id})
+                cleared_data["chapters"] = result.rowcount
+                logger.info(f"   ✅ 已删除 {cleared_data['chapters']} 个章节")
+
+                # 2. 删除章节相关的知识库条目
+                try:
+                    delete_kb_query = text("""
+                        DELETE FROM knowledge_base
+                        WHERE project_id = :project_id AND type = 'chapter'
+                    """)
+                    db.execute(delete_kb_query, {"project_id": project_id})
+                    logger.info(f"   ✅ 已清理章节相关的知识库条目")
+                except Exception as e:
+                    logger.warning(f"   ⚠️  知识库清理失败（非致命）: {e}")
+
+                # 3. 清空 project_settings 中的旧内容
+                clear_settings_query = text("""
+                    UPDATE project_settings
+                    SET concept = NULL,
+                        world_setting = NULL,
+                        characters = NULL,
+                        plot_outline = NULL,
+                        chapter_draft = NULL,
+                        review_report = NULL,
+                        final_version = NULL,
+                        updated_at = :updated_at
+                    WHERE project_id = :project_id
+                """)
+                db.execute(clear_settings_query, {
+                    "project_id": project_id,
+                    "updated_at": datetime.now().isoformat()
+                })
+                cleared_data["settings"] = True
+                logger.info(f"   ✅ 已清空项目设定（概念、大纲、世界观、人物等）")
+
+                # 4. 清理记忆管理
+                try:
+                    clear_memory_query = text("""
+                        UPDATE memory SET current_chapter = NULL
+                        WHERE project_id = :project_id
+                    """)
+                    db.execute(clear_memory_query, {"project_id": project_id})
+                    logger.info(f"   ✅ 已清理记忆管理")
+                except Exception as e:
+                    logger.warning(f"   ⚠️  记忆清理失败（非致命）: {e}")
+
+                db.commit()
+                logger.info("✅ 重新开始模式：所有旧内容已清空")
+
+            except Exception as e:
+                logger.error(f"❌ 清空旧内容失败: {e}")
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"清空旧内容失败: {str(e)}"
+                )
+
         try:
             # 删除旧的工作流会话
             delete_query = text(
                 "DELETE FROM workflow_sessions WHERE project_id = :project_id"
             )
             db.execute(delete_query, {"project_id": project_id})
-            
+
             # 保存新的工作流会话
             insert_query = text(
-                """INSERT INTO workflow_sessions 
-                   (project_id, user_id, requirement, created_at) 
+                """INSERT INTO workflow_sessions
+                   (project_id, user_id, requirement, created_at)
                    VALUES (:project_id, :user_id, :requirement, :created_at)"""
             )
             db.execute(insert_query, {
@@ -125,7 +191,7 @@ async def start_workflow(
                 "requirement": requirement,
                 "created_at": datetime.now().isoformat()
             })
-            
+
             # 🆕 同时更新 projects 表的 description 字段（关键修复！）
             update_project_query = text(
                 "UPDATE projects SET description = :description WHERE id = :project_id"
@@ -134,7 +200,7 @@ async def start_workflow(
                 "description": requirement,
                 "project_id": project_id
             })
-            
+
             db.commit()
             logger.info(f"   ✅ 工作流会话已保存到数据库")
             logger.info(f"   ✅ 项目描述已更新为用户需求")

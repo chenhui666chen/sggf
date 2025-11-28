@@ -2125,9 +2125,13 @@ export default function WorkflowControlPage() {
     }
   }
 
+  // 🆕 标记是否是重新开始（需要清空旧数据）
+  const [isRestartMode, setIsRestartMode] = useState(false)
+
   // 🆕 确认重新开始（覆盖现有内容）
   const handleConfirmRestart = () => {
     setShowContentWarningDialog(false)
+    setIsRestartMode(true)  // 🆕 标记为重新开始模式
     setOpenDialog(true)
   }
 
@@ -2153,14 +2157,25 @@ export default function WorkflowControlPage() {
           projectId: parseInt(projectId),
           requirement,
           targetChapterCount,
+          clearExisting: isRestartMode,  // 🆕 传递清空标志
         })
       ).unwrap()
       setOpenDialog(false)
       setIsRunning(true)
       setIsStarting(false)  // 启动完成，隐藏加载状态
+      setIsRestartMode(false)  // 🆕 重置重新开始标志
+
+      // 🆕 如果是重新开始模式，刷新章节列表
+      if (isRestartMode) {
+        dispatch(fetchChapters(parseInt(projectId)))
+        setSnackbarMessage('已清空旧内容，开始全新创作')
+        setSnackbarSeverity('success')
+        setSnackbarOpen(true)
+      }
     } catch (error) {
       console.error('Failed to start workflow:', error)
       setIsStarting(false)  // 启动失败，隐藏加载状态
+      setIsRestartMode(false)  // 🆕 重置重新开始标志
       setSnackbarMessage('启动工作流失败，请重试')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)

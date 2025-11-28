@@ -119,15 +119,18 @@ export const startWorkflow = createAsyncThunk(
     projectId,
     requirement,
     targetChapterCount,
+    clearExisting = false,  // 🆕 是否清空现有内容
   }: {
     projectId: number
     requirement: string
     targetChapterCount?: number
+    clearExisting?: boolean  // 🆕 重新开始时需要清空旧数据
   }) => {
     const response = await apiClient.post('/api/v1/workflow/start', {
       project_id: projectId, // 🎯 确保传递project_id
       requirement,
       target_chapter_count: targetChapterCount,
+      clear_existing: clearExisting,  // 🆕 传递清空标志
     })
     return response.data
   }
