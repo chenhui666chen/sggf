@@ -304,7 +304,6 @@ class AgentCoordinator:
                     final_version = safe_parse_json(result[6])
                     
                     # 更新 project_context
-                    # 🔥 关键修复：同时更新 chapters 列表，确保后续阶段使用最新内容
                     self._real_coordinator.project_context.update({
                         "concept": concept,
                         "world_setting": world_setting,
@@ -312,7 +311,6 @@ class AgentCoordinator:
                         "plot_outline": plot_outline,
                         "content": chapter_draft,  # ← 关键！
                         "chapter_draft": chapter_draft,
-                        "chapters": [chapter_draft] if chapter_draft else [],  # 🔥 关键修复！
                         "review_report": review_report,
                         "review": review_report,  # 兼容两种字段名
                         "final_version": final_version,
@@ -393,24 +391,17 @@ class AgentCoordinator:
             elif stage == StageType.REVIEW:
                 # 阶段4: 质量评审
                 # 🔧 修复: 获取前一阶段的输出作为评审内容
-                # 🔥 关键修复：优先使用 content/chapter_draft（字符串），而不是 chapters（列表）
+                # 优先从 project_context 中获取 chapters 或 content
                 content_to_review = (
-                    self._real_coordinator.project_context.get('content') or
-                    self._real_coordinator.project_context.get('chapter_draft') or
+                    self._real_coordinator.project_context.get('chapters') or 
+                    self._real_coordinator.project_context.get('content') or 
                     self._real_coordinator.project_context.get('plot_outline', '正在生成中...')
                 )
-
-                # 如果 content_to_review 是列表，取第一个元素
-                if isinstance(content_to_review, list) and len(content_to_review) > 0:
-                    content_to_review = content_to_review[0] if isinstance(content_to_review[0], str) else str(content_to_review[0])
-
-                # 📝 记录日志，方便调试
-                print(f"📝 质量评审阶段 - 章节内容字数: {len(content_to_review) if isinstance(content_to_review, str) else 0}")
-
+                
                 content_result = {
                     'content': content_to_review
                 }
-
+                
                 result = self._real_coordinator._stage_four_quality_review(content_result)
                 return {
                     "review": result.get("review", ""),
