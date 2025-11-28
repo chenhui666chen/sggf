@@ -118,6 +118,11 @@ export default function WorkflowControlPage() {
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [chapterTitle, setChapterTitle] = useState('')
 
+  // 🆕 保护机制：已有内容警告对话框
+  const [showContentWarningDialog, setShowContentWarningDialog] = useState(false)
+  const [existingChaptersCount, setExistingChaptersCount] = useState(0)
+  const [hasExistingContent, setHasExistingContent] = useState(false)
+
   // 故事概念对话框状态
   const [showConceptDialog, setShowConceptDialog] = useState(false)
   const [conceptContent, setConceptContent] = useState('')
@@ -2080,6 +2085,58 @@ export default function WorkflowControlPage() {
     }
   }
 
+  // 🆕 检查项目是否已有内容
+  const checkExistingContent = async () => {
+    if (!projectId) return false
+
+    try {
+      // 获取项目的章节列表
+      const response = await apiClient.getChapters(parseInt(projectId))
+      const chapters = response.data || []
+      const chapterCount = chapters.length
+
+      // 检查是否有概念/大纲等内容（通过workflow状态判断）
+      const hasCompletedStages =
+        workflow.stages.concept.status === 'completed' ||
+        workflow.stages.structure.status === 'completed' ||
+        workflow.stages.content.status === 'completed'
+
+      if (chapterCount > 0 || hasCompletedStages) {
+        setExistingChaptersCount(chapterCount)
+        setHasExistingContent(true)
+        return true
+      }
+      return false
+    } catch (error) {
+      console.error('检查项目内容失败:', error)
+      return false
+    }
+  }
+
+  // 🆕 点击"开始创作"按钮时的处理
+  const handleStartButtonClick = async () => {
+    const hasContent = await checkExistingContent()
+    if (hasContent) {
+      // 显示警告对话框
+      setShowContentWarningDialog(true)
+    } else {
+      // 直接打开创作对话框
+      setOpenDialog(true)
+    }
+  }
+
+  // 🆕 确认重新开始（覆盖现有内容）
+  const handleConfirmRestart = () => {
+    setShowContentWarningDialog(false)
+    setOpenDialog(true)
+  }
+
+  // 🆕 选择继续创作下一章
+  const handleContinueNextChapter = () => {
+    setShowContentWarningDialog(false)
+    handleGenerateNextChapter()
+  }
+
   const handleStartWorkflow = async () => {
     if (!projectId || !requirement.trim()) {
       // 使用 Snackbar 显示错误提示（取代 alert）
@@ -3513,7 +3570,7 @@ export default function WorkflowControlPage() {
                 variant="contained"
                 color="primary"
                 startIcon={<PlayArrowIcon />}
-                onClick={() => setOpenDialog(true)}
+                onClick={handleStartButtonClick}
               >
                 开始创作
               </Button>
@@ -3797,6 +3854,77 @@ export default function WorkflowControlPage() {
           </Button>
         )}
       </Box>
+
+      {/* 🆕 已有内容警告对话框 */}
+      <Dialog
+        open={showContentWarningDialog}
+        onClose={() => setShowContentWarningDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <Box sx={{ p: 3 }}>
+          <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+            ⚠️ 警告：此项目已有内容
+          </Typography>
+
+          <Alert severity="warning" sx={{ mb: 3 }}>
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              <strong>此项目已有 {existingChaptersCount} 章内容</strong>
+              {workflow.stages.concept.status === 'completed' && '，以及已完成的故事概念'}
+              {workflow.stages.structure.status === 'completed' && '、情节大纲'}。
+            </Typography>
+            <Typography variant="body2">
+              重新开始创作将<strong style={{ color: '#d32f2f' }}>覆盖所有现有内容</strong>，此操作不可撤销！
+            </Typography>
+          </Alert>
+
+          <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
+            您想要的操作是：
+          </Typography>
+
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {existingChaptersCount > 0 && (
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleContinueNextChapter}
+                startIcon={<AddIcon />}
+                sx={{ justifyContent: 'flex-start', py: 1.5 }}
+              >
+                <Box sx={{ textAlign: 'left' }}>
+                  <Typography variant="button">继续创作下一章</Typography>
+                  <Typography variant="caption" sx={{ display: 'block', opacity: 0.8 }}>
+                    基于现有内容，生成第 {existingChaptersCount + 1} 章（推荐）
+                  </Typography>
+                </Box>
+              </Button>
+            )}
+
+            <Button
+              variant="outlined"
+              color="error"
+              onClick={handleConfirmRestart}
+              startIcon={<RefreshIcon />}
+              sx={{ justifyContent: 'flex-start', py: 1.5 }}
+            >
+              <Box sx={{ textAlign: 'left' }}>
+                <Typography variant="button">重新开始（覆盖所有）</Typography>
+                <Typography variant="caption" sx={{ display: 'block', opacity: 0.8 }}>
+                  删除现有内容，从头开始创作
+                </Typography>
+              </Box>
+            </Button>
+
+            <Button
+              variant="text"
+              onClick={() => setShowContentWarningDialog(false)}
+              sx={{ justifyContent: 'flex-start' }}
+            >
+              取消
+            </Button>
+          </Box>
+        </Box>
+      </Dialog>
 
       {/* 开始创作对话框 */}
       <Dialog
