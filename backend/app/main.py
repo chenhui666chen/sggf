@@ -1,6 +1,9 @@
 """
 FastAPI主应用
 """
+import logging
+import sys
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -8,6 +11,21 @@ from app.core.config import settings
 from app.db.base import Base, engine
 from app.api.v1 import auth, projects, chapters, knowledge_base, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters
 import socketio
+
+# 🔧 配置日志 - 确保所有模块的日志都能输出
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)  # 输出到控制台
+    ]
+)
+
+# 设置特定模块的日志级别
+logging.getLogger("app").setLevel(logging.INFO)
+logging.getLogger("app.api").setLevel(logging.INFO)
+logging.getLogger("app.services").setLevel(logging.INFO)
+logging.getLogger("app.websocket").setLevel(logging.INFO)
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)

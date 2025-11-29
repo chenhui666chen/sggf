@@ -548,6 +548,8 @@ export default function ProjectDetailPage() {
         anchor="right"
         open={showChaptersDrawer}
         onClose={handleCloseChaptersDrawer}
+        disableEnforceFocus
+        disableAutoFocus
         sx={{
           '& .MuiDrawer-paper': {
             width: 350,

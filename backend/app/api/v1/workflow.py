@@ -1,6 +1,9 @@
 """
 工作流程API路由
+支持流式输出 (Streaming) 功能
 """
+import logging
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.orm import Session
 from typing import Dict, Any, Optional
@@ -19,6 +22,18 @@ import uuid
 from datetime import datetime
 import json
 
+# 🔧 配置日志
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# 🆕 导入流式输出服务
+try:
+    from app.services.streaming_service import get_streaming_service
+    STREAMING_AVAILABLE = True
+except ImportError:
+    STREAMING_AVAILABLE = False
+    get_streaming_service = None  # type: ignore
+
 # 请求模型
 class StartWorkflowRequest(BaseModel):
     project_id: int
@@ -31,6 +46,8 @@ class StartWorkflowRequest(BaseModel):
 class ExecuteStageRequest(BaseModel):
     project_id: int
     stage: str
+    # 🆕 是否启用流式输出（默认启用）
+    enable_streaming: bool = True
 
 class RegenerateStageRequest(BaseModel):
     project_id: int
@@ -368,27 +385,40 @@ async def execute_stage_async(
 ):
     """
     异步执行阶段（立即返回task_id，后台执行）
+    🆕 支持流式输出：content/review/iteration 阶段可实时推送生成内容
 
     请求体:
     {
         "project_id": 1,
-        "stage": "concept"
+        "stage": "concept",
+        "enable_streaming": true  // 🆕 是否启用流式输出
     }
-    
+
     响应:
     {
         "task_id": "uuid-string",
-        "status": "running"
+        "status": "running",
+        "streaming_enabled": true  // 🆕 是否启用了流式输出
     }
     """
-    import logging
     import asyncio
     from sqlalchemy import text
-    
-    logger = logging.getLogger("uvicorn.error")
+
     project_id = request.project_id
     stage = request.stage
-    
+    enable_streaming = request.enable_streaming
+
+    # 🔧 添加请求日志
+    logger.info(f"📥 收到异步执行请求: project_id={project_id}, stage={stage}, streaming={enable_streaming}")
+
+    # 🆕 判断是否支持流式输出（仅 content/review/iteration 阶段）
+    streaming_stages = ["content", "review", "iteration"]
+    streaming_enabled = (
+        enable_streaming and
+        stage in streaming_stages and
+        STREAMING_AVAILABLE
+    )
+
     try:
         if not project_id or not stage:
             raise HTTPException(
@@ -398,18 +428,18 @@ async def execute_stage_async(
 
         # 验证stage值
         stage_enum = StageType(stage)
-        
+
         # 生成task_id
         task_id = str(uuid.uuid4())
-        logger.info(f"\ud83c\udfaf 创建异步任务: {task_id} (stage={stage}, project_id={project_id})")
-        
+        logger.info(f"🎯 创建异步任务: {task_id} (stage={stage}, project_id={project_id}, streaming={streaming_enabled})")
+
         # 创建任务记录
         insert_query = text("""
             INSERT INTO generation_history
             (project_id, task_type, task_id, status, created_at)
             VALUES (:project_id, :task_type, :task_id, :status, :created_at)
         """)
-        
+
         db.execute(insert_query, {
             "project_id": project_id,
             "task_type": f"workflow_stage_{stage}",
@@ -418,26 +448,35 @@ async def execute_stage_async(
             "created_at": datetime.now().isoformat()
         })
         db.commit()
-        logger.info(f"   \u2705 任务记录已创建")
-        
-        # 异步执行任务（不等待）
-        asyncio.create_task(
-            execute_stage_background(task_id, project_id, stage_enum, current_user.id, db)
-        )
-        logger.info(f"   \ud83d\ude80 后台任务已启动")
-        
+        logger.info(f"   ✅ 任务记录已创建")
+
+        # 🆕 根据是否启用流式输出选择执行方式
+        if streaming_enabled:
+            # 使用流式输出执行
+            asyncio.create_task(
+                execute_stage_with_streaming(task_id, project_id, stage_enum, current_user.id, db)
+            )
+            logger.info(f"   🌊 流式后台任务已启动")
+        else:
+            # 使用传统方式执行
+            asyncio.create_task(
+                execute_stage_background(task_id, project_id, stage_enum, current_user.id, db)
+            )
+            logger.info(f"   🚀 后台任务已启动")
+
         return {
             "task_id": task_id,
-            "status": "running"
+            "status": "running",
+            "streaming_enabled": streaming_enabled  # 🆕 返回是否启用了流式输出
         }
-        
+
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid stage: {stage}",
         )
     except Exception as e:
-        logger.error(f"\u274c 异步任务创建失败: {str(e)}")
+        logger.error(f"❌ 异步任务创建失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
@@ -516,7 +555,7 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
             status='active',
             progress=0
         )
-        
+
         # 🆕 推送任务开始进度
         await ws_manager.send_task_progress(
             project_id=project_id,
@@ -525,7 +564,46 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
             message=f"开始执行{stage_enum.value}阶段"
         )
         logger.info(f"   📡 已发送任务开始进度: {task_id}")
-        
+
+        # 🆕 定义每个阶段的 Agent 配置（使用 snake_case 命名规范）
+        STAGE_AGENTS = {
+            'concept': [
+                {'id': 'creative_director', 'name': '创意总监'},
+                {'id': 'worldview_architect', 'name': '世界观架构师'},
+                {'id': 'character_designer', 'name': '人物设计师'},
+            ],
+            'structure': [
+                {'id': 'plot_architect', 'name': '情节架构师'},
+                {'id': 'event_validator', 'name': '事件验证官'},
+            ],
+            'content': [
+                {'id': 'content_creator', 'name': '内容创作师'},
+                {'id': 'style_optimizer', 'name': '文风优化师'},
+            ],
+            'review': [
+                {'id': 'quality_reviewer', 'name': '质量评审官'},
+            ],
+            'iteration': [
+                {'id': 'iteration_coordinator', 'name': '迭代协调官'},
+                {'id': 'content_reviser', 'name': '内容修订师'},
+                {'id': 'final_reviewer', 'name': '最终审核官'},
+            ],
+        }
+
+        # 🆕 推送 Agent 开始工作状态
+        stage_agents = STAGE_AGENTS.get(stage_enum.value, [])
+        for agent in stage_agents:
+            await ws_manager.send_agent_status(
+                project_id=project_id,
+                stage=stage_enum.value,
+                agent_id=agent['id'],
+                agent_name=agent['name'],
+                status='working',
+                progress=0,
+                message=f'{agent["name"]}正在工作中...'
+            )
+        logger.info(f"   📡 已发送 {len(stage_agents)} 个 Agent 开始状态")
+
         # 🆕 设置进度回调（用于任务分块执行）
         async def progress_callback(proj_id: int, t_id: str, progress: int, message: str):
             """进度回调函数，通过WebSocket发送进度更新"""
@@ -536,15 +614,26 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
                     progress=progress,
                     message=message
                 )
+                # 🆕 同步更新所有 Agent 进度
+                for agent in stage_agents:
+                    await ws_manager.send_agent_status(
+                        project_id=proj_id,
+                        stage=stage_enum.value,
+                        agent_id=agent['id'],
+                        agent_name=agent['name'],
+                        status='working',
+                        progress=progress,
+                        message=message
+                    )
                 logger.info(f"   📡 进度推送: {progress}% - {message}")
             except Exception as e:
                 logger.error(f"   ⚠️  进度推送失败: {e}")
-        
+
         # 🆕 为 coordinator 设置进度回调（如果支持）
         if hasattr(coordinator, 'set_progress_callback'):
             coordinator.set_progress_callback(progress_callback, task_id, project_id)  # type: ignore
             logger.info(f"   ✅ 已启用任务分块执行模式")
-        
+
         # 🔧 关键修复：将 requirement 传递给 execute_stage
         stage_output = await coordinator.execute_stage(
             stage_enum,
@@ -706,7 +795,20 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
             result={"output": result_str}
         )
         logger.info(f"   📡 已发送任务完成通知: {task_id}")
-        
+
+        # 🆕 推送 Agent 完成状态
+        for agent in stage_agents:
+            await ws_manager.send_agent_status(
+                project_id=project_id,
+                stage=stage_enum.value,
+                agent_id=agent['id'],
+                agent_name=agent['name'],
+                status='completed',
+                progress=100,
+                message=f'{agent["name"]}已完成'
+            )
+        logger.info(f"   📡 已发送 {len(stage_agents)} 个 Agent 完成状态")
+
         # 🔔 推送阶段完成状态
         await ws_manager.send_stage_update(
             project_id=project_id,
@@ -715,7 +817,58 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
             output=result_str,
             progress=100
         )
-        
+
+        # 🆕 保存记忆到数据库（统一存储方案）
+        try:
+            from app.models.memory import Memory
+
+            # 🆕 消息数量上限
+            MAX_MESSAGES = 50
+
+            # 查找或创建记忆记录
+            memory = db.query(Memory).filter(
+                Memory.project_id == project_id
+            ).order_by(Memory.updated_at.desc()).first()
+
+            # 构建新的消息记录
+            new_message = {
+                "role": "assistant",
+                "content": result_str[:2000] if result_str else "",  # 限制长度
+                "stage": stage_enum.value,
+                "timestamp": datetime.now().isoformat()
+            }
+
+            if memory:
+                # 更新现有记忆
+                messages = memory.messages or []
+                messages.append(new_message)
+
+                # 🆕 限制消息数量（保留最近 MAX_MESSAGES 条）
+                if len(messages) > MAX_MESSAGES:
+                    messages = messages[-MAX_MESSAGES:]
+
+                memory.messages = messages
+                memory.current_scene = stage_enum.value
+                db.add(memory)
+            else:
+                # 创建新记忆
+                # 获取用户ID
+                project = db.query(Project).filter(Project.id == project_id).first()
+                if project:
+                    memory = Memory(
+                        project_id=project_id,
+                        user_id=project.user_id,
+                        messages=[new_message],
+                        current_scene=stage_enum.value
+                    )
+                    db.add(memory)
+
+            db.commit()
+            logger.info(f"   💾 已保存阶段记忆到数据库: {stage_enum.value}")
+        except Exception as mem_error:
+            logger.error(f"   ⚠️  保存记忆失败: {mem_error}")
+            # 不影响主流程
+
     except Exception as e:
         logger.error(f"❌ 后台任务失败: {task_id}, 错误: {str(e)}")
         
@@ -743,6 +896,663 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
         logger.info(f"   📡 已发送任务失败通知: {task_id}")
         
         # 🔔 推送错误状态
+        await ws_manager.send_stage_update(
+            project_id=project_id,
+            stage=stage_enum.value,
+            status='error',
+            progress=0
+        )
+
+
+async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum: StageType, user_id: int, db: Session):
+    """
+    🆕 使用流式输出执行阶段任务
+
+    支持 content/review/iteration 阶段的实时内容推送
+    """
+    import logging
+    from sqlalchemy import text
+
+    logger = logging.getLogger("uvicorn.error")
+
+    try:
+        logger.info(f"🌊 开始流式执行后台任务: {task_id}")
+
+        # 确保协调器已初始化
+        if not coordinator._coordinator_initialized:
+            logger.info("   🔍 检测到协调器未初始化，开始初始化...")
+            await coordinator.initialize_agents()
+            logger.info("   ✅ 协调器初始化完成")
+
+        # 确保 project_settings 记录存在
+        check_query = text("""
+            SELECT id FROM project_settings WHERE project_id = :project_id
+        """)
+        existing = db.execute(check_query, {"project_id": project_id}).fetchone()
+
+        if not existing:
+            logger.info(f"   📝 初始化 project_settings 记录")
+            init_query = text("""
+                INSERT INTO project_settings
+                (project_id, stage_one_status, stage_two_status, stage_three_status,
+                 stage_four_status, stage_five_status, created_at, updated_at)
+                VALUES
+                (:project_id, 'pending', 'pending', 'pending', 'pending', 'pending',
+                 :created_at, :updated_at)
+            """)
+            db.execute(init_query, {
+                "project_id": project_id,
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
+            })
+            db.commit()
+
+        # 从数据库读取用户需求
+        requirement_query = text(
+            """SELECT requirement FROM workflow_sessions
+               WHERE project_id = :project_id
+               ORDER BY created_at DESC LIMIT 1"""
+        )
+        result = db.execute(requirement_query, {"project_id": project_id}).fetchone()
+
+        if result and result[0]:
+            requirement = result[0]
+        else:
+            project_query = text("SELECT description FROM projects WHERE id = :project_id")
+            project_result = db.execute(project_query, {"project_id": project_id}).fetchone()
+            requirement = project_result[0] if project_result and project_result[0] else "根据项目设定进行创作"
+
+        # 🌊 发送流式输出开始通知
+        await ws_manager.send_stream_start(project_id, stage_enum.value)
+
+        # 推送阶段开始状态
+        await ws_manager.send_stage_update(
+            project_id=project_id,
+            stage=stage_enum.value,
+            status='active',
+            progress=0
+        )
+
+        # 🆕 定义每个阶段的 Agent 配置（流式版本）
+        STAGE_AGENTS_STREAMING = {
+            'concept': [
+                {'id': 'creative-director', 'name': '创意总监'},
+                {'id': 'worldview-architect', 'name': '世界观架构师'},
+                {'id': 'character-designer', 'name': '人物设计师'},
+            ],
+            'structure': [
+                {'id': 'plot-architect', 'name': '情节架构师'},
+                {'id': 'event-validator', 'name': '事件验证官'},
+            ],
+            'content': [
+                {'id': 'content-creator', 'name': '内容创作师'},
+                {'id': 'style-optimizer', 'name': '文风优化师'},
+            ],
+            'review': [
+                {'id': 'quality-reviewer', 'name': '质量评审官'},
+            ],
+            'iteration': [
+                {'id': 'iteration-coordinator', 'name': '迭代协调官'},
+                {'id': 'content-reviser', 'name': '内容修订师'},
+                {'id': 'final-reviewer', 'name': '最终审核官'},
+            ],
+        }
+
+        # 🆕 推送 Agent 开始工作状态
+        stage_agents = STAGE_AGENTS_STREAMING.get(stage_enum.value, [])
+        for agent in stage_agents:
+            await ws_manager.send_agent_status(
+                project_id=project_id,
+                stage=stage_enum.value,
+                agent_id=agent['id'],
+                agent_name=agent['name'],
+                status='working',
+                progress=0,
+                message=f'{agent["name"]}正在工作中...'
+            )
+        logger.info(f"   📡 已发送 {len(stage_agents)} 个 Agent 开始状态（流式模式）")
+
+        # 🌊 创建流式输出回调
+        chunk_index = [0]  # 使用列表以便在闭包中修改
+        total_chars = [0]  # 总字符数
+
+        async def on_stream_chunk(chunk: str, idx: int):
+            """流式输出回调：推送每个文本块到前端"""
+            chunk_index[0] = idx
+            total_chars[0] += len(chunk)
+            await ws_manager.send_stream_chunk(
+                project_id=project_id,
+                stage=stage_enum.value,
+                chunk=chunk,
+                chunk_index=idx,
+                is_complete=False
+            )
+            # 🆕 每 50 个 chunk 更新一次 Agent 进度（避免太频繁）
+            if idx % 50 == 0:
+                estimated_progress = min(90, idx // 5)  # 估算进度
+                for agent in stage_agents:
+                    await ws_manager.send_agent_status(
+                        project_id=project_id,
+                        stage=stage_enum.value,
+                        agent_id=agent['id'],
+                        agent_name=agent['name'],
+                        status='working',
+                        progress=estimated_progress,
+                        message=f'已生成 {total_chars[0]} 字...'
+                    )
+
+        # 🔥 尝试使用流式 LLM 调用
+        result_str = ""
+        use_streaming_llm = STREAMING_AVAILABLE and get_streaming_service is not None
+
+        if use_streaming_llm:
+            try:
+                # 🌊 使用流式服务进行真正的流式 LLM 调用
+                streaming_service = get_streaming_service()
+
+                # 获取项目上下文（用于构建提示词）
+                context_query = text("""
+                    SELECT concept, world_setting, characters, plot_outline, chapter_draft, review_report
+                    FROM project_settings WHERE project_id = :project_id
+                """)
+                context_result = db.execute(context_query, {"project_id": project_id}).fetchone()
+
+                # 构建流式调用的提示词
+                if stage_enum == StageType.CONTENT:
+                    # 内容创作阶段
+                    plot_outline = ""
+                    world_setting = ""
+                    characters = ""
+                    if context_result:
+                        plot_outline = context_result[3] or ""
+                        world_setting = context_result[1] or ""
+                        characters = context_result[2] or ""
+                        # 尝试解析 JSON
+                        try:
+                            import json
+                            if plot_outline.startswith('"'):
+                                plot_outline = json.loads(plot_outline)
+                            if world_setting.startswith('"'):
+                                world_setting = json.loads(world_setting)
+                            if characters.startswith('"') or characters.startswith('['):
+                                characters = json.loads(characters)
+                                if isinstance(characters, list):
+                                    characters = "\n".join(str(c) for c in characters)
+                        except:
+                            pass
+
+                    # 🆕 开头/结尾方式定义（从头创作共享模块）
+                    opening_styles = {
+                        "对话开头": ("对话开头", "直接进入冲突或紧张场景", "'站住！'身后传来一声厉喝。"),
+                        "动作开头": ("动作开头", "正在发生的动态事件", "刀光闪过，血珠在空中划出一道弧线。"),
+                        "悬念开头": ("悬念开头", "抛出问题，引发好奇", "三天后回想起这个决定时，她依然后悔不已。"),
+                        "场景开头": ("场景开头", "氛围渲染，快速建立情境", "暴雨倾盆，整个长安城笼罩在一片灰蒙蒙的水雾中。"),
+                    }
+                    ending_styles = {
+                        "悬念式": ("悬念式", "关键信息揭露一半", "信封里只有一张纸，上面写着三个字——"),
+                        "转折式": ("转折式", "意外事件发生", "就在她以为一切结束时，门外响起了敲门声。"),
+                        "信息炸弹式": ("信息炸弹式", "惊人真相揭露", "'你以为我是谁？'他摘下面具，露出一张熟悉的脸。"),
+                    }
+
+                    # 第一章使用固定的开头/结尾方式（适合开篇）
+                    selected_opening = opening_styles["悬念开头"]
+                    selected_ending = ending_styles["悬念式"]
+
+                    system_prompt = """你是一位经验丰富的网络小说作家。请根据提供的情节大纲、世界观设定和人物设定，创作精彩的第一章内容。
+
+创作要求：
+1. 语言生动，描写细腻，符合网文风格
+2. 对话自然，符合人物性格
+3. 情节紧凑，引人入胜，注意爽点节奏
+4. 场景描写要有画面感
+5. 注意段落分隔，便于阅读
+6. 第一章要快速建立世界观和主角形象
+7. 使用场景描写、对话、心理描写等多种手法
+
+【质量标准】
+- ✅ 人物性格和行为符合设定
+- ✅ 遵循已建立的世界观规则
+- ✅ 注重细节的合理性和真实感
+- ✅ 开头要有吸引力，结尾要有悬念
+
+【输出格式要求】⚠️
+请直接输出章节内容，格式必须如下：
+
+第一章 章节标题
+
+章节正文内容...
+
+注意：
+- 第一行必须是章节标题，格式为"第一章 标题名称"
+- 章节标题要简洁有力，能概括本章核心内容或悬念
+- 不要包含任何额外的说明文字、作者话语等"""
+
+                    user_prompt = f"""请创作第一章内容：
+
+【情节大纲】
+{plot_outline}
+
+【世界观设定】
+{world_setting}
+
+【人物设定】
+{characters}
+
+【用户需求】
+{requirement}
+
+【目标字数】约3000字
+
+【本章开头方式 - 建议】
+建议使用【{selected_opening[0]}】方式开头，快速抓住读者注意力
+- 技巧说明：{selected_opening[1]}
+- 参考示例：{selected_opening[2]}
+
+❌ 禁止使用：用"XXX醒来/睁开眼睛/阳光照进房间"开头
+
+【本章结尾方式 - 建议】
+建议使用【{selected_ending[0]}】结尾，让读者想点下一章
+- 技巧说明：{selected_ending[1]}
+- 参考示例：{selected_ending[2]}
+
+❌ 禁止使用：总结式内心独白 + 对未来的展望（如"她知道，从这一刻起..."）
+
+请开始创作第一章内容："""
+
+                elif stage_enum == StageType.REVIEW:
+                    # 质量评审阶段
+                    chapter_draft = ""
+                    if context_result:
+                        chapter_draft = context_result[4] or ""
+                        try:
+                            import json
+                            if chapter_draft.startswith('"'):
+                                chapter_draft = json.loads(chapter_draft)
+                        except:
+                            pass
+
+                    # 🆕 网文6维度评审体系（从头创作版本）
+                    system_prompt = """你是一位专业的网络小说质量评审官。请使用【网文6维度评审体系】对第一章内容进行评审。
+
+## 📊 网文6维度评审体系
+
+### 1. 爽点效果（权重25%）
+- 本章是否有明确的爽点或为后续爽点做了铺垫？
+- 第一章作为开篇，是否成功吸引读者？
+
+### 2. 节奏把控（权重20%）
+- 信息密度是否适中（不过载也不空洞）？
+- 场景转换是否流畅？
+- 对话与叙述比例是否合理（建议30-50%对话）？
+
+### 3. 钩子效果（权重15%）
+- 章节开头是否吸引人？（是否避免了"醒来/阳光照进"的套路开头）
+- 章节结尾是否有悬念/钩子？
+- 读者是否有"想点下一章"的冲动？
+
+### 4. 代入感（权重15%）
+- 主角视角是否清晰？
+- 读者能否代入主角的处境和情感？
+- 世界观建立是否自然、不突兀？
+
+### 5. 文笔流畅度（权重10%）
+- 是否有明显的AI痕迹或机械感？
+- 对话是否自然、符合人物性格？
+- 描写是否生动有画面感？
+
+### 6. 内容一致性（权重15%）
+- 人物设定是否与提供的设定一致？
+- 世界观规则是否与提供的设定一致？"""
+
+                    user_prompt = f"""请评审以下第一章内容：
+
+【章节内容】
+{chapter_draft}
+
+---
+
+【输出格式】
+请使用以下格式输出评审报告：
+
+## 📊 网文质量评审报告
+
+**综合评分**：X/10分
+
+### 1. 爽点效果 ⭐⭐⭐
+- 评价：...
+- 问题：...
+
+### 2. 节奏把控 ⭐⭐⭐
+- 评价：...
+- 问题：...
+
+### 3. 钩子效果 ⭐⭐⭐
+- 开头评价：...
+- 结尾评价：...
+- 问题：...
+
+### 4. 代入感 ⭐⭐⭐
+- 评价：...
+- 问题：...
+
+### 5. 文笔流畅度 ⭐⭐⭐
+- 评价：...
+- 问题：...
+
+### 6. 内容一致性 ⭐⭐⭐
+- 评价：...
+- 问题：...
+
+### 🔧 具体修改建议（按优先级排序）
+1. 【必改】...
+2. 【建议】...
+3. 【可选】...
+
+### ✨ 亮点
+- ..."""
+
+                elif stage_enum == StageType.ITERATION:
+                    # 迭代优化阶段
+                    chapter_draft = ""
+                    review_report = ""
+                    if context_result:
+                        chapter_draft = context_result[4] or ""
+                        review_report = context_result[5] or ""
+                        try:
+                            import json
+                            if chapter_draft.startswith('"'):
+                                chapter_draft = json.loads(chapter_draft)
+                            if review_report.startswith('"'):
+                                review_report = json.loads(review_report)
+                        except:
+                            pass
+
+                    # 🆕 增强版迭代优化提示词
+                    system_prompt = """你是一位资深的网络小说编辑。请根据评审意见对第一章内容进行优化修改。
+
+优化要求：
+1. 保持原有故事框架和情节发展
+2. 改进语言表达，增强网文风格
+3. 增强细节描写，让场景更有画面感
+4. 优化对话内容，使其更自然、更符合人物性格
+5. 提升整体可读性和代入感
+6. 针对评审中标注【必改】的问题必须修改
+7. 标注【建议】的问题尽量修改
+
+【输出格式要求】⚠️
+请直接输出优化后的章节内容，格式必须如下：
+
+第一章 章节标题
+
+章节正文内容...
+
+注意：
+- 第一行必须是章节标题，格式为"第一章 标题名称"
+- 不要包含任何优化说明、修改说明等额外内容
+- 只输出优化后的纯净章节内容"""
+
+                    user_prompt = f"""请根据评审意见优化以下第一章：
+
+【原始章节】
+{chapter_draft}
+
+【评审意见】
+{review_report}
+
+请直接输出优化后的完整章节内容（第一行为章节标题）："""
+                else:
+                    # 其他阶段不使用流式输出，回退到原有逻辑
+                    raise ValueError(f"阶段 {stage_enum.value} 不支持流式输出")
+
+                # 🔥 执行流式 LLM 调用
+                logger.info(f"   🌊 开始流式 LLM 调用...")
+                result_str = await streaming_service.generate_chapter_streaming(
+                    prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    on_chunk=on_stream_chunk,
+                    temperature=0.7,
+                )
+                logger.info(f"   ✅ 流式 LLM 调用完成，生成 {len(result_str)} 字符")
+
+                # 🆕 迭代优化阶段：清理输出内容 + 摘要压缩保护
+                if stage_enum == StageType.ITERATION and result_str:
+                    # 清理输出内容，移除额外的评审话语
+                    def clean_final_output(content: str) -> str:
+                        if not content:
+                            return content
+                        lines = content.split('\n')
+                        cleaned_lines = []
+                        skip_section = False
+                        for line in lines:
+                            line_lower = line.lower().strip()
+                            if any(keyword in line_lower for keyword in [
+                                '优化说明', '修改说明', '评审', '改进建议', '优化要点',
+                                '以下是优化后', '根据评审意见', '主要修改', '优化内容'
+                            ]):
+                                skip_section = True
+                                continue
+                            if skip_section and line.strip() == '':
+                                skip_section = False
+                                continue
+                            if not skip_section:
+                                cleaned_lines.append(line)
+                        return '\n'.join(cleaned_lines).strip()
+
+                    result_str = clean_final_output(result_str)
+
+                    # 安全保护：如果优化后字数远小于原稿，回退为原始内容
+                    original_len = len(chapter_draft or "")
+                    optimized_len = len(result_str or "")
+                    if original_len >= 500 and optimized_len > 0 and optimized_len < original_len * 0.6:
+                        logger.warning(
+                            f"   ⚠️ 优化后长度({optimized_len}) 远小于原稿({original_len})，保留原始内容"
+                        )
+                        result_str = chapter_draft
+
+            except Exception as streaming_error:
+                logger.warning(f"   ⚠️  流式 LLM 调用失败，回退到原有逻辑: {streaming_error}")
+                use_streaming_llm = False
+
+        # 如果流式调用失败或不可用，回退到原有逻辑
+        if not use_streaming_llm or not result_str:
+            logger.info(f"   📝 使用原有逻辑执行阶段...")
+            stage_output = await coordinator.execute_stage(
+                stage_enum,
+                {
+                    "project_id": project_id,
+                    "user_id": user_id,
+                    "requirement": requirement,
+                    "enable_streaming": False,
+                },
+            )
+
+            # 提取结果内容
+            output_data = stage_output.output if isinstance(stage_output.output, dict) else {}
+            if stage_enum == StageType.ITERATION:
+                result_str = output_data.get("revised_content", "") or output_data.get("final_review", "")
+            elif stage_enum == StageType.CONTENT:
+                result_str = output_data.get("content", "") or output_data.get("chapters", "")
+            elif stage_enum == StageType.REVIEW:
+                result_str = output_data.get("review", "")
+            else:
+                result_str = str(stage_output.output) if stage_output.output else ""
+
+        # 🌊 发送流式输出结束通知
+        await ws_manager.send_stream_end(
+            project_id=project_id,
+            stage=stage_enum.value,
+            total_chars=len(result_str) if result_str else 0
+        )
+
+        # 更新任务状态为完成
+        update_query = text("""
+            UPDATE generation_history
+            SET status = :status, result = :result, completed_at = :completed_at
+            WHERE task_id = :task_id
+        """)
+
+        db.execute(update_query, {
+            "status": "completed",
+            "result": result_str,
+            "completed_at": datetime.now().isoformat(),
+            "task_id": task_id
+        })
+        db.commit()
+
+        logger.info(f"   ✅ 流式任务完成: {task_id}")
+
+        # 保存阶段输出到 project_settings
+        try:
+            if stage_enum == StageType.CONTENT:
+                save_query = text("""
+                    UPDATE project_settings
+                    SET chapter_draft = :chapter_draft,
+                        stage_three_status = 'completed',
+                        updated_at = :updated_at
+                    WHERE project_id = :project_id
+                """)
+                db.execute(save_query, {
+                    "chapter_draft": json.dumps(result_str, ensure_ascii=False),
+                    "updated_at": datetime.now().isoformat(),
+                    "project_id": project_id
+                })
+                db.commit()
+            elif stage_enum == StageType.REVIEW:
+                save_query = text("""
+                    UPDATE project_settings
+                    SET review_report = :review_report,
+                        stage_four_status = 'completed',
+                        updated_at = :updated_at
+                    WHERE project_id = :project_id
+                """)
+                db.execute(save_query, {
+                    "review_report": json.dumps(result_str, ensure_ascii=False),
+                    "updated_at": datetime.now().isoformat(),
+                    "project_id": project_id
+                })
+                db.commit()
+            elif stage_enum == StageType.ITERATION:
+                save_query = text("""
+                    UPDATE project_settings
+                    SET final_version = :final_version,
+                        stage_five_status = 'completed',
+                        updated_at = :updated_at
+                    WHERE project_id = :project_id
+                """)
+                db.execute(save_query, {
+                    "final_version": json.dumps(result_str, ensure_ascii=False),
+                    "updated_at": datetime.now().isoformat(),
+                    "project_id": project_id
+                })
+                db.commit()
+        except Exception as save_error:
+            logger.error(f"   ⚠️  保存到 project_settings 失败: {save_error}")
+
+        # 推送任务完成通知
+        await ws_manager.send_task_complete(
+            project_id=project_id,
+            task_id=task_id,
+            result={"output": result_str}
+        )
+
+        # 🆕 推送 Agent 完成状态（流式模式）
+        for agent in stage_agents:
+            await ws_manager.send_agent_status(
+                project_id=project_id,
+                stage=stage_enum.value,
+                agent_id=agent['id'],
+                agent_name=agent['name'],
+                status='completed',
+                progress=100,
+                message=f'{agent["name"]}已完成'
+            )
+        logger.info(f"   📡 已发送 {len(stage_agents)} 个 Agent 完成状态（流式模式）")
+
+        # 推送阶段完成状态
+        await ws_manager.send_stage_update(
+            project_id=project_id,
+            stage=stage_enum.value,
+            status='completed',
+            output=result_str,
+            progress=100
+        )
+
+        # 🆕 保存记忆到数据库（统一存储方案 - 流式模式）
+        try:
+            from app.models.memory import Memory
+
+            # 🆕 消息数量上限
+            MAX_MESSAGES = 50
+
+            # 查找或创建记忆记录
+            memory = db.query(Memory).filter(
+                Memory.project_id == project_id
+            ).order_by(Memory.updated_at.desc()).first()
+
+            # 构建新的消息记录
+            new_message = {
+                "role": "assistant",
+                "content": result_str[:2000] if result_str else "",  # 限制长度
+                "stage": stage_enum.value,
+                "timestamp": datetime.now().isoformat()
+            }
+
+            if memory:
+                # 更新现有记忆
+                messages = memory.messages or []
+                messages.append(new_message)
+
+                # 🆕 限制消息数量（保留最近 MAX_MESSAGES 条）
+                if len(messages) > MAX_MESSAGES:
+                    messages = messages[-MAX_MESSAGES:]
+
+                memory.messages = messages
+                memory.current_scene = stage_enum.value
+                db.add(memory)
+            else:
+                # 创建新记忆
+                project = db.query(Project).filter(Project.id == project_id).first()
+                if project:
+                    memory = Memory(
+                        project_id=project_id,
+                        user_id=project.user_id,
+                        messages=[new_message],
+                        current_scene=stage_enum.value
+                    )
+                    db.add(memory)
+
+            db.commit()
+            logger.info(f"   💾 已保存阶段记忆到数据库（流式模式）: {stage_enum.value}")
+        except Exception as mem_error:
+            logger.error(f"   ⚠️  保存记忆失败（流式模式）: {mem_error}")
+            # 不影响主流程
+
+    except Exception as e:
+        logger.error(f"❌ 流式后台任务失败: {task_id}, 错误: {str(e)}")
+
+        # 更新任务状态为失败
+        update_query = text("""
+            UPDATE generation_history
+            SET status = :status, error = :error, completed_at = :completed_at
+            WHERE task_id = :task_id
+        """)
+
+        db.execute(update_query, {
+            "status": "failed",
+            "error": str(e),
+            "completed_at": datetime.now().isoformat(),
+            "task_id": task_id
+        })
+        db.commit()
+
+        # 推送任务失败通知
+        await ws_manager.send_task_error(
+            project_id=project_id,
+            task_id=task_id,
+            error=str(e)
+        )
+
+        # 推送错误状态
         await ws_manager.send_stage_update(
             project_id=project_id,
             stage=stage_enum.value,
@@ -1681,45 +2491,29 @@ async def generate_next_chapter(
     db: Session = Depends(get_db),
 ):
     """
-    生成下一章（完整工作流）
-    
-    工作流程：
-    1. 获取项目设定（concept, world_setting, characters, plot_outline）
-    2. 获取已生成章节列表
-    3. 计算下一章编号
-    4. 提取前一章结尾（用于衔接）
-    5. 生成已完成章节摘要
-    6. 调用Agent协调器：
-       - generate_chapter_plan(): 章节规划
-       - generate_chapter_content(): 内容创作
-       - review_chapter(): 质量评审
-       - optimize_chapter(): 迭代优化
-    7. 生成章节标题
-    8. 保存到 chapters 表
-    9. 返回章节信息
-    
+    生成下一章（异步模式）
+
+    立即返回 task_id，后台执行四个步骤：
+    1. 章节规划（0-25%）- 不保存，仅内存传递
+    2. 内容创作（25-50%）- 保存到 chapter_draft
+    3. 质量评审（50-75%）- 保存到 review_report
+    4. 迭代优化（75-100%）- 保存到 final_version + chapters 表
+
     响应:
     {
-        "success": true,
-        "message": "第3章已生成并保存",
-        "chapter": {
-            "id": 456,
-            "project_id": 123,
-            "chapter_number": 3,
-            "title": "第三章 星际对决",
-            "content": "章节内容...",
-            "word_count": 3024,
-            "created_at": "2025-10-22T14:30:00"
-        }
+        "task_id": "uuid-string",
+        "status": "running",
+        "message": "已开始生成第X章",
+        "next_chapter_number": X
     }
     """
-    import logging
+    import asyncio
     from sqlalchemy import text
-    
+
     logger = logging.getLogger("uvicorn.error")
-    
+
     try:
-        logger.info(f"📍 开始生成下一章，项目ID: {project_id}")
+        logger.info(f"📍 开始生成下一章（异步模式），项目ID: {project_id}")
         
         # 1. 验证项目存在且属于用户
         project = db.query(Project).filter(
@@ -1834,149 +2628,758 @@ async def generate_next_chapter(
 
         previous_chapters_summary, previous_chapters_payload = summarize_chapters(existing_chapters)
 
-        # 6. 调用Agent协调器生成章节
-        chapter_plan = ""
-        chapter_draft = ""
-        review_report = ""
-        final_version = ""
-        
+        # 6. 生成任务ID并创建任务记录
+        task_id = str(uuid.uuid4())
+        logger.info(f"   🎯 创建异步任务: {task_id}")
+
+        # 创建任务记录
+        insert_query = text("""
+            INSERT INTO generation_history
+            (project_id, task_type, task_id, status, created_at)
+            VALUES (:project_id, :task_type, :task_id, :status, :created_at)
+        """)
+
+        db.execute(insert_query, {
+            "project_id": project_id,
+            "task_type": "generate_next_chapter",
+            "task_id": task_id,
+            "status": "running",
+            "created_at": datetime.now().isoformat()
+        })
+        db.commit()
+        logger.info(f"   ✅ 任务记录已创建")
+
+        # 7. 启动后台任务
+        asyncio.create_task(
+            execute_generate_next_chapter_task(
+                task_id=task_id,
+                project_id=project_id,
+                user_id=current_user.id,
+                next_chapter_number=next_chapter_number,
+                concept=concept or '',
+                world_setting=world_setting or '',
+                characters=characters or '',
+                plot_outline=plot_outline or '',
+                previous_ending=previous_ending,
+                previous_chapters_summary=previous_chapters_summary,
+                previous_chapters_payload=previous_chapters_payload,
+            )
+        )
+        logger.info(f"   🚀 后台任务已启动")
+
+        # 8. 立即返回响应
+        return {
+            "task_id": task_id,
+            "status": "running",
+            "message": f"已开始生成第{next_chapter_number}章",
+            "next_chapter_number": next_chapter_number
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 创建生成下一章任务失败: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+async def execute_generate_next_chapter_task(
+    task_id: str,
+    project_id: int,
+    user_id: int,
+    next_chapter_number: int,
+    concept: str,
+    world_setting: str,
+    characters: str,
+    plot_outline: str,
+    previous_ending: str,
+    previous_chapters_summary: str,
+    previous_chapters_payload: list,
+):
+    """
+    后台执行生成下一章任务（真流式版本）
+
+    执行四个步骤：
+    1. 章节规划（0-25%）- 使用 asyncio.to_thread 避免阻塞
+    2. 内容创作（25-50%）- 使用真流式 LLM 调用
+    3. 质量评审（50-75%）- 使用真流式 LLM 调用
+    4. 迭代优化（75-100%）- 使用真流式 LLM 调用
+    """
+    from sqlalchemy import text
+    from app.db.base import SessionLocal
+
+    logger = logging.getLogger("uvicorn.error")
+    logger.info(f"🚀 开始执行后台任务: {task_id}, 生成第{next_chapter_number}章")
+
+    # 获取流式服务
+    streaming_service = get_streaming_service()
+
+    # 创建独立的数据库会话
+    db = SessionLocal()
+
+    try:
+        # ==================== 步骤1：章节规划（真流式） ====================
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=5,
+            message=f"步骤 1/4: 正在规划第{next_chapter_number}章结构..."
+        )
+        logger.info(f"   → 步骤1: 生成章节规划（真流式）...")
+
         # 确保协调器已初始化
         if not coordinator._coordinator_initialized:
             logger.info("   🔍 协调器未初始化，开始初始化...")
             await coordinator.initialize_agents()
             logger.info("   ✅ 协调器初始化完成")
-        
-        # 获取真实的协调器实例
+
         real_coordinator = coordinator._real_coordinator
-        
         if not real_coordinator:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Agent协调器未初始化"
+            raise Exception("Agent协调器未初始化")
+
+        # 🆕 发送流式开始通知
+        await ws_manager.send_stream_start(project_id, 'structure', f"第{next_chapter_number}章规划开始...")
+
+        # 🆕 创建流式输出回调
+        plan_chunk_index = [0]
+
+        async def on_plan_chunk(chunk: str, idx: int):
+            """章节规划流式回调"""
+            plan_chunk_index[0] = idx
+            await ws_manager.send_stream_chunk(
+                project_id=project_id,
+                stage='structure',
+                chunk=chunk,
+                chunk_index=idx,
+                is_complete=False
             )
-        
+
+        # 🆕 根据章节编号判断爽点节奏（复刻 generate_chapter_plan 的逻辑）
+        is_climax_chapter = next_chapter_number % 5 == 0  # 每5章一个小高潮
+        is_major_climax = next_chapter_number % 25 == 0   # 每25章一个大高潮
+
+        climax_instruction = ""
+        if is_major_climax:
+            climax_instruction = f"""
+⚠️ 【卷末大高潮章节】第{next_chapter_number}章是本卷结尾，需要：
+- 设计一个让读者拍案叫绝的大爽点
+- 本卷主要矛盾要有阶段性解决
+- 为下一卷埋下新的悬念"""
+        elif is_climax_chapter:
+            climax_instruction = f"""
+⚠️ 【小高潮章节】第{next_chapter_number}章需要设计一个明确的爽点：
+- 可以是：打脸嘲讽者/突破升级/获得宝物/反转翻盘/装逼成功"""
+
+        # 🆕 构建章节规划提示词（网文化版本）
+        plan_system_prompt = """你是一位资深网络小说情节规划师，精通爽点设计和读者心理。
+你的任务是为章节制定详细的创作计划，确保情节吸引人、节奏紧凑、爽点分明。"""
+
+        plan_user_prompt = f"""请为第{next_chapter_number}章制定创作计划。
+
+【整本书信息】
+- 故事概念：{concept}
+- 情节大纲：{plot_outline}
+- 世界观：{world_setting}
+- 主要人物：{characters}
+
+【已完成章节摘要】
+{previous_chapters_summary if previous_chapters_summary else '（这是第一章）'}
+
+【前一章结尾】
+{previous_ending if previous_ending else '（这是第一章，没有前一章）'}
+{climax_instruction}
+
+---
+
+请为第{next_chapter_number}章制定创作计划，必须包含以下内容：
+
+## 1. 本章定位
+- 在整体情节中的位置（起承转合哪个阶段）
+- 本章类型：【日常/过渡/冲突/高潮/转折】
+
+## 2. 核心事件
+- 推进主线情节的关键事件
+- 事件的起因-经过-结果
+
+## 3. 爽点设计 ⚡
+- 本章爽点类型：【打脸/升级/获得/反转/装逼/无（铺垫章）】
+- 爽点具体内容描述
+- 铺垫方式（如何让爽点更有冲击力）
+
+## 4. 人物发展
+- 主角本章的成长或变化
+- 重要配角的表现
+- 人物关系推进
+
+## 5. 结尾钩子设计 🎣
+- 钩子类型：【悬念式/危机式/反转式/信息炸弹式/选择困境式】
+- 钩子具体内容
+- 确保读者有"想点下一章"的冲动
+
+## 6. 场景安排
+- 时间、地点、氛围
+- 场景转换节点
+
+---
+
+要求：
+- 确保与整本书的情节大纲保持一致
+- 确保与前面章节的剧情连贯
+- 推进故事发展，不能原地踏步
+- 爽点和钩子必须具体、可执行"""
+
+        # 🆕 使用真流式 LLM 调用
         try:
-            logger.info(f"   🤖 使用Agent协调器生成第{next_chapter_number}章...")
-            
-            # 步骤1：生成章节规划
-            logger.info(f"     → 步骤1: 生成章节规划...")
-            
-            # 检查协调器是否有 generate_chapter_plan 方法
+            chapter_plan = await streaming_service.generate_chapter_streaming(
+                prompt=plan_user_prompt,
+                system_prompt=plan_system_prompt,
+                on_chunk=on_plan_chunk,
+                temperature=0.7,
+            )
+            logger.info(f"   ✓ 章节规划已完成（真流式），长度: {len(chapter_plan)}")
+        except Exception as e:
+            logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
+            # 回退到同步调用
             if hasattr(real_coordinator, 'generate_chapter_plan'):
-                chapter_plan = real_coordinator.generate_chapter_plan(
+                chapter_plan = await asyncio.to_thread(
+                    real_coordinator.generate_chapter_plan,
                     chapter_number=next_chapter_number,
-                    project_concept=concept or '',
-                    plot_outline=plot_outline or '',
-                    world_setting=world_setting or '',
-                    characters=characters or '',
+                    project_concept=concept,
+                    plot_outline=plot_outline,
+                    world_setting=world_setting,
+                    characters=characters,
                     previous_chapters_summary=previous_chapters_summary,
                     previous_ending=previous_ending
                 )
-                logger.info(f"     ✓ 章节规划已完成，长度: {len(chapter_plan)}")
             else:
-                logger.warning(f"     ⚠️  协调器缺少 generate_chapter_plan 方法，使用默认规划")
                 chapter_plan = f"第{next_chapter_number}章创作规划\n\n根据情节大纲和前序章节，本章将继续推进故事发展..."
-            
-            # 步骤2：生成章节内容
-            logger.info(f"     → 步骤2: 生成章节内容...")
-            
+
+        await ws_manager.send_stream_end(project_id, 'structure', len(chapter_plan), f"第{next_chapter_number}章规划完成")
+
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=25,
+            message=f"步骤 1/4: 章节规划完成 ✓"
+        )
+
+        # ==================== 步骤2：内容创作（真流式） ====================
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=30,
+            message=f"步骤 2/4: 正在创作第{next_chapter_number}章内容..."
+        )
+        logger.info(f"   → 步骤2: 生成章节内容（真流式）...")
+
+        # 🆕 发送流式开始通知
+        await ws_manager.send_stream_start(project_id, 'content', f"第{next_chapter_number}章内容创作开始...")
+
+        # 🆕 创建流式输出回调
+        content_chunk_index = [0]
+
+        async def on_content_chunk(chunk: str, idx: int):
+            """内容创作流式回调"""
+            content_chunk_index[0] = idx
+            await ws_manager.send_stream_chunk(
+                project_id=project_id,
+                stage='content',
+                chunk=chunk,
+                chunk_index=idx,
+                is_complete=False
+            )
+
+        # 🆕 开头/结尾方式定义（与 agent_coordinator 保持同步）
+        opening_styles = {
+            "对话开头": ("对话开头", "直接进入冲突或紧张场景", "'站住！'身后传来一声厉喝。"),
+            "动作开头": ("动作开头", "正在发生的动态事件", "刀光闪过，血珠在空中划出一道弧线。"),
+            "悬念开头": ("悬念开头", "抛出问题，引发好奇", "三天后回想起这个决定时，她依然后悔不已。"),
+            "场景开头": ("场景开头", "氛围渲染，快速建立情境", "暴雨倾盆，整个长安城笼罩在一片灰蒙蒙的水雾中。"),
+            "反转开头": ("反转开头", "与上章结尾形成对比或反差", "然而他睁开眼时，发现自己躺在一张软榻上。"),
+        }
+        ending_styles = {
+            "悬念式": ("悬念式", "关键信息揭露一半", "信封里只有一张纸，上面写着三个字——"),
+            "转折式": ("转折式", "意外事件发生", "就在她以为一切结束时，门外响起了敲门声。来人是——"),
+            "动作中断式": ("动作中断式", "危机时刻戛然而止", "刀锋距离她的咽喉只有一寸。她闭上眼睛——"),
+            "信息炸弹式": ("信息炸弹式", "惊人真相揭露", "'你以为我是谁？'他摘下面具，露出一张与她父亲一模一样的脸。"),
+            "选择困境式": ("选择困境式", "主角面临艰难抉择", "救左边的师父，还是右边的爱人？她只有三秒钟做出决定。"),
+        }
+
+        # 🆕 情节类型 → 推荐的开头/结尾方式
+        scene_style_rules = {
+            "战斗": {"keywords": ["战斗", "打斗", "厮杀", "对决", "交手", "出招", "攻击", "防御", "刀剑", "拳脚"],
+                    "opening": "动作开头", "ending": "动作中断式"},
+            "悬疑": {"keywords": ["悬疑", "推理", "谜团", "线索", "真相", "秘密", "调查", "疑点", "隐情", "身世"],
+                    "opening": "悬念开头", "ending": "悬念式"},
+            "转折": {"keywords": ["转折", "揭秘", "真相大白", "身份", "背叛", "反转", "意外", "惊人", "原来", "竟然"],
+                    "opening": "反转开头", "ending": "信息炸弹式"},
+            "情感": {"keywords": ["告别", "离别", "重逢", "表白", "感情", "思念", "回忆", "温情", "感动", "眼泪"],
+                    "opening": "场景开头", "ending": "选择困境式"},
+            "危机": {"keywords": ["危机", "危险", "生死", "逃亡", "追杀", "困境", "绝境", "险境", "紧急", "千钧一发"],
+                    "opening": "动作开头", "ending": "动作中断式"},
+            "对话": {"keywords": ["谈判", "对话", "交涉", "质问", "争执", "辩论", "说服", "威胁", "警告", "摊牌"],
+                    "opening": "对话开头", "ending": "转折式"},
+            "日常": {"keywords": ["日常", "休息", "准备", "旅途", "修炼", "学习", "训练", "恢复", "整顿", "计划"],
+                    "opening": "场景开头", "ending": "悬念式"},
+            "升级": {"keywords": ["突破", "升级", "进阶", "觉醒", "获得", "传承", "机缘", "宝物", "功法", "神通"],
+                    "opening": "悬念开头", "ending": "信息炸弹式"},
+        }
+
+        # 🆕 分析章节规划，匹配情节类型
+        matched_scene_type = None
+        max_keyword_count = 0
+        for scene_type, rule in scene_style_rules.items():
+            keyword_count = sum(1 for kw in rule["keywords"] if kw in chapter_plan)
+            if keyword_count > max_keyword_count:
+                max_keyword_count = keyword_count
+                matched_scene_type = scene_type
+
+        # 🆕 根据匹配结果选择开头/结尾方式
+        if matched_scene_type and max_keyword_count >= 1:
+            rule = scene_style_rules[matched_scene_type]
+            selected_opening = opening_styles[rule["opening"]]
+            selected_ending = ending_styles[rule["ending"]]
+            match_method = f"关键词匹配({matched_scene_type}场景, 命中{max_keyword_count}个关键词)"
+        else:
+            # 回退到章节编号轮换
+            opening_list = list(opening_styles.values())
+            ending_list = list(ending_styles.values())
+            opening_index = (next_chapter_number - 1) % len(opening_list)
+            ending_index = (next_chapter_number + 2) % len(ending_list)
+            selected_opening = opening_list[opening_index]
+            selected_ending = ending_list[ending_index]
+            match_method = "章节编号轮换(未匹配到关键词)"
+
+        logger.info(f"   📝 第{next_chapter_number}章 - 开头: {selected_opening[0]}, 结尾: {selected_ending[0]} [{match_method}]")
+
+        # 🆕 构建内容创作提示词（增强版）
+        content_system_prompt = """你是一位经验丰富的网络小说作家。请根据提供的章节规划、世界观设定和人物设定，创作精彩的章节内容。
+
+创作要求：
+1. 语言生动，描写细腻，符合网文风格
+2. 对话自然，符合人物性格
+3. 情节紧凑，引人入胜，注意爽点节奏
+4. 场景描写要有画面感
+5. 注意段落分隔，便于阅读
+6. 开头要有吸引力，结尾要有悬念
+7. 使用场景描写、对话、心理描写等多种手法
+
+【质量标准】
+- ✅ 与前面章节的情节连贯一致
+- ✅ 人物性格和行为符合已有描写
+- ✅ 遵循已建立的世界观规则和设定
+- ✅ 延续已有的叙事风格和文笔特点
+- ✅ 推进主线情节，避免原地踏步
+- ✅ 注重细节的合理性和真实感
+
+【输出格式要求】⚠️
+请直接输出章节内容，格式必须如下：
+
+第X章 章节标题
+
+章节正文内容...
+
+注意：
+- 第一行必须是章节标题，格式为"第X章 标题名称"（X为章节数字）
+- 章节标题要简洁有力，能概括本章核心内容或悬念
+- 不要包含任何额外的说明文字、作者话语等"""
+
+        content_user_prompt = f"""请创作第{next_chapter_number}章内容：
+
+【章节规划】
+{chapter_plan}
+
+【世界观设定】
+{world_setting}
+
+【人物设定】
+{characters}
+
+【情节大纲】
+{plot_outline}
+
+【前一章结尾】
+{previous_ending if previous_ending else '（这是第一章，请设计一个引人入胜的开场）'}
+
+【目标字数】约3000字
+
+【本章开头方式 - 强制要求】⚠️
+本章必须使用【{selected_opening[0]}】方式开头！
+- 技巧说明：{selected_opening[1]}
+- 参考示例：{selected_opening[2]}
+
+❌ 禁止使用：每章都用"XXX醒来/睁开眼睛/阳光照进房间"开头
+
+【本章结尾方式 - 强制要求】⚠️
+本章必须使用【{selected_ending[0]}】结尾！
+- 技巧说明：{selected_ending[1]}
+- 参考示例：{selected_ending[2]}
+
+❌ 禁止使用：总结式内心独白 + 对未来的展望（如"她知道，从这一刻起..."）
+✅ 结尾要制造钩子，让读者想点下一章
+
+请开始创作第{next_chapter_number}章内容："""
+
+        # 🆕 使用真流式 LLM 调用
+        try:
+            chapter_draft = await streaming_service.generate_chapter_streaming(
+                prompt=content_user_prompt,
+                system_prompt=content_system_prompt,
+                on_chunk=on_content_chunk,
+                temperature=0.7,
+            )
+            logger.info(f"   ✓ 章节初稿已完成（真流式），字数: {len(chapter_draft)}")
+        except Exception as e:
+            logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
+            # 回退到同步调用
             if hasattr(real_coordinator, 'generate_chapter_content'):
-                chapter_draft = real_coordinator.generate_chapter_content(
+                chapter_draft = await asyncio.to_thread(
+                    real_coordinator.generate_chapter_content,
                     chapter_number=next_chapter_number,
                     chapter_plan=chapter_plan,
-                    world_setting=world_setting or '',
-                    characters=characters or '',
+                    world_setting=world_setting,
+                    characters=characters,
                     previous_ending=previous_ending,
                     target_word_count=3000,
                     previous_chapters=previous_chapters_payload,
                 )
-                logger.info(f"     ✓ 章节初稿已完成，字数: {len(chapter_draft)}")
             else:
-                logger.warning(f"     ⚠️  协调器缺少 generate_chapter_content 方法，使用默认内容")
                 chapter_draft = f"第{next_chapter_number}章内容\n\n{chapter_plan}\n\n（此处为生成的章节内容）"
-            
-            # 💾 保存章节初稿到 project_settings
-            logger.info(f"     💾 保存章节初稿到数据库...")
-            update_query = text("""
-                UPDATE project_settings 
-                SET chapter_draft = :chapter_draft, updated_at = :updated_at 
-                WHERE project_id = :project_id
-            """)
-            db.execute(update_query, {
-                "chapter_draft": chapter_draft,
-                "updated_at": datetime.now().isoformat(),
-                "project_id": project_id
-            })
-            db.commit()
-            logger.info(f"     ✓ 章节初稿已同步到数据库")
-            
-            # 步骤3：质量评审
-            logger.info(f"     → 步骤3: 质量评审...")
-            
+
+        await ws_manager.send_stream_end(project_id, 'content', len(chapter_draft), f"第{next_chapter_number}章内容创作完成")
+
+        # 保存章节初稿到 project_settings
+        update_query = text("""
+            UPDATE project_settings
+            SET chapter_draft = :chapter_draft, updated_at = :updated_at
+            WHERE project_id = :project_id
+        """)
+        db.execute(update_query, {
+            "chapter_draft": chapter_draft,
+            "updated_at": datetime.now().isoformat(),
+            "project_id": project_id
+        })
+        db.commit()
+        logger.info(f"   ✓ 章节初稿已同步到数据库")
+
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=50,
+            message=f"步骤 2/4: 章节内容创作完成 ✓"
+        )
+
+        # ==================== 步骤3：质量评审（真流式） ====================
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=55,
+            message=f"步骤 3/4: 正在进行质量评审..."
+        )
+        logger.info(f"   → 步骤3: 质量评审（真流式）...")
+
+        # 🆕 发送流式开始通知
+        await ws_manager.send_stream_start(project_id, 'review', f"第{next_chapter_number}章质量评审开始...")
+
+        # 🆕 创建流式输出回调
+        review_chunk_index = [0]
+
+        async def on_review_chunk(chunk: str, idx: int):
+            """评审流式回调"""
+            review_chunk_index[0] = idx
+            await ws_manager.send_stream_chunk(
+                project_id=project_id,
+                stage='review',
+                chunk=chunk,
+                chunk_index=idx,
+                is_complete=False
+            )
+
+        # 🆕 构建评审提示词（网文6维度评审体系）
+        review_system_prompt = """你是一位专业的网络小说质量评审官。请使用【网文6维度评审体系】对章节内容进行评审。
+
+## 📊 网文6维度评审体系
+
+### 1. 爽点效果（权重25%）
+- 本章是否有明确的爽点（打脸/升级/获得宝物/装逼成功/反转翻盘等）？
+- 爽点铺垫是否充分？释放是否有力？
+- 如果是过渡章节，是否为后续爽点做了必要铺垫？
+
+### 2. 节奏把控（权重20%）
+- 紧张与舒缓是否平衡？
+- 信息密度是否适中（不过载也不空洞）？
+- 场景转换是否流畅？
+- 对话与叙述比例是否合理（建议30-50%对话）？
+
+### 3. 钩子效果（权重15%）
+- 章节开头是否吸引人？（是否避免了"醒来/阳光照进"的套路开头）
+- 章节结尾是否有悬念/钩子？（是否避免了"她知道从这一刻起..."的总结式结尾）
+- 读者是否有"想点下一章"的冲动？
+- 伏笔铺设是否自然？
+
+### 4. 代入感（权重15%）
+- 主角视角是否清晰？
+- 读者能否代入主角的处境和情感？
+- 配角是否有存在感而不抢戏？
+- 情感共鸣是否充分？
+
+### 5. 文笔流畅度（权重10%）
+- 是否有明显的AI痕迹或机械感？
+- 对话是否自然、符合人物性格？
+- 是否有病句、重复、啰嗦？
+- 描写是否生动有画面感？
+
+### 6. 内容一致性（权重15%）
+- 人物设定是否与前文一致（性格、能力、外貌、背景）？
+- 世界观规则是否与前文一致？
+- 时间线是否合理？
+- 道具/物品是否与前文一致？"""
+
+        review_user_prompt = f"""请评审以下第{next_chapter_number}章内容：
+
+【章节规划】
+{chapter_plan}
+
+【情节大纲】
+{plot_outline}
+
+【章节内容】
+{chapter_draft}
+
+---
+
+【输出格式】
+请使用以下格式输出评审报告：
+
+## 📊 网文质量评审报告
+
+**综合评分**：X/10分
+
+### 1. 爽点效果 ⭐⭐⭐
+- 评价：...
+- 问题：...
+
+### 2. 节奏把控 ⭐⭐⭐
+- 评价：...
+- 问题：...
+
+### 3. 钩子效果 ⭐⭐⭐
+- 开头评价：...
+- 结尾评价：...
+- 问题：...
+
+### 4. 代入感 ⭐⭐⭐
+- 评价：...
+- 问题：...
+
+### 5. 文笔流畅度 ⭐⭐⭐
+- 评价：...
+- 问题：...
+
+### 6. 内容一致性 ⭐⭐⭐
+- 评价：...
+- 问题：...
+
+### 🔧 具体修改建议（按优先级排序）
+1. 【必改】...
+2. 【建议】...
+3. 【可选】...
+
+### ✨ 亮点
+- ..."""
+
+        # 🆕 使用真流式 LLM 调用
+        try:
+            review_report = await streaming_service.generate_chapter_streaming(
+                prompt=review_user_prompt,
+                system_prompt=review_system_prompt,
+                on_chunk=on_review_chunk,
+                temperature=0.7,
+            )
+            logger.info(f"   ✓ 评审完成（真流式），报告长度: {len(review_report)}")
+        except Exception as e:
+            logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
+            # 回退到同步调用
             if hasattr(real_coordinator, 'review_chapter'):
-                review_report = real_coordinator.review_chapter(
+                review_report = await asyncio.to_thread(
+                    real_coordinator.review_chapter,
                     chapter_draft=chapter_draft,
                     chapter_plan=chapter_plan,
-                    plot_outline=plot_outline or ''
+                    plot_outline=plot_outline
                 )
-                logger.info(f"     ✓ 评审完成，报告长度: {len(review_report)}")
             else:
-                logger.warning(f"     ⚠️  协调器缺少 review_chapter 方法，跳过评审")
                 review_report = "质量评审：章节符合要求，可以继续优化。"
-            
-            # 💾 保存评审报告到 project_settings
-            logger.info(f"     💾 保存评审报告到数据库...")
-            update_query = text("""
-                UPDATE project_settings 
-                SET review_report = :review_report, updated_at = :updated_at 
-                WHERE project_id = :project_id
-            """)
-            db.execute(update_query, {
-                "review_report": review_report,
-                "updated_at": datetime.now().isoformat(),
-                "project_id": project_id
-            })
-            db.commit()
-            logger.info(f"     ✓ 评审报告已同步到数据库")
-            
-            # 步骤4：迭代优化
-            logger.info(f"     → 步骤4: 迭代优化...")
-            
+
+        await ws_manager.send_stream_end(project_id, 'review', len(review_report), f"第{next_chapter_number}章质量评审完成")
+
+        # 保存评审报告到 project_settings
+        update_query = text("""
+            UPDATE project_settings
+            SET review_report = :review_report, updated_at = :updated_at
+            WHERE project_id = :project_id
+        """)
+        db.execute(update_query, {
+            "review_report": review_report,
+            "updated_at": datetime.now().isoformat(),
+            "project_id": project_id
+        })
+        db.commit()
+        logger.info(f"   ✓ 评审报告已同步到数据库")
+
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=75,
+            message=f"步骤 3/4: 质量评审完成 ✓"
+        )
+
+        # ==================== 步骤4：迭代优化（真流式） ====================
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=80,
+            message=f"步骤 4/4: 正在优化第{next_chapter_number}章内容..."
+        )
+        logger.info(f"   → 步骤4: 迭代优化（真流式）...")
+
+        # 🆕 发送流式开始通知
+        await ws_manager.send_stream_start(project_id, 'iteration', f"第{next_chapter_number}章迭代优化开始...")
+
+        # 🆕 创建流式输出回调
+        iteration_chunk_index = [0]
+
+        async def on_iteration_chunk(chunk: str, idx: int):
+            """迭代优化流式回调"""
+            iteration_chunk_index[0] = idx
+            await ws_manager.send_stream_chunk(
+                project_id=project_id,
+                stage='iteration',
+                chunk=chunk,
+                chunk_index=idx,
+                is_complete=False
+            )
+
+        # 🆕 构建迭代优化提示词
+        iteration_system_prompt = """你是一位资深的网络小说编辑。请根据评审意见对章节内容进行优化修改。
+
+优化要求：
+1. 保持原有故事框架和主要情节不变
+2. 改进语言表达，使文笔更加流畅
+3. 增强细节描写，提升画面感
+4. 优化对话内容，使其更符合人物性格
+5. 提升整体可读性和爽感
+6. 修正任何语病或不连贯之处
+7. 优化后的章节应完整保留原有情节发展，篇幅不应少于原稿字数的80%
+
+【输出格式要求】⚠️
+请直接输出优化后的章节内容，格式必须如下：
+
+第X章 章节标题
+
+章节正文内容...
+
+注意：
+- 第一行必须是章节标题，格式为"第X章 标题名称"（X为章节数字）
+- 如果原稿有章节标题则保留或优化，如果没有则根据内容新增一个
+- 不要包含任何评论、解释、优化说明等额外文字
+- 只输出：章节标题 + 章节正文内容"""
+
+        iteration_user_prompt = f"""请根据以下评审意见优化第{next_chapter_number}章：
+
+【原始章节内容】
+{chapter_draft}
+
+【评审意见】
+{review_report}
+
+请直接输出优化后的章节内容（第一行为章节标题）："""
+
+        # 🆕 使用真流式 LLM 调用
+        try:
+            final_version = await streaming_service.generate_chapter_streaming(
+                prompt=iteration_user_prompt,
+                system_prompt=iteration_system_prompt,
+                on_chunk=on_iteration_chunk,
+                temperature=0.7,
+            )
+            logger.info(f"   ✓ 优化完成（真流式），最终字数: {len(final_version)}")
+        except Exception as e:
+            logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
+            # 回退到同步调用
             if hasattr(real_coordinator, 'optimize_chapter'):
-                final_version = real_coordinator.optimize_chapter(
+                final_version = await asyncio.to_thread(
+                    real_coordinator.optimize_chapter,
                     chapter_draft=chapter_draft,
                     review_report=review_report
                 )
-                logger.info(f"     ✓ 优化完成，最终字数: {len(final_version)}")
             else:
-                logger.warning(f"     ⚠️  协调器缺少 optimize_chapter 方法，使用初稿作为最终版本")
                 final_version = chapter_draft
-            
-            # 💾 保存最终版本到 project_settings
-            logger.info(f"     💾 保存最终版本到数据库...")
-            update_query = text("""
-                UPDATE project_settings 
-                SET final_version = :final_version, updated_at = :updated_at 
-                WHERE project_id = :project_id
-            """)
-            db.execute(update_query, {
-                "final_version": final_version,
-                "updated_at": datetime.now().isoformat(),
-                "project_id": project_id
-            })
-            db.commit()
-            logger.info(f"     ✓ 最终版本已同步到数据库")
-            
-        except Exception as e:
-            logger.error(f"     ⚠️  Agent生成失败: {e}，使用备用方案")
-            import traceback
-            traceback.print_exc()
-            # 使用备用方案
-            final_version = f"第{next_chapter_number}章内容（备用生成）\n\n这是第{next_chapter_number}章的内容..."
-        
-        # 7. 生成章节标题
+
+        # 🆕 清理输出内容，移除额外的评审话语
+        def clean_final_output(content: str) -> str:
+            """清理最终输出，移除可能的额外评审话语"""
+            if not content:
+                return content
+            lines = content.split('\n')
+            cleaned_lines = []
+            skip_section = False
+            for line in lines:
+                line_lower = line.lower().strip()
+                # 跳过评审相关的段落
+                if any(keyword in line_lower for keyword in [
+                    '优化说明', '修改说明', '评审', '改进建议', '优化要点',
+                    '以下是优化后', '根据评审意见', '主要修改', '优化内容'
+                ]):
+                    skip_section = True
+                    continue
+                if skip_section and line.strip() == '':
+                    skip_section = False
+                    continue
+                if not skip_section:
+                    cleaned_lines.append(line)
+            return '\n'.join(cleaned_lines).strip()
+
+        final_version = clean_final_output(final_version)
+
+        # 🆕 安全保护：如果优化后字数远小于原稿，则认为可能被压缩成摘要，回退为原始章节内容
+        original_len = len(chapter_draft or "")
+        optimized_len = len(final_version or "")
+        if original_len >= 500 and optimized_len > 0 and optimized_len < original_len * 0.6:
+            logger.warning(
+                f"   ⚠️ 优化后长度({optimized_len}) 远小于原稿({original_len})，疑似被压缩为摘要，本次将保留原始章节内容"
+            )
+            final_version = chapter_draft
+
+        await ws_manager.send_stream_end(project_id, 'iteration', len(final_version), f"第{next_chapter_number}章迭代优化完成")
+
+        # 保存最终版本到 project_settings
+        update_query = text("""
+            UPDATE project_settings
+            SET final_version = :final_version, updated_at = :updated_at
+            WHERE project_id = :project_id
+        """)
+        db.execute(update_query, {
+            "final_version": final_version,
+            "updated_at": datetime.now().isoformat(),
+            "project_id": project_id
+        })
+        db.commit()
+        logger.info(f"   ✓ 最终版本已同步到数据库")
+
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=90,
+            message=f"步骤 4/4: 正在保存章节..."
+        )
+
+        # ==================== 保存章节 ====================
+        # 生成章节标题
         def convert_number_to_chinese(num: int) -> str:
-            """将数字转换为中文"""
             chinese_nums = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
             if num <= 10:
                 return chinese_nums[num]
@@ -1988,37 +3391,33 @@ async def generate_next_chapter(
                 return chinese_nums[tens] + '十' + (chinese_nums[ones] if ones > 0 else '')
             else:
                 return str(num)
-        
+
         try:
-            # 尝试从内容中提取标题（简化版）
             lines = final_version.split('\n')
             potential_title = None
-            for line in lines[:5]:  # 只检查前5行
+            for line in lines[:5]:
                 line = line.strip()
                 if line and ('第' in line or '章' in line) and len(line) < 30:
                     potential_title = line
                     break
-            
+
             if potential_title:
                 chapter_title = potential_title
-                logger.info(f"   ✓ 从内容提取标题: {chapter_title}")
             else:
                 chinese_num = convert_number_to_chinese(next_chapter_number)
                 chapter_title = f"第{chinese_num}章 未命名"
-                logger.info(f"   ✓ 使用默认标题: {chapter_title}")
-        except Exception as title_error:
-            logger.error(f"   ⚠️  生成标题失败: {title_error}")
+        except Exception:
             chinese_num = convert_number_to_chinese(next_chapter_number)
             chapter_title = f"第{chinese_num}章 未命名"
-        
-        # 8. 保存到 chapters 表
-        logger.info(f"   📍 保存章节到数据库...")
+
+        logger.info(f"   ✓ 章节标题: {chapter_title}")
+
+        # 保存到 chapters 表
         insert_query = text("""
             INSERT INTO chapters (project_id, chapter_number, title, content, word_count, created_at)
             VALUES (:project_id, :chapter_number, :title, :content, :word_count, :created_at)
         """)
-        
-        result = db.execute(insert_query, {
+        db.execute(insert_query, {
             "project_id": project_id,
             "chapter_number": next_chapter_number,
             "title": chapter_title,
@@ -2027,13 +3426,12 @@ async def generate_next_chapter(
             "created_at": datetime.now().isoformat()
         })
         db.commit()
-        
+
         # 获取新插入记录的ID
         new_chapter_id = db.execute(text("SELECT last_insert_rowid()")).scalar()
         if not new_chapter_id:
-            # 备用方案：查询刚刚插入的记录
             check_query = text("""
-                SELECT id FROM chapters 
+                SELECT id FROM chapters
                 WHERE project_id = :project_id AND chapter_number = :chapter_number
                 ORDER BY created_at DESC LIMIT 1
             """)
@@ -2041,88 +3439,96 @@ async def generate_next_chapter(
                 "project_id": project_id,
                 "chapter_number": next_chapter_number
             }).scalar()
-        
-        if not new_chapter_id:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="保存章节失败：无法获取新记录ID"
-            )
-        
-        logger.info(f"   ✓ 章节已保存: id={new_chapter_id}, chapter_number={next_chapter_number}, title={chapter_title}")
-        
-        # 8.1 自动生成并保存章节摘要
-        try:
-            logger.info(f"   📍 自动生成章节摘要...")
 
-            # 导入章节摘要生成器
+        logger.info(f"   ✓ 章节已保存: id={new_chapter_id}")
+
+        # 生成章节摘要
+        try:
             from app.services.agents.chapter_summarizer import create_chapter_summarizer
-            
-            # 创建摘要生成器实例（带数据库会话）
             summarizer = create_chapter_summarizer(db_session=db)
-            
-            # 生成并保存摘要
-            summary = summarizer.get_or_generate_summary(
+            summarizer.get_or_generate_summary(
                 chapter_id=new_chapter_id,
                 chapter_number=next_chapter_number,
                 chapter_title=chapter_title,
                 chapter_content=final_version,
                 summary_length=300
             )
-            
-            logger.info(f"   ✓ 章节摘要已生成并保存: {summary.get('summary_length', 0)} 字符")
-            
-        except Exception as summary_error:
-            logger.error(f"   ⚠️  生成章节摘要失败: {summary_error}")
-            # 不中断主流程，继续执行
-        
-        # 9. 同步到知识库和向量库
+            logger.info(f"   ✓ 章节摘要已生成")
+        except Exception as e:
+            logger.error(f"   ⚠️ 生成章节摘要失败: {e}")
+
+        # 同步到知识库
         try:
-            logger.info(f"   📍 同步章节到知识库和向量库...")
-            
-            # 导入知识库同步函数
             from app.api.v1.knowledge_base import sync_to_vector_db
-            
-            # 同步到向量数据库
             sync_to_vector_db(
                 kb_type="chapter",
                 name=f"第{next_chapter_number}章 {chapter_title}",
                 content=final_version,
                 metadata={"project_id": str(project_id), "chapter_number": str(next_chapter_number)}
             )
-            
-            logger.info(f"   ✓ 章节已同步到知识库和向量库")
-        except Exception as sync_error:
-            logger.error(f"   ⚠️  同步章节到知识库失败: {sync_error}")
-            # 不中断主流程，继续执行
-        
-        # 10. 返回响应
-        response = {
-            "success": True,
-            "message": f"第{next_chapter_number}章已生成并保存",
-            "chapter": {
-                "id": new_chapter_id,
-                "project_id": project_id,
-                "chapter_number": next_chapter_number,
-                "title": chapter_title,
-                "content": final_version,
-                "word_count": len(final_version),
-                "created_at": datetime.now().isoformat()
+            logger.info(f"   ✓ 章节已同步到知识库")
+        except Exception as e:
+            logger.error(f"   ⚠️ 同步知识库失败: {e}")
+
+        # 更新任务状态为完成
+        update_query = text("""
+            UPDATE generation_history
+            SET status = :status, completed_at = :completed_at
+            WHERE task_id = :task_id
+        """)
+        db.execute(update_query, {
+            "status": "completed",
+            "completed_at": datetime.now().isoformat(),
+            "task_id": task_id
+        })
+        db.commit()
+
+        # 发送完成事件
+        await ws_manager.send_task_complete(
+            project_id=project_id,
+            task_id=task_id,
+            result={
+                "chapter": {
+                    "id": new_chapter_id,
+                    "chapter_number": next_chapter_number,
+                    "title": chapter_title,
+                    "word_count": len(final_version),
+                }
             }
-        }
-        
-        logger.info(f"✅ 生成下一章完成，返回响应")
-        return response
-        
-    except HTTPException:
-        raise
+        )
+
+        logger.info(f"✅ 后台任务完成: {task_id}, 第{next_chapter_number}章已生成")
+
     except Exception as e:
-        logger.error(f"❌ 生成下一章失败: {e}")
+        logger.error(f"❌ 后台任务失败: {task_id}, 错误: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+
+        # 更新任务状态为失败
+        try:
+            update_query = text("""
+                UPDATE generation_history
+                SET status = :status, error_message = :error_message, completed_at = :completed_at
+                WHERE task_id = :task_id
+            """)
+            db.execute(update_query, {
+                "status": "failed",
+                "error_message": str(e),
+                "completed_at": datetime.now().isoformat(),
+                "task_id": task_id
+            })
+            db.commit()
+        except Exception:
+            pass
+
+        # 发送错误事件
+        await ws_manager.send_task_error(
+            project_id=project_id,
+            task_id=task_id,
+            error=str(e)
         )
+    finally:
+        db.close()
 
 
 @router.post("/expand-outline")

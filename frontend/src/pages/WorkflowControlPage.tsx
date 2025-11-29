@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+﻿import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import {
@@ -28,6 +28,7 @@ import {
   Tabs,
   Tab,
   MenuItem,
+  Fab,
 } from '@mui/material'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import PauseIcon from '@mui/icons-material/Pause'
@@ -49,13 +50,12 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 
 import HistoryIcon from '@mui/icons-material/History'
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows'
-import Switch from '@mui/material/Switch'
 import Checkbox from '@mui/material/Checkbox'
 import FormControlLabel from '@mui/material/FormControlLabel'
 import Chip from '@mui/material/Chip'
 import Snackbar from '@mui/material/Snackbar'
 import MuiAlert from '@mui/material/Alert'
-import { RootState, AppDispatch } from '@/store/store'
+import { RootState, AppDispatch, store } from '@/store/store'
 import {
   startWorkflow,
   regenerateStage,
@@ -66,9 +66,17 @@ import {
   updateAgentStatus,  // ✅ 添加导入
   resetFollowingStages,  // ✅ 导入新的 action
   StageType,
+  // 🆕 生成下一章 actions
+  startGenerateNextChapter,
+  updateGenerateNextChapterProgress,
+  appendGenerateNextChapterStream,
+  clearGenerateNextChapterStream,
+  completeGenerateNextChapter,
 } from '@/store/slices/workflowSlice'
 import { fetchProject } from '@/store/slices/projectSlice'
-import StageDetailPanel from '@/components/workflow/StageDetailPanel'
+import { fetchChapters } from '@/store/slices/editorSlice'
+import StageInfoPanel from '@/components/workflow/StageInfoPanel'
+import OutputPreviewPanel from '@/components/workflow/OutputPreviewPanel'
 import AgentStatusIndicator from '@/components/workflow/AgentStatusIndicator'
 import { workflowWebSocket } from '@/services/websocket'
 import { apiClient } from '@/services/api'  // ✅ 添加apiClient导入
@@ -121,7 +129,6 @@ export default function WorkflowControlPage() {
   // 🆕 保护机制：已有内容警告对话框
   const [showContentWarningDialog, setShowContentWarningDialog] = useState(false)
   const [existingChaptersCount, setExistingChaptersCount] = useState(0)
-  const [hasExistingContent, setHasExistingContent] = useState(false)
 
   // 故事概念对话框状态
   const [showConceptDialog, setShowConceptDialog] = useState(false)
@@ -156,6 +163,10 @@ export default function WorkflowControlPage() {
   const [editedReviewReportContent, setEditedReviewReportContent] = useState('')
   const [reviewLoading, setReviewLoading] = useState(false)
   const [reviewSaving, setReviewSaving] = useState(false)
+
+  // 🆕 流式输出状态
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [streamingStage, setStreamingStage] = useState<StageType | null>(null)
 
   // 世界观设定对话框状态
   const [showWorldDialog, setShowWorldDialog] = useState(false)
@@ -250,11 +261,19 @@ export default function WorkflowControlPage() {
   // 🆕 标记是否是“生成下一章”流程（已经自动保存，不需要再次保存）
   const [isGenerateNextChapterFlow, setIsGenerateNextChapterFlow] = useState(false)
 
-  // 🆕 自动保存记忆状态
-  const [autoSaveEnabled, setAutoSaveEnabled] = useState(true)
-  const [lastSaveTime, setLastSaveTime] = useState<Date | null>(null)
-  // 对话历史记录（功能暂未完全实现，仅用于记忆快照功能）
-  const [conversationHistory] = useState<Array<{role: string, content: string}>>([])
+  // 🆕 生成下一章异步任务状态 - 从 Redux 读取
+  const generateNextChapter = useSelector((state: RootState) => state.workflow.generateNextChapter)
+  const generateNextChapterTaskId = generateNextChapter.taskId
+  const generateNextChapterProgress = generateNextChapter.progress
+  const generateNextChapterStreamContent = generateNextChapter.streamContent
+  const generateNextChapterNumber = generateNextChapter.chapterNumber
+  const generateNextChapterCurrentStep = generateNextChapter.currentStep
+
+  // 🆕 自动保存记忆状态（始终启用，UI 面板已隐藏）
+  const autoSaveEnabled = true  // 🔧 简化：始终启用自动保存
+  const [, setLastSaveTime] = useState<Date | null>(null)  // 仅用于更新，不显示
+  // 🔧 修复：对话历史记录 - 收集工作流中的对话内容
+  const [conversationHistory, setConversationHistory] = useState<Array<{role: string, content: string, stage?: string, timestamp?: string}>>([])
 
   // 🆕 大纲和人物扩展功能状态
   const [showExpandOutlineDialog, setShowExpandOutlineDialog] = useState(false)
@@ -546,7 +565,7 @@ export default function WorkflowControlPage() {
     }
   }
 
-  const handleRemoveTag = (tag: string) => {
+  function handleRemoveTag(tag: string) {
     setItemForm((prev) => ({
       ...prev,
       tags: prev.tags.filter((t) => t !== tag),
@@ -904,6 +923,49 @@ export default function WorkflowControlPage() {
     console.log(`💾 已加载历史记录: 大纲${outlineHistoryData.length}条, 人物${characterHistoryData.length}条`)
   }, [])
 
+  // 🆕 页面加载时恢复记忆快照
+  useEffect(() => {
+    if (!projectId) return
+
+    const loadLatestMemory = async () => {
+      try {
+        const token = localStorage.getItem('access_token')
+        if (!token) return
+
+        const response = await fetch(`/api/v1/projects/${projectId}/memories/latest`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        })
+
+        if (response.ok) {
+          const memory = await response.json()
+          if (memory) {
+            // 恢复对话历史
+            if (memory.messages && Array.isArray(memory.messages)) {
+              setConversationHistory(memory.messages)
+              console.log(`🔄 已恢复对话历史: ${memory.messages.length} 条`)
+            }
+            // 恢复写作目标
+            if (memory.writing_goal && !requirement) {
+              setRequirement(memory.writing_goal)
+              console.log(`🔄 已恢复写作目标: ${memory.writing_goal.substring(0, 50)}...`)
+            }
+            // 更新最后保存时间
+            if (memory.updated_at) {
+              setLastSaveTime(new Date(memory.updated_at))
+            }
+            console.log(`✅ 记忆快照已恢复，项目: ${projectId}`)
+          }
+        }
+      } catch (error) {
+        console.error('❌ 恢复记忆快照失败:', error)
+      }
+    }
+
+    loadLatestMemory()
+  }, [projectId])
+
   // 🆕 计算基于时间权重的总体进度
   useEffect(() => {
     if (!stageDurations) return
@@ -932,7 +994,14 @@ export default function WorkflowControlPage() {
     }
   }, [stageDurations, workflow.stages, workflow.currentStage, taskProgress, dispatch])
 
-
+  // 🆕 处理 Redux 状态（从 DashboardPage 跳转过来时）
+  useEffect(() => {
+    if (generateNextChapterTaskId) {
+      console.log(`📍 检测到生成下一章任务: taskId=${generateNextChapterTaskId}, chapterNumber=${generateNextChapterNumber}`)
+      setGeneratingNextChapter(true)
+      setIsGenerateNextChapterFlow(true)
+    }
+  }, [generateNextChapterTaskId, generateNextChapterNumber])
 
   // 🔌 WebSocket 连接管理
   useEffect(() => {
@@ -1000,6 +1069,21 @@ export default function WorkflowControlPage() {
             setContentDraftContent(data.output)
             console.log(`🔄 内容创作阶段完成，已同步 contentDraftContent，长度: ${data.output.length}`)
           }
+
+          // 🆕 收集对话历史：将阶段输出添加到对话记录
+          if (data.output) {
+            const outputContent = data.output.substring(0, 2000) // 限制长度，避免数据过大
+            setConversationHistory(prev => [
+              ...prev,
+              {
+                role: 'assistant',
+                content: outputContent,
+                stage: stageType,
+                timestamp: new Date().toISOString()
+              }
+            ])
+            console.log(`💬 对话历史已更新，阶段: ${stageType}`)
+          }
         }
       }
 
@@ -1027,6 +1111,46 @@ export default function WorkflowControlPage() {
     workflowWebSocket.onTaskProgress((data) => {
       console.log('📈 收到任务进度:', data)
 
+      // 🆕 从 Redux store 直接读取最新状态（避免闭包问题）
+      const currentState = store.getState()
+      const currentTaskId = currentState.workflow.generateNextChapter.taskId
+
+      // 🆕 检查是否是"生成下一章"任务
+      if (data.task_id && currentTaskId && data.task_id === currentTaskId) {
+        console.log('📈 生成下一章任务进度:', data.progress, data.message)
+        const progress = data.progress || 0
+
+        // 🆕 根据进度计算当前步骤
+        // 步骤1: 章节规划 (0-25%) -> structure
+        // 步骤2: 内容创作 (25-50%) -> content
+        // 步骤3: 质量评审 (50-75%) -> review
+        // 步骤4: 迭代优化 (75-100%) -> iteration
+        let currentStep = 1
+        let targetStage: StageType = 'structure'
+        if (progress < 25) {
+          currentStep = 1
+          targetStage = 'structure'
+        } else if (progress < 50) {
+          currentStep = 2
+          targetStage = 'content'
+        } else if (progress < 75) {
+          currentStep = 3
+          targetStage = 'review'
+        } else {
+          currentStep = 4
+          targetStage = 'iteration'
+        }
+
+        // 使用 Redux action 更新进度和步骤
+        dispatch(updateGenerateNextChapterProgress({ progress, currentStep }))
+
+        // 切换工作流阶段
+        dispatch(setCurrentStage(targetStage))
+        console.log(`📍 生成下一章: 自动切换到 ${targetStage} 阶段 (进度: ${progress}%)`)
+
+        return  // 不更新普通任务进度
+      }
+
       // 🆕 更新进度估算器的真实进度
       if (progressEstimator) {
         progressEstimator.updateRealProgress(data.progress)
@@ -1045,6 +1169,35 @@ export default function WorkflowControlPage() {
     // 监听任务完成
     workflowWebSocket.onTaskComplete((data) => {
       console.log('✅ 收到任务完成:', data)
+
+      // 🆕 从 Redux store 直接读取最新状态（避免闭包问题）
+      const currentState = store.getState()
+      const currentTaskId = currentState.workflow.generateNextChapter.taskId
+
+      // 🆕 检查是否是"生成下一章"任务
+      if (data.task_id && currentTaskId && data.task_id === currentTaskId) {
+        console.log('✅ 生成下一章任务完成:', data.result)
+
+        // 使用 Redux action 清除任务状态
+        dispatch(completeGenerateNextChapter())
+        setGeneratingNextChapter(false)
+
+        // 提取章节信息
+        const chapter = data.result?.chapter
+        if (chapter) {
+          setSnackbarMessage(`🎉 第${chapter.chapter_number}章已生成：${chapter.title} (${chapter.word_count}字)`)
+        } else {
+          setSnackbarMessage('✅ 章节生成完成！')
+        }
+        setSnackbarSeverity('success')
+        setSnackbarOpen(true)
+
+        // 刷新章节列表
+        if (projectId) {
+          dispatch(fetchChapters(parseInt(projectId)))
+        }
+        return
+      }
 
       // 🆕 完成进度估算器
       if (progressEstimator) {
@@ -1076,6 +1229,24 @@ export default function WorkflowControlPage() {
     // 监听任务错误
     workflowWebSocket.onTaskError((data) => {
       console.log('❌ 收到任务错误:', data)
+
+      // 🆕 从 Redux store 直接读取最新状态（避免闭包问题）
+      const currentState = store.getState()
+      const currentTaskId = currentState.workflow.generateNextChapter.taskId
+
+      // 🆕 检查是否是"生成下一章"任务
+      if (data.task_id && currentTaskId && data.task_id === currentTaskId) {
+        console.log('❌ 生成下一章任务失败:', data.error)
+
+        // 使用 Redux action 清除任务状态
+        dispatch(completeGenerateNextChapter())
+        setGeneratingNextChapter(false)
+
+        setSnackbarMessage(`生成章节失败: ${data.error}`)
+        setSnackbarSeverity('error')
+        setSnackbarOpen(true)
+        return
+      }
 
       // 🆕 停止进度估算器
       if (progressEstimator) {
@@ -1130,6 +1301,78 @@ export default function WorkflowControlPage() {
         }))
         console.log(`✅ Agent 状态已更新: ${agentId} (${stage}) -> ${data.status}`)
       }
+    })
+
+    // 🆕 监听流式输出开始（移除自动打开对话框，直接在主页面显示）
+    workflowWebSocket.onStreamStart((data) => {
+      console.log('🌊 流式输出开始:', data)
+      setIsStreaming(true)
+      setStreamingStage(data.stage as StageType)
+
+      // 🆕 从 Redux store 直接读取最新状态（避免闭包问题）
+      const currentState = store.getState()
+      const currentTaskId = currentState.workflow.generateNextChapter.taskId
+
+      // 🆕 如果是"生成下一章"任务，清空临时流式内容（为新步骤准备）
+      if (currentTaskId) {
+        dispatch(clearGenerateNextChapterStream())  // 清空临时内容，准备接收新步骤的流式输出
+      }
+
+      // 🔄 只清空对应阶段的内容，不再自动打开对话框
+      const stageType = data.stage as StageType
+      if (stageType === 'content') {
+        setContentDraftContent('')  // 清空缓存
+        setEditedContentDraftContent('')  // 清空编辑内容
+      } else if (stageType === 'review') {
+        setReviewReportContent('')
+        setEditedReviewReportContent('')
+      } else if (stageType === 'iteration') {
+        setFinalVersionContent('')
+        setEditedFinalVersionContent('')
+      }
+
+      setSnackbarMessage(data.message || `${data.stage} 阶段开始生成内容...`)
+      setSnackbarSeverity('info')
+      setSnackbarOpen(true)
+    })
+
+    // 🆕 监听流式输出块（打字机效果 - 直接在主页面的输出预览区显示）
+    workflowWebSocket.onStreamChunk((data) => {
+      const stageType = data.stage as StageType
+
+      // 🆕 从 Redux store 直接读取最新状态（避免闭包问题）
+      const currentState = store.getState()
+      const currentTaskId = currentState.workflow.generateNextChapter.taskId
+
+      console.log(`🌊 stream_chunk: stage=${stageType}, taskId=${currentTaskId}, chunkLen=${data.chunk?.length}`)
+
+      // 🆕 如果是"生成下一章"任务，使用临时流式内容状态
+      if (currentTaskId) {
+        // 生成下一章模式：流式内容存入临时状态（不保存到数据库缓存）
+        console.log(`📝 追加流式内容到 Redux, 当前总长度=${currentState.workflow.generateNextChapter.streamContent.length}`)
+        dispatch(appendGenerateNextChapterStream(data.chunk))
+        return
+      }
+
+      // 🔄 普通模式：实时更新对应阶段的内容显示（仅更新缓存，对话框打开时再同步）
+      if (stageType === 'content') {
+        setContentDraftContent(prev => prev + data.chunk)
+      } else if (stageType === 'review') {
+        setReviewReportContent(prev => prev + data.chunk)
+      } else if (stageType === 'iteration') {
+        setFinalVersionContent(prev => prev + data.chunk)
+      }
+    })
+
+    // 🆕 监听流式输出结束
+    workflowWebSocket.onStreamEnd((data) => {
+      console.log('🌊 流式输出结束:', data)
+      setIsStreaming(false)
+      setStreamingStage(null)
+
+      setSnackbarMessage(data.message || `${data.stage} 阶段内容生成完成，共 ${data.total_chars} 字`)
+      setSnackbarSeverity('success')
+      setSnackbarOpen(true)
     })
 
     // 🔔 组件卸载时：清除监听器，但不断开 WebSocket 连接
@@ -1357,9 +1600,18 @@ export default function WorkflowControlPage() {
               // 如果已经恢复了运行中的任务，就不要再设置当前阶段了
               if (hasRestoredRunningTask) {
                 console.log(`🔒 跳过设置当前阶段，因为已恢复运行中的任务: ${restoredStage}`)
-              } else if (!isRunning && !currentTaskId) {
-                // 只有在没有恢复运行中任务时，才根据完成状态设置当前阶段
-                if (lastCompletedStage) {
+              } else {
+                // 🆕 从 Redux 读取"生成下一章"任务状态（关键：避免闭包中的旧值）
+                const reduxState = store.getState()
+                const generateNextChapterTaskId = reduxState.workflow.generateNextChapter.taskId
+                const isGeneratingNextChapter = reduxState.workflow.generateNextChapter.isRunning
+
+                // 🆕 如果正在执行"生成下一章"任务，设置为 structure 阶段（章节规划从这里开始）
+                if (generateNextChapterTaskId || isGeneratingNextChapter) {
+                  dispatch(setCurrentStage('structure'))
+                  console.log(`🔒 检测到"生成下一章"任务 (taskId=${generateNextChapterTaskId})，设置当前阶段为: structure`)
+                } else if (lastCompletedStage) {
+                  // 普通模式：根据完成状态设置当前阶段
                   const lastCompletedIndex = stageOrder.indexOf(lastCompletedStage)
                   if (lastCompletedIndex < stageOrder.length - 1) {
                     // 还有未完成的阶段,显示下一个阶段
@@ -1470,11 +1722,27 @@ export default function WorkflowControlPage() {
     }
   }, [autoSaveEnabled, projectId])
 
-  // 🆕 页面卸载前保存记忆
+  // 🆕 页面卸载前保存记忆（使用 sendBeacon 确保请求完成）
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (autoSaveEnabled && projectId) {
-        saveMemorySnapshot('beforeUnload')
+      if (autoSaveEnabled && projectId && conversationHistory.length > 0) {
+        // 使用 navigator.sendBeacon 确保页面卸载时请求能完成
+        const memoryData = {
+          messages: conversationHistory,
+          current_chapter: workflow.stages.iteration.output ? 1 : null,
+          current_scene: workflow.currentStage,
+          active_characters: [],
+          writing_goal: requirement || '创作小说',
+        }
+
+        const blob = new Blob([JSON.stringify(memoryData)], { type: 'application/json' })
+        const token = localStorage.getItem('access_token')
+
+        // sendBeacon 不支持自定义 headers，需要通过 URL 参数传递 token
+        // 或者使用特殊的 endpoint 来处理
+        const url = `/api/v1/projects/${projectId}/memories/auto-save?token=${token}`
+        navigator.sendBeacon(url, blob)
+        console.log('💾 [beforeunload] 使用 sendBeacon 保存记忆')
       }
     }
 
@@ -1483,7 +1751,7 @@ export default function WorkflowControlPage() {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload)
     }
-  }, [autoSaveEnabled, projectId])
+  }, [autoSaveEnabled, projectId, conversationHistory, workflow, requirement])
 
   // 🆕 保存记忆快照函数
   const saveMemorySnapshot = async (trigger: 'auto' | 'stage' | 'beforeUnload' | 'manual') => {
@@ -1543,6 +1811,43 @@ export default function WorkflowControlPage() {
       // 🔧 立即更新阶段状态为 'active'，显示执行中的UI
       dispatch(updateStageStatus({ stage, status: 'active' }))
 
+      // 🆕 收集用户输入到对话历史
+      const stageNames: Record<string, string> = {
+        concept: '概念开发',
+        structure: '结构设计',
+        content: '内容创作',
+        review: '质量评审',
+        iteration: '迭代优化'
+      }
+      setConversationHistory(prev => [
+        ...prev,
+        {
+          role: 'user',
+          content: `执行${stageNames[stage] || stage}阶段: ${requirement || '创作小说'}`,
+          stage: stage,
+          timestamp: new Date().toISOString()
+        }
+      ])
+
+      // 🆕 阶段开始前保存记忆（确保意外关闭时写作目标不丢失）
+      saveMemorySnapshot('stage')
+
+      // 🆕 检查是否是支持流式输出的阶段
+      const streamingStages = ['content', 'review', 'iteration']
+      const enableStreaming = streamingStages.includes(stage)
+
+      // 🆕 流式输出阶段：清空之前的内容，准备接收流式数据
+      if (enableStreaming) {
+        console.log(`🌊 阶段 ${stage} 支持流式输出，清空之前的内容`)
+        if (stage === 'content') {
+          setContentDraftContent('')
+        } else if (stage === 'review') {
+          setReviewReportContent('')
+        } else if (stage === 'iteration') {
+          setFinalVersionContent('')
+        }
+      }
+
       const response = await fetch('/api/v1/workflow/execute-stage-async', {
         method: 'POST',
         headers: {
@@ -1553,6 +1858,7 @@ export default function WorkflowControlPage() {
           project_id: parseInt(projectId),
           stage: stage,
           requirement: requirement || `创作一部小说`,
+          enable_streaming: enableStreaming,  // 🆕 启用流式输出
         }),
       })
 
@@ -2103,7 +2409,6 @@ export default function WorkflowControlPage() {
 
       if (chapterCount > 0 || hasCompletedStages) {
         setExistingChaptersCount(chapterCount)
-        setHasExistingContent(true)
         return true
       }
       return false
@@ -3406,7 +3711,7 @@ export default function WorkflowControlPage() {
     setGeneratingNextChapter(true)
 
     try {
-      console.log('📍 开始生成下一章...')
+      console.log('📍 开始生成下一章（异步模式）...')
 
       const response = await fetch(`/api/v1/workflow/${projectId}/generate-next-chapter`, {
         method: 'POST',
@@ -3418,34 +3723,34 @@ export default function WorkflowControlPage() {
 
       if (response.ok) {
         const data = await response.json()
-        console.log('✅ 生成下一章成功:', data)
+        console.log('✅ 异步任务已创建:', data)
 
-        // 🔧 关键修复：设置标记，表示这是“生成下一章”流程（已经保存）
+        // 后端返回: { task_id, status, message, next_chapter_number }
+        const { task_id, next_chapter_number } = data
+
+        // 🆕 使用 Redux action 设置任务状态
+        dispatch(startGenerateNextChapter({ taskId: task_id, chapterNumber: next_chapter_number }))
         setIsGenerateNextChapterFlow(true)
 
-        setSnackbarMessage(`✅ 已开始生成第${data.next_chapter_number}章，正在跳转到内容创作阶段...`)
-        setSnackbarSeverity('success')
+        setSnackbarMessage(`🚀 已开始生成第${next_chapter_number}章，请等待...`)
+        setSnackbarSeverity('info')
         setSnackbarOpen(true)
 
-        // 跳转到内容创作阶段
-        setTimeout(() => {
-          dispatch(setCurrentStage('content'))
-          setIsRunning(true) // 启动自动执行
-        }, 1000)
+        // 注意：不再设置 setGeneratingNextChapter(false)，等待 WebSocket 完成事件
       } else {
         const errorData = await response.json()
-        console.error('❌ 生成下一章失败:', errorData)
+        console.error('❌ 创建生成任务失败:', errorData)
 
-        setSnackbarMessage(errorData.error || '生成下一章失败，请重试')
+        setSnackbarMessage(errorData.detail || errorData.error || '创建生成任务失败，请重试')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
+        setGeneratingNextChapter(false)
       }
     } catch (error) {
       console.error('❌ 生成下一章异常:', error)
-      setSnackbarMessage('生成下一章失败，请重试')
+      setSnackbarMessage('创建生成任务失败，请重试')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
-    } finally {
       setGeneratingNextChapter(false)
     }
   }
@@ -3540,69 +3845,52 @@ export default function WorkflowControlPage() {
   const currentStageIndex = stages.indexOf(workflow.currentStage)
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
-      {/* 返回按钮 */}
-      <Box sx={{ mb: 3 }}>
-        <Button
-          startIcon={<ArrowBackIcon />}
-          onClick={() => navigate('/dashboard')}
-          variant="outlined"
-        >
-          返回仪表板
-        </Button>
-      </Box>
+    <Container maxWidth="lg" sx={{ py: 2 }}>
+      {/* 左侧顶部区域：返回按钮 + 标题 + 项目信息 */}
+      <Box sx={{ maxWidth: { xs: '100%', md: 'calc(33.33% - 8px)' }, mb: 3 }}>
+        {/* 返回按钮 */}
+        <Box sx={{ mb: 3, py: 1 }}>
+          <Button
+            startIcon={<ArrowBackIcon />}
+            onClick={() => navigate('/dashboard')}
+            variant="outlined"
+            size="medium"
+            sx={{ py: 1, px: 2 }}
+          >
+            返回仪表板
+          </Button>
+        </Box>
 
-      {/* 标题和进度 */}
-      <Box sx={{ mb: 4 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-          <Typography variant="h4">
+        {/* 主标题 */}
+        <Box sx={{ mb: 3, py: 1 }}>
+          <Typography variant="h5" sx={{ fontWeight: 600, lineHeight: 1.4 }}>
             🚀 多Agent小说创作工作流程
           </Typography>
-          {/* 🎯 任务3：显示当前工作流使用的项目 */}
-          {currentProject && (
-            <Chip
-              label={`📝 ${currentProject.title}`}
-              color="primary"
-              variant="outlined"
-              sx={{ fontSize: '0.9rem', height: '32px' }}
-            />
-          )}
-          {workflow.projectId && (
-            <Chip
-              label={`ID: ${workflow.projectId}`}
-              size="small"
-              variant="outlined"
-            />
-          )}
         </Box>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="body1">
-            总体进度: {workflow.overallProgress}%
-          </Typography>
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            {!isRunning && (
-              <Button
-                variant="contained"
+
+        {/* 项目信息 */}
+        {(currentProject || workflow.projectId) && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', py: 1 }}>
+            <Typography variant="body1" color="text.secondary">
+              当前项目:
+            </Typography>
+            {currentProject && (
+              <Chip
+                label={`📝 ${currentProject.title}`}
                 color="primary"
-                startIcon={<PlayArrowIcon />}
-                onClick={handleStartButtonClick}
-              >
-                开始创作
-              </Button>
+                variant="outlined"
+                sx={{ fontSize: '0.85rem', height: '32px' }}
+              />
             )}
-            {isRunning && (
-              <Button
-                variant="contained"
-                color="error"
-                startIcon={<PauseIcon />}
-                onClick={() => setIsRunning(false)}
-              >
-                暂停
-              </Button>
+            {workflow.projectId && (
+              <Chip
+                label={`ID: ${workflow.projectId}`}
+                variant="outlined"
+                sx={{ height: '32px' }}
+              />
             )}
           </Box>
-        </Box>
-        <LinearProgress variant="determinate" value={workflow.overallProgress} />
+        )}
       </Box>
 
       {/* 错误提示 */}
@@ -3648,56 +3936,59 @@ export default function WorkflowControlPage() {
         </Alert>
       )}
 
-      {/* 阶段导航 */}
-      <Paper sx={{ p: 3, mb: 4 }}>
-        <Stepper activeStep={currentStageIndex}>
-          {stages.map((stage, index) => (
-            <Step
-              key={stage}
-              completed={workflow.stages[stage].status === 'completed'}
-              sx={{ cursor: 'pointer' }}
-              onClick={() => {
-                // 跳转到对应阶段
-                dispatch(setCurrentStage(stage))
-                // 显示提示
-                setSnackbarMessage(`已切换到 ${stageNames[stage]}`)
-                setSnackbarSeverity('info')
-                setSnackbarOpen(true)
-              }}
-            >
-              <StepLabel
-                sx={{
-                  '& .MuiStepLabel-label': {
-                    cursor: 'pointer',
-                    transition: 'color 0.2s, transform 0.2s',
-                    '&:hover': {
-                      color: 'primary.main',
-                      transform: 'scale(1.05)',
-                    },
-                  },
-                }}
-              >
-                {stageNames[stage]}
-              </StepLabel>
-            </Step>
-          ))}
-        </Stepper>
-      </Paper>
+      {/* 🆕 生成下一章任务进度提示 */}
+      {generateNextChapterTaskId && generatingNextChapter && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <CircularProgress size={20} />
+            <Box sx={{ flex: 1 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant="body2">
+                  🚀 正在生成第{generateNextChapterNumber}章... ({generateNextChapterProgress}%)
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {generateNextChapterProgress < 25 ? '步骤1/4: 章节规划' :
+                   generateNextChapterProgress < 50 ? '步骤2/4: 内容创作' :
+                   generateNextChapterProgress < 75 ? '步骤3/4: 质量评审' :
+                   '步骤4/4: 迭代优化'}
+                </Typography>
+              </Box>
+              <LinearProgress variant="determinate" value={generateNextChapterProgress} />
+            </Box>
+          </Box>
+        </Alert>
+      )}
 
       {/* 主内容区域 */}
-      <Grid container spacing={3}>
-        {/* 左侧：阶段详情 */}
-        <Grid item xs={12} md={8}>
-          <StageDetailPanel
-            stage={workflow.currentStage}
-          />
-        </Grid>
-
-        {/* 右侧：Agent状态 */}
+      <Grid container spacing={2}>
+        {/* 左侧：总进度 + 阶段信息 + Agent状态 */}
         <Grid item xs={12} md={4}>
-          <Card sx={{ mb: 2 }}>
-            <CardContent>
-              <Typography variant="h6" sx={{ mb: 2 }}>
+          {/* 总进度条 - 与右侧 Stepper 对齐 */}
+          <Card sx={{ mb: 1.5 }}>
+            <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.75 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                  📈 总体进度
+                </Typography>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main', fontSize: '0.85rem' }}>
+                  {workflow.overallProgress}%
+                </Typography>
+              </Box>
+              <LinearProgress
+                variant="determinate"
+                value={workflow.overallProgress}
+                sx={{ height: 6, borderRadius: 3 }}
+              />
+            </CardContent>
+          </Card>
+
+          {/* 阶段信息面板（工作步骤说明） */}
+          <StageInfoPanel stage={workflow.currentStage} />
+
+          {/* Agent状态 - 与右侧输出预览底部对齐 */}
+          <Card sx={{ mb: 0, flex: 1 }}>
+            <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>
+              <Typography variant="subtitle2" sx={{ mb: 1, fontSize: '0.85rem', fontWeight: 600 }}>
                 📊 Agent状态
               </Typography>
               {workflow.stages[workflow.currentStage].agents.map((agent) => (
@@ -3706,56 +3997,119 @@ export default function WorkflowControlPage() {
             </CardContent>
           </Card>
 
-          {/* 🆕 记忆管理面板 */}
-          <Card>
-            <CardContent>
-              <Typography variant="h6" sx={{ mb: 2 }}>
-                🧠 记忆管理
-              </Typography>
+          {/* 开始/暂停操作按钮（Fab样式） */}
+          <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+            {!isRunning ? (
+              <Tooltip title="开始创作" placement="right">
+                <Fab
+                  color="primary"
+                  onClick={handleStartButtonClick}
+                  sx={{
+                    width: 56,
+                    height: 56,
+                    boxShadow: 3,
+                    '&:hover': {
+                      boxShadow: 6,
+                    },
+                  }}
+                >
+                  <PlayArrowIcon />
+                </Fab>
+              </Tooltip>
+            ) : (
+              <Tooltip title="暂停" placement="right">
+                <Fab
+                  color="error"
+                  onClick={() => setIsRunning(false)}
+                  sx={{
+                    width: 56,
+                    height: 56,
+                    boxShadow: 3,
+                    '&:hover': {
+                      boxShadow: 6,
+                    },
+                  }}
+                >
+                  <PauseIcon />
+                </Fab>
+              </Tooltip>
+            )}
+          </Box>
 
-              {/* 自动保存开关 */}
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={autoSaveEnabled}
-                    onChange={(e) => setAutoSaveEnabled(e.target.checked)}
-                    color="primary"
-                  />
-                }
-                label="自动保存"
-                sx={{ mb: 1 }}
-              />
-
-              {/* 最后保存时间 */}
-              {lastSaveTime && (
-                <Typography variant="caption" display="block" sx={{ mb: 2, color: 'text.secondary' }}>
-                  最后保存：{lastSaveTime.toLocaleTimeString()}
-                </Typography>
-              )}
-
-              {/* 手动保存按钮 */}
-              <Button
-                fullWidth
-                variant="outlined"
-                startIcon={<SaveIcon />}
-                onClick={() => saveMemorySnapshot('manual')}
-                disabled={!projectId}
-                sx={{ mb: 1 }}
-              >
-                手动保存快照
-              </Button>
-
-              {/* 设置提示 */}
-              <Typography variant="caption" display="block" sx={{ color: 'text.secondary' }}>
-                {autoSaveEnabled ? '✅ 每5分钟自动保存' : '⚠️ 自动保存已关闭'}
-              </Typography>
-            </CardContent>
-          </Card>
+          {/* 🔧 记忆管理面板已隐藏，后台自动保存逻辑保留 */}
         </Grid>
-      </Grid>
 
-      {/* 控制按钮 */}
-      <Box sx={{ mt: 4, display: 'flex', gap: 2, justifyContent: 'center' }}>
+        {/* 右侧：阶段导航 + 输出预览区域（向上移动与返回按钮顶部对齐） */}
+        <Grid item xs={12} md={8} sx={{ mt: { xs: 0, md: -22 } }}>
+          {/* 阶段导航 - 与左侧总进度对齐 */}
+          <Paper sx={{ py: 2.5, px: 3, mb: 2 }}>
+            <Stepper
+              activeStep={currentStageIndex}
+              sx={{
+                '& .MuiStepConnector-line': {
+                  minWidth: 24,
+                },
+              }}
+            >
+              {stages.map((stage) => (
+                <Step
+                  key={stage}
+                  completed={workflow.stages[stage].status === 'completed'}
+                  sx={{ cursor: 'pointer', px: 0.5 }}
+                  onClick={() => {
+                    // 跳转到对应阶段
+                    dispatch(setCurrentStage(stage))
+                    // 显示提示
+                    setSnackbarMessage(`已切换到 ${stageNames[stage]}`)
+                    setSnackbarSeverity('info')
+                    setSnackbarOpen(true)
+                  }}
+                >
+                  <StepLabel
+                    sx={{
+                      '& .MuiStepLabel-label': {
+                        cursor: 'pointer',
+                        fontSize: '0.9rem',
+                        transition: 'color 0.2s, transform 0.2s',
+                        '&:hover': {
+                          color: 'primary.main',
+                          transform: 'scale(1.05)',
+                        },
+                      },
+                    }}
+                  >
+                    {stageNames[stage]}
+                  </StepLabel>
+                </Step>
+              ))}
+            </Stepper>
+          </Paper>
+
+          {/* 输出预览区域（始终可见，实时显示流式内容） */}
+          <OutputPreviewPanel
+            stage={workflow.currentStage}
+            isStreaming={isStreaming}
+            streamingStage={streamingStage}
+            conceptContent={conceptContent}
+            worldContent={worldContent}
+            characterContent={characterContent}
+            structureContent={structureContent}
+            contentDraftContent={contentDraftContent}
+            reviewReportContent={reviewReportContent}
+            finalVersionContent={finalVersionContent}
+            generateNextChapterStreamContent={generateNextChapterStreamContent}
+            isGeneratingNextChapter={!!generateNextChapterTaskId}
+          />
+
+          {/* 控制按钮 - 在文本区域正下方居中 */}
+          <Box
+            sx={{
+              mt: 1,  // 🔧 减小与文本区域的间距
+              display: 'flex',
+              gap: 2,
+              justifyContent: 'center',
+            }}
+          >
         {/* ✅ 概念开发阶段不显示"上一步"按钮 */}
         {currentStageIndex > 0 && (
           <Button
@@ -3868,7 +4222,9 @@ export default function WorkflowControlPage() {
             下一步
           </Button>
         )}
-      </Box>
+          </Box>
+        </Grid>
+      </Grid>
 
       {/* 🆕 已有内容警告对话框 */}
       <Dialog
@@ -5245,7 +5601,10 @@ export default function WorkflowControlPage() {
                     size="small"
                     sx={{ minWidth: 260 }}
                     value={selectedTechniqueId}
-                    onChange={(e) => setSelectedTechniqueId(e.target.value)}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setSelectedTechniqueId(value === '' ? '' : Number(value));
+                    }}
                   >
                     <MenuItem value="">
                       <em>请选择功法</em>

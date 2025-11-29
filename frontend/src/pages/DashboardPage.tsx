@@ -53,6 +53,7 @@ import {
   updateProject,
 } from '@/store/slices/projectSlice'
 import { logout } from '@/store/slices/authSlice'
+import { startGenerateNextChapter } from '@/store/slices/workflowSlice'
 import { generationService, GenerationTask } from '@/services/generation'
 import { apiClient } from '@/services/api'
 import GenerationProgressDialog from '@/components/GenerationProgressDialog'
@@ -383,6 +384,10 @@ export default function DashboardPage() {
   }
 
   const handleOpenChaptersDrawer = (projectId: number) => {
+    // 失去焦点以避免 aria-hidden 警告
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur()
+    }
     setSelectedProjectId(projectId)
     setShowChaptersDrawer(true)
     loadChapters(projectId)
@@ -554,8 +559,8 @@ export default function DashboardPage() {
     setGeneratingNextChapter(prev => ({ ...prev, [projectId]: true }))
 
     try {
-      logger.log('📍 开始生成下一章...')
-      
+      logger.log('📍 开始生成下一章（异步模式）...')
+
       const response = await fetch(`/api/v1/workflow/${projectId}/generate-next-chapter`, {
         method: 'POST',
         headers: {
@@ -566,32 +571,33 @@ export default function DashboardPage() {
 
       if (response.ok) {
         const data = await response.json()
-        logger.log('✅ 生成下一章成功:', data)
-        
-        // 后端返回的数据结构：{ success: true, message: '...', chapter: { ... } }
-        const chapter = data.chapter || data
-        
-        // 使用 Snackbar 显示成功提示（取代 alert）
-        setSnackbarMessage(`🎉 第${chapter.chapter_number}章已生成：${chapter.title} (${chapter.word_count}字)`)
-        setSnackbarSeverity('success')
+        logger.log('✅ 异步任务已创建:', data)
+
+        // 后端返回: { task_id, status, message, next_chapter_number }
+        const { task_id, next_chapter_number } = data
+
+        // 🆕 先设置 Redux 状态（确保在跳转前状态已就绪）
+        dispatch(startGenerateNextChapter({ taskId: task_id, chapterNumber: next_chapter_number }))
+
+        // 显示提示
+        setSnackbarMessage(`🚀 正在生成第${next_chapter_number}章，跳转到工作流页面查看进度...`)
+        setSnackbarSeverity('info')
         setSnackbarOpen(true)
-        
-        // 刷新项目列表
-        dispatch(fetchProjects())
+
+        // 跳转到工作流页面（不再需要传递 URL 参数，因为状态已在 Redux 中）
+        navigate(`/workflow/${projectId}`)
       } else {
         const errorData = await response.json()
-        logger.error('❌ 生成下一章失败:', errorData)
-        
-        // 使用 Snackbar 显示错误提示（取代 alert）
-        setSnackbarMessage(errorData.error || '生成下一章失败，请重试')
+        logger.error('❌ 创建生成任务失败:', errorData)
+
+        setSnackbarMessage(errorData.detail || errorData.error || '创建生成任务失败，请重试')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
       }
     } catch (error) {
       logger.error('❌ 生成下一章异常:', error)
-      
-      // 使用 Snackbar 显示错误提示（取代 alert）
-      setSnackbarMessage('生成下一章失败，请重试')
+
+      setSnackbarMessage('创建生成任务失败，请重试')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     } finally {
@@ -979,6 +985,14 @@ export default function DashboardPage() {
         anchor="right"
         open={showChaptersDrawer}
         onClose={handleCloseChaptersDrawer}
+        disableEnforceFocus
+        disableAutoFocus
+        disableRestoreFocus
+        hideBackdrop={false}
+        ModalProps={{
+          keepMounted: false,
+          disablePortal: false,
+        }}
         sx={{
           '& .MuiDrawer-paper': {
             width: 350,

@@ -1,6 +1,11 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit'
 import { apiClient } from '@/services/api'
 
+// 🔧 深拷贝函数
+const deepCloneStages = (stages: Record<StageType, Stage>): Record<StageType, Stage> => {
+  return JSON.parse(JSON.stringify(stages))
+}
+
 // 类型定义
 export type StageType = 'concept' | 'structure' | 'content' | 'review' | 'iteration'
 export type StageStatus = 'pending' | 'active' | 'completed' | 'error'
@@ -24,6 +29,16 @@ export interface Stage {
   error?: string
 }
 
+// 🆕 生成下一章任务状态
+export interface GenerateNextChapterState {
+  taskId: string | null
+  chapterNumber: number | null
+  progress: number
+  currentStep: number  // 1-4 对应四个步骤
+  streamContent: string  // 临时流式内容
+  isRunning: boolean
+}
+
 export interface WorkflowState {
   projectId: number | null
   currentStage: StageType
@@ -38,9 +53,11 @@ export interface WorkflowState {
   isCreatingProject: boolean
   createdProjectId: number | null
   createProjectError: string | null
+  // 🆕 生成下一章任务状态
+  generateNextChapter: GenerateNextChapterState
 }
 
-// 初始状态
+// 初始状态（Agent ID 使用 snake_case 命名规范）
 const initialStages: Record<StageType, Stage> = {
   concept: {
     id: 'concept',
@@ -48,9 +65,9 @@ const initialStages: Record<StageType, Stage> = {
     status: 'pending',
     progress: 0,
     agents: [
-      { id: 'creative-director', name: '创意总监', status: 'idle', progress: 0, message: '' },
-      { id: 'worldview-architect', name: '世界观架构师', status: 'idle', progress: 0, message: '' },
-      { id: 'character-designer', name: '人物设计师', status: 'idle', progress: 0, message: '' },
+      { id: 'creative_director', name: '创意总监', status: 'idle', progress: 0, message: '' },
+      { id: 'worldview_architect', name: '世界观架构师', status: 'idle', progress: 0, message: '' },
+      { id: 'character_designer', name: '人物设计师', status: 'idle', progress: 0, message: '' },
     ],
   },
   structure: {
@@ -59,8 +76,8 @@ const initialStages: Record<StageType, Stage> = {
     status: 'pending',
     progress: 0,
     agents: [
-      { id: 'plot-architect', name: '情节架构师', status: 'idle', progress: 0, message: '' },
-      { id: 'event-validator', name: '事件验证官', status: 'idle', progress: 0, message: '' },
+      { id: 'plot_architect', name: '情节架构师', status: 'idle', progress: 0, message: '' },
+      { id: 'event_validator', name: '事件验证官', status: 'idle', progress: 0, message: '' },
     ],
   },
   content: {
@@ -69,8 +86,8 @@ const initialStages: Record<StageType, Stage> = {
     status: 'pending',
     progress: 0,
     agents: [
-      { id: 'content-creator', name: '内容创作师', status: 'idle', progress: 0, message: '' },
-      { id: 'style-optimizer', name: '文风优化师', status: 'idle', progress: 0, message: '' },
+      { id: 'content_creator', name: '内容创作师', status: 'idle', progress: 0, message: '' },
+      { id: 'style_optimizer', name: '文风优化师', status: 'idle', progress: 0, message: '' },
     ],
   },
   review: {
@@ -79,7 +96,7 @@ const initialStages: Record<StageType, Stage> = {
     status: 'pending',
     progress: 0,
     agents: [
-      { id: 'quality-reviewer', name: '质量评审官', status: 'idle', progress: 0, message: '' },
+      { id: 'quality_reviewer', name: '质量评审官', status: 'idle', progress: 0, message: '' },
     ],
   },
   iteration: {
@@ -88,7 +105,9 @@ const initialStages: Record<StageType, Stage> = {
     status: 'pending',
     progress: 0,
     agents: [
-      { id: 'iteration-coordinator', name: '迭代协调官', status: 'idle', progress: 0, message: '' },
+      { id: 'iteration_coordinator', name: '迭代协调官', status: 'idle', progress: 0, message: '' },
+      { id: 'content_reviser', name: '内容修订师', status: 'idle', progress: 0, message: '' },
+      { id: 'final_reviewer', name: '最终审核官', status: 'idle', progress: 0, message: '' },
     ],
   },
 }
@@ -99,7 +118,7 @@ const initialStages: Record<StageType, Stage> = {
 const initialState: WorkflowState = {
   projectId: null,
   currentStage: 'concept',  // 默认为 concept,后续从后端 API 获取实际状态
-  stages: initialStages,
+  stages: deepCloneStages(initialStages),  // 🔧 使用深拷贝避免引用问题
   isRunning: false,
   overallProgress: 0,
   error: null,
@@ -110,6 +129,15 @@ const initialState: WorkflowState = {
   isCreatingProject: false,
   createdProjectId: null,
   createProjectError: null,
+  // 🆕 生成下一章任务初始状态
+  generateNextChapter: {
+    taskId: null,
+    chapterNumber: null,
+    progress: 0,
+    currentStep: 0,
+    streamContent: '',
+    isRunning: false,
+  },
 }
 
 // 异步Thunk
@@ -263,7 +291,7 @@ const workflowSlice = createSlice({
         console.log(`🔄 项目切换：${state.projectId} → ${action.payload}，清理工作流状态`)
         // 重置工作流状态
         state.currentStage = 'concept'
-        state.stages = initialStages
+        state.stages = deepCloneStages(initialStages)  // 🔧 使用深拷贝
         state.isRunning = false
         state.overallProgress = 0
         state.error = null
@@ -316,13 +344,19 @@ const workflowSlice = createSlice({
         message: string
       }>
     ) => {
-      const agent = state.stages[action.payload.stage].agents.find(
-        (a) => a.id === action.payload.agentId
-      )
+      const { stage, agentId, status, progress, message } = action.payload
+
+      const stageData = state.stages[stage]
+      if (!stageData) {
+        return
+      }
+
+      const agent = stageData.agents.find((a) => a.id === agentId)
+
       if (agent) {
-        agent.status = action.payload.status
-        agent.progress = action.payload.progress
-        agent.message = action.payload.message
+        agent.status = status
+        agent.progress = progress
+        agent.message = message
       }
     },
     updateStageOutput: (state, action: PayloadAction<{ stage: StageType; output: any }>) => {
@@ -333,7 +367,7 @@ const workflowSlice = createSlice({
     },
     resetWorkflow: (state) => {
       state.currentStage = 'concept'
-      state.stages = initialStages
+      state.stages = deepCloneStages(initialStages)  // 🔧 使用深拷贝
       state.isRunning = false
       state.overallProgress = 0
       state.error = null
@@ -348,6 +382,39 @@ const workflowSlice = createSlice({
       state.isSavingChapter = false
       state.savedChapterId = null
       state.saveChapterError = null
+    },
+    // 🆕 生成下一章任务 actions
+    startGenerateNextChapter: (state, action: PayloadAction<{ taskId: string; chapterNumber: number }>) => {
+      state.generateNextChapter = {
+        taskId: action.payload.taskId,
+        chapterNumber: action.payload.chapterNumber,
+        progress: 0,
+        currentStep: 0,
+        streamContent: '',
+        isRunning: true,
+      }
+      console.log(`📝 开始生成第${action.payload.chapterNumber}章，任务ID: ${action.payload.taskId}`)
+    },
+    updateGenerateNextChapterProgress: (state, action: PayloadAction<{ progress: number; currentStep: number }>) => {
+      state.generateNextChapter.progress = action.payload.progress
+      state.generateNextChapter.currentStep = action.payload.currentStep
+    },
+    appendGenerateNextChapterStream: (state, action: PayloadAction<string>) => {
+      state.generateNextChapter.streamContent += action.payload
+    },
+    clearGenerateNextChapterStream: (state) => {
+      state.generateNextChapter.streamContent = ''
+    },
+    completeGenerateNextChapter: (state) => {
+      console.log(`✅ 第${state.generateNextChapter.chapterNumber}章生成完成`)
+      state.generateNextChapter = {
+        taskId: null,
+        chapterNumber: null,
+        progress: 0,
+        currentStep: 0,
+        streamContent: '',
+        isRunning: false,
+      }
     },
   },
   extraReducers: (builder) => {
@@ -425,6 +492,12 @@ export const {
   updateOverallProgress,
   resetWorkflow,
   clearSaveChapterState,
+  // 🆕 生成下一章 actions
+  startGenerateNextChapter,
+  updateGenerateNextChapterProgress,
+  appendGenerateNextChapterStream,
+  clearGenerateNextChapterStream,
+  completeGenerateNextChapter,
 } = workflowSlice.actions
 
 export default workflowSlice.reducer

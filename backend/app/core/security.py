@@ -95,19 +95,45 @@ async def get_current_user(
     token = credentials.credentials
     payload = verify_token(token)
     user_id = payload.get("sub")
-    
+
     if user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token"
         )
-    
+
     user = db.query(User).filter(User.id == int(user_id)).first()
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found"
         )
-    
+
     return user
+
+
+# 🆕 可选的用户验证（用于支持 sendBeacon 等无法携带 Authorization header 的请求）
+optional_security = HTTPBearer(auto_error=False)
+
+
+async def get_current_user_optional(
+    credentials: HTTPAuthorizationCredentials | None = Depends(optional_security),
+    db: Session = Depends(get_db)
+) -> User | None:
+    """获取当前用户（可选，不强制要求认证）"""
+    if credentials is None:
+        return None
+
+    try:
+        token = credentials.credentials
+        payload = verify_token(token)
+        user_id = payload.get("sub")
+
+        if user_id is None:
+            return None
+
+        user = db.query(User).filter(User.id == int(user_id)).first()
+        return user
+    except Exception:
+        return None
 

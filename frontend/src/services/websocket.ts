@@ -46,6 +46,28 @@ export interface AgentStatusData {
   message?: string
 }
 
+// 🆕 流式输出相关接口
+export interface StreamChunkData {
+  project_id: number
+  stage: string
+  chunk: string
+  chunk_index: number
+  is_complete: boolean
+}
+
+export interface StreamStartData {
+  project_id: number
+  stage: string
+  message?: string
+}
+
+export interface StreamEndData {
+  project_id: number
+  stage: string
+  total_chars: number
+  message?: string
+}
+
 class WorkflowWebSocket {
   private socket: Socket | null = null
   private projectId: number | null = null
@@ -273,6 +295,47 @@ class WorkflowWebSocket {
     })
   }
 
+  // 🆕 流式输出监听器
+
+  /**
+   * 监听流式输出开始
+   */
+  onStreamStart(callback: (data: StreamStartData) => void) {
+    if (!this.socket) return
+
+    this.socket.off('stream_start')
+    this.socket.on('stream_start', (data: StreamStartData) => {
+      console.log('🌊 流式输出开始:', data)
+      callback(data)
+    })
+  }
+
+  /**
+   * 监听流式输出块
+   */
+  onStreamChunk(callback: (data: StreamChunkData) => void) {
+    if (!this.socket) return
+
+    this.socket.off('stream_chunk')
+    this.socket.on('stream_chunk', (data: StreamChunkData) => {
+      // 不打印每个块的日志，避免刷屏
+      callback(data)
+    })
+  }
+
+  /**
+   * 监听流式输出结束
+   */
+  onStreamEnd(callback: (data: StreamEndData) => void) {
+    if (!this.socket) return
+
+    this.socket.off('stream_end')
+    this.socket.on('stream_end', (data: StreamEndData) => {
+      console.log('🌊 流式输出结束:', data)
+      callback(data)
+    })
+  }
+
   /**
    * 移除所有监听器
    */
@@ -285,6 +348,10 @@ class WorkflowWebSocket {
     this.socket.off('task_complete')
     this.socket.off('task_error')
     this.socket.off('agent_status')
+    // 🆕 移除流式输出监听器
+    this.socket.off('stream_start')
+    this.socket.off('stream_chunk')
+    this.socket.off('stream_end')
     console.log('✅ 监听器已移除')
   }
 
@@ -301,6 +368,10 @@ class WorkflowWebSocket {
     this.socket.off('task_complete')
     this.socket.off('task_error')
     this.socket.off('agent_status')
+    // 🆕 移除流式输出监听器
+    this.socket.off('stream_start')
+    this.socket.off('stream_chunk')
+    this.socket.off('stream_end')
     console.log('✅ 事件监听器已清除，连接保持')
   }
 

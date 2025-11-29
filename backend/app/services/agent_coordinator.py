@@ -20,6 +20,8 @@ class AgentType(str, Enum):
     STYLE_OPTIMIZER = "style_optimizer"
     QUALITY_REVIEWER = "quality_reviewer"
     ITERATION_COORDINATOR = "iteration_coordinator"
+    CONTENT_REVISER = "content_reviser"
+    FINAL_REVIEWER = "final_reviewer"
 
 
 class StageType(str, Enum):
@@ -177,7 +179,17 @@ class AgentCoordinator:
             },
             AgentType.ITERATION_COORDINATOR: {
                 "name": "迭代协调官",
-                "role": "协调迭代优化",
+                "role": "分析反馈制定改进计划",
+                "stage": StageType.ITERATION,
+            },
+            AgentType.CONTENT_REVISER: {
+                "name": "内容修订师",
+                "role": "执行内容修订优化",
+                "stage": StageType.ITERATION,
+            },
+            AgentType.FINAL_REVIEWER: {
+                "name": "最终审核官",
+                "role": "最终审核确认",
                 "stage": StageType.ITERATION,
             },
         }

@@ -1,16 +1,20 @@
 """
 LLM 客户端 - 集成模型优化器
+支持流式响应 (Streaming)
 """
 import os
 import hashlib
 import json
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, AsyncGenerator, Callable, Awaitable
 import logging
 from openai import AsyncOpenAI
 
 from app.services.model_optimizer import get_model_optimizer, TaskType
 
 logger = logging.getLogger(__name__)
+
+# 流式输出回调类型定义
+StreamCallback = Callable[[str], Awaitable[None]]
 
 # 🚀 方案3：导入缓存系统
 get_cache_system = None  # 提前声明，避免可能未绑定的变量错误
@@ -126,13 +130,132 @@ class OptimizedLLMClient:
                 f"输入: {len(str(messages))} chars | "
                 f"输出: {len(content)} chars"
             )
-            
+
             return content
-            
+
         except Exception as e:
             logger.error(f"❌ LLM调用失败: {e}")
             raise
-    
+
+    async def chat_stream(
+        self,
+        messages: List[Dict[str, str]],
+        on_chunk: Optional[StreamCallback] = None,
+        task_type: Optional[TaskType] = None,
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ) -> str:
+        """
+        🆕 流式调用 LLM API（支持实时回调）
+
+        Args:
+            messages: 消息列表
+            on_chunk: 每个文本块的回调函数
+            task_type: 任务类型（用于自动选择模型）
+            model: 指定模型（优先级高于自动选择）
+            temperature: 温度参数
+            max_tokens: 最大token数
+            **kwargs: 其他参数
+
+        Returns:
+            完整的生成文本
+        """
+        # 选择模型
+        if model is None:
+            if task_type is not None:
+                model = self.optimizer.select_model(task_type)
+                logger.info(f"🎯 任务 {task_type.value} 使用模型: {model}")
+            else:
+                model = self.default_model
+
+        try:
+            # 🔥 关键：启用流式响应
+            stream = await self.client.chat.completions.create(
+                model=model,
+                messages=messages,  # type: ignore[arg-type]
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=True,  # 启用流式输出
+                **kwargs
+            )
+
+            full_content = ""
+            chunk_count = 0
+
+            # 逐块处理响应
+            async for chunk in stream:
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
+                    if delta and delta.content:
+                        content_piece = delta.content
+                        full_content += content_piece
+                        chunk_count += 1
+
+                        # 调用回调函数推送内容块
+                        if on_chunk:
+                            try:
+                                await on_chunk(content_piece)
+                            except Exception as e:
+                                logger.warning(f"⚠️  流式回调失败: {e}")
+
+            logger.info(
+                f"✅ LLM流式调用成功 | 模型: {model} | "
+                f"块数: {chunk_count} | "
+                f"输出: {len(full_content)} chars"
+            )
+
+            return full_content
+
+        except Exception as e:
+            logger.error(f"❌ LLM流式调用失败: {e}")
+            raise
+
+    async def chat_stream_generator(
+        self,
+        messages: List[Dict[str, str]],
+        task_type: Optional[TaskType] = None,
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ) -> AsyncGenerator[str, None]:
+        """
+        🆕 流式生成器版本（返回 AsyncGenerator）
+
+        用于需要更细粒度控制的场景
+
+        Yields:
+            每个文本块
+        """
+        # 选择模型
+        if model is None:
+            if task_type is not None:
+                model = self.optimizer.select_model(task_type)
+            else:
+                model = self.default_model
+
+        try:
+            stream = await self.client.chat.completions.create(
+                model=model,
+                messages=messages,  # type: ignore[arg-type]
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=True,
+                **kwargs
+            )
+
+            async for chunk in stream:
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
+                    if delta and delta.content:
+                        yield delta.content
+
+        except Exception as e:
+            logger.error(f"❌ LLM流式生成器调用失败: {e}")
+            raise
+
 
 # 全局客户端实例
 _client: Optional[OptimizedLLMClient] = None
@@ -141,10 +264,10 @@ _client: Optional[OptimizedLLMClient] = None
 def get_llm_client(strategy: str = "conservative") -> OptimizedLLMClient:
     """
     获取 LLM 客户端单例
-    
+
     Args:
         strategy: 优化策略
-    
+
     Returns:
         OptimizedLLMClient实例
     """

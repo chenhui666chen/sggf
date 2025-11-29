@@ -92,12 +92,12 @@ class WorkflowWebSocketManager:
     
     @staticmethod
     async def send_agent_status(
-        project_id: int, 
-        stage: str | None, 
-        agent_id: str | None, 
-        agent_name: str, 
-        status: str, 
-        progress: int | None = None, 
+        project_id: int,
+        stage: str | None,
+        agent_id: str | None,
+        agent_name: str,
+        status: str,
+        progress: int | None = None,
         message: str | None = None
     ):
         """发送 Agent 状态"""
@@ -112,11 +112,64 @@ class WorkflowWebSocketManager:
         }
         await WorkflowWebSocketManager.broadcast_to_project(project_id, 'agent_status', data)
 
+    @staticmethod
+    async def send_stream_chunk(
+        project_id: int,
+        stage: str,
+        chunk: str,
+        chunk_index: int = 0,
+        is_complete: bool = False
+    ):
+        """
+        🆕 发送流式输出块（用于实时显示 AI 生成的内容）
+
+        Args:
+            project_id: 项目 ID
+            stage: 当前阶段（content/review/iteration）
+            chunk: 文本块内容
+            chunk_index: 块索引（用于前端排序）
+            is_complete: 是否为最后一块
+        """
+        data = {
+            'project_id': project_id,
+            'stage': stage,
+            'chunk': chunk,
+            'chunk_index': chunk_index,
+            'is_complete': is_complete,
+        }
+        await WorkflowWebSocketManager.broadcast_to_project(project_id, 'stream_chunk', data)
+
+    @staticmethod
+    async def send_stream_start(project_id: int, stage: str, message: str | None = None):
+        """
+        🆕 发送流式输出开始通知
+        """
+        data = {
+            'project_id': project_id,
+            'stage': stage,
+            'message': message or f'{stage} 阶段开始生成内容...',
+        }
+        await WorkflowWebSocketManager.broadcast_to_project(project_id, 'stream_start', data)
+
+    @staticmethod
+    async def send_stream_end(project_id: int, stage: str, total_chars: int = 0, message: str | None = None):
+        """
+        🆕 发送流式输出结束通知
+        """
+        data = {
+            'project_id': project_id,
+            'stage': stage,
+            'total_chars': total_chars,
+            'message': message or f'{stage} 阶段内容生成完成',
+        }
+        await WorkflowWebSocketManager.broadcast_to_project(project_id, 'stream_end', data)
+
 
 # Socket.IO 事件处理器
 @sio.event
 async def connect(sid, environ):
     """客户端连接"""
+    print(f"🔌 [WebSocket] 客户端连接: {sid}")  # 使用 print 确保输出
     logger.info(f"🔌 客户端连接: {sid}")
     await sio.emit('connected', {'message': 'WebSocket 连接成功'}, room=sid)
 
@@ -124,6 +177,7 @@ async def connect(sid, environ):
 @sio.event
 async def disconnect(sid):
     """客户端断开"""
+    print(f"🔌 [WebSocket] 客户端断开: {sid}")  # 使用 print 确保输出
     logger.info(f"🔌 客户端断开: {sid}")
     # 从所有房间中移除
     for project_id, sessions in list(project_rooms.items()):
@@ -161,6 +215,7 @@ def verify_websocket_token(token: str) -> Optional[dict]:
 @sio.event
 async def join_project(sid, data):
     """加入项目房间 - 带项目所有权验证"""
+    print(f"📥 [WebSocket] 收到 join_project 请求: sid={sid}, data={data}")  # 调试日志
     try:
         project_id = data.get('project_id')
         token = data.get('token')
