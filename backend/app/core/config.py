@@ -72,7 +72,13 @@ class Settings(BaseSettings):
     # 日志配置
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "./logs/app.log"
-    
+
+    # 腾讯云 API 配置（用于 AI 生成检测）
+    TENCENT_SECRET_ID: str = ""
+    TENCENT_SECRET_KEY: str = ""
+    TENCENT_REGION: str = "ap-guangzhou"
+    TENCENT_BIZTYPE: str = ""  # 可选，策略编号
+
     class Config:
         env_file = ".env"
         case_sensitive = True

@@ -42,6 +42,7 @@ import CloseIcon from '@mui/icons-material/Close'
 import NavigateNextIcon from '@mui/icons-material/NavigateNext'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
+import SmartToyIcon from '@mui/icons-material/SmartToy'
 import Badge from '@mui/material/Badge'
 import Snackbar from '@mui/material/Snackbar'
 import Alert from '@mui/material/Alert'
@@ -115,6 +116,18 @@ export default function DashboardPage() {
 
   // 🆕 章节字数统计（每个项目的总字数）
   const [chapterWordCounts, setChapterWordCounts] = useState<Record<number, number>>({})
+
+  // 🆕 AI 检测状态
+  const [aiDetectDialogOpen, setAiDetectDialogOpen] = useState(false)
+  const [aiDetecting, setAiDetecting] = useState(false)
+  const [aiDetectResult, setAiDetectResult] = useState<{
+    success: boolean;
+    ai_score: number | null;
+    label: string | null;
+    error: string | null;
+    text_length: number | null;
+  } | null>(null)
+  const [selectedChapterForDetect, setSelectedChapterForDetect] = useState<any>(null)
 
   // 🆕 类型映射函数（英文 → 中文）
   const getGenreLabel = (genre: string | null | undefined): string => {
@@ -605,6 +618,60 @@ export default function DashboardPage() {
     }
   }
 
+  // 🆕 AI 检测功能
+  const handleAiDetectClick = (chapter: any, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setSelectedChapterForDetect(chapter)
+    setAiDetectResult(null)
+    setAiDetectDialogOpen(true)
+  }
+
+  const handleAiDetect = async () => {
+    if (!selectedChapterForDetect) return
+
+    setAiDetecting(true)
+    setAiDetectResult(null)
+
+    try {
+      const response = await fetch('/api/v1/ai-detect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+        body: JSON.stringify({
+          chapter_id: selectedChapterForDetect.id
+        })
+      })
+
+      const result = await response.json()
+      setAiDetectResult(result)
+
+      if (result.success) {
+        logger.log(`✅ AI 检测完成: 置信度 ${result.ai_score}%`)
+      } else {
+        logger.error('❌ AI 检测失败:', result.error)
+      }
+    } catch (error) {
+      logger.error('❌ AI 检测异常:', error)
+      setAiDetectResult({
+        success: false,
+        ai_score: null,
+        label: null,
+        error: '检测请求失败，请检查网络连接',
+        text_length: null
+      })
+    } finally {
+      setAiDetecting(false)
+    }
+  }
+
+  const handleCloseAiDetectDialog = () => {
+    setAiDetectDialogOpen(false)
+    setSelectedChapterForDetect(null)
+    setAiDetectResult(null)
+  }
+
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
@@ -1047,24 +1114,41 @@ export default function DashboardPage() {
         ) : (
           <List sx={{ flex: 1, overflow: 'auto' }}>
             {chapters.map((chapter) => (
-              <ListItem 
-                key={chapter.id} 
+              <ListItem
+                key={chapter.id}
                 disablePadding
                 secondaryAction={
-                  <IconButton
-                    edge="end"
-                    aria-label="delete"
-                    size="small"
-                    color="error"
-                    onClick={(e) => handleDeleteChapterClick(chapter, e)}
-                    sx={{
-                      '&:hover': {
-                        backgroundColor: '#ffebee'
-                      }
-                    }}
-                  >
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
+                  <Box sx={{ display: 'flex', gap: 0.5 }}>
+                    <IconButton
+                      edge="end"
+                      aria-label="ai-detect"
+                      size="small"
+                      color="primary"
+                      onClick={(e) => handleAiDetectClick(chapter, e)}
+                      title="AI 检测"
+                      sx={{
+                        '&:hover': {
+                          backgroundColor: '#e3f2fd'
+                        }
+                      }}
+                    >
+                      <SmartToyIcon fontSize="small" />
+                    </IconButton>
+                    <IconButton
+                      edge="end"
+                      aria-label="delete"
+                      size="small"
+                      color="error"
+                      onClick={(e) => handleDeleteChapterClick(chapter, e)}
+                      sx={{
+                        '&:hover': {
+                          backgroundColor: '#ffebee'
+                        }
+                      }}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
                 }
               >
                 <ListItemButton
@@ -1122,14 +1206,14 @@ export default function DashboardPage() {
       </Dialog>
 
       {/* 🆕 成功/错误提示 Snackbar */}
-      <Snackbar 
-        open={snackbarOpen} 
-        autoHideDuration={6000} 
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={6000}
         onClose={() => setSnackbarOpen(false)}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
-        <Alert 
-          onClose={() => setSnackbarOpen(false)} 
+        <Alert
+          onClose={() => setSnackbarOpen(false)}
           severity={snackbarSeverity}
           variant="filled"
           sx={{ width: '100%' }}
@@ -1137,6 +1221,122 @@ export default function DashboardPage() {
           {snackbarMessage}
         </Alert>
       </Snackbar>
+
+      {/* 🆕 AI 检测对话框 */}
+      <Dialog
+        open={aiDetectDialogOpen}
+        onClose={handleCloseAiDetectDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <SmartToyIcon color="primary" />
+          AI 生成检测
+        </DialogTitle>
+        <DialogContent>
+          {selectedChapterForDetect && (
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="body2" color="textSecondary">
+                检测章节：<strong>{selectedChapterForDetect.title}</strong>
+              </Typography>
+              <Typography variant="caption" color="textSecondary">
+                字数：{selectedChapterForDetect.word_count || 0} 字
+              </Typography>
+            </Box>
+          )}
+
+          {!aiDetectResult && !aiDetecting && (
+            <DialogContentText>
+              点击"开始检测"按钮，调用腾讯云 AI 生成检测 API 分析该章节内容的 AI 生成率。
+            </DialogContentText>
+          )}
+
+          {aiDetecting && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4 }}>
+              <CircularProgress size={60} />
+              <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+                正在检测中，请稍候...
+              </Typography>
+            </Box>
+          )}
+
+          {aiDetectResult && (
+            <Box sx={{ mt: 2 }}>
+              {aiDetectResult.success ? (
+                <Box>
+                  <Box sx={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    p: 3,
+                    borderRadius: 2,
+                    backgroundColor: aiDetectResult.ai_score && aiDetectResult.ai_score > 70
+                      ? '#ffebee'
+                      : aiDetectResult.ai_score && aiDetectResult.ai_score > 30
+                        ? '#fff8e1'
+                        : '#e8f5e9'
+                  }}>
+                    <Typography variant="h2" sx={{
+                      fontWeight: 'bold',
+                      color: aiDetectResult.ai_score && aiDetectResult.ai_score > 70
+                        ? '#d32f2f'
+                        : aiDetectResult.ai_score && aiDetectResult.ai_score > 30
+                          ? '#f57c00'
+                          : '#388e3c'
+                    }}>
+                      {aiDetectResult.ai_score || 0}%
+                    </Typography>
+                    <Typography variant="body1" color="textSecondary">
+                      AI 生成置信度
+                    </Typography>
+                  </Box>
+                  <Box sx={{ mt: 2 }}>
+                    <Typography variant="body2">
+                      <strong>检测标签：</strong>{aiDetectResult.label || '无'}
+                    </Typography>
+                    <Typography variant="body2">
+                      <strong>检测文本长度：</strong>{aiDetectResult.text_length || 0} 字符
+                    </Typography>
+                  </Box>
+                  <Alert
+                    severity={
+                      aiDetectResult.ai_score && aiDetectResult.ai_score > 70
+                        ? 'error'
+                        : aiDetectResult.ai_score && aiDetectResult.ai_score > 30
+                          ? 'warning'
+                          : 'success'
+                    }
+                    sx={{ mt: 2 }}
+                  >
+                    {aiDetectResult.ai_score && aiDetectResult.ai_score > 70
+                      ? '该内容很可能是 AI 生成的，建议进行人工修改以降低 AI 痕迹。'
+                      : aiDetectResult.ai_score && aiDetectResult.ai_score > 30
+                        ? '该内容可能包含部分 AI 生成痕迹，可考虑适当修改。'
+                        : '该内容 AI 生成痕迹较低，质量良好！'}
+                  </Alert>
+                </Box>
+              ) : (
+                <Alert severity="error">
+                  <strong>检测失败：</strong>{aiDetectResult.error}
+                </Alert>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseAiDetectDialog}>
+            关闭
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleAiDetect}
+            disabled={aiDetecting}
+            startIcon={aiDetecting ? <CircularProgress size={16} /> : <SmartToyIcon />}
+          >
+            {aiDetecting ? '检测中...' : aiDetectResult ? '重新检测' : '开始检测'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   )
 }
