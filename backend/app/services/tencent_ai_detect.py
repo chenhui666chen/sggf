@@ -69,19 +69,91 @@ class TencentAIDetectService:
         )
         return authorization
     
+    def _extract_ai_trace_details(self, resp: dict, original_text: str) -> dict:
+        """
+        从API响应中提取详细的AI痕迹信息
+
+        Args:
+            resp: API响应
+            original_text: 原始文本
+
+        Returns:
+            包含详细AI痕迹信息的字典
+        """
+        details = {
+            "hit_keywords": [],      # 命中的关键词
+            "hit_positions": [],     # 命中位置（带上下文）
+            "detection_method": "",  # 检测方法
+            "label_scores": {},      # 各标签的得分
+            "problematic_segments": []  # 问题片段
+        }
+
+        # 1. 提取命中的关键词
+        keywords = resp.get("Keywords", [])
+        if keywords:
+            details["hit_keywords"] = keywords
+
+        # 2. 确定检测方法
+        hit_type = resp.get("HitType", "")
+        if hit_type:
+            if "nlp" in hit_type.lower():
+                details["detection_method"] = "NLP模型识别"
+            elif "keyword" in hit_type.lower():
+                details["detection_method"] = "关键词匹配"
+            else:
+                details["detection_method"] = hit_type
+
+        # 3. 从DetailResults提取每个标签的详细信息
+        detail_results = resp.get("DetailResults", [])
+        for dr in detail_results:
+            label = dr.get("Label", "")
+            score = dr.get("Score", 0)
+            if label and score > 0:
+                details["label_scores"][label] = score
+
+            # 提取HitInfos中的位置信息
+            hit_infos = dr.get("HitInfos", [])
+            for hit in hit_infos:
+                keyword = hit.get("Keyword", "")
+                positions = hit.get("Positions", [])
+
+                for pos in positions:
+                    start = pos.get("Start", 0)
+                    end = pos.get("End", 0)
+
+                    # 提取问题片段及上下文
+                    context_start = max(0, start - 20)
+                    context_end = min(len(original_text), end + 20)
+
+                    segment = {
+                        "keyword": keyword,
+                        "position": {"start": start, "end": end},
+                        "context": original_text[context_start:context_end],
+                        "matched_text": original_text[start:end] if start < len(original_text) else keyword
+                    }
+                    details["problematic_segments"].append(segment)
+                    details["hit_positions"].append({
+                        "start": start,
+                        "end": end,
+                        "keyword": keyword
+                    })
+
+        return details
+
     async def detect_ai_content(self, text: str) -> dict:
         """
         检测文本是否为 AI 生成
-        
+
         Args:
             text: 待检测的文本内容
-            
+
         Returns:
             检测结果字典，包含:
             - success: 是否成功
             - ai_score: AI 生成置信度 (0-100)
             - label: 检测标签
             - suggestion: 处理建议
+            - ai_trace_details: 详细的AI痕迹信息
             - error: 错误信息（如果失败）
         """
         # 检查配置
@@ -140,14 +212,22 @@ class TencentAIDetectService:
                             "error": f"{resp['Error']['Code']}: {resp['Error']['Message']}",
                             "ai_score": None
                         }
-                    
+
+                    # 提取详细的AI痕迹信息
+                    ai_trace_details = self._extract_ai_trace_details(resp, text)
+
                     return {
                         "success": True,
                         "ai_score": resp.get("Score", 0),
                         "label": resp.get("Label", "Unknown"),
+                        "sub_label": resp.get("SubLabel", ""),
                         "suggestion": resp.get("Suggestion", "Pass"),
                         "keywords": resp.get("Keywords", []),
                         "detail_results": resp.get("DetailResults", []),
+                        "hit_type": resp.get("HitType", ""),  # 审核决策归因
+                        "sentiment": resp.get("SentimentAnalysis", {}),
+                        # 🆕 新增：提取的AI痕迹细节
+                        "ai_trace_details": ai_trace_details,
                         "raw_response": resp
                     }
                 else:

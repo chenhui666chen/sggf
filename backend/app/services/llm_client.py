@@ -43,7 +43,8 @@ class OptimizedLLMClient:
         """
         self.client = AsyncOpenAI(
             api_key=os.getenv("DEEPSEEK_API_KEY"),
-            base_url=os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1")
+            base_url=os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1"),
+            timeout=120.0  # 增加超时时间到120秒
         )
         
         self.optimizer = get_model_optimizer(strategy)

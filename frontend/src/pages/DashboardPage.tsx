@@ -43,6 +43,9 @@ import NavigateNextIcon from '@mui/icons-material/NavigateNext'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
+import ScienceIcon from '@mui/icons-material/Science'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import AutoStoriesIcon from '@mui/icons-material/AutoStories'
 import Badge from '@mui/material/Badge'
 import Snackbar from '@mui/material/Snackbar'
 import Alert from '@mui/material/Alert'
@@ -673,24 +676,109 @@ export default function DashboardPage() {
   }
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
-        <Typography variant="h4">我的项目</Typography>
-        <Box>
-          <Button
-            variant="contained"
-            color="primary"
-            startIcon={<AddIcon />}
-            onClick={handleStartCreation}
-            sx={{ mr: 2 }}
-          >
-            新建项目
-          </Button>
-          <Button variant="outlined" onClick={handleLogout}>
-            退出登录
-          </Button>
-        </Box>
+    <Box sx={{ minHeight: '100vh', backgroundColor: '#f5f7fa' }}>
+      {/* 顶部标题栏 */}
+      <Box
+        sx={{
+          background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
+          py: 3,
+          px: 3,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+        }}
+      >
+        <Container maxWidth="lg">
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            {/* 左侧：返回按钮 + 标题 */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <IconButton
+                onClick={() => navigate('/home')}
+                sx={{
+                  color: 'white',
+                  backgroundColor: 'rgba(255,255,255,0.1)',
+                  '&:hover': {
+                    backgroundColor: 'rgba(255,255,255,0.2)',
+                  },
+                }}
+                title="返回创作工坊"
+              >
+                <ArrowBackIcon />
+              </IconButton>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                <AutoStoriesIcon sx={{ fontSize: 32, color: 'white' }} />
+                <Box>
+                  <Typography
+                    variant="h5"
+                    sx={{
+                      color: 'white',
+                      fontWeight: 700,
+                      letterSpacing: '0.5px',
+                    }}
+                  >
+                    我的项目
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.85rem' }}
+                  >
+                    管理您的小说创作项目
+                  </Typography>
+                </Box>
+              </Box>
+            </Box>
+
+            {/* 右侧：操作按钮 */}
+            <Box sx={{ display: 'flex', gap: 1.5 }}>
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={handleStartCreation}
+                sx={{
+                  backgroundColor: 'white',
+                  color: '#1976d2',
+                  fontWeight: 600,
+                  '&:hover': {
+                    backgroundColor: 'rgba(255,255,255,0.9)',
+                  },
+                }}
+              >
+                新建项目
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<ScienceIcon />}
+                onClick={() => navigate('/prompt-evolution')}
+                sx={{
+                  color: 'white',
+                  borderColor: 'rgba(255,255,255,0.5)',
+                  '&:hover': {
+                    borderColor: 'white',
+                    backgroundColor: 'rgba(255,255,255,0.1)',
+                  },
+                }}
+              >
+                提示词优化
+              </Button>
+              <Button
+                variant="outlined"
+                onClick={handleLogout}
+                sx={{
+                  color: 'white',
+                  borderColor: 'rgba(255,255,255,0.5)',
+                  '&:hover': {
+                    borderColor: 'white',
+                    backgroundColor: 'rgba(255,255,255,0.1)',
+                  },
+                }}
+              >
+                退出登录
+              </Button>
+            </Box>
+          </Box>
+        </Container>
       </Box>
+
+      {/* 项目列表区域 */}
+      <Container maxWidth="lg" sx={{ py: 4 }}>
 
       <Grid container spacing={3}>
         {projects.map((project) => (
@@ -1337,7 +1425,8 @@ export default function DashboardPage() {
           </Button>
         </DialogActions>
       </Dialog>
-    </Container>
+      </Container>
+    </Box>
   )
 }
 

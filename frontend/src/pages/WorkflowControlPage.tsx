@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useCallback } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import {
@@ -267,7 +267,6 @@ export default function WorkflowControlPage() {
   const generateNextChapterProgress = generateNextChapter.progress
   const generateNextChapterStreamContent = generateNextChapter.streamContent
   const generateNextChapterNumber = generateNextChapter.chapterNumber
-  const generateNextChapterCurrentStep = generateNextChapter.currentStep
 
   // 🆕 自动保存记忆状态（始终启用，UI 面板已隐藏）
   const autoSaveEnabled = true  // 🔧 简化：始终启用自动保存
