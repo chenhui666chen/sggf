@@ -89,23 +89,55 @@ function TabPanel(props: TabPanelProps) {
   )
 }
 
-// Category 中文名称映射
+// Category 中文名称映射（完整版 - 27种体系）
 const CATEGORY_NAME_MAP: Record<string, string> = {
+  // 地理与世界观
   map_system: '地图体系',
+  
+  // 修仙/玄幻体系
   cultivation_realm_system: '修仙境界体系',
   martial_realm_system: '武道境界体系',
-  magic_realm_system: '魔法境界体系',
-  ability_realm_system: '异能境界体系',
   technique_system: '功法体系',
   pill_system: '丹药体系',
-  artifact_system: '法宝体系',
   formation_system: '阵法体系',
   talisman_system: '符箓体系',
   weapon_system: '武器与法宝体系',
-  organization_system: '组织体系',
+  resource_system: '资源体系',
+  force_system: '势力体系',
+  
+  // 都市异能体系
+  ability_realm_system: '异能境界体系',
+  ability_awakening_growth_system: '异能体系',
+  hidden_organization_force_system: '组织势力体系',
+  network_social_relationship_system: '人脉关系体系',
+  special_artifact_relic_system: '道具遗物体系',
+  wealth_business_empire_system: '财富商业体系',
+  
+  // 西幻/魔法体系
+  magic_realm_system: '魔法境界体系',
+  magic_system: '魔法体系',
+  race_bloodline_system: '种族血脉体系',
+  profession_class_system: '职业体系',
+  
+  // 科幻体系
+  interstellar_travel_exploration_system: '星际航行体系',
+  ai_robot_system: 'AI机器人体系',
+  
+  // 末世废土体系
+  survivor_settlement_order_system: '聚落秩序体系',
+  mutation_infection_aberration_system: '变异感染体系',
+  
+  // 游戏系统体系
+  game_skill_talent_system: '技能天赋体系',
   skill_talent_system: '技能天赋体系',
+  
+  // 角色体系
   character_system: '角色体系',
+  
+  // 特殊
   candidate: '候选集合',
+  organization_system: '组织体系',
+  artifact_system: '法宝体系',
 }
 
 // ==================== 主组件 ====================
@@ -444,7 +476,7 @@ export default function KnowledgeBasePage() {
     }
 
     try {
-      const response = await apiClient.createSettingItem(selectedCollection.id, {
+      await apiClient.createSettingItem(selectedCollection.id, {
         name: newItemName,
         code: newItemCode,
         level: newItemLevel,
