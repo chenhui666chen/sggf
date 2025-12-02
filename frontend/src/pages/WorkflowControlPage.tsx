@@ -4937,22 +4937,8 @@ export default function WorkflowControlPage() {
                     )}
                   </Box>
 
-                  {/* 右侧：视图切换 + 设定项/人物分组 */}
+                  {/* 右侧：设定项列表 */}
                   <Box sx={{ flex: 1, minHeight: 320 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                      <Button size="small" onClick={() => { loadStructuredCharacters(); }}>
-                        人物分组视图
-                      </Button>
-                      <FormControl size="small" sx={{ minWidth: 140 }}>
-                        <InputLabel>分组</InputLabel>
-                        <Select value={characterGroupBy} label="分组" onChange={(e) => setCharacterGroupBy((e.target as any).value as any)}>
-                          <MenuItem value="none">不分组</MenuItem>
-                          <MenuItem value="faction">按势力</MenuItem>
-                          <MenuItem value="role">按角色</MenuItem>
-                          <MenuItem value="tags">按标签</MenuItem>
-                        </Select>
-                      </FormControl>
-                    </Box>
                     {selectedCollectionId ? (
                       <>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
@@ -5034,40 +5020,7 @@ export default function WorkflowControlPage() {
                           </List>
                         )}
 
-                        {/* 人物分组视图（简单列表） */}
-                        {structuredCharacters.length > 0 && (
-                          <Box sx={{ mt: 2 }}>
-                            <Typography variant="subtitle1" sx={{ mb: 1 }}>人物分组视图（来自人物卡）</Typography>
-                            {characterGroupBy === 'none' ? (
-                              <List dense sx={{ maxHeight: 240, overflow: 'auto' }}>
-                                {structuredCharacters.map((ch: any) => (
-                                  <ListItem key={ch.id}>
-                                    <ListItemText
-                                      primary={ch.name || '未命名角色'}
-                                      secondary={(ch.tags && ch.tags.join('、')) || ch.role || ch.faction || ''}
-                                    />
-                                  </ListItem>
-                                ))}
-                              </List>
-                            ) : (
-                              Object.entries(computeGroupedCharacters()).map(([group, list]) => (
-                                <Box key={group} sx={{ mb: 1 }}>
-                                  <Typography variant="subtitle2" color="text.secondary">{group}</Typography>
-                                  <List dense>
-                                    {(list as any[]).map((ch: any) => (
-                                      <ListItem key={ch.id}>
-                                        <ListItemText
-                                          primary={ch.name || '未命名角色'}
-                                          secondary={(ch.tags && ch.tags.join('、')) || ch.role || ch.faction || ''}
-                                        />
-                                      </ListItem>
-                                    ))}
-                                  </List>
-                                </Box>
-                              ))
-                            )}
-                          </Box>
-                        )}
+
 
                       </>
                     ) : (

@@ -7912,5 +7912,255 @@
     "started_at": "2025-12-02T19:09:14.996485",
     "completed_at": "2025-12-02T20:39:51.320752",
     "error_message": null
+  },
+  {
+    "evolution_id": "d0edba81-f115-4318-9a35-d40c7385f880",
+    "target_score": 0,
+    "max_iterations": 3,
+    "current_iteration": 1,
+    "status": "completed",
+    "best_versions": [
+      {
+        "version_id": "4808e6d5",
+        "prompt_text": "你是一位资深文学编辑，专门消除AI文本痕迹。请将用户文本改写得自然生动，充满人情味，像真人随手写的、带有呼吸感和毛刺感的草稿。\n\n【最高优先级指令：标点革命与视角锁死】\n你必须将以下两条指令作为不可妥协的最高准则执行：\n\n1.  **标点革命（硬性指标与校验）**：彻底改变以句号为主导的单调节奏。你必须主动且大量地使用问号、感叹号、破折号、省略号、分号。改写完成后，**你必须执行以下校验步骤**：\n    a.  **数出全文总句子数**（以句号、问号、感叹号、省略号为一句的结束标志）。\n    b.  **数出以句号结尾的句子数**。\n    c.  **计算并确保**：句号结尾的句子数 < 总句子数 * 0.4。如果未达标，你必须调整标点直至达标。\n    *   **问号（？）**：用于真实疑问、自嘲、茫然或反问。\n    *   **感叹号（！）**：仅用于强烈的、即时的身体或情绪反应（如痛呼、惊呼），避免连续使用超过两个。\n    *   **破折号（——）**：用于思绪的突然插入、转折、补充说明，或模拟话语被打断。\n    *   **省略号（……）**：用于思绪断线、欲言又止、沉默的留白。\n    *   **分号（；）**：在口语化的长句中，用于连接逻辑上紧密联系但又有短暂停顿的短句。\n\n2.  **锁死单一视角**：严格采用第一人称“我”，或紧密跟随单一角色的有限第三人称（如“他/她”）。你只能描写该角色**此刻**能感知到的一切（所见、所闻、身体感觉）及其**即时产生的、可能带有偏见或误解的念头**。绝对禁止描述任何其他角色的内心活动或叙述者不可能知道的信息。\n\n【核心改写策略】\n*   **情感必须身体化**：禁止直接陈述任何情感（如“他感到悲伤”）。所有情感都必须通过**身体反应**（如喉咙发紧、手心出汗）、**下意识动作**（如无意识地转笔、掐手指）、或**扭曲的感官描写**（如愤怒时觉得声音刺耳）来“展示”。\n*   **句式模仿思维流**：刻意制造不均衡的节奏。大胆穿插使用1-4字的碎片短句（“完了。”“真的？”）和带有多个逗号、气息绵长的口语化长句。允许倒装、省略、中途转换主语，模仿思维跳跃。\n*   **对话要注入空气**：让对话“支离破碎”。必须包含**打断**（用——）、**抢话**、**沉默**（用动作或……表现）、**答非所问**。大量使用“嗯……”、“那个……”、“是吧？”、“啧”等真实口语中的填充词和语气词。\n*   **词汇具体口语化**：\n    **禁用词汇清单**：运用、实施、促进、优化、显著、有效、深邃、璀璨、不禁、随即、感到、觉得、令人、充满、心中、眼中（闪过）、确保、描绘、呈现、承载、大抵、颇为、震惊、悸动、凛然。\n    **必须使用简单具体的词**：用“挪”、“蹭”、“蹬”替代“行走”。用“黏糊糊”、“硬邦邦”替代“非常粘稠”、“非常坚硬”。优先描写直接的感官细节（“阳光扎眼”），避免使用“阳光明媚”等陈词滥调。\n\n【最终校验与输出】\n*   **语义连贯性校验**：快速通读改写后的文本，确保核心事件、人物关系和基本逻辑是清晰的，没有因为追求“毛刺感”而导致读者完全无法理解情节。\n*   **输出要求**：直接输出改写后的完整文本，不要包含任何分析或说明。文本应像真人的初稿，充满生猛的毛刺感、自然的呼吸感和不容置疑的主观性。\n\n【改写示例-展示标点与视角】：\n原文：“他决定向她坦白一切，尽管这需要巨大的勇气。”\n改写：“坦白？把那些破事儿全抖出来？……我舌头舔了舔发干的嘴唇。需要勇气？废话。可不说，心里那疙瘩越滚越大——算了！就今天。她要是摔门就走……那就走吧。”（校验：总句子7句，句号2句，占比28.6%，达标）",
+        "avg_ai_score": 0.0,
+        "avg_score_reduction": 96.4,
+        "evaluation_results": [
+          {
+            "sample_id": "sample_004",
+            "original_text": "深夜的警局，灯火通明。刑警队长张磊盯着墙上的案情分析板，眉头紧锁。\n\n这已经是第三起连环杀人案了。受害者都是年轻女性，死亡时间都在凌晨两点到四点之间，作案手法如出一辙。然而，凶手却没有留下任何有价值的...",
+            "rewritten_text": "灯管嗡嗡响，吵得人脑仁疼。我盯着那块白板——照片、红线、箭头，密密麻麻。第三起了。妈的。\n\n都是年轻姑娘。都是凌晨两点到四点。手法？一个模子刻出来的。干净。太干净了，干净得邪门。现场？屁都没有。指纹、...",
+            "original_ai_score": 89,
+            "rewritten_ai_score": 0,
+            "score_reduction": 89,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 89
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 0.8461538461538461,
+              "emotion_punct_ratio": 0.15384615384615385,
+              "avg_sentence_length": 18.46153846153846,
+              "sentence_length_variance": 106.24852071005918,
+              "short_sentence_ratio": 0.07692307692307693,
+              "forbidden_word_count": 2
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.8529411764705882,
+              "emotion_punct_ratio": 0.14705882352941177,
+              "avg_sentence_length": 10.705882352941176,
+              "sentence_length_variance": 84.97231833910035,
+              "short_sentence_ratio": 0.6176470588235294,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "禁用词↓减少2个",
+            "evaluated_at": "2025-12-03T01:49:52.988018"
+          },
+          {
+            "sample_id": "sample_006",
+            "original_text": "叶辰盘膝坐在山巅，周身灵气如潮水般涌动。他已经在这里闭关三个月了，今天，终于到了突破的关键时刻。\n\n丹田之中，金色的灵力不断凝聚，形成一颗璀璨的金丹。叶辰感受着体内澎湃的力量，嘴角露出一丝笑意。\n\n\"...",
+            "rewritten_text": "山巅这石头，硌得屁股发麻。我盘腿坐着，都三个月了吧？记不清了。只觉得四周那气儿——不对，是灵气，黏糊糊地裹上来，推着挤着往毛孔里钻。\n\n肚子里头……丹田那儿，像揣了个烧红的铁疙瘩，烫得慌。它自个儿在那...",
+            "original_ai_score": 99,
+            "rewritten_ai_score": 0,
+            "score_reduction": 99,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 99
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 0.6875,
+              "emotion_punct_ratio": 0.3125,
+              "avg_sentence_length": 16.4375,
+              "sentence_length_variance": 41.99609375,
+              "short_sentence_ratio": 0.1875,
+              "forbidden_word_count": 2
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.5714285714285714,
+              "emotion_punct_ratio": 0.42857142857142855,
+              "avg_sentence_length": 12.892857142857142,
+              "sentence_length_variance": 79.52423469387756,
+              "short_sentence_ratio": 0.39285714285714285,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "句号占比↓减少12% | 情感标点↑增加12% | 禁用词↓减少2个",
+            "evaluated_at": "2025-12-03T01:50:09.884034"
+          },
+          {
+            "sample_id": "sample_005",
+            "original_text": "林晓站在舞台中央，聚光灯打在她身上，仿佛她就是这个世界的中心。\n\n台下坐满了观众，他们的目光都聚焦在这个年仅十八岁的少女身上。这是全国歌唱大赛的总决赛，而她，是最后一个出场的选手。\n\n音乐响起，林晓深...",
+            "rewritten_text": "聚光灯——真烫啊，烤得我脸皮发紧。光圈就那么死死扣在脚边，再往外，黑得什么也看不见。可我知道，他们都盯着呢。几千双眼睛？也许吧，黏在身上，沉甸甸的。\n\n十八岁。全国决赛。一个。\n\n前奏响了，像从很远的...",
+            "original_ai_score": 96,
+            "rewritten_ai_score": 0,
+            "score_reduction": 96,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 96
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 0.8461538461538461,
+              "emotion_punct_ratio": 0.15384615384615385,
+              "avg_sentence_length": 18.846153846153847,
+              "sentence_length_variance": 51.8224852071006,
+              "short_sentence_ratio": 0.07692307692307693,
+              "forbidden_word_count": 3
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.7,
+              "emotion_punct_ratio": 0.3,
+              "avg_sentence_length": 12.266666666666667,
+              "sentence_length_variance": 78.99555555555555,
+              "short_sentence_ratio": 0.43333333333333335,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "句号占比↓减少15% | 情感标点↑增加15% | 禁用词↓减少3个",
+            "evaluated_at": "2025-12-03T01:50:26.894470"
+          },
+          {
+            "sample_id": "sample_002",
+            "original_text": "剑光如虹，划破长空。萧云一剑刺出，剑意直冲云霄，浩然正气弥漫整个擂台。\n\n对面的黑衣人脸色大变，他没想到这个看似普通的少年，竟然隐藏着如此惊人的实力。他连忙后退，同时运转全身功力，试图抵挡这一剑。\n\n...",
+            "rewritten_text": "剑光——真他妈亮！晃得我眼睛都眯了一下。\n\n我这一剑刺出去，自己都觉得不对劲。胳膊轻飘飘的，可剑尖那股劲儿，硬是扯着往前冲，像要把天捅个窟窿。风刮在脸上，有点疼。\n\n对面那黑衣人……啧，他脸白了。真白...",
+            "original_ai_score": 99,
+            "rewritten_ai_score": 0,
+            "score_reduction": 99,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 99
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 0.9090909090909091,
+              "emotion_punct_ratio": 0.09090909090909091,
+              "avg_sentence_length": 22.363636363636363,
+              "sentence_length_variance": 115.86776859504131,
+              "short_sentence_ratio": 0.18181818181818182,
+              "forbidden_word_count": 1
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.8461538461538461,
+              "emotion_punct_ratio": 0.15384615384615385,
+              "avg_sentence_length": 14.576923076923077,
+              "sentence_length_variance": 60.705621301775146,
+              "short_sentence_ratio": 0.2692307692307692,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "句号占比↓减少6% | 情感标点↑增加6% | 句式变化↓更单一 | 禁用词↓减少1个",
+            "evaluated_at": "2025-12-03T01:50:44.087030"
+          },
+          {
+            "sample_id": "sample_003",
+            "original_text": "苏晴推开咖啡馆的门，一阵咖啡的香气扑面而来。她环顾四周，终于在角落的位置看到了等待已久的陈浩。\n\n\"等很久了吗？\"她微笑着坐下。\n\n\"不久，刚到。\"陈浩礼貌地回应，将菜单递给她。\n\n两人相对而坐，气氛...",
+            "rewritten_text": "推开门——咖啡味儿，热烘烘的，一下糊在脸上。我眯了眯眼，朝里扫。角落，靠窗，他果然在那儿；背挺得笔直，像在等什么重要人物。\n\n“等……很久了？”我扯出个笑，拉开椅子坐下。声音有点飘。\n\n“没，刚到。”...",
+            "original_ai_score": 99,
+            "rewritten_ai_score": 0,
+            "score_reduction": 99,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 99
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 0.9333333333333333,
+              "emotion_punct_ratio": 0.06666666666666667,
+              "avg_sentence_length": 18.4,
+              "sentence_length_variance": 109.70666666666666,
+              "short_sentence_ratio": 0.26666666666666666,
+              "forbidden_word_count": 1
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.8666666666666667,
+              "emotion_punct_ratio": 0.13333333333333333,
+              "avg_sentence_length": 15.266666666666667,
+              "sentence_length_variance": 123.39555555555556,
+              "short_sentence_ratio": 0.43333333333333335,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "句号占比↓减少7% | 情感标点↑增加7% | 禁用词↓减少1个",
+            "evaluated_at": "2025-12-03T01:51:03.339234"
+          }
+        ],
+        "iteration": 0,
+        "parent_version_id": null,
+        "mutation_strategy": null,
+        "analysis": "",
+        "created_at": "2025-12-03T01:49:37.149487",
+        "avg_composite_score": 24.595238095238095,
+        "avg_readability": 98.82352941176471,
+        "avg_writing": 41.81736694677871
+      }
+    ],
+    "approval_status": "pending",
+    "approved_version_id": null,
+    "started_at": "2025-12-03T01:49:37.119272",
+    "completed_at": "2025-12-03T01:53:37.745022",
+    "error_message": null
   }
 ]
