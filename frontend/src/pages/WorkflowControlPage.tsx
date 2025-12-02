@@ -25,6 +25,7 @@ import {
   DialogTitle,
   List,
   ListItem,
+  ListItemText,
   Tabs,
   Tab,
   MenuItem,
@@ -284,6 +285,7 @@ export default function WorkflowControlPage() {
   const [characterTab, setCharacterTab] = useState<'text' | 'structured'>('text')
   const [structuredCharacters, setStructuredCharacters] = useState<any[]>([])
   const [structuredCharactersLoading, setStructuredCharactersLoading] = useState(false)
+  const [characterGroupBy, setCharacterGroupBy] = useState<'none' | 'faction' | 'role' | 'tags'>('none')
 
   const [showCharacterEditDialog, setShowCharacterEditDialog] = useState(false)
   const [characterFormData, setCharacterFormData] = useState<any>({})
@@ -410,7 +412,22 @@ export default function WorkflowControlPage() {
     return ((item.depth || 1) - 1) * 24
   }
 
-  // 辅助函数：获取未创建的体系列表
+  // 人物分组计算
+  const computeGroupedCharacters = (): Record<string, any[]> => {
+    const group: Record<string, any[]> = {}
+    if (characterGroupBy === 'none') return group
+    structuredCharacters.forEach((ch: any) => {
+      let key = '未分组'
+      if (characterGroupBy === 'faction') key = ch.faction || '未分组'
+      else if (characterGroupBy === 'role') key = ch.role || '未分组'
+      else if (characterGroupBy === 'tags') key = (ch.tags && ch.tags[0]) || '未分组'
+      if (!group[key]) group[key] = []
+      group[key].push(ch)
+    })
+    return group
+  }
+
+  // 快速添加体系相关
   const getAvailableCategoriesToAdd = (): string[] => {
     const existingCategories = new Set(settingCollections.map((c: any) => c.category))
     return Object.keys(CATEGORY_NAME_MAP)
@@ -418,7 +435,6 @@ export default function WorkflowControlPage() {
       .sort()
   }
 
-  // 快速添加体系
   const handleQuickAddCategory = async (category: string) => {
     if (!projectId || !category) return
 
@@ -426,22 +442,16 @@ export default function WorkflowControlPage() {
     if (Number.isNaN(projectIdNum)) return
 
     try {
-      // 自动创建集合，使用中文名称作为集合名称
       const collectionName = getCategoryDisplayName(category)
       await apiClient.createSettingCollection(projectIdNum, {
         name: collectionName,
-        category: category,
+        category,
         description: `${collectionName}设定`,
       })
-
-      // 重新加载集合列表
       await loadSettingCollections(projectIdNum)
-
       setSnackbarMessage(`✅ 已添加「${collectionName}」`)
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
-
-      // 清空选择
       setSelectedCategoryToAdd('')
     } catch (error) {
       console.error('快速添加体系失败:', error)
@@ -4929,10 +4939,19 @@ export default function WorkflowControlPage() {
 
                   {/* 右侧：视图切换 + 设定项/人物分组 */}
                   <Box sx={{ flex: 1, minHeight: 320 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                       <Button size="small" onClick={() => { loadStructuredCharacters(); }}>
                         人物分组视图
                       </Button>
+                      <FormControl size="small" sx={{ minWidth: 140 }}>
+                        <InputLabel>分组</InputLabel>
+                        <Select value={characterGroupBy} label="分组" onChange={(e) => setCharacterGroupBy((e.target as any).value as any)}>
+                          <MenuItem value="none">不分组</MenuItem>
+                          <MenuItem value="faction">按势力</MenuItem>
+                          <MenuItem value="role">按角色</MenuItem>
+                          <MenuItem value="tags">按标签</MenuItem>
+                        </Select>
+                      </FormControl>
                     </Box>
                     {selectedCollectionId ? (
                       <>
@@ -5013,21 +5032,40 @@ export default function WorkflowControlPage() {
                               </ListItem>
                             ))}
                           </List>
+                        )}
 
                         {/* 人物分组视图（简单列表） */}
                         {structuredCharacters.length > 0 && (
                           <Box sx={{ mt: 2 }}>
                             <Typography variant="subtitle1" sx={{ mb: 1 }}>人物分组视图（来自人物卡）</Typography>
-                            <List dense sx={{ maxHeight: 240, overflow: 'auto' }}>
-                              {structuredCharacters.map((ch: any) => (
-                                <ListItem key={ch.id}>
-                                  <ListItemText
-                                    primary={ch.name || '未命名角色'}
-                                    secondary={(ch.tags && ch.tags.join('、')) || ch.role || ch.faction || ''}
-                                  />
-                                </ListItem>
-                              ))}
-                            </List>
+                            {characterGroupBy === 'none' ? (
+                              <List dense sx={{ maxHeight: 240, overflow: 'auto' }}>
+                                {structuredCharacters.map((ch: any) => (
+                                  <ListItem key={ch.id}>
+                                    <ListItemText
+                                      primary={ch.name || '未命名角色'}
+                                      secondary={(ch.tags && ch.tags.join('、')) || ch.role || ch.faction || ''}
+                                    />
+                                  </ListItem>
+                                ))}
+                              </List>
+                            ) : (
+                              Object.entries(computeGroupedCharacters()).map(([group, list]) => (
+                                <Box key={group} sx={{ mb: 1 }}>
+                                  <Typography variant="subtitle2" color="text.secondary">{group}</Typography>
+                                  <List dense>
+                                    {(list as any[]).map((ch: any) => (
+                                      <ListItem key={ch.id}>
+                                        <ListItemText
+                                          primary={ch.name || '未命名角色'}
+                                          secondary={(ch.tags && ch.tags.join('、')) || ch.role || ch.faction || ''}
+                                        />
+                                      </ListItem>
+                                    ))}
+                                  </List>
+                                </Box>
+                              ))
+                            )}
                           </Box>
                         )}
 

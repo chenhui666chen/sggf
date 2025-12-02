@@ -974,12 +974,33 @@ MAP_COLLECTION: Dict[str, Any] = {
     ],
 }
 
-# 🆕 自动为所有模板注入“地图体系”（若不存在）
+# 🆕 自动为所有模板注入“地图/势力/资源体系”（若不存在）
+FORCE_COLLECTION: Dict[str, Any] = {
+    "name": "势力体系",
+    "category": "force_system",
+    "description": "组织势力的统一规范。用于宗门/家族/王朝/商会/机构等信息，支持RAG检索与设定引用。",
+    "hierarchy_config": get_hierarchy_config_json("force_system"),
+}
+RESOURCE_COLLECTION: Dict[str, Any] = {
+    "name": "资源体系",
+    "category": "resource_system",
+    "description": "世界资源与材料的统一规范。用于灵草/矿石/妖兽材料/天材地宝等信息，支持RAG检索与设定引用。",
+    "hierarchy_config": get_hierarchy_config_json("resource_system"),
+}
 for _tpl_key, _tpl in SETTING_TEMPLATES.items():
     _cols = _tpl.get("collections", [])
+    # 地图
     _has_map = any((c.get("category") == "map_system" or c.get("name") == "地图体系") for c in _cols)
     if not _has_map:
         _cols.append(MAP_COLLECTION)
+    # 势力
+    _has_force = any(c.get("category") == "force_system" for c in _cols)
+    if not _has_force:
+        _cols.append(FORCE_COLLECTION)
+    # 资源
+    _has_res = any(c.get("category") == "resource_system" for c in _cols)
+    if not _has_res:
+        _cols.append(RESOURCE_COLLECTION)
 
 
 def get_templates_metadata() -> List[Dict[str, Any]]:
