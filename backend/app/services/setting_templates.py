@@ -217,7 +217,7 @@ HIERARCHY_DEFAULTS: Dict[str, Dict[str, Any]] = {
     },
     
     # ==================== 游戏系统体系 ====================
-    "game_skill_talent_system": {
+    "skill_talent_system": {
         "max_depth": 3,
         "levels": [
             {"depth": 1, "name": "技能天赋体系", "type": "system"},

@@ -128,7 +128,6 @@ const CATEGORY_NAME_MAP: Record<string, string> = {
   mutation_infection_aberration_system: '变异感染体系',
   
   // 游戏系统体系
-  game_skill_talent_system: '技能天赋体系',
   skill_talent_system: '技能天赋体系',
   
   // 角色体系
