@@ -120,31 +120,6 @@ class ApiClient {
     return this.client.delete(`/api/v1/chapters/${chapterId}`)
   }
 
-  // 知识库API
-  getKnowledgeBase(projectId: number) {
-    return this.client.get(`/api/v1/projects/${projectId}/knowledge-base`)
-  }
-
-  addWorldSetting(projectId: number, data: any) {
-    return this.client.post(`/api/v1/projects/${projectId}/world-settings`, data)
-  }
-
-  addCharacter(projectId: number, data: any) {
-    return this.client.post(`/api/v1/projects/${projectId}/characters`, data)
-  }
-
-  addPlotOutline(projectId: number, data: any) {
-    return this.client.post(`/api/v1/projects/${projectId}/plot-outline`, data)
-  }
-
-  updateKnowledgeBase(projectId: number, kbId: number, data: any) {
-    return this.client.put(`/api/v1/projects/${projectId}/knowledge-base/${kbId}`, data)
-  }
-
-  deleteKnowledgeBase(projectId: number, kbId: number) {
-    return this.client.delete(`/api/v1/projects/${projectId}/knowledge-base/${kbId}`)
-  }
-
   // 设定管理API
   getSettingCollections(projectId: number) {
     return this.client.get(`/api/v1/projects/${projectId}/setting-collections`)
@@ -174,6 +149,10 @@ class ApiClient {
     return this.client.put(`/api/v1/setting-items/${itemId}`, data)
   }
 
+  moveSettingItem(itemId: number, targetCollectionId: number) {
+    return this.client.post(`/api/v1/setting-items/${itemId}/move`, { target_collection_id: targetCollectionId })
+  }
+
   deleteSettingItem(itemId: number) {
     return this.client.delete(`/api/v1/setting-items/${itemId}`)
   }
@@ -181,6 +160,44 @@ class ApiClient {
   reorderSettingItems(collectionId: number, items: { id: number; order: number }[]) {
     return this.client.patch(`/api/v1/setting-collections/${collectionId}/items/reorder`, {
       items,
+    })
+  }
+
+  getSettingItemsByPath(collectionId: number, prefix?: string, maxDepth?: number) {
+    const params: any = {}
+    if (prefix) params.prefix = prefix
+    if (maxDepth != null) params.max_depth = maxDepth
+    return this.client.get(`/api/v1/setting-collections/${collectionId}/items/by-path`, { params })
+  }
+
+  getSettingItemsTree(collectionId: number) {
+    return this.client.get(`/api/v1/setting-collections/${collectionId}/items/tree`)
+  }
+
+  getGraphEdgesForItem(itemId: number, direction: 'both' | 'out' | 'in' = 'both') {
+    return this.client.get(`/api/v1/setting-items/${itemId}/graph-edges`, { params: { direction } })
+  }
+
+  createGraphEdge(payload: { source_item_id: number; target_item_id: number; relation_type: string; confidence?: number; auto_extracted?: boolean }) {
+    return this.client.post(`/api/v1/graph-edges`, payload)
+  }
+
+  deleteGraphEdge(edgeId: number) {
+    return this.client.delete(`/api/v1/graph-edges/${edgeId}`)
+  }
+
+  bulkMoveSettingItems(collectionId: number, payload: { item_ids: number[]; target_collection_id?: number; new_parent_path?: string }) {
+    return this.client.post(`/api/v1/setting-collections/${collectionId}/items/bulk-move`, payload)
+  }
+
+  setParentForItem(itemId: number, newParentPath: string) {
+    return this.client.post(`/api/v1/setting-items/${itemId}/set-parent`, { new_parent_path: newParentPath })
+  }
+
+  reorderUnderParent(collectionId: number, parentPath: string, orderedIds: number[]) {
+    return this.client.patch(`/api/v1/setting-collections/${collectionId}/items/reorder-under-parent`, {
+      parent_path: parentPath,
+      ordered_ids: orderedIds,
     })
   }
 
@@ -195,6 +212,19 @@ class ApiClient {
 
   getSettingsSummary(projectId: number) {
     return this.client.get(`/api/v1/projects/${projectId}/settings-summary`)
+  }
+
+  // 设定自动合并与冲突检测
+  autoMergeSettings(projectId: number) {
+    return this.client.post(`/api/v1/projects/${projectId}/auto-merge-settings`)
+  }
+
+  detectConflicts(projectId: number) {
+    return this.client.get(`/api/v1/projects/${projectId}/detect-conflicts`)
+  }
+
+  rollbackSettingItem(itemId: number, snapshotIndex: number) {
+    return this.client.post(`/api/v1/setting-items/${itemId}/rollback`, { snapshot_index: snapshotIndex })
   }
 
   // 评审API

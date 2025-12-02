@@ -22,6 +22,9 @@ import VisibilityIcon from '@mui/icons-material/Visibility'
 import ThumbUpIcon from '@mui/icons-material/ThumbUp'
 import DeleteIcon from '@mui/icons-material/Delete'
 import CleaningServicesIcon from '@mui/icons-material/CleaningServices'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import { apiClient } from '@/services/api'
 
 interface EvolutionStatus {
@@ -76,6 +79,18 @@ interface PromptDetail {
   created_at: string
 }
 
+interface ApprovedPrompt {
+  version_id: string
+  evolution_id: string
+  prompt_text: string
+  avg_ai_score: number
+  avg_composite_score?: number
+  avg_readability?: number
+  avg_writing?: number
+  approved_at: string
+  status: string
+}
+
 export default function PromptEvolutionPage() {
   const navigate = useNavigate()
   const [status, setStatus] = useState<EvolutionStatus | null>(null)
@@ -85,13 +100,15 @@ export default function PromptEvolutionPage() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
   
-  const [targetScore, setTargetScore] = useState(30)
   const [maxIterations, setMaxIterations] = useState(10)
   const [samplesPerIteration, setSamplesPerIteration] = useState(3)
   
   const [startDialogOpen, setStartDialogOpen] = useState(false)
   const [detailDialogOpen, setDetailDialogOpen] = useState(false)
   const [promptDialogOpen, setPromptDialogOpen] = useState(false)
+  const [approvedDialogOpen, setApprovedDialogOpen] = useState(false)
+  const [approvedPrompts, setApprovedPrompts] = useState<ApprovedPrompt[]>([])
+  const [expandedPromptId, setExpandedPromptId] = useState<string | null>(null)
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -104,6 +121,13 @@ export default function PromptEvolutionPage() {
     try {
       const res = await apiClient.client.get('/api/v1/prompt-evolution/history')
       setHistories(res.data)
+    } catch (e) { console.error(e) }
+  }, [])
+
+  const fetchApprovedPrompts = useCallback(async () => {
+    try {
+      const res = await apiClient.client.get('/api/v1/prompt-evolution/approved')
+      setApprovedPrompts(res.data.approved_prompts || [])
     } catch (e) { console.error(e) }
   }, [])
 
@@ -122,7 +146,7 @@ export default function PromptEvolutionPage() {
     setLoading(true)
     try {
       await apiClient.client.post('/api/v1/prompt-evolution/start', {
-        target_score: targetScore,
+        target_score: 0,  // 得分越低越好，默认目标为0
         max_iterations: maxIterations,
         samples_per_iteration: samplesPerIteration,
       })
@@ -166,15 +190,23 @@ export default function PromptEvolutionPage() {
     } finally { setLoading(false) }
   }
 
-  const handleApprove = async (evolutionId: string, versionId: string) => {
+  const handleToggleApproval = async (evolutionId: string, versionId: string, isCurrentlyApproved: boolean) => {
     setLoading(true)
     try {
-      await apiClient.client.post('/api/v1/prompt-evolution/approve', { evolution_id: evolutionId, version_id: versionId })
-      setMessage({ type: 'success', text: '提示词已批准！' })
+      if (isCurrentlyApproved) {
+        // 取消批准
+        await apiClient.client.post('/api/v1/prompt-evolution/revoke', { evolution_id: evolutionId, version_id: versionId })
+        setMessage({ type: 'info', text: '已取消批准' })
+      } else {
+        // 批准
+        await apiClient.client.post('/api/v1/prompt-evolution/approve', { evolution_id: evolutionId, version_id: versionId })
+        setMessage({ type: 'success', text: '提示词已批准！' })
+      }
+      // 刷新详情数据
+      await handleViewDetail(evolutionId)
       fetchHistories()
-      setDetailDialogOpen(false)
     } catch (e: any) {
-      setMessage({ type: 'error', text: e.response?.data?.detail || '批准失败' })
+      setMessage({ type: 'error', text: e.response?.data?.detail || '操作失败' })
     } finally { setLoading(false) }
   }
 
@@ -202,6 +234,23 @@ export default function PromptEvolutionPage() {
       fetchHistories()
     } catch (e: any) {
       setMessage({ type: 'error', text: e.response?.data?.detail || '清理失败' })
+    }
+  }
+
+  const handleOpenApprovedDialog = async () => {
+    await fetchApprovedPrompts()
+    setApprovedDialogOpen(true)
+  }
+
+  const handleRemoveApproved = async (versionId: string) => {
+    if (!confirm('确定要从已批准列表中移除这个提示词吗？')) return
+    try {
+      await apiClient.client.delete(`/api/v1/prompt-evolution/approved/${versionId}`)
+      setMessage({ type: 'success', text: '已从批准列表中移除' })
+      fetchApprovedPrompts()
+      fetchHistories()
+    } catch (e: any) {
+      setMessage({ type: 'error', text: e.response?.data?.detail || '移除失败' })
     }
   }
 
@@ -264,6 +313,16 @@ export default function PromptEvolutionPage() {
               ) : (
                 <Button variant="contained" color="primary" fullWidth startIcon={<PlayArrowIcon />} onClick={() => setStartDialogOpen(true)}>启动进化优化</Button>
               )}
+              <Button
+                variant="outlined"
+                color="success"
+                fullWidth
+                startIcon={<CheckCircleIcon />}
+                onClick={handleOpenApprovedDialog}
+                sx={{ mt: 2 }}
+              >
+                已批准提示词
+              </Button>
             </CardContent>
           </Card>
         </Grid>
@@ -287,7 +346,8 @@ export default function PromptEvolutionPage() {
                       <TableRow>
                         <TableCell>ID</TableCell>
                         <TableCell>状态</TableCell>
-                        <TableCell>最佳得分</TableCell>
+                        <TableCell>综合评分</TableCell>
+                        <TableCell>AI分数</TableCell>
                         <TableCell>时间</TableCell>
                         <TableCell>操作</TableCell>
                       </TableRow>
@@ -298,6 +358,7 @@ export default function PromptEvolutionPage() {
                           <TableCell><Typography variant="body2" sx={{ fontFamily: 'monospace' }}>{h.evolution_id?.substring(0, 8)}...</Typography></TableCell>
                           <TableCell><Chip label={h.status} color={h.status === 'completed' ? 'success' : h.status === 'running' ? 'primary' : 'error'} size="small" /></TableCell>
                           <TableCell>{h.best_score != null ? <Typography sx={{ color: getScoreColor(h.best_score), fontWeight: 'bold' }}>{h.best_score.toFixed(1)}</Typography> : '-'}</TableCell>
+                          <TableCell>{h.ai_score != null ? <Typography sx={{ color: getScoreColor(h.ai_score), fontWeight: 'bold' }}>{h.ai_score.toFixed(1)}</Typography> : '-'}</TableCell>
                           <TableCell><Typography variant="caption">{new Date(h.started_at).toLocaleDateString()}</Typography></TableCell>
                           <TableCell>
                             <Tooltip title="查看详情"><IconButton size="small" onClick={() => handleViewDetail(h.evolution_id)}><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
@@ -319,9 +380,7 @@ export default function PromptEvolutionPage() {
         <DialogTitle>配置进化参数</DialogTitle>
         <DialogContent>
           <Box sx={{ mt: 2 }}>
-            <Typography gutterBottom>目标AI得分: {targetScore}</Typography>
-            <Slider value={targetScore} onChange={(_, v) => setTargetScore(v as number)} min={10} max={50} step={5} marks valueLabelDisplay="auto" />
-            <Typography gutterBottom sx={{ mt: 2 }}>最大迭代次数: {maxIterations}</Typography>
+            <Typography gutterBottom>最大迭代次数: {maxIterations}</Typography>
             <Slider value={maxIterations} onChange={(_, v) => setMaxIterations(v as number)} min={3} max={20} step={1} marks valueLabelDisplay="auto" />
             <Typography gutterBottom sx={{ mt: 2 }}>每次测试样本数: {samplesPerIteration}</Typography>
             <Slider value={samplesPerIteration} onChange={(_, v) => setSamplesPerIteration(v as number)} min={1} max={5} step={1} marks valueLabelDisplay="auto" />
@@ -354,18 +413,32 @@ export default function PromptEvolutionPage() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {selectedDetail.best_versions.map((v) => (
-                      <TableRow key={v.version_id}>
-                        <TableCell>#{v.iteration}</TableCell>
-                        <TableCell><Typography sx={{ color: getScoreColor(v.avg_ai_score), fontWeight: 'bold' }}>{v.avg_ai_score.toFixed(1)}</Typography></TableCell>
-                        <TableCell>{v.avg_score_reduction.toFixed(1)}</TableCell>
-                        <TableCell><Typography variant="caption" sx={{ maxWidth: 200, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.analysis}</Typography></TableCell>
-                        <TableCell>
-                          <Tooltip title="查看完整提示词"><IconButton size="small" onClick={() => handleViewPrompt(selectedDetail.evolution_id, v.version_id)}><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
-                          <Tooltip title="批准此版本"><IconButton size="small" color="success" onClick={() => handleApprove(selectedDetail.evolution_id, v.version_id)}><ThumbUpIcon fontSize="small" /></IconButton></Tooltip>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {selectedDetail.best_versions.map((v) => {
+                      const isApproved = selectedDetail.approved_version_id === v.version_id
+                      return (
+                        <TableRow key={v.version_id} sx={{ bgcolor: isApproved ? 'success.light' : 'inherit' }}>
+                          <TableCell>#{v.iteration}</TableCell>
+                          <TableCell><Typography sx={{ color: getScoreColor(v.avg_ai_score), fontWeight: 'bold' }}>{v.avg_ai_score.toFixed(1)}</Typography></TableCell>
+                          <TableCell>{v.avg_score_reduction.toFixed(1)}</TableCell>
+                          <TableCell><Typography variant="caption" sx={{ maxWidth: 200, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.analysis}</Typography></TableCell>
+                          <TableCell>
+                            <Tooltip title="查看完整提示词"><IconButton size="small" onClick={() => handleViewPrompt(selectedDetail.evolution_id, v.version_id)}><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
+                            <Tooltip title={isApproved ? "取消批准" : "批准此版本"}>
+                              <IconButton
+                                size="small"
+                                onClick={() => handleToggleApproval(selectedDetail.evolution_id, v.version_id, isApproved)}
+                                sx={{
+                                  color: isApproved ? 'success.main' : 'grey.400',
+                                  '&:hover': { color: isApproved ? 'warning.main' : 'success.main' }
+                                }}
+                              >
+                                <ThumbUpIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
                   </TableBody>
                 </Table>
               </TableContainer>
@@ -388,8 +461,8 @@ export default function PromptEvolutionPage() {
                 <Typography variant="h6">提示词内容</Typography>
                 <Button startIcon={<ContentCopyIcon />} onClick={() => copyToClipboard(selectedPrompt.prompt_text)}>复制</Button>
               </Box>
-              <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.900', maxHeight: 300, overflow: 'auto' }}>
-                <Typography component="pre" sx={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 12 }}>{selectedPrompt.prompt_text}</Typography>
+              <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50', maxHeight: 300, overflow: 'auto', border: '1px solid', borderColor: 'grey.300' }}>
+                <Typography component="pre" sx={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 12, color: 'grey.800' }}>{selectedPrompt.prompt_text}</Typography>
               </Paper>
               <Typography variant="h6" sx={{ mt: 3, mb: 2 }}>改写效果示例</Typography>
               {selectedPrompt.evaluation_results.map((r, i) => (
@@ -415,6 +488,97 @@ export default function PromptEvolutionPage() {
           )}
         </DialogContent>
         <DialogActions><Button onClick={() => setPromptDialogOpen(false)}>关闭</Button></DialogActions>
+      </Dialog>
+
+      {/* 已批准提示词管理对话框 */}
+      <Dialog open={approvedDialogOpen} onClose={() => setApprovedDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <CheckCircleIcon color="success" />
+            已批准提示词管理
+            <Chip label={`共 ${approvedPrompts.length} 个`} size="small" sx={{ ml: 1 }} />
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          {approvedPrompts.length === 0 ? (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Typography color="text.secondary">暂无已批准的提示词</Typography>
+              <Typography variant="caption" color="text.secondary">在进化详情中批准提示词后，它们会显示在这里</Typography>
+            </Box>
+          ) : (
+            <Box sx={{ mt: 1 }}>
+              {approvedPrompts.map((prompt, index) => (
+                <Paper key={prompt.version_id} variant="outlined" sx={{ p: 2, mb: 2, bgcolor: index === approvedPrompts.length - 1 ? 'success.light' : 'inherit' }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                    <Box>
+                      <Typography variant="subtitle2" sx={{ fontFamily: 'monospace' }}>
+                        版本: {prompt.version_id}
+                        {index === approvedPrompts.length - 1 && <Chip label="最新" size="small" color="success" sx={{ ml: 1 }} />}
+                      </Typography>
+                      <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
+                        <Chip
+                          label={`AI分数: ${prompt.avg_ai_score?.toFixed(1) ?? '-'}`}
+                          size="small"
+                          color="primary"
+                          variant="outlined"
+                        />
+                        <Chip
+                          label={`综合评分: ${
+                            prompt.avg_composite_score != null && prompt.avg_composite_score < 100
+                              ? prompt.avg_composite_score.toFixed(1)
+                              : (prompt.avg_ai_score?.toFixed(1) ?? '-')
+                          }`}
+                          size="small"
+                          color="secondary"
+                          variant="outlined"
+                          title={prompt.avg_composite_score != null && prompt.avg_composite_score < 100
+                            ? '多维度综合评分'
+                            : '综合评分使用AI分数（默认）'}
+                        />
+                        <Chip label={`批准: ${new Date(prompt.approved_at).toLocaleString()}`} size="small" variant="outlined" />
+                      </Box>
+                    </Box>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Tooltip title="复制提示词">
+                        <IconButton size="small" onClick={() => copyToClipboard(prompt.prompt_text)}>
+                          <ContentCopyIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="从批准列表中移除">
+                        <IconButton size="small" color="error" onClick={() => handleRemoveApproved(prompt.version_id)}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                  </Box>
+                  <Box sx={{ mt: 1 }}>
+                    <Button
+                      size="small"
+                      startIcon={expandedPromptId === prompt.version_id ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                      onClick={() => setExpandedPromptId(expandedPromptId === prompt.version_id ? null : prompt.version_id)}
+                    >
+                      {expandedPromptId === prompt.version_id ? '收起内容' : '查看完整内容'}
+                    </Button>
+                    {expandedPromptId === prompt.version_id ? (
+                      <Paper variant="outlined" sx={{ p: 2, mt: 1, bgcolor: 'grey.50', maxHeight: 300, overflow: 'auto' }}>
+                        <Typography component="pre" sx={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 11 }}>
+                          {prompt.prompt_text}
+                        </Typography>
+                      </Paper>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                        {prompt.prompt_text.substring(0, 100)}...
+                      </Typography>
+                    )}
+                  </Box>
+                </Paper>
+              ))}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setApprovedDialogOpen(false)}>关闭</Button>
+        </DialogActions>
       </Dialog>
     </Container>
   )

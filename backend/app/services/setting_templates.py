@@ -6,6 +6,253 @@ from sqlalchemy.orm import Session
 
 from app.models.setting import SettingCollection, SettingItem
 
+# 🆕 层级模板默认配置（按体系类别）
+# 说明：
+# - max_depth: 最大深度
+# - levels: 各层级定义
+#   - depth: 层级深度（1-based）
+#   - name: 层级名称
+#   - type: 节点类型（system=体系根/category=分类/list=列表/detail=详情）
+#   - leaf: 是否为叶子节点
+#   - examples: 示例（用于UI提示）
+HIERARCHY_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    # ==================== 地理与世界观体系 ====================
+    "map_system": {
+        "max_depth": 4,
+        "levels": [
+            {"depth": 1, "name": "地图体系", "type": "system"},
+            {"depth": 2, "name": "地域分类", "type": "category", "examples": ["大陆版图", "区域地形", "城镇聚落", "秘境禁地", "交通网络"]},
+            {"depth": 3, "name": "地点列表", "type": "list"},
+            {"depth": 4, "name": "地点详情", "type": "detail", "leaf": True},
+        ],
+    },
+    
+    # ==================== 修仙/玄幻体系 ====================
+    "cultivation_realm_system": {
+        "max_depth": 2,
+        "levels": [
+            {"depth": 1, "name": "修仙境界体系", "type": "system"},
+            {"depth": 2, "name": "境界详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "technique_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "功法体系", "type": "system"},
+            {"depth": 2, "name": "功法分类", "type": "category", "examples": ["心法", "剑法", "拳法", "身法", "刀法", "掌法"]},
+            {"depth": 3, "name": "功法详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "pill_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "丹药体系", "type": "system"},
+            {"depth": 2, "name": "丹药分类", "type": "category", "examples": ["突破丹药", "恢复丹药", "辅助丹药", "特殊丹药"]},
+            {"depth": 3, "name": "丹药详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "formation_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "阵法体系", "type": "system"},
+            {"depth": 2, "name": "阵法分类", "type": "category", "examples": ["攻击阵", "防御阵", "困敌阵", "辅助阵", "传送阵"]},
+            {"depth": 3, "name": "阵法详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "talisman_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "符箓体系", "type": "system"},
+            {"depth": 2, "name": "符箓分类", "type": "category", "examples": ["攻击符", "防御符", "遁逃符", "辅助符"]},
+            {"depth": 3, "name": "符箓详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "weapon_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "武器法宝体系", "type": "system"},
+            {"depth": 2, "name": "装备分类", "type": "category", "examples": ["武器", "护甲", "法器", "灵器", "法宝", "辅助器物"]},
+            {"depth": 3, "name": "装备详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "resource_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "资源体系", "type": "system"},
+            {"depth": 2, "name": "资源分类", "type": "category", "examples": ["灵草灵药", "矿石材料", "妖兽材料", "炼丹材料", "炼器材料", "天材地宝"]},
+            {"depth": 3, "name": "资源详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "force_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "势力体系", "type": "system"},
+            {"depth": 2, "name": "势力分类", "type": "category", "examples": ["宗门", "家族", "王朝", "商会", "散修联盟"]},
+            {"depth": 3, "name": "势力详情", "type": "detail", "leaf": True},
+        ],
+    },
+    
+    # ==================== 都市异能体系 ====================
+    "ability_realm_system": {
+        "max_depth": 2,
+        "levels": [
+            {"depth": 1, "name": "异能境界体系", "type": "system"},
+            {"depth": 2, "name": "境界详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "ability_awakening_growth_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "异能体系", "type": "system"},
+            {"depth": 2, "name": "能力分类", "type": "category", "examples": ["等级划分", "能力类型", "成长路径"]},
+            {"depth": 3, "name": "能力详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "hidden_organization_force_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "组织势力体系", "type": "system"},
+            {"depth": 2, "name": "组织分类", "type": "category", "examples": ["官方机构", "地下组织", "古老家族", "佣兵团体"]},
+            {"depth": 3, "name": "组织详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "network_social_relationship_system": {
+        "max_depth": 2,
+        "levels": [
+            {"depth": 1, "name": "人脉关系体系", "type": "system"},
+            {"depth": 2, "name": "关系详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "special_artifact_relic_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "道具遗物体系", "type": "system"},
+            {"depth": 2, "name": "道具分类", "type": "category", "examples": ["觉醒结晶", "封印器具", "上古遗物", "异能武器", "防护装置"]},
+            {"depth": 3, "name": "道具详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "wealth_business_empire_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "财富商业体系", "type": "system"},
+            {"depth": 2, "name": "商业分类", "type": "category", "examples": ["交易所", "家族企业", "地下市场", "佣兵平台"]},
+            {"depth": 3, "name": "商业详情", "type": "detail", "leaf": True},
+        ],
+    },
+    
+    # ==================== 西幻/魔法体系 ====================
+    "magic_realm_system": {
+        "max_depth": 2,
+        "levels": [
+            {"depth": 1, "name": "魔法境界体系", "type": "system"},
+            {"depth": 2, "name": "境界详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "magic_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "魔法体系", "type": "system"},
+            {"depth": 2, "name": "魔法分类", "type": "category", "examples": ["元素魔法", "治疗魔法", "召唤魔法", "死灵魔法", "时空魔法"]},
+            {"depth": 3, "name": "魔法详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "race_bloodline_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "种族血脉体系", "type": "system"},
+            {"depth": 2, "name": "种族分类", "type": "category", "examples": ["常见种族", "稀有种族", "血脉传承"]},
+            {"depth": 3, "name": "种族详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "profession_class_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "职业体系", "type": "system"},
+            {"depth": 2, "name": "职业分类", "type": "category", "examples": ["战士系", "法师系", "牧师系", "刺客系", "游侠系"]},
+            {"depth": 3, "name": "职业详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "martial_realm_system": {
+        "max_depth": 2,
+        "levels": [
+            {"depth": 1, "name": "武道境界体系", "type": "system"},
+            {"depth": 2, "name": "境界详情", "type": "detail", "leaf": True},
+        ],
+    },
+    
+    # ==================== 科幻体系 ====================
+    "interstellar_travel_exploration_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "星际航行体系", "type": "system"},
+            {"depth": 2, "name": "技术分类", "type": "category", "examples": ["推进系统", "导航系统", "探测设备"]},
+            {"depth": 3, "name": "技术详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "ai_robot_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "AI机器人体系", "type": "system"},
+            {"depth": 2, "name": "类型分类", "type": "category", "examples": ["人工智能", "仿生机器人", "战斗机甲"]},
+            {"depth": 3, "name": "类型详情", "type": "detail", "leaf": True},
+        ],
+    },
+    
+    # ==================== 末世废土体系 ====================
+    "survivor_settlement_order_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "聚落秩序体系", "type": "system"},
+            {"depth": 2, "name": "聚落分类", "type": "category", "examples": ["营地据点", "交易中心", "军事势力", "科技避难所"]},
+            {"depth": 3, "name": "聚落详情", "type": "detail", "leaf": True},
+        ],
+    },
+    "mutation_infection_aberration_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "变异感染体系", "type": "system"},
+            {"depth": 2, "name": "变异分类", "type": "category", "examples": ["辐射变异", "生化感染", "超自然畸变"]},
+            {"depth": 3, "name": "变异详情", "type": "detail", "leaf": True},
+        ],
+    },
+    
+    # ==================== 游戏系统体系 ====================
+    "game_skill_talent_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "技能天赋体系", "type": "system"},
+            {"depth": 2, "name": "技能分类", "type": "category", "examples": ["主动技能", "被动技能", "职业技能", "终极技能"]},
+            {"depth": 3, "name": "技能详情", "type": "detail", "leaf": True},
+        ],
+    },
+    
+    # ==================== 角色体系 ====================
+    "character_system": {
+        "max_depth": 3,
+        "levels": [
+            {"depth": 1, "name": "角色体系", "type": "system"},
+            {"depth": 2, "name": "角色分类", "type": "category", "examples": ["主角团", "配角", "反派", "NPC"]},
+            {"depth": 3, "name": "角色详情", "type": "detail", "leaf": True},
+        ],
+    },
+    
+    # ==================== 候选集合（特殊体系）====================
+    "candidate": {
+        "max_depth": 2,
+        "levels": [
+            {"depth": 1, "name": "候选集合", "type": "system"},
+            {"depth": 2, "name": "候选项详情", "type": "detail", "leaf": True},
+        ],
+    },
+}
+
+
+def get_hierarchy_config_json(category: str) -> str:
+    """返回指定体系类别的默认层级模板JSON字符串"""
+    cfg = HIERARCHY_DEFAULTS.get(category) or {"max_depth": 2, "levels": [{"depth": 1, "name": "默认体系", "type": "system"}, {"depth": 2, "name": "详情", "type": "detail", "leaf": True}]}
+    return json.dumps(cfg, ensure_ascii=False)
+
+
 # 简单内置模板示例：可按需继续扩展
 SETTING_TEMPLATES: Dict[str, Dict[str, Any]] = {
     "xuanhuan_basic": {
@@ -14,13 +261,31 @@ SETTING_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "description": "适用于凡人修真、大陆争霸类玄幻体系。包含基础境界和功法、丹药、阵法等基础体系。",
         "collections": [
             {
-                "name": "境界体系",
-                "category": "cultivation_system",
+                "name": "修仙境界体系",
+                "category": "cultivation_realm_system",
                 "description": "从凡人到飞升的大致修行阶段。",
                 "items": [
-                    {"name": "炼气期", "level": 1, "code": "L1", "tags": ["入门", "凡人"], "content": "初入修行，通过吐纳炼化灵气强化肉身和经脉。"},
-                    {"name": "筑基期", "level": 2, "code": "L2", "tags": ["基础稳固"], "content": "筑下道基，灵气在体内形成稳定循环，为后续境界奠定根基。"},
-                    {"name": "金丹期", "level": 3, "code": "L3", "tags": ["质变"], "content": "丹成一颗，神识初开，战力与寿元迎来飞跃。"},
+                    {"name": "炼气期", "level": 1, "code": "REALM_1", "tags": ["入门", "凡人"], "content": "初入修行，通过吐纳炼化灵气强化肉身和经脉。寿元50-100年。"},
+                    {"name": "筑基期", "level": 2, "code": "REALM_2", "tags": ["基础稳固"], "content": "筑下道基，灵气在体内形成稳定循环，为后续境界奠定根基。寿元200-300年。"},
+                    {"name": "金丹期", "level": 3, "code": "REALM_3", "tags": ["质变"], "content": "丹成一颗，神识初开，战力与寿元迎来飞跃。寿元500-800年。"},
+                    {"name": "元婴期", "level": 4, "code": "REALM_4", "tags": ["元婴"], "content": "金丹破碎，元婴诞生，神识化形，可离体存活。寿元1000-1500年。"},
+                    {"name": "化神期", "level": 5, "code": "REALM_5", "tags": ["中阶"], "content": "元婴与神识融合，化为元神，脱去凡胎，初步超脱。寿元2000-3000年。"},
+                    {"name": "渡劫期", "level": 6, "code": "REALM_6", "tags": ["天劫"], "content": "需经历天劫考验，每九百年一劫，渡过则寿元大增，失败则飞灰湮灭。寿元4000-5000年。"},
+                    {"name": "大乘期", "level": 7, "code": "REALM_7", "tags": ["飞升前"], "content": "渡过九重天劫，达到凡人修仙的极致，随时可飞升仙界。寿元5000-10000年。"},
+                    {"name": "仙人", "level": 8, "code": "REALM_8", "tags": ["飞升", "仙界"], "content": "飞升仙界，超脱凡俗，成就真仙，寿元漫长，有机会证道永生。"},
+                ],
+            },
+            {
+                "name": "武道境界体系",
+                "category": "martial_realm_system",
+                "description": "武道修炼的境界划分与力量成长体系。",
+                "items": [
+                    {"name": "后天武者", "level": 1, "code": "REALM_POSTNATAL", "tags": ["入门", "凡人"], "content": "初入武道，通过锻炼身体和修炼内功，打通部分经脉。力量、速度和耐力都超越常人。"},
+                    {"name": "先天武者", "level": 2, "code": "REALM_INNATE", "tags": ["先天"], "content": "打通任督二脉，内力生生不息。可以将内力外放，形成护体罡气。是江湖中真正的高手。"},
+                    {"name": "宗师", "level": 3, "code": "REALM_GRANDMASTER", "tags": ["宗师"], "content": "武道造诣达到极高境界，能够领悟武道真意。一招一式都蕴含天地之力，是一方霸主。"},
+                    {"name": "大宗师", "level": 4, "code": "REALM_SUPREME_MASTER", "tags": ["大宗师"], "content": "对武道有了更深的理解，能够创立自己的武学流派。武道真意凝实，可以影响周围天地元气。"},
+                    {"name": "武圣", "level": 5, "code": "REALM_MARTIAL_SAINT", "tags": ["武圣", "传奇"], "content": "武道达到圣境，超凡脱俗。一拳可碎山岳，一掌可断江河。寿元大增，可活数百年。整个大陆也只有寥寥数人。"},
+                    {"name": "武神", "level": 6, "code": "REALM_MARTIAL_GOD", "tags": ["武神", "神话"], "content": "武道的极致，达到了凡人武道的巅峰。举手投足间天地变色，可以飞天遁地，几近神明。传说中的存在，世间罕有。"},
                 ],
             },
             {
@@ -117,6 +382,21 @@ SETTING_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "name": "都市异能基础模板",
         "description": "专注于现代背景下的超自然力量与社会结构，适用于都市修真、现代异能等题材。",
         "collections": [
+            {
+                "name": "异能境界体系",
+                "category": "ability_realm_system",
+                "description": "异能者的等级划分与成长路径。",
+                "items": [
+                    {"name": "觉醒者", "level": 1, "code": "REALM_AWAKENED", "tags": ["入门", "F级"], "content": "刚刚觉醒异能的新人，能力不稳定，仅能在特定情绪下触发。需要接受基础训练才能自主控制能力。"},
+                    {"name": "E级", "level": 2, "code": "REALM_E", "tags": ["初级"], "content": "能够基本控制能力，但还需要努力集中才能使用。在异能者中处于入门阶段。"},
+                    {"name": "D级", "level": 3, "code": "REALM_D", "tags": ["进阶"], "content": "能够稳定运用能力，对自身异能有基本理解。可完成普通任务，在异能者社会中占据多数。"},
+                    {"name": "C级", "level": 4, "code": "REALM_C", "tags": ["精英"], "content": "已经熟练掌握能力，能在战斗中灵活运用。是各大势力的核心战力。"},
+                    {"name": "B级", "level": 5, "code": "REALM_B", "tags": ["高阶"], "content": "将异能修炼至精深，能够开发出独特的能力应用方式。是各大势力争抢的顶尖战力。"},
+                    {"name": "A级", "level": 6, "code": "REALM_A", "tags": ["大师"], "content": "能力达到了一个极高的境界，可以单独执行高危任务。在一个城市中都能拥有显赫地位。"},
+                    {"name": "S级", "level": 7, "code": "REALM_S", "tags": ["超凡"], "content": "突破人类极限的存在，单人即可影响一座城市的格局。全球仅有数十位，各国均有专门档案追踪。"},
+                    {"name": "SSS级", "level": 8, "code": "REALM_SSS", "tags": ["神话"], "content": "传说中的级别，超越了普通异能者的认知。单人即是一支军队，可以改变一个国家的命运。全球只有少数几人。"},
+                ],
+            },
             {
                 "name": "异能觉醒与成长体系",
                 "category": "ability_awakening_growth_system",
@@ -283,6 +563,20 @@ SETTING_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "description": "涵盖西方奇幻、剑与魔法等经典设定，适用于魔法世界、史诗冒险等题材。",
         "collections": [
             {
+                "name": "魔法境界体系",
+                "category": "magic_realm_system",
+                "description": "魔法师的等级划分与力量成长体系。",
+                "items": [
+                    {"name": "学徒", "level": 1, "code": "REALM_APPRENTICE", "tags": ["入门", "初学"], "content": "刚开始学习魔法的新手，能够施展简单的基础魔法。需要在导师指导下学习魔法理论和冥想技巧。"},
+                    {"name": "初级法师", "level": 2, "code": "REALM_JUNIOR", "tags": ["正式法师"], "content": "已经掌握了基本的魔法知识，能够独立施展一环魔法。可以开始专精某个魔法流派。"},
+                    {"name": "中级法师", "level": 3, "code": "REALM_INTERMEDIATE", "tags": ["进阶"], "content": "魔法造诣更进一步，能够施展二环和三环魔法。在魔法师协会中占据主要位置。"},
+                    {"name": "高级法师", "level": 4, "code": "REALM_SENIOR", "tags": ["精英"], "content": "已经对魔法有了深刻理解，能够施展四环和五环魔法。是各大魔法组织的骨干力量。"},
+                    {"name": "大法师", "level": 5, "code": "REALM_ARCHMAGE", "tags": ["大师"], "content": "魔法造诣达到极高境界，能够施展六环和七环魔法。在一个王国中都是举足轻重的存在。"},
+                    {"name": "魔导师", "level": 6, "code": "REALM_MAGISTER", "tags": ["传奇"], "content": "触及到了魔法的本质，能够施展八环和九环魔法。整个大陆上也屈指可数，是各方势力争相拉拢的对象。"},
+                    {"name": "圣域法师", "level": 7, "code": "REALM_SANCTUARY", "tags": ["圣域", "半神"], "content": "超越了凡人的极限，进入圣域。能够施展禁咒级别的魔法，改变大陆的格局。寿命大幅延长，接近不朽。"},
+                ],
+            },
+            {
                 "name": "魔法与术法体系",
                 "category": "magic_sorcery_system",
                 "description": "魔法的分类、等级与施法规则。",
@@ -363,6 +657,37 @@ SETTING_TEMPLATES: Dict[str, Dict[str, Any]] = {
                     {"name": "魔王战争", "level": 3, "code": "LEGEND_DEMON_WAR", "tags": ["历史", "战争"], "content": "千年前诸种族联合对抗魔王入侵的史诗战争，最终由勇者击败魔王。这场战争塑造了现今的政治格局。"},
                     {"name": "失落帝国", "level": 3, "code": "LEGEND_LOST_EMPIRE", "tags": ["遗迹", "宝藏"], "content": "传说中曾统一大陆的古老帝国，其覆灭原因成谜。帝国遗迹中据说藏有惊人宝藏和失落的魔法知识。"},
                     {"name": "勇者传承", "level": 2, "code": "LEGEND_HERO", "tags": ["英雄", "命运"], "content": "每当世界面临危机，便会有勇者诞生的传说。勇者往往拥有特殊血脉或神明祝福，注定要拯救世界。"},
+                ],
+            },
+        ],
+    },
+    "wuxia_basic": {
+        "key": "wuxia_basic",
+        "name": "武侠基础模板",
+        "description": "适用于传统武侠/江湖题材。包含武道境界与基础武学体系。",
+        "collections": [
+            {
+                "name": "武道境界体系",
+                "category": "martial_realm_system",
+                "description": "武道修炼的境界划分与力量成长体系。",
+                "items": [
+                    {"name": "后天武者", "level": 1, "code": "REALM_POSTNATAL", "tags": ["入门", "凡人"], "content": "初入武道，通过锻炼身体和修炼内功，打通部分经脉。力量、速度和耐力都超越常人。"},
+                    {"name": "先天武者", "level": 2, "code": "REALM_INNATE", "tags": ["先天"], "content": "打通任督二脉，内力生生不息。可以将内力外放，形成护体罡气。是江湖中真正的高手。"},
+                    {"name": "宗师", "level": 3, "code": "REALM_GRANDMASTER", "tags": ["宗师"], "content": "武道造诣达到极高境界，能够领悟武道真意。一招一式都蕴含天地之力，是一方霸主。"},
+                    {"name": "大宗师", "level": 4, "code": "REALM_SUPREME_MASTER", "tags": ["大宗师"], "content": "对武道有了更深的理解，能够创立自己的武学流派。武道真意凝实，可以影响周围天地元气。"},
+                    {"name": "武圣", "level": 5, "code": "REALM_MARTIAL_SAINT", "tags": ["武圣", "传奇"], "content": "武道达到圣境，超凡脱俗。一拳可碎山岳，一掌可断江河。寿元大增，可活数百年。整个大陆也只有寥寥数人。"},
+                    {"name": "武神", "level": 6, "code": "REALM_MARTIAL_GOD", "tags": ["武神", "神话"], "content": "武道的极致，达到了凡人武道的巅峰。举手投足间天地变色，可以飞天遁地，几近神明。传说中的存在，世间罕有。"},
+                ],
+            },
+            {
+                "name": "武学体系",
+                "category": "technique_system",
+                "description": "基础内功、轻功、刀法、剑法等常见武学分类。",
+                "items": [
+                    {"name": "基础内功", "level": 1, "code": "WUXIA_CORE", "tags": ["内功", "入门"], "content": "用于打通经脉、积累内力的入门内功心法。可提升体魄与耐力，为后续武学打下基础。"},
+                    {"name": "轻功", "level": 1, "code": "WUXIA_QINGGONG", "tags": ["身法", "移动"], "content": "提升速度与机动性的身法类武学。可快速位移、腾挪闪避，是江湖游历与实战必备。"},
+                    {"name": "刀法", "level": 2, "code": "WUXIA_BLADE", "tags": ["攻击", "刚猛"], "content": "以刚猛迅疾为主的刀术流派，注重气势与破坏力。适合正面冲阵与迅猛压制。"},
+                    {"name": "剑法", "level": 2, "code": "WUXIA_SWORD", "tags": ["攻击", "灵动"], "content": "以灵动精准为主的剑术流派，讲究招式的变化与控制。适合游斗与破绽打击。"},
                 ],
             },
         ],
@@ -633,14 +958,42 @@ SETTING_TEMPLATES: Dict[str, Dict[str, Any]] = {
 }
 
 
+# 🆕 地图体系通用集合（自动注入所有基础模板）
+MAP_COLLECTION: Dict[str, Any] = {
+    "name": "地图体系",
+    "category": "map_system",
+    "description": "世界空间结构与地理要素的统一规范。用于承载大陆/区域/城镇/秘境/交通网络等信息，支持RAG检索与设定引用。",
+    "max_depth": 4,
+    "hierarchy_config": get_hierarchy_config_json("map_system"),
+    "items": [
+        {"name": "大陆版图", "level": 1, "code": "MAP_CONTINENT", "tags": ["地理", "整体"], "content": "世界整体地理格局（大陆/海洋/群岛）。列出主要大陆名称、相互位置与边界，以及自然与政治分区的宏观描述。"},
+        {"name": "区域地形", "level": 1, "code": "MAP_REGION", "tags": ["地形", "区域"], "content": "各区域的地形特征（山脉/平原/森林/沙漠/冰原等），并简述资源分布与气候特点，为剧情场景与资源系统提供基础。"},
+        {"name": "城镇与功能", "level": 1, "code": "MAP_TOWNS", "tags": ["城镇", "功能"], "content": "主要城市/城镇/据点的列表与定位，标注功能（贸易/宗门驻地/行政中心/黑市/学院等），用于人物与势力活动的落点。"},
+        {"name": "秘境与禁地", "level": 2, "code": "MAP_SECRET_REALM", "tags": ["秘境", "危险"], "content": "秘境、遗迹、实验区、阵法结界、危险禁区等的空间位置与进入条件，结合阵法/资源/遗物设定，为任务与冒险提供钩子。"},
+        {"name": "交通与传送网络", "level": 1, "code": "MAP_TRANSPORT", "tags": ["道路", "传送"], "content": "道路/航线/虫洞/传送阵/地铁/星门等交通体系。说明主要节点与连接关系，支持剧情推进与世界范围移动的合理性。"},
+    ],
+}
+
+# 🆕 自动为所有模板注入“地图体系”（若不存在）
+for _tpl_key, _tpl in SETTING_TEMPLATES.items():
+    _cols = _tpl.get("collections", [])
+    _has_map = any((c.get("category") == "map_system" or c.get("name") == "地图体系") for c in _cols)
+    if not _has_map:
+        _cols.append(MAP_COLLECTION)
+
+
 def get_templates_metadata() -> List[Dict[str, Any]]:
-    """返回用于前端展示的模板元数据列表"""
+    """返回用于前端展示的模板元数据列表（包含集合简要信息）"""
     return [
         {
             "key": key,
             "name": tpl.get("name", key),
             "description": tpl.get("description", ""),
             "collections_count": len(tpl.get("collections", [])),
+            "collections": [
+                {"name": c.get("name", ""), "category": c.get("category", "")}
+                for c in tpl.get("collections", [])
+            ],
         }
         for key, tpl in SETTING_TEMPLATES.items()
     ]

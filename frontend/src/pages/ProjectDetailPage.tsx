@@ -75,7 +75,11 @@ export default function ProjectDetailPage() {
   const [showChaptersDrawer, setShowChaptersDrawer] = useState(false)
   const [chapters, setChapters] = useState<any[]>([])
   const [chaptersLoading, setChaptersLoading] = useState(false)
-  const [chapterSortOrder, setChapterSortOrder] = useState<'asc' | 'desc'>('asc')
+  // 🔧 修复：从 localStorage 读取排序偏好
+  const [chapterSortOrder, setChapterSortOrder] = useState<'asc' | 'desc'>(() => {
+    const saved = localStorage.getItem('chapterSortOrder')
+    return (saved === 'asc' || saved === 'desc') ? saved : 'asc'
+  })
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [chapterToDelete, setChapterToDelete] = useState<any>(null)
   const [deleting, setDeleting] = useState(false)
@@ -157,21 +161,24 @@ export default function ProjectDetailPage() {
     }
   }
 
-  const loadChapters = async () => {
+  // 🔧 修复：接收 sortOrder 参数，避免闭包问题
+  const loadChapters = async (sortOrder?: 'asc' | 'desc') => {
     if (!projectId) {
       console.warn('⚠️ loadChapters: projectId 为空')
       return
     }
+    // 优先使用传入的参数，否则从 localStorage 读取最新值
+    const currentSortOrder = sortOrder ?? (localStorage.getItem('chapterSortOrder') as 'asc' | 'desc') ?? 'asc'
     try {
       setChaptersLoading(true)
-      console.log('📍 开始加载章节列表，projectId:', projectId)
-      const response = await apiClient.getChapters(parseInt(projectId), chapterSortOrder)
+      console.log('📍 开始加载章节列表，projectId:', projectId, '排序:', currentSortOrder)
+      const response = await apiClient.getChapters(parseInt(projectId), currentSortOrder)
       const chaptersData = response.data || []
       console.log('✅ 章节列表加载成功，数量:', chaptersData.length)
       // 按章节编号排序
-      const sortedChapters = chaptersData.sort((a: any, b: any) => 
-        chapterSortOrder === 'asc' 
-          ? a.chapter_number - b.chapter_number 
+      const sortedChapters = chaptersData.sort((a: any, b: any) =>
+        currentSortOrder === 'asc'
+          ? a.chapter_number - b.chapter_number
           : b.chapter_number - a.chapter_number
       )
       setChapters(sortedChapters)
@@ -238,10 +245,12 @@ export default function ProjectDetailPage() {
   }
 
   const handleChapterSortOrderChange = async (newOrder: 'asc' | 'desc') => {
-    console.log('切换排序方式:', newOrder); // 添加日志以便调试
+    console.log('切换排序方式:', newOrder)
     setChapterSortOrder(newOrder)
-    // 重新加载章节列表
-    await loadChapters()
+    // 🔧 修复：保存到 localStorage
+    localStorage.setItem('chapterSortOrder', newOrder)
+    // 重新加载章节列表，传入新的排序参数避免闭包问题
+    await loadChapters(newOrder)
   }
 
   const getStageStatus = (status: string) => {

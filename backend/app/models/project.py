@@ -9,14 +9,13 @@ from sqlalchemy.sql import func
 from app.db.base import Base
 
 if TYPE_CHECKING:
-    from app.models.knowledge_base import KnowledgeBase
     from app.models.memory import Memory
 
 
 class Project(Base):
     """项目表"""
     __tablename__ = "projects"
-    
+
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -26,25 +25,20 @@ class Project(Base):
     word_count: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, server_default=func.now(), onupdate=func.now())
-    
+
     # 关系定义（添加级联删除）
     chapters: Mapped[List["Chapter"]] = relationship(
-        "Chapter", 
-        back_populates="project", 
+        "Chapter",
+        back_populates="project",
         lazy="select",
         cascade="all, delete-orphan"  # 级联删除章节
-    )
-    knowledge_base_items: Mapped[List["KnowledgeBase"]] = relationship(
-        "KnowledgeBase",
-        lazy="select",
-        cascade="all, delete-orphan"  # 级联删除知识库
     )
     memories: Mapped[List["Memory"]] = relationship(
         "Memory",
         lazy="select",
         cascade="all, delete-orphan"  # 级联删除记忆
     )
-    
+
     def __repr__(self):
         return f"<Project {self.title}>"
 

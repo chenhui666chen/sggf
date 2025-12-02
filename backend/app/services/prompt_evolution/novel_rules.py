@@ -574,15 +574,23 @@ PRESET_EFFECTIVE_STRATEGIES = [
     "适当使用省略号制造停顿感",
     "对话中加入打断和话说一半的情况",
     "用动作细节展示情绪而非直接说明",
+    # 🆕 文笔优美相关策略
+    "善用比喻拟人等修辞手法增加文学美感",
+    "注意句子韵律节奏如行云流水",
+    "情景交融让环境描写与情感呼应",
+    "用精准有画面感的动词（如'踱步'替代'走'）",
+    "适度留白给读者想象空间",
 ]
 
 # 预置无效策略
 PRESET_INEFFECTIVE_STRATEGIES = [
     "简单同义词替换（效果有限）",
     "只改标点不改内容",
-    "过度口语化导致失去小说感",
+    "过度口语化导致失去小说感和文学美感",
     "堆砌破折号和省略号",
-    "所有句子都改成短句",
+    "所有句子都改成短句破坏行文流畅性",
+    "机械短句堆砌导致文字干涩失去美感",
+    "过度追求口语化牺牲文笔优美",
 ]
 
 # 预置禁止模式
@@ -615,6 +623,9 @@ class MultiDimensionScore:
     dialogue_score: float = 50.0        # 对话维度
     structure_score: float = 50.0       # 结构维度
 
+    # 🆕 文笔维度 (0-100, 越低越好，表示文笔越优美)
+    writing_score: float = 50.0         # 文笔维度
+
     # 🆕 可读性维度 (0-100, 越高越好，表示可读性越好)
     readability_score: float = 80.0     # 可读性得分
 
@@ -641,8 +652,11 @@ class MultiDimensionScore:
             "emotion_score": self.emotion_score,
             "dialogue_score": self.dialogue_score,
             "structure_score": self.structure_score,
+            "writing_score": self.writing_score,
             "readability_score": self.readability_score,
             "overall_score": self.overall_score,
+            # 🔧 新增：composite_score 作为 overall_score 的别名，用于engine.py统一访问
+            "composite_score": self.overall_score,
             "readability_warnings": self.readability_warnings,
             "details": self.details
         }
@@ -652,21 +666,27 @@ class MultiDimensionScore:
         return (f"词汇:{self.vocabulary_score:.0f} 句式:{self.sentence_score:.0f} "
                 f"标点:{self.punctuation_score:.0f} 情感:{self.emotion_score:.0f} "
                 f"对话:{self.dialogue_score:.0f} 结构:{self.structure_score:.0f} "
-                f"可读性:{self.readability_score:.0f}{warning_mark} "
+                f"文笔:{self.writing_score:.0f} 可读性:{self.readability_score:.0f}{warning_mark} "
                 f"→ 综合:{self.overall_score:.0f}")
 
 
 # 🆕 多维评分默认权重（可配置）
-# AI检测维度权重（总和0.7）
+# 🔧 调整后：AI检测维度权重（总和0.45）+ 文笔（0.20）+ 可读性（0.35）= 1.0
+# 调整理由：
+#   1. 降低AI检测权重，避免过度追求低AI率而牺牲内容质量
+#   2. 提升可读性权重，更好地保护文本的流畅性和易读性
+#   3. 提升文笔权重，保持文学美感，避免机械化改写
 DEFAULT_SCORE_WEIGHTS = {
-    "vocabulary": 0.15,   # 词汇维度
-    "sentence": 0.12,     # 句式维度
-    "punctuation": 0.15,  # 标点维度
-    "emotion": 0.13,      # 情感维度
-    "dialogue": 0.10,     # 对话维度
-    "structure": 0.05,    # 结构维度
-    # 🆕 可读性维度权重（占0.3，作为保护性约束）
-    "readability": 0.30   # 可读性维度 - 重要！防止过度优化
+    "vocabulary": 0.10,   # 词汇维度（↓0.02）
+    "sentence": 0.08,     # 句式维度（↓0.02）
+    "punctuation": 0.10,  # 标点维度（↓0.02）
+    "emotion": 0.08,      # 情感维度（↓0.02）
+    "dialogue": 0.06,     # 对话维度（↓0.02）
+    "structure": 0.03,    # 结构维度（↓0.02）
+    # 🔧 文笔维度权重提升（0.13→0.20），核心美感维度
+    "writing": 0.20,      # 文笔维度 - 保持文学美感，避免干涩机械
+    # 🔧 可读性维度权重提升（0.30→0.35），最重要的保护性约束
+    "readability": 0.35   # 可读性维度 - 最重要！防止过度优化导致内容崩坏
 }
 
 # 🆕 可读性阈值配置
@@ -678,11 +698,25 @@ READABILITY_THRESHOLDS = {
     "min_complete_sentence_ratio": 0.7, # 最小完整句比例
 }
 
+# 🔧 AI率软性约束配置（非硬性门槛，作为额外加分/扣分项）
+# 说明：AI率作为软性参考，不一票否决，而是调整综合得分
+AI_RATE_SOFT_CONSTRAINT = {
+    "excellent_threshold": 10,    # 优秀阈值：AI率≤10%，额外加分
+    "good_threshold": 30,         # 良好阈值：AI率≤30%，不调整
+    "warning_threshold": 50,      # 警告阈值：AI率>50%，轻微扣分
+    "penalty_threshold": 70,      # 惩罚阈值：AI率>70%，明显扣分
+    "excellent_bonus": -5,        # 优秀加分（负数=降低综合分=更好）
+    "warning_penalty": 3,         # 警告扣分
+    "penalty_penalty": 8,         # 惩罚扣分
+    "severe_penalty": 15,         # 严重扣分（AI率>80%）
+}
+
 
 def calculate_multi_dimension_score(
     text: str,
     metrics: TextMetrics = None,
-    weights: Dict[str, float] = None
+    weights: Dict[str, float] = None,
+    ai_score: float = None  # 🔧 新增：腾讯云API返回的AI检测分数（可选）
 ) -> MultiDimensionScore:
     """
     🆕 计算文本的多维AI痕迹评分
@@ -690,11 +724,13 @@ def calculate_multi_dimension_score(
     评分逻辑：
     - 每个维度 0-100 分，越低表示AI痕迹越少
     - 综合得分是各维度的加权平均
+    - 🔧 如果提供ai_score，应用AI率软性约束（加分/扣分）
 
     Args:
         text: 待评估的文本
         metrics: 预计算的指标（可选）
         weights: 各维度权重（可选，默认使用 DEFAULT_SCORE_WEIGHTS）
+        ai_score: 腾讯云API返回的AI检测分数（可选，0-100）
 
     Returns:
         MultiDimensionScore 对象
@@ -795,7 +831,11 @@ def calculate_multi_dimension_score(
         score.structure_score = 50
         score.details["structure"] = "单段落"
 
-    # 🆕 7. 可读性维度评分（越高越好，与其他维度相反）
+    # 🆕 7. 文笔维度评分（越低越好，表示文笔越优美）
+    score.writing_score = _calculate_writing_score(text, metrics)
+    score.details["writing"] = f"文笔{score.writing_score:.0f}"
+
+    # 🆕 8. 可读性维度评分（越高越好，与其他维度相反）
     score.readability_score, score.readability_warnings = _calculate_readability_score(text, metrics)
     score.details["readability"] = f"可读性{score.readability_score:.0f}"
 
@@ -803,26 +843,160 @@ def calculate_multi_dimension_score(
     # 🆕 使用传入的权重或默认权重
     w = weights if weights else DEFAULT_SCORE_WEIGHTS
 
-    # 🆕 AI检测维度得分（越低越好）
-    ai_detection_score = (
-        score.vocabulary_score * w.get("vocabulary", 0.15) +
-        score.sentence_score * w.get("sentence", 0.12) +
-        score.punctuation_score * w.get("punctuation", 0.15) +
-        score.emotion_score * w.get("emotion", 0.13) +
-        score.dialogue_score * w.get("dialogue", 0.10) +
-        score.structure_score * w.get("structure", 0.05)
+    # 🆕 AI检测维度 + 文笔维度得分（越低越好）
+    ai_and_writing_score = (
+        score.vocabulary_score * w.get("vocabulary", 0.12) +
+        score.sentence_score * w.get("sentence", 0.10) +
+        score.punctuation_score * w.get("punctuation", 0.12) +
+        score.emotion_score * w.get("emotion", 0.10) +
+        score.dialogue_score * w.get("dialogue", 0.08) +
+        score.structure_score * w.get("structure", 0.05) +
+        score.writing_score * w.get("writing", 0.13)
     ) / (1 - w.get("readability", 0.30))  # 归一化到0-100
 
     # 🆕 可读性惩罚：可读性越低，综合得分越高（越差）
     # 可读性分数反转：100分的可读性 = 0分惩罚，0分可读性 = 100分惩罚
     readability_penalty = (100 - score.readability_score)
 
-    # 综合得分 = AI检测得分 * 0.7 + 可读性惩罚 * 0.3
-    readability_weight = w.get("readability", 0.30)
-    score.overall_score = (
-        ai_detection_score * (1 - readability_weight) +
+    # 综合得分 = (AI检测+文笔)得分 * 0.7 + 可读性惩罚 * 0.3
+    readability_weight = w.get("readability", 0.35)
+    base_overall_score = (
+        ai_and_writing_score * (1 - readability_weight) +
         readability_penalty * readability_weight
     )
+
+    # 🔧 应用AI率软性约束（如果提供了ai_score）
+    ai_adjustment = 0.0
+    ai_adjustment_reason = ""
+    if ai_score is not None:
+        cfg = AI_RATE_SOFT_CONSTRAINT
+        if ai_score <= cfg["excellent_threshold"]:
+            # 优秀：AI率≤10%，额外加分（降低综合分）
+            ai_adjustment = cfg["excellent_bonus"]
+            ai_adjustment_reason = f"AI率{ai_score:.0f}%≤{cfg['excellent_threshold']}%，优秀加分{ai_adjustment}"
+        elif ai_score <= cfg["good_threshold"]:
+            # 良好：AI率≤30%，不调整
+            ai_adjustment = 0
+            ai_adjustment_reason = f"AI率{ai_score:.0f}%≤{cfg['good_threshold']}%，良好不调整"
+        elif ai_score <= cfg["warning_threshold"]:
+            # 警告：AI率>30%且≤50%，轻微扣分
+            ai_adjustment = cfg["warning_penalty"]
+            ai_adjustment_reason = f"AI率{ai_score:.0f}%>{cfg['good_threshold']}%，轻微扣分+{ai_adjustment}"
+        elif ai_score <= cfg["penalty_threshold"]:
+            # 惩罚：AI率>50%且≤70%，明显扣分
+            ai_adjustment = cfg["penalty_penalty"]
+            ai_adjustment_reason = f"AI率{ai_score:.0f}%>{cfg['warning_threshold']}%，扣分+{ai_adjustment}"
+        else:
+            # 严重：AI率>70%，严重扣分
+            ai_adjustment = cfg["severe_penalty"]
+            ai_adjustment_reason = f"AI率{ai_score:.0f}%>{cfg['penalty_threshold']}%，严重扣分+{ai_adjustment}"
+
+        score.details["ai_rate_adjustment"] = ai_adjustment_reason
+
+    # 最终综合得分 = 基础分 + AI率调整
+    score.overall_score = max(0, min(100, base_overall_score + ai_adjustment))
+
+    return score
+
+
+def _calculate_writing_score(text: str, metrics: TextMetrics) -> float:
+    """
+    计算文本流畅度评分（重点：顺畅、易懂）
+
+    评分逻辑（0-100，越低越好，表示越顺畅易懂）：
+    - 0-30分：非常顺畅易懂 ✨
+    - 31-50分：比较顺畅
+    - 51-70分：一般，有些卡顿
+    - 71-100分：不够顺畅，读起来费劲
+
+    评估维度：
+    1. 干涩表达（然后/接着/于是等机械连接词）
+    2. 冗余表达（啰嗦、重复）
+    3. 句子节奏（长短句搭配是否自然）
+    4. 碎片化程度（短句堆砌影响流畅）
+    5. 连贯性（有没有合理的过渡）
+    6. 晦涩表达（生僻词、复杂句式）
+    """
+    score = 50.0  # 从中间分数开始
+
+    # 1. 检测干涩表达（机械连接词，影响顺畅）
+    dry_patterns = [
+        r"然后", r"接着", r"于是", r"之后", r"随后",
+        r"进行", r"开始", r"继续", r"完成", r"处理",
+        r"因此", r"所以说", r"总之", r"综上"
+    ]
+    dry_count = sum(1 for p in dry_patterns if re.search(p, text))
+    score += min(dry_count * 4, 20)  # 每个+4分，最多+20分
+
+    # 2. 检测冗余/啰嗦表达
+    redundant_patterns = [
+        r"的话", r"来说的话", r"而言的话",
+        r"进行了.*的", r"做出了.*的",
+        r"对于.*来说", r"关于.*方面",
+        r"基本上", r"一定程度上", r"某种意义上",
+        r"实际上.*其实", r"事实上.*实际"
+    ]
+    redundant_count = sum(1 for p in redundant_patterns if re.search(p, text))
+    score += min(redundant_count * 5, 15)  # 每个+5分，最多+15分
+
+    # 3. 检测句子节奏（长短句搭配）
+    sentences = re.split(r'[。！？]', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    if len(sentences) >= 3:
+        lengths = [len(s) for s in sentences]
+        # 计算相邻句子长度差异
+        length_diffs = [abs(lengths[i+1] - lengths[i]) for i in range(len(lengths)-1)]
+        avg_diff = sum(length_diffs) / len(length_diffs) if length_diffs else 0
+
+        # 适度的长度变化读起来更顺（5-15字差异）
+        if 5 <= avg_diff <= 15:
+            score -= 10  # 节奏自然流畅
+        elif avg_diff > 25:
+            score += 10  # 变化太剧烈，读起来跳跃
+        elif avg_diff < 2:
+            score += 8   # 太单调，读起来乏味
+
+    # 4. 检测碎片化程度（短句堆砌影响流畅）
+    if metrics.short_sentence_ratio > 0.35:
+        excess = metrics.short_sentence_ratio - 0.35
+        score += min(excess * 40, 20)  # 短句过多，不顺畅
+
+    # 5. 检测连贯性（自然过渡词是好的）
+    smooth_transitions = [
+        r"不过", r"只是", r"倒是", r"却", r"但",
+        r"虽然", r"尽管", r"即便",
+        r"这时", r"此时", r"那时", r"正当",
+        r"说着", r"想着", r"看着"
+    ]
+    transition_count = sum(1 for p in smooth_transitions if re.search(p, text))
+    score -= min(transition_count * 2, 10)  # 自然过渡词让文章更顺畅
+
+    # 6. 检测晦涩表达（生僻词、复杂句式影响易懂）
+    obscure_patterns = [
+        r"之于", r"以至于", r"以致于",
+        r"诚然", r"固然", r"虽则",
+        r"殊不知", r"岂料", r"孰知",
+        r"兹", r"盖因", r"是故"
+    ]
+    obscure_count = sum(1 for p in obscure_patterns if re.search(p, text))
+    score += min(obscure_count * 5, 15)  # 晦涩表达影响易懂
+
+    # 7. 检测过长句子（太长的句子不易懂）
+    long_sentences = [s for s in sentences if len(s) > 50]
+    if long_sentences:
+        score += min(len(long_sentences) * 5, 15)
+
+    # 8. 检测简洁表达（好的特征）
+    concise_patterns = [
+        r"他说", r"她说", r"我说",  # 简洁对话标记
+        r"点头", r"摇头", r"笑了", r"叹了口气"  # 简洁动作
+    ]
+    concise_count = sum(1 for p in concise_patterns if re.search(p, text))
+    score -= min(concise_count * 2, 8)  # 简洁表达是好的
+
+    # 确保分数在0-100范围内
+    score = max(0, min(100, score))
 
     return score
 

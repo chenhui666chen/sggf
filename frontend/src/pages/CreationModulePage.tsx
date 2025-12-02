@@ -23,7 +23,8 @@ import { logout } from '@/store/slices/authSlice'
 const modules = [
   {
     id: 'novel',
-    title: '小说创作',
+    title: '灵感方舟',
+    subtitle: '小说创作',
     description: '智能小说创作工作流，从构思到成稿一站式完成',
     icon: AutoStoriesIcon,
     color: '#1976d2',
@@ -32,7 +33,8 @@ const modules = [
   },
   {
     id: 'audiobook',
-    title: '有声小说创作',
+    title: '耳畔星河',
+    subtitle: '有声小说创作',
     description: '将文字作品转化为有声读物，支持多种音色选择',
     icon: HeadphonesIcon,
     color: '#9c27b0',
@@ -41,7 +43,8 @@ const modules = [
   },
   {
     id: 'drama',
-    title: '短剧创作',
+    title: '织梦映心',
+    subtitle: '短剧创作',
     description: '短视频剧本创作，快速生成爆款短剧内容',
     icon: MovieIcon,
     color: '#f57c00',
@@ -51,6 +54,7 @@ const modules = [
   {
     id: 'ai-detect',
     title: '织文无迹',
+    subtitle: 'AI痕迹降低',
     description: '检测与降低AI痕迹，让创作更自然流畅',
     icon: AutoFixHighIcon,
     color: '#2e7d32',
@@ -148,8 +152,12 @@ export default function CreationModulePage() {
                         <IconComponent sx={{ fontSize: 32, color: module.color }} />
                       </Box>
                       {/* 标题 */}
-                      <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5, color: module.color }}>
+                      <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.3, color: module.color }}>
                         {module.title}
+                      </Typography>
+                      {/* 副标题 */}
+                      <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 0.5 }}>
+                        {module.subtitle}
                       </Typography>
                       {/* 状态标签 */}
                       {!module.available && (

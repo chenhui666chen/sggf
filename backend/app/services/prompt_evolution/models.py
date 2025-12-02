@@ -84,6 +84,10 @@ class PromptVersion:
     mutation_strategy: Optional[str] = None         # 使用的变异策略
     analysis: str = ""                              # 优化分析
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    # 🔧 新增：综合评分（多维加权）
+    avg_composite_score: float = 100.0              # 综合评分（越低越好）
+    avg_readability: float = 80.0                   # 平均可读性
+    avg_writing: float = 50.0                       # 平均文笔分
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -117,7 +121,11 @@ class PromptVersion:
             "parent_version_id": self.parent_version_id,
             "mutation_strategy": self.mutation_strategy,
             "analysis": self.analysis,
-            "created_at": self.created_at
+            "created_at": self.created_at,
+            # 🔧 新增综合评分字段
+            "avg_composite_score": self.avg_composite_score,
+            "avg_readability": self.avg_readability,
+            "avg_writing": self.avg_writing
         }
 
     @classmethod
@@ -144,17 +152,31 @@ class PromptVersion:
             )
             for r in data.get("evaluation_results", [])
         ]
+        # 🔧 智能回退：如果综合评分是默认值100但AI分数更低，使用AI分数
+        ai_score = data.get("avg_ai_score", 100.0)
+        saved_composite = data.get("avg_composite_score")
+        # 如果没有保存综合评分，或者保存的是默认值100但AI分数更低（且AI分数合理），使用AI分数
+        # 🔧 保护条件：AI分数必须在合理范围内（>0 且 <100），才进行回退
+        if saved_composite is None or (saved_composite >= 100.0 and ai_score < saved_composite and ai_score > 0):
+            composite_score = ai_score
+        else:
+            composite_score = saved_composite
+
         return cls(
             version_id=data["version_id"],
             prompt_text=data["prompt_text"],
-            avg_ai_score=data.get("avg_ai_score", 100.0),
+            avg_ai_score=ai_score,
             avg_score_reduction=data.get("avg_score_reduction", 0.0),
             evaluation_results=eval_results,
             iteration=data.get("iteration", 0),
             parent_version_id=data.get("parent_version_id"),
             mutation_strategy=data.get("mutation_strategy"),
             analysis=data.get("analysis", ""),
-            created_at=data.get("created_at", "")
+            created_at=data.get("created_at", ""),
+            # 🔧 使用智能回退的综合评分
+            avg_composite_score=composite_score,
+            avg_readability=data.get("avg_readability", 80.0),
+            avg_writing=data.get("avg_writing", 50.0)
         )
 
 
@@ -175,7 +197,7 @@ class EvolutionHistory:
     error_message: Optional[str] = None
 
 
-@dataclass  
+@dataclass
 class EvolutionConfig:
     """进化配置"""
     target_score: int = 30              # 目标AI得分阈值
@@ -184,4 +206,37 @@ class EvolutionConfig:
     early_stop_threshold: int = 25      # 提前停止阈值
     temperature: float = 0.8            # LLM温度参数
     keep_top_n: int = 5                 # 保留最佳版本数量
+
+    # 🆕 多维停止条件
+    min_readability_score: float = 70.0   # 最低可读性阈值（低于此值视为达标）
+    max_writing_score: float = 45.0       # 最大文笔分数阈值（高于此值视为达标，越低越好）
+
+    # 🆕 保护性停止阈值
+    readability_crash_threshold: float = 50.0   # 可读性崩坏阈值（低于此值强制停止）
+    writing_crash_threshold: float = 70.0       # 文笔崩坏阈值（高于此值强制停止）
+
+    # 🆕 收敛停止条件
+    convergence_threshold: float = 2.0    # 改善幅度阈值（低于此值视为收敛）
+    convergence_count: int = 4            # 🔧 连续多少次改善不足视为收敛（3→4）
+    oscillation_count: int = 4            # 🔧 连续多少次震荡视为不稳定（3→4）
+
+    # 🔧 A/B测试配置
+    ab_test_interval: int = 2             # A/B测试间隔（每N轮进行一次）
+    ab_test_sample_count: int = 4         # A/B测试使用的样本数（2→4）
+    ab_test_variant_count: int = 3        # A/B测试变体数量（2→3）
+    ab_test_min_diff: float = 3.0         # A/B测试最小显著差异（分数差超过此值才判定胜出）
+
+    # 🔧 探索模式配置
+    exploration_mode_threshold: int = 5   # 连续多少次无明显改善后进入探索模式
+    exploration_temperature: float = 1.0  # 探索模式使用的更高温度
+
+
+@dataclass
+class StopReason:
+    """停止原因"""
+    should_stop: bool = False           # 是否应该停止
+    reason_type: str = ""               # 停止类型: success/protection/convergence/oscillation/max_iter
+    reason_message: str = ""            # 停止原因描述
+    should_rollback: bool = False       # 是否需要回滚到之前版本
+    rollback_reason: str = ""           # 回滚原因
 

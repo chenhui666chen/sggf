@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 from app.db.base import get_db
 from app.models.user import User
 from app.models.project import Project, Chapter
-from app.models.knowledge_base import Review
-from app.schemas.knowledge_base import ReviewCreate, ReviewUpdate, ReviewResponse
+from app.models.review import Review
+from app.schemas.review import ReviewCreate, ReviewUpdate, ReviewResponse
 from app.core.security import get_current_user
 
 router = APIRouter(prefix="/api/v1/chapters", tags=["reviews"])

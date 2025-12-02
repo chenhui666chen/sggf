@@ -12,6 +12,8 @@ class SettingCollectionBase(BaseModel):
     category: Optional[str] = None
     description: Optional[str] = None
     order: int = 0
+    max_depth: Optional[int] = None
+    hierarchy_config: Optional[str] = None
 
 
 class SettingCollectionCreate(SettingCollectionBase):
@@ -23,6 +25,8 @@ class SettingCollectionUpdate(BaseModel):
     category: Optional[str] = None
     description: Optional[str] = None
     order: Optional[int] = None
+    max_depth: Optional[int] = None
+    hierarchy_config: Optional[str] = None
 
 
 class SettingCollectionResponse(SettingCollectionBase):
@@ -43,6 +47,11 @@ class SettingItemBase(BaseModel):
     content: Optional[str] = None
     relations: Optional[Dict[str, Any]] = None
     order: int = 0
+    depth: Optional[int] = 1
+    node_type: Optional[str] = None
+    is_leaf: Optional[bool] = True
+    path: Optional[str] = None
+    summary: Optional[str] = None
 
 
 class SettingItemCreate(SettingItemBase):
@@ -57,6 +66,11 @@ class SettingItemUpdate(BaseModel):
     content: Optional[str] = None
     relations: Optional[Dict[str, Any]] = None
     order: Optional[int] = None
+    depth: Optional[int] = None
+    node_type: Optional[str] = None
+    is_leaf: Optional[bool] = None
+    path: Optional[str] = None
+    summary: Optional[str] = None
 
 
 class SettingItemResponse(SettingItemBase):
@@ -64,6 +78,8 @@ class SettingItemResponse(SettingItemBase):
     collection_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
+    snapshots: Optional[str] = None
+    confidence_score: Optional[float] = None
 
     class Config:
         from_attributes = True
@@ -76,5 +92,41 @@ class ItemOrderUpdate(BaseModel):
 
 class ReorderItemsRequest(BaseModel):
     items: List[ItemOrderUpdate]
+
+
+class BulkMoveItemsRequest(BaseModel):
+    item_ids: List[int]
+    target_collection_id: Optional[int] = None
+    new_parent_path: Optional[str] = None
+
+
+class SetParentRequest(BaseModel):
+    new_parent_path: str
+
+
+class ReorderUnderParentRequest(BaseModel):
+    parent_path: str
+    ordered_ids: List[int]
+
+
+class GraphEdgeCreate(BaseModel):
+    source_item_id: int
+    target_item_id: int
+    relation_type: str
+    confidence: Optional[float] = None
+    auto_extracted: Optional[bool] = True
+
+
+class GraphEdgeResponse(BaseModel):
+    id: int
+    source_item_id: int
+    target_item_id: int
+    relation_type: str
+    confidence: Optional[float] = None
+    auto_extracted: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 

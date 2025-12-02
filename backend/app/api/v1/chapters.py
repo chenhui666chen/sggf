@@ -195,6 +195,139 @@ async def create_chapter(
     db.add(chapter)
     db.commit()
     db.refresh(chapter)
+    
+    # 🆕 Phase 5: 章节创建后自动抽取实体并归类
+    try:
+        from app.services.entity_extraction import EntityExtractionService
+        from app.services.location_hierarchy_extractor import LocationHierarchyExtractor
+        from app.models.setting import KnowledgeGraphEdge
+        import logging
+        
+        logger = logging.getLogger("uvicorn.error")
+        logger.info(f"   🔍 开始自动抽取章节实体...")
+        
+        # 提取实体
+        entities = await EntityExtractionService.extract_entities_from_chapter(
+            chapter_title=final_title,
+            chapter_content=chapter_data.content or "",
+            project_id=chapter_data.project_id,
+        )
+        
+        logger.info(f"   ✅ 抽取到 {len(entities)} 个实体")
+        
+        # 🆕 Phase 7: 智能提取地点层级关系
+        logger.info(f"   🗺️ 开始提取地点层级关系...")
+        locations = await LocationHierarchyExtractor.extract_location_hierarchy(
+            chapter_title=final_title,
+            chapter_content=chapter_data.content or "",
+        )
+        
+        logger.info(f"   ✅ 提取到 {len(locations)} 个地点")
+        
+        if locations:
+            # 保存地点层级到地图体系
+            location_result = LocationHierarchyExtractor.save_location_hierarchy(
+                db=db,
+                project_id=chapter_data.project_id,
+                locations=locations,
+            )
+            
+            logger.info(
+                f"   💾 地点层级保存完成：创建 {location_result['created']} 个，"
+                f"更新 {location_result['updated']} 个，跳过 {location_result['skipped']} 个"
+            )
+        
+        # 归类并保存实体
+        if entities:
+            result = EntityExtractionService.classify_and_save_entities(
+                db=db,
+                project_id=chapter_data.project_id,
+                entities=entities,
+            )
+            
+            logger.info(
+                f"   💾 实体归类完成：正式集合 {result['saved_to_formal']} 项，"
+                f"候选集合 {result['saved_to_candidate']} 项，"
+                f"跳过 {result['skipped']} 项"
+            )
+            
+            # Phase 6: 抽取实体间关系
+            logger.info(f"   🔗 开始抽取实体间关系...")
+            relations = await EntityExtractionService.extract_relations_from_chapter(
+                chapter_title=final_title,
+                chapter_content=chapter_data.content or "",
+                entities=entities,
+            )
+            
+            logger.info(f"   ✅ 抽取到 {len(relations)} 个关系")
+            
+            # 保存关系到知识图谱表（需要将实体名称转换为 ID）
+            if relations:
+                from app.models.setting import SettingItem
+                saved_relations = 0
+                
+                for rel in relations:
+                    # 查找 source 和 target 的 ID
+                    source_name = rel.get('source', '').strip()
+                    target_name = rel.get('target', '').strip()
+                    relation_type = rel.get('relation_type', '相关')
+                    confidence = rel.get('confidence', 0.6)
+                    
+                    source_item = db.query(SettingItem).filter(
+                        SettingItem.name == source_name
+                    ).filter(
+                        SettingItem.collection_id.in_(
+                            db.query(SettingItem.collection_id).join(
+                                SettingItem.collection
+                            ).filter(
+                                SettingItem.collection.has(project_id=chapter_data.project_id)
+                            )
+                        )
+                    ).first()
+                    
+                    target_item = db.query(SettingItem).filter(
+                        SettingItem.name == target_name
+                    ).filter(
+                        SettingItem.collection_id.in_(
+                            db.query(SettingItem.collection_id).join(
+                                SettingItem.collection
+                            ).filter(
+                                SettingItem.collection.has(project_id=chapter_data.project_id)
+                            )
+                        )
+                    ).first()
+                    
+                    if source_item and target_item:
+                        # 检查是否已存在该关系
+                        existing_edge = db.query(KnowledgeGraphEdge).filter(
+                            KnowledgeGraphEdge.source_item_id == source_item.id,
+                            KnowledgeGraphEdge.target_item_id == target_item.id,
+                            KnowledgeGraphEdge.relation_type == relation_type,
+                        ).first()
+                        
+                        if not existing_edge:
+                            edge = KnowledgeGraphEdge(
+                                source_item_id=source_item.id,
+                                target_item_id=target_item.id,
+                                relation_type=relation_type,
+                                confidence=confidence,
+                                auto_extracted=True,
+                            )
+                            db.add(edge)
+                            saved_relations += 1
+                
+                if saved_relations > 0:
+                    db.commit()
+                    logger.info(f"   🔗 已保存 {saved_relations} 个关系边到知识图谱")
+                else:
+                    logger.info(f"   ℹ️ 没有新关系需要保存")
+    except Exception as e:
+        import logging
+        logger = logging.getLogger("uvicorn.error")
+        logger.warning(f"⚠️ 自动抽取实体失败（不影响章节创建）: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
+    
     return chapter
 
 
@@ -300,7 +433,7 @@ async def update_chapter(
     if content_updated:
         try:
             from app.services.agents.knowledge_base import NovelKnowledgeBase
-            from app.api.v1.knowledge_base import sync_to_vector_db
+            from app.services.vector_sync import sync_to_vector_db
             import logging
 
             logger = logging.getLogger("uvicorn.error")
@@ -375,27 +508,10 @@ async def delete_chapter(
     # 🆕 清理记忆数据：如果某个记忆的 current_chapter 指向被删除的章节，将其置为 NULL
     from app.models.memory import Memory
     db.query(Memory).filter(
-        (Memory.project_id == chapter.project_id) & 
+        (Memory.project_id == chapter.project_id) &
         (Memory.current_chapter == chapter.chapter_number)
     ).update({Memory.current_chapter: None})
-    
-    # 🆕 同步删除知识库中的相关条目
-    try:
-        from app.models.knowledge_base import KnowledgeBase
-        # 删除与该章节相关的知识库条目
-        db.query(KnowledgeBase).filter(
-            (KnowledgeBase.project_id == chapter.project_id) &
-            (KnowledgeBase.type == 'chapter') &
-            (KnowledgeBase.content.like(f"%第{chapter.chapter_number}章%"))
-        ).delete(synchronize_session=False)
-        db.commit()
-    except Exception as e:
-        # 不中断主流程，记录错误
-        import logging
-        logger = logging.getLogger("uvicorn.error")
-        logger.warning(f"⚠️ 删除章节时清理知识库失败: {e}")
-        db.rollback()
-    
+
     # 🆕 同步删除向量库中的相关向量数据
     try:
         from app.services.agents.knowledge_base import NovelKnowledgeBase

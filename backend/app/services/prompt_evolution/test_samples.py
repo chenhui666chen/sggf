@@ -2,10 +2,15 @@
 提示词进化系统 - 测试样本管理
 
 提供典型的AI生成文本样本，用于测试提示词的降低AI率效果
+🔧 支持动态加载用户项目中的实际文本
 """
-from dataclasses import dataclass
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import List, Optional, Callable
 import uuid
+import random
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -15,6 +20,7 @@ class TestSample:
     text: str
     genre: str          # 题材类型
     description: str    # 样本描述
+    source: str = "default"  # 🔧 来源：default/project/custom
 
 
 # 默认测试样本集 - 典型的AI生成文本
@@ -124,44 +130,191 @@ DEFAULT_TEST_SAMPLES: List[TestSample] = [
 
 
 class TestSampleManager:
-    """测试样本管理器"""
-    
-    def __init__(self):
-        self.samples: List[TestSample] = list(DEFAULT_TEST_SAMPLES)
-    
-    def get_samples(self, count: Optional[int] = None) -> List[TestSample]:
-        """获取测试样本"""
+    """
+    测试样本管理器
+
+    🔧 增强功能：
+    1. 支持动态加载项目文本作为样本
+    2. 支持按题材筛选
+    3. 支持随机采样
+    4. 支持混合采样（默认+项目）
+    """
+
+    def __init__(self, project_sample_loader: Optional[Callable[[], List[dict]]] = None):
+        """
+        Args:
+            project_sample_loader: 可选的项目样本加载器，返回格式：
+                [{"text": str, "genre": str, "chapter_title": str}, ...]
+        """
+        self.default_samples: List[TestSample] = list(DEFAULT_TEST_SAMPLES)
+        self.project_samples: List[TestSample] = []
+        self.custom_samples: List[TestSample] = []
+        self._project_loader = project_sample_loader
+
+    @property
+    def samples(self) -> List[TestSample]:
+        """获取所有样本（合并默认+项目+自定义）"""
+        return self.default_samples + self.project_samples + self.custom_samples
+
+    def load_project_samples(self, max_samples: int = 10, min_text_length: int = 200) -> int:
+        """
+        🔧 从项目加载样本
+
+        Args:
+            max_samples: 最大加载样本数
+            min_text_length: 最小文本长度
+
+        Returns:
+            加载的样本数量
+        """
+        if not self._project_loader:
+            logger.warning("未配置项目样本加载器")
+            return 0
+
+        try:
+            raw_samples = self._project_loader()
+            loaded_count = 0
+
+            for item in raw_samples:
+                text = item.get("text", "")
+                if len(text) < min_text_length:
+                    continue
+
+                # 截取合适长度的文本片段（300-800字）
+                if len(text) > 800:
+                    # 随机选择一个起始位置
+                    start = random.randint(0, len(text) - 500)
+                    # 找到段落边界
+                    para_start = text.rfind("\n\n", 0, start)
+                    if para_start == -1:
+                        para_start = text.rfind("。", 0, start) + 1
+                    if para_start <= 0:
+                        para_start = start
+                    # 截取500-800字
+                    text = text[para_start:para_start + random.randint(500, 800)]
+
+                sample = TestSample(
+                    sample_id=f"project_{str(uuid.uuid4())[:8]}",
+                    text=text.strip(),
+                    genre=item.get("genre", "通用"),
+                    description=f"项目章节: {item.get('chapter_title', '未知')}",
+                    source="project"
+                )
+                self.project_samples.append(sample)
+                loaded_count += 1
+
+                if loaded_count >= max_samples:
+                    break
+
+            logger.info(f"📚 从项目加载 {loaded_count} 个样本")
+            return loaded_count
+
+        except Exception as e:
+            logger.error(f"加载项目样本失败: {e}")
+            return 0
+
+    def get_samples(
+        self,
+        count: Optional[int] = None,
+        genre: Optional[str] = None,
+        prefer_project: bool = True,
+        random_select: bool = True
+    ) -> List[TestSample]:
+        """
+        🔧 获取测试样本（增强版）
+
+        Args:
+            count: 需要的样本数量
+            genre: 筛选特定题材
+            prefer_project: 优先使用项目样本
+            random_select: 是否随机选择
+
+        Returns:
+            样本列表
+        """
+        # 筛选可用样本
+        available = self.samples
+        if genre:
+            available = [s for s in available if s.genre == genre]
+
+        if not available:
+            available = self.default_samples  # 回退到默认
+
+        # 如果优先项目样本，调整顺序
+        if prefer_project and self.project_samples:
+            project = [s for s in available if s.source == "project"]
+            others = [s for s in available if s.source != "project"]
+            available = project + others
+
+        # 随机选择或顺序选择
         if count is None:
-            return self.samples
-        return self.samples[:count]
-    
+            return available
+
+        if random_select and len(available) > count:
+            # 🔧 加权随机：项目样本权重更高
+            weights = [2.0 if s.source == "project" else 1.0 for s in available]
+            selected = []
+            temp_available = list(available)
+            temp_weights = list(weights)
+
+            for _ in range(min(count, len(available))):
+                if not temp_available:
+                    break
+                idx = random.choices(range(len(temp_available)), weights=temp_weights, k=1)[0]
+                selected.append(temp_available.pop(idx))
+                temp_weights.pop(idx)
+
+            return selected
+        else:
+            return available[:count]
+
     def add_sample(self, text: str, genre: str = "通用", description: str = "") -> TestSample:
         """添加自定义样本"""
         sample = TestSample(
             sample_id=f"custom_{str(uuid.uuid4())[:8]}",
             text=text,
             genre=genre,
-            description=description or "用户自定义样本"
+            description=description or "用户自定义样本",
+            source="custom"
         )
-        self.samples.append(sample)
+        self.custom_samples.append(sample)
         return sample
-    
+
     def remove_sample(self, sample_id: str) -> bool:
         """移除样本"""
-        for i, s in enumerate(self.samples):
-            if s.sample_id == sample_id:
-                self.samples.pop(i)
-                return True
+        for collection in [self.custom_samples, self.project_samples]:
+            for i, s in enumerate(collection):
+                if s.sample_id == sample_id:
+                    collection.pop(i)
+                    return True
         return False
-    
+
     def get_sample_by_id(self, sample_id: str) -> Optional[TestSample]:
         """根据ID获取样本"""
         for s in self.samples:
             if s.sample_id == sample_id:
                 return s
         return None
-    
+
     def get_samples_by_genre(self, genre: str) -> List[TestSample]:
         """根据题材获取样本"""
         return [s for s in self.samples if s.genre == genre]
+
+    def clear_project_samples(self) -> None:
+        """清空项目样本"""
+        self.project_samples.clear()
+
+    def get_sample_stats(self) -> dict:
+        """🔧 获取样本统计信息"""
+        genres = {}
+        for s in self.samples:
+            genres[s.genre] = genres.get(s.genre, 0) + 1
+
+        return {
+            "total": len(self.samples),
+            "default": len(self.default_samples),
+            "project": len(self.project_samples),
+            "custom": len(self.custom_samples),
+            "by_genre": genres
+        }
 

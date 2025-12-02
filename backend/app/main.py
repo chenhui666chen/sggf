@@ -3,22 +3,62 @@ FastAPI主应用
 """
 import logging
 import sys
+import os
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.db.base import Base, engine
-from app.api.v1 import auth, projects, chapters, knowledge_base, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters, ai_detect, prompt_evolution, ai_trace
+from app.api.v1 import auth, projects, chapters, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters, ai_detect, prompt_evolution, ai_trace
 import socketio
 
+
+# 🔧 自定义 Handler，强制每次写入后刷新缓冲区
+class FlushHandler(logging.StreamHandler):
+    """每次写入后强制刷新的 Handler"""
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
+
 # 🔧 配置日志 - 确保所有模块的日志都能输出
+# 清除已有的 handlers，避免重复
+root_logger = logging.getLogger()
+root_logger.handlers.clear()
+
+# 日志格式
+log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# 1. 控制台 Handler（强制刷新）
+flush_handler = FlushHandler(sys.stdout)
+flush_handler.setLevel(logging.INFO)
+flush_handler.setFormatter(log_formatter)
+
+# 2. 文件 Handler（自动轮转）
+# 创建日志目录
+log_dir = Path(__file__).parent.parent / "logs"
+log_dir.mkdir(exist_ok=True)
+log_file = log_dir / "app.log"
+
+# RotatingFileHandler: 单个文件最大 5MB，保留 3 个备份
+# 总共最多占用 5MB * 4 = 20MB 空间
+file_handler = RotatingFileHandler(
+    log_file,
+    maxBytes=5 * 1024 * 1024,  # 5MB
+    backupCount=3,              # 保留 app.log.1, app.log.2, app.log.3
+    encoding='utf-8'
+)
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(log_formatter)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)  # 输出到控制台
-    ]
+    handlers=[flush_handler, file_handler],
+    force=True  # 强制重新配置
 )
 
 # 设置特定模块的日志级别
@@ -26,6 +66,9 @@ logging.getLogger("app").setLevel(logging.INFO)
 logging.getLogger("app.api").setLevel(logging.INFO)
 logging.getLogger("app.services").setLevel(logging.INFO)
 logging.getLogger("app.websocket").setLevel(logging.INFO)
+logging.getLogger("app.services.prompt_evolution").setLevel(logging.INFO)
+
+logging.info(f"📁 日志文件位置: {log_file}")
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
@@ -58,7 +101,6 @@ async def health_check():
 app.include_router(auth.router)
 app.include_router(projects.router)
 app.include_router(chapters.router)
-app.include_router(knowledge_base.router)
 app.include_router(knowledge.router)  # 向量搜索API
 app.include_router(memories.router)  # 记忆管理API
 app.include_router(ai_assist.router)  # AI辅助功能API

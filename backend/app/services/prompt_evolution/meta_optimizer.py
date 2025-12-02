@@ -29,15 +29,21 @@ class ExperienceRecord:
     ineffective_strategies: List[str] = field(default_factory=list)  # 无效策略
     forbidden_patterns: List[str] = field(default_factory=list)      # 需避免的模式
     best_practices: List[str] = field(default_factory=list)          # 最佳实践
+    # 🔧 新增：权重配置和阈值参数
+    weight_config: Optional[Dict] = None                             # 评分权重配置
+    threshold_config: Optional[Dict] = None                          # 阈值参数配置
+    genre: Optional[str] = None                                      # 适用题材
 
 
 # 初始提示词模板（小说专用版）
-INITIAL_PROMPT = """你是一位资深网文作者，擅长将文字改写得更具"人味"，能够骗过AI检测器。
+INITIAL_PROMPT = """你是一位资深网文作者，擅长将文字改写得更具"人味"，同时保持文笔优美流畅，能够骗过AI检测器。
 
 # 核心任务
-将输入的小说片段进行深度改写，保持故事内容不变，但让文字风格更像真人写作。
+将输入的小说片段进行深度改写，保持故事内容不变，同时：
+1. 让文字风格更像真人写作
+2. 确保文笔优美、行文流畅、富有文学美感
 
-# 改写六维策略
+# 改写七维策略
 
 ## 1. 词汇层 - 去AI化
 【禁用词】震惊、深邃、璀璨、磅礴、不禁、随即、然而、因此、此外
@@ -94,6 +100,30 @@ INITIAL_PROMPT = """你是一位资深网文作者，擅长将文字改写得更
 - 允许轻微的啰嗦和重复
 - 在关键处留白，不必事事说明
 - 段落长度可以参差不齐
+
+## 7. 文笔层 - 顺畅易懂（核心！）
+【总原则】在降低AI痕迹的同时，必须保持行文顺畅、表意清晰
+【顺畅要求】
+- 句子之间衔接自然，避免生硬跳跃
+- 长短句搭配得当，读起来不卡顿
+- 避免机械连接词堆砌（然后、接着、于是）
+【易懂要求】
+- 用词简洁明了，不用生僻词
+- 句子不要太长太绕，一读就懂
+- 避免冗余啰嗦的表达
+【节奏要求】
+- 适度变化句子长度，避免单调
+- 不要全是短句（碎片化），也不要全是长句（费劲）
+- 自然的过渡词让文章更连贯
+【示例】
+原文："然后他进行了思考。之后他开始继续处理这件事。"
+改写："他想了想，继续忙手上的事。"
+
+原文："对于这件事情来说的话，实际上基本上是没有问题的。"
+改写："这事没问题。"
+
+原文："他。站着。看着她。不说话。"
+改写："他站在那儿看着她，一言不发。"
 
 # 标点符号优化
 1. 减少句号的主导，增加节奏感
@@ -245,7 +275,16 @@ AI检测器通过多维度"指纹"识别AI文本，需要综合优化：
    - 段落长度是否参差不齐？
    - 是否有适度的"废话"和留白？
 
-7. **🆕 可读性层**（重要保护维度）：
+7. **🆕 文笔层**（顺畅易懂维度）：
+   - 读起来是否顺畅？有没有卡顿的地方？
+   - 表意是否清晰？能否一读就懂？
+   - 是否避免了机械连接词（然后/接着/于是/之后）？
+   - 是否避免了冗余啰嗦的表达？
+   - 句子长度变化是否自然？不会太单调？
+   - 有没有过长难懂的句子？
+   - ⚠️ 警惕：不要为降AI而牺牲顺畅度！
+
+8. **🆕 可读性层**（重要保护维度）：
    - 句子是否过于碎片化？平均句长是否低于5字？
    - 短句比例是否超过50%？
    - 省略号、破折号是否过度使用？
@@ -277,30 +316,30 @@ AI检测器通过多维度"指纹"识别AI文本，需要综合优化：
 
 请完成以下分析：
 
-1. **七维分析**（六维AI痕迹 + 可读性）：
-   - 逐一检查上述七个维度的改写效果
+1. **八维分析**（六维AI痕迹 + 文笔 + 可读性）：
+   - 逐一检查上述八个维度的改写效果
    - 标注每个维度的得分（1-5分）
-   - 🆕 特别关注可读性是否受损
+   - 🆕 特别关注文笔是否优美、可读性是否受损
 
 2. **成功经验总结**：
    - 成功样本中，哪些改写策略生效了？
    - 是哪个维度的改造贡献最大？
-   - 🆕 可读性是否保持良好？
+   - 🆕 文笔和可读性是否保持良好？
 
 3. **失败原因诊断**：
    - 失败样本为什么效果不好？
    - 改写后仍保留了哪些AI痕迹特征？
-   - 🆕 是否存在过度优化导致可读性下降？
+   - 🆕 是否存在过度优化导致文笔干涩或可读性下降？
 
 4. **策略有效性判断**：
    - 当前提示词中哪些指令是有效的（应保留）？
    - 哪些指令是无效的（应删除或修改）？
-   - 🆕 哪些指令可能导致过度优化？
+   - 🆕 哪些指令可能导致过度优化或牺牲文笔？
 
 5. **趋势判断**：
    - 得分是否在收敛？还是在震荡？
    - 需要大改还是微调？
-   - 🆕 可读性趋势如何？是否在下降？
+   - 🆕 文笔和可读性趋势如何？是否在下降？
 
 【输出格式】
 请严格按以下格式输出：
@@ -345,10 +384,115 @@ class MetaOptimizer:
         self.experience = ExperienceRecord()
         # 🆕 历史分析记录（用于强制差异化）
         self.previous_analyses: List[str] = []
+        # 🔧 当前题材
+        self.current_genre: Optional[str] = None
 
-    def get_initial_prompt(self) -> str:
-        """获取初始提示词"""
-        return INITIAL_PROMPT
+    def get_initial_prompt(self, genre: Optional[str] = None) -> str:
+        """
+        🔧 获取初始提示词（支持按题材定制）
+
+        Args:
+            genre: 题材类型（玄幻/都市/言情/悬疑等）
+        """
+        base_prompt = INITIAL_PROMPT
+
+        if genre:
+            self.current_genre = genre
+            genre_addon = self._get_genre_specific_addon(genre)
+            if genre_addon:
+                base_prompt = base_prompt + "\n\n" + genre_addon
+
+        return base_prompt
+
+    def _get_genre_specific_addon(self, genre: str) -> str:
+        """🔧 获取题材专用的提示词补充"""
+        genre_addons = {
+            "玄幻": """
+# 🎯 玄幻修仙专用优化
+
+## 战斗描写去AI化
+【禁止套路】
+- "剑光如虹"、"气势磅礴"、"威势惊人"等空洞描写
+- "他脸色大变"、"眼中闪过惊恐"等直接心理描写
+- "雷鸣般的掌声"、"全场震惊"等俗套结尾
+
+【替换方案】
+- 用具体的招式动作替代"剑光如虹"：剑身一横，侧划出一道弧线
+- 用身体反应替代"脸色大变"：他往后踉跄一步，脚跟差点没站稳
+- 删除"全场震惊"类结尾，让读者自行感受
+
+## 境界修炼描写
+【禁止】直接说"他感受到体内澎湃的力量"
+【替换】用具体细节：丹田那块热得发烫，像是吞了块烧红的炭
+
+## 对话口语化
+修仙者说话不必文绉绉，可以用现代口语
+- "道友请" → "你先"
+- "敢问阁下" → "你谁啊"
+""",
+            "都市": """
+# 🎯 都市现实专用优化
+
+## 职场/生活场景
+【禁止套路】
+- "深知自己肩负的责任"等正能量废话
+- "首先...其次...最后"的三段式
+- "心中充满希望"等直接情感描写
+
+【替换方案】
+- 用具体行动替代：他把文件夹翻来覆去看了三遍
+- 用生活细节：外卖盒还堆在桌角，咖啡早凉透了
+- 用对话透露心情，而非直接说
+
+## 对话真实感
+办公室对话要有职场味：
+- "我认为这个方案..." → "这个事儿吧..."
+- "请问您有什么意见" → "老板怎么说的"
+- 加入口头禅和语气词
+""",
+            "言情": """
+# 🎯 言情小说专用优化
+
+## 情感表达去AI化
+【绝对禁止】
+- "眼中闪过一丝xxx"、"嘴角微微上扬"
+- "心中一动"、"心头涌起一股暖流"
+- "他礼貌地回应"、"气氛略显尴尬"
+
+【替换方案】
+- 用小动作：她低头玩手机，其实屏幕早就黑了
+- 用对话暗示：他说话时一直看着窗外
+- 用环境映射：咖啡凉了，她也没发现
+
+## 对话自然化
+恋爱中的对话不会那么得体：
+- 会打断、会沉默、会说错话
+- 会重复、会绕弯子、会欲言又止
+- "我觉得你很好，但是..." → "那个...其实..."
+""",
+            "悬疑": """
+# 🎯 悬疑推理专用优化
+
+## 推理过程去AI化
+【禁止套路】
+- "眼中闪过一丝精光"发现线索
+- 过于清晰的逻辑链条
+- "真相终于浮出水面"等套话
+
+【替换方案】
+- 线索发现要自然：他翻报告翻到第三遍才注意到那个数字
+- 推理有曲折：一开始想岔了，后来才反应过来
+- 保留悬念，不要每次都"终于"
+
+## 场景氛围
+不用"灯火通明"这种空洞描写：
+- 具体的光影：荧光灯嗡嗡响，照得人脸色发青
+- 具体的声音：走廊尽头有人咳嗽
+- 具体的气味：咖啡机一直没关，整层楼都是焦味
+"""
+        }
+
+        return genre_addons.get(genre, "")
 
     def reset_experience(self) -> None:
         """重置经验库并预置小说专用知识（新的进化周期开始时调用）"""
@@ -364,12 +508,13 @@ class MetaOptimizer:
         logger.info(f"📚 预置小说专用经验: 有效策略{len(PRESET_EFFECTIVE_STRATEGIES)}条, "
                    f"禁止模式{len(PRESET_FORBIDDEN_PATTERNS)}条")
 
-    def load_historical_experience(self, historical_reports: List[Dict]) -> int:
+    def load_historical_experience(self, historical_reports: List[Dict], genre: Optional[str] = None) -> int:
         """
         从历史经验报告中加载经验（跨批次传承）
 
         Args:
             historical_reports: 历史经验报告列表
+            genre: 🔧 可选的题材过滤（优先加载同题材的经验）
 
         Returns:
             加载的经验条数
@@ -386,10 +531,24 @@ class MetaOptimizer:
             reverse=True
         )
 
-        # 只取最近 5 个批次的经验，避免累积过多
-        recent_reports = sorted_reports[:5]
+        # 🔧 如果指定了题材，优先加载同题材的经验
+        if genre:
+            genre_reports = [r for r in sorted_reports if r.get("genre") == genre]
+            other_reports = [r for r in sorted_reports if r.get("genre") != genre]
+            sorted_reports = genre_reports[:3] + other_reports[:2]  # 同题材3个 + 其他2个
+        else:
+            sorted_reports = sorted_reports[:5]
 
-        for report in recent_reports:
+        # 🔧 加载权重配置（使用最近一个有效的配置）
+        for report in sorted_reports:
+            if report.get("weight_config") and not self.experience.weight_config:
+                self.experience.weight_config = report["weight_config"]
+                logger.info(f"📊 加载历史权重配置")
+            if report.get("threshold_config") and not self.experience.threshold_config:
+                self.experience.threshold_config = report["threshold_config"]
+                logger.info(f"📊 加载历史阈值配置")
+
+        for report in sorted_reports:
             # 加载有效策略（去重）
             for strategy in report.get("effective_strategies", []):
                 if strategy and strategy not in self.experience.effective_strategies:
@@ -420,7 +579,7 @@ class MetaOptimizer:
         self.experience.forbidden_patterns = self.experience.forbidden_patterns[:10]
         self.experience.best_practices = self.experience.best_practices[:10]
 
-        logger.info(f"📚 从历史加载经验: {loaded_count} 条 (来自 {len(recent_reports)} 个批次)")
+        logger.info(f"📚 从历史加载经验: {loaded_count} 条 (来自 {len(sorted_reports)} 个批次)")
 
         return loaded_count
 
@@ -813,7 +972,11 @@ class MetaOptimizer:
             return []
 
         # 核心关键词（这些维度的策略优先级更高）
-        priority_keywords = ["情感", "身体反应", "动作", "标点", "省略号", "问号", "感叹号", "对话", "口语"]
+        priority_keywords = [
+            "情感", "身体反应", "动作", "标点", "省略号", "问号", "感叹号", "对话", "口语",
+            # 🆕 文笔相关关键词
+            "文笔", "优美", "流畅", "比喻", "拟人", "修辞", "韵律", "意境", "画面感", "踱步"
+        ]
 
         # 计算策略优先级
         strategy_scores = []
@@ -916,12 +1079,22 @@ class MetaOptimizer:
 
         return improved_prompt, analysis
 
-    def get_experience_report(self) -> Dict:
-        """获取经验报告"""
+    def get_experience_report(self, weight_config: Optional[Dict] = None, threshold_config: Optional[Dict] = None) -> Dict:
+        """
+        🔧 获取经验报告（增强版：包含权重和阈值配置）
+
+        Args:
+            weight_config: 当前使用的评分权重配置
+            threshold_config: 当前使用的阈值参数配置
+        """
         return {
             "effective_strategies": self.experience.effective_strategies,
             "ineffective_strategies": self.experience.ineffective_strategies,
             "forbidden_patterns": self.experience.forbidden_patterns,
-            "best_practices": self.experience.best_practices
+            "best_practices": self.experience.best_practices,
+            # 🔧 新增：保存权重和阈值配置
+            "weight_config": weight_config or self.experience.weight_config,
+            "threshold_config": threshold_config or self.experience.threshold_config,
+            "genre": self.current_genre
         }
 

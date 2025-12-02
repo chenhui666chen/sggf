@@ -16,6 +16,10 @@ import {
   Alert,
   Divider,
   Grid,
+  FormControl,
+  RadioGroup,
+  FormControlLabel,
+  Radio,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ContentPasteIcon from '@mui/icons-material/ContentPaste'
@@ -35,12 +39,20 @@ const getScoreLevel = (score: number) => {
   return { label: '高AI痕迹', color: '#f44336', icon: ErrorIcon }
 }
 
+// 强度选项配置
+const intensityOptions = [
+  { value: 'light', label: '轻度', description: '表层润色，保留原文90%' },
+  { value: 'medium', label: '中等', description: '智能改写，保留原文70%' },
+  { value: 'strong', label: '高强度', description: '深度重构，保留原文50%' },
+]
+
 export default function AITracePage() {
   const navigate = useNavigate()
   const [inputText, setInputText] = useState('')
   const [outputText, setOutputText] = useState('')
   const [detecting, setDetecting] = useState(false)
   const [reducing, setReducing] = useState(false)
+  const [intensity, setIntensity] = useState<string>('medium') // 默认中等强度
   const [detectResult, setDetectResult] = useState<{
     score: number
     label: string
@@ -114,7 +126,7 @@ export default function AITracePage() {
     setOutputText('')
     setReducedResult(null)
     try {
-      const response = await apiClient.client.post('/api/v1/ai-trace/reduce', { text: inputText })
+      const response = await apiClient.client.post('/api/v1/ai-trace/reduce', { text: inputText, intensity })
       if (response.data.success) {
         setOutputText(response.data.reduced_text)
         setReducedResult({
@@ -130,7 +142,7 @@ export default function AITracePage() {
     } finally {
       setReducing(false)
     }
-  }, [inputText])
+  }, [inputText, intensity])
 
   // 复制结果
   const handleCopy = useCallback(async () => {
@@ -170,7 +182,10 @@ export default function AITracePage() {
                 <Typography variant="h6" sx={{ fontWeight: 600, color: '#1a237e' }}>
                   📝 输入文本
                 </Typography>
-                <Box sx={{ display: 'flex', gap: 1 }}>
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
+                    字数：{charCount} / 10000
+                  </Typography>
                   <Tooltip title="从剪贴板粘贴">
                     <IconButton size="small" onClick={handlePaste} color="primary">
                       <ContentPasteIcon />
@@ -195,15 +210,83 @@ export default function AITracePage() {
                 InputProps={{ sx: { height: '100%', fontSize: '0.95rem', lineHeight: 1.8 } }}
               />
 
-              <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="body2" color="text.secondary">
-                  字数：{charCount} / 10000
-                </Typography>
-                <Box sx={{ display: 'flex', gap: 2 }}>
+              <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+                <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                   <Button variant="outlined" startIcon={detecting ? <CircularProgress size={18} /> : <SearchIcon />}
                     onClick={handleDetect} disabled={detecting || !inputText.trim()}>
                     {detecting ? '检测中...' : '检测AI浓度'}
                   </Button>
+
+                  {/* 强度选择器 */}
+                  <FormControl size="small">
+                    <RadioGroup
+                      row
+                      value={intensity}
+                      onChange={(e) => setIntensity(e.target.value)}
+                      sx={{ gap: 0.5 }}
+                    >
+                      {intensityOptions.map((option) => (
+                        <Tooltip
+                          key={option.value}
+                          title={option.description}
+                          arrow
+                          placement="top"
+                        >
+                          <FormControlLabel
+                            value={option.value}
+                            control={
+                              <Radio
+                                size="small"
+                                sx={{
+                                  py: 0.5,
+                                  '&.Mui-checked': {
+                                    color: option.value === 'light' ? '#4caf50' :
+                                           option.value === 'medium' ? '#ff9800' : '#f44336'
+                                  }
+                                }}
+                              />
+                            }
+                            label={
+                              <Typography
+                                variant="body2"
+                                sx={{
+                                  fontSize: '0.8rem',
+                                  color: intensity === option.value ?
+                                    (option.value === 'light' ? '#4caf50' :
+                                     option.value === 'medium' ? '#ff9800' : '#f44336') :
+                                    'text.secondary',
+                                  fontWeight: intensity === option.value ? 600 : 400
+                                }}
+                              >
+                                {option.label}
+                              </Typography>
+                            }
+                            sx={{
+                              mx: 0,
+                              px: 1,
+                              py: 0.5,
+                              borderRadius: 1,
+                              backgroundColor: intensity === option.value ?
+                                (option.value === 'light' ? 'rgba(76, 175, 80, 0.08)' :
+                                 option.value === 'medium' ? 'rgba(255, 152, 0, 0.08)' : 'rgba(244, 67, 54, 0.08)') :
+                                'transparent',
+                              border: '1px solid',
+                              borderColor: intensity === option.value ?
+                                (option.value === 'light' ? 'rgba(76, 175, 80, 0.3)' :
+                                 option.value === 'medium' ? 'rgba(255, 152, 0, 0.3)' : 'rgba(244, 67, 54, 0.3)') :
+                                'transparent',
+                              transition: 'all 0.2s ease',
+                              '&:hover': {
+                                backgroundColor: option.value === 'light' ? 'rgba(76, 175, 80, 0.04)' :
+                                                 option.value === 'medium' ? 'rgba(255, 152, 0, 0.04)' : 'rgba(244, 67, 54, 0.04)',
+                              }
+                            }}
+                          />
+                        </Tooltip>
+                      ))}
+                    </RadioGroup>
+                  </FormControl>
+
                   <Button
                     variant="contained"
                     startIcon={reducing ? <CircularProgress size={18} color="inherit" /> : <AutoFixHighIcon />}

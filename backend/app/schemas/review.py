@@ -1,38 +1,9 @@
 """
-知识库和评审Schema
+评审Schema
 """
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
-
-
-class KnowledgeBaseBase(BaseModel):
-    """知识库基础Schema"""
-    type: str  # 'world', 'character', 'plot'
-    name: str
-    content: Optional[str] = None
-
-
-class KnowledgeBaseCreate(KnowledgeBaseBase):
-    """知识库创建Schema"""
-    pass
-
-
-class KnowledgeBaseUpdate(BaseModel):
-    """知识库更新Schema"""
-    name: Optional[str] = None
-    content: Optional[str] = None
-
-
-class KnowledgeBaseResponse(KnowledgeBaseBase):
-    """知识库响应Schema"""
-    id: int
-    project_id: int
-    created_at: datetime
-    updated_at: datetime
-    
-    class Config:
-        from_attributes = True
 
 
 class ReviewBase(BaseModel):
@@ -65,7 +36,7 @@ class ReviewResponse(ReviewBase):
     chapter_id: int
     created_at: datetime
     updated_at: datetime
-    
+
     class Config:
         from_attributes = True
 

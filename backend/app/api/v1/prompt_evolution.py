@@ -362,15 +362,61 @@ async def approve_prompt(
     }
 
 
-@router.get("/approved")
-async def get_approved_prompts(current_user: User = Depends(get_current_user)):
-    """获取所有已批准的提示词"""
+@router.post("/revoke")
+async def revoke_approval(
+    request: ApprovePromptRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    取消批准某个版本的提示词
+    """
     storage = get_evolution_storage()
-    latest = storage.get_latest_approved_prompt()
+    success = storage.revoke_approval(request.version_id, request.evolution_id)
+
+    if not success:
+        raise HTTPException(status_code=400, detail="取消批准失败，该版本可能未被批准")
 
     return {
+        "success": True,
+        "message": f"提示词 {request.version_id} 已取消批准",
+        "evolution_id": request.evolution_id,
+        "version_id": request.version_id
+    }
+
+
+@router.get("/approved")
+async def get_approved_prompts(current_user: User = Depends(get_current_user)):
+    """获取所有已批准的提示词列表"""
+    storage = get_evolution_storage()
+    approved_list = storage.get_all_approved_prompts()
+    latest = approved_list[-1] if approved_list else None
+
+    return {
+        "approved_prompts": approved_list,
+        "count": len(approved_list),
         "latest_approved": latest,
         "message": "已批准的提示词可以应用到生产环境" if latest else "暂无已批准的提示词"
+    }
+
+
+@router.delete("/approved/{version_id}")
+async def remove_approved_prompt(
+    version_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    从已批准列表中移除指定版本的提示词（不影响进化历史记录）
+    """
+    storage = get_evolution_storage()
+    success = storage.remove_approved_prompt(version_id)
+
+    if not success:
+        raise HTTPException(status_code=404, detail="该版本未在已批准列表中")
+
+    return {
+        "success": True,
+        "message": f"提示词 {version_id} 已从批准列表中移除",
+        "version_id": version_id
     }
 
 

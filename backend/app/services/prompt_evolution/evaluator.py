@@ -133,11 +133,20 @@ class PromptEvaluator:
                 print(f"   📈 指标变化: {metrics_comparison}")
 
                 # 🆕 6. 计算多维评分（含可读性）
-                original_multi_score = calculate_multi_dimension_score(sample.text, original_metrics)
-                rewritten_multi_score = calculate_multi_dimension_score(rewritten, rewritten_metrics)
+                # 🔧 传入AI检测分数，应用AI率软性约束
+                original_multi_score = calculate_multi_dimension_score(
+                    sample.text, original_metrics, ai_score=original_score
+                )
+                rewritten_multi_score = calculate_multi_dimension_score(
+                    rewritten, rewritten_metrics, ai_score=rewritten_score
+                )
 
                 print(f"   🎯 原文多维评分: {original_multi_score.to_summary()}", flush=True)
                 print(f"   🎯 改写多维评分: {rewritten_multi_score.to_summary()}", flush=True)
+
+                # 🔧 显示AI率调整信息
+                if "ai_rate_adjustment" in rewritten_multi_score.details:
+                    print(f"   📊 AI率调整: {rewritten_multi_score.details['ai_rate_adjustment']}", flush=True)
 
                 # 🆕 显示可读性警告
                 if rewritten_multi_score.readability_warnings:

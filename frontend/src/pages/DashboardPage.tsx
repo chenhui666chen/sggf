@@ -90,7 +90,11 @@ export default function DashboardPage() {
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null)
   const [chapters, setChapters] = useState<any[]>([])
   const [chaptersLoading, setChaptersLoading] = useState(false)
-  const [chapterSortOrder, setChapterSortOrder] = useState<'asc' | 'desc'>('asc')
+  // 🔧 修复：从 localStorage 读取排序偏好
+  const [chapterSortOrder, setChapterSortOrder] = useState<'asc' | 'desc'>(() => {
+    const saved = localStorage.getItem('chapterSortOrder')
+    return (saved === 'asc' || saved === 'desc') ? saved : 'asc'
+  })
 
   // 章节删除状态
   const [deleteChapterDialogOpen, setDeleteChapterDialogOpen] = useState(false)
@@ -149,7 +153,7 @@ export default function DashboardPage() {
     dispatch(fetchProjects())
   }, [dispatch])
 
-  // 🆕 加载知识库统计数据
+  // 🆕 加载知识库统计数据（使用工作流 API）
   useEffect(() => {
     if (projects.length === 0) return
 
@@ -158,10 +162,10 @@ export default function DashboardPage() {
       const stats: Record<number, number> = {}
 
       try {
-        // 并发请求所有项目的知识库数据
+        // 并发请求所有项目的工作流数据
         const promises = projects.map(async (project) => {
           try {
-            const response = await fetch(`/api/v1/projects/${project.id}/knowledge-base`, {
+            const response = await fetch(`/api/v1/workflow/${project.id}/all-stages-content`, {
               headers: {
                 'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
               },
@@ -169,12 +173,14 @@ export default function DashboardPage() {
 
             if (response.ok) {
               const data = await response.json()
-              const total =
-                (data.world_settings?.length || 0) +
-                (data.characters?.length || 0) +
-                (data.plot_outline?.length || 0)
-              stats[project.id] = total
-              logger.log(`✅ 项目 ${project.id} 知识库统计: ${total}`)
+              const stages = data.stages || {}
+              // 统计有内容的设定数量
+              let count = 0
+              if (stages.world_setting) count++
+              if (stages.characters) count++
+              if (stages.plot_outline) count++
+              stats[project.id] = count
+              logger.log(`✅ 项目 ${project.id} 知识库统计: ${count}`)
             } else {
               stats[project.id] = 0
             }
@@ -377,15 +383,18 @@ export default function DashboardPage() {
     navigate('/login')
   }
 
-  const loadChapters = async (projectId: number) => {
+  // 🔧 修复：接收 sortOrder 参数，避免闭包问题
+  const loadChapters = async (projectId: number, sortOrder?: 'asc' | 'desc') => {
+    // 优先使用传入的参数，否则从 localStorage 读取最新值
+    const currentSortOrder = sortOrder ?? (localStorage.getItem('chapterSortOrder') as 'asc' | 'desc') ?? 'asc'
     setChaptersLoading(true)
     try {
-      const response = await apiClient.getChapters(projectId, chapterSortOrder)
+      const response = await apiClient.getChapters(projectId, currentSortOrder)
       if (response.data) {
         // 后端直接返回章节数组，按章节编号排序
         const chaptersList = Array.isArray(response.data) ? response.data : []
         const sortedChapters = chaptersList.sort((a: any, b: any) =>
-          chapterSortOrder === 'asc'
+          currentSortOrder === 'asc'
             ? a.chapter_number - b.chapter_number
             : b.chapter_number - a.chapter_number
         )
@@ -418,9 +427,11 @@ export default function DashboardPage() {
   const handleChapterSortOrderChange = async (newOrder: 'asc' | 'desc') => {
     console.log('切换排序方式:', newOrder)
     setChapterSortOrder(newOrder)
-    // 重新加载章节列表
+    // 🔧 修复：保存到 localStorage
+    localStorage.setItem('chapterSortOrder', newOrder)
+    // 重新加载章节列表，传入新的排序参数避免闭包问题
     if (selectedProjectId) {
-      await loadChapters(selectedProjectId)
+      await loadChapters(selectedProjectId, newOrder)
     }
   }
 
@@ -600,8 +611,11 @@ export default function DashboardPage() {
         setSnackbarSeverity('info')
         setSnackbarOpen(true)
 
-        // 跳转到工作流页面（不再需要传递 URL 参数，因为状态已在 Redux 中）
-        navigate(`/workflow/${projectId}`)
+        // 🔧 关键修复：等待提示消息显示后再跳转，同时不重置状态
+        setTimeout(() => {
+          // 跳转到工作流页面（不再需要传递 URL 参数，因为状态已在 Redux 中）
+          navigate(`/workflow/${projectId}`)
+        }, 500)  // 等待500ms让用户看到提示
       } else {
         const errorData = await response.json()
         logger.error('❌ 创建生成任务失败:', errorData)
@@ -609,6 +623,8 @@ export default function DashboardPage() {
         setSnackbarMessage(errorData.detail || errorData.error || '创建生成任务失败，请重试')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
+        // 🔧 只在失败时重置状态
+        setGeneratingNextChapter(prev => ({ ...prev, [projectId]: false }))
       }
     } catch (error) {
       logger.error('❌ 生成下一章异常:', error)
@@ -616,9 +632,11 @@ export default function DashboardPage() {
       setSnackbarMessage('创建生成任务失败，请重试')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
-    } finally {
+      // 🔧 只在异常时重置状态
       setGeneratingNextChapter(prev => ({ ...prev, [projectId]: false }))
     }
+    // 🔧 关键：移除 finally 块，不自动重置状态
+    // 让 WorkflowControlPage 在任务完成时重置
   }
 
   // 🆕 AI 检测功能
@@ -714,13 +732,13 @@ export default function DashboardPage() {
                       letterSpacing: '0.5px',
                     }}
                   >
-                    我的项目
+                    灵感方舟
                   </Typography>
                   <Typography
                     variant="body2"
                     sx={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.85rem' }}
                   >
-                    管理您的小说创作项目
+                    小说创作 · 管理您的创作项目
                   </Typography>
                 </Box>
               </Box>

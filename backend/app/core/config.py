@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     
     # 向量数据库配置
     CHROMA_PERSIST_DIRECTORY: str = "./chroma_db"
+    # 🆕 Typed-RAG 开关与参数
+    ENABLE_TYPED_RAG: bool = True
+    TYPED_RAG_K_CHAR: int = 4
+    TYPED_RAG_K_WORLD: int = 5
     
     # Agent配置
     TEMPERATURE: float = 0.7

@@ -136,18 +136,7 @@ async def start_workflow(
                 cleared_data["chapters"] = result.rowcount
                 logger.info(f"   ✅ 已删除 {cleared_data['chapters']} 个章节")
 
-                # 2. 删除章节相关的知识库条目
-                try:
-                    delete_kb_query = text("""
-                        DELETE FROM knowledge_base
-                        WHERE project_id = :project_id AND type = 'chapter'
-                    """)
-                    db.execute(delete_kb_query, {"project_id": project_id})
-                    logger.info(f"   ✅ 已清理章节相关的知识库条目")
-                except Exception as e:
-                    logger.warning(f"   ⚠️  知识库清理失败（非致命）: {e}")
-
-                # 3. 清空 project_settings 中的旧内容
+                # 2. 清空 project_settings 中的旧内容
                 clear_settings_query = text("""
                     UPDATE project_settings
                     SET concept = NULL,
@@ -1814,17 +1803,6 @@ async def save_stage_content(
             if chapters:
                 logger.info(f"   📊 发现 {len(chapters)} 个已保存章节，准备清理...")
 
-                # 清理所有章节相关的知识库条目
-                try:
-                    from app.models.knowledge_base import KnowledgeBase
-                    kb_deleted = db.query(KnowledgeBase).filter(
-                        (KnowledgeBase.project_id == project_id) &
-                        (KnowledgeBase.type == 'chapter')
-                    ).delete(synchronize_session=False)
-                    logger.info(f"      ✅ 已删除 {kb_deleted} 个知识库条目")
-                except Exception as e:
-                    logger.warning(f"   ⚠️  知识库清理失败（非致命错误）: {e}")
-
                 # 清理记忆管理中的章节引用
                 try:
                     from app.models.memory import Memory
@@ -1904,44 +1882,20 @@ async def save_stage_content(
                     "word_count": existing_chapter["word_count"]
                 }
                 
-                # 🧹 1) 清理知识库中的章节内容
+                # 🧹 1) 清理 ChromaDB 向量数据
                 try:
-                    logger.info(f"   🗂️  清理知识库中的章节内容...")
-                    
-                    # 删除知识库中与该章节相关的条目
-                    from app.models.knowledge_base import KnowledgeBase
-                    kb_items = db.query(KnowledgeBase).filter(
-                        (KnowledgeBase.project_id == project_id) &
-                        (KnowledgeBase.type == 'chapter') &
-                        (KnowledgeBase.content.like(f"%第{target_chapter_number}章%"))
-                    ).all()
-                    
-                    for item in kb_items:
-                        db.delete(item)
-                        logger.info(f"      ✅ 已删除知识库条目: {item.id}")
-                    
-                    # 🆕 同步删除 ChromaDB 向量数据
-                    try:
-                        from langchain.vectorstores import Chroma
-                        import os
-                        
-                        chroma_dir = os.getenv('CHROMA_PERSIST_DIRECTORY', 'chroma_db')
-                        project_namespace = f"project_{project_id}"
-                        
-                        vectorstore = Chroma(
-                            collection_name=project_namespace,
-                            persist_directory=chroma_dir
-                        )
-                        
-                        # 尝试删除与章节相关的向量（通过元数据过滤）
-                        # 注意：Chroma不完全支持批量删除，这里只是尝试
-                        logger.info(f"      🔍 清理ChromaDB中的章节向量...")
-                    except Exception as e:
-                        logger.warning(f"      ⚠️  ChromaDB清理失败（非致命错误）: {e}")
-                    
+                    logger.info(f"   🗂️  清理ChromaDB中的章节向量...")
+                    from app.services.agents.knowledge_base import NovelKnowledgeBase
+                    kb = NovelKnowledgeBase()
+                    deleted_count = kb.delete_chapter(
+                        chapter_number=target_chapter_number,
+                        project_id=project_id
+                    )
+                    if deleted_count > 0:
+                        logger.info(f"      ✅ 已删除 {deleted_count} 个向量文档")
                 except Exception as e:
-                    logger.warning(f"   ⚠️  知识库清理失败（非致命错误）: {e}")
-                
+                    logger.warning(f"   ⚠️  ChromaDB清理失败（非致命错误）: {e}")
+
                 # 🧹 2) 清理记忆管理中的章节引用
                 try:
                     logger.info(f"   🧠 清理记忆管理中的章节引用...")
@@ -2721,8 +2675,42 @@ async def execute_generate_next_chapter_task(
     # 创建独立的数据库会话
     db = SessionLocal()
 
+    # 🆕 定义四个步骤对应的 Agent 列表
+    STEP_AGENTS = {
+        'structure': [  # 步骤1：章节规划
+            {'id': 'plot_architect', 'name': '情节架构师', 'stage': 'structure'},
+            {'id': 'event_validator', 'name': '事件验证官', 'stage': 'structure'},
+        ],
+        'content': [  # 步骤2：内容创作
+            {'id': 'content_creator', 'name': '内容创作师', 'stage': 'content'},
+            {'id': 'style_optimizer', 'name': '文风优化师', 'stage': 'content'},
+        ],
+        'review': [  # 步骤3：质量评审
+            {'id': 'quality_reviewer', 'name': '质量评审官', 'stage': 'review'},
+        ],
+        'iteration': [  # 步骤4：迭代优化
+            {'id': 'iteration_coordinator', 'name': '迭代协调官', 'stage': 'iteration'},
+            {'id': 'content_reviser', 'name': '内容修订师', 'stage': 'iteration'},
+            {'id': 'final_reviewer', 'name': '最终审核官', 'stage': 'iteration'},
+        ],
+    }
+
     try:
         # ==================== 步骤1：章节规划（真流式） ====================
+        # 🆕 推送步骤1的 Agent 开始工作状态
+        step1_agents = STEP_AGENTS['structure']
+        for agent in step1_agents:
+            await ws_manager.send_agent_status(
+                project_id=project_id,
+                stage=agent['stage'],
+                agent_id=agent['id'],
+                agent_name=agent['name'],
+                status='working',
+                progress=0,
+                message=f'{agent["name"]}正在规划章节结构...'
+            )
+        logger.info(f"   📡 已发送 {len(step1_agents)} 个 Agent 开始状态（步骤1）")
+
         await ws_manager.send_task_progress(
             project_id=project_id,
             task_id=task_id,
@@ -2743,6 +2731,13 @@ async def execute_generate_next_chapter_task(
 
         # 🆕 发送流式开始通知
         await ws_manager.send_stream_start(project_id, 'structure', f"第{next_chapter_number}章规划开始...")
+        # 🔔 推送阶段开始状态（生成下一章 - 步骤1）
+        await ws_manager.send_stage_update(
+            project_id=project_id,
+            stage='structure',
+            status='active',
+            progress=0
+        )
 
         # 🆕 创建流式输出回调
         plan_chunk_index = [0]
@@ -2859,6 +2854,27 @@ async def execute_generate_next_chapter_task(
                 chapter_plan = f"第{next_chapter_number}章创作规划\n\n根据情节大纲和前序章节，本章将继续推进故事发展..."
 
         await ws_manager.send_stream_end(project_id, 'structure', len(chapter_plan), f"第{next_chapter_number}章规划完成")
+        # 🔔 推送阶段完成状态（生成下一章 - 步骤1）
+        await ws_manager.send_stage_update(
+            project_id=project_id,
+            stage='structure',
+            status='completed',
+            output=chapter_plan,
+            progress=25
+        )
+
+        # 🆕 推送步骤1的 Agent 完成状态
+        for agent in step1_agents:
+            await ws_manager.send_agent_status(
+                project_id=project_id,
+                stage=agent['stage'],
+                agent_id=agent['id'],
+                agent_name=agent['name'],
+                status='completed',
+                progress=100,
+                message=f'{agent["name"]}已完成'
+            )
+        logger.info(f"   📡 已发送 {len(step1_agents)} 个 Agent 完成状态（步骤1）")
 
         await ws_manager.send_task_progress(
             project_id=project_id,
@@ -2868,6 +2884,24 @@ async def execute_generate_next_chapter_task(
         )
 
         # ==================== 步骤2：内容创作（真流式） ====================
+        logger.info(f"   🔴 开始步骤2：内容创作")
+        
+        # 🆕 推送步骤2的 Agent 开始工作状态
+        step2_agents = STEP_AGENTS['content']
+        logger.info(f"   📄 已获取步骤2 Agents: {[a['name'] for a in step2_agents]}")
+        
+        for agent in step2_agents:
+            await ws_manager.send_agent_status(
+                project_id=project_id,
+                stage=agent['stage'],
+                agent_id=agent['id'],
+                agent_name=agent['name'],
+                status='working',
+                progress=0,
+                message=f'{agent["name"]}正在创作章节内容...'
+            )
+        logger.info(f"   📡 已发送 {len(step2_agents)} 个 Agent 开始状态（步骤2）")
+
         await ws_manager.send_task_progress(
             project_id=project_id,
             task_id=task_id,
@@ -2875,12 +2909,22 @@ async def execute_generate_next_chapter_task(
             message=f"步骤 2/4: 正在创作第{next_chapter_number}章内容..."
         )
         logger.info(f"   → 步骤2: 生成章节内容（真流式）...")
+        logger.info(f"   📊 章节规划长度: {len(chapter_plan)} 字")
 
         # 🆕 发送流式开始通知
+        logger.info(f"   🌊 发送流式开始通知...")
         await ws_manager.send_stream_start(project_id, 'content', f"第{next_chapter_number}章内容创作开始...")
+        # 🔔 推送阶段开始状态（生成下一章 - 步骤2）
+        await ws_manager.send_stage_update(
+            project_id=project_id,
+            stage='content',
+            status='active',
+            progress=25
+        )
 
         # 🆕 创建流式输出回调
         content_chunk_index = [0]
+        logger.info(f"   🔧 已创建流式回调函数")
 
         async def on_content_chunk(chunk: str, idx: int):
             """内容创作流式回调"""
@@ -2892,6 +2936,8 @@ async def execute_generate_next_chapter_task(
                 chunk_index=idx,
                 is_complete=False
             )
+
+        logger.info(f"   📐 开始匹配场景类型...")
 
         # 🆕 开头/结尾方式定义（与 agent_coordinator 保持同步）
         opening_styles = {
@@ -2955,6 +3001,28 @@ async def execute_generate_next_chapter_task(
             match_method = "章节编号轮换(未匹配到关键词)"
 
         logger.info(f"   📝 第{next_chapter_number}章 - 开头: {selected_opening[0]}, 结尾: {selected_ending[0]} [{match_method}]")
+        logger.info(f"   💬 构建内容创作提示词...")
+
+        # 🆕 Typed-RAG（按类型检索并注入提示）
+        try:
+            from app.core.config import settings
+            from app.services.vector_sync import get_vector_kb
+            kb = get_vector_kb()
+            rag_character_context = ""
+            rag_world_context = ""
+            if kb and getattr(settings, "ENABLE_TYPED_RAG", True):
+                # 使用章节规划作为查询上下文
+                char_docs = kb.search(query=chapter_plan, k=getattr(settings, "TYPED_RAG_K_CHAR", 4), filter_type="character", project_id=project_id)
+                world_docs = kb.search(query=chapter_plan, k=getattr(settings, "TYPED_RAG_K_WORLD", 5), filter_type="world_setting", project_id=project_id)
+                if char_docs:
+                    rag_character_context = "\n".join([f"- {d.metadata.get('name','未知角色')}: {d.page_content[:300]}" for d in char_docs])
+                if world_docs:
+                    rag_world_context = "\n".join([f"- {d.metadata.get('title','设定')}: {d.page_content[:400]}" for d in world_docs])
+                logger.info(f"   📚 RAG注入：人物{len(char_docs)}条，设定{len(world_docs)}条")
+        except Exception as rag_e:
+            logger.warning(f"   ⚠️ Typed-RAG 注入失败: {rag_e}")
+            rag_character_context = ""
+            rag_world_context = ""
 
         # 🆕 构建内容创作提示词（增强版）
         content_system_prompt = """你是一位经验丰富的网络小说作家。请根据提供的章节规划、世界观设定和人物设定，创作精彩的章节内容。
@@ -2999,6 +3067,12 @@ async def execute_generate_next_chapter_task(
 【人物设定】
 {characters}
 
+【RAG检索-人物（自动注入）】
+{rag_character_context if rag_character_context else '（无）'}
+
+【RAG检索-世界设定（自动注入）】
+{rag_world_context if rag_world_context else '（无）'}
+
 【情节大纲】
 {plot_outline}
 
@@ -3025,6 +3099,7 @@ async def execute_generate_next_chapter_task(
 请开始创作第{next_chapter_number}章内容："""
 
         # 🆕 使用真流式 LLM 调用
+        logger.info(f"   🚀 开始调用流式 LLM 服务生成章节内容...")
         try:
             chapter_draft = await streaming_service.generate_chapter_streaming(
                 prompt=content_user_prompt,
@@ -3035,24 +3110,57 @@ async def execute_generate_next_chapter_task(
             logger.info(f"   ✓ 章节初稿已完成（真流式），字数: {len(chapter_draft)}")
         except Exception as e:
             logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
+            import traceback
+            traceback.print_exc()  # 🔧 打印完整的异常堆栈
             # 回退到同步调用
             if hasattr(real_coordinator, 'generate_chapter_content'):
-                chapter_draft = await asyncio.to_thread(
-                    real_coordinator.generate_chapter_content,
-                    chapter_number=next_chapter_number,
-                    chapter_plan=chapter_plan,
-                    world_setting=world_setting,
-                    characters=characters,
-                    previous_ending=previous_ending,
-                    target_word_count=3000,
-                    previous_chapters=previous_chapters_payload,
-                )
+                try:
+                    chapter_draft = await asyncio.to_thread(
+                        real_coordinator.generate_chapter_content,
+                        chapter_number=next_chapter_number,
+                        chapter_plan=chapter_plan,
+                        world_setting=world_setting,
+                        characters=characters,
+                        previous_ending=previous_ending,
+                        target_word_count=3000,
+                        previous_chapters=previous_chapters_payload,
+                    )
+                    logger.info(f"   ✓ 使用同步方式生成章节成功，字数: {len(chapter_draft)}")
+                except Exception as sync_error:
+                    logger.error(f"   ❌ 同步调用也失败: {sync_error}")
+                    traceback.print_exc()
+                    chapter_draft = f"第{next_chapter_number}章内容\n\n{chapter_plan}\n\n（此处为生成的章节内容）"
             else:
+                logger.warning("   ⚠️ 协调器没有 generate_chapter_content 方法，使用默认模板")
                 chapter_draft = f"第{next_chapter_number}章内容\n\n{chapter_plan}\n\n（此处为生成的章节内容）"
 
+        logger.info(f"   🌊 发送流式结束通知...")
         await ws_manager.send_stream_end(project_id, 'content', len(chapter_draft), f"第{next_chapter_number}章内容创作完成")
+        # 🔔 推送阶段完成状态（生成下一章 - 步骤2）
+        await ws_manager.send_stage_update(
+            project_id=project_id,
+            stage='content',
+            status='completed',
+            output=chapter_draft,
+            progress=50
+        )
+        logger.info(f"   ✓ 流式结束通知已发送")
+
+        # 🆕 推送步骤2的 Agent 完成状态
+        for agent in step2_agents:
+            await ws_manager.send_agent_status(
+                project_id=project_id,
+                stage=agent['stage'],
+                agent_id=agent['id'],
+                agent_name=agent['name'],
+                status='completed',
+                progress=100,
+                message=f'{agent["name"]}已完成'
+            )
+        logger.info(f"   📡 已发送 {len(step2_agents)} 个 Agent 完成状态（步骤2）")
 
         # 保存章节初稿到 project_settings
+        logger.info(f"   💾 开始保存章节初稿到数据库...")
         update_query = text("""
             UPDATE project_settings
             SET chapter_draft = :chapter_draft, updated_at = :updated_at
@@ -3066,14 +3174,30 @@ async def execute_generate_next_chapter_task(
         db.commit()
         logger.info(f"   ✓ 章节初稿已同步到数据库")
 
+        logger.info(f"   📡 发送步骤2完成进度通知...")
         await ws_manager.send_task_progress(
             project_id=project_id,
             task_id=task_id,
             progress=50,
             message=f"步骤 2/4: 章节内容创作完成 ✓"
         )
+        logger.info(f"   ✅ 步骤2完全完成！")
 
         # ==================== 步骤3：质量评审（真流式） ====================
+        # 🆕 推送步骤3的 Agent 开始工作状态
+        step3_agents = STEP_AGENTS['review']
+        for agent in step3_agents:
+            await ws_manager.send_agent_status(
+                project_id=project_id,
+                stage=agent['stage'],
+                agent_id=agent['id'],
+                agent_name=agent['name'],
+                status='working',
+                progress=0,
+                message=f'{agent["name"]}正在评审章节质量...'
+            )
+        logger.info(f"   📡 已发送 {len(step3_agents)} 个 Agent 开始状态（步骤3）")
+
         await ws_manager.send_task_progress(
             project_id=project_id,
             task_id=task_id,
@@ -3084,6 +3208,13 @@ async def execute_generate_next_chapter_task(
 
         # 🆕 发送流式开始通知
         await ws_manager.send_stream_start(project_id, 'review', f"第{next_chapter_number}章质量评审开始...")
+        # 🔔 推送阶段开始状态（生成下一章 - 步骤3）
+        await ws_manager.send_stage_update(
+            project_id=project_id,
+            stage='review',
+            status='active',
+            progress=50
+        )
 
         # 🆕 创建流式输出回调
         review_chunk_index = [0]
@@ -3215,6 +3346,27 @@ async def execute_generate_next_chapter_task(
                 review_report = "质量评审：章节符合要求，可以继续优化。"
 
         await ws_manager.send_stream_end(project_id, 'review', len(review_report), f"第{next_chapter_number}章质量评审完成")
+        # 🔔 推送阶段完成状态（生成下一章 - 步骤3）
+        await ws_manager.send_stage_update(
+            project_id=project_id,
+            stage='review',
+            status='completed',
+            output=review_report,
+            progress=75
+        )
+
+        # 🆕 推送步骤3的 Agent 完成状态
+        for agent in step3_agents:
+            await ws_manager.send_agent_status(
+                project_id=project_id,
+                stage=agent['stage'],
+                agent_id=agent['id'],
+                agent_name=agent['name'],
+                status='completed',
+                progress=100,
+                message=f'{agent["name"]}已完成'
+            )
+        logger.info(f"   📡 已发送 {len(step3_agents)} 个 Agent 完成状态（步骤3）")
 
         # 保存评审报告到 project_settings
         update_query = text("""
@@ -3238,6 +3390,20 @@ async def execute_generate_next_chapter_task(
         )
 
         # ==================== 步骤4：迭代优化（真流式） ====================
+        # 🆕 推送步骤4的 Agent 开始工作状态
+        step4_agents = STEP_AGENTS['iteration']
+        for agent in step4_agents:
+            await ws_manager.send_agent_status(
+                project_id=project_id,
+                stage=agent['stage'],
+                agent_id=agent['id'],
+                agent_name=agent['name'],
+                status='working',
+                progress=0,
+                message=f'{agent["name"]}正在优化章节内容...'
+            )
+        logger.info(f"   📡 已发送 {len(step4_agents)} 个 Agent 开始状态（步骤4）")
+
         await ws_manager.send_task_progress(
             project_id=project_id,
             task_id=task_id,
@@ -3248,6 +3414,13 @@ async def execute_generate_next_chapter_task(
 
         # 🆕 发送流式开始通知
         await ws_manager.send_stream_start(project_id, 'iteration', f"第{next_chapter_number}章迭代优化开始...")
+        # 🔔 推送阶段开始状态（生成下一章 - 步骤4）
+        await ws_manager.send_stage_update(
+            project_id=project_id,
+            stage='iteration',
+            status='active',
+            progress=75
+        )
 
         # 🆕 创建流式输出回调
         iteration_chunk_index = [0]
@@ -3355,6 +3528,27 @@ async def execute_generate_next_chapter_task(
             final_version = chapter_draft
 
         await ws_manager.send_stream_end(project_id, 'iteration', len(final_version), f"第{next_chapter_number}章迭代优化完成")
+        # 🔔 推送阶段完成状态（生成下一章 - 步骤4）
+        await ws_manager.send_stage_update(
+            project_id=project_id,
+            stage='iteration',
+            status='completed',
+            output=final_version,
+            progress=100
+        )
+
+        # 🆕 推送步骤4的 Agent 完成状态
+        for agent in step4_agents:
+            await ws_manager.send_agent_status(
+                project_id=project_id,
+                stage=agent['stage'],
+                agent_id=agent['id'],
+                agent_name=agent['name'],
+                status='completed',
+                progress=100,
+                message=f'{agent["name"]}已完成'
+            )
+        logger.info(f"   📡 已发送 {len(step4_agents)} 个 Agent 完成状态（步骤4）")
 
         # 保存最终版本到 project_settings
         update_query = text("""
@@ -3442,6 +3636,122 @@ async def execute_generate_next_chapter_task(
 
         logger.info(f"   ✓ 章节已保存: id={new_chapter_id}")
 
+        # 🆕 阶段2：从章节自动抽取设定候选并入库（供人工确认）
+        try:
+            import re
+            import json
+            from app.models.setting import SettingCollection, SettingItem
+
+            # 确保存在“设定候选”集合
+            candidate_collection = db.query(SettingCollection).filter(
+                SettingCollection.project_id == project_id,
+                SettingCollection.category == "candidate"
+            ).first()
+            if not candidate_collection:
+                candidate_collection = SettingCollection(
+                    project_id=project_id,
+                    name="设定候选",
+                    category="candidate",
+                    description="自动从章节抽取的待确认设定项",
+                    order=999
+                )
+                db.add(candidate_collection)
+                db.commit()
+                db.refresh(candidate_collection)
+
+            chapter_text = final_version or ""
+            patterns = [
+                ("功法", r"([一-龥A-Za-z0-9]{2,12})功法|功法《(.{1,20})》"),
+                ("丹药", r"([一-龥A-Za-z0-9]{2,12})丹药|丹药《(.{1,20})》"),
+                ("阵法", r"([一-龥A-Za-z0-9]{2,12})阵法|阵法《(.{1,20})》"),
+                ("门派/宗门", r"([一-龥A-Za-z0-9]{2,12})(宗门|门派)"),
+                ("秘境/遗迹", r"([一-龥A-Za-z0-9]{2,12})(秘境|遗迹)"),
+                ("城市/城镇", r"([一-龥A-Za-z0-9]{2,12})(城|城镇|都市)"),
+            ]
+
+            # 推荐目标集合类别映射
+            typ_to_category_map = {
+                "功法": "technique_system",
+                "丹药": "pill_system",
+                "阵法": "formation_system",
+                "门派/宗门": None,
+                "秘境/遗迹": "map_system",
+                "城市/城镇": "map_system",
+            }
+
+            extracted = []
+            for typ, pat in patterns:
+                for m in re.finditer(pat, chapter_text):
+                    name = (m.group(1) or (m.group(2) if m.lastindex and m.lastindex >= 2 else "")).strip()
+                    if not name:
+                        continue
+                    if any(x["name"] == name and x["type"] == typ for x in extracted):
+                        continue
+                    start = max(m.start() - 50, 0)
+                    end = min(m.end() + 50, len(chapter_text))
+                    excerpt = chapter_text[start:end]
+                    extracted.append({"type": typ, "name": name, "excerpt": excerpt})
+
+            # 限制一次入库数量，避免刷屏
+            for item in extracted[:10]:
+                # 计算推荐目标集合
+                recommended_category = typ_to_category_map.get(item['type'])
+                target_collection = None
+                if recommended_category:
+                    target_collection = db.query(SettingCollection).filter(
+                        SettingCollection.project_id == project_id,
+                        SettingCollection.category == recommended_category
+                    ).first()
+                # 选择写入集合：优先正式集合，否则候选集合
+                write_collection_id = (target_collection.id if target_collection else candidate_collection.id)
+                # 标记标签与推荐信息
+                tag_list = (["自动抽取"] if target_collection else ["候选","自动抽取"])
+                recommended_note = (f"\n推荐目标集合：{recommended_category}" if (recommended_category and not target_collection) else "")
+                si = SettingItem(
+                    collection_id=write_collection_id,
+                    name=f"{item['name']}（{item['type']}）",
+                    code=None,
+                    level=1,
+                    tags=json.dumps(tag_list, ensure_ascii=False),
+                    content=f"来源：第{next_chapter_number}章\n上下文：{item['excerpt']}\n类型：{item['type']}" + recommended_note,
+                    relations=None,
+                    order=0
+                )
+                db.add(si)
+            if extracted:
+                db.commit()
+                logger.info(f"   ✓ 抽取设定 {len(extracted[:10])} 项并入库（含推荐集合规则）")
+        except Exception as e:
+            logger.warning(f"   ⚠️ 设定候选抽取失败: {e}")
+
+        # 🆕 阶段3：自动合并高置信度设定项到正式集合
+        try:
+            from app.services.setting_auto_merge import SettingAutoMergeService
+            
+            # 获取候选集合
+            candidate_collection = db.query(SettingCollection).filter(
+                SettingCollection.project_id == project_id,
+                SettingCollection.category == "candidate"
+            ).first()
+            
+            if candidate_collection:
+                merge_result = SettingAutoMergeService.auto_merge_high_confidence_items(
+                    db=db,
+                    project_id=project_id,
+                    candidate_collection_id=candidate_collection.id,
+                    chapter_plan=chapter_plan or "",
+                    chapter_content=final_version or "",
+                )
+                
+                if merge_result["merged_count"] > 0:
+                    logger.info(
+                        f"   ✓ 自动合并高置信度设定: "
+                        f"成功 {merge_result['merged_count']} 项, "
+                        f"跳过 {merge_result['skipped_count']} 项"
+                    )
+        except Exception as e:
+            logger.warning(f"   ⚠️ 自动合并设定失败: {e}")
+
         # 生成章节摘要
         try:
             from app.services.agents.chapter_summarizer import create_chapter_summarizer
@@ -3459,7 +3769,7 @@ async def execute_generate_next_chapter_task(
 
         # 同步到知识库
         try:
-            from app.api.v1.knowledge_base import sync_to_vector_db
+            from app.services.vector_sync import sync_to_vector_db
             sync_to_vector_db(
                 kb_type="chapter",
                 name=f"第{next_chapter_number}章 {chapter_title}",
@@ -3636,61 +3946,7 @@ async def expand_outline(
         })
         db.commit()
         logger.info("   💾 扩展大纲已保存到数据库")
-        
-        # 6. 可选：保存到知识库（更新已存在的条目，避免重复创建）
-        try:
-            from app.models.knowledge_base import KnowledgeBase
 
-            # 🔥 修复：查找已存在的"扩展大纲"条目并更新，而不是创建新的
-            existing_outline = db.query(KnowledgeBase).filter(
-                KnowledgeBase.project_id == request.project_id,
-                KnowledgeBase.type == "plot_outline",
-                KnowledgeBase.name.like("扩展大纲%")
-            ).first()
-
-            if existing_outline:
-                # 更新已存在的条目
-                existing_outline.name = f"扩展大纲({result['current_chapter_count']}章)"
-                existing_outline.content = result["expanded_outline"]
-                logger.info("   📝 更新已存在的扩展大纲条目")
-            else:
-                # 创建新条目
-                kb_outline = KnowledgeBase(
-                    project_id=request.project_id,
-                    type="plot_outline",
-                    name=f"扩展大纲({result['current_chapter_count']}章)",
-                    content=result["expanded_outline"]
-                )
-                db.add(kb_outline)
-                logger.info("   ➕ 创建新的扩展大纲条目")
-
-            # 🔥 修复：查找已存在的"章节分解"条目并更新
-            existing_breakdown = db.query(KnowledgeBase).filter(
-                KnowledgeBase.project_id == request.project_id,
-                KnowledgeBase.type == "plot_outline",
-                KnowledgeBase.name == "章节分解"
-            ).first()
-
-            if existing_breakdown:
-                # 更新已存在的条目
-                existing_breakdown.content = result["chapter_breakdown"]
-                logger.info("   📝 更新已存在的章节分解条目")
-            else:
-                # 创建新条目
-                kb_breakdown = KnowledgeBase(
-                    project_id=request.project_id,
-                    type="plot_outline",
-                    name="章节分解",
-                    content=result["chapter_breakdown"]
-                )
-                db.add(kb_breakdown)
-                logger.info("   ➕ 创建新的章节分解条目")
-
-            db.commit()
-            logger.info("   💾 扩展结果已保存到知识库")
-        except Exception as e:
-            logger.warning(f"   ⚠️  保存到知识库失败: {e}")
-        
         return {
             "success": True,
             "expanded_outline": result["expanded_outline"],
@@ -3818,62 +4074,8 @@ async def expand_characters(
         })
         db.commit()
         logger.info("   💾 扩展人物已保存到数据库")
-        
-        # 6. 可选：保存到知识库（更新已存在的条目，避免重复创建）
-        try:
-            from app.models.knowledge_base import KnowledgeBase
 
-            # 🔥 修复：查找已存在的"完整人物体系"条目并更新，而不是创建新的
-            existing_characters = db.query(KnowledgeBase).filter(
-                KnowledgeBase.project_id == request.project_id,
-                KnowledgeBase.type == "character",
-                KnowledgeBase.name.like("完整人物体系%")
-            ).first()
-
-            if existing_characters:
-                # 更新已存在的条目
-                existing_characters.name = f"完整人物体系({result['current_character_count']}个)"
-                existing_characters.content = result["all_characters"]
-                logger.info("   📝 更新已存在的人物体系条目")
-            else:
-                # 创建新条目
-                kb_characters = KnowledgeBase(
-                    project_id=request.project_id,
-                    type="character",
-                    name=f"完整人物体系({result['current_character_count']}个)",
-                    content=result["all_characters"]
-                )
-                db.add(kb_characters)
-                logger.info("   ➕ 创建新的人物体系条目")
-
-            # 🔥 修复：查找已存在的"人物关系网络"条目并更新
-            existing_relationships = db.query(KnowledgeBase).filter(
-                KnowledgeBase.project_id == request.project_id,
-                KnowledgeBase.type == "character",
-                KnowledgeBase.name == "人物关系网络"
-            ).first()
-
-            if existing_relationships:
-                # 更新已存在的条目
-                existing_relationships.content = result["character_relationships"]
-                logger.info("   📝 更新已存在的人物关系网络条目")
-            else:
-                # 创建新条目
-                kb_relationships = KnowledgeBase(
-                    project_id=request.project_id,
-                    type="character",
-                    name="人物关系网络",
-                    content=result["character_relationships"]
-                )
-                db.add(kb_relationships)
-                logger.info("   ➕ 创建新的人物关系网络条目")
-
-            db.commit()
-            logger.info("   💾 扩展结果已保存到知识库")
-        except Exception as e:
-            logger.warning(f"   ⚠️  保存到知识库失败: {e}")
-
-        # 7. 🆕 自动解析人物卡并同步到结构化characters表
+        # 6. 🆕 自动解析人物卡并同步到结构化characters表
         sync_result = {"parsed": 0, "created": 0, "updated": 0, "skipped": 0}
         try:
             from app.services.character_parser import parse_and_sync_characters

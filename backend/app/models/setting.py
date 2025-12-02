@@ -5,7 +5,7 @@
 from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 
-from sqlalchemy import String, Text, ForeignKey, DateTime, Integer
+from sqlalchemy import String, Text, ForeignKey, DateTime, Integer, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -27,6 +27,8 @@ class SettingCollection(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    max_depth: Mapped[int] = mapped_column(Integer, default=2)
+    hierarchy_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     order: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -64,6 +66,13 @@ class SettingItem(Base):
     tags: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     relations: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    snapshots: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="版本快照JSON数组")
+    confidence_score: Mapped[Optional[float]] = mapped_column(nullable=True, comment="置信度分数0-1")
+    depth: Mapped[int] = mapped_column(Integer, default=1)
+    node_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    is_leaf: Mapped[bool] = mapped_column(Boolean, default=True)
+    path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     order: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

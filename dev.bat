@@ -50,7 +50,7 @@ cd /d %~dp0\backend
 python -c "from app.core.config import settings; print('✅ 数据库:', settings.DATABASE_URL); print('✅ CORS:', settings.CORS_ORIGINS[:2] if len(settings.CORS_ORIGINS) > 2 else settings.CORS_ORIGINS)"
 cd /d %~dp0
 echo.
-start "Novel System - Backend (FastAPI + WebSocket)" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && cd backend && python -m uvicorn app.main:application --host 0.0.0.0 --port 8000 --reload"
+start "Novel System - Backend (FastAPI + WebSocket)" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && cd backend && set PYTHONUNBUFFERED=1 && python -u -m uvicorn app.main:application --host 0.0.0.0 --port 8000 --reload"
 
 :: Wait for backend
 echo [WAIT] Waiting for backend to start...

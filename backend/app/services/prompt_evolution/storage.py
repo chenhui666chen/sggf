@@ -74,19 +74,43 @@ class EvolutionStorage:
     def list_evolution_histories(self) -> List[Dict[str, Any]]:
         """列出所有进化历史（摘要）"""
         all_histories = self._load_all_histories()
-        return [
-            {
+        result = []
+        for h in all_histories:
+            best_versions = h.get("best_versions", [])
+            ai_score = None
+            composite = None
+
+            if best_versions:
+                # 🔧 从所有 best_versions 中找最优的综合评分和 AI 分数
+                # 优先选择有有效综合评分的版本
+                valid_composite_versions = [
+                    v for v in best_versions
+                    if v.get("avg_composite_score") is not None and v.get("avg_composite_score") < 100
+                ]
+
+                if valid_composite_versions:
+                    # 按综合评分排序，取最低的
+                    best_composite_v = min(valid_composite_versions, key=lambda v: v.get("avg_composite_score", 100))
+                    composite = best_composite_v.get("avg_composite_score")
+                    ai_score = best_composite_v.get("avg_ai_score")
+                else:
+                    # 没有有效综合评分，取 AI 分数最低的版本
+                    best_ai_v = min(best_versions, key=lambda v: v.get("avg_ai_score", 100))
+                    ai_score = best_ai_v.get("avg_ai_score")
+                    composite = None  # 显示为 "-"
+
+            result.append({
                 "evolution_id": h.get("evolution_id"),
                 "status": h.get("status"),
                 "target_score": h.get("target_score"),
                 "current_iteration": h.get("current_iteration"),
-                "best_score": h.get("best_versions", [{}])[0].get("avg_ai_score") if h.get("best_versions") else None,
+                "best_score": composite,  # 综合评分（无数据显示 -）
+                "ai_score": ai_score,     # AI分数
                 "approval_status": h.get("approval_status"),
                 "started_at": h.get("started_at"),
                 "completed_at": h.get("completed_at")
-            }
-            for h in all_histories
-        ]
+            })
+        return result
 
     def delete_evolution_history(self, evolution_id: str) -> bool:
         """删除指定的进化历史"""
@@ -176,14 +200,14 @@ class EvolutionStorage:
     
     def save_best_prompts(self, versions: List[PromptVersion], keep_top_n: int = 5) -> None:
         """保存最佳提示词（只保留前N个）"""
-        # 按得分排序，取前N个
-        sorted_versions = sorted(versions, key=lambda v: v.avg_ai_score)[:keep_top_n]
-        
+        # 🔧 按综合评分排序，取前N个（综合评分越低越好）
+        sorted_versions = sorted(versions, key=lambda v: v.avg_composite_score)[:keep_top_n]
+
         data = [v.to_dict() for v in sorted_versions]
         with open(self.best_prompts_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        
-        logger.info(f"💾 保存最佳提示词: {len(sorted_versions)} 个")
+
+        logger.info(f"💾 保存最佳提示词: {len(sorted_versions)} 个（按综合评分排序）")
     
     def load_best_prompts(self) -> List[PromptVersion]:
         """加载最佳提示词"""
@@ -222,6 +246,10 @@ class EvolutionStorage:
             "evolution_id": evolution_id,
             "prompt_text": approved_version.prompt_text,
             "avg_ai_score": approved_version.avg_ai_score,
+            # 🔧 新增：保存综合评分字段
+            "avg_composite_score": approved_version.avg_composite_score,
+            "avg_readability": approved_version.avg_readability,
+            "avg_writing": approved_version.avg_writing,
             "approved_at": datetime.now().isoformat(),
             "status": "approved"
         }
@@ -234,13 +262,60 @@ class EvolutionStorage:
         
         logger.info(f"✅ 批准提示词: {version_id}")
         return True
-    
+
+    def revoke_approval(self, version_id: str, evolution_id: str) -> bool:
+        """取消批准提示词"""
+        history = self.load_evolution_history(evolution_id)
+        if not history:
+            return False
+
+        # 检查是否是当前批准的版本
+        if history.approved_version_id != version_id:
+            return False
+
+        # 更新状态
+        history.approval_status = ApprovalStatus.PENDING
+        history.approved_version_id = None
+        self.save_evolution_history(history)
+
+        # 从已批准列表中移除
+        approved_list = self._load_approved_prompts()
+        approved_list = [p for p in approved_list if not (p.get("version_id") == version_id and p.get("evolution_id") == evolution_id)]
+
+        with open(self.approved_prompts_file, "w", encoding="utf-8") as f:
+            json.dump(approved_list, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"🔄 取消批准提示词: {version_id}")
+        return True
+
     def get_latest_approved_prompt(self) -> Optional[Dict[str, Any]]:
         """获取最新批准的提示词"""
         approved_list = self._load_approved_prompts()
         if not approved_list:
             return None
         return approved_list[-1]
+
+    def get_all_approved_prompts(self) -> List[Dict[str, Any]]:
+        """获取所有已批准的提示词列表"""
+        return self._load_approved_prompts()
+
+    def remove_approved_prompt(self, version_id: str) -> bool:
+        """从已批准列表中移除指定版本的提示词"""
+        approved_list = self._load_approved_prompts()
+
+        # 查找并移除
+        original_count = len(approved_list)
+        approved_list = [p for p in approved_list if p.get("version_id") != version_id]
+
+        if len(approved_list) == original_count:
+            return False  # 没有找到要移除的版本
+
+        # 保存更新后的列表
+        with open(self.approved_prompts_file, "w", encoding="utf-8") as f:
+            json.dump(approved_list, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"🗑️ 从已批准列表中移除提示词: {version_id}")
+        return True
 
     def save_experience_report(self, evolution_id: str, report: Dict) -> None:
         """保存经验报告"""
