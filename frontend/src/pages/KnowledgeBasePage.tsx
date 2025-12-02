@@ -600,7 +600,9 @@ export default function KnowledgeBasePage() {
 
   const getAvailableCategoriesToAdd = (): string[] => {
     const existingCategories = new Set(collections.map(c => c.category))
-    return Object.keys(CATEGORY_NAME_MAP).filter(key => !existingCategories.has(key)).sort()
+    return Object.keys(CATEGORY_NAME_MAP)
+      .filter(key => key !== 'character_system' && !existingCategories.has(key))
+      .sort()
   }
 
   const handleQuickAddCategory = async (category: string) => {

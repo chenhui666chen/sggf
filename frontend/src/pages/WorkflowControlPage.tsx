@@ -414,7 +414,9 @@ export default function WorkflowControlPage() {
   // 辅助函数：获取未创建的体系列表
   const getAvailableCategoriesToAdd = (): string[] => {
     const existingCategories = new Set(settingCollections.map((c: any) => c.category))
-    return Object.keys(CATEGORY_NAME_MAP).filter(key => !existingCategories.has(key)).sort()
+    return Object.keys(CATEGORY_NAME_MAP)
+      .filter(key => key !== 'character_system' && !existingCategories.has(key))
+      .sort()
   }
 
   // 快速添加体系
