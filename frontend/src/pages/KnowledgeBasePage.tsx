@@ -136,7 +136,6 @@ const CATEGORY_NAME_MAP: Record<string, string> = {
   // 特殊
   candidate: '候选集合',
   organization_system: '组织体系',
-  artifact_system: '法宝体系',
 }
 
 // ==================== 主组件 ====================

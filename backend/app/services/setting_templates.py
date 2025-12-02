@@ -413,7 +413,7 @@ SETTING_TEMPLATES: Dict[str, Dict[str, Any]] = {
             },
             {
                 "name": "隐秘组织与势力体系",
-                "category": "hidden_organization_force_system",
+                "category": "force_system",
                 "description": "都市中的各类隐秘势力、官方机构与地下组织。",
                 "items": [
                     {"name": "特殊事务管理局", "level": 3, "code": "ORG_BUREAU", "tags": ["官方", "监管"], "content": "国家级异能者管理机构，负责登记、监控、调度异能者。表面中立，实则各派系暗中角力，掌握最完整的异能者数据库。"},

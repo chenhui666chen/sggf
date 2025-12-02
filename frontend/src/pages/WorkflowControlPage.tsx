@@ -162,7 +162,6 @@ const CATEGORY_NAME_MAP: Record<string, string> = {
   // 特殊
   candidate: '候选集合',
   organization_system: '组织体系',
-  artifact_system: '法宝体系',
 }
 
 export default function WorkflowControlPage() {
@@ -4928,8 +4927,13 @@ export default function WorkflowControlPage() {
                     )}
                   </Box>
 
-                  {/* 右侧：设定项列表 */}
+                  {/* 右侧：视图切换 + 设定项/人物分组 */}
                   <Box sx={{ flex: 1, minHeight: 320 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+                      <Button size="small" onClick={() => { loadStructuredCharacters(); }}>
+                        人物分组视图
+                      </Button>
+                    </Box>
                     {selectedCollectionId ? (
                       <>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
@@ -5010,7 +5014,23 @@ export default function WorkflowControlPage() {
                             ))}
                           </List>
 
+                        {/* 人物分组视图（简单列表） */}
+                        {structuredCharacters.length > 0 && (
+                          <Box sx={{ mt: 2 }}>
+                            <Typography variant="subtitle1" sx={{ mb: 1 }}>人物分组视图（来自人物卡）</Typography>
+                            <List dense sx={{ maxHeight: 240, overflow: 'auto' }}>
+                              {structuredCharacters.map((ch: any) => (
+                                <ListItem key={ch.id}>
+                                  <ListItemText
+                                    primary={ch.name || '未命名角色'}
+                                    secondary={(ch.tags && ch.tags.join('、')) || ch.role || ch.faction || ''}
+                                  />
+                                </ListItem>
+                              ))}
+                            </List>
+                          </Box>
                         )}
+
                       </>
                     ) : (
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
