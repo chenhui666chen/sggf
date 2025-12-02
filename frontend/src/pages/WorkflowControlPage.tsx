@@ -418,10 +418,10 @@ export default function WorkflowControlPage() {
     return settingCollections.filter((c: any) => c.category === categoryFilter)
   }
 
-  // 辅助函数：获取唯一 Category 列表
+  // 辅助函数：获取唯一 Category 列表（显示所有27种体系）
   const getUniqueCategories = (): string[] => {
-    const categories = new Set(settingCollections.map((c: any) => c.category))
-    return Array.from(categories).sort()
+    // 返回所有定义的体系，而不仅仅是已有的
+    return Object.keys(CATEGORY_NAME_MAP).sort()
   }
 
   // 🧬 结构化人物：加载角色列表

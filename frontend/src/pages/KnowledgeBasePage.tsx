@@ -605,8 +605,8 @@ export default function KnowledgeBasePage() {
   }
 
   const getUniqueCategories = (): string[] => {
-    const categories = new Set(collections.map(c => c.category))
-    return Array.from(categories).sort()
+    // 返回所有定义的体系，而不仅仅是已有的
+    return Object.keys(CATEGORY_NAME_MAP).sort()
   }
 
   // ==================== 渲染 ====================
