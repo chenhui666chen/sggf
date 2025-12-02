@@ -28,6 +28,9 @@ import {
   Tabs,
   Tab,
   MenuItem,
+  FormControl,
+  InputLabel,
+  Select,
   Fab,
 } from '@mui/material'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
@@ -4776,7 +4779,6 @@ export default function WorkflowControlPage() {
                   {/* 左侧：设定集合列表 */}
                   <Box sx={{ width: 260, flexShrink: 0 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                      <Typography variant="subtitle1">设定集合</Typography>
                       <Box sx={{ display: 'flex', gap: 1 }}>
                         <Button
                           size="small"
@@ -4798,6 +4800,25 @@ export default function WorkflowControlPage() {
                       </Box>
                     </Box>
 
+                    {/* Category 过滤器 */}
+                    {settingCollections.length > 0 && (
+                      <FormControl size="small" fullWidth sx={{ mb: 2 }}>
+                        <InputLabel>按分类过滤</InputLabel>
+                        <Select
+                          value={categoryFilter}
+                          label="按分类过滤"
+                          onChange={(e) => setCategoryFilter(e.target.value)}
+                        >
+                          <MenuItem value="all">全部</MenuItem>
+                          {getUniqueCategories().map((cat) => (
+                            <MenuItem key={cat} value={cat}>
+                              {getCategoryDisplayName(cat)}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    )}
+
                     {settingCollectionsLoading ? (
                       <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
                         <CircularProgress size={24} />
@@ -4811,7 +4832,7 @@ export default function WorkflowControlPage() {
                             </Typography>
                           </ListItem>
                         ) : (
-                          settingCollections.map((collection: any) => (
+                          getFilteredCollections().map((collection: any) => (
                             <ListItem
                               key={collection.id}
                               selected={collection.id === selectedCollectionId}
@@ -4862,7 +4883,7 @@ export default function WorkflowControlPage() {
                                 <Typography variant="body2">{collection.name}</Typography>
                                 {collection.category && (
                                   <Typography variant="caption" color="text.secondary">
-                                    {collection.category}
+                                    {getCategoryDisplayName(collection.category)}
                                   </Typography>
                                 )}
                               </Box>
@@ -4940,7 +4961,7 @@ export default function WorkflowControlPage() {
                                     </Tooltip>
                                   </Box>
                                 }
-                                sx={{ cursor: 'grab' }}
+                                sx={{ cursor: 'grab', pr: 10, pl: `${getIndentForItem(item) + 8}px` }}
                               >
                                 <Box>
                                   <Typography variant="body2">
@@ -4948,9 +4969,7 @@ export default function WorkflowControlPage() {
                                     {item.name}
                                   </Typography>
                                   {item.code && (
-                                    <Typography variant="caption" color="text.secondary">
-                                      {item.code}
-                                    </Typography>
+                                    <Chip label={item.code} size="small" variant="outlined" sx={{ mt: 0.5 }} />
                                   )}
                                 </Box>
                               </ListItem>
