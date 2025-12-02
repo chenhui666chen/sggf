@@ -578,7 +578,7 @@ SETTING_TEMPLATES: Dict[str, Dict[str, Any]] = {
             },
             {
                 "name": "魔法与术法体系",
-                "category": "magic_sorcery_system",
+                "category": "magic_system",
                 "description": "魔法的分类、等级与施法规则。",
                 "items": [
                     {"name": "元素魔法", "level": 1, "code": "MAG_ELEMENT", "tags": ["基础", "攻击"], "content": "操控火、水、风、土、雷等自然元素的魔法，是最常见的战斗魔法。学习门槛低，但精通需要极高天赋。"},
