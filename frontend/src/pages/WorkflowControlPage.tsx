@@ -238,7 +238,7 @@ export default function WorkflowControlPage() {
   const [clearExistingSettings, setClearExistingSettings] = useState(false)
   const [applyingTemplate, setApplyingTemplate] = useState(false)
   const [settingItemsLoading, setSettingItemsLoading] = useState(false)
-  const [categoryFilter, setCategoryFilter] = useState<string>('all')  // Category 过滤状态
+  const [selectedCategoryToAdd, setSelectedCategoryToAdd] = useState<string>('')  // 快速添加体系状态
 
   // 类型设定：集合/设定项编辑对话框 & 删除确认
   const [collectionDialogOpen, setCollectionDialogOpen] = useState(false)
@@ -412,16 +412,43 @@ export default function WorkflowControlPage() {
     return ((item.depth || 1) - 1) * 24
   }
 
-  // 辅助函数：过滤集合
-  const getFilteredCollections = (): any[] => {
-    if (categoryFilter === 'all') return settingCollections
-    return settingCollections.filter((c: any) => c.category === categoryFilter)
+  // 辅助函数：获取未创建的体系列表
+  const getAvailableCategoriesToAdd = (): string[] => {
+    const existingCategories = new Set(settingCollections.map((c: any) => c.category))
+    return Object.keys(CATEGORY_NAME_MAP).filter(key => !existingCategories.has(key)).sort()
   }
 
-  // 辅助函数：获取唯一 Category 列表（显示所有27种体系）
-  const getUniqueCategories = (): string[] => {
-    // 返回所有定义的体系，而不仅仅是已有的
-    return Object.keys(CATEGORY_NAME_MAP).sort()
+  // 快速添加体系
+  const handleQuickAddCategory = async (category: string) => {
+    if (!projectId || !category) return
+
+    const projectIdNum = Number(projectId)
+    if (Number.isNaN(projectIdNum)) return
+
+    try {
+      // 自动创建集合，使用中文名称作为集合名称
+      const collectionName = getCategoryDisplayName(category)
+      await apiClient.createSettingCollection(projectIdNum, {
+        name: collectionName,
+        category: category,
+        description: `${collectionName}设定`,
+      })
+
+      // 重新加载集合列表
+      await loadSettingCollections(projectIdNum)
+
+      setSnackbarMessage(`✅ 已添加「${collectionName}」`)
+      setSnackbarSeverity('success')
+      setSnackbarOpen(true)
+
+      // 清空选择
+      setSelectedCategoryToAdd('')
+    } catch (error) {
+      console.error('快速添加体系失败:', error)
+      setSnackbarMessage('添加体系失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    }
   }
 
   // 🧬 结构化人物：加载角色列表
@@ -4800,17 +4827,23 @@ export default function WorkflowControlPage() {
                       </Box>
                     </Box>
 
-                    {/* Category 过滤器 */}
-                    {settingCollections.length > 0 && (
+                    {/* 快速添加体系下拉框 */}
+                    {getAvailableCategoriesToAdd().length > 0 && (
                       <FormControl size="small" fullWidth sx={{ mb: 2 }}>
-                        <InputLabel>按分类过滤</InputLabel>
+                        <InputLabel>快速添加体系</InputLabel>
                         <Select
-                          value={categoryFilter}
-                          label="按分类过滤"
-                          onChange={(e) => setCategoryFilter(e.target.value)}
+                          value={selectedCategoryToAdd}
+                          label="快速添加体系"
+                          onChange={(e) => {
+                            const category = e.target.value
+                            setSelectedCategoryToAdd(category)
+                            if (category) {
+                              handleQuickAddCategory(category)
+                            }
+                          }}
                         >
-                          <MenuItem value="all">全部</MenuItem>
-                          {getUniqueCategories().map((cat) => (
+                          <MenuItem value="">请选择要添加的体系...</MenuItem>
+                          {getAvailableCategoriesToAdd().map((cat) => (
                             <MenuItem key={cat} value={cat}>
                               {getCategoryDisplayName(cat)}
                             </MenuItem>
@@ -4832,7 +4865,7 @@ export default function WorkflowControlPage() {
                             </Typography>
                           </ListItem>
                         ) : (
-                          getFilteredCollections().map((collection: any) => (
+                          settingCollections.map((collection: any) => (
                             <ListItem
                               key={collection.id}
                               selected={collection.id === selectedCollectionId}

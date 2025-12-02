@@ -170,8 +170,8 @@ export default function KnowledgeBasePage() {
   const [loadingCollections, setLoadingCollections] = useState(false)
   const [loadingItems, setLoadingItems] = useState(false)
 
-  // Category 过滤
-  const [categoryFilter, setCategoryFilter] = useState<string>('all')
+  // 快速添加体系
+  const [selectedCategoryToAdd, setSelectedCategoryToAdd] = useState<string>('')
 
   // 对话框状态
   const [createCollectionDialog, setCreateCollectionDialog] = useState(false)
@@ -599,14 +599,31 @@ export default function KnowledgeBasePage() {
     return ((item.depth || 1) - 1) * 24
   }
 
-  const getFilteredCollections = (): SettingCollection[] => {
-    if (categoryFilter === 'all') return collections
-    return collections.filter(c => c.category === categoryFilter)
+  const getAvailableCategoriesToAdd = (): string[] => {
+    const existingCategories = new Set(collections.map(c => c.category))
+    return Object.keys(CATEGORY_NAME_MAP).filter(key => !existingCategories.has(key)).sort()
   }
 
-  const getUniqueCategories = (): string[] => {
-    // 返回所有定义的体系，而不仅仅是已有的
-    return Object.keys(CATEGORY_NAME_MAP).sort()
+  const handleQuickAddCategory = async (category: string) => {
+    if (!projectId || !category) return
+
+    try {
+      const collectionName = getCategoryDisplayName(category)
+      const response = await apiClient.createSettingCollection(Number(projectId), {
+        name: collectionName,
+        category: category,
+        description: `${collectionName}设定`,
+        order: collections.length,
+      })
+
+      setCollections([...collections, response.data])
+      setSelectedCollection(response.data)
+      showSnackbar(`✅ 已添加「${collectionName}」`, 'success')
+      setSelectedCategoryToAdd('')
+    } catch (err) {
+      logger.error('✅ 快速添加体系失败:', err)
+      showSnackbar('添加体系失败', 'error')
+    }
   }
 
   // ==================== 渲染 ====================
@@ -810,17 +827,23 @@ export default function KnowledgeBasePage() {
                 </Button>
               </Box>
 
-              {/* Category 过滤器 */}
-              {collections.length > 0 && (
+              {/* 快速添加体系下拉框 */}
+              {getAvailableCategoriesToAdd().length > 0 && (
                 <FormControl size="small" fullWidth sx={{ mb: 2 }}>
-                  <InputLabel>按分类过滤</InputLabel>
+                  <InputLabel>快速添加体系</InputLabel>
                   <Select
-                    value={categoryFilter}
-                    label="按分类过滤"
-                    onChange={(e) => setCategoryFilter(e.target.value)}
+                    value={selectedCategoryToAdd}
+                    label="快速添加体系"
+                    onChange={(e) => {
+                      const category = e.target.value
+                      setSelectedCategoryToAdd(category)
+                      if (category) {
+                        handleQuickAddCategory(category)
+                      }
+                    }}
                   >
-                    <MenuItem value="all">全部</MenuItem>
-                    {getUniqueCategories().map(cat => (
+                    <MenuItem value="">请选择要添加的体系...</MenuItem>
+                    {getAvailableCategoriesToAdd().map(cat => (
                       <MenuItem key={cat} value={cat}>
                         {getCategoryDisplayName(cat)}
                       </MenuItem>
@@ -836,13 +859,13 @@ export default function KnowledgeBasePage() {
                 <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
                   <CircularProgress />
                 </Box>
-              ) : getFilteredCollections().length === 0 ? (
+              ) : collections.length === 0 ? (
                 <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
                   暂无设定集合
                 </Typography>
               ) : (
                 <List sx={{ flexGrow: 1, overflow: 'auto' }}>
-                  {getFilteredCollections().map((collection) => (
+                  {collections.map((collection) => (
                     <ListItem
                       key={collection.id}
                       disablePadding
