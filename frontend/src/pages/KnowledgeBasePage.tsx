@@ -11,13 +11,38 @@ import {
   Alert,
   Snackbar,
   Paper,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemText,
+  IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  MenuItem,
+  Chip,
+  Grid,
+  Divider,
+  Select,
+  FormControl,
+  InputLabel,
 } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
 import SaveIcon from '@mui/icons-material/Save'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import AddIcon from '@mui/icons-material/Add'
+import DeleteIcon from '@mui/icons-material/Delete'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import FolderIcon from '@mui/icons-material/Folder'
+import ArticleIcon from '@mui/icons-material/Article'
 import { logger } from '@/utils/logger'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
 import VditorEditor from '@/components/VditorEditor'
+import { apiClient } from '@/services/api'
+
+// ==================== 接口定义 ====================
 
 interface TabPanelProps {
   children?: React.ReactNode
@@ -25,48 +50,141 @@ interface TabPanelProps {
   value: number
 }
 
+interface SettingCollection {
+  id: number
+  name: string
+  category: string
+  description?: string
+  max_depth?: number
+  hierarchy_config?: string
+  order: number
+  created_at: string
+}
+
+interface SettingItem {
+  id: number
+  collection_id: number
+  name: string
+  code?: string
+  level?: number
+  tags?: string[]
+  content?: string
+  depth?: number
+  node_type?: string
+  is_leaf?: boolean
+  path?: string
+  summary?: string
+  order: number
+  created_at: string
+}
+
+// ==================== 组件定义 ====================
+
 function TabPanel(props: TabPanelProps) {
   const { children, value, index, ...other } = props
   return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      {...other}
-    >
+    <div role="tabpanel" hidden={value !== index} {...other}>
       {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
     </div>
   )
 }
 
+// Category 中文名称映射
+const CATEGORY_NAME_MAP: Record<string, string> = {
+  map_system: '地图体系',
+  cultivation_realm_system: '修仙境界体系',
+  martial_realm_system: '武道境界体系',
+  magic_realm_system: '魔法境界体系',
+  ability_realm_system: '异能境界体系',
+  technique_system: '功法体系',
+  pill_system: '丹药体系',
+  artifact_system: '法宝体系',
+  formation_system: '阵法体系',
+  talisman_system: '符箓体系',
+  weapon_system: '武器与法宝体系',
+  organization_system: '组织体系',
+  skill_talent_system: '技能天赋体系',
+  character_system: '角色体系',
+  candidate: '候选集合',
+}
+
+// ==================== 主组件 ====================
+
 export default function KnowledgeBasePage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
 
-  const [tabValue, setTabValue] = useState(0)
+  // 主 Tab 状态 (0=文本内容, 1=类型设定)
+  const [mainTabValue, setMainTabValue] = useState(1)
+
+  // ==================== 文本内容相关状态 ====================
+  const [textTabValue, setTextTabValue] = useState(0)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // 工作流数据
   const [worldSetting, setWorldSetting] = useState('')
   const [characters, setCharacters] = useState('')
   const [plotOutline, setPlotOutline] = useState('')
 
-  // 编辑状态
   const [isEditing, setIsEditing] = useState(false)
   const [editedContent, setEditedContent] = useState('')
+
+  // ==================== 类型设定相关状态 ====================
+  const [collections, setCollections] = useState<SettingCollection[]>([])
+  const [selectedCollection, setSelectedCollection] = useState<SettingCollection | null>(null)
+  const [settingItems, setSettingItems] = useState<SettingItem[]>([])
+  const [selectedItem, setSelectedItem] = useState<SettingItem | null>(null)
+  const [loadingCollections, setLoadingCollections] = useState(false)
+  const [loadingItems, setLoadingItems] = useState(false)
+
+  // Category 过滤
+  const [categoryFilter, setCategoryFilter] = useState<string>('all')
+
+  // 对话框状态
+  const [createCollectionDialog, setCreateCollectionDialog] = useState(false)
+  const [createItemDialog, setCreateItemDialog] = useState(false)
+  const [editItemDialog, setEditItemDialog] = useState(false)
+  const [templateDialog, setTemplateDialog] = useState(false)
+
+  // 表单数据
+  const [newCollectionName, setNewCollectionName] = useState('')
+  const [newCollectionCategory, setNewCollectionCategory] = useState('')
+  const [newCollectionDescription, setNewCollectionDescription] = useState('')
+  const [selectedTemplate, setSelectedTemplate] = useState('')
+
+  const [newItemName, setNewItemName] = useState('')
+  const [newItemCode, setNewItemCode] = useState('')
+  const [newItemLevel, setNewItemLevel] = useState(1)
+  const [newItemContent, setNewItemContent] = useState('')
+  const [newItemTags, setNewItemTags] = useState('')
 
   // 提示消息
   const [snackbarOpen, setSnackbarOpen] = useState(false)
   const [snackbarMessage, setSnackbarMessage] = useState('')
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
 
-  // 页面加载时获取数据
-  useEffect(() => {
-    loadWorkflowData()
-  }, [projectId])
+  // ==================== 生命周期 ====================
 
-  // 加载工作流数据
+  useEffect(() => {
+    if (mainTabValue === 0) {
+      loadWorkflowData()
+    } else {
+      loadSettingCollections()
+    }
+  }, [projectId, mainTabValue])
+
+  useEffect(() => {
+    if (selectedCollection) {
+      loadSettingItems(selectedCollection.id)
+    } else {
+      setSettingItems([])
+      setSelectedItem(null)
+    }
+  }, [selectedCollection])
+
+  // ==================== 文本内容相关函数 ====================
+
   const loadWorkflowData = async () => {
     if (!projectId) return
 
@@ -82,9 +200,6 @@ export default function KnowledgeBasePage() {
 
       if (response.ok) {
         const data = await response.json()
-        logger.log('✅ 加载工作流数据:', data)
-
-        // 解析数据
         const stages = data.stages || {}
         setWorldSetting(parseContent(stages.world_setting))
         setCharacters(parseContent(stages.characters))
@@ -101,11 +216,9 @@ export default function KnowledgeBasePage() {
     }
   }
 
-  // 解析内容（可能是 JSON 字符串）
   const parseContent = (content: any): string => {
     if (!content) return ''
     if (typeof content === 'string') {
-      // 尝试解析 JSON 字符串
       try {
         if (content.startsWith('"') || content.startsWith('[')) {
           const parsed = JSON.parse(content)
@@ -116,9 +229,7 @@ export default function KnowledgeBasePage() {
           }
           return String(parsed)
         }
-      } catch {
-        // 解析失败，返回原始字符串
-      }
+      } catch {}
       return content
     }
     if (Array.isArray(content)) {
@@ -132,9 +243,8 @@ export default function KnowledgeBasePage() {
     return String(content)
   }
 
-  // 获取当前 Tab 对应的内容
   const getCurrentContent = (): string => {
-    switch (tabValue) {
+    switch (textTabValue) {
       case 0: return worldSetting
       case 1: return characters
       case 2: return plotOutline
@@ -142,9 +252,8 @@ export default function KnowledgeBasePage() {
     }
   }
 
-  // 获取当前 Tab 对应的阶段名称
   const getCurrentStage = (): string => {
-    switch (tabValue) {
+    switch (textTabValue) {
       case 0: return 'world_builder'
       case 1: return 'character_designer'
       case 2: return 'structure'
@@ -152,19 +261,16 @@ export default function KnowledgeBasePage() {
     }
   }
 
-  // 开始编辑
   const handleStartEdit = () => {
     setEditedContent(getCurrentContent())
     setIsEditing(true)
   }
 
-  // 取消编辑
   const handleCancelEdit = () => {
     setIsEditing(false)
     setEditedContent('')
   }
 
-  // 保存编辑
   const handleSaveEdit = async () => {
     if (!projectId) return
 
@@ -185,36 +291,28 @@ export default function KnowledgeBasePage() {
       })
 
       if (response.ok) {
-        // 更新本地状态
-        switch (tabValue) {
+        switch (textTabValue) {
           case 0: setWorldSetting(editedContent); break
           case 1: setCharacters(editedContent); break
           case 2: setPlotOutline(editedContent); break
         }
 
         setIsEditing(false)
-        setSnackbarMessage('✅ 保存成功')
-        setSnackbarSeverity('success')
-        setSnackbarOpen(true)
+        showSnackbar('✅ 保存成功', 'success')
       } else {
         const errorData = await response.json()
-        setSnackbarMessage(errorData.detail || '保存失败')
-        setSnackbarSeverity('error')
-        setSnackbarOpen(true)
+        showSnackbar(errorData.detail || '保存失败', 'error')
       }
     } catch (err) {
       logger.error('❌ 保存失败:', err)
-      setSnackbarMessage('保存失败，请重试')
-      setSnackbarSeverity('error')
-      setSnackbarOpen(true)
+      showSnackbar('保存失败，请重试', 'error')
     } finally {
       setSaving(false)
     }
   }
 
-  // 获取 Tab 标题
   const getTabTitle = (): string => {
-    switch (tabValue) {
+    switch (textTabValue) {
       case 0: return '世界观设定'
       case 1: return '人物设定'
       case 2: return '剧情大纲'
@@ -222,17 +320,267 @@ export default function KnowledgeBasePage() {
     }
   }
 
-  // 切换 Tab 时取消编辑状态
-  const handleTabChange = (_e: React.SyntheticEvent, newValue: number) => {
-    if (isEditing) {
-      setIsEditing(false)
-      setEditedContent('')
+  // ==================== 类型设定相关函数 ====================
+
+  const loadSettingCollections = async () => {
+    if (!projectId) return
+
+    setLoadingCollections(true)
+
+    try {
+      const response = await apiClient.getSettingCollections(Number(projectId))
+      setCollections(response.data || [])
+      if (response.data && response.data.length > 0 && !selectedCollection) {
+        setSelectedCollection(response.data[0])
+      }
+    } catch (err) {
+      logger.error('❌ 加载设定集合失败:', err)
+      showSnackbar('加载设定集合失败', 'error')
+    } finally {
+      setLoadingCollections(false)
     }
-    setTabValue(newValue)
   }
 
+  const loadSettingItems = async (collectionId: number) => {
+    setLoadingItems(true)
+
+    try {
+      const response = await apiClient.getSettingItems(collectionId)
+      const items = response.data || []
+      // 按 depth 和 order 排序
+      items.sort((a: SettingItem, b: SettingItem) => {
+        if (a.depth !== b.depth) return (a.depth || 0) - (b.depth || 0)
+        return a.order - b.order
+      })
+      setSettingItems(items)
+    } catch (err) {
+      logger.error('❌ 加载设定项失败:', err)
+      showSnackbar('加载设定项失败', 'error')
+    } finally {
+      setLoadingItems(false)
+    }
+  }
+
+  const handleCreateCollection = async () => {
+    if (!projectId || !newCollectionName || !newCollectionCategory) {
+      showSnackbar('请填写必填项', 'error')
+      return
+    }
+
+    try {
+      const response = await apiClient.createSettingCollection(Number(projectId), {
+        name: newCollectionName,
+        category: newCollectionCategory,
+        description: newCollectionDescription,
+        order: collections.length,
+      })
+
+      setCollections([...collections, response.data])
+      setSelectedCollection(response.data)
+      setCreateCollectionDialog(false)
+      resetCollectionForm()
+      showSnackbar('✅ 创建成功', 'success')
+    } catch (err) {
+      logger.error('❌ 创建集合失败:', err)
+      showSnackbar('创建失败', 'error')
+    }
+  }
+
+  const handleApplyTemplate = async () => {
+    if (!projectId || !selectedTemplate) {
+      showSnackbar('请选择模板', 'error')
+      return
+    }
+
+    try {
+      const response = await fetch(`/api/v1/projects/${projectId}/setting-collections/from-template`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          template_name: selectedTemplate,
+          replace_existing: false,
+        }),
+      })
+
+      if (response.ok) {
+        await loadSettingCollections()
+        setTemplateDialog(false)
+        setSelectedTemplate('')
+        showSnackbar('✅ 模板应用成功', 'success')
+      } else {
+        const errorData = await response.json()
+        showSnackbar(errorData.detail || '应用模板失败', 'error')
+      }
+    } catch (err) {
+      logger.error('❌ 应用模板失败:', err)
+      showSnackbar('应用模板失败', 'error')
+    }
+  }
+
+  const handleDeleteCollection = async (collectionId: number) => {
+    if (!confirm('确定要删除这个设定集合吗？')) return
+
+    try {
+      await apiClient.deleteSettingCollection(collectionId)
+      const newCollections = collections.filter(c => c.id !== collectionId)
+      setCollections(newCollections)
+      if (selectedCollection?.id === collectionId) {
+        setSelectedCollection(newCollections[0] || null)
+      }
+      showSnackbar('✅ 删除成功', 'success')
+    } catch (err) {
+      logger.error('❌ 删除集合失败:', err)
+      showSnackbar('删除失败', 'error')
+    }
+  }
+
+  const handleCreateItem = async () => {
+    if (!selectedCollection || !newItemName) {
+      showSnackbar('请填写设定项名称', 'error')
+      return
+    }
+
+    try {
+      const response = await apiClient.createSettingItem(selectedCollection.id, {
+        name: newItemName,
+        code: newItemCode,
+        level: newItemLevel,
+        content: newItemContent,
+        tags: newItemTags ? newItemTags.split(',').map(t => t.trim()) : [],
+        order: settingItems.length,
+        depth: newItemLevel,
+        is_leaf: true,
+      })
+
+      await loadSettingItems(selectedCollection.id)
+      setCreateItemDialog(false)
+      resetItemForm()
+      showSnackbar('✅ 创建成功', 'success')
+    } catch (err) {
+      logger.error('❌ 创建设定项失败:', err)
+      showSnackbar('创建失败', 'error')
+    }
+  }
+
+  const handleEditItem = () => {
+    if (!selectedItem) return
+
+    setNewItemName(selectedItem.name)
+    setNewItemCode(selectedItem.code || '')
+    setNewItemLevel(selectedItem.level || 1)
+    setNewItemContent(selectedItem.content || '')
+    setNewItemTags(selectedItem.tags?.join(', ') || '')
+    setEditItemDialog(true)
+  }
+
+  const handleSaveItemEdit = async () => {
+    if (!selectedItem || !newItemName) return
+
+    try {
+      await apiClient.updateSettingItem(selectedItem.id, {
+        name: newItemName,
+        code: newItemCode,
+        level: newItemLevel,
+        content: newItemContent,
+        tags: newItemTags ? newItemTags.split(',').map(t => t.trim()) : [],
+      })
+
+      await loadSettingItems(selectedItem.collection_id)
+      setEditItemDialog(false)
+      resetItemForm()
+      showSnackbar('✅ 保存成功', 'success')
+    } catch (err) {
+      logger.error('❌ 保存设定项失败:', err)
+      showSnackbar('保存失败', 'error')
+    }
+  }
+
+  const handleDeleteItem = async (itemId: number) => {
+    if (!confirm('确定要删除这个设定项吗？')) return
+
+    try {
+      await apiClient.deleteSettingItem(itemId)
+      await loadSettingItems(selectedCollection!.id)
+      if (selectedItem?.id === itemId) {
+        setSelectedItem(null)
+      }
+      showSnackbar('✅ 删除成功', 'success')
+    } catch (err) {
+      logger.error('❌ 删除设定项失败:', err)
+      showSnackbar('删除失败', 'error')
+    }
+  }
+
+  const handleDuplicateItem = async (item: SettingItem) => {
+    if (!selectedCollection) return
+
+    try {
+      await apiClient.createSettingItem(selectedCollection.id, {
+        name: `${item.name} (副本)`,
+        code: item.code,
+        level: item.level,
+        content: item.content,
+        tags: item.tags,
+        order: settingItems.length,
+        depth: item.depth,
+        is_leaf: item.is_leaf,
+      })
+
+      await loadSettingItems(selectedCollection.id)
+      showSnackbar('✅ 复制成功', 'success')
+    } catch (err) {
+      logger.error('❌ 复制设定项失败:', err)
+      showSnackbar('复制失败', 'error')
+    }
+  }
+
+  const resetCollectionForm = () => {
+    setNewCollectionName('')
+    setNewCollectionCategory('')
+    setNewCollectionDescription('')
+  }
+
+  const resetItemForm = () => {
+    setNewItemName('')
+    setNewItemCode('')
+    setNewItemLevel(1)
+    setNewItemContent('')
+    setNewItemTags('')
+  }
+
+  const showSnackbar = (message: string, severity: 'success' | 'error') => {
+    setSnackbarMessage(message)
+    setSnackbarSeverity(severity)
+    setSnackbarOpen(true)
+  }
+
+  // ==================== 辅助函数 ====================
+
+  const getCategoryDisplayName = (category: string): string => {
+    return CATEGORY_NAME_MAP[category] || category
+  }
+
+  const getIndentForItem = (item: SettingItem): number => {
+    return ((item.depth || 1) - 1) * 24
+  }
+
+  const getFilteredCollections = (): SettingCollection[] => {
+    if (categoryFilter === 'all') return collections
+    return collections.filter(c => c.category === categoryFilter)
+  }
+
+  const getUniqueCategories = (): string[] => {
+    const categories = new Set(collections.map(c => c.category))
+    return Array.from(categories).sort()
+  }
+
+  // ==================== 渲染 ====================
+
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
+    <Container maxWidth="xl" sx={{ py: 4 }}>
       {/* 页面标题栏 */}
       <Box sx={{
         display: 'flex',
@@ -256,203 +604,562 @@ export default function KnowledgeBasePage() {
           alignItems: 'center',
           gap: 1
         }}>
-          📚 知识库
+          🌍 世界观设定文档
         </Typography>
       </Box>
 
-      {/* 加载状态 */}
-      {loading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-          <CircularProgress />
-        </Box>
-      )}
+      {/* 主 Tab 导航 */}
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+        <Tabs
+          value={mainTabValue}
+          onChange={(_, newValue) => setMainTabValue(newValue)}
+          sx={{
+            '& .MuiTab-root': {
+              fontWeight: 600,
+              fontSize: '1rem',
+              minHeight: 56,
+            }
+          }}
+        >
+          <Tab label="📝 文本内容" />
+          <Tab label="🎨 类型设定" />
+        </Tabs>
+      </Box>
 
-      {/* 错误提示 */}
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          {error}
-          <Button size="small" onClick={loadWorkflowData} sx={{ ml: 2 }}>
-            重试
-          </Button>
-        </Alert>
-      )}
-
-      {/* 主内容 */}
-      {!loading && !error && (
-        <>
-          {/* 标签页导航 */}
-          <Box sx={{
-            borderBottom: 1,
-            borderColor: 'divider',
-            mb: 2,
-            bgcolor: 'grey.50',
-            borderRadius: '8px 8px 0 0'
-          }}>
-            <Tabs
-              value={tabValue}
-              onChange={handleTabChange}
-              sx={{
-                '& .MuiTab-root': {
-                  fontWeight: 500,
-                  fontSize: '0.95rem',
-                  minHeight: 56,
-                }
-              }}
-            >
-              <Tab
-                icon={<span style={{ marginRight: 8 }}>🌍</span>}
-                iconPosition="start"
-                label="世界观设定"
-              />
-              <Tab
-                icon={<span style={{ marginRight: 8 }}>👥</span>}
-                iconPosition="start"
-                label="人物设定"
-              />
-              <Tab
-                icon={<span style={{ marginRight: 8 }}>📋</span>}
-                iconPosition="start"
-                label="剧情大纲"
-              />
-            </Tabs>
+      {/* ==================== Tab 0: 文本内容 ==================== */}
+      <TabPanel value={mainTabValue} index={0}>
+        {loading && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+            <CircularProgress />
           </Box>
+        )}
 
-          {/* 提示信息 */}
-          <Alert severity="info" sx={{ mb: 3 }}>
-            📖 此页面展示工作流生成的设定数据，编辑后将同步到工作流中
+        {error && (
+          <Alert severity="error" sx={{ mb: 3 }}>
+            {error}
+            <Button size="small" onClick={loadWorkflowData} sx={{ ml: 2 }}>
+              重试
+            </Button>
           </Alert>
+        )}
 
-          {/* 操作按钮 */}
-          <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
-            {!isEditing ? (
-              <Button
-                variant="contained"
-                startIcon={<EditIcon />}
-                onClick={handleStartEdit}
-                disabled={!getCurrentContent()}
-                sx={{ borderRadius: 2 }}
+        {!loading && !error && (
+          <>
+            <Box sx={{
+              borderBottom: 1,
+              borderColor: 'divider',
+              mb: 2,
+              bgcolor: 'grey.50',
+              borderRadius: '8px 8px 0 0'
+            }}>
+              <Tabs
+                value={textTabValue}
+                onChange={(_, newValue) => {
+                  if (isEditing) {
+                    setIsEditing(false)
+                    setEditedContent('')
+                  }
+                  setTextTabValue(newValue)
+                }}
+                sx={{
+                  '& .MuiTab-root': {
+                    fontWeight: 500,
+                    fontSize: '0.95rem',
+                    minHeight: 56,
+                  }
+                }}
               >
-                编辑{getTabTitle()}
-              </Button>
-            ) : (
-              <>
+                <Tab icon={<span style={{ marginRight: 8 }}>🌍</span>} iconPosition="start" label="世界观设定" />
+                <Tab icon={<span style={{ marginRight: 8 }}>👥</span>} iconPosition="start" label="人物设定" />
+                <Tab icon={<span style={{ marginRight: 8 }}>📋</span>} iconPosition="start" label="剧情大纲" />
+              </Tabs>
+            </Box>
+
+            <Alert severity="info" sx={{ mb: 3 }}>
+              📖 此页面展示工作流生成的设定数据，编辑后将同步到工作流中
+            </Alert>
+
+            <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
+              {!isEditing ? (
                 <Button
                   variant="contained"
-                  color="primary"
-                  startIcon={saving ? <CircularProgress size={20} /> : <SaveIcon />}
-                  onClick={handleSaveEdit}
-                  disabled={saving}
+                  startIcon={<EditIcon />}
+                  onClick={handleStartEdit}
+                  disabled={!getCurrentContent()}
                   sx={{ borderRadius: 2 }}
                 >
-                  {saving ? '保存中...' : '保存'}
+                  编辑{getTabTitle()}
                 </Button>
+              ) : (
+                <>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    startIcon={saving ? <CircularProgress size={20} /> : <SaveIcon />}
+                    onClick={handleSaveEdit}
+                    disabled={saving}
+                    sx={{ borderRadius: 2 }}
+                  >
+                    {saving ? '保存中...' : '保存'}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    onClick={handleCancelEdit}
+                    disabled={saving}
+                    sx={{ borderRadius: 2 }}
+                  >
+                    取消
+                  </Button>
+                </>
+              )}
+            </Box>
+
+            {[0, 1, 2].map(index => (
+              <TabPanel key={index} value={textTabValue} index={index}>
+                {isEditing ? (
+                  <VditorEditor
+                    value={editedContent}
+                    onChange={(val) => setEditedContent(val)}
+                    placeholder={`${getTabTitle()}内容（支持 Markdown 格式）...`}
+                    height={500}
+                  />
+                ) : (
+                  <Paper
+                    elevation={0}
+                    sx={{
+                      bgcolor: 'background.paper',
+                      p: 4,
+                      borderRadius: 2,
+                      minHeight: 400,
+                      border: '1px solid',
+                      borderColor: 'grey.200',
+                    }}
+                  >
+                    {getCurrentContent() ? (
+                      <MarkdownRenderer content={getCurrentContent()} />
+                    ) : (
+                      <Typography color="text.secondary" sx={{ textAlign: 'center', py: 8 }}>
+                        📭 暂无{getTabTitle()}，请先在工作流中生成
+                      </Typography>
+                    )}
+                  </Paper>
+                )}
+              </TabPanel>
+            ))}
+          </>
+        )}
+      </TabPanel>
+
+      {/* ==================== Tab 1: 类型设定 ==================== */}
+      <TabPanel value={mainTabValue} index={1}>
+        <Grid container spacing={3}>
+          {/* 左侧：设定集合列表 */}
+          <Grid item xs={12} md={4}>
+            <Paper elevation={2} sx={{ p: 2, height: '70vh', display: 'flex', flexDirection: 'column' }}>
+              {/* 操作按钮 */}
+              <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
                 <Button
                   variant="outlined"
-                  onClick={handleCancelEdit}
-                  disabled={saving}
-                  sx={{ borderRadius: 2 }}
+                  size="small"
+                  startIcon={<AddIcon />}
+                  onClick={() => setTemplateDialog(true)}
+                  fullWidth
                 >
-                  取消
+                  从模板创建
                 </Button>
-              </>
-            )}
-          </Box>
+                <Button
+                  variant="contained"
+                  size="small"
+                  startIcon={<AddIcon />}
+                  onClick={() => setCreateCollectionDialog(true)}
+                  fullWidth
+                >
+                  新建
+                </Button>
+              </Box>
 
-          {/* 内容展示区域 */}
-          <TabPanel value={tabValue} index={0}>
-            {isEditing ? (
-              <VditorEditor
-                value={editedContent}
-                onChange={(val) => setEditedContent(val)}
-                placeholder="世界观设定内容（支持 Markdown 格式）..."
-                height={500}
-              />
-            ) : (
-              <Paper
-                elevation={0}
-                sx={{
-                  bgcolor: 'background.paper',
-                  p: 4,
-                  borderRadius: 2,
-                  minHeight: 400,
-                  border: '1px solid',
-                  borderColor: 'grey.200',
-                }}
-              >
-                {worldSetting ? (
-                  <MarkdownRenderer content={worldSetting} />
-                ) : (
-                  <Typography color="text.secondary" sx={{ textAlign: 'center', py: 8 }}>
-                    📭 暂无世界观设定，请先在工作流中生成
-                  </Typography>
-                )}
-              </Paper>
-            )}
-          </TabPanel>
+              {/* Category 过滤器 */}
+              {collections.length > 0 && (
+                <FormControl size="small" fullWidth sx={{ mb: 2 }}>
+                  <InputLabel>按分类过滤</InputLabel>
+                  <Select
+                    value={categoryFilter}
+                    label="按分类过滤"
+                    onChange={(e) => setCategoryFilter(e.target.value)}
+                  >
+                    <MenuItem value="all">全部</MenuItem>
+                    {getUniqueCategories().map(cat => (
+                      <MenuItem key={cat} value={cat}>
+                        {getCategoryDisplayName(cat)}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
 
-          <TabPanel value={tabValue} index={1}>
-            {isEditing ? (
-              <VditorEditor
-                value={editedContent}
-                onChange={(val) => setEditedContent(val)}
-                placeholder="人物设定内容（支持 Markdown 格式）..."
-                height={500}
-              />
-            ) : (
-              <Paper
-                elevation={0}
-                sx={{
-                  bgcolor: 'background.paper',
-                  p: 4,
-                  borderRadius: 2,
-                  minHeight: 400,
-                  border: '1px solid',
-                  borderColor: 'grey.200',
-                }}
-              >
-                {characters ? (
-                  <MarkdownRenderer content={characters} />
-                ) : (
-                  <Typography color="text.secondary" sx={{ textAlign: 'center', py: 8 }}>
-                    📭 暂无人物设定，请先在工作流中生成
-                  </Typography>
-                )}
-              </Paper>
-            )}
-          </TabPanel>
+              <Divider sx={{ mb: 2 }} />
 
-          <TabPanel value={tabValue} index={2}>
-            {isEditing ? (
-              <VditorEditor
-                value={editedContent}
-                onChange={(val) => setEditedContent(val)}
-                placeholder="剧情大纲内容（支持 Markdown 格式）..."
-                height={500}
+              {/* 集合列表 */}
+              {loadingCollections ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                  <CircularProgress />
+                </Box>
+              ) : getFilteredCollections().length === 0 ? (
+                <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                  暂无设定集合
+                </Typography>
+              ) : (
+                <List sx={{ flexGrow: 1, overflow: 'auto' }}>
+                  {getFilteredCollections().map((collection) => (
+                    <ListItem
+                      key={collection.id}
+                      disablePadding
+                      secondaryAction={
+                        <IconButton
+                          edge="end"
+                          size="small"
+                          onClick={() => handleDeleteCollection(collection.id)}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      }
+                    >
+                      <ListItemButton
+                        selected={selectedCollection?.id === collection.id}
+                        onClick={() => setSelectedCollection(collection)}
+                        sx={{ pr: 6 }}
+                      >
+                        <FolderIcon sx={{ mr: 1, color: 'primary.main' }} />
+                        <ListItemText
+                          primary={collection.name}
+                          secondary={getCategoryDisplayName(collection.category)}
+                          primaryTypographyProps={{ fontWeight: 500 }}
+                        />
+                      </ListItemButton>
+                    </ListItem>
+                  ))}
+                </List>
+              )}
+            </Paper>
+          </Grid>
+
+          {/* 右侧：设定项列表 */}
+          <Grid item xs={12} md={8}>
+            <Paper elevation={2} sx={{ p: 2, height: '70vh', display: 'flex', flexDirection: 'column' }}>
+              {selectedCollection ? (
+                <>
+                  {/* 标题和操作按钮 */}
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                    <Box>
+                      <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                        设定项
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {getCategoryDisplayName(selectedCollection.category)} • 共 {settingItems.length} 项
+                      </Typography>
+                    </Box>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      startIcon={<AddIcon />}
+                      onClick={() => setCreateItemDialog(true)}
+                    >
+                      新建设定项
+                    </Button>
+                  </Box>
+
+                  <Divider sx={{ mb: 2 }} />
+
+                  {/* 设定项列表 */}
+                  {loadingItems ? (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+                      <CircularProgress />
+                    </Box>
+                  ) : settingItems.length === 0 ? (
+                    <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                      暂无设定项
+                    </Typography>
+                  ) : (
+                    <List sx={{ flexGrow: 1, overflow: 'auto' }}>
+                      {settingItems.map((item) => (
+                        <ListItem
+                          key={item.id}
+                          disablePadding
+                          secondaryAction={
+                            <Box>
+                              <IconButton
+                                edge="end"
+                                size="small"
+                                onClick={() => handleDuplicateItem(item)}
+                              >
+                                <ContentCopyIcon fontSize="small" />
+                              </IconButton>
+                              <IconButton
+                                edge="end"
+                                size="small"
+                                onClick={() => handleDeleteItem(item.id)}
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </Box>
+                          }
+                        >
+                          <ListItemButton
+                            selected={selectedItem?.id === item.id}
+                            onClick={() => setSelectedItem(item)}
+                            sx={{ pr: 10, pl: `${getIndentForItem(item) + 8}px` }}
+                          >
+                            <ArticleIcon sx={{ mr: 1, fontSize: 18, color: 'text.secondary' }} />
+                            <ListItemText
+                              primary={
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <Typography component="span" sx={{ fontWeight: 500 }}>
+                                    Lv.{item.level || 1} {item.name}
+                                  </Typography>
+                                  {item.code && (
+                                    <Chip label={item.code} size="small" variant="outlined" sx={{ height: 20 }} />
+                                  )}
+                                </Box>
+                              }
+                              secondary={item.summary || item.content?.substring(0, 50)}
+                            />
+                          </ListItemButton>
+                        </ListItem>
+                      ))}
+                    </List>
+                  )}
+
+                  {/* 设定项详情 */}
+                  {selectedItem && (
+                    <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'between', alignItems: 'center', mb: 1 }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                          {selectedItem.name}
+                        </Typography>
+                        <Button size="small" startIcon={<EditIcon />} onClick={handleEditItem}>
+                          编辑
+                        </Button>
+                      </Box>
+                      <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', color: 'text.secondary' }}>
+                        {selectedItem.content || '暂无内容'}
+                      </Typography>
+                      {selectedItem.tags && selectedItem.tags.length > 0 && (
+                        <Box sx={{ mt: 1, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                          {selectedItem.tags.map((tag, idx) => (
+                            <Chip key={idx} label={tag} size="small" />
+                          ))}
+                        </Box>
+                      )}
+                    </Box>
+                  )}
+                </>
+              ) : (
+                <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                  请选择一个设定集合
+                </Typography>
+              )}
+            </Paper>
+          </Grid>
+        </Grid>
+      </TabPanel>
+
+      {/* ==================== 对话框 ==================== */}
+
+      {/* 创建设定集合对话框 */}
+      <Dialog open={createCollectionDialog} onClose={() => setCreateCollectionDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>新建设定集合</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="集合名称 *"
+            fullWidth
+            value={newCollectionName}
+            onChange={(e) => setNewCollectionName(e.target.value)}
+          />
+          <FormControl fullWidth margin="dense">
+            <InputLabel>分类 *</InputLabel>
+            <Select
+              value={newCollectionCategory}
+              label="分类 *"
+              onChange={(e) => setNewCollectionCategory(e.target.value)}
+            >
+              {Object.entries(CATEGORY_NAME_MAP).map(([key, name]) => (
+                <MenuItem key={key} value={key}>{name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <TextField
+            margin="dense"
+            label="描述"
+            fullWidth
+            multiline
+            rows={3}
+            value={newCollectionDescription}
+            onChange={(e) => setNewCollectionDescription(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setCreateCollectionDialog(false); resetCollectionForm() }}>取消</Button>
+          <Button onClick={handleCreateCollection} variant="contained">创建</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 从模板创建对话框 */}
+      <Dialog open={templateDialog} onClose={() => setTemplateDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>从模板创建设定集合</DialogTitle>
+        <DialogContent>
+          <FormControl fullWidth margin="dense">
+            <InputLabel>选择模板</InputLabel>
+            <Select
+              value={selectedTemplate}
+              label="选择模板"
+              onChange={(e) => setSelectedTemplate(e.target.value)}
+            >
+              <MenuItem value="xianxia">修仙模板</MenuItem>
+              <MenuItem value="xuanhuan">玄幻模板</MenuItem>
+              <MenuItem value="wuxia">武侠模板</MenuItem>
+              <MenuItem value="modern_fantasy">现代奇幻模板</MenuItem>
+              <MenuItem value="scifi">科幻模板</MenuItem>
+            </Select>
+          </FormControl>
+          <Alert severity="info" sx={{ mt: 2 }}>
+            将根据所选模板自动创建多个设定集合和预设项
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setTemplateDialog(false); setSelectedTemplate('') }}>取消</Button>
+          <Button onClick={handleApplyTemplate} variant="contained">应用</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 创建设定项对话框 */}
+      <Dialog open={createItemDialog} onClose={() => setCreateItemDialog(false)} maxWidth="md" fullWidth>
+        <DialogTitle>新建设定项</DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2}>
+            <Grid item xs={8}>
+              <TextField
+                autoFocus
+                margin="dense"
+                label="设定项名称 *"
+                fullWidth
+                value={newItemName}
+                onChange={(e) => setNewItemName(e.target.value)}
               />
-            ) : (
-              <Paper
-                elevation={0}
-                sx={{
-                  bgcolor: 'background.paper',
-                  p: 4,
-                  borderRadius: 2,
-                  minHeight: 400,
-                  border: '1px solid',
-                  borderColor: 'grey.200',
-                }}
-              >
-                {plotOutline ? (
-                  <MarkdownRenderer content={plotOutline} />
-                ) : (
-                  <Typography color="text.secondary" sx={{ textAlign: 'center', py: 8 }}>
-                    📭 暂无剧情大纲，请先在工作流中生成
-                  </Typography>
-                )}
-              </Paper>
-            )}
-          </TabPanel>
-        </>
-      )}
+            </Grid>
+            <Grid item xs={4}>
+              <TextField
+                margin="dense"
+                label="代码"
+                fullWidth
+                value={newItemCode}
+                onChange={(e) => setNewItemCode(e.target.value)}
+                placeholder="TAL_FIRE"
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                margin="dense"
+                label="等级"
+                type="number"
+                fullWidth
+                value={newItemLevel}
+                onChange={(e) => setNewItemLevel(Number(e.target.value))}
+                inputProps={{ min: 1, max: 10 }}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                margin="dense"
+                label="标签（逗号分隔）"
+                fullWidth
+                value={newItemTags}
+                onChange={(e) => setNewItemTags(e.target.value)}
+                placeholder="火系, 攻击型"
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                margin="dense"
+                label="内容"
+                fullWidth
+                multiline
+                rows={6}
+                value={newItemContent}
+                onChange={(e) => setNewItemContent(e.target.value)}
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setCreateItemDialog(false); resetItemForm() }}>取消</Button>
+          <Button onClick={handleCreateItem} variant="contained">创建</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 编辑设定项对话框 */}
+      <Dialog open={editItemDialog} onClose={() => setEditItemDialog(false)} maxWidth="md" fullWidth>
+        <DialogTitle>编辑设定项</DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2}>
+            <Grid item xs={8}>
+              <TextField
+                autoFocus
+                margin="dense"
+                label="设定项名称 *"
+                fullWidth
+                value={newItemName}
+                onChange={(e) => setNewItemName(e.target.value)}
+              />
+            </Grid>
+            <Grid item xs={4}>
+              <TextField
+                margin="dense"
+                label="代码"
+                fullWidth
+                value={newItemCode}
+                onChange={(e) => setNewItemCode(e.target.value)}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                margin="dense"
+                label="等级"
+                type="number"
+                fullWidth
+                value={newItemLevel}
+                onChange={(e) => setNewItemLevel(Number(e.target.value))}
+                inputProps={{ min: 1, max: 10 }}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                margin="dense"
+                label="标签（逗号分隔）"
+                fullWidth
+                value={newItemTags}
+                onChange={(e) => setNewItemTags(e.target.value)}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                margin="dense"
+                label="内容"
+                fullWidth
+                multiline
+                rows={6}
+                value={newItemContent}
+                onChange={(e) => setNewItemContent(e.target.value)}
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setEditItemDialog(false); resetItemForm() }}>取消</Button>
+          <Button onClick={handleSaveItemEdit} variant="contained">保存</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* 提示消息 */}
       <Snackbar
@@ -468,4 +1175,3 @@ export default function KnowledgeBasePage() {
     </Container>
   )
 }
-
