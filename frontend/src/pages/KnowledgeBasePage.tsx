@@ -37,6 +37,10 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import FolderIcon from '@mui/icons-material/Folder'
 import ArticleIcon from '@mui/icons-material/Article'
+import DownloadIcon from '@mui/icons-material/Download'
+import HistoryIcon from '@mui/icons-material/History'
+import LinearProgress from '@mui/material/LinearProgress'
+import Tooltip from '@mui/material/Tooltip'
 import { logger } from '@/utils/logger'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
 import VditorEditor from '@/components/VditorEditor'
@@ -145,7 +149,7 @@ export default function KnowledgeBasePage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
 
-  // 主 Tab 状态 (0=文本内容, 1=类型设定)
+  // 主 Tab 状态 (0=文本内容, 1=类型设定, 2=大纲扩展)
   const [mainTabValue, setMainTabValue] = useState(1)
 
   // ==================== 文本内容相关状态 ====================
@@ -202,6 +206,20 @@ export default function KnowledgeBasePage() {
   const [snackbarMessage, setSnackbarMessage] = useState('')
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
 
+  // ==================== 大纲扩展相关状态 ====================
+  const [showExpandOutlineDialog, setShowExpandOutlineDialog] = useState(false)
+  const [expandingOutline, setExpandingOutline] = useState(false)
+  const [expandedOutlineData, setExpandedOutlineData] = useState<any>(null)
+  const [currentChapterCount, setCurrentChapterCount] = useState(0)
+  const [targetChapterCount, setTargetChapterCount] = useState<number>(100)
+  const [expansionProgress, setExpansionProgress] = useState(0)
+  const [expansionStartTime, setExpansionStartTime] = useState<number | null>(null)
+  const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState<number | null>(null)
+  const [editedExpansionContent, setEditedExpansionContent] = useState('')
+  const [isEditingExpansion, setIsEditingExpansion] = useState(false)
+  const [outlineHistory, setOutlineHistory] = useState<Array<{timestamp: number, content: string, chapterCount: number}>>([])
+  const [showHistoryDialog, setShowHistoryDialog] = useState(false)
+
   // ==================== 生命周期 ====================
 
   useEffect(() => {
@@ -220,6 +238,12 @@ export default function KnowledgeBasePage() {
       setSelectedItem(null)
     }
   }, [selectedCollection])
+
+  // 加载历史记录
+  useEffect(() => {
+    const historyData = getHistory('outline')
+    setOutlineHistory(historyData)
+  }, [])
 
   // ==================== 文本内容相关函数 ====================
 
@@ -613,6 +637,259 @@ export default function KnowledgeBasePage() {
     setSnackbarOpen(true)
   }
 
+  // ==================== 大纲扩展相关函数 ====================
+
+  // 计算进度
+  const calculateProgress = (current: number, total: number): number => {
+    return Math.min(Math.round((current / total) * 100), 100)
+  }
+
+  // 估算剩余时间
+  const estimateRemainingTime = (startTime: number, current: number, total: number): number => {
+    const elapsed = Date.now() - startTime
+    const avgTimePerIteration = elapsed / current
+    return Math.round(avgTimePerIteration * (total - current) / 1000)
+  }
+
+  // 格式化剩余时间
+  const formatRemainingTime = (seconds: number): string => {
+    if (seconds < 60) return `${seconds}秒`
+    const minutes = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${minutes}分${secs}秒`
+  }
+
+  // 保存历史
+  const saveHistory = (type: 'outline', content: string, chapterCount: number) => {
+    const key = `${type}_history`
+    const history = JSON.parse(localStorage.getItem(key) || '[]')
+    history.push({ timestamp: Date.now(), content, chapterCount })
+    // 只保留最近20条记录
+    if (history.length > 20) history.shift()
+    localStorage.setItem(key, JSON.stringify(history))
+  }
+
+  // 获取历史
+  const getHistory = (type: 'outline'): Array<{timestamp: number, content: string, chapterCount: number}> => {
+    const key = `${type}_history`
+    return JSON.parse(localStorage.getItem(key) || '[]')
+  }
+
+  // 大纲扩展主函数
+  const handleExpandOutline = async () => {
+    if (!projectId) return
+
+    try {
+      setExpandingOutline(true)
+      setExpansionProgress(0)
+      setExpansionStartTime(Date.now())
+      setEstimatedTimeRemaining(null)
+      setShowExpandOutlineDialog(true)
+      setExpandedOutlineData(null)
+
+      console.log('📖 开始渐进式扩展大纲...')
+
+      // 从当前阶段获取数据
+      let currentOutline = plotOutline || ''
+      const worldSettingData = worldSetting || ''
+      const charactersData = characters || ''
+
+      if (!currentOutline) {
+        showSnackbar('⚠️ 请先完成结构设计阶段，生成情节大纲', 'error')
+        setExpandingOutline(false)
+        setShowExpandOutlineDialog(false)
+        return
+      }
+
+      let chapterCount = currentChapterCount
+      let shouldContinue = true
+      let totalIterations = 0
+      const maxIterations = 10
+      const targetChapters = targetChapterCount && targetChapterCount > 0 ? targetChapterCount : 100
+
+      while (shouldContinue && totalIterations < maxIterations && chapterCount < targetChapters) {
+        totalIterations++
+        const remaining = targetChapters - chapterCount
+        if (remaining <= 0) break
+
+        let increment: number
+        const gapRatio = remaining / targetChapters
+
+        if (remaining <= 3) {
+          increment = remaining
+        } else if (targetChapters <= 40) {
+          increment = Math.min(5, remaining)
+        } else {
+          if (gapRatio > 0.6) {
+            increment = Math.min(15, Math.max(5, Math.round(remaining * 0.4)))
+          } else if (gapRatio > 0.3) {
+            increment = Math.min(10, Math.max(4, Math.round(remaining * 0.3)))
+          } else {
+            increment = Math.min(8, Math.max(3, Math.round(remaining * 0.2)))
+          }
+        }
+
+        increment = Math.max(1, Math.min(increment, remaining))
+
+        const progress = calculateProgress(totalIterations, maxIterations)
+        setExpansionProgress(progress)
+
+        if (expansionStartTime) {
+          const remainingTime = estimateRemainingTime(expansionStartTime, totalIterations, maxIterations)
+          setEstimatedTimeRemaining(remainingTime)
+        }
+
+        console.log(`🔄 第${totalIterations}次扩展：从 ${chapterCount} 章扩展 ${increment} 章（目标：${targetChapters} 章）... (进度: ${progress}%)`)
+
+        const response = await fetch('/api/v1/workflow/expand-outline', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            project_id: parseInt(projectId),
+            current_outline: currentOutline,
+            world_setting: worldSettingData,
+            characters: charactersData,
+            current_chapter_count: chapterCount,
+            increment: increment,
+            target_total_chapters: targetChapters,
+          }),
+        })
+
+        if (!response.ok) {
+          throw new Error(`扩展大纲失败: ${response.status}`)
+        }
+
+        const data = await response.json()
+        console.log(`✅ 第${totalIterations}次扩展完成，当前章节数: ${data.current_chapter_count}`)
+
+        currentOutline = data.expanded_outline
+        chapterCount = data.current_chapter_count
+        shouldContinue = data.should_continue
+
+        showSnackbar(`📝 已扩展到 ${chapterCount} 章${shouldContinue ? '，继续扩展...' : '，AI建议停止'}`, 'success')
+
+        if (!shouldContinue) {
+          console.log(`🛑 AI建议停止扩展：${data.continue_reason}`)
+          setExpandedOutlineData({
+            ...data,
+            stop_reason: data.continue_reason
+          })
+          break
+        }
+
+        setExpandedOutlineData(data)
+      }
+
+      console.log('💾 开始保存扩展结果...')
+
+      setPlotOutline(currentOutline)
+      setCurrentChapterCount(chapterCount)
+
+      const historyRecord = {
+        timestamp: Date.now(),
+        content: currentOutline,
+        chapterCount: chapterCount
+      }
+      saveHistory('outline', currentOutline, chapterCount)
+      setOutlineHistory(prev => [...prev, historyRecord])
+
+      console.log('✅ 状态已更新')
+      setExpansionProgress(100)
+
+      showSnackbar(`✅ 大纲扩展完成！共 ${chapterCount} 章（${totalIterations}次扩展）`, 'success')
+    } catch (error) {
+      console.error('❌ 扩展大纲失败:', error)
+      showSnackbar(`扩展大纲失败: ${error}`, 'error')
+    } finally {
+      setExpandingOutline(false)
+      setExpansionProgress(0)
+      setEstimatedTimeRemaining(null)
+    }
+  }
+
+  // 开始编辑大纲
+  const handleStartEditOutline = () => {
+    setIsEditingExpansion(true)
+    setEditedExpansionContent(expandedOutlineData?.expanded_outline || '')
+  }
+
+  // 保存编辑的大纲
+  const handleSaveEditedOutline = () => {
+    setPlotOutline(editedExpansionContent)
+    setIsEditingExpansion(false)
+
+    setExpandedOutlineData({
+      ...expandedOutlineData,
+      expanded_outline: editedExpansionContent
+    })
+
+    const historyRecord = {
+      timestamp: Date.now(),
+      content: editedExpansionContent,
+      chapterCount: currentChapterCount
+    }
+    saveHistory('outline', editedExpansionContent, currentChapterCount)
+    setOutlineHistory(prev => [...prev, historyRecord])
+
+    showSnackbar('✅ 编辑已保存', 'success')
+  }
+
+  // 导出 Markdown
+  const handleExportOutlineMarkdown = () => {
+    if (!expandedOutlineData) return
+
+    const markdown = `# 大纲扩展结果
+
+**章节数**: ${currentChapterCount}
+
+## 完整大纲
+
+${expandedOutlineData.expanded_outline || ''}
+`
+
+    const blob = new Blob([markdown], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `大纲扩展_${currentChapterCount}章_${Date.now()}.md`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  // 导出 CSV
+  const handleExportChapterCSV = () => {
+    if (!expandedOutlineData?.chapter_breakdown) return
+
+    const csv = `章节号,标题,摘要\n${expandedOutlineData.chapter_breakdown}`
+
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `章节分解_${currentChapterCount}章_${Date.now()}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  // 查看历史
+  const handleShowHistory = () => {
+    setShowHistoryDialog(true)
+  }
+
+  // 组件格式化显示
+  const FormattedContent = ({ content, sx = {} }: { content: string, sx?: any }) => (
+    <Box sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', ...sx }}>
+      {content}
+    </Box>
+  )
+
   // ==================== 辅助函数 ====================
 
   const getCategoryDisplayName = (category: string): string => {
@@ -698,6 +975,7 @@ export default function KnowledgeBasePage() {
         >
           <Tab label="📝 文本内容" />
           <Tab label="🎨 类型设定" />
+          <Tab label="📖 大纲扩展" />
         </Tabs>
       </Box>
 
@@ -1068,6 +1346,65 @@ export default function KnowledgeBasePage() {
         </Grid>
       </TabPanel>
 
+      {/* ==================== Tab 2: 大纲扩展 ==================== */}
+      <TabPanel value={mainTabValue} index={2}>
+        <Alert severity="info" sx={{ mb: 3 }}>
+          📚 根据当前的世界观、人物和剧情大纲，智能扩展为更详细的多章节大纲
+        </Alert>
+
+        <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            📖 大纲扩展配置
+          </Typography>
+          
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 3 }}>
+            <TextField
+              label="目标章节数"
+              type="number"
+              size="small"
+              value={targetChapterCount}
+              onChange={(e) => {
+                const value = parseInt(e.target.value, 10)
+                setTargetChapterCount(Number.isNaN(value) ? 0 : value)
+              }}
+              inputProps={{ min: 1 }}
+              sx={{ width: 150 }}
+            />
+
+            <Tooltip
+              title="💡默认目标为100个章节，可在左侧输入框中调整。"
+              placement="top"
+              arrow
+            >
+              <span>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={handleExpandOutline}
+                  disabled={!plotOutline || !worldSetting || !characters || expandingOutline}
+                  startIcon={expandingOutline ? <CircularProgress size={20} /> : <ArticleIcon />}
+                  size="large"
+                >
+                  {expandingOutline ? '扩展中...' : `📖 扩展情节大纲${currentChapterCount > 0 ? ` (当前${currentChapterCount}章)` : ''}`}
+                </Button>
+              </span>
+            </Tooltip>
+          </Box>
+
+          {currentChapterCount > 0 && (
+            <Alert severity="success" sx={{ mt: 2 }}>
+              ✅ 当前大纲已扩展至 {currentChapterCount} 章
+            </Alert>
+          )}
+        </Paper>
+
+        {(!plotOutline || !worldSetting || !characters) && (
+          <Alert severity="warning">
+            ⚠️ 请先在“文本内容”Tab中完成世界观、人物和剧情大纲的设定
+          </Alert>
+        )}
+      </TabPanel>
+
       {/* ==================== 对话框 ==================== */}
 
       {/* 创建设定集合对话框 */}
@@ -1307,6 +1644,204 @@ export default function KnowledgeBasePage() {
         <DialogActions>
           <Button onClick={() => { setEditItemDialog(false); resetItemForm() }}>取消</Button>
           <Button onClick={handleSaveItemEdit} variant="contained">保存</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 大纲扩展结果对话框 */}
+      <Dialog 
+        open={showExpandOutlineDialog} 
+        onClose={() => !expandingOutline && setShowExpandOutlineDialog(false)} 
+        maxWidth="lg" 
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6">
+              📖 扩展大纲结果 - 已扩展至{currentChapterCount}章
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Tooltip title="编辑大纲">
+                <IconButton
+                  onClick={handleStartEditOutline}
+                  color="primary"
+                  disabled={expandingOutline || !expandedOutlineData}
+                >
+                  <EditIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="导出 Markdown">
+                <IconButton
+                  onClick={handleExportOutlineMarkdown}
+                  color="primary"
+                  disabled={expandingOutline || !expandedOutlineData}
+                >
+                  <DownloadIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="导出 CSV">
+                <IconButton
+                  onClick={handleExportChapterCSV}
+                  color="primary"
+                  disabled={expandingOutline || !expandedOutlineData?.chapter_breakdown}
+                >
+                  <DownloadIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="查看历史">
+                <IconButton
+                  onClick={handleShowHistory}
+                  color="primary"
+                >
+                  <HistoryIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          </Box>
+        </DialogTitle>
+        <DialogContent dividers>
+          {/* 进度条 */}
+          {expandingOutline && (
+            <Box sx={{ mb: 3 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="body2" color="text.secondary">
+                  扩展进度：{expansionProgress}%
+                </Typography>
+                {estimatedTimeRemaining !== null && estimatedTimeRemaining > 0 && (
+                  <Typography variant="body2" color="text.secondary">
+                    预计剩余时间：{formatRemainingTime(estimatedTimeRemaining)}
+                  </Typography>
+                )}
+              </Box>
+              <LinearProgress variant="determinate" value={expansionProgress} sx={{ height: 8, borderRadius: 1 }} />
+              <Box sx={{ mt: 3, textAlign: 'center', py: 4 }}>
+                <CircularProgress size={60} />
+                <Typography variant="h6" sx={{ mt: 2, color: 'text.secondary' }}>
+                  🚀 正在扩展大纲...
+                </Typography>
+                <Typography variant="body2" sx={{ mt: 1, color: 'text.disabled' }}>
+                  AI正在生成章节内容，请耐心等待
+                </Typography>
+              </Box>
+            </Box>
+          )}
+
+          {/* 扩展结果 */}
+          {!expandingOutline && expandedOutlineData && (
+            <Box>
+              {/* 完整大纲 */}
+              <Paper elevation={2} sx={{ p: 2 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+                    📝 完整扩展大纲
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                    <Typography variant="caption" color="text.secondary">
+                      {expandedOutlineData.expanded_outline?.length || 0} 字
+                    </Typography>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        navigator.clipboard.writeText(expandedOutlineData.expanded_outline || '');
+                        showSnackbar('✅ 已复制到剪贴板', 'success');
+                      }}
+                    >
+                      📋 复制
+                    </Button>
+                  </Box>
+                </Box>
+
+                {isEditingExpansion ? (
+                  <Box>
+                    <TextField
+                      fullWidth
+                      multiline
+                      minRows={12}
+                      maxRows={20}
+                      value={editedExpansionContent}
+                      onChange={(e) => setEditedExpansionContent(e.target.value)}
+                      sx={{ mb: 2 }}
+                    />
+                    <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                      <Button
+                        onClick={() => {
+                          setIsEditingExpansion(false);
+                          setEditedExpansionContent(expandedOutlineData?.expanded_outline || '');
+                        }}
+                        size="small"
+                      >
+                        取消
+                      </Button>
+                      <Button
+                        variant="contained"
+                        onClick={handleSaveEditedOutline}
+                        size="small"
+                        startIcon={<SaveIcon />}
+                      >
+                        保存编辑
+                      </Button>
+                    </Box>
+                  </Box>
+                ) : (
+                  <Box sx={{
+                    bgcolor: 'background.default',
+                    p: 2,
+                    borderRadius: 1,
+                    maxHeight: 400,
+                    overflow: 'auto',
+                    border: '1px solid',
+                    borderColor: 'divider'
+                  }}>
+                    <FormattedContent
+                      content={expandedOutlineData.expanded_outline || '大纲内容为空'}
+                      sx={{ fontSize: '0.9rem' }}
+                    />
+                  </Box>
+                )}
+              </Paper>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            variant="contained"
+            onClick={() => setShowExpandOutlineDialog(false)}
+            disabled={expandingOutline}
+          >
+            关闭
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 历史版本对话框 */}
+      <Dialog 
+        open={showHistoryDialog} 
+        onClose={() => setShowHistoryDialog(false)} 
+        maxWidth="md" 
+        fullWidth
+      >
+        <DialogTitle>📜 历史版本</DialogTitle>
+        <DialogContent dividers>
+          {outlineHistory.length === 0 ? (
+            <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+              暂无历史记录
+            </Typography>
+          ) : (
+            <List>
+              {outlineHistory.slice().reverse().map((record, index) => (
+                <ListItem key={index} sx={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                  <Typography variant="caption" color="text.secondary">
+                    {new Date(record.timestamp).toLocaleString()} - {record.chapterCount}章
+                  </Typography>
+                  <Typography variant="body2" sx={{ mt: 1, whiteSpace: 'pre-wrap' }}>
+                    {record.content.substring(0, 200)}...
+                  </Typography>
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowHistoryDialog(false)}>关闭</Button>
         </DialogActions>
       </Dialog>
 
