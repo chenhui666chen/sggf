@@ -196,39 +196,6 @@ async def create_chapter(
     db.commit()
     db.refresh(chapter)
     
-    # 🆕 Phase 2: 自动提取与更新人物/设定关联
-    try:
-        from app.services.auto_tracking import AutoTrackingService
-        import logging
-        
-        logger = logging.getLogger("uvicorn.error")
-        logger.info(f"   🤖 开始执行章节自动归纳...")
-        
-        # 1. 更新人物出场记录
-        char_result = AutoTrackingService.update_character_appearances(
-            chapter_id=chapter.id,
-            chapter_content=chapter_data.content or "",
-            project_id=chapter_data.project_id,
-            db=db
-        )
-        logger.info(f"   ✅ 更新人物出场记录: {char_result['updated_count']} 个")
-        
-        # 2. 更新设定项引用记录
-        setting_result = AutoTrackingService.update_setting_references(
-            chapter_id=chapter.id,
-            chapter_content=chapter_data.content or "",
-            project_id=chapter_data.project_id,
-            db=db
-        )
-        logger.info(f"   ✅ 更新设定项引用: {setting_result['updated_count']} 个")
-        
-    except Exception as e:
-        import logging
-        logger = logging.getLogger("uvicorn.error")
-        logger.warning(f"⚠️ 自动归纳失败: {e}")
-        import traceback
-        logger.debug(traceback.format_exc())
-    
     # 🆕 Phase 5: 章节创建后自动抽取实体并归类（保留旧逻辑）
     try:
         from app.services.entity_extraction import EntityExtractionService
@@ -436,11 +403,14 @@ async def update_chapter(
     
     # 更新字段
     content_updated = False
+    old_content = ""  # 🆕 保存修改前的内容
+    
     if chapter_data.title is not None:
         chapter.title = cast(str, chapter_data.title)  # type: ignore[assignment]
     if chapter_data.content is not None:
         # 🆕 保存前先创建版本快照
         if chapter.content and chapter.content != chapter_data.content:
+            old_content = chapter.content  # 🆕 记录旧内容
             revision = ChapterRevision(
                 chapter_id=chapter_id,
                 content=chapter.content,
@@ -461,6 +431,50 @@ async def update_chapter(
     db.add(chapter)
     db.commit()
     db.refresh(chapter)
+
+    # 🆕 Phase 2: 智能差异检测 - 自动追踪人物/设定关联
+    if content_updated and old_content:
+        try:
+            from app.services.auto_tracking import AutoTrackingService
+            import logging
+            
+            logger = logging.getLogger("uvicorn.error")
+            logger.info(f"   🔄 检测章节内容变化并更新追踪...")
+            
+            # 1. 人物出场智能更新
+            char_result = AutoTrackingService.update_character_appearances_smart(
+                chapter_id=chapter_id,
+                old_content=old_content,
+                new_content=chapter_data.content,
+                project_id=chapter.project_id,
+                db=db
+            )
+            logger.info(
+                f"   ✅ 人物追踪: 新增{char_result['added']}个, "
+                f"移除{char_result['removed']}个, "
+                f"未变{char_result['unchanged']}个"
+            )
+            
+            # 2. 设定项引用智能更新
+            setting_result = AutoTrackingService.update_setting_references_smart(
+                chapter_id=chapter_id,
+                old_content=old_content,
+                new_content=chapter_data.content,
+                project_id=chapter.project_id,
+                db=db
+            )
+            logger.info(
+                f"   ✅ 设定追踪: 新增{setting_result['added']}个, "
+                f"移除{setting_result['removed']}个, "
+                f"未变{setting_result['unchanged']}个"
+            )
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger("uvicorn.error")
+            logger.warning(f"⚠️ 智能追踪失败: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
 
     # 🆕 同步更新向量库
     if content_updated:
