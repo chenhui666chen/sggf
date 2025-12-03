@@ -1046,16 +1046,30 @@ ${expandedOutlineData.expanded_outline || ''}
                   
                   {/* 只在剧情大纲Tab显示扩展按钮 */}
                   {textTabValue === 2 && (
-                    <Button
-                      variant="outlined"
-                      color="primary"
-                      startIcon={expandingOutline ? <CircularProgress size={20} /> : <ArticleIcon />}
-                      onClick={handleExpandOutline}
-                      disabled={!plotOutline || !worldSetting || !characters || expandingOutline}
-                      sx={{ borderRadius: 2 }}
-                    >
-                      {expandingOutline ? '扩展中...' : `📖 扩展大纲${currentChapterCount > 0 ? `(当前${currentChapterCount}章)` : ''}`}
-                    </Button>
+                    <>
+                      <TextField
+                        label="目标章节数"
+                        type="number"
+                        size="small"
+                        value={targetChapterCount}
+                        onChange={(e) => {
+                          const value = parseInt(e.target.value, 10)
+                          setTargetChapterCount(Number.isNaN(value) ? 0 : value)
+                        }}
+                        inputProps={{ min: 1 }}
+                        sx={{ width: 150 }}
+                      />
+                      <Button
+                        variant="outlined"
+                        color="primary"
+                        startIcon={expandingOutline ? <CircularProgress size={20} /> : <ArticleIcon />}
+                        onClick={handleExpandOutline}
+                        disabled={!plotOutline || !worldSetting || !characters || expandingOutline}
+                        sx={{ borderRadius: 2 }}
+                      >
+                        {expandingOutline ? '扩展中...' : `📖 扩展大纲${currentChapterCount > 0 ? `(当前${currentChapterCount}章)` : ''}`}
+                      </Button>
+                    </>
                   )}
                 </>
               ) : (
