@@ -1059,16 +1059,24 @@ ${expandedOutlineData.expanded_outline || ''}
                         inputProps={{ min: 1 }}
                         sx={{ width: 150 }}
                       />
-                      <Button
-                        variant="outlined"
-                        color="primary"
-                        startIcon={expandingOutline ? <CircularProgress size={20} /> : <ArticleIcon />}
-                        onClick={handleExpandOutline}
-                        disabled={!plotOutline || !worldSetting || !characters || expandingOutline}
-                        sx={{ borderRadius: 2 }}
+                      <Tooltip
+                        title={expandingOutline ? "扩展进行中，请稍候" : "根据当前的世界观、人物和剧情大纲，智能扩展为更详细的多章节大纲"}
+                        placement="top"
+                        arrow
                       >
-                        {expandingOutline ? '扩展中...' : `📖 扩展大纲${currentChapterCount > 0 ? `(当前${currentChapterCount}章)` : ''}`}
-                      </Button>
+                        <span>
+                          <Button
+                            variant="outlined"
+                            color="primary"
+                            startIcon={expandingOutline ? <CircularProgress size={20} /> : <ArticleIcon />}
+                            onClick={handleExpandOutline}
+                            disabled={!plotOutline || !worldSetting || !characters || expandingOutline}
+                            sx={{ borderRadius: 2 }}
+                          >
+                            {expandingOutline ? '扩展中...' : `📖 扩展大纲${currentChapterCount > 0 ? `(当前${currentChapterCount}章)` : ''}`}
+                          </Button>
+                        </span>
+                      </Tooltip>
                     </>
                   )}
                 </>
