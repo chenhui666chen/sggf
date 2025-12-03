@@ -299,6 +299,11 @@ export default function WorkflowControlPage() {
   const [characterTechniques, setCharacterTechniques] = useState<any[]>([])
   const [selectedTechniqueId, setSelectedTechniqueId] = useState<number | ''>('')
 
+  // 🆕 自动追踪关联数据
+  const [autoTrackedTechniques, setAutoTrackedTechniques] = useState<any[]>([])
+  const [autoTrackedArtifacts, setAutoTrackedArtifacts] = useState<any[]>([])
+  const [autoTrackedLocations, setAutoTrackedLocations] = useState<any[]>([])
+
   const [snackbarOpen, setSnackbarOpen] = useState(false)
   const [snackbarMessage, setSnackbarMessage] = useState('')
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error' | 'warning' | 'info'>('success')
@@ -3636,6 +3641,27 @@ export default function WorkflowControlPage() {
         // 加载该角色已掌握的功法
         const techRes = await apiClient.getCharacterTechniques(character.id)
         setCharacterTechniques(techRes.data || [])
+        
+        // 🆕 加载自动追踪关联数据
+        try {
+          const autoTrackRes = await fetch(`/api/v1/characters/${character.id}/auto-tracked-relations`, {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+            }
+          })
+          if (autoTrackRes.ok) {
+            const autoTrackData = await autoTrackRes.json()
+            setAutoTrackedTechniques(autoTrackData.techniques || [])
+            setAutoTrackedArtifacts(autoTrackData.artifacts || [])
+            setAutoTrackedLocations(autoTrackData.locations || [])
+          }
+        } catch (autoTrackError) {
+          console.warn('加载自动追踪数据失败:', autoTrackError)
+          // 不影响主流程，只是显示为空
+          setAutoTrackedTechniques([])
+          setAutoTrackedArtifacts([])
+          setAutoTrackedLocations([])
+        }
       } else {
         setCharacterFormData({
           project_id: projectIdNum,
@@ -3655,6 +3681,10 @@ export default function WorkflowControlPage() {
           relations: {},
         })
         setCharacterTechniques([])
+        // 新建时清空自动追踪数据
+        setAutoTrackedTechniques([])
+        setAutoTrackedArtifacts([])
+        setAutoTrackedLocations([])
       }
 
       // 保证功法/境界/势力/职业/种族 下拉列表已加载
@@ -3681,6 +3711,10 @@ export default function WorkflowControlPage() {
     setCharacterFormData({})
     setCharacterTechniques([])
     setSelectedTechniqueId('')
+    // 🆕 清空自动追踪数据
+    setAutoTrackedTechniques([])
+    setAutoTrackedArtifacts([])
+    setAutoTrackedLocations([])
   }
 
   // 保存角色基础信息 + 功法列表
@@ -5922,6 +5956,86 @@ export default function WorkflowControlPage() {
                       </Box>
                     </Box>
                   ))}
+                </Box>
+              </Box>
+
+              {/* 🆕 自动追踪关联数据展示 */}
+              <Box sx={{ mt: 3, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+                <Typography variant="subtitle1" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box component="span" sx={{ fontSize: '1.2em' }}>🤖</Box>
+                  自动追踪关联（基于章节内容）
+                </Typography>
+
+                {/* 掌握功法 */}
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1, fontWeight: 500 }}>
+                    📚 掌握功法
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                    {autoTrackedTechniques.length === 0 ? (
+                      <Typography variant="caption" color="text.secondary" sx={{ p: 1 }}>
+                        尚未在章节中识别到该角色使用功法
+                      </Typography>
+                    ) : (
+                      autoTrackedTechniques.map((tech: any) => (
+                        <Chip
+                          key={tech.id}
+                          label={`${tech.name} (第${tech.chapters.join(',')}章)`}
+                          size="small"
+                          color="info"
+                          variant="outlined"
+                        />
+                      ))
+                    )}
+                  </Box>
+                </Box>
+
+                {/* 持有法宝 */}
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1, fontWeight: 500 }}>
+                    ⚔️ 持有法宝
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                    {autoTrackedArtifacts.length === 0 ? (
+                      <Typography variant="caption" color="text.secondary" sx={{ p: 1 }}>
+                        尚未在章节中识别到该角色持有法宝
+                      </Typography>
+                    ) : (
+                      autoTrackedArtifacts.map((art: any) => (
+                        <Chip
+                          key={art.id}
+                          label={`${art.name} (第${art.chapters.join(',')}章)`}
+                          size="small"
+                          color="warning"
+                          variant="outlined"
+                        />
+                      ))
+                    )}
+                  </Box>
+                </Box>
+
+                {/* 关联地点 */}
+                <Box sx={{ mb: 0 }}>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1, fontWeight: 500 }}>
+                    📍 关联地点
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                    {autoTrackedLocations.length === 0 ? (
+                      <Typography variant="caption" color="text.secondary" sx={{ p: 1 }}>
+                        尚未在章节中识别到该角色与特定地点的关联
+                      </Typography>
+                    ) : (
+                      autoTrackedLocations.map((loc: any) => (
+                        <Chip
+                          key={loc.id}
+                          label={`${loc.name} (第${loc.chapters.join(',')}章)`}
+                          size="small"
+                          color="success"
+                          variant="outlined"
+                        />
+                      ))
+                    )}
+                  </Box>
                 </Box>
               </Box>
 
