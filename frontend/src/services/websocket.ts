@@ -337,6 +337,32 @@ class WorkflowWebSocket {
   }
 
   /**
+   * 🆕 监听章节保存后台任务开始
+   */
+  onPostSaveTaskStart(callback: (data: { chapter_id: number; chapter_number: number; status: string }) => void) {
+    if (!this.socket) return
+
+    this.socket.off('post_save_task_start')
+    this.socket.on('post_save_task_start', (data) => {
+      console.log('📡 收到后台任务开始:', data)
+      callback(data)
+    })
+  }
+
+  /**
+   * 🆕 监听章节保存后台任务完成
+   */
+  onPostSaveTaskComplete(callback: (data: { chapter_id: number; chapter_number: number; status: string }) => void) {
+    if (!this.socket) return
+
+    this.socket.off('post_save_task_complete')
+    this.socket.on('post_save_task_complete', (data) => {
+      console.log('✅ 收到后台任务完成:', data)
+      callback(data)
+    })
+  }
+
+  /**
    * 移除所有监听器
    */
   removeAllListeners() {
@@ -352,6 +378,9 @@ class WorkflowWebSocket {
     this.socket.off('stream_start')
     this.socket.off('stream_chunk')
     this.socket.off('stream_end')
+    // 🆕 移除后台任务监听器
+    this.socket.off('post_save_task_start')
+    this.socket.off('post_save_task_complete')
     console.log('✅ 监听器已移除')
   }
 
@@ -372,6 +401,9 @@ class WorkflowWebSocket {
     this.socket.off('stream_start')
     this.socket.off('stream_chunk')
     this.socket.off('stream_end')
+    // 🆕 移除后台任务监听器
+    this.socket.off('post_save_task_start')
+    this.socket.off('post_save_task_complete')
     console.log('✅ 事件监听器已清除，连接保持')
   }
 

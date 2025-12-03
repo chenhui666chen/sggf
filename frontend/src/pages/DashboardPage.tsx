@@ -30,6 +30,7 @@ import {
   DialogActions,
   ToggleButtonGroup,
   ToggleButton,
+  Chip,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import MenuIcon from '@mui/icons-material/Menu'
@@ -115,6 +116,9 @@ export default function DashboardPage() {
 
   // 🆕 生成下一章状态
   const [generatingNextChapter, setGeneratingNextChapter] = useState<Record<number, boolean>>({})
+  
+  // 🆕 后台任务状态（章节ID -> 是否正在处理）
+  const [postSaveProcessing, setPostSaveProcessing] = useState<Set<number>>(new Set())
 
   // 🆕 Snackbar 状态（用于显示成功/错误提示）
   const [snackbarOpen, setSnackbarOpen] = useState(false)
@@ -264,6 +268,50 @@ export default function DashboardPage() {
       }
     }
   }, [searchParams, setSearchParams])
+
+  // 🆕 监听 WebSocket 事件（后台任务状态）
+  useEffect(() => {
+    if (!selectedProjectId) return
+
+    // 导入 WebSocket 实例
+    import('@/services/websocket').then(({ workflowWebSocket }) => {
+      // 连接 WebSocket
+      workflowWebSocket.connect().then(() => {
+        workflowWebSocket.joinProject(selectedProjectId)
+      }).catch((error: any) => {
+        console.error('❗ WebSocket 连接失败:', error)
+      })
+
+      // 监听后台任务开始
+      workflowWebSocket.onPostSaveTaskStart((data: any) => {
+        logger.log('📡 收到后台任务开始:', data)
+        if (data.chapter_id) {
+          setPostSaveProcessing(prev => new Set(prev).add(data.chapter_id))
+        }
+      })
+
+      // 监听后台任务完成
+      workflowWebSocket.onPostSaveTaskComplete((data: any) => {
+        logger.log('✅ 收到后台任务完成:', data)
+        if (data.chapter_id) {
+          setPostSaveProcessing(prev => {
+            const newSet = new Set(prev)
+            newSet.delete(data.chapter_id)
+            return newSet
+          })
+        }
+      })
+    })
+
+    // 清理：组件卸载时移除监听器（不断开连接）
+    return () => {
+      import('@/services/websocket').then(({ workflowWebSocket }) => {
+        // 只移除监听器，保持 WebSocket 连接（其他页面可能还在用）
+        workflowWebSocket.onPostSaveTaskStart(() => {})
+        workflowWebSocket.onPostSaveTaskComplete(() => {})
+      })
+    }
+  }, [selectedProjectId])
 
   const handleCreateProject = async () => {
     if (formData.title.trim()) {
@@ -1267,7 +1315,19 @@ export default function DashboardPage() {
                   }}
                 >
                   <ListItemText
-                    primary={`${chapter.title}`}
+                    primary={(
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <span>{chapter.title}</span>
+                        {postSaveProcessing.has(chapter.id) && (
+                          <Chip
+                            label="处理中..."
+                            size="small"
+                            color="primary"
+                            sx={{ height: 20, fontSize: '0.7rem' }}
+                          />
+                        )}
+                      </Box>
+                    )}
                     secondary={`📝 ${chapter.word_count || 0} 字`}
                   />
                 </ListItemButton>
