@@ -1669,32 +1669,38 @@ ${expandedOutlineData.expanded_outline || ''}
               )}
             </Box>
             <Box sx={{ display: 'flex', gap: 1 }}>
-              <Tooltip title="编辑大纲">
-                <IconButton
-                  onClick={handleStartEditOutline}
-                  color="primary"
-                  disabled={expandingOutline || !expandedOutlineData}
-                >
-                  <EditIcon />
-                </IconButton>
+              <Tooltip title={expandingOutline ? "扩展进行中，请稍候" : "编辑大纲"}>
+                <span>
+                  <IconButton
+                    onClick={handleStartEditOutline}
+                    color="primary"
+                    disabled={expandingOutline || !expandedOutlineData}
+                  >
+                    <EditIcon />
+                  </IconButton>
+                </span>
               </Tooltip>
-              <Tooltip title="导出 Markdown">
-                <IconButton
-                  onClick={handleExportOutlineMarkdown}
-                  color="primary"
-                  disabled={expandingOutline || !expandedOutlineData}
-                >
-                  <DownloadIcon />
-                </IconButton>
+              <Tooltip title={expandingOutline ? "扩展进行中，请稍候" : "导出 Markdown"}>
+                <span>
+                  <IconButton
+                    onClick={handleExportOutlineMarkdown}
+                    color="primary"
+                    disabled={expandingOutline || !expandedOutlineData}
+                  >
+                    <DownloadIcon />
+                  </IconButton>
+                </span>
               </Tooltip>
-              <Tooltip title="导出 CSV">
-                <IconButton
-                  onClick={handleExportChapterCSV}
-                  color="primary"
-                  disabled={expandingOutline || !expandedOutlineData?.chapter_breakdown}
-                >
-                  <DownloadIcon />
-                </IconButton>
+              <Tooltip title={expandingOutline ? "扩展进行中，请稍候" : "导出 CSV"}>
+                <span>
+                  <IconButton
+                    onClick={handleExportChapterCSV}
+                    color="primary"
+                    disabled={expandingOutline || !expandedOutlineData?.chapter_breakdown}
+                  >
+                    <DownloadIcon />
+                  </IconButton>
+                </span>
               </Tooltip>
               <Tooltip title="查看历史">
                 <IconButton
@@ -1777,6 +1783,7 @@ ${expandedOutlineData.expanded_outline || ''}
                           setEditedExpansionContent(expandedOutlineData?.expanded_outline || '');
                         }}
                         size="small"
+                        disabled={expandingOutline}
                       >
                         取消
                       </Button>
@@ -1785,6 +1792,7 @@ ${expandedOutlineData.expanded_outline || ''}
                         onClick={handleSaveEditedOutline}
                         size="small"
                         startIcon={<SaveIcon />}
+                        disabled={expandingOutline}
                       >
                         保存编辑
                       </Button>
