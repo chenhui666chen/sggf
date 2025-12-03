@@ -224,6 +224,19 @@ async def create_chapter(
         )
         logger.info(f"   ✅ 设定追踪: 初始记录{setting_result['added']}个")
         
+        # 3. 🆕 高级关联追踪：人物-功法/法宝/地点
+        relation_result = AutoTrackingService.update_character_item_relations(
+            chapter_id=chapter.id,
+            chapter_content=chapter_data.content or "",
+            project_id=chapter_data.project_id,
+            db=db
+        )
+        logger.info(
+            f"   ✅ 高级关联: 功法{relation_result['techniques']}个, "
+            f"法宝{relation_result['artifacts']}个, "
+            f"地点{relation_result['locations']}个"
+        )
+        
     except Exception as e:
         import logging
         logger = logging.getLogger("uvicorn.error")
@@ -502,6 +515,19 @@ async def update_chapter(
                 f"   ✅ 设定追踪: 新增{setting_result['added']}个, "
                 f"移除{setting_result['removed']}个, "
                 f"未变{setting_result['unchanged']}个"
+            )
+            
+            # 3. 🆕 高级关联追踪
+            relation_result = AutoTrackingService.update_character_item_relations(
+                chapter_id=chapter_id,
+                chapter_content=chapter_data.content,
+                project_id=chapter.project_id,
+                db=db
+            )
+            logger.info(
+                f"   ✅ 高级关联: 功法{relation_result['techniques']}个, "
+                f"法宝{relation_result['artifacts']}个, "
+                f"地点{relation_result['locations']}个"
             )
             
         except Exception as e:

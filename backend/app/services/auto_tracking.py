@@ -267,3 +267,169 @@ class AutoTrackingService:
         ).first()
         
         return item
+    
+    @staticmethod
+    def update_character_item_relations(
+        chapter_id: int,
+        chapter_content: str,
+        project_id: int,
+        db: Session
+    ) -> Dict[str, int]:
+        """
+        🆕 高级功能：自动识别人物与设定项的关联
+        
+        基于关键词匹配识别：
+        - 人物-功法关联："林墨修炼/施展/掌握九天剑诀"
+        - 人物-法宝关联："林墨手持/获得/使用赤霄剑"
+        - 人物-地点关联："林墨来到/在天剑宗"
+        
+        Returns:
+            {"techniques": 2, "artifacts": 1, "locations": 3}
+        """
+        characters = db.query(Character).filter(
+            Character.project_id == project_id
+        ).all()
+        
+        technique_count = 0
+        artifact_count = 0
+        location_count = 0
+        
+        # 获取所有设定集合
+        collections = db.query(SettingCollection).filter(
+            SettingCollection.project_id == project_id
+        ).all()
+        
+        collections_by_category = {coll.category: coll for coll in collections}
+        
+        for character in characters:
+            char_name = character.name
+            if not char_name or char_name not in chapter_content:
+                continue
+            
+            # 1️⃣ 检测人物-功法关联
+            if 'technique_system' in collections_by_category:
+                technique_coll = collections_by_category['technique_system']
+                techniques = db.query(SettingItem).filter(
+                    SettingItem.collection_id == technique_coll.id
+                ).all()
+                
+                for tech in techniques:
+                    if not tech.name:
+                        continue
+                    
+                    # 匹配模式："人物名 + [修炼|施展|掌握|使用] + 功法名"
+                    if AutoTrackingService._match_relation(
+                        chapter_content, char_name, tech.name,
+                        ['修炼', '施展', '掌握', '使用', '参悟', '学会']
+                    ):
+                        # 更新人物的techniques字段
+                        char_techniques = json.loads(character.techniques or "[]")
+                        if tech.id not in char_techniques:
+                            char_techniques.append(tech.id)
+                            character.techniques = json.dumps(char_techniques)
+                            technique_count += 1
+                            print(f"  📚 {char_name} 关联功法: {tech.name}")
+                        
+                        # 更新设定项的related_characters字段
+                        tech_chars = json.loads(tech.related_characters or "[]")
+                        if character.id not in tech_chars:
+                            tech_chars.append(character.id)
+                            tech.related_characters = json.dumps(tech_chars)
+            
+            # 2️⃣ 检测人物-法宝关联
+            if 'artifact_system' in collections_by_category:
+                artifact_coll = collections_by_category['artifact_system']
+                artifacts = db.query(SettingItem).filter(
+                    SettingItem.collection_id == artifact_coll.id
+                ).all()
+                
+                for art in artifacts:
+                    if not art.name:
+                        continue
+                    
+                    # 匹配模式："人物名 + [手持|获得|使用|佩戴] + 法宝名"
+                    if AutoTrackingService._match_relation(
+                        chapter_content, char_name, art.name,
+                        ['手持', '获得', '使用', '佩戴', '持有', '拿出']
+                    ):
+                        # 更新人物的artifacts字段
+                        char_artifacts = json.loads(character.artifacts or "[]")
+                        if art.id not in char_artifacts:
+                            char_artifacts.append(art.id)
+                            character.artifacts = json.dumps(char_artifacts)
+                            artifact_count += 1
+                            print(f"  ⚔️ {char_name} 关联法宝: {art.name}")
+                        
+                        # 更新设定项的related_characters字段
+                        art_chars = json.loads(art.related_characters or "[]")
+                        if character.id not in art_chars:
+                            art_chars.append(character.id)
+                            art.related_characters = json.dumps(art_chars)
+            
+            # 3️⃣ 检测人物-地点关联
+            if 'map_system' in collections_by_category:
+                map_coll = collections_by_category['map_system']
+                locations = db.query(SettingItem).filter(
+                    SettingItem.collection_id == map_coll.id
+                ).all()
+                
+                for loc in locations:
+                    if not loc.name:
+                        continue
+                    
+                    # 匹配模式："人物名 + [来到|在|前往|进入] + 地点名"
+                    if AutoTrackingService._match_relation(
+                        chapter_content, char_name, loc.name,
+                        ['来到', '在', '前往', '进入', '走入', '赶到']
+                    ):
+                        # 更新人物的related_locations字段
+                        char_locations = json.loads(character.related_locations or "[]")
+                        if loc.id not in char_locations:
+                            char_locations.append(loc.id)
+                            character.related_locations = json.dumps(char_locations)
+                            location_count += 1
+                            print(f"  📍 {char_name} 关联地点: {loc.name}")
+                        
+                        # 更新设定项的related_characters字段
+                        loc_chars = json.loads(loc.related_characters or "[]")
+                        if character.id not in loc_chars:
+                            loc_chars.append(character.id)
+                            loc.related_characters = json.dumps(loc_chars)
+        
+        db.commit()
+        
+        return {
+            "techniques": technique_count,
+            "artifacts": artifact_count,
+            "locations": location_count
+        }
+    
+    @staticmethod
+    def _match_relation(
+        content: str,
+        char_name: str,
+        item_name: str,
+        keywords: List[str]
+    ) -> bool:
+        """
+        匹配人物与设定项的关联关系
+        
+        匹配模式：
+        - "人物名 + 关键词 + 设定项名" (直接相邻)
+        - "人物名 ... 关键词 ... 设定项名" (同一句)
+        
+        示例：
+        - "林墨施展九天剑诀" → True
+        - "林墨在天剑宗修炼" → True
+        """
+        # 简单匹配：在同一句中同时出现人物、关键词、设定项
+        sentences = content.split('。')  # 按句号分割
+        
+        for sentence in sentences:
+            if char_name in sentence and item_name in sentence:
+                # 检查是否包含任何关键词
+                for keyword in keywords:
+                    if keyword in sentence:
+                        return True
+        
+        return False
