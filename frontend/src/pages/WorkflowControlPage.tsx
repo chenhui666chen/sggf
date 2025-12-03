@@ -5710,7 +5710,7 @@ export default function WorkflowControlPage() {
                 />
                 <TextField
                   select
-                  label="角色定位（阵营/立场）"
+                  label="故事立场"
                   value={characterFormData?.role || ''}
                   onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, role: e.target.value }))}
                 >
@@ -5739,7 +5739,7 @@ export default function WorkflowControlPage() {
                 />
                 <TextField
                   select
-                  label="阵营/势力"
+                  label="所属势力"
                   value={characterFormData?.faction || ''}
                   onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, faction: e.target.value }))}
                   helperText={availableForces.length === 0 ? "未找到势力体系" : ""}

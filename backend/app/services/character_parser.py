@@ -18,8 +18,8 @@ class ParsedCharacter:
     name: str
     age: Optional[int] = None
     gender: Optional[str] = None
-    role: Optional[str] = None  # 角色定位：主角/配角/反派等
-    faction: Optional[str] = None  # 阵营
+    role: Optional[str] = None  # 故事立场：主角方/反派方/中立方/亦正亦邪
+    faction: Optional[str] = None  # 所属势力
     importance_level: Optional[str] = None  # 重要性
     
     # 文本字段（将合并到profile中）
@@ -232,7 +232,7 @@ class CharacterTextParser:
         return age, gender
 
     def _normalize_role(self, role_text: str) -> str:
-        """标准化角色定位（阵营/立场）"""
+        """标准化故事立场"""
         role_text_lower = role_text.lower()
         
         # 匹配主角方

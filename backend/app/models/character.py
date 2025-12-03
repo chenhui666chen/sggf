@@ -32,13 +32,13 @@ class Character(Base):
 
     # 基本信息
     name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
-    role: Mapped[Optional[str]] = mapped_column(  # 角色定位（阵营/立场）：主角方 / 反派方 / 中立方 / 亦正亦邪
+    role: Mapped[Optional[str]] = mapped_column(  # 故事立场：主角方 / 反派方 / 中立方 / 亦正亦邪
         String(50), nullable=True
     )
     gender: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     age: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
-    # 阵营 / 势力
+    # 所属势力
     faction: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 
     # 人物重要程度（戏份权重）：主角 / 重要角色 / 次要角色 / 群众角色
