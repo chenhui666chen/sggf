@@ -5731,10 +5731,18 @@ export default function WorkflowControlPage() {
                   onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, name: e.target.value }))}
                 />
                 <TextField
+                  select
                   label="角色定位（主角/反派/配角等）"
                   value={characterFormData?.role || ''}
                   onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, role: e.target.value }))}
-                />
+                >
+                  <MenuItem value="">自定义</MenuItem>
+                  <MenuItem value="主角">主角</MenuItem>
+                  <MenuItem value="主角阵营">主角阵营</MenuItem>
+                  <MenuItem value="配角">配角</MenuItem>
+                  <MenuItem value="反派">反派</MenuItem>
+                  <MenuItem value="中立">中立</MenuItem>
+                </TextField>
                 <TextField
                   label="性别"
                   value={characterFormData?.gender || ''}
@@ -5753,25 +5761,55 @@ export default function WorkflowControlPage() {
                   }}
                 />
                 <TextField
+                  select
                   label="阵营/势力"
                   value={characterFormData?.faction || ''}
                   onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, faction: e.target.value }))}
-                />
+                  helperText={availableForces.length === 0 ? "未找到势力体系" : ""}
+                >
+                  <MenuItem value="">
+                    <em>未设置</em>
+                  </MenuItem>
+                  {availableForces.map((force: any) => (
+                    <MenuItem key={force.id} value={force.name}>
+                      {force.name}
+                    </MenuItem>
+                  ))}
+                </TextField>
                 <TextField
+                  select
                   label="重要性（主角/关键配角/龙套等）"
                   value={characterFormData?.importance_level || ''}
                   onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, importance_level: e.target.value }))}
-                />
+                >
+                  <MenuItem value="">自定义</MenuItem>
+                  <MenuItem value="主角">主角</MenuItem>
+                  <MenuItem value="关键配角">关键配角</MenuItem>
+                  <MenuItem value="重要配角">重要配角</MenuItem>
+                  <MenuItem value="次要配角">次要配角</MenuItem>
+                  <MenuItem value="龙套">龙套</MenuItem>
+                </TextField>
                 <TextField
+                  select
                   label="出场状态（未出场/已出场/已退场）"
                   value={characterFormData?.appearance_status || ''}
                   onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, appearance_status: e.target.value }))}
-                />
+                >
+                  <MenuItem value="未出场">未出场</MenuItem>
+                  <MenuItem value="已出场">已出场</MenuItem>
+                  <MenuItem value="已退场">已退场</MenuItem>
+                </TextField>
                 <TextField
+                  select
                   label="生死状态（存活/死亡/失踪/未知）"
                   value={characterFormData?.life_status || ''}
                   onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, life_status: e.target.value }))}
-                />
+                >
+                  <MenuItem value="存活">存活</MenuItem>
+                  <MenuItem value="死亡">死亡</MenuItem>
+                  <MenuItem value="失踪">失踪</MenuItem>
+                  <MenuItem value="未知">未知</MenuItem>
+                </TextField>
                 <TextField
                   label="首次出场章节编号"
                   type="number"
