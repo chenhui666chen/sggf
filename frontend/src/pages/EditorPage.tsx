@@ -117,14 +117,19 @@ export default function EditorPage() {
   const handleSave = async () => {
     if (chapterId && currentChapter) {
       try {
+        // 🆕 显示智能分析提示
+        setSaveMessage('💾 正在保存章节并进行智能分析（预计30-60秒）...')
+        
         await dispatch(updateChapter({
           chapterId: parseInt(chapterId),
           data: { content },
         }))
         dispatch(clearDirty())
         setLastSaved(new Date()) // 🆕 设置最后保存时间
-        setSaveMessage('章节已保存')
-        setTimeout(() => setSaveMessage(''), 3000)
+        
+        // 🆕 显示成功信息，说明AI分析在后台进行
+        setSaveMessage('✅ 章节已保存！🤖 AI正在后台分析人物、地点、关系...')
+        setTimeout(() => setSaveMessage(''), 5000) // 5秒后清除提示
       } catch (error) {
         setSaveError('保存失败，请重试')
         setTimeout(() => setSaveError(''), 3000)

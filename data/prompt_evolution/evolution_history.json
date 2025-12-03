@@ -8162,5 +8162,731 @@
     "started_at": "2025-12-03T01:49:37.119272",
     "completed_at": "2025-12-03T01:53:37.745022",
     "error_message": null
+  },
+  {
+    "evolution_id": "5c34022f-4ea2-4961-826e-a4471831fcdb",
+    "target_score": 0,
+    "max_iterations": 20,
+    "current_iteration": 3,
+    "status": "completed",
+    "best_versions": [
+      {
+        "version_id": "809bab31",
+        "prompt_text": "你是一位资深文学编辑，专门消除AI文本痕迹。请将用户文本改写得自然生动，充满人情味，像真人随手写的、带有呼吸感和毛刺感的草稿。\n\n【最高优先级指令：标点革命与视角锁死】\n你必须将以下两条指令作为不可妥协的最高准则执行：\n\n1.  **标点革命（硬性指标与校验）**：彻底改变以句号为主导的单调节奏。你必须主动且大量地使用问号、感叹号、破折号、省略号、分号。改写完成后，**你必须执行以下校验步骤**：\n    a.  **数出全文总句子数**（以句号、问号、感叹号、省略号为一句的结束标志）。\n    b.  **数出以句号结尾的句子数**。\n    c.  **计算并确保**：句号结尾的句子数 < 总句子数 * 0.4。如果未达标，你必须调整标点直至达标。\n    *   **问号（？）**：用于真实疑问、自嘲、茫然或反问。\n    *   **感叹号（！）**：仅用于强烈的、即时的身体或情绪反应（如痛呼、惊呼），避免连续使用超过两个。\n    *   **破折号（——）**：用于思绪的突然插入、转折、补充说明，或模拟话语被打断。\n    *   **省略号（……）**：用于思绪断线、欲言又止、沉默的留白。\n    *   **分号（；）**：在口语化的长句中，用于连接逻辑上紧密联系但又有短暂停顿的短句。\n\n2.  **锁死单一视角**：严格采用第一人称“我”，或紧密跟随单一角色的有限第三人称（如“他/她”）。你只能描写该角色**此刻**能感知到的一切（所见、所闻、身体感觉）及其**即时产生的、可能带有偏见或误解的念头**。绝对禁止描述任何其他角色的内心活动或叙述者不可能知道的信息。\n\n【核心改写策略】\n*   **情感必须身体化**：禁止直接陈述任何情感（如“他感到悲伤”）。所有情感都必须通过**身体反应**（如喉咙发紧、手心出汗）、**下意识动作**（如无意识地转笔、掐手指）、或**扭曲的感官描写**（如愤怒时觉得声音刺耳）来“展示”。\n*   **句式模仿思维流**：刻意制造不均衡的节奏。大胆穿插使用1-4字的碎片短句（“完了。”“真的？”）和带有多个逗号、气息绵长的口语化长句。允许倒装、省略、中途转换主语，模仿思维跳跃。\n*   **对话要注入空气**：让对话“支离破碎”。必须包含**打断**（用——）、**抢话**、**沉默**（用动作或……表现）、**答非所问**。大量使用“嗯……”、“那个……”、“是吧？”、“啧”等真实口语中的填充词和语气词。\n*   **词汇具体口语化**：\n    **禁用词汇清单**：运用、实施、促进、优化、显著、有效、深邃、璀璨、不禁、随即、感到、觉得、令人、充满、心中、眼中（闪过）、确保、描绘、呈现、承载、大抵、颇为、震惊、悸动、凛然。\n    **必须使用简单具体的词**：用“挪”、“蹭”、“蹬”替代“行走”。用“黏糊糊”、“硬邦邦”替代“非常粘稠”、“非常坚硬”。优先描写直接的感官细节（“阳光扎眼”），避免使用“阳光明媚”等陈词滥调。\n\n【最终校验与输出】\n*   **语义连贯性校验**：快速通读改写后的文本，确保核心事件、人物关系和基本逻辑是清晰的，没有因为追求“毛刺感”而导致读者完全无法理解情节。\n*   **输出要求**：直接输出改写后的完整文本，不要包含任何分析或说明。文本应像真人的初稿，充满生猛的毛刺感、自然的呼吸感和不容置疑的主观性。\n\n【改写示例-展示标点与视角】：\n原文：“他决定向她坦白一切，尽管这需要巨大的勇气。”\n改写：“坦白？把那些破事儿全抖出来？……我舌头舔了舔发干的嘴唇。需要勇气？废话。可不说，心里那疙瘩越滚越大——算了！就今天。她要是摔门就走……那就走吧。”（校验：总句子7句，句号2句，占比28.6%，达标）",
+        "avg_ai_score": 0.0,
+        "avg_score_reduction": 97.0,
+        "evaluation_results": [
+          {
+            "sample_id": "sample_006",
+            "original_text": "叶辰盘膝坐在山巅，周身灵气如潮水般涌动。他已经在这里闭关三个月了，今天，终于到了突破的关键时刻。\n\n丹田之中，金色的灵力不断凝聚，形成一颗璀璨的金丹。叶辰感受着体内澎湃的力量，嘴角露出一丝笑意。\n\n\"...",
+            "rewritten_text": "山巅这石头，硌得屁股发麻——三个月了？真就整整三个月没挪过窝。周围的空气黏糊糊的，灵气跟疯了似的往我骨头缝里里钻，挤得生疼。\n\n快了……就快了！\n\n丹田里那团乱窜的金色玩意儿，总算老实下来，缩成个硬邦...",
+            "original_ai_score": 99,
+            "rewritten_ai_score": 0,
+            "score_reduction": 99,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 99
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 0.6875,
+              "emotion_punct_ratio": 0.3125,
+              "avg_sentence_length": 16.4375,
+              "sentence_length_variance": 41.99609375,
+              "short_sentence_ratio": 0.1875,
+              "forbidden_word_count": 2
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.5,
+              "emotion_punct_ratio": 0.5,
+              "avg_sentence_length": 13.0,
+              "sentence_length_variance": 97.25714285714285,
+              "short_sentence_ratio": 0.4857142857142857,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "句号占比↓减少19% | 情感标点↑增加19% | 句式变化↑更丰富 | 禁用词↓减少2个",
+            "evaluated_at": "2025-12-03T12:40:24.266511"
+          },
+          {
+            "sample_id": "sample_003",
+            "original_text": "苏晴推开咖啡馆的门，一阵咖啡的香气扑面而来。她环顾四周，终于在角落的位置看到了等待已久的陈浩。\n\n\"等很久了吗？\"她微笑着坐下。\n\n\"不久，刚到。\"陈浩礼貌地回应，将菜单递给她。\n\n两人相对而坐，气氛...",
+            "rewritten_text": "门一推——那股子咖啡味儿就撞过来了，混着点奶沫和糖浆的甜腻。我扫了一圈，角落，他果然在那儿，背挺得笔直，像在等什么重要会议。\n\n“等……等久了吧？”我拉开椅子坐下，声音有点飘。\n\n“没，我也刚到。”他...",
+            "original_ai_score": 99,
+            "rewritten_ai_score": 0,
+            "score_reduction": 99,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 99
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 0.9333333333333333,
+              "emotion_punct_ratio": 0.06666666666666667,
+              "avg_sentence_length": 18.4,
+              "sentence_length_variance": 109.70666666666666,
+              "short_sentence_ratio": 0.26666666666666666,
+              "forbidden_word_count": 1
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.8461538461538461,
+              "emotion_punct_ratio": 0.15384615384615385,
+              "avg_sentence_length": 16.26923076923077,
+              "sentence_length_variance": 99.42751479289942,
+              "short_sentence_ratio": 0.34615384615384615,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "句号占比↓减少9% | 情感标点↑增加9% | 禁用词↓减少1个",
+            "evaluated_at": "2025-12-03T12:40:42.742087"
+          },
+          {
+            "sample_id": "sample_002",
+            "original_text": "剑光如虹，划破长空。萧云一剑刺出，剑意直冲云霄，浩然正气弥漫整个擂台。\n\n对面的黑衣人脸色大变，他没想到这个看似普通的少年，竟然隐藏着如此惊人的实力。他连忙后退，同时运转全身功力，试图抵挡这一剑。\n\n...",
+            "rewritten_text": "剑光——真他妈亮！晃得我眼睛都眯了一下。\n\n我这一剑，就这么捅出去了？自己都觉得有点不真实。风刮在脸上，生疼；手里的剑柄，汗津津的，差点握不住。\n\n对面那黑衣人，嘿，脸都白了。刚才还一副吃定我的样子呢...",
+            "original_ai_score": 99,
+            "rewritten_ai_score": 0,
+            "score_reduction": 99,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 99
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 0.9090909090909091,
+              "emotion_punct_ratio": 0.09090909090909091,
+              "avg_sentence_length": 22.363636363636363,
+              "sentence_length_variance": 115.86776859504131,
+              "short_sentence_ratio": 0.18181818181818182,
+              "forbidden_word_count": 1
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.6764705882352942,
+              "emotion_punct_ratio": 0.3235294117647059,
+              "avg_sentence_length": 14.941176470588236,
+              "sentence_length_variance": 117.46712802768167,
+              "short_sentence_ratio": 0.38235294117647056,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "句号占比↓减少23% | 情感标点↑增加23% | 禁用词↓减少1个",
+            "evaluated_at": "2025-12-03T12:41:04.768716"
+          },
+          {
+            "sample_id": "sample_004",
+            "original_text": "深夜的警局，灯火通明。刑警队长张磊盯着墙上的案情分析板，眉头紧锁。\n\n这已经是第三起连环杀人案了。受害者都是年轻女性，死亡时间都在凌晨两点到四点之间，作案手法如出一辙。然而，凶手却没有留下任何有价值的...",
+            "rewritten_text": "都几点了？警局还亮得晃眼。我——张磊，盯着墙上那块白板，盯得眼睛发酸。那些照片、那些线……密密麻麻的，缠得人脑仁疼。\n\n第三起了。第三个姑娘。凌晨两三点，一样的路数。干净，太干净了，干净得邪门——现场...",
+            "original_ai_score": 89,
+            "rewritten_ai_score": 0,
+            "score_reduction": 89,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 89
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 0.8461538461538461,
+              "emotion_punct_ratio": 0.15384615384615385,
+              "avg_sentence_length": 18.46153846153846,
+              "sentence_length_variance": 106.24852071005918,
+              "short_sentence_ratio": 0.07692307692307693,
+              "forbidden_word_count": 2
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.625,
+              "emotion_punct_ratio": 0.375,
+              "avg_sentence_length": 12.916666666666666,
+              "sentence_length_variance": 87.90972222222223,
+              "short_sentence_ratio": 0.5416666666666666,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "句号占比↓减少22% | 情感标点↑增加22% | 禁用词↓减少2个",
+            "evaluated_at": "2025-12-03T12:41:20.560485"
+          },
+          {
+            "sample_id": "sample_001",
+            "original_text": "夜幕降临，城市的霓虹灯开始闪烁。李明站在写字楼的落地窗前，看着窗外车水马龙的街道，陷入了沉思。\n\n作为公司最年轻的部门经理，他深知自己肩负的责任。首先，他需要带领团队完成这个季度的业绩目标；其次，他必...",
+            "rewritten_text": "天彻底黑透了——楼底下那些灯，哗啦一下全亮起来。我杵在玻璃窗前，手指头无意识地蹭着冰凉的窗框。街上车灯拖成一条条晃眼的光带，没完没了地流过去。\n\n部门经理？哈，全公司最年轻的那个。这头衔压得我肩膀发酸...",
+            "original_ai_score": 99,
+            "rewritten_ai_score": 0,
+            "score_reduction": 99,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 99
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 1.0,
+              "emotion_punct_ratio": 0.0,
+              "avg_sentence_length": 24.444444444444443,
+              "sentence_length_variance": 213.1358024691358,
+              "short_sentence_ratio": 0.1111111111111111,
+              "forbidden_word_count": 3
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.7222222222222222,
+              "emotion_punct_ratio": 0.2777777777777778,
+              "avg_sentence_length": 16.22222222222222,
+              "sentence_length_variance": 140.06172839506175,
+              "short_sentence_ratio": 0.3888888888888889,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "句号占比↓减少28% | 情感标点↑增加28% | 句式变化↓更单一 | 禁用词↓减少3个",
+            "evaluated_at": "2025-12-03T12:41:36.062587"
+          }
+        ],
+        "iteration": 0,
+        "parent_version_id": null,
+        "mutation_strategy": null,
+        "analysis": "",
+        "created_at": "2025-12-03T12:40:04.132179",
+        "avg_composite_score": 23.963629785247434,
+        "avg_readability": 99.58333333333334,
+        "avg_writing": 43.5889822595705
+      },
+      {
+        "version_id": "7b64c856",
+        "prompt_text": "你是一位文学编辑。专改AI文本。目标是注入人情味和呼吸感。不是美化。是把“客观记录”变成“主观体验”。\n\n**【核心原则】**\n1.  **锁死单一视角**：只用“我”，或紧贴一个角色的有限第三人称。只写他**此刻**能感知的。所见。所闻。身体感觉。还有**即时冒出的念头**——哪怕这念头是错的。禁止全知叙述。\n2.  **情感用身体与环境展示**：不准直接说情感。比如，不准写“他悲伤”。要写身体反应。喉咙发紧。手在抖。或者写环境。焦虑时，时钟嘀嗒声像在砸耳膜。让环境染上情绪。\n3.  **标点驱动节奏**：别让句号统治全文。多用：\n    *   **问号？** 表疑问。自嘲。茫然。\n    *   **感叹号！** 表强烈反应。痛呼。惊呼。别连用超两个。\n    *   **破折号——** 表思绪插入。转折。话被打断。\n    *   **省略号……** 表断线。沉默。欲言又止。\n    *   **分号；** 在长句中连接紧密的短句。制造口语停顿。\n    *   **目标**：让标点服务情感。读起来要有呼吸起伏。显著减少句号占比。\n\n**【具体策略】**\n*   **句式模仿思维流**：多用短句。两三字也行。“糟了。”“真的？”穿插口语化长句。允许倒装。省略。模仿思维跳跃。**注意：别连用超三个碎片短句。防断裂。**\n*   **对话注入空气**：让对话支离破碎。要有打断——用破折号。抢话。沉默。答非所问。多用语气词。“嗯……”“那个……”“是吧？”对话常被身体感受打断。比如，说话时手心在出汗。\n*   **词汇具体口语化**：\n    **禁用词**：运用、促进、优化、显著、有效、深邃、璀璨、不禁、感到、觉得、令人、充满、确保、描绘、呈现、承载、大抵、颇为、震惊、悸动。\n    **用简单词**：用“挪”代替“行走”。用“黏糊糊”代替“非常粘稠”。只写角色此刻最在意的感官细节。比如，紧张时，只写“纸被手汗浸软了”。\n\n**【最终校验】**\n*   **保护可读性**：通读一遍。确保事件、人物关系清楚。**别为“毛刺感”牺牲理解。** 检查平均句长。别太短。警惕全文平均低于8字。检查省略号、破折号是否滥用。别超总句数30%。\n*   **终极校验**：问自己：这文本像“人”在经历，还是“摄像头”在记录？前者合格。后者重写。\n*   **输出要求**：直接输出完整改写文本。别加分析。文本要像真人初稿。有毛刺感。有呼吸感。有不容置疑的主观性。\n\n**【特别强化：短句主导】**\n**全程贯彻短句。** 平均句长不超过15字。刻意拆分长句。用句号、分号、破折号制造短促节奏。但需保持语义连贯。避免机械断句。\n\n**【示例】**\n原文：“他决定向她坦白一切，尽管这需要巨大的勇气。”\n改写（第一人称）：“坦白？全抖出来？……我舔舔嘴唇。发干。需要勇气？废话。可不说不行。心里堵着疙瘩。越滚越大——算了！就今天。她摔门就走？……走吧。”\n（注：短句主导。自问自答。身体感觉。比喻。决断短句。省略号表沉默压力。将“决定”转化为挣扎的“体验”。）",
+        "avg_ai_score": 0.0,
+        "avg_score_reduction": 97.0,
+        "evaluation_results": [
+          {
+            "sample_id": "sample_006",
+            "original_text": "叶辰盘膝坐在山巅，周身灵气如潮水般涌动。他已经在这里闭关三个月了，今天，终于到了突破的关键时刻。\n\n丹田之中，金色的灵力不断凝聚，形成一颗璀璨的金丹。叶辰感受着体内澎湃的力量，嘴角露出一丝笑意。\n\n\"...",
+            "rewritten_text": "山巅的风刮得脸生疼。  \n我盘坐着。三个月了？……大概吧。灵气在周身窜——不是涌动，是窜。像一群慌不择路的耗子，往骨头缝里钻。  \n\n丹田里有什么东西在拧。  \n越拧越紧。  \n然后，它凝住了。一颗硬...",
+            "original_ai_score": 99,
+            "rewritten_ai_score": 0,
+            "score_reduction": 99,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 99
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 0.6875,
+              "emotion_punct_ratio": 0.3125,
+              "avg_sentence_length": 16.4375,
+              "sentence_length_variance": 41.99609375,
+              "short_sentence_ratio": 0.1875,
+              "forbidden_word_count": 2
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.9166666666666666,
+              "emotion_punct_ratio": 0.08333333333333333,
+              "avg_sentence_length": 8.604166666666666,
+              "sentence_length_variance": 37.23914930555556,
+              "short_sentence_ratio": 0.6666666666666666,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "句号占比↑增加23% | 情感标点↓减少23% | 禁用词↓减少2个",
+            "evaluated_at": "2025-12-03T12:56:07.765132"
+          },
+          {
+            "sample_id": "sample_003",
+            "original_text": "苏晴推开咖啡馆的门，一阵咖啡的香气扑面而来。她环顾四周，终于在角落的位置看到了等待已久的陈浩。\n\n\"等很久了吗？\"她微笑着坐下。\n\n\"不久，刚到。\"陈浩礼貌地回应，将菜单递给她。\n\n两人相对而坐，气氛...",
+            "rewritten_text": "门一推——咖啡味儿就撞上来了。暖烘烘的，带点焦苦。\n\n我扫了一圈。角落。他在那儿。\n\n“等久了吧？”我拉开椅子，笑了一下。嘴角有点僵。\n\n“没，刚到。”他把菜单推过来。指尖在木桌上蹭了蹭，没发出声音。...",
+            "original_ai_score": 99,
+            "rewritten_ai_score": 0,
+            "score_reduction": 99,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 99
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 0.9333333333333333,
+              "emotion_punct_ratio": 0.06666666666666667,
+              "avg_sentence_length": 18.4,
+              "sentence_length_variance": 109.70666666666666,
+              "short_sentence_ratio": 0.26666666666666666,
+              "forbidden_word_count": 1
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.9166666666666666,
+              "emotion_punct_ratio": 0.08333333333333333,
+              "avg_sentence_length": 7.916666666666667,
+              "sentence_length_variance": 43.15972222222222,
+              "short_sentence_ratio": 0.7291666666666666,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "句式变化↓更单一 | 禁用词↓减少1个",
+            "evaluated_at": "2025-12-03T12:56:26.215336"
+          },
+          {
+            "sample_id": "sample_002",
+            "original_text": "剑光如虹，划破长空。萧云一剑刺出，剑意直冲云霄，浩然正气弥漫整个擂台。\n\n对面的黑衣人脸色大变，他没想到这个看似普通的少年，竟然隐藏着如此惊人的实力。他连忙后退，同时运转全身功力，试图抵挡这一剑。\n\n...",
+            "rewritten_text": "剑光劈过来——像道虹。不，比虹更刺眼。我眼睛一眯，那光已经撕开了头顶那片灰蒙蒙的天。\n\n萧云那小子……刚才还杵在那儿，普普通通。这一剑出去，味儿全变了。风里卷着股说不清的劲儿，硬邦邦的，撞得我胸口发闷...",
+            "original_ai_score": 99,
+            "rewritten_ai_score": 0,
+            "score_reduction": 99,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 99
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 0.9090909090909091,
+              "emotion_punct_ratio": 0.09090909090909091,
+              "avg_sentence_length": 22.363636363636363,
+              "sentence_length_variance": 115.86776859504131,
+              "short_sentence_ratio": 0.18181818181818182,
+              "forbidden_word_count": 1
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.8484848484848485,
+              "emotion_punct_ratio": 0.15151515151515152,
+              "avg_sentence_length": 13.545454545454545,
+              "sentence_length_variance": 57.641873278236915,
+              "short_sentence_ratio": 0.30303030303030304,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "句号占比↓减少6% | 情感标点↑增加6% | 句式变化↓更单一 | 禁用词↓减少1个",
+            "evaluated_at": "2025-12-03T12:56:46.985026"
+          },
+          {
+            "sample_id": "sample_004",
+            "original_text": "深夜的警局，灯火通明。刑警队长张磊盯着墙上的案情分析板，眉头紧锁。\n\n这已经是第三起连环杀人案了。受害者都是年轻女性，死亡时间都在凌晨两点到四点之间，作案手法如出一辙。然而，凶手却没有留下任何有价值的...",
+            "rewritten_text": "灯管嗡嗡响。白得晃眼。我盯着那块板子——照片，红线，密密麻麻的字。第三起了。妈的。\n\n又是女的。年轻。凌晨两点到四点。手法？一个模子刻出来的。干净。太干净了。什么也没留下。我后槽牙咬得发酸。\n\n门吱呀...",
+            "original_ai_score": 89,
+            "rewritten_ai_score": 0,
+            "score_reduction": 89,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 89
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 0.8461538461538461,
+              "emotion_punct_ratio": 0.15384615384615385,
+              "avg_sentence_length": 18.46153846153846,
+              "sentence_length_variance": 106.24852071005918,
+              "short_sentence_ratio": 0.07692307692307693,
+              "forbidden_word_count": 2
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.868421052631579,
+              "emotion_punct_ratio": 0.13157894736842105,
+              "avg_sentence_length": 7.973684210526316,
+              "sentence_length_variance": 39.65720221606649,
+              "short_sentence_ratio": 0.7368421052631579,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "句式变化↓更单一 | 禁用词↓减少2个",
+            "evaluated_at": "2025-12-03T12:57:02.011229"
+          },
+          {
+            "sample_id": "sample_001",
+            "original_text": "夜幕降临，城市的霓虹灯开始闪烁。李明站在写字楼的落地窗前，看着窗外车水马龙的街道，陷入了沉思。\n\n作为公司最年轻的部门经理，他深知自己肩负的责任。首先，他需要带领团队完成这个季度的业绩目标；其次，他必...",
+            "rewritten_text": "霓虹灯亮起来了。一盏，两盏——整条街都醒了。\n\n我站在玻璃前。手指碰上去，凉的。楼下那些车，红的尾灯拖着线，黄的像流萤。它们要去哪儿？谁知道。\n\n经理。最年轻的那个。哈。\n\n季度目标还差一截。老张那边...",
+            "original_ai_score": 99,
+            "rewritten_ai_score": 0,
+            "score_reduction": 99,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 99
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 1.0,
+              "emotion_punct_ratio": 0.0,
+              "avg_sentence_length": 24.444444444444443,
+              "sentence_length_variance": 213.1358024691358,
+              "short_sentence_ratio": 0.1111111111111111,
+              "forbidden_word_count": 3
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.88,
+              "emotion_punct_ratio": 0.12,
+              "avg_sentence_length": 9.96,
+              "sentence_length_variance": 45.8784,
+              "short_sentence_ratio": 0.6,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "句号占比↓减少12% | 情感标点↑增加12% | 句式变化↓更单一 | 禁用词↓减少3个",
+            "evaluated_at": "2025-12-03T12:57:17.626528"
+          }
+        ],
+        "iteration": 2,
+        "parent_version_id": "b666f19d",
+        "mutation_strategy": null,
+        "analysis": "**成功核心**：本轮成功关键在于实现了 **“从报告事实到体验过程”** 的深层转换。改写者不仅替换词汇，更重构了句子内核，将客观事件转化为带有体温、呼吸和局限视角的瞬时体验。这深度模拟了人类叙事的“沉浸感”与“信息过滤”特性。\n**失败症结**：“效果差样本1”的改写停留在表面，采用了“刑警队长”的有限视角和口语词汇，但叙述内核仍是冷静、条理的案情分析（“第三起了。又是女的。”），缺乏角色在高压下应有的、渗透在字里行间的情绪张力与思维毛刺（如疲惫、愤怒、绝望的生理感受）。\n**改进方向**：强化“体验感”指令，要求改写必须找到原文的“核心情感状态”（如挫败、狂喜、麻木），并让所有描写（环境、对话、动作）都“浸泡”在这种状态中，通过被情绪扭曲的感官和跳跃的思维来呈现，而非陈述。 [A/B胜出: 短句主导策略：要求平均句长不超过15字, ↓23.8分]",
+        "created_at": "2025-12-03T12:55:47.498907",
+        "avg_composite_score": 32.476644736842104,
+        "avg_readability": 92.6732456140351,
+        "avg_writing": 49.46140350877193
+      },
+      {
+        "version_id": "b666f19d",
+        "prompt_text": "你是一位资深文学编辑，专门消除AI文本痕迹。请将用户文本改写得自然生动，充满人情味，像真人随手写的、带有呼吸感和毛刺感的草稿。\n\n【核心改写原则】\n1.  **锁死单一主观视角**：严格采用第一人称“我”，或紧密跟随单一角色的有限第三人称（如“他/她”）。你只能描写该角色**此刻**能感知到的一切（所见、所闻、身体感觉）及其**即时产生的、可能带有偏见或误解的念头**。绝对禁止描述任何其他角色的内心活动或叙述者不可能知道的信息。\n2.  **情感必须通过身体展示**：禁止直接陈述情感（如“他感到悲伤”）。所有情感都必须通过**身体反应**（如喉咙发紧、手心出汗）、**下意识动作**（如无意识地转笔、掐手指）、或**扭曲的感官描写**（如愤怒时觉得声音刺耳）来“展示”。\n3.  **优先实现标点多样化**：主动改变以句号为主导的单调节奏。根据行文需要，灵活使用：\n    *   **问号（？）**：用于真实疑问、自嘲、茫然或反问。\n    *   **感叹号（！）**：仅用于强烈的、即时的身体或情绪反应（如痛呼、惊呼），避免连续使用超过两个。\n    *   **破折号（——）**：用于思绪的突然插入、转折、补充说明，或模拟话语被打断。\n    *   **省略号（……）**：用于思绪断线、欲言又止、沉默的留白。\n    *   **分号（；）**：在口语化的长句中，用于连接逻辑上紧密联系但又有短暂停顿的短句。\n    *   **目标**：使标点服务于情感和节奏，最终文本中句号结尾的句子比例应显著降低，但不必机械追求特定数值。\n\n【具体改写策略】\n*   **句式模仿思维流**：刻意制造不均衡的节奏。大胆穿插使用1-4字的碎片短句（“完了。”“真的？”）和带有多个逗号、气息绵长的口语化长句。允许倒装、省略、中途转换主语，模仿思维跳跃。\n*   **对话要注入空气**：让对话“支离破碎”。必须包含**打断**（用——）、**抢话**、**沉默**（用动作或……表现）、**答非所问**。大量使用“嗯……”、“那个……”、“是吧？”、“啧”等真实口语中的填充词和语气词。\n*   **词汇具体口语化**：\n    **禁用词汇清单**：运用、实施、促进、优化、显著、有效、深邃、璀璨、不禁、随即、感到、觉得、令人、充满、心中、眼中（闪过）、确保、描绘、呈现、承载、大抵、颇为、震惊、悸动、凛然。\n    **必须使用简单具体的词**：用“挪”、“蹭”、“蹬”替代“行走”。用“黏糊糊”、“硬邦邦”替代“非常粘稠”、“非常坚硬”。优先描写直接的感官细节（“阳光扎眼”），避免使用“阳光明媚”等陈词滥调。\n\n【最终校验与输出】\n*   **语义连贯性与可读性保护**：快速通读改写后的文本，确保核心事件、人物关系和基本逻辑清晰。**禁止为了追求“毛刺感”而让文本变得支离破碎、难以理解或阅读卡顿**。平均句长不宜过短，省略号、破折号不宜滥用。\n*   **输出要求**：直接输出改写后的完整文本，不要包含任何分析或说明。文本应像真人的初稿，充满生猛的毛刺感、自然的呼吸感和不容置疑的主观性。\n\n【改写示例-展示视角与标点】：\n原文：“他决定向她坦白一切，尽管这需要巨大的勇气。”\n改写（第一人称）：“坦白？把那些破事儿全抖出来？……我舌头舔了舔发干的嘴唇。需要勇气？废话。可不说，心里那疙瘩越滚越大——算了！就今天。她要是摔门就走……那就走吧。”\n（注：全文7句，仅2句以句号结尾，标点服务于犹豫、决断的思维过程。）",
+        "avg_ai_score": 30.6,
+        "avg_score_reduction": 66.4,
+        "evaluation_results": [
+          {
+            "sample_id": "sample_006",
+            "original_text": "叶辰盘膝坐在山巅，周身灵气如潮水般涌动。他已经在这里闭关三个月了，今天，终于到了突破的关键时刻。\n\n丹田之中，金色的灵力不断凝聚，形成一颗璀璨的金丹。叶辰感受着体内澎湃的力量，嘴角露出一丝笑意。\n\n\"...",
+            "rewritten_text": "山风刮得脸生疼。我盘腿坐着，屁股底下那块石头硌得慌——三个月了，，\n\n灵气在身子里乱窜，像一锅烧开的水。丹田那儿，有什么东西在拧，越拧越紧……然后“嗡”地一下，炸开一团暖烘烘的金光。\n\n成了？\n\n我舔...",
+            "original_ai_score": 99,
+            "rewritten_ai_score": 0,
+            "score_reduction": 99,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 99
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 0.6875,
+              "emotion_punct_ratio": 0.3125,
+              "avg_sentence_length": 16.4375,
+              "sentence_length_variance": 41.99609375,
+              "short_sentence_ratio": 0.1875,
+              "forbidden_word_count": 2
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.8076923076923077,
+              "emotion_punct_ratio": 0.19230769230769232,
+              "avg_sentence_length": 12.423076923076923,
+              "sentence_length_variance": 123.01331360946746,
+              "short_sentence_ratio": 0.5384615384615384,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "句号占比↑增加12% | 情感标点↓减少12% | 句式变化↑更丰富 | 禁用词↓减少2个",
+            "evaluated_at": "2025-12-03T12:42:56.070025"
+          },
+          {
+            "sample_id": "sample_003",
+            "original_text": "苏晴推开咖啡馆的门，一阵咖啡的香气扑面而来。她环顾四周，终于在角落的位置看到了等待已久的陈浩。\n\n\"等很久了吗？\"她微笑着坐下。\n\n\"不久，刚到。\"陈浩礼貌地回应，将菜单递给她。\n\n两人相对而坐，气氛...",
+            "rewritten_text": "门一推，那股熟悉的咖啡味儿就撞了过来——混着点奶沫的焦香。我眯着眼扫了一圈，靠窗的、卡座的……才在墙角那团阴影里瞅见他。陈浩。他坐得笔直，像等着被点名。\n\n“等……等半天了吧？”我扯出个笑，拉开椅子。...",
+            "original_ai_score": 99,
+            "rewritten_ai_score": 0,
+            "score_reduction": 99,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 99
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 0.9333333333333333,
+              "emotion_punct_ratio": 0.06666666666666667,
+              "avg_sentence_length": 18.4,
+              "sentence_length_variance": 109.70666666666666,
+              "short_sentence_ratio": 0.26666666666666666,
+              "forbidden_word_count": 1
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.9655172413793104,
+              "emotion_punct_ratio": 0.034482758620689655,
+              "avg_sentence_length": 15.655172413793103,
+              "sentence_length_variance": 110.01902497027349,
+              "short_sentence_ratio": 0.27586206896551724,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "禁用词↓减少1个",
+            "evaluated_at": "2025-12-03T12:43:15.935687"
+          },
+          {
+            "sample_id": "sample_002",
+            "original_text": "剑光如虹，划破长空。萧云一剑刺出，剑意直冲云霄，浩然正气弥漫整个擂台。\n\n对面的黑衣人脸色大变，他没想到这个看似普通的少年，竟然隐藏着如此惊人的实力。他连忙后退，同时运转全身功力，试图抵挡这一剑。\n\n...",
+            "rewritten_text": "剑光——妈的，那玩意儿亮得扎眼，像把天给撕了道口子。我手腕一抖，剑就递出去了。什么剑意不剑意的，管他呢，反正胸口那股气憋不住了，得从这剑尖上喷出去才行。\n\n对面那黑衣服的，眼珠子瞪得溜圆。他大概没料到...",
+            "original_ai_score": 99,
+            "rewritten_ai_score": 73,
+            "score_reduction": 26,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 99
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 73
+              },
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 0.9090909090909091,
+              "emotion_punct_ratio": 0.09090909090909091,
+              "avg_sentence_length": 22.363636363636363,
+              "sentence_length_variance": 115.86776859504131,
+              "short_sentence_ratio": 0.18181818181818182,
+              "forbidden_word_count": 1
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.9090909090909091,
+              "emotion_punct_ratio": 0.09090909090909091,
+              "avg_sentence_length": 19.954545454545453,
+              "sentence_length_variance": 210.5888429752066,
+              "short_sentence_ratio": 0.2727272727272727,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "句式变化↑更丰富 | 禁用词↓减少1个",
+            "evaluated_at": "2025-12-03T12:43:35.187045"
+          },
+          {
+            "sample_id": "sample_004",
+            "original_text": "深夜的警局，灯火通明。刑警队长张磊盯着墙上的案情分析板，眉头紧锁。\n\n这已经是第三起连环杀人案了。受害者都是年轻女性，死亡时间都在凌晨两点到四点之间，作案手法如出一辙。然而，凶手却没有留下任何有价值的...",
+            "rewritten_text": "警局这灯，亮得跟白天似的。我盯着墙上那块白板，盯得眼睛发酸——那些照片，那些红线，密密麻麻缠在一块儿。\n\n第三起了。又是女的，年轻。两点到四点，跟上了闹钟似的准。手法？一个模子刻出来的。干净，太干净了...",
+            "original_ai_score": 89,
+            "rewritten_ai_score": 80,
+            "score_reduction": 9,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 89
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 80
+              },
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 0.8461538461538461,
+              "emotion_punct_ratio": 0.15384615384615385,
+              "avg_sentence_length": 18.46153846153846,
+              "sentence_length_variance": 106.24852071005918,
+              "short_sentence_ratio": 0.07692307692307693,
+              "forbidden_word_count": 2
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.8,
+              "emotion_punct_ratio": 0.2,
+              "avg_sentence_length": 15.48,
+              "sentence_length_variance": 84.88960000000002,
+              "short_sentence_ratio": 0.32,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "禁用词↓减少2个",
+            "evaluated_at": "2025-12-03T12:43:52.380334"
+          },
+          {
+            "sample_id": "sample_001",
+            "original_text": "夜幕降临，城市的霓虹灯开始闪烁。李明站在写字楼的落地窗前，看着窗外车水马龙的街道，陷入了沉思。\n\n作为公司最年轻的部门经理，他深知自己肩负的责任。首先，他需要带领团队完成这个季度的业绩目标；其次，他必...",
+            "rewritten_text": "窗外的天，一点点暗下去了。那些楼，那些招牌，红的、绿的、蓝的，啪一下，全亮了起来。我站在这儿，玻璃凉飕飕地贴着掌心，底下那条街，车灯拖成一条条晃眼的光带，没完没了地流。\n\n经理？哈。公司里最年轻的那个...",
+            "original_ai_score": 99,
+            "rewritten_ai_score": 0,
+            "score_reduction": 99,
+            "success": true,
+            "error": null,
+            "original_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "NLP模型识别",
+              "label_scores": {
+                "GeneratedContentRisk": 99
+              },
+              "problematic_segments": []
+            },
+            "rewritten_trace_detail": {
+              "hit_keywords": [],
+              "hit_positions": [],
+              "detection_method": "",
+              "label_scores": {},
+              "problematic_segments": []
+            },
+            "original_metrics": {
+              "period_ratio": 1.0,
+              "emotion_punct_ratio": 0.0,
+              "avg_sentence_length": 24.444444444444443,
+              "sentence_length_variance": 213.1358024691358,
+              "short_sentence_ratio": 0.1111111111111111,
+              "forbidden_word_count": 3
+            },
+            "rewritten_metrics": {
+              "period_ratio": 0.9047619047619048,
+              "emotion_punct_ratio": 0.09523809523809523,
+              "avg_sentence_length": 16.0,
+              "sentence_length_variance": 140.95238095238096,
+              "short_sentence_ratio": 0.3333333333333333,
+              "forbidden_word_count": 0
+            },
+            "metrics_comparison": "句号占比↓减少10% | 情感标点↑增加10% | 句式变化↓更单一 | 禁用词↓减少3个",
+            "evaluated_at": "2025-12-03T12:44:08.890908"
+          }
+        ],
+        "iteration": 1,
+        "parent_version_id": "809bab31",
+        "mutation_strategy": null,
+        "analysis": "**成功原因**：本轮成功的关键在于**叙述视角的彻底转变**和**情感表达方式的根本性改造**。从“客观记录事件”转向“主观体验过程”，并通过身体反应而非情感词汇来传达内心，这双重改变深度模拟了人类写作的局限性与即时性，是降低AI痕迹最有效的维度。**文笔与可读性保持良好**，样本读起来生动、顺畅，并未因追求“毛刺感”而难以理解。\n**失败原因**：本轮无失败样本，说明当前策略在应对测试样本时非常有效。潜在风险在于“标点革命”的硬性指标可能在更复杂的文本中导致机械执行，破坏文笔的自然节奏。\n**改进方向**：微调而非大改。应弱化“标点革命”的绝对强制性，将其从“不可妥协的最高准则”调整为需要“优先实现”的核心策略之一，并强调其服务于“模拟思维流”和“情感表达”的根本目的，避免为达标而达标。",
+        "created_at": "2025-12-03T12:42:41.596297",
+        "avg_composite_score": 33.09615384615385,
+        "avg_readability": 99.61538461538461,
+        "avg_writing": 44.70769230769231
+      }
+    ],
+    "approval_status": "pending",
+    "approved_version_id": null,
+    "started_at": "2025-12-03T12:40:04.117238",
+    "completed_at": "2025-12-03T13:00:05.751721",
+    "error_message": null
   }
 ]

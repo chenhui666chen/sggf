@@ -244,137 +244,27 @@ async def create_chapter(
         import traceback
         logger.debug(traceback.format_exc())
     
-    # 🆕 Phase 5: 章节创建后自动抽取实体并归类（保留旧逻辑）
+    # 🚀 Phase 5: 启动后台任务（统一提取 + 摘要生成）
     try:
-        from app.services.entity_extraction import EntityExtractionService
-        from app.services.location_hierarchy_extractor import LocationHierarchyExtractor
-        from app.models.setting import KnowledgeGraphEdge
+        from app.services.chapter_post_save import start_chapter_post_save_task
         import logging
         
         logger = logging.getLogger("uvicorn.error")
-        logger.info(f"   🔍 开始自动抽取章节实体...")
+        logger.info(f"   🚀 启动后台任务：统一提取 + 摘要生成...")
         
-        # 提取实体
-        entities = await EntityExtractionService.extract_entities_from_chapter(
+        # 启动后台异步任务
+        start_chapter_post_save_task(
+            chapter_id=chapter.id,
             chapter_title=final_title,
             chapter_content=chapter_data.content or "",
-            project_id=chapter_data.project_id,
+            chapter_number=chapter.chapter_number,
+            project_id=chapter_data.project_id
         )
         
-        logger.info(f"   ✅ 抽取到 {len(entities)} 个实体")
-        
-        # 🆕 Phase 7: 智能提取地点层级关系
-        logger.info(f"   🗺️ 开始提取地点层级关系...")
-        locations = await LocationHierarchyExtractor.extract_location_hierarchy(
-            chapter_title=final_title,
-            chapter_content=chapter_data.content or "",
-        )
-        
-        logger.info(f"   ✅ 提取到 {len(locations)} 个地点")
-        
-        if locations:
-            # 保存地点层级到地图体系
-            location_result = LocationHierarchyExtractor.save_location_hierarchy(
-                db=db,
-                project_id=chapter_data.project_id,
-                locations=locations,
-            )
-            
-            logger.info(
-                f"   💾 地点层级保存完成：创建 {location_result['created']} 个，"
-                f"更新 {location_result['updated']} 个，跳过 {location_result['skipped']} 个"
-            )
-        
-        # 归类并保存实体
-        if entities:
-            result = EntityExtractionService.classify_and_save_entities(
-                db=db,
-                project_id=chapter_data.project_id,
-                entities=entities,
-            )
-            
-            logger.info(
-                f"   💾 实体归类完成：正式集合 {result['saved_to_formal']} 项，"
-                f"候选集合 {result['saved_to_candidate']} 项，"
-                f"跳过 {result['skipped']} 项"
-            )
-            
-            # Phase 6: 抽取实体间关系
-            logger.info(f"   🔗 开始抽取实体间关系...")
-            relations = await EntityExtractionService.extract_relations_from_chapter(
-                chapter_title=final_title,
-                chapter_content=chapter_data.content or "",
-                entities=entities,
-            )
-            
-            logger.info(f"   ✅ 抽取到 {len(relations)} 个关系")
-            
-            # 保存关系到知识图谱表（需要将实体名称转换为 ID）
-            if relations:
-                from app.models.setting import SettingItem
-                saved_relations = 0
-                
-                for rel in relations:
-                    # 查找 source 和 target 的 ID
-                    source_name = rel.get('source', '').strip()
-                    target_name = rel.get('target', '').strip()
-                    relation_type = rel.get('relation_type', '相关')
-                    confidence = rel.get('confidence', 0.6)
-                    
-                    source_item = db.query(SettingItem).filter(
-                        SettingItem.name == source_name
-                    ).filter(
-                        SettingItem.collection_id.in_(
-                            db.query(SettingItem.collection_id).join(
-                                SettingItem.collection
-                            ).filter(
-                                SettingItem.collection.has(project_id=chapter_data.project_id)
-                            )
-                        )
-                    ).first()
-                    
-                    target_item = db.query(SettingItem).filter(
-                        SettingItem.name == target_name
-                    ).filter(
-                        SettingItem.collection_id.in_(
-                            db.query(SettingItem.collection_id).join(
-                                SettingItem.collection
-                            ).filter(
-                                SettingItem.collection.has(project_id=chapter_data.project_id)
-                            )
-                        )
-                    ).first()
-                    
-                    if source_item and target_item:
-                        # 检查是否已存在该关系
-                        existing_edge = db.query(KnowledgeGraphEdge).filter(
-                            KnowledgeGraphEdge.source_item_id == source_item.id,
-                            KnowledgeGraphEdge.target_item_id == target_item.id,
-                            KnowledgeGraphEdge.relation_type == relation_type,
-                        ).first()
-                        
-                        if not existing_edge:
-                            edge = KnowledgeGraphEdge(
-                                source_item_id=source_item.id,
-                                target_item_id=target_item.id,
-                                relation_type=relation_type,
-                                confidence=confidence,
-                                auto_extracted=True,
-                            )
-                            db.add(edge)
-                            saved_relations += 1
-                
-                if saved_relations > 0:
-                    db.commit()
-                    logger.info(f"   🔗 已保存 {saved_relations} 个关系边到知识图谱")
-                else:
-                    logger.info(f"   ℹ️ 没有新关系需要保存")
     except Exception as e:
         import logging
         logger = logging.getLogger("uvicorn.error")
-        logger.warning(f"⚠️ 自动抽取实体失败（不影响章节创建）: {e}")
-        import traceback
-        logger.debug(traceback.format_exc())
+        logger.warning(f"⚠️ 启动后台任务失败（不影响章节创建）: {e}")
     
     return chapter
 
@@ -481,7 +371,7 @@ async def update_chapter(
     db.refresh(chapter)
 
     # 🆕 Phase 2: 智能差异检测 - 自动追踪人物/设定关联
-    if content_updated and old_content:
+    if content_updated:
         try:
             from app.services.auto_tracking import AutoTrackingService
             import logging
@@ -492,7 +382,7 @@ async def update_chapter(
             # 1. 人物出场智能更新
             char_result = AutoTrackingService.update_character_appearances_smart(
                 chapter_id=chapter_id,
-                old_content=old_content,
+                old_content=old_content,  # 即使为空字符串也可以触发初始追踪
                 new_content=chapter_data.content,
                 project_id=chapter.project_id,
                 db=db
@@ -506,7 +396,7 @@ async def update_chapter(
             # 2. 设定项引用智能更新
             setting_result = AutoTrackingService.update_setting_references_smart(
                 chapter_id=chapter_id,
-                old_content=old_content,
+                old_content=old_content,  # 即使为空字符串也可以触发初始追踪
                 new_content=chapter_data.content,
                 project_id=chapter.project_id,
                 db=db
@@ -536,6 +426,29 @@ async def update_chapter(
             logger.warning(f"⚠️ 智能追踪失败: {e}")
             import traceback
             logger.debug(traceback.format_exc())
+    
+    # 🚀 Phase 5: 启动后台任务（统一提取 + 摘要生成）
+    if content_updated and chapter_data.content:
+        try:
+            from app.services.chapter_post_save import start_chapter_post_save_task
+            import logging
+            
+            logger = logging.getLogger("uvicorn.error")
+            logger.info(f"   🚀 启动后台任务：统一提取 + 摘要生成...")
+            
+            # 启动后台异步任务
+            start_chapter_post_save_task(
+                chapter_id=chapter.id,
+                chapter_title=chapter.title,
+                chapter_content=chapter_data.content,
+                chapter_number=chapter.chapter_number,
+                project_id=chapter.project_id
+            )
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger("uvicorn.error")
+            logger.warning(f"⚠️ 启动后台任务失败（不影响章节更新）: {e}")
 
     # 🆕 同步更新向量库
     if content_updated:
@@ -619,6 +532,125 @@ async def delete_chapter(
         (Memory.project_id == chapter.project_id) &
         (Memory.current_chapter == chapter.chapter_number)
     ).update({Memory.current_chapter: None})
+
+    # 🆕 清理Character表的追踪数据
+    try:
+        from app.models.character import Character
+        import json
+        import logging
+        logger = logging.getLogger("uvicorn.error")
+        
+        logger.info(f"   🧹 清理人物追踪数据...")
+        
+        # 获取该项目的所有人物
+        characters = db.query(Character).filter(
+            Character.project_id == chapter.project_id
+        ).all()
+        
+        cleaned_characters = 0
+        for character in characters:
+            updated = False
+            
+            # 清理 appearance_chapters
+            if character.appearance_chapters:
+                appearance_chapters = json.loads(character.appearance_chapters)
+                if chapter.id in appearance_chapters:
+                    appearance_chapters.remove(chapter.id)
+                    character.appearance_chapters = json.dumps(appearance_chapters)
+                    updated = True
+                    
+                    # 重新计算 first_mention_chapter_id 和 last_appearance_chapter_id
+                    if appearance_chapters:
+                        character.first_mention_chapter_id = min(appearance_chapters)
+                        character.last_appearance_chapter_id = max(appearance_chapters)
+                    else:
+                        character.first_mention_chapter_id = None
+                        character.last_appearance_chapter_id = None
+            
+            # 清理外键字段
+            if character.first_mention_chapter_id == chapter.id:
+                character.first_mention_chapter_id = None
+                updated = True
+            
+            if character.last_appearance_chapter_id == chapter.id:
+                character.last_appearance_chapter_id = None
+                updated = True
+            
+            if updated:
+                cleaned_characters += 1
+        
+        if cleaned_characters > 0:
+            db.commit()
+            logger.info(f"   ✅ 已清理 {cleaned_characters} 个人物的追踪数据")
+        else:
+            logger.info(f"   ℹ️  无需清理人物追踪数据")
+    
+    except Exception as e:
+        import logging
+        logger = logging.getLogger("uvicorn.error")
+        logger.warning(f"⚠️ 清理人物追踪数据失败（不影响删除）: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
+        db.rollback()
+    
+    # 🆕 清理SettingItem表的追踪数据
+    try:
+        from app.models.setting import SettingItem
+        import json
+        import logging
+        logger = logging.getLogger("uvicorn.error")
+        
+        logger.info(f"   🧹 清理设定追踪数据...")
+        
+        # 获取该项目的所有设定项
+        from app.models.setting import SettingCollection
+        setting_items = db.query(SettingItem).join(
+            SettingCollection
+        ).filter(
+            SettingCollection.project_id == chapter.project_id
+        ).all()
+        
+        cleaned_settings = 0
+        for setting_item in setting_items:
+            if setting_item.referenced_chapters:
+                referenced_chapters = json.loads(setting_item.referenced_chapters)
+                if chapter.id in referenced_chapters:
+                    referenced_chapters.remove(chapter.id)
+                    setting_item.referenced_chapters = json.dumps(referenced_chapters)
+                    setting_item.usage_count = len(referenced_chapters)
+                    # last_referenced_at 保持不变（保留最后一次真实引用时间）
+                    cleaned_settings += 1
+        
+        if cleaned_settings > 0:
+            db.commit()
+            logger.info(f"   ✅ 已清理 {cleaned_settings} 个设定项的追踪数据")
+        else:
+            logger.info(f"   ℹ️  无需清理设定追踪数据")
+    
+    except Exception as e:
+        import logging
+        logger = logging.getLogger("uvicorn.error")
+        logger.warning(f"⚠️ 清理设定追踪数据失败（不影响删除）: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
+        db.rollback()
+    
+    # 🆕 清理KnowledgeGraphEdge表（可选）
+    try:
+        from app.models.graph import KnowledgeGraphEdge
+        import logging
+        logger = logging.getLogger("uvicorn.error")
+        
+        logger.info(f"   🧹 清理知识图谱关系...")
+        
+        # 注意：这里只是记录，因为关系边本身不直接存储章节ID
+        # 如果未来需要追踪关系的来源章节，可以在这里添加逻辑
+        logger.info(f"   ℹ️  知识图谱关系不直接关联章节，跳过")
+    
+    except Exception as e:
+        import logging
+        logger = logging.getLogger("uvicorn.error")
+        logger.warning(f"⚠️ 检查知识图谱失败（不影响删除）: {e}")
 
     # 🆕 同步删除向量库中的相关向量数据
     try:

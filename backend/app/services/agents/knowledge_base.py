@@ -203,20 +203,29 @@ class NovelKnowledgeBase:
         Returns:
             List[Document]: 搜索结果
         """
-        # 构建过滤条件（Chroma 需要简单的键值对过滤器）
-        filter_dict = {}
+        # 构建过滤条件（使用正确的 ChromaDB 格式）
+        filter_dict = None
         
-        # 🎯 项目隔离（最高优先级）
+        # 构建条件列表
+        conditions = []
         if project_id is not None:
-            filter_dict["project_id"] = str(project_id)
-        
-        # 类型过滤
+            conditions.append({"project_id": str(project_id)})
         if filter_type:
-            filter_dict["type"] = filter_type
+            conditions.append({"type": filter_type})
+        
+        # 根据条件数量选择格式
+        if len(conditions) == 0:
+            filter_dict = None
+        elif len(conditions) == 1:
+            # 单条件：直接使用字典
+            filter_dict = conditions[0]
+        else:
+            # 多条件：使用 $and 操作符
+            filter_dict = {"$and": conditions}
         
         # 执行搜索
         try:
-            if len(filter_dict) == 0:
+            if filter_dict is None:
                 # 无过滤条件
                 results = self.vectorstore.similarity_search(query, k=k)
             else:
@@ -236,9 +245,16 @@ class NovelKnowledgeBase:
             character_name: 角色名称
             project_id: 项目ID（推荐提供以确保项目隔离）
         """
-        filter_dict = {"type": "character", "name": character_name}
+        # 构建条件列表
+        conditions = [
+            {"type": "character"},
+            {"name": character_name}
+        ]
         if project_id is not None:
-            filter_dict["project_id"] = str(project_id)
+            conditions.append({"project_id": str(project_id)})
+        
+        # 使用 $and 操作符（多条件）
+        filter_dict = {"$and": conditions}
         
         try:
             return self.vectorstore.similarity_search(
@@ -255,9 +271,16 @@ class NovelKnowledgeBase:
             chapter_num: 章节编号
             project_id: 项目ID（推荐提供以确保项目隔离）
         """
-        filter_dict = {"type": "chapter", "chapter_num": str(chapter_num)}
+        # 构建条件列表
+        conditions = [
+            {"type": "chapter"},
+            {"chapter_num": str(chapter_num)}
+        ]
         if project_id is not None:
-            filter_dict["project_id"] = str(project_id)
+            conditions.append({"project_id": str(project_id)})
+        
+        # 使用 $and 操作符（多条件）
+        filter_dict = {"$and": conditions}
         
         try:
             return self.vectorstore.similarity_search(
@@ -280,10 +303,18 @@ class NovelKnowledgeBase:
         try:
             collection = self.vectorstore._collection
 
-            # 构建过滤条件
-            where_filter = {"type": "chapter"}
+            # 构建过滤条件（使用 $and 操作符）
             if project_id is not None:
-                where_filter["project_id"] = str(project_id)
+                # 多条件查询，需要使用 $and
+                where_filter = {
+                    "$and": [
+                        {"type": "chapter"},
+                        {"project_id": str(project_id)}
+                    ]
+                }
+            else:
+                # 单条件查询
+                where_filter = {"type": "chapter"}
 
             # 获取所有章节文档
             results = collection.get(where=where_filter)

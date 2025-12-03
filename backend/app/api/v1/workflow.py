@@ -3634,8 +3634,8 @@ async def execute_generate_next_chapter_task(
                 "chapter_number": next_chapter_number
             }).scalar()
 
-        logger.info(f"   ✓ 章节已保存: id={new_chapter_id}")
-
+        logger.info(f"   ✅ 章节已保存: id={new_chapter_id}")
+        
         # 🆕 阶段2：从章节自动抽取设定候选并入库（供人工确认）
         try:
             import re
@@ -3752,35 +3752,8 @@ async def execute_generate_next_chapter_task(
         except Exception as e:
             logger.warning(f"   ⚠️ 自动合并设定失败: {e}")
 
-        # 生成章节摘要
-        try:
-            from app.services.agents.chapter_summarizer import create_chapter_summarizer
-            summarizer = create_chapter_summarizer(db_session=db)
-            summarizer.get_or_generate_summary(
-                chapter_id=new_chapter_id,
-                chapter_number=next_chapter_number,
-                chapter_title=chapter_title,
-                chapter_content=final_version,
-                summary_length=300
-            )
-            logger.info(f"   ✓ 章节摘要已生成")
-        except Exception as e:
-            logger.error(f"   ⚠️ 生成章节摘要失败: {e}")
-
-        # 同步到知识库
-        try:
-            from app.services.vector_sync import sync_to_vector_db
-            sync_to_vector_db(
-                kb_type="chapter",
-                name=f"第{next_chapter_number}章 {chapter_title}",
-                content=final_version,
-                metadata={"project_id": str(project_id), "chapter_number": str(next_chapter_number)}
-            )
-            logger.info(f"   ✓ 章节已同步到知识库")
-        except Exception as e:
-            logger.error(f"   ⚠️ 同步知识库失败: {e}")
-
-        # 更新任务状态为完成
+        # ✅ 章节保存完成，立即更新任务状态并推送完成事件
+        # 注意：摘要生成和统一提取将在后台异步执行，不阻塞主流程
         update_query = text("""
             UPDATE generation_history
             SET status = :status, completed_at = :completed_at
@@ -3793,7 +3766,7 @@ async def execute_generate_next_chapter_task(
         })
         db.commit()
 
-        # 发送完成事件
+        # 发送完成事件（章节已保存）
         await ws_manager.send_task_complete(
             project_id=project_id,
             task_id=task_id,
@@ -3807,7 +3780,31 @@ async def execute_generate_next_chapter_task(
             }
         )
 
-        logger.info(f"✅ 后台任务完成: {task_id}, 第{next_chapter_number}章已生成")
+        logger.info(f"✅ 章节生成任务完成: {task_id}, 第{next_chapter_number}章已保存")
+        
+        # 🚀 启动后台任务（统一提取 + 摘要生成）- 异步执行，不等待结果
+        try:
+            from app.services.chapter_post_save import start_chapter_post_save_task
+            
+            logger.info(f"🚀 启动后台任务：统一提取 + 摘要生成（异步）...")
+            
+            # 启动后台异步任务（不等待完成）
+            # 🆕 注意：generate_summary=True，仅工作流场景生成摘要
+            start_chapter_post_save_task(
+                chapter_id=new_chapter_id,
+                chapter_title=chapter_title,
+                chapter_content=final_version,
+                chapter_number=next_chapter_number,
+                project_id=project_id,
+                generate_summary=True  # 🆕 工作流场景需要生成摘要
+            )
+            
+            logger.info(f"✅ 后台任务已启动，将在后台异步执行")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 启动后台任务失败（不影响章节保存）: {e}")
+            import traceback
+            traceback.print_exc()
 
     except Exception as e:
         logger.error(f"❌ 后台任务失败: {task_id}, 错误: {e}")

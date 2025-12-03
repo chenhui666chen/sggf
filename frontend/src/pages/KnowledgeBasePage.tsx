@@ -41,6 +41,7 @@ import { logger } from '@/utils/logger'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
 import VditorEditor from '@/components/VditorEditor'
 import { apiClient } from '@/services/api'
+import SettingTreeView from '@/components/SettingTreeView'
 
 // ==================== 接口定义 ====================
 
@@ -165,6 +166,14 @@ export default function KnowledgeBasePage() {
   const [selectedCollection, setSelectedCollection] = useState<SettingCollection | null>(null)
   const [settingItems, setSettingItems] = useState<SettingItem[]>([])
   const [selectedItem, setSelectedItem] = useState<SettingItem | null>(null)
+  const [selectedCategoryPath, setSelectedCategoryPath] = useState<string | null>(null)
+  
+  // 模板相关状态
+  const [settingTemplates, setSettingTemplates] = useState<any[]>([])
+  const [settingTemplatesLoading, setSettingTemplatesLoading] = useState(false)
+  const [selectedTemplateKey, setSelectedTemplateKey] = useState<string | null>(null)
+  const [clearExistingSettings, setClearExistingSettings] = useState(false)
+  const [applyingTemplate, setApplyingTemplate] = useState(false)
   const [loadingCollections, setLoadingCollections] = useState(false)
   const [loadingItems, setLoadingItems] = useState(false)
 
@@ -181,7 +190,6 @@ export default function KnowledgeBasePage() {
   const [newCollectionName, setNewCollectionName] = useState('')
   const [newCollectionCategory, setNewCollectionCategory] = useState('')
   const [newCollectionDescription, setNewCollectionDescription] = useState('')
-  const [selectedTemplate, setSelectedTemplate] = useState('')
 
   const [newItemName, setNewItemName] = useState('')
   const [newItemCode, setNewItemCode] = useState('')
@@ -416,37 +424,55 @@ export default function KnowledgeBasePage() {
     }
   }
 
+  const loadSettingTemplates = async () => {
+    setSettingTemplatesLoading(true)
+    try {
+      const response = await apiClient.getSettingTemplates()
+      setSettingTemplates(response.data || [])
+    } catch (error) {
+      logger.error('获取设定模板列表失败:', error)
+      showSnackbar('获取设定模板列表失败', 'error')
+    } finally {
+      setSettingTemplatesLoading(false)
+    }
+  }
+
+  const handleOpenTemplateDialog = () => {
+    if (!projectId) {
+      showSnackbar('请先选择一个项目', 'error')
+      return
+    }
+
+    setTemplateDialog(true)
+    setSelectedTemplateKey(null)
+    setClearExistingSettings(false)
+    loadSettingTemplates()
+  }
+
   const handleApplyTemplate = async () => {
-    if (!projectId || !selectedTemplate) {
+    if (!projectId || !selectedTemplateKey) {
       showSnackbar('请选择模板', 'error')
       return
     }
 
+    const projectIdNum = Number(projectId)
+    if (Number.isNaN(projectIdNum)) return
+
+    setApplyingTemplate(true)
     try {
-      const response = await fetch(`/api/v1/projects/${projectId}/setting-collections/from-template`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          template_name: selectedTemplate,
-          replace_existing: false,
-        }),
+      await apiClient.applySettingTemplate(projectIdNum, {
+        template_key: selectedTemplateKey,
+        clear_existing: clearExistingSettings,
       })
 
-      if (response.ok) {
-        await loadSettingCollections()
-        setTemplateDialog(false)
-        setSelectedTemplate('')
-        showSnackbar('✅ 模板应用成功', 'success')
-      } else {
-        const errorData = await response.json()
-        showSnackbar(errorData.detail || '应用模板失败', 'error')
-      }
+      await loadSettingCollections()
+      setTemplateDialog(false)
+      showSnackbar('✅ 模板应用成功', 'success')
     } catch (err) {
       logger.error('❌ 应用模板失败:', err)
       showSnackbar('应用模板失败', 'error')
+    } finally {
+      setApplyingTemplate(false)
     }
   }
 
@@ -811,7 +837,7 @@ export default function KnowledgeBasePage() {
                   variant="outlined"
                   size="small"
                   startIcon={<AddIcon />}
-                  onClick={() => setTemplateDialog(true)}
+                  onClick={handleOpenTemplateDialog}
                   fullWidth
                 >
                   从模板创建
@@ -885,11 +911,12 @@ export default function KnowledgeBasePage() {
                         sx={{ pr: 6 }}
                       >
                         <FolderIcon sx={{ mr: 1, color: 'primary.main' }} />
-                        <ListItemText
-                          primary={collection.name}
-                          secondary={getCategoryDisplayName(collection.category)}
-                          primaryTypographyProps={{ fontWeight: 500 }}
-                        />
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Typography sx={{ fontWeight: 500 }}>{collection.name}</Typography>
+                          {getCategoryDisplayName(collection.category) !== collection.name && (
+                            <Chip label={getCategoryDisplayName(collection.category)} size="small" variant="outlined" sx={{ height: 20 }} />
+                          )}
+                        </Box>
                       </ListItemButton>
                     </ListItem>
                   ))}
@@ -898,7 +925,7 @@ export default function KnowledgeBasePage() {
             </Paper>
           </Grid>
 
-          {/* 右侧：设定项列表 */}
+          {/* 右侧：设定项树 + 列表 */}
           <Grid item xs={12} md={8}>
             <Paper elevation={2} sx={{ p: 2, height: '70vh', display: 'flex', flexDirection: 'column' }}>
               {selectedCollection ? (
@@ -925,88 +952,111 @@ export default function KnowledgeBasePage() {
 
                   <Divider sx={{ mb: 2 }} />
 
-                  {/* 设定项列表 */}
-                  {loadingItems ? (
-                    <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                      <CircularProgress />
+                  <Box sx={{ display: 'flex', gap: 2, flex: 1, minHeight: 0 }}>
+                    {/* 左：树形视图 */}
+                    <Box sx={{ width: '60%', borderRight: '1px solid', borderColor: 'grey.200', pr: 1 }}>
+                      <SettingTreeView
+                        collectionId={selectedCollection.id}
+                        selectedItemId={selectedItem?.id}
+                        onSelectCategory={(path) => {
+                          setSelectedCategoryPath(path)
+                          setSelectedItem(null)
+                        }}
+                        onSelectInstance={(item) => {
+                          setSelectedItem(item)
+                          setSelectedCategoryPath(null)
+                        }}
+                        title="层级视图"
+                      />
                     </Box>
-                  ) : settingItems.length === 0 ? (
-                    <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
-                      暂无设定项
-                    </Typography>
-                  ) : (
-                    <List sx={{ flexGrow: 1, overflow: 'auto' }}>
-                      {settingItems.map((item) => (
-                        <ListItem
-                          key={item.id}
-                          disablePadding
-                          secondaryAction={
-                            <Box>
-                              <IconButton
-                                edge="end"
-                                size="small"
-                                onClick={() => handleDuplicateItem(item)}
-                              >
-                                <ContentCopyIcon fontSize="small" />
-                              </IconButton>
-                              <IconButton
-                                edge="end"
-                                size="small"
-                                onClick={() => handleDeleteItem(item.id)}
-                              >
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
-                            </Box>
-                          }
-                        >
-                          <ListItemButton
-                            selected={selectedItem?.id === item.id}
-                            onClick={() => setSelectedItem(item)}
-                            sx={{ pr: 10, pl: `${getIndentForItem(item) + 8}px` }}
-                          >
-                            <ArticleIcon sx={{ mr: 1, fontSize: 18, color: 'text.secondary' }} />
-                            <ListItemText
-                              primary={
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                  <Typography component="span" sx={{ fontWeight: 500 }}>
-                                    Lv.{item.level || 1} {item.name}
-                                  </Typography>
-                                  {item.code && (
-                                    <Chip label={item.code} size="small" variant="outlined" sx={{ height: 20 }} />
-                                  )}
-                                </Box>
-                              }
-                              secondary={item.summary || item.content?.substring(0, 50)}
-                            />
-                          </ListItemButton>
-                        </ListItem>
-                      ))}
-                    </List>
-                  )}
 
-                  {/* 设定项详情 */}
-                  {selectedItem && (
-                    <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'between', alignItems: 'center', mb: 1 }}>
-                        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                          {selectedItem.name}
-                        </Typography>
-                        <Button size="small" startIcon={<EditIcon />} onClick={handleEditItem}>
-                          编辑
-                        </Button>
-                      </Box>
-                      <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', color: 'text.secondary' }}>
-                        {selectedItem.content || '暂无内容'}
-                      </Typography>
-                      {selectedItem.tags && selectedItem.tags.length > 0 && (
-                        <Box sx={{ mt: 1, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                          {selectedItem.tags.map((tag, idx) => (
-                            <Chip key={idx} label={tag} size="small" />
-                          ))}
+                    {/* 右：详情/列表（根据选择切换） */}
+                    <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                      {/* 分类下的实例列表 */}
+                      {!selectedItem && selectedCategoryPath && (
+                        <List sx={{ flexGrow: 1, overflow: 'auto' }}>
+                          {settingItems
+                            .filter((it) => ((it.path || '').startsWith(selectedCategoryPath + '/')) && (it.is_leaf ?? true))
+                            .map((item: SettingItem) => (
+                              <ListItem
+                                key={item.id}
+                                disablePadding
+                                secondaryAction={
+                                  <Box>
+                                    <IconButton
+                                      edge="end"
+                                      size="small"
+                                      onClick={() => handleDuplicateItem(item)}
+                                    >
+                                      <ContentCopyIcon fontSize="small" />
+                                    </IconButton>
+                                    <IconButton
+                                      edge="end"
+                                      size="small"
+                                      onClick={() => handleDeleteItem(item.id)}
+                                    >
+                                      <DeleteIcon fontSize="small" />
+                                    </IconButton>
+                                  </Box>
+                                }
+                              >
+                                <ListItemButton
+                                  selected={!!((selectedItem as any) && (selectedItem as any).id === item.id)}
+                                  onClick={() => (item.is_leaf ? setSelectedItem(item) : setSelectedCategoryPath(item.path || ""))}
+                                  sx={{ pr: 10 }}
+                                >
+                                  {item.is_leaf ? <ArticleIcon sx={{ mr: 1, fontSize: 18, color: 'text.secondary' }} /> : <FolderIcon sx={{ mr: 1, fontSize: 18, color: 'primary.main' }} />}
+                                  <ListItemText
+                                    primary={
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                        <Typography component="span" sx={{ fontWeight: 500 }}>
+                                          Lv.{item.depth || item.level || 1} {item.name}
+                                        </Typography>
+                                        {item.code && (
+                                          <Chip label={item.code} size="small" variant="outlined" sx={{ height: 20 }} />
+                                        )}
+                                      </Box>
+                                    }
+                                    secondary={item.summary || item.content?.substring(0, 50)}
+                                  />
+                                </ListItemButton>
+                              </ListItem>
+                            ))}
+                        </List>
+                      )}
+
+                      {/* 设定项详情 */}
+                      {selectedItem && (
+                        <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                              {selectedItem.name}
+                            </Typography>
+                            <Button size="small" startIcon={<EditIcon />} onClick={handleEditItem}>
+                              编辑
+                            </Button>
+                          </Box>
+                          <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', color: 'text.secondary' }}>
+                            {selectedItem.content || '暂无内容'}
+                          </Typography>
+                          {selectedItem.tags && selectedItem.tags.length > 0 && (
+                            <Box sx={{ mt: 1, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                              {selectedItem.tags.map((tag, idx) => (
+                                <Chip key={idx} label={tag} size="small" />
+                              ))}
+                            </Box>
+                          )}
                         </Box>
                       )}
+
+                      {/* 空态提示 */}
+                      {!selectedItem && !selectedCategoryPath && (
+                        <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                          请选择左侧树中的分类或设定项
+                        </Typography>
+                      )}
                     </Box>
-                  )}
+                  </Box>
                 </>
               ) : (
                 <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
@@ -1061,30 +1111,74 @@ export default function KnowledgeBasePage() {
       </Dialog>
 
       {/* 从模板创建对话框 */}
-      <Dialog open={templateDialog} onClose={() => setTemplateDialog(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>从模板创建设定集合</DialogTitle>
-        <DialogContent>
-          <FormControl fullWidth margin="dense">
-            <InputLabel>选择模板</InputLabel>
-            <Select
-              value={selectedTemplate}
-              label="选择模板"
-              onChange={(e) => setSelectedTemplate(e.target.value)}
-            >
-              <MenuItem value="xianxia">修仙模板</MenuItem>
-              <MenuItem value="xuanhuan">玄幻模板</MenuItem>
-              <MenuItem value="wuxia">武侠模板</MenuItem>
-              <MenuItem value="modern_fantasy">现代奇幻模板</MenuItem>
-              <MenuItem value="scifi">科幻模板</MenuItem>
-            </Select>
-          </FormControl>
-          <Alert severity="info" sx={{ mt: 2 }}>
-            将根据所选模板自动创建多个设定集合和预设项
-          </Alert>
+      <Dialog
+        open={templateDialog}
+        onClose={() => !applyingTemplate && setTemplateDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>选择设定模板</DialogTitle>
+        <DialogContent dividers>
+          {settingTemplatesLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : (
+            <List>
+              {settingTemplates.length === 0 ? (
+                <ListItem>
+                  <Typography variant="body2" color="text.secondary">
+                    暂无可用模板。
+                  </Typography>
+                </ListItem>
+              ) : (
+                settingTemplates.map((tpl: any) => (
+                  <ListItem
+                    key={tpl.key}
+                    button
+                    selected={selectedTemplateKey === tpl.key}
+                    onClick={() => setSelectedTemplateKey(tpl.key)}
+                  >
+                    <Box>
+                      <Typography variant="subtitle1">{tpl.name}</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {tpl.description}
+                      </Typography>
+                    </Box>
+                  </ListItem>
+                ))
+              )}
+            </List>
+          )}
+
+          <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+            <FormControl component="fieldset">
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <input
+                  type="checkbox"
+                  checked={clearExistingSettings}
+                  onChange={(e) => setClearExistingSettings(e.target.checked)}
+                  style={{ width: 18, height: 18, cursor: 'pointer' }}
+                />
+                <Typography variant="body2" color="text.secondary">
+                  清空当前项目下已有的设定集合（谨慎操作）
+                </Typography>
+              </Box>
+            </FormControl>
+          </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setTemplateDialog(false); setSelectedTemplate('') }}>取消</Button>
-          <Button onClick={handleApplyTemplate} variant="contained">应用</Button>
+          <Button onClick={() => setTemplateDialog(false)} disabled={applyingTemplate}>
+            取消
+          </Button>
+          <Button
+            onClick={handleApplyTemplate}
+            variant="contained"
+            disabled={!selectedTemplateKey || applyingTemplate}
+            startIcon={applyingTemplate ? <CircularProgress size={20} /> : undefined}
+          >
+            {applyingTemplate ? '应用中...' : '应用模板'}
+          </Button>
         </DialogActions>
       </Dialog>
 

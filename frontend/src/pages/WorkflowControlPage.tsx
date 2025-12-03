@@ -25,7 +25,6 @@ import {
   DialogTitle,
   List,
   ListItem,
-  ListItemText,
   Tabs,
   Tab,
   MenuItem,
@@ -294,8 +293,6 @@ export default function WorkflowControlPage() {
   const [availableTechniques, setAvailableTechniques] = useState<any[]>([])
   const [availableRealms, setAvailableRealms] = useState<any[]>([])
   const [availableForces, setAvailableForces] = useState<any[]>([])
-  const [availableProfessions, setAvailableProfessions] = useState<any[]>([])
-  const [availableRaces, setAvailableRaces] = useState<any[]>([])
   const [characterTechniques, setCharacterTechniques] = useState<any[]>([])
   const [selectedTechniqueId, setSelectedTechniqueId] = useState<number | ''>('')
 
@@ -550,49 +547,9 @@ export default function WorkflowControlPage() {
     }
   }
 
-  // 🧬 结构化人物：加载可用职业（从 profession_class_system 体系）
-  const loadAvailableProfessions = async () => {
-    if (!projectId) return
 
-    const projectIdNum = Number(projectId)
-    if (Number.isNaN(projectIdNum)) return
 
-    try {
-      const collectionsResponse = await apiClient.getSettingCollections(projectIdNum)
-      const collections = collectionsResponse.data || []
-      const professionCollection = collections.find((c: any) => c.category === 'profession_class_system')
-      if (professionCollection) {
-        const itemsResponse = await apiClient.getSettingItems(professionCollection.id)
-        setAvailableProfessions(itemsResponse.data || [])
-      } else {
-        setAvailableProfessions([])
-      }
-    } catch (error) {
-      console.error('获取职业列表失败:', error)
-    }
-  }
 
-  // 🧬 结构化人物：加载可用种族（从 race_bloodline_system 体系）
-  const loadAvailableRaces = async () => {
-    if (!projectId) return
-
-    const projectIdNum = Number(projectId)
-    if (Number.isNaN(projectIdNum)) return
-
-    try {
-      const collectionsResponse = await apiClient.getSettingCollections(projectIdNum)
-      const collections = collectionsResponse.data || []
-      const raceCollection = collections.find((c: any) => c.category === 'race_bloodline_system')
-      if (raceCollection) {
-        const itemsResponse = await apiClient.getSettingItems(raceCollection.id)
-        setAvailableRaces(itemsResponse.data || [])
-      } else {
-        setAvailableRaces([])
-      }
-    } catch (error) {
-      console.error('获取种族列表失败:', error)
-    }
-  }
 
   const loadSettingTemplates = async () => {
     setSettingTemplatesLoading(true)
@@ -1366,9 +1323,27 @@ export default function WorkflowControlPage() {
       if (data.task_id && currentTaskId && data.task_id === currentTaskId) {
         console.log('✅ 生成下一章任务完成:', data.result)
 
+        // 🔥 关键修复：显式标记所有阶段为完成
+        const allStages: StageType[] = ['concept', 'structure', 'content', 'review', 'iteration']
+        allStages.forEach(stage => {
+          dispatch(updateStageStatus({ stage, status: 'completed' }))
+          console.log(`✅ 阶段 ${stage} 已标记为完成`)
+        })
+
         // 使用 Redux action 清除任务状态
         dispatch(completeGenerateNextChapter())
         setGeneratingNextChapter(false)
+        
+        // 🔥 关键修复：清除各阶段的进行中状态，避免卡在"生成中..."
+        setIsRunning(false)
+        // 注意：setCurrentStage 是 Redux action，不接受 null，保持当前阶段不变
+        setCurrentTaskId(null)
+        setTaskProgress(100)
+        
+        // 停止进度估算器
+        if (progressEstimator) {
+          progressEstimator.complete()
+        }
 
         // 提取章节信息
         const chapter = data.result?.chapter
@@ -3687,13 +3662,11 @@ export default function WorkflowControlPage() {
         setAutoTrackedLocations([])
       }
 
-      // 保证功法/境界/势力/职业/种族 下拉列表已加载
+      // 保证功法/境界/势力 下拉列表已加载
       await Promise.all([
         loadAvailableTechniques(),
         loadAvailableRealms(),
         loadAvailableForces(),
-        loadAvailableProfessions(),
-        loadAvailableRaces(),
       ])
     } catch (error) {
       console.error('打开角色编辑对话框失败:', error)

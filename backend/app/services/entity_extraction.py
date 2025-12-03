@@ -8,7 +8,8 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 
 from app.models.setting import SettingCollection, SettingItem
-from app.services.agents.llm_factory import LLMFactory
+from langchain_community.chat_models import ChatOpenAI
+import os
 
 
 class EntityExtractionService:
@@ -75,7 +76,13 @@ class EntityExtractionService:
             }
         ]
         """
-        llm = LLMFactory.create_llm()
+        # 创建LLM实例
+        llm = ChatOpenAI(
+            model_name=os.getenv("DEEPSEEK_MODEL", "deepseek-reasoner"),
+            temperature=0.7,
+            openai_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
+            openai_api_base=os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1")
+        )
         
         prompt = f"""你是一个小说设定提取专家。请从以下章节中提取所有重要的设定元素，包括：
 - 人物/角色（主要配角、重要NPC等）
@@ -159,7 +166,13 @@ class EntityExtractionService:
         if not entities or len(entities) < 2:
             return []
         
-        llm = LLMFactory.create_llm()
+        # 创建LLM实例
+        llm = ChatOpenAI(
+            model_name=os.getenv("DEEPSEEK_MODEL", "deepseek-reasoner"),
+            temperature=0.7,
+            openai_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
+            openai_api_base=os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1")
+        )
         
         entity_names = [e["name"] for e in entities]
         entity_list_str = "\n".join([f"- {name}" for name in entity_names])
