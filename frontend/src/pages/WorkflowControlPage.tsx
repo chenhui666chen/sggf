@@ -285,7 +285,6 @@ export default function WorkflowControlPage() {
   const [characterTab, setCharacterTab] = useState<'text' | 'structured'>('text')
   const [structuredCharacters, setStructuredCharacters] = useState<any[]>([])
   const [structuredCharactersLoading, setStructuredCharactersLoading] = useState(false)
-  const [characterGroupBy, setCharacterGroupBy] = useState<'none' | 'faction' | 'role' | 'tags'>('none')
 
   const [showCharacterEditDialog, setShowCharacterEditDialog] = useState(false)
   const [characterFormData, setCharacterFormData] = useState<any>({})
@@ -299,12 +298,6 @@ export default function WorkflowControlPage() {
   const [availableRaces, setAvailableRaces] = useState<any[]>([])
   const [characterTechniques, setCharacterTechniques] = useState<any[]>([])
   const [selectedTechniqueId, setSelectedTechniqueId] = useState<number | ''>('')
-  
-  // 快速新建设定项相关状态
-  const [showQuickCreateItemDialog, setShowQuickCreateItemDialog] = useState(false)
-  const [quickCreateItemCategory, setQuickCreateItemCategory] = useState('')
-  const [quickCreateItemName, setQuickCreateItemName] = useState('')
-  const [quickCreateItemSaving, setQuickCreateItemSaving] = useState(false)
 
   const [snackbarOpen, setSnackbarOpen] = useState(false)
   const [snackbarMessage, setSnackbarMessage] = useState('')
@@ -419,21 +412,6 @@ export default function WorkflowControlPage() {
   // 辅助函数：层级缩进计算
   const getIndentForItem = (item: any): number => {
     return ((item.depth || 1) - 1) * 24
-  }
-
-  // 人物分组计算
-  const computeGroupedCharacters = (): Record<string, any[]> => {
-    const group: Record<string, any[]> = {}
-    if (characterGroupBy === 'none') return group
-    structuredCharacters.forEach((ch: any) => {
-      let key = '未分组'
-      if (characterGroupBy === 'faction') key = ch.faction || '未分组'
-      else if (characterGroupBy === 'role') key = ch.role || '未分组'
-      else if (characterGroupBy === 'tags') key = (ch.tags && ch.tags[0]) || '未分组'
-      if (!group[key]) group[key] = []
-      group[key].push(ch)
-    })
-    return group
   }
 
   // 快速添加体系相关
