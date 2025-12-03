@@ -91,7 +91,9 @@ class CharacterTextParser:
         # 姓名特殊处理：可能有 ### 或 ** 前缀
         'name': r'(?:###\s*)?(?:\*\*)?【姓名】(?:\*\*)?[：:]\s*(.+?)(?=\n|$)',
         'age_gender': r'(?:\*\*)?【年龄/性别】(?:\*\*)?[：:]\s*(.+?)(?=\n|$)',
-        'role': r'(?:\*\*)?【角色定位】(?:\*\*)?[：:]\s*(.+?)(?=\n|$)',
+        'role': r'(?:\*\*)?【故事立场】(?:\*\*)?[：:]\s*(.+?)(?=\n|$)',
+        'faction': r'(?:\*\*)?【所属势力】(?:\*\*)?[：:]\s*(.+?)(?=\n|$)',
+        'importance': r'(?:\*\*)?【重要性】(?:\*\*)?[：:]\s*(.+?)(?=\n|$)',
         'appearance': r'(?:\*\*)?【外貌特征】(?:\*\*)?[：:]\s*(.+?)(?=【|##|$)',
         'personality': r'(?:\*\*)?【性格特点】(?:\*\*)?[：:]\s*(.+?)(?=【|##|$)',
         'background': r'(?:\*\*)?【背景故事】(?:\*\*)?[：:]\s*(.+?)(?=【|##|$)',
@@ -188,12 +190,21 @@ class CharacterTextParser:
             age_gender = age_gender_match.group(1).strip()
             char.age, char.gender = self._parse_age_gender(age_gender)
 
-        # 解析角色定位
+        # 解析故事立场
         role_match = re.search(self.FIELD_PATTERNS['role'], block, re.DOTALL)
         if role_match:
             role_text = role_match.group(1).strip()
             char.role = self._normalize_role(role_text)
-            char.importance_level = self._extract_importance(role_text)
+        
+        # 解析所属势力
+        faction_match = re.search(self.FIELD_PATTERNS['faction'], block, re.DOTALL)
+        if faction_match:
+            char.faction = faction_match.group(1).strip()
+        
+        # 解析重要性
+        importance_match = re.search(self.FIELD_PATTERNS['importance'], block, re.DOTALL)
+        if importance_match:
+            char.importance_level = importance_match.group(1).strip()
 
         # 解析其他字段
         for field_name in ['appearance', 'personality', 'background', 'worldview',
