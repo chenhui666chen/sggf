@@ -222,9 +222,9 @@ async def get_character_auto_tracked_relations(
     _ensure_project_owned(character.project_id, current_user, db)
     
     # 解析JSON字段
-    technique_ids = json.loads(character.techniques or "[]")
-    artifact_ids = json.loads(character.artifacts or "[]")
-    location_ids = json.loads(character.related_locations or "[]")
+    technique_ids = json.loads(character.techniques_json or "[]")
+    artifact_ids = json.loads(character.artifacts_json or "[]")
+    location_ids = json.loads(character.related_locations_json or "[]")
     
     # 获取详细信息
     techniques = []

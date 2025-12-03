@@ -322,11 +322,11 @@ class AutoTrackingService:
                         chapter_content, char_name, tech.name,
                         ['修炼', '施展', '掌握', '使用', '参悟', '学会']
                     ):
-                        # 更新人物的techniques字段
-                        char_techniques = json.loads(character.techniques or "[]")
+                        # 更新人物的techniques_json字段
+                        char_techniques = json.loads(character.techniques_json or "[]")
                         if tech.id not in char_techniques:
                             char_techniques.append(tech.id)
-                            character.techniques = json.dumps(char_techniques)
+                            character.techniques_json = json.dumps(char_techniques)
                             technique_count += 1
                             print(f"  📚 {char_name} 关联功法: {tech.name}")
                         
@@ -352,11 +352,11 @@ class AutoTrackingService:
                         chapter_content, char_name, art.name,
                         ['手持', '获得', '使用', '佩戴', '持有', '拿出']
                     ):
-                        # 更新人物的artifacts字段
-                        char_artifacts = json.loads(character.artifacts or "[]")
+                        # 更新人物的artifacts_json字段
+                        char_artifacts = json.loads(character.artifacts_json or "[]")
                         if art.id not in char_artifacts:
                             char_artifacts.append(art.id)
-                            character.artifacts = json.dumps(char_artifacts)
+                            character.artifacts_json = json.dumps(char_artifacts)
                             artifact_count += 1
                             print(f"  ⚔️ {char_name} 关联法宝: {art.name}")
                         
@@ -382,11 +382,11 @@ class AutoTrackingService:
                         chapter_content, char_name, loc.name,
                         ['来到', '在', '前往', '进入', '走入', '赶到']
                     ):
-                        # 更新人物的related_locations字段
-                        char_locations = json.loads(character.related_locations or "[]")
+                        # 更新人物的related_locations_json字段
+                        char_locations = json.loads(character.related_locations_json or "[]")
                         if loc.id not in char_locations:
                             char_locations.append(loc.id)
-                            character.related_locations = json.dumps(char_locations)
+                            character.related_locations_json = json.dumps(char_locations)
                             location_count += 1
                             print(f"  📍 {char_name} 关联地点: {loc.name}")
                         

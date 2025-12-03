@@ -67,9 +67,9 @@ class Character(Base):
     )
     
     # 🆕 JSON字段：掉握的功法/法宝/关联地点
-    techniques: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="掉握的功法ID列表(JSON)")
-    artifacts: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="拥有的法宝ID列表(JSON)")
-    related_locations: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="关联地点ID列表(JSON)")
+    techniques_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="掉握的功法ID列表(JSON)")
+    artifacts_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="拥有的法宝ID列表(JSON)")
+    related_locations_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="关联地点ID列表(JSON)")
     
     # 🆕 自动维护字段：出场记录
     first_mention_chapter_id: Mapped[Optional[int]] = mapped_column(
@@ -114,10 +114,31 @@ class Character(Base):
 
     # 关系定义
     project: Mapped["Project"] = relationship("Project", lazy="select")
+    
+    # 明确指定 foreign_keys 以解决歧义
     current_realm: Mapped[Optional["SettingItem"]] = relationship(
-        "SettingItem", lazy="select"
+        "SettingItem", 
+        foreign_keys=[current_realm_item_id],
+        lazy="select"
     )
-    techniques: Mapped[List["CharacterTechnique"]] = relationship(
+    faction_item: Mapped[Optional["SettingItem"]] = relationship(
+        "SettingItem",
+        foreign_keys=[faction_item_id],
+        lazy="select"
+    )
+    profession_item: Mapped[Optional["SettingItem"]] = relationship(
+        "SettingItem",
+        foreign_keys=[profession_item_id],
+        lazy="select"
+    )
+    race_item: Mapped[Optional["SettingItem"]] = relationship(
+        "SettingItem",
+        foreign_keys=[race_item_id],
+        lazy="select"
+    )
+    
+    # 角色-功法关联（CharacterTechnique 中间表）
+    character_techniques: Mapped[List["CharacterTechnique"]] = relationship(
         "CharacterTechnique",
         back_populates="character",
         lazy="select",
