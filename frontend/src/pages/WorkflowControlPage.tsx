@@ -5151,8 +5151,38 @@ export default function WorkflowControlPage() {
         </Box>
       </Dialog>
 
-      {/* 🆕 扩展人物结果对话框 */}
-      <Dialog open={showExpandCharactersDialog} onClose={() => setShowExpandCharactersDialog(false)} maxWidth="lg" fullWidth>
+      {/* 🆕 扩展人物结果对话框 - 非模态，允许操作其他内容 */}
+      <Dialog 
+        open={showExpandCharactersDialog} 
+        onClose={() => setShowExpandCharactersDialog(false)} 
+        maxWidth="lg" 
+        fullWidth
+        hideBackdrop={false}
+        slotProps={{
+          backdrop: {
+            sx: {
+              backgroundColor: 'rgba(0, 0, 0, 0.2)',
+              pointerEvents: 'none',
+            }
+          }
+        }}
+        sx={{
+          '& .MuiDialog-container': {
+            pointerEvents: 'none',
+          },
+          '& .MuiDialog-paper': {
+            pointerEvents: 'auto',
+            position: 'fixed',
+            bottom: 20,
+            right: 20,
+            top: 'auto',
+            left: 'auto',
+            m: 0,
+            maxHeight: '70vh',
+            maxWidth: '600px',
+          }
+        }}
+      >
         <Box sx={{ p: 3 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Typography variant="h6">

@@ -1603,12 +1603,38 @@ ${expandedOutlineData.expanded_outline || ''}
         </DialogActions>
       </Dialog>
 
-      {/* 大纲扩展结果对话框 */}
+      {/* 大纲扩展结果对话框 - 非模态，允许操作其他内容 */}
       <Dialog 
         open={showExpandOutlineDialog} 
         onClose={() => !expandingOutline && setShowExpandOutlineDialog(false)} 
         maxWidth="lg" 
         fullWidth
+        disableEscapeKeyDown={expandingOutline}
+        hideBackdrop={false}
+        slotProps={{
+          backdrop: {
+            sx: {
+              backgroundColor: 'rgba(0, 0, 0, 0.2)',
+              pointerEvents: 'none',
+            }
+          }
+        }}
+        sx={{
+          '& .MuiDialog-container': {
+            pointerEvents: 'none',
+          },
+          '& .MuiDialog-paper': {
+            pointerEvents: 'auto',
+            position: 'fixed',
+            bottom: 20,
+            right: 20,
+            top: 'auto',
+            left: 'auto',
+            m: 0,
+            maxHeight: '70vh',
+            maxWidth: '600px',
+          }
+        }}
       >
         <DialogTitle>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
