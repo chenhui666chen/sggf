@@ -188,7 +188,7 @@ class CharacterTechnique(Base):
 
     # 关系定义
     character: Mapped["Character"] = relationship(
-        "Character", back_populates="techniques", lazy="select"
+        "Character", back_populates="character_techniques", lazy="select"
     )
     technique_item: Mapped["SettingItem"] = relationship("SettingItem", lazy="select")
 
