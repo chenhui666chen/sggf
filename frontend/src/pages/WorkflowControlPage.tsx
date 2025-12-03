@@ -5732,16 +5732,15 @@ export default function WorkflowControlPage() {
                 />
                 <TextField
                   select
-                  label="角色定位（主角/反派/配角等）"
+                  label="角色定位（阵营/立场）"
                   value={characterFormData?.role || ''}
                   onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, role: e.target.value }))}
                 >
                   <MenuItem value="">自定义</MenuItem>
-                  <MenuItem value="主角">主角</MenuItem>
-                  <MenuItem value="主角阵营">主角阵营</MenuItem>
-                  <MenuItem value="配角">配角</MenuItem>
-                  <MenuItem value="反派">反派</MenuItem>
-                  <MenuItem value="中立">中立</MenuItem>
+                  <MenuItem value="主角方">主角方</MenuItem>
+                  <MenuItem value="反派方">反派方</MenuItem>
+                  <MenuItem value="中立方">中立方</MenuItem>
+                  <MenuItem value="亦正亦邪">亦正亦邪</MenuItem>
                 </TextField>
                 <TextField
                   label="性别"
@@ -5778,16 +5777,15 @@ export default function WorkflowControlPage() {
                 </TextField>
                 <TextField
                   select
-                  label="重要性（主角/关键配角/龙套等）"
+                  label="重要性（戏份权重）"
                   value={characterFormData?.importance_level || ''}
                   onChange={(e) => setCharacterFormData((prev: any) => ({ ...prev, importance_level: e.target.value }))}
                 >
                   <MenuItem value="">自定义</MenuItem>
                   <MenuItem value="主角">主角</MenuItem>
-                  <MenuItem value="关键配角">关键配角</MenuItem>
-                  <MenuItem value="重要配角">重要配角</MenuItem>
-                  <MenuItem value="次要配角">次要配角</MenuItem>
-                  <MenuItem value="龙套">龙套</MenuItem>
+                  <MenuItem value="重要角色">重要角色</MenuItem>
+                  <MenuItem value="次要角色">次要角色</MenuItem>
+                  <MenuItem value="群众角色">群众角色</MenuItem>
                 </TextField>
                 <TextField
                   select

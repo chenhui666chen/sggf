@@ -232,35 +232,46 @@ class CharacterTextParser:
         return age, gender
 
     def _normalize_role(self, role_text: str) -> str:
-        """标准化角色定位"""
-        role_text = role_text.lower()
-        if '主角' in role_text:
-            return '主角'
-        elif '反派' in role_text or '对手' in role_text:
-            return '反派'
-        elif '配角' in role_text:
-            if '核心' in role_text or '重要' in role_text:
-                return '重要配角'
-            return '配角'
-        elif '支持' in role_text or '辅助' in role_text:
-            return '配角'
+        """标准化角色定位（阵营/立场）"""
+        role_text_lower = role_text.lower()
+        
+        # 匹配主角方
+        if '主角' in role_text and ('阵营' in role_text or '方' in role_text):
+            return '主角方'
+        elif '正派' in role_text or '正义' in role_text:
+            return '主角方'
+        
+        # 匹配反派方
+        elif '反派' in role_text or '对手' in role_text or '敌人' in role_text:
+            return '反派方'
+        
+        # 匹配中立方
         elif '中立' in role_text:
-            return '中立'
-        return role_text.split('/')[0].strip()[:10]  # 取第一个标签
+            return '中立方'
+        
+        # 匹配亦正亦邪
+        elif '亦正亦邪' in role_text or ('正' in role_text and '邪' in role_text):
+            return '亦正亦邪'
+        
+        # 兼容旧值：如果直接写的是"主角"，也归类为主角方
+        elif '主角' in role_text:
+            return '主角方'
+        
+        # 其他情况取第一个标签
+        return role_text.split('/')[0].strip()[:10]
 
     def _extract_importance(self, role_text: str) -> str:
-        """提取重要性等级"""
+        """提取重要性等级（戏份权重）"""
         if '主角' in role_text:
             return '主角'
-        elif '核心' in role_text:
-            return '关键配角'
-        elif '重要' in role_text:
-            return '关键配角'
+        elif '核心' in role_text or '关键' in role_text or '重要' in role_text:
+            return '重要角色'
         elif '次要' in role_text:
-            return '次要配角'
-        elif '龙套' in role_text or '路人' in role_text:
-            return '龙套'
-        return '配角'
+            return '次要角色'
+        elif '龙套' in role_text or '路人' in role_text or '群众' in role_text:
+            return '群众角色'
+        # 默认为次要角色
+        return '次要角色'
 
 
 def sync_parsed_characters_to_db(

@@ -32,7 +32,7 @@ class Character(Base):
 
     # 基本信息
     name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
-    role: Mapped[Optional[str]] = mapped_column(  # 主角 / 反派 / 配角
+    role: Mapped[Optional[str]] = mapped_column(  # 角色定位（阵营/立场）：主角方 / 反派方 / 中立方 / 亦正亦邪
         String(50), nullable=True
     )
     gender: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
@@ -41,7 +41,7 @@ class Character(Base):
     # 阵营 / 势力
     faction: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 
-    # 人物重要程度（主角 / 重要配角 / 次要配角 / 路人等，可由前端自行约定枚举值）
+    # 人物重要程度（戏份权重）：主角 / 重要角色 / 次要角色 / 群众角色
     importance_level: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     # 出场状态：未出场 / 已出场 / 已退场
