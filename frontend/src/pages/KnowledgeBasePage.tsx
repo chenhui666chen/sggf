@@ -1628,9 +1628,7 @@ ${expandedOutlineData.expanded_outline || ''}
       {/* 大纲扩展结果对话框 - 非模态，允许操作其他内容 */}
       <Dialog 
         open={showExpandOutlineDialog} 
-        onClose={() => !expandingOutline && setShowExpandOutlineDialog(false)} 
-        maxWidth="lg" 
-        fullWidth
+        onClose={() => !expandingOutline && setShowExpandOutlineDialog(false)}
         disableEscapeKeyDown={expandingOutline}
         hideBackdrop={false}
         slotProps={{
@@ -1641,12 +1639,8 @@ ${expandedOutlineData.expanded_outline || ''}
             }
           }
         }}
-        sx={{
-          '& .MuiDialog-container': {
-            pointerEvents: 'none',
-          },
-          '& .MuiDialog-paper': {
-            pointerEvents: 'auto',
+        PaperProps={{
+          sx: {
             position: 'fixed',
             bottom: 20,
             right: 20,
@@ -1654,8 +1648,16 @@ ${expandedOutlineData.expanded_outline || ''}
             left: 'auto',
             m: 0,
             maxHeight: '70vh',
-            maxWidth: '600px',
+            width: '600px',
+            maxWidth: '90vw',
           }
+        }}
+        sx={{
+          '& .MuiDialog-container': {
+            alignItems: 'flex-end',
+            justifyContent: 'flex-end',
+            pointerEvents: 'none',
+          },
         }}
       >
         <DialogTitle>
