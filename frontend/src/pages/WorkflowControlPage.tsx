@@ -3757,7 +3757,7 @@ export default function WorkflowControlPage() {
             <Button
               variant="outlined"
               onClick={handleGenerateNextChapter}
-              disabled={workflow.stages.iteration.status !== 'completed' || generatingNextChapter || expandingOutline}
+              disabled={workflow.stages.iteration.status !== 'completed' || generatingNextChapter || expandingOutline || expandingCharacters}
               startIcon={generatingNextChapter ? <CircularProgress size={20} /> : <NavigateNextIcon />}
             >
               {generatingNextChapter ? '生成中...' : '生成下一章'}
@@ -4065,7 +4065,7 @@ export default function WorkflowControlPage() {
                           variant="contained"
                           color="secondary"
                           onClick={handleExpandOutline}
-                          disabled={!structureContent || !worldContent || !characterContent || expandingOutline || generatingNextChapter}
+                          disabled={!structureContent || !worldContent || !characterContent || expandingOutline || expandingCharacters || generatingNextChapter}
                           startIcon={expandingOutline ? <CircularProgress size={20} /> : <ArticleIcon />}
                         >
                           {expandingOutline ? '扩展中...' : `📖 扩展情节大纲${currentChapterCount > 0 ? ` (当前${currentChapterCount}章)` : ''}`}
@@ -4335,7 +4335,7 @@ export default function WorkflowControlPage() {
                             variant="contained"
                             color="secondary"
                             onClick={handleExpandCharacters}
-                            disabled={!characterContent || !worldContent || !structureContent || expandingCharacters}
+                            disabled={!characterContent || !worldContent || !structureContent || expandingCharacters || expandingOutline || generatingNextChapter}
                             startIcon={expandingCharacters ? <CircularProgress size={20} /> : <PeopleIcon />}
                           >
                             {expandingCharacters ? '扩展中...' : `👥 扩展人物${currentCharacterCount > 0 ? ` (当前${currentCharacterCount}个)` : ''}`}
