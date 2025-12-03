@@ -54,6 +54,32 @@ class Character(Base):
     current_realm_item_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("setting_items.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    
+    # 🆕 新增：其他体系关联字段
+    faction_item_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("setting_items.id", ondelete="SET NULL"), nullable=True, index=True, comment="所属势力(外键→force_system)"
+    )
+    profession_item_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("setting_items.id", ondelete="SET NULL"), nullable=True, index=True, comment="职业(外键→profession_class_system)"
+    )
+    race_item_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("setting_items.id", ondelete="SET NULL"), nullable=True, index=True, comment="种族(外键→race_bloodline_system)"
+    )
+    
+    # 🆕 JSON字段：掉握的功法/法宝/关联地点
+    techniques: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="掉握的功法ID列表(JSON)")
+    artifacts: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="拥有的法宝ID列表(JSON)")
+    related_locations: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="关联地点ID列表(JSON)")
+    
+    # 🆕 自动维护字段：出场记录
+    first_mention_chapter_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True, index=True, comment="首次提及章节"
+    )
+    last_appearance_chapter_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True, index=True, comment="最后出场章节"
+    )
+    appearance_chapters: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="所有出场章节ID列表(JSON)")
+    relationship_network: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="人物关系网络(JSON)")
 
     # 首次出场章节（可选，仅存储章节号，后续如需可扩展为外键）
     first_appearance_chapter: Mapped[Optional[int]] = mapped_column(

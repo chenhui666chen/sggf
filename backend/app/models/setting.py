@@ -73,6 +73,13 @@ class SettingItem(Base):
     is_leaf: Mapped[bool] = mapped_column(Boolean, default=True)
     path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # 🆕 自动追踪字段
+    related_characters: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="关联的人物ID列表(JSON)")
+    referenced_chapters: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="引用该设定的章节ID列表(JSON)")
+    usage_count: Mapped[int] = mapped_column(Integer, default=0, comment="被引用次数")
+    last_referenced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, comment="最后引用时间")
+    
     order: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
