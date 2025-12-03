@@ -294,8 +294,17 @@ export default function WorkflowControlPage() {
 
   const [availableTechniques, setAvailableTechniques] = useState<any[]>([])
   const [availableRealms, setAvailableRealms] = useState<any[]>([])
+  const [availableForces, setAvailableForces] = useState<any[]>([])
+  const [availableProfessions, setAvailableProfessions] = useState<any[]>([])
+  const [availableRaces, setAvailableRaces] = useState<any[]>([])
   const [characterTechniques, setCharacterTechniques] = useState<any[]>([])
   const [selectedTechniqueId, setSelectedTechniqueId] = useState<number | ''>('')
+  
+  // 快速新建设定项相关状态
+  const [showQuickCreateItemDialog, setShowQuickCreateItemDialog] = useState(false)
+  const [quickCreateItemCategory, setQuickCreateItemCategory] = useState('')
+  const [quickCreateItemName, setQuickCreateItemName] = useState('')
+  const [quickCreateItemSaving, setQuickCreateItemSaving] = useState(false)
 
   const [snackbarOpen, setSnackbarOpen] = useState(false)
   const [snackbarMessage, setSnackbarMessage] = useState('')
@@ -497,7 +506,7 @@ export default function WorkflowControlPage() {
     }
   }
 
-  // 🧬 结构化人物：加载可用境界（来自境界体系设定集合）
+  // 🧬 结构化人物：加载可用境界（智能识别各种境界体系）
   const loadAvailableRealms = async () => {
     if (!projectId) return
 
@@ -507,15 +516,98 @@ export default function WorkflowControlPage() {
     try {
       const collectionsResponse = await apiClient.getSettingCollections(projectIdNum)
       const collections = collectionsResponse.data || []
-      const realmCollection = collections.find((c: any) => c.category === 'cultivation_system')
-      if (realmCollection) {
-        const itemsResponse = await apiClient.getSettingItems(realmCollection.id)
-        setAvailableRealms(itemsResponse.data || [])
-      } else {
-        setAvailableRealms([])
+      
+      // 智能识别四种境界体系
+      const realmCategories = [
+        'cultivation_realm_system',
+        'martial_realm_system', 
+        'magic_realm_system',
+        'ability_realm_system',
+      ]
+      
+      const allRealms: any[] = []
+      for (const category of realmCategories) {
+        const realmCollection = collections.find((c: any) => c.category === category)
+        if (realmCollection) {
+          try {
+            const itemsResponse = await apiClient.getSettingItems(realmCollection.id)
+            const items = itemsResponse.data || []
+            allRealms.push(...items)
+          } catch (error) {
+            console.error(`获取${category}境界列表失败:`, error)
+          }
+        }
       }
+      
+      setAvailableRealms(allRealms)
     } catch (error) {
       console.error('获取境界列表失败:', error)
+    }
+  }
+
+  // 🧬 结构化人物：加载可用势力（从 force_system 体系）
+  const loadAvailableForces = async () => {
+    if (!projectId) return
+
+    const projectIdNum = Number(projectId)
+    if (Number.isNaN(projectIdNum)) return
+
+    try {
+      const collectionsResponse = await apiClient.getSettingCollections(projectIdNum)
+      const collections = collectionsResponse.data || []
+      const forceCollection = collections.find((c: any) => c.category === 'force_system')
+      if (forceCollection) {
+        const itemsResponse = await apiClient.getSettingItems(forceCollection.id)
+        setAvailableForces(itemsResponse.data || [])
+      } else {
+        setAvailableForces([])
+      }
+    } catch (error) {
+      console.error('获取势力列表失败:', error)
+    }
+  }
+
+  // 🧬 结构化人物：加载可用职业（从 profession_class_system 体系）
+  const loadAvailableProfessions = async () => {
+    if (!projectId) return
+
+    const projectIdNum = Number(projectId)
+    if (Number.isNaN(projectIdNum)) return
+
+    try {
+      const collectionsResponse = await apiClient.getSettingCollections(projectIdNum)
+      const collections = collectionsResponse.data || []
+      const professionCollection = collections.find((c: any) => c.category === 'profession_class_system')
+      if (professionCollection) {
+        const itemsResponse = await apiClient.getSettingItems(professionCollection.id)
+        setAvailableProfessions(itemsResponse.data || [])
+      } else {
+        setAvailableProfessions([])
+      }
+    } catch (error) {
+      console.error('获取职业列表失败:', error)
+    }
+  }
+
+  // 🧬 结构化人物：加载可用种族（从 race_bloodline_system 体系）
+  const loadAvailableRaces = async () => {
+    if (!projectId) return
+
+    const projectIdNum = Number(projectId)
+    if (Number.isNaN(projectIdNum)) return
+
+    try {
+      const collectionsResponse = await apiClient.getSettingCollections(projectIdNum)
+      const collections = collectionsResponse.data || []
+      const raceCollection = collections.find((c: any) => c.category === 'race_bloodline_system')
+      if (raceCollection) {
+        const itemsResponse = await apiClient.getSettingItems(raceCollection.id)
+        setAvailableRaces(itemsResponse.data || [])
+      } else {
+        setAvailableRaces([])
+      }
+    } catch (error) {
+      console.error('获取种族列表失败:', error)
     }
   }
 
@@ -3587,8 +3679,14 @@ export default function WorkflowControlPage() {
         setCharacterTechniques([])
       }
 
-      // 保证功法 / 境界下拉列表已加载
-      await Promise.all([loadAvailableTechniques(), loadAvailableRealms()])
+      // 保证功法/境界/势力/职业/种族 下拉列表已加载
+      await Promise.all([
+        loadAvailableTechniques(),
+        loadAvailableRealms(),
+        loadAvailableForces(),
+        loadAvailableProfessions(),
+        loadAvailableRaces(),
+      ])
     } catch (error) {
       console.error('打开角色编辑对话框失败:', error)
       setSnackbarMessage('加载角色信息失败')
