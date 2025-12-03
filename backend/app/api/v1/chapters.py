@@ -196,6 +196,41 @@ async def create_chapter(
     db.commit()
     db.refresh(chapter)
     
+    # 🆕 Phase 2: 初始追踪 - 自动记录人物出场和设定引用
+    try:
+        from app.services.auto_tracking import AutoTrackingService
+        import logging
+        
+        logger = logging.getLogger("uvicorn.error")
+        logger.info(f"   🆕 执行章节初始追踪...")
+        
+        # 1. 人物出场初始追踪
+        char_result = AutoTrackingService.update_character_appearances_smart(
+            chapter_id=chapter.id,
+            old_content="",  # 🔑 初始创建，old_content为空
+            new_content=chapter_data.content or "",
+            project_id=chapter_data.project_id,
+            db=db
+        )
+        logger.info(f"   ✅ 人物追踪: 初始记录{char_result['added']}个")
+        
+        # 2. 设定项引用初始追踪
+        setting_result = AutoTrackingService.update_setting_references_smart(
+            chapter_id=chapter.id,
+            old_content="",  # 🔑 初始创建，old_content为空
+            new_content=chapter_data.content or "",
+            project_id=chapter_data.project_id,
+            db=db
+        )
+        logger.info(f"   ✅ 设定追踪: 初始记录{setting_result['added']}个")
+        
+    except Exception as e:
+        import logging
+        logger = logging.getLogger("uvicorn.error")
+        logger.warning(f"⚠️ 初始追踪失败: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
+    
     # 🆕 Phase 5: 章节创建后自动抽取实体并归类（保留旧逻辑）
     try:
         from app.services.entity_extraction import EntityExtractionService

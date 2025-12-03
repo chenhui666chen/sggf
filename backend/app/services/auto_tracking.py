@@ -25,9 +25,13 @@ class AutoTrackingService:
         """
         智能检测人物出场变化（基于差异分析）
         
+        支持两种场景：
+        1. 初始追踪：old_content为空，全部视为新增
+        2. 差异检测：old_content不为空，检测变化
+        
         Args:
             chapter_id: 章节ID
-            old_content: 修改前的内容
+            old_content: 修改前的内容（初始创建时为空字符串）
             new_content: 修改后的内容
             project_id: 项目ID
             db: 数据库会话
@@ -42,12 +46,33 @@ class AutoTrackingService:
         added_count = 0
         removed_count = 0
         unchanged_count = 0
+        is_initial_tracking = (old_content == "")  # 🆕 判断是否为初始追踪
         
         for character in characters:
             name = character.name
             if not name:
                 continue
             
+            # 🆕 初始追踪模式：只处理新增
+            if is_initial_tracking:
+                now_mentioned = name in new_content
+                if now_mentioned:
+                    appearance_chapters = json.loads(character.appearance_chapters or "[]")
+                    if chapter_id not in appearance_chapters:
+                        appearance_chapters.append(chapter_id)
+                        character.appearance_chapters = json.dumps(appearance_chapters)
+                        
+                        # 更新first和last
+                        if character.first_mention_chapter_id is None or chapter_id < character.first_mention_chapter_id:
+                            character.first_mention_chapter_id = chapter_id
+                        if character.last_appearance_chapter_id is None or chapter_id > character.last_appearance_chapter_id:
+                            character.last_appearance_chapter_id = chapter_id
+                        
+                        added_count += 1
+                        print(f"  ✅ {name} 初始追踪: 第{chapter_id}章")
+                continue
+            
+            # 🔄 差异检测模式
             # 检测变化
             was_mentioned = name in old_content
             now_mentioned = name in new_content
@@ -103,6 +128,10 @@ class AutoTrackingService:
         """
         智能检测设定项引用变化（基于差异分析）
         
+        支持两种场景：
+        1. 初始追踪：old_content为空，全部视为新增
+        2. 差异检测：old_content不为空，检测变化
+        
         Returns:
             {"added": 3, "removed": 1, "unchanged": 10}
         """
@@ -113,6 +142,7 @@ class AutoTrackingService:
         added_count = 0
         removed_count = 0
         unchanged_count = 0
+        is_initial_tracking = (old_content == "")  # 🆕 判断是否为初始追踪
         
         for collection in collections:
             items = db.query(SettingItem).filter(
@@ -124,6 +154,21 @@ class AutoTrackingService:
                 if not name:
                     continue
                 
+                # 🆕 初始追踪模式：只处理新增
+                if is_initial_tracking:
+                    now_mentioned = name in new_content
+                    if now_mentioned:
+                        referenced_chapters = json.loads(item.referenced_chapters or "[]")
+                        if chapter_id not in referenced_chapters:
+                            referenced_chapters.append(chapter_id)
+                            item.referenced_chapters = json.dumps(referenced_chapters)
+                            item.usage_count = len(referenced_chapters)
+                            item.last_referenced_at = datetime.now()
+                            added_count += 1
+                            print(f"  ✅ {name} ({collection.category}) 初始追踪: 第{chapter_id}章")
+                    continue
+                
+                # 🔄 差异检测模式
                 # 检测变化
                 was_mentioned = name in old_content
                 now_mentioned = name in new_content
