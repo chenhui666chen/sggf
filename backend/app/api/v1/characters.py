@@ -194,6 +194,80 @@ async def delete_character(
     db.commit()
 
 
+@router.get("/characters/{character_id}/auto-tracked-relations")
+async def get_character_auto_tracked_relations(
+    character_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    🆕 获取人物的自动追踪关联数据
+    
+    返回：
+    {
+        "techniques": [{"id": 1, "name": "九天剑诀", "chapters": [1,3]}],
+        "artifacts": [{"id": 2, "name": "赤霄剑", "chapters": [1]}],
+        "locations": [{"id": 3, "name": "天剑宗", "chapters": [1,2]}]
+    }
+    """
+    import json
+    
+    character = db.query(Character).get(character_id)
+    if not character:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Character not found",
+        )
+    
+    _ensure_project_owned(character.project_id, current_user, db)
+    
+    # 解析JSON字段
+    technique_ids = json.loads(character.techniques or "[]")
+    artifact_ids = json.loads(character.artifacts or "[]")
+    location_ids = json.loads(character.related_locations or "[]")
+    
+    # 获取详细信息
+    techniques = []
+    for tid in technique_ids:
+        item = db.query(SettingItem).get(tid)
+        if item:
+            # 获取该设定项引用的章节
+            referenced_chapters = json.loads(item.referenced_chapters or "[]")
+            techniques.append({
+                "id": item.id,
+                "name": item.name,
+                "chapters": referenced_chapters
+            })
+    
+    artifacts = []
+    for aid in artifact_ids:
+        item = db.query(SettingItem).get(aid)
+        if item:
+            referenced_chapters = json.loads(item.referenced_chapters or "[]")
+            artifacts.append({
+                "id": item.id,
+                "name": item.name,
+                "chapters": referenced_chapters
+            })
+    
+    locations = []
+    for lid in location_ids:
+        item = db.query(SettingItem).get(lid)
+        if item:
+            referenced_chapters = json.loads(item.referenced_chapters or "[]")
+            locations.append({
+                "id": item.id,
+                "name": item.name,
+                "chapters": referenced_chapters
+            })
+    
+    return {
+        "techniques": techniques,
+        "artifacts": artifacts,
+        "locations": locations
+    }
+
+
 # ---------------------------------------------------------------------------
 # 角色功法关联（CharacterTechnique）
 # ---------------------------------------------------------------------------
