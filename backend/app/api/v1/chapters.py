@@ -196,7 +196,40 @@ async def create_chapter(
     db.commit()
     db.refresh(chapter)
     
-    # 🆕 Phase 5: 章节创建后自动抽取实体并归类
+    # 🆕 Phase 2: 自动提取与更新人物/设定关联
+    try:
+        from app.services.auto_tracking import AutoTrackingService
+        import logging
+        
+        logger = logging.getLogger("uvicorn.error")
+        logger.info(f"   🤖 开始执行章节自动归纳...")
+        
+        # 1. 更新人物出场记录
+        char_result = AutoTrackingService.update_character_appearances(
+            chapter_id=chapter.id,
+            chapter_content=chapter_data.content or "",
+            project_id=chapter_data.project_id,
+            db=db
+        )
+        logger.info(f"   ✅ 更新人物出场记录: {char_result['updated_count']} 个")
+        
+        # 2. 更新设定项引用记录
+        setting_result = AutoTrackingService.update_setting_references(
+            chapter_id=chapter.id,
+            chapter_content=chapter_data.content or "",
+            project_id=chapter_data.project_id,
+            db=db
+        )
+        logger.info(f"   ✅ 更新设定项引用: {setting_result['updated_count']} 个")
+        
+    except Exception as e:
+        import logging
+        logger = logging.getLogger("uvicorn.error")
+        logger.warning(f"⚠️ 自动归纳失败: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
+    
+    # 🆕 Phase 5: 章节创建后自动抽取实体并归类（保留旧逻辑）
     try:
         from app.services.entity_extraction import EntityExtractionService
         from app.services.location_hierarchy_extractor import LocationHierarchyExtractor
