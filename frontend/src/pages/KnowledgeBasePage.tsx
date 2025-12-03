@@ -149,7 +149,7 @@ export default function KnowledgeBasePage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
 
-  // 主 Tab 状态 (0=文本内容, 1=类型设定, 2=大纲扩展)
+  // 主 Tab 状态 (0=文本内容, 1=类型设定)
   const [mainTabValue, setMainTabValue] = useState(1)
 
   // ==================== 文本内容相关状态 ====================
@@ -975,7 +975,6 @@ ${expandedOutlineData.expanded_outline || ''}
         >
           <Tab label="📝 文本内容" />
           <Tab label="🎨 类型设定" />
-          <Tab label="📖 大纲扩展" />
         </Tabs>
       </Box>
 
@@ -1034,15 +1033,31 @@ ${expandedOutlineData.expanded_outline || ''}
 
             <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
               {!isEditing ? (
-                <Button
-                  variant="contained"
-                  startIcon={<EditIcon />}
-                  onClick={handleStartEdit}
-                  disabled={!getCurrentContent()}
-                  sx={{ borderRadius: 2 }}
-                >
-                  编辑{getTabTitle()}
-                </Button>
+                <>
+                  <Button
+                    variant="contained"
+                    startIcon={<EditIcon />}
+                    onClick={handleStartEdit}
+                    disabled={!getCurrentContent()}
+                    sx={{ borderRadius: 2 }}
+                  >
+                    编辑{getTabTitle()}
+                  </Button>
+                  
+                  {/* 只在剧情大纲Tab显示扩展按钮 */}
+                  {textTabValue === 2 && (
+                    <Button
+                      variant="outlined"
+                      color="primary"
+                      startIcon={expandingOutline ? <CircularProgress size={20} /> : <ArticleIcon />}
+                      onClick={handleExpandOutline}
+                      disabled={!plotOutline || !worldSetting || !characters || expandingOutline}
+                      sx={{ borderRadius: 2 }}
+                    >
+                      {expandingOutline ? '扩展中...' : `📖 扩展大纲${currentChapterCount > 0 ? `(当前${currentChapterCount}章)` : ''}`}
+                    </Button>
+                  )}
+                </>
               ) : (
                 <>
                   <Button
@@ -1346,65 +1361,6 @@ ${expandedOutlineData.expanded_outline || ''}
         </Grid>
       </TabPanel>
 
-      {/* ==================== Tab 2: 大纲扩展 ==================== */}
-      <TabPanel value={mainTabValue} index={2}>
-        <Alert severity="info" sx={{ mb: 3 }}>
-          📚 根据当前的世界观、人物和剧情大纲，智能扩展为更详细的多章节大纲
-        </Alert>
-
-        <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            📖 大纲扩展配置
-          </Typography>
-          
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 3 }}>
-            <TextField
-              label="目标章节数"
-              type="number"
-              size="small"
-              value={targetChapterCount}
-              onChange={(e) => {
-                const value = parseInt(e.target.value, 10)
-                setTargetChapterCount(Number.isNaN(value) ? 0 : value)
-              }}
-              inputProps={{ min: 1 }}
-              sx={{ width: 150 }}
-            />
-
-            <Tooltip
-              title="💡默认目标为100个章节，可在左侧输入框中调整。"
-              placement="top"
-              arrow
-            >
-              <span>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={handleExpandOutline}
-                  disabled={!plotOutline || !worldSetting || !characters || expandingOutline}
-                  startIcon={expandingOutline ? <CircularProgress size={20} /> : <ArticleIcon />}
-                  size="large"
-                >
-                  {expandingOutline ? '扩展中...' : `📖 扩展情节大纲${currentChapterCount > 0 ? ` (当前${currentChapterCount}章)` : ''}`}
-                </Button>
-              </span>
-            </Tooltip>
-          </Box>
-
-          {currentChapterCount > 0 && (
-            <Alert severity="success" sx={{ mt: 2 }}>
-              ✅ 当前大纲已扩展至 {currentChapterCount} 章
-            </Alert>
-          )}
-        </Paper>
-
-        {(!plotOutline || !worldSetting || !characters) && (
-          <Alert severity="warning">
-            ⚠️ 请先在“文本内容”Tab中完成世界观、人物和剧情大纲的设定
-          </Alert>
-        )}
-      </TabPanel>
-
       {/* ==================== 对话框 ==================== */}
 
       {/* 创建设定集合对话框 */}
@@ -1656,9 +1612,36 @@ ${expandedOutlineData.expanded_outline || ''}
       >
         <DialogTitle>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="h6">
-              📖 扩展大纲结果 - 已扩展至{currentChapterCount}章
-            </Typography>
+            <Box>
+              <Typography variant="h6">
+                📖 扩展大纲结果 - 已扩展至{currentChapterCount}章
+              </Typography>
+              {!expandingOutline && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+                  <TextField
+                    label="目标章节数"
+                    type="number"
+                    size="small"
+                    value={targetChapterCount}
+                    onChange={(e) => {
+                      const value = parseInt(e.target.value, 10)
+                      setTargetChapterCount(Number.isNaN(value) ? 0 : value)
+                    }}
+                    inputProps={{ min: 1 }}
+                    sx={{ width: 150 }}
+                  />
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={handleExpandOutline}
+                    disabled={expandingOutline}
+                    startIcon={<ArticleIcon />}
+                  >
+                    继续扩展
+                  </Button>
+                </Box>
+              )}
+            </Box>
             <Box sx={{ display: 'flex', gap: 1 }}>
               <Tooltip title="编辑大纲">
                 <IconButton
