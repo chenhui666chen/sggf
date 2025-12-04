@@ -301,6 +301,20 @@ export default function DashboardPage() {
           })
         }
       })
+
+      // 🆕 监听任务完成事件（大纲扩展、人物扩展）
+      workflowWebSocket.onTaskComplete((data: any) => {
+        logger.log('✅ 收到任务完成:', data)
+        const taskId = data.task_id || ''
+        
+        // 如果是扩展大纲或人物任务，刷新章节列表
+        if (taskId.startsWith('expand-outline') || taskId.startsWith('expand-characters')) {
+          logger.log('🔄 扩展任务完成，刷新章节列表...')
+          if (selectedProjectId) {
+            loadChapters(selectedProjectId)
+          }
+        }
+      })
     })
 
     // 清理：组件卸载时移除监听器（不断开连接）
@@ -309,6 +323,7 @@ export default function DashboardPage() {
         // 只移除监听器，保持 WebSocket 连接（其他页面可能还在用）
         workflowWebSocket.onPostSaveTaskStart(() => {})
         workflowWebSocket.onPostSaveTaskComplete(() => {})
+        workflowWebSocket.onTaskComplete(() => {})
       })
     }
   }, [selectedProjectId])

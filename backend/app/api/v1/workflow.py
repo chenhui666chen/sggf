@@ -951,16 +951,37 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
             project_result = db.execute(project_query, {"project_id": project_id}).fetchone()
             requirement = project_result[0] if project_result and project_result[0] else "根据项目设定进行创作"
 
-        # 🌊 发送流式输出开始通知
-        await ws_manager.send_stream_start(project_id, stage_enum.value)
-
-        # 推送阶段开始状态
+        # 🆕 推送阶段开始状态
         await ws_manager.send_stage_update(
             project_id=project_id,
             stage=stage_enum.value,
             status='active',
             progress=0
         )
+
+        # 🆕 广播本阶段选用的模型，便于前端调试
+        try:
+            from app.core.config import settings
+            default_content_model = getattr(settings, "DEFAULT_CONTENT_MODEL", "qwen-max")
+        except Exception:
+            default_content_model = "qwen-max"
+        stage_model = None
+        if stage_enum == StageType.CONTENT:
+            stage_model = default_content_model
+        elif stage_enum == StageType.REVIEW:
+            stage_model = "deepseek-reasoner"
+        elif stage_enum == StageType.ITERATION:
+            stage_model = "deepseek-reasoner"
+        if stage_model:
+            await ws_manager.send_model_used(
+                project_id=project_id,
+                stage=stage_enum.value,
+                model=stage_model,
+                extra={"source": "execute_stage_with_streaming"}
+            )
+
+        # 🌊 发送流式输出开始通知
+        await ws_manager.send_stream_start(project_id, stage_enum.value)
 
         # 🆕 定义每个阶段的 Agent 配置（流式版本）
         STAGE_AGENTS_STREAMING = {
@@ -1295,11 +1316,27 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
 
                 # 🔥 执行流式 LLM 调用
                 logger.info(f"   🌊 开始流式 LLM 调用...")
+                # 🆕 按阶段选择模型，避免使用默认deepseek-chat
+                stage_model = None
+                try:
+                    from app.core.config import settings
+                    default_content_model = getattr(settings, "DEFAULT_CONTENT_MODEL", "qwen-max")
+                except Exception:
+                    default_content_model = "qwen-max"
+                
+                if stage_enum == StageType.CONTENT:
+                    stage_model = default_content_model  # 内容创作：优先qwen-max（或按配置）
+                elif stage_enum == StageType.REVIEW:
+                    stage_model = "deepseek-reasoner"   # 质量评审：R1
+                elif stage_enum == StageType.ITERATION:
+                    stage_model = "deepseek-reasoner"   # 迭代优化（通用入口）：R1（专用生成下一章流程已改为max改稿+R1打分）
+                
                 result_str = await streaming_service.generate_chapter_streaming(
                     prompt=user_prompt,
                     system_prompt=system_prompt,
                     on_chunk=on_stream_chunk,
                     temperature=0.7,
+                    model=stage_model,
                 )
                 logger.info(f"   ✅ 流式 LLM 调用完成，生成 {len(result_str)} 字符")
 
@@ -2524,7 +2561,13 @@ async def generate_next_chapter(
         
         # 5. 生成已完成章节摘要，并为内容创作准备结构化的上一章信息
         def summarize_chapters(chapters):
-            """生成已完成章节的摘要，并构造供内容生成使用的高层摘要列表。"""
+            """生成已完成章节的摘要，并构造供内容生成使用的高层摘要列表。
+            
+            策略：2章最近章节全文 + 8章更靠前章节的摘要
+            - 最近2章：使用完整内容（保证衔接自然）
+            - 往前8章：使用结构化摘要（覆盖更长历史）
+            - 更早章节：使用简要摘要（节省token）
+            """
             if not chapters:
                 return "这是第一章，之前没有章节。", []
 
@@ -2541,7 +2584,8 @@ async def generate_next_chapter(
                 logger.error(f"   ⚠️ 创建章节摘要生成器失败，将回退到内容前200字: {e}")
 
             total = len(chapters)
-            recent_limit = 10  # 对最近若干部章节优先使用结构化摘要
+            RECENT_FULL_COUNT = 2  # 最近2章使用全文
+            SUMMARY_COUNT = 8      # 往前8章使用详细摘要
 
             for idx, chapter in enumerate(chapters):
                 chapter_id, chapter_num, title, content, existing_summary = chapter
@@ -2549,10 +2593,15 @@ async def generate_next_chapter(
                 title = title or ""
                 summary_text = (existing_summary or "").strip()
 
-                # 仅对最近若干部章节尝试使用结构化摘要，其他章节直接使用已存在摘要或前200字
-                is_recent = (total - idx) <= recent_limit
+                # 计算当前章节距离最后一章的距离
+                distance_from_end = total - idx
 
-                if summarizer and is_recent:
+                # 判断是否需要生成详细摘要（最近2章之后的8章）
+                needs_detailed_summary = (distance_from_end > RECENT_FULL_COUNT and 
+                                        distance_from_end <= RECENT_FULL_COUNT + SUMMARY_COUNT)
+
+                if summarizer and needs_detailed_summary:
+                    # 对需要详细摘要的章节，生成200字结构化摘要
                     try:
                         summary_data = summarizer.get_or_generate_summary(
                             chapter_id=chapter_id,
@@ -2562,9 +2611,11 @@ async def generate_next_chapter(
                             summary_length=200,
                         )
                         summary_text = summary_data.get("core_summary", "").strip() or summary_text
+                        logger.info(f"   ✅ 第{chapter_num}章使用详细摘要（距离末尾{distance_from_end}章）")
                     except Exception as e:
                         logger.error(f"   ⚠️ 生成第{chapter_num}章摘要失败，将回退简要摘要: {e}")
 
+                # 如果没有摘要，使用前200字作为简要摘要
                 if not summary_text:
                     summary_text = content[:200] if content and len(content) > 200 else content
 
@@ -2577,6 +2628,19 @@ async def generate_next_chapter(
                         "summary": summary_text,
                     }
                 )
+
+            # 输出策略统计
+            if total > 0:
+                recent_full_range = f"第{max(1, total-RECENT_FULL_COUNT+1)}-{total}章" if total > RECENT_FULL_COUNT else f"第1-{total}章"
+                summary_range_start = max(1, total - RECENT_FULL_COUNT - SUMMARY_COUNT + 1)
+                summary_range_end = max(0, total - RECENT_FULL_COUNT)
+                
+                logger.info(f"   📊 上下文策略：")
+                logger.info(f"      - 最近{min(RECENT_FULL_COUNT, total)}章全文: {recent_full_range}")
+                if summary_range_end > 0:
+                    logger.info(f"      - 往前{min(SUMMARY_COUNT, summary_range_end)}章摘要: 第{summary_range_start}-{summary_range_end}章")
+                if total > RECENT_FULL_COUNT + SUMMARY_COUNT:
+                    logger.info(f"      - 更早{total - RECENT_FULL_COUNT - SUMMARY_COUNT}章简要摘要: 第1-{total-RECENT_FULL_COUNT-SUMMARY_COUNT}章")
 
             return "\n\n".join(summaries), previous_chapters_payload
 
@@ -2769,6 +2833,38 @@ async def execute_generate_next_chapter_task(
 ⚠️ 【小高潮章节】第{next_chapter_number}章需要设计一个明确的爽点：
 - 可以是：打脸嘲讽者/突破升级/获得宝物/反转翻盘/装逼成功"""
 
+        # 🆕 第一步：为章节规划优化上下文
+        from app.services.agents.context_optimizer import get_context_optimizer
+        context_optimizer = get_context_optimizer(
+            current_chapter=next_chapter_number,
+            stage='chapter_planning'
+        )
+        
+        # 优化章节规划阶段的上下文（不包含 chapter_plan）
+        plan_optimized_context, plan_optimization_stats = context_optimizer.optimize_for_chapter_generation(
+            plot_outline=plot_outline or "",
+            world_setting=world_setting or "",
+            characters=characters or "",
+            previous_chapters_analysis=previous_chapters_summary or "",
+            project_concept=concept or "",
+            previous_ending=previous_ending or "",
+        )
+        
+        logger.info(f"   💾 Token优化（章节规划）:")
+        logger.info(f"      - 原始: {plan_optimization_stats['original_tokens']} tokens")
+        logger.info(f"      - 优化后: {plan_optimization_stats['optimized_tokens']} tokens")
+        logger.info(f"      - 节省: {plan_optimization_stats['savings']} tokens ({plan_optimization_stats['savings_percentage']:.1f}%)")
+        
+        # 🆕 获取优化器选择的模型
+        selected_plan_model = context_optimizer.selected_model
+        # 🆕 广播步骤1模型
+        await ws_manager.send_model_used(
+            project_id=project_id,
+            stage='structure',
+            model=selected_plan_model,
+            extra={"step": "chapter_plan", "chapter_number": next_chapter_number}
+        )
+
         # 🆕 构建章节规划提示词（网文化版本）
         plan_system_prompt = """你是一位资深网络小说情节规划师，精通爽点设计和读者心理。
 你的任务是为章节制定详细的创作计划，确保情节吸引人、节奏紧凑、爽点分明。"""
@@ -2776,16 +2872,16 @@ async def execute_generate_next_chapter_task(
         plan_user_prompt = f"""请为第{next_chapter_number}章制定创作计划。
 
 【整本书信息】
-- 故事概念：{concept}
-- 情节大纲：{plot_outline}
-- 世界观：{world_setting}
-- 主要人物：{characters}
+- 故事概念：{plan_optimized_context.get('project_concept', concept)}
+- 情节大纲：{plan_optimized_context.get('plot_outline', plot_outline)}
+- 世界观：{plan_optimized_context.get('world_setting', world_setting)}
+- 主要人物：{plan_optimized_context.get('characters', characters)}
 
 【已完成章节摘要】
-{previous_chapters_summary if previous_chapters_summary else '（这是第一章）'}
+{plan_optimized_context.get('previous_chapters_analysis', previous_chapters_summary) if previous_chapters_summary else '（这是第一章）'}
 
 【前一章结尾】
-{previous_ending if previous_ending else '（这是第一章，没有前一章）'}
+{plan_optimized_context.get('previous_ending', previous_ending) if previous_ending else '（这是第一章，没有前一章）'}
 {climax_instruction}
 
 ---
@@ -2827,15 +2923,16 @@ async def execute_generate_next_chapter_task(
 - 推进故事发展，不能原地踏步
 - 爽点和钩子必须具体、可执行"""
 
-        # 🆕 使用真流式 LLM 调用
+        # 🆕 使用真流式 LLM 调用（智能选择模型）
         try:
             chapter_plan = await streaming_service.generate_chapter_streaming(
                 prompt=plan_user_prompt,
                 system_prompt=plan_system_prompt,
                 on_chunk=on_plan_chunk,
                 temperature=0.7,
+                model=selected_plan_model,  # 🔥 使用智能选择的模型
             )
-            logger.info(f"   ✓ 章节规划已完成（真流式），长度: {len(chapter_plan)}")
+            logger.info(f"   ✓ 章节规划已完成（真流式 + {selected_plan_model}），长度: {len(chapter_plan)}")
         except Exception as e:
             logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
             # 回退到同步调用
@@ -3003,6 +3100,57 @@ async def execute_generate_next_chapter_task(
         logger.info(f"   📝 第{next_chapter_number}章 - 开头: {selected_opening[0]}, 结尾: {selected_ending[0]} [{match_method}]")
         logger.info(f"   💬 构建内容创作提示词...")
 
+        # 🆕 上下文优化：避免Token超限
+        from app.services.agents.context_optimizer import get_context_optimizer
+        context_optimizer = get_context_optimizer(
+            current_chapter=next_chapter_number,
+            stage='content_creation'
+        )
+        
+        # 🆕 获取前序章节分析（已优化的 2章全文+8章摘要）
+        from app.services.agents.chapter_summarizer import create_chapter_summarizer
+        try:
+            summarizer = create_chapter_summarizer(db_session=db)
+            # 使用 previous_chapters_payload 构造分析
+            if previous_chapters_payload:
+                # 使用 agent_coordinator 的分析方法
+                previous_chapters_analysis = "\n".join([
+                    f"第{ch['chapter_number']}章《{ch.get('title', '')}》: {ch.get('summary', ch.get('content', '')[:200])}..."
+                    for ch in previous_chapters_payload
+                ])
+            else:
+                previous_chapters_analysis = "这是第一章，之前没有章节。"
+        except Exception as e:
+            logger.warning(f"   ⚠️ 生成前序章节分析失败: {e}")
+            previous_chapters_analysis = ""
+
+        # 🆕 优化所有上下文内容
+        optimized_context, optimization_stats = context_optimizer.optimize_for_chapter_generation(
+            plot_outline=plot_outline or "",
+            world_setting=world_setting or "",
+            characters=characters or "",
+            previous_chapters_analysis=previous_chapters_analysis,
+            chapter_plan=chapter_plan,
+            previous_ending=previous_ending or "",
+        )
+        
+        # 📊 输出优化统计
+        logger.info(f"   💾 Token优化统计:")
+        logger.info(f"      - 原始: {optimization_stats['original_tokens']} tokens")
+        logger.info(f"      - 优化后: {optimization_stats['optimized_tokens']} tokens")
+        logger.info(f"      - 节省: {optimization_stats['savings']} tokens ({optimization_stats['savings_percentage']:.1f}%)")
+        
+        # 🆕 获取优化器选择的模型
+        selected_content_model = context_optimizer.selected_model
+        logger.info(f"   🤖 内容创作使用模型: {selected_content_model}")
+        # 🆕 广播步骤2模型
+        await ws_manager.send_model_used(
+            project_id=project_id,
+            stage='content',
+            model=selected_content_model,
+            extra={"step": "chapter_content", "chapter_number": next_chapter_number}
+        )
+
         # 🆕 Typed-RAG（按类型检索并注入提示）
         try:
             from app.core.config import settings
@@ -3059,13 +3207,13 @@ async def execute_generate_next_chapter_task(
         content_user_prompt = f"""请创作第{next_chapter_number}章内容：
 
 【章节规划】
-{chapter_plan}
+{optimized_context.get('chapter_plan', chapter_plan)}
 
 【世界观设定】
-{world_setting}
+{optimized_context.get('world_setting', world_setting)}
 
 【人物设定】
-{characters}
+{optimized_context.get('characters', characters)}
 
 【RAG检索-人物（自动注入）】
 {rag_character_context if rag_character_context else '（无）'}
@@ -3074,10 +3222,13 @@ async def execute_generate_next_chapter_task(
 {rag_world_context if rag_world_context else '（无）'}
 
 【情节大纲】
-{plot_outline}
+{optimized_context.get('plot_outline', plot_outline)}
 
 【前一章结尾】
-{previous_ending if previous_ending else '（这是第一章，请设计一个引人入胜的开场）'}
+{optimized_context.get('previous_ending', previous_ending) if previous_ending else '（这是第一章，请设计一个引人入胜的开场）'}
+
+【前序章节信息】
+{optimized_context.get('previous_chapters_analysis', previous_chapters_analysis)}
 
 【目标字数】约3000字
 
@@ -3086,19 +3237,19 @@ async def execute_generate_next_chapter_task(
 - 技巧说明：{selected_opening[1]}
 - 参考示例：{selected_opening[2]}
 
-❌ 禁止使用：每章都用"XXX醒来/睁开眼睛/阳光照进房间"开头
+❌ 禁止使用：每章都用“XXX醒来/睁开眼睛/阳光照进房间”开头
 
 【本章结尾方式 - 强制要求】⚠️
 本章必须使用【{selected_ending[0]}】结尾！
 - 技巧说明：{selected_ending[1]}
 - 参考示例：{selected_ending[2]}
 
-❌ 禁止使用：总结式内心独白 + 对未来的展望（如"她知道，从这一刻起..."）
+❌ 禁止使用：总结式内心独白 + 对未来的展望（如“她知道，从这一刻起...”）
 ✅ 结尾要制造钩子，让读者想点下一章
 
 请开始创作第{next_chapter_number}章内容："""
 
-        # 🆕 使用真流式 LLM 调用
+        # 🆕 使用真流式 LLM 调用（智能选择模型）
         logger.info(f"   🚀 开始调用流式 LLM 服务生成章节内容...")
         try:
             chapter_draft = await streaming_service.generate_chapter_streaming(
@@ -3106,8 +3257,9 @@ async def execute_generate_next_chapter_task(
                 system_prompt=content_system_prompt,
                 on_chunk=on_content_chunk,
                 temperature=0.7,
+                model=selected_content_model,  # 🔥 使用智能选择的模型
             )
-            logger.info(f"   ✓ 章节初稿已完成（真流式），字数: {len(chapter_draft)}")
+            logger.info(f"   ✓ 章节初稿已完成（真流式 + {selected_content_model}），字数: {len(chapter_draft)}")
         except Exception as e:
             logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
             import traceback
@@ -3323,15 +3475,16 @@ async def execute_generate_next_chapter_task(
 ### ✨ 亮点
 - ..."""
 
-        # 🆕 使用真流式 LLM 调用
+        # 🆕 使用真流式 LLM 调用（R1 逻辑检查）
         try:
             review_report = await streaming_service.generate_chapter_streaming(
                 prompt=review_user_prompt,
                 system_prompt=review_system_prompt,
                 on_chunk=on_review_chunk,
                 temperature=0.7,
+                model="deepseek-reasoner",  # 🔥 步骤3：质量评审使用R1做逻辑检查
             )
-            logger.info(f"   ✓ 评审完成（真流式），报告长度: {len(review_report)}")
+            logger.info(f"   ✓ 评审完成（真流式 + R1模型），报告长度: {len(review_report)}")
         except Exception as e:
             logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
             # 回退到同步调用
@@ -3471,17 +3624,154 @@ async def execute_generate_next_chapter_task(
 
 请直接输出优化后的章节内容（第一行为章节标题）："""
 
-        # 🆕 使用真流式 LLM 调用
+        # 🆕 使用迭代优化（max改稿 + R1打分循环,达到阈值后再输出）
         try:
-            final_version = await streaming_service.generate_chapter_streaming(
-                prompt=iteration_user_prompt,
-                system_prompt=iteration_system_prompt,
-                on_chunk=on_iteration_chunk,
-                temperature=0.7,
+            # 选择用于改稿的生成模型（与内容创作一致的策略）
+            from app.services.agents.context_optimizer import get_context_optimizer
+            revision_optimizer = get_context_optimizer(
+                current_chapter=next_chapter_number,
+                stage='content_creation'
             )
-            logger.info(f"   ✓ 优化完成（真流式），最终字数: {len(final_version)}")
+            selected_revision_model = revision_optimizer.selected_model
+            logger.info(f"   🤖 迭代优化改稿模型: {selected_revision_model}")
+            # 🆕 广播步骤4改稿模型（首轮改稿前广播一次）
+            await ws_manager.send_model_used(
+                project_id=project_id,
+                stage='iteration',
+                model=selected_revision_model,
+                extra={"step": "iteration_revision", "chapter_number": next_chapter_number}
+            )
+
+            # 配置：通过分值与最大轮次
+            try:
+                from app.core.config import settings
+                pass_score_threshold = getattr(settings, 'ITERATION_PASS_SCORE', 9.0)
+                max_rounds = getattr(settings, 'ITERATION_MAX_ROUNDS', 3)
+            except Exception:
+                pass_score_threshold = 8.5
+                max_rounds = 3
+            logger.info(f"   🎯 迭代优化目标分值: {pass_score_threshold} | 最大轮次: {max_rounds}")
+
+            # 辅助：解析评审报告中的综合评分
+            import re
+            def extract_score(text: str) -> float:
+                if not text:
+                    return 0.0
+                m = re.search(r"综合评分\s*[:：]\s*([0-9]+(?:\.[0-9]+)?)\s*/\s*10", text)
+                try:
+                    return float(m.group(1)) if m else 0.0
+                except Exception:
+                    return 0.0
+
+            # 初始版本与评审
+            current_version = chapter_draft
+            current_review = review_report
+            final_version = current_version
+            reached_pass = False
+            best_version = current_version
+            # 初始化最佳分数为已有评审的分数（若无法提取则为0）
+            best_score = extract_score(current_review)
+            # 🆕 累积所有轮次的评审意见，作为改稿参考
+            all_reviews = [f"【第0轮评审（初稿）】\n{current_review}"]
+
+            # 不透出中间稿的流式回调（前端只看最终稿）
+            async def noop_chunk(chunk: str, idx: int):
+                return
+
+            for round_idx in range(1, max_rounds + 1):
+                logger.info(f"   🔄 迭代优化第{round_idx}/{max_rounds}轮：开始改稿")
+                # 🆕 推送迭代轮次信息到前端
+                await ws_manager.send_task_progress(
+                    project_id=project_id,
+                    task_id=task_id,
+                    progress=min(95, 70 + round_idx * 5),
+                    message=f"正在迭代第{round_idx}/{max_rounds}轮..."
+                )
+                # 第N轮：根据所有历史评审意见进行改稿
+                # 🆕 将所有评审意见汇总，按轮次展示
+                all_reviews_text = "\n\n".join(all_reviews)
+                iteration_user_prompt_round = f"""【重要提示】请严格按照以下所有评审意见逐条修改第{next_chapter_number}章内容，不要遗漏或忽略任何一条建议。
+
+【当前章节内容】
+{current_version}
+
+【必须执行的所有评审意见（包含历史轮次）】
+{all_reviews_text}
+
+【修改要求】
+1. 必须逐条落实上述所有评审意见中的修改建议（包括历史轮次的意见）
+2. 保持原章节的完整情节和篇幅（不少于原稿80%字数）
+3. 直接输出优化后的完整章节内容（第一行为章节标题）
+4. 不要附加任何修改说明、优化要点等额外内容
+
+请立即输出优化后的章节："""
+
+                # 仅在最后一轮向前端流式输出正文；前几轮不推送正文
+                on_chunk_cb = on_iteration_chunk if round_idx == max_rounds else noop_chunk
+                revised_version = await streaming_service.generate_chapter_streaming(
+                    prompt=iteration_user_prompt_round,
+                    system_prompt=iteration_system_prompt,
+                    on_chunk=on_chunk_cb,
+                    temperature=0.7,
+                    model=selected_revision_model,
+                )
+                logger.info(f"   ✓ 第{round_idx}轮改稿完成（{selected_revision_model}），字数: {len(revised_version)}")
+                await ws_manager.send_task_progress(
+                    project_id=project_id,
+                    task_id=task_id,
+                    progress=min(95, 72 + round_idx * 5),
+                    message=f"第{round_idx}轮改稿完成，正在评审..."
+                )
+
+                # 评审打分（R1）
+                review_system_prompt_loop = """你是一位专业的网络小说质量评审官。请使用网文6维度对上面的章节进行评审，并输出：\n1) 综合评分：X/10分\n2) 最重要的3条修改建议。\n请严格包含“综合评分：X/10分”这一行。"""
+                review_user_prompt_loop = f"""请评审以下章节：
+
+{revised_version}
+"""
+                new_review_report = await streaming_service.generate_chapter_streaming(
+                    prompt=review_user_prompt_loop,
+                    system_prompt=review_system_prompt_loop,
+                    on_chunk=noop_chunk,  # 评分不流式推送正文
+                    temperature=0.3,
+                    model="deepseek-reasoner",
+                )
+                score = extract_score(new_review_report)
+                logger.info(f"   🧮 第{round_idx}轮评分：{score:.1f}/10")
+                await ws_manager.send_task_progress(
+                    project_id=project_id,
+                    task_id=task_id,
+                    progress=min(95, 80 + round_idx * 3),
+                    message=f"迭代优化第{round_idx}轮评分：{score:.1f}/10"
+                )
+                
+                # 🆕 将本轮评审意见加入历史记录
+                all_reviews.append(f"【第{round_idx}轮评审】\n{new_review_report}")
+
+                # 🆕 记录最高评分版本
+                if score > best_score:
+                    best_score = score
+                    best_version = revised_version
+
+                # 判定是否达标
+                if score >= pass_score_threshold:
+                    final_version = revised_version
+                    current_review = new_review_report
+                    reached_pass = True
+                    logger.info(f"   🎉 达到目标分值 {pass_score_threshold}，停止迭代")
+                    break
+                else:
+                    # 继续下一轮
+                    current_version = revised_version
+                    current_review = new_review_report
+                    final_version = revised_version
+
+            if not reached_pass:
+                logger.info(f"   ⚠️ 未达标，输出最高评分版本：{best_score:.1f}/10")
+                final_version = best_version
+            logger.info(f"   ✅ 迭代优化结束，输出最终版本，长度: {len(final_version)}")
         except Exception as e:
-            logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
+            logger.error(f"   ⚠️ 真流式迭代优化失败，回退到同步调用: {e}")
             # 回退到同步调用
             if hasattr(real_coordinator, 'optimize_chapter'):
                 final_version = await asyncio.to_thread(
@@ -3491,7 +3781,6 @@ async def execute_generate_next_chapter_task(
                 )
             else:
                 final_version = chapter_draft
-
         # 🆕 清理输出内容，移除额外的评审话语
         def clean_final_output(content: str) -> str:
             """清理最终输出，移除可能的额外评审话语"""
@@ -3845,7 +4134,7 @@ async def expand_outline(
     db: Session = Depends(get_db),
 ):
     """
-    扩展情节大纲
+    扩展情节大纲（异步后台执行）
     
     请求体:
     {
@@ -3859,15 +4148,11 @@ async def expand_outline(
     响应:
     {
         "success": true,
-        "expanded_outline": "扩展后的完整大纲...",
-        "chapter_breakdown": "章节分解...",
-        "plot_arcs": "情节线索...",
-        "target_chapters": 50
+        "task_id": "xxx-xxx-xxx",
+        "message": "大纲扩展任务已启动，正在后台执行..."
     }
     """
     import logging
-    import sys
-    import os
     
     logger = logging.getLogger("uvicorn.error")
     
@@ -3885,24 +4170,87 @@ async def expand_outline(
                 detail="Project not found"
             )
         
-        # 2. 导入大纲扩展器
-        try:
-            from app.services.agents.outline_expander import create_outline_expander
-            logger.info("   ✅ 成功导入 outline_expander")
-        except ImportError as e:
-            logger.error(f"   ❌ 导入失败: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"大纲扩展器未安装: {str(e)}"
-            )
+        # 2. 生成任务ID
+        task_id = f"expand-outline-{uuid.uuid4()}"
+        logger.info(f"   ✅ 任务ID: {task_id}")
         
-        # 3. 创建扩展器实例
+        # 3. 🆕 启动后台任务
+        asyncio.create_task(
+            execute_expand_outline_task(
+                task_id=task_id,
+                project_id=request.project_id,
+                user_id=current_user.id,
+                current_outline=request.current_outline,
+                world_setting=request.world_setting,
+                characters=request.characters,
+                current_chapter_count=request.current_chapter_count,
+                increment=request.increment,
+                target_total_chapters=request.target_total_chapters,
+            )
+        )
+        
+        logger.info(f"   🚀 后台任务已启动")
+        
+        # 4. 立即返回
+        return {
+            "success": True,
+            "task_id": task_id,
+            "message": "📖 大纲扩展任务已启动，正在后台执行..."
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 启动扩展大纲任务失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+async def execute_expand_outline_task(
+    task_id: str,
+    project_id: int,
+    user_id: int,
+    current_outline: str,
+    world_setting: str,
+    characters: str,
+    current_chapter_count: int,
+    increment: int,
+    target_total_chapters: Optional[int],
+):
+    """后台执行大纲扩展任务"""
+    from sqlalchemy import text
+    from app.db.base import SessionLocal
+    
+    logger = logging.getLogger("uvicorn.error")
+    logger.info(f"🚀 开始执行后台任务: {task_id}, 扩展大纲")
+    
+    # 创建独立的数据库会话
+    db = SessionLocal()
+    
+    try:
+        # 发送任务开始消息
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=0,
+            message="📖 开始扩展大纲..."
+        )
+        
+        # 导入大纲扩展器
+        from app.services.agents.outline_expander import create_outline_expander
+        logger.info("   ✅ 成功导入 outline_expander")
+        
+        # 创建扩展器实例
         expander = create_outline_expander()
         logger.info("   ✅ 扩展器实例已创建")
-
-        # 3.5 生成类型化设定摘要并注入世界观
-        settings_summary = build_project_settings_summary(request.project_id, db)
-        combined_world_setting = request.world_setting or ""
+        
+        # 生成类型化设定摘要并注入世界观
+        settings_summary = build_project_settings_summary(project_id, db)
+        combined_world_setting = world_setting or ""
         if settings_summary:
             combined_world_setting = (
                 f"{combined_world_setting}\n\n{settings_summary}"
@@ -3910,24 +4258,35 @@ async def expand_outline(
                 else settings_summary
             )
         logger.info("   📚 已生成设定摘要并合并到世界观上下文")
-
-        # 4. 执行大纲扩展（渐进式）
-        target_chapters = request.current_chapter_count + request.increment
-        logger.info(f"   🚀 开始扩展大纲（从 {request.current_chapter_count} 章扩展到 {target_chapters} 章）...")
-
-        result = expander.expand_plot_outline_incremental(
-            current_outline=request.current_outline,
-            world_setting=combined_world_setting,
-            characters=request.characters,
-            current_chapter_count=request.current_chapter_count,
-            increment=request.increment,
-            target_total_chapters=request.target_total_chapters,
+        
+        # 执行大纲扩展
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=20,
+            message=f"🔄 正在扩展大纲（从 {current_chapter_count} 章扩展到 {current_chapter_count + increment} 章）..."
         )
-
+        
+        # 使用线程池执行同步扩展，避免阻塞事件循环
+        result = await asyncio.to_thread(
+            expander.expand_plot_outline_incremental,
+            current_outline=current_outline,
+            world_setting=combined_world_setting,
+            characters=characters,
+            current_chapter_count=current_chapter_count,
+            increment=increment,
+            target_total_chapters=target_total_chapters,
+        )
+        
         logger.info("   ✅ 大纲扩展完成")
         
-        # 5. 保存扩展结果到project_settings
-        from sqlalchemy import text
+        # 保存扩展结果到project_settings
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=80,
+            message="💾 正在保存扩展结果..."
+        )
         
         update_query = text("""
             UPDATE project_settings
@@ -3939,31 +4298,37 @@ async def expand_outline(
         db.execute(update_query, {
             "plot_outline": result["expanded_outline"],
             "updated_at": datetime.now().isoformat(),
-            "project_id": request.project_id
+            "project_id": project_id
         })
         db.commit()
         logger.info("   💾 扩展大纲已保存到数据库")
-
-        return {
-            "success": True,
-            "expanded_outline": result["expanded_outline"],
-            "chapter_breakdown": result["chapter_breakdown"],
-            "plot_arcs": result.get("plot_arcs", ""),
-            "current_chapter_count": result["current_chapter_count"],
-            "should_continue": result["should_continue"],  # 🆕 AI建议是否继续扩展
-            "continue_reason": result.get("continue_reason", "")  # 🆕 继续扩展的原因
-        }
         
-    except HTTPException:
-        raise
+        # 发送完成消息
+        await ws_manager.send_task_complete(
+            project_id=project_id,
+            task_id=task_id,
+            result={
+                "expanded_outline": result["expanded_outline"],
+                "current_chapter_count": result["current_chapter_count"],
+                "should_continue": result["should_continue"],
+                "continue_reason": result.get("continue_reason", ""),
+                "message": f"✅ 大纲扩展完成！当前 {result['current_chapter_count']} 章"
+            }
+        )
+        
     except Exception as e:
-        logger.error(f"❌ 扩展大纲失败: {str(e)}")
+        logger.error(f"❌ 后台扩展大纲失败: {str(e)}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+        
+        # 发送错误消息
+        await ws_manager.send_task_error(
+            project_id=project_id,
+            task_id=task_id,
+            error=str(e)
         )
+    finally:
+        db.close()
 
 
 @router.post("/expand-characters")
@@ -3973,7 +4338,7 @@ async def expand_characters(
     db: Session = Depends(get_db),
 ):
     """
-    扩展人物体系
+    扩展人物体系（异步后台执行）
     
     请求体:
     {
@@ -3987,15 +4352,11 @@ async def expand_characters(
     响应:
     {
         "success": true,
-        "all_characters": "完整人物档案...",
-        "character_relationships": "人物关系网络...",
-        "role_distribution": "角色定位...",
-        "target_count": 15
+        "task_id": "xxx-xxx-xxx",
+        "message": "人物扩展任务已启动，正在后台执行..."
     }
     """
     import logging
-    import sys
-    import os
     
     logger = logging.getLogger("uvicorn.error")
     
@@ -4013,24 +4374,87 @@ async def expand_characters(
                 detail="Project not found"
             )
         
-        # 2. 导入扩展器
-        try:
-            from app.services.agents.outline_expander import create_outline_expander
-            logger.info("   ✅ 成功导入 outline_expander")
-        except ImportError as e:
-            logger.error(f"   ❌ 导入失败: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"人物扩展器未安装: {str(e)}"
-            )
+        # 2. 生成任务ID
+        task_id = f"expand-characters-{uuid.uuid4()}"
+        logger.info(f"   ✅ 任务ID: {task_id}")
         
-        # 3. 创建扩展器实例
+        # 3. 🆕 启动后台任务
+        asyncio.create_task(
+            execute_expand_characters_task(
+                task_id=task_id,
+                project_id=request.project_id,
+                user_id=current_user.id,
+                main_characters=request.main_characters,
+                world_setting=request.world_setting,
+                plot_outline=request.plot_outline,
+                current_character_count=request.current_character_count,
+                increment=request.increment,
+                target_total_characters=request.target_total_characters,
+            )
+        )
+        
+        logger.info(f"   🚀 后台任务已启动")
+        
+        # 4. 立即返回
+        return {
+            "success": True,
+            "task_id": task_id,
+            "message": "👥 人物扩展任务已启动，正在后台执行..."
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 启动扩展人物任务失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+async def execute_expand_characters_task(
+    task_id: str,
+    project_id: int,
+    user_id: int,
+    main_characters: str,
+    world_setting: str,
+    plot_outline: str,
+    current_character_count: int,
+    increment: int,
+    target_total_characters: Optional[int],
+):
+    """后台执行人物扩展任务"""
+    from sqlalchemy import text
+    from app.db.base import SessionLocal
+    
+    logger = logging.getLogger("uvicorn.error")
+    logger.info(f"🚀 开始执行后台任务: {task_id}, 扩展人物")
+    
+    # 创建独立的数据库会话
+    db = SessionLocal()
+    
+    try:
+        # 发送任务开始消息
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=0,
+            message="👥 开始扩展人物..."
+        )
+        
+        # 导入扩展器
+        from app.services.agents.outline_expander import create_outline_expander
+        logger.info("   ✅ 成功导入 outline_expander")
+        
+        # 创建扩展器实例
         expander = create_outline_expander()
         logger.info("   ✅ 扩展器实例已创建")
-
-        # 3.5 生成类型化设定摘要并注入世界观
-        settings_summary = build_project_settings_summary(request.project_id, db)
-        combined_world_setting = request.world_setting or ""
+        
+        # 生成类型化设定摘要并注入世界观
+        settings_summary = build_project_settings_summary(project_id, db)
+        combined_world_setting = world_setting or ""
         if settings_summary:
             combined_world_setting = (
                 f"{combined_world_setting}\n\n{settings_summary}"
@@ -4038,24 +4462,35 @@ async def expand_characters(
                 else settings_summary
             )
         logger.info("   📚 已生成设定摘要并合并到世界观上下文")
-
-        # 4. 执行人物扩展（渐进式）
-        target_count = request.current_character_count + request.increment
-        logger.info(f"   🚀 开始扩展人物（从 {request.current_character_count} 个扩展到 {target_count} 个）...")
-
-        result = expander.expand_characters_incremental(
-            main_characters=request.main_characters,
-            world_setting=combined_world_setting,
-            plot_outline=request.plot_outline,
-            current_character_count=request.current_character_count,
-            increment=request.increment,
-            target_total_characters=request.target_total_characters,
+        
+        # 执行人物扩展
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=20,
+            message=f"🔄 正在扩展人物（从 {current_character_count} 个扩展到 {current_character_count + increment} 个）..."
         )
-
+        
+        # 使用线程池执行同步扩展，避免阻塞事件循环
+        result = await asyncio.to_thread(
+            expander.expand_characters_incremental,
+            main_characters=main_characters,
+            world_setting=combined_world_setting,
+            plot_outline=plot_outline,
+            current_character_count=current_character_count,
+            increment=increment,
+            target_total_characters=target_total_characters,
+        )
+        
         logger.info("   ✅ 人物扩展完成")
         
-        # 5. 保存扩展结果到project_settings
-        from sqlalchemy import text
+        # 保存扩展结果到project_settings
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=70,
+            message="💾 正在保存扩展结果..."
+        )
         
         update_query = text("""
             UPDATE project_settings
@@ -4067,18 +4502,25 @@ async def expand_characters(
         db.execute(update_query, {
             "characters": result["all_characters"],
             "updated_at": datetime.now().isoformat(),
-            "project_id": request.project_id
+            "project_id": project_id
         })
         db.commit()
         logger.info("   💾 扩展人物已保存到数据库")
-
-        # 6. 🆕 自动解析人物卡并同步到结构化characters表
+        
+        # 自动解析人物卡并同步到结构化characters表
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=85,
+            message="🔄 正在同步人物卡..."
+        )
+        
         sync_result = {"parsed": 0, "created": 0, "updated": 0, "skipped": 0}
         try:
             from app.services.character_parser import parse_and_sync_characters
-
+            
             sync_result = parse_and_sync_characters(
-                project_id=request.project_id,
+                project_id=project_id,
                 characters_text=result["all_characters"],
                 db_session=db
             )
@@ -4088,25 +4530,31 @@ async def expand_characters(
             logger.warning(f"   ⚠️  自动同步人物卡失败: {e}")
             import traceback
             traceback.print_exc()
-
-        return {
-            "success": True,
-            "all_characters": result["all_characters"],
-            "character_relationships": result.get("character_relationships", ""),
-            "role_distribution": result.get("role_distribution", ""),
-            "current_character_count": result["current_character_count"],
-            "should_continue": result["should_continue"],  # 🆕 AI建议是否继续扩展
-            "continue_reason": result.get("continue_reason", ""),  # 🆕 继续扩展的原因
-            "character_sync": sync_result  # 🆕 人物卡同步统计
-        }
         
-    except HTTPException:
-        raise
+        # 发送完成消息
+        await ws_manager.send_task_complete(
+            project_id=project_id,
+            task_id=task_id,
+            result={
+                "all_characters": result["all_characters"],
+                "current_character_count": result["current_character_count"],
+                "should_continue": result["should_continue"],
+                "continue_reason": result.get("continue_reason", ""),
+                "character_sync": sync_result,
+                "message": f"✅ 人物扩展完成！当前 {result['current_character_count']} 个人物"
+            }
+        )
+        
     except Exception as e:
-        logger.error(f"❌ 扩展人物失败: {str(e)}")
+        logger.error(f"❌ 后台扩展人物失败: {str(e)}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+        
+        # 发送错误消息
+        await ws_manager.send_task_error(
+            project_id=project_id,
+            task_id=task_id,
+            error=str(e)
         )
+    finally:
+        db.close()

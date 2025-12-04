@@ -11,8 +11,9 @@ from .knowledge_base import NovelKnowledgeBase
 from .memory_manager import NovelMemoryManager
 from .agents import (
     WorldArchitectAgent, CharacterDesignerAgent, PlotArchitectAgent,
-    ContentCreatorAgent, QualityReviewerAgent, CreativeDirectorAgent, create_deepseek_llm
+    ContentCreatorAgent, QualityReviewerAgent, CreativeDirectorAgent
 )
+from .llm_singleton import create_deepseek_llm
 from .agent_communication import AgentCommunicationHub
 
 # 🆕 模型优化：导入优化的LLM客户端
@@ -569,6 +570,7 @@ class CreativeDirectorCoordinator:
         # 🆕 子任务2：生成核心概念（30%）
         self._send_progress_update(30, "🎨 正在生成故事核心概念...")
 
+        # 🆕 故事概念由CreativeDirectorAgent自动使用qwen-max
         concept = self.creative_director.process(concept_prompt, self.project_context)
         self.project_context["concept"] = concept
 
@@ -584,6 +586,8 @@ class CreativeDirectorCoordinator:
         world_prompt = f"""基于以下故事概念，设计世界观设定：
 {concept}
 {kb_reference}"""
+        
+        # 🆕 世界观设定由WorldArchitectAgent自动使用deepseek-reasoner
         world_result = self.world_architect.process(world_prompt, self.project_context)
         self.project_context["world_setting"] = world_result
 
@@ -594,6 +598,7 @@ class CreativeDirectorCoordinator:
 
         # 并行调用人物设计师
         character_start = time.time()
+        
         character_prompt = f"""基于以下故事概念，设计完整的人物体系。
 
 【故事概念】
@@ -644,7 +649,10 @@ class CreativeDirectorCoordinator:
 【与主要角色的关系】：...
 
 请只输出以上结构化人物设定内容，不要添加额外的解释性文字。"""
+        
+        # 🆕 人物设定由CharacterDesignerAgent自动使用deepseek-reasoner
         character_result = self.character_designer.process(character_prompt, self.project_context)
+            
         self.project_context["characters"] = character_result
 
         self._log_agent_execution("人物设计师", "阶段1-概念开发", character_prompt, character_result, time.time() - character_start)
@@ -832,7 +840,9 @@ class CreativeDirectorCoordinator:
 - 重要信息使用**加粗**标记
 - 爽点强度用⭐表示（1-5星）"""
 
+        # 🆕 情节大纲由PlotArchitectAgent自动使用qwen-long
         plot_result = self.plot_architect.process(plot_prompt, self.project_context)
+            
         self.project_context["plot_outline"] = plot_result
 
         # 📝 注意：自动大纲扩展已移除
@@ -1121,6 +1131,7 @@ class CreativeDirectorCoordinator:
 
 **请确保输出内容格式规范、结构清晰、易于阅读！**"""
 
+        # 🆕 章节生成由ContentCreatorAgent自动使用qwen-max
         content_result = self.content_creator.process(content_prompt, self.project_context)
 
         # ✅ 安全地添加章节，确保 chapters 列表存在
@@ -1619,29 +1630,70 @@ class CreativeDirectorCoordinator:
 
     def _analyze_previous_chapters(self, chapters: List[Any]) -> str:
         """🆕 分析已完成章节，提取关键信息用于新章节创作
+        
+        策略：智能分层处理 - 2章全文 + 8章摘要
+        - 最近2章：使用完整内容进行详细分析
+        - 往前8章：使用结构化摘要
+        - 更早章节：使用简要概括
 
         Args:
             chapters: 已完成的章节列表，可以是纯正文字符串，
                       或包含 chapter_number/title/content/summary 的字典
 
         Returns:
-            格式化的章节分析文本（以高层摘要为主，避免复制整段开头原文）
+            格式化的章节分析文本（分层展示：完整内容 + 摘要）
         """
         if not chapters:
             return ""
 
-        # 仅分析最近 3 章，避免 prompt 过长
-        recent_chapters = chapters[-3:] if len(chapters) > 3 else chapters
+        total_chapters = len(chapters)
+        RECENT_FULL_COUNT = 2  # 最近2章使用全文
+        SUMMARY_COUNT = 8      # 往前8章使用详细摘要
 
         analysis_parts: List[str] = []
-        analysis_parts.append("【已完成章节分析（高层摘要）】")
+        analysis_parts.append("【已完成章节分析】")
+        analysis_parts.append(f"（共{total_chapters}章已完成，采用分层策略：最近{min(RECENT_FULL_COUNT, total_chapters)}章详细分析 + 前{min(SUMMARY_COUNT, max(0, total_chapters-RECENT_FULL_COUNT))}章摘要）\n")
 
-        for i, chapter_item in enumerate(recent_chapters, 1):
-            # 计算实际章节编号
-            actual_chapter_num = len(chapters) - len(recent_chapters) + i
+        # === 第一部分：摘要区（往前8章） ===
+        summary_start_idx = max(0, total_chapters - RECENT_FULL_COUNT - SUMMARY_COUNT)
+        summary_end_idx = max(0, total_chapters - RECENT_FULL_COUNT)
+        
+        if summary_end_idx > summary_start_idx:
+            analysis_parts.append("\n【前期章节摘要】")
+            summary_chapters = chapters[summary_start_idx:summary_end_idx]
+            
+            for i, chapter_item in enumerate(summary_chapters):
+                chapter_number = summary_start_idx + i + 1
+                title = ""
+                summary_text = ""
+                
+                if isinstance(chapter_item, dict):
+                    chapter_number = chapter_item.get("chapter_number", chapter_number)
+                    title = (chapter_item.get("title") or "").strip()
+                    summary_text = (chapter_item.get("summary") or "").strip()
+                    if not summary_text:
+                        content = (chapter_item.get("content") or "").strip()
+                        summary_text = content[:150] if content else ""
+                else:
+                    content = str(chapter_item or "").strip()
+                    summary_text = content[:150] if content else ""
+                
+                header = f"第{chapter_number}章"
+                if title:
+                    header += f"《{title}》"
+                header += f": {summary_text}..."
+                analysis_parts.append(header)
 
-            # 兼容不同输入形式：字符串 or 字典
-            chapter_number = actual_chapter_num
+        # === 第二部分：详细分析区（最近2章） ===
+        recent_start_idx = max(0, total_chapters - RECENT_FULL_COUNT)
+        recent_chapters = chapters[recent_start_idx:]
+        
+        if recent_chapters:
+            analysis_parts.append("\n【最近章节详细分析】")
+            analysis_parts.append("（以下是最近章节的完整内容分析，用于确保情节衔接自然）\n")
+
+        for i, chapter_item in enumerate(recent_chapters):
+            chapter_number = recent_start_idx + i + 1
             title = ""
             content = ""
             summary_text = ""
@@ -1654,8 +1706,7 @@ class CreativeDirectorCoordinator:
             else:
                 content = str(chapter_item or "").strip()
 
-            # 若没有显式摘要，则退化为从正文中提取一段“概要式片段”
-            # 注意这里不再强调“开篇内容”，而是作为事件概括使用，降低开头模板化风险
+            # 若有摘要优先使用，否则从内容中提取
             if summary_text:
                 core_summary = summary_text
             else:
@@ -1680,7 +1731,7 @@ class CreativeDirectorCoordinator:
             analysis_parts.append(header)
 
             if core_summary:
-                analysis_parts.append(f"- 核心摘要：{core_summary}...")
+                analysis_parts.append(f"- 核心内容：{core_summary}...")
 
             if ending:
                 analysis_parts.append(f"- 结尾关键场景：{ending}")

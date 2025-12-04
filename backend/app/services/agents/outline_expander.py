@@ -2,7 +2,8 @@
 情节大纲和人物扩展器 - 自动扩展简短大纲和增加人物数量
 """
 from typing import Dict, Any, List, Optional
-from .agents import CreativeDirectorAgent, PlotArchitectAgent, CharacterDesignerAgent, create_deepseek_llm
+from .agents import CreativeDirectorAgent, PlotArchitectAgent, CharacterDesignerAgent
+from .llm_singleton import create_deepseek_llm
 from .knowledge_base import NovelKnowledgeBase
 from .memory_manager import NovelMemoryManager
 
@@ -26,7 +27,8 @@ class OutlineExpander:
         self.plot_architect = PlotArchitectAgent(self.knowledge_base, self.memory_manager)
         self.character_designer = CharacterDesignerAgent(self.knowledge_base, self.memory_manager)
 
-        self.llm = create_deepseek_llm()
+        # 🔔 为扩展大纲使用 qwen-long
+        self.llm = create_deepseek_llm(task_type="outline_expand")
 
     def count_chapters_in_outline(self, outline: str) -> int:
         """智能识别大纲中的章节数
@@ -244,7 +246,7 @@ class OutlineExpander:
 4. **节奏分布建议**：如何分配高潮、低潮、过渡章节
 5. **伏笔埋设点**：可以在哪些地方设置伏笔
 
-请给出具体分析，为扩展到{target_chapters}章提供依据。"""
+Please给出具体分析，为扩展到{target_chapters}章提供依据。"""
 
         print("【第一步】分析大纲扩展潜力...")
         expansion_analysis = self.creative_director.process(analysis_prompt, {})
@@ -259,7 +261,7 @@ class OutlineExpander:
 【原始大纲】
 {current_outline}
 
-请设计：
+Please design：
 1. **主线情节**：整本书的核心故事线（占比40%）
 2. **A支线**：与主线紧密相关的次要故事线（占比25%）
 3. **B支线**：人物成长或感情线（占比20%）
@@ -288,7 +290,7 @@ class OutlineExpander:
 - 世界观: {world_setting}
 - 人物: {characters}
 
-请为每一章生成结构清晰的简要说明（2-4句话），格式如下：
+Please为每一章生成结构清晰的简要说明（2-4句话），格式如下：
 
 第1章：[标题]
 - 主要内容：...
@@ -329,7 +331,7 @@ class OutlineExpander:
 【情节线索】
 {plot_arcs}
 
-请撰写一份完整的情节大纲，包括：
+Please撰写一份完整的情节大纲，包括：
 1. **故事概述**（500字）
 2. **情节发展**（按起承转合分四部分）
 3. **重要转折点**（列出5-8个关键转折）
@@ -389,7 +391,7 @@ class OutlineExpander:
 【情节大纲】
 {plot_outline}
 
-请分析：
+Please分析：
 1. **现有人物数量**：当前有几个主要人物
 2. **角色类型缺口**：缺少哪些类型的角色（对手、导师、辅助者、中立者等）
 3. **情节需求分析**：根据情节发展，需要增加哪些角色
@@ -411,7 +413,7 @@ class OutlineExpander:
 【现有主角】
 {main_characters}
 
-请设计{target_count}个人物的角色定位，包括：
+Please design{target_count}个人物的角色定位， including：
 
 1. **主角阵营**（3-5人）
    - 主角：{main_characters.split('\\n')[0] if main_characters else '待定'}
@@ -448,7 +450,7 @@ class OutlineExpander:
 【世界观】
 {world_setting}
 
-请为{target_count}个人物生成详细档案，每个人物包括：
+Please为{target_count}个人物生成详细档案，每个人物包括：
 
 **格式模板**：
 ---
@@ -485,7 +487,7 @@ class OutlineExpander:
 【所有人物】
 {all_characters}
 
-请设计人物关系网络，包括：
+Please design人物关系网络， including：
 
 1. **核心关系链**
    - 主角 ↔ 盟友
@@ -679,7 +681,7 @@ class OutlineExpander:
    - 每章结尾必须有悬念或钩子
    - 钩子类型：悬念式/危机式/反转式/升级式/对决式
 
-请生成完整的{target_chapters}章规划（🔥重点：每章必须有完整的详细规划）：
+Please生成完整的{target_chapters}章规划（🔥重点：每章必须有完整的详细规划）：
 
 ## 一、故事概述
 [基于扩展后的完整故事，概述核心概念、主线冲突、主角成长轨迹，300-500字]
@@ -785,7 +787,7 @@ class OutlineExpander:
    - 爽点和钩子信息直接写在每章内，不要分离成单独表格
    - 同时在末尾提供爽点总览表便于快速查看
 
-请输出完整的、重新整合后的网文大纲（🔥重点：每章必须有完整的详细规划）：
+Please输出完整的、重新整合后的网文大纲（🔥重点：每章必须有完整的详细规划）：
 
 ## 一、故事概述
 [整合后的完整故事概述，300-500字]
@@ -857,24 +859,15 @@ class OutlineExpander:
         upper_threshold = int(long_novel_target * 0.9)
 
 
-        # 🔥 第三步：AI判断是否需要继续扩展（在扩展完成后判断）
-        analysis_prompt = f"""你是一位资深小说策划师。请分析以下大纲是否需要继续扩展。
-
-【当前大纲】
-{integrated_outline}
-
-【世界观】
-{world_setting}
-
-【人物设定】
-{characters}
+        # 🔥 第三步：AI判断是否需要继续扩展（简化提示词，只传递统计信息）
+        analysis_prompt = f"""你是一位资深小说策划师。Please分析以下大纲是否需要继续扩展。
 
 【当前状态】
 - 当前已有章节数：{target_chapters}
 - 刚完成扩展：从{current_chapter_count}章扩展到{target_chapters}章
 - 长篇目标总章节数：{long_novel_target}章
 
-请分析：
+Please analyze：
 1. **当前大纲的完整性**：是否已经覆盖了完整的故事线（开端、发展、高潮、结局）
 2. **情节密度**：每章的情节容量是否合适，是否需要更多的过渡或详细描写
 3. **支线发展**：是否有未展开的支线故事或人物关系
@@ -888,7 +881,7 @@ class OutlineExpander:
 
 判断标准（面向长篇小说）：
 - 如果当前章节数 < {lower_threshold}，通常建议继续扩展（重点补充主线和支线）
-- 如果 {lower_threshold}-{upper_threshold} 章，根据故事完整性和情节复杂度判断
+- 如枟 {lower_threshold}-{upper_threshold} 章，根据故事完整性和情节复杂度判断
 - 如果 > {upper_threshold} 章，需要非常充分的理由才继续扩展（例如仍有重要支线或伏笔尚未完成）
 - 如果已有完整的故事结构，应该停止扩展"""
 
@@ -954,25 +947,31 @@ class OutlineExpander:
             - should_continue: AI判断是否还需要继续扩展
             - continue_reason: 继续扩展的原因（如果需要）
         """
-        # 🆕 智能识别当前人物数
-        if current_character_count == 0:
-            print("🔍 检测到 current_character_count=0，开始自动识别当前人物数...")
-            detected_count = self.count_characters_in_text(main_characters)
-            if detected_count > 0:
-                current_character_count = detected_count
-                print(f"🎯 识别成功！当前已有 {current_character_count} 个人物\n")
-            else:
-                print("🆕 未识别到人物，从 0 个开始扩展\n")
+        # 🔔 为人物扩展使用 DeepSeek R1
+        character_llm = create_deepseek_llm(task_type="character_expand")
+        original_llm = self.character_designer.llm
+        self.character_designer.llm = character_llm
+        
+        try:
+            # 🆕 智能识别当前人物数
+            if current_character_count == 0:
+                print("🔍 检测到 current_character_count=0，开始自动识别当前人物数...")
+                detected_count = self.count_characters_in_text(main_characters)
+                if detected_count > 0:
+                    current_character_count = detected_count
+                    print(f"🎯 识别成功！当前已有 {current_character_count} 个人物\n")
+                else:
+                    print("🆕 未识别到人物，从 0 个开始扩展\n")
 
-        print(f"\n{'='*70}")
-        print(f"【渐进式人物扩展】从 {current_character_count} 个扩展到 {current_character_count + increment} 个")
-        print(f"{'='*70}\n")
+            print(f"\n{'='*70}")
+            print(f"【渐进式人物扩展】从 {current_character_count} 个扩展到 {current_character_count + increment} 个")
+            print(f"{'='*70}\n")
 
-        target_count = current_character_count + increment
+            target_count = current_character_count + increment
 
-        # 🔥 修改：先执行扩展，再判断是否继续
-        # 第一步：执行扩展
-        expansion_prompt = f"""基于当前人物，扩展到{target_count}个角色。
+            # 🔥 修改：先执行扩展，再判断是否继续
+            # 第一步：执行扩展
+            expansion_prompt = f"""基于当前人物，扩展到{target_count}个角色。
 
 【当前人物】
 {main_characters}
@@ -1000,29 +999,51 @@ class OutlineExpander:
   * 关联线索（本角色主要参与的情节线，可简要命名主线/支线）
 
 🔥 重要输出格式要求：
-请直接按阵营分类输出，格式如下（每个人物必须包含完整人物卡字段）：
+Please直接按阵营分类输出，格式如下（每个人物必须包含完整人物卡字段，**每个字段后必须换行**）：
 
 ## 主角阵营
 
 ### 【姓名】：林墨
+
 【年龄/性别】：28岁/男
+
 【故事立场】：主角方
+
 【所属势力】：天剑宗
+
 【重要性】：主角
+
 【外貌特征】：...
+
 【性格特点】：...
+
 【背景故事】：...
+
 【世界观/价值观立场】：...
+
 【核心动机】：...
+
 【能力/特长】：...
+
 【弱点/缺陷】：...
+
 【在情节中的作用】：...
+
 【人物成长线】：...
+
 【关键关系】：...
+
 【关联线索】：...
 
+---
+
 ### 【姓名】：苏娜
+
+【年龄/性别】：...
+
 ...
+
+---
 
 ## 对手阵营
 
@@ -1040,17 +1061,25 @@ class OutlineExpander:
 ...
 
 注意：
-1. 不要单独列出"新增角色列表"，直接合并到各阵营中
-2. 使用【姓名】格式，方便识别和统计
-3. 每个阵营的角色按重要性排序
-4. 确保所有{target_count}个角色都包含在内"""
+1. **关键：每个字段后必须有两个换行符**，保证排版清晰
+2. 不要单独列出"新增角色列表"，直接合并到各阵营中
+3. 使用【姓名】格式，方便识别和统计
+4. 每个阵营的角色按重要性排序
+5. 人物之间使用 --- 分隔线
+6. 确保所有{target_count}个角色都包含在内"""
 
-        print(f"【第一步】扩展角色（{current_character_count + 1}-{target_count}个）...")
-        expansion_content = self.character_designer.process(expansion_prompt, {})
-        print("✅ 角色扩展完成\n")
+            print(f"【第一步】扩展角色（{current_character_count + 1}-{target_count}个）...")
+            try:
+                expansion_content = self.character_designer.process(expansion_prompt, {})
+                print("✅ 角色扩展完成\n")
+            except Exception as e:
+                print(f"❌ 角色扩展失败: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
 
-        # 第二步：整合更新人物体系（而不是简单追加）
-        integration_prompt = f"""请将新扩展的角色整合到现有人物体系中，生成一份完整的、结构清晰的人物档案。
+            # 第二步：整合更新人物体系（而不是简单追加）
+            integration_prompt = f"""Please将新扩展的角色整合到现有人物体系中，生成一份完整的、结构清晰的人物档案。
 
 【原有人物】
 {main_characters}
@@ -1066,24 +1095,39 @@ class OutlineExpander:
 5. **去重去重复**：如果有重复的角色，只保留一份最完整的
 6. **规模控制**：在保证角色完整性的前提下，尽量让总人数接近{target_count}个（允许±2人的浮动）
 
-请输出完整的、重新整合后的人物档案，格式如下：
+Please输出完整的、重新整合后的人物档案，**每个字段后必须有两个换行符**，格式如下：
 
 ## 主角阵营
 
 ### 【姓名】：[姓名]
+
 【年龄/性别】：...
+
 【角色定位】：主角/核心配角 等
+
 【外貌特征】：...
+
 【性格特点】：...
+
 【背景故事】：...
+
 【世界观/价值观立场】：...
+
 【核心动机】：...
+
 【能力/特长】：...
+
 【弱点/缺陷】：...
+
 【在情节中的作用】：...
+
 【人物成长线】：...
+
 【关键关系】：（与主要角色及重要配角的关系）
+
 【关联线索】：（本角色主要参与的情节线）
+
+---
 
 ...（所有主角阵营角色）
 
@@ -1102,19 +1146,25 @@ class OutlineExpander:
 ### 【姓名】：[姓名]
 ...
 
-确保所有{target_count}个角色都包含在内，按重要性排序。"""
+确保所有{target_count}个角色都包含在内，按重要性排序。人物之间使用 --- 分隔。"""
 
-        print(f"【第二步】整合更新人物体系（不进行简单堆码）...")
-        integrated_characters = self.character_designer.process(integration_prompt, {})
-        print("✅ 人物体系整合完成\n")
+            print(f"【第二步】整合更新人物体系（不进行简单堆码）...")
+            try:
+                integrated_characters = self.character_designer.process(integration_prompt, {})
+                print("✅ 人物体系整合完成\n")
+            except Exception as e:
+                print(f"❌ 人物体系整合失败: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
 
-        # 第三步：生成人物关系网络
-        relationship_prompt = f"""基于以下完整的人物体系，生成完整的人物关系网络。
+            # 第三步：生成人物关系网络
+            relationship_prompt = f"""基于以下完整的人物体系，生成完整的人物关系网络。
 
 【所有人物】
 {integrated_characters}
 
-请以下列格式生成人物关系网络：
+Please以下列格式生成人物关系网络：
 
 ### 人物关系网络
 
@@ -1130,22 +1180,22 @@ class OutlineExpander:
 **支持角色关系**：
 - [支持角色] ↔ [主要角色]：[关系类型]（[关系描述]）
 
-请确保：
+Please确保：
 1. 包含所有{target_count}个角色
 2. 关系类型包括：师徒、盟友、对手、亲人、同事、竞争等
 3. 每个关系都有简短描述（20字以内）"""
 
-        print(f"【第三步】生成人物关系网络...")
-        relationships = self.character_designer.process(relationship_prompt, {})
-        print("✅ 关系网络生成完成\n")
+            print(f"【第三步】生成人物关系网络...")
+            relationships = self.character_designer.process(relationship_prompt, {})
+            print("✅ 关系网络生成完成\n")
 
-        # 第四步：统计角色分布
-        distribution_prompt = f"""基于以下完整的人物体系，统计角色分布。
+            # 第四步：统计角色分布
+            distribution_prompt = f"""基于以下完整的人物体系，统计角色分布。
 
 【所有人物】
 {integrated_characters}
 
-请以以下格式输出JSON：
+Please以以下格式输出JSON：
 {{
   "主角": 数量,
   "配角": 数量,
@@ -1154,51 +1204,45 @@ class OutlineExpander:
   "中立角色": 数量
 }}
 
-请确保所有数量加起来等于{target_count}。
+Please确保所有数量加起来等于{target_count}。
 只返回JSON，不要其他文字。"""
 
-        print(f"【第四步】统计角色分布...")
-        distribution_result = self.character_designer.process(distribution_prompt, {})
-        print("✅ 角色分布统计完成\n")
+            print(f"【第四步】统计角色分布...")
+            distribution_result = self.character_designer.process(distribution_prompt, {})
+            print("✅ 角色分布统计完成\n")
 
-        # 解析角色分布JSON
-        import json
-        import re
+            # 解析角色分布JSON
+            import json
+            import re
 
-        distribution_dict = {}
-        json_match = re.search(r'\{[\s\S]*?\}', distribution_result)
-        if json_match:
-            try:
-                distribution_dict = json.loads(json_match.group())
-                print(f"✅ 角色分布：{distribution_dict}")
-            except:
-                print("⚠️  无法解析角色分布JSON")
+            distribution_dict = {}
+            json_match = re.search(r'\{[\s\S]*?\}', distribution_result)
+            if json_match:
+                try:
+                    distribution_dict = json.loads(json_match.group())
+                    print(f"✅ 角色分布：{distribution_dict}")
+                except:
+                    print("⚠️  无法解析角色分布JSON")
 
 
-        # 🆕 长篇小说目标人物数量（用于判断是否继续扩展）
-        character_target = target_total_characters or 25
-        lower_threshold = max(15, character_target - 10)
-        upper_threshold = character_target + 5
+            # 🆕 长篇小说目标人物数量（用于判断是否继续扩展）
+            character_target = target_total_characters or 25
+            lower_threshold = max(15, character_target - 10)
+            upper_threshold = character_target + 5
 
-        # 🔥 第五步：AI判断是否需要继续扩展（在扩展完成后判断）
-        analysis_prompt = f"""你是一位资深人物设计师。请分析以下人物体系是否需要继续扩展。
-
-【当前人物】
-{integrated_characters}
-
-【情节大纲】
-{plot_outline}
+            # 🔥 第五步：AI判断是否需要继续扩展（在扩展完成后判断）
+            # 🔥 优化：只传递统计信息，不传递完整文本，避免超过token限制
+            analysis_prompt = f"""你是一位资深人物设计师。Please分析以下人物体系是否需要继续扩展。
 
 【当前状态】
 - 当前已有人物数：{target_count}
 - 刚完成扩展：从{current_character_count}个扩展到{target_count}个
 - 长篇目标人物数：{character_target}个
+- 角色分布：{distribution_dict}
 
-请分析：
+Please分析：
 1. **主要角色覆盖**：主角、配角、对手、师友等关键角色是否齐全
-2. **情节需求**：根据大纲，是否需要更多的支持性角色
-3. **人物关系**：是否需要更多角色来丰富人物关系网络
-4. **角色均衡**：正面、负面、中立角色的比例是否合适
+2. **角色均衡**：正面、负面、中立角色的比例是否合适
 
 最后，以JSON格式回答：
 {{
@@ -1208,45 +1252,48 @@ class OutlineExpander:
 
 判断标准（面向长篇小说人物体系）：
 - 如果当前人物数 < {lower_threshold}，通常建议继续扩展，补足主要角色和关键配角
-- 如果 {lower_threshold}-{character_target} 个，根据情节复杂度和人物关系网丰富程度判断
+- 如果 {lower_threshold}-{character_target} 个，根据角色分布情况判断
 - 如果 {character_target}-{upper_threshold} 个，偏向于收束人物，只在确有需要时少量补充
 - 如果 > {upper_threshold} 个，需要非常充分的理由才继续扩展，避免角色过多导致人物形象被稀释"""
 
-        print("【第五步】AI判断是否需要继续扩展...")
-        analysis_result = self.character_designer.process(analysis_prompt, {})
+            print("【第五步】AI判断是否需要继续扩展...")
+            analysis_result = self.character_designer.process(analysis_prompt, {})
 
-        # 解析JSON结果
-        import json
-        import re
+            # 解析JSON结果
+            import json
+            import re
 
-        json_match = re.search(r'\{[\s\S]*?"should_continue"[\s\S]*?\}', analysis_result)
-        should_continue = True
-        continue_reason = ""
+            json_match = re.search(r'\{[\s\S]*?"should_continue"[\s\S]*?\}', analysis_result)
+            should_continue = True
+            continue_reason = ""
 
-        if json_match:
-            try:
-                decision = json.loads(json_match.group())
-                should_continue = decision.get('should_continue', True)
-                continue_reason = decision.get('reason', '')
-                print(f"✅ AI决策：{'继续扩展' if should_continue else '停止扩展'}")
-                print(f"   原因：{continue_reason}")
-            except:
+            if json_match:
+                try:
+                    decision = json.loads(json_match.group())
+                    should_continue = decision.get('should_continue', True)
+                    continue_reason = decision.get('reason', '')
+                    print(f"✅ AI决策：{'继续扩展' if should_continue else '停止扩展'}")
+                    print(f"   原因：{continue_reason}")
+                except:
+                    print("⚠️  无法解析AI结果，默认继续扩展")
+            else:
                 print("⚠️  无法解析AI结果，默认继续扩展")
-        else:
-            print("⚠️  无法解析AI结果，默认继续扩展")
 
-        print(f"{'='*70}")
-        print(f"【渐进式人物扩展】本轮完成！")
-        print(f"{'='*70}\n")
+            print(f"{'='*70}")
+            print(f"【渐进式人物扩展】本轮完成！")
+            print(f"{'='*70}\n")
 
-        return {
-            "all_characters": integrated_characters,  # 🔥 返回整合后的人物体系
-            "character_relationships": relationships,  # 🔥 现在生成完整的关系网络
-            "role_distribution": distribution_dict,  # 🔥 现在生成角色分布
-            "current_character_count": target_count,
-            "should_continue": should_continue,
-            "continue_reason": continue_reason
-        }
+            return {
+                "all_characters": integrated_characters,  # 🔥 返回整合后的人物体系
+                "character_relationships": relationships,  # 🔥 现在生成完整的关系网络
+                "role_distribution": distribution_dict,  # 🔥 现在生成角色分布
+                "current_character_count": target_count,
+                "should_continue": should_continue,
+                "continue_reason": continue_reason
+            }
+        finally:
+            # 🔄 恢复原始 LLM
+            self.character_designer.llm = original_llm
 
 
 def create_outline_expander(knowledge_base: Optional[NovelKnowledgeBase] = None,

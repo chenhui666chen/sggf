@@ -25,6 +25,8 @@ interface OutputPreviewPanelProps {
   // 🆕 生成下一章的临时流式内容
   generateNextChapterStreamContent?: string
   isGeneratingNextChapter?: boolean
+  // 🆕 新增：进度消息（如“正在迭代第1/3轮...”）
+  progressMessage?: string
 }
 
 const stageTitles: Record<StageType, string> = {
@@ -48,6 +50,7 @@ export default function OutputPreviewPanel({
   finalVersionContent,
   generateNextChapterStreamContent = '',
   isGeneratingNextChapter = false,
+  progressMessage = '',  // 🆕 新增默认值
 }: OutputPreviewPanelProps) {
   // 根据当前阶段获取对应的内容
   const getContent = (): string => {
@@ -140,7 +143,7 @@ export default function OutputPreviewPanel({
             >
               <Typography variant="body2">
                 {isCurrentStageStreaming
-                  ? '等待内容生成...'
+                  ? (progressMessage || '等待内容生成...')  // 🆕 优先显示进度消息
                   : '暂无内容，请执行当前阶段生成内容'}
               </Typography>
             </Box>

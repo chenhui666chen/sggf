@@ -8,8 +8,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from .config import Config
 
 
-def create_deepseek_llm():
-    """创建DeepSeek LLM实例"""
+def create_deepseek_llm(task_type: str = "default"):
+    """创建LLM实例"""
     return ChatOpenAI(
         model_name=Config.MODEL_NAME or "deepseek-reasoner",
         temperature=Config.TEMPERATURE,

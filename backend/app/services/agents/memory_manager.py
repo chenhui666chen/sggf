@@ -13,8 +13,8 @@ import os
 from pathlib import Path
 
 
-def create_deepseek_llm():
-    """创建DeepSeek LLM实例"""
+def create_deepseek_llm(task_type: str = "default"):
+    """创建LLM实例"""
     return ChatOpenAI(  # type: ignore
         model_name=Config.MODEL_NAME,
         temperature=Config.TEMPERATURE,

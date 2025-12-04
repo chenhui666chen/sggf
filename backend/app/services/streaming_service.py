@@ -18,9 +18,14 @@ class StreamingService:
     """
     
     def __init__(self):
-        self.client = AsyncOpenAI(
+        self.deepseek_client = AsyncOpenAI(
             api_key=os.getenv("DEEPSEEK_API_KEY"),
             base_url=os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1")
+        )
+        # 阿里云百炼（DashScope）兼容端点，用于 qwen-* 模型
+        self.dashscope_client = AsyncOpenAI(
+            api_key=os.getenv("DASHSCOPE_API_KEY", os.getenv("DEEPSEEK_API_KEY")),
+            base_url=os.getenv("DASHSCOPE_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
         )
         self.default_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
     
@@ -61,13 +66,19 @@ class StreamingService:
                 
                 logger.info(f"🌊 开始流式生成 | 模型: {model} | 尝试: {attempt + 1}/{max_retries}")
                 
-                stream = await self.client.chat.completions.create(
+                # 根据模型类型设置超时时间：R1放宽到5分钟，其它模型120秒
+                request_timeout = 300.0 if str(model).startswith("deepseek-reasoner") else 120.0
+                
+                # 按模型选择正确的客户端（DeepSeek 或 DashScope）
+                client = self.dashscope_client if str(model).startswith("qwen") else self.deepseek_client
+                
+                stream = await client.chat.completions.create(
                     model=model,
                     messages=messages,  # type: ignore
                     temperature=temperature,
                     max_tokens=max_tokens,
                     stream=True,
-                    timeout=120.0,  # 🔧 添加120秒超时
+                    timeout=request_timeout,
                 )
                 
                 full_content = ""
@@ -150,6 +161,7 @@ class StreamingService:
         on_chunk: Callable[[str, int], Awaitable[None]],
         on_complete: Optional[Callable[[str, int], Awaitable[None]]] = None,
         temperature: float = 0.7,
+        model: Optional[str] = None,  # 🆕 支持自定义模型
     ) -> str:
         """
         流式生成章节内容
@@ -160,6 +172,7 @@ class StreamingService:
             on_chunk: 块回调
             on_complete: 完成回调
             temperature: 温度
+            model: 使用的模型（如果不指定则使用默认模型）
         
         Returns:
             完整的章节内容
@@ -174,6 +187,7 @@ class StreamingService:
             on_chunk=on_chunk,
             on_complete=on_complete,
             temperature=temperature,
+            model=model,  # 🆕 传递模型参数
         )
 
 

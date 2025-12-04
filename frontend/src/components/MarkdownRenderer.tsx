@@ -80,6 +80,8 @@ const markdownComponents: Components = {
         fontSize: '1rem',
         color: 'text.primary',
         textAlign: 'justify',
+        whiteSpace: 'pre-wrap',  // 🆕 确保换行符生效
+        wordBreak: 'break-word',  // 🆕 长单词自动换行
       }}
     >
       {children}
@@ -248,6 +250,10 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
   return (
     <Box
       sx={{
+        // 🆕 添加全局样式确保所有内容正确换行
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        overflowWrap: 'break-word',
         '& > *:first-of-type': {
           mt: 0,
         },

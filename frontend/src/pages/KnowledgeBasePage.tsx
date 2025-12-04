@@ -37,9 +37,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import FolderIcon from '@mui/icons-material/Folder'
 import ArticleIcon from '@mui/icons-material/Article'
-import DownloadIcon from '@mui/icons-material/Download'
-import HistoryIcon from '@mui/icons-material/History'
-import LinearProgress from '@mui/material/LinearProgress'
+import PeopleAltIcon from '@mui/icons-material/PeopleAlt'
 import Tooltip from '@mui/material/Tooltip'
 import { logger } from '@/utils/logger'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
@@ -149,12 +147,11 @@ export default function KnowledgeBasePage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
 
-  // 主 Tab 状态 (0=文本内容, 1=类型设定)
-  const [mainTabValue, setMainTabValue] = useState(1)
+  // 主 Tab 状态 (0=世界观设定, 1=人物设定, 2=剧情大纲, 3=类型设定)
+  const [mainTabValue, setMainTabValue] = useState(0)
 
   // ==================== 文本内容相关状态 ====================
-  const [textTabValue, setTextTabValue] = useState(0)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)  // 🔥 修复：初始值为false，避免页面初始时一直加载
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -179,7 +176,6 @@ export default function KnowledgeBasePage() {
   const [clearExistingSettings, setClearExistingSettings] = useState(false)
   const [applyingTemplate, setApplyingTemplate] = useState(false)
   const [loadingCollections, setLoadingCollections] = useState(false)
-  const [loadingItems, setLoadingItems] = useState(false)
 
   // 快速添加体系
   const [selectedCategoryToAdd, setSelectedCategoryToAdd] = useState<string>('')
@@ -207,23 +203,146 @@ export default function KnowledgeBasePage() {
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
 
   // ==================== 大纲扩展相关状态 ====================
-  const [showExpandOutlineDialog, setShowExpandOutlineDialog] = useState(false)
-  const [expandingOutline, setExpandingOutline] = useState(false)
-  const [expandedOutlineData, setExpandedOutlineData] = useState<any>(null)
-  const [currentChapterCount, setCurrentChapterCount] = useState(0)
+  const [expandingOutline, setExpandingOutline] = useState(false)  // 🆕 后台任务状态
   const [targetChapterCount, setTargetChapterCount] = useState<number>(100)
-  const [expansionProgress, setExpansionProgress] = useState(0)
-  const [expansionStartTime, setExpansionStartTime] = useState<number | null>(null)
-  const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState<number | null>(null)
-  const [editedExpansionContent, setEditedExpansionContent] = useState('')
-  const [isEditingExpansion, setIsEditingExpansion] = useState(false)
   const [outlineHistory, setOutlineHistory] = useState<Array<{timestamp: number, content: string, chapterCount: number}>>([])
   const [showHistoryDialog, setShowHistoryDialog] = useState(false)
+  
+  // 🆕 扩展结果对话框状态
+  const [showResultDialog, setShowResultDialog] = useState(false)
+  const [resultDialogData, setResultDialogData] = useState<any>(null)
+  const [resultDialogType, setResultDialogType] = useState<'outline' | 'characters'>('outline')
+
+  // ==================== 人物扩展相关状态 ====================
+  const [expandingCharacters, setExpandingCharacters] = useState(false)
+  const [targetCharacterCount, setTargetCharacterCount] = useState<number>(25)
 
   // ==================== 生命周期 ====================
 
+  // 🆕 页面加载时从localStorage恢复按钮状态
   useEffect(() => {
-    if (mainTabValue === 0) {
+    if (!projectId) return
+
+    const outlineKey = `expanding_outline_${projectId}`
+    const charactersKey = `expanding_characters_${projectId}`
+
+    const savedOutlineState = localStorage.getItem(outlineKey)
+    const savedCharactersState = localStorage.getItem(charactersKey)
+
+    if (savedOutlineState === 'true') {
+      setExpandingOutline(true)
+      console.log('🔄 恢复大纲扩展状态：进行中')
+    }
+
+    if (savedCharactersState === 'true') {
+      setExpandingCharacters(true)
+      console.log('🔄 恢复人物扩展状态：进行中')
+    }
+  }, [projectId])
+
+  // 🆕 WebSocket 监听后台任务（使用统一的WebSocket服务）
+  useEffect(() => {
+    if (!projectId) return
+
+    // 导入统一的 WebSocket 服务
+    import('@/services/websocket').then(({ workflowWebSocket }) => {
+      // 连接 WebSocket
+      workflowWebSocket.connect().then(() => {
+        workflowWebSocket.joinProject(parseInt(projectId))
+        console.log('🔗 WebSocket 连接已建立')
+      }).catch((error: any) => {
+        console.error('❌ WebSocket 连接失败:', error)
+      })
+
+      // 监听任务完成
+      workflowWebSocket.onTaskComplete((data: any) => {
+        console.log('✅ 收到任务完成:', data)
+        const taskId = data.task_id || ''
+        
+        // 大纲扩展完成
+        if (taskId.startsWith('expand-outline')) {
+          console.log('✅ 大纲扩展任务完成', data)
+          showSnackbar(data.message || '✅ 大纲扩展完成！', 'success')
+          
+          // 显示结果对话框
+          setResultDialogType('outline')
+          setResultDialogData(data.result)
+          setShowResultDialog(true)
+          
+          // 刷新数据
+          loadWorkflowData()
+          
+          // 清除扩展状态
+          setExpandingOutline(false)
+          // 🆕 清除localStorage状态
+          localStorage.removeItem(`expanding_outline_${projectId}`)
+        }
+        
+        // 人物扩展完成
+        if (taskId.startsWith('expand-characters')) {
+          console.log('✅ 人物扩展任务完成', data)
+          showSnackbar(data.message || '✅ 人物扩展完成！', 'success')
+          
+          // 显示结果对话框
+          setResultDialogType('characters')
+          setResultDialogData(data.result)
+          setShowResultDialog(true)
+          
+          // 刷新数据
+          loadWorkflowData()
+          
+          // 清除扩展状态
+          setExpandingCharacters(false)
+          // 🆕 清除localStorage状态
+          localStorage.removeItem(`expanding_characters_${projectId}`)
+        }
+      })
+
+      // 监听任务进度
+      workflowWebSocket.onTaskProgress((data: any) => {
+        const taskId = data.task_id || ''
+        const message = data.message || ''
+        
+        if (taskId.startsWith('expand-outline') || taskId.startsWith('expand-characters')) {
+          console.log(`🔄 ${message}`)
+          // 可以在这里显示进度条（可选）
+        }
+      })
+
+      // 监听任务错误
+      workflowWebSocket.onTaskError((data: any) => {
+        const taskId = data.task_id || ''
+        const error = data.error || '任务失败'
+        
+        if (taskId.startsWith('expand-outline')) {
+          showSnackbar(`❌ 大纲扩展失败: ${error}`, 'error')
+          setExpandingOutline(false)
+          // 🆕 清除localStorage状态
+          localStorage.removeItem(`expanding_outline_${projectId}`)
+        }
+        
+        if (taskId.startsWith('expand-characters')) {
+          showSnackbar(`❌ 人物扩展失败: ${error}`, 'error')
+          setExpandingCharacters(false)
+          // 🆕 清除localStorage状态
+          localStorage.removeItem(`expanding_characters_${projectId}`)
+        }
+      })
+    })
+
+    // 清理：组件卸载时移除监听器
+    return () => {
+      import('@/services/websocket').then(({ workflowWebSocket }) => {
+        // 只移除监听器，保持 WebSocket 连接（其他页面可能还在用）
+        workflowWebSocket.onTaskComplete(() => {})
+        workflowWebSocket.onTaskProgress(() => {})
+        workflowWebSocket.onTaskError(() => {})
+      })
+    }
+  }, [projectId])
+
+  useEffect(() => {
+    if (mainTabValue <= 2) {
       loadWorkflowData()
     } else {
       loadSettingCollections()
@@ -254,11 +373,18 @@ export default function KnowledgeBasePage() {
     setError(null)
 
     try {
+      // 🔥 添加10秒超时控制
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
+
       const response = await fetch(`/api/v1/workflow/${projectId}/all-stages-content`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
         },
+        signal: controller.signal,
       })
+
+      clearTimeout(timeoutId)
 
       if (response.ok) {
         const data = await response.json()
@@ -270,9 +396,14 @@ export default function KnowledgeBasePage() {
         const errorData = await response.json()
         setError(errorData.detail || '加载失败')
       }
-    } catch (err) {
-      logger.error('❌ 加载工作流数据失败:', err)
-      setError('加载失败，请重试')
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        logger.error('❌ 加载工作流数据超时')
+        setError('加载超时，请重试')
+      } else {
+        logger.error('❌ 加载工作流数据失败:', err)
+        setError('加载失败，请重试')
+      }
     } finally {
       setLoading(false)
     }
@@ -306,7 +437,7 @@ export default function KnowledgeBasePage() {
   }
 
   const getCurrentContent = (): string => {
-    switch (textTabValue) {
+    switch (mainTabValue) {
       case 0: return worldSetting
       case 1: return characters
       case 2: return plotOutline
@@ -315,7 +446,7 @@ export default function KnowledgeBasePage() {
   }
 
   const getCurrentStage = (): string => {
-    switch (textTabValue) {
+    switch (mainTabValue) {
       case 0: return 'world_builder'
       case 1: return 'character_designer'
       case 2: return 'structure'
@@ -353,7 +484,7 @@ export default function KnowledgeBasePage() {
       })
 
       if (response.ok) {
-        switch (textTabValue) {
+        switch (mainTabValue) {
           case 0: setWorldSetting(editedContent); break
           case 1: setCharacters(editedContent); break
           case 2: setPlotOutline(editedContent); break
@@ -374,7 +505,7 @@ export default function KnowledgeBasePage() {
   }
 
   const getTabTitle = (): string => {
-    switch (textTabValue) {
+    switch (mainTabValue) {
       case 0: return '世界观设定'
       case 1: return '人物设定'
       case 2: return '剧情大纲'
@@ -404,8 +535,6 @@ export default function KnowledgeBasePage() {
   }
 
   const loadSettingItems = async (collectionId: number) => {
-    setLoadingItems(true)
-
     try {
       const response = await apiClient.getSettingItems(collectionId)
       const items = response.data || []
@@ -418,8 +547,6 @@ export default function KnowledgeBasePage() {
     } catch (err) {
       logger.error('❌ 加载设定项失败:', err)
       showSnackbar('加载设定项失败', 'error')
-    } finally {
-      setLoadingItems(false)
     }
   }
 
@@ -639,54 +766,18 @@ export default function KnowledgeBasePage() {
 
   // ==================== 大纲扩展相关函数 ====================
 
-  // 计算进度
-  const calculateProgress = (current: number, total: number): number => {
-    return Math.min(Math.round((current / total) * 100), 100)
-  }
-
-  // 估算剩余时间
-  const estimateRemainingTime = (startTime: number, current: number, total: number): number => {
-    const elapsed = Date.now() - startTime
-    const avgTimePerIteration = elapsed / current
-    return Math.round(avgTimePerIteration * (total - current) / 1000)
-  }
-
-  // 格式化剩余时间
-  const formatRemainingTime = (seconds: number): string => {
-    if (seconds < 60) return `${seconds}秒`
-    const minutes = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${minutes}分${secs}秒`
-  }
-
-  // 保存历史
-  const saveHistory = (type: 'outline', content: string, chapterCount: number) => {
-    const key = `${type}_history`
-    const history = JSON.parse(localStorage.getItem(key) || '[]')
-    history.push({ timestamp: Date.now(), content, chapterCount })
-    // 只保留最近20条记录
-    if (history.length > 20) history.shift()
-    localStorage.setItem(key, JSON.stringify(history))
-  }
-
   // 获取历史
   const getHistory = (type: 'outline'): Array<{timestamp: number, content: string, chapterCount: number}> => {
     const key = `${type}_history`
     return JSON.parse(localStorage.getItem(key) || '[]')
   }
 
-  // 大纲扩展主函数
+  // 大纲扩展主函数（🆕 异步后台执行）
   const handleExpandOutline = async () => {
     if (!projectId) return
 
     try {
       setExpandingOutline(true)
-      setExpansionProgress(0)
-      setExpansionStartTime(Date.now())
-      setEstimatedTimeRemaining(null)
-      setShowExpandOutlineDialog(true)
-      setExpandedOutlineData(null)
-
       console.log('📖 开始渐进式扩展大纲...')
 
       // 从当前阶段获取数据
@@ -697,207 +788,115 @@ export default function KnowledgeBasePage() {
       if (!currentOutline) {
         showSnackbar('⚠️ 请先完成结构设计阶段，生成情节大纲', 'error')
         setExpandingOutline(false)
-        setShowExpandOutlineDialog(false)
         return
       }
 
-      let chapterCount = currentChapterCount
-      let shouldContinue = true
-      let totalIterations = 0
-      const maxIterations = 10
+      let chapterCount = 0
       const targetChapters = targetChapterCount && targetChapterCount > 0 ? targetChapterCount : 100
 
-      while (shouldContinue && totalIterations < maxIterations && chapterCount < targetChapters) {
-        totalIterations++
-        const remaining = targetChapters - chapterCount
-        if (remaining <= 0) break
+      // 🆕 启动后台任务（只调用一次，立即返回）
+      const increment = 10
+      const response = await fetch('/api/v1/workflow/expand-outline', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          project_id: parseInt(projectId),
+          current_outline: currentOutline,
+          world_setting: worldSettingData,
+          characters: charactersData,
+          current_chapter_count: chapterCount,
+          increment: increment,
+          target_total_chapters: targetChapters,
+        }),
+      })
 
-        let increment: number
-        const gapRatio = remaining / targetChapters
-
-        if (remaining <= 3) {
-          increment = remaining
-        } else if (targetChapters <= 40) {
-          increment = Math.min(5, remaining)
-        } else {
-          if (gapRatio > 0.6) {
-            increment = Math.min(15, Math.max(5, Math.round(remaining * 0.4)))
-          } else if (gapRatio > 0.3) {
-            increment = Math.min(10, Math.max(4, Math.round(remaining * 0.3)))
-          } else {
-            increment = Math.min(8, Math.max(3, Math.round(remaining * 0.2)))
-          }
-        }
-
-        increment = Math.max(1, Math.min(increment, remaining))
-
-        const progress = calculateProgress(totalIterations, maxIterations)
-        setExpansionProgress(progress)
-
-        if (expansionStartTime) {
-          const remainingTime = estimateRemainingTime(expansionStartTime, totalIterations, maxIterations)
-          setEstimatedTimeRemaining(remainingTime)
-        }
-
-        console.log(`🔄 第${totalIterations}次扩展：从 ${chapterCount} 章扩展 ${increment} 章（目标：${targetChapters} 章）... (进度: ${progress}%)`)
-
-        const response = await fetch('/api/v1/workflow/expand-outline', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            project_id: parseInt(projectId),
-            current_outline: currentOutline,
-            world_setting: worldSettingData,
-            characters: charactersData,
-            current_chapter_count: chapterCount,
-            increment: increment,
-            target_total_chapters: targetChapters,
-          }),
-        })
-
-        if (!response.ok) {
-          throw new Error(`扩展大纲失败: ${response.status}`)
-        }
-
-        const data = await response.json()
-        console.log(`✅ 第${totalIterations}次扩展完成，当前章节数: ${data.current_chapter_count}`)
-
-        currentOutline = data.expanded_outline
-        chapterCount = data.current_chapter_count
-        shouldContinue = data.should_continue
-
-        showSnackbar(`📝 已扩展到 ${chapterCount} 章${shouldContinue ? '，继续扩展...' : '，AI建议停止'}`, 'success')
-
-        if (!shouldContinue) {
-          console.log(`🛑 AI建议停止扩展：${data.continue_reason}`)
-          setExpandedOutlineData({
-            ...data,
-            stop_reason: data.continue_reason
-          })
-          break
-        }
-
-        setExpandedOutlineData(data)
+      if (!response.ok) {
+        throw new Error(`扩展大纲失败: ${response.status}`)
       }
 
-      console.log('💾 开始保存扩展结果...')
+      const data = await response.json()
+      console.log(`✅ 后台任务已启动，Task ID: ${data.task_id}`)
 
-      setPlotOutline(currentOutline)
-      setCurrentChapterCount(chapterCount)
+      // 🆕 保存到localStorage
+      localStorage.setItem(`expanding_outline_${projectId}`, 'true')
 
-      const historyRecord = {
-        timestamp: Date.now(),
-        content: currentOutline,
-        chapterCount: chapterCount
-      }
-      saveHistory('outline', currentOutline, chapterCount)
-      setOutlineHistory(prev => [...prev, historyRecord])
-
-      console.log('✅ 状态已更新')
-      setExpansionProgress(100)
-
-      showSnackbar(`✅ 大纲扩展完成！共 ${chapterCount} 章（${totalIterations}次扩展）`, 'success')
+      showSnackbar('📖 大纲扩展任务已启动，正在后台执行，你可以切换到其他页面', 'success')
+      
+      // ✅ 保持按钮禁用状态，直到WebSocket接收到任务完成消息
+      // setExpandingOutline(false) —— 已移除，由WebSocket监听器清除状态
+      
     } catch (error) {
       console.error('❌ 扩展大纲失败:', error)
       showSnackbar(`扩展大纲失败: ${error}`, 'error')
-    } finally {
       setExpandingOutline(false)
-      setExpansionProgress(0)
-      setEstimatedTimeRemaining(null)
     }
   }
 
-  // 开始编辑大纲
-  const handleStartEditOutline = () => {
-    setIsEditingExpansion(true)
-    setEditedExpansionContent(expandedOutlineData?.expanded_outline || '')
-  }
+  // 🆕 人物扩展主函数（异步后台执行）
+  const handleExpandCharacters = async () => {
+    if (!projectId) return
 
-  // 保存编辑的大纲
-  const handleSaveEditedOutline = () => {
-    setPlotOutline(editedExpansionContent)
-    setIsEditingExpansion(false)
+    try {
+      setExpandingCharacters(true)
+      console.log('👥 开始扩展人物...')
 
-    setExpandedOutlineData({
-      ...expandedOutlineData,
-      expanded_outline: editedExpansionContent
-    })
+      const mainCharacters = characters || ''
+      const worldSettingData = worldSetting || ''
+      const plotOutlineData = plotOutline || ''
 
-    const historyRecord = {
-      timestamp: Date.now(),
-      content: editedExpansionContent,
-      chapterCount: currentChapterCount
+      if (!mainCharacters) {
+        showSnackbar('⚠️ 请先完成人物设定', 'error')
+        setExpandingCharacters(false)
+        return
+      }
+
+      // 🆕 启动后台任务（立即返回）
+      const response = await fetch('/api/v1/workflow/expand-characters', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          project_id: parseInt(projectId),
+          main_characters: mainCharacters,
+          world_setting: worldSettingData,
+          plot_outline: plotOutlineData,
+          current_character_count: 0,
+          increment: 5,
+          target_total_characters: targetCharacterCount || 25,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`扩展人物失败: ${response.status}`)
+      }
+
+      const data = await response.json()
+      console.log('✅ 后台任务已启动:', data)
+
+      // 🆕 保存到localStorage
+      localStorage.setItem(`expanding_characters_${projectId}`, 'true')
+
+      showSnackbar('👥 人物扩展任务已启动，正在后台执行，你可以切换到其他页面', 'success')
+      
+      // ✅ 保持按钮禁用状态，直到WebSocket接收到任务完成消息
+      // setExpandingCharacters(false) —— 已移除，由WebSocket监听器清除状态
+      
+    } catch (error) {
+      console.error('❌ 扩展人物失败:', error)
+      showSnackbar(`扩展人物失败: ${error}`, 'error')
+      setExpandingCharacters(false)
     }
-    saveHistory('outline', editedExpansionContent, currentChapterCount)
-    setOutlineHistory(prev => [...prev, historyRecord])
-
-    showSnackbar('✅ 编辑已保存', 'success')
   }
-
-  // 导出 Markdown
-  const handleExportOutlineMarkdown = () => {
-    if (!expandedOutlineData) return
-
-    const markdown = `# 大纲扩展结果
-
-**章节数**: ${currentChapterCount}
-
-## 完整大纲
-
-${expandedOutlineData.expanded_outline || ''}
-`
-
-    const blob = new Blob([markdown], { type: 'text/markdown' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `大纲扩展_${currentChapterCount}章_${Date.now()}.md`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  }
-
-  // 导出 CSV
-  const handleExportChapterCSV = () => {
-    if (!expandedOutlineData?.chapter_breakdown) return
-
-    const csv = `章节号,标题,摘要\n${expandedOutlineData.chapter_breakdown}`
-
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `章节分解_${currentChapterCount}章_${Date.now()}.csv`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  }
-
-  // 查看历史
-  const handleShowHistory = () => {
-    setShowHistoryDialog(true)
-  }
-
-  // 组件格式化显示
-  const FormattedContent = ({ content, sx = {} }: { content: string, sx?: any }) => (
-    <Box sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', ...sx }}>
-      {content}
-    </Box>
-  )
 
   // ==================== 辅助函数 ====================
 
   const getCategoryDisplayName = (category: string): string => {
     return CATEGORY_NAME_MAP[category] || category
-  }
-
-  const getIndentForItem = (item: SettingItem): number => {
-    return ((item.depth || 1) - 1) * 24
   }
 
   const getAvailableCategoriesToAdd = (): string[] => {
@@ -948,7 +947,7 @@ ${expandedOutlineData.expanded_outline || ''}
           onClick={() => navigate('/dashboard')}
           sx={{ fontWeight: 500 }}
         >
-          ← 返回
+          返回
         </Button>
         <Typography variant="h5" sx={{
           fontWeight: 600,
@@ -956,7 +955,7 @@ ${expandedOutlineData.expanded_outline || ''}
           alignItems: 'center',
           gap: 1
         }}>
-          🌍 世界观设定文档
+          🌍 知识库
         </Typography>
       </Box>
 
@@ -973,175 +972,181 @@ ${expandedOutlineData.expanded_outline || ''}
             }
           }}
         >
-          <Tab label="📝 文本内容" />
+          <Tab label="🌍 世界观设定" />
+          <Tab label="👥 人物设定" />
+          <Tab label="📋 剧情大纲" />
           <Tab label="🎨 类型设定" />
         </Tabs>
       </Box>
 
-      {/* ==================== Tab 0: 文本内容 ==================== */}
-      <TabPanel value={mainTabValue} index={0}>
-        {loading && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-            <CircularProgress />
-          </Box>
-        )}
-
-        {error && (
-          <Alert severity="error" sx={{ mb: 3 }}>
-            {error}
-            <Button size="small" onClick={loadWorkflowData} sx={{ ml: 2 }}>
-              重试
-            </Button>
-          </Alert>
-        )}
-
-        {!loading && !error && (
-          <>
-            <Box sx={{
-              borderBottom: 1,
-              borderColor: 'divider',
-              mb: 2,
-              bgcolor: 'grey.50',
-              borderRadius: '8px 8px 0 0'
-            }}>
-              <Tabs
-                value={textTabValue}
-                onChange={(_, newValue) => {
-                  if (isEditing) {
-                    setIsEditing(false)
-                    setEditedContent('')
-                  }
-                  setTextTabValue(newValue)
-                }}
-                sx={{
-                  '& .MuiTab-root': {
-                    fontWeight: 500,
-                    fontSize: '0.95rem',
-                    minHeight: 56,
-                  }
-                }}
-              >
-                <Tab icon={<span style={{ marginRight: 8 }}>🌍</span>} iconPosition="start" label="世界观设定" />
-                <Tab icon={<span style={{ marginRight: 8 }}>👥</span>} iconPosition="start" label="人物设定" />
-                <Tab icon={<span style={{ marginRight: 8 }}>📋</span>} iconPosition="start" label="剧情大纲" />
-              </Tabs>
+      {/* ==================== Tab 0-2: 世界观/人物/大纲 ==================== */}
+      {mainTabValue <= 2 && (
+        <Box>
+          {loading && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+              <CircularProgress />
             </Box>
+          )}
 
-            <Alert severity="info" sx={{ mb: 3 }}>
-              📖 此页面展示工作流生成的设定数据，编辑后将同步到工作流中
+          {error && (
+            <Alert severity="error" sx={{ mb: 3 }}>
+              {error}
+              <Button size="small" onClick={loadWorkflowData} sx={{ ml: 2 }}>
+                重试
+              </Button>
             </Alert>
+          )}
 
-            <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
-              {!isEditing ? (
-                <>
-                  <Button
-                    variant="contained"
-                    startIcon={<EditIcon />}
-                    onClick={handleStartEdit}
-                    disabled={!getCurrentContent()}
-                    sx={{ borderRadius: 2 }}
-                  >
-                    编辑{getTabTitle()}
-                  </Button>
-                  
-                  {/* 只在剧情大纲Tab显示扩展按钮 */}
-                  {textTabValue === 2 && (
-                    <>
-                      <TextField
-                        label="目标章节数"
-                        type="number"
-                        size="small"
-                        value={targetChapterCount}
-                        onChange={(e) => {
-                          const value = parseInt(e.target.value, 10)
-                          setTargetChapterCount(Number.isNaN(value) ? 0 : value)
-                        }}
-                        inputProps={{ min: 1 }}
-                        sx={{ width: 150 }}
-                      />
-                      <Tooltip
-                        title={expandingOutline ? "扩展进行中，请稍候" : "根据当前的世界观、人物和剧情大纲，智能扩展为更详细的多章节大纲"}
-                        placement="top"
-                        arrow
-                      >
-                        <span>
-                          <Button
-                            variant="outlined"
-                            color="primary"
-                            startIcon={expandingOutline ? <CircularProgress size={20} /> : <ArticleIcon />}
-                            onClick={handleExpandOutline}
-                            disabled={!plotOutline || !worldSetting || !characters || expandingOutline}
-                            sx={{ borderRadius: 2 }}
-                          >
-                            {expandingOutline ? '扩展中...' : `📖 扩展大纲${currentChapterCount > 0 ? `(当前${currentChapterCount}章)` : ''}`}
-                          </Button>
-                        </span>
-                      </Tooltip>
-                    </>
-                  )}
-                </>
-              ) : (
-                <>
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    startIcon={saving ? <CircularProgress size={20} /> : <SaveIcon />}
-                    onClick={handleSaveEdit}
-                    disabled={saving}
-                    sx={{ borderRadius: 2 }}
-                  >
-                    {saving ? '保存中...' : '保存'}
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    onClick={handleCancelEdit}
-                    disabled={saving}
-                    sx={{ borderRadius: 2 }}
-                  >
-                    取消
-                  </Button>
-                </>
-              )}
-            </Box>
+          {!loading && !error && (
+            <>
+              <Alert severity="info" sx={{ mb: 3 }}>
+                📖 此页面展示工作流生成的设定数据，编辑后将同步到工作流中
+              </Alert>
 
-            {[0, 1, 2].map(index => (
-              <TabPanel key={index} value={textTabValue} index={index}>
-                {isEditing ? (
-                  <VditorEditor
-                    value={editedContent}
-                    onChange={(val) => setEditedContent(val)}
-                    placeholder={`${getTabTitle()}内容（支持 Markdown 格式）...`}
-                    height={500}
-                  />
-                ) : (
-                  <Paper
-                    elevation={0}
-                    sx={{
-                      bgcolor: 'background.paper',
-                      p: 4,
-                      borderRadius: 2,
-                      minHeight: 400,
-                      border: '1px solid',
-                      borderColor: 'grey.200',
-                    }}
-                  >
-                    {getCurrentContent() ? (
-                      <MarkdownRenderer content={getCurrentContent()} />
-                    ) : (
-                      <Typography color="text.secondary" sx={{ textAlign: 'center', py: 8 }}>
-                        📭 暂无{getTabTitle()}，请先在工作流中生成
-                      </Typography>
+              <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
+                {!isEditing ? (
+                  <>
+                    <Button
+                      variant="contained"
+                      startIcon={<EditIcon />}
+                      onClick={handleStartEdit}
+                      disabled={!getCurrentContent() || expandingCharacters || expandingOutline}
+                      sx={{ borderRadius: 2 }}
+                    >
+                      编辑{getTabTitle()}
+                    </Button>
+                    
+                    {/* 在人物设定 Tab 显示扩展按钮 */}
+                    {mainTabValue === 1 && (
+                      <>
+                        <TextField
+                          label="目标人物数"
+                          type="number"
+                          size="small"
+                          value={targetCharacterCount}
+                          onChange={(e) => {
+                            const value = parseInt(e.target.value, 10)
+                            setTargetCharacterCount(Number.isNaN(value) ? 0 : value)
+                          }}
+                          inputProps={{ min: 1 }}
+                          sx={{ width: 150 }}
+                        />
+                        <Tooltip
+                          title={expandingCharacters ? "扩展进行中，请稍候" : "根据当前的世界观、人物和剧情大纲，智能扩展更多人物"}
+                          placement="top"
+                          arrow
+                        >
+                          <span>
+                            <Button
+                              variant="outlined"
+                              color="primary"
+                              startIcon={expandingCharacters ? <CircularProgress size={20} /> : <PeopleAltIcon />}
+                              onClick={handleExpandCharacters}
+                              disabled={!characters || !worldSetting || !plotOutline || expandingCharacters || expandingOutline || isEditing}
+                              sx={{ borderRadius: 2 }}
+                            >
+                              {expandingCharacters ? '扩展中...' : '扩展人物'}
+                            </Button>
+                          </span>
+                        </Tooltip>
+                      </>
                     )}
-                  </Paper>
+                    
+                    {/* 只在剧情大纲Tab显示扩展按钮 */}
+                    {mainTabValue === 2 && (
+                      <>
+                        <TextField
+                          label="目标章节数"
+                          type="number"
+                          size="small"
+                          value={targetChapterCount}
+                          onChange={(e) => {
+                            const value = parseInt(e.target.value, 10)
+                            setTargetChapterCount(Number.isNaN(value) ? 0 : value)
+                          }}
+                          inputProps={{ min: 1 }}
+                          sx={{ width: 150 }}
+                        />
+                        <Tooltip
+                          title={expandingOutline ? "扩展进行中，请稍候" : "根据当前的世界观、人物和剧情大纲，智能扩展为更详细的多章节大纲"}
+                          placement="top"
+                          arrow
+                        >
+                          <span>
+                            <Button
+                              variant="outlined"
+                              color="primary"
+                              startIcon={expandingOutline ? <CircularProgress size={20} /> : <ArticleIcon />}
+                              onClick={handleExpandOutline}
+                              disabled={!plotOutline || !worldSetting || !characters || expandingOutline || expandingCharacters || isEditing}
+                              sx={{ borderRadius: 2 }}
+                            >
+                              {expandingOutline ? '扩展中...' : '扩展大纲'}
+                            </Button>
+                          </span>
+                        </Tooltip>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      startIcon={saving ? <CircularProgress size={20} /> : <SaveIcon />}
+                      onClick={handleSaveEdit}
+                      disabled={saving}
+                      sx={{ borderRadius: 2 }}
+                    >
+                      {saving ? '保存中...' : '保存'}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      onClick={handleCancelEdit}
+                      disabled={saving}
+                      sx={{ borderRadius: 2 }}
+                    >
+                      取消
+                    </Button>
+                  </>
                 )}
-              </TabPanel>
-            ))}
-          </>
-        )}
-      </TabPanel>
+              </Box>
 
-      {/* ==================== Tab 1: 类型设定 ==================== */}
-      <TabPanel value={mainTabValue} index={1}>
+              {isEditing ? (
+                <VditorEditor
+                  value={editedContent}
+                  onChange={(val) => setEditedContent(val)}
+                  placeholder={`${getTabTitle()}内容（支持 Markdown 格式）...`}
+                  height={500}
+                />
+              ) : (
+                <Paper
+                  elevation={0}
+                  sx={{
+                    bgcolor: 'background.paper',
+                    p: 4,
+                    borderRadius: 2,
+                    minHeight: 400,
+                    border: '1px solid',
+                    borderColor: 'grey.200',
+                  }}
+                >
+                  {getCurrentContent() ? (
+                    <MarkdownRenderer content={getCurrentContent()} />
+                  ) : (
+                    <Typography color="text.secondary" sx={{ textAlign: 'center', py: 8 }}>
+                      📭 暂无{getTabTitle()}，请先在工作流中生成
+                    </Typography>
+                  )}
+                </Paper>
+              )}
+            </>
+          )}
+        </Box>
+      )}
+
+      {/* ==================== Tab 3: 类型设定 ==================== */}
+      <TabPanel value={mainTabValue} index={3}>
         <Grid container spacing={3}>
           {/* 左侧：设定集合列表 */}
           <Grid item xs={12} md={4}>
@@ -1625,234 +1630,6 @@ ${expandedOutlineData.expanded_outline || ''}
         </DialogActions>
       </Dialog>
 
-      {/* 大纲扩展结果对话框 - 非模态，允许操作其他内容 */}
-      <Dialog 
-        open={showExpandOutlineDialog} 
-        onClose={() => !expandingOutline && setShowExpandOutlineDialog(false)}
-        disableEscapeKeyDown={expandingOutline}
-        hideBackdrop={false}
-        slotProps={{
-          backdrop: {
-            sx: {
-              backgroundColor: 'rgba(0, 0, 0, 0.2)',
-              pointerEvents: 'none',
-            }
-          }
-        }}
-        PaperProps={{
-          sx: {
-            position: 'fixed',
-            bottom: 20,
-            right: 20,
-            top: 'auto',
-            left: 'auto',
-            m: 0,
-            maxHeight: '70vh',
-            width: '600px',
-            maxWidth: '90vw',
-          }
-        }}
-        sx={{
-          '& .MuiDialog-container': {
-            alignItems: 'flex-end',
-            justifyContent: 'flex-end',
-            pointerEvents: 'none',
-          },
-        }}
-      >
-        <DialogTitle>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Box>
-              <Typography variant="h6">
-                📖 扩展大纲结果 - 已扩展至{currentChapterCount}章
-              </Typography>
-              {!expandingOutline && (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
-                  <TextField
-                    label="目标章节数"
-                    type="number"
-                    size="small"
-                    value={targetChapterCount}
-                    onChange={(e) => {
-                      const value = parseInt(e.target.value, 10)
-                      setTargetChapterCount(Number.isNaN(value) ? 0 : value)
-                    }}
-                    inputProps={{ min: 1 }}
-                    sx={{ width: 150 }}
-                  />
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    onClick={handleExpandOutline}
-                    disabled={expandingOutline}
-                    startIcon={<ArticleIcon />}
-                  >
-                    继续扩展
-                  </Button>
-                </Box>
-              )}
-            </Box>
-            <Box sx={{ display: 'flex', gap: 1 }}>
-              <Tooltip title={expandingOutline ? "扩展进行中，请稍候" : "编辑大纲"}>
-                <span>
-                  <IconButton
-                    onClick={handleStartEditOutline}
-                    color="primary"
-                    disabled={expandingOutline || !expandedOutlineData}
-                  >
-                    <EditIcon />
-                  </IconButton>
-                </span>
-              </Tooltip>
-              <Tooltip title={expandingOutline ? "扩展进行中，请稍候" : "导出 Markdown"}>
-                <span>
-                  <IconButton
-                    onClick={handleExportOutlineMarkdown}
-                    color="primary"
-                    disabled={expandingOutline || !expandedOutlineData}
-                  >
-                    <DownloadIcon />
-                  </IconButton>
-                </span>
-              </Tooltip>
-              <Tooltip title={expandingOutline ? "扩展进行中，请稍候" : "导出 CSV"}>
-                <span>
-                  <IconButton
-                    onClick={handleExportChapterCSV}
-                    color="primary"
-                    disabled={expandingOutline || !expandedOutlineData?.chapter_breakdown}
-                  >
-                    <DownloadIcon />
-                  </IconButton>
-                </span>
-              </Tooltip>
-              <Tooltip title="查看历史">
-                <IconButton
-                  onClick={handleShowHistory}
-                  color="primary"
-                >
-                  <HistoryIcon />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          </Box>
-        </DialogTitle>
-        <DialogContent dividers>
-          {/* 进度条 */}
-          {expandingOutline && (
-            <Box sx={{ mb: 3 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                <Typography variant="body2" color="text.secondary">
-                  扩展进度：{expansionProgress}%
-                </Typography>
-                {estimatedTimeRemaining !== null && estimatedTimeRemaining > 0 && (
-                  <Typography variant="body2" color="text.secondary">
-                    预计剩余时间：{formatRemainingTime(estimatedTimeRemaining)}
-                  </Typography>
-                )}
-              </Box>
-              <LinearProgress variant="determinate" value={expansionProgress} sx={{ height: 8, borderRadius: 1 }} />
-              <Box sx={{ mt: 3, textAlign: 'center', py: 4 }}>
-                <CircularProgress size={60} />
-                <Typography variant="h6" sx={{ mt: 2, color: 'text.secondary' }}>
-                  🚀 正在扩展大纲...
-                </Typography>
-                <Typography variant="body2" sx={{ mt: 1, color: 'text.disabled' }}>
-                  AI正在生成章节内容，请耐心等待
-                </Typography>
-              </Box>
-            </Box>
-          )}
-
-          {/* 扩展结果 */}
-          {!expandingOutline && expandedOutlineData && (
-            <Box>
-              {/* 完整大纲 */}
-              <Paper elevation={2} sx={{ p: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-                    📝 完整扩展大纲
-                  </Typography>
-                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                    <Typography variant="caption" color="text.secondary">
-                      {expandedOutlineData.expanded_outline?.length || 0} 字
-                    </Typography>
-                    <Button
-                      size="small"
-                      onClick={() => {
-                        navigator.clipboard.writeText(expandedOutlineData.expanded_outline || '');
-                        showSnackbar('✅ 已复制到剪贴板', 'success');
-                      }}
-                    >
-                      📋 复制
-                    </Button>
-                  </Box>
-                </Box>
-
-                {isEditingExpansion ? (
-                  <Box>
-                    <TextField
-                      fullWidth
-                      multiline
-                      minRows={12}
-                      maxRows={20}
-                      value={editedExpansionContent}
-                      onChange={(e) => setEditedExpansionContent(e.target.value)}
-                      sx={{ mb: 2 }}
-                    />
-                    <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
-                      <Button
-                        onClick={() => {
-                          setIsEditingExpansion(false);
-                          setEditedExpansionContent(expandedOutlineData?.expanded_outline || '');
-                        }}
-                        size="small"
-                        disabled={expandingOutline}
-                      >
-                        取消
-                      </Button>
-                      <Button
-                        variant="contained"
-                        onClick={handleSaveEditedOutline}
-                        size="small"
-                        startIcon={<SaveIcon />}
-                        disabled={expandingOutline}
-                      >
-                        保存编辑
-                      </Button>
-                    </Box>
-                  </Box>
-                ) : (
-                  <Box sx={{
-                    bgcolor: 'background.default',
-                    p: 2,
-                    borderRadius: 1,
-                    maxHeight: 400,
-                    overflow: 'auto',
-                    border: '1px solid',
-                    borderColor: 'divider'
-                  }}>
-                    <FormattedContent
-                      content={expandedOutlineData.expanded_outline || '大纲内容为空'}
-                      sx={{ fontSize: '0.9rem' }}
-                    />
-                  </Box>
-                )}
-              </Paper>
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button
-            variant="contained"
-            onClick={() => setShowExpandOutlineDialog(false)}
-            disabled={expandingOutline}
-          >
-            关闭
-          </Button>
-        </DialogActions>
-      </Dialog>
-
       {/* 历史版本对话框 */}
       <Dialog 
         open={showHistoryDialog} 
@@ -1874,7 +1651,7 @@ ${expandedOutlineData.expanded_outline || ''}
                     {new Date(record.timestamp).toLocaleString()} - {record.chapterCount}章
                   </Typography>
                   <Typography variant="body2" sx={{ mt: 1, whiteSpace: 'pre-wrap' }}>
-                    {record.content.substring(0, 200)}...
+                    {(record.content || '').substring(0, 200)}...
                   </Typography>
                 </ListItem>
               ))}
@@ -1883,6 +1660,128 @@ ${expandedOutlineData.expanded_outline || ''}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowHistoryDialog(false)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 🆕 扩展结果对话框 */}
+      <Dialog 
+        open={showResultDialog} 
+        onClose={() => setShowResultDialog(false)}
+        maxWidth="md" 
+        fullWidth
+      >
+        <DialogTitle>
+          {resultDialogType === 'outline' ? '📖 大纲扩展结果' : '👥 人物扩展结果'}
+        </DialogTitle>
+        <DialogContent dividers>
+          {resultDialogData && (
+            <Box>
+              {/* 基本信息 */}
+              <Paper elevation={2} sx={{ p: 2, mb: 2, bgcolor: 'primary.50' }}>
+                <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                  {resultDialogType === 'outline' ? (
+                    <>
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">当前章节数</Typography>
+                        <Typography variant="h4" color="primary.main" sx={{ fontWeight: 'bold' }}>
+                          {resultDialogData.current_chapter_count || 0}
+                        </Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">字数</Typography>
+                        <Typography variant="h6" color="text.primary">
+                          {resultDialogData.expanded_outline?.length || 0}
+                        </Typography>
+                      </Box>
+                    </>
+                  ) : (
+                    <>
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">当前人物数</Typography>
+                        <Typography variant="h4" color="primary.main" sx={{ fontWeight: 'bold' }}>
+                          {resultDialogData.current_character_count || 0}
+                        </Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">字数</Typography>
+                        <Typography variant="h6" color="text.primary">
+                          {resultDialogData.all_characters?.length || 0}
+                        </Typography>
+                      </Box>
+                      {resultDialogData.character_sync && (
+                        <Box>
+                          <Typography variant="caption" color="text.secondary">同步结果</Typography>
+                          <Typography variant="body2" color="text.primary">
+                            解析{resultDialogData.character_sync.parsed}个 • 
+                            创建{resultDialogData.character_sync.created}个 • 
+                            更新{resultDialogData.character_sync.updated}个
+                          </Typography>
+                        </Box>
+                      )}
+                    </>
+                  )}
+                </Box>
+                
+                {resultDialogData.should_continue && (
+                  <Box sx={{ mt: 2, p: 1.5, bgcolor: 'warning.50', borderRadius: 1, border: '1px solid', borderColor: 'warning.200' }}>
+                    <Typography variant="body2" color="warning.dark">
+                      💡 AI建议：{resultDialogData.continue_reason || '可以继续扩展以丰富内容'}
+                    </Typography>
+                  </Box>
+                )}
+              </Paper>
+
+              {/* 内容预览 */}
+              <Paper elevation={1} sx={{ p: 2 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+                    📝 内容预览
+                  </Typography>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      const content = resultDialogType === 'outline' 
+                        ? resultDialogData.expanded_outline 
+                        : resultDialogData.all_characters;
+                      navigator.clipboard.writeText(content || '');
+                      showSnackbar('✅ 已复制到剪贴板', 'success');
+                    }}
+                  >
+                    📋 复制全部
+                  </Button>
+                </Box>
+                <Box sx={{
+                  maxHeight: 400,
+                  overflow: 'auto',
+                  p: 2,
+                  bgcolor: 'background.default',
+                  borderRadius: 1,
+                  border: '1px solid',
+                  borderColor: 'divider'
+                }}>
+                  <Typography 
+                    component="pre" 
+                    sx={{ 
+                      whiteSpace: 'pre-wrap', 
+                      wordBreak: 'break-word',
+                      fontFamily: 'inherit',
+                      margin: 0
+                    }}
+                  >
+                    {resultDialogType === 'outline' 
+                      ? (resultDialogData.expanded_outline || '内容为空')
+                      : (resultDialogData.all_characters || '内容为空')
+                    }
+                  </Typography>
+                </Box>
+              </Paper>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowResultDialog(false)} variant="contained">
+            关闭
+          </Button>
         </DialogActions>
       </Dialog>
 

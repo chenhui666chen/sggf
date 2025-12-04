@@ -16,27 +16,20 @@ from .quality_assessment import (
 from .context_aware_optimizer import ContextAwareOptimizer
 
 
-def create_deepseek_llm():  # type: ignore
-    """创建DeepSeek LLM实例"""
-    return ChatOpenAI(  # type: ignore
-        model_name=Config.MODEL_NAME or "deepseek-reasoner",
-        temperature=Config.TEMPERATURE,
-        openai_api_key=Config.DEEPSEEK_API_KEY or "",
-        openai_api_base=Config.DEEPSEEK_API_BASE or "https://api.deepseek.com/v1"
-    )
+from .llm_singleton import create_deepseek_llm
 
 
 class BaseAgent(ABC):
     """所有Agent的基类"""
     
     def __init__(self, name: str, role: str, knowledge_base: Optional[NovelKnowledgeBase] = None,
-                 memory_manager: Optional[NovelMemoryManager] = None):
+                 memory_manager: Optional[NovelMemoryManager] = None, task_type: str = "default"):
         """初始化Agent"""
         Config.validate()
 
         self.name = name
         self.role = role
-        self.llm = create_deepseek_llm()
+        self.llm = create_deepseek_llm(task_type=task_type)
         
         self.knowledge_base = knowledge_base or NovelKnowledgeBase()
         self.memory_manager = memory_manager or NovelMemoryManager()
@@ -148,7 +141,7 @@ class WorldArchitectAgent(BaseAgent):
 
     def __init__(self, knowledge_base: Optional[NovelKnowledgeBase] = None,
                  memory_manager: Optional[NovelMemoryManager] = None):
-        super().__init__("世界观架构师", "world_architect", knowledge_base, memory_manager)
+        super().__init__("世界观架构师", "world_architect", knowledge_base, memory_manager, task_type="worldview")
 
     def get_system_prompt(self) -> str:
         return """你是一位杰出的世界观架构师，精通社会科学、物理规则、历史学和地理学。
@@ -166,7 +159,7 @@ class CharacterDesignerAgent(BaseAgent):
 
     def __init__(self, knowledge_base: Optional[NovelKnowledgeBase] = None,
                  memory_manager: Optional[NovelMemoryManager] = None):
-        super().__init__("人物设计师", "character_designer", knowledge_base, memory_manager)
+        super().__init__("人物设计师", "character_designer", knowledge_base, memory_manager, task_type="character")
 
     def get_system_prompt(self) -> str:
         return """你是一位杰出的人物设计师，精通心理学、性格塑造和人物发展。
@@ -184,7 +177,7 @@ class CreativeDirectorAgent(BaseAgent):
 
     def __init__(self, knowledge_base: Optional[NovelKnowledgeBase] = None,
                  memory_manager: Optional[NovelMemoryManager] = None):
-        super().__init__("创意总监", "creative_director", knowledge_base, memory_manager)
+        super().__init__("创意总监", "creative_director", knowledge_base, memory_manager, task_type="concept")
 
     def get_system_prompt(self) -> str:
         return """你是一位杰出的创意总监，负责整体创作方向把控与工作流程协调。
@@ -202,7 +195,7 @@ class PlotArchitectAgent(BaseAgent):
 
     def __init__(self, knowledge_base: Optional[NovelKnowledgeBase] = None,
                  memory_manager: Optional[NovelMemoryManager] = None):
-        super().__init__("情节架构师", "plot_architect", knowledge_base, memory_manager)
+        super().__init__("情节架构师", "plot_architect", knowledge_base, memory_manager, task_type="outline")
 
     def get_system_prompt(self) -> str:
         return """你是一位杰出的情节架构师，精通叙事学、故事结构和戏剧冲突。
@@ -220,7 +213,7 @@ class ContentCreatorAgent(BaseAgent):
 
     def __init__(self, knowledge_base: Optional[NovelKnowledgeBase] = None,
                  memory_manager: Optional[NovelMemoryManager] = None):
-        super().__init__("内容创作师", "content_creator", knowledge_base, memory_manager)
+        super().__init__("内容创作师", "content_creator", knowledge_base, memory_manager, task_type="chapter")
         # 初始化上下文感知优化器 - 确保传递实际的实例而非None
         self.context_optimizer = ContextAwareOptimizer(
             self.memory_manager,  # 使用已初始化的实例
@@ -331,7 +324,7 @@ class QualityReviewerAgent(BaseAgent):
 
     def __init__(self, knowledge_base: Optional[NovelKnowledgeBase] = None,
                  memory_manager: Optional[NovelMemoryManager] = None):
-        super().__init__("质量评审官", "quality_reviewer", knowledge_base, memory_manager)
+        super().__init__("质量评审官", "quality_reviewer", knowledge_base, memory_manager, task_type="review")
         self.assessment_framework = QualityAssessmentFramework()
 
     def get_system_prompt(self) -> str:

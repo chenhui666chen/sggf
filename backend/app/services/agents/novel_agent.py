@@ -10,14 +10,7 @@ from .knowledge_base import NovelKnowledgeBase
 from .memory_manager import NovelMemoryManager
 
 
-def create_deepseek_llm():
-    """创建DeepSeek LLM实例"""
-    return ChatOpenAI(  # type: ignore
-        model_name=Config.MODEL_NAME,
-        temperature=Config.TEMPERATURE,
-        openai_api_key=Config.DEEPSEEK_API_KEY,
-        openai_api_base=Config.DEEPSEEK_API_BASE
-    )
+from .llm_singleton import create_deepseek_llm
 
 
 class NovelWritingAgent:

@@ -9,13 +9,32 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from .config import Config
 
 
-def create_deepseek_llm():
-    """创建DeepSeek LLM实例"""
+def create_deepseek_llm(task_type: str = "default"):
+    """创建LLM实例 - 根据任务类型选择模型"""
+    import os
+    import logging
+    
+    task_model_mapping = {
+        "ai_trace": "qwen-max",
+        "default": Config.MODEL_NAME or "deepseek-reasoner",
+    }
+    
+    selected_model = task_model_mapping.get(task_type, Config.MODEL_NAME or "deepseek-reasoner")
+    
+    if selected_model.startswith("qwen"):
+        api_key = os.getenv("DASHSCOPE_API_KEY", Config.DEEPSEEK_API_KEY or "")
+        api_base = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    else:
+        api_key = Config.DEEPSEEK_API_KEY or ""
+        api_base = Config.DEEPSEEK_API_BASE or "https://api.deepseek.com/v1"
+    
+    logging.info(f"🤖 [AI痕迹处理] 任务类型={task_type} → 模型={selected_model}")
+    
     return ChatOpenAI(
-        model_name=Config.MODEL_NAME or "deepseek-reasoner",
+        model_name=selected_model,
         temperature=Config.TEMPERATURE,
-        openai_api_key=Config.DEEPSEEK_API_KEY or "",
-        openai_api_base=Config.DEEPSEEK_API_BASE or "https://api.deepseek.com/v1"
+        openai_api_key=api_key,
+        openai_api_base=api_base
     )
 
 

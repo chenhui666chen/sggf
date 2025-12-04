@@ -164,6 +164,17 @@ class WorkflowWebSocketManager:
         }
         await WorkflowWebSocketManager.broadcast_to_project(project_id, 'stream_end', data)
 
+    @staticmethod
+    async def send_model_used(project_id: int, stage: str, model: str, extra: dict | None = None):
+        """🆕 发送模型使用信息到前端控制台"""
+        data = {
+            'project_id': project_id,
+            'stage': stage,
+            'model': model,
+            'extra': extra or {},
+        }
+        await WorkflowWebSocketManager.broadcast_to_project(project_id, 'model_used', data)
+
 
 # Socket.IO 事件处理器
 @sio.event

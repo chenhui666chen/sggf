@@ -16,7 +16,8 @@ from .test_samples import TestSample
 from .novel_rules import (
     preprocess_text, postprocess_text, ALL_FORBIDDEN_WORDS,
     calculate_text_metrics, compare_metrics, TextMetrics,
-    calculate_multi_dimension_score, MultiDimensionScore
+    calculate_multi_dimension_score, MultiDimensionScore,
+    _calculate_fidelity_score  # 🆕 新增：保真度计算函数
 )
 
 logger = logging.getLogger(__name__)
@@ -132,14 +133,19 @@ class PromptEvaluator:
                 print(f"   📈 改写指标: {rewritten_metrics.to_summary()}")
                 print(f"   📈 指标变化: {metrics_comparison}")
 
-                # 🆕 6. 计算多维评分（含可读性）
+                # 🆕 6. 计算多维评分（含可读性 + 保真度）
                 # 🔧 传入AI检测分数，应用AI率软性约束
                 original_multi_score = calculate_multi_dimension_score(
                     sample.text, original_metrics, ai_score=original_score
                 )
+                # 🆕 改写后评分：需要计算保真度（与原文的相似度）
                 rewritten_multi_score = calculate_multi_dimension_score(
                     rewritten, rewritten_metrics, ai_score=rewritten_score
                 )
+                # 🆕 计算保真度得分（越低越好，表示改动越小）
+                fidelity_score = _calculate_fidelity_score(sample.text, rewritten)
+                rewritten_multi_score.fidelity_score = fidelity_score
+                rewritten_multi_score.details["fidelity"] = f"相似度{100-fidelity_score:.0f}%"
 
                 print(f"   🎯 原文多维评分: {original_multi_score.to_summary()}", flush=True)
                 print(f"   🎯 改写多维评分: {rewritten_multi_score.to_summary()}", flush=True)

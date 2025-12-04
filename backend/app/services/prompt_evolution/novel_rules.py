@@ -663,30 +663,35 @@ class MultiDimensionScore:
 
     def to_summary(self) -> str:
         warning_mark = "⚠️" if self.readability_warnings else ""
+        # 🆕 添加保真度显示（如果不是默认值50）
+        fidelity_display = f" 保真:{self.fidelity_score:.0f}" if self.fidelity_score != 50 else ""
         return (f"词汇:{self.vocabulary_score:.0f} 句式:{self.sentence_score:.0f} "
                 f"标点:{self.punctuation_score:.0f} 情感:{self.emotion_score:.0f} "
                 f"对话:{self.dialogue_score:.0f} 结构:{self.structure_score:.0f} "
-                f"文笔:{self.writing_score:.0f} 可读性:{self.readability_score:.0f}{warning_mark} "
+                f"文笔:{self.writing_score:.0f} 可读性:{self.readability_score:.0f}{warning_mark}{fidelity_display} "
                 f"→ 综合:{self.overall_score:.0f}")
 
 
 # 🆕 多维评分默认权重（可配置）
-# 🔧 调整后：AI检测维度权重（总和0.45）+ 文笔（0.20）+ 可读性（0.35）= 1.0
+# 🆕 调整后：AI检测维度权重（总和0.40）+ 文笔（0.15）+ 可读性（0.25）+ 保真度（0.20）= 1.0
 # 调整理由：
 #   1. 降低AI检测权重，避免过度追求低AI率而牺牲内容质量
 #   2. 提升可读性权重，更好地保护文本的流畅性和易读性
-#   3. 提升文笔权重，保持文学美感，避免机械化改写
+#   3. 新增保真度维度，优先选择改动最小的效果
+#   4. 适度降低文笔权重，为保真度让路u，保持原文风格
 DEFAULT_SCORE_WEIGHTS = {
-    "vocabulary": 0.10,   # 词汇维度（↓0.02）
-    "sentence": 0.08,     # 句式维度（↓0.02）
-    "punctuation": 0.10,  # 标点维度（↓0.02）
-    "emotion": 0.08,      # 情感维度（↓0.02）
-    "dialogue": 0.06,     # 对话维度（↓0.02）
-    "structure": 0.03,    # 结构维度（↓0.02）
-    # 🔧 文笔维度权重提升（0.13→0.20），核心美感维度
-    "writing": 0.20,      # 文笔维度 - 保持文学美感，避免干涩机械
-    # 🔧 可读性维度权重提升（0.30→0.35），最重要的保护性约束
-    "readability": 0.35   # 可读性维度 - 最重要！防止过度优化导致内容崩坏
+    "vocabulary": 0.08,   # 词汇维度（↓）
+    "sentence": 0.07,     # 句式维度（↓）
+    "punctuation": 0.08,  # 标点维度（↓）
+    "emotion": 0.07,      # 情感维度（↓）
+    "dialogue": 0.06,     # 对话维度（↓）
+    "structure": 0.04,    # 结构维度（↓）
+    # 🔧 文笔维度权重适度降低（0.20→0.15），为保真度让路
+    "writing": 0.15,      # 文笔维度 - 保持文学美感
+    # 🔧 可读性维度权重适度降低（0.35→0.25），为保真度让路
+    "readability": 0.25,  # 可读性维度 - 防止过度优化
+    # 🆕 新增：原文保真度维度，优先选择改动最小的版本
+    "fidelity": 0.20,     # 保真度维度 - 衡量原文改动大小，越低越好
 }
 
 # 🆕 可读性阈值配置
@@ -838,30 +843,38 @@ def calculate_multi_dimension_score(
     # 🆕 8. 可读性维度评分（越高越好，与其他维度相反）
     score.readability_score, score.readability_warnings = _calculate_readability_score(text, metrics)
     score.details["readability"] = f"可读性{score.readability_score:.0f}"
+    
+    # 🆕 9. 原文保真度维度评分（越低越好，表示改动越小）
+    # 注意：需要原文才能计算，否则设为中性值50
+    score.fidelity_score = 50  # 默认值，表示未提供原文
+    score.details["fidelity"] = "未提供原文"
 
     # 计算综合得分（加权平均）
     # 🆕 使用传入的权重或默认权重
     w = weights if weights else DEFAULT_SCORE_WEIGHTS
 
-    # 🆕 AI检测维度 + 文笔维度得分（越低越好）
-    ai_and_writing_score = (
-        score.vocabulary_score * w.get("vocabulary", 0.12) +
-        score.sentence_score * w.get("sentence", 0.10) +
-        score.punctuation_score * w.get("punctuation", 0.12) +
-        score.emotion_score * w.get("emotion", 0.10) +
-        score.dialogue_score * w.get("dialogue", 0.08) +
-        score.structure_score * w.get("structure", 0.05) +
-        score.writing_score * w.get("writing", 0.13)
-    ) / (1 - w.get("readability", 0.30))  # 归一化到0-100
+    # 🆕 AI检测维度 + 文笔维度 + 保真度维度得分（越低越好）
+    # 注意：需要排除readability权重后归一化
+    non_readability_weight = 1 - w.get("readability", 0.25)
+    ai_writing_fidelity_score = (
+        score.vocabulary_score * w.get("vocabulary", 0.08) +
+        score.sentence_score * w.get("sentence", 0.07) +
+        score.punctuation_score * w.get("punctuation", 0.08) +
+        score.emotion_score * w.get("emotion", 0.07) +
+        score.dialogue_score * w.get("dialogue", 0.06) +
+        score.structure_score * w.get("structure", 0.04) +
+        score.writing_score * w.get("writing", 0.15) +
+        score.fidelity_score * w.get("fidelity", 0.20)  # 🆕 新增保真度
+    ) / non_readability_weight  # 归一化到0-100
 
     # 🆕 可读性惩罚：可读性越低，综合得分越高（越差）
     # 可读性分数反转：100分的可读性 = 0分惩罚，0分可读性 = 100分惩罚
     readability_penalty = (100 - score.readability_score)
 
-    # 综合得分 = (AI检测+文笔)得分 * 0.7 + 可读性惩罚 * 0.3
-    readability_weight = w.get("readability", 0.35)
+    # 综合得分 = (AI检测+文笔+保真度)得分 * (1-readability_weight) + 可读性惩罚 * readability_weight
+    readability_weight = w.get("readability", 0.25)
     base_overall_score = (
-        ai_and_writing_score * (1 - readability_weight) +
+        ai_writing_fidelity_score * (1 - readability_weight) +
         readability_penalty * readability_weight
     )
 
@@ -1103,3 +1116,70 @@ def _calculate_readability_score(text: str, metrics: TextMetrics) -> Tuple[float
     score = max(0, min(100, score))
 
     return score, warnings
+
+
+def _calculate_fidelity_score(original_text: str, rewritten_text: str) -> float:
+    """
+    🆕 计算原文保真度得分（衡量改写前后的相似度）
+    
+    评分逻辑（0-100，越低越好，表示改动越小）：
+    - 0-20分：几乎没改动，相似度>80% ✨
+    - 21-40分：微调，相似度60-80%
+    - 41-60分：中等改动，相似度40-60%
+    - 61-80分：大幅改写，相似夦20-40%
+    - 81-100分：几乎全部重写，相似度<20%
+    
+    评估维度：
+    1. 字符级相似度（编辑距离）
+    2. 词级相似度（共同词汇比例）
+    3. 句子结构相似度
+    4. 长度变化程度
+    """
+    score = 0.0
+    
+    # 1. 字符级相似度（简化的编辑距离比例）
+    max_len = max(len(original_text), len(rewritten_text))
+    if max_len > 0:
+        # 计算共同字符数（忽略顺序）
+        from collections import Counter
+        orig_chars = Counter(original_text)
+        rewr_chars = Counter(rewritten_text)
+        common_chars = sum((orig_chars & rewr_chars).values())
+        char_similarity = common_chars / max_len
+        # 相似度越高，分数越低（越好）
+        score += (1 - char_similarity) * 30  # 最多30分
+    
+    # 2. 词级相似度（分词后比较）
+    # 简单分词：按标点和空格切分
+    def simple_tokenize(text):
+        # 分隔标点和空格，保留有意义的词
+        words = re.findall(r'[\w\u4e00-\u9fa5]+', text)
+        return [w for w in words if len(w) > 1]  # 过滤单字
+    
+    orig_words = set(simple_tokenize(original_text))
+    rewr_words = set(simple_tokenize(rewritten_text))
+    
+    if orig_words and rewr_words:
+        common_words = orig_words & rewr_words
+        word_similarity = len(common_words) / max(len(orig_words), len(rewr_words))
+        score += (1 - word_similarity) * 35  # 最多35分
+    
+    # 3. 句子结构相似度（句数和句长分布）
+    orig_sents = [s.strip() for s in re.split(r'[。！？]', original_text) if s.strip()]
+    rewr_sents = [s.strip() for s in re.split(r'[。！？]', rewritten_text) if s.strip()]
+    
+    sent_count_diff = abs(len(orig_sents) - len(rewr_sents))
+    max_sent_count = max(len(orig_sents), len(rewr_sents))
+    if max_sent_count > 0:
+        sent_count_similarity = 1 - (sent_count_diff / max_sent_count)
+        score += (1 - sent_count_similarity) * 20  # 最多20分
+    
+    # 4. 长度变化程度
+    len_ratio = len(rewritten_text) / len(original_text) if len(original_text) > 0 else 1.0
+    len_change = abs(1 - len_ratio)  # 0表示长度不变，1表示差异很大
+    score += len_change * 15  # 最多15分
+    
+    # 确保分数在0-100范围内
+    score = max(0, min(100, score))
+    
+    return score

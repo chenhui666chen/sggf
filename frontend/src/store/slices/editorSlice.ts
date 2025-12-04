@@ -112,8 +112,16 @@ const editorSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
+      .addCase(fetchChapters.pending, (state) => {
+        state.isLoading = true
+      })
       .addCase(fetchChapters.fulfilled, (state, action) => {
         state.chapters = action.payload
+        state.isLoading = false
+      })
+      .addCase(fetchChapters.rejected, (state, action) => {
+        state.isLoading = false
+        state.error = action.error.message || 'Failed to fetch chapters'
       })
       .addCase(fetchChapter.pending, (state) => {
         state.isLoading = true

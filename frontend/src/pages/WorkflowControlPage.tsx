@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import {
@@ -28,9 +28,6 @@ import {
   Tabs,
   Tab,
   MenuItem,
-  FormControl,
-  InputLabel,
-  Select,
   Fab,
 } from '@mui/material'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
@@ -49,12 +46,9 @@ import EditIcon from '@mui/icons-material/Edit'
 import DownloadIcon from '@mui/icons-material/Download'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
-import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 
 import HistoryIcon from '@mui/icons-material/History'
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows'
-import Checkbox from '@mui/material/Checkbox'
-import FormControlLabel from '@mui/material/FormControlLabel'
 import Chip from '@mui/material/Chip'
 import Snackbar from '@mui/material/Snackbar'
 import MuiAlert from '@mui/material/Alert'
@@ -165,6 +159,8 @@ export default function WorkflowControlPage() {
   // 🆕 流式输出状态
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamingStage, setStreamingStage] = useState<StageType | null>(null)
+  // 🆕 新增：进度消息（如“正在迭代第1/3轮...”）
+  const [progressMessage, setProgressMessage] = useState('')
 
   // 世界观设定对话框状态
   const [showWorldDialog, setShowWorldDialog] = useState(false)
@@ -681,6 +677,9 @@ export default function WorkflowControlPage() {
       }
 
       if (data.message) {
+        // 🆕 更新进度消息到 OutputPreviewPanel
+        setProgressMessage(data.message)
+        
         setSnackbarMessage(data.message)
         setSnackbarSeverity('info' as any)
         setSnackbarOpen(true)
@@ -690,6 +689,57 @@ export default function WorkflowControlPage() {
     // 监听任务完成
     workflowWebSocket.onTaskComplete((data) => {
       console.log('✅ 收到任务完成:', data)
+
+      // 🆕 处理扩展大纲/人物任务完成
+      const taskId = data.task_id || ''
+      if (taskId.startsWith('expand-outline')) {
+        console.log('✅ 大纲扩展任务完成，刷新数据...')
+        // 刷新大纲内容
+        if (projectId) {
+          const token = localStorage.getItem('access_token')
+          fetch(`/api/v1/workflow/${projectId}/all-stages-content`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+          }).then(res => res.json()).then(batchData => {
+            const stages = batchData.stages
+            if (stages.plot_outline) {
+              setStructureContent(stages.plot_outline)
+              dispatch(updateStageOutput({ stage: 'structure', output: stages.plot_outline }))
+              console.log('✅ 大纲内容已更新')
+            }
+          }).catch(err => console.error('❗ 刷新大纲失败:', err))
+          
+          // 🔥 关键修复：刷新章节列表
+          dispatch(fetchChapters(parseInt(projectId)))
+        }
+        setSnackbarMessage('✅ 大纲扩展完成！')
+        setSnackbarSeverity('success')
+        setSnackbarOpen(true)
+        return
+      }
+      
+      if (taskId.startsWith('expand-characters')) {
+        console.log('✅ 人物扩展任务完成，刷新数据...')
+        // 刷新人物内容
+        if (projectId) {
+          const token = localStorage.getItem('access_token')
+          fetch(`/api/v1/workflow/${projectId}/all-stages-content`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+          }).then(res => res.json()).then(batchData => {
+            const stages = batchData.stages
+            if (stages.characters) {
+              setCharacterContent(stages.characters)
+              console.log('✅ 人物内容已更新')
+            }
+          }).catch(err => console.error('❗ 刷新人物失败:', err))
+          
+          // 🔥 关键修复：刷新章节列表
+          dispatch(fetchChapters(parseInt(projectId)))
+        }
+        setSnackbarMessage('✅ 人物扩展完成！')
+        setSnackbarSeverity('success')
+        setSnackbarOpen(true)
+        return
+      }
 
       // 🆕 从 Redux store 直接读取最新状态（避免闭包问题）
       const currentState = store.getState()
@@ -715,6 +765,8 @@ export default function WorkflowControlPage() {
         // 注意：setCurrentStage 是 Redux action，不接受 null，保持当前阶段不变
         setCurrentTaskId(null)
         setTaskProgress(100)
+        // 🆕 清空进度消息（任务完成）
+        setProgressMessage('')
         
         // 停止进度估算器
         if (progressEstimator) {
@@ -794,6 +846,8 @@ export default function WorkflowControlPage() {
 
       setCurrentTaskId(null)
       setTaskProgress(0)
+      // 🆕 清空进度消息（任务失败）
+      setProgressMessage('')
 
       setSnackbarMessage(`任务失败: ${data.error}`)
       setSnackbarSeverity('error')
@@ -908,6 +962,8 @@ export default function WorkflowControlPage() {
       console.log('🌊 流式输出结束:', data)
       setIsStreaming(false)
       setStreamingStage(null)
+      // 🆕 清空进度消息（流式输出结束）
+      setProgressMessage('')
 
       setSnackbarMessage(data.message || `${data.stage} 阶段内容生成完成，共 ${data.total_chars} 字`)
       setSnackbarSeverity('success')
@@ -3661,6 +3717,7 @@ export default function WorkflowControlPage() {
             finalVersionContent={finalVersionContent}
             generateNextChapterStreamContent={generateNextChapterStreamContent}
             isGeneratingNextChapter={!!generateNextChapterTaskId}
+            progressMessage={progressMessage}
           />
 
           {/* 控制按钮 - 在文本区域正下方居中 */}

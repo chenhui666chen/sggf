@@ -68,6 +68,14 @@ export interface StreamEndData {
   message?: string
 }
 
+// 🆕 模型使用事件
+export interface ModelUsedData {
+  project_id: number
+  stage: string
+  model: string
+  extra?: any
+}
+
 class WorkflowWebSocket {
   private socket: Socket | null = null
   private projectId: number | null = null
@@ -175,6 +183,18 @@ class WorkflowWebSocket {
 
     this.socket.on('error', (data) => {
       console.error('❌ WebSocket 错误:', data)
+    })
+
+    // 🆕 模型使用事件：直接在控制台打印
+    this.socket.on('model_used', (data: any) => {
+      const { project_id, stage, model, extra } = data || {}
+      console.log(
+        '[MODEL_USED]',
+        `project=${project_id}`,
+        `stage=${stage}`,
+        `model=${model}`,
+        extra || ''
+      )
     })
   }
 
@@ -381,6 +401,8 @@ class WorkflowWebSocket {
     // 🆕 移除后台任务监听器
     this.socket.off('post_save_task_start')
     this.socket.off('post_save_task_complete')
+    // 🆕 移除模型事件监听
+    this.socket.off('model_used')
     console.log('✅ 监听器已移除')
   }
 
@@ -404,6 +426,8 @@ class WorkflowWebSocket {
     // 🆕 移除后台任务监听器
     this.socket.off('post_save_task_start')
     this.socket.off('post_save_task_complete')
+    // 🆕 移除模型事件监听
+    this.socket.off('model_used')
     console.log('✅ 事件监听器已清除，连接保持')
   }
 
