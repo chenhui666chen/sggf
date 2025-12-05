@@ -76,6 +76,14 @@ export interface ModelUsedData {
   extra?: any
 }
 
+// 🆕 通知事件
+export interface NotificationData {
+  project_id: number
+  message: string
+  type: 'info' | 'success' | 'warning' | 'error' | 'system_collections_created'
+  data?: any
+}
+
 class WorkflowWebSocket {
   private socket: Socket | null = null
   private projectId: number | null = null
@@ -396,6 +404,19 @@ class WorkflowWebSocket {
   }
 
   /**
+   * 🆕 监听通知消息
+   */
+  onNotification(callback: (data: NotificationData) => void) {
+    if (!this.socket) return
+
+    this.socket.off('notification')
+    this.socket.on('notification', (data: NotificationData) => {
+      console.log('🔔 收到通知:', data)
+      callback(data)
+    })
+  }
+
+  /**
    * 移除所有监听器
    */
   removeAllListeners() {
@@ -416,6 +437,8 @@ class WorkflowWebSocket {
     this.socket.off('post_save_task_complete')
     // 🆕 移除模型事件监听
     this.socket.off('model_used')
+    // 🆕 移除通知监听
+    this.socket.off('notification')
     console.log('✅ 监听器已移除')
   }
 
@@ -441,6 +464,8 @@ class WorkflowWebSocket {
     this.socket.off('post_save_task_complete')
     // 🆕 移除模型事件监听
     this.socket.off('model_used')
+    // 🆕 移除通知监听
+    this.socket.off('notification')
     console.log('✅ 事件监听器已清除，连接保持')
   }
 

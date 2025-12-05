@@ -47,6 +47,7 @@ import SettingTreeView from '@/components/SettingTreeView'
 import SettingRecommendations from '@/components/SettingRecommendations'
 import ConflictDetector from '@/components/ConflictDetector'
 import RelationshipGraph from '@/components/RelationshipGraph'
+import CharacterCardManager from '@/components/CharacterCardManager'
 
 // ==================== 接口定义 ====================
 
@@ -155,6 +156,9 @@ export default function KnowledgeBasePage() {
   
   // 设定中心子 Tab 状态 (0=设定管理, 1=热门设定, 2=关系网络)
   const [settingSubTabValue, setSettingSubTabValue] = useState(0)
+  
+  // 人物设定子 Tab 状态 (0=人物文本, 1=人物卡管理, 2=扩展人物)
+  const [characterSubTabValue, setCharacterSubTabValue] = useState(0)
 
   // ==================== 文本内容相关状态 ====================
   const [loading, setLoading] = useState(false)  // 🔥 修复：初始值为false，避免页面初始时一直加载
@@ -402,6 +406,23 @@ export default function KnowledgeBasePage() {
           showSnackbar('❌ 后端服务断开，人物扩展任务已取消', 'error')
         }
       })
+
+      // 🆕 监听体系自动添加通知
+      workflowWebSocket.onNotification((data: any) => {
+        if (data.type === 'system_collections_created' && data.data?.collections) {
+          const collections = data.data.collections
+          const collectionNames = collections.map((c: any) => c.name).join('、')
+          showSnackbar(`🎉 ${data.message}: ${collectionNames}`, 'success')
+          
+          // 如果当前在设定中心Tab，刷新集合列表
+          if (mainTabValue === 3) {
+            loadSettingCollections()
+          }
+        } else {
+          // 通用通知显示
+          showSnackbar(data.message, data.type === 'success' ? 'success' : 'error')
+        }
+      })
     })
 
     // 清理：组件卸载时移除监听器
@@ -412,6 +433,7 @@ export default function KnowledgeBasePage() {
         workflowWebSocket.onTaskProgress(() => {})
         workflowWebSocket.onTaskError(() => {})
         workflowWebSocket.onDisconnect(() => {})
+        workflowWebSocket.onNotification(() => {})
       })
     }
   }, [projectId])
@@ -1064,6 +1086,20 @@ export default function KnowledgeBasePage() {
       {/* ==================== Tab 0-2: 世界观/人物/大纲 ==================== */}
       {mainTabValue <= 2 && (
         <Box>
+          {/* 🆕 人物设定Tab添加二级导航 */}
+          {mainTabValue === 1 && (
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+              <Tabs
+                value={characterSubTabValue}
+                onChange={(_, newValue) => setCharacterSubTabValue(newValue)}
+              >
+                <Tab label="📝 人物文本" />
+                <Tab label="🎴 人物卡管理" />
+                <Tab label="⭐ 扩展人物" />
+              </Tabs>
+            </Box>
+          )}
+
           {loading && (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
               <CircularProgress />
@@ -1085,6 +1121,8 @@ export default function KnowledgeBasePage() {
                 📖 此页面展示工作流生成的设定数据，编辑后将同步到工作流中
               </Alert>
 
+              {/* 🆕 只在非人物Tab或人物文本子Tab显示操作按钮 */}
+              {(mainTabValue !== 1 || characterSubTabValue === 0) && (
               <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
                 {!isEditing ? (
                   <>
@@ -1097,42 +1135,6 @@ export default function KnowledgeBasePage() {
                     >
                       编辑{getTabTitle()}
                     </Button>
-                    
-                    {/* 在人物设定 Tab 显示扩展按钮 */}
-                    {mainTabValue === 1 && (
-                      <>
-                        <TextField
-                          label="目标人物数"
-                          type="number"
-                          size="small"
-                          value={targetCharacterCount}
-                          onChange={(e) => {
-                            const value = parseInt(e.target.value, 10)
-                            setTargetCharacterCount(Number.isNaN(value) ? 0 : value)
-                          }}
-                          inputProps={{ min: 1 }}
-                          sx={{ width: 150 }}
-                        />
-                        <Tooltip
-                          title={expandingCharacters ? "扩展进行中，请稍候" : "根据当前的世界观、人物和大纲设定，智能扩展更多人物"}
-                          placement="top"
-                          arrow
-                        >
-                          <span>
-                            <Button
-                              variant="outlined"
-                              color="primary"
-                              startIcon={expandingCharacters ? <CircularProgress size={20} /> : <PeopleAltIcon />}
-                              onClick={handleExpandCharacters}
-                              disabled={!characters || !worldSetting || !plotOutline || expandingCharacters || expandingOutline || isEditing}
-                              sx={{ borderRadius: 2 }}
-                            >
-                              {expandingCharacters ? '扩展中...' : '扩展人物'}
-                            </Button>
-                          </span>
-                        </Tooltip>
-                      </>
-                    )}
                     
                     {/* 只在大纲设定Tab显示扩展按钮 */}
                     {mainTabValue === 2 && (
@@ -1193,8 +1195,113 @@ export default function KnowledgeBasePage() {
                   </>
                 )}
               </Box>
+              )}
 
-              {isEditing ? (
+              {/* 🆕 根据人物子Tab显示不同内容 */}
+              {mainTabValue === 1 ? (
+                <>
+                  {/* 子Tab 0: 人物文本 */}
+                  {characterSubTabValue === 0 && (
+                    <>
+                      {isEditing ? (
+                        <VditorEditor
+                          value={editedContent}
+                          onChange={(val) => setEditedContent(val)}
+                          placeholder={`${getTabTitle()}内容（支持 Markdown 格式）...`}
+                          height={500}
+                        />
+                      ) : (
+                        <Paper
+                          elevation={0}
+                          sx={{
+                            bgcolor: 'background.paper',
+                            p: 4,
+                            borderRadius: 2,
+                            minHeight: 400,
+                            border: '1px solid',
+                            borderColor: 'grey.200',
+                          }}
+                        >
+                          {getCurrentContent() ? (
+                            <MarkdownRenderer content={getCurrentContent()} />
+                          ) : (
+                            <Typography color="text.secondary" sx={{ textAlign: 'center', py: 8 }}>
+                              📭 暂无{getTabTitle()}，请先在工作流中生成
+                            </Typography>
+                          )}
+                        </Paper>
+                      )}
+                    </>
+                  )}
+
+                  {/* 子Tab 1: 人物卡管理 */}
+                  {characterSubTabValue === 1 && (
+                    <CharacterCardManager
+                      projectId={Number(projectId)}
+                      onCharacterUpdate={() => {
+                        // 角色更新后，可以刷新其他相关数据
+                        console.log('角色已更新')
+                      }}
+                    />
+                  )}
+
+                  {/* 子Tab 2: 扩展人物 */}
+                  {characterSubTabValue === 2 && (
+                    <Box>
+                      <Box sx={{ display: 'flex', gap: 2, mb: 3, alignItems: 'center' }}>
+                        <TextField
+                          label="目标人物数"
+                          type="number"
+                          size="small"
+                          value={targetCharacterCount}
+                          onChange={(e) => {
+                            const value = parseInt(e.target.value, 10)
+                            setTargetCharacterCount(Number.isNaN(value) ? 0 : value)
+                          }}
+                          inputProps={{ min: 1 }}
+                          sx={{ width: 150 }}
+                        />
+                        <Tooltip
+                          title={expandingCharacters ? "扩展进行中，请稍候" : "根据当前的世界观、人物和大纲设定，智能扩展更多人物"}
+                          placement="top"
+                          arrow
+                        >
+                          <span>
+                            <Button
+                              variant="contained"
+                              color="primary"
+                              startIcon={expandingCharacters ? <CircularProgress size={20} /> : <PeopleAltIcon />}
+                              onClick={handleExpandCharacters}
+                              disabled={!characters || !worldSetting || !plotOutline || expandingCharacters || expandingOutline}
+                              sx={{ borderRadius: 2 }}
+                            >
+                              {expandingCharacters ? '扩展中...' : '扩展人物'}
+                            </Button>
+                          </span>
+                        </Tooltip>
+                      </Box>
+                      <Paper
+                        elevation={0}
+                        sx={{
+                          bgcolor: 'background.paper',
+                          p: 4,
+                          borderRadius: 2,
+                          minHeight: 400,
+                          border: '1px solid',
+                          borderColor: 'grey.200',
+                        }}
+                      >
+                        <Typography color="text.secondary" sx={{ textAlign: 'center', py: 8 }}>
+                          👨‍👩‍👧 扩展人物后，结果将显示在这里
+                        </Typography>
+                      </Paper>
+                    </Box>
+                  )}
+                </>
+              ) : (
+                // 世界观设定和大纲设定Tab的原有内容
+                <>
+                  {isEditing ? (
                 <VditorEditor
                   value={editedContent}
                   onChange={(val) => setEditedContent(val)}
@@ -1221,6 +1328,8 @@ export default function KnowledgeBasePage() {
                     </Typography>
                   )}
                 </Paper>
+              )}
+                </>
               )}
             </>
           )}
