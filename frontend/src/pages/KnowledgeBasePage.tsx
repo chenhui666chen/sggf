@@ -46,6 +46,7 @@ import { apiClient } from '@/services/api'
 import SettingTreeView from '@/components/SettingTreeView'
 import SettingRecommendations from '@/components/SettingRecommendations'
 import ConflictDetector from '@/components/ConflictDetector'
+import RelationshipGraph from '@/components/RelationshipGraph'
 
 // ==================== 接口定义 ====================
 
@@ -149,7 +150,7 @@ export default function KnowledgeBasePage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
 
-  // 主 Tab 状态 (0=世界观设定, 1=人物设定, 2=剧情大纲, 3=类型设定)
+  // 主 Tab 状态 (0=世界观设定, 1=人物设定, 2=大纲设定, 3=类型设定, 4=冲突检测, 5=关系网络)
   const [mainTabValue, setMainTabValue] = useState(0)
 
   // ==================== 文本内容相关状态 ====================
@@ -227,18 +228,59 @@ export default function KnowledgeBasePage() {
 
     const outlineKey = `expanding_outline_${projectId}`
     const charactersKey = `expanding_characters_${projectId}`
+    const outlineStartKey = `expanding_outline_start_${projectId}`
+    const charactersStartKey = `expanding_characters_start_${projectId}`
 
     const savedOutlineState = localStorage.getItem(outlineKey)
     const savedCharactersState = localStorage.getItem(charactersKey)
+    const outlineStartTime = localStorage.getItem(outlineStartKey)
+    const charactersStartTime = localStorage.getItem(charactersStartKey)
 
+    const TASK_TIMEOUT = 30 * 60 * 1000  // 30分钟超时
+    const now = Date.now()
+
+    // 检查大纲扩展任务
     if (savedOutlineState === 'true') {
-      setExpandingOutline(true)
-      console.log('🔄 恢复大纲扩展状态：进行中')
+      if (outlineStartTime) {
+        const elapsed = now - parseInt(outlineStartTime)
+        if (elapsed > TASK_TIMEOUT) {
+          // 超时，清除状态
+          console.warn('⚠️ 大纲扩展任务超时，已自动清除')
+          localStorage.removeItem(outlineKey)
+          localStorage.removeItem(outlineStartKey)
+          showSnackbar('⚠️ 大纲扩展任务超时30分钟，可能已失败，请重试', 'error')
+        } else {
+          // 未超时，恢复状态
+          setExpandingOutline(true)
+          console.log('🔄 恢复大纲扩展状态：进行中')
+        }
+      } else {
+        // 没有开始时间，恢复状态
+        setExpandingOutline(true)
+        console.log('🔄 恢复大纲扩展状态：进行中')
+      }
     }
 
+    // 检查人物扩展任务
     if (savedCharactersState === 'true') {
-      setExpandingCharacters(true)
-      console.log('🔄 恢复人物扩展状态：进行中')
+      if (charactersStartTime) {
+        const elapsed = now - parseInt(charactersStartTime)
+        if (elapsed > TASK_TIMEOUT) {
+          // 超时，清除状态
+          console.warn('⚠️ 人物扩展任务超时，已自动清除')
+          localStorage.removeItem(charactersKey)
+          localStorage.removeItem(charactersStartKey)
+          showSnackbar('⚠️ 人物扩展任务超时30分钟，可能已失败，请重试', 'error')
+        } else {
+          // 未超时，恢复状态
+          setExpandingCharacters(true)
+          console.log('🔄 恢复人物扩展状态：进行中')
+        }
+      } else {
+        // 没有开始时间，恢复状态
+        setExpandingCharacters(true)
+        console.log('🔄 恢复人物扩展状态：进行中')
+      }
     }
   }, [projectId])
 
@@ -254,6 +296,17 @@ export default function KnowledgeBasePage() {
         console.log('🔗 WebSocket 连接已建立')
       }).catch((error: any) => {
         console.error('❌ WebSocket 连接失败:', error)
+        // WebSocket连接失败，清除所有进行中的任务状态
+        if (expandingOutline) {
+          setExpandingOutline(false)
+          localStorage.removeItem(`expanding_outline_${projectId}`)
+          showSnackbar('❌ 后端服务断开，大纲扩展任务已取消', 'error')
+        }
+        if (expandingCharacters) {
+          setExpandingCharacters(false)
+          localStorage.removeItem(`expanding_characters_${projectId}`)
+          showSnackbar('❌ 后端服务断开，人物扩展任务已取消', 'error')
+        }
       })
 
       // 监听任务完成
@@ -326,8 +379,24 @@ export default function KnowledgeBasePage() {
         if (taskId.startsWith('expand-characters')) {
           showSnackbar(`❌ 人物扩展失败: ${error}`, 'error')
           setExpandingCharacters(false)
-          // 🆕 清除localStorage状态
+          // 🆕 清除localStorage犰态
           localStorage.removeItem(`expanding_characters_${projectId}`)
+        }
+      })
+
+      // 🆕 监听WebSocket断开
+      workflowWebSocket.onDisconnect(() => {
+        console.warn('⚠️ WebSocket 连接断开')
+        // 如果有进行中的任务，标记为错误
+        if (expandingOutline) {
+          setExpandingOutline(false)
+          localStorage.removeItem(`expanding_outline_${projectId}`)
+          showSnackbar('❌ 后端服务断开，大纲扩展任务已取消', 'error')
+        }
+        if (expandingCharacters) {
+          setExpandingCharacters(false)
+          localStorage.removeItem(`expanding_characters_${projectId}`)
+          showSnackbar('❌ 后端服务断开，人物扩展任务已取消', 'error')
         }
       })
     })
@@ -339,6 +408,7 @@ export default function KnowledgeBasePage() {
         workflowWebSocket.onTaskComplete(() => {})
         workflowWebSocket.onTaskProgress(() => {})
         workflowWebSocket.onTaskError(() => {})
+        workflowWebSocket.onDisconnect(() => {})
       })
     }
   }, [projectId])
@@ -510,7 +580,7 @@ export default function KnowledgeBasePage() {
     switch (mainTabValue) {
       case 0: return '世界观设定'
       case 1: return '人物设定'
-      case 2: return '剧情大纲'
+      case 2: return '大纲设定'
       default: return ''
     }
   }
@@ -824,6 +894,8 @@ export default function KnowledgeBasePage() {
 
       // 🆕 保存到localStorage
       localStorage.setItem(`expanding_outline_${projectId}`, 'true')
+      // 🆕 记录任务开始时间
+      localStorage.setItem(`expanding_outline_start_${projectId}`, Date.now().toString())
 
       showSnackbar('📖 大纲扩展任务已启动，正在后台执行，你可以切换到其他页面', 'success')
       
@@ -834,6 +906,7 @@ export default function KnowledgeBasePage() {
       console.error('❌ 扩展大纲失败:', error)
       showSnackbar(`扩展大纲失败: ${error}`, 'error')
       setExpandingOutline(false)
+      localStorage.removeItem(`expanding_outline_start_${projectId}`)
     }
   }
 
@@ -882,6 +955,8 @@ export default function KnowledgeBasePage() {
 
       // 🆕 保存到localStorage
       localStorage.setItem(`expanding_characters_${projectId}`, 'true')
+      // 🆕 记录任务开始时间
+      localStorage.setItem(`expanding_characters_start_${projectId}`, Date.now().toString())
 
       showSnackbar('👥 人物扩展任务已启动，正在后台执行，你可以切换到其他页面', 'success')
       
@@ -892,6 +967,7 @@ export default function KnowledgeBasePage() {
       console.error('❌ 扩展人物失败:', error)
       showSnackbar(`扩展人物失败: ${error}`, 'error')
       setExpandingCharacters(false)
+      localStorage.removeItem(`expanding_characters_start_${projectId}`)
     }
   }
 
@@ -976,8 +1052,10 @@ export default function KnowledgeBasePage() {
         >
           <Tab label="🌍 世界观设定" />
           <Tab label="👥 人物设定" />
-          <Tab label="📋 剧情大纲" />
+          <Tab label="📋 大纲设定" />
           <Tab label="🎨 类型设定" />
+          <Tab label="⚠️ 冲突检测" />
+          <Tab label="🌐 关系网络" />
         </Tabs>
       </Box>
 
@@ -1034,7 +1112,7 @@ export default function KnowledgeBasePage() {
                           sx={{ width: 150 }}
                         />
                         <Tooltip
-                          title={expandingCharacters ? "扩展进行中，请稍候" : "根据当前的世界观、人物和剧情大纲，智能扩展更多人物"}
+                          title={expandingCharacters ? "扩展进行中，请稍候" : "根据当前的世界观、人物和大纲设定，智能扩展更多人物"}
                           placement="top"
                           arrow
                         >
@@ -1054,7 +1132,7 @@ export default function KnowledgeBasePage() {
                       </>
                     )}
                     
-                    {/* 只在剧情大纲Tab显示扩展按钮 */}
+                    {/* 只在大纲设定Tab显示扩展按钮 */}
                     {mainTabValue === 2 && (
                       <>
                         <TextField
@@ -1070,7 +1148,7 @@ export default function KnowledgeBasePage() {
                           sx={{ width: 150 }}
                         />
                         <Tooltip
-                          title={expandingOutline ? "扩展进行中，请稍候" : "根据当前的世界观、人物和剧情大纲，智能扩展为更详细的多章节大纲"}
+                          title={expandingOutline ? "扩展进行中，请稍候" : "根据当前的世界观、人物和大纲设定，智能扩展为更详细的多章节大纲"}
                           placement="top"
                           arrow
                         >
@@ -1273,28 +1351,6 @@ export default function KnowledgeBasePage() {
 
           {/* 右侧：设定项树 + 列表 */}
           <Grid item xs={12} md={8}>
-            {/* 冲突检测面板 */}
-            <Box sx={{ mb: 2 }}>
-              <ConflictDetector
-                projectId={Number(projectId)}
-                onSelectItem={(itemId) => {
-                  // 查找该设定项并跳转
-                  const item = settingItems.find(i => i.id === itemId)
-                  if (item) {
-                    setSelectedItem(item)
-                    // 如果有路径，也设置路径以便树形视图高亮
-                    if (item.path) {
-                      const pathParts = item.path.split('/')
-                      if (pathParts.length > 1) {
-                        setSelectedCategoryPath(pathParts.slice(0, -1).join('/'))
-                      }
-                    }
-                  }
-                }}
-                title="设定冲突检测"
-              />
-            </Box>
-
             <Paper elevation={2} sx={{ p: 2, height: '70vh', display: 'flex', flexDirection: 'column' }}>
               {selectedCollection ? (
                 <>
@@ -1434,6 +1490,61 @@ export default function KnowledgeBasePage() {
             </Paper>
           </Grid>
         </Grid>
+      </TabPanel>
+
+     {/* ==================== Tab 4: 冲突检测 ==================== */}
+      <TabPanel value={mainTabValue} index={4}>
+        <ConflictDetector
+          projectId={Number(projectId)}
+          onSelectItem={(itemId) => {
+            // 跳转到类型设定Tab并查找该设定项
+            setMainTabValue(3)
+            // 查找该设定项并选中
+            const item = settingItems.find(i => i.id === itemId)
+            if (item) {
+              // 先找到对应的集合
+              const collection = collections.find(c => c.id === item.collection_id)
+              if (collection) {
+                setSelectedCollection(collection)
+                // 加载该集合的设定项
+                loadSettingItems(collection.id).then(() => {
+                  setSelectedItem(item)
+                  // 如果有路径，也设置路径以便树形视图高亮
+                  if (item.path) {
+                    const pathParts = item.path.split('/')
+                    if (pathParts.length > 1) {
+                      setSelectedCategoryPath(pathParts.slice(0, -1).join('/'))
+                    }
+                  }
+                })
+              }
+            }
+          }}
+          title="设定冲突检测"
+        />
+      </TabPanel>
+
+      {/* ==================== Tab 5: 关系网络 ==================== */}
+      <TabPanel value={mainTabValue} index={5}>
+        {selectedItem ? (
+          <RelationshipGraph
+            itemId={selectedItem.id}
+            itemName={selectedItem.name}
+            onNodeClick={(nodeId) => {
+              // 查找该节点对应的设定项
+              const item = settingItems.find(i => i.id === nodeId)
+              if (item) {
+                setSelectedItem(item)
+                // 如果需要，也可以切换到类型设定Tab
+                // setMainTabValue(3)
+              }
+            }}
+          />
+        ) : (
+          <Alert severity="info" sx={{ mt: 2 }}>
+            请先在"类型设定"Tab中选择一个设定项，以查看其关系网络图
+          </Alert>
+        )}
       </TabPanel>
 
       {/* ==================== 对话框 ==================== */}

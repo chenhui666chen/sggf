@@ -383,6 +383,19 @@ class WorkflowWebSocket {
   }
 
   /**
+   * 🆕 监听WebSocket断开连接
+   */
+  onDisconnect(callback: () => void) {
+    if (!this.socket) return
+
+    this.socket.off('disconnect')
+    this.socket.on('disconnect', (reason) => {
+      console.log('🔌 WebSocket 断开连接:', reason)
+      callback()
+    })
+  }
+
+  /**
    * 移除所有监听器
    */
   removeAllListeners() {
