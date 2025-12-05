@@ -21,12 +21,25 @@ import {
   TextField,
   MenuItem,
   Grid,
+  Snackbar,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
 import HistoryIcon from '@mui/icons-material/History'
 import CloseIcon from '@mui/icons-material/Close'
+import SyncIcon from '@mui/icons-material/Sync'
+import AccountTreeIcon from '@mui/icons-material/AccountTree'
+import ReactFlow, {
+  Background,
+  Controls,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  Node,
+  Edge,
+} from 'reactflow'
+import 'reactflow/dist/style.css'
 
 interface CharacterCardManagerProps {
   projectId: number
@@ -49,6 +62,33 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
   // 自动追踪关联状态
   const [autoTrackedData, setAutoTrackedData] = useState<any>(null)
   const [autoTrackedLoading, setAutoTrackedLoading] = useState(false)
+
+  // 功法管理状态
+  const [characterTechniques, setCharacterTechniques] = useState<any[]>([])
+  const [availableTechniques, setAvailableTechniques] = useState<any[]>([])
+  const [selectedTechniqueId, setSelectedTechniqueId] = useState<number | ''>('')
+  const [saving, setSaving] = useState(false)
+
+  // 🆕 同步到工作流状态
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncPreview, setSyncPreview] = useState<any>(null)
+  const [syncPreviewLoading, setSyncPreviewLoading] = useState(false)
+
+  // 🆕 Snackbar 状态
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({ open: false, message: '', severity: 'success' })
+
+  // 🆕 关系图状态
+  const [graphDialogOpen, setGraphDialogOpen] = useState(false)
+  const [graphLoading, setGraphLoading] = useState(false)
+  const [nodes, setNodes, onNodesChange] = useNodesState([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState([])
+  const [graphStats, setGraphStats] = useState<{ total_nodes: number; total_edges: number }>({ total_nodes: 0, total_edges: 0 })
+
+  // 🆕 人物关系管理状态
+  const [characterRelations, setCharacterRelations] = useState<any[]>([])
+  const [newRelationTarget, setNewRelationTarget] = useState('')
+  const [newRelationType, setNewRelationType] = useState('')
 
   // 加载角色列表
   const loadCharacters = async () => {
@@ -129,7 +169,42 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
   useEffect(() => {
     loadCharacters()
     loadAvailableRealms()
+    loadAvailableTechniques()
   }, [projectId])
+
+  // 加载可用功法列表
+  const loadAvailableTechniques = async () => {
+    try {
+      const response = await fetch(`/api/v1/projects/${projectId}/techniques`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setAvailableTechniques(data)
+      }
+    } catch (error) {
+      console.error('加载功法列表失败:', error)
+    }
+  }
+
+  // 加载角色功法列表
+  const loadCharacterTechniques = async (characterId: number) => {
+    try {
+      const response = await fetch(`/api/v1/characters/${characterId}/techniques`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setCharacterTechniques(data)
+      }
+    } catch (error) {
+      console.error('加载角色功法失败:', error)
+    }
+  }
 
   // 加载自动追踪关联数据
   const loadAutoTrackedData = async (characterId: number) => {
@@ -158,11 +233,25 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
       setFormData(character)
       // 加载自动追踪数据
       loadAutoTrackedData(character.id)
+      // 加载角色功法
+      loadCharacterTechniques(character.id)
+      // 🆕 加载人物关系
+      try {
+        const relations = character.relations ? JSON.parse(character.relations) : []
+        setCharacterRelations(Array.isArray(relations) ? relations : [])
+      } catch {
+        setCharacterRelations([])
+      }
     } else {
       setEditingCharacter(null)
       setFormData({ name: '', role: '', faction: '' })
       setAutoTrackedData(null)
+      setCharacterTechniques([])
+      setCharacterRelations([])
     }
+    setSelectedTechniqueId('')
+    setNewRelationTarget('')
+    setNewRelationType('')
     setEditDialogOpen(true)
   }
 
@@ -172,11 +261,84 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
     setEditingCharacter(null)
     setFormData({})
     setAutoTrackedData(null)
+    setCharacterTechniques([])
+    setSelectedTechniqueId('')
+    setCharacterRelations([])
+    setNewRelationTarget('')
+    setNewRelationType('')
+  }
+
+  // 🆕 添加人物关系
+  const handleAddRelation = () => {
+    if (!newRelationTarget || !newRelationType) return
+    // 检查是否已存在
+    if (characterRelations.some((r: any) => r.target === newRelationTarget && r.type === newRelationType)) {
+      setSnackbar({ open: true, message: '该关系已存在', severity: 'error' })
+      return
+    }
+    setCharacterRelations((prev) => [
+      ...prev,
+      { target: newRelationTarget, type: newRelationType }
+    ])
+    setNewRelationTarget('')
+    setNewRelationType('')
+  }
+
+  // 🆕 删除人物关系
+  const handleRemoveRelation = (index: number) => {
+    setCharacterRelations((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  // 添加功法到角色
+  const handleAddTechnique = () => {
+    if (!selectedTechniqueId) return
+    // 检查是否已添加
+    if (characterTechniques.some((t: any) => t.technique_item_id === selectedTechniqueId)) {
+      return
+    }
+    const technique = availableTechniques.find((t: any) => 
+      (t.technique_item_id || t.id) === selectedTechniqueId
+    )
+    if (technique) {
+      setCharacterTechniques((prev) => [
+        ...prev,
+        {
+          technique_item_id: selectedTechniqueId,
+          technique_name: technique.technique_name || technique.name,
+          proficiency: '',
+          learned_at_chapter: null,
+          notes: '',
+        },
+      ])
+      setSelectedTechniqueId('')
+    }
+  }
+
+  // 移除功法
+  const handleRemoveTechnique = (index: number) => {
+    setCharacterTechniques((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  // 更新功法字段
+  const handleUpdateTechniqueField = (index: number, field: string, value: any) => {
+    setCharacterTechniques((prev) => {
+      const next = [...prev]
+      next[index] = { ...next[index], [field]: value }
+      return next
+    })
   }
 
   // 保存角色
   const handleSaveCharacter = async () => {
+    setSaving(true)
     try {
+      // 🆕 将关系数据加入formData
+      const dataToSave = {
+        ...formData,
+        relations: JSON.stringify(characterRelations)
+      }
+      
+      let savedCharacter = dataToSave
       const url = editingCharacter
         ? `/api/v1/characters/${editingCharacter.id}`
         : `/api/v1/projects/${projectId}/characters`
@@ -189,16 +351,40 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(dataToSave),
       })
 
       if (response.ok) {
+        savedCharacter = await response.json()
+        
+        // 保存功法列表（覆盖式）
+        if (savedCharacter.id) {
+          const techniquesPayload = {
+            techniques: characterTechniques.map((t: any) => ({
+              technique_item_id: t.technique_item_id,
+              proficiency: t.proficiency || null,
+              learned_at_chapter: t.learned_at_chapter ?? null,
+              notes: t.notes || null,
+            })),
+          }
+          await fetch(`/api/v1/characters/${savedCharacter.id}/techniques`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(techniquesPayload),
+          })
+        }
+        
         await loadCharacters()
         handleCloseEditDialog()
         onCharacterUpdate?.()
       }
     } catch (error) {
       console.error('保存角色失败:', error)
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -249,18 +435,186 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
     }
   }
 
+  // 🆕 打开同步对话框并加载预览
+  const handleOpenSyncDialog = async () => {
+    setSyncDialogOpen(true)
+    setSyncPreviewLoading(true)
+    setSyncPreview(null)
+    
+    try {
+      const response = await fetch(`/api/v1/projects/${projectId}/characters-text-preview`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setSyncPreview(data)
+      } else {
+        console.error('加载预览失败')
+      }
+    } catch (error) {
+      console.error('加载预览失败:', error)
+    } finally {
+      setSyncPreviewLoading(false)
+    }
+  }
+
+  // 🆕 执行同步
+  const handleSyncToWorkflow = async () => {
+    setSyncing(true)
+    
+    try {
+      const response = await fetch(`/api/v1/projects/${projectId}/sync-characters-to-workflow`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setSnackbar({ open: true, message: `✅ ${data.message}`, severity: 'success' })
+        setSyncDialogOpen(false)
+        onCharacterUpdate?.()
+      } else {
+        setSnackbar({ open: true, message: '同步失败，请重试', severity: 'error' })
+      }
+    } catch (error) {
+      console.error('同步失败:', error)
+      setSnackbar({ open: true, message: '同步失败，请重试', severity: 'error' })
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  // 🆕 加载关系图数据
+  const handleOpenGraphDialog = async () => {
+    setGraphDialogOpen(true)
+    setGraphLoading(true)
+    
+    try {
+      const response = await fetch(`/api/v1/projects/${projectId}/character-relationship-graph`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        
+        // 转换为 React Flow 格式
+        const flowNodes: Node[] = data.nodes.map((node: any, index: number) => {
+          // 计算位置（环形布局）
+          const angle = (2 * Math.PI * index) / data.nodes.length
+          const radius = 250
+          const x = 400 + radius * Math.cos(angle)
+          const y = 300 + radius * Math.sin(angle)
+          
+          return {
+            id: node.id,
+            position: { x, y },
+            data: {
+              label: (
+                <Box sx={{ textAlign: 'center', p: 0.5, cursor: 'pointer' }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                    {node.name}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {node.importance}
+                  </Typography>
+                  <Typography variant="caption" sx={{ display: 'block', color: 'primary.main', fontSize: 10 }}>
+                    ↗ 点击编辑
+                  </Typography>
+                </Box>
+              ),
+              characterId: node.character_id,  // 🆕 储存人物ID
+              characterName: node.name,
+            },
+            style: {
+              background: node.color || '#fff',
+              border: `2px solid ${node.borderColor || '#333'}`,
+              borderRadius: 8,
+              padding: 8,
+              minWidth: 80,
+              cursor: 'pointer',
+            },
+          }
+        })
+        
+        const flowEdges: Edge[] = data.edges.map((edge: any) => ({
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          label: edge.label,
+          type: 'smoothstep',
+          animated: false,
+          style: { stroke: '#888' },
+          labelStyle: { fontSize: 10, fill: '#666' },
+        }))
+        
+        setNodes(flowNodes)
+        setEdges(flowEdges)
+        setGraphStats(data.stats)
+      }
+    } catch (error) {
+      console.error('加载关系图失败:', error)
+    } finally {
+      setGraphLoading(false)
+    }
+  }
+
+  // 🆕 节点点击处理 - 打开对应人物的编辑对话框
+  const handleNodeClick = (_event: React.MouseEvent, node: Node) => {
+    const characterId = node.data?.characterId
+    if (characterId) {
+      const character = characters.find((c: any) => c.id === characterId)
+      if (character) {
+        setGraphDialogOpen(false)  // 先关闭关系图对话框
+        setTimeout(() => {
+          handleOpenEditDialog(character)  // 然后打开编辑对话框
+        }, 100)
+      }
+    }
+  }
+
   return (
     <Box>
       {/* 顶部操作栏 */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Typography variant="h6">🎴 人物卡管理</Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => handleOpenEditDialog()}
-        >
-          新建角色
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Tooltip title="查看人物关系网络图">
+            <Button
+              variant="outlined"
+              color="secondary"
+              startIcon={<AccountTreeIcon />}
+              onClick={handleOpenGraphDialog}
+              disabled={characters.length === 0}
+            >
+              关系图
+            </Button>
+          </Tooltip>
+          <Tooltip title="将结构化人物卡同步到工作流的人物设定字段">
+            <Button
+              variant="outlined"
+              color="primary"
+              startIcon={syncing ? <CircularProgress size={20} /> : <SyncIcon />}
+              onClick={handleOpenSyncDialog}
+              disabled={characters.length === 0 || syncing}
+            >
+              同步到工作流
+            </Button>
+          </Tooltip>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => handleOpenEditDialog()}
+          >
+            新建角色
+          </Button>
+        </Box>
       </Box>
 
       {/* 使用说明 */}
@@ -513,6 +867,175 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
               />
             </Grid>
 
+            {/* 功法管理 */}
+            <Grid item xs={12}>
+              <Box sx={{ mt: 1, p: 2, bgcolor: 'grey.50', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+                <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
+                  📚 已掌握功法
+                </Typography>
+
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+                  <TextField
+                    select
+                    label="选择功法添加"
+                    size="small"
+                    sx={{ minWidth: 220 }}
+                    value={selectedTechniqueId}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setSelectedTechniqueId(value === '' ? '' : Number(value))
+                    }}
+                  >
+                    <MenuItem value=""><em>请选择功法</em></MenuItem>
+                    {availableTechniques.map((t: any) => (
+                      <MenuItem key={t.technique_item_id || t.id} value={t.technique_item_id || t.id}>
+                        {t.technique_name || t.name}{t.technique_code ? `（${t.technique_code}）` : ''}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={handleAddTechnique}
+                    disabled={!selectedTechniqueId}
+                  >
+                    添加
+                  </Button>
+                </Box>
+
+                <Box sx={{ maxHeight: 200, overflowY: 'auto' }}>
+                  {characterTechniques.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary">
+                      尚未为该角色添加任何功法
+                    </Typography>
+                  ) : (
+                    characterTechniques.map((t: any, index: number) => (
+                      <Box
+                        key={`${t.technique_item_id}-${index}`}
+                        sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 1, p: 1, bgcolor: 'white', borderRadius: 1 }}
+                      >
+                        <Typography variant="body2" sx={{ minWidth: 100, fontWeight: 500 }}>
+                          {t.technique_name || availableTechniques.find((m: any) => 
+                            (m.technique_item_id || m.id) === t.technique_item_id
+                          )?.technique_name || '未知功法'}
+                        </Typography>
+                        <TextField
+                          size="small"
+                          label="熟练度"
+                          value={t.proficiency || ''}
+                          onChange={(e) => handleUpdateTechniqueField(index, 'proficiency', e.target.value)}
+                          sx={{ width: 100 }}
+                        />
+                        <TextField
+                          size="small"
+                          label="学会章节"
+                          type="number"
+                          value={t.learned_at_chapter ?? ''}
+                          onChange={(e) => handleUpdateTechniqueField(index, 'learned_at_chapter', 
+                            e.target.value === '' ? null : Number(e.target.value))}
+                          sx={{ width: 80 }}
+                        />
+                        <TextField
+                          size="small"
+                          label="备注"
+                          value={t.notes || ''}
+                          onChange={(e) => handleUpdateTechniqueField(index, 'notes', e.target.value)}
+                          sx={{ flex: 1 }}
+                        />
+                        <IconButton size="small" color="error" onClick={() => handleRemoveTechnique(index)}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    ))
+                  )}
+                </Box>
+              </Box>
+            </Grid>
+
+            {/* 🆕 人物关系管理 */}
+            <Grid item xs={12}>
+              <Box sx={{ mt: 1, p: 2, bgcolor: 'grey.50', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+                <Typography variant="subtitle2" sx={{ mb: 1.5 }}>
+                  🔗 人物关系
+                </Typography>
+
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+                  <TextField
+                    select
+                    label="目标人物"
+                    size="small"
+                    sx={{ minWidth: 160 }}
+                    value={newRelationTarget}
+                    onChange={(e) => setNewRelationTarget(e.target.value)}
+                  >
+                    <MenuItem value=""><em>请选择人物</em></MenuItem>
+                    {characters
+                      .filter((c: any) => c.id !== editingCharacter?.id)
+                      .map((c: any) => (
+                        <MenuItem key={c.id} value={c.name}>
+                          {c.name}
+                        </MenuItem>
+                      ))}
+                  </TextField>
+                  <TextField
+                    select
+                    label="关系类型"
+                    size="small"
+                    sx={{ minWidth: 140 }}
+                    value={newRelationType}
+                    onChange={(e) => setNewRelationType(e.target.value)}
+                  >
+                    <MenuItem value=""><em>请选择</em></MenuItem>
+                    <MenuItem value="父子">父子</MenuItem>
+                    <MenuItem value="母子">母子</MenuItem>
+                    <MenuItem value="兄弟">兄弟</MenuItem>
+                    <MenuItem value="姐妹">姐妹</MenuItem>
+                    <MenuItem value="师徒">师徒</MenuItem>
+                    <MenuItem value="同门">同门</MenuItem>
+                    <MenuItem value="恋人">恋人</MenuItem>
+                    <MenuItem value="夫妻">夫妻</MenuItem>
+                    <MenuItem value="战友">战友</MenuItem>
+                    <MenuItem value="朋友">朋友</MenuItem>
+                    <MenuItem value="仇敌">仇敌</MenuItem>
+                    <MenuItem value="竞争者">竞争者</MenuItem>
+                    <MenuItem value="下属">下属</MenuItem>
+                    <MenuItem value="上级">上级</MenuItem>
+                    <MenuItem value="盟友">盟友</MenuItem>
+                    <MenuItem value="其他">其他</MenuItem>
+                  </TextField>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={handleAddRelation}
+                    disabled={!newRelationTarget || !newRelationType}
+                  >
+                    添加
+                  </Button>
+                </Box>
+
+                <Box sx={{ maxHeight: 150, overflowY: 'auto' }}>
+                  {characterRelations.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary">
+                      尚未添加人物关系
+                    </Typography>
+                  ) : (
+                    <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                      {characterRelations.map((r: any, index: number) => (
+                        <Chip
+                          key={`${r.target}-${r.type}-${index}`}
+                          label={`${r.target}（${r.type}）`}
+                          onDelete={() => handleRemoveRelation(index)}
+                          size="small"
+                          color="secondary"
+                          variant="outlined"
+                        />
+                      ))}
+                    </Box>
+                  )}
+                </Box>
+              </Box>
+            </Grid>
+
             {/* 自动追踪关联（只读展示） */}
             {editingCharacter && (
               <Grid item xs={12}>
@@ -610,9 +1133,13 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
           </Grid>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseEditDialog}>取消</Button>
-          <Button variant="contained" onClick={handleSaveCharacter} disabled={!formData.name}>
-            保存
+          <Button onClick={handleCloseEditDialog} disabled={saving}>取消</Button>
+          <Button 
+            variant="contained" 
+            onClick={handleSaveCharacter} 
+            disabled={!formData.name || saving}
+          >
+            {saving ? '保存中...' : '保存'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -760,6 +1287,155 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
             </Box>
           )}
         </DialogContent>
+      </Dialog>
+
+      {/* 🆕 同步到工作流确认对话框 */}
+      <Dialog
+        open={syncDialogOpen}
+        onClose={() => !syncing && setSyncDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <SyncIcon color="primary" />
+            同步人物卡到工作流
+          </Box>
+          <IconButton onClick={() => setSyncDialogOpen(false)} disabled={syncing} size="small">
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {syncPreviewLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress />
+            </Box>
+          ) : syncPreview ? (
+            <Box>
+              {/* 统计信息 */}
+              <Box sx={{ mb: 3, p: 2, bgcolor: 'primary.50', borderRadius: 1, border: '1px solid', borderColor: 'primary.200' }}>
+                <Typography variant="body2">
+                  将同步 <strong>{syncPreview.character_count}</strong> 个人物到工作流
+                  ，生成文本长度: <strong>{syncPreview.text_length}</strong> 字符
+                </Typography>
+                {syncPreview.stats && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                    按重要程度: {Object.entries(syncPreview.stats.by_importance || {}).map(([k, v]) => `${k}: ${v}`).join(', ')}
+                  </Typography>
+                )}
+              </Box>
+
+              {/* 预览内容 */}
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>文本预览</Typography>
+              <Box
+                sx={{
+                  p: 2,
+                  bgcolor: 'grey.50',
+                  borderRadius: 1,
+                  border: '1px solid',
+                  borderColor: 'grey.300',
+                  maxHeight: 300,
+                  overflowY: 'auto',
+                  fontFamily: 'monospace',
+                  fontSize: '0.85rem',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {syncPreview.text?.substring(0, 2000)}
+                {syncPreview.text?.length > 2000 && '\n\n... (更多内容已省略)'}
+              </Box>
+
+              <Alert severity="warning" sx={{ mt: 2 }}>
+                同步将覆盖工作流中的“人物设定”字段，请确认是否继续。
+              </Alert>
+            </Box>
+          ) : (
+            <Box sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
+              加载预览失败
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSyncDialogOpen(false)} disabled={syncing}>
+            取消
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={handleSyncToWorkflow}
+            disabled={syncing || !syncPreview}
+            startIcon={syncing ? <CircularProgress size={20} /> : <SyncIcon />}
+          >
+            {syncing ? '同步中...' : '确认同步'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 🆕 Snackbar 消息提示 */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+
+      {/* 🆕 关系图对话框 */}
+      <Dialog
+        open={graphDialogOpen}
+        onClose={() => setGraphDialogOpen(false)}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <AccountTreeIcon color="secondary" />
+            人物关系网络图
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Typography variant="body2" color="text.secondary">
+              {graphStats.total_nodes} 个人物 · {graphStats.total_edges} 条关系
+            </Typography>
+            <IconButton onClick={() => setGraphDialogOpen(false)} size="small">
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 0, height: 500 }}>
+          {graphLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+              <CircularProgress />
+            </Box>
+          ) : nodes.length === 0 ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'text.secondary' }}>
+              暂无关系数据，请先在人物卡中添加关系信息
+            </Box>
+          ) : (
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onNodeClick={handleNodeClick}
+              fitView
+              attributionPosition="bottom-left"
+            >
+              <Background color="#eee" gap={16} />
+              <Controls />
+              <MiniMap nodeColor={(node) => node.style?.background as string || '#eee'} />
+            </ReactFlow>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setGraphDialogOpen(false)}>关闭</Button>
+        </DialogActions>
       </Dialog>
     </Box>
   )

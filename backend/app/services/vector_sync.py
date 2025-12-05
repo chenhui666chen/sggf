@@ -62,3 +62,174 @@ def sync_to_vector_db(kb_type: str, name: str, content: str, metadata: dict | No
     except Exception as e:
         print(f"⚠️ 向量库同步失败: {e}")
 
+
+def upsert_character_to_vector_db(
+    character_id: int,
+    character_name: str,
+    content: str,
+    project_id: int,
+    metadata: dict | None = None
+):
+    """
+    更新或插入人物到向量库（先删除旧版本，再添加新版本）
+    
+    Args:
+        character_id: 人物ID
+        character_name: 人物名称
+        content: 人物详细信息文本
+        project_id: 项目ID
+        metadata: 可选元数据
+    """
+    vector_kb = get_vector_kb()
+    if vector_kb is None:
+        return
+    
+    try:
+        collection = vector_kb._collection
+        if collection is None:
+            return
+        
+        # 删除旧版本
+        try:
+            existing = collection.get(
+                where={
+                    "$and": [
+                        {"type": "character"},
+                        {"project_id": str(project_id)},
+                        {"character_id": str(character_id)}
+                    ]
+                }
+            )
+            if existing and existing.get('ids'):
+                collection.delete(ids=existing['ids'])
+                print(f"🗑️ 已删除旧版本人物向量: {character_name}")
+        except Exception as e:
+            print(f"⚠️ 删除旧版本失败: {e}")
+        
+        # 添加新版本
+        meta = metadata or {}
+        meta.update({
+            "type": "character",
+            "project_id": str(project_id),
+            "character_id": str(character_id),
+            "character_name": character_name,
+        })
+        vector_kb.add_character(character_name, content, meta)
+        print(f"✅ 已更新人物向量: {character_name}")
+    except Exception as e:
+        print(f"⚠️ 人物向量更新失败: {e}")
+
+
+def upsert_setting_to_vector_db(
+    setting_id: int,
+    setting_name: str,
+    content: str,
+    project_id: int,
+    category: str,
+    metadata: dict | None = None
+):
+    """
+    更新或插入设定项到向量库
+    
+    Args:
+        setting_id: 设定项ID
+        setting_name: 设定名称
+        content: 设定内容
+        project_id: 项目ID
+        category: 设定类别
+        metadata: 可选元数据
+    """
+    vector_kb = get_vector_kb()
+    if vector_kb is None:
+        return
+    
+    try:
+        collection = vector_kb._collection
+        if collection is None:
+            return
+        
+        # 删除旧版本
+        try:
+            existing = collection.get(
+                where={
+                    "$and": [
+                        {"type": "world_setting"},
+                        {"project_id": str(project_id)},
+                        {"setting_id": str(setting_id)}
+                    ]
+                }
+            )
+            if existing and existing.get('ids'):
+                collection.delete(ids=existing['ids'])
+                print(f"🗑️ 已删除旧版本设定向量: {setting_name}")
+        except Exception as e:
+            print(f"⚠️ 删除旧版本失败: {e}")
+        
+        # 添加新版本
+        meta = metadata or {}
+        meta.update({
+            "type": "world_setting",
+            "project_id": str(project_id),
+            "setting_id": str(setting_id),
+            "setting_name": setting_name,
+            "category": category,
+        })
+        vector_kb.add_world_setting(setting_name, content, meta)
+        print(f"✅ 已更新设定向量: {setting_name} [{category}]")
+    except Exception as e:
+        print(f"⚠️ 设定向量更新失败: {e}")
+
+
+def delete_character_from_vector_db(character_id: int, project_id: int):
+    """从向量库删除人物"""
+    vector_kb = get_vector_kb()
+    if vector_kb is None:
+        return
+    
+    try:
+        collection = vector_kb._collection
+        if collection is None:
+            return
+        
+        existing = collection.get(
+            where={
+                "$and": [
+                    {"type": "character"},
+                    {"project_id": str(project_id)},
+                    {"character_id": str(character_id)}
+                ]
+            }
+        )
+        if existing and existing.get('ids'):
+            collection.delete(ids=existing['ids'])
+            print(f"🗑️ 已从向量库删除人物 (ID: {character_id})")
+    except Exception as e:
+        print(f"⚠️ 删除人物向量失败: {e}")
+
+
+def delete_setting_from_vector_db(setting_id: int, project_id: int):
+    """从向量库删除设定"""
+    vector_kb = get_vector_kb()
+    if vector_kb is None:
+        return
+    
+    try:
+        collection = vector_kb._collection
+        if collection is None:
+            return
+        
+        existing = collection.get(
+            where={
+                "$and": [
+                    {"type": "world_setting"},
+                    {"project_id": str(project_id)},
+                    {"setting_id": str(setting_id)}
+                ]
+            }
+        )
+        if existing and existing.get('ids'):
+            collection.delete(ids=existing['ids'])
+            print(f"🗑️ 已从向量库删除设定 (ID: {setting_id})")
+    except Exception as e:
+        print(f"⚠️ 删除设定向量失败: {e}")
+

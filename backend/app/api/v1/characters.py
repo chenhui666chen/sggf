@@ -170,6 +170,28 @@ async def update_character(
     db.add(character)
     db.commit()
     db.refresh(character)
+    
+    # 🆕 同步到向量库
+    try:
+        from app.services.vector_sync import upsert_character_to_vector_db
+        # 生成人物向量内容
+        vector_content = f"""
+人物名称: {character.name}
+角色类型: {character.role or '未设定'}
+所属势力: {character.faction or '未设定'}
+状态: {character.life_status or '未知'}
+简介: {character.summary or ''}
+详细信息: {character.profile or ''}
+""".strip()
+        upsert_character_to_vector_db(
+            character_id=character.id,
+            character_name=character.name,
+            content=vector_content,
+            project_id=character.project_id
+        )
+    except Exception as e:
+        print(f"⚠️ 同步人物到向量库失败: {e}")
+    
     return character
 
 
@@ -190,8 +212,18 @@ async def delete_character(
 
     _ensure_project_owned(character.project_id, current_user, db)
 
+    # 🆕 从向量库删除
+    project_id = character.project_id
+    char_id = character.id
+    
     db.delete(character)
     db.commit()
+    
+    try:
+        from app.services.vector_sync import delete_character_from_vector_db
+        delete_character_from_vector_db(char_id, project_id)
+    except Exception as e:
+        print(f"⚠️ 从向量库删除人物失败: {e}")
 
 
 @router.get("/characters/{character_id}/auto-tracked-relations")
@@ -520,3 +552,242 @@ async def get_character_appearance_timeline(
         "timeline": timeline
     }
 
+
+# ---------------------------------------------------------------------------
+# 人物卡同步到工作流
+# ---------------------------------------------------------------------------
+
+
+@router.post("/projects/{project_id}/sync-characters-to-workflow")
+async def sync_characters_to_workflow(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    🆕 将项目的结构化人物卡数据同步到工作流的人物设定字段
+    
+    返回：
+    {
+        "success": true,
+        "message": "已同步68个人物到工作流",
+        "character_count": 68,
+        "text_length": 12345,
+        "preview": "# 人物设定\n\n## 主角\n\n### 林风..."
+    }
+    """
+    from sqlalchemy import text
+    from app.services.character_text_generator import CharacterTextGenerator
+    
+    _ensure_project_owned(project_id, current_user, db)
+    
+    # 1. 生成人物文本
+    characters_text = CharacterTextGenerator.generate_project_characters_text(
+        project_id=project_id,
+        db=db,
+        group_by_importance=True,
+        include_all_details=True,
+    )
+    
+    # 2. 获取统计信息
+    stats = CharacterTextGenerator.get_character_stats(project_id, db)
+    
+    # 3. 更新到project_settings表
+    update_query = text("""
+        UPDATE project_settings
+        SET characters = :content, updated_at = :updated_at
+        WHERE project_id = :project_id
+    """)
+    
+    from datetime import datetime
+    db.execute(update_query, {
+        "content": characters_text,
+        "updated_at": datetime.now().isoformat(),
+        "project_id": project_id
+    })
+    db.commit()
+    
+    # 4. 返回结果
+    preview = characters_text[:500] + "..." if len(characters_text) > 500 else characters_text
+    
+    return {
+        "success": True,
+        "message": f"已同步{stats['total']}个人物到工作流",
+        "character_count": stats["total"],
+        "text_length": len(characters_text),
+        "stats": stats,
+        "preview": preview
+    }
+
+
+@router.get("/projects/{project_id}/characters-text-preview")
+async def get_characters_text_preview(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    🆕 预览人物卡生成的文本（不保存）
+    
+    用于同步前预览效果
+    """
+    from app.services.character_text_generator import CharacterTextGenerator
+    
+    _ensure_project_owned(project_id, current_user, db)
+    
+    # 生成人物文本
+    characters_text = CharacterTextGenerator.generate_project_characters_text(
+        project_id=project_id,
+        db=db,
+        group_by_importance=True,
+        include_all_details=True,
+    )
+    
+    stats = CharacterTextGenerator.get_character_stats(project_id, db)
+    
+    return {
+        "character_count": stats["total"],
+        "text_length": len(characters_text),
+        "stats": stats,
+        "text": characters_text
+    }
+
+
+# ---------------------------------------------------------------------------
+# 🆕 人物关系网络图 API
+# ---------------------------------------------------------------------------
+
+@router.get("/projects/{project_id}/character-relationship-graph")
+async def get_character_relationship_graph(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    🆕 获取人物关系网络图数据
+    
+    返回适合前端可视化库（如 React Flow）使用的节点和边数据
+    
+    返回:
+    {
+        "nodes": [{"id": "1", "name": "李铁柱", "role": "主角", ...}],
+        "edges": [{"source": "1", "target": "2", "label": "师徒", ...}],
+        "stats": {"total_nodes": 10, "total_edges": 15}
+    }
+    """
+    import json
+    
+    _ensure_project_owned(project_id, current_user, db)
+    
+    # 获取所有人物
+    characters = db.query(Character).filter(
+        Character.project_id == project_id
+    ).all()
+    
+    if not characters:
+        return {
+            "nodes": [],
+            "edges": [],
+            "stats": {"total_nodes": 0, "total_edges": 0}
+        }
+    
+    # 构建节点
+    nodes = []
+    character_id_map = {}  # name -> id 映射
+    
+    # 重要程度颜色映射
+    importance_colors = {
+        "主角": "#ff6b6b",
+        "配角": "#4ecdc4",
+        "跑龙套": "#95e1d3",
+        "群众演员": "#dfe6e9",
+    }
+    
+    # 角色类型颜色
+    role_colors = {
+        "主角方": "#74b9ff",
+        "对手方": "#fd79a8",
+        "中立方": "#ffeaa7",
+    }
+    
+    for char in characters:
+        node = {
+            "id": str(char.id),
+            "character_id": char.id,  # 🆕 添加数字ID用于前端点击编辑
+            "name": char.name,
+            "role": char.role or "未分类",
+            "importance": char.importance_level or "配角",
+            "gender": char.gender,
+            "age": char.age,
+            "faction": char.faction,
+            "summary": char.summary[:50] + "..." if char.summary and len(char.summary) > 50 else char.summary,
+            "color": importance_colors.get(char.importance_level, "#b2bec3"),
+            "borderColor": role_colors.get(char.role, "#636e72"),
+        }
+        nodes.append(node)
+        character_id_map[char.name] = str(char.id)
+    
+    # 构建边（关系）
+    edges = []
+    edge_set = set()  # 用于去重
+    
+    for char in characters:
+        # 从 relations 字段解析关系
+        if char.relations:
+            try:
+                relations = json.loads(char.relations)
+                if isinstance(relations, list):
+                    for rel in relations:
+                        if isinstance(rel, dict):
+                            target_name = rel.get("target", "")
+                            rel_type = rel.get("type", "关联")
+                            if target_name and target_name in character_id_map:
+                                source_id = str(char.id)
+                                target_id = character_id_map[target_name]
+                                # 去重（双向只保留一条）
+                                edge_key = tuple(sorted([source_id, target_id]))
+                                if edge_key not in edge_set:
+                                    edge_set.add(edge_key)
+                                    edges.append({
+                                        "id": f"e{source_id}-{target_id}",
+                                        "source": source_id,
+                                        "target": target_id,
+                                        "label": rel_type,
+                                        "type": "smoothstep",
+                                    })
+            except:
+                pass
+        
+        # 从 relationship_network 字段解析
+        if char.relationship_network:
+            try:
+                network = json.loads(char.relationship_network)
+                if isinstance(network, list):
+                    for rel in network:
+                        if isinstance(rel, dict):
+                            target_name = rel.get("target", rel.get("name", ""))
+                            rel_type = rel.get("type", rel.get("relation", "关联"))
+                            if target_name and target_name in character_id_map:
+                                source_id = str(char.id)
+                                target_id = character_id_map[target_name]
+                                edge_key = tuple(sorted([source_id, target_id]))
+                                if edge_key not in edge_set:
+                                    edge_set.add(edge_key)
+                                    edges.append({
+                                        "id": f"e{source_id}-{target_id}",
+                                        "source": source_id,
+                                        "target": target_id,
+                                        "label": rel_type,
+                                        "type": "smoothstep",
+                                    })
+            except:
+                pass
+    
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "total_nodes": len(nodes),
+            "total_edges": len(edges),
+        }
+    }

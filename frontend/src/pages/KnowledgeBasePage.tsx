@@ -40,6 +40,7 @@ import ArticleIcon from '@mui/icons-material/Article'
 import PeopleAltIcon from '@mui/icons-material/PeopleAlt'
 import Tooltip from '@mui/material/Tooltip'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
+import SyncIcon from '@mui/icons-material/Sync'
 import { logger } from '@/utils/logger'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
 import VditorEditor from '@/components/VditorEditor'
@@ -224,6 +225,9 @@ export default function KnowledgeBasePage() {
   // 🆕 智能提取相关状态
   const [smartExtractLoading, setSmartExtractLoading] = useState(false)
   const [smartExtractData, setSmartExtractData] = useState<any>(null)
+
+  // 🆕 设定同步到工作流状态
+  const [syncingSettings, setSyncingSettings] = useState(false)
 
   // 提示消息
   const [snackbarOpen, setSnackbarOpen] = useState(false)
@@ -1096,6 +1100,35 @@ export default function KnowledgeBasePage() {
     }
   }
 
+  // 🆕 同步设定到工作流
+  const handleSyncSettingsToWorkflow = async () => {
+    if (!projectId) return
+
+    setSyncingSettings(true)
+    try {
+      const response = await fetch(`/api/v1/projects/${projectId}/sync-settings-to-workflow`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        showSnackbar(`✅ ${data.message}`, 'success')
+        // 刷新工作流数据
+        loadWorkflowData()
+      } else {
+        showSnackbar('同步失败，请重试', 'error')
+      }
+    } catch (err) {
+      logger.error('❗ 同步设定到工作流失败:', err)
+      showSnackbar('同步失败，请重试', 'error')
+    } finally {
+      setSyncingSettings(false)
+    }
+  }
+
   // ==================== 渲染 ====================
 
   return (
@@ -1493,6 +1526,25 @@ export default function KnowledgeBasePage() {
                       </ListItem>
                     ))}
                   </List>
+                  
+                  {/* 🆕 同步到工作流按钮 */}
+                  <Tooltip
+                    title="将所有设定同步到工作流的世界观设定字段，供AI生成内容时参考"
+                    placement="top"
+                    arrow
+                  >
+                    <Button
+                      variant="outlined"
+                      color="primary"
+                      size="small"
+                      fullWidth
+                      startIcon={syncingSettings ? <CircularProgress size={16} /> : <SyncIcon />}
+                      onClick={handleSyncSettingsToWorkflow}
+                      disabled={syncingSettings || collections.length === 0}
+                    >
+                      {syncingSettings ? '同步中...' : '同步到工作流'}
+                    </Button>
+                  </Tooltip>
                 </>
               )}
             </Paper>

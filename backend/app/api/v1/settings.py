@@ -366,6 +366,21 @@ async def update_setting_item(
     db.add(item)
     db.commit()
     db.refresh(item)
+    
+    # 🆕 同步到向量库
+    try:
+        from app.services.vector_sync import upsert_setting_to_vector_db
+        if item.content:  # 只同步有内容的设定项
+            upsert_setting_to_vector_db(
+                setting_id=item.id,
+                setting_name=item.name,
+                content=item.content,
+                project_id=collection.project_id,
+                category=collection.category
+            )
+    except Exception as e:
+        print(f"⚠️ 同步设定到向量库失败: {e}")
+    
     return _item_to_schema(item)
 
 
@@ -447,8 +462,18 @@ async def delete_setting_item(
 
     _ensure_project_owned(collection.project_id, current_user, db)
 
+    # 🆕 从向量库删除
+    project_id = collection.project_id
+    setting_id = item.id
+    
     db.delete(item)
     db.commit()
+    
+    try:
+        from app.services.vector_sync import delete_setting_from_vector_db
+        delete_setting_from_vector_db(setting_id, project_id)
+    except Exception as e:
+        print(f"⚠️ 从向量库删除设定失败: {e}")
 
 
 @router.patch(
@@ -715,6 +740,54 @@ async def get_project_settings_summary(
     _ensure_project_owned(project_id, current_user, db)
     summary = build_project_settings_summary(project_id, db)
     return {"project_id": project_id, "summary": summary}
+
+
+@router.post("/projects/{project_id}/sync-settings-to-workflow")
+async def sync_settings_to_workflow(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    同步设定到工作流的世界观设定字段
+    
+    将当前项目的所有设定集合汇总，更新到 project_settings.world_setting 字段
+    """
+    from sqlalchemy import text
+    from datetime import datetime
+    
+    _ensure_project_owned(project_id, current_user, db)
+    
+    # 生成设定摘要
+    summary = build_project_settings_summary(project_id, db)
+    
+    if not summary:
+        return {
+            "success": True,
+            "message": "暂无设定项需要同步",
+            "synced_length": 0
+        }
+    
+    # 更新到 project_settings 表
+    update_query = text("""
+        UPDATE project_settings
+        SET world_setting = :world_setting,
+            updated_at = :updated_at
+        WHERE project_id = :project_id
+    """)
+    
+    db.execute(update_query, {
+        "world_setting": json.dumps(summary, ensure_ascii=False),
+        "updated_at": datetime.now().isoformat(),
+        "project_id": project_id
+    })
+    db.commit()
+    
+    return {
+        "success": True,
+        "message": f"已同步 {len(summary)} 字符的设定到工作流",
+        "synced_length": len(summary)
+    }
 
 
 @router.post("/projects/{project_id}/auto-merge-settings")
