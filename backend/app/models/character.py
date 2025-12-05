@@ -113,7 +113,7 @@ class Character(Base):
     )
 
     # 关系定义
-    project: Mapped["Project"] = relationship("Project", lazy="select")
+    project: Mapped["Project"] = relationship("Project", back_populates="characters", lazy="select")
     
     # 明确指定 foreign_keys 以解决歧义
     current_realm: Mapped[Optional["SettingItem"]] = relationship(

@@ -3989,93 +3989,9 @@ async def execute_generate_next_chapter_task(
 
         logger.info(f"   ✅ 章节已保存: id={new_chapter_id}")
         
-        # 🆕 阶段2：从章节自动抽取设定候选并入库（供人工确认）
-        try:
-            import re
-            import json
-            from app.models.setting import SettingCollection, SettingItem
-
-            # 确保存在“设定候选”集合
-            candidate_collection = db.query(SettingCollection).filter(
-                SettingCollection.project_id == project_id,
-                SettingCollection.category == "candidate"
-            ).first()
-            if not candidate_collection:
-                candidate_collection = SettingCollection(
-                    project_id=project_id,
-                    name="设定候选",
-                    category="candidate",
-                    description="自动从章节抽取的待确认设定项",
-                    order=999
-                )
-                db.add(candidate_collection)
-                db.commit()
-                db.refresh(candidate_collection)
-
-            chapter_text = final_version or ""
-            patterns = [
-                ("功法", r"([一-龥A-Za-z0-9]{2,12})功法|功法《(.{1,20})》"),
-                ("丹药", r"([一-龥A-Za-z0-9]{2,12})丹药|丹药《(.{1,20})》"),
-                ("阵法", r"([一-龥A-Za-z0-9]{2,12})阵法|阵法《(.{1,20})》"),
-                ("门派/宗门", r"([一-龥A-Za-z0-9]{2,12})(宗门|门派)"),
-                ("秘境/遗迹", r"([一-龥A-Za-z0-9]{2,12})(秘境|遗迹)"),
-                ("城市/城镇", r"([一-龥A-Za-z0-9]{2,12})(城|城镇|都市)"),
-            ]
-
-            # 推荐目标集合类别映射
-            typ_to_category_map = {
-                "功法": "technique_system",
-                "丹药": "pill_system",
-                "阵法": "formation_system",
-                "门派/宗门": None,
-                "秘境/遗迹": "map_system",
-                "城市/城镇": "map_system",
-            }
-
-            extracted = []
-            for typ, pat in patterns:
-                for m in re.finditer(pat, chapter_text):
-                    name = (m.group(1) or (m.group(2) if m.lastindex and m.lastindex >= 2 else "")).strip()
-                    if not name:
-                        continue
-                    if any(x["name"] == name and x["type"] == typ for x in extracted):
-                        continue
-                    start = max(m.start() - 50, 0)
-                    end = min(m.end() + 50, len(chapter_text))
-                    excerpt = chapter_text[start:end]
-                    extracted.append({"type": typ, "name": name, "excerpt": excerpt})
-
-            # 限制一次入库数量，避免刷屏
-            for item in extracted[:10]:
-                # 计算推荐目标集合
-                recommended_category = typ_to_category_map.get(item['type'])
-                target_collection = None
-                if recommended_category:
-                    target_collection = db.query(SettingCollection).filter(
-                        SettingCollection.project_id == project_id,
-                        SettingCollection.category == recommended_category
-                    ).first()
-                # 选择写入集合：优先正式集合，否则候选集合
-                write_collection_id = (target_collection.id if target_collection else candidate_collection.id)
-                # 标记标签与推荐信息
-                tag_list = (["自动抽取"] if target_collection else ["候选","自动抽取"])
-                recommended_note = (f"\n推荐目标集合：{recommended_category}" if (recommended_category and not target_collection) else "")
-                si = SettingItem(
-                    collection_id=write_collection_id,
-                    name=f"{item['name']}（{item['type']}）",
-                    code=None,
-                    level=1,
-                    tags=json.dumps(tag_list, ensure_ascii=False),
-                    content=f"来源：第{next_chapter_number}章\n上下文：{item['excerpt']}\n类型：{item['type']}" + recommended_note,
-                    relations=None,
-                    order=0
-                )
-                db.add(si)
-            if extracted:
-                db.commit()
-                logger.info(f"   ✓ 抽取设定 {len(extracted[:10])} 项并入库（含推荐集合规则）")
-        except Exception as e:
-            logger.warning(f"   ⚠️ 设定候选抽取失败: {e}")
+        # 🚨 已移除正则快速提取，统一使用后台AI提取服务
+        # 见: start_chapter_post_save_task -> chapter_post_save.py -> unified_extraction.py
+        # 所有设定提取现在都经过AI处理，生成高质量描述
 
         # 🆕 阶段3：自动合并高置信度设定项到正式集合
         try:

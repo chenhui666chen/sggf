@@ -4533,7 +4533,7 @@ export default function WorkflowControlPage() {
           ) : (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               {/* 基础信息 */}
-              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 2 }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 2 }}>
                 <TextField
                   label="姓名"
                   required
@@ -4618,18 +4618,7 @@ export default function WorkflowControlPage() {
                   <MenuItem value="失踪">失踪</MenuItem>
                   <MenuItem value="未知">未知</MenuItem>
                 </TextField>
-                <TextField
-                  label="首次出场章节编号"
-                  type="number"
-                  value={characterFormData?.first_appearance_chapter ?? ''}
-                  onChange={(e) => {
-                    const value = e.target.value
-                    setCharacterFormData((prev: any) => ({
-                      ...prev,
-                      first_appearance_chapter: value === '' ? undefined : Number(value),
-                    }))
-                  }}
-                />
+
                 <TextField
                   select
                   label="当前境界"

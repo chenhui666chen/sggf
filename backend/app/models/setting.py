@@ -37,7 +37,7 @@ class SettingCollection(Base):
         DateTime(timezone=True), nullable=True, server_default=func.now(), onupdate=func.now()
     )
 
-    project: Mapped["Project"] = relationship("Project", lazy="select")
+    project: Mapped["Project"] = relationship("Project", back_populates="setting_collections", lazy="select")
     items: Mapped[List["SettingItem"]] = relationship(
         "SettingItem",
         lazy="select",

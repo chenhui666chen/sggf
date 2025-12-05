@@ -10,6 +10,8 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.memory import Memory
+    from app.models.setting import SettingCollection
+    from app.models.character import Character
 
 
 class Project(Base):
@@ -37,6 +39,18 @@ class Project(Base):
         "Memory",
         lazy="select",
         cascade="all, delete-orphan"  # 级联删除记忆
+    )
+    setting_collections: Mapped[List["SettingCollection"]] = relationship(
+        "SettingCollection",
+        back_populates="project",
+        lazy="select",
+        cascade="all, delete-orphan"  # 级联删除设定集合
+    )
+    characters: Mapped[List["Character"]] = relationship(
+        "Character",
+        back_populates="project",
+        lazy="select",
+        cascade="all, delete-orphan"  # 级联删除角色
     )
 
     def __repr__(self):

@@ -39,6 +39,7 @@ import FolderIcon from '@mui/icons-material/Folder'
 import ArticleIcon from '@mui/icons-material/Article'
 import PeopleAltIcon from '@mui/icons-material/PeopleAlt'
 import Tooltip from '@mui/material/Tooltip'
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import { logger } from '@/utils/logger'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
 import VditorEditor from '@/components/VditorEditor'
@@ -96,53 +97,62 @@ function TabPanel(props: TabPanelProps) {
   )
 }
 
-// Category 中文名称映射（完整版 - 27种体系）
+// Category 中文名称映射（与后端 HIERARCHY_DEFAULTS 保持一致 - 33种体系）
 const CATEGORY_NAME_MAP: Record<string, string> = {
-  // 地理与世界观
+  // 地理与世界观（通用）
   map_system: '地图体系',
-  
+  organization_force_system: '组织势力体系',
+  resource_system: '资源体系',
+
   // 修仙/玄幻体系
   cultivation_realm_system: '修仙境界体系',
-  martial_realm_system: '武道境界体系',
   technique_system: '功法体系',
   pill_system: '丹药体系',
   formation_system: '阵法体系',
   talisman_system: '符箓体系',
-  weapon_system: '武器与法宝体系',
-  resource_system: '资源体系',
-  force_system: '势力体系',
-  
+  weapon_system: '武器法宝体系',
+
   // 都市异能体系
-  ability_realm_system: '异能境界体系',
-  ability_awakening_growth_system: '异能体系',
-  hidden_organization_force_system: '组织势力体系',
+  ability_system: '异能体系',
   network_social_relationship_system: '人脉关系体系',
   special_artifact_relic_system: '道具遗物体系',
   wealth_business_empire_system: '财富商业体系',
-  
+
   // 西幻/魔法体系
   magic_realm_system: '魔法境界体系',
   magic_system: '魔法体系',
   race_bloodline_system: '种族血脉体系',
   profession_class_system: '职业体系',
-  
+
+  // 武侠体系
+  martial_realm_system: '武道境界体系',
+
   // 科幻体系
   interstellar_travel_exploration_system: '星际航行体系',
   ai_robot_system: 'AI机器人体系',
-  
+
   // 末世废土体系
   survivor_settlement_order_system: '聚落秩序体系',
   mutation_infection_aberration_system: '变异感染体系',
-  
+
   // 游戏系统体系
   skill_talent_system: '技能天赋体系',
-  
+
   // 角色体系
   character_system: '角色体系',
-  
+
+  // 权力政治体系（历史权谋）
+  power_official_system: '权力与官制体系',
+  military_warfare_system: '军事与战争体系',
+  economy_taxation_system: '经济与财税体系',
+  culture_etiquette_examination_system: '文化礼制体系',
+  legal_criminal_system: '律法刑罚体系',
+  communication_intelligence_system: '通讯情报体系',
+  historical_event_legend_system: '历史与传说体系',
+  lifestyle_custom_system: '民生风俗体系',
+
   // 特殊
   candidate: '候选集合',
-  organization_system: '组织体系',
 }
 
 // ==================== 主组件 ====================
@@ -157,8 +167,12 @@ export default function KnowledgeBasePage() {
   // 设定中心子 Tab 状态 (0=设定管理, 1=热门设定, 2=关系网络)
   const [settingSubTabValue, setSettingSubTabValue] = useState(0)
   
-  // 人物设定子 Tab 状态 (0=人物文本, 1=人物卡管理, 2=扩展人物)
+  // 人物设定子 Tab 状态 (0=人物文本, 1=人物卡管理)
   const [characterSubTabValue, setCharacterSubTabValue] = useState(0)
+
+  // 🆕 扩展人物结果弹窗状态
+  const [showExpandCharactersDialog, setShowExpandCharactersDialog] = useState(false)
+  const [expandCharactersResult, setExpandCharactersResult] = useState<any>(null)
 
   // ==================== 文本内容相关状态 ====================
   const [loading, setLoading] = useState(false)  // 🔥 修复：初始值为false，避免页面初始时一直加载
@@ -206,6 +220,10 @@ export default function KnowledgeBasePage() {
   const [newItemLevel, setNewItemLevel] = useState(1)
   const [newItemContent, setNewItemContent] = useState('')
   const [newItemTags, setNewItemTags] = useState('')
+
+  // 🆕 智能提取相关状态
+  const [smartExtractLoading, setSmartExtractLoading] = useState(false)
+  const [smartExtractData, setSmartExtractData] = useState<any>(null)
 
   // 提示消息
   const [snackbarOpen, setSnackbarOpen] = useState(false)
@@ -345,10 +363,9 @@ export default function KnowledgeBasePage() {
           console.log('✅ 人物扩展任务完成', data)
           showSnackbar(data.message || '✅ 人物扩展完成！', 'success')
           
-          // 显示结果对话框
-          setResultDialogType('characters')
-          setResultDialogData(data.result)
-          setShowResultDialog(true)
+          // 🆕 显示结果弹窗（不再使用通用结果弹窗）
+          setExpandCharactersResult(data.result)
+          setShowExpandCharactersDialog(true)
           
           // 刷新数据
           loadWorkflowData()
@@ -853,6 +870,54 @@ export default function KnowledgeBasePage() {
     setNewItemLevel(1)
     setNewItemContent('')
     setNewItemTags('')
+    setSmartExtractData(null)  // 🆕 清空智能提取数据
+  }
+
+  // 🆕 智能提取设定项相关内容
+  const handleSmartExtract = async () => {
+    if (!selectedItem) return
+
+    setSmartExtractLoading(true)
+    setSmartExtractData(null)
+
+    try {
+      const response = await fetch(`/api/v1/setting-items/${selectedItem.id}/smart-extract`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setSmartExtractData(data)
+        showSnackbar('✅ 智能提取完成', 'success')
+      } else {
+        showSnackbar('提取失败', 'error')
+      }
+    } catch (error) {
+      logger.error('智能提取失败:', error)
+      showSnackbar('提取失败', 'error')
+    } finally {
+      setSmartExtractLoading(false)
+    }
+  }
+
+  // 🆕 应用推荐的标签
+  const handleApplySuggestedTags = (tags: string[]) => {
+    const currentTags = newItemTags ? newItemTags.split(',').map(t => t.trim()) : []
+    const mergedTags = [...new Set([...currentTags, ...tags])]
+    setNewItemTags(mergedTags.join(', '))
+    showSnackbar(`✅ 已添加 ${tags.length} 个标签`, 'success')
+  }
+
+  // 🆕 应用提取的内容
+  const handleApplyExtractedContent = (excerpt: string) => {
+    if (newItemContent) {
+      setNewItemContent(`${newItemContent}\n\n---\n${excerpt}`)
+    } else {
+      setNewItemContent(excerpt)
+    }
+    showSnackbar('✅ 已追加内容', 'success')
   }
 
   const showSnackbar = (message: string, severity: 'success' | 'error') => {
@@ -1052,6 +1117,9 @@ export default function KnowledgeBasePage() {
         >
           返回
         </Button>
+        <Alert severity="info" sx={{ flex: 1, mx: 3, py: 0.5 }} icon={false}>
+          📚 此页面展示工作流生成的设定数据，编辑后将同步到工作流中
+        </Alert>
         <Typography variant="h5" sx={{
           fontWeight: 600,
           display: 'flex',
@@ -1095,7 +1163,6 @@ export default function KnowledgeBasePage() {
               >
                 <Tab label="📝 人物文本" />
                 <Tab label="🎴 人物卡管理" />
-                <Tab label="⭐ 扩展人物" />
               </Tabs>
             </Box>
           )}
@@ -1117,10 +1184,6 @@ export default function KnowledgeBasePage() {
 
           {!loading && !error && (
             <>
-              <Alert severity="info" sx={{ mb: 3 }}>
-                📖 此页面展示工作流生成的设定数据，编辑后将同步到工作流中
-              </Alert>
-
               {/* 🆕 只在非人物Tab或人物文本子Tab显示操作按钮 */}
               {(mainTabValue !== 1 || characterSubTabValue === 0) && (
               <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
@@ -1136,7 +1199,7 @@ export default function KnowledgeBasePage() {
                       编辑{getTabTitle()}
                     </Button>
                     
-                    {/* 只在大纲设定Tab显示扩展按钮 */}
+                    {/* 大纲设定扩展按钮 + 人物设定扩展按钮（与布局统一） */}
                     {mainTabValue === 2 && (
                       <>
                         <TextField
@@ -1166,6 +1229,40 @@ export default function KnowledgeBasePage() {
                               sx={{ borderRadius: 2 }}
                             >
                               {expandingOutline ? '扩展中...' : '扩展大纲'}
+                            </Button>
+                          </span>
+                        </Tooltip>
+                      </>
+                    )}
+                    {mainTabValue === 1 && characterSubTabValue === 0 && (
+                      <>
+                        <TextField
+                          label="目标人物数"
+                          type="number"
+                          size="small"
+                          value={targetCharacterCount}
+                          onChange={(e) => {
+                            const value = parseInt(e.target.value, 10)
+                            setTargetCharacterCount(Number.isNaN(value) ? 0 : value)
+                          }}
+                          inputProps={{ min: 1 }}
+                          sx={{ width: 150 }}
+                        />
+                        <Tooltip
+                          title={expandingCharacters ? "扩展进行中，请稍候" : "根据当前的世界观、人物和大纲设定，智能扩展更多人物"}
+                          placement="top"
+                          arrow
+                        >
+                          <span>
+                            <Button
+                              variant="outlined"
+                              color="primary"
+                              startIcon={expandingCharacters ? <CircularProgress size={20} /> : <PeopleAltIcon />}
+                              onClick={handleExpandCharacters}
+                              disabled={!characters || !worldSetting || !plotOutline || expandingCharacters || expandingOutline}
+                              sx={{ borderRadius: 2 }}
+                            >
+                              {expandingCharacters ? '扩展中...' : '扩展人物'}
                             </Button>
                           </span>
                         </Tooltip>
@@ -1245,58 +1342,7 @@ export default function KnowledgeBasePage() {
                     />
                   )}
 
-                  {/* 子Tab 2: 扩展人物 */}
-                  {characterSubTabValue === 2 && (
-                    <Box>
-                      <Box sx={{ display: 'flex', gap: 2, mb: 3, alignItems: 'center' }}>
-                        <TextField
-                          label="目标人物数"
-                          type="number"
-                          size="small"
-                          value={targetCharacterCount}
-                          onChange={(e) => {
-                            const value = parseInt(e.target.value, 10)
-                            setTargetCharacterCount(Number.isNaN(value) ? 0 : value)
-                          }}
-                          inputProps={{ min: 1 }}
-                          sx={{ width: 150 }}
-                        />
-                        <Tooltip
-                          title={expandingCharacters ? "扩展进行中，请稍候" : "根据当前的世界观、人物和大纲设定，智能扩展更多人物"}
-                          placement="top"
-                          arrow
-                        >
-                          <span>
-                            <Button
-                              variant="contained"
-                              color="primary"
-                              startIcon={expandingCharacters ? <CircularProgress size={20} /> : <PeopleAltIcon />}
-                              onClick={handleExpandCharacters}
-                              disabled={!characters || !worldSetting || !plotOutline || expandingCharacters || expandingOutline}
-                              sx={{ borderRadius: 2 }}
-                            >
-                              {expandingCharacters ? '扩展中...' : '扩展人物'}
-                            </Button>
-                          </span>
-                        </Tooltip>
-                      </Box>
-                      <Paper
-                        elevation={0}
-                        sx={{
-                          bgcolor: 'background.paper',
-                          p: 4,
-                          borderRadius: 2,
-                          minHeight: 400,
-                          border: '1px solid',
-                          borderColor: 'grey.200',
-                        }}
-                      >
-                        <Typography color="text.secondary" sx={{ textAlign: 'center', py: 8 }}>
-                          👨‍👩‍👧 扩展人物后，结果将显示在这里
-                        </Typography>
-                      </Paper>
-                    </Box>
-                  )}
+                  {/* 已移除“扩展人物”子页；改为顶部与“编辑人物设定”并排的输入框+按钮展示，复用原有逻辑 */}
                 </>
               ) : (
                 // 世界观设定和大纲设定Tab的原有内容
@@ -1875,61 +1921,162 @@ export default function KnowledgeBasePage() {
         </DialogActions>
       </Dialog>
 
-      {/* 编辑设定项对话框 */}
-      <Dialog open={editItemDialog} onClose={() => setEditItemDialog(false)} maxWidth="md" fullWidth>
-        <DialogTitle>编辑设定项</DialogTitle>
+      {/* 编辑设定项对话框 - 🆕 添加智能提取面板 */}
+      <Dialog open={editItemDialog} onClose={() => setEditItemDialog(false)} maxWidth="lg" fullWidth>
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          编辑设定项
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={smartExtractLoading ? <CircularProgress size={16} /> : <AutoFixHighIcon />}
+            onClick={handleSmartExtract}
+            disabled={smartExtractLoading}
+          >
+            {smartExtractLoading ? '提取中...' : '智能提取'}
+          </Button>
+        </DialogTitle>
         <DialogContent>
-          <Grid container spacing={2}>
-            <Grid item xs={8}>
-              <TextField
-                autoFocus
-                margin="dense"
-                label="设定项名称 *"
-                fullWidth
-                value={newItemName}
-                onChange={(e) => setNewItemName(e.target.value)}
-              />
+          <Grid container spacing={3}>
+            {/* 左侧：编辑表单 */}
+            <Grid item xs={smartExtractData ? 6 : 12}>
+              <Grid container spacing={2}>
+                <Grid item xs={8}>
+                  <TextField
+                    autoFocus
+                    margin="dense"
+                    label="设定项名称 *"
+                    fullWidth
+                    value={newItemName}
+                    onChange={(e) => setNewItemName(e.target.value)}
+                  />
+                </Grid>
+                <Grid item xs={4}>
+                  <TextField
+                    margin="dense"
+                    label="代码"
+                    fullWidth
+                    value={newItemCode}
+                    onChange={(e) => setNewItemCode(e.target.value)}
+                  />
+                </Grid>
+                <Grid item xs={12}>
+                  <TextField
+                    margin="dense"
+                    label="等级"
+                    type="number"
+                    fullWidth
+                    value={newItemLevel}
+                    onChange={(e) => setNewItemLevel(Number(e.target.value))}
+                    inputProps={{ min: 1, max: 10 }}
+                  />
+                </Grid>
+                <Grid item xs={12}>
+                  <TextField
+                    margin="dense"
+                    label="标签（逗号分隔）"
+                    fullWidth
+                    value={newItemTags}
+                    onChange={(e) => setNewItemTags(e.target.value)}
+                  />
+                </Grid>
+                <Grid item xs={12}>
+                  <TextField
+                    margin="dense"
+                    label="内容"
+                    fullWidth
+                    multiline
+                    rows={smartExtractData ? 10 : 6}
+                    value={newItemContent}
+                    onChange={(e) => setNewItemContent(e.target.value)}
+                  />
+                </Grid>
+              </Grid>
             </Grid>
-            <Grid item xs={4}>
-              <TextField
-                margin="dense"
-                label="代码"
-                fullWidth
-                value={newItemCode}
-                onChange={(e) => setNewItemCode(e.target.value)}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                margin="dense"
-                label="等级"
-                type="number"
-                fullWidth
-                value={newItemLevel}
-                onChange={(e) => setNewItemLevel(Number(e.target.value))}
-                inputProps={{ min: 1, max: 10 }}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                margin="dense"
-                label="标签（逗号分隔）"
-                fullWidth
-                value={newItemTags}
-                onChange={(e) => setNewItemTags(e.target.value)}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                margin="dense"
-                label="内容"
-                fullWidth
-                multiline
-                rows={6}
-                value={newItemContent}
-                onChange={(e) => setNewItemContent(e.target.value)}
-              />
-            </Grid>
+
+            {/* 右侧：智能提取结果 */}
+            {smartExtractData && (
+              <Grid item xs={6}>
+                <Paper elevation={1} sx={{ p: 2, height: '100%', bgcolor: 'grey.50' }}>
+                  <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 'bold', color: 'primary.main' }}>
+                    🧠 AI智能提取结果
+                  </Typography>
+
+                  {/* 推荐标签 */}
+                  {smartExtractData.suggested_tags?.length > 0 && (
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="caption" color="text.secondary">推荐标签</Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                        {smartExtractData.suggested_tags.map((tag: string, idx: number) => (
+                          <Chip
+                            key={idx}
+                            label={tag}
+                            size="small"
+                            color="primary"
+                            variant="outlined"
+                            onClick={() => handleApplySuggestedTags([tag])}
+                            sx={{ cursor: 'pointer' }}
+                          />
+                        ))}
+                        {smartExtractData.suggested_tags.length > 1 && (
+                          <Chip
+                            label="全部添加"
+                            size="small"
+                            color="success"
+                            onClick={() => handleApplySuggestedTags(smartExtractData.suggested_tags)}
+                            sx={{ cursor: 'pointer' }}
+                          />
+                        )}
+                      </Box>
+                    </Box>
+                  )}
+
+                  {/* 相关内容 */}
+                  <Typography variant="caption" color="text.secondary">
+                    从章节中提取的相关内容 ({smartExtractData.related_contents?.length || 0}条)
+                  </Typography>
+                  <Box sx={{ mt: 1, maxHeight: 300, overflow: 'auto' }}>
+                    {smartExtractData.related_contents?.length > 0 ? (
+                      smartExtractData.related_contents.map((content: any, idx: number) => (
+                        <Paper
+                          key={idx}
+                          elevation={0}
+                          sx={{
+                            p: 1.5,
+                            mb: 1,
+                            bgcolor: 'white',
+                            border: '1px solid',
+                            borderColor: content.ai_validated ? 'success.light' : 'grey.300',
+                            borderRadius: 1,
+                          }}
+                        >
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              第{content.chapter_number}章 《{content.chapter_title}》
+                              {content.ai_validated && (
+                                <Chip label="AI验证" size="small" color="success" sx={{ ml: 1, height: 18 }} />
+                              )}
+                            </Typography>
+                            <Button
+                              size="small"
+                              onClick={() => handleApplyExtractedContent(content.excerpt)}
+                            >
+                              追加
+                            </Button>
+                          </Box>
+                          <Typography variant="body2" sx={{ fontSize: '0.85rem', color: 'text.primary' }}>
+                            {content.excerpt}
+                          </Typography>
+                        </Paper>
+                      ))
+                    ) : (
+                      <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
+                        未找到相关内容
+                      </Typography>
+                    )}
+                  </Box>
+                </Paper>
+              </Grid>
+            )}
           </Grid>
         </DialogContent>
         <DialogActions>
@@ -2088,6 +2235,101 @@ export default function KnowledgeBasePage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowResultDialog(false)} variant="contained">
+            关闭
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 🆕 扩展人物结果弹窗 */}
+      <Dialog 
+        open={showExpandCharactersDialog} 
+        onClose={() => setShowExpandCharactersDialog(false)}
+        maxWidth="md" 
+        fullWidth
+      >
+        <DialogTitle>👥 人物扩展结果</DialogTitle>
+        <DialogContent dividers>
+          {expandCharactersResult && (
+            <Box>
+              {/* 基本信息 */}
+              <Paper elevation={2} sx={{ p: 2, mb: 2, bgcolor: 'primary.50' }}>
+                <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">当前人物数</Typography>
+                    <Typography variant="h4" color="primary.main" sx={{ fontWeight: 'bold' }}>
+                      {expandCharactersResult.current_character_count || 0}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">字数</Typography>
+                    <Typography variant="h6" color="text.primary">
+                      {expandCharactersResult.all_characters?.length || 0}
+                    </Typography>
+                  </Box>
+                  {expandCharactersResult.character_sync && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">同步结果</Typography>
+                      <Typography variant="body2" color="text.primary">
+                        解析{expandCharactersResult.character_sync.parsed}个 • 
+                        创建{expandCharactersResult.character_sync.created}个 • 
+                        更新{expandCharactersResult.character_sync.updated}个
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+                
+                {expandCharactersResult.should_continue && (
+                  <Box sx={{ mt: 2, p: 1.5, bgcolor: 'warning.50', borderRadius: 1, border: '1px solid', borderColor: 'warning.200' }}>
+                    <Typography variant="body2" color="warning.dark">
+                      💡 AI建议：{expandCharactersResult.continue_reason || '可以继续扩展以丰富内容'}
+                    </Typography>
+                  </Box>
+                )}
+              </Paper>
+
+              {/* 内容预览 */}
+              <Paper elevation={1} sx={{ p: 2 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+                    📝 内容预览
+                  </Typography>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      navigator.clipboard.writeText(expandCharactersResult.all_characters || '');
+                      showSnackbar('✅ 已复制到剪贴板', 'success');
+                    }}
+                  >
+                    📋 复制全部
+                  </Button>
+                </Box>
+                <Box sx={{
+                  maxHeight: 400,
+                  overflow: 'auto',
+                  p: 2,
+                  bgcolor: 'background.default',
+                  borderRadius: 1,
+                  border: '1px solid',
+                  borderColor: 'divider'
+                }}>
+                  <Typography 
+                    component="pre" 
+                    sx={{ 
+                      whiteSpace: 'pre-wrap', 
+                      wordBreak: 'break-word',
+                      fontFamily: 'inherit',
+                      margin: 0
+                    }}
+                  >
+                    {expandCharactersResult.all_characters || '内容为空'}
+                  </Typography>
+                </Box>
+              </Paper>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowExpandCharactersDialog(false)} variant="contained">
             关闭
           </Button>
         </DialogActions>

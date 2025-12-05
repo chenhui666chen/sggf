@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.db.base import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.models.project import Project
+from app.models.project import Project, Chapter
 from app.models.character import Character, CharacterTechnique
 from app.models.setting import SettingItem, SettingCollection
 from app.schemas.character import (
@@ -442,4 +442,81 @@ async def list_project_techniques(
         )
 
     return result
+
+
+@router.get("/characters/{character_id}/appearance-timeline")
+async def get_character_appearance_timeline(
+    character_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    🆕 获取人物出场历程时间线
+    
+    返回人物在各章节的出场记录，包括：
+    - 章节基本信息（章节号、标题、字数）
+    - 人物在该章的相关摘要
+    """
+    import json
+    import re
+    
+    character = db.query(Character).get(character_id)
+    if not character:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Character not found",
+        )
+    
+    _ensure_project_owned(character.project_id, current_user, db)
+    
+    # 解析出场章节列表（存储的是章节ID）
+    appearance_chapter_ids = json.loads(character.appearance_chapters or "[]")
+    
+    if not appearance_chapter_ids:
+        return {
+            "character_id": character_id,
+            "character_name": character.name,
+            "total_appearances": 0,
+            "timeline": []
+        }
+    
+    # 获取章节详情
+    chapters = db.query(Chapter).filter(
+        Chapter.id.in_(appearance_chapter_ids)
+    ).order_by(Chapter.chapter_number).all()
+    
+    timeline = []
+    for chapter in chapters:
+        # 提取人物在该章的相关段落
+        excerpts = []
+        if chapter.content and character.name:
+            paragraphs = chapter.content.split('\n\n')
+            for para in paragraphs:
+                if character.name in para:
+                    # 取段落前200字作为摘要
+                    clean_para = re.sub(r'\s+', ' ', para).strip()
+                    if len(clean_para) > 200:
+                        clean_para = clean_para[:200] + "..."
+                    if clean_para and clean_para not in excerpts:
+                        excerpts.append(clean_para)
+                    if len(excerpts) >= 3:  # 每章最多3条摘要
+                        break
+        
+        timeline.append({
+            "chapter_id": chapter.id,
+            "chapter_number": chapter.chapter_number,
+            "chapter_title": chapter.title,
+            "word_count": chapter.word_count or 0,
+            "excerpts": excerpts,
+            "summary": chapter.summary  # 章节摘要
+        })
+    
+    return {
+        "character_id": character_id,
+        "character_name": character.name,
+        "total_appearances": len(timeline),
+        "first_appearance": timeline[0]["chapter_number"] if timeline else None,
+        "last_appearance": timeline[-1]["chapter_number"] if timeline else None,
+        "timeline": timeline
+    }
 
