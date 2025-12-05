@@ -43,7 +43,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
   const loadCharacters = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`/api/v1/characters/project/${projectId}`, {
+      const response = await fetch(`/api/v1/projects/${projectId}/characters`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
         },
@@ -99,7 +99,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
     try {
       const url = editingCharacter
         ? `/api/v1/characters/${editingCharacter.id}`
-        : `/api/v1/characters`
+        : `/api/v1/projects/${projectId}/characters`
       
       const method = editingCharacter ? 'PUT' : 'POST'
       
@@ -109,10 +109,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          ...formData,
-          project_id: projectId,
-        }),
+        body: JSON.stringify(formData),
       })
 
       if (response.ok) {
