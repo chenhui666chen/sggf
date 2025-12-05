@@ -6,9 +6,11 @@ import {
   Paper,
   CircularProgress,
   Chip,
+  Button,
 } from '@mui/material'
 import { StageType } from '@/store/slices/workflowSlice'
 import FormattedContent from '../common/FormattedContent'
+import { useNavigate } from 'react-router-dom'
 
 interface OutputPreviewPanelProps {
   stage: StageType
@@ -25,8 +27,12 @@ interface OutputPreviewPanelProps {
   // 🆕 生成下一章的临时流式内容
   generateNextChapterStreamContent?: string
   isGeneratingNextChapter?: boolean
-  // 🆕 新增：进度消息（如“正在迭代第1/3轮...”）
+  // 🆕 新增：进度消息（如"正在迭代第1/3轮..."）
   progressMessage?: string
+  // 🆕 概念开发阶段预览选择
+  selectedConceptView?: 'concept' | 'world' | 'character'
+  // 🆕 项目ID（用于跳转知识库）
+  projectId?: string
 }
 
 const stageTitles: Record<StageType, string> = {
@@ -51,28 +57,34 @@ export default function OutputPreviewPanel({
   generateNextChapterStreamContent = '',
   isGeneratingNextChapter = false,
   progressMessage = '',  // 🆕 新增默认值
+  selectedConceptView = 'concept',  // 🆕 新增默认值
+  projectId = '',  // 🆕 新增默认值
 }: OutputPreviewPanelProps) {
-  // 根据当前阶段获取对应的内容
+  const navigate = useNavigate()
+  // 🆕 根据当前阶段和选择获取对应的内容
   const getContent = (): string => {
     // 🆕 调试日志
-    console.log(`🖥️ OutputPreviewPanel: stage=${stage}, isGeneratingNextChapter=${isGeneratingNextChapter}, streamLen=${generateNextChapterStreamContent?.length || 0}`)
+    console.log(`🖥️ OutputPreviewPanel: stage=${stage}, selectedConceptView=${selectedConceptView}, isGeneratingNextChapter=${isGeneratingNextChapter}`)
 
-    // 🆕 如果正在生成下一章，优先显示临时流式内容（结构设计阶段除外，只在有新内容时才显示）
+    // 🆕 如果正在生成下一章，优先显示临时流式内容
     if (isGeneratingNextChapter && generateNextChapterStreamContent) {
-      // 对于结构设计阶段，不覆盖原有内容（项目结构设计），只显示临时流式内容
-      // 其他阶段直接显示临时流式内容
       console.log(`✅ 显示临时流式内容，长度=${generateNextChapterStreamContent.length}`)
       return generateNextChapterStreamContent
     }
 
     switch (stage) {
       case 'concept':
-        // 概念阶段：合并故事概念、世界观、人物设定
-        const parts = []
-        if (conceptContent) parts.push(`## 故事概念\n${conceptContent}`)
-        if (worldContent) parts.push(`## 世界观设定\n${worldContent}`)
-        if (characterContent) parts.push(`## 人物设定\n${characterContent}`)
-        return parts.join('\n\n')
+        // 🆕 概念阶段：根据selectedConceptView显示对应内容
+        switch (selectedConceptView) {
+          case 'concept':
+            return conceptContent || ''
+          case 'world':
+            return worldContent || ''
+          case 'character':
+            return characterContent || ''
+          default:
+            return conceptContent || ''
+        }
       case 'structure':
         return structureContent || ''
       case 'content':
@@ -86,6 +98,19 @@ export default function OutputPreviewPanel({
     }
   }
 
+  // 🆕 获取动态标题
+  const getTitle = (): string => {
+    if (stage === 'concept') {
+      const titles = {
+        concept: '故事概念预览',
+        world: '世界观预览',
+        character: '人物设定预览'
+      }
+      return titles[selectedConceptView]
+    }
+    return `${stageTitles[stage]} - 输出预览`
+  }
+
   const content = getContent()
   // 🆕 修改流式状态判断：包括生成下一章的情况
   const isCurrentStageStreaming = (isStreaming && streamingStage === stage) || isGeneratingNextChapter
@@ -96,18 +121,42 @@ export default function OutputPreviewPanel({
         {/* 标题栏 - 与左侧模块标题风格一致 */}
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 600, fontSize: '0.9rem' }}>
-            📄 {stageTitles[stage]} - 输出预览
+            📄 {getTitle()}
           </Typography>
-          {isCurrentStageStreaming && (
-            <Chip
-              icon={<CircularProgress size={12} color="inherit" />}
-              label="正在生成..."
-              color="primary"
-              size="small"
-              variant="outlined"
-              sx={{ height: 24, '& .MuiChip-label': { fontSize: '0.75rem' } }}
-            />
-          )}
+          
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {/* 🆕 概念阶段显示“前往知识库编辑”按钮 */}
+            {stage === 'concept' && projectId && (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => {
+                  navigate(`/knowledge-base/${projectId}`)
+                }}
+                sx={{
+                  borderRadius: 1.5,
+                  textTransform: 'none',
+                  fontSize: '0.75rem',
+                  px: 2,
+                  height: 28,
+                }}
+              >
+                前往知识库编辑
+              </Button>
+            )}
+            
+            {/* 流式输出状态指示器 */}
+            {isCurrentStageStreaming && (
+              <Chip
+                icon={<CircularProgress size={12} color="inherit" />}
+                label="正在生成..."
+                color="primary"
+                size="small"
+                variant="outlined"
+                sx={{ height: 24, '& .MuiChip-label': { fontSize: '0.75rem' } }}
+              />
+            )}
+          </Box>
         </Box>
 
         {/* 内容区域 - 自适应填充可用空间 */}

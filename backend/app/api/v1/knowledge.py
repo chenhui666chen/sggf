@@ -18,6 +18,19 @@ class SearchRequest(BaseModel):
     filter_type: str | None = None
     project_id: int  # ✅ 必需：项目隔离
 
+
+# 🆕 增强搜索请求模型
+class EnhancedSearchRequest(BaseModel):
+    query: str
+    project_id: int
+    k: int = 10
+    filter_types: List[str] | None = None  # ['chapter', 'character', 'world_setting']
+    categories: List[str] | None = None    # 设定体系过滤
+    chapter_range: tuple | None = None     # (start, end)
+    character_names: List[str] | None = None
+    tags: List[str] | None = None
+    min_score: float = 0.0
+
 class AddWorldSettingRequest(BaseModel):
     title: str
     content: str
@@ -291,6 +304,179 @@ async def get_character_info(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"查询失败: {str(e)}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# 🆕 增强RAG搜索接口
+# ---------------------------------------------------------------------------
+
+@router.post("/search-enhanced")
+async def search_enhanced(
+    request: EnhancedSearchRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    🆕 增强向量搜索 - 支持结构化过滤
+
+    请求体:
+    {
+        "query": "搜索查询",
+        "project_id": 1,
+        "k": 10,
+        "filter_types": ["chapter", "character"],  // 多类型过滤
+        "categories": ["technique_system"],        // 设定体系过滤
+        "chapter_range": [1, 10],                  // 章节范围
+        "character_names": ["李铁柱"],             // 人物过滤
+        "tags": ["protagonist"],                   // 标签过滤
+        "min_score": 0.3                           // 最小相关性分数
+    }
+    """
+    try:
+        # ✅ 验证项目所有权
+        project = db.query(Project).filter(
+            Project.id == request.project_id,
+            Project.user_id == current_user.id
+        ).first()
+
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found or access denied"
+            )
+
+        kb = get_knowledge_base()
+        
+        # 调用增强搜索
+        results = kb.search_enhanced(
+            query=request.query,
+            k=request.k,
+            project_id=request.project_id,
+            filter_types=request.filter_types,
+            categories=request.categories,
+            chapter_range=tuple(request.chapter_range) if request.chapter_range else None,
+            character_names=request.character_names,
+            tags=request.tags,
+            min_score=request.min_score,
+        )
+
+        return {
+            "status": "success",
+            "query": request.query,
+            "count": len(results),
+            "results": results,
+            "filters_applied": {
+                "types": request.filter_types,
+                "categories": request.categories,
+                "chapter_range": request.chapter_range,
+                "character_names": request.character_names,
+                "min_score": request.min_score,
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"增强搜索失败: {str(e)}",
+        )
+
+
+@router.post("/search-by-characters")
+async def search_by_characters(
+    project_id: int,
+    character_names: List[str],
+    k: int = 10,
+    include_chapters: bool = True,
+    include_settings: bool = True,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    🆕 根据人物名称搜索相关内容
+    """
+    try:
+        project = db.query(Project).filter(
+            Project.id == project_id,
+            Project.user_id == current_user.id
+        ).first()
+
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found or access denied"
+            )
+
+        kb = get_knowledge_base()
+        results = kb.search_by_characters(
+            character_names=character_names,
+            project_id=project_id,
+            k=k,
+            include_chapters=include_chapters,
+            include_settings=include_settings,
+        )
+
+        return {
+            "status": "success",
+            "character_names": character_names,
+            "count": len(results),
+            "results": results,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"搜索失败: {str(e)}",
+        )
+
+
+@router.post("/search-recent-chapters")
+async def search_recent_chapters(
+    project_id: int,
+    query: str,
+    last_n_chapters: int = 5,
+    k: int = 10,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    🆕 在最近N章中搜索
+    """
+    try:
+        project = db.query(Project).filter(
+            Project.id == project_id,
+            Project.user_id == current_user.id
+        ).first()
+
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found or access denied"
+            )
+
+        kb = get_knowledge_base()
+        results = kb.search_recent_chapters(
+            query=query,
+            project_id=project_id,
+            last_n_chapters=last_n_chapters,
+            k=k,
+        )
+
+        return {
+            "status": "success",
+            "query": query,
+            "last_n_chapters": last_n_chapters,
+            "count": len(results),
+            "results": results,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"搜索失败: {str(e)}",
         )
 
 

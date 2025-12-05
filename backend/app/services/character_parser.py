@@ -425,3 +425,146 @@ def parse_and_sync_characters(
 
     return sync_result
 
+
+def parse_and_sync_relationships(
+    project_id: int,
+    relationships_text: str,
+    db_session: Any
+) -> Dict[str, Any]:
+    """
+    🆕 解析人物关系文本并同步到Character.relations字段
+    
+    支持的格式：
+    - [角色A] ↔ [角色B]：[关系类型]（[关系描述]）
+    - 主角 ⇄ 盟友A：战友关系，相互信任（第1章建立）
+    - 李铁柱 → 师傅：师徒关系
+    
+    Args:
+        project_id: 项目ID
+        relationships_text: 关系文本
+        db_session: 数据库会话
+    
+    Returns:
+        解析和同步的统计信息
+    """
+    import json
+    from app.models.character import Character
+    
+    logger.info(f"🔗 开始解析人物关系文本，项目ID: {project_id}")
+    
+    if not relationships_text:
+        logger.warning("⚠️ 关系文本为空")
+        return {"parsed": 0, "saved": 0, "characters_updated": 0}
+    
+    # 获取项目下所有人物
+    characters = db_session.query(Character).filter(
+        Character.project_id == project_id
+    ).all()
+    
+    if not characters:
+        logger.warning(f"⚠️ 项目 {project_id} 没有人物卡")
+        return {"parsed": 0, "saved": 0, "characters_updated": 0}
+    
+    # 构建名称到人物的映射
+    name_to_char = {char.name: char for char in characters}
+    
+    # 解析关系文本
+    # 匹配模式：- [xxx] ↔/⇄/→/← [xxx]：xxx（xxx）
+    # 或者：- xxx ↔/⇄/→/← xxx：xxx
+    relation_patterns = [
+        # 模式1：- [角色A] ↔ [角色B]：关系类型（描述）
+        r'-\s*\[?([^\[\]↔⇄→←：:]+?)\]?\s*[↔⇄→←]\s*\[?([^\[\]↔⇄→←：:]+?)\]?\s*[：:]\s*([^（）()]+?)(?:（([^）]+)）|\(([^)]+)\))?\s*$',
+        # 模式2：角色A ↔ 角色B：关系类型
+        r'([\u4e00-\u9fa5]{2,8})\s*[↔⇄→←]\s*([\u4e00-\u9fa5]{2,8})\s*[：:]\s*(.+?)\s*$',
+    ]
+    
+    parsed_relations = []
+    
+    for line in relationships_text.split('\n'):
+        line = line.strip()
+        if not line or line.startswith('#') or line.startswith('*'):
+            continue
+        
+        for pattern in relation_patterns:
+            match = re.search(pattern, line, re.MULTILINE)
+            if match:
+                groups = match.groups()
+                source = groups[0].strip() if groups[0] else None
+                target = groups[1].strip() if groups[1] else None
+                rel_type = groups[2].strip() if groups[2] else "关联"
+                description = (groups[3] or groups[4] if len(groups) > 3 else None) or ""
+                
+                # 清理关系类型（去除多余标符）
+                rel_type = rel_type.split('，')[0].split(',')[0].strip()
+                
+                if source and target and source != target:
+                    parsed_relations.append({
+                        'source': source,
+                        'target': target,
+                        'type': rel_type,
+                        'description': description.strip() if description else ""
+                    })
+                break
+    
+    logger.info(f"   解析出 {len(parsed_relations)} 条关系")
+    
+    # 将关系写入Character.relations字段
+    saved_count = 0
+    updated_chars = set()
+    
+    for rel in parsed_relations:
+        source_name = rel['source']
+        target_name = rel['target']
+        rel_type = rel['type']
+        
+        # 查找源人物
+        source_char = name_to_char.get(source_name)
+        if not source_char:
+            # 尝试模糊匹配
+            for name, char in name_to_char.items():
+                if source_name in name or name in source_name:
+                    source_char = char
+                    break
+        
+        if not source_char:
+            logger.debug(f"   未找到源人物: {source_name}")
+            continue
+        
+        # 解析现有关系
+        try:
+            existing_relations = json.loads(source_char.relations) if source_char.relations else []
+        except:
+            existing_relations = []
+        
+        if not isinstance(existing_relations, list):
+            existing_relations = []
+        
+        # 检查是否已存在相同关系
+        already_exists = any(
+            r.get('target') == target_name and r.get('type') == rel_type
+            for r in existing_relations if isinstance(r, dict)
+        )
+        
+        if not already_exists:
+            # 添加新关系
+            new_relation = {
+                "target": target_name,
+                "type": rel_type
+            }
+            existing_relations.append(new_relation)
+            source_char.relations = json.dumps(existing_relations, ensure_ascii=False)
+            updated_chars.add(source_char.id)
+            saved_count += 1
+            logger.debug(f"   → {source_name} --[{rel_type}]--> {target_name}")
+    
+    # 提交更改
+    if updated_chars:
+        db_session.commit()
+        logger.info(f"   🔗 已更新 {len(updated_chars)} 个人物的关系数据，共 {saved_count} 条关系")
+    
+    return {
+        "parsed": len(parsed_relations),
+        "saved": saved_count,
+        "characters_updated": len(updated_chars)
+    }
+

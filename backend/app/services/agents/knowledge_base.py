@@ -238,6 +238,233 @@ class NovelKnowledgeBase:
         
         return results
     
+    def search_enhanced(
+        self,
+        query: str,
+        k: int = 10,
+        project_id: Optional[int] = None,
+        filter_types: Optional[List[str]] = None,
+        categories: Optional[List[str]] = None,
+        chapter_range: Optional[tuple] = None,
+        character_names: Optional[List[str]] = None,
+        tags: Optional[List[str]] = None,
+        min_score: float = 0.0,
+    ) -> List[Dict[str, Any]]:
+        """增强RAG检索，支持结构化过滤
+        
+        Args:
+            query: 搜索查询文本
+            k: 返回结果数量
+            project_id: 项目ID（强烈推荐，确保项目隔离）
+            filter_types: 类型过滤列表，如 ['chapter', 'character', 'world_setting']
+            categories: 设定体系过滤，如 ['cultivation_realm_system', 'technique_system']
+            chapter_range: 章节范围 (start, end)，如 (1, 10)
+            character_names: 人物名称过滤，搜索与这些人物相关的内容
+            tags: 标签过滤
+            min_score: 最小相关性分数阈值 (0-1)
+        
+        Returns:
+            List[Dict]: 搜索结果列表，包含 content, metadata, score
+        """
+        # 构建过滤条件
+        conditions = []
+        
+        # 项目ID过滤
+        if project_id is not None:
+            conditions.append({"project_id": str(project_id)})
+        
+        # 多类型过滤（使用 $or）
+        if filter_types and len(filter_types) > 0:
+            if len(filter_types) == 1:
+                conditions.append({"type": filter_types[0]})
+            else:
+                type_conditions = [{"type": t} for t in filter_types]
+                conditions.append({"$or": type_conditions})
+        
+        # 设定体系过滤
+        if categories and len(categories) > 0:
+            if len(categories) == 1:
+                conditions.append({"category": categories[0]})
+            else:
+                cat_conditions = [{"category": c} for c in categories]
+                conditions.append({"$or": cat_conditions})
+        
+        # 构建最终过滤字典
+        filter_dict = None
+        if len(conditions) == 0:
+            filter_dict = None
+        elif len(conditions) == 1:
+            filter_dict = conditions[0]
+        else:
+            filter_dict = {"$and": conditions}
+        
+        # 执行向量搜索（搜索更多结果用于后续过滤）
+        search_k = k * 3  # 搜索更多用于过滤
+        
+        try:
+            if filter_dict is None:
+                results_with_scores = self.vectorstore.similarity_search_with_score(query, k=search_k)
+            else:
+                results_with_scores = self.vectorstore.similarity_search_with_score(
+                    query, k=search_k, filter=filter_dict
+                )
+        except Exception as e:
+            print(f"Warning: Enhanced search filter error: {e}, falling back to basic search")
+            results_with_scores = self.vectorstore.similarity_search_with_score(query, k=search_k)
+        
+        # 后处理过滤
+        filtered_results = []
+        
+        for doc, score in results_with_scores:
+            # 转换分数（ChromaDB返回距离，转为相似度）
+            # 距离越小越相似，转为 0-1 分数
+            similarity_score = max(0, 1 - score / 2)  # 简单的转换公式
+            
+            # 最小分数过滤
+            if similarity_score < min_score:
+                continue
+            
+            metadata = doc.metadata or {}
+            
+            # 章节范围过滤
+            if chapter_range:
+                chapter_num = metadata.get('chapter_num')
+                if chapter_num is not None:
+                    try:
+                        ch_num = int(chapter_num)
+                        if not (chapter_range[0] <= ch_num <= chapter_range[1]):
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+            
+            # 人物名称过滤（检查内容中是否包含人物名）
+            if character_names:
+                content = doc.page_content.lower()
+                found_any = False
+                for name in character_names:
+                    if name.lower() in content:
+                        found_any = True
+                        break
+                if not found_any:
+                    continue
+            
+            # 标签过滤
+            if tags:
+                doc_tags = metadata.get('tags', [])
+                if isinstance(doc_tags, str):
+                    doc_tags = [t.strip() for t in doc_tags.split(',')]
+                if not any(tag in doc_tags for tag in tags):
+                    continue
+            
+            # 添加到结果
+            filtered_results.append({
+                'content': doc.page_content,
+                'metadata': metadata,
+                'score': round(similarity_score, 4),
+                'type': metadata.get('type', 'unknown'),
+            })
+        
+        # 按分数排序并限制数量
+        filtered_results.sort(key=lambda x: x['score'], reverse=True)
+        return filtered_results[:k]
+    
+    def search_by_characters(
+        self,
+        character_names: List[str],
+        project_id: int,
+        k: int = 10,
+        include_chapters: bool = True,
+        include_settings: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """根据人物名称搜索相关内容
+        
+        Args:
+            character_names: 人物名称列表
+            project_id: 项目ID
+            k: 返回结果数量
+            include_chapters: 是否包含章节内容
+            include_settings: 是否包含设定内容
+        
+        Returns:
+            与人物相关的内容列表
+        """
+        filter_types = []
+        if include_chapters:
+            filter_types.append('chapter')
+        if include_settings:
+            filter_types.extend(['character', 'world_setting'])
+        
+        # 用人物名作为查询
+        query = ' '.join(character_names)
+        
+        return self.search_enhanced(
+            query=query,
+            k=k,
+            project_id=project_id,
+            filter_types=filter_types if filter_types else None,
+            character_names=character_names,
+        )
+    
+    def search_recent_chapters(
+        self,
+        query: str,
+        project_id: int,
+        last_n_chapters: int = 5,
+        k: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """在最近N章中搜索
+        
+        Args:
+            query: 搜索查询
+            project_id: 项目ID
+            last_n_chapters: 最近几章
+            k: 返回结果数量
+        
+        Returns:
+            搜索结果列表
+        """
+        # 先获取最大章节号
+        try:
+            collection = self.vectorstore._collection
+            results = collection.get(
+                where={
+                    "$and": [
+                        {"type": "chapter"},
+                        {"project_id": str(project_id)}
+                    ]
+                }
+            )
+            
+            if not results or not results['metadatas']:
+                return []
+            
+            # 找出最大章节号
+            max_chapter = 0
+            for meta in results['metadatas']:
+                ch_num = meta.get('chapter_num')
+                if ch_num:
+                    try:
+                        max_chapter = max(max_chapter, int(ch_num))
+                    except (ValueError, TypeError):
+                        pass
+            
+            if max_chapter == 0:
+                return []
+            
+            # 计算章节范围
+            start_chapter = max(1, max_chapter - last_n_chapters + 1)
+            
+            return self.search_enhanced(
+                query=query,
+                k=k,
+                project_id=project_id,
+                filter_types=['chapter'],
+                chapter_range=(start_chapter, max_chapter),
+            )
+        except Exception as e:
+            print(f"Error in search_recent_chapters: {e}")
+            return []
+    
     def get_character_info(self, character_name: str, project_id: Optional[int] = None) -> List[Document]:
         """Get all information for a specific character
         

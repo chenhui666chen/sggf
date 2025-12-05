@@ -1,7 +1,7 @@
 """
 统一实体提取服务
-一次性调用AI提取：实体 + 地点层级 + 关系
-目标：将3次AI调用合并为1次，减少耗时从30-90秒到10-40秒
+一次性调用AI提取：实体 + 地点层级 + 实体关系 + 人物关系
+目标：将多次AI调用合并为1次，减少耗时
 """
 import re
 import json
@@ -47,6 +47,14 @@ class UnifiedExtractionService:
                     "relation_type": "关系类型",
                     "confidence": 0.7
                 }
+            ],
+            "character_relations": [
+                {
+                    "source": "人物A",
+                    "target": "人物B",
+                    "relation_type": "师徒/恋人/仇敌等",
+                    "description": "关系描述"
+                }
             ]
         }
         """
@@ -86,6 +94,15 @@ class UnifiedExtractionService:
 - 协作关系：同盟、合作
 - 其他：前置、包含、相关
 
+**第四部分：人物关系（重要！）**
+提取人物与人物之间的关系：
+- 血缘关系：父子、母女、兄弟、姐妹
+- 情感关系：恋人、夫妻、暗恋
+- 师承关系：师徒、同门
+- 对立关系：仇敌、对手、竞争者
+- 社交关系：朋友、同伴、盟友
+- 从属关系：主仆、上下级
+
 ---
 
 **章节标题**：{chapter_title}
@@ -121,6 +138,14 @@ class UnifiedExtractionService:
       "relation_type": "关系类型（位于/属于/掌握/拥有/对立/敌对/同盟/合作/相关之一）",
       "confidence": 0.7
     }}
+  ],
+  "character_relations": [
+    {{
+      "source": "人物A名称",
+      "target": "人物B名称",
+      "relation_type": "关系类型（师徒/同门/恋人/夫妻/父子/母女/兄弟/姐妹/仇敌/对手/朋友/同伴/盟友/主仆/上下级之一）",
+      "description": "关系简短描述（20字以内）"
+    }}
   ]
 }}
 
@@ -130,6 +155,7 @@ class UnifiedExtractionService:
 3. relations中的source和target必须是entities或locations中已提取的实体名称
 4. locations的parent必须是已提取的地点之一或null
 5. 确保返回的是合法的JSON对象
+6. character_relations中的source和target必须都是人物类型的实体
 """
         
         try:
@@ -146,13 +172,18 @@ class UnifiedExtractionService:
             result = json.loads(content)
             
             # 验证和清理数据
+            entities = UnifiedExtractionService._validate_entities(result.get("entities", []))
             validated_result = {
-                "entities": UnifiedExtractionService._validate_entities(result.get("entities", [])),
+                "entities": entities,
                 "locations": UnifiedExtractionService._validate_locations(result.get("locations", [])),
                 "relations": UnifiedExtractionService._validate_relations(
                     result.get("relations", []),
                     result.get("entities", []),
                     result.get("locations", [])
+                ),
+                "character_relations": UnifiedExtractionService._validate_character_relations(
+                    result.get("character_relations", []),
+                    entities
                 )
             }
             
@@ -164,7 +195,8 @@ class UnifiedExtractionService:
             return {
                 "entities": [],
                 "locations": [],
-                "relations": []
+                "relations": [],
+                "character_relations": []
             }
     
     @staticmethod
@@ -253,6 +285,59 @@ class UnifiedExtractionService:
             
             if 'confidence' not in rel:
                 rel['confidence'] = 0.6
+            
+            validated.append(rel)
+        
+        return validated
+
+    @staticmethod
+    def _validate_character_relations(
+        relations: List[Dict[str, Any]],
+        entities: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """验证人物关系数据格式"""
+        if not isinstance(relations, list):
+            return []
+        
+        # 构建人物名称集合
+        character_names = set()
+        for e in entities:
+            if isinstance(e, dict) and 'name' in e:
+                # 只包含人物类型的实体
+                if e.get('type', '') in ['人物', '角色', 'character', 'person']:
+                    character_names.add(e['name'])
+        
+        # 如果没有识别到人物，放宽限制，也保留关系
+        if not character_names:
+            for e in entities:
+                if isinstance(e, dict) and 'name' in e:
+                    character_names.add(e['name'])
+        
+        validated = []
+        seen_pairs = set()  # 用于去重
+        
+        for rel in relations:
+            if not isinstance(rel, dict):
+                continue
+            if not all(k in rel for k in ['source', 'target', 'relation_type']):
+                continue
+            
+            source = rel['source']
+            target = rel['target']
+            
+            # source和target不能相同
+            if source == target:
+                continue
+            
+            # 去重（不区分方向）
+            pair = tuple(sorted([source, target]))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            
+            # 确保有description字段
+            if 'description' not in rel:
+                rel['description'] = rel['relation_type']
             
             validated.append(rel)
         

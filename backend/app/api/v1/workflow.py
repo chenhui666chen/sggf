@@ -4506,6 +4506,19 @@ async def execute_expand_characters_task(
             )
             logger.info(f"   🔄 人物卡同步完成: 解析 {sync_result['parsed']} 个, "
                        f"创建 {sync_result['created']} 个, 更新 {sync_result['updated']} 个")
+            
+            # 🆕 解析人物关系文本并写入Character.relations
+            if result.get("character_relationships"):
+                from app.services.character_parser import parse_and_sync_relationships
+                
+                rel_result = parse_and_sync_relationships(
+                    project_id=project_id,
+                    relationships_text=result["character_relationships"],
+                    db_session=db
+                )
+                logger.info(f"   🔗 人物关系同步完成: 解析 {rel_result['parsed']} 条, "
+                           f"保存 {rel_result['saved']} 条, 更新 {rel_result['characters_updated']} 个人物")
+                sync_result["relationships"] = rel_result
         except Exception as e:
             logger.warning(f"   ⚠️  自动同步人物卡失败: {e}")
             import traceback

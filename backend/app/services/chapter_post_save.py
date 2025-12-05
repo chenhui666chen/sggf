@@ -2,7 +2,7 @@
 章节保存后的后台处理任务
 
 包含：
-1. 统一提取（实体、地点、关系）
+1. 统一提取（实体、地点、实体关系、人物关系）
 2. 生成章节摘要（仅工作流场景）
 
 摘要生成策略：
@@ -13,11 +13,106 @@
 import asyncio
 import threading
 import logging
-from typing import Optional
+import json
+from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from app.db.base import SessionLocal
 
 logger = logging.getLogger("uvicorn.error")
+
+
+async def _save_character_relations(
+    db: Session,
+    project_id: int,
+    character_relations: List[Dict[str, Any]]
+) -> int:
+    """
+    🆕 将提取的人物关系保存到Character表
+    
+    关系格式：[
+        {"source": "人物A", "target": "人物B", "relation_type": "师徒", "description": "..."}
+    ]
+    
+    保存到 Character.relations 字段，格式：
+    [{"target": "人物B", "type": "师徒"}]
+    
+    Returns:
+        保存的关系数量
+    """
+    from app.models.character import Character
+    
+    if not character_relations:
+        return 0
+    
+    # 获取项目下所有人物
+    characters = db.query(Character).filter(
+        Character.project_id == project_id
+    ).all()
+    
+    if not characters:
+        logger.info(f"   ℹ️ 项目 {project_id} 没有人物卡，跳过人物关系保存")
+        return 0
+    
+    # 构建名称到人物的映射
+    name_to_char = {char.name: char for char in characters}
+    
+    # 统计保存的关系数
+    saved_count = 0
+    updated_chars = set()  # 需要更新的人物ID
+    
+    for rel in character_relations:
+        source_name = rel.get('source', '').strip()
+        target_name = rel.get('target', '').strip()
+        rel_type = rel.get('relation_type', '关联')
+        description = rel.get('description', '')
+        
+        if not source_name or not target_name:
+            continue
+        
+        # 查找源人物
+        source_char = name_to_char.get(source_name)
+        target_char = name_to_char.get(target_name)
+        
+        if not source_char:
+            continue
+        
+        # 解析现有关系
+        try:
+            existing_relations = json.loads(source_char.relations) if source_char.relations else []
+        except:
+            existing_relations = []
+        
+        if not isinstance(existing_relations, list):
+            existing_relations = []
+        
+        # 检查是否已存在相同关系
+        already_exists = any(
+            r.get('target') == target_name and r.get('type') == rel_type
+            for r in existing_relations if isinstance(r, dict)
+        )
+        
+        if not already_exists:
+            # 添加新关系
+            new_relation = {
+                "target": target_name,
+                "type": rel_type
+            }
+            if description and description != rel_type:
+                new_relation["description"] = description
+            
+            existing_relations.append(new_relation)
+            source_char.relations = json.dumps(existing_relations, ensure_ascii=False)
+            updated_chars.add(source_char.id)
+            saved_count += 1
+            
+            logger.debug(f"      → {source_name} --[{rel_type}]--> {target_name}")
+    
+    # 提交更改
+    if updated_chars:
+        db.commit()
+        logger.info(f"   👥 已更新 {len(updated_chars)} 个人物的关系数据")
+    
+    return saved_count
 
 
 async def process_chapter_post_save(
@@ -32,7 +127,7 @@ async def process_chapter_post_save(
     章节保存后的后台处理任务
     
     包含：
-    1. 统一提取（实体、地点、关系）
+    1. 统一提取（实体、地点、关系、人物关系）
     2. 生成章节摘要（仅工作流场景）
     
     Args:
@@ -85,10 +180,12 @@ async def process_chapter_post_save(
                 entities = unified_result.get("entities", [])
                 locations = unified_result.get("locations", [])
                 relations = unified_result.get("relations", [])
+                character_relations = unified_result.get("character_relations", [])
                 
                 logger.info(
                     f"   ✅ 统一提取完成：{len(entities)} 个实体，"
-                    f"{len(locations)} 个地点，{len(relations)} 个关系"
+                    f"{len(locations)} 个地点，{len(relations)} 个实体关系，"
+                    f"{len(character_relations)} 个人物关系"
                 )
                 
             except Exception as unified_error:
@@ -123,6 +220,9 @@ async def process_chapter_post_save(
                     logger.info(f"   ✅ 抽取到 {len(relations)} 个关系")
                 else:
                     relations = []
+                
+                # 回退模式不提取人物关系
+                character_relations = []
             
             # 保存地点层级到地图体系
             if locations:
@@ -212,7 +312,17 @@ async def process_chapter_post_save(
                     db.commit()
                     logger.info(f"   🔗 已保存 {saved_relations} 个关系边到知识图谱")
                 else:
-                    logger.info(f"   ℹ️ 没有新关系需要保存")
+                    logger.info(f"   ℹ️ 没有新实体关系需要保存")
+            
+            # 🆕 保存人物关系到Character表
+            if character_relations:
+                saved_char_relations = await _save_character_relations(
+                    db=db,
+                    project_id=project_id,
+                    character_relations=character_relations
+                )
+                if saved_char_relations > 0:
+                    logger.info(f"   👥 已保存 {saved_char_relations} 个人物关系")
                     
         except Exception as e:
             logger.warning(f"   ⚠️ 统一提取失败: {e}")
