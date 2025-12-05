@@ -150,8 +150,11 @@ export default function KnowledgeBasePage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
 
-  // 主 Tab 状态 (0=世界观设定, 1=人物设定, 2=大纲设定, 3=类型设定, 4=冲突检测, 5=关系网络)
+  // 主 Tab 状态 (0=世界观设定, 1=人物设定, 2=大纲设定, 3=设定中心, 4=冲突检测)
   const [mainTabValue, setMainTabValue] = useState(0)
+  
+  // 设定中心子 Tab 状态 (0=设定管理, 1=热门设定, 2=关系网络)
+  const [settingSubTabValue, setSettingSubTabValue] = useState(0)
 
   // ==================== 文本内容相关状态 ====================
   const [loading, setLoading] = useState(false)  // 🔥 修复：初始值为false，避免页面初始时一直加载
@@ -1053,9 +1056,8 @@ export default function KnowledgeBasePage() {
           <Tab label="🌍 世界观设定" />
           <Tab label="👥 人物设定" />
           <Tab label="📋 大纲设定" />
-          <Tab label="🎨 类型设定" />
+          <Tab label="🎨 设定中心" />
           <Tab label="⚠️ 冲突检测" />
-          <Tab label="🌐 关系网络" />
         </Tabs>
       </Box>
 
@@ -1225,8 +1227,22 @@ export default function KnowledgeBasePage() {
         </Box>
       )}
 
-      {/* ==================== Tab 3: 类型设定 ==================== */}
+      {/* ==================== Tab 3: 设定中心 ==================== */}
       <TabPanel value={mainTabValue} index={3}>
+        {/* 子Tab导航栏 */}
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+          <Tabs
+            value={settingSubTabValue}
+            onChange={(_, newValue) => setSettingSubTabValue(newValue)}
+          >
+            <Tab label="📋 设定管理" />
+            <Tab label="⭐ 热门设定" />
+            <Tab label="🌐 关系网络" />
+          </Tabs>
+        </Box>
+
+        {/* 子Tab 0: 设定管理 */}
+        {settingSubTabValue === 0 && (
         <Grid container spacing={3}>
           {/* 左侧：设定集合列表 */}
           <Grid item xs={12} md={4}>
@@ -1322,28 +1338,6 @@ export default function KnowledgeBasePage() {
                       </ListItem>
                     ))}
                   </List>
-                  
-                  {/* 推荐设定组件 */}
-                  <Box sx={{ borderTop: '1px solid', borderColor: 'grey.200', pt: 2, maxHeight: '300px', overflow: 'auto' }}>
-                    <SettingRecommendations
-                      projectId={Number(projectId)}
-                      limit={5}
-                      showInsertButton={false}
-                      onSelectItem={(item) => {
-                        // 查找对应的集合
-                        const collection = collections.find(c => c.id === item.collection_id)
-                        if (collection) {
-                          setSelectedCollection(collection)
-                          // 加载该集合的设定项
-                          loadSettingItems(collection.id).then(() => {
-                            // 查找并选中该设定项
-                            setSelectedItem(item as any)
-                          })
-                        }
-                      }}
-                      title="热门设定"
-                    />
-                  </Box>
                 </>
               )}
             </Paper>
@@ -1490,15 +1484,84 @@ export default function KnowledgeBasePage() {
             </Paper>
           </Grid>
         </Grid>
+        )}
+
+        {/* 子Tab 1: 热门设定 */}
+        {settingSubTabValue === 1 && (
+          <Box>
+            <SettingRecommendations
+              projectId={Number(projectId)}
+              limit={50}
+              showInsertButton={false}
+              onSelectItem={(item) => {
+                // 跳转到设定管理子Tab
+                setSettingSubTabValue(0)
+                // 查找对应的集合
+                const collection = collections.find(c => c.id === item.collection_id)
+                if (collection) {
+                  setSelectedCollection(collection)
+                  // 加载该集合的设定项
+                  loadSettingItems(collection.id).then(() => {
+                    // 查找并选中该设定项（从 settingItems 中获取完整对象）
+                    const fullItem = settingItems.find(i => i.id === item.id)
+                    if (fullItem) {
+                      setSelectedItem(fullItem)
+                      // 如果有路径，也设置路径以便树形视图高亮
+                      if (fullItem.path) {
+                        const pathParts = fullItem.path.split('/')
+                        if (pathParts.length > 1) {
+                          setSelectedCategoryPath(pathParts.slice(0, -1).join('/'))
+                        }
+                      }
+                    }
+                  })
+                }
+              }}
+              title="热门设定"
+            />
+          </Box>
+        )}
+
+        {/* 子Tab 2: 关系网络 */}
+        {settingSubTabValue === 2 && (
+          <Box>
+            {selectedItem ? (
+              <RelationshipGraph
+                itemId={selectedItem.id}
+                itemName={selectedItem.name}
+                onNodeClick={(nodeId) => {
+                  // 跳转到设定管理子Tab
+                  setSettingSubTabValue(0)
+                  // 查找该节点对应的设定项
+                  const item = settingItems.find(i => i.id === nodeId)
+                  if (item) {
+                    setSelectedItem(item)
+                    // 如果需要，也查找对应的集合
+                    const collection = collections.find(c => c.id === item.collection_id)
+                    if (collection) {
+                      setSelectedCollection(collection)
+                      loadSettingItems(collection.id)
+                    }
+                  }
+                }}
+              />
+            ) : (
+              <Alert severity="info" sx={{ mt: 2 }}>
+                请先在"设定管理"中选择一个设定项，以查看其关系网络图
+              </Alert>
+            )}
+          </Box>
+        )}
       </TabPanel>
 
-     {/* ==================== Tab 4: 冲突检测 ==================== */}
+      {/* ==================== Tab 4: 冲突检测 ==================== */}
       <TabPanel value={mainTabValue} index={4}>
         <ConflictDetector
           projectId={Number(projectId)}
           onSelectItem={(itemId) => {
-            // 跳转到类型设定Tab并查找该设定项
+            // 跳转到设定中心Tab并查找该设定项
             setMainTabValue(3)
+            setSettingSubTabValue(0)  // 切换到设定管理子Tab
             // 查找该设定项并选中
             const item = settingItems.find(i => i.id === itemId)
             if (item) {
@@ -1522,29 +1585,6 @@ export default function KnowledgeBasePage() {
           }}
           title="设定冲突检测"
         />
-      </TabPanel>
-
-      {/* ==================== Tab 5: 关系网络 ==================== */}
-      <TabPanel value={mainTabValue} index={5}>
-        {selectedItem ? (
-          <RelationshipGraph
-            itemId={selectedItem.id}
-            itemName={selectedItem.name}
-            onNodeClick={(nodeId) => {
-              // 查找该节点对应的设定项
-              const item = settingItems.find(i => i.id === nodeId)
-              if (item) {
-                setSelectedItem(item)
-                // 如果需要，也可以切换到类型设定Tab
-                // setMainTabValue(3)
-              }
-            }}
-          />
-        ) : (
-          <Alert severity="info" sx={{ mt: 2 }}>
-            请先在"类型设定"Tab中选择一个设定项，以查看其关系网络图
-          </Alert>
-        )}
       </TabPanel>
 
       {/* ==================== 对话框 ==================== */}
