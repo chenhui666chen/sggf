@@ -788,6 +788,108 @@ async def detect_setting_conflicts(
     }
 
 
+@router.get("/projects/{project_id}/setting-recommendations")
+async def get_setting_recommendations(
+    project_id: int,
+    category: Optional[str] = None,
+    limit: int = 10,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    获取设定推荐列表（基于使用频率和最近引用时间）
+    
+    Args:
+        project_id: 项目ID
+        category: 设定类型过滤（可选，如technique_system、artifact_system等）
+        limit: 返回数量限制（默认10）
+    
+    Returns:
+        推荐的设定项列表，按综合得分排序
+    """
+    from datetime import datetime, timedelta
+    
+    _ensure_project_owned(project_id, current_user, db)
+    
+    # 查询项目下的所有设定集合
+    collections_query = db.query(SettingCollection).filter(
+        SettingCollection.project_id == project_id
+    )
+    
+    # 如果指定类型，过滤集合
+    if category:
+        collections_query = collections_query.filter(SettingCollection.category == category)
+    
+    collections = collections_query.all()
+    collection_ids = [c.id for c in collections]
+    
+    if not collection_ids:
+        return {
+            "project_id": project_id,
+            "category": category,
+            "recommendations": []
+        }
+    
+    # 查询所有设定项（只包含被引用过的）
+    items = db.query(SettingItem).filter(
+        SettingItem.collection_id.in_(collection_ids),
+        SettingItem.usage_count > 0  # 至少被使用过一次
+    ).all()
+    
+    # 计算推荐得分
+    now = datetime.now()
+    recommendations = []
+    
+    for item in items:
+        # 基础分：使用次数（归一化到0-1）
+        max_usage = max([i.usage_count for i in items]) if items else 1
+        usage_score = item.usage_count / max_usage if max_usage > 0 else 0
+        
+        # 时间衰减因子（最近引用的权重更高）
+        time_score = 0.5  # 默认值
+        if item.last_referenced_at:
+            days_ago = (now - item.last_referenced_at).days
+            # 30天内的设定得分更高，30天后逐渐衰减
+            if days_ago <= 30:
+                time_score = 1.0
+            elif days_ago <= 90:
+                time_score = 0.8
+            elif days_ago <= 180:
+                time_score = 0.6
+            else:
+                time_score = 0.3
+        
+        # 综合得分：使用频率权重60%，时间新鲜度权重40%
+        final_score = usage_score * 0.6 + time_score * 0.4
+        
+        # 获取集合信息
+        collection = next((c for c in collections if c.id == item.collection_id), None)
+        
+        recommendations.append({
+            "id": item.id,
+            "name": item.name,
+            "collection_id": item.collection_id,
+            "collection_name": collection.name if collection else "",
+            "category": collection.category if collection else "",
+            "usage_count": item.usage_count,
+            "last_referenced_at": item.last_referenced_at.isoformat() if item.last_referenced_at else None,
+            "score": round(final_score, 3),
+            "content_preview": (item.content[:100] + "...") if item.content and len(item.content) > 100 else item.content,
+            "tags": json.loads(item.tags) if item.tags else None
+        })
+    
+    # 按得分降序排序，取前limit个
+    recommendations.sort(key=lambda x: x["score"], reverse=True)
+    recommendations = recommendations[:limit]
+    
+    return {
+        "project_id": project_id,
+        "category": category,
+        "total_items": len(items),
+        "recommendations": recommendations
+    }
+
+
 @router.post("/setting-items/{item_id}/rollback")
 async def rollback_setting_item(
     item_id: int,

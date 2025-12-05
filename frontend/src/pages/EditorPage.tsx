@@ -20,6 +20,9 @@ import {
   Divider,
   Menu,
   MenuItem,
+  Grid,
+  Paper,
+  IconButton,
 } from '@mui/material'
 import SaveIcon from '@mui/icons-material/Save'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
@@ -29,6 +32,8 @@ import RestoreIcon from '@mui/icons-material/Restore'
 import DescriptionIcon from '@mui/icons-material/Description'
 import ArticleIcon from '@mui/icons-material/Article'
 import WarningIcon from '@mui/icons-material/Warning'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 
 import { RootState, AppDispatch } from '@/store/store'
 import {
@@ -38,6 +43,7 @@ import {
   autoSaveChapter,
   clearDirty,
 } from '@/store/slices/editorSlice'
+import SettingRecommendations from '@/components/SettingRecommendations'
 
 
 export default function EditorPage() {
@@ -73,9 +79,34 @@ export default function EditorPage() {
   const exportMenuOpen = Boolean(exportAnchorEl)
   const [exporting, setExporting] = useState(false)
 
+  // 推荐设定侧边栏状态
+  const [showRecommendations, setShowRecommendations] = useState(true)
+  const contentRef = useRef<HTMLTextAreaElement>(null)
+
   // 📄 计算字数（中文字符数）
   const wordCount = content.replace(/\s/g, '').length
   const charCount = content.length
+
+  // 插入设定到光标位置
+  const handleInsertSetting = (settingName: string) => {
+    if (!contentRef.current) return
+
+    const textarea = contentRef.current
+    const start = textarea.selectionStart
+    const end = textarea.selectionEnd
+    const currentContent = content
+
+    // 在光标位置插入设定名称
+    const newContent = currentContent.substring(0, start) + settingName + currentContent.substring(end)
+    dispatch(setContent(newContent))
+
+    // 恢复光标位置（在插入文本之后）
+    setTimeout(() => {
+      textarea.focus()
+      const newPos = start + settingName.length
+      textarea.setSelectionRange(newPos, newPos)
+    }, 0)
+  }
 
   useEffect(() => {
     if (chapterId && projectId) {
@@ -306,7 +337,7 @@ export default function EditorPage() {
   }
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
+    <Container maxWidth="xl" sx={{ py: 4 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <Button
@@ -395,38 +426,68 @@ export default function EditorPage() {
           >
             保存
           </Button>
+
+          {/* 切换推荐面板 */}
+          <IconButton
+            onClick={() => setShowRecommendations(!showRecommendations)}
+            color="primary"
+            size="small"
+          >
+            {showRecommendations ? <ChevronRightIcon /> : <ChevronLeftIcon />}
+          </IconButton>
         </Box>
       </Box>
 
-      <TextField
-        fullWidth
-        multiline
-        rows={20}
-        value={content}
-        onChange={(e) => dispatch(setContent(e.target.value))}
-        placeholder="在这里开始编写你的章节..."
-        variant="outlined"
-        sx={{
-          '& .MuiOutlinedInput-root': {
-            fontFamily: 'Fira Code, monospace',
-            fontSize: '14px',
-          },
-        }}
-      />
+      <Grid container spacing={2}>
+        {/* 左侧：编辑器 */}
+        <Grid item xs={12} md={showRecommendations ? 8 : 12}>
+          <TextField
+            fullWidth
+            multiline
+            rows={20}
+            value={content}
+            onChange={(e) => dispatch(setContent(e.target.value))}
+            placeholder="在这里开始编写你的章节..."
+            variant="outlined"
+            inputRef={contentRef}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                fontFamily: 'Fira Code, monospace',
+                fontSize: '14px',
+              },
+            }}
+          />
 
-      <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Box sx={{ display: 'flex', gap: 3 }}>
-          <Typography variant="body2" color="text.secondary">
-            📝 字数: <strong>{wordCount}</strong>
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            📄 字符: <strong>{charCount}</strong>
-          </Typography>
-        </Box>
-        <Typography variant="caption" color="info.main">
-          ℹ️ 自动保存间隔: 60秒 | 手动保存: Ctrl+S
-        </Typography>
-      </Box>
+          <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Box sx={{ display: 'flex', gap: 3 }}>
+              <Typography variant="body2" color="text.secondary">
+                📝 字数: <strong>{wordCount}</strong>
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                📄 字符: <strong>{charCount}</strong>
+              </Typography>
+            </Box>
+            <Typography variant="caption" color="info.main">
+              ℹ️ 自动保存间隔: 60秒 | 手动保存: Ctrl+S
+            </Typography>
+          </Box>
+        </Grid>
+
+        {/* 右侧：推荐设定 */}
+        {showRecommendations && (
+          <Grid item xs={12} md={4}>
+            <Paper elevation={2} sx={{ p: 2, height: 'calc(100vh - 250px)', overflow: 'auto' }}>
+              <SettingRecommendations
+                projectId={Number(projectId)}
+                limit={10}
+                showInsertButton={true}
+                onInsertItem={(item) => handleInsertSetting(item.name)}
+                title="推荐设定"
+              />
+            </Paper>
+          </Grid>
+        )}
+      </Grid>
 
 
 

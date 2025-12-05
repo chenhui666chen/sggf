@@ -223,6 +223,12 @@ class ApiClient {
     return this.client.get(`/api/v1/projects/${projectId}/detect-conflicts`)
   }
 
+  getSettingRecommendations(projectId: number, category?: string, limit: number = 10) {
+    const params: any = { limit }
+    if (category) params.category = category
+    return this.client.get(`/api/v1/projects/${projectId}/setting-recommendations`, { params })
+  }
+
   rollbackSettingItem(itemId: number, snapshotIndex: number) {
     return this.client.post(`/api/v1/setting-items/${itemId}/rollback`, { snapshot_index: snapshotIndex })
   }

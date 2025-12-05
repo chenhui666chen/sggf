@@ -44,6 +44,8 @@ import MarkdownRenderer from '@/components/MarkdownRenderer'
 import VditorEditor from '@/components/VditorEditor'
 import { apiClient } from '@/services/api'
 import SettingTreeView from '@/components/SettingTreeView'
+import SettingRecommendations from '@/components/SettingRecommendations'
+import ConflictDetector from '@/components/ConflictDetector'
 
 // ==================== 接口定义 ====================
 
@@ -1210,43 +1212,89 @@ export default function KnowledgeBasePage() {
                   暂无设定集合
                 </Typography>
               ) : (
-                <List sx={{ flexGrow: 1, overflow: 'auto' }}>
-                  {collections.map((collection) => (
-                    <ListItem
-                      key={collection.id}
-                      disablePadding
-                      secondaryAction={
-                        <IconButton
-                          edge="end"
-                          size="small"
-                          onClick={() => handleDeleteCollection(collection.id)}
-                        >
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      }
-                    >
-                      <ListItemButton
-                        selected={selectedCollection?.id === collection.id}
-                        onClick={() => setSelectedCollection(collection)}
-                        sx={{ pr: 6 }}
+                <>
+                  <List sx={{ flexGrow: 1, overflow: 'auto', mb: 2 }}>
+                    {collections.map((collection) => (
+                      <ListItem
+                        key={collection.id}
+                        disablePadding
+                        secondaryAction={
+                          <IconButton
+                            edge="end"
+                            size="small"
+                            onClick={() => handleDeleteCollection(collection.id)}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        }
                       >
-                        <FolderIcon sx={{ mr: 1, color: 'primary.main' }} />
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Typography sx={{ fontWeight: 500 }}>{collection.name}</Typography>
-                          {getCategoryDisplayName(collection.category) !== collection.name && (
-                            <Chip label={getCategoryDisplayName(collection.category)} size="small" variant="outlined" sx={{ height: 20 }} />
-                          )}
-                        </Box>
-                      </ListItemButton>
-                    </ListItem>
-                  ))}
-                </List>
+                        <ListItemButton
+                          selected={selectedCollection?.id === collection.id}
+                          onClick={() => setSelectedCollection(collection)}
+                          sx={{ pr: 6 }}
+                        >
+                          <FolderIcon sx={{ mr: 1, color: 'primary.main' }} />
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Typography sx={{ fontWeight: 500 }}>{collection.name}</Typography>
+                            {getCategoryDisplayName(collection.category) !== collection.name && (
+                              <Chip label={getCategoryDisplayName(collection.category)} size="small" variant="outlined" sx={{ height: 20 }} />
+                            )}
+                          </Box>
+                        </ListItemButton>
+                      </ListItem>
+                    ))}
+                  </List>
+                  
+                  {/* 推荐设定组件 */}
+                  <Box sx={{ borderTop: '1px solid', borderColor: 'grey.200', pt: 2, maxHeight: '300px', overflow: 'auto' }}>
+                    <SettingRecommendations
+                      projectId={Number(projectId)}
+                      limit={5}
+                      showInsertButton={false}
+                      onSelectItem={(item) => {
+                        // 查找对应的集合
+                        const collection = collections.find(c => c.id === item.collection_id)
+                        if (collection) {
+                          setSelectedCollection(collection)
+                          // 加载该集合的设定项
+                          loadSettingItems(collection.id).then(() => {
+                            // 查找并选中该设定项
+                            setSelectedItem(item as any)
+                          })
+                        }
+                      }}
+                      title="热门设定"
+                    />
+                  </Box>
+                </>
               )}
             </Paper>
           </Grid>
 
           {/* 右侧：设定项树 + 列表 */}
           <Grid item xs={12} md={8}>
+            {/* 冲突检测面板 */}
+            <Box sx={{ mb: 2 }}>
+              <ConflictDetector
+                projectId={Number(projectId)}
+                onSelectItem={(itemId) => {
+                  // 查找该设定项并跳转
+                  const item = settingItems.find(i => i.id === itemId)
+                  if (item) {
+                    setSelectedItem(item)
+                    // 如果有路径，也设置路径以便树形视图高亮
+                    if (item.path) {
+                      const pathParts = item.path.split('/')
+                      if (pathParts.length > 1) {
+                        setSelectedCategoryPath(pathParts.slice(0, -1).join('/'))
+                      }
+                    }
+                  }
+                }}
+                title="设定冲突检测"
+              />
+            </Box>
+
             <Paper elevation={2} sx={{ p: 2, height: '70vh', display: 'flex', flexDirection: 'column' }}>
               {selectedCollection ? (
                 <>
