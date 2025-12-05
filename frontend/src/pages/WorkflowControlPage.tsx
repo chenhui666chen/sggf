@@ -95,7 +95,7 @@ export default function WorkflowControlPage() {
   const [showContentWarningDialog, setShowContentWarningDialog] = useState(false)
   const [existingChaptersCount, setExistingChaptersCount] = useState(0)
 
-  // 故事概念对话框状态
+  // 故事概念对话框状态（保留用于其他功能）
   const [showConceptDialog, setShowConceptDialog] = useState(false)
   const [conceptContent, setConceptContent] = useState('')
   const [editedContent, setEditedContent] = useState('')
@@ -138,20 +138,9 @@ export default function WorkflowControlPage() {
   // 🆕 概念开发阶段预览选择状态（保留最后点击的按钮）
   const [selectedConceptView, setSelectedConceptView] = useState<'concept' | 'world' | 'character'>('concept')
 
-  // 世界观设定对话框状态
-  const [showWorldDialog, setShowWorldDialog] = useState(false)
-
+  // 世界观和人物设定内容状态（仅用于显示，不再需要对话框）
   const [worldContent, setWorldContent] = useState('')
-  const [editedWorldContent, setEditedWorldContent] = useState('')
-  const [worldLoading, setWorldLoading] = useState(false)
-  const [worldSaving, setWorldSaving] = useState(false)
-
-  // 人物设定对话框状态
-  const [showCharacterDialog, setShowCharacterDialog] = useState(false)
   const [characterContent, setCharacterContent] = useState('')
-  const [editedCharacterContent, setEditedCharacterContent] = useState('')
-  const [characterLoading, setCharacterLoading] = useState(false)
-  const [characterSaving, setCharacterSaving] = useState(false)
 
   const [snackbarOpen, setSnackbarOpen] = useState(false)
   const [snackbarMessage, setSnackbarMessage] = useState('')
@@ -2265,114 +2254,10 @@ export default function WorkflowControlPage() {
     setSelectedConceptView('world')
   }
 
-  // 关闭世界观设定对话框
-  const handleCloseWorldDialog = () => {
-    setShowWorldDialog(false)
-    // 不清空 worldContent，保持已保存的内容
-    setEditedWorldContent('')  // 只清空编辑状态
-  }
-
-  // 保存并继续（世界观设定）
-
-  // 仅保存（世界观设定）
-  const handleSaveOnlyWorld = async () => {
-    if (!projectId) return
-
-    setWorldSaving(true)
-
-    try {
-      const response = await fetch(`/api/v1/workflow/${projectId}/stage/world_builder/content`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          content: editedWorldContent,
-          continue_workflow: false,
-        }),
-      })
-
-      if (response.ok) {
-        // ✅ 更新state，保持已保存的内容
-        setWorldContent(editedWorldContent)
-
-        setSnackbarMessage('内容已保存')
-        setSnackbarSeverity('success')
-        setSnackbarOpen(true)
-
-        handleCloseWorldDialog()
-      } else {
-        setSnackbarMessage('保存失败，请重试')
-        setSnackbarSeverity('error')
-        setSnackbarOpen(true)
-      }
-    } catch (error) {
-      console.error('Failed to save world setting:', error)
-      setSnackbarMessage('保存失败，请重试')
-      setSnackbarSeverity('error')
-      setSnackbarOpen(true)
-    } finally {
-      setWorldSaving(false)
-    }
-  }
-
   // 🆕 点击人物设定按钮 - 切换预览区域显示
   const handleOpenCharacterDialog = () => {
     console.log('📍 切换到人物设定预览')
     setSelectedConceptView('character')
-  }
-
-  // 关闭人物设定对话框
-  const handleCloseCharacterDialog = () => {
-    setShowCharacterDialog(false)
-    // 不清空 characterContent，保持已保存的内容
-    setEditedCharacterContent('')  // 只清空编辑状态
-  }
-
-  // 保存并继续（人物设定）
-
-  // 仅保存（人物设定）
-  const handleSaveOnlyCharacter = async () => {
-    if (!projectId) return
-
-    setCharacterSaving(true)
-
-    try {
-      const response = await fetch(`/api/v1/workflow/${projectId}/stage/character_designer/content`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          content: editedCharacterContent,
-          continue_workflow: false,
-        }),
-      })
-
-      if (response.ok) {
-        // ✅ 更新state，保持已保存的内容
-        setCharacterContent(editedCharacterContent)
-
-        setSnackbarMessage('内容已保存')
-        setSnackbarSeverity('success')
-        setSnackbarOpen(true)
-
-        handleCloseCharacterDialog()
-      } else {
-        setSnackbarMessage('保存失败，请重试')
-        setSnackbarSeverity('error')
-        setSnackbarOpen(true)
-      }
-    } catch (error) {
-      console.error('Failed to save character:', error)
-      setSnackbarMessage('保存失败，请重试')
-      setSnackbarSeverity('error')
-      setSnackbarOpen(true)
-    } finally {
-      setCharacterSaving(false)
-    }
   }
 
   // 打开最终版本对话框
@@ -3336,120 +3221,6 @@ export default function WorkflowControlPage() {
                 </Button>
               </Box>
             </>
-          )}
-        </Box>
-      </Dialog>
-
-      {/* 世界观设定对话框 */}
-      <Dialog open={showWorldDialog} onClose={handleCloseWorldDialog} maxWidth="md" fullWidth>
-        <Box sx={{ p: 3 }}>
-          <Typography variant="h6" sx={{ mb: 2 }}>
-            🌍 世界观设定文档
-          </Typography>
-
-          {worldLoading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 4 }}>
-              <CircularProgress />
-            </Box>
-          ) : (
-            <>
-              <TextField
-                fullWidth
-                multiline
-                rows={12}
-                value={editedWorldContent}
-                onChange={(e) => setEditedWorldContent(e.target.value)}
-                placeholder="世界观设定文本内容..."
-                sx={{ mb: 2 }}
-                disabled={worldSaving}
-                InputProps={{
-                  style: {
-                    fontFamily: 'monospace',
-                    fontSize: '0.875rem',
-                  }
-                }}
-              />
-
-              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 3 }}>
-                <Button
-                  onClick={handleCloseWorldDialog}
-                  disabled={worldSaving}
-                >
-                  取消
-                </Button>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={handleSaveOnlyWorld}
-                  disabled={worldSaving}
-                  startIcon={worldSaving ? <CircularProgress size={20} /> : <SaveIcon />}
-                >
-                  {worldSaving ? '保存中...' : '保存'}
-                </Button>
-              </Box>
-            </>
-          )}
-        </Box>
-      </Dialog>
-
-
-      {/* 人物设定对话框 */}
-      <Dialog open={showCharacterDialog} onClose={handleCloseCharacterDialog} maxWidth="lg" fullWidth>
-        <Box sx={{ p: 3 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h6">
-              👥 人物设定
-            </Typography>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={() => {
-                handleCloseCharacterDialog()
-                navigate(`/knowledge-base/${projectId}`)
-              }}
-            >
-              📝 前往知识库编辑人物卡
-            </Button>
-          </Box>
-
-          {characterLoading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 4 }}>
-              <CircularProgress />
-            </Box>
-          ) : (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <TextField
-                fullWidth
-                multiline
-                rows={12}
-                value={editedCharacterContent}
-                onChange={(e) => setEditedCharacterContent(e.target.value)}
-                placeholder="人物设定文本内容..."
-                sx={{ mb: 2 }}
-                disabled={characterSaving}
-              />
-
-              {/* 底部一行：取消/保存 */}
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', mt: 1 }}>
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                  <Button
-                    onClick={handleCloseCharacterDialog}
-                    disabled={characterSaving}
-                  >
-                    取消
-                  </Button>
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    onClick={handleSaveOnlyCharacter}
-                    disabled={characterSaving}
-                    startIcon={characterSaving ? <CircularProgress size={20} /> : <SaveIcon />}
-                  >
-                    {characterSaving ? '保存中...' : '保存'}
-                  </Button>
-                </Box>
-              </Box>
-            </Box>
           )}
         </Box>
       </Dialog>
