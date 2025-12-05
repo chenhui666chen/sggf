@@ -95,12 +95,8 @@ export default function WorkflowControlPage() {
   const [showContentWarningDialog, setShowContentWarningDialog] = useState(false)
   const [existingChaptersCount, setExistingChaptersCount] = useState(0)
 
-  // 故事概念对话框状态（保留用于其他功能）
-  const [showConceptDialog, setShowConceptDialog] = useState(false)
+  // 故事概念内容状态（仅用于显示，不再需要对话框）
   const [conceptContent, setConceptContent] = useState('')
-  const [editedContent, setEditedContent] = useState('')
-  const [conceptLoading, setConceptLoading] = useState(false)
-  const [conceptSaving, setConceptSaving] = useState(false)
 
   // 情节大纲对话框状态
   const [showStructureDialog, setShowStructureDialog] = useState(false)
@@ -1763,64 +1759,10 @@ export default function WorkflowControlPage() {
 
 
 
-  // 打开故事概念对话框
   // 🆕 点击故事概念按钮 - 切换预览区域显示
   const handleOpenConceptDialog = () => {
     console.log('📍 切换到故事概念预览')
     setSelectedConceptView('concept')
-  }
-
-  // 关闭故事概念对话框
-  const handleCloseConceptDialog = () => {
-    setShowConceptDialog(false)
-    // 不清空 conceptContent，保持已保存的内容
-    setEditedContent('')  // 只清空编辑状态
-  }
-
-  // 保存并继续
-
-  // 仅保存
-  const handleSaveOnly = async () => {
-    if (!projectId) return
-
-    setConceptSaving(true)
-
-    try {
-      const response = await fetch(`/api/v1/workflow/${projectId}/stage/concept/content`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          content: editedContent,
-          continue_workflow: false,
-        }),
-      })
-
-      if (response.ok) {
-        // ✅ 更新state，保持已保存的内容
-        setConceptContent(editedContent)
-
-        setSnackbarMessage('内容已保存')
-        setSnackbarSeverity('success')
-        setSnackbarOpen(true)
-
-        // 关闭对话框
-        handleCloseConceptDialog()
-      } else {
-        setSnackbarMessage('保存失败，请重试')
-        setSnackbarSeverity('error')
-        setSnackbarOpen(true)
-      }
-    } catch (error) {
-      console.error('Failed to save concept:', error)
-      setSnackbarMessage('保存失败，请重试')
-      setSnackbarSeverity('error')
-      setSnackbarOpen(true)
-    } finally {
-      setConceptSaving(false)
-    }
   }
 
   // 打开情节大纲对话框
@@ -2993,58 +2935,6 @@ export default function WorkflowControlPage() {
               {savingChapter ? '保存中...' : '保存为章节'}
             </Button>
           </Box>
-        </Box>
-      </Dialog>
-
-      {/* 故事概念对话框 */}
-      <Dialog open={showConceptDialog} onClose={handleCloseConceptDialog} maxWidth="md" fullWidth>
-        <Box sx={{ p: 3 }}>
-          <Typography variant="h6" sx={{ mb: 2 }}>
-            📖 故事概念文档
-          </Typography>
-
-          {conceptLoading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 4 }}>
-              <CircularProgress />
-            </Box>
-          ) : (
-            <>
-              <TextField
-                fullWidth
-                multiline
-                rows={12}
-                value={editedContent}
-                onChange={(e) => setEditedContent(e.target.value)}
-                placeholder="故事概念文本内容..."
-                sx={{ mb: 2 }}
-                disabled={conceptSaving}
-                InputProps={{
-                  style: {
-                    fontFamily: 'monospace',
-                    fontSize: '0.875rem',
-                  }
-                }}
-              />
-
-              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
-                <Button
-                  onClick={handleCloseConceptDialog}
-                  disabled={conceptSaving}
-                >
-                  取消
-                </Button>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={handleSaveOnly}
-                  disabled={conceptSaving}
-                  startIcon={conceptSaving ? <CircularProgress size={20} /> : <SaveIcon />}
-                >
-                  {conceptSaving ? '保存中...' : '保存'}
-                </Button>
-              </Box>
-            </>
-          )}
         </Box>
       </Dialog>
 
