@@ -490,6 +490,31 @@ async def update_chapter(
             import traceback
             logger.debug(traceback.format_exc())
 
+    # 🎉 Phase 6: 触发体系自动检测（异步后台执行，不阻塞）
+    if content_updated and chapter_data.content:
+        try:
+            from app.api.v1.workflow import trigger_auto_system_detection
+            import asyncio
+            import logging
+            
+            logger = logging.getLogger("uvicorn.error")
+            logger.info(f"   🎉 触发体系自动检测（章节 {chapter.chapter_number}）...")
+            
+            # 异步后台执行，不阻塞主流程
+            asyncio.create_task(
+                trigger_auto_system_detection(
+                    project_id=chapter.project_id,
+                    content=chapter_data.content,
+                    content_type="chapter",
+                    db=db
+                )
+            )
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger("uvicorn.error")
+            logger.warning(f"⚠️ 触发体系检测失败（不影响章节更新）: {e}")
+
     return chapter
 
 

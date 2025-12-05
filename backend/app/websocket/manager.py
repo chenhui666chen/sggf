@@ -174,6 +174,30 @@ class WorkflowWebSocketManager:
             'extra': extra or {},
         }
         await WorkflowWebSocketManager.broadcast_to_project(project_id, 'model_used', data)
+    
+    @staticmethod
+    async def send_notification(
+        project_id: int,
+        message: str,
+        type: str = "info",
+        data: dict | None = None
+    ):
+        """
+        🆕 发送通知消息
+        
+        Args:
+            project_id: 项目ID
+            message: 通知消息
+            type: 消息类型（info/success/warning/error/system_collections_created）
+            data: 附加数据
+        """
+        notification_data = {
+            'project_id': project_id,
+            'message': message,
+            'type': type,
+            'data': data or {},
+        }
+        await WorkflowWebSocketManager.broadcast_to_project(project_id, 'notification', notification_data)
 
 
 # Socket.IO 事件处理器

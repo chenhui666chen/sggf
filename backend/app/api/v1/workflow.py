@@ -21,6 +21,10 @@ from app.services.setting_templates import build_project_settings_summary
 import uuid
 from datetime import datetime
 import json
+from sqlalchemy import text
+
+# 🎉 导入体系自动检测服务
+from app.services.auto_system_detector import auto_create_system_collections
 
 # 🔧 配置日志
 logger = logging.getLogger(__name__)
@@ -472,6 +476,54 @@ async def execute_stage_async(
         )
 
 
+async def trigger_auto_system_detection(
+    project_id: int,
+    content: str,
+    content_type: str,
+    db: Session
+):
+    """
+    触发体系自动检测（异步后台执行，不阻塞主流程）
+    
+    Args:
+        project_id: 项目ID
+        content: 待分析的内容
+        content_type: 内容类型（outline 或 chapter）
+        db: 数据库会话
+    """
+    try:
+        logger.info(f"🎉 触发体系自动检测: {content_type}, 项目ID={project_id}")
+        
+        # 调用检测服务
+        result = await auto_create_system_collections(
+            project_id=project_id,
+            content=content,
+            db=db,
+            content_type=content_type
+        )
+        
+        # 如果有创建的集合，通过WebSocket通知前端
+        if result.get("created_collections"):
+            created_names = result["created_collections"]
+            message = f"✨ 已自动添加 {len(created_names)} 个体系：{', '.join(created_names)}"
+            
+            await ws_manager.send_notification(
+                project_id=project_id,
+                message=message,
+                type="system_collections_created",
+                data=result
+            )
+            
+            logger.info(f"✅ {message}")
+        else:
+            logger.info("ℹ️ 未检测到需要添加的新体系")
+            
+    except Exception as e:
+        logger.error(f"❌ 体系自动检测失败（不影响主流程）: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 async def execute_stage_background(task_id: str, project_id: int, stage_enum: StageType, user_id: int, db: Session):
     """后台执行阶段任务"""
     import logging
@@ -698,6 +750,8 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
             elif stage_enum == StageType.STRUCTURE:
                 # 保存结构设计结果
                 output_data = stage_output.output if isinstance(stage_output.output, dict) else {}
+                plot_outline_content = output_data.get("plot_outline", "")
+                
                 save_query = text("""
                     UPDATE project_settings
                     SET plot_outline = :plot_outline,
@@ -707,12 +761,22 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
                 """)
                 
                 db.execute(save_query, {
-                    "plot_outline": json.dumps(output_data.get("plot_outline", ""), ensure_ascii=False),
+                    "plot_outline": json.dumps(plot_outline_content, ensure_ascii=False),
                     "updated_at": datetime.now().isoformat(),
                     "project_id": project_id
                 })
                 db.commit()
                 logger.info(f"   💾 已保存结构设计结果到 project_settings")
+                
+                # 🎉 异步触发体系自动检测（不阻塞主流程）
+                asyncio.create_task(
+                    trigger_auto_system_detection(
+                        project_id=project_id,
+                        content=plot_outline_content if isinstance(plot_outline_content, str) else json.dumps(plot_outline_content),
+                        content_type="outline",
+                        db=db
+                    )
+                )
             
             elif stage_enum == StageType.CONTENT:
                 # 保存内容创作结果
