@@ -88,6 +88,9 @@ class PromptVersion:
     avg_composite_score: float = 100.0              # 综合评分（越低越好）
     avg_readability: float = 80.0                   # 平均可读性
     avg_writing: float = 50.0                       # 平均文笔分
+    # 🆕 题材定制化
+    genre: Optional[str] = None                     # 题材标签（玄幻/都市/言情/悬疑等）
+    genre_optimized: bool = False                   # 是否针对特定题材优化
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -125,7 +128,10 @@ class PromptVersion:
             # 🔧 新增综合评分字段
             "avg_composite_score": self.avg_composite_score,
             "avg_readability": self.avg_readability,
-            "avg_writing": self.avg_writing
+            "avg_writing": self.avg_writing,
+            # 🆕 题材标签
+            "genre": self.genre,
+            "genre_optimized": self.genre_optimized
         }
 
     @classmethod
@@ -176,7 +182,10 @@ class PromptVersion:
             # 🔧 使用智能回退的综合评分
             avg_composite_score=composite_score,
             avg_readability=data.get("avg_readability", 80.0),
-            avg_writing=data.get("avg_writing", 50.0)
+            avg_writing=data.get("avg_writing", 50.0),
+            # 🆕 题材标签
+            genre=data.get("genre"),
+            genre_optimized=data.get("genre_optimized", False)
         )
 
 
@@ -229,6 +238,16 @@ class EvolutionConfig:
     # 🔧 探索模式配置
     exploration_mode_threshold: int = 5   # 连续多少次无明显改善后进入探索模式
     exploration_temperature: float = 1.0  # 探索模式使用的更高温度
+    
+    # 🆕 题材定制化配置
+    genre: Optional[str] = None           # 目标题材（玄幻/都市/言情/悬疑等）
+    genre_weight_config: Optional[Dict[str, float]] = None  # 题材权重配置 {"ai_score": 0.4, "readability": 0.3, "writing": 0.2, "fidelity": 0.1}
+    
+    # 🆕 审核通过标准（四项都需通过，但权重可调整）
+    ai_score_threshold: float = 30.0      # AI分数阈值（≤此值通过）
+    readability_threshold: float = 70.0   # 可读性阈值（≤此值通过）
+    writing_threshold: float = 45.0       # 文笔阈值（≤此值通过）
+    fidelity_threshold: float = 80.0      # 保真度阈值（≥此值通过）
 
 
 @dataclass

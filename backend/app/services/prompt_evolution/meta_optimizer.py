@@ -587,7 +587,9 @@ class MetaOptimizer:
         self,
         current_version: PromptVersion,
         target_score: int,
-        history: List[PromptVersion]
+        history: List[PromptVersion],
+        exploration_mode: bool = False,
+        reverse_optimization: bool = False
     ) -> Tuple[str, str]:
         """
         分析当前提示词并生成改进版本
@@ -620,6 +622,9 @@ class MetaOptimizer:
 
         # 🆕 构建历史分析对比
         previous_analysis_summary = self._build_previous_analysis_summary()
+        
+        # 🆕 构建探索模式和反向优化指令
+        exploration_instruction = self._build_exploration_instruction(exploration_mode, reverse_optimization)
 
         # 计算平均降分
         valid_results = [r for r in results if r.success]
@@ -639,6 +644,10 @@ class MetaOptimizer:
             experience_summary=experience_summary,
             previous_analysis_summary=previous_analysis_summary
         )
+        
+        # 🆕 添加探索模式和反向优化指令
+        if exploration_instruction:
+            optimization_prompt += f"\n\n{exploration_instruction}"
 
         messages = [
             {"role": "system", "content": "你是提示词工程专家，擅长通过分析成功和失败案例来优化提示词。"},
@@ -646,10 +655,12 @@ class MetaOptimizer:
         ]
 
         # 使用 REVIEW_CHECK 任务类型，会自动选择 chat 模型（更快）
+        # 🆕 探索模式使用更高温度
+        temperature = 0.9 if exploration_mode else 0.7
         response = await self.llm_client.chat(
             messages=messages,
             task_type=TaskType.REVIEW_CHECK,
-            temperature=0.7,
+            temperature=temperature,
             use_cache=False
         )
 
@@ -666,41 +677,65 @@ class MetaOptimizer:
     async def generate_prompt_variants(
         self,
         base_prompt: str,
-        num_variants: int = 2
+        num_variants: int = 2,
+        exploration_mode: bool = False
     ) -> List[Tuple[str, str]]:
         """
-        🆕 生成多个提示词变体用于A/B测试
+        🆕 生成多个提示词变体用于A/B测试（支持探索模式）
 
         Args:
             base_prompt: 基础提示词
             num_variants: 生成变体数量
+            exploration_mode: 是否处于探索模式
 
         Returns:
             [(变体提示词, 变体描述), ...]
         """
+        import random
         variants = []
 
-        # 变体策略
-        variant_strategies = [
+        # 🆕 基础变体策略
+        base_strategies = [
             ("aggressive_punctuation", "激进标点策略：强制要求至少30%的句子使用非句号标点"),
             ("emotion_focus", "情感聚焦策略：将所有情感描写规则权重提升到最高"),
             ("dialogue_extreme", "对话极端口语化：要求对话中必须包含语气词和不完整句"),
             ("short_sentence", "短句主导策略：要求平均句长不超过15字"),
         ]
+        
+        # 🆕 探索模式额外策略（更激进）
+        exploration_strategies = [
+            ("reverse_formality", "反向正式度：将所有书面语替换为口语，包括叙述部分"),
+            ("sensory_extreme", "极致感官化：所有描写必须通过具体感官细节表达"),
+            ("rhythm_chaos", "节奏混沌：随机组合长句、短句、碎片句"),
+            ("minimal_adjective", "极简形容词：删除90%以上的形容词和副词"),
+            ("emotion_implicit", "情感极致隐晦：任何情感都只能通过动作和环境暗示"),
+        ]
+        
+        # 根据模式选择策略池
+        if exploration_mode:
+            # 探索模式：混合基础和激进策略，并随机打乱
+            all_strategies = base_strategies + exploration_strategies
+            random.shuffle(all_strategies)
+            variant_strategies = all_strategies
+        else:
+            # 正常模式：只使用基础策略
+            variant_strategies = base_strategies
 
         for i in range(min(num_variants, len(variant_strategies))):
             strategy_name, strategy_desc = variant_strategies[i]
 
-            # 生成变体提示词
-            variant_prompt = await self._generate_variant(base_prompt, strategy_name, strategy_desc)
+            # 🆕 探索模式使用更高温度生成变体
+            temperature = 0.95 if exploration_mode else 0.8
+            variant_prompt = await self._generate_variant(base_prompt, strategy_name, strategy_desc, temperature)
             if variant_prompt:
                 variants.append((variant_prompt, strategy_desc))
-                logger.info(f"📝 生成变体 {i+1}: {strategy_name}")
+                mode_label = "🔍探索" if exploration_mode else "📝常规"
+                logger.info(f"{mode_label} 生成变体 {i+1}: {strategy_name}")
 
         return variants
 
-    async def _generate_variant(self, base_prompt: str, strategy_name: str, strategy_desc: str) -> str:
-        """生成单个变体"""
+    async def _generate_variant(self, base_prompt: str, strategy_name: str, strategy_desc: str, temperature: float = 0.8) -> str:
+        """生成单个变体（支持自定义温度）"""
         messages = [
             {"role": "system", "content": "你是提示词变体生成专家。"},
             {"role": "user", "content": f"""请基于以下提示词生成一个变体版本。
@@ -723,7 +758,7 @@ class MetaOptimizer:
             response = await self.llm_client.chat(
                 messages=messages,
                 task_type=TaskType.REVIEW_CHECK,
-                temperature=0.8,
+                temperature=temperature,
                 use_cache=False
             )
             return response.strip()
@@ -1013,6 +1048,59 @@ class MetaOptimizer:
         lines.append("⚠️ 请从不同角度分析，发现新问题！")
 
         return "\n".join(lines)
+    
+    def _build_exploration_instruction(self, exploration_mode: bool, reverse_optimization: bool) -> str:
+        """
+        🆕 构建探索模式和反向优化指令
+        
+        Args:
+            exploration_mode: 是否处于探索模式
+            reverse_optimization: 是否启用反向优化
+        
+        Returns:
+            探索指令字符串
+        """
+        if not exploration_mode:
+            return ""
+        
+        instruction_parts = []
+        instruction_parts.append("═══════════════════════════════════════")
+        instruction_parts.append("【🔍 探索模式激活】")
+        instruction_parts.append("═══════════════════════════════════════")
+        instruction_parts.append("")
+        instruction_parts.append("当前处于探索模式，允许你尝试更激进、更大胆的策略：")
+        instruction_parts.append("")
+        instruction_parts.append("1. **突破常规约束**")
+        instruction_parts.append("   - 你可以大幅调整现有策略的权重和优先级")
+        instruction_parts.append("   - 可以尝试之前被认为风险较高的方法")
+        instruction_parts.append("   - 允许更激进的句式变化和标点实验")
+        instruction_parts.append("")
+        instruction_parts.append("2. **增加多样性**")
+        instruction_parts.append("   - 引入全新的改写维度或视角")
+        instruction_parts.append("   - 尝试组合之前未曾组合的策略")
+        instruction_parts.append("   - 实验性地添加新的禁用词或规则")
+        instruction_parts.append("")
+        instruction_parts.append("3. **跳出局部最优**")
+        instruction_parts.append("   - 暂时忽略部分历史经验的约束")
+        instruction_parts.append("   - 重新评估之前认为无效的策略")
+        instruction_parts.append("   - 寻找全新的优化方向")
+        instruction_parts.append("")
+        
+        if reverse_optimization:
+            instruction_parts.append("4. **🔀 反向优化模式激活**")
+            instruction_parts.append("   - 尝试与历史成功策略相反的方向")
+            instruction_parts.append("   - 例如：如果之前倾向于短句，现在尝试长短结合")
+            instruction_parts.append("   - 例如：如果之前强调碎片化，现在尝试流畅连贯")
+            instruction_parts.append("   - 例如：如果之前减少形容词，现在尝试精选形容词")
+            instruction_parts.append("   - 目的：探索是否之前的方向过于极端")
+            instruction_parts.append("")
+        
+        instruction_parts.append("⚠️ 注意：探索模式不是放弃原则，仍需：")
+        instruction_parts.append("   - 保持文笔顺畅和可读性")
+        instruction_parts.append("   - 不改变故事情节")
+        instruction_parts.append("   - 保证输出质量")
+        
+        return "\n".join(instruction_parts)
 
     def _parse_response(self, response: str) -> Tuple[str, str]:
         """解析优化器响应并更新经验库"""
