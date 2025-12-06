@@ -2,7 +2,13 @@
 Knowledge Base Management - Store and retrieve novel settings using vector database
 """
 from typing import List, Dict, Any, Optional
-from langchain_community.vectorstores import Chroma
+try:
+    from langchain_chroma import Chroma  # 优先使用新包，避免弃用警告
+except ImportError:
+    try:
+        from langchain_community.vectorstores import Chroma  # 回退兼容
+    except ImportError:
+        from langchain.vectorstores import Chroma  # 最后一层回退
 from langchain_core.embeddings import Embeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
