@@ -640,6 +640,15 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
 
         # 🆕 推送 Agent 开始工作状态
         stage_agents = STAGE_AGENTS.get(stage_enum.value, [])
+        # 🔧 概念阶段的重生：仅按目标推送相关Agent（默认 story+world，不包含人物）
+        if stage_enum.value == 'concept' and regenerate:
+            target_set = set(targets or ['story', 'world'])
+            selected_ids = []
+            if 'story' in target_set:
+                selected_ids.append('creative_director')
+            if 'world' in target_set:
+                selected_ids.append('worldview_architect')
+            stage_agents = [a for a in stage_agents if a['id'] in selected_ids]
         for agent in stage_agents:
             await ws_manager.send_agent_status(
                 project_id=project_id,
