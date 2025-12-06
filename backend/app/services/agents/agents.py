@@ -3,7 +3,7 @@
 """
 from typing import Dict, Any, List, Optional, Union
 from abc import ABC, abstractmethod
-from langchain_community.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from .config import Config
 from .knowledge_base import NovelKnowledgeBase
@@ -102,12 +102,12 @@ class BaseAgent(ABC):
         # 🔥 关键修复：支持动态设置 temperature
         if temperature is not None:
             # 创建一个临时的 LLM 实例，使用指定的 temperature
-            from langchain_community.chat_models import ChatOpenAI
+            from langchain_openai import ChatOpenAI
             temp_llm = ChatOpenAI(
-                model_name=Config.MODEL_NAME or "deepseek-reasoner",
+                model=Config.MODEL_NAME or "deepseek-reasoner",
                 temperature=temperature,
-                openai_api_key=Config.DEEPSEEK_API_KEY or "",
-                openai_api_base=Config.DEEPSEEK_API_BASE or "https://api.deepseek.com/v1"
+                api_key=Config.DEEPSEEK_API_KEY or "",
+                base_url=Config.DEEPSEEK_API_BASE or "https://api.deepseek.com/v1"
             )
             print(f"🎲 使用自定义 temperature={temperature}")
             response = temp_llm.invoke(messages)

@@ -3,8 +3,25 @@
 增加持久化功能
 """
 from typing import List, Dict, Any
-from langchain_classic.memory import ConversationBufferMemory, ConversationSummaryMemory
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from typing import Optional
+
+
+# 简化Memory实现（替代LangChain已移除的Memory模块）
+class SimpleChatMemory:
+    """简化的聊天记忆实现"""
+    
+    def __init__(self):
+        self.messages: List[BaseMessage] = []
+    
+    def add_user_message(self, message: str):
+        self.messages.append(HumanMessage(content=message))
+    
+    def add_ai_message(self, message: str):
+        self.messages.append(AIMessage(content=message))
+    
+    def clear(self):
+        self.messages = []
 try:
     from langchain_openai import ChatOpenAI
     OPENAI_SRC = "langchain_openai"
@@ -24,6 +41,10 @@ from pathlib import Path
 
 def create_deepseek_llm(task_type: str = "default"):
     """创建LLM实例"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"🔧 Using ChatOpenAI from: {OPENAI_SRC}")
+    
     if OPENAI_SRC == "langchain_openai" and ChatOpenAI:
         return ChatOpenAI(  # type: ignore
             model=Config.MODEL_NAME,
@@ -55,23 +76,13 @@ class NovelMemoryManager:
         self.llm = create_deepseek_llm()
         self.persist_directory = persist_directory
         self.memory_file = None
+        self.memory_type = memory_type
         
         # 创建持久化目录
         Path(persist_directory).mkdir(parents=True, exist_ok=True)
         
-        if memory_type == "buffer":
-            self.memory = ConversationBufferMemory(
-                memory_key="chat_history",
-                return_messages=True,
-                output_key="output"
-            )
-        else:
-            self.memory = ConversationSummaryMemory(
-                llm=self.llm,
-                memory_key="chat_history",
-                return_messages=True,
-                output_key="output"
-            )
+        # 使用简化的内存实现
+        self.chat_memory = SimpleChatMemory()
         
         self.current_context = {
             "current_chapter": None,
@@ -82,15 +93,15 @@ class NovelMemoryManager:
     
     def add_user_message(self, message: str):
         """添加用户消息"""
-        self.memory.chat_memory.add_user_message(message)
+        self.chat_memory.add_user_message(message)
     
     def add_ai_message(self, message: str):
         """添加AI消息"""
-        self.memory.chat_memory.add_ai_message(message)
+        self.chat_memory.add_ai_message(message)
     
     def get_chat_history(self) -> List[BaseMessage]:
         """获取聊天历史"""
-        return self.memory.chat_memory.messages
+        return self.chat_memory.messages
     
     def get_chat_history_string(self) -> str:
         """获取聊天历史的字符串表示"""
@@ -128,7 +139,7 @@ class NovelMemoryManager:
     
     def clear_history(self):
         """清空对话历史"""
-        self.memory.clear()
+        self.chat_memory.clear()
         print(" 对话历史已清空")
     
     def clear_context(self):
@@ -158,7 +169,7 @@ class NovelMemoryManager:
             
             # 保存对话记忆
             with open(memory_file, 'wb') as f:
-                pickle.dump(self.memory.chat_memory.messages, f)
+                pickle.dump(self.chat_memory.messages, f)
             
             # 保存上下文
             with open(context_file, 'w', encoding='utf-8') as f:
@@ -193,7 +204,7 @@ class NovelMemoryManager:
             # 加载对话记忆
             with open(memory_file, 'rb') as f:
                 messages = pickle.load(f)
-                self.memory.chat_memory.messages = messages
+                self.chat_memory.messages = messages
             
             # 加载上下文
             if os.path.exists(context_file):

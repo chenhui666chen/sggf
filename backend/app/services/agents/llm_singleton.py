@@ -7,7 +7,7 @@ LLM实例单例管理器 - 避免重复创建，提升性能
 - 内存占用更优
 """
 from typing import Dict, Optional
-from langchain_community.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from .config import Config
 import os
 import logging
@@ -66,10 +66,10 @@ class LLMSingletonManager:
         logging.info(f"🤖 [模型选择] 任务类型={task_type} → 模型={selected_model}")
         
         llm = ChatOpenAI(
-            model_name=selected_model,
+            model=selected_model,
             temperature=Config.TEMPERATURE,
-            openai_api_key=api_key,
-            openai_api_base=api_base
+            api_key=api_key,
+            base_url=api_base
         )
         
         # 缓存实例

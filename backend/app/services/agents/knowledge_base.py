@@ -116,12 +116,27 @@ class NovelKnowledgeBase:
             model="text-embedding-v4"
         )
 
+        # 使用兼容模式初始化Chroma，避免RustBindingsAPI问题
+        import chromadb
+        from chromadb.config import Settings
+        
+        # 创建PersistentClient并禁用默认tenant检查
+        chroma_client = chromadb.PersistentClient(
+            path=self.persist_directory,
+            settings=Settings(
+                anonymized_telemetry=False,
+                allow_reset=True
+            )
+        )
+        
         self.vectorstore = Chroma(
-            persist_directory=self.persist_directory,
+            client=chroma_client,
             embedding_function=self.embeddings,
             collection_name="novel_knowledge"
         )
-        print(f"🔧 Using Chroma from: {CHROMA_SRC}")
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔧 Using Chroma from: {CHROMA_SRC}")
 
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
