@@ -375,7 +375,70 @@ class AgentCoordinator:
 
             # 调用真实的五阶段工作流程
             if stage == StageType.CONCEPT:
-                # 阶段1: 概念开发
+                # 阶段1: 概念开发（支持重生协同参考）
+                regen = bool(input_data.get("regenerate", False))
+                targets = set(input_data.get("targets", []))
+
+                if regen:
+                    # 参考现有内容
+                    existing_concept = self._real_coordinator.project_context.get("concept", "")
+                    existing_world = self._real_coordinator.project_context.get("world_setting", "")
+                    existing_characters = self._real_coordinator.project_context.get("characters", "")
+                    existing_outline = self._real_coordinator.project_context.get("plot_outline", "")
+
+                    new_concept = existing_concept
+                    new_world = existing_world
+
+                    # 重生故事概念：参考大纲+人物，且不得改变人物姓名/动机/关键关系
+                    if "story" in targets:
+                        concept_prompt = f"""基于以下既有内容，重写并优化故事核心概念（保持题材与风格，增强逻辑一致性）：
+
+【参考-人物设定（摘要）】
+{existing_characters[:2000]}
+
+【参考-情节大纲（摘要）】
+{existing_outline[:3000]}
+
+【约束】
+- 不得改变人物姓名、核心动机与关键关系
+- 新概念的核心冲突与卖点需可落到现有大纲走向
+- 如需轻微调整，请给出合理性（不直接改人物设定）
+"""
+                        try:
+                            new_concept = self._real_coordinator.creative_director.process(concept_prompt, None)
+                        except Exception:
+                            new_concept = existing_concept
+                        self._real_coordinator.project_context["concept"] = new_concept
+
+                    # 重生世界观：参考（新/旧）概念+人物
+                    if "world" in targets:
+                        ref_concept = new_concept if "story" in targets else existing_concept
+                        world_prompt = f"""基于以下故事概念与人物设定，重写并优化世界观设定：
+
+【参考-故事概念】
+{ref_concept[:3000]}
+
+【参考-人物设定（摘要）】
+{existing_characters[:2000]}
+
+【约束】
+- 世界规则需与人物能力/动机相容
+- 避免与既有大纲的主要走向冲突
+"""
+                        try:
+                            new_world = self._real_coordinator.world_architect.process(world_prompt, self._real_coordinator.project_context)
+                        except Exception:
+                            new_world = existing_world
+                        self._real_coordinator.project_context["world_setting"] = new_world
+
+                    # 不触发人物重生，返回现有人物
+                    return {
+                        "concept": new_concept,
+                        "worldview": new_world,
+                        "characters": existing_characters,
+                    }
+
+                # 非重生：走完整概念阶段
                 result = self._real_coordinator._stage_one_concept_development(requirement)
                 return {
                     "concept": result.get("concept", ""),
