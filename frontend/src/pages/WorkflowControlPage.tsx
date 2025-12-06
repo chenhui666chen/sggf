@@ -156,7 +156,6 @@ export default function WorkflowControlPage() {
   const [worldContent, setWorldContent] = useState('')
   const [characterContent, setCharacterContent] = useState('')
   // 🆕 概念阶段决策条与重生成弹窗（UI骨架）
-  const [showConceptDecisionBar, setShowConceptDecisionBar] = useState(false)
   const [showRegenerateDialog, setShowRegenerateDialog] = useState(false)
   const [regenerateTarget, setRegenerateTarget] = useState<'both' | 'story' | 'world'>('both')
   const [regenerateFeedback, setRegenerateFeedback] = useState('')
@@ -1127,8 +1126,7 @@ export default function WorkflowControlPage() {
     } else if (currentStageData.status === 'completed') {
       // 当前阶段已完成 - 检查是否需要执行下一阶段
       if (workflow.currentStage === 'concept') {
-        // 概念阶段完成后暂停自动推进，等待用户决策
-        setShowConceptDecisionBar(true)
+        // 概念阶段完成后暂停自动推进，等待用户决策（通过 decisionReady 状态控制）
         setIsRunning(false)
         return
       }
@@ -1658,29 +1656,7 @@ export default function WorkflowControlPage() {
   }
 
   // 🆕 概念阶段：提交重生成（携带目标、反馈），并避免触发人物
-  const handleSubmitRegenerateConcept = async () => {
-    if (!projectId) return
-    try {
-      setShowRegenerateDialog(false)
-      const targets = regenerateTarget === 'both' ? ['story', 'world'] : (regenerateTarget === 'story' ? ['story'] : ['world'])
-      await apiClient.client.post('/api/v1/workflow/execute-stage-async', {
-        project_id: parseInt(projectId),
-        stage: 'concept',
-        regenerate: true,
-        targets,
-        feedback: regenerateFeedback,
-        enable_streaming: false,
-      })
-      setSnackbarMessage('✅ 已提交概念/世界观重生成（人物不重生）')
-      setSnackbarSeverity('info')
-      setSnackbarOpen(true)
-    } catch (error) {
-      console.error('提交概念重生成失败:', error)
-      setSnackbarMessage('❌ 概念重生成提交失败')
-      setSnackbarSeverity('error')
-      setSnackbarOpen(true)
-    }
-  }
+  // 注意：此函数已被移至第2396行，此处为重复声明已删除
 
   const handleNextStage = () => {
     const currentIndex = stages.indexOf(workflow.currentStage)
@@ -2983,41 +2959,7 @@ export default function WorkflowControlPage() {
         )}
           </Box>
 
-          {/* 概念开发阶段决策条（UI骨架，已禁用，使用Dialog替代） */}
-          {false && (
-            <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 1.5, border: '1px solid', borderColor: 'grey.300', borderRadius: 1.5, bgcolor: 'grey.50' }}>
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                本轮故事概念与世界观设定已生成，请选择下一步操作：
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 1.5 }}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  size="small"
-                  disabled={workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')}
-                  onClick={() => {
-                    // 推进工作流到结构阶段
-                    setShowConceptDecisionBar(false)
-                    dispatch(updateStageStatus({ stage: 'concept', status: 'completed' }))
-                    setIsRunning(true)
-                    const nextStage: StageType = 'structure'
-                    dispatch(setCurrentStage(nextStage))
-                    executeStageAsync(nextStage)
-                  }}
-                >
-                  进入下一阶段
-                </Button>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  disabled={workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')}
-                  onClick={() => setShowRegenerateDialog(true)}
-                >
-                  重新生成
-                </Button>
-              </Box>
-            </Box>
-          )}
+          {/* 概念开发阶段决策条（已移除，使用 Dialog 替代） */}
         </Grid>
       </Grid>
 
@@ -3423,47 +3365,6 @@ export default function WorkflowControlPage() {
         </Box>
       </Dialog>
 
-      {/* 概念阶段决策弹窗（一次性，手动触发） */}
-      <Dialog open={workflow.currentStage === 'concept' && showDecisionDialog} onClose={() => setShowDecisionDialog(false)} maxWidth="sm" fullWidth>
-        <Box sx={{ p: 3 }}>
-          <Typography variant="h6" sx={{ mb: 2 }}>概念阶段完成</Typography>
-          <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
-            本轮故事概念与世界观设定已生成，请选择下一步操作：
-          </Typography>
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1.5 }}>
-            <Button
-              variant="contained"
-              color="primary"
-              disabled={workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')}
-              onClick={() => {
-                setShowDecisionDialog(false)
-                setDecisionReady(false)
-                dispatch(updateStageStatus({ stage: 'concept', status: 'completed' }))
-                setIsRunning(true)
-                const nextStage: StageType = 'structure'
-                dispatch(setCurrentStage(nextStage))
-                executeStageAsync(nextStage)
-              }}
-            >
-              进入下一阶段
-            </Button>
-            <Button
-              variant="outlined"
-              disabled={workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')}
-              onClick={() => setShowRegenerateDialog(true)}
-            >
-              重新生成
-            </Button>
-            <Button
-              variant="text"
-              disabled={workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')}
-              onClick={() => navigate(`/knowledge-base/${projectId}`)}
-            >
-              去知识库拓展人物
-            </Button>
-          </Box>
-        </Box>
-      </Dialog>
 
       {/* 重新生成设置弹窗 */}
       <Dialog open={showRegenerateDialog} onClose={() => setShowRegenerateDialog(false)} maxWidth="sm" fullWidth>
