@@ -2843,7 +2843,7 @@ export default function WorkflowControlPage() {
                   },
                 }}
               >
-                {(workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')) ? '重新生成中' : '评审结果'}
+                {(workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')) ? '生成中' : '评审结果'}
               </Button>
               </Badge>
             )}
@@ -3418,6 +3418,13 @@ export default function WorkflowControlPage() {
             >
               重新生成
             </Button>
+            <Button
+              variant="text"
+              disabled={workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')}
+              onClick={() => navigate(`/knowledge-base/${projectId}`)}
+            >
+              去知识库拓展人物
+            </Button>
           </Box>
         </Box>
       </Dialog>
@@ -3460,6 +3467,17 @@ export default function WorkflowControlPage() {
             <Button variant={regenerateTarget === 'both' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('both')}>两者</Button>
             <Button variant={regenerateTarget === 'story' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('story')}>仅故事概念</Button>
             <Button variant={regenerateTarget === 'world' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('world')}>仅世界观</Button>
+          </Box>
+
+          <Box sx={{ mb: 2 }}>
+            <Alert severity="info" icon={false}>
+              <Typography variant="caption">
+                人物重生请前往知识库的人物设定页使用“拓展人物”，此处仅针对故事概念/世界观。
+              </Typography>
+              <Box sx={{ mt: 1 }}>
+                <Button size="small" variant="outlined" onClick={() => navigate(`/knowledge-base/${projectId}`)}>去知识库拓展人物</Button>
+              </Box>
+            </Alert>
           </Box>
 
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1.5 }}>
