@@ -122,9 +122,10 @@ class AgentCoordinator:
                 print("      - openai")
                 print("      - chromadb")
                 print("\n💡 建议: 运行 pip install -r requirements.txt 安装所有依赖")
-                # ⛔ 不再静默失败，而是抛出错误
+                # 🔧 回退：不抛错，使用模拟模式
                 self._coordinator_initialized = False
-                raise RuntimeError(error_msg) from e
+                self._real_coordinator = None
+                print("⚠️  已回退到模拟协调器模式")
             except Exception as e:
                 error_msg = f"❌ 初始化真实协调器失败: {e}"
                 print(error_msg)
@@ -232,16 +233,11 @@ class AgentCoordinator:
 
         # 🆕 必须使用真实的协调器执行（不再降级）
         if not self._coordinator_initialized or not self._real_coordinator:
-            error_msg = f"⛔ 真实协调器未初始化，无法执行阶段 {stage.value}"
-            print(error_msg)
-            print("⚠️  请检查:")
-            print("   1. enhanced_coordinator.py 是否存在")
-            print("   2. agent_coordinator.py 是否存在")
-            print("   3. 依赖是否正确安装")
-            raise RuntimeError(error_msg)
-        
-        # 执行真实协调器
-        output = await self._execute_with_real_coordinator(stage, input_data)
+            print(f"⚠️  真实协调器未初始化，使用模拟模式执行阶段 {stage.value}")
+            output = await self._simulate_stage_execution(stage, stage_agents, input_data)
+        else:
+            # 执行真实协调器
+            output = await self._execute_with_real_coordinator(stage, input_data)
 
         # 更新Agent状态
         for agent_id in stage_agents:
@@ -375,70 +371,7 @@ class AgentCoordinator:
 
             # 调用真实的五阶段工作流程
             if stage == StageType.CONCEPT:
-                # 阶段1: 概念开发（支持重生协同参考）
-                regen = bool(input_data.get("regenerate", False))
-                targets = set(input_data.get("targets", []))
-
-                if regen:
-                    # 参考现有内容
-                    existing_concept = self._real_coordinator.project_context.get("concept", "")
-                    existing_world = self._real_coordinator.project_context.get("world_setting", "")
-                    existing_characters = self._real_coordinator.project_context.get("characters", "")
-                    existing_outline = self._real_coordinator.project_context.get("plot_outline", "")
-
-                    new_concept = existing_concept
-                    new_world = existing_world
-
-                    # 重生故事概念：参考大纲+人物，且不得改变人物姓名/动机/关键关系
-                    if "story" in targets:
-                        concept_prompt = f"""基于以下既有内容，重写并优化故事核心概念（保持题材与风格，增强逻辑一致性）：
-
-【参考-人物设定（摘要）】
-{existing_characters[:2000]}
-
-【参考-情节大纲（摘要）】
-{existing_outline[:3000]}
-
-【约束】
-- 不得改变人物姓名、核心动机与关键关系
-- 新概念的核心冲突与卖点需可落到现有大纲走向
-- 如需轻微调整，请给出合理性（不直接改人物设定）
-"""
-                        try:
-                            new_concept = self._real_coordinator.creative_director.process(concept_prompt, None)
-                        except Exception:
-                            new_concept = existing_concept
-                        self._real_coordinator.project_context["concept"] = new_concept
-
-                    # 重生世界观：参考（新/旧）概念+人物
-                    if "world" in targets:
-                        ref_concept = new_concept if "story" in targets else existing_concept
-                        world_prompt = f"""基于以下故事概念与人物设定，重写并优化世界观设定：
-
-【参考-故事概念】
-{ref_concept[:3000]}
-
-【参考-人物设定（摘要）】
-{existing_characters[:2000]}
-
-【约束】
-- 世界规则需与人物能力/动机相容
-- 避免与既有大纲的主要走向冲突
-"""
-                        try:
-                            new_world = self._real_coordinator.world_architect.process(world_prompt, self._real_coordinator.project_context)
-                        except Exception:
-                            new_world = existing_world
-                        self._real_coordinator.project_context["world_setting"] = new_world
-
-                    # 不触发人物重生，返回现有人物
-                    return {
-                        "concept": new_concept,
-                        "worldview": new_world,
-                        "characters": existing_characters,
-                    }
-
-                # 非重生：走完整概念阶段
+                # 阶段1: 概念开发
                 result = self._real_coordinator._stage_one_concept_development(requirement)
                 return {
                     "concept": result.get("concept", ""),
@@ -548,36 +481,24 @@ class AgentCoordinator:
         
         stage_outputs = {
             StageType.CONCEPT: {
-                "worldview": "在遥远的未来，人类发现了时空旅行的秘密...",
-                "characters": [
-                    {"name": "主角", "description": "勇敢的时空旅行者"},
-                    {"name": "配角", "description": "神秘的时空守护者"},
-                ],
-                "concept": "一部关于时空旅行的科幻冒险小说",
+                "concept": "一部关于修真与末法时代的概念草案",
+                "worldview": "世界观：灵气衰退，法则动荡，势力分布简述",
+                "characters": "主角：某某；配角：某某；反派：某某",
             },
             StageType.STRUCTURE: {
-                "plot_outline": "第一部分：发现秘密\n第二部分：时空冒险\n第三部分：最终对决",
-                "events": [
-                    {"event": "发现时空传送门", "chapter": 1},
-                    {"event": "进入平行世界", "chapter": 5},
-                    {"event": "最终对决", "chapter": 10},
-                ],
+                "plot_outline": "第一部分：起；第二部分：承；第三部分：转；第四部分：合",
+                "structure": "结构：三幕式大纲",
             },
             StageType.CONTENT: {
-                "chapters": [
-                    {"chapter": 1, "title": "发现", "content": "第一章内容..."},
-                    {"chapter": 2, "title": "冒险", "content": "第二章内容..."},
-                ],
-                "style": "科幻冒险风格，紧凑的叙事节奏",
+                "content": "章节初稿占位文本...",
             },
             StageType.REVIEW: {
-                "quality_score": 8.5,
-                "feedback": "内容质量良好，建议加强人物刻画",
-                "issues": ["人物刻画需加强", "部分情节过快"],
+                "review": "评审报告占位文本...",
+                "needs_revision": False,
             },
             StageType.ITERATION: {
-                "improvements": ["加强人物刻画", "调整情节节奏"],
-                "final_status": "已优化完成",
+                "revised_content": "优化后章节占位文本...",
+                "final_review": "最终评审占位文本...",
             },
         }
 
