@@ -3365,6 +3365,41 @@ export default function WorkflowControlPage() {
         </Box>
       </Dialog>
 
+      {/* 概念阶段决策弹窗（一次性，手动触发） */}
+      <Dialog open={workflow.currentStage === 'concept' && showDecisionDialog} onClose={() => setShowDecisionDialog(false)} maxWidth="sm" fullWidth>
+        <Box sx={{ p: 3 }}>
+          <Typography variant="h6" sx={{ mb: 2 }}>概念阶段完成</Typography>
+          <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
+            本轮故事概念与世界观设定已生成，请选择下一步操作：
+          </Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1.5 }}>
+            <Button
+              variant="contained"
+              color="primary"
+              disabled={workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')}
+              onClick={() => {
+                setShowDecisionDialog(false)
+                setDecisionReady(false)
+                dispatch(updateStageStatus({ stage: 'concept', status: 'completed' }))
+                setIsRunning(true)
+                const nextStage: StageType = 'structure'
+                dispatch(setCurrentStage(nextStage))
+                executeStageAsync(nextStage)
+              }}
+            >
+              进入下一阶段
+            </Button>
+            <Button
+              variant="outlined"
+              disabled={workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')}
+              onClick={() => setShowRegenerateDialog(true)}
+            >
+              重新生成
+            </Button>
+
+          </Box>
+        </Box>
+      </Dialog>
 
       {/* 重新生成设置弹窗 */}
       <Dialog open={showRegenerateDialog} onClose={() => setShowRegenerateDialog(false)} maxWidth="sm" fullWidth>
