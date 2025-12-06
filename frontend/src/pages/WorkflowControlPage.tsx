@@ -1657,6 +1657,31 @@ export default function WorkflowControlPage() {
     }
   }
 
+  // 🆕 概念阶段：提交重生成（携带目标、反馈），并避免触发人物
+  const handleSubmitRegenerateConcept = async () => {
+    if (!projectId) return
+    try {
+      setShowRegenerateDialog(false)
+      const targets = regenerateTarget === 'both' ? ['story', 'world'] : (regenerateTarget === 'story' ? ['story'] : ['world'])
+      await apiClient.client.post('/api/v1/workflow/execute-stage-async', {
+        project_id: parseInt(projectId),
+        stage: 'concept',
+        regenerate: true,
+        targets,
+        feedback: regenerateFeedback,
+        enable_streaming: false,
+      })
+      setSnackbarMessage('✅ 已提交概念/世界观重生成（人物不重生）')
+      setSnackbarSeverity('info')
+      setSnackbarOpen(true)
+    } catch (error) {
+      console.error('提交概念重生成失败:', error)
+      setSnackbarMessage('❌ 概念重生成提交失败')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    }
+  }
+
   const handleNextStage = () => {
     const currentIndex = stages.indexOf(workflow.currentStage)
     if (currentIndex < stages.length - 1) {
