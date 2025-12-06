@@ -5,7 +5,16 @@
 from typing import List, Dict, Any
 from langchain_classic.memory import ConversationBufferMemory, ConversationSummaryMemory
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
-from langchain_openai import ChatOpenAI
+try:
+    from langchain_openai import ChatOpenAI
+    OPENAI_SRC = "langchain_openai"
+except ImportError:
+    try:
+        from langchain_community.chat_models import ChatOpenAI
+        OPENAI_SRC = "langchain_community.chat_models"
+    except ImportError:
+        ChatOpenAI = None  # type: ignore
+        OPENAI_SRC = "missing"
 from .config import Config
 import pickle
 import json
@@ -15,12 +24,22 @@ from pathlib import Path
 
 def create_deepseek_llm(task_type: str = "default"):
     """创建LLM实例"""
-    return ChatOpenAI(  # type: ignore
-        model=Config.MODEL_NAME,
-        temperature=Config.TEMPERATURE,
-        api_key=Config.DEEPSEEK_API_KEY,
-        base_url=Config.DEEPSEEK_API_BASE
-    )
+    if OPENAI_SRC == "langchain_openai" and ChatOpenAI:
+        return ChatOpenAI(  # type: ignore
+            model=Config.MODEL_NAME,
+            temperature=Config.TEMPERATURE,
+            api_key=Config.DEEPSEEK_API_KEY,
+            base_url=Config.DEEPSEEK_API_BASE
+        )
+    elif OPENAI_SRC.startswith("langchain_") and ChatOpenAI:
+        return ChatOpenAI(  # type: ignore
+            model_name=Config.MODEL_NAME,
+            temperature=Config.TEMPERATURE,
+            openai_api_key=Config.DEEPSEEK_API_KEY,
+            openai_api_base=Config.DEEPSEEK_API_BASE
+        )
+    else:
+        raise ImportError("ChatOpenAI module not available. Please install langchain-openai or langchain-community.")
 
 
 class NovelMemoryManager:
