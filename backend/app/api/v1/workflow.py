@@ -596,6 +596,48 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
         # 📝 概念阶段附加评审反馈到需求（仅影响生成，不会直接写库）
         if stage_enum == StageType.CONCEPT and feedback:
             requirement = f"{requirement}\n用户评审反馈：{feedback}"
+
+        # 🆕 相互参考约束注入（仅重生时）
+        if stage_enum == StageType.CONCEPT and regenerate:
+            try:
+                ref_query = text("SELECT concept, world_setting, characters FROM project_settings WHERE project_id = :project_id")
+                ref_row = db.execute(ref_query, {"project_id": project_id}).fetchone()
+                existing_concept = ref_row[0] if ref_row else None
+                existing_world = ref_row[1] if ref_row else None
+                existing_characters = ref_row[2] if ref_row else None
+
+                def safe_text(value):
+                    try:
+                        import json
+                        val = json.loads(value) if value else ""
+                        if isinstance(val, (list, dict)):
+                            val = json.dumps(val, ensure_ascii=False)
+                        return str(val)
+                    except Exception:
+                        return str(value or "")
+
+                concept_txt = safe_text(existing_concept)
+                world_txt = safe_text(existing_world)
+                char_txt = safe_text(existing_characters)
+
+                def clip(s, n=1200):
+                    return s[:n] if isinstance(s, str) else ""
+
+                targets_set = set(targets or ['story', 'world'])
+                # 重生story：参考世界观+人物
+                if 'story' in targets_set and 'world' not in targets_set:
+                    requirement += f"\n\n【一致性约束】需与既有世界观与人物设定保持一致。\n【世界观摘要】\n{clip(world_txt)}\n【人物设定摘要】\n{clip(char_txt)}"
+                # 重生world：参考故事概念+人物
+                elif 'world' in targets_set and 'story' not in targets_set:
+                    requirement += f"\n\n【一致性约束】需与既有故事概念与人物设定保持一致。\n【故事概念摘要】\n{clip(concept_txt)}\n【人物设定摘要】\n{clip(char_txt)}"
+                # 重生story+world：参考人物
+                else:
+                    requirement += f"\n\n【一致性约束】需与既有人物设定保持一致。\n【人物设定摘要】\n{clip(char_txt)}"
+
+                logger.info(f"✅ 已注入相互参考约束（targets={list(targets_set) if targets_set else []}，长度={len(requirement)}）")
+            except Exception as e:
+                logger.warning(f"⚠️ 相互参考约束注入失败: {e}")
+
         # 🔔 推送阶段开始状态
         await ws_manager.send_stage_update(
             project_id=project_id,
