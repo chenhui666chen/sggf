@@ -150,7 +150,7 @@ class GenreDetector:
         
         # 最多检测前3个样本
         for sample in samples[:3]:
-            text = sample.get("original", "")
+            text = sample.text if hasattr(sample, 'text') else ""
             if text:
                 genre = self.detect(text)
                 genre_votes[genre] = genre_votes.get(genre, 0) + 1

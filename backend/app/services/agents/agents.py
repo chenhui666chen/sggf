@@ -83,13 +83,13 @@ class BaseAgent(ABC):
         """
         self.memory_manager.add_user_message(user_input)
 
+        # 🔥 合并 system_prompt 和 context 为单个 SystemMessage,避免阿里云 API 报错
         system_prompt = self.get_system_prompt()
-        messages: List[BaseMessage] = [SystemMessage(content=system_prompt)]
-
-        # 添加上下文信息
         if context:
             context_str = self._format_context(context)
-            messages.append(SystemMessage(content=context_str))
+            system_prompt = f"{system_prompt}\n\n{context_str}"
+        
+        messages: List[BaseMessage] = [SystemMessage(content=system_prompt)]
 
         # 添加对话历史
         history = self.memory_manager.get_chat_history()
@@ -120,10 +120,18 @@ class BaseAgent(ABC):
         return response.content
     
     def _format_context(self, context: Dict[str, Any]) -> str:
-        """格式化上下文信息"""
+        """格式化上下文信息（长度防护）"""
+        def to_str_limited(val: Any, limit: int = 5000) -> str:
+            try:
+                s = val if isinstance(val, str) else str(val)
+            except Exception:
+                s = ""
+            if s is None:
+                s = ""
+            return s[:limit]
         context_str = "当前上下文信息:\n"
         for key, value in context.items():
-            context_str += f"- {key}: {value}\n"
+            context_str += f"- {key}: {to_str_limited(value)}\n"
         return context_str
     
     def clear_history(self):

@@ -35,6 +35,7 @@ import PeopleIcon from '@mui/icons-material/People'
 import NavigateNextIcon from '@mui/icons-material/NavigateNext'
 import AddIcon from '@mui/icons-material/Add'
 import Chip from '@mui/material/Chip'
+import Badge from '@mui/material/Badge'
 import Snackbar from '@mui/material/Snackbar'
 import MuiAlert from '@mui/material/Alert'
 import { RootState, AppDispatch, store } from '@/store/store'
@@ -91,6 +92,23 @@ export default function WorkflowControlPage() {
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [chapterTitle, setChapterTitle] = useState('')
 
+  // 🔥 页面加载时，恢复上次的项目位置
+  useEffect(() => {
+    const savedProjectId = localStorage.getItem('lastWorkflowProjectId')
+    if (savedProjectId && !projectId) {
+      console.log(`🔄 恢复上次的项目: ${savedProjectId}`)
+      navigate(`/workflow/${savedProjectId}`)
+    }
+  }, [])
+
+  // 🔥 页面离开前，保存当前项目ID
+  useEffect(() => {
+    if (projectId) {
+      localStorage.setItem('lastWorkflowProjectId', projectId)
+      console.log(`💾 已保存项目ID: ${projectId}`)
+    }
+  }, [projectId])
+
   // 🆕 保护机制：已有内容警告对话框
   const [showContentWarningDialog, setShowContentWarningDialog] = useState(false)
   const [existingChaptersCount, setExistingChaptersCount] = useState(0)
@@ -137,6 +155,15 @@ export default function WorkflowControlPage() {
   // 世界观和人物设定内容状态（仅用于显示，不再需要对话框）
   const [worldContent, setWorldContent] = useState('')
   const [characterContent, setCharacterContent] = useState('')
+  // 🆕 概念阶段决策条与重生成弹窗（UI骨架）
+  const [showConceptDecisionBar, setShowConceptDecisionBar] = useState(false)
+  const [showRegenerateDialog, setShowRegenerateDialog] = useState(false)
+  const [regenerateTarget, setRegenerateTarget] = useState<'both' | 'story' | 'world'>('both')
+  const [regenerateFeedback, setRegenerateFeedback] = useState('')
+  const [conceptDecisionShownThisSession, setConceptDecisionShownThisSession] = useState(false)
+  const [autoInferFeedback, setAutoInferFeedback] = useState(true)
+  const [decisionReady, setDecisionReady] = useState(false)
+  const [showDecisionDialog, setShowDecisionDialog] = useState(false)
 
   const [snackbarOpen, setSnackbarOpen] = useState(false)
   const [snackbarMessage, setSnackbarMessage] = useState('')
@@ -372,6 +399,30 @@ export default function WorkflowControlPage() {
           }))
         })
         console.log(`✅ 阶段 ${stageType} 完成，所有 Agent 设置为完成`)
+
+        // 🆕 概念阶段完成：仅在会话中自动弹窗，刷新不弹
+        if (stageType === 'concept' && !conceptDecisionShownThisSession) {
+          try {
+            if (projectId) {
+              const token = localStorage.getItem('access_token')
+              fetch(`/api/v1/workflow/${projectId}/all-stages-content`, {
+                headers: { 'Authorization': `Bearer ${token}` },
+              }).then(res => res.json()).then(batchData => {
+                const stages = batchData.stages || {}
+                if (stages.concept) setConceptContent(stages.concept)
+                if (stages.world_setting) setWorldContent(stages.world_setting)
+                const hasConcept = !!(stages.concept && stages.concept.trim())
+                // 改为仅在故事概念就绪时弹窗（不依赖世界观）
+                if (hasConcept) {
+                  setDecisionReady(true)
+                  setConceptDecisionShownThisSession(true)
+                }
+              }).catch(err => console.error('刷新概念阶段内容失败:', err))
+            }
+          } catch (err) {
+            console.error('概念阶段完成后自动弹窗逻辑失败:', err)
+          }
+        }
 
         if (data.output) {
           dispatch(updateStageOutput({ stage: stageType, output: data.output }))
@@ -1064,6 +1115,12 @@ export default function WorkflowControlPage() {
       executeStageAsync(workflow.currentStage)
     } else if (currentStageData.status === 'completed') {
       // 当前阶段已完成 - 检查是否需要执行下一阶段
+      if (workflow.currentStage === 'concept') {
+        // 概念阶段完成后暂停自动推进，等待用户决策
+        setShowConceptDecisionBar(true)
+        setIsRunning(false)
+        return
+      }
       const currentIndex = stages.indexOf(workflow.currentStage)
       if (currentIndex < stages.length - 1) {
         // 移动到下一阶段
@@ -1094,6 +1151,8 @@ export default function WorkflowControlPage() {
       }
     }
   }, [isRunning, workflow.currentStage, workflow.stages, currentTaskId, projectId, dispatch])
+
+  // 🆕 概念阶段决策弹窗在 WebSocket 完成事件中控制（刷新不弹）
 
   // 🆕 清理轮询定时器
   useEffect(() => {
@@ -2297,6 +2356,60 @@ export default function WorkflowControlPage() {
     }
   }
 
+  // 🆕 概念阶段：提交重新生成（仅故事概念/世界观/两者）
+  const handleSubmitRegenerateConcept = async () => {
+    if (!projectId) return
+    if (workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')) {
+      setSnackbarMessage('概念阶段执行中，请稍后再试')
+      setSnackbarSeverity('warning')
+      setSnackbarOpen(true)
+      return
+    }
+    try {
+      setShowRegenerateDialog(false)
+      setShowDecisionDialog(false)
+      // 保持评审按钮可见，显示状态
+      setIsRunning(true)
+      const targets = regenerateTarget === 'both' ? ['story','world'] : (regenerateTarget === 'story' ? ['story'] : ['world'])
+      const feedbackText = (regenerateFeedback && regenerateFeedback.trim()) ? regenerateFeedback : (autoInferFeedback ? '根据当前预览内容进行轻微优化，增强题材适配性与逻辑一致性' : '')
+      const response = await fetch('/api/v1/workflow/execute-stage-async', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          project_id: parseInt(projectId),
+          stage: 'concept',
+          regenerate: true,
+          targets,
+          feedback: feedbackText,
+          enable_streaming: false,
+        }),
+      })
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        setSnackbarMessage(err.detail || err.error || '提交重新生成失败')
+        setSnackbarSeverity('error')
+        setSnackbarOpen(true)
+        setIsRunning(false)
+        return
+      }
+      const data = await response.json()
+      console.log('✅ 概念阶段重生任务已提交:', data)
+      setSnackbarMessage('已提交重新生成，请稍候完成')
+      setSnackbarSeverity('success')
+      setSnackbarOpen(true)
+      // 等待任务完成后由现有状态/事件再决定是否再次弹出确认
+    } catch (error) {
+      console.error('提交重新生成异常:', error)
+      setSnackbarMessage('提交重新生成失败，请重试')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+      setIsRunning(false)
+    }
+  }
+
   // 关闭最终版本对话框
   const handleCloseFinalVersionDialog = () => {
     setShowFinalVersionDialog(false)
@@ -2386,6 +2499,42 @@ export default function WorkflowControlPage() {
 
   const currentStageIndex = stages.indexOf(workflow.currentStage)
 
+  // 🆕 刷新后保持评审按钮显示（不自动弹窗）
+  // 🔥 核心逻辑：只在概念阶段完成后且结构阶段未启动时显示
+  useEffect(() => {
+    const isConceptStage = workflow.currentStage === 'concept'
+    const conceptCompleted = workflow.stages.concept.status === 'completed'
+    const conceptActive = workflow.stages.concept.status === 'active'
+    const hasConceptAgentWorking = workflow.stages.concept.agents.some(a => a.status === 'working')
+    
+    // 🔑 关键判断：结构阶段是否已开始（pending表示未启动，active/completed表示已启动）
+    const structureStarted = workflow.stages.structure.status !== 'pending'
+    
+    const hasContent = !!(conceptContent || worldContent)
+    
+    // 三种显示场景：
+    // 1. 概念阶段完成待评审（有内容，结构未启动）
+    const scenario1 = isConceptStage && conceptCompleted && !structureStarted && hasContent
+    // 2. 概念阶段执行中（生成中或重新生成中）
+    const scenario2 = isConceptStage && (conceptActive || hasConceptAgentWorking)
+    // 3. 概念阶段重生后仍在概念阶段（完成状态，结构未启动，有内容）
+    const scenario3 = isConceptStage && conceptCompleted && !structureStarted && hasContent
+    
+    const shouldShow = scenario1 || scenario2 || scenario3
+    setDecisionReady(shouldShow)
+    
+    console.log('📊 评审按钮显示逻辑:', {
+      isConceptStage,
+      conceptCompleted,
+      conceptActive,
+      hasConceptAgentWorking,
+      structureStarted,
+      hasContent,
+      shouldShow,
+      '结构阶段状态': workflow.stages.structure.status
+    })
+  }, [workflow.currentStage, conceptContent, worldContent, workflow.stages.concept.status, workflow.stages.structure.status, workflow.stages.concept.agents])
+
   return (
     <Container maxWidth="lg" sx={{ py: 2 }}>
       {/* 左侧顶部区域：返回按钮 + 标题 + 项目信息 */}
@@ -2394,7 +2543,11 @@ export default function WorkflowControlPage() {
         <Box sx={{ mb: 3, py: 1 }}>
           <Button
             startIcon={<ArrowBackIcon />}
-            onClick={() => navigate('/dashboard')}
+            onClick={() => {
+              // 🔥 返回时清除保存的项目ID
+              localStorage.removeItem('lastWorkflowProjectId')
+              navigate('/dashboard')
+            }}
             variant="outlined"
             size="medium"
             sx={{ py: 1, px: 2 }}
@@ -2669,6 +2822,31 @@ export default function WorkflowControlPage() {
         {/* 概念开发阶段：显示"故事概念"、"世界观设定"、"人物设定"按钮 */}
         {workflow.currentStage === 'concept' ? (
           <Box sx={{ display: 'flex', gap: 1 }}>
+            {decisionReady && (
+              <Badge color="error" variant="dot" overlap="rectangular" anchorOrigin={{ vertical: 'top', horizontal: 'left' }}>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={() => setShowDecisionDialog(true)}
+                disabled={workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')}
+                sx={{
+                animation: 'pulse 1.5s ease-in-out infinite, wave 2.4s linear infinite',
+                  '@keyframes pulse': {
+                    '0%': { transform: 'scale(1)' },
+                    '50%': { transform: 'scale(1.06)' },
+                    '100%': { transform: 'scale(1)' },
+                  },
+                  '@keyframes wave': {
+                    '0%': { boxShadow: '0 0 0 0 rgba(25,118,210,0.35)' },
+                    '50%': { boxShadow: '0 0 0 8px rgba(25,118,210,0.12)' },
+                    '100%': { boxShadow: '0 0 0 0 rgba(25,118,210,0.35)' },
+                  },
+                }}
+              >
+                {(workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')) ? '重新生成中' : '评审结果'}
+              </Button>
+              </Badge>
+            )}
             <Button
               variant="outlined"
               onClick={handleOpenConceptDialog}
@@ -2768,6 +2946,42 @@ export default function WorkflowControlPage() {
           </Button>
         )}
           </Box>
+
+          {/* 概念开发阶段决策条（UI骨架，已禁用，使用Dialog替代） */}
+          {false && (
+            <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 1.5, border: '1px solid', borderColor: 'grey.300', borderRadius: 1.5, bgcolor: 'grey.50' }}>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                本轮故事概念与世界观设定已生成，请选择下一步操作：
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1.5 }}>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  size="small"
+                  disabled={workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')}
+                  onClick={() => {
+                    // 推进工作流到结构阶段
+                    setShowConceptDecisionBar(false)
+                    dispatch(updateStageStatus({ stage: 'concept', status: 'completed' }))
+                    setIsRunning(true)
+                    const nextStage: StageType = 'structure'
+                    dispatch(setCurrentStage(nextStage))
+                    executeStageAsync(nextStage)
+                  }}
+                >
+                  进入下一阶段
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')}
+                  onClick={() => setShowRegenerateDialog(true)}
+                >
+                  重新生成
+                </Button>
+              </Box>
+            </Box>
+          )}
         </Grid>
       </Grid>
 
@@ -3170,6 +3384,94 @@ export default function WorkflowControlPage() {
               </Box>
             </>
           )}
+        </Box>
+      </Dialog>
+
+      {/* 概念阶段决策弹窗（一次性，手动触发） */}
+      <Dialog open={workflow.currentStage === 'concept' && showDecisionDialog} onClose={() => setShowDecisionDialog(false)} maxWidth="sm" fullWidth>
+        <Box sx={{ p: 3 }}>
+          <Typography variant="h6" sx={{ mb: 2 }}>概念阶段完成</Typography>
+          <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
+            本轮故事概念与世界观设定已生成，请选择下一步操作：
+          </Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1.5 }}>
+            <Button
+              variant="contained"
+              color="primary"
+              disabled={workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')}
+              onClick={() => {
+                setShowDecisionDialog(false)
+                setDecisionReady(false)
+                dispatch(updateStageStatus({ stage: 'concept', status: 'completed' }))
+                setIsRunning(true)
+                const nextStage: StageType = 'structure'
+                dispatch(setCurrentStage(nextStage))
+                executeStageAsync(nextStage)
+              }}
+            >
+              进入下一阶段
+            </Button>
+            <Button
+              variant="outlined"
+              disabled={workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')}
+              onClick={() => setShowRegenerateDialog(true)}
+            >
+              重新生成
+            </Button>
+          </Box>
+        </Box>
+      </Dialog>
+
+      {/* 重新生成设置弹窗 */}
+      <Dialog open={showRegenerateDialog} onClose={() => setShowRegenerateDialog(false)} maxWidth="sm" fullWidth>
+        <Box sx={{ p: 3 }}>
+          <Typography variant="h6" sx={{ mb: 2 }}>
+            重新生成设置
+          </Typography>
+
+          <TextField
+            fullWidth
+            multiline
+            rows={4}
+            placeholder="补充意见（选填）"
+            value={regenerateFeedback}
+            onChange={(e) => setRegenerateFeedback(e.target.value)}
+            sx={{ mb: 2 }}
+          />
+
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>快捷意见：</Typography>
+            <Button size="small" variant="outlined" onClick={() => setRegenerateFeedback(prev => (prev ? prev + '；' : '') + '加强权谋与历史真实感')}>权谋+真实</Button>
+            <Button size="small" variant="outlined" onClick={() => setRegenerateFeedback(prev => (prev ? prev + '；' : '') + '降低爽点，增强人物动机合理性')}>降低爽点</Button>
+            <Button size="small" variant="outlined" onClick={() => setRegenerateFeedback(prev => (prev ? prev + '；' : '') + '世界观内部规则一致')}>规则一致</Button>
+          </Box>
+
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
+            <Chip
+              label={autoInferFeedback ? '自动推断：开' : '自动推断：关'}
+              size="small"
+              variant="outlined"
+              onClick={() => setAutoInferFeedback((v) => !v)}
+            />
+          </Box>
+
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>目标：</Typography>
+            <Button variant={regenerateTarget === 'both' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('both')}>两者</Button>
+            <Button variant={regenerateTarget === 'story' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('story')}>仅故事概念</Button>
+            <Button variant={regenerateTarget === 'world' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('world')}>仅世界观</Button>
+          </Box>
+
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1.5 }}>
+            <Button onClick={() => setShowRegenerateDialog(false)}>取消</Button>
+            <Button
+              variant="contained"
+              disabled={workflow.stages.concept.status === 'active' || workflow.stages.concept.agents.some(a => a.status === 'working')}
+              onClick={handleSubmitRegenerateConcept}
+            >
+              提交并重新生成
+            </Button>
+          </Box>
         </Box>
       </Dialog>
 

@@ -52,6 +52,10 @@ class ExecuteStageRequest(BaseModel):
     stage: str
     # 🆕 是否启用流式输出（默认启用）
     enable_streaming: bool = True
+    # 🆕 概念阶段评审/重生支持的可选参数
+    regenerate: bool = False
+    targets: Optional[list[str]] = None
+    feedback: Optional[str] = None
 
 class RegenerateStageRequest(BaseModel):
     project_id: int
@@ -451,9 +455,9 @@ async def execute_stage_async(
             )
             logger.info(f"   🌊 流式后台任务已启动")
         else:
-            # 使用传统方式执行
+    # 使用传统方式执行
             asyncio.create_task(
-                execute_stage_background(task_id, project_id, stage_enum, current_user.id, db)
+                execute_stage_background(task_id, project_id, stage_enum, current_user.id, db, getattr(request, 'regenerate', False), getattr(request, 'targets', None), getattr(request, 'feedback', None))
             )
             logger.info(f"   🚀 后台任务已启动")
 
@@ -524,7 +528,7 @@ async def trigger_auto_system_detection(
         traceback.print_exc()
 
 
-async def execute_stage_background(task_id: str, project_id: int, stage_enum: StageType, user_id: int, db: Session):
+async def execute_stage_background(task_id: str, project_id: int, stage_enum: StageType, user_id: int, db: Session, regenerate: bool = False, targets: Optional[list[str]] = None, feedback: Optional[str] = None):
     """后台执行阶段任务"""
     import logging
     from sqlalchemy import text
@@ -589,6 +593,9 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
                 requirement = "根据项目设定进行创作"
                 logger.warning(f"   ⚠️  未找到用户需求，使用默认值: {requirement}")
         
+        # 📝 概念阶段附加评审反馈到需求（仅影响生成，不会直接写库）
+        if stage_enum == StageType.CONCEPT and feedback:
+            requirement = f"{requirement}\n用户评审反馈：{feedback}"
         # 🔔 推送阶段开始状态
         await ws_manager.send_stage_update(
             project_id=project_id,
@@ -681,7 +688,10 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
             {
                 "project_id": project_id, 
                 "user_id": user_id,
-                "requirement": requirement  # ✅ 传递真实的用户需求
+                "requirement": requirement,  # ✅ 传递真实的用户需求
+                "regenerate": regenerate,
+                "targets": targets,
+                "feedback": feedback,
             },
         )
         
@@ -725,8 +735,40 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
             import json
             
             if stage_enum == StageType.CONCEPT:
-                # 保存概念开发结果
+                # 保存概念开发结果（支持评审/重生的目标字段选择）
                 output_data = stage_output.output if isinstance(stage_output.output, dict) else {}
+                # 读取现有值以便选择性覆盖
+                existing_query = text("""
+                    SELECT concept, world_setting, characters FROM project_settings WHERE project_id = :project_id
+                """)
+                existing_row = db.execute(existing_query, {"project_id": project_id}).fetchone()
+                existing_concept = existing_row[0] if existing_row else None
+                existing_world = existing_row[1] if existing_row else None
+                existing_characters = existing_row[2] if existing_row else None
+
+                # 安全解析现有JSON字符串
+                def safe_json(value, default):
+                    try:
+                        import json
+                        if value is None:
+                            return default
+                        parsed = json.loads(value)
+                        return parsed
+                    except Exception:
+                        return default
+
+                existing_concept_val = safe_json(existing_concept, "")
+                existing_world_val = safe_json(existing_world, "")
+                existing_characters_val = safe_json(existing_characters, [])
+
+                targets_set = set(targets or [])
+                is_regen = bool(regenerate)
+
+                # 计算要保存的字段：非重生则全部覆盖；重生则按目标覆盖
+                concept_to_save = output_data.get("concept", "") if not is_regen or ("story" in targets_set) else existing_concept_val
+                world_to_save = output_data.get("worldview", output_data.get("world_setting", "")) if not is_regen or ("world" in targets_set) else existing_world_val
+                characters_to_save = output_data.get("characters", []) if not is_regen else existing_characters_val
+
                 save_query = text("""
                     UPDATE project_settings
                     SET concept = :concept,
@@ -738,14 +780,14 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
                 """)
                 
                 db.execute(save_query, {
-                    "concept": json.dumps(output_data.get("concept", ""), ensure_ascii=False),
-                    "world_setting": json.dumps(output_data.get("worldview", output_data.get("world_setting", "")), ensure_ascii=False),
-                    "characters": json.dumps(output_data.get("characters", []), ensure_ascii=False),
+                    "concept": json.dumps(concept_to_save, ensure_ascii=False),
+                    "world_setting": json.dumps(world_to_save, ensure_ascii=False),
+                    "characters": json.dumps(characters_to_save, ensure_ascii=False),
                     "updated_at": datetime.now().isoformat(),
                     "project_id": project_id
                 })
                 db.commit()
-                logger.info(f"   💾 已保存概念开发结果到 project_settings")
+                logger.info(f"   💾 已保存概念开发结果到 project_settings（重生={is_regen}, targets={list(targets_set) if targets_set else []}）")
             
             elif stage_enum == StageType.STRUCTURE:
                 # 保存结构设计结果

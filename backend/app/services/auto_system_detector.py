@@ -3,9 +3,11 @@
 根据文本内容自动识别涉及的体系类型，并创建对应的设定集合
 """
 import logging
+import json
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from langchain_core.messages import HumanMessage
 
 from app.services.agents.llm_singleton import create_deepseek_llm
 
@@ -148,12 +150,12 @@ class AutoSystemDetector:
         
         try:
             logger.info("🔍 开始AI分析文本，识别体系类型...")
-            response = self.llm.process(prompt, {})
+            # 🔥 使用 invoke 方法替代 process
+            response = self.llm.invoke([HumanMessage(content=prompt)])
             
             # 解析JSON响应
-            import json
             # 提取JSON部分（去除可能的markdown代码块标记）
-            response_text = response.strip()
+            response_text = response.content.strip()
             if response_text.startswith("```json"):
                 response_text = response_text[7:]
             if response_text.startswith("```"):

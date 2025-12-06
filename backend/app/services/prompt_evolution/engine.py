@@ -394,13 +394,23 @@ class PromptEvolutionEngine:
                     removed = self.meta_optimizer.experience.effective_strategies.pop(idx)
                     logger.info(f"🎲 探索模式：随机移除有效策略约束: {removed[:50]}...")
         
-        if self.meta_optimizer.experience.failure_reasons:
-            num_to_remove = max(1, len(self.meta_optimizer.experience.failure_reasons) // 3)
+        # 🆕 随机移除部分经验约束（探索模式核心）
+        # 移除部分有效策略和无效策略，给系统更多试错空间
+        if self.meta_optimizer.experience.effective_strategies:
+            num_to_remove = max(1, len(self.meta_optimizer.experience.effective_strategies) // 3)
             for _ in range(num_to_remove):
-                if self.meta_optimizer.experience.failure_reasons:
-                    idx = random.randint(0, len(self.meta_optimizer.experience.failure_reasons) - 1)
-                    removed = self.meta_optimizer.experience.failure_reasons.pop(idx)
-                    logger.info(f"🎲 探索模式：随机移除失败原因约束: {removed[:50]}...")
+                if self.meta_optimizer.experience.effective_strategies:
+                    idx = random.randint(0, len(self.meta_optimizer.experience.effective_strategies) - 1)
+                    removed = self.meta_optimizer.experience.effective_strategies.pop(idx)
+                    logger.info(f"🎲 探索模式：随机移除有效策略约束: {removed[:50]}...")
+        
+        if self.meta_optimizer.experience.ineffective_strategies:
+            num_to_remove = max(1, len(self.meta_optimizer.experience.ineffective_strategies) // 3)
+            for _ in range(num_to_remove):
+                if self.meta_optimizer.experience.ineffective_strategies:
+                    idx = random.randint(0, len(self.meta_optimizer.experience.ineffective_strategies) - 1)
+                    removed = self.meta_optimizer.experience.ineffective_strategies.pop(idx)
+                    logger.info(f"🎲 探索模式：随机移除无效策略约束: {removed[:50]}...")
 
         # 6. 🆕 决定是否启用反向优化（50%概率）
         self.reverse_optimization_mode = random.random() < 0.5
