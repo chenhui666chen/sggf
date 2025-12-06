@@ -398,6 +398,17 @@ export default function WorkflowControlPage() {
             message: '执行完成'
           }))
         })
+
+        // 🆕 同步预览输出（无需刷新）
+        if (data.output) {
+          dispatch(updateStageOutput({ stage: stageType, output: data.output }))
+          if (stageType === 'concept') {
+            const hasCharacterSection = typeof data.output === 'string' && /人物设定|人物体系|主角阵营|对手阵营|支持角色|中立角色/.test(data.output)
+            if (hasCharacterSection) {
+              setCharacterContent(data.output)
+            }
+          }
+        }
         console.log(`✅ 阶段 ${stageType} 完成，所有 Agent 设置为完成`)
 
         // 🆕 概念阶段完成：仅在会话中自动弹窗，刷新不弹
