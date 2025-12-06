@@ -4,11 +4,14 @@ Knowledge Base Management - Store and retrieve novel settings using vector datab
 from typing import List, Dict, Any, Optional
 try:
     from langchain_chroma import Chroma  # 优先使用新包，避免弃用警告
+    CHROMA_SRC = "langchain_chroma"
 except ImportError:
     try:
         from langchain_community.vectorstores import Chroma  # 回退兼容
+        CHROMA_SRC = "langchain_community.vectorstores"
     except ImportError:
         from langchain.vectorstores import Chroma  # 最后一层回退
+        CHROMA_SRC = "langchain.vectorstores"
 from langchain_core.embeddings import Embeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
@@ -118,6 +121,7 @@ class NovelKnowledgeBase:
             embedding_function=self.embeddings,
             collection_name="novel_knowledge"
         )
+        print(f"🔧 Using Chroma from: {CHROMA_SRC}")
 
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,

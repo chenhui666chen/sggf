@@ -5,7 +5,7 @@
 from typing import List, Dict, Any
 from langchain_classic.memory import ConversationBufferMemory, ConversationSummaryMemory
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
-from langchain_community.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from .config import Config
 import pickle
 import json
@@ -16,10 +16,10 @@ from pathlib import Path
 def create_deepseek_llm(task_type: str = "default"):
     """创建LLM实例"""
     return ChatOpenAI(  # type: ignore
-        model_name=Config.MODEL_NAME,
+        model=Config.MODEL_NAME,
         temperature=Config.TEMPERATURE,
-        openai_api_key=Config.DEEPSEEK_API_KEY,
-        openai_api_base=Config.DEEPSEEK_API_BASE
+        api_key=Config.DEEPSEEK_API_KEY,
+        base_url=Config.DEEPSEEK_API_BASE
     )
 
 
