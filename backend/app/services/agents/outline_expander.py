@@ -1301,6 +1301,182 @@ Please分析：
             # 🔄 恢复原始 LLM
             self.character_designer.llm = original_llm
 
+    def generate_epic_framework(self, world_setting: str, characters: str,
+                               total_volumes: int, total_chapters_range: tuple[int, int]) -> Dict[str, Any]:
+        """生成史诗框架（超长网文总体规划）
+        
+        为1000+章的超长网文生成宏观框架，每卷仅200-300字概要
+        
+        Args:
+            world_setting: 世界观设定
+            characters: 人物设定
+            total_volumes: 总卷数(10-50卷)
+            total_chapters_range: 总章节范围(min, max)
+            
+        Returns:
+            史诗框架字典，包含:
+            - expanded_outline: 史诗框架内容
+            - total_volumes: 总卷数
+            - estimated_chapters: 预估总章节数
+        """
+        print(f"\n{'='*70}")
+        print(f"🌟 【史诗框架生成器】{total_volumes}卷，预计{total_chapters_range[0]}-{total_chapters_range[1]}章")
+        print(f"{'='*70}\n")
+        
+        framework_prompt = f"""你是顶级网文架构师，擅长规划超长篇网文（1000章以上）。
+
+【任务】
+规划一部{total_volumes}卷的超长网文，预计{total_chapters_range[0]}-{total_chapters_range[1]}章
+
+【当前设定】
+世界观：
+{world_setting}
+
+主要人物：
+{characters[:1000] if characters else '待完善'}
+
+【输出要求】
+⚠️ 这是史诗框架，不是详细大纲！每卷仅需200-300字概要
+
+## 一、整体叙事节奏
+分为前中后三期，每期占多少卷，预计章节数：
+- 前期（第1-X卷）：主题/场景 → Y章
+- 中期（第X-Y卷）：主题/场景 → Z章
+- 后期（第Y-{total_volumes}卷）：主题/场景 → W章
+
+## 二、境界体系进阶
+每5卷一个大境界跨越，例如：
+- 第1-5卷：筑基→金丹（地球修真界）
+- 第6-10卷：元婴→化神（中州大陆）
+- ...
+
+## 三、{total_volumes}卷概要
+每卷格式：
+【第X卷】卷名（预计Y章）
+- 核心：本卷主题/目标
+- 境界：主角境界范围
+- 主要敌人：本卷Boss
+- 卷末高潮：关键事件
+
+## 四、关键伏笔布局
+| 伏笔 | 埋设位置 | 铺垫卷 | 揭秘卷 |
+|------|---------|--------|--------|
+| 主角真实身份 | 第X卷 | 第Y,Z卷 | 第W卷 |
+| 天道黑幕 | 第A卷 | 第B,C卷 | 第D卷 |
+(至少10条跨卷伏笔)
+
+## 五、核心人物生命周期
+| 角色 | 登场 | 活跃期 | 退场/转型 |
+|------|------|--------|-------------|
+| 女主 | 第1卷 | 1-{total_volumes}卷 | 始终在线 |
+| 师父 | 第1卷 | 1-8卷 | 第9卷羽化 |
+(主要角色的登场退场规划)
+
+记住：这是框架，不是详细大纲，保持高层视角！"""
+
+        print("【第一步】生成史诗框架...")
+        framework_content = self.creative_director.process(framework_prompt, {})
+        print("✅ 史诗框架生成完成\n")
+        
+        print(f"{'='*70}")
+        print(f"【史诗框架生成】完成！")
+        print(f"{'='*70}\n")
+        
+        return {
+            "expanded_outline": framework_content,
+            "total_volumes": total_volumes,
+            "estimated_chapters": (total_chapters_range[0] + total_chapters_range[1]) // 2,
+            "framework_type": "epic"
+        }
+    
+    def expand_volume_detail(self, framework_content: str, target_volume_index: int,
+                            world_setting: str, characters: str,
+                            chapters_range: tuple[int, int]) -> Dict[str, Any]:
+        """基于史诗框架详细扩展单卷
+        
+        根据已有的史诗框架，将指定的卷扩展为详细的章节大纲
+        
+        Args:
+            framework_content: 史诗框架内容
+            target_volume_index: 扩展第几卷
+            world_setting: 世界观设定
+            characters: 人物设定
+            chapters_range: 本卷章节范围(min, max)
+            
+        Returns:
+            单卷详细字典，包含:
+            - expanded_outline: 详细大纲
+            - volume_index: 卷索引
+            - chapter_count: 实际章节数
+        """
+        print(f"\n{'='*70}")
+        print(f"📖 【单卷详细扩展】第{target_volume_index}卷，{chapters_range[0]}-{chapters_range[1]}章")
+        print(f"{'='*70}\n")
+        
+        detail_prompt = f"""基于已有的史诗框架，详细扩展第{target_volume_index}卷。
+
+【史诗框架】
+{framework_content}
+
+【世界观设定】
+{world_setting}
+
+【人物设定】
+{characters[:2000] if characters else '待完善'}
+
+【扩展要求】
+生成{chapters_range[0]}-{chapters_range[1]}章的详细大纲
+
+每章必须包含：
+- 主要内容（50-100字）
+- 关键事件
+- 涉及人物
+- 爆点设计
+- 结尾钩子
+
+⚠️ 必须检查：
+1. 是否符合史诗框架中本卷的定位
+2. 是否正确埋设/回收框架中规划的伏笔
+3. 人物登场是否符合框架中的生命周期规划
+
+Please输出完整的、重新整合后的网文大纲（🔥重点：每章必须有完整的详细规划）：
+
+## 一、故事概述
+[整合后的完整故事概述，300-500字]
+
+## 二、第{target_volume_index}卷详细规划
+
+第1章：《章节标题》
+- 主要内容：...
+- 关键事件：...
+- 涉及人物：...
+- 爆点设计：⭐⭐ [类型] 描述
+- 结尾钩子：[类型] 钩子内容
+
+(继续每章...)
+
+## 三、伏笔埋设检查
+✅ 第X章：埋设主角身份伏笔（符合史诗框架）
+✅ 第Y章：提及“天道”异常（为第Z卷铺垫）"""
+
+        print("【第一步】详细扩展第{target_volume_index}卷...")
+        volume_content = self.plot_architect.process(detail_prompt, {})
+        print("✅ 单卷详细扩展完成\n")
+        
+        print(f"{'='*70}")
+        print(f"【单卷详细扩展】完成！")
+        print(f"{'='*70}\n")
+        
+        # 估算实际章节数(取范围中值)
+        estimated_chapters = (chapters_range[0] + chapters_range[1]) // 2
+        
+        return {
+            "expanded_outline": volume_content,
+            "volume_index": target_volume_index,
+            "chapter_count": estimated_chapters,
+            "current_chapter_count": estimated_chapters
+        }
+
 
 def create_outline_expander(knowledge_base: Optional[NovelKnowledgeBase] = None,
                            memory_manager: Optional[NovelMemoryManager] = None) -> OutlineExpander:
