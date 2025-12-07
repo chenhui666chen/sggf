@@ -78,9 +78,20 @@ class CreativeDirectorCoordinator:
         """
         logger.info(f"🎯 开始真实Agent概念开发，需求: {requirement[:100]}...")
         
-        # 1. 创意总监生成故事概念
-        logger.info("📝 创意总监正在生成故事概念...")
-        concept_prompt = f"""你是一名擅长网文结构设计的“创意总监”，需要为一个新项目生成【故事概念】和初步【世界观设定】。
+        # 🔧 获取重生信息（在创意总监执行前就读取）
+        regenerate_targets = self.project_context.get("regenerate_targets", [])
+        is_regenerate = self.project_context.get("regenerate", False)
+        
+        # 1. 创意总监生成故事概念（按 regenerate_targets 条件执行）
+        should_generate_concept = not is_regenerate or "story" in regenerate_targets
+        
+        if should_generate_concept:
+            logger.info("📝 创意总监正在生成故事概念...")
+            # 🔧 重生时的特别提示
+            regenerate_hint = ""
+            if is_regenerate and "story" in regenerate_targets:
+                regenerate_hint = "\n\n【重生成说明】\n这是一次重新生成，请基于用户反馈进行优化与调整，确保有明显改进。若用户未提供具体反馈，则从以下角度进行轻微优化：\n1. 增强核心标签的差异化锐度\n2. 优化Logline的吸引力\n3. 调整核心冲突的层次感"
+            concept_prompt = f"""你是一名擅长网文结构设计的"创意总监"，需要为一个新项目生成【故事概念】和初步【世界观设定】。{regenerate_hint}
 
 【已知信息】
 - 项目题目：{self.project_context.get("title") or self.project_context.get("project_title") or "未命名项目"}
@@ -130,13 +141,21 @@ class CreativeDirectorCoordinator:
 - 此处只做高度概括，详细世界观将在后续阶段展开。
 
 请严格按照上述顺序与小标题输出，不要添加其他额外说明。"""
-        concept_result = self.creative_director.process(concept_prompt)
-        concept = concept_result if isinstance(concept_result, str) else concept_result.get("output", requirement)
-        logger.info(f"✅ 故事概念生成完成，长度: {len(concept)}")
+            concept_result = self.creative_director.process(concept_prompt)
+            concept = concept_result if isinstance(concept_result, str) else concept_result.get("output", requirement)
+            logger.info(f"✅ 故事概念生成完成，长度: {len(concept)}")
+        else:
+            # 重生时不重生story，沿用旧概念
+            concept = self.project_context.get("concept") or ""
+            logger.info("⏭ 跳过故事概念生成，沿用现有故事概念。")
         
-        # 2. 世界观架构师生成世界观设定
-        logger.info("🌍 世界观架构师正在生成世界观...")
-        world_prompt = f"""你是一名"世界观架构师"，需要为一个网文项目生成结构化的【世界观设定】。
+        # 2. 世界观架构师生成世界观设定（按 regenerate_targets 条件执行）
+        # 判断是否需要重生世界观
+        should_generate_world = not is_regenerate or "world" in regenerate_targets
+        
+        if should_generate_world:
+            logger.info("🌍 世界观架构师正在生成世界观...")
+            world_prompt = f"""你是一名"世界观架构师"，需要为一个网文项目生成结构化的【世界观设定】。
 
 【已知内容】
 - 故事概念：{concept[:500] if concept else '无'}
@@ -182,14 +201,22 @@ class CreativeDirectorCoordinator:
 - 指出底层人物在该体系中的典型生存路径和陷阱。
 
 请用清晰的段落和小标题组织内容，避免长篇大段不分段的纯文字，严格按照上述七个部分输出。"""
-        world_context = {"concept": concept, "requirement": requirement}
-        world_result = self.world_architect.process(world_prompt, context=world_context)
-        world = world_result if isinstance(world_result, str) else world_result.get("output", "世界观设定")
-        logger.info(f"✅ 世界观生成完成，长度: {len(world)}")
+            world_context = {"concept": concept, "requirement": requirement}
+            world_result = self.world_architect.process(world_prompt, context=world_context)
+            world = world_result if isinstance(world_result, str) else world_result.get("output", "世界观设定")
+            logger.info(f"✅ 世界观生成完成，长度: {len(world)}")
+        else:
+            # 重生时不重生world，沿用旧世界观
+            world = self.project_context.get("world_setting") or ""
+            logger.info("⏭ 跳过世界观生成，沿用现有世界观设定。")
         
-       # 3. 人物设计师生成人物设定
-        logger.info("👥 人物设计师正在生成人物...")
-        char_prompt = f"""你是一名擅长网文人物塑造的"人物设计师"，需要为一个网文项目生成结构化的【主要人物设定】。
+        # 3. 人物设计师生成人物设定（按 regenerate_targets 条件执行）
+        # 判断是否需要重生人物（目前 UI 只有 story/world，没有人物，所以重生时不该跳过）
+        should_generate_characters = not is_regenerate or "characters" in regenerate_targets
+        
+        if should_generate_characters:
+            logger.info("👥 人物设计师正在生成人物...")
+            char_prompt = f"""你是一名擅长网文人物塑造的"人物设计师"，需要为一个网文项目生成结构化的【主要人物设定】。
 
 【已知内容】
 - 故事概念：{concept[:500] if concept else '无'}
@@ -391,10 +418,14 @@ class CreativeDirectorCoordinator:
 6. 盟友与对手都要有自己的成长线，不能沦为"工具人"。
 
 请严格按照上述格式输出完整的主要人物设定，每个字段后必须换行。"""
-        char_context = {"concept": concept, "world_setting": world, "requirement": requirement}
-        char_result = self.character_designer.process(char_prompt, context=char_context)
-        chars = char_result if isinstance(char_result, str) else char_result.get("output", "人物设定")
-        logger.info(f"✅ 人物生成完成，长度: {len(chars)}")
+            char_context = {"concept": concept, "world_setting": world, "requirement": requirement}
+            char_result = self.character_designer.process(char_prompt, context=char_context)
+            chars = char_result if isinstance(char_result, str) else char_result.get("output", "人物设定")
+            logger.info(f"✅ 人物生成完成，长度: {len(chars)}")
+        else:
+            # 重生时不重生人物，沿用旧人物设定
+            chars = self.project_context.get("characters") or ""
+            logger.info("⏭ 跳过人物生成，沿用现有人物设定。")
         
         # 更新上下文
         self.project_context.update({
@@ -707,7 +738,7 @@ class CreativeDirectorCoordinator:
 【优化后内容】
 {revised_content[:2000]}
 
-请确认：
+Please confirm：
 1. 是否解决了之前指出的问题
 2. 整体质量是否达标
 3. 是否可以发布

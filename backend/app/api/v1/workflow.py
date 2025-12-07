@@ -733,6 +733,14 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
             coordinator.set_progress_callback(progress_callback, task_id, project_id)  # type: ignore
             logger.info(f"   ✅ 已启用任务分块执行模式")
 
+        # 🔧 将重生信息注入到真实协调器的 project_context（供概念阶段条件执行使用）
+        if stage_enum == StageType.CONCEPT and hasattr(coordinator, '_real_coordinator'):
+            real_coord = coordinator._real_coordinator
+            if real_coord and hasattr(real_coord, 'project_context'):
+                real_coord.project_context["regenerate"] = regenerate
+                real_coord.project_context["regenerate_targets"] = targets or []
+                logger.info(f"   🎯 概念阶段重生信息已注入: regenerate={regenerate}, targets={targets}")
+
         # 🔧 关键修复：将 requirement 传递给 execute_stage
         stage_output = await coordinator.execute_stage(
             stage_enum,
