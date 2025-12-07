@@ -76,11 +76,22 @@ class ExpandOutlineRequest(BaseModel):
     target_total_chapters: Optional[int] = 100  # 🆕 长篇小说目标总章节数（默认按100章规划）
     
     # 🔥 多模式扩展参数
-    expansion_mode: str = "total"  # total(按总章数) / volume(按卷) / incremental(渐进式)
+    expansion_mode: str = "total"  # total(按总章数) / volume(按卷) / incremental(渐进式) / epic_framework(史诗框架) / volume_detail(单卷详细)
     target_volumes: Optional[int] = None  # 按卷模式:目标卷数
     chapters_per_volume_min: Optional[int] = 20  # 按卷模式:每卷最少章节数
     chapters_per_volume_max: Optional[int] = 30  # 按卷模式:每卷最多章节数
     incremental_step: Optional[int] = 10  # 渐进式模式:每次扩展章节数
+    
+    # 🌟 史诗框架模式参数(epic_framework)
+    total_volumes: Optional[int] = None  # 史诗框架:总卷数(10-50卷)
+    total_chapters_min: Optional[int] = None  # 史诗框架:总章节范围最小值
+    total_chapters_max: Optional[int] = None  # 史诗框架:总章节范围最大值
+    
+    # 📖 单卷详细模式参数(volume_detail)
+    framework_content: Optional[str] = None  # 基于的史诗框架内容
+    target_volume_index: Optional[int] = None  # 扩展第几卷
+    volume_chapters_min: Optional[int] = None  # 本卷章节范围最小值
+    volume_chapters_max: Optional[int] = None  # 本卷章节范围最大值
 
 class ExpandCharactersRequest(BaseModel):
     project_id: int
@@ -4405,6 +4416,21 @@ async def expand_outline(
                 current_chapter_count=request.current_chapter_count,
                 increment=request.increment,
                 target_total_chapters=target_count,  # 使用严格校验后的目标数
+                # 🔥 多模式参数
+                expansion_mode=request.expansion_mode,
+                target_volumes=request.target_volumes,
+                chapters_per_volume_min=request.chapters_per_volume_min,
+                chapters_per_volume_max=request.chapters_per_volume_max,
+                incremental_step=request.incremental_step,
+                # 🌟 史诗框架参数
+                total_volumes=request.total_volumes,
+                total_chapters_min=request.total_chapters_min,
+                total_chapters_max=request.total_chapters_max,
+                # 📖 单卷详细参数
+                framework_content=request.framework_content,
+                target_volume_index=request.target_volume_index,
+                volume_chapters_min=request.volume_chapters_min,
+                volume_chapters_max=request.volume_chapters_max,
             )
         )
         
@@ -4439,6 +4465,21 @@ async def execute_expand_outline_task(
     current_chapter_count: int,
     increment: int,
     target_total_chapters: Optional[int],
+    # 🔥 多模式参数
+    expansion_mode: str = "total",
+    target_volumes: Optional[int] = None,
+    chapters_per_volume_min: Optional[int] = 20,
+    chapters_per_volume_max: Optional[int] = 30,
+    incremental_step: Optional[int] = 10,
+    # 🌟 史诗框架参数
+    total_volumes: Optional[int] = None,
+    total_chapters_min: Optional[int] = None,
+    total_chapters_max: Optional[int] = None,
+    # 📖 单卷详细参数
+    framework_content: Optional[str] = None,
+    target_volume_index: Optional[int] = None,
+    volume_chapters_min: Optional[int] = None,
+    volume_chapters_max: Optional[int] = None,
 ):
     """后台执行大纲扩展任务（严格遵守目标数）"""
     from sqlalchemy import text
@@ -4478,46 +4519,97 @@ async def execute_expand_outline_task(
             )
         logger.info("   📚 已生成设定摘要并合并到世界观上下文")
         
-        # 🔥 智能识别当前章节数
-        if current_chapter_count == 0:
-            logger.info("🔍 开始自动识别当前章节数...")
-            # 匹配章节标记，如 "第1章"、"第 1 章" 等
-            import re
-            chapter_pattern = r'第\s*\d+\s*章'
-            detected_count = len(re.findall(chapter_pattern, current_outline))
-            if detected_count > 0:
-                current_chapter_count = detected_count
-                logger.info(f"🎯 识别成功！当前已有 {current_chapter_count} 章")
-            else:
-                logger.info("🆕 未识别到章节，从 0 章开始扩展")
-        
-        # 🔥 计算实际需要新增的章节数
-        increment = target_total_chapters - current_chapter_count
-        if increment <= 0:
-            raise ValueError(f"目标章节数 ({target_total_chapters}) 必须大于当前章节数 ({current_chapter_count})")
-        
-        logger.info(f"📊 当前 {current_chapter_count} 章 → 目标 {target_total_chapters} 章 = 需新增 {increment} 章")
-        
-        # 执行大纲扩展
-        await ws_manager.send_task_progress(
-            project_id=project_id,
-            task_id=task_id,
-            progress=20,
-            message=f"🔄 正在扩展大纲（从 {current_chapter_count} 章扩展到 {target_total_chapters} 章）..."
-        )
-        
-        # 使用线程池执行同步扩展，避免阻塞事件循环
-        result = await asyncio.to_thread(
-            expander.expand_plot_outline_incremental,
-            current_outline=current_outline,
-            world_setting=combined_world_setting,
-            characters=characters,
-            current_chapter_count=current_chapter_count,
-            increment=increment,
-            target_total_chapters=target_total_chapters,
-        )
-        
-        logger.info("   ✅ 大纲扩展完成")
+        # 🌟 根据扩展模式选择不同的执行路径
+        if expansion_mode == "epic_framework":
+            # ==================== 史诗框架模式 ====================
+            logger.info(f"🌟 史诗框架模式: {total_volumes}卷, {total_chapters_min}-{total_chapters_max}章")
+            
+            await ws_manager.send_task_progress(
+                project_id=project_id,
+                task_id=task_id,
+                progress=20,
+                message=f"🎨 正在生成{total_volumes}卷的史诗框架..."
+            )
+            
+            result = await asyncio.to_thread(
+                expander.generate_epic_framework,
+                world_setting=combined_world_setting,
+                characters=characters,
+                total_volumes=total_volumes,
+                total_chapters_range=(total_chapters_min, total_chapters_max),
+            )
+            
+            logger.info("   ✅ 史诗框架生成完成")
+            
+        elif expansion_mode == "volume_detail":
+            # ==================== 单卷详细模式 ====================
+            logger.info(f"📖 单卷详细模式: 扩展第{target_volume_index}卷, {volume_chapters_min}-{volume_chapters_max}章")
+            
+            await ws_manager.send_task_progress(
+                project_id=project_id,
+                task_id=task_id,
+                progress=20,
+                message=f"📝 正在详细扩展第{target_volume_index}卷..."
+            )
+            
+            result = await asyncio.to_thread(
+                expander.expand_volume_detail,
+                framework_content=framework_content,
+                target_volume_index=target_volume_index,
+                world_setting=combined_world_setting,
+                characters=characters,
+                chapters_range=(volume_chapters_min, volume_chapters_max),
+            )
+            
+            logger.info("   ✅ 单卷详细扩展完成")
+            
+        else:
+            # ==================== 原有模式(total/volume/incremental) ====================
+            # 🔥 智能识别当前章节数
+            if current_chapter_count == 0:
+                logger.info("🔍 开始自动识别当前章节数...")
+                # 匹配章节标记，如 "第1章"、"第 1 章" 等
+                import re
+                chapter_pattern = r'第\s*\d+\s*章'
+                detected_count = len(re.findall(chapter_pattern, current_outline))
+                if detected_count > 0:
+                    current_chapter_count = detected_count
+                    logger.info(f"🎯 识别成功！当前已有 {current_chapter_count} 章")
+                else:
+                    logger.info("🆕 未识别到章节，从 0 章开始扩展")
+            
+            # 🔥 计算实际需要新增的章节数
+            increment = target_total_chapters - current_chapter_count
+            if increment <= 0:
+                raise ValueError(f"目标章节数 ({target_total_chapters}) 必须大于当前章节数 ({current_chapter_count})")
+            
+            logger.info(f"📊 当前 {current_chapter_count} 章 → 目标 {target_total_chapters} 章 = 需新增 {increment} 章")
+            
+            # 执行大纲扩展
+            await ws_manager.send_task_progress(
+                project_id=project_id,
+                task_id=task_id,
+                progress=20,
+                message=f"🔄 正在扩展大纲（从 {current_chapter_count} 章扩展到 {target_total_chapters} 章）..."
+            )
+            
+            # 使用线程池执行同步扩展，避免阻塞事件循环
+            result = await asyncio.to_thread(
+                expander.expand_plot_outline_incremental,
+                current_outline=current_outline,
+                world_setting=combined_world_setting,
+                characters=characters,
+                current_chapter_count=current_chapter_count,
+                increment=increment,
+                target_total_chapters=target_total_chapters,
+                # 🔥 传递多模式参数给AI Agent
+                expansion_mode=expansion_mode,
+                target_volumes=target_volumes,
+                chapters_per_volume_min=chapters_per_volume_min,
+                chapters_per_volume_max=chapters_per_volume_max,
+            )
+            
+            logger.info("   ✅ 大纲扩展完成")
         
         # 保存扩展结果到project_settings
         await ws_manager.send_task_progress(
