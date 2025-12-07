@@ -409,7 +409,7 @@ async def execute_stage_async(
     logger.info(f"📥 收到异步执行请求: project_id={project_id}, stage={stage}, streaming={enable_streaming}")
 
     # 🆕 判断是否支持流式输出（仅 content/review/iteration 阶段）
-    streaming_stages = ["content", "review", "iteration"]
+    streaming_stages = ["concept", "content", "review", "iteration"]
     streaming_enabled = (
         enable_streaming and
         stage in streaming_stages and
@@ -839,6 +839,31 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
                 })
                 db.commit()
                 logger.info(f"   💾 已保存概念开发结果到 project_settings（重生={is_regen}, targets={list(targets_set) if targets_set else []}）")
+                
+                # 🆕 自动解析人物卡并同步到结构化characters表
+                if characters_to_save and isinstance(characters_to_save, str):
+                    await ws_manager.send_task_progress(
+                        project_id=project_id,
+                        task_id=task_id,
+                        progress=85,
+                        message="🔄 正在同步人物卡..."
+                    )
+                    
+                    sync_result = {"parsed": 0, "created": 0, "updated": 0, "skipped": 0}
+                    try:
+                        from app.services.character_parser import parse_and_sync_characters
+                        
+                        sync_result = parse_and_sync_characters(
+                            project_id=project_id,
+                            characters_text=characters_to_save,
+                            db_session=db
+                        )
+                        logger.info(f"   🔄 人物卡同步完成: 解析 {sync_result['parsed']} 个, "
+                                   f"创建 {sync_result['created']} 个, 更新 {sync_result['updated']} 个")
+                    except Exception as e:
+                        logger.warning(f"   ⚠️  自动同步人物卡失败: {e}")
+                        import traceback
+                        traceback.print_exc()
             
             elif stage_enum == StageType.STRUCTURE:
                 # 保存结构设计结果
@@ -1140,7 +1165,6 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
         # 🌊 发送流式输出开始通知
         await ws_manager.send_stream_start(project_id, stage_enum.value)
 
-        # 🆕 定义每个阶段的 Agent 配置（流式版本）
         STAGE_AGENTS_STREAMING = {
             'concept': [
                 {'id': 'creative-director', 'name': '创意总监'},

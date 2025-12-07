@@ -150,7 +150,7 @@ class DeepSeekIntegration:
     
     def _execute_workflow_stage(self, stage: str, params: Dict[str, Any]) -> str:
         """执行工作流程阶段"""
-        from agent_coordinator import CreativeDirectorCoordinator
+        from .agent_coordinator import CreativeDirectorCoordinator
         import sqlite3
         
         coordinator = CreativeDirectorCoordinator()

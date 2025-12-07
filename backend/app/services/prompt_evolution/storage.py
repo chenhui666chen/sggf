@@ -219,6 +219,21 @@ class EvolutionStorage:
         
         return [PromptVersion.from_dict(d) for d in data]
     
+    def load_global_best_prompts(self) -> List[PromptVersion]:
+        """聚合所有进化历史中的最佳提示词版本（全局）"""
+        histories = self._load_all_histories()
+        if not histories:
+            # 回退到旧的 best_prompts 文件
+            return self.load_best_prompts()
+        versions: List[PromptVersion] = []
+        for h in histories:
+            for v in h.get("best_versions", []):
+                try:
+                    versions.append(PromptVersion.from_dict(v))
+                except Exception:
+                    logger.warning("跳过无法解析的版本记录")
+        return versions
+    
     def approve_prompt(self, version_id: str, evolution_id: str) -> bool:
         """批准提示词"""
         history = self.load_evolution_history(evolution_id)

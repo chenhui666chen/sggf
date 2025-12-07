@@ -938,7 +938,8 @@ class PromptEvolutionEngine:
         best_ai_score = 100.0
 
         # 1. 🆕 检查历史最佳提示词（优先选择同题材）
-        best_prompts = self.storage.load_best_prompts()
+        # 🆕 使用全局历史最佳集合，而非上一轮
+        best_prompts = self.storage.load_global_best_prompts()
         if best_prompts:
             # 🆕 先筛选同题材的提示词
             if self.genre:

@@ -21,9 +21,15 @@ interface FormattedContentProps {
  * ```
  */
 export default function FormattedContent({ content, sx, className }: FormattedContentProps) {
-  const formattedHtml = React.useMemo(() => {
-    return smartFormat(content)
+  const sanitizedContent = React.useMemo(() => {
+    if (!content) return ''
+    // 前端展示排除开发说明：移除全角括号及其中内容
+    return content.replace(/（[^）]*）/g, '')
   }, [content])
+
+  const formattedHtml = React.useMemo(() => {
+    return smartFormat(sanitizedContent)
+  }, [sanitizedContent])
 
   return (
     <Box

@@ -809,8 +809,10 @@ export default function WorkflowControlPage() {
         return
       }
 
-      // 🔄 普通模式：实时更新对应阶段的内容显示（仅更新缓存，对话框打开时再同步）
-      if (stageType === 'content') {
+      // 🔄 普通模式：实时更新对应阶段的内容显示（仅更新缓存）
+      if (stageType === 'concept') {
+        setConceptContent(prev => prev + data.chunk)
+      } else if (stageType === 'content') {
         setContentDraftContent(prev => prev + data.chunk)
       } else if (stageType === 'review') {
         setReviewReportContent(prev => prev + data.chunk)
@@ -1297,7 +1299,7 @@ export default function WorkflowControlPage() {
       saveMemorySnapshot('stage')
 
       // 🆕 检查是否是支持流式输出的阶段
-      const streamingStages = ['content', 'review', 'iteration']
+      const streamingStages = ['concept', 'content', 'review', 'iteration']
       const enableStreaming = streamingStages.includes(stage)
 
       // 🆕 流式输出阶段：清空之前的内容，准备接收流式数据
