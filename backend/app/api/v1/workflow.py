@@ -16,6 +16,7 @@ from app.services.agent_coordinator import (
 )
 from app.core.security import get_current_user
 from app.models.project import Project
+from app.models.setting import SettingCollection
 from app.websocket.manager import ws_manager
 from app.services.setting_templates import build_project_settings_summary
 import uuid
@@ -73,6 +74,13 @@ class ExpandOutlineRequest(BaseModel):
     current_chapter_count: int = 0  # 🆕 当前已有的章节数
     increment: int = 10  # 🆕 本次扩展的章节数（5-10章）
     target_total_chapters: Optional[int] = 100  # 🆕 长篇小说目标总章节数（默认按100章规划）
+    
+    # 🔥 多模式扩展参数
+    expansion_mode: str = "total"  # total(按总章数) / volume(按卷) / incremental(渐进式)
+    target_volumes: Optional[int] = None  # 按卷模式:目标卷数
+    chapters_per_volume_min: Optional[int] = 20  # 按卷模式:每卷最少章节数
+    chapters_per_volume_max: Optional[int] = 30  # 按卷模式:每卷最多章节数
+    incremental_step: Optional[int] = 10  # 渐进式模式:每次扩展章节数
 
 class ExpandCharactersRequest(BaseModel):
     project_id: int
@@ -872,6 +880,85 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
                         logger.warning(f"   ⚠️  自动同步人物卡失败: {e}")
                         import traceback
                         traceback.print_exc()
+                
+                # 🆕 同步概念开发结果到向量库
+                try:
+                    from app.services.vector_sync import sync_to_vector_db, upsert_character_to_vector_db, upsert_setting_to_vector_db
+                    from app.models.character import Character
+                    from app.models.setting import SettingItem
+                    
+                    logger.info(f"   🔄 开始同步概念开发结果到向量库...")
+                    
+                    # 同步世界观设定
+                    if world_to_save and isinstance(world_to_save, str) and world_to_save.strip():
+                        sync_to_vector_db(
+                            kb_type="world",
+                            name="世界观设定",
+                            content=world_to_save,
+                            metadata={
+                                "project_id": str(project_id),
+                                "title": "世界观设定",
+                                "category": "world_setting"
+                            }
+                        )
+                        logger.info(f"   ✅ 已同步世界观设定到向量库")
+                    
+                    # 同步人物设定(从数据库中查询已解析的人物)
+                    characters_in_db = db.query(Character).filter(Character.project_id == project_id).all()
+                    if characters_in_db:
+                        for char in characters_in_db:
+                            # 使用Character模型的实际字段
+                            char_content = f"""
+人物名称: {char.name}
+角色类型: {char.role or '未设定'}
+所属势力: {char.faction or '未设定'}
+状态: {char.life_status or '未知'}
+简介: {char.summary or ''}
+详细信息: {char.profile or ''}
+""".strip()
+                            
+                            upsert_character_to_vector_db(
+                                character_id=char.id,
+                                character_name=char.name,
+                                content=char_content,
+                                project_id=project_id,
+                                metadata={
+                                    "character_id": str(char.id),
+                                    "name": char.name,
+                                    "role": char.role or ''
+                                }
+                            )
+                        logger.info(f"   ✅ 已同步 {len(characters_in_db)} 个人物到向量库")
+                    
+                    # 同步已识别的设定项
+                    settings_in_db = db.query(SettingItem).filter(SettingItem.project_id == project_id).all()
+                    if settings_in_db:
+                        for setting in settings_in_db:
+                            # 构建设定完整描述
+                            setting_content = f"""
+**设定名称**: {setting.name}
+**类别**: {setting.category or ''}
+**详细描述**: {setting.description or ''}
+""".strip()
+                            
+                            upsert_setting_to_vector_db(
+                                setting_id=setting.id,
+                                setting_name=setting.name,
+                                content=setting_content,
+                                project_id=project_id,
+                                category=setting.category or 'unknown',
+                                metadata={
+                                    "setting_id": str(setting.id),
+                                    "name": setting.name,
+                                    "category": setting.category or ''
+                                }
+                            )
+                        logger.info(f"   ✅ 已同步 {len(settings_in_db)} 个设定项到向量库")
+                        
+                except Exception as vector_error:
+                    logger.warning(f"   ⚠️  同步到向量库失败: {vector_error}")
+                    import traceback
+                    traceback.print_exc()
             
             elif stage_enum == StageType.STRUCTURE:
                 # 保存结构设计结果
@@ -893,6 +980,25 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
                 })
                 db.commit()
                 logger.info(f"   💾 已保存结构设计结果到 project_settings")
+                
+                # 🆕 同步情节大纲到向量库
+                try:
+                    from app.services.vector_sync import sync_to_vector_db
+                    
+                    if plot_outline_content and isinstance(plot_outline_content, str) and plot_outline_content.strip():
+                        sync_to_vector_db(
+                            kb_type="plot",
+                            name="情节大纲",
+                            content=plot_outline_content,
+                            metadata={
+                                "project_id": str(project_id),
+                                "title": "情节大纲",
+                                "type": "plot_outline"
+                            }
+                        )
+                        logger.info(f"   ✅ 已同步情节大纲到向量库")
+                except Exception as vector_error:
+                    logger.warning(f"   ⚠️  同步情节大纲到向量库失败: {vector_error}")
                 
                 # 🎉 异步触发体系自动检测（不阻塞主流程）
                 asyncio.create_task(
@@ -4264,7 +4370,15 @@ async def expand_outline(
     try:
         logger.info(f"📖 开始扩展大纲，项目ID: {request.project_id}")
         
-        # 1. 验证项目所有权
+        # 1. 严格校验目标章节数
+        target_count = request.target_total_chapters or 100
+        if target_count < 10 or target_count > 200:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"目标章节数必须在 10-200 之间，当前输入: {target_count}"
+            )
+        
+        # 2. 验证项目所有权
         project = db.query(Project).filter(
             (Project.id == request.project_id) & (Project.user_id == current_user.id)
         ).first()
@@ -4275,11 +4389,11 @@ async def expand_outline(
                 detail="Project not found"
             )
         
-        # 2. 生成任务ID
+        # 3. 生成任务ID
         task_id = f"expand-outline-{uuid.uuid4()}"
         logger.info(f"   ✅ 任务ID: {task_id}")
         
-        # 3. 🆕 启动后台任务
+        # 4. 🆕 启动后台任务
         asyncio.create_task(
             execute_expand_outline_task(
                 task_id=task_id,
@@ -4290,17 +4404,17 @@ async def expand_outline(
                 characters=request.characters,
                 current_chapter_count=request.current_chapter_count,
                 increment=request.increment,
-                target_total_chapters=request.target_total_chapters,
+                target_total_chapters=target_count,  # 使用严格校验后的目标数
             )
         )
         
-        logger.info(f"   🚀 后台任务已启动")
+        logger.info(f"   🚀 后台任务已启动，目标章节数: {target_count}")
         
-        # 4. 立即返回
+        # 5. 立即返回
         return {
             "success": True,
             "task_id": task_id,
-            "message": "📖 大纲扩展任务已启动，正在后台执行..."
+            "message": f"📖 大纲扩展任务已启动，将扩展至 {target_count} 章..."
         }
         
     except HTTPException:
@@ -4326,7 +4440,7 @@ async def execute_expand_outline_task(
     increment: int,
     target_total_chapters: Optional[int],
 ):
-    """后台执行大纲扩展任务"""
+    """后台执行大纲扩展任务（严格遵守目标数）"""
     from sqlalchemy import text
     from app.db.base import SessionLocal
     
@@ -4364,12 +4478,32 @@ async def execute_expand_outline_task(
             )
         logger.info("   📚 已生成设定摘要并合并到世界观上下文")
         
+        # 🔥 智能识别当前章节数
+        if current_chapter_count == 0:
+            logger.info("🔍 开始自动识别当前章节数...")
+            # 匹配章节标记，如 "第1章"、"第 1 章" 等
+            import re
+            chapter_pattern = r'第\s*\d+\s*章'
+            detected_count = len(re.findall(chapter_pattern, current_outline))
+            if detected_count > 0:
+                current_chapter_count = detected_count
+                logger.info(f"🎯 识别成功！当前已有 {current_chapter_count} 章")
+            else:
+                logger.info("🆕 未识别到章节，从 0 章开始扩展")
+        
+        # 🔥 计算实际需要新增的章节数
+        increment = target_total_chapters - current_chapter_count
+        if increment <= 0:
+            raise ValueError(f"目标章节数 ({target_total_chapters}) 必须大于当前章节数 ({current_chapter_count})")
+        
+        logger.info(f"📊 当前 {current_chapter_count} 章 → 目标 {target_total_chapters} 章 = 需新增 {increment} 章")
+        
         # 执行大纲扩展
         await ws_manager.send_task_progress(
             project_id=project_id,
             task_id=task_id,
             progress=20,
-            message=f"🔄 正在扩展大纲（从 {current_chapter_count} 章扩展到 {current_chapter_count + increment} 章）..."
+            message=f"🔄 正在扩展大纲（从 {current_chapter_count} 章扩展到 {target_total_chapters} 章）..."
         )
         
         # 使用线程池执行同步扩展，避免阻塞事件循环
@@ -4408,16 +4542,50 @@ async def execute_expand_outline_task(
         db.commit()
         logger.info("   💾 扩展大纲已保存到数据库")
         
+        # 🆕 同步扩展大纲到向量库
+        try:
+            from app.services.vector_sync import sync_to_vector_db
+            
+            await ws_manager.send_task_progress(
+                project_id=project_id,
+                task_id=task_id,
+                progress=90,
+                message="🔄 正在同步到向量库..."
+            )
+            
+            if result["expanded_outline"] and isinstance(result["expanded_outline"], str) and result["expanded_outline"].strip():
+                sync_to_vector_db(
+                    kb_type="plot",
+                    name="情节大纲",
+                    content=result["expanded_outline"],
+                    metadata={
+                        "project_id": str(project_id),
+                        "title": "情节大纲",
+                        "type": "plot_outline"
+                    }
+                )
+                logger.info("   ✅ 已同步扩展大纲到向量库")
+        except Exception as vector_error:
+            logger.warning(f"   ⚠️  同步扩展大纲到向量库失败: {vector_error}")
+            import traceback
+            traceback.print_exc()
+        
         # 发送完成消息
+        final_count = result.get("current_chapter_count", target_total_chapters)
+        ai_suggestion = {
+            "should_continue": result.get("should_continue", False),
+            "reason": result.get("continue_reason", "")
+        }
+
         await ws_manager.send_task_complete(
             project_id=project_id,
             task_id=task_id,
             result={
                 "expanded_outline": result["expanded_outline"],
-                "current_chapter_count": result["current_chapter_count"],
-                "should_continue": result["should_continue"],
-                "continue_reason": result.get("continue_reason", ""),
-                "message": f"✅ 大纲扩展完成！当前 {result['current_chapter_count']} 章"
+                "current_chapter_count": final_count,
+                "target_chapter_count": target_total_chapters,
+                "ai_suggestion": ai_suggestion,  # AI建议，仅供参考
+                "message": f"✅ 大纲扩展完成！当前 {final_count} 章（目标: {target_total_chapters}）"
             }
         )
         
@@ -4468,7 +4636,15 @@ async def expand_characters(
     try:
         logger.info(f"👥 开始扩展人物，项目ID: {request.project_id}")
         
-        # 1. 验证项目所有权
+        # 1. 严格校验目标人物数
+        target_count = request.target_total_characters or 25
+        if target_count < 5 or target_count > 50:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"目标人物数必须在 5-50 之间，当前输入: {target_count}"
+            )
+        
+        # 2. 验证项目所有权
         project = db.query(Project).filter(
             (Project.id == request.project_id) & (Project.user_id == current_user.id)
         ).first()
@@ -4479,11 +4655,11 @@ async def expand_characters(
                 detail="Project not found"
             )
         
-        # 2. 生成任务ID
+        # 3. 生成任务ID
         task_id = f"expand-characters-{uuid.uuid4()}"
         logger.info(f"   ✅ 任务ID: {task_id}")
         
-        # 3. 🆕 启动后台任务
+        # 4. 🆕 启动后台任务
         asyncio.create_task(
             execute_expand_characters_task(
                 task_id=task_id,
@@ -4493,18 +4669,17 @@ async def expand_characters(
                 world_setting=request.world_setting,
                 plot_outline=request.plot_outline,
                 current_character_count=request.current_character_count,
-                increment=request.increment,
-                target_total_characters=request.target_total_characters,
+                target_total_characters=target_count,  # 使用严格校验后的目标数
             )
         )
         
-        logger.info(f"   🚀 后台任务已启动")
+        logger.info(f"   🚀 后台任务已启动，目标人物数: {target_count}")
         
-        # 4. 立即返回
+        # 5. 立即返回
         return {
             "success": True,
             "task_id": task_id,
-            "message": "👥 人物扩展任务已启动，正在后台执行..."
+            "message": f"👥 人物扩展任务已启动，将扩展至 {target_count} 个人物..."
         }
         
     except HTTPException:
@@ -4527,10 +4702,9 @@ async def execute_expand_characters_task(
     world_setting: str,
     plot_outline: str,
     current_character_count: int,
-    increment: int,
-    target_total_characters: Optional[int],
+    target_total_characters: int,
 ):
-    """后台执行人物扩展任务"""
+    """后台执行人物扩展任务（严格遵守目标数）"""
     from sqlalchemy import text
     from app.db.base import SessionLocal
     
@@ -4568,12 +4742,32 @@ async def execute_expand_characters_task(
             )
         logger.info("   📚 已生成设定摘要并合并到世界观上下文")
         
+        # 🔥 智能识别当前人物数
+        if current_character_count == 0:
+            logger.info("🔍 开始自动识别当前人物数...")
+            # 简单计数：匹配「姓名】关键字
+            import re
+            name_pattern = r'【姓名】：'
+            detected_count = len(re.findall(name_pattern, main_characters))
+            if detected_count > 0:
+                current_character_count = detected_count
+                logger.info(f"🎯 识别成功！当前已有 {current_character_count} 个人物")
+            else:
+                logger.info("🆕 未识别到人物，从 0 个开始扩展")
+        
+        # 🔥 计算实际需要新增的人物数
+        increment = target_total_characters - current_character_count
+        if increment <= 0:
+            raise ValueError(f"目标人物数 ({target_total_characters}) 必须大于当前人物数 ({current_character_count})")
+        
+        logger.info(f"📊 当前 {current_character_count} 个人物 → 目标 {target_total_characters} 个人物 = 需新增 {increment} 个")
+        
         # 执行人物扩展
         await ws_manager.send_task_progress(
             project_id=project_id,
             task_id=task_id,
             progress=20,
-            message=f"🔄 正在扩展人物（从 {current_character_count} 个扩展到 {current_character_count + increment} 个）..."
+            message=f"🔄 正在扩展人物（从 {current_character_count} 个扩展到 {target_total_characters} 个）..."
         )
         
         # 使用线程池执行同步扩展，避免阻塞事件循环
@@ -4587,7 +4781,7 @@ async def execute_expand_characters_task(
             target_total_characters=target_total_characters,
         )
         
-        logger.info("   ✅ 人物扩展完成")
+        logger.info(f"   ✅ 人物扩展完成，当前总数: {result.get('current_character_count', target_total_characters)}")
         
         # 保存扩展结果到project_settings
         await ws_manager.send_task_progress(
@@ -4632,6 +4826,55 @@ async def execute_expand_characters_task(
             logger.info(f"   🔄 人物卡同步完成: 解析 {sync_result['parsed']} 个, "
                        f"创建 {sync_result['created']} 个, 更新 {sync_result['updated']} 个")
             
+            # 🆕 同步扩展人物到向量库
+            await ws_manager.send_task_progress(
+                project_id=project_id,
+                task_id=task_id,
+                progress=90,
+                message="🔄 正在同步到向量库..."
+            )
+            
+            try:
+                from app.services.vector_sync import upsert_character_to_vector_db
+                from app.models.character import Character
+                
+                logger.info(f"   🔄 开始同步扩展人物到向量库...")
+                
+                # 查询所有人物(包括新增的)
+                characters_in_db = db.query(Character).filter(
+                    Character.project_id == project_id
+                ).all()
+                
+                if characters_in_db:
+                    for char in characters_in_db:
+                        # 使用Character模型的实际字段: name, role, faction, summary, profile等
+                        char_content = f"""
+人物名称: {char.name}
+角色类型: {char.role or '未设定'}
+所属势力: {char.faction or '未设定'}
+状态: {char.life_status or '未知'}
+简介: {char.summary or ''}
+详细信息: {char.profile or ''}
+""".strip()
+                        
+                        upsert_character_to_vector_db(
+                            character_id=char.id,
+                            character_name=char.name,
+                            content=char_content,
+                            project_id=project_id,
+                            metadata={
+                                "character_id": str(char.id),
+                                "name": char.name,
+                                "role": char.role or ''
+                            }
+                        )
+                    
+                    logger.info(f"   ✅ 已同步 {len(characters_in_db)} 个人物到向量库")
+            except Exception as vector_error:
+                logger.warning(f"   ⚠️  同步人物到向量库失败: {vector_error}")
+                import traceback
+                traceback.print_exc()
+            
             # 🆕 解析人物关系文本并写入Character.relations
             if result.get("character_relationships"):
                 from app.services.character_parser import parse_and_sync_relationships
@@ -4650,16 +4893,22 @@ async def execute_expand_characters_task(
             traceback.print_exc()
         
         # 发送完成消息
+        final_count = result.get("current_character_count", target_total_characters)
+        ai_suggestion = {
+            "should_continue": result.get("should_continue", False),
+            "reason": result.get("continue_reason", "")
+        }
+        
         await ws_manager.send_task_complete(
             project_id=project_id,
             task_id=task_id,
             result={
                 "all_characters": result["all_characters"],
-                "current_character_count": result["current_character_count"],
-                "should_continue": result["should_continue"],
-                "continue_reason": result.get("continue_reason", ""),
+                "current_character_count": final_count,
+                "target_character_count": target_total_characters,
+                "ai_suggestion": ai_suggestion,  # AI建议，仅供参考
                 "character_sync": sync_result,
-                "message": f"✅ 人物扩展完成！当前 {result['current_character_count']} 个人物"
+                "message": f"✅ 人物扩展完成！当前 {final_count} 个人物（目标: {target_total_characters}）"
             }
         )
         

@@ -28,6 +28,10 @@ import {
   Select,
   FormControl,
   InputLabel,
+  FormLabel,
+  FormControlLabel,
+  Radio,
+  RadioGroup,
 } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
 import SaveIcon from '@mui/icons-material/Save'
@@ -236,18 +240,46 @@ export default function KnowledgeBasePage() {
 
   // ==================== 大纲扩展相关状态 ====================
   const [expandingOutline, setExpandingOutline] = useState(false)  // 🆕 后台任务状态
-  const [targetChapterCount, setTargetChapterCount] = useState<number>(100)
+  const [targetChapterCount, setTargetChapterCount] = useState<number>(0)
   const [outlineHistory, setOutlineHistory] = useState<Array<{timestamp: number, content: string, chapterCount: number}>>([])
   const [showHistoryDialog, setShowHistoryDialog] = useState(false)
   
+  // 🔥 多模式扩展状态
+  const [expansionMode, setExpansionMode] = useState<'total' | 'volume' | 'incremental'>('total')
+  const [targetVolumes, setTargetVolumes] = useState<number>(3)
+  const [chaptersPerVolumeMin, setChaptersPerVolumeMin] = useState<number>(20)
+  const [chaptersPerVolumeMax, setChaptersPerVolumeMax] = useState<number>(30)
+  const [incrementalStep, setIncrementalStep] = useState<number>(10)
+  const [showExpansionConfig, setShowExpansionConfig] = useState(false)  // 显示高级配置弹窗
+  
   // 🆕 扩展结果对话框状态
+  const [showExpandOutlineDialog, setShowExpandOutlineDialog] = useState(false)
+  const [expandOutlineResult, setExpandOutlineResult] = useState<any>(null)
   const [showResultDialog, setShowResultDialog] = useState(false)
   const [resultDialogData, setResultDialogData] = useState<any>(null)
   const [resultDialogType, setResultDialogType] = useState<'outline' | 'characters'>('outline')
 
   // ==================== 人物扩展相关状态 ====================
   const [expandingCharacters, setExpandingCharacters] = useState(false)
-  const [targetCharacterCount, setTargetCharacterCount] = useState<number>(25)
+  const [targetCharacterCount, setTargetCharacterCount] = useState<number>(0)
+  
+  // 🔢 计算当前已有人物数
+  const getCurrentCharacterCount = (): number => {
+    if (!characters) return 0
+    // 匹配【姓名】： 关键字
+    const namePattern = /【姓名】：/g
+    const matches = characters.match(namePattern)
+    return matches ? matches.length : 0
+  }
+
+  // 🔢 计算当前已有章节数
+  const getCurrentChapterCount = (): number => {
+    if (!plotOutline) return 0
+    // 匹配章节标记，如 "第1章"、"第 1 章" 等
+    const chapterPattern = /第\s*\d+\s*章/g
+    const matches = plotOutline.match(chapterPattern)
+    return matches ? matches.length : 0
+  }
 
   // ==================== 生命周期 ====================
 
@@ -348,10 +380,9 @@ export default function KnowledgeBasePage() {
           console.log('✅ 大纲扩展任务完成', data)
           showSnackbar(data.message || '✅ 大纲扩展完成！', 'success')
           
-          // 显示结果对话框
-          setResultDialogType('outline')
-          setResultDialogData(data.result)
-          setShowResultDialog(true)
+          // 🆕 显示结果弹窗（不再使用通用结果弹窗）
+          setExpandOutlineResult(data.result)
+          setShowExpandOutlineDialog(true)
           
           // 刷新数据
           loadWorkflowData()
@@ -945,6 +976,38 @@ export default function KnowledgeBasePage() {
     try {
       setExpandingOutline(true)
       console.log('📖 开始渐进式扩展大纲...')
+      
+      // 🔥 根据模式验证参数
+      let calculatedTargetChapters = targetChapterCount
+      
+      if (expansionMode === 'volume') {
+        // 按卷模式:计算目标总章节数
+        if (!targetVolumes || targetVolumes < 1 || targetVolumes > 10) {
+          showSnackbar('请输入有效的目标卷数 (1-10)', 'error')
+          setExpandingOutline(false)
+          return
+        }
+        const avgChapters = Math.floor((chaptersPerVolumeMin + chaptersPerVolumeMax) / 2)
+        calculatedTargetChapters = targetVolumes * avgChapters
+        console.log(`📚 按卷模式: ${targetVolumes}卷 x 约${avgChapters}章 = ${calculatedTargetChapters}章`)
+      } else if (expansionMode === 'incremental') {
+        // 渐进式模式:当前章节数 + 增量
+        const currentChapters = getCurrentChapterCount()
+        if (!incrementalStep || incrementalStep < 5 || incrementalStep > 30) {
+          showSnackbar('请输入有效的每次扩展章节数 (5-30)', 'error')
+          setExpandingOutline(false)
+          return
+        }
+        calculatedTargetChapters = currentChapters + incrementalStep
+        console.log(`🔄 渐进式模式: ${currentChapters}章 + ${incrementalStep}章 = ${calculatedTargetChapters}章`)
+      } else {
+        // 按总章数模式:校验目标章节数
+        if (!calculatedTargetChapters || calculatedTargetChapters < 10 || calculatedTargetChapters > 200) {
+          showSnackbar('请输入有效的目标章节数 (10-200)', 'error')
+          setExpandingOutline(false)
+          return
+        }
+      }
 
       // 从当前阶段获取数据
       let currentOutline = plotOutline || ''
@@ -956,9 +1019,6 @@ export default function KnowledgeBasePage() {
         setExpandingOutline(false)
         return
       }
-
-      let chapterCount = 0
-      const targetChapters = targetChapterCount && targetChapterCount > 0 ? targetChapterCount : 100
 
       // 🆕 启动后台任务（只调用一次，立即返回）
       const increment = 10
@@ -973,9 +1033,15 @@ export default function KnowledgeBasePage() {
           current_outline: currentOutline,
           world_setting: worldSettingData,
           characters: charactersData,
-          current_chapter_count: chapterCount,
+          current_chapter_count: 0,  // 自动识别
           increment: increment,
-          target_total_chapters: targetChapters,
+          target_total_chapters: calculatedTargetChapters,  // 严格遵守目标数
+          // 🔥 多模式参数
+          expansion_mode: expansionMode,
+          target_volumes: targetVolumes,
+          chapters_per_volume_min: chaptersPerVolumeMin,
+          chapters_per_volume_max: chaptersPerVolumeMax,
+          incremental_step: incrementalStep,
         }),
       })
 
@@ -1011,6 +1077,13 @@ export default function KnowledgeBasePage() {
     try {
       setExpandingCharacters(true)
       console.log('👥 开始扩展人物...')
+      
+      // 🔴 校验目标人物数
+      if (!targetCharacterCount || targetCharacterCount < 5 || targetCharacterCount > 50) {
+        showSnackbar('请输入有效的目标人物数 (5-50)', 'error')
+        setExpandingCharacters(false)
+        return
+      }
 
       const mainCharacters = characters || ''
       const worldSettingData = worldSetting || ''
@@ -1034,9 +1107,8 @@ export default function KnowledgeBasePage() {
           main_characters: mainCharacters,
           world_setting: worldSettingData,
           plot_outline: plotOutlineData,
-          current_character_count: 0,
-          increment: 5,
-          target_total_characters: targetCharacterCount || 25,
+          current_character_count: 0,  // 自动识别
+          target_total_characters: targetCharacterCount || 25,  // 严格遵守目标数
         }),
       })
 
@@ -1235,18 +1307,15 @@ export default function KnowledgeBasePage() {
                     {/* 大纲设定扩展按钮 + 人物设定扩展按钮（与布局统一） */}
                     {mainTabValue === 2 && (
                       <>
-                        <TextField
-                          label="目标章节数"
-                          type="number"
+                        <Button
+                          variant="outlined"
                           size="small"
-                          value={targetChapterCount}
-                          onChange={(e) => {
-                            const value = parseInt(e.target.value, 10)
-                            setTargetChapterCount(Number.isNaN(value) ? 0 : value)
-                          }}
-                          inputProps={{ min: 1 }}
-                          sx={{ width: 150 }}
-                        />
+                          onClick={() => setShowExpansionConfig(true)}
+                          disabled={expandingOutline || expandingCharacters}
+                          sx={{ borderRadius: 2 }}
+                        >
+                          ⚙️ 扩展配置
+                        </Button>
                         <Tooltip
                           title={expandingOutline ? "扩展进行中，请稍候" : "根据当前的世界观、人物和大纲设定，智能扩展为更详细的多章节大纲"}
                           placement="top"
@@ -1254,14 +1323,14 @@ export default function KnowledgeBasePage() {
                         >
                           <span>
                             <Button
-                              variant="outlined"
+                              variant="contained"
                               color="primary"
                               startIcon={expandingOutline ? <CircularProgress size={20} /> : <ArticleIcon />}
                               onClick={handleExpandOutline}
                               disabled={!plotOutline || !worldSetting || !characters || expandingOutline || expandingCharacters || isEditing}
                               sx={{ borderRadius: 2 }}
                             >
-                              {expandingOutline ? '扩展中...' : '扩展大纲'}
+                              {expandingOutline ? '扩展中...' : '开始扩展'}
                             </Button>
                           </span>
                         </Tooltip>
@@ -1273,12 +1342,19 @@ export default function KnowledgeBasePage() {
                           label="目标人物数"
                           type="number"
                           size="small"
-                          value={targetCharacterCount}
+                          value={targetCharacterCount || ''}
                           onChange={(e) => {
                             const value = parseInt(e.target.value, 10)
                             setTargetCharacterCount(Number.isNaN(value) ? 0 : value)
                           }}
-                          inputProps={{ min: 1 }}
+                          placeholder={`已有 ${getCurrentCharacterCount()} 个人物`}
+                          inputProps={{ min: 5, max: 50 }}
+                          error={targetCharacterCount > 0 && (targetCharacterCount < 5 || targetCharacterCount > 50)}
+                          helperText={
+                            targetCharacterCount > 0 && (targetCharacterCount < 5 || targetCharacterCount > 50)
+                              ? '请输入 5-50 之间的数字'
+                              : ''
+                          }
                           sx={{ width: 150 }}
                         />
                         <Tooltip
@@ -2292,6 +2368,258 @@ export default function KnowledgeBasePage() {
         </DialogActions>
       </Dialog>
 
+      {/* 🔥 扩展配置弹窗 */}
+      <Dialog 
+        open={showExpansionConfig} 
+        onClose={() => setShowExpansionConfig(false)}
+        maxWidth="sm" 
+        fullWidth
+      >
+        <DialogTitle>⚙️ 大纲扩展配置</DialogTitle>
+        <DialogContent dividers>
+          <Box sx={{ p: 2 }}>
+            {/* 当前状态 */}
+            <Paper sx={{ p: 2, mb: 3, bgcolor: 'grey.50' }}>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>📊 当前状态</Typography>
+              <Typography variant="body2">已有 <strong>{getCurrentChapterCount()}</strong> 章</Typography>
+            </Paper>
+
+            {/* 扩展模式选择 */}
+            <FormControl fullWidth sx={{ mb: 3 }}>
+              <FormLabel sx={{ mb: 1, fontWeight: 'bold' }}>🎯 扩展模式</FormLabel>
+              <RadioGroup
+                value={expansionMode}
+                onChange={(e) => setExpansionMode(e.target.value as 'total' | 'volume' | 'incremental')}
+              >
+                <FormControlLabel 
+                  value="total" 
+                  control={<Radio />} 
+                  label={
+                    <Box>
+                      <Typography variant="body1">按总章数扩展</Typography>
+                      <Typography variant="caption" color="text.secondary">直接设定目标总章节数，快速模式</Typography>
+                    </Box>
+                  } 
+                />
+                <FormControlLabel 
+                  value="volume" 
+                  control={<Radio />} 
+                  label={
+                    <Box>
+                      <Typography variant="body1">按卷扩展 ⭐️</Typography>
+                      <Typography variant="caption" color="text.secondary">按网文卷结构规划，每卷 20-30 章</Typography>
+                    </Box>
+                  } 
+                />
+                <FormControlLabel 
+                  value="incremental" 
+                  control={<Radio />} 
+                  label={
+                    <Box>
+                      <Typography variant="body1">渐进式扩展</Typography>
+                      <Typography variant="caption" color="text.secondary">每次扩展少量章节，精细控制</Typography>
+                    </Box>
+                  } 
+                />
+              </RadioGroup>
+            </FormControl>
+
+            {/* 按总章数模式配置 */}
+            {expansionMode === 'total' && (
+              <Box sx={{ p: 2, bgcolor: 'info.50', borderRadius: 1 }}>
+                <TextField
+                  fullWidth
+                  label="目标总章节数"
+                  type="number"
+                  value={targetChapterCount || ''}
+                  onChange={(e) => setTargetChapterCount(parseInt(e.target.value) || 0)}
+                  placeholder={`已有 ${getCurrentChapterCount()} 章`}
+                  inputProps={{ min: 10, max: 200 }}
+                  helperText="范围: 10-200 章"
+                  error={targetChapterCount > 0 && (targetChapterCount < 10 || targetChapterCount > 200)}
+                />
+              </Box>
+            )}
+
+            {/* 按卷模式配置 */}
+            {expansionMode === 'volume' && (
+              <Box sx={{ p: 2, bgcolor: 'success.50', borderRadius: 1 }}>
+                <TextField
+                  fullWidth
+                  label="目标卷数"
+                  type="number"
+                  value={targetVolumes}
+                  onChange={(e) => setTargetVolumes(parseInt(e.target.value) || 3)}
+                  inputProps={{ min: 1, max: 10 }}
+                  helperText="范围: 1-10 卷"
+                  sx={{ mb: 2 }}
+                />
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <TextField
+                    label="每卷最少章节"
+                    type="number"
+                    value={chaptersPerVolumeMin}
+                    onChange={(e) => setChaptersPerVolumeMin(parseInt(e.target.value) || 20)}
+                    inputProps={{ min: 15, max: 50 }}
+                    sx={{ flex: 1 }}
+                  />
+                  <TextField
+                    label="每卷最多章节"
+                    type="number"
+                    value={chaptersPerVolumeMax}
+                    onChange={(e) => setChaptersPerVolumeMax(parseInt(e.target.value) || 30)}
+                    inputProps={{ min: 15, max: 50 }}
+                    sx={{ flex: 1 }}
+                  />
+                </Box>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                  预计生成: {targetVolumes} 卷 x 约{Math.floor((chaptersPerVolumeMin + chaptersPerVolumeMax) / 2)} 章 = 约 {targetVolumes * Math.floor((chaptersPerVolumeMin + chaptersPerVolumeMax) / 2)} 章
+                </Typography>
+              </Box>
+            )}
+
+            {/* 渐进式模式配置 */}
+            {expansionMode === 'incremental' && (
+              <Box sx={{ p: 2, bgcolor: 'warning.50', borderRadius: 1 }}>
+                <TextField
+                  fullWidth
+                  label="每次扩展章节数"
+                  type="number"
+                  value={incrementalStep}
+                  onChange={(e) => setIncrementalStep(parseInt(e.target.value) || 10)}
+                  inputProps={{ min: 5, max: 30 }}
+                  helperText="范围: 5-30 章"
+                />
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                  当前 {getCurrentChapterCount()} 章 + {incrementalStep} 章 = {getCurrentChapterCount() + incrementalStep} 章
+                </Typography>
+              </Box>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowExpansionConfig(false)}>取消</Button>
+          <Button 
+            onClick={() => {
+              setShowExpansionConfig(false)
+              // 根据模式设置目标值
+              if (expansionMode === 'volume') {
+                const avg = Math.floor((chaptersPerVolumeMin + chaptersPerVolumeMax) / 2)
+                setTargetChapterCount(targetVolumes * avg)
+              } else if (expansionMode === 'incremental') {
+                setTargetChapterCount(getCurrentChapterCount() + incrementalStep)
+              }
+            }} 
+            variant="contained"
+          >
+            确定
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 🆕 扩展大纲结果弹窗 */}
+      <Dialog 
+        open={showExpandOutlineDialog} 
+        onClose={() => setShowExpandOutlineDialog(false)}
+        maxWidth="md" 
+        fullWidth
+      >
+        <DialogTitle>📖 大纲扩展结果</DialogTitle>
+        <DialogContent dividers>
+          {expandOutlineResult && (
+            <Box>
+              {/* 基本信息 */}
+              <Paper elevation={2} sx={{ p: 2, mb: 2, bgcolor: 'primary.50' }}>
+                <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">当前章节数</Typography>
+                    <Typography variant="h4" color="primary.main" sx={{ fontWeight: 'bold' }}>
+                      {expandOutlineResult.current_chapter_count || 0}
+                    </Typography>
+                  </Box>
+                  {expandOutlineResult.target_chapter_count && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">目标章节数</Typography>
+                      <Typography variant="h4" color="success.main" sx={{ fontWeight: 'bold' }}>
+                        {expandOutlineResult.target_chapter_count}
+                      </Typography>
+                    </Box>
+                  )}
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">字数</Typography>
+                    <Typography variant="h6" color="text.primary">
+                      {expandOutlineResult.expanded_outline?.length || 0}
+                    </Typography>
+                  </Box>
+                </Box>
+              </Paper>
+
+              {/* 🤖 AI建议显示 */}
+              {expandOutlineResult.ai_suggestion && expandOutlineResult.ai_suggestion.reason && (
+                <Box sx={{ 
+                  mt: 2, 
+                  p: 1.5, 
+                  bgcolor: expandOutlineResult.ai_suggestion.should_continue ? 'info.50' : 'success.50', 
+                  borderRadius: 1, 
+                  border: '1px solid', 
+                  borderColor: expandOutlineResult.ai_suggestion.should_continue ? 'info.200' : 'success.200' 
+                }}>
+                  <Typography variant="body2" color={expandOutlineResult.ai_suggestion.should_continue ? 'info.dark' : 'success.dark'} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <span>🤖</span>
+                    <strong>AI建议：</strong>
+                    {expandOutlineResult.ai_suggestion.reason}
+                  </Typography>
+                </Box>
+              )}
+
+              {/* 内容预览 */}
+              <Paper elevation={1} sx={{ p: 2, mt: 2 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+                    📝 内容预览
+                  </Typography>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      navigator.clipboard.writeText(expandOutlineResult.expanded_outline || '');
+                      showSnackbar('✅ 已复制到剪贴板', 'success');
+                    }}
+                  >
+                    📋 复制全部
+                  </Button>
+                </Box>
+                <Box sx={{
+                  maxHeight: 400,
+                  overflow: 'auto',
+                  p: 2,
+                  bgcolor: 'background.default',
+                  borderRadius: 1,
+                  border: '1px solid',
+                  borderColor: 'divider'
+                }}>
+                  <Typography 
+                    component="pre" 
+                    sx={{ 
+                      whiteSpace: 'pre-wrap', 
+                      wordBreak: 'break-word',
+                      fontFamily: 'inherit',
+                      margin: 0
+                    }}
+                  >
+                    {expandOutlineResult.expanded_outline || '内容为空'}
+                  </Typography>
+                </Box>
+              </Paper>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowExpandOutlineDialog(false)} variant="contained">
+            关闭
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* 🆕 扩展人物结果弹窗 */}
       <Dialog 
         open={showExpandCharactersDialog} 
@@ -2312,6 +2640,14 @@ export default function KnowledgeBasePage() {
                       {expandCharactersResult.current_character_count || 0}
                     </Typography>
                   </Box>
+                  {expandCharactersResult.target_character_count && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">目标人物数</Typography>
+                      <Typography variant="h4" color="success.main" sx={{ fontWeight: 'bold' }}>
+                        {expandCharactersResult.target_character_count}
+                      </Typography>
+                    </Box>
+                  )}
                   <Box>
                     <Typography variant="caption" color="text.secondary">字数</Typography>
                     <Typography variant="h6" color="text.primary">
@@ -2330,10 +2666,20 @@ export default function KnowledgeBasePage() {
                   )}
                 </Box>
                 
-                {expandCharactersResult.should_continue && (
-                  <Box sx={{ mt: 2, p: 1.5, bgcolor: 'warning.50', borderRadius: 1, border: '1px solid', borderColor: 'warning.200' }}>
-                    <Typography variant="body2" color="warning.dark">
-                      💡 AI建议：{expandCharactersResult.continue_reason || '可以继续扩展以丰富内容'}
+                {/* 🤖 AI建议显示 */}
+                {expandCharactersResult.ai_suggestion && expandCharactersResult.ai_suggestion.reason && (
+                  <Box sx={{ 
+                    mt: 2, 
+                    p: 1.5, 
+                    bgcolor: expandCharactersResult.ai_suggestion.should_continue ? 'info.50' : 'success.50', 
+                    borderRadius: 1, 
+                    border: '1px solid', 
+                    borderColor: expandCharactersResult.ai_suggestion.should_continue ? 'info.200' : 'success.200' 
+                  }}>
+                    <Typography variant="body2" color={expandCharactersResult.ai_suggestion.should_continue ? 'info.dark' : 'success.dark'} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <span>🤖</span>
+                      <strong>AI建议：</strong>
+                      {expandCharactersResult.ai_suggestion.reason}
                     </Typography>
                   </Box>
                 )}
