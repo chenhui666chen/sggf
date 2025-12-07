@@ -245,19 +245,27 @@ export default function KnowledgeBasePage() {
   const [showHistoryDialog, setShowHistoryDialog] = useState(false)
   
   // 🔥 多模式扩展状态
-  const [expansionMode, setExpansionMode] = useState<'total' | 'volume' | 'incremental'>('total')
+  const [expansionMode, setExpansionMode] = useState<'total' | 'volume' | 'incremental' | 'epic_framework' | 'volume_detail'>('total')
   const [targetVolumes, setTargetVolumes] = useState<number>(3)
   const [chaptersPerVolumeMin, setChaptersPerVolumeMin] = useState<number>(20)
   const [chaptersPerVolumeMax, setChaptersPerVolumeMax] = useState<number>(30)
   const [incrementalStep, setIncrementalStep] = useState<number>(10)
   const [showExpansionConfig, setShowExpansionConfig] = useState(false)  // 显示高级配置弹窗
   
+  // 🌟 史诗框架模式状态
+  const [totalVolumes, setTotalVolumes] = useState<number>(30)  // 总卷数
+  const [totalChaptersMin, setTotalChaptersMin] = useState<number>(2000)  // 总章节范围最小值
+  const [totalChaptersMax, setTotalChaptersMax] = useState<number>(2500)  // 总章节范围最大值
+  
+  // 📖 单卷详细模式状态
+  const [savedFramework, setSavedFramework] = useState<string>('')  // 保存的史诗框架
+  const [targetVolumeIndex, setTargetVolumeIndex] = useState<number>(1)  // 扩展第几卷
+  const [volumeChaptersMin, setVolumeChaptersMin] = useState<number>(50)  // 本卷章节最小值
+  const [volumeChaptersMax, setVolumeChaptersMax] = useState<number>(80)  // 本卷章节最大值
+  
   // 🆕 扩展结果对话框状态
   const [showExpandOutlineDialog, setShowExpandOutlineDialog] = useState(false)
   const [expandOutlineResult, setExpandOutlineResult] = useState<any>(null)
-  const [showResultDialog, setShowResultDialog] = useState(false)
-  const [resultDialogData, setResultDialogData] = useState<any>(null)
-  const [resultDialogType, setResultDialogType] = useState<'outline' | 'characters'>('outline')
 
   // ==================== 人物扩展相关状态 ====================
   const [expandingCharacters, setExpandingCharacters] = useState(false)
@@ -2243,128 +2251,6 @@ export default function KnowledgeBasePage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowHistoryDialog(false)}>关闭</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* 🆕 扩展结果对话框 */}
-      <Dialog 
-        open={showResultDialog} 
-        onClose={() => setShowResultDialog(false)}
-        maxWidth="md" 
-        fullWidth
-      >
-        <DialogTitle>
-          {resultDialogType === 'outline' ? '📖 大纲扩展结果' : '👥 人物扩展结果'}
-        </DialogTitle>
-        <DialogContent dividers>
-          {resultDialogData && (
-            <Box>
-              {/* 基本信息 */}
-              <Paper elevation={2} sx={{ p: 2, mb: 2, bgcolor: 'primary.50' }}>
-                <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                  {resultDialogType === 'outline' ? (
-                    <>
-                      <Box>
-                        <Typography variant="caption" color="text.secondary">当前章节数</Typography>
-                        <Typography variant="h4" color="primary.main" sx={{ fontWeight: 'bold' }}>
-                          {resultDialogData.current_chapter_count || 0}
-                        </Typography>
-                      </Box>
-                      <Box>
-                        <Typography variant="caption" color="text.secondary">字数</Typography>
-                        <Typography variant="h6" color="text.primary">
-                          {resultDialogData.expanded_outline?.length || 0}
-                        </Typography>
-                      </Box>
-                    </>
-                  ) : (
-                    <>
-                      <Box>
-                        <Typography variant="caption" color="text.secondary">当前人物数</Typography>
-                        <Typography variant="h4" color="primary.main" sx={{ fontWeight: 'bold' }}>
-                          {resultDialogData.current_character_count || 0}
-                        </Typography>
-                      </Box>
-                      <Box>
-                        <Typography variant="caption" color="text.secondary">字数</Typography>
-                        <Typography variant="h6" color="text.primary">
-                          {resultDialogData.all_characters?.length || 0}
-                        </Typography>
-                      </Box>
-                      {resultDialogData.character_sync && (
-                        <Box>
-                          <Typography variant="caption" color="text.secondary">同步结果</Typography>
-                          <Typography variant="body2" color="text.primary">
-                            解析{resultDialogData.character_sync.parsed}个 • 
-                            创建{resultDialogData.character_sync.created}个 • 
-                            更新{resultDialogData.character_sync.updated}个
-                          </Typography>
-                        </Box>
-                      )}
-                    </>
-                  )}
-                </Box>
-                
-                {resultDialogData.should_continue && (
-                  <Box sx={{ mt: 2, p: 1.5, bgcolor: 'warning.50', borderRadius: 1, border: '1px solid', borderColor: 'warning.200' }}>
-                    <Typography variant="body2" color="warning.dark">
-                      💡 AI建议：{resultDialogData.continue_reason || '可以继续扩展以丰富内容'}
-                    </Typography>
-                  </Box>
-                )}
-              </Paper>
-
-              {/* 内容预览 */}
-              <Paper elevation={1} sx={{ p: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-                    📝 内容预览
-                  </Typography>
-                  <Button
-                    size="small"
-                    onClick={() => {
-                      const content = resultDialogType === 'outline' 
-                        ? resultDialogData.expanded_outline 
-                        : resultDialogData.all_characters;
-                      navigator.clipboard.writeText(content || '');
-                      showSnackbar('✅ 已复制到剪贴板', 'success');
-                    }}
-                  >
-                    📋 复制全部
-                  </Button>
-                </Box>
-                <Box sx={{
-                  maxHeight: 400,
-                  overflow: 'auto',
-                  p: 2,
-                  bgcolor: 'background.default',
-                  borderRadius: 1,
-                  border: '1px solid',
-                  borderColor: 'divider'
-                }}>
-                  <Typography 
-                    component="pre" 
-                    sx={{ 
-                      whiteSpace: 'pre-wrap', 
-                      wordBreak: 'break-word',
-                      fontFamily: 'inherit',
-                      margin: 0
-                    }}
-                  >
-                    {resultDialogType === 'outline' 
-                      ? (resultDialogData.expanded_outline || '内容为空')
-                      : (resultDialogData.all_characters || '内容为空')
-                    }
-                  </Typography>
-                </Box>
-              </Paper>
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowResultDialog(false)} variant="contained">
-            关闭
-          </Button>
         </DialogActions>
       </Dialog>
 
