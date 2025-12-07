@@ -983,12 +983,43 @@ export default function KnowledgeBasePage() {
 
     try {
       setExpandingOutline(true)
-      console.log('📖 开始渐进式扩展大纲...')
+      console.log('📖 开始扩展大纲...')
       
       // 🔥 根据模式验证参数
       let calculatedTargetChapters = targetChapterCount
       
-      if (expansionMode === 'volume') {
+      if (expansionMode === 'epic_framework') {
+        // 🌟 史诗框架模式:验证卷数和章节范围
+        if (!totalVolumes || totalVolumes < 10 || totalVolumes > 50) {
+          showSnackbar('请输入有效的总卷数 (10-50)', 'error')
+          setExpandingOutline(false)
+          return
+        }
+        if (!totalChaptersMin || !totalChaptersMax || totalChaptersMin < 500 || totalChaptersMax > 5000 || totalChaptersMin > totalChaptersMax) {
+          showSnackbar('请输入有效的总章节范围 (500-5000)', 'error')
+          setExpandingOutline(false)
+          return
+        }
+        console.log(`🌟 史诗框架模式: ${totalVolumes}卷, ${totalChaptersMin}-${totalChaptersMax}章`)
+      } else if (expansionMode === 'volume_detail') {
+        // 📖 单卷详细模式:验证框架内容和卷编号
+        if (!savedFramework || savedFramework.trim().length < 100) {
+          showSnackbar('请先粘贴史诗框架内容（至少100字）', 'error')
+          setExpandingOutline(false)
+          return
+        }
+        if (!targetVolumeIndex || targetVolumeIndex < 1 || targetVolumeIndex > 50) {
+          showSnackbar('请输入有效的卷编号 (1-50)', 'error')
+          setExpandingOutline(false)
+          return
+        }
+        if (!volumeChaptersMin || !volumeChaptersMax || volumeChaptersMin < 30 || volumeChaptersMax > 150 || volumeChaptersMin > volumeChaptersMax) {
+          showSnackbar('请输入有效的本卷章节范围 (30-150)', 'error')
+          setExpandingOutline(false)
+          return
+        }
+        console.log(`📖 单卷详细模式: 扩展第${targetVolumeIndex}卷, ${volumeChaptersMin}-${volumeChaptersMax}章`)
+      } else if (expansionMode === 'volume') {
         // 按卷模式:计算目标总章节数
         if (!targetVolumes || targetVolumes < 1 || targetVolumes > 10) {
           showSnackbar('请输入有效的目标卷数 (1-10)', 'error')
@@ -1050,6 +1081,15 @@ export default function KnowledgeBasePage() {
           chapters_per_volume_min: chaptersPerVolumeMin,
           chapters_per_volume_max: chaptersPerVolumeMax,
           incremental_step: incrementalStep,
+          // 🌟 史诗框架模式参数
+          total_volumes: totalVolumes,
+          total_chapters_min: totalChaptersMin,
+          total_chapters_max: totalChaptersMax,
+          // 📖 单卷详细模式参数
+          framework_content: savedFramework,
+          target_volume_index: targetVolumeIndex,
+          volume_chapters_min: volumeChaptersMin,
+          volume_chapters_max: volumeChaptersMax,
         }),
       })
 
@@ -2275,7 +2315,7 @@ export default function KnowledgeBasePage() {
               <FormLabel sx={{ mb: 1, fontWeight: 'bold' }}>🎯 扩展模式</FormLabel>
               <RadioGroup
                 value={expansionMode}
-                onChange={(e) => setExpansionMode(e.target.value as 'total' | 'volume' | 'incremental')}
+                onChange={(e) => setExpansionMode(e.target.value as any)}
               >
                 <FormControlLabel 
                   value="total" 
@@ -2283,7 +2323,7 @@ export default function KnowledgeBasePage() {
                   label={
                     <Box>
                       <Typography variant="body1">按总章数扩展</Typography>
-                      <Typography variant="caption" color="text.secondary">直接设定目标总章节数，快速模式</Typography>
+                      <Typography variant="caption" color="text.secondary">直接设定目标总章节数，适合中短篇(10-200章)</Typography>
                     </Box>
                   } 
                 />
@@ -2293,7 +2333,7 @@ export default function KnowledgeBasePage() {
                   label={
                     <Box>
                       <Typography variant="body1">按卷扩展 ⭐️</Typography>
-                      <Typography variant="caption" color="text.secondary">按网文卷结构规划，每卷 20-30 章</Typography>
+                      <Typography variant="caption" color="text.secondary">按网文卷结构规划，每卷 20-30 章(1-10卷)</Typography>
                     </Box>
                   } 
                 />
@@ -2303,7 +2343,28 @@ export default function KnowledgeBasePage() {
                   label={
                     <Box>
                       <Typography variant="body1">渐进式扩展</Typography>
-                      <Typography variant="caption" color="text.secondary">每次扩展少量章节，精细控制</Typography>
+                      <Typography variant="caption" color="text.secondary">每次扩展少量章节，精细控制(5-30章)</Typography>
+                    </Box>
+                  } 
+                />
+                <Divider sx={{ my: 2 }} />
+                <FormControlLabel 
+                  value="epic_framework" 
+                  control={<Radio />} 
+                  label={
+                    <Box>
+                      <Typography variant="body1">🌟 史诗框架(超长网文)</Typography>
+                      <Typography variant="caption" color="text.secondary">生成10-50卷的总体框架，每卷仅200-300字概要</Typography>
+                    </Box>
+                  } 
+                />
+                <FormControlLabel 
+                  value="volume_detail" 
+                  control={<Radio />} 
+                  label={
+                    <Box>
+                      <Typography variant="body1">📖 单卷详细扩展</Typography>
+                      <Typography variant="caption" color="text.secondary">基于史诗框架，详细扩展单个卷的章节</Typography>
                     </Box>
                   } 
                 />
@@ -2378,6 +2439,104 @@ export default function KnowledgeBasePage() {
                 />
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
                   当前 {getCurrentChapterCount()} 章 + {incrementalStep} 章 = {getCurrentChapterCount() + incrementalStep} 章
+                </Typography>
+              </Box>
+            )}
+
+            {/* 🌟 史诗框架模式配置 */}
+            {expansionMode === 'epic_framework' && (
+              <Box sx={{ p: 2, bgcolor: 'secondary.50', borderRadius: 1 }}>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  <Typography variant="body2">
+                    🌟 适用1000章+的超长网文，生成10-50卷的宏观框架，每卷仅200-300字概要。
+                    生成后可基于框架逐卷扩展详细大纲。
+                  </Typography>
+                </Alert>
+                <TextField
+                  fullWidth
+                  label="总卷数"
+                  type="number"
+                  value={totalVolumes}
+                  onChange={(e) => setTotalVolumes(parseInt(e.target.value) || 30)}
+                  inputProps={{ min: 10, max: 50 }}
+                  helperText="范围: 10-50 卷"
+                  sx={{ mb: 2 }}
+                />
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <TextField
+                    label="总章节数(最小)"
+                    type="number"
+                    value={totalChaptersMin}
+                    onChange={(e) => setTotalChaptersMin(parseInt(e.target.value) || 2000)}
+                    inputProps={{ min: 500, max: 5000 }}
+                    sx={{ flex: 1 }}
+                  />
+                  <TextField
+                    label="总章节数(最大)"
+                    type="number"
+                    value={totalChaptersMax}
+                    onChange={(e) => setTotalChaptersMax(parseInt(e.target.value) || 2500)}
+                    inputProps={{ min: 500, max: 5000 }}
+                    sx={{ flex: 1 }}
+                  />
+                </Box>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                  预计生成: {totalVolumes} 卷，约{Math.floor((totalChaptersMin + totalChaptersMax) / 2)} 章
+                </Typography>
+              </Box>
+            )}
+
+            {/* 📖 单卷详细模式配置 */}
+            {expansionMode === 'volume_detail' && (
+              <Box sx={{ p: 2, bgcolor: 'primary.50', borderRadius: 1 }}>
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  <Typography variant="body2">
+                    📖 需要先生成史诗框架，然后基于框架详细扩展单个卷。
+                    请将生成的史诗框架内容粘贴到下方。
+                  </Typography>
+                </Alert>
+                <TextField
+                  fullWidth
+                  label="史诗框架内容"
+                  multiline
+                  rows={6}
+                  value={savedFramework}
+                  onChange={(e) => setSavedFramework(e.target.value)}
+                  placeholder="请粘贴先前生成的史诗框架内容..."
+                  helperText="必须先使用史诗框架模式生成框架"
+                  sx={{ mb: 2 }}
+                  error={!savedFramework}
+                />
+                <TextField
+                  fullWidth
+                  label="扩展第几卷"
+                  type="number"
+                  value={targetVolumeIndex}
+                  onChange={(e) => setTargetVolumeIndex(parseInt(e.target.value) || 1)}
+                  inputProps={{ min: 1, max: 50 }}
+                  helperText="请选择要扩展的卷编号"
+                  sx={{ mb: 2 }}
+                />
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <TextField
+                    label="本卷章节数(最小)"
+                    type="number"
+                    value={volumeChaptersMin}
+                    onChange={(e) => setVolumeChaptersMin(parseInt(e.target.value) || 50)}
+                    inputProps={{ min: 30, max: 150 }}
+                    sx={{ flex: 1 }}
+                  />
+                  <TextField
+                    label="本卷章节数(最大)"
+                    type="number"
+                    value={volumeChaptersMax}
+                    onChange={(e) => setVolumeChaptersMax(parseInt(e.target.value) || 80)}
+                    inputProps={{ min: 30, max: 150 }}
+                    sx={{ flex: 1 }}
+                  />
+                </Box>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                  预计生成: 第{targetVolumeIndex}卷，约{Math.floor((volumeChaptersMin + volumeChaptersMax) / 2)} 章
                 </Typography>
               </Box>
             )}
