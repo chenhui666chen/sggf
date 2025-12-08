@@ -1402,7 +1402,7 @@ export default function KnowledgeBasePage() {
                           ⚙️ 扩展配置
                         </Button>
                         <Tooltip
-                          title={expandingOutline ? "扩展进行中，请稍候" : "根据当前的世界观、人物和大纲设定，智能扩展为更详细的多章节大纲"}
+                          title={expandingOutline ? "扩展进行中，请稍候" : "请先完成扩展配置！"}
                           placement="top"
                           arrow
                         >
