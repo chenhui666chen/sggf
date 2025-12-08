@@ -1397,7 +1397,33 @@ export default function KnowledgeBasePage() {
                           size="small"
                           onClick={() => setShowExpansionConfig(true)}
                           disabled={expandingOutline || expandingCharacters}
-                          sx={{ borderRadius: 2 }}
+                          sx={{ 
+                            borderRadius: 2,
+                            position: 'relative',
+                            overflow: 'hidden',
+                            '&::before': {
+                              content: '""',
+                              position: 'absolute',
+                              top: '50%',
+                              left: '50%',
+                              width: '100%',
+                              height: '100%',
+                              borderRadius: '50%',
+                              background: 'radial-gradient(circle, rgba(25, 118, 210, 0.3) 0%, transparent 70%)',
+                              transform: 'translate(-50%, -50%) scale(0)',
+                              animation: 'ripple 2s ease-out infinite',
+                            },
+                            '@keyframes ripple': {
+                              '0%': {
+                                transform: 'translate(-50%, -50%) scale(0)',
+                                opacity: 1,
+                              },
+                              '100%': {
+                                transform: 'translate(-50%, -50%) scale(2.5)',
+                                opacity: 0,
+                              },
+                            },
+                          }}
                         >
                           ⚙️ 扩展配置
                         </Button>
