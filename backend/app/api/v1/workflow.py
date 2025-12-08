@@ -4622,12 +4622,12 @@ async def execute_expand_outline_task(
         # 🌟 处理史诗框架：添加特殊标记
         outline_content = result["expanded_outline"]
         if expansion_mode == "epic_framework":
-            # 添加 YAML 头部标记
+            # 添加 YAML 头部标记（中文字段）
             outline_content = f"""---
-type: epic_framework
-total_volumes: {total_volumes}
-total_chapters_range: [{total_chapters_min}, {total_chapters_max}]
-generated_at: {datetime.now().isoformat()}
+类型: 史诗框架
+总卷数: {total_volumes}
+总章节范围: [{total_chapters_min}, {total_chapters_max}]
+生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 ---
 
 {result["expanded_outline"]}"""
@@ -5113,9 +5113,15 @@ async def get_epic_framework(
         
         plot_outline = result[0]
         
-        # 检查是否是史诗框架（查找 YAML 头部）
-        yaml_pattern = r'^---\s*\ntype:\s*epic_framework\s*\ntotal_volumes:\s*(\d+)\s*\ntotal_chapters_range:\s*\[(\d+),\s*(\d+)\]\s*\ngenerated_at:\s*([^\n]+)\s*\n---\s*\n'
-        match = re.match(yaml_pattern, plot_outline, re.MULTILINE)
+        # 检查是否是史诗框架（查找 YAML 头部，兼容中英文字段）
+        # 中文字段格式
+        yaml_pattern_cn = r'^---\s*\n类型:\s*史诗框架\s*\n总卷数:\s*(\d+)\s*\n总章节范围:\s*\[(\d+),\s*(\d+)\]\s*\n生成时间:\s*([^\n]+)\s*\n---\s*\n'
+        # 英文字段格式（兼容旧数据）
+        yaml_pattern_en = r'^---\s*\ntype:\s*epic_framework\s*\ntotal_volumes:\s*(\d+)\s*\ntotal_chapters_range:\s*\[(\d+),\s*(\d+)\]\s*\ngenerated_at:\s*([^\n]+)\s*\n---\s*\n'
+        
+        match = re.match(yaml_pattern_cn, plot_outline, re.MULTILINE)
+        if not match:
+            match = re.match(yaml_pattern_en, plot_outline, re.MULTILINE)
         
         if match:
             # 是史诗框架，提取元数据
