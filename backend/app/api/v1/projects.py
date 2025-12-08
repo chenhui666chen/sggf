@@ -283,3 +283,172 @@ async def create_chapter(
     db.refresh(chapter)
     return chapter
 
+
+# ===========================
+# 导出 API 端点
+# ===========================
+
+@router.get("/{project_id}/export/all/txt")
+async def export_all_chapters_txt(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """一键导出所有章节为TXT格式（UTF-8编码）"""
+    from fastapi.responses import Response
+    from urllib.parse import quote
+    
+    # 验证项目存在且属于当前用户
+    project = db.query(Project).filter(
+        (Project.id == project_id) & (Project.user_id == current_user.id)
+    ).first()
+    
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    # 获取所有章节，按章节号正序排列
+    chapters = db.query(Chapter).filter(
+        Chapter.project_id == project_id
+    ).order_by(Chapter.chapter_number.asc()).all()
+    
+    if not chapters:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No chapters found in this project"
+        )
+    
+    # 生成TXT内容
+    content_parts = [
+        f"《{project.title}》\n",
+        f"\n{'=' * 50}\n\n"
+    ]
+    
+    total_words = 0
+    for chapter in chapters:
+        content_parts.append(f"{chapter.title}\n")
+        content_parts.append(f"\n{chapter.content or ''}\n")
+        content_parts.append(f"\n{'=' * 50}\n\n")
+        total_words += chapter.word_count or 0
+    
+    # 添加统计信息
+    content_parts.append(f"\n\n共 {len(chapters)} 章，约 {total_words} 字\n")
+    
+    content = "".join(content_parts)
+    
+    # 对文件名进行URL编码以支持中文
+    filename_encoded = quote(f"{project.title}_全文.txt")
+    
+    return Response(
+        content=content.encode('utf-8'),
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{filename_encoded}"
+        }
+    )
+
+
+@router.get("/{project_id}/export/all/docx")
+async def export_all_chapters_docx(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """一键导出所有章节为DOCX格式（专业排版）"""
+    from fastapi.responses import StreamingResponse
+    from urllib.parse import quote
+    from io import BytesIO
+    from docx import Document
+    from docx.shared import Pt, Inches
+    from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+    
+    # 验证项目存在且属于当前用户
+    project = db.query(Project).filter(
+        (Project.id == project_id) & (Project.user_id == current_user.id)
+    ).first()
+    
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    # 获取所有章节，按章节号正序排列
+    chapters = db.query(Chapter).filter(
+        Chapter.project_id == project_id
+    ).order_by(Chapter.chapter_number.asc()).all()
+    
+    if not chapters:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No chapters found in this project"
+        )
+    
+    # 创建DOCX文档
+    doc = Document()
+    
+    # 添加书名标题（居中、加粗、22磅）
+    book_title = doc.add_paragraph(f"《{project.title}》")
+    book_title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    book_title_run = book_title.runs[0]
+    book_title_run.bold = True
+    book_title_run.font.size = Pt(22)
+    
+    # 添加空行
+    doc.add_paragraph()
+    doc.add_paragraph()
+    
+    total_words = 0
+    for i, chapter in enumerate(chapters):
+        # 添加章节标题（居中、加粗、16磅）
+        chapter_title = doc.add_paragraph(chapter.title)
+        chapter_title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        chapter_title_run = chapter_title.runs[0]
+        chapter_title_run.bold = True
+        chapter_title_run.font.size = Pt(16)
+        
+        # 添加空行
+        doc.add_paragraph()
+        
+        # 添加正文（按段落分割）
+        if chapter.content:
+            paragraphs = chapter.content.split('\n')
+            for para_text in paragraphs:
+                if para_text.strip():
+                    para = doc.add_paragraph(para_text.strip())
+                    # 设置正文格式：首行缩进2字符
+                    para.paragraph_format.first_line_indent = Inches(0.5)
+        
+        total_words += chapter.word_count or 0
+        
+        # 如果不是最后一章，添加分隔
+        if i < len(chapters) - 1:
+            doc.add_paragraph()
+            separator = doc.add_paragraph('\u2500' * 30)  # ─── 分隔线
+            separator.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            doc.add_paragraph()
+    
+    # 添加统计信息
+    doc.add_paragraph()
+    doc.add_paragraph()
+    stats = doc.add_paragraph(f"共 {len(chapters)} 章，约 {total_words} 字")
+    stats.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    
+    # 将文档保存到BytesIO
+    docx_io = BytesIO()
+    doc.save(docx_io)
+    docx_io.seek(0)
+    
+    # 对文件名进行URL编码以支持中文
+    filename_encoded = quote(f"{project.title}_全文.docx")
+    
+    return StreamingResponse(
+        docx_io,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{filename_encoded}"
+        }
+    )
+

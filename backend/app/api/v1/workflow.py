@@ -31,6 +31,7 @@ from app.services.auto_system_detector import auto_create_system_collections
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+
 # 🆕 导入流式输出服务
 try:
     from app.services.streaming_service import get_streaming_service
@@ -429,7 +430,8 @@ async def execute_stage_async(
     logger.info(f"📥 收到异步执行请求: project_id={project_id}, stage={stage}, streaming={enable_streaming}")
 
     # 🆕 判断是否支持流式输出（仅 content/review/iteration 阶段）
-    streaming_stages = ["concept", "content", "review", "iteration"]
+    # 🔧 修复：CONCEPT 阶段需要结构化数据(concept/worldview/characters)，不适合流式模式
+    streaming_stages = ["content", "review", "iteration"]
     streaming_enabled = (
         enable_streaming and
         stage in streaming_stages and
@@ -1014,15 +1016,17 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
                             )
                         logger.info(f"   ✅ 已同步 {len(characters_in_db)} 个人物到向量库")
                     
-                    # 同步已识别的设定项
-                    settings_in_db = db.query(SettingItem).filter(SettingItem.project_id == project_id).all()
-                    if settings_in_db:
-                        for setting in settings_in_db:
+                    # 同步已识别的设定项（通过 SettingCollection 关联查询）
+                    from app.models.setting import SettingCollection
+                    collections_in_db = db.query(SettingCollection).filter(SettingCollection.project_id == project_id).all()
+                    settings_count = 0
+                    for collection in collections_in_db:
+                        for setting in collection.items:
                             # 构建设定完整描述
                             setting_content = f"""
 **设定名称**: {setting.name}
-**类别**: {setting.category or ''}
-**详细描述**: {setting.description or ''}
+**类别**: {collection.category or ''}
+**详细描述**: {setting.content or ''}
 """.strip()
                             
                             upsert_setting_to_vector_db(
@@ -1030,14 +1034,16 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
                                 setting_name=setting.name,
                                 content=setting_content,
                                 project_id=project_id,
-                                category=setting.category or 'unknown',
+                                category=collection.category or 'unknown',
                                 metadata={
                                     "setting_id": str(setting.id),
                                     "name": setting.name,
-                                    "category": setting.category or ''
+                                    "category": collection.category or ''
                                 }
                             )
-                        logger.info(f"   ✅ 已同步 {len(settings_in_db)} 个设定项到向量库")
+                            settings_count += 1
+                    if settings_count > 0:
+                        logger.info(f"   ✅ 已同步 {settings_count} 个设定项到向量库")
                         
                 except Exception as vector_error:
                     logger.warning(f"   ⚠️  同步到向量库失败: {vector_error}")
@@ -1281,9 +1287,13 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
     """
     import logging
     from sqlalchemy import text
+    from app.db.base import SessionLocal  # 🔧 导入 SessionLocal
 
     logger = logging.getLogger("uvicorn.error")
 
+    # 🔧 关键修复：创建新的独立 db session（避免使用请求级别的 session）
+    db = SessionLocal()
+    
     try:
         logger.info(f"🌊 开始流式执行后台任务: {task_id}")
 
@@ -1779,6 +1789,13 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                 result_str = output_data.get("content", "") or output_data.get("chapters", "")
             elif stage_enum == StageType.REVIEW:
                 result_str = output_data.get("review", "")
+            # 🔧 修复：CONCEPT 和 STRUCTURE 阶段需要提取正确的字段
+            elif stage_enum == StageType.CONCEPT:
+                result_str = output_data.get("concept", "") or str(output_data) if output_data else ""
+                logger.info(f"   🔍 CONCEPT 阶段提取结果: {len(result_str)} 字符")
+            elif stage_enum == StageType.STRUCTURE:
+                result_str = output_data.get("plot_outline", "") or output_data.get("structure", "") or str(output_data) if output_data else ""
+                logger.info(f"   🔍 STRUCTURE 阶段提取结果: {len(result_str)} 字符")
             else:
                 result_str = str(stage_output.output) if stage_output.output else ""
 
@@ -1788,6 +1805,10 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
             stage=stage_enum.value,
             total_chars=len(result_str) if result_str else 0
         )
+
+        # 🔧 确保 output_data 存在（防止未定义错误）
+        if 'output_data' not in locals():
+            output_data = {}
 
         # 更新任务状态为完成
         update_query = text("""
@@ -1807,8 +1828,57 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
         logger.info(f"   ✅ 流式任务完成: {task_id}")
 
         # 保存阶段输出到 project_settings
+        print(f"\n{'='*50}")
+        print(f"🔍 准备保存到 project_settings: stage={stage_enum.value}, project_id={project_id}, result_len={len(result_str) if result_str else 0}")
+        print(f"{'='*50}\n")
+        logger.info(f"   🔍 准备保存到 project_settings: stage={stage_enum.value}, project_id={project_id}, result_len={len(result_str) if result_str else 0}")
         try:
-            if stage_enum == StageType.CONTENT:
+            # 🔧 添加 CONCEPT 阶段的保存（同时保存 concept, world_setting, characters）
+            if stage_enum == StageType.CONCEPT:
+                logger.info(f"   🔍 匹配到 CONCEPT 阶段，开始保存...")
+                # 🔧 直接使用已定义的 output_data 变量
+                concept_data = output_data.get("concept", result_str) if isinstance(output_data, dict) and output_data else result_str
+                worldview_data = output_data.get("worldview", "") or output_data.get("world_setting", "") if isinstance(output_data, dict) and output_data else ""
+                characters_data = output_data.get("characters", "") if isinstance(output_data, dict) and output_data else ""
+                
+                logger.info(f"   🔍 CONCEPT 数据: concept={len(str(concept_data))}字, worldview={len(str(worldview_data))}字, characters={len(str(characters_data))}字")
+                
+                save_query = text("""
+                    UPDATE project_settings
+                    SET concept = :concept,
+                        world_setting = :world_setting,
+                        characters = :characters,
+                        stage_one_status = 'completed',
+                        updated_at = :updated_at
+                    WHERE project_id = :project_id
+                """)
+                result = db.execute(save_query, {
+                    "concept": json.dumps(concept_data, ensure_ascii=False) if concept_data else None,
+                    "world_setting": json.dumps(worldview_data, ensure_ascii=False) if worldview_data else None,
+                    "characters": json.dumps(characters_data, ensure_ascii=False) if characters_data else None,
+                    "updated_at": datetime.now().isoformat(),
+                    "project_id": project_id
+                })
+                logger.info(f"   🔍 UPDATE 执行完成，影响行数: {result.rowcount}")
+                db.commit()
+                logger.info(f"   💾 已保存概念/世界观/人物到 project_settings（流式模式）")
+            # 🔧 添加 STRUCTURE 阶段的保存
+            elif stage_enum == StageType.STRUCTURE:
+                save_query = text("""
+                    UPDATE project_settings
+                    SET plot_outline = :plot_outline,
+                        stage_two_status = 'completed',
+                        updated_at = :updated_at
+                    WHERE project_id = :project_id
+                """)
+                db.execute(save_query, {
+                    "plot_outline": json.dumps(result_str, ensure_ascii=False),
+                    "updated_at": datetime.now().isoformat(),
+                    "project_id": project_id
+                })
+                db.commit()
+                logger.info(f"   💾 已保存结构大纲到 project_settings（流式模式）")
+            elif stage_enum == StageType.CONTENT:
                 save_query = text("""
                     UPDATE project_settings
                     SET chapter_draft = :chapter_draft,
@@ -1964,6 +2034,10 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
             status='error',
             progress=0
         )
+    finally:
+        # 🔧 关键修复：关闭独立创建的 db session
+        db.close()
+        logger.info(f"   📝 db session 已关闭")
 
 
 @router.post("/regenerate-stage")

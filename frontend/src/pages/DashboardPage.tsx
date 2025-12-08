@@ -49,6 +49,8 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import ScienceIcon from '@mui/icons-material/Science'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
+import FileDownloadIcon from '@mui/icons-material/FileDownload'
+import Menu from '@mui/material/Menu'
 import Badge from '@mui/material/Badge'
 import Snackbar from '@mui/material/Snackbar'
 import Alert from '@mui/material/Alert'
@@ -132,6 +134,10 @@ export default function DashboardPage() {
 
   // 🆕 导出到其他模块的状态
   const [exportingChapter, setExportingChapter] = useState<number | null>(null)
+
+  // 🆕 一键导出所有章节状态
+  const [exportAllAnchorEl, setExportAllAnchorEl] = useState<null | HTMLElement>(null)
+  const [exportingAll, setExportingAll] = useState(false)
 
   // 🆕 类型映射函数（英文 → 中文）
   const getGenreLabel = (genre: string | null | undefined): string => {
@@ -812,6 +818,102 @@ export default function DashboardPage() {
     }
   }
 
+  // 一键导出所有章节为 TXT
+  const handleExportAllTxt = async () => {
+    if (!selectedProjectId) return
+    setExportAllAnchorEl(null)
+    setExportingAll(true)
+    
+    try {
+      const response = await fetch(`/api/v1/projects/${selectedProjectId}/export/all/txt`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      })
+      
+      if (response.ok) {
+        const blob = await response.blob()
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        // 从 Content-Disposition 获取文件名，否则使用默认名
+        const contentDisposition = response.headers.get('Content-Disposition')
+        let filename = '小说全文.txt'
+        if (contentDisposition) {
+          const match = contentDisposition.match(/filename\*=UTF-8''(.+)/)
+          if (match) {
+            filename = decodeURIComponent(match[1])
+          }
+        }
+        a.download = filename
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        window.URL.revokeObjectURL(url)
+        setSnackbarMessage('📄 TXT文件导出成功')
+        setSnackbarSeverity('success')
+        setSnackbarOpen(true)
+      } else {
+        throw new Error('导出失败')
+      }
+    } catch (error) {
+      logger.error('❗ 导出 TXT 失败:', error)
+      setSnackbarMessage('导出失败，请重试')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    } finally {
+      setExportingAll(false)
+    }
+  }
+
+  // 一键导出所有章节为 DOCX
+  const handleExportAllDocx = async () => {
+    if (!selectedProjectId) return
+    setExportAllAnchorEl(null)
+    setExportingAll(true)
+    
+    try {
+      const response = await fetch(`/api/v1/projects/${selectedProjectId}/export/all/docx`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      })
+      
+      if (response.ok) {
+        const blob = await response.blob()
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        // 从 Content-Disposition 获取文件名
+        const contentDisposition = response.headers.get('Content-Disposition')
+        let filename = '小说全文.docx'
+        if (contentDisposition) {
+          const match = contentDisposition.match(/filename\*=UTF-8''(.+)/)
+          if (match) {
+            filename = decodeURIComponent(match[1])
+          }
+        }
+        a.download = filename
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        window.URL.revokeObjectURL(url)
+        setSnackbarMessage('📝 DOCX文件导出成功')
+        setSnackbarSeverity('success')
+        setSnackbarOpen(true)
+      } else {
+        throw new Error('导出失败')
+      }
+    } catch (error) {
+      logger.error('❗ 导出 DOCX 失败:', error)
+      setSnackbarMessage('导出失败，请重试')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    } finally {
+      setExportingAll(false)
+    }
+  }
+
   return (
     <Box sx={{ minHeight: '100vh', backgroundColor: '#f5f7fa' }}>
       {/* 顶部标题栏 */}
@@ -1325,6 +1427,38 @@ export default function DashboardPage() {
           </Box>
         </Box>
         <Divider />
+        
+        {/* 一键导出按钮栏 */}
+        {chapters.length > 0 && (
+          <Box sx={{ p: 1.5, display: 'flex', justifyContent: 'center', borderBottom: '1px solid #eee' }}>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={exportingAll ? <CircularProgress size={16} /> : <FileDownloadIcon />}
+              onClick={(e) => setExportAllAnchorEl(e.currentTarget)}
+              disabled={exportingAll}
+              sx={{
+                borderRadius: 2,
+                textTransform: 'none',
+                fontWeight: 500,
+              }}
+            >
+              {exportingAll ? '导出中...' : '一键导出全文'}
+            </Button>
+            <Menu
+              anchorEl={exportAllAnchorEl}
+              open={Boolean(exportAllAnchorEl)}
+              onClose={() => setExportAllAnchorEl(null)}
+            >
+              <MenuItem onClick={handleExportAllTxt}>
+                📄 导出为 TXT
+              </MenuItem>
+              <MenuItem onClick={handleExportAllDocx}>
+                📝 导出为 DOCX
+              </MenuItem>
+            </Menu>
+          </Box>
+        )}
 
         {chaptersLoading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 4 }}>
@@ -1501,4 +1635,3 @@ export default function DashboardPage() {
     </Box>
   )
 }
-
