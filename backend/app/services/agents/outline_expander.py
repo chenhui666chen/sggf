@@ -820,7 +820,16 @@ Please生成完整的{target_chapters}章规划（🔥重点：每章必须有�
         print(f"【第一步】整体性扩展章节（重新规划第1-{target_chapters}章）...")
         print(f"   📌 参考完整人物设定（{len(characters)}字符）")
         print(f"   🔄 从{current_chapter_count}章整体扩展到{target_chapters}章")
-        expansion_content = self.plot_architect.process(expansion_prompt, {})
+        print(f"   🤖 调用Agent: 大纲扩展器 (qwen-long)")
+        
+        # 🔥 修复：直接使用 self.llm (qwen-long)，不通过 PlotArchitectAgent
+        from langchain.schema import HumanMessage, SystemMessage
+        messages = [
+            SystemMessage(content="你是一位杰出的情节架构师，精通网络小说结构设计与爽点节奏规划。"),
+            HumanMessage(content=expansion_prompt)
+        ]
+        response = self.llm.invoke(messages)
+        expansion_content = response.content
         print("✅ 章节扩展完成\n")
 
         # 第二步：整合更新大纲（不是简单追加，而是整体重构）
@@ -918,7 +927,15 @@ Please输出完整的、重新整合后的网文大纲（🔥重点：每章必�
 
         print(f"【第二步】整体重构大纲（最佳格式：章节详情+总览表）...")
         print(f"   🔄 重新组织所有{target_chapters}章的内容")
-        integrated_outline = self.plot_architect.process(integration_prompt, {})
+        print(f"   🤖 调用Agent: 大纲整合器 (qwen-long)")
+        
+        # 🔥 修复：直接使用 self.llm (qwen-long)
+        messages = [
+            SystemMessage(content="你是一位杰出的情节架构师，精通网络小说结构设计与卷结构整合。"),
+            HumanMessage(content=integration_prompt)
+        ]
+        response = self.llm.invoke(messages)
+        integrated_outline = response.content
         print("✅ 大纲整体重构完成\n")
         # 🆕 长篇小说目标章节数（用于判断是否继续扩展）
         long_novel_target = target_total_chapters or 100
@@ -953,7 +970,15 @@ Please analyze：
 - 如果已有完整的故事结构，应该停止扩展"""
 
         print("【第三步】AI判断是否需要继续扩展...")
-        analysis_result = self.creative_director.process(analysis_prompt, {})
+        print(f"   🤖 调用Agent: 决策分析器")
+        
+        # 🔥 修复：直接使用 self.llm
+        messages = [
+            SystemMessage(content="你是一位资深小说策划师，擅长分析大纲完整性与判断是否需要继续扩展。"),
+            HumanMessage(content=analysis_prompt)
+        ]
+        response = self.llm.invoke(messages)
+        analysis_result = response.content
 
         # 解析JSON结果
         import json
