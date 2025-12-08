@@ -2548,7 +2548,13 @@ export default function KnowledgeBasePage() {
             onClick={() => {
               setShowExpansionConfig(false)
               // 根据模式设置目标值
-              if (expansionMode === 'volume') {
+              if (expansionMode === 'epic_framework') {
+                // 🌟 史诗框架模式:不需要设置 targetChapterCount(后端使用 total_chapters_min/max)
+                console.log(`🌟 史诗框架模式: ${totalVolumes}卷, ${totalChaptersMin}-${totalChaptersMax}章`)
+              } else if (expansionMode === 'volume_detail') {
+                // 📖 单卷详细模式:不需要设置 targetChapterCount(后端使用 volume_chapters_min/max)
+                console.log(`📖 单卷详细模式: 第${targetVolumeIndex}卷, ${volumeChaptersMin}-${volumeChaptersMax}章`)
+              } else if (expansionMode === 'volume') {
                 const avg = Math.floor((chaptersPerVolumeMin + chaptersPerVolumeMax) / 2)
                 setTargetChapterCount(targetVolumes * avg)
               } else if (expansionMode === 'incremental') {
