@@ -823,7 +823,7 @@ Please生成完整的{target_chapters}章规划（🔥重点：每章必须有�
         print(f"   🤖 调用Agent: 大纲扩展器 (qwen-long)")
         
         # 🔥 修复：直接使用 self.llm (qwen-long)，不通过 PlotArchitectAgent
-        from langchain.schema import HumanMessage, SystemMessage
+        from langchain_core.messages import HumanMessage, SystemMessage
         messages = [
             SystemMessage(content="你是一位杰出的情节架构师，精通网络小说结构设计与爽点节奏规划。"),
             HumanMessage(content=expansion_prompt)
