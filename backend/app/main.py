@@ -110,7 +110,7 @@ app.include_router(settings_api.router)
 app.include_router(statistics.router)
 app.include_router(characters.router)
 app.include_router(ai_detect.router)  # AI 生成检测 API
-app.include_router(ai_trace.router)  # AI 痕迹降低 API
+app.include_router(ai_trace.router)  # 织文无迹 API
 app.include_router(prompt_evolution.router)  # 提示词进化优化 API（实验性）
 
 

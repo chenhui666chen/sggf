@@ -85,7 +85,7 @@ def upsert_character_to_vector_db(
         return
     
     try:
-        collection = vector_kb._collection
+        collection = vector_kb.vectorstore._collection
         if collection is None:
             return
         
@@ -144,7 +144,7 @@ def upsert_setting_to_vector_db(
         return
     
     try:
-        collection = vector_kb._collection
+        collection = vector_kb.vectorstore._collection
         if collection is None:
             return
         
@@ -187,7 +187,7 @@ def delete_character_from_vector_db(character_id: int, project_id: int):
         return
     
     try:
-        collection = vector_kb._collection
+        collection = vector_kb.vectorstore._collection
         if collection is None:
             return
         
@@ -214,7 +214,7 @@ def delete_setting_from_vector_db(setting_id: int, project_id: int):
         return
     
     try:
-        collection = vector_kb._collection
+        collection = vector_kb.vectorstore._collection
         if collection is None:
             return
         

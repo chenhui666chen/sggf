@@ -6,21 +6,29 @@ from .agents import CreativeDirectorAgent, PlotArchitectAgent, CharacterDesigner
 from .llm_singleton import create_deepseek_llm
 from .knowledge_base import NovelKnowledgeBase
 from .memory_manager import NovelMemoryManager
+# 🎯 任务6：导入题材自适应模板系统
+from .agent_coordinator import GENRE_PROMPT_MODULES, DEFAULT_GENRE_MODULE, REALM_SPAN_WARNING_THRESHOLD, REALM_SPAN_RECOMMEND_SUBDIVISION
 
 
 class OutlineExpander:
     """情节大纲和人物扩展器"""
 
     def __init__(self, knowledge_base: Optional[NovelKnowledgeBase] = None,
-                 memory_manager: Optional[NovelMemoryManager] = None):
+                 memory_manager: Optional[NovelMemoryManager] = None,
+                 genre: str = "",  # 🎯 任务6：添加题材参数
+                 planned_chapters_max: int = 0):  # 🎯 任务6.1：添加章节数参数用于境界检查
         """初始化扩展器
 
         Args:
             knowledge_base: 知识库实例
             memory_manager: 记忆管理器实例
+            genre: 题材类型（修仙、都市、悬疑等）
+            planned_chapters_max: 规划的最大章节数
         """
         self.knowledge_base = knowledge_base or NovelKnowledgeBase()
         self.memory_manager = memory_manager or NovelMemoryManager()
+        self.genre = genre  # 🎯 保存题材
+        self.planned_chapters_max = planned_chapters_max
 
         # 初始化AI Agent
         self.creative_director = CreativeDirectorAgent(self.knowledge_base, self.memory_manager)
@@ -29,6 +37,10 @@ class OutlineExpander:
 
         # 🔔 为扩展大纲使用 qwen-long
         self.llm = create_deepseek_llm(task_type="outline_expand")
+        
+        # 🎯 任务6.3：获取题材专属Prompt模块
+        self.genre_module = GENRE_PROMPT_MODULES.get(genre, DEFAULT_GENRE_MODULE)
+        print(f"🎯 题材：{genre}，已加载专属Prompt模块")
 
     def count_chapters_in_outline(self, outline: str) -> int:
         """智能识别大纲中的章节数
@@ -109,6 +121,56 @@ class OutlineExpander:
 
         print("⚠️  无法识别章节数，默认返回0")
         return 0
+
+    def check_realm_span_and_suggest(self) -> str:
+        """🎯 任务6.1：修仙题材境界跨度检查和细分建议
+        
+        当修仙/玄幻题材的长篇小说超过500章时，建议将境界细分
+        
+        Returns:
+            建议文本，如果不需要建议则返回空字符串
+        """
+        # 只对修仙/玄幻题材生效
+        if self.genre not in ["修仙", "玄幻"]:
+            return ""
+        
+        # 只对超过500章的长篇生效
+        if self.planned_chapters_max < REALM_SPAN_WARNING_THRESHOLD:
+            return ""
+        
+        # 生成建议文本
+        suggestion = f"""
+
+【🎯 修仙题材境界跨度优化建议】
+
+⚠️ **检测到长篇小说**：本书规划约{self.planned_chapters_max}章，属于长篇作品
+
+**境界细分建议**：
+- 📉 **推荐境界跨度**：每个大境界约{REALM_SPAN_RECOMMEND_SUBDIVISION}章以内
+- ❌ **避免单个境界超过{REALM_SPAN_WARNING_THRESHOLD}章**，否则会导致：
+  1. 节奏拖沓，读者疑惑"为什么还不突破"
+  2. 爽点单一，缺少境界跨越的震撑感
+  3. 后期境界压缩，前后不均
+
+**具体建议**：
+1. **细分大境界**：将原本5个大境界细分为7-8个，例如：
+   - 原：炼气 → 筑基 → 金丹 → 元婴 → 化神
+   - 改：炼气 → 筑基 → 金丹 → 元婴 → 化神 → 炼虚 → 合体 → 渡劫
+
+2. **增加小境界层次**：每个大境界内设置3-5个小境界（初期/中期/后期/大圆满）
+   - 每10-30章一个小境界突破，增加爽点密度
+   - 大境界突破作为卷末高潮
+
+3. **增加特殊体质/功法升级线**：除境界外，增加其他提升线
+   - 体质觉醒：普通 → 隐藏体质 → 神体觉醒
+   - 功法进阶：黄阶 → 玄阶 → 地阶 → 天阶
+   - 法宝成长：法器 → 灵器 → 宝器 → 仙器
+
+请在生成大纲时，结合以上建议，确保境界提升节奏合理，爽点分布均匀。
+"""
+        
+        print(f"🎯 境界跨度检查：长篇{self.planned_chapters_max}章，已添加细分建议")
+        return suggestion
 
     def count_characters_in_text(self, characters_text: str) -> int:
         """智能识别人物文本中的人物数
@@ -633,6 +695,9 @@ Please design人物关系网络， including：
 
         target_chapters = current_chapter_count + increment
 
+        # 🎯 任务6.1：修仙题材境界跨度检查
+        realm_suggestion = self.check_realm_span_and_suggest()
+
         # 🔥 修改：先执行扩展，再判断是否继续
         # 🆕 计算卷数和每卷章节数（网文通常每卷20-30章）
         chapters_per_volume = 25  # 每卷约25章
@@ -657,6 +722,8 @@ Please design人物关系网络， including：
 3. **钩子设计**：每章结尾必须有悬念，让读者想点下一章
 4. **节奏控制**：紧张-舒缓交替，避免长时间铺垫
 5. **金手指展示**：定期展示主角的优势，给读者爽感
+{self.genre_module.get('outline_rhythm_guide', '')}
+{realm_suggestion}
 
 【扩展要求】
 🔥 重要：这不是简单增加章节，而是整体重新规划为网文卷结构
@@ -1500,14 +1567,18 @@ Please输出完整的、重新整合后的网文大纲（🔥重点：每章必�
 
 
 def create_outline_expander(knowledge_base: Optional[NovelKnowledgeBase] = None,
-                           memory_manager: Optional[NovelMemoryManager] = None) -> OutlineExpander:
+                           memory_manager: Optional[NovelMemoryManager] = None,
+                           genre: str = "",  # 🎯 任务6：添加题材参数
+                           planned_chapters_max: int = 0) -> OutlineExpander:  # 🎯 任务6.1
     """创建大纲扩展器的工厂函数
 
     Args:
         knowledge_base: 知识库实例
         memory_manager: 记忆管理器实例
+        genre: 题材类型
+        planned_chapters_max: 规划的最大章节数
 
     Returns:
         配置好的OutlineExpander实例
     """
-    return OutlineExpander(knowledge_base, memory_manager)
+    return OutlineExpander(knowledge_base, memory_manager, genre, planned_chapters_max)

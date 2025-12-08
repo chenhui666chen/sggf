@@ -7,6 +7,14 @@ interface Project {
   title: string
   description?: string
   genre?: string
+  
+  // 🆕 题材与篇幅规划字段
+  sub_genre?: string
+  planned_length_type?: string  // short/mid/long/epic
+  planned_chapters_min?: number
+  planned_chapters_max?: number
+  user_outline_plan?: string
+  
   status: string
   word_count: number
   created_at: string
@@ -37,7 +45,16 @@ export const fetchProjects = createAsyncThunk(
 
 export const createProject = createAsyncThunk(
   'project/createProject',
-  async (data: { title: string; description?: string; genre?: string }) => {
+  async (data: { 
+    title: string; 
+    description?: string; 
+    genre?: string;
+    sub_genre?: string;
+    planned_length_type?: string;
+    planned_chapters_min?: number;
+    planned_chapters_max?: number;
+    user_outline_plan?: string;
+  }) => {
     const response = await apiClient.createProject(data)
     return response.data
   }

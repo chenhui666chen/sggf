@@ -37,7 +37,12 @@ async def create_project(
         user_id=current_user.id,
         title=project_data.title,
         description=project_data.description,
-        genre=project_data.genre
+        genre=project_data.genre,
+        sub_genre=project_data.sub_genre,
+        planned_length_type=project_data.planned_length_type,
+        planned_chapters_min=project_data.planned_chapters_min,
+        planned_chapters_max=project_data.planned_chapters_max,
+        user_outline_plan=project_data.user_outline_plan
     )
     db.add(project)
     db.commit()

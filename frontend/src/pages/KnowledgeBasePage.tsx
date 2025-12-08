@@ -54,6 +54,7 @@ import SettingRecommendations from '@/components/SettingRecommendations'
 import ConflictDetector from '@/components/ConflictDetector'
 import RelationshipGraph from '@/components/RelationshipGraph'
 import CharacterCardManager from '@/components/CharacterCardManager'
+import ExpansionConfigDialog from '@/components/workflow/ExpansionConfigDialog'
 
 // ==================== 接口定义 ====================
 
@@ -256,6 +257,7 @@ export default function KnowledgeBasePage() {
   const [totalVolumes, setTotalVolumes] = useState<number>(30)  // 总卷数
   const [totalChaptersMin, setTotalChaptersMin] = useState<number>(2000)  // 总章节范围最小值
   const [totalChaptersMax, setTotalChaptersMax] = useState<number>(2500)  // 总章节范围最大值
+  const [autoExpandAllVolumes, setAutoExpandAllVolumes] = useState<boolean>(true)  // 是否自动扩展全部卷
   
   // 📖 单卷详细模式状态
   const [savedFramework, setSavedFramework] = useState<string>('')  // 保存的史诗框架
@@ -268,6 +270,9 @@ export default function KnowledgeBasePage() {
   // 🆕 扩展结果对话框状态
   const [showExpandOutlineDialog, setShowExpandOutlineDialog] = useState(false)
   const [expandOutlineResult, setExpandOutlineResult] = useState<any>(null)
+  
+  // 🆕 项目信息
+  const [projectInfo, setProjectInfo] = useState<any>(null)
 
   // ==================== 人物扩展相关状态 ====================
   const [expandingCharacters, setExpandingCharacters] = useState(false)
@@ -522,6 +527,27 @@ export default function KnowledgeBasePage() {
     const historyData = getHistory('outline')
     setOutlineHistory(historyData)
   }, [])
+  
+  // 🆕 加载项目信息
+  useEffect(() => {
+    const loadProjectInfo = async () => {
+      if (!projectId) return
+      try {
+        const response = await fetch(`/api/v1/projects/${projectId}`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          },
+        })
+        if (response.ok) {
+          const data = await response.json()
+          setProjectInfo(data)
+        }
+      } catch (error) {
+        console.error('加载项目信息失败:', error)
+      }
+    }
+    loadProjectInfo()
+  }, [projectId])
 
   // ==================== 文本内容相关函数 ====================
 
@@ -1122,6 +1148,7 @@ export default function KnowledgeBasePage() {
           total_volumes: totalVolumes,
           total_chapters_min: totalChaptersMin,
           total_chapters_max: totalChaptersMax,
+          auto_expand_all_volumes: autoExpandAllVolumes,  // 🆕 是否自动扩全部卷
           // 📖 单卷详细模式参数
           framework_content: savedFramework,
           target_volume_index: targetVolumeIndex,
@@ -2897,6 +2924,40 @@ export default function KnowledgeBasePage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* ⚙️ 扩展配置对话框 */}
+      <ExpansionConfigDialog
+        open={showExpansionConfig}
+        onClose={() => setShowExpansionConfig(false)}
+        expansionMode={expansionMode}
+        targetChapterCount={targetChapterCount}
+        incrementalStep={incrementalStep}
+        totalVolumes={totalVolumes}
+        totalChaptersMin={totalChaptersMin}
+        totalChaptersMax={totalChaptersMax}
+        autoExpandAllVolumes={autoExpandAllVolumes}
+        frameworkMetadata={frameworkMetadata}
+        loadingFramework={loadingFramework}
+        onExpansionModeChange={(mode) => {
+          setExpansionMode(mode)
+          // 如果切换到史诗框架模式，需要加载框架
+          if (mode === 'epic_framework' && !frameworkMetadata) {
+            loadEpicFramework()
+          }
+        }}
+        onTargetChapterCountChange={setTargetChapterCount}
+        onIncrementalStepChange={setIncrementalStep}
+        onTotalVolumesChange={setTotalVolumes}
+        onTotalChaptersMinChange={setTotalChaptersMin}
+        onTotalChaptersMaxChange={setTotalChaptersMax}
+        onAutoExpandAllVolumesChange={setAutoExpandAllVolumes}
+        onConfirm={() => {
+          setShowExpansionConfig(false)
+          // 调用扩展函数
+          handleExpandOutline()
+        }}
+        genre={projectInfo?.genre || ''}
+      />
 
       {/* 提示消息 */}
       <Snackbar

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Box,
@@ -64,6 +64,22 @@ export default function AITracePage() {
   } | null>(null)
   const [error, setError] = useState('')
   const [copySuccess, setCopySuccess] = useState(false)
+  
+  // 🆕 从 localStorage 读取导入的章节内容
+  useEffect(() => {
+    const importedContent = localStorage.getItem('zhiwen_import_content')
+    if (importedContent) {
+      try {
+        const data = JSON.parse(importedContent)
+        setInputText(data.content || '')
+        // 清除已使用的数据
+        localStorage.removeItem('zhiwen_import_content')
+        console.log('✅ 已导入章节:', data.title)
+      } catch (error) {
+        console.error('❌ 解析导入数据失败:', error)
+      }
+    }
+  }, [])
 
   // 从剪贴板粘贴
   const handlePaste = useCallback(async () => {

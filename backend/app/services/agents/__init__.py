@@ -11,7 +11,6 @@ __all__ = [
     'memory_manager',
     'context_aware_optimizer',
     'dialogue_authenticity_module',
-    'ai_trace_reduction_processor',
     'author_voice_system',
     'config',
     'deepseek_integration',

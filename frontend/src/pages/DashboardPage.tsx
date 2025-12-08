@@ -43,7 +43,9 @@ import CloseIcon from '@mui/icons-material/Close'
 import NavigateNextIcon from '@mui/icons-material/NavigateNext'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
-import SmartToyIcon from '@mui/icons-material/SmartToy'
+import HeadphonesIcon from '@mui/icons-material/Headphones'
+import TheatersIcon from '@mui/icons-material/Theaters'
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import ScienceIcon from '@mui/icons-material/Science'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
@@ -128,17 +130,8 @@ export default function DashboardPage() {
   // 🆕 章节字数统计（每个项目的总字数）
   const [chapterWordCounts, setChapterWordCounts] = useState<Record<number, number>>({})
 
-  // 🆕 AI 检测状态
-  const [aiDetectDialogOpen, setAiDetectDialogOpen] = useState(false)
-  const [aiDetecting, setAiDetecting] = useState(false)
-  const [aiDetectResult, setAiDetectResult] = useState<{
-    success: boolean;
-    ai_score: number | null;
-    label: string | null;
-    error: string | null;
-    text_length: number | null;
-  } | null>(null)
-  const [selectedChapterForDetect, setSelectedChapterForDetect] = useState<any>(null)
+  // 🆕 导出到其他模块的状态
+  const [exportingChapter, setExportingChapter] = useState<number | null>(null)
 
   // 🆕 类型映射函数（英文 → 中文）
   const getGenreLabel = (genre: string | null | undefined): string => {
@@ -702,58 +695,121 @@ export default function DashboardPage() {
     // 让 WorkflowControlPage 在任务完成时重置
   }
 
-  // 🆕 AI 检测功能
-  const handleAiDetectClick = (chapter: any, e: React.MouseEvent) => {
+  // 🆕 导出到有声小说模块
+  const handleExportToAudio = async (chapter: any, e: React.MouseEvent) => {
     e.stopPropagation()
-    setSelectedChapterForDetect(chapter)
-    setAiDetectResult(null)
-    setAiDetectDialogOpen(true)
-  }
-
-  const handleAiDetect = async () => {
-    if (!selectedChapterForDetect) return
-
-    setAiDetecting(true)
-    setAiDetectResult(null)
-
+    setExportingChapter(chapter.id)
+    
     try {
-      const response = await fetch('/api/v1/ai-detect', {
-        method: 'POST',
+      // 获取章节完整内容
+      const response = await fetch(`/api/v1/chapters/${chapter.id}`, {
         headers: {
-          'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
         },
-        body: JSON.stringify({
-          chapter_id: selectedChapterForDetect.id
-        })
       })
-
-      const result = await response.json()
-      setAiDetectResult(result)
-
-      if (result.success) {
-        logger.log(`✅ AI 检测完成: 置信度 ${result.ai_score}%`)
+      
+      if (response.ok) {
+        const data = await response.json()
+        // 暂存到 localStorage
+        localStorage.setItem('audio_import_content', JSON.stringify({
+          fromProjectId: selectedProjectId,
+          chapterId: chapter.id,
+          title: data.title,
+          content: data.content,
+        }))
+        
+        setSnackbarMessage('📖 章节内容已准备，有声小说模块开发中...')
+        setSnackbarSeverity('info')
+        setSnackbarOpen(true)
+        // 未来跳转: navigate('/audio?from=novel&chapterId=' + chapter.id)
       } else {
-        logger.error('❌ AI 检测失败:', result.error)
+        throw new Error('获取章节内容失败')
       }
     } catch (error) {
-      logger.error('❌ AI 检测异常:', error)
-      setAiDetectResult({
-        success: false,
-        ai_score: null,
-        label: null,
-        error: '检测请求失败，请检查网络连接',
-        text_length: null
-      })
+      logger.error('❌ 导出到有声小说失败:', error)
+      setSnackbarMessage('导出失败，请重试')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
     } finally {
-      setAiDetecting(false)
+      setExportingChapter(null)
     }
   }
 
-  const handleCloseAiDetectDialog = () => {
-    setAiDetectDialogOpen(false)
-    setSelectedChapterForDetect(null)
-    setAiDetectResult(null)
+  // 🆕 导出到短剧模块
+  const handleExportToDrama = async (chapter: any, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setExportingChapter(chapter.id)
+    
+    try {
+      const response = await fetch(`/api/v1/chapters/${chapter.id}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        localStorage.setItem('drama_import_content', JSON.stringify({
+          fromProjectId: selectedProjectId,
+          chapterId: chapter.id,
+          title: data.title,
+          content: data.content,
+        }))
+        
+        setSnackbarMessage('🎬 章节内容已准备，短剧模块开发中...')
+        setSnackbarSeverity('info')
+        setSnackbarOpen(true)
+        // 未来跳转: navigate('/drama?from=novel&chapterId=' + chapter.id)
+      } else {
+        throw new Error('获取章节内容失败')
+      }
+    } catch (error) {
+      logger.error('❌ 导出到短剧失败:', error)
+      setSnackbarMessage('导出失败，请重试')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    } finally {
+      setExportingChapter(null)
+    }
+  }
+
+  // 🆕 导出到织文无迹模块
+  const handleExportToZhiwen = async (chapter: any, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setExportingChapter(chapter.id)
+    
+    try {
+      const response = await fetch(`/api/v1/chapters/${chapter.id}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        localStorage.setItem('zhiwen_import_content', JSON.stringify({
+          fromProjectId: selectedProjectId,
+          chapterId: chapter.id,
+          title: data.title,
+          content: data.content,
+        }))
+        
+        setSnackbarMessage('✨ 章节内容已准备，正在跳转到织文无迹...')
+        setSnackbarSeverity('info')
+        setSnackbarOpen(true)
+        // 跳转到织文无迹模块
+        setTimeout(() => navigate('/ai-trace'), 500)
+      } else {
+        throw new Error('获取章节内容失败')
+      }
+    } catch (error) {
+      logger.error('❌ 导出到织文无迹失败:', error)
+      setSnackbarMessage('导出失败，请重试')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    } finally {
+      setExportingChapter(null)
+    }
   }
 
   return (
@@ -1288,21 +1344,58 @@ export default function DashboardPage() {
                 disablePadding
                 secondaryAction={
                   <Box sx={{ display: 'flex', gap: 0.5 }}>
+                    {/* 🎧 导出到有声小说 */}
                     <IconButton
                       edge="end"
-                      aria-label="ai-detect"
+                      aria-label="export-audio"
                       size="small"
                       color="primary"
-                      onClick={(e) => handleAiDetectClick(chapter, e)}
-                      title="AI 检测"
+                      onClick={(e) => handleExportToAudio(chapter, e)}
+                      title="导入有声小说模块"
+                      disabled={exportingChapter === chapter.id}
                       sx={{
                         '&:hover': {
                           backgroundColor: '#e3f2fd'
                         }
                       }}
                     >
-                      <SmartToyIcon fontSize="small" />
+                      <HeadphonesIcon fontSize="small" />
                     </IconButton>
+                    {/* 🎬 导出到短剧 */}
+                    <IconButton
+                      edge="end"
+                      aria-label="export-drama"
+                      size="small"
+                      color="secondary"
+                      onClick={(e) => handleExportToDrama(chapter, e)}
+                      title="导入短剧模块"
+                      disabled={exportingChapter === chapter.id}
+                      sx={{
+                        '&:hover': {
+                          backgroundColor: '#f3e5f5'
+                        }
+                      }}
+                    >
+                      <TheatersIcon fontSize="small" />
+                    </IconButton>
+                    {/* ✨ 导出到织文无迹 */}
+                    <IconButton
+                      edge="end"
+                      aria-label="export-zhiwen"
+                      size="small"
+                      color="success"
+                      onClick={(e) => handleExportToZhiwen(chapter, e)}
+                      title="导入织文无迹模块"
+                      disabled={exportingChapter === chapter.id}
+                      sx={{
+                        '&:hover': {
+                          backgroundColor: '#e8f5e9'
+                        }
+                      }}
+                    >
+                      <AutoFixHighIcon fontSize="small" />
+                    </IconButton>
+                    {/* 🗑 删除 */}
                     <IconButton
                       edge="end"
                       aria-label="delete"
@@ -1403,121 +1496,7 @@ export default function DashboardPage() {
         </Alert>
       </Snackbar>
 
-      {/* 🆕 AI 检测对话框 */}
-      <Dialog
-        open={aiDetectDialogOpen}
-        onClose={handleCloseAiDetectDialog}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <SmartToyIcon color="primary" />
-          AI 生成检测
-        </DialogTitle>
-        <DialogContent>
-          {selectedChapterForDetect && (
-            <Box sx={{ mb: 2 }}>
-              <Typography variant="body2" color="textSecondary">
-                检测章节：<strong>{selectedChapterForDetect.title}</strong>
-              </Typography>
-              <Typography variant="caption" color="textSecondary">
-                字数：{selectedChapterForDetect.word_count || 0} 字
-              </Typography>
-            </Box>
-          )}
 
-          {!aiDetectResult && !aiDetecting && (
-            <DialogContentText>
-              点击"开始检测"按钮，调用腾讯云 AI 生成检测 API 分析该章节内容的 AI 生成率。
-            </DialogContentText>
-          )}
-
-          {aiDetecting && (
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4 }}>
-              <CircularProgress size={60} />
-              <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
-                正在检测中，请稍候...
-              </Typography>
-            </Box>
-          )}
-
-          {aiDetectResult && (
-            <Box sx={{ mt: 2 }}>
-              {aiDetectResult.success ? (
-                <Box>
-                  <Box sx={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    p: 3,
-                    borderRadius: 2,
-                    backgroundColor: aiDetectResult.ai_score && aiDetectResult.ai_score > 70
-                      ? '#ffebee'
-                      : aiDetectResult.ai_score && aiDetectResult.ai_score > 30
-                        ? '#fff8e1'
-                        : '#e8f5e9'
-                  }}>
-                    <Typography variant="h2" sx={{
-                      fontWeight: 'bold',
-                      color: aiDetectResult.ai_score && aiDetectResult.ai_score > 70
-                        ? '#d32f2f'
-                        : aiDetectResult.ai_score && aiDetectResult.ai_score > 30
-                          ? '#f57c00'
-                          : '#388e3c'
-                    }}>
-                      {aiDetectResult.ai_score || 0}%
-                    </Typography>
-                    <Typography variant="body1" color="textSecondary">
-                      AI 生成置信度
-                    </Typography>
-                  </Box>
-                  <Box sx={{ mt: 2 }}>
-                    <Typography variant="body2">
-                      <strong>检测标签：</strong>{aiDetectResult.label || '无'}
-                    </Typography>
-                    <Typography variant="body2">
-                      <strong>检测文本长度：</strong>{aiDetectResult.text_length || 0} 字符
-                    </Typography>
-                  </Box>
-                  <Alert
-                    severity={
-                      aiDetectResult.ai_score && aiDetectResult.ai_score > 70
-                        ? 'error'
-                        : aiDetectResult.ai_score && aiDetectResult.ai_score > 30
-                          ? 'warning'
-                          : 'success'
-                    }
-                    sx={{ mt: 2 }}
-                  >
-                    {aiDetectResult.ai_score && aiDetectResult.ai_score > 70
-                      ? '该内容很可能是 AI 生成的，建议进行人工修改以降低 AI 痕迹。'
-                      : aiDetectResult.ai_score && aiDetectResult.ai_score > 30
-                        ? '该内容可能包含部分 AI 生成痕迹，可考虑适当修改。'
-                        : '该内容 AI 生成痕迹较低，质量良好！'}
-                  </Alert>
-                </Box>
-              ) : (
-                <Alert severity="error">
-                  <strong>检测失败：</strong>{aiDetectResult.error}
-                </Alert>
-              )}
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseAiDetectDialog}>
-            关闭
-          </Button>
-          <Button
-            variant="contained"
-            onClick={handleAiDetect}
-            disabled={aiDetecting}
-            startIcon={aiDetecting ? <CircularProgress size={16} /> : <SmartToyIcon />}
-          >
-            {aiDetecting ? '检测中...' : aiDetectResult ? '重新检测' : '开始检测'}
-          </Button>
-        </DialogActions>
-      </Dialog>
       </Container>
     </Box>
   )

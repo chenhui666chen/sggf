@@ -180,6 +180,24 @@ class CharacterDesignerAgent(BaseAgent):
 请创建深度、立体的人物形象，包括外貌、性格、背景、动机等多个维度。"""
 
 
+class OutlinePlanParserAgent(BaseAgent):
+    """大纲规划解析Agent - 解析用户自定义大纲规划文本，生成结构化JSON"""
+
+    def __init__(self, knowledge_base: Optional[NovelKnowledgeBase] = None,
+                 memory_manager: Optional[NovelMemoryManager] = None):
+        super().__init__("大纲规划解析器", "outline_plan_parser", knowledge_base, memory_manager, task_type="outline")
+
+    def get_system_prompt(self) -> str:
+        return """你是一位专业的大纲规划解析专家，负责将用户输入的自然语言大纲规划转换为结构化JSON。
+你的核心职责是：
+1. 识别卷结构：从文本中提取卷数、卷标题、章节范围等信息
+2. 识别境界规划：提取修仙境界、阶段划分、境界对应章节范围
+3. 识别节奏要求：提取爽点分布、情绪起伏、转折点要求
+4. 生成结构化输出：输出标准JSON格式，便于后续Agent使用
+
+你必须严格按照JSON Schema输出，不要添加任何解释性文字。"""
+
+
 class CreativeDirectorAgent(BaseAgent):
     """创意总监Agent - 整体创作方向把控与工作流程协调"""
 

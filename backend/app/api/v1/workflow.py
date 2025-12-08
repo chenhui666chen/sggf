@@ -86,6 +86,7 @@ class ExpandOutlineRequest(BaseModel):
     total_volumes: Optional[int] = None  # 史诗框架:总卷数(10-50卷)
     total_chapters_min: Optional[int] = None  # 史诗框架:总章节范围最小值
     total_chapters_max: Optional[int] = None  # 史诗框架:总章节范围最大值
+    auto_expand_all_volumes: bool = False  # 🆕 是否自动扩展全部卷（默认仅生成框架）
     
     # 📖 单卷详细模式参数(volume_detail)
     framework_content: Optional[str] = None  # 基于的史诗框架内容
@@ -611,6 +612,78 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
             else:
                 requirement = "根据项目设定进行创作"
                 logger.warning(f"   ⚠️  未找到用户需求，使用默认值: {requirement}")
+        
+        # 🆕 题材与篇幅规划注入（概念阶段首次启动时）
+        if stage_enum == StageType.CONCEPT and not regenerate:
+            try:
+                # 读取项目的题材与篇幅信息
+                project_info_query = text("""
+                    SELECT genre, sub_genre, planned_length_type, 
+                           planned_chapters_min, planned_chapters_max, user_outline_plan
+                    FROM projects 
+                    WHERE id = :project_id
+                """)
+                proj_info = db.execute(project_info_query, {"project_id": project_id}).fetchone()
+                
+                if proj_info:
+                    genre = proj_info[0]
+                    sub_genre = proj_info[1]
+                    planned_length_type = proj_info[2]
+                    planned_chapters_min = proj_info[3]
+                    planned_chapters_max = proj_info[4]
+                    user_outline_plan = proj_info[5]
+                    
+                    # 🆕 如果有自定义大纲规划，先解析
+                    if user_outline_plan and user_outline_plan.strip():
+                        logger.info("📝 检测到用户自定义大纲规划，开始解析...")
+                        
+                        # 调用规划解析Agent
+                        if hasattr(coordinator, '_real_coordinator'):
+                            real_coord = coordinator._real_coordinator
+                            if real_coord and hasattr(real_coord, 'parse_outline_plan'):
+                                parsed_plan = real_coord.parse_outline_plan(
+                                    user_outline_plan=user_outline_plan,
+                                    genre=genre or "",
+                                    planned_length_type=planned_length_type or ""
+                                )
+                                
+                                if parsed_plan:
+                                    logger.info(f"✅ 大纲规划解析完成: {list(parsed_plan.keys())}")
+                                    
+                                    # 将解析结果注入到项目上下文
+                                    real_coord.project_context.update({
+                                        "genre": genre,
+                                        "sub_genre": sub_genre,
+                                        "planned_length_type": planned_length_type,
+                                        "planned_chapters_min": planned_chapters_min,
+                                        "planned_chapters_max": planned_chapters_max,
+                                        "parsed_outline_plan": parsed_plan
+                                    })
+                                else:
+                                    logger.warning("⚠️ 大纲规划解析返回空结果")
+                    
+                    # 将题材篇幅信息添加到需求文本（供prompt使用）
+                    if genre or planned_length_type:
+                        genre_info = f"\n\n【题材与篇幅信息】\n"
+                        if genre:
+                            genre_info += f"- 题材类型：{genre}"
+                            if sub_genre:
+                                genre_info += f" / {sub_genre}"
+                            genre_info += "\n"
+                        if planned_length_type:
+                            length_labels = {"short": "短篇", "mid": "中篇", "long": "长篇", "epic": "超长篇"}
+                            genre_info += f"- 篇幅规划：{length_labels.get(planned_length_type, planned_length_type)}"
+                            if planned_chapters_min and planned_chapters_max:
+                                genre_info += f"（{planned_chapters_min}-{planned_chapters_max}章）"
+                            genre_info += "\n"
+                        
+                        requirement += genre_info
+                        logger.info(f"✅ 已注入题材与篇幅信息到需求文本")
+                        
+            except Exception as e:
+                logger.warning(f"⚠️ 题材与篇幅信息注入失败: {e}")
+                import traceback
+                traceback.print_exc()
         
         # 📝 概念阶段附加评审反馈到需求（仅影响生成，不会直接写库）
         if stage_enum == StageType.CONCEPT and feedback:
@@ -3479,81 +3552,23 @@ async def execute_generate_next_chapter_task(
             rag_world_context = ""
 
         # 🆕 构建内容创作提示词（增强版）
-        content_system_prompt = """你是一位经验丰富的网络小说作家。请根据提供的章节规划、世界观设定和人物设定，创作精彩的章节内容。
-
-创作要求：
-1. 语言生动，描写细腻，符合网文风格
-2. 对话自然，符合人物性格
-3. 情节紧凑，引人入胜，注意爽点节奏
-4. 场景描写要有画面感
-5. 注意段落分隔，便于阅读
-6. 开头要有吸引力，结尾要有悬念
-7. 使用场景描写、对话、心理描写等多种手法
-
-【质量标准】
-- ✅ 与前面章节的情节连贯一致
-- ✅ 人物性格和行为符合已有描写
-- ✅ 遵循已建立的世界观规则和设定
-- ✅ 延续已有的叙事风格和文笔特点
-- ✅ 推进主线情节，避免原地踏步
-- ✅ 注重细节的合理性和真实感
-
-【输出格式要求】⚠️
-请直接输出章节内容，格式必须如下：
-
-第X章 章节标题
-
-章节正文内容...
-
-注意：
-- 第一行必须是章节标题，格式为"第X章 标题名称"（X为章节数字）
-- 章节标题要简洁有力，能概括本章核心内容或悬念
-- 不要包含任何额外的说明文字、作者话语等"""
-
-        content_user_prompt = f"""请创作第{next_chapter_number}章内容：
-
-【章节规划】
-{optimized_context.get('chapter_plan', chapter_plan)}
-
-【世界观设定】
-{optimized_context.get('world_setting', world_setting)}
-
-【人物设定】
-{optimized_context.get('characters', characters)}
-
-【RAG检索-人物（自动注入）】
-{rag_character_context if rag_character_context else '（无）'}
-
-【RAG检索-世界设定（自动注入）】
-{rag_world_context if rag_world_context else '（无）'}
-
-【情节大纲】
-{optimized_context.get('plot_outline', plot_outline)}
-
-【前一章结尾】
-{optimized_context.get('previous_ending', previous_ending) if previous_ending else '（这是第一章，请设计一个引人入胜的开场）'}
-
-【前序章节信息】
-{optimized_context.get('previous_chapters_analysis', previous_chapters_analysis)}
-
-【目标字数】约3000字
-
-【本章开头方式 - 强制要求】⚠️
-本章必须使用【{selected_opening[0]}】方式开头！
-- 技巧说明：{selected_opening[1]}
-- 参考示例：{selected_opening[2]}
-
-❌ 禁止使用：每章都用“XXX醒来/睁开眼睛/阳光照进房间”开头
-
-【本章结尾方式 - 强制要求】⚠️
-本章必须使用【{selected_ending[0]}】结尾！
-- 技巧说明：{selected_ending[1]}
-- 参考示例：{selected_ending[2]}
-
-❌ 禁止使用：总结式内心独白 + 对未来的展望（如“她知道，从这一刻起...”）
-✅ 结尾要制造钩子，让读者想点下一章
-
-请开始创作第{next_chapter_number}章内容："""
+        from app.services.agents.chapter_prompt_builder import ChapterPromptBuilder
+        builder = ChapterPromptBuilder(genre=project.genre if project and getattr(project, "genre", None) else "")
+        content_system_prompt = builder.build_system_prompt()
+        content_user_prompt = builder.build_user_prompt(
+            next_chapter_number=next_chapter_number,
+            optimized_context=optimized_context,
+            chapter_plan=chapter_plan,
+            plot_outline=plot_outline,
+            world_setting=world_setting,
+            characters=characters,
+            previous_ending=previous_ending or "",
+            previous_chapters_analysis=previous_chapters_analysis,
+            rag_character_context=rag_character_context,
+            rag_world_context=rag_world_context,
+            selected_opening=selected_opening,
+            selected_ending=selected_ending,
+        )
 
         # 🆕 使用真流式 LLM 调用（智能选择模型）
         logger.info(f"   🚀 开始调用流式 LLM 服务生成章节内容...")
@@ -4426,6 +4441,7 @@ async def expand_outline(
                 total_volumes=request.total_volumes,
                 total_chapters_min=request.total_chapters_min,
                 total_chapters_max=request.total_chapters_max,
+                auto_expand_all_volumes=request.auto_expand_all_volumes,
                 # 📖 单卷详细参数
                 framework_content=request.framework_content,
                 target_volume_index=request.target_volume_index,
@@ -4475,6 +4491,7 @@ async def execute_expand_outline_task(
     total_volumes: Optional[int] = None,
     total_chapters_min: Optional[int] = None,
     total_chapters_max: Optional[int] = None,
+    auto_expand_all_volumes: bool = False,
     # 📖 单卷详细参数
     framework_content: Optional[str] = None,
     target_volume_index: Optional[int] = None,
@@ -4504,9 +4521,24 @@ async def execute_expand_outline_task(
         from app.services.agents.outline_expander import create_outline_expander
         logger.info("   ✅ 成功导入 outline_expander")
         
-        # 创建扩展器实例
-        expander = create_outline_expander()
-        logger.info("   ✅ 扩展器实例已创建")
+        # 🎯 任务6：获取项目题材和章节数
+        from sqlalchemy import text
+        project_query = text("""
+            SELECT genre, planned_chapters_max
+            FROM projects
+            WHERE id = :project_id
+        """)
+        project_result = db.execute(project_query, {"project_id": project_id}).fetchone()
+        project_genre = project_result[0] if project_result else ""
+        project_planned_chapters = project_result[1] if project_result else 0
+        logger.info(f"   🎯 项目题材：{project_genre}，规划章节：{project_planned_chapters}")
+        
+        # 创建扩展器实例（🎯 传入题材参数）
+        expander = create_outline_expander(
+            genre=project_genre,
+            planned_chapters_max=project_planned_chapters
+        )
+        logger.info("   ✅ 扩展器实例已创建（含题材配置）")
         
         # 生成类型化设定摘要并注入世界观
         settings_summary = build_project_settings_summary(project_id, db)
@@ -4540,6 +4572,24 @@ async def execute_expand_outline_task(
             )
             
             logger.info("   ✅ 史诗框架生成完成")
+            
+            # 🆕 如果需要自动扩全部卷，在框架生成后循环扩展每一卷
+            if auto_expand_all_volumes:
+                logger.info(f"🔄 自动扩展全部卷模式：开始扩展 {total_volumes} 卷...")
+                framework_content_for_volumes = result["expanded_outline"]
+                avg_total_chapters = (total_chapters_min + total_chapters_max) // 2
+                avg_per_volume = avg_total_chapters // total_volumes
+                all_volumes_outline = ""
+                for vol_index in range(1, total_volumes + 1):
+                    logger.info(f"📖 正在扩展第 {vol_index}/{total_volumes} 卷...")
+                    await ws_manager.send_task_progress(project_id=project_id, task_id=task_id, progress=20 + int((vol_index / total_volumes) * 60), message=f"📖 正在详细扩展第 {vol_index}/{total_volumes} 卷...")
+                    vol_result = await asyncio.to_thread(expander.expand_volume_detail, framework_content=framework_content_for_volumes, target_volume_index=vol_index, world_setting=combined_world_setting, characters=characters, chapters_range=(max(30, avg_per_volume - 10), min(150, avg_per_volume + 10)))
+                    all_volumes_outline += f"\n\n{'='*70}\n第{vol_index}卷 详细大纲\n{'='*70}\n\n{vol_result['expanded_outline']}"
+                    logger.info(f"有效 第 {vol_index}/{total_volumes} 卷扩展完成")
+                result["expanded_outline"] = f"【史诗框架概览】\n{framework_content_for_volumes}\n\n{'='*70}\n【分卷详细大纲】\n{all_volumes_outline}"
+                result["auto_expanded"] = True
+                result["total_volume_count"] = total_volumes
+                logger.info(f"有效 自动扩全部卷完成！共 {total_volumes} 卷")
             
         elif expansion_mode == "volume_detail":
             # ==================== 单卷详细模式 ====================
@@ -4602,11 +4652,6 @@ async def execute_expand_outline_task(
                 current_chapter_count=current_chapter_count,
                 increment=increment,
                 target_total_chapters=target_total_chapters,
-                # 🔥 传递多模式参数给AI Agent
-                expansion_mode=expansion_mode,
-                target_volumes=target_volumes,
-                chapters_per_volume_min=chapters_per_volume_min,
-                chapters_per_volume_max=chapters_per_volume_max,
             )
             
             logger.info("   ✅ 大纲扩展完成")

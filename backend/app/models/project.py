@@ -23,6 +23,14 @@ class Project(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     genre: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    
+    # 🆕 题材与篇幅规划字段(用于题材驱动的大纲扩展)
+    sub_genre: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment="子流派")
+    planned_length_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, comment="篇幅类型: short/mid/long/epic")
+    planned_chapters_min: Mapped[Optional[int]] = mapped_column(nullable=True, comment="预期最少章节数")
+    planned_chapters_max: Mapped[Optional[int]] = mapped_column(nullable=True, comment="预期最多章节数")
+    user_outline_plan: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="用户自定义大纲规划原文")
+    
     status: Mapped[str] = mapped_column(String(50), default="draft")  # draft, writing, reviewing, published
     word_count: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

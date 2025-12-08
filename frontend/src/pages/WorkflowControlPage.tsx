@@ -20,6 +20,11 @@ import {
   CircularProgress,
   Tooltip,
   Fab,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  FormHelperText,
 } from '@mui/material'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import PauseIcon from '@mui/icons-material/Pause'
@@ -91,6 +96,21 @@ export default function WorkflowControlPage() {
   const [isStarting, setIsStarting] = useState(false)  // 新增：标记是否正在启动工作流
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [chapterTitle, setChapterTitle] = useState('')
+  
+  // 🆕 题材与篇幅规划状态
+  const [genre, setGenre] = useState('')
+  const [subGenre, setSubGenre] = useState('')
+  const [plannedLengthType, setPlannedLengthType] = useState('')
+  const [plannedChaptersMin, setPlannedChaptersMin] = useState<number | ''>('')
+  const [plannedChaptersMax, setPlannedChaptersMax] = useState<number | ''>('')
+  const [userOutlinePlan, setUserOutlinePlan] = useState('')
+
+  // 🎯 任务5.1：大纲扩展智能推荐状态
+  const [recommendedExpansionMode, setRecommendedExpansionMode] = useState<'total' | 'epic_framework' | 'incremental'>('total')
+  const [recommendedVolumes, setRecommendedVolumes] = useState(3)
+  const [recommendedChaptersPerVolumeMin, setRecommendedChaptersPerVolumeMin] = useState(20)
+  const [recommendedChaptersPerVolumeMax, setRecommendedChaptersPerVolumeMax] = useState(30)
+  const [autoExpandAllVolumes, setAutoExpandAllVolumes] = useState(true)  // 是否自动扩展全部卷
 
   // 🔥 页面加载时，恢复上次的项目位置
   useEffect(() => {
@@ -256,6 +276,96 @@ export default function WorkflowControlPage() {
       dispatch(fetchProject(Number(projectId)))
     }
   }, [projectId, dispatch])
+
+  // 🎯 任务5.1：智能推荐大纲扩展模式和参数
+  useEffect(() => {
+    if (!currentProject) return
+
+    const projectGenre = currentProject.genre || ''
+    const lengthType = currentProject.planned_length_type || ''
+    const maxChapters = currentProject.planned_chapters_max || 0
+    const minChapters = currentProject.planned_chapters_min || 0
+    const hasCustomPlan = !!currentProject.user_outline_plan
+
+    console.log('🧠 智能推荐大纲扩展模式：', { projectGenre, lengthType, maxChapters, hasCustomPlan })
+
+    // 📌 优先级：篇幅判断
+    if (lengthType === 'short' || maxChapters < 50) {
+      // 短篇：直接按总章数
+      setRecommendedExpansionMode('total')
+      console.log('✅ 推荐模式：按总章数（短篇）')
+    } else if (lengthType === 'epic' || maxChapters > 500) {
+      // 超长篇：史诗框架 + 手动选卷
+      setRecommendedExpansionMode('epic_framework')
+      setAutoExpandAllVolumes(false)  // 超长篇默认手动选卷
+      console.log('✅ 推荐模式：史诗框架（超长篇） - 手动选卷')
+    } else if (lengthType === 'long' || maxChapters >= 100) {
+      // 长篇：史诗框架 + 根据章数决定是否自动扩展
+      setRecommendedExpansionMode('epic_framework')
+      
+      if (maxChapters <= 500) {
+        setAutoExpandAllVolumes(true)  // 500章以内默认自动全卷扩展
+        console.log('✅ 推荐模式：史诗框架（长篇） - 自动全卷扩展')
+      } else {
+        setAutoExpandAllVolumes(false)  // 500章以上默认手动选卷
+        console.log('✅ 推荐模式：史诗框架（长篇） - 手动选卷')
+      }
+
+      // 🎯 根据题材推荐卷数和每卷章数
+      if (projectGenre === '修仙' || projectGenre === '珀幻') {
+        // 修仙/珀幻：5卷，每坷8080-100章
+        const estimatedVolumes = Math.max(3, Math.min(8, Math.ceil(maxChapters / 90)))
+        setRecommendedVolumes(estimatedVolumes)
+        setRecommendedChaptersPerVolumeMin(80)
+        setRecommendedChaptersPerVolumeMax(100)
+        console.log(`  💫 修仙/珀幻：${estimatedVolumes}卷 × 80-100章`)
+      } else if (projectGenre === '都市') {
+        // 都市：3卷，每圇30-50章
+        const estimatedVolumes = Math.max(2, Math.min(5, Math.ceil(maxChapters / 40)))
+        setRecommendedVolumes(estimatedVolumes)
+        setRecommendedChaptersPerVolumeMin(30)
+        setRecommendedChaptersPerVolumeMax(50)
+        console.log(`  🏙️ 都市：${estimatedVolumes}卷 × 30-50章`)
+      } else if (projectGenre === '悬疑') {
+        // 悬疑：2-4卷，每圇20-50章
+        const estimatedVolumes = Math.max(2, Math.min(4, Math.ceil(maxChapters / 35)))
+        setRecommendedVolumes(estimatedVolumes)
+        setRecommendedChaptersPerVolumeMin(20)
+        setRecommendedChaptersPerVolumeMax(50)
+        console.log(`  🔍 悬疑：${estimatedVolumes}卷 × 20-50章`)
+      } else if (projectGenre === '言情' || projectGenre === '耽美') {
+        // 言情/耽美：2-3卷，每圇20-60章
+        const estimatedVolumes = Math.max(2, Math.min(3, Math.ceil(maxChapters / 40)))
+        setRecommendedVolumes(estimatedVolumes)
+        setRecommendedChaptersPerVolumeMin(20)
+        setRecommendedChaptersPerVolumeMax(60)
+        console.log(`  💖 言情/耽美：${estimatedVolumes}卷 × 20-60章`)
+      } else if (projectGenre === '科幻') {
+        // 科幻：4卷，每圇50-80章
+        const estimatedVolumes = Math.max(3, Math.min(6, Math.ceil(maxChapters / 65)))
+        setRecommendedVolumes(estimatedVolumes)
+        setRecommendedChaptersPerVolumeMin(50)
+        setRecommendedChaptersPerVolumeMax(80)
+        console.log(`  🚀 科幻：${estimatedVolumes}卷 × 50-80章`)
+      } else {
+        // 通用默认：3-5卷，每圇30-50章
+        const estimatedVolumes = Math.max(3, Math.min(5, Math.ceil(maxChapters / 40)))
+        setRecommendedVolumes(estimatedVolumes)
+        setRecommendedChaptersPerVolumeMin(30)
+        setRecommendedChaptersPerVolumeMax(50)
+        console.log(`  📚 通用：${estimatedVolumes}卷 × 30-50章`)
+      }
+    } else {
+      // 中篇：渐进式扩展
+      setRecommendedExpansionMode('incremental')
+      console.log('✅ 推荐模式：渐进式（中篇）')
+    }
+
+    // 💡 如果有自定义规划，提示但不改变推荐
+    if (hasCustomPlan) {
+      console.log('📝 检测到自定义大纲规划，将优先遵循用户规划')
+    }
+  }, [currentProject])
 
   // 🔧 修复：移除 localStorage 阶段保存逻辑
   // 原因：localStorage 中的阶段可能与后端实际状态不一致
@@ -1574,18 +1684,6 @@ export default function WorkflowControlPage() {
     }
   }
 
-  // 🆕 点击"开始创作"按钮时的处理
-  const handleStartButtonClick = async () => {
-    const hasContent = await checkExistingContent()
-    if (hasContent) {
-      // 显示警告对话框
-      setShowContentWarningDialog(true)
-    } else {
-      // 直接打开创作对话框
-      setOpenDialog(true)
-    }
-  }
-
   // 🆕 标记是否是重新开始（需要清空旧数据）
   const [isRestartMode, setIsRestartMode] = useState(false)
 
@@ -1613,6 +1711,24 @@ export default function WorkflowControlPage() {
 
     try {
       setIsStarting(true)  // 开始启动，显示加载状态
+      
+      // 🆕 先更新项目的题材与篇幅信息
+      if (genre || plannedLengthType || userOutlinePlan) {
+        try {
+          await apiClient.updateProject(parseInt(projectId), {
+            genre,
+            sub_genre: subGenre,
+            planned_length_type: plannedLengthType,
+            planned_chapters_min: plannedChaptersMin || undefined,
+            planned_chapters_max: plannedChaptersMax || undefined,
+            user_outline_plan: userOutlinePlan || undefined,
+          })
+          console.log('✅ 项目题材与篇幅信息已更新')
+        } catch (error) {
+          console.error('⚠️ 更新项目信息失败:', error)
+        }
+      }
+      
       await dispatch(
         startWorkflow({
           projectId: parseInt(projectId),
@@ -1639,6 +1755,35 @@ export default function WorkflowControlPage() {
       setSnackbarMessage('启动工作流失败，请重试')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
+    }
+  }
+  
+  // 🆕 开始按钮点击处理（检查是否有已存在的内容）
+  const handleStartButtonClick = async () => {
+    if (!projectId) {
+      setSnackbarMessage('项目 ID 不存在')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+      return
+    }
+
+    try {
+      // 🔍 检查是否有已存在的章节
+      const chaptersResponse = await apiClient.getChapters(parseInt(projectId))
+      const existingChapters = chaptersResponse.data || []
+
+      if (existingChapters.length > 0) {
+        // 有已存在的章节，显示警告对话框
+        setExistingChaptersCount(existingChapters.length)
+        setShowContentWarningDialog(true)
+      } else {
+        // 没有已存在的章节，直接打开创作对话框
+        setOpenDialog(true)
+      }
+    } catch (error) {
+      console.error('检查章节失败:', error)
+      // 如果检查失败，也直接打开对话框
+      setOpenDialog(true)
     }
   }
 
@@ -3040,12 +3185,12 @@ export default function WorkflowControlPage() {
       <Dialog
         open={openDialog}
         onClose={() => !isStarting && setOpenDialog(false)}
-        maxWidth="sm"
+        maxWidth="md"
         fullWidth
       >
         <Box sx={{ p: 3 }}>
           <Typography variant="h6" sx={{ mb: 2 }}>
-            输入创作需求
+            开始创作 - 配置项目参数
           </Typography>
 
           {/* 启动中的加载提示 */}
@@ -3059,17 +3204,152 @@ export default function WorkflowControlPage() {
               </Box>
             </Alert>
           )}
+          
+          {/* 🆕 题材选择 */}
+          <FormControl fullWidth sx={{ mb: 2 }}>
+            <InputLabel>题材类型</InputLabel>
+            <Select
+              value={genre}
+              onChange={(e) => setGenre(e.target.value)}
+              disabled={isStarting}
+              label="题材类型"
+            >
+              <MenuItem value="">请选择</MenuItem>
+              <MenuItem value="修仙">修仙玄幻</MenuItem>
+              <MenuItem value="都市">都市现实</MenuItem>
+              <MenuItem value="悬疑">悬疑推理</MenuItem>
+              <MenuItem value="言情">言情耽美</MenuItem>
+              <MenuItem value="科幻">科幻</MenuItem>
+              <MenuItem value="纯文学">纯文学</MenuItem>
+            </Select>
+            <FormHelperText>AI将根据题材自动调整创作风格和节奏</FormHelperText>
+          </FormControl>
+          
+          {/* 🆕 篇幅选择 */}
+          <FormControl fullWidth sx={{ mb: 2 }}>
+            <InputLabel>篇幅规划</InputLabel>
+            <Select
+              value={plannedLengthType}
+              onChange={(e) => {
+                const value = e.target.value
+                setPlannedLengthType(value)
+                // 根据篇幅自动设置推荐章节范围
+                if (value === 'short') {
+                  setPlannedChaptersMin(3)
+                  setPlannedChaptersMax(30)
+                } else if (value === 'mid') {
+                  setPlannedChaptersMin(30)
+                  setPlannedChaptersMax(100)
+                } else if (value === 'long') {
+                  setPlannedChaptersMin(100)
+                  setPlannedChaptersMax(500)
+                } else if (value === 'epic') {
+                  setPlannedChaptersMin(500)
+                  setPlannedChaptersMax(1000)
+                }
+              }}
+              disabled={isStarting}
+              label="篇幅规划"
+            >
+              <MenuItem value="">请选择</MenuItem>
+              <MenuItem value="short">短篇 (3-30章)</MenuItem>
+              <MenuItem value="mid">中篇 (30-100章)</MenuItem>
+              <MenuItem value="long">长篇 (100-500章)</MenuItem>
+              <MenuItem value="epic">超长篇 (500+章)</MenuItem>
+            </Select>
+            <FormHelperText>系统将根据篇幅推荐适合的大纲扩展模式</FormHelperText>
+          </FormControl>
+          
+          {/* 🆕 章节范围 */}
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            <TextField
+              label="最少章节数"
+              type="number"
+              value={plannedChaptersMin}
+              onChange={(e) => setPlannedChaptersMin(e.target.value ? parseInt(e.target.value) : '')}
+              disabled={isStarting}
+              sx={{ flex: 1 }}
+              inputProps={{ min: 1 }}
+            />
+            <TextField
+              label="最多章节数"
+              type="number"
+              value={plannedChaptersMax}
+              onChange={(e) => setPlannedChaptersMax(e.target.value ? parseInt(e.target.value) : '')}
+              disabled={isStarting}
+              sx={{ flex: 1 }}
+              inputProps={{ min: 1 }}
+            />
+          </Box>
 
           <TextField
             fullWidth
             multiline
             rows={4}
+            label="创作需求"
             placeholder="请输入您的创作需求，例如：创作一部关于时空旅行的科幻小说..."
             value={requirement}
             onChange={(e) => setRequirement(e.target.value)}
             sx={{ mb: 2 }}
             disabled={isStarting}
           />
+          
+          {/* 🆕 自定义大纲规划 */}
+          <TextField
+            fullWidth
+            multiline
+            rows={4}
+            label="自定义大纲规划（可选）"
+            placeholder="可输入您的卷结构规划，例如：\n第一卷：引气境 (10章)\n第二卷：筑基境 (15章)\n..."
+            value={userOutlinePlan}
+            onChange={(e) => setUserOutlinePlan(e.target.value)}
+            sx={{ mb: 2 }}
+            disabled={isStarting}
+          />
+          
+          {/* 🎯 任务5.3：创作目标提示和规划优先说明 */}
+          {genre && plannedLengthType && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              {/* 📌 第一部分：智能推荐信息 */}
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                <strong>🧠 智能推荐：</strong>
+                {recommendedExpansionMode === 'total' && '按总章数扩展（适合短篇）'}
+                {recommendedExpansionMode === 'incremental' && '渐进式扩展（适合中篇）'}
+                {recommendedExpansionMode === 'epic_framework' && (
+                  <>
+                    史诗框架模式 → {recommendedVolumes}卷 × {recommendedChaptersPerVolumeMin}-{recommendedChaptersPerVolumeMax}章/卷
+                    {autoExpandAllVolumes ? ' (自动全卷扩展)' : ' (手动选卷扩展)'}
+                  </>
+                )}
+              </Typography>
+
+              {/* 📌 第二部分：题材节奏建议 */}
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                <strong>🎵 节奏建议：</strong>
+                {genre === '修仙' && plannedLengthType === 'long' && '修仙长篇推荐境界逐层递进，每5-8章一个小爆点，每卷结束有境界突破大高潮'}
+                {genre === '修仙' && plannedLengthType !== 'long' && '修仙题材注意境界体系设计，确保修炼节奏合理'}
+                {genre === '悬疑' && '悬疑题材注意线索布局，每3-5章揭露一个小真相，每卷一个大反转'}
+                {genre === '都市' && '都市题材建议多线穿插（商战+感情+亲情），每卷一个事业里程碑'}
+                {genre === '言情' && '言情题材注意感情递进（相识→相知→相守），每圇5-10章一个甜蜜时刻'}
+                {genre === '科幻' && '科幻题材注意科技突破节奏，每卷一次探索升级（地球→星系→宇宙）'}
+                {!genre.match(/(修仙|悬疑|都市|言情|科幻)/) && '根据题材特点自动适配叙事节奏'}
+              </Typography>
+
+              {/* 📌 第三部分：规划优先说明 */}
+              <Typography variant="body2">
+                {userOutlinePlan ? (
+                  <>
+                    <strong>✅ 已检测到自定义规划</strong>，将优先遵循您的规划生成大纲
+                  </>
+                ) : (
+                  <>
+                    💡 未检测到自定义规划，将按上述智能推荐生成大纲（您也可在上方输入自定义规划）
+                  </>
+                )}
+              </Typography>
+            </Alert>
+          )}
+          
           <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
             <Button
               onClick={() => setOpenDialog(false)}

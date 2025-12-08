@@ -11,6 +11,13 @@ class ProjectBase(BaseModel):
     title: str
     description: Optional[str] = None
     genre: Optional[str] = None
+    
+    # 🆕 题材与篇幅规划字段
+    sub_genre: Optional[str] = None
+    planned_length_type: Optional[str] = None  # short/mid/long/epic
+    planned_chapters_min: Optional[int] = None
+    planned_chapters_max: Optional[int] = None
+    user_outline_plan: Optional[str] = None
 
 
 class ProjectCreate(ProjectBase):
@@ -24,6 +31,13 @@ class ProjectUpdate(BaseModel):
     description: Optional[str] = None
     genre: Optional[str] = None
     status: Optional[str] = None
+    
+    # 🆕 题材与篇幅规划字段
+    sub_genre: Optional[str] = None
+    planned_length_type: Optional[str] = None
+    planned_chapters_min: Optional[int] = None
+    planned_chapters_max: Optional[int] = None
+    user_outline_plan: Optional[str] = None
 
 
 class ProjectResponse(ProjectBase):
