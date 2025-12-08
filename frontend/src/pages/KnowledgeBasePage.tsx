@@ -262,6 +262,8 @@ export default function KnowledgeBasePage() {
   const [targetVolumeIndex, setTargetVolumeIndex] = useState<number>(1)  // 扩展第几卷
   const [volumeChaptersMin, setVolumeChaptersMin] = useState<number>(50)  // 本卷章节最小值
   const [volumeChaptersMax, setVolumeChaptersMax] = useState<number>(80)  // 本卷章节最大值
+  const [loadingFramework, setLoadingFramework] = useState<boolean>(false)  // 🆕 加载框架状态
+  const [frameworkMetadata, setFrameworkMetadata] = useState<any>(null)  // 🆕 框架元数据
   
   // 🆕 扩展结果对话框状态
   const [showExpandOutlineDialog, setShowExpandOutlineDialog] = useState(false)
@@ -977,6 +979,41 @@ export default function KnowledgeBasePage() {
     return JSON.parse(localStorage.getItem(key) || '[]')
   }
 
+  // 🌟 加载史诗框架
+  const loadEpicFramework = async () => {
+    if (!projectId) return
+
+    try {
+      setLoadingFramework(true)
+      const response = await fetch(`/api/v1/workflow/epic-framework/${projectId}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`加载史诗框架失败: ${response.status}`)
+      }
+
+      const data = await response.json()
+      
+      if (data.has_framework) {
+        setSavedFramework(data.framework_content)
+        setFrameworkMetadata(data.metadata)
+        console.log('✅ 史诗框架加载成功:', data.metadata)
+      } else {
+        setSavedFramework('')
+        setFrameworkMetadata(null)
+        showSnackbar('⚠️ 请先使用史诗框架模式生成框架', 'error')
+      }
+    } catch (error) {
+      console.error('❌ 加载史诗框架失败:', error)
+      showSnackbar('加载史诗框架失败', 'error')
+    } finally {
+      setLoadingFramework(false)
+    }
+  }
+
   // 大纲扩展主函数（🆕 异步后台执行）
   const handleExpandOutline = async () => {
     if (!projectId) return
@@ -1004,12 +1041,12 @@ export default function KnowledgeBasePage() {
       } else if (expansionMode === 'volume_detail') {
         // 📖 单卷详细模式:验证框架内容和卷编号
         if (!savedFramework || savedFramework.trim().length < 100) {
-          showSnackbar('请先粘贴史诗框架内容（至少100字）', 'error')
+          showSnackbar('请先使用史诗框架模式生成框架', 'error')
           setExpandingOutline(false)
           return
         }
-        if (!targetVolumeIndex || targetVolumeIndex < 1 || targetVolumeIndex > 50) {
-          showSnackbar('请输入有效的卷编号 (1-50)', 'error')
+        if (!targetVolumeIndex || targetVolumeIndex < 1 || targetVolumeIndex > (frameworkMetadata?.total_volumes || 50)) {
+          showSnackbar(`请输入有效的卷编号 (1-${frameworkMetadata?.total_volumes || 50})`, 'error')
           setExpandingOutline(false)
           return
         }
@@ -2489,33 +2526,34 @@ export default function KnowledgeBasePage() {
             {/* 📖 单卷详细模式配置 */}
             {expansionMode === 'volume_detail' && (
               <Box sx={{ p: 2, bgcolor: 'primary.50', borderRadius: 1 }}>
-                <Alert severity="warning" sx={{ mb: 2 }}>
-                  <Typography variant="body2">
-                    📖 需要先生成史诗框架，然后基于框架详细扩展单个卷。
-                    请将生成的史诗框架内容粘贴到下方。
-                  </Typography>
-                </Alert>
-                <TextField
-                  fullWidth
-                  label="史诗框架内容"
-                  multiline
-                  rows={6}
-                  value={savedFramework}
-                  onChange={(e) => setSavedFramework(e.target.value)}
-                  placeholder="请粘贴先前生成的史诗框架内容..."
-                  helperText="必须先使用史诗框架模式生成框架"
-                  sx={{ mb: 2 }}
-                  error={!savedFramework}
-                />
+                {loadingFramework ? (
+                  <Box sx={{ textAlign: 'center', py: 3 }}>
+                    <CircularProgress size={24} />
+                    <Typography variant="body2" sx={{ mt: 1 }}>加载史诗框架...</Typography>
+                  </Box>
+                ) : frameworkMetadata ? (
+                  <Alert severity="success" sx={{ mb: 2 }}>
+                    <Typography variant="body2">
+                      ✅ 已加载史诗框架：{frameworkMetadata.total_volumes}卷，约{frameworkMetadata.total_chapters_range[0]}-{frameworkMetadata.total_chapters_range[1]}章
+                    </Typography>
+                  </Alert>
+                ) : (
+                  <Alert severity="warning" sx={{ mb: 2 }}>
+                    <Typography variant="body2">
+                      ⚠️ 未找到史诗框架，请先使用史诗框架模式生成框架
+                    </Typography>
+                  </Alert>
+                )}
                 <TextField
                   fullWidth
                   label="扩展第几卷"
                   type="number"
                   value={targetVolumeIndex}
                   onChange={(e) => setTargetVolumeIndex(parseInt(e.target.value) || 1)}
-                  inputProps={{ min: 1, max: 50 }}
-                  helperText="请选择要扩展的卷编号"
+                  inputProps={{ min: 1, max: frameworkMetadata?.total_volumes || 50 }}
+                  helperText={`请选择要扩展的卷编号 (1-${frameworkMetadata?.total_volumes || 50})`}
                   sx={{ mb: 2 }}
+                  disabled={!frameworkMetadata}
                 />
                 <Box sx={{ display: 'flex', gap: 2 }}>
                   <TextField
@@ -2525,6 +2563,7 @@ export default function KnowledgeBasePage() {
                     onChange={(e) => setVolumeChaptersMin(parseInt(e.target.value) || 50)}
                     inputProps={{ min: 30, max: 150 }}
                     sx={{ flex: 1 }}
+                    disabled={!frameworkMetadata}
                   />
                   <TextField
                     label="本卷章节数(最大)"
@@ -2533,6 +2572,7 @@ export default function KnowledgeBasePage() {
                     onChange={(e) => setVolumeChaptersMax(parseInt(e.target.value) || 80)}
                     inputProps={{ min: 30, max: 150 }}
                     sx={{ flex: 1 }}
+                    disabled={!frameworkMetadata}
                   />
                 </Box>
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
@@ -2552,8 +2592,9 @@ export default function KnowledgeBasePage() {
                 // 🌟 史诗框架模式:不需要设置 targetChapterCount(后端使用 total_chapters_min/max)
                 console.log(`🌟 史诗框架模式: ${totalVolumes}卷, ${totalChaptersMin}-${totalChaptersMax}章`)
               } else if (expansionMode === 'volume_detail') {
-                // 📖 单卷详细模式:不需要设置 targetChapterCount(后端使用 volume_chapters_min/max)
+                // 📖 单卷详细模式:自动加载史诗框架
                 console.log(`📖 单卷详细模式: 第${targetVolumeIndex}卷, ${volumeChaptersMin}-${volumeChaptersMax}章`)
+                loadEpicFramework()  // 🆕 自动加载框架
               } else if (expansionMode === 'volume') {
                 const avg = Math.floor((chaptersPerVolumeMin + chaptersPerVolumeMax) / 2)
                 setTargetChapterCount(targetVolumes * avg)
