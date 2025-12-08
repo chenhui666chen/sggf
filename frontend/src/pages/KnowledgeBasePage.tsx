@@ -2622,28 +2622,75 @@ export default function KnowledgeBasePage() {
             <Box>
               {/* 基本信息 */}
               <Paper elevation={2} sx={{ p: 2, mb: 2, bgcolor: 'primary.50' }}>
-                <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary">当前章节数</Typography>
-                    <Typography variant="h4" color="primary.main" sx={{ fontWeight: 'bold' }}>
-                      {expandOutlineResult.current_chapter_count || 0}
-                    </Typography>
-                  </Box>
-                  {expandOutlineResult.target_chapter_count && (
+                {expandOutlineResult.framework_type === 'epic' ? (
+                  // 🌟 史诗框架模式
+                  <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
                     <Box>
-                      <Typography variant="caption" color="text.secondary">目标章节数</Typography>
-                      <Typography variant="h4" color="success.main" sx={{ fontWeight: 'bold' }}>
-                        {expandOutlineResult.target_chapter_count}
+                      <Typography variant="caption" color="text.secondary">总卷数</Typography>
+                      <Typography variant="h4" color="primary.main" sx={{ fontWeight: 'bold' }}>
+                        {expandOutlineResult.total_volumes || 0}
                       </Typography>
                     </Box>
-                  )}
-                  <Box>
-                    <Typography variant="caption" color="text.secondary">字数</Typography>
-                    <Typography variant="h6" color="text.primary">
-                      {expandOutlineResult.expanded_outline?.length || 0}
-                    </Typography>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">预计章节</Typography>
+                      <Typography variant="h4" color="success.main" sx={{ fontWeight: 'bold' }}>
+                        {expandOutlineResult.estimated_chapters || 0}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">字数</Typography>
+                      <Typography variant="h6" color="text.primary">
+                        {expandOutlineResult.expanded_outline?.length || 0}
+                      </Typography>
+                    </Box>
                   </Box>
-                </Box>
+                ) : expandOutlineResult.volume_index ? (
+                  // 📖 单卷详细模式
+                  <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">卷编号</Typography>
+                      <Typography variant="h4" color="primary.main" sx={{ fontWeight: 'bold' }}>
+                        第{expandOutlineResult.volume_index}卷
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">章节数</Typography>
+                      <Typography variant="h4" color="success.main" sx={{ fontWeight: 'bold' }}>
+                        {expandOutlineResult.chapter_count || 0}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">字数</Typography>
+                      <Typography variant="h6" color="text.primary">
+                        {expandOutlineResult.expanded_outline?.length || 0}
+                      </Typography>
+                    </Box>
+                  </Box>
+                ) : (
+                  // 原有模式
+                  <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">当前章节数</Typography>
+                      <Typography variant="h4" color="primary.main" sx={{ fontWeight: 'bold' }}>
+                        {expandOutlineResult.current_chapter_count || 0}
+                      </Typography>
+                    </Box>
+                    {expandOutlineResult.target_chapter_count && (
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">目标章节数</Typography>
+                        <Typography variant="h4" color="success.main" sx={{ fontWeight: 'bold' }}>
+                          {expandOutlineResult.target_chapter_count}
+                        </Typography>
+                      </Box>
+                    )}
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">字数</Typography>
+                      <Typography variant="h6" color="text.primary">
+                        {expandOutlineResult.expanded_outline?.length || 0}
+                      </Typography>
+                    </Box>
+                  </Box>
+                )}
               </Paper>
 
               {/* 🤖 AI建议显示 */}

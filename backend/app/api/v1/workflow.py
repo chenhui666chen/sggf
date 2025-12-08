@@ -4677,23 +4677,50 @@ generated_at: {datetime.now().isoformat()}
             traceback.print_exc()
         
         # 发送完成消息
-        final_count = result.get("current_chapter_count", target_total_chapters)
-        ai_suggestion = {
-            "should_continue": result.get("should_continue", False),
-            "reason": result.get("continue_reason", "")
-        }
-
-        await ws_manager.send_task_complete(
-            project_id=project_id,
-            task_id=task_id,
-            result={
-                "expanded_outline": result["expanded_outline"],
-                "current_chapter_count": final_count,
-                "target_chapter_count": target_total_chapters,
-                "ai_suggestion": ai_suggestion,  # AI建议，仅供参考
-                "message": f"✅ 大纲扩展完成！当前 {final_count} 章（目标: {target_total_chapters}）"
+        if expansion_mode == "epic_framework":
+            # 🌟 史诗框架模式:不显示章节数
+            await ws_manager.send_task_complete(
+                project_id=project_id,
+                task_id=task_id,
+                result={
+                    "expanded_outline": result["expanded_outline"],
+                    "total_volumes": result.get("total_volumes", total_volumes),
+                    "estimated_chapters": result.get("estimated_chapters", 0),
+                    "framework_type": "epic",
+                    "message": f"✅ 史诗框架生成完成！{result.get('total_volumes', total_volumes)}卷，预计{result.get('estimated_chapters', 0)}章"
+                }
+            )
+        elif expansion_mode == "volume_detail":
+            # 📖 单卷详细模式:显示单卷信息
+            await ws_manager.send_task_complete(
+                project_id=project_id,
+                task_id=task_id,
+                result={
+                    "expanded_outline": result["expanded_outline"],
+                    "volume_index": result.get("volume_index", target_volume_index),
+                    "chapter_count": result.get("chapter_count", 0),
+                    "message": f"✅ 第{result.get('volume_index', target_volume_index)}卷详细大纲生成完成！约{result.get('chapter_count', 0)}章"
+                }
+            )
+        else:
+            # 原有模式(total/volume/incremental):显示章节数
+            final_count = result.get("current_chapter_count", target_total_chapters)
+            ai_suggestion = {
+                "should_continue": result.get("should_continue", False),
+                "reason": result.get("continue_reason", "")
             }
-        )
+            
+            await ws_manager.send_task_complete(
+                project_id=project_id,
+                task_id=task_id,
+                result={
+                    "expanded_outline": result["expanded_outline"],
+                    "current_chapter_count": final_count,
+                    "target_chapter_count": target_total_chapters,
+                    "ai_suggestion": ai_suggestion,
+                    "message": f"✅ 大纲扩展完成！当前 {final_count} 章（目标: {target_total_chapters}）"
+                }
+            )
         
     except Exception as e:
         logger.error(f"❌ 后台扩展大纲失败: {str(e)}")
