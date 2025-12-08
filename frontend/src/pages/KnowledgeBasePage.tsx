@@ -28,10 +28,6 @@ import {
   Select,
   FormControl,
   InputLabel,
-  FormLabel,
-  FormControlLabel,
-  Radio,
-  RadioGroup,
 } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
 import SaveIcon from '@mui/icons-material/Save'
@@ -247,9 +243,9 @@ export default function KnowledgeBasePage() {
   
   // 🔥 多模式扩展状态
   const [expansionMode, setExpansionMode] = useState<'total' | 'volume' | 'incremental' | 'epic_framework' | 'volume_detail'>('total')
-  const [targetVolumes, setTargetVolumes] = useState<number>(3)
-  const [chaptersPerVolumeMin, setChaptersPerVolumeMin] = useState<number>(20)
-  const [chaptersPerVolumeMax, setChaptersPerVolumeMax] = useState<number>(30)
+  const [targetVolumes] = useState<number>(3)
+  const [chaptersPerVolumeMin] = useState<number>(20)
+  const [chaptersPerVolumeMax] = useState<number>(30)
   const [incrementalStep, setIncrementalStep] = useState<number>(10)
   const [showExpansionConfig, setShowExpansionConfig] = useState(false)  // 显示高级配置弹窗
   
@@ -261,9 +257,9 @@ export default function KnowledgeBasePage() {
   
   // 📖 单卷详细模式状态
   const [savedFramework, setSavedFramework] = useState<string>('')  // 保存的史诗框架
-  const [targetVolumeIndex, setTargetVolumeIndex] = useState<number>(1)  // 扩展第几卷
-  const [volumeChaptersMin, setVolumeChaptersMin] = useState<number>(50)  // 本卷章节最小值
-  const [volumeChaptersMax, setVolumeChaptersMax] = useState<number>(80)  // 本卷章节最大值
+  const [targetVolumeIndex] = useState<number>(1)  // 扩展第几卷
+  const [volumeChaptersMin] = useState<number>(50)  // 本卷章节最小值
+  const [volumeChaptersMax] = useState<number>(80)  // 本卷章节最大值
   const [loadingFramework, setLoadingFramework] = useState<boolean>(false)  // 🆕 加载框架状态
   const [frameworkMetadata, setFrameworkMetadata] = useState<any>(null)  // 🆕 框架元数据
   

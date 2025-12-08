@@ -99,7 +99,7 @@ export default function WorkflowControlPage() {
   
   // 🆕 题材与篇幅规划状态
   const [genre, setGenre] = useState('')
-  const [subGenre, setSubGenre] = useState('')
+  const [subGenre] = useState('')
   const [plannedLengthType, setPlannedLengthType] = useState('')
   const [plannedChaptersMin, setPlannedChaptersMin] = useState<number | ''>('')
   const [plannedChaptersMax, setPlannedChaptersMax] = useState<number | ''>('')
@@ -284,7 +284,6 @@ export default function WorkflowControlPage() {
     const projectGenre = currentProject.genre || ''
     const lengthType = currentProject.planned_length_type || ''
     const maxChapters = currentProject.planned_chapters_max || 0
-    const minChapters = currentProject.planned_chapters_min || 0
     const hasCustomPlan = !!currentProject.user_outline_plan
 
     console.log('🧠 智能推荐大纲扩展模式：', { projectGenre, lengthType, maxChapters, hasCustomPlan })
@@ -1655,33 +1654,6 @@ export default function WorkflowControlPage() {
     }, 2000)
 
     setTaskPollingInterval(interval)
-  }
-
-  // 🆕 检查项目是否已有内容
-  const checkExistingContent = async () => {
-    if (!projectId) return false
-
-    try {
-      // 获取项目的章节列表
-      const response = await apiClient.getChapters(parseInt(projectId))
-      const chapters = response.data || []
-      const chapterCount = chapters.length
-
-      // 检查是否有概念/大纲等内容（通过workflow状态判断）
-      const hasCompletedStages =
-        workflow.stages.concept.status === 'completed' ||
-        workflow.stages.structure.status === 'completed' ||
-        workflow.stages.content.status === 'completed'
-
-      if (chapterCount > 0 || hasCompletedStages) {
-        setExistingChaptersCount(chapterCount)
-        return true
-      }
-      return false
-    } catch (error) {
-      console.error('检查项目内容失败:', error)
-      return false
-    }
   }
 
   // 🆕 标记是否是重新开始（需要清空旧数据）

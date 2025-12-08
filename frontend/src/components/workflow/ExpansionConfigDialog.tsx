@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react'
 import {
   Dialog,
   DialogTitle,
@@ -75,7 +74,6 @@ export default function ExpansionConfigDialog({
     const avgPerVolume = Math.floor(avgChapters / totalVolumes)
 
     if (genre === '修仙' || genre === '玄幻') {
-      const recommended = Math.floor(totalVolumes / 5) * 100
       return (
         <Alert severity="info" sx={{ mt: 2 }}>
           💡 <strong>{genre}{totalVolumes}卷建议：</strong>每卷{avgPerVolume}章左右，适合修炼体系分阶段推进
