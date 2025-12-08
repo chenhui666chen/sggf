@@ -4619,6 +4619,20 @@ async def execute_expand_outline_task(
             message="💾 正在保存扩展结果..."
         )
         
+        # 🌟 处理史诗框架：添加特殊标记
+        outline_content = result["expanded_outline"]
+        if expansion_mode == "epic_framework":
+            # 添加 YAML 头部标记
+            outline_content = f"""---
+type: epic_framework
+total_volumes: {total_volumes}
+total_chapters_range: [{total_chapters_min}, {total_chapters_max}]
+generated_at: {datetime.now().isoformat()}
+---
+
+{result["expanded_outline"]}"""
+            logger.info(f"   🌟 史诗框架已添加元数据标记")
+        
         update_query = text("""
             UPDATE project_settings
             SET plot_outline = :plot_outline,
@@ -4627,7 +4641,7 @@ async def execute_expand_outline_task(
         """)
         
         db.execute(update_query, {
-            "plot_outline": result["expanded_outline"],
+            "plot_outline": outline_content,
             "updated_at": datetime.now().isoformat(),
             "project_id": project_id
         })
@@ -5017,3 +5031,98 @@ async def execute_expand_characters_task(
         )
     finally:
         db.close()
+
+
+@router.get("/epic-framework/{project_id}")
+async def get_epic_framework(
+    project_id: int,
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    获取项目的史诗框架
+    
+    返回:
+    {
+        "has_framework": true,
+        "framework_content": "史诗框架内容...",
+        "metadata": {
+            "total_volumes": 30,
+            "total_chapters_range": [1000, 2500],
+            "generated_at": "2025-12-08T..."
+        }
+    }
+    """
+    import re
+    from sqlalchemy import text
+    
+    try:
+        # 验证项目所有权
+        project = db.query(Project).filter(
+            (Project.id == project_id) & (Project.user_id == current_user.id)
+        ).first()
+        
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found"
+            )
+        
+        # 获取 plot_outline
+        query = text("""
+            SELECT plot_outline
+            FROM project_settings
+            WHERE project_id = :project_id
+        """)
+        
+        result = db.execute(query, {"project_id": project_id}).fetchone()
+        
+        if not result or not result[0]:
+            return {
+                "has_framework": False,
+                "framework_content": "",
+                "metadata": None
+            }
+        
+        plot_outline = result[0]
+        
+        # 检查是否是史诗框架（查找 YAML 头部）
+        yaml_pattern = r'^---\s*\ntype:\s*epic_framework\s*\ntotal_volumes:\s*(\d+)\s*\ntotal_chapters_range:\s*\[(\d+),\s*(\d+)\]\s*\ngenerated_at:\s*([^\n]+)\s*\n---\s*\n'
+        match = re.match(yaml_pattern, plot_outline, re.MULTILINE)
+        
+        if match:
+            # 是史诗框架，提取元数据
+            total_volumes = int(match.group(1))
+            chapters_min = int(match.group(2))
+            chapters_max = int(match.group(3))
+            generated_at = match.group(4)
+            
+            # 移除 YAML 头部，只返回内容
+            framework_content = plot_outline[match.end():]
+            
+            return {
+                "has_framework": True,
+                "framework_content": framework_content.strip(),
+                "metadata": {
+                    "total_volumes": total_volumes,
+                    "total_chapters_range": [chapters_min, chapters_max],
+                    "generated_at": generated_at
+                }
+            }
+        else:
+            # 不是史诗框架
+            return {
+                "has_framework": False,
+                "framework_content": "",
+                "metadata": None
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
