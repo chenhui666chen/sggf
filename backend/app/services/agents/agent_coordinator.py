@@ -1324,6 +1324,10 @@ class CreativeDirectorCoordinator:
         world_setting = concept_result.get("world_setting") or self.project_context.get("world_setting")
         characters = concept_result.get("characters") or self.project_context.get("characters")
         
+        # 获取题材专属Prompt模块
+        current_genre = self.project_context.get("genre", "")
+        genre_module = GENRE_PROMPT_MODULES.get(current_genre, DEFAULT_GENRE_MODULE)
+        
         logger.info("📝 创意总监正在生成网文卷结构大纲...")
         structure_prompt = f"""你是一名擅长网文结构的“情节架构师”，需要在已有【故事概念 + 世界观设定 + 主要人物】的基础上，规划一部长篇网文的【情节大纲】。
 

@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 cd /d "%~dp0"
 cls
 
@@ -45,9 +46,9 @@ echo.
 :: Start Backend
 echo [1/2] Starting FastAPI Backend Server (WebSocket Enabled)...
 echo.
-echo 验证配置...
+echo Validating config...
 cd /d %~dp0\backend
-python -c "from app.core.config import settings; print('✅ 数据库:', settings.DATABASE_URL); print('✅ CORS:', settings.CORS_ORIGINS[:2] if len(settings.CORS_ORIGINS) > 2 else settings.CORS_ORIGINS)"
+python -c "from app.core.config import settings; print('[OK] Database:', settings.DATABASE_URL); print('[OK] CORS:', settings.CORS_ORIGINS[:2] if len(settings.CORS_ORIGINS) > 2 else settings.CORS_ORIGINS)"
 cd /d %~dp0
 echo.
 start "Novel System - Backend (FastAPI + WebSocket)" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && cd backend && set PYTHONUNBUFFERED=1 && python -u -m uvicorn app.main:application --host 0.0.0.0 --port 8000 --reload"
