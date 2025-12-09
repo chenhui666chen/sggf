@@ -287,7 +287,7 @@ export default function ExpansionConfigDialog({
                 label={
                   <Box>
                     <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                      ● 自动扩展全部卷（推荐）
+                      ● 自动扩展全部卷
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
                       ✅ 确认框架后自动扩展{totalVolumes}卷

@@ -1463,63 +1463,17 @@ export default function KnowledgeBasePage() {
                       编辑{getTabTitle()}
                     </Button>
                     
-                    {/* 大纲设定扩展按钮 + 人物设定扩展按钮（与布局统一） */}
+                    {/* 大纲设定扩展按钮 */}
                     {mainTabValue === 2 && (
-                      <>
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          onClick={() => setShowExpansionConfig(true)}
-                          disabled={expandingOutline || expandingCharacters}
-                          sx={{ 
-                            borderRadius: 2,
-                            position: 'relative',
-                            overflow: 'hidden',
-                            '&::before': {
-                              content: '""',
-                              position: 'absolute',
-                              top: '50%',
-                              left: '50%',
-                              width: '100%',
-                              height: '100%',
-                              borderRadius: '50%',
-                              background: 'radial-gradient(circle, rgba(25, 118, 210, 0.3) 0%, transparent 70%)',
-                              transform: 'translate(-50%, -50%) scale(0)',
-                              animation: 'ripple 2s ease-out infinite',
-                            },
-                            '@keyframes ripple': {
-                              '0%': {
-                                transform: 'translate(-50%, -50%) scale(0)',
-                                opacity: 1,
-                              },
-                              '100%': {
-                                transform: 'translate(-50%, -50%) scale(2.5)',
-                                opacity: 0,
-                              },
-                            },
-                          }}
-                        >
-                          ⚙️ 扩展配置
-                        </Button>
-                        <Tooltip
-                          title={expandingOutline ? "扩展进行中，请稍候" : "请先完成扩展配置！"}
-                          placement="top"
-                          arrow
-                        >
-                          <span>
-                            <Button
-                              variant="contained"
-                              color="primary"
-                              startIcon={expandingOutline ? <CircularProgress size={20} /> : <ArticleIcon />}
-                              onClick={handleExpandOutline}
-                              disabled={!plotOutline || !worldSetting || !characters || expandingOutline || expandingCharacters || isEditing}
-                              sx={{ borderRadius: 2 }}
-                            >
-                              {expandingOutline ? '扩展中...' : '开始扩展'}
-                            </Button>
-                          </span>
-                        </Tooltip>
-                      </>
+                      <Button
+                        variant="contained"
+                        startIcon={<ArticleIcon />}
+                        onClick={() => setShowExpansionConfig(true)}
+                        disabled={expandingOutline || expandingCharacters}
+                        sx={{ borderRadius: 2 }}
+                      >
+                        开始扩展
+                      </Button>
                     )}
                     {mainTabValue === 1 && characterSubTabValue === 0 && (
                       <>
