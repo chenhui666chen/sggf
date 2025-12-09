@@ -31,6 +31,7 @@ import {
   ToggleButtonGroup,
   ToggleButton,
   Chip,
+  Tooltip,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import MenuIcon from '@mui/icons-material/Menu'
@@ -43,6 +44,7 @@ import CloseIcon from '@mui/icons-material/Close'
 import NavigateNextIcon from '@mui/icons-material/NavigateNext'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
+import SortIcon from '@mui/icons-material/Sort'
 import HeadphonesIcon from '@mui/icons-material/Headphones'
 import TheatersIcon from '@mui/icons-material/Theaters'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
@@ -1397,26 +1399,57 @@ export default function DashboardPage() {
         <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography variant="h6">📚 章节列表</Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography variant="body2" sx={{ mr: 1 }}>排序:</Typography>
-            <ToggleButtonGroup
-              size="small"
-              value={chapterSortOrder}
-              exclusive
-              onChange={(_, newOrder) => {
-                if (newOrder !== null) {
+            {/* 🆕 合并排序按钮：单个图标，根据排序状态改变箭头方向 */}
+            <Tooltip title={chapterSortOrder === 'asc' ? '当前：正序，点击倒序' : '当前：倒序，点击正序'} placement="top">
+              <IconButton
+                size="small"
+                onClick={() => {
+                  const newOrder = chapterSortOrder === 'asc' ? 'desc' : 'asc'
                   handleChapterSortOrderChange(newOrder)
-                }
-              }}
-              aria-label="章节排序"
-              sx={{ mr: 1 }}
-            >
-              <ToggleButton value="asc" aria-label="正序">
-                <ArrowUpwardIcon fontSize="small" />
-              </ToggleButton>
-              <ToggleButton value="desc" aria-label="倒序">
-                <ArrowDownwardIcon fontSize="small" />
-              </ToggleButton>
-            </ToggleButtonGroup>
+                }}
+                sx={{
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  borderRadius: 1,
+                  '&:hover': {
+                    backgroundColor: 'action.hover',
+                  },
+                }}
+              >
+                {chapterSortOrder === 'asc' ? (
+                  <ArrowUpwardIcon fontSize="small" />
+                ) : (
+                  <ArrowDownwardIcon fontSize="small" />
+                )}
+              </IconButton>
+            </Tooltip>
+            
+            {/* 🆕 一键导出全文按钮（移到顶部） */}
+            {chapters.length > 0 && (
+              <Tooltip title="一键导出全文" placement="top">
+                <IconButton
+                  size="small"
+                  onClick={(e) => setExportAllAnchorEl(e.currentTarget)}
+                  disabled={exportingAll}
+                  sx={{
+                    border: '1px solid',
+                    borderColor: 'primary.main',
+                    borderRadius: 1,
+                    color: 'primary.main',
+                    '&:hover': {
+                      backgroundColor: 'primary.50',
+                    },
+                  }}
+                >
+                  {exportingAll ? (
+                    <CircularProgress size={16} />
+                  ) : (
+                    <FileDownloadIcon fontSize="small" />
+                  )}
+                </IconButton>
+              </Tooltip>
+            )}
+            
             <Button
               size="small"
               onClick={handleCloseChaptersDrawer}
@@ -1428,37 +1461,19 @@ export default function DashboardPage() {
         </Box>
         <Divider />
         
-        {/* 一键导出按钮栏 */}
-        {chapters.length > 0 && (
-          <Box sx={{ p: 1.5, display: 'flex', justifyContent: 'center', borderBottom: '1px solid #eee' }}>
-            <Button
-              variant="outlined"
-              size="small"
-              startIcon={exportingAll ? <CircularProgress size={16} /> : <FileDownloadIcon />}
-              onClick={(e) => setExportAllAnchorEl(e.currentTarget)}
-              disabled={exportingAll}
-              sx={{
-                borderRadius: 2,
-                textTransform: 'none',
-                fontWeight: 500,
-              }}
-            >
-              {exportingAll ? '导出中...' : '一键导出全文'}
-            </Button>
-            <Menu
-              anchorEl={exportAllAnchorEl}
-              open={Boolean(exportAllAnchorEl)}
-              onClose={() => setExportAllAnchorEl(null)}
-            >
-              <MenuItem onClick={handleExportAllTxt}>
-                📄 导出为 TXT
-              </MenuItem>
-              <MenuItem onClick={handleExportAllDocx}>
-                📝 导出为 DOCX
-              </MenuItem>
-            </Menu>
-          </Box>
-        )}
+        {/* 🗑️ 移除原有的导出按钮栏 */}
+        <Menu
+          anchorEl={exportAllAnchorEl}
+          open={Boolean(exportAllAnchorEl)}
+          onClose={() => setExportAllAnchorEl(null)}
+        >
+          <MenuItem onClick={handleExportAllTxt}>
+            📄 导出为 TXT
+          </MenuItem>
+          <MenuItem onClick={handleExportAllDocx}>
+            📝 导出为 DOCX
+          </MenuItem>
+        </Menu>
 
         {chaptersLoading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 4 }}>
