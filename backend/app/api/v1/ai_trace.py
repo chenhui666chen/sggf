@@ -70,16 +70,21 @@ async def reduce_ai_trace(
         
         # 🆕 设置总超时时间为90秒（避免前端120秒超时）
         async def process_with_timeout():
-            # 1. 先检测原始文本的AI分数（超时10秒）
+            # 1. 🆕 尝试检测原始文本的AI分数（但不阻塞核心流程）
+            original_score = 50  # 默认分数5
             try:
-                original_result = await asyncio.wait_for(
-                    tencent_ai_detect_service.detect_ai_content(text[:5000]),
-                    timeout=10.0
+                detect_task = asyncio.create_task(
+                    tencent_ai_detect_service.detect_ai_content(text[:5000])
                 )
-                original_score = original_result.get("ai_score", 50) if original_result.get("success") else 50
+                original_result = await asyncio.wait_for(detect_task, timeout=10.0)
+                if original_result.get("success"):
+                    original_score = original_result.get("ai_score", 50)
+                    logger.info(f"🔍 原始文本AI分数: {original_score}")
             except asyncio.TimeoutError:
                 logger.warning("⚠️ 原始文本检测超时，使用默认分数50")
-                original_score = 50
+                detect_task.cancel()  # 🆕 取消任务
+            except Exception as e:
+                logger.warning(f"⚠️ 原始文本检测失败: {e}，使用默认分数50")
             
             # 2. 使用提示词进化引擎的改写能力
             evaluator = PromptEvaluator()
@@ -129,23 +134,30 @@ async def reduce_ai_trace(
             prompt = intensity_prompts.get(request.intensity, intensity_prompts["medium"])
             
             # 调用改写（超时60秒）
+            logger.info("🔄 开始改写文本...")
             reduced_text = await asyncio.wait_for(
                 evaluator._rewrite_text(prompt, text, temperature=0.8),
                 timeout=60.0
             )
+            logger.info(f"✅ 改写完成，生成文本长度: {len(reduced_text)} 字符")
             
-            # 3. 检测改写后的AI分数（超时10秒）
+            # 3. 🆕 尝试检测改写后的AI分数（但不阻塞返回）
+            new_score = original_score
+            label = "Unknown"
             try:
-                new_result = await asyncio.wait_for(
-                    tencent_ai_detect_service.detect_ai_content(reduced_text[:5000]),
-                    timeout=10.0
+                new_detect_task = asyncio.create_task(
+                    tencent_ai_detect_service.detect_ai_content(reduced_text[:5000])
                 )
-                new_score = new_result.get("ai_score", original_score) if new_result.get("success") else original_score
-                label = new_result.get("label", "Unknown")
+                new_result = await asyncio.wait_for(new_detect_task, timeout=10.0)
+                if new_result.get("success"):
+                    new_score = new_result.get("ai_score", original_score)
+                    label = new_result.get("label", "Unknown")
+                    logger.info(f"🔍 改写后AI分数: {new_score}")
             except asyncio.TimeoutError:
-                logger.warning("⚠️ 改写后文本检测超时，返回改写结果但不更新分数")
-                new_score = original_score
-                label = "Unknown"
+                logger.warning("⚠️ 改写后文本检测超时，直接返回改写结果")
+                new_detect_task.cancel()  # 🆕 取消任务
+            except Exception as e:
+                logger.warning(f"⚠️ 改写后文本检测失败: {e}，直接返回改写结果")
             
             improvement = original_score - new_score
             
