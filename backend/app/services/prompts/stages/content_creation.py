@@ -293,3 +293,64 @@ def get_recommended_styles(
 def get_genre_creation_guide(genre: str) -> str:
     """获取题材专属创作指导"""
     return GENRE_CREATION_GUIDES.get(genre, "")
+
+class FirstChapterPrompts:
+    """第1章创作提示词（用于agent_coordinator的阶段3）"""
+    
+    @staticmethod
+    def get_first_chapter_prompt(
+        plot_outline: str,
+        concept: str,
+        world_setting: str,
+        characters: str,
+        target_words: int = 2500
+    ) -> str:
+        """
+        获取第1章创作的 user prompt
+        
+        Args:
+            plot_outline: 情节大纲（截断至500字）
+            concept: 故事概念（截断至300字）
+            world_setting: 世界观设定（截断至200字）
+            characters: 人物设定（截断至200字）
+            target_words: 目标字数
+        
+        Returns:
+            完整的第1章创作 user prompt
+        """
+        return f"""请根据提供的情节大纲、世界观设定和人物设定，创作精彩的第1章内容。
+
+【结构大纲】
+{plot_outline}
+
+【故事概念】
+{concept}
+
+【世界观设定】
+{world_setting}
+
+【主要人物】
+{characters}
+
+【创作要求】
+1. **语言风格**：语言生动，描写细腻，符合网文风格
+2. **对话要求**：对话自然，符合人物性格
+3. **情节节奏**：情节紧凑，引人入胜，注意爽点节奏
+4. **场景描写**：场景描写要有画面感
+5. **段落分隔**：注意段落分隔，便于阅读
+6. **开篇建立**：第一章要快速建立世界观和主角形象
+7. **多种手法**：使用场景描写、对话、心理描写等多种手法
+
+【质量标准】
+- ✅ 人物性格和行为符合设定
+- ✅ 遵循已建立的世界观规则
+- ✅ 注重细节的合理性和真实感
+- ✅ 开头要有吸引力，结尾要有悬念
+
+【禁止事项】
+❌ 禁止使用：用"XXX醒来/睁开眼睛/阳光照进房间"开头
+❌ 禁止使用：总结式内心独白 + 对未来的展望（如"他知道，从这一刻起..."）
+
+【目标字数】约{target_words}字
+
+请开始创作第1章内容，直接输出章节正文，不要包含任何额外的说明文字。"""

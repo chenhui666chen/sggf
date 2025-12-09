@@ -10,13 +10,18 @@
 """
 
 from .chapter_planning import ChapterPlanningPrompts, get_genre_chapter_plan_guide, get_climax_instruction
-from .content_creation import ContentCreationPrompts
+from .content_creation import ContentCreationPrompts, FirstChapterPrompts
 from .outline_expansion import OutlineExpansionPrompts, CharacterExpansionPrompts, get_genre_outline_guide
 from .world_building import (
     WorldBuildingPrompts,
     CharacterDesignPrompts,
     get_genre_world_extension,
     get_genre_character_fields
+)
+from .structure_design import (
+    StructureDesignPrompts,
+    get_genre_rhythm_guide,
+    build_structure_design_prompt
 )
 
 __all__ = [
@@ -26,6 +31,7 @@ __all__ = [
     'get_climax_instruction',
     # 内容创作
     'ContentCreationPrompts',
+    'FirstChapterPrompts',
     # 大纲扩展
     'OutlineExpansionPrompts',
     'CharacterExpansionPrompts',
@@ -35,4 +41,8 @@ __all__ = [
     'CharacterDesignPrompts',
     'get_genre_world_extension',
     'get_genre_character_fields',
+    # 结构设计（情节大纲）
+    'StructureDesignPrompts',
+    'get_genre_rhythm_guide',
+    'build_structure_design_prompt',
 ]

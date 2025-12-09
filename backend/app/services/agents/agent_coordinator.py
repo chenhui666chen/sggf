@@ -16,6 +16,11 @@ from app.services.prompts.stages.world_building import (
     get_genre_world_extension,
     get_genre_character_fields
 )
+from app.services.prompts.stages.structure_design import (
+    StructureDesignPrompts,
+    get_genre_rhythm_guide
+)
+from app.services.prompts.stages.content_creation import FirstChapterPrompts
 
 logger = logging.getLogger(__name__)
 
@@ -1554,56 +1559,15 @@ class CreativeDirectorCoordinator:
         genre_module = GENRE_PROMPT_MODULES.get(current_genre, DEFAULT_GENRE_MODULE)
         
         logger.info("📝 创意总监正在生成网文卷结构大纲...")
-        structure_prompt = f"""你是一名擅长网文结构的“情节架构师”，需要在已有【故事概念 + 世界观设定 + 主要人物】的基础上，规划一部长篇网文的【情节大纲】。
-
-【故事概念】
-{concept[:500] if concept else '无'}
-
-【世界观设定】
-{world_setting[:300] if world_setting else '无'}
-
-【主要人物】
-{characters[:300] if characters else '无'}
-
-【总体要求】
-1. 采用“按卷/阶段 + 起承转合骨架 + 网文爽点节奏”的混合结构。
-2. 每一卷/阶段都要明确：阶段目标、主要矛盾、爆点与升级节点。
-3. 不写细节对白，只写“发生什么事 + 冲突方向 + 爽点类型”。
-
-请按以下结构输出：
-
-1. **总体结构概览**
-- 用 3–5 行概括全书走向（例如：底层生存 → 技术崛起 → 撼动旧秩序 → 新范式成型）；
-- 标明本书更偏“爽文逆袭”“权谋智斗”“悬疑走向”“慢热成长”等（可组合）；
-- 明确整体“情绪起伏节奏”，例如：“小爽 → 压抑 → 中爽 → 再压抑 → 爆爽 → 余韵”，避免全程同强度爽点导致疲劳。
-
-2. **卷一：XXXX（起）**
-- **阶段目标**：主角要达成的阶段性目标（例如：活下来、保住家人、摆脱债务、进入学院等）；
-- **核心矛盾**：这一卷持续的主要矛盾；
-- **关键节点建议**（建议 4–8 个），每个节点必须包含：
-  - 场景（简短描述发生在哪里）；
-  - 冲突（谁 vs 谁，矛盾点是什么）；
-  - 爽点/转折：说明这是“打脸、越级、技术降维打击、关系反转、真相片段”等哪一类爽点；
-  - **爽点强度：小爽 / 中爽 / 爆爽**（必须标注）；
-  - 建议章节范围（如“第1–3章”“第4–6章”），可参考“约每3章一个小高潮”的节奏（例如：第3章、第6章设小爽点，第10章左右设卷内爆点）。
-
-3. **卷二：XXXX（承）**
-- 同卷一格式：阶段目标 + 核心矛盾 + 关键节点列表；
-- 注意承接卷一的未解矛盾，并引入新的升级点（更大格局、更强对手或更深真相）。
-
-4. **卷三：XXXX（转）**
-- 侧重重大转折与价值观/世界观层面的冲突升级，可以有一段“压抑期”，为后续爆爽做铺垫。
-
-5. **卷四：XXXX（合）**（或后续多卷）
-- 交代主线收束方式，安排终极爆点与情绪“余韵”。
-
-【节奏与爽点规则】
-- 保证每 5–10 章至少有一个明确爽点（反杀、升级、打脸、关系反转、真相片段等）；
-- 在每卷内，爽点强度建议遵循“小爽 → 中爽 → 小缓冲 → 爆爽”的节奏结构；
-- 不要在前期一次性暴露所有终极秘密，要保留后续升级与反转空间；
-- 若是系统流/科技流，每卷引入一个新的“工具/规则应用方式”，形成能力或玩法上的升级感。
-
-请根据以上要求输出完整的卷结构大纲。{genre_module.get('outline_rhythm_guide', '')}"""
+        
+        # 🆕 使用模块化提示词生成结构设计 prompt
+        rhythm_guide = genre_module.get('outline_rhythm_guide', '') or get_genre_rhythm_guide(current_genre)
+        structure_prompt = StructureDesignPrompts.get_structure_prompt(
+            concept=concept[:500] if concept else '无',
+            world_setting=world_setting[:300] if world_setting else '无',
+            characters=characters[:300] if characters else '无',
+            genre_rhythm_guide=rhythm_guide
+        )
         
         structure_context = {
             "concept": concept,
@@ -1642,42 +1606,15 @@ class CreativeDirectorCoordinator:
         target = self.target_chapter_count or 1
         
         logger.info(f"✍️ 内容创作师正在生成第1章草稿（目标{target}章）...")
-        content_prompt = f"""请根据提供的情节大纲、世界观设定和人物设定，创作精彩的第1章内容。
-
-【结构大纲】
-{plot_outline[:500] if plot_outline else '无'}
-
-【故事概念】
-{concept[:300] if concept else '无'}
-
-【世界观设定】
-{world_setting[:200] if world_setting else '无'}
-
-【主要人物】
-{characters[:200] if characters else '无'}
-
-【创作要求】
-1. **语言风格**：语言生动，描写细腻，符合网文风格
-2. **对话要求**：对话自然，符合人物性格
-3. **情节节奏**：情节紧凑，引人入胜，注意爭点节奏
-4. **场景描写**：场景描写要有画面感
-5. **段落分隔**：注意段落分隔，便于阅读
-6. **开篇建立**：第一章要快速建立世界观和主角形象
-7. **多种手法**：使用场景描写、对话、心理描写等多种手法
-
-【质量标准】
-- ✅ 人物性格和行为符合设定
-- ✅ 遵循已建立的世界观规则
-- ✅ 注重细节的合理性和真实感
-- ✅ 开头要有吸引力，结尾要有悬念
-
-【禁止事项】
-❌ 禁止使用：用"XXX醒来/睁开眼睛/阳光照进房间"开头
-❌ 禁止使用：总结式内心独白 + 对未来的展望（如"他知道，从这一刻起..."）
-
-【目标字数】约2000-3000字
-
-请开始创作第1章内容，直接输出章节正文，不要包含任何额外的说明文字。"""
+        
+        # 🆕 使用模块化提示词生成第1章创作 prompt
+        content_prompt = FirstChapterPrompts.get_first_chapter_prompt(
+            plot_outline=plot_outline[:500] if plot_outline else '无',
+            concept=concept[:300] if concept else '无',
+            world_setting=world_setting[:200] if world_setting else '无',
+            characters=characters[:200] if characters else '无',
+            target_words=2500
+        )
         
         content_context = {
             "plot_outline": plot_outline,
