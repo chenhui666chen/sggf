@@ -4740,6 +4740,7 @@ async def execute_expand_outline_task(
         
         # 🌟 处理史诗框架：添加特殊标记
         outline_content = result["expanded_outline"]
+        
         if expansion_mode == "epic_framework":
             # 添加 YAML 头部标记（中文字段）
             outline_content = f"""---
@@ -4751,6 +4752,48 @@ async def execute_expand_outline_task(
 
 {result["expanded_outline"]}"""
             logger.info(f"   🌟 史诗框架已添加元数据标记")
+        
+        elif expansion_mode == "volume_detail":
+            # 📖 单卷详细模式：合并到原有框架
+            logger.info(f"   🔄 单卷详细模式：将第{target_volume_index}卷合并到原有框架")
+            
+            # 读取原有大纲（应该是史诗框架）
+            original_outline_query = text("""
+                SELECT plot_outline FROM project_settings WHERE project_id = :project_id
+            """)
+            original_result = db.execute(original_outline_query, {"project_id": project_id}).fetchone()
+            original_outline = original_result[0] if original_result and original_result[0] else ""
+            
+            if not original_outline:
+                # 如果没有原有框架，直接使用单卷内容（降级处理）
+                logger.warning("   ⚠️  未找到原有史诗框架，直接保存单卷内容")
+                outline_content = result["expanded_outline"]
+            else:
+                # 🔧 合并逻辑：保留框架 + 更新单卷
+                import re
+                
+                # 提取 YAML 头部
+                yaml_match = re.match(r'^---\n(.*?)\n---\n', original_outline, re.DOTALL)
+                yaml_header = yaml_match.group(0) if yaml_match else ""
+                framework_body = original_outline[len(yaml_header):] if yaml_match else original_outline
+                
+                # 尝试匹配单卷占位符（如：“第X卷：xxx” 到 “第X+1卷” 或文末）
+                volume_pattern = rf'第{target_volume_index}卷[^：]*：.*?(?=第{target_volume_index + 1}卷|$)'
+                
+                if re.search(volume_pattern, framework_body, re.DOTALL):
+                    # 找到占位符，替换为详细内容
+                    updated_body = re.sub(
+                        volume_pattern,
+                        f"第{target_volume_index}卷：详细大纲\n{'='*70}\n{result['expanded_outline']}\n",
+                        framework_body,
+                        flags=re.DOTALL
+                    )
+                    outline_content = yaml_header + updated_body
+                    logger.info(f"   ✅ 已将第{target_volume_index}卷详细内容合并到框架")
+                else:
+                    # 未找到占位符，追加到末尾
+                    outline_content = f"{original_outline}\n\n{'='*70}\n第{target_volume_index}卷：详细大纲\n{'='*70}\n{result['expanded_outline']}"
+                    logger.info(f"   📌 已将第{target_volume_index}卷追加到框架末尾")
         
         update_query = text("""
             UPDATE project_settings

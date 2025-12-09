@@ -171,7 +171,20 @@ export default function ExpansionConfigDialog({
             />
 
             <Alert severity="info" sx={{ mt: 2 }}>
-              💡 快速规划模式：直接设定目标章节数，AI 将自动生成对应的大纲结构
+              <Box>
+                <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                  💡 快速规划模式
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block', mb: 0.3 }}>
+                  ✅ 适合：短中篇小说（10-200章）、快速验证创意
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block', mb: 0.3 }}>
+                  ⚡ 优势：一键生成完整大纲，无需复杂配置，2分钟内完成
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
+                  📌 推荐用于：都市、言情、悬疑等常规体量作品
+                </Typography>
+              </Box>
             </Alert>
           </Box>
         )}
@@ -201,7 +214,20 @@ export default function ExpansionConfigDialog({
             />
 
             <Alert severity="info" sx={{ mt: 2 }}>
-              💡 精细控制模式：每次扩展少量章节，适合迭代优化和精细打磨
+              <Box>
+                <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                  💡 精细控制模式
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block', mb: 0.3 }}>
+                  ✅ 适合：追求极致质量、边写边规划的创作者
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block', mb: 0.3 }}>
+                  ⚡ 优势：每次扩展5-30章，可随时调整方向，降低试错成本
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
+                  📌 推荐用于：剧情复杂、多线并进、需反复打磨的作品
+                </Typography>
+              </Box>
             </Alert>
           </Box>
         )}
@@ -368,6 +394,24 @@ export default function ExpansionConfigDialog({
 
             {/* 题材适配提示 */}
             {getGenreTip()}
+            
+            {/* 🆕 史诗框架模式统一说明 */}
+            <Alert severity="info" sx={{ mt: 2 }}>
+              <Box>
+                <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                  💡 史诗框架模式
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block', mb: 0.3 }}>
+                  ✅ 适合：超长篇网文（400章+）、修仙/玄幻/都市等按卷创作
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block', mb: 0.3 }}>
+                  ⚡ 优势：分卷规划层次清晰，支持分阶段扩展，避免一次性生成过多内容
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
+                  📌 推荐用于：修仙（境界体系）、都市（事业发展）、玄幻（多卷史诗）
+                </Typography>
+              </Box>
+            </Alert>
           </Box>
         )}
       </DialogContent>
