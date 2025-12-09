@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import {
   Container,
@@ -19,15 +19,15 @@ import {
   Alert,
   CircularProgress,
   Tooltip,
-  Fab,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
   FormHelperText,
+  Drawer,
+  IconButton,
 } from '@mui/material'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
-import PauseIcon from '@mui/icons-material/Pause'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import SaveIcon from '@mui/icons-material/Save'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
@@ -39,6 +39,8 @@ import PublicIcon from '@mui/icons-material/Public'
 import PeopleIcon from '@mui/icons-material/People'
 import NavigateNextIcon from '@mui/icons-material/NavigateNext'
 import AddIcon from '@mui/icons-material/Add'
+import MenuIcon from '@mui/icons-material/Menu'
+import CloseIcon from '@mui/icons-material/Close'
 import Chip from '@mui/material/Chip'
 import Badge from '@mui/material/Badge'
 import Snackbar from '@mui/material/Snackbar'
@@ -86,6 +88,7 @@ const stageNames = {
 export default function WorkflowControlPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const dispatch = useDispatch<AppDispatch>()
   const workflow = useSelector((state: RootState) => state.workflow)
   // 🎯 任务3：获取当前项目信息
@@ -128,6 +131,21 @@ export default function WorkflowControlPage() {
       console.log(`💾 已保存项目ID: ${projectId}`)
     }
   }, [projectId])
+
+  // 🆕 检查 autoStart 参数，自动打开开始创作对话框
+  useEffect(() => {
+    const autoStart = searchParams.get('autoStart')
+    if (autoStart === 'true' && projectId) {
+      console.log('🚀 检测到 autoStart 参数，自动打开开始创作对话框')
+      // 移除 autoStart 参数，避免刷新时重复触发
+      searchParams.delete('autoStart')
+      setSearchParams(searchParams, { replace: true })
+      // 延迟打开对话框，确保页面已加载
+      setTimeout(() => {
+        setOpenDialog(true)
+      }, 300)
+    }
+  }, [projectId, searchParams, setSearchParams])
 
   // 🆕 保护机制：已有内容警告对话框
   const [showContentWarningDialog, setShowContentWarningDialog] = useState(false)
@@ -183,6 +201,9 @@ export default function WorkflowControlPage() {
   const [autoInferFeedback, setAutoInferFeedback] = useState(true)
   const [decisionReady, setDecisionReady] = useState(false)
   const [showDecisionDialog, setShowDecisionDialog] = useState(false)
+  
+  // 🆕 左侧抽屉展开/收起状态
+  const [leftDrawerOpen, setLeftDrawerOpen] = useState(false)
 
   const [snackbarOpen, setSnackbarOpen] = useState(false)
   const [snackbarMessage, setSnackbarMessage] = useState('')
@@ -2668,56 +2689,103 @@ export default function WorkflowControlPage() {
 
   return (
     <Container maxWidth="lg" sx={{ py: 2 }}>
-      {/* 左侧顶部区域：返回按钮 + 标题 + 项目信息 */}
-      <Box sx={{ maxWidth: { xs: '100%', md: 'calc(33.33% - 8px)' }, mb: 3 }}>
+      {/* 顶部区域：返回按钮 + 标题居中 */}
+      <Box sx={{ 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'space-between',
+        mb: 2,
+        py: 1,
+      }}>
         {/* 返回按钮 */}
-        <Box sx={{ mb: 3, py: 1 }}>
-          <Button
-            startIcon={<ArrowBackIcon />}
-            onClick={() => {
-              // 🔥 返回时清除保存的项目ID
-              localStorage.removeItem('lastWorkflowProjectId')
-              navigate('/dashboard')
-            }}
-            variant="outlined"
-            size="medium"
-            sx={{ py: 1, px: 2 }}
-          >
-            返回仪表板
-          </Button>
-        </Box>
+        <Button
+          startIcon={<ArrowBackIcon />}
+          onClick={() => {
+            localStorage.removeItem('lastWorkflowProjectId')
+            navigate('/dashboard')
+          }}
+          variant="outlined"
+          size="small"
+          sx={{ py: 0.5, px: 1.5, fontSize: '0.8rem' }}
+        >
+          返回
+        </Button>
 
-        {/* 主标题 */}
-        <Box sx={{ mb: 3, py: 1 }}>
-          <Typography variant="h5" sx={{ fontWeight: 600, lineHeight: 1.4 }}>
-            🚀 多Agent小说创作工作流程
+        {/* 主标题 - 居中显示 */}
+        <Box sx={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: 1,
+          position: 'absolute',
+          left: '50%',
+          transform: 'translateX(-50%)',
+        }}>
+          <Typography 
+            component="span" 
+            sx={{ 
+              fontSize: '1.8rem',
+              animation: 'float 3s ease-in-out infinite',
+              '@keyframes float': {
+                '0%, 100%': { transform: 'translateY(0)' },
+                '50%': { transform: 'translateY(-4px)' },
+              },
+            }}
+          >
+            ⛵
+          </Typography>
+          <Typography 
+            variant="h5" 
+            sx={{ 
+              fontWeight: 700,
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%)',
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              fontStyle: 'italic',
+              letterSpacing: '2px',
+              textShadow: '2px 2px 4px rgba(0,0,0,0.1)',
+              animation: 'shimmer 3s ease-in-out infinite',
+              '@keyframes shimmer': {
+                '0%': { backgroundPosition: '0% 50%' },
+                '50%': { backgroundPosition: '100% 50%' },
+                '100%': { backgroundPosition: '0% 50%' },
+              },
+              backgroundSize: '200% 200%',
+            }}
+          >
+            灵感方舟
           </Typography>
         </Box>
 
-        {/* 项目信息 */}
-        {(currentProject || workflow.projectId) && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', py: 1 }}>
-            <Typography variant="body1" color="text.secondary">
-              当前项目:
-            </Typography>
-            {currentProject && (
-              <Chip
-                label={`📝 ${currentProject.title}`}
-                color="primary"
-                variant="outlined"
-                sx={{ fontSize: '0.85rem', height: '32px' }}
-              />
-            )}
-            {workflow.projectId && (
-              <Chip
-                label={`ID: ${workflow.projectId}`}
-                variant="outlined"
-                sx={{ height: '32px' }}
-              />
-            )}
-          </Box>
-        )}
+        {/* 右侧占位，保持平衡 */}
+        <Box sx={{ width: 60 }} />
       </Box>
+
+      {/* 项目信息 */}
+      {(currentProject || workflow.projectId) && (
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1.5, flexWrap: 'wrap', mb: 2 }}>
+          <Typography variant="body2" color="text.secondary">
+            当前项目:
+          </Typography>
+          {currentProject && (
+            <Chip
+              label={`📝 ${currentProject.title}`}
+              color="primary"
+              variant="outlined"
+              size="small"
+              sx={{ fontSize: '0.8rem', height: '28px' }}
+            />
+          )}
+          {workflow.projectId && (
+            <Chip
+              label={`ID: ${workflow.projectId}`}
+              variant="outlined"
+              size="small"
+              sx={{ height: '28px' }}
+            />
+          )}
+        </Box>
+      )}
 
       {/* 错误提示 */}
       {workflow.error && (
@@ -2786,10 +2854,46 @@ export default function WorkflowControlPage() {
       )}
 
       {/* 主内容区域 */}
-      <Grid container spacing={2}>
-        {/* 左侧：总进度 + 阶段信息 + Agent状态 */}
-        <Grid item xs={12} md={4}>
-          {/* 总进度条 - 与右侧 Stepper 对齐 */}
+      <Box sx={{ position: 'relative' }}>
+        {/* 左侧抽屉切换按钮 */}
+        <Tooltip title={leftDrawerOpen ? "收起侧边栏" : "展开侧边栏"} placement="right">
+          <IconButton
+            onClick={() => setLeftDrawerOpen(!leftDrawerOpen)}
+            sx={{
+              position: 'fixed',
+              left: leftDrawerOpen ? 340 : 16,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              zIndex: 1201,
+              backgroundColor: 'primary.main',
+              color: 'white',
+              boxShadow: 2,
+              transition: 'left 0.3s ease',
+              '&:hover': {
+                backgroundColor: 'primary.dark',
+              },
+            }}
+          >
+            {leftDrawerOpen ? <CloseIcon /> : <MenuIcon />}
+          </IconButton>
+        </Tooltip>
+
+        {/* 左侧抽屉 */}
+        <Drawer
+          variant="persistent"
+          anchor="left"
+          open={leftDrawerOpen}
+          sx={{
+            '& .MuiDrawer-paper': {
+              width: 340,
+              boxSizing: 'border-box',
+              top: 64,
+              height: 'calc(100% - 64px)',
+              p: 2,
+            },
+          }}
+        >
+          {/* 总进度条 */}
           <Card sx={{ mb: 1.5 }}>
             <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.75 }}>
@@ -2811,7 +2915,7 @@ export default function WorkflowControlPage() {
           {/* 阶段信息面板（工作步骤说明） */}
           <StageInfoPanel stage={workflow.currentStage} />
 
-          {/* Agent状态 - 与右侧输出预览底部对齐 */}
+          {/* Agent状态 */}
           <Card sx={{ mb: 0, flex: 1 }}>
             <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>
               <Typography variant="subtitle2" sx={{ mb: 1, fontSize: '0.85rem', fontWeight: 600 }}>
@@ -2822,51 +2926,15 @@ export default function WorkflowControlPage() {
               ))}
             </CardContent>
           </Card>
+        </Drawer>
 
-          {/* 开始/暂停操作按钮（Fab样式） */}
-          <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-            {!isRunning ? (
-              <Tooltip title="开始创作" placement="right">
-                <Fab
-                  color="primary"
-                  onClick={handleStartButtonClick}
-                  sx={{
-                    width: 56,
-                    height: 56,
-                    boxShadow: 3,
-                    '&:hover': {
-                      boxShadow: 6,
-                    },
-                  }}
-                >
-                  <PlayArrowIcon />
-                </Fab>
-              </Tooltip>
-            ) : (
-              <Tooltip title="暂停" placement="right">
-                <Fab
-                  color="error"
-                  onClick={() => setIsRunning(false)}
-                  sx={{
-                    width: 56,
-                    height: 56,
-                    boxShadow: 3,
-                    '&:hover': {
-                      boxShadow: 6,
-                    },
-                  }}
-                >
-                  <PauseIcon />
-                </Fab>
-              </Tooltip>
-            )}
-          </Box>
-
-          {/* 🔧 记忆管理面板已隐藏，后台自动保存逻辑保留 */}
-        </Grid>
-
-        {/* 右侧：阶段导航 + 输出预览区域（向上移动与返回按钮顶部对齐） */}
-        <Grid item xs={12} md={8} sx={{ mt: { xs: 0, md: -22 } }}>
+        {/* 右侧：阶段导航 + 输出预览区域 */}
+        <Box
+          sx={{
+            ml: leftDrawerOpen ? '340px' : 0,
+            transition: 'margin-left 0.3s ease',
+          }}
+        >
           {/* 阶段导航 - 与左侧总进度对齐 */}
           <Paper sx={{ py: 2.5, px: 3, mb: 2 }}>
             <Stepper
@@ -3079,8 +3147,8 @@ export default function WorkflowControlPage() {
           </Box>
 
           {/* 概念开发阶段决策条（已移除，使用 Dialog 替代） */}
-        </Grid>
-      </Grid>
+        </Box>
+      </Box>
 
       {/* 🆕 已有内容警告对话框 */}
       <Dialog
@@ -3737,4 +3805,5 @@ export default function WorkflowControlPage() {
     </Container>
   )
 }
+
 

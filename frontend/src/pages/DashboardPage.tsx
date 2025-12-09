@@ -376,8 +376,8 @@ export default function DashboardPage() {
         logger.log('🔍 [DEBUG] 项目创建成功，ID:', newProjectId)
         logger.log('🔍 [DEBUG] 准备跳转到 /workflow/' + newProjectId)
 
-        // 直接跳转到工作流程页面
-        navigate(`/workflow/${newProjectId}`)
+        // 直接跳转到工作流程页面，带上 autoStart 参数自动打开开始创作对话框
+        navigate(`/workflow/${newProjectId}?autoStart=true`)
 
         logger.log('🔍 [DEBUG] 跳转完成')
       } else {
