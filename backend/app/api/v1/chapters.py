@@ -490,6 +490,26 @@ async def update_chapter(
             import traceback
             logger.debug(traceback.format_exc())
 
+    # 🆕 内容进化器：收集编辑量反馈（用户保存时统计修改比例）
+    if content_updated and old_content and chapter_data.content:
+        try:
+            from app.services.content_evolution import get_engine
+            import logging
+            
+            logger = logging.getLogger("uvicorn.error")
+            evolution_engine = get_engine()
+            edit_ratio = await evolution_engine.on_chapter_save(
+                chapter_id=chapter.id,
+                original_content=old_content,
+                final_content=chapter_data.content,
+            )
+            if edit_ratio is not None:
+                logger.debug(f"   📊 内容进化器：编辑比例 {edit_ratio:.2%}")
+        except Exception as evo_err:
+            import logging
+            logger = logging.getLogger("uvicorn.error")
+            logger.debug(f"   ⚠️ 内容进化器反馈收集失败（不影响主流程）: {evo_err}")
+
     # 🎉 Phase 6: 触发体系自动检测（异步后台执行，不阻塞）
     if content_updated and chapter_data.content:
         try:
@@ -704,6 +724,20 @@ async def delete_chapter(
         logger.warning(f"⚠️ 删除章节时清理向量库失败: {e}")
         import traceback
         logger.debug(traceback.format_exc())
+    
+    # 🆕 内容进化器：收集保留率反馈（章节被删除 = 不满意）
+    try:
+        from app.services.content_evolution import get_engine
+        import logging
+        
+        logger = logging.getLogger("uvicorn.error")
+        evolution_engine = get_engine()
+        await evolution_engine.on_chapter_delete(chapter_id=chapter.id)
+        logger.debug(f"   📊 内容进化器：已记录删除反馈")
+    except Exception as evo_err:
+        import logging
+        logger = logging.getLogger("uvicorn.error")
+        logger.debug(f"   ⚠️ 内容进化器反馈收集失败（不影响主流程）: {evo_err}")
     
     # 删除章节（评审数据会自动级联删除）
     db.delete(chapter)

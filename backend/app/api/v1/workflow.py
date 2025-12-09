@@ -4312,6 +4312,26 @@ async def execute_generate_next_chapter_task(
 
         logger.info(f"   ✅ 章节已保存: id={new_chapter_id}")
         
+        # 🆕 内容进化器：记录生成数据（5%采样 + 隐式反馈收集）
+        try:
+            from app.services.content_evolution import get_engine, GenerationStage
+            
+            evolution_engine = get_engine()
+            await evolution_engine.on_generation_complete(
+                project_id=project_id,
+                chapter_id=new_chapter_id,
+                genre=plan_project_genre or "通用",
+                stage=GenerationStage.CONTENT,
+                module_name="chapter_content",
+                version_id="default",  # 暂用默认版本，后续可扩展为变体检测
+                is_variant=False,
+                content=final_version,
+                ai_score=None,  # AI评分在评审阶段已完成
+            )
+            logger.info(f"   📊 内容进化器：已记录生成数据")
+        except Exception as evo_err:
+            logger.debug(f"   ⚠️ 内容进化器记录失败（不影响主流程）: {evo_err}")
+        
         # 🚨 已移除正则快速提取，统一使用后台AI提取服务
         # 见: start_chapter_post_save_task -> chapter_post_save.py -> unified_extraction.py
         # 所有设定提取现在都经过AI处理，生成高质量描述
