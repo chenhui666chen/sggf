@@ -413,8 +413,12 @@ export default function KnowledgeBasePage() {
           setExpandOutlineResult(data.result)
           setShowExpandOutlineDialog(true)
           
-          // 刷新数据
-          loadWorkflowData()
+          // 🔄 刷新数据（立即加载最新大纲）
+          console.log('🔄 开始刷新工作流数据...')
+          loadWorkflowData().then(() => {
+            console.log('✅ 工作流数据刷新完成')
+            console.log('📝 当前 plotOutline 长度:', plotOutline.length)
+          })
           
           // 清除扩展状态
           setExpandingOutline(false)
