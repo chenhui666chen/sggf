@@ -194,8 +194,7 @@ class TencentAIDetectService:
         }
         
         try:
-            # 🆕 缩短超时时间至8秒，与asyncio.wait_for的10秒超时匹配
-            async with httpx.AsyncClient(timeout=8.0) as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
                     f"https://{self.endpoint}",
                     headers=headers,

@@ -142,7 +142,13 @@ export default function AITracePage() {
     setOutputText('')
     setReducedResult(null)
     try {
-      const response = await apiClient.client.post('/api/v1/ai-trace/reduce', { text: inputText, intensity })
+      // 🔧 为AI痕迹降低单独设置更长的超时时间（5分钟）
+      // 因为涉及3次API调用：原始检测 + LLM改写 + 改写后检测
+      const response = await apiClient.client.post(
+        '/api/v1/ai-trace/reduce', 
+        { text: inputText, intensity },
+        { timeout: 300000 }  // 300秒 = 5分钟
+      )
       if (response.data.success) {
         setOutputText(response.data.reduced_text)
         setReducedResult({
