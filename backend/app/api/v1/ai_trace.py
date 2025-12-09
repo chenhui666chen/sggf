@@ -66,43 +66,54 @@ async def reduce_ai_trace(
     logger.info(f"开始降低AI痕迹，文本长度: {len(text)} 字符, 强度: {request.intensity}")
     
     try:
-        # 1. 先检测原始文本的AI分数
-        original_result = await tencent_ai_detect_service.detect_ai_content(text[:5000])
-        original_score = original_result.get("ai_score", 50) if original_result.get("success") else 50
+        import asyncio
         
-        # 2. 使用提示词进化引擎的改写能力
-        evaluator = PromptEvaluator()
-        meta_optimizer = MetaOptimizer()
-        storage = EvolutionStorage()
+        # 🆕 设置总超时时间为90秒（避免前端120秒超时）
+        async def process_with_timeout():
+            # 1. 先检测原始文本的AI分数（超时10秒）
+            try:
+                original_result = await asyncio.wait_for(
+                    tencent_ai_detect_service.detect_ai_content(text[:5000]),
+                    timeout=10.0
+                )
+                original_score = original_result.get("ai_score", 50) if original_result.get("success") else 50
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ 原始文本检测超时，使用默认分数50")
+                original_score = 50
+            
+            # 2. 使用提示词进化引擎的改写能力
+            evaluator = PromptEvaluator()
+            meta_optimizer = MetaOptimizer()
+            storage = EvolutionStorage()
 
-        # 获取优化后的最佳提示词（优先级：已批准 > 历史最佳 > 初始提示词）
-        def get_optimized_prompt() -> str:
-            # 1. 优先使用已批准的提示词
-            approved = storage.get_latest_approved_prompt()
-            if approved and approved.get("prompt_text"):
-                logger.info(f"✨ 使用已批准的提示词 (得分: {approved.get('avg_ai_score', '?')})")
-                return approved["prompt_text"]
+            # 获取优化后的最佳提示词（优先级：已批准 > 历史最佳 > 初始提示词）
+            def get_optimized_prompt() -> str:
+                # 1. 优先使用已批准的提示词
+                approved = storage.get_latest_approved_prompt()
+                if approved and approved.get("prompt_text"):
+                    logger.info(f"✨ 使用已批准的提示词 (得分: {approved.get('avg_ai_score', '?')})")
+                    return approved["prompt_text"]
 
-            # 2. 其次使用历史最佳提示词
-            best_prompts = storage.load_best_prompts()
-            if best_prompts:
-                # 选择得分最低（效果最好）的
-                best = min(best_prompts, key=lambda p: p.avg_ai_score)
-                if best.avg_ai_score < 80:  # 只有足够好的才使用
-                    logger.info(f"✨ 使用历史最佳提示词 (得分: {best.avg_ai_score:.1f})")
-                    return best.prompt_text
+                # 2. 其次使用历史最佳提示词
+                best_prompts = storage.load_best_prompts()
+                if best_prompts:
+                    # 选择得分最低（效果最好）的
+                    best = min(best_prompts, key=lambda p: p.avg_ai_score)
+                    if best.avg_ai_score < 80:  # 只有足够好的才使用
+                        logger.info(f"✨ 使用历史最佳提示词 (得分: {best.avg_ai_score:.1f})")
+                        return best.prompt_text
 
-            # 3. 回退到初始提示词
-            logger.info("📝 使用初始提示词（无优化版本可用）")
-            return meta_optimizer.get_initial_prompt()
+                # 3. 回退到初始提示词
+                logger.info("📝 使用初始提示词（无优化版本可用）")
+                return meta_optimizer.get_initial_prompt()
 
-        # 根据强度选择不同的提示词
-        optimized_prompt = get_optimized_prompt()
+            # 根据强度选择不同的提示词
+            optimized_prompt = get_optimized_prompt()
 
-        intensity_prompts = {
-            "light": "请对以下文本进行轻微润色，保持原意的同时略微调整表达方式，使其更加自然流畅。",
-            "medium": optimized_prompt,  # 🆕 使用优化后的提示词
-            "strong": f"""{optimized_prompt}
+            intensity_prompts = {
+                "light": "请对以下文本进行轻微润色，保持原意的同时略微调整表达方式，使其更加自然流畅。",
+                "medium": optimized_prompt,  # 🆕 使用优化后的提示词
+                "strong": f"""{optimized_prompt}
 
 【深度改写附加要求】
 1. 彻底重构句式，避免AI常见的对称结构
@@ -113,30 +124,52 @@ async def reduce_ai_trace(
 6. 保持原文的核心意思，但用完全不同的方式表达
 
 改写后的文本应该读起来像是一位有经验的人类作者写的。"""
-        }
+            }
 
-        prompt = intensity_prompts.get(request.intensity, intensity_prompts["medium"])
+            prompt = intensity_prompts.get(request.intensity, intensity_prompts["medium"])
+            
+            # 调用改写（超时60秒）
+            reduced_text = await asyncio.wait_for(
+                evaluator._rewrite_text(prompt, text, temperature=0.8),
+                timeout=60.0
+            )
+            
+            # 3. 检测改写后的AI分数（超时10秒）
+            try:
+                new_result = await asyncio.wait_for(
+                    tencent_ai_detect_service.detect_ai_content(reduced_text[:5000]),
+                    timeout=10.0
+                )
+                new_score = new_result.get("ai_score", original_score) if new_result.get("success") else original_score
+                label = new_result.get("label", "Unknown")
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ 改写后文本检测超时，返回改写结果但不更新分数")
+                new_score = original_score
+                label = "Unknown"
+            
+            improvement = original_score - new_score
+            
+            logger.info(f"AI痕迹降低完成: {original_score} -> {new_score} (降低 {improvement} 分)")
+            
+            return ReduceResponse(
+                success=True,
+                reduced_text=reduced_text,
+                original_ai_score=original_score,
+                new_ai_score=new_score,
+                label=label,
+                improvement=improvement
+            )
         
-        # 调用改写
-        reduced_text = await evaluator._rewrite_text(prompt, text, temperature=0.8)
+        # 🆕 整体超时控制：90秒
+        result = await asyncio.wait_for(process_with_timeout(), timeout=90.0)
+        return result
         
-        # 3. 检测改写后的AI分数
-        new_result = await tencent_ai_detect_service.detect_ai_content(reduced_text[:5000])
-        new_score = new_result.get("ai_score", original_score) if new_result.get("success") else original_score
-        
-        improvement = original_score - new_score
-        
-        logger.info(f"AI痕迹降低完成: {original_score} -> {new_score} (降低 {improvement} 分)")
-        
+    except asyncio.TimeoutError:
+        logger.error("❌ 处理总超时（90秒）")
         return ReduceResponse(
-            success=True,
-            reduced_text=reduced_text,
-            original_ai_score=original_score,
-            new_ai_score=new_score,
-            label=new_result.get("label", "Unknown"),
-            improvement=improvement
+            success=False,
+            error="处理超时，请尝试减少文本长度或稍后重试"
         )
-        
     except Exception as e:
         logger.error(f"降低AI痕迹失败: {str(e)}")
         return ReduceResponse(
