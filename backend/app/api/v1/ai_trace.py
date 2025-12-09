@@ -27,6 +27,7 @@ class ReduceRequest(BaseModel):
     """降低AI浓度请求"""
     text: str
     intensity: Optional[str] = "medium"  # light, medium, strong
+    original_ai_score: Optional[int] = None  # 🆕 如果前端已检测过，可传入原始分数，跳过重复检测
 
 
 class ReduceResponse(BaseModel):
@@ -68,11 +69,17 @@ async def reduce_ai_trace(
     start_time = time.time()
     
     try:
-        # 1. 先检测原始文本的AI分数
-        step1_start = time.time()
-        original_result = await tencent_ai_detect_service.detect_ai_content(text[:5000])
-        original_score = original_result.get("ai_score", 50) if original_result.get("success") else 50
-        logger.info(f"  ✅ 步骤1-原始检测完成，耗时: {time.time() - step1_start:.2f}秒, 分数: {original_score}")
+        # 1. 检测原始文本的AI分数（🆕 优化：如果前端已传入分数，跳过此步）
+        if request.original_ai_score is not None:
+            # 前端已检测过，直接使用
+            original_score = request.original_ai_score
+            logger.info(f"  ✅ 步骤1-使用前端已检测分数: {original_score}（跳过重复检测）")
+        else:
+            # 前端未检测，调用检测API
+            step1_start = time.time()
+            original_result = await tencent_ai_detect_service.detect_ai_content(text[:5000])
+            original_score = original_result.get("ai_score", 50) if original_result.get("success") else 50
+            logger.info(f"  ✅ 步骤1-原始检测完成，耗时: {time.time() - step1_start:.2f}秒, 分数: {original_score}")
         
         # 2. 使用提示词进化引擎的改写能力
         evaluator = PromptEvaluator()

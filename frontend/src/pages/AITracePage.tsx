@@ -142,11 +142,21 @@ export default function AITracePage() {
     setOutputText('')
     setReducedResult(null)
     try {
-      // 🔧 为AI痕迹降低单独设置更长的超时时间（5分钟）
-      // 因为涉及3次API调用：原始检测 + LLM改写 + 改写后检测
+      // 🔧 优化：如果用户已手动检测过，传递已有分数，跳过重复检测
+      // 这样只需1次API调用（改写后检测），而非2次
+      const requestData: {
+        text: string
+        intensity: string
+        original_ai_score?: number
+      } = { text: inputText, intensity }
+      
+      if (detectResult?.score !== undefined) {
+        requestData.original_ai_score = detectResult.score
+      }
+      
       const response = await apiClient.client.post(
         '/api/v1/ai-trace/reduce', 
-        { text: inputText, intensity },
+        requestData,
         { timeout: 300000 }  // 300秒 = 5分钟
       )
       if (response.data.success) {
@@ -155,6 +165,14 @@ export default function AITracePage() {
           score: response.data.new_ai_score,
           label: response.data.label,
         })
+        // 🆕 如果后端返回了原始分数（用户未手动检测时），更新detectResult
+        if (!detectResult && response.data.original_ai_score !== undefined) {
+          setDetectResult({
+            score: response.data.original_ai_score,
+            label: 'Unknown',
+            suggestion: 'Pass',
+          })
+        }
       } else {
         setError(response.data.error || '降低AI浓度失败')
       }
@@ -164,7 +182,7 @@ export default function AITracePage() {
     } finally {
       setReducing(false)
     }
-  }, [inputText, intensity])
+  }, [inputText, intensity, detectResult])
 
   // 复制结果
   const handleCopy = useCallback(async () => {
