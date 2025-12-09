@@ -274,6 +274,11 @@ export default function KnowledgeBasePage() {
   const [expandingCharacters, setExpandingCharacters] = useState(false)
   const [targetCharacterCount, setTargetCharacterCount] = useState<number>(0)
   
+  // 🆕 人物扩展按钮状态：idle | loading | resultReady
+  const [characterExpandState, setCharacterExpandState] = useState<'idle' | 'loading' | 'resultReady'>('idle')
+  // 🆕 控制图标高亮动效的key（每次有新结果时+1触发动画）
+  const [characterButtonHighlightKey, setCharacterButtonHighlightKey] = useState(0)
+  
   // 🔢 计算当前已有人物数
   const getCurrentCharacterCount = (): number => {
     if (!characters) return 0
@@ -354,6 +359,19 @@ export default function KnowledgeBasePage() {
         console.log('🔄 恢复人物扩展状态：进行中')
       }
     }
+    
+    // 🆕 恢复人物扩展结果状态（如果有未查看的结果）
+    const characterResultKey = `character_expand_result_${projectId}`
+    const characterStateKey = `character_expand_state_${projectId}`
+    
+    const savedCharacterState = localStorage.getItem(characterStateKey)
+    const savedCharacterResult = localStorage.getItem(characterResultKey)
+    
+    if (savedCharacterState === 'resultReady' && savedCharacterResult) {
+      setCharacterExpandState('resultReady')
+      setExpandCharactersResult(JSON.parse(savedCharacterResult))
+      console.log('🔄 恢复人物扩展状态：有未查看结果')
+    }
   }, [projectId])
 
   // 🆕 WebSocket 监听后台任务（使用统一的WebSocket服务）
@@ -407,19 +425,28 @@ export default function KnowledgeBasePage() {
         // 人物扩展完成
         if (taskId.startsWith('expand-characters')) {
           console.log('✅ 人物扩展任务完成', data)
-          showSnackbar(data.message || '✅ 人物扩展完成！', 'success')
+          showSnackbar(data.message || '✅ 人物扩展完成！可点击「查看结果」查看AI建议', 'success')
           
-          // 🆕 显示结果弹窗（不再使用通用结果弹窗）
-          setExpandCharactersResult(data.result)
-          setShowExpandCharactersDialog(true)
+          // 🆕 存储结果到 localStorage + state
+          const resultData = data.result || {}
+          setExpandCharactersResult(resultData)
+          localStorage.setItem(`character_expand_result_${projectId}`, JSON.stringify(resultData))
+          
+          // 🆕 切换按钮状态为 resultReady
+          setCharacterExpandState('resultReady')
+          localStorage.setItem(`character_expand_state_${projectId}`, 'resultReady')
+          
+          // 🆕 触发一次动效
+          setCharacterButtonHighlightKey(prev => prev + 1)
           
           // 刷新数据
           loadWorkflowData()
           
-          // 清除扩展状态
+          // 清除扩展中状态
           setExpandingCharacters(false)
           // 🆕 清除localStorage状态
           localStorage.removeItem(`expanding_characters_${projectId}`)
+          localStorage.removeItem(`expanding_characters_start_${projectId}`)
         }
       })
 
@@ -1516,7 +1543,13 @@ export default function KnowledgeBasePage() {
                           sx={{ width: 150 }}
                         />
                         <Tooltip
-                          title={expandingCharacters ? "扩展进行中，请稍候" : "根据当前的世界观、人物和大纲设定，智能扩展更多人物"}
+                          title={
+                            expandingCharacters 
+                              ? "扩展进行中，请稍候" 
+                              : characterExpandState === 'resultReady'
+                              ? "查看AI生成的人物扩展结果与建议"
+                              : "根据当前的世界观、人物和大纲设定，智能扩展更多人物"
+                          }
                           placement="top"
                           arrow
                         >
@@ -1524,12 +1557,57 @@ export default function KnowledgeBasePage() {
                             <Button
                               variant="outlined"
                               color="primary"
-                              startIcon={expandingCharacters ? <CircularProgress size={20} /> : <PeopleAltIcon />}
-                              onClick={handleExpandCharacters}
-                              disabled={!characters || !worldSetting || !plotOutline || expandingCharacters || expandingOutline}
-                              sx={{ borderRadius: 2 }}
+                              startIcon={
+                                expandingCharacters 
+                                  ? <CircularProgress size={20} /> 
+                                  : characterExpandState === 'resultReady'
+                                  ? <Box sx={{ position: 'relative', display: 'inline-flex' }}>
+                                      <PeopleAltIcon />
+                                      <Box
+                                        sx={{
+                                          position: 'absolute',
+                                          top: -4,
+                                          right: -4,
+                                          width: 8,
+                                          height: 8,
+                                          borderRadius: '50%',
+                                          bgcolor: '#ff5252',
+                                          border: '2px solid white',
+                                        }}
+                                      />
+                                    </Box>
+                                  : <PeopleAltIcon />
+                              }
+                              onClick={() => {
+                                if (characterExpandState === 'resultReady') {
+                                  // 🆕 查看结果模式：直接打开结果弹窗
+                                  setShowExpandCharactersDialog(true)
+                                } else {
+                                  // 🆕 正常模式：执行扩展逻辑
+                                  handleExpandCharacters()
+                                }
+                              }}
+                              disabled={expandingCharacters || expandingOutline || (characterExpandState === 'idle' && (!characters || !worldSetting || !plotOutline))}
+                              sx={{ 
+                                borderRadius: 2,
+                                // 🆕 动效：只在状态变为 resultReady 时触发一次
+                                animation: characterExpandState === 'resultReady' && characterButtonHighlightKey > 0
+                                  ? 'characterButtonPulse 0.8s ease-in-out'
+                                  : 'none',
+                                '@keyframes characterButtonPulse': {
+                                  '0%': { transform: 'scale(1)' },
+                                  '30%': { transform: 'scale(1.05)' },
+                                  '60%': { transform: 'scale(0.98)' },
+                                  '100%': { transform: 'scale(1)' },
+                                },
+                              }}
                             >
-                              {expandingCharacters ? '扩展中...' : '扩展人物'}
+                              {expandingCharacters 
+                                ? '扩展中...' 
+                                : characterExpandState === 'resultReady'
+                                ? '🔍 查看结果'
+                                : '扩展人物'
+                              }
                             </Button>
                           </span>
                         </Tooltip>
@@ -2558,7 +2636,14 @@ export default function KnowledgeBasePage() {
       {/* 🆕 扩展人物结果弹窗 */}
       <Dialog 
         open={showExpandCharactersDialog} 
-        onClose={() => setShowExpandCharactersDialog(false)}
+        onClose={() => {
+          setShowExpandCharactersDialog(false)
+          // 🆕 关闭弹窗后，恢复按钮状态为 idle
+          setCharacterExpandState('idle')
+          localStorage.setItem(`character_expand_state_${projectId}`, 'idle')
+          // 🆕 保留结果内容以便查看历史（可选）
+          // localStorage.removeItem(`character_expand_result_${projectId}`)
+        }}
         maxWidth="md" 
         fullWidth
       >
@@ -2662,7 +2747,31 @@ export default function KnowledgeBasePage() {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShowExpandCharactersDialog(false)} variant="contained">
+          {/* 🆕 如果AI建议继续扩展，显示“继续扩展人物”按钮 */}
+          {expandCharactersResult?.ai_suggestion?.should_continue && (
+            <Button 
+              onClick={() => {
+                setShowExpandCharactersDialog(false)
+                // 恢复按钮状态
+                setCharacterExpandState('idle')
+                localStorage.setItem(`character_expand_state_${projectId}`, 'idle')
+                // 继续扩展：再次触发扩展逻辑
+                handleExpandCharacters()
+              }} 
+              variant="outlined"
+              color="primary"
+            >
+              👥 继续扩展人物
+            </Button>
+          )}
+          <Button 
+            onClick={() => {
+              setShowExpandCharactersDialog(false)
+              setCharacterExpandState('idle')
+              localStorage.setItem(`character_expand_state_${projectId}`, 'idle')
+            }} 
+            variant="contained"
+          >
             关闭
           </Button>
         </DialogActions>
