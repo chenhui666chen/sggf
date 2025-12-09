@@ -260,6 +260,229 @@ class ContextOptimizer:
         
         return '\n\n'.join(summary_parts) if summary_parts else text[:target_length] + "..."
     
+    def extract_relevant_outline(
+        self,
+        full_outline: str,
+        target_chapter: int,
+        context_range: int = 2
+    ) -> str:
+        """智能提取当前章节相关的大纲内容
+        
+        从完整大纲中提取：
+        1. 故事概述（必保留）
+        2. 当前卷概述（如果有卷结构）
+        3. 当前章节 + 前后N章的详细细纲
+        4. 涉及当前章节的伏笔信息
+        5. 本卷活跃的人物生命周期
+        
+        Args:
+            full_outline: 完整大纲
+            target_chapter: 目标章节号
+            context_range: 上下文范围（前后各几章）
+            
+        Returns:
+            提取后的精准大纲内容
+        """
+        if not full_outline or not full_outline.strip():
+            return full_outline
+        
+        original_length = len(full_outline)
+        print(f"\n🎯 【智能大纲提取】目标章节: 第{target_chapter}章, 原始长度: {original_length}字符")
+        
+        result_parts = []
+        
+        # 1️⃣ 提取故事概述（必保留）
+        story_overview = self._extract_story_overview(full_outline)
+        if story_overview:
+            result_parts.append(story_overview)
+            print(f"   ✅ 提取故事概述: {len(story_overview)}字符")
+        
+        # 2️⃣ 提取当前卷概述（如果有卷结构）
+        volume_info = self._extract_current_volume_info(full_outline, target_chapter)
+        if volume_info:
+            result_parts.append(volume_info)
+            print(f"   ✅ 提取当前卷信息: {len(volume_info)}字符")
+        
+        # 3️⃣ 提取当前章节 + 前后N章的细纲（核心）
+        chapters_outline = self._extract_chapters_range(
+            full_outline, 
+            target_chapter, 
+            context_range
+        )
+        if chapters_outline:
+            result_parts.append(chapters_outline)
+            print(f"   ✅ 提取章节细纲(第{max(1, target_chapter-context_range)}-{target_chapter+context_range}章): {len(chapters_outline)}字符")
+        
+        # 4️⃣ 提取涉及当前章节的伏笔信息
+        foreshadowing = self._extract_relevant_foreshadowing(full_outline, target_chapter)
+        if foreshadowing:
+            result_parts.append(foreshadowing)
+            print(f"   ✅ 提取相关伏笔: {len(foreshadowing)}字符")
+        
+        # 5️⃣ 提取本卷活跃的人物生命周期
+        character_lifecycle = self._extract_active_characters(full_outline, target_chapter)
+        if character_lifecycle:
+            result_parts.append(character_lifecycle)
+            print(f"   ✅ 提取人物生命周期: {len(character_lifecycle)}字符")
+        
+        # 合并结果
+        if result_parts:
+            extracted = "\n\n".join(result_parts)
+            extracted_length = len(extracted)
+            savings = original_length - extracted_length
+            savings_pct = (savings / original_length * 100) if original_length > 0 else 0
+            print(f"   💾 提取后长度: {extracted_length}字符, 节省: {savings}字符 ({savings_pct:.1f}%)")
+            return extracted
+        
+        # 如果无法提取，返回原始大纲（稍后会被压缩）
+        print(f"   ⚠️  无法识别大纲结构，返回原始内容")
+        return full_outline
+    
+    def _extract_story_overview(self, outline: str) -> str:
+        """提取故事概述部分"""
+        patterns = [
+            r'(##\s*一、故事概述.*?)(?=##\s*[二2]|---|【第|$)',
+            r'(##\s*故事概述.*?)(?=##|---|【第|$)',
+            r'(#\s*概述.*?)(?=##|#|---|【|$)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, outline, re.DOTALL | re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        
+        return ""
+    
+    def _extract_current_volume_info(self, outline: str, target_chapter: int) -> str:
+        """提取当前章节所属卷的概述信息"""
+        estimated_volume = (target_chapter - 1) // 25 + 1
+        
+        patterns = [
+            rf'(【第{estimated_volume}卷】.*?)(?=【第{estimated_volume + 1}卷】|####\s*第\d+章|##\s*[三四五六]|---\s*##|$)',
+            rf'(###\s*【第{estimated_volume}卷】.*?)(?=###\s*【第|####\s*第\d+章|##\s*[三四五六]|$)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, outline, re.DOTALL)
+            if match:
+                volume_content = match.group(1).strip()
+                chapter_start = re.search(r'####?\s*第\d+章', volume_content)
+                if chapter_start:
+                    return volume_content[:chapter_start.start()].strip()
+                return volume_content[:1500]
+        
+        return ""
+    
+    def _extract_chapters_range(self, outline: str, target_chapter: int, context_range: int) -> str:
+        """提取目标章节及前后N章的细纲"""
+        start_chapter = max(1, target_chapter - context_range)
+        end_chapter = target_chapter + context_range
+        
+        extracted_chapters = []
+        
+        for ch_num in range(start_chapter, end_chapter + 1):
+            chapter_content = self._extract_single_chapter(outline, ch_num)
+            if chapter_content:
+                if ch_num == target_chapter:
+                    extracted_chapters.append(f"🎯【当前创作章节】\n{chapter_content}")
+                else:
+                    extracted_chapters.append(chapter_content)
+        
+        if extracted_chapters:
+            return "## 章节细纲\n\n" + "\n\n".join(extracted_chapters)
+        
+        return ""
+    
+    def _extract_single_chapter(self, outline: str, chapter_num: int) -> str:
+        """提取单个章节的细纲"""
+        patterns = [
+            rf'(####\s*第{chapter_num}章[：:][^\n]*.*?)(?=####\s*第{chapter_num + 1}章|####\s*第\d+章|###\s*【|##\s*[三四五六]|---\s*##|$)',
+            rf'(第{chapter_num}章[：:][^\n]*.*?)(?=第{chapter_num + 1}章[：:]|第\d+章[：:]|###\s*【|##\s*[三四五六]|---\s*##|$)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, outline, re.DOTALL)
+            if match:
+                content = match.group(1).strip()
+                if len(content) > 800:
+                    content = content[:800] + "..."
+                return content
+        
+        return ""
+    
+    def _extract_relevant_foreshadowing(self, outline: str, target_chapter: int) -> str:
+        """提取与当前章节相关的伏笔信息"""
+        estimated_volume = (target_chapter - 1) // 25 + 1
+        
+        foreshadowing_patterns = [
+            r'(##\s*[四4][.、]?\s*关键伏笔布局.*?)(?=##\s*[五六5-9]|---\s*##|$)',
+            r'(##\s*伏笔.*?布局.*?)(?=##|---\s*##|$)',
+            r'(伏笔埋设检查.*?)(?=##|$)',
+        ]
+        
+        for pattern in foreshadowing_patterns:
+            match = re.search(pattern, outline, re.DOTALL | re.IGNORECASE)
+            if match:
+                full_foreshadowing = match.group(1).strip()
+                
+                relevant_lines = []
+                lines = full_foreshadowing.split('\n')
+                
+                for line in lines:
+                    if line.strip().startswith('#') or line.strip().startswith('|'):
+                        if '伏笔' in line or '---' in line or '埋设' in line or '揭秘' in line:
+                            relevant_lines.append(line)
+                    
+                    volume_match = re.search(rf'第?({estimated_volume}|第{estimated_volume}卷)', line)
+                    chapter_match = re.search(rf'第({target_chapter-5}|{target_chapter-4}|{target_chapter-3}|{target_chapter-2}|{target_chapter-1}|{target_chapter}|{target_chapter+1}|{target_chapter+2}|{target_chapter+3})章', line)
+                    
+                    if volume_match or chapter_match:
+                        relevant_lines.append(line)
+                
+                if relevant_lines:
+                    return "## 相关伏笔（本章附近）\n" + '\n'.join(relevant_lines)
+        
+        return ""
+    
+    def _extract_active_characters(self, outline: str, target_chapter: int) -> str:
+        """提取本卷活跃的人物生命周期信息"""
+        estimated_volume = (target_chapter - 1) // 25 + 1
+        
+        lifecycle_patterns = [
+            r'(##\s*[五六5-6][.、]?\s*核心人物生命周期.*?)(?=##|---\s*##|$)',
+            r'(##\s*人物.*?周期.*?)(?=##|---\s*##|$)',
+            r'(人物出场统计.*?)(?=##|$)',
+        ]
+        
+        for pattern in lifecycle_patterns:
+            match = re.search(pattern, outline, re.DOTALL | re.IGNORECASE)
+            if match:
+                full_lifecycle = match.group(1).strip()
+                
+                relevant_lines = []
+                lines = full_lifecycle.split('\n')
+                
+                for line in lines:
+                    if line.strip().startswith('#') or '---' in line or '角色' in line or '登场' in line:
+                        relevant_lines.append(line)
+                        continue
+                    
+                    range_match = re.search(r'(\d+)[-~]+(\d+)卷', line)
+                    if range_match:
+                        start_vol = int(range_match.group(1))
+                        end_vol = int(range_match.group(2))
+                        if start_vol <= estimated_volume <= end_vol:
+                            relevant_lines.append(line)
+                            continue
+                    
+                    if f'第{estimated_volume}卷' in line or f'{estimated_volume}卷' in line:
+                        relevant_lines.append(line)
+                
+                if relevant_lines:
+                    return "## 本卷活跃人物\n" + '\n'.join(relevant_lines)
+        
+        return ""
+    
     def optimize_context(self, context_parts: Dict[str, str]) -> Tuple[Dict[str, str], Dict[str, Any]]:
         """优化整体上下文，确保不超过token限制
         
@@ -413,7 +636,13 @@ class ContextOptimizer:
         context_parts = {}
         
         if plot_outline:
-            context_parts['plot_outline'] = plot_outline
+            # 🆕 智能提取当前章节相关的大纲内容
+            extracted_outline = self.extract_relevant_outline(
+                full_outline=plot_outline,
+                target_chapter=self.current_chapter,
+                context_range=2  # 前后各2章
+            )
+            context_parts['plot_outline'] = extracted_outline
         if world_setting:
             context_parts['world_setting'] = world_setting
         if characters:

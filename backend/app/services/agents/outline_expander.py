@@ -1061,6 +1061,10 @@ Please analyze：
 
             target_count = current_character_count + increment
 
+            # 🆕 获取题材专属人物字段
+            character_extra_fields = self.genre_module.get('character_extra_fields', '')
+            genre_specific_hint = f"\n\n🎯 【题材专属细化】（以下为人物设定的补充字段，请结合使用）\n{character_extra_fields}" if character_extra_fields else ""
+
             # 🔥 修改：先执行扩展，再判断是否继续
             # 第一步：执行扩展
             expansion_prompt = f"""基于当前人物，扩展到{target_count}个角色。
@@ -1164,7 +1168,7 @@ Please直接按阵营分类输出，格式如下（每个人物必须包含完�
 3. 使用【姓名】格式，方便识别和统计
 4. 每个阵营的角色按重要性排序
 5. 人物之间使用 --- 分隔线
-6. 确保所有{target_count}个角色都包含在内"""
+6. 确保所有{target_count}个角色都包含在内{genre_specific_hint}"""
 
             print(f"【第一步】扩展角色（{current_character_count + 1}-{target_count}个）...")
             try:
@@ -1526,6 +1530,13 @@ Please分析：
         print(f"📖 【单卷详细扩展】第{target_volume_index}卷，{chapters_range[0]}-{chapters_range[1]}章")
         print(f"{'='*70}\n")
         
+        # 🆕 获取题材专属的章节细纲模板
+        chapter_template = self.genre_module.get('chapter_detail_template', '')
+        template_example = chapter_template.format(
+            chapter_num=1,
+            chapter_title="章节标题"
+        ) if chapter_template else ""
+        
         detail_prompt = f"""基于已有的史诗框架，详细扩展第{target_volume_index}卷。
 
 【史诗框架】
@@ -1540,12 +1551,33 @@ Please分析：
 【扩展要求】
 生成{chapters_range[0]}-{chapters_range[1]}章的详细大纲
 
-每章必须包含：
-- 主要内容（50-100字）
-- 关键事件
-- 涉及人物
-- 爆点设计
-- 结尾钩子
+🔥 【章节细纲模板】每章必须严格按以下格式：
+{template_example if template_example else '''第{chapter_num}章：《{chapter_title}》
+
+【核心目标】本章在故事中的作用
+
+【进度变化】章节开始 → 章节结束的关键变化
+
+【情节分镜】（3-5个场景，标注字数占比）
+1. 开场(10%)：场景描述
+2. 发展(30%)：场景描述
+3. 小高潮(25%)：场景描述
+4. 延伸(20%)：场景描述
+5. 收尾(15%)：场景描述
+
+【关键对话】（1-2段核心对话大意）
+
+【情绪曲线】情绪走势
+
+【伏笔设计】埋设/回收的伏笔
+
+【爽点/高潮设计】
+类型、强度⭐~⭐⭐⭐⭐、实现方式
+
+【结尾钩子】具体内容
+
+【涉及人物与发展】主要人物及本章变化
+'''}
 
 ⚠️ 必须检查：
 1. 是否符合史诗框架中本卷的定位
@@ -1559,18 +1591,11 @@ Please输出完整的、重新整合后的网文大纲（🔥重点：每章必�
 
 ## 二、第{target_volume_index}卷详细规划
 
-第1章：《章节标题》
-- 主要内容：...
-- 关键事件：...
-- 涉及人物：...
-- 爆点设计：⭐⭐ [类型] 描述
-- 结尾钩子：[类型] 钩子内容
-
-(继续每章...)
+(按上述模板格式输出每一章...)
 
 ## 三、伏笔埋设检查
 ✅ 第X章：埋设主角身份伏笔（符合史诗框架）
-✅ 第Y章：提及“天道”异常（为第Z卷铺垫）"""
+✅ 第Y章：提及"天道"异常（为第Z卷铺垫）"""
 
         print("【第一步】详细扩展第{target_volume_index}卷...")
         volume_content = self.plot_architect.process(detail_prompt, {})

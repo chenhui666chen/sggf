@@ -1397,9 +1397,9 @@ export default function DashboardPage() {
         }}
       >
         <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="h6">📚 章节列表</Typography>
+          {/* 左侧：标题 + 排序按钮紧邻 */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            {/* 🆕 合并排序按钮：单个图标，根据排序状态改变箭头方向 */}
+            <Typography variant="h6">📚 章节列表</Typography>
             <Tooltip title={chapterSortOrder === 'asc' ? '当前：正序，点击倒序' : '当前：倒序，点击正序'} placement="top">
               <IconButton
                 size="small"
@@ -1408,23 +1408,42 @@ export default function DashboardPage() {
                   handleChapterSortOrderChange(newOrder)
                 }}
                 sx={{
-                  border: '1px solid',
-                  borderColor: 'divider',
-                  borderRadius: 1,
+                  p: 0.5,
+                  color: 'primary.main',
                   '&:hover': {
-                    backgroundColor: 'action.hover',
+                    backgroundColor: 'primary.50',
                   },
                 }}
               >
-                {chapterSortOrder === 'asc' ? (
-                  <ArrowUpwardIcon fontSize="small" />
-                ) : (
-                  <ArrowDownwardIcon fontSize="small" />
-                )}
+                {/* 自定义排序图标：递增/递减线条 + 箭头 */}
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  {chapterSortOrder === 'asc' ? (
+                    // 正序：短到长 + 向上箭头
+                    <>
+                      <rect x="3" y="18" width="18" height="2" rx="1" />
+                      <rect x="3" y="13" width="14" height="2" rx="1" />
+                      <rect x="3" y="8" width="10" height="2" rx="1" />
+                      <rect x="3" y="3" width="6" height="2" rx="1" />
+                      <path d="M20 3 L20 11 M17 6 L20 3 L23 6" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                    </>
+                  ) : (
+                    // 倒序：长到短 + 向下箭头
+                    <>
+                      <rect x="3" y="3" width="18" height="2" rx="1" />
+                      <rect x="3" y="8" width="14" height="2" rx="1" />
+                      <rect x="3" y="13" width="10" height="2" rx="1" />
+                      <rect x="3" y="18" width="6" height="2" rx="1" />
+                      <path d="M20 21 L20 13 M17 18 L20 21 L23 18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                    </>
+                  )}
+                </svg>
               </IconButton>
             </Tooltip>
-            
-            {/* 🆕 一键导出全文按钮（移到顶部） */}
+          </Box>
+          
+          {/* 右侧：导出 + 关闭 */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {/* 一键导出全文按钮 */}
             {chapters.length > 0 && (
               <Tooltip title="一键导出全文" placement="top">
                 <IconButton

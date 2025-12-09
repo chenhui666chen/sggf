@@ -3270,24 +3270,33 @@ async def execute_generate_next_chapter_task(
                 is_complete=False
             )
 
-        # 🆕 根据章节编号判断爽点节奏（复刻 generate_chapter_plan 的逻辑）
-        is_climax_chapter = next_chapter_number % 5 == 0  # 每5章一个小高潮
-        is_major_climax = next_chapter_number % 25 == 0   # 每25章一个大高潮
-
-        climax_instruction = ""
-        if is_major_climax:
-            climax_instruction = f"""
-⚠️ 【卷末大高潮章节】第{next_chapter_number}章是本卷结尾，需要：
-- 设计一个让读者拍案叫绝的大爽点
-- 本卷主要矛盾要有阶段性解决
-- 为下一卷埋下新的悬念"""
-        elif is_climax_chapter:
-            climax_instruction = f"""
-⚠️ 【小高潮章节】第{next_chapter_number}章需要设计一个明确的爽点：
-- 可以是：打脸嘲讽者/突破升级/获得宝物/反转翻盘/装逼成功"""
+        # 🆕 获取高潮章节指示（使用模块化函数）
+        climax_instruction = get_climax_instruction(next_chapter_number)
 
         # 🆕 第一步：为章节规划优化上下文
         from app.services.agents.context_optimizer import get_context_optimizer
+        from app.services.agents.agent_coordinator import GENRE_PROMPT_MODULES, DEFAULT_GENRE_MODULE
+        from app.services.prompts.stages.chapter_planning import (
+            ChapterPlanningPrompts, 
+            get_genre_chapter_plan_guide,
+            get_climax_instruction
+        )
+        
+        # 🆕 获取项目题材
+        plan_project_genre = ""
+        try:
+            plan_genre_query = text("SELECT genre FROM projects WHERE id = :project_id")
+            plan_genre_result = db.execute(plan_genre_query, {"project_id": project_id}).fetchone()
+            if plan_genre_result:
+                plan_project_genre = plan_genre_result[0] or ""
+            logger.info(f"   🎯 项目题材: {plan_project_genre or '通用'}")
+        except Exception as e:
+            logger.warning(f"   ⚠️ 获取项目题材失败: {e}")
+        
+        # 🆕 获取题材专属章节规划指导
+        plan_genre_module = GENRE_PROMPT_MODULES.get(plan_project_genre, DEFAULT_GENRE_MODULE)
+        chapter_plan_guide = plan_genre_module.get('chapter_plan_guide', '')
+        
         context_optimizer = get_context_optimizer(
             current_chapter=next_chapter_number,
             stage='chapter_planning'
@@ -3318,9 +3327,8 @@ async def execute_generate_next_chapter_task(
             extra={"step": "chapter_plan", "chapter_number": next_chapter_number}
         )
 
-        # 🆕 构建章节规划提示词（网文化版本）
-        plan_system_prompt = """你是一位资深网络小说情节规划师，精通爽点设计和读者心理。
-你的任务是为章节制定详细的创作计划，确保情节吸引人、节奏紧凑、爽点分明。"""
+        # 🆕 构建章节规划提示词（使用模块化系统）
+        plan_system_prompt = ChapterPlanningPrompts.get_system_prompt(plan_project_genre)
 
         plan_user_prompt = f"""请为第{next_chapter_number}章制定创作计划。
 
@@ -3374,7 +3382,10 @@ async def execute_generate_next_chapter_task(
 - 确保与整本书的情节大纲保持一致
 - 确保与前面章节的剧情连贯
 - 推进故事发展，不能原地踏步
-- 爽点和钩子必须具体、可执行"""
+- 爽点和钩子必须具体、可执行
+{f"""
+【题材专属细化】（以下为通用规划要求的具体落地方式，请结合使用）
+{chapter_plan_guide}""" if chapter_plan_guide else ''}"""
 
         # 🆕 使用真流式 LLM 调用（智能选择模型）
         try:
@@ -3553,47 +3564,14 @@ async def execute_generate_next_chapter_task(
         logger.info(f"   📝 第{next_chapter_number}章 - 开头: {selected_opening[0]}, 结尾: {selected_ending[0]} [{match_method}]")
         logger.info(f"   💬 构建内容创作提示词...")
 
-        # 🆕 上下文优化：避免Token超限
+        # 🆕 上下文优化：获取智能模型选择
         from app.services.agents.context_optimizer import get_context_optimizer
         context_optimizer = get_context_optimizer(
             current_chapter=next_chapter_number,
             stage='content_creation'
         )
         
-        # 🆕 获取前序章节分析（已优化的 2章全文+8章摘要）
-        from app.services.agents.chapter_summarizer import create_chapter_summarizer
-        try:
-            summarizer = create_chapter_summarizer(db_session=db)
-            # 使用 previous_chapters_payload 构造分析
-            if previous_chapters_payload:
-                # 使用 agent_coordinator 的分析方法
-                previous_chapters_analysis = "\n".join([
-                    f"第{ch['chapter_number']}章《{ch.get('title', '')}》: {ch.get('summary', ch.get('content', '')[:200])}..."
-                    for ch in previous_chapters_payload
-                ])
-            else:
-                previous_chapters_analysis = "这是第一章，之前没有章节。"
-        except Exception as e:
-            logger.warning(f"   ⚠️ 生成前序章节分析失败: {e}")
-            previous_chapters_analysis = ""
-
-        # 🆕 优化所有上下文内容
-        optimized_context, optimization_stats = context_optimizer.optimize_for_chapter_generation(
-            plot_outline=plot_outline or "",
-            world_setting=world_setting or "",
-            characters=characters or "",
-            previous_chapters_analysis=previous_chapters_analysis,
-            chapter_plan=chapter_plan,
-            previous_ending=previous_ending or "",
-        )
-        
-        # 📊 输出优化统计
-        logger.info(f"   💾 Token优化统计:")
-        logger.info(f"      - 原始: {optimization_stats['original_tokens']} tokens")
-        logger.info(f"      - 优化后: {optimization_stats['optimized_tokens']} tokens")
-        logger.info(f"      - 节省: {optimization_stats['savings']} tokens ({optimization_stats['savings_percentage']:.1f}%)")
-        
-        # 🆕 获取优化器选择的模型
+        # 🆕 获取优化器选择的模型（不再需要 optimize_for_chapter_generation，因为章节规划已消化上下文）
         selected_content_model = context_optimizer.selected_model
         logger.info(f"   🤖 内容创作使用模型: {selected_content_model}")
         # 🆕 广播步骤2模型
@@ -3625,24 +3603,38 @@ async def execute_generate_next_chapter_task(
             rag_character_context = ""
             rag_world_context = ""
 
-        # 🆕 构建内容创作提示词（增强版）
+        # 🆕 构建内容创作提示词（精简版 - 章节规划已消化大部分上下文）
         from app.services.agents.chapter_prompt_builder import ChapterPromptBuilder
-        builder = ChapterPromptBuilder(genre=project.genre if project and getattr(project, "genre", None) else "")
+        
+        # 获取项目题材
+        project_genre = ""
+        try:
+            genre_query = text("SELECT genre FROM projects WHERE id = :project_id")
+            genre_result = db.execute(genre_query, {"project_id": project_id}).fetchone()
+            if genre_result:
+                project_genre = genre_result[0] or ""
+        except Exception as e:
+            logger.warning(f"   ⚠️ 获取项目题材失败: {e}")
+        
+        builder = ChapterPromptBuilder(genre=project_genre)
         content_system_prompt = builder.build_system_prompt()
         content_user_prompt = builder.build_user_prompt(
             next_chapter_number=next_chapter_number,
-            optimized_context=optimized_context,
             chapter_plan=chapter_plan,
-            plot_outline=plot_outline,
-            world_setting=world_setting,
-            characters=characters,
             previous_ending=previous_ending or "",
-            previous_chapters_analysis=previous_chapters_analysis,
             rag_character_context=rag_character_context,
             rag_world_context=rag_world_context,
             selected_opening=selected_opening,
             selected_ending=selected_ending,
         )
+        
+        # 📊 输出精简版 prompt 统计
+        logger.info(f"   📉 Prompt优化（精简版）：")
+        logger.info(f"      - 章节规划: {len(chapter_plan)} 字")
+        logger.info(f"      - 前一章结尾: {len(previous_ending or '')} 字")
+        logger.info(f"      - RAG人物: {len(rag_character_context)} 字")
+        logger.info(f"      - RAG设定: {len(rag_world_context)} 字")
+        logger.info(f"      - 总共: {len(content_user_prompt)} 字（移除冗余情节大纲/世界观/人物/前序章节）")
 
         # 🆕 使用真流式 LLM 调用（智能选择模型）
         logger.info(f"   🚀 开始调用流式 LLM 服务生成章节内容...")
