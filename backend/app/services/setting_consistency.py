@@ -140,11 +140,12 @@ class SettingConsistencyService:
         
         # 检测角色功法与境界要求的冲突
         for char in characters:
-            char_realm = char.realm or ""
+            # 使用正确的字段：current_realm 是关系对象
+            char_realm = char.current_realm.name if char.current_realm else ""
             
             # 解析角色掌握的功法（从character_techniques或描述中）
             # 这里简化处理，实际可扩展
-            char_desc = char.description or ""
+            char_desc = char.profile or char.summary or ""
             
             for tech in techniques:
                 tech_content = tech.content or ""

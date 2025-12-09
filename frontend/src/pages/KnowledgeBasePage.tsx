@@ -257,9 +257,9 @@ export default function KnowledgeBasePage() {
   
   // 📖 单卷详细模式状态
   const [savedFramework, setSavedFramework] = useState<string>('')  // 保存的史诗框架
-  const [targetVolumeIndex] = useState<number>(1)  // 扩展第几卷
-  const [volumeChaptersMin] = useState<number>(50)  // 本卷章节最小值
-  const [volumeChaptersMax] = useState<number>(80)  // 本卷章节最大值
+  const [targetVolumeIndex, setTargetVolumeIndex] = useState<number>(0)  // 扩展第几卷（0表示未选择）
+  const [volumeChaptersMin, setVolumeChaptersMin] = useState<number>(50)  // 本卷章节最小值
+  const [volumeChaptersMax, setVolumeChaptersMax] = useState<number>(80)  // 本卷章节最大值
   const [loadingFramework, setLoadingFramework] = useState<boolean>(false)  // 🆕 加载框架状态
   const [frameworkMetadata, setFrameworkMetadata] = useState<any>(null)  // 🆕 框架元数据
   
@@ -1049,17 +1049,32 @@ export default function KnowledgeBasePage() {
       
       if (expansionMode === 'epic_framework') {
         // 🌟 史诗框架模式:验证卷数和章节范围
-        if (!totalVolumes || totalVolumes < 10 || totalVolumes > 50) {
-          showSnackbar('请输入有效的总卷数 (10-50)', 'error')
+        if (!totalVolumes || totalVolumes < 5 || totalVolumes > 50) {
+          showSnackbar('请输入有效的总卷数 (5-50)', 'error')
           setExpandingOutline(false)
           return
         }
-        if (!totalChaptersMin || !totalChaptersMax || totalChaptersMin < 500 || totalChaptersMax > 5000 || totalChaptersMin > totalChaptersMax) {
-          showSnackbar('请输入有效的总章节范围 (500-5000)', 'error')
+        if (!totalChaptersMin || !totalChaptersMax || totalChaptersMin < 400 || totalChaptersMax > 5000 || totalChaptersMin > totalChaptersMax) {
+          showSnackbar('请输入有效的总章节范围 (400-5000)', 'error')
           setExpandingOutline(false)
           return
         }
         console.log(`🌟 史诗框架模式: ${totalVolumes}卷, ${totalChaptersMin}-${totalChaptersMax}章`)
+        
+        // 🆕 如果选择了具体卷编号，验证单卷参数
+        if (!autoExpandAllVolumes && targetVolumeIndex > 0) {
+          if (targetVolumeIndex > (frameworkMetadata?.metadata?.total_volumes || totalVolumes)) {
+            showSnackbar(`卷编号超出范围 (1-${frameworkMetadata?.metadata?.total_volumes || totalVolumes})`, 'error')
+            setExpandingOutline(false)
+            return
+          }
+          if (!volumeChaptersMin || !volumeChaptersMax || volumeChaptersMin < 30 || volumeChaptersMax > 150 || volumeChaptersMin > volumeChaptersMax) {
+            showSnackbar('请输入有效的本卷章节范围 (30-150)', 'error')
+            setExpandingOutline(false)
+            return
+          }
+          console.log(`📖 将扩展第${targetVolumeIndex}卷: ${volumeChaptersMin}-${volumeChaptersMax}章`)
+        }
       } else if (expansionMode === 'volume_detail') {
         // 📖 单卷详细模式:验证框架内容和卷编号
         if (!savedFramework || savedFramework.trim().length < 100) {
@@ -1118,6 +1133,15 @@ export default function KnowledgeBasePage() {
         return
       }
 
+      // 🆕 确定实际发送的扩展模式
+      let actualExpansionMode = expansionMode
+      
+      // 如果是史诗框架模式 + 手动选卷 + 选择了具体卷编号，切换到 volume_detail 模式
+      if (expansionMode === 'epic_framework' && !autoExpandAllVolumes && targetVolumeIndex > 0) {
+        actualExpansionMode = 'volume_detail'
+        console.log(`📖 自动切换到单卷详细模式: 第${targetVolumeIndex}卷`)
+      }
+
       // 🆕 启动后台任务（只调用一次，立即返回）
       const increment = 10
       const response = await fetch('/api/v1/workflow/expand-outline', {
@@ -1135,7 +1159,7 @@ export default function KnowledgeBasePage() {
           increment: increment,
           target_total_chapters: calculatedTargetChapters,  // 严格遵守目标数
           // 🔥 多模式参数
-          expansion_mode: expansionMode,
+          expansion_mode: actualExpansionMode,  // 🆕 使用实际模式
           target_volumes: targetVolumes,
           chapters_per_volume_min: chaptersPerVolumeMin,
           chapters_per_volume_max: chaptersPerVolumeMax,
@@ -2670,6 +2694,12 @@ export default function KnowledgeBasePage() {
         onTotalChaptersMinChange={setTotalChaptersMin}
         onTotalChaptersMaxChange={setTotalChaptersMax}
         onAutoExpandAllVolumesChange={setAutoExpandAllVolumes}
+        targetVolumeIndex={targetVolumeIndex}
+        volumeChaptersMin={volumeChaptersMin}
+        volumeChaptersMax={volumeChaptersMax}
+        onTargetVolumeIndexChange={setTargetVolumeIndex}
+        onVolumeChaptersMinChange={setVolumeChaptersMin}
+        onVolumeChaptersMaxChange={setVolumeChaptersMax}
         onConfirm={() => {
           setShowExpansionConfig(false)
           // 调用扩展函数
