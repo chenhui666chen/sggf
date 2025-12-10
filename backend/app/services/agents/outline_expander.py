@@ -8,6 +8,8 @@ from .knowledge_base import NovelKnowledgeBase
 from .memory_manager import NovelMemoryManager
 # 🎯 任务6：导入题材自适应模板系统
 from .agent_coordinator import GENRE_PROMPT_MODULES, DEFAULT_GENRE_MODULE, REALM_SPAN_WARNING_THRESHOLD, REALM_SPAN_RECOMMEND_SUBDIVISION
+# 🎆 引入分层摘要器
+from .layered_summarizer import LayeredSummarizer
 
 
 class OutlineExpander:
@@ -37,6 +39,9 @@ class OutlineExpander:
 
         # 🔔 为扩展大纲使用 qwen-long
         self.llm = create_deepseek_llm(task_type="outline_expand")
+        
+        # 🎆 初始化分层摘要器
+        self.layered_summarizer = LayeredSummarizer(self.knowledge_base)
         
         # 🎯 任务6.3：获取题材专属Prompt模块
         self.genre_module = GENRE_PROMPT_MODULES.get(genre, DEFAULT_GENRE_MODULE)
@@ -698,22 +703,65 @@ Please design人物关系网络， including：
         # 🎯 任务6.1：修仙题材境界跨度检查
         realm_suggestion = self.check_realm_span_and_suggest()
 
+        # 🎆 启用分层摘要策略 - 智能准备上下文
+        print(f"\n{'='*70}")
+        print(f"【分层摘要器】准备上下文")
+        print(f"{'='*70}\n")
+        
+        context_result = self.layered_summarizer.prepare_context_for_expansion(
+            outline=current_outline,
+            characters=characters,
+            worldview=world_setting,
+            scenario="outline_expand",
+            current_count=target_chapters,  # 使用目标章节数选择模型
+            focus_range=None  # 大纲扩展不需要聚焦特定范围
+        )
+        
+        # 🔥 使用智能选择的模型
+        selected_model = context_result["selected_model"]
+        optimized_context = context_result["context"]
+        stats = context_result["stats"]
+        
+        print(f"\n📊 上下文优化结果:")
+        print(f"   - 选择模型: {selected_model}")
+        print(f"   - 原始总长: {len(current_outline) + len(characters) + len(world_setting):,}字符")
+        print(f"   - 优化后: {len(optimized_context):,}字符 (压缩{(1-stats['compression_ratio'])*100:.1f}%)")
+        print(f"   - Token使用: {stats['total_tokens']:,} / {stats['target_tokens']:,} ({stats['total_tokens']/stats['target_tokens']*100:.1f}%)\n")
+        
+        # 🎆 更新LLM：使用智能选择的模型
+        if selected_model != "qwen-long":  # 如果不是qwen-long，需要创建新的LLM
+            from langchain_openai import ChatOpenAI
+            from .config import Config
+            import os
+            
+            if selected_model.startswith("qwen"):
+                api_key = os.getenv("DASHSCOPE_API_KEY", Config.DEEPSEEK_API_KEY)
+                api_base = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            else:
+                api_key = Config.DEEPSEEK_API_KEY
+                api_base = Config.DEEPSEEK_API_BASE
+            
+            dynamic_llm = ChatOpenAI(
+                model=selected_model,
+                temperature=0.7,
+                api_key=api_key,
+                base_url=api_base
+            )
+            print(f"🔄 动态创建 LLM: {selected_model}\n")
+        else:
+            dynamic_llm = self.llm  # 使用默认的qwen-long
+            print(f"✅ 使用默认 LLM: qwen-long\n")
+
         # 🔥 修改：先执行扩展，再判断是否继续
         # 🆕 计算卷数和每卷章节数（网文通常每卷20-30章）
         chapters_per_volume = 25  # 每卷约25章
         volume_count = max(2, (target_chapters + chapters_per_volume - 1) // chapters_per_volume)
 
         # 第一步：执行扩展（网文卷结构）
-        expansion_prompt = f"""基于当前大纲和人物设定，进行整体性扩展到{target_chapters}章。
+        # 🎆 使用优化后的上下文替换原始内容
+        expansion_prompt = f"""基于以下优化后的上下文，进行整体性扩展到{target_chapters}章。
 
-【当前大纲】
-{current_outline}
-
-【世界观设定】
-{world_setting}
-
-【完整人物设定】
-{characters}
+{optimized_context}
 
 【网文结构设计原则】
 ⚠️ 网络小说不同于传统文学，需要特别注意：
@@ -818,17 +866,17 @@ Please生成完整的{target_chapters}章规划（🔥重点：每章必须有�
 | ... | ... | ... | ... | ... |"""
 
         print(f"【第一步】整体性扩展章节（重新规划第1-{target_chapters}章）...")
-        print(f"   📌 参考完整人物设定（{len(characters)}字符）")
+        print(f"   📌 参考优化后的上下文（{len(optimized_context):,}字符）")
         print(f"   🔄 从{current_chapter_count}章整体扩展到{target_chapters}章")
-        print(f"   🤖 调用Agent: 大纲扩展器 (qwen-long)")
+        print(f"   🤖 调用模型: {selected_model}")
         
-        # 🔥 修复：直接使用 self.llm (qwen-long)，不通过 PlotArchitectAgent
+        # 🔥 使用动态选择的LLM
         from langchain_core.messages import HumanMessage, SystemMessage
         messages = [
             SystemMessage(content="你是一位杰出的情节架构师，精通网络小说结构设计与爽点节奏规划。"),
             HumanMessage(content=expansion_prompt)
         ]
-        response = self.llm.invoke(messages)
+        response = dynamic_llm.invoke(messages)
         expansion_content = response.content
         print("✅ 章节扩展完成\n")
 
@@ -927,14 +975,14 @@ Please输出完整的、重新整合后的网文大纲（🔥重点：每章必�
 
         print(f"【第二步】整体重构大纲（最佳格式：章节详情+总览表）...")
         print(f"   🔄 重新组织所有{target_chapters}章的内容")
-        print(f"   🤖 调用Agent: 大纲整合器 (qwen-long)")
+        print(f"   🤖 调用模型: {selected_model}")
         
-        # 🔥 修复：直接使用 self.llm (qwen-long)
+        # 🔥 使用动态选择的LLM
         messages = [
             SystemMessage(content="你是一位杰出的情节架构师，精通网络小说结构设计与卷结构整合。"),
             HumanMessage(content=integration_prompt)
         ]
-        response = self.llm.invoke(messages)
+        response = dynamic_llm.invoke(messages)
         integrated_outline = response.content
         print("✅ 大纲整体重构完成\n")
         # 🆕 长篇小说目标章节数（用于判断是否继续扩展）
@@ -944,7 +992,7 @@ Please输出完整的、重新整合后的网文大纲（🔥重点：每章必�
 
 
         # 🔥 第三步：AI判断是否需要继续扩展（简化提示词，只传递统计信息）
-        analysis_prompt = f"""你是一位资深小说策划师。Please分析以下大纲是否需要继续扩展。
+        analysis_prompt = f"""你是一位资深小说策划师。Please analyze以下大纲是否 needs继续扩展。
 
 【当前状态】
 - 当前已有章节数：{target_chapters}
@@ -970,14 +1018,14 @@ Please analyze：
 - 如果已有完整的故事结构，应该停止扩展"""
 
         print("【第三步】AI判断是否需要继续扩展...")
-        print(f"   🤖 调用Agent: 决策分析器")
+        print(f"   🤖 调用模型: {selected_model}")
         
-        # 🔥 修复：直接使用 self.llm
+        # 🔥 使用动态选择的LLM
         messages = [
             SystemMessage(content="你是一位资深小说策划师，擅长分析大纲完整性与判断是否需要继续扩展。"),
             HumanMessage(content=analysis_prompt)
         ]
-        response = self.llm.invoke(messages)
+        response = dynamic_llm.invoke(messages)
         analysis_result = response.content
 
         # 解析JSON结果
@@ -1039,41 +1087,71 @@ Please analyze：
             - should_continue: AI判断是否还需要继续扩展
             - continue_reason: 继续扩展的原因（如果需要）
         """
-        # 🔔 为人物扩展使用 DeepSeek R1
-        character_llm = create_deepseek_llm(task_type="character_expand")
+        # 🆕 智能识别当前人物数
+        if current_character_count == 0:
+            print("🔍 检测到 current_character_count=0，开始自动识别当前人物数...")
+            detected_count = self.count_characters_in_text(main_characters)
+            if detected_count > 0:
+                current_character_count = detected_count
+                print(f"🎯 识别成功！当前已有 {current_character_count} 个人物\n")
+            else:
+                print("🆕 未识别到人物，从 0 个开始扩展\n")
+
+        print(f"\n{'='*70}")
+        print(f"【渐进式人物扩展】从 {current_character_count} 个扩展到 {current_character_count + increment} 个")
+        print(f"{'='*70}\n")
+
+        target_count = current_character_count + increment
+
+        # 🎆 启用分层摘要策略 - 智能准备上下文
+        context_result = self.layered_summarizer.prepare_context_for_expansion(
+            outline=plot_outline,
+            characters=main_characters,
+            worldview=world_setting,
+            scenario="character_expand",
+            current_count=target_count,  # 使用目标人物数选择模型
+            focus_range=None  # 人物扩展不需要聚焦特定范围
+        )
+        
+        # 🔥 使用智能选择的模型
+        selected_model = context_result["selected_model"]
+        optimized_context = context_result["context"]
+        stats = context_result["stats"]
+        
+        # 打印优化结果日志
+        print(f"\n📊 上下文优化结果:")
+        print(f"   - 选择模型: {selected_model}")
+        print(f"   - 原始总长: {len(plot_outline) + len(main_characters) + len(world_setting):,}字符")
+        print(f"   - 优化后: {len(optimized_context):,}字符 (压缩{(1-stats['compression_ratio'])*100:.1f}%)")
+        print(f"   - Token使用: {stats['total_tokens']:,} / {stats['target_tokens']:,}\n")
+
+        # 🎆 更新LLM：使用智能选择的模型
+        if selected_model != "qwen-long":
+            from langchain_openai import ChatOpenAI
+            dynamic_llm = ChatOpenAI(
+                model=selected_model,
+                base_url=self.character_designer.llm.openai_api_base,
+                api_key=self.character_designer.llm.openai_api_key,
+                temperature=0.8,
+                max_tokens=4000
+            )
+        else:
+            dynamic_llm = self.character_designer.llm
+        
+        # 临时替换LLM
         original_llm = self.character_designer.llm
-        self.character_designer.llm = character_llm
+        self.character_designer.llm = dynamic_llm
         
         try:
-            # 🆕 智能识别当前人物数
-            if current_character_count == 0:
-                print("🔍 检测到 current_character_count=0，开始自动识别当前人物数...")
-                detected_count = self.count_characters_in_text(main_characters)
-                if detected_count > 0:
-                    current_character_count = detected_count
-                    print(f"🎯 识别成功！当前已有 {current_character_count} 个人物\n")
-                else:
-                    print("🆕 未识别到人物，从 0 个开始扩展\n")
-
-            print(f"\n{'='*70}")
-            print(f"【渐进式人物扩展】从 {current_character_count} 个扩展到 {current_character_count + increment} 个")
-            print(f"{'='*70}\n")
-
-            target_count = current_character_count + increment
-
             # 🆕 获取题材专属人物字段
             character_extra_fields = self.genre_module.get('character_extra_fields', '')
             genre_specific_hint = f"\n\n🎯 【题材专属细化】（以下为人物设定的补充字段，请结合使用）\n{character_extra_fields}" if character_extra_fields else ""
 
             # 🔥 修改：先执行扩展，再判断是否继续
-            # 第一步：执行扩展
-            expansion_prompt = f"""基于当前人物，扩展到{target_count}个角色。
+            # 第一步：执行扩展（使用优化后的上下文）
+            expansion_prompt = f"""基于以下优化后的上下文，扩展到{target_count}个角色。
 
-【当前人物】
-{main_characters}
-
-【情节大纲】
-{plot_outline}
+{optimized_context}
 
 【扩展要求】
 - 新增 {increment} 个角色（从第{current_character_count + 1}个开始）
@@ -1180,11 +1258,11 @@ Please直接按阵营分类输出，格式如下（每个人物必须包含完�
                 traceback.print_exc()
                 raise
 
-            # 第二步：整合更新人物体系（而不是简单追加）
+            # 第二步：整合更新人物体系（使用优化后的上下文）
             integration_prompt = f"""Please将新扩展的角色整合到现有人物体系中，生成一份完整的、结构清晰的人物档案。
 
-【原有人物】
-{main_characters}
+【优化后的当前人物上下文】
+{optimized_context}
 
 【新增角色】
 {expansion_content}
@@ -1334,7 +1412,7 @@ Please确保所有数量加起来等于{target_count}。
 
             # 🔥 第五步：AI判断是否需要继续扩展（在扩展完成后判断）
             # 🔥 优化：只传递统计信息，不传递完整文本，避免超过token限制
-            analysis_prompt = f"""你是一位资深人物设计师。Please分析以下人物体系是否需要继续扩展。
+            analysis_prompt = f"""你是一位资深人物设计师。Please analyze以下人物体系是否 needs继续扩展。
 
 【当前状态】
 - 当前已有人物数：{target_count}
@@ -1342,7 +1420,7 @@ Please确保所有数量加起来等于{target_count}。
 - 长篇目标人物数：{character_target}个
 - 角色分布：{distribution_dict}
 
-Please分析：
+Please analyze：
 1. **主要角色覆盖**：主角、配角、对手、师友等关键角色是否齐全
 2. **角色均衡**：正面、负面、中立角色的比例是否合适
 

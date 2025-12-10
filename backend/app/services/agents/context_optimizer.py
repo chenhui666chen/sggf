@@ -21,6 +21,8 @@ class ContextOptimizer:
     # 各模型的Token限制
     MODEL_LIMITS = {
         'qwen-max': 30720,
+        'qwen-plus': 1000000,   # 100万tokens
+        'qwen-turbo': 1000000,  # 100万tokens (Qwen2.5-Turbo)
         'qwen-long': 10000000,  # 1000万tokens
         'deepseek-r1': 128000,  # 约12.8万tokens
     }

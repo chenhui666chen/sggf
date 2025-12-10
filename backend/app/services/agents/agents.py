@@ -120,18 +120,41 @@ class BaseAgent(ABC):
         return response.content
     
     def _format_context(self, context: Dict[str, Any]) -> str:
-        """格式化上下文信息（长度防护）"""
-        def to_str_limited(val: Any, limit: int = 5000) -> str:
+        """格式化上下文信息（智能截断）"""
+        from .intelligent_truncator import truncate_with_ai_assist
+        
+        context_str = "当前上下文信息:\n"
+        
+        for key, value in context.items():
             try:
-                s = val if isinstance(val, str) else str(val)
+                # 转换为字符串
+                s = value if isinstance(value, str) else str(value)
             except Exception:
                 s = ""
-            if s is None:
-                s = ""
-            return s[:limit]
-        context_str = "当前上下文信息:\n"
-        for key, value in context.items():
-            context_str += f"- {key}: {to_str_limited(value)}\n"
+            
+            if s is None or not s:
+                continue
+            
+            # 根据键名判断内容类型
+            if 'outline' in key.lower() or 'plot' in key.lower():
+                content_type = "outline"
+            elif 'character' in key.lower():
+                content_type = "character"
+            elif 'world' in key.lower() or 'setting' in key.lower():
+                content_type = "worldview"
+            else:
+                content_type = "outline"  # 默认
+            
+            # 智能截断：超过5000字符才启用AI辅助
+            if len(s) > 5000:
+                s = truncate_with_ai_assist(
+                    content=s,
+                    target_length=5000,
+                    content_type=content_type
+                )
+            
+            context_str += f"- {key}: {s}\n"
+        
         return context_str
     
     def clear_history(self):

@@ -3342,8 +3342,8 @@ async def execute_generate_next_chapter_task(
                 is_complete=False
             )
 
-        # 🆕 第一步：为章节规划优化上下文
-        from app.services.agents.context_optimizer import get_context_optimizer
+        # 🎆 第一步：为章节规划使用分层摘要策略
+        from app.services.agents.layered_summarizer import LayeredSummarizer
         from app.services.agents.agent_coordinator import GENRE_PROMPT_MODULES, DEFAULT_GENRE_MODULE
         from app.services.prompts.stages.chapter_planning import (
             ChapterPlanningPrompts, 
@@ -3369,28 +3369,38 @@ async def execute_generate_next_chapter_task(
         plan_genre_module = GENRE_PROMPT_MODULES.get(plan_project_genre, DEFAULT_GENRE_MODULE)
         chapter_plan_guide = plan_genre_module.get('chapter_plan_guide', '')
         
-        context_optimizer = get_context_optimizer(
-            current_chapter=next_chapter_number,
-            stage='chapter_planning'
-        )
-        
-        # 优化章节规划阶段的上下文（不包含 chapter_plan）
-        plan_optimized_context, plan_optimization_stats = context_optimizer.optimize_for_chapter_generation(
-            plot_outline=plot_outline or "",
-            world_setting=world_setting or "",
+        # 🎆 使用分层摘要策略优化上下文
+        layered_summarizer = LayeredSummarizer()
+        plan_context_result = layered_summarizer.prepare_context_for_expansion(
+            outline=plot_outline or "",
             characters=characters or "",
-            previous_chapters_analysis=previous_chapters_summary or "",
-            project_concept=concept or "",
-            previous_ending=previous_ending or "",
+            worldview=world_setting or "",
+            scenario="chapter_generation",
+            current_count=next_chapter_number,  # 使用当前章节数选择模型
+            focus_range=(max(1, next_chapter_number - 5), next_chapter_number + 5)  # 聚焦当前章节前后5章
         )
         
-        logger.info(f"   💾 Token优化（章节规划）:")
-        logger.info(f"      - 原始: {plan_optimization_stats['original_tokens']} tokens")
-        logger.info(f"      - 优化后: {plan_optimization_stats['optimized_tokens']} tokens")
-        logger.info(f"      - 节省: {plan_optimization_stats['savings']} tokens ({plan_optimization_stats['savings_percentage']:.1f}%)")
+        # 🔥 使用智能选择的模型和优化后的上下文
+        selected_plan_model = plan_context_result["selected_model"]
+        plan_optimized_context_text = plan_context_result["context"]
+        plan_stats = plan_context_result["stats"]
         
-        # 🆕 获取优化器选择的模型
-        selected_plan_model = context_optimizer.selected_model
+        logger.info(f"   📊 上下文优化（章节规划 - 分层摘要）:")
+        logger.info(f"      - 选择模型: {selected_plan_model}")
+        logger.info(f"      - 原始总长: {len(plot_outline or '') + len(characters or '') + len(world_setting or ''):,}字符")
+        logger.info(f"      - 优化后: {len(plan_optimized_context_text):,}字符 (压缩{(1-plan_stats['compression_ratio'])*100:.1f}%)")
+        logger.info(f"      - Token使用: {plan_stats['total_tokens']:,} / {plan_stats['target_tokens']:,}")
+        logger.info(f"      - 聚焦范围: 第{max(1, next_chapter_number - 5)}-{next_chapter_number + 5}章")
+        
+        # 构建包含各部分的上下文字典（用于后续提示词构建）
+        plan_optimized_context = {
+            'project_concept': concept or '',
+            'plot_outline': plan_optimized_context_text,  # 使用优化后的完整上下文
+            'world_setting': '',  # 已包含在优化上下文中
+            'characters': '',  # 已包含在优化上下文中
+            'previous_chapters_analysis': previous_chapters_summary or '',
+            'previous_ending': previous_ending or ''
+        }
         # 🆕 广播步骤1模型
         await ws_manager.send_model_used(
             project_id=project_id,
@@ -3404,11 +3414,11 @@ async def execute_generate_next_chapter_task(
 
         plan_user_prompt = f"""请为第{next_chapter_number}章制定创作计划。
 
-【整本书信息】
+【整本书信息 - 智能优化上下文】
 - 故事概念：{plan_optimized_context.get('project_concept', concept)}
-- 情节大纲：{plan_optimized_context.get('plot_outline', plot_outline)}
-- 世界观：{plan_optimized_context.get('world_setting', world_setting)}
-- 主要人物：{plan_optimized_context.get('characters', characters)}
+
+【优化后的核心上下文】（已通过分层摘要策略压缩，聚焦第{max(1, next_chapter_number - 5)}-{next_chapter_number + 5}章）
+{plan_optimized_context.get('plot_outline', plot_outline)}
 
 【已完成章节摘要】
 {plan_optimized_context.get('previous_chapters_analysis', previous_chapters_summary) if previous_chapters_summary else '（这是第一章）'}

@@ -19,5 +19,7 @@ __all__ = [
     'outline_expander',
     'novel_agent',
     'aliyun_embeddings',
+    'intelligent_truncator',  # 新增: AI辅助智能截断器
+    'layered_summarizer',     # 新增: 分层摘要器
 ]
 

@@ -1251,18 +1251,9 @@ export default function WorkflowControlPage() {
                   dispatch(setCurrentStage('structure'))
                   console.log(`🔒 检测到"生成下一章"任务 (taskId=${generateNextChapterTaskId})，设置当前阶段为: structure`)
                 } else if (lastCompletedStage) {
-                  // 普通模式：根据完成状态设置当前阶段
-                  const lastCompletedIndex = stageOrder.indexOf(lastCompletedStage)
-                  if (lastCompletedIndex < stageOrder.length - 1) {
-                    // 还有未完成的阶段,显示下一个阶段
-                    const nextStage = stageOrder[lastCompletedIndex + 1]
-                    dispatch(setCurrentStage(nextStage))
-                    console.log(`📍 设置当前阶段为: ${nextStage} (最后完成阶段 ${lastCompletedStage} 的下一个)`)
-                  } else {
-                    // 所有阶段都完成了,显示最后一个阶段
-                    dispatch(setCurrentStage(lastCompletedStage))
-                    console.log(`📍 所有阶段已完成,显示最后阶段: ${lastCompletedStage}`)
-                  }
+                  // 🔧 关键修复：刷新时保持在最后完成的阶段，不要跳转到下一阶段
+                  dispatch(setCurrentStage(lastCompletedStage))
+                  console.log(`📍 刷新后保持在已完成阶段: ${lastCompletedStage}`)
                 } else {
                   // 没有完成的阶段,显示第一个阶段
                   dispatch(setCurrentStage('concept'))
@@ -3720,7 +3711,25 @@ export default function WorkflowControlPage() {
         <Box sx={{ p: 3 }}>
           <Typography variant="h6" sx={{ mb: 2 }}>概念阶段完成</Typography>
           <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
-            本轮故事概念与世界观设定已生成，请选择下一步操作：
+            本轮故事概念和世界观设定已生成，满意可点击进入下一阶段，不满意可点击重新生成或者
+            <Typography
+              component="span"
+              sx={{
+                color: 'primary.main',
+                cursor: 'pointer',
+                textDecoration: 'underline',
+                '&:hover': {
+                  color: 'primary.dark',
+                },
+              }}
+              onClick={() => {
+                setShowDecisionDialog(false)
+                navigate(`/knowledge-base/${projectId}`)
+              }}
+            >
+              前往知识库
+            </Typography>
+            手动编辑修改。
           </Typography>
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1.5 }}>
             <Button

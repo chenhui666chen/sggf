@@ -43,6 +43,7 @@ class LLMSingletonManager:
             "review": "deepseek-reasoner",
             "final_review": "deepseek-reasoner",
             "quality_review": "deepseek-reasoner",
+            "summarize": "qwen-turbo",  # 新增: AI摘要任务
         }
         
         selected_model = task_model_mapping.get(task_type, Config.MODEL_NAME)
