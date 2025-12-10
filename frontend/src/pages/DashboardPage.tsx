@@ -28,8 +28,6 @@ import {
   DialogContent,
   DialogContentText,
   DialogActions,
-  ToggleButtonGroup,
-  ToggleButton,
   Chip,
   Tooltip,
 } from '@mui/material'
@@ -42,9 +40,6 @@ import EditIcon from '@mui/icons-material/Edit'
 import CheckIcon from '@mui/icons-material/Check'
 import CloseIcon from '@mui/icons-material/Close'
 import NavigateNextIcon from '@mui/icons-material/NavigateNext'
-import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
-import SortIcon from '@mui/icons-material/Sort'
 import HeadphonesIcon from '@mui/icons-material/Headphones'
 import TheatersIcon from '@mui/icons-material/Theaters'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
@@ -141,15 +136,25 @@ export default function DashboardPage() {
   const [exportAllAnchorEl, setExportAllAnchorEl] = useState<null | HTMLElement>(null)
   const [exportingAll, setExportingAll] = useState(false)
 
-  // 🆕 类型映射函数（英文 → 中文）
+  // 🆕 类型映射函数（英文/中文 → 显示标签）
   const getGenreLabel = (genre: string | null | undefined): string => {
     const genreMap: Record<string, string> = {
+      // 英文键
       'Fantasy': '奇幻',
       'Science Fiction': '科幻',
       'Romance': '浪漫',
       'Mystery': '悬疑',
       'Thriller': '惊悚',
-      'Other': '其他'
+      'Other': '其他',
+      // 中文键（网文题材）
+      '修仙': '修仙',
+      '玄幻': '玄幻',
+      '都市': '都市',
+      '悬疑': '悬疑',
+      '言情': '言情',
+      '耽美': '耽美',
+      '科幻': '科幻',
+      '纯文学': '纯文学',
     }
     return genreMap[genre || ''] || genre || '未设置'
   }
@@ -1022,255 +1027,481 @@ export default function DashboardPage() {
       <Container maxWidth="lg" sx={{ py: 4 }}>
 
       <Grid container spacing={3}>
-        {projects.map((project) => (
-          <Grid item xs={12} sm={6} md={4} key={project.id}>
-            <Card
+        {projects.map((project) => {
+          // 根据题材选择书本封面颜色
+          const getBookColors = (genre: string | undefined) => {
+            const colors: Record<string, { primary: string; secondary: string; accent: string; text: string }> = {
+              '修仙': { primary: '#1a237e', secondary: '#283593', accent: '#ffd700', text: '#e8d5b7' },
+              '玄幻': { primary: '#4a148c', secondary: '#6a1b9a', accent: '#ff6f00', text: '#f3e5f5' },
+              '都市': { primary: '#263238', secondary: '#37474f', accent: '#00bcd4', text: '#eceff1' },
+              '言情': { primary: '#880e4f', secondary: '#ad1457', accent: '#ffb6c1', text: '#fce4ec' },
+              '耽美': { primary: '#311b92', secondary: '#4527a0', accent: '#e1bee7', text: '#ede7f6' },
+              '悬疑': { primary: '#1b1b1b', secondary: '#2d2d2d', accent: '#b71c1c', text: '#bdbdbd' },
+              '科幻': { primary: '#0d47a1', secondary: '#1565c0', accent: '#00e5ff', text: '#e3f2fd' },
+              '纯文学': { primary: '#3e2723', secondary: '#4e342e', accent: '#a1887f', text: '#efebe9' },
+              'Fantasy': { primary: '#1b5e20', secondary: '#2e7d32', accent: '#ffd54f', text: '#e8f5e9' },
+            }
+            return colors[genre || ''] || { primary: '#5d4037', secondary: '#6d4c41', accent: '#d4af37', text: '#efebe9' }
+          }
+          const bookColors = getBookColors(project.genre)
+          const isDisabled = generatingProjectId === project.id || generatingNextChapter[project.id]
+
+          return (
+          <Grid item xs={6} sm={4} md={3} lg={2.4} key={project.id}>
+            {/* 书本容器 - 包含书脊和页面效果 */}
+            <Tooltip title={isDisabled ? '正在处理中...' : '点击进入工作流'} arrow placement="top">
+            <Box
               sx={{
-                height: '280px',
-                display: 'flex',
-                flexDirection: 'column',
                 position: 'relative',
-                opacity: generatingProjectId === project.id ? 0.7 : 1,
+                height: '300px',
+                maxWidth: '240px',
+                margin: '0 auto',
+                perspective: '1000px',
+                cursor: isDisabled ? 'default' : 'pointer',
+              }}
+              onClick={() => {
+                if (!isDisabled) {
+                  navigate(`/workflow/${project.id}`)
+                }
               }}
             >
-              {/* 生成中的加载指示器 */}
-              {generatingProjectId === project.id && (
-                <Box
-                  sx={{
+              {/* 页面层叠效果 */}
+              <Box
+                sx={{
+                  position: 'absolute',
+                  right: 2,
+                  top: 8,
+                  bottom: 8,
+                  width: '12px',
+                  background: 'linear-gradient(to right, #f5f5dc 0%, #fffef0 50%, #f0ead6 100%)',
+                  borderRadius: '0 2px 2px 0',
+                  boxShadow: 'inset -2px 0 4px rgba(0,0,0,0.1)',
+                  '&::before': {
+                    content: '""',
                     position: 'absolute',
                     top: 0,
-                    left: 0,
-                    right: 0,
                     bottom: 0,
+                    left: 0,
+                    width: '100%',
+                    background: 'repeating-linear-gradient(to bottom, transparent 0px, transparent 3px, rgba(0,0,0,0.03) 3px, rgba(0,0,0,0.03) 4px)',
+                  },
+                }}
+              />
+              
+              {/* 书本主体 */}
+              <Box
+                sx={{
+                  position: 'absolute',
+                  left: 0,
+                  right: 14,
+                  top: 0,
+                  bottom: 0,
+                  display: 'flex',
+                  opacity: isDisabled ? 0.7 : 1,
+                  transition: 'all 0.3s ease-in-out',
+                  transform: isDisabled ? 'none' : 'rotateY(0deg)',
+                  '&:hover': {
+                    transform: isDisabled ? 'none' : 'translateX(-8px) rotateY(-5deg)',
+                    '& .book-spine': {
+                      boxShadow: isDisabled ? undefined : '4px 0 8px rgba(0,0,0,0.3)',
+                    },
+                  },
+                }}
+              >
+                {/* 书脊 */}
+                <Box
+                  className="book-spine"
+                  sx={{
+                    width: '22px',
+                    background: `linear-gradient(135deg, ${bookColors.secondary} 0%, ${bookColors.primary} 50%, ${bookColors.secondary} 100%)`,
+                    borderRadius: '3px 0 0 3px',
+                    boxShadow: '2px 0 4px rgba(0,0,0,0.2)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    backgroundColor: 'rgba(255, 255, 255, 0.8)',
-                    zIndex: 10,
-                    borderRadius: 1,
+                    position: 'relative',
+                    transition: 'box-shadow 0.3s ease',
+                    '&::before': {
+                      content: '""',
+                      position: 'absolute',
+                      top: '10%',
+                      bottom: '10%',
+                      left: '50%',
+                      width: '1px',
+                      background: `linear-gradient(to bottom, transparent, ${bookColors.accent}40, ${bookColors.accent}, ${bookColors.accent}40, transparent)`,
+                      transform: 'translateX(-50%)',
+                    },
                   }}
                 >
-                  <Box sx={{ textAlign: 'center' }}>
-                    <CircularProgress size={40} sx={{ mb: 1 }} />
-                    <Typography variant="caption">生成中...</Typography>
-                  </Box>
-                </Box>
-              )}
-
-              <CardContent sx={{ flexGrow: 1, overflow: 'hidden' }}>
-                {/* 🆕 可编辑标题 */}
-                {editingProjectId === project.id ? (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
-                    <TextField
-                      size="small"
-                      value={editedTitle}
-                      onChange={(e) => setEditedTitle(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          handleSaveTitle(project.id)
-                        } else if (e.key === 'Escape') {
-                          handleCancelEditTitle()
-                        }
-                      }}
-                      autoFocus
-                      fullWidth
-                      sx={{ flex: 1 }}
-                    />
-                    <IconButton 
-                      size="small" 
-                      color="primary"
-                      onClick={() => handleSaveTitle(project.id)}
-                      title="保存"
-                    >
-                      <CheckIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton 
-                      size="small" 
-                      color="default"
-                      onClick={handleCancelEditTitle}
-                      title="取消"
-                    >
-                      <CloseIcon fontSize="small" />
-                    </IconButton>
-                  </Box>
-                ) : (
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
-                    <Typography 
-                      variant="h6" 
-                      sx={{ 
-                        flex: 1,
-                        overflow: 'hidden', 
-                        textOverflow: 'ellipsis', 
-                        whiteSpace: 'nowrap',
-                        cursor: 'pointer',
-                        '&:hover': {
-                          color: 'primary.main',
-                        }
-                      }}
-                      onClick={() => handleStartEditTitle(project.id, project.title)}
-                      title="点击编辑标题"
-                    >
-                      {project.title}
-                    </Typography>
-                    <IconButton 
-                      size="small" 
-                      onClick={() => handleStartEditTitle(project.id, project.title)}
-                      title="编辑标题"
-                      sx={{ 
-                        opacity: 0.6,
-                        '&:hover': { opacity: 1 }
-                      }}
-                    >
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                  </Box>
-                )}
-                <Typography 
-                  variant="body2" 
-                  color="textSecondary" 
-                  sx={{ 
-                    mb: 1,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    display: '-webkit-box',
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: 'vertical',
-                    minHeight: '40px'
-                  }}
-                >
-                  {project.description}
-                </Typography>
-                <Box sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
-                  {/* 类型编辑区域 */}
-                  {editingGenreProjectId === project.id ? (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      <FormControl size="small" sx={{ minWidth: 120 }}>
-                        <Select
-                          value={editedGenre}
-                          onChange={(e) => setEditedGenre(e.target.value)}
-                          sx={{ fontSize: '0.75rem', height: '28px' }}
-                        >
-                          <MenuItem value="Fantasy">奇幻</MenuItem>
-                          <MenuItem value="Science Fiction">科幻</MenuItem>
-                          <MenuItem value="Romance">浪漫</MenuItem>
-                          <MenuItem value="Mystery">悬疑</MenuItem>
-                          <MenuItem value="Thriller">惊悚</MenuItem>
-                          <MenuItem value="Other">其他</MenuItem>
-                        </Select>
-                      </FormControl>
-                      <IconButton 
-                        size="small" 
-                        color="primary"
-                        onClick={() => handleSaveGenre(project.id)}
-                        title="保存"
-                      >
-                        <CheckIcon fontSize="small" />
-                      </IconButton>
-                      <IconButton 
-                        size="small" 
-                        color="default"
-                        onClick={handleCancelEditGenre}
-                        title="取消"
-                      >
-                        <CloseIcon fontSize="small" />
-                      </IconButton>
-                    </Box>
-                  ) : (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      <Typography variant="caption" color="textSecondary">
-                        类型: {getGenreLabel(project.genre)}
-                      </Typography>
-                      <IconButton 
-                        size="small" 
-                        onClick={() => handleStartEditGenre(project.id, project.genre || '')}
-                        title="编辑类型"
-                        sx={{ 
-                          opacity: 0.6,
-                          padding: '2px',
-                          '&:hover': { opacity: 1 }
-                        }}
-                      >
-                        <EditIcon sx={{ fontSize: '0.9rem' }} />
-                      </IconButton>
-                    </Box>
-                  )}
-                  <Typography variant="caption" color="textSecondary">
-                    字数: {chapterWordCounts[project.id] || 0}
+                  <Typography
+                    sx={{
+                      writingMode: 'vertical-rl',
+                      textOrientation: 'mixed',
+                      color: bookColors.accent,
+                      fontSize: '0.55rem',
+                      fontWeight: 600,
+                      letterSpacing: '1px',
+                      textShadow: '0 0 4px rgba(0,0,0,0.5)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      maxHeight: '85%',
+                    }}
+                  >
+                    {project.title}
                   </Typography>
                 </Box>
-              </CardContent>
 
-              <CardActions sx={{ pt: 0, flexWrap: 'wrap', gap: 0.5 }}>
-                <Button
-                  size="small"
-                  startIcon={<SchemaIcon />}
-                  onClick={() => navigate(`/workflow/${project.id}`)}
-                  disabled={generatingProjectId === project.id || generatingNextChapter[project.id]}
-                  color="success"
+                {/* 封面 */}
+                <Box
+                  sx={{
+                    flex: 1,
+                    background: `linear-gradient(145deg, ${bookColors.primary} 0%, ${bookColors.secondary} 100%)`,
+                    borderRadius: '0 4px 4px 0',
+                    position: 'relative',
+                    overflow: 'hidden',
+                    boxShadow: '4px 4px 12px rgba(0,0,0,0.3)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    '&::before': {
+                      content: '""',
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      background: 'url("data:image/svg+xml,%3Csvg width=\'100\' height=\'100\' viewBox=\'0 0 100 100\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M0 0h100v100H0z\' fill=\'none\'/%3E%3Cpath d=\'M0 50c25-10 75 10 100 0\' stroke=\'%23ffffff08\' fill=\'none\'/%3E%3C/svg%3E")',
+                      opacity: 0.3,
+                    },
+                    '&::after': {
+                      content: '""',
+                      position: 'absolute',
+                      top: 12,
+                      left: 12,
+                      right: 12,
+                      bottom: 12,
+                      border: `1px solid ${bookColors.accent}40`,
+                      borderRadius: '2px',
+                      pointerEvents: 'none',
+                    },
+                  }}
                 >
-                  工作流
-                </Button>
-                <Button
-                  size="small"
-                  startIcon={<MenuIcon />}
-                  onClick={() => handleOpenChaptersDrawer(project.id)}
-                  disabled={generatingProjectId === project.id || generatingNextChapter[project.id]}
-                >
-                  章节列表
-                </Button>
-                <Button
-                  size="small"
-                  startIcon={<LibraryBooksIcon />}
-                  onClick={() => navigate(`/knowledge-base/${project.id}`)}
-                  disabled={generatingProjectId === project.id || generatingNextChapter[project.id]}
-                  color="info"
-                  endIcon={
-                    statsLoading ? (
-                      <CircularProgress size={16} />
+                  {/* 生成中的加载指示器 */}
+                  {generatingProjectId === project.id && (
+                    <Box
+                      sx={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                        zIndex: 10,
+                        borderRadius: '0 4px 4px 0',
+                      }}
+                    >
+                      <Box sx={{ textAlign: 'center' }}>
+                        <CircularProgress size={40} sx={{ mb: 1, color: bookColors.accent }} />
+                        <Typography variant="caption" sx={{ color: bookColors.text, display: 'block' }}>执笔中...</Typography>
+                      </Box>
+                    </Box>
+                  )}
+
+                  {/* 封面内容区 */}
+                  <Box sx={{ p: 1.5, pt: 2, flexGrow: 1, position: 'relative', zIndex: 1 }}>
+                    {/* 装饰性顶部花纹 */}
+                    <Box sx={{ 
+                      textAlign: 'center', 
+                      mb: 1,
+                      color: bookColors.accent,
+                      fontSize: '0.75rem',
+                      opacity: 0.8,
+                      letterSpacing: '4px',
+                    }}>
+                      ✦ ✦ ✦
+                    </Box>
+
+                    {/* 书名 */}
+                    {editingProjectId === project.id ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 2 }} onClick={(e) => e.stopPropagation()}>
+                        <TextField
+                          size="small"
+                          value={editedTitle}
+                          onChange={(e) => setEditedTitle(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveTitle(project.id)
+                            else if (e.key === 'Escape') handleCancelEditTitle()
+                          }}
+                          autoFocus
+                          fullWidth
+                          sx={{ 
+                            flex: 1,
+                            '& .MuiOutlinedInput-root': {
+                              color: bookColors.text,
+                              backgroundColor: 'rgba(255,255,255,0.1)',
+                              '& fieldset': { borderColor: bookColors.accent },
+                            },
+                            '& .MuiOutlinedInput-input': { color: bookColors.text },
+                          }}
+                        />
+                        <IconButton size="small" onClick={() => handleSaveTitle(project.id)} sx={{ color: bookColors.accent }}>
+                          <CheckIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton size="small" onClick={handleCancelEditTitle} sx={{ color: bookColors.text }}>
+                          <CloseIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
                     ) : (
-                      <Badge
-                        badgeContent={knowledgeStats[project.id] || 0}
-                        color="primary"
-                        max={999}
+                      <Typography
+                        onClick={(e) => { e.stopPropagation(); handleStartEditTitle(project.id, project.title) }}
+                        title="点击编辑书名"
                         sx={{
-                          '& .MuiBadge-badge': {
-                            fontSize: '0.65rem',
-                            height: '18px',
-                            minWidth: '18px',
-                            padding: '0 4px',
+                          fontFamily: '"STKaiti", "KaiTi", "楷体", serif',
+                          fontSize: '1.1rem',
+                          fontWeight: 700,
+                          color: bookColors.accent,
+                          textAlign: 'center',
+                          mb: 1,
+                          textShadow: `0 1px 3px rgba(0,0,0,0.5), 0 0 15px ${bookColors.accent}30`,
+                          letterSpacing: '2px',
+                          cursor: 'pointer',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          lineHeight: 1.3,
+                          minHeight: '2.6em',
+                          transition: 'text-shadow 0.3s ease',
+                          '&:hover': {
+                            textShadow: `0 2px 4px rgba(0,0,0,0.5), 0 0 25px ${bookColors.accent}60`,
                           },
                         }}
                       >
-                        <span />
-                      </Badge>
-                    )
-                  }
-                >
-                  知识库
-                </Button>
-                {/* 🆕 生成下一章按钮（与迭代优化阶段完全相同） */}
-                <Button
-                  size="small"
-                  startIcon={generatingNextChapter[project.id] ? <CircularProgress size={20} /> : <NavigateNextIcon />}
-                  onClick={() => handleGenerateNextChapter(project.id)}
-                  disabled={generatingProjectId === project.id || generatingNextChapter[project.id]}
-                  color="secondary"
-                >
-                  {generatingNextChapter[project.id] ? '生成中...' : '生成下一章'}
-                </Button>
-                <Button
-                  size="small"
-                  startIcon={<DeleteIcon />}
-                  color="error"
-                  onClick={() => handleDeleteProject(project.id)}
-                  disabled={generatingProjectId === project.id || generatingNextChapter[project.id]}
-                >
-                  删除
-                </Button>
-              </CardActions>
-            </Card>
+                        {project.title}
+                      </Typography>
+                    )}
+
+                    {/* 描述 */}
+                    <Typography
+                      sx={{
+                        fontFamily: '"STFangsong", "FangSong", "仿宋", serif',
+                        fontSize: '0.7rem',
+                        color: bookColors.text,
+                        opacity: 0.85,
+                        textAlign: 'center',
+                        mb: 1,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        lineHeight: 1.5,
+                        minHeight: '2.1em',
+                      }}
+                    >
+                      {project.description || '一段传奇即将开始...'}
+                    </Typography>
+
+                    {/* 题材标签 */}
+                    <Box sx={{ textAlign: 'center', mb: 0.5 }}>
+                      {editingGenreProjectId === project.id ? (
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }} onClick={(e) => e.stopPropagation()}>
+                          <FormControl size="small" sx={{ minWidth: 100 }}>
+                            <Select
+                              value={editedGenre}
+                              onChange={(e) => setEditedGenre(e.target.value)}
+                              sx={{ 
+                                fontSize: '0.75rem', 
+                                height: '28px',
+                                color: bookColors.text,
+                                backgroundColor: 'rgba(255,255,255,0.1)',
+                                '& .MuiOutlinedInput-notchedOutline': { borderColor: bookColors.accent },
+                                '& .MuiSvgIcon-root': { color: bookColors.accent },
+                              }}
+                            >
+                              <MenuItem value="修仙">修仙</MenuItem>
+                              <MenuItem value="玄幻">玄幻</MenuItem>
+                              <MenuItem value="都市">都市</MenuItem>
+                              <MenuItem value="言情">言情</MenuItem>
+                              <MenuItem value="耽美">耽美</MenuItem>
+                              <MenuItem value="悬疑">悬疑</MenuItem>
+                              <MenuItem value="科幻">科幻</MenuItem>
+                              <MenuItem value="纯文学">纯文学</MenuItem>
+                              <MenuItem value="Fantasy">奇幻</MenuItem>
+                              <MenuItem value="Other">其他</MenuItem>
+                            </Select>
+                          </FormControl>
+                          <IconButton size="small" onClick={() => handleSaveGenre(project.id)} sx={{ color: bookColors.accent }}>
+                            <CheckIcon fontSize="small" />
+                          </IconButton>
+                          <IconButton size="small" onClick={handleCancelEditGenre} sx={{ color: bookColors.text }}>
+                            <CloseIcon fontSize="small" />
+                          </IconButton>
+                        </Box>
+                      ) : (
+                        <Chip
+                          label={`『${getGenreLabel(project.genre)}』`}
+                          size="small"
+                          onClick={(e) => { e.stopPropagation(); handleStartEditGenre(project.id, project.genre || '') }}
+                          sx={{
+                            backgroundColor: 'transparent',
+                            border: `1px solid ${bookColors.accent}60`,
+                            color: bookColors.accent,
+                            fontFamily: '"STKaiti", "KaiTi", "楷体", serif',
+                            fontSize: '0.65rem',
+                            height: '20px',
+                            letterSpacing: '1px',
+                            cursor: 'pointer',
+                            '&:hover': {
+                              backgroundColor: `${bookColors.accent}20`,
+                            },
+                          }}
+                        />
+                      )}
+                    </Box>
+
+                    {/* 字数统计 */}
+                    <Typography
+                      sx={{
+                        textAlign: 'center',
+                        color: bookColors.text,
+                        opacity: 0.6,
+                        fontSize: '0.6rem',
+                        fontStyle: 'italic',
+                      }}
+                    >
+                      ─ {(chapterWordCounts[project.id] || 0).toLocaleString()}字 ─
+                    </Typography>
+                  </Box>
+
+                  {/* 底部操作区 - 古籍艺术字风格 */}
+                  <Box
+                    sx={{
+                      p: 1,
+                      pt: 0.5,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 0.3,
+                      alignItems: 'center',
+                      position: 'relative',
+                      zIndex: 1,
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* 第一排：典籍 | 目录 */}
+                    <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+                      <Tooltip title="进入知识库" arrow>
+                        <Typography
+                          onClick={() => !isDisabled && navigate(`/knowledge-base/${project.id}`)}
+                          sx={{
+                            fontFamily: '楷体, KaiTi, serif',
+                            fontSize: '0.85rem',
+                            color: bookColors.text,
+                            cursor: isDisabled ? 'default' : 'pointer',
+                            opacity: isDisabled ? 0.5 : 0.85,
+                            letterSpacing: '2px',
+                            transition: 'all 0.2s ease',
+                            textShadow: `0 0 8px ${bookColors.primary}`,
+                            '&:hover': {
+                              opacity: 1,
+                              color: bookColors.accent,
+                              textShadow: `0 0 12px ${bookColors.accent}`,
+                              transform: 'scale(1.05)',
+                            },
+                          }}
+                        >
+                          典 籍
+                        </Typography>
+                      </Tooltip>
+                      <Typography sx={{ color: `${bookColors.text}40`, fontSize: '0.7rem' }}>|</Typography>
+                      <Tooltip title="查看章节列表" arrow>
+                        <Typography
+                          onClick={() => !isDisabled && handleOpenChaptersDrawer(project.id)}
+                          sx={{
+                            fontFamily: '楷体, KaiTi, serif',
+                            fontSize: '0.85rem',
+                            color: bookColors.text,
+                            cursor: isDisabled ? 'default' : 'pointer',
+                            opacity: isDisabled ? 0.5 : 0.85,
+                            letterSpacing: '2px',
+                            transition: 'all 0.2s ease',
+                            textShadow: `0 0 8px ${bookColors.primary}`,
+                            '&:hover': {
+                              opacity: 1,
+                              color: bookColors.accent,
+                              textShadow: `0 0 12px ${bookColors.accent}`,
+                              transform: 'scale(1.05)',
+                            },
+                          }}
+                        >
+                          目 录
+                        </Typography>
+                      </Tooltip>
+                    </Box>
+                    {/* 第二排：焚毁 | 续写 */}
+                    <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+                      <Tooltip title="删除项目" arrow>
+                        <Typography
+                          onClick={() => !isDisabled && handleDeleteProject(project.id)}
+                          sx={{
+                            fontFamily: '楷体, KaiTi, serif',
+                            fontSize: '0.8rem',
+                            color: '#ef5350',
+                            cursor: isDisabled ? 'default' : 'pointer',
+                            opacity: isDisabled ? 0.4 : 0.7,
+                            letterSpacing: '2px',
+                            transition: 'all 0.2s ease',
+                            '&:hover': {
+                              opacity: 1,
+                              textShadow: '0 0 8px #ef5350',
+                              transform: 'scale(1.05)',
+                            },
+                          }}
+                        >
+                          焚 毁
+                        </Typography>
+                      </Tooltip>
+                      <Typography sx={{ color: `${bookColors.text}40`, fontSize: '0.7rem' }}>|</Typography>
+                      <Tooltip title="续写下一章" arrow>
+                        <Typography
+                          onClick={() => !isDisabled && handleGenerateNextChapter(project.id)}
+                          sx={{
+                            fontFamily: '楷体, KaiTi, serif',
+                            fontSize: '0.85rem',
+                            color: bookColors.accent,
+                            cursor: isDisabled ? 'default' : 'pointer',
+                            opacity: isDisabled ? 0.5 : 1,
+                            letterSpacing: '2px',
+                            fontWeight: 600,
+                            transition: 'all 0.2s ease',
+                            textShadow: `0 0 8px ${bookColors.accent}60`,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 0.5,
+                            '&:hover': {
+                              textShadow: `0 0 16px ${bookColors.accent}`,
+                              transform: 'scale(1.08)',
+                            },
+                          }}
+                        >
+                          {generatingNextChapter[project.id] 
+                            ? <><CircularProgress size={12} sx={{ color: 'inherit' }} /> 续写中...</>
+                            : '续 写'
+                          }
+                        </Typography>
+                      </Tooltip>
+                    </Box>
+                  </Box>
+                </Box>
+              </Box>
+            </Box>
+            </Tooltip>
           </Grid>
-        ))}
+        )
+      })}
       </Grid>
 
       <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth>
@@ -1302,11 +1533,15 @@ export default function DashboardPage() {
               onChange={(e) => setFormData({ ...formData, genre: e.target.value })}
               label="类型"
             >
+              <MenuItem value="修仙">修仙</MenuItem>
+              <MenuItem value="玄幻">玄幻</MenuItem>
+              <MenuItem value="都市">都市</MenuItem>
+              <MenuItem value="言情">言情</MenuItem>
+              <MenuItem value="耽美">耽美</MenuItem>
+              <MenuItem value="悬疑">悬疑</MenuItem>
+              <MenuItem value="科幻">科幻</MenuItem>
+              <MenuItem value="纯文学">纯文学</MenuItem>
               <MenuItem value="Fantasy">奇幻</MenuItem>
-              <MenuItem value="Science Fiction">科幻</MenuItem>
-              <MenuItem value="Romance">浪漫</MenuItem>
-              <MenuItem value="Mystery">悬疑</MenuItem>
-              <MenuItem value="Thriller">惊悚</MenuItem>
               <MenuItem value="Other">其他</MenuItem>
             </Select>
           </FormControl>

@@ -942,6 +942,45 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
                 db.commit()
                 logger.info(f"   💾 已保存概念开发结果到 project_settings（重生={is_regen}, targets={list(targets_set) if targets_set else []}）")
                 
+                # 🆕 从故事概念中提取日志标题，自动更新项目title
+                if concept_to_save and isinstance(concept_to_save, str):
+                    try:
+                        import re
+                        # 匹配日志标题（支持多种格式）
+                        # 格式1: **日志标题（短标题）**：《...》 或 **日志标题**：《...》
+                        # 格式2: 2. **日志标题...**：《...》
+                        patterns = [
+                            r'\*\*日志标题[^：:*]*\*\*[：:]\s*《([^》]+)》',
+                            r'\d+\.\s*\*\*日志标题[^：:*]*\*\*[：:]\s*《([^》]+)》',
+                            r'日志标题[：:]\s*《([^》]+)》',
+                            r'\*\*日志标题[^：:*]*\*\*[：:]\s*([^\n。]+)',
+                        ]
+                        
+                        log_title = None
+                        for pattern in patterns:
+                            match = re.search(pattern, concept_to_save)
+                            if match:
+                                log_title = match.group(1).strip()
+                                # 移除可能的《》书名号
+                                log_title = log_title.strip('《》')
+                                break
+                        
+                        if log_title and len(log_title) >= 2:
+                            # 更新项目标题
+                            update_title_query = text("""
+                                UPDATE projects SET title = :title, updated_at = :updated_at
+                                WHERE id = :project_id
+                            """)
+                            db.execute(update_title_query, {
+                                "title": log_title,
+                                "updated_at": datetime.now().isoformat(),
+                                "project_id": project_id
+                            })
+                            db.commit()
+                            logger.info(f"   📝 已从日志标题更新项目title: {log_title}")
+                    except Exception as e:
+                        logger.warning(f"   ⚠️  提取日志标题失败: {e}")
+                
                 # 🆕 自动解析人物卡并同步到结构化characters表
                 if characters_to_save and isinstance(characters_to_save, str):
                     await ws_manager.send_task_progress(
@@ -1862,6 +1901,39 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                 logger.info(f"   🔍 UPDATE 执行完成，影响行数: {result.rowcount}")
                 db.commit()
                 logger.info(f"   💾 已保存概念/世界观/人物到 project_settings（流式模式）")
+                
+                # 🆕 从故事概念中提取日志标题，自动更新项目title（流式模式）
+                if concept_data and isinstance(concept_data, str):
+                    try:
+                        import re
+                        patterns = [
+                            r'\*\*日志标题[^：:*]*\*\*[：:]\s*《([^》]+)》',
+                            r'\d+\.\s*\*\*日志标题[^：:*]*\*\*[：:]\s*《([^》]+)》',
+                            r'日志标题[：:]\s*《([^》]+)》',
+                            r'\*\*日志标题[^：:*]*\*\*[：:]\s*([^\n。]+)',
+                        ]
+                        
+                        log_title = None
+                        for pattern in patterns:
+                            match = re.search(pattern, concept_data)
+                            if match:
+                                log_title = match.group(1).strip().strip('《》')
+                                break
+                        
+                        if log_title and len(log_title) >= 2:
+                            update_title_query = text("""
+                                UPDATE projects SET title = :title, updated_at = :updated_at
+                                WHERE id = :project_id
+                            """)
+                            db.execute(update_title_query, {
+                                "title": log_title,
+                                "updated_at": datetime.now().isoformat(),
+                                "project_id": project_id
+                            })
+                            db.commit()
+                            logger.info(f"   📝 已从日志标题更新项目title: {log_title}（流式模式）")
+                    except Exception as e:
+                        logger.warning(f"   ⚠️  提取日志标题失败（流式模式）: {e}")
             # 🔧 添加 STRUCTURE 阶段的保存
             elif stage_enum == StageType.STRUCTURE:
                 save_query = text("""
@@ -3270,9 +3342,6 @@ async def execute_generate_next_chapter_task(
                 is_complete=False
             )
 
-        # 🆕 获取高潮章节指示（使用模块化函数）
-        climax_instruction = get_climax_instruction(next_chapter_number)
-
         # 🆕 第一步：为章节规划优化上下文
         from app.services.agents.context_optimizer import get_context_optimizer
         from app.services.agents.agent_coordinator import GENRE_PROMPT_MODULES, DEFAULT_GENRE_MODULE
@@ -3281,6 +3350,9 @@ async def execute_generate_next_chapter_task(
             get_genre_chapter_plan_guide,
             get_climax_instruction
         )
+
+        # 🆕 获取高潮章节指示（使用模块化函数）
+        climax_instruction = get_climax_instruction(next_chapter_number)
         
         # 🆕 获取项目题材
         plan_project_genre = ""

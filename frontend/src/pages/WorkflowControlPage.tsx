@@ -12,7 +12,6 @@ import {
   CardContent,
   Typography,
   LinearProgress,
-  Grid,
   Paper,
   Dialog,
   TextField,
@@ -27,7 +26,6 @@ import {
   Drawer,
   IconButton,
 } from '@mui/material'
-import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import SaveIcon from '@mui/icons-material/Save'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
@@ -149,7 +147,7 @@ export default function WorkflowControlPage() {
 
   // 🆕 保护机制：已有内容警告对话框
   const [showContentWarningDialog, setShowContentWarningDialog] = useState(false)
-  const [existingChaptersCount, setExistingChaptersCount] = useState(0)
+  const [existingChaptersCount, _setExistingChaptersCount] = useState(0)
 
   // 故事概念内容状态（仅用于显示，不再需要对话框）
   const [conceptContent, setConceptContent] = useState('')
@@ -248,9 +246,10 @@ export default function WorkflowControlPage() {
   useEffect(() => {
     const initProgressEstimator = async () => {
       try {
-        // 🆕 优先使用最近3次任务的平均耗时（自适应学习）
+        // 🆕 跨项目统计：不传 projectId，统计当前用户所有项目的数据
+        // 优先使用最近3次任务的平均耗时（自适应学习）
         let durations = await statisticsService.getStageDurations(
-          projectId ? Number(projectId) : undefined,
+          undefined,  // 不传 projectId，实现跨项目统计
           3  // 最近3次任务
         )
 
@@ -261,16 +260,16 @@ export default function WorkflowControlPage() {
           // 如果最近3次任务数据不足，回退到全局平均
           console.log('⚠️ 最近3次任务数据不足，回退到全局平均耗时')
           durations = await statisticsService.getStageDurations(
-            projectId ? Number(projectId) : undefined
+            undefined  // 不传 projectId，统计所有项目
           )
         }
 
-        console.log('📊 最终使用的阶段耗时:', durations)
+        console.log('📊 最终使用的阶段耗时（跨项目统计）:', durations)
         setStageDurations(durations)
 
-        // 🆕 获取置信区间
+        // 🆕 获取置信区间（同样跨项目）
         const durationRanges = await statisticsService.getStageDurationRanges(
-          projectId ? Number(projectId) : undefined
+          undefined  // 不传 projectId
         )
 
         // 创建进度估算器（传入置信区间）
@@ -282,7 +281,7 @@ export default function WorkflowControlPage() {
     }
 
     initProgressEstimator()
-  }, [projectId])
+  }, [])  // 只在组件加载时执行一次，不依赖 projectId
 
   useEffect(() => {
     if (projectId) {
@@ -297,6 +296,58 @@ export default function WorkflowControlPage() {
       dispatch(fetchProject(Number(projectId)))
     }
   }, [projectId, dispatch])
+
+  // 🆕 题材映射表（Dashboard英文 → WorkflowControl中文）
+  const genreMapping: Record<string, string> = {
+    'Fantasy': '修仙',
+    'Science Fiction': '科幻',
+    'Romance': '言情',
+    'Mystery': '悬疑',
+    'Thriller': '悬疑',
+    'Other': '',
+    // 直接中文匹配
+    '修仙': '修仙',
+    '玄幻': '修仙',
+    '都市': '都市',
+    '悬疑': '悬疑',
+    '言情': '言情',
+    '耽美': '言情',
+    '科幻': '科幻',
+    '纯文学': '纯文学',
+  }
+
+  // 🆕 当项目数据加载后，自动填充题材和篇幅设置
+  useEffect(() => {
+    if (!currentProject) return
+
+    // 自动填充题材
+    if (currentProject.genre && !genre) {
+      const mappedGenre = genreMapping[currentProject.genre] || currentProject.genre
+      if (mappedGenre) {
+        setGenre(mappedGenre)
+        console.log('📍 自动填充题材:', currentProject.genre, '→', mappedGenre)
+      }
+    }
+
+    // 自动填充篇幅设置
+    if (currentProject.planned_length_type && !plannedLengthType) {
+      setPlannedLengthType(currentProject.planned_length_type)
+      console.log('📍 自动填充篇幅:', currentProject.planned_length_type)
+    }
+
+    // 自动填充章节范围
+    if (currentProject.planned_chapters_min && !plannedChaptersMin) {
+      setPlannedChaptersMin(currentProject.planned_chapters_min)
+    }
+    if (currentProject.planned_chapters_max && !plannedChaptersMax) {
+      setPlannedChaptersMax(currentProject.planned_chapters_max)
+    }
+
+    // 自动填充自定义大纲规划
+    if (currentProject.user_outline_plan && !userOutlinePlan) {
+      setUserOutlinePlan(currentProject.user_outline_plan)
+    }
+  }, [currentProject])
 
   // 🎯 任务5.1：智能推荐大纲扩展模式和参数
   useEffect(() => {
@@ -332,13 +383,13 @@ export default function WorkflowControlPage() {
       }
 
       // 🎯 根据题材推荐卷数和每卷章数
-      if (projectGenre === '修仙' || projectGenre === '珀幻') {
-        // 修仙/珀幻：5卷，每坷8080-100章
+      if (projectGenre === '修仙' || projectGenre === '玄幻') {
+        // 修仙/玄幻：5卷，每卷80-100章
         const estimatedVolumes = Math.max(3, Math.min(8, Math.ceil(maxChapters / 90)))
         setRecommendedVolumes(estimatedVolumes)
         setRecommendedChaptersPerVolumeMin(80)
         setRecommendedChaptersPerVolumeMax(100)
-        console.log(`  💫 修仙/珀幻：${estimatedVolumes}卷 × 80-100章`)
+        console.log(`  💫 修仙/玄幻：${estimatedVolumes}卷 × 80-100章`)
       } else if (projectGenre === '都市') {
         // 都市：3卷，每圇30-50章
         const estimatedVolumes = Math.max(2, Math.min(5, Math.ceil(maxChapters / 40)))
@@ -1748,35 +1799,6 @@ export default function WorkflowControlPage() {
       setSnackbarMessage('启动工作流失败，请重试')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
-    }
-  }
-  
-  // 🆕 开始按钮点击处理（检查是否有已存在的内容）
-  const handleStartButtonClick = async () => {
-    if (!projectId) {
-      setSnackbarMessage('项目 ID 不存在')
-      setSnackbarSeverity('error')
-      setSnackbarOpen(true)
-      return
-    }
-
-    try {
-      // 🔍 检查是否有已存在的章节
-      const chaptersResponse = await apiClient.getChapters(parseInt(projectId))
-      const existingChapters = chaptersResponse.data || []
-
-      if (existingChapters.length > 0) {
-        // 有已存在的章节，显示警告对话框
-        setExistingChaptersCount(existingChapters.length)
-        setShowContentWarningDialog(true)
-      } else {
-        // 没有已存在的章节，直接打开创作对话框
-        setOpenDialog(true)
-      }
-    } catch (error) {
-      console.error('检查章节失败:', error)
-      // 如果检查失败，也直接打开对话框
-      setOpenDialog(true)
     }
   }
 
@@ -3255,10 +3277,12 @@ export default function WorkflowControlPage() {
               label="题材类型"
             >
               <MenuItem value="">请选择</MenuItem>
-              <MenuItem value="修仙">修仙玄幻</MenuItem>
-              <MenuItem value="都市">都市现实</MenuItem>
-              <MenuItem value="悬疑">悬疑推理</MenuItem>
-              <MenuItem value="言情">言情耽美</MenuItem>
+              <MenuItem value="修仙">修仙</MenuItem>
+              <MenuItem value="玄幻">玄幻</MenuItem>
+              <MenuItem value="都市">都市</MenuItem>
+              <MenuItem value="言情">言情</MenuItem>
+              <MenuItem value="耽美">耽美</MenuItem>
+              <MenuItem value="悬疑">悬疑</MenuItem>
               <MenuItem value="科幻">科幻</MenuItem>
               <MenuItem value="纯文学">纯文学</MenuItem>
             </Select>
@@ -3368,11 +3392,15 @@ export default function WorkflowControlPage() {
                 <strong>🎵 节奏建议：</strong>
                 {genre === '修仙' && plannedLengthType === 'long' && '修仙长篇推荐境界逐层递进，每5-8章一个小爆点，每卷结束有境界突破大高潮'}
                 {genre === '修仙' && plannedLengthType !== 'long' && '修仙题材注意境界体系设计，确保修炼节奏合理'}
+                {genre === '玄幻' && plannedLengthType === 'long' && '玄幻长篇推荐天赋觉醒与实力突破交替，每5-8章一个小爆点'}
+                {genre === '玄幻' && plannedLengthType !== 'long' && '玄幻题材注意血脉天赋体系设计，确保等级压制清晰'}
                 {genre === '悬疑' && '悬疑题材注意线索布局，每3-5章揭露一个小真相，每卷一个大反转'}
                 {genre === '都市' && '都市题材建议多线穿插（商战+感情+亲情），每卷一个事业里程碑'}
-                {genre === '言情' && '言情题材注意感情递进（相识→相知→相守），每圇5-10章一个甜蜜时刻'}
+                {genre === '言情' && '言情题材注意感情递进（相识→相知→相守），每5-10章一个甜蜜时刻'}
+                {genre === '耽美' && '耽美题材注意暧昧张力与情感突破交替，每5-10章一个关系进展节点'}
                 {genre === '科幻' && '科幻题材注意科技突破节奏，每卷一次探索升级（地球→星系→宇宙）'}
-                {!genre.match(/(修仙|悬疑|都市|言情|科幻)/) && '根据题材特点自动适配叙事节奏'}
+                {genre === '纯文学' && '纯文学题材注重内心世界与外部环境的张力，节奏可适当放缓'}
+                {!genre.match(/(修仙|玄幻|悬疑|都市|言情|耽美|科幻|纯文学)/) && '根据题材特点自动适配叙事节奏'}
               </Typography>
 
               {/* 📌 第三部分：规划优先说明 */}
