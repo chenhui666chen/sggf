@@ -579,6 +579,10 @@ export default function WorkflowControlPage() {
           }))
         })
 
+        // 🔥 关键修复：重置 isRunning 状态
+        setIsRunning(false)
+        console.log(`✅ 阶段 ${stageType} 完成，已重置 isRunning 为 false`)
+
         // 🆕 同步预览输出（无需刷新）
         if (data.output) {
           dispatch(updateStageOutput({ stage: stageType, output: data.output }))
@@ -612,6 +616,35 @@ export default function WorkflowControlPage() {
             }
           } catch (err) {
             console.error('概念阶段完成后自动弹窗逻辑失败:', err)
+          }
+        }
+
+        // 🔥 概念阶段重生完成：刷新所有预览内容
+        if (stageType === 'concept') {
+          try {
+            if (projectId) {
+              const token = localStorage.getItem('access_token')
+              console.log('🔄 概念阶段完成，刷新所有预览内容...')
+              fetch(`/api/v1/workflow/${projectId}/all-stages-content`, {
+                headers: { 'Authorization': `Bearer ${token}` },
+              }).then(res => res.json()).then(batchData => {
+                const stages = batchData.stages || {}
+                if (stages.concept) {
+                  setConceptContent(stages.concept)
+                  console.log(`✅ 已更新故事概念: ${stages.concept.length} 字符`)
+                }
+                if (stages.world_setting) {
+                  setWorldContent(stages.world_setting)
+                  console.log(`✅ 已更新世界观: ${stages.world_setting.length} 字符`)
+                }
+                if (stages.characters) {
+                  setCharacterContent(stages.characters)
+                  console.log(`✅ 已更新人物设定: ${stages.characters.length} 字符`)
+                }
+              }).catch(err => console.error('刷新概念阶段内容失败:', err))
+            }
+          } catch (err) {
+            console.error('刷新概念阶段内容失败:', err)
           }
         }
 
@@ -1219,7 +1252,6 @@ export default function WorkflowControlPage() {
 
               // 🔧 修复：根据后端状态确定当前应该显示的阶段
               let lastCompletedStage: StageType | null = null
-              const stageOrder: StageType[] = ['concept', 'structure', 'content', 'review', 'iteration']
 
               Object.entries(stageStatusMap).forEach(([dbField, stageName]) => {
                 const status = statusData[dbField]
@@ -3771,33 +3803,40 @@ export default function WorkflowControlPage() {
             fullWidth
             multiline
             rows={4}
-            placeholder="补充意见（选填）"
+            placeholder="可在此处输入您的想法，否则系统将随机重新生成。（选填）"
             value={regenerateFeedback}
             onChange={(e) => setRegenerateFeedback(e.target.value)}
             sx={{ mb: 2 }}
           />
 
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-            <Typography variant="body2" sx={{ color: 'text.secondary' }}>快捷意见：</Typography>
-            <Button size="small" variant="outlined" onClick={() => setRegenerateFeedback(prev => (prev ? prev + '；' : '') + '加强权谋与历史真实感')}>权谋+真实</Button>
-            <Button size="small" variant="outlined" onClick={() => setRegenerateFeedback(prev => (prev ? prev + '；' : '') + '降低爽点，增强人物动机合理性')}>降低爽点</Button>
-            <Button size="small" variant="outlined" onClick={() => setRegenerateFeedback(prev => (prev ? prev + '；' : '') + '世界观内部规则一致')}>规则一致</Button>
-          </Box>
-
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
-            <Chip
-              label={autoInferFeedback ? '自动推断：开' : '自动推断：关'}
-              size="small"
-              variant="outlined"
-              onClick={() => setAutoInferFeedback((v) => !v)}
-            />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1 }}>
+            <Tooltip 
+              title={
+                autoInferFeedback 
+                  ? "开启后，若未填写想法，系统将基于当前内容进行优化改进"
+                  : "关闭后,若未填写想法,系统将完全随机重新生成"
+              }
+              arrow
+              placement="top"
+            >
+              <Chip
+                label={autoInferFeedback ? '自动推断：开' : '自动推断：关'}
+                size="small"
+                variant="outlined"
+                onClick={() => setAutoInferFeedback((v) => !v)}
+                sx={{ cursor: 'pointer' }}
+              />
+            </Tooltip>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              {autoInferFeedback ? '将基于当前内容微调优化' : '将完全随机重新生成'}
+            </Typography>
           </Box>
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
             <Typography variant="body2" sx={{ color: 'text.secondary' }}>目标：</Typography>
-            <Button variant={regenerateTarget === 'both' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('both')}>两者</Button>
-            <Button variant={regenerateTarget === 'story' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('story')}>仅故事概念</Button>
-            <Button variant={regenerateTarget === 'world' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('world')}>仅世界观</Button>
+            <Button variant={regenerateTarget === 'story' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('story')}>重生故事概念</Button>
+            <Button variant={regenerateTarget === 'world' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('world')}>重生世界观</Button>
+            <Button variant={regenerateTarget === 'both' ? 'contained' : 'outlined'} size="small" onClick={() => setRegenerateTarget('both')}>重生两者</Button>
           </Box>
 
           <Box sx={{ mb: 2 }}>
