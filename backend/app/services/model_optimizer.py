@@ -29,6 +29,9 @@ class TaskType(str, Enum):
     
     # 阶段五：迭代优化
     ITERATION_OPTIMIZE = "iteration_optimize" # 迭代优化
+    
+    # 🆕 提示词进化专用
+    REWRITE = "rewrite"                       # 文本改写（降低AI痕迹）
 
 
 class ComplexityLevel(str, Enum):
@@ -65,6 +68,9 @@ class ModelOptimizer:
         
         # 阶段五：使用 chat（修改润色）
         TaskType.ITERATION_OPTIMIZE: "deepseek-chat",
+        
+        # 🆕 提示词进化：使用 chat（文风改写不需要推理，追求速度）
+        TaskType.REWRITE: "deepseek-chat",
     }
     
     # 激进优化策略（最大化速度）
@@ -87,6 +93,9 @@ class ModelOptimizer:
         
         # 阶段五：chat
         TaskType.ITERATION_OPTIMIZE: "deepseek-chat",
+        
+        # 🆕 提示词进化：chat
+        TaskType.REWRITE: "deepseek-chat",
     }
     
     # 默认策略（不优化，全部使用 reasoner）
@@ -306,6 +315,9 @@ if __name__ == "__main__":
     # 复杂需求
     complex_req = "创作一部逻辑严密的科幻悬疑小说，涉及多重世界观和复杂的时间线"
     print(f"\n需求: {complex_req}")
+    for task in [TaskType.CONCEPT_STORY, TaskType.CONTENT_DRAFT]:
+        model = optimizer_dynamic.select_model(task, requirement=complex_req)
+        print(f"{task.value:30} → {model}")
     for task in [TaskType.CONCEPT_STORY, TaskType.CONTENT_DRAFT]:
         model = optimizer_dynamic.select_model(task, requirement=complex_req)
         print(f"{task.value:30} → {model}")

@@ -243,10 +243,10 @@ class PromptEvaluator:
             {"role": "user", "content": f"请改写以下文本，降低其AI痕迹：\n\n{preprocessed_text}"}
         ]
 
-        # 强制使用 deepseek-chat 模型（更快更适合文风改写，不需要推理）
+        # 🔧 使用 REWRITE 任务类型（自动选择适合改写的快速模型）
         llm_result = await self.llm_client.chat(
             messages=messages,
-            model="deepseek-chat",  # 直接指定模型，绕过策略配置
+            task_type=TaskType.REWRITE,  # 由模型策略决定使用哪个模型
             temperature=temperature,
             use_cache=False  # 禁用缓存以获得多样性
         )

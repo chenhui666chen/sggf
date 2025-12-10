@@ -367,6 +367,74 @@ class EvolutionStorage:
                 reports.append(json.load(f))
         return sorted(reports, key=lambda x: x.get("created_at", ""), reverse=True)
     
+    def save_optimized_experiences(self, experiences: List[Dict]) -> None:
+        """
+        保存优化后的经验到专用文件
+        
+        Args:
+            experiences: 优化后的经验列表
+        """
+        optimized_file = self.storage_dir / "optimized_experiences.json"
+        
+        data = {
+            "optimized_at": datetime.now().isoformat(),
+            "total_count": len(experiences),
+            "experiences": experiences,
+            "version": "1.0"
+        }
+        
+        with open(optimized_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"💾 保存优化经验: {len(experiences)} 条")
+    
+    def load_optimized_experiences(self) -> Optional[Dict]:
+        """
+        加载优化后的经验
+        
+        Returns:
+            优化经验数据，如果不存在返回None
+        """
+        optimized_file = self.storage_dir / "optimized_experiences.json"
+        if not optimized_file.exists():
+            return None
+        
+        with open(optimized_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    
+    def get_optimization_metadata(self) -> Dict:
+        """
+        获取优化元数据
+        
+        Returns:
+            {"last_optimization_count": 50, "optimized_at": "2025-12-10..."}
+        """
+        metadata_file = self.storage_dir / "optimization_metadata.json"
+        if not metadata_file.exists():
+            return {"last_optimization_count": 0, "optimized_at": None}
+        
+        with open(metadata_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    
+    def update_optimization_metadata(self, report_count: int) -> None:
+        """
+        更新优化元数据
+        
+        Args:
+            report_count: 优化时的报告总数
+        """
+        metadata_file = self.storage_dir / "optimization_metadata.json"
+        
+        data = {
+            "last_optimization_count": report_count,
+            "optimized_at": datetime.now().isoformat()
+        }
+        
+        with open(metadata_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"📝 更新优化元数据: {report_count} 个报告")
+    
     def _load_all_histories(self) -> List[Dict]:
         """加载所有历史记录"""
         if not self.history_file.exists():

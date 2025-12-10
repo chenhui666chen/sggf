@@ -487,6 +487,44 @@ class PromptEvolutionEngine:
             # 重置经验库并加载历史经验（跨批次传承）
             self.meta_optimizer.reset_experience()
             historical_reports = self.storage.get_all_experience_reports()
+            
+            # 🆕 自动触发经验优化（如果满足条件）
+            if historical_reports:
+                from .experience_optimizer import get_experience_optimizer
+                optimizer = get_experience_optimizer()
+                metadata = self.storage.get_optimization_metadata()
+                
+                total_reports = len(historical_reports)
+                last_opt_count = metadata.get("last_optimization_count", 0)
+                
+                if optimizer.should_trigger_optimization(total_reports, last_opt_count):
+                    logger.info(f"🔧 触发经验优化：当前 {total_reports} 个报告，上次优化 {last_opt_count} 个")
+                    print(f"🔧 开始优化历史经验...")
+                    await self._notify_progress(on_progress, "🔧 正在优化历史经验...", 1, {})
+                    
+                    try:
+                        # 执行优化
+                        opt_result = await optimizer.optimize_experiences(historical_reports, self.genre)
+                        
+                        # 保存优化结果
+                        optimized_exps = [item.to_dict() for item in opt_result.top_strategies]
+                        self.storage.save_optimized_experiences(optimized_exps)
+                        self.storage.update_optimization_metadata(total_reports)
+                        
+                        # 输出优化摘要
+                        print(opt_result.optimization_summary)
+                        logger.info(opt_result.optimization_summary)
+                        
+                        await self._notify_progress(
+                            on_progress, 
+                            f"✅ 经验优化完成: {opt_result.original_count} → {len(opt_result.top_strategies)} 条",
+                            1.5,
+                            {"optimization_summary": opt_result.optimization_summary}
+                        )
+                    except Exception as e:
+                        logger.error(f"❌ 经验优化失败: {e}", exc_info=True)
+                        print(f"⚠️ 经验优化失败，继续使用原始经验: {e}")
+            
             if historical_reports:
                 loaded_count = self.meta_optimizer.load_historical_experience(historical_reports)
                 print(f"📚 从历史批次加载经验: {loaded_count} 条")

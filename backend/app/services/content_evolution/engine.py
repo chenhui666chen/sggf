@@ -28,6 +28,7 @@ from .feedback_collector import (
     get_collector,
 )
 from .genre_weights import get_genre_profile, build_evaluation_prompt
+from .experience_optimizer import get_content_experience_optimizer, ExperienceItem
 
 logger = logging.getLogger(__name__)
 
@@ -386,6 +387,142 @@ class ContentEvolutionEngine:
         
         logger.info(f"📊 计划进化完成: {len(results)} 个会话")
         return results
+    
+    # ==================== 🆕 经验库优化 ====================
+    
+    async def run_experience_optimization(
+        self,
+        module_name: str,
+        genre: str
+    ) -> Dict[str, Any]:
+        """
+        🆕 运行经验库优化
+        
+        在进化开始前自动触发，去重、合并、过滤历史经验
+        
+        Args:
+            module_name: 模块名称 (chapter/outline/character)
+            genre: 题材
+        
+        Returns:
+            优化结果
+        """
+        logger.info(f"🆕 开始经验库优化: {module_name}/{genre}")
+        
+        optimizer = get_content_experience_optimizer()
+        
+        # 检查是否需要优化
+        total_variants = len(self.storage.get_variants_by_module(module_name, genre))
+        last_count = self.storage.get_last_optimization_count(module_name, genre)
+        
+        should_optimize = optimizer.should_trigger_optimization(total_variants, last_count)
+        
+        if not should_optimize:
+            logger.info(f"⛔ 经验库不需要优化: 变体数={total_variants}, 上次={last_count}")
+            return {
+                "optimized": False,
+                "reason": "未达到触发条件",
+                "total_variants": total_variants,
+                "last_count": last_count
+            }
+        
+        # 收集经验数据（从变体记录中提取）
+        experiences = await self._collect_experiences_from_variants(module_name, genre)
+        
+        if not experiences or sum(len(items) for items in experiences.values()) == 0:
+            logger.warning(f"⚠️ 没有找到可优化的经验")
+            return {
+                "optimized": False,
+                "reason": "没有经验数据"
+            }
+        
+        # 执行优化
+        top_experiences, summary = await optimizer.optimize_experiences(
+            experiences,
+            module_name=module_name,
+            genre=genre
+        )
+        
+        # 保存优化结果
+        self.storage.save_optimization_metadata(
+            module_name,
+            genre,
+            top_experiences,
+            summary
+        )
+        
+        logger.info(f"✅ 经验库优化完成: 保留{len(top_experiences)}条核心经验")
+        logger.info(f"\n{summary}")
+        
+        return {
+            "optimized": True,
+            "total_experiences": len(top_experiences),
+            "summary": summary
+        }
+    
+    async def _collect_experiences_from_variants(
+        self,
+        module_name: str,
+        genre: str
+    ) -> Dict[str, List[ExperienceItem]]:
+        """
+        从变体记录中收集经验
+        
+        Returns:
+            {
+                "variant_success": [ExperienceItem, ...],
+                "variant_failure": [ExperienceItem, ...],
+                "feedback_patterns": [ExperienceItem, ...]
+            }
+        """
+        experiences = {
+            "variant_success": [],
+            "variant_failure": [],
+            "feedback_patterns": []
+        }
+        
+        # 获取所有变体
+        variants = self.storage.get_variants_by_module(module_name, genre)
+        
+        for variant in variants:
+            # 根据平均分判断成功/失败
+            if variant.sample_count < 3:
+                continue  # 样本太少，跳过
+            
+            category = "variant_success" if variant.avg_score >= 60 else "variant_failure"
+            
+            experience = ExperienceItem(
+                text=variant.mutation_description or f"变体{variant.variant_id}的优化策略",
+                category=category,
+                appearance_count=variant.sample_count,
+                source_reports=[variant.variant_id],
+                first_seen=variant.created_at,
+                last_seen=variant.last_evaluated_at or variant.created_at,
+                avg_score_improvement=variant.avg_score - 50,  # 基准50分计算提升
+                success_rate=variant.avg_score / 100  # 转换为0-1
+            )
+            
+            experiences[category].append(experience)
+        
+        # 收集反馈规律（从生成记录中提取高频反馈模式）
+        records = self.storage.get_records_by_genre(genre, days=30)
+        feedback_patterns = self._extract_feedback_patterns(records)
+        experiences["feedback_patterns"].extend(feedback_patterns)
+        
+        return experiences
+    
+    def _extract_feedback_patterns(self, records: List) -> List[ExperienceItem]:
+        """
+        从记录中提取反馈规律
+        
+        例如：
+        - 编辑量高的共同特征
+        - 重生成多的共同特征
+        - 保留率高的共同特征
+        """
+        # 简化实现：返回空列表
+        # TODO: 实现更复杂的规律提取逻辑
+        return []
     
     # ==================== 手动操作 ====================
     

@@ -62,15 +62,90 @@ export default function RelationshipGraph(props: RelationshipGraphProps) {
       const graphNodes = data.nodes || []
       const graphEdges = data.edges || []
 
-      // 转换为ReactFlow格式
-      const flowNodes: Node[] = graphNodes.map((node: any, index: number) => {
-        const isCenter = node.id === itemId
+      // 🔧 优化：改进的多层级布局算法
+      console.log('📊 开始布局计算, 节点数:', graphNodes.length, '边数:', graphEdges.length)
+      
+      // 1. 使用BFS计算每个节点的层级
+      const nodeLevels = new Map<number, number>()
+      nodeLevels.set(itemId, 0)
+      
+      const queue = [itemId]
+      const visited = new Set([itemId])
+      
+      while (queue.length > 0) {
+        const current = queue.shift()!
+        const currentLevel = nodeLevels.get(current)!
         
-        // 力导向布局：中心节点在中间，其他节点环绕
-        const angle = (index * 2 * Math.PI) / Math.max(graphNodes.length - 1, 1)
-        const radius = 200
-        const x = isCenter ? 400 : 400 + radius * Math.cos(angle)
-        const y = isCenter ? 300 : 300 + radius * Math.sin(angle)
+        // 查找所有相关边
+        graphEdges.forEach((edge: any) => {
+          let neighbor: number | null = null
+          
+          // 判断当前节点是源还是目标
+          if (edge.source === current) {
+            neighbor = edge.target
+          } else if (edge.target === current) {
+            neighbor = edge.source
+          }
+          
+          // 如果找到未访问的邻居节点
+          if (neighbor !== null && !visited.has(neighbor)) {
+            visited.add(neighbor)
+            nodeLevels.set(neighbor, currentLevel + 1)
+            queue.push(neighbor)
+          }
+        })
+      }
+      
+      console.log('✅ 层级计算完成:', Object.fromEntries(nodeLevels))
+      
+      // 2. 按层级分组节点
+      const nodesByLevel = new Map<number, any[]>()
+      graphNodes.forEach((node: any) => {
+        const level = nodeLevels.get(node.id) ?? maxDepth
+        if (!nodesByLevel.has(level)) {
+          nodesByLevel.set(level, [])
+        }
+        nodesByLevel.get(level)!.push(node)
+      })
+      
+      console.log('📂 分层结果:', Array.from(nodesByLevel.entries()).map(([k, v]) => [k, v.length]))
+      
+      // 3. 布局参数
+      const centerX = 500
+      const centerY = 400
+      const baseRadius = 220 // 增大基础半径
+      const radiusIncrement = 250 // 增大层间距
+      const minNodeSpacing = 170 // 增大节点间距
+      
+      // 4. 为每个节点计算位置
+      const flowNodes: Node[] = graphNodes.map((node: any) => {
+        const isCenter = node.id === itemId
+        const level = nodeLevels.get(node.id) ?? maxDepth
+        
+        let x = centerX
+        let y = centerY
+        
+        if (!isCenter) {
+          const levelNodes = nodesByLevel.get(level) || []
+          const nodeIndex = levelNodes.findIndex((n: any) => n.id === node.id)
+          const nodesInLevel = levelNodes.length
+          
+          // 计算所需半径（确保节点不重叠）
+          const requiredCircumference = nodesInLevel * minNodeSpacing
+          const minRequiredRadius = requiredCircumference / (2 * Math.PI)
+          const radius = Math.max(baseRadius + (level - 1) * radiusIncrement, minRequiredRadius)
+          
+          // 均匀分布在圆周上
+          const angleOffset = (level % 2) * (Math.PI / Math.max(nodesInLevel, 1))
+          const angle = (nodeIndex * 2 * Math.PI) / nodesInLevel + angleOffset
+          
+          x = centerX + radius * Math.cos(angle)
+          y = centerY + radius * Math.sin(angle)
+          
+          console.log(`🔵 节点 ${node.name} (ID:${node.id}) - 层级:${level}, 位置:(${Math.round(x)}, ${Math.round(y)}), 半径:${Math.round(radius)}`)
+        } else {
+          console.log(`🟢 中心节点 ${node.name} (ID:${node.id}) - 位置:(${x}, ${y})`)
+        }
 
         return {
           id: String(node.id),
@@ -179,9 +254,11 @@ export default function RelationshipGraph(props: RelationshipGraphProps) {
             </FormControl>
 
             <Tooltip title="刷新">
-              <IconButton size="small" onClick={loadGraph} disabled={loading}>
-                <RefreshIcon />
-              </IconButton>
+              <span>
+                <IconButton size="small" onClick={loadGraph} disabled={loading}>
+                  <RefreshIcon />
+                </IconButton>
+              </span>
             </Tooltip>
           </Box>
         </Box>
@@ -205,7 +282,7 @@ export default function RelationshipGraph(props: RelationshipGraphProps) {
         )}
 
         {!loading && !error && nodes.length > 0 && (
-          <Box sx={{ height: 600, border: '1px solid #ddd', borderRadius: 1 }}>
+          <Box sx={{ height: 700, border: '1px solid #ddd', borderRadius: 1 }}>
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -213,6 +290,9 @@ export default function RelationshipGraph(props: RelationshipGraphProps) {
               onEdgesChange={onEdgesChange}
               onNodeClick={handleNodeClick}
               fitView
+              fitViewOptions={{ padding: 0.2, maxZoom: 1.2 }}
+              minZoom={0.1}
+              maxZoom={2}
             >
               <Background />
               <Controls />

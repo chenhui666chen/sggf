@@ -409,6 +409,77 @@ class ContentEvolutionStorage:
             logger.error(f"加载最佳提示词失败: {e}")
             return None
     
+    # ==================== 🆕 经验库优化管理 ====================
+    
+    def save_optimization_metadata(
+        self,
+        module_name: str,
+        genre: str,
+        optimized_experiences: List,
+        summary: str
+    ) -> None:
+        """
+        保存经验优化元数据
+        
+        Args:
+            module_name: 模块名称
+            genre: 题材
+            optimized_experiences: 优化后的经验列表
+            summary: 优化摘要
+        """
+        opt_dir = self.storage_dir / "optimizations"
+        opt_dir.mkdir(parents=True, exist_ok=True)
+        
+        filename = f"{module_name}_{genre}_opt.json"
+        filepath = opt_dir / filename
+        
+        data = {
+            "module_name": module_name,
+            "genre": genre,
+            "optimized_count": len(optimized_experiences),
+            "experiences": [{
+                "text": exp.text,
+                "category": exp.category,
+                "appearance_count": exp.appearance_count,
+                "success_rate": exp.success_rate,
+                "last_seen": exp.last_seen
+            } for exp in optimized_experiences],
+            "summary": summary,
+            "optimized_at": datetime.now().isoformat()
+        }
+        
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"💾 保存经验优化记录: {filename}")
+    
+    def get_last_optimization_count(self, module_name: str, genre: str) -> int:
+        """
+        获取上次优化时的变体数量
+        
+        Returns:
+            上次优化时的变体总数，如果没有优化过返回0
+        """
+        opt_dir = self.storage_dir / "optimizations"
+        if not opt_dir.exists():
+            return 0
+        
+        filename = f"{module_name}_{genre}_opt.json"
+        filepath = opt_dir / filename
+        
+        if not filepath.exists():
+            return 0
+        
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                # 假设上次优化时处理的变体数即为当时的总数
+                # 可以根据实际需求调整
+                return data.get("optimized_count", 0)
+        except Exception as e:
+            logger.error(f"读取优化记录失败: {e}")
+            return 0
+    
     # ==================== 数据清理 ====================
     
     def cleanup_old_records(self, keep_days: int = 30) -> int:

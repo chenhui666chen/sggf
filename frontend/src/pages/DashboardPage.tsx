@@ -4,9 +4,6 @@ import { useDispatch, useSelector } from 'react-redux'
 import {
   Container,
   Grid,
-  Card,
-  CardContent,
-  CardActions,
   Button,
   Typography,
   Box,
@@ -32,14 +29,9 @@ import {
   Tooltip,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
-import MenuIcon from '@mui/icons-material/Menu'
 import DeleteIcon from '@mui/icons-material/Delete'
-import SchemaIcon from '@mui/icons-material/Schema'
-import LibraryBooksIcon from '@mui/icons-material/LibraryBooks'
-import EditIcon from '@mui/icons-material/Edit'
 import CheckIcon from '@mui/icons-material/Check'
 import CloseIcon from '@mui/icons-material/Close'
-import NavigateNextIcon from '@mui/icons-material/NavigateNext'
 import HeadphonesIcon from '@mui/icons-material/Headphones'
 import TheatersIcon from '@mui/icons-material/Theaters'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
@@ -48,7 +40,6 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
 import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import Menu from '@mui/material/Menu'
-import Badge from '@mui/material/Badge'
 import Snackbar from '@mui/material/Snackbar'
 import Alert from '@mui/material/Alert'
 import { RootState, AppDispatch } from '@/store/store'
@@ -103,9 +94,6 @@ export default function DashboardPage() {
   const [chapterToDelete, setChapterToDelete] = useState<any>(null)
   const [deletingChapter, setDeletingChapter] = useState(false)
 
-  // 🆕 知识库统计状态
-  const [knowledgeStats, setKnowledgeStats] = useState<Record<number, number>>({})
-  const [statsLoading, setStatsLoading] = useState(false)
 
   // 🆕 标题编辑状态
   const [editingProjectId, setEditingProjectId] = useState<number | null>(null)
@@ -163,55 +151,6 @@ export default function DashboardPage() {
     dispatch(fetchProjects())
   }, [dispatch])
 
-  // 🆕 加载知识库统计数据（使用工作流 API）
-  useEffect(() => {
-    if (projects.length === 0) return
-
-    const loadKnowledgeStats = async () => {
-      setStatsLoading(true)
-      const stats: Record<number, number> = {}
-
-      try {
-        // 并发请求所有项目的工作流数据
-        const promises = projects.map(async (project) => {
-          try {
-            const response = await fetch(`/api/v1/workflow/${project.id}/all-stages-content`, {
-              headers: {
-                'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-              },
-            })
-
-            if (response.ok) {
-              const data = await response.json()
-              const stages = data.stages || {}
-              // 统计有内容的设定数量
-              let count = 0
-              if (stages.world_setting) count++
-              if (stages.characters) count++
-              if (stages.plot_outline) count++
-              stats[project.id] = count
-              logger.log(`✅ 项目 ${project.id} 知识库统计: ${count}`)
-            } else {
-              stats[project.id] = 0
-            }
-          } catch (error) {
-            logger.error(`❌ 获取项目 ${project.id} 知识库失败:`, error)
-            stats[project.id] = 0
-          }
-        })
-
-        await Promise.all(promises)
-        setKnowledgeStats(stats)
-        logger.log('✅ 知识库统计加载完成:', stats)
-      } catch (error) {
-        logger.error('❌ 加载知识库统计失败:', error)
-      } finally {
-        setStatsLoading(false)
-      }
-    }
-
-    loadKnowledgeStats()
-  }, [projects])
 
   // 🆕 加载章节字数统计
   useEffect(() => {
@@ -1681,26 +1620,28 @@ export default function DashboardPage() {
             {/* 一键导出全文按钮 */}
             {chapters.length > 0 && (
               <Tooltip title="一键导出全文" placement="top">
-                <IconButton
-                  size="small"
-                  onClick={(e) => setExportAllAnchorEl(e.currentTarget)}
-                  disabled={exportingAll}
-                  sx={{
-                    border: '1px solid',
-                    borderColor: 'primary.main',
-                    borderRadius: 1,
-                    color: 'primary.main',
-                    '&:hover': {
-                      backgroundColor: 'primary.50',
-                    },
-                  }}
-                >
-                  {exportingAll ? (
-                    <CircularProgress size={16} />
-                  ) : (
-                    <FileDownloadIcon fontSize="small" />
-                  )}
-                </IconButton>
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => setExportAllAnchorEl(e.currentTarget)}
+                    disabled={exportingAll}
+                    sx={{
+                      border: '1px solid',
+                      borderColor: 'primary.main',
+                      borderRadius: 1,
+                      color: 'primary.main',
+                      '&:hover': {
+                        backgroundColor: 'primary.50',
+                      },
+                    }}
+                  >
+                    {exportingAll ? (
+                      <CircularProgress size={16} />
+                    ) : (
+                      <FileDownloadIcon fontSize="small" />
+                    )}
+                  </IconButton>
+                </span>
               </Tooltip>
             )}
             

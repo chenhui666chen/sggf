@@ -84,6 +84,8 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [graphStats, setGraphStats] = useState<{ total_nodes: number; total_edges: number }>({ total_nodes: 0, total_edges: 0 })
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)  // 🆕 选中的节点ID
+  const [allEdges, setAllEdges] = useState<Edge[]>([])  // 🆕 存储所有边的备份
 
   // 🆕 人物关系管理状态
   const [characterRelations, setCharacterRelations] = useState<any[]>([])
@@ -505,12 +507,84 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         const data = await response.json()
         
         // 转换为 React Flow 格式
-        const flowNodes: Node[] = data.nodes.map((node: any, index: number) => {
-          // 计算位置（环形布局）
-          const angle = (2 * Math.PI * index) / data.nodes.length
-          const radius = 250
-          const x = 400 + radius * Math.cos(angle)
-          const y = 300 + radius * Math.sin(angle)
+        // 🔧 优化：使用多层级布局算法防止节点重叠
+        console.log('📊 关系图开始布局, 节点数:', data.nodes.length, '边数:', data.edges.length)
+        
+        // 1. 构建BFS邻接表
+        const adjacency = new Map<string, Set<string>>()
+        data.nodes.forEach((node: any) => adjacency.set(node.id, new Set()))
+        data.edges.forEach((edge: any) => {
+          adjacency.get(edge.source)?.add(edge.target)
+          adjacency.get(edge.target)?.add(edge.source)
+        })
+        
+        // 2. BFS计算每个节点的层级（以度最高的节点为中心）
+        const centerNode = data.nodes.reduce((max: any, node: any) => {
+          const degree = (adjacency.get(node.id)?.size || 0)
+          return degree > (adjacency.get(max?.id)?.size || 0) ? node : max
+        }, data.nodes[0])
+        
+        const nodeLevels = new Map<string, number>()
+        nodeLevels.set(centerNode.id, 0)
+        
+        const queue = [centerNode.id]
+        const visited = new Set([centerNode.id])
+        
+        while (queue.length > 0) {
+          const current = queue.shift()!
+          const currentLevel = nodeLevels.get(current)!
+          
+          adjacency.get(current)?.forEach(neighbor => {
+            if (!visited.has(neighbor)) {
+              visited.add(neighbor)
+              nodeLevels.set(neighbor, currentLevel + 1)
+              queue.push(neighbor)
+            }
+          })
+        }
+        
+        console.log('✅ 层级计算完成:', Object.fromEntries(nodeLevels))
+        
+        // 3. 按层级分组
+        const nodesByLevel = new Map<number, any[]>()
+        data.nodes.forEach((node: any) => {
+          const level = nodeLevels.get(node.id) ?? 3
+          if (!nodesByLevel.has(level)) nodesByLevel.set(level, [])
+          nodesByLevel.get(level)!.push(node)
+        })
+        
+        console.log('📂 分层结果:', Array.from(nodesByLevel.entries()).map(([k, v]) => [k, v.length]))
+        
+        // 4. 布局参数
+        const centerX = 400
+        const centerY = 300
+        const baseRadius = 220
+        const radiusIncrement = 250
+        const minNodeSpacing = 180
+        
+        // 5. 计算节点位置
+        const flowNodes: Node[] = data.nodes.map((node: any) => {
+          const isCenter = node.id === centerNode.id
+          const level = nodeLevels.get(node.id) ?? 3
+          
+          let x = centerX
+          let y = centerY
+          
+          if (!isCenter) {
+            const levelNodes = nodesByLevel.get(level) || []
+            const nodeIndex = levelNodes.findIndex((n: any) => n.id === node.id)
+            const nodesInLevel = levelNodes.length
+            
+            const requiredCircumference = nodesInLevel * minNodeSpacing
+            const minRequiredRadius = requiredCircumference / (2 * Math.PI)
+            const radius = Math.max(baseRadius + (level - 1) * radiusIncrement, minRequiredRadius)
+            
+            const angleOffset = (level % 2) * (Math.PI / Math.max(nodesInLevel, 1))
+            const angle = (nodeIndex * 2 * Math.PI) / nodesInLevel + angleOffset
+            
+            x = centerX + radius * Math.cos(angle)
+            y = centerY + radius * Math.sin(angle)
+          }
           
           return {
             id: node.id,
@@ -525,7 +599,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                     {node.importance}
                   </Typography>
                   <Typography variant="caption" sx={{ display: 'block', color: 'primary.main', fontSize: 10 }}>
-                    ↗ 点击编辑
+                    ↗ 点击过滤关系
                   </Typography>
                 </Box>
               ),
@@ -555,7 +629,9 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         }))
         
         setNodes(flowNodes)
+        setAllEdges(flowEdges)  // 🆕 存储全部边
         setEdges(flowEdges)
+        setSelectedNodeId(null)  // 🆕 重置选中状态
         setGraphStats(data.stats)
       }
     } catch (error) {
@@ -565,17 +641,58 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
     }
   }
 
-  // 🆕 节点点击处理 - 打开对应人物的编辑对话框
+  // 🆕 节点点击处理 - 过滤显示关系线
   const handleNodeClick = (_event: React.MouseEvent, node: Node) => {
-    const characterId = node.data?.characterId
-    if (characterId) {
-      const character = characters.find((c: any) => c.id === characterId)
-      if (character) {
-        setGraphDialogOpen(false)  // 先关闭关系图对话框
-        setTimeout(() => {
-          handleOpenEditDialog(character)  // 然后打开编辑对话框
-        }, 100)
-      }
+    const nodeId = node.id
+    
+    // 如果点击的是已选中节点，则取消选中，显示所有边
+    if (selectedNodeId === nodeId) {
+      setSelectedNodeId(null)
+      setEdges(allEdges.map(edge => ({
+        ...edge,
+        animated: false,
+        style: { stroke: '#888' },
+      })))
+      // 恢复所有节点样式
+      setNodes(prevNodes => prevNodes.map(n => ({
+        ...n,
+        style: {
+          ...n.style,
+          opacity: 1,
+        },
+      })))
+    } else {
+      // 选中节点，只显示相关边
+      setSelectedNodeId(nodeId)
+      
+      // 过滤边：只显示与该节点直接相关的边
+      const filteredEdges = allEdges.map(edge => {
+        const isRelated = edge.source === nodeId || edge.target === nodeId
+        return {
+          ...edge,
+          animated: isRelated,
+          style: {
+            stroke: isRelated ? '#1976d2' : '#ddd',
+            strokeWidth: isRelated ? 2 : 1,
+          },
+        }
+      })
+      setEdges(filteredEdges)
+      
+      // 高亮相关节点，淡化其他节点
+      const relatedNodeIds = new Set<string>([nodeId])
+      allEdges.forEach(edge => {
+        if (edge.source === nodeId) relatedNodeIds.add(edge.target)
+        if (edge.target === nodeId) relatedNodeIds.add(edge.source)
+      })
+      
+      setNodes(prevNodes => prevNodes.map(n => ({
+        ...n,
+        style: {
+          ...n.style,
+          opacity: relatedNodeIds.has(n.id) ? 1 : 0.3,
+        },
+      })))
     }
   }
 
@@ -586,26 +703,30 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         <Typography variant="h6">🎴 人物卡管理</Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Tooltip title="查看人物关系网络图">
-            <Button
-              variant="outlined"
-              color="secondary"
-              startIcon={<AccountTreeIcon />}
-              onClick={handleOpenGraphDialog}
-              disabled={characters.length === 0}
-            >
-              关系图
-            </Button>
+            <span>
+              <Button
+                variant="outlined"
+                color="secondary"
+                startIcon={<AccountTreeIcon />}
+                onClick={handleOpenGraphDialog}
+                disabled={characters.length === 0}
+              >
+                关系图
+              </Button>
+            </span>
           </Tooltip>
           <Tooltip title="将结构化人物卡同步到工作流的人物设定字段">
-            <Button
-              variant="outlined"
-              color="primary"
-              startIcon={syncing ? <CircularProgress size={20} /> : <SyncIcon />}
-              onClick={handleOpenSyncDialog}
-              disabled={characters.length === 0 || syncing}
-            >
-              同步到工作流
-            </Button>
+            <span>
+              <Button
+                variant="outlined"
+                color="primary"
+                startIcon={syncing ? <CircularProgress size={20} /> : <SyncIcon />}
+                onClick={handleOpenSyncDialog}
+                disabled={characters.length === 0 || syncing}
+              >
+                同步到工作流
+              </Button>
+            </span>
           </Tooltip>
           <Button
             variant="contained"
@@ -1403,6 +1524,15 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
             <Typography variant="body2" color="text.secondary">
               {graphStats.total_nodes} 个人物 · {graphStats.total_edges} 条关系
             </Typography>
+            {selectedNodeId && (
+              <Button 
+                size="small" 
+                variant="outlined" 
+                onClick={() => handleNodeClick({} as React.MouseEvent, { id: selectedNodeId } as Node)}
+              >
+                重置过滤
+              </Button>
+            )}
             <IconButton onClick={() => setGraphDialogOpen(false)} size="small">
               <CloseIcon />
             </IconButton>

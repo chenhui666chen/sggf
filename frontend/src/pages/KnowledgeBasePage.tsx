@@ -1803,17 +1803,19 @@ export default function KnowledgeBasePage() {
                     placement="top"
                     arrow
                   >
-                    <Button
-                      variant="outlined"
-                      color="primary"
-                      size="small"
-                      fullWidth
-                      startIcon={syncingSettings ? <CircularProgress size={16} /> : <SyncIcon />}
-                      onClick={handleSyncSettingsToWorkflow}
-                      disabled={syncingSettings || collections.length === 0}
-                    >
-                      {syncingSettings ? '同步中...' : '同步到工作流'}
-                    </Button>
+                    <span>
+                      <Button
+                        variant="outlined"
+                        color="primary"
+                        size="small"
+                        fullWidth
+                        startIcon={syncingSettings ? <CircularProgress size={16} /> : <SyncIcon />}
+                        onClick={handleSyncSettingsToWorkflow}
+                        disabled={syncingSettings || collections.length === 0}
+                      >
+                        {syncingSettings ? '同步中...' : '同步到工作流'}
+                      </Button>
+                    </span>
                   </Tooltip>
                 </>
               )}

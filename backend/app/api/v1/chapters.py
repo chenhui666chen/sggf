@@ -49,8 +49,8 @@ def extract_title_from_content(content: str, chapter_number: int) -> str:
     # 提取第一行（去除前后空白）
     first_line = content.split('\n')[0].strip()
     
-    # 🔥 策略1: 匹配 Markdown 加粗标题 **第X章：标题**
-    pattern_bold = r'\*\*第[一二三四五六七八九十\d]+章[：:]\s*(.+?)\*\*'
+    # 🔥 策略1: 匹配 Markdown 加粗标题 **第X章：标题** 或 **第X章 标题**
+    pattern_bold = r'\*\*第[一二三四五六七八九十\d]+章[\uff1a:\s]+(.+?)\*\*'
     match_bold = re.match(pattern_bold, first_line)
     if match_bold:
         title_only = match_bold.group(1).strip()
@@ -60,9 +60,9 @@ def extract_title_from_content(content: str, chapter_number: int) -> str:
         title_only = _extract_title_only(title_only)
         return f"第{chapter_number}章：{title_only}"
     
-    # 🔥 策略2: 匹配普通标题 第X章：标题
+    # 🔥 策略2: 匹配普通标题 第X章：标题 或 第X章 标题
     clean_line = first_line.replace('*', '').strip()
-    pattern_normal = r'第[一二三四五六七八九十\d]+章[：:]\s*(.+)'
+    pattern_normal = r'第[一二三四五六七八九十\d]+章[\uff1a:\s]+(.+)'
     match_normal = re.match(pattern_normal, clean_line)
     if match_normal:
         title_only = match_normal.group(1).strip()
@@ -96,18 +96,20 @@ def extract_title_from_content(content: str, chapter_number: int) -> str:
 
 def _remove_chapter_prefix(text: str) -> str:
     """
-    递归移除文本中的所有"第X章："前缀
+    递归移除文本中的所有“第X章：”或“第X章 ”前缀
     
     示例:
     - "第1章：深夜解密" → "深夜解密"
+    - "第1章 深夜解密" → "深夜解密"
     - "第1章：第2章：标题" → "标题"
-    - "深夜解密" → "深夜解密"
+    - "深夜解密" → "深夜觥密"
     """
     text = text.strip().strip('"\'')
-    pattern = r'^第[一二三四五六七八九十\d]+章[：:]\s*(.+)'
+    # 🔧 修复：匹配冲号或空格分隔
+    pattern = r'^第[一二三四五六七八九十\d]+章[\uff1a:\s]+(.+)'
     match = re.match(pattern, text)
     if match:
-        # 递归处理，直到没有"第X章："前缀
+        # 递归处理，直到没有“第X章：”前缀
         return _remove_chapter_prefix(match.group(1))
     return text
 
@@ -117,25 +119,26 @@ def _extract_title_only(text: str) -> str:
     从文本中只提取标题部分，移除后面的正文内容
     
     示例:
-    - "深夜解密\\n\\nAlex的处理器" → "深夜解密"
+    - "深夜解密\n\nAlex的处理器" → "深夜解密"
     - "深夜解密" → "深夜解密"
     - "标题 正文开始" → "标题"
     
     策略：
-    1. 如果包含\\n\\n（两个换行），只取第一部分
-    2. 如果包含\\n（单个换行），只取第一部分
+    1. 如果包含\n\n（两个换行），只取第一部分
+    2. 如果包含\n（单个换行），只取第一部分
     3. 去除引号
     4. 限制长度为50字符（超过50字可能包含正文）
     """
     text = text.strip().strip('"\'')
     
-    # 移除\\n\\n后面的内容（正文开始）
-    if '\\n\\n' in text:
-        text = text.split('\\n\\n')[0].strip()
+    # 🔧 修复：使用实际换行符而不是字面量字符串
+    # 移除\n\n后面的内容（正文开始）
+    if '\n\n' in text:
+        text = text.split('\n\n')[0].strip()
     
-    # 移除单个\\n后面的内容
-    if '\\n' in text:
-        text = text.split('\\n')[0].strip()
+    # 移除单个\n后面的内容
+    if '\n' in text:
+        text = text.split('\n')[0].strip()
     
     # 限制最大长度（标题一般不会超过50字）
     if len(text) > 50:

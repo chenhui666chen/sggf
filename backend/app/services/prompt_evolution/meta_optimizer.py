@@ -18,6 +18,7 @@ from .novel_rules import (
     PRESET_INEFFECTIVE_STRATEGIES,
     PRESET_FORBIDDEN_PATTERNS,
 )
+from .experience_optimizer import get_experience_optimizer, ExperienceItem
 
 logger = logging.getLogger(__name__)
 
@@ -523,6 +524,55 @@ class MetaOptimizer:
             return 0
 
         loaded_count = 0
+        
+        # 🆕 尝试从 storage 加载优化后的经验
+        from .storage import get_evolution_storage
+        storage = get_evolution_storage()
+        optimized_data = storage.load_optimized_experiences()
+        
+        if optimized_data:
+            logger.info("🎯 检测到优化经验，优先使用")
+            # 使用优化后的经验
+            experiences = optimized_data.get("experiences", [])
+            
+            # 按类别加载
+            for exp_dict in experiences:
+                try:
+                    exp_item = ExperienceItem.from_dict(exp_dict)
+                    category = exp_item.category
+                    
+                    # 映射到对应的字段
+                    if category == "effective":
+                        if exp_item.text not in self.experience.effective_strategies:
+                            self.experience.effective_strategies.append(exp_item.text)
+                            loaded_count += 1
+                    elif category == "ineffective":
+                        if exp_item.text not in self.experience.ineffective_strategies:
+                            self.experience.ineffective_strategies.append(exp_item.text)
+                            loaded_count += 1
+                    elif category == "forbidden":
+                        if exp_item.text not in self.experience.forbidden_patterns:
+                            self.experience.forbidden_patterns.append(exp_item.text)
+                            loaded_count += 1
+                    elif category == "best_practice":
+                        if exp_item.text not in self.experience.best_practices:
+                            self.experience.best_practices.append(exp_item.text)
+                            loaded_count += 1
+                except Exception as e:
+                    logger.warning(f"⚠️ 加载优化经验项失败: {e}")
+            
+            logger.info(f"📚 从优化经验加载: {loaded_count} 条")
+            
+            # 限制每类经验的最大数量
+            self.experience.effective_strategies = self.experience.effective_strategies[:15]
+            self.experience.ineffective_strategies = self.experience.ineffective_strategies[:15]
+            self.experience.forbidden_patterns = self.experience.forbidden_patterns[:10]
+            self.experience.best_practices = self.experience.best_practices[:10]
+            
+            return loaded_count
+        
+        # 如果没有优化经验，使用原始方式加载
+        logger.info("📚 未找到优化经验，使用原始报告")
 
         # 按时间排序，优先使用最近的经验
         sorted_reports = sorted(
@@ -681,7 +731,7 @@ class MetaOptimizer:
         exploration_mode: bool = False
     ) -> List[Tuple[str, str]]:
         """
-        🆕 生成多个提示词变体用于A/B测试（支持探索模式）
+        🆕 生成多个提示词变体用于A/B测试（完全由AI动态随机探索）
 
         Args:
             base_prompt: 基础提示词
@@ -691,77 +741,169 @@ class MetaOptimizer:
         Returns:
             [(变体提示词, 变体描述), ...]
         """
-        import random
         variants = []
-
-        # 🆕 基础变体策略
-        base_strategies = [
-            ("aggressive_punctuation", "激进标点策略：强制要求至少30%的句子使用非句号标点"),
-            ("emotion_focus", "情感聚焦策略：将所有情感描写规则权重提升到最高"),
-            ("dialogue_extreme", "对话极端口语化：要求对话中必须包含语气词和不完整句"),
-            ("short_sentence", "短句主导策略：要求平均句长不超过15字"),
-        ]
         
-        # 🆕 探索模式额外策略（更激进）
-        exploration_strategies = [
-            ("reverse_formality", "反向正式度：将所有书面语替换为口语，包括叙述部分"),
-            ("sensory_extreme", "极致感官化：所有描写必须通过具体感官细节表达"),
-            ("rhythm_chaos", "节奏混沌：随机组合长句、短句、碎片句"),
-            ("minimal_adjective", "极简形容词：删除90%以上的形容词和副词"),
-            ("emotion_implicit", "情感极致隐晦：任何情感都只能通过动作和环境暗示"),
-        ]
+        # 🆕 第一步：让AI随机生成探索策略
+        strategies = await self._generate_random_exploration_strategies(num_variants, exploration_mode)
         
-        # 根据模式选择策略池
-        if exploration_mode:
-            # 探索模式：混合基础和激进策略，并随机打乱
-            all_strategies = base_strategies + exploration_strategies
-            random.shuffle(all_strategies)
-            variant_strategies = all_strategies
-        else:
-            # 正常模式：只使用基础策略
-            variant_strategies = base_strategies
-
-        for i in range(min(num_variants, len(variant_strategies))):
-            strategy_name, strategy_desc = variant_strategies[i]
-
-            # 🆕 探索模式使用更高温度生成变体
+        if not strategies:
+            logger.warning("⚠️ AI策略生成失败，跳过变体生成")
+            return []
+        
+        # 🆕 第二步：根据随机策略生成变体
+        for i, strategy_desc in enumerate(strategies, 1):
+            # 探索模式使用更高温度
             temperature = 0.95 if exploration_mode else 0.8
-            variant_prompt = await self._generate_variant(base_prompt, strategy_name, strategy_desc, temperature)
+            variant_prompt = await self._generate_variant_from_strategy(
+                base_prompt, 
+                strategy_desc, 
+                temperature
+            )
+            
             if variant_prompt:
                 variants.append((variant_prompt, strategy_desc))
                 mode_label = "🔍探索" if exploration_mode else "📝常规"
-                logger.info(f"{mode_label} 生成变体 {i+1}: {strategy_name}")
-
+                logger.info(f"{mode_label} 生成变体 {i}: {strategy_desc[:50]}...")
+        
         return variants
+    
+    async def _generate_random_exploration_strategies(
+        self,
+        num_strategies: int,
+        exploration_mode: bool = False
+    ) -> List[str]:
+        """
+        🆕 让AI随机生成探索策略（根本不使用硬编码）
+        
+        Args:
+            num_strategies: 需要生成的策略数量
+            exploration_mode: 是否为探索模式（影响激进程度）
+        
+        Returns:
+            策略描述列表
+        """
+        mode_desc = "激进探索" if exploration_mode else "温和优化"
+        
+        prompt = f"""你是提示词优化专家，擅长发现降低AI痕迹的创新方法。
 
-    async def _generate_variant(self, base_prompt: str, strategy_name: str, strategy_desc: str, temperature: float = 0.8) -> str:
-        """生成单个变体（支持自定义温度）"""
-        messages = [
-            {"role": "system", "content": "你是提示词变体生成专家。"},
-            {"role": "user", "content": f"""请基于以下提示词生成一个变体版本。
+你的任务：**随机生成 {num_strategies} 个不同的{mode_desc}策略**，用于测试和改进"降低AI痕迹"提示词。
+
+【核心要求】
+1. **完全随机创造**：每次生成都应该不同，不要重复固定模式
+2. **多维度探索**：从不同角度切入（词汇、句式、情感、对话、标点、描写、节奏等）
+3. **创新思维**：可以提出反常规的、实验性的方法
+4. {'增强激进性：可以尝试极端或颛覆性的策略' if exploration_mode else '保持温和：策略应该可控且有效'}
+
+【可能的探索方向示例】（仅供参考，你需要随机创造新的）
+- 标点类：如“禁用句号主导”、“增加省略号使用”、“问号感叹号交替”
+- 句式类：如“长短句极端对比”、“碎片化表达”、“复合句优先”
+- 词汇类：如“口语化极致”、“禁用形容词”、“多用动词”
+- 情感类：如“隐性情感表达”、“身体反应主导”、“环境映射情绪”
+- 对话类：如“方言化对话”、“不完整句式”、“语气词密集”
+- 描写类：如“感官细节主导”、“删除抽象描述”、“具体画面感”
+- 结构类：如“破坏均衡结构”、“允许冗余”、“非线性叙述”
+- 节奏类：如“加快节奏”、“停顿增加”、“韵律变化”
+
+【输出格式】
+请直接输出 {num_strategies} 条策略，每行一条，不要编号，不要解释。
+每条策略应该是一个简洁的描述性句子（30-50字）。
+
+示例输出：
+强制每句必须有情感标点（问号、感叹号、省略号），禁用连续3个以上句号
+所有描写必须通过具体的视觉、听觉、触觉细节，禁用抽象形容词
+对话中必须包含至少一个不完整句（省略、打断、话说一半）
+
+请开始随机生成："""
+        
+        try:
+            messages = [
+                {"role": "system", "content": "你是创意探索专家，擅长随机生成多样化的优化策略。"},
+                {"role": "user", "content": prompt}
+            ]
+            
+            # 使用高温度生成随机性更强的策略
+            temperature = 0.95 if exploration_mode else 0.85
+            response = await self.llm_client.chat(
+                messages=messages,
+                task_type=TaskType.REVIEW_CHECK,
+                temperature=temperature,
+                use_cache=False  # 禁用缓存，确保每次都是新的
+            )
+            
+            # 解析返回的策略列表
+            strategies = []
+            for line in response.strip().split('\n'):
+                line = line.strip()
+                # 过滤空行和编号
+                if line and not line[0].isdigit() and line[0] not in ['-', '*', '·']:
+                    strategies.append(line)
+                elif line and (line[0].isdigit() or line[0] in ['-', '*', '·']):
+                    # 移除编号标记
+                    cleaned = line.lstrip('0123456789.-*· ')
+                    if cleaned:
+                        strategies.append(cleaned)
+            
+            # 只取需要的数量
+            strategies = strategies[:num_strategies]
+            
+            logger.info(f"🎲 AI随机生成 {len(strategies)} 个{mode_desc}策略")
+            for i, s in enumerate(strategies, 1):
+                logger.debug(f"  {i}. {s[:60]}...")
+            
+            return strategies
+            
+        except Exception as e:
+            logger.error(f"❌ AI策略生成失败: {e}")
+            return []
+    
+    async def _generate_variant_from_strategy(
+        self,
+        base_prompt: str,
+        strategy_desc: str,
+        temperature: float = 0.8
+    ) -> str:
+        """
+        🆕 根据AI随机生成的策略生成变体
+        
+        Args:
+            base_prompt: 基础提示词
+            strategy_desc: AI生成的策略描述
+            temperature: 生成温度
+        
+        Returns:
+            变体提示词
+        """
+        prompt = f"""请基于以下提示词生成一个变体版本。
 
 【原始提示词】
-{base_prompt[:2000]}...
+{base_prompt[:2000]}{'...' if len(base_prompt) > 2000 else ''}
 
 【变体策略】
-{strategy_name}: {strategy_desc}
+{strategy_desc}
 
 【要求】
-1. 保持原始提示词的核心结构
-2. 根据变体策略，强化或弱化某些方面
-3. 直接输出变体提示词，不要解释
+1. 保持原始提示词的核心结构和目标（降低AI痕迹）
+2. 根据变体策略，强化、弱化或调整相关规则
+3. 可以添加新的指令、示例或禁止项
+4. 直接输出完整的变体提示词，不要任何解释或标记
 
-请输出变体提示词："""}
-        ]
-
+请输出变体提示词："""
+        
         try:
+            messages = [
+                {"role": "system", "content": "你是提示词变体生成专家。"},
+                {"role": "user", "content": prompt}
+            ]
+            
             response = await self.llm_client.chat(
                 messages=messages,
                 task_type=TaskType.REVIEW_CHECK,
                 temperature=temperature,
                 use_cache=False
             )
+            
             return response.strip()
+            
         except Exception as e:
             logger.error(f"生成变体失败: {e}")
             return ""

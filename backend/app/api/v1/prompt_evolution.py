@@ -46,6 +46,23 @@ class ApprovePromptRequest(BaseModel):
     version_id: str
 
 
+class OptimizeExperiencesRequest(BaseModel):
+    """🆕 优化经验请求"""
+    genre: Optional[str] = Field(default=None, description="可选的题材过滤")
+    force: bool = Field(default=False, description="强制优化（忽略触发条件）")
+
+
+class OptimizeExperiencesResponse(BaseModel):
+    """🆕 优化经验响应"""
+    success: bool
+    original_count: int
+    optimized_count: int
+    merged_groups_count: int
+    removed_count: int
+    summary: str
+    message: Optional[str] = None
+
+
 class EvolutionStatusResponse(BaseModel):
     """进化状态响应"""
     is_running: bool
@@ -477,5 +494,115 @@ async def get_all_experience_reports(current_user: User = Depends(get_current_us
     return {
         "count": len(reports),
         "reports": reports
+    }
+
+
+@router.post("/optimize-experiences", response_model=OptimizeExperiencesResponse)
+async def optimize_experiences(
+    request: OptimizeExperiencesRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    🆕 手动触发经验优化
+    
+    功能：
+    - 语义去重：合并相似的经验
+    - 质量过滤：移除低质量经验
+    - 效果排序：按出现频率和效果排序
+    - 压缩优化：176条 → 30-40条核心经验
+    """
+    from app.services.prompt_evolution.experience_optimizer import get_experience_optimizer
+    
+    storage = get_evolution_storage()
+    optimizer = get_experience_optimizer()
+    
+    # 获取所有经验报告
+    historical_reports = storage.get_all_experience_reports()
+    
+    if not historical_reports:
+        return OptimizeExperiencesResponse(
+            success=False,
+            original_count=0,
+            optimized_count=0,
+            merged_groups_count=0,
+            removed_count=0,
+            summary="无历史经验报告，无需优化",
+            message="请先运行几次提示词进化以积累经验"
+        )
+    
+    # 检查是否需要优化
+    if not request.force:
+        metadata = storage.get_optimization_metadata()
+        total_reports = len(historical_reports)
+        last_opt_count = metadata.get("last_optimization_count", 0)
+        
+        if not optimizer.should_trigger_optimization(total_reports, last_opt_count):
+            return OptimizeExperiencesResponse(
+                success=False,
+                original_count=total_reports,
+                optimized_count=0,
+                merged_groups_count=0,
+                removed_count=0,
+                summary=f"未达到优化触发条件：当前 {total_reports} 个报告，上次优化 {last_opt_count} 个（需增加≥20或总数>40）",
+                message="可使用 force=true 强制优化"
+            )
+    
+    try:
+        logger.info(f"🔧 开始优化经验：共 {len(historical_reports)} 个报告")
+        
+        # 执行优化
+        opt_result = await optimizer.optimize_experiences(
+            historical_reports,
+            genre=request.genre
+        )
+        
+        # 保存优化结果
+        optimized_exps = [item.to_dict() for item in opt_result.top_strategies]
+        storage.save_optimized_experiences(optimized_exps)
+        storage.update_optimization_metadata(len(historical_reports))
+        
+        logger.info(f"✅ 经验优化完成: {opt_result.original_count} → {len(opt_result.top_strategies)} 条")
+        
+        return OptimizeExperiencesResponse(
+            success=True,
+            original_count=opt_result.original_count,
+            optimized_count=len(opt_result.top_strategies),
+            merged_groups_count=len(opt_result.merged_groups),
+            removed_count=len(opt_result.removed_low_quality),
+            summary=opt_result.optimization_summary,
+            message="经验优化成功"
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ 经验优化失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"优化失败: {str(e)}")
+
+
+@router.get("/optimization-status")
+async def get_optimization_status(current_user: User = Depends(get_current_user)):
+    """🆕 获取经验优化状态"""
+    storage = get_evolution_storage()
+    metadata = storage.get_optimization_metadata()
+    optimized_data = storage.load_optimized_experiences()
+    historical_reports = storage.get_all_experience_reports()
+    
+    total_reports = len(historical_reports)
+    last_opt_count = metadata.get("last_optimization_count", 0)
+    optimized_at = metadata.get("optimized_at")
+    
+    # 计算是否应该优化
+    from app.services.prompt_evolution.experience_optimizer import get_experience_optimizer
+    optimizer = get_experience_optimizer()
+    should_optimize = optimizer.should_trigger_optimization(total_reports, last_opt_count)
+    
+    return {
+        "total_reports": total_reports,
+        "last_optimization_count": last_opt_count,
+        "new_reports_since_last": total_reports - last_opt_count,
+        "optimized_at": optimized_at,
+        "has_optimized_data": optimized_data is not None,
+        "optimized_experience_count": optimized_data.get("total_count", 0) if optimized_data else 0,
+        "should_optimize": should_optimize,
+        "optimization_trigger_threshold": "\u589e\u52a0>=20\u4e2a\u62a5\u544a \u6216 \u603b\u6570>40"
     }
 
