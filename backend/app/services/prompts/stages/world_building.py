@@ -27,17 +27,15 @@ class WorldBuildingPrompts:
 
     @staticmethod
     def get_world_prompt(
-        concept: str,
         genre: str,
         requirement: str = "",
         genre_constraint: str = "",
         genre_extra_sections: str = ""
     ) -> str:
         """
-        获取世界观生成的 user prompt
+        获取世界观生成的 user prompt（引用式）
         
         Args:
-            concept: 故事概念
             genre: 题材类型
             requirement: 用户特别要求
             genre_constraint: 题材约束（术语适配）
@@ -46,7 +44,7 @@ class WorldBuildingPrompts:
         return f"""你是一名"世界观架构师"，需要为一个网文项目生成结构化的【世界观设定】。
 
 【已知内容】
-- 故事概念：{concept[:500] if concept else '无'}
+- 故事概念：详见上下文
 - 题材类型：{genre or "通用题材"}
 - 用户在世界观上的特别要求：{requirement or "暂无特别要求"}{genre_constraint}
 
@@ -113,25 +111,21 @@ class CharacterDesignPrompts:
 
     @staticmethod
     def get_character_prompt(
-        concept: str,
-        world_setting: str,
         requirement: str = "",
         genre_extra_fields: str = ""
     ) -> str:
         """
-        获取人物生成的 user prompt（完整详细版）
+        获取人物生成的 user prompt（引用式）
         
         Args:
-            concept: 故事概念
-            world_setting: 世界观设定
             requirement: 用户特别要求
             genre_extra_fields: 题材专属人物字段
         """
-        return f"""你是一名擅长网文人物塑造的“人物设计师”，需要为一个网文项目生成结构化的【主要人物设定】。
+        return f"""你是一名擅长网文人物塑造的"人物设计师"，需要为一个网文项目生成结构化的【主要人物设定】。
 
 【已知内容】
-- 故事概念：{concept[:500] if concept else '无'}
-- 世界观设定：{world_setting[:300] if world_setting else '无'}
+- 故事概念：详见上下文
+- 世界观设定：详见上下文
 - 用户对人物的特别要求：{requirement or "暂无特别要求"}
 
 【总体要求】

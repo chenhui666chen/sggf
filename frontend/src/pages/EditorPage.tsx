@@ -74,6 +74,11 @@ export default function EditorPage() {
   const [logicCheckResult, setLogicCheckResult] = useState<any | null>(null)
   const [checkingLogic, setCheckingLogic] = useState(false)
 
+  // 🆕 再次优化状态
+  const [optimizing, setOptimizing] = useState(false)
+  const [optimizeDialogOpen, setOptimizeDialogOpen] = useState(false)
+  const [userFeedback, setUserFeedback] = useState('')
+
   // 导出菜单状态
   const [exportAnchorEl, setExportAnchorEl] = useState<null | HTMLElement>(null)
   const exportMenuOpen = Boolean(exportAnchorEl)
@@ -187,6 +192,116 @@ export default function EditorPage() {
     } finally {
       setLoadingRevisions(false)
     }
+  }
+
+  // 🆕 打开再次优化对话框
+  const handleOpenOptimizeDialog = () => {
+    setUserFeedback('')  // 清空之前的意见
+    setOptimizeDialogOpen(true)
+  }
+
+  // 🆕 确认再次优化
+  const handleConfirmOptimize = async () => {
+    setOptimizeDialogOpen(false)
+    await handleReOptimize(userFeedback.trim())
+  }
+
+  // 🆕 再次优化：对当前章节再迭代一次
+  const handleReOptimize = async (feedback: string = '') => {
+    if (!chapterId || !projectId) return
+    
+    setOptimizing(true)
+    try {
+      const response = await fetch('/api/v1/workflow/optimize-chapter', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+        body: JSON.stringify({
+          project_id: parseInt(projectId),
+          chapter_id: parseInt(chapterId),
+          current_content: content,  // 使用当前编辑器中的内容
+          user_feedback: feedback,   // 🆕 用户额外意见
+        }),
+      })
+      
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || '优化请求失败')
+      }
+      
+      const data = await response.json()
+      setSaveMessage('✨ 已提交优化任务,正在后台处理...（预计30-60秒）')
+      
+      // 轮询任务状态
+      pollOptimizeTaskStatus(data.task_id)
+    } catch (error: any) {
+      console.error('再次优化失败:', error)
+      setSaveError(error.message || '再次优化失败，请稍后重试')
+      setOptimizing(false)
+    }
+  }
+
+  // 轮询优化任务状态
+  const pollOptimizeTaskStatus = async (taskId: string) => {
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/v1/workflow/task/${taskId}`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          },
+        })
+        
+        if (!response.ok) {
+          clearInterval(pollInterval)
+          setOptimizing(false)
+          setSaveError('获取任务状态失败')
+          return
+        }
+        
+        const data = await response.json()
+        
+        if (data.status === 'completed') {
+          clearInterval(pollInterval)
+          
+          // 解析结果（result 是 JSON 字符串）
+          try {
+            const result = typeof data.result === 'string' ? JSON.parse(data.result) : data.result
+            
+            if (result && result.optimized_content) {
+              dispatch(setContent(result.optimized_content))
+              setSaveMessage(`✅ 优化完成！评分: ${result.original_score || 'N/A'}`)
+            } else {
+              setSaveError('优化结果为空，请重试')
+            }
+          } catch (parseError) {
+            console.error('解析优化结果失败:', parseError)
+            setSaveError('解析优化结果失败')
+          }
+          
+          setOptimizing(false)
+        } else if (data.status === 'failed') {
+          clearInterval(pollInterval)
+          setSaveError('优化失败: ' + (data.error || '未知错误'))
+          setOptimizing(false)
+        } else if (data.status === 'running') {
+          // 更新进度提示
+          setSaveMessage(`🔄 优化中... (进度: ${data.progress || 50}%)`)
+        }
+      } catch (error) {
+        console.error('轮询任务状态失败:', error)
+      }
+    }, 2000) // 每2秒轮询一次
+    
+    // 5分钟后超时
+    setTimeout(() => {
+      clearInterval(pollInterval)
+      if (optimizing) {
+        setOptimizing(false)
+        setSaveError('优化超时，请重试')
+      }
+    }, 300000)
   }
 
   // 运行章节逻辑检查
@@ -368,6 +483,18 @@ export default function EditorPage() {
             size="small"
           >
             版本历史
+          </Button>
+
+          {/* 🆕 再次优化按钮 */}
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={handleOpenOptimizeDialog}
+            disabled={optimizing || !content}
+            startIcon={optimizing ? <CircularProgress size={16} /> : undefined}
+            color="secondary"
+          >
+            {optimizing ? '优化中...' : '再次优化'}
           </Button>
 
           {/* 章节逻辑检查按钮 */}
@@ -798,6 +925,62 @@ export default function EditorPage() {
             startIcon={restoringRevision ? <CircularProgress size={16} /> : <RestoreIcon />}
           >
             {restoringRevision ? '恢复中...' : '确认恢复'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 🆕 再次优化对话框 */}
+      <Dialog
+        open={optimizeDialogOpen}
+        onClose={() => !optimizing && setOptimizeDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 2,
+          }
+        }}
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          ✨ 再次优化章节
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            AI 将自动分析当前章节并提出优化建议。您可以补充额外的优化意见，或者直接点击「开始优化」依赖系统自动评审。
+          </Typography>
+          
+          <TextField
+            fullWidth
+            multiline
+            rows={6}
+            value={userFeedback}
+            onChange={(e) => setUserFeedback(e.target.value)}
+            placeholder="请输入您的优化意见（可选）\n\n例如：\n- 增加更多情感描写\n- 加强动作场面的紧张感\n- 修改某个人物的对话语气..."
+            variant="outlined"
+            sx={{
+              mt: 2,
+              '& .MuiOutlinedInput-root': {
+                fontFamily: 'inherit',
+                fontSize: '14px',
+              },
+            }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setOptimizeDialogOpen(false)}
+            disabled={optimizing}
+          >
+            取消
+          </Button>
+          <Button
+            onClick={handleConfirmOptimize}
+            variant="contained"
+            color="secondary"
+            disabled={optimizing}
+            startIcon={optimizing ? <CircularProgress size={16} /> : undefined}
+          >
+            {optimizing ? '优化中...' : '开始优化'}
           </Button>
         </DialogActions>
       </Dialog>

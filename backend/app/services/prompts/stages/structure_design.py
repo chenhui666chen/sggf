@@ -17,38 +17,39 @@ class StructureDesignPrompts:
     
     @staticmethod
     def get_structure_prompt(
-        concept: str,
-        world_setting: str,
-        characters: str,
-        genre_rhythm_guide: str = ""
+        genre_rhythm_guide: str = "",
+        genre: str = "通用"
     ) -> str:
         """
-        获取结构设计（情节大纲）的 user prompt
+        获取结构设计（情节大纲）的 user prompt（纯引用式，避免信息冗余）
         
         Args:
-            concept: 故事概念（截断至500字）
-            world_setting: 世界观设定（截断至300字）
-            characters: 人物设定（截断至300字）
             genre_rhythm_guide: 题材专属节奏指导
+            genre: 题材类型（用于任务描述）
         
         Returns:
             完整的结构设计 user prompt
+        
+        注意：
+            - 本方法不再接收concept/world_setting/characters参数
+            - 所有详细信息通过context中的optimized_context传递
+            - 避免分层摘要与手动截断共存造成信息冲突
         """
-        base_prompt = f'''你是一名擅长网文结构的"情节架构师"，需要在已有【故事概念 + 世界观设定 + 主要人物】的基础上，规划一部长篇网文的【情节大纲】。
+        base_prompt = f'''你是一名擅长网文结构的"情节架构师"，需要基于context中提供的完整故事信息，规划一部{genre}题材长篇网文的【情节大纲】。
 
-【故事概念】
-{concept}
+【重要说明】
+context中的optimized_context字段包含了经过AI优化的完整信息，其中涵盖：
+- 故事概念的核心骨架和关键情节片段
+- 世界观设定的核心要素和详细规则
+- 主要人物的设定骨架和详细背景
 
-【世界观设定】
-{world_setting}
-
-【主要人物】
-{characters}
+请仔细阅读context中的所有信息，确保大纲设计与背景设定完全一致
 
 【总体要求】
 1. 采用"按卷/阶段 + 起承转合骨架 + 网文爽点节奏"的混合结构。
 2. 每一卷/阶段都要明确：阶段目标、主要矛盾、爆点与升级节点。
 3. 不写细节对白，只写"发生什么事 + 冲突方向 + 爽点类型"。
+4. 确保与context中的世界观规则、人物性格、故事主线保持一致。
 
 请按以下结构输出：
 
@@ -160,21 +161,24 @@ def get_genre_rhythm_guide(genre: str) -> str:
     return GENRE_RHYTHM_GUIDES.get(genre, "")
 
 
-# 快捷构建函数
+# 快捷构建函数（保持向后兼容，但已弃用）
 def build_structure_design_prompt(
-    concept: str,
-    world_setting: str,
-    characters: str,
+    concept: str = "",  # 已弃用，仅为向后兼容保留
+    world_setting: str = "",  # 已弃用，仅为向后兼容保留
+    characters: str = "",  # 已弃用，仅为向后兼容保留
     genre: str = "",
     genre_module: Optional[dict] = None
 ) -> str:
     """
     构建结构设计提示词的快捷函数
     
+    警告：本函数已弃用。请直接使用 StructureDesignPrompts.get_structure_prompt()
+    concept/world_setting/characters 参数已不再使用，所有信息通过 context 传递。
+    
     Args:
-        concept: 故事概念
-        world_setting: 世界观设定
-        characters: 人物设定
+        concept: (已弃用) 故事概念
+        world_setting: (已弃用) 世界观设定
+        characters: (已弃用) 人物设定
         genre: 题材名称
         genre_module: 题材模块（可选，包含 outline_rhythm_guide）
     
@@ -188,8 +192,6 @@ def build_structure_design_prompt(
         rhythm_guide = get_genre_rhythm_guide(genre)
     
     return StructureDesignPrompts.get_structure_prompt(
-        concept=concept[:500] if concept else '无',
-        world_setting=world_setting[:300] if world_setting else '无',
-        characters=characters[:300] if characters else '无',
-        genre_rhythm_guide=rhythm_guide
+        genre_rhythm_guide=rhythm_guide,
+        genre=genre or "通用"
     )

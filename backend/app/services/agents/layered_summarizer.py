@@ -42,6 +42,11 @@ class LayeredSummarizer:
             (0, 20): ('qwen-max', 0.85),      # 0-20章: qwen-max
             (20, 50): ('qwen-long', 0.40),    # 20-50章: qwen-long
             (50, 999): ('qwen-long', 0.20),   # 50+章: qwen-long宽松
+        },
+        'structure_design': {  # 结构设计场景
+            (0, 50): ('deepseek-r1', 0.80),   # 0-50章: R1推理(结构设计需要严谨逻辑)
+            (50, 150): ('qwen-long', 0.40),   # 50-150章: qwen-long(大规模结构)
+            (150, 999): ('qwen-long', 0.25),  # 150+章: qwen-long宽松
         }
     }
     
@@ -60,7 +65,7 @@ class LayeredSummarizer:
         outline: str,
         characters: str,
         worldview: str,
-        scenario: str = "outline_expand",  # outline_expand/character_expand/chapter_generation
+        scenario: str = "outline_expand",  # outline_expand/character_expand/chapter_generation/structure_design
         current_count: int = 50,  # 当前章节数/人物数
         focus_range: Optional[Tuple[int, int]] = None  # 聚焦章节范围
     ) -> dict:

@@ -3676,9 +3676,18 @@ async def execute_generate_next_chapter_task(
                 char_docs = kb.search(query=chapter_plan, k=getattr(settings, "TYPED_RAG_K_CHAR", 4), filter_type="character", project_id=project_id)
                 world_docs = kb.search(query=chapter_plan, k=getattr(settings, "TYPED_RAG_K_WORLD", 5), filter_type="world_setting", project_id=project_id)
                 if char_docs:
-                    rag_character_context = "\n".join([f"- {d.metadata.get('name','未知角色')}: {d.page_content[:300]}" for d in char_docs])
+                    # 🆕 使用智能截断替代手动截断
+                    from app.services.agents.intelligent_truncator import smart_truncate_for_context
+                    rag_character_context = "\n".join([
+                        f"- {d.metadata.get('name','未知角色')}: {smart_truncate_for_context(d.page_content, max_tokens=200, content_type='rag_doc', preserve_ratio=0.9)}"
+                        for d in char_docs
+                    ])
                 if world_docs:
-                    rag_world_context = "\n".join([f"- {d.metadata.get('title','设定')}: {d.page_content[:400]}" for d in world_docs])
+                    from app.services.agents.intelligent_truncator import smart_truncate_for_context
+                    rag_world_context = "\n".join([
+                        f"- {d.metadata.get('title','设定')}: {smart_truncate_for_context(d.page_content, max_tokens=250, content_type='rag_doc', preserve_ratio=0.9)}"
+                        for d in world_docs
+                    ])
                 logger.info(f"   📚 RAG注入：人物{len(char_docs)}条，设定{len(world_docs)}条")
         except Exception as rag_e:
             logger.warning(f"   ⚠️ Typed-RAG 注入失败: {rag_e}")
@@ -3851,98 +3860,31 @@ async def execute_generate_next_chapter_task(
                 is_complete=False
             )
 
-        # 🆕 构建评审提示词（网文6维度评审体系）
-        review_system_prompt = """你是一位专业的网络小说质量评审官。请使用【网文6维度评审体系】对章节内容进行评审。
-
-## 📊 网文6维度评审体系
-
-### 1. 爽点效果（权重25%）
-- 本章是否有明确的爽点（打脸/升级/获得宝物/装逼成功/反转翻盘等）？
-- 爽点铺垫是否充分？释放是否有力？
-- 如果是过渡章节，是否为后续爽点做了必要铺垫？
-
-### 2. 节奏把控（权重20%）
-- 紧张与舒缓是否平衡？
-- 信息密度是否适中（不过载也不空洞）？
-- 场景转换是否流畅？
-- 对话与叙述比例是否合理（建议30-50%对话）？
-
-### 3. 钩子效果（权重15%）
-- 章节开头是否吸引人？（是否避免了"醒来/阳光照进"的套路开头）
-- 章节结尾是否有悬念/钩子？（是否避免了"她知道从这一刻起..."的总结式结尾）
-- 读者是否有"想点下一章"的冲动？
-- 伏笔铺设是否自然？
-
-### 4. 代入感（权重15%）
-- 主角视角是否清晰？
-- 读者能否代入主角的处境和情感？
-- 配角是否有存在感而不抢戏？
-- 情感共鸣是否充分？
-
-### 5. 文笔流畅度（权重10%）
-- 是否有明显的AI痕迹或机械感？
-- 对话是否自然、符合人物性格？
-- 是否有病句、重复、啰嗦？
-- 描写是否生动有画面感？
-
-### 6. 内容一致性（权重15%）
-- 人物设定是否与前文一致（性格、能力、外貌、背景）？
-- 世界观规则是否与前文一致？
-- 时间线是否合理？
-- 道具/物品是否与前文一致？"""
-
-        review_user_prompt = f"""请评审以下第{next_chapter_number}章内容：
-
-【章节规划】
-{chapter_plan}
-
-【情节大纲】
-{plot_outline}
-
-【章节内容】
-{chapter_draft}
-
----
-
-【输出格式】
-请使用以下格式输出评审报告：
-
-## 📊 网文质量评审报告
-
-**综合评分**：X/10分
-
-### 1. 爽点效果 ⭐⭐⭐
-- 评价：...
-- 问题：...
-
-### 2. 节奏把控 ⭐⭐⭐
-- 评价：...
-- 问题：...
-
-### 3. 钩子效果 ⭐⭐⭐
-- 开头评价：...
-- 结尾评价：...
-- 问题：...
-
-### 4. 代入感 ⭐⭐⭐
-- 评价：...
-- 问题：...
-
-### 5. 文笔流畅度 ⭐⭐⭐
-- 评价：...
-- 问题：...
-
-### 6. 内容一致性 ⭐⭐⭐
-- 评价：...
-- 问题：...
-
-### 🔧 具体修改建议（按优先级排序）
-1. 【必改】...
-2. 【建议】...
-3. 【可选】...
-
-### ✨ 亮点
-- ..."""
+         # 🆕 获取项目题材（用于题材自适应评审）
+        review_project_genre = ""
+        try:
+            review_genre_query = text("SELECT genre FROM projects WHERE id = :project_id")
+            review_genre_result = db.execute(review_genre_query, {"project_id": project_id}).fetchone()
+            if review_genre_result:
+                review_project_genre = review_genre_result[0] or ""
+            logger.info(f"   🎯 评审使用题材: {review_project_genre or '通用'}")
+        except Exception as e:
+            logger.warning(f"   ⚠️ 获取项目题材失败: {e}")
+        
+        # 🆕 使用题材自适应评审提示词
+        from app.services.prompts.review_prompts import GenreAdaptiveReviewPrompts
+        
+        review_system_prompt = GenreAdaptiveReviewPrompts.get_review_system_prompt(
+            genre=review_project_genre
+        )
+        
+        review_user_prompt = GenreAdaptiveReviewPrompts.get_review_user_prompt(
+            chapter_number=next_chapter_number,
+            chapter_plan=chapter_plan,
+            chapter_content=chapter_draft,
+            plot_outline=plot_outline,
+            genre=review_project_genre
+        )
 
         # 🆕 使用真流式 LLM 调用（R1 逻辑检查）
         try:
@@ -4095,14 +4037,47 @@ async def execute_generate_next_chapter_task(
 
         # 🆕 使用迭代优化（max改稿 + R1打分循环,达到阈值后再输出）
         try:
-            # 选择用于改稿的生成模型（与内容创作一致的策略）
-            from app.services.agents.context_optimizer import get_context_optimizer
-            revision_optimizer = get_context_optimizer(
-                current_chapter=next_chapter_number,
-                stage='content_creation'
-            )
-            selected_revision_model = revision_optimizer.selected_model
+            # 🎯 根据实际输入长度动态选择改稿模型
+            def estimate_tokens(text: str) -> int:
+                """估算文本的 token 数（中文按1.3倍字符数估算）"""
+                return int(len(text) * 1.3)
+            
+            def select_model_by_length(chapter_content: str, reviews: str) -> str:
+                """根据输入长度智能选择模型
+                
+                Args:
+                    chapter_content: 当前章节内容
+                    reviews: 累积的评审意见
+                
+                Returns:
+                    选择的模型名称
+                """
+                # 估算总输入长度（章节 + 评审 + 系统提示词 + 用户提示词模板）
+                chapter_tokens = estimate_tokens(chapter_content)
+                reviews_tokens = estimate_tokens(reviews)
+                prompt_overhead = 500  # 系统提示词和用户提示词模板的开销
+                
+                total_tokens = chapter_tokens + reviews_tokens + prompt_overhead
+                
+                # qwen-max 限制：30720 tokens
+                # 保留 30% 安全余量：21504 tokens
+                max_safe_limit = 21504
+                
+                if total_tokens < max_safe_limit:
+                    return "qwen-max"
+                else:
+                    return "qwen-long"
+            
+            # 初始评审意见
+            initial_reviews = review_report or ""
+            
+            # 选择初始模型
+            selected_revision_model = select_model_by_length(chapter_draft, initial_reviews)
             logger.info(f"   🤖 迭代优化改稿模型: {selected_revision_model}")
+            logger.info(f"      - 章节长度: {len(chapter_draft)} 字 ≈ {estimate_tokens(chapter_draft)} tokens")
+            logger.info(f"      - 初始评审: {len(initial_reviews)} 字 ≈ {estimate_tokens(initial_reviews)} tokens")
+            logger.info(f"      - 预估总计: ≈ {estimate_tokens(chapter_draft) + estimate_tokens(initial_reviews) + 500} tokens")
+            
             # 🆕 广播步骤4改稿模型（首轮改稿前广播一次）
             await ws_manager.send_model_used(
                 project_id=project_id,
@@ -4115,10 +4090,10 @@ async def execute_generate_next_chapter_task(
             try:
                 from app.core.config import settings
                 pass_score_threshold = getattr(settings, 'ITERATION_PASS_SCORE', 9.0)
-                max_rounds = getattr(settings, 'ITERATION_MAX_ROUNDS', 3)
+                max_rounds = getattr(settings, 'ITERATION_MAX_ROUNDS', 2)
             except Exception:
                 pass_score_threshold = 8.5
-                max_rounds = 3
+                max_rounds = 2
             logger.info(f"   🎯 迭代优化目标分值: {pass_score_threshold} | 最大轮次: {max_rounds}")
 
             # 辅助：解析评审报告中的综合评分
@@ -4159,6 +4134,22 @@ async def execute_generate_next_chapter_task(
                 # 第N轮：根据所有历史评审意见进行改稿
                 # 🆕 将所有评审意见汇总，按轮次展示
                 all_reviews_text = "\n\n".join(all_reviews)
+                
+                # 🎯 每轮动态选择模型（因为评审意见在累积）
+                current_model = select_model_by_length(current_version, all_reviews_text)
+                if current_model != selected_revision_model:
+                    selected_revision_model = current_model
+                    logger.info(f"   🔄 第{round_idx}轮模型切换: {selected_revision_model}")
+                    logger.info(f"      - 当前章节: {len(current_version)} 字 ≈ {estimate_tokens(current_version)} tokens")
+                    logger.info(f"      - 累积评审: {len(all_reviews_text)} 字 ≈ {estimate_tokens(all_reviews_text)} tokens")
+                    logger.info(f"      - 预估总计: ≈ {estimate_tokens(current_version) + estimate_tokens(all_reviews_text) + 500} tokens")
+                    # 广播模型切换
+                    await ws_manager.send_model_used(
+                        project_id=project_id,
+                        stage='iteration',
+                        model=selected_revision_model,
+                        extra={"step": f"iteration_round_{round_idx}", "reason": "context_length_increase"}
+                    )
                 iteration_user_prompt_round = f"""【重要提示】请严格按照以下所有评审意见逐条修改第{next_chapter_number}章内容，不要遗漏或忽略任何一条建议。
 
 【当前章节内容】
@@ -5415,3 +5406,328 @@ async def get_epic_framework(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+
+@router.post("/optimize-chapter")
+async def optimize_chapter(
+    request: dict,
+    background_tasks: BackgroundTasks,
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    再次优化章节：对当前章节再进行一轮迭代优化
+    
+    请求体：
+    {
+        "project_id": 1,
+        "chapter_id": 10,
+        "current_content": "当前章节内容..."
+    }
+    
+    返回：
+    {
+        "task_id": "optimize_xxx",
+        "message": "优化任务已提交"
+    }
+    """
+    from app.services.websocket_manager import ws_manager
+    import uuid
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    project_id = request.get("project_id")
+    chapter_id = request.get("chapter_id")
+    current_content = request.get("current_content", "")
+    user_feedback = request.get("user_feedback", "")  # 🆕 用户额外意见
+    
+    if not project_id or not chapter_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="缺少 project_id 或 chapter_id"
+        )
+    
+    # 验证项目所有权
+    project = db.query(Project).filter(
+        (Project.id == project_id) & (Project.user_id == current_user.id)
+    ).first()
+    
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="项目不存在"
+        )
+    
+    # 验证章节存在
+    chapter = db.query(Chapter).filter(
+        (Chapter.id == chapter_id) & (Chapter.project_id == project_id)
+    ).first()
+    
+    if not chapter:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="章节不存在"
+        )
+    
+    # 生成任务ID
+    task_id = f"optimize_{uuid.uuid4().hex[:8]}"
+    
+    # 创建任务记录（使用 generation_history 表）
+    insert_query = text("""
+        INSERT INTO generation_history
+        (project_id, task_type, task_id, status, created_at)
+        VALUES (:project_id, :task_type, :task_id, :status, :created_at)
+    """)
+    
+    db.execute(insert_query, {
+        "project_id": project_id,
+        "task_type": "optimize_chapter",
+        "task_id": task_id,
+        "status": "running",
+        "created_at": datetime.now().isoformat()
+    })
+    db.commit()
+    logger.info(f"✅ 任务记录已创建: {task_id}")
+    
+    # 异步执行优化
+    asyncio.create_task(
+        _optimize_chapter_task(
+            task_id=task_id,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            current_content=current_content,
+            user_feedback=user_feedback,  # 🆕 传递用户意见
+        )
+    )
+    
+    return {
+        "task_id": task_id,
+        "message": "优化任务已提交"
+    }
+
+
+async def _optimize_chapter_task(
+    task_id: str,
+    project_id: int,
+    chapter_id: int,
+    current_content: str,
+    user_feedback: str = "",  # 🆕 用户额外意见
+):
+    """
+    异步执行章节优化任务
+    """
+    from app.services.websocket_manager import ws_manager
+    from app.services.agents.agents import (
+        StoryReviewAgent,
+        ContentRevisionAgent,
+    )
+    from app.services.prompts.review_prompts import GenreAdaptiveReviewPrompts
+    from sqlalchemy import text
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    db = SessionLocal()
+    
+    try:
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=0,
+            message="🔄 开始优化章节..."
+        )
+        
+        # 获取项目信息
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if not project:
+            raise Exception("项目不存在")
+        
+        # 获取章节信息
+        chapter = db.query(Chapter).filter(
+            (Chapter.id == chapter_id) & (Chapter.project_id == project_id)
+        ).first()
+        if not chapter:
+            raise Exception("章节不存在")
+        
+        # 获取章节计划
+        query = text("""
+            SELECT chapter_plan
+            FROM chapter_plans
+            WHERE project_id = :project_id AND chapter_number = :chapter_number
+            ORDER BY id DESC
+            LIMIT 1
+        """)
+        plan_result = db.execute(query, {
+            "project_id": project_id,
+            "chapter_number": chapter.chapter_number
+        }).fetchone()
+        
+        chapter_plan = plan_result[0] if plan_result else ""
+        
+        # 获取项目题材
+        genre = ""
+        try:
+            genre_query = text("SELECT genre FROM projects WHERE id = :project_id")
+            genre_result = db.execute(genre_query, {"project_id": project_id}).fetchone()
+            if genre_result:
+                genre = genre_result[0] or ""
+        except Exception as e:
+            logger.warning(f"获取项目题材失败: {e}")
+        
+        # 📝 步骤1：质量评审
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=20,
+            message="📝 正在评审章节质量..."
+        )
+        
+        review_agent = StoryReviewAgent()
+        review_system_prompt = GenreAdaptiveReviewPrompts.get_review_system_prompt(genre=genre)
+        review_user_prompt = GenreAdaptiveReviewPrompts.get_review_user_prompt(
+            chapter_number=chapter.chapter_number,
+            chapter_plan=chapter_plan,
+            chapter_content=current_content,
+            plot_outline="",  # 再次优化不需要大纲
+            genre=genre
+        )
+        
+        review_result = await review_agent.execute(
+            system_prompt=review_system_prompt,
+            user_prompt=review_user_prompt,
+            context={},
+        )
+        
+        review_report = review_result.get("output", "")
+        
+        # 解析评分
+        import re
+        score_match = re.search(r'综合评分[:\uff1a]\s*(\d+(?:\.\d+)?)', review_report)
+        current_score = float(score_match.group(1)) if score_match else 0.0
+        
+        logger.info(f"📊 当前章节评分: {current_score}")
+        
+        # 🔧 步骤2：迭代优化
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=50,
+            message=f"🔧 正在优化章节（当前评分: {current_score}）..."
+        )
+        
+        # 准备改稿Agent
+        revision_agent = ContentRevisionAgent()
+        revision_system_prompt = revision_agent.get_system_prompt()
+        
+        # 构造改稿提示词
+        # 🆕 如果用户提供了额外意见，则加入到提示词中
+        user_feedback_section = ""
+        if user_feedback and user_feedback.strip():
+            user_feedback_section = f"""
+
+## 用户额外意见
+{user_feedback.strip()}
+"""
+        
+        revision_user_prompt = f"""你是一位网络小说修改专家，请根据以下评审意见修改章节内容。
+
+## 章节信息
+- 章节号：第{chapter.chapter_number}章
+- 题材：{genre or '通用'}
+
+## 系统评审意见
+{review_report}{user_feedback_section}
+
+## 当前章节内容
+{current_content}
+
+---
+
+请根据以上评审意见和用户意见，对章节进行修改优化，直接输出修改后的完整章节内容。
+"""
+        
+        # 选择模型（根据内容长度）
+        def estimate_tokens(text: str) -> int:
+            return int(len(text) * 1.3)
+        
+        total_tokens = estimate_tokens(current_content) + estimate_tokens(review_report) + 500
+        max_safe_limit = 21504
+        
+        revision_model = "qwen-max" if total_tokens < max_safe_limit else "qwen-long"
+        
+        logger.info(f"🤖 使用模型: {revision_model} (预计tokens: {total_tokens})")
+        
+        # 执行改稿
+        revision_result = await revision_agent.execute(
+            system_prompt=revision_system_prompt,
+            user_prompt=revision_user_prompt,
+            context={},
+            model_override=revision_model,
+        )
+        
+        optimized_content = revision_result.get("output", "")
+        
+        if not optimized_content:
+            raise Exception("优化结果为空")
+        
+        # 完成
+        await ws_manager.send_task_progress(
+            project_id=project_id,
+            task_id=task_id,
+            progress=100,
+            message="✅ 章节优化完成"
+        )
+        
+        # 更新任务状态为完成，并存储结果
+        update_query = text("""
+            UPDATE generation_history
+            SET status = :status,
+                result = :result,
+                completed_at = :completed_at
+            WHERE task_id = :task_id
+        """)
+        
+        import json
+        db.execute(update_query, {
+            "task_id": task_id,
+            "status": "completed",
+            "result": json.dumps({
+                "optimized_content": optimized_content,
+                "original_score": current_score,
+                "review_report": review_report,
+            }, ensure_ascii=False),
+            "completed_at": datetime.now().isoformat()
+        })
+        db.commit()
+        
+        logger.info(f"✅ 章节优化任务完成: {task_id}")
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        logger.error(f"❌ 章节优化任务失败: {e}")
+        
+        # 更新任务状态为失败
+        update_query = text("""
+            UPDATE generation_history
+            SET status = :status,
+                error = :error,
+                completed_at = :completed_at
+            WHERE task_id = :task_id
+        """)
+        
+        db.execute(update_query, {
+            "task_id": task_id,
+            "status": "failed",
+            "error": str(e),
+            "completed_at": datetime.now().isoformat()
+        })
+        db.commit()
+        
+        await ws_manager.send_task_error(
+            project_id=project_id,
+            task_id=task_id,
+            error=str(e)
+        )
+    finally:
+        db.close()

@@ -23,17 +23,19 @@ class IntelligentTruncator:
         self, 
         content: str, 
         target_length: int,
-        content_type: str = "outline"  # outline/character/worldview
+        content_type: str = "outline",  # outline/character/worldview/chapter/review/rag_doc
+        preserve_ratio: float = 0.7  # 规则筛选保留的比例
     ) -> dict:
         """
         混合策略截断:
-        1. 规则快速筛选(保留70%)
-        2. AI语义摘要(压缩30%)
+        1. 规则快速筛选(保留preserve_ratio)
+        2. AI语义摘要(压缩剩余部分)
         
         Args:
             content: 原始内容
             target_length: 目标长度(字符)
-            content_type: 内容类型(outline/character/worldview)
+            content_type: 内容类型(outline/character/worldview/chapter/review/rag_doc)
+            preserve_ratio: 规则筛选保留比例(默认0.7)
             
         Returns:
             {
@@ -83,8 +85,8 @@ class IntelligentTruncator:
         print(f"🤖 启动AI摘要: 处理超出的 {current_length - target_length:,}字符...")
         
         # 计算保留多少规则筛选的内容
-        keep_length = int(target_length * 0.7)  # 保留70%给规则筛选结果
-        summarize_budget = target_length - keep_length  # 30%给AI摘要
+        keep_length = int(target_length * preserve_ratio)  # 使用传入的保留比例
+        summarize_budget = target_length - keep_length  # 剩余部分给AI摘要
         
         kept_part = high_priority[:keep_length]
         overflow_part = high_priority[keep_length:]
@@ -215,6 +217,46 @@ class IntelligentTruncator:
 3. 删除详细历史背景、地理描写
 
 只输出摘要。控制在{target_length}字符以内。
+""",
+            "chapter": f"""
+请从以下章节内容中提取**核心情节和关键对话**，压缩到约{target_length}字。
+
+【原始章节】
+{content}
+
+【提取要求】
+1. 保留核心情节发展和转折点
+2. 保留关键对话和人物互动
+3. 保留爽点和钩子设计
+4. 删除详细环境描写、心理描写
+
+只输出摘要。控制在{target_length}字符以内。
+""",
+            "review": f"""
+请从以下评审报告中提取**核心问题和修改建议**，压缩到约{target_length}字。
+
+【原始评审】
+{content}
+
+【提取要求】
+1. 保留【必改】级别的问题
+2. 保留核心修改建议
+3. 删除详细解释和示例
+
+只输出摘要。控制在{target_length}字符以内。
+""",
+            "rag_doc": f"""
+请从以下RAG检索文档中提取**核心设定信息**，压缩到约{target_length}字。
+
+【原始文档】
+{content}
+
+【提取要求】
+1. 保留核心属性和关键信息
+2. 保留与当前情节相关的内容
+3. 删除详细背景和次要信息
+
+只输出摘要。控制在{target_length}字符以内。
 """
         }
         
@@ -238,7 +280,8 @@ class IntelligentTruncator:
 def truncate_with_ai_assist(
     content: str,
     target_length: int,
-    content_type: str = "outline"
+    content_type: str = "outline",
+    preserve_ratio: float = 0.7
 ) -> str:
     """
     便捷函数：AI辅助截断
@@ -247,10 +290,55 @@ def truncate_with_ai_assist(
         content: 原始内容
         target_length: 目标长度(字符)
         content_type: 内容类型
+        preserve_ratio: 规则筛选保留比例
         
     Returns:
         截断后的内容
     """
     truncator = IntelligentTruncator()
-    result = truncator.intelligent_truncate(content, target_length, content_type)
+    result = truncator.intelligent_truncate(
+        content, 
+        target_length, 
+        content_type,
+        preserve_ratio
+    )
     return result["content"]
+
+
+def smart_truncate_for_context(
+    content: str,
+    max_tokens: int,
+    content_type: str = "outline",
+    preserve_ratio: float = 0.7,
+    chars_per_token: float = 1.5  # 中文平均1.5字符≈1 token
+) -> str:
+    """
+    基于token限制的智能截断
+    
+    Args:
+        content: 原始内容
+        max_tokens: 最大token数
+        content_type: 内容类型
+        preserve_ratio: 规则筛选保留比例
+        chars_per_token: 字符到token的转换比例(中文默认1.5)
+        
+    Returns:
+        截断后的内容
+    """
+    if not content:
+        return content
+    
+    # 计算目标字符长度
+    target_chars = int(max_tokens * chars_per_token)
+    
+    # 如果当前长度已在限制内，直接返回
+    if len(content) <= target_chars:
+        return content
+    
+    # 使用智能截断
+    return truncate_with_ai_assist(
+        content=content,
+        target_length=target_chars,
+        content_type=content_type,
+        preserve_ratio=preserve_ratio
+    )

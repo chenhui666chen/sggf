@@ -120,8 +120,30 @@ class BaseAgent(ABC):
         return response.content
     
     def _format_context(self, context: Dict[str, Any]) -> str:
-        """格式化上下文信息（智能截断）"""
+        """格式化上下文信息（智能超限保护）"""
         from .intelligent_truncator import truncate_with_ai_assist
+        
+        # 💡 智能检测当前模型的tokens限制
+        model_name = getattr(self.llm, 'model_name', None) or getattr(self.llm, 'model', 'qwen-max')
+        
+        # 模型限制映射 (tokens)
+        MODEL_LIMITS = {
+            'qwen-max': 30720,          # 30K tokens
+            'qwen-plus': 1000000,       # 1M tokens
+            'qwen-long': 10000000,      # 10M tokens
+            'qwen-turbo': 8000,         # 8K tokens
+            'deepseek-reasoner': 128000, # R1: 128K tokens
+            'deepseek-chat': 64000,     # V3: 64K tokens
+        }
+        
+        # 默认限制(如果模型未知)
+        token_limit = MODEL_LIMITS.get(model_name, 30720)
+        
+        # 🛡️ 安全系数: 使用85%空间,留余15%给system_prompt和prompt模板
+        safe_token_limit = int(token_limit * 0.85)
+        
+        # 📊 按中文估算: 1 token ≈ 0.67 中文字符
+        safe_char_limit = int(safe_token_limit * 0.67)
         
         context_str = "当前上下文信息:\n"
         
@@ -145,11 +167,13 @@ class BaseAgent(ABC):
             else:
                 content_type = "outline"  # 默认
             
-            # 智能截断：超过5000字符才启用AI辅助
-            if len(s) > 5000:
+            # 🔥 智能截断：只在真正超限时才启用AI辅助
+            if len(s) > safe_char_limit:
+                # 🎯 目标长度 = 安全限制 * 95% (略留余地)
+                target_length = int(safe_char_limit * 0.95)
                 s = truncate_with_ai_assist(
                     content=s,
-                    target_length=5000,
+                    target_length=target_length,
                     content_type=content_type
                 )
             
@@ -180,9 +204,8 @@ class WorldArchitectAgent(BaseAgent):
 1. 体系设计：设计和完善世界观设定（物理规则、社会结构、历史文化等）
 2. 逻辑验证：确保设定逻辑一致性和科学性
 3. 冲突检测：检查新设定与已有设定的冲突
-4. 选项提供：提出多个世界观选项供作者选择
 
-请以专业、详细的方式回答问题，并提供多个选项时要清晰标注。"""
+请以专业、详细的方式构建世界观设定。"""
 
 
 class CharacterDesignerAgent(BaseAgent):
