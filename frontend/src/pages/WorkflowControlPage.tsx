@@ -631,6 +631,8 @@ export default function WorkflowControlPage() {
                 const stages = batchData.stages || {}
                 if (stages.concept) {
                   setConceptContent(stages.concept)
+                  // 🔥 关键修复：同时更新Redux store，触发OutputPreviewPanel重新渲染
+                  dispatch(updateStageOutput({ stage: 'concept', output: stages.concept }))
                   console.log(`✅ 已更新故事概念: ${stages.concept.length} 字符`)
                 }
                 if (stages.world_setting) {
@@ -641,10 +643,25 @@ export default function WorkflowControlPage() {
                   setCharacterContent(stages.characters)
                   console.log(`✅ 已更新人物设定: ${stages.characters.length} 字符`)
                 }
-              }).catch(err => console.error('刷新概念阶段内容失败:', err))
+                // 🔥 关键修复：强制触发组件重新渲染
+                setSelectedConceptView('concept')
+                
+                // 🔥 🔥 终极修复：数据刷新完成后，再次确保isRunning被重置
+                // 防止WebSocket事件丢失导致按钮卡在"生成中"状态
+                setTimeout(() => {
+                  setIsRunning(false)
+                  console.log('🔥 [二次确认] 概念阶段数据刷新完成，强制重置 isRunning=false')
+                }, 100)
+              }).catch(err => {
+                console.error('刷新概念阶段内容失败:', err)
+                // 即使刷新失败也要重置状态
+                setIsRunning(false)
+              })
             }
           } catch (err) {
             console.error('刷新概念阶段内容失败:', err)
+            // 确保异常时也重置状态
+            setIsRunning(false)
           }
         }
 
@@ -3387,59 +3404,28 @@ export default function WorkflowControlPage() {
             multiline
             rows={4}
             label="自定义大纲规划（可选）"
-            placeholder="可输入您的卷结构规划，例如：\n第一卷：引气境 (10章)\n第二卷：筑基境 (15章)\n..."
+            placeholder={
+              genre && plannedLengthType ? (
+                `🎵 节奏建议：${
+                  genre === '修仙' && plannedLengthType === 'long' ? '修仙长篇推荐境界逐层递进，每5-8章一个小爆点，每卷结束有境界突破大高潮' :
+                  genre === '修仙' && plannedLengthType !== 'long' ? '修仙题材注意境界体系设计，确保修炼节奏合理' :
+                  genre === '玄幻' && plannedLengthType === 'long' ? '玄幻长篇推荐天赋觉醒与实力突破交替，每5-8章一个小爆点' :
+                  genre === '玄幻' && plannedLengthType !== 'long' ? '玄幻题材注意血脉天赋体系设计，确保等级压制清晰' :
+                  genre === '悬疑' ? '悬疑题材注意线索布局，每3-5章揭露一个小真相，每卷一个大反转' :
+                  genre === '都市' ? '都市题材建议多线穿插（商战+感情+亲情），每卷一个事业里程碑' :
+                  genre === '言情' ? '言情题材注意感情递进（相识→相知→相守），每5-10章一个甜蜜时刻' :
+                  genre === '耳美' ? '耳美题材注意暖昧张力与情感突破交替，每5-10章一个关系进展节点' :
+                  genre === '科幻' ? '科幻题材注意科技突破节奏，每卷一次探索升级（地球→星系→宇宙）' :
+                  genre === '纯文学' ? '纯文学题材注重内心世界与外部环境的张力，节奏可适当放缓' :
+                  '根据题材特点自动适配叙事节奏'
+                }\n\n💡 若不使用自定义规划，将随机智能生成大纲`
+              ) : '可输入您的卷结构规划，例如：\n第一卷：引气境 (10章)\n第二卷：筑基境 (15章)\n...'
+            }
             value={userOutlinePlan}
             onChange={(e) => setUserOutlinePlan(e.target.value)}
             sx={{ mb: 2 }}
             disabled={isStarting}
           />
-          
-          {/* 🎯 任务5.3：创作目标提示和规划优先说明 */}
-          {genre && plannedLengthType && (
-            <Alert severity="info" sx={{ mb: 2 }}>
-              {/* 📌 第一部分：智能推荐信息 */}
-              <Typography variant="body2" sx={{ mb: 1 }}>
-                <strong>🧠 智能推荐：</strong>
-                {recommendedExpansionMode === 'total' && '按总章数扩展（适合短篇）'}
-                {recommendedExpansionMode === 'incremental' && '渐进式扩展（适合中篇）'}
-                {recommendedExpansionMode === 'epic_framework' && (
-                  <>
-                    史诗框架模式 → {recommendedVolumes}卷 × {recommendedChaptersPerVolumeMin}-{recommendedChaptersPerVolumeMax}章/卷
-                    {autoExpandAllVolumes ? ' (自动全卷扩展)' : ' (手动选卷扩展)'}
-                  </>
-                )}
-              </Typography>
-
-              {/* 📌 第二部分：题材节奏建议 */}
-              <Typography variant="body2" sx={{ mb: 1 }}>
-                <strong>🎵 节奏建议：</strong>
-                {genre === '修仙' && plannedLengthType === 'long' && '修仙长篇推荐境界逐层递进，每5-8章一个小爆点，每卷结束有境界突破大高潮'}
-                {genre === '修仙' && plannedLengthType !== 'long' && '修仙题材注意境界体系设计，确保修炼节奏合理'}
-                {genre === '玄幻' && plannedLengthType === 'long' && '玄幻长篇推荐天赋觉醒与实力突破交替，每5-8章一个小爆点'}
-                {genre === '玄幻' && plannedLengthType !== 'long' && '玄幻题材注意血脉天赋体系设计，确保等级压制清晰'}
-                {genre === '悬疑' && '悬疑题材注意线索布局，每3-5章揭露一个小真相，每卷一个大反转'}
-                {genre === '都市' && '都市题材建议多线穿插（商战+感情+亲情），每卷一个事业里程碑'}
-                {genre === '言情' && '言情题材注意感情递进（相识→相知→相守），每5-10章一个甜蜜时刻'}
-                {genre === '耽美' && '耽美题材注意暧昧张力与情感突破交替，每5-10章一个关系进展节点'}
-                {genre === '科幻' && '科幻题材注意科技突破节奏，每卷一次探索升级（地球→星系→宇宙）'}
-                {genre === '纯文学' && '纯文学题材注重内心世界与外部环境的张力，节奏可适当放缓'}
-                {!genre.match(/(修仙|玄幻|悬疑|都市|言情|耽美|科幻|纯文学)/) && '根据题材特点自动适配叙事节奏'}
-              </Typography>
-
-              {/* 📌 第三部分：规划优先说明 */}
-              <Typography variant="body2">
-                {userOutlinePlan ? (
-                  <>
-                    <strong>✅ 已检测到自定义规划</strong>，将优先遵循您的规划生成大纲
-                  </>
-                ) : (
-                  <>
-                    💡 未检测到自定义规划，将按上述智能推荐生成大纲（您也可在上方输入自定义规划）
-                  </>
-                )}
-              </Typography>
-            </Alert>
-          )}
           
           <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
             <Button

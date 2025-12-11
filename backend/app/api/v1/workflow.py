@@ -5431,7 +5431,6 @@ async def optimize_chapter(
         "message": "优化任务已提交"
     }
     """
-    from app.services.websocket_manager import ws_manager
     import uuid
     import logging
     
@@ -5490,16 +5489,22 @@ async def optimize_chapter(
     db.commit()
     logger.info(f"✅ 任务记录已创建: {task_id}")
     
-    # 异步执行优化
-    asyncio.create_task(
-        _optimize_chapter_task(
-            task_id=task_id,
-            project_id=project_id,
-            chapter_id=chapter_id,
-            current_content=current_content,
-            user_feedback=user_feedback,  # 🆕 传递用户意见
-        )
+    # 使用线程异步执行优化（FastAPI的BackgroundTasks不支持async函数）
+    import threading
+    thread = threading.Thread(
+        target=lambda: asyncio.run(
+            _optimize_chapter_task(
+                task_id=task_id,
+                project_id=project_id,
+                chapter_id=chapter_id,
+                current_content=current_content,
+                user_feedback=user_feedback,
+            )
+        ),
+        daemon=True
     )
+    thread.start()
+    logger.info(f"🚀 [{task_id}] 优化线程已启动")
     
     return {
         "task_id": task_id,
@@ -5517,11 +5522,7 @@ async def _optimize_chapter_task(
     """
     异步执行章节优化任务
     """
-    from app.services.websocket_manager import ws_manager
-    from app.services.agents.agents import (
-        StoryReviewAgent,
-        ContentRevisionAgent,
-    )
+    from app.services.agents.agents import QualityReviewerAgent, ContentCreatorAgent
     from app.services.prompts.review_prompts import GenreAdaptiveReviewPrompts
     from sqlalchemy import text
     import logging
@@ -5530,12 +5531,21 @@ async def _optimize_chapter_task(
     db = SessionLocal()
     
     try:
-        await ws_manager.send_task_progress(
-            project_id=project_id,
-            task_id=task_id,
-            progress=0,
-            message="🔄 开始优化章节..."
-        )
+        # 更新任务状态：开始优化
+        update_query = text("""
+            UPDATE generation_history
+            SET status = :status, progress = :progress, message = :message, updated_at = :updated_at
+            WHERE task_id = :task_id
+        """)
+        db.execute(update_query, {
+            "task_id": task_id,
+            "status": "running",
+            "progress": 0,
+            "message": "🔄 开始优化章节...",
+            "updated_at": datetime.now().isoformat()
+        })
+        db.commit()
+        logger.info(f"🔄 [{task_id}] 开始优化章节...")
         
         # 获取项目信息
         project = db.query(Project).filter(Project.id == project_id).first()
@@ -5549,20 +5559,24 @@ async def _optimize_chapter_task(
         if not chapter:
             raise Exception("章节不存在")
         
-        # 获取章节计划
-        query = text("""
-            SELECT chapter_plan
-            FROM chapter_plans
-            WHERE project_id = :project_id AND chapter_number = :chapter_number
-            ORDER BY id DESC
-            LIMIT 1
-        """)
-        plan_result = db.execute(query, {
-            "project_id": project_id,
-            "chapter_number": chapter.chapter_number
-        }).fetchone()
-        
-        chapter_plan = plan_result[0] if plan_result else ""
+        # 获取章节计划（可选）
+        chapter_plan = ""
+        try:
+            query = text("""
+                SELECT chapter_plan
+                FROM chapter_plans
+                WHERE project_id = :project_id AND chapter_number = :chapter_number
+                ORDER BY id DESC
+                LIMIT 1
+            """)
+            plan_result = db.execute(query, {
+                "project_id": project_id,
+                "chapter_number": chapter.chapter_number
+            }).fetchone()
+            
+            chapter_plan = plan_result[0] if plan_result else ""
+        except Exception as e:
+            logger.warning(f"获取章节计划失败: {e}，将继续执行")
         
         # 获取项目题材
         genre = ""
@@ -5575,30 +5589,54 @@ async def _optimize_chapter_task(
             logger.warning(f"获取项目题材失败: {e}")
         
         # 📝 步骤1：质量评审
-        await ws_manager.send_task_progress(
-            project_id=project_id,
-            task_id=task_id,
-            progress=20,
-            message="📝 正在评审章节质量..."
-        )
+        update_query = text("""
+            UPDATE generation_history
+            SET progress = :progress, message = :message, updated_at = :updated_at
+            WHERE task_id = :task_id
+        """)
+        db.execute(update_query, {
+            "task_id": task_id,
+            "progress": 20,
+            "message": "📝 正在评审章节质量...",
+            "updated_at": datetime.now().isoformat()
+        })
+        db.commit()
+        logger.info(f"📝 [{task_id}] 开始评审章节质量...")
         
-        review_agent = StoryReviewAgent()
-        review_system_prompt = GenreAdaptiveReviewPrompts.get_review_system_prompt(genre=genre)
-        review_user_prompt = GenreAdaptiveReviewPrompts.get_review_user_prompt(
-            chapter_number=chapter.chapter_number,
-            chapter_plan=chapter_plan,
-            chapter_content=current_content,
-            plot_outline="",  # 再次优化不需要大纲
-            genre=genre
-        )
+        # 使用QualityReviewerAgent进行评审
+        review_agent = QualityReviewerAgent()
         
-        review_result = await review_agent.execute(
-            system_prompt=review_system_prompt,
-            user_prompt=review_user_prompt,
-            context={},
-        )
+        # 构造评审提示词
+        review_prompt = f"""请对以下章节内容进行详细的质量评审：
+
+【章节信息】
+- 章节号：第{chapter.chapter_number}章
+- 题材：{genre or '通用'}
+
+【章节计划】
+{chapter_plan}
+
+【章节内容】
+{current_content}
+
+---
+
+请按照以下维度进行评估，每个维度给出1-10分的评分：
+1. 故事性：情节紧凑度、冲突设置、节奏把控
+2. 人物塑造：人物立体度、性格一致性、成长弧光
+3. 语言表达：语言流畅度、修辞手法、风格独特性、画面感
+4. 结构完整性：情节连贯性、逻辑合理性、章节衔接
+5. 创新性：设定新颖性、情节原创性、视角独特性
+
+请提供：
+1. 每个维度的评分和反馈
+2. 主要优点（至少3个）
+3. 主要缺点（至少3个）
+4. 改进建议（至少5个）
+5. 综合评分（加权平均）
+"""
         
-        review_report = review_result.get("output", "")
+        review_report = review_agent.process(review_prompt)
         
         # 解析评分
         import re
@@ -5608,42 +5646,55 @@ async def _optimize_chapter_task(
         logger.info(f"📊 当前章节评分: {current_score}")
         
         # 🔧 步骤2：迭代优化
-        await ws_manager.send_task_progress(
-            project_id=project_id,
-            task_id=task_id,
-            progress=50,
-            message=f"🔧 正在优化章节（当前评分: {current_score}）..."
-        )
+        db.execute(update_query, {
+            "task_id": task_id,
+            "progress": 50,
+            "message": f"🔧 正在优化章节（当前评分: {current_score}）...",
+            "updated_at": datetime.now().isoformat()
+        })
+        db.commit()
+        logger.info(f"🔧 [{task_id}] 开始优化章节...")
         
-        # 准备改稿Agent
-        revision_agent = ContentRevisionAgent()
-        revision_system_prompt = revision_agent.get_system_prompt()
+        # 使用ContentCreatorAgent进行改稿（但需要明确指示修改而非重写）
+        content_agent = ContentCreatorAgent()
         
-        # 构造改稿提示词
-        # 🆕 如果用户提供了额外意见，则加入到提示词中
+        # 构造改稿提示词（强调修改而非重写）
         user_feedback_section = ""
         if user_feedback and user_feedback.strip():
             user_feedback_section = f"""
 
-## 用户额外意见
+【用户额外意见】
 {user_feedback.strip()}
 """
         
-        revision_user_prompt = f"""你是一位网络小说修改专家，请根据以下评审意见修改章节内容。
+        revision_prompt = f"""你是一位网络小说修改专家，请根据评审意见**修改**以下章节内容。
 
-## 章节信息
+⚠️ **重要：你的任务是修改和优化现有内容，而不是重新创作或编写全新的章节。**
+
+修改原则：
+1. 保持原有故事线和主要情节不变
+2. 保留原文中的精彩描写和对话
+3. 根据评审意见针对性地修改问题部分
+4. 不要添加新的人物、地点或大型情节
+
+【章节信息】
 - 章节号：第{chapter.chapter_number}章
 - 题材：{genre or '通用'}
 
-## 系统评审意见
+【系统评审意见】
 {review_report}{user_feedback_section}
 
-## 当前章节内容
+【当前章节内容（需要修改的原文）】
 {current_content}
 
 ---
 
-请根据以上评审意见和用户意见，对章节进行修改优化，直接输出修改后的完整章节内容。
+请仔细阅读以上原文和评审意见，然后：
+1. 找出需要改进的具体位置
+2. 在保持整体结构和故事线的基础上，针对性地修改这些问题
+3. 直接输出修改后的完整章节内容
+
+注意：不要输出任何解释性文字，直接输出修改后的章节正文。
 """
         
         # 选择模型（根据内容长度）
@@ -5653,30 +5704,28 @@ async def _optimize_chapter_task(
         total_tokens = estimate_tokens(current_content) + estimate_tokens(review_report) + 500
         max_safe_limit = 21504
         
-        revision_model = "qwen-max" if total_tokens < max_safe_limit else "qwen-long"
+        model_name = "qwen-max" if total_tokens < max_safe_limit else "qwen-long"
         
-        logger.info(f"🤖 使用模型: {revision_model} (预计tokens: {total_tokens})")
+        logger.info(f"🤖 使用模型: {model_name} (预计tokens: {total_tokens})")
         
-        # 执行改稿
-        revision_result = await revision_agent.execute(
-            system_prompt=revision_system_prompt,
-            user_prompt=revision_user_prompt,
-            context={},
-            model_override=revision_model,
+        # 执行改稿（使用较低temperature保持原文结构）
+        optimized_content = content_agent.process(
+            revision_prompt,
+            temperature=0.3  # 使用低temperature保持忠于原文，避免过度创作
         )
-        
-        optimized_content = revision_result.get("output", "")
         
         if not optimized_content:
             raise Exception("优化结果为空")
         
-        # 完成
-        await ws_manager.send_task_progress(
-            project_id=project_id,
-            task_id=task_id,
-            progress=100,
-            message="✅ 章节优化完成"
-        )
+        # 完成 - 更新进度
+        db.execute(update_query, {
+            "task_id": task_id,
+            "progress": 100,
+            "message": "✅ 章节优化完成",
+            "updated_at": datetime.now().isoformat()
+        })
+        db.commit()
+        logger.info(f"✅ [{task_id}] 章节优化完成")
         
         # 更新任务状态为完成，并存储结果
         update_query = text("""
@@ -5723,11 +5772,5 @@ async def _optimize_chapter_task(
             "completed_at": datetime.now().isoformat()
         })
         db.commit()
-        
-        await ws_manager.send_task_error(
-            project_id=project_id,
-            task_id=task_id,
-            error=str(e)
-        )
     finally:
         db.close()

@@ -955,7 +955,12 @@ export default function EditorPage() {
             rows={6}
             value={userFeedback}
             onChange={(e) => setUserFeedback(e.target.value)}
-            placeholder="请输入您的优化意见（可选）\n\n例如：\n- 增加更多情感描写\n- 加强动作场面的紧张感\n- 修改某个人物的对话语气..."
+            placeholder={`请输入您的优化意见（可选）
+
+例如：
+- 增加更多情感描写
+- 加强动作场面的紧张感
+- 修改某个人物的对话语气...`}
             variant="outlined"
             sx={{
               mt: 2,
