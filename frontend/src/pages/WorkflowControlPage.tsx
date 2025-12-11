@@ -3498,6 +3498,42 @@ export default function WorkflowControlPage() {
             </Select>
             <FormHelperText>系统将根据篇幅推荐适合的大纲扩展模式</FormHelperText>
           </FormControl>
+
+          {/* 💡 智能推荐信息提示 */}
+          {genre && plannedLengthType && (
+            <Alert 
+              severity="info" 
+              sx={{ mb: 2, backgroundColor: '#e3f2fd' }}
+            >
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                🎯 智能推荐：
+              </Typography>
+              <Typography variant="body2" component="div">
+                • <strong>大纲模式</strong>：{
+                  recommendedExpansionMode === 'total' ? '按总章数扩展（快速规划）' :
+                  recommendedExpansionMode === 'epic_framework' ? `史诗框架（按卷结构 - ${autoExpandAllVolumes ? '自动全卷' : '手动选卷'}）` :
+                  '渐进式扩展（精细控制）'
+                }
+                <br />
+                {recommendedExpansionMode === 'epic_framework' && (
+                  <>
+                    • <strong>推荐卷数</strong>：{recommendedVolumes} 卷
+                    <br />
+                    • <strong>每卷章节</strong>：{recommendedChaptersPerVolumeMin}-{recommendedChaptersPerVolumeMax} 章
+                    <br />
+                  </>
+                )}
+                • <strong>预计总章数</strong>：
+                {recommendedExpansionMode === 'epic_framework' 
+                  ? `${recommendedVolumes * recommendedChaptersPerVolumeMin}-${recommendedVolumes * recommendedChaptersPerVolumeMax} 章`
+                  : `${plannedChaptersMin}-${plannedChaptersMax} 章`
+                }
+              </Typography>
+              <Typography variant="caption" sx={{ mt: 1, display: 'block', fontStyle: 'italic' }}>
+                🔍 根据「{genre}」题材 + 「{plannedLengthType === 'short' ? '短篇' : plannedLengthType === 'mid' ? '中篇' : plannedLengthType === 'long' ? '长篇' : '超长篇'}」篇幅智能计算
+              </Typography>
+            </Alert>
+          )}
           
           {/* 🆕 章节范围 */}
           <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>

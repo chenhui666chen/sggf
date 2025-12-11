@@ -117,6 +117,9 @@ export default function DashboardPage() {
   // 🆕 章节字数统计（每个项目的总字数）
   const [chapterWordCounts, setChapterWordCounts] = useState<Record<number, number>>({})
 
+  // 🆕 项目概念状态（用于判断是否为空白项目）
+  const [projectConceptStatus, setProjectConceptStatus] = useState<Record<number, boolean>>({})
+
   // 🆕 导出到其他模块的状态
   const [exportingChapter, setExportingChapter] = useState<number | null>(null)
 
@@ -151,6 +154,48 @@ export default function DashboardPage() {
     dispatch(fetchProjects())
   }, [dispatch])
 
+
+  // 🆕 加载项目概念状态（检查是否为空白项目）
+  useEffect(() => {
+    if (projects.length === 0) return
+
+    const loadProjectConceptStatus = async () => {
+      const conceptStatus: Record<number, boolean> = {}
+
+      try {
+        // 并发请求所有项目的概念内容
+        const promises = projects.map(async (project) => {
+          try {
+            const response = await fetch(`/api/v1/workflow/${project.id}/all-stages-content`, {
+              headers: {
+                'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+              },
+            })
+
+            if (response.ok) {
+              const data = await response.json()
+              const hasConcept = !!(data.stages?.concept && data.stages.concept.trim())
+              conceptStatus[project.id] = hasConcept
+              logger.log(`✅ 项目 ${project.id} 概念状态: ${hasConcept ? '非空' : '空白'}`)
+            } else {
+              conceptStatus[project.id] = false
+            }
+          } catch (error) {
+            logger.error(`❌ 获取项目 ${project.id} 概念状态失败:`, error)
+            conceptStatus[project.id] = false
+          }
+        })
+
+        await Promise.all(promises)
+        setProjectConceptStatus(conceptStatus)
+        logger.log('✅ 项目概念状态加载完成:', conceptStatus)
+      } catch (error) {
+        logger.error('❌ 加载项目概念状态失败:', error)
+      }
+    }
+
+    loadProjectConceptStatus()
+  }, [projects])
 
   // 🆕 加载章节字数统计
   useEffect(() => {
@@ -988,7 +1033,7 @@ export default function DashboardPage() {
           return (
           <Grid item xs={6} sm={4} md={3} lg={2.4} key={project.id}>
             {/* 书本容器 - 包含书脊和页面效果 */}
-            <Tooltip title={isDisabled ? '正在处理中...' : '点击进入工作流'} arrow placement="top">
+            <Tooltip title={isDisabled ? '正在处理中...' : projectConceptStatus[project.id] === false ? '点击开始创作' : '点击进入工作流'} arrow placement="top">
             <Box
               sx={{
                 position: 'relative',
@@ -1000,7 +1045,15 @@ export default function DashboardPage() {
               }}
               onClick={() => {
                 if (!isDisabled) {
-                  navigate(`/workflow/${project.id}`)
+                  // 🔥 空白项目智能跳转：跳转到输入框区域自动触发对话框
+                  const hasConcept = projectConceptStatus[project.id]
+                  if (hasConcept === false) {
+                    logger.log(`📝 检测到空白项目 ${project.id}，跳转到工作流并自动打开创作对话框`)
+                    navigate(`/workflow/${project.id}?autoStart=true`)
+                  } else {
+                    logger.log(`📖 检测到已有内容项目 ${project.id}，正常跳转`)
+                    navigate(`/workflow/${project.id}`)
+                  }
                 }
               }}
             >

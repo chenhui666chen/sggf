@@ -110,7 +110,18 @@ class BaseAgent(ABC):
                 base_url=Config.DEEPSEEK_API_BASE or "https://api.deepseek.com/v1"
             )
             print(f"🎲 使用自定义 temperature={temperature}")
-            response = temp_llm.invoke(messages)
+            try:
+                response = temp_llm.invoke(messages)
+            except Exception as e:
+                # 捕获并详细记录错误
+                import traceback
+                error_details = traceback.format_exc()
+                print(f"❌ LLM调用失败: {str(e)}")
+                print(f"📋 完整错误信息:\n{error_details}")
+                # 如果是JSON解析错误,记录更多信息
+                if "JSON" in str(e) or "Expecting value" in str(e):
+                    print("⚠️ 检测到JSON解析错误,可能是API返回格式异常")
+                raise
         else:
             response = self.llm.invoke(messages)
 

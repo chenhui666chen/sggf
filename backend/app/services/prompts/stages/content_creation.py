@@ -97,11 +97,9 @@ class ContentCreationPrompts:
 
 【本章开头方式】⚠️ 必须使用【{opening_style}】
 - 技巧：{opening_technique}
-- 示例：{opening_example}
 
 【本章结尾方式】⚠️ 必须使用【{ending_style}】
 - 技巧：{ending_technique}
-- 示例：{ending_example}
 
 请开始创作第{chapter_number}章内容："""
 
@@ -135,16 +133,14 @@ class ContentCreationPrompts:
         return ContentCreationPrompts.get_user_prompt_template().format(
             chapter_number=chapter_number,
             chapter_plan=chapter_plan,
-            previous_ending=previous_ending if previous_ending else '（这是第一章，请设计一个引人入胜的开场）',
-            rag_character_context=rag_character_context if rag_character_context else '（无额外人物细节）',
-            rag_world_context=rag_world_context if rag_world_context else '（无额外设定细节）',
+            previous_ending=previous_ending if previous_ending else '(这是第一章，请设计一个引人入胜的开场)',
+            rag_character_context=rag_character_context if rag_character_context else '(无额外人物细节)',
+            rag_world_context=rag_world_context if rag_world_context else '(无额外设定细节)',
             target_words=target_words,
             opening_style=selected_opening[0],
             opening_technique=selected_opening[1],
-            opening_example=selected_opening[2],
             ending_style=selected_ending[0],
-            ending_technique=selected_ending[1],
-            ending_example=selected_ending[2]
+            ending_technique=selected_ending[1]
         )
 
 
@@ -202,20 +198,20 @@ GENRE_CREATION_GUIDES: Dict[str, str] = {
 
 # 开头方式定义
 OPENING_STYLES: Dict[str, Tuple[str, str, str]] = {
-    "对话开头": ("对话开头", "直接进入冲突或紧张场景", "'站住！'身后传来一声厉喝。"),
-    "动作开头": ("动作开头", "正在发生的动态事件", "刀光闪过，血珠在空中划出一道弧线。"),
-    "悬念开头": ("悬念开头", "抛出问题，引发好奇", "三天后回想起这个决定时，她依然后悔不已。"),
-    "场景开头": ("场景开头", "氛围渲染，快速建立情境", "暴雨倾盆，整个长安城笼罩在一片灰蒙蒙的水雾中。"),
-    "反转开头": ("反转开头", "与上章结尾形成对比或反差", "然而他睁开眼时，发现自己躺在一张软榻上。"),
+    "对话开头": ("对话开头", "直接进入冲突或紧张场景，用对话抽出矛盾", ""),
+    "动作开头": ("动作开头", "从正在发生的动态事件开始，制造紧迫感", ""),
+    "悬念开头": ("悬念开头", "抛出问题或异常现象，引发读者好奇，创造独特的开场", ""),
+    "场景开头": ("场景开头", "通过环境氛围描写快速建立情境，融入题材特色", ""),
+    "反转开头": ("反转开头", "与上章结尾形成对比或反差，制造意外效果", ""),
 }
 
 # 结尾方式定义
 ENDING_STYLES: Dict[str, Tuple[str, str, str]] = {
-    "悬念式": ("悬念式", "关键信息揭露一半", "信封里只有一张纸，上面写着三个字——"),
-    "转折式": ("转折式", "意外事件发生", "就在她以为一切结束时，门外响起了敲门声。来人是——"),
-    "动作中断式": ("动作中断式", "危机时刻戛然而止", "刀锋距离她的咽喉只有一寸。她闭上眼睛——"),
-    "信息炸弹式": ("信息炸弹式", "惊人真相揭露", "'你以为我是谁？'他摘下面具，露出一张与她父亲一模一样的脸。"),
-    "选择困境式": ("选择困境式", "主角面临艰难抉择", "救左边的师父，还是右边的爱人？她只有三秒钟做出决定。"),
+    "悬念式": ("悬念式", "关键信息揭露一半，留下悬念让读者想继续阅读", ""),
+    "转折式": ("转折式", "意外事件发生，打破读者预期", ""),
+    "动作中断式": ("动作中断式", "危机时刻戈然而止，制造紧张感", ""),
+    "信息炸弹式": ("信息炸弹式", "揭露惊人真相或身份，制造震撼效果", ""),
+    "选择困境式": ("选择困境式", "主角面临艰难拉择，强化情绪张力", ""),
 }
 
 # 情节类型 → 推荐的开头/结尾方式

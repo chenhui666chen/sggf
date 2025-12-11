@@ -165,10 +165,8 @@ class ChapterPromptBuilder:
 
 【本章开头方式】⚠️ 必须使用【{selected_opening[0]}】
 - 技巧：{selected_opening[1]}
-- 示例：{selected_opening[2]}
 
 【本章结尾方式】⚠️ 必须使用【{selected_ending[0]}】
 - 技巧：{selected_ending[1]}
-- 示例：{selected_ending[2]}
 
 请开始创作第{next_chapter_number}章内容："""
