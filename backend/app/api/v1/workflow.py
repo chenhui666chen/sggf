@@ -2520,7 +2520,7 @@ async def save_stage_content(
         })
         db.commit()
 
-        # 4. 如果continue_workflow为true，创建任务记录
+        # 4. 如果continue_workflow为true，创建任务记录并启动后台任务
         task_id = None
         if request.continue_workflow:
             task_id = str(uuid.uuid4())
@@ -2540,6 +2540,43 @@ async def save_stage_content(
                 "created_at": datetime.now().isoformat()
             })
             db.commit()
+
+            # 🔥 关键修复：启动后台任务执行下一阶段
+            logger.info(f"🚀 启动后台任务执行下一阶段，task_id={task_id}")
+            
+            # 确定下一阶段
+            stage_sequence = ['concept', 'structure', 'content', 'review', 'iteration']
+            try:
+                current_index = stage_sequence.index(stage)
+                if current_index < len(stage_sequence) - 1:
+                    next_stage_name = stage_sequence[current_index + 1]
+                    next_stage_enum = StageType(next_stage_name)
+                    
+                    logger.info(f"   📍 下一阶段: {next_stage_name}")
+                    
+                    # 🆕 根据阶段判断是否启用流式输出
+                    streaming_stages = [StageType.CONCEPT, StageType.CONTENT, StageType.REVIEW, StageType.ITERATION]
+                    streaming_enabled = next_stage_enum in streaming_stages
+                    
+                    # 启动后台任务
+                    if streaming_enabled:
+                        asyncio.create_task(
+                            execute_stage_with_streaming(
+                                task_id, project_id, next_stage_enum, current_user.id, db
+                            )
+                        )
+                        logger.info(f"   🌊 流式后台任务已启动: {next_stage_name}")
+                    else:
+                        asyncio.create_task(
+                            execute_stage_background(
+                                task_id, project_id, next_stage_enum, current_user.id, db, False, None, None
+                            )
+                        )
+                        logger.info(f"   🚀 后台任务已启动: {next_stage_name}")
+                else:
+                    logger.info(f"   ✅ 已完成所有阶段，无需继续")
+            except ValueError:
+                logger.error(f"   ❌ 无效的阶段名称: {stage}")
 
         response = {
             "success": True,

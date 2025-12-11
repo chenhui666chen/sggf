@@ -672,9 +672,15 @@ export default function WorkflowControlPage() {
         })
         console.log(`✅ [Redux-Agent] ${stageType} 阶段的 ${agents.length} 个Agent已全部设为completed`)
         
-        // 第三步：立即重置 isRunning 状态
-        setIsRunning(false)
-        console.log(`✅ [状态重置-1] 阶段 ${stageType} 完成，已重置 isRunning=false`)
+        // 🔥 关键修复：不要立即重置 isRunning，让 useEffect 自动执行逻辑来判断是否继续
+        // 只有在概念阶段完成时才暂停（等待用户决策）
+        if (stageType === 'concept') {
+          setIsRunning(false)
+          console.log(`✅ [状态重置-1] 概念阶段完成，已重置 isRunning=false（等待用户决策）`)
+        } else {
+          // 其他阶段完成后保持 isRunning=true，让自动执行逻辑继续下一阶段
+          console.log(`📍 [阶段完成] ${stageType} 阶段完成，保持 isRunning 状态，等待自动推进到下一阶段`)
+        }
 
         // 第四步：同步更新 Redux store（如果有output）
         if (data.output) {
@@ -697,10 +703,6 @@ export default function WorkflowControlPage() {
           const stageStatus = latestState.workflow.stages[stageType].status
           const agentStatuses = latestState.workflow.stages[stageType].agents.map(a => a.status)
           console.log(`🔍 [验证状态] ${stageType}阶段状态=${stageStatus}, Agent状态=${agentStatuses.join(',')}`)
-          
-          // 再次确认isRunning已重置
-          setIsRunning(false)
-          console.log(`🔥 [二次确认] 延迟100ms后再次确认 isRunning=false`)
         }, 100)
 
         // 第六步：概念阶段完成 - 统一处理刷新与弹窗逻辑
@@ -749,19 +751,16 @@ export default function WorkflowControlPage() {
                 
                 // 数据刷新完成后，最终确认状态
                 setTimeout(() => {
-                  setIsRunning(false)
                   const finalState = store.getState()
                   const conceptStatus = finalState.workflow.stages.concept.status
                   const conceptAgents = finalState.workflow.stages.concept.agents
                   const allCompleted = conceptAgents.every(a => a.status === 'completed')
                   console.log(`🏁 [最终验证] concept状态=${conceptStatus}, 所有Agent完成=${allCompleted}`)
-                  console.log(`🔥 [状态重置-3] 概念阶段数据刷新完成，最终确认 isRunning=false`)
                 }, 200)
               }).catch(err => {
                 console.error('❌ [API错误] 刷新概念阶段内容失败:', err)
-                // 即使刷新失败也要重置状态
+                // 即使刷新失败也要重置状态（概念阶段需要停止）
                 setIsRunning(false)
-                // 验证状态
                 const errorState = store.getState()
                 console.log(`🔥 [状态重置-异常] catch块中重置 isRunning=false, concept状态=${errorState.workflow.stages.concept.status}`)
               })
@@ -770,7 +769,7 @@ export default function WorkflowControlPage() {
             }
           } catch (err) {
             console.error('❌ [异常] 概念阶段完成处理失败:', err)
-            // 确保异常时也重置状态
+            // 确保异常时也重置状态（概念阶段需要停止）
             setIsRunning(false)
             const errorState = store.getState()
             console.log(`🔥 [状态重置-异常] try-catch块中重置 isRunning=false, concept状态=${errorState.workflow.stages.concept.status}`)
@@ -2453,15 +2452,10 @@ export default function WorkflowControlPage() {
 
       handleCloseReviewDialog()
 
-      // ✅ 关键修复：真正调用后端API执行下一阶段（迭代优化）
+      // ✅ 关键修复：后端已经启动后台任务，前端只需设置isRunning=true等待WebSocket更新
       setIsRunning(true)
-      setTimeout(async () => {
-        const nextStage: StageType = 'iteration'
-        dispatch(setCurrentStage(nextStage))
-
-        console.log('🚀 使用异步模式继续工作流，下一阶段: iteration')
-        executeStageAsync(nextStage)
-      }, 1000)
+      dispatch(setCurrentStage('iteration'))
+      console.log('🚀 后端已启动迭代优化阶段，等待WebSocket通知...')
     } catch (error) {
       console.error('❌ 保存评审报告失败:', error)
       setSnackbarMessage('保存失败，请重试')
@@ -2523,15 +2517,10 @@ export default function WorkflowControlPage() {
 
       handleCloseContentDialog()
 
-      // ✅ 关键修复：真正调用后端API执行下一阶段
+      // ✅ 关键修复：后端已经启动后台任务，前端只需设置isRunning=true等待WebSocket更新
       setIsRunning(true)
-      setTimeout(async () => {
-        const nextStage: StageType = 'review'
-        dispatch(setCurrentStage(nextStage))
-
-        console.log('🚀 使用异步模式继续工作流...')
-        executeStageAsync(nextStage)
-      }, 1000)
+      dispatch(setCurrentStage('review'))
+      console.log('🚀 后端已启动质量评审阶段，等待WebSocket通知...')
     } catch (error) {
       console.error('Failed to save content:', error)
       setSnackbarMessage('保存失败，请重试')
