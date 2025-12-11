@@ -528,6 +528,90 @@ export default function WorkflowControlPage() {
     }
   }, [generateNextChapterTaskId, generateNextChapterNumber])
 
+  // 🔥 监控Redux状态变化，调试按钮状态
+  useEffect(() => {
+    const conceptStatus = workflow.stages.concept.status
+    const conceptAgents = workflow.stages.concept.agents
+    const hasWorkingAgent = conceptAgents.some(a => a.status === 'working')
+    const allCompleted = conceptAgents.every(a => a.status === 'completed')
+    const buttonShouldShowGenerating = conceptStatus === 'active' || hasWorkingAgent
+    
+    console.log(`🔔 [Redux状态监控] concept状态=${conceptStatus}, hasWorkingAgent=${hasWorkingAgent}, allCompleted=${allCompleted}, 按钮应显示=[生成中:${buttonShouldShowGenerating}]`)
+  }, [workflow.stages.concept.status, workflow.stages.concept.agents])
+
+  // 🔥 关键修复：设置WebSocket加入房间后的回调，主动查询状态
+  useEffect(() => {
+    // 注册加入房间成功后的回调
+    workflowWebSocket.setOnRoomJoined(async (joinedProjectId) => {
+      console.log(`🎉 [房间加入成功] projectId=${joinedProjectId}，开始主动查询阶段状态...`)
+      
+      if (!projectId || Number(projectId) !== joinedProjectId) {
+        console.warn(`⚠️  [项目不匹配] 当前projectId=${projectId}, 加入的projectId=${joinedProjectId}`)
+        return
+      }
+      
+      try {
+        const token = localStorage.getItem('access_token')
+        const response = await fetch(`/api/v1/workflow/${projectId}/all-stages-content`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        })
+        
+        if (!response.ok) {
+          console.error(`❌ [查询失败] HTTP ${response.status}`)
+          return
+        }
+        
+        const batchData = await response.json()
+        const stages = batchData.stages || {}
+        
+        console.log(`📥 [加入房间后查询] 收到数据:`, Object.keys(stages))
+        
+        // 更新概念阶段状态
+        if (stages.concept && stages.concept.trim()) {
+          setConceptContent(stages.concept)
+          dispatch(updateStageOutput({ stage: 'concept', output: stages.concept }))
+          
+          // 🔥 关键：如果有完整内容，说明阶段已完成，强制更新状态
+          dispatch(updateStageStatus({ stage: 'concept', status: 'completed' }))
+          
+          // 更新所有Agent状态
+          const currentState = store.getState()
+          const conceptAgents = currentState.workflow.stages.concept.agents
+          conceptAgents.forEach(agent => {
+            dispatch(updateAgentStatus({
+              stage: 'concept',
+              agentId: agent.id,
+              status: 'completed',
+              progress: 100,
+              message: '执行完成'
+            }))
+          })
+          
+          // 重置isRunning
+          setIsRunning(false)
+          
+          console.log(`✅ [加入房间后同步] concept状态已更新为completed，所有Agent已设置为completed`)
+        }
+        
+        if (stages.world_setting) {
+          setWorldContent(stages.world_setting)
+        }
+        
+        if (stages.characters) {
+          setCharacterContent(stages.characters)
+        }
+        
+      } catch (error) {
+        console.error('❌ [加入房间后查询失败]', error)
+      }
+    })
+    
+    // cleanup
+    return () => {
+      workflowWebSocket.setOnRoomJoined(() => {})
+    }
+  }, [projectId, dispatch])
+
   // 🔌 WebSocket 连接管理
   useEffect(() => {
     if (!projectId) return
@@ -565,10 +649,18 @@ export default function WorkflowControlPage() {
         })
         console.log(`✅ 阶段 ${stageType} 开始，所有 Agent 设置为工作中`)
       } else if (data.status === 'completed') {
+        // 🔥 关键修复：从Redux store直接读取最新状态，避免闭包问题
+        const currentState = store.getState()
+        const agents = currentState.workflow.stages[stageType].agents
+        
+        console.log(`🎯 [阶段完成] stage=${stageType}, status=completed, output存在=${!!data.output}, projectId=${projectId}`)
+        console.log(`📊 [当前状态] 该阶段有 ${agents.length} 个Agent，正在更新为completed...`)
+        
+        // 第一步：更新Redux状态（阶段状态）
         dispatch(updateStageStatus({ stage: stageType, status: 'completed' }))
-
-        // ✅ 临时方案：将该阶段的所有 Agent 设置为完成
-        const agents = workflow.stages[stageType].agents
+        console.log(`✅ [Redux-阶段] ${stageType} 状态已更新为completed`)
+        
+        // 第二步：更新Redux状态（所有Agent状态）
         agents.forEach(agent => {
           dispatch(updateAgentStatus({
             stage: stageType,
@@ -578,95 +670,126 @@ export default function WorkflowControlPage() {
             message: '执行完成'
           }))
         })
-
-        // 🔥 关键修复：重置 isRunning 状态
+        console.log(`✅ [Redux-Agent] ${stageType} 阶段的 ${agents.length} 个Agent已全部设为completed`)
+        
+        // 第三步：立即重置 isRunning 状态
         setIsRunning(false)
-        console.log(`✅ 阶段 ${stageType} 完成，已重置 isRunning 为 false`)
+        console.log(`✅ [状态重置-1] 阶段 ${stageType} 完成，已重置 isRunning=false`)
 
-        // 🆕 同步预览输出（无需刷新）
+        // 第四步：同步更新 Redux store（如果有output）
         if (data.output) {
           dispatch(updateStageOutput({ stage: stageType, output: data.output }))
+          console.log(`✅ [Redux-输出] 已更新 ${stageType} 阶段输出到store: ${data.output.length} 字符`)
+          
           if (stageType === 'concept') {
             const hasCharacterSection = typeof data.output === 'string' && /人物设定|人物体系|主角阵营|对手阵营|支持角色|中立角色/.test(data.output)
             if (hasCharacterSection) {
               setCharacterContent(data.output)
+              console.log(`✅ [人物内容] 检测到人物设定，已同步更新`)
             }
           }
         }
-        console.log(`✅ 阶段 ${stageType} 完成，所有 Agent 设置为完成`)
+        
+        // 🔥 第五步：强制触发组件重新渲染（通过读取Redux最新状态）
+        // 通过setTimeout确保Redux更新已经完成
+        setTimeout(() => {
+          const latestState = store.getState()
+          const stageStatus = latestState.workflow.stages[stageType].status
+          const agentStatuses = latestState.workflow.stages[stageType].agents.map(a => a.status)
+          console.log(`🔍 [验证状态] ${stageType}阶段状态=${stageStatus}, Agent状态=${agentStatuses.join(',')}`)
+          
+          // 再次确认isRunning已重置
+          setIsRunning(false)
+          console.log(`🔥 [二次确认] 延迟100ms后再次确认 isRunning=false`)
+        }, 100)
 
-        // 🆕 概念阶段完成：仅在会话中自动弹窗，刷新不弹
-        if (stageType === 'concept' && !conceptDecisionShownThisSession) {
-          try {
-            if (projectId) {
-              const token = localStorage.getItem('access_token')
-              fetch(`/api/v1/workflow/${projectId}/all-stages-content`, {
-                headers: { 'Authorization': `Bearer ${token}` },
-              }).then(res => res.json()).then(batchData => {
-                const stages = batchData.stages || {}
-                if (stages.concept) setConceptContent(stages.concept)
-                if (stages.world_setting) setWorldContent(stages.world_setting)
-                const hasConcept = !!(stages.concept && stages.concept.trim())
-                // 改为仅在故事概念就绪时弹窗（不依赖世界观）
-                if (hasConcept) {
-                  setDecisionReady(true)
-                  setConceptDecisionShownThisSession(true)
-                }
-              }).catch(err => console.error('刷新概念阶段内容失败:', err))
-            }
-          } catch (err) {
-            console.error('概念阶段完成后自动弹窗逻辑失败:', err)
-          }
-        }
-
-        // 🔥 概念阶段重生完成：刷新所有预览内容
+        // 第六步：概念阶段完成 - 统一处理刷新与弹窗逻辑
         if (stageType === 'concept') {
+          console.log(`🔄 [概念阶段处理] 开始刷新内容，conceptDecisionShownThisSession=${conceptDecisionShownThisSession}`)
           try {
             if (projectId) {
               const token = localStorage.getItem('access_token')
-              console.log('🔄 概念阶段完成，刷新所有预览内容...')
+              console.log(`📡 [API调用] 请求 /api/v1/workflow/${projectId}/all-stages-content`)
+              
               fetch(`/api/v1/workflow/${projectId}/all-stages-content`, {
                 headers: { 'Authorization': `Bearer ${token}` },
               }).then(res => res.json()).then(batchData => {
+                console.log(`📥 [API响应] 收到数据:`, Object.keys(batchData.stages || {}))
                 const stages = batchData.stages || {}
+                
+                // 更新本地state
                 if (stages.concept) {
                   setConceptContent(stages.concept)
-                  // 🔥 关键修复：同时更新Redux store，触发OutputPreviewPanel重新渲染
+                  // 同时更新Redux store
                   dispatch(updateStageOutput({ stage: 'concept', output: stages.concept }))
-                  console.log(`✅ 已更新故事概念: ${stages.concept.length} 字符`)
+                  console.log(`✅ [故事概念] 已更新: ${stages.concept.length} 字符`)
                 }
                 if (stages.world_setting) {
                   setWorldContent(stages.world_setting)
-                  console.log(`✅ 已更新世界观: ${stages.world_setting.length} 字符`)
+                  console.log(`✅ [世界观] 已更新: ${stages.world_setting.length} 字符`)
                 }
                 if (stages.characters) {
                   setCharacterContent(stages.characters)
-                  console.log(`✅ 已更新人物设定: ${stages.characters.length} 字符`)
+                  console.log(`✅ [人物设定] 已更新: ${stages.characters.length} 字符`)
                 }
-                // 🔥 关键修复：强制触发组件重新渲染
-                setSelectedConceptView('concept')
                 
-                // 🔥 🔥 终极修复：数据刷新完成后，再次确保isRunning被重置
-                // 防止WebSocket事件丢失导致按钮卡在"生成中"状态
+                // 强制触发组件重新渲染
+                setSelectedConceptView('concept')
+                console.log(`✅ [视图刷新] 已切换到concept视图`)
+                
+                // 检查是否需要弹窗（仅在会话中首次）
+                const hasConcept = !!(stages.concept && stages.concept.trim())
+                if (hasConcept && !conceptDecisionShownThisSession) {
+                  setDecisionReady(true)
+                  setConceptDecisionShownThisSession(true)
+                  console.log(`🎉 [弹窗触发] 故事概念就绪，显示决策弹窗`)
+                } else {
+                  console.log(`⏭️  [弹窗跳过] hasConcept=${hasConcept}, shown=${conceptDecisionShownThisSession}`)
+                }
+                
+                // 数据刷新完成后，最终确认状态
                 setTimeout(() => {
                   setIsRunning(false)
-                  console.log('🔥 [二次确认] 概念阶段数据刷新完成，强制重置 isRunning=false')
-                }, 100)
+                  const finalState = store.getState()
+                  const conceptStatus = finalState.workflow.stages.concept.status
+                  const conceptAgents = finalState.workflow.stages.concept.agents
+                  const allCompleted = conceptAgents.every(a => a.status === 'completed')
+                  console.log(`🏁 [最终验证] concept状态=${conceptStatus}, 所有Agent完成=${allCompleted}`)
+                  console.log(`🔥 [状态重置-3] 概念阶段数据刷新完成，最终确认 isRunning=false`)
+                }, 200)
               }).catch(err => {
-                console.error('刷新概念阶段内容失败:', err)
+                console.error('❌ [API错误] 刷新概念阶段内容失败:', err)
                 // 即使刷新失败也要重置状态
                 setIsRunning(false)
+                // 验证状态
+                const errorState = store.getState()
+                console.log(`🔥 [状态重置-异常] catch块中重置 isRunning=false, concept状态=${errorState.workflow.stages.concept.status}`)
               })
+            } else {
+              console.warn(`⚠️  [跳过刷新] projectId不存在`)
             }
           } catch (err) {
-            console.error('刷新概念阶段内容失败:', err)
+            console.error('❌ [异常] 概念阶段完成处理失败:', err)
             // 确保异常时也重置状态
             setIsRunning(false)
+            const errorState = store.getState()
+            console.log(`🔥 [状态重置-异常] try-catch块中重置 isRunning=false, concept状态=${errorState.workflow.stages.concept.status}`)
           }
+        } else {
+          // 🔥 非概念阶段：也需要验证状态
+          console.log(`✅ [非概念阶段] ${stageType}阶段完成，验证Redux状态...`)
+          setTimeout(() => {
+            const nonConceptState = store.getState()
+            const status = nonConceptState.workflow.stages[stageType].status
+            const agents = nonConceptState.workflow.stages[stageType].agents
+            const allCompleted = agents.every(a => a.status === 'completed')
+            console.log(`🏁 [最终验证-${stageType}] 阶段状态=${status}, 所有Agent完成=${allCompleted}`)
+          }, 100)
         }
 
         if (data.output) {
-          dispatch(updateStageOutput({ stage: stageType, output: data.output }))
+          // 👁️ 防止重复更新：在第567-595行已经更新过一次，这里不再重复执行
+          // dispatch(updateStageOutput({ stage: stageType, output: data.output }))
 
           // 🔥 关键修复：同步更新组件本地状态
           if (stageType === 'iteration') {
@@ -3080,9 +3203,21 @@ export default function WorkflowControlPage() {
           </Button>
         )}
 
-        {/* 概念开发阶段：显示"故事概念"、"世界观设定"、"人物设定"按钮 */}
+        {/* 概念开发阶段：显示“故事概念”、“世界观设定”、“人物设定”按钮 */}
         {workflow.currentStage === 'concept' ? (
           <Box sx={{ display: 'flex', gap: 1 }}>
+            {(() => {
+              // 🔥 添加调试日志：监控按钮渲染状态
+              const conceptStatus = workflow.stages.concept.status
+              const conceptAgents = workflow.stages.concept.agents
+              const hasWorkingAgent = conceptAgents.some(a => a.status === 'working')
+              const isButtonDisabled = conceptStatus === 'active' || hasWorkingAgent
+              const buttonText = isButtonDisabled ? '生成中' : '评审结果'
+                      
+              console.log(`🎬 [按钮渲染] decisionReady=${decisionReady}, conceptStatus=${conceptStatus}, hasWorkingAgent=${hasWorkingAgent}, disabled=${isButtonDisabled}, text=${buttonText}`)
+                      
+              return null // 不渲染任何内容，只执行日志
+            })()}
             {decisionReady && (
               <Badge color="error" variant="dot" overlap="rectangular" anchorOrigin={{ vertical: 'top', horizontal: 'left' }}>
               <Button
@@ -3414,11 +3549,11 @@ export default function WorkflowControlPage() {
                   genre === '悬疑' ? '悬疑题材注意线索布局，每3-5章揭露一个小真相，每卷一个大反转' :
                   genre === '都市' ? '都市题材建议多线穿插（商战+感情+亲情），每卷一个事业里程碑' :
                   genre === '言情' ? '言情题材注意感情递进（相识→相知→相守），每5-10章一个甜蜜时刻' :
-                  genre === '耳美' ? '耳美题材注意暖昧张力与情感突破交替，每5-10章一个关系进展节点' :
+                  genre === '耽美' ? '耽美题材注意暧昧张力与情感突破交替，每5-10章一个关系进展节点' :
                   genre === '科幻' ? '科幻题材注意科技突破节奏，每卷一次探索升级（地球→星系→宇宙）' :
                   genre === '纯文学' ? '纯文学题材注重内心世界与外部环境的张力，节奏可适当放缓' :
                   '根据题材特点自动适配叙事节奏'
-                }\n\n💡 若不使用自定义规划，将随机智能生成大纲`
+                }\n\n💡 未检测到自定义规划，将随机智能生成大纲`
               ) : '可输入您的卷结构规划，例如：\n第一卷：引气境 (10章)\n第二卷：筑基境 (15章)\n...'
             }
             value={userOutlinePlan}

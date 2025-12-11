@@ -91,6 +91,9 @@ class WorkflowWebSocket {
   private maxReconnectAttempts = 5
   private reconnectDelay = 1000
   // 移除了未使用的 listenersRegistered 变量
+  
+  // 🔥 新增：加入房间成功后的回调
+  private onRoomJoinedCallback: ((projectId: number) => void) | null = null
 
   /**
    * 连接到 WebSocket 服务器
@@ -183,6 +186,12 @@ class WorkflowWebSocket {
 
     this.socket.on('joined_project', (data) => {
       console.log('📥 已加入项目房间:', data)
+      
+      // 🔥 关键修复：加入房间成功后，触发回调通知页面刷新状态
+      if (this.onRoomJoinedCallback && data.project_id) {
+        console.log('🔔 [房间加入成功] 触发回调，projectId=', data.project_id)
+        this.onRoomJoinedCallback(data.project_id)
+      }
     })
 
     this.socket.on('left_project', (data) => {
@@ -251,6 +260,15 @@ class WorkflowWebSocket {
     if (this.projectId === projectId) {
       this.projectId = null
     }
+  }
+
+  /**
+   * 🔥 设置加入房间成功后的回调
+   * @param callback 回调函数，接收 projectId 作为参数
+   */
+  setOnRoomJoined(callback: (projectId: number) => void) {
+    this.onRoomJoinedCallback = callback
+    console.log('✅ [回调注册] 已注册加入房间成功回调')
   }
 
   /**
