@@ -906,7 +906,11 @@ export default function DashboardPage() {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', backgroundColor: '#f5f7fa' }}>
+    <Box sx={{ 
+      minHeight: '100vh', 
+      background: 'linear-gradient(135deg, #6b7280 0%, #4b5563 50%, #374151 100%)',
+      position: 'relative',
+    }}>
       {/* 顶部标题栏 */}
       <Box
         sx={{
@@ -1015,17 +1019,17 @@ export default function DashboardPage() {
           // 根据题材选择书本封面颜色
           const getBookColors = (genre: string | undefined) => {
             const colors: Record<string, { primary: string; secondary: string; accent: string; text: string }> = {
-              '修仙': { primary: '#4a90e2', secondary: '#5ba3f5', accent: '#ffd700', text: '#f0f4f8' },
-              '玄幻': { primary: '#8b5cf6', secondary: '#a78bfa', accent: '#fbbf24', text: '#faf5ff' },
-              '都市': { primary: '#3b82f6', secondary: '#60a5fa', accent: '#10b981', text: '#f0f9ff' },
-              '言情': { primary: '#ec4899', secondary: '#f472b6', accent: '#fde68a', text: '#fdf2f8' },
-              '耽美': { primary: '#a855f7', secondary: '#c084fc', accent: '#f9a8d4', text: '#faf5ff' },
-              '悬疑': { primary: '#475569', secondary: '#64748b', accent: '#ef4444', text: '#f8fafc' },
-              '科幻': { primary: '#0ea5e9', secondary: '#38bdf8', accent: '#22d3ee', text: '#f0f9ff' },
-              '纯文学': { primary: '#78716c', secondary: '#a8a29e', accent: '#d6bcfa', text: '#fafaf9' },
-              'Fantasy': { primary: '#10b981', secondary: '#34d399', accent: '#fbbf24', text: '#f0fdf4' },
+              '修仙': { primary: '#1e3a8a', secondary: '#2563eb', accent: '#fbbf24', text: '#fef3c7' },
+              '玄幻': { primary: '#6b21a8', secondary: '#7c3aed', accent: '#fb923c', text: '#fed7aa' },
+              '都市': { primary: '#ea580c', secondary: '#f97316', accent: '#fef3c7', text: '#fef3c7' },
+              '言情': { primary: '#f472b6', secondary: '#f9a8d4', accent: '#f59e0b', text: '#fef3c7' },
+              '耽美': { primary: '#831843', secondary: '#9f1239', accent: '#fda4af', text: '#fce7f3' },
+              '悬疑': { primary: '#0f172a', secondary: '#1e293b', accent: '#dc2626', text: '#fecaca' },
+              '科幻': { primary: '#0891b2', secondary: '#06b6d4', accent: '#a5f3fc', text: '#ecfeff' },
+              '纯文学': { primary: '#44403c', secondary: '#57534e', accent: '#d6d3d1', text: '#f5f5f4' },
+              'Fantasy': { primary: '#14532d', secondary: '#166534', accent: '#fbbf24', text: '#fef3c7' },
             }
-            return colors[genre || ''] || { primary: '#6366f1', secondary: '#818cf8', accent: '#fbbf24', text: '#f5f3ff' }
+            return colors[genre || ''] || { primary: '#713f12', secondary: '#92400e', accent: '#fbbf24', text: '#fef3c7' }
           }
           const bookColors = getBookColors(project.genre)
           const isDisabled = generatingProjectId === project.id || generatingNextChapter[project.id]
@@ -1057,28 +1061,6 @@ export default function DashboardPage() {
                 }
               }}
             >
-              {/* 页面层叠效果 */}
-              <Box
-                sx={{
-                  position: 'absolute',
-                  right: 2,
-                  top: 8,
-                  bottom: 8,
-                  width: '12px',
-                  background: 'linear-gradient(to right, #f5f5dc 0%, #fffef0 50%, #f0ead6 100%)',
-                  borderRadius: '0 2px 2px 0',
-                  boxShadow: 'inset -2px 0 4px rgba(0,0,0,0.1)',
-                  '&::before': {
-                    content: '""',
-                    position: 'absolute',
-                    top: 0,
-                    bottom: 0,
-                    left: 0,
-                    width: '100%',
-                    background: 'repeating-linear-gradient(to bottom, transparent 0px, transparent 3px, rgba(0,0,0,0.03) 3px, rgba(0,0,0,0.03) 4px)',
-                  },
-                }}
-              />
               
               {/* 书本主体 */}
               <Box
@@ -1097,6 +1079,10 @@ export default function DashboardPage() {
                     '& .book-spine': {
                       boxShadow: isDisabled ? undefined : '4px 0 8px rgba(0,0,0,0.3)',
                     },
+                  },
+                  '&:hover ~ .book-pages': {
+                    transform: 'translateX(-8px)',
+                    boxShadow: 'inset -2px 0 6px rgba(0,0,0,0.15), 2px 0 8px rgba(0,0,0,0.2)',
                   },
                 }}
               >
@@ -1161,8 +1147,9 @@ export default function DashboardPage() {
                       left: 0,
                       right: 0,
                       bottom: 0,
-                      background: 'url("data:image/svg+xml,%3Csvg width=\'100\' height=\'100\' viewBox=\'0 0 100 100\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M0 0h100v100H0z\' fill=\'none\'/%3E%3Cpath d=\'M0 50c25-10 75 10 100 0\' stroke=\'%23ffffff08\' fill=\'none\'/%3E%3C/svg%3E")',
-                      opacity: 0.3,
+                      background: `radial-gradient(circle at 30% 30%, ${bookColors.accent}15 0%, transparent 60%), repeating-linear-gradient(45deg, transparent, transparent 10px, ${bookColors.accent}08 10px, ${bookColors.accent}08 11px)`,
+                      pointerEvents: 'none',
+                      zIndex: 0,
                     },
                     '&::after': {
                       content: '""',
@@ -1174,9 +1161,110 @@ export default function DashboardPage() {
                       border: `1px solid ${bookColors.accent}40`,
                       borderRadius: '2px',
                       pointerEvents: 'none',
+                      zIndex: 1,
                     },
                   }}
                 >
+                  {/* 四角装饰 - 左上 */}
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      top: 8,
+                      left: 8,
+                      width: '30px',
+                      height: '30px',
+                      borderTop: `2px solid ${bookColors.accent}50`,
+                      borderLeft: `2px solid ${bookColors.accent}50`,
+                      borderRadius: '2px 0 0 0',
+                      zIndex: 2,
+                      '&::before': {
+                        content: '""',
+                        position: 'absolute',
+                        top: -2,
+                        left: -2,
+                        width: '8px',
+                        height: '8px',
+                        background: bookColors.accent,
+                        opacity: 0.4,
+                        borderRadius: '50%',
+                      },
+                    }}
+                  />
+                  {/* 四角装饰 - 右上 */}
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      top: 8,
+                      right: 8,
+                      width: '30px',
+                      height: '30px',
+                      borderTop: `2px solid ${bookColors.accent}50`,
+                      borderRight: `2px solid ${bookColors.accent}50`,
+                      borderRadius: '0 2px 0 0',
+                      zIndex: 2,
+                      '&::before': {
+                        content: '""',
+                        position: 'absolute',
+                        top: -2,
+                        right: -2,
+                        width: '8px',
+                        height: '8px',
+                        background: bookColors.accent,
+                        opacity: 0.4,
+                        borderRadius: '50%',
+                      },
+                    }}
+                  />
+                  {/* 四角装饰 - 左下 */}
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      bottom: 8,
+                      left: 8,
+                      width: '30px',
+                      height: '30px',
+                      borderBottom: `2px solid ${bookColors.accent}50`,
+                      borderLeft: `2px solid ${bookColors.accent}50`,
+                      borderRadius: '0 0 0 2px',
+                      zIndex: 2,
+                      '&::before': {
+                        content: '""',
+                        position: 'absolute',
+                        bottom: -2,
+                        left: -2,
+                        width: '8px',
+                        height: '8px',
+                        background: bookColors.accent,
+                        opacity: 0.4,
+                        borderRadius: '50%',
+                      },
+                    }}
+                  />
+                  {/* 四角装饰 - 右下 */}
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      bottom: 8,
+                      right: 8,
+                      width: '30px',
+                      height: '30px',
+                      borderBottom: `2px solid ${bookColors.accent}50`,
+                      borderRight: `2px solid ${bookColors.accent}50`,
+                      borderRadius: '0 0 2px 0',
+                      zIndex: 2,
+                      '&::before': {
+                        content: '""',
+                        position: 'absolute',
+                        bottom: -2,
+                        right: -2,
+                        width: '8px',
+                        height: '8px',
+                        background: bookColors.accent,
+                        opacity: 0.4,
+                        borderRadius: '50%',
+                      },
+                    }}
+                  />
                   {/* 生成中的加载指示器 */}
                   {generatingProjectId === project.id && (
                     <Box
@@ -1489,6 +1577,31 @@ export default function DashboardPage() {
                   </Box>
                 </Box>
               </Box>
+            
+            {/* 页面层叠效果 */}
+            <Box
+              className="book-pages"
+              sx={{
+                position: 'absolute',
+                right: 2,
+                top: 8,
+                bottom: 8,
+                width: '12px',
+                background: 'linear-gradient(to right, #f5f5dc 0%, #fffef0 50%, #f0ead6 100%)',
+                borderRadius: '0 2px 2px 0',
+                boxShadow: 'inset -2px 0 4px rgba(0,0,0,0.1)',
+                transition: 'all 0.3s ease-in-out',
+                '&::before': {
+                  content: '""',
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
+                  left: 0,
+                  width: '100%',
+                  background: 'repeating-linear-gradient(to bottom, transparent 0px, transparent 3px, rgba(0,0,0,0.03) 3px, rgba(0,0,0,0.03) 4px)',
+                },
+              }}
+            />
             </Box>
             </Tooltip>
           </Grid>
@@ -1797,11 +1910,12 @@ export default function DashboardPage() {
                       edge="end"
                       aria-label="delete"
                       size="small"
-                      color="error"
                       onClick={(e) => handleDeleteChapterClick(chapter, e)}
                       sx={{
+                        color: '#b71c1c',
                         '&:hover': {
-                          backgroundColor: '#ffebee'
+                          backgroundColor: '#ffcdd2',
+                          color: '#c62828',
                         }
                       }}
                     >
@@ -1866,10 +1980,20 @@ export default function DashboardPage() {
           </Button>
           <Button 
             onClick={handleConfirmDeleteChapter} 
-            color="error" 
             variant="contained"
             disabled={deletingChapter}
             startIcon={deletingChapter ? <CircularProgress size={16} /> : <DeleteIcon />}
+            sx={{
+              backgroundColor: '#b71c1c',
+              color: '#ffffff',
+              '&:hover': {
+                backgroundColor: '#c62828',
+              },
+              '&:disabled': {
+                backgroundColor: '#e0e0e0',
+                color: '#9e9e9e',
+              }
+            }}
           >
             {deletingChapter ? '删除中...' : '确认删除'}
           </Button>
