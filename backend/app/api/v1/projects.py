@@ -175,6 +175,16 @@ async def delete_project(
             logger.warning(f"   ⚠️ generation_history 删除失败: {e}")
             db.rollback()
         
+        # 删除 chapter_plans
+        try:
+            delete_plans = text("DELETE FROM chapter_plans WHERE project_id = :project_id")
+            db.execute(delete_plans, {"project_id": project_id})
+            db.commit()
+            logger.info(f"   ✅ 已删除 chapter_plans 表记录")
+        except Exception as e:
+            logger.warning(f"   ⚠️ chapter_plans 删除失败: {e}")
+            db.rollback()
+        
     except Exception as e:
         logger.error(f"   ❌ 原始 SQL 表清理失败: {e}")
         # 不阻塞删除流程，继续执行

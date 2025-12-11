@@ -1407,7 +1407,11 @@ class CreativeDirectorCoordinator:
 - 此处只做高度概括，详细世界观将在后续阶段展开。
 
 请严格按照上述顺序与小标题输出，不要添加其他额外说明。"""
-            concept_result = self.creative_director.process(concept_prompt)
+            # 🎲 提高temperature增加创造性，避免相同题材生成重复内容
+            concept_result = self.creative_director.process(
+                concept_prompt,
+                temperature=0.9  # 使用高温度增加随机性和创造性
+            )
             concept = concept_result if isinstance(concept_result, str) else concept_result.get("output", requirement)
             logger.info(f"✅ 故事概念生成完成，长度: {len(concept)}")
         else:
