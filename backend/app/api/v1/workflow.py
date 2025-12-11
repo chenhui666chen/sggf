@@ -4,18 +4,18 @@
 """
 import logging
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Body, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
-from app.db.base import get_db
+from app.db.base import get_db, SessionLocal
 from app.services.agent_coordinator import (
     coordinator,
     StageType,
     AgentStatus,
 )
 from app.core.security import get_current_user
-from app.models.project import Project
+from app.models.project import Project, Chapter
 from app.models.setting import SettingCollection
 from app.websocket.manager import ws_manager
 from app.services.setting_templates import build_project_settings_summary
