@@ -970,17 +970,17 @@ export default function DashboardPage() {
           // 根据题材选择书本封面颜色
           const getBookColors = (genre: string | undefined) => {
             const colors: Record<string, { primary: string; secondary: string; accent: string; text: string }> = {
-              '修仙': { primary: '#1a237e', secondary: '#283593', accent: '#ffd700', text: '#e8d5b7' },
-              '玄幻': { primary: '#4a148c', secondary: '#6a1b9a', accent: '#ff6f00', text: '#f3e5f5' },
-              '都市': { primary: '#263238', secondary: '#37474f', accent: '#00bcd4', text: '#eceff1' },
-              '言情': { primary: '#880e4f', secondary: '#ad1457', accent: '#ffb6c1', text: '#fce4ec' },
-              '耽美': { primary: '#311b92', secondary: '#4527a0', accent: '#e1bee7', text: '#ede7f6' },
-              '悬疑': { primary: '#1b1b1b', secondary: '#2d2d2d', accent: '#b71c1c', text: '#bdbdbd' },
-              '科幻': { primary: '#0d47a1', secondary: '#1565c0', accent: '#00e5ff', text: '#e3f2fd' },
-              '纯文学': { primary: '#3e2723', secondary: '#4e342e', accent: '#a1887f', text: '#efebe9' },
-              'Fantasy': { primary: '#1b5e20', secondary: '#2e7d32', accent: '#ffd54f', text: '#e8f5e9' },
+              '修仙': { primary: '#4a90e2', secondary: '#5ba3f5', accent: '#ffd700', text: '#f0f4f8' },
+              '玄幻': { primary: '#8b5cf6', secondary: '#a78bfa', accent: '#fbbf24', text: '#faf5ff' },
+              '都市': { primary: '#3b82f6', secondary: '#60a5fa', accent: '#10b981', text: '#f0f9ff' },
+              '言情': { primary: '#ec4899', secondary: '#f472b6', accent: '#fde68a', text: '#fdf2f8' },
+              '耽美': { primary: '#a855f7', secondary: '#c084fc', accent: '#f9a8d4', text: '#faf5ff' },
+              '悬疑': { primary: '#475569', secondary: '#64748b', accent: '#ef4444', text: '#f8fafc' },
+              '科幻': { primary: '#0ea5e9', secondary: '#38bdf8', accent: '#22d3ee', text: '#f0f9ff' },
+              '纯文学': { primary: '#78716c', secondary: '#a8a29e', accent: '#d6bcfa', text: '#fafaf9' },
+              'Fantasy': { primary: '#10b981', secondary: '#34d399', accent: '#fbbf24', text: '#f0fdf4' },
             }
-            return colors[genre || ''] || { primary: '#5d4037', secondary: '#6d4c41', accent: '#d4af37', text: '#efebe9' }
+            return colors[genre || ''] || { primary: '#6366f1', secondary: '#818cf8', accent: '#fbbf24', text: '#f5f3ff' }
           }
           const bookColors = getBookColors(project.genre)
           const isDisabled = generatingProjectId === project.id || generatingNextChapter[project.id]
