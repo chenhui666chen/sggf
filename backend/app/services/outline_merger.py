@@ -30,8 +30,11 @@ def add_volume_anchors(framework: str, total_volumes: int) -> str:
     lines = framework.split('\n')
     result = []
     
-    # 匹配卷标题的模式
-    volume_pattern = re.compile(r'^(#+)\s*第([0-9]+)卷[：:]')
+    # 匹配卷标题的模式（支持多种格式）
+    # 格式1: ## 第1卷：...
+    # 格式2: 【第1卷】...
+    # 格式3: 第1卷：...
+    volume_pattern = re.compile(r'^(#+\s*)?[【\[]?第([0-9]+)卷[】\]]?[：:]?')
     
     for line in lines:
         match = volume_pattern.match(line)
