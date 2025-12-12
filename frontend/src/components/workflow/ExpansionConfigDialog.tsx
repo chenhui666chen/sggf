@@ -1,3 +1,4 @@
+import React from 'react'
 import {
   Dialog,
   DialogTitle,
@@ -14,6 +15,9 @@ import {
   Alert,
   CircularProgress,
   Divider,
+  Chip,
+  Tooltip,
+  Popover,
 } from '@mui/material'
 
 interface ExpansionConfigDialogProps {
@@ -35,6 +39,13 @@ interface ExpansionConfigDialogProps {
   targetVolumeIndex: number
   volumeChaptersMin: number
   volumeChaptersMax: number
+  // 💡 智能推荐数据
+  recommendedMode?: 'total' | 'epic_framework' | 'incremental'
+  recommendedVolumes?: number
+  recommendedChaptersPerVolumeMin?: number
+  recommendedChaptersPerVolumeMax?: number
+  recommendedAutoExpandAllVolumes?: boolean
+  recommendationReason?: string
   // 回调
   onExpansionModeChange: (mode: 'total' | 'volume' | 'incremental' | 'epic_framework' | 'volume_detail') => void
   onTargetChapterCountChange: (count: number) => void
@@ -66,6 +77,12 @@ export default function ExpansionConfigDialog({
   targetVolumeIndex,
   volumeChaptersMin,
   volumeChaptersMax,
+  recommendedMode,
+  recommendedVolumes,
+  recommendedChaptersPerVolumeMin,
+  recommendedChaptersPerVolumeMax,
+  recommendedAutoExpandAllVolumes,
+  recommendationReason,
   onExpansionModeChange,
   onTargetChapterCountChange,
   onIncrementalStepChange,
@@ -79,6 +96,18 @@ export default function ExpansionConfigDialog({
   onConfirm,
   genre = '',
 }: ExpansionConfigDialogProps) {
+  // 💡 Popover 状态
+  const [anchorEl, setAnchorEl] = React.useState<HTMLElement | null>(null)
+
+  const handlePopoverOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget)
+  }
+
+  const handlePopoverClose = () => {
+    setAnchorEl(null)
+  }
+
+  const popoverOpen = Boolean(anchorEl)
   // 🎯 题材适配的智能提示
   const getGenreTip = () => {
     if (expansionMode !== 'epic_framework') return null
@@ -131,17 +160,62 @@ export default function ExpansionConfigDialog({
             <FormControlLabel 
               value="total" 
               control={<Radio />} 
-              label="📊 按总章数" 
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <span>📊 按总章数</span>
+                  {recommendedMode === 'total' && (
+                    <Tooltip title="根据题材和篇幅智能推荐" arrow>
+                      <Chip 
+                        label="💡 智能推荐" 
+                        size="small" 
+                        color="primary" 
+                        onClick={handlePopoverOpen}
+                        sx={{ cursor: 'help', height: 20, fontSize: '0.75rem' }}
+                      />
+                    </Tooltip>
+                  )}
+                </Box>
+              }
             />
             <FormControlLabel 
               value="epic_framework" 
               control={<Radio />} 
-              label="🌟 史诗框架（超长篇）" 
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <span>🌟 史诗框架（超长篇）</span>
+                  {recommendedMode === 'epic_framework' && (
+                    <Tooltip title="根据题材和篇幅智能推荐" arrow>
+                      <Chip 
+                        label="💡 智能推荐" 
+                        size="small" 
+                        color="primary" 
+                        onClick={handlePopoverOpen}
+                        sx={{ cursor: 'help', height: 20, fontSize: '0.75rem' }}
+                      />
+                    </Tooltip>
+                  )}
+                </Box>
+              }
             />
             <FormControlLabel 
               value="incremental" 
               control={<Radio />} 
-              label="⏭️ 渐进式扩展" 
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <span>⏭️ 渐进式扩展</span>
+                  {recommendedMode === 'incremental' && (
+                    <Tooltip title="根据题材和篇幅智能推荐" arrow>
+                      <Chip 
+                        label="💡 智能推荐" 
+                        size="small" 
+                        color="primary" 
+                        onClick={handlePopoverOpen}
+                        sx={{ cursor: 'help', height: 20, fontSize: '0.75rem' }}
+                      />
+                    </Tooltip>
+                  )}
+                </Box>
+              }
             />
           </RadioGroup>
         </FormControl>
@@ -421,6 +495,59 @@ export default function ExpansionConfigDialog({
           开始扩展
         </Button>
       </DialogActions>
+
+      {/* 💡 智能推荐 Popover */}
+      <Popover
+        open={popoverOpen}
+        anchorEl={anchorEl}
+        onClose={handlePopoverClose}
+        anchorOrigin={{
+          vertical: 'bottom',
+          horizontal: 'center',
+        }}
+        transformOrigin={{
+          vertical: 'top',
+          horizontal: 'center',
+        }}
+      >
+        <Box sx={{ p: 2, maxWidth: 400 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            💡 智能推荐理由
+          </Typography>
+          {recommendationReason ? (
+            <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
+              {recommendationReason}
+            </Typography>
+          ) : (
+            <Box>
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                <strong>推荐模式：</strong>
+                {recommendedMode === 'total' && '按总章数扩展（快速规划）'}
+                {recommendedMode === 'epic_framework' && '史诗框架（超长篇）'}
+                {recommendedMode === 'incremental' && '渐进式扩展（精细控制）'}
+              </Typography>
+              {recommendedMode === 'epic_framework' && (
+                <>
+                  <Typography variant="body2" sx={{ mb: 0.5 }}>
+                    <strong>推荐卷数：</strong>{recommendedVolumes || totalVolumes} 卷
+                  </Typography>
+                  <Typography variant="body2" sx={{ mb: 0.5 }}>
+                    <strong>每卷章节：</strong>
+                    {recommendedChaptersPerVolumeMin || 30}-{recommendedChaptersPerVolumeMax || 50} 章
+                  </Typography>
+                  <Typography variant="body2" sx={{ mb: 0.5 }}>
+                    <strong>扩展方式：</strong>
+                    {recommendedAutoExpandAllVolumes ? '自动扩展全部卷' : '手动选择扩展'}
+                  </Typography>
+                </>
+              )}
+              <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'text.secondary', fontStyle: 'italic' }}>
+                🔍 基于「{genre}」题材与篇幅智能计算
+              </Typography>
+            </Box>
+          )}
+        </Box>
+      </Popover>
     </Dialog>
   )
 }

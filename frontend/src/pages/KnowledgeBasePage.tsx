@@ -255,13 +255,21 @@ export default function KnowledgeBasePage() {
   const [totalChaptersMax, setTotalChaptersMax] = useState<number>(2500)  // 总章节范围最大值
   const [autoExpandAllVolumes, setAutoExpandAllVolumes] = useState<boolean>(true)  // 是否自动扩展全部卷
   
-  // 📖 单卷详细模式状态
+  // 🆕 单卷扩展相关
   const [savedFramework, setSavedFramework] = useState<string>('')  // 保存的史诗框架
   const [targetVolumeIndex, setTargetVolumeIndex] = useState<number>(0)  // 扩展第几卷（0表示未选择）
   const [volumeChaptersMin, setVolumeChaptersMin] = useState<number>(50)  // 本卷章节最小值
   const [volumeChaptersMax, setVolumeChaptersMax] = useState<number>(80)  // 本卷章节最大值
   const [loadingFramework, setLoadingFramework] = useState<boolean>(false)  // 🆕 加载框架状态
   const [frameworkMetadata, setFrameworkMetadata] = useState<any>(null)  // 🆕 框架元数据
+  
+  // 💡 智能推荐相关状态
+  const [recommendedMode, setRecommendedMode] = useState<'total' | 'epic_framework' | 'incremental'>('total')
+  const [recommendedVolumes, setRecommendedVolumes] = useState(3)
+  const [recommendedChaptersPerVolumeMin, setRecommendedChaptersPerVolumeMin] = useState(20)
+  const [recommendedChaptersPerVolumeMax, setRecommendedChaptersPerVolumeMax] = useState(30)
+  const [recommendedAutoExpandAllVolumes, setRecommendedAutoExpandAllVolumes] = useState(true)
+  const [recommendationReason, setRecommendationReason] = useState('')
   
   // 🆕 扩展结果对话框状态
   const [showExpandOutlineDialog, setShowExpandOutlineDialog] = useState(false)
@@ -575,6 +583,159 @@ export default function KnowledgeBasePage() {
     }
     loadProjectInfo()
   }, [projectId])
+
+  // 💡 智能推荐大纲扩展模式和参数
+  useEffect(() => {
+    if (!projectInfo) return
+
+    const projectGenre = projectInfo.genre || ''
+    const lengthType = projectInfo.planned_length_type || ''
+    const maxChapters = projectInfo.planned_chapters_max || 0
+
+    console.log('🧠 [知识库] 智能推荐大纲扩展模式：', { projectGenre, lengthType, maxChapters })
+
+    let reason = ''
+
+    // 📌 优先级：篇幅判断
+    if (lengthType === 'short' || maxChapters < 50) {
+      // 短篇：直接按总章数
+      setRecommendedMode('total')
+      reason = `推荐「按总章数扩展」：
+
+• 题材：${projectGenre || '通用'}
+• 篇幅：短篇（${maxChapters}章）
+• 优势：快速规划，2分钟内完成
+• 适用：快速验证创意，无需复杂配置`
+      console.log('✅ 推荐模式：按总章数（短篇）')
+    } else if (lengthType === 'epic' || maxChapters > 500) {
+      // 超长篇：史诗框架 + 手动选卷
+      setRecommendedMode('epic_framework')
+      setRecommendedAutoExpandAllVolumes(false)
+      
+      const estimatedVolumes = Math.max(5, Math.min(50, Math.ceil(maxChapters / 90)))
+      setRecommendedVolumes(estimatedVolumes)
+      setRecommendedChaptersPerVolumeMin(80)
+      setRecommendedChaptersPerVolumeMax(100)
+      
+      reason = `推荐「史诗框架」：
+
+• 题材：${projectGenre || '通用'}
+• 篇幅：超长篇（${maxChapters}章）
+• 推荐卷数：${estimatedVolumes}卷
+• 每卷章节：80-100章
+• 扩展方式：手动选择扩展（分阶段创作）`
+      console.log(`✅ 推荐模式：史诗框架（超长篇） - 手动选卷`)
+    } else if (lengthType === 'long' || maxChapters >= 100) {
+      // 长篇：史诗框架 + 根据章数决定是否自动扩展
+      setRecommendedMode('epic_framework')
+      
+      if (maxChapters <= 500) {
+        setRecommendedAutoExpandAllVolumes(true)
+      } else {
+        setRecommendedAutoExpandAllVolumes(false)
+      }
+
+      // 🎯 根据题材推荐卷数和每卷章数
+      if (projectGenre === '修仙' || projectGenre === '玄幻') {
+        const estimatedVolumes = Math.max(3, Math.min(8, Math.ceil(maxChapters / 90)))
+        setRecommendedVolumes(estimatedVolumes)
+        setRecommendedChaptersPerVolumeMin(80)
+        setRecommendedChaptersPerVolumeMax(100)
+        reason = `推荐「史诗框架」：
+
+• 题材：${projectGenre}（境界体系）
+• 篇幅：长篇（${maxChapters}章）
+• 推荐卷数：${estimatedVolumes}卷
+• 每卷章节：80-100章
+• 扩展方式：${maxChapters <= 500 ? '自动扩展全部卷' : '手动选择扩展'}
+• 适用：修炼体系分阶段推进`
+        console.log(`  💫 ${projectGenre}：${estimatedVolumes}卷 × 80-100章`)
+      } else if (projectGenre === '都市') {
+        const estimatedVolumes = Math.max(2, Math.min(5, Math.ceil(maxChapters / 40)))
+        setRecommendedVolumes(estimatedVolumes)
+        setRecommendedChaptersPerVolumeMin(30)
+        setRecommendedChaptersPerVolumeMax(50)
+        reason = `推荐「史诗框架」：
+
+• 题材：都市（事业发展）
+• 篇幅：长篇（${maxChapters}章）
+• 推荐卷数：${estimatedVolumes}卷
+• 每卷章节：30-50章
+• 扩展方式：${maxChapters <= 500 ? '自动扩展全部卷' : '手动选择扩展'}
+• 适用：事业发展和人际关系递进`
+        console.log(`  🏙️ 都市：${estimatedVolumes}卷 × 30-50章`)
+      } else if (projectGenre === '悬疑') {
+        const estimatedVolumes = Math.max(2, Math.min(4, Math.ceil(maxChapters / 35)))
+        setRecommendedVolumes(estimatedVolumes)
+        setRecommendedChaptersPerVolumeMin(20)
+        setRecommendedChaptersPerVolumeMax(50)
+        reason = `推荐「史诗框架」：
+
+• 题材：悬疑（线索布局）
+• 篇幅：长篇（${maxChapters}章）
+• 推荐卷数：${estimatedVolumes}卷
+• 每卷章节：20-50章
+• 扩展方式：${maxChapters <= 500 ? '自动扩展全部卷' : '手动选择扩展'}
+• 适用：每卷一个大反转`
+        console.log(`  🔍 悬疑：${estimatedVolumes}卷 × 20-50章`)
+      } else if (projectGenre === '言情' || projectGenre === '耽美') {
+        const estimatedVolumes = Math.max(2, Math.min(3, Math.ceil(maxChapters / 40)))
+        setRecommendedVolumes(estimatedVolumes)
+        setRecommendedChaptersPerVolumeMin(20)
+        setRecommendedChaptersPerVolumeMax(60)
+        reason = `推荐「史诗框架」：
+
+• 题材：${projectGenre}（感情递进）
+• 篇幅：长篇（${maxChapters}章）
+• 推荐卷数：${estimatedVolumes}卷
+• 每卷章节：20-60章
+• 扩展方式：${maxChapters <= 500 ? '自动扩展全部卷' : '手动选择扩展'}
+• 适用：相识→相知→相守`
+        console.log(`  💖 ${projectGenre}：${estimatedVolumes}卷 × 20-60章`)
+      } else if (projectGenre === '科幻') {
+        const estimatedVolumes = Math.max(3, Math.min(6, Math.ceil(maxChapters / 65)))
+        setRecommendedVolumes(estimatedVolumes)
+        setRecommendedChaptersPerVolumeMin(50)
+        setRecommendedChaptersPerVolumeMax(80)
+        reason = `推荐「史诗框架」：
+
+• 题材：科幻（探索升级）
+• 篇幅：长篇（${maxChapters}章）
+• 推荐卷数：${estimatedVolumes}卷
+• 每卷章节：50-80章
+• 扩展方式：${maxChapters <= 500 ? '自动扩展全部卷' : '手动选择扩展'}
+• 适用：地球→星系→宇宙`
+        console.log(`  🚀 科幻：${estimatedVolumes}卷 × 50-80章`)
+      } else {
+        // 通用默认：3-5卷，每卷 30-50章
+        const estimatedVolumes = Math.max(3, Math.min(5, Math.ceil(maxChapters / 40)))
+        setRecommendedVolumes(estimatedVolumes)
+        setRecommendedChaptersPerVolumeMin(30)
+        setRecommendedChaptersPerVolumeMax(50)
+        reason = `推荐「史诗框架」：
+
+• 题材：${projectGenre || '通用'}
+• 篇幅：长篇（${maxChapters}章）
+• 推荐卷数：${estimatedVolumes}卷
+• 每卷章节：30-50章
+• 扩展方式：${maxChapters <= 500 ? '自动扩展全部卷' : '手动选择扩展'}`
+        console.log(`  📚 通用：${estimatedVolumes}卷 × 30-50章`)
+      }
+      console.log(`✅ 推荐模式：史诗框架（长篇）`)
+    } else {
+      // 中篇：渐进式扩展
+      setRecommendedMode('incremental')
+      reason = `推荐「渐进式扩展」：
+
+• 题材：${projectGenre || '通用'}
+• 篇幅：中篇（${maxChapters}章）
+• 优势：精细控制，随时调整
+• 适用：探索性写作，多线并进`
+      console.log('✅ 推荐模式：渐进式（中篇）')
+    }
+
+    setRecommendationReason(reason)
+  }, [projectInfo])
 
   // ==================== 文本内容相关函数 ====================
 
@@ -1472,7 +1633,23 @@ export default function KnowledgeBasePage() {
                       <Button
                         variant="contained"
                         startIcon={<ArticleIcon />}
-                        onClick={() => setShowExpansionConfig(true)}
+                        onClick={() => {
+                          // 💡 打开对话框前自动选中推荐模式
+                          console.log('💡 打开大纲扩展配置，自动选中推荐模式：', recommendedMode)
+                          setExpansionMode(recommendedMode)
+                          
+                          // 🔄 如果推荐史诗框架，同步推荐的参数
+                          if (recommendedMode === 'epic_framework') {
+                            setTotalVolumes(recommendedVolumes)
+                            setTotalChaptersMin(recommendedVolumes * recommendedChaptersPerVolumeMin)
+                            setTotalChaptersMax(recommendedVolumes * recommendedChaptersPerVolumeMax)
+                            setAutoExpandAllVolumes(recommendedAutoExpandAllVolumes)
+                            // 加载框架元数据
+                            loadEpicFramework()
+                          }
+                          
+                          setShowExpansionConfig(true)
+                        }}
                         disabled={expandingOutline || expandingCharacters}
                         sx={{ borderRadius: 2 }}
                       >
@@ -2775,6 +2952,12 @@ export default function KnowledgeBasePage() {
           handleExpandOutline()
         }}
         genre={projectInfo?.genre || ''}
+        recommendedMode={recommendedMode}
+        recommendedVolumes={recommendedVolumes}
+        recommendedChaptersPerVolumeMin={recommendedChaptersPerVolumeMin}
+        recommendedChaptersPerVolumeMax={recommendedChaptersPerVolumeMax}
+        recommendedAutoExpandAllVolumes={recommendedAutoExpandAllVolumes}
+        recommendationReason={recommendationReason}
       />
 
       {/* 提示消息 */}
