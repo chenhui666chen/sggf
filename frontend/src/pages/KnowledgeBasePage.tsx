@@ -1298,6 +1298,22 @@ export default function KnowledgeBasePage() {
         }
       }
       
+      // 🆕 阶段2: 检测单卷详细模式的覆盖
+      if (expansionMode === 'volume_detail') {
+        const response = await apiClient.getEpicFrameworkState(parseInt(projectId))
+        const state = response.data
+        
+        if (state.has_framework && state.expanded_volumes.includes(targetVolumeIndex)) {
+          setConfirmDialogType('duplicate')
+          setConfirmDialogMessage(
+            `第${targetVolumeIndex}卷细纲已存在，重新生成将覆盖现有内容。\n\n确认要重新生成该卷吗？`
+          )
+          setConfirmDialogOpen(true)
+          setPendingAction(() => executeExpandOutline)
+          return  // 等待用户确认
+        }
+      }
+      
       // 直接执行扩展
       await executeExpandOutline()
       
