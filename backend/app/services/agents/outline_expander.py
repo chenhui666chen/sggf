@@ -1676,8 +1676,54 @@ Please输出完整的、重新整合后的网文大纲（🔥重点：每章必�
 ✅ 第Y章：提及"天道"异常（为第Z卷铺垫）"""
 
         print("【第一步】详细扩展第{target_volume_index}卷...")
-        volume_content = self.plot_architect.process(detail_prompt, {})
-        print("✅ 单卷详细扩展完成\n")
+        
+        # 🛡️ 内容安全重试机制
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # 第一次尝试：正常prompt
+                # 后续尝试：添加内容安全约束
+                if attempt > 0:
+                    print(f"⚠️ 检测到内容安全问题，第{attempt + 1}次重试（共{max_retries}次）...")
+                    # 在prompt末尾添加内容安全约束
+                    safety_constraint = """
+
+⚠️ 内容安全要求：
+1. 避免包含暴力、血腥、恐怖等过度描写
+2. 人物关系和情节发展应符合主流价值观
+3. 使用委婉、克制的表达方式
+4. 重点突出正面价值观和人物成长"""
+                    detail_prompt_safe = detail_prompt + safety_constraint
+                    volume_content = self.plot_architect.process(detail_prompt_safe, {})
+                else:
+                    volume_content = self.plot_architect.process(detail_prompt, {})
+                
+                print("✅ 单卷详细扩展完成\n")
+                break  # 成功则跳出重试循环
+                
+            except Exception as e:
+                error_str = str(e)
+                # 检查是否是内容安全问题
+                if 'data_inspection_failed' in error_str or 'inappropriate content' in error_str:
+                    if attempt < max_retries - 1:
+                        print(f"⚠️ 内容安全审查失败: {error_str[:100]}...")
+                        continue  # 继续重试
+                    else:
+                        # 最后一次重试也失败，返回占位内容
+                        print(f"❌ 第{target_volume_index}卷内容安全审查多次失败，使用占位内容")
+                        volume_content = f"""## 第{target_volume_index}卷：内容生成失败
+
+⚠️ 由于内容安全审查限制，本卷详细大纲暂时无法生成。
+建议：
+1. 调整世界观设定或人物关系，避免敏感内容
+2. 手动编写本卷大纲
+3. 稍后重试单卷扩展
+
+章节范围：第{chapters_range[0]}-{chapters_range[1]}章（预计）"""
+                        break
+                else:
+                    # 非内容安全问题，直接抛出
+                    raise
         
         print(f"{'='*70}")
         print(f"【单卷详细扩展】完成！")
