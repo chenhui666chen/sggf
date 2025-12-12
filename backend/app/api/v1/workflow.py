@@ -4603,7 +4603,7 @@ async def get_epic_framework_state(
         
         # 读取框架数据
         query = text("""
-            SELECT epic_framework, epic_framework_generated_at, plot_outline
+            SELECT epic_framework, epic_framework_generated_at, plot_outline, epic_volumes_detail
             FROM project_settings
             WHERE project_id = :project_id
         """)
@@ -4621,6 +4621,7 @@ async def get_epic_framework_state(
         epic_framework = result[0]
         framework_generated_at = result[1]
         plot_outline = result[2] or ""
+        epic_volumes_detail_json = result[3] or ""
         
         # 🔑 关键修复：使用 epic_framework 来检测状态，而不是 plot_outline
         # 如果 epic_framework 为空，退耋检查 plot_outline
@@ -4638,12 +4639,28 @@ async def get_epic_framework_state(
         # 使用状态检测函数
         state = detect_framework_state(content_to_check)
         
-        logger.info(f"   ✅ 框架状态: {state}")
+        # 🆕 关键修复：从 epic_volumes_detail JSON 中直接读取已扩展的卷列表
+        from app.services.outline_merger import parse_volumes_detail_json
+        expanded_volumes = []
+        if epic_volumes_detail_json:
+            try:
+                volumes_dict = parse_volumes_detail_json(epic_volumes_detail_json)
+                expanded_volumes = sorted(volumes_dict.keys())
+                logger.info(f"   📝 从 JSON 读取已扩展卷：{expanded_volumes}")
+            except Exception as e:
+                logger.warning(f"   ⚠️  解析 epic_volumes_detail 失败: {e}")
+                # 退耋使用正则匹配
+                expanded_volumes = state["expandedVolumes"]
+        else:
+            # 如果没有 JSON，使用正则匹配（兼容旧数据）
+            expanded_volumes = state["expandedVolumes"]
+        
+        logger.info(f"   ✅ 框架状态: has_framework={state['hasFramework']}, total_volumes={state['totalVolumes']}, expanded_volumes={expanded_volumes}")
         
         return {
             "has_framework": state["hasFramework"],
             "total_volumes": state["totalVolumes"],
-            "expanded_volumes": state["expandedVolumes"],
+            "expanded_volumes": expanded_volumes,
             "framework_generated_at": framework_generated_at
         }
         
