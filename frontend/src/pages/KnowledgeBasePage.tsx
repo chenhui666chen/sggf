@@ -439,8 +439,8 @@ export default function KnowledgeBasePage() {
             console.log('✅ 工作流数据刷新完成')
             console.log('📝 当前 plotOutline 长度:', plotOutline.length)
             
-            // 🆕 如果是史诗框架模式，刷新框架状态
-            if (expansionMode === 'epic_framework') {
+            // 🆕 如果是史诗框架模式或单卷详细模式，刷新框架状态
+            if (expansionMode === 'epic_framework' || expansionMode === 'volume_detail') {
               console.log('🔄 刷新史诗框架状态...')
               loadEpicFramework()
             }
