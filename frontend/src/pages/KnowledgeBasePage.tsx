@@ -1630,31 +1630,37 @@ export default function KnowledgeBasePage() {
                     
                     {/* 大纲设定扩展按钮 */}
                     {mainTabValue === 2 && (
-                      <Button
-                        variant="contained"
-                        startIcon={<ArticleIcon />}
-                        onClick={() => {
-                          // 💡 打开对话框前自动选中推荐模式
-                          console.log('💡 打开大纲扩展配置，自动选中推荐模式：', recommendedMode)
-                          setExpansionMode(recommendedMode)
-                          
-                          // 🔄 如果推荐史诗框架，同步推荐的参数
-                          if (recommendedMode === 'epic_framework') {
-                            setTotalVolumes(recommendedVolumes)
-                            setTotalChaptersMin(recommendedVolumes * recommendedChaptersPerVolumeMin)
-                            setTotalChaptersMax(recommendedVolumes * recommendedChaptersPerVolumeMax)
-                            setAutoExpandAllVolumes(recommendedAutoExpandAllVolumes)
-                            // 加载框架元数据
-                            loadEpicFramework()
-                          }
-                          
-                          setShowExpansionConfig(true)
-                        }}
-                        disabled={expandingOutline || expandingCharacters}
-                        sx={{ borderRadius: 2 }}
+                      <Tooltip
+                        title="💡 建议扩展人物和扩展大纲交替进行，直到满意再进行后续创作，人物和大纲是后续创作的根基"
+                        placement="top"
+                        arrow
                       >
-                        开始扩展
-                      </Button>
+                        <Button
+                          variant="contained"
+                          startIcon={<ArticleIcon />}
+                          onClick={() => {
+                            // 💡 打开对话框前自动选中推荐模式
+                            console.log('💡 打开大纲扩展配置，自动选中推荐模式：', recommendedMode)
+                            setExpansionMode(recommendedMode)
+                            
+                            // 🔄 如果推荐史诗框架，同步推荐的参数
+                            if (recommendedMode === 'epic_framework') {
+                              setTotalVolumes(recommendedVolumes)
+                              setTotalChaptersMin(recommendedVolumes * recommendedChaptersPerVolumeMin)
+                              setTotalChaptersMax(recommendedVolumes * recommendedChaptersPerVolumeMax)
+                              setAutoExpandAllVolumes(recommendedAutoExpandAllVolumes)
+                              // 加载框架元数据
+                              loadEpicFramework()
+                            }
+                            
+                            setShowExpansionConfig(true)
+                          }}
+                          disabled={expandingOutline || expandingCharacters}
+                          sx={{ borderRadius: 2 }}
+                        >
+                          扩展大纲
+                        </Button>
+                      </Tooltip>
                     )}
                     {mainTabValue === 1 && characterSubTabValue === 0 && (
                       <>
@@ -1683,7 +1689,7 @@ export default function KnowledgeBasePage() {
                               ? "扩展进行中，请稍候" 
                               : characterExpandState === 'resultReady'
                               ? "查看AI生成的人物扩展结果与建议"
-                              : "根据当前的世界观、人物和大纲设定，智能扩展更多人物"
+                              : "💡 建议扩展人物和扩展大纲交替进行，直到满意再进行后续创作，人物和大纲是后续创作的根基"
                           }
                           placement="top"
                           arrow
