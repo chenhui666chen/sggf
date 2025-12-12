@@ -392,23 +392,56 @@ export default function ExpansionConfigDialog({
             </Typography>
 
             {frameworkMetadata?.has_framework ? (
-              // ===== 已有框架：只显示单卷扩展选项 =====
+              // ===== 任务3.4：已有框架UI =====
               <Box>
-                <Alert severity="info" sx={{ mb: 2 }}>
-                  📌 已有{frameworkMetadata.metadata.total_volumes}卷框架，请选择要扩展的卷
+                {/* ✅ 框架信息展示 */}
+                <Alert severity="success" sx={{ mb: 2 }}>
+                  ✅ 已生成{frameworkMetadata.metadata.total_volumes}卷史诗框架
                 </Alert>
+
+                {/* 📝 已扩展卷标记 */}
+                {frameworkMetadata.metadata.expanded_volumes && 
+                 frameworkMetadata.metadata.expanded_volumes.length > 0 && (
+                  <Box sx={{ mb: 2, p: 1.5, bgcolor: 'success.50', borderRadius: 1, border: '1px solid', borderColor: 'success.200' }}>
+                    <Typography variant="caption" sx={{ display: 'block', mb: 0.5, fontWeight: 'bold', color: 'success.dark' }}>
+                      已扩展卷：
+                    </Typography>
+                    <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                      {frameworkMetadata.metadata.expanded_volumes.map((vol: number) => (
+                        <Chip 
+                          key={vol} 
+                          label={`第${vol}卷 ✓`} 
+                          size="small" 
+                          color="success" 
+                          variant="outlined"
+                          sx={{ height: 22, fontSize: '0.75rem' }}
+                        />
+                      ))}
+                    </Box>
+                  </Box>
+                )}
+
+                {/* 📝 扩展指定卷输入框 */}
                 <TextField
-                  label="要扩展的卷编号（必填）"
+                  label="扩展指定卷（可选，留空将重生框架）"
                   type="number"
-                  required
                   fullWidth
                   size="small"
                   value={targetVolumeIndex || ''}
                   onChange={(e) => onTargetVolumeIndexChange(parseInt(e.target.value) || 0)}
                   inputProps={{ min: 1, max: frameworkMetadata.metadata.total_volumes }}
-                  helperText={`范围: 1-${frameworkMetadata.metadata.total_volumes}卷`}
+                  helperText={`范围: 1-${frameworkMetadata.metadata.total_volumes} 卷`}
                   sx={{ mb: 2 }}
                 />
+
+                {/* ⚠️ 留空重生警告 */}
+                {!targetVolumeIndex && (
+                  <Alert severity="warning" sx={{ mb: 2 }}>
+                    ⚠️ 留空将<strong>重新生成框架并清除所有已扩展的细纲</strong>！如不满意框架，建议前往「知识库」→「剧情大纲」删除后重新生成。
+                  </Alert>
+                )}
+
+                {/* 本卷章节范围配置 */}
                 {targetVolumeIndex > 0 && (
                   <Box sx={{ display: 'flex', gap: 2 }}>
                     <TextField
@@ -431,14 +464,16 @@ export default function ExpansionConfigDialog({
                     />
                   </Box>
                 )}
-                <Divider sx={{ my: 2 }} />
-                <Alert severity="warning" sx={{ mt: 2 }}>
-                  ⚠️ 对框架不满意？请前往「知识库」→「剧情大纲」删除后重新生成
-                </Alert>
               </Box>
             ) : (
-              // ===== 无框架：显示完整的扩展方式选择 =====
+              // ===== 任务3.3：初次扩展UI（无框架） =====
               <>
+                {/* ⚠️ 首次扩展提示 */}
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  💡 首次扩展必须先生成框架
+                </Alert>
+
+                {/* 扩展方式选择 */}
                 <RadioGroup
                   value={autoExpandAllVolumes ? 'auto' : 'manual'}
                   onChange={(e) => onAutoExpandAllVolumesChange(e.target.value === 'auto')}
@@ -478,51 +513,6 @@ export default function ExpansionConfigDialog({
                     }
                   />
                 </RadioGroup>
-
-                {/* 🆕 单卷扩展配置 - 当选择手动扩展时显示 */}
-                {!autoExpandAllVolumes && (
-                  <Box sx={{ mt: 2, p: 2, bgcolor: 'info.50', borderRadius: 1, border: '1px solid', borderColor: 'info.200' }}>
-                    <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold', color: 'info.dark' }}>
-                      📝 扩展指定卷（可选）
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
-                      留空：仅生成框架；填写卷编号：生成框架后立即扩展该卷。
-                    </Typography>
-                    <TextField
-                      label="要扩展的卷编号（可选）"
-                      type="number"
-                      fullWidth
-                      size="small"
-                      value={targetVolumeIndex || ''}
-                      onChange={(e) => onTargetVolumeIndexChange(parseInt(e.target.value) || 0)}
-                      inputProps={{ min: 1, max: totalVolumes }}
-                      helperText={`将生成${totalVolumes}卷框架，可选择扩展其中某卷（1-${totalVolumes}）`}
-                      sx={{ mb: 2 }}
-                    />
-                    {targetVolumeIndex > 0 && (
-                      <Box sx={{ display: 'flex', gap: 2 }}>
-                        <TextField
-                          label="本卷章节（最小）"
-                          type="number"
-                          fullWidth
-                          size="small"
-                          value={volumeChaptersMin}
-                          onChange={(e) => onVolumeChaptersMinChange(parseInt(e.target.value) || 50)}
-                          inputProps={{ min: 30, max: 150 }}
-                        />
-                        <TextField
-                          label="本卷章节（最大）"
-                          type="number"
-                          fullWidth
-                          size="small"
-                          value={volumeChaptersMax}
-                          onChange={(e) => onVolumeChaptersMaxChange(parseInt(e.target.value) || 80)}
-                          inputProps={{ min: 30, max: 150 }}
-                        />
-                      </Box>
-                    )}
-                  </Box>
-                )}
               </>
             )}
 
@@ -552,7 +542,9 @@ export default function ExpansionConfigDialog({
       <DialogActions>
         <Button onClick={onClose}>取消</Button>
         <Button onClick={onConfirm} variant="contained" color="primary">
-          开始扩展
+          {expansionMode === 'epic_framework' && frameworkMetadata?.has_framework 
+            ? (targetVolumeIndex ? '开始扩展' : '重生框架')
+            : (expansionMode === 'epic_framework' ? '生成框架' : '开始扩展')}
         </Button>
       </DialogActions>
 
