@@ -64,7 +64,7 @@ class OutlineExpander:
             return 0
 
         # 方法1：正则表达式匹配
-        # 匹配形如：“第N章”、“Chapter N”、“第N回”等
+        # 匹配形如："第N章"、"Chapter N"、"第N回"等
         # 🔧 关键修复：只匹配后面带有标题符号的章节，排除范围描述
         patterns = [
             r'第(\d+)章[：:、]',  # 第X章： 或 第X章、
@@ -109,7 +109,7 @@ class OutlineExpander:
 
 示例格式：
 - 如果有第1章到第5章，返回：5
-- 如果是简要描述无章节，运回：0
+- 如果是简要描述无章节，返回：0
 
 只返回数字，不要其他内容。"""
 
@@ -127,44 +127,6 @@ class OutlineExpander:
 
         print("⚠️  无法识别章节数，默认返回0")
         return 0
-
-    def validate_volume_completeness(self, outline: str, expected_chapters: int) -> tuple[bool, list[int]]:
-        """🎯 校验卷细纲完整性，检测是否省略章节
-        
-        Args:
-            outline: 生成的大纲内容
-            expected_chapters: 期望的章节数
-        
-        Returns:
-            (is_complete, missing_chapters)
-            - is_complete: 是否完整
-            - missing_chapters: 缺失的章节号列表
-        """
-        import re
-        
-        # 提取所有章节号
-        patterns = [
-            r'第(\d+)章[：:、]',
-            r'####\s*第(\d+)章',
-        ]
-        
-        found_chapters = set()
-        for pattern in patterns:
-            matches = re.findall(pattern, outline)
-            found_chapters.update(int(m) for m in matches)
-        
-        # 检查连续性
-        missing = []
-        for i in range(1, expected_chapters + 1):
-            if i not in found_chapters:
-                missing.append(i)
-        
-        if missing:
-            print(f"⚠️  检测到省略章节：{missing[:10]}..." if len(missing) > 10 else f"⚠️  检测到省略章节：{missing}")
-            return False, missing
-        
-        print(f"✅ 完整性校验通过：共{len(found_chapters)}章，无省略")
-        return True, []
 
     def check_realm_span_and_suggest(self) -> str:
         """🎯 任务6.1：修仙题材境界跨度检查和细分建议
@@ -1782,7 +1744,21 @@ Please输出完整的、重新整合后的网文大纲：
 ### 第{start_chapter_num + 2}章：《章节标题》
 
 【核心目标】...
-（以下第{start_chapter_num + 3}章、第{start_chapter_num + 4}章直到本卷最后一章，全部完整输出，禁止跳过任何章节）
+【境界变化/进度变化】...
+【情节分镜】...
+【情绪曲线】...
+【伏笔设计】...
+【爽点设计】...
+【结尾钩子】...
+【涉及人物与发展】...
+
+### 第{start_chapter_num + 3}章：《章节标题》
+
+【核心目标】...
+【境界变化/进度变化】...
+（以下第{start_chapter_num + 4}章、第{start_chapter_num + 5}章直到本卷最后一章，全部完整输出，禁止使用"...略"、"继续输出"、"其余省略"等占位符）
+
+⚠️ 【极重要】必须逐章完整输出，每章包含所有字段，不可跳过任何章节！
 
 ## 三、伏笔埋设检查
 ✅ 第X章：埋设主角身份伏笔（符合史诗框架）
@@ -1841,17 +1817,6 @@ Please输出完整的、重新整合后的网文大纲：
         print(f"{'='*70}")
         print(f"【单卷详细扩展】完成！")
         print(f"{'='*70}\n")
-        
-        # 🎯 完整性校验：检查是否省略章节
-        expected_chapters = (chapters_count_range[0] + chapters_count_range[1]) // 2
-        is_complete, missing_chapters = self.validate_volume_completeness(volume_content, expected_chapters)
-        
-        if not is_complete and len(missing_chapters) > expected_chapters * 0.5:
-            # 如果缺失超过50%，警告并记录
-            print(f"⚠️⚠️⚠️  检测到严重省略：缺失{len(missing_chapters)}/{expected_chapters}章")
-            print(f"   建议：手动检查生成结果，可能需要重新生成")
-        elif not is_complete:
-            print(f"⚠️  检测到部分章节缺失：{len(missing_chapters)}章")
         
         # 估算实际章节数(取范围中值)
         estimated_chapters = (chapters_count_range[0] + chapters_count_range[1]) // 2

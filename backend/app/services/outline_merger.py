@@ -30,11 +30,8 @@ def add_volume_anchors(framework: str, total_volumes: int) -> str:
     lines = framework.split('\n')
     result = []
     
-    # 匹配卷标题的模式（支持多种格式）
-    # 格式1: ## 第1卷：...
-    # 格式2: 【第1卷】...
-    # 格式3: 第1卷：...
-    volume_pattern = re.compile(r'^(#+\s*)?[【\[]?第([0-9]+)卷[】\]]?[：:]?')
+    # 匹配卷标题的模式
+    volume_pattern = re.compile(r'^(#+)\s*第([0-9]+)卷[：:]')
     
     for line in lines:
         match = volume_pattern.match(line)
@@ -111,11 +108,17 @@ def merge_framework_with_volumes(
             i += 1
             continue  # 跳过锚点标记，不添加到结果
         
-        # 如果在已扩展卷的概要区域内，跳过内容（包括卷标题和概要）
+        # 如果在已扩展卷的概要区域内，跳过内容（直到遇到下一个锚点结束或下一卷开始）
         if in_expanded_volume:
-            # 🔧 跳过所有内容，直到遇到锚点结束标记
-            i += 1
-            continue
+            # 检查是否已到达概要结束（下一卷开始或空行后的分隔符）
+            next_volume_match = re.match(r'^(#+)\s*第([0-9]+)卷[：:]', line) if i + 1 < len(lines) else None
+            if next_volume_match:
+                # 即将进入下一卷，当前行（卷标题）保留，但概要部分已跳过
+                in_expanded_volume = False
+            else:
+                # 仍在概要区域，跳过
+                i += 1
+                continue
         
         # 正常添加行（非锚点、非已扩展卷概要）
         result.append(line)
