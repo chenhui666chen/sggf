@@ -60,27 +60,37 @@ def merge_framework_with_volumes(
         volumes_detail: 已扩展的卷细纲 {1: "第1卷细纲", 3: "第3卷细纲"}
     
     Returns:
-        拼接后的完整大纲
+        拼接后的完整大纲（已移除锚点标记和已扩展卷的概要）
     """
     if not framework:
         return ""
     
     if not volumes_detail:
-        # 如果没有扩展的卷，直接返回框架
-        return framework
+        # 如果没有扩展的卷，返回框架（移除锚点）
+        return _remove_anchor_marks(framework)
     
     lines = framework.split('\n')
     result = []
     
     i = 0
+    in_expanded_volume = False  # 标记是否在已扩展卷的概要区域内
+    current_volume_num = None
+    
     while i < len(lines):
         line = lines[i]
-        result.append(line)
+        
+        # 检测卷锚点起始标记
+        anchor_start_match = re.match(r'<!-- VOLUME_(\d+)_ANCHOR_START -->', line)
+        if anchor_start_match:
+            current_volume_num = int(anchor_start_match.group(1))
+            in_expanded_volume = current_volume_num in volumes_detail
+            i += 1
+            continue  # 跳过锚点标记，不添加到结果
         
         # 检测卷锚点结束标记
-        anchor_match = re.match(r'<!-- VOLUME_(\d+)_ANCHOR_END -->', line)
-        if anchor_match:
-            vol_num = int(anchor_match.group(1))
+        anchor_end_match = re.match(r'<!-- VOLUME_(\d+)_ANCHOR_END -->', line)
+        if anchor_end_match:
+            vol_num = int(anchor_end_match.group(1))
             
             # 如果该卷有细纲，插入可折叠区块
             if vol_num in volumes_detail:
@@ -92,7 +102,26 @@ def merge_framework_with_volumes(
                 result.append('')
                 result.append('</details>')
                 result.append('')
+            
+            in_expanded_volume = False
+            current_volume_num = None
+            i += 1
+            continue  # 跳过锚点标记，不添加到结果
         
+        # 如果在已扩展卷的概要区域内，跳过内容（直到遇到下一个锚点结束或下一卷开始）
+        if in_expanded_volume:
+            # 检查是否已到达概要结束（下一卷开始或空行后的分隔符）
+            next_volume_match = re.match(r'^(#+)\s*第([0-9]+)卷[：:]', line) if i + 1 < len(lines) else None
+            if next_volume_match:
+                # 即将进入下一卷，当前行（卷标题）保留，但概要部分已跳过
+                in_expanded_volume = False
+            else:
+                # 仍在概要区域，跳过
+                i += 1
+                continue
+        
+        # 正常添加行（非锚点、非已扩展卷概要）
+        result.append(line)
         i += 1
     
     # 添加拼接统计信息
@@ -242,6 +271,28 @@ def validate_outline_integrity(
             logger.warning(f"   - {issue['message']}")
     
     return result
+
+
+def _remove_anchor_marks(content: str) -> str:
+    """
+    移除内容中的锚点标记
+    
+    Args:
+        content: 包含锚点的内容
+    
+    Returns:
+        移除锚点后的内容
+    """
+    lines = content.split('\n')
+    result = []
+    
+    for line in lines:
+        # 跳过锚点标记行
+        if re.match(r'<!-- VOLUME_\d+_ANCHOR_(START|END) -->', line):
+            continue
+        result.append(line)
+    
+    return '\n'.join(result)
 
 
 def extract_volume_detail(outline_content: str, volume_number: int) -> Optional[str]:
