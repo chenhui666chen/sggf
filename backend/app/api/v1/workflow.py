@@ -4564,6 +4564,86 @@ async def execute_generate_next_chapter_task(
         db.close()
 
 
+@router.get("/epic-framework-state/{project_id}")
+async def get_epic_framework_state(
+    project_id: int,
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    🔍 检测史诗框架状态
+    
+    返回:
+    {
+        "has_framework": true/false,
+        "total_volumes": 17,
+        "expanded_volumes": [1, 3, 5],
+        "framework_generated_at": "2025-12-12T10:00:00"
+    }
+    """
+    import logging
+    from app.services.outline_merger import detect_framework_state
+    from sqlalchemy import text
+    
+    logger = logging.getLogger("uvicorn.error")
+    
+    try:
+        logger.info(f"🔍 检测史诗框架状态，项目ID: {project_id}")
+        
+        # 验证项目所有权
+        project = db.query(Project).filter(
+            (Project.id == project_id) & (Project.user_id == current_user.id)
+        ).first()
+        
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found"
+            )
+        
+        # 读取框架数据
+        query = text("""
+            SELECT epic_framework, epic_framework_generated_at, plot_outline
+            FROM project_settings
+            WHERE project_id = :project_id
+        """)
+        result = db.execute(query, {"project_id": project_id}).fetchone()
+        
+        if not result or not result[0]:
+            logger.info(f"   ✅ 未找到框架，返回空状态")
+            return {
+                "has_framework": False,
+                "total_volumes": 0,
+                "expanded_volumes": [],
+                "framework_generated_at": None
+            }
+        
+        epic_framework = result[0]
+        framework_generated_at = result[1]
+        plot_outline = result[2] or ""
+        
+        # 使用状态检测函数
+        state = detect_framework_state(plot_outline)
+        
+        logger.info(f"   ✅ 框架状态: {state}")
+        
+        return {
+            "has_framework": state["hasFramework"],
+            "total_volumes": state["totalVolumes"],
+            "expanded_volumes": state["expandedVolumes"],
+            "framework_generated_at": framework_generated_at
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ 检测框架状态失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
 @router.post("/expand-outline")
 async def expand_outline(
     request: ExpandOutlineRequest,
@@ -4885,11 +4965,31 @@ async def execute_expand_outline_task(
             message="💾 正在保存扩展结果..."
         )
         
+        # 🆕 导入拼接模块
+        from app.services.outline_merger import (
+            add_volume_anchors,
+            merge_framework_with_volumes,
+            parse_volumes_detail_json,
+            build_volumes_detail_json
+        )
+        
         # 🌟 处理史诗框架：添加特殊标记
         outline_content = result["expanded_outline"]
+        epic_framework = None  # 纯框架内容
+        epic_volumes_detail_json = None  # 已扩展卷细纲（JSON格式）
         
         if expansion_mode == "epic_framework":
-            # 添加 YAML 头部标记（中文字段）
+            # ==================== 史诗框架模式 ====================
+            # 🔑 关键：为框架添加锚点标记
+            framework_with_anchors = add_volume_anchors(
+                result["expanded_outline"],
+                total_volumes
+            )
+            
+            # 保存纯框架到 epic_framework 字段
+            epic_framework = framework_with_anchors
+            
+            # 添加 YAML 头部标记到完整大纲
             outline_content = f"""---
 类型: 史诗框架
 总卷数: {total_volumes}
@@ -4897,63 +4997,124 @@ async def execute_expand_outline_task(
 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 ---
 
-{result["expanded_outline"]}"""
-            logger.info(f"   🌟 史诗框架已添加元数据标记")
+{framework_with_anchors}"""
+            logger.info(f"   🌟 史诗框架已添加元数据标记和锚点")
+            
+            # 🆕 如果自动扩展全部卷，需要保存卷细纲到 epic_volumes_detail
+            if auto_expand_all_volumes:
+                volumes_detail_dict = {}
+                accumulated_chapters = 0
+                avg_total_chapters = (total_chapters_min + total_chapters_max) // 2
+                avg_per_volume = avg_total_chapters // total_volumes
+                
+                # 从结果中提取每一卷的细纲（需要AI返回结构化数据）
+                # 暂时使用简单存储方式
+                for vol_index in range(1, total_volumes + 1):
+                    start_chapter = accumulated_chapters + 1
+                    end_chapter = accumulated_chapters + avg_per_volume
+                    
+                    volumes_detail_dict[vol_index] = {
+                        "chapters_start": start_chapter,
+                        "chapters_end": end_chapter,
+                        "outline": f"第{vol_index}卷细纲（自动生成）",  # 简化存储
+                        "generated_at": datetime.now().isoformat()
+                    }
+                    
+                    accumulated_chapters += avg_per_volume
+                
+                epic_volumes_detail_json = build_volumes_detail_json(volumes_detail_dict)
+                logger.info(f"   📦 已保存 {len(volumes_detail_dict)} 个卷的细纲到JSON")
         
         elif expansion_mode == "volume_detail":
             # 📖 单卷详细模式：合并到原有框架
             logger.info(f"   🔄 单卷详细模式：将第{target_volume_index}卷合并到原有框架")
             
-            # 读取原有大纲（应该是史诗框架）
-            original_outline_query = text("""
-                SELECT plot_outline FROM project_settings WHERE project_id = :project_id
+            # 读取原有框架和已有卷细纲
+            original_data_query = text("""
+                SELECT epic_framework, epic_volumes_detail 
+                FROM project_settings 
+                WHERE project_id = :project_id
             """)
-            original_result = db.execute(original_outline_query, {"project_id": project_id}).fetchone()
-            original_outline = original_result[0] if original_result and original_result[0] else ""
+            original_result = db.execute(original_data_query, {"project_id": project_id}).fetchone()
             
-            if not original_outline:
+            if not original_result or not original_result[0]:
                 # 如果没有原有框架，直接使用单卷内容（降级处理）
                 logger.warning("   ⚠️  未找到原有史诗框架，直接保存单卷内容")
                 outline_content = result["expanded_outline"]
             else:
-                # 🔧 合并逻辑：保留框架 + 更新单卷
-                import re
+                # 🆕 使用智能拼接算法
+                stored_framework = original_result[0]
+                stored_volumes_json = original_result[1] or '{}'
                 
-                # 提取 YAML 头部
-                yaml_match = re.match(r'^---\n(.*?)\n---\n', original_outline, re.DOTALL)
-                yaml_header = yaml_match.group(0) if yaml_match else ""
-                framework_body = original_outline[len(yaml_header):] if yaml_match else original_outline
+                # 解析已有卷细纲
+                volumes_detail_dict = parse_volumes_detail_json(stored_volumes_json)
+                logger.info(f"   📚 已加载 {len(volumes_detail_dict)} 个已有卷细纲")
                 
-                # 尝试匹配单卷占位符（如：“第X卷：xxx” 到 “第X+1卷” 或文末）
-                volume_pattern = rf'第{target_volume_index}卷[^：]*：.*?(?=第{target_volume_index + 1}卷|$)'
+                # 更新/添加当前卷的细纲
+                volumes_detail_dict[target_volume_index] = {
+                    "chapters_start": result.get("chapter_start", 1),
+                    "chapters_end": result.get("chapter_end", result.get("chapter_count", 10)),
+                    "outline": result["expanded_outline"],
+                    "generated_at": datetime.now().isoformat()
+                }
+                logger.info(f"   ✅ 已更新第{target_volume_index}卷细纲")
                 
-                if re.search(volume_pattern, framework_body, re.DOTALL):
-                    # 找到占位符，替换为详细内容
-                    updated_body = re.sub(
-                        volume_pattern,
-                        f"第{target_volume_index}卷：详细大纲\n{'='*70}\n{result['expanded_outline']}\n",
-                        framework_body,
-                        flags=re.DOTALL
-                    )
-                    outline_content = yaml_header + updated_body
-                    logger.info(f"   ✅ 已将第{target_volume_index}卷详细内容合并到框架")
-                else:
-                    # 未找到占位符，追加到末尾
-                    outline_content = f"{original_outline}\n\n{'='*70}\n第{target_volume_index}卷：详细大纲\n{'='*70}\n{result['expanded_outline']}"
-                    logger.info(f"   📌 已将第{target_volume_index}卷追加到框架末尾")
+                # 🌟 智能拼接：框架 + 所有已扩展卷
+                # 提取纯细纲内容（不含章节范围元数据）
+                volumes_outline_only = {
+                    vol_num: vol_data["outline"] 
+                    for vol_num, vol_data in volumes_detail_dict.items()
+                }
+                
+                merged_outline = merge_framework_with_volumes(
+                    stored_framework,
+                    volumes_outline_only
+                )
+                
+                outline_content = merged_outline
+                
+                # 保存纯框架和更新后的JSON
+                epic_framework = stored_framework  # 框架保持不变
+                epic_volumes_detail_json = build_volumes_detail_json(volumes_detail_dict)
+                
+                logger.info(f"   🎯 智能拼接完成：框架 + {len(volumes_detail_dict)} 个卷细纲")
         
-        update_query = text("""
-            UPDATE project_settings
-            SET plot_outline = :plot_outline,
-                updated_at = :updated_at
-            WHERE project_id = :project_id
-        """)
-        
-        db.execute(update_query, {
-            "plot_outline": outline_content,
-            "updated_at": datetime.now().isoformat(),
-            "project_id": project_id
-        })
+        # 🆕 根据模式选择更新策略
+        if expansion_mode in ["epic_framework", "volume_detail"]:
+            # 史诗框架模式：同时更新 epic_framework 和 epic_volumes_detail
+            update_query = text("""
+                UPDATE project_settings
+                SET plot_outline = :plot_outline,
+                    epic_framework = :epic_framework,
+                    epic_volumes_detail = :epic_volumes_detail,
+                    epic_framework_generated_at = :generated_at,
+                    updated_at = :updated_at
+                WHERE project_id = :project_id
+            """)
+            
+            db.execute(update_query, {
+                "plot_outline": outline_content,
+                "epic_framework": epic_framework,
+                "epic_volumes_detail": epic_volumes_detail_json,
+                "generated_at": datetime.now().isoformat() if epic_framework else None,
+                "updated_at": datetime.now().isoformat(),
+                "project_id": project_id
+            })
+            logger.info("   💾 史诗框架模式：已分离保存框架和卷细纲")
+        else:
+            # 原有模式：只更新 plot_outline
+            update_query = text("""
+                UPDATE project_settings
+                SET plot_outline = :plot_outline,
+                    updated_at = :updated_at
+                WHERE project_id = :project_id
+            """)
+            
+            db.execute(update_query, {
+                "plot_outline": outline_content,
+                "updated_at": datetime.now().isoformat(),
+                "project_id": project_id
+            })
         db.commit()
         logger.info("   💾 扩展大纲已保存到数据库")
         

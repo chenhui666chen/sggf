@@ -263,6 +263,12 @@ export default function KnowledgeBasePage() {
   const [loadingFramework, setLoadingFramework] = useState<boolean>(false)  // 🆕 加载框架状态
   const [frameworkMetadata, setFrameworkMetadata] = useState<any>(null)  // 🆕 框架元数据
   
+  // 🆕 二次确认对话框状态
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
+  const [confirmDialogType, setConfirmDialogType] = useState<'regenerate' | 'duplicate' | null>(null)
+  const [confirmDialogMessage, setConfirmDialogMessage] = useState('')
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
+  
   // 💡 智能推荐相关状态
   const [recommendedMode, setRecommendedMode] = useState<'total' | 'epic_framework' | 'incremental'>('total')
   const [recommendedVolumes, setRecommendedVolumes] = useState(3)
@@ -1219,36 +1225,35 @@ export default function KnowledgeBasePage() {
     return JSON.parse(localStorage.getItem(key) || '[]')
   }
 
-  // 🌟 加载史诗框架
+  // 🌟 加载史诗框架状态
   const loadEpicFramework = async () => {
     if (!projectId) return
 
     try {
       setLoadingFramework(true)
-      const response = await fetch(`/api/v1/workflow/epic-framework/${projectId}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-
-      if (!response.ok) {
-        throw new Error(`加载史诗框架失败: ${response.status}`)
-      }
-
-      const data = await response.json()
+      // 🆕 使用新的状态检测API
+      const response = await apiClient.getEpicFrameworkState(parseInt(projectId))
+      const data = response.data
       
       if (data.has_framework) {
-        setSavedFramework(data.framework_content)
-        setFrameworkMetadata(data.metadata)
-        console.log('✅ 史诗框架加载成功:', data.metadata)
+        // 构造元数据对象
+        setFrameworkMetadata({
+          has_framework: true,
+          metadata: {
+            total_volumes: data.total_volumes,
+            expanded_volumes: data.expanded_volumes,
+            total_chapters_range: [totalChaptersMin, totalChaptersMax],  // 使用当前设置
+          },
+          framework_generated_at: data.framework_generated_at
+        })
+        console.log('✅ 史诗框架状态加载成功:', data)
       } else {
-        setSavedFramework('')
         setFrameworkMetadata(null)
-        showSnackbar('⚠️ 请先使用史诗框架模式生成框架', 'error')
+        console.log('ℹ️ 暂无史诗框架')
       }
     } catch (error) {
-      console.error('❌ 加载史诗框架失败:', error)
-      showSnackbar('加载史诗框架失败', 'error')
+      console.error('❌ 加载框架状态失败:', error)
+      setFrameworkMetadata(null)
     } finally {
       setLoadingFramework(false)
     }
@@ -1256,6 +1261,49 @@ export default function KnowledgeBasePage() {
 
   // 大纲扩展主函数（🆕 异步后台执行）
   const handleExpandOutline = async () => {
+    if (!projectId) return
+
+    try {
+      // 🆕 阶段1: 检测框架状态（仅针对史诗框架模式）
+      if (expansionMode === 'epic_framework') {
+        const response = await apiClient.getEpicFrameworkState(parseInt(projectId))
+        const state = response.data
+        
+        // 如果已有框架且没有选择具体卷，提示重生
+        if (state.has_framework && targetVolumeIndex === 0 && !autoExpandAllVolumes) {
+          setConfirmDialogType('regenerate')
+          setConfirmDialogMessage(
+            `已存在${state.total_volumes}卷框架，重新生成将清除所有已扩展的卷细纲（${state.expanded_volumes.length}个卷）。\n\n确认要重生框架吗？`
+          )
+          setConfirmDialogOpen(true)
+          setPendingAction(() => executeExpandOutline)
+          return  // 等待用户确认
+        }
+        
+        // 如果选择了具体卷，检查是否已有该卷细纲
+        if (targetVolumeIndex > 0 && state.has_framework && state.expanded_volumes.includes(targetVolumeIndex)) {
+          setConfirmDialogType('duplicate')
+          setConfirmDialogMessage(
+            `第${targetVolumeIndex}卷细纲已存在，重新生成将覆盖现有内容。\n\n确认要重新生成该卷吗？`
+          )
+          setConfirmDialogOpen(true)
+          setPendingAction(() => executeExpandOutline)
+          return  // 等待用户确认
+        }
+      }
+      
+      // 直接执行扩展
+      await executeExpandOutline()
+      
+    } catch (error) {
+      console.error('❌ 检测框架状态失败:', error)
+      // 失败也继续执行
+      await executeExpandOutline()
+    }
+  }
+
+  // 🆕 实际执行扩展的函数
+  const executeExpandOutline = async () => {
     if (!projectId) return
 
     try {
@@ -1675,9 +1723,10 @@ export default function KnowledgeBasePage() {
                               setTotalChaptersMin(recommendedVolumes * recommendedChaptersPerVolumeMin)
                               setTotalChaptersMax(recommendedVolumes * recommendedChaptersPerVolumeMax)
                               setAutoExpandAllVolumes(recommendedAutoExpandAllVolumes)
-                              // 加载框架元数据
-                              loadEpicFramework()
                             }
+                            
+                            // 🆕 始终加载框架状态（无论是否为史诗模式）
+                            loadEpicFramework()
                             
                             setShowExpansionConfig(true)
                           }}
@@ -2991,6 +3040,39 @@ export default function KnowledgeBasePage() {
         recommendedAutoExpandAllVolumes={recommendedAutoExpandAllVolumes}
         recommendationReason={recommendationReason}
       />
+
+      {/* 🆕 二次确认对话框 */}
+      <Dialog
+        open={confirmDialogOpen}
+        onClose={() => setConfirmDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          {confirmDialogType === 'regenerate' ? '⚠️ 确认重生框架' : '⚠️ 确认重新生成'}
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            {confirmDialogMessage}
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDialogOpen(false)}>取消</Button>
+          <Button
+            onClick={() => {
+              setConfirmDialogOpen(false)
+              if (pendingAction) {
+                pendingAction()
+                setPendingAction(null)
+              }
+            }}
+            variant="contained"
+            color="warning"
+          >
+            确认继续
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* 提示消息 */}
       <Snackbar

@@ -325,6 +325,11 @@ class ApiClient {
       timeout: 5000
     })
   }
+
+  // 🌟 史诗框架状态检测API
+  getEpicFrameworkState(projectId: number) {
+    return this.client.get(`/api/v1/workflow/epic-framework-state/${projectId}`)
+  }
 }
 
 export const apiClient = new ApiClient()
