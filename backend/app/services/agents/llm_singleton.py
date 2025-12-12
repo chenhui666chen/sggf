@@ -70,7 +70,9 @@ class LLMSingletonManager:
             model=selected_model,
             temperature=Config.TEMPERATURE,
             api_key=api_key,
-            base_url=api_base
+            base_url=api_base,
+            max_retries=5,  # 🔧 增加重试次数
+            timeout=180.0,  # 🔧 增加超时时间到3分钟
         )
         
         # 缓存实例
