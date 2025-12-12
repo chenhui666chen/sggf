@@ -1270,13 +1270,13 @@ export default function KnowledgeBasePage() {
     if (!projectId) return
 
     try {
-      // 🆕 阶段1: 检测框架状态（仅针对史诗框架模式）
-      if (expansionMode === 'epic_framework') {
+      // 🆕 阶段1: 检测框架状态（针对史诗框架模式和单卷详细模式）
+      if (expansionMode === 'epic_framework' || expansionMode === 'volume_detail') {
         const response = await apiClient.getEpicFrameworkState(parseInt(projectId))
         const state = response.data
         
-        // 如果已有框架且没有选择具体卷，提示重生
-        if (state.has_framework && targetVolumeIndex === 0 && !autoExpandAllVolumes) {
+        // 情况1: 史诗框架模式 - 已有框架且没有选择具体卷，提示重生
+        if (expansionMode === 'epic_framework' && state.has_framework && targetVolumeIndex === 0 && !autoExpandAllVolumes) {
           setConfirmDialogType('regenerate')
           setConfirmDialogMessage(
             `已存在${state.total_volumes}卷框架，重新生成将清除所有已扩展的卷细纲（${state.expanded_volumes.length}个卷）。\n\n确认要重生框架吗？`
@@ -1286,7 +1286,7 @@ export default function KnowledgeBasePage() {
           return  // 等待用户确认
         }
         
-        // 如果选择了具体卷，检查是否已有该卷细纲
+        // 情况2: 史诗框架模式 - 选择了具体卷 OR 单卷详细模式 - 检查是否已有该卷细纲
         if (targetVolumeIndex > 0 && state.has_framework && state.expanded_volumes.includes(targetVolumeIndex)) {
           setConfirmDialogType('duplicate')
           setConfirmDialogMessage(
@@ -1294,22 +1294,7 @@ export default function KnowledgeBasePage() {
           )
           setConfirmDialogOpen(true)
           setPendingAction(() => executeExpandOutline)
-          return  // 等待用户确认
-        }
-      }
-      
-      // 🆕 阶段2: 检测单卷详细模式的覆盖
-      if (expansionMode === 'volume_detail') {
-        const response = await apiClient.getEpicFrameworkState(parseInt(projectId))
-        const state = response.data
-        
-        if (state.has_framework && state.expanded_volumes.includes(targetVolumeIndex)) {
-          setConfirmDialogType('duplicate')
-          setConfirmDialogMessage(
-            `第${targetVolumeIndex}卷细纲已存在，重新生成将覆盖现有内容。\n\n确认要重新生成该卷吗？`
-          )
-          setConfirmDialogOpen(true)
-          setPendingAction(() => executeExpandOutline)
+          console.log(`⚠️ 第${targetVolumeIndex}卷已存在，等待用户确认...`)
           return  // 等待用户确认
         }
       }
