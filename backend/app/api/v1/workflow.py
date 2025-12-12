@@ -2267,11 +2267,6 @@ async def get_stage_content(
             }
 
         content = result[0] or ""
-        
-        # 🔧 修复: 如果是大纲内容，移除HTML锤点标记
-        if stage == 'structure' and content:
-            from app.services.outline_merger import _remove_anchor_marks
-            content = _remove_anchor_marks(content)
 
         # 🔧 修复JSON解码错误：如果内容是JSON字符串，先解析
         import json
@@ -2511,12 +2506,6 @@ async def save_stage_content(
                 detail=f"Invalid stage: {stage}"
             )
 
-        # 🔧 修复: 如果是大纲阶段，保存前移除HTML锤点标记
-        content_to_save = request.content
-        if stage == 'structure' and content_to_save:
-            from app.services.outline_merger import _remove_anchor_marks
-            content_to_save = _remove_anchor_marks(content_to_save)
-        
         # 更新project_settings表
         update_query = text(f"""
             UPDATE project_settings
@@ -2525,7 +2514,7 @@ async def save_stage_content(
         """)
 
         db.execute(update_query, {
-            "content": content_to_save,
+            "content": request.content,
             "updated_at": datetime.now().isoformat(),
             "project_id": project_id
         })
@@ -5049,10 +5038,17 @@ async def execute_expand_outline_task(
         
         if expansion_mode == "epic_framework":
             # ==================== 史诗框架模式 ====================
-            # 🔑 保存纯净框架（不含锁点）到 epic_framework 字段
-            epic_framework = result["expanded_outline"]
+            # 🔑 添加锤点标记到框架，保存到 epic_framework 字段
+            from app.services.outline_merger import add_volume_anchors, _remove_anchor_marks
             
-            # 添加 YAML 头部标记到完整大纲
+            framework_with_anchors = add_volume_anchors(
+                result["expanded_outline"],
+                total_volumes
+            )
+            epic_framework = framework_with_anchors  # 带锤点，用于拼接
+            
+            # 📝 移除锤点后添加 YAML 头部标记到展示大纲
+            framework_without_anchors = _remove_anchor_marks(framework_with_anchors)
             outline_content = f"""---
 类型: 史诗框架
 总卷数: {total_volumes}
@@ -5060,8 +5056,8 @@ async def execute_expand_outline_task(
 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 ---
 
-{result["expanded_outline"]}"""
-            logger.info(f"   🌟 史诗框架已添加元数据标记（未含锁点）")
+{framework_without_anchors}"""
+            logger.info(f"   🌟 史诗框架已添加锤点（epic_framework）并移除锤点（plot_outline）")
             
             # 🆕 如果自动扩展全部卷，需要保存卷细纲到 epic_volumes_detail
             if auto_expand_all_volumes:
@@ -5131,7 +5127,9 @@ async def execute_expand_outline_task(
                 volumes_outline_only
             )
             
-            outline_content = merged_outline
+            # 🔧 移除拼接结果中的锤点标记（用于用户展示）
+            from app.services.outline_merger import _remove_anchor_marks
+            outline_content = _remove_anchor_marks(merged_outline)
             
             # 保存纯框架和更新后的JSON
             epic_framework = stored_framework  # 框架保持不变
