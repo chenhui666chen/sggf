@@ -2267,6 +2267,11 @@ async def get_stage_content(
             }
 
         content = result[0] or ""
+        
+        # 🔧 修复: 如果是大纲内容，移除HTML锤点标记
+        if stage == 'structure' and content:
+            from app.services.outline_merger import _remove_anchor_marks
+            content = _remove_anchor_marks(content)
 
         # 🔧 修复JSON解码错误：如果内容是JSON字符串，先解析
         import json
@@ -2506,6 +2511,12 @@ async def save_stage_content(
                 detail=f"Invalid stage: {stage}"
             )
 
+        # 🔧 修复: 如果是大纲阶段，保存前移除HTML锤点标记
+        content_to_save = request.content
+        if stage == 'structure' and content_to_save:
+            from app.services.outline_merger import _remove_anchor_marks
+            content_to_save = _remove_anchor_marks(content_to_save)
+        
         # 更新project_settings表
         update_query = text(f"""
             UPDATE project_settings
@@ -2514,7 +2525,7 @@ async def save_stage_content(
         """)
 
         db.execute(update_query, {
-            "content": request.content,
+            "content": content_to_save,
             "updated_at": datetime.now().isoformat(),
             "project_id": project_id
         })
@@ -5038,14 +5049,8 @@ async def execute_expand_outline_task(
         
         if expansion_mode == "epic_framework":
             # ==================== 史诗框架模式 ====================
-            # 🔑 关键：为框架添加锚点标记
-            framework_with_anchors = add_volume_anchors(
-                result["expanded_outline"],
-                total_volumes
-            )
-            
-            # 保存纯框架到 epic_framework 字段
-            epic_framework = framework_with_anchors
+            # 🔑 保存纯净框架（不含锁点）到 epic_framework 字段
+            epic_framework = result["expanded_outline"]
             
             # 添加 YAML 头部标记到完整大纲
             outline_content = f"""---
@@ -5055,8 +5060,8 @@ async def execute_expand_outline_task(
 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 ---
 
-{framework_with_anchors}"""
-            logger.info(f"   🌟 史诗框架已添加元数据标记和锚点")
+{result["expanded_outline"]}"""
+            logger.info(f"   🌟 史诗框架已添加元数据标记（未含锁点）")
             
             # 🆕 如果自动扩展全部卷，需要保存卷细纲到 epic_volumes_detail
             if auto_expand_all_volumes:
