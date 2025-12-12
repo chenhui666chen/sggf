@@ -258,8 +258,8 @@ export default function KnowledgeBasePage() {
   // 🆕 单卷扩展相关
   const [savedFramework] = useState<string>('')  // 保存的史诗框架（仅读）
   const [targetVolumeIndex, setTargetVolumeIndex] = useState<number>(0)  // 扩展第几卷（0表示未选择）
-  const [volumeChaptersMin, setVolumeChaptersMin] = useState<number>(50)  // 本卷章节最小值
-  const [volumeChaptersMax, setVolumeChaptersMax] = useState<number>(80)  // 本卷章节最大值
+  const [volumeChaptersMin, setVolumeChaptersMin] = useState<number>(50)  // 本卷章节数量最小值
+  const [volumeChaptersMax, setVolumeChaptersMax] = useState<number>(80)  // 本卷章节数量最大值
   const [loadingFramework, setLoadingFramework] = useState<boolean>(false)  // 🆕 加载框架状态
   const [frameworkMetadata, setFrameworkMetadata] = useState<any>(null)  // 🆕 框架元数据
   

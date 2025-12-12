@@ -1587,7 +1587,8 @@ Please analyze：
     
     def expand_volume_detail(self, framework_content: str, target_volume_index: int,
                             world_setting: str, characters: str,
-                            chapters_range: tuple[int, int]) -> Dict[str, Any]:
+                            start_chapter_num: int,
+                            chapters_count_range: tuple[int, int]) -> Dict[str, Any]:
         """基于史诗框架详细扩展单卷
         
         根据已有的史诗框架，将指定的卷扩展为详细的章节大纲
@@ -1597,7 +1598,8 @@ Please analyze：
             target_volume_index: 扩展第几卷
             world_setting: 世界观设定
             characters: 人物设定
-            chapters_range: 本卷章节范围(min, max)
+            start_chapter_num: 起始章节号
+            chapters_count_range: 本卷章节数量范围(min, max)，AI在此范围内自由发挥
             
         Returns:
             单卷详细字典，包含:
@@ -1606,7 +1608,7 @@ Please analyze：
             - chapter_count: 实际章节数
         """
         print(f"\n{'='*70}")
-        print(f"📖 【单卷详细扩展】第{target_volume_index}卷，{chapters_range[0]}-{chapters_range[1]}章")
+        print(f"📖 【单卷详细扩展】第{target_volume_index}卷，从第{start_chapter_num}章开始，生成{chapters_count_range[0]}-{chapters_count_range[1]}章")
         print(f"{'='*70}\n")
         
         # 🛡️ 临时修复：清空历史记忆，避免旧消息导致API错误
@@ -1633,9 +1635,7 @@ Please analyze：
 {characters[:2000] if characters else '待完善'}
 
 【扩展要求】
-生成第{chapters_range[0]}-{chapters_range[1]}章的详细大纲（✅ 章节号从第{chapters_range[0]}章开始，到第{chapters_range[1]}章结束）
-
-⚠️ 关键：本卷的章节编号必须从第{chapters_range[0]}章开始！不要从第1章开始！
+本卷章节编号从第{start_chapter_num}章开始，生成{chapters_count_range[0]}-{chapters_count_range[1]}章左右的详细大纲。
 
 🔥 【章节细纲模板】每章必须严格按以下格式：
 {template_example if template_example else '''第{chapter_num}章：《{chapter_title}》
@@ -1663,29 +1663,18 @@ Please analyze：
 【涉及人物与发展】主要人物及本章变化
 '''}
 
-��️ 必须检查：
-1. 是否符合史诗框架中本卷的定位
-2. 是否正确埋设/回收框架中规划的伏笔
-3. 人物登场是否符合框架中的生命周期规划
-4. ✅ 【强制要求】必须输出从第{chapters_range[0]}章到第{chapters_range[1]}章的每一章完整内容，不允许省略任何章节！
-5. ✅ 【强制要求】不允许使用"中间章节略"、"……（省略）"、"示例章节"等省略性表述！
-6. ✅ 【强制要求】每一章都必须包含完整的【核心目标】【境界变化】【情节分镜】等所有必需字段！
-
-Please输出完整的、重新整合后的网文大纲（🔥重点：每章必须有完整的详细规划）：
+Please输出完整的、重新整合后的网文大纲：
 
 ## 一、故事概述
 [整合后的完整故事概述，300-500字]
 
 ## 二、第{target_volume_index}卷详细规划
 
+### 第{start_chapter_num}章：《章节标题》
+
+... 其他章节 ...
+
 (按上述模板格式输出每一章...)
-
-🔴 【最后检查】请确认：
-- [ ] 是否已输出从第{chapters_range[0]}章到第{chapters_range[1]}章的**每一章**？
-- [ ] 是否没有使用任何省略性表述（如"中间章节略"）？
-- [ ] 是否每一章都包含完整的所有必需字段？
-
-⚠️ 如果上述任何一项为“否”，请立即补全！
 
 ## 三、伏笔埋设检查
 ✅ 第X章：埋设主角身份伏笔（符合史诗框架）
@@ -1735,7 +1724,7 @@ Please输出完整的、重新整合后的网文大纲（🔥重点：每章必�
 2. 手动编写本卷大纲
 3. 稍后重试单卷扩展
 
-章节范围：第{chapters_range[0]}-{chapters_range[1]}章（预计）"""
+章节范围：从第{start_chapter_num}章开始（预计{chapters_count_range[0]}-{chapters_count_range[1]}章）"""
                         break
                 else:
                     # 非内容安全问题，直接抛出
@@ -1746,7 +1735,7 @@ Please输出完整的、重新整合后的网文大纲（🔥重点：每章必�
         print(f"{'='*70}\n")
         
         # 估算实际章节数(取范围中值)
-        estimated_chapters = (chapters_range[0] + chapters_range[1]) // 2
+        estimated_chapters = (chapters_count_range[0] + chapters_count_range[1]) // 2
         
         return {
             "expanded_outline": volume_content,

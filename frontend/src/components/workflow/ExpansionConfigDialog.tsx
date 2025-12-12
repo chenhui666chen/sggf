@@ -441,26 +441,28 @@ export default function ExpansionConfigDialog({
                   </Alert>
                 )}
 
-                {/* 本卷章节范围配置 */}
+                {/* 本卷章节数量配置 */}
                 {targetVolumeIndex > 0 && (
                   <Box sx={{ display: 'flex', gap: 2 }}>
                     <TextField
-                      label="本卷章节（最小）"
+                      label="本卷章节数（最少）"
                       type="number"
                       fullWidth
                       size="small"
                       value={volumeChaptersMin}
                       onChange={(e) => onVolumeChaptersMinChange(parseInt(e.target.value) || 50)}
                       inputProps={{ min: 30, max: 150 }}
+                      helperText="每卷生成多少章，章节编号自动计算"
                     />
                     <TextField
-                      label="本卷章节（最大）"
+                      label="本卷章节数（最多）"
                       type="number"
                       fullWidth
                       size="small"
                       value={volumeChaptersMax}
                       onChange={(e) => onVolumeChaptersMaxChange(parseInt(e.target.value) || 80)}
                       inputProps={{ min: 30, max: 150 }}
+                      helperText="每卷生成多少章，章节编号自动计算"
                     />
                   </Box>
                 )}

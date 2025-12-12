@@ -106,13 +106,6 @@ export default function WorkflowControlPage() {
   const [plannedChaptersMax, setPlannedChaptersMax] = useState<number | ''>('')
   const [userOutlinePlan, setUserOutlinePlan] = useState('')
 
-  // 🎯 任务5.1：大纲扩展智能推荐状态
-  const [recommendedExpansionMode, setRecommendedExpansionMode] = useState<'total' | 'epic_framework' | 'incremental'>('total')
-  const [recommendedVolumes, setRecommendedVolumes] = useState(3)
-  const [recommendedChaptersPerVolumeMin, setRecommendedChaptersPerVolumeMin] = useState(20)
-  const [recommendedChaptersPerVolumeMax, setRecommendedChaptersPerVolumeMax] = useState(30)
-  const [autoExpandAllVolumes, setAutoExpandAllVolumes] = useState(true)  // 是否自动扩展全部卷
-
   // 🔥 页面加载时，恢复上次的项目位置
   useEffect(() => {
     const savedProjectId = localStorage.getItem('lastWorkflowProjectId')
@@ -346,95 +339,6 @@ export default function WorkflowControlPage() {
     // 自动填充自定义大纲规划
     if (currentProject.user_outline_plan && !userOutlinePlan) {
       setUserOutlinePlan(currentProject.user_outline_plan)
-    }
-  }, [currentProject])
-
-  // 🎯 任务5.1：智能推荐大纲扩展模式和参数
-  useEffect(() => {
-    if (!currentProject) return
-
-    const projectGenre = currentProject.genre || ''
-    const lengthType = currentProject.planned_length_type || ''
-    const maxChapters = currentProject.planned_chapters_max || 0
-    const hasCustomPlan = !!currentProject.user_outline_plan
-
-    console.log('🧠 智能推荐大纲扩展模式：', { projectGenre, lengthType, maxChapters, hasCustomPlan })
-
-    // 📌 优先级：篇幅判断
-    if (lengthType === 'short' || maxChapters < 50) {
-      // 短篇：直接按总章数
-      setRecommendedExpansionMode('total')
-      console.log('✅ 推荐模式：按总章数（短篇）')
-    } else if (lengthType === 'epic' || maxChapters > 500) {
-      // 超长篇：史诗框架 + 手动选卷
-      setRecommendedExpansionMode('epic_framework')
-      setAutoExpandAllVolumes(false)  // 超长篇默认手动选卷
-      console.log('✅ 推荐模式：史诗框架（超长篇） - 手动选卷')
-    } else if (lengthType === 'long' || maxChapters >= 100) {
-      // 长篇：史诗框架 + 根据章数决定是否自动扩展
-      setRecommendedExpansionMode('epic_framework')
-      
-      if (maxChapters <= 500) {
-        setAutoExpandAllVolumes(true)  // 500章以内默认自动全卷扩展
-        console.log('✅ 推荐模式：史诗框架（长篇） - 自动全卷扩展')
-      } else {
-        setAutoExpandAllVolumes(false)  // 500章以上默认手动选卷
-        console.log('✅ 推荐模式：史诗框架（长篇） - 手动选卷')
-      }
-
-      // 🎯 根据题材推荐卷数和每卷章数
-      if (projectGenre === '修仙' || projectGenre === '玄幻') {
-        // 修仙/玄幻：5卷，每坷80-100章
-        const estimatedVolumes = Math.max(5, Math.min(8, Math.ceil(maxChapters / 90)))
-        setRecommendedVolumes(estimatedVolumes)
-        setRecommendedChaptersPerVolumeMin(80)
-        setRecommendedChaptersPerVolumeMax(100)
-        console.log(`  💫 修仙/玄幻：${estimatedVolumes}卷 × 80-100章`)
-      } else if (projectGenre === '都市') {
-        // 都市：5卷，每圭30-50章
-        const estimatedVolumes = Math.max(5, Math.min(10, Math.ceil(maxChapters / 40)))
-        setRecommendedVolumes(estimatedVolumes)
-        setRecommendedChaptersPerVolumeMin(30)
-        setRecommendedChaptersPerVolumeMax(50)
-        console.log(`  🏙️ 都市：${estimatedVolumes}卷 × 30-50章`)
-      } else if (projectGenre === '悬疑') {
-        // 悬疑：5卷，每圭20-50章
-        const estimatedVolumes = Math.max(5, Math.min(8, Math.ceil(maxChapters / 35)))
-        setRecommendedVolumes(estimatedVolumes)
-        setRecommendedChaptersPerVolumeMin(20)
-        setRecommendedChaptersPerVolumeMax(50)
-        console.log(`  🔍 悬疑：${estimatedVolumes}卷 × 20-50章`)
-      } else if (projectGenre === '言情' || projectGenre === '耽美') {
-        // 言情/耽美：5卷，每圭20-60章
-        const estimatedVolumes = Math.max(5, Math.min(8, Math.ceil(maxChapters / 40)))
-        setRecommendedVolumes(estimatedVolumes)
-        setRecommendedChaptersPerVolumeMin(20)
-        setRecommendedChaptersPerVolumeMax(60)
-        console.log(`  💖 言情/耽美：${estimatedVolumes}卷 × 20-60章`)
-      } else if (projectGenre === '科幻') {
-        // 科幻：5卷，每圭50-80章
-        const estimatedVolumes = Math.max(5, Math.min(8, Math.ceil(maxChapters / 65)))
-        setRecommendedVolumes(estimatedVolumes)
-        setRecommendedChaptersPerVolumeMin(50)
-        setRecommendedChaptersPerVolumeMax(80)
-        console.log(`  🚀 科幻：${estimatedVolumes}卷 × 50-80章`)
-      } else {
-        // 通用默认：5-8卷，每圭30-50章
-        const estimatedVolumes = Math.max(5, Math.min(8, Math.ceil(maxChapters / 40)))
-        setRecommendedVolumes(estimatedVolumes)
-        setRecommendedChaptersPerVolumeMin(30)
-        setRecommendedChaptersPerVolumeMax(50)
-        console.log(`  📚 通用：${estimatedVolumes}卷 × 30-50章`)
-      }
-    } else {
-      // 中篇：渐进式扩展
-      setRecommendedExpansionMode('incremental')
-      console.log('✅ 推荐模式：渐进式（中篇）')
-    }
-
-    // 💡 如果有自定义规划，提示但不改变推荐
-    if (hasCustomPlan) {
-      console.log('📝 检测到自定义大纲规划，将优先遵循用户规划')
     }
   }, [currentProject])
 

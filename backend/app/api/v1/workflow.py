@@ -4907,13 +4907,57 @@ async def execute_expand_outline_task(
             
         elif expansion_mode == "volume_detail":
             # ==================== 单卷详细模式 ====================
-            logger.info(f"📖 单卷详细模式: 扩展第{target_volume_index}卷, {volume_chapters_min}-{volume_chapters_max}章")
+            logger.info(f"📖 单卷详细模式: 扩展第{target_volume_index}卷, 输入章节数量范围: {volume_chapters_min}-{volume_chapters_max}章")
+            
+            # 🆕 导入拼接模块（提前导入）
+            from app.services.outline_merger import (
+                parse_volumes_detail_json,
+                build_volumes_detail_json,
+                merge_framework_with_volumes
+            )
+            
+            # 🔍 读取原有框架和已有卷细纲，计算章节编号
+            original_data_query = text("""
+                SELECT epic_framework, epic_volumes_detail 
+                FROM project_settings 
+                WHERE project_id = :project_id
+            """)
+            original_result = db.execute(original_data_query, {"project_id": project_id}).fetchone()
+            
+            if not original_result or not original_result[0]:
+                raise ValueError("⚠️  未找到史诗框架！请先生成史诗框架后再扩展单卷")
+            
+            # 解析已有卷细纲
+            stored_volumes_json = original_result[1] or '{}'
+            volumes_detail_dict = parse_volumes_detail_json(stored_volumes_json)
+            logger.info(f"   📚 已加载 {len(volumes_detail_dict)} 个已有卷细纲")
+            
+            # ✅ 检测是否覆盖：如果目标卷已存在，记录警告
+            if target_volume_index in volumes_detail_dict:
+                existing_vol = volumes_detail_dict[target_volume_index]
+                logger.warning(
+                    f"   ⚠️  第{target_volume_index}卷已存在（第{existing_vol.get('chapters_start', '?')}-{existing_vol.get('chapters_end', '?')}章），将被覆盖！"
+                )
+            
+            # 📊 计算章节编号：基于前面所有卷的累计章节数
+            accumulated_chapters = 0
+            for vol_num in range(1, target_volume_index):
+                if vol_num in volumes_detail_dict:
+                    vol_data = volumes_detail_dict[vol_num]
+                    vol_chapters = vol_data.get('chapters_end', 0) - vol_data.get('chapters_start', 0) + 1
+                    accumulated_chapters += vol_chapters
+                    logger.info(f"   📖 第{vol_num}卷: 第{vol_data.get('chapters_start')}-{vol_data.get('chapters_end')}章（{vol_chapters}章）")
+            
+            # ✅ 计算实际章节编号范围：从累计章节数+1开始
+            start_chapter = accumulated_chapters + 1
+            
+            logger.info(f"   🎯 计算结果：第{target_volume_index}卷将从第{start_chapter}章开始，生成{volume_chapters_min}-{volume_chapters_max}章（AI自由发挥）")
             
             await ws_manager.send_task_progress(
                 project_id=project_id,
                 task_id=task_id,
                 progress=20,
-                message=f"📝 正在详细扩展第{target_volume_index}卷..."
+                message=f"📝 正在详细扩展第{target_volume_index}卷（从第{start_chapter}章开始，预计{volume_chapters_min}-{volume_chapters_max}章）..."
             )
             
             result = await asyncio.to_thread(
@@ -4922,7 +4966,8 @@ async def execute_expand_outline_task(
                 target_volume_index=target_volume_index,
                 world_setting=combined_world_setting,
                 characters=characters,
-                chapters_range=(volume_chapters_min, volume_chapters_max),
+                start_chapter_num=start_chapter,  # ✅ 起始章节号
+                chapters_count_range=(volume_chapters_min, volume_chapters_max),  # ✅ 章节数量范围（让AI自由发挥）
             )
             
             logger.info("   ✅ 单卷详细扩展完成")
@@ -5042,55 +5087,52 @@ async def execute_expand_outline_task(
             # 📖 单卷详细模式：合并到原有框架
             logger.info(f"   🔄 单卷详细模式：将第{target_volume_index}卷合并到原有框架")
             
-            # 读取原有框架和已有卷细纲
-            original_data_query = text("""
-                SELECT epic_framework, epic_volumes_detail 
-                FROM project_settings 
-                WHERE project_id = :project_id
-            """)
-            original_result = db.execute(original_data_query, {"project_id": project_id}).fetchone()
+            # ✅ 复用前面读取的数据，避免重复查询
+            stored_framework = original_result[0]  # 已在上面读取
+            # volumes_detail_dict 已在上面解析
             
-            if not original_result or not original_result[0]:
-                # 如果没有原有框架，直接使用单卷内容（降级处理）
-                logger.warning("   ⚠️  未找到原有史诗框架，直接保存单卷内容")
-                outline_content = result["expanded_outline"]
+            # 🔍 解析AI实际生成的章节数
+            import re
+            chapter_pattern = r'第\s*(\d+)\s*章'
+            chapter_matches = re.findall(chapter_pattern, result["expanded_outline"])
+            if chapter_matches:
+                actual_start = int(chapter_matches[0])
+                actual_end = int(chapter_matches[-1])
+                logger.info(f"   📊 AI实际生成：第{actual_start}-{actual_end}章（共{actual_end - actual_start + 1}章）")
             else:
-                # 🆕 使用智能拼接算法
-                stored_framework = original_result[0]
-                stored_volumes_json = original_result[1] or '{}'
-                
-                # 解析已有卷细纲
-                volumes_detail_dict = parse_volumes_detail_json(stored_volumes_json)
-                logger.info(f"   📚 已加载 {len(volumes_detail_dict)} 个已有卷细纲")
-                
-                # 更新/添加当前卷的细纲
-                volumes_detail_dict[target_volume_index] = {
-                    "chapters_start": result.get("chapter_start", 1),
-                    "chapters_end": result.get("chapter_end", result.get("chapter_count", 10)),
-                    "outline": result["expanded_outline"],
-                    "generated_at": datetime.now().isoformat()
-                }
-                logger.info(f"   ✅ 已更新第{target_volume_index}卷细纲")
-                
-                # 🌟 智能拼接：框架 + 所有已扩展卷
-                # 提取纯细纲内容（不含章节范围元数据）
-                volumes_outline_only = {
-                    vol_num: vol_data["outline"] 
-                    for vol_num, vol_data in volumes_detail_dict.items()
-                }
-                
-                merged_outline = merge_framework_with_volumes(
-                    stored_framework,
-                    volumes_outline_only
-                )
-                
-                outline_content = merged_outline
-                
-                # 保存纯框架和更新后的JSON
-                epic_framework = stored_framework  # 框架保持不变
-                epic_volumes_detail_json = build_volumes_detail_json(volumes_detail_dict)
-                
-                logger.info(f"   🎯 智能拼接完成：框架 + {len(volumes_detail_dict)} 个卷细纲")
+                # 如果解析失败，使用预估值
+                actual_start = start_chapter
+                actual_end = start_chapter + volume_chapters_min - 1
+                logger.warning(f"   ⚠️  未能解析实际章节数，使用预估值：第{actual_start}-{actual_end}章")
+            
+            # 更新/添加当前卷的细纲
+            volumes_detail_dict[target_volume_index] = {
+                "chapters_start": actual_start,  # ✅ 使用AI实际生成的起始章节号
+                "chapters_end": actual_end,      # ✅ 使用AI实际生成的结束章节号
+                "outline": result["expanded_outline"],
+                "generated_at": datetime.now().isoformat()
+            }
+            logger.info(f"   ✅ 已更新第{target_volume_index}卷细纲（第{actual_start}-{actual_end}章）")
+            
+            # 🌟 智能拼接：框架 + 所有已扩展卷
+            # 提取纯细纲内容（不含章节范围元数据）
+            volumes_outline_only = {
+                vol_num: vol_data["outline"] 
+                for vol_num, vol_data in volumes_detail_dict.items()
+            }
+            
+            merged_outline = merge_framework_with_volumes(
+                stored_framework,
+                volumes_outline_only
+            )
+            
+            outline_content = merged_outline
+            
+            # 保存纯框架和更新后的JSON
+            epic_framework = stored_framework  # 框架保持不变
+            epic_volumes_detail_json = build_volumes_detail_json(volumes_detail_dict)
+            
+            logger.info(f"   🎯 智能拼接完成：框架 + {len(volumes_detail_dict)} 个卷细纲")
         
         # 🆕 根据模式选择更新策略
         if expansion_mode in ["epic_framework", "volume_detail"]:
