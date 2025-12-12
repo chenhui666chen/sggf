@@ -336,109 +336,77 @@ export default function ExpansionConfigDialog({
               </Box>
             )}
 
-            {/* 总卷数 */}
+            {/* 总卷数 - 已有框架时只读 */}
             <TextField
               label="总卷数"
               type="number"
               fullWidth
               size="small"
-              value={totalVolumes}
+              value={frameworkMetadata?.has_framework 
+                ? frameworkMetadata.metadata.total_volumes 
+                : totalVolumes}
+              disabled={frameworkMetadata?.has_framework}
               onChange={(e) => onTotalVolumesChange(parseInt(e.target.value) || 5)}
               inputProps={{ min: 5, max: 50 }}
-              helperText="建议5-50卷"
+              helperText={frameworkMetadata?.has_framework 
+                ? "框架已固定，不可修改" 
+                : "建议5-50卷"}
               sx={{ mb: 2 }}
             />
 
-            {/* 总章节范围 */}
+            {/* 总章节范围 - 已有框架时只读 */}
             <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
               <TextField
                 label="总章节（最小）"
                 type="number"
                 fullWidth
                 size="small"
-                value={totalChaptersMin}
+                value={frameworkMetadata?.has_framework 
+                  ? frameworkMetadata.metadata.total_chapters_range[0] 
+                  : totalChaptersMin}
+                disabled={frameworkMetadata?.has_framework}
                 onChange={(e) => onTotalChaptersMinChange(parseInt(e.target.value) || 400)}
                 inputProps={{ min: 400, max: 5000 }}
+                helperText={frameworkMetadata?.has_framework ? "框架已固定" : ""}
               />
               <TextField
                 label="总章节（最大）"
                 type="number"
                 fullWidth
                 size="small"
-                value={totalChaptersMax}
+                value={frameworkMetadata?.has_framework 
+                  ? frameworkMetadata.metadata.total_chapters_range[1] 
+                  : totalChaptersMax}
+                disabled={frameworkMetadata?.has_framework}
                 onChange={(e) => onTotalChaptersMaxChange(parseInt(e.target.value) || 450)}
                 inputProps={{ min: 400, max: 5000 }}
+                helperText={frameworkMetadata?.has_framework ? "框架已固定" : ""}
               />
             </Box>
 
             <Divider sx={{ my: 2 }} />
 
-            {/* 扩展方式选择 */}
+            {/* 🆕 扩展方式选择 - 根据是否有框架动态调整 */}
             <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold' }}>
-              扩展方式（可切换）
+              {frameworkMetadata?.has_framework ? '扩展操作' : '扩展方式（可切换）'}
             </Typography>
-            <RadioGroup
-              value={autoExpandAllVolumes ? 'auto' : 'manual'}
-              onChange={(e) => onAutoExpandAllVolumesChange(e.target.value === 'auto')}
-            >
-              <FormControlLabel
-                value="auto"
-                control={<Radio />}
-                label={
-                  <Box>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                      ● 自动扩展全部卷
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      ✅ 确认框架后自动扩展{totalVolumes}卷
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                      ⏱️ {getEstimatedTime()}
-                    </Typography>
-                  </Box>
-                }
-              />
-              <FormControlLabel
-                value="manual"
-                control={<Radio />}
-                label={
-                  <Box>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                      ○ 手动选择扩展某卷
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      📋 仅生成框架，后续手动扩展
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                      🎯 适合超长篇或分阶段创作
-                    </Typography>
-                  </Box>
-                }
-              />
-            </RadioGroup>
 
-            {/* 🆕 单卷扩展配置 - 当选择手动扩展时显示 */}
-            {!autoExpandAllVolumes && (
-              <Box sx={{ mt: 2, p: 2, bgcolor: 'info.50', borderRadius: 1, border: '1px solid', borderColor: 'info.200' }}>
-                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold', color: 'info.dark' }}>
-                  📝 扩展指定卷（可选）
-                </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
-                  {frameworkMetadata?.has_framework 
-                    ? '已有框架，可直接选择要扩展的卷。留空则仅刷新框架。' 
-                    : '留空：仅生成框架；填写卷编号：生成框架后立即扩展该卷。'}
-                </Typography>
+            {frameworkMetadata?.has_framework ? (
+              // ===== 已有框架：只显示单卷扩展选项 =====
+              <Box>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  📌 已有{frameworkMetadata.metadata.total_volumes}卷框架，请选择要扩展的卷
+                </Alert>
                 <TextField
-                  label="要扩展的卷编号（可选）"
+                  label="要扩展的卷编号"
                   type="number"
+                  required
                   fullWidth
                   size="small"
                   value={targetVolumeIndex || ''}
                   onChange={(e) => onTargetVolumeIndexChange(parseInt(e.target.value) || 0)}
-                  inputProps={{ min: 1, max: frameworkMetadata?.metadata?.total_volumes || totalVolumes }}
-                  helperText={frameworkMetadata?.has_framework 
-                    ? `已有框架，范围: 1-${frameworkMetadata?.metadata?.total_volumes}卷` 
-                    : `将生成${totalVolumes}卷框架，可选择扩展其中某卷（1-${totalVolumes}）`}
+                  inputProps={{ min: 1, max: frameworkMetadata.metadata.total_volumes }}
+                  helperText={`范围: 1-${frameworkMetadata.metadata.total_volumes}卷`}
                   sx={{ mb: 2 }}
                 />
                 {targetVolumeIndex > 0 && (
@@ -464,6 +432,94 @@ export default function ExpansionConfigDialog({
                   </Box>
                 )}
               </Box>
+            ) : (
+              // ===== 无框架：显示完整的扩展方式选择 =====
+              <>
+                <RadioGroup
+                  value={autoExpandAllVolumes ? 'auto' : 'manual'}
+                  onChange={(e) => onAutoExpandAllVolumesChange(e.target.value === 'auto')}
+                >
+                  <FormControlLabel
+                    value="auto"
+                    control={<Radio />}
+                    label={
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                          ● 自动扩展全部卷
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          ✅ 确认框架后自动扩展{totalVolumes}卷
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                          ⏱️ {getEstimatedTime()}
+                        </Typography>
+                      </Box>
+                    }
+                  />
+                  <FormControlLabel
+                    value="manual"
+                    control={<Radio />}
+                    label={
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                          ○ 手动选择扩展某卷
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          📋 仅生成框架，后续手动扩展
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                          🎯 适合超长篇或分阶段创作
+                        </Typography>
+                      </Box>
+                    }
+                  />
+                </RadioGroup>
+
+                {/* 🆕 单卷扩展配置 - 当选择手动扩展时显示 */}
+                {!autoExpandAllVolumes && (
+                  <Box sx={{ mt: 2, p: 2, bgcolor: 'info.50', borderRadius: 1, border: '1px solid', borderColor: 'info.200' }}>
+                    <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold', color: 'info.dark' }}>
+                      📝 扩展指定卷（可选）
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+                      留空：仅生成框架；填写卷编号：生成框架后立即扩展该卷。
+                    </Typography>
+                    <TextField
+                      label="要扩展的卷编号（可选）"
+                      type="number"
+                      fullWidth
+                      size="small"
+                      value={targetVolumeIndex || ''}
+                      onChange={(e) => onTargetVolumeIndexChange(parseInt(e.target.value) || 0)}
+                      inputProps={{ min: 1, max: totalVolumes }}
+                      helperText={`将生成${totalVolumes}卷框架，可选择扩展其中某卷（1-${totalVolumes}）`}
+                      sx={{ mb: 2 }}
+                    />
+                    {targetVolumeIndex > 0 && (
+                      <Box sx={{ display: 'flex', gap: 2 }}>
+                        <TextField
+                          label="本卷章节（最小）"
+                          type="number"
+                          fullWidth
+                          size="small"
+                          value={volumeChaptersMin}
+                          onChange={(e) => onVolumeChaptersMinChange(parseInt(e.target.value) || 50)}
+                          inputProps={{ min: 30, max: 150 }}
+                        />
+                        <TextField
+                          label="本卷章节（最大）"
+                          type="number"
+                          fullWidth
+                          size="small"
+                          value={volumeChaptersMax}
+                          onChange={(e) => onVolumeChaptersMaxChange(parseInt(e.target.value) || 80)}
+                          inputProps={{ min: 30, max: 150 }}
+                        />
+                      </Box>
+                    )}
+                  </Box>
+                )}
+              </>
             )}
 
             {/* 题材适配提示 */}
