@@ -384,43 +384,43 @@ export default function WorkflowControlPage() {
 
       // 🎯 根据题材推荐卷数和每卷章数
       if (projectGenre === '修仙' || projectGenre === '玄幻') {
-        // 修仙/玄幻：5卷，每卷80-100章
-        const estimatedVolumes = Math.max(3, Math.min(8, Math.ceil(maxChapters / 90)))
+        // 修仙/玄幻：5卷，每坷80-100章
+        const estimatedVolumes = Math.max(5, Math.min(8, Math.ceil(maxChapters / 90)))
         setRecommendedVolumes(estimatedVolumes)
         setRecommendedChaptersPerVolumeMin(80)
         setRecommendedChaptersPerVolumeMax(100)
         console.log(`  💫 修仙/玄幻：${estimatedVolumes}卷 × 80-100章`)
       } else if (projectGenre === '都市') {
-        // 都市：3卷，每圇30-50章
-        const estimatedVolumes = Math.max(2, Math.min(5, Math.ceil(maxChapters / 40)))
+        // 都市：5卷，每圭30-50章
+        const estimatedVolumes = Math.max(5, Math.min(10, Math.ceil(maxChapters / 40)))
         setRecommendedVolumes(estimatedVolumes)
         setRecommendedChaptersPerVolumeMin(30)
         setRecommendedChaptersPerVolumeMax(50)
         console.log(`  🏙️ 都市：${estimatedVolumes}卷 × 30-50章`)
       } else if (projectGenre === '悬疑') {
-        // 悬疑：2-4卷，每圇20-50章
-        const estimatedVolumes = Math.max(2, Math.min(4, Math.ceil(maxChapters / 35)))
+        // 悬疑：5卷，每圭20-50章
+        const estimatedVolumes = Math.max(5, Math.min(8, Math.ceil(maxChapters / 35)))
         setRecommendedVolumes(estimatedVolumes)
         setRecommendedChaptersPerVolumeMin(20)
         setRecommendedChaptersPerVolumeMax(50)
         console.log(`  🔍 悬疑：${estimatedVolumes}卷 × 20-50章`)
       } else if (projectGenre === '言情' || projectGenre === '耽美') {
-        // 言情/耽美：2-3卷，每圇20-60章
-        const estimatedVolumes = Math.max(2, Math.min(3, Math.ceil(maxChapters / 40)))
+        // 言情/耽美：5卷，每圭20-60章
+        const estimatedVolumes = Math.max(5, Math.min(8, Math.ceil(maxChapters / 40)))
         setRecommendedVolumes(estimatedVolumes)
         setRecommendedChaptersPerVolumeMin(20)
         setRecommendedChaptersPerVolumeMax(60)
         console.log(`  💖 言情/耽美：${estimatedVolumes}卷 × 20-60章`)
       } else if (projectGenre === '科幻') {
-        // 科幻：4卷，每圇50-80章
-        const estimatedVolumes = Math.max(3, Math.min(6, Math.ceil(maxChapters / 65)))
+        // 科幻：5卷，每圭50-80章
+        const estimatedVolumes = Math.max(5, Math.min(8, Math.ceil(maxChapters / 65)))
         setRecommendedVolumes(estimatedVolumes)
         setRecommendedChaptersPerVolumeMin(50)
         setRecommendedChaptersPerVolumeMax(80)
         console.log(`  🚀 科幻：${estimatedVolumes}卷 × 50-80章`)
       } else {
-        // 通用默认：3-5卷，每圇30-50章
-        const estimatedVolumes = Math.max(3, Math.min(5, Math.ceil(maxChapters / 40)))
+        // 通用默认：5-8卷，每圭30-50章
+        const estimatedVolumes = Math.max(5, Math.min(8, Math.ceil(maxChapters / 40)))
         setRecommendedVolumes(estimatedVolumes)
         setRecommendedChaptersPerVolumeMin(30)
         setRecommendedChaptersPerVolumeMax(50)

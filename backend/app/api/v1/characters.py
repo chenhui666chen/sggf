@@ -237,9 +237,9 @@ async def get_character_auto_tracked_relations(
     
     返回：
     {
-        "techniques": [{"id": 1, "name": "九天剑诀", "chapters": [1,3]}],
-        "artifacts": [{"id": 2, "name": "赤霄剑", "chapters": [1]}],
-        "locations": [{"id": 3, "name": "天剑宗", "chapters": [1,2]}]
+        "techniques": [{"id": 1, "name": "某功法", "chapters": [1,3]}],
+        "artifacts": [{"id": 2, "name": "某法宝", "chapters": [1]}],
+        "locations": [{"id": 3, "name": "某地点", "chapters": [1,2]}]
     }
     """
     import json

@@ -64,12 +64,13 @@ class OutlineExpander:
             return 0
 
         # 方法1：正则表达式匹配
-        # 匹配形如：“第N章”、“Chapter N”、“第N回”等
+        # 匹配形如："第N章"、"Chapter N"、"第N回"等
+        # 🔧 关键修复：只匹配后面带有标题符号的章节，排除范围描述
         patterns = [
-            r'第(\d+)章',
-            r'第(\d+)回',
-            r'Chapter\s+(\d+)',
-            r'第([一二三四五六七八九十百]+)章',  # 中文数字
+            r'第(\d+)章[：:、]',  # 第X章： 或 第X章、
+            r'第(\d+)回[：:、]',  # 第X回： 或 第X回、
+            r'Chapter\s+(\d+)[：:]',  # Chapter X:
+            r'####\s*第(\d+)章',  # Markdown标题 #### 第X章
         ]
 
         chapter_numbers = []
@@ -216,8 +217,8 @@ class OutlineExpander:
         ]
 
         # 匹配格式：
-        # 1. 林墨、苏娜（顿号分隔）
-        comma_names = re.findall(r'([\u4e00-\u9fa5]{2,4})、', characters_text)
+        # 1. 主角、配角A（顿号分隔）
+        comma_names = re.findall(r'([一-龥]{2,4})、', characters_text)
         for name in comma_names:
             if name not in exclude_keywords and len(name) >= 2:
                 character_names.add(name)
@@ -251,7 +252,7 @@ class OutlineExpander:
 注意：不要统计"主角"、"配角"、"新增角色"等标题性词语。
 
 示例：
-- 如果文本中有林墨、苏娜、老周三个人物，返回：3
+- 如果文本中有主角、配角A、配角B三个人物，返回：3
 - 如果只是标题和分类，没有具体人物，返回：0
 
 只返回一个数字，不要其他内容。"""
@@ -1158,7 +1159,7 @@ Please analyze：
 - 每个新角色需要完整的人物卡信息，包括：
   * 姓名、年龄、性别
   * 故事立场：主角方/反派方/中立方/亦正亦邪
-  * 所属势力：具体组织名称（如天剑宗/魔教/散修联盟/无）
+  * 所属势力：具体组织名称（如某宗门/某势力/散修联盟/无）
   * 重要性（戏份权重）：主角/重要角色/次要角色/群众角色
   * 外貌特征（2-3句）
   * 性格特点（2-3句），包括典型行为与矛盾性格
@@ -1608,6 +1609,11 @@ Please analyze：
         print(f"📖 【单卷详细扩展】第{target_volume_index}卷，{chapters_range[0]}-{chapters_range[1]}章")
         print(f"{'='*70}\n")
         
+        # 🛡️ 临时修复：清空历史记忆，避免旧消息导致API错误
+        print("🧹 清空历史记忆，避免旧消息影响...")
+        self.plot_architect.memory_manager.clear_history()
+        self.creative_director.memory_manager.clear_history()
+        
         # 🆕 获取题材专属的章节细纲模板
         chapter_template = self.genre_module.get('chapter_detail_template', '')
         template_example = chapter_template.format(
@@ -1627,7 +1633,9 @@ Please analyze：
 {characters[:2000] if characters else '待完善'}
 
 【扩展要求】
-生成{chapters_range[0]}-{chapters_range[1]}章的详细大纲
+生成第{chapters_range[0]}-{chapters_range[1]}章的详细大纲（✅ 章节号从第{chapters_range[0]}章开始，到第{chapters_range[1]}章结束）
+
+⚠️ 关键：本卷的章节编号必须从第{chapters_range[0]}章开始！不要从第1章开始！
 
 🔥 【章节细纲模板】每章必须严格按以下格式：
 {template_example if template_example else '''第{chapter_num}章：《{chapter_title}》
@@ -1643,8 +1651,6 @@ Please analyze：
 4. 延伸(20%)：场景描述
 5. 收尾(15%)：场景描述
 
-【关键对话】（1-2段核心对话大意）
-
 【情绪曲线】情绪走势
 
 【伏笔设计】埋设/回收的伏笔
@@ -1657,10 +1663,13 @@ Please analyze：
 【涉及人物与发展】主要人物及本章变化
 '''}
 
-⚠️ 必须检查：
+��️ 必须检查：
 1. 是否符合史诗框架中本卷的定位
 2. 是否正确埋设/回收框架中规划的伏笔
 3. 人物登场是否符合框架中的生命周期规划
+4. ✅ 【强制要求】必须输出从第{chapters_range[0]}章到第{chapters_range[1]}章的每一章完整内容，不允许省略任何章节！
+5. ✅ 【强制要求】不允许使用"中间章节略"、"……（省略）"、"示例章节"等省略性表述！
+6. ✅ 【强制要求】每一章都必须包含完整的【核心目标】【境界变化】【情节分镜】等所有必需字段！
 
 Please输出完整的、重新整合后的网文大纲（🔥重点：每章必须有完整的详细规划）：
 
@@ -1671,9 +1680,16 @@ Please输出完整的、重新整合后的网文大纲（🔥重点：每章必�
 
 (按上述模板格式输出每一章...)
 
+🔴 【最后检查】请确认：
+- [ ] 是否已输出从第{chapters_range[0]}章到第{chapters_range[1]}章的**每一章**？
+- [ ] 是否没有使用任何省略性表述（如"中间章节略"）？
+- [ ] 是否每一章都包含完整的所有必需字段？
+
+⚠️ 如果上述任何一项为“否”，请立即补全！
+
 ## 三、伏笔埋设检查
 ✅ 第X章：埋设主角身份伏笔（符合史诗框架）
-✅ 第Y章：提及"天道"异常（为第Z卷铺垫）"""
+✅ 第Y章：提及“天道”异常（为第Z卷铺垫）"""
 
         print("【第一步】详细扩展第{target_volume_index}卷...")
         

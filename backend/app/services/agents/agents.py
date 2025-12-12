@@ -4,7 +4,7 @@
 from typing import Dict, Any, List, Optional, Union
 from abc import ABC, abstractmethod
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 from .config import Config
 from .knowledge_base import NovelKnowledgeBase
 from .memory_manager import NovelMemoryManager
@@ -101,7 +101,8 @@ class BaseAgent(ABC):
         for msg in history[:-1]:  # 排除最后一条（已经被添加到 user_input）
             # 验证消息类型和内容
             if isinstance(msg, (HumanMessage, AIMessage, SystemMessage)):
-                if msg.content and isinstance(msg.content, str) and msg.content.strip():
+                # 检查 content 属性是否存在且为字符串
+                if hasattr(msg, 'content') and msg.content and isinstance(msg.content, str) and msg.content.strip():
                     valid_history.append(msg)
                 else:
                     print(f"⚠️ 过滤空消息: {type(msg).__name__}")
@@ -111,6 +112,15 @@ class BaseAgent(ABC):
         messages.extend(valid_history)
 
         messages.append(HumanMessage(content=user_input))
+        
+        # 📝 调试：打印最终传递给API的消息列表
+        print(f"📦 准备调用LLM，消息数量: {len(messages)}")
+        for i, msg in enumerate(messages):
+            msg_type = type(msg).__name__
+            # 检查是否有 role 属性
+            role = getattr(msg, 'role', 'N/A')
+            content_preview = (msg.content[:50] + '...') if len(msg.content) > 50 else msg.content
+            print(f"  [{i}] {msg_type} (role={role}): {content_preview}")
 
         # 🔥 关键修复：支持动态设置 temperature
         if temperature is not None:

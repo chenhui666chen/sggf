@@ -394,17 +394,23 @@ export default function KnowledgeBasePage() {
         console.log('🔗 WebSocket 连接已建立')
       }).catch((error: any) => {
         console.error('❌ WebSocket 连接失败:', error)
-        // WebSocket连接失败，清除所有进行中的任务状态
-        if (expandingOutline) {
-          setExpandingOutline(false)
-          localStorage.removeItem(`expanding_outline_${projectId}`)
-          showSnackbar('❌ 后端服务断开，大纲扩展任务已取消', 'error')
-        }
-        if (expandingCharacters) {
-          setExpandingCharacters(false)
-          localStorage.removeItem(`expanding_characters_${projectId}`)
-          showSnackbar('❌ 后端服务断开，人物扩展任务已取消', 'error')
-        }
+        // ✅ 修复：使用函数式setState检查并清除状态
+        setExpandingOutline(prev => {
+          if (prev) {
+            console.log('❌ WebSocket连接失败，清除大纲扩展状态')
+            localStorage.removeItem(`expanding_outline_${projectId}`)
+            showSnackbar('❌ 后端服务断开，大纲扩展任务已取消', 'error')
+          }
+          return false
+        })
+        setExpandingCharacters(prev => {
+          if (prev) {
+            console.log('❌ WebSocket连接失败，清除人物扩展状态')
+            localStorage.removeItem(`expanding_characters_${projectId}`)
+            showSnackbar('❌ 后端服务断开，人物扩展任务已取消', 'error')
+          }
+          return false
+        })
       })
 
       // 监听任务完成
@@ -428,8 +434,11 @@ export default function KnowledgeBasePage() {
             console.log('📝 当前 plotOutline 长度:', plotOutline.length)
           })
           
-          // 清除扩展状态
-          setExpandingOutline(false)
+          // ✅ 修复：使用函数式setState，避免闭包陷阱
+          setExpandingOutline(prev => {
+            console.log('🔄 清除扩展状态: prev =', prev, '-> false')
+            return false
+          })
           // 🆕 清除localStorage状态
           localStorage.removeItem(`expanding_outline_${projectId}`)
         }
@@ -454,8 +463,11 @@ export default function KnowledgeBasePage() {
           // 刷新数据
           loadWorkflowData()
           
-          // 清除扩展中状态
-          setExpandingCharacters(false)
+          // ✅ 修复：使用函数式setState，避免闭包陷阱
+          setExpandingCharacters(prev => {
+            console.log('🔄 清除人物扩展状态: prev =', prev, '-> false')
+            return false
+          })
           // 🆕 清除localStorage状态
           localStorage.removeItem(`expanding_characters_${projectId}`)
           localStorage.removeItem(`expanding_characters_start_${projectId}`)
@@ -480,15 +492,23 @@ export default function KnowledgeBasePage() {
         
         if (taskId.startsWith('expand-outline')) {
           showSnackbar(`❌ 大纲扩展失败: ${error}`, 'error')
-          setExpandingOutline(false)
+          // ✅ 修复：使用函数式setState
+          setExpandingOutline(prev => {
+            console.log('❌ 大纲扩展失败，清除状态: prev =', prev, '-> false')
+            return false
+          })
           // 🆕 清除localStorage状态
           localStorage.removeItem(`expanding_outline_${projectId}`)
         }
         
         if (taskId.startsWith('expand-characters')) {
           showSnackbar(`❌ 人物扩展失败: ${error}`, 'error')
-          setExpandingCharacters(false)
-          // 🆕 清除localStorage犰态
+          // ✅ 修复：使用函数式setState
+          setExpandingCharacters(prev => {
+            console.log('❌ 人物扩展失败，清除状态: prev =', prev, '-> false')
+            return false
+          })
+          // 🆕 清除localStorage状态
           localStorage.removeItem(`expanding_characters_${projectId}`)
         }
       })
@@ -496,17 +516,23 @@ export default function KnowledgeBasePage() {
       // 🆕 监听WebSocket断开
       workflowWebSocket.onDisconnect(() => {
         console.warn('⚠️ WebSocket 连接断开')
-        // 如果有进行中的任务，标记为错误
-        if (expandingOutline) {
-          setExpandingOutline(false)
-          localStorage.removeItem(`expanding_outline_${projectId}`)
-          showSnackbar('❌ 后端服务断开，大纲扩展任务已取消', 'error')
-        }
-        if (expandingCharacters) {
-          setExpandingCharacters(false)
-          localStorage.removeItem(`expanding_characters_${projectId}`)
-          showSnackbar('❌ 后端服务断开，人物扩展任务已取消', 'error')
-        }
+        // ✅ 修复：使用函数式setState检查并清除状态
+        setExpandingOutline(prev => {
+          if (prev) {
+            console.log('⚠️ WebSocket断开，清除大纲扩展状态')
+            localStorage.removeItem(`expanding_outline_${projectId}`)
+            showSnackbar('❌ 后端服务断开，大纲扩展任务已取消', 'error')
+          }
+          return false
+        })
+        setExpandingCharacters(prev => {
+          if (prev) {
+            console.log('⚠️ WebSocket断开，清除人物扩展状态')
+            localStorage.removeItem(`expanding_characters_${projectId}`)
+            showSnackbar('❌ 后端服务断开，人物扩展任务已取消', 'error')
+          }
+          return false
+        })
       })
 
       // 🆕 监听体系自动添加通知
@@ -637,7 +663,7 @@ export default function KnowledgeBasePage() {
 
       // 🎯 根据题材推荐卷数和每卷章数
       if (projectGenre === '修仙' || projectGenre === '玄幻') {
-        const estimatedVolumes = Math.max(3, Math.min(8, Math.ceil(maxChapters / 90)))
+        const estimatedVolumes = Math.max(5, Math.min(8, Math.ceil(maxChapters / 90)))
         setRecommendedVolumes(estimatedVolumes)
         setRecommendedChaptersPerVolumeMin(80)
         setRecommendedChaptersPerVolumeMax(100)
@@ -651,7 +677,7 @@ export default function KnowledgeBasePage() {
 • 适用：修炼体系分阶段推进`
         console.log(`  💫 ${projectGenre}：${estimatedVolumes}卷 × 80-100章`)
       } else if (projectGenre === '都市') {
-        const estimatedVolumes = Math.max(2, Math.min(5, Math.ceil(maxChapters / 40)))
+        const estimatedVolumes = Math.max(5, Math.min(10, Math.ceil(maxChapters / 40)))
         setRecommendedVolumes(estimatedVolumes)
         setRecommendedChaptersPerVolumeMin(30)
         setRecommendedChaptersPerVolumeMax(50)
@@ -665,7 +691,7 @@ export default function KnowledgeBasePage() {
 • 适用：事业发展和人际关系递进`
         console.log(`  🏙️ 都市：${estimatedVolumes}卷 × 30-50章`)
       } else if (projectGenre === '悬疑') {
-        const estimatedVolumes = Math.max(2, Math.min(4, Math.ceil(maxChapters / 35)))
+        const estimatedVolumes = Math.max(5, Math.min(8, Math.ceil(maxChapters / 35)))
         setRecommendedVolumes(estimatedVolumes)
         setRecommendedChaptersPerVolumeMin(20)
         setRecommendedChaptersPerVolumeMax(50)
@@ -679,7 +705,7 @@ export default function KnowledgeBasePage() {
 • 适用：每卷一个大反转`
         console.log(`  🔍 悬疑：${estimatedVolumes}卷 × 20-50章`)
       } else if (projectGenre === '言情' || projectGenre === '耽美') {
-        const estimatedVolumes = Math.max(2, Math.min(3, Math.ceil(maxChapters / 40)))
+        const estimatedVolumes = Math.max(5, Math.min(8, Math.ceil(maxChapters / 40)))
         setRecommendedVolumes(estimatedVolumes)
         setRecommendedChaptersPerVolumeMin(20)
         setRecommendedChaptersPerVolumeMax(60)
@@ -693,7 +719,7 @@ export default function KnowledgeBasePage() {
 • 适用：相识→相知→相守`
         console.log(`  💖 ${projectGenre}：${estimatedVolumes}卷 × 20-60章`)
       } else if (projectGenre === '科幻') {
-        const estimatedVolumes = Math.max(3, Math.min(6, Math.ceil(maxChapters / 65)))
+        const estimatedVolumes = Math.max(5, Math.min(8, Math.ceil(maxChapters / 65)))
         setRecommendedVolumes(estimatedVolumes)
         setRecommendedChaptersPerVolumeMin(50)
         setRecommendedChaptersPerVolumeMax(80)
@@ -707,8 +733,8 @@ export default function KnowledgeBasePage() {
 • 适用：地球→星系→宇宙`
         console.log(`  🚀 科幻：${estimatedVolumes}卷 × 50-80章`)
       } else {
-        // 通用默认：3-5卷，每卷 30-50章
-        const estimatedVolumes = Math.max(3, Math.min(5, Math.ceil(maxChapters / 40)))
+        // 通用默认：5-8卷，每卷 30-50章
+        const estimatedVolumes = Math.max(5, Math.min(8, Math.ceil(maxChapters / 40)))
         setRecommendedVolumes(estimatedVolumes)
         setRecommendedChaptersPerVolumeMin(30)
         setRecommendedChaptersPerVolumeMax(50)

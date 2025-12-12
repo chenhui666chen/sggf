@@ -35,12 +35,12 @@ class EntityExtractor:
         
         Returns:
             {
-                "characters": [{"name": "林墨", "mentions": 5}],
-                "locations": [{"name": "天剑宗", "type": "map_system"}],
-                "techniques": [{"name": "九天剑诀", "type": "technique_system"}],
-                "artifacts": [{"name": "赤霄剑", "type": "artifact_system"}],
+                "characters": [{"name": "主角", "mentions": 5}],
+                "locations": [{"name": "某宗门", "type": "map_system"}],
+                "techniques": [{"name": "某功法", "type": "technique_system"}],
+                "artifacts": [{"name": "某法宝", "type": "artifact_system"}],
                 "realms": [{"name": "筑基期", "type": "cultivation_realm_system"}],
-                "factions": [{"name": "魔教", "type": "force_system"}]
+                "factions": [{"name": "某势力", "type": "force_system"}]
             }
         """
         # 1. 获取项目的已有人物和设定项
@@ -109,24 +109,24 @@ class EntityExtractor:
 ```json
 {{
   "characters": [
-    {{"name": "林墨", "mentions": 5, "actions": ["修炼", "战斗"]}},
-    {{"name": "苏婉儿", "mentions": 2, "actions": ["对话"]}}
+    {{"name": "主角", "mentions": 5, "actions": ["修炼", "战斗"]}},
+    {{"name": "配角A", "mentions": 2, "actions": ["对话"]}}
   ],
   "locations": [
-    {{"name": "天剑宗", "type": "map_system", "mentions": 3}},
-    {{"name": "玄冥洞", "type": "map_system", "mentions": 1}}
+    {{"name": "某宗门", "type": "map_system", "mentions": 3}},
+    {{"name": "某秘境", "type": "map_system", "mentions": 1}}
   ],
   "techniques": [
-    {{"name": "九天剑诀", "type": "technique_system", "level": "玄级上品"}}
+    {{"name": "某功法", "type": "technique_system", "level": "玄级上品"}}
   ],
   "artifacts": [
-    {{"name": "赤霄剑", "type": "artifact_system"}}
+    {{"name": "某法宝", "type": "artifact_system"}}
   ],
   "realms": [
     {{"name": "筑基期", "type": "cultivation_realm_system"}}
   ],
   "factions": [
-    {{"name": "魔教", "type": "force_system"}}
+    {{"name": "某势力", "type": "force_system"}}
   ]
 }}
 ```

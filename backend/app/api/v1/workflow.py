@@ -2904,8 +2904,12 @@ async def get_all_stages_content(
             def parse_json_content(content):
                 if not content:
                     return ""
+                
+                # ✅ 修复：优先检查是否为 JSON 对象/数组，避免误解析 Markdown 文本
+                # 大纲扩展后的内容以 "# " 或 "---" 开头，不应被解析为 JSON
                 try:
-                    if content.startswith('{') or content.startswith('[') or content.startswith('"'):
+                    # 只解析明确的 JSON 对象或数组格式
+                    if content.startswith('{') or content.startswith('['):
                         parsed = json.loads(content)
                         if isinstance(parsed, str):
                             return parsed
@@ -2913,6 +2917,8 @@ async def get_all_stages_content(
                             return json.dumps(parsed, ensure_ascii=False, indent=2)
                         else:
                             return str(parsed)
+                    # ⚠️ 移除对 "..." 格式的 JSON 解析，避免将 Markdown 文本误识别
+                    # 如果内容以 " 开头但不是有效 JSON 字符串，直接返回原内容
                 except (json.JSONDecodeError, AttributeError):
                     pass
                 return content
@@ -4774,16 +4780,37 @@ async def execute_expand_outline_task(
                 avg_total_chapters = (total_chapters_min + total_chapters_max) // 2
                 avg_per_volume = avg_total_chapters // total_volumes
                 all_volumes_outline = ""
+                
+                # ✅ 修复：计算每一卷的实际起始和结束章节号
+                accumulated_chapters = 0  # 累计已生成的章节数
+                
                 for vol_index in range(1, total_volumes + 1):
+                    # 计算本卷的章节数
+                    volume_chapter_count = avg_per_volume
+                    
+                    # ✅ 计算实际章节号范围
+                    start_chapter = accumulated_chapters + 1
+                    end_chapter = accumulated_chapters + volume_chapter_count
                     logger.info(f"📖 正在扩展第 {vol_index}/{total_volumes} 卷...")
                     await ws_manager.send_task_progress(project_id=project_id, task_id=task_id, progress=20 + int((vol_index / total_volumes) * 60), message=f"📖 正在详细扩展第 {vol_index}/{total_volumes} 卷...")
-                    vol_result = await asyncio.to_thread(expander.expand_volume_detail, framework_content=framework_content_for_volumes, target_volume_index=vol_index, world_setting=combined_world_setting, characters=characters, chapters_range=(max(30, avg_per_volume - 10), min(150, avg_per_volume + 10)))
+                    vol_result = await asyncio.to_thread(
+                        expander.expand_volume_detail, 
+                        framework_content=framework_content_for_volumes, 
+                        target_volume_index=vol_index, 
+                        world_setting=combined_world_setting, 
+                        characters=characters, 
+                        chapters_range=(start_chapter, end_chapter)  # ✅ 实际章节号（第81-152章）
+                    )
                     all_volumes_outline += f"\n\n{'='*70}\n第{vol_index}卷 详细大纲\n{'='*70}\n\n{vol_result['expanded_outline']}"
-                    logger.info(f"有效 第 {vol_index}/{total_volumes} 卷扩展完成")
+                    
+                    # ✅ 更新累计章节数
+                    accumulated_chapters += volume_chapter_count
+                    
+                    logger.info(f"✅ 第 {vol_index}/{total_volumes} 卷扩展完成（第{start_chapter}-{end_chapter}章）")
                 result["expanded_outline"] = f"【史诗框架概览】\n{framework_content_for_volumes}\n\n{'='*70}\n【分卷详细大纲】\n{all_volumes_outline}"
                 result["auto_expanded"] = True
                 result["total_volume_count"] = total_volumes
-                logger.info(f"有效 自动扩全部卷完成！共 {total_volumes} 卷")
+                logger.info(f"✅ 自动扩全部卷完成！共 {total_volumes} 卷，{accumulated_chapters} 章")
             
         elif expansion_mode == "volume_detail":
             # ==================== 单卷详细模式 ====================

@@ -217,7 +217,7 @@ class AutoTrackingService:
         自动关联人物与设定项（根据名称匹配）
         
         例如：
-        - 如果人物的faction字段是"天剑宗"，自动链接到force_system中的"天剑宗"设定项
+        - 如果人物的faction字段是"某宗门"，自动链接到force_system中的"某宗门"设定项
         - 如果人物的current_realm字段是"筑基期"，自动链接到realm_system中的"筑基期"设定项
         """
         character = db.query(Character).filter(Character.id == character_id).first()
@@ -279,9 +279,9 @@ class AutoTrackingService:
         🆕 高级功能：自动识别人物与设定项的关联
         
         基于关键词匹配识别：
-        - 人物-功法关联："林墨修炼/施展/掌握九天剑诀"
-        - 人物-法宝关联："林墨手持/获得/使用赤霄剑"
-        - 人物-地点关联："林墨来到/在天剑宗"
+        - 人物-功法关联："主角修炼/施展/掌握某功法"
+        - 人物-法宝关联："主角手持/获得/使用某法宝"
+        - 人物-地点关联："主角来到/在某地点"
         
         Returns:
             {"techniques": 2, "artifacts": 1, "locations": 3}
@@ -419,8 +419,8 @@ class AutoTrackingService:
         - "人物名 ... 关键词 ... 设定项名" (同一句)
         
         示例：
-        - "林墨施展九天剑诀" → True
-        - "林墨在天剑宗修炼" → True
+        - "主角施展某功法" → True
+        - "主角在某地点修炼" → True
         """
         # 简单匹配：在同一句中同时出现人物、关键词、设定项
         sentences = content.split('。')  # 按句号分割
