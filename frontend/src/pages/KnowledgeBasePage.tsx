@@ -439,10 +439,19 @@ export default function KnowledgeBasePage() {
             console.log('✅ 工作流数据刷新完成')
             console.log('📝 当前 plotOutline 长度:', plotOutline.length)
             
-            // 🆕 如果是史诗框架模式或单卷详细模式，刷新框架状态
-            if (expansionMode === 'epic_framework' || expansionMode === 'volume_detail') {
+            // 🆕 通过返回数据判断是否需要刷新框架状态（避免闭包陷阱）
+            const isEpicFramework = data.result?.framework_type === 'epic' || data.result?.volume_index > 0
+            console.log('🔍 检测扩展类型:', {
+              framework_type: data.result?.framework_type,
+              volume_index: data.result?.volume_index,
+              isEpicFramework
+            })
+            
+            if (isEpicFramework) {
               console.log('🔄 刷新史诗框架状态...')
               loadEpicFramework()
+            } else {
+              console.log('ℹ️ 非史诗框架模式，跳过框架刷新')
             }
           })
           
