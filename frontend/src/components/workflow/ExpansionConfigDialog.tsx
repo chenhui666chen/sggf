@@ -398,7 +398,7 @@ export default function ExpansionConfigDialog({
                   📌 已有{frameworkMetadata.metadata.total_volumes}卷框架，请选择要扩展的卷
                 </Alert>
                 <TextField
-                  label="要扩展的卷编号"
+                  label="要扩展的卷编号（必填）"
                   type="number"
                   required
                   fullWidth
@@ -431,6 +431,10 @@ export default function ExpansionConfigDialog({
                     />
                   </Box>
                 )}
+                <Divider sx={{ my: 2 }} />
+                <Alert severity="warning" sx={{ mt: 2 }}>
+                  ⚠️ 对框架不满意？请前往「知识库」→「剧情大纲」删除后重新生成
+                </Alert>
               </Box>
             ) : (
               // ===== 无框架：显示完整的扩展方式选择 =====
