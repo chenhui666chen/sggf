@@ -4609,8 +4609,8 @@ async def get_epic_framework_state(
         """)
         result = db.execute(query, {"project_id": project_id}).fetchone()
         
-        if not result or not result[0]:
-            logger.info(f"   ✅ 未找到框架，返回空状态")
+        if not result:
+            logger.info(f"   ✅ 未找到项目设置，返回空状态")
             return {
                 "has_framework": False,
                 "total_volumes": 0,
@@ -4622,8 +4622,21 @@ async def get_epic_framework_state(
         framework_generated_at = result[1]
         plot_outline = result[2] or ""
         
+        # 🔑 关键修复：使用 epic_framework 来检测状态，而不是 plot_outline
+        # 如果 epic_framework 为空，退耋检查 plot_outline
+        content_to_check = epic_framework if epic_framework else plot_outline
+        
+        if not content_to_check:
+            logger.info(f"   ✅ 未找到框架内容，返回空状态")
+            return {
+                "has_framework": False,
+                "total_volumes": 0,
+                "expanded_volumes": [],
+                "framework_generated_at": None
+            }
+        
         # 使用状态检测函数
-        state = detect_framework_state(plot_outline)
+        state = detect_framework_state(content_to_check)
         
         logger.info(f"   ✅ 框架状态: {state}")
         
