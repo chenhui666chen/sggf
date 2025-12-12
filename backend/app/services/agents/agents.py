@@ -91,11 +91,24 @@ class BaseAgent(ABC):
         
         messages: List[BaseMessage] = [SystemMessage(content=system_prompt)]
 
-        # 添加对话历史
+        # 添加对话历史（🛡️ 验证消息格式）
         history = self.memory_manager.get_chat_history()
         if len(history) > 10:
             history = history[-10:]
-        messages.extend(history[:-1])
+        
+        # 🔧 过滤无效消息，避免 API 错误
+        valid_history = []
+        for msg in history[:-1]:  # 排除最后一条（已经被添加到 user_input）
+            # 验证消息类型和内容
+            if isinstance(msg, (HumanMessage, AIMessage, SystemMessage)):
+                if msg.content and isinstance(msg.content, str) and msg.content.strip():
+                    valid_history.append(msg)
+                else:
+                    print(f"⚠️ 过滤空消息: {type(msg).__name__}")
+            else:
+                print(f"⚠️ 过滤无效消息类型: {type(msg)}")
+        
+        messages.extend(valid_history)
 
         messages.append(HumanMessage(content=user_input))
 
