@@ -256,7 +256,7 @@ export default function KnowledgeBasePage() {
   const [autoExpandAllVolumes, setAutoExpandAllVolumes] = useState<boolean>(true)  // 是否自动扩展全部卷
   
   // 🆕 单卷扩展相关
-  const [savedFramework, setSavedFramework] = useState<string>('')  // 保存的史诗框架
+  const [savedFramework] = useState<string>('')  // 保存的史诗框架（仅读）
   const [targetVolumeIndex, setTargetVolumeIndex] = useState<number>(0)  // 扩展第几卷（0表示未选择）
   const [volumeChaptersMin, setVolumeChaptersMin] = useState<number>(50)  // 本卷章节最小值
   const [volumeChaptersMax, setVolumeChaptersMax] = useState<number>(80)  // 本卷章节最大值
