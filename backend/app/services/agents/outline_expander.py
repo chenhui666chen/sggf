@@ -1660,8 +1660,9 @@ Please analyze：
         self.plot_architect.memory_manager.clear_history()
         self.creative_director.memory_manager.clear_history()
         
-        # 🆕 获取题材专属的章节细纲模板
+        # 🆕 获取题材专属的章节细纲模板和补充说明
         chapter_template = self.genre_module.get('chapter_detail_template', '')
+        outline_tips = self.genre_module.get('outline_detail_tips', '')  # 🆕 新增：题材补充说明
         template_example = chapter_template.format(
             chapter_num=1,
             chapter_title="章节标题"
@@ -1705,6 +1706,8 @@ Please analyze：
 - **结尾钩子**：（吸引追读，20-30字）
   类型：危机/机遇/悬念/反转
 '''}
+
+{outline_tips if outline_tips else ''}
 
 Please输出完整的、重新整合后的网文大纲：
 
