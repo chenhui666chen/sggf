@@ -51,6 +51,7 @@ import ConflictDetector from '@/components/ConflictDetector'
 import RelationshipGraph from '@/components/RelationshipGraph'
 import CharacterCardManager from '@/components/CharacterCardManager'
 import ExpansionConfigDialog from '@/components/workflow/ExpansionConfigDialog'
+import FormattedContent from '@/components/common/FormattedContent'
 
 // ==================== 接口定义 ====================
 
@@ -2222,9 +2223,16 @@ export default function KnowledgeBasePage() {
                               编辑
                             </Button>
                           </Box>
-                          <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', color: 'text.secondary' }}>
-                            {selectedItem.content || '暂无内容'}
-                          </Typography>
+                          {selectedItem.content ? (
+                            <FormattedContent 
+                              content={selectedItem.content} 
+                              sx={{ color: 'text.secondary', fontSize: '0.875rem' }} 
+                            />
+                          ) : (
+                            <Typography variant="body2" color="text.secondary">
+                              暂无内容
+                            </Typography>
+                          )}
                           {selectedItem.tags && selectedItem.tags.length > 0 && (
                             <Box sx={{ mt: 1, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
                               {selectedItem.tags.map((tag, idx) => (

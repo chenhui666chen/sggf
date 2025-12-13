@@ -21,15 +21,49 @@ interface FormattedContentProps {
  * ```
  */
 export default function FormattedContent({ content, sx, className }: FormattedContentProps) {
-  const sanitizedContent = React.useMemo(() => {
-    if (!content) return ''
-    // 前端展示排除开发说明：移除全角括号及其中内容
-    return content.replace(/（[^）]*）/g, '')
-  }, [content])
-
   const formattedHtml = React.useMemo(() => {
-    return smartFormat(sanitizedContent)
-  }, [sanitizedContent])
+    if (!content) return ''
+    
+    // 前端展示排除开发说明：移除全角括号及其中内容
+    let text = content.replace(/（[^）]*）/g, '')
+    
+    // 🌟 保护 details/summary 标签块，避免被 smartFormat 转义
+    const detailsBlocks: string[] = []
+    
+    // 情况1：保护原始的 <details> 块
+    text = text.replace(/<details[^>]*>[\s\S]*?<\/details>/gi, (match) => {
+      detailsBlocks.push(match)
+      return `___DETAILS_BLOCK_${detailsBlocks.length - 1}___`
+    })
+    
+    // 情况2：处理已经转义的 &lt;details&gt; 块（后端可能存储的就是转义后的）
+    text = text.replace(/&lt;details[^&]*&gt;[\s\S]*?&lt;\/details&gt;/gi, (match) => {
+      // 解码转义的标签
+      const decoded = match
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+      detailsBlocks.push(decoded)
+      return `___DETAILS_BLOCK_${detailsBlocks.length - 1}___`
+    })
+    
+    // 执行 Markdown 格式化（此时 details 块已被保护）
+    let html = smartFormat(text)
+    
+    // 🌟 恢复 details 块（并确保内部标签被解码）
+    detailsBlocks.forEach((block, index) => {
+      // 解码块内部可能存在的转义字符
+      const decodedBlock = block
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+      html = html.replace(`___DETAILS_BLOCK_${index}___`, decodedBlock)
+    })
+    
+    // 🌟 清理可能的包裹问题
+    html = html.replace(/<p[^>]*>\s*(<details[\s\S]*?<\/details>)\s*<\/p>/gi, '$1')
+    
+    return html
+  }, [content])
 
   return (
     <Box
@@ -76,6 +110,34 @@ export default function FormattedContent({ content, sx, className }: FormattedCo
         '& strong': {
           fontWeight: 600,
           color: 'error.main',
+        },
+        // 🌟 details/summary 标签样式（可展开/收起）
+        '& details': {
+          margin: '12px 0',
+          padding: '8px 12px',
+          backgroundColor: 'grey.50',
+          borderRadius: 1,
+          border: '1px solid',
+          borderColor: 'divider',
+        },
+        '& summary': {
+          cursor: 'pointer',
+          fontWeight: 600,
+          color: 'primary.main',
+          padding: '4px 0',
+          userSelect: 'none',
+          '&:hover': {
+            color: 'primary.dark',
+          },
+          '&::marker': {
+            color: 'primary.main',
+          },
+        },
+        '& details[open] > summary': {
+          marginBottom: '8px',
+          borderBottom: '1px solid',
+          borderColor: 'divider',
+          paddingBottom: '8px',
         },
         ...sx,
       }}

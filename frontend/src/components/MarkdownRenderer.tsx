@@ -1,5 +1,6 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import rehypeRaw from 'rehype-raw'
 import { Box, Typography, Divider, Paper } from '@mui/material'
 import type { Components } from 'react-markdown'
 
@@ -247,11 +248,13 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
     return null
   }
 
+  // 🌟 预处理：清理多余空行（将3个以上连续换行压缩为2个）
+  const cleanedContent = content.replace(/\n{3,}/g, '\n\n')
+
   return (
     <Box
       sx={{
-        // 🆕 添加全局样式确保所有内容正确换行
-        whiteSpace: 'pre-wrap',
+        // 样式确保正常换行，但不保留过多空白
         wordBreak: 'break-word',
         overflowWrap: 'break-word',
         '& > *:first-of-type': {
@@ -260,10 +263,39 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
         '& > *:last-child': {
           mb: 0,
         },
+        // 🌟 details/summary 标签样式（可展开/收起）
+        '& details': {
+          my: 1.5,
+          p: 1.5,
+          bgcolor: 'grey.50',
+          borderRadius: 1,
+          border: '1px solid',
+          borderColor: 'divider',
+        },
+        '& summary': {
+          cursor: 'pointer',
+          fontWeight: 600,
+          color: 'primary.main',
+          py: 0.5,
+          userSelect: 'none',
+          '&:hover': {
+            color: 'primary.dark',
+          },
+        },
+        '& details[open] > summary': {
+          mb: 1,
+          pb: 1,
+          borderBottom: '1px solid',
+          borderColor: 'divider',
+        },
       }}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-        {content}
+      <ReactMarkdown 
+        remarkPlugins={[remarkGfm]} 
+        rehypePlugins={[rehypeRaw]}
+        components={markdownComponents}
+      >
+        {cleanedContent}
       </ReactMarkdown>
     </Box>
   )
