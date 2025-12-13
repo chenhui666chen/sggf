@@ -253,7 +253,7 @@ export default function KnowledgeBasePage() {
   const [totalVolumes, setTotalVolumes] = useState<number>(30)  // 总卷数
   const [totalChaptersMin, setTotalChaptersMin] = useState<number>(2000)  // 总章节范围最小值
   const [totalChaptersMax, setTotalChaptersMax] = useState<number>(2500)  // 总章节范围最大值
-  const [autoExpandAllVolumes, setAutoExpandAllVolumes] = useState<boolean>(true)  // 是否自动扩展全部卷
+  // 🗑️ 删除了 autoExpandAllVolumes 状态，因为技术上不可行
   
   // 🆕 单卷扩展相关
   const [savedFramework] = useState<string>('')  // 保存的史诗框架（仅读）
@@ -274,7 +274,7 @@ export default function KnowledgeBasePage() {
   const [recommendedVolumes, setRecommendedVolumes] = useState(3)
   const [recommendedChaptersPerVolumeMin, setRecommendedChaptersPerVolumeMin] = useState(20)
   const [recommendedChaptersPerVolumeMax, setRecommendedChaptersPerVolumeMax] = useState(30)
-  const [recommendedAutoExpandAllVolumes, setRecommendedAutoExpandAllVolumes] = useState(true)
+  // 🗑️ 删除了 recommendedAutoExpandAllVolumes 状态
   const [recommendationReason, setRecommendationReason] = useState('')
   
   // 🆕 扩展结果对话框状态
@@ -392,12 +392,14 @@ export default function KnowledgeBasePage() {
   useEffect(() => {
     if (!projectId) return
 
+    console.log('🔌 KnowledgeBasePage: 初始化 WebSocket 监听器, projectId =', projectId)
+
     // 导入统一的 WebSocket 服务
     import('@/services/websocket').then(({ workflowWebSocket }) => {
       // 连接 WebSocket
       workflowWebSocket.connect().then(() => {
         workflowWebSocket.joinProject(parseInt(projectId))
-        console.log('🔗 WebSocket 连接已建立')
+        console.log('🔗 WebSocket 连接已建立, 已加入项目房间:', projectId)
       }).catch((error: any) => {
         console.error('❌ WebSocket 连接失败:', error)
         // ✅ 修复：使用函数式setState检查并清除状态
@@ -420,9 +422,18 @@ export default function KnowledgeBasePage() {
       })
 
       // 监听任务完成
-      workflowWebSocket.onTaskComplete((data: any) => {
+      const handleTaskComplete = (data: any) => {
         console.log('✅ 收到任务完成:', data)
+        console.log('🔍 任务详情:', {
+          task_id: data.task_id,
+          result: data.result,
+          message: data.message,
+          status: data.status
+        })
         const taskId = data.task_id || ''
+        console.log('🔍 提取的 taskId:', taskId)
+        console.log('🔍 是否以 expand-outline 开头:', taskId.startsWith('expand-outline'))
+        console.log('🔍 是否以 expand-characters 开头:', taskId.startsWith('expand-characters'))
         
         // 大纲扩展完成
         if (taskId.startsWith('expand-outline')) {
@@ -493,7 +504,10 @@ export default function KnowledgeBasePage() {
           localStorage.removeItem(`expanding_characters_${projectId}`)
           localStorage.removeItem(`expanding_characters_start_${projectId}`)
         }
-      })
+      }
+      
+      workflowWebSocket.onTaskComplete(handleTaskComplete)
+      console.log('✅ 已注册 onTaskComplete 监听器')
 
       // 监听任务进度
       workflowWebSocket.onTaskProgress((data: any) => {
@@ -657,7 +671,7 @@ export default function KnowledgeBasePage() {
     } else if (lengthType === 'epic' || maxChapters > 500) {
       // 超长篇：史诗框架 + 手动选卷
       setRecommendedMode('epic_framework')
-      setRecommendedAutoExpandAllVolumes(false)
+      // 🔥 删除了智能推荐自动扩展逻辑
       
       const estimatedVolumes = Math.max(5, Math.min(50, Math.ceil(maxChapters / 90)))
       setRecommendedVolumes(estimatedVolumes)
@@ -677,9 +691,9 @@ export default function KnowledgeBasePage() {
       setRecommendedMode('epic_framework')
       
       if (maxChapters <= 500) {
-        setRecommendedAutoExpandAllVolumes(true)
+      // 🔥 删除了智能推荐自动扩展逻辑
       } else {
-        setRecommendedAutoExpandAllVolumes(false)
+        // 🔥 删除了智能推荐自动扩展逻辑
       }
 
       // 🎯 根据题材推荐卷数和每卷章数
@@ -1284,8 +1298,8 @@ export default function KnowledgeBasePage() {
         const response = await apiClient.getEpicFrameworkState(parseInt(projectId))
         const state = response.data
         
-        // 情况1: 史诗框架模式 - 已有框架且没有选择具体卷，提示重生
-        if (expansionMode === 'epic_framework' && state.has_framework && targetVolumeIndex === 0 && !autoExpandAllVolumes) {
+        // 情兵1: 史诗框架模式 - 已有框架且没有选择具体卷，提示重生
+        if (expansionMode === 'epic_framework' && state.has_framework && targetVolumeIndex === 0) {
           setConfirmDialogType('regenerate')
           setConfirmDialogMessage(
             `已存在${state.total_volumes}卷框架，重新生成将清除所有已扩展的卷细纲（${state.expanded_volumes.length}个卷）。\n\n确认要重生框架吗？`
@@ -1343,8 +1357,8 @@ export default function KnowledgeBasePage() {
         }
         console.log(`🌟 史诗框架模式: ${totalVolumes}卷, ${totalChaptersMin}-${totalChaptersMax}章`)
         
-        // 🆕 如果选择了具体卷编号，验证单卷参数
-        if (!autoExpandAllVolumes && targetVolumeIndex > 0) {
+        // 🔥 如果选择了具体卷编号，验证单卷参数
+        if (targetVolumeIndex > 0) {
           if (targetVolumeIndex > (frameworkMetadata?.metadata?.total_volumes || totalVolumes)) {
             showSnackbar(`卷编号超出范围 (1-${frameworkMetadata?.metadata?.total_volumes || totalVolumes})`, 'error')
             setExpandingOutline(false)
@@ -1419,7 +1433,7 @@ export default function KnowledgeBasePage() {
       let actualExpansionMode = expansionMode
       
       // 如果是史诗框架模式 + 手动选卷 + 选择了具体卷编号，切换到 volume_detail 模式
-      if (expansionMode === 'epic_framework' && !autoExpandAllVolumes && targetVolumeIndex > 0) {
+      if (expansionMode === 'epic_framework' && targetVolumeIndex > 0) {
         actualExpansionMode = 'volume_detail'
         console.log(`📖 自动切换到单卷详细模式: 第${targetVolumeIndex}卷`)
       }
@@ -1450,7 +1464,7 @@ export default function KnowledgeBasePage() {
           total_volumes: totalVolumes,
           total_chapters_min: totalChaptersMin,
           total_chapters_max: totalChaptersMax,
-          auto_expand_all_volumes: autoExpandAllVolumes,  // 🆕 是否自动扩全部卷
+          // 🔥 删除了 auto_expand_all_volumes 参数
           // 📖 单卷详细模式参数
           framework_content: savedFramework,
           target_volume_index: targetVolumeIndex,
@@ -1738,7 +1752,8 @@ export default function KnowledgeBasePage() {
                               setTotalVolumes(recommendedVolumes)
                               setTotalChaptersMin(recommendedVolumes * recommendedChaptersPerVolumeMin)
                               setTotalChaptersMax(recommendedVolumes * recommendedChaptersPerVolumeMax)
-                              setAutoExpandAllVolumes(recommendedAutoExpandAllVolumes)
+                              // 🔥 删除了智能推荐自动扩展逻辑
+                              // setAutoExpandAllVolumes(recommendedAutoExpandAllVolumes)
                             }
                             
                             // 🆕 始终加载框架状态（无论是否为史诗模式）
@@ -3021,7 +3036,7 @@ export default function KnowledgeBasePage() {
         totalVolumes={totalVolumes}
         totalChaptersMin={totalChaptersMin}
         totalChaptersMax={totalChaptersMax}
-        autoExpandAllVolumes={autoExpandAllVolumes}
+        // 🔥 删除了 autoExpandAllVolumes 参数
         frameworkMetadata={frameworkMetadata}
         loadingFramework={loadingFramework}
         onExpansionModeChange={(mode) => {
@@ -3036,7 +3051,7 @@ export default function KnowledgeBasePage() {
         onTotalVolumesChange={setTotalVolumes}
         onTotalChaptersMinChange={setTotalChaptersMin}
         onTotalChaptersMaxChange={setTotalChaptersMax}
-        onAutoExpandAllVolumesChange={setAutoExpandAllVolumes}
+        // 🖅 删除了 onAutoExpandAllVolumesChange 参数
         targetVolumeIndex={targetVolumeIndex}
         volumeChaptersMin={volumeChaptersMin}
         volumeChaptersMax={volumeChaptersMax}
@@ -3053,7 +3068,7 @@ export default function KnowledgeBasePage() {
         recommendedVolumes={recommendedVolumes}
         recommendedChaptersPerVolumeMin={recommendedChaptersPerVolumeMin}
         recommendedChaptersPerVolumeMax={recommendedChaptersPerVolumeMax}
-        recommendedAutoExpandAllVolumes={recommendedAutoExpandAllVolumes}
+        // 🖅 删除了 recommendedAutoExpandAllVolumes 参数
         recommendationReason={recommendationReason}
       />
 

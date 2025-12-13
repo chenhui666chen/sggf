@@ -40,6 +40,12 @@ class OutlineExpander:
         # 🔔 为扩展大纲使用 qwen-long
         self.llm = create_deepseek_llm(task_type="outline_expand")
         
+        # 🎆 为单卷详细扩展使用 DeepSeek-R1（深度推理能力）
+        from .llm_singleton import get_model_for_task
+        r1_llm = get_model_for_task("volume_detail_expand")
+        self.plot_architect_r1 = PlotArchitectAgent(self.knowledge_base, self.memory_manager, llm=r1_llm)
+        print("🎆 单卷扩展使用 DeepSeek-R1 模型")
+        
         # 🎆 初始化分层摘要器
         self.layered_summarizer = LayeredSummarizer(self.knowledge_base)
         
@@ -1874,9 +1880,9 @@ Please输出完整的、重新整合后的网文大纲：
 3. 使用委婉、克制的表达方式
 4. 重点突出正面价值观和人物成长"""
                     detail_prompt_safe = detail_prompt + safety_constraint
-                    volume_content = self.plot_architect.process(detail_prompt_safe, {})
+                    volume_content = self.plot_architect_r1.process(detail_prompt_safe, {})  # ✅ 使用R1
                 else:
-                    volume_content = self.plot_architect.process(detail_prompt, {})
+                    volume_content = self.plot_architect_r1.process(detail_prompt, {})  # ✅ 使用R1
                 
                 print("✅ 单卷详细扩展完成\n")
                 break  # 成功则跳出重试循环

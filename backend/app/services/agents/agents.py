@@ -23,13 +23,14 @@ class BaseAgent(ABC):
     """所有Agent的基类"""
     
     def __init__(self, name: str, role: str, knowledge_base: Optional[NovelKnowledgeBase] = None,
-                 memory_manager: Optional[NovelMemoryManager] = None, task_type: str = "default"):
+                 memory_manager: Optional[NovelMemoryManager] = None, task_type: str = "default",
+                 llm: Optional[Any] = None):  # 🎆 支持传入自定义LLM
         """初始化Agent"""
         Config.validate()
 
         self.name = name
         self.role = role
-        self.llm = create_deepseek_llm(task_type=task_type)
+        self.llm = llm if llm is not None else create_deepseek_llm(task_type=task_type)  # ✅ 优先使用传入的llm
         
         self.knowledge_base = knowledge_base or NovelKnowledgeBase()
         self.memory_manager = memory_manager or NovelMemoryManager()
@@ -300,8 +301,10 @@ class PlotArchitectAgent(BaseAgent):
     """情节架构师Agent - 故事结构设计与情节质量把控"""
 
     def __init__(self, knowledge_base: Optional[NovelKnowledgeBase] = None,
-                 memory_manager: Optional[NovelMemoryManager] = None):
-        super().__init__("情节架构师", "plot_architect", knowledge_base, memory_manager, task_type="outline")
+                 memory_manager: Optional[NovelMemoryManager] = None,
+                 llm: Optional[Any] = None):  # 🎆 支持传入自定义LLM
+        super().__init__("情节架构师", "plot_architect", knowledge_base, memory_manager, 
+                        task_type="outline", llm=llm)  # ✅ 传递llm参数
 
     def get_system_prompt(self) -> str:
         return """你是一位杰出的情节架构师，精通叙事学、故事结构和戏剧冲突。

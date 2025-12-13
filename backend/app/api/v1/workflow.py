@@ -87,7 +87,6 @@ class ExpandOutlineRequest(BaseModel):
     total_volumes: Optional[int] = None  # 史诗框架:总卷数(10-50卷)
     total_chapters_min: Optional[int] = None  # 史诗框架:总章节范围最小值
     total_chapters_max: Optional[int] = None  # 史诗框架:总章节范围最大值
-    auto_expand_all_volumes: bool = False  # 🆕 是否自动扩展全部卷（默认仅生成框架）
     
     # 📖 单卷详细模式参数(volume_detail)
     framework_content: Optional[str] = None  # 基于的史诗框架内容
@@ -4751,7 +4750,6 @@ async def expand_outline(
                 total_volumes=request.total_volumes,
                 total_chapters_min=request.total_chapters_min,
                 total_chapters_max=request.total_chapters_max,
-                auto_expand_all_volumes=request.auto_expand_all_volumes,
                 # 📖 单卷详细参数
                 framework_content=request.framework_content,
                 target_volume_index=request.target_volume_index,
@@ -4882,45 +4880,6 @@ async def execute_expand_outline_task(
             )
             
             logger.info("   ✅ 史诗框架生成完成")
-            
-            # 🆕 如果需要自动扩全部卷，在框架生成后循环扩展每一卷
-            if auto_expand_all_volumes:
-                logger.info(f"🔄 自动扩展全部卷模式：开始扩展 {total_volumes} 卷...")
-                framework_content_for_volumes = result["expanded_outline"]
-                avg_total_chapters = (total_chapters_min + total_chapters_max) // 2
-                avg_per_volume = avg_total_chapters // total_volumes
-                all_volumes_outline = ""
-                
-                # ✅ 修复：计算每一卷的实际起始和结束章节号
-                accumulated_chapters = 0  # 累计已生成的章节数
-                
-                for vol_index in range(1, total_volumes + 1):
-                    # 计算本卷的章节数
-                    volume_chapter_count = avg_per_volume
-                    
-                    # ✅ 计算实际章节号范围
-                    start_chapter = accumulated_chapters + 1
-                    end_chapter = accumulated_chapters + volume_chapter_count
-                    logger.info(f"📖 正在扩展第 {vol_index}/{total_volumes} 卷...")
-                    await ws_manager.send_task_progress(project_id=project_id, task_id=task_id, progress=20 + int((vol_index / total_volumes) * 60), message=f"📖 正在详细扩展第 {vol_index}/{total_volumes} 卷...")
-                    vol_result = await asyncio.to_thread(
-                        expander.expand_volume_detail, 
-                        framework_content=framework_content_for_volumes, 
-                        target_volume_index=vol_index, 
-                        world_setting=combined_world_setting, 
-                        characters=characters, 
-                        chapters_range=(start_chapter, end_chapter)  # ✅ 实际章节号（第81-152章）
-                    )
-                    all_volumes_outline += f"\n\n{'='*70}\n第{vol_index}卷 详细大纲\n{'='*70}\n\n{vol_result['expanded_outline']}"
-                    
-                    # ✅ 更新累计章节数
-                    accumulated_chapters += volume_chapter_count
-                    
-                    logger.info(f"✅ 第 {vol_index}/{total_volumes} 卷扩展完成（第{start_chapter}-{end_chapter}章）")
-                result["expanded_outline"] = f"【史诗框架概览】\n{framework_content_for_volumes}\n\n{'='*70}\n【分卷详细大纲】\n{all_volumes_outline}"
-                result["auto_expanded"] = True
-                result["total_volume_count"] = total_volumes
-                logger.info(f"✅ 自动扩全部卷完成！共 {total_volumes} 卷，{accumulated_chapters} 章")
             
         elif expansion_mode == "volume_detail":
             # ==================== 单卷详细模式 ====================
@@ -5075,32 +5034,7 @@ async def execute_expand_outline_task(
 
 {framework_without_anchors}"""
             logger.info(f"   🌟 史诗框架已添加锤点（epic_framework）并移除锤点（plot_outline）")
-            
-            # 🆕 如果自动扩展全部卷，需要保存卷细纲到 epic_volumes_detail
-            if auto_expand_all_volumes:
-                volumes_detail_dict = {}
-                accumulated_chapters = 0
-                avg_total_chapters = (total_chapters_min + total_chapters_max) // 2
-                avg_per_volume = avg_total_chapters // total_volumes
-                
-                # 从结果中提取每一卷的细纲（需要AI返回结构化数据）
-                # 暂时使用简单存储方式
-                for vol_index in range(1, total_volumes + 1):
-                    start_chapter = accumulated_chapters + 1
-                    end_chapter = accumulated_chapters + avg_per_volume
-                    
-                    volumes_detail_dict[vol_index] = {
-                        "chapters_start": start_chapter,
-                        "chapters_end": end_chapter,
-                        "outline": f"第{vol_index}卷细纲（自动生成）",  # 简化存储
-                        "generated_at": datetime.now().isoformat()
-                    }
-                    
-                    accumulated_chapters += avg_per_volume
-                
-                epic_volumes_detail_json = build_volumes_detail_json(volumes_detail_dict)
-                logger.info(f"   📦 已保存 {len(volumes_detail_dict)} 个卷的细纲到JSON")
-        
+
         elif expansion_mode == "volume_detail":
             # 📖 单卷详细模式：合并到原有框架
             logger.info(f"   🔄 单卷详细模式：将第{target_volume_index}卷合并到原有框架")
@@ -5175,7 +5109,27 @@ async def execute_expand_outline_task(
                 "updated_at": datetime.now().isoformat(),
                 "project_id": project_id
             })
-            logger.info("   💾 史诗框架模式：已分离保存框架和卷细纲")
+            logger.info("💾 史诗框架模式：已分离保存框架和卷细纲")
+                        
+            # 🔍 关键诊断：立即验证保存是否成功
+            verify_query = text("""
+                SELECT epic_framework, epic_framework_generated_at 
+                FROM project_settings 
+                WHERE project_id = :project_id
+            """)
+            verify_result = db.execute(verify_query, {"project_id": project_id}).fetchone()
+            if verify_result:
+                saved_framework = verify_result[0]
+                saved_generated_at = verify_result[1]
+                has_anchors = 'VOLUME_' in (saved_framework or '') and 'ANCHOR_' in (saved_framework or '')
+                logger.info(f"💾 保存验证: epic_framework长度={len(saved_framework or '')}, 有锚点={has_anchors}, generated_at={saved_generated_at}")
+                            
+                if not saved_framework:
+                    logger.error("⚠️  保存失败！epic_framework为空")
+                elif not has_anchors:
+                    logger.error(f"⚠️  保存失败！epic_framework缺少锚点标记，前200字符: {saved_framework[:200]}")
+            else:
+                logger.error("⚠️  保存失败！未找到project_settings记录")
         else:
             # 原有模式：只更新 plot_outline
             update_query = text("""

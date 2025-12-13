@@ -32,7 +32,7 @@ interface ExpansionConfigDialogProps {
   totalVolumes: number
   totalChaptersMin: number
   totalChaptersMax: number
-  autoExpandAllVolumes: boolean
+  // 🖅 删除了 autoExpandAllVolumes 参数
   frameworkMetadata: any
   loadingFramework: boolean
   // 🆕 单卷扩展相关
@@ -44,7 +44,7 @@ interface ExpansionConfigDialogProps {
   recommendedVolumes?: number
   recommendedChaptersPerVolumeMin?: number
   recommendedChaptersPerVolumeMax?: number
-  recommendedAutoExpandAllVolumes?: boolean
+  // 🖅 删除了 recommendedAutoExpandAllVolumes 参数
   recommendationReason?: string
   // 回调
   onExpansionModeChange: (mode: 'total' | 'volume' | 'incremental' | 'epic_framework' | 'volume_detail') => void
@@ -53,7 +53,7 @@ interface ExpansionConfigDialogProps {
   onTotalVolumesChange: (volumes: number) => void
   onTotalChaptersMinChange: (min: number) => void
   onTotalChaptersMaxChange: (max: number) => void
-  onAutoExpandAllVolumesChange: (auto: boolean) => void
+  // 🖅 删除了 onAutoExpandAllVolumesChange 参数
   onTargetVolumeIndexChange: (index: number) => void
   onVolumeChaptersMinChange: (min: number) => void
   onVolumeChaptersMaxChange: (max: number) => void
@@ -71,7 +71,7 @@ export default function ExpansionConfigDialog({
   totalVolumes,
   totalChaptersMin,
   totalChaptersMax,
-  autoExpandAllVolumes,
+  // 🖅 删除了 autoExpandAllVolumes 参数
   frameworkMetadata,
   loadingFramework,
   targetVolumeIndex,
@@ -81,7 +81,7 @@ export default function ExpansionConfigDialog({
   recommendedVolumes,
   recommendedChaptersPerVolumeMin,
   recommendedChaptersPerVolumeMax,
-  recommendedAutoExpandAllVolumes,
+  // 🖅 删除了 recommendedAutoExpandAllVolumes 参数
   recommendationReason,
   onExpansionModeChange,
   onTargetChapterCountChange,
@@ -89,7 +89,7 @@ export default function ExpansionConfigDialog({
   onTotalVolumesChange,
   onTotalChaptersMinChange,
   onTotalChaptersMaxChange,
-  onAutoExpandAllVolumesChange,
+  // 🖅 删除了 onAutoExpandAllVolumesChange 参数
   onTargetVolumeIndexChange,
   onVolumeChaptersMinChange,
   onVolumeChaptersMaxChange,
@@ -133,10 +133,7 @@ export default function ExpansionConfigDialog({
 
   // 🎯 估算耗时
   const getEstimatedTime = () => {
-    if (expansionMode === 'epic_framework' && autoExpandAllVolumes) {
-      const minutes = Math.floor(totalVolumes * 2) // 假设每卷2分钟
-      return `预计耗时：${minutes}-${minutes + 2}分钟`
-    } else if (expansionMode === 'epic_framework' && !autoExpandAllVolumes) {
+    if (expansionMode === 'epic_framework') {
       return '仅生成框架：约1-2分钟'
     }
     return ''
@@ -468,53 +465,12 @@ export default function ExpansionConfigDialog({
                 )}
               </Box>
             ) : (
-              // ===== 任务3.3：初次扩展UI（无框架） =====
+              // ===== 任务3.3：首次扩展UI（无框架） =====
               <>
                 {/* ⚠️ 首次扩展提示 */}
                 <Alert severity="info" sx={{ mb: 2 }}>
-                  💡 首次扩展必须先生成框架
+                  💡 首次扩展必须先生成框架,生成后可分卷扩展
                 </Alert>
-
-                {/* 扩展方式选择 */}
-                <RadioGroup
-                  value={autoExpandAllVolumes ? 'auto' : 'manual'}
-                  onChange={(e) => onAutoExpandAllVolumesChange(e.target.value === 'auto')}
-                >
-                  <FormControlLabel
-                    value="auto"
-                    control={<Radio />}
-                    label={
-                      <Box>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          ● 自动扩展全部卷
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          ✅ 确认框架后自动扩展{totalVolumes}卷
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                          ⏱️ {getEstimatedTime()}
-                        </Typography>
-                      </Box>
-                    }
-                  />
-                  <FormControlLabel
-                    value="manual"
-                    control={<Radio />}
-                    label={
-                      <Box>
-                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          ○ 手动选择扩展某卷
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          📋 仅生成框架，后续手动扩展
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                          🎯 适合超长篇或分阶段创作
-                        </Typography>
-                      </Box>
-                    }
-                  />
-                </RadioGroup>
               </>
             )}
 
@@ -589,10 +545,7 @@ export default function ExpansionConfigDialog({
                     <strong>每卷章节：</strong>
                     {recommendedChaptersPerVolumeMin || 30}-{recommendedChaptersPerVolumeMax || 50} 章
                   </Typography>
-                  <Typography variant="body2" sx={{ mb: 0.5 }}>
-                    <strong>扩展方式：</strong>
-                    {recommendedAutoExpandAllVolumes ? '自动扩展全部卷' : '手动选择扩展'}
-                  </Typography>
+                  {/* 🖅 删除了扩展方式推荐 */}
                 </>
               )}
               <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'text.secondary', fontStyle: 'italic' }}>

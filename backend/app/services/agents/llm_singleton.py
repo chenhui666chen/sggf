@@ -35,6 +35,7 @@ class LLMSingletonManager:
             "character": "deepseek-reasoner",
             "outline": "qwen-long",
             "outline_expand": "qwen-long",
+            "volume_detail_expand": "deepseek-reasoner",  # 🎆 单卷详细扩展使用R1深度推理
             "character_expand": "deepseek-reasoner",
             "chapter": "qwen-max",
             "dialogue": "qwen-max",
@@ -89,4 +90,16 @@ class LLMSingletonManager:
 # 兼容旧接口
 def create_deepseek_llm(task_type: str = "default") -> ChatOpenAI:
     """创建LLM实例（使用单例模式）"""
+    return LLMSingletonManager.get_llm(task_type)
+
+
+def get_model_for_task(task_type: str = "default") -> ChatOpenAI:
+    """获取指定任务类型的LLM实例
+    
+    Args:
+        task_type: 任务类型
+        
+    Returns:
+        ChatOpenAI实例
+    """
     return LLMSingletonManager.get_llm(task_type)
