@@ -383,14 +383,14 @@ export default function ExpansionConfigDialog({
 
             <Divider sx={{ my: 2 }} />
 
-            {/* 🆕 扩展方式选择 - 根据是否有框架动态调整 */}
-            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold' }}>
-              {frameworkMetadata?.has_framework ? '扩展操作' : '扩展方式（可切换）'}
-            </Typography>
-
             {frameworkMetadata?.has_framework ? (
-              // ===== 任务3.4：已有框架UI =====
+              // ===== 已有框架UI =====
               <Box>
+                {/* 扩展操作标题 */}
+                <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold' }}>
+                  扩展操作
+                </Typography>
+
                 {/* ✅ 框架信息展示 */}
                 <Alert severity="success" sx={{ mb: 2 }}>
                   ✅ 已生成{frameworkMetadata.metadata.total_volumes}卷史诗框架
@@ -448,8 +448,8 @@ export default function ExpansionConfigDialog({
                       size="small"
                       value={volumeChaptersMin}
                       onChange={(e) => onVolumeChaptersMinChange(parseInt(e.target.value) || 50)}
-                      inputProps={{ min: 30, max: 150 }}
-                      helperText="每卷生成多少章，章节编号自动计算"
+                      inputProps={{ min: 30, max: 80 }}
+                      helperText="每卷生成多少章（上限80章），章节编号自动计算"
                     />
                     <TextField
                       label="本卷章节数（最多）"
@@ -457,21 +457,18 @@ export default function ExpansionConfigDialog({
                       fullWidth
                       size="small"
                       value={volumeChaptersMax}
-                      onChange={(e) => onVolumeChaptersMaxChange(parseInt(e.target.value) || 80)}
-                      inputProps={{ min: 30, max: 150 }}
-                      helperText="每卷生成多少章，章节编号自动计算"
+                      onChange={(e) => onVolumeChaptersMaxChange(Math.min(parseInt(e.target.value) || 80, 80))}
+                      inputProps={{ min: 30, max: 80 }}
+                      helperText="每卷最多80章，增加章数请增加卷数"
                     />
                   </Box>
                 )}
               </Box>
             ) : (
-              // ===== 任务3.3：首次扩展UI（无框架） =====
-              <>
-                {/* ⚠️ 首次扩展提示 */}
-                <Alert severity="info" sx={{ mb: 2 }}>
-                  💡 首次扩展必须先生成框架,生成后可分卷扩展
-                </Alert>
-              </>
+              // ===== 无框架：首次扩展提示 =====
+              <Alert severity="info" sx={{ mb: 2 }}>
+                💡 首次扩展将生成史诗框架，生成后可分卷扩展
+              </Alert>
             )}
 
             {/* 题材适配提示 */}

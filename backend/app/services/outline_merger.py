@@ -30,21 +30,80 @@ def add_volume_anchors(framework: str, total_volumes: int) -> str:
     lines = framework.split('\n')
     result = []
     
-    # 匹配卷标题的模式
-    volume_pattern = re.compile(r'^(#+)\s*第([0-9]+)卷[：:]')
+    # 🔧 增强版：支持多种卷标题格式
+    # 格式1: ## 第1卷：标题  或  ## 第1卷:标题
+    # 格式2: ## 第1卷 标题  (无冒号)
+    # 格式3: 第1卷：标题  (无markdown标题)
+    # 格式4: 第一卷：标题  (中文数字)
+    volume_patterns = [
+        re.compile(r'^(#+)\s*第\s*([0-9]+)\s*卷\s*[：:]'),           # ## 第1卷：
+        re.compile(r'^(#+)\s*第\s*([0-9]+)\s*卷\s+'),                # ## 第1卷 标题
+        re.compile(r'^第\s*([0-9]+)\s*卷\s*[：:]'),                  # 第1卷：
+        re.compile(r'^第\s*([0-9]+)\s*卷\s+'),                       # 第1卷 标题
+        re.compile(r'^\*\*第\s*([0-9]+)\s*卷\s*[：:]'),             # **第1卷：
+        re.compile(r'^\|\s*第\s*([0-9]+)\s*卷'),                     # | 第1卷 (表格格式)
+    ]
+    
+    # 中文数字映射
+    cn_num_map = {
+        '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+        '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
+        '十一': 11, '十二': 12, '十三': 13, '十四': 14, '十五': 15,
+        '十六': 16, '十七': 17, '十八': 18, '十九': 19, '二十': 20
+    }
+    cn_volume_pattern = re.compile(r'^(#+)?\s*第([\u4e00-\u9fa5]+)卷\s*[：:]')
+    
+    added_volumes = set()  # 记录已添加锚点的卷
     
     for line in lines:
-        match = volume_pattern.match(line)
-        if match:
-            vol_num = int(match.group(2))
+        vol_num = None
+        matched = False
+        
+        # 尝试匹配阿拉伯数字格式
+        for pattern in volume_patterns:
+            match = pattern.match(line)
+            if match:
+                # 根据模式不同，数字在不同的组
+                groups = match.groups()
+                for g in groups:
+                    if g and g.isdigit():
+                        vol_num = int(g)
+                        matched = True
+                        break
+                if matched:
+                    break
+        
+        # 尝试匹配中文数字格式
+        if not matched:
+            cn_match = cn_volume_pattern.match(line)
+            if cn_match:
+                cn_num = cn_match.group(2)
+                if cn_num in cn_num_map:
+                    vol_num = cn_num_map[cn_num]
+                    matched = True
+        
+        if matched and vol_num and vol_num not in added_volumes:
             # 在卷标题前插入起始锚点
             result.append(f'<!-- VOLUME_{vol_num}_ANCHOR_START -->')
             result.append(line)
             result.append(f'<!-- VOLUME_{vol_num}_ANCHOR_END -->')
+            added_volumes.add(vol_num)
         else:
             result.append(line)
     
-    logger.info(f"✅ 已为 {total_volumes} 卷框架添加锚点标记")
+    # 🛡️ 如果没有匹配到任何卷，尝试回退方案：为每个卷手动添加锚点
+    if len(added_volumes) == 0 and total_volumes > 0:
+        logger.warning(f"⚠️ 未匹配到卷标题，使用回退方案：添加 {total_volumes} 个隐式锚点")
+        # 在内容开头添加隐式锚点（让系统能识别框架存在）
+        hidden_anchors = []
+        for i in range(1, total_volumes + 1):
+            hidden_anchors.append(f'<!-- VOLUME_{i}_ANCHOR_START --><!-- VOLUME_{i}_ANCHOR_END -->')
+        result.insert(0, '<!-- EPIC_FRAMEWORK_ANCHORS: ' + ' '.join([str(i) for i in range(1, total_volumes + 1)]) + ' -->')
+        result.insert(1, '\n'.join(hidden_anchors))
+        logger.info(f"✅ 回退方案：已添加 {total_volumes} 个隐式锚点")
+    else:
+        logger.info(f"✅ 已为 {len(added_volumes)}/{total_volumes} 卷框架添加锚点标记")
+    
     return '\n'.join(result)
 
 
@@ -56,11 +115,11 @@ def merge_framework_with_volumes(
     智能拼接框架与卷细纲
     
     Args:
-        framework: 史诗框架内容（包含锚点）
+        framework: 史诗框架内容（可能包含锚点，也可能不包含）
         volumes_detail: 已扩展的卷细纲 {1: "第1卷细纲", 3: "第3卷细纲"}
     
     Returns:
-        拼接后的完整大纲（已移除锚点标记和已扩展卷的概要）
+        拼接后的完整大纲
     """
     if not framework:
         return ""
@@ -69,11 +128,24 @@ def merge_framework_with_volumes(
         # 如果没有扩展的卷，返回框架（移除锚点）
         return _remove_anchor_marks(framework)
     
+    # 🔧 检测框架是否包含锚点
+    has_anchors = 'VOLUME_' in framework and 'ANCHOR_' in framework
+    
+    if has_anchors:
+        # 有锚点：使用原有的精确插入逻辑
+        return _merge_with_anchors(framework, volumes_detail)
+    else:
+        # 无锚点：直接在框架末尾追加细纲
+        return _merge_append_mode(framework, volumes_detail)
+
+
+def _merge_with_anchors(framework: str, volumes_detail: Dict[int, str]) -> str:
+    """有锚点时的精确插入模式"""
     lines = framework.split('\n')
     result = []
     
     i = 0
-    in_expanded_volume = False  # 标记是否在已扩展卷的概要区域内
+    in_expanded_volume = False
     current_volume_num = None
     
     while i < len(lines):
@@ -85,14 +157,13 @@ def merge_framework_with_volumes(
             current_volume_num = int(anchor_start_match.group(1))
             in_expanded_volume = current_volume_num in volumes_detail
             i += 1
-            continue  # 跳过锚点标记，不添加到结果
+            continue
         
         # 检测卷锚点结束标记
         anchor_end_match = re.match(r'<!-- VOLUME_(\d+)_ANCHOR_END -->', line)
         if anchor_end_match:
             vol_num = int(anchor_end_match.group(1))
             
-            # 如果该卷有细纲，插入可折叠区块
             if vol_num in volumes_detail:
                 result.append('')
                 result.append(f'<details open>')
@@ -106,30 +177,51 @@ def merge_framework_with_volumes(
             in_expanded_volume = False
             current_volume_num = None
             i += 1
-            continue  # 跳过锚点标记，不添加到结果
+            continue
         
-        # 如果在已扩展卷的概要区域内，跳过内容（直到遇到下一个锚点结束或下一卷开始）
         if in_expanded_volume:
-            # 检查是否已到达概要结束（下一卷开始或空行后的分隔符）
             next_volume_match = re.match(r'^(#+)\s*第([0-9]+)卷[：:]', line) if i + 1 < len(lines) else None
             if next_volume_match:
-                # 即将进入下一卷，当前行（卷标题）保留，但概要部分已跳过
                 in_expanded_volume = False
             else:
-                # 仍在概要区域，跳过
                 i += 1
                 continue
         
-        # 正常添加行（非锚点、非已扩展卷概要）
         result.append(line)
         i += 1
     
-    # 添加拼接统计信息
     result.append('')
     result.append('---')
     result.append(f'_✅ 已生成完整框架 | 已扩展卷：{sorted(volumes_detail.keys())} | 拼接时间：{datetime.now().strftime("%Y-%m-%d %H:%M")}_')
     
-    logger.info(f"✅ 框架拼接完成：{len(volumes_detail)} 个卷的细纲已插入")
+    logger.info(f"✅ 框架拼接完成（锚点模式）：{len(volumes_detail)} 个卷的细纲已插入")
+    return '\n'.join(result)
+
+
+def _merge_append_mode(framework: str, volumes_detail: Dict[int, str]) -> str:
+    """无锚点时的追加模式：直接在框架末尾追加所有细纲"""
+    result = [_remove_anchor_marks(framework)]
+    
+    result.append('')
+    result.append('---')
+    result.append('')
+    result.append('## 📖 已扩展的卷细纲')
+    result.append('')
+    
+    # 按卷号排序追加
+    for vol_num in sorted(volumes_detail.keys()):
+        result.append(f'<details open>')
+        result.append(f'<summary>📖 第{vol_num}卷详细章节（点击收起/展开）</summary>')
+        result.append('')
+        result.append(volumes_detail[vol_num])
+        result.append('')
+        result.append('</details>')
+        result.append('')
+    
+    result.append('---')
+    result.append(f'_✅ 已生成完整框架 | 已扩展卷：{sorted(volumes_detail.keys())} | 拼接时间：{datetime.now().strftime("%Y-%m-%d %H:%M")}_')
+    
+    logger.info(f"✅ 框架拼接完成（追加模式）：{len(volumes_detail)} 个卷的细纲已追加")
     return '\n'.join(result)
 
 
@@ -156,14 +248,45 @@ def detect_framework_state(outline_content: str) -> Dict[str, any]:
             "frameworkGeneratedAt": None
         }
     
+    # 🔧 增强检测：支持多种锚点标记格式
     # 检测是否有锚点标记（说明有框架）
     has_anchors = 'VOLUME_' in outline_content and 'ANCHOR_' in outline_content
     
+    # 检测回退方案的隐式锚点
+    has_epic_marker = 'EPIC_FRAMEWORK_ANCHORS:' in outline_content
+    
     # 提取总卷数
-    volume_pattern = re.compile(r'<!-- VOLUME_(\d+)_ANCHOR_START -->')
     volume_numbers = set()
+    
+    # 方式1：从标准锚点提取
+    volume_pattern = re.compile(r'<!-- VOLUME_(\d+)_ANCHOR_START -->')
     for match in volume_pattern.finditer(outline_content):
         volume_numbers.add(int(match.group(1)))
+    
+    # 方式2：从回退锚点标记提取
+    if not volume_numbers and has_epic_marker:
+        epic_marker_pattern = re.compile(r'<!-- EPIC_FRAMEWORK_ANCHORS: ([\d\s]+) -->')
+        epic_match = epic_marker_pattern.search(outline_content)
+        if epic_match:
+            nums = epic_match.group(1).strip().split()
+            for n in nums:
+                if n.isdigit():
+                    volume_numbers.add(int(n))
+    
+    # 方式3：如果仍然没有，尝试从卷标题直接提取
+    if not volume_numbers:
+        title_patterns = [
+            re.compile(r'^(#+)?\s*第\s*(\d+)\s*卷', re.MULTILINE),
+            re.compile(r'第\s*(\d+)\s*卷', re.MULTILINE),
+        ]
+        for pattern in title_patterns:
+            for match in pattern.finditer(outline_content):
+                groups = match.groups()
+                for g in groups:
+                    if g and g.isdigit():
+                        volume_numbers.add(int(g))
+            if volume_numbers:
+                break
     
     total_volumes = max(volume_numbers) if volume_numbers else 0
     
@@ -178,8 +301,15 @@ def detect_framework_state(outline_content: str) -> Dict[str, any]:
     time_match = time_pattern.search(outline_content)
     generated_at = time_match.group(1) if time_match else None
     
+    # 🛡️ 框架存在判断逻辑
+    has_framework = (
+        has_anchors or 
+        has_epic_marker or 
+        total_volumes >= 5  # 如果检测到足够多的卷，认为是框架
+    )
+    
     return {
-        "hasFramework": has_anchors or total_volumes > 0,
+        "hasFramework": has_framework,
         "totalVolumes": total_volumes,
         "expandedVolumes": sorted(expanded_volumes),
         "frameworkGeneratedAt": generated_at
@@ -249,11 +379,11 @@ def validate_outline_integrity(
                 "volume": vol_num,
                 "message": f"第{vol_num}卷只有{chapters_count}章，建议至少10章"
             })
-        elif chapters_count > 200:
+        elif chapters_count > 80:
             issues.append({
                 "type": "volume_too_long",
                 "volume": vol_num,
-                "message": f"第{vol_num}卷有{chapters_count}章，可能过长"
+                "message": f"第{vol_num}卷有{chapters_count}章，超过每卷80章上限，建议拆分为多卷"
             })
     
     result = {
@@ -319,9 +449,514 @@ def extract_volume_detail(outline_content: str, volume_number: int) -> Optional[
     return None
 
 
+# =====================================
+# 🌟 新架构：卷级独立存储结构
+# =====================================
+
+def create_volume_entry(
+    volume_num: int,
+    title: str,
+    summary: str,
+    chapters_range: List[int] = None,
+    detail: str = None,
+    expanded_at: str = None
+) -> Dict[str, any]:
+    """
+    创建单卷存储条目
+    
+    Args:
+        volume_num: 卷号
+        title: 卷标题
+        summary: 框架阶段的卷概要
+        chapters_range: 章节范围 [start, end]
+        detail: 细纲内容（展开后填入）
+        expanded_at: 展开时间
+    
+    Returns:
+        卷条目字典
+    """
+    return {
+        "type": "detail" if detail else "framework",  # framework=未展开, detail=已展开
+        "title": title,
+        "summary": summary,                             # 保留原始概要（可回退）
+        "detail": detail,                               # 细纲内容
+        "chapters_range": chapters_range or [0, 0],
+        "expanded_at": expanded_at
+    }
+
+
+def parse_epic_volumes_json(json_str: str) -> Dict[str, any]:
+    """
+    解析新结构的 epic_volumes_detail JSON
+    
+    🌟 增强版结构格式：
+    {
+        "total_volumes": 5,
+        "framework_generated_at": "2025-12-13T17:00:00",
+        "framework_header": "一、整体叙事节奏...\n二、境界体系...",  // 🌟 头部通用信息
+        "framework_footer": "四、关键伏笔...\n五、核心人物...",  // 🌟 尾部通用信息
+        "volumes": {
+            "1": {
+                "type": "framework",
+                "title": "初入南麓",
+                "summary": "核心：林澈进入南麓艺术学院...",
+                "detail": null,
+                "chapters_range": [1, 80],
+                "expanded_at": null
+            }
+        }
+    }
+    
+    Returns:
+        解析后的字典
+    """
+    if not json_str:
+        return {
+            "total_volumes": 0,
+            "framework_generated_at": None,
+            "framework_header": "",
+            "framework_footer": "",
+            "volumes": {}
+        }
+    
+    try:
+        data = json.loads(json_str)
+        
+        # 🔄 兼容旧结构：如果没有 "volumes" 键，说明是旧格式
+        if "volumes" not in data:
+            return _migrate_old_format(data)
+        
+        # 确保新字段存在
+        if "framework_header" not in data:
+            data["framework_header"] = ""
+        if "framework_footer" not in data:
+            data["framework_footer"] = ""
+        
+        return data
+    except json.JSONDecodeError as e:
+        logger.error(f"❌ 解析 epic_volumes_detail JSON 失败: {e}")
+        return {
+            "total_volumes": 0,
+            "framework_generated_at": None,
+            "framework_header": "",
+            "framework_footer": "",
+            "volumes": {}
+        }
+
+
+def _migrate_old_format(old_data: Dict) -> Dict[str, any]:
+    """
+    将旧格式迁移到新结构
+    
+    旧格式：
+    {
+        "1": {"chapters_start": 1, "chapters_end": 80, "outline": "...", "generated_at": "..."},
+        "2": {"chapters_start": 81, "chapters_end": 152, "outline": "..."}
+    }
+    """
+    logger.info("🔄 检测到旧格式，正在迁移到新结构...")
+    
+    volumes = {}
+    max_vol = 0
+    
+    for vol_key, vol_data in old_data.items():
+        try:
+            vol_num = int(vol_key)
+            max_vol = max(max_vol, vol_num)
+            
+            volumes[vol_key] = {
+                "type": "detail",  # 旧格式都是已展开的细纲
+                "title": f"第{vol_num}卷",
+                "summary": "",  # 旧格式没有保留概要
+                "detail": vol_data.get("outline", ""),
+                "chapters_range": [
+                    vol_data.get("chapters_start", 0),
+                    vol_data.get("chapters_end", 0)
+                ],
+                "expanded_at": vol_data.get("generated_at")
+            }
+        except (ValueError, TypeError):
+            continue
+    
+    return {
+        "total_volumes": max_vol,
+        "framework_generated_at": None,
+        "volumes": volumes
+    }
+
+
+def build_epic_volumes_json(data: Dict[str, any]) -> str:
+    """
+    构建新结构的 epic_volumes_detail JSON字符串
+    
+    Args:
+        data: {
+            "total_volumes": 10,
+            "framework_generated_at": "...",
+            "volumes": {...}
+        }
+    
+    Returns:
+        JSON字符串
+    """
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def parse_framework_to_volumes(framework_content: str, total_volumes: int) -> Dict[str, any]:
+    """
+    🌟 解析AI生成的框架内容，提取头部、尾部和每卷内容
+    
+    框架结构分三部分：
+    1. 头部(header): 整体叙事节奏、境界体系等通用信息
+    2. 中间(volumes): 每卷的具体描述
+    3. 尾部(footer): 伏笔布局、人物周期等通用信息
+    
+    Args:
+        framework_content: AI生成的框架内容
+        total_volumes: 总卷数
+    
+    Returns:
+        新结构的字典，包含 framework_header, framework_footer, volumes
+    """
+    volumes = {}
+    framework_header = ""
+    framework_footer = ""
+    lines = framework_content.split('\n')
+    
+    # 📝 调试日志
+    logger.info(f"🔍 解析框架内容，长度: {len(framework_content)} 字符")
+    
+    # 🌟 卷标题匹配模式
+    volume_title_patterns = [
+        # 【第1卷】《标题》 或 【第1卷】标题
+        re.compile(r'^\s*【第\s*(\d+)\s*卷】\s*[《》]?([^《》\n]*)', re.MULTILINE),
+        # ## 第1卷：标题 或 ## 第1卷:标题
+        re.compile(r'^(#+)\s*第\s*(\d+)\s*卷\s*[：:](.*)', re.MULTILINE),
+        # ## 第1卷 标题
+        re.compile(r'^(#+)\s*第\s*(\d+)\s*卷\s+(.+)', re.MULTILINE),
+        # **第1卷：标题**
+        re.compile(r'^\*\*第\s*(\d+)\s*卷\s*[：:](.*)\*\*', re.MULTILINE),
+        # 第1卷：标题 或 第1卷:标题
+        re.compile(r'^第\s*(\d+)\s*卷\s*[：:](.*)', re.MULTILINE),
+        # 第1卷 标题
+        re.compile(r'^第\s*(\d+)\s*卷\s+(.+)', re.MULTILINE),
+    ]
+    
+    # 🌟 尾部标题匹配模式（伏笔、人物等通用信息）
+    footer_title_patterns = [
+        re.compile(r'^#+\s*[四五六七八九十][\u3001\.\uff0c,]?\s*(关键伏笔|伏笔布局|核心人物|人物生命周期|人物关系|\w+周期)', re.MULTILINE),
+        re.compile(r'^[四五六七八九十][\u3001\.\uff0c,]?\s*(关键伏笔|伏笔布局|核心人物|人物生命周期)', re.MULTILINE),
+    ]
+    
+    # 中文数字映射
+    cn_num_map = {
+        '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+        '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
+        '十一': 11, '十二': 12, '十三': 13, '十四': 14, '十五': 15,
+        '十六': 16, '十七': 17, '十八': 18, '十九': 19, '二十': 20
+    }
+    cn_volume_patterns = [
+        re.compile(r'^\s*【第([\u4e00-\u9fa5]+)卷】\s*[《》]?([^《》\n]*)', re.MULTILINE),
+        re.compile(r'^(#+)?\s*第([\u4e00-\u9fa5]+)卷\s*[：:](.*)', re.MULTILINE),
+        re.compile(r'^(#+)?\s*第([\u4e00-\u9fa5]+)卷\s+(.+)', re.MULTILINE),
+    ]
+    
+    # 找到所有卷的位置
+    volume_positions = []  # [(vol_num, title, line_index), ...]
+    footer_start_idx = None  # 尾部开始位置
+    
+    for i, line in enumerate(lines):
+        vol_num = None
+        title = ""
+        matched = False
+        
+        # 检查是否是尾部标题
+        for pattern in footer_title_patterns:
+            if pattern.match(line):
+                if footer_start_idx is None:
+                    footer_start_idx = i
+                    logger.info(f"📌 检测到尾部开始位置: 第{i}行")
+                break
+        
+        # 如果已经进入尾部，不再匹配卷标题
+        if footer_start_idx is not None:
+            continue
+        
+        # 尝试匹配阿拉伯数字格式
+        for pattern in volume_title_patterns:
+            match = pattern.match(line)
+            if match:
+                groups = match.groups()
+                for g in groups:
+                    if g and g.strip().isdigit():
+                        vol_num = int(g.strip())
+                    elif g and not g.startswith('#') and len(g.strip()) > 0:
+                        clean_title = g.strip().strip('《》|').strip()
+                        if clean_title and not clean_title.isdigit():
+                            title = clean_title
+                
+                if vol_num:
+                    volume_positions.append((vol_num, title, i))
+                    matched = True
+                break
+        
+        # 尝试匹配中文数字格式
+        if not matched:
+            for pattern in cn_volume_patterns:
+                match = pattern.match(line)
+                if match:
+                    groups = match.groups()
+                    for g in groups:
+                        if g and g in cn_num_map:
+                            vol_num = cn_num_map[g]
+                        elif g and not g.startswith('#') and len(g.strip()) > 0:
+                            title = g.strip().strip('《》').strip()
+                    
+                    if vol_num:
+                        volume_positions.append((vol_num, title, i))
+                    break
+    
+    logger.info(f"📊 匹配到 {len(volume_positions)} 个卷标题")
+    
+    # 🌟 提取头部内容（第一个卷之前的内容）
+    if volume_positions:
+        first_vol_line = volume_positions[0][2]
+        if first_vol_line > 0:
+            header_lines = lines[:first_vol_line]
+            framework_header = '\n'.join(header_lines).strip()
+            logger.info(f"📦 提取头部内容: {len(framework_header)} 字符")
+    
+    # 🌟 提取尾部内容（最后一个卷之后的通用信息）
+    if footer_start_idx is not None:
+        footer_lines = lines[footer_start_idx:]
+        framework_footer = '\n'.join(footer_lines).strip()
+        logger.info(f"📦 提取尾部内容: {len(framework_footer)} 字符")
+    
+    # 🌟 提取每卷的概要内容
+    for idx, (vol_num, title, line_idx) in enumerate(volume_positions):
+        # 确定该卷内容的结束位置
+        if idx + 1 < len(volume_positions):
+            end_idx = volume_positions[idx + 1][2]
+        elif footer_start_idx is not None:
+            end_idx = footer_start_idx
+        else:
+            end_idx = len(lines)
+        
+        # 提取概要内容（卷标题下一行到下一卷之前）
+        summary_lines = lines[line_idx + 1:end_idx]
+        summary = '\n'.join(summary_lines).strip()
+        
+        # 清理概要（去掉尾部的分隔符等）
+        summary = re.sub(r'\n---\s*$', '', summary)
+        summary = re.sub(r'^---\s*\n', '', summary)
+        
+        volumes[str(vol_num)] = create_volume_entry(
+            volume_num=vol_num,
+            title=title or f"第{vol_num}卷",
+            summary=summary if summary else f"（第{vol_num}卷概要待填充）",
+            chapters_range=[0, 0],
+            detail=None,
+            expanded_at=None
+        )
+    
+    # 🌟 回退机制：如果解析失败，保留原始框架
+    if not volumes and total_volumes > 0:
+        logger.warning(f"⚠️ 未能解析卷结构，使用回退机制")
+        
+        # 将完整内容放入头部
+        framework_header = framework_content.strip()
+        
+        # 创建空卷条目
+        for i in range(1, total_volumes + 1):
+            volumes[str(i)] = create_volume_entry(
+                volume_num=i,
+                title=f"第{i}卷",
+                summary=f"（第{i}卷待填充）",
+                chapters_range=[0, 0],
+                detail=None,
+                expanded_at=None
+            )
+        
+        logger.info("📦 回退机制：将完整框架内容放入header")
+    
+    result = {
+        "total_volumes": total_volumes or len(volumes),
+        "framework_generated_at": datetime.now().isoformat(),
+        "framework_header": framework_header,
+        "framework_footer": framework_footer,
+        "volumes": volumes
+    }
+    
+    logger.info(f"✅ 框架解析完成：共 {len(volumes)} 卷，头部 {len(framework_header)} 字符，尾部 {len(framework_footer)} 字符")
+    return result
+
+
+def update_volume_detail(
+    volumes_data: Dict[str, any],
+    volume_num: int,
+    detail_content: str,
+    chapters_range: List[int]
+) -> Dict[str, any]:
+    """
+    🌟 更新指定卷的细纲内容
+    
+    Args:
+        volumes_data: 当前的volumes数据
+        volume_num: 要更新的卷号
+        detail_content: 细纲内容
+        chapters_range: 章节范围 [start, end]
+    
+    Returns:
+        更新后的volumes数据
+    """
+    vol_key = str(volume_num)
+    
+    if vol_key in volumes_data["volumes"]:
+        # 更新现有卷
+        volumes_data["volumes"][vol_key]["type"] = "detail"
+        volumes_data["volumes"][vol_key]["detail"] = detail_content
+        volumes_data["volumes"][vol_key]["chapters_range"] = chapters_range
+        volumes_data["volumes"][vol_key]["expanded_at"] = datetime.now().isoformat()
+        logger.info(f"✅ 已更新第{volume_num}卷细纲（第{chapters_range[0]}-{chapters_range[1]}章）")
+    else:
+        # 新增卷（异常情况）
+        volumes_data["volumes"][vol_key] = create_volume_entry(
+            volume_num=volume_num,
+            title=f"第{volume_num}卷",
+            summary="",
+            chapters_range=chapters_range,
+            detail=detail_content,
+            expanded_at=datetime.now().isoformat()
+        )
+        logger.warning(f"⚠️ 第{volume_num}卷不存在，已新增")
+    
+    return volumes_data
+
+
+def get_volume_state(volumes_data: Dict[str, any]) -> Dict[str, any]:
+    """
+    🌟 获取卷状态概览
+    
+    Returns:
+        {
+            "hasFramework": bool,
+            "totalVolumes": int,
+            "expandedVolumes": [1, 3, 5],
+            "frameworkGeneratedAt": str or None
+        }
+    """
+    if not volumes_data or not volumes_data.get("volumes"):
+        return {
+            "hasFramework": False,
+            "totalVolumes": 0,
+            "expandedVolumes": [],
+            "frameworkGeneratedAt": None
+        }
+    
+    expanded = []
+    for vol_key, vol_data in volumes_data["volumes"].items():
+        if vol_data.get("type") == "detail":
+            try:
+                expanded.append(int(vol_key))
+            except ValueError:
+                pass
+    
+    return {
+        "hasFramework": len(volumes_data["volumes"]) > 0,
+        "totalVolumes": volumes_data.get("total_volumes", len(volumes_data["volumes"])),
+        "expandedVolumes": sorted(expanded),
+        "frameworkGeneratedAt": volumes_data.get("framework_generated_at")
+    }
+
+
+def merge_volumes_to_outline(volumes_data: Dict[str, any]) -> str:
+    """
+    🌟 新架构拼接函数：拼接头部 + 各卷内容 + 尾部
+    
+    拼接顺序：
+    1. framework_header（整体叙事节奏、境界体系等）
+    2. 各卷内容（未展开显示summary，已展开显示detail）
+    3. framework_footer（伏笔布局、人物周期等）
+    
+    Args:
+        volumes_data: 完整的volumes数据
+    
+    Returns:
+        拼接后的大纲内容
+    """
+    if not volumes_data or not volumes_data.get("volumes"):
+        return ""
+    
+    result = []
+    expanded_list = []
+    
+    # 🌟 1. 添加头部内容（整体叙事节奏、境界体系等）
+    framework_header = volumes_data.get("framework_header", "")
+    if framework_header:
+        result.append(framework_header)
+        result.append('')
+        result.append('---')
+        result.append('')
+    
+    # 🌟 2. 添加分卷内容标题
+    result.append('## 📚 分卷概要')
+    result.append('')
+    
+    # 按卷号排序
+    sorted_volumes = sorted(
+        volumes_data["volumes"].items(),
+        key=lambda x: int(x[0])
+    )
+    
+    for vol_key, vol_data in sorted_volumes:
+        vol_num = int(vol_key)
+        title = vol_data.get("title", f"第{vol_num}卷")
+        vol_type = vol_data.get("type", "framework")
+        
+        # 添加卷标题
+        result.append(f"### 【第{vol_num}卷】《{title}》")
+        result.append("")
+        
+        if vol_type == "detail" and vol_data.get("detail"):
+            # 已展开：显示细纲（可折叠）
+            chapters_range = vol_data.get("chapters_range", [0, 0])
+            result.append(f'<details open>')
+            result.append(f'<summary>📖 第{vol_num}卷详细章节（第{chapters_range[0]}-{chapters_range[1]}章，点击收起/展开）</summary>')
+            result.append('')
+            result.append(vol_data["detail"])
+            result.append('')
+            result.append('</details>')
+            expanded_list.append(vol_num)
+        else:
+            # 未展开：显示概要
+            summary = vol_data.get("summary", "（无概要）")
+            result.append(summary)
+        
+        result.append('')
+    
+    # 🌟 3. 添加尾部内容（伏笔布局、人物周期等）
+    framework_footer = volumes_data.get("framework_footer", "")
+    if framework_footer:
+        result.append('---')
+        result.append('')
+        result.append(framework_footer)
+        result.append('')
+    
+    # 添加拼接统计
+    result.append('---')
+    result.append(f'_✅ 共{volumes_data.get("total_volumes", len(sorted_volumes))}卷 | 已展开：{expanded_list if expanded_list else "无"} | 拼接时间：{datetime.now().strftime("%Y-%m-%d %H:%M")}_')
+    
+    logger.info(f"✅ 大纲拼接完成：{len(expanded_list)}/{len(sorted_volumes)} 卷已展开")
+    return '\n'.join(result)
+
+
+# =====================================
+# 📦 旧版兼容函数（保留以支持过渡）
+# =====================================
+
 def parse_volumes_detail_json(json_str: str) -> Dict[int, Dict[str, any]]:
     """
-    解析存储在数据库中的 epic_volumes_detail JSON字符串
+    [旧版兼容] 解析存储在数据库中的 epic_volumes_detail JSON字符串
     
     Args:
         json_str: JSON字符串，格式如：
@@ -338,7 +973,26 @@ def parse_volumes_detail_json(json_str: str) -> Dict[int, Dict[str, any]]:
     
     try:
         raw_dict = json.loads(json_str)
-        # 将字符串键转换为整数键
+        
+        # 检测新结构
+        if "volumes" in raw_dict:
+            # 新结构：转换为旧格式返回
+            result = {}
+            for vol_key, vol_data in raw_dict["volumes"].items():
+                try:
+                    vol_num = int(vol_key)
+                    if vol_data.get("type") == "detail" and vol_data.get("detail"):
+                        result[vol_num] = {
+                            "chapters_start": vol_data.get("chapters_range", [0, 0])[0],
+                            "chapters_end": vol_data.get("chapters_range", [0, 0])[1],
+                            "outline": vol_data.get("detail", ""),
+                            "generated_at": vol_data.get("expanded_at")
+                        }
+                except (ValueError, TypeError, IndexError):
+                    pass
+            return result
+        
+        # 旧结构：将字符串键转换为整数键
         return {int(k): v for k, v in raw_dict.items()}
     except json.JSONDecodeError as e:
         logger.error(f"❌ 解析 epic_volumes_detail JSON 失败: {e}")
@@ -347,7 +1001,7 @@ def parse_volumes_detail_json(json_str: str) -> Dict[int, Dict[str, any]]:
 
 def build_volumes_detail_json(volumes_detail: Dict[int, Dict[str, any]]) -> str:
     """
-    构建用于存储到数据库的 epic_volumes_detail JSON字符串
+    [旧版兼容] 构建用于存储到数据库的 epic_volumes_detail JSON字符串
     
     Args:
         volumes_detail: {

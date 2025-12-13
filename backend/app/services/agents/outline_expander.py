@@ -10,6 +10,10 @@ from .memory_manager import NovelMemoryManager
 from .agent_coordinator import GENRE_PROMPT_MODULES, DEFAULT_GENRE_MODULE, REALM_SPAN_WARNING_THRESHOLD, REALM_SPAN_RECOMMEND_SUBDIVISION
 # 🎆 引入分层摘要器
 from .layered_summarizer import LayeredSummarizer
+# 🆕 三层体系模块
+from ..volume_connector import VolumeConnector
+from ..foreshadowing_tracker import ForeshadowingTracker
+from ..consistency_validator import ConsistencyValidator, get_consistency_validator, get_chapter_renumberer
 
 
 class OutlineExpander:
@@ -1655,9 +1659,9 @@ Please analyze：
 🔥 根据题材和总章数智能规划：
 
 【境界密度规则】
-- 若总章数 < 500：大境界3-5个，每大境界100-150章
-- 若500-1500章：大境界5-8个，每大境界100-250章
-- 若 > 1500章：大境界8-12个，每大境界150-300章
+- 若总章数 < 500：大境界3-5个，每大境界80-150章
+- 若500-1500章：大境界5-8个，每大境界100-200章
+- 若 > 1500章：大境界8-12个，每大境界120-250章
 
 【题材适配】
 - 修仙类：炼气→1-9层→筑基→金丹→元婴→化神→合体→渡劫（可下分初/中/后期）
@@ -1668,19 +1672,21 @@ Please analyze：
 【具体要求】
 1. 首先分析世界观是什么题材（修仙/玄幻/武侠/都市/其他）
 2. 根据总章数{total_chapters_range[0]}-{total_chapters_range[1]}决定大境界数量
-3. 每个大境界应分配80-250章，避免500+章才进阶一次
+3. 每个大境界应分配60-200章，避免500+章才进阶一次
 4. 修仙类需考虑小境界（如炼气1-9层），提供更频繁的成就感
 5. 列出具体的境界进阶路径，格式如：
-   - 第1-3卷：炼气1层→9层（约150-200章）
-   - 第4-6卷：筑基初期→后期（约180-220章）
-   - 第7-10卷：金丹初期→后期（约250-300章）
+   - 第1-3卷：炼气1层→9层（约120-180章）
+   - 第4-6卷：筑基初期→后期（约150-200章）
+   - 第7-10卷：金丹初期→后期（约200-280章）
    - ...
 
 ⚠️ 关键：不要固定“有5卷一个大境界”，而是根据题材和总章数灵活调整！
 
 ## 三、{total_volumes}卷概要
+❗️❗️ 每卷最多80章！如果内容多就增加卷数，不要让单卷超过80章 ❗️❗️
+
 每卷格式：
-【第X卷】卷名（预计Y章）
+【第X卷】卷名（预计30-80章，不得超过80章）
 - 核心：本卷主题/目标
 - 境界：主角境界范围（如：炼气3层→7层）
 - 主要敌人：本卷Boss
@@ -1703,8 +1709,33 @@ Please analyze：
 记住：这是框架，不是详细大纲，保持高层视角！"""
 
         print("【第一步】生成史诗框架...")
-        framework_content = self.creative_director.process(framework_prompt, {})
-        print("✅ 史诗框架生成完成\n")
+        
+        # 🛡️ 重试机制：处理网络波动
+        import time
+        max_retries = 3
+        retry_delays = [2, 4, 8]  # 指数退避
+        
+        for attempt in range(max_retries):
+            try:
+                framework_content = self.creative_director.process(framework_prompt, {})
+                print("✅ 史诗框架生成完成\n")
+                break  # 成功则跳出重试循环
+            except Exception as e:
+                error_str = str(e).lower()
+                # 检查是否是网络连接错误
+                is_connection_error = any(keyword in error_str for keyword in [
+                    'connection', 'ssl', 'timeout', 'eof', 'network', 'reset'
+                ])
+                
+                if is_connection_error and attempt < max_retries - 1:
+                    delay = retry_delays[attempt]
+                    print(f"⚠️ 网络连接失败，{delay}秒后重试（第{attempt + 1}/{max_retries}次）...")
+                    time.sleep(delay)
+                    continue
+                else:
+                    # 非网络错误或最后一次重试失败
+                    print(f"❌ 史诗框架生成失败: {e}")
+                    raise
         
         print(f"{'='*70}")
         print(f"【史诗框架生成】完成！")
@@ -1720,10 +1751,16 @@ Please analyze：
     def expand_volume_detail(self, framework_content: str, target_volume_index: int,
                             world_setting: str, characters: str,
                             start_chapter_num: int,
-                            chapters_count_range: tuple[int, int]) -> Dict[str, Any]:
-        """基于史诗框架详细扩展单卷
+                            chapters_count_range: tuple[int, int],
+                            prev_volume_summary: Optional[Dict[str, Any]] = None,
+                            pending_foreshadowings: Optional[List[Dict[str, Any]]] = None,
+                            core_storyline: Optional[str] = None,
+                            framework_header: Optional[str] = None,
+                            framework_footer: Optional[str] = None) -> Dict[str, Any]:
+        """基于史诗框架详细扩展单卷（三层体系增强版）
         
-        根据已有的史诗框架，将指定的卷扩展为详细的章节大纲
+        根据已有的史诗框架，将指定的卷扩展为详细的章节大纲。
+        采用「顶层框架锚定+卷级接口约束+章节锚点承接」三层体系。
         
         Args:
             framework_content: 史诗框架内容
@@ -1732,6 +1769,19 @@ Please analyze：
             characters: 人物设定
             start_chapter_num: 起始章节号
             chapters_count_range: 本卷章节数量范围(min, max)，AI在此范围内自由发挥
+            prev_volume_summary: 上一卷摘要信息（可选），包含：
+                - core_plot_completed: 本卷完成的核心剧情
+                - character_status_update: 人物状态更新
+                - new_foreshadowings: 新埋下的伏笔
+                - ending_hook: 卷尾钩子
+                - next_volume_target: 下卷开局目标
+            pending_foreshadowings: 待处理伏笔清单（可选），每项包含：
+                - content: 伏笔内容
+                - planted_volume: 埋设卷
+                - action: 本卷动作（plant/pave/reveal）
+            core_storyline: 全书核心主线（可选）
+            framework_header: 🌟 框架头部（整体叙事节奏、境界体系等全局约束）
+            framework_footer: 🌟 框架尾部（伏笔布局、人物生命周期等全局约束）
             
         Returns:
             单卷详细字典，包含:
@@ -1756,8 +1806,102 @@ Please analyze：
             chapter_title="章节标题"
         ) if chapter_template else ""
         
-        detail_prompt = f"""基于已有的史诗框架，详细扩展第{target_volume_index}卷。
+        # ==================== 🆕 三层体系增强 ====================
+        
+        # 1️⃣ 构建「顶层框架锚点」- 全书核心主线
+        core_storyline_section = ""
+        if core_storyline:
+            core_storyline_section = f"""\n【🎯 全书核心主线（不可偏离）】\n{core_storyline}\n"""
+        else:
+            # 尝试从史诗框架中提取核心主线
+            core_storyline_section = self._extract_core_storyline_from_framework(framework_content)
+        
+        # 2️⃣ 构建「卷级接口约束」- 上一卷衔接信息
+        prev_volume_section = ""
+        if prev_volume_summary and target_volume_index > 1:
+            new_foreshadowings_text = self._format_foreshadowings_list(
+                prev_volume_summary.get('new_foreshadowings', [])
+            )
+            prev_volume_section = f"""\n【📚 前置锚点（必须严格遵循）】
 
+1. **上一卷结尾内容**：
+   - 核心剧情完成：{prev_volume_summary.get('core_plot_completed', '待填充')}
+   - 卷尾钩子：{prev_volume_summary.get('ending_hook', '待填充')}
+   - 下卷开局目标：{prev_volume_summary.get('next_volume_target', '待填充')}
+
+2. **人物状态更新**：
+   {prev_volume_summary.get('character_status_update', '待填充')}
+
+3. **已埋下的伏笔**（需在本卷或后续卷回收）：
+   {new_foreshadowings_text}
+
+⚠️ **本卷第{start_chapter_num}章必须从上述「下卷开局目标」开始**，确保卷间无缝衔接！\n"""
+        
+        # 3️⃣ 构建「待处理伏笔约束」
+        foreshadowing_section = ""
+        if pending_foreshadowings:
+            plant_items = [f for f in pending_foreshadowings if f.get('action') == 'plant']
+            pave_items = [f for f in pending_foreshadowings if f.get('action') == 'pave']
+            reveal_items = [f for f in pending_foreshadowings if f.get('action') == 'reveal']
+            
+            foreshadowing_section = "\n【🎭 本卷伏笔任务】\n"
+            if plant_items:
+                foreshadowing_section += "\n**本卷需埋设的伏笔**：\n"
+                for item in plant_items:
+                    foreshadowing_section += f"- {item.get('content', '未知')}（揭秘于第{item.get('reveal_volume', '?')}卷）\n"
+            if pave_items:
+                foreshadowing_section += "\n**本卷需铺垫的伏笔**（已埋设，需强化暗示）：\n"
+                for item in pave_items:
+                    foreshadowing_section += f"- {item.get('content', '未知')}（埋设于第{item.get('planted_volume', '?')}卷）\n"
+            if reveal_items:
+                foreshadowing_section += "\n**本卷需揭秘的伏笔**（完成回收）：\n"
+                for item in reveal_items:
+                    foreshadowing_section += f"- {item.get('content', '未知')}（埋设于第{item.get('planted_volume', '?')}卷）\n"
+        
+        # 4️⃣ 构建「卷尾过渡段约束」- 明确最后3章任务
+        end_chapter_num = start_chapter_num + chapters_count_range[1] - 1
+        volume_transition_section = f"""\n【📍 卷尾过渡段设计（极重要）】
+
+本卷最后3章（约第{end_chapter_num-2}~{end_chapter_num}章）必须完成以下任务：
+
+1. **倒数第3章**（第{end_chapter_num-2}章左右）：完成本卷核心任务/Boss战/关键突破
+2. **倒数第2章**（第{end_chapter_num-1}章左右）：抛出下一卷的核心悬念/新线索
+3. **最后一章**（第{end_chapter_num}章左右）：明确下一卷的开局场景/目标，设置强力钩子\n"""
+        
+        # 5⃣️ 构建伏笔检查提示
+        foreshadowing_checklist = self._generate_foreshadowing_checklist_hint(
+            pending_foreshadowings, target_volume_index
+        ) if pending_foreshadowings else "✅ 第X章：埋设主角身份伏笔（符合史诗框架）\n✅ 第Y章：提及相关线索（为后续卷铺垫）"
+        
+        # 6️⃣ 🌟 构建「全局约束模块」- 显式强调头部和尾部信息
+        global_constraints_section = ""
+        if framework_header or framework_footer:
+            global_constraints_section = "\n【🌟 全局约束（必须严格遵循）】\n"
+            
+            if framework_header:
+                # 提取头部关键信息（限制长度避免提示词过长）
+                header_excerpt = framework_header[:2000] if len(framework_header) > 2000 else framework_header
+                global_constraints_section += f"""\n**1⃣ 整体叙事节奏与境界体系**（本卷必须符合）：
+{header_excerpt}
+"""
+            
+            if framework_footer:
+                # 提取尾部关键信息（限制长度避免提示词过长）
+                footer_excerpt = framework_footer[:2000] if len(framework_footer) > 2000 else framework_footer
+                global_constraints_section += f"""\n**2️⃣ 伏笔布局与人物周期**（本卷需配合）：
+{footer_excerpt}
+
+⚠️ 本卷的情节设计必须：
+- 符合上述叙事节奏和境界进阶设定
+- 配合全局伏笔布局（埋设/铺垫/揭秘）
+- 保持人物生命周期的连续性
+"""
+        
+        detail_prompt = f"""基于已有的史诗框架，详细扩展第{target_volume_index}卷。
+{global_constraints_section}
+{core_storyline_section}
+{prev_volume_section}
+{foreshadowing_section}
 【史诗框架】
 {framework_content}
 
@@ -1769,6 +1913,7 @@ Please analyze：
 
 【扩展要求】
 本卷章节编号从第{start_chapter_num}章开始，生成{chapters_count_range[0]}-{chapters_count_range[1]}章左右的详细大纲。
+{volume_transition_section}
 
 🔥 【章节细纲模板】每章必须严格按以下格式：
 {template_example if template_example else '''第{chapter_num}章：《{chapter_title}》
@@ -1858,8 +2003,12 @@ Please输出完整的、重新整合后的网文大纲：
 ⚠️ 【极重要】必须逐章完整输出，每章包含所有字段，不可跳过任何章节！
 
 ## 三、伏笔埋设检查
-✅ 第X章：埋设主角身份伏笔（符合史诗框架）
-✅ 第Y章：提及"天道"异常（为第Z卷铺垫）"""
+{foreshadowing_checklist}
+
+## 四、卷尾衔接检查
+✅ 本卷核心任务完成情况：（简述）
+✅ 下卷开局场景：（明确描述）
+✅ 卷尾钩子：（强力悬念）"""
 
         print("【第一步】详细扩展第{target_volume_index}卷...")
         
@@ -1915,15 +2064,161 @@ Please输出完整的、重新整合后的网文大纲：
         print(f"【单卷详细扩展】完成！")
         print(f"{'='*70}\n")
         
+        # ✅ 三层体系整合：章节编号自动修正
+        print(f"\n🔧 【章节编号修正器】检测第{target_volume_index}卷章节编号...")
+        renumberer = get_chapter_renumberer()
+        renumber_result = renumberer.detect_and_fix(
+            content=volume_content,
+            expected_start=start_chapter_num,
+            expected_count_range=chapters_count_range
+        )
+        
+        # 使用修正后的内容
+        volume_content = renumber_result["fixed_content"]
+        if renumber_result["was_fixed"]:
+            print(f"✅ {renumber_result['details']}")
+        else:
+            print(f"✅ {renumber_result['details']}")
+        
         # 估算实际章节数(取范围中值)
         estimated_chapters = (chapters_count_range[0] + chapters_count_range[1]) // 2
+        
+        # 如果有修正结果，使用实际章节数
+        if renumber_result["fixed_range"][1] > 0:
+            actual_start = renumber_result["fixed_range"][0]
+            actual_end = renumber_result["fixed_range"][1]
+            estimated_chapters = actual_end - actual_start + 1
+        
+        # ✅ 三层体系整合：一致性校验（严格模式）
+        print(f"\n🔍 【一致性校验器】开始校验第{target_volume_index}卷...")
+        validator = get_consistency_validator(strict_mode=True)
+        validation_result = validator.validate(
+            volume_content=volume_content,
+            volume_index=target_volume_index,
+            core_storyline=core_storyline or "",
+            prev_volume_summary=prev_volume_summary,
+            pending_foreshadowings=pending_foreshadowings,
+            framework_content=framework_content
+        )
+        
+        # 输出校验结果
+        print(validation_result.get_summary())
+        
+        # 校验结果加入返回值
+        validation_dict = validation_result.to_dict()
         
         return {
             "expanded_outline": volume_content,
             "volume_index": target_volume_index,
             "chapter_count": estimated_chapters,
-            "current_chapter_count": estimated_chapters
+            "current_chapter_count": estimated_chapters,
+            # ✅ 新增：实际章节范围（修正后）
+            "chapters_start": renumber_result["fixed_range"][0] if renumber_result["fixed_range"][0] > 0 else start_chapter_num,
+            "chapters_end": renumber_result["fixed_range"][1] if renumber_result["fixed_range"][1] > 0 else start_chapter_num + estimated_chapters - 1,
+            "renumber_result": renumber_result,
+            # ✅ 新增：校验结果
+            "validation": validation_dict,
+            "validation_passed": validation_result.passed,
+            "validation_issues": validation_dict.get('issues', []),
+            "validation_suggestions": validation_dict.get('suggestions', [])
         }
+    
+    # ==================== 三层体系辅助方法 ====================
+    
+    def _extract_core_storyline_from_framework(self, framework_content: str) -> str:
+        """从史诗框架中提取核心主线
+        
+        Args:
+            framework_content: 史诗框架内容
+            
+        Returns:
+            核心主线部分的提示词
+        """
+        import re
+        
+        if not framework_content:
+            return ""
+        
+        # 尝试匹配整体叙事节奏部分
+        patterns = [
+            r'##\s*一[、.]?\s*整体叙事节奏[\s\S]*?(?=##\s*[二2]|$)',
+            r'【核心主线】[\s\S]*?(?=【|##|$)',
+            r'核心主线[:：][\s\S]*?(?=\n\n|##|$)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, framework_content)
+            if match:
+                storyline = match.group(0).strip()
+                # 限制长度
+                if len(storyline) > 500:
+                    storyline = storyline[:500] + "..."
+                return f"\n【🎯 全书核心主线（从史诗框架提取）】\n{storyline}\n"
+        
+        # 如果找不到特定部分，提取框架开头部分作为概览
+        overview = framework_content[:800] if len(framework_content) > 800 else framework_content
+        return f"\n【🎯 全书框架概览】\n{overview}\n"
+    
+    def _format_foreshadowings_list(self, foreshadowings: List[Any]) -> str:
+        """格式化伏笔列表为文本
+        
+        Args:
+            foreshadowings: 伏笔列表，支持字典列表或字符串列表
+            
+        Returns:
+            格式化后的文本
+        """
+        if not foreshadowings:
+            return "无"
+        
+        result = []
+        for item in foreshadowings:
+            # 🌟 支持两种格式：字典和字符串
+            if isinstance(item, dict):
+                # 字典格式：{"content": "...", "planted_volume": X, "reveal_volume": Y}
+                content = item.get('content', '未知伏笔')
+                planted_vol = item.get('planted_volume', '?')
+                reveal_vol = item.get('reveal_volume', '?')
+                result.append(f"- {content}（埋设于第{planted_vol}卷，揭秘于第{reveal_vol}卷）")
+            elif isinstance(item, str):
+                # 字符串格式：直接是伏笔内容
+                result.append(f"- {item}")
+            else:
+                result.append(f"- {str(item)}")
+        
+        return "\n   ".join(result) if result else "无"
+    
+    def _generate_foreshadowing_checklist_hint(self, 
+                                               pending_foreshadowings: Optional[List[Dict[str, Any]]], 
+                                               target_volume_index: int) -> str:
+        """生成伏笔检查清单提示
+        
+        Args:
+            pending_foreshadowings: 待处理伏笔列表
+            target_volume_index: 当前卷索引
+            
+        Returns:
+            伏笔检查清单文本
+        """
+        if not pending_foreshadowings:
+            return "✅ 第X章：埋设主角身份伏笔（符合史诗框架）\n✅ 第Y章：提及相关线索（为后续卷铺垫）"
+        
+        checklist_lines = []
+        for item in pending_foreshadowings:
+            action = item.get('action', 'plant')
+            content = item.get('content', '未知伏笔')
+            
+            if action == 'plant':
+                reveal_vol = item.get('reveal_volume', '?')
+                checklist_lines.append(f"✅ 第??章：埋设『{content[:20]}...』伏笔（将于第{reveal_vol}卷揭秘）")
+            elif action == 'pave':
+                planted_vol = item.get('planted_volume', '?')
+                checklist_lines.append(f"✅ 第??章：铺垫『{content[:20]}...』（第{planted_vol}卷埋设，本卷强化暗示）")
+            elif action == 'reveal':
+                planted_vol = item.get('planted_volume', '?')
+                checklist_lines.append(f"✅ 第??章：揭秘『{content[:20]}...』（第{planted_vol}卷埋设，本卷完成回收）")
+        
+        return "\n".join(checklist_lines) if checklist_lines else "✅ 无特定伏笔任务"
 
 
 def create_outline_expander(knowledge_base: Optional[NovelKnowledgeBase] = None,

@@ -4622,43 +4622,51 @@ async def get_epic_framework_state(
         plot_outline = result[2] or ""
         epic_volumes_detail_json = result[3] or ""
         
-        # 🔑 关键修复：使用 epic_framework 来检测状态，而不是 plot_outline
-        # 如果 epic_framework 为空，退耋检查 plot_outline
-        content_to_check = epic_framework if epic_framework else plot_outline
+        # 🌟 新架构：使用 parse_epic_volumes_json 和 get_volume_state
+        from app.services.outline_merger import parse_epic_volumes_json, get_volume_state
         
-        if not content_to_check:
-            logger.info(f"   ✅ 未找到框架内容，返回空状态")
+        # 解析卷数据
+        volumes_data = parse_epic_volumes_json(epic_volumes_detail_json)
+        
+        # 如果新架构有数据，直接使用
+        if volumes_data.get("volumes"):
+            state = get_volume_state(volumes_data)
+            logger.info(f"   ✅ 新架构状态: has_framework={state['hasFramework']}, total_volumes={state['totalVolumes']}, expanded_volumes={state['expandedVolumes']}")
             return {
-                "has_framework": False,
-                "total_volumes": 0,
-                "expanded_volumes": [],
-                "framework_generated_at": None
+                "has_framework": state["hasFramework"],
+                "total_volumes": state["totalVolumes"],
+                "expanded_volumes": state["expandedVolumes"],
+                "framework_generated_at": state["frameworkGeneratedAt"] or framework_generated_at
             }
         
-        # 使用状态检测函数
-        state = detect_framework_state(content_to_check)
+        # 🔄 回退：老结构或空数据，使用原有逻辑
+        import re
+        has_framework = bool(framework_generated_at) or bool(epic_framework and len(epic_framework) > 100)
         
-        # 🆕 关键修复：从 epic_volumes_detail JSON 中直接读取已扩展的卷列表
+        total_volumes = 0
+        yaml_match = re.search(r'总卷数:\s*(\d+)', plot_outline)
+        if yaml_match:
+            total_volumes = int(yaml_match.group(1))
+        else:
+            vol_matches = re.findall(r'第\s*(\d+)\s*卷', plot_outline or epic_framework or '')
+            if vol_matches:
+                total_volumes = max(int(v) for v in vol_matches)
+        
+        # 老格式兼容：从旧JSON读取已扩展卷
         from app.services.outline_merger import parse_volumes_detail_json
         expanded_volumes = []
         if epic_volumes_detail_json:
             try:
                 volumes_dict = parse_volumes_detail_json(epic_volumes_detail_json)
                 expanded_volumes = sorted(volumes_dict.keys())
-                logger.info(f"   📝 从 JSON 读取已扩展卷：{expanded_volumes}")
             except Exception as e:
                 logger.warning(f"   ⚠️  解析 epic_volumes_detail 失败: {e}")
-                # 退耋使用正则匹配
-                expanded_volumes = state["expandedVolumes"]
-        else:
-            # 如果没有 JSON，使用正则匹配（兼容旧数据）
-            expanded_volumes = state["expandedVolumes"]
         
-        logger.info(f"   ✅ 框架状态: has_framework={state['hasFramework']}, total_volumes={state['totalVolumes']}, expanded_volumes={expanded_volumes}")
+        logger.info(f"   ✅ 框架状态(回退): has_framework={has_framework}, total_volumes={total_volumes}, expanded_volumes={expanded_volumes}")
         
         return {
-            "has_framework": state["hasFramework"],
-            "total_volumes": state["totalVolumes"],
+            "has_framework": has_framework,
+            "total_volumes": total_volumes,
             "expanded_volumes": expanded_volumes,
             "framework_generated_at": framework_generated_at
         }
@@ -4903,31 +4911,79 @@ async def execute_expand_outline_task(
             if not original_result or not original_result[0]:
                 raise ValueError("⚠️  未找到史诗框架！请先生成史诗框架后再扩展单卷")
             
-            # 解析已有卷细纲
+            # 🌟 优先使用数据库中的框架内容（而不是请求参数）
+            stored_epic_framework = original_result[0]
+            effective_framework_content = stored_epic_framework
+            logger.info(f"   📚 已从数据库加载史诗框架，长度: {len(effective_framework_content)} 字符")
+            
+            # 解析已有卷细纲（支持新旧结构）
             stored_volumes_json = original_result[1] or '{}'
-            volumes_detail_dict = parse_volumes_detail_json(stored_volumes_json)
-            logger.info(f"   📚 已加载 {len(volumes_detail_dict)} 个已有卷细纲")
+            epic_volumes_detail_json_from_db = stored_volumes_json  # 保存原始JSON供后续使用
+            
+            # 🌟 新架构：使用 parse_epic_volumes_json
+            from app.services.outline_merger import parse_epic_volumes_json
+            volumes_data = parse_epic_volumes_json(stored_volumes_json)
+            volumes_dict = volumes_data.get("volumes", {})
+            
+            # 🌟 提取框架头部和尾部信息（用于全局约束）
+            framework_header = volumes_data.get("framework_header", "")
+            framework_footer = volumes_data.get("framework_footer", "")
+            
+            logger.info(f"   📚 已加载 {len(volumes_dict)} 个已有卷条目")
+            if framework_header:
+                logger.info(f"   🌟 框架头部: {len(framework_header)} 字符（叙事节奏/境界体系）")
+            if framework_footer:
+                logger.info(f"   🌟 框架尾部: {len(framework_footer)} 字符（伏笔布局/人物周期）")
             
             # ✅ 检测是否覆盖：如果目标卷已存在，记录警告
-            if target_volume_index in volumes_detail_dict:
-                existing_vol = volumes_detail_dict[target_volume_index]
+            vol_key = str(target_volume_index)
+            if vol_key in volumes_dict and volumes_dict[vol_key].get("type") == "detail":
+                existing_vol = volumes_dict[vol_key]
+                chapters_range = existing_vol.get("chapters_range", [0, 0])
                 logger.warning(
-                    f"   ⚠️  第{target_volume_index}卷已存在（第{existing_vol.get('chapters_start', '?')}-{existing_vol.get('chapters_end', '?')}章），将被覆盖！"
+                    f"   ⚠️  第{target_volume_index}卷已存在（第{chapters_range[0]}-{chapters_range[1]}章），将被覆盖！"
                 )
             
             # 📊 计算章节编号：基于前面所有卷的累计章节数
             accumulated_chapters = 0
             for vol_num in range(1, target_volume_index):
-                if vol_num in volumes_detail_dict:
-                    vol_data = volumes_detail_dict[vol_num]
-                    vol_chapters = vol_data.get('chapters_end', 0) - vol_data.get('chapters_start', 0) + 1
-                    accumulated_chapters += vol_chapters
-                    logger.info(f"   📖 第{vol_num}卷: 第{vol_data.get('chapters_start')}-{vol_data.get('chapters_end')}章（{vol_chapters}章）")
+                vol_key = str(vol_num)
+                if vol_key in volumes_dict:
+                    vol_data = volumes_dict[vol_key]
+                    if vol_data.get("type") == "detail":
+                        chapters_range = vol_data.get("chapters_range", [0, 0])
+                        vol_chapters = chapters_range[1] - chapters_range[0] + 1
+                        accumulated_chapters += vol_chapters
+                        logger.info(f"   📖 第{vol_num}卷: 第{chapters_range[0]}-{chapters_range[1]}章（{vol_chapters}章）")
             
             # ✅ 计算实际章节编号范围：从累计章节数+1开始
             start_chapter = accumulated_chapters + 1
             
             logger.info(f"   🎯 计算结果：第{target_volume_index}卷将从第{start_chapter}章开始，生成{volume_chapters_min}-{volume_chapters_max}章（AI自由发挥）")
+            
+            # 🌟 新架构：提取上一卷摘要信息（用于卷间衔接）
+            prev_volume_summary = None
+            if target_volume_index > 1:
+                prev_vol_key = str(target_volume_index - 1)
+                if prev_vol_key in volumes_dict:
+                    prev_vol_data = volumes_dict[prev_vol_key]
+                    if prev_vol_data.get("type") == "detail" and prev_vol_data.get("detail"):
+                        logger.info(f"   📚 正在提取第{target_volume_index - 1}卷摘要用于衔接...")
+                        try:
+                            from app.services.volume_connector import VolumeConnector
+                            connector = VolumeConnector(llm=expander.llm)
+                            prev_volume_summary = connector.extract_volume_summary(
+                                prev_vol_data["detail"],
+                                target_volume_index - 1
+                            )
+                            logger.info(f"   ✅ 已提取第{target_volume_index - 1}卷摘要：{prev_volume_summary.get('extraction_method', 'unknown')}方式")
+                        except Exception as e:
+                            logger.warning(f"   ⚠️  提取上一卷摘要失败: {e}，将不使用衔接信息")
+                            prev_volume_summary = None
+                    else:
+                        logger.info(f"   ℹ️  第{target_volume_index - 1}卷尚未展开细纲，跳过衔接提取")
+                else:
+                    logger.info(f"   ℹ️  未找到第{target_volume_index - 1}卷数据，跳过衔接提取")
             
             await ws_manager.send_task_progress(
                 project_id=project_id,
@@ -4938,12 +4994,15 @@ async def execute_expand_outline_task(
             
             result = await asyncio.to_thread(
                 expander.expand_volume_detail,
-                framework_content=framework_content,
+                framework_content=effective_framework_content,  # 🌟 修复：使用数据库中的框架
                 target_volume_index=target_volume_index,
                 world_setting=combined_world_setting,
                 characters=characters,
                 start_chapter_num=start_chapter,  # ✅ 起始章节号
                 chapters_count_range=(volume_chapters_min, volume_chapters_max),  # ✅ 章节数量范围（让AI自由发挥）
+                prev_volume_summary=prev_volume_summary,  # 🌟 上一卷摘要用于衔接
+                framework_header=framework_header,  # 🌟 新增：框架头部（叙事节奏/境界体系）
+                framework_footer=framework_footer,  # 🌟 新增：框架尾部（伏笔布局/人物周期）
             )
             
             logger.info("   ✅ 单卷详细扩展完成")
@@ -4999,32 +5058,40 @@ async def execute_expand_outline_task(
             message="💾 正在保存扩展结果..."
         )
         
-        # 🆕 导入拼接模块
+        # 🆕 导入拼接模块（新架构）
         from app.services.outline_merger import (
-            add_volume_anchors,
-            merge_framework_with_volumes,
+            parse_framework_to_volumes,
+            parse_epic_volumes_json,
+            build_epic_volumes_json,
+            update_volume_detail,
+            merge_volumes_to_outline,
+            # 旧版兼容
             parse_volumes_detail_json,
             build_volumes_detail_json
         )
         
-        # 🌟 处理史诗框架：添加特殊标记
+        # 🌟 处理史诗框架：使用新的卷级存储结构
         outline_content = result["expanded_outline"]
         epic_framework = None  # 纯框架内容
-        epic_volumes_detail_json = None  # 已扩展卷细纲（JSON格式）
+        epic_volumes_detail_json = None  # 卷级数据（JSON格式）
         
         if expansion_mode == "epic_framework":
             # ==================== 史诗框架模式 ====================
-            # 🔑 添加锤点标记到框架，保存到 epic_framework 字段
-            from app.services.outline_merger import add_volume_anchors, _remove_anchor_marks
-            
-            framework_with_anchors = add_volume_anchors(
+            # 🌟 新架构：解析框架内容，为每个卷创建独立存储条目
+            volumes_data = parse_framework_to_volumes(
                 result["expanded_outline"],
                 total_volumes
             )
-            epic_framework = framework_with_anchors  # 带锤点，用于拼接
+            logger.info(f"🌟 新架构：已解析框架为 {len(volumes_data['volumes'])} 个卷条目")
             
-            # 📝 移除锤点后添加 YAML 头部标记到展示大纲
-            framework_without_anchors = _remove_anchor_marks(framework_with_anchors)
+            # 保存原始框架内容（不再需要锚点）
+            epic_framework = result["expanded_outline"]
+            epic_volumes_detail_json = build_epic_volumes_json(volumes_data)
+            
+            # 📝 生成展示大纲（使用新的拼接函数）
+            outline_content = merge_volumes_to_outline(volumes_data)
+            
+            # 添加YAML头部标记
             outline_content = f"""---
 类型: 史诗框架
 总卷数: {total_volumes}
@@ -5032,16 +5099,15 @@ async def execute_expand_outline_task(
 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 ---
 
-{framework_without_anchors}"""
-            logger.info(f"   🌟 史诗框架已添加锤点（epic_framework）并移除锤点（plot_outline）")
+{outline_content}"""
+            logger.info(f"   🌟 史诗框架已保存：{total_volumes}卷，各卷状态=framework")
 
         elif expansion_mode == "volume_detail":
-            # 📖 单卷详细模式：合并到原有框架
-            logger.info(f"   🔄 单卷详细模式：将第{target_volume_index}卷合并到原有框架")
+            # 📖 单卷详细模式：使用新架构更新指定卷
+            logger.info(f"   🔄 单卷详细模式：将第{target_volume_index}卷展开为细纲")
             
-            # ✅ 复用前面读取的数据，避免重复查询
+            # ✅ 复用前面读取的数据
             stored_framework = original_result[0]  # 已在上面读取
-            # volumes_detail_dict 已在上面解析
             
             # 🔍 解析AI实际生成的章节数
             import re
@@ -5057,36 +5123,33 @@ async def execute_expand_outline_task(
                 actual_end = start_chapter + volume_chapters_min - 1
                 logger.warning(f"   ⚠️  未能解析实际章节数，使用预估值：第{actual_start}-{actual_end}章")
             
-            # 更新/添加当前卷的细纲
-            volumes_detail_dict[target_volume_index] = {
-                "chapters_start": actual_start,  # ✅ 使用AI实际生成的起始章节号
-                "chapters_end": actual_end,      # ✅ 使用AI实际生成的结束章节号
-                "outline": result["expanded_outline"],
-                "generated_at": datetime.now().isoformat()
-            }
-            logger.info(f"   ✅ 已更新第{target_volume_index}卷细纲（第{actual_start}-{actual_end}章）")
+            # 🌟 新架构：读取并更新卷数据
+            volumes_data = parse_epic_volumes_json(epic_volumes_detail_json_from_db)
             
-            # 🌟 智能拼接：框架 + 所有已扩展卷
-            # 提取纯细纲内容（不含章节范围元数据）
-            volumes_outline_only = {
-                vol_num: vol_data["outline"] 
-                for vol_num, vol_data in volumes_detail_dict.items()
-            }
+            # 如果volumes_data为空（老数据或首次扩展），重新解析框架
+            if not volumes_data.get("volumes"):
+                logger.info("🔄 volumes_data为空，从框架重新解析...")
+                stored_framework = original_result[0] if original_result else ""
+                total_vol_match = re.search(r'总卷数:\s*(\d+)', stored_framework)
+                detected_total = int(total_vol_match.group(1)) if total_vol_match else 10
+                volumes_data = parse_framework_to_volumes(stored_framework, detected_total)
             
-            merged_outline = merge_framework_with_volumes(
-                stored_framework,
-                volumes_outline_only
+            # 更新指定卷的细纲
+            volumes_data = update_volume_detail(
+                volumes_data,
+                target_volume_index,
+                result["expanded_outline"],
+                [actual_start, actual_end]
             )
             
-            # 🔧 移除拼接结果中的锤点标记（用于用户展示）
-            from app.services.outline_merger import _remove_anchor_marks
-            outline_content = _remove_anchor_marks(merged_outline)
+            # 生成拼接后的大纲
+            outline_content = merge_volumes_to_outline(volumes_data)
             
-            # 保存纯框架和更新后的JSON
-            epic_framework = stored_framework  # 框架保持不变
-            epic_volumes_detail_json = build_volumes_detail_json(volumes_detail_dict)
+            # 保存
+            epic_framework = original_result[0] if original_result else ""
+            epic_volumes_detail_json = build_epic_volumes_json(volumes_data)
             
-            logger.info(f"   🎯 智能拼接完成：框架 + {len(volumes_detail_dict)} 个卷细纲")
+            logger.info(f"   🎯 新架构拼接完成：第{target_volume_index}卷已展开")
         
         # 🆕 根据模式选择更新策略
         if expansion_mode in ["epic_framework", "volume_detail"]:
@@ -5109,25 +5172,27 @@ async def execute_expand_outline_task(
                 "updated_at": datetime.now().isoformat(),
                 "project_id": project_id
             })
-            logger.info("💾 史诗框架模式：已分离保存框架和卷细纲")
+            logger.info("💾 史诗框架模式：已保存框架和卷数据（新架构）")
                         
             # 🔍 关键诊断：立即验证保存是否成功
             verify_query = text("""
-                SELECT epic_framework, epic_framework_generated_at 
+                SELECT epic_framework, epic_volumes_detail, epic_framework_generated_at 
                 FROM project_settings 
                 WHERE project_id = :project_id
             """)
             verify_result = db.execute(verify_query, {"project_id": project_id}).fetchone()
             if verify_result:
                 saved_framework = verify_result[0]
-                saved_generated_at = verify_result[1]
-                has_anchors = 'VOLUME_' in (saved_framework or '') and 'ANCHOR_' in (saved_framework or '')
-                logger.info(f"💾 保存验证: epic_framework长度={len(saved_framework or '')}, 有锚点={has_anchors}, generated_at={saved_generated_at}")
+                saved_volumes = verify_result[1]
+                saved_generated_at = verify_result[2]
+                # 新架构验证：检查volumes数据
+                has_volumes = saved_volumes and '"volumes"' in saved_volumes
+                logger.info(f"💾 保存验证: epic_framework长度={len(saved_framework or '')}, 有volumes数据={has_volumes}, generated_at={saved_generated_at}")
                             
                 if not saved_framework:
                     logger.error("⚠️  保存失败！epic_framework为空")
-                elif not has_anchors:
-                    logger.error(f"⚠️  保存失败！epic_framework缺少锚点标记，前200字符: {saved_framework[:200]}")
+                if not has_volumes:
+                    logger.warning(f"⚠️  保存注意！epic_volumes_detail不是新结构")
             else:
                 logger.error("⚠️  保存失败！未找到project_settings记录")
         else:

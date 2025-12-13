@@ -683,7 +683,7 @@ export default function KnowledgeBasePage() {
 • 题材：${projectGenre || '通用'}
 • 篇幅：超长篇（${maxChapters}章）
 • 推荐卷数：${estimatedVolumes}卷
-• 每卷章节：80-100章
+• 每卷章节：60-80章（上限80章）
 • 扩展方式：手动选择扩展（分阶段创作）`
       console.log(`✅ 推荐模式：史诗框架（超长篇） - 手动选卷`)
     } else if (lengthType === 'long' || maxChapters >= 100) {
@@ -698,19 +698,19 @@ export default function KnowledgeBasePage() {
 
       // 🎯 根据题材推荐卷数和每卷章数
       if (projectGenre === '修仙' || projectGenre === '玄幻') {
-        const estimatedVolumes = Math.max(5, Math.min(8, Math.ceil(maxChapters / 90)))
+        const estimatedVolumes = Math.max(5, Math.min(12, Math.ceil(maxChapters / 70)))  // 🌟 改为每印70章计算卷数
         setRecommendedVolumes(estimatedVolumes)
-        setRecommendedChaptersPerVolumeMin(80)
-        setRecommendedChaptersPerVolumeMax(100)
+        setRecommendedChaptersPerVolumeMin(60)
+        setRecommendedChaptersPerVolumeMax(80)  // 🌟 上限80章
         reason = `推荐「史诗框架」：
 
 • 题材：${projectGenre}（境界体系）
 • 篇幅：长篇（${maxChapters}章）
 • 推荐卷数：${estimatedVolumes}卷
-• 每卷章节：80-100章
+• 每卷章节：60-80章（上限80章）
 • 扩展方式：${maxChapters <= 500 ? '自动扩展全部卷' : '手动选择扩展'}
 • 适用：修炼体系分阶段推进`
-        console.log(`  💫 ${projectGenre}：${estimatedVolumes}卷 × 80-100章`)
+        console.log(`  💫 ${projectGenre}：${estimatedVolumes}卷 × 60-80章`)
       } else if (projectGenre === '都市') {
         const estimatedVolumes = Math.max(5, Math.min(10, Math.ceil(maxChapters / 40)))
         setRecommendedVolumes(estimatedVolumes)
@@ -1364,8 +1364,8 @@ export default function KnowledgeBasePage() {
             setExpandingOutline(false)
             return
           }
-          if (!volumeChaptersMin || !volumeChaptersMax || volumeChaptersMin < 30 || volumeChaptersMax > 150 || volumeChaptersMin > volumeChaptersMax) {
-            showSnackbar('请输入有效的本卷章节范围 (30-150)', 'error')
+          if (!volumeChaptersMin || !volumeChaptersMax || volumeChaptersMin < 30 || volumeChaptersMax > 80 || volumeChaptersMin > volumeChaptersMax) {
+            showSnackbar('请输入有效的本卷章节范围 (30-80)，增加章数请增加卷数', 'error')
             setExpandingOutline(false)
             return
           }
@@ -1383,8 +1383,8 @@ export default function KnowledgeBasePage() {
           setExpandingOutline(false)
           return
         }
-        if (!volumeChaptersMin || !volumeChaptersMax || volumeChaptersMin < 30 || volumeChaptersMax > 150 || volumeChaptersMin > volumeChaptersMax) {
-          showSnackbar('请输入有效的本卷章节范围 (30-150)', 'error')
+        if (!volumeChaptersMin || !volumeChaptersMax || volumeChaptersMin < 30 || volumeChaptersMax > 80 || volumeChaptersMin > volumeChaptersMax) {
+          showSnackbar('请输入有效的本卷章节范围 (30-80)，增加章数请增加卷数', 'error')
           setExpandingOutline(false)
           return
         }

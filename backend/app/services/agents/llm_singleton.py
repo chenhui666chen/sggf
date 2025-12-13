@@ -5,12 +5,33 @@ LLM实例单例管理器 - 避免重复创建，提升性能
 - 减少初始化耗时约8秒
 - 避免重复网络连接
 - 内存占用更优
+
+网络配置：
+- 禁用代理，确保直连API
 """
 from typing import Dict, Optional
 from langchain_openai import ChatOpenAI
 from .config import Config
 import os
 import logging
+import httpx
+
+# 🛡️ 全局禁用代理配置 - 确保直连API
+os.environ["HTTP_PROXY"] = ""
+os.environ["HTTPS_PROXY"] = ""
+os.environ["http_proxy"] = ""
+os.environ["https_proxy"] = ""
+os.environ["ALL_PROXY"] = ""
+os.environ["all_proxy"] = ""
+
+# 创建禁用代理的httpx客户端
+def _create_no_proxy_client() -> httpx.Client:
+    """创建禁用代理的httpx客户端"""
+    return httpx.Client(
+        proxy=None,  # 明确禁用代理
+        timeout=httpx.Timeout(120.0, connect=30.0),  # 超时配置
+        follow_redirects=True
+    )
 
 
 class LLMSingletonManager:
@@ -71,7 +92,8 @@ class LLMSingletonManager:
             model=selected_model,
             temperature=Config.TEMPERATURE,
             api_key=api_key,
-            base_url=api_base
+            base_url=api_base,
+            http_client=_create_no_proxy_client()  # 🛡️ 禁用代理，确保直连
         )
         
         # 缓存实例
