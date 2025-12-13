@@ -256,10 +256,35 @@ class LocationHierarchyExtractor:
                     "category": category,
                 })
         
-        # 第二步：更新path（基于parent关系构建完整路径）
+        # 第二步：基于parent关系构建完整路径（修复重复问题）
+        # 构建完整的祖先链，而不是简单的 category + parent
+        def get_ancestor_chain(loc_name: str, visited: set = None) -> List[str]:
+            """递归获取祖先链"""
+            if visited is None:
+                visited = set()
+            if loc_name in visited:  # 防止循环引用
+                return []
+            visited.add(loc_name)
+            
+            # 查找这个地点的信息
+            loc_info = None
+            for loc in locations:
+                if loc['name'] == loc_name:
+                    loc_info = loc
+                    break
+            
+            if not loc_info:
+                return [loc_name]
+            
+            parent_name = loc_info.get('parent')
+            if parent_name and parent_name in location_id_map:
+                ancestors = get_ancestor_chain(parent_name, visited)
+                return ancestors + [loc_name]
+            else:
+                return [loc_name]
+        
         for loc in locations:
             name = loc['name']
-            parent_name = loc.get('parent')
             
             if name not in location_id_map:
                 continue
@@ -268,27 +293,9 @@ class LocationHierarchyExtractor:
             if not item:
                 continue
             
-            # 构建完整路径
-            path_parts = [map_collection.name]
-            
-            # 根据category添加分类层
-            category_map = {
-                "大陆版图": "大陆版图",
-                "区域地形": "区域地形",
-                "城镇聚落": "城镇聚落",
-                "秘境禁地": "秘境禁地",
-                "交通网络": "交通网络",
-            }
-            
-            category_name = category_map.get(loc['category'], "其他地点")
-            path_parts.append(category_name)
-            
-            # 添加父节点路径
-            if parent_name and parent_name in location_id_map:
-                path_parts.append(parent_name)
-            
-            # 添加当前节点
-            path_parts.append(name)
+            # 构建完整路径：体系名 + 祖先链
+            ancestor_chain = get_ancestor_chain(name)
+            path_parts = [map_collection.name] + ancestor_chain
             
             # 更新path
             item.path = "/" + "/".join(path_parts)

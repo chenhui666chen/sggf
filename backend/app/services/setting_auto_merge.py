@@ -166,15 +166,45 @@ class SettingAutoMergeService:
             "details": [{"item_name": str, "confidence": float, "action": str}]
         }
         """
-        # 类型映射到目标集合类别
+        # 类型映射到目标集合类别（完善版本）
         typ_to_category_map = {
+            # 人物
+            "人物": "character_system",
+            "角色": "character_system",
+            # 境界
+            "境界": "cultivation_realm_system",
+            "修为": "cultivation_realm_system",
+            "等级": "cultivation_realm_system",
+            # 功法
             "功法": "technique_system",
+            "武学": "technique_system",
+            "技能": "technique_system",
+            # 丹药
             "丹药": "pill_system",
+            "灵丹": "pill_system",
+            # 阵法
             "阵法": "formation_system",
+            "结界": "formation_system",
+            # 武器法宝
+            "法宝": "weapon_system",
+            "武器": "weapon_system",
+            "灵器": "weapon_system",
+            # 资源
+            "资源": "resource_system",
+            "灵草": "resource_system",
+            "材料": "resource_system",
+            # 地点
             "秘境": "map_system",
             "遗迹": "map_system",
             "城市": "map_system",
             "城镇": "map_system",
+            "地点": "map_system",
+            # 势力
+            "势力": "organization_force_system",
+            "组织": "organization_force_system",
+            "门派": "organization_force_system",
+            # 符箓
+            "符箓": "talisman_system",
         }
         
         # 获取所有候选项

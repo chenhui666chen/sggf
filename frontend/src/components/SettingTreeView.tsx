@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Box, CircularProgress, List, ListItemButton, ListItemText, Typography, IconButton, Stack } from '@mui/material'
+import { Box, CircularProgress, List, ListItemButton, ListItemText, Typography, IconButton, Stack, Tooltip } from '@mui/material'
 import FolderIcon from '@mui/icons-material/Folder'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import DescriptionIcon from '@mui/icons-material/Description'
 import RefreshIcon from '@mui/icons-material/Refresh'
+import AddIcon from '@mui/icons-material/Add'
+import DeleteIcon from '@mui/icons-material/Delete'
 import { apiClient } from '@/services/api'
 
 interface SettingItem {
@@ -36,14 +38,19 @@ interface SettingTreeViewProps {
   collectionId: number
   selectedItemId?: number
   onSelectItem?: (item: SettingItem | null) => void
-  onSelectCategory?: (categoryPath: string) => void
+  onSelectCategory?: (categoryPath: string, categoryItem: SettingItem | null) => void  // 🆕 添加 categoryItem 参数
   onSelectInstance?: (item: SettingItem) => void
+  onAddItem?: (parentPath: string, parentItem: SettingItem | null) => void
+  onDeleteItem?: (item: SettingItem) => void
   title?: string
   showHeader?: boolean
+  showActions?: boolean  // 是否显示添加/删除按钮
+  refreshTrigger?: number  // 🆕 刷新触发器，变化时重新加载
 }
 
 export default function SettingTreeView(props: SettingTreeViewProps) {
-  const { collectionId, selectedItemId, onSelectItem, onSelectCategory, onSelectInstance, title, showHeader = true } = props
+  const { collectionId, selectedItemId, onSelectItem, onSelectCategory, onSelectInstance, onAddItem, onDeleteItem, title, showHeader = true, showActions = true, refreshTrigger = 0 } = props
+  const [hoveredPath, setHoveredPath] = useState<string | null>(null)
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -90,7 +97,7 @@ export default function SettingTreeView(props: SettingTreeViewProps) {
   useEffect(() => {
     loadTree()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collectionId])
+  }, [collectionId, refreshTrigger])  // 🆕 添加 refreshTrigger 依赖
 
   const handleToggle = (path: string) => {
     setExpanded((prev) => {
@@ -108,7 +115,7 @@ export default function SettingTreeView(props: SettingTreeViewProps) {
     if (!node.is_leaf) {
       handleToggle(node.path)
       if (onSelectCategory) {
-        onSelectCategory(node.path)
+        onSelectCategory(node.path, node.item)  // 🆕 传递分类节点的 item
       }
       return
     }
@@ -122,11 +129,32 @@ export default function SettingTreeView(props: SettingTreeViewProps) {
     }
   }
 
+  const handleAdd = (e: React.MouseEvent, node: TreeNode) => {
+    e.stopPropagation()
+    if (onAddItem) {
+      onAddItem(node.path, node.item)
+    }
+  }
+
+  const handleDelete = (e: React.MouseEvent, node: TreeNode) => {
+    e.stopPropagation()
+    if (onDeleteItem) {
+      // 传递节点信息，包含路径和is_leaf标志
+      onDeleteItem({
+        ...node.item,
+        path: node.path,
+        is_leaf: node.is_leaf,
+        name: node.name,
+      } as any)
+    }
+  }
+
   const renderNodes = (nodes: TreeNode[], level: number = 0) => {
     return nodes.map((node) => {
       const hasChildren = node.children && node.children.length > 0
       const isExpanded = expanded.has(node.path)
       const isSelected = !!(node.item && selectedItemId != null && node.item.id === selectedItemId)
+      const isHovered = hoveredPath === node.path
 
       const IconComponent = node.is_leaf ? DescriptionIcon : isExpanded ? FolderOpenIcon : FolderIcon
 
@@ -136,9 +164,11 @@ export default function SettingTreeView(props: SettingTreeViewProps) {
             dense
             selected={isSelected}
             onClick={() => handleClickNode(node)}
-            sx={{ pl: 1.5 + level * 2 }}
+            onMouseEnter={() => setHoveredPath(node.path)}
+            onMouseLeave={() => setHoveredPath(null)}
+            sx={{ pl: 1.5 + level * 2, pr: 1 }}
           >
-            <Stack direction="row" alignItems="center" spacing={1}>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ flex: 1, minWidth: 0 }}>
               <IconComponent fontSize="small" />
               <ListItemText
                 primary={
@@ -148,6 +178,35 @@ export default function SettingTreeView(props: SettingTreeViewProps) {
                 }
               />
             </Stack>
+            {/* 操作按钮 - 悬停时显示 */}
+            {showActions && isHovered && (
+              <Stack direction="row" spacing={0} sx={{ ml: 1 }}>
+                {/* 添加子节点按钮 */}
+                {onAddItem && (
+                  <Tooltip title="添加子项" placement="top">
+                    <IconButton
+                      size="small"
+                      onClick={(e) => handleAdd(e, node)}
+                      sx={{ padding: '2px' }}
+                    >
+                      <AddIcon sx={{ fontSize: 16 }} />
+                    </IconButton>
+                  </Tooltip>
+                )}
+                {/* 删除按钮 - 所有层级都可删除 */}
+                {onDeleteItem && (
+                  <Tooltip title={node.is_leaf ? "删除" : "删除整个分类"} placement="top">
+                    <IconButton
+                      size="small"
+                      onClick={(e) => handleDelete(e, node)}
+                      sx={{ padding: '2px' }}
+                    >
+                      <DeleteIcon sx={{ fontSize: 16, color: 'error.main' }} />
+                    </IconButton>
+                  </Tooltip>
+                )}
+              </Stack>
+            )}
           </ListItemButton>
           {hasChildren && isExpanded && (
             <Box>
@@ -166,9 +225,19 @@ export default function SettingTreeView(props: SettingTreeViewProps) {
           <Typography variant="subtitle2">
             {title || '层级视图'}
           </Typography>
-          <IconButton size="small" onClick={loadTree} disabled={loading}>
-            <RefreshIcon fontSize="small" />
-          </IconButton>
+          <Stack direction="row" spacing={0.5}>
+            {/* 顶层添加按钮 */}
+            {showActions && onAddItem && (
+              <Tooltip title="添加根级项" placement="top">
+                <IconButton size="small" onClick={() => onAddItem('', null)}>
+                  <AddIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+            <IconButton size="small" onClick={loadTree} disabled={loading}>
+              <RefreshIcon fontSize="small" />
+            </IconButton>
+          </Stack>
         </Box>
       )}
 

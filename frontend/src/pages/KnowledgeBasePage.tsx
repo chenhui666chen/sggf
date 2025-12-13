@@ -195,6 +195,7 @@ export default function KnowledgeBasePage() {
   const [settingItems, setSettingItems] = useState<SettingItem[]>([])
   const [selectedItem, setSelectedItem] = useState<SettingItem | null>(null)
   const [selectedCategoryPath, setSelectedCategoryPath] = useState<string | null>(null)
+  const [selectedCategoryItem, setSelectedCategoryItem] = useState<SettingItem | null>(null)  // 🆕 分类节点的item
   
   // 模板相关状态
   const [settingTemplates, setSettingTemplates] = useState<any[]>([])
@@ -212,6 +213,13 @@ export default function KnowledgeBasePage() {
   const [createItemDialog, setCreateItemDialog] = useState(false)
   const [editItemDialog, setEditItemDialog] = useState(false)
   const [templateDialog, setTemplateDialog] = useState(false)
+  const [createChildItemDialog, setCreateChildItemDialog] = useState(false)  // 🆕 层级视图添加子项对话框
+  const [parentItemPath, setParentItemPath] = useState<string>('')  // 🆕 父节点路径
+  const [parentItemRef, setParentItemRef] = useState<any>(null)  // 🆕 父节点引用
+  const [newItemIsLeaf, setNewItemIsLeaf] = useState<boolean>(true)  // 🆕 是否为叶子节点
+  const [treeRefreshTrigger, setTreeRefreshTrigger] = useState<number>(0)  // 🆕 树刷新触发器
+  const [moveItemDialog, setMoveItemDialog] = useState(false)  // 🆕 移动到对话框
+  const [moveTargetPath, setMoveTargetPath] = useState<string>('')  // 🆕 移动目标路径
 
   // 表单数据
   const [newCollectionName, setNewCollectionName] = useState('')
@@ -1192,6 +1200,176 @@ export default function KnowledgeBasePage() {
     setNewItemContent('')
     setNewItemTags('')
     setSmartExtractData(null)  // 🆕 清空智能提取数据
+    setNewItemIsLeaf(true)  // 🆕 重置为叶子节点
+  }
+
+  // 🆕 层级视图添加子项
+  const handleTreeAddItem = (parentPath: string, parentItem: any) => {
+    setParentItemPath(parentPath)
+    setParentItemRef(parentItem)
+    resetItemForm()
+    setCreateChildItemDialog(true)
+  }
+
+  // 🆕 层级视图删除项（支持删除单项或整个分类）
+  const handleTreeDeleteItem = async (item: any) => {
+    const isLeaf = item.is_leaf
+    const itemPath = item.path
+    const itemName = item.name
+
+    if (isLeaf) {
+      // 删除单个叶子节点
+      if (!confirm(`确定要删除「${itemName}」吗？`)) return
+
+      try {
+        await apiClient.deleteSettingItem(item.id)
+        await loadSettingItems(selectedCollection!.id)
+        setTreeRefreshTrigger(prev => prev + 1)  // 🆕 触发树刷新
+        if (selectedItem?.id === item.id) {
+          setSelectedItem(null)
+        }
+        showSnackbar('✅ 删除成功', 'success')
+      } catch (err) {
+        logger.error('❌ 删除设定项失败:', err)
+        showSnackbar('删除失败', 'error')
+      }
+    } else {
+      // 删除整个分类（批量删除该路径下的所有项）
+      const itemsToDelete = settingItems.filter(it => 
+        it.path && (it.path === itemPath || it.path.startsWith(itemPath + '/'))
+      )
+      
+      if (itemsToDelete.length === 0) {
+        showSnackbar('该分类下没有可删除的项', 'error')
+        return
+      }
+
+      if (!confirm(`确定要删除「${itemName}」及其下的 ${itemsToDelete.length} 个项吗？\n\n此操作不可撤销！`)) return
+
+      try {
+        // 批量删除
+        for (const delItem of itemsToDelete) {
+          await apiClient.deleteSettingItem(delItem.id)
+        }
+        await loadSettingItems(selectedCollection!.id)
+        setTreeRefreshTrigger(prev => prev + 1)  // 🆕 触发树刷新
+        setSelectedItem(null)
+        setSelectedCategoryPath(null)
+        showSnackbar(`✅ 已删除 ${itemsToDelete.length} 个项`, 'success')
+      } catch (err) {
+        logger.error('❌ 批量删除失败:', err)
+        showSnackbar('删除失败', 'error')
+      }
+    }
+  }
+
+  // 🆕 创建子项（来自层级视图）
+  const handleCreateChildItem = async () => {
+    if (!selectedCollection || !newItemName) {
+      showSnackbar('请填写设定项名称', 'error')
+      return
+    }
+
+    try {
+      // 构建路径：父路径 + 新项名称
+      const itemPath = parentItemPath ? `${parentItemPath}/${newItemName}` : `${selectedCollection.name}/${newItemName}`
+      
+      await apiClient.createSettingItem(selectedCollection.id, {
+        name: newItemName,
+        code: newItemCode,
+        level: newItemLevel,
+        content: newItemContent,  // 🆕 分类节点也可以有描述
+        tags: newItemTags ? newItemTags.split(',').map(t => t.trim()) : [],
+        order: settingItems.length,
+        depth: parentItemPath ? (parentItemPath.split('/').length) : 1,
+        is_leaf: newItemIsLeaf,
+        path: itemPath,
+      })
+
+      await loadSettingItems(selectedCollection.id)
+      setTreeRefreshTrigger(prev => prev + 1)  // 🆕 触发树刷新
+      setCreateChildItemDialog(false)
+      resetItemForm()
+      showSnackbar(`✅ ${newItemIsLeaf ? '设定项' : '分类'}创建成功`, 'success')
+    } catch (err) {
+      logger.error('❌ 创建设定项失败:', err)
+      showSnackbar('创建失败', 'error')
+    }
+  }
+
+  // 🆕 移动节点到新的父节点下
+  const handleMoveItem = async () => {
+    if (!selectedItem || !selectedCollection) {
+      showSnackbar('请先选择要移动的项', 'error')
+      return
+    }
+
+    try {
+      // 构建新路径
+      const newPath = moveTargetPath 
+        ? `${moveTargetPath}/${selectedItem.name}` 
+        : `${selectedCollection.name}/${selectedItem.name}`
+      
+      // 计算新的深度
+      const newDepth = moveTargetPath ? moveTargetPath.split('/').length : 1
+
+      // 更新设定项的路径和深度
+      await apiClient.updateSettingItem(selectedItem.id, {
+        path: newPath,
+        depth: newDepth,
+      })
+
+      // 如果是分类节点，还需要更新其所有子节点的路径
+      if (!selectedItem.is_leaf) {
+        const oldPath = selectedItem.path || ''
+        const childItems = settingItems.filter(it => 
+          it.path && it.path.startsWith(oldPath + '/')
+        )
+        
+        for (const child of childItems) {
+          const childNewPath = child.path!.replace(oldPath, newPath)
+          const childNewDepth = childNewPath.split('/').length - 1
+          await apiClient.updateSettingItem(child.id, {
+            path: childNewPath,
+            depth: childNewDepth,
+          })
+        }
+      }
+
+      await loadSettingItems(selectedCollection.id)
+      setTreeRefreshTrigger(prev => prev + 1)
+      setMoveItemDialog(false)
+      setMoveTargetPath('')
+      showSnackbar('✅ 移动成功', 'success')
+    } catch (err) {
+      logger.error('❌ 移动失败:', err)
+      showSnackbar('移动失败', 'error')
+    }
+  }
+
+  // 🆕 获取可用的移动目标（所有分类节点 + 根节点）
+  const getAvailableMoveTargets = () => {
+    if (!selectedItem || !selectedCollection) return []
+    
+    const targets: { path: string; label: string; depth: number }[] = [
+      { path: '', label: `📁 ${selectedCollection.name}（根目录）`, depth: 0 }
+    ]
+    
+    // 添加所有分类节点
+    settingItems
+      .filter(it => !it.is_leaf && it.id !== selectedItem.id)  // 排除自己
+      .filter(it => !(it.path || '').startsWith((selectedItem.path || '') + '/'))  // 排除自己的子节点
+      .forEach(it => {
+        const depth = (it.path || '').split('/').length - 1
+        const indent = '  '.repeat(depth)
+        targets.push({
+          path: it.path || '',
+          label: `${indent}📁 ${it.name}`,
+          depth,
+        })
+      })
+    
+    return targets
   }
 
   // 🆕 智能提取设定项相关内容
@@ -2076,12 +2254,7 @@ export default function KnowledgeBasePage() {
                           sx={{ pr: 6 }}
                         >
                           <FolderIcon sx={{ mr: 1, color: 'primary.main' }} />
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Typography sx={{ fontWeight: 500 }}>{collection.name}</Typography>
-                            {getCategoryDisplayName(collection.category) !== collection.name && (
-                              <Chip label={getCategoryDisplayName(collection.category)} size="small" variant="outlined" sx={{ height: 20 }} />
-                            )}
-                          </Box>
+                          <Typography sx={{ fontWeight: 500 }}>{collection.name}</Typography>
                         </ListItemButton>
                       </ListItem>
                     ))}
@@ -2145,20 +2318,62 @@ export default function KnowledgeBasePage() {
                       <SettingTreeView
                         collectionId={selectedCollection.id}
                         selectedItemId={selectedItem?.id}
-                        onSelectCategory={(path) => {
+                        refreshTrigger={treeRefreshTrigger}
+                        onSelectCategory={(path, categoryItem) => {
                           setSelectedCategoryPath(path)
+                          setSelectedCategoryItem(categoryItem)  // 🆕 保存分类节点的item
                           setSelectedItem(null)
                         }}
                         onSelectInstance={(item) => {
                           setSelectedItem(item)
                           setSelectedCategoryPath(null)
                         }}
+                        onAddItem={handleTreeAddItem}
+                        onDeleteItem={handleTreeDeleteItem}
                         title="层级视图"
                       />
                     </Box>
 
                     {/* 右：详情/列表（根据选择切换） */}
                     <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                      {/* 🆕 分类描述区域 - 选中分类时显示 */}
+                      {!selectedItem && selectedCategoryPath && selectedCategoryItem && (
+                        <Box sx={{ p: 2, bgcolor: 'primary.50', borderRadius: 1, mb: 2, border: '1px solid', borderColor: 'primary.200' }}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <FolderIcon sx={{ color: 'primary.main' }} />
+                              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                                {selectedCategoryItem.name}
+                              </Typography>
+                              <Chip label="分类" size="small" color="primary" variant="outlined" />
+                            </Box>
+                            <Box sx={{ display: 'flex', gap: 0.5 }}>
+                              <Tooltip title="编辑分类描述">
+                                <Button size="small" startIcon={<EditIcon />} onClick={() => {
+                                  // 将分类设为当前编辑项
+                                  setSelectedItem(selectedCategoryItem)
+                                  handleEditItem()
+                                }}>
+                                  编辑
+                                </Button>
+                              </Tooltip>
+                            </Box>
+                          </Box>
+                          {selectedCategoryItem.content ? (
+                            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                              {selectedCategoryItem.content}
+                            </Typography>
+                          ) : (
+                            <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic', mb: 1 }}>
+                              点击“编辑”添加分类描述...
+                            </Typography>
+                          )}
+                          <Typography variant="caption" color="text.secondary">
+                            路径: {selectedCategoryPath}
+                          </Typography>
+                        </Box>
+                      )}
+
                       {/* 分类下的实例列表 */}
                       {!selectedItem && selectedCategoryPath && (
                         <List sx={{ flexGrow: 1, overflow: 'auto' }}>
@@ -2216,21 +2431,38 @@ export default function KnowledgeBasePage() {
                       {selectedItem && (
                         <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
                           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                              {selectedItem.name}
-                            </Typography>
-                            <Button size="small" startIcon={<EditIcon />} onClick={handleEditItem}>
-                              编辑
-                            </Button>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                                {selectedItem.name}
+                              </Typography>
+                              {!selectedItem.is_leaf && (
+                                <Chip label="分类" size="small" color="primary" variant="outlined" />
+                              )}
+                            </Box>
+                            <Box sx={{ display: 'flex', gap: 0.5 }}>
+                              <Tooltip title="移动到其他分类">
+                                <Button size="small" onClick={() => setMoveItemDialog(true)}>
+                                  移动到
+                                </Button>
+                              </Tooltip>
+                              <Button size="small" startIcon={<EditIcon />} onClick={handleEditItem}>
+                                编辑
+                              </Button>
+                            </Box>
                           </Box>
+                          {selectedItem.path && (
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                              路径: {selectedItem.path}
+                            </Typography>
+                          )}
                           {selectedItem.content ? (
                             <FormattedContent 
                               content={selectedItem.content} 
                               sx={{ color: 'text.secondary', fontSize: '0.875rem' }} 
                             />
                           ) : (
-                            <Typography variant="body2" color="text.secondary">
-                              暂无内容
+                            <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                              点击“编辑”添加内容描述...
                             </Typography>
                           )}
                           {selectedItem.tags && selectedItem.tags.length > 0 && (
@@ -2539,6 +2771,138 @@ export default function KnowledgeBasePage() {
         <DialogActions>
           <Button onClick={() => { setCreateItemDialog(false); resetItemForm() }}>取消</Button>
           <Button onClick={handleCreateItem} variant="contained">创建</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 🆕 层级视图创建子项对话框 */}
+      <Dialog open={createChildItemDialog} onClose={() => setCreateChildItemDialog(false)} maxWidth="md" fullWidth>
+        <DialogTitle>
+          添加{newItemIsLeaf ? '设定项' : '分类'}
+          {parentItemPath && (
+            <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+              路径: {parentItemPath}
+            </Typography>
+          )}
+        </DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2}>
+            {/* 类型选择 */}
+            <Grid item xs={12}>
+              <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+                <Chip
+                  label="📄 设定项"
+                  color={newItemIsLeaf ? 'primary' : 'default'}
+                  variant={newItemIsLeaf ? 'filled' : 'outlined'}
+                  onClick={() => setNewItemIsLeaf(true)}
+                  sx={{ cursor: 'pointer' }}
+                />
+                <Chip
+                  label="📁 分类（文件夹）"
+                  color={!newItemIsLeaf ? 'primary' : 'default'}
+                  variant={!newItemIsLeaf ? 'filled' : 'outlined'}
+                  onClick={() => setNewItemIsLeaf(false)}
+                  sx={{ cursor: 'pointer' }}
+                />
+              </Box>
+              <Typography variant="caption" color="text.secondary">
+                {newItemIsLeaf ? '设定项是叶子节点，包含具体的设定内容' : '分类是文件夹节点，用于组织其他设定项'}
+              </Typography>
+            </Grid>
+            <Grid item xs={8}>
+              <TextField
+                autoFocus
+                margin="dense"
+                label={newItemIsLeaf ? '设定项名称 *' : '分类名称 *'}
+                fullWidth
+                value={newItemName}
+                onChange={(e) => setNewItemName(e.target.value)}
+                placeholder={newItemIsLeaf ? '例如: 灶气期、绍沙城、砚红仙千' : '例如: 修炼境界、地点分类'}
+              />
+            </Grid>
+            <Grid item xs={4}>
+              <TextField
+                margin="dense"
+                label="代码"
+                fullWidth
+                value={newItemCode}
+                onChange={(e) => setNewItemCode(e.target.value)}
+                placeholder="可选"
+              />
+            </Grid>
+            {newItemIsLeaf && (
+              <Grid item xs={12}>
+                <TextField
+                  margin="dense"
+                  label="标签（逗号分隔）"
+                  fullWidth
+                  value={newItemTags}
+                  onChange={(e) => setNewItemTags(e.target.value)}
+                  placeholder="例如: 修炼境界, 初期"
+                />
+              </Grid>
+            )}
+            <Grid item xs={12}>
+              <TextField
+                margin="dense"
+                label={newItemIsLeaf ? '内容描述' : '分类描述（可选）'}
+                fullWidth
+                multiline
+                rows={newItemIsLeaf ? 6 : 3}
+                value={newItemContent}
+                onChange={(e) => setNewItemContent(e.target.value)}
+                placeholder={newItemIsLeaf ? '详细描述该设定项的内容...' : '可以为这个分类添加说明文字...'}
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setCreateChildItemDialog(false); resetItemForm() }}>取消</Button>
+          <Button onClick={handleCreateChildItem} variant="contained">创建{newItemIsLeaf ? '设定项' : '分类'}</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 🆕 移动到对话框 */}
+      <Dialog open={moveItemDialog} onClose={() => setMoveItemDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          移动到其他分类
+          {selectedItem && (
+            <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+              移动: {selectedItem.name}
+            </Typography>
+          )}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            选择目标分类，该项将被移动到指定分类下。这对于调整层级关系很有用。
+          </Typography>
+          <FormControl fullWidth margin="dense">
+            <InputLabel>目标分类</InputLabel>
+            <Select
+              value={moveTargetPath}
+              label="目标分类"
+              onChange={(e) => setMoveTargetPath(e.target.value)}
+            >
+              {getAvailableMoveTargets().map((target) => (
+                <MenuItem key={target.path || 'root'} value={target.path}>
+                  {target.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          {selectedItem && moveTargetPath !== '' && (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              新路径将为: {moveTargetPath}/{selectedItem.name}
+            </Alert>
+          )}
+          {selectedItem && moveTargetPath === '' && selectedCollection && (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              新路径将为: {selectedCollection.name}/{selectedItem.name}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setMoveItemDialog(false); setMoveTargetPath('') }}>取消</Button>
+          <Button onClick={handleMoveItem} variant="contained">移动</Button>
         </DialogActions>
       </Dialog>
 

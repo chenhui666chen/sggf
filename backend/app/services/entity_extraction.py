@@ -11,30 +11,98 @@ from app.models.setting import SettingCollection, SettingItem
 from langchain_community.chat_models import ChatOpenAI
 import os
 
+# 体系名称映射（用于自动创建集合）
+CATEGORY_NAME_MAP = {
+    "character_system": "角色体系",
+    "cultivation_realm_system": "修仙境界体系",
+    "technique_system": "功法体系",
+    "pill_system": "丹药体系",
+    "formation_system": "阵法体系",
+    "weapon_system": "武器法宝体系",
+    "resource_system": "资源体系",
+    "map_system": "地图体系",
+    "organization_force_system": "组织势力体系",
+    "talisman_system": "符箓体系",
+    "magic_system": "魔法体系",
+    "profession_class_system": "职业体系",
+    "martial_realm_system": "武道境界体系",
+}
+
 
 class EntityExtractionService:
     """实体抽取服务"""
 
-    # 类型映射到集合类别
+    # 类型映射到集合类别（完善版本）
     ENTITY_TYPE_TO_CATEGORY = {
+        # 人物/角色
         "人物": "character_system",
         "角色": "character_system",
+        "NPC": "character_system",
+        
+        # 境界体系
+        "境界": "cultivation_realm_system",
+        "修为": "cultivation_realm_system",
+        "修炼境界": "cultivation_realm_system",
+        "等级": "cultivation_realm_system",
+        
+        # 功法/技能
         "功法": "technique_system",
+        "武学": "technique_system",
+        "武功": "technique_system",
+        "心法": "technique_system",
+        "秘法": "technique_system",
+        "技能": "technique_system",
+        
+        # 丹药体系
         "丹药": "pill_system",
+        "丹方": "pill_system",
+        "灵丹": "pill_system",
+        
+        # 阵法体系
         "阵法": "formation_system",
+        "结界": "formation_system",
+        "禁制": "formation_system",
+        
+        # 武器法宝体系
+        "法宝": "weapon_system",
+        "武器": "weapon_system",
+        "灵器": "weapon_system",
+        "灵宝": "weapon_system",
+        "仙器": "weapon_system",
+        
+        # 资源体系
+        "资源": "resource_system",
+        "灵草": "resource_system",
+        "灵石": "resource_system",
+        "材料": "resource_system",
+        "矿石": "resource_system",
+        "灵物": "resource_system",
+        
+        # 地点/地图体系
         "秘境": "map_system",
         "遗迹": "map_system",
         "城市": "map_system",
         "城镇": "map_system",
         "地点": "map_system",
-        "势力": "force_system",
-        "组织": "force_system",
-        "门派": "force_system",
-        # 兼容扩展类型
+        "洞府": "map_system",
+        "宗门": "map_system",
+        
+        # 势力体系
+        "势力": "organization_force_system",
+        "组织": "organization_force_system",
+        "门派": "organization_force_system",
+        "家族": "organization_force_system",
+        "帮派": "organization_force_system",
+        
+        # 魔法/职业体系
         "魔法": "magic_system",
         "职业": "profession_class_system",
-        "武学": "technique_system",
         "武道": "martial_realm_system",
+        
+        # 符箓体系
+        "符箓": "talisman_system",
+        "符文": "talisman_system",
+        "符咒": "talisman_system",
     }
     
     # Phase 6: 关系类型枚举
@@ -86,14 +154,17 @@ class EntityExtractionService:
         
         prompt = f"""你是一个小说设定提取专家。请从以下章节中提取所有重要的设定元素，包括：
 - 人物/角色（主要配角、重要NPC等）
-- 地点（城市、秘境、遗迹等）
-- 功法/技能
-- 丹药/法宝
-- 阵法/结界
-- 势力/门派/组织
+- 境界（修为境界、等级，如炼气期、筑基期等）
+- 资源（灵草、灵石、材料等，如凝露草、金辉石等）
+- 功法/技能/武学
+- 丹药/灵丹
+- 阵法/结界/禁制
+- 法宝/武器/灵器
+- 势力/门派/组织/家族
+- 地点（城市、秘境、遗迹、洞府等）
+- 符箓（符文、符印等）
 - 魔法（分类/术法）
 - 职业（战士/法师等）
-- 武学/武道（流派/境界）
 
 章节标题：{chapter_title}
 
@@ -104,7 +175,7 @@ class EntityExtractionService:
 [
   {{
     "name": "实体名称",
-    "type": "实体类型（人物/地点/功法/丹药/阵法/势力/魔法/职业/武学/武道之一）",
+    "type": "实体类型（人物/境界/资源/功法/丹药/阵法/法宝/势力/地点/符箓/魔法/职业之一）",
     "content": "实体的详细描述（不少于30字）",
     "confidence": 0.8
   }}
@@ -114,6 +185,7 @@ class EntityExtractionService:
 1. 只提取有详细描述的实体，仅提及名称的不要提取
 2. confidence范围0-1，根据描述详细程度和重要性打分
 3. 确保返回的是合法的JSON数组
+4. 境界类型用于修炼境界、等级体系；资源类型用于灵草、灵石、练器材料等
 """
         
         try:
@@ -310,6 +382,21 @@ class EntityExtractionService:
                     )
                     .first()
                 )
+                
+                # 🌟 如果目标集合不存在，自动创建
+                if not target_collection and target_category in CATEGORY_NAME_MAP:
+                    collection_name = CATEGORY_NAME_MAP[target_category]
+                    target_collection = SettingCollection(
+                        project_id=project_id,
+                        name=collection_name,
+                        category=target_category,
+                        description=f"自动创建的{collection_name}",
+                        order=100,
+                    )
+                    db.add(target_collection)
+                    db.commit()
+                    db.refresh(target_collection)
+                    print(f"✅ 自动创建集合: {collection_name} ({target_category})")
             
             # 优先直写规则
             if target_collection:
