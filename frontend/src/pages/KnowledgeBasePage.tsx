@@ -1649,6 +1649,8 @@ export default function KnowledgeBasePage() {
           target_volume_index: targetVolumeIndex,
           volume_chapters_min: volumeChaptersMin,
           volume_chapters_max: volumeChaptersMax,
+          // 🆕 已写章节处理模式（自动检测+提取，保证质量）
+          preserve_written_mode: "extract_extend",
         }),
       })
 

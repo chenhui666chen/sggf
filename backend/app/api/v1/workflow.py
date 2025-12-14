@@ -93,6 +93,9 @@ class ExpandOutlineRequest(BaseModel):
     target_volume_index: Optional[int] = None  # 扩展第几卷
     volume_chapters_min: Optional[int] = None  # 本卷章节范围最小值
     volume_chapters_max: Optional[int] = None  # 本卷章节范围最大值
+    
+    # 🆕 已写章节处理模式参数
+    preserve_written_mode: str = "extract_extend"  # preserve_written(仅保护) / extract_extend(提取+扩展) / regenerate_all(重新生成全部)
 
 class ExpandCharactersRequest(BaseModel):
     project_id: int
@@ -4786,6 +4789,8 @@ async def expand_outline(
                 target_volume_index=request.target_volume_index,
                 volume_chapters_min=request.volume_chapters_min,
                 volume_chapters_max=request.volume_chapters_max,
+                # 🆕 已写章节处理模式
+                preserve_written_mode=request.preserve_written_mode,
             )
         )
         
@@ -4836,6 +4841,8 @@ async def execute_expand_outline_task(
     target_volume_index: Optional[int] = None,
     volume_chapters_min: Optional[int] = None,
     volume_chapters_max: Optional[int] = None,
+    # 🆕 已写章节处理模式
+    preserve_written_mode: str = "extract_extend",
 ):
     """后台执行大纲扩展任务（严格遵守目标数）"""
     from sqlalchemy import text
@@ -5032,8 +5039,26 @@ async def execute_expand_outline_task(
             
         else:
             # ==================== 原有模式(total/volume/incremental) ====================
-            # 🔥 智能识别当前章节数
-            if current_chapter_count == 0:
+            # 🆕 处理已写章节
+            from app.services.agents.written_chapters_handler import process_written_chapters
+            
+            written_count, extracted_outline_text = await process_written_chapters(
+                project_id=project_id,
+                preserve_written_mode=preserve_written_mode,
+                project_genre=project_genre,
+                combined_world_setting=combined_world_setting,
+                db=db,
+                extractor_llm=expander.llm,
+                ws_manager=ws_manager,
+                task_id=task_id,
+            )
+            
+            # 更新current_chapter_count
+            if written_count > 0 and preserve_written_mode in ["extract_extend", "preserve_written"]:
+                current_chapter_count = written_count
+            
+            # 🔥 智能识别当前章节数（如果没有已写章节）
+            if current_chapter_count == 0 and written_count == 0:
                 logger.info("🔍 开始自动识别当前章节数...")
                 # 匹配章节标记，如 "第1章"、"第 1 章" 等
                 import re
@@ -5056,14 +5081,17 @@ async def execute_expand_outline_task(
             await ws_manager.send_task_progress(
                 project_id=project_id,
                 task_id=task_id,
-                progress=20,
+                progress=50,
                 message=f"🔄 正在扩展大纲（从 {current_chapter_count} 章扩展到 {target_total_chapters} 章）..."
             )
+            
+            # 🆕 构建完整上下文：提取的细纲 + 原有大纲
+            effective_current_outline = extracted_outline_text if extracted_outline_text else current_outline
             
             # 使用线程池执行同步扩展，避免阻塞事件循环
             result = await asyncio.to_thread(
                 expander.expand_plot_outline_incremental,
-                current_outline=current_outline,
+                current_outline=effective_current_outline,
                 world_setting=combined_world_setting,
                 characters=characters,
                 current_chapter_count=current_chapter_count,
