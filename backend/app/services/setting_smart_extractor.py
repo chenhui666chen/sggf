@@ -54,15 +54,10 @@ class SettingSmartExtractor:
             return []
         
         try:
-            from langchain_community.chat_models import ChatOpenAI
+            from app.services.agents.llm_singleton import get_model_for_task
             
-            # 使用轻量级模型进行验证
-            llm = ChatOpenAI(
-                model_name=os.getenv("QWEN_MODEL", "qwen-turbo"),
-                temperature=0.3,
-                openai_api_key=os.getenv("DASHSCOPE_API_KEY", ""),
-                openai_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1"
-            )
+            # 🛡️ 使用单例管理器获取LLM实例（已禁用代理）
+            llm = get_model_for_task("summarize")
             
             # 准备候选内容
             candidates = []

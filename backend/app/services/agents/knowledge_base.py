@@ -2,6 +2,13 @@
 Knowledge Base Management - Store and retrieve novel settings using vector database
 """
 from typing import List, Dict, Any, Optional
+import os
+
+# 🛡️ 全局禁用代理配置 - 确保直连API
+for proxy_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']:
+    if proxy_var in os.environ:
+        del os.environ[proxy_var]
+
 try:
     from langchain_chroma import Chroma  # 优先使用新包，避免弃用警告
     CHROMA_SRC = "langchain_chroma"
@@ -83,7 +90,8 @@ class AliyunEmbeddings(Embeddings):
                 f"{self.api_base}/embeddings",
                 headers=headers,
                 json=data,
-                timeout=30
+                timeout=30,
+                proxies={'http': None, 'https': None}  # 🛡️ 禁用代理
             )
 
             if response.status_code == 200:

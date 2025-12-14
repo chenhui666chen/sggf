@@ -194,7 +194,16 @@ class TencentAIDetectService:
         }
         
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            # 清除代理配置，避免代理残留导致连接失败
+            import os
+            for proxy_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']:
+                if proxy_var in os.environ:
+                    del os.environ[proxy_var]
+            
+            async with httpx.AsyncClient(
+                timeout=30.0,
+                trust_env=False  # 不读取环境变量中的代理配置
+            ) as client:
                 response = await client.post(
                     f"https://{self.endpoint}",
                     headers=headers,
@@ -238,10 +247,13 @@ class TencentAIDetectService:
                     }
                     
         except Exception as e:
-            logger.error(f"腾讯云 AI 检测失败: {e}")
+            import traceback
+            error_msg = str(e) or repr(e) or "未知错误"
+            stack_trace = traceback.format_exc()
+            logger.error(f"腾讯云 AI 检测失败: {error_msg}\n堆栈信息:\n{stack_trace}")
             return {
                 "success": False,
-                "error": str(e),
+                "error": error_msg,
                 "ai_score": None
             }
 

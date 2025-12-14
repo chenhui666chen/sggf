@@ -10,6 +10,11 @@ import json
 import numpy as np
 from .config import Config
 
+# 🛡️ 全局禁用代理配置 - 确保直连API
+for proxy_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']:
+    if proxy_var in os.environ:
+        del os.environ[proxy_var]
+
 
 class AliyunEmbeddings(Embeddings):
     """阿里云百炼 Embeddings 适配器"""
@@ -73,7 +78,8 @@ class AliyunEmbeddings(Embeddings):
                 f"{self.api_base}/embeddings",
                 headers=headers,
                 json=data,
-                timeout=30
+                timeout=30,
+                proxies={'http': None, 'https': None}  # 🛡️ 禁用代理
             )
 
             if response.status_code == 200:

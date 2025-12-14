@@ -138,6 +138,8 @@ export default function ExpansionConfigDialog({
     }
     return ''
   }
+  // 用于显示估计时间，避免未使用警告
+  void getEstimatedTime
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>

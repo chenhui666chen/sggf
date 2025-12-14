@@ -3347,6 +3347,7 @@ export default function WorkflowControlPage() {
               <MenuItem value="">请选择</MenuItem>
               <MenuItem value="修仙">修仙</MenuItem>
               <MenuItem value="玄幻">玄幻</MenuItem>
+              <MenuItem value="奇幻">奇幻</MenuItem>
               <MenuItem value="都市">都市</MenuItem>
               <MenuItem value="言情">言情</MenuItem>
               <MenuItem value="耽美">耽美</MenuItem>
@@ -3451,10 +3452,12 @@ export default function WorkflowControlPage() {
                   genre === '修仙' && plannedLengthType !== 'long' ? '修仙题材注意境界体系设计，确保修炼节奏合理' :
                   genre === '玄幻' && plannedLengthType === 'long' ? '玄幻长篇推荐天赋觉醒与实力突破交替，每5-8章一个小爆点' :
                   genre === '玄幻' && plannedLengthType !== 'long' ? '玄幻题材注意血脉天赋体系设计，确保等级压制清晰' :
+                  genre === '奇幻' && plannedLengthType === 'long' ? '奇幻长篇推荐奇妙世界规则逐渐展开，每5-8章一个世界观揭秘或冒险突破' :
+                  genre === '奇幻' && plannedLengthType !== 'long' ? '奇幻题材注意奇幻种族、魔法体系设计，保持冒险与探索节奏' :
                   genre === '悬疑' ? '悬疑题材注意线索布局，每3-5章揭露一个小真相，每卷一个大反转' :
                   genre === '都市' ? '都市题材建议多线穿插（商战+感情+亲情），每卷一个事业里程碑' :
                   genre === '言情' ? '言情题材注意感情递进（相识→相知→相守），每5-10章一个甜蜜时刻' :
-                  genre === '耽美' ? '耽美题材注意暧昧张力与情感突破交替，每5-10章一个关系进展节点' :
+                  genre === '耽美' ? '耽美题材注意昧昧张力与情感突破交替，每5-10章一个关系进展节点' :
                   genre === '科幻' ? '科幻题材注意科技突破节奏，每卷一次探索升级（地球→星系→宇宙）' :
                   genre === '纯文学' ? '纯文学题材注重内心世界与外部环境的张力，节奏可适当放缓' :
                   '根据题材特点自动适配叙事节奏'

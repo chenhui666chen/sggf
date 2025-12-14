@@ -32,6 +32,10 @@ class TaskType(str, Enum):
     
     # 🆕 提示词进化专用
     REWRITE = "rewrite"                       # 文本改写（降低AI痕迹）
+    
+    # 🆕 拆书分析专用（信息提取，不需要深度推理）
+    BOOK_ANALYSIS = "book_analysis"           # 书籍内容分析（单章）
+    BOOK_SYNTHESIS = "book_synthesis"         # 书籍汇总分析（全书，用long）
 
 
 class ComplexityLevel(str, Enum):
@@ -71,6 +75,12 @@ class ModelOptimizer:
         
         # 🆕 提示词进化：使用 chat（文风改写不需要推理，追求速度）
         TaskType.REWRITE: "deepseek-chat",
+        
+        # 🆕 拆书分析：使用 chat（信息提取不需要深度推理，且输入可能较长）
+        TaskType.BOOK_ANALYSIS: "deepseek-chat",
+        
+        # 🆕 拆书汇总：使用 qwen-long（全书摘要汇总，输入量大）
+        TaskType.BOOK_SYNTHESIS: "qwen-long",
     }
     
     # 激进优化策略（最大化速度）
@@ -96,12 +106,20 @@ class ModelOptimizer:
         
         # 🆕 提示词进化：chat
         TaskType.REWRITE: "deepseek-chat",
+        
+        # 🆕 拆书分析：chat
+        TaskType.BOOK_ANALYSIS: "deepseek-chat",
+        
+        # 🆕 拆书汇总：qwen-long
+        TaskType.BOOK_SYNTHESIS: "qwen-long",
     }
     
     # 默认策略（不优化，全部使用 reasoner）
     DEFAULT_STRATEGY = {
         task: "deepseek-reasoner" for task in TaskType
     }
+    DEFAULT_STRATEGY[TaskType.BOOK_ANALYSIS] = "deepseek-chat"  # 拆书始终用chat
+    DEFAULT_STRATEGY[TaskType.BOOK_SYNTHESIS] = "qwen-long"      # 汇总始终用long
     
     def __init__(self, strategy: str = "conservative"):
         """

@@ -215,7 +215,7 @@ export default function KnowledgeBasePage() {
   const [templateDialog, setTemplateDialog] = useState(false)
   const [createChildItemDialog, setCreateChildItemDialog] = useState(false)  // 🆕 层级视图添加子项对话框
   const [parentItemPath, setParentItemPath] = useState<string>('')  // 🆕 父节点路径
-  const [parentItemRef, setParentItemRef] = useState<any>(null)  // 🆕 父节点引用
+  const [, setParentItemRef] = useState<any>(null)  // 🆕 父节点引用
   const [newItemIsLeaf, setNewItemIsLeaf] = useState<boolean>(true)  // 🆕 是否为叶子节点
   const [treeRefreshTrigger, setTreeRefreshTrigger] = useState<number>(0)  // 🆕 树刷新触发器
   const [moveItemDialog, setMoveItemDialog] = useState(false)  // 🆕 移动到对话框

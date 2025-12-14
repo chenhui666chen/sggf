@@ -5,9 +5,15 @@ import os
 import asyncio
 from typing import Optional, Dict, Any, List, Callable, Awaitable
 import logging
+import httpx
 from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
+
+# 🛡️ 全局禁用代理配置 - 确保直连API
+for proxy_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']:
+    if proxy_var in os.environ:
+        del os.environ[proxy_var]
 
 
 class StreamingService:
@@ -18,14 +24,26 @@ class StreamingService:
     """
     
     def __init__(self):
+        # 🛡️ 创建禁用代理的httpx客户端
+        deepseek_http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(120.0, connect=30.0),
+            trust_env=False  # 不读取环境变量中的代理配置
+        )
+        dashscope_http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(180.0, connect=30.0),
+            trust_env=False
+        )
+        
         self.deepseek_client = AsyncOpenAI(
             api_key=os.getenv("DEEPSEEK_API_KEY"),
-            base_url=os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1")
+            base_url=os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1"),
+            http_client=deepseek_http_client  # 🛡️ 使用禁用代理的客户端
         )
         # 阿里云百炼（DashScope）兼容端点，用于 qwen-* 模型
         self.dashscope_client = AsyncOpenAI(
             api_key=os.getenv("DASHSCOPE_API_KEY", os.getenv("DEEPSEEK_API_KEY")),
-            base_url=os.getenv("DASHSCOPE_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+            base_url=os.getenv("DASHSCOPE_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+            http_client=dashscope_http_client  # 🛡️ 使用禁用代理的客户端
         )
         self.default_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
     

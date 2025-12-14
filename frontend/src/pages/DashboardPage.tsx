@@ -140,6 +140,7 @@ export default function DashboardPage() {
       // 中文键（网文题材）
       '修仙': '修仙',
       '玄幻': '玄幻',
+      '奇幻': '奇幻',
       '都市': '都市',
       '悬疑': '悬疑',
       '言情': '言情',
@@ -1021,6 +1022,7 @@ export default function DashboardPage() {
             const colors: Record<string, { primary: string; secondary: string; accent: string; text: string }> = {
               '修仙': { primary: '#1e3a8a', secondary: '#2563eb', accent: '#fbbf24', text: '#fef3c7' },
               '玄幻': { primary: '#6b21a8', secondary: '#7c3aed', accent: '#fb923c', text: '#fed7aa' },
+              '奇幻': { primary: '#14532d', secondary: '#166534', accent: '#fbbf24', text: '#fef3c7' },
               '都市': { primary: '#ea580c', secondary: '#f97316', accent: '#fef3c7', text: '#fef3c7' },
               '言情': { primary: '#f472b6', secondary: '#f9a8d4', accent: '#f59e0b', text: '#fef3c7' },
               '耽美': { primary: '#831843', secondary: '#9f1239', accent: '#fda4af', text: '#fce7f3' },
@@ -1404,13 +1406,14 @@ export default function DashboardPage() {
                             >
                               <MenuItem value="修仙">修仙</MenuItem>
                               <MenuItem value="玄幻">玄幻</MenuItem>
+                              <MenuItem value="奇幻">奇幻</MenuItem>
                               <MenuItem value="都市">都市</MenuItem>
                               <MenuItem value="言情">言情</MenuItem>
                               <MenuItem value="耽美">耽美</MenuItem>
                               <MenuItem value="悬疑">悬疑</MenuItem>
                               <MenuItem value="科幻">科幻</MenuItem>
                               <MenuItem value="纯文学">纯文学</MenuItem>
-                              <MenuItem value="Fantasy">奇幻</MenuItem>
+                              <MenuItem value="Fantasy">奇幻（英）</MenuItem>
                               <MenuItem value="Other">其他</MenuItem>
                             </Select>
                           </FormControl>
@@ -1640,13 +1643,14 @@ export default function DashboardPage() {
             >
               <MenuItem value="修仙">修仙</MenuItem>
               <MenuItem value="玄幻">玄幻</MenuItem>
+              <MenuItem value="奇幻">奇幻</MenuItem>
               <MenuItem value="都市">都市</MenuItem>
               <MenuItem value="言情">言情</MenuItem>
               <MenuItem value="耽美">耽美</MenuItem>
               <MenuItem value="悬疑">悬疑</MenuItem>
               <MenuItem value="科幻">科幻</MenuItem>
               <MenuItem value="纯文学">纯文学</MenuItem>
-              <MenuItem value="Fantasy">奇幻</MenuItem>
+              <MenuItem value="Fantasy">奇幻（英）</MenuItem>
               <MenuItem value="Other">其他</MenuItem>
             </Select>
           </FormControl>

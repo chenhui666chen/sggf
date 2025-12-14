@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.models.setting import SettingCollection, SettingItem
-from langchain_community.chat_models import ChatOpenAI
+from app.services.agents.llm_singleton import get_model_for_task
 import os
 
 
@@ -40,13 +40,8 @@ class LocationHierarchyExtractor:
             }
         ]
         """
-        # 创建LLM实例
-        llm = ChatOpenAI(
-            model_name=os.getenv("DEEPSEEK_MODEL", "deepseek-reasoner"),
-            temperature=0.7,
-            openai_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
-            openai_api_base=os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1")
-        )
+        # 🛡️ 使用单例管理器获取LLM实例（已禁用代理）
+        llm = get_model_for_task("entity_extract")
         
         prompt = f"""你是一个小说地点提取专家。请从以下章节中提取所有地点，并识别它们的层级关系。
 

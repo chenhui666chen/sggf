@@ -18,6 +18,7 @@ const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 const WorkflowControlPage = lazy(() => import('@/pages/WorkflowControlPage'))
 const PromptEvolutionPage = lazy(() => import('@/pages/PromptEvolutionPage'))
 const AITracePage = lazy(() => import('@/pages/AITracePage'))
+const BookParserPage = lazy(() => import('@/pages/BookParserPage'))
 
 // 加载中组件
 const LoadingFallback = () => (
@@ -133,6 +134,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <AITracePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/book-parser"
+            element={
+              <ProtectedRoute>
+                <BookParserPage />
               </ProtectedRoute>
             }
           />

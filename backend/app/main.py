@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.db.base import Base, engine
-from app.api.v1 import auth, projects, chapters, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters, ai_detect, prompt_evolution, ai_trace
+from app.api.v1 import auth, projects, chapters, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters, ai_detect, prompt_evolution, ai_trace, book_parser
 import socketio
 
 
@@ -112,6 +112,7 @@ app.include_router(characters.router)
 app.include_router(ai_detect.router)  # AI 生成检测 API
 app.include_router(ai_trace.router)  # 织文无迹 API
 app.include_router(prompt_evolution.router)  # 提示词进化优化 API（实验性）
+app.include_router(book_parser.router)  # 拆书工具 API
 
 
 # 🔌 挂载 Socket.IO
