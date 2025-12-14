@@ -170,6 +170,9 @@ class BookChapter(Base):
     key_events: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="关键事件(JSON)")
     appearing_characters: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="出场人物(JSON)")
     
+    # 🆕 完整细纲数据（包含场景目标、冲突弧、情绪曲线、爽点、结尾钩子等）
+    outline_data: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="细纲数据(JSON)")
+    
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     

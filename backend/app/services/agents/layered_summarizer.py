@@ -7,9 +7,16 @@
 3. 根据章节数智能选择模型
 4. 确保总输入不超过模型限制
 """
+import os
 from typing import Dict, Any, Optional, Tuple, List
 import re
 from langchain_core.messages import SystemMessage, HumanMessage
+
+# 🛡️ 全局禁用代理配置 - 确保直连API
+for proxy_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']:
+    if proxy_var in os.environ:
+        del os.environ[proxy_var]
+
 from .llm_singleton import create_deepseek_llm
 from .knowledge_base import NovelKnowledgeBase
 

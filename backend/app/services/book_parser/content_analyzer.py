@@ -116,7 +116,7 @@ class ContentAnalyzer:
         on_progress: Optional[ProgressCallback] = None,
         analysis_types: Optional[List[AnalysisType]] = None,
         use_two_stage: bool = True  # 🆕 是否使用两阶段分析
-    ) -> List[AnalysisResult]:
+    ) -> tuple[List[AnalysisResult], List[Dict[str, Any]]]:
         """
         执行全面分析
         
@@ -131,7 +131,7 @@ class ContentAnalyzer:
             use_two_stage: 是否使用两阶段分析（默认开启）
             
         Returns:
-            分析结果列表
+            (分析结果列表, 章节摘要列表) - 章节摘要包含完整细纲数据
         """
         if analysis_types is None:
             analysis_types = [
@@ -142,10 +142,11 @@ class ContentAnalyzer:
             ]
         
         results = []
+        chapter_summaries = []  # 🆕 保存章节摘要用于返回
         
         if use_two_stage and len(chapters) > 5:
             # 🆕 两阶段分析流程
-            results = await self._two_stage_analysis(
+            results, chapter_summaries = await self._two_stage_analysis(
                 chapters, analysis_types, on_progress
             )
         else:
@@ -157,19 +158,22 @@ class ContentAnalyzer:
         if on_progress:
             await on_progress("complete", 100, "分析完成")
         
-        return results
+        return results, chapter_summaries
     
     async def _two_stage_analysis(
         self,
         chapters: List[ChapterInfo],
         analysis_types: List[AnalysisType],
         on_progress: Optional[ProgressCallback] = None
-    ) -> List[AnalysisResult]:
+    ) -> tuple[List[AnalysisResult], List[Dict[str, Any]]]:
         """
         两阶段分析流程
         
         阶段1: 逐章提取摘要
         阶段2: 基于摘要汇总分析
+        
+        Returns:
+            (分析结果列表, 章节摘要列表)
         """
         results = []
         
@@ -206,7 +210,7 @@ class ContentAnalyzer:
             except Exception as e:
                 logger.error(f"❌ {analysis_type.value} 汇总分析失败: {e}")
         
-        return results
+        return results, chapter_summaries  # 🆕 同时返回章节摘要
     
     async def _sampling_analysis(
         self,
@@ -341,22 +345,22 @@ class ContentAnalyzer:
         chapter: ChapterInfo
     ) -> Dict[str, Any]:
         """
-        提取单章摘要
+        提取单章摘要（增强版 - 支持细纲生成）
         
-        输入：单章内容（最多2000字）
-        输出：结构化摘要
+        输入：单章内容（最多3000字，确保信息完整）
+        输出：结构化摘要 + 细纲关键要素
         """
-        # 截取章节内容（智能截断）
-        content = self._smart_truncate(chapter.content or "", 2000)
+        # 截取章节内容（增加到3000字以获取更完整信息）
+        content = self._smart_truncate(chapter.content or "", 3000)
         
-        prompt = f"""请分析以下章节内容，提取关键信息。
+        prompt = f"""请深度分析以下章节内容，提取完整的情节要素（用于续写参考）。
 
 【第{chapter.number}章 {chapter.title}】
 {content}
 
-请以JSON格式输出：
+请以JSON格式输出（每个字段都很重要，请认真填写）：
 {{
-    "summary": "章节摘要（200-300字，详细概括本章完整情节发展，包括起因、经过、结果）",
+    "summary": "章节摘要（300-400字，详细概括本章完整情节发展，包括起因、经过、结果、人物状态变化）",
     "characters_appeared": ["本章出场的人物姓名"],
     "key_events": [
         "关键事件1（30字以内，包含谁做了什么、结果如何）",
@@ -366,20 +370,48 @@ class ContentAnalyzer:
         "关键事件5"
     ],
     "setting": "主要场景/地点（20字以内）",
-    "conflict": "本章冲突或悬念（50字以内，描述矛盾点及走向）",
-    "emotion_tone": "情感基调（如：紧张/轻松/悲伤/燃血/感人）"
+    
+    "scene_goal": "场景目标（40字以内，格式：[地点] + [人物] + [要达成什么]）",
+    
+    "conflict_arc": {{
+        "trigger": "冲突起因（30字以内）",
+        "escalation": "冲突升级（30字以内，主角陷入困境或发现转机）",
+        "resolution": "冲突结果（30字以内，本章如何收尾）"
+    }},
+    
+    "emotion_curve": "情绪曲线（格式：起点情绪→转折情绪→终点情绪，如：平静→紧张→释然）",
+    
+    "highlight": {{
+        "type": "本章爽点/高潮类型（打脸/升级/获得/反转/危机/无）",
+        "description": "爽点具体内容（30字以内）",
+        "intensity": "强度（1-5星）"
+    }},
+    
+    "ending_hook": {{
+        "type": "结尾钩子类型（悬念/危机/反转/机遇/无）",
+        "content": "钩子具体内容（30字以内）"
+    }},
+    
+    "gains": {{
+        "character_gains": "主角收获（能力/物品/关系/信息，30字以内）",
+        "plot_progress": "主线推进（埋设/揭示了什么伏笔或线索，30字以内）"
+    }},
+    
+    "foreshadowing": ["本章埋设或回收的伏笔（可选，最多3个）"]
 }}
 
 注意：
-1. 摘要要完整详细，包含故事的来龙去脉
+1. 摘要要完整详细，包含故事的来龙去脉和人物状态变化
 2. 人物只列出明确出场的，不要猜测
 3. 关键事件最多5个，按重要性排序
-4. 场景要具体到地名"""
+4. 若本章无明显爽点/钩子，type填"无"，其他字段填"本章为过渡/铺垫章节"
+5. 冲突发展要体现起承转合
+6. 情绪曲线要准确反映读者阅读时的情感变化"""
 
         result = await self._call_llm_with_retry(prompt, TaskType.BOOK_ANALYSIS)
         parsed = self._parse_json_response(result)
         
-        # 确保必要字段存在
+        # 确保必要字段存在（兼容旧格式 + 新增细纲字段）
         return {
             "chapter_number": chapter.number,
             "title": chapter.title,
@@ -387,6 +419,15 @@ class ContentAnalyzer:
             "characters_appeared": parsed.get("characters_appeared", []),
             "key_events": parsed.get("key_events", []),
             "setting": parsed.get("setting", ""),
+            # 🆕 细纲关键字段
+            "scene_goal": parsed.get("scene_goal", ""),
+            "conflict_arc": parsed.get("conflict_arc", {"trigger": "", "escalation": "", "resolution": ""}),
+            "emotion_curve": parsed.get("emotion_curve", ""),
+            "highlight": parsed.get("highlight", {"type": "无", "description": "", "intensity": "1"}),
+            "ending_hook": parsed.get("ending_hook", {"type": "无", "content": ""}),
+            "gains": parsed.get("gains", {"character_gains": "", "plot_progress": ""}),
+            "foreshadowing": parsed.get("foreshadowing", []),
+            # 兼容旧字段
             "conflict": parsed.get("conflict", ""),
             "emotion_tone": parsed.get("emotion_tone", "")
         }
@@ -616,13 +657,23 @@ class ContentAnalyzer:
             )
             timeline_text = json.dumps(sampled, ensure_ascii=False, indent=1)
         
-        prompt = f"""基于以下全书情节线，分析整体情节架构。
+        prompt = f"""基于以下全书情节线，分析整体情节架构并提取故事概念。
 
 【情节时间线（共{total}章）】
 {timeline_text}
 
-请分析并输出JSON:
+请分析并输出JSON（包含故事概念六部分 + 情节架构）:
 {{
+    "concept": {{
+        "logline": "一句话卖点（30-60字，概括主角类型+核心能力+主要对手+最具爽感的目标）",
+        "short_title": "日志标题（4-10字的简短名称）",
+        "summary": "概念摘要（80-150字，介绍主角身份、困境、目标、阻力、世界观钩子）",
+        "genre": "主题材（如：玄幻修真/都市奇能/科幻末世）",
+        "sub_genre": "子流派（如：系统流/穿越流/无限流）",
+        "core_tags": ["标签1", "标签2", "标签3"],
+        "core_conflict": "核心冲突描述（谁对谁，什么利益/观念矛盾）",
+        "emotional_tone": "情感基调（爽文逆袭/黑暗现实/甜宠成长/悬疑惊悚）"
+    }},
     "main_plot": "主线剧情概述（200字）",
     "plot_arcs": [
         {{
@@ -649,9 +700,10 @@ class ContentAnalyzer:
 }}
 
 注意：
-1. 根据情感基调变化识别剧情节奏
-2. 转折点通常伴随冲突升级
-3. 分析故事结构的起承转合"""
+1. 故事概念部分要突出卖点和吸引力
+2. 核心标签至少包含1个反套路/细分创新标签
+3. 根据情感基调变化识别剧情节奏
+4. 转折点通常伴随冲突升级"""
 
         # 🆕 使用qwen-long进行汇总分析
         result = await self._call_qwen_long(prompt)
@@ -759,6 +811,8 @@ class ContentAnalyzer:
             "description": "人物简介（50字以内）",
             "personality": ["性格特点1", "性格特点2"],
             "abilities": ["能力/技能"],
+            "faction": "所属势力/门派/组织（如有）",
+            "arc": "人物发展轨迹描述（30字以内）",
             "first_appearance_chapter": 1,
             "importance_score": 0.9
         }}
@@ -768,6 +822,7 @@ class ContentAnalyzer:
             "name": "人物姓名",
             "role": "配角类型",
             "description": "人物简介",
+            "faction": "所属势力（如有）",
             "relationship_to_main": "与主角的关系"
         }}
     ],
@@ -791,7 +846,8 @@ class ContentAnalyzer:
 注意：
 1. 主角importance_score应为0.9-1.0
 2. 只提取明确出现的人物，不要猜测
-3. 人物关系要基于文本证据"""
+3. 人物关系要基于文本证据
+4. 每个人物的faction字段很重要，请仔细提取"""
 
         result = await self._call_llm_with_retry(prompt, TaskType.BOOK_ANALYSIS)
         parsed = self._parse_json_response(result)
@@ -1341,6 +1397,39 @@ class ContentAnalyzer:
         # 返回原始文本包装
         logger.warning("无法解析JSON响应，返回原始文本")
         return {"raw_response": response, "parse_error": True}
+    
+    # ==================== 快速分析方法 ====================
+    
+    async def quick_analyze(
+        self,
+        chapters: List[ChapterInfo]
+    ) -> Dict[str, Any]:
+        """
+        快速分析（只提取关键信息）
+        
+        用于预览和快速判断
+        """
+        # 只取前5章分析
+        samples = chapters[:5]
+        content = self._build_chapter_summary(samples, 500)
+        
+        prompt = f"""请快速分析以下小说开头，提取关键信息。
+
+【小说开头】
+{content}
+
+请以JSON格式简要输出：
+{{
+    "genre": "类型判断",
+    "main_character": "主角姓名",
+    "setting": "背景设定（20字）",
+    "initial_conflict": "初始冲突（30字）",
+    "writing_style": "风格描述（20字）",
+    "quality_assessment": "质量评估（优秀/良好/一般/较差）"
+}}"""
+
+        result = await self._call_llm_with_retry(prompt, TaskType.BOOK_ANALYSIS)
+        return self._parse_json_response(result)
     
     # ==================== 快速分析方法 ====================
     

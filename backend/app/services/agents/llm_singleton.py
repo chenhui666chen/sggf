@@ -16,13 +16,10 @@ import os
 import logging
 import httpx
 
-# 🛡️ 全局禁用代理配置 - 确保直连API
-os.environ["HTTP_PROXY"] = ""
-os.environ["HTTPS_PROXY"] = ""
-os.environ["http_proxy"] = ""
-os.environ["https_proxy"] = ""
-os.environ["ALL_PROXY"] = ""
-os.environ["all_proxy"] = ""
+# 🛡️ 全局禁用代理配置 - 确保直连API（必须删除而非设为空字符串）
+for proxy_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']:
+    if proxy_var in os.environ:
+        del os.environ[proxy_var]
 
 # 创建禁用代理的httpx客户端
 def _create_no_proxy_client() -> httpx.Client:
@@ -30,7 +27,8 @@ def _create_no_proxy_client() -> httpx.Client:
     return httpx.Client(
         proxy=None,  # 明确禁用代理
         timeout=httpx.Timeout(120.0, connect=30.0),  # 超时配置
-        follow_redirects=True
+        follow_redirects=True,
+        trust_env=False  # 🛡️ 不读取环境变量中的代理配置
     )
 
 

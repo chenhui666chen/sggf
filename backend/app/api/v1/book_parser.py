@@ -630,7 +630,41 @@ async def _do_analyze_book(book_id: int):
             update_task_status(book_id, "analyzing", progress, message)
         
         # 执行分析
-        results = await analyzer.analyze_all(chapters, on_progress=on_progress)
+        results, chapter_summaries = await analyzer.analyze_all(chapters, on_progress=on_progress)
+        
+        # 🆕 保存章节细纲到 BookChapter 表
+        if chapter_summaries:
+            for summary in chapter_summaries:
+                chapter_num = summary.get("chapter_number")
+                if chapter_num:
+                    book_chapter = db.query(BookChapter).filter(
+                        BookChapter.book_id == book_id,
+                        BookChapter.chapter_number == chapter_num
+                    ).first()
+                    if book_chapter:
+                        # 保存基础摘要
+                        book_chapter.summary = summary.get("summary", "")
+                        book_chapter.key_events = json.dumps(
+                            summary.get("key_events", []), ensure_ascii=False
+                        )
+                        book_chapter.appearing_characters = json.dumps(
+                            summary.get("characters_appeared", []), ensure_ascii=False
+                        )
+                        # 🆕 保存完整细纲数据
+                        outline_data = {
+                            "scene_goal": summary.get("scene_goal", ""),
+                            "conflict_arc": summary.get("conflict_arc", {}),
+                            "emotion_curve": summary.get("emotion_curve", ""),
+                            "highlight": summary.get("highlight", {}),
+                            "ending_hook": summary.get("ending_hook", {}),
+                            "gains": summary.get("gains", {}),
+                            "foreshadowing": summary.get("foreshadowing", []),
+                            "setting": summary.get("setting", ""),
+                            "conflict": summary.get("conflict", ""),
+                            "emotion_tone": summary.get("emotion_tone", "")
+                        }
+                        book_chapter.outline_data = json.dumps(outline_data, ensure_ascii=False)
+            logger.info(f"✅ 保存了 {len(chapter_summaries)} 章细纲数据")
         
         # 删除旧的分析结果
         db.query(BookAnalysis).filter(BookAnalysis.book_id == book_id).delete()
