@@ -431,8 +431,8 @@ async def execute_stage_async(
     # 🔧 添加请求日志
     logger.info(f"📥 收到异步执行请求: project_id={project_id}, stage={stage}, streaming={enable_streaming}")
 
-    # 🆕 判断是否支持流式输出（concept/content/review/iteration 阶段都支持）
-    streaming_stages = ["concept", "content", "review", "iteration"]
+    # 🆕 判断是否支持流式输出（concept/structure/content/review/iteration 阶段都支持）
+    streaming_stages = ["concept", "structure", "content", "review", "iteration"]
     streaming_enabled = (
         enable_streaming and
         stage in streaming_stages and
@@ -1761,6 +1761,102 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                         "characters": character_result
                     }
 
+                elif stage_enum == StageType.STRUCTURE:
+                    # 结构设计阶段 - 流式输出大纲
+                    logger.info(f"   🌊 结构设计阶段开始流式输出...")
+                    
+                    # 获取概念开发阶段的成果
+                    concept_data = ""
+                    world_setting = ""
+                    characters = ""
+                    if context_result:
+                        concept_data = context_result[0] or ""
+                        world_setting = context_result[1] or ""
+                        characters = context_result[2] or ""
+                        # 尝试解析 JSON
+                        try:
+                            if concept_data.startswith('"'):
+                                concept_data = json.loads(concept_data)
+                            if world_setting.startswith('"'):
+                                world_setting = json.loads(world_setting)
+                            if characters.startswith('"') or characters.startswith('['):
+                                characters = json.loads(characters)
+                                if isinstance(characters, list):
+                                    characters = "\n".join(str(c) for c in characters)
+                        except:
+                            pass
+                    
+                    await ws_manager.send_stream_start(project_id, stage_enum.value, "正在生成情节大纲...")
+                    
+                    structure_system_prompt = """你是一名"情节架构师"，需要基于故事概念、世界观和人物设定，设计详细的情节大纲。
+
+【要求】
+1. 基于已有的概念、世界观和人物设定进行大纲设计
+2. 保持与前期设定的一致性
+3. 设计清晰的情节线索和冲突发展
+4. 为第一章提供具体的情节指导
+5. 输出详细的情节大纲，包括主线情节、支线情节、关键节点等
+
+【输出格式】
+请按以下结构输出情节大纲：
+
+## 一、主线情节
+- 描述主要情节线索和发展脉络
+
+## 二、第一章大纲
+- 章节标题建议
+- 开场设定
+- 主要情节
+- 关键冲突
+- 章节结尾
+
+## 三、后续章节规划（可选）
+- 概述后续几章的大致发展方向"""
+                    
+                    structure_user_prompt = f"""请基于以下设定生成情节大纲：
+
+【故事概念】
+{concept_data}
+
+【世界观设定】
+{world_setting}
+
+【人物设定】
+{characters}
+
+【用户需求】
+{requirement}"""
+                    
+                    # 执行结构设计的流式调用
+                    structure_result = ""
+                    async def on_structure_chunk(chunk: str, idx: int):
+                        nonlocal structure_result
+                        structure_result += chunk
+                        # 发送到前端
+                        await ws_manager.send_stream_chunk(
+                            project_id=project_id,
+                            stage=stage_enum.value,
+                            chunk=chunk,
+                            chunk_index=idx,
+                            is_complete=False
+                        )
+                    
+                    await streaming_service.generate_chapter_streaming(
+                        prompt=structure_user_prompt,
+                        system_prompt=structure_system_prompt,
+                        on_chunk=on_structure_chunk,
+                        temperature=0.7,
+                        model="deepseek-reasoner",
+                    )
+                    
+                    result_str = structure_result
+                    logger.info(f"   ✅ 结构设计阶段流式输出完成，总长度: {len(result_str)} 字符")
+                    
+                    # 🔧 将结构设计结果存储到output_data，用于后续保存
+                    output_data = {
+                        "plot_outline": structure_result
+                    }
+
                 elif stage_enum == StageType.REVIEW:
                     # 质量评审阶段
                     chapter_draft = ""
@@ -2757,7 +2853,7 @@ async def save_stage_content(
                     logger.info(f"   📍 下一阶段: {next_stage_name}")
                     
                     # 🆕 根据阶段判断是否启用流式输出
-                    streaming_stages = [StageType.CONCEPT, StageType.CONTENT, StageType.REVIEW, StageType.ITERATION]
+                    streaming_stages = [StageType.CONCEPT, StageType.STRUCTURE, StageType.CONTENT, StageType.REVIEW, StageType.ITERATION]
                     streaming_enabled = next_stage_enum in streaming_stages
                     
                     # 启动后台任务

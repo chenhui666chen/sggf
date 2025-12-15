@@ -1070,7 +1070,15 @@ export default function WorkflowControlPage() {
       if (stageType === 'concept') {
         // 根据target字段决定更新哪个状态
         if (data.extra && data.extra.target) {
-          switch (data.extra.target) {
+          const target = data.extra.target
+          
+          // 🆕 自动切换视图：只在target变化时切换，避免频繁切换
+          if (target !== selectedConceptView) {
+            console.log(`🔀 概念阶段视图自动切换: ${selectedConceptView} → ${target}`)
+            setSelectedConceptView(target as 'concept' | 'world' | 'character')
+          }
+          
+          switch (target) {
             case 'concept':
               setConceptContent(prev => prev + data.chunk)
               break;
@@ -1086,6 +1094,9 @@ export default function WorkflowControlPage() {
         } else {
           setConceptContent(prev => prev + data.chunk)
         }
+      } else if (stageType === 'structure') {
+        // 🆕 结构设计阶段：更新情节大纲
+        setStructureContent(prev => prev + data.chunk)
       } else if (stageType === 'content') {
         setContentDraftContent(prev => prev + data.chunk)
       } else if (stageType === 'review') {
@@ -1563,7 +1574,7 @@ export default function WorkflowControlPage() {
       saveMemorySnapshot('stage')
 
       // 🆕 检查是否是支持流式输出的阶段
-      const streamingStages = ['concept', 'content', 'review', 'iteration']
+      const streamingStages = ['concept', 'structure', 'content', 'review', 'iteration']
       const enableStreaming = streamingStages.includes(stage)
 
       // 🆕 流式输出阶段：清空之前的内容，准备接收流式数据
@@ -1573,6 +1584,8 @@ export default function WorkflowControlPage() {
           setConceptContent('')
           setWorldContent('')
           setCharacterContent('')
+        } else if (stage === 'structure') {
+          setStructureContent('')
         } else if (stage === 'content') {
           setContentDraftContent('')
         } else if (stage === 'review') {
