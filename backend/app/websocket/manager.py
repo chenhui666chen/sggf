@@ -118,7 +118,8 @@ class WorkflowWebSocketManager:
         stage: str,
         chunk: str,
         chunk_index: int = 0,
-        is_complete: bool = False
+        is_complete: bool = False,
+        extra: dict | None = None
     ):
         """
         🆕 发送流式输出块（用于实时显示 AI 生成的内容）
@@ -129,6 +130,7 @@ class WorkflowWebSocketManager:
             chunk: 文本块内容
             chunk_index: 块索引（用于前端排序）
             is_complete: 是否为最后一块
+            extra: 额外数据（用于前端区分内容类型等）
         """
         data = {
             'project_id': project_id,
@@ -136,6 +138,7 @@ class WorkflowWebSocketManager:
             'chunk': chunk,
             'chunk_index': chunk_index,
             'is_complete': is_complete,
+            'extra': extra or {},
         }
         await WorkflowWebSocketManager.broadcast_to_project(project_id, 'stream_chunk', data)
 

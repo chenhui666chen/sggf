@@ -1068,7 +1068,24 @@ export default function WorkflowControlPage() {
 
       // 🔄 普通模式：实时更新对应阶段的内容显示（仅更新缓存）
       if (stageType === 'concept') {
-        setConceptContent(prev => prev + data.chunk)
+        // 根据target字段决定更新哪个状态
+        if (data.extra && data.extra.target) {
+          switch (data.extra.target) {
+            case 'concept':
+              setConceptContent(prev => prev + data.chunk)
+              break;
+            case 'world':
+              setWorldContent(prev => prev + data.chunk)
+              break;
+            case 'character':
+              setCharacterContent(prev => prev + data.chunk)
+              break;
+            default:
+              setConceptContent(prev => prev + data.chunk)
+          }
+        } else {
+          setConceptContent(prev => prev + data.chunk)
+        }
       } else if (stageType === 'content') {
         setContentDraftContent(prev => prev + data.chunk)
       } else if (stageType === 'review') {
@@ -1552,7 +1569,11 @@ export default function WorkflowControlPage() {
       // 🆕 流式输出阶段：清空之前的内容，准备接收流式数据
       if (enableStreaming) {
         console.log(`🌊 阶段 ${stage} 支持流式输出，清空之前的内容`)
-        if (stage === 'content') {
+        if (stage === 'concept') {
+          setConceptContent('')
+          setWorldContent('')
+          setCharacterContent('')
+        } else if (stage === 'content') {
           setContentDraftContent('')
         } else if (stage === 'review') {
           setReviewReportContent('')
@@ -1560,6 +1581,7 @@ export default function WorkflowControlPage() {
           setFinalVersionContent('')
         }
       }
+
 
       const response = await fetch('/api/v1/workflow/execute-stage-async', {
         method: 'POST',

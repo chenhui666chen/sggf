@@ -53,6 +53,7 @@ export interface StreamChunkData {
   chunk: string
   chunk_index: number
   is_complete: boolean
+  extra?: Record<string, any> // 添加额外数据字段，用于传递target等信息
 }
 
 export interface StreamStartData {

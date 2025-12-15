@@ -431,9 +431,8 @@ async def execute_stage_async(
     # 🔧 添加请求日志
     logger.info(f"📥 收到异步执行请求: project_id={project_id}, stage={stage}, streaming={enable_streaming}")
 
-    # 🆕 判断是否支持流式输出（仅 content/review/iteration 阶段）
-    # 🔧 修复：CONCEPT 阶段需要结构化数据(concept/worldview/characters)，不适合流式模式
-    streaming_stages = ["content", "review", "iteration"]
+    # 🆕 判断是否支持流式输出（concept/content/review/iteration 阶段都支持）
+    streaming_stages = ["concept", "content", "review", "iteration"]
     streaming_enabled = (
         enable_streaming and
         stage in streaming_stages and
@@ -1610,6 +1609,156 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
 
 请开始创作第一章内容："""
 
+                elif stage_enum == StageType.CONCEPT:
+                    # 概念开发阶段 - 分三个子阶段流式输出
+                    logger.info(f"   🌊 概念开发阶段开始流式输出...")
+                    
+                    # 1. 故事概念生成
+                    await ws_manager.send_stream_start(project_id, stage_enum.value, "正在生成故事概念...")
+                    
+                    concept_system_prompt = """你是一名擅长网文结构设计的\"创意总监\"，需要为一个新项目生成【故事概念】和初步【世界观设定】。
+
+【总体要求】
+1. 先完成\"故事概念\"六段标准输出，再给出一个与之匹配的高度概括版世界观（可简略）。
+2. 保持网文向：强调爽点潜力、冲突强度和持续升级空间。
+
+——————————
+一、请先生成【故事概念】，严格按以下六个部分输出（用 Markdown 粗体标记小标题）：
+
+1. **一句话卖点（Logline）**：
+- 用一句极具吸引力的网文式概括，包含主角类型、核心能力/优势、主要对手/系统，以及最具爽感的长期目标或爆点。
+
+2. **日志标题（短标题）**：
+- 用 4–10 个字给出一个便于读者记忆的项目名，偏网文风格。
+
+3. **概念摘要（80–150字）**：
+- 简要交代主角身份、初始困境、长期目标、主要阻力，以及世界观的一个独特钩子。
+
+4. **题材与流派（主题材/子流派）**：
+- 主题材例如：玄幻修真 / 反乌托邦科幻 / 历史权谋 / 都市奇能 等；
+
+5. **核心标签（3–6个）**：
+- 用 3–6 个标签概括作品的核心气质，例如：#系统流 #无敌流 #热血 #成长 #复仇 #智斗
+
+6. **核心冲突与情感基调**：
+- 用 100–200 字说明主角面临的长期核心冲突（如：弱小时被欺压 vs 强大后遭围剿），以及全文的整体情绪氛围（如：前期压抑但充满希望，后期高燃且快节奏）。
+
+二、接着生成【世界观设定】（简略版）
+- 用 100–200 字给出最核心的世界观设定，包括世界背景、基本规则、主要势力等。
+
+请严格按照上述顺序与小标题输出，不要添加其他额外说明。"""
+                    
+                    concept_user_prompt = f"""请为以下项目生成故事概念：
+
+【项目题目】：未命名项目
+【题材类型】：通用题材
+【用户初始想法】：{requirement or "暂无"}"""
+                    
+                    # 执行故事概念生成的流式调用
+                    concept_result = ""
+                    async def on_concept_chunk(chunk: str, idx: int):
+                        nonlocal concept_result
+                        concept_result += chunk
+                        # 发送到前端的conceptContent状态
+                        await ws_manager.send_stream_chunk(
+                            project_id=project_id,
+                            stage=stage_enum.value,
+                            chunk=chunk,
+                            chunk_index=idx,
+                            is_complete=False,
+                            extra={'target': 'concept'}
+                        )
+                    
+                    await streaming_service.generate_chapter_streaming(
+                        prompt=concept_user_prompt,
+                        system_prompt=concept_system_prompt,
+                        on_chunk=on_concept_chunk,
+                        temperature=0.9,
+                        model="qwen-max",
+                    )
+                    
+                    # 2. 世界观设定生成
+                    await ws_manager.send_stream_start(project_id, stage_enum.value, "正在生成世界观设定...")
+                    
+                    world_system_prompt = """你是一名\"世界观架构师\"，需要基于已有的故事概念，生成详细的世界观设定。
+
+【要求】
+1. 基于故事概念中的设定线索进行扩展
+2. 保持与故事概念的一致性
+3. 输出详细的世界观设定，包括世界背景、基本规则、主要势力等"""
+                    
+                    world_user_prompt = f"""请基于以下故事概念生成世界观设定：
+
+{concept_result}"""
+                    
+                    # 执行世界观设定生成的流式调用
+                    world_result = ""
+                    async def on_world_chunk(chunk: str, idx: int):
+                        nonlocal world_result
+                        world_result += chunk
+                        # 发送到前端的worldContent状态
+                        await ws_manager.send_stream_chunk(
+                            project_id=project_id,
+                            stage=stage_enum.value,
+                            chunk=chunk,
+                            chunk_index=idx,
+                            is_complete=False,
+                            extra={'target': 'world'}
+                        )
+                    
+                    await streaming_service.generate_chapter_streaming(
+                        prompt=world_user_prompt,
+                        system_prompt=world_system_prompt,
+                        on_chunk=on_world_chunk,
+                        temperature=0.7,
+                        model="deepseek-reasoner",
+                    )
+                    
+                    # 3. 人物设定生成
+                    await ws_manager.send_stream_start(project_id, stage_enum.value, "正在生成人物设定...")
+                    
+                    character_system_prompt = """你是一名\"人物设计师\"，需要基于故事概念和世界观设定，设计主要人物。
+
+【要求】
+1. 设计主角、配角和反派
+2. 保持与故事概念和世界观的一致性
+3. 输出详细的人物设定"""
+                    
+                    character_user_prompt = f"""请基于以下故事概念和世界观设定生成人物设定：
+
+【故事概念】
+{concept_result}
+
+【世界观设定】
+{world_result}"""
+                    
+                    # 执行人物设定生成的流式调用
+                    character_result = ""
+                    async def on_character_chunk(chunk: str, idx: int):
+                        nonlocal character_result
+                        character_result += chunk
+                        # 发送到前端的characterContent状态
+                        await ws_manager.send_stream_chunk(
+                            project_id=project_id,
+                            stage=stage_enum.value,
+                            chunk=chunk,
+                            chunk_index=idx,
+                            is_complete=False,
+                            extra={'target': 'character'}
+                        )
+                    
+                    await streaming_service.generate_chapter_streaming(
+                        prompt=character_user_prompt,
+                        system_prompt=character_system_prompt,
+                        on_chunk=on_character_chunk,
+                        temperature=0.7,
+                        model="deepseek-reasoner",
+                    )
+                    
+                    # 组合结果
+                    result_str = f"{concept_result}\n\n{world_result}\n\n{character_result}"
+                    logger.info(f"   ✅ 概念开发阶段流式输出完成，总长度: {len(result_str)} 字符")
+
                 elif stage_enum == StageType.REVIEW:
                     # 质量评审阶段
                     chapter_draft = ""
@@ -1637,9 +1786,9 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
 - 对话与叙述比例是否合理（建议30-50%对话）？
 
 ### 3. 钩子效果（权重15%）
-- 章节开头是否吸引人？（是否避免了"醒来/阳光照进"的套路开头）
+- 章节开头是否吸引人？（是否避免了\"醒来/阳光照进\"的套路开头）
 - 章节结尾是否有悬念/钩子？
-- 读者是否有"想点下一章"的冲动？
+- 读者是否有\"想点下一章\"的冲动？
 
 ### 4. 代入感（权重15%）
 - 主角视角是否清晰？
@@ -1772,14 +1921,16 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                 elif stage_enum == StageType.ITERATION:
                     stage_model = "deepseek-reasoner"   # 迭代优化（通用入口）：R1（专用生成下一章流程已改为max改稿+R1打分）
                 
-                result_str = await streaming_service.generate_chapter_streaming(
-                    prompt=user_prompt,
-                    system_prompt=system_prompt,
-                    on_chunk=on_stream_chunk,
-                    temperature=0.7,
-                    model=stage_model,
-                )
-                logger.info(f"   ✅ 流式 LLM 调用完成，生成 {len(result_str)} 字符")
+                # 对于非CONCEPT阶段，执行流式调用
+                if stage_enum != StageType.CONCEPT:
+                    result_str = await streaming_service.generate_chapter_streaming(
+                        prompt=user_prompt,
+                        system_prompt=system_prompt,
+                        on_chunk=on_stream_chunk,
+                        temperature=0.7,
+                        model=stage_model,
+                    )
+                    logger.info(f"   ✅ 流式 LLM 调用完成，生成 {len(result_str)} 字符")
 
                 # 🆕 迭代优化阶段：清理输出内容 + 摘要压缩保护
                 if stage_enum == StageType.ITERATION and result_str:
