@@ -703,7 +703,6 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
 
                 def safe_text(value):
                     try:
-                        import json
                         val = json.loads(value) if value else ""
                         if isinstance(val, (list, dict)):
                             val = json.dumps(val, ensure_ascii=False)
@@ -886,8 +885,6 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
         
         # 🆕 保存阶段输出到 project_settings（关键修复！）
         try:
-            import json
-            
             if stage_enum == StageType.CONCEPT:
                 # 保存概念开发结果（支持评审/重生的目标字段选择）
                 output_data = stage_output.output if isinstance(stage_output.output, dict) else {}
@@ -903,7 +900,6 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
                 # 安全解析现有JSON字符串
                 def safe_json(value, default):
                     try:
-                        import json
                         if value is None:
                             return default
                         parsed = json.loads(value)
@@ -1508,7 +1504,6 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                         characters = context_result[2] or ""
                         # 尝试解析 JSON
                         try:
-                            import json
                             if plot_outline.startswith('"'):
                                 plot_outline = json.loads(plot_outline)
                             if world_setting.startswith('"'):
@@ -1758,6 +1753,13 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                     # 组合结果
                     result_str = f"{concept_result}\n\n{world_result}\n\n{character_result}"
                     logger.info(f"   ✅ 概念开发阶段流式输出完成，总长度: {len(result_str)} 字符")
+                    
+                    # 🔧 将概念阶段的三个部分数据存储到output_data，用于后续保存
+                    output_data = {
+                        "concept": concept_result,
+                        "world_setting": world_result,
+                        "characters": character_result
+                    }
 
                 elif stage_enum == StageType.REVIEW:
                     # 质量评审阶段
@@ -1765,7 +1767,6 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                     if context_result:
                         chapter_draft = context_result[4] or ""
                         try:
-                            import json
                             if chapter_draft.startswith('"'):
                                 chapter_draft = json.loads(chapter_draft)
                         except:
@@ -1859,7 +1860,6 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                         chapter_draft = context_result[4] or ""
                         review_report = context_result[5] or ""
                         try:
-                            import json
                             if chapter_draft.startswith('"'):
                                 chapter_draft = json.loads(chapter_draft)
                             if review_report.startswith('"'):
@@ -2011,7 +2011,37 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
 
         # 🔧 确保 output_data 存在（防止未定义错误）
         if 'output_data' not in locals():
-            output_data = {}
+            # 🆕 如果是流式模式，需要从 result_str 中提取结构化数据
+            if stage_enum == StageType.CONCEPT and result_str:
+                # 尝试从 result_str 中提取三个部分：故事概念、世界观、人物
+                logger.info(f"   🔍 流式模式，开始解析 CONCEPT 结果...")
+                import re
+                
+                # 提取世界观部分
+                world_pattern = r'(?:###?\s*二、世界观设定|###?\s*2\.\s*世界观设定|###\s*世界观设定)(.*?)(?=###?\s*三、人物设定|###?\s*3\.\s*人物设定|$)'
+                world_match = re.search(world_pattern, result_str, re.DOTALL | re.IGNORECASE)
+                world_setting = world_match.group(1).strip() if world_match else ""
+                
+                # 提取人物部分
+                char_pattern = r'(?:###?\s*三、人物设定|###?\s*3\.\s*人物设定|###\s*人物设定)(.*?)$'
+                char_match = re.search(char_pattern, result_str, re.DOTALL | re.IGNORECASE)
+                characters = char_match.group(1).strip() if char_match else ""
+                
+                # 故事概念是从开头到世界观之前的部分
+                concept_pattern = r'^(.*?)(?=###?\s*二、世界观设定|###?\s*2\.\s*世界观设定|###\s*世界观设定)'
+                concept_match = re.search(concept_pattern, result_str, re.DOTALL | re.IGNORECASE)
+                concept = concept_match.group(1).strip() if concept_match else result_str
+                
+                logger.info(f"   🔍 提取结果: concept={len(concept)}字, world={len(world_setting)}字, characters={len(characters)}字")
+                
+                output_data = {
+                    "concept": concept,
+                    "worldview": world_setting,
+                    "world_setting": world_setting,
+                    "characters": characters
+                }
+            else:
+                output_data = {}
 
         # 更新任务状态为完成
         update_query = text("""
@@ -2158,6 +2188,12 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                 db.commit()
         except Exception as save_error:
             logger.error(f"   ⚠️  保存到 project_settings 失败: {save_error}")
+            # 🆕 添加详细堆栈跟踪
+            import traceback
+            logger.error(f"   🔍 堆栈跟踪:\n{traceback.format_exc()}")
+            # 🆕 打印关键变量
+            logger.error(f"   🔍 stage_enum={stage_enum}, project_id={project_id}, result_str_len={len(result_str) if result_str else 0}")
+            logger.error(f"   🔍 output_data={type(output_data)}, output_data_keys={output_data.keys() if isinstance(output_data, dict) else 'not dict'}")
 
         # 推送任务完成通知
         await ws_manager.send_task_complete(
