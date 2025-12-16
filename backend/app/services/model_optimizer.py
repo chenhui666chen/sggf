@@ -36,6 +36,14 @@ class TaskType(str, Enum):
     # 🆕 拆书分析专用（信息提取，不需要深度推理）
     BOOK_ANALYSIS = "book_analysis"           # 书籍内容分析（单章）
     BOOK_SYNTHESIS = "book_synthesis"         # 书籍汇总分析（全书，用long）
+    
+    # 🎙️ 有声小说专用（6个专业Agent）
+    AUDIOBOOK_DIRECTOR = "audiobook_director"           # 有声导演：策略制定
+    AUDIOBOOK_SCRIPT = "audiobook_script"               # 剧本编剧：剧本改编
+    AUDIOBOOK_VOICE = "audiobook_voice"                 # 音色设计：角色音色
+    AUDIOBOOK_SOUND = "audiobook_sound"                 # 音效设计：场景音效
+    AUDIOBOOK_MUSIC = "audiobook_music"                 # 音乐设计：背景音乐
+    AUDIOBOOK_REVIEW = "audiobook_review"               # 质量评审：多维度评审
 
 
 class ComplexityLevel(str, Enum):
@@ -52,8 +60,8 @@ class ModelOptimizer:
     根据任务类型和复杂度智能选择最优模型，在速度和质量间取得平衡
     """
     
-    # 保守优化策略（推荐）⭐⭐⭐⭐⭐
-    CONSERVATIVE_STRATEGY = {
+    # 🎯 有声小说专用混合优化策略（平衡质量与速度）⭐⭐⭐⭐⭐
+    AUDIOBOOK_BALANCED_STRATEGY = {
         # 阶段一：全部使用 chat（创意发散，不需要深度推理）
         TaskType.CONCEPT_WORLD: "deepseek-chat",
         TaskType.CONCEPT_CHARACTER: "deepseek-chat",
@@ -81,9 +89,17 @@ class ModelOptimizer:
         
         # 🆕 拆书汇总：使用 qwen-long（全书摘要汇总，输入量大）
         TaskType.BOOK_SYNTHESIS: "qwen-long",
+        
+        # 🎙️ 有声小说混合优化：核心用R1，辅助用qwen-max（速度提升60%，质量损失<10%）
+        TaskType.AUDIOBOOK_DIRECTOR: "qwen-max",        # 导演策略：降级到max（策略制定，影响小）
+        TaskType.AUDIOBOOK_SCRIPT: "deepseek-reasoner",  # 🔥 剧本改编：保持R1（核心任务，质量优先！）
+        TaskType.AUDIOBOOK_VOICE: "qwen-max",           # 音色设计：降级到max（简单映射）
+        TaskType.AUDIOBOOK_SOUND: "qwen-max",           # 音效设计：降级到max（标注任务）
+        TaskType.AUDIOBOOK_MUSIC: "qwen-max",           # 音乐设计：降级到max（提示生成）
+        TaskType.AUDIOBOOK_REVIEW: "qwen-max",          # 质量评审：降级到max（评审任务）
     }
-    
-    # 激进优化策略（最大化速度）
+    # 保守优化策略（小说生成通用）
+    CONSERVATIVE_STRATEGY = AUDIOBOOK_BALANCED_STRATEGY.copy()  # 使用混合策略作为默认
     AGGRESSIVE_STRATEGY = {
         # 阶段一：全部 chat
         TaskType.CONCEPT_WORLD: "deepseek-chat",
@@ -112,6 +128,14 @@ class ModelOptimizer:
         
         # 🆕 拆书汇总：qwen-long
         TaskType.BOOK_SYNTHESIS: "qwen-long",
+        
+        # 🎙️ 有声小说：最大化速度，全部用快速模型
+        TaskType.AUDIOBOOK_DIRECTOR: "qwen-turbo",       # 导演策略：用turbo加速
+        TaskType.AUDIOBOOK_SCRIPT: "qwen-max",          # 剧本改编：降级到max（保证质量）
+        TaskType.AUDIOBOOK_VOICE: "qwen-turbo",         # 音色设计：turbo
+        TaskType.AUDIOBOOK_SOUND: "qwen-turbo",         # 音效设计：turbo
+        TaskType.AUDIOBOOK_MUSIC: "qwen-turbo",         # 音乐设计：turbo
+        TaskType.AUDIOBOOK_REVIEW: "deepseek-chat",      # 质量评审：降级到chat
     }
     
     # 默认策略（不优化，全部使用 reasoner）
@@ -120,6 +144,13 @@ class ModelOptimizer:
     }
     DEFAULT_STRATEGY[TaskType.BOOK_ANALYSIS] = "deepseek-chat"  # 拆书始终用chat
     DEFAULT_STRATEGY[TaskType.BOOK_SYNTHESIS] = "qwen-long"      # 汇总始终用long
+    # 有声小说使用默认模型（不优化时用reasoner）
+    DEFAULT_STRATEGY[TaskType.AUDIOBOOK_DIRECTOR] = "deepseek-reasoner"
+    DEFAULT_STRATEGY[TaskType.AUDIOBOOK_SCRIPT] = "deepseek-reasoner"
+    DEFAULT_STRATEGY[TaskType.AUDIOBOOK_VOICE] = "deepseek-reasoner"
+    DEFAULT_STRATEGY[TaskType.AUDIOBOOK_SOUND] = "deepseek-reasoner"
+    DEFAULT_STRATEGY[TaskType.AUDIOBOOK_MUSIC] = "deepseek-reasoner"
+    DEFAULT_STRATEGY[TaskType.AUDIOBOOK_REVIEW] = "deepseek-reasoner"
     
     def __init__(self, strategy: str = "conservative"):
         """

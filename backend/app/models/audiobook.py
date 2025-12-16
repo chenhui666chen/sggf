@@ -1,0 +1,78 @@
+"""
+有声书数据库模型
+"""
+from sqlalchemy import Column, Integer, String, Float, DateTime, Text, JSON, Boolean, ForeignKey
+from sqlalchemy.orm import relationship
+from datetime import datetime
+
+from app.db.base import Base
+
+
+class AudiobookProject(Base):
+    """有声书项目表"""
+    __tablename__ = "audiobook_projects"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    
+    # 状态
+    status = Column(String(20), default="pending")  # pending/processing/completed/failed
+    
+    # 配置
+    tts_provider = Column(String(20), default="aliyun")
+    voice_mapping = Column(JSON, default={})  # {character_name: voice_profile}
+    enable_cache = Column(Boolean, default=True)
+    
+    # 统计
+    total_chapters = Column(Integer, default=0)
+    completed_chapters = Column(Integer, default=0)
+    failed_chapters = Column(Integer, default=0)
+    
+    total_duration = Column(Float, default=0.0)  # 秒
+    total_size = Column(Integer, default=0)  # 字节
+    total_cost = Column(Float, default=0.0)  # 元
+    
+    # 时间
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+    
+    # 关系
+    project = relationship("Project", back_populates="audiobook_projects")
+    chapter_audios = relationship("ChapterAudio", back_populates="audiobook_project", cascade="all, delete-orphan")
+
+
+class ChapterAudio(Base):
+    """章节音频表"""
+    __tablename__ = "chapter_audios"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    audiobook_project_id = Column(Integer, ForeignKey("audiobook_projects.id"), nullable=False)
+    chapter_id = Column(Integer, ForeignKey("chapters.id"), nullable=False)
+    
+    # 新增：任务状态追踪
+    task_id = Column(String(100), nullable=True, index=True)  # 任务ID，用于查询实时状态
+    
+    # 音频信息
+    audio_path = Column(String(500))  # 相对路径或URL
+    duration = Column(Float, default=0.0)  # 秒
+    file_size = Column(Integer, default=0)  # 字节
+    
+    # 元数据
+    segment_count = Column(Integer, default=0)  # 片段数
+    dialogue_count = Column(Integer, default=0)  # 对话数
+    narration_count = Column(Integer, default=0)  # 旁白数
+    character_count = Column(Integer, default=0)  # 参与角色数
+    
+    # 统计
+    generation_time = Column(Float, default=0.0)  # 生成耗时（秒）
+    tts_cost = Column(Float, default=0.0)  # TTS成本（元）
+    cache_hit_rate = Column(Float, default=0.0)  # 缓存命中率
+    
+    # 时间
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # 关系
+    audiobook_project = relationship("AudiobookProject", back_populates="chapter_audios")
+    chapter = relationship("Chapter")
