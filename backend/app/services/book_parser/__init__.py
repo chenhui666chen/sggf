@@ -5,6 +5,7 @@ from .chapter_splitter import ChapterSplitter, ChapterInfo, ChapterType, SplitRe
 from .text_cleaner import TextCleaner, CleanResult
 from .content_analyzer import ContentAnalyzer, AnalysisResult, AnalysisType
 from .project_bridge import ProjectBridge
+from .file_parser import FileParser, FileFormat, ParsedContent
 
 __all__ = [
     # 章节切分
@@ -21,4 +22,8 @@ __all__ = [
     "AnalysisType",
     # 项目桥接
     "ProjectBridge",
+    # 多格式解析
+    "FileParser",
+    "FileFormat",
+    "ParsedContent",
 ]

@@ -7,12 +7,16 @@ import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+# ⚠️ 重要：首先加载环境变量（必须在所有导入之前）
+from dotenv import load_dotenv
+load_dotenv()  # 加载 .env 文件
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.db.base import Base, engine
-from app.api.v1 import auth, projects, chapters, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters, ai_detect, prompt_evolution, ai_trace, book_parser
+from app.api.v1 import auth, projects, chapters, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters, ai_detect, prompt_evolution, ai_trace, book_parser, audiobook, monitoring, script_review
 import socketio
 
 
@@ -70,6 +74,14 @@ logging.getLogger("app.services.prompt_evolution").setLevel(logging.INFO)
 
 logging.info(f"📁 日志文件位置: {log_file}")
 
+# 🔧 导入所有模型（确保在 create_all 之前）
+from app.models import (
+    User, Project, Memory, SettingCollection, SettingItem,
+    Character, CharacterTechnique, Review, KnowledgeGraphEdge,
+    BookSource, BookChapter, BookAnalysis,
+    AudiobookProject, ChapterAudio  # 有声书模型
+)
+
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
 
@@ -113,6 +125,9 @@ app.include_router(ai_detect.router)  # AI 生成检测 API
 app.include_router(ai_trace.router)  # 织文无迹 API
 app.include_router(prompt_evolution.router)  # 提示词进化优化 API（实验性）
 app.include_router(book_parser.router)  # 拆书工具 API
+app.include_router(audiobook.router)  # 耳畔星河 - 有声书生成 API
+app.include_router(monitoring.router)  # 监控与指标 API
+app.include_router(script_review.router)  # 剧本审核与调整 API
 
 
 # 🔌 挂载 Socket.IO

@@ -1,16 +1,25 @@
 """
-MusicComposer - 音乐设计师Agent
+MusicComposer - 音乐设计师Agent（AI增强版）
 
 核心职责：
 1. 设计情绪音乐和主题音乐
 2. 规划音乐的插入时机
 3. 设计音乐与对话的混音关系
+4. **AI生成音乐**（昆仑万维Mureka O1集成）
 """
 
 import logging
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
+
+# 导入AI音乐生成器
+try:
+    from ..ai_music import AIMusicGenerator, MusicGenerationRequest, MusicStyle
+    AI_MUSIC_AVAILABLE = True
+except ImportError:
+    logger.warning("⚠️ AI音乐生成模块未安装，将使用静态音乐库")
+    AI_MUSIC_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -54,14 +63,33 @@ class MusicCue:
 
 class MusicComposer:
     """
-    音乐设计师Agent
+    音乐设计师Agent（AI增强版）
     
     基于情节节奏和情感基调设计背景音乐
+    支持AI动态生成（Mureka O1）+ 静态音乐库降级
     """
     
-    def __init__(self):
+    def __init__(self, ai_generator: Optional[Any] = None, enable_ai: bool = True):
+        """
+        Args:
+            ai_generator: AI音乐生成器（可选，默认自动创建）
+            enable_ai: 是否启用AI生成（默认True）
+        """
         self.music_library = self._init_music_library()
         self.music_cues: List[MusicCue] = []
+        
+        # AI音乐生成器
+        self.enable_ai = enable_ai and AI_MUSIC_AVAILABLE
+        if self.enable_ai:
+            if ai_generator is None and AI_MUSIC_AVAILABLE:
+                from ..ai_music import create_music_generator
+                self.ai_generator = create_music_generator(enable_cache=True)
+                logger.info("✅ AI音乐生成器已启用（Mureka O1）")
+            else:
+                self.ai_generator = ai_generator
+        else:
+            self.ai_generator = None
+            logger.info("📚 使用静态音乐库模式")
     
     def _init_music_library(self) -> Dict[str, Dict[str, Any]]:
         """初始化音乐库（占位）"""
@@ -174,19 +202,33 @@ class MusicComposer:
         self,
         scene: Dict[str, Any]
     ) -> Optional[MusicCue]:
-        """设计场景音乐"""
+        """设计场景音乐（AI增强）"""
         mood = scene.get("mood", "peaceful")
         start_time = scene.get("start_time", 0.0)
         duration = scene.get("duration", 60.0)
-        
-        music_info = self._match_music(mood)
-        
+        scene_description = scene.get("description", "场景")
+            
         # 只为关键场景（高潮、转折）添加音乐
         is_key_scene = scene.get("is_climax", False) or scene.get("is_turning_point", False)
-        
+            
         if not is_key_scene and mood == "peaceful":
             return None  # 平静场景不一定需要音乐
-        
+            
+        # 尝试AI生成（优先）
+        if self.enable_ai and self.ai_generator:
+            try:
+                return self._generate_scene_music_with_ai(
+                    scene_description=scene_description,
+                    mood=mood,
+                    start_time=start_time,
+                    duration=min(duration, 120.0)
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ AI生成音乐失败，降级到静态库: {e}")
+            
+        # 降级到静态音乐库
+        music_info = self._match_music(mood)
+            
         cue = MusicCue(
             scene_id=scene.get("scene_id", "scene"),
             timestamp=start_time,
@@ -197,7 +239,7 @@ class MusicComposer:
             volume=0.15,  # 背景音乐音量更低
             fade_in=3.0,
             fade_out=3.0,
-            duration=min(duration, 120.0),  # 最长2分钟
+            duration=min(duration, 120.0),  # 最長2分钟
             sync_with_dialogue=True,
             dialogue_volume_reduction=0.6  # 对话时降低40%
         )
@@ -245,7 +287,7 @@ class MusicComposer:
         character_traits: Dict[str, Any]
     ) -> MusicCue:
         """
-        为角色创建主题音乐
+        为角色创建主题音乐（AI增强）
         
         Args:
             character_name: 角色名
@@ -270,6 +312,34 @@ class MusicComposer:
         else:
             mood = MusicMood.PEACEFUL
         
+        # 尝试AI生成
+        if self.enable_ai and self.ai_generator:
+            try:
+                import asyncio
+                result = asyncio.run(self.ai_generator.generate_theme_music(
+                    character_name=character_name,
+                    personality=personality,
+                    duration=30
+                ))
+                
+                if result.success:
+                    return MusicCue(
+                        scene_id=f"theme_{character_name}",
+                        timestamp=0.0,
+                        music_type=MusicType.THEME,
+                        mood=mood,
+                        description=f"{character_name}的主题音乐（AI生成）",
+                        audio_file=result.audio_file_path,
+                        volume=0.2,
+                        fade_in=2.0,
+                        fade_out=3.0,
+                        duration=30.0,
+                        sync_with_dialogue=True
+                    )
+            except Exception as e:
+                logger.warning(f"⚠️ AI生成主题音乐失败: {e}")
+        
+        # 降级到静态库
         music_info = self._match_music(mood.value)
         
         cue = MusicCue(
@@ -385,10 +455,54 @@ class MusicComposer:
         return counts
     
     def get_statistics(self) -> Dict[str, Any]:
-        """获取统计信息"""
-        return {
+        """获取统计信息（增强AI统计）"""
+        stats = {
             "total_cues": len(self.music_cues),
             "cues_by_type": self._count_by_type(),
             "cues_by_mood": self._count_by_mood(),
             "music_library_size": len(self.music_library)
         }
+        
+        # AI生成器统计
+        if self.enable_ai and self.ai_generator:
+            ai_stats = self.ai_generator.get_statistics()
+            stats["ai_music_stats"] = ai_stats
+        
+        return stats
+    
+    def _generate_scene_music_with_ai(
+        self,
+        scene_description: str,
+        mood: str,
+        start_time: float,
+        duration: float
+    ) -> MusicCue:
+        """使用AI生成场景音乐"""
+        import asyncio
+        
+        # 调用AI生成器
+        result = asyncio.run(self.ai_generator.generate_for_scene(
+            scene_description=scene_description,
+            mood=mood,
+            duration=int(duration)
+        ))
+        
+        if not result.success:
+            raise RuntimeError(result.error_message)
+        
+        logger.info(f"   ✅ AI生成音乐成功: {result.audio_file_path}")
+        
+        return MusicCue(
+            scene_id=f"scene_{scene_description[:10]}",
+            timestamp=start_time,
+            music_type=MusicType.UNDERSCORE,
+            mood=MusicMood(mood),
+            description=f"场景音乐 - {scene_description}（AI生成）",
+            audio_file=result.audio_file_path,
+            volume=0.15,
+            fade_in=3.0,
+            fade_out=3.0,
+            duration=result.duration,
+            sync_with_dialogue=True,
+            dialogue_volume_reduction=0.6
+        )

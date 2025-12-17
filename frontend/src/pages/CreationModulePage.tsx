@@ -53,7 +53,7 @@ const modules = [
     description: '将文字作品转化为有声读物，支持多种音色选择',
     icon: HeadphonesIcon,
     color: '#9c27b0',
-    available: false,
+    available: true,  // ✅ 启用
     path: '/audiobook',
   },
   {

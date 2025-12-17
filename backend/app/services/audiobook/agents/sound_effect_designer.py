@@ -8,12 +8,26 @@ SoundEffectDesigner - 音效设计师Agent
 """
 
 import logging
+import json
+import os
+import hashlib
+import shutil
+from pathlib import Path
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
 
+import requests
+from app.services.model_optimizer import TaskType
+from app.services.audiobook.ai_music import AIMusicGenerator, MusicGenerationResult, create_music_generator
+
 logger = logging.getLogger(__name__)
 
+# 音效资源与索引默认路径（相对 backend/ 计算）
+BACKEND_DIR = Path(__file__).resolve().parents[4]
+AUDIO_LIBRARY_DIR = BACKEND_DIR / "data" / "audio_library"
+SOUND_EFFECTS_DIR = AUDIO_LIBRARY_DIR / "sound_effects"
+DEFAULT_INDEX_PATH = AUDIO_LIBRARY_DIR / "sound_effects_index.json"
 
 class EffectType(str, Enum):
     """音效类型"""
@@ -39,6 +53,7 @@ class SoundEffectCue:
     mix_mode: str = "background"  # background/foreground
 
 
+
 class SoundEffectDesigner:
     """
     音效设计师Agent
@@ -46,8 +61,26 @@ class SoundEffectDesigner:
     基于剧本标注设计场景音效
     """
     
-    def __init__(self):
+    def __init__(
+        self,
+        index_path: Optional[str] = None,
+        llm_client=None,
+    ):
+        """音效设计师
+
+        Args:
+            index_path: 外部音效索引文件路径（可选），默认使用 DEFAULT_INDEX_PATH
+            llm_client: LLM客户端（可选，用于智能音效匹配）
+        """
+        self.llm_client = llm_client
+        self._music_generator: Optional[AIMusicGenerator] = None
+
+        # 内置占位音效库
         self.sound_library = self._init_sound_library()
+        # 尝试从外部索引加载扩展音效库
+        self.index_path = Path(index_path) if index_path else DEFAULT_INDEX_PATH
+        self._load_external_sound_library()
+
         self.effect_cues: List[SoundEffectCue] = []
     
     def _init_sound_library(self) -> Dict[str, Dict[str, Any]]:
@@ -120,9 +153,12 @@ class SoundEffectDesigner:
             current_time += estimated_duration
         
         self.effect_cues = effect_cues
-        logger.info(f"   ✅ 设计完成: {len(effect_cues)} 个音效提示")
+
+        # 优化音效密度，避免过载
+        optimized = self.optimize_effect_density()
+        logger.info(f"   ✅ 设计完成: {len(effect_cues)} → {len(optimized)} 个音效提示（含密度优化）")
         
-        return effect_cues
+        return optimized
     
     def _match_effect(
         self,
@@ -130,32 +166,74 @@ class SoundEffectDesigner:
         timestamp: float,
         scene_id: str
     ) -> Optional[SoundEffectCue]:
-        """匹配音效库"""
-        # 简单关键词匹配
+        """匹配音效库
+
+        匹配优先级：
+        1. 直接按ID精确匹配（description 作为音效ID）
+        2. 按描述与音效 description 的包含关系匹配
+        3. 按 tags 关键词匹配
+        4. 若仍未命中，返回占位音效
+        """
+        # 1. 精确ID匹配（如剧本直接给出 "rain_heavy"）
+        if description in self.sound_library:
+            effect_info = self.sound_library[description]
+            effect_type = EffectType(effect_info["type"])
+            file_path = effect_info["file"]
+            return SoundEffectCue(
+                scene_id=scene_id,
+                timestamp=timestamp,
+                effect_type=effect_type,
+                description=description,
+                audio_file=file_path,
+                volume=0.3 if effect_type == EffectType.ENVIRONMENT else 0.5,
+                fade_in=2.0 if effect_type == EffectType.ENVIRONMENT else 0.5,
+                fade_out=2.0 if effect_type == EffectType.ENVIRONMENT else 0.5,
+                loop=(effect_type == EffectType.ENVIRONMENT),
+                duration=10.0 if effect_type == EffectType.ENVIRONMENT else 2.0,
+                mix_mode="background" if effect_type == EffectType.ENVIRONMENT else "foreground",
+            )
+
+        # 2. 描述+标签匹配
+        best_match: Optional[Dict[str, Any]] = None
+        best_score = 0
+
         for effect_name, effect_info in self.sound_library.items():
-            if effect_info["description"] in description or description in effect_info["description"]:
-                
-                # 判断音效类型
-                effect_type = EffectType(effect_info["type"])
-                
-                # 设置默认参数
-                cue = SoundEffectCue(
-                    scene_id=scene_id,
-                    timestamp=timestamp,
-                    effect_type=effect_type,
-                    description=description,
-                    audio_file=effect_info["file"],
-                    volume=0.3 if effect_type == EffectType.ENVIRONMENT else 0.5,
-                    fade_in=2.0 if effect_type == EffectType.ENVIRONMENT else 0.5,
-                    fade_out=2.0 if effect_type == EffectType.ENVIRONMENT else 0.5,
-                    loop=(effect_type == EffectType.ENVIRONMENT),
-                    duration=10.0 if effect_type == EffectType.ENVIRONMENT else 2.0,
-                    mix_mode="background" if effect_type == EffectType.ENVIRONMENT else "foreground"
-                )
-                
-                return cue
-        
-        # 未找到匹配，创建占位
+            desc_text = effect_info.get("description", "")
+            tags = effect_info.get("tags", [])
+
+            score = 0
+            # 描述包含匹配
+            if desc_text and (desc_text in description or description in desc_text):
+                score += 2
+
+            # 标签匹配：如果有任何 tag 出现在 description 中，加分
+            for tag in tags:
+                if tag and tag in description:
+                    score += 1
+
+            if score > best_score:
+                best_score = score
+                best_match = {"name": effect_name, "info": effect_info}
+
+        if best_match and best_score > 0:
+            effect_info = best_match["info"]
+            effect_type = EffectType(effect_info["type"])
+            file_path = effect_info["file"]
+            return SoundEffectCue(
+                scene_id=scene_id,
+                timestamp=timestamp,
+                effect_type=effect_type,
+                description=description,
+                audio_file=file_path,
+                volume=0.3 if effect_type == EffectType.ENVIRONMENT else 0.5,
+                fade_in=2.0 if effect_type == EffectType.ENVIRONMENT else 0.5,
+                fade_out=2.0 if effect_type == EffectType.ENVIRONMENT else 0.5,
+                loop=(effect_type == EffectType.ENVIRONMENT),
+                duration=10.0 if effect_type == EffectType.ENVIRONMENT else 2.0,
+                mix_mode="background" if effect_type == EffectType.ENVIRONMENT else "foreground",
+            )
+
+        # 3. 未找到匹配，创建占位
         logger.warning(f"⚠️ 未找到音效: {description}，使用占位")
         return SoundEffectCue(
             scene_id=scene_id,
@@ -163,7 +241,7 @@ class SoundEffectDesigner:
             effect_type=EffectType.ACTION,
             description=description,
             audio_file="placeholder.mp3",
-            volume=0.3
+            volume=0.3,
         )
     
     def design_ambient_sound(
@@ -171,19 +249,17 @@ class SoundEffectDesigner:
         scene_description: str,
         duration: float
     ) -> SoundEffectCue:
-        """
-        设计环境音
-        
+        """设计环境音（仅使用本地静态音效库）
+
         Args:
             scene_description: 场景描述，如"雨夜的城市街道"
             duration: 持续时长（秒）
-        
+
         Returns:
             环境音效提示
         """
         logger.info(f"🌆 设计环境音: {scene_description}")
-        
-        # 关键词匹配
+        # 保持向后兼容：使用简单关键词映射到内置环境音
         ambient_map = {
             "雨": "rain_light",
             "大雨": "rain_heavy",
@@ -191,15 +267,15 @@ class SoundEffectDesigner:
             "城市": "city_ambient",
             "森林": "forest_ambient",
         }
-        
+
         effect_name = "city_ambient"  # 默认
         for keyword, name in ambient_map.items():
             if keyword in scene_description:
                 effect_name = name
                 break
-        
+
         effect_info = self.sound_library.get(effect_name, {})
-        
+
         cue = SoundEffectCue(
             scene_id="ambient",
             timestamp=0.0,
@@ -211,11 +287,219 @@ class SoundEffectDesigner:
             fade_out=3.0,
             loop=True,
             duration=duration,
-            mix_mode="background"
+            mix_mode="background",
         )
-        
+
         return cue
-    
+
+    def _infer_mood_from_scene(self, scene_description: str) -> str:
+        """根据场景文本粗略推断情绪标签（用于Mureka环境音）"""
+        text = scene_description
+        if any(k in text for k in ["紧张", "追杀", "追逐", "战斗", "惊悚", "血", "爆炸"]):
+            return "tense"
+        if any(k in text for k in ["兴奋", "热血", "欢呼", "比赛"]):
+            return "exciting"
+        if any(k in text for k in ["悲伤", "哭", "葬礼", "孤独", "失去"]):
+            return "sad"
+        if any(k in text for k in ["浪漫", "约会", "拥抱", "亲吻"]):
+            return "romantic"
+        if any(k in text for k in ["史诗", "大战", "军队", "王朝", "决战"]):
+            return "epic"
+        return "calm"
+
+    def _build_ambient_effect_metadata(
+        self,
+        scene_description: str,
+        mood: str,
+    ) -> Dict[str, Any]:
+        """从场景描述构造环境音的ID/目录/标签等元数据"""
+        text = scene_description
+        base = "city"
+        label = "ambient"
+        tags: List[str] = []
+
+        if any(k in text for k in ["森林", "林间", "树林"]):
+            base = "forest"
+            tags.append("森林")
+        elif any(k in text for k in ["山", "山崖", "山谷"]):
+            base = "mountain"
+            tags.append("山")
+        elif any(k in text for k in ["海", "海边", "海岸", "沙滩"]):
+            base = "sea"
+            tags.append("海")
+        elif any(k in text for k in ["乡村", "田野"]):
+            base = "country"
+            tags.append("乡村")
+        else:
+            base = "city"
+            if any(k in text for k in ["街", "路", "巷"]):
+                tags.append("城市")
+
+        if "雨" in text:
+            label = "rain"
+            tags.append("雨")
+        elif "风" in text:
+            label = "wind"
+            tags.append("风")
+        elif any(k in text for k in ["人群", "市场", "广场"]):
+            label = "crowd"
+            tags.append("人群")
+
+        mood_tag = mood or "calm"
+        tags.append(mood_tag)
+        tags.append("Mureka")
+
+        slug = f"{base}_{label}"
+        raw = f"{scene_description}|{mood_tag}"
+        short_hash = hashlib.md5(raw.encode("utf-8")).hexdigest()[:6]
+        effect_id = f"ambient_{slug}_{mood_tag}_mureka_{short_hash}"
+
+        # 子目录，例如 environment/city_rain
+        subdir = slug
+
+        # 显示名称（中文友好）
+        if base == "forest":
+            base_cn = "森林"
+        elif base == "mountain":
+            base_cn = "山景"
+        elif base == "sea":
+            base_cn = "海边"
+        elif base == "country":
+            base_cn = "乡村"
+        else:
+            base_cn = "城市"
+
+        if label == "rain":
+            label_cn = "雨夜"
+        elif label == "wind":
+            label_cn = "风声"
+        elif label == "crowd":
+            label_cn = "人群"
+        else:
+            label_cn = "环境"
+
+        name = f"{base_cn}{label_cn}环境音（Mureka，{mood_tag}）"
+
+        return {
+            "effect_id": effect_id,
+            "subdir": subdir,
+            "tags": tags,
+            "name": name,
+        }
+
+    def _get_music_generator(self) -> Optional[AIMusicGenerator]:
+        """懒加载 Mureka AI 音乐生成器，用于通用环境音生成"""
+        if self._music_generator is None:
+            try:
+                self._music_generator = create_music_generator(enable_cache=True)
+            except Exception as e:
+                logger.warning(f"⚠️ 初始化 Mureka 音乐生成器失败: {e}")
+                self._music_generator = None
+        return self._music_generator
+
+    async def ensure_mureka_ambient_sound(
+        self,
+        scene_description: str,
+        duration: float,
+        mood: Optional[str] = None,
+    ) -> SoundEffectCue:
+        """本地优先 + Mureka 兜底 的环境音设计器
+
+        1. 优先在现有音效库（含本地索引 + Mureka 生成并入库的环境音）中查找。
+        2. 若未找到合适环境音，则调用 Mureka 生成一段氛围音乐，写入本地 sound_effects 仓库和索引。
+        3. 返回可直接用于混音的 SoundEffectCue。
+        """
+        logger.info(f"🌆 [Mureka] 设计环境音: {scene_description}")
+
+        # 1. 尝试使用现有音效库匹配环境音（包括已入库的Mureka环境音）
+        local_cue = self._match_effect(
+            description=scene_description,
+            timestamp=0.0,
+            scene_id="ambient",
+        )
+        if local_cue and local_cue.effect_type == EffectType.ENVIRONMENT and local_cue.audio_file not in ("", "placeholder.mp3"):
+            # 调整为环境层参数
+            local_cue.description = scene_description
+            local_cue.timestamp = 0.0
+            local_cue.loop = True
+            local_cue.duration = duration
+            local_cue.volume = 0.2
+            local_cue.fade_in = 3.0
+            local_cue.fade_out = 3.0
+            local_cue.mix_mode = "background"
+            logger.info("✅ 使用本地环境音，无需调用 Mureka")
+            return local_cue
+
+        # 2. 调用 Mureka 生成新的环境音
+        music_generator = self._get_music_generator()
+        if not music_generator:
+            logger.warning("⚠️ 未能初始化 Mureka 音乐生成器，回退到内置环境音逻辑")
+            return self.design_ambient_sound(scene_description, duration)
+
+        mood_value = mood or self._infer_mood_from_scene(scene_description)
+        try:
+            music_result: MusicGenerationResult = await music_generator.generate_for_scene(
+                scene_description=scene_description,
+                mood=mood_value,
+                duration=int(duration) if duration > 0 else 30,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ 调用 Mureka 生成环境音失败: {e}，回退到内置环境音")
+            return self.design_ambient_sound(scene_description, duration)
+
+        if not music_result.success or not music_result.audio_file_path:
+            logger.warning("⚠️ Mureka 返回的环境音结果无效，回退到内置环境音")
+            return self.design_ambient_sound(scene_description, duration)
+
+        # 3. 将 Mureka 结果写入本地 sound_effects 仓库 + 索引
+        meta = self._build_ambient_effect_metadata(scene_description, mood_value)
+        effect_id = meta["effect_id"]
+        subdir = meta["subdir"]
+        tags = meta["tags"]
+        name = meta["name"]
+
+        source_path = Path(music_result.audio_file_path)
+        ext = source_path.suffix or ".mp3"
+        relative_dir = Path("environment") / subdir
+        output_dir = SOUND_EFFECTS_DIR / relative_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_file = output_dir / f"{effect_id}{ext}"
+
+        try:
+            shutil.copy(source_path, output_file)
+        except Exception as e:
+            logger.warning(f"⚠️ 拷贝 Mureka 环境音文件失败: {e}，回退到内置环境音")
+            return self.design_ambient_sound(scene_description, duration)
+
+        # file_path 相对于 AUDIO_LIBRARY_DIR，供后续组合路径使用
+        relative_file_path = str(Path("sound_effects") / relative_dir / output_file.name).replace(os.sep, "/")
+
+        record: Dict[str, Any] = {
+            "id": effect_id,
+            "name": name,
+            "category": "environment",
+            "file_path": relative_file_path,
+            "description": scene_description,
+            "tags": tags,
+            "source": "mureka",
+        }
+        self.register_new_effect(record)
+        logger.info(f"🎧 已生成并注册 Mureka 环境音: {effect_id}")
+
+        return SoundEffectCue(
+            scene_id="ambient",
+            timestamp=0.0,
+            effect_type=EffectType.ENVIRONMENT,
+            description=scene_description,
+            audio_file=relative_file_path,
+            volume=0.2,
+            fade_in=3.0,
+            fade_out=3.0,
+            loop=True,
+            duration=duration,
+            mix_mode="background",
+        )
+
     def optimize_effect_density(
         self,
         max_effects_per_minute: int = 6
@@ -293,5 +577,238 @@ class SoundEffectDesigner:
         return {
             "total_effects": len(self.effect_cues),
             "effects_by_type": self._count_by_type(),
-            "sound_library_size": len(self.sound_library)
+            "sound_library_size": len(self.sound_library),
         }
+
+    async def ai_match_effects(self, scene_text: str) -> List[str]:
+        """AI智能匹配音效ID列表
+
+        根据场景文本和当前音效库，调用LLM推荐合适的音效ID列表。
+        """
+        if not self.llm_client:
+            logger.warning("⚠️ 未配置 llm_client，ai_match_effects 将返回空结果")
+            return []
+
+        available_effects = list(self.sound_library.keys())
+        prompt = f"""
+分析以下场景，基于可用音效库推荐最合适的音效 ID 列表。
+
+场景内容:
+{scene_text}
+
+可选音效库（effect_id 列表）:
+{available_effects}
+
+请只输出 JSON，格式如下（不要添加多余文字）:
+{{
+  "effects": ["effect_id1", "effect_id2"]
+}}
+""".strip()
+
+        try:
+            # 使用有声小说专用任务类型，自动选择合适模型
+            response = await self.llm_client.chat(
+                messages=[{"role": "user", "content": prompt}],
+                task_type=TaskType.AUDIOBOOK_SOUND,
+                use_cache=False,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ 调用 LLM 进行音效匹配失败: {e}")
+            return []
+
+        # 尝试从响应中提取 JSON
+        try:
+            text = response
+            if "```" in text:
+                start = text.find("```")
+                end = text.find("```", start + 3)
+                if end != -1:
+                    text = text[start + 3 : end].strip()
+            data = json.loads(text)
+            effects = data.get("effects", [])
+            if not isinstance(effects, list):
+                return []
+            # 只保留在当前音效库中的 ID
+            return [e for e in effects if isinstance(e, str) and e in self.sound_library]
+        except Exception as e:
+            logger.warning(f"⚠️ 解析 AI 音效匹配结果失败: {e}")
+            return []
+    
+    def _load_external_sound_library(self) -> None:
+        """从外部索引加载音效库
+
+        支持的索引格式：
+        - JSON 数组：[ {"id": ..., "category": ..., "file_path": ..., "description": ...}, ... ]
+        - JSON 对象：{"id": { ...record... }}
+        """
+        index_path = self.index_path
+        if not index_path or not index_path.exists():
+            return
+        
+        try:
+            with index_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            # 兼容数组或字典两种格式
+            if isinstance(data, dict):
+                records = list(data.values())
+            else:
+                records = list(data)
+            
+            loaded = 0
+            for item in records:
+                effect_id = item.get("id") or item.get("name")
+                if not effect_id:
+                    continue
+                # 已存在则跳过，优先保留代码内置定义
+                if effect_id in self.sound_library:
+                    continue
+                
+                category = item.get("category") or item.get("type") or "action"
+                file_path = item.get("file_path") or item.get("file")
+                description = item.get("description") or item.get("name") or effect_id
+                
+                if not file_path:
+                    continue
+                
+                self.sound_library[effect_id] = {
+                    "type": category,
+                    "file": file_path,
+                    "description": description,
+                    "tags": item.get("tags", []),
+                    "source": item.get("source", "manual"),
+                }
+                loaded += 1
+            
+            if loaded:
+                logger.info(f"🔊 从外部音效索引加载 {loaded} 个音效: {index_path}")
+        except Exception as e:
+            logger.warning(f"⚠️ 加载音效索引失败: {e}")
+    
+    def register_new_effect(self, record: Dict[str, Any]) -> None:
+        """注册新的音效并写入索引
+
+        典型用于 AI 生成音效后入库：
+        record 示例：
+        {
+            "id": "forest_birds_ai_001",
+            "name": "森林鸟鸣环境音（AI生成）",
+            "category": "environment",
+            "file_path": "sound_effects/generated/forest_birds_ai_001.mp3",
+            "description": "森林里的鸟鸣声",
+            "tags": ["森林", "鸟鸣"],
+            "source": "ai"
+        }
+        """
+        index_path = self.index_path
+        try:
+            records: List[Dict[str, Any]]
+            if index_path.exists():
+                with index_path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    # 统一转成列表写回
+                    records = list(data.values())
+                else:
+                    records = list(data)
+            else:
+                # 确保目录存在
+                index_path.parent.mkdir(parents=True, exist_ok=True)
+                records = []
+            
+            # 去重：按 id 覆盖旧记录
+            effect_id = record.get("id")
+            if effect_id:
+                records = [r for r in records if r.get("id") != effect_id]
+            records.append(record)
+            
+            with index_path.open("w", encoding="utf-8") as f:
+                json.dump(records, f, ensure_ascii=False, indent=2)
+            
+            # 同步更新内存中的 sound_library
+            if effect_id:
+                self.sound_library[effect_id] = {
+                    "type": record.get("category", "action"),
+                    "file": record.get("file_path") or record.get("file", ""),
+                    "description": record.get("description") or record.get("name", effect_id),
+                    "tags": record.get("tags", []),
+                    "source": record.get("source", "ai"),
+                }
+            logger.info(f"✅ 新音效已注册并写入索引: {effect_id}")
+        except Exception as e:
+            logger.warning(f"⚠️ 写入音效索引失败: {e}")
+
+    def download_and_register_effect(
+        self,
+        url: str,
+        effect_id: str,
+        category: str,
+        description: str,
+        tags: Optional[List[str]] = None,
+        file_name: Optional[str] = None,
+        source: str = "manual",
+    ) -> Optional[Dict[str, Any]]:
+        """从指定URL下载音效文件并注册到音效库索引中
+
+        Args:
+            url: 音效文件直链URL（应指向mp3/ogg等音频文件，而不是网页）
+            effect_id: 在系统中使用的音效ID（如"door_wood_open_01"）
+            category: 音效类别（如"environment/weather"、"action/door"）
+            description: 人类可读的描述
+            tags: 检索用标签列表
+            file_name: 保存到本地的文件名（可选，不传则使用 effect_id + 源文件后缀）
+            source: 来源标识（如"online_sfx"、"recorded"等）
+
+        Returns:
+            成功时返回完整的record字典，失败时返回None
+        """
+        try:
+            # 下载文件
+            resp = requests.get(url, stream=True, timeout=30)
+            resp.raise_for_status()
+
+            # 推断文件后缀
+            ext = None
+            if file_name and "." in file_name:
+                ext = file_name.split(".")[-1]
+            else:
+                # 尝试从URL推断
+                if "." in url.split("?")[0]:
+                    ext = url.split("?")[0].rsplit(".", 1)[-1]
+            if not ext:
+                ext = "mp3"  # 默认使用mp3
+
+            # 规范化文件名
+            if not file_name:
+                file_name = f"{effect_id}.{ext}"
+
+            # category 作为相对目录，如 "environment/weather"
+            relative_dir = Path(category.replace("\\", "/").replace("//", "/"))
+            output_dir = SOUND_EFFECTS_DIR / relative_dir
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / file_name
+
+            with output_path.open("wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+
+            # 构建记录并注册
+            # file_path 相对于 AUDIO_LIBRARY_DIR，供后续组合路径使用
+            relative_file_path = str(Path("sound_effects") / relative_dir / file_name).replace(os.sep, "/")
+            record: Dict[str, Any] = {
+                "id": effect_id,
+                "name": description,
+                "category": category,
+                "file_path": relative_file_path,
+                "description": description,
+                "tags": tags or [],
+                "source": source,
+            }
+
+            self.register_new_effect(record)
+            logger.info(f"🎧 已下载并注册音效: {effect_id} ← {url}")
+            return record
+        except Exception as e:
+            logger.warning(f"⚠️ 下载并注册音效失败: {e}")
+            return None

@@ -31,6 +31,9 @@ class ScriptSegment:
     pause_before: float = 0.0  # 前停顿（秒）
     pause_after: float = 0.0  # 后停顿（秒）
     
+    # v3-plus音声参数控制
+    voice_params: Dict[str, float] = None  # {"rate": 1.0, "pitch": 1.0, "pause_before": 0.2, "pause_after": 0.3}
+    
     # 音效音乐标注
     sound_effects: List[str] = None  # 音效列表，如["推门声", "脚步声"]
     music_cue: str = ""  # 音乐提示，如"悬疑感的低频弦乐"
@@ -42,6 +45,14 @@ class ScriptSegment:
     def __post_init__(self):
         if self.sound_effects is None:
             self.sound_effects = []
+        if self.voice_params is None:
+            # 默认参数：如果LLM没有输出voice_params，使用pause_before/after填充
+            self.voice_params = {
+                "rate": 1.0,
+                "pitch": 1.0,
+                "pause_before": self.pause_before,
+                "pause_after": self.pause_after
+            }
 
 
 class AudiobookScriptAgent:
@@ -118,12 +129,14 @@ class AudiobookScriptAgent:
             }
         """
         
-        prompt = f"""你是一位专业的有声小说编剧，擅长为现代TTS语音合成技术改编文本。
+        prompt = f"""你是专业的有声书剧本改编师，擅长利用CosyVoice v3-plus的高级功能创造生动的听觉体验。
 
-**当前使用的TTS模型能力**：
-- Qwen3-TTS：49种音色，8种原生情感（happy/sad/angry/nervous/calm/gentle/serious/natural）
-- CosyVoice3：零样本音色克隆，多方言支持
-- 首包延迟<300ms，自然度MOS 4.53
+**TTS模型能力（CosyVoice v3-plus）**：
+- 语速控制：0.5-2.0倍速（rate参数）
+- 音调控制：0.5-2.0倍音调（pitch参数）
+- 情感表达：10+种细分情感（支持强度调节）
+- SSML支持：精确控制停顿、重音、语调变化
+- 音质：顶级自然度，适合精品章节
 
 **章节标题**: {title}
 **小说类型**: {genre}
@@ -131,16 +144,23 @@ class AudiobookScriptAgent:
 **章节内容**（前800字）:
 {content[:800]}
 
-**分析目标**：为后续的语音合成提供关键指导，确保充分利用TTS模型的情感表达能力。
+**分析目标**：挖掘文本中的情感细节和节奏变化，为v3-plus的参数控制提供依据。
 
 请以**纯净的JSON格式**输出分析结果（不要包含注释）：
 ```json
 {{
     "theme": "章节主题（一句话概括）",
     "emotional_tone": "整体情感基调（calm/tense/exciting/sad/mysterious）",
-    "highlight_scenes": ["适合音频化的高光场景描述"],
-    "adaptation_challenges": ["需要特殊处理的难点，如心理描写、多时间线等"],
-    "recommended_emotions": ["建议使用的主要情感标签（基于TTS支持的情感）"]
+    "emotion_transitions": ["关键情感转折点"],
+    "rhythm_pattern": "节奏模式（快速/中等/慢速/变化丰富）",
+    "highlight_scenes": ["适合音频化的高光场景"],
+    "adaptation_challenges": ["需要特殊处理的难点"],
+    "recommended_emotions": ["建议使用的主要情感标签"],
+    "voice_control_strategy": {{
+        "pace_changes": "语速变化策略",
+        "pitch_variations": "音调变化建议",
+        "pause_points": "关键停顿位置"
+    }}
 }}
 ```"""
         
@@ -244,27 +264,35 @@ class AudiobookScriptAgent:
     ) -> List[ScriptSegment]:
         """转化单个段落"""
         
-        prompt = f"""你是专业的有声小说编剧，为高品质TTS语音合成改编文本。
+        prompt = f"""你是专业的有声书剧本改编师，擅长利用CosyVoice v3-plus的高级功能创造生动的听觉体验。
 
-**TTS模型能力说明**：
-本项目使用Qwen3-TTS（主）+ CosyVoice3（备）双引擎：
-- **49种音色**：支持多角色差异化
-- **8种原生情感**: happy/sad/angry/nervous/calm/gentle/serious/natural
-- **首包延迟<300ms**：实时响应
-- **MOS 4.53**：接近真人的自然度
-- **方言支持**：可选择普通话/四川话/粤语等
+**TTS模型能力（CosyVoice v3-plus）**：
+- 语速控制：0.5-2.0倍速（rate参数）
+- 音调控制：0.5-2.0倍音调（pitch参数）
+- 情感表达：10+种细分情感（支持强度调节）
+- 停顿控制：毫秒级精确（100-2000ms）
+- 重音强调：3级（none/moderate/strong）
+- 音质：顶级自然度，适合精品章节
 
-**改编要求** - 核心原则：充分发挥TTS情感表达能力
+**改编要求** - 充分发挥v3-plus的参数控制能力：
 1. **识别对话、旁白、心理活动**
-2. **情感标注**：每个片段必须匹配8种原生情感之一
-3. **心理活动外化**：转为独白（monologue）或音效暗示
-4. **环境描写音频化**：标注音效（如“雨声渐密”）
-5. **表演提示**：标注语气、停顿等（利用TTS的prosody控制）
-6. **节奏优化**：保留原文情感波动，确保听觉自然性
+2. **情感标注**：使用neutral/happy/sad/angry/calm/tense/excited/tender/solemn
+3. **语速控制**：紧张=1.2-1.3, 平静=0.95-1.0, 悲伤=0.85-0.9
+4. **音调调节**：惊恐=1.15, 正常=1.0, 沉重=0.9
+5. **停顿设置**：短停=0.1-0.3s, 中停=0.3-0.5s, 长停=0.5-1.0s
+6. **环境描写音频化**：标注音效（如“雨声渐密”）
+
+**语速/音调控制指南**：
+- 紧张对话：rate=1.2-1.3, pitch=1.1-1.15
+- 平静叙述：rate=0.95-1.0, pitch=1.0
+- 悲伤场景：rate=0.85-0.9, pitch=0.9-0.95
+- 激动场景：rate=1.3-1.5, pitch=1.15-1.3
+- 庄重场景：rate=0.85-0.9, pitch=0.9
 
 **已知角色**: {', '.join(character_list) if character_list else '无'}
 **情感基调**: {analysis.get('emotional_tone', 'neutral')}
 **建议情感**: {', '.join(analysis.get('recommended_emotions', ['natural']))}
+**节奏模式**: {analysis.get('rhythm_pattern', '中等')}
 
 **原文段落**:
 {paragraph}
@@ -277,14 +305,18 @@ class AudiobookScriptAgent:
         "type": "narration|dialogue|monologue",
         "text": "改编后的文本（简洁、听觉友好）",
         "speaker": "角色名或旁白",
-        "emotion": "happy|sad|angry|nervous|calm|gentle|serious|natural",
-        "performance_notes": "语气提示，如：颤抖着低语 / 略带咽哽 / 激动地高声说",
-        "pause_before": 0.5,
-        "pause_after": 0.3,
-        "sound_effects": ["音效1", "音效2"],
+        "emotion": "neutral|happy|sad|angry|calm|tense|excited|tender|solemn",
+        "voice_params": {{
+            "rate": 1.0,
+            "pitch": 1.0,
+            "pause_before": 0.2,
+            "pause_after": 0.3
+        }},
+        "performance_notes": "语气提示，如：颇抖着低语 / 略带咽噶 / 激动地高声说",
+        "sound_effects": ["音数1", "音数2"],
         "music_cue": "音乐提示",
         "original_text": "对应的原文",
-        "adaptation_reason": "改编原因说明（如：利用TTS的nervous情感强化紧张气氛）"
+        "adaptation_reason": "改编原因说明（如：使用rate=1.3加快语速营造紧张感）"
     }}
 ]
 ```
@@ -292,9 +324,12 @@ class AudiobookScriptAgent:
 **重要提醒**：
 - 只输出JSON数组，不要添加任何//注释或/*注释*/
 - 不要在JSON中添加解释性文字
-- emotion字段必须使用8种原生情感之一，不要自行发明
-- 优先使用happy/sad/nervous等有强烈情感的标签，避免过多使用neutral
-- performance_notes要具体可执行，帮助TTS调节韵律和语气"""
+- emotion字段必须使用推荐情感之一，不要自行发明
+- voice_params必须包含rate和pitch参数，根据情感调整
+- pause_before/after单位为秒，范围：0.1-2.0
+- 优先使用happy/sad/tense等有强烈情感的标签，避免过多使用neutral
+- performance_notes要具体可执行，帮助TTS调节韵律和语气
+- adaptation_reason说明为什么这样设置rate/pitch参数"""
         
         try:
             from app.services.model_optimizer import TaskType

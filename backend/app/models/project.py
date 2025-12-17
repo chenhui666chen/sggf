@@ -2,16 +2,11 @@
 项目模型
 """
 from datetime import datetime
-from typing import Optional, List, TYPE_CHECKING
+from typing import Optional, List
 from sqlalchemy import String, Text, ForeignKey, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.db.base import Base
-
-if TYPE_CHECKING:
-    from app.models.memory import Memory
-    from app.models.setting import SettingCollection
-    from app.models.character import Character
 
 
 class Project(Base):
@@ -30,6 +25,11 @@ class Project(Base):
     planned_chapters_min: Mapped[Optional[int]] = mapped_column(nullable=True, comment="预期最少章节数")
     planned_chapters_max: Mapped[Optional[int]] = mapped_column(nullable=True, comment="预期最多章节数")
     user_outline_plan: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="用户自定义大纲规划原文")
+    
+    # 🆕 项目级音频配置（角色音与音量等），使用JSON字符串存储
+    audio_config: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="项目级音频配置(JSON)"
+    )
     
     status: Mapped[str] = mapped_column(String(50), default="draft")  # draft, writing, reviewing, published
     word_count: Mapped[int] = mapped_column(default=0)
@@ -59,6 +59,12 @@ class Project(Base):
         back_populates="project",
         lazy="select",
         cascade="all, delete-orphan"  # 级联删除角色
+    )
+    audiobook_projects: Mapped[List["AudiobookProject"]] = relationship(
+        "AudiobookProject",
+        back_populates="project",
+        lazy="select",
+        cascade="all, delete-orphan"  # 级联删除有声书项目
     )
 
     def __repr__(self):

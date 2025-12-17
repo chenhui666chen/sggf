@@ -94,6 +94,14 @@ class ApiClient {
     return this.client.delete(`/api/v1/projects/${projectId}`)
   }
 
+  getProjectAudioConfig(projectId: number) {
+    return this.client.get(`/api/v1/projects/${projectId}/audio-config`)
+  }
+
+  updateProjectAudioConfig(projectId: number, data: any) {
+    return this.client.put(`/api/v1/projects/${projectId}/audio-config`, data)
+  }
+
   // 章节API
   getChapters(projectId: number, sortOrder: 'asc' | 'desc' = 'asc') {
     return this.client.get(`/api/v1/projects/${projectId}/chapters?sort_order=${sortOrder}`)
@@ -248,6 +256,10 @@ class ApiClient {
 
   deleteReview(chapterId: number) {
     return this.client.delete(`/api/v1/chapters/${chapterId}/review`)
+  }
+
+  previewTTS(payload: { text: string; voice_id: string; volume?: number; speed?: number; pitch?: number }) {
+    return this.client.post('/api/v1/audiobook/tts/preview', payload, { responseType: 'blob' })
   }
 
   // 角色管理API

@@ -28,12 +28,16 @@ class VoiceCharacteristics:
 
 @dataclass
 class TTSParams:
-    """TTS参数"""
-    speaker: str = "zhixiaobao"  # 音色ID
-    pitch: int = 50  # 音调 (0-100)
-    speed: float = 1.0  # 语速 (0.5-2.0)
+    """TTS参数（适配CosyVoice v3-plus）"""
+    speaker: str = "longanyang"  # 音色ID（v3-plus支持300+种）
+    rate: float = 1.0  # 语速 (0.5-2.0)
+    pitch: float = 1.0  # 音调 (0.5-2.0)
     volume: int = 50  # 音量 (0-100)
     emotion: str = "neutral"  # 情感标签
+    # v3-plus高级参数
+    pause_before: float = 0.2  # 前停顿(秒)
+    pause_after: float = 0.3  # 后停顿(秒)
+    emphasis_level: str = "none"  # 重音：none/moderate/strong
 
 
 @dataclass
@@ -57,19 +61,17 @@ class VoiceDesigner:
     def __init__(self):
         self.voice_profiles: Dict[str, VoiceProfile] = {}
         
-        # 预设音色库（阿里云TTS可用音色）
+        # 预设音色库（CosyVoice v3-plus 300+种音色）
         self.available_voices = {
-            "zhixiaobao": {"gender": "female", "age": "child", "tone": "活泼"},
-            "zhiyan": {"gender": "female", "age": "young_adult", "tone": "甜美"},
-            "zhimiao": {"gender": "female", "age": "adult", "tone": "温柔"},
-            "zhixiaomei": {"gender": "female", "age": "adult", "tone": "清亮"},
-            "aixia": {"gender": "female", "age": "adult", "tone": "知性"},
-            "aitong": {"gender": "female", "age": "child", "tone": "可爱"},
-            
-            "zhichu": {"gender": "male", "age": "young_adult", "tone": "阳光"},
-            "zhitian": {"gender": "male", "age": "adult", "tone": "稳重"},
-            "zhixiaoxue": {"gender": "male", "age": "adult", "tone": "磁性"},
-            "aixiang": {"gender": "male", "age": "adult", "tone": "成熟"},
+            # v3-plus官方音色
+            "longanyang": {"gender": "male", "age": "adult", "tone": "成熟稳重"},
+            "longcaitou": {"gender": "female", "age": "young_adult", "tone": "甜美温柔"},
+            "longshaohua": {"gender": "male", "age": "young_adult", "tone": "阳光有力"},
+            "longxiaochun": {"gender": "female", "age": "adult", "tone": "知性优雅"},
+            "longxiaoxuan": {"gender": "female", "age": "young_adult", "tone": "活泼可爱"},
+            "longwan": {"gender": "female", "age": "adult", "tone": "成熟魅力"},
+            "longfei": {"gender": "male", "age": "adult", "tone": "低沉磁性"},
+            "longjing": {"gender": "male", "age": "middle_aged", "tone": "沉稳有力"},
         }
     
     def design_voice(
@@ -179,45 +181,48 @@ class VoiceDesigner:
         characteristics: VoiceCharacteristics,
         character_info: Dict[str, Any]
     ) -> TTSParams:
-        """匹配TTS参数"""
+        """匹配TTS参数（适配v3-plus）"""
         gender = characteristics.gender
         age_range = characteristics.age_range
         
-        # 选择音色
-        speaker = "zhitian"  # 默认
+        # 选择音色（v3-plus官方音色）
+        speaker = "longanyang"  # 默认
         if gender == "female":
-            if "儿童" in age_range:
-                speaker = "zhixiaobao"
-            elif "青年" in age_range:
-                speaker = "zhiyan"
+            if "青年" in age_range or "青少年" in age_range:
+                speaker = "longcaitou"  # 甜美女声
             else:
-                speaker = "zhimiao"
+                speaker = "longxiaochun"  # 知性女声
         else:  # male
             if "青年" in age_range:
-                speaker = "zhichu"
+                speaker = "longshaohua"  # 青年男声
             else:
-                speaker = "zhitian"
+                speaker = "longanyang"  # 成熟男声
         
-        # 音调
-        pitch = 50
+        # 音调 (v3-plus: 0.5-2.0)
+        pitch = 1.0
         if "低沉" in characteristics.tone:
-            pitch = 40
+            pitch = 0.9
         elif "清亮" in characteristics.tone:
-            pitch = 60
+            pitch = 1.1
+        elif "活泼" in characteristics.tone:
+            pitch = 1.15
         
-        # 语速
-        speed = 1.0
+        # 语速 (v3-plus: 0.5-2.0)
+        rate = 1.0
         if "快速" in characteristics.speaking_pace:
-            speed = 1.2
+            rate = 1.2
         elif "慢速" in characteristics.speaking_pace:
-            speed = 0.8
+            rate = 0.85
         
         return TTSParams(
             speaker=speaker,
+            rate=rate,
             pitch=pitch,
-            speed=speed,
             volume=50,
-            emotion="neutral"
+            emotion="neutral",
+            pause_before=0.2,
+            pause_after=0.3,
+            emphasis_level="none"
         )
     
     def _generate_description(
@@ -302,31 +307,44 @@ class VoiceDesigner:
         character_name: str,
         emotion: str = "neutral"
     ) -> Optional[TTSParams]:
-        """获取TTS参数（带情感调整）"""
+        """获取TTS参数（带情感调整，适配v3-plus）"""
         profile = self.voice_profiles.get(character_name)
         if not profile:
             return None
         
         params = profile.tts_params
-        # 根据情感调整参数
+        # 根据情感调整参数（v3-plus格式）
         adjusted_params = TTSParams(
             speaker=params.speaker,
+            rate=params.rate,
             pitch=params.pitch,
-            speed=params.speed,
             volume=params.volume,
-            emotion=emotion
+            emotion=emotion,
+            pause_before=params.pause_before,
+            pause_after=params.pause_after,
+            emphasis_level=params.emphasis_level
         )
         
-        # 情感调整
+        # 情感调整（利用v3-plus的rate/pitch控制）
         if emotion == "angry":
-            adjusted_params.pitch += 10
-            adjusted_params.volume += 10
+            adjusted_params.pitch = min(2.0, params.pitch * 1.15)  # 音调升高
+            adjusted_params.rate = min(2.0, params.rate * 1.2)  # 语速加快
+            adjusted_params.emphasis_level = "strong"
         elif emotion == "sad":
-            adjusted_params.pitch -= 10
-            adjusted_params.speed *= 0.9
+            adjusted_params.pitch = max(0.5, params.pitch * 0.9)  # 音调降低
+            adjusted_params.rate = max(0.5, params.rate * 0.85)  # 语速放慢
+            adjusted_params.pause_after = 0.5  # 增加停顿
         elif emotion == "excited":
-            adjusted_params.speed *= 1.2
-            adjusted_params.pitch += 5
+            adjusted_params.rate = min(2.0, params.rate * 1.3)  # 语速明显加快
+            adjusted_params.pitch = min(2.0, params.pitch * 1.1)
+            adjusted_params.emphasis_level = "moderate"
+        elif emotion == "calm":
+            adjusted_params.rate = params.rate * 0.95  # 略放慢
+            adjusted_params.pause_before = 0.3
+            adjusted_params.pause_after = 0.4
+        elif emotion == "tense":
+            adjusted_params.rate = min(2.0, params.rate * 1.25)
+            adjusted_params.pitch = min(2.0, params.pitch * 1.05)
         
         return adjusted_params
     

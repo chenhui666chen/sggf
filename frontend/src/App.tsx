@@ -19,6 +19,7 @@ const WorkflowControlPage = lazy(() => import('@/pages/WorkflowControlPage'))
 const PromptEvolutionPage = lazy(() => import('@/pages/PromptEvolutionPage'))
 const AITracePage = lazy(() => import('@/pages/AITracePage'))
 const BookParserPage = lazy(() => import('@/pages/BookParserPage'))
+const AudiobookPage = lazy(() => import('@/pages/AudiobookPage'))  // 耳畔星河
 
 // 加载中组件
 const LoadingFallback = () => (
@@ -142,6 +143,22 @@ function App() {
             element={
               <ProtectedRoute>
                 <BookParserPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/audiobook"
+            element={
+              <ProtectedRoute>
+                <AudiobookPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/modules"
+            element={
+              <ProtectedRoute>
+                <CreationModulePage />
               </ProtectedRoute>
             }
           />

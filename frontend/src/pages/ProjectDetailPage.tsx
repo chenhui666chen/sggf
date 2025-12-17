@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useEffect, useState } from 'react'
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useDispatch } from 'react-redux'
 import {
@@ -29,6 +29,11 @@ import {
   IconButton,
   ToggleButton,
   ToggleButtonGroup,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Slider,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import EditIcon from '@mui/icons-material/Edit'
@@ -84,6 +89,21 @@ export default function ProjectDetailPage() {
   const [chapterToDelete, setChapterToDelete] = useState<any>(null)
   const [deleting, setDeleting] = useState(false)
 
+  const [audioSettings, setAudioSettings] = useState<{
+    characterId: number
+    name: string
+    gender?: string | null
+    role?: string | null
+    voiceId: string
+    volume: number
+    speed?: number
+    pitch?: number
+  }[]>([])
+  const [audioLoading, setAudioLoading] = useState(false)
+  const [audioSaving, setAudioSaving] = useState(false)
+  const [audioError, setAudioError] = useState<string | null>(null)
+  const [previewingId, setPreviewingId] = useState<number | null>(null)
+
   useEffect(() => {
     // 当项目 ID 改变时，清除编辑器状态，确保项目隔离
     console.log('🔄 ProjectDetailPage useEffect 触发，projectId:', projectId)
@@ -92,6 +112,7 @@ export default function ProjectDetailPage() {
     if (projectId) {
       loadProjectDetails()
       loadChapters()  // 自动加载章节列表
+      loadAudioConfig()  // 加载项目级音频配置
     } else {
       console.warn('⚠️ projectId 为空')
       setError('项目ID不存在')
@@ -190,15 +211,127 @@ export default function ProjectDetailPage() {
     }
   }
 
-  const handleOpenChaptersDrawer = async () => {
-    setShowChaptersDrawer(true)
-    if (chapters.length === 0) {
-      await loadChapters()
+  const loadAudioConfig = async () => {
+    if (!projectId) {
+      return
+    }
+    try {
+      setAudioLoading(true)
+      setAudioError(null)
+      const projectIdNum = parseInt(projectId)
+
+      const [charactersRes, configRes] = await Promise.all([
+        apiClient.getCharacters(projectIdNum),
+        apiClient.getProjectAudioConfig(projectIdNum),
+      ])
+
+      const characters = (charactersRes.data || []) as any[]
+      const configData = (configRes.data || { characters: [] }) as {
+        characters?: {
+          character_id: number
+          name: string
+          voice_id: string
+          volume: number
+          speed?: number | null
+          pitch?: number | null
+        }[]
+      }
+      const configById = new Map<number, { voice_id: string; volume: number; speed?: number | null; pitch?: number | null }>()
+      for (const item of configData.characters || []) {
+        configById.set(item.character_id, {
+          voice_id: item.voice_id,
+          volume: item.volume,
+          speed: item.speed ?? undefined,
+          pitch: item.pitch ?? undefined,
+        })
+      }
+
+      const settings = characters.map((c) => {
+        const existing = configById.get(c.id)
+        return {
+          characterId: c.id,
+          name: c.name,
+          gender: c.gender,
+          role: c.role,
+          voiceId: existing?.voice_id || '',
+          volume: existing?.volume ?? 50,
+          speed: existing?.speed ?? 1.0,
+          pitch: existing?.pitch ?? 50,
+        }
+      })
+
+      setAudioSettings(settings)
+    } catch (err) {
+      console.error('❌ 加载音频配置失败:', err)
+      setAudioError('加载音频配置失败')
+    } finally {
+      setAudioLoading(false)
     }
   }
 
-  const handleCloseChaptersDrawer = () => {
-    setShowChaptersDrawer(false)
+  const handleSaveAudioConfig = async () => {
+    if (!projectId) return
+    try {
+      setAudioSaving(true)
+      const projectIdNum = parseInt(projectId)
+      const payload = {
+        characters: audioSettings
+          .filter((s) => s.voiceId)
+          .map((s) => ({
+            character_id: s.characterId,
+            name: s.name,
+            voice_id: s.voiceId,
+            volume: s.volume,
+            speed: s.speed,
+            pitch: s.pitch,
+          })),
+      }
+      await apiClient.updateProjectAudioConfig(projectIdNum, payload)
+      alert('音频配置已保存为项目默认配置')
+    } catch (err) {
+      console.error('❌ 保存音频配置失败:', err)
+      alert('保存音频配置失败，请稍后重试')
+    } finally {
+      setAudioSaving(false)
+    }
+  }
+
+  const handlePreviewAudio = async (setting: {
+    characterId: number
+    name: string
+    voiceId: string
+    volume: number
+    speed?: number
+    pitch?: number
+  }) => {
+    if (!projectId) return
+    if (!setting.voiceId) {
+      alert('请先选择音色再试听')
+      return
+    }
+    try {
+      setPreviewingId(setting.characterId)
+      const text = `这是角色「${setting.name}」的语音示例。`
+      const response = await apiClient.previewTTS({
+        text,
+        voice_id: setting.voiceId,
+        volume: setting.volume,
+        speed: setting.speed,
+        pitch: setting.pitch,
+      })
+      const blob = response.data as Blob
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      audio.play()
+      audio.onended = () => {
+        URL.revokeObjectURL(url)
+      }
+    } catch (err) {
+      console.error('❌ 音频试听失败:', err)
+      alert('音频试听失败，请稍后重试')
+    } finally {
+      setPreviewingId(null)
+    }
   }
 
   const handleChapterClick = (chapterId: number) => {
@@ -357,7 +490,8 @@ export default function ProjectDetailPage() {
           <Tab label="👥 人物设定" id="tab-2" aria-controls="tabpanel-2" />
           <Tab label="📋 情节大纲" id="tab-3" aria-controls="tabpanel-3" />
           <Tab label="📚 章节列表" id="tab-4" aria-controls="tabpanel-4" />
-          <Tab label="⭐ 评审结果" id="tab-5" aria-controls="tabpanel-5" />
+          <Tab label="🎧 音频配置" id="tab-5" aria-controls="tabpanel-5" />
+          <Tab label="⭐ 评审结果" id="tab-6" aria-controls="tabpanel-6" />
         </Tabs>
       </Box>
 
@@ -511,8 +645,191 @@ export default function ProjectDetailPage() {
         )}
       </TabPanel>
 
-      {/* 评审结果 */}
+      {/* 音频配置 */}
       <TabPanel value={tabValue} index={5}>
+        {audioError && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {audioError}
+          </Alert>
+        )}
+
+        {audioLoading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+            <CircularProgress />
+          </Box>
+        ) : audioSettings.length === 0 ? (
+          <Alert severity="info">当前项目还没有结构化角色档案，可在人物模块中创建角色后再配置音色。</Alert>
+        ) : (
+          <>
+            <Paper
+              variant="outlined"
+              sx={{
+                maxHeight: 500,
+                overflow: 'auto',
+              }}
+            >
+              <List>
+                {audioSettings.map((cv) => (
+                  <ListItem
+                    key={cv.characterId}
+                    alignItems="flex-start"
+                    sx={{
+                      alignItems: 'stretch',
+                      '&:hover': {
+                        backgroundColor: '#f5f5f5',
+                      },
+                    }}
+                  >
+                    <Box sx={{ width: '100%' }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                        <Box>
+                          <Typography variant="subtitle2">{cv.name}</Typography>
+                          {(cv.role || cv.gender) && (
+                            <Typography variant="caption" color="text.secondary">
+                              {cv.role || '角色'} · {cv.gender || '性别未设定'}
+                            </Typography>
+                          )}
+                        </Box>
+                        {cv.voiceId && (
+                          <Chip label="已配置" size="small" color="success" sx={{ height: 20 }} />
+                        )}
+                      </Box>
+
+                      <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+                        <FormControl size="small" fullWidth>
+                          <InputLabel>角色音</InputLabel>
+                          <Select
+                            label="角色音"
+                            value={cv.voiceId}
+                            onChange={(e) =>
+                              setAudioSettings((prev) =>
+                                prev.map((item) =>
+                                  item.characterId === cv.characterId
+                                    ? { ...item, voiceId: e.target.value as string }
+                                    : item,
+                                ),
+                              )
+                            }
+                          >
+                            <MenuItem value="">
+                              <em>自动（AI 选择）</em>
+                            </MenuItem>
+                            <MenuItem value="male_young_energetic">年轻男主（热血）</MenuItem>
+                            <MenuItem value="male_adult_calm">成熟男声（沉稳）</MenuItem>
+                            <MenuItem value="female_young_gentle">年轻女主（温柔）</MenuItem>
+                            <MenuItem value="female_adult_cold">成熟女性（高冷）</MenuItem>
+                            <MenuItem value="elder_wise">长者旁白（睿智）</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </Box>
+
+                      <Box sx={{ mt: 1 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          音量：{cv.volume}
+                        </Typography>
+                        <Slider
+                          size="small"
+                          min={0}
+                          max={100}
+                          step={5}
+                          value={cv.volume}
+                          onChange={(_, value) =>
+                            setAudioSettings((prev) =>
+                              prev.map((item) =>
+                                item.characterId === cv.characterId
+                                  ? { ...item, volume: value as number }
+                                  : item,
+                              ),
+                            )
+                          }
+                          sx={{ mt: 0.5 }}
+                        />
+                      </Box>
+
+                      <Box sx={{ mt: 1 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          语速：{cv.speed ?? 1.0}
+                        </Typography>
+                        <Slider
+                          size="small"
+                          min={0.5}
+                          max={2.0}
+                          step={0.1}
+                          value={cv.speed ?? 1.0}
+                          onChange={(_, value) =>
+                            setAudioSettings((prev) =>
+                              prev.map((item) =>
+                                item.characterId === cv.characterId
+                                  ? { ...item, speed: value as number }
+                                  : item,
+                              ),
+                            )
+                          }
+                          sx={{ mt: 0.5 }}
+                        />
+                      </Box>
+
+                      <Box sx={{ mt: 1 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          音高：{cv.pitch ?? 50}
+                        </Typography>
+                        <Slider
+                          size="small"
+                          min={0}
+                          max={100}
+                          step={5}
+                          value={cv.pitch ?? 50}
+                          onChange={(_, value) =>
+                            setAudioSettings((prev) =>
+                              prev.map((item) =>
+                                item.characterId === cv.characterId
+                                  ? { ...item, pitch: value as number }
+                                  : item,
+                              ),
+                            )
+                          }
+                          sx={{ mt: 0.5 }}
+                        />
+                      </Box>
+
+                      <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => handlePreviewAudio(cv)}
+                          disabled={!cv.voiceId || previewingId === cv.characterId}
+                        >
+                          {previewingId === cv.characterId ? '试听中...' : '试听'}
+                        </Button>
+                      </Box>
+                    </Box>
+                  </ListItem>
+                ))}
+              </List>
+            </Paper>
+
+            <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
+              <Button
+                variant="outlined"
+                onClick={loadAudioConfig}
+                disabled={audioLoading}
+              >
+                重新加载
+              </Button>
+              <Button
+                variant="contained"
+                onClick={handleSaveAudioConfig}
+                disabled={audioSaving}
+              >
+                {audioSaving ? '保存中...' : '保存为项目默认配置'}
+              </Button>
+            </Box>
+          </>
+        )}
+      </TabPanel>
+
+      {/* 评审结果 */}
+      <TabPanel value={tabValue} index={6}>
         {review ? (
           <Card>
             <CardContent>

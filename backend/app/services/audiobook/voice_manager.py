@@ -269,6 +269,69 @@ class VoiceManager:
         """获取角色音色"""
         return self.character_voices.get(character_name)
     
+    def apply_project_voice_mapping(self, voice_mapping: Dict[str, Any]):
+        """应用项目级的角色音配置（用户配置优先）
+
+        voice_mapping 结构示例:
+        {
+            "角色名": {
+                "voice_id": "male_young_energetic",
+                "volume": 60
+            }
+        }
+        """
+        if not voice_mapping:
+            return
+
+        for character_name, config in voice_mapping.items():
+            if not isinstance(config, dict):
+                continue
+
+            voice_id = config.get("voice_id")
+            if not voice_id:
+                # 未显式配置音色，保留为自动分配
+                continue
+
+            preset = self.PRESET_VOICES.get(voice_id)
+            if not preset:
+                logger.warning(f"⚠️ 未知的voice_id: {voice_id}，跳过角色 {character_name}")
+                continue
+
+            # 基于预设音色创建一份副本，并允许覆盖音量
+            voice_config = dict(preset)
+            volume = config.get("volume")
+            if volume is not None:
+                try:
+                    volume_int = int(volume)
+                except (TypeError, ValueError):
+                    volume_int = preset.get("volume_base", 50)
+                voice_config["volume_base"] = max(0, min(100, volume_int))
+
+            # 可选：覆盖语速和音高
+            speed = config.get("speed")
+            if speed is not None:
+                try:
+                    speed_float = float(speed)
+                except (TypeError, ValueError):
+                    speed_float = preset.get("speed_base", 1.0)
+                voice_config["speed_base"] = max(0.5, min(2.0, speed_float))
+
+            pitch = config.get("pitch")
+            if pitch is not None:
+                try:
+                    pitch_int = int(pitch)
+                except (TypeError, ValueError):
+                    pitch_int = preset.get("pitch_base", 50)
+                voice_config["pitch_base"] = max(0, min(100, pitch_int))
+
+            profile = self._create_profile(character_name, voice_id, voice_config)
+            self.character_voices[character_name] = profile
+            self.used_voice_ids.add(voice_id)
+            logger.info(
+                f"🎛 应用用户音频配置: {character_name} -> {voice_id} "
+                f"(volume={voice_config.get('volume_base')})"
+            )
+    
     def save_mapping(self, filepath: str):
         """保存音色映射到文件"""
         mapping = {

@@ -3,7 +3,9 @@
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
+from pydantic import BaseModel
+import json
 from app.db.base import get_db
 from app.models.user import User
 from app.models.project import Project, Chapter
@@ -12,6 +14,22 @@ from app.schemas.project import (
     ChapterCreate, ChapterUpdate, ChapterResponse
 )
 from app.core.security import get_current_user
+
+
+class CharacterAudioConfig(BaseModel):
+    """单个角色的音频配置"""
+    character_id: int
+    name: str
+    voice_id: str
+    volume: int = 50
+    speed: Optional[float] = None
+    pitch: Optional[int] = None
+
+
+class ProjectAudioConfig(BaseModel):
+    """项目级音频配置"""
+    characters: List[CharacterAudioConfig] = []
+
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
 
@@ -232,6 +250,62 @@ async def delete_project(
             "chromadb": True,  # vector data
         }
     }
+
+
+@router.get("/{project_id}/audio-config", response_model=ProjectAudioConfig)
+async def get_project_audio_config(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProjectAudioConfig:
+    """获取项目级音频配置"""
+    project = db.query(Project).filter(
+        (Project.id == project_id) & (Project.user_id == current_user.id)
+    ).first()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+
+    raw = project.audio_config or ""
+    data: dict = {}
+    if raw:
+        try:
+            data = json.loads(raw)
+        except Exception:
+            data = {}
+
+    characters = data.get("characters") or []
+    # 让 Pydantic 处理具体字段校验
+    return ProjectAudioConfig(characters=characters)
+
+
+@router.put("/{project_id}/audio-config", response_model=ProjectAudioConfig)
+async def update_project_audio_config(
+    project_id: int,
+    config: ProjectAudioConfig,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProjectAudioConfig:
+    """更新项目级音频配置"""
+    project = db.query(Project).filter(
+        (Project.id == project_id) & (Project.user_id == current_user.id)
+    ).first()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+
+    project.audio_config = json.dumps(config.dict(), ensure_ascii=False)
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+
+    return config
 
 
 # 章节路由

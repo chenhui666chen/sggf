@@ -43,6 +43,7 @@ import {
   CircularProgress,
   Divider,
   Checkbox,
+  Slider,
   Snackbar,
 } from '@mui/material'
 import {
@@ -96,6 +97,45 @@ interface TaskStatus {
   novel_theme: string
 }
 
+interface CharacterVoiceSetting {
+  characterId: number
+  name: string
+  gender?: string | null
+  role?: string | null
+  voiceId: string
+  volume: number
+  speed?: number
+  pitch?: number
+}
+
+const VOICE_PRESETS: { id: string; label: string; description: string }[] = [
+  {
+    id: 'male_young_energetic',
+    label: '年轻男主（热血）',
+    description: '年轻男性，活力充沛，适合热血主角',
+  },
+  {
+    id: 'male_adult_calm',
+    label: '成熟男声（沉稳）',
+    description: '成熟男性，沉稳冷静，适合智者角色',
+  },
+  {
+    id: 'female_young_gentle',
+    label: '年轻女主（温柔）',
+    description: '年轻女性，温柔体贴，适合女主角',
+  },
+  {
+    id: 'female_adult_cold',
+    label: '成熟女性（高冷）',
+    description: '成熟女性，高冷理智，适合女强人',
+  },
+  {
+    id: 'elder_wise',
+    label: '长者旁白（睿智）',
+    description: '长者，睿智稳重，适合导师或老者角色',
+  },
+]
+
 export default function AudiobookPage() {
   const navigate = useNavigate()
 
@@ -107,7 +147,8 @@ export default function AudiobookPage() {
   const [loading, setLoading] = useState<boolean>(false)
   const [generating, setGenerating] = useState<boolean>(false)
   const [activeStep, setActiveStep] = useState<number>(0)
-  const [voiceMapping, setVoiceMapping] = useState<Record<string, string>>({})
+  const [characterVoices, setCharacterVoices] = useState<CharacterVoiceSetting[]>([])
+  const [loadingCharacters, setLoadingCharacters] = useState<boolean>(false)
   const [audiobookProject, setAudiobookProject] = useState<any>(null)
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' as 'success' | 'error' | 'info' })
   
@@ -126,6 +167,8 @@ export default function AudiobookPage() {
   // 新增：删除确认对话框
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<boolean>(false)
   const [deletingProject, setDeletingProject] = useState<any>(null)
+  // 新增：角色试听状态
+  const [previewingCharacterId, setPreviewingCharacterId] = useState<number | null>(null)
 
   const steps = ['选择项目', '配置音色', '生成有声书', '完成']
 
@@ -249,22 +292,68 @@ export default function AudiobookPage() {
   const handleSelectProject = async (project: Project) => {
     setSelectedProject(project)
     setLoading(true)
+    setCharacterVoices([])
+
+    const narratorVoice: CharacterVoiceSetting = {
+      characterId: 0,
+      name: '旁白',
+      gender: '中性',
+      role: '旁白',
+      voiceId: '',
+      volume: 50,
+      speed: 1.0,
+      pitch: 50,
+    }
     
     try {
+      const headers: HeadersInit = {
+        'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+      }
+
       // 获取章节列表
-      const response = await fetch(`/api/v1/projects/${project.id}/chapters`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
+      const chaptersResponse = await fetch(`/api/v1/projects/${project.id}/chapters`, {
+        headers,
       })
-      if (response.ok) {
-        const data = await response.json()
+      if (chaptersResponse.ok) {
+        const data = await chaptersResponse.json()
         setChapters(data)
         setSelectedChapters(data.map((c: Chapter) => c.id))  // 默认全选
-        setActiveStep(1)
       } else {
         setSnackbar({ open: true, message: '获取章节失败', severity: 'error' })
       }
+
+      // 获取角色列表（用于音频配置）
+      setLoadingCharacters(true)
+      try {
+        const charactersResponse = await fetch(`/api/v1/projects/${project.id}/characters`, {
+          headers,
+        })
+        if (charactersResponse.ok) {
+          const charactersData = await charactersResponse.json()
+          const characterVoicesFromApi: CharacterVoiceSetting[] = charactersData.map((c: any) => ({
+            characterId: c.id,
+            name: c.name,
+            gender: c.gender,
+            role: c.role,
+            voiceId: '',
+            volume: 50,
+            speed: 1.0,
+            pitch: 50,
+          }))
+          const initialVoices: CharacterVoiceSetting[] = [
+            narratorVoice,
+            ...characterVoicesFromApi,
+          ]
+          setCharacterVoices(initialVoices)
+        } else {
+          console.warn('获取角色列表失败:', charactersResponse.status)
+          setCharacterVoices([narratorVoice])
+        }
+      } finally {
+        setLoadingCharacters(false)
+      }
+
+      setActiveStep(1)
     } catch (error) {
       console.error('获取章节失败:', error)
       setSnackbar({ open: true, message: '网络错误，请重试', severity: 'error' })
@@ -291,6 +380,83 @@ export default function AudiobookPage() {
     }
   }
   
+  const handleVoiceChange = (characterId: number, voiceId: string) => {
+    setCharacterVoices(prev =>
+      prev.map((item) =>
+        item.characterId === characterId ? { ...item, voiceId } : item
+      )
+    )
+  }
+
+  const handleVolumeChange = (characterId: number, volume: number) => {
+    setCharacterVoices(prev =>
+      prev.map((item) =>
+        item.characterId === characterId ? { ...item, volume } : item
+      )
+    )
+  }
+
+  const handleSpeedChange = (characterId: number, speed: number) => {
+    setCharacterVoices(prev =>
+      prev.map((item) =>
+        item.characterId === characterId ? { ...item, speed } : item
+      )
+    )
+  }
+
+  const handlePitchChange = (characterId: number, pitch: number) => {
+    setCharacterVoices(prev =>
+      prev.map((item) =>
+        item.characterId === characterId ? { ...item, pitch } : item
+      )
+    )
+  }
+
+  const handlePreviewCharacterVoice = async (cv: CharacterVoiceSetting) => {
+    if (!cv.voiceId) {
+      setSnackbar({ open: true, message: '请先为该角色选择音色再试听', severity: 'error' })
+      return
+    }
+
+    try {
+      setPreviewingCharacterId(cv.characterId)
+      const token = localStorage.getItem('access_token')
+      const text = '当你真的喜欢一个人的时候就容易说傻话办蠢事。'
+
+      const response = await fetch('/api/v1/audiobook/tts/preview', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          text,
+          voice_id: cv.voiceId,
+          volume: cv.volume,
+          speed: cv.speed,
+          pitch: cv.pitch,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('试听请求失败')
+      }
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      audio.play()
+      audio.onended = () => {
+        window.URL.revokeObjectURL(url)
+      }
+    } catch (error) {
+      console.error('角色音试听失败:', error)
+      setSnackbar({ open: true, message: '角色音试听失败，请稍后重试', severity: 'error' })
+    } finally {
+      setPreviewingCharacterId(null)
+    }
+  }
+
   // 新增：下载音频
   const handleDownloadAudio = async (chapterId: number) => {
     if (!audiobookProject) return
@@ -406,6 +572,17 @@ export default function AudiobookPage() {
 
     try {
       // 调用生成API
+      const voiceConfigPayload =
+        characterVoices
+          .filter((cv) => cv.voiceId)
+          .map((cv) => ({
+            character_name: cv.name,
+            voice_id: cv.voiceId,
+            volume: cv.volume,
+            speed: cv.speed,
+            pitch: cv.pitch,
+          }))
+
       const response = await fetch('/api/v1/audiobook/projects', {
         method: 'POST',
         headers: {
@@ -417,6 +594,7 @@ export default function AudiobookPage() {
           chapter_ids: selectedChapters,
           tts_provider: 'aliyun',
           enable_cache: true,
+          voice_config: voiceConfigPayload,
         }),
       })
       
@@ -739,73 +917,229 @@ export default function AudiobookPage() {
           </Box>
         )}
 
-        {/* 步骤2: 配置音色（章节选择） */}
+        {/* 步骤2: 配置音色（章节选择 + 角色音频设置） */}
         {activeStep === 1 && (
           <Paper sx={{ p: 3, backgroundColor: 'rgba(255,255,255,0.95)' }}>
             <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center' }}>
               <VoiceIcon sx={{ mr: 1, color: '#9c27b0' }} />
-              选择章节
+              配置章节与角色音
             </Typography>
-            
+                    
             <Alert severity="info" sx={{ mb: 2 }}>
-              已选择 {selectedChapters.length}/{chapters.length} 个章节
+              已选择 {selectedChapters.length}/{chapters.length} 个章节。未配置的角色将由 AI 自动分配音色和音量。
             </Alert>
-
-            {/* 全选按钮 */}
-            <Box sx={{ mb: 2, display: 'flex', gap: 1 }}>
-              <Button 
-                variant="outlined" 
-                size="small"
-                onClick={handleToggleAll}
-              >
-                {selectedChapters.length === chapters.length ? '取消全选' : '全选'}
-              </Button>
-            </Box>
-
-            {/* 章节列表 */}
-            <Paper 
-              variant="outlined" 
-              sx={{ 
-                maxHeight: 400, 
-                overflow: 'auto',
-                mb: 3
-              }}
-            >
-              <List>
-                {chapters.map((chapter) => (
-                  <ListItem 
-                    key={chapter.id}
-                    component="div"
-                    onClick={() => handleToggleChapter(chapter.id)}
+        
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <Typography variant="subtitle1" sx={{ mb: 1 }}>
+                  章节选择
+                </Typography>
+        
+                {/* 全选按钮 */}
+                <Box sx={{ mb: 2, display: 'flex', gap: 1 }}>
+                  <Button 
+                    variant="outlined" 
+                    size="small"
+                    onClick={handleToggleAll}
+                  >
+                    {selectedChapters.length === chapters.length ? '取消全选' : '全选'}
+                  </Button>
+                </Box>
+        
+                {/* 章节列表 */}
+                <Paper 
+                  variant="outlined" 
+                  sx={{ 
+                    maxHeight: 400, 
+                    overflow: 'auto',
+                  }}
+                >
+                  <List>
+                    {chapters.map((chapter) => (
+                      <ListItem 
+                        key={chapter.id}
+                        component="div"
+                        onClick={() => handleToggleChapter(chapter.id)}
+                        sx={{
+                          cursor: 'pointer',
+                          '&:hover': {
+                            backgroundColor: 'rgba(156, 39, 176, 0.08)'
+                          }
+                        }}
+                      >
+                        <Checkbox
+                          edge="start"
+                          checked={selectedChapters.includes(chapter.id)}
+                          tabIndex={-1}
+                          disableRipple
+                          sx={{
+                            color: '#9c27b0',
+                            '&.Mui-checked': {
+                              color: '#9c27b0',
+                            },
+                          }}
+                        />
+                        <ListItemText
+                          primary={`第${chapter.chapter_number}章 - ${chapter.title}`}
+                          secondary={chapter.content ? `${chapter.content.slice(0, 50)}...` : '暂无内容'}
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                </Paper>
+              </Grid>
+        
+              <Grid item xs={12} md={6}>
+                <Typography variant="subtitle1" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <AudioIcon fontSize="small" />
+                  角色音与音量配置
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  不修改时使用 AI 默认音色；为角色选择音色或调整音量后，本次有声书生成将优先使用你的配置。
+                </Typography>
+        
+                {loadingCharacters && (
+                  <Box sx={{ py: 4, display: 'flex', justifyContent: 'center' }}>
+                    <CircularProgress size={24} />
+                  </Box>
+                )}
+        
+                {!loadingCharacters && characterVoices.length === 0 && (
+                  <Box sx={{ py: 2 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      当前项目还没有结构化角色档案，可在「项目详情 → 角色管理」中添加角色后再配置音色。
+                    </Typography>
+                  </Box>
+                )}
+        
+                {!loadingCharacters && characterVoices.length > 0 && (
+                  <Paper
+                    variant="outlined"
                     sx={{
-                      cursor: 'pointer',
-                      '&:hover': {
-                        backgroundColor: 'rgba(156, 39, 176, 0.08)'
-                      }
+                      maxHeight: 400,
+                      overflow: 'auto',
+                      p: 1,
                     }}
                   >
-                    <Checkbox
-                      edge="start"
-                      checked={selectedChapters.includes(chapter.id)}
-                      tabIndex={-1}
-                      disableRipple
-                      sx={{
-                        color: '#9c27b0',
-                        '&.Mui-checked': {
-                          color: '#9c27b0',
-                        },
-                      }}
-                    />
-                    <ListItemText
-                      primary={`第${chapter.chapter_number}章 - ${chapter.title}`}
-                      secondary={chapter.content ? `${chapter.content.slice(0, 50)}...` : '暂无内容'}
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            </Paper>
+                    <List>
+                      {characterVoices.map((cv) => (
+                        <ListItem
+                          key={cv.characterId}
+                          alignItems="flex-start"
+                          sx={{
+                            alignItems: 'stretch',
+                            '&:hover': {
+                              backgroundColor: 'rgba(156, 39, 176, 0.03)',
+                            },
+                          }}
+                        >
+                          <Box sx={{ width: '100%' }}>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                              <Box>
+                                <Typography variant="subtitle2">{cv.name}</Typography>
+                                {(cv.role || cv.gender) && (
+                                  <Typography variant="caption" color="text.secondary">
+                                    {cv.role || '角色'} · {cv.gender || '性别未设定'}
+                                  </Typography>
+                                )}
+                              </Box>
+                              {cv.voiceId && (
+                                <Chip
+                                  label="已配置"
+                                  size="small"
+                                  color="success"
+                                  sx={{ height: 20 }}
+                                />
+                              )}
+                            </Box>
+        
+                            <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+                              <FormControl size="small" fullWidth>
+                                <InputLabel>角色音</InputLabel>
+                                <Select
+                                  label="角色音"
+                                  value={cv.voiceId}
+                                  onChange={(e) => handleVoiceChange(cv.characterId, e.target.value as string)}
+                                >
+                                  <MenuItem value="">
+                                    <em>自动（AI 选择）</em>
+                                  </MenuItem>
+                                  {VOICE_PRESETS.map((preset) => (
+                                    <MenuItem key={preset.id} value={preset.id}>
+                                      {preset.label}
+                                    </MenuItem>
+                                  ))}
+                                </Select>
+                              </FormControl>
+                            </Box>
+        
+                            <Box sx={{ mt: 1 }}>
+                              <Typography variant="caption" color="text.secondary">
+                                音量：{cv.volume}
+                              </Typography>
+                              <Slider
+                                size="small"
+                                min={0}
+                                max={100}
+                                step={5}
+                                value={cv.volume}
+                                onChange={(_, value) => handleVolumeChange(cv.characterId, value as number)}
+                                sx={{ mt: 0.5 }}
+                              />
+                            </Box>
 
-            <Box sx={{ display: 'flex', gap: 2, justifyContent: 'space-between' }}>
+                            <Box sx={{ mt: 1 }}>
+                              <Typography variant="caption" color="text.secondary">
+                                语速：{cv.speed ?? 1.0}
+                              </Typography>
+                              <Slider
+                                size="small"
+                                min={0.5}
+                                max={2.0}
+                                step={0.1}
+                                value={cv.speed ?? 1.0}
+                                onChange={(_, value) => handleSpeedChange(cv.characterId, value as number)}
+                                sx={{ mt: 0.5 }}
+                              />
+                            </Box>
+
+                            <Box sx={{ mt: 1 }}>
+                              <Typography variant="caption" color="text.secondary">
+                                音高：{cv.pitch ?? 50}
+                              </Typography>
+                              <Slider
+                                size="small"
+                                min={0}
+                                max={100}
+                                step={5}
+                                value={cv.pitch ?? 50}
+                                onChange={(_, value) => handlePitchChange(cv.characterId, value as number)}
+                                sx={{ mt: 0.5 }}
+                              />
+                            </Box>
+
+                            <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
+                              <Tooltip title="云端精确试听效果，请稍作等待...">
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  onClick={() => handlePreviewCharacterVoice(cv)}
+                                  disabled={!cv.voiceId || previewingCharacterId === cv.characterId}
+                                >
+                                  {previewingCharacterId === cv.characterId ? '试听中...' : '试听'}
+                                </Button>
+                              </Tooltip>
+                            </Box>
+                          </Box>
+                        </ListItem>
+                      ))}
+                    </List>
+                  </Paper>
+                )}
+              </Grid>
+            </Grid>
+        
+            <Box sx={{ mt: 3, display: 'flex', gap: 2, justifyContent: 'space-between' }}>
               <Button variant="outlined" onClick={() => setActiveStep(0)}>
                 上一步
               </Button>

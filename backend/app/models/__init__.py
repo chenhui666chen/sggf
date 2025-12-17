@@ -19,6 +19,9 @@ from .book_parser import (
     AnalysisType
 )
 
+# 有声书模型
+from .audiobook import AudiobookProject, ChapterAudio
+
 __all__ = [
     "User",
     "Project",
@@ -36,4 +39,7 @@ __all__ = [
     "SourceType",
     "ParseStatus",
     "AnalysisType",
+    # 有声书
+    "AudiobookProject",
+    "ChapterAudio",
 ]

@@ -1,11 +1,17 @@
-"""
-AudioDirector - 有声导演/总监Agent
+"""AudioDirector - 有声导演/总监Agent
 
 核心职责：
 1. 统筹有声剧本的整体创作方向和质量
 2. 制定改编策略（声音戏剧 vs 朗读）
 3. 协调各专业Agent的工作
 4. 最终质量把关和发布决策
+
+TTS能力：CosyVoice v3-plus
+- 顶级音质（MOS>4.7）
+- 语速控制：0.5-2.0
+- 音调控制：0.5-2.0
+- 毫秒级停顿：100-2000ms
+- 重音强调：3级
 """
 
 import logging
@@ -32,7 +38,7 @@ class FidelityLevel(str, Enum):
 
 @dataclass
 class AdaptationStrategy:
-    """改编策略"""
+    """改编策略（适配CosyVoice v3-plus）"""
     style: AdaptationStyle = AdaptationStyle.HYBRID
     fidelity_level: FidelityLevel = FidelityLevel.HIGH
     target_audience: str = "通用听众"
@@ -44,6 +50,12 @@ class AdaptationStrategy:
     sound_effect_density: str = "medium"  # low/medium/high
     music_density: str = "medium"
     voice_differentiation: bool = True  # 是否为角色分配不同音色
+    
+    # v3-plus高级特性利用
+    use_advanced_rate_control: bool = True  # 使用语速控制
+    use_pitch_modulation: bool = True  # 使用音调调节
+    use_precise_pauses: bool = True  # 使用精确停顿
+    use_emphasis: bool = True  # 使用重音强调
 
 
 @dataclass
@@ -130,7 +142,12 @@ class AudioDirector:
             emphasis=self._determine_emphasis(novel_genre),
             sound_effect_density=sound_density_mapping[style],
             music_density="medium",
-            voice_differentiation=True
+            voice_differentiation=True,
+            # 商业版：全面启用v3-plus高级特性
+            use_advanced_rate_control=True,
+            use_pitch_modulation=True,
+            use_precise_pauses=True,
+            use_emphasis=True
         )
         
         self.current_strategy = strategy
@@ -172,7 +189,7 @@ class AudioDirector:
         # 1. 剧本改编任务（最高优先级）
         tasks.append(TaskAssignment(
             agent_name="AudiobookScriptAdapter",
-            task_description=f"改编章节内容为有声剧本，风格：{self.current_strategy.style.value}",
+            task_description=f"改编章节内容为有声剧本，风格：{self.current_strategy.style.value}。充分利用v3-plus的rate/pitch/pause/emphasis控制。",
             priority=1,
             status="pending"
         ))
@@ -181,7 +198,7 @@ class AudioDirector:
         if self.current_strategy.voice_differentiation:
             tasks.append(TaskAssignment(
                 agent_name="VoiceDesigner",
-                task_description="为主要角色设计差异化音色",
+                task_description="为主要角色设计差异化音色，使用v3-plus的rate/pitch参数进行精细调整。",
                 priority=2,
                 status="pending"
             ))

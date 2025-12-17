@@ -23,6 +23,9 @@ from app.services.book_parser import (
     TextCleaner, 
     ContentAnalyzer,
     AnalysisType,
+    FileParser,
+    FileFormat,
+    ParsedContent,
 )
 
 logger = logging.getLogger(__name__)
@@ -211,47 +214,63 @@ async def upload_file(
     """
     上传文件
     
-    支持 TXT 格式文件
+    支持 TXT、EPUB、PDF 格式文件
     """
-    # 验证文件类型
+    # 验证文件名
     if not file.filename:
         raise HTTPException(status_code=400, detail="文件名不能为空")
     
     filename = file.filename.lower()
-    if not filename.endswith('.txt'):
-        raise HTTPException(status_code=400, detail="目前仅支持 TXT 格式文件")
+    
+    # 验证文件格式
+    if not any(filename.endswith(ext) for ext in ['.txt', '.epub', '.pdf']):
+        raise HTTPException(
+            status_code=400, 
+            detail="仅支持 TXT、EPUB、PDF 格式文件"
+        )
     
     # 读取文件内容
     content = await file.read()
     
-    # 尝试多种编码
-    text = None
-    for encoding in ['utf-8', 'gbk', 'gb2312', 'utf-16', 'latin-1']:
-        try:
-            text = content.decode(encoding)
-            break
-        except UnicodeDecodeError:
-            continue
+    # 使用多格式解析器
+    parser = FileParser()
+    parsed = parser.parse(content, file.filename)
     
-    if text is None:
-        raise HTTPException(status_code=400, detail="无法识别文件编码")
+    if not parsed.success:
+        raise HTTPException(
+            status_code=400,
+            detail=f"文件解析失败: {parsed.error}"
+        )
     
     # 清洗文本
     cleaner = TextCleaner()
-    clean_result = cleaner.clean(text)
-    metadata = cleaner.extract_metadata_from_header(text)
+    clean_result = cleaner.clean(parsed.text)
     
-    # 确定书名
-    book_title = title or metadata.get("title") or file.filename.rsplit('.', 1)[0]
+    # 元数据提取（优先使用文件内提取的元数据）
+    metadata = cleaner.extract_metadata_from_header(parsed.text)
+    
+    # 确定书名和作者（优先级：用户输入 > 文件元数据 > 文本元数据 > 文件名）
+    book_title = (
+        title 
+        or parsed.title 
+        or metadata.get("title") 
+        or file.filename.rsplit('.', 1)[0]
+    )
+    
+    book_author = (
+        author 
+        or parsed.author 
+        or metadata.get("author")
+    )
     
     # 创建书籍记录
     book = BookSource(
         user_id=current_user.id,
         title=book_title,
-        author=author or metadata.get("author"),
+        author=book_author,
         genre=genre,
         description=metadata.get("description"),
-        source_type="txt",
+        source_type=parsed.format.value,  # txt/epub/pdf
         total_words=clean_result.word_count,
         status=ParseStatus.PENDING.value,
     )
@@ -260,7 +279,7 @@ async def upload_file(
     db.commit()
     db.refresh(book)
     
-    # 存储文件
+    # 存储文件（统一保存为 TXT 格式）
     text_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "book_texts")
     os.makedirs(text_dir, exist_ok=True)
     text_path = os.path.join(text_dir, f"book_{book.id}.txt")
@@ -271,7 +290,7 @@ async def upload_file(
     book.file_path = text_path
     db.commit()
     
-    logger.info(f"✅ 书籍文件上传成功: {book.title} (ID: {book.id})")
+    logger.info(f"✅ 书籍文件上传成功: {book.title} (ID: {book.id}, 格式: {parsed.format.value})")
     
     return BookResponse(
         id=book.id,
