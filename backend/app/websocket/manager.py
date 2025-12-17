@@ -201,6 +201,124 @@ class WorkflowWebSocketManager:
             'data': data or {},
         }
         await WorkflowWebSocketManager.broadcast_to_project(project_id, 'notification', notification_data)
+    
+    # ==================== 有声书专用推送 ====================
+    
+    @staticmethod
+    async def send_audiobook_progress(
+        audiobook_project_id: int,
+        chapter_id: int,
+        stage: str,
+        progress: int,
+        message: str | None = None,
+        stage_metrics: dict | None = None
+    ):
+        """
+        发送有声书章节生成进度（细粒度推送）
+        
+        Args:
+            audiobook_project_id: 有声书项目ID
+            chapter_id: 章节ID
+            stage: 当前阶段（strategy/script_adaptation/voice_design/...）
+            progress: 进度0-100
+            message: 进度消息
+            stage_metrics: 阶段指标（如segments_count, tts_stats等）
+        """
+        data = {
+            'audiobook_project_id': audiobook_project_id,
+            'chapter_id': chapter_id,
+            'stage': stage,
+            'progress': progress,
+            'message': message,
+            'stage_metrics': stage_metrics or {},
+        }
+        # 使用 audiobook_project_id 作为房间标识（前端可监听整个有声书项目）
+        room = f'audiobook_{audiobook_project_id}'
+        await sio.emit('audiobook_progress', data, room=room)
+    
+    @staticmethod
+    async def send_audiobook_chapter_complete(
+        audiobook_project_id: int,
+        chapter_id: int,
+        audio_info: dict,
+        task_id: str | None = None
+    ):
+        """
+        发送章节音频生成完成通知
+        
+        Args:
+            audiobook_project_id: 有声书项目ID
+            chapter_id: 章节ID
+            audio_info: 音频信息（duration, file_size, stats等）
+            task_id: 任务ID（可选）
+        """
+        data = {
+            'audiobook_project_id': audiobook_project_id,
+            'chapter_id': chapter_id,
+            'status': 'completed',
+            'audio_info': audio_info,
+            'task_id': task_id,
+        }
+        room = f'audiobook_{audiobook_project_id}'
+        await sio.emit('audiobook_chapter_complete', data, room=room)
+    
+    @staticmethod
+    async def send_audiobook_chapter_error(
+        audiobook_project_id: int,
+        chapter_id: int,
+        error: str,
+        task_id: str | None = None
+    ):
+        """
+        发送章节音频生成失败通知
+        
+        Args:
+            audiobook_project_id: 有声书项目ID
+            chapter_id: 章节ID
+            error: 错误信息
+            task_id: 任务ID（可选）
+        """
+        data = {
+            'audiobook_project_id': audiobook_project_id,
+            'chapter_id': chapter_id,
+            'status': 'failed',
+            'error': error,
+            'task_id': task_id,
+        }
+        room = f'audiobook_{audiobook_project_id}'
+        await sio.emit('audiobook_chapter_error', data, room=room)
+    
+    @staticmethod
+    async def send_audiobook_project_summary(
+        audiobook_project_id: int,
+        total_chapters: int,
+        completed_chapters: int,
+        failed_chapters: int,
+        total_duration: float,
+        total_cost: float
+    ):
+        """
+        发送有声书项目整体进度汇总
+        
+        Args:
+            audiobook_project_id: 有声书项目ID
+            total_chapters: 总章节数
+            completed_chapters: 已完成章节数
+            failed_chapters: 失败章节数
+            total_duration: 总时长（秒）
+            total_cost: 总成本（元）
+        """
+        data = {
+            'audiobook_project_id': audiobook_project_id,
+            'total_chapters': total_chapters,
+            'completed_chapters': completed_chapters,
+            'failed_chapters': failed_chapters,
+            'total_duration': total_duration,
+            'total_cost': total_cost,
+            'overall_progress': int((completed_chapters + failed_chapters) / total_chapters * 100) if total_chapters > 0 else 0,
+        }
+        room = f'audiobook_{audiobook_project_id}'
+        await sio.emit('audiobook_project_summary', data, room=room)
 
 
 # Socket.IO 事件处理器
@@ -330,6 +448,89 @@ async def leave_project(sid, data):
         await sio.emit('left_project', {'project_id': project_id}, room=sid)
     except Exception as e:
         logger.error(f"❌ 离开房间失败: {e}")
+
+
+@sio.event
+async def join_audiobook(sid, data):
+    """加入有声书项目房间 - 用于接收实时进度推送"""
+    print(f"📥 [WebSocket] 收到 join_audiobook 请求: sid={sid}, data={data}")
+    try:
+        audiobook_project_id = data.get('audiobook_project_id')
+        token = data.get('token')
+
+        # 验证必要参数
+        if not audiobook_project_id:
+            await sio.emit('error', {'message': '缺少 audiobook_project_id'}, room=sid)
+            return
+
+        if not token:
+            await sio.emit('error', {'message': '缺少认证令牌'}, room=sid)
+            return
+
+        # 验证 token
+        payload = verify_websocket_token(token)
+        if not payload:
+            await sio.emit('error', {'message': '无效的认证令牌'}, room=sid)
+            return
+
+        user_id = payload.get("sub")
+        if not user_id:
+            await sio.emit('error', {'message': '令牌中缺少用户信息'}, room=sid)
+            return
+
+        # 验证有声书项目所有权
+        from app.models.audiobook import AudiobookProject
+        db = next(get_db())
+        try:
+            audiobook_project = db.query(AudiobookProject).filter(
+                AudiobookProject.id == audiobook_project_id
+            ).first()
+
+            if not audiobook_project:
+                await sio.emit('error', {'message': '有声书项目不存在'}, room=sid)
+                return
+
+            # 验证原始项目权限
+            project = db.query(Project).filter(
+                Project.id == audiobook_project.project_id,
+                Project.user_id == int(user_id)
+            ).first()
+
+            if not project:
+                logger.warning(f"⚠️ 用户 {user_id} 尝试加入未授权的有声书项目 {audiobook_project_id}")
+                await sio.emit('error', {'message': '无权访问该有声书项目'}, room=sid)
+                return
+
+            # 验证通过，加入房间
+            room = f'audiobook_{audiobook_project_id}'
+            await sio.enter_room(sid, room)
+
+            logger.info(f"📥 客户端 {sid} (用户 {user_id}) 加入有声书房间: {room}")
+            await sio.emit('joined_audiobook', {'audiobook_project_id': audiobook_project_id, 'room': room}, room=sid)
+
+        finally:
+            db.close()
+
+    except Exception as e:
+        logger.error(f"❌ 加入有声书房间失败: {e}")
+        await sio.emit('error', {'message': f'加入房间失败: {str(e)}'}, room=sid)
+
+
+@sio.event
+async def leave_audiobook(sid, data):
+    """离开有声书项目房间"""
+    try:
+        audiobook_project_id = data.get('audiobook_project_id')
+        if not audiobook_project_id:
+            return
+        
+        room = f'audiobook_{audiobook_project_id}'
+        await sio.leave_room(sid, room)
+        
+        logger.info(f"📤 客户端 {sid} 离开有声书房间: {room}")
+        await sio.emit('left_audiobook', {'audiobook_project_id': audiobook_project_id}, room=sid)
+    except Exception as e:
+        logger.error(f"❌ 离开有声书房间失败: {e}")
 
 
 def get_socket_app():

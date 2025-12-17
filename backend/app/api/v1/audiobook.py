@@ -10,9 +10,10 @@
 import asyncio
 import logging
 import os
+import json
 from urllib.parse import quote
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status, Response
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -23,6 +24,8 @@ from app.models.user import User
 from app.models.project import Project, Chapter
 from app.models.audiobook import AudiobookProject, ChapterAudio
 from app.services.audiobook import AudiobookEngine
+from app.services.audiobook.tts_engine import TTSEngine
+from app.services.audiobook.voice_manager import VoiceManager
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,7 @@ class AudiobookProjectCreate(BaseModel):
     chapter_ids: List[int]
     tts_provider: str = "aliyun"
     enable_cache: bool = True
+    voice_config: Optional[List["CharacterVoiceConfig"]] = None
 
 
 class AudiobookProjectResponse(BaseModel):
@@ -66,6 +70,58 @@ class ChapterAudioResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class CharacterVoiceConfig(BaseModel):
+    """角色音频配置（用户可选）"""
+    character_name: str
+    voice_id: str
+    volume: int = 50
+    speed: Optional[float] = None
+    pitch: Optional[int] = None
+
+
+class TTSPreviewRequest(BaseModel):
+    """TTS试听请求"""
+    text: str
+    voice_id: str = "longanyang"
+    volume: int = 50
+    speed: Optional[float] = None
+    pitch: Optional[int] = None
+
+
+@router.post("/tts/preview")
+async def tts_preview(
+    request: TTSPreviewRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """合成一小段音频用于前端试听"""
+    # 简单防护：限制文本长度
+    text = (request.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文本不能为空")
+    if len(text) > 200:
+        text = text[:200]
+
+    engine = TTSEngine(enable_cache=False, max_concurrent=1, model="cosyvoice-v3-plus", request_delay=0.0)
+    # 将前端的 voice_id（如 'male_young_energetic'）映射为真实的 TTS 音色ID
+    preset = VoiceManager.PRESET_VOICES.get(request.voice_id)
+    speaker_id = preset["tts_speaker_id"] if preset else request.voice_id
+
+    voice_params: dict = {
+        "speaker": speaker_id,
+        "volume": request.volume,
+    }
+    if request.speed is not None:
+        voice_params["rate"] = request.speed
+    if request.pitch is not None:
+        voice_params["pitch"] = request.pitch
+
+    audio_bytes = await engine.synthesize(text, voice_params)
+    if not audio_bytes:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="TTS预览失败")
+
+    return Response(content=audio_bytes, media_type="audio/mpeg")
 
 
 # ==================== API Endpoints ====================
@@ -112,10 +168,40 @@ async def create_audiobook_project(
         )
     
     # 3. 创建有声书项目
+    voice_mapping_data = {}
+
+    # 3.1 加载项目级默认音频配置（如有）
+    if project.audio_config:
+        try:
+            config = json.loads(project.audio_config)
+            for item in (config.get("characters") or []):
+                name = item.get("name")
+                if not name:
+                    continue
+                voice_mapping_data[name] = {
+                    "voice_id": item.get("voice_id"),
+                    "volume": item.get("volume", 50),
+                    "speed": item.get("speed"),
+                    "pitch": item.get("pitch"),
+                }
+        except Exception as e:
+            logger.warning(f"⚠️ 解析项目级音频配置失败: {e}")
+
+    # 3.2 覆盖本次任务中的角色音频配置
+    if request.voice_config:
+        for item in request.voice_config:
+            voice_mapping_data[item.character_name] = {
+                "voice_id": item.voice_id,
+                "volume": item.volume,
+                "speed": item.speed,
+                "pitch": item.pitch,
+            }
+
     audiobook_project = AudiobookProject(
         project_id=request.project_id,
         status="pending",
         tts_provider=request.tts_provider,
+        voice_mapping=voice_mapping_data,
         enable_cache=request.enable_cache,
         total_chapters=len(request.chapter_ids),
         completed_chapters=0,
@@ -569,6 +655,14 @@ async def generate_audiobook_background(
         )
         # 设置为全局实例，供状态查询使用
         set_engine_instance(engine)
+        
+        # 应用项目级角色音配置（如有）
+        if audiobook_project.voice_mapping:
+            try:
+                engine.voice_manager.apply_project_voice_mapping(audiobook_project.voice_mapping)
+                logger.info(f"🎛 已加载项目级角色音配置: {len(audiobook_project.voice_mapping)} 个角色")
+            except Exception as e:
+                logger.warning(f"⚠️ 应用项目级角色音配置失败: {e}")
         
         # 获取项目角色列表
         from app.models.character import Character

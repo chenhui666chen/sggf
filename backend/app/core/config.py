@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # 阿里云百炼 API配置
     DASHSCOPE_API_KEY: str = "your-dashscope-api-key"
     
+    # Mureka AI 音乐服务配置
+    MUREKA_API_KEY: str = ""
+    MUREKA_API_URL: str = "https://api.mureka.ai"
+    
     # Embedding模型配置
     EMBEDDING_MODEL: str = "text-embedding-v4"
     EMBEDDING_API_KEY: str = ""
