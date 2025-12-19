@@ -104,13 +104,16 @@ class VoiceDesigner:
         # 2. 匹配TTS参数
         tts_params = self._match_tts_params(characteristics, character_info)
         
-        # 3. 生成描述
+        # 3. 差异化调整：如果与已有角色过于相似，调整pitch/rate
+        tts_params = self._adjust_for_differentiation(character_name, tts_params, characteristics)
+        
+        # 4. 生成描述
         description = self._generate_description(characteristics, character_info)
         
-        # 4. 生成示例文本
+        # 5. 生成示例文本
         sample_texts = self._generate_sample_texts(character_info)
         
-        # 5. 确保差异化
+        # 6. 记录差异化笔记
         differentiation_notes = self._ensure_differentiation(character_name, characteristics)
         
         profile = VoiceProfile(
@@ -123,7 +126,7 @@ class VoiceDesigner:
         )
         
         self.voice_profiles[character_name] = profile
-        logger.info(f"   ✅ 音色设计完成: {tts_params.speaker}")
+        logger.info(f"   ✅ 音色设计完成: {tts_params.speaker} (pitch={tts_params.pitch:.2f}, rate={tts_params.rate:.2f})")
         
         return profile
     
@@ -184,19 +187,39 @@ class VoiceDesigner:
         """匹配TTS参数（适配v3-plus）"""
         gender = characteristics.gender
         age_range = characteristics.age_range
+        personality = character_info.get("personality", "")
+        role = character_info.get("role", "")
         
         # 选择音色（v3-plus官方音色）
         speaker = "longanyang"  # 默认
+        
         if gender == "female":
+            # 女性角色：根据年龄+性格细分
             if "青年" in age_range or "青少年" in age_range:
-                speaker = "longcaitou"  # 甜美女声
+                if "活泼" in personality or "开朗" in personality:
+                    speaker = "longxiaoxuan"  # 活泼可爱
+                else:
+                    speaker = "longcaitou"  # 甜美温柔
             else:
-                speaker = "longxiaochun"  # 知性女声
+                if "成熟" in personality or "知性" in personality:
+                    speaker = "longxiaochun"  # 知性优雅
+                else:
+                    speaker = "longwan"  # 成熟魅力
+        
         else:  # male
+            # 男性角色：根据年龄+性格+角色定位细分
             if "青年" in age_range:
-                speaker = "longshaohua"  # 青年男声
+                # 青年男性：根据性格区分
+                if "冷静" in personality or "理性" in personality:
+                    speaker = "longanyang"  # 成熟稳重（用于冷静类型）
+                elif "强势" in personality or "霸道" in personality or "主角" in role:
+                    speaker = "longfei"  # 低沉磁性（用于强势主角）
+                else:
+                    speaker = "longshaohua"  # 阳光有力（普通青年）
+            elif "中年" in age_range or "老年" in age_range:
+                speaker = "longjing"  # 沉稳有力（中老年）
             else:
-                speaker = "longanyang"  # 成熟男声
+                speaker = "longshaohua"  # 默认青年男声
         
         # 音调 (v3-plus: 0.5-2.0)
         pitch = 1.0
@@ -281,6 +304,39 @@ class VoiceDesigner:
             return "; ".join(notes)
         else:
             return "音色差异明显，易于区分"
+    
+    def _adjust_for_differentiation(
+        self,
+        character_name: str,
+        tts_params: TTSParams,
+        characteristics: VoiceCharacteristics
+    ) -> TTSParams:
+        """
+        差异化调整：如果与已有角色使用相同的speaker，调整pitch/rate以产生差异
+        """
+        # 统计已经使用该speaker的角色数量
+        same_speaker_count = 0
+        for existing_profile in self.voice_profiles.values():
+            if existing_profile.tts_params.speaker == tts_params.speaker:
+                same_speaker_count += 1
+        
+        # 如果已经有角色使用该speaker，调整pitch和rate以产生差异
+        if same_speaker_count > 0:
+            # 每增加一个同speaker的角色，就调整一些参数
+            pitch_adjust = 0.08 * same_speaker_count  # 每个增加8%
+            rate_adjust = 0.10 * same_speaker_count   # 每个增加10%
+            
+            # 交替调高/调低，防止全部往一个方向
+            if same_speaker_count % 2 == 0:
+                tts_params.pitch = min(2.0, tts_params.pitch + pitch_adjust)
+                tts_params.rate = max(0.5, tts_params.rate - rate_adjust)
+            else:
+                tts_params.pitch = max(0.5, tts_params.pitch - pitch_adjust)
+                tts_params.rate = min(2.0, tts_params.rate + rate_adjust)
+            
+            logger.info(f"   🔊 差异化调整: {character_name} 与其他 {same_speaker_count} 个角色同speaker，调整 pitch={tts_params.pitch:.2f}, rate={tts_params.rate:.2f}")
+        
+        return tts_params
     
     def batch_design(
         self,

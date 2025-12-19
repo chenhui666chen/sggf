@@ -23,11 +23,25 @@ from app.db.base import get_db
 from app.models.user import User
 from app.models.project import Project, Chapter
 from app.models.audiobook import AudiobookProject, ChapterAudio
+from app.models.character import Character
 from app.services.audiobook import AudiobookEngine
 from app.services.audiobook.tts_engine import TTSEngine
 from app.services.audiobook.voice_manager import VoiceManager
+from dataclasses import asdict, is_dataclass
 
 logger = logging.getLogger(__name__)
+
+
+def serialize_dataclass_to_dict(obj):
+    """递归将dataclass对象转换为字典，用于JSON序列化"""
+    if is_dataclass(obj):
+        return asdict(obj)
+    elif isinstance(obj, list):
+        return [serialize_dataclass_to_dict(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {key: serialize_dataclass_to_dict(value) for key, value in obj.items()}
+    else:
+        return obj
 
 router = APIRouter(prefix="/api/v1/audiobook", tags=["audiobook"])
 
@@ -41,6 +55,20 @@ class AudiobookProjectCreate(BaseModel):
     tts_provider: str = "aliyun"
     enable_cache: bool = True
     voice_config: Optional[List["CharacterVoiceConfig"]] = None
+    tts_model: Optional[str] = "cosyvoice-v3-flash"  # cosyvoice 模型：flash 或 plus
+    generation_mode: str = "full"  # full: 直接生成音频; script_only: 仅生成剧本+评审
+
+
+class GenerateAudioFromScriptsRequest(BaseModel):
+    """基于已生成剧本的音频生成请求（两阶段流程第2阶段）"""
+    chapter_ids: Optional[List[int]] = None
+    tts_model: Optional[str] = "cosyvoice-v3-flash"  # cosyvoice 模型：flash 或 plus
+
+
+class ChapterScriptUpdateRequest(BaseModel):
+    """更新章节剧本请求"""
+    script_segments: List[dict]
+    script_status: Optional[str] = None  # pending/reviewed/approved
 
 
 class AudiobookProjectResponse(BaseModel):
@@ -88,6 +116,7 @@ class TTSPreviewRequest(BaseModel):
     volume: int = 50
     speed: Optional[float] = None
     pitch: Optional[int] = None
+    model: Optional[str] = "cosyvoice-v3-flash"  # cosyvoice 模型：flash 或 plus
 
 
 @router.post("/tts/preview")
@@ -103,7 +132,12 @@ async def tts_preview(
     if len(text) > 200:
         text = text[:200]
 
-    engine = TTSEngine(enable_cache=False, max_concurrent=1, model="cosyvoice-v3-plus", request_delay=0.0)
+    # 选择模型：默认使用 cosyvoice-v3-flash，可切换为 cosyvoice-v3-plus
+    model_name = (request.model or "cosyvoice-v3-flash").strip()
+    if model_name not in {"cosyvoice-v3-flash", "cosyvoice-v3-plus"}:
+        model_name = "cosyvoice-v3-flash"
+
+    engine = TTSEngine(enable_cache=False, max_concurrent=1, model=model_name, request_delay=0.0)
     # 将前端的 voice_id（如 'male_young_energetic'）映射为真实的 TTS 音色ID
     preset = VoiceManager.PRESET_VOICES.get(request.voice_id)
     speaker_id = preset["tts_speaker_id"] if preset else request.voice_id
@@ -197,6 +231,67 @@ async def create_audiobook_project(
                 "pitch": item.pitch,
             }
 
+    # 3.3 自动为缺少配置的角色分配音色（基于结构化人物卡）
+    try:
+        characters = (
+            db.query(Character)
+            .filter(Character.project_id == request.project_id)
+            .order_by(Character.id)
+            .all()
+        )
+
+        vm = VoiceManager()
+
+        def _build_traits_from_character(char: Character) -> dict:
+            traits: dict = {}
+            gender = (char.gender or "").strip().lower()
+            if gender in ("男", "male", "m", "man", "boy"):
+                traits["gender"] = "male"
+            elif gender in ("女", "female", "f", "woman", "girl"):
+                traits["gender"] = "female"
+
+            if char.age is not None:
+                age = char.age
+                if age < 12:
+                    traits["age_group"] = "child"
+                elif age < 18:
+                    traits["age_group"] = "teen"
+                elif age < 30:
+                    traits["age_group"] = "young"
+                elif age < 60:
+                    traits["age_group"] = "adult"
+                else:
+                    traits["age_group"] = "elder"
+
+            # 简单用重要程度影响性格倾向
+            importance = (char.importance_level or "").strip()
+            if importance:
+                if "主角" in importance or "重要" in importance:
+                    traits.setdefault("personality", "energetic")
+                elif "龙套" in importance or "群众" in importance:
+                    traits.setdefault("personality", "calm")
+
+            return traits
+
+        for char in characters:
+            # 已有配置（项目级或本次请求）优先，不自动覆盖
+            existing = voice_mapping_data.get(char.name)
+            if existing and existing.get("voice_id"):
+                continue
+
+            traits = _build_traits_from_character(char)
+            profile = vm.assign_voice(char.name, character_info=traits or None)
+
+            voice_mapping_data[char.name] = {
+                "voice_id": profile.voice_id,
+                "volume": profile.volume_base,
+                "speed": profile.speed_base,
+                "pitch": profile.pitch_base,
+            }
+
+    except Exception as e:
+        logger.warning(f"⚠️ 自动分配角色音色失败，将使用默认规则分配: {e}")
+
     audiobook_project = AudiobookProject(
         project_id=request.project_id,
         status="pending",
@@ -217,11 +312,20 @@ async def create_audiobook_project(
     logger.info(f"✅ 有声书项目创建成功: audiobook_project_id={audiobook_project.id}")
     
     # 4. 后台启动生成任务
-    background_tasks.add_task(
-        generate_audiobook_background,
-        audiobook_project_id=audiobook_project.id,
-        chapter_ids=request.chapter_ids
-    )
+    if getattr(request, "generation_mode", "full") == "script_only":
+        background_tasks.add_task(
+            generate_audiobook_scripts_background,
+            audiobook_project_id=audiobook_project.id,
+            chapter_ids=request.chapter_ids,
+            tts_model=(request.tts_model or "cosyvoice-v3-flash")
+        )
+    else:
+        background_tasks.add_task(
+            generate_audiobook_background,
+            audiobook_project_id=audiobook_project.id,
+            chapter_ids=request.chapter_ids,
+            tts_model=(request.tts_model or "cosyvoice-v3-flash")
+        )
     
     return {
         "success": True,
@@ -325,6 +429,83 @@ async def list_audiobook_projects(
     ]
 
 
+@router.post("/projects/{audiobook_project_id}/generate-audio-from-scripts", response_model=dict)
+async def trigger_generate_audio_from_scripts(
+    audiobook_project_id: int,
+    request: GenerateAudioFromScriptsRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """触发基于已生成剧本的章节音频生成（两阶段流程第2阶段）。
+
+    - 如果未显式指定 chapter_ids，则默认选择该有声书项目下 script_status == "approved" 且已存在 script_json 的章节。
+    - 如果显式指定 chapter_ids，则仅要求对应章节存在 script_json（不强制检查 script_status），用于高级/调试场景。
+    """
+    # 1. 验证有声书项目是否存在
+    audiobook_project = db.query(AudiobookProject).filter(
+        AudiobookProject.id == audiobook_project_id
+    ).first()
+
+    if not audiobook_project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="有声书项目不存在",
+        )
+
+    # 2. 验证原始项目权限
+    project = db.query(Project).filter(
+        Project.id == audiobook_project.project_id,
+        Project.user_id == current_user.id,
+    ).first()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权限访问",
+        )
+
+    # 3. 选取需要生成音频的章节
+    if request.chapter_ids:
+        # 显式指定章节：只过滤有剧本的章节
+        chapter_audios = db.query(ChapterAudio).filter(
+            ChapterAudio.audiobook_project_id == audiobook_project_id,
+            ChapterAudio.chapter_id.in_(request.chapter_ids),
+            ChapterAudio.script_json.isnot(None),
+        ).all()
+    else:
+        # 未指定章节：默认选择 script_status == "approved" 的章节
+        chapter_audios = db.query(ChapterAudio).filter(
+            ChapterAudio.audiobook_project_id == audiobook_project_id,
+            ChapterAudio.script_json.isnot(None),
+            ChapterAudio.script_status == "approved",
+        ).all()
+
+    if not chapter_audios:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="没有可生成音频的章节，请先完成剧本生成与审核",
+        )
+
+    target_chapter_ids = [ca.chapter_id for ca in chapter_audios]
+
+    # 4. 启动后台任务
+    background_tasks.add_task(
+        generate_audiobook_audio_from_scripts_background,
+        audiobook_project_id=audiobook_project_id,
+        chapter_ids=target_chapter_ids,
+        tts_model=(request.tts_model or "cosyvoice-v3-flash"),
+    )
+
+    return {
+        "success": True,
+        "audiobook_project_id": audiobook_project_id,
+        "chapter_ids": target_chapter_ids,
+        "message": "已启动基于剧本的音频生成任务",
+    }
+
+
+
 @router.delete("/projects/{audiobook_project_id}")
 async def delete_audiobook_project(
     audiobook_project_id: int,
@@ -414,7 +595,8 @@ async def get_task_status(
     - music_composition: 音乐编曲
     - tts_synthesis: TTS合成
     - audio_mixing: 音频混合
-    - quality_review: 质量评审
+    - quality_review: 剧本质量评审
+    - final_audio_review: 最终音频评审
     """
     # 获取全局Engine实例（或从缓存中获取）
     from app.services.audiobook import get_engine_instance
@@ -608,11 +790,595 @@ async def stream_chapter_audio(
     )
 
 
+# ==================== 剧本编辑与音频生成（两阶段相关） ====================
+
+@router.get("/projects/{audiobook_project_id}/chapters/{chapter_id}/script", response_model=dict)
+async def get_chapter_script(
+    audiobook_project_id: int,
+    chapter_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取指定章节的有声剧本与评审结果。
+
+    仅返回最近一次生成/保存的剧本快照，不做版本历史。
+    """
+    # 验证有声书项目
+    audiobook_project = db.query(AudiobookProject).filter(
+        AudiobookProject.id == audiobook_project_id
+    ).first()
+
+    if not audiobook_project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="有声书项目不存在",
+        )
+
+    # 验证原始项目权限
+    project = db.query(Project).filter(
+        Project.id == audiobook_project.project_id,
+        Project.user_id == current_user.id,
+    ).first()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权限访问",
+        )
+
+    # 获取章节剧本记录
+    chapter_audio = db.query(ChapterAudio).filter(
+        ChapterAudio.audiobook_project_id == audiobook_project_id,
+        ChapterAudio.chapter_id == chapter_id,
+    ).first()
+
+    if not chapter_audio or not chapter_audio.script_json:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="章节剧本不存在，请先生成剧本",
+        )
+
+    try:
+        script_segments = json.loads(chapter_audio.script_json)
+    except Exception as e:
+        logger.error(f"❌ 解析章节剧本JSON失败 chapter_id={chapter_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="章节剧本数据损坏，请尝试重新生成",
+        )
+
+    script_review = None
+    if chapter_audio.script_review_json:
+        try:
+            script_review = json.loads(chapter_audio.script_review_json)
+        except Exception as e:
+            logger.warning(f"⚠️ 解析章节剧本评审JSON失败 chapter_id={chapter_id}: {e}")
+
+    return {
+        "chapter_id": chapter_id,
+        "script_status": chapter_audio.script_status or "pending",
+        "script_segments": script_segments,
+        "script_review": script_review,
+    }
+
+
+@router.put("/projects/{audiobook_project_id}/chapters/{chapter_id}/script", response_model=dict)
+async def update_chapter_script(
+    audiobook_project_id: int,
+    chapter_id: int,
+    request: ChapterScriptUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """更新指定章节的有声剧本。
+
+    - script_segments：覆盖写入最近一次剧本快照
+    - script_status：可选，pending/reviewed/approved
+    """
+    # 验证有声书项目
+    audiobook_project = db.query(AudiobookProject).filter(
+        AudiobookProject.id == audiobook_project_id
+    ).first()
+
+    if not audiobook_project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="有声书项目不存在",
+        )
+
+    # 验证原始项目权限
+    project = db.query(Project).filter(
+        Project.id == audiobook_project.project_id,
+        Project.user_id == current_user.id,
+    ).first()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权限访问",
+        )
+
+    # 验证章节是否属于该项目
+    chapter = db.query(Chapter).filter(
+        Chapter.id == chapter_id,
+        Chapter.project_id == project.id,
+    ).first()
+
+    if not chapter:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="章节不存在或不属于该项目",
+        )
+
+    # 获取或创建章节音频记录
+    chapter_audio = db.query(ChapterAudio).filter(
+        ChapterAudio.audiobook_project_id == audiobook_project_id,
+        ChapterAudio.chapter_id == chapter_id,
+    ).first()
+
+    if not chapter_audio:
+        chapter_audio = ChapterAudio(
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=chapter_id,
+        )
+        db.add(chapter_audio)
+
+    # 覆盖写入剧本
+    try:
+        chapter_audio.script_json = json.dumps(
+            request.script_segments or [], ensure_ascii=False
+        )
+    except Exception as e:
+        logger.error(f"❌ 序列化章节剧本失败 chapter_id={chapter_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="剧本数据格式不合法",
+        )
+
+    # 更新脚本状态（如有）
+    if request.script_status:
+        if request.script_status not in {"pending", "reviewed", "approved"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="无效的script_status，必须为 pending/reviewed/approved",
+            )
+        chapter_audio.script_status = request.script_status
+
+    # 剧本变化后，清空最终音频评审，防止混淆
+    chapter_audio.final_audio_review_json = None
+
+    db.commit()
+    db.refresh(chapter_audio)
+
+    return {
+        "success": True,
+        "chapter_id": chapter_id,
+        "script_status": chapter_audio.script_status,
+    }
+
+
 # ==================== Background Tasks ====================
+
+async def generate_audiobook_scripts_background(
+    audiobook_project_id: int,
+    chapter_ids: List[int],
+    tts_model: str = "cosyvoice-v3-flash",
+):
+    """后台生成有声书【剧本+评审】任务（不执行TTS和混音）。
+
+    流程：
+    1. 初始化AudiobookEngine
+    2. 逐章生成剧本与质量评审
+    3. 将结果覆盖写入 ChapterAudio.script_json/script_review_json
+    """
+    from app.db.base import SessionLocal
+    db = SessionLocal()
+
+    try:
+        logger.info(f"📝 开始后台生成有声书剧本: audiobook_project_id={audiobook_project_id}")
+
+        audiobook_project = db.query(AudiobookProject).filter(
+            AudiobookProject.id == audiobook_project_id
+        ).first()
+
+        if not audiobook_project:
+            logger.error(f"❌ 有声书项目不存在: {audiobook_project_id}")
+            return
+
+        audiobook_project.status = "processing"
+        db.commit()
+
+        # 初始化引擎
+        from app.services.audiobook import get_engine_instance, set_engine_instance
+        from app.services.llm_client import get_llm_client
+
+        llm_client = get_llm_client(strategy="conservative")
+
+        engine = AudiobookEngine(
+            enable_cache=audiobook_project.enable_cache,
+            max_concurrent=1,
+            llm_client=llm_client,
+            tts_model=tts_model,
+        )
+        set_engine_instance(engine)
+
+        # 应用项目级音效/BGM 配置（如有）
+        try:
+            project = db.query(Project).filter(Project.id == audiobook_project.project_id).first()
+            if project and project.audio_config:
+                try:
+                    config_data = json.loads(project.audio_config)
+                except Exception as parse_err:
+                    logger.warning(f"⚠️ 解析项目级音频配置失败: {parse_err}")
+                    config_data = {}
+                audio_fx = config_data.get("audio_fx") or None
+                if audio_fx:
+                    try:
+                        engine.apply_audio_fx_config(audio_fx)
+                        logger.info("🎚 已加载项目级音效/BGM 配置")
+                    except Exception as e:
+                        logger.warning(f"⚠️ 应用项目级音效/BGM 配置失败: {e}")
+        except Exception as e:
+            logger.warning(f"⚠️ 加载项目级音频配置失败: {e}")
+
+        # 获取项目角色列表
+        from app.models.character import Character
+        characters = db.query(Character).filter(
+            Character.project_id == audiobook_project.project_id
+        ).all()
+        character_list = [c.name for c in characters if c.name]
+
+        logger.info(f"📝 剧本阶段角色列表: {character_list}")
+
+        # 逐章生成剧本与评审
+        for i, chapter_id in enumerate(chapter_ids, 1):
+            try:
+                logger.info(f"📖 [脚本阶段] 处理章节 {i}/{len(chapter_ids)}: chapter_id={chapter_id}")
+
+                chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+                if not chapter:
+                    logger.warning(f"⚠️ 章节不存在: {chapter_id}")
+                    audiobook_project.failed_chapters += 1
+                    continue
+
+                result = await engine.prepare_chapter_script(
+                    chapter_content=chapter.content or "",
+                    chapter_id=chapter_id,
+                    character_list=character_list,
+                    audiobook_project_id=audiobook_project_id,
+                )
+
+                # upsert ChapterAudio
+                chapter_audio = db.query(ChapterAudio).filter(
+                    ChapterAudio.audiobook_project_id == audiobook_project_id,
+                    ChapterAudio.chapter_id == chapter_id,
+                ).first()
+
+                if not chapter_audio:
+                    chapter_audio = ChapterAudio(
+                        audiobook_project_id=audiobook_project_id,
+                        chapter_id=chapter_id,
+                    )
+                    db.add(chapter_audio)
+
+                chapter_audio.task_id = result.get("task_id")
+                stats = result.get("stats", {})
+                parse_stats = stats.get("parse_stats", {})
+
+                chapter_audio.segment_count = parse_stats.get("total_segments", 0)
+                chapter_audio.dialogue_count = parse_stats.get("dialogue_count", 0)
+                chapter_audio.narration_count = parse_stats.get("narration_count", 0)
+                chapter_audio.character_count = stats.get("characters", 0)
+
+                gen_time_str = stats.get("generation_time", "0秒")
+                try:
+                    chapter_audio.generation_time = float(str(gen_time_str).replace("秒", ""))
+                except Exception:
+                    pass
+
+                chapter_audio.script_json = json.dumps(
+                    serialize_dataclass_to_dict(result.get("script_segments") or []),
+                    ensure_ascii=False
+                )
+                chapter_audio.script_review_json = json.dumps(
+                    serialize_dataclass_to_dict(result.get("quality_report") or {}),
+                    ensure_ascii=False
+                )
+                chapter_audio.script_status = "pending"
+
+                audiobook_project.completed_chapters += 1
+                db.commit()
+
+            except Exception as e:
+                logger.error(f"❌ [脚本阶段] 章节 {chapter_id} 处理异常: {e}")
+                audiobook_project.failed_chapters += 1
+                db.commit()
+                import traceback
+                traceback.print_exc()
+
+        audiobook_project.status = "completed"
+        db.commit()
+
+        logger.info("🎉 有声书剧本生成完成!")
+        logger.info(
+            f"   - 成功: {audiobook_project.completed_chapters}/{audiobook_project.total_chapters}"
+        )
+
+    finally:
+        db.close()
+
+
+async def generate_audiobook_audio_from_scripts_background(
+    audiobook_project_id: int,
+    chapter_ids: List[int],
+    tts_model: str = "cosyvoice-v3-flash",
+):
+    """后台生成有声书音频任务（基于已生成/人工审核后的剧本）。
+
+    用于两阶段流程的第2阶段：
+    1. 读取 ChapterAudio.script_json 作为有声剧本
+    2. 调用 AudiobookEngine.generate_chapter_audio_from_script 生成音频
+    3. 更新 ChapterAudio.audio_path/duration/file_size/final_audio_review_json 等字段
+    """
+    from app.db.base import SessionLocal
+    db = SessionLocal()
+
+    try:
+        logger.info(
+            f"🎙️ 开始基于剧本的有声书音频生成: audiobook_project_id={audiobook_project_id}, chapters={chapter_ids}"
+        )
+
+        # 1. 获取有声书项目
+        audiobook_project = db.query(AudiobookProject).filter(
+            AudiobookProject.id == audiobook_project_id
+        ).first()
+
+        if not audiobook_project:
+            logger.error(f"❌ 有声书项目不存在: {audiobook_project_id}")
+            return
+
+        # 2. 重置并标记状态
+        audiobook_project.status = "processing"
+        audiobook_project.completed_chapters = 0
+        audiobook_project.failed_chapters = 0
+        audiobook_project.total_duration = 0.0
+        audiobook_project.total_cost = 0.0
+        db.commit()
+
+        # 3. 初始化引擎
+        from app.services.audiobook import get_engine_instance, set_engine_instance
+        from app.services.llm_client import get_llm_client
+
+        llm_client = get_llm_client(strategy="conservative")
+
+        engine = AudiobookEngine(
+            enable_cache=audiobook_project.enable_cache,
+            max_concurrent=1,
+            llm_client=llm_client,
+            tts_model=tts_model,
+        )
+        set_engine_instance(engine)
+
+        # 获取项目与章节信息（用于文件路径和题材）
+        project = db.query(Project).filter(Project.id == audiobook_project.project_id).first()
+        novel_genre = (project.genre or "科幻") if project else "科幻"
+        novel_theme = (project.sub_genre or "未知主题") if project else "未知主题"
+
+        # 计算本次生成应当使用的角色音配置：
+        # 以已有的 audiobook_project.voice_mapping 为基础，叠加最新的 Project.audio_config.characters（如有），
+        # 后者优先级更高，确保二阶段生成也能应用最新的前端配置（例如苏娜女声）。
+        effective_voice_mapping = dict(audiobook_project.voice_mapping or {})
+        if project and project.audio_config:
+            try:
+                config_data = json.loads(project.audio_config)
+                logger.info(f"🔍 [调试] 项目音频配置: {config_data.get('characters', [])}")
+                for item in (config_data.get("characters") or []):
+                    name = item.get("name")
+                    if not name:
+                        logger.warning(f"⚠️ [调试] 跳过无名称的配置项: {item}")
+                        continue
+                    effective_voice_mapping[name] = {
+                        "voice_id": item.get("voice_id"),
+                        "volume": item.get("volume", 50),
+                        "speed": item.get("speed"),
+                        "pitch": item.get("pitch"),
+                    }
+                    logger.info(f"✅ [调试] 加载角色音配置: {name} -> {item.get('voice_id')}")
+            except Exception as e:
+                logger.warning(f"⚠️ 合并项目级角色音配置失败，将继续使用已有 voice_mapping: {e}")
+
+        # 应用角色音配置到引擎（如有）
+        if effective_voice_mapping:
+            try:
+                engine.voice_manager.apply_project_voice_mapping(effective_voice_mapping)
+                logger.info(
+                    f"🎛 已加载角色音配置: {len(effective_voice_mapping)} 个角色"
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ 应用角色音配置失败: {e}")
+
+        # 应用项目级音效/BGM 配置（如有）
+        audio_fx = None
+        if project and project.audio_config:
+            try:
+                config_data = json.loads(project.audio_config)
+                audio_fx = config_data.get("audio_fx") or None
+            except Exception as parse_err:
+                logger.warning(f"⚠️ 解析项目级音频配置失败: {parse_err}")
+
+        if audio_fx:
+            try:
+                engine.apply_audio_fx_config(audio_fx)
+                logger.info("🎚 已加载项目级音效/BGM 配置")
+            except Exception as e:
+                logger.warning(f"⚠️ 应用项目级音效/BGM 配置失败: {e}")
+
+        total_duration = 0.0
+        total_cost = 0.0
+
+        for i, chapter_id in enumerate(chapter_ids, 1):
+            try:
+                logger.info(
+                    f"📖 [音频阶段] 处理章节 {i}/{len(chapter_ids)}: chapter_id={chapter_id}"
+                )
+
+                # 读取章节与脚本
+                chapter_audio = db.query(ChapterAudio).filter(
+                    ChapterAudio.audiobook_project_id == audiobook_project_id,
+                    ChapterAudio.chapter_id == chapter_id,
+                ).first()
+
+                if not chapter_audio or not chapter_audio.script_json:
+                    logger.warning(
+                        f"⚠️ 章节 {chapter_id} 缺少剧本数据(script_json为空)，跳过该章节"
+                    )
+                    audiobook_project.failed_chapters += 1
+                    db.commit()
+                    continue
+
+                chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+                if not chapter:
+                    logger.warning(f"⚠️ 章节不存在: {chapter_id}")
+                    audiobook_project.failed_chapters += 1
+                    db.commit()
+                    continue
+
+                try:
+                    script_segments_data = json.loads(chapter_audio.script_json)
+                except Exception as parse_err:
+                    logger.error(f"❌ 解析章节剧本JSON失败 chapter_id={chapter_id}: {parse_err}")
+                    audiobook_project.failed_chapters += 1
+                    db.commit()
+                    continue
+
+                if not isinstance(script_segments_data, list):
+                    logger.warning(
+                        f"⚠️ 章节 {chapter_id} 剧本数据格式异常，期望为列表，实际为 {type(script_segments_data)}"
+                    )
+                    audiobook_project.failed_chapters += 1
+                    db.commit()
+                    continue
+
+                # 生成输出路径
+                output_path = f"audiobooks/project_{audiobook_project.project_id}/chapter_{chapter.chapter_number:03d}.mp3"
+
+                # 调用引擎生成音频
+                result = await engine.generate_chapter_audio_from_script(
+                    script_segments_data=script_segments_data,
+                    chapter_id=chapter_id,
+                    output_path=output_path,
+                    novel_genre=novel_genre,
+                    novel_theme=novel_theme,
+                    enable_quality_review=True,
+                    audiobook_project_id=audiobook_project_id,
+                )
+
+                task_id = result.get("task_id")
+                logger.info(f"🎯 [音频阶段] Chapter {chapter_id} TaskID: {task_id}")
+
+                if result.get("success"):
+                    stats = result.get("stats") or {}
+                    parse_stats = stats.get("parse_stats") or {}
+                    tts_stats = stats.get("tts_stats") or {}
+
+                    # 更新章节音频记录（覆盖写入）
+                    chapter_audio.task_id = task_id
+                    chapter_audio.audio_path = output_path
+                    chapter_audio.duration = result.get("duration") or 0.0
+                    chapter_audio.file_size = result.get("file_size") or 0
+                    chapter_audio.segment_count = parse_stats.get(
+                        "total_segments", chapter_audio.segment_count
+                    )
+                    chapter_audio.dialogue_count = parse_stats.get(
+                        "dialogue_count", chapter_audio.dialogue_count
+                    )
+                    chapter_audio.narration_count = parse_stats.get(
+                        "narration_count", chapter_audio.narration_count
+                    )
+
+                    gen_time_str = stats.get("generation_time", "0秒")
+                    try:
+                        chapter_audio.generation_time = float(
+                            str(gen_time_str).replace("秒", "")
+                        )
+                    except Exception:
+                        pass
+
+                    cost_str = tts_stats.get("estimated_cost", "¥0.00")
+                    try:
+                        chapter_audio.tts_cost = float(
+                            str(cost_str).replace("¥", "").replace("$", "")
+                        )
+                    except Exception:
+                        pass
+
+                    final_audio_review = stats.get("final_audio_review")
+                    if final_audio_review is not None:
+                        try:
+                            chapter_audio.final_audio_review_json = json.dumps(
+                                final_audio_review, ensure_ascii=False
+                            )
+                        except Exception as dump_err:
+                            logger.warning(
+                                f"⚠️ 序列化最终音频评审结果失败 chapter_id={chapter_id}: {dump_err}"
+                            )
+
+                    audiobook_project.completed_chapters += 1
+                    total_duration += result.get("duration") or 0.0
+                    try:
+                        total_cost += float(
+                            str(cost_str).replace("¥", "").replace("$", "")
+                        )
+                    except Exception:
+                        pass
+
+                    logger.info(f"✅ 章节 {chapter_id} 音频生成成功")
+                else:
+                    audiobook_project.failed_chapters += 1
+                    logger.error(
+                        f"❌ 章节 {chapter_id} 音频生成失败: {result.get('error')}"
+                    )
+
+                audiobook_project.total_duration = total_duration
+                audiobook_project.total_cost = total_cost
+                db.commit()
+
+            except Exception as e:
+                logger.error(f"❌ 章节 {chapter_id} 音频阶段处理异常: {e}")
+                audiobook_project.failed_chapters += 1
+                db.commit()
+                import traceback
+                traceback.print_exc()
+
+        audiobook_project.status = "completed"
+        audiobook_project.total_duration = total_duration
+        audiobook_project.total_cost = total_cost
+        db.commit()
+
+        logger.info("🎉 基于剧本的有声书音频生成完成!")
+        logger.info(
+            f"   - 成功: {audiobook_project.completed_chapters}/{audiobook_project.total_chapters}"
+        )
+        logger.info(f"   - 总时长: {total_duration:.1f}秒")
+        logger.info(f"   - 总成本: ¥{total_cost:.2f}")
+
+    except Exception as e:
+        logger.error(f"❌ 基于剧本的后台生成任务失败: {e}")
+        import traceback
+        traceback.print_exc()
+
+        if audiobook_project:
+            audiobook_project.status = "failed"
+            db.commit()
+
+    finally:
+        db.close()
+
 
 async def generate_audiobook_background(
     audiobook_project_id: int,
-    chapter_ids: List[int]
+    chapter_ids: List[int],
+    tts_model: str = "cosyvoice-v3-flash"
 ):
     """
     后台生成有声书任务
@@ -651,10 +1417,30 @@ async def generate_audiobook_background(
         engine = AudiobookEngine(
             enable_cache=audiobook_project.enable_cache,
             max_concurrent=1,  # 降低并发避免限流
-            llm_client=llm_client  # 必须传入LLM客户端
+            llm_client=llm_client,  # 必须传入LLM客户端
+            tts_model=tts_model,
         )
         # 设置为全局实例，供状态查询使用
         set_engine_instance(engine)
+
+        # 应用项目级音效/BGM 配置（如有）
+        try:
+            project = db.query(Project).filter(Project.id == audiobook_project.project_id).first()
+            if project and project.audio_config:
+                try:
+                    config_data = json.loads(project.audio_config)
+                except Exception as parse_err:
+                    logger.warning(f"⚠️ 解析项目级音频配置失败: {parse_err}")
+                    config_data = {}
+                audio_fx = config_data.get("audio_fx") or None
+                if audio_fx:
+                    try:
+                        engine.apply_audio_fx_config(audio_fx)
+                        logger.info("🎚 已加载项目级音效/BGM 配置")
+                    except Exception as e:
+                        logger.warning(f"⚠️ 应用项目级音效/BGM 配置失败: {e}")
+        except Exception as e:
+            logger.warning(f"⚠️ 加载项目级音频配置失败: {e}")
         
         # 应用项目级角色音配置（如有）
         if audiobook_project.voice_mapping:

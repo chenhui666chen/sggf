@@ -8,8 +8,9 @@
  * 4. 进度监控
  * 5. 音频播放与下载
  */
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { apiClient } from '../services/api'
 import {
   Box,
   Container,
@@ -24,7 +25,6 @@ import {
   List,
   ListItem,
   ListItemText,
-  ListItemSecondaryAction,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -45,6 +45,7 @@ import {
   Checkbox,
   Slider,
   Snackbar,
+  FormControlLabel,
 } from '@mui/material'
 import {
   ArrowBack as ArrowBackIcon,
@@ -52,7 +53,6 @@ import {
   PlayArrow as PlayIcon,
   Pause as PauseIcon,
   Download as DownloadIcon,
-  Settings as SettingsIcon,
   AutoStories as BookIcon,
   RecordVoiceOver as VoiceIcon,
   GraphicEq as AudioIcon,
@@ -108,31 +108,131 @@ interface CharacterVoiceSetting {
   pitch?: number
 }
 
-const VOICE_PRESETS: { id: string; label: string; description: string }[] = [
+interface AudioFxConfig {
+  enable_sound_effects: boolean
+  enable_music: boolean
+  sound_effect_density: 'low' | 'medium' | 'high' | 'off'
+  music_density: 'low' | 'medium' | 'high' | 'off'
+}
+
+interface ProjectAudioConfig {
+  characters: {
+    character_id: number
+    name: string
+    voice_id: string
+    volume: number
+    speed?: number | null
+    pitch?: number | null
+  }[]
+  audio_fx?: AudioFxConfig | null
+}
+
+const VOICE_PRESETS: { id: string; label: string; description: string; supportsInstruct?: boolean }[] = [
+  // === 男性音色 (10种) ===
   {
     id: 'male_young_energetic',
-    label: '年轻男主（热血）',
-    description: '年轻男性，活力充沛，适合热血主角',
+    label: '龙安洋（阳光大男孩）',
+    description: 'CosyVoice 标杆男声：阳光大男孩，20~30岁，中文（普通话）',
+    supportsInstruct: true,
+  },
+  {
+    id: 'male_young_gentle',
+    label: '年轻男主（温柔）',
+    description: '居家暖男，温柔体贴',
   },
   {
     id: 'male_adult_calm',
-    label: '成熟男声（沉稳）',
-    description: '成熟男性，沉稳冷静，适合智者角色',
+    label: '成熟男性（沉稳）',
+    description: '睿智轻熟，沉稳冷静',
   },
+  {
+    id: 'male_adult_energetic',
+    label: '成熟男性（豪迈）',
+    description: '洒脱活力，豪迈大气',
+  },
+  {
+    id: 'male_elder_wise',
+    label: '长者（睿智）',
+    description: '沧桑岁月，睿智稳重',
+  },
+  {
+    id: 'male_warm',
+    label: '暖男（痴情）',
+    description: '温暖痴情，适合情感戏',
+  },
+  {
+    id: 'male_customer_service',
+    label: '书生（青涩）',
+    description: '年轻青涩，文雅气质',
+  },
+  {
+    id: 'male_refreshing',
+    label: '武将（利落）',
+    description: '清爽利落，适合战士',
+  },
+  {
+    id: 'male_monkey',
+    label: '特色（猴哥）',
+    description: '经典猴哥，独特风格',
+  },
+  {
+    id: 'male_narrator',
+    label: '旁白（方言）',
+    description: '陕北方言，亲切感',
+  },
+  
+  // === 女性音色 (10种) ===
   {
     id: 'female_young_gentle',
     label: '年轻女主（温柔）',
-    description: '年轻女性，温柔体贴，适合女主角',
+    description: '细腻柔声，温柔体贴',
   },
   {
-    id: 'female_adult_cold',
-    label: '成熟女性（高冷）',
-    description: '成熟女性，高冷理智，适合女强人',
+    id: 'female_young_energetic',
+    label: '龙安欢（欢脱元气女）',
+    description: 'CosyVoice 标杆女声：欢脱元气女，20~30岁，中文（普通话）',
+    supportsInstruct: true,
   },
   {
-    id: 'elder_wise',
-    label: '长者旁白（睿智）',
-    description: '长者，睿智稳重，适合导师或老者角色',
+    id: 'female_young_cute',
+    label: '少女（可爱）',
+    description: '清纯萝莉，甜美可爱',
+  },
+  {
+    id: 'female_adult_elegant',
+    label: '成熟女性（优雅）',
+    description: '高雅气质，知性美',
+  },
+  {
+    id: 'female_adult_intellectual',
+    label: '成熟女性（知性）',
+    description: '优雅知性，职场精英',
+  },
+  {
+    id: 'female_capable',
+    label: '女强人（干练）',
+    description: '利落从容，女强人范',
+  },
+  {
+    id: 'female_elder',
+    label: '长者（慈祥）',
+    description: '烟火从容，慈祥温和',
+  },
+  {
+    id: 'female_intimate',
+    label: '闺蜜（亲切）',
+    description: '温柔闺蜜，亲切感',
+  },
+  {
+    id: 'female_lively',
+    label: '才女（活泼）',
+    description: '亲和活泼，灵动活跃',
+  },
+  {
+    id: 'female_child',
+    label: '童声（天真）',
+    description: '天真烂漫，可爱童声',
+    supportsInstruct: true,
   },
 ]
 
@@ -144,13 +244,13 @@ export default function AudiobookPage() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [selectedChapters, setSelectedChapters] = useState<number[]>([])
-  const [loading, setLoading] = useState<boolean>(false)
+  const [, setLoading] = useState<boolean>(false)
   const [generating, setGenerating] = useState<boolean>(false)
   const [activeStep, setActiveStep] = useState<number>(0)
   const [characterVoices, setCharacterVoices] = useState<CharacterVoiceSetting[]>([])
   const [loadingCharacters, setLoadingCharacters] = useState<boolean>(false)
   const [audiobookProject, setAudiobookProject] = useState<any>(null)
-  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' as 'success' | 'error' | 'info' })
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' as 'success' | 'error' | 'info' | 'warning' })
   
   // 新增：任务状态追踪
   const [taskStatuses, setTaskStatuses] = useState<Record<number, TaskStatus>>({})
@@ -159,6 +259,10 @@ export default function AudiobookPage() {
   // 新增：音频播放状态
   const [playingChapter, setPlayingChapter] = useState<number | null>(null)
   const [audioRef] = useState<HTMLAudioElement>(new Audio())
+  
+  // 新增：音频阶段模式切换（一步到位/仅生成剧本）+ 记录最近一次生成模式
+  const [scriptOnlyMode, setScriptOnlyMode] = useState<boolean>(false)
+  const [lastGenerationMode, setLastGenerationMode] = useState<'full' | 'script_only' | 'unknown'>('unknown')
   
   // 新增：历史记录相关
   const [showHistory, setShowHistory] = useState<boolean>(false)
@@ -169,8 +273,45 @@ export default function AudiobookPage() {
   const [deletingProject, setDeletingProject] = useState<any>(null)
   // 新增：角色试听状态
   const [previewingCharacterId, setPreviewingCharacterId] = useState<number | null>(null)
+  // 新增：自动推荐声线状态
+  const [autoAssigningVoices, setAutoAssigningVoices] = useState<boolean>(false)
+  // 新增：TTS 模型选择
+  const [ttsModel, setTtsModel] = useState<'cosyvoice-v3-flash' | 'cosyvoice-v3-plus'>('cosyvoice-v3-flash')
+  // 新增：剧本质量评审弹窗
+  const [scriptReviewDialogOpen, setScriptReviewDialogOpen] = useState(false)
+  const [scriptReviewData, setScriptReviewData] = useState<{
+    report: any
+    segments: any[]
+  } | null>(null)
+
+  // 新增：章节剧本编辑对话框
+  const [scriptEditorDialogOpen, setScriptEditorDialogOpen] = useState(false)
+  const [scriptEditorLoading, setScriptEditorLoading] = useState(false)
+  const [scriptEditorChapter, setScriptEditorChapter] = useState<{
+    chapterId: number
+    title: string
+  } | null>(null)
+  const [scriptEditorData, setScriptEditorData] = useState<{
+    scriptStatus: string
+    scriptSegments: any[]
+    scriptReview: any | null
+  } | null>(null)
+  const [audioFxConfig, setAudioFxConfig] = useState<AudioFxConfig>({
+    enable_sound_effects: true,
+    enable_music: true,
+    sound_effect_density: 'medium',
+    music_density: 'medium',
+  })
 
   const steps = ['选择项目', '配置音色', '生成有声书', '完成']
+
+  // 根据当前选择的 TTS 模型动态调整可选音色列表
+  const currentVoicePresets =
+    ttsModel === 'cosyvoice-v3-plus'
+      ? VOICE_PRESETS.filter(
+          (p) => p.id === 'male_young_energetic' || p.id === 'female_young_energetic'
+        )
+      : VOICE_PRESETS
 
   // 获取项目列表
   useEffect(() => {
@@ -294,12 +435,12 @@ export default function AudiobookPage() {
     setLoading(true)
     setCharacterVoices([])
 
-    const narratorVoice: CharacterVoiceSetting = {
+    const baseNarratorVoice: CharacterVoiceSetting = {
       characterId: 0,
       name: '旁白',
       gender: '中性',
       role: '旁白',
-      voiceId: '',
+      voiceId: 'male_narrator',  // 🔧 默认使用“旁白（方言）”，用户可以手动修改
       volume: 50,
       speed: 1.0,
       pitch: 50,
@@ -330,24 +471,75 @@ export default function AudiobookPage() {
         })
         if (charactersResponse.ok) {
           const charactersData = await charactersResponse.json()
-          const characterVoicesFromApi: CharacterVoiceSetting[] = charactersData.map((c: any) => ({
-            characterId: c.id,
-            name: c.name,
-            gender: c.gender,
-            role: c.role,
-            voiceId: '',
-            volume: 50,
-            speed: 1.0,
-            pitch: 50,
-          }))
+
+          // 尝试读取项目级音频配置（角色音 + 音效/BGM）
+          let projectAudioConfig: ProjectAudioConfig | null = null
+          try {
+            const audioConfigResponse = await fetch(`/api/v1/projects/${project.id}/audio-config`, {
+              headers,
+            })
+            if (audioConfigResponse.ok) {
+              projectAudioConfig = await audioConfigResponse.json()
+            }
+          } catch (e) {
+            console.warn('获取项目音频配置失败:', e)
+          }
+
+          const savedCharacters = projectAudioConfig?.characters || []
+          const savedFx = projectAudioConfig?.audio_fx || null
+
+          // 根据已保存的角色音配置初始化角色音
+          const characterVoicesFromApi: CharacterVoiceSetting[] = charactersData.map((c: any) => {
+            const saved = savedCharacters.find((sc) => sc.character_id === c.id)
+            return {
+              characterId: c.id,
+              name: c.name,
+              gender: c.gender,
+              role: c.role,
+              voiceId: saved?.voice_id || '',
+              volume: saved?.volume ?? 50,
+              speed: saved?.speed ?? 1.0,
+              pitch: saved?.pitch ?? 50,
+            }
+          })
+
+          // 旁白使用 character_id 为 0 或 name 为“旁白”的配置（如有）
+          const narratorSaved = savedCharacters.find(
+            (sc) => sc.character_id === 0 || sc.name === '旁白'
+          )
+          const narratorVoice: CharacterVoiceSetting = {
+            ...baseNarratorVoice,
+            voiceId: narratorSaved?.voice_id || baseNarratorVoice.voiceId,
+            volume: narratorSaved?.volume ?? baseNarratorVoice.volume,
+            speed: narratorSaved?.speed ?? baseNarratorVoice.speed,
+            pitch: narratorSaved?.pitch ?? baseNarratorVoice.pitch,
+          }
+
           const initialVoices: CharacterVoiceSetting[] = [
             narratorVoice,
             ...characterVoicesFromApi,
           ]
           setCharacterVoices(initialVoices)
+
+          // 初始化项目级音效/BGM 配置
+          if (savedFx) {
+            setAudioFxConfig({
+              enable_sound_effects: savedFx.enable_sound_effects ?? true,
+              enable_music: savedFx.enable_music ?? true,
+              sound_effect_density: (savedFx.sound_effect_density as AudioFxConfig['sound_effect_density']) || 'medium',
+              music_density: (savedFx.music_density as AudioFxConfig['music_density']) || 'medium',
+            })
+          } else {
+            setAudioFxConfig({
+              enable_sound_effects: true,
+              enable_music: true,
+              sound_effect_density: 'medium',
+              music_density: 'medium',
+            })
+          }
         } else {
           console.warn('获取角色列表失败:', charactersResponse.status)
-          setCharacterVoices([narratorVoice])
+          setCharacterVoices([baseNarratorVoice])
         }
       } finally {
         setLoadingCharacters(false)
@@ -412,6 +604,77 @@ export default function AudiobookPage() {
     )
   }
 
+  // 🆕 基于人物卡自动推荐声线
+  const handleAutoAssignVoices = async () => {
+    if (!selectedProject) return
+
+    try {
+      setAutoAssigningVoices(true)
+      const res = await apiClient.autoAssignProjectAudioVoices(selectedProject.id)
+      const configData = (res.data || { characters: [] }) as {
+        characters?: {
+          character_id: number
+          name: string
+          voice_id: string
+          volume: number
+          speed?: number | null
+          pitch?: number | null
+        }[]
+      }
+
+      const configById = new Map<
+        number,
+        { voice_id: string; volume: number; speed?: number | null; pitch?: number | null }
+      >()
+      for (const item of configData.characters || []) {
+        configById.set(item.character_id, {
+          voice_id: item.voice_id,
+          volume: item.volume,
+          speed: item.speed ?? undefined,
+          pitch: item.pitch ?? undefined,
+        })
+      }
+
+      setCharacterVoices((prev) =>
+        prev.map((cv) => {
+          const conf = configById.get(cv.characterId)
+          if (!conf) return cv
+          return {
+            ...cv,
+            voiceId: conf.voice_id || '',
+            volume: conf.volume ?? cv.volume,
+            speed: conf.speed ?? cv.speed,
+            pitch: conf.pitch ?? cv.pitch,
+          }
+        }),
+      )
+
+      const assignedCount = configById.size
+      if (assignedCount > 0) {
+        setSnackbar({
+          open: true,
+          message: `✅ 已为 ${assignedCount} 个角色智能推荐声线！请检查推荐结果，如需调整可手动修改。`,
+          severity: 'success',
+        })
+      } else {
+        setSnackbar({
+          open: true,
+          message: '⚠️ 当前项目还没有角色档案，请先在「项目详情 → 人物设定」中创建角色。',
+          severity: 'warning',
+        })
+      }
+    } catch (err) {
+      console.error('❌ 自动推荐声线失败:', err)
+      setSnackbar({
+        open: true,
+        message: '自动推荐声线失败，请稍后重试',
+        severity: 'error',
+      })
+    } finally {
+      setAutoAssigningVoices(false)
+    }
+  }
+
   const handlePreviewCharacterVoice = async (cv: CharacterVoiceSetting) => {
     if (!cv.voiceId) {
       setSnackbar({ open: true, message: '请先为该角色选择音色再试听', severity: 'error' })
@@ -435,6 +698,7 @@ export default function AudiobookPage() {
           volume: cv.volume,
           speed: cv.speed,
           pitch: cv.pitch,
+          model: ttsModel,
         }),
       })
 
@@ -559,6 +823,211 @@ export default function AudiobookPage() {
     }
   }
 
+  const handleOpenScriptReviewDialog = () => {
+    if (selectedChapters.length === 0) return
+    const chapterId = selectedChapters[0]
+    const taskStatus = taskStatuses[chapterId]
+    if (!taskStatus) {
+      setSnackbar({ open: true, message: '暂未获取到该章节的任务状态', severity: 'error' })
+      return
+    }
+    const stage = taskStatus.stages['quality_review']
+    if (!stage || !stage.metrics) {
+      setSnackbar({ open: true, message: '暂未获取到剧本评审结果', severity: 'error' })
+      return
+    }
+    const metrics = stage.metrics
+    const report = {
+      overall_score: metrics.overall_score,
+      overall_grade: metrics.overall_grade,
+      issues_count: metrics.issues_count,
+      script_quality: metrics.script_quality,
+      audio_balance: metrics.audio_balance,
+      pacing: metrics.pacing,
+      revision_suggestions: metrics.revision_suggestions,
+    }
+    const segments = metrics.sample_segments || []
+    setScriptReviewData({ report, segments })
+    setScriptReviewDialogOpen(true)
+  }
+
+  const handleCloseScriptReviewDialog = () => {
+    setScriptReviewDialogOpen(false)
+  }
+
+  // 打开章节剧本编辑器
+  const handleOpenScriptEditor = (chapterId: number) => {
+    if (!audiobookProject) {
+      setSnackbar({ open: true, message: '请先创建有声书项目', severity: 'error' })
+      return
+    }
+
+    const chapter = chapters.find((c) => c.id === chapterId)
+    setScriptEditorChapter(
+      chapter
+        ? { chapterId, title: `第${chapter.chapter_number}章 - ${chapter.title}` }
+        : { chapterId, title: `章节 ${chapterId}` }
+    )
+    setScriptEditorLoading(true)
+
+    const token = localStorage.getItem('access_token')
+    fetch(
+      `/api/v1/audiobook/projects/${audiobookProject.id}/chapters/${chapterId}/script`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      }
+    )
+      .then(async (res) => {
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error(data.detail || '获取章节剧本失败')
+        }
+        return res.json()
+      })
+      .then((data) => {
+        setScriptEditorData({
+          scriptStatus: data.script_status || 'pending',
+          scriptSegments: data.script_segments || [],
+          scriptReview: data.script_review || null,
+        })
+        setScriptEditorDialogOpen(true)
+      })
+      .catch((err: any) => {
+        console.error('获取章节剧本失败:', err)
+        setSnackbar({ open: true, message: err.message || '获取章节剧本失败', severity: 'error' })
+      })
+      .finally(() => {
+        setScriptEditorLoading(false)
+      })
+  }
+
+  const handleCloseScriptEditorDialog = () => {
+    setScriptEditorDialogOpen(false)
+    setScriptEditorData(null)
+    setScriptEditorChapter(null)
+  }
+
+  const handleChangeScriptSegmentText = (index: number, value: string) => {
+    setScriptEditorData((prev) => {
+      if (!prev) return prev
+      const segments = [...prev.scriptSegments]
+      segments[index] = { ...segments[index], text: value }
+      return { ...prev, scriptSegments: segments }
+    })
+  }
+
+  const handleSaveScript = async (options: { nextStatus?: 'reviewed' | 'approved'; generateAudio?: boolean }) => {
+    if (!audiobookProject || !scriptEditorChapter || !scriptEditorData) return
+
+    try {
+      setScriptEditorLoading(true)
+      const token = localStorage.getItem('access_token')
+
+      const payload: any = {
+        script_segments: scriptEditorData.scriptSegments,
+      }
+      if (options.nextStatus) {
+        payload.script_status = options.nextStatus
+      }
+
+      const res = await fetch(
+        `/api/v1/audiobook/projects/${audiobookProject.id}/chapters/${scriptEditorChapter.chapterId}/script`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(payload),
+        }
+      )
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || '保存剧本失败')
+      }
+
+      setSnackbar({ open: true, message: '剧本已保存', severity: 'success' })
+
+      // 可选：保存并生成该章节音频
+      if (options.generateAudio) {
+        const genRes = await fetch(
+          `/api/v1/audiobook/projects/${audiobookProject.id}/generate-audio-from-scripts`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({
+              chapter_ids: [scriptEditorChapter.chapterId],
+              tts_model: ttsModel,
+            }),
+          }
+        )
+
+        if (!genRes.ok) {
+          const data = await genRes.json().catch(() => ({}))
+          throw new Error(data.detail || '触发音频生成失败')
+        }
+
+        setSnackbar({ open: true, message: '已触发该章节音频生成', severity: 'success' })
+      }
+
+      // 保存后不自动关闭，方便继续修改；如需可在此关闭
+      // handleCloseScriptEditorDialog()
+    } catch (err: any) {
+      console.error('保存/生成失败:', err)
+      setSnackbar({ open: true, message: err.message || '保存失败', severity: 'error' })
+    } finally {
+      setScriptEditorLoading(false)
+    }
+  }
+
+  const handleGenerateAudioForApprovedChapters = async () => {
+    if (!audiobookProject) {
+      setSnackbar({ open: true, message: '请先完成剧本生成', severity: 'error' })
+      return
+    }
+
+    try {
+      const token = localStorage.getItem('access_token')
+      const res = await fetch(
+        `/api/v1/audiobook/projects/${audiobookProject.id}/generate-audio-from-scripts`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            tts_model: ttsModel,
+          }),
+        }
+      )
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || '触发音频生成失败')
+      }
+
+      setSnackbar({
+        open: true,
+        message: '已触发所有已审批章节的音频生成，请稍候在历史记录或本页刷新查看结果',
+        severity: 'success',
+      })
+    } catch (err: any) {
+      console.error('批量生成音频失败:', err)
+      setSnackbar({
+        open: true,
+        message: err.message || '批量生成音频失败，请稍后重试',
+        severity: 'error',
+      })
+    }
+  }
+
   // 开始生成
   const handleGenerate = async () => {
     if (!selectedProject || selectedChapters.length === 0) {
@@ -568,16 +1037,49 @@ export default function AudiobookPage() {
     
     setGenerating(true)
     setActiveStep(2)
+    setLastGenerationMode(scriptOnlyMode ? 'script_only' : 'full')
     setTaskStatuses({})  // 清空之前的状态
 
     try {
       // 调用生成API
+      const token = localStorage.getItem('access_token')
+
+      // 先保存本次的项目级音频配置（角色音 + 音效/BGM），用于下次自动带出
+      if (selectedProject) {
+        const projectAudioConfigBody: ProjectAudioConfig = {
+          characters: characterVoices
+            .filter((cv) => cv.voiceId || cv.name === '旁白')  // 🔧 修复：旁白即使 voiceId 为空也保留，让后端使用默认音色
+            .map((cv) => ({
+              character_id: cv.characterId,
+              name: cv.name,
+              voice_id: cv.voiceId || 'male_narrator',  // 🔧 修复：空音色使用默认值
+              volume: cv.volume,
+              speed: cv.speed,
+              pitch: cv.pitch,
+            })),
+          audio_fx: audioFxConfig,
+        }
+
+        try {
+          await fetch(`/api/v1/projects/${selectedProject.id}/audio-config`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify(projectAudioConfigBody),
+          })
+        } catch (err) {
+          console.warn('保存项目音频配置失败:', err)
+        }
+      }
+
       const voiceConfigPayload =
         characterVoices
-          .filter((cv) => cv.voiceId)
+          .filter((cv) => cv.voiceId || cv.name === '旁白')  // 🔧 修复：旁白即使 voiceId 为空也保留
           .map((cv) => ({
             character_name: cv.name,
-            voice_id: cv.voiceId,
+            voice_id: cv.voiceId || 'male_narrator',  // 🔧 修复：空音色使用默认值
             volume: cv.volume,
             speed: cv.speed,
             pitch: cv.pitch,
@@ -587,7 +1089,7 @@ export default function AudiobookPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           project_id: selectedProject.id,
@@ -595,6 +1097,8 @@ export default function AudiobookPage() {
           tts_provider: 'aliyun',
           enable_cache: true,
           voice_config: voiceConfigPayload,
+          tts_model: ttsModel,
+          generation_mode: scriptOnlyMode ? 'script_only' : 'full',
         }),
       })
       
@@ -695,7 +1199,8 @@ export default function AudiobookPage() {
       music_composition: '音乐编曲',
       tts_synthesis: 'TTS合成',
       audio_mixing: '音频混合',
-      quality_review: '质量评审'
+      quality_review: '剧本质量评审',
+      final_audio_review: '最终音频评审',
     }
     
     const statusIcons = {
@@ -928,6 +1433,160 @@ export default function AudiobookPage() {
             <Alert severity="info" sx={{ mb: 2 }}>
               已选择 {selectedChapters.length}/{chapters.length} 个章节。未配置的角色将由 AI 自动分配音色和音量。
             </Alert>
+
+            {/* TTS 模型选择 */}
+            <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+              <FormControl size="small" sx={{ minWidth: 260 }}>
+                <InputLabel>TTS 模型</InputLabel>
+                <Select
+                  label="TTS 模型"
+                  value={ttsModel}
+                  onChange={(e) => setTtsModel(e.target.value as 'cosyvoice-v3-flash' | 'cosyvoice-v3-plus')}
+                >
+                  <MenuItem value="cosyvoice-v3-flash">
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <span>CosyVoice v3-flash</span>
+                      <Tooltip title="高性价比，速度快，适合大规模章节生成，价格较低">
+                        <Chip
+                          label="价格：低"
+                          size="small"
+                          color="success"
+                          sx={{ height: 18, fontSize: '0.65rem' }}
+                        />
+                      </Tooltip>
+                    </Box>
+                  </MenuItem>
+                  <MenuItem value="cosyvoice-v3-plus">
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <span>CosyVoice v3-plus</span>
+                      <Tooltip title="音质更好，支持零样本声音复刻，更适合重要章节和精细角色，价格较高">
+                        <Chip
+                          label="价格：高"
+                          size="small"
+                          color="error"
+                          sx={{ height: 18, fontSize: '0.65rem' }}
+                        />
+                      </Tooltip>
+                    </Box>
+                  </MenuItem>
+                </Select>
+              </FormControl>
+
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={scriptOnlyMode}
+                    onChange={(_, checked) => setScriptOnlyMode(checked)}
+                    sx={{
+                      color: '#9c27b0',
+                      '&.Mui-checked': {
+                        color: '#9c27b0',
+                      },
+                    }}
+                  />
+                }
+                label="仅生成剧本和评审（稍后再生成音频）"
+              />
+            </Box>
+
+            {/* 项目级音效与配乐配置 */}
+            <Paper
+              variant="outlined"
+              sx={{
+                mb: 2,
+                p: 2,
+                backgroundColor: 'rgba(156, 39, 176, 0.02)',
+              }}
+            >
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                音效与背景音乐
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                这里的设置会作为项目级默认配置保存，下次进入该项目会自动带出，并影响音效/配乐是否启用及大致密度。
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={12} md={6}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={audioFxConfig.enable_sound_effects}
+                        onChange={(_, checked) =>
+                          setAudioFxConfig((prev) => ({
+                            ...prev,
+                            enable_sound_effects: checked,
+                          }))
+                        }
+                        sx={{
+                          color: '#9c27b0',
+                          '&.Mui-checked': {
+                            color: '#9c27b0',
+                          },
+                        }}
+                      />
+                    }
+                    label="开启音效（环境音 + 关键动作音）"
+                  />
+                  <FormControl size="small" sx={{ mt: 1, minWidth: 200 }} disabled={!audioFxConfig.enable_sound_effects}>
+                    <InputLabel>音效密度</InputLabel>
+                    <Select
+                      label="音效密度"
+                      value={audioFxConfig.sound_effect_density}
+                      onChange={(e) =>
+                        setAudioFxConfig((prev) => ({
+                          ...prev,
+                          sound_effect_density: e.target.value as AudioFxConfig['sound_effect_density'],
+                        }))
+                      }
+                    >
+                      <MenuItem value="off">关闭（不使用音效）</MenuItem>
+                      <MenuItem value="low">稀疏（仅关键场景）</MenuItem>
+                      <MenuItem value="medium">适中（推荐）</MenuItem>
+                      <MenuItem value="high">丰富（沉浸感更强）</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={audioFxConfig.enable_music}
+                        onChange={(_, checked) =>
+                          setAudioFxConfig((prev) => ({
+                            ...prev,
+                            enable_music: checked,
+                          }))
+                        }
+                        sx={{
+                          color: '#9c27b0',
+                          '&.Mui-checked': {
+                            color: '#9c27b0',
+                          },
+                        }}
+                      />
+                    }
+                    label="开启背景音乐（AI 配乐）"
+                  />
+                  <FormControl size="small" sx={{ mt: 1, minWidth: 200 }} disabled={!audioFxConfig.enable_music}>
+                    <InputLabel>配乐密度</InputLabel>
+                    <Select
+                      label="配乐密度"
+                      value={audioFxConfig.music_density}
+                      onChange={(e) =>
+                        setAudioFxConfig((prev) => ({
+                          ...prev,
+                          music_density: e.target.value as AudioFxConfig['music_density'],
+                        }))
+                      }
+                    >
+                      <MenuItem value="off">关闭（不使用配乐）</MenuItem>
+                      <MenuItem value="low">稀疏（仅片头/片尾）</MenuItem>
+                      <MenuItem value="medium">适中（推荐）</MenuItem>
+                      <MenuItem value="high">丰富（几乎全程有配乐）</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+              </Grid>
+            </Paper>
         
             <Grid container spacing={3}>
               <Grid item xs={12} md={6}>
@@ -1064,9 +1723,21 @@ export default function AudiobookPage() {
                                   <MenuItem value="">
                                     <em>自动（AI 选择）</em>
                                   </MenuItem>
-                                  {VOICE_PRESETS.map((preset) => (
+                                  {currentVoicePresets.map((preset) => (
                                     <MenuItem key={preset.id} value={preset.id}>
-                                      {preset.label}
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                        <span>{preset.label}</span>
+                                        {preset.supportsInstruct && (
+                                          <Tooltip title="该音色支持智能情感：系统会根据文本内容自动选择合适的情感表达">
+                                            <Chip
+                                              label="智能情感"
+                                              size="small"
+                                              color="primary"
+                                              sx={{ height: 18, fontSize: '0.65rem' }}
+                                            />
+                                          </Tooltip>
+                                        )}
+                                      </Box>
                                     </MenuItem>
                                   ))}
                                 </Select>
@@ -1120,14 +1791,16 @@ export default function AudiobookPage() {
 
                             <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
                               <Tooltip title="云端精确试听效果，请稍作等待...">
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  onClick={() => handlePreviewCharacterVoice(cv)}
-                                  disabled={!cv.voiceId || previewingCharacterId === cv.characterId}
-                                >
-                                  {previewingCharacterId === cv.characterId ? '试听中...' : '试听'}
-                                </Button>
+                                <span>
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={() => handlePreviewCharacterVoice(cv)}
+                                    disabled={!cv.voiceId || previewingCharacterId === cv.characterId}
+                                  >
+                                    {previewingCharacterId === cv.characterId ? '试听中...' : '试听'}
+                                  </Button>
+                                </span>
                               </Tooltip>
                             </Box>
                           </Box>
@@ -1135,6 +1808,28 @@ export default function AudiobookPage() {
                       ))}
                     </List>
                   </Paper>
+                )}
+
+                {/* 🆕 自动推荐声线按钮 */}
+                {!loadingCharacters && (
+                  <Box sx={{ mt: 2, display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={handleAutoAssignVoices}
+                      disabled={autoAssigningVoices}
+                      sx={{
+                        borderColor: '#9c27b0',
+                        color: '#9c27b0',
+                        '&:hover': {
+                          borderColor: '#7b1fa2',
+                          backgroundColor: 'rgba(156, 39, 176, 0.04)',
+                        },
+                      }}
+                    >
+                      {autoAssigningVoices ? '🤖 智能推荐中...' : '✨ 基于人物卡自动推荐声线'}
+                    </Button>
+                  </Box>
                 )}
               </Grid>
             </Grid>
@@ -1164,7 +1859,7 @@ export default function AudiobookPage() {
             <Box sx={{ textAlign: 'center', mb: 3 }}>
               <CircularProgress size={80} sx={{ mb: 3, color: '#9c27b0' }} />
               <Typography variant="h6" sx={{ mb: 2 }}>
-                正在生成有声书...
+                {lastGenerationMode === 'script_only' ? '正在生成剧本和评审...' : '正在生成有声书...'}
               </Typography>
               {audiobookProject && (
                 <>
@@ -1185,6 +1880,17 @@ export default function AudiobookPage() {
                   当前阶段进度
                 </Typography>
                 {renderStageDetails(taskStatuses[selectedChapters[0]])}
+                {taskStatuses[selectedChapters[0]].stages?.quality_review?.status === 'completed' && (
+                  <Box sx={{ mt: 2, textAlign: 'right' }}>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={handleOpenScriptReviewDialog}
+                    >
+                      查看剧本评审详情
+                    </Button>
+                  </Box>
+                )}
               </Box>
             )}
             
@@ -1216,7 +1922,9 @@ export default function AudiobookPage() {
                 生成完成！
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                您的有声书已经准备好了
+                {lastGenerationMode === 'script_only'
+                  ? '剧本与评审已生成，接下来可以逐章审稿、修改剧本，再生成音频'
+                  : '您的有声书已经准备好了'}
               </Typography>
             </Box>
             
@@ -1289,46 +1997,143 @@ export default function AudiobookPage() {
                     const isPlaying = playingChapter === chapterAudio.chapter_id
                     
                     return (
-                      <Box key={chapterAudio.id} sx={{ display: 'flex', gap: 1 }}>
-                        {/* 在线播放按钮 */}
-                        <Tooltip title={isPlaying ? '暂停播放' : '在线播放'}>
-                          <Button
-                            variant="outlined"
+                      <Box key={chapterAudio.id} sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          {/* 在线播放按钮 */}
+                          <Tooltip title={isPlaying ? '暂停播放' : '在线播放'}>
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              startIcon={isPlaying ? <PauseIcon /> : <PlayIcon />}
+                              onClick={() => handlePlayAudio(chapterAudio.chapter_id)}
+                              sx={{
+                                borderColor: isPlaying ? '#f50057' : '#9c27b0',
+                                color: isPlaying ? '#f50057' : '#9c27b0',
+                                '&:hover': {
+                                  borderColor: isPlaying ? '#c51162' : '#7b1fa2',
+                                  backgroundColor: isPlaying ? 'rgba(245, 0, 87, 0.08)' : 'rgba(156, 39, 176, 0.08)',
+                                },
+                              }}
+                            >
+                              {chapter ? `第${chapter.chapter_number}章` : `章节${chapterAudio.chapter_id}`}
+                            </Button>
+                          </Tooltip>
+                          
+                          {/* 下载按钮 */}
+                          <Tooltip title="下载音频">
+                            <IconButton
+                              size="small"
+                              onClick={() => handleDownloadAudio(chapterAudio.chapter_id)}
+                              sx={{
+                                color: '#9c27b0',
+                                '&:hover': {
+                                  backgroundColor: 'rgba(156, 39, 176, 0.08)',
+                                },
+                              }}
+                            >
+                              <DownloadIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+  
+                          {/* 编辑剧本按钮（如果有脚本可用，用户可以直接尝试打开） */}
+                          <Tooltip title="编辑本章节有声剧本">
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => handleOpenScriptEditor(chapterAudio.chapter_id)}
+                              sx={{
+                                borderColor: '#607d8b',
+                                color: '#607d8b',
+                                '&:hover': {
+                                  borderColor: '#455a64',
+                                  backgroundColor: 'rgba(96, 125, 139, 0.08)',
+                                },
+                              }}
+                            >
+                              编辑剧本
+                            </Button>
+                          </Tooltip>
+                        </Box>
+                        <Box sx={{ display: 'flex', gap: 1, mt: 0.5, flexWrap: 'wrap' }}>
+                          <Chip
+                            label={
+                              chapterAudio.script_status === 'approved'
+                                ? '剧本：已审批'
+                                : chapterAudio.script_status === 'reviewed'
+                                ? '剧本：已修改'
+                                : chapterAudio.script_status
+                                ? '剧本：待处理'
+                                : '剧本：未生成'
+                            }
                             size="small"
-                            startIcon={isPlaying ? <PauseIcon /> : <PlayIcon />}
-                            onClick={() => handlePlayAudio(chapterAudio.chapter_id)}
                             sx={{
-                              borderColor: isPlaying ? '#f50057' : '#9c27b0',
-                              color: isPlaying ? '#f50057' : '#9c27b0',
-                              '&:hover': {
-                                borderColor: isPlaying ? '#c51162' : '#7b1fa2',
-                                backgroundColor: isPlaying ? 'rgba(245, 0, 87, 0.08)' : 'rgba(156, 39, 176, 0.08)',
-                              },
+                              backgroundColor:
+                                chapterAudio.script_status === 'approved'
+                                  ? 'rgba(76, 175, 80, 0.15)'
+                                  : chapterAudio.script_status === 'reviewed'
+                                  ? 'rgba(33, 150, 243, 0.12)'
+                                  : 'rgba(158, 158, 158, 0.12)',
+                              color:
+                                chapterAudio.script_status === 'approved'
+                                  ? '#2e7d32'
+                                  : chapterAudio.script_status === 'reviewed'
+                                  ? '#1565c0'
+                                  : '#616161',
+                              fontSize: '0.75rem',
+                              height: 22,
                             }}
-                          >
-                            {chapter ? `第${chapter.chapter_number}章` : `章节${chapterAudio.chapter_id}`}
-                          </Button>
-                        </Tooltip>
-                        
-                        {/* 下载按钮 */}
-                        <Tooltip title="下载音频">
-                          <IconButton
+                          />
+                          <Chip
+                            label={chapterAudio.audio_path ? '音频：已生成' : '音频：未生成'}
                             size="small"
-                            onClick={() => handleDownloadAudio(chapterAudio.chapter_id)}
                             sx={{
-                              color: '#9c27b0',
-                              '&:hover': {
-                                backgroundColor: 'rgba(156, 39, 176, 0.08)',
-                              },
+                              backgroundColor: chapterAudio.audio_path
+                                ? 'rgba(156, 39, 176, 0.12)'
+                                : 'rgba(189, 189, 189, 0.18)',
+                              color: chapterAudio.audio_path ? '#6a1b9a' : '#616161',
+                              fontSize: '0.75rem',
+                              height: 22,
                             }}
-                          >
-                            <DownloadIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
+                          />
+                        </Box>
                       </Box>
                     )
                   })}
                 </Box>
+              )}
+              
+              {selectedChapters.length > 0 && taskStatuses[selectedChapters[0]]?.stages?.quality_review && (
+                <Button
+                  variant="outlined"
+                  onClick={handleOpenScriptReviewDialog}
+                  sx={{
+                    borderColor: '#9c27b0',
+                    color: '#9c27b0',
+                    '&:hover': {
+                      borderColor: '#7b1fa2',
+                      backgroundColor: 'rgba(156, 39, 176, 0.08)',
+                    },
+                  }}
+                >
+                  查看剧本评审
+                </Button>
+              )}
+
+              {audiobookProject && (
+                <Button
+                  variant="outlined"
+                  onClick={handleGenerateAudioForApprovedChapters}
+                  sx={{
+                    borderColor: '#4caf50',
+                    color: '#2e7d32',
+                    '&:hover': {
+                      borderColor: '#2e7d32',
+                      backgroundColor: 'rgba(76, 175, 80, 0.08)',
+                    },
+                  }}
+                >
+                  对已审批章节生成音频
+                </Button>
               )}
               
               <Button
@@ -1367,6 +2172,379 @@ export default function AudiobookPage() {
           {snackbar.message}
         </Alert>
       </Snackbar>
+      
+      {/* 剧本质量评审弹窗 */}
+      <Dialog
+        open={scriptReviewDialogOpen}
+        onClose={handleCloseScriptReviewDialog}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>剧本质量评审</DialogTitle>
+        <DialogContent dividers>
+          {!scriptReviewData ? (
+            <Typography variant="body2" color="text.secondary">
+              暂无评审数据
+            </Typography>
+          ) : (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Box>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                  总体评分
+                </Typography>
+                <Typography variant="body2" sx={{ mt: 0.5 }}>
+                  评分：
+                  {scriptReviewData.report.overall_score?.toFixed
+                    ? scriptReviewData.report.overall_score.toFixed(1)
+                    : scriptReviewData.report.overall_score}{' '}
+                  （{scriptReviewData.report.overall_grade || 'N/A'}），问题数：
+                  {scriptReviewData.report.issues_count ?? 0}
+                </Typography>
+                {scriptReviewData.report.revision_suggestions && (
+                  <Box sx={{ mt: 1 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 500, mb: 0.5 }}>
+                      建议：
+                    </Typography>
+                    {scriptReviewData.report.revision_suggestions.map((s: string, idx: number) => (
+                      <Typography key={idx} variant="body2" color="text.secondary">
+                        • {s}
+                      </Typography>
+                    ))}
+                  </Box>
+                )}
+              </Box>
+
+              <Divider />
+
+              <Box>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+                  剧本片段预览（前 {scriptReviewData.segments.length} 段）
+                </Typography>
+                <Paper
+                  variant="outlined"
+                  sx={{ maxHeight: 400, overflow: 'auto', p: 1 }}
+                >
+                  <List dense>
+                    {scriptReviewData.segments.map((seg: any) => (
+                      <ListItem key={seg.index} alignItems="flex-start" sx={{ mb: 0.5 }}>
+                        <ListItemText
+                          primary={
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                              #{seg.index + 1} [{seg.type === 'dialogue' ? '对白' : seg.type}] {seg.speaker || '旁白'}
+                            </Typography>
+                          }
+                          secondary={
+                            <Typography variant="body2" color="text.secondary">
+                              {seg.text}
+                            </Typography>
+                          }
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                </Paper>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ mt: 1, display: 'block' }}
+                >
+                  当前弹窗展示的是自动改编后的有声剧本片段，仅用于人工审核；后续版本会支持直接在此编辑并回写。
+                </Typography>
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseScriptReviewDialog}>关闭</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 章节剧本编辑弹窗 */}
+      <Dialog
+        open={scriptEditorDialogOpen}
+        onClose={handleCloseScriptEditorDialog}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          {scriptEditorChapter ? `编辑剧本 - ${scriptEditorChapter.title}` : '编辑章节剧本'}
+        </DialogTitle>
+        <DialogContent dividers sx={{ minHeight: 400 }}>
+          {scriptEditorLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress size={28} />
+            </Box>
+          ) : !scriptEditorData ? (
+            <Typography variant="body2" color="text.secondary">
+              暂无剧本数据，请先生成剧本。
+            </Typography>
+          ) : (
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              {/* 左侧：剧本可编辑列表 */}
+              <Box sx={{ flex: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+                  剧本片段（可编辑文本，仅修改 text 字段）
+                </Typography>
+                <Paper
+                  variant="outlined"
+                  sx={{ maxHeight: 520, overflow: 'auto', p: 1 }}
+                >
+                  <List dense>
+                    {scriptEditorData.scriptSegments.map((seg: any, idx: number) => (
+                      <ListItem key={idx} alignItems="flex-start" sx={{ mb: 1 }}>
+                        <Box sx={{ width: '100%' }}>
+                          <Typography variant="caption" color="text.secondary">
+                            #{idx + 1} [{seg.type === 'dialogue' ? '对白' : seg.type}] {seg.speaker || '旁白'}{' '}
+                            {seg.emotion ? `· 情绪: ${seg.emotion}` : ''}
+                          </Typography>
+                          <TextField
+                            fullWidth
+                            multiline
+                            minRows={2}
+                            margin="dense"
+                            value={seg.text || ''}
+                            onChange={(e) => handleChangeScriptSegmentText(idx, e.target.value)}
+                          />
+                        </Box>
+                      </ListItem>
+                    ))}
+                  </List>
+                </Paper>
+              </Box>
+
+              {/* 右侧：评审报告摘要 */}
+              <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                  评审报告
+                </Typography>
+                {scriptEditorData.scriptReview ? (
+                  <Paper variant="outlined" sx={{ p: 2, maxHeight: 520, overflow: 'auto' }}>
+                    {/* 总体评分 */}
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                        📊 总体评分
+                      </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: 60,
+                            height: 60,
+                            borderRadius: '50%',
+                            backgroundColor: 
+                              scriptEditorData.scriptReview.overall_score >= 8 ? 'rgba(76, 175, 80, 0.15)' :
+                              scriptEditorData.scriptReview.overall_score >= 6 ? 'rgba(255, 152, 0, 0.15)' :
+                              'rgba(244, 67, 54, 0.15)',
+                          }}
+                        >
+                          <Typography variant="h5" sx={{ fontWeight: 600, color: 
+                            scriptEditorData.scriptReview.overall_score >= 8 ? '#2e7d32' :
+                            scriptEditorData.scriptReview.overall_score >= 6 ? '#f57c00' :
+                            '#c62828'
+                          }}>
+                            {scriptEditorData.scriptReview.overall_score?.toFixed
+                              ? scriptEditorData.scriptReview.overall_score.toFixed(1)
+                              : scriptEditorData.scriptReview.overall_score}
+                          </Typography>
+                        </Box>
+                        <Box>
+                          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                            等级：{scriptEditorData.scriptReview.overall_grade || 'N/A'}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            问题数：{scriptEditorData.scriptReview.issues_count ?? (scriptEditorData.scriptReview.issues?.length ?? 0)}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </Box>
+
+                    {/* 详细评分维度 */}
+                    {(scriptEditorData.scriptReview.script_quality_score !== undefined ||
+                      scriptEditorData.scriptReview.audio_balance_score !== undefined ||
+                      scriptEditorData.scriptReview.pacing_score !== undefined) && (
+                      <Box sx={{ mb: 2 }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                          📈 分项评分
+                        </Typography>
+                        {scriptEditorData.scriptReview.script_quality_score !== undefined && (
+                          <Box sx={{ mb: 0.5 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              剧本质量
+                            </Typography>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Box sx={{ flex: 1, height: 6, backgroundColor: '#e0e0e0', borderRadius: 1 }}>
+                                <Box sx={{ 
+                                  width: `${(scriptEditorData.scriptReview.script_quality_score / 10) * 100}%`, 
+                                  height: '100%', 
+                                  backgroundColor: '#9c27b0', 
+                                  borderRadius: 1 
+                                }} />
+                              </Box>
+                              <Typography variant="caption" sx={{ minWidth: 30, fontWeight: 500 }}>
+                                {scriptEditorData.scriptReview.script_quality_score.toFixed(1)}
+                              </Typography>
+                            </Box>
+                          </Box>
+                        )}
+                        {scriptEditorData.scriptReview.audio_balance_score !== undefined && (
+                          <Box sx={{ mb: 0.5 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              音频平衡
+                            </Typography>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Box sx={{ flex: 1, height: 6, backgroundColor: '#e0e0e0', borderRadius: 1 }}>
+                                <Box sx={{ 
+                                  width: `${(scriptEditorData.scriptReview.audio_balance_score / 10) * 100}%`, 
+                                  height: '100%', 
+                                  backgroundColor: '#2196f3', 
+                                  borderRadius: 1 
+                                }} />
+                              </Box>
+                              <Typography variant="caption" sx={{ minWidth: 30, fontWeight: 500 }}>
+                                {scriptEditorData.scriptReview.audio_balance_score.toFixed(1)}
+                              </Typography>
+                            </Box>
+                          </Box>
+                        )}
+                        {scriptEditorData.scriptReview.pacing_score !== undefined && (
+                          <Box sx={{ mb: 0.5 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              节奏把控
+                            </Typography>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Box sx={{ flex: 1, height: 6, backgroundColor: '#e0e0e0', borderRadius: 1 }}>
+                                <Box sx={{ 
+                                  width: `${(scriptEditorData.scriptReview.pacing_score / 10) * 100}%`, 
+                                  height: '100%', 
+                                  backgroundColor: '#ff9800', 
+                                  borderRadius: 1 
+                                }} />
+                              </Box>
+                              <Typography variant="caption" sx={{ minWidth: 30, fontWeight: 500 }}>
+                                {scriptEditorData.scriptReview.pacing_score.toFixed(1)}
+                              </Typography>
+                            </Box>
+                          </Box>
+                        )}
+                      </Box>
+                    )}
+
+                    {/* 修订建议 */}
+                    {scriptEditorData.scriptReview.revision_suggestions && scriptEditorData.scriptReview.revision_suggestions.length > 0 && (
+                      <Box sx={{ mb: 2 }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                          💡 修订建议
+                        </Typography>
+                        {scriptEditorData.scriptReview.revision_suggestions.map((s: string, idx: number) => (
+                          <Box key={idx} sx={{ display: 'flex', gap: 0.5, mb: 0.5 }}>
+                            <Typography variant="body2" color="primary">
+                              •
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              {s}
+                            </Typography>
+                          </Box>
+                        ))}
+                      </Box>
+                    )}
+
+                    {/* 问题列表 */}
+                    {scriptEditorData.scriptReview.issues && scriptEditorData.scriptReview.issues.length > 0 && (
+                      <Box>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                          ⚠️ 问题列表（{scriptEditorData.scriptReview.issues.length}项）
+                        </Typography>
+                        <Box sx={{ maxHeight: 200, overflow: 'auto' }}>
+                          {(scriptEditorData.scriptReview.issues as any[]).map((issue, idx) => (
+                            <Box 
+                              key={idx} 
+                              sx={{ 
+                                mb: 1, 
+                                p: 1, 
+                                backgroundColor: 
+                                  issue.severity === 'critical' ? 'rgba(244, 67, 54, 0.08)' :
+                                  issue.severity === 'major' ? 'rgba(255, 152, 0, 0.08)' :
+                                  'rgba(158, 158, 158, 0.06)',
+                                borderRadius: 1,
+                                borderLeft: `3px solid ${
+                                  issue.severity === 'critical' ? '#f44336' :
+                                  issue.severity === 'major' ? '#ff9800' :
+                                  '#9e9e9e'
+                                }`
+                              }}
+                            >
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                                <Chip 
+                                  label={issue.severity === 'critical' ? '严重' : issue.severity === 'major' ? '重要' : '一般'}
+                                  size="small"
+                                  sx={{ 
+                                    height: 18, 
+                                    fontSize: '0.7rem',
+                                    backgroundColor: 
+                                      issue.severity === 'critical' ? '#f44336' :
+                                      issue.severity === 'major' ? '#ff9800' :
+                                      '#9e9e9e',
+                                    color: 'white'
+                                  }}
+                                />
+                                {issue.segment_index !== undefined && (
+                                  <Typography variant="caption" color="text.secondary">
+                                    片段 #{issue.segment_index + 1}
+                                  </Typography>
+                                )}
+                              </Box>
+                              <Typography variant="body2" sx={{ fontSize: '0.85rem' }}>
+                                {issue.description}
+                              </Typography>
+                              {issue.suggestion && (
+                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                                  建议：{issue.suggestion}
+                                </Typography>
+                              )}
+                            </Box>
+                          ))}
+                        </Box>
+                      </Box>
+                    )}
+                  </Paper>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    暂无评审数据。
+                  </Typography>
+                )}
+
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
+                  修改剧本后，建议重新生成该章节音频以保证文本与音频一致。
+                </Typography>
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseScriptEditorDialog} disabled={scriptEditorLoading}>
+            关闭
+          </Button>
+          <Button
+            onClick={() => handleSaveScript({ nextStatus: 'reviewed', generateAudio: false })}
+            disabled={scriptEditorLoading || !scriptEditorData}
+          >
+            仅保存剧本
+          </Button>
+          <Button
+            onClick={() => handleSaveScript({ nextStatus: 'approved', generateAudio: true })}
+            disabled={scriptEditorLoading || !scriptEditorData}
+            variant="contained"
+            sx={{
+              backgroundColor: '#9c27b0',
+              '&:hover': { backgroundColor: '#7b1fa2' },
+            }}
+          >
+            保存并生成该章节音频
+          </Button>
+        </DialogActions>
+      </Dialog>
       
       {/* 新增：历史记录对话框 */}
       <Dialog
@@ -1514,7 +2692,7 @@ export default function AudiobookPage() {
                 </Typography>
               </Box>
             )}
-            <Alert severity="warning" sx={{ mt: 2 }}>
+            <Alert severity="error" sx={{ mt: 2 }}>
               此操作将永久删除该项目及其所有音频文件，无法恢复！
             </Alert>
           </Box>

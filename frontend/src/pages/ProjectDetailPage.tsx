@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useEffect, useState } from 'react'
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useDispatch } from 'react-redux'
 import {
@@ -101,8 +101,16 @@ export default function ProjectDetailPage() {
   }[]>([])
   const [audioLoading, setAudioLoading] = useState(false)
   const [audioSaving, setAudioSaving] = useState(false)
+  const [audioAutoAssigning, setAudioAutoAssigning] = useState(false)
   const [audioError, setAudioError] = useState<string | null>(null)
   const [previewingId, setPreviewingId] = useState<number | null>(null)
+
+  // 🆕 当切换到音频配置 Tab 时自动加载
+  useEffect(() => {
+    if (tabValue === 5 && projectId && audioSettings.length === 0) {
+      loadAudioConfig()
+    }
+  }, [tabValue, projectId])
 
   useEffect(() => {
     // 当项目 ID 改变时，清除编辑器状态，确保项目隔离
@@ -211,6 +219,14 @@ export default function ProjectDetailPage() {
     }
   }
 
+  const handleOpenChaptersDrawer = () => {
+    setShowChaptersDrawer(true)
+  }
+
+  const handleCloseChaptersDrawer = () => {
+    setShowChaptersDrawer(false)
+  }
+
   const loadAudioConfig = async () => {
     if (!projectId) {
       return
@@ -293,6 +309,65 @@ export default function ProjectDetailPage() {
       alert('保存音频配置失败，请稍后重试')
     } finally {
       setAudioSaving(false)
+    }
+  }
+
+  const handleAutoAssignVoices = async () => {
+    if (!projectId) return
+    try {
+      setAudioAutoAssigning(true)
+      const projectIdNum = parseInt(projectId)
+      const res = await apiClient.autoAssignProjectAudioVoices(projectIdNum)
+      const configData = (res.data || { characters: [] }) as {
+        characters?: {
+          character_id: number
+          name: string
+          voice_id: string
+          volume: number
+          speed?: number | null
+          pitch?: number | null
+        }[]
+      }
+
+      const configById = new Map<
+        number,
+        { voice_id: string; volume: number; speed?: number | null; pitch?: number | null }
+      >()
+      for (const item of configData.characters || []) {
+        configById.set(item.character_id, {
+          voice_id: item.voice_id,
+          volume: item.volume,
+          speed: item.speed ?? undefined,
+          pitch: item.pitch ?? undefined,
+        })
+      }
+
+      setAudioSettings((prev) =>
+        prev.map((cv) => {
+          const conf = configById.get(cv.characterId)
+          if (!conf) return cv
+          return {
+            ...cv,
+            voiceId: conf.voice_id || '',
+            volume: conf.volume ?? cv.volume,
+            speed: conf.speed ?? cv.speed,
+            pitch: conf.pitch ?? cv.pitch,
+          }
+        }),
+      )
+
+      // ✅ 添加明确的成功反馈
+      const assignedCount = configById.size
+      if (assignedCount > 0) {
+        alert(`✅ 已为 ${assignedCount} 个角色智能推荐声线！\n\n请检查推荐结果，如需调整可手动修改，最后点击「保存为项目默认配置」保存。`)
+      } else {
+        alert('⚠️ 当前项目还没有角色档案，请先在「👥 人物设定」中创建角色。')
+      }
+    } catch (err) {
+      console.error('❌ 自动推荐声线失败:', err)
+      alert('自动推荐声线失败，请稍后重试')
+    } finally {
+      setAudioAutoAssigning(false)
     }
   }
 
@@ -657,8 +732,6 @@ export default function ProjectDetailPage() {
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
             <CircularProgress />
           </Box>
-        ) : audioSettings.length === 0 ? (
-          <Alert severity="info">当前项目还没有结构化角色档案，可在人物模块中创建角色后再配置音色。</Alert>
         ) : (
           <>
             <Paper
@@ -808,7 +881,20 @@ export default function ProjectDetailPage() {
               </List>
             </Paper>
 
+            {audioSettings.length === 0 ? (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                当前项目还没有结构化角色档案。请先在「👥 人物设定」模块中创建角色，然后点击下方按钮自动推荐声线。
+              </Alert>
+            ) : null}
+
             <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
+              <Button
+                variant="outlined"
+                onClick={handleAutoAssignVoices}
+                disabled={audioLoading || audioAutoAssigning}
+              >
+                {audioAutoAssigning ? '正在基于人物卡智能推荐...' : '基于人物卡自动推荐声线'}
+              </Button>
               <Button
                 variant="outlined"
                 onClick={loadAudioConfig}
@@ -819,7 +905,7 @@ export default function ProjectDetailPage() {
               <Button
                 variant="contained"
                 onClick={handleSaveAudioConfig}
-                disabled={audioSaving}
+                disabled={audioSaving || audioSettings.length === 0}
               >
                 {audioSaving ? '保存中...' : '保存为项目默认配置'}
               </Button>

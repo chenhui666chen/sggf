@@ -73,6 +73,7 @@ class TTSCost:
     cache_hits: int = 0
     api_calls: int = 0
     estimated_cost: float = 0.0  # 单位：元
+    price_per_10k: float = 1.0   # 每万字符价格，默认按 v3-flash 计算
     
     def add_segment(self, char_count: int, is_cached: bool = False):
         """添加片段统计"""
@@ -83,8 +84,8 @@ class TTSCost:
             self.cache_hits += 1
         else:
             self.api_calls += 1
-            # CosyVoice v3-plus价格：¥2/万字符
-            self.estimated_cost += (char_count / 10000) * 2.0
+            # 根据当前模型的单价计算成本
+            self.estimated_cost += (char_count / 10000) * self.price_per_10k
     
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""
@@ -105,7 +106,7 @@ class TTSEngine:
     TTS引擎 - 支持多提供商 + 智能重试
     
     特性：
-    1. 主提供商：阿里云 CosyVoice v3-plus（顶级音质 MOS>4.7）
+    1. 主提供商：阿里云 CosyVoice v3-flash（高性价比，优质音质）
     2. 备用提供商：可配置（未来扩展）
     3. 智能重试：指数退避 + 随机抖动
     4. 故障转移：主提供商失败自动切换备用
@@ -118,9 +119,9 @@ class TTSEngine:
     def __init__(
         self,
         enable_cache: bool = True,
-        max_concurrent: int = 1,  # 降低到1个并发，避免频率限制
-        model: str = "cosyvoice-v3-plus",  # 专业版：仅支持v3-plus
-        request_delay: float = 10.0,  # 默认每次请求后等待时间
+        max_concurrent: int = 2,  # 提升到2个并发（低于3 RPS限制）
+        model: str = "cosyvoice-v3-flash",  # 高性价比版本，支持更多预设音色
+        request_delay: float = 0.5,  # 优化为0.5秒（2 RPS，安全范围内）
         primary_provider: TTSProvider = TTSProvider.ALIYUN,  # 主提供商
         fallback_providers: Optional[List[TTSProvider]] = None,  # 备用提供商列表
         retry_config: Optional[RetryConfig] = None,  # 重试配置
@@ -132,6 +133,12 @@ class TTSEngine:
         self.enable_cache = enable_cache
         self.max_concurrent = max_concurrent
         self.model = model  # TTS模型版本
+
+        # 根据模型设置单价：v3-plus 成本更高
+        if "plus" in model:
+            self.price_per_10k = 2.0  # ¥2/万字符
+        else:
+            self.price_per_10k = 1.0  # ¥1/万字符（默认 flash 模型）
         
         # 重试配置
         self.retry_config = retry_config or RetryConfig(
@@ -143,7 +150,7 @@ class TTSEngine:
         )
         
         # 成本统计
-        self.cost_tracker = TTSCost()
+        self.cost_tracker = TTSCost(price_per_10k=self.price_per_10k)
         
         # 并发控制（降低到1，避免频率限制）
         self.semaphore = asyncio.Semaphore(max_concurrent)
@@ -195,15 +202,30 @@ class TTSEngine:
                 labels={"provider": self.primary_provider.value}
             )
         
+        # 预处理文本：对支持 Instruct 的音色自动注入情感指令
+        effective_text = self._build_instruct_text(text, voice_params, emotion)
+        
+        # 📊 情感参数日志（便于调试和验证）
+        speaker = voice_params.get("speaker", "unknown")
+        pitch = voice_params.get("pitch", 50)
+        speed = voice_params.get("speed", voice_params.get("rate", 1.0))
+        volume = voice_params.get("volume", 50)
+        logger.debug(
+            f"🎭 [{speaker}] emotion={emotion} | "
+            f"pitch={pitch} (base+offset) | "
+            f"speed={speed:.2f}x | "
+            f"volume={volume}"
+        )
+        
         # 1. 生成缓存key
-        cache_key = self._generate_cache_key(text, voice_params, emotion)
+        cache_key = self._generate_cache_key(effective_text, voice_params, emotion)
         
         # 2. 检查缓存
         if self.cache:
             cached_audio = await self.cache.get(cache_key)
             if cached_audio:
-                logger.debug(f"🎯 缓存命中: {text[:20]}...")
-                self.cost_tracker.add_segment(len(text), is_cached=True)
+                logger.debug(f"🎯 缓存命中: {effective_text[:20]}...")
+                self.cost_tracker.add_segment(len(effective_text), is_cached=True)
                 # 缓存的是base64字符串，需要解码
                 import base64
                 
@@ -228,15 +250,15 @@ class TTSEngine:
                         "model": self.model
                     }
                 ):
-                    audio_bytes = await self._call_tts_api(text, voice_params)
+                    audio_bytes = await self._call_tts_api(effective_text, voice_params)
             else:
-                audio_bytes = await self._call_tts_api(text, voice_params)
+                audio_bytes = await self._call_tts_api(effective_text, voice_params)
             
             # 每次请求后等待，避免频率限制
             await asyncio.sleep(self.request_delay)
         
         # 4. 更新成本统计
-        self.cost_tracker.add_segment(len(text), is_cached=False)
+        self.cost_tracker.add_segment(len(effective_text), is_cached=False)
         
         # 5. 缓存结果
         if self.cache and audio_bytes:
@@ -250,7 +272,9 @@ class TTSEngine:
         self,
         segments: List[Dict[str, Any]],
         batch_size: int = 10,  # 每批处理数量
-        batch_interval: int = 0  # 批次间隔（秒）- 优化：取消节流等待
+        batch_interval: int = 0,  # 批次间隔（秒）- 优化：取消节流等待
+        debug_save_segments: bool = False,  # 🔧 调试：是否保存每个片段的原始音频
+        debug_output_dir: Optional[str] = None  # 🔧 调试：保存目录
     ) -> List[bytes]:
         """
         批量合成（分批处理，避免阿里云配额限制）
@@ -321,6 +345,46 @@ class TTSEngine:
         
         success_count = len([a for a in audio_list if a])
         logger.info(f"\n✅ 批量合成完成: {success_count}/{total} 成功")
+        
+        # 🔧 调试模式：保存每个片段的原始音频和文本
+        if debug_save_segments and audio_list:
+            from pathlib import Path
+            
+            if debug_output_dir:
+                debug_dir = Path(debug_output_dir)
+            else:
+                debug_dir = Path("backend/data/tts_debug")
+            
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"\n🔧 [调试模式] 保存 TTS 片段到: {debug_dir}")
+            
+            for i, (seg, audio_bytes) in enumerate(zip(segments, audio_list), start=1):
+                try:
+                    # 保存音频
+                    audio_file = debug_dir / f"segment_{i:03d}.mp3"
+                    if audio_bytes and len(audio_bytes) > 0:
+                        audio_file.write_bytes(audio_bytes)
+                        
+                        # 保存对应文本（方便对照）
+                        text_file = debug_dir / f"segment_{i:03d}.txt"
+                        seg_text = seg.get("text", "")
+                        text_file.write_text(
+                            f"片段 {i}\n"
+                            f"长度: {len(seg_text)} 字符\n"
+                            f"音频大小: {len(audio_bytes)} 字节\n"
+                            f"音色: {seg.get('voice_params', {}).get('speaker', 'unknown')}\n"
+                            f"情感: {seg.get('emotion', 'neutral')}\n"
+                            f"\n文本内容:\n{seg_text}\n",
+                            encoding="utf-8"
+                        )
+                        logger.info(f"   ✅ 片段 {i:03d}: {len(audio_bytes)}字节 → {audio_file.name}")
+                    else:
+                        logger.warning(f"   ⚠️ 片段 {i:03d}: 空音频，跳过保存")
+                except Exception as e:
+                    logger.error(f"   ❌ 保存片段 {i:03d} 失败: {e}")
+            
+            logger.info(f"🔧 [调试模式] 已保存 {len([a for a in audio_list if a])}/{total} 个片段")
+        
         return audio_list
     
     async def _call_tts_api(
@@ -519,9 +583,21 @@ class TTSEngine:
         )
         text = cleaned_text.strip()
             
-        # 调试：对比清理前后
+        # 调试：对比清理前后（仅在有实质性变化时警告）
         if text != original_text:
-            logger.warning(f"⚠️ 文本已清理：原文[{original_text[:30]}...] → 清理后[{text[:30]}...]")
+            # 统计清理了什么
+            cleaned_chars = []
+            if original_text.strip() != original_text:
+                cleaned_chars.append("首尾空格")
+            if '"' in original_text or '"' in original_text:
+                cleaned_chars.append("中文引号")
+            if any(unicodedata.category(c)[0] == 'C' for c in original_text):
+                cleaned_chars.append("控制字符")
+            
+            if cleaned_chars:
+                logger.debug(f"📝 文本清理: 移除了 {', '.join(cleaned_chars)} | 原始长度:{len(original_text)} → 清理后:{len(text)}")
+            else:
+                logger.debug(f"📝 文本清理: 长度变化 {len(original_text)} → {len(text)}")
             
         # 再次验证
         if not text:
@@ -613,6 +689,75 @@ class TTSEngine:
             logger.error(f"❌ 阿里云TTS失败: {result}")
             return b""
     
+    def _build_instruct_text(
+        self,
+        text: str,
+        voice_params: Dict[str, Any],
+        emotion: str
+    ) -> str:
+        """对支持 Instruct 的音色自动注入情感/场景/角色/身份指令。
+
+        仅以下三个音色支持 Instruct：
+        - longanyang（龙安洋）：情感 / 场景（闲聊互动） / 角色（一个旁白） / 身份（故事机）
+        - longanhuan（龙安欢）：情感 / 场景（闲聊对话等） / 角色（温和客服）
+        - longhuhu_v3（龙呼呼）：情感 / 场景（自由对话） / 角色（傲娇公主等） / 身份（故事机、儿童玩具）
+        """
+        speaker_id = voice_params.get("speaker", "")
+        instruct_voices = {"longanyang", "longanhuan", "longhuhu_v3"}
+        if speaker_id not in instruct_voices:
+            return text
+
+        segment_speaker = voice_params.get("segment_speaker", "")
+        segment_type = voice_params.get("segment_type", "")
+
+        # 将内部情感标签映射到阿里云支持的情感值
+        # 阿里云Instruct支持的情感: happy, sad, angry, fearful, surprised, disgusted, neutral
+        emotion_map = {
+            # 基础情感
+            "happy": "happy",
+            "sad": "sad",
+            "angry": "angry",
+            "neutral": "neutral",
+            "calm": "neutral",
+            
+            # 扩展情感（映射到阿里云原生支持的类别）
+            "excited": "happy",         # 兴奋 → happy
+            "fearful": "fearful",       # 恐惧 → fearful
+            "tense": "fearful",         # 紧张 → fearful
+            "nervous": "fearful",       # 紧张不安 → fearful
+            "surprised": "surprised",   # 惊讶 → surprised
+            "disgusted": "disgusted",   # 厌恶 → disgusted
+            "tender": "neutral",        # 温柔 → neutral
+            "serious": "neutral",       # 严肃 → neutral
+            "gentle": "neutral",        # 轻柔 → neutral
+            "whisper": "neutral",       # 低语 → neutral (依赖pitch/volume调节)
+            "shout": "angry",           # 呼喊 → angry
+        }
+        emotion_value = emotion_map.get(emotion, "neutral")
+
+        # 根据音色+片段类型选择 Instruct 模板
+        prefix: str
+        if speaker_id == "longanyang":
+            # 旁白 → 角色 + 情感；其他 → 场景 + 情感
+            if segment_speaker == "旁白" or segment_type == "narration":
+                prefix = f"你现在说话的角色是一个旁白，你说话的情感是{emotion_value}。"
+            else:
+                prefix = f"你正在进行闲聊互动，你说话的情感是{emotion_value}。"
+        elif speaker_id == "longanhuan":
+            # 主要用于陪伴闲聊：场景 + 情感
+            prefix = f"你正在进行闲聊对话，你说话的情感是{emotion_value}。"
+        elif speaker_id == "longhuhu_v3":
+            # 儿童向内容：身份 + 情感（故事机）
+            prefix = f"你正在以一个故事机的身份说话，你说话的情感是{emotion_value}。"
+        else:
+            # 理论上不会走到这里，兜底为简单情感指令
+            prefix = f"你说话的情感是{emotion_value}。"
+
+        # 防止重复注入
+        if text.startswith(prefix):
+            return text
+        return prefix + text
+
     def _generate_cache_key(
         self,
         text: str,

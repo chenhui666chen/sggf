@@ -12,12 +12,16 @@ import json
 import os
 import hashlib
 import shutil
+import asyncio
+import time
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
 
+import httpx
 import requests
+from app.core.config import settings
 from app.services.model_optimizer import TaskType
 from app.services.audiobook.ai_music import AIMusicGenerator, MusicGenerationResult, create_music_generator
 
@@ -82,6 +86,7 @@ class SoundEffectDesigner:
         self._load_external_sound_library()
 
         self.effect_cues: List[SoundEffectCue] = []
+        self._core_assets_checked: bool = False
     
     def _init_sound_library(self) -> Dict[str, Dict[str, Any]]:
         """初始化音效库（占位）"""
@@ -129,6 +134,9 @@ class SoundEffectDesigner:
             音效提示列表
         """
         logger.info(f"🎵 设计音效方案: {len(script_segments)} 个片段...")
+
+        # 🆕 核心静态音效自动补全（仅在首次调用时执行一次）
+        self._ensure_core_assets_ready()
         
         effect_cues = []
         current_time = 0.0
@@ -307,10 +315,90 @@ class SoundEffectDesigner:
             return "epic"
         return "calm"
 
+    def _convert_to_fal_prompt(self, effect_name: str) -> str:
+        """将音效名称转换为 Fal.ai 能理解的英文描述
+        
+        Args:
+            effect_name: 音效名称，如 "rain_heavy", "大雨", "city_ambient" 等
+        
+        Returns:
+            适合 Fal.ai 的简洁英文 prompt
+        
+        Examples:
+            "rain_heavy" -> "heavy rain sound"
+            "大雨" -> "heavy rain sound"
+            "city_ambient" -> "city ambient sound"
+        """
+        # 先将中文映射为英文（按照长度从长到短排序，优先匹配较长的词）
+        chinese_to_english = [
+            ("大雨", "heavy rain"),
+            ("小雨", "light rain"),
+            ("雨声", "rain"),
+            ("雷声", "thunder"),
+            ("风声", "wind"),
+            ("海浪", "ocean waves"),
+            ("城市", "city ambient"),
+            ("森林", "forest ambient"),
+            ("鸟叫", "birds chirping"),
+            ("脚步声", "footsteps"),
+            ("开门", "door opening"),
+            ("关门", "door closing"),
+            ("风", "wind"),
+            ("雨", "rain"),  # 单字放在最后
+        ]
+        
+        # 如果是中文，先转换（精确匹配优先）
+        normalized = effect_name.strip()
+        for cn, en in chinese_to_english:
+            if normalized == cn:  # 精确匹配
+                normalized = en
+                break
+        else:
+            # 没有精确匹配，尝试包含匹配（优先匹配较长的词）
+            for cn, en in chinese_to_english:
+                if cn in normalized:
+                    normalized = en
+                    break
+        
+        # 内置音效名映射（从id到描述）
+        effect_mapping = {
+            "rain_light": "light rain sound",
+            "rain_heavy": "heavy rain sound",
+            "rain": "rain sound",
+            "wind": "wind sound",
+            "thunder": "thunder sound",
+            "city_ambient": "city ambient sound with traffic",
+            "forest_ambient": "forest ambient sound with birds",
+            "ocean": "ocean waves sound",
+            "sea": "ocean waves sound",
+            "footsteps": "footsteps sound",
+            "door_open": "door opening sound",
+            "door_close": "door closing sound",
+            "heartbeat": "heartbeat sound",
+        }
+        
+        # 尝试精确匹配
+        normalized_lower = normalized.lower()
+        if normalized_lower in effect_mapping:
+            return effect_mapping[normalized_lower]
+        
+        # 模糊匹配（包含id中包含关键词）
+        for key, prompt in effect_mapping.items():
+            if key in normalized_lower or normalized_lower in key:
+                return prompt
+        
+        # 如果已经是英文且包含 "sound" 或者看起来像音效描述，直接返回
+        if "sound" in normalized_lower or "ambient" in normalized_lower:
+            return normalized
+        
+        # 默认：在后面添加 "sound"
+        return f"{normalized} sound"
+
     def _build_ambient_effect_metadata(
         self,
         scene_description: str,
         mood: str,
+        provider: str = "Mureka",
     ) -> Dict[str, Any]:
         """从场景描述构造环境音的ID/目录/标签等元数据"""
         text = scene_description
@@ -347,12 +435,14 @@ class SoundEffectDesigner:
 
         mood_tag = mood or "calm"
         tags.append(mood_tag)
-        tags.append("Mureka")
+        if provider:
+            tags.append(provider)
 
         slug = f"{base}_{label}"
-        raw = f"{scene_description}|{mood_tag}"
+        raw = f"{scene_description}|{mood_tag}|{provider}"
         short_hash = hashlib.md5(raw.encode("utf-8")).hexdigest()[:6]
-        effect_id = f"ambient_{slug}_{mood_tag}_mureka_{short_hash}"
+        provider_suffix = provider.lower() if provider else "generic"
+        effect_id = f"ambient_{slug}_{mood_tag}_{provider_suffix}_{short_hash}"
 
         # 子目录，例如 environment/city_rain
         subdir = slug
@@ -378,7 +468,7 @@ class SoundEffectDesigner:
         else:
             label_cn = "环境"
 
-        name = f"{base_cn}{label_cn}环境音（Mureka，{mood_tag}）"
+        name = f"{base_cn}{label_cn}环境音（{provider}，{mood_tag}）"
 
         return {
             "effect_id": effect_id,
@@ -452,7 +542,7 @@ class SoundEffectDesigner:
             return self.design_ambient_sound(scene_description, duration)
 
         # 3. 将 Mureka 结果写入本地 sound_effects 仓库 + 索引
-        meta = self._build_ambient_effect_metadata(scene_description, mood_value)
+        meta = self._build_ambient_effect_metadata(scene_description, mood_value, provider="Mureka")
         effect_id = meta["effect_id"]
         subdir = meta["subdir"]
         tags = meta["tags"]
@@ -499,6 +589,429 @@ class SoundEffectDesigner:
             duration=duration,
             mix_mode="background",
         )
+
+    async def ensure_fal_ambient_sound(
+        self,
+        scene_description: str,
+        duration: float,
+        mood: Optional[str] = None,
+    ) -> SoundEffectCue:
+        """使用 Fal.ai Sound Effects Generator 生成环境音（本地 + Fal.ai 兜底）"""
+        logger.info(f"🌆 [Fal.ai] 设计环境音: {scene_description}")
+
+        # 如果没有配置 Fal Key，则回退到 Mureka/内置逻辑
+        fal_key = getattr(settings, "FAL_KEY", "") or os.getenv("FAL_KEY", "")
+        if not fal_key:
+            logger.warning("⚠️ 未配置 Fal.ai API 密钥(FAL_KEY)，回退到 Mureka 环境音逻辑")
+            return await self.ensure_mureka_ambient_sound(scene_description, duration, mood)
+
+        # 1. 先尝试使用本地已生成的环境音（包含可能已有的 Fal 结果）
+        local_cue = self._match_effect(
+            description=scene_description,
+            timestamp=0.0,
+            scene_id="ambient",
+        )
+        if local_cue and local_cue.effect_type == EffectType.ENVIRONMENT and local_cue.audio_file not in ("", "placeholder.mp3"):
+            local_cue.description = scene_description
+            local_cue.timestamp = 0.0
+            local_cue.loop = True
+            local_cue.duration = duration
+            local_cue.volume = 0.2
+            local_cue.fade_in = 3.0
+            local_cue.fade_out = 3.0
+            local_cue.mix_mode = "background"
+            logger.info("✅ 使用本地环境音，无需调用 Fal.ai")
+            return local_cue
+
+        # 2. 调用 Fal.ai 生成新的环境音
+        duration_sec = int(duration) if duration and duration > 0 else 30
+        duration_sec = max(1, min(duration_sec, 30))
+
+        # 将音效描述转换为简洁的英文 prompt（适合 Fal.ai）
+        # scene_description 应该是编剧标注的简短音效名（如"rain_heavy"），而不是完整章节文本
+        ambient_prompt = self._convert_to_fal_prompt(scene_description)
+        logger.info(f"🎧 [Fal.ai] 环境音 prompt: {scene_description} -> {ambient_prompt}")
+
+        headers = {
+            "Authorization": f"Key {fal_key}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                queue_resp = await client.post(
+                    "https://queue.fal.run/cassetteai/sound-effects-generator",
+                    json={
+                        "prompt": ambient_prompt,
+                        "duration": duration_sec,
+                    },
+                    headers=headers,
+                )
+                queue_resp.raise_for_status()
+                queue_data = queue_resp.json()
+                request_id = queue_data.get("request_id")
+                status = queue_data.get("status")
+                if not request_id:
+                    raise ValueError(f"Fal.ai queue 返回格式异常: {queue_data}")
+
+                # 轮询队列状态直到完成或超时
+                for _ in range(40):
+                    if status == "COMPLETED":
+                        break
+                    await asyncio.sleep(1.5)
+                    status_resp = await client.get(
+                        f"https://queue.fal.run/cassetteai/sound-effects-generator/requests/{request_id}/status",
+                        params={"logs": 0},
+                        headers=headers,
+                    )
+                    status_resp.raise_for_status()
+                    status_data = status_resp.json()
+                    status = status_data.get("status")
+                if status != "COMPLETED":
+                    logger.warning(f"⚠️ Fal.ai 环境音生成未在预期时间内完成，当前状态: {status}，回退到 Mureka/内置环境音")
+                    return await self.ensure_mureka_ambient_sound(scene_description, duration, mood)
+
+                result_resp = await client.get(
+                    f"https://queue.fal.run/cassetteai/sound-effects-generator/requests/{request_id}",
+                    headers=headers,
+                )
+                result_resp.raise_for_status()
+                result_data = result_resp.json()
+        except Exception as e:
+            logger.warning(f"⚠️ 调用 Fal.ai 生成环境音失败: {e}，回退到 Mureka/内置环境音")
+            return await self.ensure_mureka_ambient_sound(scene_description, duration, mood)
+
+        audio_file = result_data.get("audio_file") or {}
+        audio_url = audio_file.get("url")
+        if not audio_url:
+            logger.warning("⚠️ Fal.ai 返回结果中缺少 audio_file.url，回退到 Mureka/内置环境音")
+            return await self.ensure_mureka_ambient_sound(scene_description, duration, mood)
+
+        # 3. 下载 Fal.ai 返回的音频并写入本地 sound_effects 仓库 + 索引
+        mood_value = mood or self._infer_mood_from_scene(scene_description)
+        meta = self._build_ambient_effect_metadata(scene_description, mood_value, provider="FalAI")
+        effect_id = meta["effect_id"]
+        subdir = meta["subdir"]
+        tags = meta["tags"]
+        name = meta["name"]
+
+        category = f"environment/{subdir}"
+        record = self.download_and_register_effect(
+            url=audio_url,
+            effect_id=effect_id,
+            category=category,
+            description=name,
+            tags=tags,
+            source="fal-ai",
+        )
+        if not record:
+            logger.warning("⚠️ Fal.ai 环境音下载或注册失败，回退到 Mureka/内置环境音")
+            return await self.ensure_mureka_ambient_sound(scene_description, duration, mood)
+
+        logger.info(f"🎧 已生成并注册 Fal.ai 环境音: {effect_id}")
+
+        return SoundEffectCue(
+            scene_id="ambient",
+            timestamp=0.0,
+            effect_type=EffectType.ENVIRONMENT,
+            description=scene_description,
+            audio_file=record.get("file_path", ""),
+            volume=0.2,
+            fade_in=3.0,
+            fade_out=3.0,
+            loop=True,
+            duration=duration,
+            mix_mode="background",
+        )
+
+    async def enhance_effects_with_fal(
+        self,
+        max_fal_effects: int = 5,
+    ) -> None:
+        """使用 Fal.ai 为占位音效生成真实音效（仅 ACTION/EMOTION 类型）
+
+        设计原则：
+        1. 只处理当前时间线中 audio_file 为空或 placeholder.mp3 的提示；
+        2. 只处理 ACTION / EMOTION 两类短效音，避免误当作整章环境床；
+        3. 为每个描述生成一段 1-5 秒的短音效，并入库，后续可被 _match_effect 命中。
+        """
+        if not self.effect_cues:
+            return
+
+        fal_key = getattr(settings, "FAL_KEY", "") or os.getenv("FAL_KEY", "")
+        if not fal_key:
+            logger.info("⚠️ 未配置 Fal.ai API 密钥(FAL_KEY)，跳过占位音效增强")
+            return
+
+        remaining = max(0, int(max_fal_effects)) or 0
+        if remaining <= 0:
+            return
+
+        headers = {
+            "Authorization": f"Key {fal_key}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                for cue in self.effect_cues:
+                    if remaining <= 0:
+                        break
+
+                    # 仅处理占位音效
+                    if cue.audio_file not in ("", "placeholder.mp3"):
+                        continue
+
+                    # 仅处理动作/情绪类短效音
+                    if cue.effect_type not in (EffectType.ACTION, EffectType.EMOTION):
+                        continue
+
+                    try:
+                        record = await self._generate_fal_effect_for_cue(client, headers, cue)
+                        if record and record.get("file_path"):
+                            cue.audio_file = record["file_path"]
+                            remaining -= 1
+                    except Exception as e:
+                        logger.warning(f"⚠️ 使用 Fal.ai 生成音效失败（忽略并继续）: {e}")
+                        continue
+        except Exception as e:
+            logger.warning(f"⚠️ 占位音效 Fal.ai 增强流程失败: {e}")
+
+    async def _generate_fal_effect_for_cue(
+        self,
+        client: httpx.AsyncClient,
+        headers: Dict[str, str],
+        cue: SoundEffectCue,
+    ) -> Optional[Dict[str, Any]]:
+        """针对单个占位音效，调用 Fal.ai 生成短音效并入库。"""
+        # 动作音一般更短，情绪音稍长一些
+        base_duration = 3 if cue.effect_type == EffectType.ACTION else 5
+        duration_sec = max(1, min(base_duration, 10))
+
+        logger.info(f"🎧 [Fal.ai] 为占位音效生成短音效: {cue.description} ({cue.effect_type.value})")
+
+        # 将音效描述转换为简洁的英文 prompt
+        effect_prompt = self._convert_to_fal_prompt(cue.description)
+        logger.info(f"🎧 [Fal.ai] 短音效 prompt: {cue.description} -> {effect_prompt}")
+
+        # 1. 提交队列请求
+        queue_resp = await client.post(
+            "https://queue.fal.run/cassetteai/sound-effects-generator",
+            json={
+                "prompt": effect_prompt,
+                "duration": duration_sec,
+            },
+            headers=headers,
+        )
+        queue_resp.raise_for_status()
+        queue_data = queue_resp.json()
+        request_id = queue_data.get("request_id")
+        status = queue_data.get("status")
+        if not request_id:
+            raise ValueError(f"Fal.ai queue 返回格式异常: {queue_data}")
+
+        # 2. 轮询队列状态直到完成或超时
+        for _ in range(30):
+            if status == "COMPLETED":
+                break
+            await asyncio.sleep(1.0)
+            status_resp = await client.get(
+                f"https://queue.fal.run/cassetteai/sound-effects-generator/requests/{request_id}/status",
+                params={"logs": 0},
+                headers=headers,
+            )
+            status_resp.raise_for_status()
+            status_data = status_resp.json()
+            status = status_data.get("status")
+
+        if status != "COMPLETED":
+            logger.warning(f"⚠️ Fal.ai 短音效生成未在预期时间内完成，当前状态: {status}")
+            return None
+
+        # 3. 获取最终结果
+        result_resp = await client.get(
+            f"https://queue.fal.run/cassetteai/sound-effects-generator/requests/{request_id}",
+            headers=headers,
+        )
+        result_resp.raise_for_status()
+        result_data = result_resp.json()
+
+        audio_file = result_data.get("audio_file") or {}
+        audio_url = audio_file.get("url")
+        if not audio_url:
+            logger.warning("⚠️ Fal.ai 短音效结果中缺少 audio_file.url")
+            return None
+
+        # 4. 构造元数据并入库
+        raw = f"{cue.description}|{cue.effect_type.value}|FalAI"
+        short_hash = hashlib.md5(raw.encode("utf-8")).hexdigest()[:6]
+        effect_id = f"sfx_{cue.effect_type.value}_{short_hash}"
+        category = f"effects/{cue.effect_type.value}"
+        tags = [cue.effect_type.value, "FalAI"]
+        description = cue.description or f"{cue.effect_type.value} effect"
+
+        record = self.download_and_register_effect(
+            url=audio_url,
+            effect_id=effect_id,
+            category=category,
+            description=description,
+            tags=tags,
+            source="fal-ai",
+        )
+        if not record:
+            logger.warning("⚠️ Fal.ai 短音效下载或注册失败")
+            return None
+
+        logger.info(f"🎧 已生成并注册 Fal.ai 短音效: {effect_id}")
+        return record
+
+    def _ensure_core_assets_ready(self, max_generate: int = 6) -> None:
+        """确保内置核心音效在素材库中具有可用文件。
+
+        设计目标：
+        - 对 _init_sound_library 中的核心ID（如 wind/footsteps 等），如果声明了 file 却找不到实际mp3，
+          尝试通过 Fal.ai 自动生成一版基础音效并入库，避免混音阶段出现大量“文件不存在”告警。
+        - 只在实例生命周期内执行一次，避免重复网络请求。
+        """
+        if self._core_assets_checked:
+            return
+        self._core_assets_checked = True
+
+        # 如果素材文件本来就都在，本函数会很快返回
+        missing_items: List[tuple[str, Dict[str, Any]]] = []
+        for effect_id, info in self.sound_library.items():
+            file_ref = info.get("file") or ""
+            if not file_ref:
+                continue
+
+            # 内置核心库使用简单文件名（wind.mp3 / footsteps.mp3），
+            # 以及可能已经是 sound_effects/ 相对路径的AI资源。
+            if "/" in file_ref or "\\" in file_ref:
+                path = AUDIO_LIBRARY_DIR / file_ref
+            else:
+                path = AUDIO_LIBRARY_DIR / file_ref
+
+            if not path.exists():
+                missing_items.append((effect_id, info))
+
+        if not missing_items:
+            return
+
+        fal_key = getattr(settings, "FAL_KEY", "") or os.getenv("FAL_KEY", "")
+        if not fal_key:
+            logger.info("⚠️ 未配置 Fal.ai API 密钥(FAL_KEY)，跳过核心静态音效自动补全")
+            return
+
+        headers = {
+            "Authorization": f"Key {fal_key}",
+            "Content-Type": "application/json",
+        }
+
+        generated = 0
+        for effect_id, info in missing_items:
+            if generated >= max_generate:
+                break
+            try:
+                self._generate_core_effect_with_fal(
+                    effect_id=effect_id,
+                    description=info.get("description") or effect_id,
+                    effect_type=str(info.get("type") or "action"),
+                    headers=headers,
+                )
+                generated += 1
+            except Exception as e:
+                logger.warning(f"⚠️ 自动补全核心音效 {effect_id} 失败: {e}")
+                continue
+
+        if generated:
+            logger.info(f"✅ 核心静态音效自动补全完成，生成 {generated} 个缺失文件")
+
+    def _generate_core_effect_with_fal(
+        self,
+        effect_id: str,
+        description: str,
+        effect_type: str,
+        headers: Dict[str, str],
+    ) -> None:
+        """使用 Fal.ai 为缺失的核心静态音效生成一段基础音效并入库。
+
+        注意：这里使用同步 requests 客户端，在首次调用 design_effects 时执行，
+        以满足“素材库缺失时自动补全”的项目约定。
+        """
+        # 环境音稍长，动作音更短一些
+        base_duration = 5 if effect_type == "environment" else 3
+        duration_sec = max(1, min(base_duration, 10))
+
+        logger.info(f"🎧 [Fal.ai] 自动补全核心音效: {effect_id} ({description})")
+
+        # 将音效描述转换为简洁的英文 prompt
+        effect_prompt = self._convert_to_fal_prompt(description)
+        logger.info(f"🎧 [Fal.ai] 核心音效 prompt: {description} -> {effect_prompt}")
+
+        # 1. 提交队列请求
+        queue_resp = requests.post(
+            "https://queue.fal.run/cassetteai/sound-effects-generator",
+            json={
+                "prompt": effect_prompt,
+                "duration": duration_sec,
+            },
+            headers=headers,
+            timeout=60,
+        )
+        queue_resp.raise_for_status()
+        queue_data = queue_resp.json()
+        request_id = queue_data.get("request_id")
+        status = queue_data.get("status")
+        if not request_id:
+            raise ValueError(f"Fal.ai queue 返回格式异常: {queue_data}")
+
+        # 2. 轮询队列状态直到完成或超时
+        for _ in range(30):
+            if status == "COMPLETED":
+                break
+            time.sleep(1.0)
+            status_resp = requests.get(
+                f"https://queue.fal.run/cassetteai/sound-effects-generator/requests/{request_id}/status",
+                params={"logs": 0},
+                headers=headers,
+                timeout=30,
+            )
+            status_resp.raise_for_status()
+            status_data = status_resp.json()
+            status = status_data.get("status")
+
+        if status != "COMPLETED":
+            raise RuntimeError(f"Fal.ai 核心音效生成未在预期时间内完成，当前状态: {status}")
+
+        # 3. 获取最终结果
+        result_resp = requests.get(
+            f"https://queue.fal.run/cassetteai/sound-effects-generator/requests/{request_id}",
+            headers=headers,
+            timeout=60,
+        )
+        result_resp.raise_for_status()
+        result_data = result_resp.json()
+
+        audio_file = result_data.get("audio_file") or {}
+        audio_url = audio_file.get("url")
+        if not audio_url:
+            raise RuntimeError(f"Fal.ai 核心音效结果中缺少 audio_file.url: {result_data}")
+
+        # 4. 通过已有的下载+索引机制入库，并同步更新 sound_library
+        category = f"core/{effect_type}"
+        tags = [effect_type, "core", "FalAI"]
+        record = self.download_and_register_effect(
+            url=audio_url,
+            effect_id=effect_id,
+            category=category,
+            description=description,
+            tags=tags,
+            source="fal-ai-core",
+        )
+        if not record:
+            raise RuntimeError("Fal.ai 核心音效下载或注册失败")
+
+        logger.info(f"🎧 核心静态音效已自动补全并入库: {effect_id}")
 
     def optimize_effect_density(
         self,
@@ -665,6 +1178,10 @@ class SoundEffectDesigner:
                     continue
                 
                 category = item.get("category") or item.get("type") or "action"
+                # 🔧 规范化 category：将 "core/environment" -> "environment", "effects/action" -> "action"
+                if "/" in category:
+                    category = category.split("/")[-1]  # 取最后一部分
+                
                 file_path = item.get("file_path") or item.get("file")
                 description = item.get("description") or item.get("name") or effect_id
                 
@@ -727,8 +1244,13 @@ class SoundEffectDesigner:
             
             # 同步更新内存中的 sound_library
             if effect_id:
+                category = record.get("category", "action")
+                # 🔧 规范化 category
+                if "/" in category:
+                    category = category.split("/")[-1]
+                
                 self.sound_library[effect_id] = {
-                    "type": record.get("category", "action"),
+                    "type": category,
                     "file": record.get("file_path") or record.get("file", ""),
                     "description": record.get("description") or record.get("name", effect_id),
                     "tags": record.get("tags", []),

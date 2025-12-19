@@ -23,6 +23,12 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# 全局并发控制：限制同时调用 Mureka API 的协程数量，避免触发服务端QPS限制
+# 可通过环境变量 MUREKA_MAX_CONCURRENT 配置，默认值为 1（严格顺序：一个完成再下一个）
+_MUREKA_MAX_CONCURRENT = int(os.getenv("MUREKA_MAX_CONCURRENT", "1"))
+_MUREKA_MAX_CONCURRENT = max(1, _MUREKA_MAX_CONCURRENT)
+_MUREKA_SEMAPHORE = asyncio.Semaphore(_MUREKA_MAX_CONCURRENT)
+
 
 class MusicStyle(str, Enum):
     """音乐风格枚举（Mureka O1支持的风格）"""
@@ -92,12 +98,21 @@ class MurekaO1Client:
         """
         # 优先顺序：显式参数 > 环境变量 > 配置文件
         self.api_key = api_key or os.getenv("MUREKA_API_KEY") or getattr(settings, "MUREKA_API_KEY", None)
-        self.api_base = os.getenv("MUREKA_API_URL") or getattr(settings, "MUREKA_API_URL", "https://api.mureka.ai")
+        # Mureka 官方 API 地址（根据官方文档：https://platform.mureka.cn/docs/cn/quickstart.html）
+        self.api_base = os.getenv("MUREKA_API_URL") or getattr(settings, "MUREKA_API_URL", "https://api.mureka.cn")
         if not self.api_key:
             logger.warning("⚠️ MUREKA_API_KEY未设置，AI音乐生成将使用模拟模式")
         
         self.enable_cache = enable_cache
-        self.cache_dir = Path(cache_dir)
+        # 🔧 修复：cache_dir 转换为绝对路径，避免在不同工作目录下创建重复目录
+        # ai_music.py 位于 backend/app/services/audiobook/，parents[4] = 项目根目录
+        cache_dir_path = Path(cache_dir)
+        if not cache_dir_path.is_absolute():
+            # 相对路径：相对于项目根目录
+            project_root = Path(__file__).resolve().parents[4]
+            cache_dir_path = project_root / cache_dir
+        
+        self.cache_dir = cache_dir_path
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.index_path = self.cache_dir.parent / "music_index.json"
         
@@ -112,8 +127,7 @@ class MurekaO1Client:
         self,
         request: MusicGenerationRequest
     ) -> MusicGenerationResult:
-        """
-        生成音乐
+        """生成音乐（带全局并发控制）
         
         Args:
             request: 音乐生成请求
@@ -121,6 +135,15 @@ class MurekaO1Client:
         Returns:
             音乐生成结果
         """
+        # 通过全局信号量限制同时在飞的 Mureka 请求数量
+        async with _MUREKA_SEMAPHORE:
+            return await self._generate_music_inner(request)
+
+    async def _generate_music_inner(
+        self,
+        request: MusicGenerationRequest
+    ) -> MusicGenerationResult:
+        """实际执行音乐生成的内部实现（不再单独做并发控制）"""
         # 1. 检查缓存
         if self.enable_cache:
             cached_result = self._get_cached_music(request)
@@ -163,18 +186,31 @@ class MurekaO1Client:
             return await self._simulate_generation(request)
         
         try:
-            # TODO: 根据 Mureka 官方文档调整具体接口路径和参数
-            # 这里提供一个基于 HTTP 的参考实现：
+            # Mureka 官方 API Endpoint（根据官方文档：https://platform.mureka.cn/docs/api/operations/post-v1-instrumental-generate.html）
+            # 使用 /v1/instrumental/generate 生成纯音乐/环境音（无人声）
             base_url = self.api_base.rstrip("/")
-            endpoint = f"{base_url}/v1/music/generate"
+            endpoint = f"{base_url}/v1/instrumental/generate"
+
+            # 根据官方 API 格式构造请求：使用 prompt 描述风格
+            # 将我们的结构化参数转换为 Mureka 的 prompt 格式
+            prompt_parts = []
+            if request.mood:
+                prompt_parts.append(request.mood)
+            if request.style:
+                prompt_parts.append(request.style.value)
+            if request.tempo:
+                prompt_parts.append(request.tempo)
+            if request.instruments:
+                prompt_parts.extend(request.instruments)
+            if request.prompt:
+                prompt_parts.append(request.prompt)
+            
+            combined_prompt = ", ".join(prompt_parts) if prompt_parts else request.prompt
 
             payload = {
-                "prompt": request.prompt,
-                "style": request.style.value,
-                "duration": request.duration,
-                "tempo": request.tempo,
-                "mood": request.mood,
-                "instruments": request.instruments,
+                "prompt": combined_prompt,  # 风格描述，如 "tense, suspense, slow, piano"
+                "model": "auto",           # 自动选择模型
+                "duration": request.duration,  # 时长（秒）
             }
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
@@ -190,30 +226,92 @@ class MurekaO1Client:
 
             resp = await loop.run_in_executor(None, _do_request)
 
-            # 假设接口返回 JSON，包含音频下载地址或直接的音频二进制
-            content_type = resp.headers.get("Content-Type", "")
-            audio_data: bytes
+            # 根据官方文档，接口返回任务信息：{"id": "...", "status": "preparing", "model": "...", ...}
+            # 需要轮询任务状态直到完成，然后获取音频 URL
+            task_data = resp.json()
+            task_id = task_data.get("id")
+            if not task_id:
+                raise RuntimeError(f"Mureka 返回数据中缺少 task id: {task_data}")
+            
+            logger.info(f"🎵 Mureka 任务已创建: {task_id}, 开始轮询状态...")
+            
+            # 轮询任务状态，直到完成或失败
+            max_poll_time = int(os.getenv("TIME_OUT_SECONDS", "300"))  # 默认 5 分钟
+            poll_interval = 5  # 每 5 秒查询一次
+            start_time = asyncio.get_event_loop().time()
+            
+            audio_url = None
             duration = request.duration
-            cost = 0.0
-
-            if "application/json" in content_type:
-                data = resp.json()
-                audio_url = data.get("audio_url") or data.get("bgm_url")
-                duration = data.get("duration", duration)
-                cost = float(data.get("cost", 0.0))
-
-                if not audio_url:
-                    raise RuntimeError("Mureka 返回数据中缺少 audio_url 字段")
-
-                def _download():
-                    r2 = requests.get(audio_url, timeout=300)
-                    r2.raise_for_status()
-                    return r2.content
-
-                audio_data = await loop.run_in_executor(None, _download)
-            else:
-                # 直接返回音频二进制（如 audio/mpeg）
-                audio_data = resp.content
+            
+            while True:
+                elapsed = asyncio.get_event_loop().time() - start_time
+                if elapsed > max_poll_time:
+                    raise RuntimeError(f"任务 {task_id} 超时（{max_poll_time}秒）")
+                
+                # 查询任务状态（使用 instrumental 专用查询接口）
+                def _check_status():
+                    status_url = f"{base_url}/v1/instrumental/query/{task_id}"
+                    r = requests.get(status_url, headers=headers, timeout=30)
+                    r.raise_for_status()
+                    return r.json()
+                
+                status_data = await loop.run_in_executor(None, _check_status)
+                status = status_data.get("status")
+                
+                logger.debug(f"🔍 任务 {task_id} 状态: {status} | 原始数据: {status_data}")
+                
+                # 兼容不同接口的状态字段：
+                # - instrumental 文档常见: pending / running / succeeded / failed
+                # - 早期文档: preparing / processing / completed
+                if status in ["completed", "succeeded"]:
+                    # 任务完成，获取音频 URL
+                    # Mureka instrumental 接口返回格式：
+                    # {
+                    #   "choices": [
+                    #     {"url": "xxx.mp3", "flac_url": "xxx.flac", "wav_url": "xxx.wav", "duration": 168190},
+                    #     ...
+                    #   ]
+                    # }
+                    # 我们优先使用第一个候选的 MP3 URL
+                    choices = status_data.get("choices", [])
+                    if choices and isinstance(choices, list) and len(choices) > 0:
+                        first_choice = choices[0]
+                        audio_url = first_choice.get("url")  # MP3 格式
+                        # duration 单位是毫秒，转换为秒
+                        duration_ms = first_choice.get("duration", request.duration * 1000)
+                        duration = duration_ms / 1000.0
+                    else:
+                        # 兼容旧格式（如果顶层有 audio_url）
+                        audio_url = (
+                            status_data.get("audio_url")
+                            or status_data.get("result", {}).get("audio_url")
+                            or status_data.get("data", {}).get("audio_url")
+                        )
+                        duration = status_data.get("duration", duration)
+                    
+                    if not audio_url:
+                        raise RuntimeError(f"任务完成但缺少 audio_url: {status_data}")
+                    break
+                elif status in ["failed", "error"]:
+                    error_msg = status_data.get("error", {}).get("message", "未知错误")
+                    raise RuntimeError(f"任务失败: {error_msg}")
+                elif status in ["preparing", "processing", "queued", "pending", "running"]:
+                    # 继续等待
+                    await asyncio.sleep(poll_interval)
+                else:
+                    logger.warning(f"⚠️ 未知任务状态: {status}，继续等待...")
+                    await asyncio.sleep(poll_interval)
+            
+            # 下载音频文件
+            logger.info(f"⬇️ 下载音频: {audio_url}")
+            
+            def _download():
+                r2 = requests.get(audio_url, timeout=300)
+                r2.raise_for_status()
+                return r2.content
+            
+            audio_data = await loop.run_in_executor(None, _download)
+            cost = 0.0  # Mureka 计费需要根据实际情况调整
 
             # 将结果写入缓存目录的临时文件
             cache_key = self._get_cache_key(request)
@@ -221,9 +319,13 @@ class MurekaO1Client:
             with open(output_file, "wb") as f:
                 f.write(audio_data)
 
+            # 返回相对于 audio_library 的路径（而不是完整路径）
+            # 这样 engine.py 可以正确拼接基础目录
+            relative_path = output_file.relative_to(self.cache_dir.parent)
+            
             return MusicGenerationResult(
                 success=True,
-                audio_file_path=str(output_file),
+                audio_file_path=str(relative_path),
                 audio_data=audio_data,
                 duration=duration,
                 file_size=len(audio_data),
@@ -252,9 +354,12 @@ class MurekaO1Client:
         with open(output_file, 'wb') as f:
             f.write(audio_data)
         
+        # 返回相对于 audio_library 的路径
+        relative_path = output_file.relative_to(self.cache_dir.parent)
+        
         return MusicGenerationResult(
             success=True,
-            audio_file_path=str(output_file),
+            audio_file_path=str(relative_path),
             audio_data=audio_data,
             duration=request.duration,
             file_size=len(audio_data),
@@ -263,9 +368,17 @@ class MurekaO1Client:
         )
     
     def _get_cache_key(self, request: MusicGenerationRequest) -> str:
-        """生成缓存键"""
-        # 基于请求参数生成唯一哈希
-        cache_str = f"{request.prompt}_{request.style.value}_{request.duration}_{request.tempo}_{request.mood}"
+        """生成缓存键
+        
+        优化策略：只基于核心风格参数，而非完整prompt，让同类场景能复用音乐。
+        例如：所有"悬疑场景"共用一个缓存，避免因场景细节不同而反复生成。
+        """
+        # 只取 prompt 前100个字符作为风格标识（去掉场景具体描述）
+        # 这样"悬疑场景铺垫配乐...\n\n场景描述：XXX"会被截断为"悬疑场景铺垫配乐..."
+        prompt_key = request.prompt[:100] if request.prompt else ""
+        
+        # 基于核心风格参数生成缓存键（而非完整prompt）
+        cache_str = f"{prompt_key}_{request.style.value}_{request.duration}_{request.tempo}_{request.mood}"
         return hashlib.md5(cache_str.encode()).hexdigest()
     
     def _get_cached_music(
@@ -282,9 +395,12 @@ class MurekaO1Client:
             
             self._update_music_index(request, cache_file)
             
+            # 返回相对于 audio_library 的路径
+            relative_path = cache_file.relative_to(self.cache_dir.parent)
+            
             return MusicGenerationResult(
                 success=True,
-                audio_file_path=str(cache_file),
+                audio_file_path=str(relative_path),
                 audio_data=audio_data,
                 duration=request.duration,
                 file_size=len(audio_data),
@@ -303,10 +419,13 @@ class MurekaO1Client:
         cache_key = self._get_cache_key(request)
         cache_file = self.cache_dir / f"{cache_key}.mp3"
         
-        # 如果result已有文件路径，直接复制
+        # 如果result已有文件路径，复制或移动
         if result.audio_file_path and Path(result.audio_file_path).exists():
             import shutil
-            shutil.copy(result.audio_file_path, cache_file)
+            source_path = Path(result.audio_file_path)
+            # 如果源文件和目标文件不是同一个文件，才复制
+            if source_path.resolve() != cache_file.resolve():
+                shutil.copy(result.audio_file_path, cache_file)
         # 否则写入audio_data
         elif result.audio_data:
             with open(cache_file, 'wb') as f:

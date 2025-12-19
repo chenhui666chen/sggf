@@ -68,6 +68,12 @@ class ChapterAudio(Base):
     generation_time = Column(Float, default=0.0)  # 生成耗时（秒）
     tts_cost = Column(Float, default=0.0)  # TTS成本（元）
     cache_hit_rate = Column(Float, default=0.0)  # 缓存命中率
+
+    # 剧本与评审（仅保留最近一次生成结果，可被新一轮覆盖）
+    script_json = Column(Text, nullable=True)  # 存储有声剧本片段列表（JSON字符串）
+    script_review_json = Column(Text, nullable=True)  # 存储剧本质量评审报告（JSON字符串）
+    script_status = Column(String(20), default="pending")  # pending/reviewed/approved
+    final_audio_review_json = Column(Text, nullable=True)  # 最终音频评审结果（JSON字符串）
     
     # 时间
     created_at = Column(DateTime, default=datetime.utcnow)

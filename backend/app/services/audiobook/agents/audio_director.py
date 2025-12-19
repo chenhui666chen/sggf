@@ -56,6 +56,12 @@ class AdaptationStrategy:
     use_pitch_modulation: bool = True  # 使用音调调节
     use_precise_pauses: bool = True  # 使用精确停顿
     use_emphasis: bool = True  # 使用重音强调
+    
+    # 🆕 语义完整性控制（多人精品有声剧标准）
+    min_segment_length: int = 15  # 最小片段字数（避免过短片段）
+    merge_short_dialogue: bool = True  # 短对话自动与上下文合并
+    enforce_context_continuity: bool = True  # 强制上下文连贯性
+    semantic_validation: bool = True  # 语义完整性验证
 
 
 @dataclass
@@ -189,7 +195,14 @@ class AudioDirector:
         # 1. 剧本改编任务（最高优先级）
         tasks.append(TaskAssignment(
             agent_name="AudiobookScriptAdapter",
-            task_description=f"改编章节内容为有声剧本，风格：{self.current_strategy.style.value}。充分利用v3-plus的rate/pitch/pause/emphasis控制。",
+            task_description=f"""改编章节内容为有声剧本，风格：{self.current_strategy.style.value}。
+充分利用v3-plus的rate/pitch/pause/emphasis控制。
+
+⚠️ 语义完整性约束：
+- 最小片段长度: {self.current_strategy.min_segment_length}字
+- 短对话合并: {'enabled' if self.current_strategy.merge_short_dialogue else 'disabled'}
+- 语义验证: {'enabled' if self.current_strategy.semantic_validation else 'disabled'}
+- 禁止生成孤立的短片段（如"废物……""就一晚。"），必须与上下文合并保证语义完整""",
             priority=1,
             status="pending"
         ))

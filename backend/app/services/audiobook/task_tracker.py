@@ -29,7 +29,8 @@ class StageType(Enum):
     MUSIC_COMPOSITION = "music_composition"  # 音乐编曲
     TTS_SYNTHESIS = "tts_synthesis"  # TTS合成
     AUDIO_MIXING = "audio_mixing"  # 音频混合
-    QUALITY_REVIEW = "quality_review"  # 质量评审
+    QUALITY_REVIEW = "quality_review"  # 剧本质量评审
+    FINAL_AUDIO_REVIEW = "final_audio_review"  # 最终音频评审
 
 
 @dataclass

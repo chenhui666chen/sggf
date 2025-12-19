@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     MUREKA_API_KEY: str = ""
     MUREKA_API_URL: str = "https://api.mureka.ai"
     
+    # Fal.ai 声效服务配置（用于环境音 / 音效生成）
+    FAL_KEY: str = ""
+    
     # Embedding模型配置
     EMBEDDING_MODEL: str = "text-embedding-v4"
     EMBEDDING_API_KEY: str = ""

@@ -9,11 +9,13 @@ import json
 from app.db.base import get_db
 from app.models.user import User
 from app.models.project import Project, Chapter
+from app.models.character import Character
 from app.schemas.project import (
     ProjectCreate, ProjectUpdate, ProjectResponse, ProjectDetailResponse,
     ChapterCreate, ChapterUpdate, ChapterResponse
 )
 from app.core.security import get_current_user
+from app.services.audiobook.voice_manager import VoiceManager
 
 
 class CharacterAudioConfig(BaseModel):
@@ -24,11 +26,21 @@ class CharacterAudioConfig(BaseModel):
     volume: int = 50
     speed: Optional[float] = None
     pitch: Optional[int] = None
+    source: Optional[str] = None  # "user" | "ai_suggest" | None
+
+
+class AudioFxConfig(BaseModel):
+    """项目级音效与配乐配置"""
+    enable_sound_effects: bool = True
+    enable_music: bool = True
+    sound_effect_density: str = "medium"  # low/medium/high/off
+    music_density: str = "medium"  # low/medium/high/off
 
 
 class ProjectAudioConfig(BaseModel):
     """项目级音频配置"""
     characters: List[CharacterAudioConfig] = []
+    audio_fx: Optional[AudioFxConfig] = None
 
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
@@ -278,8 +290,9 @@ async def get_project_audio_config(
             data = {}
 
     characters = data.get("characters") or []
+    audio_fx = data.get("audio_fx") or None
     # 让 Pydantic 处理具体字段校验
-    return ProjectAudioConfig(characters=characters)
+    return ProjectAudioConfig(characters=characters, audio_fx=audio_fx)
 
 
 @router.put("/{project_id}/audio-config", response_model=ProjectAudioConfig)
@@ -306,6 +319,140 @@ async def update_project_audio_config(
     db.refresh(project)
 
     return config
+
+
+@router.post("/{project_id}/audio-config/auto-voices", response_model=ProjectAudioConfig)
+async def auto_assign_project_audio_voices(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProjectAudioConfig:
+    """基于结构化人物档案自动为项目生成推荐声线配置。
+
+    规则：
+    - 已有且未标记为 ai_suggest 的角色配置视为用户手动配置，保留不动。
+    - 对于缺少配置或来源为 ai_suggest 的角色，根据 Character 信息调用 VoiceManager 分配音色。
+    - 保留现有的 audio_fx 配置。
+    """
+    project = db.query(Project).filter(
+        (Project.id == project_id) & (Project.user_id == current_user.id)
+    ).first()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+
+    # 解析现有 audio_config
+    raw = project.audio_config or ""
+    data: dict = {}
+    if raw:
+        try:
+            data = json.loads(raw)
+        except Exception:
+            data = {}
+
+    existing_characters = data.get("characters") or []
+    audio_fx = data.get("audio_fx") or None
+
+    # 建立已有配置索引
+    manual_configs_by_id = {}
+    ai_configs_by_id = {}
+    other_entries = []
+
+    for item in existing_characters:
+        if not isinstance(item, dict):
+            continue
+        cid = item.get("character_id")
+        source = item.get("source")
+        # 旁白或未知 ID 的条目直接保留
+        if cid is None or cid == 0:
+            other_entries.append(item)
+            continue
+        if source == "ai_suggest":
+            ai_configs_by_id[cid] = item
+        else:
+            manual_configs_by_id[cid] = item
+
+    # 载入项目角色
+    characters = (
+        db.query(Character)
+        .filter(Character.project_id == project_id)
+        .order_by(Character.id)
+        .all()
+    )
+
+    vm = VoiceManager()
+    result_characters = []
+
+    # 先放入“其他”条目（如旁白）
+    result_characters.extend(other_entries)
+
+    def _build_traits_from_character(char: Character) -> dict:
+        traits: dict = {}
+        gender = (char.gender or "").strip().lower()
+        if gender in ("男", "male", "m", "man", "boy"):
+            traits["gender"] = "male"
+        elif gender in ("女", "female", "f", "woman", "girl"):
+            traits["gender"] = "female"
+
+        if char.age is not None:
+            age = char.age
+            if age < 12:
+                traits["age_group"] = "child"
+            elif age < 18:
+                traits["age_group"] = "teen"
+            elif age < 30:
+                traits["age_group"] = "young"
+            elif age < 60:
+                traits["age_group"] = "adult"
+            else:
+                traits["age_group"] = "elder"
+
+        # 简单用重要程度影响性格倾向
+        importance = (char.importance_level or "").strip()
+        if importance:
+            if "主角" in importance or "重要" in importance:
+                traits.setdefault("personality", "energetic")
+            elif "龙套" in importance or "群众" in importance:
+                traits.setdefault("personality", "calm")
+
+        return traits
+
+    for char in characters:
+        existing_manual = manual_configs_by_id.get(char.id)
+        if existing_manual and existing_manual.get("voice_id"):
+            # 用户手动配置优先，直接保留
+            result_characters.append(existing_manual)
+            continue
+
+        traits = _build_traits_from_character(char)
+        profile = vm.assign_voice(char.name, character_info=traits or None)
+
+        result_characters.append(
+            {
+                "character_id": char.id,
+                "name": char.name,
+                "voice_id": profile.voice_id,
+                "volume": profile.volume_base,
+                "speed": profile.speed_base,
+                "pitch": profile.pitch_base,
+                "source": "ai_suggest",
+            }
+        )
+
+    # 更新并保存配置
+    new_config = {
+        "characters": result_characters,
+        "audio_fx": audio_fx,
+    }
+    project.audio_config = json.dumps(new_config, ensure_ascii=False)
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+
+    return ProjectAudioConfig(characters=result_characters, audio_fx=audio_fx)
 
 
 # 章节路由

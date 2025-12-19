@@ -102,6 +102,10 @@ class ApiClient {
     return this.client.put(`/api/v1/projects/${projectId}/audio-config`, data)
   }
 
+  autoAssignProjectAudioVoices(projectId: number) {
+    return this.client.post(`/api/v1/projects/${projectId}/audio-config/auto-voices`)
+  }
+
   // 章节API
   getChapters(projectId: number, sortOrder: 'asc' | 'desc' = 'asc') {
     return this.client.get(`/api/v1/projects/${projectId}/chapters?sort_order=${sortOrder}`)

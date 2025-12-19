@@ -1,0 +1,154 @@
+[
+  {
+    "id": "ambient_city_rain_calm_mureka_cb51a5",
+    "name": "城市雨夜环境音（Mureka，calm）",
+    "category": "environment",
+    "file_path": "sound_effects/environment/city_rain/ambient_city_rain_calm_mureka_cb51a5.mp3",
+    "description": "第一章 雨夜的邂逅\n\n新长安的雨夜，霓虹在湿漉漉的街道上流淌成河。\n“时之狭间”实验室深处，刺耳的过载警报刚刚停歇，只剩下设备冷却风扇低沉的嗡鸣。张百忍瘫坐在控制台前，手指深深插进发间。又失败了。第十二次尝试稳定时间锚点，换来的依旧是量子场发生器的一串红色警告。\n“废物……”他低声咒骂，不知是在说设备，还是说自己。\n离开“永生科技”自立门户已经一年半，积蓄快烧光了，论文被学界嗤为“民科幻想”，连当",
+    "tags": [
+      "城市",
+      "雨",
+      "calm",
+      "Mureka"
+    ],
+    "source": "mureka"
+  },
+  {
+    "id": "rain_light",
+    "name": "小雨",
+    "category": "core/environment",
+    "file_path": "sound_effects/core/environment/rain_light.wav",
+    "description": "小雨",
+    "tags": [
+      "environment",
+      "core",
+      "FalAI"
+    ],
+    "source": "fal-ai-core"
+  },
+  {
+    "id": "rain_heavy",
+    "name": "大雨",
+    "category": "core/environment",
+    "file_path": "sound_effects/core/environment/rain_heavy.wav",
+    "description": "大雨",
+    "tags": [
+      "environment",
+      "core",
+      "FalAI"
+    ],
+    "source": "fal-ai-core"
+  },
+  {
+    "id": "wind",
+    "name": "风声",
+    "category": "core/environment",
+    "file_path": "sound_effects/core/environment/wind.wav",
+    "description": "风声",
+    "tags": [
+      "environment",
+      "core",
+      "FalAI"
+    ],
+    "source": "fal-ai-core"
+  },
+  {
+    "id": "city_ambient",
+    "name": "城市环境音",
+    "category": "core/environment",
+    "file_path": "sound_effects/core/environment/city_ambient.wav",
+    "description": "城市环境音",
+    "tags": [
+      "environment",
+      "core",
+      "FalAI"
+    ],
+    "source": "fal-ai-core"
+  },
+  {
+    "id": "forest_ambient",
+    "name": "森林环境音",
+    "category": "core/environment",
+    "file_path": "sound_effects/core/environment/forest_ambient.wav",
+    "description": "森林环境音",
+    "tags": [
+      "environment",
+      "core",
+      "FalAI"
+    ],
+    "source": "fal-ai-core"
+  },
+  {
+    "id": "footsteps",
+    "name": "脚步声",
+    "category": "core/action",
+    "file_path": "sound_effects/core/action/footsteps.wav",
+    "description": "脚步声",
+    "tags": [
+      "action",
+      "core",
+      "FalAI"
+    ],
+    "source": "fal-ai-core"
+  },
+  {
+    "id": "sfx_action_16bc9b",
+    "name": "人群嘈杂声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_16bc9b.wav",
+    "description": "人群嘈杂声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_3bd711",
+    "name": "窃窃私语声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_3bd711.wav",
+    "description": "窃窃私语声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_b937dd",
+    "name": "指针划过图表声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_b937dd.wav",
+    "description": "指针划过图表声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_4dc4db",
+    "name": "小狗轻蹭声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_4dc4db.wav",
+    "description": "小狗轻蹭声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_7c2d23",
+    "name": "小狗奔跑声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_7c2d23.wav",
+    "description": "小狗奔跑声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  }
+]

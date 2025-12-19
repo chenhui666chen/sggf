@@ -86,9 +86,13 @@ class TextParser:
         1. 正则匹配引号内容为对话
         2. 引号外内容为旁白
         3. 保持原文顺序
+        4. **关键优化**：从对话前的旁白中剔除引导语（如"XXX说："、"XXX问道："等）
         """
         segments = []
         position = 0
+        
+        # 说话人引导语模式（如"张三说："、"他问道："等）
+        speaker_intro_pattern = r'[，。；]?([^，。！？；：""\n]{0,15}(?:说|道|问|答|笑|叹|喊|叫|开口|沉声|冷笑|轻声|嘀咕|低语|高声)[：:])$'
         
         # 逐段处理
         for paragraph in text.split('\n'):
@@ -111,28 +115,50 @@ class TextParser:
             # 提取对话和旁白
             last_pos = 0
             for dialogue in dialogues:
-                # 对话前的旁白
-                narration_text = paragraph[last_pos:dialogue['start']].strip()
-                if narration_text:
-                    segments.append(TextSegment(
-                        type="narration",
-                        text=narration_text,
-                        speaker="旁白",
-                        emotion="neutral",
-                        position=position
-                    ))
-                    position += len(narration_text)
+                # 对话前的旁白（原始文本）
+                narration_before = paragraph[last_pos:dialogue['start']].strip()
+                
+                if narration_before:
+                    # **关键修复**：检查是否以说话人引导语结尾（如"张三说："）
+                    # 如果是，则将引导语从旁白中移除，避免旁白和对话混淆
+                    match = re.search(speaker_intro_pattern, narration_before)
+                    if match:
+                        # 移除说话人引导语
+                        intro_text = match.group(1)
+                        narration_text = narration_before[:match.start()].strip()
+                        
+                        # 只有当移除引导语后还有实质内容时，才添加旁白片段
+                        if narration_text:
+                            segments.append(TextSegment(
+                                type="narration",
+                                text=narration_text,
+                                speaker="旁白",
+                                emotion="neutral",
+                                position=position
+                            ))
+                            position += len(narration_text)
+                    else:
+                        # 没有说话人引导语，直接使用全部文本
+                        segments.append(TextSegment(
+                            type="narration",
+                            text=narration_before,
+                            speaker="旁白",
+                            emotion="neutral",
+                            position=position
+                        ))
+                        position += len(narration_before)
                 
                 # 对话
                 dialogue_text = dialogue['text'].strip()
-                segments.append(TextSegment(
-                    type="dialogue",
-                    text=dialogue_text,
-                    speaker="未知",  # 待识别
-                    emotion="neutral",
-                    position=position
-                ))
-                position += len(dialogue_text)
+                if dialogue_text:  # 过滤空对话
+                    segments.append(TextSegment(
+                        type="dialogue",
+                        text=dialogue_text,
+                        speaker="未知",  # 待识别
+                        emotion="neutral",
+                        position=position
+                    ))
+                    position += len(dialogue_text)
                 
                 last_pos = dialogue['end']
             

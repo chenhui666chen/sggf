@@ -97,7 +97,7 @@ class AudioMixer:
     def __init__(
         self,
         silence_duration: int = 500,  # 静音间隔（毫秒）
-        normalize_audio: bool = True,  # 是否归一化音量
+        normalize_audio: bool = False,  # 🔧 修复：禁用归一化（避免音频截断）
         enable_fallback: bool = True   # 是否启用降级模式
     ):
         self.silence_duration = silence_duration
@@ -195,43 +195,83 @@ class AudioMixer:
         Returns:
             混音后的音频
         """
-        if not self.pydub_available:
-            logger.warning("⚠️ 背景音乐功能需要pydub支持，返回原始人声")
-            return voice_audio
+        # 🔥 优先使用 FFmpeg 原生混音
+        if self.ffmpeg_available:
+            try:
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    temp_path = Path(temp_dir)
+                    voice_file = temp_path / "voice.mp3"
+                    bgm_file = temp_path / "bgm.mp3"
+                    output_file = temp_path / "mixed.mp3"
+                    
+                    # 写入临时文件
+                    voice_file.write_bytes(voice_audio)
+                    bgm_file.write_bytes(bgm_audio)
+                    
+                    # FFmpeg 混音命令：
+                    # - aloop=999:size=2e+09 循环 BGM
+                    # - volume=X 调整音量（使用线性倍数）
+                    # - amix 混音
+                    # - shortest=1 截断到最短输入
+                    volume_multiplier = 10 ** (bgm_volume_offset / 20)  # dB 转线性
+                    
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-i", str(voice_file),
+                        "-stream_loop", "-1",  # 循环 BGM
+                        "-i", str(bgm_file),
+                        "-filter_complex",
+                        f"[1:a]volume={volume_multiplier}[bgm];[0:a][bgm]amix=inputs=2:duration=first[out]",
+                        "-map", "[out]",
+                        "-c:a", "libmp3lame",
+                        "-b:a", "128k",
+                        str(output_file)
+                    ]
+                    
+                    subprocess.run(cmd, check=True, capture_output=True)
+                    logger.info(f"✅ FFmpeg 背景音乐混合完成")
+                    return output_file.read_bytes()
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ FFmpeg 混音失败，尝试降级方案: {e}")
         
-        try:
-            # 加载音频
-            voice = AudioSegment.from_file(io.BytesIO(voice_audio))
-            bgm = AudioSegment.from_file(io.BytesIO(bgm_audio))
-            
-            # 调整BGM音量
-            bgm = bgm + bgm_volume_offset
-            
-            # 循环BGM到与人声相同长度
-            if len(bgm) < len(voice):
-                loops_needed = (len(voice) // len(bgm)) + 1
-                bgm = bgm * loops_needed
-            
-            # 截取BGM到与人声相同长度
-            bgm = bgm[:len(voice)]
-            
-            # 混音（overlay）
-            mixed = voice.overlay(bgm)
-            
-            # 归一化
-            if self.normalize_audio:
-                mixed = normalize(mixed)
-            
-            # 输出
-            output_buffer = io.BytesIO()
-            mixed.export(output_buffer, format="mp3", bitrate="128k")
-            
-            logger.info(f"✅ 背景音乐混合完成")
-            return output_buffer.getvalue()
-            
-        except Exception as e:
-            logger.error(f"❌ 背景音乐混合失败: {e}")
-            return voice_audio
+        # 🔻 降级方案：pydub
+        if self.pydub_available:
+            try:
+                # 加载音频
+                voice = AudioSegment.from_file(io.BytesIO(voice_audio))
+                bgm = AudioSegment.from_file(io.BytesIO(bgm_audio))
+                
+                # 调整BGM音量
+                bgm = bgm + bgm_volume_offset
+                
+                # 循环BGM到与人声相同长度
+                if len(bgm) < len(voice):
+                    loops_needed = (len(voice) // len(bgm)) + 1
+                    bgm = bgm * loops_needed
+                
+                # 截取BGM到与人声相同长度
+                bgm = bgm[:len(voice)]
+                
+                # 混音（overlay）
+                mixed = voice.overlay(bgm)
+                
+                # 归一化
+                if self.normalize_audio:
+                    mixed = normalize(mixed)
+                
+                # 输出
+                output_buffer = io.BytesIO()
+                mixed.export(output_buffer, format="mp3", bitrate="128k")
+                
+                logger.info(f"✅ pydub 背景音乐混合完成")
+                return output_buffer.getvalue()
+            except Exception as e:
+                logger.warning(f"⚠️ pydub 混音失败: {e}")
+        
+        # 最终降级：返回原始人声
+        logger.warning("⚠️ 背景音乐功能不可用，返回原始人声")
+        return voice_audio
     
     def get_audio_info(self, audio_data: bytes) -> dict:
         """获取音频信息（FFmpeg增强版）"""
@@ -268,64 +308,99 @@ class AudioMixer:
         output_format: str = "mp3",
         bitrate: str = "128k"
     ) -> bytes:
-        """使用 FFmpeg 命令行混音（原生实现，无 Python 依赖问题）"""
+        """使用 FFmpeg 命令行混音（filter_complex 无损拼接版）"""
         # 创建临时目录
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
             
-            # 1. 将所有音频片段写入临时文件
+            # 1. 将所有音频片段写入临时文件并解码为 WAV（避免 MP3 帧边界问题）
             input_files = []
             for i, audio_bytes in enumerate(audio_segments):
                 if not audio_bytes:
                     continue
-                input_file = tmpdir_path / f"segment_{i:04d}.mp3"
-                input_file.write_bytes(audio_bytes)
-                input_files.append(str(input_file))
+                
+                # 先保存原始 MP3
+                mp3_file = tmpdir_path / f"segment_{i:04d}.mp3"
+                mp3_file.write_bytes(audio_bytes)
+                
+                # 解码为 WAV（无损，避免帧对齐问题）
+                wav_file = tmpdir_path / f"segment_{i:04d}.wav"
+                subprocess.run([
+                    "ffmpeg", "-i", str(mp3_file),
+                    "-acodec", "pcm_s16le",
+                    "-ar", "44100",
+                    "-ac", "2",
+                    "-y", str(wav_file)
+                ], check=True, capture_output=True)
+                
+                input_files.append(str(wav_file))
             
             if not input_files:
                 logger.warning("⚠️ 没有有效的音频片段")
                 return b""
             
-            # 2. 生成静音文件（用于间隔）
-            silence_file = None
-            if self.silence_duration > 0:
-                silence_file = tmpdir_path / "silence.mp3"
-                # 使用 FFmpeg 生成静音
-                subprocess.run([
-                    "ffmpeg", "-f", "lavfi", 
-                    "-i", f"anullsrc=r=44100:cl=stereo",
-                    "-t", str(self.silence_duration / 1000.0),
-                    "-q:a", "9",
-                    "-y", str(silence_file)
-                ], check=True, capture_output=True)
+            # 2. 生成静音文件（WAV 格式）
+            silence_duration_sec = self.silence_duration / 1000.0
             
-            # 3. 生成 concat 文件列表
-            concat_file = tmpdir_path / "concat_list.txt"
-            with open(concat_file, "w", encoding="utf-8") as f:
-                for i, input_file in enumerate(input_files):
-                    f.write(f"file '{input_file}'\n")
-                    # 在片段间添加静音（除了最后一个）
-                    if silence_file and i < len(input_files) - 1:
-                        f.write(f"file '{silence_file}'\n")
-            
-            # 4. 使用 FFmpeg concat 拼接
+            # 3. 使用 filter_complex 进行无损拼接（带静音间隔）
             output_file = tmpdir_path / f"output.{output_format}"
-            ffmpeg_cmd = [
-                "ffmpeg",
-                "-f", "concat",
-                "-safe", "0",
-                "-i", str(concat_file),
-                "-c:a", "libmp3lame" if output_format == "mp3" else "pcm_s16le",
-                "-b:a", bitrate,
-            ]
             
-            # 5. 添加归一化滤镜
+            # 构建 filter_complex 滤镜链
+            # 格式: [0:a][silence][1:a][silence]...[N:a] concat=n=X:v=0:a=1
+            filter_parts = []
+            concat_inputs = []
+            
+            for i in range(len(input_files)):
+                concat_inputs.append(f"[{i}:a]")
+                if i < len(input_files) - 1 and self.silence_duration > 0:
+                    # 添加静音（使用 aevalsrc 生成）
+                    filter_parts.append(
+                        f"aevalsrc=0:d={silence_duration_sec}:s=44100:c=stereo[silence{i}]"
+                    )
+                    concat_inputs.append(f"[silence{i}]")
+            
+            # 拼接所有输入
+            concat_filter = "".join(concat_inputs) + f"concat=n={len(concat_inputs)}:v=0:a=1[outa]"
+            
+            # 完整滤镜链
+            if filter_parts:
+                full_filter = ";".join(filter_parts) + ";" + concat_filter
+            else:
+                full_filter = concat_filter
+            
+            # 构建 FFmpeg 命令
+            ffmpeg_cmd = ["ffmpeg"]
+            
+            # 添加所有输入文件
+            for input_file in input_files:
+                ffmpeg_cmd.extend(["-i", input_file])
+            
+            # 添加滤镜链
+            ffmpeg_cmd.extend([
+                "-filter_complex", full_filter,
+                "-map", "[outa]",
+            ])
+            
+            # 编码参数
+            if output_format == "mp3":
+                ffmpeg_cmd.extend([
+                    "-c:a", "libmp3lame",
+                    "-b:a", bitrate,
+                ])
+            else:
+                ffmpeg_cmd.extend([
+                    "-c:a", "pcm_s16le",
+                ])
+            
+            # 添加归一化（如果需要）
             if self.normalize_audio:
+                # 注意：loudnorm 要在 filter_complex 之后应用
                 ffmpeg_cmd.extend(["-af", "loudnorm=I=-16:TP=-1.5:LRA=11"])
             
             ffmpeg_cmd.extend(["-y", str(output_file)])
             
             # 执行 FFmpeg
+            logger.debug(f"🔧 FFmpeg 命令: {' '.join(ffmpeg_cmd)}")
             result = subprocess.run(
                 ffmpeg_cmd,
                 capture_output=True,
@@ -340,7 +415,7 @@ class AudioMixer:
             output_bytes = output_file.read_bytes()
             
             logger.info(
-                f"✅ FFmpeg 原生混音完成: "
+                f"✅ FFmpeg filter_complex 无损混音完成: "
                 f"片段数 {len(input_files)}, "
                 f"大小 {len(output_bytes)/1024:.1f}KB"
             )
@@ -421,30 +496,67 @@ class AudioMixer:
         Returns:
             叠加音效后的音频
         """
-        if not self.pydub_available:
-            logger.warning("⚠️ 音效叠加需要pydub支持")
-            return voice_audio
+        # 🔥 优先使用 FFmpeg 原生叠加
+        if self.ffmpeg_available:
+            try:
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    temp_path = Path(temp_dir)
+                    voice_file = temp_path / "voice.mp3"
+                    effect_file = temp_path / "effect.mp3"
+                    output_file = temp_path / "mixed.mp3"
+                    
+                    # 写入临时文件
+                    voice_file.write_bytes(voice_audio)
+                    effect_file.write_bytes(effect_audio)
+                    
+                    # FFmpeg 音效叠加命令
+                    volume_multiplier = 10 ** (effect_volume_offset / 20)  # dB 转线性
+                    delay_ms = max(0, position_ms)  # 确保非负值
+                    
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-i", str(voice_file),
+                        "-i", str(effect_file),
+                        "-filter_complex",
+                        f"[1:a]adelay={delay_ms}|{delay_ms},volume={volume_multiplier}[sfx];[0:a][sfx]amix=inputs=2:duration=first[out]",
+                        "-map", "[out]",
+                        "-c:a", "libmp3lame",
+                        "-b:a", "128k",
+                        str(output_file)
+                    ]
+                    
+                    subprocess.run(cmd, check=True, capture_output=True)
+                    logger.debug(f"✅ FFmpeg 音效叠加完成: position={position_ms}ms")
+                    return output_file.read_bytes()
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ FFmpeg 音效叠加失败: {e}")
         
-        try:
-            voice = AudioSegment.from_file(io.BytesIO(voice_audio))
-            effect = AudioSegment.from_file(io.BytesIO(effect_audio))
-            
-            # 调整音效音量
-            effect = effect + effect_volume_offset
-            
-            # 叠加音效
-            mixed = voice.overlay(effect, position=position_ms)
-            
-            # 输出
-            output_buffer = io.BytesIO()
-            mixed.export(output_buffer, format="mp3", bitrate="128k")
-            
-            logger.debug(f"✅ 音效叠加完成: position={position_ms}ms")
-            return output_buffer.getvalue()
-            
-        except Exception as e:
-            logger.error(f"❌ 音效叠加失败: {e}")
-            return voice_audio
+        # 🔻 降级方案：pydub
+        if self.pydub_available:
+            try:
+                voice = AudioSegment.from_file(io.BytesIO(voice_audio))
+                effect = AudioSegment.from_file(io.BytesIO(effect_audio))
+                
+                # 调整音效音量
+                effect = effect + effect_volume_offset
+                
+                # 叠加音效
+                mixed = voice.overlay(effect, position=position_ms)
+                
+                # 输出
+                output_buffer = io.BytesIO()
+                mixed.export(output_buffer, format="mp3", bitrate="128k")
+                
+                logger.debug(f"✅ pydub 音效叠加完成: position={position_ms}ms")
+                return output_buffer.getvalue()
+                
+            except Exception as e:
+                logger.warning(f"⚠️ pydub 音效叠加失败: {e}")
+        
+        # 最终降级：返回原始人声
+        logger.warning("⚠️ 音效叠加不可用")
+        return voice_audio
 
     def analyze_quality(
         self,

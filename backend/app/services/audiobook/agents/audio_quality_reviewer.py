@@ -65,20 +65,31 @@ class AudioQualityReviewer:
         self.quality_standards = self._init_quality_standards()
     
     def _init_quality_standards(self) -> Dict[str, Any]:
-        """初始化质量标准"""
+        """初始化质量标准（更贴近有声小说实战节奏）"""
         return {
-            "max_sentence_length": 50,  # 最大句子长度（字）
-            "max_paragraph_length": 200,  # 最大段落长度
-            "min_pause_between_sentences": 0.3,  # 最小句间停顿（秒）
-            "max_episode_duration": 40 * 60,  # 最大单集时长（秒）
-            "min_episode_duration": 15 * 60,  # 最小单集时长
-            "max_sound_effects_per_minute": 6,  # 每分钟最大音效数
-            "max_music_coverage": 0.5,  # 最大音乐覆盖率
+            # 句子与段落：朗读友好（对话 15-35 字为宜，极少超过 40 字）
+            "max_sentence_length": 40,   # 单句建议不超过 40 字
+            "max_paragraph_length": 120,  # 单段建议不超过 120 字（LLM 已经做了分段）
+
+            # 时长：按 10 字/秒估算，建议单集在 10-35 分钟之间
+            "max_episode_duration": 35 * 60,  # 最大单集时长（秒）
+            "min_episode_duration": 10 * 60,  # 最小单集时长
+
+            # 音效密度：推荐每分钟 2-6 个音效，高于 8 视为明显过多
+            "min_sound_effects_per_minute": 2,
+            "max_sound_effects_per_minute": 6,
+            "hard_max_sound_effects_per_minute": 8,
+
+            # 音乐覆盖率：推荐 15%-40%，超过 60% 视为几乎全程铺乐
+            "music_coverage_target_min": 0.15,
+            "music_coverage_target_max": 0.40,
+            "max_music_coverage": 0.60,
         }
     
     def review_script(
         self,
-        script_segments: List[Dict[str, Any]]
+        script_segments: List[Dict[str, Any]],
+        novel_genre: str = ""
     ) -> AudioQualityReport:
         """
         评审有声剧本
@@ -96,11 +107,20 @@ class AudioQualityReviewer:
                         "music_cue": "音乐提示"
                     }
                 ]
+            novel_genre: 小说类型（如“都市”“玄幻”“悬疑”等），用于选择细分质量配置
         
         Returns:
             质量报告
         """
         logger.info(f"🔍 评审有声剧本: {len(script_segments)} 个片段...")
+
+        # 根据小说类型应用细分质量标准
+        genre = (novel_genre or "").strip().lower()
+        standards = dict(self.quality_standards)
+        if genre:
+            standards = self._apply_genre_overrides(standards, genre)
+        self.quality_standards = standards
+        logger.info(f"   使用质量标准: {self.quality_standards}")
         
         issues = []
         
@@ -190,19 +210,77 @@ class AudioQualityReviewer:
         }
     
     def _detect_awkward_words(self, text: str) -> List[str]:
-        """检测拗口词汇"""
-        # 常见拗口词列表（示例）
-        awkward_patterns = [
-            r'诡谲', r'晦涩', r'逻辑悖论', r'具象化',
-            r'赋能', r'颗粒度', r'闭环'
+        """检测可能拗口、不适合朗读的词汇
+
+        说明：
+        - 这里先用一套简单的启发式规则，后续可以接 LLM 做更智能的评审
+        - 目标是发现：书面化过重、成串叠词、生僻词堆叠等情况
+        """
+        candidates = [
+            "之乎者也",
+            "不禁感叹",
+            "不由得感叹",
+            "不禁赞叹",
+            "不由得说道",
+            "不禁说道",
+            "蓦然回首",
+            "恍若隔世",
+            "不胜唏嘘",
         ]
-        
-        found = []
-        for pattern in awkward_patterns:
-            if re.search(pattern, text):
-                found.append(pattern)
-        
-        return found
+
+        awkward = []
+        for w in candidates:
+            if w in text:
+                awkward.append(w)
+
+        # 规则2：连续三个以上相同的字（容易念错 / 听感别扭）
+        repeat_pattern = re.compile(r"(.)\1{2,}")
+        for m in repeat_pattern.finditer(text):
+            awkward.append(m.group(0))
+
+        # 去重
+        return list(dict.fromkeys(awkward))
+    
+    def _apply_genre_overrides(self, standards: Dict[str, Any], genre: str) -> Dict[str, Any]:
+        """根据小说类型对质量标准做细分调整。
+
+        说明：
+        - 都市/言情/校园：允许略高的背景音乐覆盖率，音效保持中等。
+        - 玄幻/仙侠/热血/冒险：允许更高的音效密度和略高的音乐覆盖率。
+        - 悬疑/推理/惊悚/恐怖：整体更克制，强调静音和环境音，背景音乐覆盖率下调。
+        - 其他类型：使用默认标准。
+        """
+        g = genre
+
+        # 都市、言情、校园 等相对温和题材
+        if ("都市" in g) or ("言情" in g) or ("校园" in g) or ("日常" in g):
+            standards["min_sound_effects_per_minute"] = 1
+            standards["max_sound_effects_per_minute"] = 5
+            standards["hard_max_sound_effects_per_minute"] = 7
+            standards["music_coverage_target_min"] = 0.20
+            standards["music_coverage_target_max"] = 0.50
+            standards["max_music_coverage"] = 0.70
+
+        # 玄幻、仙侠、热血、冒险 等偏戏剧化题材
+        elif ("玄幻" in g) or ("仙侠" in g) or ("奇幻" in g) or ("热血" in g) or ("冒险" in g):
+            standards["min_sound_effects_per_minute"] = 3
+            standards["max_sound_effects_per_minute"] = 8
+            standards["hard_max_sound_effects_per_minute"] = 10
+            standards["music_coverage_target_min"] = 0.20
+            standards["music_coverage_target_max"] = 0.50
+            standards["max_music_coverage"] = 0.70
+
+        # 悬疑、推理、惊悚、恐怖 等需要静音张力的题材
+        elif ("悬疑" in g) or ("推理" in g) or ("惊悚" in g) or ("恐怖" in g):
+            standards["min_sound_effects_per_minute"] = 1
+            standards["max_sound_effects_per_minute"] = 4
+            standards["hard_max_sound_effects_per_minute"] = 6
+            standards["music_coverage_target_min"] = 0.05
+            standards["music_coverage_target_max"] = 0.25
+            standards["max_music_coverage"] = 0.40
+
+        # 其他类型（包括科幻等）保持默认
+        return standards
     
     def _review_audio_balance(
         self,
@@ -224,35 +302,95 @@ class AudioQualityReviewer:
         
         # 音效密度
         effects_per_minute = total_effects / estimated_duration_minutes if estimated_duration_minutes > 0 else 0
-        
+
+        target_min_effects = self.quality_standards.get("min_sound_effects_per_minute", 2)
+        target_max_effects = self.quality_standards.get("max_sound_effects_per_minute", 6)
+        hard_max_effects = self.quality_standards.get("hard_max_sound_effects_per_minute", target_max_effects + 2)
+
         sound_effect_rating = "适中"
-        if effects_per_minute > self.quality_standards["max_sound_effects_per_minute"]:
+        if effects_per_minute > hard_max_effects:
+            sound_effect_rating = "严重偏多"
+            issues.append(QualityIssue(
+                location="overall",
+                severity="major",
+                category="audio",
+                description=f"音效密度严重过高（约 {effects_per_minute:.1f}/分钟）",
+                suggestion="仅保留关键情节所需音效，删除背景性或重复音效"
+            ))
+        elif effects_per_minute > target_max_effects:
             sound_effect_rating = "偏多"
             issues.append(QualityIssue(
                 location="overall",
                 severity="minor",
                 category="audio",
-                description=f"音效密度过高（{effects_per_minute:.1f}/分钟）",
-                suggestion="建议减少非关键音效"
+                description=f"音效偏多（约 {effects_per_minute:.1f}/分钟）",
+                suggestion="合并相近音效触发点，避免每一句都叠加音效"
             ))
-        elif effects_per_minute < 2:
+        elif 0 < effects_per_minute < target_min_effects:
             sound_effect_rating = "偏少"
-        
+            issues.append(QualityIssue(
+                location="overall",
+                severity="minor",
+                category="audio",
+                description="音效略少，部分环境描写可以转化为音效",
+                suggestion="为重要环境或动作场景补充少量高质量音效"
+            ))
+        elif effects_per_minute == 0 and total_text_length > 800:
+            sound_effect_rating = "明显不足"
+            issues.append(QualityIssue(
+                location="overall",
+                severity="major",
+                category="audio",
+                description="长篇文本完全没有音效标注",
+                suggestion="为关键环境/动作场景设计基础音效，例如雨声、脚步声、环境氛围音"
+            ))
+        else:
+            sound_effect_rating = "适中"
+
         # 音乐密度
         music_rating = "适中"
         music_coverage = total_music_cues / len(segments) if segments else 0
-        if music_coverage > 0.3:
+        target_min_music = self.quality_standards.get("music_coverage_target_min", 0.15)
+        target_max_music = self.quality_standards.get("music_coverage_target_max", 0.40)
+        max_music_coverage = self.quality_standards.get("max_music_coverage", 0.60)
+
+        if music_coverage > max_music_coverage:
+            music_rating = "严重偏多"
+            issues.append(QualityIssue(
+                location="overall",
+                severity="major",
+                category="audio",
+                description=f"背景音乐覆盖率过高（约 {music_coverage*100:.0f}% 片段有BGM）",
+                suggestion="保留开头/结尾/高潮等关键位置的配乐，减少连续长时间背景音乐"
+            ))
+        elif music_coverage > target_max_music:
             music_rating = "偏多"
-        elif music_coverage < 0.1:
+            issues.append(QualityIssue(
+                location="overall",
+                severity="minor",
+                category="audio",
+                description=f"背景音乐略多（约 {music_coverage*100:.0f}% 片段有BGM）",
+                suggestion="适当减少非关键段落的配乐，给对话和旁白留出空间"
+            ))
+        elif 0 < music_coverage < target_min_music:
             music_rating = "偏少"
             issues.append(QualityIssue(
                 location="overall",
                 severity="minor",
                 category="audio",
-                description="背景音乐较少",
-                suggestion="建议在关键场景增加背景音乐"
+                description="背景音乐略少",
+                suggestion="在情绪起伏较大的片段增加少量配乐，增强氛围"
             ))
-        
+        elif music_coverage == 0 and total_text_length > 800:
+            music_rating = "明显不足"
+            issues.append(QualityIssue(
+                location="overall",
+                severity="major",
+                category="audio",
+                description="长篇章节没有任何背景音乐提示",
+                suggestion="为章节开头/结尾或关键转折点增加简短背景音乐"
+            ))
+
         # 角色音色区分度
         speakers = set(s.get("speaker") for s in segments if s.get("type") == "dialogue")
         voice_differentiation = "清晰" if len(speakers) <= 5 else "可能混淆"
@@ -281,7 +419,7 @@ class AudioQualityReviewer:
         issues: List[QualityIssue]
     ) -> Dict[str, Any]:
         """评审节奏"""
-        # 估算总时长
+        # 估算时长（粗略，按10字/秒）
         total_text_length = sum(len(s.get("text", "")) for s in segments)
         estimated_duration = total_text_length / 10  # 10字/秒
         estimated_duration_minutes = estimated_duration / 60
