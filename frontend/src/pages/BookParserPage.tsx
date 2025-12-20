@@ -9,7 +9,7 @@
  * 5. 导入为工作流项目
  */
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import {
   Box,
   Container,
@@ -132,10 +132,14 @@ function UploadDialog({
   open,
   onClose,
   onUpload,
+  initialTitle = '',
+  initialContent = '',
 }: {
   open: boolean
   onClose: () => void
   onUpload: (book: BookSource) => void
+  initialTitle?: string
+  initialContent?: string
 }) {
   const [tabIndex, setTabIndex] = useState(0)
   const [title, setTitle] = useState('')
@@ -144,6 +148,17 @@ function UploadDialog({
   const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (open) {
+      if (initialTitle) {
+        setTitle(initialTitle)
+      }
+      if (initialContent) {
+        setContent(initialContent)
+      }
+    }
+  }, [open, initialTitle, initialContent])
 
   const handleSubmit = async () => {
     setLoading(true)
@@ -580,6 +595,7 @@ function AnalysisContent({ type, content }: { type: string; content: Record<stri
 
 export default function BookParserPage() {
   const navigate = useNavigate()
+  const location = useLocation()
 
   // 状态
   const [books, setBooks] = useState<BookSource[]>([])
@@ -593,6 +609,11 @@ export default function BookParserPage() {
   const [importOpen, setImportOpen] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(null)
+  const [prefillTitle, setPrefillTitle] = useState('')
+  const [prefillContent, setPrefillContent] = useState('')
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [bookToDelete, setBookToDelete] = useState<BookSource | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   // 加载书籍列表
   const loadBooks = useCallback(async () => {
@@ -603,6 +624,26 @@ export default function BookParserPage() {
       console.error('加载书籍列表失败:', err)
     }
   }, [])
+
+  // 如果从耳畔星河跳转过来，自动打开上传对话框并填充文本
+  useEffect(() => {
+    const state = (location as any).state as
+      | { openUpload?: boolean; prefillTitle?: string; prefillContent?: string }
+      | undefined
+
+    if (state?.openUpload) {
+      if (state.prefillTitle) {
+        setPrefillTitle(state.prefillTitle)
+      }
+      if (state.prefillContent) {
+        setPrefillContent(state.prefillContent)
+      }
+      setUploadOpen(true)
+
+      // 清理路由状态，避免刷新或返回时重复弹出
+      navigate(location.pathname, { replace: true, state: null })
+    }
+  }, [location, navigate])
 
   useEffect(() => {
     loadBooks()
@@ -627,18 +668,28 @@ export default function BookParserPage() {
     }
   }
 
-  // 删除书籍
-  const handleDeleteBook = async (book: BookSource) => {
-    if (!confirm(`确定要删除《${book.title}》吗？`)) return
+  // 删除书籍（弹出确认对话框）
+  const handleDeleteBook = (book: BookSource) => {
+    setBookToDelete(book)
+    setDeleteConfirmOpen(true)
+  }
+
+  const handleConfirmDeleteBook = async () => {
+    if (!bookToDelete) return
 
     try {
-      await bookParserApi.deleteBook(book.id)
-      setBooks(books.filter((b) => b.id !== book.id))
-      if (selectedBook?.id === book.id) {
+      setDeleting(true)
+      await bookParserApi.deleteBook(bookToDelete.id)
+      setBooks((prev) => prev.filter((b) => b.id !== bookToDelete.id))
+      if (selectedBook?.id === bookToDelete.id) {
         setSelectedBook(null)
       }
     } catch (err) {
       console.error('删除失败:', err)
+    } finally {
+      setDeleting(false)
+      setDeleteConfirmOpen(false)
+      setBookToDelete(null)
     }
   }
 
@@ -970,6 +1021,8 @@ export default function BookParserPage() {
         open={uploadOpen}
         onClose={() => setUploadOpen(false)}
         onUpload={handleUploadSuccess}
+        initialTitle={prefillTitle}
+        initialContent={prefillContent}
       />
 
       {/* 导入对话框 */}
@@ -980,6 +1033,49 @@ export default function BookParserPage() {
         loading={importing}
         onImport={handleImport}
       />
+
+      {/* 删除书籍确认对话框 */}
+      <Dialog
+        open={deleteConfirmOpen}
+        onClose={() => {
+          if (!deleting) {
+            setDeleteConfirmOpen(false)
+            setBookToDelete(null)
+          }
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>删除书籍</DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" sx={{ mb: 1 }}>
+            确定要删除《{bookToDelete?.title}》吗？
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            该操作只会删除拆书工具中的书籍及解析结果，不会影响已经导入的创作项目。
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setDeleteConfirmOpen(false)
+              setBookToDelete(null)
+            }}
+            disabled={deleting}
+          >
+            取消
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleConfirmDeleteBook}
+            disabled={deleting}
+          >
+            {deleting ? <CircularProgress size={20} color="inherit" /> : '删除'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
     </Box>
   )
 }

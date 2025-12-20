@@ -14,6 +14,174 @@
     "source": "mureka"
   },
   {
+    "id": "sfx_action_16bc9b",
+    "name": "人群嘈杂声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_16bc9b.wav",
+    "description": "人群嘈杂声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_3bd711",
+    "name": "窃窃私语声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_3bd711.wav",
+    "description": "窃窃私语声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_b937dd",
+    "name": "指针划过图表声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_b937dd.wav",
+    "description": "指针划过图表声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_4dc4db",
+    "name": "小狗轻蹭声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_4dc4db.wav",
+    "description": "小狗轻蹭声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_7c2d23",
+    "name": "小狗奔跑声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_7c2d23.wav",
+    "description": "小狗奔跑声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_6b803a",
+    "name": "轻微的尘埃飘落声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_6b803a.wav",
+    "description": "轻微的尘埃飘落声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_b6de59",
+    "name": "小狗急促跑动声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_b6de59.wav",
+    "description": "小狗急促跑动声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_5ba9fc",
+    "name": "人群哄笑声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_5ba9fc.wav",
+    "description": "人群哄笑声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_94480e",
+    "name": "突然安静的氛围",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_94480e.wav",
+    "description": "突然安静的氛围",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_06a1c2",
+    "name": "树叶沙沙声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_06a1c2.wav",
+    "description": "树叶沙沙声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_4dfbb9",
+    "name": "沉闷的室内环境音",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_4dfbb9.wav",
+    "description": "沉闷的室内环境音",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_278161",
+    "name": "丹炉点燃火焰声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_278161.wav",
+    "description": "丹炉点燃火焰声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_0b18ea",
+    "name": "爪子轻点声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_0b18ea.wav",
+    "description": "爪子轻点声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_bfc863",
+    "name": "调整丹炉温度声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_bfc863.wav",
+    "description": "调整丹炉温度声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
     "id": "rain_light",
     "name": "小雨",
     "category": "core/environment",
@@ -92,11 +260,11 @@
     "source": "fal-ai-core"
   },
   {
-    "id": "sfx_action_16bc9b",
-    "name": "人群嘈杂声",
+    "id": "sfx_action_bc6de3",
+    "name": "老旧房间环境声",
     "category": "effects/action",
-    "file_path": "sound_effects/effects/action/sfx_action_16bc9b.wav",
-    "description": "人群嘈杂声",
+    "file_path": "sound_effects/effects/action/sfx_action_bc6de3.wav",
+    "description": "老旧房间环境声",
     "tags": [
       "action",
       "FalAI"
@@ -104,11 +272,11 @@
     "source": "fal-ai"
   },
   {
-    "id": "sfx_action_3bd711",
-    "name": "窃窃私语声",
+    "id": "sfx_action_a37664",
+    "name": "丹炉点燃声",
     "category": "effects/action",
-    "file_path": "sound_effects/effects/action/sfx_action_3bd711.wav",
-    "description": "窃窃私语声",
+    "file_path": "sound_effects/effects/action/sfx_action_a37664.wav",
+    "description": "丹炉点燃声",
     "tags": [
       "action",
       "FalAI"
@@ -116,11 +284,11 @@
     "source": "fal-ai"
   },
   {
-    "id": "sfx_action_b937dd",
-    "name": "指针划过图表声",
+    "id": "sfx_action_9430ab",
+    "name": "爪子轻拍声",
     "category": "effects/action",
-    "file_path": "sound_effects/effects/action/sfx_action_b937dd.wav",
-    "description": "指针划过图表声",
+    "file_path": "sound_effects/effects/action/sfx_action_9430ab.wav",
+    "description": "爪子轻拍声",
     "tags": [
       "action",
       "FalAI"
@@ -128,11 +296,11 @@
     "source": "fal-ai"
   },
   {
-    "id": "sfx_action_4dc4db",
-    "name": "小狗轻蹭声",
+    "id": "sfx_action_e48a14",
+    "name": "小狗轻微叫声",
     "category": "effects/action",
-    "file_path": "sound_effects/effects/action/sfx_action_4dc4db.wav",
-    "description": "小狗轻蹭声",
+    "file_path": "sound_effects/effects/action/sfx_action_e48a14.wav",
+    "description": "小狗轻微叫声",
     "tags": [
       "action",
       "FalAI"
@@ -140,11 +308,11 @@
     "source": "fal-ai"
   },
   {
-    "id": "sfx_action_7c2d23",
-    "name": "小狗奔跑声",
+    "id": "sfx_action_4ed7af",
+    "name": "夜晚环境声",
     "category": "effects/action",
-    "file_path": "sound_effects/effects/action/sfx_action_7c2d23.wav",
-    "description": "小狗奔跑声",
+    "file_path": "sound_effects/effects/action/sfx_action_4ed7af.wav",
+    "description": "夜晚环境声",
     "tags": [
       "action",
       "FalAI"

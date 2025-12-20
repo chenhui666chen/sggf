@@ -262,7 +262,7 @@ class ApiClient {
     return this.client.delete(`/api/v1/chapters/${chapterId}/review`)
   }
 
-  previewTTS(payload: { text: string; voice_id: string; volume?: number; speed?: number; pitch?: number }) {
+  previewTTS(payload: { text: string; voice_id: string; volume?: number; speed?: number; pitch?: number; model?: string }) {
     return this.client.post('/api/v1/audiobook/tts/preview', payload, { responseType: 'blob' })
   }
 
@@ -298,6 +298,51 @@ class ApiClient {
 
   getProjectTechniques(projectId: number) {
     return this.client.get(`/api/v1/projects/${projectId}/techniques`)
+  }
+
+  // 有声书 API
+  getAudiobookProjectsByProject(projectId: number) {
+    return this.client.get(`/api/v1/audiobook/projects/by-project/${projectId}`)
+  }
+
+  getAudiobookProject(audiobookProjectId: number) {
+    return this.client.get(`/api/v1/audiobook/projects/${audiobookProjectId}`)
+  }
+
+  deleteAudiobookProject(audiobookProjectId: number) {
+    return this.client.delete(`/api/v1/audiobook/projects/${audiobookProjectId}`)
+  }
+
+  createAudiobookProject(payload: {
+    project_id: number
+    chapter_ids: number[]
+    tts_provider?: string
+    enable_cache?: boolean
+    voice_config?: any[]
+    tts_model?: string
+    generation_mode?: 'full' | 'script_only'
+  }) {
+    return this.client.post('/api/v1/audiobook/projects', payload)
+  }
+
+  getAudiobookChapterScript(audiobookProjectId: number, chapterId: number) {
+    return this.client.get(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/script`
+    )
+  }
+
+  updateAudiobookChapterScript(audiobookProjectId: number, chapterId: number, payload: any) {
+    return this.client.put(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/script`,
+      payload
+    )
+  }
+
+  generateAudioFromScripts(audiobookProjectId: number, payload: any) {
+    return this.client.post(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/generate-audio-from-scripts`,
+      payload
+    )
   }
 
   // 章节逻辑检查API

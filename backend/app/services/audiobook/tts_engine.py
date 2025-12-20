@@ -205,11 +205,58 @@ class TTSEngine:
         # 预处理文本：对支持 Instruct 的音色自动注入情感指令
         effective_text = self._build_instruct_text(text, voice_params, emotion)
         
+        # 📦 调试：输出接收到的voice_params
+        logger.info(f"📦 TTS引擎接收参数: {voice_params}")
+        
+        # 🆕 将emotion添加到voice_params中，供_call_aliyun_tts使用
+        voice_params_with_emotion = voice_params.copy()
+        
+            # 🎭 反派角色智能情感：如果使用longanyang/longanhuan且情感为neutral，自动应用angry情感
+        speaker_id = voice_params.get("speaker", "")
+        villain_voice_ids = ["longanyang", "longanhuan"]  # 支持Instruct的音色，用于反派角色
+        
+        if speaker_id in villain_voice_ids and (emotion == "neutral" or not emotion):
+            logger.info(f"🎭 检测到反派音色 [{speaker_id}] + neutral情感，自动应用 'angry' 情感")
+            emotion = "angry"  # 自动调整为愤怒情感
+        
+        # 🔥 关键修复：情感词映射（将不支持的情感转换为阿里云TTS支持的情感）
+        # 阿里云Instruct只支持有限的中文情感词，不支持的词会触发428错误
+        EMOTION_MAPPING = {
+            # 不支持的英文情感 → 支持的中文情感
+            "focused": "neutral",      # 专注 → 中性（不支持）
+            "solemn": "neutral",       # 庄重 → 中性（不支持）
+            "tender": "neutral",       # 温柔 → 中性（不支持）
+            "gentle": "neutral",       # 轻柔 → 中性（不支持）
+            "serious": "neutral",      # 严肃 → 中性（不支持）
+            "nervous": "tense",        # 紧张不安 → 紧张
+            "fearful": "tense",        # 恐惧 → 紧张
+            "surprised": "happy",      # 惊讶 → 开心（excited不支持）
+            "excited": "happy",        # 🔥 兴奋 → 开心（excited触发428错误）
+            "disgusted": "angry",      # 厌恶 → 愤怒
+            "whisper": "neutral",      # 低语 → 中性（不支持）
+            "shout": "angry",          # 呼喃 → 愤怒
+            # 支持的情感保持不变
+            "neutral": "neutral",
+            "happy": "happy",
+            "sad": "sad",
+            "angry": "angry",
+            "calm": "calm",
+            "tense": "tense",
+        }
+        
+        # 如果情感不在映射表中，默认使用neutral
+        original_emotion = emotion
+        emotion = EMOTION_MAPPING.get(emotion, "neutral")
+        if original_emotion != emotion:
+            logger.warning(f"⚠️ 情感映射: {original_emotion} → {emotion} (阿里云TTS不支持 '{original_emotion}')") 
+        
+        voice_params_with_emotion["emotion"] = emotion
+        
         # 📊 情感参数日志（便于调试和验证）
-        speaker = voice_params.get("speaker", "unknown")
-        pitch = voice_params.get("pitch", 50)
-        speed = voice_params.get("speed", voice_params.get("rate", 1.0))
-        volume = voice_params.get("volume", 50)
+        speaker = voice_params_with_emotion.get("speaker", "unknown")
+        pitch = voice_params_with_emotion.get("pitch", 50)
+        speed = voice_params_with_emotion.get("speed", voice_params_with_emotion.get("rate", 1.0))
+        volume = voice_params_with_emotion.get("volume", 50)
         logger.debug(
             f"🎭 [{speaker}] emotion={emotion} | "
             f"pitch={pitch} (base+offset) | "
@@ -218,7 +265,7 @@ class TTSEngine:
         )
         
         # 1. 生成缓存key
-        cache_key = self._generate_cache_key(effective_text, voice_params, emotion)
+        cache_key = self._generate_cache_key(effective_text, voice_params_with_emotion, emotion)
         
         # 2. 检查缓存
         if self.cache:
@@ -250,9 +297,9 @@ class TTSEngine:
                         "model": self.model
                     }
                 ):
-                    audio_bytes = await self._call_tts_api(effective_text, voice_params)
+                    audio_bytes = await self._call_tts_api(effective_text, voice_params_with_emotion)
             else:
-                audio_bytes = await self._call_tts_api(effective_text, voice_params)
+                audio_bytes = await self._call_tts_api(effective_text, voice_params_with_emotion)
             
             # 每次请求后等待，避免频率限制
             await asyncio.sleep(self.request_delay)
@@ -645,16 +692,59 @@ class TTSEngine:
             # 如果pitch是0-100范围，转换为0.5-2.0
             if pitch > 10:  # 判断是否为百分比格式
                 pitch = pitch / 50.0
-                
-            synthesizer = SpeechSynthesizer(
-                model=self.model,
-                voice=voice_params.get("speaker", "longanyang"),
-                format=AudioFormat.MP3_22050HZ_MONO_256KBPS,
-                # v3-plus支持音高、语速调节（0.5-2.0范围）
-                pitch_rate=pitch,  # 使用voice_params中的pitch
-                speech_rate=rate,  # 使用voice_params中的rate
-                volume=voice_params.get("volume", 50)  # 0-100
+            
+            # 🔥 调试：输出最终传递给阿里云API的参数
+            logger.info(
+                f"🔥 调用阿里云TTS: voice={voice_params.get('speaker')}, "
+                f"pitch_rate={pitch:.2f}, speech_rate={rate:.2f}, volume={voice_params.get('volume', 50)}"
             )
+            
+            # 🆕 支持Instruct的音色：通过instruction参数传递情感
+            speaker_id = voice_params.get("speaker", "longanyang")
+            instruct_voices = ["longanyang", "longanhuan", "longhuhu_v3"]  # 支持Instruct的音色
+            
+            # 获取emotion参数（从 voice_params 中传递）
+            emotion = voice_params.get("emotion", "neutral")
+            
+            # 🔥 调试：输出emotion参数和instruction判断
+            logger.info(f"🎭 检测到emotion={emotion}, speaker={speaker_id}, instruct_voices={speaker_id in instruct_voices}")
+            
+            # 如果是支持Instruct的音色且有情感设置，添加instruction参数
+            if speaker_id in instruct_voices and emotion != "neutral":
+                # 构建 instruction 文本（根据阿里云官方文档格式）
+                instruction_text = f"你说话的情感是{emotion}。"
+                logger.info(f"🎭 使用Instruct情感控制: {instruction_text}")
+                
+                # 🔥 关键修复：使用Instruct时，使用中性参数，避免参数叠加超出兼容范围
+                # Instruct指令会自己控制情感表现（音高、语速等），不需要额外的参数调整
+                base_pitch = 50  # 使用基础音高（对应1.0倍率）
+                base_speed = 1.0  # 使用基础语速
+                
+                # 但保留角色的基础音色特征（如果有的话）
+                # 从voice_params中提取角色基础参数（不包含情感调整）
+                character_pitch = voice_params.get("character_base_pitch", 50)
+                character_speed = voice_params.get("character_base_speed", 1.0)
+                
+                logger.info(f"🎭 Instruct模式：使用中性参数 pitch={character_pitch}, speed={character_speed}, 情感由instruction控制（已修复428问题）")
+                
+                synthesizer = SpeechSynthesizer(
+                    model=self.model,
+                    voice=speaker_id,
+                    format=AudioFormat.MP3_22050HZ_MONO_256KBPS,
+                    pitch_rate=character_pitch / 50.0,  # 转换为倍率（基础值50=1.0倍）
+                    speech_rate=character_speed,
+                    volume=voice_params.get("volume", 50),
+                    instruction=instruction_text  # 🆕 添加情感指令
+                )
+            else:
+                synthesizer = SpeechSynthesizer(
+                    model=self.model,
+                    voice=speaker_id,
+                    format=AudioFormat.MP3_22050HZ_MONO_256KBPS,
+                    pitch_rate=pitch,
+                    speech_rate=rate,
+                    volume=voice_params.get("volume", 50)
+                )
             
         # 同步调用（dashscope暂不支持async）
         loop = asyncio.get_event_loop()
@@ -695,68 +785,21 @@ class TTSEngine:
         voice_params: Dict[str, Any],
         emotion: str
     ) -> str:
-        """对支持 Instruct 的音色自动注入情感/场景/角色/身份指令。
-
-        仅以下三个音色支持 Instruct：
-        - longanyang（龙安洋）：情感 / 场景（闲聊互动） / 角色（一个旁白） / 身份（故事机）
-        - longanhuan（龙安欢）：情感 / 场景（闲聊对话等） / 角色（温和客服）
-        - longhuhu_v3（龙呼呼）：情感 / 场景（自由对话） / 角色（傲娇公主等） / 身份（故事机、儿童玩具）
+        """情感控制已移至API参数层，不再向文本添加前置描述。
+        
+        ⚠️ 重要变更：
+        - 之前：在文本前添加"你正在以一个故事机的身份说话，你说话的情感是xxx。"
+        - 现在：直接返回原文本，情感通过API参数传递
+        
+        支持 Instruct 的音色：
+        - longanyang（龙安洋）
+        - longanhuan（龙安欢）
+        - longhuhu_v3（龙呼呼）
+        
+        情感将在 _call_aliyun_tts 方法中通过 API 参数传递。
         """
-        speaker_id = voice_params.get("speaker", "")
-        instruct_voices = {"longanyang", "longanhuan", "longhuhu_v3"}
-        if speaker_id not in instruct_voices:
-            return text
-
-        segment_speaker = voice_params.get("segment_speaker", "")
-        segment_type = voice_params.get("segment_type", "")
-
-        # 将内部情感标签映射到阿里云支持的情感值
-        # 阿里云Instruct支持的情感: happy, sad, angry, fearful, surprised, disgusted, neutral
-        emotion_map = {
-            # 基础情感
-            "happy": "happy",
-            "sad": "sad",
-            "angry": "angry",
-            "neutral": "neutral",
-            "calm": "neutral",
-            
-            # 扩展情感（映射到阿里云原生支持的类别）
-            "excited": "happy",         # 兴奋 → happy
-            "fearful": "fearful",       # 恐惧 → fearful
-            "tense": "fearful",         # 紧张 → fearful
-            "nervous": "fearful",       # 紧张不安 → fearful
-            "surprised": "surprised",   # 惊讶 → surprised
-            "disgusted": "disgusted",   # 厌恶 → disgusted
-            "tender": "neutral",        # 温柔 → neutral
-            "serious": "neutral",       # 严肃 → neutral
-            "gentle": "neutral",        # 轻柔 → neutral
-            "whisper": "neutral",       # 低语 → neutral (依赖pitch/volume调节)
-            "shout": "angry",           # 呼喊 → angry
-        }
-        emotion_value = emotion_map.get(emotion, "neutral")
-
-        # 根据音色+片段类型选择 Instruct 模板
-        prefix: str
-        if speaker_id == "longanyang":
-            # 旁白 → 角色 + 情感；其他 → 场景 + 情感
-            if segment_speaker == "旁白" or segment_type == "narration":
-                prefix = f"你现在说话的角色是一个旁白，你说话的情感是{emotion_value}。"
-            else:
-                prefix = f"你正在进行闲聊互动，你说话的情感是{emotion_value}。"
-        elif speaker_id == "longanhuan":
-            # 主要用于陪伴闲聊：场景 + 情感
-            prefix = f"你正在进行闲聊对话，你说话的情感是{emotion_value}。"
-        elif speaker_id == "longhuhu_v3":
-            # 儿童向内容：身份 + 情感（故事机）
-            prefix = f"你正在以一个故事机的身份说话，你说话的情感是{emotion_value}。"
-        else:
-            # 理论上不会走到这里，兜底为简单情感指令
-            prefix = f"你说话的情感是{emotion_value}。"
-
-        # 防止重复注入
-        if text.startswith(prefix):
-            return text
-        return prefix + text
+        # 🆕 不再添加任何前置描述，直接返回原文本
+        return text
 
     def _generate_cache_key(
         self,

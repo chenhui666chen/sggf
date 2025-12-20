@@ -292,7 +292,12 @@ class AudioQualityReviewer:
         total_music_cues = 0
         
         for seg in segments:
-            total_effects += len(seg.get("sound_effects", []))
+            # 防御性检查：确保 sound_effects 是列表类型
+            sound_effects = seg.get("sound_effects", [])
+            if sound_effects is None:
+                sound_effects = []
+            total_effects += len(sound_effects)
+            
             if seg.get("music_cue"):
                 total_music_cues += 1
         

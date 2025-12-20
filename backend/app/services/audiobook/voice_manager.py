@@ -31,6 +31,8 @@ class VoiceProfile:
     pitch_base: int = 50  # 基础音高 0-100
     speed_base: float = 1.0  # 基础语速 0.5-2.0
     volume_base: int = 50  # 基础音量 0-100
+    default_emotion: str = "neutral"  # 🆕 默认情感（反派音色专用）
+    is_villain_voice: bool = False  # 🆕 是否为反派音色（自动使用Instruct情感）
     
     # 情感参数映射（扩展版 - 在阿里云API限制内最大化情感表现力）
     # pitch范围: 0-100 (基础50), offset范围: -50到+50 (对应API的0.5-2.0倍率)
@@ -38,39 +40,86 @@ class VoiceProfile:
     emotion_adjustments: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
         # === 基础情感（6种） ===
         "neutral": {"pitch_offset": 0, "speed_multiplier": 1.0, "volume_offset": 0},
-        "happy": {"pitch_offset": 15, "speed_multiplier": 1.15, "volume_offset": 5},      # 开心：音高↑15%，语速↑15%，音量↑
+        "happy": {"pitch_offset": 10, "speed_multiplier": 1.12, "volume_offset": 5},      # 开心：音高↑10%，语速↑12%，音量↑
         "sad": {"pitch_offset": -15, "speed_multiplier": 0.85, "volume_offset": -8},       # 悲伤：音高↓15%，语速↓15%，音量↓
-        "angry": {"pitch_offset": 20, "speed_multiplier": 1.25, "volume_offset": 10},      # 愤怒：音高↑20%，语速↑25%，音量↑↑
-        "excited": {"pitch_offset": 25, "speed_multiplier": 1.35, "volume_offset": 8},     # 兴奋：音高↑25%，语速↑35%，音量↑
+        "angry": {"pitch_offset": 12, "speed_multiplier": 1.15, "volume_offset": 8},      # 愤怒：音高↑12%，语速↑15%，音量↑↑（降低幅度避免API 428错误）
+        "excited": {"pitch_offset": 8, "speed_multiplier": 1.10, "volume_offset": 5},     # 兴奋：音高↑8%，语速↑10%，音量↑（降低幅度避免API 428错误）
         "calm": {"pitch_offset": -8, "speed_multiplier": 0.92, "volume_offset": -3},       # 平静：音高↓8%，语速↓8%，音量略↓
         
         # === 扩展情感（10种） ===
-        "fearful": {"pitch_offset": 18, "speed_multiplier": 1.28, "volume_offset": -5},    # 恐惧：音高↑18%，语速↑28%，音量↓
-        "tense": {"pitch_offset": 12, "speed_multiplier": 1.18, "volume_offset": -2},      # 紧张：音高↑12%，语速↑18%，音量略↓
-        "surprised": {"pitch_offset": 22, "speed_multiplier": 1.32, "volume_offset": 7},   # 惊讶：音高↑22%，语速↑32%，音量↑
+        "fearful": {"pitch_offset": 10, "speed_multiplier": 1.15, "volume_offset": -5},    # 恐惧：音高↑10%，语速↑15%，音量↓（降低幅度避免API 428错误）
+        "tense": {"pitch_offset": 8, "speed_multiplier": 1.12, "volume_offset": -2},      # 紧张：音高↑8%，语速↑12%，音量略↓
+        "surprised": {"pitch_offset": 12, "speed_multiplier": 1.18, "volume_offset": 5},   # 惊讶：音高↑12%，语速↑18%，音量↑（降低幅度避免API 428错误）
         "disgusted": {"pitch_offset": -12, "speed_multiplier": 0.88, "volume_offset": 3},  # 厌恶：音高↓12%，语速↓12%，音量略↑
         "tender": {"pitch_offset": -5, "speed_multiplier": 0.90, "volume_offset": -5},     # 温柔：音高↓5%，语速↓10%，音量↓
         "serious": {"pitch_offset": -10, "speed_multiplier": 0.95, "volume_offset": 0},    # 严肃：音高↓10%，语速↓5%，音量不变
         "gentle": {"pitch_offset": -6, "speed_multiplier": 0.93, "volume_offset": -4},     # 轻柔：音高↓6%，语速↓7%，音量↓
-        "nervous": {"pitch_offset": 14, "speed_multiplier": 1.22, "volume_offset": -3},    # 紧张不安：音高↑14%，语速↑22%，音量略↓
+        "nervous": {"pitch_offset": 8, "speed_multiplier": 1.12, "volume_offset": -3},    # 紧张不安：音高↑8%，语速↑12%，音量略↓（降低幅度避免API 428错误）
         "whisper": {"pitch_offset": -18, "speed_multiplier": 0.75, "volume_offset": -20},  # 低语：音高↓18%，语速↓25%，音量↓↓
         "shout": {"pitch_offset": 28, "speed_multiplier": 1.20, "volume_offset": 15},      # 呼喊：音高↑28%，语速↑20%，音量↑↑↑
     })
     
-    def get_tts_params(self, emotion: str = "neutral") -> Dict[str, Any]:
-        """获取TTS参数（支持情感动态调节）"""
+    def get_tts_params(self, emotion: str = "") -> Dict[str, Any]:
+        """获取TTS参数（支持情感动态调节）
+        
+        🆕 如果未指定情感，则使用 default_emotion（反派音色自动应用冷酷/厌恶情感）
+        """
+        # 🆕 如果未指定情感，使用默认情感
+        if not emotion or emotion == "neutral":
+            emotion = self.default_emotion
+        
         adjustment = self.emotion_adjustments.get(emotion, self.emotion_adjustments["neutral"])
         
         # 动态计算音量（基础音量 + 情感偏移）
         volume_offset = adjustment.get("volume_offset", 0)
         final_volume = max(0, min(100, self.volume_base + volume_offset))
         
-        return {
+        params = {
             "speaker": self.tts_speaker_id,
             "pitch": max(0, min(100, self.pitch_base + adjustment["pitch_offset"])),
             "speed": max(0.5, min(2.0, self.speed_base * adjustment["speed_multiplier"])),
-            "volume": final_volume  # 动态音量调节
+            "volume": final_volume,
+            # 🔥 新增：根据情感调节停顿参数
+            "pause_before": self._get_pause_before(emotion),
+            "pause_after": self._get_pause_after(emotion)
         }
+        
+        # 🔍 调试：输出TTS参数
+        try:
+            logger.debug(
+                f"   🎵 get_tts_params返回: speaker={params.get('speaker')}, "
+                f"pitch={params.get('pitch')}, speed={params.get('speed'):.2f}, volume={params.get('volume')}"
+            )
+        except Exception:
+            pass  # 忽略日志错误
+        
+        return params
+    
+    def _get_pause_before(self, emotion: str) -> float:
+        """根据情感计算前停顿时长（秒）"""
+        pause_map = {
+            "neutral": 0.2,
+            "calm": 0.3,
+            "sad": 0.4,
+            "tense": 0.15,
+            "angry": 0.1,
+            "excited": 0.1,
+            "happy": 0.15,
+        }
+        return pause_map.get(emotion, 0.2)
+    
+    def _get_pause_after(self, emotion: str) -> float:
+        """根据情感计算后停顿时长（秒）"""
+        pause_map = {
+            "neutral": 0.3,
+            "calm": 0.4,
+            "sad": 0.5,
+            "tense": 0.25,
+            "angry": 0.2,
+            "excited": 0.25,
+            "happy": 0.3,
+        }
+        return pause_map.get(emotion, 0.3)
     
     def to_dict(self) -> Dict[str, Any]:
         """转为字典"""
@@ -147,9 +196,9 @@ class VoiceManager:
             "gender": "male",
             "age_group": "elder",
             "personality": "calm",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
+            "pitch_base": 43,  # 降低音高到0.86倍（43/50=0.86），让老年音色更明显
+            "speed_base": 0.92,  # 降低语速到0.92倍，更符合老年人说话节奏
+            "volume_base": 52,  # 稍微提高音量，避免声音过小
             "description": "长者（睿智）"
         },
         "male_warm": {
@@ -201,6 +250,41 @@ class VoiceManager:
             "speed_base": 1.0,
             "volume_base": 50,
             "description": "旁白（方言）"
+        },
+        
+        # === 特色音色（3种） ===
+        "male_villain_sinister": {
+            "tts_speaker_id": "longhan_v3",  # 基于温暖痴情男
+            "gender": "male",
+            "age_group": "adult",
+            "personality": "calm",  # 沉稳
+            "pitch_base": 45,  # 降低音高10%
+            "speed_base": 0.92,  # 减慢语速8%
+            "volume_base": 48,  # 降低音量，更沉稳
+            "description": "成熟谋士（沉稳）",
+            "default_emotion": "neutral"  # 默认中性情感
+        },
+        "female_villain_cold": {
+            "tts_speaker_id": "longanli_v3",  # 基于利落从容女
+            "gender": "female",
+            "age_group": "adult",
+            "personality": "calm",  # 冷静
+            "pitch_base": 45,  # 降低音高10%，更沉稳
+            "speed_base": 0.90,  # 减慢语速10%
+            "volume_base": 50,
+            "description": "冷静御姐（高雅）",
+            "default_emotion": "neutral"  # 默认中性情感
+        },
+        "female_villain_cunning": {
+            "tts_speaker_id": "longanya_v3",  # 基于高雅气质女
+            "gender": "female",
+            "age_group": "adult",
+            "personality": "elegant",  # 优雅
+            "pitch_base": 48,  # 略降低音高4%
+            "speed_base": 0.95,  # 略减慢语速5%
+            "volume_base": 48,
+            "description": "优雅名媛（睿智）",
+            "default_emotion": "neutral"  # 默认中性情感
         },
         
         # === 女性音色（10种） ===
@@ -299,16 +383,24 @@ class VoiceManager:
             "gender": "female",
             "age_group": "child",
             "personality": "energetic",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
+            "pitch_base": 65,  # 提高音高到1.3倍（65/50=1.3），让童声更明显
+            "speed_base": 1.05,  # 略加快语速，符合儿童活泼特质
+            "volume_base": 52,  # 略提高音量，让声音更清晰
             "description": "童声（天真）"
         }
     }
     
-    def __init__(self):
+    def __init__(self, llm_client=None):
+        """
+        Args:
+            llm_client: LLM客户端（用于智能推断角色特征）
+        """
+        # 统一管理角色音色档案
         self.character_voices: Dict[str, VoiceProfile] = {}  # 角色名 -> 音色档案
+        # 向后兼容旧字段 voice_profiles（部分模块仍然引用）
+        self.voice_profiles: Dict[str, VoiceProfile] = self.character_voices
         self.used_voice_ids = set()  # 已使用的音色ID
+        self.llm_client = llm_client  # 🆕 存储LLM客户端用于智能推断
     
     def assign_voice(
         self,
@@ -317,7 +409,13 @@ class VoiceManager:
         preferred_voice_id: Optional[str] = None
     ) -> VoiceProfile:
         """
-        为角色分配音色
+        为角色分配音色（自适应智能推断）
+        
+        优先级策略：
+        1. ✅ 已配置角色 → 直接返回（用户配置优先）
+        2. 🔒 指定音色 → 使用指定ID（手动覆盖）
+        3. 🤖 LLM推断 → 智能匹配（自动启用）
+        4. 📖 规则推断 → 基于名字特征（兜底）
         
         Args:
             character_name: 角色名
@@ -327,24 +425,26 @@ class VoiceManager:
         Returns:
             音色档案
         """
-        # 1. 检查是否已分配
+        # 优先级1：检查是否已分配（用户配置优先）
         if character_name in self.character_voices:
-            logger.info(f"✅ 角色 '{character_name}' 已有音色档案")
+            logger.info(f"✅ 角色 '{character_name}' 已有音色档案（用户配置）")
             return self.character_voices[character_name]
         
-        # 2. 使用指定音色
+        # 优先级2：使用指定音色（手动覆盖）
         if preferred_voice_id and preferred_voice_id in self.PRESET_VOICES:
             voice_config = self.PRESET_VOICES[preferred_voice_id]
             profile = self._create_profile(character_name, preferred_voice_id, voice_config)
             self.character_voices[character_name] = profile
             self.used_voice_ids.add(preferred_voice_id)
-            logger.info(f"✅ 为 '{character_name}' 分配指定音色: {preferred_voice_id}")
+            logger.info(f"🔒 为 '{character_name}' 分配指定音色: {preferred_voice_id}")
             return profile
         
-        # 3. 智能匹配音色
+        # 优先级3 & 4：智能匹配（LLM推断 → 规则推断）
         traits = character_info or {}
         if not traits:
+            # 🆕 自动尝试LLM推断（如果有LLM客户端）
             traits = self._infer_traits_from_name(character_name)
+        
         matched_voice_id = self._match_voice_by_traits(traits)
         voice_config = self.PRESET_VOICES[matched_voice_id]
         profile = self._create_profile(character_name, matched_voice_id, voice_config)
@@ -352,38 +452,65 @@ class VoiceManager:
         self.character_voices[character_name] = profile
         self.used_voice_ids.add(matched_voice_id)
         
-        logger.info(f"✅ 为 '{character_name}' 自动分配音色: {matched_voice_id}")
+        # 📊 显示分配方式
+        if self.llm_client and traits:
+            logger.info(f"🤖 为 '{character_name}' 智能分配音色: {matched_voice_id}")
+        else:
+            logger.info(f"📖 为 '{character_name}' 规则分配音色: {matched_voice_id}")
+        
         return profile
     
     def _match_voice_by_traits(self, character_info: Dict[str, Any]) -> str:
         """
         基于角色特征匹配最佳音色
-        
-        优先级：gender > age_group > personality
+            
+        优先级：gender > age_group > personality > role_type
         同时避免使用已分配的音色（确保差异化）
+        🆕 支持反派角色识别与专属音色匹配
         """
         gender = str(character_info.get("gender", "male")).lower()
         age = str(character_info.get("age_group", "young")).lower()
         personality = str(character_info.get("personality", "calm")).lower()
+        role_type = str(character_info.get("role_type", "")).lower()
+        
+        # 🎭 反派角色检测：优先分配支持Instruct情感的音色
+        villain_keywords = ["反派", "恶人", "反角", "敌人", "boss", "villain", "enemy", "antagonist"]
+        villain_personalities = ["cold", "evil", "sinister", "cruel", "ruthless", "domineering", "cunning"]
+        
+        is_villain = (
+            any(keyword in role_type for keyword in villain_keywords) or
+            personality in villain_personalities
+        )
+        
+        if is_villain:
+            logger.info(f"🎭 检测到反派角色，优先使用支持Instruct情感的音色 (role_type={role_type}, personality={personality})")
+            # 根据性别分配支持Instruct的音色（longanyang/longanhuan）
+            # TTS引擎会自动为这些音色添加 angry/disgusted 情感
+            if gender == "male":
+                logger.info("🎭 为男性反派分配: male_young_energetic (longanyang + Instruct情感)")
+                return "male_young_energetic"  # longanyang，支持angry/disgusted情感
+            elif gender == "female":
+                logger.info("🎭 为女性反派分配: female_young_energetic (longanhuan + Instruct情感)")
+                return "female_young_energetic"  # longanhuan，支持angry/disgusted情感
         
         # 候选音色列表
         candidates = []
-        
+            
         for voice_id, voice_config in self.PRESET_VOICES.items():
             # 跳过旁白音色
-            if voice_id == "male_narrator":  # 修复：使用正确的key
+            if voice_id == "male_narrator":
                 continue
-            
+                
             # 当已知角色性别时，严格按性别过滤音色池，避免女性角色被分配到男性音色（反之亦然）
             if gender in ("male", "female") and voice_config["gender"] != gender:
                 continue
-            
-            # 对性别未知的情况，才使用“避免重复”的策略
+                
+            # 对性别未知的情况，才使用"避免重复"的策略
             if gender not in ("male", "female"):
                 # 跳过已使用的音色（除非没有可用选项）
                 if voice_id in self.used_voice_ids and len(self.used_voice_ids) < len(self.PRESET_VOICES) - 2:
                     continue
-            
+                
             # 计算匹配分数
             score = 0
             if voice_config["gender"] == gender:
@@ -392,9 +519,9 @@ class VoiceManager:
                 score += 5
             if voice_config["personality"] == personality:
                 score += 3
-            
+                
             candidates.append((voice_id, score))
-        
+            
         # 选择最高分
         if candidates:
             candidates.sort(key=lambda x: x[1], reverse=True)
@@ -409,31 +536,180 @@ class VoiceManager:
                         return voice_id
             # 降级：返回任意未使用的音色
             for voice_id in self.PRESET_VOICES:
-                if voice_id not in self.used_voice_ids and voice_id != "male_narrator":  # 修复：使用正确的key
+                if voice_id not in self.used_voice_ids and voice_id != "male_narrator":
                     return voice_id
             # 最后降级：返回默认音色
             return "male_young_energetic"
     
     def _infer_traits_from_name(self, character_name: str) -> Dict[str, Any]:
-        """根据中文称呼简单推断性别/年龄段，用于缺少结构化信息时的兜底逻辑。"""
+        """
+        🤖 智能推断角色特征（基于名字）
+        
+        优先使用LLM进行语义理解，失败时回退到规则推断
+        
+        Args:
+            character_name: 角色名
+        
+        Returns:
+            角色特征 {gender, age_group, personality}
+        """
         name = (character_name or "").strip()
-        # 老年女性称呼
-        elder_female_keywords = ["奶奶", "婆婆", "大妈", "阿姨"]
+        if not name:
+            return {}
+        
+        # 🆕 优先尝试LLM智能推断
+        if self.llm_client:
+            try:
+                llm_traits = self._llm_infer_traits(name)
+                if llm_traits:
+                    logger.info(f"🤖 [智能推断] '{name}' -> {llm_traits}")
+                    return llm_traits
+            except Exception as e:
+                logger.warning(f"⚠️ LLM推断失败，回退到规则推断: {e}")
+        
+        # 📖 回退到规则推断
+        return self._rule_based_infer_traits(name)
+    
+    def _llm_infer_traits(
+        self,
+        character_name: str,
+        context: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        🤖 使用LLM智能推断角色特征
+        
+        Args:
+            character_name: 角色名
+            context: 上下文信息（可选，如角色描述）
+        
+        Returns:
+            角色特征字典，失败返回None
+        """
+        prompt = f"""你是专业的角色分析助手，请根据角色名推断其基本特征。
+
+**角色名**：{character_name}
+{f'**上下文**：{context}' if context else ''}
+
+**推断规则**：
+1. **性别** (gender)：根据中文名字特征判断
+   - female: 常见女性名字（娜/婷/芝/霞/雪/梅/芳/琳/雯/瑜/娥等）、称呼（娘/姐/妹/娃/奶奶/婆婆/姑娘/阿姨）
+   - male: 常见男性名字（昊/浩/强/伟/军/明/建/凌/龙等）、称呼（爷爷/大爷/老头/伯伯）
+   - unknown: 无法判断（如英文名/中性称呼）
+
+2. **年龄段** (age_group)：根据称呼/职业推断
+   - child: 儿童（小孩/娃娃/小屏风）
+   - young: 青年（小姐/小伙/小姑娘/默认）
+   - middle: 中年（大叔/大娘/阿姨）
+   - elder: 老年（爷爷/奶奶/老人）
+
+3. **性格** (personality)：根据名字气质猜测
+   - calm: 沉稳冷静（默认）
+   - energetic: 活泼开朗
+   - gentle: 温柔亲切
+   - serious: 严肃正经
+
+**输出格式**：纯JSON，不要包含注释
+```json
+{{
+    "gender": "female|male|unknown",
+    "age_group": "child|young|middle|elder",
+    "personality": "calm|energetic|gentle|serious",
+    "confidence": 0.8
+}}
+```
+
+**示例**：
+- "苏娜" -> {{"gender": "female", "age_group": "young", "personality": "gentle", "confidence": 0.9}}
+- "陈浩" -> {{"gender": "male", "age_group": "young", "personality": "calm", "confidence": 0.85}}
+- "李奶奶" -> {{"gender": "female", "age_group": "elder", "personality": "gentle", "confidence": 0.95}}
+- "Alice" -> {{"gender": "unknown", "age_group": "young", "personality": "calm", "confidence": 0.5}}
+"""
+        
+        try:
+            from app.services.model_optimizer import TaskType
+            import asyncio
+            import json
+            
+            response = asyncio.run(self.llm_client.chat(
+                messages=[{"role": "user", "content": prompt}],
+                task_type=TaskType.AUDIOBOOK_SCRIPT,
+                max_tokens=500,
+                response_format={"type": "json_object"},
+                use_cache=True,  # 启用缓存，相同名字不重复调用
+            ))
+            
+            # 解析JSON
+            result = json.loads(response.strip())
+            
+            # 验证结果
+            if result.get("gender") and result.get("age_group"):
+                # 只返回高置信度的结果
+                confidence = result.get("confidence", 0.5)
+                if confidence >= 0.7:
+                    return {
+                        "gender": result["gender"],
+                        "age_group": result["age_group"],
+                        "personality": result.get("personality", "calm")
+                    }
+                else:
+                    logger.info(f"📊 LLM置信度较低 ({confidence:.2f})，回退到规则推断")
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"🤖 LLM推断失败: {e}")
+            return None
+    
+    def _rule_based_infer_traits(self, character_name: str) -> Dict[str, Any]:
+        """📖 基于规则的特征推断（增强版）"""
+        name = character_name.strip()
+        
+        # === 年龄段判断 ===
+        # 老年女性
+        elder_female_keywords = ["奶奶", "婆婆", "大妈", "阿姨", "老太太"]
         if any(k in name for k in elder_female_keywords):
-            return {"gender": "female", "age_group": "elder"}
-        # 老年男性称呼
-        elder_male_keywords = ["爷爷", "大爷", "老头", "老伯", "伯伯"]
+            return {"gender": "female", "age_group": "elder", "personality": "gentle"}
+        
+        # 老年男性
+        elder_male_keywords = ["爷爷", "大爷", "老头", "老伯", "伯伯", "老爷子"]
         if any(k in name for k in elder_male_keywords):
-            return {"gender": "male", "age_group": "elder"}
-        # 典型女性名字特征（优先覆盖“苏娜”等场景）
-        female_name_keywords = ["妹", "丫头", "姑娘", "小姐姐"]
-        if name and (
-            name.endswith("娜")
-            or any(k in name for k in female_name_keywords)
-        ):
-            # 默认按年轻女性处理
-            return {"gender": "female", "age_group": "young"}
-        # 默认返回空，由 _match_voice_by_traits 使用默认规则处理
+            return {"gender": "male", "age_group": "elder", "personality": "serious"}
+        
+        # 儿童
+        child_keywords = ["小孩", "娃娃", "小屏风", "孩子"]
+        if any(k in name for k in child_keywords):
+            return {"gender": "unknown", "age_group": "child", "personality": "energetic"}
+        
+        # === 性别判断（增强版） ===
+        # 女性特征字（扩充）
+        female_chars = [
+            "娜", "婷", "芝", "霞", "雪", "梅", "芳", "琳", "雯", "瑜", "娥",
+            "芭", "妮", "蕾", "萝", "莉", "慧", "敏", "静", "涵", "琼",
+            "娟", "娅", "珊", "嘉", "莲", "蓉", "珊", "洁", "雅", "怡"
+        ]
+        if any(name.endswith(c) for c in female_chars):
+            return {"gender": "female", "age_group": "young", "personality": "gentle"}
+        
+        # 女性称呼/关键词
+        female_keywords = ["姐", "姑娘", "小姐", "妹", "丫头", "娘", "女士"]
+        if any(k in name for k in female_keywords):
+            return {"gender": "female", "age_group": "young", "personality": "energetic"}
+        
+        # 男性特征字（扩充）
+        male_chars = [
+            "昊", "浩", "强", "伟", "军", "明", "建", "凌", "龙", "杰",
+            "博", "宇", "峰", "岭", "浩", "辉", "宏", "俊", "强", "瑞"
+        ]
+        if any(name.endswith(c) for c in male_chars):
+            return {"gender": "male", "age_group": "young", "personality": "calm"}
+        
+        # 男性称呼/关键词
+        male_keywords = ["大叔", "小伙", "公子", "少侠", "少爷"]
+        if any(k in name for k in male_keywords):
+            return {"gender": "male", "age_group": "young", "personality": "energetic"}
+        
+        # 默认返回空（由 _match_voice_by_traits 使用默认规则处理）
+        logger.info(f"📊 [规则推断] '{name}' 无法判断，使用默认配置")
         return {}
     
     def _create_profile(
@@ -452,7 +728,8 @@ class VoiceManager:
             tts_speaker_id=voice_config["tts_speaker_id"],
             pitch_base=voice_config["pitch_base"],
             speed_base=voice_config["speed_base"],
-            volume_base=voice_config["volume_base"]
+            volume_base=voice_config["volume_base"],
+            default_emotion=voice_config.get("default_emotion", "neutral")  # 🆕 支持反派音色默认情感
         )
     
     def get_narrator_voice(self) -> VoiceProfile:
@@ -467,12 +744,18 @@ class VoiceManager:
             )
         else:
             profile = self.character_voices["旁白"]
+            # 🔍 详细调试：输出旁白的实际参数
             logger.info(f"✅ [调试] 旁白已配置: {profile.voice_id} ({profile.tts_speaker_id})")
+            logger.info(f"   📦 旁白参数: pitch_base={profile.pitch_base}, speed_base={profile.speed_base}, volume_base={profile.volume_base}")
         return self.character_voices["旁白"]
     
     def get_voice(self, character_name: str) -> Optional[VoiceProfile]:
         """获取角色音色"""
-        return self.character_voices.get(character_name)
+        profile = self.character_voices.get(character_name)
+        if profile:
+            # 🔍 调试：输出角色的实际参数
+            logger.debug(f"   📦 {character_name}参数: pitch_base={profile.pitch_base}, speed_base={profile.speed_base}, volume_base={profile.volume_base}")
+        return profile
     
     def apply_project_voice_mapping(self, voice_mapping: Dict[str, Any]):
         """应用项目级的角色音配置（用户配置优先）

@@ -610,15 +610,24 @@ class AudiobookScriptAgent:
    - 情绪高涨：0.3-0.4
    - 高潮场景：0.4-0.5（关键处留白，突出台词）
 
-**重要提醒**：
+*重要提醒**：
 - 只输出JSON数组，不要添加任何//注释或/*注释*/
 - 不要在JSON中添加解释性文字
 - emotion字段必须使用推荐情感之一，不要自行发明
 - voice_params必须包含rate和pitch参数，根据情感调整
 - pause_before/after单位为秒，范围：0.1-2.0
 - 优先使用happy/sad/tense等有强烈情感的标签，避免过多使用neutral
-- performance_notes要具体可执行，帮助TTS调节韵律和语气（可点明是“故事机”语气或“童声”语气等）
-- adaptation_reason说明为什么这样设置句式和停顿，以服务听觉节奏"""
+- performance_notes要具体可执行，帮助TTS调节韵律和语气（可点明是"故事机"语气或"童声"语气等）
+- adaptation_reason说明为什么这样设置句式和停顿，以服务听觉节奏
+
+🔥 **极重要：text字段内容规范**
+- text字段必须是**实际要朗读的台词/旁白内容**，不要写对朗读方式的描述
+- ❌ 错误示例："旁白将温柔地讲述接下来的情节"（这是剧本指导语，不是台词）
+- ❌ 错误示例："旁白怎样怎样选择"（这是对角色的描述，不是台词）
+- ✅ 正确示例："夜幕降临，城市的灯光逐渐亮起"（这是实际的旁白台词）
+- ✅ 正确示例："你真的要这样做吗？"（这是实际的对话台词）
+- 如果需要说明朗读方式，请使用performance_notes字段，不要写在text中
+"""
         
         try:
             from app.services.model_optimizer import TaskType
@@ -1034,12 +1043,12 @@ class AudiobookScriptAgent:
         theme = analysis.get('theme', '')
         emotional_tone = analysis.get('emotional_tone', 'calm')
         
-        # 根据类型和主题生成简介
+        # 根据类型和主题生成简介（移除chapter_title，避免说出"chapter"）
         if character_list:
             main_chars = ', '.join(character_list[:3])  # 只取前3个主要角色
-            intro_text = f"{main_chars}的故事继续展开。{theme}，{chapter_title}，现在开播！"
+            intro_text = f"{main_chars}的故事继续展开。{theme}，第{chapter_number}集，现在开播！"
         else:
-            intro_text = f"{theme}，{chapter_title}，现在开播！"
+            intro_text = f"{theme}，第{chapter_number}集，现在开播！"
         
         # 选择片头配乐风格
         music_style_map = {

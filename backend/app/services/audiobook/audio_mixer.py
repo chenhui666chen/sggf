@@ -1,23 +1,27 @@
 """
-音频混合器 - 拼接与后处理（FFmpeg原生版）
+音频混合器 - 拼接与后处理（纯pydub版）
+
+🔥 修改说明：
+- 移除FFmpeg命令行依赖，只使用pydub
+- pydub底层仍需ffmpeg/avconv，但通过Python封装更稳定
+- 解决Python 3.13上FFmpeg命令行调用兼容性问题
 
 核心功能：
 1. 音频片段拼接（支持静音间隔）
 2. 音效叠加（时间轴定位）
-3. 背景音乐混音（自动ducking）
-4. 音量归一化
+3. 背景音乐混音（overlay方式，保持人声音量）
+4. 音量归一化（可选）
 5. 格式转换
 
 技术方案：
-- 优先使用 FFmpeg 命令行（原生，无 Python 依赖兼容性问题）
-- 降级使用 pydub（仅在 FFmpeg 不可用时）
-- 最终降级：简单字节拼接
+- 优先使用 pydub（主要方案）
+- 降级使用简单字节拼接（pydub不可用时）
 
 依赖：
-- FFmpeg: https://ffmpeg.org/download.html（必须）
-- pydub: pip install pydub（可选，Python 3.13 可能不兼容）
+- pydub: pip install pydub（必须）
+- ffmpeg/avconv: pydub底层依赖，系统安装即可
 
-注意：需要先安装FFmpeg到系统PATH
+注意：需要先安装pydub到Python环境
 """
 import io
 import os
@@ -39,7 +43,7 @@ def _check_ffmpeg_available() -> bool:
 
 FFMPEG_AVAILABLE = _check_ffmpeg_available()
 
-# 尝试导入pydub（作为降级方案）
+# 尝试导入pydub
 try:
     from pydub import AudioSegment
     from pydub.effects import normalize
@@ -48,13 +52,11 @@ except ImportError:
     PYDUB_AVAILABLE = False
 
 # 输出可用的音频处理引擎
-if FFMPEG_AVAILABLE:
-    logger.info("✅ 音频混合器：使用 FFmpeg 原生引擎（最佳）")
-elif PYDUB_AVAILABLE:
-    logger.info("✅ 音频混合器：使用 pydub 引擎（降级）")
+if PYDUB_AVAILABLE:
+    logger.info("✅ 音频混合器：使用 pydub 引擎（主要方案）")
 else:
-    logger.warning("⚠️ 音频混合器：仅支持简单拼接模式（需安装 FFmpeg 以启用完整功能）")
-    logger.warning("   下载地址: https://ffmpeg.org/download.html")
+    logger.warning("⚠️ 音频混合器：仅支持简单拼接模式（需安装 pydub 以启用完整功能）")
+    logger.warning("   安装命令: pip install pydub")
 
 
 class AudioQualityGrade(str, Enum):
@@ -86,36 +88,49 @@ class AudioQualityReport:
 
 class AudioMixer:
     """
-    音频混合器（FFmpeg原生版）
+    音频混合器（纯pydub版）
     
-    优先级：
-    1. FFmpeg 命令行（最佳）
-    2. pydub（降级）
-    3. 简单拼接（最终降级）
+    🔥 修改说明：
+    - 移除FFmpeg依赖，只使用pydub
+    - pydub底层仍需ffmpeg/avconv，但通过Python封装更稳定
+    - 优先级：pydub > 简单拼接
     """
     
     def __init__(
         self,
         silence_duration: int = 500,  # 静音间隔（毫秒）
         normalize_audio: bool = False,  # 🔧 修复：禁用归一化（避免音频截断）
-        enable_fallback: bool = True   # 是否启用降级模式
+        enable_fallback: bool = True,   # 是否启用降级模式
+        force_pydub: bool = True        # 🔥 新增：强制使用pydub（忽略FFmpeg）
     ):
         self.silence_duration = silence_duration
         self.normalize_audio = normalize_audio
         self.enable_fallback = enable_fallback
+        self.force_pydub = force_pydub
         
-        # 检查可用性
-        self.ffmpeg_available = FFMPEG_AVAILABLE
-        self.pydub_available = PYDUB_AVAILABLE
-        
-        if self.ffmpeg_available:
-            logger.info(f"✅ 音频混合器初始化（FFmpeg原生模式）: silence={silence_duration}ms, normalize={normalize_audio}")
-        elif self.pydub_available:
-            logger.info(f"✅ 音频混合器初始化（pydub模式）: silence={silence_duration}ms, normalize={normalize_audio}")
+        # 🔥 强制使用pydub模式（忽略FFmpeg）
+        if force_pydub:
+            self.ffmpeg_available = False  # 强制禁用FFmpeg
+            self.pydub_available = PYDUB_AVAILABLE
+            if self.pydub_available:
+                logger.info(f"✅ 音频混合器初始化（纯pydub模式）: silence={silence_duration}ms, normalize={normalize_audio}")
+            else:
+                logger.error("❌ pydub不可用！请安装: pip install pydub")
+                if not self.enable_fallback:
+                    raise RuntimeError("pydub不可用且未启用降级模式")
         else:
-            logger.warning(f"⚠️ 音频混合器初始化（降级模式）: 缺少 FFmpeg/pydub 支持")
-            if not self.enable_fallback:
-                raise RuntimeError("FFmpeg 和 pydub 均不可用且未启用降级模式")
+            # 原有逻辑：检查可用性
+            self.ffmpeg_available = FFMPEG_AVAILABLE
+            self.pydub_available = PYDUB_AVAILABLE
+            
+            if self.ffmpeg_available:
+                logger.info(f"✅ 音频混合器初始化（FFmpeg原生模式）: silence={silence_duration}ms, normalize={normalize_audio}")
+            elif self.pydub_available:
+                logger.info(f"✅ 音频混合器初始化（pydub模式）: silence={silence_duration}ms, normalize={normalize_audio}")
+            else:
+                logger.warning(f"⚠️ 音频混合器初始化（降级模式）: 缺少 FFmpeg/pydub 支持")
+                if not self.enable_fallback:
+                    raise RuntimeError("FFmpeg 和 pydub 均不可用且未启用降级模式")
     
     def mix_chapter(
         self,
@@ -124,7 +139,7 @@ class AudioMixer:
         bitrate: str = "128k"
     ) -> bytes:
         """
-        混合章节音频（优先使用 FFmpeg 原生）
+        混合章节音频（纯pydub模式）
         
         Args:
             audio_segments: 音频片段列表
@@ -140,20 +155,7 @@ class AudioMixer:
         
         logger.info(f"🎧 开始混合音频: {len(audio_segments)} 个片段")
         
-        # 优先级 1: FFmpeg 命令行
-        if self.ffmpeg_available:
-            try:
-                return self._mix_with_ffmpeg_cli(audio_segments, output_format, bitrate)
-            except Exception as e:
-                logger.error(f"❌ FFmpeg 原生混音失败: {e}")
-                import traceback
-                traceback.print_exc()
-                
-                if not self.enable_fallback:
-                    raise
-                logger.warning("⚠️ 降级到 pydub 模式")
-        
-        # 优先级 2: pydub
+        # 🔥 优先级 1: pydub（主要方案）
         if self.pydub_available:
             try:
                 return self._mix_with_pydub(audio_segments, output_format, bitrate)
@@ -166,7 +168,7 @@ class AudioMixer:
                     raise
                 logger.warning("⚠️ 降级到简单拼接模式")
         
-        # 优先级 3: 简单字节拼接
+        # 🔥 优先级 2：简单字节拼接（降级方案）
         try:
             combined = b"".join(audio_segments)
             logger.info(
@@ -185,7 +187,7 @@ class AudioMixer:
         bgm_volume_offset: int = -20  # 降低背景音乐音量（dB）
     ) -> bytes:
         """
-        添加背景音乐（FFmpeg增强版）
+        添加背景音乐（纯pydub版）
         
         Args:
             voice_audio: 人声音频
@@ -195,54 +197,14 @@ class AudioMixer:
         Returns:
             混音后的音频
         """
-        # 🔥 优先使用 FFmpeg 原生混音
-        if self.ffmpeg_available:
-            try:
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    temp_path = Path(temp_dir)
-                    voice_file = temp_path / "voice.mp3"
-                    bgm_file = temp_path / "bgm.mp3"
-                    output_file = temp_path / "mixed.mp3"
-                    
-                    # 写入临时文件
-                    voice_file.write_bytes(voice_audio)
-                    bgm_file.write_bytes(bgm_audio)
-                    
-                    # FFmpeg 混音命令：
-                    # - aloop=999:size=2e+09 循环 BGM
-                    # - volume=X 调整音量（使用线性倍数）
-                    # - amix 混音
-                    # - shortest=1 截断到最短输入
-                    volume_multiplier = 10 ** (bgm_volume_offset / 20)  # dB 转线性
-                    
-                    cmd = [
-                        "ffmpeg", "-y",
-                        "-i", str(voice_file),
-                        "-stream_loop", "-1",  # 循环 BGM
-                        "-i", str(bgm_file),
-                        "-filter_complex",
-                        f"[1:a]volume={volume_multiplier}[bgm];[0:a][bgm]amix=inputs=2:duration=first[out]",
-                        "-map", "[out]",
-                        "-c:a", "libmp3lame",
-                        "-b:a", "128k",
-                        str(output_file)
-                    ]
-                    
-                    subprocess.run(cmd, check=True, capture_output=True)
-                    logger.info(f"✅ FFmpeg 背景音乐混合完成")
-                    return output_file.read_bytes()
-                    
-            except Exception as e:
-                logger.warning(f"⚠️ FFmpeg 混音失败，尝试降级方案: {e}")
-        
-        # 🔻 降级方案：pydub
+        # 🔥 使用 pydub 混音（主要方案）
         if self.pydub_available:
             try:
                 # 加载音频
                 voice = AudioSegment.from_file(io.BytesIO(voice_audio))
                 bgm = AudioSegment.from_file(io.BytesIO(bgm_audio))
                 
-                # 调整BGM音量
+                # 调整BGM音量（默认-20dB）
                 bgm = bgm + bgm_volume_offset
                 
                 # 循环BGM到与人声相同长度
@@ -253,10 +215,11 @@ class AudioMixer:
                 # 截取BGM到与人声相同长度
                 bgm = bgm[:len(voice)]
                 
-                # 混音（overlay）
+                # 🔥 关键：使用 overlay 叠加混音（不会削弱人声）
+                # overlay 会将 BGM 叠加在人声上，不会降低人声音量
                 mixed = voice.overlay(bgm)
                 
-                # 归一化
+                # 归一化（如果启用）
                 if self.normalize_audio:
                     mixed = normalize(mixed)
                 
@@ -264,7 +227,7 @@ class AudioMixer:
                 output_buffer = io.BytesIO()
                 mixed.export(output_buffer, format="mp3", bitrate="128k")
                 
-                logger.info(f"✅ pydub 背景音乐混合完成")
+                logger.info(f"✅ pydub 背景音乐混合完成：BGM音量偏移={bgm_volume_offset}dB, 混音方式=overlay（保持人声原始音量）")
                 return output_buffer.getvalue()
             except Exception as e:
                 logger.warning(f"⚠️ pydub 混音失败: {e}")
@@ -302,133 +265,13 @@ class AudioMixer:
                 "size_kb": len(audio_data) / 1024
             }
     
-    def _mix_with_ffmpeg_cli(
-        self,
-        audio_segments: List[bytes],
-        output_format: str = "mp3",
-        bitrate: str = "128k"
-    ) -> bytes:
-        """使用 FFmpeg 命令行混音（filter_complex 无损拼接版）"""
-        # 创建临时目录
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir_path = Path(tmpdir)
-            
-            # 1. 将所有音频片段写入临时文件并解码为 WAV（避免 MP3 帧边界问题）
-            input_files = []
-            for i, audio_bytes in enumerate(audio_segments):
-                if not audio_bytes:
-                    continue
-                
-                # 先保存原始 MP3
-                mp3_file = tmpdir_path / f"segment_{i:04d}.mp3"
-                mp3_file.write_bytes(audio_bytes)
-                
-                # 解码为 WAV（无损，避免帧对齐问题）
-                wav_file = tmpdir_path / f"segment_{i:04d}.wav"
-                subprocess.run([
-                    "ffmpeg", "-i", str(mp3_file),
-                    "-acodec", "pcm_s16le",
-                    "-ar", "44100",
-                    "-ac", "2",
-                    "-y", str(wav_file)
-                ], check=True, capture_output=True)
-                
-                input_files.append(str(wav_file))
-            
-            if not input_files:
-                logger.warning("⚠️ 没有有效的音频片段")
-                return b""
-            
-            # 2. 生成静音文件（WAV 格式）
-            silence_duration_sec = self.silence_duration / 1000.0
-            
-            # 3. 使用 filter_complex 进行无损拼接（带静音间隔）
-            output_file = tmpdir_path / f"output.{output_format}"
-            
-            # 构建 filter_complex 滤镜链
-            # 格式: [0:a][silence][1:a][silence]...[N:a] concat=n=X:v=0:a=1
-            filter_parts = []
-            concat_inputs = []
-            
-            for i in range(len(input_files)):
-                concat_inputs.append(f"[{i}:a]")
-                if i < len(input_files) - 1 and self.silence_duration > 0:
-                    # 添加静音（使用 aevalsrc 生成）
-                    filter_parts.append(
-                        f"aevalsrc=0:d={silence_duration_sec}:s=44100:c=stereo[silence{i}]"
-                    )
-                    concat_inputs.append(f"[silence{i}]")
-            
-            # 拼接所有输入
-            concat_filter = "".join(concat_inputs) + f"concat=n={len(concat_inputs)}:v=0:a=1[outa]"
-            
-            # 完整滤镜链
-            if filter_parts:
-                full_filter = ";".join(filter_parts) + ";" + concat_filter
-            else:
-                full_filter = concat_filter
-            
-            # 构建 FFmpeg 命令
-            ffmpeg_cmd = ["ffmpeg"]
-            
-            # 添加所有输入文件
-            for input_file in input_files:
-                ffmpeg_cmd.extend(["-i", input_file])
-            
-            # 添加滤镜链
-            ffmpeg_cmd.extend([
-                "-filter_complex", full_filter,
-                "-map", "[outa]",
-            ])
-            
-            # 编码参数
-            if output_format == "mp3":
-                ffmpeg_cmd.extend([
-                    "-c:a", "libmp3lame",
-                    "-b:a", bitrate,
-                ])
-            else:
-                ffmpeg_cmd.extend([
-                    "-c:a", "pcm_s16le",
-                ])
-            
-            # 添加归一化（如果需要）
-            if self.normalize_audio:
-                # 注意：loudnorm 要在 filter_complex 之后应用
-                ffmpeg_cmd.extend(["-af", "loudnorm=I=-16:TP=-1.5:LRA=11"])
-            
-            ffmpeg_cmd.extend(["-y", str(output_file)])
-            
-            # 执行 FFmpeg
-            logger.debug(f"🔧 FFmpeg 命令: {' '.join(ffmpeg_cmd)}")
-            result = subprocess.run(
-                ffmpeg_cmd,
-                capture_output=True,
-                text=True
-            )
-            
-            if result.returncode != 0:
-                logger.error(f"❌ FFmpeg 执行失败: {result.stderr}")
-                raise RuntimeError(f"FFmpeg failed: {result.stderr}")
-            
-            # 6. 读取输出文件
-            output_bytes = output_file.read_bytes()
-            
-            logger.info(
-                f"✅ FFmpeg filter_complex 无损混音完成: "
-                f"片段数 {len(input_files)}, "
-                f"大小 {len(output_bytes)/1024:.1f}KB"
-            )
-            
-            return output_bytes
-    
     def _mix_with_pydub(
         self,
         audio_segments: List[bytes],
         output_format: str = "mp3",
         bitrate: str = "128k"
     ) -> bytes:
-        """使用pydub混音（核心实现）"""
+        """使用pydub混音（主要方案）"""
         # 1. 加载所有音频片段
         segments = []
         for audio_bytes in audio_segments:
@@ -470,7 +313,7 @@ class AudioMixer:
         result = output_buffer.getvalue()
         
         logger.info(
-            f"✅ FFmpeg混音完成: "
+            f"✅ pydub混音完成: "
             f"时长 {len(combined)/1000:.1f}秒, "
             f"大小 {len(result)/1024:.1f}KB"
         )
@@ -485,7 +328,7 @@ class AudioMixer:
         effect_volume_offset: int = -10
     ) -> bytes:
         """
-        叠加音效（时间轴定位）
+        叠加音效（时间轴定位，纯pydub版）
         
         Args:
             voice_audio: 人声音频
@@ -496,43 +339,7 @@ class AudioMixer:
         Returns:
             叠加音效后的音频
         """
-        # 🔥 优先使用 FFmpeg 原生叠加
-        if self.ffmpeg_available:
-            try:
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    temp_path = Path(temp_dir)
-                    voice_file = temp_path / "voice.mp3"
-                    effect_file = temp_path / "effect.mp3"
-                    output_file = temp_path / "mixed.mp3"
-                    
-                    # 写入临时文件
-                    voice_file.write_bytes(voice_audio)
-                    effect_file.write_bytes(effect_audio)
-                    
-                    # FFmpeg 音效叠加命令
-                    volume_multiplier = 10 ** (effect_volume_offset / 20)  # dB 转线性
-                    delay_ms = max(0, position_ms)  # 确保非负值
-                    
-                    cmd = [
-                        "ffmpeg", "-y",
-                        "-i", str(voice_file),
-                        "-i", str(effect_file),
-                        "-filter_complex",
-                        f"[1:a]adelay={delay_ms}|{delay_ms},volume={volume_multiplier}[sfx];[0:a][sfx]amix=inputs=2:duration=first[out]",
-                        "-map", "[out]",
-                        "-c:a", "libmp3lame",
-                        "-b:a", "128k",
-                        str(output_file)
-                    ]
-                    
-                    subprocess.run(cmd, check=True, capture_output=True)
-                    logger.debug(f"✅ FFmpeg 音效叠加完成: position={position_ms}ms")
-                    return output_file.read_bytes()
-                    
-            except Exception as e:
-                logger.warning(f"⚠️ FFmpeg 音效叠加失败: {e}")
-        
-        # 🔻 降级方案：pydub
+        # 🔥 使用 pydub 叠加音效（主要方案）
         if self.pydub_available:
             try:
                 voice = AudioSegment.from_file(io.BytesIO(voice_audio))

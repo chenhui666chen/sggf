@@ -58,7 +58,7 @@ class AudiobookEngine:
         self,
         enable_cache: bool = True,
         max_concurrent: int = 1,  # 降低并发，避免阿里云限流（从5改为1）
-        llm_client=None,  # LLM客户端（用于专业Agent）
+        llm_client=None,  # LLM客户端（用于专业Agent + 智能音色推断）
         tts_model: str = "cosyvoice-v3-flash",  # cosyvoice 模型：flash 或 plus
     ) -> None:
         # 检查LLM客户端
@@ -80,7 +80,11 @@ class AudiobookEngine:
         
         # 初始化基础组件
         self.tts_model = tts_model
-        self.voice_manager = VoiceManager()
+        # 🆕 VoiceManager自动启用智能推断：
+        # - 用户已配置的角色 → 使用用户配置
+        # - 用户未配置的角色 → LLM智能推断 (如果有llm_client)
+        # - LLM推断失败 → 增强版规则推断
+        self.voice_manager = VoiceManager(llm_client=llm_client)
         self.tts_engine = TTSEngine(
             enable_cache=enable_cache,
             max_concurrent=max_concurrent,
@@ -280,8 +284,9 @@ class AudiobookEngine:
                 )
             
             # 并行执行三个设计阶段
+            # 👉 关键修复：只为未配置的角色设计音色，避免覆盖用户配置
             voice_profiles, sound_effects_count, music_cues_count = await self._parallel_design(
-                task_id, script_segments, chapter_content
+                task_id, script_segments, chapter_content, preserve_user_config=True  # 🔥 保留用户配置
             )
             
             logger.info(f"   ✅ 并行设计完成")
@@ -317,8 +322,8 @@ class AudiobookEngine:
                         "speaker": seg.speaker,
                         "emotion": seg.emotion,
                         "performance_notes": seg.performance_notes if hasattr(seg, 'performance_notes') else "",
-                        "sound_effects": seg.sound_effects,
-                        "music_cue": seg.music_cue if hasattr(seg, 'music_cue') else ""
+                        "sound_effects": seg.sound_effects if seg.sound_effects is not None else [],
+                        "music_cue": seg.music_cue if hasattr(seg, 'music_cue') and seg.music_cue is not None else ""
                     }
                     for seg in script_segments
                 ]
@@ -604,12 +609,31 @@ class AudiobookEngine:
         # 片尾
         closing = chapter_structure.closing
         if closing:
+            # 🆕 收集片尾各部分文本
             closing_parts = [
                 closing.recap_text.strip() if closing.recap_text else "",
                 closing.hook_text.strip() if closing.hook_text else "",
                 closing.call_to_action.strip() if closing.call_to_action else "",
             ]
-            closing_text = " ".join([p for p in closing_parts if p])
+            
+            # 🔥 关键修复：过滤异常内容（移除包含"旁白"等角色说话引导语的片段）
+            import re
+            cleaned_parts = []
+            for part in closing_parts:
+                if not part:
+                    continue
+                
+                # 检测并移除异常的角色说话引导语（如"旁白说："、"旁白怎么怎么样"等）
+                # 模式1："旁白说：xxx" → 保留"xxx"
+                cleaned = re.sub(r'^旁白[说道讲][:：]\s*', '', part)
+                # 模式2："旁白怎么怎么样" → 完全移除这种描述性文本
+                if not re.match(r'^旁白[^：:，,。.！!？?\s]+', cleaned):
+                    # 只有不是纯粹描述旁白状态的文本才保留
+                    cleaned_parts.append(cleaned)
+                else:
+                    logger.warning(f"⚠️ 片尾检测到异常内容并移除: {part[:50]}")
+            
+            closing_text = " ".join(cleaned_parts)
             if closing_text:
                 closing_segment = ScriptSegment(
                     type="narration",
@@ -628,7 +652,7 @@ class AudiobookEngine:
         return segments
     
     def _assign_voices(self, script_segments):
-        """为剧本片段分配音色"""
+        """为剧本片段分配音色（统一使用VoiceManager）"""
         for segment in script_segments:
             if segment.speaker == "旁白":
                 voice_profile = self.voice_manager.get_narrator_voice()
@@ -638,13 +662,24 @@ class AudiobookEngine:
                     # 未知角色，临时分配
                     voice_profile = self.voice_manager.assign_voice(segment.speaker)
             
-            # 为ScriptSegment添加voice_params属性
-            if not hasattr(segment, 'voice_params'):
-                segment.voice_params = voice_profile.get_tts_params(segment.emotion)
+            # 🔥 重构后：直接使用 VoiceManager 的 TTS 参数，不再合并 VoiceDesigner 的结果
+            voice_params_dict = voice_profile.get_tts_params(getattr(segment, "emotion", "neutral"))
+            
+            # 🔍 调试：输出最终参数
+            logger.info(
+                f"🎵 [{segment.speaker}] 最终voice_params: "
+                f"speaker={voice_params_dict.get('speaker')}, "
+                f"pitch={voice_params_dict.get('pitch')}, "
+                f"speed={voice_params_dict.get('speed'):.2f}, "
+                f"volume={voice_params_dict.get('volume')}"
+            )
+            
+            # 写回到segment
+            segment.voice_params = voice_params_dict
+            
             # 将片段元信息透传给TTS，用于Instruct模板（场景/角色/身份）
             segment.voice_params["segment_speaker"] = getattr(segment, "speaker", "")
-            segment.voice_params["segment_type"] = getattr(segment, "type", "")
-    
+            segment.voice_params["segment_type"] = getattr(segment, "type", "") 
     async def _synthesize_segments(
         self,
         script_segments,
@@ -694,13 +729,14 @@ class AudiobookEngine:
 
             # 根据时间线中的类型和音量，计算对应的音量衰减（dB）
             effect_type_str = item.get("type", "action")
+            # 🔧 已降低所有音效约 5-6dB，使其相对人声更小
             base_gain_map = {
-                "environment": -18.0,
-                "action": -8.0,
-                "emotion": -10.0,
-                "transition": -12.0,
+                "environment": -14.0,  # 环境音（降低 6dB）
+                "action": -14.0,       # 动作音（降低 6dB）
+                "emotion": -16.0,      # 情绪音（降低 6dB）
+                "transition": -18.0,   # 过渡音（降低 6dB）
             }
-            base_gain = base_gain_map.get(effect_type_str, -10.0)
+            base_gain = base_gain_map.get(effect_type_str, -16.0)
 
             # timeline volume 约定为 0.0~1.0，0.5 视为“默认音量”
             timeline_volume = item.get("volume", 0.5)
@@ -775,8 +811,8 @@ class AudiobookEngine:
             sync_with_dialogue = item.get("sync_with_dialogue", True)
             
             # 计算音量偏移（dB）
-            # 配乐默认音量较低，以-18dB为基准
-            base_gain = -18.0
+            # 配乐默认音量更低，以 -30dB 为基准（适合有旁白的人声为主场景）
+            base_gain = -30.0
             try:
                 volume_val = float(volume)
             except (TypeError, ValueError):
@@ -869,7 +905,8 @@ class AudiobookEngine:
         self,
         task_id: str,
         script_segments: List[Any],
-        chapter_content: str = ""
+        chapter_content: str = "",
+        preserve_user_config: bool = False  # 🆕 新参数：是否保留用户配置
     ) -> tuple:
         """
         并行执行音色、音效、音乐设计
@@ -878,13 +915,14 @@ class AudiobookEngine:
             task_id: 任务ID
             script_segments: 剧本片段列表
             chapter_content: 章节原文（用于环境音与配乐生成）
+            preserve_user_config: 是否保留用户配置（True=只为未配置的角色设计音色）
         
         Returns:
             (voice_profiles, sound_effects_count, music_cues_count)
         """
         # 定义三个并行任务
         async def voice_design_task():
-            """ 音色设计任务"""
+            """ 音色设计任务（已废弃，现统一使用VoiceManager）"""
             self.task_tracker.start_stage(task_id, StageType.VOICE_DESIGN)
             
             # 提取角色列表
@@ -894,14 +932,38 @@ class AudiobookEngine:
             ]))
             
             if characters_in_script:
-                # 批量设计音色
-                voice_profiles = self.voice_designer.batch_design([
-                    {"name": char, "gender": "unknown", "age": 30} 
-                    for char in characters_in_script
-                ])
+                # 🔥 重构：VoiceDesigner 不再设计音色，只检查配置完整性
+                if preserve_user_config:
+                    # 获取已配置的角色列表
+                    configured_characters = set(self.voice_manager.voice_profiles.keys())
+                    # 找出未配置的角色
+                    characters_to_design = [
+                        char for char in characters_in_script 
+                        if char not in configured_characters
+                    ]
+                    
+                    if configured_characters:
+                        logger.info(f"   🛡️ 保留用户配置: {len(configured_characters)} 个角色 {list(configured_characters)}")
+                    
+                    # 🔥 关键改动：为未配置的角色使用 VoiceManager.assign_voice 而不是 VoiceDesigner
+                    if characters_to_design:
+                        logger.info(f"   🎭 使用VoiceManager自动分配: {len(characters_to_design)} 个角色 {characters_to_design}")
+                        for char_name in characters_to_design:
+                            # 使用 VoiceManager 的智能分配逻辑
+                            self.voice_manager.assign_voice(char_name)
+                        
+                    voice_profiles = {}  # 返回空字典，因为已由 VoiceManager 管理
+                else:
+                    # 不保留用户配置时，也用 VoiceManager 重新分配
+                    logger.info(f"   🎭 使用VoiceManager为 {len(characters_in_script)} 个角色分配音色")
+                    for char_name in characters_in_script:
+                        self.voice_manager.assign_voice(char_name)
+                    voice_profiles = {}
                 
                 self.task_tracker.complete_stage(task_id, StageType.VOICE_DESIGN, metrics={
-                    "characters_count": len(voice_profiles)
+                    "characters_count": len(characters_in_script),
+                    "preserved_count": len(configured_characters) if preserve_user_config else 0,
+                    "unified_system": "VoiceManager"  # 🔥 标记：已统一到VoiceManager
                 })
                 
                 return voice_profiles
@@ -1203,6 +1265,18 @@ class AudiobookEngine:
 
             # 阶段1：制定改编策略
             self.task_tracker.start_stage(task_id, StageType.STRATEGY)
+            logger.info("🎭 [1/5] 制定改编策略...")
+            
+            # 📡 WebSocket推送：策略阶段开始
+            if WEBSOCKET_AVAILABLE and audiobook_project_id:
+                await ws_manager.send_audiobook_progress(
+                    audiobook_project_id=audiobook_project_id,
+                    chapter_id=chapter_id,
+                    stage='strategy',
+                    progress=0,
+                    message='正在制定改编策略...'
+                )
+            
             strategy = self.audio_director.formulate_strategy(
                 novel_genre=novel_genre,
                 novel_theme=novel_theme,
@@ -1219,9 +1293,33 @@ class AudiobookEngine:
                     "sound_density": strategy.sound_effect_density,
                 },
             )
+            logger.info(f"   ✅ 策略: {strategy.style.value}, 音效密度: {strategy.sound_effect_density}")
+            
+            # 📡 WebSocket推送：策略阶段完成
+            if WEBSOCKET_AVAILABLE and audiobook_project_id:
+                await ws_manager.send_audiobook_progress(
+                    audiobook_project_id=audiobook_project_id,
+                    chapter_id=chapter_id,
+                    stage='strategy',
+                    progress=100,
+                    message=f'策略完成: {strategy.style.value}',
+                    stage_metrics={'style': strategy.style.value, 'sound_density': strategy.sound_effect_density}
+                )
 
             # 阶段2：剧本改编
             self.task_tracker.start_stage(task_id, StageType.SCRIPT_ADAPTATION)
+            logger.info("📝 [2/5] 剧本改编...")
+            
+            # 📡 WebSocket推送：剧本阶段开始
+            if WEBSOCKET_AVAILABLE and audiobook_project_id:
+                await ws_manager.send_audiobook_progress(
+                    audiobook_project_id=audiobook_project_id,
+                    chapter_id=chapter_id,
+                    stage='script_adaptation',
+                    progress=0,
+                    message='正在改编剧本...'
+                )
+            
             adapted_result = await self.script_adapter.adapt_chapter(
                 chapter_content=chapter_content,
                 character_list=character_list,
@@ -1246,10 +1344,33 @@ class AudiobookEngine:
                     "text_length": len(chapter_content),
                 },
             )
+            logger.info(f"   ✅ 生成 {segments_count} 个剧本片段")
+            
+            # 📡 WebSocket推送：剧本阶段完成
+            if WEBSOCKET_AVAILABLE and audiobook_project_id:
+                await ws_manager.send_audiobook_progress(
+                    audiobook_project_id=audiobook_project_id,
+                    chapter_id=chapter_id,
+                    stage='script_adaptation',
+                    progress=100,
+                    message=f'剧本改编完成：{segments_count}个片段',
+                    stage_metrics={'segments_count': segments_count}
+                )
 
             # 阶段3：剧本质量评审（可选）
             if enable_quality_review:
                 self.task_tracker.start_stage(task_id, StageType.QUALITY_REVIEW)
+                logger.info("🔍 [3/5] 剧本质量评审...")
+                
+                # 📡 WebSocket推送：评审阶段开始
+                if WEBSOCKET_AVAILABLE and audiobook_project_id:
+                    await ws_manager.send_audiobook_progress(
+                        audiobook_project_id=audiobook_project_id,
+                        chapter_id=chapter_id,
+                        stage='quality_review',
+                        progress=0,
+                        message='正在评审剧本质量...'
+                    )
 
                 review_segments: List[Dict[str, Any]] = [
                     {
@@ -1299,6 +1420,23 @@ class AudiobookEngine:
                         "issues_count": len(quality_report_obj.issues),
                     },
                 )
+                logger.info(f"   ✅ 评审完成: {quality_report_obj.overall_grade} ({quality_report_obj.overall_score:.1f}分)")
+                logger.info(f"   发现 {len(quality_report_obj.issues)} 个问题")
+                
+                # 📡 WebSocket推送：评审阶段完成
+                if WEBSOCKET_AVAILABLE and audiobook_project_id:
+                    await ws_manager.send_audiobook_progress(
+                        audiobook_project_id=audiobook_project_id,
+                        chapter_id=chapter_id,
+                        stage='quality_review',
+                        progress=100,
+                        message=f'剧本质量评审完成：{quality_report_obj.overall_grade} ({quality_report_obj.overall_score:.1f}分)',
+                        stage_metrics={
+                            'overall_score': quality_report_obj.overall_score,
+                            'overall_grade': quality_report_obj.overall_grade,
+                            'issues_count': len(quality_report_obj.issues),
+                        }
+                    )
 
                 if quality_report_obj.overall_score < quality_threshold:
                     logger.warning(
@@ -1307,8 +1445,10 @@ class AudiobookEngine:
                     logger.warning(
                         f"   修订建议: {', '.join(quality_report_obj.revision_suggestions)}"
                     )
-
             else:
+                # 跳过质量评审
+                logger.info("⚠️ [3/5] 已跳过剧本质量评审（配置关闭）")
+                quality_report = None
                 self.task_tracker.complete_stage(
                     task_id,
                     StageType.QUALITY_REVIEW,
