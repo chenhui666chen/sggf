@@ -68,7 +68,7 @@ def show_model_comparison():
     print("\n" + "="*70)
     print("📊 CosyVoice 模型对比")
     print("="*70)
-    print("\n🔹 cosyvoice-v3-flash (当前使用)")
+    print("\n🔹 qwen3-tts-flash (当前使用)")
     print("  - 音质: ⭐⭐⭐⭐ (优秀)")
     print("  - 速度: ⚡⚡⚡⚡⚡ (非常快)")
     print("  - 成本: 💰💰 (0.002元/100字)")
@@ -107,7 +107,7 @@ async def main():
         
         print(f"\n📝 下一步操作:")
         print(f"  1. 修改 engine.py 和 tts_engine.py")
-        print(f"  2. 将 model='cosyvoice-v3-flash' 改为 model='cosyvoice-v3-plus'")
+        print(f"  2. 将 model='qwen3-tts-flash' 改为 model='cosyvoice-v3-plus'")
         print(f"  3. 通过前端生成这些章节的有声书")
         print(f"  4. 下载并对比音质效果")
         

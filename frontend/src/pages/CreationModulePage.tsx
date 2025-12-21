@@ -21,16 +21,16 @@ import LogoutIcon from '@mui/icons-material/Logout'
 import { useDispatch } from 'react-redux'
 import { logout } from '@/store/slices/authSlice'
 
-// 🆕 破碎书籍SVG图标（拆书工具入口）
+// 破碎书册 SVG 图标（拆书工具入口）
 const BrokenBookIcon = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
     {/* 左半本书 */}
-    <path d="M3 4v14c0 1.1.9 2 2 2h4V2H5c-1.1 0-2 .9-2 2z" opacity="0.9"/>
+    <path d="M3 4v14c0 1.1.9 2 2 2h4V2H5c-1.1 0-2 .9-2 2z" opacity="0.9" />
     {/* 右半本书（破碎效果） */}
-    <path d="M13 2v6l2-1.5 2 1.5V2h2c1.1 0 2 .9 2 2v10l-3-2-3 2V6l-2 1.5L11 6v12h4l1 2h3c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2h-6z" opacity="0.7"/>
+    <path d="M13 2v6l2-1.5 2 1.5V2h2c1.1 0 2 .9 2 2v10l-3-2-3 2V6l-2 1.5L11 6v12h4l1 2h3c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2h-6z" opacity="0.7" />
     {/* 裂缝效果 */}
-    <path d="M10 2h1v20h-1z" fill="#fff" opacity="0.3"/>
-    <path d="M11.5 8l1-2 1 3-1 2-1-3z" fill="#fff" opacity="0.5"/>
+    <path d="M10 2h1v20h-1z" fill="#fff" opacity="0.3" />
+    <path d="M11.5 8l1-2 1 3-1 2-1-3z" fill="#fff" opacity="0.5" />
   </svg>
 )
 
@@ -53,18 +53,19 @@ const modules = [
     description: '将文字作品转化为有声读物，支持多种音色选择',
     icon: HeadphonesIcon,
     color: '#9c27b0',
-    available: true,  // ✅ 启用
+    available: true, // 启用
     path: '/audiobook',
   },
   {
     id: 'drama',
     title: '织梦映心',
     subtitle: '短剧创作',
-    description: '短视频剧本创作，快速生成爆款短剧内容',
+    description: '短视频剧本创作，快速生成短剧内容（当前为模拟线路）',
     icon: MovieIcon,
     color: '#f57c00',
-    available: false,
+    available: true,
     path: '/drama',
+    badge: '内测',
   },
   {
     id: 'ai-detect',
@@ -145,14 +146,14 @@ export default function CreationModulePage() {
                     borderRadius: 3,
                     transition: 'all 0.3s ease',
                     opacity: module.available ? 1 : 0.7,
-                    position: 'relative', // 用于定位拆书入口
+                    position: 'relative', // 用于拆书入口定位
                     '&:hover': {
                       transform: module.available ? 'translateY(-4px)' : 'none',
                       boxShadow: module.available ? '0 12px 24px rgba(0,0,0,0.15)' : 'none',
                     },
                   }}
                 >
-                  {/* 🆕 灵感方舟卡片右上角的拆书入口 */}
+                  {/* 灵感方舟卡片右上角的拆书入口 */}
                   {isNovel && (
                     <Tooltip title="拆书工具 - 智能分析书籍结构" placement="top" arrow>
                       <IconButton
@@ -189,8 +190,14 @@ export default function CreationModulePage() {
                       {/* 图标 */}
                       <Box
                         sx={{
-                          width: 64, height: 64, borderRadius: '50%', mx: 'auto', mb: 1.5,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          width: 64,
+                          height: 64,
+                          borderRadius: '50%',
+                          mx: 'auto',
+                          mb: 1.5,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
                           backgroundColor: alpha(module.color, 0.1),
                         }}
                       >
@@ -205,6 +212,13 @@ export default function CreationModulePage() {
                         {module.subtitle}
                       </Typography>
                       {/* 状态标签 */}
+                      {module.badge && (
+                        <Chip
+                          label={module.badge}
+                          size="small"
+                          sx={{ mb: 1, backgroundColor: alpha(module.color, 0.1), color: module.color }}
+                        />
+                      )}
                       {!module.available && (
                         <Chip label="敬请期待" size="small" sx={{ mb: 1, backgroundColor: '#f5f5f5' }} />
                       )}
@@ -223,4 +237,3 @@ export default function CreationModulePage() {
     </Box>
   )
 }
-

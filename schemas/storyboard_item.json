@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "StoryboardItem",
+  "type": "object",
+  "required": ["scene_id", "shot_id", "desc", "duration_s", "head_frame", "tail_frame"],
+  "properties": {
+    "scene_id": { "type": "string" },
+    "shot_id": { "type": "string" },
+    "desc": { "type": "string" },
+    "duration_s": { "type": "number", "minimum": 0.5 },
+    "head_frame": { "$ref": "./frame_spec.json" },
+    "tail_frame": { "$ref": "./frame_spec.json" },
+    "cam_move": { "type": "string" },
+    "bridge_rule": { "type": "string" }
+  }
+}

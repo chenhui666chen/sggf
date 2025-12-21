@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FrameSpec",
+  "type": "object",
+  "required": ["prompt", "ratio", "subject_pos"],
+  "properties": {
+    "prompt": { "type": "string" },
+    "ratio": { "type": "string", "enum": ["16:9", "9:16", "1:1"] },
+    "subject_pos": {
+      "type": "object",
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "lighting": { "type": "string" },
+    "style_tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

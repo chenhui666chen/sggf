@@ -7,6 +7,11 @@ import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+# 允许后端直接 import 项目根目录下的轻量模块（如：pipeline/agents/adapters）
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
+
 # ⚠️ 重要：首先加载环境变量（必须在所有导入之前）
 from dotenv import load_dotenv
 load_dotenv()  # 加载 .env 文件
@@ -16,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.db.base import Base, engine
-from app.api.v1 import auth, projects, chapters, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters, ai_detect, prompt_evolution, ai_trace, book_parser, audiobook, monitoring, script_review
+from app.api.v1 import auth, projects, chapters, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters, ai_detect, prompt_evolution, ai_trace, book_parser, audiobook, monitoring, script_review, dreamweaver
 import socketio
 
 
@@ -128,6 +133,7 @@ app.include_router(book_parser.router)  # 拆书工具 API
 app.include_router(audiobook.router)  # 耳畔星河 - 有声书生成 API
 app.include_router(monitoring.router)  # 监控与指标 API
 app.include_router(script_review.router)  # 剧本审核与调整 API
+app.include_router(dreamweaver.router)  # 织梦映心 - 短剧 Mock API
 
 
 # 🔌 挂载 Socket.IO

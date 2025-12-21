@@ -19,6 +19,8 @@ import io
 from dataclasses import dataclass
 from enum import Enum
 
+from .constants import INSTRUCT_SPEAKER_IDS, normalize_speaker_id
+
 # 导入监控模块
 try:
     from app.services.monitoring import metrics_collector
@@ -120,7 +122,7 @@ class TTSEngine:
         self,
         enable_cache: bool = True,
         max_concurrent: int = 2,  # 提升到2个并发（低于3 RPS限制）
-        model: str = "cosyvoice-v3-flash",  # 高性价比版本，支持更多预设音色
+        model: str = "qwen3-tts-flash",  # 高性价比版本，支持更多预设音色
         request_delay: float = 0.5,  # 优化为0.5秒（2 RPS，安全范围内）
         primary_provider: TTSProvider = TTSProvider.ALIYUN,  # 主提供商
         fallback_providers: Optional[List[TTSProvider]] = None,  # 备用提供商列表
@@ -211,9 +213,9 @@ class TTSEngine:
         # 🆕 将emotion添加到voice_params中，供_call_aliyun_tts使用
         voice_params_with_emotion = voice_params.copy()
         
-            # 🎭 反派角色智能情感：如果使用longanyang/longanhuan且情感为neutral，自动应用angry情感
+            # 🎭 反派角色智能情感：如果使用Ethan/Sunny且情感为neutral，自动应用angry情感
         speaker_id = voice_params.get("speaker", "")
-        villain_voice_ids = ["longanyang", "longanhuan"]  # 支持Instruct的音色，用于反派角色
+        villain_voice_ids = ["Ethan", "Sunny"]  # 支持Instruct的音色，用于反派角色
         
         if speaker_id in villain_voice_ids and (emotion == "neutral" or not emotion):
             logger.info(f"🎭 检测到反派音色 [{speaker_id}] + neutral情感，自动应用 'angry' 情感")
@@ -675,11 +677,15 @@ class TTSEngine:
             
         # 创建合成器
         # 根据模型版本配置不同参数
+        speaker_id = normalize_speaker_id(voice_params.get("speaker", "Ethan"))
+        voice_params["speaker"] = speaker_id
+        voice_params_with_emotion["speaker"] = speaker_id
+        
         if self.model == "cosyvoice-v1":
             # v1：仅支持基础参数
             synthesizer = SpeechSynthesizer(
                 model="cosyvoice-v1",
-                voice=voice_params.get("speaker", "longxiaochun"),
+                voice=speaker_id,
                 format=AudioFormat.MP3_22050HZ_MONO_256KBPS
                 # v1不支持pitch_rate/speech_rate/volume
             )
@@ -695,46 +701,51 @@ class TTSEngine:
             
             # 🔥 调试：输出最终传递给阿里云API的参数
             logger.info(
-                f"🔥 调用阿里云TTS: voice={voice_params.get('speaker')}, "
+                f"🔥 调用阿里云TTS: voice={speaker_id}, "
                 f"pitch_rate={pitch:.2f}, speech_rate={rate:.2f}, volume={voice_params.get('volume', 50)}"
             )
             
-            # 🆕 支持Instruct的音色：通过instruction参数传递情感
-            speaker_id = voice_params.get("speaker", "longanyang")
-            instruct_voices = ["longanyang", "longanhuan", "longhuhu_v3"]  # 支持Instruct的音色
-            
-            # 获取emotion参数（从 voice_params 中传递）
+            # ?? ??Instruct??????instruction??????
+            # speaker normalized earlier for consistency
+
             emotion = voice_params.get("emotion", "neutral")
-            
-            # 🔥 调试：输出emotion参数和instruction判断
-            logger.info(f"🎭 检测到emotion={emotion}, speaker={speaker_id}, instruct_voices={speaker_id in instruct_voices}")
-            
-            # 如果是支持Instruct的音色且有情感设置，添加instruction参数
-            if speaker_id in instruct_voices and emotion != "neutral":
-                # 构建 instruction 文本（根据阿里云官方文档格式）
-                instruction_text = f"你说话的情感是{emotion}。"
-                logger.info(f"🎭 使用Instruct情感控制: {instruction_text}")
-                
-                # 🔥 关键修复：使用Instruct时，使用中性参数，避免参数叠加超出兼容范围
-                # Instruct指令会自己控制情感表现（音高、语速等），不需要额外的参数调整
-                base_pitch = 50  # 使用基础音高（对应1.0倍率）
-                base_speed = 1.0  # 使用基础语速
-                
-                # 但保留角色的基础音色特征（如果有的话）
-                # 从voice_params中提取角色基础参数（不包含情感调整）
+            use_instruct_flag = bool(voice_params.get("use_instruct_mode"))
+            disable_instruction = self._is_qwen_model()
+            should_use_instruction = bool(
+                not disable_instruction
+                and (use_instruct_flag or (speaker_id in INSTRUCT_SPEAKER_IDS and emotion != "neutral"))
+            )
+            if disable_instruction and use_instruct_flag:
+                logger.info("???? Qwen3-TTS?????????instruction???????????????????????????????????????")
+
+            # ?? ?????emotion???instruction??
+            logger.info(
+                f"?? ???emotion={emotion}, speaker={speaker_id}, "
+                f"instruct_supported={speaker_id in INSTRUCT_SPEAKER_IDS}, use_instruct={should_use_instruction}"
+            )
+
+            # ?????Instruct?????????????instruction??
+            if should_use_instruction:
+                # ?? instruction ???????????????
+                instruction_text = f"???????{emotion}?"
+                logger.info(f"?? ??Instruct????: {instruction_text}")
+
+                # ??????????????Aliyun 428??
                 character_pitch = voice_params.get("character_base_pitch", 50)
                 character_speed = voice_params.get("character_base_speed", 1.0)
-                
-                logger.info(f"🎭 Instruct模式：使用中性参数 pitch={character_pitch}, speed={character_speed}, 情感由instruction控制（已修复428问题）")
-                
+
+                logger.info(
+                    f"?? Instruct????????? pitch={character_pitch}, speed={character_speed}, ???instruction??????428???"
+                )
+
                 synthesizer = SpeechSynthesizer(
                     model=self.model,
                     voice=speaker_id,
                     format=AudioFormat.MP3_22050HZ_MONO_256KBPS,
-                    pitch_rate=character_pitch / 50.0,  # 转换为倍率（基础值50=1.0倍）
+                    pitch_rate=character_pitch / 50.0,  # ?????????50=1.0??
                     speech_rate=character_speed,
                     volume=voice_params.get("volume", 50),
-                    instruction=instruction_text  # 🆕 添加情感指令
+                    instruction=instruction_text  # ?? ??????
                 )
             else:
                 synthesizer = SpeechSynthesizer(
@@ -745,7 +756,7 @@ class TTSEngine:
                     speech_rate=rate,
                     volume=voice_params.get("volume", 50)
                 )
-            
+
         # 同步调用（dashscope暂不支持async）
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
@@ -779,6 +790,10 @@ class TTSEngine:
             logger.error(f"❌ 阿里云TTS失败: {result}")
             return b""
     
+    def _is_qwen_model(self) -> bool:
+        """Return True when??????Qwen3-TTS???"""
+        return str(self.model).startswith("qwen3-tts")
+
     def _build_instruct_text(
         self,
         text: str,
@@ -792,9 +807,9 @@ class TTSEngine:
         - 现在：直接返回原文本，情感通过API参数传递
         
         支持 Instruct 的音色：
-        - longanyang（龙安洋）
-        - longanhuan（龙安欢）
-        - longhuhu_v3（龙呼呼）
+        - Ethan（龙安洋）
+        - Sunny（龙安欢）
+        - Momo（龙呼呼）
         
         情感将在 _call_aliyun_tts 方法中通过 API 参数传递。
         """

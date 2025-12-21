@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "StoryRequest",
+  "type": "object",
+  "required": ["run_id", "mode", "title", "style", "length"],
+  "properties": {
+    "run_id": { "type": "string" },
+    "mode": { "type": "string", "enum": ["novel", "script"] },
+    "title": { "type": "string" },
+    "style": { "type": "string" },
+    "length": { "type": "integer", "minimum": 1 },
+    "outline": { "type": "string" }
+  }
+}

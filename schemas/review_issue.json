@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ReviewIssue",
+  "type": "object",
+  "required": ["severity", "target", "message"],
+  "properties": {
+    "severity": { "type": "string", "enum": ["blocker", "major", "minor"] },
+    "target": { "type": "string" },
+    "message": { "type": "string" },
+    "suggestion": { "type": "string" }
+  }
+}

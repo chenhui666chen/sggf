@@ -128,10 +128,15 @@ cp backend/.env.example backend/.env
 # 启动后端服务
 python simple_backend_server.py
 
+# （新）启动 Celery 异步任务队列，独立终端执行（Windows 建议 solo 池）
+celery -A app.celery_app.celery_app worker -P solo -Q audiobook -l info
+
 # 在另一个终端启动前端服务
 cd frontend
 npm run dev
 ```
+
+> Windows 环境如忘记携带 `-P solo` 参数，`backend/app/celery_app.py` 也会自动强制使用 solo 池，避免 `WinError 5`。
 
 ---
 
@@ -180,6 +185,18 @@ npm run dev
    EMBEDDING_MODEL=local
    ```
 
+### TTS配置（阿里云 Qwen3-TTS）
+
+- **默认模型**：`qwen3-tts-flash`（高性价比）。可在前端有声书页或 API 中改为 `cosyvoice-v3-plus` 用于精品章节。
+- **凭证**：沿用 `DASHSCOPE_API_KEY`。未配置该变量则无法调用 TTS。
+- **音色列表**：参见阿里云官方文档（含最新 speaker 参数）  
+  https://bailian.console.aliyun.com/?tab=doc#/doc/?type=model&url=2879134
+- **自定义方式**：  
+  1. 前端 `frontend/src/pages/AudiobookPage.tsx` 的 `VOICE_PRESETS` 控制下拉选项。  
+  2. 后端 `backend/app/services/audiobook/voice_manager.py` 维护 `PRESET_VOICES` 以及旧 CosyVoice → Qwen3 的映射，可按需增删。  
+  3. 旧项目若仍保存 `longanyang` 等 CosyVoice 音色，VoiceManager 会自动映射到对应的 Qwen3 speaker，重新在 UI 中保存即可持久化新 ID。
+- **情绪/Instruction**：Qwen3 不支持 instruction 参数，系统通过 pitch/speed/volume 映射情绪并自动规避 428 `InvalidParameter`。只有在切换 `cosyvoice-v3-plus` 时才会重新启用 instruction。
+
 ---
 
 ## 📖 文档导航
@@ -189,6 +206,7 @@ npm run dev
 - 🏗️ [架构设计文档](ARCHITECTURE.md)
 - 🔌 [API参考文档](API_REFERENCE.md)
 - 🧪 [测试脚本](test_*.py)
+- 🎙 [有声书任务队列架构](docs/AUDIOBOOK_TASK_QUEUE.md)
 
 ---
 

@@ -28,8 +28,8 @@ class VoiceCharacteristics:
 
 @dataclass
 class TTSParams:
-    """TTS参数（适配CosyVoice v3-plus）"""
-    speaker: str = "longanyang"  # 音色ID（v3-plus支持300+种）
+    """TTS参数（适配Qwen3-TTS Flash，兼容CosyVoice v3-plus）"""
+    speaker: str = "Ethan"  # 音色ID（v3-plus支持300+种）
     rate: float = 1.0  # 语速 (0.5-2.0)
     pitch: float = 1.0  # 音调 (0.5-2.0)
     volume: int = 50  # 音量 (0-100)
@@ -61,17 +61,17 @@ class VoiceDesigner:
     def __init__(self):
         self.voice_profiles: Dict[str, VoiceProfile] = {}
         
-        # 预设音色库（CosyVoice v3-plus 300+种音色）
+        # 预设音色库（Qwen3 官方 20+ 音色，兼容旧 CosyVoice ID）
         self.available_voices = {
             # v3-plus官方音色
-            "longanyang": {"gender": "male", "age": "adult", "tone": "成熟稳重"},
-            "longcaitou": {"gender": "female", "age": "young_adult", "tone": "甜美温柔"},
-            "longshaohua": {"gender": "male", "age": "young_adult", "tone": "阳光有力"},
-            "longxiaochun": {"gender": "female", "age": "adult", "tone": "知性优雅"},
-            "longxiaoxuan": {"gender": "female", "age": "young_adult", "tone": "活泼可爱"},
-            "longwan": {"gender": "female", "age": "adult", "tone": "成熟魅力"},
-            "longfei": {"gender": "male", "age": "adult", "tone": "低沉磁性"},
-            "longjing": {"gender": "male", "age": "middle_aged", "tone": "沉稳有力"},
+            "Ethan": {"gender": "male", "age": "adult", "tone": "成熟稳重"},
+            "Cherry": {"gender": "female", "age": "young_adult", "tone": "甜美温柔"},
+            "Dylan": {"gender": "male", "age": "young_adult", "tone": "阳光有力"},
+            "Jennifer": {"gender": "female", "age": "adult", "tone": "知性优雅"},
+            "Sunny": {"gender": "female", "age": "young_adult", "tone": "活泼可爱"},
+            "Serena": {"gender": "female", "age": "adult", "tone": "成熟魅力"},
+            "Ryan": {"gender": "male", "age": "adult", "tone": "低沉磁性"},
+            "Marcus": {"gender": "male", "age": "middle_aged", "tone": "沉稳有力"},
         }
     
     def design_voice(
@@ -191,35 +191,35 @@ class VoiceDesigner:
         role = character_info.get("role", "")
         
         # 选择音色（v3-plus官方音色）
-        speaker = "longanyang"  # 默认
+        speaker = "Ethan"  # 默认
         
         if gender == "female":
             # 女性角色：根据年龄+性格细分
             if "青年" in age_range or "青少年" in age_range:
                 if "活泼" in personality or "开朗" in personality:
-                    speaker = "longxiaoxuan"  # 活泼可爱
+                    speaker = "Sunny"  # 活泼可爱
                 else:
-                    speaker = "longcaitou"  # 甜美温柔
+                    speaker = "Cherry"  # 甜美温柔
             else:
                 if "成熟" in personality or "知性" in personality:
-                    speaker = "longxiaochun"  # 知性优雅
+                    speaker = "Jennifer"  # 知性优雅
                 else:
-                    speaker = "longwan"  # 成熟魅力
+                    speaker = "Serena"  # 成熟魅力
         
         else:  # male
             # 男性角色：根据年龄+性格+角色定位细分
             if "青年" in age_range:
                 # 青年男性：根据性格区分
                 if "冷静" in personality or "理性" in personality:
-                    speaker = "longanyang"  # 成熟稳重（用于冷静类型）
+                    speaker = "Ethan"  # 成熟稳重（用于冷静类型）
                 elif "强势" in personality or "霸道" in personality or "主角" in role:
-                    speaker = "longfei"  # 低沉磁性（用于强势主角）
+                    speaker = "Ryan"  # 低沉磁性（用于强势主角）
                 else:
-                    speaker = "longshaohua"  # 阳光有力（普通青年）
+                    speaker = "Dylan"  # 阳光有力（普通青年）
             elif "中年" in age_range or "老年" in age_range:
-                speaker = "longjing"  # 沉稳有力（中老年）
+                speaker = "Marcus"  # 沉稳有力（中老年）
             else:
-                speaker = "longshaohua"  # 默认青年男声
+                speaker = "Dylan"  # 默认青年男声
         
         # 音调 (v3-plus: 0.5-2.0)
         pitch = 1.0

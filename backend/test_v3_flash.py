@@ -1,4 +1,4 @@
-"""Test cosyvoice-v3-flash with multiple voices and parameters"""
+"""Test qwen3-tts-flash with multiple voices and parameters"""
 import asyncio
 from dotenv import load_dotenv
 load_dotenv()
@@ -11,11 +11,11 @@ async def test_v3_flash():
         provider="aliyun", 
         enable_cache=False, 
         max_concurrent=1,
-        model="cosyvoice-v3-flash"  # 最佳性价比模型
+        model="qwen3-tts-flash"  # 最佳性价比模型
     )
     
     print("="*70)
-    print("Testing cosyvoice-v3-flash with multiple voices & parameters:")
+    print("Testing qwen3-tts-flash with multiple voices & parameters:")
     print("="*70)
     print(f"Model: {engine.model}")
     print()
@@ -23,14 +23,14 @@ async def test_v3_flash():
     # 测试不同音色和参数
     test_cases = [
         {
-            "name": "男性音色 (longanyang)",
+            "name": "男性音色 (Ethan)",
             "voice_params": {
-                "speaker": "longanyang",
+                "speaker": "Ethan",
                 "pitch": 50,      # v3支持！
                 "speed": 1.0,     # v3支持！
                 "volume": 55      # v3支持！
             },
-            "text": "这是使用longanyang男性音色的测试。"
+            "text": "这是使用Ethan男性音色的测试。"
         },
         {
             "name": "女性音色 (longxiaochun)",
@@ -45,7 +45,7 @@ async def test_v3_flash():
         {
             "name": "男性音色 - 低音慢速",
             "voice_params": {
-                "speaker": "longanyang",
+                "speaker": "Ethan",
                 "pitch": 40,      # 降低音高
                 "speed": 0.85,    # 慢速
                 "volume": 52
@@ -81,8 +81,8 @@ async def test_v3_flash():
     print("="*70)
     print("Cost Statistics:")
     print(f"  Total segments: {stats['total_segments']}")
-    print(f"  Total characters: {stats['total_chars']}")
-    print(f"  Estimated cost: ¥{stats['estimated_cost']:.4f}")
+    print(f"  Total characters: {stats['total_characters']}")
+    print(f"  Estimated cost: {stats['estimated_cost']}")
     print("="*70)
 
 if __name__ == "__main__":

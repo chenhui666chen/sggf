@@ -38,7 +38,7 @@ class FidelityLevel(str, Enum):
 
 @dataclass
 class AdaptationStrategy:
-    """改编策略（适配CosyVoice v3-plus）"""
+    """改编策略（默认适配Qwen3-TTS Flash）"""
     style: AdaptationStyle = AdaptationStyle.HYBRID
     fidelity_level: FidelityLevel = FidelityLevel.HIGH
     target_audience: str = "通用听众"

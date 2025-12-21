@@ -106,7 +106,7 @@ export TTS_DEBUG_SAVE_SEGMENTS="false"
 片段 1
 长度: 125 字符
 音频大小: 458234 字节
-音色: longanyang
+音色: Ethan
 情感: neutral
 
 文本内容:

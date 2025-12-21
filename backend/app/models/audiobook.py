@@ -40,6 +40,12 @@ class AudiobookProject(Base):
     # 关系
     project = relationship("Project", back_populates="audiobook_projects")
     chapter_audios = relationship("ChapterAudio", back_populates="audiobook_project", cascade="all, delete-orphan")
+    tasks = relationship(
+        "AudiobookTask",
+        back_populates="audiobook_project",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
 
 
 class ChapterAudio(Base):

@@ -2,6 +2,7 @@ import axios, { AxiosInstance, AxiosError } from 'axios'
 
 // 在开发环境中直接连接到后端，不使用Vite代理
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const DREAMWEAVER_SCHEMA_VERSION = '0.1.0'
 
 class ApiClient {
   public client: AxiosInstance
@@ -384,6 +385,29 @@ class ApiClient {
   getTaskStatus(taskId: string) {
     return this.client.get(`/api/v1/workflow/task/${taskId}`, {
       timeout: 5000
+    })
+  }
+
+  // 织梦映心 Mock 流程（读取灵感方舟内容后跑通 mock 状态机）
+  runDreamweaverMock(projectId: number, chapterIds: number[]) {
+    return this.client.post('/api/v1/dreamweaver/mock-run', {
+      project_id: projectId,
+      chapter_ids: chapterIds,
+      schema_version: DREAMWEAVER_SCHEMA_VERSION,
+    })
+  }
+
+  runDreamweaverMockAsync(projectId: number, chapterIds: number[]) {
+    return this.client.post('/api/v1/dreamweaver/mock-run-async', {
+      project_id: projectId,
+      chapter_ids: chapterIds,
+      schema_version: DREAMWEAVER_SCHEMA_VERSION,
+    })
+  }
+
+  getDreamweaverMockTask(taskId: string) {
+    return this.client.get(`/api/v1/dreamweaver/task/${taskId}`, {
+      timeout: 5000,
     })
   }
 

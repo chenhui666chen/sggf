@@ -8,7 +8,7 @@
  * 4. 进度监控
  * 5. 音频播放与下载
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiClient } from '../services/api'
 import * as bookParserApi from '../services/bookParserApi'
@@ -490,202 +490,185 @@ function HistoryDialog({
 }
 
 const VOICE_PRESETS: { id: string; label: string; description: string; supportsInstruct?: boolean }[] = [
-  // === 男性音色 (10种) ===
+  // === ?????10?? ===
   {
     id: 'male_young_energetic',
-    label: '龙安洋（阳光大男孩）',
-    description: 'CosyVoice 标杆男声：阳光大男孩，20~30岁，中文（普通话）',
-    supportsInstruct: true,
+    label: 'Ethan????? ? ????',
+    description: 'Qwen3 Ethan?????????+???????????/???',
   },
   {
     id: 'male_young_gentle',
-    label: '年轻男主（温柔）',
-    description: '居家暖男，温柔体贴',
+    label: 'Elias????? ? ????',
+    description: 'Qwen3 Elias??????????/??????',
   },
   {
     id: 'male_adult_calm',
-    label: '成熟男性（沉稳）',
-    description: '睿智轻熟，沉稳冷静',
+    label: 'Ryan????? ? ????',
+    description: 'Qwen3 Ryan???????????????????/???',
   },
   {
     id: 'male_adult_energetic',
-    label: '成熟男性（豪迈）',
-    description: '洒脱活力，豪迈大气',
+    label: 'Dylan????? ? ????',
+    description: 'Qwen3 Dylan??????????????/?????',
   },
   {
     id: 'male_elder_wise',
-    label: '长者（睿智）',
-    description: '沧桑岁月，睿智稳重',
+    label: 'Marcus????? ? ???',
+    description: 'Qwen3 Marcus?????????????????/????',
   },
   {
     id: 'male_warm',
-    label: '暖男（痴情）',
-    description: '温暖痴情，适合情感戏',
+    label: 'Roy????? ? ???',
+    description: 'Qwen3 Roy?????????????????????',
   },
   {
     id: 'male_customer_service',
-    label: '书生（青涩）',
-    description: '年轻青涩，文雅气质',
+    label: 'Peter????? ? ???',
+    description: 'Qwen3 Peter????????/??????????',
   },
   {
     id: 'male_refreshing',
-    label: '武将（利落）',
-    description: '清爽利落，适合战士',
+    label: 'Li????? ? ???',
+    description: 'Qwen3 Li???????????????/?????',
   },
   {
     id: 'male_monkey',
-    label: '特色（猴哥）',
-    description: '经典猴哥，独特风格',
+    label: 'Nofish????? ? ????',
+    description: 'Qwen3 Nofish??????????/?????',
   },
   {
     id: 'male_narrator',
-    label: '旁白（方言）',
-    description: '陕北方言，亲切感',
+    label: 'Eric????? ? ???',
+    description: 'Qwen3 Eric???????????????????',
   },
+  // === ??/???? ===
   {
     id: 'male_villain_sinister',
-    label: '成熟谋士（沉稳）',
-    description: '成熟沉稳，适合智者、谋士角色',
+    label: 'Rocky????? ? ???',
+    description: 'Qwen3 Rocky???????????????/BOSS?',
   },
   {
     id: 'female_villain_cold',
-    label: '冷静御姐（高雅）',
-    description: '冷静从容，高雅御姐、女强人',
+    label: 'Katerina????? ? ????',
+    description: 'Qwen3 Katerina???????????????/????',
   },
   {
     id: 'female_villain_cunning',
-    label: '优雅名媛（睿智）',
-    description: '高雅睿智，名媛贵妇、魅力女性',
+    label: 'Jennifer????? ? ????',
+    description: 'Qwen3 Jennifer??????????/??/?????',
   },
-  
-  // === 女性音色 (10种) ===
+  // === ?????10?? ===
   {
     id: 'female_young_gentle',
-    label: '年轻女主（温柔）',
-    description: '细腻柔声，温柔体贴',
+    label: 'Cherry????? ? ????',
+    description: 'Qwen3 Cherry??????????????',
   },
   {
     id: 'female_young_energetic',
-    label: '龙安欢（欢脱元气女）',
-    description: 'CosyVoice 标杆女声：欢脱元气女，20~30岁，中文（普通话）',
-    supportsInstruct: true,
+    label: 'Sunny????? ? ???+????',
+    description: 'Qwen3 Sunny???????????/???????',
   },
   {
     id: 'female_young_cute',
-    label: '少女（可爱）',
-    description: '清纯萝莉，甜美可爱',
+    label: 'Kiki????? ? ????',
+    description: 'Qwen3 Kiki??????????/?????',
   },
   {
     id: 'female_adult_elegant',
-    label: '成熟女性（优雅）',
-    description: '高雅气质，知性美',
+    label: 'Serena????? ? ????',
+    description: 'Qwen3 Serena????????????/???',
   },
   {
     id: 'female_adult_intellectual',
-    label: '成熟女性（知性）',
-    description: '优雅知性，职场精英',
+    label: 'Jada????? ? ???+????',
+    description: 'Qwen3 Jada?????+???????????',
   },
   {
     id: 'female_capable',
-    label: '女强人（干练）',
-    description: '利落从容，女强人范',
+    label: 'Jennifer????? ? ????',
+    description: 'Qwen3 Jennifer??????????????',
   },
   {
     id: 'female_elder',
-    label: '长者（慈祥）',
-    description: '烟火从容，慈祥温和',
+    label: 'Chelsie????? ? ????',
+    description: 'Qwen3 Chelsie??????????/???',
   },
   {
     id: 'female_intimate',
-    label: '闺蜜（亲切）',
-    description: '温柔闺蜜，亲切感',
+    label: 'Serena????? ? ????',
+    description: 'Qwen3 Serena??????????/????',
   },
   {
     id: 'female_lively',
-    label: '才女（活泼）',
-    description: '亲和活泼，灵动活跃',
+    label: 'Sunny????? ? ????',
+    description: 'Qwen3 Sunny??????????????????',
   },
   {
     id: 'female_child',
-    label: '童声（天真）',
-    description: '天真烂漫，可爱童声',
-    supportsInstruct: true,
+    label: 'Momo??? ? ????',
+    description: 'Qwen3 Momo???????????/?????',
   },
 ]
 
-export default function AudiobookPage() {
+const steps = ['选择项目', '配置音色', '生成有声书', '完成']
+
+const AudiobookPage = () => {
   const navigate = useNavigate()
 
-  // 状态管理
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [selectedChapters, setSelectedChapters] = useState<number[]>([])
-  const [, setLoading] = useState<boolean>(false)
-  const [generating, setGenerating] = useState<boolean>(false)
-  const [activeStep, setActiveStep] = useState<number>(0)
   const [characterVoices, setCharacterVoices] = useState<CharacterVoiceSetting[]>([])
-  const [loadingCharacters, setLoadingCharacters] = useState<boolean>(false)
-  const [audiobookProject, setAudiobookProject] = useState<any>(null)
-  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' as 'success' | 'error' | 'info' | 'warning' })
-  
-  // 新增：任务状态追踪
-  const [taskStatuses, setTaskStatuses] = useState<Record<number, TaskStatus>>({})
-  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
-  
-  // 新增：音频播放状态
-  const [playingChapter, setPlayingChapter] = useState<number | null>(null)
-  const [audioRef] = useState<HTMLAudioElement>(new Audio())
-  
-  // 新增：音频阶段模式切换（一步到位/仅生成剧本）+ 记录最近一次生成模式
-  const [scriptOnlyMode, setScriptOnlyMode] = useState<boolean>(false)
-  const [lastGenerationMode, setLastGenerationMode] = useState<'full' | 'script_only' | 'unknown'>('unknown')
-  
-  // 新增：历史记录相关
-  const [showHistory, setShowHistory] = useState<boolean>(false)
-  const [historyProjects, setHistoryProjects] = useState<any[]>([])
-  const [loadingHistory, setLoadingHistory] = useState<boolean>(false)
-  // 新增：删除确认对话框
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState<boolean>(false)
-  const [deletingProject, setDeletingProject] = useState<any>(null)
-  // 新增：角色试听状态
-  const [previewingCharacterId, setPreviewingCharacterId] = useState<number | null>(null)
-  // 新增：自动推荐声线状态
-  const [autoAssigningVoices, setAutoAssigningVoices] = useState<boolean>(false)
-  // 新增：TTS 模型选择
-  const [ttsModel, setTtsModel] = useState<'cosyvoice-v3-flash' | 'cosyvoice-v3-plus'>('cosyvoice-v3-flash')
-  // 新增：剧本质量评审弹窗
-  const [scriptReviewDialogOpen, setScriptReviewDialogOpen] = useState(false)
-  const [scriptReviewData, setScriptReviewData] = useState<{
-    report: any
-    segments: any[]
-  } | null>(null)
-
-  // 新增：章节剧本编辑对话框
-  const [scriptEditorDialogOpen, setScriptEditorDialogOpen] = useState(false)
-  const [scriptEditorLoading, setScriptEditorLoading] = useState(false)
-  const [scriptEditorChapter, setScriptEditorChapter] = useState<{
-    chapterId: number
-    title: string
-  } | null>(null)
-  const [scriptEditorData, setScriptEditorData] = useState<{
-    scriptStatus: string
-    scriptSegments: any[]
-    scriptReview: any | null
-  } | null>(null)
   const [audioFxConfig, setAudioFxConfig] = useState<AudioFxConfig>({
     enable_sound_effects: true,
     enable_music: true,
     sound_effect_density: 'medium',
     music_density: 'medium',
   })
-
+  const [audiobookProject, setAudiobookProject] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
+  const [loadingCharacters, setLoadingCharacters] = useState(false)
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [historyProjects, setHistoryProjects] = useState<any[]>([])
+  const [showHistory, setShowHistory] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deletingProject, setDeletingProject] = useState<any | null>(null)
+  const [scriptReviewDialogOpen, setScriptReviewDialogOpen] = useState(false)
+  const [scriptReviewData, setScriptReviewData] = useState<{ report: any; segments: any[] } | null>(null)
+  const [scriptEditorDialogOpen, setScriptEditorDialogOpen] = useState(false)
+  const [scriptEditorChapter, setScriptEditorChapter] = useState<{ chapterId: number; title: string } | null>(null)
+  const [scriptEditorData, setScriptEditorData] = useState<{
+    scriptStatus: string
+    scriptSegments: any[]
+    scriptReview?: any
+  } | null>(null)
+  const [scriptEditorLoading, setScriptEditorLoading] = useState(false)
+  const [scriptOnlyMode, setScriptOnlyMode] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [playingChapter, setPlayingChapter] = useState<number | null>(null)
+  const [previewingCharacterId, setPreviewingCharacterId] = useState<number | null>(null)
+  const [taskStatuses, setTaskStatuses] = useState<Record<number, TaskStatus>>({})
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
   const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false)
   const [newProjectTitle, setNewProjectTitle] = useState('')
   const [newProjectText, setNewProjectText] = useState('')
+  const [snackbar, setSnackbar] = useState<{
+    open: boolean
+    message: string
+    severity: 'success' | 'info' | 'warning' | 'error'
+  }>({
+    open: false,
+    message: '',
+    severity: 'info',
+  })
+  const [autoAssigningVoices, setAutoAssigningVoices] = useState(false)
   const [creatingFromBook, setCreatingFromBook] = useState(false)
+  const [lastGenerationMode, setLastGenerationMode] = useState<'full' | 'script_only'>('full')
+  const [activeStep, setActiveStep] = useState(0)
+  const [ttsModel, setTtsModel] = useState<'qwen3-tts-flash' | 'cosyvoice-v3-plus'>('qwen3-tts-flash')
 
-  const steps = ['选择项目', '配置音色', '生成有声书', '完成']
+  const audioRef = useMemo(() => new Audio(), [])
 
   // 根据当前选择的 TTS 模型动态调整可选音色列表
   const currentVoicePresets =
@@ -1982,11 +1965,11 @@ export default function AudiobookPage() {
                 <Select
                   label="TTS 模型"
                   value={ttsModel}
-                  onChange={(e) => setTtsModel(e.target.value as 'cosyvoice-v3-flash' | 'cosyvoice-v3-plus')}
+                  onChange={(e) => setTtsModel(e.target.value as 'qwen3-tts-flash' | 'cosyvoice-v3-plus')}
                 >
-                  <MenuItem value="cosyvoice-v3-flash">
+                  <MenuItem value="qwen3-tts-flash">
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      <span>CosyVoice v3-flash</span>
+                      <span>Qwen3-TTS Flash</span>
                       <Tooltip title="高性价比，速度快，适合大规模章节生成，价格较低">
                         <Chip
                           label="价格：低"
@@ -2925,3 +2908,5 @@ export default function AudiobookPage() {
     </Box>
   )
 }
+
+export default AudiobookPage

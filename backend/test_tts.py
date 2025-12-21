@@ -7,6 +7,8 @@ import sys
 import asyncio
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -14,48 +16,45 @@ async def test_aliyun_tts():
     """测试阿里云TTS基础功能"""
     
     # 设置API Key
-    api_key = "***REDACTED-DASHSCOPE-KEY***"
-    os.environ["DASHSCOPE_API_KEY"] = api_key
+    load_dotenv()
+    api_key = os.getenv("DASHSCOPE_API_KEY")
+    if not api_key:
+        print("❌ 未配置 DASHSCOPE_API_KEY，无法测试 TTS")
+        return
     
     print("=" * 60)
     print("🎤 阿里云TTS API测试")
     print("=" * 60)
     print()
     
-    # 测试用例：测试最新推荐模型
+    # 测试用例：覆盖 Qwen3 默认场景以及精品模式
     test_cases = [
         {
-            "name": "cosyvoice-v3-flash（官方推荐，高性价比）",
-            "text": "这是一个测试文本",
-            "model": "cosyvoice-v3-flash",
-            "voice": "longanyang"
+            "name": "qwen3-tts-flash（阳光男声 Ethan）",
+            "text": "这是一个测试文本。",
+            "model": "qwen3-tts-flash",
+            "voice": "Ethan"
         },
         {
-            "name": "cosyvoice-v3-plus（最高质量）",
-            "text": "这是一个测试文本",
+            "name": "qwen3-tts-flash（女声 Sunny）",
+            "text": "这是一个测试文本。",
+            "model": "qwen3-tts-flash",
+            "voice": "Sunny"
+        },
+        {
+            "name": "qwen3-tts-flash 长文本（240字）",
+            "text": "陆长生站在炼丹房门口，看着眼前这座曾经熟悉的建筑，心中涌起一股难以言喻的感觉。三年前，他还是外门首席弟子，前途一片光明。一场意外之后，丹田破碎，修为尽废，从云端坠落谷底。昔日的师兄弟纷纷避之不及，只有几个人还愿意和他说话。今天，他要证明自己还有价值。赵铁山是外门炼丹堂的执事，为人刻薄，最看不起废物。陆长生深吸一口气，推开了大门。",
+            "model": "qwen3-tts-flash",
+            "voice": "Ethan"
+        },
+        {
+            "name": "cosyvoice-v3-plus（精品备选）",
+            "text": "这是一个测试文本。",
             "model": "cosyvoice-v3-plus",
-            "voice": "longanyang"
-        },
-        {
-            "name": "cosyvoice-v2（较新版本）",
-            "text": "这是一个测试文本",
-            "model": "cosyvoice-v2",
-            "voice": "longanyang"
-        },
-        {
-            "name": "cosyvoice-v1（当前使用，已验证）",
-            "text": "这是一个测试文本",
-            "model": "cosyvoice-v1",
-            "voice": "longxiaochun"
-        },
-        {
-            "name": "cosyvoice-v3-flash长文本（240字）",
-            "text": "陆长生站在炼丹房门口，看着眼前这座曾经熟悉的建筑，心中涌起一股难以言喻的感觉。三年前，他还是外门首席弟子，前途一片光明。一场意外之后，丹田破碎，修为尽废，从云端跌落谷底。昔日的师兄弟纷纷避之不及，只有几个人还愿意和他说话。今天，他要证明自己还有价值。赵铁山是外门炼丹堂的执事，为人刻薄，最看不起废物。陆长生深吸一口气，推开了大门。",
-            "model": "cosyvoice-v3-flash",
-            "voice": "longanyang"
+            "voice": "longanyun_v3"
         }
     ]
-    
+
     try:
         import dashscope
         from dashscope.audio.tts_v2 import SpeechSynthesizer, AudioFormat

@@ -67,10 +67,9 @@ def test_tts_models():
     
     # 所有可能的模型配置
     models_to_test = [
-        {"model": "cosyvoice-v1", "voice": "longxiaochun", "name": "CosyVoice v1 (基础版)"},
-        {"model": "sambert-zhichu-v1", "voice": "zhichu", "name": "Sambert知楚 v1"},
-        {"model": "sambert-zhiru-v1", "voice": "zhiru", "name": "Sambert知如 v1"},
-        {"model": "sambert-zhitian-v1", "voice": "zhitian", "name": "Sambert知甜 v1"},
+        {"model": "qwen3-tts-flash", "voice": "Ethan", "name": "Qwen3-TTS Flash（男声）"},
+        {"model": "qwen3-tts-flash", "voice": "Sunny", "name": "Qwen3-TTS Flash（女声）"},
+        {"model": "cosyvoice-v3-plus", "voice": "longanyun_v3", "name": "CosyVoice v3-plus（精品）"},
     ]
     
     success_models = []

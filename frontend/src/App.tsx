@@ -20,6 +20,8 @@ const PromptEvolutionPage = lazy(() => import('@/pages/PromptEvolutionPage'))
 const AITracePage = lazy(() => import('@/pages/AITracePage'))
 const BookParserPage = lazy(() => import('@/pages/BookParserPage'))
 const AudiobookPage = lazy(() => import('@/pages/AudiobookPage'))  // 耳畔星河
+const DreamWeaverPage = lazy(() => import('@/pages/DreamWeaverPage')) // 织梦映心
+const DreamWeaverMockPage = lazy(() => import('@/pages/DreamWeaverMockPage')) // 织梦映心 Mock
 
 // 加载中组件
 const LoadingFallback = () => (
@@ -155,6 +157,22 @@ function App() {
             }
           />
           <Route
+            path="/drama"
+            element={
+              <ProtectedRoute>
+                <DreamWeaverPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/drama/mock"
+            element={
+              <ProtectedRoute>
+                <DreamWeaverMockPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/modules"
             element={
               <ProtectedRoute>
@@ -172,4 +190,3 @@ function App() {
 }
 
 export default App
-

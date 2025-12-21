@@ -28,7 +28,8 @@ import os
 import subprocess
 import tempfile
 import logging
-from typing import List, Optional, Dict, Any
+import math  # 🆕 新增：用于音量计算
+from typing import List, Optional, Dict, Any, Tuple  # 🆕 添加Tuple
 from pathlib import Path
 from dataclasses import dataclass
 from enum import Enum
@@ -235,6 +236,106 @@ class AudioMixer:
         # 最终降级：返回原始人声
         logger.warning("⚠️ 背景音乐功能不可用，返回原始人声")
         return voice_audio
+    
+    def crossfade_audio(
+        self,
+        audio1: bytes,
+        audio2: bytes,
+        crossfade_duration_ms: int = 3000
+    ) -> bytes:
+        """
+        🆕 音频交叉淡化（平滑过渡）
+        
+        Args:
+            audio1: 第一段音频
+            audio2: 第二段音频
+            crossfade_duration_ms: 交叉淡化时长（毫秒）
+        
+        Returns:
+            交叉淡化后的音频
+        """
+        if not self.pydub_available:
+            # 降级：直接拼接
+            return audio1 + audio2
+        
+        try:
+            sound1 = AudioSegment.from_file(io.BytesIO(audio1))
+            sound2 = AudioSegment.from_file(io.BytesIO(audio2))
+            
+            # 确保交叉时长不超过较短的音频
+            actual_crossfade = min(crossfade_duration_ms, len(sound1), len(sound2))
+            
+            # 使用pydub的append方法，带交叉淡化
+            result = sound1.append(sound2, crossfade=actual_crossfade)
+            
+            # 输出
+            output_buffer = io.BytesIO()
+            result.export(output_buffer, format="mp3", bitrate="128k")
+            
+            logger.debug(f"✅ 音频交叉淡化完成: {actual_crossfade}ms")
+            return output_buffer.getvalue()
+        except Exception as e:
+            logger.warning(f"⚠️ 交叉淡化失败: {e}，降级为直接拼接")
+            return audio1 + audio2
+    
+    def apply_volume_curve(
+        self,
+        audio_data: bytes,
+        volume_curve: List[Tuple[float, float]]
+    ) -> bytes:
+        """
+        🆕 应用动态音量曲线
+        
+        Args:
+            audio_data: 音频数据
+            volume_curve: 音量曲线 [(time_sec, volume_0to1), ...]
+                例：[(0.0, 0.15), (15.0, 0.3), (30.0, 0.2)]
+        
+        Returns:
+            应用音量曲线后的音频
+        """
+        if not self.pydub_available or not volume_curve or len(volume_curve) < 2:
+            return audio_data
+        
+        try:
+            audio = AudioSegment.from_file(io.BytesIO(audio_data))
+            result = AudioSegment.empty()
+            
+            for i in range(len(volume_curve) - 1):
+                t1, v1 = volume_curve[i]
+                t2, v2 = volume_curve[i + 1]
+                
+                # 提取片段
+                start_ms = int(t1 * 1000)
+                end_ms = int(t2 * 1000)
+                segment = audio[start_ms:end_ms]
+                
+                # 计算音量调整（dB）
+                # 从 v1 到 v2 线性渐变
+                avg_volume = (v1 + v2) / 2
+                db_change = 20 * math.log10(avg_volume) if avg_volume > 0 else -40
+                
+                # 应用音量
+                adjusted_segment = segment + db_change
+                
+                # 添加淡入淡出效果
+                fade_duration = min(500, len(adjusted_segment) // 4)  # 最长500ms
+                if i == 0:  # 第一段淡入
+                    adjusted_segment = adjusted_segment.fade_in(fade_duration)
+                if i == len(volume_curve) - 2:  # 最后一段淡出
+                    adjusted_segment = adjusted_segment.fade_out(fade_duration)
+                
+                result += adjusted_segment
+            
+            # 输出
+            output_buffer = io.BytesIO()
+            result.export(output_buffer, format="mp3", bitrate="128k")
+            
+            logger.debug(f"✅ 应用音量曲线完成: {len(volume_curve)}个控制点")
+            return output_buffer.getvalue()
+        except Exception as e:
+            logger.warning(f"⚠️ 应用音量曲线失败: {e}")
+            return audio_data
     
     def get_audio_info(self, audio_data: bytes) -> dict:
         """获取音频信息（FFmpeg增强版）"""

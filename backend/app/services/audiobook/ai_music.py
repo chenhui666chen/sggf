@@ -121,6 +121,15 @@ class MurekaO1Client:
         self.cache_hits = 0
         self.total_cost = 0.0
         
+        # 🆕 水印裁剪配置
+        # 从环境变量或配置文件读取裁剪时长，默认3秒
+        self.watermark_trim_seconds = float(
+            os.getenv("MUREKA_WATERMARK_TRIM") or 
+            getattr(settings, "MUREKA_WATERMARK_TRIM", 3.0)
+        )
+        if self.watermark_trim_seconds > 0:
+            logger.info(f"✂️ 启用Mureka水印自动裁剪: {self.watermark_trim_seconds}秒")
+        
         logger.info(f"✅ MurekaO1客户端初始化完成 (cache={enable_cache})")
     
     async def generate_music(
@@ -313,6 +322,13 @@ class MurekaO1Client:
             audio_data = await loop.run_in_executor(None, _download)
             cost = 0.0  # Mureka 计费需要根据实际情况调整
 
+            # 🆕 自动去除Mureka水印（使用配置的裁剪时长）
+            if self.watermark_trim_seconds > 0:
+                audio_data = self._remove_mureka_watermark(
+                    audio_data, 
+                    trim_seconds=self.watermark_trim_seconds
+                )
+
             # 将结果写入缓存目录的临时文件
             cache_key = self._get_cache_key(request)
             output_file = self.cache_dir / f"{cache_key}.mp3"
@@ -466,6 +482,57 @@ class MurekaO1Client:
                 json.dump(index_data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.warning(f"⚠️ 更新音乐索引失败: {e}")
+    
+    def _remove_mureka_watermark(
+        self,
+        audio_data: bytes,
+        trim_seconds: float = 3.0
+    ) -> bytes:
+        """
+        🆕 自动去除Mureka水印（裁剪末尾）
+        
+        Args:
+            audio_data: 原始音频数据
+            trim_seconds: 裁剪末尾时长（秒），默认3秒
+        
+        Returns:
+            去除水印后的音频数据
+        """
+        try:
+            # 尝试使用pydub裁剪
+            try:
+                from pydub import AudioSegment
+                import io
+                
+                audio = AudioSegment.from_file(io.BytesIO(audio_data))
+                original_duration_ms = len(audio)
+                
+                # 裁剪末尾
+                trim_ms = int(trim_seconds * 1000)
+                if original_duration_ms > trim_ms:
+                    trimmed_audio = audio[:-trim_ms]
+                    
+                    # 输出
+                    output_buffer = io.BytesIO()
+                    trimmed_audio.export(output_buffer, format="mp3", bitrate="128k")
+                    
+                    logger.info(
+                        f"✂️ 已自动去除Mureka水印: "
+                        f"{original_duration_ms/1000:.1f}s → {len(trimmed_audio)/1000:.1f}s "
+                        f"(裁剪{trim_seconds}s)"
+                    )
+                    return output_buffer.getvalue()
+                else:
+                    logger.warning(f"⚠️ 音频太短({original_duration_ms/1000:.1f}s)，跳过水印裁剪")
+                    return audio_data
+                    
+            except ImportError:
+                logger.warning("⚠️ pydub不可用，无法裁剪水印")
+                return audio_data
+                
+        except Exception as e:
+            logger.warning(f"⚠️ 裁剪水印失败: {e}，返回原始音频")
+            return audio_data
     
     def get_statistics(self) -> Dict[str, Any]:
         """获取统计信息"""

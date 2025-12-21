@@ -84,6 +84,10 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "./logs/app.log"
 
+    # Celery配置
+    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+
     # 腾讯云 API 配置（用于 AI 生成检测）
     TENCENT_SECRET_ID: str = ""
     TENCENT_SECRET_KEY: str = ""

@@ -139,8 +139,12 @@ backend/venv/
 backend/.env
 backend/.env.local
 
+# Generated artifacts (DreamWeaver / local runs)
+runs/
+backend/runs/
+test_old_sdk.wav
+
 # Misc
 .turbo/
 .vercel/
 .netlify/
-

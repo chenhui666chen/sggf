@@ -21,6 +21,8 @@ from .book_parser import (
 
 # 有声书模型
 from .audiobook import AudiobookProject, ChapterAudio
+from .audiobook_task import AudiobookTask
+from .dreamweaver import DreamweaverProject, DreamweaverEpisode, DreamweaverShot, DreamweaverAsset
 
 __all__ = [
     "User",
@@ -42,4 +44,10 @@ __all__ = [
     # 有声书
     "AudiobookProject",
     "ChapterAudio",
+    "AudiobookTask",
+    # 织梦映心（短剧/漫剧生产）
+    "DreamweaverProject",
+    "DreamweaverEpisode",
+    "DreamweaverShot",
+    "DreamweaverAsset",
 ]

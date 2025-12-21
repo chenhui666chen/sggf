@@ -13,7 +13,7 @@ class AudiobookProjectCreate(BaseModel):
     tts_provider: str = "aliyun"
     enable_cache: bool = True
     voice_config: Optional[List["CharacterVoiceConfig"]] = None
-    tts_model: Optional[str] = "cosyvoice-v3-flash"  # cosyvoice 模型：flash 或 plus
+    tts_model: Optional[str] = "qwen3-tts-flash"  # TTS 模型（qwen3-tts-flash / cosyvoice-v3-plus）
     generation_mode: str = "full"  # full: 直接生成音频; script_only: 仅生成剧本+评审
     force_regenerate_script: bool = False  # 🆕 是否强制重新生成剧本（覆盖已有剧本）
 
@@ -21,7 +21,7 @@ class AudiobookProjectCreate(BaseModel):
 class GenerateAudioFromScriptsRequest(BaseModel):
     """基于已生成剧本的音频生成请求（两阶段流程第2阶段）"""
     chapter_ids: Optional[List[int]] = None
-    tts_model: Optional[str] = "cosyvoice-v3-flash"  # cosyvoice 模型：flash 或 plus
+    tts_model: Optional[str] = "qwen3-tts-flash"  # TTS 模型（qwen3-tts-flash / cosyvoice-v3-plus）
 
 
 class ChapterScriptUpdateRequest(BaseModel):
@@ -71,8 +71,30 @@ class CharacterVoiceConfig(BaseModel):
 class TTSPreviewRequest(BaseModel):
     """TTS试听请求"""
     text: str
-    voice_id: str = "longanyang"
+    voice_id: str = "male_young_energetic"
     volume: int = 50
     speed: Optional[float] = None
     pitch: Optional[int] = None
-    model: Optional[str] = "cosyvoice-v3-flash"  # cosyvoice 模型：flash 或 plus
+    model: Optional[str] = "qwen3-tts-flash"  # TTS 模型（默认 qwen3-tts-flash）
+
+
+class AudiobookTaskStatus(BaseModel):
+    """Celery 任务状态响应"""
+    celery_task_id: Optional[str]
+    audiobook_project_id: int
+    chapter_id: Optional[int]
+    task_type: str
+    status: str
+    current_stage: Optional[str] = None
+    progress: float = 0.0
+    completed_units: int = 0
+    total_units: int = 0
+    detail: Optional[dict] = None
+    error_message: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True

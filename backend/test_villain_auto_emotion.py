@@ -32,7 +32,7 @@ def test_villain_voice_assignment():
                 "personality": "evil",  # 邪恶 → 触发反派识别
                 "role_type": "villain"
             },
-            "expected": "male_young_energetic (longanyang)"
+            "expected": "male_young_energetic (Ethan)"
         },
         {
             "name": "冷血杀手",
@@ -42,7 +42,7 @@ def test_villain_voice_assignment():
                 "personality": "cold",  # 冷酷 → 触发反派识别
                 "role_type": ""
             },
-            "expected": "male_young_energetic (longanyang)"
+            "expected": "male_young_energetic (Ethan)"
         },
         {
             "name": "阴险女反派",
@@ -52,7 +52,7 @@ def test_villain_voice_assignment():
                 "personality": "sinister",  # 阴险 → 触发反派识别
                 "role_type": ""
             },
-            "expected": "female_young_energetic (longanhuan)"
+            "expected": "female_young_energetic (Sunny)"
         },
         {
             "name": "幕后boss",
@@ -62,7 +62,7 @@ def test_villain_voice_assignment():
                 "personality": "calm",
                 "role_type": "boss"  # boss → 触发反派识别
             },
-            "expected": "male_young_energetic (longanyang)"
+            "expected": "male_young_energetic (Ethan)"
         },
         {
             "name": "温柔女主",
@@ -110,27 +110,27 @@ def test_villain_emotion_override():
     
     from app.services.audiobook.tts_engine import TTSEngine
     
-    engine = TTSEngine(model="cosyvoice-v3-flash", enable_cache=False)
+    engine = TTSEngine(model="qwen3-tts-flash", enable_cache=False)
     
     # 模拟反派角色的voice_params
     test_cases = [
         {
-            "speaker": "longanyang",
+            "speaker": "Ethan",
             "emotion": "neutral",
             "description": "反派音色 + neutral → 应自动变为 angry"
         },
         {
-            "speaker": "longanhuan",
+            "speaker": "Sunny",
             "emotion": "neutral",
             "description": "女反派音色 + neutral → 应自动变为 angry"
         },
         {
-            "speaker": "longanzhi_v3",
+            "speaker": "Ryan",
             "emotion": "neutral",
             "description": "普通音色 + neutral → 保持 neutral"
         },
         {
-            "speaker": "longanyang",
+            "speaker": "Ethan",
             "emotion": "happy",
             "description": "反派音色 + happy → 保持 happy（尊重明确指定的情感）"
         },
@@ -146,7 +146,7 @@ def test_villain_emotion_override():
         emotion = case["emotion"]
         
         # 检测反派音色并自动调整情感
-        villain_voice_ids = ["longanyang", "longanhuan"]
+        villain_voice_ids = ["Ethan", "Sunny"]
         if case["speaker"] in villain_voice_ids and (emotion == "neutral" or not emotion):
             logger.info(f"   🎭 检测到反派音色，自动应用 'angry' 情感")
             emotion = "angry"
@@ -170,7 +170,7 @@ if __name__ == "__main__":
     print("\n\n📝 功能说明：")
     print("1. 当角色的 personality 包含 'evil/sinister/cruel/cold/ruthless/domineering/cunning' 时")
     print("   或 role_type 包含 '反派/villain/boss/enemy' 时")
-    print("   → 自动分配支持Instruct的音色（男性→longanyang, 女性→longanhuan）")
+    print("   → 自动分配支持Instruct的音色（男性→Ethan, 女性→Sunny）")
     print()
     print("2. 当使用这些音色且情感为neutral时")
     print("   → TTS引擎自动将情感调整为 'angry'，通过Instruct情感控制实现反派效果")

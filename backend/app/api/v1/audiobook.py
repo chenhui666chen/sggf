@@ -13,7 +13,7 @@ import os
 import json
 from urllib.parse import quote
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -23,6 +23,7 @@ from app.models.user import User
 from app.models.project import Project, Chapter
 from app.models.audiobook import AudiobookProject, ChapterAudio
 from app.models.character import Character
+from app.models.audiobook_task import AudiobookTask
 from app.schemas.audiobook import (
     AudiobookProjectCreate,
     GenerateAudioFromScriptsRequest,
@@ -31,7 +32,9 @@ from app.schemas.audiobook import (
     ChapterAudioResponse,
     CharacterVoiceConfig,
     TTSPreviewRequest,
+    AudiobookTaskStatus,
 )
+from app.celery_app import celery_app
 from app.services.audiobook import AudiobookEngine
 from app.services.audiobook.tts_engine import TTSEngine
 from app.services.audiobook.voice_manager import VoiceManager
@@ -40,6 +43,7 @@ from app.services.audiobook.repository import (
     AudiobookProjectRepository,
     ChapterAudioRepository,
     ProjectRepository,
+    AudiobookTaskRepository,
 )
 from dataclasses import asdict, is_dataclass
 
@@ -56,6 +60,34 @@ def serialize_dataclass_to_dict(obj):
         return {key: serialize_dataclass_to_dict(value) for key, value in obj.items()}
     else:
         return obj
+
+
+def build_task_status_response(task: AudiobookTask) -> AudiobookTaskStatus:
+    """Convert ORM object to API schema."""
+    return AudiobookTaskStatus(
+        celery_task_id=task.celery_task_id,
+        audiobook_project_id=task.audiobook_project_id,
+        chapter_id=task.chapter_id,
+        task_type=task.task_type,
+        status=task.status,
+        current_stage=task.current_stage,
+        progress=task.progress or 0.0,
+        completed_units=task.completed_units or 0,
+        total_units=task.total_units or 0,
+        detail=task.detail_json or {},
+        error_message=task.error_message,
+        created_at=task.created_at.isoformat() if task.created_at else None,
+        updated_at=task.updated_at.isoformat() if task.updated_at else None,
+        started_at=task.started_at.isoformat() if task.started_at else None,
+        finished_at=task.finished_at.isoformat() if task.finished_at else None,
+    )
+
+
+def _tracker_update(tracker, stage: str, completed: int, total: int, message: Optional[str] = None, detail: Optional[dict] = None):
+    """简单包装，避免在任务函数中重复判空。"""
+    if tracker is None:
+        return
+    tracker.update_stage(stage, completed, total, message, detail)
 
 router = APIRouter(prefix="/api/v1/audiobook", tags=["audiobook"])
 
@@ -77,10 +109,10 @@ async def tts_preview(
     if len(text) > 200:
         text = text[:200]
 
-    # 选择模型：默认使用 cosyvoice-v3-flash，可切换为 cosyvoice-v3-plus
-    model_name = (request.model or "cosyvoice-v3-flash").strip()
-    if model_name not in {"cosyvoice-v3-flash", "cosyvoice-v3-plus"}:
-        model_name = "cosyvoice-v3-flash"
+    # 选择模型：默认使用 qwen3-tts-flash，可切换为 cosyvoice-v3-plus
+    model_name = (request.model or "qwen3-tts-flash").strip()
+    if model_name not in {"qwen3-tts-flash", "cosyvoice-v3-plus"}:
+        model_name = "qwen3-tts-flash"
 
     engine = TTSEngine(enable_cache=False, max_concurrent=1, model=model_name, request_delay=0.0)
     # 将前端的 voice_id（如 'male_young_energetic'）映射为真实的 TTS 音色ID
@@ -108,7 +140,6 @@ async def tts_preview(
 @router.post("/projects", response_model=dict)
 async def create_audiobook_project(
     request: AudiobookProjectCreate,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -121,27 +152,46 @@ async def create_audiobook_project(
     service = AudiobookAppService(db=db, current_user=current_user)
     audiobook_project = service.create_audiobook_project(request)
 
-    # 4. 后台启动生成任务
-    if getattr(request, "generation_mode", "full") == "script_only":
-        background_tasks.add_task(
-            generate_audiobook_scripts_background,
-            audiobook_project_id=audiobook_project.id,
-            chapter_ids=request.chapter_ids,
-            tts_model=(request.tts_model or "cosyvoice-v3-flash"),
-            force_regenerate=request.force_regenerate_script,  # 🆕 传递强制重生成参数
+    # 4. 后台启动生成任务（通过 Celery 队列）
+    job_type = "script_only" if getattr(request, "generation_mode", "full") == "script_only" else "full"
+    task_record = AudiobookTaskRepository.create_task(
+        db,
+        audiobook_project_id=audiobook_project.id,
+        chapter_id=None,
+        task_type=job_type,
+        total_units=len(request.chapter_ids),
+    )
+    tts_model = (request.tts_model or "qwen3-tts-flash").strip()
+    if job_type == "script_only":
+        signature = celery_app.signature(
+            "audiobook.run_script_only",
+            args=[
+                task_record.id,
+                audiobook_project.id,
+                request.chapter_ids,
+                tts_model,
+                request.force_regenerate_script,
+            ],
         )
     else:
-        background_tasks.add_task(
-            generate_audiobook_background,
-            audiobook_project_id=audiobook_project.id,
-            chapter_ids=request.chapter_ids,
-            tts_model=(request.tts_model or "cosyvoice-v3-flash"),
+        signature = celery_app.signature(
+            "audiobook.run_full",
+            args=[
+                task_record.id,
+                audiobook_project.id,
+                request.chapter_ids,
+                tts_model,
+            ],
         )
+    async_result = signature.delay()
+    AudiobookTaskRepository.attach_celery_id(db, task_record.id, async_result.id)
 
     return {
         "success": True,
         "audiobook_project_id": audiobook_project.id,
-        "message": "有声书生成任务已启动",
+        "job_id": async_result.id,
+        "task_type": job_type,
+        "message": "有声书生成任务已进入队列",
         "total_chapters": len(request.chapter_ids),
     }
 
@@ -232,7 +282,6 @@ async def list_audiobook_projects(
 async def trigger_generate_audio_from_scripts(
     audiobook_project_id: int,
     request: GenerateAudioFromScriptsRequest,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -289,17 +338,31 @@ async def trigger_generate_audio_from_scripts(
     target_chapter_ids = [ca.chapter_id for ca in chapter_audios]
 
     # 4. 启动后台任务
-    background_tasks.add_task(
-        generate_audiobook_audio_from_scripts_background,
+    task_record = AudiobookTaskRepository.create_task(
+        db,
         audiobook_project_id=audiobook_project_id,
-        chapter_ids=target_chapter_ids,
-        tts_model=(request.tts_model or "cosyvoice-v3-flash"),
+        chapter_id=None,
+        task_type="audio_from_scripts",
+        total_units=len(target_chapter_ids),
     )
+    tts_model = (request.tts_model or "qwen3-tts-flash").strip()
+    signature = celery_app.signature(
+        "audiobook.run_audio_from_scripts",
+        args=[
+            task_record.id,
+            audiobook_project_id,
+            target_chapter_ids,
+            tts_model,
+        ],
+    )
+    async_result = signature.delay()
+    AudiobookTaskRepository.attach_celery_id(db, task_record.id, async_result.id)
 
     return {
         "success": True,
         "audiobook_project_id": audiobook_project_id,
         "chapter_ids": target_chapter_ids,
+        "job_id": async_result.id,
         "message": "已启动基于剧本的音频生成任务",
     }
 
@@ -378,62 +441,30 @@ async def delete_audiobook_project(
     }
 
 
-@router.get("/tasks/{task_id}/status")
+@router.get("/tasks/{task_id}/status", response_model=AudiobookTaskStatus)
 async def get_task_status(
     task_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    """
-    获取有声书生成任务状态
-    
-    返回各阶段的详细进度：
-    - strategy: 策略制定
-    - script_adaptation: 剧本改编
-    - voice_design: 音色设计
-    - sound_design: 音效设计
-    - music_composition: 音乐编曲
-    - tts_synthesis: TTS合成
-    - audio_mixing: 音频混合
-    - quality_review: 剧本质量评审
-    - final_audio_review: 最终音频评审
-    """
-    # 获取全局Engine实例（或从缓存中获取）
-    from app.services.audiobook import get_engine_instance
-    
-    engine = get_engine_instance()
-    if not engine:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="有声书引擎未初始化"
-        )
-    
-    task_status = engine.get_task_status(task_id)
-    
-    if not task_status:
+    """查询指定任务的持久化队列状态。"""
+    task = AudiobookTaskRepository.get_task_for_user(db, task_id, current_user.id)
+    if not task:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"任务不存在: {task_id}"
+            detail=f"任务不存在: {task_id}",
         )
-    
-    return task_status
+    return build_task_status_response(task)
 
 
-@router.get("/tasks")
+@router.get("/tasks", response_model=List[AudiobookTaskStatus])
 async def list_all_tasks(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    """
-    获取所有任务状态列表
-    
-    用于监控页面或调试
-    """
-    from app.services.audiobook import get_engine_instance
-    
-    engine = get_engine_instance()
-    if not engine:
-        return []
-    
-    return engine.get_all_tasks()
+    """列出当前用户最近的有声书后台任务。"""
+    tasks = AudiobookTaskRepository.list_tasks_for_user(db, current_user.id)
+    return [build_task_status_response(task) for task in tasks]
 
 
 @router.get("/download/{audiobook_project_id}/{chapter_id}")
@@ -761,8 +792,9 @@ async def update_chapter_script(
 async def generate_audiobook_scripts_background(
     audiobook_project_id: int,
     chapter_ids: List[int],
-    tts_model: str = "cosyvoice-v3-flash",
+    tts_model: str = "qwen3-tts-flash",
     force_regenerate: bool = False,  # 🆕 新增参数：是否强制重新生成剧本
+    tracker=None,
 ):
     """后台生成有声书【剧本+评审】任务（不执行TTS和混音）。
 
@@ -952,7 +984,8 @@ async def generate_audiobook_scripts_background(
 async def generate_audiobook_audio_from_scripts_background(
     audiobook_project_id: int,
     chapter_ids: List[int],
-    tts_model: str = "cosyvoice-v3-flash",
+    tts_model: str = "qwen3-tts-flash",
+    tracker=None,
 ):
     """后台生成有声书音频任务（基于已生成/人工审核后的剧本）。
 
@@ -1219,7 +1252,8 @@ async def generate_audiobook_audio_from_scripts_background(
 async def generate_audiobook_background(
     audiobook_project_id: int,
     chapter_ids: List[int],
-    tts_model: str = "cosyvoice-v3-flash"
+    tts_model: str = "qwen3-tts-flash",
+    tracker=None,
 ):
     """
     后台生成有声书任务

@@ -14,7 +14,7 @@ def test_emotion_params():
         gender="male",
         age_group="young",
         personality="energetic",
-        tts_speaker_id="longanyang",
+        tts_speaker_id="Ryan",
         pitch_base=50,      # 基础音高
         speed_base=1.0,     # 基础语速
         volume_base=50      # 基础音量

@@ -11,6 +11,7 @@ from typing import Iterable, List, Optional
 from sqlalchemy.orm import Session
 
 from app.models.audiobook import AudiobookProject, ChapterAudio
+from app.models.audiobook_task import AudiobookTask
 from app.models.character import Character
 from app.models.project import Chapter, Project
 
@@ -91,3 +92,65 @@ class ChapterAudioRepository:
             .filter(ChapterAudio.audiobook_project_id == audiobook_project_id)
             .all()
         )
+
+
+class AudiobookTaskRepository:
+    """与 AudiobookTask 相关的查询与管理."""
+
+    @staticmethod
+    def create_task(
+        db: Session,
+        *,
+        audiobook_project_id: int,
+        chapter_id: Optional[int],
+        task_type: str,
+        total_units: int = 0,
+    ) -> AudiobookTask:
+        task = AudiobookTask(
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=chapter_id,
+            task_type=task_type,
+            total_units=total_units,
+            status="pending",
+        )
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+        return task
+
+    @staticmethod
+    def attach_celery_id(db: Session, task_id: int, celery_task_id: str) -> None:
+        task = db.query(AudiobookTask).filter(AudiobookTask.id == task_id).first()
+        if not task:
+            return
+        task.celery_task_id = celery_task_id
+        db.commit()
+
+    @staticmethod
+    def list_tasks_for_user(db: Session, user_id: int, limit: int = 50) -> List[AudiobookTask]:
+        return (
+            db.query(AudiobookTask)
+            .join(AudiobookProject, AudiobookProject.id == AudiobookTask.audiobook_project_id)
+            .join(Project, Project.id == AudiobookProject.project_id)
+            .filter(Project.user_id == user_id)
+            .order_by(AudiobookTask.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+    @staticmethod
+    def get_task_for_user(db: Session, celery_task_id: str, user_id: int) -> Optional[AudiobookTask]:
+        return (
+            db.query(AudiobookTask)
+            .join(AudiobookProject, AudiobookProject.id == AudiobookTask.audiobook_project_id)
+            .join(Project, Project.id == AudiobookProject.project_id)
+            .filter(
+                AudiobookTask.celery_task_id == celery_task_id,
+                Project.user_id == user_id,
+            )
+            .first()
+        )
+
+    @staticmethod
+    def get_by_id(db: Session, task_id: int) -> Optional[AudiobookTask]:
+        return db.query(AudiobookTask).filter(AudiobookTask.id == task_id).first()

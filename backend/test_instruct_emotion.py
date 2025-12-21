@@ -4,7 +4,11 @@
 """
 import asyncio
 import os
+
+import pytest
 from dotenv import load_dotenv
+
+pytest.skip("Qwen3-TTS暂未开放instruction参数，跳过CosyVoice特定用例", allow_module_level=True)
 
 # 加载环境变量
 load_dotenv()

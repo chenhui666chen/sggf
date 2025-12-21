@@ -59,7 +59,7 @@ class AudiobookEngine:
         enable_cache: bool = True,
         max_concurrent: int = 1,  # 降低并发，避免阿里云限流（从5改为1）
         llm_client=None,  # LLM客户端（用于专业Agent + 智能音色推断）
-        tts_model: str = "cosyvoice-v3-flash",  # cosyvoice 模型：flash 或 plus
+        tts_model: str = "qwen3-tts-flash",  # TTS 模型（qwen3-tts-flash / cosyvoice-v3-plus）
     ) -> None:
         # 检查LLM客户端
         if llm_client is None:
@@ -88,7 +88,7 @@ class AudiobookEngine:
         self.tts_engine = TTSEngine(
             enable_cache=enable_cache,
             max_concurrent=max_concurrent,
-            model=tts_model  # 支持 cosyvoice-v3-flash / cosyvoice-v3-plus
+            model=tts_model  # 支持 qwen3-tts-flash / cosyvoice-v3-plus
         )
         self.audio_mixer = AudioMixer()
         # 存储最近一次音效时间线（用于混音）
@@ -97,6 +97,11 @@ class AudiobookEngine:
         self._last_music_timeline: Optional[Dict[str, Any]] = None
         # 项目级音效/BGM 配置（来自 Project.audio_config.audio_fx）
         self._audio_fx_config: Optional[Dict[str, Any]] = None
+        
+        # 🆕 智能化模块
+        from .intelligence import ClimaxDetector, EmotionCurveAnalyzer
+        self.climax_detector = ClimaxDetector()
+        self.emotion_analyzer = EmotionCurveAnalyzer()
         
         logger.info("🎶 有声书生成引擎初始化完成")
     
@@ -786,7 +791,7 @@ class AudiobookEngine:
         audio_data: bytes,
         music_timeline: Dict[str, Any],
     ) -> bytes:
-        """根据配乐时间线，将BGM叠加到音频上
+        """根据配乐时间线，将BGM叠加到音频上（🆕 智能音量平衡版）
         
         Args:
             audio_data: 原始音频数据
@@ -804,25 +809,41 @@ class AudiobookEngine:
         
         mixed_audio = audio_data
         
+        # 🆕 检查是否启用智能音量平衡
+        audio_fx = getattr(self, "_audio_fx_config", None) or {}
+        intelligent_balance = audio_fx.get("intelligent_balance", False)
+        base_bgm_volume_db = audio_fx.get("base_bgm_volume", -30)  # 默认-30dB
+        
         for item in timeline_items:
             file_ref = item.get("file")
             timestamp = item.get("timestamp", 0.0)
             volume = item.get("volume", 0.2)
             sync_with_dialogue = item.get("sync_with_dialogue", True)
+            mood = item.get("mood", "peaceful")
+            music_type = item.get("type", "underscore")
             
-            # 计算音量偏移（dB）
-            # 配乐默认音量更低，以 -30dB 为基准（适合有旁白的人声为主场景）
-            base_gain = -30.0
-            try:
-                volume_val = float(volume)
-            except (TypeError, ValueError):
-                volume_val = 0.2
-            volume_val = max(0.05, min(1.0, volume_val))
-            
-            # 以 0.2 为基准做相对音量调整
-            relative = volume_val / 0.2
-            volume_adjust_db = 20 * math.log10(relative)
-            bgm_volume_offset = base_gain + volume_adjust_db
+            # 🆕 智能音量平衡计算
+            if intelligent_balance:
+                bgm_volume_offset = self._calculate_intelligent_bgm_volume(
+                    base_volume_db=base_bgm_volume_db,
+                    music_type=music_type,
+                    mood=mood,
+                    target_volume=volume
+                )
+                logger.debug(f"🎚️ 智能音量: {music_type}/{mood} → {bgm_volume_offset:.1f}dB")
+            else:
+                # 原有逻辑：固定基准音量
+                base_gain = base_bgm_volume_db
+                try:
+                    volume_val = float(volume)
+                except (TypeError, ValueError):
+                    volume_val = 0.2
+                volume_val = max(0.05, min(1.0, volume_val))
+                
+                # 以 0.2 为基准做相对音量调整
+                relative = volume_val / 0.2
+                volume_adjust_db = 20 * math.log10(relative) if relative > 0 else -40
+                bgm_volume_offset = base_gain + volume_adjust_db
             
             if not file_ref:
                 continue
@@ -842,6 +863,8 @@ class AudiobookEngine:
                 with music_path.open("rb") as f:
                     bgm_bytes = f.read()
                 
+                logger.info(f"🎼 叠加BGM: {music_path.name} (音量: {bgm_volume_offset:.1f}dB)")
+                
                 # 使用 AudioMixer.add_background_music 叠加 BGM
                 # 注意：add_background_music 会循环 BGM 至与音频相同长度
                 mixed_audio = self.audio_mixer.add_background_music(
@@ -854,6 +877,76 @@ class AudiobookEngine:
                 logger.warning(f"⚠️ 叠加配乐失败 {music_path}: {e}")
         
         return mixed_audio
+    
+    def _calculate_intelligent_bgm_volume(
+        self,
+        base_volume_db: float,
+        music_type: str,
+        mood: str,
+        target_volume: float
+    ) -> float:
+        """
+        🤖 智能计算BGM音量（根据场景类型、情绪、音乐类型进行动态调整）
+        
+        Args:
+            base_volume_db: 基础音量（dB），默认-30dB
+            music_type: 音乐类型 (opening/ending/underscore/theme)
+            mood: 情绪 (tense/epic/peaceful/sad/joyful/mysterious/romantic)
+            target_volume: 目标音量 (0.0-1.0)
+        
+        Returns:
+            最终BGM音量偏移（dB）
+        
+        🎯 智能调整规则：
+        1. 开场/片尾音乐：可适当提升音量 (+5dB)
+        2. 高潮情绪(tense/epic)：提升音量 (+8dB)
+        3. 平静情绪(peaceful/sad)：降低音量 (-5dB)
+        4. 背景音乐(underscore)：保持基础音量
+        5. 角色主题音乐(theme)：稍微提升 (+3dB)
+        """
+        # 从基础音量开始
+        adjusted_volume = base_volume_db
+        
+        # 1. 根据音乐类型调整
+        if music_type == "opening" or music_type == "ending":
+            adjusted_volume += 5  # 开场/结尾可以更响亮
+            logger.debug(f"  🎬 开场/结尾音乐: +5dB")
+        elif music_type == "theme":
+            adjusted_volume += 3  # 主题音乐稍微突出
+            logger.debug(f"  🎭 主题音乐: +3dB")
+        
+        # 2. 根据情绪调整
+        if mood in ["tense", "epic"]:
+            adjusted_volume += 8  # 紧张/史诗场景，配乐加强
+            logger.debug(f"  🔥 高潮情绪({mood}): +8dB")
+        elif mood in ["peaceful", "sad"]:
+            adjusted_volume -= 5  # 平静/悲伤场景，配乐低调
+            logger.debug(f"  🌙 平静情绪({mood}): -5dB")
+        elif mood in ["joyful", "romantic"]:
+            adjusted_volume += 2  # 欢快/浪漫场景，稍微提升
+            logger.debug(f"  ✨ 欢快情绪({mood}): +2dB")
+        
+        # 3. 根据目标音量做相对调整
+        try:
+            volume_val = float(target_volume)
+        except (TypeError, ValueError):
+            volume_val = 0.2
+        volume_val = max(0.05, min(1.0, volume_val))
+        
+        # 以 0.2 为基准，计算相对调整
+        relative = volume_val / 0.2
+        volume_adjust_db = 20 * math.log10(relative) if relative > 0 else -40
+        adjusted_volume += volume_adjust_db
+        
+        # 4. 限制在合理范围内 (-50dB 到 -10dB)
+        adjusted_volume = max(-50, min(-10, adjusted_volume))
+        
+        logger.debug(
+            f"  🎶 最终音量: {base_volume_db:.1f}dB → {adjusted_volume:.1f}dB "
+            f"(类型={music_type}, 情绪={mood}, 目标={volume_val:.2f})"
+        )
+        
+        return adjusted_volume
     
     def _final_audio_review(
         self,
@@ -1144,6 +1237,70 @@ class AudiobookEngine:
                         "is_turning_point": False,
                     })
 
+                # 🆕 智能化增强：高潮点检测 + 情绪曲线分析
+                audio_fx = getattr(self, "_audio_fx_config", None) or {}
+                enable_smart_enhancement = audio_fx.get("auto_climax_detection", False)
+                
+                if enable_smart_enhancement:
+                    logger.info("🤖 启用智能化增强...")
+                    
+                    # 1. 高潮点检测
+                    climax_points = self.climax_detector.detect_climax_points(script_segments)
+                    
+                    # 2. 情绪曲线分析
+                    emotion_flow = self.emotion_analyzer.analyze_chapter_emotion_flow(script_segments)
+                    
+                    # 3. 为检测到的高潮点添加配乐
+                    for climax in climax_points:
+                        idx = climax.segment_idx
+                        if idx >= len(script_segments):
+                            continue
+                        
+                        seg = script_segments[idx]
+                        # 计算时间点（累积前面所有片段的时长）
+                        climax_start_time = sum(
+                            getattr(script_segments[i], 'estimated_duration', 5.0)
+                            for i in range(idx)
+                        )
+                        
+                        scenes.append({
+                            "scene_id": f"climax_{idx}",
+                            "start_time": climax_start_time,
+                            "duration": 45.0,  # 高潮配乐持续45秒
+                            "mood": getattr(seg, 'emotion', 'epic'),
+                            "description": f"高潮点 - {climax.description}",
+                            "is_climax": True,
+                            "is_turning_point": climax.climax_type == 'turning_point',
+                            "music_prompt_key": "awakening" if climax.climax_type == 'battle' else "faction_intro"
+                        })
+                        logger.info(
+                            f"  ✅ 添加高潮配乐 #{idx}: {climax.description} "
+                            f"(强度={climax.intensity:.2f})"
+                        )
+                    
+                    # 4. 为情绪转折点添加转场音乐
+                    for shift in emotion_flow.get('emotional_shifts', []):
+                        idx = shift.idx
+                        if idx >= len(script_segments):
+                            continue
+                        
+                        shift_start_time = sum(
+                            getattr(script_segments[i], 'estimated_duration', 5.0)
+                            for i in range(idx)
+                        )
+                        
+                        scenes.append({
+                            "scene_id": f"shift_{idx}",
+                            "start_time": shift_start_time,
+                            "duration": 10.0,  # 转场音乐较短
+                            "mood": shift.to_emotion,
+                            "description": f"情绪转场 - {shift.from_emotion}→{shift.to_emotion}",
+                            "is_climax": False,
+                            "is_turning_point": True,
+                            "music_prompt_key": "suspense" if shift.to_emotion == 'tense' else "daily"
+                        })
+                        logger.info(f"  ✅ 添加转场音乐 #{idx}: {shift.shift_type}")
+                
                 # 如果没有任何候选场景，则退回到原来的简单三场景策略
                 if not scenes:
                     scenes = [
