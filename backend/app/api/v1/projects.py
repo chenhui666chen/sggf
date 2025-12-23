@@ -15,7 +15,14 @@ from app.schemas.project import (
     ChapterCreate, ChapterUpdate, ChapterResponse
 )
 from app.core.security import get_current_user
-from app.services.audiobook.voice_manager import VoiceManager
+from app.services.audiobook.project_audio_config import (
+    get_audio_fx,
+    get_characters_for_model,
+    parse_project_audio_config,
+    set_audio_fx,
+    set_characters_for_model,
+)
+from app.services.audiobook.voice_manager_factory import create_voice_manager
 
 
 class CharacterAudioConfig(BaseModel):
@@ -267,6 +274,7 @@ async def delete_project(
 @router.get("/{project_id}/audio-config", response_model=ProjectAudioConfig)
 async def get_project_audio_config(
     project_id: int,
+    tts_model: str = Query("qwen3-tts-flash"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectAudioConfig:
@@ -281,16 +289,10 @@ async def get_project_audio_config(
             detail="Project not found",
         )
 
-    raw = project.audio_config or ""
-    data: dict = {}
-    if raw:
-        try:
-            data = json.loads(raw)
-        except Exception:
-            data = {}
+    data = parse_project_audio_config(project.audio_config or "")
 
-    characters = data.get("characters") or []
-    audio_fx = data.get("audio_fx") or None
+    characters = get_characters_for_model(data, tts_model)
+    audio_fx = get_audio_fx(data)
     # 让 Pydantic 处理具体字段校验
     return ProjectAudioConfig(characters=characters, audio_fx=audio_fx)
 
@@ -299,6 +301,7 @@ async def get_project_audio_config(
 async def update_project_audio_config(
     project_id: int,
     config: ProjectAudioConfig,
+    tts_model: str = Query("qwen3-tts-flash"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectAudioConfig:
@@ -313,7 +316,10 @@ async def update_project_audio_config(
             detail="Project not found",
         )
 
-    project.audio_config = json.dumps(config.dict(), ensure_ascii=False)
+    data = parse_project_audio_config(project.audio_config or "")
+    set_characters_for_model(data, tts_model, [c.dict() for c in (config.characters or [])])
+    set_audio_fx(data, config.audio_fx.dict() if config.audio_fx else None)
+    project.audio_config = json.dumps(data, ensure_ascii=False)
     db.add(project)
     db.commit()
     db.refresh(project)
@@ -324,6 +330,7 @@ async def update_project_audio_config(
 @router.post("/{project_id}/audio-config/auto-voices", response_model=ProjectAudioConfig)
 async def auto_assign_project_audio_voices(
     project_id: int,
+    tts_model: str = Query("qwen3-tts-flash"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectAudioConfig:
@@ -345,16 +352,9 @@ async def auto_assign_project_audio_voices(
         )
 
     # 解析现有 audio_config
-    raw = project.audio_config or ""
-    data: dict = {}
-    if raw:
-        try:
-            data = json.loads(raw)
-        except Exception:
-            data = {}
-
-    existing_characters = data.get("characters") or []
-    audio_fx = data.get("audio_fx") or None
+    data = parse_project_audio_config(project.audio_config or "")
+    existing_characters = get_characters_for_model(data, tts_model)
+    audio_fx = get_audio_fx(data)
 
     # 建立已有配置索引
     manual_configs_by_id = {}
@@ -383,7 +383,7 @@ async def auto_assign_project_audio_voices(
         .all()
     )
 
-    vm = VoiceManager()
+    vm = create_voice_manager(tts_model=tts_model)
     result_characters = []
 
     # 先放入“其他”条目（如旁白）
@@ -448,6 +448,13 @@ async def auto_assign_project_audio_voices(
         "audio_fx": audio_fx,
     }
     project.audio_config = json.dumps(new_config, ensure_ascii=False)
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+
+    set_characters_for_model(data, tts_model, result_characters)
+    set_audio_fx(data, audio_fx)
+    project.audio_config = json.dumps(data, ensure_ascii=False)
     db.add(project)
     db.commit()
     db.refresh(project)
@@ -682,4 +689,3 @@ async def export_all_chapters_docx(
             "Content-Disposition": f"attachment; filename*=UTF-8''{filename_encoded}"
         }
     )
-

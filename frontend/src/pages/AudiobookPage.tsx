@@ -8,7 +8,7 @@
  * 4. 进度监控
  * 5. 音频播放与下载
  */
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiClient } from '../services/api'
 import * as bookParserApi from '../services/bookParserApi'
@@ -77,25 +77,30 @@ interface Chapter {
 }
 
 // 新增：任务状态类型
+type StageStatus = 'pending' | 'running' | 'completed' | 'failed'
+
 interface StageInfo {
-  status: 'pending' | 'running' | 'completed' | 'failed'
+  status: StageStatus
   progress: number
   start_time?: string
   end_time?: string
   error_message?: string
   metrics?: Record<string, any>
+  message?: string
 }
 
 interface TaskStatus {
   task_id: string
-  chapter_id: number
-  status: 'pending' | 'running' | 'completed' | 'failed'
-  overall_progress: number
-  stages: Record<string, StageInfo>
-  created_at: string
+  audiobook_project_id: number
+  chapter_id?: number | null
+  status: StageStatus
+  current_stage?: string | null
+  progress: number
+  stages: Record<StageKey, StageInfo>
+  created_at?: string
   updated_at?: string
-  novel_genre?: string
-  novel_theme?: string
+  detail?: Record<string, any>
+  overall_progress?: number
 }
 
 interface CharacterVoiceSetting {
@@ -158,6 +163,173 @@ interface HistoryDialogProps {
   onCloseDeleteConfirm: () => void
   onConfirmDelete: () => void
 }
+
+interface VoiceDefaultParams {
+  pitch?: number
+  speed?: number
+  volume?: number
+}
+
+interface VoicePreset {
+  id: string
+  speaker: string
+  label: string
+  gender?: string
+  style?: string
+  category?: string
+  languages?: string[]
+  description?: string
+  recommended?: string[]
+  default_params?: VoiceDefaultParams
+  supportsInstruct?: boolean
+}
+
+interface VoiceCatalogMeta {
+  model?: string
+  updated_at?: string
+  source?: string
+  voice_count?: number
+}
+
+const DEFAULT_NARRATOR_BY_MODEL = {
+  'qwen3-tts-flash': 'Ryan',
+  'cosyvoice-v3-plus': 'longanyang',
+} as const
+
+const getDefaultNarratorId = (model: 'qwen3-tts-flash' | 'cosyvoice-v3-plus') =>
+  DEFAULT_NARRATOR_BY_MODEL[model] || 'Ryan'
+
+const LEGACY_VOICE_ALIASES: Record<string, string> = {
+  male_young_energetic: 'Ethan',
+  male_young_gentle: 'Vincent',
+  male_adult_calm: 'Ryan',
+  male_adult_energetic: 'Aiden',
+  male_elder_wise: 'Eldric Sage',
+  male_warm: 'Vincent',
+  male_customer_service: 'Kai',
+  male_refreshing: 'Kai',
+  male_monkey: 'Nofish',
+  male_narrator: 'Ryan',
+  male_villain_sinister: 'Aiden',
+  female_villain_cold: 'Jennifer',
+  female_villain_cunning: 'Katerina',
+  female_young_gentle: 'Cherry',
+  female_young_energetic: 'Bunny',
+  female_young_cute: 'Momo',
+  female_adult_elegant: 'Bella',
+  female_adult_intellectual: 'Vivian',
+  female_capable: 'Jennifer',
+  female_elder: 'Chelsie',
+  female_intimate: 'Mochi',
+  female_lively: 'Mia',
+  female_child: 'Momo',
+}
+
+const normalizeVoiceId = (
+  model: 'qwen3-tts-flash' | 'cosyvoice-v3-plus',
+  voiceId?: string | null,
+) => {
+  if (!voiceId) return ''
+  if (model === 'qwen3-tts-flash') {
+    return LEGACY_VOICE_ALIASES[voiceId] || voiceId
+  }
+  const cosyvoiceV3PlusLegacyAliases: Record<string, string> = {
+    longanzhi_v3: 'longanyang',
+    longanyun_v3: 'longanyang',
+    longyichen_v3: 'longanyang',
+    longwanjun_v3: 'longanhuan',
+    longanwen_v3: 'longanhuan',
+  }
+  return cosyvoiceV3PlusLegacyAliases[voiceId] || voiceId
+}
+
+const STAGE_CONFIG = [
+  { key: 'strategy', name: '策略制定', icon: '01', desc: '分析原文，制定改编策略' },
+  { key: 'script_adaptation', name: '剧本改编', icon: '02', desc: '将小说改编为有声剧本' },
+  { key: 'voice_design', name: '音色设计', icon: '03', desc: '为角色分配音色参数' },
+  { key: 'sound_design', name: '音效设计', icon: '04', desc: '设计场景音效和环境音' },
+  { key: 'music_composition', name: '音乐编曲', icon: '05', desc: '设计背景音乐方案' },
+  { key: 'quality_review', name: '剧本评审', icon: '06', desc: 'TTS前质量检查' },
+  { key: 'tts_synthesis', name: 'TTS合成', icon: '07', desc: '语音合成生成音频' },
+  { key: 'audio_mixing', name: '音频混合', icon: '08', desc: '混音与后期处理' },
+  { key: 'final_audio_review', name: '最终评审', icon: '09', desc: '最终质量检查' },
+] as const
+
+type StageKey = typeof STAGE_CONFIG[number]['key']
+
+const STAGE_KEYS: StageKey[] = STAGE_CONFIG.map((stage) => stage.key)
+
+const createEmptyStageMap = (): Record<StageKey, StageInfo> =>
+  STAGE_KEYS.reduce((acc, key) => {
+    acc[key] = {
+      status: 'pending',
+      progress: 0,
+      start_time: undefined,
+      end_time: undefined,
+      error_message: undefined,
+      metrics: undefined,
+      message: undefined,
+    }
+    return acc
+  }, {} as Record<StageKey, StageInfo>)
+
+const coerceStageStatus = (value: any): StageStatus => {
+  if (value === 'running' || value === 'completed' || value === 'failed' || value === 'pending') {
+    return value
+  }
+  return 'pending'
+}
+
+const normalizeStageEntry = (stageKey: StageKey, raw: any): StageInfo => ({
+  status: coerceStageStatus(raw?.status),
+  progress: typeof raw?.progress === 'number' ? raw.progress : 0,
+  start_time: raw?.start_time,
+  end_time: raw?.end_time,
+  error_message: raw?.error ?? raw?.error_message,
+  metrics: raw?.metrics,
+  message: raw?.message,
+})
+
+const normalizeTaskStatusResponse = (payload: any): TaskStatus => {
+  const detail = payload?.detail ?? {}
+  const rawStages = (detail?.stages ?? {}) as Record<string, any>
+  const normalizedStages = createEmptyStageMap()
+
+  Object.entries(rawStages).forEach(([key, value]) => {
+    const stageKey = key as StageKey
+    if (STAGE_KEYS.includes(stageKey)) {
+      normalizedStages[stageKey] = normalizeStageEntry(stageKey, value)
+    }
+  })
+
+  const currentStage = (payload?.current_stage || detail?.current_stage) as string | undefined
+  if (currentStage && normalizedStages[currentStage as StageKey]) {
+    const stageInfo = normalizedStages[currentStage as StageKey]
+    if (stageInfo.status === 'pending' && payload?.status === 'running') {
+      stageInfo.status = 'running'
+    }
+  }
+
+  const taskId = payload?.celery_task_id || payload?.task_id || String(payload?.id || '')
+
+  return {
+    task_id: taskId,
+    audiobook_project_id: payload?.audiobook_project_id,
+    chapter_id: payload?.chapter_id ?? null,
+    status: coerceStageStatus(payload?.status),
+    current_stage: currentStage,
+    progress: typeof payload?.progress === 'number' ? payload.progress : 0,
+    stages: normalizedStages,
+    created_at: payload?.created_at,
+    updated_at: payload?.updated_at,
+    detail,
+    overall_progress: typeof detail?.overall_progress === 'number' ? detail.overall_progress : undefined,
+  }
+}
+
+const AUDIOBOOK_SESSION_STORAGE_KEY = 'audiobook_active_session_v1'
+
+
 
 function ScriptEditorDialog({
   open,
@@ -231,7 +403,7 @@ function ScriptEditorDialog({
                   {/* 这一段直接从原 Dialog 中复制，略过注释修改 */}
                   <Box sx={{ mb: 2 }}>
                     <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-                      📊 总体评分
+                      总体评分
                     </Typography>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
                       <Box
@@ -408,11 +580,11 @@ function HistoryDialog({
                     </Box>
                     <Box sx={{ display: 'flex', gap: 2 }}>
                       <Typography variant="body2">
-                        📚 章节：{project.completed_chapters}/{project.total_chapters}
+                        章节：{project.completed_chapters}/{project.total_chapters}
                       </Typography>
                       {project.status === 'completed' && (
                         <Typography variant="body2" color="text.secondary">
-                          🕒 {((project.total_duration || 0) / 60).toFixed(1)}分钟
+                          时长：{((project.total_duration || 0) / 60).toFixed(1)}分钟
                         </Typography>
                       )}
                     </Box>
@@ -489,127 +661,6 @@ function HistoryDialog({
   )
 }
 
-const VOICE_PRESETS: { id: string; label: string; description: string; supportsInstruct?: boolean }[] = [
-  // === ?????10?? ===
-  {
-    id: 'male_young_energetic',
-    label: 'Ethan????? ? ????',
-    description: 'Qwen3 Ethan?????????+???????????/???',
-  },
-  {
-    id: 'male_young_gentle',
-    label: 'Elias????? ? ????',
-    description: 'Qwen3 Elias??????????/??????',
-  },
-  {
-    id: 'male_adult_calm',
-    label: 'Ryan????? ? ????',
-    description: 'Qwen3 Ryan???????????????????/???',
-  },
-  {
-    id: 'male_adult_energetic',
-    label: 'Dylan????? ? ????',
-    description: 'Qwen3 Dylan??????????????/?????',
-  },
-  {
-    id: 'male_elder_wise',
-    label: 'Marcus????? ? ???',
-    description: 'Qwen3 Marcus?????????????????/????',
-  },
-  {
-    id: 'male_warm',
-    label: 'Roy????? ? ???',
-    description: 'Qwen3 Roy?????????????????????',
-  },
-  {
-    id: 'male_customer_service',
-    label: 'Peter????? ? ???',
-    description: 'Qwen3 Peter????????/??????????',
-  },
-  {
-    id: 'male_refreshing',
-    label: 'Li????? ? ???',
-    description: 'Qwen3 Li???????????????/?????',
-  },
-  {
-    id: 'male_monkey',
-    label: 'Nofish????? ? ????',
-    description: 'Qwen3 Nofish??????????/?????',
-  },
-  {
-    id: 'male_narrator',
-    label: 'Eric????? ? ???',
-    description: 'Qwen3 Eric???????????????????',
-  },
-  // === ??/???? ===
-  {
-    id: 'male_villain_sinister',
-    label: 'Rocky????? ? ???',
-    description: 'Qwen3 Rocky???????????????/BOSS?',
-  },
-  {
-    id: 'female_villain_cold',
-    label: 'Katerina????? ? ????',
-    description: 'Qwen3 Katerina???????????????/????',
-  },
-  {
-    id: 'female_villain_cunning',
-    label: 'Jennifer????? ? ????',
-    description: 'Qwen3 Jennifer??????????/??/?????',
-  },
-  // === ?????10?? ===
-  {
-    id: 'female_young_gentle',
-    label: 'Cherry????? ? ????',
-    description: 'Qwen3 Cherry??????????????',
-  },
-  {
-    id: 'female_young_energetic',
-    label: 'Sunny????? ? ???+????',
-    description: 'Qwen3 Sunny???????????/???????',
-  },
-  {
-    id: 'female_young_cute',
-    label: 'Kiki????? ? ????',
-    description: 'Qwen3 Kiki??????????/?????',
-  },
-  {
-    id: 'female_adult_elegant',
-    label: 'Serena????? ? ????',
-    description: 'Qwen3 Serena????????????/???',
-  },
-  {
-    id: 'female_adult_intellectual',
-    label: 'Jada????? ? ???+????',
-    description: 'Qwen3 Jada?????+???????????',
-  },
-  {
-    id: 'female_capable',
-    label: 'Jennifer????? ? ????',
-    description: 'Qwen3 Jennifer??????????????',
-  },
-  {
-    id: 'female_elder',
-    label: 'Chelsie????? ? ????',
-    description: 'Qwen3 Chelsie??????????/???',
-  },
-  {
-    id: 'female_intimate',
-    label: 'Serena????? ? ????',
-    description: 'Qwen3 Serena??????????/????',
-  },
-  {
-    id: 'female_lively',
-    label: 'Sunny????? ? ????',
-    description: 'Qwen3 Sunny??????????????????',
-  },
-  {
-    id: 'female_child',
-    label: 'Momo??? ? ????',
-    description: 'Qwen3 Momo???????????/?????',
-  },
-]
-
 const steps = ['选择项目', '配置音色', '生成有声书', '完成']
 
 const AudiobookPage = () => {
@@ -648,8 +699,9 @@ const AudiobookPage = () => {
   const [generating, setGenerating] = useState(false)
   const [playingChapter, setPlayingChapter] = useState<number | null>(null)
   const [previewingCharacterId, setPreviewingCharacterId] = useState<number | null>(null)
-  const [taskStatuses, setTaskStatuses] = useState<Record<number, TaskStatus>>({})
+  const [taskStatuses, setTaskStatuses] = useState<Record<string, TaskStatus>>({})
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
+  const [currentAudiobookProjectId, setCurrentAudiobookProjectId] = useState<number | null>(null)
   const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false)
   const [newProjectTitle, setNewProjectTitle] = useState('')
   const [newProjectText, setNewProjectText] = useState('')
@@ -662,27 +714,221 @@ const AudiobookPage = () => {
     message: '',
     severity: 'info',
   })
+  const [voicePresets, setVoicePresets] = useState<VoicePreset[]>([])
+  const [voiceCatalogMeta, setVoiceCatalogMeta] = useState<VoiceCatalogMeta | null>(null)
+  const [voiceLoading, setVoiceLoading] = useState(false)
+  const [voiceError, setVoiceError] = useState<string | null>(null)
+
+  const [cloneName, setCloneName] = useState('')
+  const [cloneUrl, setCloneUrl] = useState('')
+  const [cloneLoading, setCloneLoading] = useState(false)
+  const [cloneError, setCloneError] = useState<string | null>(null)
+  const [cloneSuccess, setCloneSuccess] = useState<string | null>(null)
   const [autoAssigningVoices, setAutoAssigningVoices] = useState(false)
   const [creatingFromBook, setCreatingFromBook] = useState(false)
   const [lastGenerationMode, setLastGenerationMode] = useState<'full' | 'script_only'>('full')
   const [activeStep, setActiveStep] = useState(0)
   const [ttsModel, setTtsModel] = useState<'qwen3-tts-flash' | 'cosyvoice-v3-plus'>('qwen3-tts-flash')
+  const [voiceDraftsByModel, setVoiceDraftsByModel] = useState<Record<string, CharacterVoiceSetting[]>>({})
 
   const audioRef = useMemo(() => new Audio(), [])
+  const sessionHydratedRef = useRef(false)
+  const selectedProjectId = selectedProject?.id ?? null
+  const activeTaskStatus = useMemo(() => {
+    if (currentTaskId && taskStatuses[currentTaskId]) {
+      return taskStatuses[currentTaskId]
+    }
+    const first = Object.values(taskStatuses)[0]
+    return first || null
+  }, [currentTaskId, taskStatuses])
 
-  // 根据当前选择的 TTS 模型动态调整可选音色列表
-  const currentVoicePresets =
-    ttsModel === 'cosyvoice-v3-plus'
-      ? VOICE_PRESETS.filter(
-          (p) => p.id === 'male_young_energetic' || p.id === 'female_young_energetic'
-        )
-      : VOICE_PRESETS
+  const setCharacterVoicesForModel = (
+    model: 'qwen3-tts-flash' | 'cosyvoice-v3-plus',
+    next: CharacterVoiceSetting[],
+  ) => {
+    setCharacterVoices(next)
+    setVoiceDraftsByModel((prev) => ({ ...prev, [model]: next }))
+  }
+
+  const setCharacterVoicesForCurrentModel = (next: CharacterVoiceSetting[]) => {
+    setCharacterVoicesForModel(ttsModel, next)
+  }
+
+  const updateCharacterVoicesForCurrentModel = (
+    updater: (prev: CharacterVoiceSetting[]) => CharacterVoiceSetting[],
+  ) => {
+    setCharacterVoices((prev) => {
+      const next = updater(prev)
+      setVoiceDraftsByModel((drafts) => ({ ...drafts, [ttsModel]: next }))
+      return next
+    })
+  }
+
+  const currentVoicePresets = useMemo(() => {
+    if (voicePresets.length === 0) {
+      return []
+    }
+
+    const sorted = [...voicePresets].sort((a, b) => {
+      const catA = a.category || 'general'
+      const catB = b.category || 'general'
+      if (catA !== catB) {
+        return catA.localeCompare(catB, 'zh-CN')
+      }
+      const labelA = a.label || a.id
+      const labelB = b.label || b.id
+      return labelA.localeCompare(labelB, 'zh-CN')
+    })
+
+    return sorted
+  }, [voicePresets, ttsModel])
 
   // 获取项目列表
   useEffect(() => {
     fetchProjects()
   }, [])
-  
+
+  // 同步当前 TTS 模型的音色目录
+  useEffect(() => {
+    fetchVoiceCatalog()
+  }, [ttsModel])
+
+  const fetchVoiceCatalog = async () => {
+    setVoiceLoading(true)
+    try {
+      const res = await apiClient.getTtsVoices(ttsModel)
+      const data = res.data || {}
+      const voicesFromApi = (data.voices || []) as VoicePreset[]
+      const normalized = voicesFromApi.map((voice) => ({
+        ...voice,
+        supportsInstruct: Boolean(voice.supportsInstruct),
+      }))
+      setVoicePresets(normalized)
+      setVoiceCatalogMeta({
+        model: data.model,
+        updated_at: data.updated_at,
+        source: data.source,
+        voice_count: data.voice_count || normalized.length,
+      })
+      setVoiceError(null)
+    } catch (error: any) {
+      console.error('加载音色库失败:', error)
+      const message = (error?.response?.data?.detail as string) || error.message || '加载音色库失败'
+      setVoiceError(message)
+    } finally {
+      setVoiceLoading(false)
+    }
+  }
+
+  const handleCreateCloneVoice = async () => {
+    setCloneLoading(true)
+    setCloneError(null)
+    setCloneSuccess(null)
+    try {
+      const name = cloneName.trim()
+      const url = cloneUrl.trim()
+      const res = await apiClient.createCosyVoiceV3PlusClone({ name, url })
+      const voiceId = (res.data?.voice_id as string) || ''
+      setCloneSuccess(voiceId ? `已提交复刻任务：${voiceId}` : '已提交复刻任务')
+      setCloneName('')
+      setCloneUrl('')
+      await fetchVoiceCatalog()
+    } catch (error: any) {
+      const message = (error?.response?.data?.detail as string) || error.message || '创建复刻音色失败'
+      setCloneError(message)
+    } finally {
+      setCloneLoading(false)
+    }
+  }
+
+  const loadProjectVoiceConfig = async (
+    projectId: number,
+    model: 'qwen3-tts-flash' | 'cosyvoice-v3-plus',
+  ) => {
+    const baseNarratorVoice: CharacterVoiceSetting = {
+      characterId: 0,
+      name: '旁白',
+      gender: '中性',
+      role: '旁白',
+      voiceId: getDefaultNarratorId(model),
+      volume: 50,
+      speed: 1.0,
+      pitch: 50,
+    }
+
+    setLoadingCharacters(true)
+    try {
+      const [charactersRes, audioConfigRes] = await Promise.all([
+        apiClient.getCharacters(projectId),
+        apiClient.getProjectAudioConfig(projectId, model),
+      ])
+
+      const charactersData = charactersRes.data || []
+      const projectAudioConfig = (audioConfigRes.data || { characters: [] }) as ProjectAudioConfig
+      const savedCharacters = projectAudioConfig?.characters || []
+      const savedFx = projectAudioConfig?.audio_fx || null
+
+      const characterVoicesFromApi: CharacterVoiceSetting[] = charactersData.map((c: any) => {
+        const saved = savedCharacters.find((sc) => sc.character_id === c.id)
+        return {
+          characterId: c.id,
+          name: c.name,
+          gender: c.gender,
+          role: c.role,
+          voiceId: normalizeVoiceId(model, saved?.voice_id),
+          volume: saved?.volume ?? 50,
+          speed: saved?.speed ?? 1.0,
+          pitch: saved?.pitch ?? 50,
+        }
+      })
+
+      const narratorSaved = savedCharacters.find((sc) => sc.character_id === 0 || sc.name === '旁白')
+      const narratorVoice: CharacterVoiceSetting = {
+        ...baseNarratorVoice,
+        voiceId: normalizeVoiceId(model, narratorSaved?.voice_id) || baseNarratorVoice.voiceId,
+        volume: narratorSaved?.volume ?? baseNarratorVoice.volume,
+        speed: narratorSaved?.speed ?? baseNarratorVoice.speed,
+        pitch: narratorSaved?.pitch ?? baseNarratorVoice.pitch,
+      }
+
+      const initialVoices: CharacterVoiceSetting[] = [narratorVoice, ...characterVoicesFromApi]
+      setCharacterVoicesForModel(model, initialVoices)
+
+      if (savedFx) {
+        setAudioFxConfig({
+          enable_sound_effects: savedFx.enable_sound_effects ?? true,
+          enable_music: savedFx.enable_music ?? true,
+          sound_effect_density: (savedFx.sound_effect_density as AudioFxConfig['sound_effect_density']) || 'medium',
+          music_density: (savedFx.music_density as AudioFxConfig['music_density']) || 'medium',
+        })
+      }
+    } catch (error) {
+      console.error('加载项目音色配置失败:', error)
+      setCharacterVoicesForModel(model, [baseNarratorVoice])
+    } finally {
+      setLoadingCharacters(false)
+    }
+  }
+
+  const handleTtsModelChange = async (nextModel: 'qwen3-tts-flash' | 'cosyvoice-v3-plus') => {
+    if (nextModel === ttsModel) return
+
+    // 保留当前模型的未保存草稿
+    setVoiceDraftsByModel((prev) => ({ ...prev, [ttsModel]: characterVoices }))
+
+    setTtsModel(nextModel)
+
+    if (!selectedProject) return
+
+    const cached = voiceDraftsByModel[nextModel]
+    if (cached && cached.length > 0) {
+      setCharacterVoicesForModel(nextModel, cached)
+      return
+    }
+
+    await loadProjectVoiceConfig(selectedProject.id, nextModel)
+  }
+
   // 新增：获取历史记录
   const fetchHistory = async () => {
     if (!selectedProject) return
@@ -704,6 +950,7 @@ const AudiobookPage = () => {
       const res = await apiClient.getAudiobookProject(audiobookProjectId)
       const data = res.data
       setAudiobookProject(data)
+      setCurrentAudiobookProjectId(data.id)
       setActiveStep(3) // 跳转到完成页面
       setShowHistory(false)
     } catch (error) {
@@ -859,17 +1106,23 @@ const AudiobookPage = () => {
   }
 
   // 选择项目
-  const handleSelectProject = async (project: Project) => {
+  type SelectProjectOptions = { skipStepReset?: boolean }
+
+  const handleSelectProject = async (project: Project, options?: SelectProjectOptions) => {
     setSelectedProject(project)
+    setCurrentAudiobookProjectId(null)
+    setCurrentTaskId(null)
+    setTaskStatuses({})
     setLoading(true)
     setCharacterVoices([])
+    setVoiceDraftsByModel({})
 
     const baseNarratorVoice: CharacterVoiceSetting = {
       characterId: 0,
       name: '旁白',
       gender: '中性',
       role: '旁白',
-      voiceId: 'male_narrator',  // 🔧 默认使用“旁白（方言）”，用户可以手动修改
+      voiceId: getDefaultNarratorId(ttsModel),
       volume: 50,
       speed: 1.0,
       pitch: 50,
@@ -891,7 +1144,7 @@ const AudiobookPage = () => {
         // 尝试读取项目级音频配置（角色音 + 音效/BGM）
         let projectAudioConfig: ProjectAudioConfig | null = null
         try {
-          const audioConfigRes = await apiClient.getProjectAudioConfig(project.id)
+          const audioConfigRes = await apiClient.getProjectAudioConfig(project.id, ttsModel)
           projectAudioConfig = audioConfigRes.data
         } catch (e) {
           console.warn('获取项目音频配置失败:', e)
@@ -908,7 +1161,7 @@ const AudiobookPage = () => {
             name: c.name,
             gender: c.gender,
             role: c.role,
-            voiceId: saved?.voice_id || '',
+            voiceId: normalizeVoiceId(ttsModel, saved?.voice_id),
             volume: saved?.volume ?? 50,
             speed: saved?.speed ?? 1.0,
             pitch: saved?.pitch ?? 50,
@@ -921,7 +1174,7 @@ const AudiobookPage = () => {
         )
         const narratorVoice: CharacterVoiceSetting = {
           ...baseNarratorVoice,
-          voiceId: narratorSaved?.voice_id || baseNarratorVoice.voiceId,
+          voiceId: normalizeVoiceId(ttsModel, narratorSaved?.voice_id) || baseNarratorVoice.voiceId,
           volume: narratorSaved?.volume ?? baseNarratorVoice.volume,
           speed: narratorSaved?.speed ?? baseNarratorVoice.speed,
           pitch: narratorSaved?.pitch ?? baseNarratorVoice.pitch,
@@ -931,7 +1184,7 @@ const AudiobookPage = () => {
           narratorVoice,
           ...characterVoicesFromApi,
         ]
-        setCharacterVoices(initialVoices)
+        setCharacterVoicesForCurrentModel(initialVoices)
       
         // 初始化项目级音效/BGM 配置
         if (savedFx) {
@@ -956,7 +1209,9 @@ const AudiobookPage = () => {
         setLoadingCharacters(false)
       }
 
-      setActiveStep(1)
+      if (!options?.skipStepReset) {
+        setActiveStep(1)
+      }
     } catch (error) {
       console.error('获取章节失败:', error)
       setSnackbar({ open: true, message: '网络错误，请重试', severity: 'error' })
@@ -964,6 +1219,93 @@ const AudiobookPage = () => {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (!sessionHydratedRef.current) {
+      return
+    }
+
+    if (!selectedProjectId && !currentAudiobookProjectId && !currentTaskId) {
+      localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
+      return
+    }
+
+    const payload = {
+      projectId: selectedProjectId,
+      audiobookProjectId: currentAudiobookProjectId,
+      taskId: currentTaskId,
+      activeStep,
+      generating,
+      ttsModel,
+    }
+    localStorage.setItem(AUDIOBOOK_SESSION_STORAGE_KEY, JSON.stringify(payload))
+  }, [selectedProjectId, currentAudiobookProjectId, currentTaskId, activeStep, generating, ttsModel])
+
+  useEffect(() => {
+    if (sessionHydratedRef.current) {
+      return
+    }
+
+    let cancelled = false
+
+    const restoreSession = async () => {
+      const raw = localStorage.getItem(AUDIOBOOK_SESSION_STORAGE_KEY)
+      if (!raw) {
+        sessionHydratedRef.current = true
+        return
+      }
+
+      try {
+        const saved = JSON.parse(raw)
+
+        if (saved.ttsModel && saved.ttsModel !== ttsModel) {
+          setTtsModel(saved.ttsModel)
+        }
+
+        if (saved.projectId && !cancelled) {
+          try {
+            const projectRes = await apiClient.getProject(saved.projectId)
+            if (!cancelled) {
+              await handleSelectProject(projectRes.data, { skipStepReset: true })
+            }
+          } catch (error) {
+            console.warn('恢复项目失败:', error)
+          }
+        }
+
+        if (saved.audiobookProjectId && !cancelled) {
+          setCurrentAudiobookProjectId(saved.audiobookProjectId)
+          try {
+            const detailRes = await apiClient.getAudiobookProject(saved.audiobookProjectId)
+            if (!cancelled) {
+              setAudiobookProject(detailRes.data)
+            }
+          } catch (error) {
+            console.warn('恢复有声书项目失败:', error)
+          }
+        }
+
+        if (saved.taskId && !cancelled) {
+          setCurrentTaskId(saved.taskId)
+          setGenerating(saved.generating ?? true)
+          setActiveStep(saved.activeStep ?? 2)
+        } else if (typeof saved.activeStep === 'number' && !cancelled) {
+          setActiveStep(saved.activeStep)
+        }
+      } catch (error) {
+        console.warn('恢复会话失败:', error)
+        localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
+      } finally {
+        sessionHydratedRef.current = true
+      }
+    }
+
+    restoreSession()
+
+    return () => {
+      cancelled = true
+    }
+  }, [handleSelectProject, ttsModel])
 
   // 切换章节选择
   const handleToggleChapter = (chapterId: number) => {
@@ -984,44 +1326,46 @@ const AudiobookPage = () => {
   }
   
   const handleVoiceChange = (characterId: number, voiceId: string) => {
-    setCharacterVoices(prev =>
-      prev.map((item) =>
-        item.characterId === characterId ? { ...item, voiceId } : item
-      )
+    const preset = voicePresets.find((p) => p.id === voiceId)
+    updateCharacterVoicesForCurrentModel((prev) =>
+      prev.map((item) => {
+        if (item.characterId !== characterId) return item
+        const next = { ...item, voiceId }
+        if (!item.voiceId && preset?.default_params) {
+          next.volume = preset.default_params.volume ?? next.volume
+          next.speed = preset.default_params.speed ?? next.speed
+          next.pitch = preset.default_params.pitch ?? next.pitch
+        }
+        return next
+      }),
     )
   }
 
   const handleVolumeChange = (characterId: number, volume: number) => {
-    setCharacterVoices(prev =>
-      prev.map((item) =>
-        item.characterId === characterId ? { ...item, volume } : item
-      )
+    updateCharacterVoicesForCurrentModel((prev) =>
+      prev.map((item) => (item.characterId === characterId ? { ...item, volume } : item)),
     )
   }
 
   const handleSpeedChange = (characterId: number, speed: number) => {
-    setCharacterVoices(prev =>
-      prev.map((item) =>
-        item.characterId === characterId ? { ...item, speed } : item
-      )
+    updateCharacterVoicesForCurrentModel((prev) =>
+      prev.map((item) => (item.characterId === characterId ? { ...item, speed } : item)),
     )
   }
 
   const handlePitchChange = (characterId: number, pitch: number) => {
-    setCharacterVoices(prev =>
-      prev.map((item) =>
-        item.characterId === characterId ? { ...item, pitch } : item
-      )
+    updateCharacterVoicesForCurrentModel((prev) =>
+      prev.map((item) => (item.characterId === characterId ? { ...item, pitch } : item)),
     )
   }
 
-  // 🆕 基于人物卡自动推荐声线
+  // 基于人物卡自动推荐声线
   const handleAutoAssignVoices = async () => {
     if (!selectedProject) return
 
     try {
       setAutoAssigningVoices(true)
-      const res = await apiClient.autoAssignProjectAudioVoices(selectedProject.id)
+      const res = await apiClient.autoAssignProjectAudioVoices(selectedProject.id, ttsModel)
       const configData = (res.data || { characters: [] }) as {
         characters?: {
           character_id: number
@@ -1039,14 +1383,14 @@ const AudiobookPage = () => {
       >()
       for (const item of configData.characters || []) {
         configById.set(item.character_id, {
-          voice_id: item.voice_id,
+          voice_id: normalizeVoiceId(ttsModel, item.voice_id),
           volume: item.volume,
           speed: item.speed ?? undefined,
           pitch: item.pitch ?? undefined,
         })
       }
 
-      setCharacterVoices((prev) =>
+      updateCharacterVoicesForCurrentModel((prev) =>
         prev.map((cv) => {
           const conf = configById.get(cv.characterId)
           if (!conf) return cv
@@ -1064,18 +1408,18 @@ const AudiobookPage = () => {
       if (assignedCount > 0) {
         setSnackbar({
           open: true,
-          message: `✅ 已为 ${assignedCount} 个角色智能推荐声线！请检查推荐结果，如需调整可手动修改。`,
+          message: `? 已为 ${assignedCount} 个角色智能推荐声线！请检查推荐结果，如需调整可手动修改。`,
           severity: 'success',
         })
       } else {
         setSnackbar({
           open: true,
-          message: '⚠️ 当前项目还没有角色档案，请先在「项目详情 → 人物设定」中创建角色。',
+          message: '当前项目还没有角色档案，请先在「项目详情 → 人物设定」中创建角色。',
           severity: 'warning',
         })
       }
     } catch (err) {
-      console.error('❌ 自动推荐声线失败:', err)
+      console.error('? 自动推荐声线失败:', err)
       setSnackbar({
         open: true,
         message: '自动推荐声线失败，请稍后重试',
@@ -1157,13 +1501,13 @@ const AudiobookPage = () => {
         document.body.removeChild(a)
         window.URL.revokeObjectURL(url)
         
-        setSnackbar({ open: true, message: '📥 音频下载成功', severity: 'success' })
+        setSnackbar({ open: true, message: '音频下载成功', severity: 'success' })
       } else {
         throw new Error('下载失败')
       }
     } catch (error) {
       console.error('下载音频失败:', error)
-      setSnackbar({ open: true, message: '❗ 下载失败，请重试', severity: 'error' })
+      setSnackbar({ open: true, message: '? 下载失败，请重试', severity: 'error' })
     }
   }
   
@@ -1214,20 +1558,18 @@ const AudiobookPage = () => {
         window.URL.revokeObjectURL(blobUrl)
       }
       
-      setSnackbar({ open: true, message: '🎵 开始播放', severity: 'success' })
+        setSnackbar({ open: true, message: '开始播放', severity: 'success' })
     } catch (error) {
       console.error('播放音频失败:', error)
-      setSnackbar({ open: true, message: '❗ 播放失败，请重试', severity: 'error' })
+      setSnackbar({ open: true, message: '? 播放失败，请重试', severity: 'error' })
       setPlayingChapter(null)
     }
   }
 
   const handleOpenScriptReviewDialog = () => {
-    if (selectedChapters.length === 0) return
-    const chapterId = selectedChapters[0]
-    const taskStatus = taskStatuses[chapterId]
+    const taskStatus = activeTaskStatus
     if (!taskStatus) {
-      setSnackbar({ open: true, message: '暂未获取到该章节的任务状态', severity: 'error' })
+      setSnackbar({ open: true, message: '暂未获取到任务状态', severity: 'error' })
       return
     }
     const stage = taskStatus.stages['quality_review']
@@ -1391,11 +1733,11 @@ const AudiobookPage = () => {
       if (selectedProject) {
         const projectAudioConfigBody: ProjectAudioConfig = {
           characters: characterVoices
-            .filter((cv) => cv.voiceId || cv.name === '旁白')  // 🔧 修复：旁白即使 voiceId 为空也保留，让后端使用默认音色
+            .filter((cv) => cv.voiceId || cv.name === '旁白')  // 修复：旁白即使 voiceId 为空也保留，让后端使用默认音色
             .map((cv) => ({
               character_id: cv.characterId,
               name: cv.name,
-              voice_id: cv.voiceId || 'male_narrator',  // 🔧 修复：空音色使用默认值
+              voice_id: cv.voiceId || getDefaultNarratorId(ttsModel),
               volume: cv.volume,
               speed: cv.speed,
               pitch: cv.pitch,
@@ -1404,7 +1746,7 @@ const AudiobookPage = () => {
         }
 
         try {
-          await apiClient.updateProjectAudioConfig(selectedProject.id, projectAudioConfigBody)
+          await apiClient.updateProjectAudioConfig(selectedProject.id, projectAudioConfigBody, ttsModel)
         } catch (err) {
           console.warn('保存项目音频配置失败:', err)
         }
@@ -1412,10 +1754,10 @@ const AudiobookPage = () => {
 
       const voiceConfigPayload =
         characterVoices
-          .filter((cv) => cv.voiceId || cv.name === '旁白')  // 🔧 修复：旁白即使 voiceId 为空也保留
+          .filter((cv) => cv.voiceId || cv.name === '旁白')  // 修复：旁白即使 voiceId 为空也保留
           .map((cv) => ({
             character_name: cv.name,
-            voice_id: cv.voiceId || 'male_narrator',  // 🔧 修复：空音色使用默认值
+            voice_id: cv.voiceId || getDefaultNarratorId(ttsModel),
             volume: cv.volume,
             speed: cv.speed,
             pitch: cv.pitch,
@@ -1432,6 +1774,12 @@ const AudiobookPage = () => {
       })
 
       const data = response.data
+      if (data?.audiobook_project_id) {
+        setCurrentAudiobookProjectId(data.audiobook_project_id)
+      }
+      if (data?.job_id) {
+        setCurrentTaskId(data.job_id)
+      }
       setAudiobookProject(data)
 
       // 轮询查询项目进度
@@ -1441,25 +1789,6 @@ const AudiobookPage = () => {
           const statusResponse = await apiClient.getAudiobookProject(projectId)
           const statusData = statusResponse.data
           console.log('轮询项目状态:', statusData)
-
-          // 新增：获取第一个章节的task_id（如果有）
-          if (statusData.chapter_audios && statusData.chapter_audios.length > 0) {
-            console.log('chapter_audios:', statusData.chapter_audios)
-            const firstTaskId = statusData.chapter_audios[0].task_id
-            console.log('firstTaskId:', firstTaskId)
-            if (firstTaskId) {
-              console.log('获取到 task_id:', firstTaskId)
-              setCurrentTaskId(prev => {
-                if (!prev) {
-                  console.log('设置 currentTaskId:', firstTaskId)
-                  return firstTaskId
-                }
-                return prev
-              })
-            }
-          } else {
-            console.log('暂无 chapter_audios 或为空')
-          }
 
           if (statusData.status === 'completed') {
             clearInterval(pollInterval)
@@ -1489,16 +1818,13 @@ const AudiobookPage = () => {
     }
   }
   
-  // 新增：轮询任务列表以获取当前章节的 task_id（避免依赖 chapter_audios）
+  // 新增：轮询任务列表以获取当前任务ID（避免依赖 chapter_audios）
   useEffect(() => {
-    if (!generating || currentTaskId) {
+    if (currentTaskId || !currentAudiobookProjectId || !generating) {
       return
     }
 
-    const chapterId = selectedChapters[0]
-    if (!chapterId) {
-      return
-    }
+    let cancelled = false
 
     const pollTaskList = async () => {
       try {
@@ -1508,42 +1834,52 @@ const AudiobookPage = () => {
           },
         })
 
-        if (response.ok) {
-          const tasks: TaskStatus[] = await response.json()
-          const matched = tasks.find(t => t && t.chapter_id === chapterId)
-          if (matched) {
-            console.log('从任务列表中找到当前章节的 task_id:', matched.task_id)
-            setCurrentTaskId(prev => prev || matched.task_id)
-          }
-        } else {
+        if (!response.ok) {
           console.error('查询任务列表失败:', response.status, response.statusText)
+          return
+        }
+
+        const rawTasks = await response.json()
+        const normalizedTasks: TaskStatus[] = rawTasks.map((task: any) => normalizeTaskStatusResponse(task))
+        const matched = normalizedTasks.find(
+          (task) =>
+            task.audiobook_project_id === currentAudiobookProjectId &&
+            (task.status === 'running' || task.status === 'pending')
+        )
+
+        if (matched && !cancelled) {
+          setTaskStatuses((prev) => ({
+            ...prev,
+            [matched.task_id]: matched,
+          }))
+          setCurrentTaskId(matched.task_id)
         }
       } catch (error) {
         console.error('查询任务列表异常:', error)
       }
     }
 
-    // 先查一次
     pollTaskList()
-    // 然后每2秒查一次，直到 currentTaskId 被设置
-    const intervalId = setInterval(() => {
-      if (!currentTaskId) {
-        pollTaskList()
-      }
-    }, 2000)
+    const intervalId = setInterval(pollTaskList, 2000)
 
-    return () => clearInterval(intervalId)
-  }, [generating, currentTaskId, selectedChapters])
+    return () => {
+      cancelled = true
+      clearInterval(intervalId)
+    }
+  }, [generating, currentTaskId, currentAudiobookProjectId])
   
   // 新增：轮询单个任务状态（用于实时显示8个阶段）
   useEffect(() => {
-    if (!currentTaskId || !generating) {
-      console.log('跳过任务状态轮询:', { currentTaskId, generating })
+    if (!currentTaskId) {
       return
     }
-    
-    console.log('开始轮询任务状态:', currentTaskId)
-    
+
+    if (activeTaskStatus && (activeTaskStatus.status === 'completed' || activeTaskStatus.status === 'failed')) {
+      return
+    }
+
+    let cancelled = false
+
     const pollTaskStatus = async () => {
       try {
         const response = await fetch(`/api/v1/audiobook/tasks/${currentTaskId}/status`, {
@@ -1551,14 +1887,35 @@ const AudiobookPage = () => {
             'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
           },
         })
-        
+
         if (response.ok) {
-          const taskStatus: TaskStatus = await response.json()
-          console.log('获取到任务状态:', taskStatus)
-          setTaskStatuses(prev => ({
+          const raw = await response.json()
+          const normalized = normalizeTaskStatusResponse(raw)
+          if (cancelled) return
+          setTaskStatuses((prev) => ({
             ...prev,
-            [taskStatus.chapter_id]: taskStatus
+            [normalized.task_id]: normalized,
           }))
+          if (!currentAudiobookProjectId && normalized.audiobook_project_id) {
+            setCurrentAudiobookProjectId(normalized.audiobook_project_id)
+          }
+          if (normalized.status === 'completed') {
+            setGenerating(false)
+            setActiveStep(3)
+            setSnackbar({ open: true, message: '生成完成！', severity: 'success' })
+            setCurrentTaskId(null)
+          } else if (normalized.status === 'failed') {
+            setGenerating(false)
+            setActiveStep(1)
+            setSnackbar({ open: true, message: '生成失败，请重试', severity: 'error' })
+            setCurrentTaskId(null)
+          } else {
+            setGenerating(true)
+          }
+        } else if (response.status === 404) {
+          console.warn('任务不存在，停止轮询')
+          setGenerating(false)
+          setCurrentTaskId(null)
         } else {
           console.error('查询任务状态失败:', response.status, response.statusText)
         }
@@ -1566,30 +1923,20 @@ const AudiobookPage = () => {
         console.error('查询任务状态异常:', error)
       }
     }
-    
-    // 立即查询一次
+
     pollTaskStatus()
-    
-    // 每2秒查询一次
     const intervalId = setInterval(pollTaskStatus, 2000)
-    
-    return () => clearInterval(intervalId)
-  }, [currentTaskId, generating])
+
+    return () => {
+      cancelled = true
+      clearInterval(intervalId)
+    }
+  }, [currentTaskId, activeTaskStatus?.status, currentAudiobookProjectId])
   
   // 新增：渲染阶段详情
   const renderStageDetails = (taskStatus: TaskStatus) => {
-    const stageConfig = [
-      { key: 'strategy', name: '策略制定', icon: '🎯', desc: '分析原文，制定改编策略' },
-      { key: 'script_adaptation', name: '剧本改编', icon: '📝', desc: '将小说改编为有声剧本' },
-      { key: 'voice_design', name: '音色设计', icon: '🎭', desc: '为角色分配音色参数' },
-      { key: 'sound_design', name: '音效设计', icon: '🎧', desc: '设计场景音效和环境音' },
-      { key: 'music_composition', name: '音乐编曲', icon: '🎵', desc: '设计背景音乐方案' },
-      { key: 'quality_review', name: '剧本评审', icon: '🔍', desc: 'TTS前质量检查' },
-      { key: 'tts_synthesis', name: 'TTS合成', icon: '🗣️', desc: '语音合成生成音频' },
-      { key: 'audio_mixing', name: '音频混合', icon: '🎚️', desc: '混音与后期处理' },
-      { key: 'final_audio_review', name: '最终评审', icon: '✨', desc: '最终质量检查' },
-    ]
-    
+    const stageConfig = STAGE_CONFIG
+
     const statusColors = {
       pending: { bg: '#f5f5f5', border: '#e0e0e0', text: '#9e9e9e' },
       running: { bg: 'rgba(156, 39, 176, 0.08)', border: '#9c27b0', text: '#9c27b0' },
@@ -1597,11 +1944,19 @@ const AudiobookPage = () => {
       failed: { bg: 'rgba(244, 67, 54, 0.08)', border: '#f44336', text: '#f44336' }
     }
     
+    const stageValues = Object.values(taskStatus.stages || {})
+    const hasLiveProgress = stageValues.some((stage) => stage?.status && stage.status !== 'pending')
+
     return (
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2 }}>
+      <Box>
+        {!hasLiveProgress && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            正在等待后台任务启动，阶段详情准备就绪后会自动更新。如需查看以往结果，可打开右上角「历史记录」。
+          </Alert>
+        )}
+        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2 }}>
         {stageConfig.map((stage) => {
-          const stageInfo = taskStatus.stages[stage.key as keyof typeof taskStatus.stages]
-          if (!stageInfo) return null
+          const stageInfo = taskStatus.stages[stage.key as StageKey] || { status: 'pending', progress: 0 }
           
           const colors = statusColors[stageInfo.status as keyof typeof statusColors] || statusColors.pending
           const isActive = stageInfo.status === 'running'
@@ -1647,17 +2002,19 @@ const AudiobookPage = () => {
                   </Box>
                 </Box>
                 {isDone && (
-                  <Box sx={{ 
-                    width: 24, 
-                    height: 24, 
-                    borderRadius: '50%', 
-                    backgroundColor: '#4caf50',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'white',
-                    fontSize: '0.9rem'
-                  }}>
+                  <Box
+                    sx={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: '50%',
+                      backgroundColor: '#4caf50',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'white',
+                      fontSize: '0.9rem',
+                    }}
+                  >
                     ✓
                   </Box>
                 )}
@@ -1710,6 +2067,7 @@ const AudiobookPage = () => {
             </Paper>
           )
         })}
+        </Box>
       </Box>
     )
   }
@@ -1965,7 +2323,9 @@ const AudiobookPage = () => {
                 <Select
                   label="TTS 模型"
                   value={ttsModel}
-                  onChange={(e) => setTtsModel(e.target.value as 'qwen3-tts-flash' | 'cosyvoice-v3-plus')}
+                  onChange={(e) =>
+                    handleTtsModelChange(e.target.value as 'qwen3-tts-flash' | 'cosyvoice-v3-plus')
+                  }
                 >
                   <MenuItem value="qwen3-tts-flash">
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -2011,6 +2371,79 @@ const AudiobookPage = () => {
                 }
                 label="仅生成剧本和评审（稍后再生成音频）"
               />
+            </Box>
+
+            <Box sx={{ flex: 1, minWidth: 260 }}>
+              {voiceCatalogMeta && (
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  {(voiceCatalogMeta.model || 'Qwen3-TTS Flash')}：官方 {voiceCatalogMeta.voice_count ?? currentVoicePresets.length} 种音色，最近更新 {voiceCatalogMeta.updated_at || '—'}，覆盖普通话/多语种/方言。
+                </Typography>
+              )}
+              <Alert severity="success" sx={{ mb: 1 }}>
+                Qwen3-TTS Flash 支持快速批量合成、指令式情感（Ethan/Sunny）与多语种/方言音色，适合整本生成；CosyVoice 保留为精品章节备用。
+              </Alert>
+              {ttsModel === 'cosyvoice-v3-plus' && (
+                <Paper variant="outlined" sx={{ mb: 1, p: 1.5 }}>
+                  <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+                    声音复刻（CosyVoice v3-plus）
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    需要提供公网可访问的音频 URL；系统会自动生成合规 prefix（最长 10 个字符），并用你的“命名”在列表里展示为 “复刻-命名”（状态 OK 后可用于合成）。
+                  </Typography>
+                  <Grid container spacing={1}>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label="声音名称"
+                        value={cloneName}
+                        onChange={(e) => setCloneName(e.target.value)}
+                        disabled={cloneLoading}
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={6}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label="音频 URL（公网可访问）"
+                        value={cloneUrl}
+                        onChange={(e) => setCloneUrl(e.target.value)}
+                        disabled={cloneLoading}
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={2}>
+                      <Button
+                        fullWidth
+                        variant="contained"
+                        onClick={handleCreateCloneVoice}
+                        disabled={cloneLoading || !cloneName.trim() || !cloneUrl.trim()}
+                        sx={{ height: '100%' }}
+                      >
+                        {cloneLoading ? '提交中...' : '开始复刻'}
+                      </Button>
+                    </Grid>
+                  </Grid>
+                  {cloneError && (
+                    <Alert severity="warning" sx={{ mt: 1 }}>
+                      {cloneError}
+                    </Alert>
+                  )}
+                  {cloneSuccess && (
+                    <Alert severity="success" sx={{ mt: 1 }}>
+                      {cloneSuccess}
+                    </Alert>
+                  )}
+                </Paper>
+              )}
+              {voiceError && (
+                <Alert severity="warning" action={
+                  <Button size="small" onClick={fetchVoiceCatalog} disabled={voiceLoading}>
+                    {voiceLoading ? '同步中...' : '重新同步'}
+                  </Button>
+                } sx={{ mb: 1 }}>
+                  {voiceError}
+                </Alert>
+              )}
             </Box>
 
             {/* 项目级音效与配乐配置 */}
@@ -2243,25 +2676,47 @@ const AudiobookPage = () => {
                                   label="角色音"
                                   value={cv.voiceId}
                                   onChange={(e) => handleVoiceChange(cv.characterId, e.target.value as string)}
+                                  disabled={voiceLoading && currentVoicePresets.length === 0}
                                 >
                                   <MenuItem value="">
                                     <em>自动（AI 选择）</em>
                                   </MenuItem>
+                                  {voiceLoading && currentVoicePresets.length === 0 && (
+                                    <MenuItem disabled value="__loading">
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                        <CircularProgress size={14} />
+                                        <Typography variant="caption">同步官方音色...</Typography>
+                                      </Box>
+                                    </MenuItem>
+                                  )}
+                                  {!voiceLoading && currentVoicePresets.length === 0 && (
+                                    <MenuItem disabled value="__empty">暂无官方音色，请稍后重试</MenuItem>
+                                  )}
                                   {currentVoicePresets.map((preset) => (
                                     <MenuItem key={preset.id} value={preset.id}>
-                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                        <span>{preset.label}</span>
-                                        {preset.supportsInstruct && (
-                                          <Tooltip title="该音色支持智能情感：系统会根据文本内容自动选择合适的情感表达">
-                                            <Chip
-                                              label="智能情感"
-                                              size="small"
-                                              color="primary"
-                                              sx={{ height: 18, fontSize: '0.65rem' }}
-                                            />
-                                          </Tooltip>
+                                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0.25 }}>
+                                        <Typography variant="body2" fontWeight={600}>
+                                          {preset.label || preset.id}
+                                        </Typography>
+                                        {preset.description && (
+                                          <Typography variant="caption" color="text.secondary">
+                                            {preset.description}
+                                          </Typography>
                                         )}
+                                        <Typography variant="caption" color="text.secondary">
+                                          {(preset.languages?.join('/') || '中英')} · {preset.style || '通用'}
+                                        </Typography>
                                       </Box>
+                                      {ttsModel === 'cosyvoice-v3-plus' && preset.supportsInstruct && (
+                                        <Tooltip title="该音色支持 Instruct/SSML（CosyVoice v3-plus）。情绪/语气可通过 Instruct 参数控制。">
+                                          <Chip
+                                            label="Instruct"
+                                            size="small"
+                                            color="primary"
+                                            sx={{ height: 18, fontSize: '0.65rem', ml: 1 }}
+                                          />
+                                        </Tooltip>
+                                      )}
                                     </MenuItem>
                                   ))}
                                 </Select>
@@ -2334,7 +2789,7 @@ const AudiobookPage = () => {
                   </Paper>
                 )}
 
-                {/* 🆕 自动推荐声线按钮 */}
+                {/* 自动推荐声线按钮 */}
                 {!loadingCharacters && (
                   <Box sx={{ mt: 2, display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
                     <Button
@@ -2351,7 +2806,7 @@ const AudiobookPage = () => {
                         },
                       }}
                     >
-                      {autoAssigningVoices ? '🤖 智能推荐中...' : '✨ 基于人物卡自动推荐声线'}
+                    {autoAssigningVoices ? '智能推荐中...' : '基于人物卡自动推荐声线'}
                     </Button>
                   </Box>
                 )}
@@ -2384,52 +2839,27 @@ const AudiobookPage = () => {
             
             {/* 新增：8个阶段详细展示 */}
             {(() => {
-              console.log('渲染阶段信息 - currentTaskId:', currentTaskId)
-              console.log('渲染阶段信息 - taskStatuses:', taskStatuses)
-              console.log('渲染阶段信息 - selectedChapters:', selectedChapters)
+              let taskStatus = activeTaskStatus
               
-              // 先尝试使用 selectedChapters[0]，如果没有则查找第一个可用的 taskStatus
-              const chapterId = selectedChapters[0]
-              let taskStatus = chapterId ? taskStatuses[chapterId] : null
-              
-              // 如果没有找到，尝试使用第一个可用的 taskStatus
-              if (!taskStatus && Object.keys(taskStatuses).length > 0) {
-                const firstTaskStatusKey = Object.keys(taskStatuses)[0]
-                taskStatus = taskStatuses[Number(firstTaskStatusKey)]
-                console.log('使用第一个可用的 taskStatus:', firstTaskStatusKey, taskStatus)
-              }
-              
-              // 如果还是没有数据，使用初始状态的模拟数据
-              if (!taskStatus || !taskStatus.stages) {
-                // 创建初始状态的 taskStatus
+              if (!taskStatus) {
                 taskStatus = {
                   task_id: 'pending',
-                  chapter_id: chapterId || 0,
+                  audiobook_project_id: currentAudiobookProjectId || 0,
+                  chapter_id: null,
                   status: 'pending',
-                  overall_progress: 0,
-                  stages: {
-                    strategy: { status: 'pending', progress: 0, start_time: undefined, end_time: undefined, error_message: undefined, metrics: undefined },
-                    script_adaptation: { status: 'pending', progress: 0, start_time: undefined, end_time: undefined, error_message: undefined, metrics: undefined },
-                    voice_design: { status: 'pending', progress: 0, start_time: undefined, end_time: undefined, error_message: undefined, metrics: undefined },
-                    sound_design: { status: 'pending', progress: 0, start_time: undefined, end_time: undefined, error_message: undefined, metrics: undefined },
-                    music_composition: { status: 'pending', progress: 0, start_time: undefined, end_time: undefined, error_message: undefined, metrics: undefined },
-                    quality_review: { status: 'pending', progress: 0, start_time: undefined, end_time: undefined, error_message: undefined, metrics: undefined },
-                    tts_synthesis: { status: 'pending', progress: 0, start_time: undefined, end_time: undefined, error_message: undefined, metrics: undefined },
-                    audio_mixing: { status: 'pending', progress: 0, start_time: undefined, end_time: undefined, error_message: undefined, metrics: undefined },
-                    final_audio_review: { status: 'pending', progress: 0, start_time: undefined, end_time: undefined, error_message: undefined, metrics: undefined },
-                  },
+                  current_stage: null,
+                  progress: 0,
+                  stages: createEmptyStageMap(),
                   created_at: new Date().toISOString(),
                   updated_at: new Date().toISOString(),
+                  detail: {},
                 }
-                console.log('使用初始状态的模拟数据')
               }
-              
-              console.log('渲染阶段详情:', taskStatus)
               
               return (
                 <Box sx={{ mt: 3 }}>
                   <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, color: '#333' }}>
-                    🎯 当前阶段进度
+                    当前阶段进度
                   </Typography>
                   {renderStageDetails(taskStatus)}
                   {taskStatus.stages?.quality_review?.status === 'completed' && (
@@ -2447,7 +2877,7 @@ const AudiobookPage = () => {
                           }
                         }}
                       >
-                        🔍 查看剧本评审详情
+                        查看剧本评审详情
                       </Button>
                     </Box>
                   )}
@@ -2527,7 +2957,7 @@ const AudiobookPage = () => {
                     }}
                   >
                     <Typography variant="h3" sx={{ fontWeight: 700, mb: 1 }}>
-                      ¥{(audiobookProject.total_cost || 0).toFixed(2)}
+                      ￥{(audiobookProject.total_cost || 0).toFixed(2)}
                     </Typography>
                     <Typography variant="body2" sx={{ opacity: 0.9 }}>
                       总成本
@@ -2651,7 +3081,7 @@ const AudiobookPage = () => {
                 </Box>
               )}
               
-              {selectedChapters.length > 0 && taskStatuses[selectedChapters[0]]?.stages?.quality_review && (
+              {activeTaskStatus?.stages?.quality_review && (
                 <Button
                   variant="outlined"
                   onClick={handleOpenScriptReviewDialog}
@@ -2828,7 +3258,7 @@ const AudiobookPage = () => {
                     </Typography>
                     {scriptReviewData.report.revision_suggestions.map((s: string, idx: number) => (
                       <Typography key={idx} variant="body2" color="text.secondary">
-                        • {s}
+                        ? {s}
                       </Typography>
                     ))}
                   </Box>
@@ -2910,3 +3340,4 @@ const AudiobookPage = () => {
 }
 
 export default AudiobookPage
+

@@ -19,11 +19,11 @@ async def test_aliyun_tts():
     load_dotenv()
     api_key = os.getenv("DASHSCOPE_API_KEY")
     if not api_key:
-        print("❌ 未配置 DASHSCOPE_API_KEY，无法测试 TTS")
+        print("未配置 DASHSCOPE_API_KEY，无法测试 TTS")
         return
     
     print("=" * 60)
-    print("🎤 阿里云TTS API测试")
+    print("阿里云TTS API测试")
     print("=" * 60)
     print()
     
@@ -51,7 +51,7 @@ async def test_aliyun_tts():
             "name": "cosyvoice-v3-plus（精品备选）",
             "text": "这是一个测试文本。",
             "model": "cosyvoice-v3-plus",
-            "voice": "longanyun_v3"
+            "voice": "longanyang"
         }
     ]
 
@@ -60,12 +60,12 @@ async def test_aliyun_tts():
         from dashscope.audio.tts_v2 import SpeechSynthesizer, AudioFormat
         
         dashscope.api_key = api_key
-        print(f"✅ API Key已配置: {api_key[:20]}...")
+        print(f"API Key已配置: {api_key[:20]}...")
         print()
         
         # 逐个测试
         for i, test in enumerate(test_cases, 1):
-            print(f"📝 测试 {i}/{len(test_cases)}: {test['name']}")
+            print(f"测试 {i}/{len(test_cases)}: {test['name']}")
             print(f"   文本: {test['text']}")
             print(f"   模型: {test['model']}")
             print(f"   音色: {test['voice']}")
@@ -92,7 +92,7 @@ async def test_aliyun_tts():
                     audio_data = result.get_audio_data()
                 
                 if audio_data:
-                    print(f"   ✅ 成功！音频大小: {len(audio_data)} 字节")
+                    print(f"   成功！音频大小: {len(audio_data)} 字节")
                     
                     # 保存音频（可选）
                     output_file = f"test_output_{i}.mp3"
@@ -100,10 +100,10 @@ async def test_aliyun_tts():
                         f.write(audio_data)
                     print(f"   💾 已保存到: {output_file}")
                 else:
-                    print(f"   ❌ 失败：返回空音频 or {result}")
+                    print(f"   失败：返回空音频 or {result}")
                     
             except Exception as e:
-                print(f"   ❌ 异常：{e}")
+                print(f"   异常：{e}")
                 # 打印详细错误信息
                 import traceback
                 print(f"   详细错误：")
@@ -112,11 +112,11 @@ async def test_aliyun_tts():
             print()
         
         print("=" * 60)
-        print("✅ 测试完成")
+        print("测试完成")
         print("=" * 60)
         
     except Exception as e:
-        print(f"❌ 初始化失败: {e}")
+        print(f"初始化失败: {e}")
         import traceback
         traceback.print_exc()
 

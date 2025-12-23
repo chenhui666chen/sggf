@@ -12,7 +12,7 @@ import logging
 import os
 import json
 from urllib.parse import quote
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -33,11 +33,21 @@ from app.schemas.audiobook import (
     CharacterVoiceConfig,
     TTSPreviewRequest,
     AudiobookTaskStatus,
+    CosyVoiceCloneCreateRequest,
 )
 from app.celery_app import celery_app
 from app.services.audiobook import AudiobookEngine
 from app.services.audiobook.tts_engine import TTSEngine
 from app.services.audiobook.voice_manager import VoiceManager
+from app.services.audiobook.voice_catalog import get_voice_entry, load_voice_catalog_for_model
+from app.services.audiobook.cosyvoice_clone_client import (
+    CosyVoiceCloneError,
+    create_cosyvoice_v3_plus_clone,
+    delete_cosyvoice_clone,
+    get_clone_display_name,
+    list_cosyvoice_v3_plus_clones,
+    save_clone_display_name,
+)
 from app.services.audiobook.app_service import AudiobookAppService
 from app.services.audiobook.repository import (
     AudiobookProjectRepository,
@@ -89,6 +99,41 @@ def _tracker_update(tracker, stage: str, completed: int, total: int, message: Op
         return
     tracker.update_stage(stage, completed, total, message, detail)
 
+
+def _build_progress_handler(tracker, chapter_ids: List[int]):
+    """将 AudiobookEngine 的章节级任务进度映射到 Celery 任务追踪。"""
+    if tracker is None:
+        return None
+
+    total = max(len(chapter_ids) or 0, 1)
+    chapter_positions: Dict[int, int] = {chapter_id: idx + 1 for idx, chapter_id in enumerate(chapter_ids)}
+    chapter_completed: Dict[int, bool] = {}
+
+    def handle_progress(snapshot: Dict[str, Any]):
+        stage = snapshot.get("current_stage")
+        chapter_id = snapshot.get("chapter_id")
+        if not stage or chapter_id is None:
+            return
+
+        if snapshot.get("status") == "completed":
+            chapter_completed[chapter_id] = True
+        completed_units = sum(1 for finished in chapter_completed.values() if finished)
+
+        detail_payload = {
+            "chapter_id": chapter_id,
+            "task_id": snapshot.get("task_id"),
+            "overall_progress": snapshot.get("overall_progress"),
+            "stages": snapshot.get("stages"),
+            "status": snapshot.get("status"),
+            "chapter_index": chapter_positions.get(chapter_id),
+            "chapter_total": total,
+        }
+        stage_name = stage if isinstance(stage, str) else str(stage)
+        message = f"章节 {chapter_positions.get(chapter_id, '?')}/{total} · {stage_name}"
+        _tracker_update(tracker, stage_name, completed_units, total, message, detail_payload)
+
+    return handle_progress
+
 router = APIRouter(prefix="/api/v1/audiobook", tags=["audiobook"])
 
 
@@ -116,8 +161,12 @@ async def tts_preview(
 
     engine = TTSEngine(enable_cache=False, max_concurrent=1, model=model_name, request_delay=0.0)
     # 将前端的 voice_id（如 'male_young_energetic'）映射为真实的 TTS 音色ID
-    preset = VoiceManager.PRESET_VOICES.get(request.voice_id)
-    speaker_id = preset["tts_speaker_id"] if preset else request.voice_id
+    if model_name == "qwen3-tts-flash":
+        preset = VoiceManager.PRESET_VOICES.get(request.voice_id)
+        speaker_id = preset["tts_speaker_id"] if preset else request.voice_id
+    else:
+        entry = get_voice_entry(request.voice_id, model=model_name)
+        speaker_id = entry.get("speaker") if entry else request.voice_id
 
     voice_params: dict = {
         "speaker": speaker_id,
@@ -132,7 +181,114 @@ async def tts_preview(
     if not audio_bytes:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="TTS预览失败")
 
-    return Response(content=audio_bytes, media_type="audio/mpeg")
+    media_type = "audio/wav" if audio_bytes.startswith(b"RIFF") else "audio/mpeg"
+    return Response(content=audio_bytes, media_type=media_type)
+
+
+@router.get("/tts/voices")
+async def list_tts_voices(
+    model: str = "qwen3-tts-flash",
+    current_user: User = Depends(get_current_user),
+):
+    """Expose the supported voices to the frontend (model-specific)."""
+    model = (model or "qwen3-tts-flash").strip()
+    if model not in {"qwen3-tts-flash", "cosyvoice-v3-plus"}:
+        model = "qwen3-tts-flash"
+    catalog = load_voice_catalog_for_model(model)
+    meta = catalog.get("meta") or {}
+    voices = list(catalog.get("voices") or [])
+
+    # cosyvoice-v3-plus：合并“官方内置音色”与“复刻音色”（DashScope VoiceEnrollmentService）
+    if model == "cosyvoice-v3-plus":
+        try:
+            clones, _clone_meta = list_cosyvoice_v3_plus_clones()
+            voices.extend([c.to_voice_preset(get_clone_display_name(c.voice_id)) for c in clones])
+        except CosyVoiceCloneError:
+            # 未配置 API Key 等情况下，不阻塞页面使用内置音色
+            pass
+    return {
+        "model": meta.get("model", "qwen3-tts-flash"),
+        "updated_at": meta.get("updated_at"),
+        "source": meta.get("source"),
+        "voice_count": len(voices),
+        "voices": voices,
+    }
+
+
+@router.post("/tts/voices/cosyvoice-v3-plus/clones")
+async def create_cosyvoice_v3_plus_voice_clone(
+    request: CosyVoiceCloneCreateRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """创建 cosyvoice-v3-plus 复刻音色。
+
+    说明：DashScope 克隆接口要求 input.url 为公网可访问地址。
+    """
+    try:
+        import hashlib
+        import re
+        import secrets
+
+        display_name = (request.name or "").strip()
+        if not display_name:
+            raise CosyVoiceCloneError("name 不能为空")
+
+        prefix = (request.prefix or "").strip()
+        if not prefix:
+            # 生成策略：
+            # - 允许 name 任意字符（含中文），但 prefix 必须满足 SDK 要求：字母/数字/下划线，1~32
+            # - 注意：cosyvoice clone 要求 prefix 最长 10 个字符
+            # - 尽量从 name 提取可读片段，否则退化为 v，再拼接 hash 提升唯一性
+            slug = re.sub(r"[^A-Za-z0-9_]+", "_", display_name).strip("_").lower()
+            base = (slug[:4] if slug else "v").strip("_") or "v"
+            uid = str(getattr(current_user, "id", "0"))
+            # 防碰撞：加一个稳定 hash 片段（避免同名同用户频繁生成完全一致）
+            h = hashlib.sha1(f"{uid}:{display_name}".encode("utf-8")).hexdigest()[:6]  # noqa: S324
+            rand = secrets.token_hex(1)  # 2 hex chars
+            prefix = f"{base}{h}{rand}"[:10]
+
+        result = create_cosyvoice_v3_plus_clone(prefix=prefix, audio_url=request.url)
+        save_clone_display_name(voice_id=result.get("voice_id", ""), display_name=display_name)
+        result["display_name"] = display_name
+        return result
+    except CosyVoiceCloneError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/tts/voices/cosyvoice-v3-plus/clones")
+async def list_cosyvoice_v3_plus_voice_clones(
+    prefix: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+):
+    """列出 cosyvoice-v3-plus 的复刻音色（当前 API Key 维度）。"""
+    try:
+        clones, meta = list_cosyvoice_v3_plus_clones(prefix=prefix)
+        return {
+            "meta": meta,
+            "voices": [
+                {
+                    "voice_id": c.voice_id,
+                    "status": c.status,
+                    "gmt_create": c.gmt_create,
+                    "gmt_modified": c.gmt_modified,
+                }
+                for c in clones
+            ],
+        }
+    except CosyVoiceCloneError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.delete("/tts/voices/cosyvoice-v3-plus/clones/{voice_id}")
+async def delete_cosyvoice_v3_plus_voice_clone(
+    voice_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """删除 cosyvoice-v3-plus 复刻音色。"""
+    try:
+        return delete_cosyvoice_clone(voice_id=voice_id)
+    except CosyVoiceCloneError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 # ==================== API Endpoints ====================
@@ -663,10 +819,44 @@ async def get_chapter_script(
     ).first()
 
     if not chapter_audio or not chapter_audio.script_json:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="章节剧本不存在，请先生成剧本",
+        fallback = (
+            db.query(ChapterAudio)
+            .join(AudiobookProject, ChapterAudio.audiobook_project_id == AudiobookProject.id)
+            .filter(
+                AudiobookProject.project_id == project.id,
+                ChapterAudio.chapter_id == chapter_id,
+                ChapterAudio.script_json.isnot(None),
+            )
+            .order_by(ChapterAudio.updated_at.desc())
+            .first()
         )
+
+        if fallback:
+            if not chapter_audio:
+                chapter_audio = ChapterAudio(
+                    audiobook_project_id=audiobook_project_id,
+                    chapter_id=chapter_id,
+                )
+                db.add(chapter_audio)
+
+            chapter_audio.script_json = fallback.script_json
+            chapter_audio.script_review_json = fallback.script_review_json
+            chapter_audio.script_status = fallback.script_status or "pending"
+            chapter_audio.segment_count = fallback.segment_count
+            chapter_audio.dialogue_count = fallback.dialogue_count
+            chapter_audio.narration_count = fallback.narration_count
+            chapter_audio.character_count = fallback.character_count
+            db.commit()
+            logger.info(
+                "♻️ 章节 %s 复用历史剧本供 audiobook_project_id=%s 使用",
+                chapter_id,
+                audiobook_project_id,
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="章节剧本不存在，请先生成剧本",
+            )
 
     try:
         script_segments = json.loads(chapter_audio.script_json)
@@ -826,11 +1016,14 @@ async def generate_audiobook_scripts_background(
 
         llm_client = get_llm_client(strategy="conservative")
 
+        progress_handler = _build_progress_handler(tracker, chapter_ids)
+
         engine = AudiobookEngine(
             enable_cache=audiobook_project.enable_cache,
             max_concurrent=1,
             llm_client=llm_client,
             tts_model=tts_model,
+            progress_handler=progress_handler,
         )
         set_engine_instance(engine)
 
@@ -839,14 +1032,16 @@ async def generate_audiobook_scripts_background(
             project = db.query(Project).filter(Project.id == audiobook_project.project_id).first()
             if project and project.audio_config:
                 try:
-                    config_data = json.loads(project.audio_config)
+                    from app.services.audiobook.project_audio_config import parse_project_audio_config
+                    config_data = parse_project_audio_config(project.audio_config or "")
                 except Exception as parse_err:
                     logger.warning(f"⚠️ 解析项目级音频配置失败: {parse_err}")
                     config_data = {}
                 
                 # 1. 应用角色音色配置（先加载，确保剧本阶段也能使用正确的音色）
                 effective_voice_mapping = dict(audiobook_project.voice_mapping or {})
-                for item in (config_data.get("characters") or []):
+                from app.services.audiobook.project_audio_config import get_characters_for_model, get_audio_fx
+                for item in get_characters_for_model(config_data, tts_model):
                     name = item.get("name")
                     if not name:
                         continue
@@ -866,7 +1061,7 @@ async def generate_audiobook_scripts_background(
                         logger.warning(f"⚠️ [剧本阶段] 应用角色音配置失败: {e}")
                 
                 # 2. 应用音效/BGM配置
-                audio_fx = config_data.get("audio_fx") or None
+                audio_fx = get_audio_fx(config_data)
                 if audio_fx:
                     try:
                         engine.apply_audio_fx_config(audio_fx)
@@ -1025,11 +1220,14 @@ async def generate_audiobook_audio_from_scripts_background(
 
         llm_client = get_llm_client(strategy="conservative")
 
+        progress_handler = _build_progress_handler(tracker, chapter_ids)
+
         engine = AudiobookEngine(
             enable_cache=audiobook_project.enable_cache,
             max_concurrent=1,
             llm_client=llm_client,
             tts_model=tts_model,
+            progress_handler=progress_handler,
         )
         set_engine_instance(engine)
 
@@ -1042,11 +1240,13 @@ async def generate_audiobook_audio_from_scripts_background(
         # 以已有的 audiobook_project.voice_mapping 为基础，叠加最新的 Project.audio_config.characters（如有），
         # 后者优先级更高，确保二阶段生成也能应用最新的前端配置（例如苏娜女声）。
         effective_voice_mapping = dict(audiobook_project.voice_mapping or {})
+        from app.services.audiobook.project_audio_config import get_audio_fx, get_characters_for_model
         if project and project.audio_config:
             try:
-                config_data = json.loads(project.audio_config)
-                logger.info(f"🔍 [调试] 项目音频配置: {config_data.get('characters', [])}")
-                for item in (config_data.get("characters") or []):
+                from app.services.audiobook.project_audio_config import parse_project_audio_config
+                config_data = parse_project_audio_config(project.audio_config or "")
+                logger.info(f"🔍 [调试] 项目音频配置: {get_characters_for_model(config_data, tts_model)}")
+                for item in get_characters_for_model(config_data, tts_model):
                     name = item.get("name")
                     if not name:
                         logger.warning(f"⚠️ [调试] 跳过无名称的配置项: {item}")
@@ -1075,8 +1275,9 @@ async def generate_audiobook_audio_from_scripts_background(
         audio_fx = None
         if project and project.audio_config:
             try:
-                config_data = json.loads(project.audio_config)
-                audio_fx = config_data.get("audio_fx") or None
+                from app.services.audiobook.project_audio_config import parse_project_audio_config
+                config_data = parse_project_audio_config(project.audio_config or "")
+                audio_fx = get_audio_fx(config_data)
             except Exception as parse_err:
                 logger.warning(f"⚠️ 解析项目级音频配置失败: {parse_err}")
 
@@ -1289,11 +1490,14 @@ async def generate_audiobook_background(
         # 创建LLM客户端（必需）
         llm_client = get_llm_client(strategy="conservative")
         
+        progress_handler = _build_progress_handler(tracker, chapter_ids)
+
         engine = AudiobookEngine(
             enable_cache=audiobook_project.enable_cache,
             max_concurrent=1,  # 降低并发避免限流
             llm_client=llm_client,  # 必须传入LLM客户端
             tts_model=tts_model,
+            progress_handler=progress_handler,
         )
         # 设置为全局实例，供状态查询使用
         set_engine_instance(engine)
@@ -1303,11 +1507,13 @@ async def generate_audiobook_background(
             project = db.query(Project).filter(Project.id == audiobook_project.project_id).first()
             if project and project.audio_config:
                 try:
-                    config_data = json.loads(project.audio_config)
+                    from app.services.audiobook.project_audio_config import parse_project_audio_config
+                    config_data = parse_project_audio_config(project.audio_config or "")
                 except Exception as parse_err:
                     logger.warning(f"⚠️ 解析项目级音频配置失败: {parse_err}")
                     config_data = {}
-                audio_fx = config_data.get("audio_fx") or None
+                from app.services.audiobook.project_audio_config import get_audio_fx
+                audio_fx = get_audio_fx(config_data)
                 if audio_fx:
                     try:
                         engine.apply_audio_fx_config(audio_fx)
@@ -1391,6 +1597,18 @@ async def generate_audiobook_background(
                     stats = result.get("stats", {})
                     parse_stats = stats.get("parse_stats", {})
                     tts_stats = stats.get("tts_stats", {})
+
+                    script_payload = result.get("script_segments_payload") or []
+                    if script_payload:
+                        chapter_audio.script_json = json.dumps(
+                            serialize_dataclass_to_dict(script_payload), ensure_ascii=False
+                        )
+                        chapter_audio.script_status = "pending"
+                        quality_detail = result.get("quality_report_detail")
+                        if quality_detail:
+                            chapter_audio.script_review_json = json.dumps(
+                                serialize_dataclass_to_dict(quality_detail), ensure_ascii=False
+                            )
                     
                     chapter_audio.segment_count = parse_stats.get("total_segments", 0)
                     chapter_audio.dialogue_count = parse_stats.get("dialogue_count", 0)

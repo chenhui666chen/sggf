@@ -95,16 +95,26 @@ class ApiClient {
     return this.client.delete(`/api/v1/projects/${projectId}`)
   }
 
-  getProjectAudioConfig(projectId: number) {
-    return this.client.get(`/api/v1/projects/${projectId}/audio-config`)
+  getProjectAudioConfig(projectId: number, ttsModel?: string) {
+    return this.client.get(`/api/v1/projects/${projectId}/audio-config`, {
+      params: ttsModel ? { tts_model: ttsModel } : undefined,
+    })
   }
 
-  updateProjectAudioConfig(projectId: number, data: any) {
-    return this.client.put(`/api/v1/projects/${projectId}/audio-config`, data)
+  updateProjectAudioConfig(projectId: number, data: any, ttsModel?: string) {
+    return this.client.put(`/api/v1/projects/${projectId}/audio-config`, data, {
+      params: ttsModel ? { tts_model: ttsModel } : undefined,
+    })
   }
 
-  autoAssignProjectAudioVoices(projectId: number) {
-    return this.client.post(`/api/v1/projects/${projectId}/audio-config/auto-voices`)
+  autoAssignProjectAudioVoices(projectId: number, ttsModel?: string) {
+    return this.client.post(
+      `/api/v1/projects/${projectId}/audio-config/auto-voices`,
+      null,
+      {
+        params: ttsModel ? { tts_model: ttsModel } : undefined,
+      },
+    )
   }
 
   // 章节API
@@ -265,6 +275,16 @@ class ApiClient {
 
   previewTTS(payload: { text: string; voice_id: string; volume?: number; speed?: number; pitch?: number; model?: string }) {
     return this.client.post('/api/v1/audiobook/tts/preview', payload, { responseType: 'blob' })
+  }
+
+  getTtsVoices(model?: string) {
+    return this.client.get('/api/v1/audiobook/tts/voices', {
+      params: model ? { model } : undefined,
+    })
+  }
+
+  createCosyVoiceV3PlusClone(payload: { name: string; url: string }) {
+    return this.client.post('/api/v1/audiobook/tts/voices/cosyvoice-v3-plus/clones', payload)
   }
 
   // 角色管理API

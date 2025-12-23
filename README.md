@@ -197,6 +197,13 @@ npm run dev
   3. 旧项目若仍保存 `longanyang` 等 CosyVoice 音色，VoiceManager 会自动映射到对应的 Qwen3 speaker，重新在 UI 中保存即可持久化新 ID。
 - **情绪/Instruction**：Qwen3 不支持 instruction 参数，系统通过 pitch/speed/volume 映射情绪并自动规避 428 `InvalidParameter`。只有在切换 `cosyvoice-v3-plus` 时才会重新启用 instruction。
 
+### Celery / Redis 队列（有声书后台进度）
+
+- `.env` 中新增 `CELERY_BROKER_URL`、`CELERY_RESULT_BACKEND`，默认都指向 `redis://localhost:6379/0`。`dev.bat` 会检查这两个变量，确保后台队列与前端提示一致。
+- 启动流程：本地先运行 Redis（`redis-server`），然后执行 `celery -A app.celery_app.celery_app worker -P solo -Q audiobook -l info`。未连上 Redis 时，任务会卡在 `pending`，UI 也仅能显示历史记录。
+- **前端提示**：当 `/api/v1/audiobook/tasks` 无法返回实时进度（例如 Celery 未运行或 Redis 未连接）时，有声书页会显示一个信息 Alert，提醒用户“已切换到历史数据，请到右侧历史记录面板查看最新状态”。一旦后台恢复、接口提供实时数据，该 Alert 会自动消失，阶段卡片重新展示实时进度。
+- 如需在其他环境运行（云主机 / Docker），将上述两个变量改成对应的 Redis 地址即可，Celery worker 与 FastAPI 实例保持相同配置即可共享队列。
+
 ---
 
 ## 📖 文档导航

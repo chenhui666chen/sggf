@@ -318,15 +318,14 @@ class AudiobookScriptAgent:
             tts_block = """**当前TTS模型：CosyVoice v3-plus（精品模式）**\n- 适合：精品章节 / 情绪层次丰富场景\n- 特性：精细情感控制、停顿/重音/语调变化能力极强，音质最佳\n- 成本：相对更高，适合高光章节与关键桥段\n"""
             instruct_block = (
                 "**Instruct 情绪提示（CosyVoice 专用）**\n"
-                "- Ethan / Sunny / Momo 支持 instruction 参数，可按 performance_notes 指派【愤怒/惊讶/紧张】等情绪\n"
-                "- 请写清角色身份与场景张力，便于后续自动注入 instruction，避免 428 InvalidParameter\n"
+                "- cosyvoice-v3-plus 内置音色仅 2 种：longanyang（男）/ longanhuan（女），均支持 Instruct/SSML\n"
+                "- 请在 performance_notes 中写清角色身份、场景张力、目标语气（如【愤怒/紧张/平静】），便于后续注入 instruction\n"
             )
         else:
-            tts_block = """**当前TTS模型：Qwen3-TTS Flash（高性价比模式）**\n- 适合：长篇连载 / 日更章节\n- 特性：语速灵活、稳定性强、成本低，适合大体量文本\n- 限制：不支持 instruction，仅依赖 pitch/speed/volume 参数映射情绪\n"""
+            tts_block = """**当前TTS模型：Qwen3-TTS Flash（高性价比模式）**\n- 适合：长篇连载 / 日更章节\n- 特性：音色丰富、稳定性强、成本低，适合大体量文本\n- 限制：当前调用通道不支持 Instruct/SSML，且不暴露可控的情绪/语速/音调参数（仅使用 voice + language_type）\n"""
             instruct_block = (
-                "**Qwen3 情绪提示**\n"
-                "- 通过 performance_notes / emotion 描述【紧张、平静、激动】等中文情绪，系统会映射到 pitch/speed/volume\n"
-                "- 避免使用未支持的英文情感词，保持中文描述可降低 428 InvalidParameter 风险\n"
+                "**Qwen3 备注提示**\n"
+                "- 仍可在 performance_notes / emotion 写【紧张/平静/激动】等中文情绪（用于编剧节奏与后续扩展），但请不要假设会直接影响 TTS\n"
             )
 
         # 智能采样：章节开头 + 中段 + 结尾，兼顾全局又控制长度
@@ -498,10 +497,10 @@ class AudiobookScriptAgent:
         model_name = (getattr(self, "tts_model", None) or "qwen3-tts-flash").strip()
         if "plus" in model_name:
             tts_block = """**当前TTS模型：CosyVoice v3-plus（精品模式）**\n- 适合：精品章节 / 情绪层次丰富场景\n- 特性：精细情感控制、停顿/重音/语调变化能力极强，音质最佳\n"""
+            instruct_block = """**Instruct 提示（cosyvoice-v3-plus）**\n- 内置音色仅 2 种：longanyang（男）/ longanhuan（女），均支持 Instruct/SSML\n- 请在 performance_notes 中写清语气/情绪（如【愤怒/紧张/平静】），便于后续注入 instruction\n"""
         else:
-            tts_block = """**当前TTS模型：Qwen3-TTS Flash（高性价比模式）**\n- 适合：长篇连载 / 日更章节\n- 特性：语速灵活、稳定性强、成本低，适合大体量文本\n- 限制：情感与停顿控制略弱于 v3-plus\n"""
-
-        instruct_block = """**支持 Instruct 调控的音色（必须充分利用）**\n- Ethan：适合作为阳光男旁白 / 故事机讲述者\n- Sunny：适合活泼女主 / 闺蜜式对话\n- Momo：适合作为童声故事机 / 儿童向旁白\n在剧本片段中，请通过清晰的角色身份、场景描述和 performance_notes，帮助这些 Instruct 音色进入正确角色与语气。\n"""
+            tts_block = """**当前TTS模型：Qwen3-TTS Flash（高性价比模式）**\n- 适合：长篇连载 / 日更章节\n- 特性：音色丰富、稳定性强、成本低，适合大体量文本\n- 限制：当前调用通道不支持 Instruct/SSML，且不暴露可控的情绪/语速/音调参数（仅使用 voice + language_type）\n"""
+            instruct_block = """**Qwen3 提示**\n- 可以输出 emotion/performance_notes 作为编剧标注与后续扩展，但不要把它当作可控的 TTS 参数\n"""
 
         six_step_block = """**有声剧本 6 步听觉化重构流程（请严格遵守）**\n1. 心理活动 → 改写为可听见的独白或用音效/环境暗示呈现，避免长篇抽象描写。\n2. 环境描写 → 提炼为可感知的音效标签（如“雨声渐密”“地铁驶过”），填入 sound_effects。\n3. 动作与场景切换 → 用短句 + 停顿 + 过渡性音效，避免连续大段说明。\n4. 对话优化 → 口语化，拆分过长句子，去掉拗口表达，保证朗读顺畅。\n5. 节奏控制 → 根据情节紧张度调整句长，并通过 pause_before/pause_after 控制呼吸感。\n6. 音乐与情绪 → 为情绪明显的片段给出 music_cue（如“低频紧张弦乐”），避免整章铺满BGM。\n"""
 

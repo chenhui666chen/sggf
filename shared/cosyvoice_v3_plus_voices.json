@@ -1,0 +1,33 @@
+{
+  "model": "cosyvoice-v3-plus",
+  "updated_at": "2025-12-23",
+  "source": "bailian-doc: cosyvoice-v3-plus voices (2 built-in)",
+  "voices": [
+    {
+      "id": "longanyang",
+      "speaker": "longanyang",
+      "label": "龙安洋 (longanyang)",
+      "gender": "male",
+      "style": "warm",
+      "category": "narrator",
+      "languages": ["zh", "en"],
+      "supportsInstruct": true,
+      "supportsSsml": true,
+      "description": "阳光大男孩（20~30岁）。适合社交陪伴/标杆音色。",
+      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+    },
+    {
+      "id": "longanhuan",
+      "speaker": "longanhuan",
+      "label": "龙安欢 (longanhuan)",
+      "gender": "female",
+      "style": "energetic",
+      "category": "dialogue",
+      "languages": ["zh", "en"],
+      "supportsInstruct": true,
+      "supportsSsml": true,
+      "description": "欢脱元气女（20~30岁）。适合社交陪伴/标杆音色。",
+      "default_params": { "pitch": 50, "speed": 1.0, "volume": 50 }
+    }
+  ]
+}

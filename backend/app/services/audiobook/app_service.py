@@ -1,11 +1,9 @@
-"""应用层服务：有声书相关用例的业务编排
+"""应用层服务：有声书相关用例的业务编排。
 
-当前主要负责：
+职责：
 - 校验项目归属与章节有效性
 - 基于项目配置 / 请求参数 / 角色信息构建 voice_mapping
 - 创建 AudiobookProject 记录
-
-后续可以在此基础上逐步引入 Repository 层，进一步解耦 ORM 访问。
 """
 import json
 import logging
@@ -14,7 +12,7 @@ from typing import Dict, List
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models.audiobook import AudiobookProject
+from app.models.audiobook import AudiobookProject, ChapterAudio
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.audiobook import AudiobookProjectCreate, CharacterVoiceConfig
@@ -24,20 +22,19 @@ from app.services.audiobook.repository import (
     CharacterRepository,
     ProjectRepository,
 )
-from app.services.audiobook.voice_manager import VoiceManager
+from app.services.audiobook.project_audio_config import get_characters_for_model, parse_project_audio_config
+from app.services.audiobook.voice_manager_factory import create_voice_manager
 
 logger = logging.getLogger(__name__)
 
 
 class AudiobookAppService:
-    """有声书应用服务
+    """有声书应用服务。
 
     注意：
-    - 该层承担用例级业务编排职责，不负责 HTTP 细节和后台任务调度。
-    - 当前直接依赖 SQLAlchemy Session 和 FastAPI 的 HTTPException，
-      后续如果需要可进一步抽象为领域服务 + Repository。
+    - 本层承担用例级业务编排，不负责 HTTP 细节与后台任务调度。
+    - 当前直接依赖 SQLAlchemy Session 与 FastAPI HTTPException；如需更强解耦，可进一步抽象为领域服务 + Repository。
     """
-
     def __init__(self, db: Session, current_user: User) -> None:
         self.db = db
         self.current_user = current_user
@@ -46,7 +43,7 @@ class AudiobookAppService:
         self.character_repo = CharacterRepository
         self.audiobook_repo = AudiobookProjectRepository
 
-    # -------- 项目与章节校验 ---------
+    # -------- 椤圭洰涓庣珷鑺傛牎楠?---------
     def _get_user_project(self, project_id: int) -> Project:
         project = self.project_repo.get_user_project(
             self.db, user_id=self.current_user.id, project_id=project_id
@@ -62,7 +59,7 @@ class AudiobookAppService:
         if not chapter_ids:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="章节列表不能为空",
+                detail="绔犺妭鍒楄〃涓嶈兘涓虹┖",
             )
 
         chapters = self.chapter_repo.get_project_chapters_by_ids(
@@ -78,19 +75,11 @@ class AudiobookAppService:
         return chapters
 
     # -------- voice_mapping 构建逻辑 ---------
-    def _load_project_voice_mapping(self, project: Project) -> Dict[str, Dict]:
-        """从项目级 audio_config 中加载默认角色音频配置。"""
+    def _load_project_voice_mapping(self, project: Project, tts_model: str) -> Dict[str, Dict]:
         voice_mapping: Dict[str, Dict] = {}
-        if not project.audio_config:
-            return voice_mapping
+        config = parse_project_audio_config(project.audio_config or "")
 
-        try:
-            config = json.loads(project.audio_config)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("⚠️ 解析项目级音频配置失败: %s", e)
-            return voice_mapping
-
-        for item in (config.get("characters") or []):
+        for item in get_characters_for_model(config, tts_model):
             name = item.get("name")
             if not name:
                 continue
@@ -108,7 +97,7 @@ class AudiobookAppService:
         voice_mapping: Dict[str, Dict],
         voice_config: List[CharacterVoiceConfig] | None,
     ) -> None:
-        """将本次请求中的角色音频配置合入 voice_mapping。"""
+        """将本次请求中的角色音频配置合并到 voice_mapping（优先覆盖）。"""
         if not voice_config:
             return
 
@@ -124,19 +113,20 @@ class AudiobookAppService:
         self,
         project_id: int,
         voice_mapping: Dict[str, Dict],
+        tts_model: str,
     ) -> None:
-        """为缺少配置的角色自动分配音色（基于结构化人物卡）。"""
+        """为缺少配置的角色自动分配音色（基于结构化人物信息）。"""
         try:
             characters = self.character_repo.list_by_project(self.db, project_id=project_id)
 
-            vm = VoiceManager()
+            vm = create_voice_manager(tts_model=tts_model)
 
             def _build_traits_from_character(char) -> Dict:
                 traits: Dict = {}
                 gender = (char.gender or "").strip().lower()
-                if gender in ("男", "male", "m", "man", "boy"):
+                if gender in ("男", "男性", "male", "m", "man", "boy"):
                     traits["gender"] = "male"
-                elif gender in ("女", "female", "f", "woman", "girl"):
+                elif gender in ("女", "女性", "female", "f", "woman", "girl"):
                     traits["gender"] = "female"
 
                 if char.age is not None:
@@ -179,13 +169,56 @@ class AudiobookAppService:
                 }
 
         except Exception as e:  # noqa: BLE001
-            logger.warning("⚠️ 自动分配角色音色失败，将使用默认规则分配: %s", e)
+            logger.warning("自动分配角色音色失败，将回退到默认规则: %s", e)
+
+    def _clone_existing_scripts(
+        self,
+        audiobook_project: AudiobookProject,
+        chapter_ids: List[int],
+    ) -> int:
+        """为新建的 audiobook_project 复用最近一次生成的剧本，直到用户主动重生成。"""
+        reused = 0
+        if not chapter_ids:
+            return reused
+
+        for chapter_id in chapter_ids:
+            existing = (
+                self.db.query(ChapterAudio)
+                .join(AudiobookProject, ChapterAudio.audiobook_project_id == AudiobookProject.id)
+                .filter(
+                    AudiobookProject.project_id == audiobook_project.project_id,
+                    ChapterAudio.chapter_id == chapter_id,
+                    ChapterAudio.script_json.isnot(None),
+                )
+                .order_by(ChapterAudio.updated_at.desc())
+                .first()
+            )
+            if not existing:
+                continue
+
+            clone = ChapterAudio(
+                audiobook_project_id=audiobook_project.id,
+                chapter_id=chapter_id,
+                script_json=existing.script_json,
+                script_review_json=existing.script_review_json,
+                script_status=existing.script_status or "pending",
+                segment_count=existing.segment_count,
+                dialogue_count=existing.dialogue_count,
+                narration_count=existing.narration_count,
+                character_count=existing.character_count,
+            )
+            self.db.add(clone)
+            reused += 1
+
+        if reused:
+            self.db.commit()
+            logger.info("♻️ 复用 %s 个章节的已有剧本供新项目 %s 使用", reused, audiobook_project.id)
+        return reused
 
     # -------- 对外用例方法 ---------
     def create_audiobook_project(self, request: AudiobookProjectCreate) -> AudiobookProject:
-        """创建有声书项目（不包含后台任务调度）。"""
         logger.info(
-            "🎙️ 用户 %s 创建有声书项目: project_id=%s",
+            "创建有声书项目 user_id=%s project_id=%s",
             self.current_user.id,
             request.project_id,
         )
@@ -197,9 +230,10 @@ class AudiobookAppService:
         self._validate_chapters(project.id, request.chapter_ids)
 
         # 3. 构建 voice_mapping
-        voice_mapping_data = self._load_project_voice_mapping(project)
+        tts_model = (request.tts_model or "qwen3-tts-flash").strip()
+        voice_mapping_data = self._load_project_voice_mapping(project, tts_model)
         self._apply_request_voice_config(voice_mapping_data, request.voice_config)
-        self._auto_assign_voices(project.id, voice_mapping_data)
+        self._auto_assign_voices(project.id, voice_mapping_data, tts_model)
 
         # 4. 创建 AudiobookProject
         audiobook_project = AudiobookProject(
@@ -219,6 +253,12 @@ class AudiobookAppService:
         self.db.commit()
         self.db.refresh(audiobook_project)
 
-        logger.info("✅ 有声书项目创建成功: audiobook_project_id=%s", audiobook_project.id)
+        logger.info("有声书项目创建成功 audiobook_project_id=%s", audiobook_project.id)
+
+        # 5. 复用最近一次的剧本，除非用户稍后重新生成
+        try:
+            self._clone_existing_scripts(audiobook_project, request.chapter_ids)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("复用已有剧本失败：%s", exc)
 
         return audiobook_project

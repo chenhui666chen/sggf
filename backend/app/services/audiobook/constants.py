@@ -10,35 +10,36 @@ INSTRUCT_SPEAKER_IDS: set[str] = set()
 COSYVOICE_TO_QWEN = {
     # Male voices
     "longanyang": "Ethan",
-    "longanyun_v3": "Elias",
+    "longanyun_v3": "Vincent",
     "longanzhi_v3": "Ryan",
-    "longyichen_v3": "Dylan",
-    "longlaobo_v3": "Marcus",
-    "longhan_v3": "Roy",
-    "longyingxun_v3": "Peter",
+    "longyichen_v3": "Aiden",
+    "longlaobo_v3": "Eldric Sage",
+    "longhan_v3": "Vincent",
+    "longyingxun_v3": "Kai",
     "longanlang_v3": "Li",
     "longhouge_v3": "Nofish",
     "longshange_v3": "Eric",
-    "longjing": "Marcus",
+    "longjing": "Eldric Sage",
     "longshaohua": "Ethan",
-    "longfei": "Dylan",
+    "longfei": "Aiden",
     # Female voices
     "longwanjun_v3": "Cherry",
-    "longanhuan": "Sunny",
+    "longanhuan": "Bunny",
     "longanmin_v3": "Momo",
     "longanya_v3": "Katerina",
     "longanwen_v3": "Serena",
     "longlaoyi_v3": "Chelsie",
-    "longanrou_v3": "Jada",
-    "longanqin_v3": "Kiki",
+    "longanrou_v3": "Mochi",
+    "longanqin_v3": "Mia",
     "longhuhu_v3": "Momo",
     "longcaitou": "Cherry",
     "longxiaochun": "Jennifer",
-    "longxiaoxuan": "Sunny",
-    "longwan": "Serena",
+    "longxiaoxuan": "Bunny",
+    "longwan": "Bella",
 }
 
 
 def normalize_speaker_id(speaker_id: str) -> str:
     """Map legacy CosyVoice IDs to the new Qwen3-TTS speakers if needed."""
+    speaker_id = str(speaker_id).strip()
     return COSYVOICE_TO_QWEN.get(speaker_id, speaker_id)

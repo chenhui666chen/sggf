@@ -4,10 +4,13 @@
 追踪多Agent协作任务的执行状态
 """
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Callable
 from datetime import datetime
 from enum import Enum
 import uuid
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class TaskStatus(Enum):
@@ -76,6 +79,7 @@ class TaskInfo:
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
     metadata: Dict[str, Any] = field(default_factory=dict)
+    current_stage: Optional[StageType] = None
     
     def update_stage(self, stage: StageType, progress: float):
         """更新阶段进度"""
@@ -96,6 +100,7 @@ class TaskTracker:
     
     def __init__(self):
         self.tasks: Dict[str, TaskInfo] = {}
+        self._observers: List[Callable[[Dict[str, Any]], None]] = []
     
     def create_task(
         self,
@@ -123,14 +128,37 @@ class TaskTracker:
         )
         
         self.tasks[task_id] = task
+        self._notify(task_id)
         return task_id
+
+    def add_observer(self, callback: Callable[[Dict[str, Any]], None]) -> None:
+        """添加进度监听"""
+        if callback not in self._observers:
+            self._observers.append(callback)
+
+    def remove_observer(self, callback: Callable[[Dict[str, Any]], None]) -> None:
+        """移除进度监听"""
+        if callback in self._observers:
+            self._observers.remove(callback)
+
+    def _notify(self, task_id: str) -> None:
+        snapshot = self.get_task_status(task_id)
+        if not snapshot:
+            return
+        for callback in list(self._observers):
+            try:
+                callback(snapshot)
+            except Exception as exc:  # pragma: no cover
+                logger.warning("TaskTracker observer failed: %s", exc)
     
     def start_stage(self, task_id: str, stage: StageType):
         """开始某个阶段"""
         if task_id in self.tasks:
             self.tasks[task_id].stages[stage].start()
             self.tasks[task_id].status = TaskStatus.RUNNING
+            self.tasks[task_id].current_stage = stage
             self.tasks[task_id].updated_at = datetime.now().isoformat()
+            self._notify(task_id)
     
     def complete_stage(
         self,
@@ -141,20 +169,25 @@ class TaskTracker:
         """完成某个阶段"""
         if task_id in self.tasks:
             self.tasks[task_id].stages[stage].complete(metrics)
+            self.tasks[task_id].current_stage = stage
             self.tasks[task_id].updated_at = datetime.now().isoformat()
+            self._notify(task_id)
     
     def fail_stage(self, task_id: str, stage: StageType, error: str):
         """标记阶段失败"""
         if task_id in self.tasks:
             self.tasks[task_id].stages[stage].fail(error)
             self.tasks[task_id].status = TaskStatus.FAILED
+            self.tasks[task_id].current_stage = stage
             self.tasks[task_id].updated_at = datetime.now().isoformat()
+            self._notify(task_id)
     
     def complete_task(self, task_id: str):
         """完成任务"""
         if task_id in self.tasks:
             self.tasks[task_id].status = TaskStatus.COMPLETED
             self.tasks[task_id].updated_at = datetime.now().isoformat()
+            self._notify(task_id)
     
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         """获取任务状态"""
@@ -167,6 +200,7 @@ class TaskTracker:
             "chapter_id": task.chapter_id,
             "status": task.status.value,
             "overall_progress": task.get_overall_progress(),
+            "current_stage": task.current_stage.value if task.current_stage else None,
             "stages": {
                 stage.value: {
                     "status": progress.status.value,

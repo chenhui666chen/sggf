@@ -78,6 +78,16 @@ class TTSPreviewRequest(BaseModel):
     model: Optional[str] = "qwen3-tts-flash"  # TTS 模型（默认 qwen3-tts-flash）
 
 
+class CosyVoiceCloneCreateRequest(BaseModel):
+    """CosyVoice v3-plus 声音复刻请求（需要公网可访问的音频 URL）。"""
+
+    # 用户希望显示的命名（可包含中文）。服务端会基于该名称自动生成合法 prefix。
+    name: str
+    url: str
+    # 向后兼容：允许老版本前端直接传 prefix
+    prefix: Optional[str] = None
+
+
 class AudiobookTaskStatus(BaseModel):
     """Celery 任务状态响应"""
     celery_task_id: Optional[str]

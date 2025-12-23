@@ -12,11 +12,12 @@ import asyncio
 import logging
 import time
 import math
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
 from pathlib import Path
+from dataclasses import asdict, is_dataclass
 
 from .script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructure
-from .voice_manager import VoiceManager
+from .voice_manager_factory import create_voice_manager
 from .tts_engine import TTSEngine
 from .audio_mixer import AudioMixer
 
@@ -60,6 +61,7 @@ class AudiobookEngine:
         max_concurrent: int = 1,  # 降低并发，避免阿里云限流（从5改为1）
         llm_client=None,  # LLM客户端（用于专业Agent + 智能音色推断）
         tts_model: str = "qwen3-tts-flash",  # TTS 模型（qwen3-tts-flash / cosyvoice-v3-plus）
+        progress_handler: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> None:
         # 检查LLM客户端
         if llm_client is None:
@@ -67,6 +69,8 @@ class AudiobookEngine:
         
         # 初始化任务追踪和消息总线
         self.task_tracker = TaskTracker()
+        self._progress_handler: Optional[Callable[[Dict[str, Any]], None]] = progress_handler
+        self.task_tracker.add_observer(self._handle_task_progress)
         self.message_bus = MessageBus()
         
         # 初始化专业Agent
@@ -84,7 +88,7 @@ class AudiobookEngine:
         # - 用户已配置的角色 → 使用用户配置
         # - 用户未配置的角色 → LLM智能推断 (如果有llm_client)
         # - LLM推断失败 → 增强版规则推断
-        self.voice_manager = VoiceManager(llm_client=llm_client)
+        self.voice_manager = create_voice_manager(tts_model=tts_model, llm_client=llm_client)
         self.tts_engine = TTSEngine(
             enable_cache=enable_cache,
             max_concurrent=max_concurrent,
@@ -104,6 +108,18 @@ class AudiobookEngine:
         self.emotion_analyzer = EmotionCurveAnalyzer()
         
         logger.info("🎶 有声书生成引擎初始化完成")
+    
+    def set_progress_handler(self, handler: Optional[Callable[[Dict[str, Any]], None]]) -> None:
+        """设置外部进度回调（用于持久化阶段状态）"""
+        self._progress_handler = handler
+
+    def _handle_task_progress(self, snapshot: Dict[str, Any]) -> None:
+        if not self._progress_handler:
+            return
+        try:
+            self._progress_handler(snapshot)
+        except Exception as exc:  # pragma: no cover - 避免进度回调影响主流程
+            logger.warning("⚠️ 分发任务进度失败: %s", exc)
     
     def apply_audio_fx_config(self, audio_fx: Dict[str, Any]) -> None:
         """应用项目级音效/BGM 配置（来自 Project.audio_config['audio_fx']）。"""
@@ -507,12 +523,25 @@ class AudiobookEngine:
                     elif seg.type == "narration":
                         narration_count += 1
             
+            script_segments_payload: List[Dict[str, Any]] = []
+            for seg in script_segments:
+                if is_dataclass(seg):
+                    script_segments_payload.append(asdict(seg))
+                elif isinstance(seg, dict):
+                    script_segments_payload.append(seg)
+                else:
+                    script_segments_payload.append(getattr(seg, "__dict__", seg))
+
+            quality_report_payload = asdict(quality_report) if quality_report else None
+
             result = {
                 "success": True,
                 "task_id": task_id,  # 返回任务ID
                 "audio_data": final_audio,
                 "duration": audio_info.get("duration_seconds", 0),
                 "file_size": len(final_audio),
+                "script_segments_payload": script_segments_payload,
+                "quality_report_detail": quality_report_payload,
                 "stats": {
                     "generation_time": f"{elapsed_time:.1f}秒",
                     "mode": "专业Agent模式",
@@ -812,7 +841,8 @@ class AudiobookEngine:
         # 🆕 检查是否启用智能音量平衡
         audio_fx = getattr(self, "_audio_fx_config", None) or {}
         intelligent_balance = audio_fx.get("intelligent_balance", False)
-        base_bgm_volume_db = audio_fx.get("base_bgm_volume", -30)  # 默认-30dB
+        # 将默认配乐基准音量从 -30dB 再降低到 -36dB，避免喧宾夺主
+        base_bgm_volume_db = audio_fx.get("base_bgm_volume", -36)
         
         for item in timeline_items:
             file_ref = item.get("file")
@@ -844,6 +874,9 @@ class AudiobookEngine:
                 relative = volume_val / 0.2
                 volume_adjust_db = 20 * math.log10(relative) if relative > 0 else -40
                 bgm_volume_offset = base_gain + volume_adjust_db
+
+            # 统一再降低 3dB，进一步减弱BGM存在感
+            bgm_volume_offset -= 3
             
             if not file_ref:
                 continue

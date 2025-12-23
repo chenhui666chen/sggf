@@ -1,4 +1,4 @@
-"""
+﻿"""
 音色管理器 - 智能分配与管理角色音色
 
 核心功能：
@@ -13,8 +13,124 @@ from dataclasses import dataclass, field, asdict
 import json
 
 from .constants import INSTRUCT_SPEAKER_IDS, normalize_speaker_id
+from .voice_catalog import load_voice_catalog
 
 logger = logging.getLogger(__name__)
+
+STYLE_TRAIT_HINTS = {
+    "gentle": ("young", "gentle"),
+    "cute": ("young", "energetic"),
+    "bright": ("young", "energetic"),
+    "lively": ("young", "energetic"),
+    "fast": ("young", "energetic"),
+    "soft": ("adult", "gentle"),
+    "smooth": ("adult", "calm"),
+    "calm": ("adult", "calm"),
+    "warm": ("adult", "gentle"),
+    "elegant": ("adult", "calm"),
+    "energetic": ("adult", "energetic"),
+    "powerful": ("adult", "serious"),
+    "magnetic": ("adult", "calm"),
+    "clear": ("adult", "serious"),
+    "soothing": ("adult", "gentle"),
+    "elder": ("elder", "calm"),
+    "dialect": ("adult", "dialect"),
+}
+
+VOICE_PROFILE_OVERRIDES: Dict[str, Dict[str, Any]] = {
+    "Cherry": {"age_group": "young"},
+    "Momo": {"age_group": "young"},
+    "Bunny": {"age_group": "young", "personality": "energetic"},
+    "Kai": {"personality": "energetic"},
+    "Aiden": {"personality": "energetic"},
+    "Vincent": {"personality": "calm"},
+    "Mia": {"personality": "energetic"},
+    "Eldric Sage": {"age_group": "elder", "personality": "serious"},
+    # 方言音色（官方 voice 参数）
+    "Jada": {"personality": "dialect"},
+    "Dylan": {"personality": "dialect"},
+    "Li": {"personality": "dialect"},
+    "Marcus": {"personality": "dialect"},
+    "Roy": {"personality": "dialect"},
+    "Peter": {"personality": "dialect"},
+    "Sunny": {"personality": "dialect"},
+    "Eric": {"personality": "dialect"},
+    "Rocky": {"personality": "dialect"},
+    "Kiki": {"personality": "dialect"},
+}
+
+LEGACY_PRESET_ALIASES = {
+    "male_young_energetic": "Ethan",
+    "male_young_gentle": "Vincent",
+    "male_adult_calm": "Ryan",
+    "male_adult_energetic": "Aiden",
+    "male_elder_wise": "Eldric Sage",
+    "male_warm": "Vincent",
+    "male_customer_service": "Kai",
+    "male_refreshing": "Kai",
+    "male_monkey": "Nofish",
+    "male_narrator": "Ryan",
+    "male_villain_sinister": "Aiden",
+    "female_villain_cold": "Jennifer",
+    "female_villain_cunning": "Katerina",
+    "female_young_gentle": "Cherry",
+    "female_young_energetic": "Bunny",
+    "female_young_cute": "Momo",
+    "female_adult_elegant": "Bella",
+    "female_adult_intellectual": "Vivian",
+    "female_capable": "Jennifer",
+    "female_elder": "Chelsie",
+    "female_intimate": "Mochi",
+    "female_lively": "Mia",
+    "female_child": "Momo",
+}
+
+_CATALOG = load_voice_catalog()
+_VOICE_ENTRIES = _CATALOG["voices_by_id"]
+
+
+def _derive_traits(style: str) -> Tuple[str, str]:
+    style = (style or "").lower()
+    return STYLE_TRAIT_HINTS.get(style, ("adult", "calm"))
+
+
+def _build_voice_preset(voice_id: str) -> Dict[str, Any]:
+    voice_entry = _VOICE_ENTRIES[voice_id]
+    overrides = VOICE_PROFILE_OVERRIDES.get(voice_id, {})
+    style = voice_entry.get("style", "calm")
+    age_group, personality = _derive_traits(style)
+    gender = overrides.get("gender", voice_entry.get("gender", "neutral") or "neutral").lower()
+    defaults = voice_entry.get("default_params", {})
+    return {
+        "tts_speaker_id": voice_entry["speaker"],
+        "gender": gender,
+        "age_group": overrides.get("age_group", age_group),
+        "personality": overrides.get("personality", personality),
+        "pitch_base": int(overrides.get("pitch_base", defaults.get("pitch", 50))),
+        "speed_base": float(overrides.get("speed_base", defaults.get("speed", 1.0))),
+        "volume_base": int(overrides.get("volume_base", defaults.get("volume", 50))),
+        "description": overrides.get("description", voice_entry.get("description", "")),
+        "default_emotion": overrides.get("default_emotion", "neutral"),
+    }
+
+_BASE_PRESET_VOICES: Dict[str, Dict[str, Any]] = {
+    voice_id: _build_voice_preset(voice_id)
+    for voice_id in _VOICE_ENTRIES
+}
+
+_PRESET_VOICES: Dict[str, Dict[str, Any]] = dict(_BASE_PRESET_VOICES)
+for alias, target in LEGACY_PRESET_ALIASES.items():
+    target_cfg = _BASE_PRESET_VOICES.get(target)
+    if not target_cfg:
+        continue
+    alias_cfg = dict(target_cfg)
+    alias_cfg["legacy_alias_of"] = target
+    _PRESET_VOICES[alias] = alias_cfg
+
+_SPEAKER_TO_PRESET: Dict[str, str] = {}
+for preset_id, cfg in _BASE_PRESET_VOICES.items():
+    key = cfg["tts_speaker_id"].lower()
+    _SPEAKER_TO_PRESET.setdefault(key, preset_id)
 
 
 @dataclass
@@ -33,11 +149,11 @@ class VoiceProfile:
     pitch_base: int = 50  # 基础音高 0-100
     speed_base: float = 1.0  # 基础语速 0.5-2.0
     volume_base: int = 50  # 基础音量 0-100
-    default_emotion: str = "neutral"  # 🆕 默认情感（反派音色专用）
-    is_villain_voice: bool = False  # 🆕 是否为反派音色（自动加大情绪张力）
+    default_emotion: str = "neutral"  # 默认情感（反派音色专用）
+    is_villain_voice: bool = False  # 是否为反派音色（自动加大情绪张力）
     
     # 情感参数映射（扩展版 - 在阿里云API限制内最大化情感表现力）
-    # pitch范围: 0-100 (基础50), offset范围: -50到+50 (对应API的0.5-2.0倍率)
+    # pitch范围: 0-100 (基础50), offset范围: -50~+50 (对应API的0.5-2.0倍率)
     # speed范围: 0.5-2.0倍率, volume范围: 0-100
     emotion_adjustments: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
         # === 基础情感（6种） ===
@@ -62,11 +178,7 @@ class VoiceProfile:
     })
     
     def get_tts_params(self, emotion: str = "") -> Dict[str, Any]:
-        """??????TTS????????????????????????????????????
-        
-        ???? ?????????????????????????????????default_emotion????????????????????????????????????????????????
-        """
-        # ???? ??????????????????????????????????????????
+        """生成传递给TTS接口的参数。"""
         if not emotion or emotion == "neutral":
             emotion = self.default_emotion
         
@@ -74,7 +186,6 @@ class VoiceProfile:
         is_instruct_voice = self.tts_speaker_id in INSTRUCT_SPEAKER_IDS
         use_instruct_mode = bool(is_instruct_voice and emotion and emotion != "neutral")
         
-        # ????????????????????????????????? + ???????????????
         volume_offset = adjustment.get("volume_offset", 0)
         final_volume = max(0, min(100, self.volume_base + volume_offset))
         
@@ -92,24 +203,22 @@ class VoiceProfile:
             "pitch": pitch_value,
             "speed": speed_value,
             "volume": final_volume,
-            # ???? ???????????????????????????????????????
             "pause_before": self._get_pause_before(emotion),
             "pause_after": self._get_pause_after(emotion),
             "character_base_pitch": max(0, min(100, self.pitch_base)),
-            "character_base_speed": max(0.5, min(2.0, self.speed_base))
+            "character_base_speed": max(0.5, min(2.0, self.speed_base)),
         }
         
         if use_instruct_mode:
             params["use_instruct_mode"] = True
         
-        # ???? ???????????????TTS??????
         try:
             logger.debug(
-                f"   ???? get_tts_params??????: speaker={params.get('speaker')}, "
+                f"get_tts_params -> speaker={params.get('speaker')}, "
                 f"pitch={params.get('pitch')}, speed={params.get('speed'):.2f}, volume={params.get('volume')}"
             )
         except Exception:
-            pass  # ??????????????????
+            pass
         
         return params
 
@@ -150,269 +259,10 @@ class VoiceProfile:
 
 
 class VoiceManager:
-    """
-    音色库管理器
-    
-    职责：
-    1. 管理预设音色库
-    2. 为角色智能分配音色
-    3. 保证音色一致性
-    """
-    
-    # 预设音色库（基于阿里云TTS音色）
-    # 注意：
-    # - Qwen3-TTS：官方音色 >20 种，原生支持情感参数
-    # - CosyVoice3：零样本克隆（保留为精品模式，可选）
-    # - 优先使用 Qwen3-TTS（免费 100 万字符/月）
-    # 预设音色库（基于阿里云 Qwen3 官方音色列表 + 旧 CosyVoice ID 映射）
-    # 参考文档：https://bailian.console.aliyun.com/?tab=doc#/doc/?type=model&url=2879134
-    # 使用官方支持的音色 ID，确保完全兼容
-    PRESET_VOICES = {
-        # === 男性音色（10种） ===
-        "male_young_energetic": {
-            "tts_speaker_id": "Ethan",  # 阳光大男孩
-            "gender": "male",
-            "age_group": "young",
-            "personality": "energetic",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "年轻男主（阳光）"
-        },
-        "male_young_gentle": {
-            "tts_speaker_id": "Elias",  # 居家暖男
-            "gender": "male",
-            "age_group": "young",
-            "personality": "gentle",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "年轻男主（温柔）"
-        },
-        "male_adult_calm": {
-            "tts_speaker_id": "Ryan",  # 睿智轻熟男
-            "gender": "male",
-            "age_group": "adult",
-            "personality": "calm",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "成熟男性（沉稳）"
-        },
-        "male_adult_energetic": {
-            "tts_speaker_id": "Dylan",  # 洒脱活力男
-            "gender": "male",
-            "age_group": "adult",
-            "personality": "energetic",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "成熟男性（豪迈）"
-        },
-        "male_elder_wise": {
-            "tts_speaker_id": "Marcus",  # 沧桑岁月爷
-            "gender": "male",
-            "age_group": "elder",
-            "personality": "calm",
-            "pitch_base": 43,  # 降低音高到0.86倍（43/50=0.86），让老年音色更明显
-            "speed_base": 0.92,  # 降低语速到0.92倍，更符合老年人说话节奏
-            "volume_base": 52,  # 稍微提高音量，避免声音过小
-            "description": "长者（睿智）"
-        },
-        "male_warm": {
-            "tts_speaker_id": "Roy",  # 温暖痴情男
-            "gender": "male",
-            "age_group": "adult",
-            "personality": "gentle",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "暖男（痴情）"
-        },
-        "male_customer_service": {
-            "tts_speaker_id": "Peter",  # 年轻青涩男
-            "gender": "male",
-            "age_group": "young",
-            "personality": "gentle",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "书生（青涩）"
-        },
-        "male_refreshing": {
-            "tts_speaker_id": "Li",  # 清爽利落男
-            "gender": "male",
-            "age_group": "young",
-            "personality": "energetic",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "武将（利落）"
-        },
-        "male_monkey": {
-            "tts_speaker_id": "Nofish",  # 经典猴哥
-            "gender": "male",
-            "age_group": "young",
-            "personality": "energetic",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "特色（猴哥）"
-        },
-        "male_narrator": {
-            "tts_speaker_id": "Eric",  # 原味陕北男
-            "gender": "male",
-            "age_group": "adult",
-            "personality": "calm",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "旁白（方言）"
-        },
-        
-        # === 特色音色（3种） ===
-        "male_villain_sinister": {
-            "tts_speaker_id": "Roy",  # 基于温暖痴情男
-            "gender": "male",
-            "age_group": "adult",
-            "personality": "calm",  # 沉稳
-            "pitch_base": 45,  # 降低音高10%
-            "speed_base": 0.92,  # 减慢语速8%
-            "volume_base": 48,  # 降低音量，更沉稳
-            "description": "成熟谋士（沉稳）",
-            "default_emotion": "neutral"  # 默认中性情感
-        },
-        "female_villain_cold": {
-            "tts_speaker_id": "Jennifer",  # 基于利落从容女
-            "gender": "female",
-            "age_group": "adult",
-            "personality": "calm",  # 冷静
-            "pitch_base": 45,  # 降低音高10%，更沉稳
-            "speed_base": 0.90,  # 减慢语速10%
-            "volume_base": 50,
-            "description": "冷静御姐（高雅）",
-            "default_emotion": "neutral"  # 默认中性情感
-        },
-        "female_villain_cunning": {
-            "tts_speaker_id": "Katerina",  # 基于高雅气质女
-            "gender": "female",
-            "age_group": "adult",
-            "personality": "elegant",  # 优雅
-            "pitch_base": 48,  # 略降低音高4%
-            "speed_base": 0.95,  # 略减慢语速5%
-            "volume_base": 48,
-            "description": "优雅名媛（睿智）",
-            "default_emotion": "neutral"  # 默认中性情感
-        },
-        
-        # === 女性音色（10种） ===
-        "female_young_gentle": {
-            "tts_speaker_id": "Cherry",  # 细腻柔声女
-            "gender": "female",
-            "age_group": "young",
-            "personality": "gentle",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "年轻女主（温柔）"
-        },
-        "female_young_energetic": {
-            "tts_speaker_id": "Sunny",  # 欢脱元气女
-            "gender": "female",
-            "age_group": "young",
-            "personality": "energetic",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "年轻女主（活泼）"
-        },
-        "female_young_cute": {
-            "tts_speaker_id": "Momo",  # 清纯萝莉女
-            "gender": "female",
-            "age_group": "young",
-            "personality": "gentle",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "少女（可爱）"
-        },
-        "female_adult_elegant": {
-            "tts_speaker_id": "Katerina",  # 高雅气质女
-            "gender": "female",
-            "age_group": "adult",
-            "personality": "calm",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "成熟女性（优雅）"
-        },
-        "female_adult_intellectual": {
-            "tts_speaker_id": "Serena",  # 优雅知性女
-            "gender": "female",
-            "age_group": "adult",
-            "personality": "calm",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "成熟女性（知性）"
-        },
-        "female_capable": {
-            "tts_speaker_id": "Jennifer",  # 利落从容女
-            "gender": "female",
-            "age_group": "adult",
-            "personality": "cold",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "女强人（干练）"
-        },
-        "female_elder": {
-            "tts_speaker_id": "Chelsie",  # 烟火从容阿姨
-            "gender": "female",
-            "age_group": "elder",
-            "personality": "gentle",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "长者（慈祥）"
-        },
-        "female_intimate": {
-            "tts_speaker_id": "Jada",  # 温柔闺蜜女
-            "gender": "female",
-            "age_group": "young",
-            "personality": "gentle",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "闺蜜（亲切）"
-        },
-        "female_lively": {
-            "tts_speaker_id": "Kiki",  # 亲和活泼女
-            "gender": "female",
-            "age_group": "young",
-            "personality": "energetic",
-            "pitch_base": 50,
-            "speed_base": 1.0,
-            "volume_base": 50,
-            "description": "才女（活泼）"
-        },
-        "female_child": {
-            "tts_speaker_id": "Momo",  # 天真烂漫女童
-            "gender": "female",
-            "age_group": "child",
-            "personality": "energetic",
-            "pitch_base": 65,  # 提高音高到1.3倍（65/50=1.3），让童声更明显
-            "speed_base": 1.05,  # 略加快语速，符合儿童活泼特质
-            "volume_base": 52,  # 略提高音量，让声音更清晰
-            "description": "童声（天真）"
-        }
-    }
+    PRESET_VOICES = _PRESET_VOICES
+    BASE_PRESET_VOICES = _BASE_PRESET_VOICES
+    SPEAKER_TO_PRESET = _SPEAKER_TO_PRESET
 
-    SPEAKER_TO_PRESET = {
-        cfg["tts_speaker_id"].lower(): preset_id
-        for preset_id, cfg in PRESET_VOICES.items()
-    }
-    
     def __init__(self, llm_client=None):
         """
         Args:
@@ -510,7 +360,7 @@ class VoiceManager:
         personality = str(character_info.get("personality", "calm")).lower()
         role_type = str(character_info.get("role_type", "")).lower()
         
-        # 🎭 反派角色检测：优先分配高张力的 Ethan/Sunny
+        # 🎭 反派角色检测：优先分配高张力的 Ethan/Bunny
         villain_keywords = ["反派", "恶人", "反角", "敌人", "boss", "villain", "enemy", "antagonist"]
         villain_personalities = ["cold", "evil", "sinister", "cruel", "ruthless", "domineering", "cunning"]
         
@@ -521,19 +371,21 @@ class VoiceManager:
         
         if is_villain:
             logger.info(f"🎭 检测到反派角色，优先使用高张力音色 (role_type={role_type}, personality={personality})")
-            # 根据性别锁定 Ethan/Sunny，并由情感映射增强张力
+            # 根据性别锁定 Ethan/Bunny，并由情感映射增强张力
             # TTS引擎会自动为这些音色添加 angry/disgusted 情感
             if gender == "male":
-                logger.info("🎭 为男性反派分配: male_young_energetic (Ethan)")
-                return "male_young_energetic"  # Ethan，支持angry/disgusted情感
+                logger.info("🎭 为男性反派分配: Ethan")
+                return "Ethan"  # Ethan，支持angry/disgusted情感
             elif gender == "female":
-                logger.info("🎭 为女性反派分配: female_young_energetic (Sunny)")
-                return "female_young_energetic"  # Sunny，支持angry/disgusted情感
+                logger.info("🎭 为女性反派分配: Bunny")
+                return "Bunny"  # Sunny，支持angry/disgusted情感
         
         # 候选音色列表
         candidates = []
             
         for voice_id, voice_config in self.PRESET_VOICES.items():
+            if voice_config.get("legacy_alias_of"):
+                continue
             # 跳过旁白音色
             if voice_id == "male_narrator":
                 continue
@@ -567,16 +419,22 @@ class VoiceManager:
             # 优先：如果已知性别，则在全量音色中按性别挑一个（不看已使用记录），保证性别一致性
             if gender in ("male", "female"):
                 for voice_id, voice_config in self.PRESET_VOICES.items():
+                    if voice_config.get("legacy_alias_of"):
+                        continue
+                    if voice_config.get("legacy_alias_of"):
+                        continue
                     if voice_id == "male_narrator":
                         continue
                     if voice_config["gender"] == gender:
                         return voice_id
             # 降级：返回任意未使用的音色
-            for voice_id in self.PRESET_VOICES:
+            for voice_id, voice_config in self.PRESET_VOICES.items():
+                if voice_config.get("legacy_alias_of"):
+                    continue
                 if voice_id not in self.used_voice_ids and voice_id != "male_narrator":
                     return voice_id
             # 最后降级：返回默认音色
-            return "male_young_energetic"
+            return "Ethan"
     
     def _infer_traits_from_name(self, character_name: str) -> Dict[str, Any]:
         """
@@ -910,3 +768,4 @@ class VoiceManager:
             "age_distribution": age_dist,
             "characters": list(self.character_voices.keys())
         }
+

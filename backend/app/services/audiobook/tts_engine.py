@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import logging
 import random
+import os
 from typing import Dict, Any, Optional, List, Callable
 import io
 from dataclasses import dataclass
@@ -21,15 +22,19 @@ from enum import Enum
 
 from .constants import INSTRUCT_SPEAKER_IDS, normalize_speaker_id
 
+logger = logging.getLogger(__name__)
+
+# Qwen3-TTS-Flash：stable 与 snapshot 支持的音色集合不同。
+# 默认指向 49 音色的快照版（与文档“qwen3-tts-flash-2025-11-27 音色列表”一致）。
+QWEN3_TTS_FLASH_MODEL_ID = os.getenv("QWEN3_TTS_FLASH_MODEL_ID", "qwen3-tts-flash-2025-11-27")
+
 # 导入监控模块
 try:
     from app.services.monitoring import metrics_collector
     METRICS_ENABLED = True
 except ImportError:
     METRICS_ENABLED = False
-    logger.warning("⚠️ 监控模块未安装，指标收集已禁用")
-
-logger = logging.getLogger(__name__)
+    logger.warning("监控模块未安装，指标收集已禁用")
 
 
 class TTSProvider(str, Enum):
@@ -41,6 +46,14 @@ class TTSProvider(str, Enum):
     # AZURE = "azure"      # 微软 Azure TTS
     # GOOGLE = "google"    # Google Cloud TTS
     # OPENAI = "openai"    # OpenAI TTS
+
+# 前端显示用模型名 -> DashScope 实际模型 ID
+ALIYUN_MODEL_ALIASES: Dict[str, str] = {
+    # Qwen3-TTS Flash：应用侧保持使用 qwen3-tts-flash，提供商侧可切换到具体快照版本。
+    "qwen3-tts-flash": QWEN3_TTS_FLASH_MODEL_ID,
+    # 预留高阶版本；若未来官方启用真正的 qwen3-tts-plus，可在此更新
+    "qwen3-tts-plus": "qwen3-tts-plus",
+}
 
 
 @dataclass
@@ -108,7 +121,7 @@ class TTSEngine:
     TTS引擎 - 支持多提供商 + 智能重试
     
     特性：
-    1. 主提供商：阿里云 CosyVoice v3-flash（高性价比，优质音质）
+    1. 主提供商：阿里云 Qwen3-TTS Flash（高性价比，适合批量生成）
     2. 备用提供商：可配置（未来扩展）
     3. 智能重试：指数退避 + 随机抖动
     4. 故障转移：主提供商失败自动切换备用
@@ -170,13 +183,13 @@ class TTSEngine:
             #     memory_max_size=200  # 缓存200个音频片段
             # )
             self.cache = None
-            logger.info("⚠️ 缓存功能暂时禁用")
+            logger.info("缓存功能暂时禁用")
         else:
             self.cache = None
         
         provider_list = [self.primary_provider.value] + [p.value for p in self.fallback_providers]
         logger.info(
-            f"✅ TTS引擎初始化: model={model}, cache={enable_cache}, concurrent={max_concurrent}\n"
+            f"TTS引擎初始化: model={model}, cache={enable_cache}, concurrent={max_concurrent}\n"
             f"   提供商: {' -> '.join(provider_list)} (主提供商 -> 备用)"
         )
     
@@ -204,39 +217,31 @@ class TTSEngine:
                 labels={"provider": self.primary_provider.value}
             )
         
-        # 预处理文本：对支持 Instruct 的音色自动注入情感指令
+        # 预处理文本：保留钩子（当前不向文本注入额外指令）
         effective_text = self._build_instruct_text(text, voice_params, emotion)
         
-        # 📦 调试：输出接收到的voice_params
-        logger.info(f"📦 TTS引擎接收参数: {voice_params}")
+        # 调试：输出接收到的 voice_params
+        logger.info("TTS引擎接收参数: %s", voice_params)
         
-        # 🆕 将emotion添加到voice_params中，供_call_aliyun_tts使用
+        # 将 emotion 添加到 voice_params 中，供 _call_aliyun_tts 使用
         voice_params_with_emotion = voice_params.copy()
-        
-            # 🎭 反派角色智能情感：如果使用Ethan/Sunny且情感为neutral，自动应用angry情感
-        speaker_id = voice_params.get("speaker", "")
-        villain_voice_ids = ["Ethan", "Sunny"]  # 支持Instruct的音色，用于反派角色
-        
-        if speaker_id in villain_voice_ids and (emotion == "neutral" or not emotion):
-            logger.info(f"🎭 检测到反派音色 [{speaker_id}] + neutral情感，自动应用 'angry' 情感")
-            emotion = "angry"  # 自动调整为愤怒情感
         
         # 🔥 关键修复：情感词映射（将不支持的情感转换为阿里云TTS支持的情感）
         # 阿里云Instruct只支持有限的中文情感词，不支持的词会触发428错误
         EMOTION_MAPPING = {
-            # 不支持的英文情感 → 支持的中文情感
-            "focused": "neutral",      # 专注 → 中性（不支持）
-            "solemn": "neutral",       # 庄重 → 中性（不支持）
-            "tender": "neutral",       # 温柔 → 中性（不支持）
-            "gentle": "neutral",       # 轻柔 → 中性（不支持）
-            "serious": "neutral",      # 严肃 → 中性（不支持）
-            "nervous": "tense",        # 紧张不安 → 紧张
-            "fearful": "tense",        # 恐惧 → 紧张
-            "surprised": "happy",      # 惊讶 → 开心（excited不支持）
-            "excited": "happy",        # 🔥 兴奋 → 开心（excited触发428错误）
-            "disgusted": "angry",      # 厌恶 → 愤怒
-            "whisper": "neutral",      # 低语 → 中性（不支持）
-            "shout": "angry",          # 呼喃 → 愤怒
+            # 不支持的英文情感 -> 支持的中文情感
+            "focused": "neutral",      # 专注 -> 中性（不支持）
+            "solemn": "neutral",       # 庄重 -> 中性（不支持）
+            "tender": "neutral",       # 温柔 -> 中性（不支持）
+            "gentle": "neutral",       # 轻柔 -> 中性（不支持）
+            "serious": "neutral",      # 严肃 -> 中性（不支持）
+            "nervous": "tense",        # 紧张不安 -> 紧张
+            "fearful": "tense",        # 恐惧 -> 紧张
+            "surprised": "happy",      # 惊讶 -> 开心（excited不支持）
+            "excited": "happy",        # 兴奋 -> 开心（excited 可能触发参数错误）
+            "disgusted": "angry",      # 厌恶 -> 愤怒
+            "whisper": "neutral",      # 低语 -> 中性（不支持）
+            "shout": "angry",          # 呼喃 -> 愤怒
             # 支持的情感保持不变
             "neutral": "neutral",
             "happy": "happy",
@@ -250,7 +255,12 @@ class TTSEngine:
         original_emotion = emotion
         emotion = EMOTION_MAPPING.get(emotion, "neutral")
         if original_emotion != emotion:
-            logger.warning(f"⚠️ 情感映射: {original_emotion} → {emotion} (阿里云TTS不支持 '{original_emotion}')") 
+            logger.warning(
+                "情感映射: %s -> %s (阿里云 TTS 不支持 '%s')",
+                original_emotion,
+                emotion,
+                original_emotion,
+            )
         
         voice_params_with_emotion["emotion"] = emotion
         
@@ -273,7 +283,7 @@ class TTSEngine:
         if self.cache:
             cached_audio = await self.cache.get(cache_key)
             if cached_audio:
-                logger.debug(f"🎯 缓存命中: {effective_text[:20]}...")
+                logger.debug("缓存命中: %s...", effective_text[:20])
                 self.cost_tracker.add_segment(len(effective_text), is_cached=True)
                 # 缓存的是base64字符串，需要解码
                 import base64
@@ -322,8 +332,8 @@ class TTSEngine:
         segments: List[Dict[str, Any]],
         batch_size: int = 10,  # 每批处理数量
         batch_interval: int = 0,  # 批次间隔（秒）- 优化：取消节流等待
-        debug_save_segments: bool = False,  # 🔧 调试：是否保存每个片段的原始音频
-        debug_output_dir: Optional[str] = None  # 🔧 调试：保存目录
+        debug_save_segments: bool = False,  # 调试：是否保存每个片段的原始音频
+        debug_output_dir: Optional[str] = None  # 调试：保存目录
     ) -> List[bytes]:
         """
         批量合成（分批处理，避免阿里云配额限制）
@@ -341,8 +351,8 @@ class TTSEngine:
         print(f"[TTS] Starting batch synthesis: {total} segments")
         print(f"      Batch strategy: {batch_size} per batch, {batch_interval}s interval")
         print(f"{'='*70}\n")
-        logger.info(f"🎙️ 开始批量TTS合成: {total} 个片段")
-        logger.info(f"   📦 分批策略: 每批{batch_size}个，批次间隔{batch_interval}秒")
+        logger.info("开始批量TTS合成: %s 个片段", total)
+        logger.info("分批策略: 每批%s个，批次间隔%s秒", batch_size, batch_interval)
         
         # 分批处理
         audio_list = []
@@ -353,7 +363,13 @@ class TTSEngine:
             end_idx = min(start_idx + batch_size, total)
             batch_segments = segments[start_idx:end_idx]
             
-            logger.info(f"\n📦 批次 {batch_idx + 1}/{num_batches}: 处理片段 {start_idx + 1}-{end_idx}")
+            logger.info(
+                "批次 %s/%s: 处理片段 %s-%s",
+                batch_idx + 1,
+                num_batches,
+                start_idx + 1,
+                end_idx,
+            )
             
             # 串行处理当前批次（避免并发创建WebSocket连接）
             batch_results = []
@@ -367,7 +383,7 @@ class TTSEngine:
                     )
                     batch_results.append(result)
                 except Exception as e:
-                    logger.error(f"   ❌ 片段 {global_idx + 1} 异常: {e}")
+                    logger.error("片段 %s 异常: %s", global_idx + 1, e)
                     batch_results.append(Exception(str(e)))
             
             # 处理当前批次结果
@@ -375,27 +391,27 @@ class TTSEngine:
             for i, result in enumerate(batch_results):
                 global_idx = start_idx + i
                 if isinstance(result, Exception):
-                    logger.error(f"   ❌ 片段 {global_idx + 1} 失败: {result}")
+                    logger.error("片段 %s 失败: %s", global_idx + 1, result)
                     audio_list.append(b"")  # 空音频
                 elif result and len(result) > 0:
-                    logger.debug(f"   ✅ 片段 {global_idx + 1} 成功: {len(result)}字节")
+                    logger.debug("片段 %s 成功: %s字节", global_idx + 1, len(result))
                     audio_list.append(result)
                     batch_success += 1
                 else:
-                    logger.warning(f"   ⚠️ 片段 {global_idx + 1} 返回空")
+                    logger.warning("片段 %s 返回空", global_idx + 1)
                     audio_list.append(b"")
             
             logger.info(f"   批次完成: {batch_success}/{len(batch_segments)} 成功")
             
             # 批次间暂停（除了最后一批）
             if batch_idx < num_batches - 1:
-                logger.info(f"   ⏸️ 暂停{batch_interval}秒，避免触发配额限制...")
+                logger.info("暂停%s秒，避免触发配额限制...", batch_interval)
                 await asyncio.sleep(batch_interval)
         
         success_count = len([a for a in audio_list if a])
-        logger.info(f"\n✅ 批量合成完成: {success_count}/{total} 成功")
+        logger.info("批量合成完成: %s/%s 成功", success_count, total)
         
-        # 🔧 调试模式：保存每个片段的原始音频和文本
+        # 调试模式：保存每个片段的原始音频和文本
         if debug_save_segments and audio_list:
             from pathlib import Path
             
@@ -405,7 +421,7 @@ class TTSEngine:
                 debug_dir = Path("backend/data/tts_debug")
             
             debug_dir.mkdir(parents=True, exist_ok=True)
-            logger.info(f"\n🔧 [调试模式] 保存 TTS 片段到: {debug_dir}")
+            logger.info("[调试模式] 保存 TTS 片段到: %s", debug_dir)
             
             for i, (seg, audio_bytes) in enumerate(zip(segments, audio_list), start=1):
                 try:
@@ -426,13 +442,13 @@ class TTSEngine:
                             f"\n文本内容:\n{seg_text}\n",
                             encoding="utf-8"
                         )
-                        logger.info(f"   ✅ 片段 {i:03d}: {len(audio_bytes)}字节 → {audio_file.name}")
+                        logger.info("片段 %03d: %s字节 -> %s", i, len(audio_bytes), audio_file.name)
                     else:
-                        logger.warning(f"   ⚠️ 片段 {i:03d}: 空音频，跳过保存")
+                        logger.warning("片段 %03d: 空音频，跳过保存", i)
                 except Exception as e:
-                    logger.error(f"   ❌ 保存片段 {i:03d} 失败: {e}")
+                    logger.error("保存片段 %03d 失败: %s", i, e)
             
-            logger.info(f"🔧 [调试模式] 已保存 {len([a for a in audio_list if a])}/{total} 个片段")
+            logger.info("[调试模式] 已保存 %s/%s 个片段", len([a for a in audio_list if a]), total)
         
         return audio_list
     
@@ -459,13 +475,13 @@ class TTSEngine:
             if audio and len(audio) > 0:
                 return audio
             else:
-                logger.warning(f"⚠️ 主提供商 {self.primary_provider.value} 返回空音频")
+                logger.warning("主提供商 %s 返回空音频", self.primary_provider.value)
         except Exception as e:
-            logger.error(f"❌ 主提供商 {self.primary_provider.value} 失败: {e}")
+            logger.error("主提供商 %s 失败: %s", self.primary_provider.value, e)
         
         # 2. 尝试备用提供商
         for fallback_provider in self.fallback_providers:
-            logger.warning(f"🔄 尝试备用提供商: {fallback_provider.value}")
+            logger.warning("尝试备用提供商: %s", fallback_provider.value)
             
             # 📊 埋点：记录提供商切换
             if METRICS_ENABLED:
@@ -484,13 +500,13 @@ class TTSEngine:
                     voice_params
                 )
                 if audio and len(audio) > 0:
-                    logger.info(f"✅ 备用提供商 {fallback_provider.value} 成功")
+                    logger.info("备用提供商 %s 成功", fallback_provider.value)
                     return audio
             except Exception as e:
-                logger.error(f"❌ 备用提供商 {fallback_provider.value} 失败: {e}")
+                logger.error("备用提供商 %s 失败: %s", fallback_provider.value, e)
         
         # 3. 所有提供商失败
-        logger.error("❌ 所有 TTS 提供商均失败")
+        logger.error("所有 TTS 提供商均失败")
         return b""
     
     async def _call_provider(
@@ -523,7 +539,11 @@ class TTSEngine:
                 audio = await self._call_aliyun_tts(text, voice_params)
                 if audio and len(audio) > 0:
                     if attempt > 0:
-                        logger.info(f"✅ 重试成功 (attempt {attempt + 1}/{self.retry_config.max_retries})")
+                        logger.info(
+                            "重试成功 (attempt %s/%s)",
+                            attempt + 1,
+                            self.retry_config.max_retries,
+                        )
                         # 📊 埋点：记录重试成功
                         if METRICS_ENABLED:
                             metrics_collector.increment_counter(
@@ -536,8 +556,10 @@ class TTSEngine:
                     if attempt < self.retry_config.max_retries - 1:
                         delay = self.retry_config.calculate_delay(attempt)
                         logger.warning(
-                            f"⚠️ 返回空音频，等待 {delay:.1f}秒后重试 "
-                            f"(attempt {attempt + 1}/{self.retry_config.max_retries})"
+                            "返回空音频，等待 %.1f秒后重试 (attempt %s/%s)",
+                            delay,
+                            attempt + 1,
+                            self.retry_config.max_retries,
                         )
                         # 📊 埋点：记录重试次数
                         if METRICS_ENABLED:
@@ -563,9 +585,12 @@ class TTSEngine:
                 if is_retryable and attempt < self.retry_config.max_retries - 1:
                     delay = self.retry_config.calculate_delay(attempt)
                     logger.warning(
-                        f"⚠️ {type(e).__name__}: {error_str[:100]}, "
-                        f"等待 {delay:.1f}秒后重试 "
-                        f"(attempt {attempt + 1}/{self.retry_config.max_retries})"
+                        "%s: %s, 等待 %.1f秒后重试 (attempt %s/%s)",
+                        type(e).__name__,
+                        error_str[:100],
+                        delay,
+                        attempt + 1,
+                        self.retry_config.max_retries,
                     )
                     # 📊 埋点：记录重试次数
                     if METRICS_ENABLED:
@@ -577,7 +602,7 @@ class TTSEngine:
                     continue
                 else:
                     # 不可重试或超过最大重试次数
-                    logger.error(f"❌ 阿里云 TTS 失败: {e}")
+                    logger.error("阿里云 TTS 失败: %s", e)
                     # 📊 埋点：记录错误
                     if METRICS_ENABLED:
                         metrics_collector.increment_counter(
@@ -604,7 +629,7 @@ class TTSEngine:
         """
         # 验证文本
         if not text or not text.strip():
-            logger.warning("⚠️ 文本为空，跳过TTS")
+            logger.warning("文本为空，跳过TTS")
             return b""
             
         # 清理文本（仅移除危险字符，保留中文）
@@ -644,47 +669,73 @@ class TTSEngine:
                 cleaned_chars.append("控制字符")
             
             if cleaned_chars:
-                logger.debug(f"📝 文本清理: 移除了 {', '.join(cleaned_chars)} | 原始长度:{len(original_text)} → 清理后:{len(text)}")
+                logger.debug(
+                    "文本清理: 移除了 %s | 原始长度:%s -> 清理后:%s",
+                    ", ".join(cleaned_chars),
+                    len(original_text),
+                    len(text),
+                )
             else:
-                logger.debug(f"📝 文本清理: 长度变化 {len(original_text)} → {len(text)}")
+                logger.debug("文本清理: 长度变化 %s -> %s", len(original_text), len(text))
             
         # 再次验证
         if not text:
-            logger.warning("⚠️ 清理后文本为空，跳过TTS")
+            logger.warning("清理后文本为空，跳过TTS")
             return b""
             
         # 调试：打印文本内容（包括字符类型）
-        logger.info(f"📝 准备TTS文本: [{text[:50]}...] (长度:{len(text)}字)")
+        logger.info("准备TTS文本: [%s...] (长度:%s字)", text[:50], len(text))
         # 输出前20个字符的Unicode编码
         char_codes = ', '.join([f"{ord(c):04x}" for c in text[:20]])
-        logger.debug(f"🔍 Unicode编码: {char_codes}")
+        logger.debug("Unicode编码: %s", char_codes)
             
         if len(text) > 2000:  # 官方限制：同步调用最套2000字符
-            logger.warning(f"⚠️ 文本过长({len(text)}字符)，截断到2000字符")
+            logger.warning("文本过长(%s字符)，截断到2000字符", len(text))
             text = text[:2000]
             
         import dashscope
-        from dashscope.audio.tts_v2 import SpeechSynthesizer, AudioFormat
             
         # 确保API Key已配置
         import os
         api_key = os.getenv("DASHSCOPE_API_KEY")
         if not api_key:
-            logger.error("❌ 未配置 DASHSCOPE_API_KEY")
+            logger.error("未配置 DASHSCOPE_API_KEY")
             return b""
             
         dashscope.api_key = api_key
             
         # 创建合成器
         # 根据模型版本配置不同参数
-        speaker_id = normalize_speaker_id(voice_params.get("speaker", "Ethan"))
+        provider_model = ALIYUN_MODEL_ALIASES.get(self.model, self.model)
+        if provider_model != self.model:
+            logger.debug("模型别名映射: %s -> %s", self.model, provider_model)
+
+        raw_speaker_id = voice_params.get("speaker", "Ethan")
+        speaker_id = normalize_speaker_id(raw_speaker_id) if self._is_qwen_model() else str(raw_speaker_id)
+
         voice_params["speaker"] = speaker_id
-        voice_params_with_emotion["speaker"] = speaker_id
-        
-        if self.model == "cosyvoice-v1":
+
+        if self._is_qwen_model():
+            logger.info(
+                "调用阿里云 Qwen-TTS: model=%s, voice=%s, volume=%s (speed/pitch 参数将被忽略)",
+                provider_model,
+                speaker_id,
+                voice_params.get("volume", 50),
+            )
+            return await self._call_dashscope_qwen_tts(
+                model=provider_model,
+                api_key=api_key,
+                text=text,
+                voice=speaker_id,
+                voice_params=voice_params,
+            )
+
+        from dashscope.audio.tts_v2 import SpeechSynthesizer, AudioFormat
+
+        if provider_model == "cosyvoice-v1":
             # v1：仅支持基础参数
             synthesizer = SpeechSynthesizer(
-                model="cosyvoice-v1",
+                model=provider_model,
                 voice=speaker_id,
                 format=AudioFormat.MP3_22050HZ_MONO_256KBPS
                 # v1不支持pitch_rate/speech_rate/volume
@@ -692,20 +743,30 @@ class TTSEngine:
         else:
             # v2/v3：支持完整参数
             # 获取voice_params中的rate和pitch（支持v3-plus新格式）
-            rate = voice_params.get("rate", voice_params.get("speed", 1.0))  # 兼容旧字段
-            pitch = voice_params.get("pitch", 1.0)  # v3-plus新增
+            rate = float(voice_params.get("rate", voice_params.get("speed", 1.0)) or 1.0)  # 兼容旧字段
+            pitch = float(voice_params.get("pitch", 1.0) or 1.0)  # v3-plus新增
                 
             # 如果pitch是0-100范围，转换为0.5-2.0
             if pitch > 10:  # 判断是否为百分比格式
                 pitch = pitch / 50.0
+
+            # 防御：裁剪到合理范围，避免 4xx 参数错误
+            if rate < 0.5:
+                rate = 0.5
+            elif rate > 2.0:
+                rate = 2.0
+            if pitch < 0.5:
+                pitch = 0.5
+            elif pitch > 2.0:
+                pitch = 2.0
             
             # 🔥 调试：输出最终传递给阿里云API的参数
             logger.info(
-                f"🔥 调用阿里云TTS: voice={speaker_id}, "
+                f"🔥 调用阿里云TTS: model={provider_model}, voice={speaker_id}, "
                 f"pitch_rate={pitch:.2f}, speech_rate={rate:.2f}, volume={voice_params.get('volume', 50)}"
             )
             
-            # ?? ??Instruct??????instruction??????
+            # Instruct 模式：通过 instruction 参数传递情绪/指令（仅对支持的音色启用）。
             # speaker normalized earlier for consistency
 
             emotion = voice_params.get("emotion", "neutral")
@@ -716,40 +777,39 @@ class TTSEngine:
                 and (use_instruct_flag or (speaker_id in INSTRUCT_SPEAKER_IDS and emotion != "neutral"))
             )
             if disable_instruction and use_instruct_flag:
-                logger.info("???? Qwen3-TTS?????????instruction???????????????????????????????????????")
+                logger.info("Qwen3-TTS 已禁用 instruction 模式：将忽略 use_instruct_mode。")
 
-            # ?? ?????emotion???instruction??
+            # 记录是否启用 instruct
             logger.info(
-                f"?? ???emotion={emotion}, speaker={speaker_id}, "
+                f"instruct: emotion={emotion}, speaker={speaker_id}, "
                 f"instruct_supported={speaker_id in INSTRUCT_SPEAKER_IDS}, use_instruct={should_use_instruction}"
             )
 
-            # ?????Instruct?????????????instruction??
+            # Instruct：将情绪写入 instruction 参数
             if should_use_instruction:
-                # ?? instruction ???????????????
-                instruction_text = f"???????{emotion}?"
-                logger.info(f"?? ??Instruct????: {instruction_text}")
+                instruction_text = f"emotion={emotion}"
+                logger.info(f"Instruct instruction: {instruction_text}")
 
-                # ??????????????Aliyun 428??
+                # 用更保守的 pitch/speed，避免服务端 4xx 参数错误
                 character_pitch = voice_params.get("character_base_pitch", 50)
                 character_speed = voice_params.get("character_base_speed", 1.0)
 
                 logger.info(
-                    f"?? Instruct????????? pitch={character_pitch}, speed={character_speed}, ???instruction??????428???"
+                    f"Instruct params: pitch={character_pitch}, speed={character_speed}"
                 )
 
                 synthesizer = SpeechSynthesizer(
-                    model=self.model,
+                    model=provider_model,
                     voice=speaker_id,
                     format=AudioFormat.MP3_22050HZ_MONO_256KBPS,
-                    pitch_rate=character_pitch / 50.0,  # ?????????50=1.0??
+                    pitch_rate=character_pitch / 50.0,  # 50 -> 1.0
                     speech_rate=character_speed,
                     volume=voice_params.get("volume", 50),
-                    instruction=instruction_text  # ?? ??????
+                    instruction=instruction_text
                 )
             else:
                 synthesizer = SpeechSynthesizer(
-                    model=self.model,
+                    model=provider_model,
                     voice=speaker_id,
                     format=AudioFormat.MP3_22050HZ_MONO_256KBPS,
                     pitch_rate=pitch,
@@ -769,29 +829,231 @@ class TTSEngine:
         audio_data = None
             
         # 详细记录返回结果
-        logger.debug(f"🔍 返回类型: {type(result)}")
-        logger.debug(f"🔍 返回值: {result}")
+        logger.debug("返回类型: %s", type(result))
+        logger.debug("返回值: %s", result)
             
         # 格式1：cosyvoice-v1直接返回bytes
         if isinstance(result, bytes):
             audio_data = result
-            logger.debug(f"✅ 阿里云TTS成功: {len(text)} 字符 → {len(audio_data)} 字节")
+            logger.debug("阿里云TTS成功: %s 字符 -> %s 字节", len(text), len(audio_data))
             return audio_data
         # 格式2：旧模型返回对象，调用get_audio_data()
         elif result and hasattr(result, 'get_audio_data'):
             audio_data = result.get_audio_data()
             if audio_data:
-                logger.debug(f"✅ 阿里云TTS成功: {len(text)} 字符")
+                logger.debug("阿里云TTS成功: %s 字符", len(text))
                 return audio_data
             else:
-                logger.warning(f"⚠️ 阿里云TTS返回空音频: {text[:50]}...")
+                logger.warning("阿里云TTS返回空音频: %s...", text[:50])
                 return b""
         else:
-            logger.error(f"❌ 阿里云TTS失败: {result}")
+            logger.error("阿里云TTS失败: %s", result)
             return b""
     
+    async def _call_dashscope_qwen_tts(
+        self,
+        *,
+        model: str,
+        api_key: str,
+        text: str,
+        voice: str,
+        voice_params: Dict[str, Any],
+    ) -> bytes:
+        """调用 Qwen-TTS（MultiModalConversation）并返回 WAV 音频字节。
+
+        参考：百炼 Qwen-TTS 文档。该接口以 URL 形式返回音频（默认 WAV）。
+        """
+        import base64
+        import urllib.error
+        import urllib.request
+        import wave
+        import audioop
+
+        import dashscope
+
+        _LANGUAGE_TYPE_MAP = {
+            "auto": "Auto",
+            "zh": "Chinese",
+            "zh_cn": "Chinese",
+            "zh_dialect": "Chinese",
+            "dialect": "Chinese",
+            "chinese": "Chinese",
+            "en": "English",
+            "english": "English",
+            "de": "German",
+            "german": "German",
+            "it": "Italian",
+            "italian": "Italian",
+            "pt": "Portuguese",
+            "portuguese": "Portuguese",
+            "es": "Spanish",
+            "spanish": "Spanish",
+            "ja": "Japanese",
+            "japanese": "Japanese",
+            "ko": "Korean",
+            "korean": "Korean",
+            "fr": "French",
+            "french": "French",
+            "ru": "Russian",
+            "russian": "Russian",
+        }
+        _ALLOWED_LANGUAGE_TYPES = {
+            "Auto",
+            "Chinese",
+            "English",
+            "German",
+            "Italian",
+            "Portuguese",
+            "Spanish",
+            "Japanese",
+            "Korean",
+            "French",
+            "Russian",
+        }
+
+        def _normalize_language_type(value: str) -> str:
+            if not value:
+                return "Auto"
+            value = str(value).strip()
+            if value in _ALLOWED_LANGUAGE_TYPES:
+                return value
+            mapped = _LANGUAGE_TYPE_MAP.get(value.lower())
+            return mapped or "Auto"
+
+        def _detect_language_type(value: str) -> str:
+            # KISS：包含中文即视为 Chinese，否则 English；用户可在 voice_params 里显式覆盖。
+            for ch in value:
+                if "\u4e00" <= ch <= "\u9fff":
+                    return "Chinese"
+            return "English"
+
+        language_type = _normalize_language_type(
+            voice_params.get("language_type") or _detect_language_type(text)
+        )
+        volume = voice_params.get("volume", 50)
+        try:
+            volume = int(volume)
+        except (TypeError, ValueError):
+            volume = 50
+        volume = max(0, min(100, volume))
+
+        def _extract_audio_payload_from_output(output: dict) -> tuple[bytes | None, str | None]:
+            audio = output.get("audio")
+            if isinstance(audio, dict):
+                data_b64 = audio.get("data")
+                url = audio.get("url")
+                if data_b64:
+                    try:
+                        return base64.b64decode(data_b64), None
+                    except Exception:  # noqa: BLE001
+                        return None, url
+                if url:
+                    return None, url
+
+            choices = output.get("choices") or []
+            if not choices:
+                return None, None
+            message = (choices[0] or {}).get("message") or {}
+            audios = message.get("audios") or []
+            if not audios:
+                return None, None
+            first = audios[0] or {}
+            data_b64 = first.get("data")
+            url = first.get("url")
+            if data_b64:
+                try:
+                    return base64.b64decode(data_b64), None
+                except Exception:  # noqa: BLE001
+                    return None, url
+            return None, url
+
+        def _extract_audio_payload(response) -> tuple[bytes | None, str | None]:
+            output = getattr(response, "output", None)
+            if isinstance(output, dict):
+                return _extract_audio_payload_from_output(output)
+
+            # 兜底：尽量把对象转成 dict 再解析
+            try:
+                as_dict = response.to_dict()  # type: ignore[attr-defined]
+            except Exception:  # noqa: BLE001
+                as_dict = None
+            if isinstance(as_dict, dict):
+                output_dict = as_dict.get("output")
+                if isinstance(output_dict, dict):
+                    return _extract_audio_payload_from_output(output_dict)
+
+            return None, None
+
+        def _apply_volume_wav(wav_bytes: bytes) -> bytes:
+            # 50 视为原始音量，不做处理
+            if volume == 50:
+                return wav_bytes
+            scale = volume / 50.0 if volume > 0 else 0.0
+            try:
+                with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
+                    params = wf.getparams()
+                    frames = wf.readframes(wf.getnframes())
+                if not frames:
+                    return wav_bytes
+                adjusted = audioop.mul(frames, params.sampwidth, scale)
+                out = io.BytesIO()
+                with wave.open(out, "wb") as wf2:
+                    wf2.setparams(params)
+                    wf2.writeframes(adjusted)
+                return out.getvalue()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("WAV 音量调整失败，将返回原始音频: %s", exc)
+                return wav_bytes
+
+        def _sync_call() -> bytes:
+            # Qwen-TTS：使用 text/voice/language_type 参数（不要用 messages 模式，否则会触发 input.text 缺失）
+            logger.info(
+                "Qwen-TTS请求参数: model=%s voice=%s language_type=%s text_len=%s",
+                model,
+                voice,
+                language_type,
+                len(text),
+            )
+            response = dashscope.MultiModalConversation.call(
+                model=model,
+                api_key=api_key,
+                text=text,
+                voice=voice,
+                language_type=language_type,
+                stream=False,
+            )
+
+            status_code = getattr(response, "status_code", None)
+            if status_code is not None and int(status_code) != 200:
+                code = getattr(response, "code", None)
+                message = getattr(response, "message", None)
+                raise RuntimeError(
+                    f"Qwen-TTS failed: status_code={status_code} code={code} message={message}"
+                )
+
+            audio_bytes, audio_url = _extract_audio_payload(response)
+            if audio_bytes:
+                return _apply_volume_wav(audio_bytes)
+
+            if not audio_url:
+                logger.error("Qwen-TTS 响应中未找到音频URL: %s", response)
+                return b""
+
+            try:
+                req = urllib.request.Request(audio_url, headers={"User-Agent": "novel-writing-agent"})
+                with urllib.request.urlopen(req, timeout=60) as f:  # noqa: S310
+                    downloaded = f.read()
+            except urllib.error.URLError as exc:
+                logger.error("下载 Qwen-TTS 音频失败: %s", exc)
+                return b""
+
+            return _apply_volume_wav(downloaded)
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _sync_call)
+
     def _is_qwen_model(self) -> bool:
-        """Return True when??????Qwen3-TTS???"""
+        """判断当前引擎是否为 Qwen3-TTS 系列模型。"""
         return str(self.model).startswith("qwen3-tts")
 
     def _build_instruct_text(
@@ -800,20 +1062,7 @@ class TTSEngine:
         voice_params: Dict[str, Any],
         emotion: str
     ) -> str:
-        """情感控制已移至API参数层，不再向文本添加前置描述。
-        
-        ⚠️ 重要变更：
-        - 之前：在文本前添加"你正在以一个故事机的身份说话，你说话的情感是xxx。"
-        - 现在：直接返回原文本，情感通过API参数传递
-        
-        支持 Instruct 的音色：
-        - Ethan（龙安洋）
-        - Sunny（龙安欢）
-        - Momo（龙呼呼）
-        
-        情感将在 _call_aliyun_tts 方法中通过 API 参数传递。
-        """
-        # 🆕 不再添加任何前置描述，直接返回原文本
+        """预处理文本（当前不注入任何前置描述）。"""
         return text
 
     def _generate_cache_key(
