@@ -8,7 +8,7 @@
  * 4. 进度监控
  * 5. 音频播放与下载
  */
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiClient } from '../services/api'
 import * as bookParserApi from '../services/bookParserApi'
@@ -280,7 +280,7 @@ const coerceStageStatus = (value: any): StageStatus => {
   return 'pending'
 }
 
-const normalizeStageEntry = (stageKey: StageKey, raw: any): StageInfo => ({
+const normalizeStageEntry = (raw: any): StageInfo => ({
   status: coerceStageStatus(raw?.status),
   progress: typeof raw?.progress === 'number' ? raw.progress : 0,
   start_time: raw?.start_time,
@@ -298,7 +298,7 @@ const normalizeTaskStatusResponse = (payload: any): TaskStatus => {
   Object.entries(rawStages).forEach(([key, value]) => {
     const stageKey = key as StageKey
     if (STAGE_KEYS.includes(stageKey)) {
-      normalizedStages[stageKey] = normalizeStageEntry(stageKey, value)
+      normalizedStages[stageKey] = normalizeStageEntry(value)
     }
   })
 
@@ -678,7 +678,6 @@ const AudiobookPage = () => {
     music_density: 'medium',
   })
   const [audiobookProject, setAudiobookProject] = useState<any>(null)
-  const [loading, setLoading] = useState(false)
   const [loadingCharacters, setLoadingCharacters] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [historyProjects, setHistoryProjects] = useState<any[]>([])
@@ -692,7 +691,7 @@ const AudiobookPage = () => {
   const [scriptEditorData, setScriptEditorData] = useState<{
     scriptStatus: string
     scriptSegments: any[]
-    scriptReview?: any
+    scriptReview: any | null
   } | null>(null)
   const [scriptEditorLoading, setScriptEditorLoading] = useState(false)
   const [scriptOnlyMode, setScriptOnlyMode] = useState(false)
@@ -750,9 +749,12 @@ const AudiobookPage = () => {
     setVoiceDraftsByModel((prev) => ({ ...prev, [model]: next }))
   }
 
-  const setCharacterVoicesForCurrentModel = (next: CharacterVoiceSetting[]) => {
-    setCharacterVoicesForModel(ttsModel, next)
-  }
+  const setCharacterVoicesForCurrentModel = useCallback(
+    (next: CharacterVoiceSetting[]) => {
+      setCharacterVoicesForModel(ttsModel, next)
+    },
+    [ttsModel],
+  )
 
   const updateCharacterVoicesForCurrentModel = (
     updater: (prev: CharacterVoiceSetting[]) => CharacterVoiceSetting[],
@@ -1108,12 +1110,11 @@ const AudiobookPage = () => {
   // 选择项目
   type SelectProjectOptions = { skipStepReset?: boolean }
 
-  const handleSelectProject = async (project: Project, options?: SelectProjectOptions) => {
+  const handleSelectProject = useCallback(async (project: Project, options?: SelectProjectOptions) => {
     setSelectedProject(project)
     setCurrentAudiobookProjectId(null)
     setCurrentTaskId(null)
     setTaskStatuses({})
-    setLoading(true)
     setCharacterVoices([])
     setVoiceDraftsByModel({})
 
@@ -1215,10 +1216,8 @@ const AudiobookPage = () => {
     } catch (error) {
       console.error('获取章节失败:', error)
       setSnackbar({ open: true, message: '网络错误，请重试', severity: 'error' })
-    } finally {
-      setLoading(false)
     }
-  }
+  }, [ttsModel, setCharacterVoicesForCurrentModel])
 
   useEffect(() => {
     if (!sessionHydratedRef.current) {
@@ -1296,7 +1295,9 @@ const AudiobookPage = () => {
         console.warn('恢复会话失败:', error)
         localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
       } finally {
-        sessionHydratedRef.current = true
+        if (!cancelled) {
+          sessionHydratedRef.current = true
+        }
       }
     }
 
@@ -1619,7 +1620,7 @@ const AudiobookPage = () => {
       setScriptEditorData({
         scriptStatus: data.script_status || 'pending',
         scriptSegments: data.script_segments || [],
-        scriptReview: data.script_review || undefined,
+        scriptReview: data.script_review ?? null,
       })
       setScriptEditorDialogOpen(true)
     } catch (err: any) {
