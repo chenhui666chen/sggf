@@ -2399,7 +2399,7 @@ const AudiobookPage = () => {
           boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
         }}
       >
-        <IconButton onClick={() => navigate('/modules')}>
+        <IconButton onClick={() => navigate('/home')}>
           <ArrowBackIcon />
         </IconButton>
         <HeadphonesIcon sx={{ fontSize: 32, color: '#9c27b0' }} />
@@ -2471,7 +2471,7 @@ const AudiobookPage = () => {
                 </Typography>
                 <Button
                   variant="contained"
-                  onClick={() => navigate('/dashboard')}
+                  onClick={() => navigate('/home')}
                   sx={{
                     mt: 2,
                     backgroundColor: '#9c27b0',
@@ -3524,6 +3524,7 @@ const AudiobookPage = () => {
                   openUpload: true,
                   prefillTitle: title,
                   prefillContent: text,
+                  from: 'audiobook',
                 },
               })
             }}

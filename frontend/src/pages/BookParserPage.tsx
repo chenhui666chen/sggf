@@ -628,7 +628,7 @@ export default function BookParserPage() {
   // 如果从耳畔星河跳转过来，自动打开上传对话框并填充文本
   useEffect(() => {
     const state = (location as any).state as
-      | { openUpload?: boolean; prefillTitle?: string; prefillContent?: string }
+      | { openUpload?: boolean; prefillTitle?: string; prefillContent?: string; from?: string }
       | undefined
 
     if (state?.openUpload) {
@@ -644,6 +644,18 @@ export default function BookParserPage() {
       navigate(location.pathname, { replace: true, state: null })
     }
   }, [location, navigate])
+
+  // 保存来源信息
+  const [sourcePage, setSourcePage] = useState<string>('/home')
+
+  useEffect(() => {
+    const state = (location as any).state as
+      | { from?: string }
+      | undefined
+    if (state?.from) {
+      setSourcePage(state.from)
+    }
+  }, [location])
 
   useEffect(() => {
     loadBooks()
@@ -802,9 +814,27 @@ export default function BookParserPage() {
       const bookData = await bookParserApi.getBook(selectedBook.id)
       setSelectedBook(bookData)
       
+      // 检查是否从耳畔星河跳转过来
+      const fromAudiobook = (location as any).state?.from === 'audiobook'
+      
       // 提示成功并跳转
-      if (confirm(`导入成功！已创建项目《${result.project_title}》\n\n是否立即跳转到该项目？`)) {
-        navigate(`/workflow/${result.project_id}`)
+      if (fromAudiobook) {
+        // 如果是从耳畔星河来的，提供返回选项
+        const choice = confirm(
+          `导入成功！已创建项目《${result.project_title}》\n\n` +
+          `点击"确定"跳转到工作流\n` +
+          `点击"取消"返回耳畔星河`
+        )
+        if (choice) {
+          navigate(`/workflow/${result.project_id}`)
+        } else {
+          navigate('/audiobook')
+        }
+      } else {
+        // 原有逻辑：直接跳转到工作流
+        if (confirm(`导入成功！已创建项目《${result.project_title}》\n\n是否立即跳转到该项目？`)) {
+          navigate(`/workflow/${result.project_id}`)
+        }
       }
     } catch (err: any) {
       setImporting(false)
@@ -841,7 +871,7 @@ export default function BookParserPage() {
       {/* 顶部导航 */}
       <Paper sx={{ p: 2, mb: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <IconButton onClick={() => navigate('/home')}>
+          <IconButton onClick={() => navigate(sourcePage)}>
             <ArrowBackIcon />
           </IconButton>
           <ArticleIcon color="primary" />

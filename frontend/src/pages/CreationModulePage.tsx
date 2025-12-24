@@ -159,7 +159,7 @@ export default function CreationModulePage() {
                       <IconButton
                         onClick={(e) => {
                           e.stopPropagation()
-                          navigate('/book-parser')
+                          navigate('/book-parser', { state: { from: '/home' } })
                         }}
                         sx={{
                           position: 'absolute',
