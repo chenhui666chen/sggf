@@ -9,15 +9,13 @@
  * 5. 音频播放与下载
  */
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { apiClient } from '../services/api'
 import * as bookParserApi from '../services/bookParserApi'
 import {
   Box,
   Container,
   Typography,
-  Card,
-  CardContent,
   Button,
   Grid,
   IconButton,
@@ -155,13 +153,8 @@ interface HistoryDialogProps {
   loading: boolean
   historyProjects: any[]
   selectedProject: Project | null
-  showDeleteConfirm: boolean
-  deletingProject: any | null
   onCloseHistory: () => void
   onViewHistory: (audiobookProjectId: number) => void
-  onOpenDeleteConfirm: (project: any) => void
-  onCloseDeleteConfirm: () => void
-  onConfirmDelete: () => void
 }
 
 interface VoiceDefaultParams {
@@ -795,176 +788,120 @@ function HistoryDialog({
   loading,
   historyProjects,
   selectedProject,
-  showDeleteConfirm,
-  deletingProject,
   onCloseHistory,
   onViewHistory,
-  onOpenDeleteConfirm,
-  onCloseDeleteConfirm,
-  onConfirmDelete,
 }: HistoryDialogProps) {
   return (
-    <>
-      <Dialog open={open} onClose={onCloseHistory} maxWidth="md" fullWidth>
-        <DialogTitle>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <HistoryIcon sx={{ color: '#9c27b0' }} />
-            <Typography variant="h6">
-              {selectedProject?.title} - 历史生成记录
+    <Dialog open={open} onClose={onCloseHistory} maxWidth="md" fullWidth>
+      <DialogTitle>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <HistoryIcon sx={{ color: '#9c27b0' }} />
+          <Typography variant="h6">
+            {selectedProject?.title} - 历史生成记录
+          </Typography>
+        </Box>
+      </DialogTitle>
+      <DialogContent>
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+            <CircularProgress />
+          </Box>
+        ) : historyProjects.length === 0 ? (
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <Typography variant="body2" color="text.secondary">
+              还没有生成过有声书
             </Typography>
           </Box>
-        </DialogTitle>
-        <DialogContent>
-          {loading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-              <CircularProgress />
-            </Box>
-          ) : historyProjects.length === 0 ? (
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <Typography variant="body2" color="text.secondary">
-                还没有生成过有声书
-              </Typography>
-            </Box>
-          ) : (
-            <List>
-              {historyProjects.map((project) => (
-                <ListItem
-                  key={project.id}
-                  sx={{
-                    border: '1px solid #e0e0e0',
-                    borderRadius: 2,
-                    mb: 2,
-                    '&:hover': {
-                      backgroundColor: 'rgba(156, 39, 176, 0.05)',
-                      cursor: 'pointer',
-                    },
-                  }}
-                  onClick={() => onViewHistory(project.id)}
-                >
-                  <Box sx={{ flex: 1 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                      <Chip
-                        label={
+        ) : (
+          <List>
+            {historyProjects.map((project) => (
+              <ListItem
+                key={project.id}
+                sx={{
+                  border: '1px solid #e0e0e0',
+                  borderRadius: 2,
+                  mb: 2,
+                  '&:hover': {
+                    backgroundColor: 'rgba(156, 39, 176, 0.05)',
+                    cursor: 'pointer',
+                  },
+                }}
+                onClick={() => onViewHistory(project.id)}
+              >
+                <Box sx={{ flex: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                    <Chip
+                      label={
+                        project.status === 'completed'
+                          ? '已完成'
+                          : project.status === 'processing'
+                          ? '生成中'
+                          : project.status === 'failed'
+                          ? '失败'
+                          : '等待中'
+                      }
+                      size="small"
+                      sx={{
+                        backgroundColor:
                           project.status === 'completed'
-                            ? '已完成'
+                            ? '#4caf50'
                             : project.status === 'processing'
-                            ? '生成中'
+                            ? '#ff9800'
                             : project.status === 'failed'
-                            ? '失败'
-                            : '等待中'
-                        }
-                        size="small"
-                        sx={{
-                          backgroundColor:
-                            project.status === 'completed'
-                              ? '#4caf50'
-                              : project.status === 'processing'
-                              ? '#ff9800'
-                              : project.status === 'failed'
-                              ? '#f44336'
-                              : '#9e9e9e',
-                          color: 'white',
-                        }}
-                      />
-                      <Typography variant="caption" color="text.secondary">
-                        {new Date(project.created_at).toLocaleString('zh-CN', {
-                          year: 'numeric',
-                          month: '2-digit',
-                          day: '2-digit',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', gap: 2 }}>
-                      <Typography variant="body2">
-                        章节：{project.completed_chapters}/{project.total_chapters}
-                      </Typography>
-                      {project.status === 'completed' && (
-                        <Typography variant="body2" color="text.secondary">
-                          时长：{((project.total_duration || 0) / 60).toFixed(1)}分钟
-                        </Typography>
-                      )}
-                    </Box>
+                            ? '#f44336'
+                            : '#9e9e9e',
+                        color: 'white',
+                      }}
+                    />
+                    <Typography variant="caption" color="text.secondary">
+                      {new Date(project.created_at).toLocaleString('zh-CN', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </Typography>
                   </Box>
-                  <IconButton
-                    edge="end"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onViewHistory(project.id)
-                    }}
-                    sx={{ color: '#9c27b0' }}
-                  >
-                    <PlayIcon />
-                  </IconButton>
-                  <IconButton
-                    edge="end"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onOpenDeleteConfirm(project)
-                    }}
-                    sx={{ color: '#f44336' }}
-                  >
-                    <DeleteIcon />
-                  </IconButton>
-                </ListItem>
-              ))}
-            </List>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={onCloseHistory}>关闭</Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={showDeleteConfirm} onClose={onCloseDeleteConfirm} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <HistoryIcon sx={{ color: '#f44336' }} />
-            <Typography variant="h6">确认删除</Typography>
-          </Box>
-        </DialogTitle>
-        <DialogContent>
-          <Box sx={{ py: 2 }}>
-            <Typography variant="body1" gutterBottom>
-              确定要删除以下有声书项目吗？
-            </Typography>
-            {deletingProject && (
-              <Box sx={{ mt: 2, p: 2, bgcolor: 'rgba(244, 67, 54, 0.05)', borderRadius: 1 }}>
-                <Typography variant="body2" fontWeight="bold">
-                  《{selectedProject?.title}》 - #{deletingProject.id}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  章节：{deletingProject.completed_chapters}/{deletingProject.total_chapters} | 时长：
-                  {((deletingProject.total_duration || 0) / 60).toFixed(1)}分钟
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                  创建时间：{new Date(deletingProject.created_at).toLocaleString('zh-CN')}
-                </Typography>
-              </Box>
-            )}
-            <Alert severity="error" sx={{ mt: 2 }}>
-              此操作将永久删除该项目及其所有音频文件，无法恢复！
-            </Alert>
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={onCloseDeleteConfirm}>取消</Button>
-          <Button onClick={onConfirmDelete} variant="contained" color="error" autoFocus>
-            确认删除
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Typography variant="body2">
+                      章节：{project.completed_chapters}/{project.total_chapters}
+                    </Typography>
+                    {project.status === 'completed' && (
+                      <Typography variant="body2" color="text.secondary">
+                        时长：{((project.total_duration || 0) / 60).toFixed(1)}分钟
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+                <IconButton
+                  edge="end"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onViewHistory(project.id)
+                  }}
+                  sx={{ color: '#9c27b0' }}
+                >
+                  <PlayIcon />
+                </IconButton>
+              </ListItem>
+            ))}
+          </List>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onCloseHistory}>关闭</Button>
+      </DialogActions>
+    </Dialog>
   )
 }
 
-const steps = ['选择项目', '配置音色', '生成有声书', '完成']
+const steps = ['配置音色', '生成有声书', '完成']
 
 const AudiobookPage = () => {
   const navigate = useNavigate()
+  const { projectId } = useParams<{ projectId: string }>()
 
-  const [projects, setProjects] = useState<Project[]>([])
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [selectedChapters, setSelectedChapters] = useState<number[]>([])
@@ -980,8 +917,6 @@ const AudiobookPage = () => {
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [historyProjects, setHistoryProjects] = useState<any[]>([])
   const [showHistory, setShowHistory] = useState(false)
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const [deletingProject, setDeletingProject] = useState<any | null>(null)
   const [scriptReviewDialogOpen, setScriptReviewDialogOpen] = useState(false)
   const [scriptReviewData, setScriptReviewData] = useState<{ report: ScriptReviewDetail; segments: any[] } | null>(null)
   const [scriptEditorDialogOpen, setScriptEditorDialogOpen] = useState(false)
@@ -1084,10 +1019,79 @@ const AudiobookPage = () => {
     return sorted
   }, [voicePresets, ttsModel])
 
-  // 获取项目列表
+  // 从URL参数加载项目（优先级最高，但会尝试保留会话状态）
   useEffect(() => {
-    fetchProjects()
-  }, [])
+    const loadProjectFromUrl = async () => {
+      if (!projectId) {
+        setSnackbar({ open: true, message: '缺少项目ID参数', severity: 'error' })
+        navigate('/audiobook-dashboard')
+        return
+      }
+
+      // 检查是否需要清除会话缓存
+      const savedSession = localStorage.getItem(AUDIOBOOK_SESSION_STORAGE_KEY)
+      if (savedSession) {
+        try {
+          const saved = JSON.parse(savedSession)
+          // 如果URL中的projectId与保存的projectId相同，则不清除会话缓存
+          if (saved.projectId === parseInt(projectId)) {
+            console.log('项目ID匹配，保留会话状态')
+            // 恢复会话状态中的activeStep
+            if (typeof saved.activeStep === 'number') {
+              console.log('恢复activeStep:', saved.activeStep)
+              setActiveStep(saved.activeStep)
+            }
+            if (saved.taskId) {
+              setCurrentTaskId(saved.taskId)
+              setGenerating(saved.generating ?? true)
+            }
+            if (saved.ttsModel) {
+              setTtsModel(saved.ttsModel)
+            }
+            // 恢复audiobookProject（如果存在）
+            if (saved.audiobookProjectId) {
+              setCurrentAudiobookProjectId(saved.audiobookProjectId)
+              // 异步加载audiobookProject
+              apiClient.getAudiobookProject(saved.audiobookProjectId)
+                .then(detailRes => {
+                  setAudiobookProject(detailRes.data)
+                  console.log('恢复audiobookProject:', detailRes.data)
+                })
+                .catch(error => {
+                  console.warn('恢复有声书项目失败:', error)
+                })
+            }
+            // 设置标志，防止restoreSession effect重复执行
+            sessionHydratedRef.current = true
+          } else {
+            console.log('项目ID不匹配，清除旧会话缓存')
+            localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
+            sessionHydratedRef.current = true
+          }
+        } catch (e) {
+          console.warn('解析会话数据失败，清除缓存:', e)
+          localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
+          sessionHydratedRef.current = true
+        }
+      } else {
+        sessionHydratedRef.current = true
+      }
+
+      try {
+        const projectRes = await apiClient.getProject(parseInt(projectId))
+        const project = projectRes.data as Project
+        setSelectedProject(project)
+        await handleSelectProject(project, { skipStepReset: true })
+      } catch (error: any) {
+        console.error('加载项目失败:', error)
+        const msg = (error?.response?.data?.detail as string) || '加载项目失败'
+        setSnackbar({ open: true, message: msg, severity: 'error' })
+        navigate('/audiobook-dashboard')
+      }
+    }
+
+    loadProjectFromUrl()
+  }, [projectId])
 
   // 同步当前 TTS 模型的音色目录
   useEffect(() => {
@@ -1252,44 +1256,11 @@ const AudiobookPage = () => {
       const data = res.data
       setAudiobookProject(data)
       setCurrentAudiobookProjectId(data.id)
-      setActiveStep(3) // 跳转到完成页面
+      setActiveStep(2) // 跳转到完成页面
       setShowHistory(false)
     } catch (error) {
       console.error('查看历史失败:', error)
       setSnackbar({ open: true, message: '加载失败', severity: 'error' })
-    }
-  }
-
-  // 新增：打开删除确认对话框
-  const handleOpenDeleteConfirm = (project: any) => {
-    setDeletingProject(project)
-    setShowDeleteConfirm(true)
-  }
-
-  // 新增：删除有声书项目
-  const handleDeleteProject = async () => {
-    if (!deletingProject) return
-
-    try {
-      await apiClient.deleteAudiobookProject(deletingProject.id)
-      setSnackbar({ open: true, message: '删除成功', severity: 'success' })
-      setShowDeleteConfirm(false)
-      setDeletingProject(null)
-      fetchHistory()
-    } catch (error: any) {
-      console.error('删除失败:', error)
-      const msg = (error?.response?.data?.detail as string) || '删除失败'
-      setSnackbar({ open: true, message: msg, severity: 'error' })
-    }
-  }
-
-  const fetchProjects = async () => {
-    try {
-      const res = await apiClient.getProjects()
-      setProjects(res.data)
-    } catch (error) {
-      console.error('获取项目失败:', error)
-      setSnackbar({ open: true, message: '网络错误，无法加载项目列表', severity: 'error' })
     }
   }
 
@@ -1358,15 +1329,10 @@ const AudiobookPage = () => {
         import_chapters: true,
       })
 
-      // 5. 刷新项目列表，并选中新建项目，直接进入音色配置
+      // 5. 选中新建项目，直接进入音色配置
       try {
         const projectRes = await apiClient.getProject(importResult.project_id)
         const project = projectRes.data as Project
-        setProjects((prev) => {
-          // 确保列表中包含新项目
-          if (prev.some((p) => p.id === project.id)) return prev
-          return [project, ...prev]
-        })
         setSelectedProject(project)
       } catch (e) {
         // 回退：如果获取单个项目失败，至少构造一个最小的项目对象
@@ -1376,14 +1342,10 @@ const AudiobookPage = () => {
           description: undefined,
           genre: undefined,
         }
-        setProjects((prev) => {
-          if (prev.some((p) => p.id === fallbackProject.id)) return prev
-          return [fallbackProject, ...prev]
-        })
         setSelectedProject(fallbackProject)
       }
 
-      setActiveStep(1)
+      setActiveStep(0)
       setNewProjectDialogOpen(false)
       setNewProjectTitle('')
       setNewProjectText('')
@@ -1510,7 +1472,7 @@ const AudiobookPage = () => {
       }
 
       if (!options?.skipStepReset) {
-        setActiveStep(1)
+        setActiveStep(0)
       }
     } catch (error) {
       console.error('获取章节失败:', error)
@@ -1594,7 +1556,7 @@ const AudiobookPage = () => {
         if (saved.taskId && !cancelled) {
           setCurrentTaskId(saved.taskId)
           setGenerating(saved.generating ?? true)
-          setActiveStep(saved.activeStep ?? 2)
+          setActiveStep(saved.activeStep ?? 0)
         } else if (typeof saved.activeStep === 'number' && !cancelled) {
           setActiveStep(saved.activeStep)
         }
@@ -2036,7 +1998,7 @@ const AudiobookPage = () => {
     }
     
     setGenerating(true)
-    setActiveStep(2)
+    setActiveStep(1)
     setLastGenerationMode(scriptOnlyMode ? 'script_only' : 'full')
     setTaskStatuses({})  // 清空之前的状态
 
@@ -2093,7 +2055,9 @@ const AudiobookPage = () => {
       if (data?.job_id) {
         setCurrentTaskId(data.job_id)
       }
-      setAudiobookProject(data)
+      // 不立即设置audiobookProject，因为createAudiobookProject返回的数据不包含chapter_audios
+      // 等待轮询获取完整数据后再设置
+      // setAudiobookProject(data)
 
       // 轮询查询项目进度
       const projectId = data.audiobook_project_id
@@ -2103,17 +2067,22 @@ const AudiobookPage = () => {
           const statusData = statusResponse.data
           console.log('轮询项目状态:', statusData)
 
+          // 首次获取到完整数据时设置audiobookProject
+          if (!audiobookProject && statusData) {
+            setAudiobookProject(statusData)
+          }
+
           if (statusData.status === 'completed') {
             clearInterval(pollInterval)
             setGenerating(false)
-            setActiveStep(3)
+            setActiveStep(2)
             setAudiobookProject(statusData)
             setSnackbar({ open: true, message: '生成完成！', severity: 'success' })
           } else if (statusData.status === 'failed') {
             clearInterval(pollInterval)
             setGenerating(false)
             setSnackbar({ open: true, message: '生成失败，请重试', severity: 'error' })
-            setActiveStep(1)
+            setActiveStep(0)
           }
         } catch (err) {
           console.error('轮询有声书项目状态失败:', err)
@@ -2127,7 +2096,7 @@ const AudiobookPage = () => {
         severity: 'error' 
       })
       setGenerating(false)
-      setActiveStep(1)
+      setActiveStep(0)
     }
   }
   
@@ -2214,12 +2183,12 @@ const AudiobookPage = () => {
           }
           if (normalized.status === 'completed') {
             setGenerating(false)
-            setActiveStep(3)
+            setActiveStep(2)
             setSnackbar({ open: true, message: '生成完成！', severity: 'success' })
             setCurrentTaskId(null)
           } else if (normalized.status === 'failed') {
             setGenerating(false)
-            setActiveStep(1)
+            setActiveStep(0)
             setSnackbar({ open: true, message: '生成失败，请重试', severity: 'error' })
             setCurrentTaskId(null)
           } else {
@@ -2402,12 +2371,12 @@ const AudiobookPage = () => {
         <IconButton onClick={() => navigate('/home')}>
           <ArrowBackIcon />
         </IconButton>
-        <HeadphonesIcon sx={{ fontSize: 32, color: '#9c27b0' }} />
-        <Box sx={{ flex: 1 }}>
+        <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1 }}>
+          <HeadphonesIcon sx={{ fontSize: 32, color: '#9c27b0' }} />
           <Typography variant="h5" sx={{ fontWeight: 600 }}>
             耳畔星河
           </Typography>
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" color="text.secondary" sx={{ ml: 2 }}>
             有声小说生成工具
           </Typography>
         </Box>
@@ -2461,164 +2430,8 @@ const AudiobookPage = () => {
           </Stepper>
         </Paper>
 
-        {/* 步骤1: 选择项目 */}
+        {/* 步骤1: 配置音色（章节选择 + 角色音频设置） */}
         {activeStep === 0 && (
-          <Box>
-            {projects.length === 0 ? (
-              <Paper sx={{ p: 4, textAlign: 'center', backgroundColor: 'rgba(255,255,255,0.95)' }}>
-                <Typography variant="body1" color="text.secondary">
-                  暂无项目，请先创建小说项目
-                </Typography>
-                <Button
-                  variant="contained"
-                  onClick={() => navigate('/home')}
-                  sx={{
-                    mt: 2,
-                    backgroundColor: '#9c27b0',
-                    '&:hover': { backgroundColor: '#7b1fa2' },
-                  }}
-                >
-                  去创建项目
-                </Button>
-              </Paper>
-            ) : (
-              <Grid container spacing={3}>
-                {projects.map((project) => (
-                  <Grid
-                    item
-                    key={project.id}
-                    sx={{
-                      flexBasis: { xs: '100%', sm: '50%', md: '20%' },
-                      maxWidth: { xs: '100%', sm: '50%', md: '20%' },
-                    }}
-                  >
-                    <Card
-                      sx={{
-                        cursor: 'pointer',
-                        transition: 'all 0.3s',
-                        background: 'radial-gradient(circle at 30% 20%, #ffe4f3 0%, #f8f9ff 40%, #d7e0ff 100%)',
-                        position: 'relative',
-                        overflow: 'hidden',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        minHeight: 180,
-                        '&:hover': {
-                          transform: 'translateY(-6px)',
-                          boxShadow: '0 12px 32px rgba(156, 39, 176, 0.35)',
-                        },
-                      }}
-                      onClick={() => handleSelectProject(project)}
-                    >
-                      <CardContent
-                        sx={{
-                          width: '100%',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          py: 4,
-                        }}
-                      >
-                        <Box
-                          sx={{
-                            width: 112,
-                            height: 112,
-                            borderRadius: '50%',
-                            position: 'relative',
-                            mb: 2,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            backgroundColor: '#f3ecff',
-                          }}
-                        >
-                          {/* 内层深色圆 */}
-                          <Box
-                            sx={{
-                              width: 90,
-                              height: 90,
-                              borderRadius: '50%',
-                              backgroundColor: '#262b4f',
-                              position: 'relative',
-                            }}
-                          />
-
-                          {/* 播放按钮（三角形） */}
-                          <Box
-                            sx={{
-                              position: 'absolute',
-                              width: 34,
-                              height: 34,
-                              backgroundColor: '#ffffff',
-                              clipPath: 'polygon(28% 18%, 78% 50%, 28% 82%)',
-                            }}
-                          />
-
-                          {/* 书本元素已移除，仅保留耳机与播放按钮 */}
-
-                          {/* 耳机头梁（上方弧线） */}
-                          <Box
-                            sx={{
-                              position: 'absolute',
-                              top: 8,
-                              width: 92,
-                              height: 92,
-                              borderRadius: '50%',
-                              border: '7px solid #ff9fb8',
-                              borderBottomColor: 'transparent',
-                              backgroundColor: 'transparent',
-                              boxSizing: 'border-box',
-                            }}
-                          />
-
-                          {/* 左右耳罩 */}
-                          <Box
-                            sx={{
-                              position: 'absolute',
-                              left: 14,
-                              top: 54,
-                              width: 26,
-                              height: 32,
-                              borderRadius: 14,
-                              backgroundColor: '#ff9fb8',
-                            }}
-                          />
-                          <Box
-                            sx={{
-                              position: 'absolute',
-                              right: 14,
-                              top: 54,
-                              width: 26,
-                              height: 32,
-                              borderRadius: 14,
-                              backgroundColor: '#ff9fb8',
-                            }}
-                          />
-                        </Box>
-                        {/* 只保留项目名称，不再展示简介 */}
-                        <Typography
-                          variant="subtitle1"
-                          sx={{
-                            fontWeight: 700,
-                            textAlign: 'center',
-                            color: '#3d356b',
-                            px: 2,
-                          }}
-                        >
-                          {project.title}
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                ))}
-              </Grid>
-            )}
-          </Box>
-        )}
-
-        {/* 步骤2: 配置音色（章节选择 + 角色音频设置） */}
-        {activeStep === 1 && (
           <Paper sx={{ p: 3, backgroundColor: 'rgba(255,255,255,0.95)' }}>
             <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center' }}>
               <VoiceIcon sx={{ mr: 1, color: '#9c27b0' }} />
@@ -3126,10 +2939,12 @@ const AudiobookPage = () => {
               </Grid>
             </Grid>
         
-            <Box sx={{ mt: 3, display: 'flex', gap: 2, justifyContent: 'space-between' }}>
-              <Button variant="outlined" onClick={() => setActiveStep(0)}>
-                上一步
-              </Button>
+            <Box sx={{ mt: 3, display: 'flex', gap: 2, justifyContent: 'center' }}>
+              {activeStep > 0 && (
+                <Button variant="outlined" onClick={() => setActiveStep(activeStep - 1)}>
+                  上一步
+                </Button>
+              )}
               <Button
                 variant="contained"
                 onClick={handleGenerate}
@@ -3145,8 +2960,8 @@ const AudiobookPage = () => {
           </Paper>
         )}
 
-        {/* 步骤3: 生成中 */}
-        {activeStep === 2 && (
+        {/* 步骤2: 生成有声书 */}
+        {activeStep === 1 && (
           <Paper sx={{ p: 4, backgroundColor: 'rgba(255,255,255,0.95)' }}>
             {/* 顶部整体进度条和文字已移除，改为仅展示阶段卡片状态 */}
             
@@ -3205,8 +3020,8 @@ const AudiobookPage = () => {
           </Paper>
         )}
 
-        {/* 步骤4: 完成 */}
-        {activeStep === 3 && (
+        {/* 步骤3: 完成 */}
+        {activeStep === 2 && (
           <Paper sx={{ p: 4, backgroundColor: 'rgba(255,255,255,0.95)' }}>
             <Box sx={{ textAlign: 'center', mb: 3 }}>
               <CheckIcon sx={{ fontSize: 80, color: '#4caf50', mb: 2 }} />
@@ -3282,7 +3097,7 @@ const AudiobookPage = () => {
             
             <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
               {/* 下载按钮 - 支持分章节下载 */}
-              {audiobookProject.chapter_audios && audiobookProject.chapter_audios.length > 0 && (
+              {audiobookProject && audiobookProject.chapter_audios && audiobookProject.chapter_audios.length > 0 && (
                 <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'center', width: '100%', mb: 2 }}>
                   {audiobookProject.chapter_audios.map((chapterAudio: any) => {
                     const chapter = chapters.find(c => c.id === chapterAudio.chapter_id)
@@ -3622,18 +3437,13 @@ const AudiobookPage = () => {
       
       {/* 新增：历史记录对话框 */}
       <HistoryDialog
-        open={showHistory}
-        loading={loadingHistory}
-        historyProjects={historyProjects}
-        selectedProject={selectedProject}
-        showDeleteConfirm={showDeleteConfirm}
-        deletingProject={deletingProject}
-        onCloseHistory={() => setShowHistory(false)}
-        onViewHistory={handleViewHistory}
-        onOpenDeleteConfirm={handleOpenDeleteConfirm}
-        onCloseDeleteConfirm={() => setShowDeleteConfirm(false)}
-        onConfirmDelete={handleDeleteProject}
-      />
+            open={showHistory}
+            loading={loadingHistory}
+            historyProjects={historyProjects}
+            selectedProject={selectedProject}
+            onCloseHistory={() => setShowHistory(false)}
+            onViewHistory={handleViewHistory}
+          />
     </Box>
   )
 }

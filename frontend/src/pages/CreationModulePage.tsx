@@ -54,7 +54,7 @@ const modules = [
     icon: HeadphonesIcon,
     color: '#9c27b0',
     available: true, // 启用
-    path: '/audiobook',
+    path: '/audiobook-dashboard',
   },
   {
     id: 'drama',

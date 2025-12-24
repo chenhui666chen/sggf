@@ -74,9 +74,29 @@ class AudiobookProjectRepository:
 
     @staticmethod
     def list_by_project(db: Session, project_id: int) -> List[AudiobookProject]:
+        """获取项目的有声书项目列表
+        
+        Args:
+            project_id: 项目ID
+        """
         return (
             db.query(AudiobookProject)
             .filter(AudiobookProject.project_id == project_id)
+            .order_by(AudiobookProject.created_at.desc())
+            .all()
+        )
+
+    @staticmethod
+    def list_by_user(db: Session, user_id: int) -> List[AudiobookProject]:
+        """获取用户的所有有声书项目
+        
+        Args:
+            user_id: 用户ID
+        """
+        return (
+            db.query(AudiobookProject)
+            .join(Project, Project.id == AudiobookProject.project_id)
+            .filter(Project.user_id == user_id)
             .order_by(AudiobookProject.created_at.desc())
             .all()
         )

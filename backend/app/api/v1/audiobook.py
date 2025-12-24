@@ -437,6 +437,37 @@ async def list_audiobook_projects(
     ]
 
 
+@router.get("/projects")
+async def list_user_audiobook_projects(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取用户的所有有声书项目（用于有声小说仪表盘）"""
+    audiobook_projects = AudiobookProjectRepository.list_by_user(db, current_user.id)
+    
+    # 获取项目详细信息
+    result = []
+    for ap in audiobook_projects:
+        project = ProjectRepository.get_user_project(db, current_user.id, ap.project_id)
+        if project:
+            result.append({
+                "id": ap.id,
+                "project_id": ap.project_id,
+                "project_title": project.title,
+                "project_description": project.description,
+                "status": ap.status,
+                "total_chapters": ap.total_chapters,
+                "completed_chapters": ap.completed_chapters,
+                "failed_chapters": ap.failed_chapters,
+                "total_duration": ap.total_duration,
+                "total_cost": ap.total_cost,
+                "created_at": ap.created_at.isoformat() if ap.created_at else None,
+                "updated_at": ap.updated_at.isoformat() if ap.updated_at else None,
+            })
+    
+    return result
+
+
 @router.post("/projects/{audiobook_project_id}/generate-audio-from-scripts", response_model=dict)
 async def trigger_generate_audio_from_scripts(
     audiobook_project_id: int,

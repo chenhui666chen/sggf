@@ -19,6 +19,7 @@ const WorkflowControlPage = lazy(() => import('@/pages/WorkflowControlPage'))
 const PromptEvolutionPage = lazy(() => import('@/pages/PromptEvolutionPage'))
 const AITracePage = lazy(() => import('@/pages/AITracePage'))
 const BookParserPage = lazy(() => import('@/pages/BookParserPage'))
+const AudiobookDashboardPage = lazy(() => import('@/pages/AudiobookDashboardPage'))  // 耳畔星河仪表盘
 const AudiobookPage = lazy(() => import('@/pages/AudiobookPage'))  // 耳畔星河
 const DreamWeaverPage = lazy(() => import('@/pages/DreamWeaverPage')) // 织梦映心
 const DreamWeaverMockPage = lazy(() => import('@/pages/DreamWeaverMockPage')) // 织梦映心 Mock
@@ -149,7 +150,15 @@ function App() {
             }
           />
           <Route
-            path="/audiobook"
+            path="/audiobook-dashboard"
+            element={
+              <ProtectedRoute>
+                <AudiobookDashboardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/audiobook/:projectId"
             element={
               <ProtectedRoute>
                 <AudiobookPage />
@@ -190,3 +199,4 @@ function App() {
 }
 
 export default App
+
