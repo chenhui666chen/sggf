@@ -397,6 +397,9 @@ async def get_audiobook_project(
                 "audio_path": ca.audio_path,
                 "duration": ca.duration,
                 "file_size": ca.file_size,
+                "script_status": ca.script_status or "pending",
+                "has_script": bool(ca.script_json),
+                "has_review": bool(ca.script_review_json),
             }
             for ca in chapter_audios
         ],

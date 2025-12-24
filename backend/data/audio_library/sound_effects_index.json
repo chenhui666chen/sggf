@@ -182,6 +182,66 @@
     "source": "fal-ai"
   },
   {
+    "id": "sfx_action_bc6de3",
+    "name": "老旧房间环境声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_bc6de3.wav",
+    "description": "老旧房间环境声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_a37664",
+    "name": "丹炉点燃声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_a37664.wav",
+    "description": "丹炉点燃声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_9430ab",
+    "name": "爪子轻拍声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_9430ab.wav",
+    "description": "爪子轻拍声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_e48a14",
+    "name": "小狗轻微叫声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_e48a14.wav",
+    "description": "小狗轻微叫声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
+    "id": "sfx_action_4ed7af",
+    "name": "夜晚环境声",
+    "category": "effects/action",
+    "file_path": "sound_effects/effects/action/sfx_action_4ed7af.wav",
+    "description": "夜晚环境声",
+    "tags": [
+      "action",
+      "FalAI"
+    ],
+    "source": "fal-ai"
+  },
+  {
     "id": "rain_light",
     "name": "小雨",
     "category": "core/environment",
@@ -260,11 +320,11 @@
     "source": "fal-ai-core"
   },
   {
-    "id": "sfx_action_bc6de3",
-    "name": "老旧房间环境声",
+    "id": "sfx_action_45cf22",
+    "name": "公交车驶入声",
     "category": "effects/action",
-    "file_path": "sound_effects/effects/action/sfx_action_bc6de3.wav",
-    "description": "老旧房间环境声",
+    "file_path": "sound_effects/effects/action/sfx_action_45cf22.wav",
+    "description": "公交车驶入声",
     "tags": [
       "action",
       "FalAI"
@@ -272,11 +332,11 @@
     "source": "fal-ai"
   },
   {
-    "id": "sfx_action_a37664",
-    "name": "丹炉点燃声",
+    "id": "sfx_action_f72d17",
+    "name": "发动机轰鸣声",
     "category": "effects/action",
-    "file_path": "sound_effects/effects/action/sfx_action_a37664.wav",
-    "description": "丹炉点燃声",
+    "file_path": "sound_effects/effects/action/sfx_action_f72d17.wav",
+    "description": "发动机轰鸣声",
     "tags": [
       "action",
       "FalAI"
@@ -284,11 +344,11 @@
     "source": "fal-ai"
   },
   {
-    "id": "sfx_action_9430ab",
-    "name": "爪子轻拍声",
+    "id": "sfx_action_a20f90",
+    "name": "纸张摩擦声",
     "category": "effects/action",
-    "file_path": "sound_effects/effects/action/sfx_action_9430ab.wav",
-    "description": "爪子轻拍声",
+    "file_path": "sound_effects/effects/action/sfx_action_a20f90.wav",
+    "description": "纸张摩擦声",
     "tags": [
       "action",
       "FalAI"
@@ -296,11 +356,11 @@
     "source": "fal-ai"
   },
   {
-    "id": "sfx_action_e48a14",
-    "name": "小狗轻微叫声",
+    "id": "sfx_action_784a19",
+    "name": "车门打开声",
     "category": "effects/action",
-    "file_path": "sound_effects/effects/action/sfx_action_e48a14.wav",
-    "description": "小狗轻微叫声",
+    "file_path": "sound_effects/effects/action/sfx_action_784a19.wav",
+    "description": "车门打开声",
     "tags": [
       "action",
       "FalAI"
@@ -308,11 +368,11 @@
     "source": "fal-ai"
   },
   {
-    "id": "sfx_action_4ed7af",
-    "name": "夜晚环境声",
+    "id": "sfx_action_ed1857",
+    "name": "写字声",
     "category": "effects/action",
-    "file_path": "sound_effects/effects/action/sfx_action_4ed7af.wav",
-    "description": "夜晚环境声",
+    "file_path": "sound_effects/effects/action/sfx_action_ed1857.wav",
+    "description": "写字声",
     "tags": [
       "action",
       "FalAI"

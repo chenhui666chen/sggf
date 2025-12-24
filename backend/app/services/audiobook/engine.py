@@ -366,6 +366,16 @@ class AudiobookEngine:
                     novel_genre=novel_genre
                 )
                 
+                issues_preview = [
+                    {
+                        "location": issue.location,
+                        "severity": issue.severity,
+                        "category": issue.category,
+                        "description": issue.description,
+                        "suggestion": issue.suggestion,
+                    }
+                    for issue in quality_report.issues[:20]
+                ]
                 self.task_tracker.complete_stage(task_id, StageType.QUALITY_REVIEW, metrics={
                     "overall_score": quality_report.overall_score,
                     "overall_grade": quality_report.overall_grade,
@@ -375,6 +385,7 @@ class AudiobookEngine:
                     "pacing": quality_report.pacing,
                     "revision_suggestions": quality_report.revision_suggestions,
                     "sample_segments": sample_segments,
+                    "issues": issues_preview,
                 })
                 
                 logger.info(f"   ✅ 剧本评审完成: {quality_report.overall_grade} ({quality_report.overall_score:.1f}分)")
@@ -1601,6 +1612,7 @@ class AudiobookEngine:
                     ],
                 }
 
+                issues_preview = quality_report["issues"][:20]
                 self.task_tracker.complete_stage(
                     task_id,
                     StageType.QUALITY_REVIEW,
@@ -1608,6 +1620,11 @@ class AudiobookEngine:
                         "overall_score": quality_report_obj.overall_score,
                         "overall_grade": quality_report_obj.overall_grade,
                         "issues_count": len(quality_report_obj.issues),
+                        "script_quality": quality_report_obj.script_quality,
+                        "audio_balance": quality_report_obj.audio_balance,
+                        "pacing": quality_report_obj.pacing,
+                        "revision_suggestions": quality_report_obj.revision_suggestions,
+                        "issues": issues_preview,
                     },
                 )
                 logger.info(f"   ✅ 评审完成: {quality_report_obj.overall_grade} ({quality_report_obj.overall_score:.1f}分)")

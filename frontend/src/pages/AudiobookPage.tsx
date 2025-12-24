@@ -143,7 +143,7 @@ interface ScriptEditorDialogProps {
   data: {
     scriptStatus: string
     scriptSegments: any[]
-    scriptReview: any | null
+    scriptReview: ScriptReviewDetail | null
   } | null
   onClose: () => void
   onChangeSegmentText: (index: number, value: string) => void
@@ -189,6 +189,49 @@ interface VoiceCatalogMeta {
   updated_at?: string
   source?: string
   voice_count?: number
+}
+
+interface ScriptReviewIssue {
+  location?: string
+  severity?: string
+  category?: string
+  description?: string
+  suggestion?: string
+}
+
+interface ScriptQualityMetrics {
+  naturalness_score?: number
+  clarity_score?: number
+  engagement_score?: number
+  total_segments?: number
+  average_segment_length?: number
+}
+
+interface ScriptAudioBalanceMetrics {
+  sound_effects?: string
+  music?: string
+  voice_differentiation?: string
+  total_effects?: number
+  total_music_cues?: number
+  effects_per_minute?: number
+}
+
+interface ScriptPacingMetrics {
+  estimated_duration?: string
+  pacing_issues?: string[]
+  average_segment_duration?: string
+  total_segments?: number
+}
+
+interface ScriptReviewDetail {
+  overall_score?: number
+  overall_grade?: string
+  issues_count?: number
+  script_quality?: ScriptQualityMetrics
+  audio_balance?: ScriptAudioBalanceMetrics
+  pacing?: ScriptPacingMetrics
+  revision_suggestions?: string[]
+  issues?: ScriptReviewIssue[]
 }
 
 const DEFAULT_NARRATOR_BY_MODEL = {
@@ -329,6 +372,317 @@ const normalizeTaskStatusResponse = (payload: any): TaskStatus => {
 
 const AUDIOBOOK_SESSION_STORAGE_KEY = 'audiobook_active_session_v1'
 
+type NavigationType = PerformanceNavigationTiming['type'] | 'navigate' | 'reload' | 'back_forward'
+
+const detectNavigationType = (): NavigationType => {
+  if (typeof window === 'undefined' || typeof performance === 'undefined') {
+    return 'navigate'
+  }
+  try {
+    if (typeof performance.getEntriesByType === 'function') {
+      const entries = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[]
+      if (entries && entries.length > 0) {
+        return entries[0].type
+      }
+    }
+    const legacyNav = (performance as any).navigation
+    if (legacyNav) {
+      switch (legacyNav.type) {
+        case legacyNav.TYPE_RELOAD:
+          return 'reload'
+        case legacyNav.TYPE_BACK_FORWARD:
+          return 'back_forward'
+        default:
+          return 'navigate'
+      }
+    }
+  } catch (error) {
+    console.warn('无法检测导航类型:', error)
+  }
+  return 'navigate'
+}
+
+const ISSUE_DISPLAY_LIMIT = 20
+
+const isSamePathReferrer = () => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return false
+  }
+  try {
+    if (!document.referrer) return false
+    const refUrl = new URL(document.referrer)
+    return refUrl.origin === window.location.origin && refUrl.pathname === window.location.pathname
+  } catch {
+    return false
+  }
+}
+
+const severityColorMap: Record<string, 'default' | 'error' | 'warning' | 'info'> = {
+  critical: 'error',
+  major: 'warning',
+  minor: 'info',
+}
+
+const severityLabelMap: Record<string, string> = {
+  critical: '严重',
+  major: '重要',
+  minor: '提示',
+}
+
+const categoryLabelMap: Record<string, string> = {
+  script: '剧本',
+  audio: '音频',
+  pacing: '节奏',
+}
+
+const normalizeScriptReview = (raw: any): ScriptReviewDetail | null => {
+  if (!raw || typeof raw !== 'object') return null
+  const safeIssues = Array.isArray(raw.issues) ? raw.issues : []
+  return {
+    overall_score: typeof raw.overall_score === 'number' ? raw.overall_score : undefined,
+    overall_grade: raw.overall_grade,
+    issues_count:
+      typeof raw.issues_count === 'number'
+        ? raw.issues_count
+        : safeIssues.length,
+    script_quality: raw.script_quality,
+    audio_balance: raw.audio_balance,
+    pacing: raw.pacing,
+    revision_suggestions: Array.isArray(raw.revision_suggestions) ? raw.revision_suggestions : [],
+    issues: safeIssues,
+  }
+}
+
+const formatTenScale = (value?: number) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—'
+  return value.toFixed(1)
+}
+
+const formatOneDecimal = (value?: number) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—'
+  return value.toFixed(1)
+}
+
+const ScriptReviewReport = ({ review }: { review: ScriptReviewDetail | null }) => {
+  if (!review) return null
+  const scriptQuality = review.script_quality || {}
+  const audioBalance = review.audio_balance || {}
+  const pacing = review.pacing || {}
+  const issues = review.issues || []
+  const suggestions = review.revision_suggestions || []
+  const extraIssues =
+    (review.issues_count || issues.length || 0) > ISSUE_DISPLAY_LIMIT
+      ? (review.issues_count || issues.length || 0) - ISSUE_DISPLAY_LIMIT
+      : 0
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Box>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+          总体评分
+        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 70,
+              height: 70,
+              borderRadius: '50%',
+              backgroundColor:
+                (review.overall_score || 0) >= 8
+                  ? 'rgba(76, 175, 80, 0.15)'
+                  : (review.overall_score || 0) >= 6
+                  ? 'rgba(255, 152, 0, 0.15)'
+                  : 'rgba(244, 67, 54, 0.15)',
+            }}
+          >
+            <Typography
+              variant="h5"
+              sx={{
+                fontWeight: 600,
+                color:
+                  (review.overall_score || 0) >= 8
+                    ? '#2e7d32'
+                    : (review.overall_score || 0) >= 6
+                    ? '#f57c00'
+                    : '#c62828',
+              }}
+            >
+              {typeof review.overall_score === 'number'
+                ? review.overall_score.toFixed(1)
+                : '—'}
+            </Typography>
+          </Box>
+          <Box>
+            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+              等级：{review.overall_grade || 'N/A'}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              问题数：{review.issues_count ?? issues.length ?? 0}
+            </Typography>
+          </Box>
+        </Box>
+        {suggestions.length > 0 && (
+          <Alert severity="info" sx={{ mb: 1 }}>
+            {suggestions[0]}
+            {suggestions.length > 1 && (
+              <Typography variant="caption" component="div">
+                其余建议在下方详列
+              </Typography>
+            )}
+          </Alert>
+        )}
+      </Box>
+
+      <Divider textAlign="left">剧本质量</Divider>
+      <Grid container spacing={1}>
+        <Grid item xs={4}>
+          <Typography variant="caption" color="text.secondary">
+            自然流畅度
+          </Typography>
+          <Typography variant="subtitle2">{formatTenScale(scriptQuality.naturalness_score)}/10</Typography>
+        </Grid>
+        <Grid item xs={4}>
+          <Typography variant="caption" color="text.secondary">
+            信息清晰度
+          </Typography>
+          <Typography variant="subtitle2">{formatTenScale(scriptQuality.clarity_score)}/10</Typography>
+        </Grid>
+        <Grid item xs={4}>
+          <Typography variant="caption" color="text.secondary">
+            听觉张力
+          </Typography>
+          <Typography variant="subtitle2">{formatTenScale(scriptQuality.engagement_score)}/10</Typography>
+        </Grid>
+      </Grid>
+      <Typography variant="caption" color="text.secondary">
+        片段数：{scriptQuality.total_segments ?? '—'} · 平均片段长度：
+        {typeof scriptQuality.average_segment_length === 'number'
+          ? `${formatOneDecimal(scriptQuality.average_segment_length)} 字`
+          : '—'}
+      </Typography>
+
+      <Divider textAlign="left">音频平衡</Divider>
+      <List dense>
+        <ListItem disableGutters>
+          <ListItemText
+            primary="音效密度"
+            secondary={
+              audioBalance.sound_effects
+                ? `${audioBalance.sound_effects}（≈ ${formatOneDecimal(audioBalance.effects_per_minute)} / 分钟）`
+                : '—'
+            }
+          />
+        </ListItem>
+        <ListItem disableGutters>
+          <ListItemText
+            primary="配乐覆盖"
+            secondary={
+              audioBalance.music
+                ? `${audioBalance.music}（共 ${audioBalance.total_music_cues ?? 0} 个提示）`
+                : '—'
+            }
+          />
+        </ListItem>
+        <ListItem disableGutters>
+          <ListItemText
+            primary="角色音色区分"
+            secondary={audioBalance.voice_differentiation || '—'}
+          />
+        </ListItem>
+      </List>
+
+      <Divider textAlign="left">节奏评估</Divider>
+      <List dense>
+        <ListItem disableGutters>
+          <ListItemText
+            primary="预计成品时长"
+            secondary={pacing.estimated_duration || '—'}
+          />
+        </ListItem>
+        <ListItem disableGutters>
+          <ListItemText
+            primary="平均片段朗读时长"
+            secondary={pacing.average_segment_duration || '—'}
+          />
+        </ListItem>
+        {pacing.pacing_issues?.length ? (
+          pacing.pacing_issues.map((issue, idx) => (
+            <ListItem key={idx} disableGutters>
+              <ListItemText
+                primaryTypographyProps={{ variant: 'body2' }}
+                primary={`节奏提示 ${idx + 1}`}
+                secondary={issue}
+              />
+            </ListItem>
+          ))
+        ) : (
+          <ListItem disableGutters>
+            <ListItemText secondary="节奏稳定，未发现明显问题" />
+          </ListItem>
+        )}
+      </List>
+
+      <Divider textAlign="left">问题清单</Divider>
+      {issues.length > 0 ? (
+        <List dense>
+          {issues.slice(0, ISSUE_DISPLAY_LIMIT).map((issue, idx) => {
+            const severityKey = (issue.severity || '').toLowerCase()
+            const color = severityColorMap[severityKey] || 'default'
+            const categoryLabel = categoryLabelMap[(issue.category || '').toLowerCase()] || issue.category || '其他'
+            const severityLabel = severityLabelMap[severityKey] || issue.severity || '未分级'
+            return (
+              <ListItem key={`${issue.location || idx}-${idx}`} alignItems="flex-start" sx={{ mb: 1 }}>
+                <ListItemText
+                  primary={
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                      <Chip label={severityLabel} size="small" color={color} />
+                      <Chip label={categoryLabel} size="small" variant="outlined" />
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {issue.description || '未提供描述'}
+                      </Typography>
+                    </Box>
+                  }
+                  secondary={
+                    issue.suggestion ? (
+                      <Typography variant="body2" color="text.secondary">
+                        建议：{issue.suggestion}
+                      </Typography>
+                    ) : undefined
+                  }
+                />
+              </ListItem>
+            )
+          })}
+        </List>
+      ) : (
+        <Typography variant="body2" color="text.secondary">
+          未找到具体问题，整体表现稳定。
+        </Typography>
+      )}
+      {extraIssues > 0 && (
+        <Typography variant="caption" color="text.secondary">
+          另有 {extraIssues} 条问题记录，可在导出报告或后台数据库中查看全部明细。
+        </Typography>
+      )}
+
+      {suggestions.length > 1 && (
+        <>
+          <Divider textAlign="left">修订建议</Divider>
+          <List dense>
+            {suggestions.map((s, idx) => (
+              <ListItem key={idx} disableGutters>
+                <ListItemText primary={`建议 ${idx + 1}`} secondary={s} />
+              </ListItem>
+            ))}
+          </List>
+        </>
+      )}
+    </Box>
+  )
+}
 
 
 function ScriptEditorDialog({
@@ -395,63 +749,7 @@ function ScriptEditorDialog({
               </Typography>
               {data.scriptReview ? (
                 <Paper variant="outlined" sx={{ p: 2, maxHeight: 520, overflow: 'auto' }}>
-                  {/* 总体评分 */}
-                  {/* 保留原有的复杂展示逻辑 */}
-                  {/* 为节省篇幅，这里复用原有 JSX，不再细化拆分 */}
-                  {/* 由于只是抽成组件，内部结构不变 */}
-                  {/* BEGIN: 总体评分 & 分项评分 & 修订建议 & 问题列表 */}
-                  {/* 这一段直接从原 Dialog 中复制，略过注释修改 */}
-                  <Box sx={{ mb: 2 }}>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-                      总体评分
-                    </Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
-                      <Box
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          width: 60,
-                          height: 60,
-                          borderRadius: '50%',
-                          backgroundColor:
-                            data.scriptReview.overall_score >= 8
-                              ? 'rgba(76, 175, 80, 0.15)'
-                              : data.scriptReview.overall_score >= 6
-                              ? 'rgba(255, 152, 0, 0.15)'
-                              : 'rgba(244, 67, 54, 0.15)',
-                        }}
-                      >
-                        <Typography
-                          variant="h5"
-                          sx={{
-                            fontWeight: 600,
-                            color:
-                              data.scriptReview.overall_score >= 8
-                                ? '#2e7d32'
-                                : data.scriptReview.overall_score >= 6
-                                ? '#f57c00'
-                                : '#c62828',
-                          }}
-                        >
-                          {data.scriptReview.overall_score?.toFixed
-                            ? data.scriptReview.overall_score.toFixed(1)
-                            : data.scriptReview.overall_score}
-                        </Typography>
-                      </Box>
-                      <Box>
-                        <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                          等级：{data.scriptReview.overall_grade || 'N/A'}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          问题数：
-                          {data.scriptReview.issues_count ?? (data.scriptReview.issues?.length ?? 0)}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  </Box>
-                  {/* 其余详细 JSX 继续保留在原组件中 */}
-                  {/* END: 详细评分与问题列表等 */}
+                  <ScriptReviewReport review={data.scriptReview} />
                 </Paper>
               ) : (
                 <Typography variant="body2" color="text.secondary">
@@ -685,7 +983,7 @@ const AudiobookPage = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deletingProject, setDeletingProject] = useState<any | null>(null)
   const [scriptReviewDialogOpen, setScriptReviewDialogOpen] = useState(false)
-  const [scriptReviewData, setScriptReviewData] = useState<{ report: any; segments: any[] } | null>(null)
+  const [scriptReviewData, setScriptReviewData] = useState<{ report: ScriptReviewDetail; segments: any[] } | null>(null)
   const [scriptEditorDialogOpen, setScriptEditorDialogOpen] = useState(false)
   const [scriptEditorChapter, setScriptEditorChapter] = useState<{ chapterId: number; title: string } | null>(null)
   const [scriptEditorData, setScriptEditorData] = useState<{
@@ -732,6 +1030,7 @@ const AudiobookPage = () => {
 
   const audioRef = useMemo(() => new Audio(), [])
   const sessionHydratedRef = useRef(false)
+  const navigationTypeRef = useRef<NavigationType>(typeof window === 'undefined' ? null : detectNavigationType())
   const selectedProjectId = selectedProject?.id ?? null
   const activeTaskStatus = useMemo(() => {
     if (currentTaskId && taskStatuses[currentTaskId]) {
@@ -1245,6 +1544,14 @@ const AudiobookPage = () => {
       return
     }
 
+    const navType = navigationTypeRef.current
+    const shouldRestore = navType === 'reload' || navType === 'back_forward' || isSamePathReferrer()
+    if (!shouldRestore) {
+      localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
+      sessionHydratedRef.current = true
+      return
+    }
+
     let cancelled = false
 
     const restoreSession = async () => {
@@ -1579,7 +1886,7 @@ const AudiobookPage = () => {
       return
     }
     const metrics = stage.metrics
-    const report = {
+    const report = normalizeScriptReview({
       overall_score: metrics.overall_score,
       overall_grade: metrics.overall_grade,
       issues_count: metrics.issues_count,
@@ -1587,6 +1894,11 @@ const AudiobookPage = () => {
       audio_balance: metrics.audio_balance,
       pacing: metrics.pacing,
       revision_suggestions: metrics.revision_suggestions,
+      issues: metrics.issues,
+    })
+    if (!report) {
+      setSnackbar({ open: true, message: '暂未获取到完整的评审详情', severity: 'error' })
+      return
     }
     const segments = metrics.sample_segments || []
     setScriptReviewData({ report, segments })
@@ -1620,7 +1932,7 @@ const AudiobookPage = () => {
       setScriptEditorData({
         scriptStatus: data.script_status || 'pending',
         scriptSegments: data.script_segments || [],
-        scriptReview: data.script_review ?? null,
+        scriptReview: normalizeScriptReview(data.script_review),
       })
       setScriptEditorDialogOpen(true)
     } catch (err: any) {
@@ -3035,34 +3347,42 @@ const AudiobookPage = () => {
                           </Tooltip>
                         </Box>
                         <Box sx={{ display: 'flex', gap: 1, mt: 0.5, flexWrap: 'wrap' }}>
-                          <Chip
-                            label={
-                              chapterAudio.script_status === 'approved'
-                                ? '剧本：已审批'
-                                : chapterAudio.script_status === 'reviewed'
-                                ? '剧本：已修改'
-                                : chapterAudio.script_status
-                                ? '剧本：待处理'
-                                : '剧本：未生成'
+                          {(() => {
+                            const status = chapterAudio.script_status || 'pending'
+                            const scriptHasContent = chapterAudio.has_script
+                            let label = '剧本：未生成'
+                            let bg = 'rgba(158, 158, 158, 0.12)'
+                            let color = '#616161'
+
+                            if (status === 'approved') {
+                              label = '剧本：已审批'
+                              bg = 'rgba(76, 175, 80, 0.15)'
+                              color = '#2e7d32'
+                            } else if (status === 'reviewed') {
+                              label = '剧本：已修改'
+                              bg = 'rgba(33, 150, 243, 0.12)'
+                              color = '#1565c0'
+                            } else if (scriptHasContent) {
+                              label = '剧本：已生成'
+                              bg = 'rgba(156, 39, 176, 0.10)'
+                              color = '#7b1fa2'
+                            } else if (status) {
+                              label = '剧本：待处理'
                             }
-                            size="small"
-                            sx={{
-                              backgroundColor:
-                                chapterAudio.script_status === 'approved'
-                                  ? 'rgba(76, 175, 80, 0.15)'
-                                  : chapterAudio.script_status === 'reviewed'
-                                  ? 'rgba(33, 150, 243, 0.12)'
-                                  : 'rgba(158, 158, 158, 0.12)',
-                              color:
-                                chapterAudio.script_status === 'approved'
-                                  ? '#2e7d32'
-                                  : chapterAudio.script_status === 'reviewed'
-                                  ? '#1565c0'
-                                  : '#616161',
-                              fontSize: '0.75rem',
-                              height: 22,
-                            }}
-                          />
+
+                            return (
+                              <Chip
+                                label={label}
+                                size="small"
+                                sx={{
+                                  backgroundColor: bg,
+                                  color,
+                                  fontSize: '0.75rem',
+                                  height: 22,
+                                }}
+                              />
+                            )
+                          })()}
                           <Chip
                             label={chapterAudio.audio_path ? '音频：已生成' : '音频：未生成'}
                             size="small"
@@ -3240,32 +3560,9 @@ const AudiobookPage = () => {
             </Typography>
           ) : (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <Box>
-                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                  总体评分
-                </Typography>
-                <Typography variant="body2" sx={{ mt: 0.5 }}>
-                  评分：
-                  {scriptReviewData.report.overall_score?.toFixed
-                    ? scriptReviewData.report.overall_score.toFixed(1)
-                    : scriptReviewData.report.overall_score}{' '}
-                  （{scriptReviewData.report.overall_grade || 'N/A'}），问题数：
-                  {scriptReviewData.report.issues_count ?? 0}
-                </Typography>
-                {scriptReviewData.report.revision_suggestions && (
-                  <Box sx={{ mt: 1 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 500, mb: 0.5 }}>
-                      建议：
-                    </Typography>
-                    {scriptReviewData.report.revision_suggestions.map((s: string, idx: number) => (
-                      <Typography key={idx} variant="body2" color="text.secondary">
-                        ? {s}
-                      </Typography>
-                    ))}
-                  </Box>
-                )}
-              </Box>
+              <ScriptReviewReport review={scriptReviewData.report} />
 
+              <Divider />
               <Divider />
 
               <Box>
@@ -3341,4 +3638,3 @@ const AudiobookPage = () => {
 }
 
 export default AudiobookPage
-
