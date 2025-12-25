@@ -9,9 +9,13 @@ MusicComposer - 音乐设计师Agent（AI增强版）
 """
 
 import logging
+import asyncio
+import hashlib
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 # 导入AI音乐生成器
 try:
@@ -20,8 +24,6 @@ try:
 except ImportError:
     logger.warning("⚠️ AI音乐生成模块未安装，将使用静态音乐库")
     AI_MUSIC_AVAILABLE = False
-
-logger = logging.getLogger(__name__)
 
 
 class MusicType(str, Enum):
@@ -78,6 +80,8 @@ class MusicComposer:
         self.music_library = self._init_music_library()
         self.prompt_library = self._init_prompt_library()
         self.music_cues: List[MusicCue] = []
+        self._chapter_total_duration: float = 600.0
+        self._music_pool_cache: Dict[str, List[str]] = {}
         
         # AI音乐生成器
         self.enable_ai = enable_ai and AI_MUSIC_AVAILABLE
@@ -267,23 +271,33 @@ class MusicComposer:
         logger.info("🎼 设计音乐方案...")
         
         music_cues = []
+        self._chapter_total_duration = float(chapter_structure.get("total_duration") or 0.0) or 600.0
+
+        chapter_id = chapter_structure.get("chapter_id")
+        audiobook_project_id = chapter_structure.get("audiobook_project_id")
         
         # 1. 开场音乐（低密度时可跳过）
         if not skip_intro_outro:
-            opening_cue = self._create_opening_music(chapter_structure)
+            opening_cue = await self._create_opening_music_async(chapter_structure)
             if opening_cue:
                 music_cues.append(opening_cue)
         
         # 2. 场景音乐
         for scene in chapter_structure.get("scenes", []):
-            scene_cue = await self._design_scene_music(scene)
+            scene_with_ids = dict(scene or {})
+            if chapter_id is not None:
+                scene_with_ids["chapter_id"] = chapter_id
+            if audiobook_project_id is not None:
+                scene_with_ids["audiobook_project_id"] = audiobook_project_id
+
+            scene_cue = await self._design_scene_music(scene_with_ids)
             if scene_cue:
                 music_cues.append(scene_cue)
         
         # 3. 结尾音乐（低密度时可跳过）
         if not skip_intro_outro:
             total_duration = chapter_structure.get("total_duration", 0)
-            ending_cue = self._create_ending_music(total_duration)
+            ending_cue = await self._create_ending_music_async(float(total_duration or 0.0))
             if ending_cue:
                 music_cues.append(ending_cue)
         
@@ -291,6 +305,78 @@ class MusicComposer:
         logger.info(f"   ✅ 设计完成: {len(music_cues)} 个音乐提示")
         
         return music_cues
+
+    async def _create_opening_music_async(
+        self,
+        chapter_structure: Dict[str, Any],
+    ) -> Optional[MusicCue]:
+        """创建开场音乐（优先AI，降级静态库）。"""
+        overall_mood = chapter_structure.get("overall_mood", "mysterious")
+
+        if self.enable_ai and self.ai_generator:
+            try:
+                bucket = f"opening:{overall_mood}"
+                prompt = self.prompt_library.get("opening", "") or f"{overall_mood}氛围的开场主题音乐，纯音乐，无人声"
+                result = await self.ai_generator.generate_for_bucket(
+                    prompt=prompt,
+                    mood=str(overall_mood),
+                    duration=15,
+                    variant=0,
+                    bucket=bucket,
+                )
+                if result.success and result.audio_file_path:
+                    return MusicCue(
+                        scene_id="opening",
+                        timestamp=0.0,
+                        music_type=MusicType.OPENING,
+                        mood=MusicMood(overall_mood),
+                        description="开场音乐（AI）",
+                        audio_file=result.audio_file_path,
+                        volume=0.3,
+                        fade_in=2000 / 1000.0,
+                        fade_out=4000 / 1000.0,
+                        duration=15.0,
+                        sync_with_dialogue=True,
+                    )
+            except Exception as e:
+                logger.warning(f"⚠️ 开场音乐AI生成失败，降级到静态库: {e}")
+
+        return self._create_opening_music(chapter_structure)
+
+    async def _create_ending_music_async(
+        self,
+        chapter_duration: float,
+    ) -> Optional[MusicCue]:
+        """创建结尾音乐（优先AI，降级静态库）。"""
+        if self.enable_ai and self.ai_generator:
+            try:
+                bucket = "ending:peaceful"
+                prompt = self.prompt_library.get("ending", "") or "章节尾声/收尾配乐，留白与余韵，纯音乐，无人声"
+                result = await self.ai_generator.generate_for_bucket(
+                    prompt=prompt,
+                    mood="peaceful",
+                    duration=20,
+                    variant=0,
+                    bucket=bucket,
+                )
+                if result.success and result.audio_file_path:
+                    return MusicCue(
+                        scene_id="ending",
+                        timestamp=max(0.0, float(chapter_duration or 0.0) - 20.0),
+                        music_type=MusicType.ENDING,
+                        mood=MusicMood.PEACEFUL,
+                        description="结尾音乐（AI）",
+                        audio_file=result.audio_file_path,
+                        volume=0.25,
+                        fade_in=3.0,
+                        fade_out=5.0,
+                        duration=20.0,
+                        sync_with_dialogue=False,
+                    )
+            except Exception as e:
+                logger.warning(f"⚠️ 结尾音乐AI生成失败，降级到静态库: {e}")
+
+        return self._create_ending_music(chapter_duration)
     
     def _create_opening_music(
         self,
@@ -328,12 +414,10 @@ class MusicComposer:
         duration = scene.get("duration", 60.0)
         scene_description = scene.get("description", "场景")
         
-        # 使用提示库增强场景描述，便于AI生成更贴合的配乐
-        prompt_template = self._select_ai_prompt_for_scene(scene)
-        if prompt_template:
-            enhanced_description = f"{prompt_template}\n\n场景描述：{scene_description}"
-        else:
-            enhanced_description = scene_description
+        # 选择“可复用桶”的基准风格提示词：避免每个场景都拼接细节，导致缓存无法命中
+        bucket_prompt = self._select_ai_prompt_for_scene(scene) or ""
+        if not bucket_prompt:
+            bucket_prompt = f"{mood}氛围的影视配乐风格背景音乐，纯音乐，无人声，适合长篇小说朗读作底色"
             
         # 只为关键场景（高潮、转折）添加音乐
         is_key_scene = scene.get("is_climax", False) or scene.get("is_turning_point", False)
@@ -345,7 +429,8 @@ class MusicComposer:
         if self.enable_ai and self.ai_generator:
             try:
                 return await self._generate_scene_music_with_ai(
-                    scene_description=enhanced_description,
+                    scene=scene,
+                    bucket_prompt=bucket_prompt,
                     mood=mood,
                     start_time=start_time,
                     duration=min(duration, 120.0)
@@ -529,7 +614,7 @@ class MusicComposer:
         
         # 逐个添加，直到达到覆盖率上限
         current_coverage = sum(c.duration for c in optimized_cues)
-        max_allowed_duration = max_music_coverage * 600  # 假设章节10分钟
+        max_allowed_duration = max_music_coverage * float(getattr(self, "_chapter_total_duration", 600.0) or 600.0)
         
         for cue in scene_cues:
             if current_coverage + cue.duration <= max_allowed_duration:
@@ -556,7 +641,10 @@ class MusicComposer:
                     "file": cue.audio_file,
                     "volume": cue.volume,
                     "duration": cue.duration,
-                    "sync_with_dialogue": cue.sync_with_dialogue
+                    "fade_in": cue.fade_in,
+                    "fade_out": cue.fade_out,
+                    "sync_with_dialogue": cue.sync_with_dialogue,
+                    "dialogue_volume_reduction": cue.dialogue_volume_reduction,
                 }
                 for cue in sorted(self.music_cues, key=lambda x: x.timestamp)
             ]
@@ -595,39 +683,106 @@ class MusicComposer:
             stats["ai_music_stats"] = ai_stats
         
         return stats
+
+    def _stable_choice_index(self, seed: str, pool_size: int) -> int:
+        if pool_size <= 1:
+            return 0
+        digest = hashlib.md5(seed.encode("utf-8")).hexdigest()
+        return int(digest[:8], 16) % pool_size
+
+    async def _ensure_music_pool(
+        self,
+        *,
+        bucket: str,
+        mood: str,
+        prompt: str,
+        duration: int,
+        pool_size: int = 5,
+    ) -> List[str]:
+        """确保音乐池存在（每个bucket生成/命中多个变体），返回可用的相对路径列表。"""
+        if not (self.enable_ai and self.ai_generator):
+            return []
+
+        cache_key = f"{bucket}|{mood}|{duration}|{pool_size}"
+        cached = self._music_pool_cache.get(cache_key)
+        if cached:
+            return cached
+
+        tasks = [
+            self.ai_generator.generate_for_bucket(
+                prompt=prompt,
+                mood=mood,
+                duration=duration,
+                variant=i,
+                bucket=bucket,
+            )
+            for i in range(pool_size)
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        file_paths: List[str] = []
+        for r in results:
+            if isinstance(r, Exception):
+                continue
+            if getattr(r, "success", False) and getattr(r, "audio_file_path", ""):
+                file_paths.append(r.audio_file_path)
+
+        seen = set()
+        deduped: List[str] = []
+        for p in file_paths:
+            if p in seen:
+                continue
+            seen.add(p)
+            deduped.append(p)
+
+        if deduped:
+            self._music_pool_cache[cache_key] = deduped
+        return deduped
     
     async def _generate_scene_music_with_ai(
         self,
-        scene_description: str,
+        scene: Dict[str, Any],
+        bucket_prompt: str,
         mood: str,
         start_time: float,
         duration: float
     ) -> MusicCue:
-        """使用AI生成场景音乐"""
-        
-        # 调用AI生成器
-        result = await self.ai_generator.generate_for_scene(
-            scene_description=scene_description,
+        """使用AI生成场景音乐（音乐池 + 可复现随机组合）"""
+        # 固定池内片段时长，提升跨场景复用与缓存命中（避免因场景时长波动导致反复建池）
+        pool_duration = 20
+        pool_bucket = f"underscore:{mood}"
+
+        pool = await self._ensure_music_pool(
+            bucket=pool_bucket,
             mood=mood,
-            duration=int(duration)
+            prompt=bucket_prompt,
+            duration=pool_duration,
+            pool_size=5,
         )
-        
-        if not result.success:
-            raise RuntimeError(result.error_message)
-        
-        logger.info(f"   ✅ AI生成音乐成功: {result.audio_file_path}")
-        
+        if not pool:
+            raise RuntimeError("音乐池为空")
+
+        project_id = str(scene.get("audiobook_project_id") or "")
+        chapter_id = str(scene.get("chapter_id") or "")
+        scene_id = str(scene.get("scene_id") or "scene")
+        ts = str(scene.get("start_time") or start_time)
+        seed = f"{project_id}|{chapter_id}|{scene_id}|{ts}|{mood}|{pool_bucket}"
+        picked_index = self._stable_choice_index(seed, len(pool))
+        picked_file = pool[picked_index]
+
+        logger.info(f"   ✅ 音乐池选曲: bucket={pool_bucket} picked={picked_index+1}/{len(pool)}")
+
         return MusicCue(
-            scene_id=f"scene_{scene_description[:10]}",
+            scene_id=scene_id,
             timestamp=start_time,
             music_type=MusicType.UNDERSCORE,
             mood=MusicMood(mood),
-            description=f"场景音乐 - {scene_description}（AI生成）",
-            audio_file=result.audio_file_path,
+            description=f"场景音乐（AI池） - {scene.get('description', '场景')}",
+            audio_file=picked_file,
             volume=0.15,
             fade_in=3.0,
             fade_out=3.0,
-            duration=result.duration,
+            duration=min(duration, 120.0),
             sync_with_dialogue=True,
             dialogue_volume_reduction=0.6
         )

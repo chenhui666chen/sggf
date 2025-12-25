@@ -185,7 +185,14 @@ class AudioMixer:
         self,
         voice_audio: bytes,
         bgm_audio: bytes,
-        bgm_volume_offset: int = -20  # 降低背景音乐音量（dB）
+        bgm_volume_offset: int = -20,  # 降低背景音乐音量（dB）
+        position_ms: int = 0,
+        duration_ms: Optional[int] = None,
+        fade_in_ms: int = 0,
+        fade_out_ms: int = 0,
+        loop_fill: bool = True,
+        sync_with_dialogue: bool = False,
+        dialogue_volume_reduction: float = 0.0,
     ) -> bytes:
         """
         添加背景音乐（纯pydub版）
@@ -208,17 +215,57 @@ class AudioMixer:
                 # 调整BGM音量（默认-20dB）
                 bgm = bgm + bgm_volume_offset
                 
-                # 循环BGM到与人声相同长度
-                if len(bgm) < len(voice):
-                    loops_needed = (len(voice) // len(bgm)) + 1
-                    bgm = bgm * loops_needed
-                
-                # 截取BGM到与人声相同长度
-                bgm = bgm[:len(voice)]
-                
+                start_ms = max(0, int(position_ms or 0))
+                if start_ms >= len(voice):
+                    return voice_audio
+
+                if duration_ms is None:
+                    end_ms = len(voice)
+                else:
+                    end_ms = min(len(voice), start_ms + max(0, int(duration_ms)))
+
+                if end_ms <= start_ms:
+                    return voice_audio
+
+                target_len = end_ms - start_ms
+                bgm_seg = bgm
+
+                if loop_fill and len(bgm_seg) > 0 and len(bgm_seg) < target_len:
+                    loops_needed = (target_len // len(bgm_seg)) + 1
+                    bgm_seg = bgm_seg * loops_needed
+
+                bgm_seg = bgm_seg[:target_len]
+
+                if fade_in_ms > 0:
+                    bgm_seg = bgm_seg.fade_in(min(int(fade_in_ms), len(bgm_seg)))
+                if fade_out_ms > 0:
+                    bgm_seg = bgm_seg.fade_out(min(int(fade_out_ms), len(bgm_seg)))
+
+                if sync_with_dialogue and dialogue_volume_reduction and dialogue_volume_reduction > 0:
+                    try:
+                        voice_seg = voice[start_ms:end_ms]
+                        reduction_factor = max(0.0, min(1.0, 1.0 - float(dialogue_volume_reduction)))
+                        # 0.4 => -7.96dB
+                        reduction_db = 20 * math.log10(max(0.0001, reduction_factor))
+                        threshold_dbfs = -35.0
+                        chunk_ms = 300
+
+                        adjusted = AudioSegment.empty()
+                        for offset in range(0, len(bgm_seg), chunk_ms):
+                            bgm_chunk = bgm_seg[offset:offset + chunk_ms]
+                            voice_chunk = voice_seg[offset:offset + chunk_ms]
+
+                            voice_dbfs = voice_chunk.dBFS
+                            if voice_dbfs != float("-inf") and voice_dbfs > threshold_dbfs:
+                                bgm_chunk = bgm_chunk + reduction_db
+                            adjusted += bgm_chunk
+                        bgm_seg = adjusted
+                    except Exception:
+                        # ducking 失败不影响主流程
+                        pass
+
                 # 🔥 关键：使用 overlay 叠加混音（不会削弱人声）
-                # overlay 会将 BGM 叠加在人声上，不会降低人声音量
-                mixed = voice.overlay(bgm)
+                mixed = voice.overlay(bgm_seg, position=start_ms)
                 
                 # 归一化（如果启用）
                 if self.normalize_audio:
@@ -228,7 +275,9 @@ class AudioMixer:
                 output_buffer = io.BytesIO()
                 mixed.export(output_buffer, format="mp3", bitrate="128k")
                 
-                logger.info(f"✅ pydub 背景音乐混合完成：BGM音量偏移={bgm_volume_offset}dB, 混音方式=overlay（保持人声原始音量）")
+                logger.info(
+                    f"✅ pydub 背景音乐混合完成：offset={bgm_volume_offset}dB pos={start_ms}ms len={target_len}ms overlay"
+                )
                 return output_buffer.getvalue()
             except Exception as e:
                 logger.warning(f"⚠️ pydub 混音失败: {e}")

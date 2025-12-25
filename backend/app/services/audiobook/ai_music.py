@@ -13,6 +13,8 @@ import logging
 import json
 import hashlib
 import asyncio
+import threading
+import codecs
 from typing import Dict, Any, Optional
 from pathlib import Path
 from dataclasses import dataclass
@@ -22,6 +24,8 @@ import requests
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+_MUSIC_INDEX_LOCK = threading.Lock()
 
 # 全局并发控制：限制同时调用 Mureka API 的协程数量，避免触发服务端QPS限制
 # 可通过环境变量 MUREKA_MAX_CONCURRENT 配置，默认值为 1（严格顺序：一个完成再下一个）
@@ -57,6 +61,8 @@ class MusicGenerationRequest:
     tempo: str = "medium"          # 节奏：slow/medium/fast
     mood: str = "calm"             # 情绪：calm/tense/exciting/sad/mysterious
     instruments: list = None       # 乐器列表，如["piano", "strings"]
+    variant: int = 0               # 变体编号（用于同一风格生成多个候选）
+    bucket: str = ""               # 复用桶标识（用于索引/检索，不影响实际生成）
     
     def __post_init__(self):
         if self.instruments is None:
@@ -304,7 +310,7 @@ class MurekaO1Client:
                 elif status in ["failed", "error"]:
                     error_msg = status_data.get("error", {}).get("message", "未知错误")
                     raise RuntimeError(f"任务失败: {error_msg}")
-                elif status in ["preparing", "processing", "queued", "pending", "running"]:
+                elif status in ["preparing", "processing", "queued", "pending", "running", "reviewing"]:
                     # 继续等待
                     await asyncio.sleep(poll_interval)
                 else:
@@ -394,7 +400,7 @@ class MurekaO1Client:
         prompt_key = request.prompt[:100] if request.prompt else ""
         
         # 基于核心风格参数生成缓存键（而非完整prompt）
-        cache_str = f"{prompt_key}_{request.style.value}_{request.duration}_{request.tempo}_{request.mood}"
+        cache_str = f"{request.bucket}_{prompt_key}_{request.style.value}_{request.duration}_{request.tempo}_{request.mood}_{request.variant}"
         return hashlib.md5(cache_str.encode()).hexdigest()
     
     def _get_cached_music(
@@ -456,30 +462,48 @@ class MurekaO1Client:
         cache_file: Path,
     ) -> None:
         """更新本地音乐索引，便于后续检索和复用"""
+        cache_key = self._get_cache_key(request)
+        record = {
+            "id": cache_key,
+            "prompt": request.prompt,
+            "style": request.style.value,
+            "duration": request.duration,
+            "tempo": request.tempo,
+            "mood": request.mood,
+            "instruments": request.instruments,
+            "variant": request.variant,
+            "bucket": request.bucket,
+            "file_path": str(cache_file),
+            "source": "mureka",
+        }
+
         try:
-            index_data = []
-            if self.index_path.exists():
-                with self.index_path.open("r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    if isinstance(data, list):
-                        index_data = data
-            cache_key = self._get_cache_key(request)
-            record = {
-                "id": cache_key,
-                "prompt": request.prompt,
-                "style": request.style.value,
-                "duration": request.duration,
-                "tempo": request.tempo,
-                "mood": request.mood,
-                "instruments": request.instruments,
-                "file_path": str(cache_file),
-                "source": "mureka",
-            }
-            index_data = [r for r in index_data if r.get("id") != cache_key]
-            index_data.append(record)
-            self.index_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.index_path.open("w", encoding="utf-8") as f:
-                json.dump(index_data, f, ensure_ascii=False, indent=2)
+            with _MUSIC_INDEX_LOCK:
+                index_data = []
+                if self.index_path.exists():
+                    try:
+                        raw = self.index_path.read_bytes()
+                        if raw.startswith(codecs.BOM_UTF8):
+                            raw = raw[len(codecs.BOM_UTF8):]
+                        text = raw.decode("utf-8", errors="replace").lstrip("\ufeff").strip()
+                        if text:
+                            loaded = json.loads(text)
+                            if isinstance(loaded, list):
+                                index_data = loaded
+                    except Exception:
+                        # 索引损坏/并发写入导致不完整时，直接重建索引（索引只是辅助信息，不影响主流程）
+                        index_data = []
+
+                index_data = [r for r in index_data if r.get("id") != cache_key]
+                index_data.append(record)
+
+                self.index_path.parent.mkdir(parents=True, exist_ok=True)
+                tmp_path = self.index_path.with_suffix(self.index_path.suffix + ".tmp")
+                tmp_path.write_text(
+                    json.dumps(index_data, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                os.replace(tmp_path, self.index_path)
         except Exception as e:
             logger.warning(f"⚠️ 更新音乐索引失败: {e}")
     
@@ -629,6 +653,30 @@ class AIMusicGenerator:
         )
         
         logger.info(f"🎼 为场景生成音乐: {scene_description[:30]}...")
+        return await self.client.generate_music(request)
+
+    async def generate_for_bucket(
+        self,
+        prompt: str,
+        mood: str,
+        duration: int,
+        *,
+        tempo: Optional[str] = None,
+        variant: int = 0,
+        bucket: str = "",
+    ) -> MusicGenerationResult:
+        """为“可复用音乐桶”生成音乐（用于同风格多变体池）。"""
+        style = self.MOOD_TO_STYLE_MAP.get(mood, MusicStyle.AMBIENT)
+        request = MusicGenerationRequest(
+            prompt=f"{prompt}\n\nVariation: {variant}",
+            style=style,
+            duration=duration,
+            mood=mood,
+            tempo=tempo or self._infer_tempo(mood),
+            variant=variant,
+            bucket=bucket,
+        )
+        logger.info(f"🎼 为音乐桶生成音乐: bucket={bucket or 'n/a'} mood={mood} variant={variant}")
         return await self.client.generate_music(request)
     
     async def generate_theme_music(

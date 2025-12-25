@@ -307,7 +307,12 @@ class AudiobookEngine:
             # 并行执行三个设计阶段
             # 👉 关键修复：只为未配置的角色设计音色，避免覆盖用户配置
             voice_profiles, sound_effects_count, music_cues_count = await self._parallel_design(
-                task_id, script_segments, chapter_content, preserve_user_config=True  # 🔥 保留用户配置
+                task_id,
+                script_segments,
+                chapter_content,
+                preserve_user_config=True,  # 🔥 保留用户配置
+                chapter_id=chapter_id,
+                audiobook_project_id=audiobook_project_id,
             )
             
             logger.info(f"   ✅ 并行设计完成")
@@ -860,8 +865,12 @@ class AudiobookEngine:
             timestamp = item.get("timestamp", 0.0)
             volume = item.get("volume", 0.2)
             sync_with_dialogue = item.get("sync_with_dialogue", True)
+            dialogue_volume_reduction = item.get("dialogue_volume_reduction", 0.0)
             mood = item.get("mood", "peaceful")
             music_type = item.get("type", "underscore")
+            cue_duration = item.get("duration", None)
+            fade_in = item.get("fade_in", 0.0)
+            fade_out = item.get("fade_out", 0.0)
             
             # 🆕 智能音量平衡计算
             if intelligent_balance:
@@ -910,11 +919,25 @@ class AudiobookEngine:
                 logger.info(f"🎼 叠加BGM: {music_path.name} (音量: {bgm_volume_offset:.1f}dB)")
                 
                 # 使用 AudioMixer.add_background_music 叠加 BGM
-                # 注意：add_background_music 会循环 BGM 至与音频相同长度
+                position_ms = max(0, int(float(timestamp or 0.0) * 1000))
+                duration_ms = None
+                try:
+                    if cue_duration is not None:
+                        duration_ms = max(0, int(float(cue_duration) * 1000))
+                except (TypeError, ValueError):
+                    duration_ms = None
+
                 mixed_audio = self.audio_mixer.add_background_music(
                     mixed_audio,
                     bgm_bytes,
                     bgm_volume_offset=int(bgm_volume_offset),
+                    position_ms=position_ms,
+                    duration_ms=duration_ms,
+                    fade_in_ms=max(0, int(float(fade_in or 0.0) * 1000)),
+                    fade_out_ms=max(0, int(float(fade_out or 0.0) * 1000)),
+                    loop_fill=True,
+                    sync_with_dialogue=bool(sync_with_dialogue),
+                    dialogue_volume_reduction=float(dialogue_volume_reduction or 0.0),
                 )
                 logger.info(f"✅ 已叠加配乐: {music_path.name}, 音量偏移={bgm_volume_offset:.1f}dB")
             except Exception as e:
@@ -1043,7 +1066,9 @@ class AudiobookEngine:
         task_id: str,
         script_segments: List[Any],
         chapter_content: str = "",
-        preserve_user_config: bool = False  # 🆕 新参数：是否保留用户配置
+        preserve_user_config: bool = False,  # 🆕 新参数：是否保留用户配置
+        chapter_id: Optional[int] = None,
+        audiobook_project_id: Optional[int] = None,
     ) -> tuple:
         """
         并行执行音色、音效、音乐设计
@@ -1367,6 +1392,8 @@ class AudiobookEngine:
                     "total_duration": total_duration,
                     "overall_mood": overall_mood,
                     "scenes": scenes,
+                    "chapter_id": chapter_id,
+                    "audiobook_project_id": audiobook_project_id,
                 }
                 
                 # 根据密度决定是否跳过开场/结尾音乐
@@ -1813,7 +1840,11 @@ class AudiobookEngine:
             chapter_text_for_design = "".join([seg.text for seg in script_segments])
 
             voice_profiles, sound_effects_count, music_cues_count = await self._parallel_design(
-                task_id, script_segments, chapter_text_for_design
+                task_id,
+                script_segments,
+                chapter_text_for_design,
+                chapter_id=chapter_id,
+                audiobook_project_id=audiobook_project_id,
             )
 
             # ============ 阶段6：TTS合成 ============
