@@ -379,6 +379,19 @@ async def get_audiobook_project(
     # 获取章节音频列表
     chapter_audios = ChapterAudioRepository.list_by_audiobook_project(db, audiobook_project_id)
 
+    # 取章节编号，用于前端“按章节编号跨记录合并音频”
+    chapter_ids = [ca.chapter_id for ca in chapter_audios]
+    chapter_number_by_id = {}
+    if chapter_ids:
+        from app.models.project import Chapter  # 避免顶层循环依赖
+
+        rows = (
+            db.query(Chapter.id, Chapter.chapter_number)
+            .filter(Chapter.id.in_(chapter_ids))
+            .all()
+        )
+        chapter_number_by_id = {cid: cnum for cid, cnum in rows}
+
     return {
         "id": audiobook_project.id,
         "project_id": audiobook_project.project_id,
@@ -389,14 +402,15 @@ async def get_audiobook_project(
         "total_duration": audiobook_project.total_duration,
         "total_cost": audiobook_project.total_cost,
         "created_at": audiobook_project.created_at.isoformat() if audiobook_project.created_at else None,
-        "chapter_audios": [
-            {
-                "id": ca.id,
-                "chapter_id": ca.chapter_id,
-                "task_id": ca.task_id,  # 新增：返回task_id
-                "audio_path": ca.audio_path,
-                "duration": ca.duration,
-                "file_size": ca.file_size,
+	        "chapter_audios": [
+	            {
+	                "id": ca.id,
+	                "chapter_id": ca.chapter_id,
+	                "chapter_number": chapter_number_by_id.get(ca.chapter_id),
+	                "task_id": ca.task_id,  # 新增：返回task_id
+	                "audio_path": ca.audio_path,
+	                "duration": ca.duration,
+	                "file_size": ca.file_size,
                 "script_status": ca.script_status or "pending",
                 "has_script": bool(ca.script_json),
                 "has_review": bool(ca.script_review_json),

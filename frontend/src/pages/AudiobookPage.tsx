@@ -158,7 +158,7 @@ interface HistoryDialogProps {
   selectedProject: Project | null
   onCloseHistory: () => void
   onViewHistory: (audiobookProjectId: number) => Promise<void>
-  onDeleteHistory: (audiobookProjectId: number, deleteFiles?: boolean) => Promise<void>
+  onDeleteHistory: (audiobookProjectId: number) => Promise<void>
 }
 
 interface VoiceDefaultParams {
@@ -798,26 +798,20 @@ function HistoryDialog({
 }: HistoryDialogProps) {
   const [deleteProjectId, setDeleteProjectId] = useState<number | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [confirmText, setConfirmText] = useState('')
-  const [deleteFiles, setDeleteFiles] = useState(false)
   
   const handleOpenDeleteDialog = (projectId: number) => {
     setDeleteProjectId(projectId)
     setDeleteDialogOpen(true)
-    setConfirmText('')
-    setDeleteFiles(false)
   }
   
   const handleCloseDeleteDialog = () => {
     setDeleteDialogOpen(false)
     setDeleteProjectId(null)
-    setConfirmText('')
-    setDeleteFiles(false)
   }
   
   const handleConfirmDelete = async () => {
-    if (deleteProjectId && confirmText === 'DELETE') {
-      await onDeleteHistory(deleteProjectId, deleteFiles)
+    if (deleteProjectId) {
+      await onDeleteHistory(deleteProjectId)
       handleCloseDeleteDialog()
     }
   }
@@ -938,8 +932,8 @@ function HistoryDialog({
       </DialogActions>
     </Dialog>
     
-    {/* 删除确认对话框 */}
-    <Dialog open={deleteDialogOpen} onClose={handleCloseDeleteDialog}>
+	    {/* 删除确认对话框 */}
+	    <Dialog open={deleteDialogOpen} onClose={handleCloseDeleteDialog}>
       <DialogTitle>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <WarningIcon sx={{ color: '#f44336' }} />
@@ -953,55 +947,27 @@ function HistoryDialog({
         <Typography variant="body1" sx={{ mb: 2 }}>
           确定要删除这个有声书项目吗？
         </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          项目ID: {deleteProjectId}
-        </Typography>
-        <FormControlLabel
-          control={
-            <Checkbox
-              checked={deleteFiles}
-              onChange={(e) => setDeleteFiles(e.target.checked)}
-              sx={{ color: '#f44336' }}
-            />
-          }
-          label={
-            <Typography variant="body2" color="text.secondary">
-              同时删除音频文件（不可恢复）
-            </Typography>
-          }
-          sx={{ mb: 2, display: 'flex', alignItems: 'flex-start' }}
-        />
-        <Alert severity="info" sx={{ mb: 2 }}>
-          请输入 "DELETE" 以确认删除操作
-        </Alert>
-        <TextField
-          fullWidth
-          variant="outlined"
-          placeholder="请输入 DELETE"
-          value={confirmText}
-          onChange={(e) => setConfirmText(e.target.value)}
-          sx={{ mb: 2 }}
-        />
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={handleCloseDeleteDialog}>取消</Button>
-        <Button 
-          onClick={handleConfirmDelete} 
-          variant="contained" 
-          disabled={confirmText !== 'DELETE'}
-          sx={{
-            backgroundColor: '#f44336',
-            '&:hover': { backgroundColor: '#d32f2f' },
-            '&.Mui-disabled': {
-              backgroundColor: '#f44336',
-              opacity: 0.5,
-            }
-          }}
-        >
-          确认删除
-        </Button>
-      </DialogActions>
-    </Dialog>
+	        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+	          项目ID: {deleteProjectId}
+	        </Typography>
+	        <Alert severity="info" sx={{ mb: 2 }}>
+	          将默认同时删除音频文件（不可恢复）。
+	        </Alert>
+	      </DialogContent>
+	      <DialogActions>
+	        <Button onClick={handleCloseDeleteDialog}>取消</Button>
+	        <Button 
+	          onClick={handleConfirmDelete} 
+	          variant="contained" 
+	          sx={{
+	            backgroundColor: '#f44336',
+	            '&:hover': { backgroundColor: '#d32f2f' },
+	          }}
+	        >
+	          确认删除
+	        </Button>
+	      </DialogActions>
+	    </Dialog>
     </>
   )
 }
@@ -1011,6 +977,10 @@ const steps = ['配置音色', '生成有声书', '完成']
 const AudiobookPage = () => {
   const navigate = useNavigate()
   const { projectId } = useParams<{ projectId: string }>()
+  const routeProjectId = useMemo(() => {
+    const id = Number(projectId)
+    return Number.isFinite(id) ? id : null
+  }, [projectId])
 
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
@@ -1381,9 +1351,9 @@ const AudiobookPage = () => {
   }
   
   // 新增：删除历史项目
-  const handleDeleteHistory = async (audiobookProjectId: number, deleteFiles?: boolean) => {
+  const handleDeleteHistory = async (audiobookProjectId: number) => {
     try {
-      await apiClient.deleteAudiobookProject(audiobookProjectId, { delete_files: deleteFiles })
+      await apiClient.deleteAudiobookProject(audiobookProjectId, { delete_files: true })
       setSnackbar({ open: true, message: '项目已删除', severity: 'success' })
       // 重新获取历史记录以更新列表
       await fetchHistory()
@@ -2182,8 +2152,16 @@ const AudiobookPage = () => {
 
   // 开始生成
   const handleGenerate = async () => {
-    if (!selectedProject || selectedChapters.length === 0) {
+    if (generating) return
+
+    if (selectedChapters.length === 0) {
       setSnackbar({ open: true, message: '请至少选择一个章节', severity: 'error' })
+      return
+    }
+
+    const projectIdForRequest = selectedProject?.id ?? routeProjectId
+    if (!projectIdForRequest) {
+      setSnackbar({ open: true, message: '项目尚未加载完成，请稍后重试', severity: 'error' })
       return
     }
     
@@ -2195,7 +2173,7 @@ const AudiobookPage = () => {
     try {
       // 调用生成API
       // 先保存本次的项目级音频配置（角色音 + 音效/BGM），用于下次自动带出
-      if (selectedProject) {
+      if (projectIdForRequest) {
         const projectAudioConfigBody: ProjectAudioConfig = {
           characters: characterVoices
             .filter((cv) => cv.voiceId || cv.name === '旁白')  // 修复：旁白即使 voiceId 为空也保留，让后端使用默认音色
@@ -2211,7 +2189,7 @@ const AudiobookPage = () => {
         }
 
         try {
-          await apiClient.updateProjectAudioConfig(selectedProject.id, projectAudioConfigBody, ttsModel)
+          await apiClient.updateProjectAudioConfig(projectIdForRequest, projectAudioConfigBody, ttsModel)
         } catch (err) {
           console.warn('保存项目音频配置失败:', err)
         }
@@ -2229,7 +2207,7 @@ const AudiobookPage = () => {
           }))
 
       const response = await apiClient.createAudiobookProject({
-        project_id: selectedProject.id,
+        project_id: projectIdForRequest,
         chapter_ids: selectedChapters,
         tts_provider: 'aliyun',
         enable_cache: true,
@@ -3148,7 +3126,7 @@ const AudiobookPage = () => {
               <Button
                 variant="contained"
                 onClick={handleGenerate}
-                disabled={selectedChapters.length === 0}
+                disabled={selectedChapters.length === 0 || generating || !(selectedProject?.id ?? routeProjectId)}
                 sx={{
                   backgroundColor: '#9c27b0',
                   '&:hover': { backgroundColor: '#7b1fa2' },

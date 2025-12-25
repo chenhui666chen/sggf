@@ -866,6 +866,7 @@ class TTSEngine:
         import base64
         import urllib.error
         import urllib.request
+        import urllib.parse
         import wave
         import audioop
 
@@ -1036,15 +1037,49 @@ class TTSEngine:
                 return _apply_volume_wav(audio_bytes)
 
             if not audio_url:
-                logger.error("Qwen-TTS 响应中未找到音频URL: %s", response)
+                try:
+                    preview = response.to_dict()  # type: ignore[attr-defined]
+                except Exception:  # noqa: BLE001
+                    preview = None
+                logger.error("Qwen-TTS 响应中未找到音频URL: %s", preview or response)
                 return b""
 
+            parsed = urllib.parse.urlparse(audio_url)
+            logger.info(
+                "Qwen-TTS 音频URL: scheme=%s host=%s port=%s path=%s",
+                parsed.scheme,
+                parsed.hostname,
+                parsed.port,
+                parsed.path,
+            )
+
             try:
+                # 某些运行环境（尤其是 Windows 系统代理）会把 HTTPS 走本地代理（如 127.0.0.1:7890）。
+                # 当代理未运行/被拦截时，会出现 WinError 10061（连接被拒绝）。
+                # 允许通过环境变量绕过代理，避免“API 调用成功但音频 URL 下载失败”。
+                disable_proxy = os.getenv("TTS_AUDIO_DOWNLOAD_DISABLE_PROXY", "").strip().lower() in {"1", "true", "yes"}
+                opener = (
+                    urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                    if disable_proxy
+                    else urllib.request.build_opener()
+                )
+
+                if not disable_proxy:
+                    proxies = urllib.request.getproxies()
+                    if proxies:
+                        logger.info("Qwen-TTS 下载将使用代理配置: %s", proxies)
+
                 req = urllib.request.Request(audio_url, headers={"User-Agent": "novel-writing-agent"})
-                with urllib.request.urlopen(req, timeout=60) as f:  # noqa: S310
+                with opener.open(req, timeout=60) as f:  # noqa: S310
                     downloaded = f.read()
             except urllib.error.URLError as exc:
-                logger.error("下载 Qwen-TTS 音频失败: %s", exc)
+                logger.error(
+                    "下载 Qwen-TTS 音频失败: %s (host=%s port=%s disable_proxy=%s)",
+                    exc,
+                    parsed.hostname,
+                    parsed.port,
+                    disable_proxy,
+                )
                 return b""
 
             return _apply_volume_wav(downloaded)

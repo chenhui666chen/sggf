@@ -50,6 +50,7 @@ class ChapterAudioResponse(BaseModel):
     """章节音频响应"""
     id: int
     chapter_id: int
+    chapter_number: Optional[int] = None
     audio_path: Optional[str]
     duration: float
     file_size: int
