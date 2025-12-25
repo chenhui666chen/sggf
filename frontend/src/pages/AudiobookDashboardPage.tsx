@@ -822,7 +822,7 @@ const AudiobookDashboardPage = () => {
                         <IconButton
                           sx={{
                             position: 'absolute',
-                            top: 8,
+                            bottom: 8,
                             right: 8,
                             zIndex: 3,
                           }}
