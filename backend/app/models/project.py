@@ -93,6 +93,9 @@ class Chapter(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, server_default=func.now(), onupdate=func.now())
     
+    # 软删除字段
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, comment="软删除时间")
+    
     # 关系定义
     project: Mapped["Project"] = relationship("Project", back_populates="chapters")
     revisions: Mapped[List["ChapterRevision"]] = relationship(

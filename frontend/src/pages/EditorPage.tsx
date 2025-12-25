@@ -79,6 +79,11 @@ export default function EditorPage() {
   const [optimizeDialogOpen, setOptimizeDialogOpen] = useState(false)
   const [userFeedback, setUserFeedback] = useState('')
 
+  // 🆕 重新生成章节状态
+  const [regenerating, setRegenerating] = useState(false)
+  const [regenerateDialogOpen, setRegenerateDialogOpen] = useState(false)
+  const [regenerateReason, setRegenerateReason] = useState('')
+
   // 导出菜单状态
   const [exportAnchorEl, setExportAnchorEl] = useState<null | HTMLElement>(null)
   const exportMenuOpen = Boolean(exportAnchorEl)
@@ -209,7 +214,7 @@ export default function EditorPage() {
   // 🆕 再次优化：对当前章节再迭代一次
   const handleReOptimize = async (feedback: string = '') => {
     if (!chapterId || !projectId) return
-    
+
     setOptimizing(true)
     try {
       const response = await fetch('/api/v1/workflow/optimize-chapter', {
@@ -225,15 +230,15 @@ export default function EditorPage() {
           user_feedback: feedback,   // 🆕 用户额外意见
         }),
       })
-      
+
       if (!response.ok) {
         const errorData = await response.json()
         throw new Error(errorData.detail || '优化请求失败')
       }
-      
+
       const data = await response.json()
       setSaveMessage('✨ 已提交优化任务,正在后台处理...（预计30-60秒）')
-      
+
       // 轮询任务状态
       pollOptimizeTaskStatus(data.task_id)
     } catch (error: any) {
@@ -241,6 +246,115 @@ export default function EditorPage() {
       setSaveError(error.message || '再次优化失败，请稍后重试')
       setOptimizing(false)
     }
+  }
+
+  // 🆕 打开重新生成章节对话框
+  const handleOpenRegenerateDialog = () => {
+    setRegenerateReason('')  // 清空之前的理由
+    setRegenerateDialogOpen(true)
+  }
+
+  // 🆕 确认重新生成章节
+  const handleConfirmRegenerate = async () => {
+    setRegenerateDialogOpen(false)
+    await handleRegenerateChapter(regenerateReason.trim())
+  }
+
+  // 🆕 重新生成章节：完全重新创作章节内容
+  const handleRegenerateChapter = async (reason: string = '') => {
+    if (!chapterId || !projectId) return
+
+    setRegenerating(true)
+    try {
+      const response = await fetch('/api/v1/workflow/regenerate-chapter', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+        body: JSON.stringify({
+          project_id: parseInt(projectId),
+          chapter_id: parseInt(chapterId),
+          reason: reason,  // 重新生成的理由
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || '重新生成请求失败')
+      }
+
+      const data = await response.json()
+      setSaveMessage('🔄 已提交重新生成任务,正在后台处理...（预计60-120秒）')
+
+      // 轮询任务状态
+      pollRegenerateTaskStatus(data.task_id)
+    } catch (error: any) {
+      console.error('重新生成章节失败:', error)
+      setSaveError(error.message || '重新生成章节失败，请稍后重试')
+      setRegenerating(false)
+    }
+  }
+
+  // 轮询重新生成任务状态
+  const pollRegenerateTaskStatus = async (taskId: string) => {
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/v1/workflow/task/${taskId}`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          },
+        })
+
+        if (!response.ok) {
+          clearInterval(pollInterval)
+          setRegenerating(false)
+          setSaveError('获取任务状态失败')
+          return
+        }
+
+        const data = await response.json()
+
+        if (data.status === 'completed') {
+          clearInterval(pollInterval)
+
+          // 解析结果（result 是 JSON 字符串）
+          try {
+            const result = typeof data.result === 'string' ? JSON.parse(data.result) : data.result
+
+            if (result && result.content) {
+              dispatch(setContent(result.content))
+              setSaveMessage('✅ 重新生成完成！章节内容已更新')
+            } else {
+              setSaveError('重新生成结果为空，请重试')
+            }
+          } catch (parseError) {
+            console.error('解析重新生成结果失败:', parseError)
+            setSaveError('解析重新生成结果失败')
+          }
+
+          setRegenerating(false)
+        } else if (data.status === 'failed') {
+          clearInterval(pollInterval)
+          setSaveError('重新生成失败: ' + (data.error || '未知错误'))
+          setRegenerating(false)
+        } else if (data.status === 'running') {
+          // 更新进度提示
+          setSaveMessage(`🔄 重新生成中... (进度: ${data.progress || 50}%)`)
+        }
+      } catch (error) {
+        console.error('轮询任务状态失败:', error)
+      }
+    }, 2000) // 每2秒轮询一次
+
+    // 10分钟后超时
+    setTimeout(() => {
+      clearInterval(pollInterval)
+      if (regenerating) {
+        setRegenerating(false)
+        setSaveError('重新生成超时，请重试')
+      }
+    }, 600000)
   }
 
   // 轮询优化任务状态
@@ -495,6 +609,18 @@ export default function EditorPage() {
             color="secondary"
           >
             {optimizing ? '优化中...' : '再次优化'}
+          </Button>
+
+          {/* 🆕 重新生成章节按钮 */}
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={handleOpenRegenerateDialog}
+            disabled={regenerating || optimizing || checkingLogic}
+            startIcon={regenerating ? <CircularProgress size={16} /> : undefined}
+            color="error"
+          >
+            {regenerating ? '生成中...' : '重新生成'}
           </Button>
 
           {/* 章节逻辑检查按钮 */}
@@ -948,7 +1074,7 @@ export default function EditorPage() {
           <Typography variant="body2" color="text.secondary" gutterBottom>
             AI 将自动分析当前章节并提出优化建议。您可以补充额外的优化意见，或者直接点击「开始优化」依赖系统自动评审。
           </Typography>
-          
+
           <TextField
             fullWidth
             multiline
@@ -986,6 +1112,78 @@ export default function EditorPage() {
             startIcon={optimizing ? <CircularProgress size={16} /> : undefined}
           >
             {optimizing ? '优化中...' : '开始优化'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 🆕 重新生成章节对话框 */}
+      <Dialog
+        open={regenerateDialogOpen}
+        onClose={() => !regenerating && setRegenerateDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 2,
+          }
+        }}
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <WarningIcon color="error" />
+          重新生成章节
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mb: 2, p: 2, bgcolor: 'error.light', borderRadius: 1 }}>
+            <Typography variant="body2" color="error.contrastText">
+              ⚠️ 警告：重新生成将完全重写当前章节内容，原有内容将被覆盖！
+            </Typography>
+          </Box>
+
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            AI 将根据项目设定和章节大纲，完全重新创作本章节内容。请说明重新生成的理由，帮助AI更好地理解您的需求。
+          </Typography>
+
+          <TextField
+            fullWidth
+            multiline
+            rows={6}
+            value={regenerateReason}
+            onChange={(e) => setRegenerateReason(e.target.value)}
+            placeholder={`请输入重新生成的理由（可选）
+
+例如：
+- 当前章节质量不理想，希望完全重写
+- 想要改变章节的叙事风格
+- 需要调整情节走向...`}
+            variant="outlined"
+            sx={{
+              mt: 2,
+              '& .MuiOutlinedInput-root': {
+                fontFamily: 'inherit',
+                fontSize: '14px',
+              },
+            }}
+          />
+
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
+            💡 提示：当前内容将被自动备份为版本历史，您可以通过「版本历史」功能恢复。
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setRegenerateDialogOpen(false)}
+            disabled={regenerating}
+          >
+            取消
+          </Button>
+          <Button
+            onClick={handleConfirmRegenerate}
+            variant="contained"
+            color="error"
+            disabled={regenerating}
+            startIcon={regenerating ? <CircularProgress size={16} /> : undefined}
+          >
+            {regenerating ? '生成中...' : '确认重新生成'}
           </Button>
         </DialogActions>
       </Dialog>

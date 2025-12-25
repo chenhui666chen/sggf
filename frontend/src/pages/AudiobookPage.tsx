@@ -45,6 +45,7 @@ import {
   Slider,
   Snackbar,
   FormControlLabel,
+  Menu,
 } from '@mui/material'
 import {
   ArrowBack as ArrowBackIcon,
@@ -57,6 +58,8 @@ import {
   CheckCircle as CheckIcon,
   History as HistoryIcon,
   Delete as DeleteIcon,
+  Warning as WarningIcon,
+  MoreVert as MoreVertIcon,
 } from '@mui/icons-material'
 
 // 类型定义
@@ -154,7 +157,8 @@ interface HistoryDialogProps {
   historyProjects: any[]
   selectedProject: Project | null
   onCloseHistory: () => void
-  onViewHistory: (audiobookProjectId: number) => void
+  onViewHistory: (audiobookProjectId: number) => Promise<void>
+  onDeleteHistory: (audiobookProjectId: number, deleteFiles?: boolean) => Promise<void>
 }
 
 interface VoiceDefaultParams {
@@ -790,8 +794,36 @@ function HistoryDialog({
   selectedProject,
   onCloseHistory,
   onViewHistory,
+  onDeleteHistory,
 }: HistoryDialogProps) {
+  const [deleteProjectId, setDeleteProjectId] = useState<number | null>(null)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [confirmText, setConfirmText] = useState('')
+  const [deleteFiles, setDeleteFiles] = useState(false)
+  
+  const handleOpenDeleteDialog = (projectId: number) => {
+    setDeleteProjectId(projectId)
+    setDeleteDialogOpen(true)
+    setConfirmText('')
+    setDeleteFiles(false)
+  }
+  
+  const handleCloseDeleteDialog = () => {
+    setDeleteDialogOpen(false)
+    setDeleteProjectId(null)
+    setConfirmText('')
+    setDeleteFiles(false)
+  }
+  
+  const handleConfirmDelete = async () => {
+    if (deleteProjectId && confirmText === 'DELETE') {
+      await onDeleteHistory(deleteProjectId, deleteFiles)
+      handleCloseDeleteDialog()
+    }
+  }
+  
   return (
+    <>
     <Dialog open={open} onClose={onCloseHistory} maxWidth="md" fullWidth>
       <DialogTitle>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -874,16 +906,28 @@ function HistoryDialog({
                     )}
                   </Box>
                 </Box>
-                <IconButton
-                  edge="end"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onViewHistory(project.id)
-                  }}
-                  sx={{ color: '#9c27b0' }}
-                >
-                  <PlayIcon />
-                </IconButton>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <IconButton
+                    edge="end"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onViewHistory(project.id)
+                    }}
+                    sx={{ color: '#9c27b0' }}
+                  >
+                    <PlayIcon />
+                  </IconButton>
+                  <IconButton
+                    edge="end"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleOpenDeleteDialog(project.id)
+                    }}
+                    sx={{ color: '#f44336' }}
+                  >
+                    <DeleteIcon />
+                  </IconButton>
+                </Box>
               </ListItem>
             ))}
           </List>
@@ -893,6 +937,72 @@ function HistoryDialog({
         <Button onClick={onCloseHistory}>关闭</Button>
       </DialogActions>
     </Dialog>
+    
+    {/* 删除确认对话框 */}
+    <Dialog open={deleteDialogOpen} onClose={handleCloseDeleteDialog}>
+      <DialogTitle>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <WarningIcon sx={{ color: '#f44336' }} />
+          <Typography variant="h6">确认删除</Typography>
+        </Box>
+      </DialogTitle>
+      <DialogContent>
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          此操作将永久删除该有声书项目！
+        </Alert>
+        <Typography variant="body1" sx={{ mb: 2 }}>
+          确定要删除这个有声书项目吗？
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          项目ID: {deleteProjectId}
+        </Typography>
+        <FormControlLabel
+          control={
+            <Checkbox
+              checked={deleteFiles}
+              onChange={(e) => setDeleteFiles(e.target.checked)}
+              sx={{ color: '#f44336' }}
+            />
+          }
+          label={
+            <Typography variant="body2" color="text.secondary">
+              同时删除音频文件（不可恢复）
+            </Typography>
+          }
+          sx={{ mb: 2, display: 'flex', alignItems: 'flex-start' }}
+        />
+        <Alert severity="info" sx={{ mb: 2 }}>
+          请输入 "DELETE" 以确认删除操作
+        </Alert>
+        <TextField
+          fullWidth
+          variant="outlined"
+          placeholder="请输入 DELETE"
+          value={confirmText}
+          onChange={(e) => setConfirmText(e.target.value)}
+          sx={{ mb: 2 }}
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={handleCloseDeleteDialog}>取消</Button>
+        <Button 
+          onClick={handleConfirmDelete} 
+          variant="contained" 
+          disabled={confirmText !== 'DELETE'}
+          sx={{
+            backgroundColor: '#f44336',
+            '&:hover': { backgroundColor: '#d32f2f' },
+            '&.Mui-disabled': {
+              backgroundColor: '#f44336',
+              opacity: 0.5,
+            }
+          }}
+        >
+          确认删除
+        </Button>
+      </DialogActions>
+    </Dialog>
+    </>
   )
 }
 
@@ -962,6 +1072,12 @@ const AudiobookPage = () => {
   const [activeStep, setActiveStep] = useState(0)
   const [ttsModel, setTtsModel] = useState<'qwen3-tts-flash' | 'cosyvoice-v3-plus'>('qwen3-tts-flash')
   const [voiceDraftsByModel, setVoiceDraftsByModel] = useState<Record<string, CharacterVoiceSetting[]>>({})
+  const [chapterMenuAnchor, setChapterMenuAnchor] = useState<null | HTMLElement>(null)
+  const [selectedChapterForMenu, setSelectedChapterForMenu] = useState<Chapter | null>(null)
+  const [deleteChapterDialogOpen, setDeleteChapterDialogOpen] = useState(false)
+  const [deleteChapterReason, setDeleteChapterReason] = useState('')
+  const [deleteChapterFiles, setDeleteChapterFiles] = useState(false)
+  const [deletingChapter, setDeletingChapter] = useState(false)
 
   const audioRef = useMemo(() => new Audio(), [])
   const sessionHydratedRef = useRef(false)
@@ -1263,6 +1379,22 @@ const AudiobookPage = () => {
       setSnackbar({ open: true, message: '加载失败', severity: 'error' })
     }
   }
+  
+  // 新增：删除历史项目
+  const handleDeleteHistory = async (audiobookProjectId: number, deleteFiles?: boolean) => {
+    try {
+      await apiClient.deleteAudiobookProject(audiobookProjectId, { delete_files: deleteFiles })
+      setSnackbar({ open: true, message: '项目已删除', severity: 'success' })
+      // 重新获取历史记录以更新列表
+      await fetchHistory()
+    } catch (error: any) {
+      console.error('删除历史失败:', error)
+      const errorMessage = error?.response?.status === 404 
+        ? '项目不存在或已被删除' 
+        : error?.response?.data?.detail || '删除失败，请重试'
+      setSnackbar({ open: true, message: errorMessage, severity: 'error' })
+    }
+  }
 
   const handleCreateProjectFromText = async () => {
     const rawText = newProjectText.trim()
@@ -1479,6 +1611,64 @@ const AudiobookPage = () => {
       setSnackbar({ open: true, message: '网络错误，请重试', severity: 'error' })
     }
   }, [ttsModel, setCharacterVoicesForCurrentModel])
+
+  // 章节菜单相关处理函数
+  const handleOpenChapterMenu = (event: React.MouseEvent<HTMLElement>, chapter: Chapter) => {
+    event.stopPropagation()
+    setChapterMenuAnchor(event.currentTarget)
+    setSelectedChapterForMenu(chapter)
+  }
+
+  const handleCloseChapterMenu = () => {
+    setChapterMenuAnchor(null)
+    setSelectedChapterForMenu(null)
+  }
+
+  const handleOpenDeleteChapterDialog = () => {
+    handleCloseChapterMenu()
+    setDeleteChapterDialogOpen(true)
+    setDeleteChapterReason('')
+    setDeleteChapterFiles(false)
+  }
+
+  const handleCloseDeleteChapterDialog = () => {
+    setDeleteChapterDialogOpen(false)
+    setDeleteChapterReason('')
+    setDeleteChapterFiles(false)
+  }
+
+  const handleDeleteChapter = async () => {
+    if (!selectedChapterForMenu) return
+
+    setDeletingChapter(true)
+    try {
+      await apiClient.deleteChapter(selectedChapterForMenu.id, {
+        delete_reason: deleteChapterReason || undefined,
+        delete_files: deleteChapterFiles,
+      })
+
+      // 从章节列表中移除已删除的章节
+      setChapters((prev) => prev.filter((c) => c.id !== selectedChapterForMenu.id))
+      setSelectedChapters((prev) => prev.filter((id) => id !== selectedChapterForMenu.id))
+
+      setSnackbar({
+        open: true,
+        message: '章节已删除',
+        severity: 'success',
+      })
+      handleCloseDeleteChapterDialog()
+    } catch (error: any) {
+      console.error('删除章节失败:', error)
+      const msg = (error?.response?.data?.detail as string) || '删除章节失败'
+      setSnackbar({
+        open: true,
+        message: msg,
+        severity: 'error',
+      })
+    } finally {
+      setDeletingChapter(false)
+    }
+  }
 
   useEffect(() => {
     if (!sessionHydratedRef.current) {
@@ -2702,6 +2892,16 @@ const AudiobookPage = () => {
                         key={chapter.id}
                         component="div"
                         onClick={() => handleToggleChapter(chapter.id)}
+                        secondaryAction={
+                          <IconButton
+                            edge="end"
+                            size="small"
+                            onClick={(e) => handleOpenChapterMenu(e, chapter)}
+                            sx={{ color: '#757575' }}
+                          >
+                            <MoreVertIcon fontSize="small" />
+                          </IconButton>
+                        }
                         sx={{
                           cursor: 'pointer',
                           '&:hover': {
@@ -3443,7 +3643,123 @@ const AudiobookPage = () => {
             selectedProject={selectedProject}
             onCloseHistory={() => setShowHistory(false)}
             onViewHistory={handleViewHistory}
+            onDeleteHistory={handleDeleteHistory}
           />
+
+      {/* 章节菜单 */}
+      <Menu
+        anchorEl={chapterMenuAnchor}
+        open={Boolean(chapterMenuAnchor)}
+        onClose={handleCloseChapterMenu}
+        anchorOrigin={{
+          vertical: 'bottom',
+          horizontal: 'right',
+        }}
+        transformOrigin={{
+          vertical: 'top',
+          horizontal: 'right',
+        }}
+      >
+        <MenuItem onClick={handleOpenDeleteChapterDialog} sx={{ color: '#f44336' }}>
+          <DeleteIcon fontSize="small" sx={{ mr: 1 }} />
+          删除章节
+        </MenuItem>
+      </Menu>
+
+      {/* 章节删除确认对话框 */}
+      <Dialog
+        open={deleteChapterDialogOpen}
+        onClose={handleCloseDeleteChapterDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <WarningIcon sx={{ color: '#f44336' }} />
+            <Typography variant="h6">确认删除章节</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            此操作将删除章节及其相关数据，请谨慎操作！
+          </Alert>
+          
+          <Typography variant="body1" sx={{ mb: 2 }}>
+            确定要删除以下章节吗？
+          </Typography>
+          
+          <Paper variant="outlined" sx={{ p: 2, mb: 2, backgroundColor: 'rgba(244, 67, 54, 0.05)' }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+              {selectedChapterForMenu && `第${selectedChapterForMenu.chapter_number}章 - ${selectedChapterForMenu.title}`}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              {selectedChapterForMenu?.content ? `${selectedChapterForMenu.content.slice(0, 100)}...` : '暂无内容'}
+            </Typography>
+          </Paper>
+
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            删除后将影响以下内容：
+          </Typography>
+          
+          <List dense>
+            <ListItem>
+              <ListItemText primary="章节内容" secondary="章节的文本内容将被删除" />
+            </ListItem>
+            <ListItem>
+              <ListItemText primary="有声剧本" secondary="已生成的有声剧本将被删除" />
+            </ListItem>
+            <ListItem>
+              <ListItemText primary="音频文件" secondary="已生成的音频文件将被删除（可选）" />
+            </ListItem>
+            <ListItem>
+              <ListItemText primary="章节关联" secondary="章节与角色、设定的关联将被移除" />
+            </ListItem>
+          </List>
+
+          <TextField
+            fullWidth
+            multiline
+            rows={3}
+            label="删除原因（可选）"
+            placeholder="请说明删除此章节的原因..."
+            value={deleteChapterReason}
+            onChange={(e) => setDeleteChapterReason(e.target.value)}
+            sx={{ mb: 2 }}
+          />
+
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={deleteChapterFiles}
+                onChange={(e) => setDeleteChapterFiles(e.target.checked)}
+                sx={{
+                  color: '#f44336',
+                  '&.Mui-checked': {
+                    color: '#f44336',
+                  },
+                }}
+              />
+            }
+            label="同时删除音频文件（不可恢复）"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDeleteChapterDialog} disabled={deletingChapter}>
+            取消
+          </Button>
+          <Button
+            onClick={handleDeleteChapter}
+            disabled={deletingChapter}
+            variant="contained"
+            sx={{
+              backgroundColor: '#f44336',
+              '&:hover': { backgroundColor: '#d32f2f' },
+            }}
+          >
+            {deletingChapter ? <CircularProgress size={20} color="inherit" /> : '确认删除'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }

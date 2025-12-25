@@ -23,6 +23,7 @@ const AudiobookDashboardPage = lazy(() => import('@/pages/AudiobookDashboardPage
 const AudiobookPage = lazy(() => import('@/pages/AudiobookPage'))  // 耳畔星河
 const DreamWeaverPage = lazy(() => import('@/pages/DreamWeaverPage')) // 织梦映心
 const DreamWeaverMockPage = lazy(() => import('@/pages/DreamWeaverMockPage')) // 织梦映心 Mock
+const TrashPage = lazy(() => import('@/pages/TrashPage')) // 回收站
 
 // 加载中组件
 const LoadingFallback = () => (
@@ -186,6 +187,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <CreationModulePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/trash"
+            element={
+              <ProtectedRoute>
+                <TrashPage />
               </ProtectedRoute>
             }
           />

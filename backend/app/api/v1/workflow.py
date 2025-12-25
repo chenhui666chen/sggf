@@ -6425,3 +6425,319 @@ async def _optimize_chapter_task(
         db.commit()
     finally:
         db.close()
+
+
+@router.post("/regenerate-chapter")
+async def regenerate_chapter(
+    request: dict,
+    background_tasks: BackgroundTasks,
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    重新生成章节：完全重新创作指定章节的内容
+    
+    请求体：
+    {
+        "project_id": 1,
+        "chapter_id": 10,
+        "user_feedback": "用户反馈意见（可选）"
+    }
+    
+    返回：
+    {
+        "task_id": "regenerate_xxx",
+        "message": "重新生成任务已提交"
+    }
+    """
+    import uuid
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    project_id = request.get("project_id")
+    chapter_id = request.get("chapter_id")
+    user_feedback = request.get("user_feedback", "")
+    
+    if not project_id or not chapter_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="缺少 project_id 或 chapter_id"
+        )
+    
+    # 验证项目所有权
+    project = db.query(Project).filter(
+        (Project.id == project_id) & (Project.user_id == current_user.id)
+    ).first()
+    
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="项目不存在"
+        )
+    
+    # 验证章节存在
+    chapter = db.query(Chapter).filter(
+        (Chapter.id == chapter_id) & (Chapter.project_id == project_id)
+    ).first()
+    
+    if not chapter:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="章节不存在"
+        )
+    
+    # 生成任务ID
+    task_id = f"regenerate_{uuid.uuid4().hex[:8]}"
+    
+    # 创建任务记录
+    insert_query = text("""
+        INSERT INTO generation_history
+        (project_id, task_type, task_id, status, created_at)
+        VALUES (:project_id, :task_type, :task_id, :status, :created_at)
+    """)
+    
+    db.execute(insert_query, {
+        "project_id": project_id,
+        "task_type": "regenerate_chapter",
+        "task_id": task_id,
+        "status": "running",
+        "created_at": datetime.now().isoformat()
+    })
+    db.commit()
+    logger.info(f"✅ 重新生成任务记录已创建: {task_id}")
+    
+    # 使用线程异步执行重新生成
+    import threading
+    thread = threading.Thread(
+        target=lambda: asyncio.run(
+            _regenerate_chapter_task(
+                task_id=task_id,
+                project_id=project_id,
+                chapter_id=chapter_id,
+                user_feedback=user_feedback,
+            )
+        ),
+        daemon=True
+    )
+    thread.start()
+    logger.info(f"🚀 [{task_id}] 重新生成线程已启动")
+    
+    return {
+        "task_id": task_id,
+        "message": "重新生成任务已提交"
+    }
+
+
+async def _regenerate_chapter_task(
+    task_id: str,
+    project_id: int,
+    chapter_id: int,
+    user_feedback: str = "",
+):
+    """
+    异步执行章节重新生成任务
+    """
+    from app.services.agents.agents import ContentCreatorAgent
+    from sqlalchemy import text
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    db = SessionLocal()
+    
+    try:
+        # 更新任务状态：开始生成
+        update_query = text("""
+            UPDATE generation_history
+            SET status = :status, progress = :progress, message = :message, updated_at = :updated_at
+            WHERE task_id = :task_id
+        """)
+        db.execute(update_query, {
+            "task_id": task_id,
+            "status": "running",
+            "progress": 0,
+            "message": "🔄 开始重新生成章节...",
+            "updated_at": datetime.now().isoformat()
+        })
+        db.commit()
+        logger.info(f"🔄 [{task_id}] 开始重新生成章节...")
+        
+        # 获取项目信息
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if not project:
+            raise Exception("项目不存在")
+        
+        # 获取章节信息
+        chapter = db.query(Chapter).filter(
+            (Chapter.id == chapter_id) & (Chapter.project_id == project_id)
+        ).first()
+        if not chapter:
+            raise Exception("章节不存在")
+        
+        # 获取章节计划
+        chapter_plan = ""
+        try:
+            query = text("""
+                SELECT chapter_plan
+                FROM chapter_plans
+                WHERE project_id = :project_id AND chapter_number = :chapter_number
+                ORDER BY id DESC
+                LIMIT 1
+            """)
+            plan_result = db.execute(query, {
+                "project_id": project_id,
+                "chapter_number": chapter.chapter_number
+            }).fetchone()
+            
+            chapter_plan = plan_result[0] if plan_result else ""
+        except Exception as e:
+            logger.warning(f"获取章节计划失败: {e}，将继续执行")
+        
+        # 获取项目大纲
+        outline = ""
+        try:
+            outline_query = text("SELECT outline FROM projects WHERE id = :project_id")
+            outline_result = db.execute(outline_query, {"project_id": project_id}).fetchone()
+            if outline_result:
+                outline = outline_result[0] or ""
+        except Exception as e:
+            logger.warning(f"获取项目大纲失败: {e}")
+        
+        # 获取项目题材
+        genre = ""
+        try:
+            genre_query = text("SELECT genre FROM projects WHERE id = :project_id")
+            genre_result = db.execute(genre_query, {"project_id": project_id}).fetchone()
+            if genre_result:
+                genre = genre_result[0] or ""
+        except Exception as e:
+            logger.warning(f"获取项目题材失败: {e}")
+        
+        # 获取项目设定
+        world_builder = ""
+        character_designer = ""
+        try:
+            settings_query = text("""
+                SELECT world_builder, character_designer
+                FROM project_settings
+                WHERE project_id = :project_id
+            """)
+            settings_result = db.execute(settings_query, {"project_id": project_id}).fetchone()
+            if settings_result:
+                world_builder = settings_result[0] or ""
+                character_designer = settings_result[1] or ""
+        except Exception as e:
+            logger.warning(f"获取项目设定失败: {e}")
+        
+        # 更新进度：准备生成
+        db.execute(update_query, {
+            "task_id": task_id,
+            "progress": 20,
+            "message": "📝 正在准备生成章节...",
+            "updated_at": datetime.now().isoformat()
+        })
+        db.commit()
+        
+        # 构建章节信息
+        chapter_info = {
+            "chapter_number": chapter.chapter_number,
+            "title": chapter.title,
+            "outline": chapter_plan or outline,
+            "main_characters": [],  # 可以从character_designer中解析
+            "setting": "",  # 可以从world_builder中解析
+            "project_genre": genre,
+            "world_builder": world_builder,
+            "character_designer": character_designer,
+            "user_feedback": user_feedback
+        }
+        
+        # 更新进度：生成中
+        db.execute(update_query, {
+            "task_id": task_id,
+            "progress": 50,
+            "message": "✍️ 正在生成章节内容...",
+            "updated_at": datetime.now().isoformat()
+        })
+        db.commit()
+        
+        # 使用ContentCreatorAgent重新生成章节
+        content_agent = ContentCreatorAgent()
+        content_agent.set_project_context(project_id)
+        
+        result = content_agent.create_chapter(chapter_info)
+        new_content = result.get("content", "")
+        
+        if not new_content:
+            raise Exception("生成内容为空")
+        
+        # 更新进度：保存中
+        db.execute(update_query, {
+            "task_id": task_id,
+            "progress": 80,
+            "message": "💾 正在保存章节内容...",
+            "updated_at": datetime.now().isoformat()
+        })
+        db.commit()
+        
+        # 更新章节内容
+        chapter.content = new_content
+        chapter.updated_at = datetime.now()
+        db.commit()
+        
+        # 完成 - 更新进度
+        db.execute(update_query, {
+            "task_id": task_id,
+            "progress": 100,
+            "message": "✅ 章节重新生成完成",
+            "updated_at": datetime.now().isoformat()
+        })
+        db.commit()
+        logger.info(f"✅ [{task_id}] 章节重新生成完成")
+        
+        # 更新任务状态为完成，并存储结果
+        update_query = text("""
+            UPDATE generation_history
+            SET status = :status,
+                result = :result,
+                completed_at = :completed_at
+            WHERE task_id = :task_id
+        """)
+        
+        import json
+        db.execute(update_query, {
+            "task_id": task_id,
+            "status": "completed",
+            "result": json.dumps({
+                "regenerated_content": new_content,
+                "consistency_analysis": result.get("consistency_analysis", {}),
+                "optimization_info": result.get("optimization_info", {}),
+            }, ensure_ascii=False),
+            "completed_at": datetime.now().isoformat()
+        })
+        db.commit()
+        
+        logger.info(f"✅ 章节重新生成任务完成: {task_id}")
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        logger.error(f"❌ 章节重新生成任务失败: {e}")
+        
+        # 更新任务状态为失败
+        update_query = text("""
+            UPDATE generation_history
+            SET status = :status,
+                error = :error,
+                completed_at = :completed_at
+            WHERE task_id = :task_id
+        """)
+        
+        db.execute(update_query, {
+            "task_id": task_id,
+            "status": "failed",
+            "error": str(e),
+            "completed_at": datetime.now().isoformat()
+        })
+        db.commit()
+    finally:
+        db.close()

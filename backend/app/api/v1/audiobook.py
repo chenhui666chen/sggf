@@ -561,24 +561,23 @@ async def trigger_generate_audio_from_scripts(
 @router.delete("/projects/{audiobook_project_id}")
 async def delete_audiobook_project(
     audiobook_project_id: int,
+    delete_reason: Optional[str] = None,
+    delete_files: bool = False,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    删除有声书项目及其所有音频文件
+    删除有声书项目（支持软删除和硬删除）
     
     工作流：
     1. 验证权限
-    2. 获取所有章节音频文件路径
-    3. 删除物理文件
-    4. 删除数据库记录（级联删除）
+    2. 执行软删除并记录审计日志
+    3. 可选：删除物理文件（delete_files=true时）
     """
-    logger.info(f"🗑️ 用户 {current_user.id} 请求删除有声书项目: audiobook_project_id={audiobook_project_id}")
+    logger.info(f"🗑️ 用户 {current_user.id} 请求删除有声书项目: audiobook_project_id={audiobook_project_id}, delete_files={delete_files}")
     
-    # 1. 验证有声书项目是否存在
-    audiobook_project = db.query(AudiobookProject).filter(
-        AudiobookProject.id == audiobook_project_id
-    ).first()
+    # 1. 验证有声书项目权限
+    audiobook_project = db.query(AudiobookProject).filter(AudiobookProject.id == audiobook_project_id).first()
     
     if not audiobook_project:
         raise HTTPException(
@@ -586,7 +585,7 @@ async def delete_audiobook_project(
             detail="有声书项目不存在"
         )
     
-    # 2. 验证原始项目权限
+    # 验证原始项目权限
     project = db.query(Project).filter(
         Project.id == audiobook_project.project_id,
         Project.user_id == current_user.id
@@ -598,36 +597,325 @@ async def delete_audiobook_project(
             detail="无权限删除此项目"
         )
     
-    # 3. 获取所有章节音频并删除文件
-    chapter_audios = db.query(ChapterAudio).filter(
-        ChapterAudio.audiobook_project_id == audiobook_project_id
-    ).all()
+    # 2. 执行软删除并记录审计日志
+    audit_log = AudiobookProjectRepository.soft_delete(
+        db=db,
+        audiobook_project_id=audiobook_project_id,
+        user_id=current_user.id,
+        user_name=current_user.username,
+        delete_reason=delete_reason
+    )
     
+    if not audit_log:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="有声书项目不存在或已被删除"
+        )
+    
+    # 3. 可选：删除物理文件
     deleted_files = 0
     failed_files = []
     
-    for chapter_audio in chapter_audios:
-        if chapter_audio.audio_path and os.path.exists(chapter_audio.audio_path):
-            try:
-                os.remove(chapter_audio.audio_path)
-                deleted_files += 1
-                logger.info(f"✅ 删除文件: {chapter_audio.audio_path}")
-            except Exception as e:
-                logger.error(f"❌ 删除文件失败: {chapter_audio.audio_path}, 错误: {e}")
-                failed_files.append(chapter_audio.audio_path)
+    if delete_files:
+        # 获取所有章节音频并删除文件
+        chapter_audios = db.query(ChapterAudio).filter(
+            ChapterAudio.audiobook_project_id == audiobook_project_id
+        ).all()
+        
+        for chapter_audio in chapter_audios:
+            if chapter_audio.audio_path and os.path.exists(chapter_audio.audio_path):
+                try:
+                    os.remove(chapter_audio.audio_path)
+                    deleted_files += 1
+                    logger.info(f"✅ 删除文件: {chapter_audio.audio_path}")
+                except Exception as e:
+                    logger.error(f"❌ 删除文件失败: {chapter_audio.audio_path}, 错误: {e}")
+                    failed_files.append(chapter_audio.audio_path)
     
-    # 4. 删除数据库记录（级联删除会自动删除 ChapterAudio）
-    db.delete(audiobook_project)
-    db.commit()
-    
-    logger.info(f"✅ 有声书项目删除成功: audiobook_project_id={audiobook_project_id}, 删除文件数: {deleted_files}")
+    logger.info(f"✅ 有声书项目软删除成功: audiobook_project_id={audiobook_project_id}, audit_id={audit_log.id}")
     
     return {
         "success": True,
         "message": "有声书项目已删除",
+        "audit_id": audit_log.id,
         "deleted_files": deleted_files,
         "failed_files": failed_files,
-        "total_chapters": len(chapter_audios)
+        "affected_chapters": audit_log.affected_chapters,
+        "affected_tasks": audit_log.affected_tasks,
+        "total_size": audit_log.total_size
+    }
+
+
+@router.delete("/chapter-audios/{chapter_audio_id}")
+async def delete_chapter_audio(
+    chapter_audio_id: int,
+    delete_reason: Optional[str] = None,
+    delete_file: bool = False,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    删除章节音频（支持软删除和硬删除）
+    
+    工作流：
+    1. 验证权限
+    2. 执行软删除并记录审计日志
+    3. 可选：删除物理文件（delete_file=true时）
+    """
+    logger.info(f"🗑️ 用户 {current_user.id} 请求删除章节音频: chapter_audio_id={chapter_audio_id}, delete_file={delete_file}")
+    
+    # 1. 获取章节音频
+    chapter_audio = ChapterAudioRepository.get_by_id(db, chapter_audio_id)
+    
+    if not chapter_audio:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="章节音频不存在"
+        )
+    
+    # 2. 验证权限
+    audiobook_project = db.query(AudiobookProject).filter(
+        AudiobookProject.id == chapter_audio.audiobook_project_id
+    ).first()
+    
+    if not audiobook_project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="有声书项目不存在"
+        )
+    
+    project = db.query(Project).filter(
+        Project.id == audiobook_project.project_id,
+        Project.user_id == current_user.id
+    ).first()
+    
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权限删除此章节音频"
+        )
+    
+    # 3. 执行软删除并记录审计日志
+    audit_log = ChapterAudioRepository.soft_delete(
+        db=db,
+        chapter_audio_id=chapter_audio_id,
+        user_id=current_user.id,
+        user_name=current_user.username,
+        delete_reason=delete_reason
+    )
+    
+    if not audit_log:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="章节音频不存在或已被删除"
+        )
+    
+    # 4. 可选：删除物理文件
+    deleted_file = False
+    failed_file = None
+    
+    if delete_file and chapter_audio.audio_path:
+        if os.path.exists(chapter_audio.audio_path):
+            try:
+                os.remove(chapter_audio.audio_path)
+                deleted_file = True
+                logger.info(f"✅ 删除文件: {chapter_audio.audio_path}")
+            except Exception as e:
+                logger.error(f"❌ 删除文件失败: {chapter_audio.audio_path}, 错误: {e}")
+                failed_file = chapter_audio.audio_path
+    
+    logger.info(f"✅ 章节音频软删除成功: chapter_audio_id={chapter_audio_id}, audit_id={audit_log.id}")
+    
+    return {
+        "success": True,
+        "message": "章节音频已删除",
+        "audit_id": audit_log.id,
+        "deleted_file": deleted_file,
+        "failed_file": failed_file,
+        "affected_tasks": audit_log.affected_tasks,
+        "file_size": audit_log.total_size
+    }
+
+
+@router.post("/projects/{audiobook_project_id}/restore")
+async def restore_audiobook_project(
+    audiobook_project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    恢复已删除的有声书项目
+    
+    工作流：
+    1. 验证权限
+    2. 恢复项目及关联的章节音频
+    3. 更新审计日志
+    """
+    logger.info(f"♻️ 用户 {current_user.id} 请求恢复有声书项目: audiobook_project_id={audiobook_project_id}")
+    
+    # 1. 验证原始项目权限
+    project = db.query(Project).filter(Project.id == audiobook_project_id).first()
+    
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="有声书项目不存在"
+        )
+    
+    if project.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权限恢复此项目"
+        )
+    
+    # 2. 恢复项目
+    restored_project = AudiobookProjectRepository.restore(
+        db=db,
+        audiobook_project_id=audiobook_project_id,
+        user_id=current_user.id
+    )
+    
+    if not restored_project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="项目不存在或未被删除"
+        )
+    
+    logger.info(f"✅ 有声书项目恢复成功: audiobook_project_id={audiobook_project_id}")
+    
+    return {
+        "success": True,
+        "message": "有声书项目已恢复",
+        "project_id": restored_project.id,
+        "restored_at": datetime.utcnow().isoformat()
+    }
+
+
+@router.post("/chapter-audios/{chapter_audio_id}/restore")
+async def restore_chapter_audio(
+    chapter_audio_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    恢复已删除的章节音频
+    
+    工作流：
+    1. 验证权限
+    2. 恢复章节音频
+    3. 更新审计日志
+    """
+    logger.info(f"♻️ 用户 {current_user.id} 请求恢复章节音频: chapter_audio_id={chapter_audio_id}")
+    
+    # 1. 获取章节音频
+    chapter_audio = db.query(ChapterAudio).filter(
+        ChapterAudio.id == chapter_audio_id
+    ).first()
+    
+    if not chapter_audio:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="章节音频不存在"
+        )
+    
+    # 2. 验证权限
+    audiobook_project = db.query(AudiobookProject).filter(
+        AudiobookProject.id == chapter_audio.audiobook_project_id
+    ).first()
+    
+    if not audiobook_project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="有声书项目不存在"
+        )
+    
+    project = db.query(Project).filter(
+        Project.id == audiobook_project.project_id,
+        Project.user_id == current_user.id
+    ).first()
+    
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权限恢复此章节音频"
+        )
+    
+    # 3. 恢复章节音频
+    restored_audio = ChapterAudioRepository.restore(
+        db=db,
+        chapter_audio_id=chapter_audio_id,
+        user_id=current_user.id
+    )
+    
+    if not restored_audio:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="章节音频不存在或未被删除"
+        )
+    
+    logger.info(f"✅ 章节音频恢复成功: chapter_audio_id={chapter_audio_id}")
+    
+    return {
+        "success": True,
+        "message": "章节音频已恢复",
+        "chapter_audio_id": restored_audio.id,
+        "restored_at": datetime.utcnow().isoformat()
+    }
+
+
+@router.get("/projects/deleted")
+async def list_deleted_projects(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    limit: int = 50
+):
+    """
+    获取用户已删除的有声书项目列表（回收站）
+    
+    返回：已删除的项目列表，包含审计信息
+    """
+    logger.info(f"📋 用户 {current_user.id} 查询已删除项目列表")
+    
+    # 获取已删除的项目
+    deleted_projects = AudiobookProjectRepository.list_deleted(
+        db=db,
+        user_id=current_user.id,
+        limit=limit
+    )
+    
+    # 获取审计日志
+    project_ids = [p.id for p in deleted_projects]
+    audit_logs = db.query(AudiobookDeleteAudit).filter(
+        AudiobookDeleteAudit.target_id.in_(project_ids),
+        AudiobookDeleteAudit.delete_type == 'project'
+    ).all()
+    
+    # 构建审计日志映射
+    audit_map = {log.target_id: log for log in audit_logs}
+    
+    # 构建响应
+    result = []
+    for project in deleted_projects:
+        audit = audit_map.get(project.id)
+        result.append({
+            "id": project.id,
+            "title": project.title,
+            "deleted_at": project.deleted_at.isoformat() if project.deleted_at else None,
+            "created_at": project.created_at.isoformat() if project.created_at else None,
+            "audit_id": audit.id if audit else None,
+            "delete_reason": audit.delete_reason if audit else None,
+            "affected_chapters": audit.affected_chapters if audit else 0,
+            "affected_tasks": audit.affected_tasks if audit else 0,
+            "total_size": audit.total_size if audit else 0,
+            "restored_at": audit.restored_at.isoformat() if audit and audit.restored_at else None,
+        })
+    
+    logger.info(f"✅ 查询到 {len(result)} 个已删除项目")
+    
+    return {
+        "success": True,
+        "count": len(result),
+        "projects": result
     }
 
 

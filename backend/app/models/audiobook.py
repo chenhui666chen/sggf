@@ -36,6 +36,7 @@ class AudiobookProject(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
+    deleted_at = Column(DateTime, nullable=True, index=True)  # 软删除时间戳
     
     # 关系
     project = relationship("Project", back_populates="audiobook_projects")
@@ -84,6 +85,7 @@ class ChapterAudio(Base):
     # 时间
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    deleted_at = Column(DateTime, nullable=True, index=True)  # 软删除时间戳
     
     # 关系
     audiobook_project = relationship("AudiobookProject", back_populates="chapter_audios")

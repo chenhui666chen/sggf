@@ -139,8 +139,16 @@ class ApiClient {
     return this.client.post(`/api/v1/chapters/${chapterId}/auto-save`, data)
   }
 
-  deleteChapter(chapterId: number) {
-    return this.client.delete(`/api/v1/chapters/${chapterId}`)
+  deleteChapter(chapterId: number, data?: { delete_reason?: string; delete_files?: boolean }) {
+    return this.client.delete(`/api/v1/chapters/${chapterId}`, { data })
+  }
+
+  restoreChapter(chapterId: number) {
+    return this.client.post(`/api/v1/chapters/${chapterId}/restore`)
+  }
+
+  getDeletedChapters(projectId: number) {
+    return this.client.get(`/api/v1/chapters/deleted`, { params: { project_id: projectId } })
   }
 
   // 设定管理API
@@ -330,8 +338,24 @@ class ApiClient {
     return this.client.get(`/api/v1/audiobook/projects/${audiobookProjectId}`)
   }
 
-  deleteAudiobookProject(audiobookProjectId: number) {
-    return this.client.delete(`/api/v1/audiobook/projects/${audiobookProjectId}`)
+  deleteAudiobookProject(audiobookProjectId: number, data?: { delete_reason?: string; delete_files?: boolean }) {
+    return this.client.delete(`/api/v1/audiobook/projects/${audiobookProjectId}`, { data })
+  }
+
+  deleteChapterAudio(chapterAudioId: number, data?: { delete_reason?: string; delete_files?: boolean }) {
+    return this.client.delete(`/api/v1/audiobook/chapter-audios/${chapterAudioId}`, { data })
+  }
+
+  restoreAudiobookProject(audiobookProjectId: number) {
+    return this.client.post(`/api/v1/audiobook/projects/${audiobookProjectId}/restore`)
+  }
+
+  restoreChapterAudio(chapterAudioId: number) {
+    return this.client.post(`/api/v1/audiobook/chapter-audios/${chapterAudioId}/restore`)
+  }
+
+  listDeletedProjects() {
+    return this.client.get('/api/v1/audiobook/projects/deleted')
   }
 
   createAudiobookProject(payload: {

@@ -742,10 +742,103 @@ async def delete_chapter(
         logger = logging.getLogger("uvicorn.error")
         logger.debug(f"   ⚠️ 内容进化器反馈收集失败（不影响主流程）: {evo_err}")
     
-    # 删除章节（评审数据会自动级联删除）
-    db.delete(chapter)
+    # 软删除章节（设置deleted_at字段）
+    chapter.deleted_at = datetime.now()
     db.commit()
-    return {"message": "Chapter deleted successfully"}
+    
+    return {
+        "message": "Chapter deleted successfully",
+        "chapter_id": chapter.id,
+        "chapter_number": chapter.chapter_number,
+        "deleted_at": chapter.deleted_at
+    }
+
+
+@router.post("/{chapter_id}/restore")
+async def restore_chapter(
+    chapter_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """恢复已删除的章节"""
+    chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+    
+    if chapter is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chapter not found"
+        )
+    
+    # 检查章节是否已被删除
+    if chapter.deleted_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Chapter is not deleted"
+        )
+    
+    # 检查权限
+    project = db.query(Project).filter(Project.id == chapter.project_id).first()
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Associated project not found"
+        )
+    
+    # 类型断言：在此时project已经确认不为None
+    project_user_id: int = cast(int, project.user_id)
+    current_user_id: int = cast(int, current_user.id)
+    
+    if project_user_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+    
+    # 恢复章节（清除deleted_at字段）
+    chapter.deleted_at = None
+    db.commit()
+    db.refresh(chapter)
+    
+    return {
+        "message": "Chapter restored successfully",
+        "chapter_id": chapter.id,
+        "chapter_number": chapter.chapter_number,
+        "restored_at": datetime.now()
+    }
+
+
+@router.get("/deleted")
+async def get_deleted_chapters(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """获取项目中所有已删除的章节"""
+    # 检查项目权限
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    if project.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+    
+    # 获取已删除的章节
+    deleted_chapters = db.query(Chapter).filter(
+        (Chapter.project_id == project_id) &
+        (Chapter.deleted_at.isnot(None))
+    ).order_by(Chapter.deleted_at.desc()).all()
+    
+    return {
+        "project_id": project_id,
+        "deleted_chapters": deleted_chapters,
+        "count": len(deleted_chapters)
+    }
 
 
 @router.post("/{chapter_id}/auto-save")

@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useEffect, useState } from 'react'
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useDispatch } from 'react-redux'
 import {
@@ -88,6 +88,10 @@ export default function ProjectDetailPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [chapterToDelete, setChapterToDelete] = useState<any>(null)
   const [deleting, setDeleting] = useState(false)
+  const [trashDrawerOpen, setTrashDrawerOpen] = useState(false)
+  const [deletedChapters, setDeletedChapters] = useState<any[]>([])
+  const [deletedChaptersLoading, setDeletedChaptersLoading] = useState(false)
+  const [restoring, setRestoring] = useState<number | null>(null)
 
   const [audioSettings, setAudioSettings] = useState<{
     characterId: number
@@ -442,14 +446,59 @@ export default function ProjectDetailPage() {
       // 关闭对话框
       handleCloseDeleteDialog()
       
-      // 显示成功提示（可选）
-      // 你可以使用toast或snackbar来显示成功消息
+      // 显示成功提示
+      alert('章节已移至回收站')
     } catch (err) {
       console.error('❌ 删除章节失败:', err)
       alert('删除章节失败，请重试')
     } finally {
       setDeleting(false)
     }
+  }
+
+  const loadDeletedChapters = async () => {
+    if (!projectId) return
+    
+    try {
+      setDeletedChaptersLoading(true)
+      const response = await apiClient.getDeletedChapters(parseInt(projectId))
+      const deletedData = response.data || []
+      // 按删除时间倒序排列
+      const sortedDeleted = deletedData.sort((a: any, b: any) => 
+        new Date(b.deleted_at).getTime() - new Date(a.deleted_at).getTime()
+      )
+      setDeletedChapters(sortedDeleted)
+    } catch (err) {
+      console.error('❌ 加载已删除章节失败:', err)
+      setDeletedChapters([])
+    } finally {
+      setDeletedChaptersLoading(false)
+    }
+  }
+
+  const handleRestoreChapter = async (chapterId: number) => {
+    try {
+      setRestoring(chapterId)
+      await apiClient.restoreChapter(chapterId)
+      
+      // 刷新两个列表
+      await Promise.all([
+        loadChapters(),
+        loadDeletedChapters()
+      ])
+      
+      alert('章节已恢复')
+    } catch (err) {
+      console.error('❌ 恢复章节失败:', err)
+      alert('恢复章节失败，请重试')
+    } finally {
+      setRestoring(null)
+    }
+  }
+
+  const handleOpenTrashDrawer = () => {
+    setTrashDrawerOpen(true)
+    loadDeletedChapters()
   }
 
   const handleChapterSortOrderChange = async (newOrder: 'asc' | 'desc') => {
@@ -617,18 +666,34 @@ export default function ProjectDetailPage() {
       {/* 章节列表 */}
       <TabPanel value={tabValue} index={4}>
         <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Button
-            variant="contained"
-            startIcon={<EditIcon />}
-            onClick={() => {
-              // 创建新章节的逻辑
-              // 这里可以打开一个对话框让用户输入章节信息
-              // 或者直接创建一个空章节并跳转到编辑器
-              alert('创建新章节功能将在下一个版本实现')
-            }}
-          >
-            创建新章节
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+            <Button
+              variant="contained"
+              startIcon={<EditIcon />}
+              onClick={() => {
+                // 创建新章节的逻辑
+                // 这里可以打开一个对话框让用户输入章节信息
+                // 或者直接创建一个空章节并跳转到编辑器
+                alert('创建新章节功能将在下一个版本实现')
+              }}
+            >
+              创建新章节
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={handleOpenTrashDrawer}
+            >
+              🗑️ 回收站 ({deletedChapters.length})
+            </Button>
+            <Button
+              variant="text"
+              size="small"
+              onClick={() => navigate('/trash')}
+              sx={{ ml: 1 }}
+            >
+              查看全部
+            </Button>
+          </Box>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <Typography variant="body2" sx={{ mr: 1 }}>排序:</Typography>
             <ToggleButtonGroup
@@ -1013,32 +1078,20 @@ export default function ProjectDetailPage() {
               <ListItem 
                 key={chapter.id} 
                 disablePadding
-                secondaryAction={
-                  <IconButton
-                    edge="end"
-                    aria-label="delete"
-                    size="small"
-                    color="error"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleDeleteClick(chapter, e)
-                    }}
-                    sx={{
-                      '&:hover': {
-                        backgroundColor: '#ffebee'
-                      }
-                    }}
-                  >
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
-                }
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  py: 0.5,
+                  px: 0,
+                  borderBottom: '1px solid #eee',
+                }}
               >
                 <ListItemButton
                   onClick={() => handleChapterClick(chapter.id)}
                   sx={{
+                    flex: 1,
                     py: 1.5,
                     px: 2,
-                    borderBottom: '1px solid #eee',
                     '&:hover': {
                       backgroundColor: '#f5f5f5',
                     },
@@ -1057,6 +1110,24 @@ export default function ProjectDetailPage() {
                     }
                   />
                 </ListItemButton>
+                <IconButton
+                  edge="end"
+                  aria-label="delete"
+                  size="small"
+                  color="error"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleDeleteClick(chapter, e)
+                  }}
+                  sx={{
+                    mr: 1,
+                    '&:hover': {
+                      backgroundColor: '#ffebee'
+                    }
+                  }}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
               </ListItem>
             ))}
           </List>
@@ -1079,11 +1150,11 @@ export default function ProjectDetailPage() {
         </DialogTitle>
         <DialogContent>
           <DialogContentText id="delete-dialog-description">
-            你确定要删除章节 <strong>"{chapterToDelete?.title}"</strong> 吗？
-            <br />
-            <br />
-            此操作不可恢复，章节内容将被永久删除。
-          </DialogContentText>
+          你确定要将章节 <strong>"{chapterToDelete?.title}"</strong> 移至回收站吗？
+          <br />
+          <br />
+          章节将被移至回收站，你可以在回收站中恢复它。
+        </DialogContentText>
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseDeleteDialog} disabled={deleting}>
@@ -1100,6 +1171,96 @@ export default function ProjectDetailPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* 回收站抽屉 */}
+      <Drawer
+        anchor="right"
+        open={trashDrawerOpen}
+        onClose={() => setTrashDrawerOpen(false)}
+        sx={{
+          '& .MuiDrawer-paper': {
+            width: 400,
+            boxSizing: 'border-box',
+          },
+        }}
+      >
+        <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography variant="h6">🗑️ 回收站</Typography>
+          <Button
+            size="small"
+            onClick={() => setTrashDrawerOpen(false)}
+            startIcon={<CloseIcon />}
+          >
+            关闭
+          </Button>
+        </Box>
+        <Divider />
+
+        {deletedChaptersLoading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}>
+            <CircularProgress size={40} />
+          </Box>
+        ) : deletedChapters.length > 0 ? (
+          <List sx={{ flex: 1, overflow: 'auto' }}>
+            {deletedChapters.map((chapter: any) => (
+              <ListItem
+                key={chapter.id}
+                disablePadding
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  py: 0.5,
+                  px: 0,
+                  borderBottom: '1px solid #eee',
+                }}
+              >
+                <ListItemButton
+                  disabled
+                  sx={{
+                    flex: 1,
+                    py: 1.5,
+                    px: 2,
+                    opacity: 0.7,
+                  }}
+                >
+                  <ListItemText
+                    primary={
+                      <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                        {chapter.title}
+                      </Typography>
+                    }
+                    secondary={
+                      <Box>
+                        <Typography variant="caption" color="textSecondary" display="block">
+                          📝 {chapter.word_count || 0} 字
+                        </Typography>
+                        <Typography variant="caption" color="textSecondary" display="block">
+                          🗑️ 删除于 {new Date(chapter.deleted_at).toLocaleString('zh-CN')}
+                        </Typography>
+                      </Box>
+                    }
+                  />
+                </ListItemButton>
+                <Button
+                  size="small"
+                  variant="contained"
+                  color="success"
+                  onClick={() => handleRestoreChapter(chapter.id)}
+                  disabled={restoring === chapter.id}
+                  startIcon={restoring === chapter.id ? <CircularProgress size={16} /> : undefined}
+                  sx={{ mr: 1 }}
+                >
+                  {restoring === chapter.id ? '恢复中...' : '恢复'}
+                </Button>
+              </ListItem>
+            ))}
+          </List>
+        ) : (
+          <Box sx={{ p: 2 }}>
+            <Alert severity="info">回收站为空</Alert>
+          </Box>
+        )}
+      </Drawer>
     </Container>
   )
 }
