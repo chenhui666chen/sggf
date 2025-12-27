@@ -1929,7 +1929,7 @@ class CreativeDirectorCoordinator:
         logger.info("🔍 质量评审官正在评审内容...")
         
         # 🆕 使用智能截断替代手动截断
-        # qwen-max限制: 30720 tokens ≈ 46000字符
+        # qwen3-max 限制: 256K tokens ≈ 384000字符
         # 评审模板约1500字 + content，需确保总输入不超限
         truncated_content = smart_truncate_for_context(
             content=content,

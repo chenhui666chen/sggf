@@ -46,8 +46,8 @@ def test_audiobook_model_allocation():
     
     reasons = {
         "AudioDirector": {
-            "模型": "qwen-max",
-            "理由": "需要综合分析小说类型、目标听众，制定改编策略，qwen-max在多维度分析上表现均衡"
+            "模型": "qwen3-max",
+            "理由": "需要综合分析小说类型、目标听众，制定改编策略，qwen3-max在多维度分析上表现均衡"
         },
         "AudiobookScriptAdapter": {
             "模型": "deepseek-reasoner",
@@ -92,6 +92,7 @@ def test_cost_estimation():
         "deepseek-reasoner": {"input": 1.0, "output": 4.0},  # 推理模型较贵
         "deepseek-chat": {"input": 0.2, "output": 0.8},       # chat便宜
         "qwen-max": {"input": 0.4, "output": 1.2},
+        "qwen3-max": {"input": 0.4, "output": 1.2},
         "qwen-turbo": {"input": 0.1, "output": 0.3},          # turbo最便宜
         "qwen-long": {"input": 0.05, "output": 0.2},
     }

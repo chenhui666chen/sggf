@@ -1388,9 +1388,9 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
         # 🆕 广播本阶段选用的模型，便于前端调试
         try:
             from app.core.config import settings
-            default_content_model = getattr(settings, "DEFAULT_CONTENT_MODEL", "qwen-max")
+            default_content_model = getattr(settings, "DEFAULT_CONTENT_MODEL", "qwen3-max")
         except Exception:
-            default_content_model = "qwen-max"
+            default_content_model = "qwen3-max"
         stage_model = None
         if stage_enum == StageType.CONTENT:
             stage_model = default_content_model
@@ -1669,7 +1669,7 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                         system_prompt=concept_system_prompt,
                         on_chunk=on_concept_chunk,
                         temperature=0.9,
-                        model="qwen-max",
+                        model="qwen3-max",
                     )
                     
                     # 2. 世界观设定生成
@@ -2006,12 +2006,12 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                 stage_model = None
                 try:
                     from app.core.config import settings
-                    default_content_model = getattr(settings, "DEFAULT_CONTENT_MODEL", "qwen-max")
+                    default_content_model = getattr(settings, "DEFAULT_CONTENT_MODEL", "qwen3-max")
                 except Exception:
-                    default_content_model = "qwen-max"
+                    default_content_model = "qwen3-max"
                 
                 if stage_enum == StageType.CONTENT:
-                    stage_model = default_content_model  # 内容创作：优先qwen-max（或按配置）
+                    stage_model = default_content_model  # 内容创作：优先 qwen3-max（或按配置）
                 elif stage_enum == StageType.REVIEW:
                     stage_model = "deepseek-reasoner"   # 质量评审：R1
                 elif stage_enum == StageType.ITERATION:
@@ -4408,12 +4408,12 @@ async def execute_generate_next_chapter_task(
                 
                 total_tokens = chapter_tokens + reviews_tokens + prompt_overhead
                 
-                # qwen-max 限制：30720 tokens
-                # 保留 30% 安全余量：21504 tokens
-                max_safe_limit = 21504
+                # qwen3-max 限制：256K tokens（上下文 256K）
+                # 保留 30% 安全余量：179200 tokens
+                max_safe_limit = 179200
                 
                 if total_tokens < max_safe_limit:
-                    return "qwen-max"
+                    return "qwen3-max"
                 else:
                     return "qwen-long"
             
@@ -6355,7 +6355,7 @@ async def _optimize_chapter_task(
         total_tokens = estimate_tokens(current_content) + estimate_tokens(review_report) + 500
         max_safe_limit = 21504
         
-        model_name = "qwen-max" if total_tokens < max_safe_limit else "qwen-long"
+        model_name = "qwen3-max" if total_tokens < max_safe_limit else "qwen-long"
         
         logger.info(f"🤖 使用模型: {model_name} (预计tokens: {total_tokens})")
         

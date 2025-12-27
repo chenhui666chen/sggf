@@ -16,7 +16,7 @@ from .quality_assessment import (
 from .context_aware_optimizer import ContextAwareOptimizer
 
 
-from .llm_singleton import create_deepseek_llm
+from .llm_singleton import create_deepseek_llm, create_routed_llm
 
 
 class BaseAgent(ABC):
@@ -126,13 +126,13 @@ class BaseAgent(ABC):
         # 🔥 关键修复：支持动态设置 temperature
         if temperature is not None:
             # 创建一个临时的 LLM 实例，使用指定的 temperature
-            from langchain_openai import ChatOpenAI
-            temp_llm = ChatOpenAI(
-                model=Config.MODEL_NAME or "deepseek-reasoner",
-                temperature=temperature,
-                api_key=Config.DEEPSEEK_API_KEY or "",
-                base_url=Config.DEEPSEEK_API_BASE or "https://api.deepseek.com/v1"
+            model_name = (
+                getattr(self.llm, 'model_name', None)
+                or getattr(self.llm, 'model', None)
+                or Config.MODEL_NAME
+                or "qwen3-max"
             )
+            temp_llm = create_routed_llm(model=model_name, temperature=temperature)
             print(f"🎲 使用自定义 temperature={temperature}")
             try:
                 response = temp_llm.invoke(messages)
@@ -159,11 +159,12 @@ class BaseAgent(ABC):
         from .intelligent_truncator import truncate_with_ai_assist
         
         # 💡 智能检测当前模型的tokens限制
-        model_name = getattr(self.llm, 'model_name', None) or getattr(self.llm, 'model', 'qwen-max')
+        model_name = getattr(self.llm, 'model_name', None) or getattr(self.llm, 'model', 'qwen3-max')
         
         # 模型限制映射 (tokens)
         MODEL_LIMITS = {
             'qwen-max': 30720,          # 30K tokens
+            'qwen3-max': 256000,        # 256K tokens（上下文 256K）
             'qwen-plus': 1000000,       # 1M tokens
             'qwen-long': 10000000,      # 10M tokens
             'qwen-turbo': 8000,         # 8K tokens

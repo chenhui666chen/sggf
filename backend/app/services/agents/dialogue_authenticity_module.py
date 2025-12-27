@@ -3,20 +3,9 @@
 """
 from typing import Dict, Any, List, Optional
 import re
-from langchain_community.chat_models import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from .config import Config
-
-
-def create_deepseek_llm(task_type: str = "default"):
-    """创建LLM实例"""
-    return ChatOpenAI(
-        model_name=Config.MODEL_NAME or "deepseek-reasoner",
-        temperature=Config.TEMPERATURE,
-        openai_api_key=Config.DEEPSEEK_API_KEY or "",
-        openai_api_base=Config.DEEPSEEK_API_BASE or "https://api.deepseek.com/v1"
-    )
-
+from .llm_singleton import create_deepseek_llm
 
 class DialogueAuthenticityEngine:
     """对话真实性引擎 - 增强对话的真实感和潜台词"""

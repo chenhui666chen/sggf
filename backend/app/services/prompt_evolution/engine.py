@@ -224,7 +224,8 @@ class PromptEvolutionEngine:
         self,
         ai_score: float,
         readability_score: float,
-        writing_score: float
+        writing_score: float,
+        fidelity_similarity: float
     ) -> StopReason:
         """
         🆕 检查多维停止条件
@@ -262,14 +263,16 @@ class PromptEvolutionEngine:
         ai_ok = ai_score <= self.config.early_stop_threshold
         readability_ok = readability_score >= self.config.min_readability_score
         writing_ok = writing_score <= self.config.max_writing_score
+        fidelity_ok = fidelity_similarity >= self.config.min_fidelity_similarity
 
-        if ai_ok and readability_ok and writing_ok:
+        if ai_ok and readability_ok and writing_ok and fidelity_ok:
             return StopReason(
                 should_stop=True,
                 reason_type="success",
                 reason_message=f"🎉 完美达标！AI:{ai_score:.0f}≤{self.config.early_stop_threshold} "
                               f"可读性:{readability_score:.0f}≥{self.config.min_readability_score} "
-                              f"文笔:{writing_score:.0f}≤{self.config.max_writing_score}",
+                              f"文笔:{writing_score:.0f}≤{self.config.max_writing_score} "
+                              f"保真:{fidelity_similarity:.0f}≥{self.config.min_fidelity_similarity}",
                 should_rollback=False
             )
 
@@ -484,6 +487,23 @@ class PromptEvolutionEngine:
             logger.info("🚀 开始提示词进化优化")
             await self._notify_progress(on_progress, "🚀 开始提示词进化优化", 0, {})
 
+            # 获取测试样本（用于题材检测，需早于经验加载/经验优化）
+            samples = self.sample_manager.get_samples(self.config.samples_per_iteration)
+            print(f"📝 获取到 {len(samples)} 个测试样本")
+
+            # 🆕 自动检测题材（如果未指定）
+            if not self.genre:
+                print("🔍 未指定题材，开始自动检测...")
+                detector = get_genre_detector()
+                self.genre = detector.detect_from_samples(samples)
+                print(f"🎭 自动检测到题材: {self.genre}")
+
+            if self.genre:
+                # 统一设置题材上下文，确保经验加载/经验优化可用
+                self.genre_weights = self._get_genre_weights(self.genre)
+                self.meta_optimizer.current_genre = self.genre
+                await self._notify_progress(on_progress, f"🎭 当前题材: {self.genre}", 1, {"genre": self.genre})
+
             # 重置经验库并加载历史经验（跨批次传承）
             self.meta_optimizer.reset_experience()
             historical_reports = self.storage.get_all_experience_reports()
@@ -500,7 +520,7 @@ class PromptEvolutionEngine:
                 if optimizer.should_trigger_optimization(total_reports, last_opt_count):
                     logger.info(f"🔧 触发经验优化：当前 {total_reports} 个报告，上次优化 {last_opt_count} 个")
                     print(f"🔧 开始优化历史经验...")
-                    await self._notify_progress(on_progress, "🔧 正在优化历史经验...", 1, {})
+                    await self._notify_progress(on_progress, "🔧 正在优化历史经验...", 1.2, {})
                     
                     try:
                         # 执行优化
@@ -518,7 +538,7 @@ class PromptEvolutionEngine:
                         await self._notify_progress(
                             on_progress, 
                             f"✅ 经验优化完成: {opt_result.original_count} → {len(opt_result.top_strategies)} 条",
-                            1.5,
+                            1.6,
                             {"optimization_summary": opt_result.optimization_summary}
                         )
                     except Exception as e:
@@ -526,28 +546,11 @@ class PromptEvolutionEngine:
                         print(f"⚠️ 经验优化失败，继续使用原始经验: {e}")
             
             if historical_reports:
-                loaded_count = self.meta_optimizer.load_historical_experience(historical_reports)
+                loaded_count = self.meta_optimizer.load_historical_experience(historical_reports, genre=self.genre)
                 print(f"📚 从历史批次加载经验: {loaded_count} 条")
                 await self._notify_progress(on_progress, f"📚 加载历史经验 {loaded_count} 条", 2, {})
             else:
                 print("📚 无历史经验，从零开始")
-
-            # 获取测试样本
-            samples = self.sample_manager.get_samples(self.config.samples_per_iteration)
-            print(f"📝 获取到 {len(samples)} 个测试样本")
-            
-            # 🆕 自动检测题材（如果未指定）
-            if not self.genre:
-                print("🔍 未指定题材，开始自动检测...")
-                detector = get_genre_detector()
-                self.genre = detector.detect_from_samples(samples)
-                print(f"🎭 自动检测到题材: {self.genre}")
-                
-                # 加载题材权重
-                self.genre_weights = self._get_genre_weights(self.genre)
-                self.meta_optimizer.current_genre = self.genre
-                
-                await self._notify_progress(on_progress, f"🎭 检测到题材: {self.genre}", 3, {"genre": self.genre})
 
             # 尝试使用历史最佳提示词作为起点
             initial_prompt = self._get_best_starting_prompt()
@@ -772,6 +775,16 @@ class PromptEvolutionEngine:
                 avg_readability = sum(readability_scores) / len(readability_scores) if readability_scores else 80
                 avg_writing = sum(writing_scores) / len(writing_scores) if writing_scores else 50
 
+                # 🆕 提取保真度相似度（0-100，越高越好）
+                fidelity_scores = []
+                for r in results:
+                    if r.success and r.rewritten_multi_score:
+                        fidelity_score = r.rewritten_multi_score.get("fidelity_score")
+                        if isinstance(fidelity_score, (int, float)):
+                            fidelity_scores.append(float(fidelity_score))
+                avg_fidelity_score = sum(fidelity_scores) / len(fidelity_scores) if fidelity_scores else 50.0
+                avg_fidelity_similarity = 100 - avg_fidelity_score
+
                 # 🔧 计算并保存综合评分
                 composite_scores = []
                 for r in results:
@@ -788,7 +801,11 @@ class PromptEvolutionEngine:
                     new_version.genre = self.genre
                     new_version.genre_optimized = True
 
-                print(f"   📖 平均可读性: {avg_readability:.1f}, 平均文笔: {avg_writing:.1f}, 综合评分: {avg_composite:.1f}", flush=True)
+                print(
+                    f"   📖 平均可读性: {avg_readability:.1f}, 平均文笔: {avg_writing:.1f}, "
+                    f"平均保真: {avg_fidelity_similarity:.1f}, 综合评分: {avg_composite:.1f}",
+                    flush=True
+                )
                 if self.genre:
                     print(f"   🎭 题材标签: {self.genre}", flush=True)
 
@@ -796,7 +813,7 @@ class PromptEvolutionEngine:
                 self._cache_evaluation(best_prompt, avg_score, results, composite_score=avg_composite)
 
                 # 🆕 多维停止条件检查
-                stop_reason = self._check_stop_conditions(avg_score, avg_readability, avg_writing)
+                stop_reason = self._check_stop_conditions(avg_score, avg_readability, avg_writing, avg_fidelity_similarity)
 
                 if stop_reason.should_stop:
                     print(f"\n   {stop_reason.reason_message}", flush=True)
@@ -1060,4 +1077,3 @@ async def run_evolution(
     """便捷函数：运行进化优化"""
     engine = PromptEvolutionEngine(config)
     return await engine.run_evolution(on_progress)
-

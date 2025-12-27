@@ -3,7 +3,7 @@
 """
 from typing import Dict, Any, List, Optional
 from .agents import CreativeDirectorAgent, PlotArchitectAgent, CharacterDesignerAgent
-from .llm_singleton import create_deepseek_llm
+from .llm_singleton import create_deepseek_llm, create_routed_llm
 from .knowledge_base import NovelKnowledgeBase
 from .memory_manager import NovelMemoryManager
 # 🎯 任务6：导入题材自适应模板系统
@@ -741,23 +741,7 @@ Please design人物关系网络， including：
         
         # 🎆 更新LLM：使用智能选择的模型
         if selected_model != "qwen-long":  # 如果不是qwen-long，需要创建新的LLM
-            from langchain_openai import ChatOpenAI
-            from .config import Config
-            import os
-            
-            if selected_model.startswith("qwen"):
-                api_key = os.getenv("DASHSCOPE_API_KEY", Config.DEEPSEEK_API_KEY)
-                api_base = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            else:
-                api_key = Config.DEEPSEEK_API_KEY
-                api_base = Config.DEEPSEEK_API_BASE
-            
-            dynamic_llm = ChatOpenAI(
-                model=selected_model,
-                temperature=0.7,
-                api_key=api_key,
-                base_url=api_base
-            )
+            dynamic_llm = create_routed_llm(model=selected_model, temperature=0.7)
             print(f"🔄 动态创建 LLM: {selected_model}\n")
         else:
             dynamic_llm = self.llm  # 使用默认的qwen-long
@@ -1264,14 +1248,7 @@ Please analyze：
 
         # 🎆 更新LLM：使用智能选择的模型
         if selected_model != "qwen-long":
-            from langchain_openai import ChatOpenAI
-            dynamic_llm = ChatOpenAI(
-                model=selected_model,
-                base_url=self.character_designer.llm.openai_api_base,
-                api_key=self.character_designer.llm.openai_api_key,
-                temperature=0.8,
-                max_tokens=4000
-            )
+            dynamic_llm = create_routed_llm(model=selected_model, temperature=0.8, max_tokens=4000)
         else:
             dynamic_llm = self.character_designer.llm
         

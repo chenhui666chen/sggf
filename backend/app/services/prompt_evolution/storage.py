@@ -342,7 +342,11 @@ class EvolutionStorage:
             "effective_strategies": report.get("effective_strategies", []),
             "ineffective_strategies": report.get("ineffective_strategies", []),
             "forbidden_patterns": report.get("forbidden_patterns", []),
-            "best_practices": report.get("best_practices", [])
+            "best_practices": report.get("best_practices", []),
+            # 🆕 可选扩展字段：用于跨批次传承与按题材筛选
+            "weight_config": report.get("weight_config"),
+            "threshold_config": report.get("threshold_config"),
+            "genre": report.get("genre"),
         }
 
         with open(report_file, "w", encoding="utf-8") as f:
@@ -492,4 +496,3 @@ def get_evolution_storage() -> EvolutionStorage:
     if _storage is None:
         _storage = EvolutionStorage()
     return _storage
-

@@ -37,7 +37,7 @@ class ExperienceRecord:
 
 
 # 初始提示词模板（小说专用版）
-INITIAL_PROMPT = """你是一位资深网文作者，擅长将文字改写得更具"人味"，同时保持文笔优美流畅，能够骗过AI检测器。
+INITIAL_PROMPT = """你是一位资深网文作者，擅长将文字改写得更具"人味"，同时保持文笔优美流畅，尽量降低AI生成痕迹。
 
 # 核心任务
 将输入的小说片段进行深度改写，保持故事内容不变，同时：
@@ -532,43 +532,68 @@ class MetaOptimizer:
         
         if optimized_data:
             logger.info("🎯 检测到优化经验，优先使用")
-            # 使用优化后的经验
             experiences = optimized_data.get("experiences", [])
-            
-            # 按类别加载
-            for exp_dict in experiences:
+
+            optimized_texts = {
+                "effective": set(),
+                "ineffective": set(),
+                "forbidden": set(),
+                "best_practice": set(),
+            }
+
+            def apply_to_list(target_list: List[str], text: str) -> None:
+                # 让优化经验成为“更近期”的条目，避免被截断掉；同时保持去重
+                if text in target_list:
+                    target_list.remove(text)
+                target_list.append(text)
+
+            # 逆序应用：让排序更靠前（通常更重要）的经验最终处在列表更后侧（更容易保留）
+            for exp_dict in reversed(experiences):
                 try:
                     exp_item = ExperienceItem.from_dict(exp_dict)
-                    category = exp_item.category
-                    
-                    # 映射到对应的字段
-                    if category == "effective":
-                        if exp_item.text not in self.experience.effective_strategies:
-                            self.experience.effective_strategies.append(exp_item.text)
-                            loaded_count += 1
-                    elif category == "ineffective":
-                        if exp_item.text not in self.experience.ineffective_strategies:
-                            self.experience.ineffective_strategies.append(exp_item.text)
-                            loaded_count += 1
-                    elif category == "forbidden":
-                        if exp_item.text not in self.experience.forbidden_patterns:
-                            self.experience.forbidden_patterns.append(exp_item.text)
-                            loaded_count += 1
-                    elif category == "best_practice":
-                        if exp_item.text not in self.experience.best_practices:
-                            self.experience.best_practices.append(exp_item.text)
-                            loaded_count += 1
                 except Exception as e:
                     logger.warning(f"⚠️ 加载优化经验项失败: {e}")
-            
-            logger.info(f"📚 从优化经验加载: {loaded_count} 条")
-            
-            # 限制每类经验的最大数量
-            self.experience.effective_strategies = self.experience.effective_strategies[:15]
-            self.experience.ineffective_strategies = self.experience.ineffective_strategies[:15]
-            self.experience.forbidden_patterns = self.experience.forbidden_patterns[:10]
-            self.experience.best_practices = self.experience.best_practices[:10]
-            
+                    continue
+
+                category = exp_item.category
+                text = (exp_item.text or "").strip()
+                if not text:
+                    continue
+
+                if category in optimized_texts:
+                    optimized_texts[category].add(text)
+
+                if category == "effective":
+                    apply_to_list(self.experience.effective_strategies, text)
+                elif category == "ineffective":
+                    apply_to_list(self.experience.ineffective_strategies, text)
+                elif category == "forbidden":
+                    apply_to_list(self.experience.forbidden_patterns, text)
+                elif category == "best_practice":
+                    apply_to_list(self.experience.best_practices, text)
+
+            # 限制每类经验的最大数量（保留后N条，避免新经验被截断）
+            self.experience.effective_strategies = self.experience.effective_strategies[-15:]
+            self.experience.ineffective_strategies = self.experience.ineffective_strategies[-15:]
+            self.experience.forbidden_patterns = self.experience.forbidden_patterns[-15:]
+            self.experience.best_practices = self.experience.best_practices[-15:]
+
+            applied_counts = {
+                "effective": sum(1 for s in self.experience.effective_strategies if s in optimized_texts["effective"]),
+                "ineffective": sum(1 for s in self.experience.ineffective_strategies if s in optimized_texts["ineffective"]),
+                "forbidden": sum(1 for s in self.experience.forbidden_patterns if s in optimized_texts["forbidden"]),
+                "best_practice": sum(1 for s in self.experience.best_practices if s in optimized_texts["best_practice"]),
+            }
+            loaded_count = sum(applied_counts.values())
+
+            logger.info(
+                f"📚 优化经验生效: {loaded_count} 条 "
+                f"(effective={applied_counts['effective']}, "
+                f"ineffective={applied_counts['ineffective']}, "
+                f"forbidden={applied_counts['forbidden']}, "
+                f"best_practice={applied_counts['best_practice']})"
+            )
+
             return loaded_count
         
         # 如果没有优化经验，使用原始方式加载
@@ -624,10 +649,10 @@ class MetaOptimizer:
                     loaded_count += 1
 
         # 限制每类经验的最大数量，避免prompt过长
-        self.experience.effective_strategies = self.experience.effective_strategies[:15]
-        self.experience.ineffective_strategies = self.experience.ineffective_strategies[:15]
-        self.experience.forbidden_patterns = self.experience.forbidden_patterns[:10]
-        self.experience.best_practices = self.experience.best_practices[:10]
+        self.experience.effective_strategies = self.experience.effective_strategies[-15:]
+        self.experience.ineffective_strategies = self.experience.ineffective_strategies[-15:]
+        self.experience.forbidden_patterns = self.experience.forbidden_patterns[-15:]
+        self.experience.best_practices = self.experience.best_practices[-15:]
 
         logger.info(f"📚 从历史加载经验: {loaded_count} 条 (来自 {len(sorted_reports)} 个批次)")
 
@@ -1327,4 +1352,3 @@ class MetaOptimizer:
             "threshold_config": threshold_config or self.experience.threshold_config,
             "genre": self.current_genre
         }
-

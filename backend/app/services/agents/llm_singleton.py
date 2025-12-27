@@ -9,7 +9,7 @@ LLM实例单例管理器 - 避免重复创建，提升性能
 网络配置：
 - 禁用代理，确保直连API
 """
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, Any
 from langchain_openai import ChatOpenAI
 from .config import Config
 import os
@@ -32,6 +32,39 @@ def _create_no_proxy_client() -> httpx.Client:
     )
 
 
+def _resolve_api_config(model: str) -> Tuple[str, str]:
+    if model.startswith("qwen"):
+        api_key = os.getenv("DASHSCOPE_API_KEY", getattr(Config, "DASHSCOPE_API_KEY", ""))
+        api_base = os.getenv("DASHSCOPE_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        return api_key, api_base
+
+    if model.startswith("deepseek"):
+        api_key = os.getenv("DEEPSEEK_API_KEY", Config.DEEPSEEK_API_KEY)
+        api_base = os.getenv("DEEPSEEK_API_BASE", Config.DEEPSEEK_API_BASE)
+        return api_key, api_base
+
+    api_key = os.getenv("DEEPSEEK_API_KEY", Config.DEEPSEEK_API_KEY)
+    api_base = os.getenv("DEEPSEEK_API_BASE", Config.DEEPSEEK_API_BASE)
+    return api_key, api_base
+
+
+def create_routed_llm(
+    model: str,
+    temperature: Optional[float] = None,
+    **kwargs: Any,
+) -> ChatOpenAI:
+    api_key, api_base = _resolve_api_config(model)
+
+    return ChatOpenAI(
+        model=model,
+        temperature=Config.TEMPERATURE if temperature is None else temperature,
+        api_key=api_key,
+        base_url=api_base,
+        http_client=_create_no_proxy_client(),
+        **kwargs,
+    )
+
+
 class LLMSingletonManager:
     """LLM实例单例管理器"""
     
@@ -49,17 +82,17 @@ class LLMSingletonManager:
         """
         # 任务类型到模型的映射
         task_model_mapping = {
-            "concept": "qwen-max",
+            "concept": "qwen3-max",
             "worldview": "deepseek-reasoner",
             "character": "deepseek-reasoner",
             "outline": "qwen-long",
             "outline_expand": "qwen-long",
             "volume_detail_expand": "deepseek-reasoner",  # 🎆 单卷详细扩展使用R1深度推理
             "character_expand": "deepseek-reasoner",
-            "chapter": "qwen-max",
-            "dialogue": "qwen-max",
+            "chapter": "qwen3-max",
+            "dialogue": "qwen3-max",
             "entity_extract": "qwen-turbo",
-            "ai_trace": "qwen-max",
+            "ai_trace": "deepseek-chat",
             "review": "deepseek-reasoner",
             "final_review": "deepseek-reasoner",
             "quality_review": "deepseek-reasoner",
@@ -74,15 +107,7 @@ class LLMSingletonManager:
             return cls._instances[selected_model]
         
         # 创建新实例
-        if selected_model.startswith("qwen"):
-            api_key = os.getenv("DASHSCOPE_API_KEY", Config.DEEPSEEK_API_KEY)
-            api_base = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        elif selected_model.startswith("deepseek"):
-            api_key = Config.DEEPSEEK_API_KEY
-            api_base = Config.DEEPSEEK_API_BASE
-        else:
-            api_key = Config.DEEPSEEK_API_KEY
-            api_base = Config.DEEPSEEK_API_BASE
+        api_key, api_base = _resolve_api_config(selected_model)
         
         logging.info(f"🤖 [模型选择] 任务类型={task_type} → 模型={selected_model}")
         

@@ -645,6 +645,7 @@ class MultiDimensionScore:
             self.readability_warnings = []
 
     def to_dict(self) -> Dict[str, Any]:
+        fidelity_score = getattr(self, "fidelity_score", 50.0)
         return {
             "vocabulary_score": self.vocabulary_score,
             "sentence_score": self.sentence_score,
@@ -654,6 +655,7 @@ class MultiDimensionScore:
             "structure_score": self.structure_score,
             "writing_score": self.writing_score,
             "readability_score": self.readability_score,
+            "fidelity_score": fidelity_score,
             "overall_score": self.overall_score,
             # 🔧 新增：composite_score 作为 overall_score 的别名，用于engine.py统一访问
             "composite_score": self.overall_score,

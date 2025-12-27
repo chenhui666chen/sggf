@@ -31,7 +31,7 @@ def example_outline_expansion():
     )
     
     # 查看结果
-    print(f"选择的模型: {result['selected_model']}")  # qwen-max (30章)
+    print(f"选择的模型: {result['selected_model']}")  # qwen3-max (30章)
     print(f"优化后上下文: {len(result['context'])}字符")
     print(f"Token使用: {result['stats']['total_tokens']:,} / {result['stats']['target_tokens']:,}")
     
@@ -129,8 +129,8 @@ def example_model_selection():
     """展示不同规模下的自动模型选择"""
     
     test_cases = [
-        (10, "outline_expand"),   # qwen-max
-        (30, "outline_expand"),   # qwen-max
+        (10, "outline_expand"),   # qwen3-max
+        (30, "outline_expand"),   # qwen3-max
         (50, "outline_expand"),   # qwen-plus
         (80, "outline_expand"),   # qwen-long
         (150, "outline_expand"),  # qwen-long
@@ -148,7 +148,7 @@ def example_model_selection():
         print(f"{count}章 → {result['selected_model']} (目标tokens: {result['stats']['target_tokens']:,})")
     
     # 输出:
-    # 10章 → qwen-max (目标tokens: 26,112)
+    # 10章 → qwen3-max (目标tokens: 26,112)
     # 30章 → qwen-plus (目标tokens: 600,000)
     # 50章 → qwen-plus (目标tokens: 600,000)
     # 80章 → qwen-long (目标tokens: 3,000,000)

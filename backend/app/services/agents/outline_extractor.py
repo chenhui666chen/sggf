@@ -9,6 +9,7 @@
 
 from typing import Dict, Any, Optional, List
 from langchain_openai import ChatOpenAI
+from .llm_singleton import create_routed_llm
 import json
 import logging
 
@@ -27,12 +28,8 @@ class OutlineExtractor:
         """
         if llm is None:
             from app.core.config import settings
-            self.llm = ChatOpenAI(
-                model=settings.DEEPSEEK_MODEL_NAME,
-                api_key=settings.DEEPSEEK_API_KEY,
-                base_url=settings.DEEPSEEK_BASE_URL,
-                temperature=0.3,  # 提取任务使用低温度，确保准确性
-            )
+            model = getattr(settings, "DEEPSEEK_MODEL", None) or getattr(settings, "MODEL_NAME", "qwen3-max")
+            self.llm = create_routed_llm(model=model, temperature=0.3)
         else:
             self.llm = llm
     

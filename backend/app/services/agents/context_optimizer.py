@@ -5,7 +5,7 @@
 1. 动态评估各部分内容的token消耗
 2. 基于重要性⭐️分级进行智能截断
 3. 对超长内容使用摘要策略
-4. 确保总输入不超过qwen-max的30720 tokens限制
+4. 确保总输入不超过 qwen3-max 的 256K tokens 限制
 """
 from typing import Dict, Any, Optional, Tuple
 import re
@@ -21,6 +21,7 @@ class ContextOptimizer:
     # 各模型的Token限制
     MODEL_LIMITS = {
         'qwen-max': 30720,
+        'qwen3-max': 256000,    # 256K tokens（上下文 256K）
         'qwen-plus': 1000000,   # 100万tokens
         'qwen-turbo': 1000000,  # 100万tokens (Qwen2.5-Turbo)
         'qwen-long': 10000000,  # 1000万tokens
@@ -30,16 +31,16 @@ class ContextOptimizer:
     # 🆕 智能模型选择策略（根据章节数）
     MODEL_SELECTION_STRATEGY = {
         'chapter_planning': {  # 章节规划阶段
-            'default': 'qwen-max',  # 默认使用max（推理质量高）
+            'default': 'qwen3-max',  # 默认使用 qwen3-max（质量优先）
             'thresholds': [
-                (0, 50, 'qwen-max', 0.85),      # 0-50章: qwen-max, 85%使用率
+                (0, 50, 'qwen3-max', 0.85),     # 0-50章: qwen3-max, 85%使用率
                 (50, 999, 'qwen-long', 0.30),   # 50+章: qwen-long, 30%使用率（较宽松）
             ]
         },
         'content_creation': {  # 内容创作阶段
-            'default': 'qwen-max',
+            'default': 'qwen3-max',
             'thresholds': [
-                (0, 20, 'qwen-max', 0.85),      # 0-20章: qwen-max, 85%使用率
+                (0, 20, 'qwen3-max', 0.85),     # 0-20章: qwen3-max, 85%使用率
                 (20, 50, 'qwen-long', 0.40),    # 20-50章: qwen-long, 40%使用率
                 (50, 999, 'qwen-long', 0.20),   # 50+章: qwen-long, 20%使用率（很宽松）
             ]
@@ -91,7 +92,7 @@ class ContextOptimizer:
         Returns:
             CONTENT_PRIORITIES 字典
         """
-        # 基础配置（qwen-max）
+        # 基础配置（qwen3-max）
         base_config = {
             'previous_chapters_analysis': {'priority': 1, 'max_tokens': 8000},
             'chapter_plan': {'priority': 2, 'max_tokens': 3000},

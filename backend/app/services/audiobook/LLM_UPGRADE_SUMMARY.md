@@ -147,7 +147,7 @@ engine = AudiobookEngine(llm_client=None)
 
 3. **AudioDirector** (audio_director.py)
    - 任务：策略制定
-   - 模型：`qwen-max`
+   - 模型：`qwen3-max`
    - 必需性：⚠️ **可选**（规则驱动也可用）
 
 ---

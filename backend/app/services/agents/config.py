@@ -14,6 +14,10 @@ class Config:
     DEEPSEEK_API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1")
     MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-reasoner")
 
+    # DashScope（阿里云百炼）LLM配置（qwen-*）
+    DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
+    DASHSCOPE_API_BASE = os.getenv("DASHSCOPE_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+
     # Embedding模型配置（使用DeepSeek Embeddings）
     EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "deepseek-embedding")
     EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY", "")
@@ -36,12 +40,22 @@ class Config:
         if not cls.DEEPSEEK_API_KEY:
             errors.append("❌ 未配置 DEEPSEEK_API_KEY")
             errors.append("   请在 .env 文件中设置 DEEPSEEK_API_KEY")
-        elif cls.DEEPSEEK_API_KEY == "your-api-key-here":
+        elif cls.DEEPSEEK_API_KEY in {"your-api-key-here", "your-deepseek-api-key-here"}:
             warnings.append("⚠️  DEEPSEEK_API_KEY 使用默认值，请修改为实际的API Key")
         
         # 检查Embedding API Key
-        if not cls.EMBEDDING_API_KEY and not cls.DEEPSEEK_API_KEY:
-            warnings.append("⚠️  未配置 EMBEDDING_API_KEY，将使用 DEEPSEEK_API_KEY")
+        if not cls.EMBEDDING_API_KEY:
+            if cls.DASHSCOPE_API_KEY:
+                warnings.append("⚠️  未配置 EMBEDDING_API_KEY，将使用 DASHSCOPE_API_KEY")
+            elif cls.DEEPSEEK_API_KEY:
+                warnings.append("⚠️  未配置 EMBEDDING_API_KEY，将使用 DEEPSEEK_API_KEY")
+
+        # 检查DashScope API Key（qwen-* 模型）
+        if not cls.DASHSCOPE_API_KEY:
+            errors.append("❌ 未配置 DASHSCOPE_API_KEY")
+            errors.append("   请在 .env 文件中设置 DASHSCOPE_API_KEY")
+        elif cls.DASHSCOPE_API_KEY in {"your-api-key-here", "your-dashscope-api-key-here"}:
+            warnings.append("⚠️  DASHSCOPE_API_KEY 使用默认值，请修改为实际的API Key")
         
         # 输出结果
         if errors or warnings:

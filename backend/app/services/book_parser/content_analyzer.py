@@ -857,7 +857,7 @@ class ContentAnalyzer:
             content=parsed,
             confidence=0.85,
             chapter_range=(1, len(chapters)),
-            model_used="deepseek-chat"
+            model_used="qwen3-max"
         )
     
     # ==================== 世界观分析 ====================
@@ -935,7 +935,7 @@ class ContentAnalyzer:
             content=parsed,
             confidence=0.80,
             chapter_range=(1, len(chapters)),
-            model_used="deepseek-chat"
+            model_used="qwen3-max"
         )
     
     # ==================== 情节分析 ====================
@@ -1035,7 +1035,7 @@ class ContentAnalyzer:
             content=parsed,
             confidence=0.75,
             chapter_range=(1, len(chapters)),
-            model_used="deepseek-chat"
+            model_used="qwen3-max"
         )
     
     # ==================== 写作风格分析 ====================
@@ -1103,7 +1103,7 @@ class ContentAnalyzer:
             content=parsed,
             confidence=0.80,
             chapter_range=(1, len(chapters)),
-            model_used="deepseek-chat"
+            model_used="qwen3-max"
         )
     
     # ==================== 辅助方法 ====================

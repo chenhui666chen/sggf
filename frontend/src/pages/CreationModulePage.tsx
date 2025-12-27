@@ -23,14 +23,27 @@ import { logout } from '@/store/slices/authSlice'
 
 // 破碎书册 SVG 图标（拆书工具入口）
 const BrokenBookIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-    {/* 左半本书 */}
-    <path d="M3 4v14c0 1.1.9 2 2 2h4V2H5c-1.1 0-2 .9-2 2z" opacity="0.9" />
-    {/* 右半本书（破碎效果） */}
-    <path d="M13 2v6l2-1.5 2 1.5V2h2c1.1 0 2 .9 2 2v10l-3-2-3 2V6l-2 1.5L11 6v12h4l1 2h3c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2h-6z" opacity="0.7" />
-    {/* 裂缝效果 */}
-    <path d="M10 2h1v20h-1z" fill="#fff" opacity="0.3" />
-    <path d="M11.5 8l1-2 1 3-1 2-1-3z" fill="#fff" opacity="0.5" />
+  <svg
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    {/* 打开书本（基于常见 open-book 轮廓，线性风格更清晰） */}
+    <path d="M2.75 4.5h5.75c2.2 0 3.5 1.05 3.5 3v14.25c-.65-.55-1.6-.9-2.75-.9H2.75V4.5z" />
+    <path d="M21.25 4.5h-5.75c-2.2 0-3.5 1.05-3.5 3v14.25c.65-.55 1.6-.9 2.75-.9h6.5V4.5z" />
+
+    {/* 中缝“拆解”锯齿线：强调拆书/结构拆分语义 */}
+    <path d="M12 7.75l-1 1.4 1 1.4-1 1.4 1 1.4-1 1.4 1 1.4-1 1.4 1 1.4" />
+
+    {/* 右页结构线条：暗示解析/分析 */}
+    <path d="M15.2 9.4h3.3" />
+    <path d="M15.2 12h3.3" />
+    <path d="M15.2 14.6h3.3" />
   </svg>
 )
 

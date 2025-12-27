@@ -212,13 +212,14 @@ class EvolutionConfig:
     target_score: int = 30              # 目标AI得分阈值
     max_iterations: int = 10            # 最大迭代次数
     samples_per_iteration: int = 3      # 每次迭代使用的样本数
-    early_stop_threshold: int = 25      # 提前停止阈值
+    early_stop_threshold: int = 10      # 提前停止阈值
     temperature: float = 0.8            # LLM温度参数
     keep_top_n: int = 5                 # 保留最佳版本数量
 
     # 🆕 多维停止条件
-    min_readability_score: float = 70.0   # 最低可读性阈值（低于此值视为达标）
-    max_writing_score: float = 45.0       # 最大文笔分数阈值（高于此值视为达标，越低越好）
+    min_readability_score: float = 85.0   # 最低可读性阈值（低于此值视为不达标）
+    max_writing_score: float = 35.0       # 最大文笔分数阈值（高于此值视为不达标，越低越好）
+    min_fidelity_similarity: float = 70.0 # 最低保真相似度阈值（相似度≥此值通过）
 
     # 🆕 保护性停止阈值
     readability_crash_threshold: float = 50.0   # 可读性崩坏阈值（低于此值强制停止）
@@ -258,4 +259,3 @@ class StopReason:
     reason_message: str = ""            # 停止原因描述
     should_rollback: bool = False       # 是否需要回滚到之前版本
     rollback_reason: str = ""           # 回滚原因
-

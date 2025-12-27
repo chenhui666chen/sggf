@@ -41,11 +41,11 @@ class StreamingService:
         )
         # 阿里云百炼（DashScope）兼容端点，用于 qwen-* 模型
         self.dashscope_client = AsyncOpenAI(
-            api_key=os.getenv("DASHSCOPE_API_KEY", os.getenv("DEEPSEEK_API_KEY")),
+            api_key=os.getenv("DASHSCOPE_API_KEY"),
             base_url=os.getenv("DASHSCOPE_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
             http_client=dashscope_http_client  # 🛡️ 使用禁用代理的客户端
         )
-        self.default_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+        self.default_model = os.getenv("DEEPSEEK_MODEL", "qwen3-max")
     
     async def generate_with_streaming(
         self,
@@ -219,4 +219,3 @@ def get_streaming_service() -> StreamingService:
     if _streaming_service is None:
         _streaming_service = StreamingService()
     return _streaming_service
-

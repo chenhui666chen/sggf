@@ -176,8 +176,10 @@ class ExperienceOptimizer:
         }
         
         # 题材过滤
-        if genre:
-            reports = [r for r in reports if r.get("genre") == genre]
+        # - 兼容历史数据：缺失 genre 视为「通用」
+        # - 「通用」视为不过滤（全量），避免误杀其它题材的高质量经验
+        if genre and genre != "通用":
+            reports = [r for r in reports if (r.get("genre") or "通用") == genre]
         
         # 按时间排序（最新的优先）
         sorted_reports = sorted(

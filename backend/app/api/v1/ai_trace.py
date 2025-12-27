@@ -77,8 +77,8 @@ async def reduce_ai_trace(
         else:
             # 前端未检测，调用检测API
             step1_start = time.time()
-            original_result = await tencent_ai_detect_service.detect_ai_content(text[:5000])
-            original_score = original_result.get("ai_score", 50) if original_result.get("success") else 50
+            original_detect_result = await tencent_ai_detect_service.detect_ai_content(text[:5000])
+            original_score = original_detect_result.get("ai_score", 50) if original_detect_result.get("success") else 50
             logger.info(f"  ✅ 步骤1-原始检测完成，耗时: {time.time() - step1_start:.2f}秒, 分数: {original_score}")
         
         # 2. 使用提示词进化引擎的改写能力
@@ -110,23 +110,39 @@ async def reduce_ai_trace(
         # 根据强度选择不同的提示词
         optimized_prompt = get_optimized_prompt()
 
-        intensity_prompts = {
-            "light": "请对以下文本进行轻微润色，保持原意的同时略微调整表达方式，使其更加自然流畅。",
+        output_requirements = (
+            "【输出要求】\n"
+            "只输出改写后的文本，保持原文段落结构，不要任何解释、标题或列表。"
+        )
+
+        def ensure_output_requirements(prompt_text: str) -> str:
+            if "只输出改写后的文本" in prompt_text:
+                return prompt_text
+            return f"{prompt_text}\n\n{output_requirements}"
+
+        base_intensity_prompts = {
+            "light": (
+                "请对以下文本进行轻微润色，保持原意不变的前提下，做小幅表达优化，使其更自然、更像人类写作。"
+                "\n\n【改写范围】\n"
+                "1. 仅做措辞、语序、节奏、标点的轻微调整\n"
+                "2. 不增删关键事实，不改变叙述视角\n"
+                "3. 尽量保持原文段落结构"
+            ),
             "medium": optimized_prompt,  # 🆕 使用优化后的提示词
             "strong": f"""{optimized_prompt}
 
 【深度改写附加要求】
-1. 彻底重构句式，避免AI常见的对称结构
-2. 替换所有常见的AI用语（如"首先、其次、总之"等）
-3. 增加口语化表达和个人化视角
-4. 打破段落的规整性，创造自然的阅读节奏
-5. 加入适当的语气词和转折
-6. 保持原文的核心意思，但用完全不同的方式表达
-
-改写后的文本应该读起来像是一位有经验的人类作者写的。"""
+1. 彻底重构句式，避免常见的对称结构
+2. 替换常见的模板化连接词（如“首先/其次/总之”等）
+3. 增加口语化表达与个体化视角
+4. 打破段落过度规整，制造更自然的阅读节奏
+5. 加入适当语气词与转折停顿
+6. 保持核心意思不变，但用完全不同的方式表达
+改写后的文本应读起来像是一位有经验的人类作者写的"""
         }
 
-        prompt = intensity_prompts.get(request.intensity, intensity_prompts["medium"])
+        base_prompt = base_intensity_prompts.get(request.intensity, base_intensity_prompts["medium"])
+        prompt = ensure_output_requirements(base_prompt)
         
         # 调用改写
         step2_start = time.time()
@@ -138,19 +154,19 @@ async def reduce_ai_trace(
         new_result = await tencent_ai_detect_service.detect_ai_content(reduced_text[:5000])
         new_score = new_result.get("ai_score", original_score) if new_result.get("success") else original_score
         logger.info(f"  ✅ 步骤3-改写后检测完成，耗时: {time.time() - step3_start:.2f}秒, 新分数: {new_score}")
-        
+
         improvement = original_score - new_score
         total_time = time.time() - start_time
-        
+
         logger.info(f"AI痕迹降低完成: {original_score} -> {new_score} (降低 {improvement} 分)，总耗时: {total_time:.2f}秒")
-        
+
         response = ReduceResponse(
             success=True,
             reduced_text=reduced_text,
             original_ai_score=original_score,
             new_ai_score=new_score,
             label=new_result.get("label", "Unknown"),
-            improvement=improvement
+            improvement=improvement,
         )
         
         logger.info(f"✏️ 准备返回响应，数据大小: {len(reduced_text)}字符")

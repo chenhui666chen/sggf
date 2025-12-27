@@ -27,6 +27,7 @@ class LayeredSummarizer:
     # 各模型的Token限制
     MODEL_LIMITS = {
         'qwen-max': 30720,
+        'qwen3-max': 256000,  # 256K tokens（上下文 256K）
         'qwen-plus': 1000000,
         'qwen-turbo': 1000000,
         'qwen-long': 10000000,
@@ -36,7 +37,7 @@ class LayeredSummarizer:
     # 智能模型选择策略
     MODEL_SELECTION_RULES = {
         'outline_expand': {  # 大纲扩展场景
-            (0, 30): ('qwen-max', 0.85),      # 0-30章: qwen-max, 文笔最好
+            (0, 30): ('qwen3-max', 0.85),     # 0-30章: qwen3-max, 文笔最好
             (30, 80): ('qwen-plus', 0.60),    # 30-80章: qwen-plus, 性价比
             (80, 999): ('qwen-long', 0.30),   # 80+章: qwen-long, 超长输入
         },
@@ -46,7 +47,7 @@ class LayeredSummarizer:
             (50, 999): ('qwen-long', 0.30),   # 50+人: qwen-long
         },
         'chapter_generation': {  # 章节生成场景
-            (0, 20): ('qwen-max', 0.85),      # 0-20章: qwen-max
+            (0, 20): ('qwen3-max', 0.85),     # 0-20章: qwen3-max
             (20, 50): ('qwen-long', 0.40),    # 20-50章: qwen-long
             (50, 999): ('qwen-long', 0.20),   # 50+章: qwen-long宽松
         },

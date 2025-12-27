@@ -38,6 +38,13 @@ class OptimizedLLMClient:
     
     自动根据任务类型选择最优模型
     """
+
+    @staticmethod
+    def _is_qwen_model(model: str) -> bool:
+        return str(model).startswith("qwen")
+
+    def _select_client(self, model: str) -> AsyncOpenAI:
+        return self.dashscope_client if self._is_qwen_model(model) else self.deepseek_client
     
     def __init__(self, strategy: str = "conservative", enable_cache: bool = True):
         """
@@ -47,21 +54,37 @@ class OptimizedLLMClient:
             strategy: 优化策略（conservative/aggressive/dynamic/default）
             enable_cache: 是否启用缓存
         """
-        # 🛡️ 创建禁用代理的httpx客户端
-        http_client = httpx.AsyncClient(
+        # 🛡️ 创建禁用代理的httpx客户端（按模型 Provider 分流）
+        deepseek_http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(120.0, connect=30.0),
-            trust_env=False  # 不读取环境变量中的代理配置
+            trust_env=False,  # 不读取环境变量中的代理配置
         )
-        
-        self.client = AsyncOpenAI(
+        dashscope_http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(180.0, connect=30.0),
+            trust_env=False,
+        )
+
+        # DeepSeek（deepseek-*）
+        self.deepseek_client = AsyncOpenAI(
             api_key=os.getenv("DEEPSEEK_API_KEY"),
             base_url=os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1"),
             timeout=120.0,
-            http_client=http_client  # 🛡️ 使用禁用代理的客户端
+            http_client=deepseek_http_client,  # 🛡️ 使用禁用代理的客户端
         )
+
+        # DashScope（qwen-*）
+        self.dashscope_client = AsyncOpenAI(
+            api_key=os.getenv("DASHSCOPE_API_KEY"),
+            base_url=os.getenv("DASHSCOPE_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+            timeout=180.0,
+            http_client=dashscope_http_client,
+        )
+
+        # 兼容旧字段（历史代码可能引用 self.client）
+        self.client = self.deepseek_client
         
         self.optimizer = get_model_optimizer(strategy)
-        self.default_model = os.getenv("DEEPSEEK_MODEL", "deepseek-reasoner")
+        self.default_model = os.getenv("DEEPSEEK_MODEL", "qwen3-max")
         
         # 🚀 方案3：初始化缓存系统
         self.cache_enabled = enable_cache and CACHE_AVAILABLE
@@ -123,8 +146,8 @@ class OptimizedLLMClient:
                 return cached
         
         try:
-            # 调用 API
-            response = await self.client.chat.completions.create(
+            client = self._select_client(model)
+            response = await client.chat.completions.create(
                 model=model,
                 messages=messages,  # type: ignore[arg-type]
                 temperature=temperature,
@@ -186,7 +209,8 @@ class OptimizedLLMClient:
 
         try:
             # 🔥 关键：启用流式响应
-            stream = await self.client.chat.completions.create(
+            client = self._select_client(model)
+            stream = await client.chat.completions.create(
                 model=model,
                 messages=messages,  # type: ignore[arg-type]
                 temperature=temperature,
@@ -251,7 +275,8 @@ class OptimizedLLMClient:
                 model = self.default_model
 
         try:
-            stream = await self.client.chat.completions.create(
+            client = self._select_client(model)
+            stream = await client.chat.completions.create(
                 model=model,
                 messages=messages,  # type: ignore[arg-type]
                 temperature=temperature,

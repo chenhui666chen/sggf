@@ -4,7 +4,7 @@ AI 生成检测 API
 """
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.db.base import get_db
@@ -32,7 +32,6 @@ class AIDetectResponse(BaseModel):
     ai_score: Optional[int] = None
     label: Optional[str] = None
     suggestion: Optional[str] = None
-    keywords: Optional[List[str]] = None
     error: Optional[str] = None
     text_length: Optional[int] = None
     text_preview: Optional[str] = None
@@ -79,7 +78,6 @@ async def detect_ai_content(
         ai_score=result.get("ai_score"),
         label=result.get("label"),
         suggestion=result.get("suggestion"),
-        keywords=result.get("keywords"),
         error=result.get("error"),
         text_length=len(text),
         text_preview=text[:100] + "..." if len(text) > 100 else text
@@ -109,4 +107,3 @@ async def get_config_status(
         "region": getattr(settings, 'TENCENT_REGION', 'ap-guangzhou'),
         "biztype": getattr(settings, 'TENCENT_BIZTYPE', '') or "未设置（使用默认策略）"
     }
-

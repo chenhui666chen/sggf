@@ -5,6 +5,7 @@
 from typing import List, Dict, Any
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from typing import Optional
+from .llm_singleton import create_deepseek_llm
 
 
 # 简化Memory实现（替代LangChain已移除的Memory模块）
@@ -22,45 +23,10 @@ class SimpleChatMemory:
     
     def clear(self):
         self.messages = []
-try:
-    from langchain_openai import ChatOpenAI
-    OPENAI_SRC = "langchain_openai"
-except ImportError:
-    try:
-        from langchain_community.chat_models import ChatOpenAI
-        OPENAI_SRC = "langchain_community.chat_models"
-    except ImportError:
-        ChatOpenAI = None  # type: ignore
-        OPENAI_SRC = "missing"
-from .config import Config
 import pickle
 import json
 import os
 from pathlib import Path
-
-
-def create_deepseek_llm(task_type: str = "default"):
-    """创建LLM实例"""
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.info(f"🔧 Using ChatOpenAI from: {OPENAI_SRC}")
-    
-    if OPENAI_SRC == "langchain_openai" and ChatOpenAI:
-        return ChatOpenAI(  # type: ignore
-            model=Config.MODEL_NAME,
-            temperature=Config.TEMPERATURE,
-            api_key=Config.DEEPSEEK_API_KEY,
-            base_url=Config.DEEPSEEK_API_BASE
-        )
-    elif OPENAI_SRC.startswith("langchain_") and ChatOpenAI:
-        return ChatOpenAI(  # type: ignore
-            model_name=Config.MODEL_NAME,
-            temperature=Config.TEMPERATURE,
-            openai_api_key=Config.DEEPSEEK_API_KEY,
-            openai_api_base=Config.DEEPSEEK_API_BASE
-        )
-    else:
-        raise ImportError("ChatOpenAI module not available. Please install langchain-openai or langchain-community.")
 
 
 class NovelMemoryManager:
@@ -273,5 +239,4 @@ class NovelMemoryManager:
         except Exception as e:
             print(f"❌ 列出记忆文件失败: {e}")
             return []
-
 

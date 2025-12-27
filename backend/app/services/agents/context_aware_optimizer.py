@@ -2,21 +2,11 @@
 上下文感知优化器 - 基于记忆管理器优化提示词，准确捕捉作者创作意图
 """
 from typing import Dict, Any, List, Optional
-from langchain_community.chat_models import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from .config import Config
+from .llm_singleton import create_deepseek_llm
 from .memory_manager import NovelMemoryManager
 from .knowledge_base import NovelKnowledgeBase
-
-
-def create_deepseek_llm(task_type: str = "default"):  # type: ignore
-    """创建LLM实例"""
-    return ChatOpenAI(  # type: ignore
-        model_name=Config.MODEL_NAME,
-        temperature=Config.TEMPERATURE,
-        openai_api_key=Config.DEEPSEEK_API_KEY,
-        openai_api_base=Config.DEEPSEEK_API_BASE
-    )
 
 
 class ContextAwareOptimizer:
@@ -268,4 +258,3 @@ class ContextAwareOptimizer:
             "timeline_consistency": "未能分析",
             "suggestions": []
         }
-

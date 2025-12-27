@@ -41,9 +41,9 @@ const getScoreLevel = (score: number) => {
 
 // 强度选项配置
 const intensityOptions = [
-  { value: 'light', label: '轻度', description: '表层润色，保留原文90%' },
-  { value: 'medium', label: '中等', description: '智能改写，保留原文70%' },
-  { value: 'strong', label: '高强度', description: '深度重构，保留原文50%' },
+  { value: 'light', label: '轻度', description: '轻度润色，尽量保持原意' },
+  { value: 'medium', label: '中等', description: '改写优化，平衡自然度与保真' },
+  { value: 'strong', label: '高强度', description: '深度改写，重构节奏与表达' },
 ]
 
 export default function AITracePage() {
@@ -438,4 +438,3 @@ export default function AITracePage() {
     </Box>
   )
 }
-

@@ -6,8 +6,8 @@
 import re
 import json
 from typing import List, Dict, Any, Optional
-from langchain_community.chat_models import ChatOpenAI
 import os
+from .agents.llm_singleton import create_routed_llm
 
 
 class UnifiedExtractionService:
@@ -59,12 +59,13 @@ class UnifiedExtractionService:
         }
         """
         # 创建LLM实例
-        llm = ChatOpenAI(
-            model_name=os.getenv("DEEPSEEK_MODEL", "deepseek-reasoner"),
-            temperature=0.7,
-            openai_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
-            openai_api_base=os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1")
+        model = (
+            os.getenv("UNIFIED_EXTRACTION_MODEL")
+            or os.getenv("DEEPSEEK_MODEL")
+            or os.getenv("MODEL_NAME")
+            or "deepseek-reasoner"
         )
+        llm = create_routed_llm(model=model, temperature=0.7)
         
         # 构建统一提示词
         prompt = f"""你是一个小说设定提取专家。请从以下章节中**一次性**提取所有重要信息，包括：

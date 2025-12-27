@@ -12,7 +12,7 @@
 
 | Agent | 任务类型 | 推荐模型 | 选择理由 |
 |-------|---------|---------|---------|
-| **AudioDirector** | 策略制定 | `qwen-max` | 需要综合分析小说类型、目标听众，制定改编策略，qwen-max在多维度分析上表现均衡 |
+| **AudioDirector** | 策略制定 | `qwen3-max` | 需要综合分析小说类型、目标听众，制定改编策略，qwen3-max在多维度分析上表现均衡 |
 | **AudiobookScriptAdapter** | 剧本改编 | `deepseek-reasoner` | **核心任务**，需要创意+逻辑推理（心理活动外化、环境描写→音效标注），reasoner深度思考能力强 |
 | **VoiceDesigner** | 音色设计 | `qwen-turbo` | 基于规则库匹配（年龄→音调，性格→语速），不需要深度推理，turbo快速响应 |
 | **SoundEffectDesigner** | 音效设计 | `qwen-turbo` | 场景→音效库的匹配任务（雨天→rain.mp3），规则为主，turbo即可 |
@@ -24,11 +24,11 @@
 | Agent | 任务类型 | 推荐模型 | 变化 |
 |-------|---------|---------|------|
 | **AudioDirector** | 策略制定 | `qwen-turbo` | 降级到turbo，速度更快但分析深度下降 |
-| **AudiobookScriptAdapter** | 剧本改编 | `qwen-max` | 降级到max，保证基本质量 |
+| **AudiobookScriptAdapter** | 剧本改编 | `qwen3-max` | 降级到qwen3-max，保证基本质量 |
 | **VoiceDesigner** | 音色设计 | `qwen-turbo` | 不变 |
 | **SoundEffectDesigner** | 音效设计 | `qwen-turbo` | 不变 |
 | **MusicComposer** | 音乐设计 | `qwen-turbo` | 不变 |
-| **AudioQualityReviewer** | 质量评审 | `deepseek-chat` | 降级到chat，评审速度快但严谨度下降 |
+| **AudioQualityReviewer** | 质量评审 | `qwen3-max` | 升级到qwen3-max，评审速度与严谨度更均衡 |
 
 ---
 
@@ -41,7 +41,7 @@
 ├─ AudiobookScriptAdapter: 剧本改编（创意+逻辑）
 └─ AudioQualityReviewer: 质量评审（多维度分析）
 
-均衡分析任务（qwen-max）:
+均衡分析任务（qwen3-max）:
 └─ AudioDirector: 策略制定（综合判断）
 
 快速匹配任务（qwen-turbo）:
@@ -120,7 +120,7 @@ response = await llm_client.chat(
 
 | 阶段 | Agent | 模型 | 预计耗时 | Token消耗 |
 |------|-------|------|---------|----------|
-| 1 | AudioDirector | qwen-max | 2s | 500 input + 200 output |
+| 1 | AudioDirector | qwen3-max | 2s | 500 input + 200 output |
 | 2 | AudiobookScriptAdapter | deepseek-reasoner | 15s | 3000 input + 2000 output |
 | 3 | VoiceDesigner | qwen-turbo | 1s | 300 input + 100 output |
 | 3 | SoundEffectDesigner | qwen-turbo | 1s | 300 input + 100 output |
@@ -159,7 +159,7 @@ python -m app.services.audiobook.agents.test_model_config
 
 **输出**：
 ```
-✓ 有声导演         → qwen-max           (综合分析策略制定)
+✓ 有声导演         → qwen3-max         (综合分析策略制定)
 ✓ 剧本编剧         → deepseek-reasoner  (创意改编+逻辑推理)
 ✓ 音色设计         → qwen-turbo         (规则匹配音色参数)
 ✓ 音效设计         → qwen-turbo         (场景音效规划)
@@ -184,7 +184,7 @@ from app.services.audiobook.agents import (
 # 初始化LLM客户端（自动模型优化）
 llm = get_llm_client(strategy="conservative")
 
-# 1. 制定策略（qwen-max）
+# 1. 制定策略（qwen3-max）
 director = AudioDirector(llm_client=llm)
 strategy = director.formulate_strategy(
     novel_genre="科幻",

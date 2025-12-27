@@ -63,9 +63,9 @@ class ModelOptimizer:
     # 🎯 有声小说专用混合优化策略（平衡质量与速度）⭐⭐⭐⭐⭐
     AUDIOBOOK_BALANCED_STRATEGY = {
         # 阶段一：全部使用 chat（创意发散，不需要深度推理）
-        TaskType.CONCEPT_WORLD: "deepseek-chat",
-        TaskType.CONCEPT_CHARACTER: "deepseek-chat",
-        TaskType.CONCEPT_STORY: "deepseek-chat",
+        TaskType.CONCEPT_WORLD: "qwen3-max",
+        TaskType.CONCEPT_CHARACTER: "qwen3-max",
+        TaskType.CONCEPT_STORY: "qwen3-max",
         
         # 阶段二：保持 reasoner（需要逻辑推理）
         TaskType.STRUCTURE_PLOT: "deepseek-reasoner",
@@ -76,73 +76,73 @@ class ModelOptimizer:
         TaskType.CONTENT_STYLE: "deepseek-reasoner",
         
         # 阶段四：使用 chat（评审不需要深度推理）
-        TaskType.REVIEW_CHECK: "deepseek-chat",
+        TaskType.REVIEW_CHECK: "qwen3-max",
         
         # 阶段五：使用 chat（修改润色）
-        TaskType.ITERATION_OPTIMIZE: "deepseek-chat",
+        TaskType.ITERATION_OPTIMIZE: "qwen3-max",
         
         # 🆕 提示词进化：使用 chat（文风改写不需要推理，追求速度）
         TaskType.REWRITE: "deepseek-chat",
         
         # 🆕 拆书分析：使用 chat（信息提取不需要深度推理，且输入可能较长）
-        TaskType.BOOK_ANALYSIS: "deepseek-chat",
+        TaskType.BOOK_ANALYSIS: "qwen3-max",
         
         # 🆕 拆书汇总：使用 qwen-long（全书摘要汇总，输入量大）
         TaskType.BOOK_SYNTHESIS: "qwen-long",
         
-        # 🎙️ 有声小说混合优化：核心用R1，辅助用qwen-max（速度提升60%，质量损失<10%）
-        TaskType.AUDIOBOOK_DIRECTOR: "qwen-max",        # 导演策略：降级到max（策略制定，影响小）
+        # 🎙️ 有声小说混合优化：核心用R1，辅助用qwen3-max（速度提升60%，质量损失<10%）
+        TaskType.AUDIOBOOK_DIRECTOR: "qwen3-max",       # 导演策略：升级到 qwen3-max
         TaskType.AUDIOBOOK_SCRIPT: "deepseek-reasoner",  # 🔥 剧本改编：保持R1（核心任务，质量优先！）
-        TaskType.AUDIOBOOK_VOICE: "qwen-max",           # 音色设计：降级到max（简单映射）
-        TaskType.AUDIOBOOK_SOUND: "qwen-max",           # 音效设计：降级到max（标注任务）
-        TaskType.AUDIOBOOK_MUSIC: "qwen-max",           # 音乐设计：降级到max（提示生成）
-        TaskType.AUDIOBOOK_REVIEW: "qwen-max",          # 质量评审：降级到max（评审任务）
+        TaskType.AUDIOBOOK_VOICE: "qwen3-max",          # 音色设计：升级到 qwen3-max
+        TaskType.AUDIOBOOK_SOUND: "qwen3-max",          # 音效设计：升级到 qwen3-max
+        TaskType.AUDIOBOOK_MUSIC: "qwen3-max",          # 音乐设计：升级到 qwen3-max
+        TaskType.AUDIOBOOK_REVIEW: "qwen3-max",         # 质量评审：升级到 qwen3-max
     }
     # 保守优化策略（小说生成通用）
     CONSERVATIVE_STRATEGY = AUDIOBOOK_BALANCED_STRATEGY.copy()  # 使用混合策略作为默认
     AGGRESSIVE_STRATEGY = {
         # 阶段一：全部 chat
-        TaskType.CONCEPT_WORLD: "deepseek-chat",
-        TaskType.CONCEPT_CHARACTER: "deepseek-chat",
-        TaskType.CONCEPT_STORY: "deepseek-chat",
+        TaskType.CONCEPT_WORLD: "qwen3-max",
+        TaskType.CONCEPT_CHARACTER: "qwen3-max",
+        TaskType.CONCEPT_STORY: "qwen3-max",
         
         # 阶段二：全部 chat
-        TaskType.STRUCTURE_PLOT: "deepseek-chat",
-        TaskType.STRUCTURE_EVENTS: "deepseek-chat",
+        TaskType.STRUCTURE_PLOT: "qwen3-max",
+        TaskType.STRUCTURE_EVENTS: "qwen3-max",
         
         # 阶段三：初稿用 reasoner，优化用 chat
         TaskType.CONTENT_DRAFT: "deepseek-reasoner",
-        TaskType.CONTENT_STYLE: "deepseek-chat",
+        TaskType.CONTENT_STYLE: "qwen3-max",
         
         # 阶段四：chat
-        TaskType.REVIEW_CHECK: "deepseek-chat",
+        TaskType.REVIEW_CHECK: "qwen3-max",
         
         # 阶段五：chat
-        TaskType.ITERATION_OPTIMIZE: "deepseek-chat",
+        TaskType.ITERATION_OPTIMIZE: "qwen3-max",
         
         # 🆕 提示词进化：chat
         TaskType.REWRITE: "deepseek-chat",
         
         # 🆕 拆书分析：chat
-        TaskType.BOOK_ANALYSIS: "deepseek-chat",
+        TaskType.BOOK_ANALYSIS: "qwen3-max",
         
         # 🆕 拆书汇总：qwen-long
         TaskType.BOOK_SYNTHESIS: "qwen-long",
         
         # 🎙️ 有声小说：最大化速度，全部用快速模型
         TaskType.AUDIOBOOK_DIRECTOR: "qwen-turbo",       # 导演策略：用turbo加速
-        TaskType.AUDIOBOOK_SCRIPT: "qwen-max",          # 剧本改编：降级到max（保证质量）
+        TaskType.AUDIOBOOK_SCRIPT: "qwen3-max",         # 剧本改编：升级到 qwen3-max（保证质量）
         TaskType.AUDIOBOOK_VOICE: "qwen-turbo",         # 音色设计：turbo
         TaskType.AUDIOBOOK_SOUND: "qwen-turbo",         # 音效设计：turbo
         TaskType.AUDIOBOOK_MUSIC: "qwen-turbo",         # 音乐设计：turbo
-        TaskType.AUDIOBOOK_REVIEW: "deepseek-chat",      # 质量评审：降级到chat
+        TaskType.AUDIOBOOK_REVIEW: "qwen3-max",          # 质量评审：升级到 qwen3-max
     }
     
     # 默认策略（不优化，全部使用 reasoner）
     DEFAULT_STRATEGY = {
         task: "deepseek-reasoner" for task in TaskType
     }
-    DEFAULT_STRATEGY[TaskType.BOOK_ANALYSIS] = "deepseek-chat"  # 拆书始终用chat
+    DEFAULT_STRATEGY[TaskType.BOOK_ANALYSIS] = "qwen3-max"  # 拆书始终用 qwen3-max
     DEFAULT_STRATEGY[TaskType.BOOK_SYNTHESIS] = "qwen-long"      # 汇总始终用long
     # 有声小说使用默认模型（不优化时用reasoner）
     DEFAULT_STRATEGY[TaskType.AUDIOBOOK_DIRECTOR] = "deepseek-reasoner"
@@ -219,9 +219,13 @@ class ModelOptimizer:
         - 复杂任务：核心阶段用 reasoner
         - 中等复杂度：大部分用 chat
         """
+        # 降 AI 痕迹改写：固定使用 deepseek-chat（对降低 AI 率更友好）
+        if task_type == TaskType.REWRITE:
+            return "deepseek-chat"
+
         # 简单任务：全部用 chat
         if complexity == ComplexityLevel.SIMPLE:
-            return "deepseek-chat"
+            return "qwen3-max"
         
         # 复杂任务：核心阶段用 reasoner
         if complexity == ComplexityLevel.COMPLEX:
@@ -231,13 +235,13 @@ class ModelOptimizer:
             ]:
                 return "deepseek-reasoner"
             else:
-                return "deepseek-chat"
+                return "qwen3-max"
         
         # 中等复杂度：大部分用 chat（除了最关键的内容创作）
         if task_type == TaskType.CONTENT_DRAFT:
             return "deepseek-reasoner"
         else:
-            return "deepseek-chat"
+            return "qwen3-max"
     
     def _analyze_complexity(self, requirement: str) -> ComplexityLevel:
         """
@@ -273,8 +277,8 @@ class ModelOptimizer:
         """
         # 统计每种模型的使用次数
         chat_count = sum(
-            1 for model in self.model_map.values() 
-            if model == "deepseek-chat"
+            1 for model in self.model_map.values()
+            if model in {"qwen3-max", "deepseek-chat"}
         )
         reasoner_count = sum(
             1 for model in self.model_map.values() 
