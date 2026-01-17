@@ -18,7 +18,7 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import AddIcon from '@mui/icons-material/Add'
 import StarIcon from '@mui/icons-material/Star'
-import { apiClient } from '@/services/api'
+import { apiClient, extractApiErrorMessage } from '@/services/api'
 
 interface SettingRecommendation {
   id: number
@@ -87,7 +87,7 @@ export default function SettingRecommendations(props: SettingRecommendationsProp
       setTotalItems(data.total_items || 0)
     } catch (err: any) {
       console.error('加载推荐设定失败', err)
-      setError(err.response?.data?.detail || '加载失败')
+      setError(await extractApiErrorMessage(err, '加载失败'))
     } finally {
       setLoading(false)
     }
@@ -95,7 +95,6 @@ export default function SettingRecommendations(props: SettingRecommendationsProp
 
   useEffect(() => {
     loadRecommendations()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, category, limit])
 
   const handleView = (item: SettingRecommendation) => {

@@ -135,7 +135,7 @@ app.include_router(book_parser.router)  # 拆书工具 API
 app.include_router(audiobook.router)  # 耳畔星河 - 有声书生成 API
 app.include_router(monitoring.router)  # 监控与指标 API
 app.include_router(script_review.router)  # 剧本审核与调整 API
-app.include_router(dreamweaver.router)  # 织梦映心 - 短剧 Mock API
+app.include_router(dreamweaver.router)  # 织梦映心 - 短剧生成 API
 
 
 # 🔌 挂载 Socket.IO

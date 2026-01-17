@@ -123,11 +123,33 @@ class Shot(VersionedModel):
     desc: str
     duration_s: float = Field(gt=0.0)
 
+    class ShotSchemaV2(VersionedModel):
+        """
+        可选增强结构（向后兼容），用于承载更细粒度的镜头描述：
+        - cam_idx / visual_desc / ff_desc / lf_desc / motion_desc / audio_desc
+        - 角色可见性先用 string id（后续可再对齐到 Character/AnchorSet）
+        """
+
+        cam_idx: int = Field(default=0, ge=0)
+        visual_desc: str = ""
+        variation_type: Literal["large", "medium", "small"] = "medium"
+        variation_reason: str = ""
+        ff_desc: str = ""
+        lf_desc: str = ""
+        motion_desc: str = ""
+        audio_desc: str = ""
+        state_before: str = ""
+        state_after: str = ""
+        ff_vis_char_ids: List[str] = Field(default_factory=list)
+        lf_vis_char_ids: List[str] = Field(default_factory=list)
+        meta: Dict[str, Any] = Field(default_factory=dict)
+
     head_frame: FrameSpec
     tail_frame: FrameSpec
     constraints: ShotConstraints = Field(default_factory=ShotConstraints)
     autoqc: Optional[AutoQCShotReport] = None
 
+    shot_schema_v2: Optional[ShotSchemaV2] = None
     assets: List[AssetRef] = Field(default_factory=list)
 
 
@@ -148,6 +170,12 @@ class Project(VersionedModel):
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     episodes: List[Episode]
+
+    # project-level assets（如：角色/场景/道具素材库、风格基准图等）
+    assets: List[AssetRef] = Field(default_factory=list)
+
+    # 运行期配置快照（便于复现/继续执行）
+    runtime_config: Dict[str, Any] = Field(default_factory=dict)
 
     # 版本化约束/风格/锚点占位字段（后续接入 Style Bible / AnchorSet）
     style_bible_ref: Optional[Dict[str, Any]] = None

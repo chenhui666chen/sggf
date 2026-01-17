@@ -23,7 +23,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
-import { apiClient } from '@/services/api'
+import { apiClient, extractApiErrorMessage } from '@/services/api'
 
 interface DuplicateNameConflict {
   conflict_type: 'duplicate_name'
@@ -76,7 +76,7 @@ export default function ConflictDetector(props: ConflictDetectorProps) {
       setHasDetected(true)
     } catch (err: any) {
       console.error('冲突检测失败', err)
-      setError(err.response?.data?.detail || '检测失败')
+      setError(await extractApiErrorMessage(err, '检测失败'))
     } finally {
       setLoading(false)
     }

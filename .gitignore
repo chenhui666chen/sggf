@@ -64,6 +64,9 @@ out/
 *.sqlite3
 *.sqlite-journal
 
+# Database backups
+database_backups/
+
 # Vector Database
 backend/chroma_db/
 backend/chroma_*/

@@ -44,7 +44,7 @@ import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import { clearEditorState } from '@/store/slices/editorSlice'
 import { generationService } from '@/services/generation'
-import { apiClient } from '@/services/api'
+import { apiClient, extractApiErrorMessage } from '@/services/api'
 import FormattedContent from '@/components/common/FormattedContent'
 
 interface TabPanelProps {
@@ -407,7 +407,7 @@ export default function ProjectDetailPage() {
       }
     } catch (err) {
       console.error('❌ 音频试听失败:', err)
-      alert('音频试听失败，请稍后重试')
+      alert(await extractApiErrorMessage(err, '音频试听失败，请稍后重试'))
     } finally {
       setPreviewingId(null)
     }

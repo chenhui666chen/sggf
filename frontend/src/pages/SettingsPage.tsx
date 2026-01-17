@@ -15,7 +15,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import SaveIcon from '@mui/icons-material/Save'
 import { RootState, AppDispatch } from '@/store/store'
 import { logout } from '@/store/slices/authSlice'
-import { apiClient } from '@/services/api'
+import { apiClient, extractApiErrorMessage } from '@/services/api'
 
 export default function SettingsPage() {
   const navigate = useNavigate()
@@ -49,7 +49,7 @@ export default function SettingsPage() {
       setMessage({ type: 'success', text: 'Password changed successfully' })
       setPasswordData({ old_password: '', new_password: '', confirm_password: '' })
     } catch (error: any) {
-      setMessage({ type: 'error', text: error.response?.data?.detail || 'Failed to change password' })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(error, 'Failed to change password') })
     } finally {
       setIsLoading(false)
     }
@@ -159,4 +159,3 @@ export default function SettingsPage() {
     </Container>
   )
 }
-

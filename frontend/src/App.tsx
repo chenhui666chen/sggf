@@ -22,7 +22,8 @@ const BookParserPage = lazy(() => import('@/pages/BookParserPage'))
 const AudiobookDashboardPage = lazy(() => import('@/pages/AudiobookDashboardPage'))  // 耳畔星河仪表盘
 const AudiobookPage = lazy(() => import('@/pages/AudiobookPage'))  // 耳畔星河
 const DreamWeaverPage = lazy(() => import('@/pages/DreamWeaverPage')) // 织梦映心
-const DreamWeaverMockPage = lazy(() => import('@/pages/DreamWeaverMockPage')) // 织梦映心 Mock
+const DreamWeaverRunPage = lazy(() => import('@/pages/DreamWeaverRunPage')) // 织梦映心生成页
+const DreamWeaverLibraryPage = lazy(() => import('@/pages/DreamWeaverLibraryPage')) // 织梦映心项目素材库
 const TrashPage = lazy(() => import('@/pages/TrashPage')) // 回收站
 
 // 加载中组件
@@ -175,10 +176,26 @@ function App() {
             }
           />
           <Route
-            path="/drama/mock"
+            path="/drama/:projectId"
             element={
               <ProtectedRoute>
-                <DreamWeaverMockPage />
+                <DreamWeaverRunPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/drama/:projectId/library"
+            element={
+              <ProtectedRoute>
+                <DreamWeaverLibraryPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/drama/run"
+            element={
+              <ProtectedRoute>
+                <DreamWeaverRunPage />
               </ProtectedRoute>
             }
           />
@@ -208,4 +225,3 @@ function App() {
 }
 
 export default App
-

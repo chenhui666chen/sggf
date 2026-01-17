@@ -7,12 +7,18 @@ from pathlib import Path
 
 from celery import Celery
 
-from app.core.config import settings
-
 # 允许 Celery worker 直接 import 项目根目录下的轻量模块（如：pipeline/agents/adapters）
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
+
+# ⚠️ 重要：先加载环境变量（必须在导入 settings 之前）
+from dotenv import load_dotenv
+
+load_dotenv(PROJECT_ROOT / ".env", override=False)
+load_dotenv(PROJECT_ROOT / "backend" / ".env", override=True)
+
+from app.core.config import settings
 
 celery_app = Celery(
     "novel_writing_agent",
@@ -38,6 +44,7 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    broker_connection_retry_on_startup=True,
 )
 
 # Windows 下 Celery 无法使用 prefork 池，会触发 WinError 5。

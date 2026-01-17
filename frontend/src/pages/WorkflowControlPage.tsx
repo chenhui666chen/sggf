@@ -67,7 +67,7 @@ import StageInfoPanel from '@/components/workflow/StageInfoPanel'
 import OutputPreviewPanel from '@/components/workflow/OutputPreviewPanel'
 import AgentStatusIndicator from '@/components/workflow/AgentStatusIndicator'
 import { workflowWebSocket } from '@/services/websocket'
-import { apiClient } from '@/services/api'  // ✅ 添加apiClient导入
+import { apiClient, extractApiErrorMessage } from '@/services/api'  // ✅ 添加apiClient导入
 import { ProgressEstimator, type StageDurations, type ProgressState } from '@/utils/progressEstimator'
 import { statisticsService } from '@/services/statistics'
 
@@ -2006,7 +2006,7 @@ export default function WorkflowControlPage() {
 
       if (error.response) {
         // 服务器返回错误响应
-        errorMessage = error.response.data?.error || error.response.data?.detail || errorMessage
+        errorMessage = await extractApiErrorMessage(error, errorMessage)
         console.error('❌ 服务器错误:', error.response.status, error.response.data)
       } else if (error.request) {
         // 请求已发送但无响应
@@ -2080,7 +2080,7 @@ export default function WorkflowControlPage() {
       let errorMessage = '自动保存失败'
 
       if (error.response) {
-        errorMessage = error.response.data?.error || error.response.data?.detail || errorMessage
+        errorMessage = await extractApiErrorMessage(error, errorMessage)
       } else if (error.request) {
         errorMessage = '无法连接到服务器'
       }
@@ -2738,7 +2738,7 @@ export default function WorkflowControlPage() {
 
       if (error.response) {
         // 服务器返回错误响应
-        errorMessage = error.response.data?.error || error.response.data?.detail || errorMessage
+        errorMessage = await extractApiErrorMessage(error, errorMessage)
         console.error('❌ 服务器错误:', error.response.status, error.response.data)
       } else if (error.request) {
         // 请求已发送但无响应

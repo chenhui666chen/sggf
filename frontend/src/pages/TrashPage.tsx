@@ -18,7 +18,7 @@ import {
   DialogActions,
 } from '@mui/material'
 import { Restore as RestoreIcon, DeleteForever as DeleteForeverIcon } from '@mui/icons-material'
-import { apiClient } from '@/services/api'
+import { apiClient, extractApiErrorMessage } from '@/services/api'
 import { useNavigate } from 'react-router-dom'
 
 interface DeletedChapter {
@@ -50,7 +50,7 @@ export default function TrashPage() {
       const response = await apiClient.getDeletedChapters(0) // projectId为0表示获取所有
       setDeletedChapters(response.data || [])
     } catch (err: any) {
-      setError(err.response?.data?.detail || '加载回收站失败')
+      setError(await extractApiErrorMessage(err, '加载回收站失败'))
     } finally {
       setLoading(false)
     }
@@ -66,7 +66,7 @@ export default function TrashPage() {
       await apiClient.restoreChapter(chapterId)
       await loadDeletedChapters()
     } catch (err: any) {
-      setError(err.response?.data?.detail || '恢复章节失败')
+      setError(await extractApiErrorMessage(err, '恢复章节失败'))
     } finally {
       setRestoring(null)
     }
@@ -86,7 +86,7 @@ export default function TrashPage() {
       setDeleteDialogOpen(false)
       await loadDeletedChapters()
     } catch (err: any) {
-      setError(err.response?.data?.detail || '永久删除失败')
+      setError(await extractApiErrorMessage(err, '永久删除失败'))
     } finally {
       setPermanentlyDeleting(null)
       setChapterToDelete(null)

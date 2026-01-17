@@ -44,7 +44,7 @@ if exist ".venv\Scripts\Activate.ps1" (
 echo.
 
 :: Start Backend
-echo [1/3] Starting FastAPI Backend Server (WebSocket Enabled)...
+echo [1/4] Starting FastAPI Backend Server (WebSocket Enabled)...
 echo.
 echo Validating config...
 cd /d %~dp0\backend
@@ -57,14 +57,19 @@ start "Novel System - Backend (FastAPI + WebSocket)" cmd /k "cd /d %~dp0 && call
 echo [WAIT] Waiting for backend to start...
 timeout /t 3 /nobreak >nul
 
-:: Start Celery Worker for Audiobook Tasks
-echo [2/3] Starting Celery Worker (Audiobook Queue, solo pool)...
-start "Novel System - Celery Worker" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && cd backend && celery -A app.celery_app.celery_app worker -P solo -Q audiobook -l info"
+:: Start Celery Workers
+echo [2/4] Starting Celery Worker (Audiobook Queue, solo pool)...
+start "Novel System - Celery Worker (Audiobook)" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && cd backend && celery -A app.celery_app.celery_app worker -P solo -Q audiobook -l info"
+echo [WAIT] Giving Celery worker a moment to attach...
+timeout /t 2 /nobreak >nul
+
+echo [3/4] Starting Celery Worker (DreamWeaver Queue, solo pool)...
+start "Novel System - Celery Worker (DreamWeaver)" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && cd backend && celery -A app.celery_app.celery_app worker -P solo -Q dreamweaver -l info"
 echo [WAIT] Giving Celery worker a moment to attach...
 timeout /t 2 /nobreak >nul
 
 :: Start Frontend
-echo [3/3] Starting Frontend Dev Server...
+echo [4/4] Starting Frontend Dev Server...
 start "Novel System - Frontend" cmd /k "cd /d %~dp0 && call .venv\Scripts\activate.bat && cd frontend && npm run dev"
 
 echo.
@@ -79,7 +84,7 @@ echo    - API Docs: http://localhost:8000/docs
 echo    - WebSocket: ws://localhost:8000/socket.io/
 echo.
 echo Tips:
-echo    - Two new windows opened (Backend + Frontend)
+echo    - Four new windows opened (Backend + Celery Audiobook + Celery DreamWeaver + Frontend)
 echo    - Close window to stop service
 echo    - Press any key to open browser...
 echo.

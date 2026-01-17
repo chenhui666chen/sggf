@@ -30,7 +30,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import { apiClient } from '@/services/api'
+import { apiClient, extractApiErrorMessage } from '@/services/api'
 
 interface Project {
   id: number
@@ -63,7 +63,7 @@ interface MockResult {
 
 interface MockTaskStatus {
   task_id: string
-  status: 'running' | 'completed' | 'failed'
+  status: 'running' | 'completed' | 'failed' | 'waiting'
   progress: number
   run_id?: string | null
   state?: string | null
@@ -137,7 +137,7 @@ export default function DreamWeaverMockPage() {
         const res = await apiClient.getProjects()
         setProjects(res.data || [])
       } catch (e: any) {
-        setError(e?.message || '获取项目列表失败')
+        setError(await extractApiErrorMessage(e, '获取项目列表失败'))
       } finally {
         setLoadingProjects(false)
       }
@@ -153,7 +153,7 @@ export default function DreamWeaverMockPage() {
 
     const poll = async () => {
       try {
-        const res = await apiClient.getDreamweaverMockTask(taskId)
+        const res = await apiClient.getDreamweaverTask(taskId)
         const data = res.data as MockTaskStatus
         if (cancelled) return
 
@@ -189,7 +189,7 @@ export default function DreamWeaverMockPage() {
         setTaskState(null)
         setTaskStage(null)
         setTaskArtifacts(null)
-        setError(e?.response?.data?.detail || e?.message || 'Mock 任务状态查询失败')
+        setError(await extractApiErrorMessage(e, 'Mock 任务状态查询失败'))
       }
     }
 
@@ -212,7 +212,7 @@ export default function DreamWeaverMockPage() {
       setChapters(data)
       setSelectedChapterIds(data.map((c) => c.id))
     } catch (e: any) {
-      setError(e?.message || '加载章节失败')
+      setError(await extractApiErrorMessage(e, '加载章节失败'))
       setChapters([])
       setSelectedChapterIds([])
     } finally {
@@ -249,12 +249,12 @@ export default function DreamWeaverMockPage() {
     setResult(null)
     setError(null)
     try {
-      const res = await apiClient.runDreamweaverMockAsync(selectedProjectId, selectedChapterIds)
+      const res = await apiClient.runDreamweaverAsync(selectedProjectId, selectedChapterIds)
       const data = res.data as { task_id: string; run_id: string; status: string }
       setTaskId(data.task_id)
       setTaskRunId(data.run_id)
     } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || 'Mock 任务提交失败')
+      setError(await extractApiErrorMessage(e, 'Mock 任务提交失败'))
       setRunning(false)
     } finally {
       // running 状态由轮询结束时关闭

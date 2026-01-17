@@ -58,6 +58,7 @@ import ImportExportIcon from '@mui/icons-material/ImportExport'
 
 import * as bookParserApi from '@/services/bookParserApi'
 import type { BookSource, BookChapter, BookAnalysis, ParseStatus, ImportPreview, ImportRequest } from '@/services/bookParserApi'
+import { extractApiErrorMessage } from '@/services/api'
 
 // ==================== 子组件 ====================
 
@@ -196,7 +197,7 @@ function UploadDialog({
       setContent('')
       setFile(null)
     } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || '上传失败')
+      setError(await extractApiErrorMessage(err, '上传失败'))
     } finally {
       setLoading(false)
     }
@@ -734,7 +735,7 @@ export default function BookParserPage() {
       )
     } catch (err: any) {
       setLoading(false)
-      alert(err.response?.data?.detail || '启动解析失败')
+      alert(await extractApiErrorMessage(err, '启动解析失败'))
     }
   }
 
@@ -767,7 +768,7 @@ export default function BookParserPage() {
       )
     } catch (err: any) {
       setLoading(false)
-      alert(err.response?.data?.detail || '启动分析失败')
+      alert(await extractApiErrorMessage(err, '启动分析失败'))
     }
   }
 
@@ -796,7 +797,7 @@ export default function BookParserPage() {
       setImportPreview(preview)
       setImportOpen(true)
     } catch (err: any) {
-      alert(err.response?.data?.detail || '获取导入预览失败')
+      alert(await extractApiErrorMessage(err, '获取导入预览失败'))
     }
   }
 
@@ -838,7 +839,7 @@ export default function BookParserPage() {
       }
     } catch (err: any) {
       setImporting(false)
-      alert(err.response?.data?.detail || '导入失败')
+      alert(await extractApiErrorMessage(err, '导入失败'))
     }
   }
 
@@ -862,7 +863,7 @@ export default function BookParserPage() {
       alert('已重置导入状态，可以重新导入为新项目')
     } catch (err: any) {
       setLoading(false)
-      alert(err.response?.data?.detail || '重置失败')
+      alert(await extractApiErrorMessage(err, '重置失败'))
     }
   }
 

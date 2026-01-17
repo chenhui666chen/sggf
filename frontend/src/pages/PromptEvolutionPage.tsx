@@ -25,7 +25,7 @@ import CleaningServicesIcon from '@mui/icons-material/CleaningServices'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
-import { apiClient } from '@/services/api'
+import { apiClient, extractApiErrorMessage } from '@/services/api'
 
 interface EvolutionStatus {
   is_running: boolean
@@ -154,7 +154,7 @@ export default function PromptEvolutionPage() {
       setStartDialogOpen(false)
       fetchStatus()
     } catch (e: any) {
-      setMessage({ type: 'error', text: e.response?.data?.detail || '启动失败' })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '启动失败') })
     } finally { setLoading(false) }
   }
 
@@ -164,7 +164,7 @@ export default function PromptEvolutionPage() {
       setMessage({ type: 'info', text: '任务已停止' })
       fetchStatus()
     } catch (e: any) {
-      setMessage({ type: 'error', text: e.response?.data?.detail || '停止失败' })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '停止失败') })
     }
   }
 
@@ -206,7 +206,7 @@ export default function PromptEvolutionPage() {
       await handleViewDetail(evolutionId)
       fetchHistories()
     } catch (e: any) {
-      setMessage({ type: 'error', text: e.response?.data?.detail || '操作失败' })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '操作失败') })
     } finally { setLoading(false) }
   }
 
@@ -222,7 +222,7 @@ export default function PromptEvolutionPage() {
       setMessage({ type: 'success', text: '删除成功' })
       fetchHistories()
     } catch (e: any) {
-      setMessage({ type: 'error', text: e.response?.data?.detail || '删除失败' })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '删除失败') })
     }
   }
 
@@ -233,7 +233,7 @@ export default function PromptEvolutionPage() {
       setMessage({ type: 'success', text: res.data.message })
       fetchHistories()
     } catch (e: any) {
-      setMessage({ type: 'error', text: e.response?.data?.detail || '清理失败' })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '清理失败') })
     }
   }
 
@@ -250,7 +250,7 @@ export default function PromptEvolutionPage() {
       fetchApprovedPrompts()
       fetchHistories()
     } catch (e: any) {
-      setMessage({ type: 'error', text: e.response?.data?.detail || '移除失败' })
+      setMessage({ type: 'error', text: await extractApiErrorMessage(e, '移除失败') })
     }
   }
 
@@ -587,4 +587,3 @@ export default function PromptEvolutionPage() {
     </Container>
   )
 }
-

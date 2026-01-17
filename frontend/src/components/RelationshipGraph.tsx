@@ -26,7 +26,7 @@ import {
   Tooltip,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
-import { apiClient } from '@/services/api'
+import { apiClient, extractApiErrorMessage } from '@/services/api'
 
 interface RelationshipGraphProps {
   itemId: number
@@ -201,7 +201,7 @@ export default function RelationshipGraph(props: RelationshipGraphProps) {
       setEdges(flowEdges)
     } catch (err: any) {
       console.error('加载关系图谱失败', err)
-      setError(err.response?.data?.detail || '加载失败')
+      setError(await extractApiErrorMessage(err, '加载失败'))
     } finally {
       setLoading(false)
     }

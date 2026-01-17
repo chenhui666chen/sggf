@@ -1,22 +1,1803 @@
 from __future__ import annotations
 
+import base64
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import hashlib
+import os
 from pathlib import Path
-from typing import Any, List
+from typing import Any, Dict, List, Optional
 
-from adapters.mock.video import MockVideoAdapter
+import requests
+
+from adapters.model_adapters import GenerationResult, ModelAdapterFactory
+from agents.audio_sync_manager import AudioSyncManager
+from agents.character_manager import CharacterManager
+from agents.prompt_fragments import (
+    library_assets_from_payload as _library_assets_from_payload,
+    match_library_assets_for_shot as _match_library_assets_for_shot,
+)
+from pipeline.media_presets import (
+    WAN_I2V_OUTPUT_FPS,
+    ensure_media_payload,
+    normalize_video_fps,
+    normalize_wan_i2v_duration_s,
+    resolve_frame_size,
+)
+from pipeline.artifacts_io import download_url_to_path as _download_url_to_path
+from pipeline.ffmpeg_runner import run_ffmpeg as _run_ffmpeg
+from pipeline.style_presets import style_negative_prompt_for_preset, style_prompt_for_preset
+
+
+def _normalize_regenerate_shot_ids(value: Any) -> set[str]:
+    if not isinstance(value, list):
+        return set()
+    out: List[str] = []
+    for item in value:
+        if not isinstance(item, (str, int)):
+            continue
+        s = str(item).strip()
+        if not s or s in out:
+            continue
+        out.append(s)
+        if len(out) >= 200:
+            break
+    return set(out)
+
+
+def _index_video_clips_by_shot(items: Any) -> Dict[str, Dict[str, Any]]:
+    clips: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(items, list):
+        return clips
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        path = item.get("path")
+        if not isinstance(path, str) or not path.strip():
+            continue
+        shot_id = Path(path).stem
+        if shot_id:
+            clips[shot_id] = item
+    return clips
+
+
+def _index_camera_states_by_shot_id(camera_states: Any) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(camera_states, list) or not camera_states:
+        return out
+    for track in camera_states:
+        if not isinstance(track, dict):
+            continue
+        states = track.get("states") if isinstance(track.get("states"), list) else []
+        for state in states:
+            if not isinstance(state, dict):
+                continue
+            shot_id = str(state.get("shot_id") or state.get("state_id") or "").strip()
+            if not shot_id or shot_id in out:
+                continue
+            out[shot_id] = state
+    return out
+
+
+def _stable_seed(*parts: str) -> int:
+    payload = "|".join(parts).encode("utf-8", errors="ignore")
+    digest = hashlib.sha256(payload).digest()
+    return int.from_bytes(digest[:8], byteorder="big", signed=False) % 2147483647
+
+
+def _parse_int(value: Any, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return default
+        return int(value)
+    except Exception:  # noqa: BLE001
+        return default
+
+
+def _resolve_slideshow_effect(value: Any) -> str:
+    raw = str(value or os.getenv("DREAMWEAVER_SLIDESHOW_EFFECT") or "kenburns").strip().lower()
+    if not raw:
+        return "kenburns"
+    if raw in {"none", "off", "disabled"}:
+        return "static"
+    if raw in {"zoompan", "motion"}:
+        return "kenburns"
+    return raw
+
+
+def _join_prompt_parts(parts: List[str], *, sep: str = "，", max_parts: int = 12) -> str:
+    deduped: List[str] = []
+    for part in parts:
+        s = str(part or "").strip()
+        if not s or s in deduped:
+            continue
+        deduped.append(s)
+        if len(deduped) >= max_parts:
+            break
+    return sep.join(deduped)
+
+
+def _i2v_soft_negative_hint(style_negative_prompt: str) -> str:
+    raw = str(style_negative_prompt or "").strip()
+    if not raw:
+        return ""
+    items = [s.strip() for s in raw.replace("，", ",").split(",") if s.strip()]
+    items = [it for i, it in enumerate(items) if it not in items[:i]]
+    if not items:
+        return ""
+    items = items[:8]
+    return "避免出现：" + "、".join(items)
+
+
+def _compact_prompt_fragment(fragment: str, *, limit: int = 180) -> str:
+    text = str(fragment or "").strip()
+    if not text:
+        return ""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    merged = "；".join(lines)
+    if limit > 0 and len(merged) > int(limit):
+        merged = merged[: int(limit)].rstrip("，； ")
+    return merged
+
+
+def _infer_motion_level(*, desc: str, motion_desc: str) -> str:
+    text = f"{desc} {motion_desc}".strip()
+    if any(k in text for k in ("过渡", "衔接", "转场", "接续", "镜头切换", "承接")):
+        return "small"
+    if any(k in text for k in ("打斗", "追逐", "爆炸", "奔跑", "冲刺", "激烈", "快速", "翻滚")):
+        return "large"
+    return "medium"
+
+
+def _as_str_list(value: Any, *, limit: int = 8) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    out: List[str] = []
+    for item in value:
+        if not isinstance(item, (str, int)):
+            continue
+        s = str(item).strip()
+        if not s or s in out:
+            continue
+        out.append(s)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _normalize_state_text(value: Any, *, limit: int = 120) -> str:
+    text = str(value or "").replace("\n", " ").strip()
+    if limit > 0 and len(text) > int(limit):
+        text = text[: int(limit)]
+    return text
+
+
+def _shot_cam_idx(shot: Dict[str, Any]) -> int:
+    raw = None
+    if isinstance(shot, dict):
+        if "cam_idx" in shot:
+            raw = shot.get("cam_idx")
+        elif "camera_index" in shot:
+            raw = shot.get("camera_index")
+    if raw is None or isinstance(raw, bool):
+        return -1
+    try:
+        return int(raw)
+    except Exception:  # noqa: BLE001
+        return -1
+
+
+def _infer_i2v_head_source(
+    *,
+    prev_shot: Optional[Dict[str, Any]],
+    shot: Dict[str, Any],
+    camera_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    自动推断本镜头 I2V 的首帧来源：
+    - 默认：使用本镜头 keyframe head（稳定、可控）
+    - 若满足“同相机 + 状态连续”（或明确的过渡/衔接镜头）：使用上一镜头视频尾帧作为本镜头首帧（更强衔接）
+    - 若存在相机 State（camera_states）且首镜头依赖 parent camera/shot：允许使用依赖镜头视频尾帧作为首帧（更强跨相机衔接）
+    推断优先依赖 state_before/state_after + cam_idx，并在状态缺失时用 motion_desc 做轻量兜底（KISS）。
+    """
+    base: Dict[str, Any]
+    if not isinstance(prev_shot, dict):
+        base = {"mode": "head_keyframe", "reason": "no_prev_shot"}
+    else:
+        curr_cam = _shot_cam_idx(shot)
+        prev_cam = _shot_cam_idx(prev_shot)
+        if curr_cam < 0 or prev_cam < 0:
+            base = {"mode": "head_keyframe", "reason": "missing_cam_idx"}
+        elif curr_cam != prev_cam:
+            base = {"mode": "head_keyframe", "reason": "cam_changed"}
+        else:
+            prev_after = _normalize_state_text(prev_shot.get("state_after"))
+            curr_before = _normalize_state_text(shot.get("state_before"))
+            motion_level = _infer_motion_level(
+                desc=str(shot.get("desc") or "").strip(),
+                motion_desc=str(shot.get("motion_desc") or "").strip(),
+            )
+
+            if prev_after and curr_before:
+                if prev_after == curr_before:
+                    base = {
+                        "mode": "prev_clip_tail",
+                        "reason": "same_cam_and_state_match",
+                        "prev_state_after": prev_after,
+                        "state_before": curr_before,
+                        "motion_level": motion_level,
+                    }
+                else:
+                    base = {
+                        "mode": "head_keyframe",
+                        "reason": "state_mismatch",
+                        "prev_state_after": prev_after,
+                        "state_before": curr_before,
+                        "motion_level": motion_level,
+                    }
+            elif not prev_after and not curr_before:
+                if motion_level == "small":
+                    base = {"mode": "prev_clip_tail", "reason": "same_cam_transition", "motion_level": motion_level}
+                else:
+                    base = {"mode": "head_keyframe", "reason": "state_missing_but_not_transition", "motion_level": motion_level}
+            else:
+                base = {
+                    "mode": "head_keyframe",
+                    "reason": "partial_state_provided",
+                    "prev_state_after": prev_after,
+                    "state_before": curr_before,
+                    "motion_level": motion_level,
+                }
+
+    if str(base.get("mode") or "") == "prev_clip_tail" and isinstance(prev_shot, dict):
+        prev_shot_id = str(prev_shot.get("shot_id") or "").strip()
+        if prev_shot_id:
+            base.setdefault("depends_on_shot_id", prev_shot_id)
+
+    if str(base.get("mode") or "") != "prev_clip_tail" and isinstance(camera_state, dict) and _env_flag("DREAMWEAVER_I2V_CAMERA_STATE_BRIDGE", default=True):
+        anchor_source = str(camera_state.get("anchor_source") or "").strip()
+        anchor_shot_id = str(camera_state.get("anchor_shot_id") or "").strip()
+        if anchor_source in {"camera_tree_parent_shot", "parent_camera_tail"} and anchor_shot_id:
+            motion_level = _infer_motion_level(
+                desc=str(shot.get("desc") or "").strip(),
+                motion_desc=str(shot.get("motion_desc") or "").strip(),
+            )
+            base = {
+                "mode": "prev_clip_tail",
+                "reason": anchor_source,
+                "depends_on_shot_id": anchor_shot_id,
+                "anchor_source": anchor_source,
+                "anchor_shot_id": anchor_shot_id,
+                "motion_level": motion_level,
+                "cam_idx": _shot_cam_idx(shot),
+            }
+
+    return base
+
+
+def _extract_video_tail_frame(
+    *,
+    ffmpeg: str,
+    video_path: Path,
+    out_path: Path,
+    width: int,
+    height: int,
+) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-sseof",
+        "-0.1",
+        "-i",
+        str(video_path),
+        "-frames:v",
+        "1",
+        "-vf",
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+        str(out_path),
+    ]
+    _run_ffmpeg(cmd, log_dir=out_path.parent, log_prefix=f"ffmpeg_extract_tail_{video_path.stem}")
+
+
+def _build_wan_i2v_prompt(*, shot: Dict[str, Any], style_preset: str, frame_ratio: str, prompt_fragment: str = "", engine: str = "wan_i2v") -> str:
+    """
+    Wan I2V 仅接收 prompt 字符串（DashScope VideoSynthesis 亦然），因此将结构化字段“语义化拼接”为自然语言。
+    """
+    style_prompt = style_prompt_for_preset(style_preset)
+    soft_negative = _i2v_soft_negative_hint(style_negative_prompt_for_preset(style_preset))
+    engine_value = str(engine or "wan_i2v").strip().lower()
+    is_t2v = engine_value in {"wan_t2v", "wan26_t2v", "t2v"}
+    consistency_line = "以参考帧为准，保持主体外观一致" if not is_t2v else "保持主体外观一致（角色/服饰/风格一致）"
+
+    desc = str(shot.get("desc") or "").strip()
+    visual_desc = str(shot.get("visual_desc") or "").strip()
+    ff_desc = str(shot.get("ff_desc") or "").strip()
+    lf_desc = str(shot.get("lf_desc") or "").strip()
+    motion_desc = str(shot.get("motion_desc") or "").strip()
+    state_before = str(shot.get("state_before") or "").replace("\n", " ").strip()
+    state_after = str(shot.get("state_after") or "").replace("\n", " ").strip()
+    if len(state_before) > 120:
+        state_before = state_before[:120]
+    if len(state_after) > 120:
+        state_after = state_after[:120]
+
+    shot_type = str(shot.get("shot_type") or "").strip()
+    camera_angle = str(shot.get("camera_angle") or "").strip()
+    movement = str(shot.get("movement") or "").strip()
+    if not movement:
+        movement = str(shot.get("camera_movement") or "").strip()
+    composition = str(shot.get("composition_notes") or "").strip()
+    location = str(shot.get("location") or "").strip()
+    time = str(shot.get("time") or "").strip()
+    atmosphere = str(shot.get("atmosphere") or "").strip()
+    audio_sync = str(shot.get("audio_sync") or "").strip()
+    character_ids = shot.get("character_ids")
+
+    if not motion_desc:
+        motion_desc = _join_prompt_parts(
+            [
+                desc[:120],
+                "镜头缓慢推进",
+                "主体有细微动作变化",
+                "稳定运镜",
+                "电影感",
+            ]
+        )
+
+    motion_level = str(shot.get("motion_level") or "").strip().lower()
+    if motion_level not in {"small", "medium", "large"}:
+        motion_level = _infer_motion_level(desc=desc, motion_desc=motion_desc)
+    if state_before and state_after:
+        if state_before == state_after:
+            motion_level = "small"
+        elif motion_level == "small":
+            motion_level = "medium"
+    motion_control = ""
+    if motion_level == "small":
+        motion_control = "动作幅度小，镜头稳定，过渡自然，避免大幅位移/抖动/变形"
+    elif motion_level == "large":
+        motion_control = "动作幅度较大，运镜跟随但保持主体身份一致，动作自然连贯"
+    else:
+        motion_control = "动作幅度中等，运镜稳定，避免抖动与突兀跳变"
+
+    vis_chars = _as_str_list(shot.get("ff_vis_char_ids")) + _as_str_list(shot.get("lf_vis_char_ids"))
+    vis_chars = [c for i, c in enumerate(vis_chars) if c and c not in vis_chars[:i]]
+    vis_hint = f"人物：{'、'.join(vis_chars[:4])}" if vis_chars else ""
+
+    fragment_hint = _compact_prompt_fragment(prompt_fragment, limit=180)
+
+    subshots = shot.get("subshots") if isinstance(shot.get("subshots"), list) else []
+    multishot_enabled = str(os.getenv("DREAMWEAVER_WAN_I2V_MULTISHOT_PROMPT", "1") or "1").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+        "on",
+    }
+
+    duration_s = normalize_wan_i2v_duration_s(shot.get("duration_s"), default=15.0)
+
+    prompt = ""
+    is_multishot = bool(multishot_enabled and subshots)
+    if is_multishot:
+        def _sec(v: Any) -> int:
+            try:
+                return int(round(float(v)))
+            except Exception:  # noqa: BLE001
+                return 0
+
+        header: List[str] = []
+        header.append(f"总时长{int(duration_s)}秒，按时间戳分镜生成（不要新增/删除分镜，严格覆盖[0-{int(duration_s)}秒]）")
+        if location:
+            header.append(f"场景：{location}")
+        if time:
+            header.append(f"时间：{time}")
+        if atmosphere:
+            header.append(f"氛围：{atmosphere}")
+        if visual_desc:
+            header.append(visual_desc)
+        if desc:
+            header.append(desc[:160])
+        if vis_hint:
+            header.append(vis_hint)
+        if fragment_hint:
+            header.append(f"一致性设定：{fragment_hint}")
+        if state_before:
+            header.append(f"开始状态：{state_before}")
+        if state_after:
+            header.append(f"结束状态：{state_after}")
+        if audio_sync:
+            header.append(f"声画同步：{audio_sync}")
+        if character_ids and isinstance(character_ids, list) and character_ids:
+            header.append(f"角色ID：{', '.join([str(c) for c in character_ids[:4]])}")
+        if motion_control:
+            header.append(motion_control)
+        header.append(consistency_line)
+        header.append(style_prompt)
+        if frame_ratio:
+            header.append(f"画幅{frame_ratio}")
+        if soft_negative:
+            header.append(soft_negative)
+
+        lines: List[str] = []
+        lines.append("总体：" + _join_prompt_parts(header, sep="，", max_parts=18))
+        lines.append("分镜：")
+
+        cursor = 0
+        for idx, raw in enumerate(subshots[:8]):
+            if not isinstance(raw, dict):
+                continue
+            start = _sec(raw.get("start_s"))
+            end = _sec(raw.get("end_s"))
+            if idx == 0:
+                start = 0
+            if end <= start:
+                continue
+            cursor = max(cursor, end)
+            if cursor > int(duration_s):
+                cursor = int(duration_s)
+
+            shot_type_s = str(raw.get("shot_type") or "").strip()
+            angle_s = str(raw.get("camera_angle") or "").strip()
+            move_s = str(raw.get("camera_movement") or "").strip()
+            trans_s = str(raw.get("transition") or "").strip()
+            sub_desc = str(raw.get("visual_desc") or raw.get("desc") or "").strip()
+            if not sub_desc:
+                sub_desc = visual_desc or desc or motion_desc
+            sub_desc = sub_desc.replace("\n", " ").strip()
+            if len(sub_desc) > 180:
+                sub_desc = sub_desc[:180]
+
+            sub_parts: List[str] = []
+            if idx > 0 and trans_s:
+                sub_parts.append(f"转场：{trans_s}")
+            if shot_type_s:
+                sub_parts.append(f"景别：{shot_type_s}")
+            if angle_s:
+                sub_parts.append(f"角度：{angle_s}")
+            if move_s:
+                sub_parts.append(f"运镜：{move_s}")
+            sub_parts.append(sub_desc)
+
+            lines.append(f"[{start}-{end}秒] " + "，".join(sub_parts))
+            if cursor >= int(duration_s):
+                break
+
+        # 兜底：若 subshots 不完整，补上末段，避免总时长不闭合
+        if lines and cursor < int(duration_s):
+            tail_from = max(0, cursor)
+            tail_desc = (lf_desc or motion_desc or desc or visual_desc or "").replace("\n", " ").strip()
+            if len(tail_desc) > 180:
+                tail_desc = tail_desc[:180]
+            lines.append(f"[{tail_from}-{int(duration_s)}秒] {tail_desc or '延续上一镜头，动作自然收束，保持一致性'}")
+
+        prompt = "\n".join([ln for ln in lines if ln.strip()])
+    else:
+        parts: List[str] = []
+        if shot_type:
+            parts.append(f"镜头类型：{shot_type}")
+        if camera_angle:
+            parts.append(f"拍摄角度：{camera_angle}")
+        if movement:
+            parts.append(f"镜头运动：{movement}")
+        if composition:
+            parts.append(f"构图：{composition}")
+        if location:
+            parts.append(f"场景：{location}")
+        if time:
+            parts.append(f"时间：{time}")
+        if atmosphere:
+            parts.append(f"氛围：{atmosphere}")
+        if visual_desc:
+            parts.append(visual_desc)
+        if desc:
+            parts.append(desc[:180])
+        if vis_hint:
+            parts.append(vis_hint)
+        if fragment_hint:
+            parts.append(f"一致性设定：{fragment_hint}")
+        if state_before:
+            parts.append(f"开始状态：{state_before}")
+        if state_after:
+            parts.append(f"结束状态：{state_after}")
+        if audio_sync:
+            parts.append(f"声画同步：{audio_sync}")
+        if character_ids and isinstance(character_ids, list):
+            char_hint = f"角色ID：{', '.join([str(c) for c in character_ids[:4]])}"
+            parts.append(char_hint)
+        if motion_control:
+            parts.append(motion_control)
+
+        if ff_desc:
+            parts.append(ff_desc[:120])
+        if lf_desc:
+            parts.append(lf_desc[:120])
+
+        parts.append(motion_desc[:200])
+        parts.append(consistency_line)
+        parts.append(style_prompt)
+        if frame_ratio:
+            parts.append(f"画幅{frame_ratio}")
+        if soft_negative:
+            parts.append(soft_negative)
+
+        prompt = _join_prompt_parts(parts, max_parts=11)
+
+    max_chars_default = 900 if is_multishot else 420
+    max_chars = _parse_int(os.getenv("DREAMWEAVER_WAN_I2V_PROMPT_MAX_CHARS"), max_chars_default)
+    max_chars = max(120, min(max_chars, 1200))
+    if len(prompt) > max_chars:
+        prompt = prompt[:max_chars].rstrip("，,。.；; ")
+    return prompt
+
+
+def _clone_adapter_instance(adapter: Any) -> Optional[Any]:
+    cfg = getattr(adapter, "config", None)
+    if cfg is None:
+        return None
+    try:
+        return adapter.__class__(cfg)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _close_adapter_session(adapter: Any) -> None:
+    session = getattr(adapter, "session", None)
+    try:
+        if session is not None:
+            session.close()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _write_video_from_generation_result(result: GenerationResult, out_path: Path) -> None:
+    if not result.success:
+        raise RuntimeError(result.error or "WAN video generate failed")
+
+    data = result.data
+    if isinstance(data, dict):
+        url = data.get("video_url") or data.get("url")
+        if isinstance(url, str) and url:
+            _download_url_to_path(url, out_path, timeout_s=300.0, max_retries=2)
+            return
+
+        b64 = data.get("b64_json") or data.get("base64") or data.get("video_base64")
+        if isinstance(b64, str) and b64:
+            out_path.write_bytes(base64.b64decode(b64))
+            return
+
+    raise RuntimeError("WAN video response unsupported: missing video_url/base64 payload")
+
+
+def _render_slideshow_clip(
+    *,
+    ffmpeg: str,
+    head: Path,
+    mid: Optional[Path],
+    tail: Path,
+    out: Path,
+    duration_s: float,
+    fps: int = 24,
+    width: int = 1280,
+    height: int = 720,
+    effect: Optional[str] = None,
+) -> None:
+    effect_value = _resolve_slideshow_effect(effect)
+    has_mid = bool(mid and mid.exists())
+    if has_mid:
+        first_s = max(duration_s / 3.0, 0.1)
+        middle_s = max(duration_s / 3.0, 0.1)
+        last_s = max(duration_s - first_s - middle_s, 0.1)
+    else:
+        first_s = max(duration_s / 2.0, 0.1)
+        second_s = max(duration_s - first_s, 0.1)
+
+    if effect_value != "static":
+        try:
+            zoom_step = float(os.getenv("DREAMWEAVER_SLIDESHOW_ZOOM_STEP", "0.0008") or "0.0008")
+        except Exception:  # noqa: BLE001
+            zoom_step = 0.0008
+        zoom_step = max(0.0001, min(0.01, zoom_step))
+        try:
+            max_zoom = float(os.getenv("DREAMWEAVER_SLIDESHOW_MAX_ZOOM", "1.08") or "1.08")
+        except Exception:  # noqa: BLE001
+            max_zoom = 1.08
+        max_zoom = max(1.0, min(2.0, max_zoom))
+
+        def _kb_stream(input_index: int, frames: int, out_label: str) -> str:
+            safe_frames = max(1, int(frames))
+            return (
+                f"[{input_index}:v]"
+                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+                f"zoompan=z='min(zoom+{zoom_step:.6f},{max_zoom:.3f})':"
+                f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+                f"d={safe_frames}:s={width}x{height}:fps={int(fps)},"
+                "format=yuv420p,setsar=1,setpts=PTS-STARTPTS"
+                f"[{out_label}]"
+            )
+
+        if has_mid and mid is not None:
+            first_frames = max(1, int(round(first_s * fps)))
+            middle_frames = max(1, int(round(middle_s * fps)))
+            last_frames = max(1, int(round(last_s * fps)))
+            filter_complex = (
+                f"{_kb_stream(0, first_frames, 'v0')};"
+                f"{_kb_stream(1, middle_frames, 'v1')};"
+                f"{_kb_stream(2, last_frames, 'v2')};"
+                "[v0][v1][v2]concat=n=3:v=1:a=0,format=yuv420p[v]"
+            )
+            cmd = [
+                ffmpeg,
+                "-y",
+                "-i",
+                str(head),
+                "-i",
+                str(mid),
+                "-i",
+                str(tail),
+                "-filter_complex",
+                filter_complex,
+                "-map",
+                "[v]",
+                "-r",
+                str(int(fps)),
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                str(out),
+            ]
+        else:
+            first_frames = max(1, int(round(first_s * fps)))
+            second_frames = max(1, int(round(second_s * fps)))
+            filter_complex = (
+                f"{_kb_stream(0, first_frames, 'v0')};"
+                f"{_kb_stream(1, second_frames, 'v1')};"
+                "[v0][v1]concat=n=2:v=1:a=0,format=yuv420p[v]"
+            )
+            cmd = [
+                ffmpeg,
+                "-y",
+                "-i",
+                str(head),
+                "-i",
+                str(tail),
+                "-filter_complex",
+                filter_complex,
+                "-map",
+                "[v]",
+                "-r",
+                str(int(fps)),
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                str(out),
+            ]
+
+        _run_ffmpeg(cmd, log_dir=out.parent, log_prefix=f"ffmpeg_slideshow_{out.stem}_kb")
+        return
+
+    if has_mid and mid is not None:
+        filter_complex = (
+            f"[0:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p[v0];"
+            f"[1:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p[v1];"
+            f"[2:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p[v2];"
+            "[v0][v1][v2]concat=n=3:v=1:a=0,format=yuv420p[v]"
+        )
+        cmd = [
+            ffmpeg,
+            "-y",
+            "-loop",
+            "1",
+            "-t",
+            f"{first_s}",
+            "-i",
+            str(head),
+            "-loop",
+            "1",
+            "-t",
+            f"{middle_s}",
+            "-i",
+            str(mid),
+            "-loop",
+            "1",
+            "-t",
+            f"{last_s}",
+            "-i",
+            str(tail),
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[v]",
+            "-r",
+            str(int(fps)),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(out),
+        ]
+    else:
+        filter_complex = (
+            f"[0:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p[v0];"
+            f"[1:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p[v1];"
+            "[v0][v1]concat=n=2:v=1:a=0,format=yuv420p[v]"
+        )
+        cmd = [
+            ffmpeg,
+            "-y",
+            "-loop",
+            "1",
+            "-t",
+            f"{first_s}",
+            "-i",
+            str(head),
+            "-loop",
+            "1",
+            "-t",
+            f"{second_s}",
+            "-i",
+            str(tail),
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[v]",
+            "-r",
+            str(int(fps)),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(out),
+        ]
+
+    _run_ffmpeg(cmd, log_dir=out.parent, log_prefix=f"ffmpeg_slideshow_{out.stem}")
+
+
+def _run_wan_i2v(
+    ctx: Any,
+    *,
+    run_dir: Path,
+    video_cfg: Dict[str, Any],
+    width: int,
+    height: int,
+    regenerate_shot_ids: Optional[set[str]] = None,
+    allowed_shot_ids: Optional[set[str]] = None,
+    character_manager: Optional[CharacterManager] = None,
+) -> None:
+    factory = ModelAdapterFactory()
+    adapter_name = str(video_cfg.get("adapter") or "wan_i2v").strip() or "wan_i2v"
+    i2v = factory.get_adapter(adapter_name)
+
+    ffmpeg = os.getenv("FFMPEG_PATH", "ffmpeg")
+    fps = WAN_I2V_OUTPUT_FPS
+    motion_bucket_id = int(video_cfg.get("motion_bucket_id") or 127)
+    slideshow_effect = _resolve_slideshow_effect(video_cfg.get("slideshow_effect"))
+
+    regen_set = regenerate_shot_ids or set()
+    existing_clips_by_shot = _index_video_clips_by_shot(ctx.payload.get("video_clips"))
+
+    style_preset = str(ctx.payload.get("style_preset") or "").strip()
+    image_cfg = ctx.payload.get("image_config") if isinstance(ctx.payload.get("image_config"), dict) else {}
+    frame_ratio = str(image_cfg.get("ratio") or "").strip() or "16:9"
+    lib_assets = _library_assets_from_payload(ctx.payload)
+
+    storyboard = ctx.payload.get("storyboard", [])
+    camera_states = ctx.payload.get("camera_states")
+    if not isinstance(camera_states, list) or not camera_states:
+        try:
+            from agents.camera_states import build_camera_states as _build_camera_states
+            from agents.camera_tree import build_camera_tree as _build_camera_tree
+
+            camera_tree = ctx.payload.get("camera_tree")
+            if not (
+                isinstance(camera_tree, list)
+                and any(isinstance(n, dict) and isinstance(n.get("cam_idx"), int) for n in camera_tree)
+            ):
+                camera_tree = _build_camera_tree(storyboard if isinstance(storyboard, list) else [])
+                if camera_tree:
+                    ctx.payload["camera_tree"] = camera_tree
+
+            camera_states = _build_camera_states(
+                storyboard if isinstance(storyboard, list) else [],
+                camera_tree if isinstance(camera_tree, list) and camera_tree else None,
+            )
+            if camera_states:
+                ctx.payload["camera_states"] = camera_states
+        except Exception:  # noqa: BLE001
+            camera_states = None
+    camera_state_by_shot_id = _index_camera_states_by_shot_id(camera_states)
+
+    jobs: List[dict] = []
+    for item in storyboard:
+        if not isinstance(item, dict):
+            continue
+        shot_id = str(item.get("shot_id") or "")
+        if not shot_id:
+            continue
+        if allowed_shot_ids is not None and shot_id not in allowed_shot_ids:
+            continue
+        out = run_dir / f"{shot_id}.mp4"
+        if out.exists() and shot_id not in regen_set:
+            continue
+        jobs.append(item)
+
+    video_parallelism = _parse_int(video_cfg.get("parallelism") or os.getenv("DREAMWEAVER_VIDEO_PARALLELISM"), 1)
+    video_parallelism = max(1, min(int(video_parallelism), len(jobs) if jobs else 1))
+    if video_parallelism > 1:
+        probe = _clone_adapter_instance(i2v)
+        if probe is None:
+            video_parallelism = 1
+        else:
+            _close_adapter_session(probe)
+
+    def _render_one(
+        item: dict,
+        *,
+        head_override: Optional[Path] = None,
+        i2v_input_meta: Optional[Dict[str, Any]] = None,
+        disallow_slideshow_fallback: bool = False,
+    ) -> dict:
+        shot_id = str(item.get("shot_id") or "")
+        head = run_dir / f"{shot_id}_head.png"
+        tail = run_dir / f"{shot_id}_tail.png"
+        mid = run_dir / f"{shot_id}_mid.png"
+        out = run_dir / f"{shot_id}.mp4"
+        duration_s = normalize_wan_i2v_duration_s(item.get("duration_s"), default=5.0)
+
+        if not head.exists():
+            raise RuntimeError(f"missing head frame for i2v: {head}")
+
+        input_head = head_override if isinstance(head_override, Path) else head
+
+        asset_match = _match_library_assets_for_shot(shot=item, library_assets=lib_assets, max_character_refs=3)
+        prompt_fragment = str(asset_match.get("prompt_fragment") or "").strip()
+        
+        character_assets = asset_match.get("character_assets") if isinstance(asset_match.get("character_assets"), list) else []
+        character_references: List[Dict[str, Any]] = []
+        for char_asset in character_assets:
+            char_ref: Dict[str, Any] = {
+                "character_id": str(char_asset.get("entity_name") or ""),
+                "name": str(char_asset.get("entity_name") or ""),
+            }
+            descriptor = str(char_asset.get("descriptor") or "")
+            if descriptor:
+                char_ref["appearance"] = descriptor
+            character_references.append(char_ref)
+        
+        if character_manager:
+            try:
+                manager_chars = character_manager.get_characters_for_api(shot_id, max_characters=3)
+                if manager_chars:
+                    character_references = manager_chars
+            except Exception as e:
+                print(f"获取角色引用失败 ({shot_id}): {e}")
+        
+        motion_prompt = _build_wan_i2v_prompt(
+            shot=item,
+            style_preset=style_preset,
+            frame_ratio=frame_ratio,
+            prompt_fragment=prompt_fragment,
+        )
+
+        via = "wan_i2v"
+        meta: Dict[str, Any] = {"engine": "wan_i2v", "adapter": adapter_name, "fps": fps, "motion_bucket_id": motion_bucket_id}
+        seed = _stable_seed(str(getattr(ctx, "run_id", "")), shot_id, "clip")
+
+        default_input_meta = {"mode": "head_keyframe", "reason": "default", "head_path": str(head)}
+        primary_input_meta = i2v_input_meta or default_input_meta
+
+        attempts: List[Dict[str, Any]] = []
+        candidates: List[Tuple[Path, Dict[str, Any]]] = [(input_head, dict(primary_input_meta))]
+
+        # “尾帧->下镜头首帧桥接”属于连续性增强策略：不允许退化到图片拼接。
+        # 但允许在桥接输入失败时，回退到本镜头 head keyframe 继续 I2V（仍保证是真视频片段）。
+        if disallow_slideshow_fallback and isinstance(head_override, Path) and head_override.exists() and head_override != head:
+            candidates.append(
+                (
+                    head,
+                    {
+                        "mode": "head_keyframe",
+                        "reason": "bridge_i2v_failed_fallback_to_head_keyframe",
+                        "head_path": str(head),
+                        "bridge_source": dict(primary_input_meta),
+                    },
+                )
+            )
+
+        try:
+            local_i2v = i2v
+            if video_parallelism > 1:
+                cloned = _clone_adapter_instance(i2v)
+                if cloned is None:
+                    raise RuntimeError("adapter clone failed for parallel i2v generation")
+                local_i2v = cloned
+
+            result = None
+            chosen_input_meta: Optional[Dict[str, Any]] = None
+            try:
+                last_error: Optional[str] = None
+                for idx, (candidate_path, candidate_meta) in enumerate(candidates):
+                    meta["i2v_input"] = candidate_meta
+                    try:
+                        result = local_i2v.generate(
+                            image_path=str(candidate_path),
+                            prompt=motion_prompt,
+                            duration=duration_s,
+                            fps=fps,
+                            motion_bucket_id=motion_bucket_id,
+                            seed=seed,
+                            character_references=character_references if character_references else None,
+                        )
+                        _write_video_from_generation_result(result, out)
+                        chosen_input_meta = candidate_meta
+                        break
+                    except Exception as exc:  # noqa: BLE001
+                        last_error = str(exc)
+                        attempts.append(
+                            {
+                                "attempt": idx + 1,
+                                "image_path": str(candidate_path),
+                                "input_meta": candidate_meta,
+                                "error": last_error,
+                            }
+                        )
+                        result = None
+                        chosen_input_meta = None
+                        continue
+
+                if result is None or chosen_input_meta is None:
+                    raise RuntimeError(last_error or "wan_i2v generate failed")
+            finally:
+                if local_i2v is not i2v:
+                    _close_adapter_session(local_i2v)
+
+            if isinstance(result.data, dict) and isinstance(result.data.get("video_url"), str):
+                meta["remote_url"] = result.data["video_url"]
+            meta["seed"] = seed
+            if attempts:
+                meta["i2v_attempts"] = attempts
+            meta["i2v_input"] = chosen_input_meta
+        except Exception as exc:  # noqa: BLE001
+            if disallow_slideshow_fallback:
+                meta["error"] = str(exc)
+                meta["strict_i2v"] = True
+                if attempts and "i2v_attempts" not in meta:
+                    meta["i2v_attempts"] = attempts
+                raise
+
+            via = "ffmpeg_slideshow_fallback"
+            meta["error"] = str(exc)
+            meta["slideshow_effect"] = slideshow_effect
+            _render_slideshow_clip(
+                ffmpeg=ffmpeg,
+                head=input_head,
+                mid=mid if mid.exists() else None,
+                tail=tail,
+                out=out,
+                duration_s=duration_s,
+                fps=fps,
+                width=width,
+                height=height,
+                effect=slideshow_effect,
+            )
+
+        return {
+            "path": str(out),
+            "duration": duration_s,
+            "head": str(head),
+            "mid": str(mid) if mid.exists() else None,
+            "tail": str(tail),
+            "meta": {**meta, "via": via, "motion_prompt": motion_prompt[:240]},
+        }
+
+    # 若存在“上一镜头视频尾帧 -> 下一镜头首帧”的依赖，则强制串行生成，避免并发打乱依赖关系。
+    needs_bridge = False
+    prev_item: Optional[dict] = None
+    for item in storyboard:
+        if not isinstance(item, dict):
+            continue
+        shot_id = str(item.get("shot_id") or "").strip()
+        if not shot_id:
+            continue
+        inferred = _infer_i2v_head_source(
+            prev_shot=prev_item,
+            shot=item,
+            camera_state=camera_state_by_shot_id.get(shot_id),
+        )
+        if (allowed_shot_ids is None or shot_id in allowed_shot_ids) and str(inferred.get("mode") or "") == "prev_clip_tail":
+            needs_bridge = True
+            break
+        prev_item = item
+    if needs_bridge:
+        video_parallelism = 1
+
+    generated: List[dict] = []
+    if video_parallelism <= 1 or len(jobs) <= 1:
+        # 串行：在 storyboard 顺序下填充 prev_clip_path，用于尾帧抽取。
+        prev_clip_path: Optional[Path] = None
+        prev_shot_id: Optional[str] = None
+        prev_item = None
+
+        def _resolve_clip_path(shot_key: str) -> Optional[Path]:
+            key = str(shot_key or "").strip()
+            if not key:
+                return None
+            existing = existing_clips_by_shot.get(key)
+            if isinstance(existing, dict) and isinstance(existing.get("path"), str):
+                p = Path(str(existing.get("path") or "")).expanduser()
+                if p.exists():
+                    return p
+            p = run_dir / f"{key}.mp4"
+            return p if p.exists() else None
+
+        for item in storyboard:
+            if not isinstance(item, dict):
+                continue
+            shot_id = str(item.get("shot_id") or "").strip()
+            if not shot_id:
+                continue
+
+            out = run_dir / f"{shot_id}.mp4"
+            existing = existing_clips_by_shot.get(shot_id)
+            existing_path = Path(str(existing.get("path") or out)) if isinstance(existing, dict) else out
+            if not existing_path.exists() and out.exists():
+                existing_path = out
+
+            if allowed_shot_ids is not None and shot_id not in allowed_shot_ids:
+                prev_clip_path = existing_path if existing_path.exists() else None
+                prev_shot_id = shot_id
+                prev_item = item
+                continue
+
+            if existing_path.exists() and shot_id not in regen_set:
+                prev_clip_path = existing_path
+                prev_shot_id = shot_id
+                prev_item = item
+                continue
+
+            head_override: Optional[Path] = None
+            input_meta: Optional[Dict[str, Any]] = None
+            inferred = _infer_i2v_head_source(
+                prev_shot=prev_item,
+                shot=item,
+                camera_state=camera_state_by_shot_id.get(shot_id),
+            )
+            bridge_required = str(inferred.get("mode") or "") == "prev_clip_tail"
+            dep_shot_id = str(inferred.get("depends_on_shot_id") or "").strip() if bridge_required else ""
+            dep_clip_path = _resolve_clip_path(dep_shot_id) if dep_shot_id else None
+
+            if bridge_required and allowed_shot_ids is not None and (dep_clip_path is None or not dep_clip_path.exists()):
+                prev_clip_path = None
+                prev_shot_id = shot_id
+                prev_item = item
+                continue
+            if bridge_required and dep_clip_path is not None and dep_clip_path.exists():
+                tail_frame = run_dir / f"{Path(dep_clip_path).stem}_clip_tail.png"
+                try:
+                    _extract_video_tail_frame(
+                        ffmpeg=ffmpeg,
+                        video_path=dep_clip_path,
+                        out_path=tail_frame,
+                        width=width,
+                        height=height,
+                    )
+                    if tail_frame.exists():
+                        head_override = tail_frame
+                        input_meta = {
+                            "mode": "prev_clip_tail",
+                            "reason": inferred.get("reason"),
+                            "depends_on_shot_id": dep_shot_id or None,
+                            "depends_on_clip_path": str(dep_clip_path),
+                            "tail_frame_path": str(tail_frame),
+                            "prev_state_after": inferred.get("prev_state_after"),
+                            "state_before": inferred.get("state_before"),
+                            "anchor_source": inferred.get("anchor_source"),
+                            "anchor_shot_id": inferred.get("anchor_shot_id"),
+                            "cam_idx": _shot_cam_idx(item),
+                        }
+                except Exception as exc:  # noqa: BLE001
+                    input_meta = {
+                        "mode": "head_keyframe_fallback",
+                        "reason": "extract_prev_clip_tail_failed",
+                        "depends_on_shot_id": dep_shot_id or None,
+                        "depends_on_clip_path": str(dep_clip_path) if dep_clip_path is not None else None,
+                        "error": str(exc),
+                        "cam_idx": _shot_cam_idx(item),
+                    }
+
+            clip = _render_one(
+                item,
+                head_override=head_override,
+                i2v_input_meta=input_meta,
+                disallow_slideshow_fallback=bridge_required,
+            )
+            generated.append(clip)
+            prev_clip_path = Path(str(clip.get("path") or out))
+            prev_shot_id = shot_id
+            prev_item = item
+    else:
+        # 并行：无跨镜头首帧依赖时，保持原并发行为。
+        ordered: List[Optional[dict]] = [None] * len(jobs)
+        with ThreadPoolExecutor(max_workers=video_parallelism) as pool:
+            futures = {pool.submit(_render_one, item): idx for idx, item in enumerate(jobs)}
+            for fut in as_completed(futures):
+                idx = futures[fut]
+                ordered[idx] = fut.result()
+        generated = [c for c in ordered if isinstance(c, dict)]
+
+    for clip in generated:
+        path = clip.get("path")
+        if not isinstance(path, str) or not path.strip():
+            continue
+        shot_key = Path(path).stem
+        if shot_key:
+            existing_clips_by_shot[shot_key] = clip
+
+    merged: List[dict] = []
+    for item in storyboard:
+        if not isinstance(item, dict):
+            continue
+        shot_id = str(item.get("shot_id") or "")
+        if not shot_id:
+            continue
+        clip = existing_clips_by_shot.get(shot_id)
+        if isinstance(clip, dict):
+            merged.append(clip)
+
+    audio_sync_enabled = _env_flag("DREAMWEAVER_AUDIO_SYNC_ENABLED", default=True)
+    if audio_sync_enabled and merged:
+        try:
+            audio_manager = AudioSyncManager(run_dir=run_dir)
+            audio_clips: List[Dict[str, Any]] = []
+            
+            for clip in merged:
+                shot_id = Path(clip.get("path") or "").stem
+                if not shot_id:
+                    continue
+                
+                shot_item = None
+                for item in storyboard:
+                    if isinstance(item, dict) and str(item.get("shot_id") or "") == shot_id:
+                        shot_item = item
+                        break
+                
+                if not shot_item:
+                    continue
+                
+                audio_sync_marker = shot_item.get("audio_sync")
+                if not audio_sync_marker:
+                    continue
+                
+                video_path = Path(clip.get("path") or "")
+                
+                if not video_path.exists():
+                    continue
+                
+                try:
+                    audio_map = audio_manager.generate_audio_for_storyboard(
+                        storyboard=[shot_item]
+                    )
+                    
+                    generated_audio_path = audio_map.get(shot_id)
+                    if generated_audio_path and Path(generated_audio_path).exists():
+                        output_with_audio = run_dir / f"{shot_id}_with_audio.mp4"
+                        if audio_manager.sync_audio_to_video(
+                            video_path=str(video_path),
+                            audio_path=generated_audio_path,
+                            output_path=str(output_with_audio),
+                            start_time=0.0,
+                            volume=1.0,
+                            fade_in=0.1,
+                            fade_out=0.1
+                        ):
+                            clip["audio_path"] = generated_audio_path
+                            clip["path_with_audio"] = str(output_with_audio)
+                            clip["has_audio"] = True
+                            audio_clips.append(clip)
+                except Exception as e:
+                    print(f"音频同步失败 ({shot_id}): {e}")
+                    clip["has_audio"] = False
+                    clip["audio_error"] = str(e)
+            
+            if audio_clips:
+                for clip in merged:
+                    shot_id = Path(clip.get("path") or "").stem
+                    for audio_clip in audio_clips:
+                        if Path(audio_clip.get("path") or "").stem == shot_id:
+                            clip.update(audio_clip)
+                            break
+        except Exception as e:
+            print(f"音频同步初始化失败: {e}")
+
+    ctx.payload["video_clips"] = merged
+
+
+def _run_wan_t2v(
+    ctx: Any,
+    *,
+    run_dir: Path,
+    video_cfg: Dict[str, Any],
+    width: int,
+    height: int,
+    fps: int,
+    regenerate_shot_ids: Optional[set[str]] = None,
+    allowed_shot_ids: Optional[set[str]] = None,
+) -> None:
+    factory = ModelAdapterFactory()
+    adapter_name = str(video_cfg.get("adapter") or "wan_t2v").strip() or "wan_t2v"
+    t2v = factory.get_adapter(adapter_name)
+
+    regen_set = regenerate_shot_ids or set()
+    existing_clips_by_shot = _index_video_clips_by_shot(ctx.payload.get("video_clips"))
+
+    style_preset = str(ctx.payload.get("style_preset") or "").strip()
+    image_cfg = ctx.payload.get("image_config") if isinstance(ctx.payload.get("image_config"), dict) else {}
+    frame_ratio = str(image_cfg.get("ratio") or "").strip() or "16:9"
+    lib_assets = _library_assets_from_payload(ctx.payload)
+
+    storyboard = ctx.payload.get("storyboard", [])
+    jobs: List[dict] = []
+    for item in storyboard:
+        if not isinstance(item, dict):
+            continue
+        shot_id = str(item.get("shot_id") or "").strip()
+        if not shot_id:
+            continue
+        if allowed_shot_ids is not None and shot_id not in allowed_shot_ids:
+            continue
+        out = run_dir / f"{shot_id}.mp4"
+        if out.exists() and shot_id not in regen_set:
+            continue
+        jobs.append(item)
+
+    video_parallelism = _parse_int(video_cfg.get("parallelism") or os.getenv("DREAMWEAVER_VIDEO_PARALLELISM"), 1)
+    video_parallelism = max(1, min(int(video_parallelism), len(jobs) if jobs else 1))
+    if video_parallelism > 1:
+        probe = _clone_adapter_instance(t2v)
+        if probe is None:
+            video_parallelism = 1
+        else:
+            _close_adapter_session(probe)
+
+    def _render_one(item: dict) -> dict:
+        shot_id = str(item.get("shot_id") or "").strip()
+        out = run_dir / f"{shot_id}.mp4"
+        duration_s = normalize_wan_i2v_duration_s(item.get("duration_s"), default=5.0)
+
+        asset_match = _match_library_assets_for_shot(shot=item, library_assets=lib_assets, max_character_refs=3)
+        prompt_fragment = str(asset_match.get("prompt_fragment") or "").strip()
+
+        prompt = _build_wan_i2v_prompt(
+            shot=item,
+            style_preset=style_preset,
+            frame_ratio=frame_ratio,
+            prompt_fragment=prompt_fragment,
+            engine="wan_t2v",
+        )
+
+        seed = _stable_seed(str(getattr(ctx, "run_id", "")), shot_id, "t2v_clip")
+        meta: Dict[str, Any] = {"engine": "wan_t2v", "adapter": adapter_name, "fps": fps, "width": width, "height": height, "seed": seed}
+
+        local_t2v = t2v
+        if video_parallelism > 1:
+            cloned = _clone_adapter_instance(t2v)
+            if cloned is None:
+                raise RuntimeError("adapter clone failed for parallel t2v generation")
+            local_t2v = cloned
+
+        try:
+            kwargs: Dict[str, Any] = {
+                "prompt": prompt,
+                "width": int(width),
+                "height": int(height),
+                "duration": float(duration_s),
+                "fps": int(fps),
+                "seed": int(seed),
+            }
+            steps = video_cfg.get("num_inference_steps")
+            if steps is not None:
+                kwargs["num_inference_steps"] = int(steps)
+            guidance = video_cfg.get("guidance_scale")
+            if guidance is not None:
+                kwargs["guidance_scale"] = float(guidance)
+
+            result = local_t2v.generate(**kwargs)
+        finally:
+            if local_t2v is not t2v:
+                _close_adapter_session(local_t2v)
+
+        _write_video_from_generation_result(result, out)
+        if isinstance(result.data, dict) and isinstance(result.data.get("video_url"), str):
+            meta["remote_url"] = result.data["video_url"]
+
+        return {"path": str(out), "duration": float(duration_s), "meta": {**meta, "via": "wan_t2v", "prompt": prompt[:240]}}
+
+    generated_by_shot: Dict[str, Dict[str, Any]] = {}
+    if video_parallelism <= 1 or len(jobs) <= 1:
+        for item in jobs:
+            clip = _render_one(item)
+            sid = Path(str(clip.get("path") or "")).stem
+            if sid:
+                generated_by_shot[sid] = clip
+    else:
+        with ThreadPoolExecutor(max_workers=int(video_parallelism)) as pool:
+            futures = [pool.submit(_render_one, item) for item in jobs]
+            for fut in as_completed(futures):
+                clip = fut.result()
+                sid = Path(str(clip.get("path") or "")).stem
+                if sid:
+                    generated_by_shot[sid] = clip
+
+    clips_by_shot: Dict[str, Dict[str, Any]] = dict(existing_clips_by_shot)
+    clips_by_shot.update(generated_by_shot)
+
+    merged: List[dict] = []
+    for item in storyboard:
+        if not isinstance(item, dict):
+            continue
+        shot_id = str(item.get("shot_id") or "").strip()
+        if not shot_id:
+            continue
+        existing = clips_by_shot.get(shot_id)
+        if allowed_shot_ids is not None and shot_id not in allowed_shot_ids:
+            if isinstance(existing, dict):
+                merged.append(existing)
+            continue
+
+        if isinstance(existing, dict):
+            merged.append(existing)
+            continue
+
+        out = run_dir / f"{shot_id}.mp4"
+        if out.exists():
+            duration_s = normalize_wan_i2v_duration_s(item.get("duration_s"), default=5.0)
+            merged.append(
+                {
+                    "path": str(out),
+                    "duration": float(duration_s),
+                    "meta": {"engine": "wan_t2v", "via": "wan_t2v", "fps": fps, "width": width, "height": height},
+                }
+            )
+
+    ctx.payload["video_clips"] = merged
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _index_video_clip_jobs_by_shot(items: Any) -> Dict[str, Dict[str, Any]]:
+    jobs: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(items, list):
+        return jobs
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        shot_id = str(item.get("shot_id") or "").strip()
+        if not shot_id:
+            continue
+        jobs[shot_id] = item
+    return jobs
+
+
+def _all_storyboard_shots_have_video(*, storyboard: Any, run_dir: Path) -> bool:
+    if not isinstance(storyboard, list) or not storyboard:
+        return False
+    for item in storyboard:
+        if not isinstance(item, dict):
+            continue
+        shot_id = str(item.get("shot_id") or "").strip()
+        if not shot_id:
+            continue
+        if not (run_dir / f"{shot_id}.mp4").exists():
+            return False
+    return True
+
+
+def _build_video_clip_jobs(
+    *,
+    storyboard: Any,
+    run_dir: Path,
+    existing_jobs_by_shot: Dict[str, Dict[str, Any]],
+    existing_clips_by_shot: Dict[str, Dict[str, Any]],
+    requested_shot_ids: set[str],
+    bridge_enabled: bool,
+    camera_states: Any = None,
+) -> List[Dict[str, Any]]:
+    jobs: List[Dict[str, Any]] = []
+    if not isinstance(storyboard, list):
+        return jobs
+
+    camera_state_by_shot_id = _index_camera_states_by_shot_id(camera_states)
+    if bridge_enabled and not camera_state_by_shot_id and _env_flag("DREAMWEAVER_I2V_CAMERA_STATE_BRIDGE", default=True):
+        try:
+            from agents.camera_states import build_camera_states as _build_camera_states
+            from agents.camera_tree import build_camera_tree as _build_camera_tree
+
+            camera_tree = _build_camera_tree(storyboard)
+            built = _build_camera_states(storyboard, camera_tree if isinstance(camera_tree, list) and camera_tree else None)
+            camera_state_by_shot_id = _index_camera_states_by_shot_id(built)
+        except Exception:  # noqa: BLE001
+            camera_state_by_shot_id = {}
+
+    prev_item: Optional[Dict[str, Any]] = None
+    prev_shot_id: Optional[str] = None
+    for item in storyboard:
+        if not isinstance(item, dict):
+            continue
+        shot_id = str(item.get("shot_id") or "").strip()
+        if not shot_id:
+            continue
+
+        prior = existing_jobs_by_shot.get(shot_id) if isinstance(existing_jobs_by_shot, dict) else None
+        confirmed = bool(prior.get("confirmed")) if isinstance(prior, dict) else False
+        if shot_id in requested_shot_ids:
+            confirmed = True
+
+        out = run_dir / f"{shot_id}.mp4"
+        clip = existing_clips_by_shot.get(shot_id)
+        clip_exists = out.exists() or (
+            isinstance(clip, dict) and isinstance(clip.get("path"), str) and Path(str(clip.get("path") or "")).exists()
+        )
+
+        if bridge_enabled:
+            inferred = _infer_i2v_head_source(
+                prev_shot=prev_item,
+                shot=item,
+                camera_state=camera_state_by_shot_id.get(shot_id),
+            )
+            requires_bridge = str(inferred.get("mode") or "") == "prev_clip_tail"
+        else:
+            inferred = {"mode": "head_keyframe", "reason": "bridge_disabled"}
+            requires_bridge = False
+        dep_shot_id = str(inferred.get("depends_on_shot_id") or "").strip() if requires_bridge else ""
+
+        status = "draft"
+        if clip_exists:
+            status = "done"
+        elif confirmed:
+            if requires_bridge and dep_shot_id:
+                dep_clip_path = run_dir / f"{dep_shot_id}.mp4"
+                dep_exists = dep_clip_path.exists()
+                if not dep_exists:
+                    dep_existing = existing_clips_by_shot.get(dep_shot_id) if isinstance(existing_clips_by_shot, dict) else None
+                    dep_path = (
+                        Path(str(dep_existing.get("path") or "")) if isinstance(dep_existing, dict) and isinstance(dep_existing.get("path"), str) else None
+                    )
+                    if dep_path is not None and dep_path.exists():
+                        dep_exists = True
+
+                dep_confirmed = dep_shot_id in requested_shot_ids
+                if not dep_exists and not dep_confirmed:
+                    status = "blocked"
+                else:
+                    status = "confirmed"
+            else:
+                status = "confirmed"
+
+        jobs.append(
+            {
+                "shot_id": shot_id,
+                "confirmed": confirmed,
+                "status": status,
+                "desc": str(item.get("desc") or "").strip(),
+                "duration_s": item.get("duration_s"),
+                "cam_idx": item.get("cam_idx"),
+                "motion_desc": str(item.get("motion_desc") or "").strip(),
+                "requires_bridge": requires_bridge,
+                "depends_on_shot_id": dep_shot_id if dep_shot_id else None,
+                "i2v_head_source": inferred,
+                "inputs": {
+                    "head": str(run_dir / f"{shot_id}_head.png"),
+                    "mid": str(run_dir / f"{shot_id}_mid.png"),
+                    "tail": str(run_dir / f"{shot_id}_tail.png"),
+                },
+                "outputs": {"clip": str(out)},
+            }
+        )
+
+        prev_item = item
+        prev_shot_id = shot_id
+
+    return jobs
 
 
 def run_video(ctx: Any) -> None:
-    video = MockVideoAdapter()
+    ensure_media_payload(ctx.payload)
+
     run_dir = Path("runs") / ctx.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    video_cfg = ctx.payload.get("video_config") if isinstance(ctx.payload.get("video_config"), dict) else {}
+    image_cfg = ctx.payload.get("image_config") if isinstance(ctx.payload.get("image_config"), dict) else {}
+    width, height, _ratio = resolve_frame_size(image_cfg)
+    fps = normalize_video_fps(video_cfg.get("fps"), default=24)
+    engine = str(video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "ffmpeg_slideshow").strip().lower()
+    bridge_enabled = engine in {"wan_i2v", "i2v"}
+    regen_set = _normalize_regenerate_shot_ids(ctx.payload.get("regenerate_shot_ids"))
+
+    require_confirmation_cfg = video_cfg.get("require_confirmation")
+    require_confirmation = (
+        bool(require_confirmation_cfg)
+        if isinstance(require_confirmation_cfg, bool)
+        else _env_flag("DREAMWEAVER_VIDEO_REQUIRE_CONFIRMATION", default=False)
+    )
+
+    storyboard = ctx.payload.get("storyboard", [])
+    existing_clips_by_shot = _index_video_clips_by_shot(ctx.payload.get("video_clips"))
+    existing_jobs_by_shot = _index_video_clip_jobs_by_shot(ctx.payload.get("video_clip_jobs"))
+    requested_shots = set(regen_set)
+    for s in existing_jobs_by_shot.values():
+        if not isinstance(s, dict):
+            continue
+        if bool(s.get("confirmed")) and isinstance(s.get("shot_id"), str):
+            requested_shots.add(str(s["shot_id"]).strip())
+
+    character_manager = None
+    character_profiles = ctx.payload.get("character_profiles", [])
+    if isinstance(character_profiles, list) and character_profiles and bridge_enabled:
+        try:
+            character_manager = CharacterManager(run_dir=run_dir)
+            entities = ctx.payload.get("entities", {})
+            if isinstance(entities, dict):
+                character_manager.auto_assign_characters_from_storyboard(storyboard=storyboard, entities=entities)
+        except Exception as e:
+            print(f"角色管理器初始化失败: {e}")
+            character_manager = None
+
+    ctx.payload["video_clip_jobs"] = _build_video_clip_jobs(
+        storyboard=storyboard,
+        run_dir=run_dir,
+        existing_jobs_by_shot=existing_jobs_by_shot,
+        existing_clips_by_shot=existing_clips_by_shot,
+        requested_shot_ids=requested_shots,
+        bridge_enabled=bridge_enabled,
+        camera_states=ctx.payload.get("camera_states"),
+    )
+
+    if require_confirmation and not _all_storyboard_shots_have_video(storyboard=storyboard, run_dir=run_dir):
+        if requested_shots:
+            if engine in {"wan_i2v", "i2v"}:
+                _run_wan_i2v(
+                    ctx,
+                    run_dir=run_dir,
+                    video_cfg=video_cfg,
+                    width=width,
+                    height=height,
+                    regenerate_shot_ids=regen_set,
+                    allowed_shot_ids=requested_shots,
+                    character_manager=character_manager,
+                )
+            elif engine in {"wan_t2v", "wan26_t2v", "t2v"}:
+                _run_wan_t2v(
+                    ctx,
+                    run_dir=run_dir,
+                    video_cfg=video_cfg,
+                    width=width,
+                    height=height,
+                    fps=fps,
+                    regenerate_shot_ids=regen_set,
+                    allowed_shot_ids=requested_shots,
+                )
+            else:
+                ffmpeg = os.getenv("FFMPEG_PATH", "ffmpeg")
+                slideshow_effect = _resolve_slideshow_effect(video_cfg.get("slideshow_effect"))
+                existing_clips_by_shot = _index_video_clips_by_shot(ctx.payload.get("video_clips"))
+                clips: List[dict] = []
+                for item in storyboard:
+                    if not isinstance(item, dict):
+                        continue
+                    shot_id = str(item.get("shot_id") or "")
+                    if not shot_id:
+                        continue
+                    if shot_id not in requested_shots:
+                        existing = existing_clips_by_shot.get(shot_id)
+                        if isinstance(existing, dict):
+                            clips.append(existing)
+                        continue
+
+                    head = run_dir / f"{shot_id}_head.png"
+                    tail = run_dir / f"{shot_id}_tail.png"
+                    mid = run_dir / f"{shot_id}_mid.png"
+                    out = run_dir / f"{shot_id}.mp4"
+                    duration_s = float(item.get("duration_s", 3.0))
+
+                    existing = existing_clips_by_shot.get(shot_id)
+                    if out.exists() and shot_id not in regen_set:
+                        if isinstance(existing, dict):
+                            clips.append(existing)
+                        else:
+                            clips.append(
+                                {
+                                    "path": str(out),
+                                    "duration": duration_s,
+                                    "head": str(head),
+                                    "mid": str(mid) if mid.exists() else None,
+                                    "tail": str(tail),
+                                    "meta": {
+                                        "engine": "ffmpeg_slideshow",
+                                        "via": "ffmpeg_slideshow",
+                                        "slideshow_effect": slideshow_effect,
+                                        "fps": fps,
+                                        "width": width,
+                                        "height": height,
+                                    },
+                                }
+                            )
+                        continue
+
+                    _render_slideshow_clip(
+                        ffmpeg=ffmpeg,
+                        head=head,
+                        mid=mid if mid.exists() else None,
+                        tail=tail,
+                        out=out,
+                        duration_s=duration_s,
+                        fps=fps,
+                        width=width,
+                        height=height,
+                        effect=slideshow_effect,
+                    )
+                    clips.append(
+                        {
+                            "path": str(out),
+                            "duration": duration_s,
+                            "head": str(head),
+                            "mid": str(mid) if mid.exists() else None,
+                            "tail": str(tail),
+                            "meta": {
+                                "engine": "ffmpeg_slideshow",
+                                "via": "ffmpeg_slideshow",
+                                "slideshow_effect": slideshow_effect,
+                                "fps": fps,
+                                "width": width,
+                                "height": height,
+                            },
+                        }
+                    )
+                ctx.payload["video_clips"] = clips
+
+        ctx.payload["video_clip_jobs"] = _build_video_clip_jobs(
+            storyboard=storyboard,
+            run_dir=run_dir,
+            existing_jobs_by_shot=_index_video_clip_jobs_by_shot(ctx.payload.get("video_clip_jobs")),
+            existing_clips_by_shot=_index_video_clips_by_shot(ctx.payload.get("video_clips")),
+            requested_shot_ids=requested_shots,
+            bridge_enabled=bridge_enabled,
+            camera_states=ctx.payload.get("camera_states"),
+        )
+        ctx.payload["video_done"] = _all_storyboard_shots_have_video(storyboard=storyboard, run_dir=run_dir)
+        return
+
+    if engine in {"wan_i2v", "i2v"}:
+        _run_wan_i2v(
+            ctx,
+            run_dir=run_dir,
+            video_cfg=video_cfg,
+            width=width,
+            height=height,
+            regenerate_shot_ids=regen_set,
+            character_manager=character_manager,
+        )
+        ctx.payload["video_clip_jobs"] = _build_video_clip_jobs(
+            storyboard=storyboard,
+            run_dir=run_dir,
+            existing_jobs_by_shot=_index_video_clip_jobs_by_shot(ctx.payload.get("video_clip_jobs")),
+            existing_clips_by_shot=_index_video_clips_by_shot(ctx.payload.get("video_clips")),
+            requested_shot_ids=requested_shots,
+            bridge_enabled=bridge_enabled,
+            camera_states=ctx.payload.get("camera_states"),
+        )
+        ctx.payload["video_done"] = True
+        return
+
+    if engine in {"wan_t2v", "wan26_t2v", "t2v"}:
+        _run_wan_t2v(
+            ctx,
+            run_dir=run_dir,
+            video_cfg=video_cfg,
+            width=width,
+            height=height,
+            fps=fps,
+            regenerate_shot_ids=regen_set,
+        )
+        ctx.payload["video_clip_jobs"] = _build_video_clip_jobs(
+            storyboard=storyboard,
+            run_dir=run_dir,
+            existing_jobs_by_shot=_index_video_clip_jobs_by_shot(ctx.payload.get("video_clip_jobs")),
+            existing_clips_by_shot=_index_video_clips_by_shot(ctx.payload.get("video_clips")),
+            requested_shot_ids=requested_shots,
+            bridge_enabled=bridge_enabled,
+            camera_states=ctx.payload.get("camera_states"),
+        )
+        ctx.payload["video_done"] = True
+        return
+
+    ffmpeg = os.getenv("FFMPEG_PATH", "ffmpeg")
+    slideshow_effect = _resolve_slideshow_effect(video_cfg.get("slideshow_effect"))
+    existing_clips_by_shot = _index_video_clips_by_shot(ctx.payload.get("video_clips"))
     clips: List[dict] = []
     storyboard = ctx.payload.get("storyboard", [])
     for item in storyboard:
-        head = run_dir / f"{item['shot_id']}_head.png"
-        tail = run_dir / f"{item['shot_id']}_tail.png"
-        out = run_dir / f"{item['shot_id']}.mp4"
-        clip = video.gen_clip([str(head), str(tail)], duration=item.get("duration_s", 3.0), out_path=str(out))
-        clips.append(clip)
+        if not isinstance(item, dict):
+            continue
+        shot_id = str(item.get("shot_id") or "")
+        if not shot_id:
+            continue
+        head = run_dir / f"{shot_id}_head.png"
+        tail = run_dir / f"{shot_id}_tail.png"
+        mid = run_dir / f"{shot_id}_mid.png"
+        out = run_dir / f"{shot_id}.mp4"
+        duration_s = float(item.get("duration_s", 3.0))
+
+        if regen_set and shot_id not in regen_set and out.exists():
+            existing = existing_clips_by_shot.get(shot_id)
+            if isinstance(existing, dict):
+                clips.append(existing)
+                continue
+
+        _render_slideshow_clip(
+            ffmpeg=ffmpeg,
+            head=head,
+            mid=mid if mid.exists() else None,
+            tail=tail,
+            out=out,
+            duration_s=duration_s,
+            fps=fps,
+            width=width,
+            height=height,
+            effect=slideshow_effect,
+        )
+
+        clips.append(
+            {
+                "path": str(out),
+                "duration": duration_s,
+                "head": str(head),
+                "mid": str(mid) if mid.exists() else None,
+                "tail": str(tail),
+                "meta": {
+                    "engine": "ffmpeg_slideshow",
+                    "via": "ffmpeg_slideshow",
+                    "slideshow_effect": slideshow_effect,
+                    "fps": fps,
+                    "width": width,
+                    "height": height,
+                },
+            }
+        )
+
     ctx.payload["video_clips"] = clips
+    ctx.payload["video_clip_jobs"] = _build_video_clip_jobs(
+        storyboard=storyboard,
+        run_dir=run_dir,
+        existing_jobs_by_shot=_index_video_clip_jobs_by_shot(ctx.payload.get("video_clip_jobs")),
+        existing_clips_by_shot=_index_video_clips_by_shot(ctx.payload.get("video_clips")),
+        requested_shot_ids=requested_shots,
+        bridge_enabled=bridge_enabled,
+        camera_states=ctx.payload.get("camera_states"),
+    )
+    ctx.payload["video_done"] = True

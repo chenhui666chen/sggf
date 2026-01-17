@@ -4,6 +4,168 @@ import axios, { AxiosInstance, AxiosError } from 'axios'
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 const DREAMWEAVER_SCHEMA_VERSION = '0.1.0'
 
+type DreamweaverQualityMode = 'quality' | 'cost'
+
+interface DreamweaverRunOptions {
+  quality_mode?: DreamweaverQualityMode
+  qc_allow_fail?: boolean
+  smart_tuning?: boolean
+  ab_variant?: string
+  video_require_confirmation?: boolean
+  style_preset?: string
+  image_ratio?: string
+  image_resolution?: string
+}
+
+interface DreamweaverProjectLockedGenerationConfig {
+  locked: boolean
+  style_preset: string
+  image_ratio: string
+  image_resolution: string
+  source_run_id?: string | null
+}
+
+interface DreamweaverLibraryApproveRequest {
+  approve_all?: boolean
+  roles?: string[]
+  approved?: boolean
+}
+
+interface DreamweaverLibraryRegenerateRequest {
+  role: string
+  prompt?: string
+  style_preset?: string
+  image_ratio?: string
+  image_resolution?: string
+  prefer_image_edit?: boolean
+}
+
+interface DreamweaverLibraryPromptSuggestRequest {
+  role: string
+  prompt?: string
+  style_preset?: string
+  image_ratio?: string
+  image_resolution?: string
+  mode?: 'template' | 'ai'
+}
+
+interface DreamweaverLibraryPromptSuggestResponse {
+  role: string
+  style_preset: string
+  image_ratio: string
+  prompt: string
+  negative_prompt: string
+  meta?: Record<string, any>
+}
+
+interface DreamweaverProjectGeneratedDeleteResponse {
+  project_id: number
+  deleted_runs: string[]
+  skipped_runs: string[]
+  deleted_library_assets: number
+  deleted_library_dir: boolean
+  deleted_library_anchor_projects: number
+  library_skipped: boolean
+  library_skip_reason?: string | null
+  failed_paths: string[]
+  failed_runs: Array<{ run_id: string; error: string }>
+}
+
+interface DreamweaverScriptUpdateRequest {
+  script_text: string
+}
+
+interface DreamweaverScriptApproveRequest {
+  approved: boolean
+}
+
+interface DreamweaverRestartRequest {
+  start_state: string
+  reset_policy?: string
+  qc_allow_fail?: boolean
+  smart_tuning?: boolean
+  shot_ids?: string[]
+  cam_idxs?: number[]
+  asset_roles?: string[]
+}
+
+interface DreamweaverVideoJobConfirmAsyncResponse {
+  run_id: string
+  status: 'queued' | 'blocked' | 'noop'
+  task_id?: string | null
+  message?: string | null
+  video_clip_jobs?: any[] | null
+}
+
+interface DreamweaverVideoJobsRebuildResponse {
+  run_id: string
+  video_clip_jobs: any[]
+}
+
+function extractDetailMessage(detail: any): string | null {
+  if (!detail) return null
+  if (typeof detail === 'string') return detail.trim() || null
+  if (Array.isArray(detail) && detail.length > 0) {
+    const first = detail[0] as any
+    if (first && typeof first === 'object') {
+      const msg = typeof first.msg === 'string' ? first.msg : typeof first.message === 'string' ? first.message : null
+      return msg?.trim() || null
+    }
+    return null
+  }
+  if (typeof detail === 'object') {
+    if (typeof (detail as any).message === 'string') return String((detail as any).message || '').trim() || null
+    if (typeof (detail as any).error === 'string') return String((detail as any).error || '').trim() || null
+  }
+  return null
+}
+
+function extractErrorMessageFromResponseData(data: any): string | null {
+  if (!data) return null
+  if (typeof data === 'string') return data.trim() || null
+  if (typeof data === 'object') {
+    const detailMsg = extractDetailMessage((data as any).detail)
+    if (detailMsg) return detailMsg
+    if (typeof (data as any).message === 'string') return String((data as any).message || '').trim() || null
+    if (typeof (data as any).error === 'string') return String((data as any).error || '').trim() || null
+  }
+  return null
+}
+
+export async function extractApiErrorMessage(error: unknown, fallback: string = '请求失败'): Promise<string> {
+  try {
+    if (axios.isAxiosError(error)) {
+      const responseData = (error as AxiosError).response?.data as any
+      if (responseData instanceof Blob) {
+        try {
+          const text = await responseData.text()
+          if (text && text.trim()) {
+            try {
+              const parsed = JSON.parse(text)
+              return extractErrorMessageFromResponseData(parsed) || text.trim() || fallback
+            } catch {
+              return text.trim() || fallback
+            }
+          }
+        } catch {
+          // ignore
+        }
+        return fallback
+      }
+      return extractErrorMessageFromResponseData(responseData) || (error as AxiosError).message || fallback
+    }
+
+    if (typeof error === 'string') return error.trim() || fallback
+    if (error && typeof error === 'object' && typeof (error as any).message === 'string') {
+      return String((error as any).message || '').trim() || fallback
+    }
+
+    return fallback
+  } catch {
+    return fallback
+  }
+}
+
 class ApiClient {
   public client: AxiosInstance
 
@@ -33,9 +195,6 @@ class ApiClient {
         }
         // 设置Authorization头
         config.headers['Authorization'] = `Bearer ${token}`
-        console.log('🔑 添加Authorization头:', `Bearer ${token.substring(0, 10)}...`)
-      } else {
-        console.warn('⚠️ Token不存在，未添加Authorization头')
       }
       return config
     })
@@ -330,8 +489,8 @@ class ApiClient {
   }
 
   // 有声书 API
-  getAudiobookProjectsByProject(projectId: number) {
-    return this.client.get(`/api/v1/audiobook/projects/by-project/${projectId}`)
+  getAudiobookProjectsByProject(projectId: number, params?: { include_chapter_audios?: boolean }) {
+    return this.client.get(`/api/v1/audiobook/projects/by-project/${projectId}`, { params })
   }
 
   getAudiobookProject(audiobookProjectId: number) {
@@ -432,26 +591,197 @@ class ApiClient {
     })
   }
 
-  // 织梦映心 Mock 流程（读取灵感方舟内容后跑通 mock 状态机）
-  runDreamweaverMock(projectId: number, chapterIds: number[]) {
-    return this.client.post('/api/v1/dreamweaver/mock-run', {
+  // 织梦映心流程（短剧生成）
+  runDreamweaver(projectId: number, chapterIds: number[], options?: DreamweaverRunOptions) {
+    return this.client.post('/api/v1/dreamweaver/run', {
       project_id: projectId,
       chapter_ids: chapterIds,
       schema_version: DREAMWEAVER_SCHEMA_VERSION,
+      ...(options?.quality_mode ? { quality_mode: options.quality_mode } : {}),
+      ...(typeof options?.qc_allow_fail === 'boolean' ? { qc_allow_fail: options.qc_allow_fail } : {}),
+      ...(typeof options?.smart_tuning === 'boolean' ? { smart_tuning: options.smart_tuning } : {}),
+      ...(options?.ab_variant ? { ab_variant: options.ab_variant } : {}),
+      ...(typeof options?.video_require_confirmation === 'boolean'
+        ? { video_require_confirmation: options.video_require_confirmation }
+        : {}),
+      ...(options?.style_preset ? { style_preset: options.style_preset } : {}),
+      ...(options?.image_ratio ? { image_ratio: options.image_ratio } : {}),
+      ...(options?.image_resolution ? { image_resolution: options.image_resolution } : {}),
     })
   }
 
-  runDreamweaverMockAsync(projectId: number, chapterIds: number[]) {
-    return this.client.post('/api/v1/dreamweaver/mock-run-async', {
+  runDreamweaverAsync(projectId: number, chapterIds: number[], options?: DreamweaverRunOptions) {
+    return this.client.post('/api/v1/dreamweaver/run-async', {
       project_id: projectId,
       chapter_ids: chapterIds,
       schema_version: DREAMWEAVER_SCHEMA_VERSION,
+      ...(options?.quality_mode ? { quality_mode: options.quality_mode } : {}),
+      ...(typeof options?.qc_allow_fail === 'boolean' ? { qc_allow_fail: options.qc_allow_fail } : {}),
+      ...(typeof options?.smart_tuning === 'boolean' ? { smart_tuning: options.smart_tuning } : {}),
+      ...(options?.ab_variant ? { ab_variant: options.ab_variant } : {}),
+      ...(typeof options?.video_require_confirmation === 'boolean'
+        ? { video_require_confirmation: options.video_require_confirmation }
+        : {}),
+      ...(options?.style_preset ? { style_preset: options.style_preset } : {}),
+      ...(options?.image_ratio ? { image_ratio: options.image_ratio } : {}),
+      ...(options?.image_resolution ? { image_resolution: options.image_resolution } : {}),
     })
   }
 
-  getDreamweaverMockTask(taskId: string) {
+  getDreamweaverTask(taskId: string) {
     return this.client.get(`/api/v1/dreamweaver/task/${taskId}`, {
-      timeout: 5000,
+      timeout: 15000,
+    })
+  }
+
+  getDreamweaverLibrary(projectId: number, options?: { run_id?: string }) {
+    return this.client.get(`/api/v1/dreamweaver/library/${projectId}`, {
+      params: options?.run_id ? { run_id: options.run_id } : undefined,
+      timeout: 15000,
+    })
+  }
+
+  getDreamweaverProjectLockedConfig(projectId: number) {
+    return this.client.get<DreamweaverProjectLockedGenerationConfig>(`/api/v1/dreamweaver/projects/${projectId}/locked-config`, {
+      timeout: 15000,
+    })
+  }
+
+  approveDreamweaverLibrary(projectId: number, payload: DreamweaverLibraryApproveRequest) {
+    return this.client.post(`/api/v1/dreamweaver/library/${projectId}/approve`, payload, {
+      timeout: 15000,
+    })
+  }
+
+  regenerateDreamweaverLibraryAsset(projectId: number, payload: DreamweaverLibraryRegenerateRequest) {
+    return this.client.post(`/api/v1/dreamweaver/library/${projectId}/regenerate`, payload, {
+      timeout: 120000,
+    })
+  }
+
+  suggestDreamweaverLibraryPrompt(projectId: number, payload: DreamweaverLibraryPromptSuggestRequest) {
+    return this.client.post<DreamweaverLibraryPromptSuggestResponse>(`/api/v1/dreamweaver/library/${projectId}/prompt-suggest`, payload, {
+      timeout: 60000,
+    })
+  }
+
+  getDreamweaverLibraryAssetFile(assetId: number) {
+    return this.client.get(`/api/v1/dreamweaver/library/assets/${assetId}/file`, {
+      responseType: 'blob',
+      timeout: 30000,
+      params: { _ts: Date.now() },
+      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+    })
+  }
+
+  uploadDreamweaverLibraryAssetFile(assetId: number, file: File) {
+    const form = new FormData()
+    form.append('file', file)
+    return this.client.post(`/api/v1/dreamweaver/library/assets/${assetId}/upload`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000,
+    })
+  }
+
+  uploadDreamweaverRunShotAssetFile(runId: string, shotId: string, role: string, file: File) {
+    const form = new FormData()
+    form.append('file', file)
+    return this.client.post(`/api/v1/dreamweaver/runs/${encodeURIComponent(runId)}/shots/${encodeURIComponent(shotId)}/assets/${encodeURIComponent(role)}/upload`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000,
+    })
+  }
+
+  updateDreamweaverRunShotFramePrompt(runId: string, shotId: string, frame: 'head' | 'tail', prompt: string) {
+    return this.client.post(`/api/v1/dreamweaver/runs/${encodeURIComponent(runId)}/shots/${encodeURIComponent(shotId)}/frames/${encodeURIComponent(frame)}/prompt`, { prompt }, {
+      timeout: 15000,
+    })
+  }
+
+  resumeDreamweaverAsync(runId: string) {
+    return this.client.post(`/api/v1/dreamweaver/runs/${runId}/resume-async`, null, {
+      timeout: 15000,
+    })
+  }
+
+  restartDreamweaverAsync(runId: string, payload: DreamweaverRestartRequest) {
+    return this.client.post(`/api/v1/dreamweaver/runs/${runId}/restart-async`, payload, {
+      timeout: 15000,
+    })
+  }
+
+  confirmDreamweaverVideoJobAsync(runId: string, shotId: string) {
+    return this.client.post<DreamweaverVideoJobConfirmAsyncResponse>(
+      `/api/v1/dreamweaver/runs/${encodeURIComponent(runId)}/video-jobs/${encodeURIComponent(shotId)}/confirm-async`,
+      null,
+      { timeout: 15000 },
+    )
+  }
+
+  rebuildDreamweaverVideoJobs(runId: string) {
+    return this.client.post<DreamweaverVideoJobsRebuildResponse>(
+      `/api/v1/dreamweaver/runs/${encodeURIComponent(runId)}/video-jobs/rebuild`,
+      null,
+      { timeout: 15000 },
+    )
+  }
+
+  getDreamweaverRunScript(runId: string) {
+    return this.client.get(`/api/v1/dreamweaver/runs/${runId}/script`, {
+      timeout: 15000,
+    })
+  }
+
+  updateDreamweaverRunScript(runId: string, payload: DreamweaverScriptUpdateRequest) {
+    return this.client.post(`/api/v1/dreamweaver/runs/${runId}/script`, payload, {
+      timeout: 15000,
+    })
+  }
+
+  approveDreamweaverRunScript(runId: string, payload: DreamweaverScriptApproveRequest) {
+    return this.client.post(`/api/v1/dreamweaver/runs/${runId}/script/approve`, payload, {
+      timeout: 15000,
+    })
+  }
+
+  getDreamweaverRun(runId: string) {
+    return this.client.get(`/api/v1/dreamweaver/runs/${runId}`, {
+      timeout: 15000,
+    })
+  }
+
+  getDreamweaverMergedVideoFile(runId: string) {
+    return this.client.get(`/api/v1/dreamweaver/runs/${encodeURIComponent(runId)}/merged-video/file`, {
+      responseType: 'blob',
+      timeout: 60000,
+    })
+  }
+
+  getDreamweaverRunAssetFile(runId: string, uri: string) {
+    return this.client.get(`/api/v1/dreamweaver/runs/${encodeURIComponent(runId)}/assets/file`, {
+      params: { uri },
+      responseType: 'blob',
+      timeout: 60000,
+    })
+  }
+
+  listDreamweaverRuns(projectId: number, limit: number = 50) {
+    return this.client.get(`/api/v1/dreamweaver/projects/${projectId}/runs`, {
+      params: { limit },
+      timeout: 15000,
+    })
+  }
+
+  deleteDreamweaverProjectGenerated(projectId: number) {
+    return this.client.delete<DreamweaverProjectGeneratedDeleteResponse>(`/api/v1/dreamweaver/projects/${projectId}/generated`, {
+      timeout: 120000,
+    })
+  }
+
+  deleteDreamweaverRun(runId: string, deleteFiles: boolean = true) {
+    return this.client.delete(`/api/v1/dreamweaver/runs/${encodeURIComponent(runId)}`, {
+      params: { delete_files: deleteFiles },
+      timeout: 15000,
     })
   }
 

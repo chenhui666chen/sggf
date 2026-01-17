@@ -96,7 +96,6 @@ export default function SettingTreeView(props: SettingTreeViewProps) {
 
   useEffect(() => {
     loadTree()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collectionId, refreshTrigger])  // 🆕 添加 refreshTrigger 依赖
 
   const handleToggle = (path: string) => {

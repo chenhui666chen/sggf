@@ -24,6 +24,9 @@ from .constants import INSTRUCT_SPEAKER_IDS, normalize_speaker_id
 
 logger = logging.getLogger(__name__)
 
+# Windows/Linux 常见网络瞬断 errno（用于判定可重试）。
+_RETRYABLE_NETWORK_ERRNOS = {10053, 10054, 104, 110, 111}
+
 # Qwen3-TTS-Flash：stable 与 snapshot 支持的音色集合不同。
 # 默认指向 49 音色的快照版（与文档“qwen3-tts-flash-2025-11-27 音色列表”一致）。
 QWEN3_TTS_FLASH_MODEL_ID = os.getenv("QWEN3_TTS_FLASH_MODEL_ID", "qwen3-tts-flash-2025-11-27")
@@ -574,12 +577,27 @@ class TTSEngine:
                 error_str = str(e)
                 
                 # 判断是否为可重试的错误
-                is_retryable = (
+                errno_value = getattr(e, "errno", None)
+                lower = error_str.lower()
+                is_retryable = bool(
+                    # 配额/限流
                     "Throttling.RateQuota" in error_str
-                    or "rate limit" in error_str.lower()
+                    or "rate limit" in lower
+                    # 常见“服务端/风控/短暂不可用”信号
                     or "418" in error_str
-                    or "timeout" in error_str.lower()
-                    or "connection" in error_str.lower()
+                    or "429" in error_str
+                    # 超时 / 断连（英文）
+                    or "timeout" in lower
+                    or "connection" in lower
+                    # 超时 / 断连（中文 Windows 系统信息）
+                    or (
+                        "连接" in error_str
+                        and any(token in error_str for token in ("重置", "中止", "断开", "关闭", "强迫关闭"))
+                    )
+                    # errno（Windows 10053/10054；Linux 104/110/111）
+                    or (errno_value in _RETRYABLE_NETWORK_ERRNOS)
+                    # 异常类型兜底
+                    or isinstance(e, (TimeoutError, ConnectionError, ConnectionResetError, ConnectionAbortedError, BrokenPipeError))
                 )
                 
                 if is_retryable and attempt < self.retry_config.max_retries - 1:

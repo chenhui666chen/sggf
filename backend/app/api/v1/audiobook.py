@@ -13,7 +13,7 @@ import os
 import json
 from urllib.parse import quote
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, status, Response, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -37,7 +37,7 @@ from app.schemas.audiobook import (
 )
 from app.celery_app import celery_app
 from app.services.audiobook import AudiobookEngine
-from app.services.audiobook.tts_engine import TTSEngine
+from app.services.audiobook.tts_engine import RetryConfig, TTSEngine
 from app.services.audiobook.voice_manager import VoiceManager
 from app.services.audiobook.voice_catalog import get_voice_entry, load_voice_catalog_for_model
 from app.services.audiobook.cosyvoice_clone_client import (
@@ -159,7 +159,17 @@ async def tts_preview(
     if model_name not in {"qwen3-tts-flash", "cosyvoice-v3-plus"}:
         model_name = "qwen3-tts-flash"
 
-    engine = TTSEngine(enable_cache=False, max_concurrent=1, model=model_name, request_delay=0.0)
+    # 试听场景优先“快速恢复”而非长时间等待：
+    # - 额外多 1 次重试（应对偶发断连）
+    # - 基础退避更小，避免前端等待过久
+    preview_retry = RetryConfig(max_retries=4, base_delay=1.0, max_delay=8.0, exponential_base=2.0, jitter=True)
+    engine = TTSEngine(
+        enable_cache=False,
+        max_concurrent=1,
+        model=model_name,
+        request_delay=0.0,
+        retry_config=preview_retry,
+    )
     # 将前端的 voice_id（如 'male_young_energetic'）映射为真实的 TTS 音色ID
     if model_name == "qwen3-tts-flash":
         preset = VoiceManager.PRESET_VOICES.get(request.voice_id)
@@ -177,9 +187,19 @@ async def tts_preview(
     if request.pitch is not None:
         voice_params["pitch"] = request.pitch
 
-    audio_bytes = await engine.synthesize(text, voice_params)
+    try:
+        audio_bytes = await engine.synthesize(text, voice_params)
+    except Exception as exc:
+        logger.warning("TTS预览失败: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": "TTS服务暂时不可用，请稍后重试", "retryable": True},
+        ) from exc
     if not audio_bytes:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="TTS预览失败")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": "TTS服务暂时不可用，请稍后重试", "retryable": True},
+        )
 
     media_type = "audio/wav" if audio_bytes.startswith(b"RIFF") else "audio/mpeg"
     return Response(content=audio_bytes, media_type=media_type)
@@ -423,6 +443,7 @@ async def get_audiobook_project(
 @router.get("/projects/by-project/{project_id}")
 async def list_audiobook_projects(
     project_id: int,
+    include_chapter_audios: bool = Query(False, description="是否包含章节音频列表"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -438,17 +459,78 @@ async def list_audiobook_projects(
 
     audiobook_projects = AudiobookProjectRepository.list_by_project(db, project_id)
 
-    return [
-        {
-            "id": ap.id,
-            "status": ap.status,
-            "total_chapters": ap.total_chapters,
-            "completed_chapters": ap.completed_chapters,
-            "total_duration": ap.total_duration,
-            "created_at": ap.created_at.isoformat() if ap.created_at else None,
-        }
-        for ap in audiobook_projects
-    ]
+    if not include_chapter_audios:
+        return [
+            {
+                "id": ap.id,
+                "status": ap.status,
+                "total_chapters": ap.total_chapters,
+                "completed_chapters": ap.completed_chapters,
+                "total_duration": ap.total_duration,
+                "created_at": ap.created_at.isoformat() if ap.created_at else None,
+            }
+            for ap in audiobook_projects
+        ]
+
+    audiobook_project_ids = [ap.id for ap in audiobook_projects]
+    chapter_audios: List[ChapterAudio] = []
+    if audiobook_project_ids:
+        chapter_audios = (
+            db.query(ChapterAudio)
+            .filter(
+                ChapterAudio.audiobook_project_id.in_(audiobook_project_ids),
+                ChapterAudio.deleted_at.is_(None),
+            )
+            .all()
+        )
+
+    audios_by_project: Dict[int, List[ChapterAudio]] = {}
+    chapter_ids: List[int] = []
+    for ca in chapter_audios:
+        audios_by_project.setdefault(ca.audiobook_project_id, []).append(ca)
+        chapter_ids.append(ca.chapter_id)
+
+    chapter_number_by_id: Dict[int, int] = {}
+    if chapter_ids:
+        rows = (
+            db.query(Chapter.id, Chapter.chapter_number)
+            .filter(Chapter.id.in_(list(set(chapter_ids))))
+            .all()
+        )
+        chapter_number_by_id = {cid: cnum for cid, cnum in rows}
+
+    results: List[Dict[str, Any]] = []
+    for ap in audiobook_projects:
+        audios = audios_by_project.get(ap.id, [])
+        audios.sort(key=lambda ca: chapter_number_by_id.get(ca.chapter_id) or 0)
+
+        results.append(
+            {
+                "id": ap.id,
+                "status": ap.status,
+                "total_chapters": ap.total_chapters,
+                "completed_chapters": ap.completed_chapters,
+                "total_duration": ap.total_duration,
+                "created_at": ap.created_at.isoformat() if ap.created_at else None,
+                "chapter_audios": [
+                    {
+                        "id": ca.id,
+                        "chapter_id": ca.chapter_id,
+                        "chapter_number": chapter_number_by_id.get(ca.chapter_id),
+                        "task_id": ca.task_id,
+                        "audio_path": ca.audio_path,
+                        "duration": ca.duration,
+                        "file_size": ca.file_size,
+                        "script_status": ca.script_status or "pending",
+                        "has_script": bool(ca.script_json),
+                        "has_review": bool(ca.script_review_json),
+                    }
+                    for ca in audios
+                ],
+            }
+        )
+
+    return results
 
 
 @router.get("/projects")
@@ -577,6 +659,7 @@ async def delete_audiobook_project(
     audiobook_project_id: int,
     delete_reason: Optional[str] = None,
     delete_files: bool = False,
+    payload: Optional[Dict[str, Any]] = Body(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -590,6 +673,13 @@ async def delete_audiobook_project(
     """
     logger.info(f"🗑️ 用户 {current_user.id} 请求删除有声书项目: audiobook_project_id={audiobook_project_id}, delete_files={delete_files}")
     
+    if isinstance(payload, dict):
+        if payload.get("delete_reason") is not None:
+            raw_reason = str(payload.get("delete_reason") or "").strip()
+            delete_reason = raw_reason or None
+        if payload.get("delete_files") is not None:
+            delete_files = bool(payload.get("delete_files"))
+
     # 1. 验证有声书项目权限
     audiobook_project = db.query(AudiobookProject).filter(AudiobookProject.id == audiobook_project_id).first()
     
@@ -665,6 +755,7 @@ async def delete_chapter_audio(
     chapter_audio_id: int,
     delete_reason: Optional[str] = None,
     delete_file: bool = False,
+    payload: Optional[Dict[str, Any]] = Body(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -678,6 +769,17 @@ async def delete_chapter_audio(
     """
     logger.info(f"🗑️ 用户 {current_user.id} 请求删除章节音频: chapter_audio_id={chapter_audio_id}, delete_file={delete_file}")
     
+    if isinstance(payload, dict):
+        if payload.get("delete_reason") is not None:
+            raw_reason = str(payload.get("delete_reason") or "").strip()
+            delete_reason = raw_reason or None
+
+        raw_delete_file = payload.get("delete_file")
+        if raw_delete_file is None:
+            raw_delete_file = payload.get("delete_files")
+        if raw_delete_file is not None:
+            delete_file = bool(raw_delete_file)
+
     # 1. 获取章节音频
     chapter_audio = ChapterAudioRepository.get_by_id(db, chapter_audio_id)
     
@@ -767,22 +869,23 @@ async def restore_audiobook_project(
     """
     logger.info(f"♻️ 用户 {current_user.id} 请求恢复有声书项目: audiobook_project_id={audiobook_project_id}")
     
-    # 1. 验证原始项目权限
-    project = db.query(Project).filter(Project.id == audiobook_project_id).first()
-    
-    if not project:
+    # 1. 验证有声书项目是否存在
+    audiobook_project = AudiobookProjectRepository.get_by_id(db, audiobook_project_id)
+    if not audiobook_project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="有声书项目不存在"
         )
-    
-    if project.user_id != current_user.id:
+
+    # 2. 验证原始项目权限
+    project = ProjectRepository.get_user_project(db, current_user.id, audiobook_project.project_id)
+    if not project:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="无权限恢复此项目"
         )
-    
-    # 2. 恢复项目
+
+    # 3. 恢复项目
     restored_project = AudiobookProjectRepository.restore(
         db=db,
         audiobook_project_id=audiobook_project_id,
@@ -909,11 +1012,26 @@ async def list_deleted_projects(
     
     # 构建响应
     result = []
+    source_project_ids = list({p.project_id for p in deleted_projects})
+    source_title_by_id: Dict[int, str] = {}
+    if source_project_ids:
+        rows = (
+            db.query(Project.id, Project.title)
+            .filter(Project.id.in_(source_project_ids))
+            .all()
+        )
+        source_title_by_id = {pid: title for pid, title in rows}
+
     for project in deleted_projects:
         audit = audit_map.get(project.id)
         result.append({
             "id": project.id,
-            "title": project.title,
+            "project_id": project.project_id,
+            "project_title": source_title_by_id.get(project.project_id),
+            "status": project.status,
+            "total_chapters": project.total_chapters,
+            "completed_chapters": project.completed_chapters,
+            "total_duration": project.total_duration,
             "deleted_at": project.deleted_at.isoformat() if project.deleted_at else None,
             "created_at": project.created_at.isoformat() if project.created_at else None,
             "audit_id": audit.id if audit else None,

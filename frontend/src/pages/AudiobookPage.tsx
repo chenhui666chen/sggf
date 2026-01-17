@@ -10,7 +10,7 @@
  */
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { apiClient } from '../services/api'
+import { apiClient, extractApiErrorMessage } from '../services/api'
 import * as bookParserApi from '../services/bookParserApi'
 import {
   Box,
@@ -1170,7 +1170,7 @@ const AudiobookPage = () => {
         await handleSelectProject(project, { skipStepReset: true })
       } catch (error: any) {
         console.error('加载项目失败:', error)
-        const msg = (error?.response?.data?.detail as string) || '加载项目失败'
+        const msg = await extractApiErrorMessage(error, '加载项目失败')
         setSnackbar({ open: true, message: msg, severity: 'error' })
         navigate('/audiobook-dashboard')
       }
@@ -1204,7 +1204,7 @@ const AudiobookPage = () => {
       setVoiceError(null)
     } catch (error: any) {
       console.error('加载音色库失败:', error)
-      const message = (error?.response?.data?.detail as string) || error.message || '加载音色库失败'
+      const message = await extractApiErrorMessage(error, '加载音色库失败')
       setVoiceError(message)
     } finally {
       setVoiceLoading(false)
@@ -1225,7 +1225,7 @@ const AudiobookPage = () => {
       setCloneUrl('')
       await fetchVoiceCatalog()
     } catch (error: any) {
-      const message = (error?.response?.data?.detail as string) || error.message || '创建复刻音色失败'
+      const message = await extractApiErrorMessage(error, '创建复刻音色失败')
       setCloneError(message)
     } finally {
       setCloneLoading(false)
@@ -1361,7 +1361,7 @@ const AudiobookPage = () => {
       console.error('删除历史失败:', error)
       const errorMessage = error?.response?.status === 404 
         ? '项目不存在或已被删除' 
-        : error?.response?.data?.detail || '删除失败，请重试'
+        : await extractApiErrorMessage(error, '删除失败，请重试')
       setSnackbar({ open: true, message: errorMessage, severity: 'error' })
     }
   }
@@ -1459,10 +1459,10 @@ const AudiobookPage = () => {
       })
     } catch (error: any) {
       console.error('从文本创建项目失败:', error)
-      const msg = (error?.response?.data?.detail ?? undefined) as string | undefined
+      const msg = await extractApiErrorMessage(error, '从文本创建项目失败，请稍后重试')
       setSnackbar({
         open: true,
-        message: msg || error.message || '从文本创建项目失败，请稍后重试',
+        message: msg,
         severity: 'error',
       })
     } finally {
@@ -1629,7 +1629,7 @@ const AudiobookPage = () => {
       handleCloseDeleteChapterDialog()
     } catch (error: any) {
       console.error('删除章节失败:', error)
-      const msg = (error?.response?.data?.detail as string) || '删除章节失败'
+      const msg = await extractApiErrorMessage(error, '删除章节失败')
       setSnackbar({
         open: true,
         message: msg,
@@ -1888,7 +1888,7 @@ const AudiobookPage = () => {
       }
     } catch (error) {
       console.error('角色音试听失败:', error)
-      setSnackbar({ open: true, message: '角色音试听失败，请稍后重试', severity: 'error' })
+      setSnackbar({ open: true, message: await extractApiErrorMessage(error, '角色音试听失败，请稍后重试'), severity: 'error' })
     } finally {
       setPreviewingCharacterId(null)
     }
