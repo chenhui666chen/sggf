@@ -15,8 +15,8 @@ if str(PROJECT_ROOT) not in sys.path:
 # ⚠️ 重要：首先加载环境变量（必须在所有导入之前）
 from dotenv import load_dotenv
 # 兼容从项目根目录或 backend/ 目录启动：优先加载 backend/.env，其次加载根目录 .env（作为兜底）。
+load_dotenv(PROJECT_ROOT / "backend" / ".env", override=False)
 load_dotenv(PROJECT_ROOT / ".env", override=False)
-load_dotenv(PROJECT_ROOT / "backend" / ".env", override=True)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

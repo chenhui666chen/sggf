@@ -15,8 +15,8 @@ if str(PROJECT_ROOT) not in sys.path:
 # ⚠️ 重要：先加载环境变量（必须在导入 settings 之前）
 from dotenv import load_dotenv
 
+load_dotenv(PROJECT_ROOT / "backend" / ".env", override=False)
 load_dotenv(PROJECT_ROOT / ".env", override=False)
-load_dotenv(PROJECT_ROOT / "backend" / ".env", override=True)
 
 from app.core.config import settings
 
