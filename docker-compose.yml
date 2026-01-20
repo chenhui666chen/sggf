@@ -7,28 +7,61 @@ services:
     container_name: novel_postgres
     environment:
       POSTGRES_USER: novel_user
-      POSTGRES_PASSWORD: novel_password
+      POSTGRES_PASSWORD: NovelPostgres0t649OyRUaI
       POSTGRES_DB: novel_db
+      # PostgreSQL性能优化配置
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+      # 连接数配置（生产环境建议根据服务器资源调整）
+      POSTGRES_MAX_CONNECTIONS: 200
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # 初始化脚本目录（可选）
+      - ./postgres-init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U novel_user"]
       interval: 10s
       timeout: 5s
       retries: 5
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=200"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "effective_cache_size=1GB"
+      - "-c"
+      - "maintenance_work_mem=64MB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_buffers=16MB"
+      - "-c"
+      - "default_statistics_target=100"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "work_mem=4MB"
+      - "-c"
+      - "min_wal_size=1GB"
+      - "-c"
+      - "max_wal_size=4GB"
 
   # Redis缓存
   redis:
     image: redis:7-alpine
     container_name: novel_redis
+    command: redis-server --requirepass NovelRedis2024! --appendonly yes
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "NovelRedis2024!", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -40,10 +73,23 @@ services:
       dockerfile: Dockerfile
     container_name: novel_backend
     environment:
-      DATABASE_URL: postgresql://novel_user:novel_password@postgres:5432/novel_db
-      REDIS_URL: redis://redis:6379/0
-      JWT_SECRET: your-secret-key-change-in-production
+      # 数据库配置（PostgreSQL）
+      DATABASE_URL: postgresql://novel_user:NovelPostgres0t649OyRUaI@postgres:5432/novel_db
+      # Redis配置（带密码）
+      REDIS_URL: redis://:NovelRedis2024!@redis:6379/0
+      # JWT密钥（生产环境必须修改）
+      JWT_SECRET: d268d958af7fcfc8c17910bb3abcbf8d26bdda0e94b8b21b4d73dbd529e3e433
+      # 关闭Debug模式
       DEBUG: "False"
+      # 数据库连接池配置
+      DB_POOL_SIZE: 20
+      DB_MAX_OVERFLOW: 10
+      DB_POOL_TIMEOUT: 30
+      DB_POOL_RECYCLE: 3600
+      DB_POOL_PRE_PING: "True"
+      # Celery配置
+      CELERY_BROKER_URL: redis://:NovelRedis2024!@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://:NovelRedis2024!@redis:6379/0
     ports:
       - "8000:8000"
     depends_on:
@@ -53,7 +99,19 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      # 日志目录
+      - ./backend/logs:/app/logs
+    # 资源限制（生产环境建议根据实际情况调整）
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    restart: unless-stopped
+    command: uvicorn app.main:application --host 0.0.0.0 --port 8000 --workers 2
 
   # React前端
   frontend:
@@ -64,13 +122,17 @@ services:
     ports:
       - "3000:3000"
     environment:
-      VITE_API_URL: http://localhost:8000
-      VITE_WS_URL: ws://localhost:8000
+      VITE_API_URL: https://sggf.net
+      VITE_WS_URL: wss://sggf.net
+      VITE_APP_NAME: 拾光工坊
+      VITE_APP_VERSION: 1.0.0
+      VITE_ENABLE_WEBSOCKET: "true"
     depends_on:
       - backend
     volumes:
       - ./frontend:/app
       - /app/node_modules
+    restart: unless-stopped
 
   # Nginx反向代理
   nginx:

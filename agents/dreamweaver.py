@@ -4,6 +4,7 @@ import base64
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -12,6 +13,7 @@ import requests
 from adapters.model_adapters import GenerationResult, ModelAdapterFactory
 from agents.audio_sync_manager import AudioSyncManager
 from agents.character_manager import CharacterManager
+from agents.sound_effect_manager import SoundEffectManager
 from agents.prompt_fragments import (
     library_assets_from_payload as _library_assets_from_payload,
     match_library_assets_for_shot as _match_library_assets_for_shot,
@@ -76,6 +78,148 @@ def _index_camera_states_by_shot_id(camera_states: Any) -> Dict[str, Dict[str, A
                 continue
             out[shot_id] = state
     return out
+
+
+def _collect_dialogues_for_shot(shot: Dict[str, Any], audio_manager: AudioSyncManager) -> List[Dict[str, Any]]:
+    dialogues: List[Dict[str, Any]] = []
+    markers = shot.get("audio_markers")
+    if isinstance(markers, list):
+        for marker in markers:
+            if not isinstance(marker, dict):
+                continue
+            text = str(marker.get("dialogue_text") or "").strip()
+            speaker = str(marker.get("character_name") or "").strip()
+            if text:
+                dialogues.append({"text": text, "speaker": speaker})
+    if dialogues:
+        return dialogues
+
+    desc = str(shot.get("desc") or "").strip()
+    if not desc:
+        return []
+    return audio_manager.extract_dialogue_from_text(desc)
+
+
+def _normalize_dialogue_key(text: str) -> str:
+    raw = str(text or "").strip().lower()
+    if not raw:
+        return ""
+    return re.sub(r"[\s\W]+", "", raw, flags=re.UNICODE)
+
+
+def _collect_sfx_hint_for_shot(
+    *,
+    shot: Dict[str, Any],
+    audio_markers: Optional[List[Dict[str, Any]]],
+    audio_manager: AudioSyncManager,
+    max_items: int = 6,
+) -> str:
+    effects_by_dialogue: Dict[str, List[str]] = {}
+    if isinstance(audio_markers, list):
+        for marker in audio_markers:
+            if not isinstance(marker, dict):
+                continue
+            effects = marker.get("sound_effects")
+            if not isinstance(effects, list) or not effects:
+                continue
+            key = _normalize_dialogue_key(marker.get("dialogue_line") or "")
+            if not key:
+                continue
+            effects_by_dialogue[key] = [str(e).strip() for e in effects if str(e).strip()]
+
+    effect_names: List[str] = []
+    for dialogue in _collect_dialogues_for_shot(shot, audio_manager):
+        key = _normalize_dialogue_key(dialogue.get("text") or "")
+        if key and key in effects_by_dialogue:
+            effect_names.extend(effects_by_dialogue[key])
+
+    if not effect_names and isinstance(shot.get("sound_effects"), list):
+        effect_names.extend([str(e).strip() for e in shot.get("sound_effects") if str(e).strip()])
+
+    deduped: List[str] = []
+    for name in effect_names:
+        if name and name not in deduped:
+            deduped.append(name)
+        if len(deduped) >= max_items:
+            break
+
+    if not deduped:
+        return ""
+
+    return "音效：" + "、".join(deduped)
+
+
+def _apply_sfx_to_clips(*, ctx: Any, run_dir: Path, storyboard: List[Dict[str, Any]]) -> None:
+    if not _env_flag("DREAMWEAVER_SFX_ENABLED", default=False):
+        return
+    source = str(os.getenv("DREAMWEAVER_SFX_SOURCE") or "library").strip().lower()
+    if source in {"model", "video", "none"}:
+        return
+    clips = ctx.payload.get("video_clips")
+    if not isinstance(clips, list) or not clips:
+        return
+
+    sfx_manager = SoundEffectManager(run_dir=run_dir)
+    effect_map = sfx_manager.build_shot_effects_map(
+        storyboard=storyboard,
+        audio_markers=ctx.payload.get("audio_markers") if isinstance(ctx.payload.get("audio_markers"), list) else None,
+    )
+    if not effect_map:
+        return
+
+    duration_by_shot: Dict[str, float] = {}
+    for shot in storyboard:
+        if not isinstance(shot, dict):
+            continue
+        shot_id = str(shot.get("shot_id") or "").strip()
+        if not shot_id:
+            continue
+        try:
+            duration_by_shot[shot_id] = float(shot.get("duration_s") or 0.0)
+        except Exception:  # noqa: BLE001
+            duration_by_shot[shot_id] = 0.0
+
+    audio_manager = AudioSyncManager(run_dir=run_dir)
+    updated: List[str] = []
+    for clip in clips:
+        if not isinstance(clip, dict):
+            continue
+        path = str(clip.get("path") or "").strip()
+        if not path:
+            continue
+        if clip.get("has_sfx"):
+            continue
+        shot_id = Path(path).stem
+        if not shot_id or shot_id not in effect_map:
+            continue
+        duration_s = duration_by_shot.get(shot_id, 0.0)
+        sfx_path = sfx_manager.render_shot_sfx(
+            shot_id=shot_id,
+            duration_s=duration_s,
+            effect_items=effect_map[shot_id],
+        )
+        if not sfx_path:
+            continue
+        output_path = run_dir / f"{shot_id}_sfx.mp4"
+        if not output_path.exists():
+            ok = audio_manager.sync_audio_to_video(
+                video_path=str(Path(path)),
+                audio_path=sfx_path,
+                output_path=str(output_path),
+                start_time=0.0,
+                volume=1.0,
+                fade_in=0.0,
+                fade_out=0.0,
+            )
+            if not ok:
+                continue
+        clip["path"] = str(output_path)
+        clip["sfx_path"] = sfx_path
+        clip["has_sfx"] = True
+        updated.append(shot_id)
+
+    if updated:
+        ctx.payload["sfx_tracks"] = effect_map
 
 
 def _stable_seed(*parts: str) -> int:
@@ -303,6 +447,18 @@ def _extract_video_tail_frame(
     _run_ffmpeg(cmd, log_dir=out_path.parent, log_prefix=f"ffmpeg_extract_tail_{video_path.stem}")
 
 
+def _build_audio_policy_hint() -> str:
+    if not _env_flag("DREAMWEAVER_AUDIO_POLICY_HINT_ENABLED", default=True):
+        return ""
+    if _env_flag("DREAMWEAVER_DIALOGUE_AUDIO_EMBED", default=False):
+        return ""
+
+    sfx_source = str(os.getenv("DREAMWEAVER_SFX_SOURCE") or "library").strip().lower()
+    if sfx_source in {"model", "video"}:
+        return "音频要求：仅生成环境音/音效，不生成对白音频与背景音乐"
+    return "音频要求：不生成对白音频与背景音乐"
+
+
 def _build_wan_i2v_prompt(*, shot: Dict[str, Any], style_preset: str, frame_ratio: str, prompt_fragment: str = "", engine: str = "wan_i2v") -> str:
     """
     Wan I2V 仅接收 prompt 字符串（DashScope VideoSynthesis 亦然），因此将结构化字段“语义化拼接”为自然语言。
@@ -335,6 +491,7 @@ def _build_wan_i2v_prompt(*, shot: Dict[str, Any], style_preset: str, frame_rati
     time = str(shot.get("time") or "").strip()
     atmosphere = str(shot.get("atmosphere") or "").strip()
     audio_sync = str(shot.get("audio_sync") or "").strip()
+    audio_policy = _build_audio_policy_hint()
     character_ids = shot.get("character_ids")
 
     if not motion_desc:
@@ -412,6 +569,8 @@ def _build_wan_i2v_prompt(*, shot: Dict[str, Any], style_preset: str, frame_rati
             header.append(f"结束状态：{state_after}")
         if audio_sync:
             header.append(f"声画同步：{audio_sync}")
+        if audio_policy:
+            header.append(audio_policy)
         if character_ids and isinstance(character_ids, list) and character_ids:
             header.append(f"角色ID：{', '.join([str(c) for c in character_ids[:4]])}")
         if motion_control:
@@ -506,6 +665,8 @@ def _build_wan_i2v_prompt(*, shot: Dict[str, Any], style_preset: str, frame_rati
             parts.append(f"结束状态：{state_after}")
         if audio_sync:
             parts.append(f"声画同步：{audio_sync}")
+        if audio_policy:
+            parts.append(audio_policy)
         if character_ids and isinstance(character_ids, list):
             char_hint = f"角色ID：{', '.join([str(c) for c in character_ids[:4]])}"
             parts.append(char_hint)
@@ -1165,9 +1326,10 @@ def _run_wan_i2v(
             merged.append(clip)
 
     audio_sync_enabled = _env_flag("DREAMWEAVER_AUDIO_SYNC_ENABLED", default=True)
-    if audio_sync_enabled and merged:
+    dialogue_embed = _env_flag("DREAMWEAVER_DIALOGUE_AUDIO_EMBED", default=False)
+    if audio_sync_enabled and dialogue_embed and merged:
         try:
-            audio_manager = AudioSyncManager(run_dir=run_dir)
+            audio_manager = AudioSyncManager(run_dir=run_dir, batch_id=batch_id, cache_dir=audio_cache_dir)
             audio_clips: List[Dict[str, Any]] = []
             
             for clip in merged:
@@ -1195,7 +1357,8 @@ def _run_wan_i2v(
                 
                 try:
                     audio_map = audio_manager.generate_audio_for_storyboard(
-                        storyboard=[shot_item]
+                        storyboard=[shot_item],
+                        character_manager=character_manager,
                     )
                     
                     generated_audio_path = audio_map.get(shot_id)
@@ -1389,6 +1552,40 @@ def _env_flag(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _resolve_audio_batch_id(payload: Dict[str, Any]) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    raw = str(payload.get("batch_id") or "").strip()
+    if raw:
+        return raw
+    project_id = payload.get("project_id") or payload.get("source_project_id")
+    if project_id is not None:
+        try:
+            project_id_str = str(int(project_id))
+        except Exception:  # noqa: BLE001
+            project_id_str = str(project_id).strip()
+        if project_id_str:
+            return f"dw_project_{project_id_str}"
+    run_id = str(payload.get("run_id") or "").strip()
+    return run_id or None
+
+
+def _resolve_audio_cache_dir(payload: Dict[str, Any]) -> Optional[Path]:
+    if not isinstance(payload, dict):
+        return None
+    project_id = payload.get("project_id") or payload.get("source_project_id")
+    if project_id is None:
+        return None
+    try:
+        project_id_str = str(int(project_id))
+    except Exception:  # noqa: BLE001
+        project_id_str = str(project_id).strip()
+    if not project_id_str:
+        return None
+    safe_id = re.sub(r"[^A-Za-z0-9_-]+", "_", project_id_str)
+    return Path("runs") / "_audio_cache" / f"project_{safe_id}"
+
+
 def _index_video_clip_jobs_by_shot(items: Any) -> Dict[str, Dict[str, Any]]:
     jobs: Dict[str, Dict[str, Any]] = {}
     if not isinstance(items, list):
@@ -1538,6 +1735,15 @@ def run_video(ctx: Any) -> None:
     engine = str(video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "ffmpeg_slideshow").strip().lower()
     bridge_enabled = engine in {"wan_i2v", "i2v"}
     regen_set = _normalize_regenerate_shot_ids(ctx.payload.get("regenerate_shot_ids"))
+    batch_id = _resolve_audio_batch_id(ctx.payload)
+    if batch_id and not str(ctx.payload.get("batch_id") or "").strip():
+        ctx.payload["batch_id"] = batch_id
+    audio_cache_dir = _resolve_audio_cache_dir(ctx.payload)
+
+    audio_sync_enabled = _env_flag("DREAMWEAVER_AUDIO_SYNC_ENABLED", default=True)
+    lipsync_mode = str(os.getenv("DREAMWEAVER_DIALOGUE_LIPSYNC_MODE") or "estimate").strip().lower()
+    enable_tts_lipsync = audio_sync_enabled and lipsync_mode in {"tts", "tts_lipsync"}
+    viseme_tracks_enabled = _env_flag("DREAMWEAVER_LIPSYNC_TRACKS_ENABLED", default=True)
 
     require_confirmation_cfg = video_cfg.get("require_confirmation")
     require_confirmation = (
@@ -1558,15 +1764,85 @@ def run_video(ctx: Any) -> None:
 
     character_manager = None
     character_profiles = ctx.payload.get("character_profiles", [])
-    if isinstance(character_profiles, list) and character_profiles and bridge_enabled:
+    need_character_manager = bool(isinstance(character_profiles, list) and character_profiles and bridge_enabled) or enable_tts_lipsync
+    if need_character_manager:
         try:
             character_manager = CharacterManager(run_dir=run_dir)
-            entities = ctx.payload.get("entities", {})
+            entities = ctx.payload.get("entities")
+            if not isinstance(entities, dict) or not entities:
+                entities = ctx.payload.get("script_entities", {})
             if isinstance(entities, dict):
                 character_manager.auto_assign_characters_from_storyboard(storyboard=storyboard, entities=entities)
         except Exception as e:
             print(f"角色管理器初始化失败: {e}")
             character_manager = None
+    if enable_tts_lipsync and isinstance(storyboard, list):
+        audio_manager = AudioSyncManager(run_dir=run_dir, batch_id=batch_id, cache_dir=audio_cache_dir)
+        existing_tracks = ctx.payload.get("dialogue_tracks") if isinstance(ctx.payload.get("dialogue_tracks"), dict) else {}
+        existing_audio_map = ctx.payload.get("dialogue_audio_map") if isinstance(ctx.payload.get("dialogue_audio_map"), dict) else {}
+        existing_viseme_tracks = ctx.payload.get("viseme_tracks") if isinstance(ctx.payload.get("viseme_tracks"), dict) else {}
+        target_shots = requested_shots if requested_shots else {str(s.get("shot_id") or "") for s in storyboard if isinstance(s, dict)}
+
+        for shot in storyboard:
+            if not isinstance(shot, dict):
+                continue
+            shot_id = str(shot.get("shot_id") or "").strip()
+            if not shot_id or shot_id not in target_shots:
+                continue
+
+            dialogues = _collect_dialogues_for_shot(shot, audio_manager)
+            if not dialogues:
+                continue
+
+            if engine in {"wan_i2v", "i2v", "wan_t2v", "wan26_t2v", "t2v"}:
+                target_duration_s = normalize_wan_i2v_duration_s(shot.get("duration_s"), default=5.0)
+            else:
+                try:
+                    target_duration_s = float(shot.get("duration_s") or 0.0)
+                except Exception:  # noqa: BLE001
+                    target_duration_s = 0.0
+
+            tracks = audio_manager.build_dialogue_tracks(
+                shot_id=shot_id,
+                dialogues=dialogues,
+                character_manager=character_manager,
+                target_duration_s=target_duration_s,
+            )
+            if not tracks:
+                continue
+
+            shot["dialogue_tracks"] = tracks
+            viseme_tracks = []
+            if viseme_tracks_enabled:
+                viseme_tracks = audio_manager.build_viseme_tracks(tracks, mode=lipsync_mode)
+                if viseme_tracks:
+                    shot["viseme_tracks"] = viseme_tracks
+            shot["audio_markers"] = audio_manager.build_audio_markers_from_tracks(tracks)
+            shot["audio_sync"] = audio_manager.format_audio_sync_text(tracks)
+            sfx_source = str(os.getenv("DREAMWEAVER_SFX_SOURCE") or "library").strip().lower()
+            if sfx_source in {"model", "video"}:
+                sfx_hint = _collect_sfx_hint_for_shot(
+                    shot=shot,
+                    audio_markers=ctx.payload.get("audio_markers") if isinstance(ctx.payload.get("audio_markers"), list) else None,
+                    audio_manager=audio_manager,
+                )
+                if sfx_hint:
+                    if shot["audio_sync"]:
+                        shot["audio_sync"] = f"{shot['audio_sync']}；{sfx_hint}"
+                    else:
+                        shot["audio_sync"] = sfx_hint
+
+            existing_tracks[shot_id] = tracks
+            existing_audio_map[shot_id] = [t.get("audio_path") for t in tracks if t.get("audio_path")]
+            if viseme_tracks:
+                existing_viseme_tracks[shot_id] = viseme_tracks
+
+        if existing_tracks:
+            ctx.payload["dialogue_tracks"] = existing_tracks
+        if existing_audio_map:
+            ctx.payload["dialogue_audio_map"] = existing_audio_map
+        if existing_viseme_tracks:
+            ctx.payload["viseme_tracks"] = existing_viseme_tracks
 
     ctx.payload["video_clip_jobs"] = _build_video_clip_jobs(
         storyboard=storyboard,
@@ -1680,6 +1956,7 @@ def run_video(ctx: Any) -> None:
                     )
                 ctx.payload["video_clips"] = clips
 
+        _apply_sfx_to_clips(ctx=ctx, run_dir=run_dir, storyboard=storyboard)
         ctx.payload["video_clip_jobs"] = _build_video_clip_jobs(
             storyboard=storyboard,
             run_dir=run_dir,
@@ -1702,6 +1979,7 @@ def run_video(ctx: Any) -> None:
             regenerate_shot_ids=regen_set,
             character_manager=character_manager,
         )
+        _apply_sfx_to_clips(ctx=ctx, run_dir=run_dir, storyboard=storyboard)
         ctx.payload["video_clip_jobs"] = _build_video_clip_jobs(
             storyboard=storyboard,
             run_dir=run_dir,
@@ -1724,6 +2002,7 @@ def run_video(ctx: Any) -> None:
             fps=fps,
             regenerate_shot_ids=regen_set,
         )
+        _apply_sfx_to_clips(ctx=ctx, run_dir=run_dir, storyboard=storyboard)
         ctx.payload["video_clip_jobs"] = _build_video_clip_jobs(
             storyboard=storyboard,
             run_dir=run_dir,
@@ -1791,6 +2070,7 @@ def run_video(ctx: Any) -> None:
         )
 
     ctx.payload["video_clips"] = clips
+    _apply_sfx_to_clips(ctx=ctx, run_dir=run_dir, storyboard=storyboard)
     ctx.payload["video_clip_jobs"] = _build_video_clip_jobs(
         storyboard=storyboard,
         run_dir=run_dir,

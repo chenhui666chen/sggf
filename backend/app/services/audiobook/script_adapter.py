@@ -11,7 +11,7 @@
 """
 import re
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
 from dataclasses import dataclass, asdict, field
 import json
 
@@ -181,6 +181,12 @@ class ScriptSegment:
     
     # v3-plus音声参数控制
     voice_params: Optional[Dict[str, float]] = None  # {"rate": 1.0, "pitch": 1.0, "pause_before": 0.2, "pause_after": 0.3}
+
+    # cosyvoice-v3-plus Instruct 结构化字段（用于指令模板拼装）
+    instruct_emotion: str = ""  # neutral/fearful/angry/sad/surprised/happy/disgusted
+    instruct_scene: str = ""  # 场景，如“闲聊互动”
+    instruct_role: str = ""  # 角色，如“一个旁白”
+    instruct_identity: str = ""  # 身份，如“故事机”
     
     # 🆕 音效音乐精细化标注（新版）
     sound_effects: List[SoundEffect] = field(default_factory=list)  # 音效对象列表
@@ -203,6 +209,14 @@ class ScriptSegment:
                 "pause_before": self.pause_before,
                 "pause_after": self.pause_after
             }
+        if self.instruct_emotion is None:
+            self.instruct_emotion = ""
+        if self.instruct_scene is None:
+            self.instruct_scene = ""
+        if self.instruct_role is None:
+            self.instruct_role = ""
+        if self.instruct_identity is None:
+            self.instruct_identity = ""
         
         # 如果sound_effects_simple有内容但sound_effects为空，转换为新格式
         if self.sound_effects_simple and not self.sound_effects:
@@ -243,7 +257,8 @@ class AudiobookScriptAgent:
         chapter_title: str = "",
         genre: str = "科幻",
         chapter_number: int = 1,
-        enable_chapter_structure: bool = True  # 🆕 是否启用章节结构化
+        enable_chapter_structure: bool = True,  # 🆕 是否启用章节结构化
+        progress_callback: Optional[Callable[[float, Optional[Dict[str, Any]]], None]] = None,
     ) -> List[ScriptSegment]:
         """
         将章节改编为有声剧本
@@ -264,19 +279,41 @@ class AudiobookScriptAgent:
         logger.info(f"   原文长度: {len(chapter_content)} 字符")
         
         # 1. 前期分析
+        def report_progress(progress: float, metrics: Optional[Dict[str, Any]] = None) -> None:
+            if not progress_callback:
+                return
+            try:
+                progress_callback(progress, metrics)
+            except Exception as exc:
+                logger.warning("鈿狅笍 杩涘害鍥炶皟澶辫触: %s", exc)
+
+        report_progress(0.02, {"phase": "analysis"})
         analysis = await self._analyze_chapter(
             chapter_content, 
             chapter_title, 
             genre
         )
+        report_progress(0.12, {"phase": "analysis_done"})
         logger.info(f"   ✅ 分析完成: {analysis.get('theme', 'N/A')}")
         
         # 2. 剧本转化
+        transform_base = 0.12
+        transform_span = 0.80
+
+        def on_transform_progress(batch_index: int, batch_total: int) -> None:
+            if batch_total <= 0:
+                report_progress(transform_base, {"phase": "transform", "batch": "0/0"})
+                return
+            progress_value = transform_base + transform_span * (batch_index / batch_total)
+            report_progress(progress_value, {"phase": "transform", "batch": f"{batch_index}/{batch_total}"})
+
         script_segments = await self._transform_to_script(
             chapter_content,
             character_list or [],
-            analysis
+            analysis,
+            progress_callback=on_transform_progress,
         )
+        report_progress(0.94, {"phase": "transform_done"})
         logger.info(f"   ✅ 转化完成: {len(script_segments)} 个片段")
         
         # 🆕 3. 章节结构化（新增）
@@ -291,8 +328,10 @@ class AudiobookScriptAgent:
             )
             logger.info(f"   ✅ 结构化完成: 片头{'✓' if chapter_structure.opening else '✗'} + {len(script_segments)}片段 + 片尾{'✓' if chapter_structure.closing else '✗'}")
             logger.info(f"   🕒 预估时长: {chapter_structure.estimate_duration() / 60:.1f} 分钟")
+            report_progress(0.96, {"phase": "structure"})
             return chapter_structure
         
+        report_progress(0.96, {"phase": "segments_ready"})
         return script_segments
     
     async def _analyze_chapter(
@@ -419,7 +458,8 @@ class AudiobookScriptAgent:
         self,
         content: str,
         character_list: List[str],
-        analysis: Dict[str, Any]
+        analysis: Dict[str, Any],
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> List[ScriptSegment]:
         """
         剧本转化：听觉化改写
@@ -473,7 +513,10 @@ class AudiobookScriptAgent:
             except Exception as e:
                 logger.error(f"   ❌ [{idx}/{total_paras}] 失败: {e}")
                 # 继续处理下一段，不中断整个流程
-                continue
+                pass
+
+            if progress_callback:
+                progress_callback(idx, total_paras)
         
         logger.info(f"✅ 全部段落处理完成，总计 {len(all_segments)} 个剧本片段")
         
@@ -497,12 +540,23 @@ class AudiobookScriptAgent:
         model_name = (getattr(self, "tts_model", None) or "qwen3-tts-flash").strip()
         if "plus" in model_name:
             tts_block = """**当前TTS模型：CosyVoice v3-plus（精品模式）**\n- 适合：精品章节 / 情绪层次丰富场景\n- 特性：精细情感控制、停顿/重音/语调变化能力极强，音质最佳\n"""
-            instruct_block = """**Instruct 提示（cosyvoice-v3-plus）**\n- 内置音色仅 2 种：longanyang（男）/ longanhuan（女），均支持 Instruct/SSML\n- 请在 performance_notes 中写清语气/情绪（如【愤怒/紧张/平静】），便于后续注入 instruction\n"""
+            instruct_block = (
+                "**Instruct 提示（cosyvoice-v3-plus）**\n"
+                "- 内置音色仅 2 种：longanyang（男）/ longanhuan（女），均支持 Instruct/SSML\n"
+                "- 请输出结构化指令字段：instruct_emotion / instruct_scene / instruct_role / instruct_identity\n"
+                "- instruct_emotion 取值：neutral、fearful、angry、sad、surprised、happy、disgusted\n"
+                "- instruct_scene（不适用留空）：\n"
+                "  - longanyang：闲聊互动、新闻播报、广告促销、比赛解说、一些儿童内容解说、语音导航、脱口秀表演\n"
+                "  - longanhuan：闲聊对话、比赛解说、深夜电台广播、诗歌朗诵、科普知识推广、产品推广、脱口秀表演\n"
+                "- instruct_role（不适用留空）：longanyang=一个旁白；longanhuan=温和客服\n"
+                "- instruct_identity（不适用留空）：longanyang=故事机；longanhuan 无\n"
+                "- scene/role/identity 三者最多选其一，其余留空\n"
+            )
         else:
             tts_block = """**当前TTS模型：Qwen3-TTS Flash（高性价比模式）**\n- 适合：长篇连载 / 日更章节\n- 特性：音色丰富、稳定性强、成本低，适合大体量文本\n- 限制：当前调用通道不支持 Instruct/SSML，且不暴露可控的情绪/语速/音调参数（仅使用 voice + language_type）\n"""
             instruct_block = """**Qwen3 提示**\n- 可以输出 emotion/performance_notes 作为编剧标注与后续扩展，但不要把它当作可控的 TTS 参数\n"""
 
-        six_step_block = """**有声剧本 6 步听觉化重构流程（请严格遵守）**\n1. 心理活动 → 改写为可听见的独白或用音效/环境暗示呈现，避免长篇抽象描写。\n2. 环境描写 → 提炼为可感知的音效标签（如“雨声渐密”“地铁驶过”），填入 sound_effects。\n3. 动作与场景切换 → 用短句 + 停顿 + 过渡性音效，避免连续大段说明。\n4. 对话优化 → 口语化，拆分过长句子，去掉拗口表达，保证朗读顺畅。\n5. 节奏控制 → 根据情节紧张度调整句长，并通过 pause_before/pause_after 控制呼吸感。\n6. 音乐与情绪 → 为情绪明显的片段给出 music_cue（如“低频紧张弦乐”），避免整章铺满BGM。\n"""
+        six_step_block = """**有声剧本 6 步听觉化重构流程（请严格遵守）**\n1. 心理活动 → 改写为可听见的独白或用音效/环境暗示呈现，避免长篇抽象描写。\n2. 环境描写 → 提炼为可感知的音效标签（如“雨声渐密”“地铁驶过”），填入 sound_effects。\n3. 动作与场景切换 → 用短句 + 停顿 + 过渡性音效，避免连续大段说明。\n4. 对话优化 → 口语化，必要时拆分过长句子，允许适度长句，去掉拗口表达，保证朗读顺畅。\n5. 节奏控制 → 根据情节紧张度调整句长，并通过 pause_before/pause_after 控制呼吸感。\n6. 音乐与情绪 → 为情绪明显的片段给出 music_cue（如“低频紧张弦乐”），避免整章铺满BGM。\n   - 音效密度建议控制在每分钟 2-6 个，仅保留关键动作/场景的音效。\n   - 配乐覆盖建议 15%-40%，低密度时仅保留开头/结尾/高潮等关键位置。\n"""
 
         prompt = f"""你是专业的有声书剧本改编师，负责将网络小说改编成适合音频化播放的有声剧本。
 
@@ -552,6 +606,10 @@ class AudiobookScriptAgent:
         "text": "改编后的文本（简洁、听觉友好）",
         "speaker": "角色名或旁白",
         "emotion": "neutral|happy|sad|angry|calm|tense|excited|tender|solemn",
+        "instruct_emotion": "neutral|fearful|angry|sad|surprised|happy|disgusted",
+        "instruct_scene": "闲聊互动|新闻播报|比赛解说|诗歌朗诵|...（不适用留空）",
+        "instruct_role": "一个旁白|温和客服（不适用留空）",
+        "instruct_identity": "故事机（不适用留空）",
         "voice_params": {{
             "rate": 1.0,
             "pitch": 1.0,
@@ -614,6 +672,8 @@ class AudiobookScriptAgent:
 - 只输出JSON数组，不要添加任何//注释或/*注释*/
 - 不要在JSON中添加解释性文字
 - emotion字段必须使用推荐情感之一，不要自行发明
+- instruct_emotion仅用于cosyvoice-v3-plus，取值：neutral、fearful、angry、sad、surprised、happy、disgusted
+- instruct_scene / instruct_role / instruct_identity 仅用于cosyvoice-v3-plus，三者最多选其一，其余留空
 - voice_params必须包含rate和pitch参数，根据情感调整
 - pause_before/after单位为秒，范围：0.1-2.0
 - 优先使用happy/sad/tense等有强烈情感的标签，避免过多使用neutral
@@ -700,6 +760,14 @@ class AudiobookScriptAgent:
                 '文本': 'text',
                 '说话人': 'speaker',
                 '情绪': 'emotion',
+                '情感值': 'instruct_emotion',
+                '指令情感': 'instruct_emotion',
+                '场景': 'instruct_scene',
+                '指令场景': 'instruct_scene',
+                '指令角色': 'instruct_role',
+                '角色指令': 'instruct_role',
+                '身份': 'instruct_identity',
+                '指令身份': 'instruct_identity',
                 '动作': 'action',
                 '音效': 'sound_effects',
                 '音乐': 'music_cue',

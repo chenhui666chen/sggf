@@ -79,3 +79,29 @@ def clamp_prompt_text(text: str, limit: int = 900) -> str:
         return cleaned
     return cleaned[:limit].rstrip()
 
+
+def clamp_text_list(
+    items: Any,
+    *,
+    max_items: int = 8,
+    max_chars: int = 120,
+) -> List[str]:
+    if not isinstance(items, list):
+        return []
+    max_items = max(0, int(max_items))
+    max_chars = max(0, int(max_chars))
+    out: List[str] = []
+    for item in items:
+        if not isinstance(item, (str, int, float)):
+            continue
+        text = str(item).strip()
+        if not text:
+            continue
+        if max_chars and len(text) > max_chars:
+            text = text[:max_chars].rstrip()
+        if text in out:
+            continue
+        out.append(text)
+        if max_items and len(out) >= max_items:
+            break
+    return out

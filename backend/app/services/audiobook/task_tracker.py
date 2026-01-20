@@ -30,9 +30,10 @@ class StageType(Enum):
     VOICE_DESIGN = "voice_design"  # 音色设计
     SOUND_DESIGN = "sound_design"  # 音效设计
     MUSIC_COMPOSITION = "music_composition"  # 音乐编曲
+    QUALITY_REVIEW = "quality_review"  # 剧本质量评审
+    AUDIO_PROMPT_REVIEW = "audio_prompt_review"  # 音频提示词审阅
     TTS_SYNTHESIS = "tts_synthesis"  # TTS合成
     AUDIO_MIXING = "audio_mixing"  # 音频混合
-    QUALITY_REVIEW = "quality_review"  # 剧本质量评审
     FINAL_AUDIO_REVIEW = "final_audio_review"  # 最终音频评审
 
 
@@ -159,6 +160,44 @@ class TaskTracker:
             self.tasks[task_id].current_stage = stage
             self.tasks[task_id].updated_at = datetime.now().isoformat()
             self._notify(task_id)
+
+    def update_stage_progress(
+        self,
+        task_id: str,
+        stage: StageType,
+        progress: float,
+        metrics: Optional[Dict[str, Any]] = None,
+    ):
+        task = self.tasks.get(task_id)
+        if not task:
+            return
+
+        stage_info = task.stages.get(stage)
+        if not stage_info:
+            return
+
+        if stage_info.status == TaskStatus.PENDING:
+            stage_info.start()
+        if stage_info.status == TaskStatus.COMPLETED:
+            return
+
+        try:
+            progress_value = float(progress)
+        except (TypeError, ValueError):
+            progress_value = stage_info.progress
+
+        progress_value = max(0.0, min(1.0, progress_value))
+        if progress_value < stage_info.progress:
+            progress_value = stage_info.progress
+        stage_info.progress = progress_value
+
+        if metrics:
+            stage_info.metrics.update(metrics)
+
+        task.status = TaskStatus.RUNNING
+        task.current_stage = stage
+        task.updated_at = datetime.now().isoformat()
+        self._notify(task_id)
     
     def complete_stage(
         self,

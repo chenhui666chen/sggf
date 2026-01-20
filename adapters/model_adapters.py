@@ -891,6 +891,7 @@ class Wan26R2VAdapter(BaseModelAdapter):
 
 class QwenImageEditPlusAdapter(BaseModelAdapter):
     """Qwen-Image-Edit-Plus 适配器 - 图片编辑"""
+    supports_multi_image = True
 
     def generate(
         self,
@@ -899,7 +900,8 @@ class QwenImageEditPlusAdapter(BaseModelAdapter):
         mask_path: Optional[str] = None,
         strength: float = 0.8,
         guidance_scale: float = 7.5,
-        seed: Optional[int] = None
+        seed: Optional[int] = None,
+        image_paths: Optional[List[str]] = None
     ) -> GenerationResult:
         """编辑图像"""
         if not self._is_dashscope():
@@ -910,9 +912,32 @@ class QwenImageEditPlusAdapter(BaseModelAdapter):
             )
 
         try:
-            with open(image_path, "rb") as f:
-                import base64
-                image_data = base64.b64encode(f.read()).decode()
+            import base64
+            content_items: List[Dict[str, Any]] = []
+            extra_paths: List[str] = []
+            if isinstance(image_paths, list):
+                for item in image_paths:
+                    if not item:
+                        continue
+                    item_str = str(item).strip()
+                    if not item_str or item_str == image_path:
+                        continue
+                    if item_str in extra_paths:
+                        continue
+                    extra_paths.append(item_str)
+
+            for item_path in [image_path] + extra_paths:
+                if str(item_path).startswith(("http://", "https://")):
+                    content_items.append({"image": str(item_path)})
+                    continue
+                path_obj = Path(str(item_path))
+                if not path_obj.exists():
+                    if str(item_path) == image_path:
+                        raise RuntimeError(f"image not found: {image_path}")
+                    continue
+                with open(path_obj, "rb") as f:
+                    image_data = base64.b64encode(f.read()).decode()
+                content_items.append({"image": f"data:image/png;base64,{image_data}"})
 
             host = self._base_host()
             if not host:
@@ -926,14 +951,7 @@ class QwenImageEditPlusAdapter(BaseModelAdapter):
                     "messages": [
                         {
                             "role": "user",
-                            "content": [
-                                {
-                                    "image": f"data:image/png;base64,{image_data}"
-                                },
-                                {
-                                    "text": edit_prompt
-                                }
-                            ]
+                            "content": content_items + [{"text": edit_prompt}],
                         }
                     ]
                 },
@@ -1042,7 +1060,12 @@ class QwenImageEditPlusAdapter(BaseModelAdapter):
 
 
 class WanImageEditAdapter(QwenImageEditPlusAdapter):
-    """Wan Image Edit 适配器 - 图像编辑"""
+    """Wan Image Edit é€‚â€¦å™? å›¾åƒ¡ç¼‘è¾‘"""
+    supports_multi_image = False
+
+
+class QwenImageEditMaxAdapter(QwenImageEditPlusAdapter):
+    """Qwen-Image-Edit-Max adapter - image edit"""
 
 
 class QwenMultiPersonFusionAdapter(BaseModelAdapter):
@@ -1611,6 +1634,7 @@ class Qwen3TTSAdapter(BaseModelAdapter):
         text: str,
         voice_style: str = "natural",
         character_id: Optional[str] = None,
+        voice_id: Optional[str] = None,
         speed: float = 1.0,
         pitch: float = 1.0,
         volume: float = 1.0
@@ -1622,6 +1646,7 @@ class Qwen3TTSAdapter(BaseModelAdapter):
             text: 要转换的文本
             voice_style: 语音风格（natural/emotional/humorous等）
             character_id: 角色ID（用于音色匹配）
+            voice_id: 音色ID（优先使用）
             speed: 语速（0.5-2.0）
             pitch: 音调（0.5-2.0）
             volume: 音量（0.0-1.0）
@@ -1644,6 +1669,15 @@ class Qwen3TTSAdapter(BaseModelAdapter):
             "pitch": max(0.5, min(2.0, float(pitch))),
             "volume": max(0.0, min(1.0, float(volume)))
         }
+
+        resolved_voice_id = str(voice_id or "").strip()
+        if resolved_voice_id:
+            try:
+                from backend.app.services.audiobook.constants import normalize_speaker_id
+                resolved_voice_id = normalize_speaker_id(resolved_voice_id)
+            except Exception:
+                pass
+            payload["voice"] = resolved_voice_id
         
         if character_id:
             payload["character_id"] = character_id
@@ -1657,13 +1691,23 @@ class Qwen3TTSAdapter(BaseModelAdapter):
             if result and "data" in result:
                 audio_data = result["data"].get("audio_data")
                 if audio_data:
+                    data = {"audio_data": audio_data, "format": "mp3"}
+                    tts_timestamps = result["data"].get("tts_timestamps")
+                    if not isinstance(tts_timestamps, list):
+                        tts_timestamps = result["data"].get("word_timestamps")
+                    if isinstance(tts_timestamps, list):
+                        data["tts_timestamps"] = tts_timestamps
+                    phoneme_timestamps = result["data"].get("phoneme_timestamps")
+                    if isinstance(phoneme_timestamps, list):
+                        data["phoneme_timestamps"] = phoneme_timestamps
                     return GenerationResult(
                         success=True,
-                        data={"audio_data": audio_data, "format": "mp3"},
+                        data=data,
                         metadata={
                             "text": text,
                             "voice_style": voice_style,
                             "character_id": character_id,
+                            "voice_id": resolved_voice_id,
                             "model": self.config.model_name
                         }
                     )
@@ -1696,6 +1740,9 @@ class Qwen3TTSAdapter(BaseModelAdapter):
                 "volume": payload["volume"]
             }
         }
+
+        if "voice" in payload:
+            dashscope_payload["parameters"]["voice"] = payload["voice"]
         
         if "character_id" in payload:
             dashscope_payload["parameters"]["character_id"] = payload["character_id"]
@@ -1709,11 +1756,15 @@ class Qwen3TTSAdapter(BaseModelAdapter):
         result = self._request_json_url(method="POST", url=url, payload=dashscope_payload)
 
         if "output" in result and "audio" in result["output"]:
-            return {
-                "data": {
-                    "audio_data": result["output"]["audio"]
-                }
-            }
+            data = {"audio_data": result["output"]["audio"]}
+            output = result.get("output") if isinstance(result.get("output"), dict) else {}
+            if isinstance(output.get("timestamps"), list):
+                data["tts_timestamps"] = output.get("timestamps")
+            elif isinstance(output.get("word_timestamps"), list):
+                data["tts_timestamps"] = output.get("word_timestamps")
+            if isinstance(output.get("phoneme_timestamps"), list):
+                data["phoneme_timestamps"] = output.get("phoneme_timestamps")
+            return {"data": data}
 
         return result
 
@@ -1808,6 +1859,7 @@ class ModelAdapterFactory:
             "wan26_r2v": Wan26R2VAdapter,
             "wan_image_edit": WanImageEditAdapter,
             "qwen_image_edit_plus": QwenImageEditPlusAdapter,
+            "qwen_image_edit_max": QwenImageEditMaxAdapter,
             "qwen_multiperson_fusion": QwenMultiPersonFusionAdapter,
             "qwen3_vl_plus": Qwen3VLPlusAdapter,
             "qwen3_tts": Qwen3TTSAdapter,
@@ -1831,6 +1883,7 @@ class ModelAdapterFactory:
         - wan_r2v / wan26_r2v
         - wan_image_edit
         - qwen_image_edit_plus
+        - qwen_image_edit_max
         - qwen3_vl_plus
         - qwen3_tts
         - jianying
@@ -1857,6 +1910,7 @@ class ModelAdapterFactory:
             "wan26_r2v": "WAN_R2V",
             "wan_image_edit": "WAN_IMAGE_EDIT",
             "qwen_image_edit_plus": "QWEN_IMAGE_EDIT",
+            "qwen_image_edit_max": "QWEN_IMAGE_EDIT_MAX",
             "qwen_multiperson_fusion": "QWEN_IMAGE_EDIT",
             "qwen3_vl_plus": "QWEN_VL_PLUS",
             "qwen3_tts": "QWEN3_TTS",
@@ -1874,6 +1928,14 @@ class ModelAdapterFactory:
             or os.getenv(f"{env_prefix}_MODEL", "").strip()
         )
 
+        if env_prefix == "QWEN_IMAGE_EDIT_MAX" and (not api_key or not base_url):
+            fallback_key = os.getenv("QWEN_IMAGE_EDIT_API_KEY", "").strip()
+            fallback_base = os.getenv("QWEN_IMAGE_EDIT_BASE_URL", "").strip()
+            if not api_key:
+                api_key = fallback_key
+            if not base_url:
+                base_url = fallback_base
+
         if not api_key or not base_url:
             raise RuntimeError(
                 f"Missing {env_prefix} config: require {env_prefix}_API_KEY and {env_prefix}_BASE_URL"
@@ -1886,6 +1948,8 @@ class ModelAdapterFactory:
                 model_name = "qwen3-vl-plus"
             elif env_prefix == "QWEN_IMAGE_EDIT":
                 model_name = "qwen-image-edit-plus"
+            elif env_prefix == "QWEN_IMAGE_EDIT_MAX":
+                model_name = "qwen-image-edit-max-2026-01-16"
 
         if not model_name and adapter_type != "jianying":
             raise RuntimeError(

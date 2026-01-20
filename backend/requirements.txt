@@ -32,13 +32,12 @@ dashscope>=1.14.2
 openai>=1.0.0
 
 # Vector Database & Embeddings
-tiktoken==0.5.2
+tiktoken>=0.7.0
 
 # Document Processing
 python-docx
 email-validator
 pydub>=0.25.1  # 音频处理
-audioop-lts>=0.2.1  # Python 3.13兼容性（audioop替代品）
 
 # Task Queue
 aioredis==2.0.1

@@ -3803,10 +3803,16 @@ async def execute_generate_next_chapter_task(
 - 确保与整本书的情节大纲保持一致
 - 确保与前面章节的剧情连贯
 - 推进故事发展，不能原地踏步
-- 爽点和钩子必须具体、可执行
-{f"""
-【题材专属细化】（以下为通用规划要求的具体落地方式，请结合使用）
-{chapter_plan_guide}""" if chapter_plan_guide else ''}"""
+- 爽点和钩子必须具体、可执行"""
+
+        # 使用题材专属细化
+        genre_specific = f"""
+Genre-specific refinement (specific implementation of general planning requirements, please use in combination)
+{chapter_plan_guide}""" if chapter_plan_guide else ''
+
+        # 将题材专属细化添加到提示词
+        if genre_specific:
+            plan_user_prompt += genre_specific
 
         # 🆕 使用真流式 LLM 调用（智能选择模型）
         try:

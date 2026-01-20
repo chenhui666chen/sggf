@@ -8,6 +8,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from agents.vlm_utils import clamp_text_list
+
 
 DEFAULT_SIMILARITY_THRESHOLD = 0.9
 DEFAULT_MAX_SUBJECT_POS_DELTA = 0.1
@@ -475,6 +477,7 @@ def _semantic_match(
         "任务：判断给定图片是否符合【期望描述】（语义一致性/主要元素/动作/场景）。\n"
         "只输出 JSON（不要 Markdown），字段：match_score(0~1, float)、issues(list[string])。"
     )
+    system_prompt += "\nOutput JSON only. Keep issues <= 6 items; each item <= 120 chars."
 
     user_content = [
         {"type": "image_url", "image_url": {"url": _file_to_data_url(p)}},
@@ -505,10 +508,7 @@ def _semantic_match(
             score_f = float(score)
         else:
             return None
-        if isinstance(issues, list):
-            issues_list = [str(i) for i in issues if isinstance(i, (str, int))][:8]
-        else:
-            issues_list = []
+        issues_list = clamp_text_list(issues, max_items=6, max_chars=120)
         return {"match_score": score_f, "issues": issues_list}
     except Exception:  # noqa: BLE001
         return None
@@ -545,6 +545,7 @@ def _state_continuity_match(
         "同时参考提供的【状态约束】：若画面与状态约束矛盾，应判为不连续。\n"
         "只输出 JSON（不要 Markdown），字段：match_score(0~1,float)、issues(list[string])、suggestions(list[string],可选)。"
     )
+    system_prompt += "\nOutput JSON only. Keep issues/suggestions <= 6 items; each item <= 120 chars."
 
     constraint_text = (
         "【状态约束】\n"
@@ -590,10 +591,10 @@ def _state_continuity_match(
             score_f = 1.0
 
         issues_raw = obj.get("issues") if isinstance(obj.get("issues"), list) else []
-        issues = [str(i).strip() for i in issues_raw if isinstance(i, (str, int)) and str(i).strip()][:10]
+        issues = clamp_text_list(issues_raw, max_items=6, max_chars=120)
 
         suggestions_raw = obj.get("suggestions") if isinstance(obj.get("suggestions"), list) else []
-        suggestions = [str(s).strip() for s in suggestions_raw if isinstance(s, (str, int)) and str(s).strip()][:6]
+        suggestions = clamp_text_list(suggestions_raw, max_items=6, max_chars=120)
 
         return {"match_score": score_f, "issues": issues, "suggestions": suggestions}
     except Exception:  # noqa: BLE001

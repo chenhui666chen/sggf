@@ -469,13 +469,35 @@ class AudioMixer:
         )
         
         return result
+
+    def create_silence(self, duration_ms: int, output_format: str = "mp3", bitrate: str = "128k") -> bytes:
+        """创建指定时长的静音音频（pydub 版）。"""
+        if not self.pydub_available:
+            return b""
+        try:
+            silence = AudioSegment.silent(duration=max(0, int(duration_ms)))
+            output_buffer = io.BytesIO()
+            silence.export(output_buffer, format=output_format, bitrate=bitrate)
+            return output_buffer.getvalue()
+        except Exception as e:
+            logger.warning(f"⚠️ 生成静音音频失败: {e}")
+            return b""
     
     def add_sound_effect(
         self,
         voice_audio: bytes,
         effect_audio: bytes,
         position_ms: int,
-        effect_volume_offset: int = -10
+        effect_volume_offset: int = -10,
+        effect_duration_ms: Optional[int] = None,
+        fade_in_ms: int = 0,
+        fade_out_ms: int = 0,
+        loop_fill: bool = False,
+        ducking_enabled: bool = True,
+        ducking_priority: str = "dialogue",
+        ducking_threshold_dbfs: float = -35.0,
+        ducking_reduction_db: float = -6.0,
+        ducking_chunk_ms: int = 250,
     ) -> bytes:
         """
         叠加音效（时间轴定位，纯pydub版）
@@ -485,6 +507,15 @@ class AudioMixer:
             effect_audio: 音效
             position_ms: 插入位置（毫秒）
             effect_volume_offset: 音效音量偏移（dB）
+            effect_duration_ms: 指定音效覆盖时长（毫秒）
+            fade_in_ms: 音效淡入时长（毫秒）
+            fade_out_ms: 音效淡出时长（毫秒）
+            loop_fill: 是否循环填充至指定时长
+            ducking_enabled: 是否启用对白优先的ducking
+            ducking_priority: ducking 优先级（dialogue/sfx）
+            ducking_threshold_dbfs: 触发ducking的对白响度阈值（dBFS）
+            ducking_reduction_db: ducking 时的音量衰减（负数，dB）
+            ducking_chunk_ms: ducking 分段分析窗口（毫秒）
         
         Returns:
             叠加音效后的音频
@@ -497,9 +528,67 @@ class AudioMixer:
                 
                 # 调整音效音量
                 effect = effect + effect_volume_offset
+
+                if effect_duration_ms is not None:
+                    target_len = max(0, int(effect_duration_ms))
+                    if target_len <= 0:
+                        return voice_audio
+                    if loop_fill and len(effect) > 0 and len(effect) < target_len:
+                        loops_needed = (target_len // len(effect)) + 1
+                        effect = effect * loops_needed
+                    effect = effect[:target_len]
+
+                if fade_in_ms > 0:
+                    effect = effect.fade_in(min(int(fade_in_ms), len(effect)))
+                if fade_out_ms > 0:
+                    effect = effect.fade_out(min(int(fade_out_ms), len(effect)))
+
+                start_ms = max(0, int(position_ms or 0))
+                if start_ms >= len(voice):
+                    return voice_audio
+                effect_len = len(effect)
+                if effect_len <= 0:
+                    return voice_audio
+                end_ms = min(len(voice), start_ms + effect_len)
+                target_len = max(0, end_ms - start_ms)
+                if target_len <= 0:
+                    return voice_audio
+
+                effect_seg = effect[:target_len]
+                voice_seg = voice[start_ms:end_ms]
+
+                if ducking_enabled:
+                    try:
+                        priority = str(ducking_priority or "dialogue").strip().lower()
+                        chunk_ms = max(80, int(ducking_chunk_ms or 250))
+                        threshold = float(ducking_threshold_dbfs)
+                        reduction_db = float(ducking_reduction_db)
+                        if reduction_db > 0:
+                            reduction_db = -abs(reduction_db)
+
+                        adjusted_effect = AudioSegment.empty()
+                        adjusted_voice = AudioSegment.empty()
+                        for offset in range(0, target_len, chunk_ms):
+                            effect_chunk = effect_seg[offset:offset + chunk_ms]
+                            voice_chunk = voice_seg[offset:offset + chunk_ms]
+                            voice_dbfs = voice_chunk.dBFS
+                            if voice_dbfs != float("-inf") and voice_dbfs > threshold:
+                                if priority in {"sfx", "effect", "effects"}:
+                                    voice_chunk = voice_chunk + reduction_db
+                                else:
+                                    effect_chunk = effect_chunk + reduction_db
+                            adjusted_effect += effect_chunk
+                            adjusted_voice += voice_chunk
+
+                        effect_seg = adjusted_effect
+                        if priority in {"sfx", "effect", "effects"}:
+                            voice = voice[:start_ms] + adjusted_voice + voice[end_ms:]
+                    except Exception:
+                        # ducking 失败不影响主流程
+                        pass
                 
                 # 叠加音效
-                mixed = voice.overlay(effect, position=position_ms)
+                mixed = voice.overlay(effect_seg, position=start_ms)
                 
                 # 输出
                 output_buffer = io.BytesIO()

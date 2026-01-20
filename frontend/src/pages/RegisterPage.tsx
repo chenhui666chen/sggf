@@ -56,7 +56,7 @@ export default function RegisterPage() {
             Create Account
           </Typography>
           <Typography variant="body2" color="textSecondary" align="center" sx={{ mb: 3 }}>
-            Join Novel Writing System
+            Join 拾光工坊
           </Typography>
 
           {error && (

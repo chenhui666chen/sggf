@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useEffect, useState } from 'react'
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useEffect, useRef, useState, ChangeEvent } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useDispatch } from 'react-redux'
 import {
@@ -33,6 +33,7 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  TextField,
   Slider,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
@@ -51,6 +52,13 @@ interface TabPanelProps {
   children?: React.ReactNode
   index: number
   value: number
+}
+
+interface VoicePresetLite {
+  id: string
+  label?: string
+  description?: string
+  category?: string
 }
 
 function TabPanel(props: TabPanelProps) {
@@ -108,12 +116,30 @@ export default function ProjectDetailPage() {
   const [audioAutoAssigning, setAudioAutoAssigning] = useState(false)
   const [audioError, setAudioError] = useState<string | null>(null)
   const [previewingId, setPreviewingId] = useState<number | null>(null)
+  const [cloneName, setCloneName] = useState('')
+  const [cloneUrl, setCloneUrl] = useState('')
+  const [cloneLoading, setCloneLoading] = useState(false)
+  const [cloneUploading, setCloneUploading] = useState(false)
+  const [cloneRecording, setCloneRecording] = useState(false)
+  const [cloneDeletingId, setCloneDeletingId] = useState<string | null>(null)
+  const [cloneVoicePresets, setCloneVoicePresets] = useState<VoicePresetLite[]>([])
+  const [cloneVoiceLoading, setCloneVoiceLoading] = useState(false)
+  const [cloneError, setCloneError] = useState<string | null>(null)
+  const [cloneSuccess, setCloneSuccess] = useState<string | null>(null)
+  const [cloneRecordDialogOpen, setCloneRecordDialogOpen] = useState(false)
+  const cloneRecorderRef = useRef<MediaRecorder | null>(null)
+  const cloneStreamRef = useRef<MediaStream | null>(null)
+  const cloneChunksRef = useRef<Blob[]>([])
 
   // 🆕 当切换到音频配置 Tab 时自动加载
   useEffect(() => {
-    if (tabValue === 5 && projectId && audioSettings.length === 0) {
+    if (tabValue !== 5) {
+      return
+    }
+    if (projectId && audioSettings.length === 0) {
       loadAudioConfig()
     }
+    fetchCloneVoices()
   }, [tabValue, projectId])
 
   useEffect(() => {
@@ -289,6 +315,21 @@ export default function ProjectDetailPage() {
     }
   }
 
+  const fetchCloneVoices = async () => {
+    setCloneVoiceLoading(true)
+    try {
+      const res = await apiClient.getTtsVoices('cosyvoice-v3-plus')
+      const voicesFromApi = (res.data?.voices || []) as VoicePresetLite[]
+      const clones = voicesFromApi.filter((voice) => voice.category === 'custom')
+      setCloneVoicePresets(clones)
+    } catch (err) {
+      const message = await extractApiErrorMessage(err, '加载复刻音色失败')
+      setCloneError(message)
+    } finally {
+      setCloneVoiceLoading(false)
+    }
+  }
+
   const handleSaveAudioConfig = async () => {
     if (!projectId) return
     try {
@@ -411,6 +452,169 @@ export default function ProjectDetailPage() {
     } finally {
       setPreviewingId(null)
     }
+  }
+
+  const handleCreateCloneVoice = async () => {
+    setCloneLoading(true)
+    setCloneError(null)
+    setCloneSuccess(null)
+    try {
+      const name = cloneName.trim()
+      const url = cloneUrl.trim()
+      const res = await apiClient.createCosyVoiceV3PlusClone({ name, url })
+      const voiceId = (res.data?.voice_id as string) || ''
+      setCloneSuccess(voiceId ? `已提交复刻任务：${voiceId}` : '已提交复刻任务')
+      setCloneName('')
+      setCloneUrl('')
+      await fetchCloneVoices()
+    } catch (err) {
+      const message = await extractApiErrorMessage(err, '创建复刻音色失败')
+      setCloneError(message)
+    } finally {
+      setCloneLoading(false)
+    }
+  }
+
+  const handleDeleteCloneVoice = async (voiceId: string, label?: string) => {
+    if (!voiceId || cloneDeletingId) return
+    const displayName = label || voiceId
+    if (!confirm(`确定要删除复刻音色「${displayName}」吗？\n\n该操作会从当前账号移除该复刻音色，无法恢复。`)) {
+      return
+    }
+    setCloneDeletingId(voiceId)
+    setCloneError(null)
+    setCloneSuccess(null)
+    try {
+      await apiClient.deleteCosyVoiceV3PlusClone(voiceId)
+      setCloneSuccess(`已删除复刻音色：${displayName}`)
+      await fetchCloneVoices()
+    } catch (err) {
+      const message = await extractApiErrorMessage(err, '删除复刻音色失败')
+      setCloneError(message)
+    } finally {
+      setCloneDeletingId(null)
+    }
+  }
+
+  const handleUploadCloneAudio = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setCloneUploading(true)
+    setCloneError(null)
+    setCloneSuccess(null)
+    try {
+      const res = await apiClient.uploadCosyVoiceV3PlusCloneSample(file)
+      const url = (res.data?.url as string) || ''
+      if (!url) {
+        throw new Error('未返回临时URL')
+      }
+      setCloneUrl(url)
+      setCloneSuccess('已上传音频并生成临时URL（48小时有效）')
+    } catch (err) {
+      const message = await extractApiErrorMessage(err, '上传音频失败')
+      setCloneError(message)
+    } finally {
+      setCloneUploading(false)
+    }
+  }
+
+  const stopCloneRecordingStream = () => {
+    if (cloneStreamRef.current) {
+      cloneStreamRef.current.getTracks().forEach((track) => track.stop())
+      cloneStreamRef.current = null
+    }
+  }
+
+  const uploadRecordedCloneAudio = async (blob: Blob) => {
+    setCloneUploading(true)
+    setCloneError(null)
+    setCloneSuccess(null)
+    try {
+      const filename = `recording_${Date.now()}.webm`
+      const file = new File([blob], filename, { type: blob.type || 'audio/webm' })
+      const res = await apiClient.uploadCosyVoiceV3PlusCloneSample(file)
+      const url = (res.data?.url as string) || ''
+      if (!url) {
+        throw new Error('未返回临时URL')
+      }
+      setCloneUrl(url)
+      setCloneSuccess('录音已上传并生成临时URL（48小时有效）')
+    } catch (err) {
+      const message = await extractApiErrorMessage(err, '上传录音失败')
+      setCloneError(message)
+    } finally {
+      setCloneUploading(false)
+    }
+  }
+
+  const handleStartCloneRecording = async () => {
+    if (cloneLoading || cloneUploading || cloneRecording) return
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setCloneError('当前浏览器不支持录音，请改用上传音频')
+      return
+    }
+    setCloneError(null)
+    setCloneSuccess(null)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      cloneStreamRef.current = stream
+      cloneChunksRef.current = []
+      const recorder = new MediaRecorder(stream)
+      cloneRecorderRef.current = recorder
+      recorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data && event.data.size > 0) {
+          cloneChunksRef.current.push(event.data)
+        }
+      }
+      recorder.onstop = () => {
+        const chunks = cloneChunksRef.current
+        cloneChunksRef.current = []
+        cloneRecorderRef.current = null
+        setCloneRecording(false)
+        stopCloneRecordingStream()
+        if (chunks.length === 0) {
+          setCloneError('未获取到录音数据，请重试')
+          return
+        }
+        const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' })
+        void uploadRecordedCloneAudio(blob)
+      }
+      recorder.onerror = () => {
+        cloneRecorderRef.current = null
+        setCloneRecording(false)
+        stopCloneRecordingStream()
+        setCloneError('录音失败，请重试')
+      }
+      recorder.start()
+      setCloneRecording(true)
+    } catch (err) {
+      stopCloneRecordingStream()
+      setCloneRecording(false)
+      const message = await extractApiErrorMessage(err, '无法访问麦克风，请检查权限')
+      setCloneError(message)
+    }
+  }
+
+  const handleStopCloneRecording = () => {
+    const recorder = cloneRecorderRef.current
+    if (!recorder) return
+    if (recorder.state === 'inactive') {
+      cloneRecorderRef.current = null
+      setCloneRecording(false)
+      stopCloneRecordingStream()
+      return
+    }
+    recorder.stop()
+  }
+
+  const handleOpenCloneRecordDialog = () => {
+    setCloneRecordDialogOpen(true)
+  }
+
+  const handleCloseCloneRecordDialog = () => {
+    if (cloneRecording) return
+    setCloneRecordDialogOpen(false)
   }
 
   const handleChapterClick = (chapterId: number) => {
@@ -799,6 +1003,149 @@ export default function ProjectDetailPage() {
           </Box>
         ) : (
           <>
+            <Paper variant="outlined" sx={{ mb: 2, p: 1.5 }}>
+              <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+                声音复刻（CosyVoice v3-plus）
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                支持 http/https 或 oss:// 临时 URL（有效期 48 小时）；系统会自动生成合规 prefix（最长 10 个字符），并用你的“命名”在列表里展示为 “复刻-命名”（状态 OK 后可用于合成）。
+              </Typography>
+              <Grid container spacing={1}>
+                <Grid item xs={12} md={4}>
+                  <TextField
+                    size="small"
+                    fullWidth
+                    label="声音名称"
+                    value={cloneName}
+                    onChange={(e) => setCloneName(e.target.value)}
+                    disabled={cloneLoading || cloneUploading || cloneRecording}
+                  />
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    size="small"
+                    fullWidth
+                    label="音频 URL（http/https 或 oss://）"
+                    value={cloneUrl}
+                    onChange={(e) => setCloneUrl(e.target.value)}
+                    disabled={cloneLoading || cloneUploading || cloneRecording}
+                  />
+                </Grid>
+                <Grid item xs={12} md={2}>
+                  <Button
+                    fullWidth
+                    variant="contained"
+                    onClick={handleCreateCloneVoice}
+                    disabled={cloneLoading || cloneUploading || cloneRecording || !cloneName.trim() || !cloneUrl.trim()}
+                    sx={{ height: '100%' }}
+                  >
+                    {cloneLoading ? '提交中...' : '开始复刻'}
+                  </Button>
+                </Grid>
+                <Grid item xs={12}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                    <Button
+                      variant="outlined"
+                      onClick={handleOpenCloneRecordDialog}
+                      disabled={cloneLoading || cloneUploading || cloneRecording}
+                    >
+                      录音
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      component="label"
+                      disabled={cloneLoading || cloneUploading || cloneRecording}
+                    >
+                      {cloneUploading ? '上传中...' : '上传音频获取临时URL'}
+                      <input
+                        type="file"
+                        hidden
+                        accept="audio/*"
+                        onChange={handleUploadCloneAudio}
+                      />
+                    </Button>
+                    <Typography variant="caption" color="text.secondary">
+                      录音或上传都会生成临时 URL（oss://），有效期 48 小时。点击“录音”可查看示例文本，也可以随机朗读其他内容。
+                    </Typography>
+                  </Box>
+                </Grid>
+              </Grid>
+              {cloneError && (
+                <Alert severity="warning" sx={{ mt: 1 }}>
+                  {cloneError}
+                </Alert>
+              )}
+              {cloneSuccess && (
+                <Alert severity="success" sx={{ mt: 1 }}>
+                  {cloneSuccess}
+                </Alert>
+              )}
+              {cloneVoiceLoading && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                  正在加载复刻音色...
+                </Typography>
+              )}
+              {!cloneVoiceLoading && cloneVoicePresets.length > 0 && (
+                <Box sx={{ mt: 1 }}>
+                  <Divider sx={{ mb: 1 }} />
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                    已复刻音色（可删除）
+                  </Typography>
+                  <List dense>
+                    {cloneVoicePresets.map((preset) => (
+                      <ListItem
+                        key={preset.id}
+                        secondaryAction={
+                          <Button
+                            color="error"
+                            size="small"
+                            disabled={cloneDeletingId === preset.id || cloneLoading || cloneUploading}
+                            onClick={() => handleDeleteCloneVoice(preset.id, preset.label)}
+                          >
+                            {cloneDeletingId === preset.id ? '删除中...' : '删除'}
+                          </Button>
+                        }
+                      >
+                        <ListItemText
+                          primary={preset.label || preset.id}
+                          secondary={preset.description || preset.id}
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                </Box>
+              )}
+            </Paper>
+            <Dialog
+              open={cloneRecordDialogOpen}
+              onClose={() => handleCloseCloneRecordDialog()}
+              fullWidth
+              maxWidth="sm"
+              disableEscapeKeyDown={cloneRecording}
+            >
+              <DialogTitle>录音朗读提示</DialogTitle>
+              <DialogContent dividers>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  朗读示例（约10秒）：“时间会缓和所有的悲伤，当你的悲伤被安抚以后，你就会因为认识过我而感到满足。”
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  也可以随机读其他内容。
+                </Typography>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={handleCloseCloneRecordDialog} disabled={cloneRecording}>
+                  关闭
+                </Button>
+                <Button
+                  variant="contained"
+                  color={cloneRecording ? 'error' : 'primary'}
+                  onClick={cloneRecording ? handleStopCloneRecording : handleStartCloneRecording}
+                  disabled={cloneLoading || cloneUploading}
+                >
+                  {cloneRecording ? '结束录音并上传' : '开始录音'}
+                </Button>
+              </DialogActions>
+            </Dialog>
             <Paper
               variant="outlined"
               sx={{

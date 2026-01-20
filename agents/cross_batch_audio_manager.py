@@ -164,14 +164,24 @@ class CrossBatchAudioManager:
             return None
         
         voice_manager = self._get_voice_manager(batch_id)
-        profile = voice_manager.create_voice_profile(
-            character_id=character_id,
-            character_name=character_name,
-            voice_style=voice_style,
-            voice_id=voice_id,
-            tts_params=tts_params,
-            audio_samples=audio_samples or []
-        )
+        existing_profile = voice_manager.get_voice_profile(character_id)
+        if existing_profile:
+            profile = voice_manager.update_voice_profile(
+                character_id=character_id,
+                voice_style=voice_style,
+                voice_id=voice_id,
+                tts_params=tts_params,
+                audio_samples=audio_samples if audio_samples is not None else None,
+            )
+        else:
+            profile = voice_manager.create_voice_profile(
+                character_id=character_id,
+                character_name=character_name,
+                voice_style=voice_style,
+                voice_id=voice_id,
+                tts_params=tts_params,
+                audio_samples=audio_samples or []
+            )
         
         batch = self.batches[batch_id]
         if character_id not in batch.characters:

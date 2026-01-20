@@ -4,6 +4,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
+import re
 from pydantic import BaseModel
 import json
 from app.db.base import get_db
@@ -42,6 +43,16 @@ class AudioFxConfig(BaseModel):
     enable_music: bool = True
     sound_effect_density: str = "medium"  # low/medium/high/off
     music_density: str = "medium"  # low/medium/high/off
+    bgm_theme: Optional[str] = None
+    bgm_style: Optional[str] = None
+    base_bgm_volume: float = -36.0
+    intelligent_balance: bool = False
+    bgm_crossfade_ms: int = 0
+    sound_effect_ducking: bool = True
+    sound_effect_priority: str = "dialogue"  # dialogue/sfx
+    sound_effect_ducking_threshold_dbfs: float = -35.0
+    sound_effect_ducking_reduction_db: float = -6.0
+    sound_effect_ducking_chunk_ms: int = 250
 
 
 class ProjectAudioConfig(BaseModel):
@@ -383,40 +394,153 @@ async def auto_assign_project_audio_voices(
         .all()
     )
 
-    vm = create_voice_manager(tts_model=tts_model)
+    llm_client = None
+    try:
+        from app.services.llm_client import get_llm_client
+
+        llm_client = get_llm_client(strategy="conservative")
+    except Exception:
+        llm_client = None
+
+    vm = create_voice_manager(tts_model=tts_model, llm_client=llm_client)
     result_characters = []
 
     # 先放入“其他”条目（如旁白）
     result_characters.extend(other_entries)
 
-    def _build_traits_from_character(char: Character) -> dict:
-        traits: dict = {}
-        gender = (char.gender or "").strip().lower()
-        if gender in ("男", "male", "m", "man", "boy"):
-            traits["gender"] = "male"
-        elif gender in ("女", "female", "f", "woman", "girl"):
-            traits["gender"] = "female"
+    def _normalize_text(value: Optional[str]) -> str:
+        return str(value).strip() if value else ""
 
+    def _parse_tags(raw: Optional[str]) -> List[str]:
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+            if isinstance(data, list):
+                return [str(item).strip() for item in data if str(item).strip()]
+            if isinstance(data, dict):
+                values: List[str] = []
+                for item in data.values():
+                    if isinstance(item, list):
+                        values.extend([str(v).strip() for v in item if str(v).strip()])
+                    elif item is not None:
+                        values.append(str(item).strip())
+                return [v for v in values if v]
+        except Exception:
+            pass
+        return [part for part in re.split(r"[，,;/|\\s]+", raw) if part]
+
+    def _infer_gender(char: Character, text_lower: str) -> str:
+        gender_raw = _normalize_text(char.gender).lower()
+        if gender_raw in ("男", "male", "m", "man", "boy"):
+            return "male"
+        if gender_raw in ("女", "female", "f", "woman", "girl"):
+            return "female"
+
+        female_keywords = (
+            "女", "女性", "女人", "女孩", "少女", "小姐", "夫人", "太太", "公主", "王后",
+            "女主", "姐姐", "妹妹", "阿姨", "奶奶", "婆婆", "她",
+            "female", "woman", "girl", "miss", "queen", "princess",
+        )
+        male_keywords = (
+            "男", "男性", "男人", "男孩", "少年", "先生", "少爷", "公子", "王子",
+            "男主", "哥哥", "弟弟", "大叔", "爷爷", "他",
+            "male", "man", "boy", "sir", "king", "prince",
+        )
+        female_hit = any(k in text_lower for k in female_keywords)
+        male_hit = any(k in text_lower for k in male_keywords)
+        if female_hit ^ male_hit:
+            return "female" if female_hit else "male"
+
+        name = _normalize_text(char.name)
+        female_chars = (
+            "娜", "婷", "芝", "霞", "雪", "梅", "芳", "琳", "雯", "瑜",
+            "娥", "妮", "蕾", "莉", "慧", "敏", "静", "涵", "娟", "珊",
+            "洁", "雅", "怡",
+        )
+        male_chars = (
+            "昊", "浩", "强", "伟", "军", "明", "建", "凌", "龙", "杰",
+            "博", "宇", "峰", "辉", "宏", "俊", "瑞",
+        )
+        if name.endswith(female_chars):
+            return "female"
+        if name.endswith(male_chars):
+            return "male"
+        return "unknown"
+
+    def _infer_age_group(char: Character, text_lower: str) -> Optional[str]:
         if char.age is not None:
             age = char.age
             if age < 12:
-                traits["age_group"] = "child"
-            elif age < 18:
-                traits["age_group"] = "teen"
-            elif age < 30:
-                traits["age_group"] = "young"
-            elif age < 60:
-                traits["age_group"] = "adult"
-            else:
-                traits["age_group"] = "elder"
+                return "child"
+            if age < 18:
+                return "teen"
+            if age < 30:
+                return "young"
+            if age < 60:
+                return "adult"
+            return "elder"
 
-        # 简单用重要程度影响性格倾向
-        importance = (char.importance_level or "").strip()
-        if importance:
-            if "主角" in importance or "重要" in importance:
-                traits.setdefault("personality", "energetic")
-            elif "龙套" in importance or "群众" in importance:
-                traits.setdefault("personality", "calm")
+        elder_keywords = ("老者", "老人", "老头", "老伯", "老太", "老奶", "爷爷", "奶奶", "婆婆", "大爷")
+        child_keywords = ("儿童", "孩童", "幼童", "小孩", "娃娃", "宝宝", "孩子")
+        teen_keywords = ("少年", "少女", "青少年", "学生", "高中生")
+        young_keywords = ("青年", "年轻", "小伙", "小哥", "小妹", "姑娘", "小姐", "少侠")
+        adult_keywords = ("中年", "成熟", "大叔", "大姐", "少妇", "壮年")
+
+        if any(k in text_lower for k in elder_keywords):
+            return "elder"
+        if any(k in text_lower for k in child_keywords):
+            return "child"
+        if any(k in text_lower for k in teen_keywords):
+            return "teen"
+        if any(k in text_lower for k in young_keywords):
+            return "young"
+        if any(k in text_lower for k in adult_keywords):
+            return "adult"
+        return None
+
+    def _infer_personality(text_lower: str) -> Optional[str]:
+        personality_map = [
+            ("serious", ("严肃", "威严", "刚毅", "果断", "冷酷", "强势", "霸道", "冷峻", "阴沉", "狠辣", "威猛")),
+            ("gentle", ("温柔", "温顺", "善良", "柔和", "恬静", "乖巧", "甜美", "亲切", "软萌", "可爱")),
+            ("energetic", ("活泼", "开朗", "阳光", "热血", "冲动", "豪爽", "外向", "爽朗", "元气", "俏皮", "顽皮")),
+            ("calm", ("冷静", "沉稳", "稳重", "理性", "内敛", "淡定", "谨慎", "沉着", "克制")),
+        ]
+        for personality, keywords in personality_map:
+            if any(k in text_lower for k in keywords):
+                return personality
+        return None
+
+    def _build_traits_from_character(char: Character) -> dict:
+        tags = _parse_tags(char.tags)
+        role = _normalize_text(char.role)
+        importance = _normalize_text(char.importance_level)
+        summary = _normalize_text(char.summary)
+        profile = _normalize_text(char.profile)
+        faction = _normalize_text(char.faction)
+
+        text_parts = [char.name, role, importance, summary, profile, faction, " ".join(tags)]
+        text = " ".join([_normalize_text(p) for p in text_parts if _normalize_text(p)])
+        text_lower = text.lower()
+
+        traits: dict = {}
+        traits["gender"] = _infer_gender(char, text_lower)
+
+        age_group = _infer_age_group(char, text_lower)
+        traits["age_group"] = age_group or "unknown"
+
+        personality = _infer_personality(text_lower)
+        if not personality:
+            if "主角" in importance or "重要" in importance or "protagonist" in text_lower or "hero" in text_lower:
+                personality = "energetic"
+            elif "龙套" in importance or "群众" in importance or "配角" in importance or "supporting" in text_lower:
+                personality = "calm"
+        if personality:
+            traits["personality"] = personality
+
+        role_text = " ".join([role, importance, summary, profile, " ".join(tags)]).strip()
+        if role_text:
+            traits["role_type"] = role_text
 
         return traits
 

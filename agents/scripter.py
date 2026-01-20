@@ -22,6 +22,8 @@ class CharacterProfile:
     appearance_description: str = ""
     personality_traits: List[str] = field(default_factory=list)
     voice_style: str = "natural"
+    voice_id: str = ""
+    voice_profile_id: str = ""
     importance: str = "secondary"
     created_at: str = ""
     
@@ -40,6 +42,8 @@ class CharacterProfile:
             "appearance_description": self.appearance_description,
             "personality_traits": self.personality_traits,
             "voice_style": self.voice_style,
+            "voice_id": self.voice_id,
+            "voice_profile_id": self.voice_profile_id,
             "importance": self.importance,
             "created_at": self.created_at
         }
@@ -56,6 +60,8 @@ class CharacterProfile:
             appearance_description=data.get("appearance_description", ""),
             personality_traits=data.get("personality_traits", []),
             voice_style=data.get("voice_style", "natural"),
+            voice_id=data.get("voice_id", ""),
+            voice_profile_id=data.get("voice_profile_id", ""),
             importance=data.get("importance", "secondary"),
             created_at=data.get("created_at", "")
         )
@@ -494,7 +500,12 @@ def _extract_character_profiles_from_entities(entities: Dict[str, Any]) -> List[
         importance = char.get("importance", "secondary").strip()
         
         # 生成唯一ID
-        character_id = f"char_{idx}_{hash(name) % 10000:04d}"
+        raw_id = char.get("character_id")
+        if raw_id is None:
+            raw_id = char.get("entity_id") or char.get("id")
+        character_id = str(raw_id).strip() if raw_id is not None else ""
+        if not character_id:
+            character_id = f"char_{idx}_{hash(name) % 10000:04d}"
         
         # 从描述中提取外观和性格特征
         appearance_description = descriptor

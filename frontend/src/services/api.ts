@@ -444,6 +444,18 @@ class ApiClient {
     return this.client.post('/api/v1/audiobook/tts/preview', payload, { responseType: 'blob' })
   }
 
+  previewScriptSegmentAudio(
+    audiobookProjectId: number,
+    chapterId: number,
+    payload: { segment: Record<string, any>; tts_model?: string; preview_type?: string }
+  ) {
+    return this.client.post(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/segments/preview`,
+      payload,
+      { responseType: 'blob' }
+    )
+  }
+
   getTtsVoices(model?: string) {
     return this.client.get('/api/v1/audiobook/tts/voices', {
       params: model ? { model } : undefined,
@@ -452,6 +464,21 @@ class ApiClient {
 
   createCosyVoiceV3PlusClone(payload: { name: string; url: string }) {
     return this.client.post('/api/v1/audiobook/tts/voices/cosyvoice-v3-plus/clones', payload)
+  }
+
+  deleteCosyVoiceV3PlusClone(voiceId: string) {
+    return this.client.delete(
+      `/api/v1/audiobook/tts/voices/cosyvoice-v3-plus/clones/${encodeURIComponent(voiceId)}`
+    )
+  }
+
+  uploadCosyVoiceV3PlusCloneSample(file: File) {
+    const form = new FormData()
+    form.append('file', file)
+    return this.client.post('/api/v1/audiobook/tts/voices/cosyvoice-v3-plus/clones/upload', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000,
+    })
   }
 
   // 角色管理API

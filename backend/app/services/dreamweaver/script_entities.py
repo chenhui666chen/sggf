@@ -117,7 +117,10 @@ def sync_script_entities_to_project(
                 existing.importance_level = importance
 
         if getattr(existing, "id", None) is not None:
-            character_ids.append(int(existing.id))
+            resolved_id = int(existing.id)
+            item["entity_id"] = resolved_id
+            item["character_id"] = str(resolved_id)
+            character_ids.append(resolved_id)
 
     # 2) Scenes -> map_system
     scene_cols = _ensure_collections(
@@ -225,4 +228,3 @@ def sync_script_entities_to_project(
         "scene_item_ids": scene_item_ids,
         "prop_item_ids": prop_item_ids,
     }
-

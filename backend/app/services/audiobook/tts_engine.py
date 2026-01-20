@@ -21,8 +21,45 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .constants import INSTRUCT_SPEAKER_IDS, normalize_speaker_id
+from .voice_catalog import get_voice_entry
 
 logger = logging.getLogger(__name__)
+
+# cosyvoice-v3-plus Instruct 约束（按官方文档枚举）
+COSYVOICE_V3_PLUS_INSTRUCT_EMOTIONS = {
+    "neutral",
+    "fearful",
+    "angry",
+    "sad",
+    "surprised",
+    "happy",
+    "disgusted",
+}
+COSYVOICE_V3_PLUS_EMOTION_ALIASES = {
+    "excited": "happy",
+    "tense": "fearful",
+    "calm": "neutral",
+    "tender": "neutral",
+    "solemn": "sad",
+    "nervous": "fearful",
+    "focused": "neutral",
+    "gentle": "neutral",
+    "serious": "neutral",
+    "whisper": "neutral",
+    "shout": "angry",
+}
+COSYVOICE_V3_PLUS_INSTRUCT_CHOICES = {
+    "longanyang": {
+        "scenes": ["闲聊互动", "新闻播报", "广告促销", "比赛解说", "一些儿童内容解说", "语音导航", "脱口秀表演"],
+        "roles": ["一个旁白"],
+        "identities": ["故事机"],
+    },
+    "longanhuan": {
+        "scenes": ["闲聊对话", "比赛解说", "深夜电台广播", "诗歌朗诵", "科普知识推广", "产品推广", "脱口秀表演"],
+        "roles": ["温和客服"],
+        "identities": [],
+    },
+}
 
 # Windows/Linux 常见网络瞬断 errno（用于判定可重试）。
 _RETRYABLE_NETWORK_ERRNOS = {10053, 10054, 104, 110, 111}
@@ -229,34 +266,9 @@ class TTSEngine:
         # 将 emotion 添加到 voice_params 中，供 _call_aliyun_tts 使用
         voice_params_with_emotion = voice_params.copy()
         
-        # 🔥 关键修复：情感词映射（将不支持的情感转换为阿里云TTS支持的情感）
-        # 阿里云Instruct只支持有限的中文情感词，不支持的词会触发428错误
-        EMOTION_MAPPING = {
-            # 不支持的英文情感 -> 支持的中文情感
-            "focused": "neutral",      # 专注 -> 中性（不支持）
-            "solemn": "neutral",       # 庄重 -> 中性（不支持）
-            "tender": "neutral",       # 温柔 -> 中性（不支持）
-            "gentle": "neutral",       # 轻柔 -> 中性（不支持）
-            "serious": "neutral",      # 严肃 -> 中性（不支持）
-            "nervous": "tense",        # 紧张不安 -> 紧张
-            "fearful": "tense",        # 恐惧 -> 紧张
-            "surprised": "happy",      # 惊讶 -> 开心（excited不支持）
-            "excited": "happy",        # 兴奋 -> 开心（excited 可能触发参数错误）
-            "disgusted": "angry",      # 厌恶 -> 愤怒
-            "whisper": "neutral",      # 低语 -> 中性（不支持）
-            "shout": "angry",          # 呼喃 -> 愤怒
-            # 支持的情感保持不变
-            "neutral": "neutral",
-            "happy": "happy",
-            "sad": "sad",
-            "angry": "angry",
-            "calm": "calm",
-            "tense": "tense",
-        }
-        
-        # 如果情感不在映射表中，默认使用neutral
+        # 🔥 情感映射：根据模型能力归一化情感，避免服务端报错
         original_emotion = emotion
-        emotion = EMOTION_MAPPING.get(emotion, "neutral")
+        emotion = self._normalize_emotion(emotion)
         if original_emotion != emotion:
             logger.warning(
                 "情感映射: %s -> %s (阿里云 TTS 不支持 '%s')",
@@ -653,19 +665,21 @@ class TTSEngine:
         # 清理文本（仅移除危险字符，保留中文）
         original_text = text
         text = text.strip()
+        is_ssml = self._is_ssml_text(text)
             
-        # 标准化引号（阿里云TTS不支持中文引号）
-        text = text.replace('“', '')
-        text = text.replace('”', '')
-        text = text.replace('‘', "'")
-        text = text.replace('’', "'")
-        text = text.replace('《', '<')
-        text = text.replace('》', '>')
-        text = text.replace('【', '[')
-        text = text.replace('】', ']')
-        # 兼容直角引号
-        text = text.replace('「', '"')
-        text = text.replace('」', '"')
+        if not is_ssml:
+            # 标准化引号（阿里云TTS不支持中文引号）
+            text = text.replace('“', '')
+            text = text.replace('”', '')
+            text = text.replace('‘', "'")
+            text = text.replace('’', "'")
+            text = text.replace('《', '<')
+            text = text.replace('》', '>')
+            text = text.replace('【', '[')
+            text = text.replace('】', ']')
+            # 兼容直角引号
+            text = text.replace('「', '"')
+            text = text.replace('」', '"')
             
         # 只移除控制字符（保留中文、英文、数字、标点、空格）
         import unicodedata
@@ -790,24 +804,32 @@ class TTSEngine:
             emotion = voice_params.get("emotion", "neutral")
             use_instruct_flag = bool(voice_params.get("use_instruct_mode"))
             disable_instruction = self._is_qwen_model()
+            supports_instruction = self._supports_instruction(speaker_id)
             should_use_instruction = bool(
                 not disable_instruction
-                and (use_instruct_flag or (speaker_id in INSTRUCT_SPEAKER_IDS and emotion != "neutral"))
+                and supports_instruction
+                and (use_instruct_flag or emotion != "neutral")
             )
             if disable_instruction and use_instruct_flag:
                 logger.info("Qwen3-TTS 已禁用 instruction 模式：将忽略 use_instruct_mode。")
+            if use_instruct_flag and not supports_instruction:
+                logger.info("当前音色不支持 instruction，已忽略 use_instruct_mode。")
 
             # 记录是否启用 instruct
             logger.info(
                 f"instruct: emotion={emotion}, speaker={speaker_id}, "
-                f"instruct_supported={speaker_id in INSTRUCT_SPEAKER_IDS}, use_instruct={should_use_instruction}"
+                f"instruct_supported={supports_instruction}, use_instruct={should_use_instruction}"
             )
 
             # Instruct：将情绪写入 instruction 参数
             if should_use_instruction:
-                instruction_text = f"emotion={emotion}"
-                logger.info(f"Instruct instruction: {instruction_text}")
+                instruction_text = self._build_instruction_text(voice_params, emotion)
+                if not instruction_text:
+                    should_use_instruction = False
+                else:
+                    logger.info(f"Instruct instruction: {instruction_text}")
 
+            if should_use_instruction:
                 # 用更保守的 pitch/speed，避免服务端 4xx 参数错误
                 character_pitch = voice_params.get("character_base_pitch", 50)
                 character_speed = voice_params.get("character_base_speed", 1.0)
@@ -823,7 +845,7 @@ class TTSEngine:
                     pitch_rate=character_pitch / 50.0,  # 50 -> 1.0
                     speech_rate=character_speed,
                     volume=voice_params.get("volume", 50),
-                    instruction=instruction_text
+                    instruction=instruction_text,
                 )
             else:
                 synthesizer = SpeechSynthesizer(
@@ -832,7 +854,7 @@ class TTSEngine:
                     format=AudioFormat.MP3_22050HZ_MONO_256KBPS,
                     pitch_rate=pitch,
                     speech_rate=rate,
-                    volume=voice_params.get("volume", 50)
+                    volume=voice_params.get("volume", 50),
                 )
 
         # 同步调用（dashscope暂不支持async）
@@ -1109,13 +1131,166 @@ class TTSEngine:
         """判断当前引擎是否为 Qwen3-TTS 系列模型。"""
         return str(self.model).startswith("qwen3-tts")
 
+    def _is_cosyvoice_v3_plus(self) -> bool:
+        """判断当前引擎是否为 cosyvoice-v3-plus 模型。"""
+        return str(self.model).startswith("cosyvoice-v3-plus")
+
+    def _normalize_emotion(self, emotion: str) -> str:
+        """按模型能力归一化情感标签。"""
+        value = str(emotion or "").strip().lower()
+        if not value:
+            return "neutral"
+        if self._is_cosyvoice_v3_plus():
+            if value in COSYVOICE_V3_PLUS_INSTRUCT_EMOTIONS:
+                return value
+            mapped = COSYVOICE_V3_PLUS_EMOTION_ALIASES.get(value)
+            return mapped or "neutral"
+
+        mapping = {
+            "focused": "neutral",
+            "solemn": "neutral",
+            "tender": "neutral",
+            "gentle": "neutral",
+            "serious": "neutral",
+            "nervous": "tense",
+            "fearful": "tense",
+            "surprised": "happy",
+            "excited": "happy",
+            "disgusted": "angry",
+            "whisper": "neutral",
+            "shout": "angry",
+            "neutral": "neutral",
+            "happy": "happy",
+            "sad": "sad",
+            "angry": "angry",
+            "calm": "calm",
+            "tense": "tense",
+        }
+        return mapping.get(value, "neutral")
+
+    def _is_ssml_text(self, text: str) -> bool:
+        return str(text or "").lstrip().lower().startswith("<speak")
+
+    def _supports_ssml(self, speaker_id: str) -> bool:
+        if not self._is_cosyvoice_v3_plus():
+            return False
+        entry = get_voice_entry(str(speaker_id or ""), "cosyvoice-v3-plus")
+        if entry is None:
+            return True
+        return bool(entry.get("supportsSsml", False))
+
+    def _supports_instruction(self, speaker_id: str) -> bool:
+        if not self._is_cosyvoice_v3_plus():
+            return speaker_id in INSTRUCT_SPEAKER_IDS
+        entry = get_voice_entry(str(speaker_id or ""), "cosyvoice-v3-plus")
+        if entry is None:
+            return False
+        return bool(entry.get("supportsInstruct", False))
+
+    def _escape_ssml_text(self, value: str) -> str:
+        text = str(value or "")
+        return (
+            text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&apos;")
+        )
+
+    def _format_break_time(self, seconds: Any) -> str:
+        try:
+            value = float(seconds)
+        except (TypeError, ValueError):
+            return ""
+        if value <= 0:
+            return ""
+        ms = int(round(value * 1000))
+        ms = max(50, min(10000, ms))
+        return f"{ms}ms"
+
+    def _should_use_ssml(self, text: str, voice_params: Dict[str, Any]) -> bool:
+        if self._is_ssml_text(text):
+            return True
+        flag = voice_params.get("use_ssml")
+        if flag is False:
+            return False
+        speaker_id = voice_params.get("speaker", "")
+        return bool(flag) or self._supports_ssml(speaker_id)
+
+    def _render_ssml_text(self, text: str, voice_params: Dict[str, Any]) -> str:
+        if self._is_ssml_text(text):
+            return text
+
+        def _to_float(value: Any, default: float) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        rate = _to_float(voice_params.get("rate", voice_params.get("speed", 1.0)), 1.0)
+        pitch = _to_float(voice_params.get("pitch", 1.0), 1.0)
+        if pitch > 10:
+            pitch = pitch / 50.0
+        rate = max(0.5, min(2.0, rate))
+        pitch = max(0.5, min(2.0, pitch))
+
+        volume = voice_params.get("volume", 50)
+        try:
+            volume = int(volume)
+        except (TypeError, ValueError):
+            volume = 50
+        volume = max(0, min(100, volume))
+
+        pause_before = self._format_break_time(voice_params.get("pause_before"))
+        pause_after = self._format_break_time(voice_params.get("pause_after"))
+
+        parts = []
+        if pause_before:
+            parts.append(f"<break time=\"{pause_before}\"/>")
+        parts.append(self._escape_ssml_text(text))
+        if pause_after:
+            parts.append(f"<break time=\"{pause_after}\"/>")
+
+        attrs = [f'rate="{rate:.2f}"', f'pitch="{pitch:.2f}"', f'volume="{volume}"']
+        return f"<speak {' '.join(attrs)}>{''.join(parts)}</speak>"
+
+    def _build_instruction_text(self, voice_params: Dict[str, Any], emotion: str) -> str:
+        if not self._is_cosyvoice_v3_plus():
+            return f"emotion={emotion}"
+
+        instruct_emotion = (voice_params.get("instruct_emotion") or emotion or "neutral").strip()
+        instruct_emotion = self._normalize_emotion(instruct_emotion)
+        scene = str(voice_params.get("instruct_scene") or "").strip()
+        role = str(voice_params.get("instruct_role") or "").strip()
+        identity = str(voice_params.get("instruct_identity") or "").strip()
+
+        speaker_id = str(voice_params.get("speaker") or "").strip()
+        choices = COSYVOICE_V3_PLUS_INSTRUCT_CHOICES.get(speaker_id)
+        if choices:
+            if scene and scene not in choices["scenes"]:
+                scene = ""
+            if role and role not in choices["roles"]:
+                role = ""
+            if identity and identity not in choices["identities"]:
+                identity = ""
+
+        if role:
+            return f"你现在说话的角色是{role}，你说话的情感是{instruct_emotion}。"
+        if scene:
+            return f"你正在进行{scene}，你说话的情感是{instruct_emotion}。"
+        if identity:
+            return f"你正在以一个{identity}的身份说话，你说话的情感是{instruct_emotion}。"
+        return f"你说话的情感是{instruct_emotion}。"
+
     def _build_instruct_text(
         self,
         text: str,
         voice_params: Dict[str, Any],
         emotion: str
     ) -> str:
-        """预处理文本（当前不注入任何前置描述）。"""
+        """预处理文本（必要时渲染 SSML）。"""
+        if self._should_use_ssml(text, voice_params):
+            return self._render_ssml_text(text, voice_params)
         return text
 
     def _generate_cache_key(
@@ -1130,7 +1305,8 @@ class TTSEngine:
             text,
             str(voice_params.get("speaker", "")),
             str(voice_params.get("pitch", "")),
-            str(voice_params.get("speed", "")),
+            str(voice_params.get("rate", voice_params.get("speed", ""))),
+            str(voice_params.get("volume", "")),
             emotion
         ]
         key_string = "|".join(key_parts)

@@ -10,13 +10,20 @@ class Settings(BaseSettings):
     """应用配置"""
     
     # 应用基本配置
-    APP_NAME: str = "Novel Writing System API"
+    APP_NAME: str = "拾光工坊"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
     
-    # 数据库配置
+    # 数据库配置（本地开发使用SQLite，生产环境使用PostgreSQL）
     DATABASE_URL: str = "sqlite:///../novel_app.db"
     SQLALCHEMY_ECHO: bool = False
+    
+    # 数据库连接池配置（生产环境优化）
+    DB_POOL_SIZE: int = 20
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_TIMEOUT: int = 30
+    DB_POOL_RECYCLE: int = 3600
+    DB_POOL_PRE_PING: bool = True
     
     # JWT配置
     JWT_SECRET: str = "your-secret-key-change-in-production"
@@ -61,8 +68,10 @@ class Settings(BaseSettings):
     MUREKA_API_KEY: str = ""
     MUREKA_API_URL: str = "https://api.mureka.ai"
     
-    # Fal.ai 声效服务配置（用于环境音 / 音效生成）
-    FAL_KEY: str = ""
+    # 可灵AI声效服务配置（用于环境音 / 音效生成）
+    KLINGAI_ACCESS_KEY: str = ""
+    KLINGAI_SECRET_KEY: str = ""
+    KLINGAI_API_URL: str = "https://api.klingai.com/v1/audio/text-to-audio"
     
     # Embedding模型配置
     EMBEDDING_MODEL: str = "text-embedding-v4"

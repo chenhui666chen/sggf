@@ -8,7 +8,7 @@
  * 4. 进度监控
  * 5. 音频播放与下载
  */
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, ChangeEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { apiClient, extractApiErrorMessage } from '../services/api'
 import * as bookParserApi from '../services/bookParserApi'
@@ -79,6 +79,7 @@ interface Chapter {
 
 // 新增：任务状态类型
 type StageStatus = 'pending' | 'running' | 'completed' | 'failed'
+type PreviewType = 'voice' | 'sfx' | 'bgm' | 'mix'
 
 interface StageInfo {
   status: StageStatus
@@ -149,6 +150,13 @@ interface ScriptEditorDialogProps {
   onClose: () => void
   onChangeSegmentText: (index: number, value: string) => void
   onSaveScript: (options: { nextStatus?: 'reviewed' | 'approved'; generateAudio?: boolean }) => void
+  onPreviewSegmentAudio: (index: number, segment: any, previewType: PreviewType) => void
+  segmentPreviewingIndex: number | null
+  segmentPreviewingType: PreviewType | null
+  segmentAudioUrls: Record<number, string>
+  segmentDetailsOpen: Record<number, boolean>
+  onToggleSegmentDetails: (index: number) => void
+  onUpdateSegment: (index: number, patch: Record<string, any>) => void
 }
 
 interface HistoryDialogProps {
@@ -290,14 +298,22 @@ const STAGE_CONFIG = [
   { key: 'sound_design', name: '音效设计', icon: '04', desc: '设计场景音效和环境音' },
   { key: 'music_composition', name: '音乐编曲', icon: '05', desc: '设计背景音乐方案' },
   { key: 'quality_review', name: '剧本评审', icon: '06', desc: 'TTS前质量检查' },
-  { key: 'tts_synthesis', name: 'TTS合成', icon: '07', desc: '语音合成生成音频' },
-  { key: 'audio_mixing', name: '音频混合', icon: '08', desc: '混音与后期处理' },
-  { key: 'final_audio_review', name: '最终评审', icon: '09', desc: '最终质量检查' },
+  { key: 'audio_prompt_review', name: '提示词审阅', icon: '07', desc: '审阅音频提示词并试听' },
+  { key: 'tts_synthesis', name: 'TTS合成', icon: '08', desc: '语音合成生成音频' },
+  { key: 'audio_mixing', name: '音频混合', icon: '09', desc: '混音与后期处理' },
+  { key: 'final_audio_review', name: '最终评审', icon: '10', desc: '最终质量检查' },
 ] as const
 
 type StageKey = typeof STAGE_CONFIG[number]['key']
+type StageConfig = typeof STAGE_CONFIG[number]
 
 const STAGE_KEYS: StageKey[] = STAGE_CONFIG.map((stage) => stage.key)
+const STAGE_STATUS_LABELS: Record<StageStatus, string> = {
+  pending: '等待中',
+  running: '进行中',
+  completed: '已完成',
+  failed: '失败',
+}
 
 const createEmptyStageMap = (): Record<StageKey, StageInfo> =>
   STAGE_KEYS.reduce((acc, key) => {
@@ -690,11 +706,38 @@ function ScriptEditorDialog({
   onClose,
   onChangeSegmentText,
   onSaveScript,
+  onPreviewSegmentAudio,
+  segmentPreviewingIndex,
+  segmentPreviewingType,
+  segmentAudioUrls,
+  segmentDetailsOpen,
+  onToggleSegmentDetails,
+  onUpdateSegment,
 }: ScriptEditorDialogProps) {
+  const parseFloatValue = (value: string) => {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+
+  const parseCommaList = (value: string) =>
+    value
+      .split(',')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+
+  const updateVoiceParams = (index: number, patch: Record<string, any>) => {
+    if (!data) return
+    const current = data.scriptSegments[index]
+    const currentParams = current?.voice_params && typeof current.voice_params === 'object'
+      ? current.voice_params
+      : {}
+    onUpdateSegment(index, { voice_params: { ...currentParams, ...patch } })
+  }
+
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
       <DialogTitle>
-        {chapter ? `编辑剧本 - ${chapter.title}` : '编辑章节剧本'}
+        {chapter ? `编辑剧本与音频提示词 - ${chapter.title}` : '编辑章节剧本与音频提示词'}
       </DialogTitle>
       <DialogContent dividers sx={{ minHeight: 400 }}>
         {loading ? (
@@ -710,31 +753,257 @@ function ScriptEditorDialog({
             {/* 左侧：剧本可编辑列表 */}
             <Box sx={{ flex: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
               <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-                剧本片段（可编辑文本，仅修改 text 字段）
+                剧本片段（支持文本与音频提示词调整）
               </Typography>
               <Paper
                 variant="outlined"
                 sx={{ maxHeight: 520, overflow: 'auto', p: 1 }}
               >
                 <List dense>
-                  {data.scriptSegments.map((seg: any, idx: number) => (
-                    <ListItem key={idx} alignItems="flex-start" sx={{ mb: 1 }}>
-                      <Box sx={{ width: '100%' }}>
-                        <Typography variant="caption" color="text.secondary">
-                          #{idx + 1} [{seg.type === 'dialogue' ? '对白' : seg.type}] {seg.speaker || '旁白'}{' '}
-                          {seg.emotion ? `· 情绪: ${seg.emotion}` : ''}
-                        </Typography>
-                        <TextField
-                          fullWidth
-                          multiline
-                          minRows={2}
-                          margin="dense"
-                          value={seg.text || ''}
-                          onChange={(e) => onChangeSegmentText(idx, e.target.value)}
-                        />
-                      </Box>
-                    </ListItem>
-                  ))}
+                  {data.scriptSegments.map((seg: any, idx: number) => {
+                    const hasSoundEffects =
+                      (Array.isArray(seg.sound_effects) && seg.sound_effects.length > 0) ||
+                      (Array.isArray(seg.sound_effects_simple) && seg.sound_effects_simple.length > 0)
+                    const hasMusicCue = Boolean(seg.music_cue) || Boolean(seg.music_cue_simple)
+                    const isBusy = segmentPreviewingIndex === idx
+                    const isPreviewing = (type: PreviewType) =>
+                      isBusy && segmentPreviewingType === type
+                    const voiceParams =
+                      seg.voice_params && typeof seg.voice_params === 'object' ? seg.voice_params : {}
+                    const soundEffectsSimple = Array.isArray(seg.sound_effects_simple)
+                      ? seg.sound_effects_simple
+                      : []
+                    const soundEffectsFromDetail = Array.isArray(seg.sound_effects)
+                      ? seg.sound_effects
+                          .map((item: any) => item?.name || item?.effect_id || item?.id || item)
+                          .filter((item: any) => typeof item === 'string' && item.length > 0)
+                      : []
+                    const soundEffectsValue =
+                      soundEffectsSimple.length > 0
+                        ? soundEffectsSimple.join(',')
+                        : soundEffectsFromDetail.join(',')
+                    const musicCueValue =
+                      seg.music_cue_simple ||
+                      (seg.music_cue && (seg.music_cue.style || seg.music_cue.name)) ||
+                      ''
+
+                    return (
+                      <ListItem key={idx} alignItems="flex-start" sx={{ mb: 1 }}>
+                        <Box sx={{ width: '100%' }}>
+                          <Typography variant="caption" color="text.secondary">
+                            #{idx + 1} [{seg.type === 'dialogue' ? '对白' : seg.type}] {seg.speaker || '旁白'}{' '}
+                            {seg.emotion ? `· 情绪: ${seg.emotion}` : ''}
+                          </Typography>
+                          <TextField
+                            fullWidth
+                            multiline
+                            minRows={2}
+                            margin="dense"
+                            value={seg.text || ''}
+                            onChange={(e) => onChangeSegmentText(idx, e.target.value)}
+                          />
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1, flexWrap: 'wrap' }}>
+                            <Button
+                              size="small"
+                              variant="text"
+                              onClick={() => onToggleSegmentDetails(idx)}
+                            >
+                              {segmentDetailsOpen[idx] ? '收起详情' : '查看详情'}
+                            </Button>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={() => onPreviewSegmentAudio(idx, seg, 'voice')}
+                              disabled={isBusy || !seg.text?.trim()}
+                              startIcon={isPreviewing('voice') ? <CircularProgress size={14} /> : undefined}
+                            >
+                              {isPreviewing('voice') ? '生成中...' : '人声试听'}
+                            </Button>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={() => onPreviewSegmentAudio(idx, seg, 'sfx')}
+                              disabled={isBusy || !seg.text?.trim() || !hasSoundEffects}
+                              startIcon={isPreviewing('sfx') ? <CircularProgress size={14} /> : undefined}
+                            >
+                              {isPreviewing('sfx') ? '生成中...' : '音效试听'}
+                            </Button>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={() => onPreviewSegmentAudio(idx, seg, 'bgm')}
+                              disabled={isBusy || !seg.text?.trim() || !hasMusicCue}
+                              startIcon={isPreviewing('bgm') ? <CircularProgress size={14} /> : undefined}
+                            >
+                              {isPreviewing('bgm') ? '生成中...' : '配乐试听'}
+                            </Button>
+                            <Button
+                              size="small"
+                              variant="contained"
+                              onClick={() => onPreviewSegmentAudio(idx, seg, 'mix')}
+                              disabled={isBusy || !seg.text?.trim()}
+                              startIcon={isPreviewing('mix') ? <CircularProgress size={14} /> : undefined}
+                              sx={{
+                                backgroundColor: '#9c27b0',
+                                '&:hover': { backgroundColor: '#7b1fa2' },
+                              }}
+                            >
+                              {isPreviewing('mix') ? '生成中...' : '融合试听'}
+                            </Button>
+                          </Box>
+                          {segmentDetailsOpen[idx] && (
+                            <Paper
+                              variant="outlined"
+                              sx={{
+                                mt: 1,
+                                p: 1,
+                                backgroundColor: 'rgba(0,0,0,0.02)',
+                                borderStyle: 'dashed',
+                              }}
+                            >
+                              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                详细信息
+                              </Typography>
+                              <Typography variant="caption" sx={{ display: 'block' }}>
+                                表演提示：{seg.performance_notes || '—'}
+                              </Typography>
+                              <Typography variant="caption" sx={{ display: 'block' }}>
+                                原文：{seg.original_text || '—'}
+                              </Typography>
+                              <Typography variant="caption" sx={{ display: 'block' }}>
+                                改编原因：{seg.adaptation_reason || '—'}
+                              </Typography>
+                              <Typography variant="caption" sx={{ display: 'block' }}>
+                                停顿：前 {seg.pause_before ?? '—'}s / 后 {seg.pause_after ?? '—'}s
+                              </Typography>
+                              <Typography variant="caption" sx={{ display: 'block' }}>
+                                Instruct：{seg.instruct_emotion || '—'} / {seg.instruct_scene || '—'} / {seg.instruct_role || '—'} / {seg.instruct_identity || '—'}
+                              </Typography>
+                              <Typography variant="caption" sx={{ display: 'block' }}>
+                                音色参数：{seg.voice_params ? JSON.stringify(seg.voice_params) : '—'}
+                              </Typography>
+                              <Typography variant="caption" sx={{ display: 'block' }}>
+                                音效：{seg.sound_effects ? JSON.stringify(seg.sound_effects) : (seg.sound_effects_simple ? JSON.stringify(seg.sound_effects_simple) : '—')}
+                              </Typography>
+                              <Typography variant="caption" sx={{ display: 'block' }}>
+                                配乐：{seg.music_cue ? JSON.stringify(seg.music_cue) : (seg.music_cue_simple || '—')}
+                              </Typography>
+                              <Divider sx={{ my: 1 }} />
+                              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                                音频提示词（可编辑）
+                              </Typography>
+                              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 1 }}>
+                                <TextField
+                                  size="small"
+                                  label="停顿-前(s)"
+                                  type="number"
+                                  value={seg.pause_before ?? ''}
+                                  onChange={(e) =>
+                                    onUpdateSegment(idx, { pause_before: parseFloatValue(e.target.value) })
+                                  }
+                                />
+                                <TextField
+                                  size="small"
+                                  label="停顿-后(s)"
+                                  type="number"
+                                  value={seg.pause_after ?? ''}
+                                  onChange={(e) =>
+                                    onUpdateSegment(idx, { pause_after: parseFloatValue(e.target.value) })
+                                  }
+                                />
+                                <TextField
+                                  size="small"
+                                  label="Instruct 情感"
+                                  value={seg.instruct_emotion || ''}
+                                  onChange={(e) =>
+                                    onUpdateSegment(idx, { instruct_emotion: e.target.value })
+                                  }
+                                />
+                                <TextField
+                                  size="small"
+                                  label="Instruct 场景"
+                                  value={seg.instruct_scene || ''}
+                                  onChange={(e) =>
+                                    onUpdateSegment(idx, { instruct_scene: e.target.value })
+                                  }
+                                />
+                                <TextField
+                                  size="small"
+                                  label="Instruct 角色"
+                                  value={seg.instruct_role || ''}
+                                  onChange={(e) =>
+                                    onUpdateSegment(idx, { instruct_role: e.target.value })
+                                  }
+                                />
+                                <TextField
+                                  size="small"
+                                  label="Instruct 身份"
+                                  value={seg.instruct_identity || ''}
+                                  onChange={(e) =>
+                                    onUpdateSegment(idx, { instruct_identity: e.target.value })
+                                  }
+                                />
+                              </Box>
+                              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 1, mt: 1 }}>
+                                <TextField
+                                  size="small"
+                                  label="语速 rate"
+                                  type="number"
+                                  value={voiceParams.rate ?? voiceParams.speed ?? ''}
+                                  onChange={(e) => updateVoiceParams(idx, { rate: parseFloatValue(e.target.value) })}
+                                />
+                                <TextField
+                                  size="small"
+                                  label="音高 pitch"
+                                  type="number"
+                                  value={voiceParams.pitch ?? ''}
+                                  onChange={(e) => updateVoiceParams(idx, { pitch: parseFloatValue(e.target.value) })}
+                                />
+                                <TextField
+                                  size="small"
+                                  label="音量 volume"
+                                  type="number"
+                                  value={voiceParams.volume ?? ''}
+                                  onChange={(e) => updateVoiceParams(idx, { volume: parseFloatValue(e.target.value) })}
+                                />
+                              </Box>
+                              <TextField
+                                fullWidth
+                                size="small"
+                                label="音效提示（逗号分隔）"
+                                value={soundEffectsValue}
+                                onChange={(e) =>
+                                  onUpdateSegment(idx, {
+                                    sound_effects_simple: parseCommaList(e.target.value),
+                                    sound_effects: [],
+                                  })
+                                }
+                                sx={{ mt: 1 }}
+                              />
+                              <TextField
+                                fullWidth
+                                size="small"
+                                label="配乐提示"
+                                value={musicCueValue}
+                                onChange={(e) =>
+                                  onUpdateSegment(idx, {
+                                    music_cue_simple: e.target.value,
+                                    music_cue: null,
+                                  })
+                                }
+                                sx={{ mt: 1 }}
+                              />
+                            </Paper>
+                          )}
+                          {segmentAudioUrls[idx] && (
+                            <Box sx={{ mt: 1 }}>
+                              <audio controls src={segmentAudioUrls[idx]} />
+                            </Box>
+                          )}
+                        </Box>
+                      </ListItem>
+                    )
+                  })}
                 </List>
               </Paper>
             </Box>
@@ -999,6 +1268,11 @@ const AudiobookPage = () => {
   const [showHistory, setShowHistory] = useState(false)
   const [scriptReviewDialogOpen, setScriptReviewDialogOpen] = useState(false)
   const [scriptReviewData, setScriptReviewData] = useState<{ report: ScriptReviewDetail; segments: any[] } | null>(null)
+  const [stageMetricsDialogOpen, setStageMetricsDialogOpen] = useState(false)
+  const [stageMetricsData, setStageMetricsData] = useState<{
+    stage: StageConfig
+    info: StageInfo
+  } | null>(null)
   const [scriptEditorDialogOpen, setScriptEditorDialogOpen] = useState(false)
   const [scriptEditorChapter, setScriptEditorChapter] = useState<{ chapterId: number; title: string } | null>(null)
   const [scriptEditorData, setScriptEditorData] = useState<{
@@ -1007,6 +1281,10 @@ const AudiobookPage = () => {
     scriptReview: any | null
   } | null>(null)
   const [scriptEditorLoading, setScriptEditorLoading] = useState(false)
+  const [segmentPreviewingIndex, setSegmentPreviewingIndex] = useState<number | null>(null)
+  const [segmentPreviewingType, setSegmentPreviewingType] = useState<PreviewType | null>(null)
+  const [segmentAudioUrls, setSegmentAudioUrls] = useState<Record<number, string>>({})
+  const [segmentDetailsOpen, setSegmentDetailsOpen] = useState<Record<number, boolean>>({})
   const [scriptOnlyMode, setScriptOnlyMode] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [playingChapter, setPlayingChapter] = useState<number | null>(null)
@@ -1034,6 +1312,10 @@ const AudiobookPage = () => {
   const [cloneName, setCloneName] = useState('')
   const [cloneUrl, setCloneUrl] = useState('')
   const [cloneLoading, setCloneLoading] = useState(false)
+  const [cloneUploading, setCloneUploading] = useState(false)
+  const [cloneRecording, setCloneRecording] = useState(false)
+  const [cloneRecordDialogOpen, setCloneRecordDialogOpen] = useState(false)
+  const [cloneDeletingId, setCloneDeletingId] = useState<string | null>(null)
   const [cloneError, setCloneError] = useState<string | null>(null)
   const [cloneSuccess, setCloneSuccess] = useState<string | null>(null)
   const [autoAssigningVoices, setAutoAssigningVoices] = useState(false)
@@ -1041,6 +1323,7 @@ const AudiobookPage = () => {
   const [lastGenerationMode, setLastGenerationMode] = useState<'full' | 'script_only'>('full')
   const [activeStep, setActiveStep] = useState(0)
   const [ttsModel, setTtsModel] = useState<'qwen3-tts-flash' | 'cosyvoice-v3-plus'>('qwen3-tts-flash')
+  const supportsTtsTuning = ttsModel === 'cosyvoice-v3-plus'
   const [voiceDraftsByModel, setVoiceDraftsByModel] = useState<Record<string, CharacterVoiceSetting[]>>({})
   const [chapterMenuAnchor, setChapterMenuAnchor] = useState<null | HTMLElement>(null)
   const [selectedChapterForMenu, setSelectedChapterForMenu] = useState<Chapter | null>(null)
@@ -1051,6 +1334,9 @@ const AudiobookPage = () => {
 
   const audioRef = useMemo(() => new Audio(), [])
   const sessionHydratedRef = useRef(false)
+  const cloneRecorderRef = useRef<MediaRecorder | null>(null)
+  const cloneStreamRef = useRef<MediaStream | null>(null)
+  const cloneChunksRef = useRef<Blob[]>([])
   const navigationTypeRef = useRef<NavigationType>(typeof window === 'undefined' ? null : detectNavigationType())
   const selectedProjectId = selectedProject?.id ?? null
   const activeTaskStatus = useMemo(() => {
@@ -1104,6 +1390,13 @@ const AudiobookPage = () => {
 
     return sorted
   }, [voicePresets, ttsModel])
+
+  const cloneVoicePresets = useMemo(() => {
+    if (ttsModel !== 'cosyvoice-v3-plus') {
+      return []
+    }
+    return currentVoicePresets.filter((preset) => preset.category === 'custom')
+  }, [currentVoicePresets, ttsModel])
 
   // 从URL参数加载项目（优先级最高，但会尝试保留会话状态）
   useEffect(() => {
@@ -1230,6 +1523,151 @@ const AudiobookPage = () => {
     } finally {
       setCloneLoading(false)
     }
+  }
+
+  const handleDeleteCloneVoice = async (voiceId: string, label?: string) => {
+    if (!voiceId || cloneDeletingId) return
+    const displayName = label || voiceId
+    if (!confirm(`确定要删除复刻音色「${displayName}」吗？\n\n该操作会从当前账号移除该复刻音色，无法恢复。`)) {
+      return
+    }
+    setCloneDeletingId(voiceId)
+    setCloneError(null)
+    setCloneSuccess(null)
+    try {
+      await apiClient.deleteCosyVoiceV3PlusClone(voiceId)
+      updateCharacterVoicesForCurrentModel((prev) =>
+        prev.map((item) => (item.voiceId === voiceId ? { ...item, voiceId: '' } : item)),
+      )
+      setCloneSuccess(`已删除复刻音色：${displayName}`)
+      await fetchVoiceCatalog()
+    } catch (error: any) {
+      const message = await extractApiErrorMessage(error, '删除复刻音色失败')
+      setCloneError(message)
+    } finally {
+      setCloneDeletingId(null)
+    }
+  }
+
+  const handleUploadCloneAudio = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setCloneUploading(true)
+    setCloneError(null)
+    setCloneSuccess(null)
+    try {
+      const res = await apiClient.uploadCosyVoiceV3PlusCloneSample(file)
+      const url = (res.data?.url as string) || ''
+      if (!url) {
+        throw new Error('未返回临时URL')
+      }
+      setCloneUrl(url)
+      setCloneSuccess('已上传音频并生成临时URL（48小时有效）')
+    } catch (error: any) {
+      const message = await extractApiErrorMessage(error, '上传音频失败')
+      setCloneError(message)
+    } finally {
+      setCloneUploading(false)
+    }
+  }
+
+  const stopCloneRecordingStream = () => {
+    if (cloneStreamRef.current) {
+      cloneStreamRef.current.getTracks().forEach((track) => track.stop())
+      cloneStreamRef.current = null
+    }
+  }
+
+  const uploadRecordedCloneAudio = async (blob: Blob) => {
+    setCloneUploading(true)
+    setCloneError(null)
+    setCloneSuccess(null)
+    try {
+      const filename = `recording_${Date.now()}.webm`
+      const file = new File([blob], filename, { type: blob.type || 'audio/webm' })
+      const res = await apiClient.uploadCosyVoiceV3PlusCloneSample(file)
+      const url = (res.data?.url as string) || ''
+      if (!url) {
+        throw new Error('未返回临时URL')
+      }
+      setCloneUrl(url)
+      setCloneSuccess('录音已上传并生成临时URL（48小时有效）')
+    } catch (error: any) {
+      const message = await extractApiErrorMessage(error, '上传录音失败')
+      setCloneError(message)
+    } finally {
+      setCloneUploading(false)
+    }
+  }
+
+  const handleStartCloneRecording = async () => {
+    if (cloneLoading || cloneUploading || cloneRecording) return
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setCloneError('当前浏览器不支持录音，请改用上传音频')
+      return
+    }
+    setCloneError(null)
+    setCloneSuccess(null)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      cloneStreamRef.current = stream
+      cloneChunksRef.current = []
+      const recorder = new MediaRecorder(stream)
+      cloneRecorderRef.current = recorder
+      recorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data && event.data.size > 0) {
+          cloneChunksRef.current.push(event.data)
+        }
+      }
+      recorder.onstop = () => {
+        const chunks = cloneChunksRef.current
+        cloneChunksRef.current = []
+        cloneRecorderRef.current = null
+        setCloneRecording(false)
+        stopCloneRecordingStream()
+        if (chunks.length === 0) {
+          setCloneError('未获取到录音数据，请重试')
+          return
+        }
+        const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' })
+        void uploadRecordedCloneAudio(blob)
+      }
+      recorder.onerror = () => {
+        cloneRecorderRef.current = null
+        setCloneRecording(false)
+        stopCloneRecordingStream()
+        setCloneError('录音失败，请重试')
+      }
+      recorder.start()
+      setCloneRecording(true)
+    } catch (error: any) {
+      stopCloneRecordingStream()
+      setCloneRecording(false)
+      const message = await extractApiErrorMessage(error, '无法访问麦克风，请检查权限')
+      setCloneError(message)
+    }
+  }
+
+  const handleStopCloneRecording = () => {
+    const recorder = cloneRecorderRef.current
+    if (!recorder) return
+    if (recorder.state === 'inactive') {
+      cloneRecorderRef.current = null
+      setCloneRecording(false)
+      stopCloneRecordingStream()
+      return
+    }
+    recorder.stop()
+  }
+
+  const handleOpenCloneRecordDialog = () => {
+    setCloneRecordDialogOpen(true)
+  }
+
+  const handleCloseCloneRecordDialog = () => {
+    if (cloneRecording) return
+    setCloneRecordDialogOpen(false)
   }
 
   const loadProjectVoiceConfig = async (
@@ -2031,6 +2469,91 @@ const AudiobookPage = () => {
     setScriptReviewDialogOpen(false)
   }
 
+  const handleOpenStageMetricsDialog = (stage: StageConfig, stageInfo: StageInfo) => {
+    const metrics = stageInfo.metrics
+    if (!metrics || Object.keys(metrics).length === 0) {
+      setSnackbar({ open: true, message: '该阶段暂无可查看的结果数据', severity: 'info' })
+      return
+    }
+    setStageMetricsData({ stage, info: stageInfo })
+    setStageMetricsDialogOpen(true)
+  }
+
+  const handleCloseStageMetricsDialog = () => {
+    setStageMetricsDialogOpen(false)
+    setStageMetricsData(null)
+  }
+
+  const resetSegmentPreviewState = useCallback(() => {
+    Object.values(segmentAudioUrls).forEach((url) => {
+      if (url) {
+        window.URL.revokeObjectURL(url)
+      }
+    })
+    setSegmentAudioUrls({})
+    setSegmentPreviewingIndex(null)
+    setSegmentPreviewingType(null)
+    setSegmentDetailsOpen({})
+  }, [segmentAudioUrls])
+
+  const handleToggleSegmentDetails = (index: number) => {
+    setSegmentDetailsOpen((prev) => ({ ...prev, [index]: !prev[index] }))
+  }
+
+  const handlePreviewScriptSegmentAudio = async (
+    index: number,
+    segment: any,
+    previewType: PreviewType,
+  ) => {
+    if (!audiobookProject || !scriptEditorChapter) return
+    const textValue = String(segment?.text || '').trim()
+    if (!textValue) {
+      setSnackbar({ open: true, message: '片段文本为空，无法生成音频', severity: 'warning' })
+      return
+    }
+
+    setSegmentPreviewingIndex(index)
+    setSegmentPreviewingType(previewType)
+    try {
+      if (playingChapter) {
+        audioRef.pause()
+        setPlayingChapter(null)
+      }
+
+      const response = await apiClient.previewScriptSegmentAudio(
+        audiobookProject.id,
+        scriptEditorChapter.chapterId,
+        { segment, tts_model: ttsModel, preview_type: previewType }
+      )
+      const blob = response.data as Blob
+      const url = window.URL.createObjectURL(blob)
+      setSegmentAudioUrls((prev) => {
+        const existing = prev[index]
+        if (existing) {
+          window.URL.revokeObjectURL(existing)
+        }
+        return { ...prev, [index]: url }
+      })
+      audioRef.src = url
+      await audioRef.play()
+      audioRef.onended = () => {
+        setSegmentPreviewingIndex(null)
+        setSegmentPreviewingType(null)
+      }
+      setSnackbar({ open: true, message: '片段音频已生成并开始播放', severity: 'success' })
+    } catch (error) {
+      console.error('生成片段音频失败:', error)
+      setSnackbar({
+        open: true,
+        message: extractApiErrorMessage(error) || '生成片段音频失败，请重试',
+        severity: 'error',
+      })
+    } finally {
+      setSegmentPreviewingIndex(null)
+      setSegmentPreviewingType(null)
+    }
+  }
+
   // 打开章节剧本编辑器
   const handleOpenScriptEditor = async (chapterId: number) => {
     if (!audiobookProject) {
@@ -2046,6 +2569,7 @@ const AudiobookPage = () => {
     )
 
     try {
+      resetSegmentPreviewState()
       setScriptEditorLoading(true)
 
       const res = await apiClient.getAudiobookChapterScript(audiobookProject.id, chapterId)
@@ -2066,6 +2590,8 @@ const AudiobookPage = () => {
   }
 
   const handleCloseScriptEditorDialog = () => {
+    resetSegmentPreviewState()
+    audioRef.pause()
     setScriptEditorDialogOpen(false)
     setScriptEditorData(null)
     setScriptEditorChapter(null)
@@ -2080,10 +2606,20 @@ const AudiobookPage = () => {
     })
   }
 
+  const handleUpdateScriptSegment = (index: number, patch: Record<string, any>) => {
+    setScriptEditorData((prev) => {
+      if (!prev) return prev
+      const segments = [...prev.scriptSegments]
+      segments[index] = { ...segments[index], ...patch }
+      return { ...prev, scriptSegments: segments }
+    })
+  }
+
   const handleSaveScript = async (options: { nextStatus?: 'reviewed' | 'approved'; generateAudio?: boolean }) => {
     if (!audiobookProject || !scriptEditorChapter || !scriptEditorData) return
 
     try {
+      resetSegmentPreviewState()
       setScriptEditorLoading(true)
 
       const payload: any = {
@@ -2411,11 +2947,14 @@ const AudiobookPage = () => {
           const colors = statusColors[stageInfo.status as keyof typeof statusColors] || statusColors.pending
           const isActive = stageInfo.status === 'running'
           const isDone = stageInfo.status === 'completed'
+          const hasMetrics = Boolean(stageInfo.metrics && Object.keys(stageInfo.metrics).length > 0)
+          const canOpen = isDone && hasMetrics
           
           return (
             <Paper 
               key={stage.key}
               elevation={isActive ? 4 : 1}
+              onClick={canOpen ? () => handleOpenStageMetricsDialog(stage, stageInfo) : undefined}
               sx={{ 
                 p: 2,
                 border: `2px solid ${colors.border}`,
@@ -2424,6 +2963,7 @@ const AudiobookPage = () => {
                 transform: isActive ? 'scale(1.02)' : 'scale(1)',
                 position: 'relative',
                 overflow: 'hidden',
+                cursor: canOpen ? 'pointer' : 'default',
                 '&::before': isActive ? {
                   content: '""',
                   position: 'absolute',
@@ -2677,57 +3217,146 @@ const AudiobookPage = () => {
                 Qwen3-TTS Flash 支持快速批量合成、指令式情感（Ethan/Sunny）与多语种/方言音色，适合整本生成；CosyVoice 保留为精品章节备用。
               </Alert>
               {ttsModel === 'cosyvoice-v3-plus' && (
-                <Paper variant="outlined" sx={{ mb: 1, p: 1.5 }}>
-                  <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-                    声音复刻（CosyVoice v3-plus）
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    需要提供公网可访问的音频 URL；系统会自动生成合规 prefix（最长 10 个字符），并用你的“命名”在列表里展示为 “复刻-命名”（状态 OK 后可用于合成）。
-                  </Typography>
-                  <Grid container spacing={1}>
-                    <Grid item xs={12} md={4}>
-                      <TextField
-                        size="small"
-                        fullWidth
-                        label="声音名称"
-                        value={cloneName}
-                        onChange={(e) => setCloneName(e.target.value)}
-                        disabled={cloneLoading}
-                      />
+                <>
+                  <Paper variant="outlined" sx={{ mb: 1, p: 1.5 }}>
+                    <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+                      声音复刻（CosyVoice v3-plus）
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                      支持 http/https 或 oss:// 临时 URL（有效期 48 小时）；系统会自动生成合规 prefix（最长 10 个字符），并用你的“命名”在列表里展示为 “复刻-命名”（状态 OK 后可用于合成）。
+                    </Typography>
+                    <Grid container spacing={1}>
+                      <Grid item xs={12} md={4}>
+                        <TextField
+                          size="small"
+                          fullWidth
+                          label="声音名称"
+                          value={cloneName}
+                          onChange={(e) => setCloneName(e.target.value)}
+                          disabled={cloneLoading || cloneUploading || cloneRecording}
+                        />
+                      </Grid>
+                      <Grid item xs={12} md={6}>
+                        <TextField
+                          size="small"
+                          fullWidth
+                          label="音频 URL（http/https 或 oss://）"
+                          value={cloneUrl}
+                          onChange={(e) => setCloneUrl(e.target.value)}
+                          disabled={cloneLoading || cloneUploading || cloneRecording}
+                        />
+                      </Grid>
+                      <Grid item xs={12} md={2}>
+                        <Button
+                          fullWidth
+                          variant="contained"
+                          onClick={handleCreateCloneVoice}
+                          disabled={cloneLoading || cloneUploading || cloneRecording || !cloneName.trim() || !cloneUrl.trim()}
+                          sx={{ height: '100%' }}
+                        >
+                          {cloneLoading ? '提交中...' : '开始复刻'}
+                        </Button>
+                      </Grid>
+                      <Grid item xs={12}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                          <Button
+                            variant="outlined"
+                            onClick={handleOpenCloneRecordDialog}
+                            disabled={cloneLoading || cloneUploading || cloneRecording}
+                          >
+                            录音
+                          </Button>
+                          <Button
+                            variant="outlined"
+                            component="label"
+                            disabled={cloneLoading || cloneUploading || cloneRecording}
+                          >
+                            {cloneUploading ? '上传中...' : '上传音频获取临时URL'}
+                            <input
+                              type="file"
+                              hidden
+                              accept="audio/*"
+                              onChange={handleUploadCloneAudio}
+                            />
+                          </Button>
+                          <Typography variant="caption" color="text.secondary">
+                            录音或上传都会生成临时 URL（oss://），有效期 48 小时。点击“录音”可查看示例文本，也可以随机朗读其他内容。
+                          </Typography>
+                        </Box>
+                      </Grid>
                     </Grid>
-                    <Grid item xs={12} md={6}>
-                      <TextField
-                        size="small"
-                        fullWidth
-                        label="音频 URL（公网可访问）"
-                        value={cloneUrl}
-                        onChange={(e) => setCloneUrl(e.target.value)}
-                        disabled={cloneLoading}
-                      />
-                    </Grid>
-                    <Grid item xs={12} md={2}>
-                      <Button
-                        fullWidth
-                        variant="contained"
-                        onClick={handleCreateCloneVoice}
-                        disabled={cloneLoading || !cloneName.trim() || !cloneUrl.trim()}
-                        sx={{ height: '100%' }}
-                      >
-                        {cloneLoading ? '提交中...' : '开始复刻'}
+                    {cloneError && (
+                      <Alert severity="warning" sx={{ mt: 1 }}>
+                        {cloneError}
+                      </Alert>
+                    )}
+                    {cloneSuccess && (
+                      <Alert severity="success" sx={{ mt: 1 }}>
+                        {cloneSuccess}
+                      </Alert>
+                    )}
+                    {cloneVoicePresets.length > 0 && (
+                      <Box sx={{ mt: 1 }}>
+                        <Divider sx={{ mb: 1 }} />
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                          已复刻音色（可删除）
+                        </Typography>
+                        <List dense>
+                          {cloneVoicePresets.map((preset) => (
+                            <ListItem
+                              key={preset.id}
+                              secondaryAction={
+                                <Button
+                                  color="error"
+                                  size="small"
+                                  disabled={cloneDeletingId === preset.id || cloneLoading || cloneUploading}
+                                  onClick={() => handleDeleteCloneVoice(preset.id, preset.label)}
+                                >
+                                  {cloneDeletingId === preset.id ? '删除中...' : '删除'}
+                                </Button>
+                              }
+                            >
+                              <ListItemText
+                                primary={preset.label || preset.id}
+                                secondary={preset.description || preset.id}
+                              />
+                            </ListItem>
+                          ))}
+                        </List>
+                      </Box>
+                    )}
+                  </Paper>
+                  <Dialog
+                    open={cloneRecordDialogOpen}
+                    onClose={() => handleCloseCloneRecordDialog()}
+                    fullWidth
+                    maxWidth="sm"
+                    disableEscapeKeyDown={cloneRecording}
+                  >
+                    <DialogTitle>录音朗读提示</DialogTitle>
+                    <DialogContent dividers>
+                      <Typography variant="body2" sx={{ mb: 1 }}>
+                        朗读示例（约10秒）：“时间会缓和所有的悲伤，当你的悲伤被安抚以后，你就会因为认识过我而感到满足。”
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        也可以随机读其他内容。
+                      </Typography>
+                    </DialogContent>
+                    <DialogActions>
+                      <Button onClick={handleCloseCloneRecordDialog} disabled={cloneRecording}>
+                        关闭
                       </Button>
-                    </Grid>
-                  </Grid>
-                  {cloneError && (
-                    <Alert severity="warning" sx={{ mt: 1 }}>
-                      {cloneError}
-                    </Alert>
-                  )}
-                  {cloneSuccess && (
-                    <Alert severity="success" sx={{ mt: 1 }}>
-                      {cloneSuccess}
-                    </Alert>
-                  )}
-                </Paper>
+                      <Button
+                        variant="contained"
+                        color={cloneRecording ? 'error' : 'primary'}
+                        onClick={cloneRecording ? handleStopCloneRecording : handleStartCloneRecording}
+                        disabled={cloneLoading || cloneUploading}
+                      >
+                        {cloneRecording ? '结束录音并上传' : '开始录音'}
+                      </Button>
+                    </DialogActions>
+                  </Dialog>
+                </>
               )}
               {voiceError && (
                 <Alert severity="warning" action={
@@ -2912,10 +3541,12 @@ const AudiobookPage = () => {
               <Grid item xs={12} md={6}>
                 <Typography variant="subtitle1" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
                   <AudioIcon fontSize="small" />
-                  角色音与音量配置
+                  {supportsTtsTuning ? '角色音与音量配置' : '角色音配置'}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  不修改时使用 AI 默认音色；为角色选择音色或调整音量后，本次有声书生成将优先使用你的配置。
+                  {supportsTtsTuning
+                    ? '不修改时使用 AI 默认音色；为角色选择音色或调整音量/语速/音高后，本次有声书生成将优先使用你的配置。'
+                    : '不修改时使用 AI 默认音色；为角色选择音色后，本次有声书生成将优先使用你的配置。'}
                 </Typography>
         
                 {loadingCharacters && (
@@ -3027,50 +3658,54 @@ const AudiobookPage = () => {
                               </FormControl>
                             </Box>
         
-                            <Box sx={{ mt: 1 }}>
-                              <Typography variant="caption" color="text.secondary">
-                                音量：{cv.volume}
-                              </Typography>
-                              <Slider
-                                size="small"
-                                min={0}
-                                max={100}
-                                step={5}
-                                value={cv.volume}
-                                onChange={(_, value) => handleVolumeChange(cv.characterId, value as number)}
-                                sx={{ mt: 0.5 }}
-                              />
-                            </Box>
+                            {supportsTtsTuning && (
+                              <>
+                                <Box sx={{ mt: 1 }}>
+                                  <Typography variant="caption" color="text.secondary">
+                                    音量：{cv.volume}
+                                  </Typography>
+                                  <Slider
+                                    size="small"
+                                    min={0}
+                                    max={100}
+                                    step={5}
+                                    value={cv.volume}
+                                    onChange={(_, value) => handleVolumeChange(cv.characterId, value as number)}
+                                    sx={{ mt: 0.5 }}
+                                  />
+                                </Box>
 
-                            <Box sx={{ mt: 1 }}>
-                              <Typography variant="caption" color="text.secondary">
-                                语速：{cv.speed ?? 1.0}
-                              </Typography>
-                              <Slider
-                                size="small"
-                                min={0.5}
-                                max={2.0}
-                                step={0.1}
-                                value={cv.speed ?? 1.0}
-                                onChange={(_, value) => handleSpeedChange(cv.characterId, value as number)}
-                                sx={{ mt: 0.5 }}
-                              />
-                            </Box>
+                                <Box sx={{ mt: 1 }}>
+                                  <Typography variant="caption" color="text.secondary">
+                                    语速：{cv.speed ?? 1.0}
+                                  </Typography>
+                                  <Slider
+                                    size="small"
+                                    min={0.5}
+                                    max={2.0}
+                                    step={0.1}
+                                    value={cv.speed ?? 1.0}
+                                    onChange={(_, value) => handleSpeedChange(cv.characterId, value as number)}
+                                    sx={{ mt: 0.5 }}
+                                  />
+                                </Box>
 
-                            <Box sx={{ mt: 1 }}>
-                              <Typography variant="caption" color="text.secondary">
-                                音高：{cv.pitch ?? 50}
-                              </Typography>
-                              <Slider
-                                size="small"
-                                min={0}
-                                max={100}
-                                step={5}
-                                value={cv.pitch ?? 50}
-                                onChange={(_, value) => handlePitchChange(cv.characterId, value as number)}
-                                sx={{ mt: 0.5 }}
-                              />
-                            </Box>
+                                <Box sx={{ mt: 1 }}>
+                                  <Typography variant="caption" color="text.secondary">
+                                    音高：{cv.pitch ?? 50}
+                                  </Typography>
+                                  <Slider
+                                    size="small"
+                                    min={0}
+                                    max={100}
+                                    step={5}
+                                    value={cv.pitch ?? 50}
+                                    onChange={(_, value) => handlePitchChange(cv.characterId, value as number)}
+                                    sx={{ mt: 0.5 }}
+                                  />
+                                </Box>
+                              </>
+                            )}
 
                             <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
                               <Tooltip title="云端精确试听效果，请稍作等待...">
@@ -3321,7 +3956,7 @@ const AudiobookPage = () => {
                           </Tooltip>
   
                           {/* 编辑剧本按钮（如果有脚本可用，用户可以直接尝试打开） */}
-                          <Tooltip title="编辑本章节有声剧本">
+                          <Tooltip title="编辑本章节剧本与音频提示词">
                             <Button
                               variant="outlined"
                               size="small"
@@ -3335,7 +3970,7 @@ const AudiobookPage = () => {
                                 },
                               }}
                             >
-                              编辑剧本
+                              编辑剧本/提示词
                             </Button>
                           </Tooltip>
                         </Box>
@@ -3597,8 +4232,63 @@ const AudiobookPage = () => {
             </Box>
           )}
         </DialogContent>
+      <DialogActions>
+        <Button onClick={handleCloseScriptReviewDialog}>关闭</Button>
+      </DialogActions>
+    </Dialog>
+
+      {/* 阶段结果弹窗 */}
+      <Dialog
+        open={stageMetricsDialogOpen}
+        onClose={handleCloseStageMetricsDialog}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          {stageMetricsData ? `阶段结果：${stageMetricsData.stage.name}` : '阶段结果'}
+        </DialogTitle>
+        <DialogContent dividers>
+          {!stageMetricsData ? (
+            <Typography variant="body2" color="text.secondary">
+              暂无阶段数据
+            </Typography>
+          ) : (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <Typography variant="body2" color="text.secondary">
+                状态：{STAGE_STATUS_LABELS[stageMetricsData.info.status]}
+              </Typography>
+              {stageMetricsData.info.message && (
+                <Typography variant="body2">提示：{stageMetricsData.info.message}</Typography>
+              )}
+              {stageMetricsData.info.start_time && (
+                <Typography variant="body2" color="text.secondary">
+                  开始时间：{stageMetricsData.info.start_time}
+                </Typography>
+              )}
+              {stageMetricsData.info.end_time && (
+                <Typography variant="body2" color="text.secondary">
+                  结束时间：{stageMetricsData.info.end_time}
+                </Typography>
+              )}
+              {stageMetricsData.info.error_message && (
+                <Alert severity="error">{stageMetricsData.info.error_message}</Alert>
+              )}
+              <Paper
+                variant="outlined"
+                sx={{ p: 1, backgroundColor: 'rgba(0,0,0,0.02)' }}
+              >
+                <Box
+                  component="pre"
+                  sx={{ m: 0, fontSize: '0.75rem', whiteSpace: 'pre-wrap' }}
+                >
+                  {JSON.stringify(stageMetricsData.info.metrics, null, 2)}
+                </Box>
+              </Paper>
+            </Box>
+          )}
+        </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseScriptReviewDialog}>关闭</Button>
+          <Button onClick={handleCloseStageMetricsDialog}>关闭</Button>
         </DialogActions>
       </Dialog>
 
@@ -3611,6 +4301,13 @@ const AudiobookPage = () => {
         onClose={handleCloseScriptEditorDialog}
         onChangeSegmentText={handleChangeScriptSegmentText}
         onSaveScript={handleSaveScript}
+        onPreviewSegmentAudio={handlePreviewScriptSegmentAudio}
+        segmentPreviewingIndex={segmentPreviewingIndex}
+        segmentPreviewingType={segmentPreviewingType}
+        segmentAudioUrls={segmentAudioUrls}
+        segmentDetailsOpen={segmentDetailsOpen}
+        onToggleSegmentDetails={handleToggleSegmentDetails}
+        onUpdateSegment={handleUpdateScriptSegment}
       />
       
       {/* 新增：历史记录对话框 */}

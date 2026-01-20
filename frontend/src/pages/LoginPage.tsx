@@ -51,7 +51,7 @@ export default function LoginPage() {
       >
         <Paper elevation={3} sx={{ p: 4, width: '100%' }}>
           <Typography variant="h4" component="h1" gutterBottom align="center">
-            Novel Writing System
+            拾光工坊
           </Typography>
           <Typography variant="body2" color="textSecondary" align="center" sx={{ mb: 3 }}>
             Sign in to your account

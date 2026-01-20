@@ -12,6 +12,7 @@ import asyncio
 import logging
 import time
 import math
+import json
 from typing import List, Dict, Any, Optional, Callable
 from pathlib import Path
 from dataclasses import asdict, is_dataclass
@@ -125,6 +126,10 @@ class AudiobookEngine:
         """应用项目级音效/BGM 配置（来自 Project.audio_config['audio_fx']）。"""
         try:
             self._audio_fx_config = audio_fx or {}
+            theme = str(self._audio_fx_config.get("bgm_theme") or "").strip() or None
+            style = str(self._audio_fx_config.get("bgm_style") or "").strip() or None
+            if hasattr(self.music_composer, "apply_project_style"):
+                self.music_composer.apply_project_style(theme=theme, style=style)
             logger.info(f"🎚 已应用项目级音效/BGM 配置: {self._audio_fx_config}")
         except Exception as e:
             logger.warning(f"⚠️ 设置音效/BGM 配置失败: {e}")
@@ -150,6 +155,176 @@ class AudiobookEngine:
                 strategy.music_density = music_density
         except Exception as e:
             logger.warning(f"⚠️ 应用项目级音效/BGM 策略失败: {e}")
+
+    def _build_review_segments(self, script_segments: List[ScriptSegment]) -> List[Dict[str, Any]]:
+        """构造评审所需的片段结构。"""
+        return [
+            {
+                "type": seg.type,
+                "text": seg.text,
+                "speaker": seg.speaker,
+                "emotion": seg.emotion,
+                "performance_notes": seg.performance_notes if hasattr(seg, "performance_notes") else "",
+                "pause_before": getattr(seg, "pause_before", 0.0),
+                "pause_after": getattr(seg, "pause_after", 0.0),
+                "voice_params": seg.voice_params if hasattr(seg, "voice_params") else {},
+                "instruct_emotion": getattr(seg, "instruct_emotion", ""),
+                "instruct_scene": getattr(seg, "instruct_scene", ""),
+                "instruct_role": getattr(seg, "instruct_role", ""),
+                "instruct_identity": getattr(seg, "instruct_identity", ""),
+                "sound_effects": seg.sound_effects if seg.sound_effects is not None else [],
+                "music_cue": seg.music_cue if hasattr(seg, "music_cue") and seg.music_cue is not None else "",
+                "sound_effects_simple": getattr(seg, "sound_effects_simple", []) or [],
+                "music_cue_simple": getattr(seg, "music_cue_simple", "") or "",
+                "original_text": getattr(seg, "original_text", ""),
+                "adaptation_reason": getattr(seg, "adaptation_reason", ""),
+            }
+            for seg in script_segments
+        ]
+
+    @staticmethod
+    def _select_evenly_indices(total: int, keep: int) -> List[int]:
+        if keep <= 0:
+            return []
+        if keep >= total:
+            return list(range(total))
+        if keep == 1:
+            return [0]
+
+        step = (total - 1) / (keep - 1)
+        selected = [int(round(i * step)) for i in range(keep)]
+        unique = []
+        used = set()
+        for idx in selected:
+            if idx in used:
+                continue
+            used.add(idx)
+            unique.append(idx)
+        if len(unique) < keep:
+            for idx in range(total):
+                if idx in used:
+                    continue
+                unique.append(idx)
+                used.add(idx)
+                if len(unique) == keep:
+                    break
+        unique.sort()
+        return unique
+
+    def _auto_balance_script_audio_cues(
+        self,
+        script_segments: List[ScriptSegment],
+        standards: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """根据评审标准自动收敛音效/配乐密度。"""
+        if not script_segments:
+            return {"applied": False}
+
+        total_text_length = sum(len(getattr(seg, "text", "") or "") for seg in script_segments)
+        if total_text_length <= 0:
+            return {"applied": False}
+
+        estimated_minutes = total_text_length / 10 / 60
+        audio_fx = getattr(self, "_audio_fx_config", None) or {}
+        sfx_density = str(audio_fx.get("sound_effect_density") or "").lower()
+        music_density = str(audio_fx.get("music_density") or "").lower()
+
+        min_sfx_per_min = standards.get("min_sound_effects_per_minute", 2)
+        max_sfx_per_min = standards.get("max_sound_effects_per_minute", 6)
+        hard_max_sfx_per_min = standards.get("hard_max_sound_effects_per_minute", max_sfx_per_min)
+
+        target_sfx_per_min = max_sfx_per_min
+        if sfx_density == "off":
+            target_sfx_per_min = 0
+        elif sfx_density == "low":
+            target_sfx_per_min = min_sfx_per_min
+        elif sfx_density == "high":
+            target_sfx_per_min = hard_max_sfx_per_min
+
+        target_music_min = standards.get("music_coverage_target_min", 0.15)
+        target_music_max = standards.get("music_coverage_target_max", 0.40)
+        max_music_coverage = standards.get("max_music_coverage", 0.60)
+
+        target_music_coverage = target_music_max
+        if music_density == "off":
+            target_music_coverage = 0.0
+        elif music_density == "low":
+            target_music_coverage = target_music_min
+        elif music_density == "high":
+            target_music_coverage = max_music_coverage
+
+        max_effects = int(math.floor(target_sfx_per_min * estimated_minutes))
+        if target_sfx_per_min > 0 and max_effects == 0:
+            max_effects = 1
+
+        max_music_segments = int(math.floor(target_music_coverage * len(script_segments)))
+        if target_music_coverage > 0 and max_music_segments == 0:
+            max_music_segments = 1
+
+        effect_entries: List[tuple[int, int]] = []
+        for seg_idx, seg in enumerate(script_segments):
+            effects = seg.sound_effects or []
+            for effect_idx, _ in enumerate(effects):
+                effect_entries.append((seg_idx, effect_idx))
+
+        total_effects = len(effect_entries)
+        total_music_segments = sum(1 for seg in script_segments if seg.music_cue)
+        summary = {
+            "applied": False,
+            "estimated_minutes": round(estimated_minutes, 2),
+            "sound_effects_before": total_effects,
+            "sound_effects_after": total_effects,
+            "music_cues_before": total_music_segments,
+            "music_cues_after": total_music_segments,
+            "targets": {
+                "sound_effects_per_minute": target_sfx_per_min,
+                "music_coverage": target_music_coverage,
+            },
+        }
+
+        if total_effects > max_effects:
+            keep_indices = set(self._select_evenly_indices(total_effects, max_effects))
+            new_effects_by_segment: List[List[Any]] = [[] for _ in script_segments]
+            for flat_idx, (seg_idx, effect_idx) in enumerate(effect_entries):
+                if flat_idx in keep_indices:
+                    new_effects_by_segment[seg_idx].append(script_segments[seg_idx].sound_effects[effect_idx])
+            for seg_idx, seg in enumerate(script_segments):
+                seg.sound_effects = new_effects_by_segment[seg_idx]
+            summary["sound_effects_after"] = max_effects
+            summary["applied"] = True
+
+        if total_music_segments > max_music_segments:
+            music_indices = [idx for idx, seg in enumerate(script_segments) if seg.music_cue]
+            keep_music = set(self._select_evenly_indices(len(music_indices), max_music_segments))
+            for keep_idx, seg_idx in enumerate(music_indices):
+                if keep_idx in keep_music:
+                    continue
+                script_segments[seg_idx].music_cue = None
+            summary["music_cues_after"] = max_music_segments
+            summary["applied"] = True
+
+        if summary["applied"]:
+            for seg in script_segments:
+                effects = seg.sound_effects or []
+                names = []
+                for effect in effects:
+                    if isinstance(effect, dict):
+                        name = effect.get("name") or effect.get("id") or effect.get("effect_id") or ""
+                    else:
+                        name = getattr(effect, "name", "") or str(effect)
+                    if name:
+                        names.append(name)
+                seg.sound_effects_simple = names
+
+                if seg.music_cue:
+                    if isinstance(seg.music_cue, dict):
+                        seg.music_cue_simple = seg.music_cue.get("style") or seg.music_cue.get("name") or ""
+                    else:
+                        seg.music_cue_simple = getattr(seg.music_cue, "style", "") or str(seg.music_cue)
+                else:
+                    seg.music_cue_simple = ""
+
+        return summary
     
     async def generate_chapter_audio(
         self,
@@ -200,6 +375,7 @@ class AudiobookEngine:
         try:
             quality_report = None  # 剧本级质量评审结果
             final_audio_review = None  # 最终音频评审结果
+            auto_revision: Dict[str, Any] = {"applied": False}
             # ============ 阶段1：制定改编策略 ============
             self.task_tracker.start_stage(task_id, StageType.STRATEGY)
             logger.info("🎭 [1/6] AudioDirector制定改编策略...")
@@ -257,11 +433,20 @@ class AudiobookEngine:
                     message='正在改编剧本...'
                 )
             
+            def on_script_progress(progress: float, metrics: Optional[Dict[str, Any]] = None) -> None:
+                self.task_tracker.update_stage_progress(
+                    task_id,
+                    StageType.SCRIPT_ADAPTATION,
+                    progress,
+                    metrics,
+                )
+
             adapted_result = await self.script_adapter.adapt_chapter(
                 chapter_content=chapter_content,
                 character_list=character_list,
                 chapter_title=f"Chapter {chapter_id}",
-                genre=novel_genre
+                genre=novel_genre,
+                progress_callback=on_script_progress,
             )
             
             # 兼容 ChapterStructure 与纯片段列表两种返回形式
@@ -341,18 +526,7 @@ class AudiobookEngine:
                 logger.info("🔍 [6/8] AudioQualityReviewer剧本质量评审（TTS前）...")
                 
                 # 转换script_segments为评审格式
-                review_segments = [
-                    {
-                        "type": seg.type,
-                        "text": seg.text,
-                        "speaker": seg.speaker,
-                        "emotion": seg.emotion,
-                        "performance_notes": seg.performance_notes if hasattr(seg, 'performance_notes') else "",
-                        "sound_effects": seg.sound_effects if seg.sound_effects is not None else [],
-                        "music_cue": seg.music_cue if hasattr(seg, 'music_cue') and seg.music_cue is not None else ""
-                    }
-                    for seg in script_segments
-                ]
+                review_segments = self._build_review_segments(script_segments)
 
                 # 为前端评审弹窗准备一份精简的片段列表（只保留前50段）
                 sample_segments = [
@@ -370,6 +544,17 @@ class AudiobookEngine:
                     review_segments,
                     novel_genre=novel_genre
                 )
+
+                auto_revision = self._auto_balance_script_audio_cues(
+                    script_segments,
+                    self.audio_quality_reviewer.quality_standards,
+                )
+                if auto_revision.get("applied"):
+                    review_segments = self._build_review_segments(script_segments)
+                    quality_report = self.audio_quality_reviewer.review_script(
+                        review_segments,
+                        novel_genre=novel_genre
+                    )
                 
                 issues_preview = [
                     {
@@ -391,6 +576,7 @@ class AudiobookEngine:
                     "revision_suggestions": quality_report.revision_suggestions,
                     "sample_segments": sample_segments,
                     "issues": issues_preview,
+                    "auto_revision": auto_revision if auto_revision.get("applied") else None,
                 })
                 
                 logger.info(f"   ✅ 剧本评审完成: {quality_report.overall_grade} ({quality_report.overall_score:.1f}分)")
@@ -417,6 +603,52 @@ class AudiobookEngine:
                             'issues_count': len(quality_report.issues),
                         }
                     )
+
+                if auto_revision.get("applied"):
+                    try:
+                        _, sound_effects_count, music_cues_count = await self._parallel_design(
+                            task_id,
+                            script_segments,
+                            chapter_content,
+                            preserve_user_config=True,
+                            chapter_id=chapter_id,
+                            audiobook_project_id=audiobook_project_id,
+                            skip_stage_tracking=True,
+                            include_voice_design=False,
+                        )
+
+                        audio_fx = getattr(self, "_audio_fx_config", None)
+                        sound_metrics = {"sound_effects_count": sound_effects_count}
+                        if self._last_effect_timeline:
+                            sound_metrics["timeline"] = self._last_effect_timeline
+                        if audio_fx:
+                            enable_sfx = audio_fx.get("enable_sound_effects", True)
+                            sfx_density = str(audio_fx.get("sound_effect_density") or "").lower()
+                            if (not enable_sfx) or sfx_density == "off":
+                                sound_metrics["skipped"] = True
+                        self.task_tracker.complete_stage(
+                            task_id,
+                            StageType.SOUND_DESIGN,
+                            metrics=sound_metrics,
+                        )
+
+                        music_metrics = {"music_cues_count": music_cues_count}
+                        if self._last_music_timeline:
+                            music_metrics["timeline"] = self._last_music_timeline
+                        if audio_fx:
+                            enable_music = audio_fx.get("enable_music", True)
+                            music_density = str(audio_fx.get("music_density") or "").lower()
+                            if (not enable_music) or music_density == "off":
+                                music_metrics["skipped"] = True
+                        self.task_tracker.complete_stage(
+                            task_id,
+                            StageType.MUSIC_COMPOSITION,
+                            metrics=music_metrics,
+                        )
+
+                        logger.info("Auto revision applied; refreshed sound/music timelines.")
+                    except Exception as exc:
+                        logger.warning("Auto revision refresh failed: %s", exc)
             else:
                 # 跳过质量评审，标记为已完成
                 self.task_tracker.complete_stage(task_id, StageType.QUALITY_REVIEW, metrics={
@@ -432,9 +664,37 @@ class AudiobookEngine:
                         stage_metrics={'skipped': True}
                     )
             
-            # ============ 阶段7：TTS合成 ============
+            # ============ 阶段7：音频提示词审阅 ============
+            self._assign_voices(script_segments)
+            self.task_tracker.start_stage(task_id, StageType.AUDIO_PROMPT_REVIEW)
+            prompt_metrics = {
+                "segments_count": len(script_segments),
+                "sound_effects_count": sum(len(getattr(seg, "sound_effects", []) or []) for seg in script_segments),
+                "music_cues_count": sum(
+                    1
+                    for seg in script_segments
+                    if getattr(seg, "music_cue", None) or getattr(seg, "music_cue_simple", "")
+                ),
+                "instruct_count": sum(
+                    1
+                    for seg in script_segments
+                    if (getattr(seg, "instruct_emotion", "") or getattr(seg, "instruct_scene", "") or getattr(seg, "instruct_role", "") or getattr(seg, "instruct_identity", ""))
+                ),
+            }
+            self.task_tracker.complete_stage(task_id, StageType.AUDIO_PROMPT_REVIEW, metrics=prompt_metrics)
+            if WEBSOCKET_AVAILABLE and audiobook_project_id:
+                await ws_manager.send_audiobook_progress(
+                    audiobook_project_id=audiobook_project_id,
+                    chapter_id=chapter_id,
+                    stage='audio_prompt_review',
+                    progress=100,
+                    message='音频提示词准备完成，可进入审阅',
+                    stage_metrics=prompt_metrics,
+                )
+
+            # ============ 阶段8：TTS合成 ============
             self.task_tracker.start_stage(task_id, StageType.TTS_SYNTHESIS)
-            logger.info("🎙️ [7/8] TTS合成中...")
+            logger.info("🎙️ [8/10] TTS合成中...")
             
             # 📡 WebSocket推送：TTS阶段开始
             if WEBSOCKET_AVAILABLE and audiobook_project_id:
@@ -446,8 +706,6 @@ class AudiobookEngine:
                     message=f'正在合成{len(script_segments)}个音频片段...'
                 )
             
-            # 为剧本片段分配音色
-            self._assign_voices(script_segments)
             audio_list = await self._synthesize_segments(script_segments)
             
             tts_stats = self.tts_engine.get_cost_stats()
@@ -468,9 +726,12 @@ class AudiobookEngine:
                     stage_metrics=tts_stats
                 )
             
-            # ============ 阶段7：音频混合 ============
+            # 基于真实音频时长对齐音效/配乐时间线
+            self._realign_timelines_with_audio(script_segments, audio_list)
+
+            # ============ 阶段9：音频混合 ============
             self.task_tracker.start_stage(task_id, StageType.AUDIO_MIXING)
-            logger.info("🎧 [7/8] 音频混合中...")
+            logger.info("🎧 [9/10] 音频混合中...")
             
             final_audio = self.audio_mixer.mix_chapter(audio_list)
             
@@ -496,10 +757,10 @@ class AudiobookEngine:
             })
             logger.info(f"   ✅ 混合完成: {audio_info}")
             
-            # ============ 阶段8：最终音频评审（可选） ============
+            # ============ 阶段10：最终音频评审（可选） ============
             if enable_quality_review:
                 self.task_tracker.start_stage(task_id, StageType.FINAL_AUDIO_REVIEW)
-                logger.info("🔎 [8/8] 最终音频评审（基于音频信息）...")
+                logger.info("🔎 [10/10] 最终音频评审（基于音频信息）...")
                 
                 final_audio_review = self._final_audio_review(
                     audio_info=audio_info,
@@ -516,14 +777,14 @@ class AudiobookEngine:
                     "skipped": True
                 })
             
-            # ============ 阶段9：保存文件（可选） ============
+            # ============ 阶段11：保存文件（可选） ============
             if output_path:
                 Path(output_path).parent.mkdir(parents=True, exist_ok=True)
                 with open(output_path, 'wb') as f:
                     f.write(final_audio)
                 logger.info(f"💾 音频已保存: {output_path}")
             
-            # ============ 阶段10：统计结果 ============
+            # ============ 阶段12：统计结果 ============
             elapsed_time = time.time() - start_time
             
             # 标记任务完成
@@ -549,6 +810,8 @@ class AudiobookEngine:
                     script_segments_payload.append(getattr(seg, "__dict__", seg))
 
             quality_report_payload = asdict(quality_report) if quality_report else None
+            if quality_report_payload and auto_revision.get("applied"):
+                quality_report_payload["auto_revision"] = auto_revision
 
             result = {
                 "success": True,
@@ -577,7 +840,8 @@ class AudiobookEngine:
                         "overall_grade": quality_report.overall_grade,
                         "overall_score": quality_report.overall_score,
                         "issues_count": len(quality_report.issues),
-                        "revision_suggestions": quality_report.revision_suggestions
+                        "revision_suggestions": quality_report.revision_suggestions,
+                        "auto_revision": auto_revision if auto_revision.get("applied") else None,
                     } if quality_report else None,
                     "final_audio_review": final_audio_review,
                 }
@@ -712,8 +976,29 @@ class AudiobookEngine:
                     # 未知角色，临时分配
                     voice_profile = self.voice_manager.assign_voice(segment.speaker)
             
-            # 🔥 重构后：直接使用 VoiceManager 的 TTS 参数，不再合并 VoiceDesigner 的结果
-            voice_params_dict = voice_profile.get_tts_params(getattr(segment, "emotion", "neutral"))
+            # 🔥 重构后：使用 VoiceManager 的默认参数，并合并段落级 voice_params
+            segment_emotion = getattr(segment, "emotion", "neutral")
+            instruct_emotion = (getattr(segment, "instruct_emotion", "") or "").strip()
+            emotion_for_params = instruct_emotion or segment_emotion or "neutral"
+            voice_params_dict = voice_profile.get_tts_params(emotion_for_params)
+
+            segment_voice_params = getattr(segment, "voice_params", None) or {}
+            for key, value in segment_voice_params.items():
+                if value is None or key == "speaker":
+                    continue
+                voice_params_dict[key] = value
+
+            if "rate" not in voice_params_dict and "speed" in voice_params_dict:
+                voice_params_dict["rate"] = voice_params_dict["speed"]
+
+            voice_params_dict["pause_before"] = segment_voice_params.get(
+                "pause_before",
+                getattr(segment, "pause_before", 0.0),
+            )
+            voice_params_dict["pause_after"] = segment_voice_params.get(
+                "pause_after",
+                getattr(segment, "pause_after", 0.0),
+            )
             
             # 🔍 调试：输出最终参数
             logger.info(
@@ -730,6 +1015,13 @@ class AudiobookEngine:
             # 将片段元信息透传给TTS，用于Instruct模板（场景/角色/身份）
             segment.voice_params["segment_speaker"] = getattr(segment, "speaker", "")
             segment.voice_params["segment_type"] = getattr(segment, "type", "") 
+            segment.voice_params["instruct_emotion"] = instruct_emotion
+            segment.voice_params["instruct_scene"] = getattr(segment, "instruct_scene", "") or ""
+            segment.voice_params["instruct_role"] = getattr(segment, "instruct_role", "") or ""
+            segment.voice_params["instruct_identity"] = getattr(segment, "instruct_identity", "") or ""
+
+            if instruct_emotion or segment.voice_params["instruct_scene"] or segment.voice_params["instruct_role"] or segment.voice_params["instruct_identity"]:
+                segment.voice_params["use_instruct_mode"] = True
     async def _synthesize_segments(
         self,
         script_segments,
@@ -742,7 +1034,7 @@ class AudiobookEngine:
             {
                 "text": seg.text,
                 "voice_params": seg.voice_params if hasattr(seg, 'voice_params') else {},
-                "emotion": seg.emotion
+                "emotion": (getattr(seg, "instruct_emotion", "") or getattr(seg, "emotion", "neutral"))
             }
             for seg in script_segments
         ]
@@ -758,6 +1050,125 @@ class AudiobookEngine:
         
         return audio_list
 
+    @staticmethod
+    def _parse_scene_index(scene_id: str) -> Optional[int]:
+        if not scene_id:
+            return None
+        for prefix in ("scene_", "climax_", "shift_"):
+            if scene_id.startswith(prefix):
+                try:
+                    return int(scene_id[len(prefix):])
+                except ValueError:
+                    return None
+        return None
+
+    @staticmethod
+    def _build_segment_offsets(durations: List[float]) -> List[Dict[str, float]]:
+        offsets: List[Dict[str, float]] = []
+        current = 0.0
+        for duration in durations:
+            safe_duration = max(0.0, float(duration))
+            offsets.append({"start": current, "duration": safe_duration})
+            current += safe_duration
+        return offsets
+
+    @staticmethod
+    def _estimate_segment_durations(script_segments: List[ScriptSegment]) -> List[float]:
+        durations = []
+        for seg in script_segments:
+            text = getattr(seg, "text", "") or ""
+            duration = len(text) / 10.0
+            durations.append(max(duration, 0.2))
+        return durations
+
+    def _align_timeline_with_audio(
+        self,
+        timeline: Optional[Dict[str, Any]],
+        estimated_offsets: List[Dict[str, float]],
+        actual_offsets: List[Dict[str, float]],
+        total_actual_duration: float,
+        *,
+        align_environment: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        if not timeline or not timeline.get("timeline"):
+            return timeline
+
+        adjusted_items: List[Dict[str, Any]] = []
+        for item in timeline.get("timeline", []):
+            new_item = dict(item)
+            scene_id = str(item.get("scene_id") or "")
+            idx = self._parse_scene_index(scene_id)
+            if idx is not None and idx < len(estimated_offsets) and idx < len(actual_offsets):
+                est_start = estimated_offsets[idx]["start"]
+                actual_start = actual_offsets[idx]["start"]
+                relative = max(0.0, float(item.get("timestamp", 0.0)) - est_start)
+                new_item["timestamp"] = actual_start + relative
+            elif scene_id == "ending":
+                duration = float(item.get("duration") or 0.0)
+                new_item["timestamp"] = max(0.0, total_actual_duration - duration)
+            elif scene_id == "opening":
+                new_item["timestamp"] = 0.0
+            adjusted_items.append(new_item)
+
+        if align_environment:
+            env_indices = [
+                idx for idx, item in enumerate(adjusted_items)
+                if item.get("type") == "environment" or item.get("loop")
+            ]
+            for pos, idx in enumerate(env_indices):
+                item = adjusted_items[idx]
+                start = float(item.get("timestamp", 0.0))
+                next_start = total_actual_duration
+                if pos + 1 < len(env_indices):
+                    next_start = float(adjusted_items[env_indices[pos + 1]].get("timestamp", total_actual_duration))
+                if next_start <= start:
+                    continue
+                item["duration"] = max(0.0, next_start - start)
+                item["loop"] = True
+
+        timeline_copy = dict(timeline)
+        timeline_copy["timeline"] = adjusted_items
+        return timeline_copy
+
+    def _realign_timelines_with_audio(
+        self,
+        script_segments: List[ScriptSegment],
+        audio_list: List[bytes],
+    ) -> None:
+        if not audio_list or not script_segments:
+            return
+
+        estimated_durations = self._estimate_segment_durations(script_segments)
+        actual_durations: List[float] = []
+        for idx, audio in enumerate(audio_list):
+            if not audio:
+                actual_durations.append(estimated_durations[idx] if idx < len(estimated_durations) else 0.2)
+                continue
+            info = self.audio_mixer.get_audio_info(audio)
+            duration = float(info.get("duration_seconds", 0.0) or 0.0)
+            if duration <= 0 and idx < len(estimated_durations):
+                duration = estimated_durations[idx]
+            actual_durations.append(duration)
+
+        estimated_offsets = self._build_segment_offsets(estimated_durations)
+        actual_offsets = self._build_segment_offsets(actual_durations)
+        total_actual = sum(actual_durations)
+
+        self._last_effect_timeline = self._align_timeline_with_audio(
+            self._last_effect_timeline,
+            estimated_offsets,
+            actual_offsets,
+            total_actual,
+            align_environment=True,
+        )
+        self._last_music_timeline = self._align_timeline_with_audio(
+            self._last_music_timeline,
+            estimated_offsets,
+            actual_offsets,
+            total_actual,
+            align_environment=False,
+        )
+
     def _apply_sound_effects(
         self,
         audio_data: bytes,
@@ -772,6 +1183,14 @@ class AudiobookEngine:
             return audio_data
         
         mixed_audio = audio_data
+        base_dir = Path(__file__).resolve().parents[3] / "data" / "audio_library"
+        audio_fx = getattr(self, "_audio_fx_config", None) or {}
+        ducking_enabled = audio_fx.get("sound_effect_ducking", True)
+        ducking_priority = audio_fx.get("sound_effect_priority", "dialogue")
+        ducking_threshold_dbfs = audio_fx.get("sound_effect_ducking_threshold_dbfs", -35.0)
+        ducking_reduction_db = audio_fx.get("sound_effect_ducking_reduction_db", -6.0)
+        ducking_chunk_ms = audio_fx.get("sound_effect_ducking_chunk_ms", 250)
+        base_dir = Path(__file__).resolve().parents[3] / "data" / "audio_library"
         
         for item in timeline_items:
             file_ref = item.get("file")
@@ -787,6 +1206,10 @@ class AudiobookEngine:
                 "transition": -18.0,   # 过渡音（降低 6dB）
             }
             base_gain = base_gain_map.get(effect_type_str, -16.0)
+            duration = item.get("duration")
+            fade_in = item.get("fade_in", 0.0)
+            fade_out = item.get("fade_out", 0.0)
+            loop = bool(item.get("loop")) or effect_type_str == "environment"
 
             # timeline volume 约定为 0.0~1.0，0.5 视为“默认音量”
             timeline_volume = item.get("volume", 0.5)
@@ -808,10 +1231,13 @@ class AudiobookEngine:
             effect_path = Path(file_ref)
             if not effect_path.is_absolute():
                 # 相对路径：相对于 audio_library 根目录
-                # engine.py 在 backend/app/services/audiobook/ 下，parents[3] = backend/
-                base_dir = Path(__file__).resolve().parents[3] / "data" / "audio_library"
                 effect_path = base_dir / file_ref
-            
+            if not effect_path.exists():
+                effect_name = Path(file_ref).stem or str(item.get("description") or "").strip()
+                if effect_name:
+                    for candidate in (base_dir / "sound_effects").rglob(f"{effect_name}.*"):
+                        effect_path = candidate
+                        break
             if not effect_path.exists():
                 logger.warning(f"⚠️ 音效文件不存在: {effect_path}")
                 continue
@@ -820,16 +1246,92 @@ class AudiobookEngine:
                 with effect_path.open("rb") as f:
                     effect_bytes = f.read()
                 position_ms = int(timestamp * 1000)
+                effect_duration_ms = None
+                try:
+                    if duration is not None:
+                        duration_val = float(duration)
+                        if duration_val <= 0:
+                            effect_duration_ms = max(0, len(mixed_audio) - position_ms) if loop else None
+                        else:
+                            effect_duration_ms = int(duration_val * 1000)
+                except (TypeError, ValueError):
+                    effect_duration_ms = None
+                fade_in_ms = int(float(fade_in) * 1000) if fade_in else 0
+                fade_out_ms = int(float(fade_out) * 1000) if fade_out else 0
                 mixed_audio = self.audio_mixer.add_sound_effect(
                     mixed_audio,
                     effect_bytes,
                     position_ms=position_ms,
                     effect_volume_offset=effect_volume_offset,
+                    effect_duration_ms=effect_duration_ms,
+                    fade_in_ms=fade_in_ms,
+                    fade_out_ms=fade_out_ms,
+                    loop_fill=bool(loop),
+                    ducking_enabled=bool(ducking_enabled),
+                    ducking_priority=str(ducking_priority or "dialogue"),
+                    ducking_threshold_dbfs=float(ducking_threshold_dbfs),
+                    ducking_reduction_db=float(ducking_reduction_db),
+                    ducking_chunk_ms=int(ducking_chunk_ms),
                 )
             except Exception as e:
                 logger.warning(f"⚠️ 叠加音效失败 {effect_path}: {e}")
         
         return mixed_audio
+
+    def _resolve_music_path(
+        self,
+        file_ref: str,
+        base_dir: Path,
+        *,
+        style_hint: str = "",
+        mood_hint: str = "",
+    ) -> Optional[Path]:
+        """解析配乐文件路径（支持索引回退与缓存目录搜索）。"""
+        if file_ref:
+            music_path = Path(file_ref)
+            if not music_path.is_absolute():
+                music_path = base_dir / file_ref
+            if music_path.exists():
+                return music_path
+
+            candidate_name = Path(file_ref).stem
+            if candidate_name:
+                for candidate in (base_dir / "music_cache").rglob(f"{candidate_name}.*"):
+                    return candidate
+
+        style_hint = (style_hint or "").strip()
+        mood_hint = (mood_hint or "").strip().lower()
+        index_path = base_dir / "music_index.json"
+        if index_path.exists():
+            try:
+                raw = index_path.read_text(encoding="utf-8")
+                index_data = json.loads(raw)
+            except Exception as exc:
+                logger.warning(f"?? 读取配乐索引失败: {exc}")
+                index_data = []
+
+            if isinstance(index_data, list):
+                if style_hint:
+                    for entry in index_data:
+                        style = str(entry.get("style") or "").strip()
+                        if style and (style_hint in style or style in style_hint):
+                            file_path = entry.get("file_path")
+                            if file_path and Path(file_path).exists():
+                                return Path(file_path)
+                if mood_hint:
+                    for entry in index_data:
+                        if str(entry.get("mood") or "").strip().lower() == mood_hint:
+                            file_path = entry.get("file_path")
+                            if file_path and Path(file_path).exists():
+                                return Path(file_path)
+                for entry in index_data:
+                    file_path = entry.get("file_path")
+                    if file_path and Path(file_path).exists():
+                        return Path(file_path)
+
+        for candidate in (base_dir / "music_cache").rglob("*.mp3"):
+            return candidate
+        return None
     
     def _apply_background_music(
         self,
@@ -859,6 +1361,12 @@ class AudiobookEngine:
         intelligent_balance = audio_fx.get("intelligent_balance", False)
         # 将默认配乐基准音量从 -30dB 再降低到 -36dB，避免喧宾夺主
         base_bgm_volume_db = audio_fx.get("base_bgm_volume", -36)
+        try:
+            bgm_crossfade_ms = int(audio_fx.get("bgm_crossfade_ms") or 0)
+        except Exception:
+            bgm_crossfade_ms = 0
+        if bgm_crossfade_ms < 0:
+            bgm_crossfade_ms = 0
         
         for item in timeline_items:
             file_ref = item.get("file")
@@ -909,6 +1417,15 @@ class AudiobookEngine:
                 music_path = base_dir / file_ref
             
             if not music_path.exists():
+                resolved = self._resolve_music_path(
+                    str(file_ref or ""),
+                    base_dir,
+                    style_hint=str(item.get("description") or ""),
+                    mood_hint=str(mood or ""),
+                )
+                if resolved:
+                    music_path = resolved
+            if not music_path.exists():
                 logger.warning(f"⚠️ 配乐文件不存在: {music_path}")
                 continue
             
@@ -927,14 +1444,20 @@ class AudiobookEngine:
                 except (TypeError, ValueError):
                     duration_ms = None
 
+                fade_in_ms = max(0, int(float(fade_in or 0.0) * 1000))
+                fade_out_ms = max(0, int(float(fade_out or 0.0) * 1000))
+                if bgm_crossfade_ms > 0:
+                    fade_in_ms = max(fade_in_ms, bgm_crossfade_ms)
+                    fade_out_ms = max(fade_out_ms, bgm_crossfade_ms)
+
                 mixed_audio = self.audio_mixer.add_background_music(
                     mixed_audio,
                     bgm_bytes,
                     bgm_volume_offset=int(bgm_volume_offset),
                     position_ms=position_ms,
                     duration_ms=duration_ms,
-                    fade_in_ms=max(0, int(float(fade_in or 0.0) * 1000)),
-                    fade_out_ms=max(0, int(float(fade_out or 0.0) * 1000)),
+                    fade_in_ms=fade_in_ms,
+                    fade_out_ms=fade_out_ms,
                     loop_fill=True,
                     sync_with_dialogue=bool(sync_with_dialogue),
                     dialogue_volume_reduction=float(dialogue_volume_reduction or 0.0),
@@ -1069,6 +1592,8 @@ class AudiobookEngine:
         preserve_user_config: bool = False,  # 🆕 新参数：是否保留用户配置
         chapter_id: Optional[int] = None,
         audiobook_project_id: Optional[int] = None,
+        skip_stage_tracking: bool = False,
+        include_voice_design: bool = True,
     ) -> tuple:
         """
         并行执行音色、音效、音乐设计
@@ -1083,9 +1608,13 @@ class AudiobookEngine:
             (voice_profiles, sound_effects_count, music_cues_count)
         """
         # 定义三个并行任务
+        allow_asset_generation = False
         async def voice_design_task():
             """ 音色设计任务（已废弃，现统一使用VoiceManager）"""
-            self.task_tracker.start_stage(task_id, StageType.VOICE_DESIGN)
+            if not include_voice_design:
+                return {}
+            if not skip_stage_tracking:
+                self.task_tracker.start_stage(task_id, StageType.VOICE_DESIGN)
             
             # 提取角色列表
             characters_in_script = list(set([
@@ -1122,6 +1651,8 @@ class AudiobookEngine:
                         self.voice_manager.assign_voice(char_name)
                     voice_profiles = {}
                 
+                if skip_stage_tracking:
+                    return voice_profiles
                 self.task_tracker.complete_stage(task_id, StageType.VOICE_DESIGN, metrics={
                     "characters_count": len(characters_in_script),
                     "preserved_count": len(configured_characters) if preserve_user_config else 0,
@@ -1130,6 +1661,8 @@ class AudiobookEngine:
                 
                 return voice_profiles
             else:
+                if skip_stage_tracking:
+                    return []
                 self.task_tracker.complete_stage(task_id, StageType.VOICE_DESIGN, metrics={
                     "characters_count": 0
                 })
@@ -1137,7 +1670,8 @@ class AudiobookEngine:
         
         async def sound_design_task():
             """音效设计任务（增强 Mureka 环境音）"""
-            self.task_tracker.start_stage(task_id, StageType.SOUND_DESIGN)
+            if not skip_stage_tracking:
+                self.task_tracker.start_stage(task_id, StageType.SOUND_DESIGN)
             
             # 如果项目配置关闭了音效，直接跳过音效设计阶段
             audio_fx = getattr(self, "_audio_fx_config", None)
@@ -1147,6 +1681,8 @@ class AudiobookEngine:
                 if (not enable_sfx) or sfx_density == "off":
                     logger.info("🎚 项目级配置已关闭音效设计，跳过 SoundEffectDesigner 阶段")
                     self._last_effect_timeline = None
+                    if skip_stage_tracking:
+                        return 0
                     self.task_tracker.complete_stage(
                         task_id,
                         StageType.SOUND_DESIGN,
@@ -1182,13 +1718,10 @@ class AudiobookEngine:
             
             # 调用音效设计器生成音效时间线
             try:
-                effect_cues = self.sound_effect_designer.design_effects(script_dicts)
-
-                # 使用 Fal.ai 为占位音效生成真实音效（如开门声、狗叫声等）
-                try:
-                    await self.sound_effect_designer.enhance_effects_with_fal()
-                except Exception as fal_err:
-                    logger.warning(f"⚠️ 占位音效 Fal.ai 增强失败（不影响主流程）: {fal_err}")
+                effect_cues = self.sound_effect_designer.design_effects(
+                    script_dicts,
+                    allow_asset_generation=allow_asset_generation,
+                )
                 
                 # 根据音效密度配置优化音效数量
                 sfx_density = str(audio_fx.get("sound_effect_density") or "medium").lower() if audio_fx else "medium"
@@ -1204,20 +1737,26 @@ class AudiobookEngine:
                 
                 self._last_effect_timeline = self.sound_effect_designer.export_effect_timeline()
                 sound_effects_count = len(self.sound_effect_designer.effect_cues)
+                effect_timeline = self._last_effect_timeline
             except Exception as e:
                 logger.warning(f"⚠️ 音效设计阶段异常，将退回到简单计数逻辑: {e}")
                 sound_effects_count = sum(len(getattr(seg, "sound_effects", []) or []) for seg in script_segments)
                 self._last_effect_timeline = None
+                effect_timeline = None
             
-            self.task_tracker.complete_stage(task_id, StageType.SOUND_DESIGN, metrics={
-                "sound_effects_count": sound_effects_count
-            })
+            metrics = {"sound_effects_count": sound_effects_count}
+            if effect_timeline:
+                metrics["timeline"] = effect_timeline
+            if skip_stage_tracking:
+                return sound_effects_count
+            self.task_tracker.complete_stage(task_id, StageType.SOUND_DESIGN, metrics=metrics)
             
             return sound_effects_count
         
         async def music_composition_task():
             """音乐编曲任务（增强 AI 配乐）"""
-            self.task_tracker.start_stage(task_id, StageType.MUSIC_COMPOSITION)
+            if not skip_stage_tracking:
+                self.task_tracker.start_stage(task_id, StageType.MUSIC_COMPOSITION)
             
             # 如果项目配置关闭了配乐，直接跳过配乐设计阶段
             audio_fx = getattr(self, "_audio_fx_config", None)
@@ -1227,6 +1766,8 @@ class AudiobookEngine:
                 if (not enable_music) or music_density == "off":
                     logger.info("🎚 项目级配置已关闭配乐设计，跳过 MusicComposer 阶段")
                     self._last_music_timeline = None
+                    if skip_stage_tracking:
+                        return 0
                     self.task_tracker.complete_stage(
                         task_id,
                         StageType.MUSIC_COMPOSITION,
@@ -1402,7 +1943,8 @@ class AudiobookEngine:
                 
                 music_cues = await self.music_composer.design_music(
                     chapter_structure,
-                    skip_intro_outro=skip_intro_outro
+                    skip_intro_outro=skip_intro_outro,
+                    allow_asset_generation=allow_asset_generation,
                 )
                 
                 # 根据音乐密度配置优化配乐数量
@@ -1418,15 +1960,20 @@ class AudiobookEngine:
                 
                 self._last_music_timeline = self.music_composer.export_music_timeline()
                 music_cues_count = len(music_cues)
+                music_timeline = self._last_music_timeline
                 logger.info(f"🎼 已设计 {music_cues_count} 个配乐提示")
             except Exception as e:
                 logger.warning(f"⚠️ 配乐设计异常（不影响主流程）: {e}")
                 music_cues_count = sum(1 for seg in script_segments if seg.music_cue)
                 self._last_music_timeline = None
+                music_timeline = None
             
-            self.task_tracker.complete_stage(task_id, StageType.MUSIC_COMPOSITION, metrics={
-                "music_cues_count": music_cues_count
-            })
+            metrics = {"music_cues_count": music_cues_count}
+            if music_timeline:
+                metrics["timeline"] = music_timeline
+            if skip_stage_tracking:
+                return music_cues_count
+            self.task_tracker.complete_stage(task_id, StageType.MUSIC_COMPOSITION, metrics=metrics)
             
             return music_cues_count
         
@@ -1493,7 +2040,7 @@ class AudiobookEngine:
 
             # 阶段1：制定改编策略
             self.task_tracker.start_stage(task_id, StageType.STRATEGY)
-            logger.info("🎭 [1/5] 制定改编策略...")
+            logger.info("🎭 [1/7] 制定改编策略...")
             
             # 📡 WebSocket推送：策略阶段开始
             if WEBSOCKET_AVAILABLE and audiobook_project_id:
@@ -1536,7 +2083,7 @@ class AudiobookEngine:
 
             # 阶段2：剧本改编
             self.task_tracker.start_stage(task_id, StageType.SCRIPT_ADAPTATION)
-            logger.info("📝 [2/5] 剧本改编...")
+            logger.info("📝 [2/7] 剧本改编...")
             
             # 📡 WebSocket推送：剧本阶段开始
             if WEBSOCKET_AVAILABLE and audiobook_project_id:
@@ -1548,11 +2095,20 @@ class AudiobookEngine:
                     message='正在改编剧本...'
                 )
             
+            def on_script_progress(progress: float, metrics: Optional[Dict[str, Any]] = None) -> None:
+                self.task_tracker.update_stage_progress(
+                    task_id,
+                    StageType.SCRIPT_ADAPTATION,
+                    progress,
+                    metrics,
+                )
+
             adapted_result = await self.script_adapter.adapt_chapter(
                 chapter_content=chapter_content,
                 character_list=character_list,
                 chapter_title=f"Chapter {chapter_id}",
                 genre=novel_genre,
+                progress_callback=on_script_progress,
             )
 
             if isinstance(adapted_result, ChapterStructure):
@@ -1585,10 +2141,52 @@ class AudiobookEngine:
                     stage_metrics={'segments_count': segments_count}
                 )
 
+            # ============ 阶段3-5：并行设计（音色+音效+音乐）============
+            logger.info("🎵 [3-5/7] 并行设计：音色、音效、音乐...")
+
+            if WEBSOCKET_AVAILABLE and audiobook_project_id:
+                await ws_manager.send_audiobook_progress(
+                    audiobook_project_id=audiobook_project_id,
+                    chapter_id=chapter_id,
+                    stage='design',
+                    progress=0,
+                    message='正在并行设计音色、音效、音乐...'
+                )
+
+            voice_profiles, sound_effects_count, music_cues_count = await self._parallel_design(
+                task_id,
+                script_segments,
+                chapter_content,
+                preserve_user_config=True,
+                chapter_id=chapter_id,
+                audiobook_project_id=audiobook_project_id,
+            )
+
+            logger.info("   ✅并行设计完成")
+            logger.info(f"      - 音色: {len(voice_profiles) if voice_profiles else 0} 个角色")
+            logger.info(f"      - 音效: {sound_effects_count} 个标注")
+            logger.info(f"      - 音乐: {music_cues_count} 个提示")
+
+            if WEBSOCKET_AVAILABLE and audiobook_project_id:
+                await ws_manager.send_audiobook_progress(
+                    audiobook_project_id=audiobook_project_id,
+                    chapter_id=chapter_id,
+                    stage='design',
+                    progress=100,
+                    message=f'设计完成：{len(voice_profiles) if voice_profiles else 0}个角色、{sound_effects_count}个音效、{music_cues_count}个配乐',
+                    stage_metrics={
+                        'voice_count': len(voice_profiles) if voice_profiles else 0,
+                        'sound_effects_count': sound_effects_count,
+                        'music_cues_count': music_cues_count
+                    }
+                )
+
             # 阶段3：剧本质量评审（可选）
+            review_segments = self._build_review_segments(script_segments)
+            auto_revision: Dict[str, Any] = {"applied": False}
             if enable_quality_review:
                 self.task_tracker.start_stage(task_id, StageType.QUALITY_REVIEW)
-                logger.info("🔍 [3/5] 剧本质量评审...")
+                logger.info("🔍 [6/7] 剧本质量评审...")
                 
                 # 📡 WebSocket推送：评审阶段开始
                 if WEBSOCKET_AVAILABLE and audiobook_project_id:
@@ -1600,25 +2198,21 @@ class AudiobookEngine:
                         message='正在评审剧本质量...'
                     )
 
-                review_segments: List[Dict[str, Any]] = [
-                    {
-                        "type": getattr(seg, "type", ""),
-                        "text": getattr(seg, "text", ""),
-                        "speaker": getattr(seg, "speaker", ""),
-                        "emotion": getattr(seg, "emotion", ""),
-                        "performance_notes": getattr(seg, "performance_notes", ""),
-                        "sound_effects": getattr(seg, "sound_effects", []) or [],
-                        "music_cue": getattr(seg, "music_cue", ""),
-                        "original_text": getattr(seg, "original_text", ""),
-                        "adaptation_reason": getattr(seg, "adaptation_reason", ""),
-                    }
-                    for seg in script_segments
-                ]
-
                 quality_report_obj = self.audio_quality_reviewer.review_script(
                     review_segments,
                     novel_genre=novel_genre,
                 )
+
+                auto_revision = self._auto_balance_script_audio_cues(
+                    script_segments,
+                    self.audio_quality_reviewer.quality_standards,
+                )
+                if auto_revision.get("applied"):
+                    review_segments = self._build_review_segments(script_segments)
+                    quality_report_obj = self.audio_quality_reviewer.review_script(
+                        review_segments,
+                        novel_genre=novel_genre,
+                    )
                 # 序列化为dict，方便存库
                 quality_report = {
                     "script_quality": quality_report_obj.script_quality,
@@ -1637,22 +2231,26 @@ class AudiobookEngine:
                         }
                         for i in quality_report_obj.issues
                     ],
+                    "auto_revision": auto_revision if auto_revision.get("applied") else None,
                 }
 
                 issues_preview = quality_report["issues"][:20]
+                stage_metrics = {
+                    "overall_score": quality_report_obj.overall_score,
+                    "overall_grade": quality_report_obj.overall_grade,
+                    "issues_count": len(quality_report_obj.issues),
+                    "script_quality": quality_report_obj.script_quality,
+                    "audio_balance": quality_report_obj.audio_balance,
+                    "pacing": quality_report_obj.pacing,
+                    "revision_suggestions": quality_report_obj.revision_suggestions,
+                    "issues": issues_preview,
+                }
+                if auto_revision.get("applied"):
+                    stage_metrics["auto_revision"] = auto_revision
                 self.task_tracker.complete_stage(
                     task_id,
                     StageType.QUALITY_REVIEW,
-                    metrics={
-                        "overall_score": quality_report_obj.overall_score,
-                        "overall_grade": quality_report_obj.overall_grade,
-                        "issues_count": len(quality_report_obj.issues),
-                        "script_quality": quality_report_obj.script_quality,
-                        "audio_balance": quality_report_obj.audio_balance,
-                        "pacing": quality_report_obj.pacing,
-                        "revision_suggestions": quality_report_obj.revision_suggestions,
-                        "issues": issues_preview,
-                    },
+                    metrics=stage_metrics,
                 )
                 logger.info(f"   ✅ 评审完成: {quality_report_obj.overall_grade} ({quality_report_obj.overall_score:.1f}分)")
                 logger.info(f"   发现 {len(quality_report_obj.issues)} 个问题")
@@ -1681,12 +2279,44 @@ class AudiobookEngine:
                     )
             else:
                 # 跳过质量评审
-                logger.info("⚠️ [3/5] 已跳过剧本质量评审（配置关闭）")
+                logger.info("⚠️ [6/7] 已跳过剧本质量评审（配置关闭）")
                 quality_report = None
                 self.task_tracker.complete_stage(
                     task_id,
                     StageType.QUALITY_REVIEW,
                     metrics={"skipped": True},
+                )
+
+            # 为脚本片段补全音色参数，便于提示词审阅
+            self._assign_voices(script_segments)
+
+            # 音频提示词审阅阶段（输出可编辑的提示词快照）
+            self.task_tracker.start_stage(task_id, StageType.AUDIO_PROMPT_REVIEW)
+            output_segments = self._build_review_segments(script_segments)
+            prompt_metrics = {
+                "segments_count": len(script_segments),
+                "sound_effects_count": sum(len(getattr(seg, "sound_effects", []) or []) for seg in script_segments),
+                "music_cues_count": sum(
+                    1
+                    for seg in script_segments
+                    if getattr(seg, "music_cue", None) or getattr(seg, "music_cue_simple", "")
+                ),
+                "instruct_count": sum(
+                    1
+                    for seg in script_segments
+                    if (getattr(seg, "instruct_emotion", "") or getattr(seg, "instruct_scene", "") or getattr(seg, "instruct_role", "") or getattr(seg, "instruct_identity", ""))
+                ),
+            }
+            self.task_tracker.complete_stage(task_id, StageType.AUDIO_PROMPT_REVIEW, metrics=prompt_metrics)
+
+            if WEBSOCKET_AVAILABLE and audiobook_project_id:
+                await ws_manager.send_audiobook_progress(
+                    audiobook_project_id=audiobook_project_id,
+                    chapter_id=chapter_id,
+                    stage='audio_prompt_review',
+                    progress=100,
+                    message='音频提示词准备完成，可进入审阅',
+                    stage_metrics=prompt_metrics,
                 )
 
             # 统计对话和旁白数量
@@ -1713,7 +2343,7 @@ class AudiobookEngine:
                     },
                     "characters": len(character_list or []),
                 },
-                "script_segments": review_segments,
+                "script_segments": output_segments,
                 "quality_report": quality_report,
             }
 
@@ -1814,6 +2444,10 @@ class AudiobookEngine:
                     pause_before=float(seg_dict.get("pause_before") or 0.0),
                     pause_after=float(seg_dict.get("pause_after") or 0.0),
                     voice_params=seg_dict.get("voice_params"),
+                    instruct_emotion=seg_dict.get("instruct_emotion", ""),
+                    instruct_scene=seg_dict.get("instruct_scene", ""),
+                    instruct_role=seg_dict.get("instruct_role", ""),
+                    instruct_identity=seg_dict.get("instruct_identity", ""),
                     sound_effects=seg_dict.get("sound_effects") or [],
                     music_cue=seg_dict.get("music_cue"),
                     sound_effects_simple=seg_dict.get("sound_effects_simple", []),
@@ -1834,7 +2468,7 @@ class AudiobookEngine:
             )
 
             # ============ 阶段3-5：并行设计（音色+音效+音乐） ============
-            logger.info("🎵 [3-5/6] 并行设计：音色+音效+音乐...")
+            logger.info("🎵 [3-5/8] 并行设计：音色+音效+音乐...")
 
             # 使用剧本文本粗略拼接作为环境描述
             chapter_text_for_design = "".join([seg.text for seg in script_segments])
@@ -1847,12 +2481,28 @@ class AudiobookEngine:
                 audiobook_project_id=audiobook_project_id,
             )
 
-            # ============ 阶段6：TTS合成 ============
-            self.task_tracker.start_stage(task_id, StageType.TTS_SYNTHESIS)
-            logger.info("🎙️ [6/7] TTS合成中(基于已审稿剧本)...")
-
-            # 为剧本片段分配音色
+            # ============ 阶段6：音频提示词审阅 ============
             self._assign_voices(script_segments)
+            self.task_tracker.start_stage(task_id, StageType.AUDIO_PROMPT_REVIEW)
+            prompt_metrics = {
+                "segments_count": len(script_segments),
+                "sound_effects_count": sum(len(getattr(seg, "sound_effects", []) or []) for seg in script_segments),
+                "music_cues_count": sum(
+                    1
+                    for seg in script_segments
+                    if getattr(seg, "music_cue", None) or getattr(seg, "music_cue_simple", "")
+                ),
+                "instruct_count": sum(
+                    1
+                    for seg in script_segments
+                    if (getattr(seg, "instruct_emotion", "") or getattr(seg, "instruct_scene", "") or getattr(seg, "instruct_role", "") or getattr(seg, "instruct_identity", ""))
+                ),
+            }
+            self.task_tracker.complete_stage(task_id, StageType.AUDIO_PROMPT_REVIEW, metrics=prompt_metrics)
+
+            # ============ 阶段7：TTS合成 ============
+            self.task_tracker.start_stage(task_id, StageType.TTS_SYNTHESIS)
+            logger.info("🎙️ [7/9] TTS合成中(基于已审稿剧本)...")
             
             # 🔧 调试：从环境变量读取调试开关
             import os
@@ -1872,9 +2522,12 @@ class AudiobookEngine:
                 metrics={"tts_stats": tts_stats},
             )
 
-            # ============ 阶段7：音频混合 ============
+            # 基于真实音频时长对齐音效/配乐时间线
+            self._realign_timelines_with_audio(script_segments, audio_list)
+
+            # ============ 阶段8：音频混合 ============
             self.task_tracker.start_stage(task_id, StageType.AUDIO_MIXING)
-            logger.info("🎧 [7/7] 音频混合中...")
+            logger.info("🎧 [8/9] 音频混合中...")
 
             final_audio = self.audio_mixer.mix_chapter(audio_list)
 

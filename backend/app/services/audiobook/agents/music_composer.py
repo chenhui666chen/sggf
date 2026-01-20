@@ -82,6 +82,8 @@ class MusicComposer:
         self.music_cues: List[MusicCue] = []
         self._chapter_total_duration: float = 600.0
         self._music_pool_cache: Dict[str, List[str]] = {}
+        self.project_theme: Optional[str] = None
+        self.project_style: Optional[str] = None
         
         # AI音乐生成器
         self.enable_ai = enable_ai and AI_MUSIC_AVAILABLE
@@ -96,6 +98,23 @@ class MusicComposer:
             self.ai_generator = None
             logger.info("📚 使用静态音乐库模式")
     
+    def apply_project_style(self, *, theme: Optional[str] = None, style: Optional[str] = None) -> None:
+        self.project_theme = (theme or "").strip() or None
+        self.project_style = (style or "").strip() or None
+
+    def _apply_project_style_to_prompt(self, prompt: str) -> str:
+        base = str(prompt or "").strip()
+        if not base:
+            return base
+        parts = []
+        if self.project_theme:
+            parts.append(f"主题基调：{self.project_theme}")
+        if self.project_style:
+            parts.append(f"风格要求：{self.project_style}")
+        if not parts:
+            return base
+        return f"{base}\n" + "；".join(parts)
+
     def _init_music_library(self) -> Dict[str, Dict[str, Any]]:
         """初始化音乐库（占位）"""
         return {
@@ -182,7 +201,7 @@ class MusicComposer:
         # 显式标注优先
         prompt_key = scene.get("music_prompt_key")
         if prompt_key and prompt_key in self.prompt_library:
-            return self.prompt_library[prompt_key]
+            return self._apply_project_style_to_prompt(self.prompt_library[prompt_key])
 
         mood = scene.get("mood", "peaceful")
         description = scene.get("description", "")
@@ -190,52 +209,52 @@ class MusicComposer:
 
         # 高优先级：特定剧情类型
         if any(kw in text for kw in ["战斗", "打斗", "厮杀", "爆炸"]):
-            return self.prompt_library.get("battle", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("battle", ""))
         if any(kw in text for kw in ["追逐", "逃亡", "追击"]):
-            return self.prompt_library.get("chase", "") or self.prompt_library.get("battle", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("chase", "") or self.prompt_library.get("battle", ""))
         if any(kw in text for kw in ["灵异", "超自然", "鬼", "幽灵", "亡灵", "诡异空间"]):
-            return self.prompt_library.get("supernatural", "") or self.prompt_library.get("suspense", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("supernatural", "") or self.prompt_library.get("suspense", ""))
 
         if any(kw in text for kw in ["悬疑", "调查", "谜团"]):
-            return self.prompt_library.get("suspense", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("suspense", ""))
 
         if any(kw in text for kw in ["离别", "诀别", "告别"]):
-            return self.prompt_library.get("farewell", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("farewell", ""))
 
         if any(kw in text for kw in ["重逢", "相认", "团聚", "和解"]):
-            return self.prompt_library.get("reunion", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("reunion", ""))
 
         if any(kw in text for kw in ["搞笑", "逗趣", "吐槽", "闹笑话"]):
-            return self.prompt_library.get("comic", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("comic", ""))
 
         if any(kw in text for kw in ["仙侠", "修仙", "飞升", "渡劫"]):
-            return self.prompt_library.get("xianxia", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("xianxia", ""))
 
         if any(kw in text for kw in ["机甲", "星舰", "未来", "都市", "科幻", "霓虹"]):
-            return self.prompt_library.get("urban_sci_fi", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("urban_sci_fi", ""))
 
         if any(kw in text for kw in ["觉醒", "突破", "领悟", "爆发"]):
-            return self.prompt_library.get("awakening", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("awakening", ""))
 
         if any(kw in text for kw in ["势力", "军团", "宗门", "登场", "盛典", "全景展示"]):
-            return self.prompt_library.get("faction_intro", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("faction_intro", ""))
 
         if any(kw in text for kw in ["尾声", "片尾", "终章", "收尾", "完结"]):
-            return self.prompt_library.get("ending", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("ending", ""))
 
         # 默认：根据情绪选择一个通用模版
         if mood in ["tense", "mysterious"]:
-            return self.prompt_library.get("suspense", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("suspense", ""))
         if mood == "epic":
-            return self.prompt_library.get("battle", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("battle", ""))
         if mood == "joyful":
-            return self.prompt_library.get("comic", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("comic", ""))
         if mood == "romantic":
-            return self.prompt_library.get("romantic", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("romantic", ""))
         if mood == "sad":
-            return self.prompt_library.get("farewell", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("farewell", ""))
         if mood == "peaceful":
-            return self.prompt_library.get("daily", "")
+            return self._apply_project_style_to_prompt(self.prompt_library.get("daily", ""))
 
         return ""
     
@@ -243,7 +262,8 @@ class MusicComposer:
         self,
         chapter_structure: Dict[str, Any],
         emotion_curve: Optional[List[Dict[str, Any]]] = None,
-        skip_intro_outro: bool = False  # 新增参数：是否跳过开场/结尾音乐
+        skip_intro_outro: bool = False,  # 新增参数：是否跳过开场/结尾音乐
+        allow_asset_generation: bool = True,
     ) -> List[MusicCue]:
         """
         设计音乐方案
@@ -264,6 +284,7 @@ class MusicComposer:
                 }
             emotion_curve: 情绪曲线（可选）
             skip_intro_outro: 低密度时跳过开场/结尾音乐，只保留关键场景配乐
+            allow_asset_generation: 是否允许生成/补全配乐素材（AI或素材池）
         
         Returns:
             音乐提示列表
@@ -278,7 +299,10 @@ class MusicComposer:
         
         # 1. 开场音乐（低密度时可跳过）
         if not skip_intro_outro:
-            opening_cue = await self._create_opening_music_async(chapter_structure)
+            opening_cue = await self._create_opening_music_async(
+                chapter_structure,
+                allow_asset_generation=allow_asset_generation,
+            )
             if opening_cue:
                 music_cues.append(opening_cue)
         
@@ -290,14 +314,20 @@ class MusicComposer:
             if audiobook_project_id is not None:
                 scene_with_ids["audiobook_project_id"] = audiobook_project_id
 
-            scene_cue = await self._design_scene_music(scene_with_ids)
+            scene_cue = await self._design_scene_music(
+                scene_with_ids,
+                allow_asset_generation=allow_asset_generation,
+            )
             if scene_cue:
                 music_cues.append(scene_cue)
         
         # 3. 结尾音乐（低密度时可跳过）
         if not skip_intro_outro:
             total_duration = chapter_structure.get("total_duration", 0)
-            ending_cue = await self._create_ending_music_async(float(total_duration or 0.0))
+            ending_cue = await self._create_ending_music_async(
+                float(total_duration or 0.0),
+                allow_asset_generation=allow_asset_generation,
+            )
             if ending_cue:
                 music_cues.append(ending_cue)
         
@@ -309,14 +339,16 @@ class MusicComposer:
     async def _create_opening_music_async(
         self,
         chapter_structure: Dict[str, Any],
+        allow_asset_generation: bool = True,
     ) -> Optional[MusicCue]:
         """创建开场音乐（优先AI，降级静态库）。"""
         overall_mood = chapter_structure.get("overall_mood", "mysterious")
 
-        if self.enable_ai and self.ai_generator:
+        if allow_asset_generation and self.enable_ai and self.ai_generator:
             try:
                 bucket = f"opening:{overall_mood}"
                 prompt = self.prompt_library.get("opening", "") or f"{overall_mood}氛围的开场主题音乐，纯音乐，无人声"
+                prompt = self._apply_project_style_to_prompt(prompt)
                 result = await self.ai_generator.generate_for_bucket(
                     prompt=prompt,
                     mood=str(overall_mood),
@@ -346,12 +378,14 @@ class MusicComposer:
     async def _create_ending_music_async(
         self,
         chapter_duration: float,
+        allow_asset_generation: bool = True,
     ) -> Optional[MusicCue]:
         """创建结尾音乐（优先AI，降级静态库）。"""
-        if self.enable_ai and self.ai_generator:
+        if allow_asset_generation and self.enable_ai and self.ai_generator:
             try:
                 bucket = "ending:peaceful"
                 prompt = self.prompt_library.get("ending", "") or "章节尾声/收尾配乐，留白与余韵，纯音乐，无人声"
+                prompt = self._apply_project_style_to_prompt(prompt)
                 result = await self.ai_generator.generate_for_bucket(
                     prompt=prompt,
                     mood="peaceful",
@@ -406,7 +440,8 @@ class MusicComposer:
     
     async def _design_scene_music(
         self,
-        scene: Dict[str, Any]
+        scene: Dict[str, Any],
+        allow_asset_generation: bool = True,
     ) -> Optional[MusicCue]:
         """设计场景音乐（AI增强）"""
         mood = scene.get("mood", "peaceful")
@@ -418,6 +453,7 @@ class MusicComposer:
         bucket_prompt = self._select_ai_prompt_for_scene(scene) or ""
         if not bucket_prompt:
             bucket_prompt = f"{mood}氛围的影视配乐风格背景音乐，纯音乐，无人声，适合长篇小说朗读作底色"
+        bucket_prompt = self._apply_project_style_to_prompt(bucket_prompt)
             
         # 只为关键场景（高潮、转折）添加音乐
         is_key_scene = scene.get("is_climax", False) or scene.get("is_turning_point", False)
@@ -426,7 +462,7 @@ class MusicComposer:
             return None  # 平静场景不一定需要音乐
             
         # 尝试AI生成（优先）
-        if self.enable_ai and self.ai_generator:
+        if allow_asset_generation and self.enable_ai and self.ai_generator:
             try:
                 return await self._generate_scene_music_with_ai(
                     scene=scene,
@@ -634,6 +670,7 @@ class MusicComposer:
             "cues_by_mood": self._count_by_mood(),
             "timeline": [
                 {
+                    "scene_id": cue.scene_id,
                     "timestamp": cue.timestamp,
                     "type": cue.music_type.value,
                     "mood": cue.mood.value,

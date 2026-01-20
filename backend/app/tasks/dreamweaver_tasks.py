@@ -706,6 +706,32 @@ def run_dreamweaver_task(
                         )
                         ctx.payload["script_entities_synced"] = True
                         ctx.payload["script_entities_sync"] = sync_result
+                        profiles = ctx.payload.get("character_profiles")
+                        if isinstance(profiles, list):
+                            entity_chars = entities.get("characters") if isinstance(entities.get("characters"), list) else []
+                            id_by_name: Dict[str, str] = {}
+                            for item in entity_chars:
+                                if not isinstance(item, dict):
+                                    continue
+                                name = str(item.get("name") or "").strip()
+                                raw_id = item.get("character_id") or item.get("entity_id") or item.get("id")
+                                if name and raw_id is not None:
+                                    id_by_name[name.lower()] = str(raw_id).strip()
+
+                            if id_by_name:
+                                updated = False
+                                for profile in profiles:
+                                    if not isinstance(profile, dict):
+                                        continue
+                                    name = str(profile.get("name") or "").strip()
+                                    if not name:
+                                        continue
+                                    mapped_id = id_by_name.get(name.lower())
+                                    if mapped_id and str(profile.get("character_id") or "").strip() != mapped_id:
+                                        profile["character_id"] = mapped_id
+                                        updated = True
+                                if updated:
+                                    ctx.payload["character_profiles"] = profiles
 
                         try:
                             from app.services.dreamweaver.library import enrich_payload_with_library

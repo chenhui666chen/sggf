@@ -1,5 +1,5 @@
 """
-Novel Writing System API
+拾光工坊
 """
 __version__ = "1.0.0"
 

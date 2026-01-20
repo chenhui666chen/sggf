@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from adapters.model_adapters import ModelAdapterFactory
 
+from agents.image_edit_utils import resolve_image_edit_adapter_name
 from agents.painter import _generate_edit_with_candidates, _generate_t2i_with_candidates
 from pipeline.media_presets import ensure_media_payload, normalize_frame_ratio, resolve_frame_size
 from pipeline.style_presets import ensure_style_payload
@@ -243,7 +244,11 @@ def run(ctx: Any) -> None:
 
     factory = ModelAdapterFactory()
     t2i = factory.get_adapter("wan_t2i")
-    image_edit_adapter_name = os.getenv("DREAMWEAVER_IMAGE_EDIT_ADAPTER", "wan_image_edit")
+    image_edit_adapter_name = resolve_image_edit_adapter_name(
+        image_cfg,
+        purpose="library_character_view",
+        default_adapter="wan_image_edit",
+    )
     image_edit_strength = _parse_float(image_cfg.get("image_edit_strength") or os.getenv("DREAMWEAVER_IMAGE_EDIT_STRENGTH") or 0.65, 0.65)
     image_edit_guidance = _parse_float(image_cfg.get("image_edit_guidance") or os.getenv("DREAMWEAVER_IMAGE_EDIT_GUIDANCE") or 7.5, 7.5)
     image_edit_strength = max(0.0, min(float(image_edit_strength), 1.0))

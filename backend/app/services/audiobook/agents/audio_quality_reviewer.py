@@ -67,8 +67,7 @@ class AudioQualityReviewer:
     def _init_quality_standards(self) -> Dict[str, Any]:
         """初始化质量标准（更贴近有声小说实战节奏）"""
         return {
-            # 句子与段落：朗读友好（对话 15-35 字为宜，极少超过 40 字）
-            "max_sentence_length": 40,   # 单句建议不超过 40 字
+            # 段落：朗读友好
             "max_paragraph_length": 120,  # 单段建议不超过 120 字（LLM 已经做了分段）
 
             # 时长：按 10 字/秒估算，建议单集在 10-35 分钟之间
@@ -171,19 +170,6 @@ class AudioQualityReviewer:
         for i, seg in enumerate(segments):
             text = seg.get("text", "")
             location = f"segment_{i}"
-            
-            # 检查句子长度
-            sentences = re.split(r'[。！？]', text)
-            for j, sentence in enumerate(sentences):
-                if len(sentence) > self.quality_standards["max_sentence_length"]:
-                    issues.append(QualityIssue(
-                        location=f"{location}_sentence_{j}",
-                        severity="major",
-                        category="script",
-                        description=f"句子过长（{len(sentence)}字）",
-                        suggestion="建议拆分为多个短句"
-                    ))
-                    naturalness_score -= 0.5
             
             # 检查拗口词汇
             awkward_words = self._detect_awkward_words(text)
@@ -547,7 +533,7 @@ class AudioQualityReviewer:
         # 按类别生成建议
         script_issues = [i for i in issues if i.category == "script"]
         if script_issues:
-            suggestions.append("优化剧本：简化长句、替换拗口词汇")
+            suggestions.append("优化剧本：替换拗口词汇，提升口语化表达")
         
         audio_issues = [i for i in issues if i.category == "audio"]
         if audio_issues:

@@ -327,11 +327,45 @@ class VoiceManager:
             return profile
         
         # 优先级3 & 4：智能匹配（LLM推断 → 规则推断）
-        traits = character_info or {}
+        traits = dict(character_info or {})
+        used_llm = False
+        missing_values = (None, "", "unknown")
         if not traits:
-            # 🆕 自动尝试LLM推断（如果有LLM客户端）
-            traits = self._infer_traits_from_name(character_name)
-        
+            if self.llm_client:
+                llm_traits = self._llm_infer_traits(character_name)
+                if llm_traits:
+                    traits = llm_traits
+                    used_llm = True
+                else:
+                    traits = self._rule_based_infer_traits(character_name)
+            else:
+                traits = self._rule_based_infer_traits(character_name)
+        else:
+            needs_fill = any(
+                traits.get(key) in missing_values
+                for key in ("gender", "age_group", "personality")
+            )
+            if needs_fill and self.llm_client:
+                context = traits.get("context") or traits.get("role_type")
+                llm_traits = self._llm_infer_traits(character_name, context=context)
+                if llm_traits:
+                    used_llm = True
+                    for key in ("gender", "age_group", "personality"):
+                        if traits.get(key) in missing_values and llm_traits.get(key):
+                            traits[key] = llm_traits[key]
+
+            if any(traits.get(key) in missing_values for key in ("gender", "age_group", "personality")):
+                rule_traits = self._rule_based_infer_traits(character_name)
+                for key in ("gender", "age_group", "personality"):
+                    if traits.get(key) in missing_values and rule_traits.get(key):
+                        traits[key] = rule_traits[key]
+
+        age_group = str(traits.get("age_group") or "").strip().lower()
+        if age_group in ("middle", "mid"):
+            traits["age_group"] = "adult"
+        elif age_group in ("teen", "teenager", "adolescent"):
+            traits["age_group"] = "young"
+
         matched_voice_id = self._match_voice_by_traits(traits)
         voice_config = self.PRESET_VOICES[matched_voice_id]
         profile = self._create_profile(character_name, matched_voice_id, voice_config)
@@ -340,7 +374,7 @@ class VoiceManager:
         self.used_voice_ids.add(matched_voice_id)
         
         # 📊 显示分配方式
-        if self.llm_client and traits:
+        if used_llm:
             logger.info(f"🤖 为 '{character_name}' 智能分配音色: {matched_voice_id}")
         else:
             logger.info(f"📖 为 '{character_name}' 规则分配音色: {matched_voice_id}")
@@ -492,9 +526,9 @@ class VoiceManager:
    - unknown: 无法判断（如英文名/中性称呼）
 
 2. **年龄段** (age_group)：根据称呼/职业推断
-   - child: 儿童（小孩/娃娃/小屏风）
-   - young: 青年（小姐/小伙/小姑娘/默认）
-   - middle: 中年（大叔/大娘/阿姨）
+   - child: 儿童（小孩/娃娃）
+   - young: 青年/少年（小姐/小伙/小姑娘/学生）
+   - adult: 成年/中年（大叔/大娘/阿姨）
    - elder: 老年（爷爷/奶奶/老人）
 
 3. **性格** (personality)：根据名字气质猜测
@@ -507,7 +541,7 @@ class VoiceManager:
 ```json
 {{
     "gender": "female|male|unknown",
-    "age_group": "child|young|middle|elder",
+    "age_group": "child|young|adult|elder",
     "personality": "calm|energetic|gentle|serious",
     "confidence": 0.8
 }}
@@ -539,13 +573,26 @@ class VoiceManager:
             # 验证结果
             if result.get("gender") and result.get("age_group"):
                 # 只返回高置信度的结果
-                confidence = result.get("confidence", 0.5)
+                confidence = float(result.get("confidence", 0.5))
                 if confidence >= 0.7:
-                    return {
-                        "gender": result["gender"],
-                        "age_group": result["age_group"],
-                        "personality": result.get("personality", "calm")
-                    }
+                    gender = str(result.get("gender") or "").strip().lower()
+                    age_group = str(result.get("age_group") or "").strip().lower()
+                    personality = str(result.get("personality") or "calm").strip().lower()
+
+                    if age_group in ("middle", "mid"):
+                        age_group = "adult"
+                    elif age_group in ("teen", "teenager", "adolescent"):
+                        age_group = "young"
+
+                    traits = {}
+                    if gender in ("male", "female"):
+                        traits["gender"] = gender
+                    if age_group in ("child", "young", "adult", "elder"):
+                        traits["age_group"] = age_group
+                    if personality in ("calm", "energetic", "gentle", "serious"):
+                        traits["personality"] = personality
+
+                    return traits or None
                 else:
                     logger.info(f"📊 LLM置信度较低 ({confidence:.2f})，回退到规则推断")
             

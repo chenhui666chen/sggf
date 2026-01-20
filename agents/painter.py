@@ -29,6 +29,11 @@ from agents.prompt_fragments import (
     library_assets_from_payload as _library_assets_from_payload,
     match_library_assets_for_shot as _match_library_assets_for_shot,
 )
+from agents.image_edit_utils import (
+    resolve_image_edit_adapter_name,
+    resolve_image_edit_multi_ref,
+    resolve_image_edit_ref_max_images,
+)
 from pipeline.media_presets import (
     WAN_I2V_OUTPUT_FPS,
     ensure_media_payload,
@@ -885,6 +890,37 @@ def _generate_t2i_with_candidates(
     return out
 
 
+def _collect_reference_image_paths(
+    reference_images: Optional[List[Dict[str, Any]]],
+    base_path: Path,
+    max_images: int,
+) -> List[str]:
+    if not reference_images or max_images <= 0:
+        return []
+    base_str = str(base_path)
+    seen: set[str] = set()
+    out: List[str] = []
+    for item in reference_images:
+        if not isinstance(item, dict):
+            continue
+        raw = item.get("path")
+        if isinstance(raw, Path):
+            path_str = str(raw)
+        elif isinstance(raw, str):
+            path_str = raw.strip()
+        else:
+            continue
+        if not path_str or path_str == base_str or path_str in seen:
+            continue
+        if not path_str.startswith(("http://", "https://")) and not Path(path_str).exists():
+            continue
+        seen.add(path_str)
+        out.append(path_str)
+        if len(out) >= int(max_images):
+            break
+    return out
+
+
 def _generate_edit_with_candidates(
     *,
     adapter: Any,
@@ -907,27 +943,48 @@ def _generate_edit_with_candidates(
     keep_candidates: bool,
     enable_hash_cache: Optional[bool] = None,
     bypass_hash_cache: bool = False,
+    use_multi_ref: bool = False,
+    max_ref_images: int = 3,
 ) -> Dict[str, Any]:
     cache_enabled = _hash_cache_enabled(enable_hash_cache) and not bool(bypass_hash_cache)
     payload = ctx.payload if hasattr(ctx, "payload") and isinstance(getattr(ctx, "payload", None), dict) else None
     base_image_hash = ""
     if cache_enabled:
         base_image_hash = hashlib.sha256(image_path.read_bytes()).hexdigest()
+    supports_multi_ref = bool(getattr(adapter, "supports_multi_image", False))
+    ref_paths = (
+        _collect_reference_image_paths(reference_images, image_path, max_ref_images)
+        if use_multi_ref and supports_multi_ref
+        else []
+    )
+    if not ref_paths:
+        use_multi_ref = False
+    ref_hashes: List[str] = []
+    if cache_enabled and use_multi_ref:
+        for ref_path in ref_paths:
+            if ref_path.startswith(("http://", "https://")):
+                ref_hashes.append(ref_path)
+                continue
+            try:
+                ref_hashes.append(hashlib.sha256(Path(ref_path).read_bytes()).hexdigest())
+            except Exception:  # noqa: BLE001
+                continue
     if candidate_count <= 1:
         seed_value = _derive_seed(base_seed=base_seed, ctx=ctx, shot_id=shot_id, role=role, idx=0)
         cache_key = None
         if cache_enabled:
-            cache_key = _hash_cache_key(
-                {
-                    "kind": "image_edit",
-                    "adapter": _adapter_fingerprint(adapter),
-                    "image_sha256": base_image_hash,
-                    "edit_prompt": edit_prompt,
-                    "strength": float(strength),
-                    "guidance_scale": float(guidance_scale),
-                    "seed": int(seed_value),
-                }
-            )
+            cache_payload = {
+                "kind": "image_edit",
+                "adapter": _adapter_fingerprint(adapter),
+                "image_sha256": base_image_hash,
+                "edit_prompt": edit_prompt,
+                "strength": float(strength),
+                "guidance_scale": float(guidance_scale),
+                "seed": int(seed_value),
+            }
+            if use_multi_ref:
+                cache_payload["ref_images"] = ref_hashes
+            cache_key = _hash_cache_key(cache_payload)
             if _try_restore_from_hash_cache(key=cache_key, out_path=output_path):
                 if payload is not None:
                     _bump_telemetry_counter(payload, "image_edit_cache_hits", 1)
@@ -944,13 +1001,23 @@ def _generate_edit_with_candidates(
 
         if payload is not None:
             _bump_telemetry_counter(payload, "image_edit_generate_calls", 1)
-        result = adapter.generate(
-            image_path=str(image_path),
-            edit_prompt=edit_prompt,
-            strength=strength,
-            guidance_scale=guidance_scale,
-            seed=seed_value,
-        )
+        if use_multi_ref:
+            result = adapter.generate(
+                image_path=str(image_path),
+                edit_prompt=edit_prompt,
+                strength=strength,
+                guidance_scale=guidance_scale,
+                seed=seed_value,
+                image_paths=ref_paths,
+            )
+        else:
+            result = adapter.generate(
+                image_path=str(image_path),
+                edit_prompt=edit_prompt,
+                strength=strength,
+                guidance_scale=guidance_scale,
+                seed=seed_value,
+            )
         _write_image_from_generation_result(result, output_path)
         if cache_enabled and cache_key:
             _save_to_hash_cache(key=cache_key, src_path=output_path)
@@ -972,17 +1039,18 @@ def _generate_edit_with_candidates(
             cache_dir = _hash_cache_dir()
             for idx in range(int(candidate_count)):
                 seed = _derive_seed(base_seed=base_seed, ctx=ctx, shot_id=shot_id, role=role, idx=idx)
-                key = _hash_cache_key(
-                    {
-                        "kind": "image_edit",
-                        "adapter": _adapter_fingerprint(adapter),
-                        "image_sha256": base_image_hash,
-                        "edit_prompt": edit_prompt,
-                        "strength": float(strength),
-                        "guidance_scale": float(guidance_scale),
-                        "seed": int(seed),
-                    }
-                )
+                cache_payload = {
+                    "kind": "image_edit",
+                    "adapter": _adapter_fingerprint(adapter),
+                    "image_sha256": base_image_hash,
+                    "edit_prompt": edit_prompt,
+                    "strength": float(strength),
+                    "guidance_scale": float(guidance_scale),
+                    "seed": int(seed),
+                }
+                if use_multi_ref:
+                    cache_payload["ref_images"] = ref_hashes
+                key = _hash_cache_key(cache_payload)
                 if (cache_dir / f"{key}.png").exists():
                     cache_hits += 1
         except Exception:  # noqa: BLE001
@@ -1006,17 +1074,18 @@ def _generate_edit_with_candidates(
         cand_path = cand_dir / f"{shot_id}_{role}_c{idx}.png"
         cache_key = None
         if cache_enabled:
-            cache_key = _hash_cache_key(
-                {
-                    "kind": "image_edit",
-                    "adapter": _adapter_fingerprint(adapter),
-                    "image_sha256": base_image_hash,
-                    "edit_prompt": edit_prompt,
-                    "strength": float(strength),
-                    "guidance_scale": float(guidance_scale),
-                    "seed": int(seed),
-                }
-            )
+            cache_payload = {
+                "kind": "image_edit",
+                "adapter": _adapter_fingerprint(adapter),
+                "image_sha256": base_image_hash,
+                "edit_prompt": edit_prompt,
+                "strength": float(strength),
+                "guidance_scale": float(guidance_scale),
+                "seed": int(seed),
+            }
+            if use_multi_ref:
+                cache_payload["ref_images"] = ref_hashes
+            cache_key = _hash_cache_key(cache_payload)
             if _try_restore_from_hash_cache(key=cache_key, out_path=cand_path):
                 return cand_path
         local_adapter = adapter
@@ -1026,13 +1095,23 @@ def _generate_edit_with_candidates(
                 raise RuntimeError("adapter clone failed for parallel candidate generation")
             local_adapter = cloned
         try:
-            result = local_adapter.generate(
-                image_path=str(image_path),
-                edit_prompt=edit_prompt,
-                strength=strength,
-                guidance_scale=guidance_scale,
-                seed=seed,
-            )
+            if use_multi_ref:
+                result = local_adapter.generate(
+                    image_path=str(image_path),
+                    edit_prompt=edit_prompt,
+                    strength=strength,
+                    guidance_scale=guidance_scale,
+                    seed=seed,
+                    image_paths=ref_paths,
+                )
+            else:
+                result = local_adapter.generate(
+                    image_path=str(image_path),
+                    edit_prompt=edit_prompt,
+                    strength=strength,
+                    guidance_scale=guidance_scale,
+                    seed=seed,
+                )
             _write_image_from_generation_result(result, cand_path)
             if cache_enabled and cache_key:
                 _save_to_hash_cache(key=cache_key, src_path=cand_path)
@@ -1524,12 +1603,25 @@ def run_keyframes(ctx: Any) -> None:
     ref_selector = _cfg_str(image_cfg, "ref_selector", env_name="DREAMWEAVER_REF_SELECTOR", default="recent").strip().lower()
     head_ref_rewrite = _cfg_flag(image_cfg, "head_ref_rewrite", env_name="DREAMWEAVER_HEAD_REF_REWRITE", default=True)
     tail_ref_rewrite = _cfg_flag(image_cfg, "tail_ref_rewrite", env_name="DREAMWEAVER_TAIL_REF_REWRITE", default=True)
-    image_edit_adapter = None
-    if use_head_image_edit or use_tail_image_edit:
-        try:
-            image_edit_adapter = factory.get_adapter(os.getenv("DREAMWEAVER_IMAGE_EDIT_ADAPTER", "wan_image_edit"))
-        except Exception:  # noqa: BLE001
-            image_edit_adapter = None
+    image_edit_adapter_name_head = resolve_image_edit_adapter_name(
+        image_cfg,
+        purpose="keyframe_head",
+        default_adapter="wan_image_edit",
+    )
+    image_edit_adapter_name_tail = resolve_image_edit_adapter_name(
+        image_cfg,
+        purpose="keyframe_tail",
+        default_adapter="wan_image_edit",
+    )
+    image_edit_multi_ref_head = resolve_image_edit_multi_ref(
+        image_cfg=image_cfg,
+        adapter_name=image_edit_adapter_name_head,
+    )
+    image_edit_multi_ref_tail = resolve_image_edit_multi_ref(
+        image_cfg=image_cfg,
+        adapter_name=image_edit_adapter_name_tail,
+    )
+    image_edit_ref_max_images = resolve_image_edit_ref_max_images(image_cfg=image_cfg)
 
     vlm_adapter = None
     if selector in {"vlm", "semantic"} or ref_selector == "vlm":
@@ -2020,12 +2112,21 @@ def run_keyframes(ctx: Any) -> None:
             local_factory = ModelAdapterFactory()
             local_t2i = local_factory.get_adapter("wan_t2i")
 
-            local_image_edit_adapter = None
-            if use_head_image_edit or use_tail_image_edit:
+            local_image_edit_adapters: Dict[str, Any] = {}
+            if use_head_image_edit:
                 try:
-                    local_image_edit_adapter = local_factory.get_adapter(os.getenv("DREAMWEAVER_IMAGE_EDIT_ADAPTER", "wan_image_edit"))
+                    local_image_edit_adapters[image_edit_adapter_name_head] = local_factory.get_adapter(
+                        image_edit_adapter_name_head
+                    )
                 except Exception:  # noqa: BLE001
-                    local_image_edit_adapter = None
+                    local_image_edit_adapters[image_edit_adapter_name_head] = None
+            if use_tail_image_edit and image_edit_adapter_name_tail not in local_image_edit_adapters:
+                try:
+                    local_image_edit_adapters[image_edit_adapter_name_tail] = local_factory.get_adapter(
+                        image_edit_adapter_name_tail
+                    )
+                except Exception:  # noqa: BLE001
+                    local_image_edit_adapters[image_edit_adapter_name_tail] = None
 
             local_vlm_adapter = None
             if selector in {"vlm", "semantic"} or ref_selector == "vlm":
@@ -2217,7 +2318,8 @@ def run_keyframes(ctx: Any) -> None:
                         head_meta = {"candidate_count": 1, "selected": 0, "selector": "single"}
 
                 if fused_head_path is None:
-                    if use_head_image_edit and local_image_edit_adapter is None:
+                    head_image_edit_adapter = local_image_edit_adapters.get(image_edit_adapter_name_head)
+                    if use_head_image_edit and head_image_edit_adapter is None:
                         head_decision = {"mode": "t2i", "reason": "图像编辑模型不可用"}
                     elif use_head_image_edit:
                         head_decision = _decide_image_mode(
@@ -2235,7 +2337,7 @@ def run_keyframes(ctx: Any) -> None:
 
                     if (
                         head_decision.get("mode") == "image_edit"
-                        and local_image_edit_adapter is not None
+                        and head_image_edit_adapter is not None
                         and head_base_path is not None
                         and head_base_path.exists()
                     ):
@@ -2288,7 +2390,7 @@ def run_keyframes(ctx: Any) -> None:
 
                         try:
                             head_meta = _generate_edit_with_candidates(
-                                adapter=local_image_edit_adapter,
+                                adapter=head_image_edit_adapter,
                                 image_path=head_base_path,
                                 edit_prompt=edit_prompt,
                                 reference_desc=base_desc,
@@ -2307,6 +2409,8 @@ def run_keyframes(ctx: Any) -> None:
                                 reference_images=head_edit_ref_pack,
                                 keep_candidates=keep_candidates,
                                 bypass_hash_cache=bypass_hash_cache,
+                                use_multi_ref=image_edit_multi_ref_head,
+                                max_ref_images=image_edit_ref_max_images,
                             )
                             head_via = "image_edit"
                         except Exception as exc:  # noqa: BLE001
@@ -2456,7 +2560,8 @@ def run_keyframes(ctx: Any) -> None:
                     ref_issues=tail_ref_issues,
                 )
                 tail_edit_ref_pack = _drop_anchor_from_refs(tail_ref_pack, tail_anchor)
-                if use_tail_image_edit and local_image_edit_adapter is None:
+                tail_image_edit_adapter = local_image_edit_adapters.get(image_edit_adapter_name_tail)
+                if use_tail_image_edit and tail_image_edit_adapter is None:
                     tail_decision = {"mode": "t2i", "reason": "图像编辑模型不可用"}
                 elif use_tail_image_edit:
                     if variation_driven_image_edit and variation_type == "large":
@@ -2474,7 +2579,7 @@ def run_keyframes(ctx: Any) -> None:
                             default_ratio=frame_ratio,
                         )
 
-                if tail_decision.get("mode") == "image_edit" and local_image_edit_adapter is not None:
+                if tail_decision.get("mode") == "image_edit" and tail_image_edit_adapter is not None:
                     tail_desc = tail_anchor_desc
                     tail_edit_prompt = tail_prompt or head_prompt
                     tail_rewrite = None
@@ -2524,7 +2629,7 @@ def run_keyframes(ctx: Any) -> None:
 
                     try:
                         tail_meta = _generate_edit_with_candidates(
-                            adapter=local_image_edit_adapter,
+                            adapter=tail_image_edit_adapter,
                             image_path=head_path,
                             edit_prompt=tail_edit_prompt,
                             reference_desc=tail_desc,
@@ -2543,6 +2648,8 @@ def run_keyframes(ctx: Any) -> None:
                             reference_images=tail_edit_ref_pack,
                             keep_candidates=keep_candidates,
                             bypass_hash_cache=bypass_hash_cache,
+                            use_multi_ref=image_edit_multi_ref_tail,
+                            max_ref_images=image_edit_ref_max_images,
                         )
                         tail_via = "image_edit"
                     except Exception as exc:  # noqa: BLE001
@@ -2622,8 +2729,16 @@ def run_keyframes(ctx: Any) -> None:
                 return {"head": head_frame, "tail": tail_frame}
             finally:
                 _close_adapter_session(local_t2i)
-                if local_image_edit_adapter is not None:
-                    _close_adapter_session(local_image_edit_adapter)
+                if local_image_edit_adapters:
+                    closed: set[int] = set()
+                    for item in local_image_edit_adapters.values():
+                        if item is None:
+                            continue
+                        key = id(item)
+                        if key in closed:
+                            continue
+                        closed.add(key)
+                        _close_adapter_session(item)
                 if local_vlm_adapter is not None:
                     _close_adapter_session(local_vlm_adapter)
 
@@ -2807,10 +2922,20 @@ def run_midframes(ctx: Any) -> None:
     mid_min_variation_rank = {"small": 0, "medium": 1, "large": 2}.get(mid_min_variation, 0)
 
     use_mid_image_edit = _cfg_flag(image_cfg, "mid_use_image_edit", env_name="DREAMWEAVER_MID_USE_IMAGE_EDIT", default=False)
+    image_edit_adapter_name_mid = resolve_image_edit_adapter_name(
+        image_cfg,
+        purpose="keyframe_mid",
+        default_adapter="wan_image_edit",
+    )
+    image_edit_multi_ref_mid = resolve_image_edit_multi_ref(
+        image_cfg=image_cfg,
+        adapter_name=image_edit_adapter_name_mid,
+    )
+    image_edit_ref_max_images = resolve_image_edit_ref_max_images(image_cfg=image_cfg)
     image_edit_adapter = None
     if use_mid_image_edit:
         try:
-            image_edit_adapter = factory.get_adapter(os.getenv("DREAMWEAVER_IMAGE_EDIT_ADAPTER", "wan_image_edit"))
+            image_edit_adapter = factory.get_adapter(image_edit_adapter_name_mid)
         except Exception:  # noqa: BLE001
             image_edit_adapter = None
 
@@ -2999,6 +3124,8 @@ def run_midframes(ctx: Any) -> None:
                     reference_images=mid_edit_ref_pack,
                     keep_candidates=keep_candidates,
                     bypass_hash_cache=bypass_hash_cache,
+                    use_multi_ref=image_edit_multi_ref_mid,
+                    max_ref_images=image_edit_ref_max_images,
                 )
             except Exception as exc:  # noqa: BLE001
                 mid_meta = _generate_t2i_with_candidates(

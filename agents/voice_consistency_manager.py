@@ -253,6 +253,27 @@ class VoiceConsistencyManager:
             声音档案，如果不存在则返回None
         """
         return self.voice_profiles.get(character_id)
+
+    def resolve_voice_ids(self, character_id: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        解析角色的语音ID与档案ID
+
+        Args:
+            character_id: 角色ID
+
+        Returns:
+            (voice_id, voice_profile_id)
+        """
+        profile = self.voice_profiles.get(character_id)
+        if not profile:
+            return None, None
+
+        voice_id = str(profile.voice_id or "").strip() or None
+        voice_profile_id = None
+        if isinstance(profile.tts_params, dict):
+            voice_profile_id = str(profile.tts_params.get("voice_profile_id") or "").strip() or None
+
+        return voice_id, voice_profile_id
     
     def update_voice_profile(
         self,

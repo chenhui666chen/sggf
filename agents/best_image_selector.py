@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from agents.vlm_utils import file_to_data_url, vlm_chat_json
+from agents.vlm_utils import clamp_prompt_text, clamp_text_list, file_to_data_url, vlm_chat_json
 
 
 def _bump(bump_telemetry: Optional[Callable[[str, int], None]], name: str, delta: int = 1) -> None:
@@ -150,6 +150,9 @@ def _vlm_select_best_candidate_semantic(
         "candidate_scores 的每一项包含 index 与 scores，scores 至少给出 "
         "quality/character_consistency/scene_style_consistency/transition_consistency/description_accuracy（0~1）。"
     )
+    system_prompt += (
+        "\nOutput JSON only. Keep reason <= 120 chars; issues/suggestions <= 6 items; each item <= 120 chars."
+    )
 
     content: List[Dict[str, Any]] = []
     image_count = 0
@@ -193,15 +196,15 @@ def _vlm_select_best_candidate_semantic(
         return None
 
     best_idx = obj.get("best_image_index")
-    reason = obj.get("reason")
+    reason = clamp_prompt_text(str(obj.get("reason") or "").strip(), limit=160)
     if not isinstance(best_idx, int) or best_idx < 0 or best_idx >= len(candidate_paths):
         return None
 
     issues_raw = obj.get("issues") if isinstance(obj.get("issues"), list) else []
-    issues_list = [str(i).strip() for i in issues_raw if isinstance(i, (str, int)) and str(i).strip()][:8]
+    issues_list = clamp_text_list(issues_raw, max_items=8, max_chars=120)
 
     suggestions_raw = obj.get("suggestions") if isinstance(obj.get("suggestions"), list) else []
-    suggestions = [str(s).strip() for s in suggestions_raw if isinstance(s, (str, int)) and str(s).strip()][:8]
+    suggestions = clamp_text_list(suggestions_raw, max_items=6, max_chars=120)
 
     candidate_scores_raw = obj.get("candidate_scores") if isinstance(obj.get("candidate_scores"), list) else []
     candidate_scores: List[Dict[str, Any]] = []
@@ -214,7 +217,7 @@ def _vlm_select_best_candidate_semantic(
         sc_raw = item.get("scores") if isinstance(item.get("scores"), dict) else {}
         sc = _normalize_director_scores(sc_raw)
         item_issues_raw = item.get("issues") if isinstance(item.get("issues"), list) else []
-        item_issues = [str(i).strip() for i in item_issues_raw if isinstance(i, (str, int)) and str(i).strip()][:8]
+        item_issues = clamp_text_list(item_issues_raw, max_items=8, max_chars=120)
         total = _weighted_total(sc, weights)
         candidate_scores.append({"index": int(idx), "scores": sc, "issues": item_issues, "total": total})
 
@@ -278,7 +281,7 @@ def _vlm_select_best_candidate_semantic(
     }
     return {
         "best_index": best_idx,
-        "reason": str(reason or "").strip(),
+        "reason": reason,
         "scores": scores,
         "issues": issues_list,
         "candidate_scores": candidate_scores,

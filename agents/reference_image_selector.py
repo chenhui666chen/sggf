@@ -54,6 +54,10 @@ def vlm_select_reference_and_prompt(
         "任务：从候选参考图中选择最适合生成【目标帧描述】的那张，并输出用于图片编辑模型的 edit_prompt。\n"
         "要求：只输出 JSON（不要 Markdown），字段为 ref_image_index(int)、edit_prompt(string)、reason(string)。"
     )
+    system_prompt += (
+        "\nOutput JSON only with keys: ref_image_index(int), edit_prompt(string), reason(string). "
+        "Keep reason within 120 chars; do not add extra keys."
+    )
 
     content: List[Dict[str, Any]] = []
     for idx, (_, cand) in enumerate(subset):
@@ -88,7 +92,7 @@ def vlm_select_reference_and_prompt(
     return {
         "ref_index": int(orig_idx),
         "edit_prompt": clamp_prompt_text(edit_prompt.strip(), limit=900),
-        "reason": str(reason or "").strip(),
+        "reason": clamp_prompt_text(str(reason or "").strip(), limit=160),
         "prefilter": prefilter,
     }
 
@@ -131,6 +135,10 @@ def vlm_prefilter_reference_images_text_only(
         "要求：只输出 JSON（不要 Markdown），字段：selected_ref_indices(list[int])、reason(string)。\n"
         f"规则：最多选择 {max_keep} 个索引；优先保证角色一致性、场景一致性、风格一致性；尽量避免重复/冗余。\n"
     )
+    system_prompt += (
+        "\nOutput JSON only with keys: selected_ref_indices(list[int]), reason(string). "
+        "Keep reason within 120 chars; no extra keys."
+    )
 
     user_text = (
         "【候选参考图描述】\n"
@@ -170,7 +178,10 @@ def vlm_prefilter_reference_images_text_only(
     if not selected:
         return None
 
-    return {"selected_ref_indices": selected, "reason": str(obj.get("reason") or "").strip()}
+    return {
+        "selected_ref_indices": selected,
+        "reason": clamp_prompt_text(str(obj.get("reason") or "").strip(), limit=160),
+    }
 
 
 def vlm_rewrite_t2i_prompt_from_references(
@@ -216,6 +227,10 @@ def vlm_rewrite_t2i_prompt_from_references(
         "3) 避免生成可读文字、水印、字幕、UI。\n"
         "只输出 JSON（不要 Markdown），字段：prompt(string)、selected_ref_indices(list[int])、reason(string)。"
     )
+    system_prompt += (
+        "\nOutput JSON only with keys: prompt(string), selected_ref_indices(list[int]), reason(string). "
+        "Keep reason within 120 chars; no extra keys."
+    )
 
     content.append(
         {
@@ -259,7 +274,7 @@ def vlm_rewrite_t2i_prompt_from_references(
     return {
         "prompt": clamp_prompt_text(prompt, limit=900),
         "selected_ref_indices": selected,
-        "reason": str(obj.get("reason") or "").strip(),
+        "reason": clamp_prompt_text(str(obj.get("reason") or "").strip(), limit=160),
     }
 
 
@@ -307,6 +322,10 @@ def vlm_build_edit_prompt_from_base_and_refs(
         "避免镜头术语；不要要求生成可读文字、水印、字幕、UI。\n"
         "只输出 JSON（不要 Markdown），字段：edit_prompt(string)、selected_ref_indices(list[int])、reason(string)。"
     )
+    system_prompt += (
+        "\nOutput JSON only with keys: edit_prompt(string), selected_ref_indices(list[int]), reason(string). "
+        "Keep reason within 120 chars; no extra keys."
+    )
 
     content.append(
         {
@@ -350,7 +369,7 @@ def vlm_build_edit_prompt_from_base_and_refs(
     return {
         "edit_prompt": clamp_prompt_text(edit_prompt, limit=900),
         "selected_ref_indices": selected,
-        "reason": str(obj.get("reason") or "").strip(),
+        "reason": clamp_prompt_text(str(obj.get("reason") or "").strip(), limit=160),
     }
 
 
