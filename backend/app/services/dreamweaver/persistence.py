@@ -403,6 +403,41 @@ def build_contract_from_payload(
             variation_type = str(item.get("variation_type") or "").strip().lower()
             if variation_type not in {"small", "medium", "large"}:
                 variation_type = "medium"
+            raw_meta = item.get("shot_schema_v2_meta")
+            shot_schema_meta: Dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
+            if shot_schema_meta:
+                shot_schema_meta = dict(shot_schema_meta)
+
+            def _maybe_put_meta(key: str, value: Any) -> None:
+                if key in shot_schema_meta:
+                    return
+                if value is None:
+                    return
+                if isinstance(value, str):
+                    v = value.strip()
+                    if not v:
+                        return
+                    value = v
+                if isinstance(value, (list, dict)) and not value:
+                    return
+                shot_schema_meta[key] = value
+
+            _maybe_put_meta("shot_type", item.get("shot_type"))
+            _maybe_put_meta("camera_angle", item.get("camera_angle"))
+            camera_movement = item.get("camera_movement")
+            if not camera_movement:
+                camera_movement = item.get("movement")
+            _maybe_put_meta("camera_movement", camera_movement)
+            _maybe_put_meta("composition_notes", item.get("composition_notes"))
+            _maybe_put_meta("composition", item.get("composition"))
+            _maybe_put_meta("location", item.get("location"))
+            _maybe_put_meta("time", item.get("time"))
+            _maybe_put_meta("atmosphere", item.get("atmosphere"))
+            _maybe_put_meta("audio_sync", item.get("audio_sync"))
+            _maybe_put_meta("character_ids", item.get("character_ids"))
+            _maybe_put_meta("subshots", item.get("subshots"))
+            _maybe_put_meta("motion_level", item.get("motion_level"))
+            _maybe_put_meta("emotion", item.get("emotion"))
             shot_schema_v2 = Shot.ShotSchemaV2(
                 schema_version=schema_version,
                 cam_idx=int(item.get("cam_idx") or item.get("camera_index") or 0),
@@ -417,7 +452,7 @@ def build_contract_from_payload(
                 state_after=str(item.get("state_after") or ""),
                 ff_vis_char_ids=[str(i) for i in (item.get("ff_vis_char_ids") or []) if isinstance(i, (str, int))],
                 lf_vis_char_ids=[str(i) for i in (item.get("lf_vis_char_ids") or []) if isinstance(i, (str, int))],
-                meta=item.get("shot_schema_v2_meta") if isinstance(item.get("shot_schema_v2_meta"), dict) else {},
+                meta=shot_schema_meta,
             )
         except Exception:  # noqa: BLE001
             shot_schema_v2 = None
@@ -638,12 +673,20 @@ def build_contract_from_payload(
         runtime_config["script_text"] = payload.get("script_text")
     if isinstance(payload.get("script_entities"), dict):
         runtime_config["script_entities"] = payload.get("script_entities")
+    if isinstance(payload.get("character_profiles"), list):
+        runtime_config["character_profiles"] = payload.get("character_profiles")
+    if isinstance(payload.get("audio_markers"), list):
+        runtime_config["audio_markers"] = payload.get("audio_markers")
     if isinstance(payload.get("script_generation"), dict):
         runtime_config["script_generation"] = payload.get("script_generation")
     if isinstance(payload.get("script_review"), dict):
         runtime_config["script_review"] = payload.get("script_review")
     if isinstance(payload.get("script_requires_review"), bool):
         runtime_config["script_requires_review"] = payload.get("script_requires_review")
+    if isinstance(payload.get("prompt_review_required"), bool):
+        runtime_config["prompt_review_required"] = payload.get("prompt_review_required")
+    if isinstance(payload.get("prompt_review"), dict):
+        runtime_config["prompt_review"] = payload.get("prompt_review")
     if isinstance(payload.get("storyboard_generation"), dict):
         runtime_config["storyboard_generation"] = payload.get("storyboard_generation")
     if isinstance(payload.get("camera_tree_generation"), dict):

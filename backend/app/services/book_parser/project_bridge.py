@@ -701,216 +701,265 @@ class ProjectBridge:
         return '\n'.join(parts)
     
     def _build_characters_text(self, analysis_map: Dict[str, BookAnalysis]) -> str:
-        """构建人物设定文本（与创作模式一致）"""
+        """生成与人物扩展一致的人物档案文本。"""
         if 'characters' not in analysis_map:
             return ""
-        
+
         try:
             content = json.loads(analysis_map['characters'].content) if isinstance(analysis_map['characters'].content, str) else analysis_map['characters'].content
-        except:
+        except Exception:
             return ""
-        
-        parts = ["# 人物设定", ""]
-        
-        # 主要人物
-        main_characters = content.get('main_characters', [])
-        if main_characters:
-            parts.append("## 主要人物")
+
+        def normalize_text(value: Any) -> str:
+            if value is None:
+                return ""
+            if isinstance(value, list):
+                items = [str(v).strip() for v in value if str(v).strip()]
+                return "、".join(items)
+            return str(value).strip()
+
+        def pick_first(*values: Any) -> str:
+            for value in values:
+                text_value = normalize_text(value)
+                if text_value:
+                    return text_value
+            return ""
+
+        def build_role_text(role_value: str, fallback: str) -> str:
+            role_map = {
+                'protagonist': '主角',
+                'antagonist': '反派',
+                'deuteragonist': '核心配角',
+                'supporting': '支持角色',
+            }
+            if role_value:
+                normalized = str(role_value).strip().lower()
+                if normalized:
+                    return role_map.get(normalized, role_value)
+            return fallback
+
+        relationship_map: Dict[str, List[str]] = {}
+        for rel in (content.get('character_relationships', []) or []):
+            char_a = normalize_text(rel.get('character1'))
+            char_b = normalize_text(rel.get('character2'))
+            if not char_a or not char_b:
+                continue
+            relation = normalize_text(rel.get('relationship'))
+            description = normalize_text(rel.get('description'))
+            detail_parts = []
+            if relation:
+                detail_parts.append(relation)
+            if description and description != relation:
+                detail_parts.append(description)
+            detail = "，".join(detail_parts)
+            line_a = f"{char_b}：{detail}" if detail else char_b
+            line_b = f"{char_a}：{detail}" if detail else char_a
+            relationship_map.setdefault(char_a, []).append(line_a)
+            relationship_map.setdefault(char_b, []).append(line_b)
+
+        def value_or_default(value: str) -> str:
+            return value if value else "待补充"
+
+        def append_character_card(target: List[str], char_data: Dict[str, Any], role_text: str) -> None:
+            name = normalize_text(char_data.get('name')) or "待补充"
+            age_gender = pick_first(char_data.get('age_gender'), char_data.get('age'), char_data.get('gender'))
+            appearance = pick_first(char_data.get('appearance'), char_data.get('looks'), char_data.get('appearance_feature'))
+            personality = pick_first(char_data.get('personality'), char_data.get('traits'))
+            background = pick_first(char_data.get('background'), char_data.get('backstory'))
+            worldview = pick_first(char_data.get('worldview'), char_data.get('values'), char_data.get('worldview_position'))
+            motivation = pick_first(char_data.get('motivation'), char_data.get('goal'))
+            abilities = pick_first(char_data.get('abilities'), char_data.get('skills'), char_data.get('strengths'))
+            weakness = pick_first(char_data.get('weakness'), char_data.get('weaknesses'), char_data.get('flaws'))
+            plot_role = pick_first(char_data.get('plot_role'), char_data.get('role_in_plot'), char_data.get('description'))
+            growth_arc = pick_first(char_data.get('arc'), char_data.get('development'), char_data.get('growth'))
+            related_clues = pick_first(char_data.get('clues'), char_data.get('related_clues'))
+
+            relationship_lines: List[str] = []
+            relation_to_main = normalize_text(char_data.get('relationship_to_main'))
+            if relation_to_main:
+                relationship_lines.append(f"与主角：{relation_to_main}")
+            relationship_lines.extend(relationship_map.get(name, []))
+            relationship_text = "；".join(list(dict.fromkeys([line for line in relationship_lines if line]))) or "待补充"
+
+            target.append(f"### 【姓名】：{name}")
+            target.append("")
+            target.append(f"【年龄/性别】：{value_or_default(age_gender)}")
+            target.append("")
+            target.append(f"【角色定位】：{value_or_default(role_text)}")
+            target.append("")
+            target.append(f"【外貌特征】：{value_or_default(appearance)}")
+            target.append("")
+            target.append(f"【性格特点】：{value_or_default(personality)}")
+            target.append("")
+            target.append(f"【背景故事】：{value_or_default(background)}")
+            target.append("")
+            target.append(f"【世界观/价值观立场】：{value_or_default(worldview)}")
+            target.append("")
+            target.append(f"【核心动机】：{value_or_default(motivation)}")
+            target.append("")
+            target.append(f"【能力/特长】：{value_or_default(abilities)}")
+            target.append("")
+            target.append(f"【弱点/缺陷】：{value_or_default(weakness)}")
+            target.append("")
+            target.append(f"【在情节中的作用】：{value_or_default(plot_role)}")
+            target.append("")
+            target.append(f"【人物成长线】：{value_or_default(growth_arc)}")
+            target.append("")
+            target.append(f"【关键关系】：{value_or_default(relationship_text)}")
+            target.append("")
+            target.append(f"【关联线索】：{value_or_default(related_clues)}")
+            target.append("")
+            target.append("---")
+            target.append("")
+
+        parts: List[str] = []
+        main_characters = content.get('main_characters', []) or []
+        supporting_characters = content.get('supporting_characters', []) or []
+
+        main_names = {normalize_text(c.get('name')) for c in main_characters if normalize_text(c.get('name'))}
+        supporting_characters = [c for c in supporting_characters if normalize_text(c.get('name')) not in main_names]
+
+        groups: Dict[str, List[Any]] = {
+            "主角阵营": [],
+            "对手阵营": [],
+            "支持角色": [],
+            "中立角色": [],
+        }
+
+        for char in main_characters:
+            role = str(char.get('role') or '').lower()
+            if role == 'protagonist':
+                groups["主角阵营"].append((char, build_role_text(role, "主角")))
+            elif role == 'antagonist':
+                groups["对手阵营"].append((char, build_role_text(role, "反派")))
+            elif role in {'deuteragonist', 'supporting'}:
+                groups["支持角色"].append((char, build_role_text(role, "支持角色")))
+            else:
+                groups["中立角色"].append((char, build_role_text(role, "中立角色")))
+
+        for char in supporting_characters:
+            role = str(char.get('role') or '').lower()
+            groups["支持角色"].append((char, build_role_text(role, "支持角色")))
+
+        for group_name, entries in groups.items():
+            if not entries:
+                continue
+            parts.append(f"## {group_name}")
             parts.append("")
-            for char in main_characters:
-                parts.append(f"### {char.get('name', '未命名')}")
-                
-                # 角色类型
-                if char.get('role'):
-                    role_map = {'protagonist': '主角', 'antagonist': '反派', 'deuteragonist': '重要配角'}
-                    parts.append(f"角色：{role_map.get(char['role'], char['role'])}")
-                
-                # 🆕 重要性
-                importance = '主角' if char.get('role') == 'protagonist' else '重要角色'
-                parts.append(f"重要性：{importance}")
-                
-                # 🆕 所属势力
-                faction = char.get('faction', '') or char.get('affiliation', '')
-                if faction:
-                    parts.append(f"所属势力：{faction}")
-                
-                # 简介
-                if char.get('description'):
-                    parts.append(f"简介：{char['description']}")
-                
-                # 性格
-                if char.get('personality'):
-                    personality = char['personality']
-                    if isinstance(personality, list):
-                        parts.append(f"性格：{'、'.join(personality)}")
-                    else:
-                        parts.append(f"性格：{personality}")
-                
-                # 能力
-                if char.get('abilities'):
-                    abilities = char['abilities']
-                    if isinstance(abilities, list):
-                        parts.append(f"能力：{'、'.join(abilities)}")
-                    else:
-                        parts.append(f"能力：{abilities}")
-                
-                # 人物弧光/发展轨迹
-                if char.get('arc') or char.get('development'):
-                    arc = char.get('arc', '') or char.get('development', '')
-                    parts.append(f"人物弧光：{arc}")
-                
-                parts.append("")
-        
-        # 配角
-        supporting_characters = content.get('supporting_characters', [])[:10]
-        if supporting_characters:
-            parts.append("## 配角")
-            parts.append("")
-            for char in supporting_characters:
-                parts.append(f"### {char.get('name', '未命名')}")
-                
-                # 🆕 重要性
-                parts.append("重要性：次要角色")
-                
-                # 🆕 所属势力
-                faction = char.get('faction', '') or char.get('affiliation', '')
-                if faction:
-                    parts.append(f"所属势力：{faction}")
-                
-                if char.get('description'):
-                    parts.append(f"简介：{char['description']}")
-                if char.get('relationship_to_main'):
-                    parts.append(f"与主角关系：{char['relationship_to_main']}")
-                parts.append("")
-        
-        return '\n'.join(parts)
-    
+            for char_data, role_text in entries:
+                append_character_card(parts, char_data, role_text)
+
+        return "\n".join(parts).strip()
+
     def _build_plot_outline_text(self, analysis_map: Dict[str, BookAnalysis], book_id: int) -> str:
-        """构建情节大纲文本（增强版 - 包含每章细纲）"""
-        parts = ["# 情节大纲", ""]
-        
-        # 从分析结果获取主线剧情和剧情弧
-        if 'plot' in analysis_map:
-            try:
-                content = json.loads(analysis_map['plot'].content) if isinstance(analysis_map['plot'].content, str) else analysis_map['plot'].content
-                
-                # 主线剧情
-                if content.get('main_plot'):
-                    parts.append("## 主线剧情")
-                    parts.append(content['main_plot'])
-                    parts.append("")
-                
-                # 剧情弧概览
-                plot_arcs = content.get('plot_arcs', [])
-                if plot_arcs:
-                    parts.append("## 剧情弧")
-                    parts.append("")
-                    for arc in plot_arcs:
-                        parts.append(f"### {arc.get('name', '剧情弧')}")
-                        chapters = arc.get('chapters', [])
-                        if len(chapters) >= 2:
-                            parts.append(f"章节范围：第{chapters[0]}-{chapters[1]}章")
-                        if arc.get('description'):
-                            parts.append(arc['description'])
-                        parts.append("")
-            except:
-                pass
-        
-        # 🆕 从 BookChapter 表读取每章细纲数据
-        chapters = self.db.query(BookChapter).filter(
-            BookChapter.book_id == book_id
-        ).order_by(BookChapter.chapter_number).all()
-        
-        if chapters:
-            parts.append("## 章节细纲")
-            parts.append("")
-            
-            for ch in chapters:
-                parts.append(f"### 第{ch.chapter_number}章：{ch.title}")
-                parts.append("")
-                
-                # 基础摘要
-                if ch.summary:
-                    parts.append(f"**内容概要**：{ch.summary}")
-                    parts.append("")
-                
-                # 🆕 读取细纲数据
-                if ch.outline_data:
-                    try:
-                        outline = json.loads(ch.outline_data)
-                        
-                        # 场景目标
-                        if outline.get('scene_goal'):
-                            parts.append(f"**场景目标**：{outline['scene_goal']}")
-                        
-                        # 冲突弧
-                        conflict_arc = outline.get('conflict_arc', {})
-                        if conflict_arc and any([conflict_arc.get('trigger'), conflict_arc.get('escalation'), conflict_arc.get('resolution')]):
-                            parts.append("**冲突发展**：")
-                            if conflict_arc.get('trigger'):
-                                parts.append(f"  - 起因：{conflict_arc['trigger']}")
-                            if conflict_arc.get('escalation'):
-                                parts.append(f"  - 升级：{conflict_arc['escalation']}")
-                            if conflict_arc.get('resolution'):
-                                parts.append(f"  - 结果：{conflict_arc['resolution']}")
-                        
-                        # 情绪曲线
-                        if outline.get('emotion_curve'):
-                            parts.append(f"**情绪曲线**：{outline['emotion_curve']}")
-                        
-                        # 爽点/高潮
-                        highlight = outline.get('highlight', {})
-                        if highlight and highlight.get('type') and highlight.get('type') != '无':
-                            hl_text = f"{highlight.get('type', '')}"
-                            if highlight.get('description'):
-                                hl_text += f" - {highlight['description']}"
-                            if highlight.get('intensity'):
-                                hl_text += f" (强度{highlight['intensity']}星)"
-                            parts.append(f"**爽点**：{hl_text}")
-                        
-                        # 结尾钩子
-                        ending_hook = outline.get('ending_hook', {})
-                        if ending_hook and ending_hook.get('type') and ending_hook.get('type') != '无':
-                            hook_text = f"{ending_hook.get('type', '')}"
-                            if ending_hook.get('content'):
-                                hook_text += f" - {ending_hook['content']}"
-                            parts.append(f"**结尾钩子**：{hook_text}")
-                        
-                        # 收获
-                        gains = outline.get('gains', {})
-                        if gains and (gains.get('character_gains') or gains.get('plot_progress')):
-                            if gains.get('character_gains'):
-                                parts.append(f"**角色收获**：{gains['character_gains']}")
-                            if gains.get('plot_progress'):
-                                parts.append(f"**主线推进**：{gains['plot_progress']}")
-                        
-                        # 伏笔
-                        foreshadowing = outline.get('foreshadowing', [])
-                        if foreshadowing:
-                            parts.append(f"**伏笔**：{'、'.join(foreshadowing)}")
-                        
-                    except json.JSONDecodeError:
-                        pass
-                
-                parts.append("")  # 章节间空行
-        
-        # 转折点
-        if 'plot' in analysis_map:
-            try:
-                content = json.loads(analysis_map['plot'].content) if isinstance(analysis_map['plot'].content, str) else analysis_map['plot'].content
-                turning_points = content.get('turning_points', [])[:10]
-                if turning_points:
-                    parts.append("## 关键转折点")
-                    parts.append("")
-                    for tp in turning_points:
-                        chapter = tp.get('chapter', '?')
-                        parts.append(f"### 第{chapter}章")
-                        if tp.get('event'):
-                            parts.append(f"事件：{tp['event']}")
-                        if tp.get('significance'):
-                            parts.append(f"重要性：{tp['significance']}")
-                        parts.append("")
-            except:
-                pass
-        
-        return '\n'.join(parts)
+        """生成与大纲扩展一致的情节大纲文本。"""
+        if 'plot' not in analysis_map:
+            return ""
+
+        try:
+            content = json.loads(analysis_map['plot'].content) if isinstance(analysis_map['plot'].content, str) else analysis_map['plot'].content
+        except Exception:
+            return ""
+
+        def normalize_text(value: Any) -> str:
+            if value is None:
+                return ""
+            if isinstance(value, list):
+                items = [str(v).strip() for v in value if str(v).strip()]
+                return "、".join(items)
+            return str(value).strip()
+
+        def format_arc_brief(arc: Any) -> str:
+            if not isinstance(arc, dict):
+                return normalize_text(arc) or "待补充"
+            name = normalize_text(arc.get('name')) or "待补充"
+            desc = normalize_text(arc.get('description'))
+            chapters = arc.get('chapters') or []
+            meta_parts = []
+            if isinstance(chapters, list) and len(chapters) >= 2:
+                meta_parts.append(f"第{chapters[0]}-{chapters[1]}章")
+            arc_type = normalize_text(arc.get('type'))
+            if arc_type:
+                meta_parts.append(arc_type)
+            if meta_parts:
+                name = f"{name}（{' / '.join(meta_parts)}）"
+            if desc:
+                return f"{name}：{desc}"
+            return name
+
+        parts: List[str] = []
+
+        main_plot = normalize_text(content.get('main_plot'))
+        if not main_plot:
+            main_plot = normalize_text(content.get('concept', {}).get('summary')) or normalize_text(content.get('concept', {}).get('logline'))
+        parts.append("1. 故事概述")
+        parts.append(main_plot if main_plot else "待补充")
+        parts.append("")
+
+        plot_arcs = content.get('plot_arcs', []) or []
+        parts.append("2. 情节发展")
+        if plot_arcs:
+            for arc in plot_arcs:
+                parts.append(f"- {format_arc_brief(arc)}")
+        else:
+            parts.append("待补充")
+        parts.append("")
+
+        turning_points = content.get('turning_points', []) or []
+        parts.append("3. 重要转折点")
+        if turning_points:
+            for tp in turning_points[:8]:
+                chapter = normalize_text(tp.get('chapter')) if isinstance(tp, dict) else ""
+                event = normalize_text(tp.get('event')) if isinstance(tp, dict) else ""
+                significance = normalize_text(tp.get('significance')) if isinstance(tp, dict) else ""
+                title = f"第{chapter}章" if chapter else "关键节点"
+                detail_parts = [item for item in [event, significance] if item]
+                detail = "，".join(detail_parts)
+                parts.append(f"- {title}：{detail}" if detail else f"- {title}")
+        else:
+            parts.append("待补充")
+        parts.append("")
+
+        parts.append("4. 高潮设计")
+        climax_lines = []
+        for arc in plot_arcs:
+            if not isinstance(arc, dict):
+                continue
+            arc_type = normalize_text(arc.get('type'))
+            arc_name = normalize_text(arc.get('name'))
+            if "高潮" in arc_type or "高潮" in arc_name or "决战" in arc_name:
+                climax_lines.append(f"- {format_arc_brief(arc)}")
+        if not climax_lines and turning_points:
+            for tp in turning_points[-2:]:
+                chapter = normalize_text(tp.get('chapter')) if isinstance(tp, dict) else ""
+                event = normalize_text(tp.get('event')) if isinstance(tp, dict) else ""
+                title = f"第{chapter}章" if chapter else "关键节点"
+                detail = event or (normalize_text(tp.get('significance')) if isinstance(tp, dict) else "")
+                climax_lines.append(f"- {title}：{detail}" if detail else f"- {title}")
+        if climax_lines:
+            parts.extend(climax_lines)
+        else:
+            parts.append("待补充")
+        parts.append("")
+
+        parts.append("5. 结局规划")
+        ending_lines = []
+        for arc in plot_arcs:
+            if not isinstance(arc, dict):
+                continue
+            arc_type = normalize_text(arc.get('type'))
+            arc_name = normalize_text(arc.get('name'))
+            if any(keyword in arc_type for keyword in ["结局", "收尾", "终局", "尾声"]) or any(keyword in arc_name for keyword in ["结局", "收尾", "终局", "尾声"]):
+                ending_lines.append(f"- {format_arc_brief(arc)}")
+        if not ending_lines:
+            chapter_summaries = content.get('chapter_summaries') or []
+            if chapter_summaries:
+                last_summary = normalize_text(chapter_summaries[-1])
+                if last_summary:
+                    ending_lines.append(f"- {last_summary}")
+        if ending_lines:
+            parts.extend(ending_lines)
+        else:
+            parts.append("待补充")
+
+        return "\n".join(parts).strip()

@@ -102,6 +102,7 @@ class RunContext:
     state: State = State.INIT
     retry: Dict[State, int] = field(default_factory=dict)
     payload: Dict[str, Any] = field(default_factory=dict)
+    event_emitter: Any | None = None
 
     def __post_init__(self) -> None:
         # 让所有节点都能稳定取到 run_id（历史代码部分读取 ctx.payload["run_id"]）
@@ -157,9 +158,14 @@ def step(ctx: RunContext) -> RunContext:
             # 允许素材库阶段“增量推进”：单次 step() 只生成一部分素材，
             # 其间保持停留在 ASSET_LIBRARY，便于 Celery/UI 持续刷新进度。
             # 向后兼容：若未设置 asset_library_done，视为已完成本阶段。
+            prompt_review_required = bool(ctx.payload.get("prompt_review_required"))
+            prompt_review = ctx.payload.get("prompt_review") if isinstance(ctx.payload.get("prompt_review"), dict) else {}
+            prompt_review_approved = bool(prompt_review.get("approved"))
             if ctx.payload.get("asset_library_done") is False:
                 ctx.state = State.ASSET_LIBRARY
             elif bool(ctx.payload.get("asset_library_requires_review")):
+                ctx.state = State.WAITING_APPROVAL
+            elif prompt_review_required and not prompt_review_approved:
                 ctx.state = State.WAITING_APPROVAL
             else:
                 ctx.state = State.KEYFRAMES

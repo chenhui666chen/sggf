@@ -92,3 +92,17 @@ class DreamweaverAsset(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+
+class DreamweaverRunEvent(Base):
+    __tablename__ = "dreamweaver_run_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(String(128), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    stage = Column(String(32), nullable=True)
+    event_type = Column(String(64), nullable=False)
+    payload = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

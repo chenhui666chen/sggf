@@ -12,6 +12,7 @@ interface DreamweaverRunOptions {
   smart_tuning?: boolean
   ab_variant?: string
   video_require_confirmation?: boolean
+  prompt_review_required?: boolean
   style_preset?: string
   image_ratio?: string
   image_resolution?: string
@@ -77,6 +78,14 @@ interface DreamweaverScriptUpdateRequest {
 
 interface DreamweaverScriptApproveRequest {
   approved: boolean
+}
+
+interface DreamweaverPromptReviewApproveRequest {
+  approved: boolean
+}
+
+interface DreamweaverShotVideoPromptUpdateRequest {
+  prompt?: string | null
 }
 
 interface DreamweaverRestartRequest {
@@ -171,7 +180,11 @@ class ApiClient {
 
   constructor() {
     // 使用环境变量或默认值
-    const baseURL = API_URL
+    // 如果 API_URL 是 /api，则设置为空字符串，因为 API 路径已经包含了 /api
+    let baseURL = API_URL
+    if (baseURL === '/api') {
+      baseURL = ''
+    }
 
     this.client = axios.create({
       baseURL: baseURL,
@@ -231,6 +244,14 @@ class ApiClient {
 
   changePassword(data: { old_password: string; new_password: string }) {
     return this.client.post('/api/v1/auth/change-password', data)
+  }
+
+  alipayCallback(code: string) {
+    return this.client.post('/api/v1/auth/alipay/callback', { code })
+  }
+
+  wechatCallback(code: string) {
+    return this.client.post('/api/v1/auth/wechat/callback', { code })
   }
 
   // 项目API
@@ -631,6 +652,9 @@ class ApiClient {
       ...(typeof options?.video_require_confirmation === 'boolean'
         ? { video_require_confirmation: options.video_require_confirmation }
         : {}),
+      ...(typeof options?.prompt_review_required === 'boolean'
+        ? { prompt_review_required: options.prompt_review_required }
+        : {}),
       ...(options?.style_preset ? { style_preset: options.style_preset } : {}),
       ...(options?.image_ratio ? { image_ratio: options.image_ratio } : {}),
       ...(options?.image_resolution ? { image_resolution: options.image_resolution } : {}),
@@ -648,6 +672,9 @@ class ApiClient {
       ...(options?.ab_variant ? { ab_variant: options.ab_variant } : {}),
       ...(typeof options?.video_require_confirmation === 'boolean'
         ? { video_require_confirmation: options.video_require_confirmation }
+        : {}),
+      ...(typeof options?.prompt_review_required === 'boolean'
+        ? { prompt_review_required: options.prompt_review_required }
         : {}),
       ...(options?.style_preset ? { style_preset: options.style_preset } : {}),
       ...(options?.image_ratio ? { image_ratio: options.image_ratio } : {}),
@@ -725,6 +752,13 @@ class ApiClient {
     })
   }
 
+  updateDreamweaverRunShotVideoPrompt(runId: string, shotId: string, prompt?: string | null) {
+    const payload: DreamweaverShotVideoPromptUpdateRequest = { prompt: prompt ?? '' }
+    return this.client.post(`/api/v1/dreamweaver/runs/${encodeURIComponent(runId)}/shots/${encodeURIComponent(shotId)}/video-prompt`, payload, {
+      timeout: 15000,
+    })
+  }
+
   resumeDreamweaverAsync(runId: string) {
     return this.client.post(`/api/v1/dreamweaver/runs/${runId}/resume-async`, null, {
       timeout: 15000,
@@ -771,8 +805,21 @@ class ApiClient {
     })
   }
 
+  approveDreamweaverPromptReview(runId: string, payload: DreamweaverPromptReviewApproveRequest) {
+    return this.client.post(`/api/v1/dreamweaver/runs/${runId}/prompt-review/approve`, payload, {
+      timeout: 15000,
+    })
+  }
+
   getDreamweaverRun(runId: string) {
     return this.client.get(`/api/v1/dreamweaver/runs/${runId}`, {
+      timeout: 15000,
+    })
+  }
+
+  getDreamweaverRunEvents(runId: string, params?: { after_id?: number; limit?: number }) {
+    return this.client.get(`/api/v1/dreamweaver/runs/${encodeURIComponent(runId)}/events`, {
+      params,
       timeout: 15000,
     })
   }

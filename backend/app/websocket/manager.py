@@ -12,6 +12,15 @@ from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
+_socket_manager = None
+if isinstance(getattr(settings, "REDIS_URL", None), str) and str(settings.REDIS_URL or "").strip():
+    try:
+        _socket_manager = socketio.AsyncRedisManager(str(settings.REDIS_URL).strip())
+        logger.info("Socket.IO 使用 Redis 消息队列: %s", str(settings.REDIS_URL).strip())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Socket.IO Redis 管理器初始化失败，将回退为本进程广播: %s", exc)
+        _socket_manager = None
+
 # 创建 Socket.IO 服务器实例
 sio = socketio.AsyncServer(
     async_mode='asgi',
@@ -25,7 +34,8 @@ sio = socketio.AsyncServer(
     max_http_buffer_size=10000000,  # 10MB（支持大文件传输）
     allow_upgrades=True,  # 允许从轮询升级到WebSocket
     http_compression=True,  # 启用HTTP压缩
-    compression_threshold=1024  # 压缩阈值1KB
+    compression_threshold=1024,  # 压缩阈值1KB
+    client_manager=_socket_manager,
 )
 
 # 房间管理：project_id -> set of session_ids

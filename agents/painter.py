@@ -44,6 +44,10 @@ from pipeline.media_presets import (
 from pipeline.artifacts_io import download_url_to_path as _download_url_to_path
 from pipeline.style_presets import ensure_style_payload
 
+_PNG_PLACEHOLDER_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGO4o6YGAAMKASng8MlTAAAAAElFTkSuQmCC"
+)
+
 
 def _ensure_run_dir(ctx: Any) -> Path:
     base = Path("runs") / ctx.run_id
@@ -201,6 +205,119 @@ def _env_float(name: str, default: float) -> float:
         return float(raw)
     except Exception:  # noqa: BLE001
         return default
+
+
+def _normalize_safety_strategy(raw: str) -> str:
+    value = (raw or "").strip().lower()
+    if value in {"off", "none", "disable", "false", "0"}:
+        return ""
+    if value in {"conservative", "moderate", "aggressive"}:
+        return value
+    return "moderate"
+
+
+def _sanitize_prompt_for_safety(prompt: str) -> Tuple[str, Dict[str, Any]]:
+    meta: Dict[str, Any] = {
+        "strategy": "off",
+        "issues": 0,
+        "changed": False,
+    }
+    if not isinstance(prompt, str) or not prompt.strip():
+        return prompt, meta
+
+    strategy = _normalize_safety_strategy(os.getenv("DREAMWEAVER_SAFETY_STRATEGY", "moderate"))
+    if not strategy:
+        return prompt, meta
+
+    from adapters.content_safety_checker import check_and_fix_prompt
+
+    fixed_prompt, issues, fix_description = check_and_fix_prompt(prompt, strategy=strategy)
+    meta["strategy"] = strategy
+    if issues:
+        meta["issues"] = len(issues)
+        meta["fix_description"] = fix_description
+        if fixed_prompt != prompt:
+            meta["changed"] = True
+            print(f"⚠️ [内容安全] T2I 提示词已自动修复: {fix_description}")
+            return fixed_prompt, meta
+    return prompt, meta
+
+
+def _is_safety_block_error(error: str) -> bool:
+    text = (error or "").lower()
+    return "datainspectionfailed" in text or "inappropriate content" in text or "content check failed" in text
+
+
+def _write_png_placeholder(
+    out_path: Path,
+    *,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+    label: str = "安全拦截 / 可重试",
+) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    w = int(width or 0)
+    h = int(height or 0)
+    if w <= 0:
+        w = 1024
+    if h <= 0:
+        h = 576
+
+    try:
+        from PIL import Image, ImageDraw, ImageFont  # type: ignore
+
+        bg = (252, 232, 232)
+        fg = (176, 0, 0)
+        border = (224, 120, 120)
+        img = Image.new("RGB", (w, h), bg)
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([0, 0, w - 1, h - 1], outline=border, width=2)
+
+        font_paths = [
+            "C:/Windows/Fonts/msyh.ttc",
+            "C:/Windows/Fonts/msyh.ttf",
+            "C:/Windows/Fonts/simhei.ttf",
+            "C:/Windows/Fonts/arial.ttf",
+        ]
+        font_size = max(16, min(w, h) // 18)
+        font = None
+        for path in font_paths:
+            try:
+                if Path(path).exists():
+                    font = ImageFont.truetype(path, font_size)
+                    break
+            except Exception:  # noqa: BLE001
+                continue
+        if font is None:
+            font = ImageFont.load_default()
+
+        text_lines = [label.strip(), "Safety blocked / Retry"]
+        line_heights: List[int] = []
+        line_widths: List[int] = []
+        for text in text_lines:
+            try:
+                bbox = draw.textbbox((0, 0), text, font=font)
+                line_widths.append(bbox[2] - bbox[0])
+                line_heights.append(bbox[3] - bbox[1])
+            except Exception:  # noqa: BLE001
+                size = draw.textsize(text, font=font)
+                line_widths.append(size[0])
+                line_heights.append(size[1])
+
+        spacing = max(6, int(font_size * 0.4))
+        total_height = sum(line_heights) + spacing * (len(text_lines) - 1)
+        y = max(12, (h - total_height) // 2)
+
+        for idx, text in enumerate(text_lines):
+            line_w = line_widths[idx]
+            x = max(12, (w - line_w) // 2)
+            draw.text((x, y), text, fill=fg, font=font)
+            y += line_heights[idx] + spacing
+
+        img.save(out_path, format="PNG")
+        return
+    except Exception:  # noqa: BLE001
+        out_path.write_bytes(base64.b64decode(_PNG_PLACEHOLDER_B64))
 
 
 def _cfg_flag(cfg: Dict[str, Any], key: str, *, env_name: str, default: bool) -> bool:
@@ -673,6 +790,43 @@ def _clamp_prompt_text(text: str, limit: int = 900) -> str:
     return cleaned[:limit].rstrip()
 
 
+def _is_qwen_image_edit_adapter_name(name: str) -> bool:
+    raw = str(name or "").strip().lower()
+    if not raw:
+        return False
+    return (
+        raw.startswith("qwen_image_edit")
+        or raw.startswith("wan_image_edit")
+        or "qwen-image-edit" in raw
+        or "qwenimageedit" in raw
+    )
+
+
+def _is_qwen_image_edit_adapter(adapter: Any) -> bool:
+    if adapter is None:
+        return False
+    cfg = getattr(adapter, "config", None)
+    model_name = str(getattr(cfg, "model_name", "") or "").strip().lower()
+    if _is_qwen_image_edit_adapter_name(model_name):
+        return True
+    class_name = adapter.__class__.__name__.lower()
+    return "qwenimageedit" in class_name or "wanimageedit" in class_name
+
+
+def _apply_image_edit_prompt_constraints(*, prompt: str, adapter: Any, ref_count: int) -> str:
+    cleaned = str(prompt or "").strip()
+    if not cleaned:
+        return ""
+    if ref_count > 0 and "image 1" not in cleaned.lower():
+        ref_hint = "Image 2"
+        if ref_count >= 2:
+            ref_hint = "Image 2、Image 3"
+        prefix = f"以 Image 1 为基准，参考 {ref_hint} 保持主体一致。"
+        cleaned = f"{prefix}\n{cleaned}"
+    limit = 800 if _is_qwen_image_edit_adapter(adapter) else 900
+    return _clamp_prompt_text(cleaned, limit=limit)
+
+
 def _finalize_candidates(
     *,
     candidate_paths: List[Path],
@@ -721,6 +875,19 @@ def _generate_t2i_with_candidates(
 ) -> Dict[str, Any]:
     cache_enabled = _hash_cache_enabled(enable_hash_cache) and not bool(bypass_hash_cache)
     payload = ctx.payload if hasattr(ctx, "payload") and isinstance(getattr(ctx, "payload", None), dict) else None
+    raw_prompt = prompt
+    prompt, safety_meta = _sanitize_prompt_for_safety(prompt)
+    aggressive_prompt: Optional[str] = None
+    if _env_flag("DREAMWEAVER_SAFETY_AGGRESSIVE_FALLBACK", True):
+        try:
+            from adapters.content_safety_checker import check_and_fix_prompt
+            aggressive_prompt, _, _ = check_and_fix_prompt(raw_prompt, strategy="aggressive")
+            if not aggressive_prompt or aggressive_prompt == prompt:
+                aggressive_prompt = None
+        except Exception:  # noqa: BLE001
+            aggressive_prompt = None
+    if payload is not None and safety_meta.get("issues"):
+        _bump_telemetry_counter(payload, "t2i_safety_fixes", 1)
     if candidate_count <= 1:
         seed_value = _derive_seed(base_seed=base_seed, ctx=ctx, shot_id=shot_id, role=role, idx=0)
         cache_key = None
@@ -752,14 +919,51 @@ def _generate_t2i_with_candidates(
 
         if payload is not None:
             _bump_telemetry_counter(payload, "t2i_generate_calls", 1)
-        result = adapter.generate(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            width=width,
-            height=height,
-            seed=seed_value,
-        )
-        _write_image_from_generation_result(result, output_path)
+        used_fallback = False
+        try:
+            try:
+                result = adapter.generate(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    width=width,
+                    height=height,
+                    seed=seed_value,
+                )
+            except Exception as exc:  # noqa: BLE001
+                error_text = str(exc)
+                if _is_safety_block_error(error_text) and aggressive_prompt:
+                    result = adapter.generate(
+                        prompt=aggressive_prompt,
+                        negative_prompt=negative_prompt,
+                        width=width,
+                        height=height,
+                        seed=seed_value,
+                    )
+                    used_fallback = True
+                    if payload is not None:
+                        _bump_telemetry_counter(payload, "t2i_safety_retries", 1)
+                else:
+                    raise
+            _write_image_from_generation_result(result, output_path)
+        except Exception as exc:  # noqa: BLE001
+            error_text = str(exc)
+            if _is_safety_block_error(error_text):
+                _write_png_placeholder(output_path, width=width, height=height)
+                if payload is not None:
+                    _bump_telemetry_counter(payload, "t2i_safety_blocked", 1)
+                return {
+                    "candidate_count": 1,
+                    "selected": 0,
+                    "selector": "safety_placeholder",
+                    "seed": seed_value,
+                    "cache_hit": False if cache_enabled else None,
+                    "cache_key": cache_key,
+                    "safety_blocked": True,
+                    "safety_error": error_text,
+                }
+            raise
+        if used_fallback:
+            cache_key = None
         if cache_enabled and cache_key:
             _save_to_hash_cache(key=cache_key, src_path=output_path)
         return {
@@ -770,7 +974,6 @@ def _generate_t2i_with_candidates(
             "cache_hit": False if cache_enabled else None,
             "cache_key": cache_key,
         }
-
     cand_dir = output_path.parent / "candidates"
     cand_dir.mkdir(parents=True, exist_ok=True)
 
@@ -809,7 +1012,11 @@ def _generate_t2i_with_candidates(
         else:
             _close_adapter_session(probe)
 
+    safety_blocked_any = False
+    safety_error_sample: Optional[str] = None
+
     def _generate_one(idx: int) -> Path:
+        nonlocal safety_blocked_any, safety_error_sample
         seed = _derive_seed(base_seed=base_seed, ctx=ctx, shot_id=shot_id, role=role, idx=idx)
         cand_path = cand_dir / f"{shot_id}_{role}_c{idx}.png"
         cache_key = None
@@ -834,17 +1041,49 @@ def _generate_t2i_with_candidates(
                 raise RuntimeError("adapter clone failed for parallel candidate generation")
             local_adapter = cloned
         try:
-            result = local_adapter.generate(
-                prompt=prompt,
-                negative_prompt=negative_prompt,
-                width=width,
-                height=height,
-                seed=seed,
-            )
-            _write_image_from_generation_result(result, cand_path)
-            if cache_enabled and cache_key:
-                _save_to_hash_cache(key=cache_key, src_path=cand_path)
-            return cand_path
+            try:
+                result = local_adapter.generate(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    width=width,
+                    height=height,
+                    seed=seed,
+                )
+                _write_image_from_generation_result(result, cand_path)
+                if cache_enabled and cache_key:
+                    _save_to_hash_cache(key=cache_key, src_path=cand_path)
+                return cand_path
+            except Exception as exc:  # noqa: BLE001
+                error_text = str(exc)
+                if _is_safety_block_error(error_text) and aggressive_prompt:
+                    try:
+                        result = local_adapter.generate(
+                            prompt=aggressive_prompt,
+                            negative_prompt=negative_prompt,
+                            width=width,
+                            height=height,
+                            seed=seed,
+                        )
+                        _write_image_from_generation_result(result, cand_path)
+                        if payload is not None:
+                            _bump_telemetry_counter(payload, "t2i_safety_retries", 1)
+                        return cand_path
+                    except Exception as retry_exc:  # noqa: BLE001
+                        error_text = str(retry_exc)
+                        if _is_safety_block_error(error_text):
+                            safety_blocked_any = True
+                            if safety_error_sample is None:
+                                safety_error_sample = error_text
+                            _write_png_placeholder(cand_path, width=width, height=height)
+                            return cand_path
+                        raise
+                if _is_safety_block_error(error_text):
+                    safety_blocked_any = True
+                    if safety_error_sample is None:
+                        safety_error_sample = error_text
+                    _write_png_placeholder(cand_path, width=width, height=height)
+                    return cand_path
+                raise
         finally:
             if local_adapter is not adapter:
                 _close_adapter_session(local_adapter)
@@ -876,6 +1115,8 @@ def _generate_t2i_with_candidates(
         if cache_enabled:
             _bump_telemetry_counter(payload, "t2i_cache_hits", int(cache_hits))
             _bump_telemetry_counter(payload, "t2i_cache_misses", int(candidate_count) - int(cache_hits))
+        if safety_blocked_any:
+            _bump_telemetry_counter(payload, "t2i_safety_blocked", 1)
     out = {
         "candidate_count": candidate_count,
         "selected": int(pick["best_index"]),
@@ -885,6 +1126,10 @@ def _generate_t2i_with_candidates(
         "candidate_seeds": candidate_seeds,
         "selected_seed": candidate_seeds[int(pick["best_index"])] if isinstance(pick.get("best_index"), int) and 0 <= int(pick["best_index"]) < len(candidate_seeds) else None,
     }
+    if safety_blocked_any:
+        out["safety_blocked"] = True
+        if safety_error_sample:
+            out["safety_error"] = safety_error_sample
     if keep_candidates:
         out["candidates"] = [str(p) for p in candidate_paths]
     return out
@@ -952,6 +1197,8 @@ def _generate_edit_with_candidates(
     if cache_enabled:
         base_image_hash = hashlib.sha256(image_path.read_bytes()).hexdigest()
     supports_multi_ref = bool(getattr(adapter, "supports_multi_image", False))
+    if _is_qwen_image_edit_adapter(adapter):
+        max_ref_images = min(int(max_ref_images), 2)
     ref_paths = (
         _collect_reference_image_paths(reference_images, image_path, max_ref_images)
         if use_multi_ref and supports_multi_ref
@@ -959,6 +1206,11 @@ def _generate_edit_with_candidates(
     )
     if not ref_paths:
         use_multi_ref = False
+    edit_prompt = _apply_image_edit_prompt_constraints(
+        prompt=edit_prompt,
+        adapter=adapter,
+        ref_count=len(ref_paths),
+    )
     ref_hashes: List[str] = []
     if cache_enabled and use_multi_ref:
         for ref_path in ref_paths:
@@ -1622,6 +1874,12 @@ def run_keyframes(ctx: Any) -> None:
         adapter_name=image_edit_adapter_name_tail,
     )
     image_edit_ref_max_images = resolve_image_edit_ref_max_images(image_cfg=image_cfg)
+    max_refs_for_edit = max_refs
+    if _is_qwen_image_edit_adapter_name(image_edit_adapter_name_head) or _is_qwen_image_edit_adapter_name(
+        image_edit_adapter_name_tail
+    ):
+        max_refs_for_edit = min(int(max_refs_for_edit), 2)
+        image_edit_ref_max_images = min(int(image_edit_ref_max_images), 2)
 
     vlm_adapter = None
     if selector in {"vlm", "semantic"} or ref_selector == "vlm":
@@ -2360,7 +2618,7 @@ def run_keyframes(ctx: Any) -> None:
                                 base_image_desc=base_desc,
                                 target_description=head_prompt,
                                 reference_images=rewrite_subset,
-                                max_refs=max_refs,
+                                max_refs=max_refs_for_edit,
                             )
                             if isinstance(ref_pick, dict) and isinstance(ref_pick.get("edit_prompt"), str):
                                 edit_prompt = str(ref_pick.get("edit_prompt") or head_prompt)
@@ -2599,7 +2857,7 @@ def run_keyframes(ctx: Any) -> None:
                             base_image_desc=tail_desc,
                             target_description=tail_edit_prompt,
                             reference_images=rewrite_subset,
-                            max_refs=max_refs,
+                            max_refs=max_refs_for_edit,
                         )
                         if isinstance(tail_rewrite, dict) and isinstance(tail_rewrite.get("edit_prompt"), str):
                             tail_edit_prompt = str(tail_rewrite.get("edit_prompt") or tail_edit_prompt)
@@ -2932,6 +3190,10 @@ def run_midframes(ctx: Any) -> None:
         adapter_name=image_edit_adapter_name_mid,
     )
     image_edit_ref_max_images = resolve_image_edit_ref_max_images(image_cfg=image_cfg)
+    max_refs_for_edit = max_refs
+    if _is_qwen_image_edit_adapter_name(image_edit_adapter_name_mid):
+        max_refs_for_edit = min(int(max_refs_for_edit), 2)
+        image_edit_ref_max_images = min(int(image_edit_ref_max_images), 2)
     image_edit_adapter = None
     if use_mid_image_edit:
         try:
@@ -3087,7 +3349,7 @@ def run_midframes(ctx: Any) -> None:
                     base_image_desc=mid_desc,
                     target_description=mid_edit_prompt,
                     reference_images=ref_images,
-                    max_refs=max_refs,
+                    max_refs=max_refs_for_edit,
                 )
                 if isinstance(mid_rewrite, dict) and isinstance(mid_rewrite.get("edit_prompt"), str):
                     mid_edit_prompt = str(mid_rewrite.get("edit_prompt") or mid_edit_prompt)

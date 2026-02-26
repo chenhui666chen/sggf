@@ -3019,7 +3019,15 @@ async def get_running_tasks(
             FROM project_settings
             WHERE project_id = :project_id
         """)
-        stage_result = db.execute(stage_query, {"project_id": project_id}).fetchone()
+        stage_result = None
+        try:
+            stage_result = db.execute(stage_query, {"project_id": project_id}).fetchone()
+        except Exception as exc:
+            err_text = str(exc)
+            if "project_settings" in err_text and "does not exist" in err_text:
+                logger.warning("   ⚠️ project_settings 表不存在，跳过 stage 状态检查")
+            else:
+                raise
 
         all_stages_completed = False
         if stage_result:

@@ -1055,14 +1055,51 @@ class TTSEngine:
                 language_type,
                 len(text),
             )
-            response = dashscope.MultiModalConversation.call(
-                model=model,
-                api_key=api_key,
-                text=text,
-                voice=voice,
-                language_type=language_type,
-                stream=False,
-            )
+            
+            max_retries = 5
+            retry_count = 0
+            response = None
+            
+            while retry_count <= max_retries:
+                try:
+                    response = dashscope.MultiModalConversation.call(
+                        model=model,
+                        api_key=api_key,
+                        text=text,
+                        voice=voice,
+                        language_type=language_type,
+                        stream=False,
+                    )
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    error_str = str(exc)
+                    if "429" in error_str or "Throttling" in error_str or "RateQuota" in error_str:
+                        if retry_count < max_retries:
+                            retry_count += 1
+                            wait_time = min(5 * (retry_count ** 1.5), 120)
+                            logger.warning(
+                                "Qwen-TTS rate limit (429), retry %s/%s, waiting %.1fs...",
+                                retry_count,
+                                max_retries,
+                                wait_time,
+                            )
+                            import time
+                            time.sleep(wait_time)
+                            continue
+                        else:
+                            logger.error(
+                                "Qwen-TTS rate limit exceeded after %s retries: %s",
+                                max_retries,
+                                error_str,
+                            )
+                            return b""
+                    else:
+                        logger.error("Qwen-TTS call failed: %s", exc)
+                        return b""
+
+            if not response:
+                logger.error("Qwen-TTS no response after retries")
+                return b""
 
             status_code = getattr(response, "status_code", None)
             if status_code is not None and int(status_code) != 200:

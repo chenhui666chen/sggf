@@ -245,6 +245,39 @@ class Wan26T2IAdapter(BaseModelAdapter):
 
         url = f"{host}/api/v1/services/aigc/multimodal-generation/generation"
 
+        # 🔧 内容安全检查与自动修复
+        from adapters.content_safety_checker import check_and_fix_prompt
+
+        raw_prompt = prompt
+        safety_strategy = (os.getenv("DREAMWEAVER_SAFETY_STRATEGY") or "moderate").strip().lower()
+        if safety_strategy in {"off", "none", "disable", "false", "0"}:
+            safety_strategy = ""
+        if safety_strategy and safety_strategy not in {"conservative", "moderate", "aggressive"}:
+            safety_strategy = "moderate"
+
+        aggressive_fallback_raw = (os.getenv("DREAMWEAVER_SAFETY_AGGRESSIVE_FALLBACK") or "true").strip().lower()
+        aggressive_fallback = aggressive_fallback_raw not in {"0", "false", "off", "no"}
+        aggressive_prompt: Optional[str] = None
+
+        if safety_strategy:
+            print("🔍 [内容安全检查] 检查提示词...")
+            fixed_prompt, issues, fix_description = check_and_fix_prompt(raw_prompt, strategy=safety_strategy)
+            if issues:
+                print(f"⚠️ [内容安全检查] {fix_description}")
+                print(f"📝 [内容安全检查] 原始提示词: {raw_prompt}")
+                print(f"✨ [内容安全检查] 修复后提示词: {fixed_prompt}")
+                prompt = fixed_prompt
+            else:
+                print("✅ [内容安全检查] 提示词安全，无需修复")
+                prompt = raw_prompt
+        else:
+            prompt = raw_prompt
+
+        if aggressive_fallback:
+            aggressive_fixed, _, _ = check_and_fix_prompt(raw_prompt, strategy="aggressive")
+            if aggressive_fixed and aggressive_fixed != prompt:
+                aggressive_prompt = aggressive_fixed
+
         def _error_detail(resp: Any) -> str:
             if not isinstance(resp, requests.Response):
                 return ""
@@ -302,88 +335,150 @@ class Wan26T2IAdapter(BaseModelAdapter):
                     items.append(p)
             return [f"{a}*{b}" for a, b in items]
 
+        prompt_candidates: List[str] = [prompt]
+        if isinstance(aggressive_prompt, str) and aggressive_prompt and aggressive_prompt not in prompt_candidates:
+            prompt_candidates.append(aggressive_prompt)
+
         sizes = _candidate_sizes(width, height)
-        last_error: Optional[str] = None
-        for size in sizes[:3]:
-            payload: Dict[str, Any] = {
-                "model": self._dashscope_model_name(),
-                "input": {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "text": prompt
-                                }
-                            ]
-                        }
-                    ]
-                },
-                "parameters": {
-                    "size": size,
-                    "n": 1,
-                    "prompt_extend": True,
-                    "watermark": False
-                },
-            }
-            if negative_prompt:
-                payload["parameters"]["negative_prompt"] = negative_prompt
-            if seed is not None:
-                payload["parameters"]["seed"] = int(seed)
+        max_retries = 5
+        final_error: Optional[str] = None
 
-            for async_enabled in (True, False):
-                headers = {"X-DashScope-Async": "enable"} if async_enabled else None
-                resp: Any = None
-                try:
-                    if self._rate_limiter:
-                        self._rate_limiter.acquire()
-                    resp = self.session.post(
-                        url,
-                        json=payload,
-                        headers=headers,
-                        timeout=self.config.timeout,
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
+        for prompt_index, prompt_value in enumerate(prompt_candidates):
+            last_error: Optional[str] = None
+            safety_failed = False
 
-                    output = data.get("output") if isinstance(data, dict) else None
-                    if isinstance(output, dict):
-                        choices = output.get("choices")
-                        if (
-                            isinstance(choices, list)
-                            and choices
-                            and isinstance(choices[0], dict)
-                        ):
-                            choice = choices[0]
-                            message = choice.get("message") if isinstance(choice, dict) else None
-                            if isinstance(message, dict):
-                                content = message.get("content") if isinstance(message, dict) else None
-                                if isinstance(content, list) and content:
-                                    for content_item in content:
-                                        if isinstance(content_item, dict) and "image" in content_item:
-                                            image_url = content_item.get("image")
-                                            if isinstance(image_url, str) and image_url:
-                                                return {"data": [{"url": image_url}]}
-                        task_id = output.get("task_id")
-                        if isinstance(task_id, str) and task_id:
-                            return {"output": {"task_id": task_id}}
+            for size in sizes[:3]:
+                payload: Dict[str, Any] = {
+                    "model": self._dashscope_model_name(),
+                    "input": {
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "text": prompt_value
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    "parameters": {
+                        "size": size,
+                        "n": 1,
+                        "prompt_extend": True,
+                        "watermark": False
+                    },
+                }
+                if negative_prompt:
+                    payload["parameters"]["negative_prompt"] = negative_prompt
+                if seed is not None:
+                    payload["parameters"]["seed"] = int(seed)
 
-                    raise RuntimeError("dashscope t2i response unsupported")
-                except requests.exceptions.HTTPError as exc:
-                    resp_obj = getattr(exc, "response", None)
-                    if resp_obj is None:
-                        resp_obj = resp
-                    status = getattr(getattr(exc, "response", None), "status_code", None)
-                    detail = _error_detail(resp_obj)
-                    last_error = f"dashscope t2i HTTP {status} (size={size}, async={async_enabled}): {detail}".strip()
-                    if async_enabled:
-                        continue
+                for async_enabled in (True, False):
+                    headers = {"X-DashScope-Async": "enable"} if async_enabled else None
+                    resp: Any = None
+                    retry_count = 0
+
+                    while retry_count <= max_retries:
+                        try:
+                            if self._rate_limiter:
+                                self._rate_limiter.acquire()
+                            resp = self.session.post(
+                                url,
+                                json=payload,
+                                headers=headers,
+                                timeout=self.config.timeout,
+                            )
+                            resp.raise_for_status()
+                            data = resp.json()
+
+                            output = data.get("output") if isinstance(data, dict) else None
+                            if isinstance(output, dict):
+                                choices = output.get("choices")
+                                if (
+                                    isinstance(choices, list)
+                                    and choices
+                                    and isinstance(choices[0], dict)
+                                ):
+                                    choice = choices[0]
+                                    message = choice.get("message") if isinstance(choice, dict) else None
+                                    if isinstance(message, dict):
+                                        content = message.get("content") if isinstance(message, dict) else None
+                                        if isinstance(content, list) and content:
+                                            for content_item in content:
+                                                if isinstance(content_item, dict) and "image" in content_item:
+                                                    image_url = content_item.get("image")
+                                                    if isinstance(image_url, str) and image_url:
+                                                        return {"data": [{"url": image_url}]}
+                                task_id = output.get("task_id")
+                                if isinstance(task_id, str) and task_id:
+                                    return {"output": {"task_id": task_id}}
+
+                            raise RuntimeError("dashscope t2i response unsupported")
+                        except requests.exceptions.HTTPError as exc:
+                            resp_obj = getattr(exc, "response", None)
+                            if resp_obj is None:
+                                resp_obj = resp
+                            status = getattr(getattr(exc, "response", None), "status_code", None)
+
+                            if status == 429:
+                                if retry_count < max_retries:
+                                    retry_count += 1
+                                    wait_time = min(5 * (retry_count ** 1.5), 120)
+                                    print(f"⚠️ DashScope T2I rate limit (429), retry {retry_count}/{max_retries}, waiting {wait_time:.1f}s...")
+                                    time.sleep(wait_time)
+                                    continue
+                                else:
+                                    detail = _error_detail(resp_obj)
+                                    last_error = f"dashscope t2i HTTP 429 (size={size}, async={async_enabled}): {detail}".strip()
+                                    break
+                            elif status == 403:
+                                detail = _error_detail(resp_obj)
+                                error_msg = detail.lower()
+                                if "asynchronous" in error_msg and async_enabled:
+                                    print("⚠️ DashScope T2I async not supported (403), switching to sync mode...")
+                                    break
+                                else:
+                                    last_error = f"dashscope t2i HTTP {status} (size={size}, async={async_enabled}): {detail}".strip()
+                                    break
+                            elif status == 400:
+                                detail = _error_detail(resp_obj)
+                                error_msg = detail.lower()
+                                if "DataInspectionFailed" in detail or "inappropriate content" in error_msg:
+                                    print("⚠️ DashScope T2I content check failed (400): Input may contain inappropriate content")
+                                    print("   Please review and modify your prompt to comply with content policies")
+                                    last_error = "dashscope t2i HTTP 400 (DataInspectionFailed): Input may contain inappropriate content. Please review and modify your prompt."
+                                    safety_failed = True
+                                else:
+                                    last_error = f"dashscope t2i HTTP {status} (size={size}, async={async_enabled}): {detail}".strip()
+                                break
+                            else:
+                                detail = _error_detail(resp_obj)
+                                last_error = f"dashscope t2i HTTP {status} (size={size}, async={async_enabled}): {detail}".strip()
+                                break
+                        except Exception as exc:  # noqa: BLE001
+                            if retry_count < max_retries and "timeout" in str(exc).lower():
+                                retry_count += 1
+                                time.sleep(5)
+                                continue
+                            last_error = f"dashscope t2i error (size={size}, async={async_enabled}): {str(exc)}"
+                            break
+
+                    if last_error:
+                        break
+                if safety_failed or last_error:
                     break
-                except Exception as exc:  # noqa: BLE001
-                    last_error = f"dashscope t2i error (size={size}, async={async_enabled}): {str(exc)}"
-                    break
 
-        raise RuntimeError(last_error or "dashscope t2i request failed")
+            if safety_failed and prompt_index + 1 < len(prompt_candidates):
+                final_error = last_error
+                print("🛡️ [内容安全] 触发内容安全拦截，尝试使用更严格的安全提示词重试...")
+                continue
+
+            if last_error:
+                final_error = last_error
+                break
+
+        raise RuntimeError(final_error or "dashscope t2i request failed")
 
     def _dashscope_poll_task(self, *, task_id: str) -> Dict[str, Any]:
         host = self._base_host()
@@ -415,6 +510,9 @@ class Wan26T2IAdapter(BaseModelAdapter):
 
         last_payload: Any = None
         last_error: str | None = None
+        poll_retry_count = 0
+        max_poll_retries = 5
+        
         while time.time() < deadline:
             try:
                 if self._rate_limiter:
@@ -422,8 +520,27 @@ class Wan26T2IAdapter(BaseModelAdapter):
                 resp = self.session.get(url, timeout=poll_http_timeout_s)
                 resp.raise_for_status()
                 payload = resp.json()
+                poll_retry_count = 0
+            except requests.exceptions.HTTPError as exc:
+                resp_obj = getattr(exc, "response", None)
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                
+                if status == 429:
+                    if poll_retry_count < max_poll_retries:
+                        poll_retry_count += 1
+                        wait_time = min(5 * (poll_retry_count ** 1.5), 120)
+                        print(f"⚠️ DashScope task poll rate limit (429), retry {poll_retry_count}/{max_poll_retries}, waiting {wait_time:.1f}s...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        last_error = f"dashscope task poll HTTP 429: task_id={task_id}"
+                        time.sleep(poll_interval_s)
+                        continue
+                else:
+                    last_error = str(exc)
+                    time.sleep(poll_interval_s)
+                    continue
             except Exception as exc:  # noqa: BLE001
-                # 轮询期间允许短暂网络抖动/限流，不应立刻终止整个生成链路。
                 last_error = str(exc)
                 time.sleep(poll_interval_s)
                 continue
@@ -567,6 +684,22 @@ class Wan26I2VAdapter(BaseModelAdapter):
         if duration_i <= 0:
             duration_i = 5
 
+        # 🔧 内容安全检查与自动修复
+        from adapters.content_safety_checker import ContentSafetyChecker, check_and_fix_prompt
+        
+        print(f"🔍 [内容安全检查] 检查 I2V 提示词...")
+        fixed_prompt, issues, fix_description = check_and_fix_prompt(prompt, strategy="moderate")
+        
+        if issues:
+            print(f"⚠️ [内容安全检查] {fix_description}")
+            print(f"📝 [内容安全检查] 原始提示词: {prompt}")
+            print(f"✨ [内容安全检查] 修复后提示词: {fixed_prompt}")
+            
+            # 使用修复后的提示词
+            prompt = fixed_prompt
+        else:
+            print(f"✅ [内容安全检查] 提示词安全，无需修复")
+
         kwargs: Dict[str, Any] = {"duration": duration_i}
         if size:
             kwargs["size"] = size
@@ -575,18 +708,34 @@ class Wan26I2VAdapter(BaseModelAdapter):
         if character_references and isinstance(character_references, list):
             kwargs["character_references"] = character_references
 
-        try:
-            if self._rate_limiter:
-                self._rate_limiter.acquire()
-            resp = dashscope.VideoSynthesis.call(
-                model=model_value,
-                prompt=prompt,
-                img_url=image_path,
-                api_key=self.config.api_key,
-                **kwargs,
-            )
-        except Exception as exc:  # noqa: BLE001
-            return GenerationResult(success=False, data=None, error=str(exc))
+        max_retries = 5
+        retry_count = 0
+        
+        while retry_count <= max_retries:
+            try:
+                if self._rate_limiter:
+                    self._rate_limiter.acquire()
+                resp = dashscope.VideoSynthesis.call(
+                    model=model_value,
+                    prompt=prompt,
+                    img_url=image_path,
+                    api_key=self.config.api_key,
+                    **kwargs,
+                )
+                break
+            except Exception as exc:  # noqa: BLE001
+                error_str = str(exc)
+                if "429" in error_str or "Throttling" in error_str or "RateQuota" in error_str:
+                    if retry_count < max_retries:
+                        retry_count += 1
+                        wait_time = min(5 * (retry_count ** 1.5), 120)
+                        print(f"⚠️ DashScope I2V rate limit, retry {retry_count}/{max_retries}, waiting {wait_time:.1f}s...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        return GenerationResult(success=False, data=None, error=f"dashscope video_synthesis rate limit exceeded after {max_retries} retries: {error_str}")
+                else:
+                    return GenerationResult(success=False, data=None, error=str(exc))
 
         status_code = getattr(resp, "status_code", None)
         if status_code is not None and int(status_code) != 200:
@@ -721,21 +870,53 @@ class Wan26T2VAdapter(BaseModelAdapter):
         if duration_i <= 0:
             duration_i = 5
 
+        # 🔧 内容安全检查与自动修复
+        from adapters.content_safety_checker import ContentSafetyChecker, check_and_fix_prompt
+        
+        print(f"🔍 [内容安全检查] 检查 T2V 提示词...")
+        fixed_prompt, issues, fix_description = check_and_fix_prompt(prompt, strategy="moderate")
+        
+        if issues:
+            print(f"⚠️ [内容安全检查] {fix_description}")
+            print(f"📝 [内容安全检查] 原始提示词: {prompt}")
+            print(f"✨ [内容安全检查] 修复后提示词: {fixed_prompt}")
+            
+            # 使用修复后的提示词
+            prompt = fixed_prompt
+        else:
+            print(f"✅ [内容安全检查] 提示词安全，无需修复")
+
         kwargs: Dict[str, Any] = {"duration": duration_i}
         if seed is not None:
             kwargs["seed"] = int(seed)
 
-        try:
-            if self._rate_limiter:
-                self._rate_limiter.acquire()
-            resp = dashscope.VideoSynthesis.call(
-                model=model_value,
-                prompt=prompt,
-                api_key=self.config.api_key,
-                **kwargs,
-            )
-        except Exception as exc:  # noqa: BLE001
-            return GenerationResult(success=False, data=None, error=str(exc))
+        max_retries = 5
+        retry_count = 0
+        
+        while retry_count <= max_retries:
+            try:
+                if self._rate_limiter:
+                    self._rate_limiter.acquire()
+                resp = dashscope.VideoSynthesis.call(
+                    model=model_value,
+                    prompt=prompt,
+                    api_key=self.config.api_key,
+                    **kwargs,
+                )
+                break
+            except Exception as exc:  # noqa: BLE001
+                error_str = str(exc)
+                if "429" in error_str or "Throttling" in error_str or "RateQuota" in error_str:
+                    if retry_count < max_retries:
+                        retry_count += 1
+                        wait_time = min(5 * (retry_count ** 1.5), 120)
+                        print(f"⚠️ DashScope T2V rate limit, retry {retry_count}/{max_retries}, waiting {wait_time:.1f}s...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        return GenerationResult(success=False, data=None, error=f"dashscope video_synthesis rate limit exceeded after {max_retries} retries: {error_str}")
+                else:
+                    return GenerationResult(success=False, data=None, error=str(exc))
 
         status_code = getattr(resp, "status_code", None)
         if status_code is not None and int(status_code) != 200:

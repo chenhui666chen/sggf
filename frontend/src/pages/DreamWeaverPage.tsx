@@ -347,6 +347,7 @@ export default function DreamWeaverPage() {
                   }}
                 >
                   <CardActionArea
+                    component="div"
                     title="进入生成流程"
                     onClick={() => navigate(`/drama/${project.id}`)}
                     sx={{ display: 'block' }}

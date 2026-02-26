@@ -22,7 +22,7 @@ from .book_parser import (
 # 有声书模型
 from .audiobook import AudiobookProject, ChapterAudio
 from .audiobook_task import AudiobookTask
-from .dreamweaver import DreamweaverProject, DreamweaverEpisode, DreamweaverShot, DreamweaverAsset
+from .dreamweaver import DreamweaverProject, DreamweaverEpisode, DreamweaverShot, DreamweaverAsset, DreamweaverRunEvent
 
 __all__ = [
     "User",
@@ -50,4 +50,5 @@ __all__ = [
     "DreamweaverEpisode",
     "DreamweaverShot",
     "DreamweaverAsset",
+    "DreamweaverRunEvent",
 ]

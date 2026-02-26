@@ -85,6 +85,16 @@ export interface NotificationData {
   data?: any
 }
 
+export interface DreamweaverEventData {
+  event_id: number
+  run_id: string
+  project_id: number
+  stage?: string | null
+  event_type: string
+  payload?: Record<string, any>
+  created_at?: string | null
+}
+
 class WorkflowWebSocket {
   private socket: Socket | null = null
   private projectId: number | null = null
@@ -429,8 +439,18 @@ class WorkflowWebSocket {
     if (!this.socket) return
 
     this.socket.off('notification')
+    this.socket.off('dreamweaver_event')
     this.socket.on('notification', (data: NotificationData) => {
       console.log('🔔 收到通知:', data)
+      callback(data)
+    })
+  }
+
+  onDreamweaverEvent(callback: (data: DreamweaverEventData) => void) {
+    if (!this.socket) return
+
+    this.socket.off('dreamweaver_event')
+    this.socket.on('dreamweaver_event', (data: DreamweaverEventData) => {
       callback(data)
     })
   }
@@ -458,6 +478,7 @@ class WorkflowWebSocket {
     this.socket.off('model_used')
     // 🆕 移除通知监听
     this.socket.off('notification')
+    this.socket.off('dreamweaver_event')
     console.log('✅ 监听器已移除')
   }
 
@@ -485,6 +506,7 @@ class WorkflowWebSocket {
     this.socket.off('model_used')
     // 🆕 移除通知监听
     this.socket.off('notification')
+    this.socket.off('dreamweaver_event')
     console.log('✅ 事件监听器已清除，连接保持')
   }
 

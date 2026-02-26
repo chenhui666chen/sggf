@@ -25,6 +25,10 @@ is_sqlite = "sqlite" in settings.DATABASE_URL
 is_postgresql = "postgresql" in settings.DATABASE_URL
 sqlite_timeout_s = max(1.0, _env_float("SQLITE_TIMEOUT_S", 30.0)) if is_sqlite else 0.0
 
+# Enforce PostgreSQL-only usage
+if not is_postgresql:
+    raise RuntimeError("DATABASE_URL must use PostgreSQL (postgresql://...)")
+
 # 根据数据库类型配置连接池
 if is_sqlite:
     # SQLite不使用连接池

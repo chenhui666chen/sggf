@@ -12,6 +12,55 @@ from dataclasses import dataclass, field
 logger = logging.getLogger("uvicorn.error")
 
 
+def normalize_character_name(name: str) -> str:
+    if not name:
+        return ""
+    value = str(name).strip()
+    value = re.sub(r'^[\"“”\'‘’]+|[\"“”\'‘’]+$', '', value).strip()
+    value = re.sub(r'[（(].*?[）)]', '', value)
+    value = value.replace('昵称', '')
+    value = re.sub(r'[【】\[\]<>《》]', '', value)
+    value = re.sub(r'\s+', '', value).strip()
+    return value
+
+
+def _merge_parsed_character(base: "ParsedCharacter", incoming: "ParsedCharacter") -> "ParsedCharacter":
+    for field_name in (
+        "age",
+        "gender",
+        "role",
+        "faction",
+        "importance_level",
+        "appearance",
+        "personality",
+        "background",
+        "worldview",
+        "motivation",
+        "abilities",
+        "weaknesses",
+        "plot_role",
+        "growth_arc",
+        "relationships",
+        "plot_threads",
+    ):
+        cur = getattr(base, field_name, None)
+        nxt = getattr(incoming, field_name, None)
+        if nxt is None or nxt == "":
+            continue
+        if cur is None or cur == "":
+            setattr(base, field_name, nxt)
+            continue
+        if isinstance(cur, str) and isinstance(nxt, str) and len(nxt) > len(cur):
+            setattr(base, field_name, nxt)
+
+    base_norm = normalize_character_name(base.name)
+    incoming_norm = normalize_character_name(incoming.name)
+    if base_norm and incoming_norm and base_norm == incoming_norm:
+        if len(incoming.name.strip()) < len(base.name.strip()):
+            base.name = incoming.name.strip()
+    return base
+
+
 @dataclass
 class ParsedCharacter:
     """解析后的人物卡结构"""
@@ -124,6 +173,7 @@ class CharacterTextParser:
         3. **【姓名】**：李铁柱
         """
         characters = []
+        unique: Dict[str, ParsedCharacter] = {}
         current_faction = None
 
         logger.debug(f"📋 开始解析人物卡，文本长度: {len(text)} 字符")
@@ -155,10 +205,17 @@ class CharacterTextParser:
             if parsed and parsed.name:
                 if current_faction and not parsed.faction:
                     parsed.faction = current_faction
-                characters.append(parsed)
+                key = normalize_character_name(parsed.name) or parsed.name.strip()
+                if key in unique:
+                    unique[key] = _merge_parsed_character(unique[key], parsed)
+                else:
+                    unique[key] = parsed
                 logger.debug(f"   ✓ 成功解析人物: {parsed.name}")
             elif '【姓名】' in block:
                 logger.debug(f"   ✗ 块 {i} 包含【姓名】但解析失败，前100字符: {block[:100]}...")
+
+        if unique:
+            characters = list(unique.values())
 
         logger.info(f"📋 解析完成，共识别 {len(characters)} 个人物")
         return characters
@@ -313,13 +370,28 @@ def sync_parsed_characters_to_db(
     skipped_count = 0
     errors = []
 
+    existing_characters = db_session.query(Character).filter(
+        Character.project_id == project_id
+    ).all()
+    existing_by_norm: Dict[str, Character] = {}
+    for item in existing_characters:
+        key = normalize_character_name(item.name) or (item.name or "").strip()
+        if not key or key in existing_by_norm:
+            continue
+        existing_by_norm[key] = item
+
     for parsed in parsed_characters:
         try:
             # 查找已存在的角色（按项目ID和姓名）
-            existing = db_session.query(Character).filter(
-                Character.project_id == project_id,
-                Character.name == parsed.name
-            ).first()
+            parsed_key = normalize_character_name(parsed.name) or parsed.name.strip()
+            existing = existing_by_norm.get(parsed_key)
+            if not existing:
+                existing = db_session.query(Character).filter(
+                    Character.project_id == project_id,
+                    Character.name == parsed.name
+                ).first()
+                if existing and parsed_key:
+                    existing_by_norm[parsed_key] = existing
 
             if existing:
                 # 更新已存在的角色
@@ -359,6 +431,8 @@ def sync_parsed_characters_to_db(
                 )
                 db_session.add(new_char)
                 created_count += 1
+                if parsed_key:
+                    existing_by_norm[parsed_key] = new_char
                 logger.debug(f"   ➕ 创建角色: {parsed.name}")
 
         except Exception as e:
@@ -567,4 +641,3 @@ def parse_and_sync_relationships(
         "saved": saved_count,
         "characters_updated": len(updated_chars)
     }
-

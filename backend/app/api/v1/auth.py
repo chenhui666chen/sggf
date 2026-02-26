@@ -1,9 +1,11 @@
 """
 认证API路由
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from datetime import timedelta
+from typing import Optional
+from pydantic import BaseModel
 from app.db.base import get_db
 from app.models.user import User
 from app.schemas.user import (
@@ -12,8 +14,27 @@ from app.schemas.user import (
 from app.core.security import (
     hash_password, verify_password, create_access_token, get_current_user
 )
+from app.services.oauth_service import OAuthService
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+
+
+class OAuthCallbackRequest(BaseModel):
+    """OAuth回调请求"""
+    code: str
+    state: Optional[str] = None
+
+
+class AlipayAuthUrlRequest(BaseModel):
+    """支付宝授权URL请求"""
+    redirect_uri: str
+    state: Optional[str] = None
+
+
+class WechatAuthUrlRequest(BaseModel):
+    """微信授权URL请求"""
+    redirect_uri: str
+    state: Optional[str] = None
 
 
 @router.post("/register", response_model=TokenResponse)
@@ -109,4 +130,105 @@ async def change_password(
     db.commit()
     
     return {"message": "Password changed successfully"}
+
+
+@router.post("/alipay/auth-url")
+async def get_alipay_auth_url(request: AlipayAuthUrlRequest):
+    """获取支付宝授权URL"""
+    from app.core.config import settings
+    
+    alipay_service = OAuthService.AlipayOAuthService(
+        app_id=settings.ALIPAY_APP_ID,
+        private_key=settings.ALIPAY_PRIVATE_KEY,
+        public_key=settings.ALIPAY_PUBLIC_KEY
+    )
+    
+    auth_url = alipay_service.get_auth_url(request.redirect_uri, request.state)
+    
+    return {"auth_url": auth_url}
+
+
+@router.post("/alipay/callback", response_model=TokenResponse)
+async def alipay_callback(
+    request: OAuthCallbackRequest,
+    db: Session = Depends(get_db)
+):
+    """支付宝OAuth回调"""
+    from app.core.config import settings
+    
+    alipay_service = OAuthService.AlipayOAuthService(
+        app_id=settings.ALIPAY_APP_ID,
+        private_key=settings.ALIPAY_PRIVATE_KEY,
+        public_key=settings.ALIPAY_PUBLIC_KEY
+    )
+    
+    token_data = await alipay_service.get_access_token(request.code)
+    
+    if "error" in token_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=token_data.get("error_description", "Alipay authentication failed")
+        )
+    
+    access_token = token_data.get("access_token")
+    user_info = await alipay_service.get_user_info(access_token)
+    
+    if "error" in user_info:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to get user info from Alipay"
+        )
+    
+    return OAuthService.handle_alipay_login(db, user_info)
+
+
+@router.post("/wechat/auth-url")
+async def get_wechat_auth_url(request: WechatAuthUrlRequest):
+    """获取微信授权URL"""
+    from app.core.config import settings
+    
+    wechat_service = OAuthService.WechatOAuthService(
+        app_id=settings.WECHAT_APP_ID,
+        app_secret=settings.WECHAT_APP_SECRET
+    )
+    
+    auth_url = wechat_service.get_auth_url(request.redirect_uri, request.state)
+    
+    return {"auth_url": auth_url}
+
+
+@router.post("/wechat/callback", response_model=TokenResponse)
+async def wechat_callback(
+    request: OAuthCallbackRequest,
+    db: Session = Depends(get_db)
+):
+    """微信OAuth回调"""
+    from app.core.config import settings
+    
+    wechat_service = OAuthService.WechatOAuthService(
+        app_id=settings.WECHAT_APP_ID,
+        app_secret=settings.WECHAT_APP_SECRET
+    )
+    
+    token_data = await wechat_service.get_access_token(request.code)
+    
+    if "errcode" in token_data and token_data["errcode"] != 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=token_data.get("errmsg", "WeChat authentication failed")
+        )
+    
+    access_token = token_data.get("access_token")
+    openid = token_data.get("openid")
+    unionid = token_data.get("unionid")
+    
+    user_info = await wechat_service.get_user_info(access_token, openid)
+    
+    if "errcode" in user_info and user_info["errcode"] != 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to get user info from WeChat"
+        )
+    
+    return OAuthService.handle_wechat_login(db, user_info, openid, unionid)
 

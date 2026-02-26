@@ -172,6 +172,7 @@ def build_camera_tree(storyboard: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def build_camera_tree_llm(
     storyboard: List[Dict[str, Any]],
     *,
+    ctx: Any | None = None,
     api_key: str,
     base_url: str,
     model: str,
@@ -201,7 +202,7 @@ def build_camera_tree_llm(
         max_shots_per_camera = 6
     max_shots_per_camera = max(1, min(max_shots_per_camera, 12))
 
-    from agents.llm_client import chat_completions, extract_json_object  # local import: optional dependency
+    from agents.llm_client import chat_completions, extract_json_object, llm_stream_context  # local import: optional dependency
 
     base_tree = build_camera_tree(storyboard)
     if not base_tree:
@@ -285,13 +286,15 @@ def build_camera_tree_llm(
         "仅输出 JSON。"
     )
 
-    content = chat_completions(
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-        timeout_s=max(10, int(timeout_s)),
-    )
+    with llm_stream_context(ctx, stage="storyboard", stream_key="camera_tree") as on_chunk:
+        content = chat_completions(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            timeout_s=max(10, int(timeout_s)),
+            on_chunk=on_chunk,
+        )
     obj = extract_json_object(content)
     items = obj.get("camera_tree") if isinstance(obj, dict) else None
     if not isinstance(items, list) or not items:

@@ -2545,7 +2545,7 @@ const AudiobookPage = () => {
       console.error('生成片段音频失败:', error)
       setSnackbar({
         open: true,
-        message: extractApiErrorMessage(error) || '生成片段音频失败，请重试',
+        message: await extractApiErrorMessage(error) || '生成片段音频失败，请重试',
         severity: 'error',
       })
     } finally {

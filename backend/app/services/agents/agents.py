@@ -18,6 +18,58 @@ from .context_aware_optimizer import ContextAwareOptimizer
 
 from .llm_singleton import create_deepseek_llm, create_routed_llm
 
+def _is_dashscope_llm(llm: Any) -> bool:
+    model = getattr(llm, "model_name", None) or getattr(llm, "model", None) or ""
+    if isinstance(model, str) and model.startswith("qwen"):
+        return True
+    base = getattr(llm, "openai_api_base", None) or getattr(llm, "base_url", None)
+    if not base:
+        client = getattr(llm, "client", None)
+        base = getattr(client, "base_url", None) if client else None
+    return bool(base and "dashscope.aliyuncs.com" in str(base))
+
+
+def _collect_streaming_content(stream: Any) -> str:
+    parts: List[str] = []
+    for chunk in stream:
+        if chunk is None:
+            continue
+        if isinstance(chunk, str):
+            parts.append(chunk)
+            continue
+        content = getattr(chunk, "content", None)
+        if content:
+            parts.append(content)
+            continue
+        message = getattr(chunk, "message", None)
+        if message is not None:
+            message_content = getattr(message, "content", None)
+            if message_content:
+                parts.append(message_content)
+                continue
+        text_value = getattr(chunk, "text", None)
+        if text_value:
+            parts.append(text_value)
+    return "".join(parts)
+
+
+def _invoke_llm_with_optional_streaming(llm: Any, messages: List[BaseMessage]) -> str:
+    if _is_dashscope_llm(llm):
+        try:
+            return _collect_streaming_content(llm.stream(messages))
+        except Exception as e:
+            err = str(e)
+            if "use sse protocol" in err or "non-stream call timed out" in err:
+                raise
+    try:
+        response = llm.invoke(messages)
+        return response.content
+    except Exception as e:
+        err = str(e)
+        if "use sse protocol" in err or "non-stream call timed out" in err:
+            return _collect_streaming_content(llm.stream(messages))
+        raise
+
 
 class BaseAgent(ABC):
     """所有Agent的基类"""
@@ -135,7 +187,7 @@ class BaseAgent(ABC):
             temp_llm = create_routed_llm(model=model_name, temperature=temperature)
             print(f"🎲 使用自定义 temperature={temperature}")
             try:
-                response = temp_llm.invoke(messages)
+                response_content = _invoke_llm_with_optional_streaming(temp_llm, messages)
             except Exception as e:
                 # 捕获并详细记录错误
                 import traceback
@@ -147,12 +199,12 @@ class BaseAgent(ABC):
                     print("⚠️ 检测到JSON解析错误,可能是API返回格式异常")
                 raise
         else:
-            response = self.llm.invoke(messages)
+            response_content = _invoke_llm_with_optional_streaming(self.llm, messages)
 
-        self.memory_manager.add_ai_message(response.content)
-        self.conversation_history.append({"input": user_input, "output": response.content})
+        self.memory_manager.add_ai_message(response_content)
+        self.conversation_history.append({"input": user_input, "output": response_content})
 
-        return response.content
+        return response_content
     
     def _format_context(self, context: Dict[str, Any]) -> str:
         """格式化上下文信息（智能超限保护）"""

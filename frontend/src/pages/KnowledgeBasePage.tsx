@@ -330,11 +330,15 @@ export default function KnowledgeBasePage() {
     const charactersKey = `expanding_characters_${projectId}`
     const outlineStartKey = `expanding_outline_start_${projectId}`
     const charactersStartKey = `expanding_characters_start_${projectId}`
+    const outlineTaskKey = `expanding_outline_task_${projectId}`
+    const charactersTaskKey = `expanding_characters_task_${projectId}`
 
     const savedOutlineState = localStorage.getItem(outlineKey)
     const savedCharactersState = localStorage.getItem(charactersKey)
     const outlineStartTime = localStorage.getItem(outlineStartKey)
     const charactersStartTime = localStorage.getItem(charactersStartKey)
+    const outlineTaskId = localStorage.getItem(outlineTaskKey)
+    const charactersTaskId = localStorage.getItem(charactersTaskKey)
 
     const TASK_TIMEOUT = 30 * 60 * 1000  // 30分钟超时
     const now = Date.now()
@@ -348,6 +352,7 @@ export default function KnowledgeBasePage() {
           console.warn('⚠️ 大纲扩展任务超时，已自动清除')
           localStorage.removeItem(outlineKey)
           localStorage.removeItem(outlineStartKey)
+          localStorage.removeItem(outlineTaskKey)
           showSnackbar('⚠️ 大纲扩展任务超时30分钟，可能已失败，请重试', 'error')
         } else {
           // 未超时，恢复状态
@@ -370,6 +375,7 @@ export default function KnowledgeBasePage() {
           console.warn('⚠️ 人物扩展任务超时，已自动清除')
           localStorage.removeItem(charactersKey)
           localStorage.removeItem(charactersStartKey)
+          localStorage.removeItem(charactersTaskKey)
           showSnackbar('⚠️ 人物扩展任务超时30分钟，可能已失败，请重试', 'error')
         } else {
           // 未超时，恢复状态
@@ -395,6 +401,89 @@ export default function KnowledgeBasePage() {
       setExpandCharactersResult(JSON.parse(savedCharacterResult))
       console.log('🔄 恢复人物扩展状态：有未查看结果')
     }
+
+    let cancelled = false
+
+    const fetchTaskStatus = async (taskId: string) => {
+      const token = localStorage.getItem('access_token')
+      if (!token || !taskId) return null
+      try {
+        const res = await fetch(`/api/v1/workflow/task/${taskId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!res.ok) return null
+        return await res.json()
+      } catch (error) {
+        console.warn('?? ????????:', error)
+        return null
+      }
+    }
+
+    const recoverOutlineIfDone = async () => {
+      if (savedOutlineState !== 'true' || !outlineTaskId) return
+      const statusData = await fetchTaskStatus(outlineTaskId)
+      if (!statusData || cancelled) return
+      const statusRaw = String(statusData.status || '').toLowerCase()
+      if (statusRaw === 'completed') {
+        setExpandingOutline(false)
+        localStorage.removeItem(outlineKey)
+        localStorage.removeItem(outlineStartKey)
+        localStorage.removeItem(outlineTaskKey)
+        const resultData = statusData.result || {}
+        if (Object.keys(resultData || {}).length) {
+          setExpandOutlineResult(resultData)
+          setShowExpandOutlineDialog(true)
+        }
+        loadWorkflowData()
+        const isEpicFramework = resultData.framework_type === 'epic' || resultData.volume_index > 0
+        if (isEpicFramework) {
+          loadEpicFramework()
+        }
+        showSnackbar('? ???????????????', 'success')
+      } else if (statusRaw === 'failed' || statusRaw === 'timeout') {
+        setExpandingOutline(false)
+        localStorage.removeItem(outlineKey)
+        localStorage.removeItem(outlineStartKey)
+        localStorage.removeItem(outlineTaskKey)
+        const errorMsg = statusData.error || '??????'
+        showSnackbar(`? ??????: ${errorMsg}`, 'error')
+      }
+    }
+
+    const recoverCharactersIfDone = async () => {
+      if (savedCharactersState !== 'true' || !charactersTaskId) return
+      const statusData = await fetchTaskStatus(charactersTaskId)
+      if (!statusData || cancelled) return
+      const statusRaw = String(statusData.status || '').toLowerCase()
+      if (statusRaw === 'completed') {
+        setExpandingCharacters(false)
+        localStorage.removeItem(charactersKey)
+        localStorage.removeItem(charactersStartKey)
+        localStorage.removeItem(charactersTaskKey)
+        const resultData = statusData.result || {}
+        setExpandCharactersResult(resultData)
+        localStorage.setItem(`character_expand_result_${projectId}`, JSON.stringify(resultData))
+        setCharacterExpandState('resultReady')
+        localStorage.setItem(`character_expand_state_${projectId}`, 'resultReady')
+        setCharacterButtonHighlightKey(prev => prev + 1)
+        loadWorkflowData()
+        showSnackbar('? ???????????????', 'success')
+      } else if (statusRaw === 'failed' || statusRaw === 'timeout') {
+        setExpandingCharacters(false)
+        localStorage.removeItem(charactersKey)
+        localStorage.removeItem(charactersStartKey)
+        localStorage.removeItem(charactersTaskKey)
+        const errorMsg = statusData.error || '??????'
+        showSnackbar(`? ??????: ${errorMsg}`, 'error')
+      }
+    }
+
+    void recoverOutlineIfDone()
+    void recoverCharactersIfDone()
+
+    return () => {
+      cancelled = true
+    }
   }, [projectId])
 
   // 🆕 WebSocket 监听后台任务（使用统一的WebSocket服务）
@@ -416,6 +505,8 @@ export default function KnowledgeBasePage() {
           if (prev) {
             console.log('❌ WebSocket连接失败，清除大纲扩展状态')
             localStorage.removeItem(`expanding_outline_${projectId}`)
+            localStorage.removeItem(`expanding_outline_start_${projectId}`)
+            localStorage.removeItem(`expanding_outline_task_${projectId}`)
             showSnackbar('❌ 后端服务断开，大纲扩展任务已取消', 'error')
           }
           return false
@@ -424,6 +515,8 @@ export default function KnowledgeBasePage() {
           if (prev) {
             console.log('❌ WebSocket连接失败，清除人物扩展状态')
             localStorage.removeItem(`expanding_characters_${projectId}`)
+            localStorage.removeItem(`expanding_characters_start_${projectId}`)
+            localStorage.removeItem(`expanding_characters_task_${projectId}`)
             showSnackbar('❌ 后端服务断开，人物扩展任务已取消', 'error')
           }
           return false
@@ -482,6 +575,8 @@ export default function KnowledgeBasePage() {
           })
           // 🆕 清除localStorage状态
           localStorage.removeItem(`expanding_outline_${projectId}`)
+          localStorage.removeItem(`expanding_outline_start_${projectId}`)
+          localStorage.removeItem(`expanding_outline_task_${projectId}`)
         }
         
         // 人物扩展完成
@@ -512,6 +607,7 @@ export default function KnowledgeBasePage() {
           // 🆕 清除localStorage状态
           localStorage.removeItem(`expanding_characters_${projectId}`)
           localStorage.removeItem(`expanding_characters_start_${projectId}`)
+          localStorage.removeItem(`expanding_characters_task_${projectId}`)
         }
       }
       
@@ -543,6 +639,8 @@ export default function KnowledgeBasePage() {
           })
           // 🆕 清除localStorage状态
           localStorage.removeItem(`expanding_outline_${projectId}`)
+          localStorage.removeItem(`expanding_outline_start_${projectId}`)
+          localStorage.removeItem(`expanding_outline_task_${projectId}`)
         }
         
         if (taskId.startsWith('expand-characters')) {
@@ -554,6 +652,8 @@ export default function KnowledgeBasePage() {
           })
           // 🆕 清除localStorage状态
           localStorage.removeItem(`expanding_characters_${projectId}`)
+          localStorage.removeItem(`expanding_characters_start_${projectId}`)
+          localStorage.removeItem(`expanding_characters_task_${projectId}`)
         }
       })
 
@@ -565,6 +665,8 @@ export default function KnowledgeBasePage() {
           if (prev) {
             console.log('⚠️ WebSocket断开，清除大纲扩展状态')
             localStorage.removeItem(`expanding_outline_${projectId}`)
+            localStorage.removeItem(`expanding_outline_start_${projectId}`)
+            localStorage.removeItem(`expanding_outline_task_${projectId}`)
             showSnackbar('❌ 后端服务断开，大纲扩展任务已取消', 'error')
           }
           return false
@@ -573,6 +675,8 @@ export default function KnowledgeBasePage() {
           if (prev) {
             console.log('⚠️ WebSocket断开，清除人物扩展状态')
             localStorage.removeItem(`expanding_characters_${projectId}`)
+            localStorage.removeItem(`expanding_characters_start_${projectId}`)
+            localStorage.removeItem(`expanding_characters_task_${projectId}`)
             showSnackbar('❌ 后端服务断开，人物扩展任务已取消', 'error')
           }
           return false
@@ -1659,6 +1763,11 @@ export default function KnowledgeBasePage() {
       }
 
       const data = await response.json()
+      if (data?.task_id) {
+        localStorage.setItem(`expanding_outline_task_${projectId}`, String(data.task_id))
+      } else {
+        localStorage.removeItem(`expanding_outline_task_${projectId}`)
+      }
       console.log(`✅ 后台任务已启动，Task ID: ${data.task_id}`)
 
       // 🆕 保存到localStorage
@@ -1676,6 +1785,7 @@ export default function KnowledgeBasePage() {
       showSnackbar(`扩展大纲失败: ${error}`, 'error')
       setExpandingOutline(false)
       localStorage.removeItem(`expanding_outline_start_${projectId}`)
+      localStorage.removeItem(`expanding_outline_task_${projectId}`)
     }
   }
 
@@ -1726,6 +1836,11 @@ export default function KnowledgeBasePage() {
       }
 
       const data = await response.json()
+      if (data?.task_id) {
+        localStorage.setItem(`expanding_characters_task_${projectId}`, String(data.task_id))
+      } else {
+        localStorage.removeItem(`expanding_characters_task_${projectId}`)
+      }
       console.log('✅ 后台任务已启动:', data)
 
       // 🆕 保存到localStorage
@@ -1743,6 +1858,7 @@ export default function KnowledgeBasePage() {
       showSnackbar(`扩展人物失败: ${error}`, 'error')
       setExpandingCharacters(false)
       localStorage.removeItem(`expanding_characters_start_${projectId}`)
+      localStorage.removeItem(`expanding_characters_task_${projectId}`)
     }
   }
 

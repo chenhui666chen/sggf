@@ -2,12 +2,20 @@ import { useEffect, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import { ThemeProvider, createTheme, CssBaseline, CircularProgress, Box } from '@mui/material'
+import { CacheProvider } from '@emotion/react'
+import createCache from '@emotion/cache'
 import { RootState, AppDispatch } from '@/store/store'
 import { getCurrentUser } from '@/store/slices/authSlice'
 import ProtectedRoute from '@/components/ProtectedRoute'
 
+const cache = createCache({
+  key: 'css',
+  prepend: true,
+})
+
 // 懒加载页面组件
 const LoginPage = lazy(() => import('@/pages/LoginPage'))
+const LoginCallbackPage = lazy(() => import('@/pages/LoginCallbackPage'))
 const RegisterPage = lazy(() => import('@/pages/RegisterPage'))
 const CreationModulePage = lazy(() => import('@/pages/CreationModulePage'))
 const DashboardPage = lazy(() => import('@/pages/DashboardPage'))
@@ -34,6 +42,15 @@ const LoadingFallback = () => (
 )
 
 const theme = createTheme({
+  components: {
+    MuiCssBaseline: {
+      styleOverrides: {
+        body: {
+          margin: 0,
+        },
+      },
+    },
+  },
   palette: {
     primary: {
       main: '#1976d2',
@@ -52,23 +69,32 @@ function App() {
   const { isAuthenticated, token } = useSelector((state: RootState) => state.auth)
 
   useEffect(() => {
-    if (token && isAuthenticated) {
-      dispatch(getCurrentUser())
+    const loadUser = async () => {
+      if (token && isAuthenticated) {
+        try {
+          await dispatch(getCurrentUser())
+        } catch (error) {
+          console.error('Failed to load user:', error)
+        }
+      }
     }
+    loadUser()
   }, [dispatch, token, isAuthenticated])
 
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <BrowserRouter
-        future={{
-          v7_startTransition: true,
-          v7_relativeSplatPath: true,
-        }}
-      >
-        <Suspense fallback={<LoadingFallback />}>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
+    <CacheProvider value={cache}>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <BrowserRouter
+          future={{
+            v7_startTransition: true,
+            v7_relativeSplatPath: true,
+          }}
+        >
+          <Suspense fallback={<LoadingFallback />}>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/login/callback" element={<LoginCallbackPage />} />
             <Route path="/register" element={<RegisterPage />} />
           {/* 创作模块入口页 */}
           <Route
@@ -221,6 +247,7 @@ function App() {
         </Suspense>
       </BrowserRouter>
     </ThemeProvider>
+    </CacheProvider>
   )
 }
 

@@ -486,7 +486,7 @@ def _build_wan_i2v_prompt(*, shot: Dict[str, Any], style_preset: str, frame_rati
     movement = str(shot.get("movement") or "").strip()
     if not movement:
         movement = str(shot.get("camera_movement") or "").strip()
-    composition = str(shot.get("composition_notes") or "").strip()
+    composition = str(shot.get("composition_notes") or shot.get("composition") or "").strip()
     location = str(shot.get("location") or "").strip()
     time = str(shot.get("time") or "").strip()
     atmosphere = str(shot.get("atmosphere") or "").strip()
@@ -535,11 +535,24 @@ def _build_wan_i2v_prompt(*, shot: Dict[str, Any], style_preset: str, frame_rati
         "y",
         "on",
     }
+    is_multishot = bool(multishot_enabled and subshots)
+
+    override = str(shot.get("video_prompt_override") or "").strip()
+    if not override:
+        meta = shot.get("shot_schema_v2_meta")
+        if isinstance(meta, dict):
+            override = str(meta.get("video_prompt_override") or "").strip()
+    if override:
+        max_chars_default = 900 if is_multishot else 420
+        max_chars = _parse_int(os.getenv("DREAMWEAVER_WAN_I2V_PROMPT_MAX_CHARS"), max_chars_default)
+        max_chars = max(120, min(max_chars, 1200))
+        if len(override) > max_chars:
+            override = override[:max_chars].rstrip("，,。.；; ")
+        return override
 
     duration_s = normalize_wan_i2v_duration_s(shot.get("duration_s"), default=15.0)
 
     prompt = ""
-    is_multishot = bool(multishot_enabled and subshots)
     if is_multishot:
         def _sec(v: Any) -> int:
             try:
@@ -694,6 +707,19 @@ def _build_wan_i2v_prompt(*, shot: Dict[str, Any], style_preset: str, frame_rati
     if len(prompt) > max_chars:
         prompt = prompt[:max_chars].rstrip("，,。.；; ")
     return prompt
+
+
+def _store_video_prompt_generated(shot: Dict[str, Any], prompt: str) -> None:
+    if not isinstance(shot, dict):
+        return
+    value = str(prompt or "").strip()
+    if not value:
+        return
+    meta = shot.get("shot_schema_v2_meta")
+    if not isinstance(meta, dict):
+        meta = {}
+        shot["shot_schema_v2_meta"] = meta
+    meta["video_prompt_generated"] = value
 
 
 def _clone_adapter_instance(adapter: Any) -> Optional[Any]:
@@ -1059,6 +1085,7 @@ def _run_wan_i2v(
             frame_ratio=frame_ratio,
             prompt_fragment=prompt_fragment,
         )
+        _store_video_prompt_generated(item, motion_prompt)
 
         via = "wan_i2v"
         meta: Dict[str, Any] = {"engine": "wan_i2v", "adapter": adapter_name, "fps": fps, "motion_bucket_id": motion_bucket_id}
@@ -1457,6 +1484,7 @@ def _run_wan_t2v(
             prompt_fragment=prompt_fragment,
             engine="wan_t2v",
         )
+        _store_video_prompt_generated(item, prompt)
 
         seed = _stable_seed(str(getattr(ctx, "run_id", "")), shot_id, "t2v_clip")
         meta: Dict[str, Any] = {"engine": "wan_t2v", "adapter": adapter_name, "fps": fps, "width": width, "height": height, "seed": seed}

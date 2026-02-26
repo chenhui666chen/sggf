@@ -1,6 +1,7 @@
 """
 情节大纲和人物扩展器 - 自动扩展简短大纲和增加人物数量
 """
+import os
 from typing import Dict, Any, List, Optional
 from .agents import CreativeDirectorAgent, PlotArchitectAgent, CharacterDesignerAgent
 from .llm_singleton import create_deepseek_llm, create_routed_llm
@@ -1484,10 +1485,20 @@ Please确保：
             print("✅ 关系网络生成完成\n")
 
             # 第四步：统计角色分布
+            distribution_input = integrated_characters
+            max_chars_raw = os.getenv("CHARACTER_DISTRIBUTION_MAX_CHARS", "60000")
+            try:
+                max_chars = max(10000, int(max_chars_raw))
+            except Exception:
+                max_chars = 60000
+            if len(distribution_input) > max_chars:
+                distribution_input = distribution_input[:max_chars].rstrip() + "\n\n[已截断：内容过长]"
+                print(f"⚠️  角色体系统计超长，已截断到 {max_chars} 字符用于分布统计")
+
             distribution_prompt = f"""基于以下完整的人物体系，统计角色分布。
 
 【所有人物】
-{integrated_characters}
+{distribution_input}
 
 Please以以下格式输出JSON：
 {{

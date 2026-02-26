@@ -319,6 +319,7 @@ class ContentAnalyzer:
                         "characters_appeared": [],
                         "key_events": [],
                         "setting": "",
+                        "character_clues": [],
                         "conflict": "",
                         "emotion_tone": ""
                     })
@@ -371,6 +372,15 @@ class ContentAnalyzer:
     ],
     "setting": "主要场景/地点（20字以内）",
     
+    "character_clues": [
+        {
+            "name": "人物姓名",
+            "story_stance": "故事立场（主角方/反派方/中立方/亦正亦邪/未提及）",
+            "faction": "所属势力/组织/门派（未提及则写未提及）",
+            "evidence": "原文证据片段（20-40字，包含明确指向的词句）"
+        }
+    ],
+    
     "scene_goal": "场景目标（40字以内，格式：[地点] + [人物] + [要达成什么]）",
     
     "conflict_arc": {{
@@ -406,7 +416,8 @@ class ContentAnalyzer:
 3. 关键事件最多5个，按重要性排序
 4. 若本章无明显爽点/钩子，type填"无"，其他字段填"本章为过渡/铺垫章节"
 5. 冲突发展要体现起承转合
-6. 情绪曲线要准确反映读者阅读时的情感变化"""
+6. 情绪曲线要准确反映读者阅读时的情感变化
+7. 故事立场/所属势力必须有明确文本证据，否则写“未提及”"""
 
         result = await self._call_llm_with_retry(prompt, TaskType.BOOK_ANALYSIS)
         parsed = self._parse_json_response(result)
@@ -419,6 +430,7 @@ class ContentAnalyzer:
             "characters_appeared": parsed.get("characters_appeared", []),
             "key_events": parsed.get("key_events", []),
             "setting": parsed.get("setting", ""),
+            "character_clues": parsed.get("character_clues", []),
             # 🆕 细纲关键字段
             "scene_goal": parsed.get("scene_goal", ""),
             "conflict_arc": parsed.get("conflict_arc", {"trigger": "", "escalation": "", "resolution": ""}),
@@ -475,6 +487,33 @@ class ContentAnalyzer:
                     }
                 character_appearances[char]["count"] += 1
                 character_appearances[char]["chapters"].append(s["chapter_number"])
+
+        # 汇总人物线索（故事立场/所属势力）
+        character_clues: Dict[str, Dict[str, List[str]]] = {}
+        for s in summaries:
+            for clue in s.get("character_clues", []) or []:
+                name = str(clue.get("name") or "").strip()
+                if not name:
+                    continue
+                story_stance = str(clue.get("story_stance") or "").strip()
+                faction = str(clue.get("faction") or "").strip()
+                evidence = str(clue.get("evidence") or "").strip()
+                entry = character_clues.setdefault(name, {"story_stance": [], "faction": [], "evidence": []})
+                if story_stance and story_stance != "未提及":
+                    entry["story_stance"].append(story_stance)
+                if faction and faction != "未提及":
+                    entry["faction"].append(faction)
+                if evidence:
+                    entry["evidence"].append(evidence)
+
+        character_clues_summary = {
+            name: {
+                "story_stance": list(dict.fromkeys(values["story_stance"]))[:3],
+                "faction": list(dict.fromkeys(values["faction"]))[:3],
+                "evidence": list(dict.fromkeys(values["evidence"]))[:3],
+            }
+            for name, values in character_clues.items()
+        }
         
         # 构建汇总提示词
         char_stats = json.dumps(
@@ -497,6 +536,9 @@ class ContentAnalyzer:
 【人物出场统计（姓名: 出场次数）】
 {char_stats}
 
+【人物线索（故事立场/所属势力/证据）】
+{json.dumps(character_clues_summary, ensure_ascii=False)}
+
 【关键事件线索】
 {key_events_text}
 
@@ -510,9 +552,12 @@ class ContentAnalyzer:
             "name": "人物姓名",
             "role": "protagonist/antagonist/deuteragonist",
             "description": "人物简介（50字）",
+            "story_stance": "故事立场（主角方/反派方/中立方/亦正亦邪/未提及）",
+            "faction": "所属势力/组织/门派（未提及则写未提及）",
             "first_appearance_chapter": 1,
             "appearance_count": 出场次数,
-            "importance_score": 0.9
+            "importance_score": 0.9,
+            "importance_level": "核心角色/重要角色/次要角色/边缘角色"
         }}
     ],
     "supporting_characters": [
@@ -535,12 +580,65 @@ class ContentAnalyzer:
 注意：
 1. 出场次数最多的通常是主角
 2. 主角importance_score为0.9-1.0
-3. 关系基于事件线索推断"""
+3. 故事立场/所属势力必须有明确文本证据，否则写“未提及”
+4. 关系基于事件线索推断"""
 
         # 🆕 使用qwen-long进行汇总分析
         result = await self._call_qwen_long(prompt)
         parsed = self._parse_json_response(result)
         
+        counts_sorted = sorted(
+            [value["count"] for value in character_appearances.values() if value.get("count", 0) > 0],
+            reverse=True
+        )
+        max_count = counts_sorted[0] if counts_sorted else 0
+
+        def importance_level_for(name: str) -> str:
+            count = character_appearances.get(name, {}).get("count", 0)
+            if not counts_sorted or count <= 0:
+                return "边缘角色"
+            try:
+                rank_index = counts_sorted.index(count)
+            except ValueError:
+                rank_index = len(counts_sorted) - 1
+            ratio = rank_index / max(len(counts_sorted), 1)
+            if ratio < 0.1:
+                return "核心角色"
+            if ratio < 0.3:
+                return "重要角色"
+            if ratio < 0.6:
+                return "次要角色"
+            return "边缘角色"
+
+        def fill_character_fields(char: Dict[str, Any]) -> None:
+            name = str(char.get("name") or "").strip()
+            if not name:
+                return
+            if name in character_appearances:
+                char.setdefault("appearance_count", character_appearances[name].get("count", 0))
+                char.setdefault("first_appearance_chapter", character_appearances[name].get("first_chapter"))
+                if max_count > 0 and not char.get("importance_score"):
+                    char["importance_score"] = round(character_appearances[name].get("count", 0) / max_count, 2)
+            char["importance_level"] = importance_level_for(name)
+            if not char.get("story_stance"):
+                char["story_stance"] = "未提及"
+            if not char.get("faction"):
+                char["faction"] = "未提及"
+            clues = character_clues_summary.get(name, {})
+            if clues:
+                if char.get("story_stance") == "未提及" and clues.get("story_stance"):
+                    char["story_stance"] = clues["story_stance"][0]
+                if char.get("faction") == "未提及" and clues.get("faction"):
+                    char["faction"] = clues["faction"][0]
+
+        if isinstance(parsed, dict):
+            for char in parsed.get("main_characters", []) or []:
+                if isinstance(char, dict):
+                    fill_character_fields(char)
+            for char in parsed.get("supporting_characters", []) or []:
+                if isinstance(char, dict):
+                    fill_character_fields(char)
+
         # 补充统计信息
         parsed["character_statistics"] = character_appearances
         
@@ -809,12 +907,14 @@ class ContentAnalyzer:
             "aliases": ["别名1", "别名2"],
             "role": "protagonist/antagonist/deuteragonist",
             "description": "人物简介（50字以内）",
+            "story_stance": "故事立场（主角方/反派方/中立方/亦正亦邪/未提及）",
+            "faction": "所属势力/组织/门派（未提及则写未提及）",
             "personality": ["性格特点1", "性格特点2"],
             "abilities": ["能力/技能"],
-            "faction": "所属势力/门派/组织（如有）",
             "arc": "人物发展轨迹描述（30字以内）",
             "first_appearance_chapter": 1,
-            "importance_score": 0.9
+            "importance_score": 0.9,
+            "importance_level": "核心角色/重要角色/次要角色/边缘角色"
         }}
     ],
     "supporting_characters": [
@@ -822,7 +922,8 @@ class ContentAnalyzer:
             "name": "人物姓名",
             "role": "配角类型",
             "description": "人物简介",
-            "faction": "所属势力（如有）",
+            "story_stance": "故事立场（主角方/反派方/中立方/亦正亦邪/未提及）",
+            "faction": "所属势力/组织/门派（未提及则写未提及）",
             "relationship_to_main": "与主角的关系"
         }}
     ],
@@ -847,11 +948,51 @@ class ContentAnalyzer:
 1. 主角importance_score应为0.9-1.0
 2. 只提取明确出现的人物，不要猜测
 3. 人物关系要基于文本证据
-4. 每个人物的faction字段很重要，请仔细提取"""
+4. 故事立场/所属势力必须有明确文本证据，否则写“未提及”"""
 
         result = await self._call_llm_with_retry(prompt, TaskType.BOOK_ANALYSIS)
         parsed = self._parse_json_response(result)
-        
+
+        main_characters = parsed.get("main_characters", []) if isinstance(parsed, dict) else []
+        counts_sorted = sorted(
+            [char.get("appearance_count", 0) for char in main_characters if char.get("appearance_count", 0) > 0],
+            reverse=True
+        )
+        max_count = counts_sorted[0] if counts_sorted else 0
+
+        def importance_level_for_count(count: int) -> str:
+            if not counts_sorted or count <= 0:
+                return "边缘角色"
+            try:
+                rank_index = counts_sorted.index(count)
+            except ValueError:
+                rank_index = len(counts_sorted) - 1
+            ratio = rank_index / max(len(counts_sorted), 1)
+            if ratio < 0.1:
+                return "核心角色"
+            if ratio < 0.3:
+                return "重要角色"
+            if ratio < 0.6:
+                return "次要角色"
+            return "边缘角色"
+
+        for char in main_characters:
+            if not isinstance(char, dict):
+                continue
+            char.setdefault("story_stance", "未提及")
+            char.setdefault("faction", "未提及")
+            char["importance_level"] = importance_level_for_count(char.get("appearance_count", 0))
+            if max_count > 0 and not char.get("importance_score"):
+                char["importance_score"] = round(char.get("appearance_count", 0) / max_count, 2)
+
+        supporting_characters = parsed.get("supporting_characters", []) if isinstance(parsed, dict) else []
+        for char in supporting_characters:
+            if not isinstance(char, dict):
+                continue
+            char.setdefault("story_stance", "未提及")
+            char.setdefault("faction", "未提及")
+            char["importance_level"] = "边缘角色"
+
         return AnalysisResult(
             analysis_type=AnalysisType.CHARACTERS,
             content=parsed,

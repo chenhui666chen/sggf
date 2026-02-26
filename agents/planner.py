@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-from agents.llm_client import chat_completions, env_flag, extract_json_object, pick_model
+from agents.llm_client import chat_completions, env_flag, extract_json_object, pick_model, llm_stream_context
 from pipeline.style_presets import ensure_style_payload
 
 
@@ -16,6 +16,7 @@ def _estimate_shot_count(source_text: str, *, min_count: int = 6, max_count: int
 
 
 def _llm_plan(
+    ctx: Any,
     *,
     source_text: str,
     chapter_count: int,
@@ -43,13 +44,15 @@ def _llm_plan(
         "章节文本：\n"
         f"{source_text[:12000]}"
     )
-    content = chat_completions(
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-        timeout_s=timeout_s,
-    )
+    with llm_stream_context(ctx, stage="init", stream_key="plan") as on_chunk:
+        content = chat_completions(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            timeout_s=timeout_s,
+            on_chunk=on_chunk,
+        )
     obj = extract_json_object(content)
     if not isinstance(obj, dict):
         return None
@@ -95,6 +98,7 @@ def run(ctx: Any) -> None:
     if can_llm:
         try:
             llm_plan = _llm_plan(
+                ctx,
                 source_text=source_text,
                 chapter_count=chapter_count,
                 style_preset=str(ctx.payload.get("style_preset") or ""),

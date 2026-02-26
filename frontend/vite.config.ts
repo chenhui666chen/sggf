@@ -14,6 +14,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      '@mui/styled-engine': path.resolve(__dirname, './node_modules/@mui/styled-engine-sc'),
     },
   },
   server: {
@@ -33,7 +34,7 @@ export default defineConfig({
     proxy: {
       // 特殊处理 /api/workflow 路径，重写为 /api/v1/workflow
       '/api/workflow': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/workflow/, '/api/v1/workflow'),
         headers: {
@@ -51,7 +52,7 @@ export default defineConfig({
       },
       // 其他 /api 请求保持不变
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         // 保留所有请求头，包括Authorization
         headers: {
@@ -69,7 +70,7 @@ export default defineConfig({
         },
       },
       '/ws': {
-        target: 'ws://localhost:8000',
+        target: 'ws://127.0.0.1:8000',
         ws: true,
       },
     },
@@ -106,4 +107,3 @@ export default defineConfig({
     ],
   },
 })
-

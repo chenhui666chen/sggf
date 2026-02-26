@@ -304,7 +304,7 @@ def vlm_build_edit_prompt_from_base_and_refs(
         if isinstance(path, Path) and path.exists():
             valid.append((idx, ref))
     content: List[Dict[str, Any]] = []
-    content.append({"type": "text", "text": f"基准图（待编辑）：{str(base_image_desc or '').strip()}"})
+    content.append({"type": "text", "text": f"Image 1（基准图，待编辑）：{str(base_image_desc or '').strip()}"})
     content.append({"type": "image_url", "image_url": {"url": file_to_data_url(base_image_path)}})
 
     for idx, (_, ref) in enumerate(valid):
@@ -312,13 +312,14 @@ def vlm_build_edit_prompt_from_base_and_refs(
         desc = str(ref.get("desc") or "").strip()
         if not isinstance(path, Path):
             continue
-        content.append({"type": "text", "text": f"参考图 {idx}: {desc}"})
+        content.append({"type": "text", "text": f"Image {idx + 2}（参考图）: {desc}"})
         content.append({"type": "image_url", "image_url": {"url": file_to_data_url(path)}})
 
     system_prompt = (
         "你是专业的图像编辑提示词工程师。\n"
         "任务：基于【基准图】与【参考图】（用于提炼一致性信息）以及【目标帧描述】，生成一个可直接用于图片编辑模型的 edit_prompt。\n"
         "要求：以基准图为基础，尽量保持人物身份一致（脸型五官/发型/服装主色/体态），再将画面调整为目标描述。\n"
+        "多图输入时，edit_prompt 必须使用“Image 1/2/3”指代输入图片（Image 1 为基准图，Image 2/3 为参考图）。\n"
         "避免镜头术语；不要要求生成可读文字、水印、字幕、UI。\n"
         "只输出 JSON（不要 Markdown），字段：edit_prompt(string)、selected_ref_indices(list[int])、reason(string)。"
     )

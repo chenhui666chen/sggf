@@ -31,6 +31,19 @@ except ImportError:
     CACHE_AVAILABLE = False
     logger.warning("⚠️ 缓存系统不可用")
 
+# 🚦 导入限流处理器
+try:
+    from app.services.rate_limit_handler import (
+        retry_with_backoff,
+        is_rate_limit_error,
+        is_retryable_error,
+        AdaptiveRateLimiter
+    )
+    RATE_LIMIT_AVAILABLE = True
+except ImportError:
+    RATE_LIMIT_AVAILABLE = False
+    logger.warning("⚠️ 限流处理器不可用")
+
 
 class OptimizedLLMClient:
     """
@@ -46,13 +59,14 @@ class OptimizedLLMClient:
     def _select_client(self, model: str) -> AsyncOpenAI:
         return self.dashscope_client if self._is_qwen_model(model) else self.deepseek_client
     
-    def __init__(self, strategy: str = "conservative", enable_cache: bool = True):
+    def __init__(self, strategy: str = "conservative", enable_cache: bool = True, enable_rate_limit: bool = True):
         """
         初始化客户端
         
         Args:
             strategy: 优化策略（conservative/aggressive/dynamic/default）
             enable_cache: 是否启用缓存
+            enable_rate_limit: 是否启用速率限制
         """
         # 🛡️ 创建禁用代理的httpx客户端（按模型 Provider 分流）
         deepseek_http_client = httpx.AsyncClient(
@@ -94,6 +108,19 @@ class OptimizedLLMClient:
         else:
             self.cache = None
         
+        # 🚦 初始化速率限制器
+        self.rate_limit_enabled = enable_rate_limit and RATE_LIMIT_AVAILABLE
+        if self.rate_limit_enabled:
+            self.rate_limiter = AdaptiveRateLimiter(
+                max_requests=10,  # 每秒最多10个请求
+                time_window=1.0,
+                min_requests=1,
+                adjustment_factor=0.8
+            )
+            logger.info("✅ 自适应速率限制器已启用")
+        else:
+            self.rate_limiter = None
+        
         logger.info(f"✅ LLM 客户端已初始化，优化策略: {strategy}")
     
     async def chat(
@@ -107,7 +134,7 @@ class OptimizedLLMClient:
         **kwargs
     ) -> str:
         """
-        调用 LLM API（支持缓存）
+        调用 LLM API（支持缓存和重试）
         
         Args:
             messages: 消息列表
@@ -130,6 +157,10 @@ class OptimizedLLMClient:
                 model = self.default_model
                 logger.warning("⚠️  未指定任务类型，使用默认模型")
         
+        # 🚦 速率限制
+        if self.rate_limit_enabled and self.rate_limiter:
+            await self.rate_limiter.acquire()
+        
         # 🚀 方案3：尝试从缓存获取
         cache_key = None
         if self.cache_enabled and use_cache and temperature < 0.3:
@@ -145,7 +176,8 @@ class OptimizedLLMClient:
                 logger.info("⚡ LLM 响应缓存命中")
                 return cached
         
-        try:
+        # 🚦 定义重试函数
+        async def make_request():
             client = self._select_client(model)
             response = await client.chat.completions.create(
                 model=model,
@@ -169,7 +201,49 @@ class OptimizedLLMClient:
             )
 
             return content
-
+        
+        # 🚦 定义重试回调
+        def on_retry(retry_count: int, exception: Exception, delay: float):
+            if is_rate_limit_error(exception):
+                logger.warning(
+                    f"🚦 限流错误 | "
+                    f"重试 {retry_count}/5 | "
+                    f"等待 {delay:.1f}秒 | "
+                    f"模型: {model}"
+                )
+                if self.rate_limit_enabled and self.rate_limiter:
+                    # 触发限流时降低请求速率
+                    import asyncio
+                    asyncio.create_task(self.rate_limiter.on_rate_limit())
+            else:
+                logger.warning(
+                    f"⚠️ 请求失败 | "
+                    f"重试 {retry_count}/5 | "
+                    f"等待 {delay:.1f}秒 | "
+                    f"错误: {type(exception).__name__}"
+                )
+        
+        # 🚦 执行请求（带重试）
+        try:
+            if self.rate_limit_enabled and RATE_LIMIT_AVAILABLE:
+                result = await retry_with_backoff(
+                    make_request,
+                    max_retries=5,
+                    initial_delay=1.0,
+                    max_delay=60.0,
+                    backoff_factor=2.0,
+                    on_retry=on_retry
+                )
+            else:
+                result = await make_request()
+            
+            # 请求成功时逐步提高请求速率
+            if self.rate_limit_enabled and self.rate_limiter:
+                import asyncio
+                asyncio.create_task(self.rate_limiter.on_success())
+            
+            return result
+            
         except Exception as e:
             logger.error(f"❌ LLM调用失败: {e}")
             raise
@@ -185,7 +259,7 @@ class OptimizedLLMClient:
         **kwargs
     ) -> str:
         """
-        🆕 流式调用 LLM API（支持实时回调）
+        🆕 流式调用 LLM API（支持实时回调、速率限制和重试）
 
         Args:
             messages: 消息列表
@@ -206,8 +280,13 @@ class OptimizedLLMClient:
                 logger.info(f"🎯 任务 {task_type.value} 使用模型: {model}")
             else:
                 model = self.default_model
+        
+        # 🚦 速率限制
+        if self.rate_limit_enabled and self.rate_limiter:
+            await self.rate_limiter.acquire()
 
-        try:
+        # 🚦 定义重试函数
+        async def make_request():
             # 🔥 关键：启用流式响应
             client = self._select_client(model)
             stream = await client.chat.completions.create(
@@ -245,7 +324,48 @@ class OptimizedLLMClient:
             )
 
             return full_content
-
+        
+        # 🚦 定义重试回调
+        def on_retry(retry_count: int, exception: Exception, delay: float):
+            if is_rate_limit_error(exception):
+                logger.warning(
+                    f"🚦 限流错误 | "
+                    f"重试 {retry_count}/5 | "
+                    f"等待 {delay:.1f}秒 | "
+                    f"模型: {model}"
+                )
+                if self.rate_limit_enabled and self.rate_limiter:
+                    import asyncio
+                    asyncio.create_task(self.rate_limiter.on_rate_limit())
+            else:
+                logger.warning(
+                    f"⚠️ 请求失败 | "
+                    f"重试 {retry_count}/5 | "
+                    f"等待 {delay:.1f}秒 | "
+                    f"错误: {type(exception).__name__}"
+                )
+        
+        # 🚦 执行请求（带重试）
+        try:
+            if self.rate_limit_enabled and RATE_LIMIT_AVAILABLE:
+                result = await retry_with_backoff(
+                    make_request,
+                    max_retries=5,
+                    initial_delay=1.0,
+                    max_delay=60.0,
+                    backoff_factor=2.0,
+                    on_retry=on_retry
+                )
+            else:
+                result = await make_request()
+            
+            # 请求成功时逐步提高请求速率
+            if self.rate_limit_enabled and self.rate_limiter:
+                import asyncio
+                asyncio.create_task(self.rate_limiter.on_success())
+            
+            return result
+            
         except Exception as e:
             logger.error(f"❌ LLM流式调用失败: {e}")
             raise

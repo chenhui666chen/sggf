@@ -81,7 +81,7 @@ logging.getLogger("app.services.prompt_evolution").setLevel(logging.INFO)
 
 logging.info(f"📁 日志文件位置: {log_file}")
 
-# 🔧 导入所有模型（确保在 create_all 之前）
+# 🔧 导入所有模型（确保在 Alembic 迁移之前）
 from app.models import (
     User, Project, Memory, SettingCollection, SettingItem,
     Character, CharacterTechnique, Review, KnowledgeGraphEdge,
@@ -89,8 +89,9 @@ from app.models import (
     AudiobookProject, ChapterAudio  # 有声书模型
 )
 
-# 创建数据库表
-Base.metadata.create_all(bind=engine)
+# ⚠️ 生产环境请使用 Alembic 迁移，不要使用 create_all
+# 开发环境如果需要快速重置数据库，可以取消下面的注释
+# Base.metadata.create_all(bind=engine)
 
 # 创建FastAPI应用
 app = FastAPI(

@@ -230,31 +230,38 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
 
   // 打开编辑对话框
   const handleOpenEditDialog = async (character?: any) => {
-    if (character) {
-      setEditingCharacter(character)
-      setFormData(character)
-      // 加载自动追踪数据
-      loadAutoTrackedData(character.id)
-      // 加载角色功法
-      loadCharacterTechniques(character.id)
-      // 🆕 加载人物关系
-      try {
-        const relations = character.relations ? JSON.parse(character.relations) : []
-        setCharacterRelations(Array.isArray(relations) ? relations : [])
-      } catch {
+    console.log('📝 [人物卡管理] 打开编辑对话框, character:', character)
+    try {
+      if (character) {
+        setEditingCharacter(character)
+        setFormData(character)
+        // 加载自动追踪数据
+        loadAutoTrackedData(character.id)
+        // 加载角色功法
+        loadCharacterTechniques(character.id)
+        // 🆕 加载人物关系
+        try {
+          const relations = character.relations ? JSON.parse(character.relations) : []
+          setCharacterRelations(Array.isArray(relations) ? relations : [])
+        } catch {
+          setCharacterRelations([])
+        }
+      } else {
+        setEditingCharacter(null)
+        setFormData({ name: '', role: '', faction: '' })
+        setAutoTrackedData(null)
+        setCharacterTechniques([])
         setCharacterRelations([])
       }
-    } else {
-      setEditingCharacter(null)
-      setFormData({ name: '', role: '', faction: '' })
-      setAutoTrackedData(null)
-      setCharacterTechniques([])
-      setCharacterRelations([])
+      setSelectedTechniqueId('')
+      setNewRelationTarget('')
+      setNewRelationType('')
+      setEditDialogOpen(true)
+      console.log('✅ [人物卡管理] 编辑对话框已打开')
+    } catch (error) {
+      console.error('❌ [人物卡管理] 打开编辑对话框失败:', error)
+      setSnackbar({ open: true, message: '打开编辑对话框失败', severity: 'error' })
     }
-    setSelectedTechniqueId('')
-    setNewRelationTarget('')
-    setNewRelationType('')
-    setEditDialogOpen(true)
   }
 
   // 关闭编辑对话框
@@ -332,13 +339,23 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
 
   // 保存角色
   const handleSaveCharacter = async () => {
+    console.log('💾 [人物卡管理] 开始保存角色, editingCharacter:', editingCharacter)
     setSaving(true)
     try {
-      // 🆕 将关系数据加入formData
+      // 🆕 将关系数据转换为字典格式（后端期望 dict 类型）
+      const relationsDict: Record<string, string> = {}
+      characterRelations.forEach((r: any) => {
+        if (r.target && r.type) {
+          relationsDict[r.target] = r.type
+        }
+      })
+      
       const dataToSave = {
         ...formData,
-        relations: JSON.stringify(characterRelations)
+        relations: Object.keys(relationsDict).length > 0 ? relationsDict : null
       }
+      console.log('📦 [人物卡管理] 保存数据:', dataToSave)
+      console.log('📦 [人物卡管理] 关系数据:', relationsDict)
       
       let savedCharacter = dataToSave
       const url = editingCharacter
@@ -346,6 +363,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         : `/api/v1/projects/${projectId}/characters`
       
       const method = editingCharacter ? 'PUT' : 'POST'
+      console.log('🌐 [人物卡管理] 请求:', method, url)
       
       const response = await fetch(url, {
         method,
@@ -356,8 +374,11 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         body: JSON.stringify(dataToSave),
       })
 
+      console.log('📡 [人物卡管理] 响应状态:', response.status)
+      
       if (response.ok) {
         savedCharacter = await response.json()
+        console.log('✅ [人物卡管理] 角色保存成功:', savedCharacter)
         
         // 保存功法列表（覆盖式）
         if (savedCharacter.id) {
@@ -369,6 +390,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
               notes: t.notes || null,
             })),
           }
+          console.log('📚 [人物卡管理] 保存功法列表:', techniquesPayload)
           await fetch(`/api/v1/characters/${savedCharacter.id}/techniques`, {
             method: 'PUT',
             headers: {
@@ -382,9 +404,15 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         await loadCharacters()
         handleCloseEditDialog()
         onCharacterUpdate?.()
+        setSnackbar({ open: true, message: '保存成功', severity: 'success' })
+      } else {
+        const errorText = await response.text()
+        console.error('❌ [人物卡管理] 保存失败:', response.status, errorText)
+        setSnackbar({ open: true, message: `保存失败: ${errorText}`, severity: 'error' })
       }
     } catch (error) {
-      console.error('保存角色失败:', error)
+      console.error('❌ [人物卡管理] 保存角色异常:', error)
+      setSnackbar({ open: true, message: '保存失败，请重试', severity: 'error' })
     } finally {
       setSaving(false)
     }

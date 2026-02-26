@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Tuple
 from datetime import datetime
 from dataclasses import dataclass, field
 
-from agents.llm_client import chat_completions, env_flag, extract_json_object
+from agents.llm_client import chat_completions, env_flag, extract_json_object, llm_stream_context
 from pipeline.style_presets import ensure_style_payload
 
 
@@ -81,6 +81,11 @@ class AudioMarker:
     background_music: str = ""
     sound_effects: List[str] = field(default_factory=list)
     
+    voice_tone: str = ""
+    voice_speed: str = ""
+    voice_color: str = ""
+    voice_accent: str = ""
+    
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式"""
         return {
@@ -92,7 +97,11 @@ class AudioMarker:
             "voice_style": self.voice_style,
             "emotion": self.emotion,
             "background_music": self.background_music,
-            "sound_effects": self.sound_effects
+            "sound_effects": self.sound_effects,
+            "voice_tone": self.voice_tone,
+            "voice_speed": self.voice_speed,
+            "voice_color": self.voice_color,
+            "voice_accent": self.voice_accent
         }
     
     @classmethod
@@ -107,8 +116,69 @@ class AudioMarker:
             voice_style=data.get("voice_style", "natural"),
             emotion=data.get("emotion", "neutral"),
             background_music=data.get("background_music", ""),
-            sound_effects=data.get("sound_effects", [])
+            sound_effects=data.get("sound_effects", []),
+            voice_tone=data.get("voice_tone", ""),
+            voice_speed=data.get("voice_speed", ""),
+            voice_color=data.get("voice_color", ""),
+            voice_accent=data.get("voice_accent", "")
         )
+    
+    def to_wanx_audio_description(self) -> str:
+        """
+        转换为阿里云百炼的声音描述格式
+        
+        返回格式：
+        人声：角色说话的内容 + 情绪 + 语调 + 语速 + 音色 + 口音
+        音效：音源材质 + 行为 + 环境音
+        背景音乐：背景音乐/配乐 + 风格
+        """
+        parts = []
+        
+        if self.dialogue_line:
+            voice_parts = [f"{self.character_name}说道：{self.dialogue_line}"]
+            
+            if self.emotion:
+                emotion_map = {
+                    "neutral": "平静",
+                    "happy": "开心",
+                    "sad": "悲伤",
+                    "angry": "愤怒",
+                    "fearful": "恐惧",
+                    "surprised": "惊讶",
+                    "tense": "紧张",
+                    "calm": "温和",
+                    "excited": "兴奋"
+                }
+                voice_parts.append(f"语气{emotion_map.get(self.emotion, self.emotion)}")
+            
+            if self.voice_speed:
+                speed_map = {
+                    "slow": "缓慢",
+                    "normal": "适中",
+                    "fast": "急促",
+                    "very_fast": "极快"
+                }
+                voice_parts.append(f"语速{speed_map.get(self.voice_speed, self.voice_speed)}")
+            
+            if self.voice_tone:
+                voice_parts.append(self.voice_tone)
+            
+            if self.voice_color:
+                voice_parts.append(f"声音{self.voice_color}")
+            
+            if self.voice_accent:
+                voice_parts.append(f"{self.voice_accent}口音")
+            
+            parts.append("人声：" + "，".join(voice_parts))
+        
+        if self.sound_effects:
+            for effect in self.sound_effects:
+                parts.append(f"音效：{effect}")
+        
+        if self.background_music:
+            parts.append(f"背景音乐：{self.background_music}")
+        
+        return "；".join(parts) if parts else ""
 
 
 def _env_int(name: str, default: int) -> int:
@@ -129,6 +199,18 @@ def _env_float(name: str, default: float) -> float:
         return float(raw)
     except Exception:  # noqa: BLE001
         return default
+
+
+def _should_enable_script_enhance(*, payload: Dict[str, Any]) -> bool:
+    override = payload.get("script_enhance")
+    if override is not None:
+        return bool(override)
+    override = payload.get("script_enhancement_enabled")
+    if override is not None:
+        return bool(override)
+    quality_mode = str(payload.get("quality_mode") or "").strip().lower()
+    default_enabled = quality_mode == "quality"
+    return env_flag("DREAMWEAVER_SCRIPT_ENHANCE", default=default_enabled)
 
 
 def _format_llm_error(exc: Exception) -> str:
@@ -221,14 +303,16 @@ def _llm_enhance_script(
         f"{str(entities)[:6000]}"
     )
 
-    content = chat_completions(
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-        timeout_s=timeout_s,
-        temperature=temperature,
-    )
+    with llm_stream_context(ctx, stage="script", stream_key="script_enhance") as on_chunk:
+        content = chat_completions(
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            timeout_s=timeout_s,
+            temperature=temperature,
+            on_chunk=on_chunk,
+        )
     obj = extract_json_object(content)
     if not isinstance(obj, dict):
         raise RuntimeError("invalid enhanced script JSON: missing object")
@@ -583,6 +667,7 @@ def _extract_audio_markers_from_script(script_text: str, entities: Dict[str, Any
 
 
 def _generate_character_profiles_with_llm(
+    ctx: Any | None = None,
     *,
     source_text: str,
     entities: Dict[str, Any],
@@ -647,14 +732,16 @@ def _generate_character_profiles_with_llm(
     )
     
     try:
-        content = chat_completions(
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-            timeout_s=timeout_s,
-            temperature=temperature,
-        )
+        with llm_stream_context(ctx, stage="script", stream_key="character_profiles") as on_chunk:
+            content = chat_completions(
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                timeout_s=timeout_s,
+                temperature=temperature,
+                on_chunk=on_chunk,
+            )
         
         obj = extract_json_object(content)
         if not isinstance(obj, list):
@@ -682,6 +769,7 @@ def _generate_character_profiles_with_llm(
 
 
 def _generate_audio_markers_with_llm(
+    ctx: Any | None = None,
     *,
     script_text: str,
     entities: Dict[str, Any],
@@ -692,7 +780,14 @@ def _generate_audio_markers_with_llm(
     temperature: float,
 ) -> List[AudioMarker]:
     """
-    使用LLM生成详细的音频标记
+    使用LLM生成详细的音频标记（遵循阿里云百炼声音公式）
+    
+    阿里云百炼声音公式：
+    提示词 = 主体 + 场景 + 运动 + 声音描述（人声/音效/背景音乐）
+    声音描述 = 人声 + 音效 + 背景音乐
+    人声 = 角色说话的内容 + 情绪 + 语调 + 语速 + 音色 + 口音
+    音效 = 音源材质 + 行为 + 环境音
+    背景音乐 = 背景音乐/配乐 + 风格
     
     Args:
         script_text: 剧本文本
@@ -707,8 +802,8 @@ def _generate_audio_markers_with_llm(
         音频标记列表
     """
     system = (
-        "你是专业的配音指导和音频设计师。\n"
-        "任务：根据【剧本】和【角色实体】，为每句对白生成详细的音频标记，包括情感、声音风格、背景音乐等。\n"
+        "你是专业的配音指导和音频设计师，精通阿里云百炼文生视频的声音描述规范。\n"
+        "任务：根据【剧本】和【角色实体】，为每句对白生成详细的音频标记。\n"
         "输出必须是严格 JSON 数组（不要 Markdown 代码块、不要解释文字、不要多余字段）。"
     )
     
@@ -720,16 +815,37 @@ def _generate_audio_markers_with_llm(
         '    "character_name": "角色名",\n'
         '    "dialogue_line": "对白内容",\n'
         '    "voice_style": "声音风格（natural/energetic/calm/dramatic/whispering等）",\n'
-        '    "emotion": "情感（neutral/happy/sad/angry/fearful/surprised等）",\n'
-        '    "background_music": "背景音乐描述（可选）",\n'
+        '    "emotion": "情感（neutral/happy/sad/angry/fearful/surprised/tense/calm/excited等）",\n'
+        '    "voice_tone": "语调描述（如：低沉、清亮、沙哑、温柔等）",\n'
+        '    "voice_speed": "语速（slow/normal/fast/very_fast）",\n'
+        '    "voice_color": "音色描述（如：磁性、甜美、浑厚、清脆等）",\n'
+        '    "voice_accent": "口音（如：普通话、粤语、东北话、美式英文等）",\n'
+        '    "background_music": "背景音乐描述（格式：场景描述+音乐风格，如：雨夜阴森走廊，悬疑风格背景音乐）",\n'
         '    "sound_effects": ["音效1", "音效2"]\n'
         '  }\n'
         "]\n\n"
-        "要求：\n"
-        "- emotion 要准确反映对白的情感状态\n"
-        "- voice_style 要根据情感和角色性格选择\n"
-        "- background_music 要描述适合的音乐风格和情绪\n"
-        "- sound_effects 要列出适合的音效（如：脚步声、门铃声、风声等）\n\n"
+        "声音描述规范（遵循阿里云百炼公式）：\n"
+        "- emotion 要准确反映对白的情感状态（neutral/happy/sad/angry/fearful/surprised/tense/calm/excited）\n"
+        "- voice_tone 要描述语调特征（低沉、清亮、沙哑、温柔、严肃等）\n"
+        "- voice_speed 要根据情感和语境选择（slow/normal/fast/very_fast）\n"
+        "- voice_color 要描述音色特征（磁性、甜美、浑厚、清脆、温暖等）\n"
+        "- voice_accent 要根据角色设定选择（普通话、粤语、东北话、美式英文等）\n"
+        "- background_music 要描述场景氛围和音乐风格（如：温馨的客厅，轻快温馨的钢琴配乐）\n"
+        "- sound_effects 要描述音源材质+行为+环境音（如：玻璃小球从桌面掉在木质地面上，发出'砰'的声音，室内安静环境）\n\n"
+        "示例：\n"
+        "{\n"
+        '  "scene_number": 1,\n'
+        '  "character_name": "小明",\n'
+        '  "dialogue_line": "我要去上学了",\n'
+        '  "voice_style": "energetic",\n'
+        '  "emotion": "happy",\n'
+        '  "voice_tone": "清亮",\n'
+        '  "voice_speed": "fast",\n'
+        '  "voice_color": "甜美",\n'
+        '  "voice_accent": "普通话",\n'
+        '  "background_music": "清晨阳光明媚的街道，轻快活泼的童谣风格配乐",\n'
+        '  "sound_effects": ["书包拉链拉开的声音", "脚步声"]\n'
+        "}\n\n"
         "【剧本】：\n"
         f"{(script_text or '')[:10000]}\n\n"
         "【角色实体】：\n"
@@ -737,14 +853,16 @@ def _generate_audio_markers_with_llm(
     )
     
     try:
-        content = chat_completions(
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-            timeout_s=timeout_s,
-            temperature=temperature,
-        )
+        with llm_stream_context(ctx, stage="script", stream_key="audio_markers") as on_chunk:
+            content = chat_completions(
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                timeout_s=timeout_s,
+                temperature=temperature,
+                on_chunk=on_chunk,
+            )
         
         obj = extract_json_object(content)
         if not isinstance(obj, list):
@@ -762,7 +880,11 @@ def _generate_audio_markers_with_llm(
                 voice_style=item.get("voice_style", "natural"),
                 emotion=item.get("emotion", "neutral"),
                 background_music=item.get("background_music", ""),
-                sound_effects=item.get("sound_effects", [])
+                sound_effects=item.get("sound_effects", []),
+                voice_tone=item.get("voice_tone", ""),
+                voice_speed=item.get("voice_speed", ""),
+                voice_color=item.get("voice_color", ""),
+                voice_accent=item.get("voice_accent", "")
             )
             
             markers.append(marker)
@@ -981,14 +1103,16 @@ def run(ctx: Any) -> None:
             last_exc: Exception | None = None
             for attempt in range(max_retries + 1):
                 try:
-                    content = chat_completions(
-                        api_key=api_key,
-                        base_url=base_url,
-                        model=model,
-                        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-                        timeout_s=timeout_s,
-                        temperature=temperature,
-                    )
+                    with llm_stream_context(ctx, stage="script", stream_key="script") as on_chunk:
+                        content = chat_completions(
+                            api_key=api_key,
+                            base_url=base_url,
+                            model=model,
+                            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                            timeout_s=timeout_s,
+                            temperature=temperature,
+                            on_chunk=on_chunk,
+                        )
                     obj = extract_json_object(content)
                     if not isinstance(obj, dict) or not isinstance(obj.get("script_text"), str):
                         raise RuntimeError("invalid LLM output: missing script_text JSON field")
@@ -1118,13 +1242,14 @@ def run(ctx: Any) -> None:
     if enable_character_profiles and can_llm:
         try:
             character_profiles = _generate_character_profiles_with_llm(
+                ctx,
                 source_text=source_text,
                 entities=entities,
                 api_key=api_key,
                 base_url=base_url,
                 model=model,
                 timeout_s=timeout_s,
-                temperature=temperature
+                temperature=temperature,
             )
             
             if not character_profiles:
@@ -1143,13 +1268,14 @@ def run(ctx: Any) -> None:
     if enable_audio_markers and can_llm:
         try:
             audio_markers = _generate_audio_markers_with_llm(
+                ctx,
                 script_text=script_text,
                 entities=entities,
                 api_key=api_key,
                 base_url=base_url,
                 model=model,
                 timeout_s=timeout_s,
-                temperature=temperature
+                temperature=temperature,
             )
             
             if not audio_markers:

@@ -11,7 +11,7 @@ import sqlite3
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
@@ -21,6 +21,8 @@ from app.celery_app import celery_app
 from app.db.base import SessionLocal
 from app.models.project import Chapter, Project
 from app.schemas.dreamweaver_contract import DREAMWEAVER_SCHEMA_VERSION
+from app.services.dreamweaver.events import DreamweaverEventEmitter
+from app.services.dreamweaver.library import parse_library_role, required_library_roles
 from pipeline.state_machine import RunContext, State, progress_percent, stage_label, step
 from pipeline.restart_reset import apply_restart_reset as _apply_restart_reset_impl
 
@@ -75,6 +77,268 @@ def _safe_str_list(value: Any, *, limit: int = 200) -> List[str]:
     return out
 
 
+def _build_asset_plan_from_storyboard(storyboard: Any) -> List[Dict[str, Any]]:
+    if not isinstance(storyboard, list):
+        return []
+    items: List[Dict[str, Any]] = []
+    seen_shots: set[str] = set()
+
+    for raw in storyboard:
+        if not isinstance(raw, dict):
+            continue
+        shot_id = str(raw.get("shot_id") or raw.get("shot_key") or "").strip()
+        if not shot_id or shot_id in seen_shots:
+            continue
+        seen_shots.add(shot_id)
+        scene_id = str(raw.get("scene_id") or "").strip() or None
+        cam_idx = raw.get("cam_idx")
+        cam_idx_val = int(cam_idx) if isinstance(cam_idx, int) else None
+
+        def _add(role: str, kind: str, label: str, optional: bool = False) -> None:
+            items.append(
+                {
+                    "id": f"{shot_id}:{role}",
+                    "shot_id": shot_id,
+                    "scene_id": scene_id,
+                    "cam_idx": cam_idx_val,
+                    "role": role,
+                    "kind": kind,
+                    "label": label,
+                    "status": "planned",
+                    "optional": bool(optional),
+                }
+            )
+
+        _add("head_frame", "image", f"{shot_id} 头帧")
+        _add("tail_frame", "image", f"{shot_id} 尾帧")
+        _add("mid_frame", "image", f"{shot_id} 中间帧", optional=True)
+        _add("video_clip", "video", f"{shot_id} 片段")
+
+    if items:
+        items.append(
+            {
+                "id": "merged_video",
+                "shot_id": None,
+                "scene_id": None,
+                "cam_idx": None,
+                "role": "merged_video",
+                "kind": "video",
+                "label": "合成视频",
+                "status": "planned",
+                "optional": False,
+            }
+        )
+
+    return items
+
+
+def _build_asset_library_plan_from_payload(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    spec = payload.get("asset_library_spec")
+    if not isinstance(spec, dict):
+        return []
+    try:
+        required_roles = required_library_roles(spec)
+    except Exception:  # noqa: BLE001
+        return []
+    if not required_roles:
+        return []
+
+    entity_map: Dict[Tuple[str, int], Dict[str, str]] = {}
+    for section_key, default_entity_type in (("characters", "character"), ("scenes", "scene"), ("props", "prop")):
+        items = spec.get(section_key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            entity_type = str(item.get("entity_type") or default_entity_type).strip().lower() or default_entity_type
+            try:
+                entity_id = int(item.get("entity_id"))
+            except Exception:  # noqa: BLE001
+                continue
+            name = str(item.get("name") or "").strip()
+            descriptor = str(item.get("descriptor") or "").strip()
+            entity_map[(entity_type, entity_id)] = {"name": name, "descriptor": descriptor}
+
+    assets_by_role: Dict[str, Dict[str, Any]] = {}
+    assets = payload.get("project_assets")
+    if isinstance(assets, list):
+        for item in assets:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "").strip()
+            if role:
+                assets_by_role[role] = item
+
+    items: List[Dict[str, Any]] = []
+    seen_roles: set[str] = set()
+    for raw_role in required_roles:
+        if not isinstance(raw_role, str):
+            continue
+        role = raw_role.strip()
+        if not role or role in seen_roles:
+            continue
+        seen_roles.add(role)
+        try:
+            entity_type, entity_id = parse_library_role(role)
+        except Exception:  # noqa: BLE001
+            continue
+
+        view = None
+        label_suffix = ""
+        if role.startswith("lib_character_portrait_side:"):
+            view = "side"
+            label_suffix = "侧面"
+        elif role.startswith("lib_character_portrait_back:"):
+            view = "back"
+            label_suffix = "背面"
+        elif role.startswith("lib_character_portrait:"):
+            view = "front"
+            label_suffix = "正面"
+        elif role.startswith("lib_scene_card:"):
+            label_suffix = "场景"
+        elif role.startswith("lib_prop_card:"):
+            label_suffix = "道具"
+
+        entity_key = (str(entity_type).strip().lower(), int(entity_id))
+        entity = entity_map.get(entity_key) or {}
+        name = str(entity.get("name") or "").strip()
+        label = name or role
+        if name and label_suffix:
+            label = f"{name} {label_suffix}"
+
+        status = "processing"
+        uri = None
+        asset_id = None
+        approved = None
+        asset = assets_by_role.get(role)
+        if isinstance(asset, dict):
+            uri_raw = asset.get("uri")
+            if isinstance(uri_raw, str) and uri_raw.strip():
+                uri = uri_raw
+                status = "done"
+            if isinstance(asset.get("id"), int):
+                asset_id = int(asset["id"])
+            meta = asset.get("meta") if isinstance(asset.get("meta"), dict) else {}
+            if isinstance(meta.get("approved"), bool):
+                approved = bool(meta.get("approved"))
+
+        items.append(
+            {
+                "id": role,
+                "role": role,
+                "kind": "image",
+                "status": status,
+                "entity_type": entity_type,
+                "entity_id": int(entity_id),
+                "entity_name": name or None,
+                "label": label,
+                "view": view,
+                "uri": uri,
+                "asset_id": asset_id,
+                "approved": approved,
+            }
+        )
+
+    return items
+
+
+def _infer_asset_from_path(path: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    if not isinstance(path, str) or not path.strip():
+        return None, None, None
+    p = Path(path)
+    stem = p.stem
+    suffix = p.suffix.lower()
+    if suffix in {".mp4", ".mov", ".webm"}:
+        return stem, "video_clip", "video"
+    if stem.endswith("_head"):
+        return stem[: -len("_head")], "head_frame", "image"
+    if stem.endswith("_tail"):
+        return stem[: -len("_tail")], "tail_frame", "image"
+    if stem.endswith("_mid"):
+        return stem[: -len("_mid")], "mid_frame", "image"
+    return None, None, None
+
+
+def _emit_asset_ready_events(
+    emitter: DreamweaverEventEmitter,
+    *,
+    payload: Dict[str, Any],
+    stage: str,
+    emitted_keys: set[str],
+) -> None:
+    def _emit_single(uri: str, shot_id: Optional[str], role: str, kind: str) -> None:
+        asset_id = "merged_video" if role == "merged_video" else f"{shot_id}:{role}" if shot_id else None
+        if not asset_id:
+            return
+        key = uri or asset_id
+        if key in emitted_keys:
+            return
+        emitted_keys.add(key)
+        emitter.emit_event(
+            stage=stage,
+            event_type="asset_ready",
+            payload={
+                "id": asset_id,
+                "shot_id": shot_id,
+                "role": role,
+                "kind": kind,
+                "uri": uri,
+                "status": "done",
+            },
+        )
+
+    keyframes = payload.get("keyframes")
+    if isinstance(keyframes, list):
+        for item in keyframes:
+            if not isinstance(item, dict):
+                continue
+            uri = item.get("path")
+            if not isinstance(uri, str) or not uri.strip():
+                continue
+            shot_id, role, kind = _infer_asset_from_path(uri)
+            if not role or not kind:
+                meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+                role_meta = str(meta.get("role") or "").strip().lower()
+                if role_meta in {"head", "tail"}:
+                    role = "head_frame" if role_meta == "head" else "tail_frame"
+                    kind = "image"
+            if role and kind and shot_id:
+                _emit_single(uri, shot_id, role, kind)
+
+    midframes = payload.get("midframes")
+    if isinstance(midframes, list):
+        for item in midframes:
+            if not isinstance(item, dict):
+                continue
+            uri = item.get("path")
+            if not isinstance(uri, str) or not uri.strip():
+                continue
+            shot_id, role, kind = _infer_asset_from_path(uri)
+            if role and kind and shot_id:
+                _emit_single(uri, shot_id, role, kind)
+
+    video_clips = payload.get("video_clips")
+    if isinstance(video_clips, list):
+        for item in video_clips:
+            if not isinstance(item, dict):
+                continue
+            uri = item.get("path") or item.get("uri")
+            if not isinstance(uri, str) or not uri.strip():
+                continue
+            shot_id, role, kind = _infer_asset_from_path(uri)
+            if not role:
+                role = "video_clip"
+                kind = "video"
+                shot_id = shot_id or Path(uri).stem
+            if role and kind and shot_id:
+                _emit_single(uri, shot_id, role, kind)
+
+    merged_video = payload.get("merged_video")
+    if isinstance(merged_video, str) and merged_video.strip():
+        _emit_single(merged_video, None, "merged_video", "video")
+
+
 def _build_source_text(session: Session, *, project_id: int, chapter_ids: List[int]) -> str:
     if not chapter_ids:
         return ""
@@ -123,27 +387,55 @@ def _resume_payload_from_contract(
         head_frame = shot.get("head_frame") if isinstance(shot.get("head_frame"), dict) else {}
         tail_frame = shot.get("tail_frame") if isinstance(shot.get("tail_frame"), dict) else {}
         schema_v2 = shot.get("shot_schema_v2") if isinstance(shot.get("shot_schema_v2"), dict) else {}
-        storyboard.append(
-            {
-                "scene_id": str(shot.get("scene_id") or ""),
-                "shot_id": shot_key,
-                "desc": str(shot.get("desc") or ""),
-                "duration_s": float(shot.get("duration_s") or 3.0),
-                "cam_idx": int(schema_v2.get("cam_idx") or idx),
-                "visual_desc": str(schema_v2.get("visual_desc") or ""),
-                "ff_desc": str(schema_v2.get("ff_desc") or ""),
-                "lf_desc": str(schema_v2.get("lf_desc") or ""),
-                "motion_desc": str(schema_v2.get("motion_desc") or ""),
-                "audio_desc": str(schema_v2.get("audio_desc") or ""),
-                "state_before": str(schema_v2.get("state_before") or ""),
-                "state_after": str(schema_v2.get("state_after") or ""),
-                "ff_vis_char_ids": [str(i) for i in (schema_v2.get("ff_vis_char_ids") or []) if isinstance(i, (str, int))],
-                "lf_vis_char_ids": [str(i) for i in (schema_v2.get("lf_vis_char_ids") or []) if isinstance(i, (str, int))],
-                "head_frame": head_frame,
-                "tail_frame": tail_frame,
-                "shot_schema_v2_meta": schema_v2.get("meta") if isinstance(schema_v2.get("meta"), dict) else {},
-            }
-        )
+        schema_meta = schema_v2.get("meta") if isinstance(schema_v2.get("meta"), dict) else {}
+        storyboard_item = {
+            "scene_id": str(shot.get("scene_id") or ""),
+            "shot_id": shot_key,
+            "desc": str(shot.get("desc") or ""),
+            "duration_s": float(shot.get("duration_s") or 3.0),
+            "cam_idx": int(schema_v2.get("cam_idx") or idx),
+            "visual_desc": str(schema_v2.get("visual_desc") or ""),
+            "ff_desc": str(schema_v2.get("ff_desc") or ""),
+            "lf_desc": str(schema_v2.get("lf_desc") or ""),
+            "motion_desc": str(schema_v2.get("motion_desc") or ""),
+            "audio_desc": str(schema_v2.get("audio_desc") or ""),
+            "state_before": str(schema_v2.get("state_before") or ""),
+            "state_after": str(schema_v2.get("state_after") or ""),
+            "ff_vis_char_ids": [str(i) for i in (schema_v2.get("ff_vis_char_ids") or []) if isinstance(i, (str, int))],
+            "lf_vis_char_ids": [str(i) for i in (schema_v2.get("lf_vis_char_ids") or []) if isinstance(i, (str, int))],
+            "head_frame": head_frame,
+            "tail_frame": tail_frame,
+            "shot_schema_v2_meta": schema_meta,
+        }
+
+        if isinstance(schema_meta, dict) and schema_meta:
+            def _apply_meta_field(key: str, target_key: Optional[str] = None) -> None:
+                if key not in schema_meta:
+                    return
+                value = schema_meta.get(key)
+                if value is None:
+                    return
+                if isinstance(value, str) and not value.strip():
+                    return
+                if isinstance(value, (list, dict)) and not value:
+                    return
+                storyboard_item[target_key or key] = value
+
+            _apply_meta_field("shot_type")
+            _apply_meta_field("camera_angle")
+            _apply_meta_field("camera_movement")
+            _apply_meta_field("composition_notes")
+            _apply_meta_field("composition")
+            _apply_meta_field("location")
+            _apply_meta_field("time")
+            _apply_meta_field("atmosphere")
+            _apply_meta_field("audio_sync")
+            _apply_meta_field("character_ids")
+            _apply_meta_field("subshots")
+            _apply_meta_field("motion_level")
+            _apply_meta_field("emotion")
+
+        storyboard.append(storyboard_item)
 
         assets = shot.get("assets") if isinstance(shot.get("assets"), list) else []
         for asset in assets:
@@ -227,6 +519,8 @@ def _resume_payload_from_contract(
                     "script_generation",
                     "script_review",
                     "script_requires_review",
+                    "prompt_review_required",
+                    "prompt_review",
                     "storyboard_generation",
                     "camera_tree_generation",
                     "camera_tree",
@@ -495,6 +789,7 @@ def run_dreamweaver_task(
     from app.services.dreamweaver.persistence import build_contract_from_payload, persist_contract
 
     session = SessionLocal()
+    emitter: DreamweaverEventEmitter | None = None
     try:
         resume_config: Dict[str, Any] | None = None
         runtime_config: Dict[str, Any] | None = None
@@ -582,6 +877,10 @@ def run_dreamweaver_task(
                 payload["style_preset"] = runtime_config["style_preset"].strip()
             if isinstance(runtime_config.get("style_prompt"), str) and runtime_config["style_prompt"].strip():
                 payload["style_prompt"] = runtime_config["style_prompt"].strip()
+            if isinstance(runtime_config.get("prompt_review_required"), bool):
+                payload["prompt_review_required"] = runtime_config.get("prompt_review_required")
+            if isinstance(runtime_config.get("prompt_review"), dict):
+                payload["prompt_review"] = runtime_config.get("prompt_review")
 
         if isinstance(payload.get("chapter_ids"), list):
             payload["chapter_ids"] = _safe_int_list(payload.get("chapter_ids"))
@@ -638,9 +937,11 @@ def run_dreamweaver_task(
             # 素材库仅做增强，不影响主流程（例如项目没有设定体系/角色）
             pass
 
+        emitter = DreamweaverEventEmitter(project_id=project_id, user_id=user_id, run_id=run_id)
         ctx = RunContext(
             run_id=run_id,
             payload=payload,
+            event_emitter=emitter,
         )
 
         if isinstance(resume_config, dict) and isinstance(resume_config.get("start_state"), str):
@@ -673,6 +974,12 @@ def run_dreamweaver_task(
             result=json.dumps(running_payload, ensure_ascii=False),
             error=None,
         )
+        current_stage = stage_label(ctx.state)
+        emitter.emit_stage_start(stage=current_stage, state=ctx.state.name, progress=progress_percent(ctx.state))
+        emitter.emit_stage_progress(stage=current_stage, state=ctx.state.name, progress=progress_percent(ctx.state))
+        asset_plan_emitted = False
+        library_plan_emitted = False
+        emitted_asset_keys: set[str] = set()
         # 逐步执行，实时写入 progress/state，便于前端轮询展示
         max_steps = 50
         for _ in range(max_steps):
@@ -684,7 +991,42 @@ def run_dreamweaver_task(
                 State.WAITING_VIDEO_CONFIRMATION,
             ):
                 break
+            prev_stage = stage_label(ctx.state)
+            prev_state = ctx.state.name
             ctx = step(ctx)
+            next_stage = stage_label(ctx.state)
+            if next_stage != prev_stage:
+                emitter.emit_stage_end(stage=prev_stage, state=prev_state, progress=progress_percent(ctx.state))
+                emitter.emit_stage_start(stage=next_stage, state=ctx.state.name, progress=progress_percent(ctx.state))
+            emitter.emit_stage_progress(stage=next_stage, state=ctx.state.name, progress=progress_percent(ctx.state))
+
+            if not asset_plan_emitted:
+                storyboard = ctx.payload.get("storyboard")
+                plan_items = _build_asset_plan_from_storyboard(storyboard)
+                if plan_items:
+                    emitter.emit_event(
+                        stage=next_stage,
+                        event_type="asset_plan",
+                        payload={"items": plan_items, "total": len(plan_items)},
+                    )
+                    asset_plan_emitted = True
+
+            if not library_plan_emitted and next_stage in {"asset_library", "waiting_approval"}:
+                library_plan = _build_asset_library_plan_from_payload(ctx.payload)
+                if library_plan:
+                    emitter.emit_event(
+                        stage=next_stage,
+                        event_type="asset_library_plan",
+                        payload={"items": library_plan, "total": len(library_plan)},
+                    )
+                    library_plan_emitted = True
+
+            _emit_asset_ready_events(
+                emitter,
+                payload=ctx.payload,
+                stage=next_stage,
+                emitted_keys=emitted_asset_keys,
+            )
 
             # 将剧本阶段抽取的实体同步写入项目库（角色/场景/道具），并刷新素材库 spec。
             try:
@@ -779,6 +1121,13 @@ def run_dreamweaver_task(
                 status="running",
                 result=json.dumps(running_payload, ensure_ascii=False),
                 error=None,
+            )
+
+        if emitter is not None:
+            emitter.emit_stage_end(
+                stage=stage_label(ctx.state),
+                state=ctx.state.name,
+                progress=progress_percent(ctx.state),
             )
 
         result_payload = {
@@ -886,6 +1235,12 @@ def run_dreamweaver_task(
             )
     except Exception as exc:  # pragma: no cover - safety
         logger.exception("DreamWeaver task failed: %s", exc)
+        if emitter is not None:
+            emitter.emit_event(
+                stage=None,
+                event_type="run_error",
+                payload={"error": str(exc)},
+            )
         _update_generation_history(
             task_id,
             status="failed",

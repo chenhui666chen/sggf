@@ -36,7 +36,7 @@ export default function RegisterPage() {
     e.preventDefault()
     const result = await dispatch(register(formData))
     if (register.fulfilled.match(result)) {
-      navigate('/dashboard')
+      navigate('/home')
     }
   }
 
@@ -53,10 +53,10 @@ export default function RegisterPage() {
       >
         <Paper elevation={3} sx={{ p: 4, width: '100%' }}>
           <Typography variant="h4" component="h1" gutterBottom align="center">
-            Create Account
+            创建账户
           </Typography>
           <Typography variant="body2" color="textSecondary" align="center" sx={{ mb: 3 }}>
-            Join 拾光工坊
+            加入拾光工坊
           </Typography>
 
           {error && (
@@ -68,7 +68,7 @@ export default function RegisterPage() {
           <Box component="form" onSubmit={handleSubmit} sx={{ mt: 2 }}>
             <TextField
               fullWidth
-              label="Full Name"
+              label="姓名"
               name="full_name"
               value={formData.full_name}
               onChange={handleChange}
@@ -76,7 +76,7 @@ export default function RegisterPage() {
             />
             <TextField
               fullWidth
-              label="Username"
+              label="用户名"
               name="username"
               value={formData.username}
               onChange={handleChange}
@@ -85,7 +85,7 @@ export default function RegisterPage() {
             />
             <TextField
               fullWidth
-              label="Email"
+              label="邮箱"
               name="email"
               type="email"
               value={formData.email}
@@ -95,7 +95,7 @@ export default function RegisterPage() {
             />
             <TextField
               fullWidth
-              label="Password"
+              label="密码"
               name="password"
               type="password"
               value={formData.password}
@@ -111,15 +111,15 @@ export default function RegisterPage() {
               sx={{ mt: 3 }}
               disabled={isLoading}
             >
-              {isLoading ? 'Creating account...' : 'Sign Up'}
+              {isLoading ? '创建账户中...' : '注册'}
             </Button>
           </Box>
 
           <Box sx={{ mt: 2, textAlign: 'center' }}>
             <Typography variant="body2">
-              Already have an account?{' '}
+              已有账户？{' '}
               <Link to="/login" style={{ color: '#1976d2', textDecoration: 'none' }}>
-                Sign in
+                登录
               </Link>
             </Typography>
           </Box>

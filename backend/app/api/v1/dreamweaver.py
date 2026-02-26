@@ -26,6 +26,7 @@ from app.models.dreamweaver import (
     DreamweaverAsset as DreamweaverAssetModel,
     DreamweaverEpisode as DreamweaverEpisodeModel,
     DreamweaverProject as DreamweaverProjectModel,
+    DreamweaverRunEvent as DreamweaverRunEventModel,
     DreamweaverShot as DreamweaverShotModel,
 )
 from app.schemas.dreamweaver_contract import DREAMWEAVER_SCHEMA_VERSION
@@ -36,6 +37,7 @@ from app.services.dreamweaver.library import (
     build_library_spec,
     build_library_spec_from_script_entities,
     compute_library_review,
+    default_library_asset_uri,
     ensure_required_library_assets,
     enrich_payload_with_library,
     load_latest_library_assets,
@@ -79,6 +81,7 @@ class RunRequest(BaseModel):
     video_fps: Optional[int] = Field(default=None, ge=1, le=60)
     # 视频生成是否需要逐镜头确认（可选）：True=VIDEO 阶段先生成 video_clip_jobs 任务卡并等待确认
     video_require_confirmation: Optional[bool] = Field(default=None)
+    prompt_review_required: Optional[bool] = Field(default=None)
     # 用于版本化契约与资产锚点（可选，默认 0.1.0）
     schema_version: Optional[str] = None
 
@@ -247,6 +250,14 @@ class ScriptApproveRequest(BaseModel):
     approved: bool = Field(default=True)
 
 
+class PromptReviewApproveRequest(BaseModel):
+    approved: bool = Field(default=True)
+
+
+class ShotVideoPromptUpdateRequest(BaseModel):
+    prompt: Optional[str] = Field(default=None, max_length=2000)
+
+
 def _env_int(name: str, default: int) -> int:
     raw = os.getenv(name)
     if raw is None or not raw.strip():
@@ -265,6 +276,16 @@ def _env_float(name: str, default: float) -> float:
         return float(raw)
     except ValueError:
         return default
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    text = str(raw).strip().lower()
+    if not text:
+        return default
+    return text not in {"0", "false", "no", "off"}
 
 
 def _normalize_prompt_for_similarity(text: str) -> str:
@@ -654,6 +675,12 @@ def run_pipeline(
         video_cfg = payload.get("video_config") if isinstance(payload.get("video_config"), dict) else {}
         video_cfg["require_confirmation"] = bool(request.video_require_confirmation)
         payload["video_config"] = video_cfg
+    prompt_review_required = request.prompt_review_required
+    if prompt_review_required is None:
+        prompt_review_required = _env_flag("DREAMWEAVER_PROMPT_REVIEW_REQUIRED", default=False)
+    payload["prompt_review_required"] = bool(prompt_review_required)
+    if prompt_review_required:
+        payload["prompt_review"] = {"approved": False}
 
     payload = apply_locked_generation_config(payload, locked_cfg)
 
@@ -774,6 +801,7 @@ def run_pipeline_async(
 
     run_id = f"drama_{request.project_id}_{int(time.time())}"
     task_id = str(uuid.uuid4())
+    schema_version = request.schema_version or DREAMWEAVER_SCHEMA_VERSION
 
     # 使用 ASCII 兜底，避免编码问题影响任务写入与执行。
     source_text = "\n\n".join(
@@ -811,11 +839,22 @@ def run_pipeline_async(
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         },
     )
+    db.add(
+        DreamweaverProjectModel(
+            run_id=run_id,
+            source_project_id=request.project_id,
+            user_id=current_user.id,
+            schema_version=schema_version,
+            status="queued",
+            state="INIT",
+            stage="init",
+            progress=0,
+        )
+    )
     db.commit()
 
     from app.tasks.dreamweaver_tasks import run_dreamweaver_task
 
-    schema_version = request.schema_version or DREAMWEAVER_SCHEMA_VERSION
     runtime_config: Dict[str, Any] = {}
     if isinstance(request.quality_mode, str) and request.quality_mode.strip():
         image_config, qc_config, video_config = _quality_mode_to_runtime_config(request.quality_mode)
@@ -853,6 +892,12 @@ def run_pipeline_async(
         video_cfg = runtime_config.get("video_config") if isinstance(runtime_config.get("video_config"), dict) else {}
         video_cfg["require_confirmation"] = bool(request.video_require_confirmation)
         runtime_config["video_config"] = video_cfg
+    prompt_review_required = request.prompt_review_required
+    if prompt_review_required is None:
+        prompt_review_required = _env_flag("DREAMWEAVER_PROMPT_REVIEW_REQUIRED", default=False)
+    runtime_config["prompt_review_required"] = bool(prompt_review_required)
+    if prompt_review_required:
+        runtime_config["prompt_review"] = {"approved": False}
 
     runtime_config = apply_locked_generation_config(runtime_config, locked_cfg)
 
@@ -1388,13 +1433,31 @@ def regenerate_asset_library(
 
     prompt = _augment_library_prompt_for_role(role=role, prompt=prompt)
 
+    safety_strategy = (os.getenv("DREAMWEAVER_SAFETY_STRATEGY") or "moderate").strip().lower()
+    if safety_strategy in {"off", "none", "disable", "false", "0"}:
+        safety_strategy = ""
+    if safety_strategy:
+        from adapters.content_safety_checker import check_and_fix_prompt
+        fixed_prompt, issues, _ = check_and_fix_prompt(prompt, strategy=safety_strategy)
+        if issues and fixed_prompt:
+            prompt = fixed_prompt
+
     from adapters.model_adapters import ModelAdapterFactory
 
-    out_path = resolve_asset_path(str(asset_row.uri))
+    asset_uri = str(getattr(asset_row, "uri", "") or "").strip()
+    resolved: Optional[Path] = None
+    if asset_uri and "://" not in asset_uri:
+        try:
+            resolved = _ensure_path_under_runs(resolve_asset_path(asset_uri))
+        except HTTPException:
+            resolved = None
+    if resolved is None:
+        fixed_uri = default_library_asset_uri(project_id=project_id, role=role)
+        asset_row.uri = fixed_uri
+        db.flush()
+        resolved = _ensure_path_under_runs(resolve_asset_path(fixed_uri))
+    out_path = resolved
     base = Path("runs").resolve()
-    resolved = out_path.resolve()
-    if resolved != base and base not in resolved.parents:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="非法输出路径")
 
     edit_base_path: Optional[Path] = resolved if resolved.exists() else None
     edit_base_meta: Dict[str, Any] = current_meta if isinstance(current_meta, dict) else {}
@@ -1864,7 +1927,68 @@ def get_run_script(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权访问")
+        # 兜底：run 尚未持久化到 dreamweaver_projects 时，回退到 generation_history
+        gh_query = text(
+            """
+            SELECT gh.status, gh.result, gh.error, gh.created_at, gh.completed_at
+            FROM generation_history gh
+            INNER JOIN projects p ON gh.project_id = p.id
+            WHERE p.user_id = :user_id
+              AND gh.task_type = 'dreamweaver'
+              AND gh.result LIKE :needle
+            ORDER BY gh.created_at DESC
+            LIMIT 1
+            """
+        )
+        needle = f'%\"run_id\": \"{run_id}\"%'
+        gh_row = db.execute(gh_query, {"user_id": current_user.id, "needle": needle}).fetchone()
+        if not gh_row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权访问")
+
+        status_str = str(gh_row[0] or "").strip()
+        result_raw = gh_row[1]
+        error_message = gh_row[2] if isinstance(gh_row[2], str) and gh_row[2].strip() else None
+        state = None
+        stage = None
+        progress = None
+        error_type = None
+        if isinstance(result_raw, str) and result_raw.strip():
+            try:
+                payload = json.loads(result_raw)
+                if isinstance(payload, dict) and str(payload.get("run_id") or "").strip() == run_id:
+                    if isinstance(payload.get("state"), str):
+                        state = str(payload.get("state") or "").strip() or None
+                    if isinstance(payload.get("stage"), str):
+                        stage = str(payload.get("stage") or "").strip() or None
+                    if isinstance(payload.get("progress"), int):
+                        progress = int(payload.get("progress"))
+                    if isinstance(payload.get("error_type"), str):
+                        error_type = str(payload.get("error_type") or "").strip() or None
+                    if not error_message and isinstance(payload.get("error_message"), str):
+                        error_message = str(payload.get("error_message") or "").strip() or None
+            except Exception:
+                pass
+
+        if not isinstance(progress, int):
+            if status_str == "running":
+                progress = 50
+            elif status_str == "completed":
+                progress = 100
+            else:
+                progress = 0
+
+        return {
+            "dreamweaver_project_id": None,
+            "run_id": run_id,
+            "status": status_str or "queued",
+            "state": state,
+            "stage": stage,
+            "progress": progress,
+            "schema_version": "",
+            "error_type": error_type,
+            "error_message": error_message,
+            "contract": None,
+        }
 
     contract = row.contract_json if isinstance(row.contract_json, dict) else {}
     runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
@@ -1959,6 +2083,43 @@ def approve_run_script(
     return {"run_id": row.run_id, "approved": approved}
 
 
+@router.post("/runs/{run_id}/prompt-review/approve", response_model=dict)
+def approve_prompt_review(
+    run_id: str,
+    request: PromptReviewApproveRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    row = (
+        db.query(DreamweaverProjectModel)
+        .filter(DreamweaverProjectModel.run_id == run_id, DreamweaverProjectModel.user_id == current_user.id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权访问")
+
+    stage = str(row.stage or "").strip().lower()
+    if stage != "waiting_approval":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前 run 不在提示词审核阶段")
+
+    _ensure_run_not_running(row, action="更新提示词审核状态")
+
+    contract = row.contract_json if isinstance(row.contract_json, dict) else {}
+    runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
+
+    approved = bool(request.approved)
+    if "prompt_review_required" not in runtime_cfg:
+        runtime_cfg["prompt_review_required"] = True
+    runtime_cfg["prompt_review"] = {"approved": approved}
+    contract["runtime_config"] = runtime_cfg
+
+    row.contract_json = contract
+    flag_modified(row, "contract_json")
+    db.commit()
+
+    return {"run_id": row.run_id, "approved": approved}
+
+
 @router.post("/runs/{run_id}/resume-async", response_model=ResumeAsyncResponse)
 def resume_run_async(
     run_id: str,
@@ -2003,6 +2164,14 @@ def resume_run_async(
         review = compute_library_review(spec=spec, assets_by_role=assets_by_role)
         if not bool(review.get("approved")):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": "素材库未审核完成", "review": review})
+        prompt_review_required = bool(runtime_cfg.get("prompt_review_required"))
+        prompt_review = runtime_cfg.get("prompt_review") if isinstance(runtime_cfg.get("prompt_review"), dict) else {}
+        prompt_review_approved = bool(prompt_review.get("approved"))
+        if prompt_review_required and not prompt_review_approved:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"message": "鎻愮ず璇嶆湭瀹℃牳瀹屾垚", "prompt_review": prompt_review},
+            )
         start_state = "KEYFRAMES"
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前 run 不处于可继续的等待状态")
@@ -2622,6 +2791,69 @@ def get_persisted_run_contract(
     }
 
 
+@router.get("/runs/{run_id}/events", response_model=List[dict])
+def list_run_events(
+    run_id: str,
+    after_id: int = 0,
+    limit: int = 500,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    获取 DreamWeaver run 事件流（用于前端回放/断线补偿）。
+    """
+    row = (
+        db.query(DreamweaverProjectModel)
+        .filter(DreamweaverProjectModel.run_id == run_id, DreamweaverProjectModel.user_id == current_user.id)
+        .first()
+    )
+    if not row:
+        gh_query = text(
+            """
+            SELECT gh.status
+            FROM generation_history gh
+            INNER JOIN projects p ON gh.project_id = p.id
+            WHERE p.user_id = :user_id
+              AND gh.task_type = 'dreamweaver'
+              AND gh.result LIKE :needle
+            ORDER BY gh.created_at DESC
+            LIMIT 1
+            """
+        )
+        needle = f'%\"run_id\": \"{run_id}\"%'
+        gh_row = db.execute(gh_query, {"user_id": current_user.id, "needle": needle}).fetchone()
+        if gh_row:
+            return []
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
+
+    safe_after_id = max(0, int(after_id or 0))
+    safe_limit = max(1, min(int(limit or 0), 1000))
+
+    query = (
+        db.query(DreamweaverRunEventModel)
+        .filter(
+            DreamweaverRunEventModel.run_id == run_id,
+            DreamweaverRunEventModel.user_id == current_user.id,
+        )
+    )
+    if safe_after_id > 0:
+        query = query.filter(DreamweaverRunEventModel.id > safe_after_id)
+    rows = query.order_by(DreamweaverRunEventModel.id.asc()).limit(safe_limit).all()
+
+    return [
+        {
+            "event_id": int(item.id),
+            "run_id": item.run_id,
+            "project_id": item.project_id,
+            "stage": item.stage,
+            "event_type": item.event_type,
+            "payload": item.payload or {},
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+        }
+        for item in rows
+    ]
+
+
 @router.post("/runs/{run_id}/shots/{shot_id}/assets/{role}/upload", response_model=dict)
 def upload_run_shot_asset_file(
     run_id: str,
@@ -2815,6 +3047,12 @@ def update_run_shot_frame_prompt(
         frame_obj = {}
     frame_obj["prompt"] = request.prompt.strip()
     shot[key] = frame_obj
+    shot_schema_v2 = shot.get("shot_schema_v2") if isinstance(shot.get("shot_schema_v2"), dict) else {}
+    if frame_norm == "head":
+        shot_schema_v2["ff_desc"] = request.prompt.strip()
+    else:
+        shot_schema_v2["lf_desc"] = request.prompt.strip()
+    shot["shot_schema_v2"] = shot_schema_v2
 
     # 尝试同步到对应 keyframe 资产的 meta.spec.prompt（若存在）
     role_name = "head_frame" if frame_norm == "head" else "tail_frame"
@@ -2833,11 +3071,75 @@ def update_run_shot_frame_prompt(
         item["meta"] = meta
         break
 
+    runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
+    if bool(runtime_cfg.get("prompt_review_required")):
+        review = runtime_cfg.get("prompt_review") if isinstance(runtime_cfg.get("prompt_review"), dict) else {}
+        review["approved"] = False
+        runtime_cfg["prompt_review"] = review
+        contract["runtime_config"] = runtime_cfg
+
     row.contract_json = contract
     flag_modified(row, "contract_json")
     db.commit()
 
     return {"run_id": safe_run_id, "shot_id": safe_shot_id, "frame": frame_norm, "updated": True}
+
+
+@router.post("/runs/{run_id}/shots/{shot_id}/video-prompt", response_model=dict)
+def update_run_shot_video_prompt(
+    run_id: str,
+    shot_id: str,
+    request: ShotVideoPromptUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    更新指定 run/shot 的视频提示词覆盖（用于 VIDEO 阶段的 prompt）。
+    prompt 为空时清除覆盖。
+    """
+    safe_run_id = _normalize_run_id(run_id)
+    safe_shot_id = str(shot_id or "").strip()
+    if not safe_shot_id or "/" in safe_shot_id or "\\" in safe_shot_id or ".." in safe_shot_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="shot_id 格式不合法")
+
+    row = (
+        db.query(DreamweaverProjectModel)
+        .filter(DreamweaverProjectModel.run_id == safe_run_id, DreamweaverProjectModel.user_id == current_user.id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权访问")
+    _ensure_run_not_running(row, action="更新视频提示词")
+
+    contract = row.contract_json if isinstance(getattr(row, "contract_json", None), dict) else None
+    if not isinstance(contract, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="contract_json 不存在或格式不正确")
+
+    shot = _find_contract_shot(contract, shot_id=safe_shot_id)
+    shot_schema_v2 = shot.get("shot_schema_v2") if isinstance(shot.get("shot_schema_v2"), dict) else {}
+    meta = shot_schema_v2.get("meta") if isinstance(shot_schema_v2.get("meta"), dict) else {}
+
+    value = str(request.prompt or "").strip()
+    if value:
+        meta["video_prompt_override"] = value
+    else:
+        meta.pop("video_prompt_override", None)
+
+    shot_schema_v2["meta"] = meta
+    shot["shot_schema_v2"] = shot_schema_v2
+
+    runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
+    if bool(runtime_cfg.get("prompt_review_required")):
+        review = runtime_cfg.get("prompt_review") if isinstance(runtime_cfg.get("prompt_review"), dict) else {}
+        review["approved"] = False
+        runtime_cfg["prompt_review"] = review
+        contract["runtime_config"] = runtime_cfg
+
+    row.contract_json = contract
+    flag_modified(row, "contract_json")
+    db.commit()
+
+    return {"run_id": safe_run_id, "shot_id": safe_shot_id, "updated": True, "prompt": value}
 
 
 @router.get("/runs/{run_id}/merged-video/file")

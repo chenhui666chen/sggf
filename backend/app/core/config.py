@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     
     # 数据库配置（本地开发使用SQLite，生产环境使用PostgreSQL）
-    DATABASE_URL: str = "sqlite:///../novel_app.db"
+    DATABASE_URL: str = "postgresql://novel_user:NovelPostgres0t649OyRUaI@localhost:5432/novel_db"
     SQLALCHEMY_ECHO: bool = False
     
     # 数据库连接池配置（生产环境优化）
@@ -102,6 +102,15 @@ class Settings(BaseSettings):
     TENCENT_SECRET_KEY: str = ""
     TENCENT_REGION: str = "ap-guangzhou"
     TENCENT_BIZTYPE: str = ""  # 可选，策略编号
+
+    # 支付宝OAuth配置
+    ALIPAY_APP_ID: str = ""
+    ALIPAY_PRIVATE_KEY: str = ""
+    ALIPAY_PUBLIC_KEY: str = ""
+
+    # 微信OAuth配置
+    WECHAT_APP_ID: str = ""
+    WECHAT_APP_SECRET: str = ""
 
     class Config:
         env_file = ".env"

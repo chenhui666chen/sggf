@@ -55,6 +55,8 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import WarningIcon from '@mui/icons-material/Warning'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
+import { workflowWebSocket } from '@/services/websocket'
+import FormattedContent from '@/components/common/FormattedContent'
 
 // 织梦映心：生成流程页
 
@@ -71,6 +73,7 @@ interface PersistedDreamWeaverRun {
   qc_allow_fail?: boolean
   smart_tuning?: boolean
   video_require_confirmation?: boolean
+  prompt_review_required?: boolean
   style_preset?: string
   image_ratio?: string
   image_resolution?: string
@@ -108,6 +111,7 @@ function writePersistedDreamWeaverRun(projectId: number, patch: Partial<Persiste
       qc_allow_fail: patch.qc_allow_fail ?? prev?.qc_allow_fail,
       smart_tuning: patch.smart_tuning ?? prev?.smart_tuning,
       video_require_confirmation: patch.video_require_confirmation ?? prev?.video_require_confirmation,
+      prompt_review_required: patch.prompt_review_required ?? prev?.prompt_review_required,
       style_preset: patch.style_preset ?? prev?.style_preset,
       image_ratio: patch.image_ratio ?? prev?.image_ratio,
       image_resolution: patch.image_resolution ?? prev?.image_resolution,
@@ -224,6 +228,61 @@ interface LibraryPayload {
   spec: Record<string, any>
   review: Record<string, any>
   assets: LibraryAsset[]
+}
+
+interface DreamweaverEventRecord {
+  event_id: number
+  run_id: string
+  project_id: number
+  stage?: string | null
+  event_type: string
+  payload?: Record<string, any>
+  created_at?: string | null
+}
+
+interface DreamweaverAssetPlanItem {
+  id: string
+  shot_id?: string | null
+  scene_id?: string | null
+  cam_idx?: number | null
+  role?: string | null
+  kind?: 'image' | 'video'
+  label?: string
+  status?: 'planned' | 'done' | 'processing'
+  optional?: boolean
+  uri?: string | null
+}
+
+interface DreamweaverLibraryPlanItem {
+  id: string
+  role: string
+  entity_type?: string | null
+  entity_id?: number | null
+  entity_name?: string | null
+  label?: string
+  view?: string | null
+  status?: 'planned' | 'done' | 'processing'
+  kind?: 'image'
+  uri?: string | null
+  asset_id?: number | null
+  approved?: boolean | null
+}
+
+interface LibraryDisplayItem {
+  key: string
+  role: string
+  title: string
+  preview: string
+  aspectRatio: string
+  approved: boolean
+  status: 'planned' | 'processing' | 'done'
+  group: 'character' | 'scene' | 'prop' | 'other'
+  view?: 'front' | 'side' | 'back' | null
+  viewRank: number
+  asset?: LibraryAsset
+  missing?: boolean
+  safety_blocked?: boolean
+  safety_error?: string | null
 }
 
 function extractMergedVideoFromContract(contract: any): string | null {
@@ -427,6 +486,7 @@ export default function DreamWeaverRunPage() {
   const [qcAllowFail, setQcAllowFail] = useState(false)
   const [smartTuning, setSmartTuning] = useState(true)
   const [videoRequireConfirmation, setVideoRequireConfirmation] = useState(true)
+  const [promptReviewRequired, setPromptReviewRequired] = useState(true)
   const [abVariant, setAbVariant] = useState<string>('')
   const [stylePreset, setStylePreset] = useState<string>('cinematic_realistic')
   const [imageRatio, setImageRatio] = useState<string>('16:9')
@@ -455,10 +515,27 @@ export default function DreamWeaverRunPage() {
   const [scriptRequiresReview, setScriptRequiresReview] = useState(true)
   const [scriptEntities, setScriptEntities] = useState<Record<string, any> | null>(null)
   const [scriptGeneration, setScriptGeneration] = useState<{ mode?: string; model?: string | null; error?: string | null } | null>(null)
+  const [promptReviewLoading, setPromptReviewLoading] = useState(false)
+  const [promptReviewError, setPromptReviewError] = useState<string | null>(null)
+  const [promptReviewShowAll, setPromptReviewShowAll] = useState(false)
+  const [shotPromptExpanded, setShotPromptExpanded] = useState<Record<string, boolean>>({})
+  const [promptEditOpen, setPromptEditOpen] = useState(false)
+  const [promptEditShot, setPromptEditShot] = useState<any | null>(null)
+  const [promptEditHead, setPromptEditHead] = useState<string>('')
+  const [promptEditTail, setPromptEditTail] = useState<string>('')
+  const [promptEditVideo, setPromptEditVideo] = useState<string>('')
+  const [promptEditSaving, setPromptEditSaving] = useState(false)
+  const [promptEditError, setPromptEditError] = useState<string | null>(null)
+  const promptEditGenerated = useMemo(() => {
+    return String(promptEditShot?.shot_schema_v2?.meta?.video_prompt_generated || '').trim()
+  }, [promptEditShot])
   const [library, setLibrary] = useState<LibraryPayload | null>(null)
   const [libraryLoading, setLibraryLoading] = useState(false)
   const [libraryError, setLibraryError] = useState<string | null>(null)
   const [libraryPreviews, setLibraryPreviews] = useState<Record<number, string>>({})
+  const [libraryPreviewLoading, setLibraryPreviewLoading] = useState<Record<number, boolean>>({})
+  const [libraryPreviewErrors, setLibraryPreviewErrors] = useState<Record<number, string>>({})
+  const libraryPreviewsRef = useRef<Record<number, string>>({})
   const [mergedVideoLoading, setMergedVideoLoading] = useState(false)
   const [mergedVideoError, setMergedVideoError] = useState<string | null>(null)
   const [mergedVideoPreviewUrl, setMergedVideoPreviewUrl] = useState<string | null>(null)
@@ -466,6 +543,9 @@ export default function DreamWeaverRunPage() {
   const [runAssetPreviewLoading, setRunAssetPreviewLoading] = useState<Record<string, boolean>>({})
   const [runAssetPreviewErrors, setRunAssetPreviewErrors] = useState<Record<string, string>>({})
   const runAssetPreviewsRef = useRef<Record<string, string>>({})
+  const activeRunIdRef = useRef<string | null>(null)
+  const eventCursorRef = useRef(0)
+  const eventSyncingRef = useRef(false)
   const [regenOpen, setRegenOpen] = useState(false)
   const [regenRole, setRegenRole] = useState<string>('')
   const [regenTitle, setRegenTitle] = useState<string>('')
@@ -474,6 +554,13 @@ export default function DreamWeaverRunPage() {
   const [regenError, setRegenError] = useState<string | null>(null)
   const [result, setResult] = useState<RunResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [eventCursor, setEventCursor] = useState(0)
+  const [eventSyncing, setEventSyncing] = useState(false)
+  const [eventSyncError, setEventSyncError] = useState<string | null>(null)
+  const [streamTextByKey, setStreamTextByKey] = useState<Record<string, string>>({})
+  const [streamMetaByKey, setStreamMetaByKey] = useState<Record<string, { stage?: string | null; done?: boolean }>>({})
+  const [assetPlanItems, setAssetPlanItems] = useState<DreamweaverAssetPlanItem[]>([])
+  const [libraryPlanItems, setLibraryPlanItems] = useState<DreamweaverLibraryPlanItem[]>([])
 
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -560,8 +647,25 @@ export default function DreamWeaverRunPage() {
 
   const autoLoadedScriptRunIdRef = useRef<string | null>(null)
   const autoLoadedRunSnapshotRunIdRef = useRef<string | null>(null)
+  const autoLoadedLibraryRef = useRef(false)
   const restoredProjectIdRef = useRef<number | null>(null)
   const lockedGenerationConfigReqIdRef = useRef(0)
+
+  useEffect(() => {
+    libraryPreviewsRef.current = libraryPreviews
+  }, [libraryPreviews])
+
+  useEffect(() => {
+    return () => {
+      Object.values(libraryPreviewsRef.current).forEach((url) => {
+        try {
+          URL.revokeObjectURL(url)
+        } catch {
+          // ignore
+        }
+      })
+    }
+  }, [])
 
   useEffect(() => {
     runAssetPreviewsRef.current = runAssetPreviews
@@ -592,6 +696,81 @@ export default function DreamWeaverRunPage() {
     setRunAssetPreviewLoading({})
     setRunAssetPreviewErrors({})
   }, [])
+
+  const clearLibraryPreviews = useCallback(() => {
+    Object.values(libraryPreviewsRef.current).forEach((url) => {
+      try {
+        URL.revokeObjectURL(url)
+      } catch {
+        // ignore
+      }
+    })
+    libraryPreviewsRef.current = {}
+    setLibraryPreviews({})
+    setLibraryPreviewLoading({})
+    setLibraryPreviewErrors({})
+  }, [])
+
+  const resetDreamweaverEvents = useCallback(() => {
+    eventCursorRef.current = 0
+    setEventCursor(0)
+    setEventSyncError(null)
+    setStreamTextByKey({})
+    setStreamMetaByKey({})
+    setAssetPlanItems([])
+    setLibraryPlanItems([])
+  }, [])
+
+  const shouldTreatRunNotFoundAsPending = useCallback((taskIdValue?: string | null, statusValue?: string | null) => {
+    const status = String(statusValue || '').trim().toLowerCase()
+    if (status === 'queued' || status === 'running' || status === 'waiting') return true
+    return Boolean(taskIdValue)
+  }, [])
+
+  const resetMissingRunState = useCallback(
+    (projectId: number | null) => {
+      if (projectId) {
+        clearPersistedDreamWeaverRun(projectId)
+      }
+
+      setTaskId(null)
+      setTaskRunId(null)
+      setTaskStatus(null)
+      setTaskQueue(null)
+      setTaskProgress(0)
+      setTaskState(null)
+      setTaskStage(null)
+      setTaskArtifacts(null)
+      setRunning(false)
+      setWaitingApproval(false)
+
+      setResult(null)
+      setRunSnapshot(null)
+
+      setScriptError(null)
+      setScriptText('')
+      setScriptSavedText('')
+      setScriptApproved(false)
+      setScriptRequiresReview(true)
+      setScriptEntities(null)
+      setScriptGeneration(null)
+
+      setLibrary(null)
+      setLibraryError(null)
+      setLibraryPreviews({})
+      setMergedVideoLoading(false)
+      setMergedVideoError(null)
+      setMergedVideoPreviewUrl(null)
+      clearRunAssetPreviews()
+      resetDreamweaverEvents()
+
+      autoLoadedRunSnapshotRunIdRef.current = null
+      autoLoadedScriptRunIdRef.current = null
+      setPreviewStep(0)
+      setManualPreviewStep(false)
+    },
+    [clearRunAssetPreviews, resetDreamweaverEvents],
+  )
 
   const lockedProjectId = useMemo(() => {
     const parsed = Number(projectIdParam)
@@ -688,6 +867,715 @@ export default function DreamWeaverRunPage() {
           })}
         </Grid>
       </Box>
+    )
+  }
+
+  const renderAssetPlanGrid = (title: string, items: DreamweaverAssetPlanItem[]) => {
+    const list = Array.isArray(items) ? items : []
+    if (!list.length) return null
+    return (
+      <Box sx={{ mt: 1 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+          {title}
+        </Typography>
+        <Grid container spacing={1}>
+          {list.map((item) => {
+            const uri = item.uri ? String(item.uri).trim() : ''
+            const previewUrl = uri ? runAssetPreviews[uri] : ''
+            const loading = uri ? Boolean(runAssetPreviewLoading[uri]) : false
+            const err = uri ? runAssetPreviewErrors[uri] : null
+            const status = item.status === 'done' || uri ? 'done' : item.status === 'processing' ? 'processing' : 'planned'
+            const statusLabel = status === 'done' ? '已生成' : status === 'processing' ? '生成中' : '待生成'
+            const statusColor: 'default' | 'success' | 'info' = status === 'done' ? 'success' : status === 'processing' ? 'info' : 'default'
+            const label = String(item.label || item.id || '').trim() || item.id
+            const kind = item.kind === 'video' ? 'video' : 'image'
+
+            return (
+              <Grid item xs={12} sm={6} md={4} key={`plan:${item.id}`}>
+                <Card variant="outlined">
+                  <CardContent sx={{ p: 1.25 }}>
+                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                        {label}
+                      </Typography>
+                      <Chip size="small" label={statusLabel} color={statusColor} />
+                      {item.optional && <Chip size="small" label="可选" variant="outlined" />}
+                    </Stack>
+
+                    {previewUrl ? (
+                      kind === 'video' ? (
+                        <Box sx={{ mt: 0.75, bgcolor: '#000', borderRadius: 1, overflow: 'hidden' }}>
+                          <Box component="video" src={previewUrl} controls sx={{ width: '100%', maxHeight: 240, display: 'block' }} />
+                        </Box>
+                      ) : (
+                        <Box
+                          sx={{
+                            mt: 0.75,
+                            bgcolor: '#000',
+                            borderRadius: 1,
+                            overflow: 'hidden',
+                            display: 'flex',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            p: 0.5,
+                          }}
+                        >
+                          <Box component="img" src={previewUrl} sx={{ maxWidth: '100%', maxHeight: 220, display: 'block', objectFit: 'contain' }} />
+                        </Box>
+                      )
+                    ) : (
+                      <Box sx={{ mt: 0.75, bgcolor: '#fafafa', border: '1px dashed #ddd', borderRadius: 1, p: 1, textAlign: 'center' }}>
+                        <Typography variant="caption" color="text.secondary">
+                          {uri ? '已生成，待加载预览' : '生成中，等待素材'}
+                        </Typography>
+                      </Box>
+                    )}
+
+                    {uri && (
+                      <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mt: 1 }}>
+                        <Button size="small" variant="outlined" onClick={() => loadRunAssetPreview(uri)} disabled={!currentRunId || loading}>
+                          {loading ? '加载中…' : previewUrl ? '重新加载' : '加载预览'}
+                        </Button>
+                        <Button size="small" variant="text" onClick={() => downloadRunAsset(uri)} disabled={!currentRunId || loading}>
+                          下载
+                        </Button>
+                        {formatPath(uri) && <Chip size="small" label={formatPath(uri)} variant="outlined" />}
+                      </Stack>
+                    )}
+
+                    {(item.shot_id || item.scene_id) && (
+                      <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                        {item.shot_id ? `Shot: ${item.shot_id}` : ''}
+                        {item.scene_id ? `  Scene: ${item.scene_id}` : ''}
+                      </Typography>
+                    )}
+
+                    {err && (
+                      <Typography variant="caption" color="error" display="block" sx={{ mt: 0.5, wordBreak: 'break-all' }}>
+                        {err}
+                      </Typography>
+                    )}
+                  </CardContent>
+                </Card>
+              </Grid>
+            )
+          })}
+        </Grid>
+      </Box>
+    )
+  }
+
+  const renderStageOverview = () => null
+  const renderLibraryDisplayCard = (item: LibraryDisplayItem) => {
+    const asset = item.asset
+    const missing = Boolean(item.missing) && !asset
+    const approved = asset ? Boolean(asset.meta?.approved) : Boolean(item.approved)
+    const safetyBlocked = item.safety_blocked || Boolean(asset?.meta?.safety_blocked)
+    const safetyError = item.safety_error || (asset?.meta?.safety_error as string | undefined) || null
+    const statusLabel = missing
+      ? '缺失'
+      : safetyBlocked
+        ? '安全拦截'
+        : asset
+          ? approved
+            ? '已通过'
+            : '待审核'
+          : item.status === 'done'
+            ? '已生成'
+            : item.status === 'planned'
+              ? '待生成'
+              : '生成中'
+    const statusColor: 'default' | 'success' | 'info' | 'error' = missing
+      ? 'error'
+      : safetyBlocked
+        ? 'error'
+        : asset
+          ? (approved ? 'success' : 'default')
+          : item.status === 'done'
+            ? 'success'
+            : item.status === 'planned'
+              ? 'default'
+              : 'info'
+    const preview = asset ? item.preview : ''
+    const placeholderText = missing
+      ? '素材缺失'
+      : safetyBlocked
+        ? '安全拦截'
+        : asset
+          ? '待加载预览'
+          : item.status === 'done'
+            ? '已生成，等待入库'
+            : item.status === 'planned'
+              ? '待生成'
+              : '生成中'
+    const previewLoading = asset ? Boolean(libraryPreviewLoading[asset.id]) : false
+    const previewError = asset ? libraryPreviewErrors[asset.id] : null
+    const canGenerate = !asset && (missing || item.status === 'done')
+    const roleLabel = item.role ? `role: ${item.role}` : ''
+
+    return (
+      <ImageListItem key={item.key} sx={{ border: '1px solid #eee', borderRadius: 2, overflow: 'hidden' }}>
+        <Box
+          sx={{
+            width: '100%',
+            aspectRatio: item.aspectRatio,
+            bgcolor: safetyBlocked || missing ? '#fff5f5' : '#f5f5f5',
+            position: 'relative',
+            overflow: 'hidden',
+          }}
+        >
+          {preview && !safetyBlocked ? (
+            <Box
+              component="img"
+              src={preview}
+              alt={item.title}
+              loading="lazy"
+              sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
+          ) : (
+            <Box
+              sx={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: safetyBlocked || missing ? 'error.main' : 'text.secondary',
+                fontSize: 12,
+                backgroundImage: safetyBlocked || missing
+                  ? 'repeating-linear-gradient(45deg, rgba(211,47,47,0.05) 0, rgba(211,47,47,0.05) 8px, rgba(211,47,47,0.1) 8px, rgba(211,47,47,0.1) 16px)'
+                  : 'repeating-linear-gradient(45deg, rgba(0,0,0,0.02) 0, rgba(0,0,0,0.02) 8px, rgba(0,0,0,0.04) 8px, rgba(0,0,0,0.04) 16px)',
+              }}
+            >
+              {safetyBlocked && (
+                <Box sx={{ fontSize: 24, mb: 0.5 }}>⛔️</Box>
+              )}
+              <Box>{placeholderText}</Box>
+              {safetyBlocked && (
+                <Box sx={{ fontSize: 10, mt: 0.5, px: 1, textAlign: 'center', opacity: 0.8 }}>
+                  点击重新生成
+                </Box>
+              )}
+            </Box>
+          )}
+          <Box sx={{ position: 'absolute', top: 8, left: 8 }}>
+            <Chip size="small" label={statusLabel} color={statusColor} />
+          </Box>
+          {!asset && !safetyBlocked && !missing && (
+            <Box sx={{ position: 'absolute', top: 8, right: 8 }}>
+              <Chip size="small" label="占位" variant="outlined" />
+            </Box>
+          )}
+        </Box>
+        <Box sx={{ p: 1 }}>
+          <Typography variant="caption" sx={{ fontWeight: 600 }} display="block">
+            {item.title}
+          </Typography>
+          {roleLabel && (
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+              {roleLabel}
+            </Typography>
+          )}
+          {safetyError && (
+            <Typography variant="caption" color="error" display="block" sx={{ mb: 0.5, fontSize: '0.7rem', wordBreak: 'break-all' }}>
+              {safetyError.slice(0, 100)}{safetyError.length > 100 ? '...' : ''}
+            </Typography>
+          )}
+          {previewError && (
+            <Typography variant="caption" color="error" display="block" sx={{ mb: 0.5, fontSize: '0.7rem', wordBreak: 'break-all' }}>
+              {previewError.slice(0, 100)}{previewError.length > 100 ? '...' : ''}
+            </Typography>
+          )}
+          <Stack direction="row" spacing={1} alignItems="center" mt={0.5} flexWrap="wrap">
+            {asset ? (
+              <>
+                {!safetyBlocked && (
+                  <Button
+                    size="small"
+                    variant="text"
+                    onClick={() => approveLibrary({ roles: [asset.role], approved: !approved })}
+                    disabled={libraryLoading}
+                  >
+                    {approved ? '撤销' : '通过'}
+                  </Button>
+                )}
+                {!safetyBlocked && (!preview || previewError) && (
+                  <Button
+                    size="small"
+                    variant="text"
+                    onClick={() => loadLibraryPreview(asset, { force: true })}
+                    disabled={libraryLoading || previewLoading}
+                  >
+                    {previewLoading ? '加载中…' : preview ? '重新加载预览' : '加载预览'}
+                  </Button>
+                )}
+                <Button
+                  size="small"
+                  variant={safetyBlocked ? 'contained' : 'text'}
+                  color={safetyBlocked ? 'warning' : 'primary'}
+                  onClick={() => openRegenerateDialog(asset)}
+                  disabled={libraryLoading}
+                >
+                  {safetyBlocked ? '重新生成' : '重新生成'}
+                </Button>
+              </>
+            ) : canGenerate ? (
+              <Button size="small" variant="text" onClick={() => openRegenerateDialogForRole(item.role, item.title)} disabled={libraryLoading}>
+                生成素材
+              </Button>
+            ) : (
+              <Chip size="small" label="等待生成" variant="outlined" />
+            )}
+          </Stack>
+        </Box>
+      </ImageListItem>
+    )
+  }
+
+  const renderStreamingTextBlock = (
+    title: string,
+    text: string,
+    options?: { maxHeight?: number; monospace?: boolean; streaming?: boolean },
+  ) => {
+    if (!text) return null
+    const maxHeight = typeof options?.maxHeight === 'number' ? options?.maxHeight : 220
+    const isStreaming = options?.streaming ?? false
+    const fontFamily = options?.monospace
+      ? 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
+      : undefined
+
+    return (
+      <Box sx={{ mb: 1 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+          {title}
+          {isStreaming && (
+            <Box
+              component="span"
+              sx={{
+                display: 'inline-block',
+                width: 6,
+                height: 14,
+                bgcolor: 'primary.main',
+                animation: 'blink 1s step-end infinite',
+                verticalAlign: 'middle',
+                ml: 0.5,
+                borderRadius: 0.5,
+                '@keyframes blink': {
+                  '50%': { opacity: 0 },
+                },
+              }}
+            />
+          )}
+        </Typography>
+        <Box sx={{ maxHeight, overflow: 'auto', bgcolor: '#fafafa', border: '1px solid #eee', borderRadius: 1, p: 1.5 }}>
+          {options?.monospace ? (
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ whiteSpace: 'pre-wrap', fontFamily, fontSize: '0.85rem', lineHeight: 1.6 }}
+            >
+              {text}
+            </Typography>
+          ) : (
+            <FormattedContent
+              content={text}
+              sx={{
+                fontSize: '0.9rem',
+                lineHeight: 1.7,
+                '& p': { margin: '8px 0' },
+                '& h1, & h2, & h3': { marginTop: '12px', marginBottom: '8px' },
+              }}
+            />
+          )}
+        </Box>
+      </Box>
+    )
+  }
+
+  const renderStreamingPreview = (step: number) => {
+    const planText = String(streamSnapshots.plan || '').trim()
+    const scriptText = String(streamSnapshots.script || streamSnapshots.scriptEnhance || '').trim()
+    const profileText = String(streamSnapshots.characterProfiles || '').trim()
+    const audioText = String(streamSnapshots.audioMarkers || '').trim()
+    const storyboardText = String(streamSnapshots.storyboard || '').trim()
+    const cameraTreeText = String(streamSnapshots.cameraTree || '').trim()
+
+    if (step === 0) {
+      if (!planText && !scriptText && !profileText && !audioText) return null
+      return (
+        <Box sx={{ mb: 1 }}>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 0.5 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+              流式预览
+            </Typography>
+            {activeStreamKeys.length > 0 && <Chip size="small" label={`实时输出: ${activeStreamKeys.join(', ')}`} />}
+          </Stack>
+          {renderStreamingTextBlock('计划/脚本提要（流式）', planText, { maxHeight: 200 })}
+          {renderStreamingTextBlock('剧本（流式）', scriptText, { maxHeight: 400 })}
+          {renderStreamingTextBlock('角色小传（流式）', profileText, { maxHeight: 200 })}
+          {renderStreamingTextBlock('音频标记（流式）', audioText, { maxHeight: 200, monospace: true })}
+        </Box>
+      )
+    }
+
+    if (step === 1) {
+      if (!storyboardText && !cameraTreeText) return null
+      return (
+        <Box sx={{ mb: 1 }}>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 0.5 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+              流式预览
+            </Typography>
+            {activeStreamKeys.length > 0 && <Chip size="small" label={`实时输出: ${activeStreamKeys.join(', ')}`} />}
+          </Stack>
+          {renderStreamingTextBlock('分镜（流式）', storyboardText, { maxHeight: 400 })}
+          {renderStreamingTextBlock('镜头树（流式）', cameraTreeText, { maxHeight: 260 })}
+        </Box>
+      )
+    }
+
+    if (step === 2) {
+      if (!libraryPlanItems.length) return null
+      const plannedCount = libraryPlanItems.filter((i) => i.status === 'planned').length
+      const doneCount = libraryPlanItems.filter((i) => i.status === 'done').length
+      const processingCount = libraryPlanItems.filter((i) => i.status === 'processing').length
+      return (
+        <Box sx={{ mb: 1 }}>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 0.5 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+              素材库生成
+            </Typography>
+            <Chip size="small" label={`总计: ${libraryPlanItems.length}`} />
+            <Chip size="small" label={`已生成: ${doneCount}`} color={doneCount > 0 ? 'success' : 'default'} />
+            <Chip size="small" label={`生成中: ${processingCount}`} color={processingCount > 0 ? 'warning' : 'default'} />
+            <Chip size="small" label={`待生成: ${plannedCount}`} />
+          </Stack>
+          <Grid container spacing={1.5}>
+            {libraryPlanItems.slice(0, 12).map((item) => (
+              <Grid item key={item.id} xs={6} sm={4} md={3} lg={2}>
+                <Card
+                  sx={{
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    border: item.status === 'processing' ? '2px solid' : '1px solid',
+                    borderColor: item.status === 'processing' ? 'warning.main' : 'divider',
+                    opacity: item.status === 'planned' ? 0.7 : 1,
+                  }}
+                >
+                  <Box
+                    sx={{
+                      position: 'relative',
+                      paddingTop: '100%',
+                      bgcolor: 'grey.100',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {item.status === 'processing' ? (
+                      <Box
+                        sx={{
+                          position: 'absolute',
+                          top: '50%',
+                          left: '50%',
+                          transform: 'translate(-50%, -50%)',
+                          textAlign: 'center',
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            width: 24,
+                            height: 24,
+                            border: '2px solid',
+                            borderColor: 'primary.main',
+                            borderTopColor: 'transparent',
+                            borderRadius: '50%',
+                            animation: 'spin 1s linear infinite',
+                            '@keyframes spin': {
+                              '0%': { transform: 'rotate(0deg)' },
+                              '100%': { transform: 'rotate(360deg)' },
+                            },
+                          }}
+                        />
+                      </Box>
+                    ) : (
+                      <Box
+                        sx={{
+                          position: 'absolute',
+                          top: '50%',
+                          left: '50%',
+                          transform: 'translate(-50%, -50%)',
+                          textAlign: 'center',
+                        }}
+                      >
+                        <PhotoCameraIcon sx={{ fontSize: 32, color: 'grey.400' }} />
+                      </Box>
+                    )}
+                    {item.status === 'processing' && (
+                      <Box
+                        sx={{
+                          position: 'absolute',
+                          top: 4,
+                          right: 4,
+                          bgcolor: 'warning.main',
+                          color: 'white',
+                          fontSize: '0.65rem',
+                          px: 0.5,
+                          py: 0.25,
+                          borderRadius: 0.5,
+                        }}
+                      >
+                        生成中
+                      </Box>
+                    )}
+                    {item.status === 'done' && (
+                      <Box
+                        sx={{
+                          position: 'absolute',
+                          top: 4,
+                          right: 4,
+                          bgcolor: 'success.main',
+                          color: 'white',
+                          fontSize: '0.65rem',
+                          px: 0.5,
+                          py: 0.25,
+                          borderRadius: 0.5,
+                        }}
+                      >
+                        完成
+                      </Box>
+                    )}
+                  </Box>
+                  <CardContent sx={{ p: 1, '&:last-child': { pb: 1 } }}>
+                    <Typography variant="caption" sx={{ fontWeight: 500, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {item.label || item.entity_name || item.role}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+                      {item.status === 'done' ? '已生成' : item.status === 'processing' ? '生成中...' : '待生成'}
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+            {libraryPlanItems.length > 12 && (
+              <Grid item xs={12}>
+                <Typography variant="caption" color="text.secondary">
+                  还有 {libraryPlanItems.length - 12} 个素材...
+                </Typography>
+              </Grid>
+            )}
+          </Grid>
+        </Box>
+      )
+    }
+
+    if (step === 3) {
+      const assets = assetPlanItems.filter((item) => item.id !== 'merged_video')
+      if (!assets.length) return null
+      return (
+        <Box sx={{ mb: 1 }}>
+          <Stack direction="row" spacing={1} flexWrap="wrap" mb={0.5}>
+            <Chip size="small" label={`占位: ${assetPlanSummary.total}`} />
+            <Chip size="small" label={`已生成: ${assetPlanSummary.done}`} color={assetPlanSummary.done > 0 ? 'success' : 'default'} />
+            <Chip size="small" label={`待生成: ${assetPlanSummary.planned}`} />
+            <Chip size="small" label={`图像: ${assetPlanSummary.images}`} />
+            <Chip size="small" label={`视频: ${assetPlanSummary.videos}`} />
+          </Stack>
+          {renderAssetPlanGrid('素材占位卡', assets)}
+        </Box>
+      )
+    }
+
+    if (step === 4) {
+      if (!mergedVideoPlan) return null
+      return (
+        <Box sx={{ mb: 1 }}>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 0.5 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+              流式预览
+            </Typography>
+            <Chip size="small" label={mergedVideoPlan.uri ? '已生成' : '待生成'} color={mergedVideoPlan.uri ? 'success' : 'default'} />
+          </Stack>
+          {renderAssetPlanGrid('合成视频占位', [mergedVideoPlan])}
+        </Box>
+      )
+    }
+
+    return null
+  }
+
+  const renderScriptStageSnapshot = () => {
+    const planText = snapshotPlanText.trim()
+    const scriptText = snapshotScriptText.trim()
+    const profilesCount = snapshotCharacterProfiles.length
+    const markersCount = snapshotAudioMarkers.length
+    const entityCount = (key: string) => {
+      if (!snapshotScriptEntities || typeof snapshotScriptEntities !== 'object') return 0
+      const list = (snapshotScriptEntities as any)[key]
+      return Array.isArray(list) ? list.length : 0
+    }
+    const entitySummary = snapshotScriptEntities
+      ? `角色 ${entityCount('characters')}，场景 ${entityCount('scenes')}，道具 ${entityCount('props')}`
+      : ''
+    const hasGeneration = Boolean(snapshotScriptGeneration && Object.keys(snapshotScriptGeneration).length > 0)
+
+    const renderJsonBlock = (value: any, emptyText: string, maxHeight = 240) => {
+      const isEmpty =
+        value == null ||
+        (Array.isArray(value) ? value.length === 0 : typeof value === 'object' && Object.keys(value).length === 0)
+      if (isEmpty) {
+        return (
+          <Typography variant="body2" color="text.secondary">
+            {emptyText}
+          </Typography>
+        )
+      }
+      return (
+        <Box
+          sx={{
+            whiteSpace: 'pre-wrap',
+            fontFamily: 'monospace',
+            fontSize: 12,
+            bgcolor: '#fafafa',
+            border: '1px solid #eee',
+            borderRadius: 2,
+            p: 1.5,
+            maxHeight,
+            overflow: 'auto',
+          }}
+        >
+          {JSON.stringify(value, null, 2)}
+        </Box>
+      )
+    }
+
+    return (
+      <Box sx={{ mb: 1 }}>
+        <Accordion defaultExpanded>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+              计划 / 剧本提要（快照）
+            </Typography>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-wrap' }}>
+              {planText || '暂无计划/提要快照（可能仍在生成或尚未落库）。'}
+            </Typography>
+          </AccordionDetails>
+        </Accordion>
+
+        <Accordion defaultExpanded>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                剧本（快照）
+              </Typography>
+              <Chip size="small" label={snapshotScriptApproved ? '已通过' : '未通过'} color={snapshotScriptApproved ? 'success' : 'default'} />
+              <Chip size="small" label={`长度: ${scriptText.length}`} />
+            </Stack>
+          </AccordionSummary>
+          <AccordionDetails>
+            {scriptText ? (
+              <Box
+                sx={{
+                  whiteSpace: 'pre-wrap',
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  bgcolor: '#fafafa',
+                  border: '1px solid #eee',
+                  borderRadius: 2,
+                  p: 1.5,
+                  maxHeight: 320,
+                  overflow: 'auto',
+                }}
+              >
+                {scriptText.length > 6000 ? `${scriptText.slice(0, 6000)}\n…` : scriptText}
+              </Box>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                尚无可用剧本快照（可能仍在生成或尚未落库）。
+              </Typography>
+            )}
+          </AccordionDetails>
+        </Accordion>
+
+        <Accordion>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                角色小传（快照）
+              </Typography>
+              {profilesCount > 0 && <Chip size="small" label={`${profilesCount} 条`} />}
+            </Stack>
+          </AccordionSummary>
+          <AccordionDetails>{renderJsonBlock(snapshotCharacterProfiles, '暂无角色小传（可能尚未生成或未落库）。')}</AccordionDetails>
+        </Accordion>
+
+        <Accordion>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                音频标记（快照）
+              </Typography>
+              {markersCount > 0 && <Chip size="small" label={`${markersCount} 条`} />}
+            </Stack>
+          </AccordionSummary>
+          <AccordionDetails>{renderJsonBlock(snapshotAudioMarkers, '暂无音频标记（可能尚未生成或未落库）。')}</AccordionDetails>
+        </Accordion>
+
+        <Accordion>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                实体抽取（快照）
+              </Typography>
+              {entitySummary && <Chip size="small" label={entitySummary} />}
+            </Stack>
+          </AccordionSummary>
+          <AccordionDetails>{renderJsonBlock(snapshotScriptEntities, '暂无实体抽取数据（可能尚未生成或未落库）。')}</AccordionDetails>
+        </Accordion>
+
+        <Accordion>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                剧本生成信息（快照）
+              </Typography>
+              {hasGeneration && <Chip size="small" label="已记录" />}
+            </Stack>
+          </AccordionSummary>
+          <AccordionDetails>{renderJsonBlock(snapshotScriptGeneration, '暂无剧本生成信息（可能尚未生成或未落库）。')}</AccordionDetails>
+        </Accordion>
+      </Box>
+    )
+  }
+
+  const renderSafetyBlockedAlert = () => {
+    if (!safetyBlockedShots.length) return null
+    return (
+      <Alert severity="warning" sx={{ mb: 1 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+          检测到内容安全拦截：部分镜头产物被安全过滤
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          请点击下方镜头编号查看/修改提示词后重试生成。
+        </Typography>
+        <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1 }}>
+          {safetyBlockedShots.map((item) => {
+            const label = item.shotIndex != null ? `#${item.shotIndex} ${item.shotId}` : item.shotId
+            return (
+              <Button key={item.shotId} size="small" variant="outlined" onClick={() => openSafetyBlockedShot(item.shotId)}>
+                {label}
+              </Button>
+            )
+          })}
+        </Stack>
+        {safetyBlockedShots[0]?.errorSample && (
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
+            示例错误：{safetyBlockedShots[0].errorSample}
+          </Typography>
+        )}
+      </Alert>
     )
   }
 
@@ -923,12 +1811,14 @@ export default function DreamWeaverRunPage() {
     setMergedVideoLoading(false)
     setMergedVideoError(null)
     setMergedVideoPreviewUrl(null)
+    clearRunAssetPreviews()
+    resetDreamweaverEvents()
 
     setPreviewStep(0)
     setManualPreviewStep(false)
 
     writePersistedDreamWeaverRun(selectedProjectId, { run_id: nextRunId, task_id: null, status: null })
-    void hydrateFromPersistedRun(selectedProjectId, nextRunId, null)
+    void hydrateFromPersistedRun(selectedProjectId, nextRunId, null, null)
     setHistoryOpen(false)
   }
 
@@ -1001,6 +1891,9 @@ export default function DreamWeaverRunPage() {
       setDeleteDialogOpen(false)
       setDeleteRunId(null)
     } catch (e: any) {
+      if (e?.response?.status === 404) {
+        resetMissingRunState(selectedProjectId)
+      }
       setDeleteDialogError(await extractApiErrorMessage(e, '删除失败'))
     } finally {
       setDeleteSubmitting(false)
@@ -1079,6 +1972,8 @@ export default function DreamWeaverRunPage() {
           setMergedVideoLoading(false)
           setMergedVideoError(null)
           setMergedVideoPreviewUrl(null)
+          clearRunAssetPreviews()
+          resetDreamweaverEvents()
         }
       } catch (e: any) {
         const msg = await extractApiErrorMessage(e, '删除失败')
@@ -1112,6 +2007,7 @@ export default function DreamWeaverRunPage() {
     projectId: number,
     runId: string,
     persistedTaskId: string | null,
+    persistedStatus: string | null,
   ) => {
     if (!runId) return
     try {
@@ -1159,7 +2055,11 @@ export default function DreamWeaverRunPage() {
       }
     } catch (e: any) {
       if (e?.response?.status === 404) {
-        clearPersistedDreamWeaverRun(projectId)
+        if (shouldTreatRunNotFoundAsPending(persistedTaskId, persistedStatus)) {
+          setRunSnapshotError('运行数据尚未落库，稍后自动重试')
+          return
+        }
+        resetMissingRunState(projectId)
       }
       setRunSnapshotError(await extractApiErrorMessage(e, '恢复运行状态失败'))
     }
@@ -1193,10 +2093,12 @@ export default function DreamWeaverRunPage() {
     if (typeof persisted.smart_tuning === 'boolean') setSmartTuning(persisted.smart_tuning)
     if (typeof persisted.video_require_confirmation === 'boolean')
       setVideoRequireConfirmation(persisted.video_require_confirmation)
+    if (typeof persisted.prompt_review_required === 'boolean')
+      setPromptReviewRequired(persisted.prompt_review_required)
     if (persisted.image_ratio) setImageRatio(persisted.image_ratio)
     if (persisted.image_resolution) setImageResolution(persisted.image_resolution)
 
-    void hydrateFromPersistedRun(selectedProjectId, persisted.run_id, persisted.task_id ?? null)
+    void hydrateFromPersistedRun(selectedProjectId, persisted.run_id, persisted.task_id ?? null, persisted.status ?? null)
   }, [selectedProjectId])
 
   useEffect(() => {
@@ -1219,12 +2121,28 @@ export default function DreamWeaverRunPage() {
       qc_allow_fail: qcAllowFail,
       smart_tuning: smartTuning,
       video_require_confirmation: videoRequireConfirmation,
+      prompt_review_required: promptReviewRequired,
       style_preset: stylePreset,
       image_ratio: imageRatio,
       image_resolution: imageResolution,
       selected_chapter_ids: selectedChapterIds,
     })
-  }, [highQuality, imageRatio, imageResolution, qcAllowFail, smartTuning, videoRequireConfirmation, result?.run_id, selectedChapterIds, selectedProjectId, stylePreset, taskId, taskRunId, taskStatus])
+  }, [
+    highQuality,
+    imageRatio,
+    imageResolution,
+    qcAllowFail,
+    smartTuning,
+    videoRequireConfirmation,
+    promptReviewRequired,
+    result?.run_id,
+    selectedChapterIds,
+    selectedProjectId,
+    stylePreset,
+    taskId,
+    taskRunId,
+    taskStatus,
+  ])
 
   useEffect(() => {
     if (!taskId) return
@@ -1382,6 +2300,7 @@ export default function DreamWeaverRunPage() {
     setMergedVideoError(null)
     setMergedVideoPreviewUrl(null)
     clearRunAssetPreviews()
+    resetDreamweaverEvents()
     setLoadingChapters(true)
     try {
       const res = await apiClient.getChapters(projectId)
@@ -1395,7 +2314,7 @@ export default function DreamWeaverRunPage() {
     } finally {
       setLoadingChapters(false)
     }
-  }, [clearRunAssetPreviews, refreshLockedGenerationConfig])
+  }, [clearRunAssetPreviews, refreshLockedGenerationConfig, resetDreamweaverEvents])
 
   useEffect(() => {
     if (!lockedProjectId) return
@@ -1449,6 +2368,14 @@ export default function DreamWeaverRunPage() {
     setScriptRequiresReview(true)
     setScriptEntities(null)
     setScriptGeneration(null)
+    setPromptReviewError(null)
+    setPromptReviewShowAll(false)
+    setPromptEditOpen(false)
+    setPromptEditShot(null)
+    setPromptEditHead('')
+    setPromptEditTail('')
+    setPromptEditVideo('')
+    setPromptEditError(null)
     setTaskId(null)
     setTaskRunId(null)
     setTaskStatus(null)
@@ -1468,6 +2395,7 @@ export default function DreamWeaverRunPage() {
     setMergedVideoError(null)
     setMergedVideoPreviewUrl(null)
     clearRunAssetPreviews()
+    resetDreamweaverEvents()
     try {
       const res = await apiClient.runDreamweaverAsync(selectedProjectId, selectedChapterIds, {
         quality_mode: highQuality ? 'quality' : 'cost',
@@ -1475,6 +2403,7 @@ export default function DreamWeaverRunPage() {
         smart_tuning: smartTuning,
         ab_variant: abVariant.trim() ? abVariant.trim() : undefined,
         video_require_confirmation: videoRequireConfirmation,
+        prompt_review_required: promptReviewRequired,
         style_preset: stylePreset,
         image_ratio: imageRatio,
         image_resolution: imageResolution,
@@ -1496,18 +2425,6 @@ export default function DreamWeaverRunPage() {
 
   useEffect(() => {
     return () => {
-      Object.values(libraryPreviews).forEach((url) => {
-        try {
-          URL.revokeObjectURL(url)
-        } catch {
-          // ignore
-        }
-      })
-    }
-  }, [libraryPreviews])
-
-  useEffect(() => {
-    return () => {
       if (!mergedVideoPreviewUrl) return
       try {
         URL.revokeObjectURL(mergedVideoPreviewUrl)
@@ -1517,6 +2434,281 @@ export default function DreamWeaverRunPage() {
     }
   }, [mergedVideoPreviewUrl])
 
+  const applyStageSignal = useCallback((stage: string | null, payload: any) => {
+    if (stage) setTaskStage(stage)
+    const stateRaw = payload && typeof payload.state === 'string' ? String(payload.state) : null
+    if (stateRaw) setTaskState(stateRaw)
+    const progressRaw = payload && typeof payload.progress === 'number' ? payload.progress : null
+    if (typeof progressRaw === 'number') setTaskProgress(progressRaw)
+
+    if (stateRaw) {
+      const upper = stateRaw.toUpperCase()
+      if (upper.startsWith('WAITING')) {
+        setTaskStatus('waiting')
+        setWaitingApproval(true)
+        setRunning(false)
+      } else if (upper === 'DONE') {
+        setTaskStatus('completed')
+        setWaitingApproval(false)
+        setRunning(false)
+      } else if (upper === 'FAILED') {
+        setTaskStatus('failed')
+        setWaitingApproval(false)
+        setRunning(false)
+      } else {
+        setTaskStatus('running')
+        setWaitingApproval(false)
+        setRunning(true)
+      }
+    }
+  }, [])
+
+  const normalizeAssetPlanItems = useCallback((items: any[]): DreamweaverAssetPlanItem[] => {
+    if (!Array.isArray(items)) return []
+    return items
+      .map((raw) => {
+        if (!raw || typeof raw !== 'object') return null
+        const id = String((raw as any).id || '').trim()
+        if (!id) return null
+        const kindRaw = String((raw as any).kind || '').trim().toLowerCase()
+        const roleRaw = String((raw as any).role || '').trim()
+        const statusRaw = String((raw as any).status || '').trim().toLowerCase()
+        const kind = kindRaw === 'video' ? 'video' : kindRaw === 'image' ? 'image' : roleRaw === 'video_clip' || roleRaw === 'merged_video' ? 'video' : 'image'
+        const status = statusRaw === 'done' ? 'done' : statusRaw === 'processing' ? 'processing' : 'planned'
+        const uri = typeof (raw as any).uri === 'string' ? String((raw as any).uri || '').trim() : ''
+        return {
+          id,
+          shot_id: (raw as any).shot_id != null ? String((raw as any).shot_id) : null,
+          scene_id: (raw as any).scene_id != null ? String((raw as any).scene_id) : null,
+          cam_idx: typeof (raw as any).cam_idx === 'number' ? (raw as any).cam_idx : null,
+          role: roleRaw || null,
+          kind,
+          label: typeof (raw as any).label === 'string' ? String((raw as any).label || '') : id,
+          status,
+          optional: Boolean((raw as any).optional),
+          uri: uri || null,
+        } as DreamweaverAssetPlanItem
+      })
+      .filter(Boolean) as DreamweaverAssetPlanItem[]
+  }, [])
+
+  const normalizeLibraryPlanItems = useCallback((items: any[]): DreamweaverLibraryPlanItem[] => {
+    if (!Array.isArray(items)) return []
+    return items
+      .map((raw) => {
+        if (!raw || typeof raw !== 'object') return null
+        const role = String((raw as any).role || '').trim()
+        const id = String((raw as any).id || role || '').trim()
+        if (!id || !role) return null
+        const statusRaw = String((raw as any).status || '').trim().toLowerCase()
+        const status = statusRaw === 'done' ? 'done' : statusRaw === 'planned' ? 'planned' : 'processing'
+        const entityType = (raw as any).entity_type != null ? String((raw as any).entity_type) : null
+        const entityId = typeof (raw as any).entity_id === 'number' ? (raw as any).entity_id : Number((raw as any).entity_id || 0) || null
+        const entityName = typeof (raw as any).entity_name === 'string' ? String((raw as any).entity_name || '').trim() : null
+        const label = typeof (raw as any).label === 'string' ? String((raw as any).label || '').trim() : ''
+        const view = typeof (raw as any).view === 'string' ? String((raw as any).view || '').trim() : null
+        const uri = typeof (raw as any).uri === 'string' ? String((raw as any).uri || '').trim() : ''
+        const assetId = typeof (raw as any).asset_id === 'number' ? (raw as any).asset_id : Number((raw as any).asset_id || 0) || null
+        const approved = typeof (raw as any).approved === 'boolean' ? Boolean((raw as any).approved) : null
+        return {
+          id,
+          role,
+          entity_type: entityType,
+          entity_id: entityId,
+          entity_name: entityName,
+          label: label || role,
+          view,
+          status,
+          kind: 'image',
+          uri: uri || null,
+          asset_id: assetId,
+          approved,
+        } as DreamweaverLibraryPlanItem
+      })
+      .filter(Boolean) as DreamweaverLibraryPlanItem[]
+  }, [])
+
+  const applyDreamweaverEvent = useCallback(
+    (event: DreamweaverEventRecord) => {
+      if (!event || !event.run_id) return
+      const activeRunId = activeRunIdRef.current
+      if (!activeRunId || event.run_id !== activeRunId) return
+
+      const eventId = typeof event.event_id === 'number' ? event.event_id : Number(event.event_id || 0)
+      if (eventId && eventId <= eventCursorRef.current) return
+      if (eventId) {
+        eventCursorRef.current = eventId
+        setEventCursor(eventId)
+      }
+
+      const eventType = String(event.event_type || '').trim()
+      const stage = event.stage != null ? String(event.stage) : null
+      const payload = event.payload || {}
+
+      if (eventType === 'text_stream_start' || eventType === 'text_stream_delta' || eventType === 'text_stream_end') {
+        const streamKeyRaw = payload && typeof (payload as any).stream_key === 'string' ? String((payload as any).stream_key || '').trim() : ''
+        const streamKey = streamKeyRaw || stage || 'default'
+
+        if (eventType === 'text_stream_start') {
+          setStreamTextByKey((prev) => ({ ...prev, [streamKey]: '' }))
+          setStreamMetaByKey((prev) => ({ ...prev, [streamKey]: { stage, done: false } }))
+          return
+        }
+
+        if (eventType === 'text_stream_delta') {
+          const chunk = payload && typeof (payload as any).chunk === 'string' ? String((payload as any).chunk || '') : ''
+          if (chunk) {
+            setStreamTextByKey((prev) => ({ ...prev, [streamKey]: (prev[streamKey] || '') + chunk }))
+          }
+          if (stage) {
+            setStreamMetaByKey((prev) => ({ ...prev, [streamKey]: { stage, done: prev[streamKey]?.done } }))
+          }
+          return
+        }
+
+        if (eventType === 'text_stream_end') {
+          setStreamMetaByKey((prev) => ({ ...prev, [streamKey]: { stage, done: true } }))
+          return
+        }
+      }
+
+      if (eventType === 'asset_library_plan') {
+        const items = normalizeLibraryPlanItems((payload as any)?.items)
+        if (items.length) {
+          setLibraryPlanItems((prev) => {
+            const map = new Map(prev.map((item) => [item.id, item]))
+            for (const item of items) {
+              const existing = map.get(item.id)
+              if (existing) {
+                map.set(item.id, {
+                  ...existing,
+                  ...item,
+                  status: existing.status === 'done' ? 'done' : item.status,
+                  uri: existing.uri || item.uri,
+                })
+              } else {
+                map.set(item.id, item)
+              }
+            }
+            return Array.from(map.values())
+          })
+        }
+        return
+      }
+
+      if (eventType === 'asset_plan') {
+        const items = normalizeAssetPlanItems((payload as any)?.items)
+        if (items.length) {
+          setAssetPlanItems((prev) => {
+            const map = new Map(prev.map((item) => [item.id, item]))
+            for (const item of items) {
+              const existing = map.get(item.id)
+              if (existing) {
+                map.set(item.id, {
+                  ...item,
+                  status: existing.status === 'done' ? 'done' : item.status,
+                  uri: existing.uri || item.uri,
+                })
+              } else {
+                map.set(item.id, item)
+              }
+            }
+            return Array.from(map.values())
+          })
+        }
+        return
+      }
+
+      if (eventType === 'asset_ready') {
+        const assetId = typeof (payload as any)?.id === 'string' ? String((payload as any).id || '').trim() : ''
+        if (!assetId) return
+        const uri = typeof (payload as any)?.uri === 'string' ? String((payload as any).uri || '').trim() : ''
+        const role = typeof (payload as any)?.role === 'string' ? String((payload as any).role || '').trim() : ''
+        const kindRaw = typeof (payload as any)?.kind === 'string' ? String((payload as any).kind || '').trim().toLowerCase() : ''
+        const kind = kindRaw === 'video' ? 'video' : kindRaw === 'image' ? 'image' : role === 'video_clip' || role === 'merged_video' ? 'video' : 'image'
+
+        setAssetPlanItems((prev) => {
+          const map = new Map(prev.map((item) => [item.id, item]))
+          const existing = map.get(assetId)
+          const next: DreamweaverAssetPlanItem = {
+            id: assetId,
+            shot_id: (payload as any)?.shot_id != null ? String((payload as any).shot_id) : existing?.shot_id ?? null,
+            role: role || existing?.role || null,
+            kind,
+            label: existing?.label || assetId,
+            status: 'done',
+            uri: uri || existing?.uri || null,
+          }
+          map.set(assetId, { ...existing, ...next })
+          return Array.from(map.values())
+        })
+        return
+      }
+
+      if (eventType === 'stage_start' || eventType === 'stage_progress' || eventType === 'stage_end') {
+        applyStageSignal(stage, payload)
+        return
+      }
+
+      if (eventType === 'run_error') {
+        const err = typeof (payload as any)?.error === 'string' ? String((payload as any).error || '').trim() : ''
+        if (err) setError(err)
+        setTaskStatus('failed')
+        setRunning(false)
+        setWaitingApproval(false)
+      }
+    },
+    [applyStageSignal, normalizeAssetPlanItems, normalizeLibraryPlanItems],
+  )
+
+  const syncDreamweaverEvents = useCallback(
+    async (runId: string) => {
+      if (!runId) return
+      if (eventSyncingRef.current) return
+      eventSyncingRef.current = true
+      setEventSyncing(true)
+      setEventSyncError(null)
+
+      try {
+        let afterId = eventCursorRef.current
+        let guard = 0
+        while (guard < 6) {
+          if (activeRunIdRef.current && activeRunIdRef.current !== runId) break
+          const res = await apiClient.getDreamweaverRunEvents(runId, { after_id: afterId, limit: 200 })
+          const rows = Array.isArray(res.data) ? (res.data as DreamweaverEventRecord[]) : []
+          if (!rows.length) break
+          for (const row of rows) {
+            applyDreamweaverEvent(row)
+          }
+          const maxId = rows.reduce((acc, item) => {
+            const id = typeof item.event_id === 'number' ? item.event_id : Number(item.event_id || 0)
+            return id > acc ? id : acc
+          }, afterId)
+          if (maxId > afterId) {
+            afterId = maxId
+            eventCursorRef.current = maxId
+            setEventCursor(maxId)
+          }
+          if (rows.length < 200) break
+          guard += 1
+        }
+      } catch (e: any) {
+        if (e?.response?.status === 404) {
+          if (shouldTreatRunNotFoundAsPending(taskId, taskStatus)) {
+            setEventSyncError('事件尚未落库，稍后再试')
+            return
+          }
+          resetMissingRunState(selectedProjectId)
+        }
+        setEventSyncError(await extractApiErrorMessage(e, '同步事件失败'))
+      } finally {
+        eventSyncingRef.current = false
+        setEventSyncing(false)
+      }
+    },
+    [applyDreamweaverEvent, resetMissingRunState, selectedProjectId, shouldTreatRunNotFoundAsPending, taskId, taskStatus],
+  )
+
   const scriptDirty = scriptText !== scriptSavedText
   const waitingKind = (taskStage || taskState || '').toString().toLowerCase()
   const waitingScriptApproval = waitingApproval && waitingKind === 'waiting_script_approval'
@@ -1524,14 +2716,74 @@ export default function DreamWeaverRunPage() {
   const persistedRunId = taskRunId || result?.run_id || null
   const currentRunId = persistedRunId
   const libraryApproved = Boolean(library?.review?.approved)
+
+  useEffect(() => {
+    autoLoadedLibraryRef.current = false
+  }, [currentRunId])
   const snapshotRuntimeCfg =
     runSnapshot?.contract && typeof (runSnapshot as any).contract === 'object' && (runSnapshot as any).contract.runtime_config && typeof (runSnapshot as any).contract.runtime_config === 'object'
       ? ((runSnapshot as any).contract.runtime_config as any)
       : {}
   const videoClipJobs: any[] = Array.isArray(snapshotRuntimeCfg.video_clip_jobs) ? (snapshotRuntimeCfg.video_clip_jobs as any[]) : []
+  const promptReviewRequiredSnapshot = Boolean(snapshotRuntimeCfg?.prompt_review_required)
+  const promptReviewApproved = Boolean(snapshotRuntimeCfg?.prompt_review?.approved)
+  const promptReviewReady = !promptReviewRequiredSnapshot || promptReviewApproved
   const canResumeFromScript =
     Boolean(currentRunId) && !scriptLoading && !resumeLoading && !scriptDirty && (!scriptRequiresReview || scriptApproved)
-  const canResumeFromLibrary = Boolean(currentRunId) && !libraryLoading && !resumeLoading && libraryApproved
+  const canResumeFromLibrary =
+    Boolean(currentRunId) && !libraryLoading && !resumeLoading && libraryApproved && promptReviewReady
+
+  useEffect(() => {
+    if (!currentRunId) {
+      activeRunIdRef.current = null
+      resetDreamweaverEvents()
+      return
+    }
+    if (activeRunIdRef.current === currentRunId) return
+    activeRunIdRef.current = currentRunId
+    resetDreamweaverEvents()
+    void syncDreamweaverEvents(currentRunId)
+  }, [currentRunId, resetDreamweaverEvents, syncDreamweaverEvents])
+
+  useEffect(() => {
+    if (!currentRunId) return
+    if (!running) return
+    const timer = window.setInterval(() => {
+      if (eventSyncingRef.current) return
+      void syncDreamweaverEvents(currentRunId)
+    }, 2000)
+    return () => window.clearInterval(timer)
+  }, [currentRunId, running, syncDreamweaverEvents])
+
+  useEffect(() => {
+    if (!selectedProjectId) return
+    let active = true
+
+    workflowWebSocket.setOnRoomJoined((joinedProjectId) => {
+      if (!active) return
+      if (joinedProjectId !== selectedProjectId) return
+      if (activeRunIdRef.current) {
+        void syncDreamweaverEvents(activeRunIdRef.current)
+      }
+    })
+
+    workflowWebSocket.connect().then(() => {
+      if (!active) return
+      workflowWebSocket.joinProject(selectedProjectId)
+    }).catch((error) => {
+      console.error('WebSocket 连接失败:', error)
+    })
+
+    workflowWebSocket.onDreamweaverEvent((data) => {
+      applyDreamweaverEvent(data as DreamweaverEventRecord)
+    })
+
+    return () => {
+      active = false
+      workflowWebSocket.setOnRoomJoined(() => {})
+      workflowWebSocket.removeEventListeners()
+    }
+  }, [applyDreamweaverEvent, selectedProjectId, syncDreamweaverEvents])
 
   const loadRunSnapshot = useCallback(async () => {
     if (!persistedRunId) return
@@ -1546,11 +2798,18 @@ export default function DreamWeaverRunPage() {
         if (nextResult) setResult((prev) => mergeRunResult(prev, nextResult))
       }
     } catch (e: any) {
+      if (e?.response?.status === 404) {
+        if (shouldTreatRunNotFoundAsPending(taskId, taskStatus)) {
+          setRunSnapshotError('运行数据尚未落库，稍后自动重试')
+          return
+        }
+        resetMissingRunState(selectedProjectId)
+      }
       setRunSnapshotError(await extractApiErrorMessage(e, '加载运行快照失败'))
     } finally {
       setRunSnapshotLoading(false)
     }
-  }, [persistedRunId])
+  }, [persistedRunId, resetMissingRunState, selectedProjectId, shouldTreatRunNotFoundAsPending, taskId, taskStatus])
 
   const rebuildVideoJobs = useCallback(async () => {
     if (!persistedRunId) return
@@ -1795,13 +3054,86 @@ export default function DreamWeaverRunPage() {
       setScriptLoading(false)
     }
   }
+  const approvePromptReview = async (approved: boolean) => {
+    if (!currentRunId) return
+    setPromptReviewLoading(true)
+    setPromptReviewError(null)
+    try {
+      await apiClient.approveDreamweaverPromptReview(currentRunId, { approved })
+      await loadRunSnapshot()
+    } catch (e: any) {
+      setPromptReviewError(await extractApiErrorMessage(e, '更新提示词审核状态失败'))
+    } finally {
+      setPromptReviewLoading(false)
+    }
+  }
+
+  const openPromptEditDialog = (shot: any) => {
+    const head = String(shot?.head_frame?.prompt || '').trim()
+    const tail = String(shot?.tail_frame?.prompt || '').trim()
+    const meta = shot?.shot_schema_v2?.meta && typeof shot.shot_schema_v2.meta === 'object' ? shot.shot_schema_v2.meta : {}
+    const videoOverride = String(meta?.video_prompt_override || '').trim()
+    setPromptEditShot(shot)
+    setPromptEditHead(head)
+    setPromptEditTail(tail)
+    setPromptEditVideo(videoOverride)
+    setPromptEditError(null)
+    setPromptEditOpen(true)
+  }
+
+  const savePromptEdit = async () => {
+    if (!currentRunId || !promptEditShot) return
+    const shotId = String(promptEditShot?.shot_key || promptEditShot?.shot_id || '').trim()
+    if (!shotId) {
+      setPromptEditError('缺少 shot_id，无法保存')
+      return
+    }
+    const head = promptEditHead.trim()
+    const tail = promptEditTail.trim()
+    if (!head || !tail) {
+      setPromptEditError('首帧/尾帧提示词不能为空')
+      return
+    }
+
+    const originHead = String(promptEditShot?.head_frame?.prompt || '').trim()
+    const originTail = String(promptEditShot?.tail_frame?.prompt || '').trim()
+    const originVideo = String(promptEditShot?.shot_schema_v2?.meta?.video_prompt_override || '').trim()
+    const nextVideo = promptEditVideo.trim()
+
+    const tasks: Promise<any>[] = []
+    if (head !== originHead) {
+      tasks.push(apiClient.updateDreamweaverRunShotFramePrompt(currentRunId, shotId, 'head', head))
+    }
+    if (tail !== originTail) {
+      tasks.push(apiClient.updateDreamweaverRunShotFramePrompt(currentRunId, shotId, 'tail', tail))
+    }
+    if (nextVideo !== originVideo) {
+      tasks.push(apiClient.updateDreamweaverRunShotVideoPrompt(currentRunId, shotId, nextVideo))
+    }
+    if (!tasks.length) {
+      setPromptEditOpen(false)
+      return
+    }
+
+    setPromptEditSaving(true)
+    setPromptEditError(null)
+    try {
+      await Promise.all(tasks)
+      await loadRunSnapshot()
+      setPromptEditOpen(false)
+    } catch (e: any) {
+      setPromptEditError(await extractApiErrorMessage(e, '提示词保存失败'))
+    } finally {
+      setPromptEditSaving(false)
+    }
+  }
 
   const loadLibrary = async (): Promise<string | null> => {
     if (!selectedProjectId) return '未选择项目'
     setLibraryLoading(true)
     setLibraryError(null)
     setLibrary(null)
-    setLibraryPreviews({})
+    clearLibraryPreviews()
     try {
       const scopedRunId = typeof currentRunId === 'string' && currentRunId.trim() ? currentRunId.trim() : null
       const res = await apiClient.getDreamweaverLibrary(selectedProjectId, scopedRunId ? { run_id: scopedRunId } : undefined)
@@ -1809,26 +3141,26 @@ export default function DreamWeaverRunPage() {
       setLibrary(data)
 
       const assets = Array.isArray(data.assets) ? data.assets : []
-      const missingRoles = Array.isArray(data?.review?.missing_roles) ? (data.review!.missing_roles as string[]) : []
-      const missingRoleSet = new Set(missingRoles.map((r) => String(r || '').trim()).filter((r) => r))
       const previewEntries = await Promise.all(
-        assets
-          .filter((asset) => !missingRoleSet.has(String(asset?.role || '').trim()))
-          .map(async (asset) => {
+        assets.map(async (asset) => {
           try {
             const fileRes = await apiClient.getDreamweaverLibraryAssetFile(asset.id)
             const url = URL.createObjectURL(fileRes.data)
-            return [asset.id, url] as const
-          } catch {
-            return [asset.id, ''] as const
+            return { id: asset.id, url, error: '' }
+          } catch (e: any) {
+            const message = await extractApiErrorMessage(e, '加载预览失败')
+            return { id: asset.id, url: '', error: message }
           }
         }),
       )
       const previewMap: Record<number, string> = {}
-      for (const [assetId, url] of previewEntries) {
-        if (url) previewMap[assetId] = url
+      const previewErrorMap: Record<number, string> = {}
+      for (const entry of previewEntries) {
+        if (entry.url) previewMap[entry.id] = entry.url
+        if (entry.error) previewErrorMap[entry.id] = entry.error
       }
       setLibraryPreviews(previewMap)
+      setLibraryPreviewErrors(previewErrorMap)
       return null
     } catch (e: any) {
       const message = await extractApiErrorMessage(e, '加载素材库失败')
@@ -1838,6 +3170,15 @@ export default function DreamWeaverRunPage() {
       setLibraryLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (!selectedProjectId) return
+    if (libraryLoading) return
+    if (library || libraryPlanItems.length === 0) return
+    if (autoLoadedLibraryRef.current) return
+    autoLoadedLibraryRef.current = true
+    void loadLibrary()
+  }, [library, libraryLoading, libraryPlanItems.length, loadLibrary, selectedProjectId])
 
   const approveLibrary = async (payload: { approve_all?: boolean; roles?: string[]; approved?: boolean }) => {
     if (!selectedProjectId) return
@@ -1869,16 +3210,41 @@ export default function DreamWeaverRunPage() {
     }
   }
 
-  const openRegenerateDialog = (asset: LibraryAsset) => {
-    const role = String(asset.role || '').trim()
+  const loadLibraryPreview = async (asset: LibraryAsset, options?: { force?: boolean }): Promise<void> => {
+    if (!asset?.id) return
+    if (!options?.force && libraryPreviews[asset.id]) return
+    setLibraryPreviewLoading((prev) => ({ ...prev, [asset.id]: true }))
+    setLibraryPreviewErrors((prev) => ({ ...prev, [asset.id]: '' }))
+    try {
+      const fileRes = await apiClient.getDreamweaverLibraryAssetFile(asset.id)
+      const url = URL.createObjectURL(fileRes.data)
+      setLibraryPreviews((prev) => ({ ...prev, [asset.id]: url }))
+    } catch (e: any) {
+      const message = await extractApiErrorMessage(e, '加载预览失败')
+      setLibraryPreviewErrors((prev) => ({ ...prev, [asset.id]: message }))
+    } finally {
+      setLibraryPreviewLoading((prev) => ({ ...prev, [asset.id]: false }))
+    }
+  }
+
+  const openRegenerateDialogForRole = (roleInput: string, titleInput?: string, promptInput?: string) => {
+    const role = String(roleInput || '').trim()
     if (!role) return
-    const title = String(asset.meta?.entity_name || asset.role || '').trim() || role
-    const prompt = String(asset.meta?.prompt || '').trim()
+    const title = String(titleInput || role).trim() || role
+    const prompt = String(promptInput || '').trim()
     setRegenRole(role)
     setRegenTitle(title)
     setRegenPrompt(prompt)
     setRegenError(null)
     setRegenOpen(true)
+  }
+
+  const openRegenerateDialog = (asset: LibraryAsset) => {
+    const role = String(asset.role || '').trim()
+    if (!role) return
+    const title = String(asset.meta?.entity_name || asset.role || '').trim() || role
+    const prompt = String(asset.meta?.prompt || '').trim()
+    openRegenerateDialogForRole(role, title, prompt)
   }
 
   const submitRegenerateDialog = async () => {
@@ -2175,6 +3541,24 @@ export default function DreamWeaverRunPage() {
     return mode
   }, [scriptGeneration?.mode, scriptGeneration?.model])
 
+  const streamSnapshots = useMemo(() => {
+    return {
+      plan: streamTextByKey.plan || '',
+      script: streamTextByKey.script || '',
+      scriptEnhance: streamTextByKey.script_enhance || '',
+      characterProfiles: streamTextByKey.character_profiles || '',
+      audioMarkers: streamTextByKey.audio_markers || '',
+      storyboard: streamTextByKey.storyboard || '',
+      cameraTree: streamTextByKey.camera_tree || '',
+    }
+  }, [streamTextByKey])
+
+  const activeStreamKeys = useMemo(() => {
+    return Object.entries(streamMetaByKey)
+      .filter(([, meta]) => meta && !meta.done)
+      .map(([key]) => key)
+  }, [streamMetaByKey])
+
   const snapshotShots = useMemo(() => {
     const episodes = (runSnapshot as any)?.contract?.episodes
     if (!Array.isArray(episodes)) return []
@@ -2185,6 +3569,64 @@ export default function DreamWeaverRunPage() {
     }
     return shots
   }, [runSnapshot])
+
+  const safetyBlockedShots = useMemo(() => {
+    const results: Array<{ shotId: string; shotIndex?: number; roles: string[]; errorSample: string }> = []
+    const pattern = /datainspectionfailed|inappropriate content|content check failed/i
+    for (const shot of snapshotShots) {
+      const shotId = String((shot as any)?.shot_key || (shot as any)?.shot_id || '').trim()
+      if (!shotId) continue
+      const roles = new Set<string>()
+      let errorSample = ''
+      const assets = Array.isArray((shot as any)?.assets) ? ((shot as any).assets as any[]) : []
+      for (const asset of assets) {
+        if (!asset || typeof asset !== 'object') continue
+        const meta = asset.meta && typeof asset.meta === 'object' ? asset.meta : {}
+        const safetyError = typeof meta.safety_error === 'string' ? meta.safety_error : ''
+        const errorText = typeof meta.error === 'string' ? meta.error : ''
+        const messageText = typeof meta.message === 'string' ? meta.message : ''
+        const combined = [safetyError, errorText, messageText].filter((v) => v && v.trim()).join(' | ')
+        const isBlocked = Boolean(meta.safety_blocked) || (combined && pattern.test(combined))
+        if (!isBlocked) continue
+        const role = String((asset as any).role || '').trim()
+        if (role) roles.add(role)
+        if (!errorSample && combined) errorSample = combined
+      }
+      if (!roles.size) continue
+      results.push({
+        shotId,
+        shotIndex: typeof (shot as any)?.shot_index === 'number' ? (shot as any).shot_index : undefined,
+        roles: Array.from(roles),
+        errorSample,
+      })
+    }
+    return results
+  }, [snapshotShots])
+
+  const snapshotShotById = useMemo(() => {
+    const map = new Map<string, any>()
+    for (const shot of snapshotShots) {
+      const id = String((shot as any)?.shot_key || (shot as any)?.shot_id || '').trim()
+      if (!id) continue
+      map.set(id, shot)
+    }
+    return map
+  }, [snapshotShots])
+
+  const openSafetyBlockedShot = useCallback(
+    (shotId: string) => {
+      const key = String(shotId || '').trim()
+      if (!key) return
+      const shot = snapshotShotById.get(key)
+      if (!shot) return
+      openPromptEditDialog(shot)
+    },
+    [openPromptEditDialog, snapshotShotById],
+  )
+
+  const promptReviewShots = useMemo(() => {
+    return promptReviewShowAll ? snapshotShots : snapshotShots.slice(0, 12)
+  }, [promptReviewShowAll, snapshotShots])
 
   const snapshotAssetCount = useMemo(() => {
     return snapshotShots.reduce((acc, shot) => {
@@ -2202,6 +3644,14 @@ export default function DreamWeaverRunPage() {
     const runtimeCfg = snapshotContract?.runtime_config
     return runtimeCfg && typeof runtimeCfg === 'object' ? (runtimeCfg as any) : {}
   }, [snapshotContract])
+
+  const libraryPromptReviewMessage = libraryApproved
+    ? promptReviewReady
+      ? '素材库已通过，提示词已确认：可继续生成进入镜头阶段。'
+      : '素材库已通过，但提示词待确认：请先完成提示词审核。'
+    : promptReviewRequiredSnapshot
+      ? '素材库待审核：通过后还需确认提示词，才能继续生成。'
+      : '素材库待审核：通过后可继续生成。'
 
   const snapshotCameraDiagnostics = useMemo(() => {
     const generation = snapshotRuntimeConfig?.camera_tree_generation
@@ -2346,6 +3796,26 @@ export default function DreamWeaverRunPage() {
     return Boolean(review && typeof review === 'object' && Boolean((review as any).approved))
   }, [snapshotRuntimeConfig])
 
+  const snapshotScriptEntities = useMemo(() => {
+    const entities = snapshotRuntimeConfig?.script_entities
+    return entities && typeof entities === 'object' ? (entities as any) : null
+  }, [snapshotRuntimeConfig])
+
+  const snapshotScriptGeneration = useMemo(() => {
+    const generation = snapshotRuntimeConfig?.script_generation
+    return generation && typeof generation === 'object' ? (generation as any) : null
+  }, [snapshotRuntimeConfig])
+
+  const snapshotCharacterProfiles = useMemo(() => {
+    const profiles = snapshotRuntimeConfig?.character_profiles
+    return Array.isArray(profiles) ? (profiles as any[]) : []
+  }, [snapshotRuntimeConfig])
+
+  const snapshotAudioMarkers = useMemo(() => {
+    const markers = snapshotRuntimeConfig?.audio_markers
+    return Array.isArray(markers) ? (markers as any[]) : []
+  }, [snapshotRuntimeConfig])
+
   const snapshotMergedVideo = useMemo(() => {
     return snapshotContract ? extractMergedVideoFromContract(snapshotContract) : null
   }, [snapshotContract])
@@ -2369,6 +3839,233 @@ export default function DreamWeaverRunPage() {
     }
     return { keyframes, midframes, videoClips }
   }, [snapshotShots])
+
+  const assetPlanSummary = useMemo(() => {
+    const total = assetPlanItems.length
+    let done = 0
+    let planned = 0
+    let images = 0
+    let videos = 0
+    for (const item of assetPlanItems) {
+      if (item.kind === 'video') videos += 1
+      else images += 1
+      if (item.status === 'done' || item.uri) done += 1
+      else planned += 1
+    }
+    return { total, done, planned, images, videos }
+  }, [assetPlanItems])
+
+  const mergedVideoPlan = useMemo(() => {
+    return assetPlanItems.find((item) => item.id === 'merged_video') || null
+  }, [assetPlanItems])
+
+  const libraryDisplayItems = useMemo<LibraryDisplayItem[]>(() => {
+    const assets = Array.isArray(library?.assets) ? (library?.assets as LibraryAsset[]) : []
+    const missingRoles = Array.isArray(library?.review?.missing_roles) ? (library.review!.missing_roles as string[]) : []
+    const normalizedMissingRoles = missingRoles.map((role) => String(role || '').trim()).filter((role) => role)
+    const missingRoleSet = new Set(normalizedMissingRoles)
+    const assetsByRole = new Map<string, LibraryAsset>()
+    for (const asset of assets) {
+      const role = String(asset?.role || '').trim()
+      if (!role) continue
+      assetsByRole.set(role, asset)
+    }
+
+    const normalizeRole = (rawRole: string) => {
+      const role = String(rawRole || '').trim()
+      let group: LibraryDisplayItem['group'] = 'other'
+      let view: LibraryDisplayItem['view'] = null
+      if (role.startsWith('lib_character_portrait_back:')) {
+        group = 'character'
+        view = 'back'
+      } else if (role.startsWith('lib_character_portrait_side:')) {
+        group = 'character'
+        view = 'side'
+      } else if (role.startsWith('lib_character_portrait:')) {
+        group = 'character'
+        view = 'front'
+      } else if (role.startsWith('lib_scene_card:')) {
+        group = 'scene'
+      } else if (role.startsWith('lib_prop_card:')) {
+        group = 'prop'
+      }
+      const viewRank = view === 'front' ? 0 : view === 'side' ? 1 : view === 'back' ? 2 : 9
+      const viewLabel = view === 'front' ? '正面' : view === 'side' ? '侧面' : view === 'back' ? '背面' : ''
+      return { role, group, view, viewRank, viewLabel }
+    }
+
+    const formatTitle = (rawTitle: string, role: string, viewLabel: string) => {
+      const base = String(rawTitle || '').trim() || role
+      if (viewLabel && !base.includes(viewLabel)) return `${base} ${viewLabel}`
+      return base
+    }
+
+    const makeAssetItem = (asset: LibraryAsset, key: string) => {
+      const { role, group, view, viewRank, viewLabel } = normalizeRole(String(asset?.role || '').trim() || key)
+      const rawTitle = String(asset?.meta?.entity_name || asset?.role || '').trim()
+      const title = formatTitle(rawTitle, role, viewLabel)
+      const preview = libraryPreviews[asset.id] || ''
+      const aspectRatio = libraryAssetToCssAspectRatio(asset, libraryPreviewAspectRatio)
+      const approved = Boolean(asset.meta?.approved)
+      const safety_blocked = Boolean(asset.meta?.safety_blocked)
+      const safety_error = typeof asset.meta?.safety_error === 'string' ? asset.meta.safety_error : null
+      return {
+        key,
+        role,
+        title,
+        preview,
+        aspectRatio,
+        approved,
+        status: 'done' as const,
+        group,
+        view,
+        viewRank,
+        asset,
+        safety_blocked,
+        safety_error,
+      }
+    }
+
+    const items: LibraryDisplayItem[] = []
+    const usedRoles = new Set<string>()
+
+    const pushMissingItem = (rawRole: string) => {
+      const role = String(rawRole || '').trim()
+      if (!role || usedRoles.has(role)) return
+      const { group, view, viewRank, viewLabel } = normalizeRole(role)
+      const title = formatTitle(role, role, viewLabel)
+      items.push({
+        key: `missing:${role}`,
+        role,
+        title,
+        preview: '',
+        aspectRatio: libraryPreviewAspectRatio,
+        approved: false,
+        status: 'planned',
+        group,
+        view,
+        viewRank,
+        missing: true,
+      })
+      usedRoles.add(role)
+    }
+
+    if (libraryPlanItems.length) {
+      for (const plan of libraryPlanItems) {
+        const role = String(plan.role || '').trim()
+        if (!role) continue
+        usedRoles.add(role)
+        const asset = assetsByRole.get(role)
+        if (asset) {
+          items.push(makeAssetItem(asset, `plan:${role}`))
+          continue
+        }
+        const { group, view, viewRank, viewLabel } = normalizeRole(role)
+        const rawTitle = String(plan.label || plan.entity_name || role).trim()
+        const title = formatTitle(rawTitle, role, viewLabel)
+        items.push({
+          key: `plan:${role}`,
+          role,
+          title,
+          preview: '',
+          aspectRatio: libraryPreviewAspectRatio,
+          approved: Boolean(plan.approved),
+          status: plan.status === 'done' ? 'done' : plan.status === 'planned' ? 'planned' : 'processing',
+          group,
+          view,
+          viewRank,
+          missing: !asset && missingRoleSet.has(role),
+        })
+      }
+      for (const asset of assets) {
+        const role = String(asset?.role || '').trim()
+        if (!role || usedRoles.has(role)) continue
+        usedRoles.add(role)
+        items.push(makeAssetItem(asset, `asset:${asset.id}`))
+      }
+      for (const role of normalizedMissingRoles) {
+        pushMissingItem(role)
+      }
+      return items
+    }
+
+    for (const asset of assets) {
+      const role = String(asset?.role || '').trim()
+      if (role) usedRoles.add(role)
+      items.push(makeAssetItem(asset, `asset:${asset.id}`))
+    }
+    for (const role of normalizedMissingRoles) {
+      pushMissingItem(role)
+    }
+    return items
+  }, [library?.assets, library?.review, libraryPlanItems, libraryPreviews, libraryPreviewAspectRatio])
+
+  const librarySummary = useMemo(() => {
+    const total = libraryDisplayItems.length
+    let generated = 0
+    let processing = 0
+    let planned = 0
+    let approved = 0
+    let pendingReview = 0
+    for (const item of libraryDisplayItems) {
+      if (item.asset || item.status === 'done') {
+        generated += 1
+      } else if (item.status === 'planned') {
+        planned += 1
+      } else {
+        processing += 1
+      }
+      if (item.asset) {
+        if (item.approved) approved += 1
+        else pendingReview += 1
+      }
+    }
+    return { total, generated, processing, planned, approved, pendingReview }
+  }, [libraryDisplayItems])
+
+  const libraryGroups = useMemo(() => {
+    const order: Array<LibraryDisplayItem['group']> = ['character', 'scene', 'prop', 'other']
+    const labels: Record<LibraryDisplayItem['group'], string> = {
+      character: '角色',
+      scene: '场景',
+      prop: '道具',
+      other: '其他',
+    }
+    const groups = new Map<LibraryDisplayItem['group'], LibraryDisplayItem[]>()
+    for (const item of libraryDisplayItems) {
+      const key = item.group || 'other'
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key)!.push(item)
+    }
+    const result: Array<{
+      key: LibraryDisplayItem['group']
+      label: string
+      items: LibraryDisplayItem[]
+      summary: { total: number; generated: number; processing: number; planned: number; approved: number; pendingReview: number }
+    }> = []
+    for (const key of order) {
+      const items = groups.get(key) || []
+      if (!items.length) continue
+      const stripView = (value: string) => value.replace(/\s+(正面|侧面|背面)$/, '')
+      const sorted = [...items].sort((a, b) => {
+        const nameA = stripView(String(a.title || ''))
+        const nameB = stripView(String(b.title || ''))
+        if (nameA !== nameB) return nameA.localeCompare(nameB, 'zh-CN')
+        if (a.viewRank !== b.viewRank) return a.viewRank - b.viewRank
+        return String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN')
+      })
+      const summary = {
+        total: sorted.length,
+        generated: sorted.filter((i) => i.asset || i.status === 'done').length,
+        processing: sorted.filter((i) => !i.asset && i.status === 'processing').length,
+        planned: sorted.filter((i) => !i.asset && i.status === 'planned').length,
+        approved: sorted.filter((i) => i.asset && i.approved).length,
+        pendingReview: sorted.filter((i) => i.asset && !i.approved).length,
+      }
+      result.push({ key, label: labels[key], items: sorted, summary })
+    }
+    return result
+  }, [libraryDisplayItems])
 
   const diagnosticResult = useMemo(() => {
     if (result) return result
@@ -2536,6 +4233,928 @@ export default function DreamWeaverRunPage() {
     setManualPreviewStep(false)
     setPreviewStep(progressStep)
   }
+
+  const toggleShotPromptExpanded = useCallback((key: string) => {
+    const safeKey = String(key || '').trim()
+    if (!safeKey) return
+    setShotPromptExpanded((prev) => ({ ...prev, [safeKey]: !prev[safeKey] }))
+  }, [])
+
+  const renderPendingView = () => (
+                  running ? (
+                    <Box>
+                      {taskStatus === 'queued' && (
+                        <Alert severity="info" sx={{ mb: 1 }}>
+                          任务已入队排队中{taskQueue ? `（队列：${taskQueue}）` : ''}。若长期无进度，请确认 Celery worker 正在运行并监听该队列。
+                        </Alert>
+                      )}
+                      {previewStep === 0 && (
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                          剧本预览：当前为运行中阶段，进入“剧本待审核”后可加载/编辑/通过。
+                        </Typography>
+                      )}
+                      {previewStep === 1 && (
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                          分镜预览：将展示镜头数量与分镜阶段信息（后续可升级为镜头列表/分镜卡）。
+                        </Typography>
+                      )}
+                      {previewStep === 2 && (
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                          素材预览：素材库在生成后可在此加载并逐项审核。
+                        </Typography>
+                      )}
+                      {previewStep === 3 && (
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                          镜头预览：关键帧/中间帧/片段生成将逐步更新计数与产物路径。
+                        </Typography>
+                      )}
+                      {previewStep === 4 && (
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                          合成预览：合成视频与质检结果将在后续阶段产出。
+                        </Typography>
+                      )}
+
+                      {persistedRunId && (
+                        <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" mb={1}>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={loadRunSnapshot}
+                            disabled={!persistedRunId || runSnapshotLoading}
+                          >
+                            {runSnapshotLoading ? '加载中…' : '刷新运行快照'}
+                          </Button>
+                          {runSnapshot && runSnapshot.run_id === persistedRunId && (
+                            <Chip size="small" label="快照已加载" color="success" />
+                          )}
+                        </Stack>
+                      )}
+                      {runSnapshotError && (
+                        <Alert severity="error" sx={{ mb: 1 }}>
+                          {runSnapshotError}
+                        </Alert>
+                      )}
+                      {runSnapshotLoading && <LinearProgress sx={{ mb: 1 }} />}
+                      {renderSafetyBlockedAlert()}
+
+                      {renderStreamingPreview(previewStep)}
+
+                      {previewStep === 0 && !runSnapshotLoading && renderScriptStageSnapshot()}
+
+                      {previewStep === 1 && !runSnapshotLoading && (
+                        <Box sx={{ mb: 1 }}>
+                          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                            镜头列表
+                          </Typography>
+                          {snapshotShots.length ? (
+                            <List dense sx={{ bgcolor: '#fff', border: '1px solid #eee', borderRadius: 2 }}>
+                              {snapshotShots.slice(0, 12).map((shot: any, idx: number) => {
+                                const shotKey = String(shot?.shot_key || shot?.shot_id || shot?.shot_index || idx).trim()
+                                const expanded = Boolean(shotPromptExpanded[shotKey])
+                                const headPrompt = String(shot?.head_frame?.prompt || '').trim()
+                                const tailPrompt = String(shot?.tail_frame?.prompt || '').trim()
+                                const overridePrompt = String(shot?.shot_schema_v2?.meta?.video_prompt_override || '').trim()
+                                const hasPrompt = Boolean(headPrompt || tailPrompt || overridePrompt)
+                                const promptLines: string[] = []
+                                const formatPrompt = (value: string) => (expanded || value.length <= 120 ? value : `${value.slice(0, 120)}…`)
+                                if (headPrompt) promptLines.push(`首帧: ${formatPrompt(headPrompt)}`)
+                                if (tailPrompt) promptLines.push(`尾帧: ${formatPrompt(tailPrompt)}`)
+                                if (overridePrompt) {
+                                  promptLines.push(`视频覆盖: ${formatPrompt(overridePrompt)}`)
+                                }
+                                const promptText = hasPrompt ? promptLines.join('\n') : '暂无提示词快照'
+                                return (
+                                  <ListItem key={shotKey || String(idx)} disablePadding sx={{ px: 1, py: 0.25 }}>
+                                    <ListItemText
+                                      primary={`#${shot.shot_index} ${shot.desc || ''}`.trim()}
+                                      secondary={
+                                        <>
+                                          <Typography variant="caption" color="text.secondary" display="block">
+                                            场景: {shot.scene_id || '-'}  时长: {typeof shot.duration_s === 'number' ? shot.duration_s.toFixed(1) : '-'}s
+                                          </Typography>
+                                          <Typography variant="caption" color="text.secondary" display="block" sx={{ whiteSpace: 'pre-wrap' }}>
+                                            {promptText}
+                                          </Typography>
+                                          <Button
+                                            size="small"
+                                            variant="text"
+                                            onClick={() => toggleShotPromptExpanded(shotKey)}
+                                            disabled={!hasPrompt}
+                                            sx={{ px: 0, mt: 0.25 }}
+                                          >
+                                            {expanded ? '收起提示词' : '展开提示词'}
+                                          </Button>
+                                        </>
+                                      }
+                                    />
+                                  </ListItem>
+                                )
+                              })}
+                            </List>
+                          ) : (
+                            <Typography variant="body2" color="text.secondary">
+                              尚无可用分镜快照（可能仍在生成，或尚未落库）。
+                            </Typography>
+                          )}
+                        </Box>
+                      )}
+
+                        {previewStep === 3 && !runSnapshotLoading && snapshotShots.length > 0 && (
+                          <Box sx={{ mb: 1 }}>
+                            <Stack direction="row" spacing={1} flexWrap="wrap" mb={0.5}>
+                              <Chip size="small" label={`镜头: ${snapshotShots.length}`} />
+                              <Chip size="small" label={`资产: ${snapshotAssetCount}`} />
+                              <Chip size="small" label={`KF: ${snapshotAssetSummary.keyframes.length}`} />
+                              <Chip size="small" label={`MF: ${snapshotAssetSummary.midframes.length}`} />
+                              <Chip size="small" label={`VC: ${snapshotAssetSummary.videoClips.length}`} />
+                            </Stack>
+                            {(snapshotAssetSummary.keyframes.length > 0 || snapshotAssetSummary.midframes.length > 0 || snapshotAssetSummary.videoClips.length > 0) && (
+                              <Typography variant="caption" color="text.secondary" display="block">
+                                快照路径：
+                                {formatPaths(snapshotAssetSummary.keyframes.slice(-3)) ? `KF ${formatPaths(snapshotAssetSummary.keyframes.slice(-3))}` : ''}
+                                {formatPaths(snapshotAssetSummary.midframes.slice(-3)) ? `  MF ${formatPaths(snapshotAssetSummary.midframes.slice(-3))}` : ''}
+                                {formatPaths(snapshotAssetSummary.videoClips.slice(-3).map((v) => v.path)) ? `  VC ${formatPaths(snapshotAssetSummary.videoClips.slice(-3).map((v) => v.path))}` : ''}
+                              </Typography>
+                            )}
+                            {renderRunAssetPreviewGrid('关键帧（快照）', snapshotAssetSummary.keyframes.slice(-6), 'image')}
+                            {renderRunAssetPreviewGrid('中间帧（快照）', snapshotAssetSummary.midframes.slice(-6), 'image')}
+                            {renderRunAssetPreviewGrid(
+                              '镜头片段（快照）',
+                              snapshotAssetSummary.videoClips.slice(-3).map((v) => v.path),
+                              'video',
+                            )}
+                          </Box>
+                        )}
+
+                      {previewStep === 4 && !runSnapshotLoading && (
+                        <Box sx={{ mb: 1 }}>
+                          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                            合成视频（快照）
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            {snapshotMergedVideo ? `合成视频：${snapshotMergedVideo}` : '暂无合成视频快照'}
+                          </Typography>
+                          {snapshotMergedVideo && (
+                            <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mt: 1 }}>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                onClick={loadMergedVideoPreview}
+                                disabled={!currentRunId || mergedVideoLoading}
+                              >
+                                {mergedVideoLoading ? '加载中…' : mergedVideoPreviewUrl ? '重新加载合成视频' : '加载合成视频预览'}
+                              </Button>
+                              <Button
+                                size="small"
+                                variant="contained"
+                                onClick={downloadMergedVideo}
+                                disabled={!currentRunId || mergedVideoLoading}
+                              >
+                                下载合成视频
+                              </Button>
+                            </Stack>
+                          )}
+                          {mergedVideoError && (
+                            <Alert severity="error" sx={{ mt: 1 }}>
+                              {mergedVideoError}
+                            </Alert>
+                          )}
+                          {mergedVideoPreviewUrl && (
+                            <Box sx={{ mt: 1, bgcolor: '#000', borderRadius: 2, overflow: 'hidden' }}>
+                              <Box component="video" src={mergedVideoPreviewUrl} controls sx={{ width: '100%', display: 'block' }} />
+                            </Box>
+                          )}
+                        </Box>
+                      )}
+                      <Stack direction="row" spacing={1} flexWrap="wrap" mb={1} alignItems="center">
+                        {taskArtifacts?.storyboard_count != null && (
+                          <Chip label={`SB: ${taskArtifacts.storyboard_count}`} size="small" />
+                        )}
+                        {taskArtifacts?.keyframes_count != null && (
+                          <Chip label={`KF: ${taskArtifacts.keyframes_count}`} size="small" />
+                        )}
+                        {taskArtifacts?.midframes_count != null && (
+                          <Chip label={`MF: ${taskArtifacts.midframes_count}`} size="small" />
+                        )}
+                        {taskArtifacts?.video_clips_count != null && (
+                          <Chip label={`VC: ${taskArtifacts.video_clips_count}`} size="small" />
+                        )}
+                        {taskArtifacts?.stage_artifacts?.camera_tree_mode && (
+                          <Chip label={`CamTree: ${taskArtifacts.stage_artifacts.camera_tree_mode}`} size="small" variant="outlined" />
+                        )}
+                        {taskArtifacts?.stage_artifacts?.camera_count != null && (
+                          <Chip label={`Cam: ${taskArtifacts.stage_artifacts.camera_count}`} size="small" />
+                        )}
+                        {taskArtifacts?.stage_artifacts?.camera_states_count != null && (
+                          <Chip label={`CamState: ${taskArtifacts.stage_artifacts.camera_states_count}`} size="small" />
+                        )}
+                        {taskArtifacts?.stage_artifacts?.camera_scenes_count != null && (
+                          <Chip label={`CamScene: ${taskArtifacts.stage_artifacts.camera_scenes_count}`} size="small" />
+                        )}
+                        <Button
+                          size="small"
+                          variant="text"
+                          startIcon={<ContentCopyIcon fontSize="small" />}
+                          onClick={copyDebugInfo}
+                        >
+                          复制调试信息
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="text"
+                          startIcon={<BugReportIcon fontSize="small" />}
+                          onClick={() => {
+                            setDiagnosticActionError(null)
+                            setDiagnosticOpen(true)
+                          }}
+                          disabled={!currentRunId}
+                        >
+                          诊断面板
+                        </Button>
+                      </Stack>
+                      {(taskArtifacts?.last_keyframe_path || taskArtifacts?.last_midframe_path || taskArtifacts?.last_video_clip_path) && (
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                          Last: {formatPath(taskArtifacts.last_keyframe_path) ? `KF ${formatPath(taskArtifacts.last_keyframe_path)}` : ''}
+                          {formatPath(taskArtifacts.last_midframe_path) ? `  MF ${formatPath(taskArtifacts.last_midframe_path)}` : ''}
+                          {formatPath(taskArtifacts.last_video_clip_path) ? `  VC ${formatPath(taskArtifacts.last_video_clip_path)}` : ''}
+                        </Typography>
+                      )}
+                      {(taskArtifacts?.keyframes_tail_paths || taskArtifacts?.midframes_tail_paths || taskArtifacts?.video_clips_tail_paths) && (
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                          {formatPaths(taskArtifacts.keyframes_tail_paths) ? `KF: ${formatPaths(taskArtifacts.keyframes_tail_paths)}` : ''}
+                          {formatPaths(taskArtifacts.midframes_tail_paths) ? `  MF: ${formatPaths(taskArtifacts.midframes_tail_paths)}` : ''}
+                          {formatPaths(taskArtifacts.video_clips_tail_paths) ? `  VC: ${formatPaths(taskArtifacts.video_clips_tail_paths)}` : ''}
+                        </Typography>
+                      )}
+                      {taskArtifacts?.rework_reason && (
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                          Rework: {JSON.stringify(taskArtifacts.rework_reason)}
+                        </Typography>
+                      )}
+                      {taskArtifacts?.stage_artifacts && (
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+                          Stage artifacts: {JSON.stringify(taskArtifacts.stage_artifacts)}
+                        </Typography>
+                      )}
+                      <Typography variant="body2" color="text.secondary">
+                        任务执行中，完成后将自动展示分镜/首尾帧/视频产物。
+                      </Typography>
+                      <Accordion sx={{ mt: 1 }}>
+                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                            调试面板（Artifacts）
+                          </Typography>
+                        </AccordionSummary>
+                        <AccordionDetails>
+                          <Box
+                            sx={{
+                              whiteSpace: 'pre-wrap',
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                              bgcolor: '#fafafa',
+                              border: '1px solid #eee',
+                              borderRadius: 2,
+                              p: 1.5,
+                            }}
+                          >
+                            {JSON.stringify(taskArtifacts, null, 2)}
+                          </Box>
+                        </AccordionDetails>
+                      </Accordion>
+                    </Box>
+                  ) : waitingScriptApproval && previewStep === 0 ? (
+                      <Box>
+                        <Stack direction="row" spacing={1} flexWrap="wrap" mb={1} alignItems="center">
+                          {scriptGenerationLabel && <Chip label={`剧本生成: ${scriptGenerationLabel}`} size="small" />}
+                          {scriptDirty && <Chip label="未保存" size="small" color="warning" />}
+                        </Stack>
+
+                        {scriptRequiresReview ? (
+                          scriptApproved ? (
+                            <Alert severity="success" sx={{ mb: 1 }}>
+                              剧本已通过：现在可以点击“继续生成”进入分镜与素材库阶段。
+                            </Alert>
+                          ) : (
+                            <Alert severity="warning" sx={{ mb: 1 }}>
+                              剧本待审核：请先加载/编辑剧本并点击“通过”，通过后再继续生成分镜与素材库。
+                            </Alert>
+                          )
+                        ) : (
+                          <Alert severity="info" sx={{ mb: 1 }}>
+                            当前配置无需剧本审核：可直接点击“继续生成”进入分镜与素材库阶段。
+                          </Alert>
+                        )}
+                        {scriptDirty && (
+                          <Alert severity="info" sx={{ mb: 1 }}>
+                            剧本已修改但未保存：请先点击“保存”，再点击“通过”。
+                          </Alert>
+                        )}
+                        {scriptGeneration?.mode === 'rule_fallback' && scriptGeneration?.error && (
+                          <Alert severity="info" sx={{ mb: 1 }}>
+                            LLM 调用失败，已回退为规则剧本：{scriptGeneration.error}
+                            <br />
+                            建议检查 `.env` 的 `DASHSCOPE_API_KEY` / `DASHSCOPE_API_BASE` 以及 `DREAMWEAVER_*_MODEL`（如 `qwen-plus`），并重启后端与 Celery worker。
+                          </Alert>
+                        )}
+
+                        <Stack direction="row" spacing={1} flexWrap="wrap" mb={1}>
+                          <Button size="small" variant="contained" onClick={loadScript} disabled={!currentRunId || scriptLoading}>
+                            加载剧本
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={saveScript}
+                            disabled={!currentRunId || scriptLoading || !scriptDirty || !scriptText.trim()}
+                          >
+                            保存
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="contained"
+                            color="success"
+                            onClick={() => approveScript(true)}
+                            disabled={!currentRunId || scriptLoading || scriptDirty || !scriptText.trim()}
+                          >
+                            通过
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="text"
+                            onClick={() => approveScript(false)}
+                            disabled={!currentRunId || scriptLoading || !scriptApproved}
+                          >
+                            撤销通过
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="contained"
+                            color="success"
+                            onClick={resumeGeneration}
+                            disabled={!canResumeFromScript}
+                          >
+                            {resumeLoading ? '继续生成中…' : '继续生成'}
+                          </Button>
+                        </Stack>
+
+                        {scriptError && (
+                          <Alert severity="error" sx={{ mb: 1 }}>
+                            {scriptError}
+                          </Alert>
+                        )}
+
+                        {scriptLoading && <LinearProgress sx={{ mb: 1 }} />}
+
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                          审核状态：{scriptRequiresReview ? (scriptApproved ? '已通过' : '待审核') : '无需审核'}
+                          {scriptGenerationLabel ? `  生成：${scriptGenerationLabel}` : ''}
+                          {scriptEntities
+                            ? `  实体：角色 ${Array.isArray((scriptEntities as any).characters) ? (scriptEntities as any).characters.length : 0}，场景 ${Array.isArray((scriptEntities as any).scenes) ? (scriptEntities as any).scenes.length : 0}，道具 ${Array.isArray((scriptEntities as any).props) ? (scriptEntities as any).props.length : 0}`
+                            : ''}
+                        </Typography>
+
+                        <TextField
+                          label="剧本（可编辑）"
+                          value={scriptText}
+                          onChange={(e) => setScriptText(e.target.value)}
+                          fullWidth
+                          multiline
+                          minRows={10}
+                          maxRows={22}
+                          disabled={scriptLoading}
+                          sx={{ bgcolor: '#fff' }}
+                        />
+
+                        <Accordion sx={{ mt: 1 }}>
+                          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                              调试面板（Artifacts）
+                            </Typography>
+                          </AccordionSummary>
+                          <AccordionDetails>
+                            <Box
+                              sx={{
+                                whiteSpace: 'pre-wrap',
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                                bgcolor: '#fafafa',
+                                border: '1px solid #eee',
+                                borderRadius: 2,
+                                p: 1.5,
+                              }}
+                            >
+                              {JSON.stringify(taskArtifacts, null, 2)}
+                            </Box>
+                          </AccordionDetails>
+                        </Accordion>
+                      </Box>
+                  ) : waitingVideoConfirmation && previewStep === 3 ? (
+                      <Box>
+                        <Alert severity="info" sx={{ mb: 1 }}>
+                          当前阶段启用“逐镜头确认生成”：点击卡片右侧按钮确认/触发生成；若镜头需要“上一镜头尾帧→本镜头首帧”桥接，依赖未就绪时会保持阻塞。
+                        </Alert>
+
+                        {videoJobActionError && (
+                          <Alert severity="error" sx={{ mb: 1 }}>
+                            {videoJobActionError}
+                          </Alert>
+                        )}
+
+                        <Stack direction="row" spacing={1} flexWrap="wrap" mb={1}>
+                          <Button size="small" variant="outlined" onClick={rebuildVideoJobs} disabled={!persistedRunId || runSnapshotLoading}>
+                            {runSnapshotLoading ? '刷新中…' : '刷新任务卡'}
+                          </Button>
+                        </Stack>
+
+                        {videoClipJobs.length ? (
+                          <List dense sx={{ bgcolor: '#fff', border: '1px solid #eee', borderRadius: 2 }}>
+                            {videoClipJobs.map((job: any, idx: number) => {
+                              const sid = String(job?.shot_id || '').trim()
+                              const desc = String(job?.desc || '').trim()
+                              const status = String(job?.status || '').trim().toLowerCase()
+                              const confirmed = Boolean(job?.confirmed)
+                              const requiresBridge = Boolean(job?.requires_bridge)
+                              const dep = String(job?.depends_on_shot_id || '').trim()
+                              const shot = sid ? snapshotShotById.get(sid) : null
+                              const headPrompt = String((shot as any)?.head_frame?.prompt || '').trim()
+                              const tailPrompt = String((shot as any)?.tail_frame?.prompt || '').trim()
+                              const overridePrompt = String((shot as any)?.shot_schema_v2?.meta?.video_prompt_override || '').trim()
+                              const hasPrompt = Boolean(headPrompt || tailPrompt || overridePrompt)
+
+                              const statusLabel =
+                                status === 'done'
+                                  ? '已生成'
+                                  : status === 'blocked'
+                                    ? '依赖未就绪'
+                                    : status === 'confirmed'
+                                      ? '已确认'
+                                      : '待确认'
+
+                              const confirming = videoJobConfirmingShotId === sid
+                              const disabled = !sid || running || confirming || status === 'done'
+                              const actionLabel =
+                                status === 'done'
+                                  ? '已生成'
+                                  : confirming
+                                    ? '处理中…'
+                                    : confirmed
+                                      ? '开始生成'
+                                      : requiresBridge
+                                        ? '确认（桥接）'
+                                        : '确认生成'
+
+                              return (
+                                <ListItem
+                                  key={sid || String(idx)}
+                                  disableGutters
+                                  sx={{ px: 1, py: 0.75, borderBottom: '1px solid #f0f0f0', alignItems: 'flex-start' }}
+                                >
+                                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                                    <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
+                                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                                        {sid || '(unknown)'}
+                                      </Typography>
+                                      <Chip size="small" label={statusLabel} color={status === 'done' ? 'success' : status === 'blocked' ? 'warning' : 'default'} />
+                                      {confirmed && status !== 'done' && <Chip size="small" label="已确认" color="primary" />}
+                                      {requiresBridge && <Chip size="small" label={`桥接依赖: ${dep || '-'}`} />}
+                                    </Stack>
+                                    {desc && (
+                                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
+                                        {desc}
+                                      </Typography>
+                                    )}
+                                    {hasPrompt ? (
+                                      <Box sx={{ mt: 0.5 }}>
+                                        <Typography variant="caption" color="text.secondary" display="block" sx={{ whiteSpace: 'pre-wrap' }}>
+                                          首帧: {headPrompt ? (headPrompt.length > 120 ? `${headPrompt.slice(0, 120)}…` : headPrompt) : '-'}
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary" display="block" sx={{ whiteSpace: 'pre-wrap' }}>
+                                          尾帧: {tailPrompt ? (tailPrompt.length > 120 ? `${tailPrompt.slice(0, 120)}…` : tailPrompt) : '-'}
+                                        </Typography>
+                                        {overridePrompt && (
+                                          <Typography variant="caption" color="text.secondary" display="block" sx={{ whiteSpace: 'pre-wrap' }}>
+                                            视频覆盖: {overridePrompt.length > 120 ? `${overridePrompt.slice(0, 120)}…` : overridePrompt}
+                                          </Typography>
+                                        )}
+                                      </Box>
+                                    ) : (
+                                      <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                                        暂无提示词快照
+                                      </Typography>
+                                    )}
+                                  </Box>
+
+                                  <Box sx={{ pl: 1 }}>
+                                    <Stack spacing={0.5} alignItems="flex-end">
+                                      <Button size="small" variant="contained" onClick={() => confirmVideoJob(sid)} disabled={disabled}>
+                                        {actionLabel}
+                                      </Button>
+                                      <Button size="small" variant="outlined" onClick={() => shot && openPromptEditDialog(shot)} disabled={!shot}>
+                                        查看提示词
+                                      </Button>
+                                    </Stack>
+                                  </Box>
+                                </ListItem>
+                              )
+                            })}
+                          </List>
+                        ) : (
+                          <Alert severity="warning">未找到视频任务卡（video_clip_jobs）。可点击“刷新任务卡”或重试生成到 VIDEO 阶段。</Alert>
+                        )}
+                      </Box>
+                  ) : (
+                    promptReviewRequiredSnapshot && previewStep === 1 ? (
+                      <Box>
+                        <Alert severity={promptReviewApproved ? 'success' : 'warning'} sx={{ mb: 1 }}>
+                          {promptReviewApproved
+                            ? libraryApproved
+                              ? '提示词已确认、素材库已通过：可继续生成进入镜头阶段。'
+                              : '提示词已确认，但素材库仍待审核。'
+                            : '提示词待确认：请逐镜检查并修改，确认后再继续生成。'}
+                        </Alert>
+
+                        <Stack direction="row" spacing={1} flexWrap="wrap" mb={1} alignItems="center">
+                          <Button size="small" variant="outlined" onClick={loadRunSnapshot} disabled={!persistedRunId || runSnapshotLoading}>
+                            {runSnapshotLoading ? '刷新中…' : '刷新快照'}
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="contained"
+                            color="success"
+                            onClick={() => approvePromptReview(true)}
+                            disabled={!currentRunId || promptReviewLoading}
+                          >
+                            {promptReviewLoading ? '确认中…' : '确认提示词'}
+                          </Button>
+                          <Button
+                            size="small"
+                            variant="text"
+                            onClick={() => approvePromptReview(false)}
+                            disabled={!currentRunId || promptReviewLoading || !promptReviewApproved}
+                          >
+                            撤销确认
+                          </Button>
+                          <Button size="small" variant="contained" color="success" onClick={resumeGeneration} disabled={!canResumeFromLibrary}>
+                            {resumeLoading ? '继续生成中…' : '继续生成'}
+                          </Button>
+                        </Stack>
+
+                        {promptReviewError && (
+                          <Alert severity="error" sx={{ mb: 1 }}>
+                            {promptReviewError}
+                          </Alert>
+                        )}
+
+                        {promptReviewShots.length ? (
+                          <List dense sx={{ bgcolor: '#fff', border: '1px solid #eee', borderRadius: 2 }}>
+                            {promptReviewShots.map((shot: any, idx: number) => {
+                              const shotId = String(shot?.shot_key || shot?.shot_id || '').trim()
+                              const headPrompt = String(shot?.head_frame?.prompt || '').trim()
+                              const tailPrompt = String(shot?.tail_frame?.prompt || '').trim()
+                              const overridePrompt = String(shot?.shot_schema_v2?.meta?.video_prompt_override || '').trim()
+                              const title = String(shot?.desc || '').trim()
+                              return (
+                                <ListItem
+                                  key={shotId || String(idx)}
+                                  disableGutters
+                                  sx={{ px: 1, py: 0.75, borderBottom: '1px solid #f0f0f0', alignItems: 'flex-start' }}
+                                >
+                                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                                    <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
+                                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                                        #{shot?.shot_index || idx + 1} {title}
+                                      </Typography>
+                                      {shotId && <Chip size="small" label={shotId} variant="outlined" />}
+                                      {overridePrompt && <Chip size="small" label="视频已覆盖" color="info" />}
+                                    </Stack>
+                                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
+                                      首帧: {headPrompt ? (headPrompt.length > 120 ? `${headPrompt.slice(0, 120)}…` : headPrompt) : '-'}
+                                    </Typography>
+                                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, whiteSpace: 'pre-wrap' }}>
+                                      尾帧: {tailPrompt ? (tailPrompt.length > 120 ? `${tailPrompt.slice(0, 120)}…` : tailPrompt) : '-'}
+                                    </Typography>
+                                  </Box>
+                                  <Box sx={{ pl: 1 }}>
+                                    <Button size="small" variant="outlined" onClick={() => openPromptEditDialog(shot)}>
+                                      编辑提示词
+                                    </Button>
+                                  </Box>
+                                </ListItem>
+                              )
+                            })}
+                          </List>
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">
+                            暂无可用镜头提示词快照（可能仍在生成或尚未落库）。
+                          </Typography>
+                        )}
+
+                        {snapshotShots.length > 12 && (
+                          <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mt: 1 }}>
+                            <Button size="small" variant="text" onClick={() => setPromptReviewShowAll((prev) => !prev)}>
+                              {promptReviewShowAll ? '收起列表' : `显示全部(${snapshotShots.length})`}
+                            </Button>
+                          </Stack>
+                        )}
+                      </Box>
+                    ) : currentRunId ? (
+                      previewStep === 2 ? (
+                        <Box>
+
+                      <Alert severity={libraryApproved && promptReviewReady ? 'success' : 'warning'} sx={{ mb: 1 }}>
+                        {libraryPromptReviewMessage}
+                      </Alert>
+ 
+                      <Stack direction="row" spacing={1} flexWrap="wrap" mb={1}>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          onClick={loadLibrary}
+                          disabled={!selectedProjectId || libraryLoading}
+                        >
+                          加载素材库
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => approveLibrary({ approve_all: true, approved: true })}
+                          disabled={!selectedProjectId || libraryLoading}
+                        >
+                          全部通过
+                        </Button>
+                          <Button
+                            size="small"
+                            variant="contained"
+                            color="success"
+                            onClick={resumeGeneration}
+                            disabled={!canResumeFromLibrary}
+                          >
+                            {resumeLoading ? '继续生成中…' : '继续生成'}
+                          </Button>
+                      </Stack>
+
+                      {libraryError && (
+                        <Alert severity="error" sx={{ mb: 1 }}>
+                          {libraryError}
+                        </Alert>
+                      )}
+
+                      {libraryLoading && <LinearProgress sx={{ mb: 1 }} />}
+
+                      {library?.review && (
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                          审核状态：缺失 {Array.isArray(library.review.missing_roles) ? library.review.missing_roles.length : 0}，未通过{' '}
+                          {Array.isArray(library.review.unapproved_roles) ? library.review.unapproved_roles.length : 0}
+                        </Typography>
+                      )}
+
+                      {libraryDisplayItems.length ? (
+                        <Box>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
+                            <Chip size="small" label={`占位 ${librarySummary.total}`} />
+                            <Chip size="small" label={`已生成 ${librarySummary.generated}`} color={librarySummary.generated ? 'success' : 'default'} />
+                            <Chip size="small" label={`生成中 ${librarySummary.processing}`} color={librarySummary.processing ? 'info' : 'default'} />
+                            <Chip size="small" label={`待生成 ${librarySummary.planned}`} />
+                            {librarySummary.approved > 0 && (
+                              <Chip size="small" label={`已通过 ${librarySummary.approved}`} color="success" />
+                            )}
+                            {librarySummary.pendingReview > 0 && (
+                              <Chip size="small" label={`待审核 ${librarySummary.pendingReview}`} color="warning" />
+                            )}
+                          </Stack>
+
+                          {libraryGroups.map((group) => (
+                            <Box key={group.key} sx={{ mb: 2 }}>
+                              <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 0.5 }}>
+                                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                                  {group.label}
+                                </Typography>
+                                <Chip size="small" label={`总计 ${group.summary.total}`} />
+                                <Chip size="small" label={`已生成 ${group.summary.generated}`} color={group.summary.generated ? 'success' : 'default'} />
+                                <Chip size="small" label={`生成中 ${group.summary.processing}`} color={group.summary.processing ? 'info' : 'default'} />
+                                <Chip size="small" label={`待生成 ${group.summary.planned}`} />
+                                {group.summary.approved > 0 && <Chip size="small" label={`已通过 ${group.summary.approved}`} color="success" />}
+                                {group.summary.pendingReview > 0 && <Chip size="small" label={`待审核 ${group.summary.pendingReview}`} color="warning" />}
+                              </Stack>
+                              <ImageList cols={3} gap={8} sx={{ m: 0 }}>
+                                {group.items.map(renderLibraryDisplayCard)}
+                              </ImageList>
+                            </Box>
+                          ))}
+                        </Box>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">{'未加载素材库或当前项目暂无可审核素材。'}</Typography>
+                      )}
+
+                      <Accordion sx={{ mt: 1 }}>
+                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                            调试面板（Artifacts）
+                          </Typography>
+                        </AccordionSummary>
+                        <AccordionDetails>
+                          <Box
+                            sx={{
+                              whiteSpace: 'pre-wrap',
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                              bgcolor: '#fafafa',
+                              border: '1px solid #eee',
+                              borderRadius: 2,
+                              p: 1.5,
+                            }}
+                          >
+                            {JSON.stringify(taskArtifacts, null, 2)}
+                          </Box>
+                        </AccordionDetails>
+                      </Accordion>
+                    </Box>
+                    ) : (
+                      <Box>
+                        <Alert
+                          severity={libraryApproved && promptReviewReady ? 'success' : 'info'}
+                          sx={{ mb: 1 }}
+                          action={
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <Button size="small" variant="text" onClick={() => handleClickStep(2)}>
+                                查看素材库
+                              </Button>
+                              {promptReviewRequiredSnapshot && (
+                                <Button size="small" variant="text" onClick={() => handleClickStep(1)}>
+                                  查看提示词
+                                </Button>
+                              )}
+                              <Button size="small" variant="contained" color="success" onClick={resumeGeneration} disabled={!canResumeFromLibrary}>
+                                {resumeLoading ? '继续生成中…' : '继续生成'}
+                              </Button>
+                            </Stack>
+                          }
+                        >
+                          {libraryPromptReviewMessage}
+                        </Alert>
+
+                        {persistedRunId && (
+                          <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" mb={1}>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={loadRunSnapshot}
+                              disabled={!persistedRunId || runSnapshotLoading}
+                            >
+                              {runSnapshotLoading ? '加载中…' : '刷新运行快照'}
+                            </Button>
+                            {runSnapshot && runSnapshot.run_id === persistedRunId && (
+                              <Chip size="small" label="快照已加载" color="success" />
+                            )}
+                          </Stack>
+                        )}
+                      {runSnapshotError && (
+                        <Alert severity="error" sx={{ mb: 1 }}>
+                          {runSnapshotError}
+                        </Alert>
+                      )}
+                      {runSnapshotLoading && <LinearProgress sx={{ mb: 1 }} />}
+                      {renderSafetyBlockedAlert()}
+
+                      {previewStep === 0 && !runSnapshotLoading && renderScriptStageSnapshot()}
+
+                        {previewStep === 1 && !runSnapshotLoading && (
+                          <Box sx={{ mb: 1 }}>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                              镜头列表
+                            </Typography>
+                            {snapshotShots.length ? (
+                              <List dense sx={{ bgcolor: '#fff', border: '1px solid #eee', borderRadius: 2 }}>
+                                {snapshotShots.slice(0, 12).map((shot: any, idx: number) => {
+                                  const shotKey = String(shot?.shot_key || shot?.shot_id || shot?.shot_index || idx).trim()
+                                  const expanded = Boolean(shotPromptExpanded[shotKey])
+                                  const headPrompt = String(shot?.head_frame?.prompt || '').trim()
+                                  const tailPrompt = String(shot?.tail_frame?.prompt || '').trim()
+                                  const overridePrompt = String(shot?.shot_schema_v2?.meta?.video_prompt_override || '').trim()
+                                  const hasPrompt = Boolean(headPrompt || tailPrompt || overridePrompt)
+                                  const promptLines: string[] = []
+                                  const formatPrompt = (value: string) => (expanded || value.length <= 120 ? value : `${value.slice(0, 120)}…`)
+                                  if (headPrompt) promptLines.push(`首帧: ${formatPrompt(headPrompt)}`)
+                                  if (tailPrompt) promptLines.push(`尾帧: ${formatPrompt(tailPrompt)}`)
+                                  if (overridePrompt) {
+                                    promptLines.push(`视频覆盖: ${formatPrompt(overridePrompt)}`)
+                                  }
+                                  const promptText = hasPrompt ? promptLines.join('\n') : '暂无提示词快照'
+                                  return (
+                                    <ListItem key={shotKey || String(idx)} disablePadding sx={{ px: 1, py: 0.25 }}>
+                                      <ListItemText
+                                        primary={`#${shot.shot_index} ${shot.desc || ''}`.trim()}
+                                        secondary={
+                                          <>
+                                            <Typography variant="caption" color="text.secondary" display="block">
+                                              场景: {shot.scene_id || '-'}  时长: {typeof shot.duration_s === 'number' ? shot.duration_s.toFixed(1) : '-'}s
+                                            </Typography>
+                                            <Typography variant="caption" color="text.secondary" display="block" sx={{ whiteSpace: 'pre-wrap' }}>
+                                              {promptText}
+                                            </Typography>
+                                            <Button
+                                              size="small"
+                                              variant="text"
+                                              onClick={() => toggleShotPromptExpanded(shotKey)}
+                                              disabled={!hasPrompt}
+                                              sx={{ px: 0, mt: 0.25 }}
+                                            >
+                                              {expanded ? '收起提示词' : '展开提示词'}
+                                            </Button>
+                                          </>
+                                        }
+                                      />
+                                    </ListItem>
+                                  )
+                                })}
+                              </List>
+                            ) : (
+                              <Typography variant="body2" color="text.secondary">
+                                尚无可用分镜快照（可能尚未落库）。
+                              </Typography>
+                            )}
+                          </Box>
+                        )}
+
+                        {previewStep === 3 && !runSnapshotLoading && snapshotShots.length > 0 && (
+                          <Box sx={{ mb: 1 }}>
+                            <Stack direction="row" spacing={1} flexWrap="wrap" mb={0.5}>
+                              <Chip size="small" label={`镜头: ${snapshotShots.length}`} />
+                              <Chip size="small" label={`资产: ${snapshotAssetCount}`} />
+                              <Chip size="small" label={`KF: ${snapshotAssetSummary.keyframes.length}`} />
+                              <Chip size="small" label={`MF: ${snapshotAssetSummary.midframes.length}`} />
+                              <Chip size="small" label={`VC: ${snapshotAssetSummary.videoClips.length}`} />
+                            </Stack>
+                            {(snapshotAssetSummary.keyframes.length > 0 ||
+                              snapshotAssetSummary.midframes.length > 0 ||
+                              snapshotAssetSummary.videoClips.length > 0) && (
+                              <Typography variant="caption" color="text.secondary" display="block">
+                                快照路径：
+                                {formatPaths(snapshotAssetSummary.keyframes.slice(-3)) ? `KF ${formatPaths(snapshotAssetSummary.keyframes.slice(-3))}` : ''}
+                                {formatPaths(snapshotAssetSummary.midframes.slice(-3)) ? `  MF ${formatPaths(snapshotAssetSummary.midframes.slice(-3))}` : ''}
+                                {formatPaths(snapshotAssetSummary.videoClips.slice(-3).map((v) => v.path))
+                                  ? `  VC ${formatPaths(snapshotAssetSummary.videoClips.slice(-3).map((v) => v.path))}`
+                                  : ''}
+                              </Typography>
+                            )}
+                            {renderRunAssetPreviewGrid('关键帧（快照）', snapshotAssetSummary.keyframes.slice(-6), 'image')}
+                            {renderRunAssetPreviewGrid('中间帧（快照）', snapshotAssetSummary.midframes.slice(-6), 'image')}
+                            {renderRunAssetPreviewGrid(
+                              '镜头片段（快照）',
+                              snapshotAssetSummary.videoClips.slice(-3).map((v) => v.path),
+                              'video',
+                            )}
+                          </Box>
+                        )}
+
+                        {previewStep === 4 && !runSnapshotLoading && (
+                          <Box sx={{ mb: 1 }}>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                              合成视频（快照）
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              {snapshotMergedVideo ? `合成视频：${snapshotMergedVideo}` : '暂无合成视频快照'}
+                            </Typography>
+                            {snapshotMergedVideo && (
+                              <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mt: 1 }}>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  onClick={loadMergedVideoPreview}
+                                  disabled={!currentRunId || mergedVideoLoading}
+                                >
+                                  {mergedVideoLoading ? '加载中…' : mergedVideoPreviewUrl ? '重新加载合成视频' : '加载合成视频预览'}
+                                </Button>
+                                <Button
+                                  size="small"
+                                  variant="contained"
+                                  onClick={downloadMergedVideo}
+                                  disabled={!currentRunId || mergedVideoLoading}
+                                >
+                                  下载合成视频
+                                </Button>
+                              </Stack>
+                            )}
+                            {mergedVideoError && (
+                              <Alert severity="error" sx={{ mt: 1 }}>
+                                {mergedVideoError}
+                              </Alert>
+                            )}
+                            {mergedVideoPreviewUrl && (
+                              <Box sx={{ mt: 1, bgcolor: '#000', borderRadius: 2, overflow: 'hidden' }}>
+                                <Box component="video" src={mergedVideoPreviewUrl} controls sx={{ width: '100%', display: 'block' }} />
+                              </Box>
+                            )}
+                          </Box>
+                        )}
+                      </Box>
+                    )
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">
+                      点击“开始生成”后，这里会展示「{DREAMWEAVER_PREVIEW_STEPS[previewStep]}」相关产物与进度。
+                    </Typography>
+                  )
+  ))
 
   return (
     <Box sx={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', py: 4 }}>
@@ -2759,6 +5378,29 @@ export default function DreamWeaverRunPage() {
                             VIDEO 阶段先生成任务卡，确认后按镜头生成视频；桥接依赖会自动阻塞提示。
                           </Typography>
                         </Stack>
+
+                        <Stack spacing={0.5}>
+                          <Stack direction="row" alignItems="center" justifyContent="space-between">
+                            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                              提示词审核
+                            </Typography>
+                            <FormControlLabel
+                              sx={{ mr: 0 }}
+                              control={
+                                <Switch
+                                  checked={promptReviewRequired}
+                                  onChange={(e) => setPromptReviewRequired(e.target.checked)}
+                                  disabled={running}
+                                />
+                              }
+                              label={promptReviewRequired ? '先审提示词' : '直接生成'}
+                            />
+                          </Stack>
+                          <Typography variant="caption" color="text.secondary">
+                            生成关键帧/视频前先停在提示词审核，可修改后再提交生成任务。
+                          </Typography>
+                        </Stack>
+
 
                         <Stack spacing={0.5}>
 	                          <Stack direction="row" alignItems="center" justifyContent="space-between">
@@ -3089,866 +5731,9 @@ export default function DreamWeaverRunPage() {
                     ))}
                   </Stepper>
                 </Paper>
+                {renderStageOverview()}
                 {!result ? (
-                  running ? (
-                    <Box>
-                      {taskStatus === 'queued' && (
-                        <Alert severity="info" sx={{ mb: 1 }}>
-                          任务已入队排队中{taskQueue ? `（队列：${taskQueue}）` : ''}。若长期无进度，请确认 Celery worker 正在运行并监听该队列。
-                        </Alert>
-                      )}
-                      {previewStep === 0 && (
-                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                          剧本预览：当前为运行中阶段，进入“剧本待审核”后可加载/编辑/通过。
-                        </Typography>
-                      )}
-                      {previewStep === 1 && (
-                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                          分镜预览：将展示镜头数量与分镜阶段信息（后续可升级为镜头列表/分镜卡）。
-                        </Typography>
-                      )}
-                      {previewStep === 2 && (
-                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                          素材预览：素材库在生成后可在此加载并逐项审核。
-                        </Typography>
-                      )}
-                      {previewStep === 3 && (
-                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                          镜头预览：关键帧/中间帧/片段生成将逐步更新计数与产物路径。
-                        </Typography>
-                      )}
-                      {previewStep === 4 && (
-                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                          合成预览：合成视频与质检结果将在后续阶段产出。
-                        </Typography>
-                      )}
-
-                      {persistedRunId && (
-                        <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" mb={1}>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            onClick={loadRunSnapshot}
-                            disabled={!persistedRunId || runSnapshotLoading}
-                          >
-                            {runSnapshotLoading ? '加载中…' : '刷新运行快照'}
-                          </Button>
-                          {runSnapshot && runSnapshot.run_id === persistedRunId && (
-                            <Chip size="small" label="快照已加载" color="success" />
-                          )}
-                        </Stack>
-                      )}
-                      {runSnapshotError && (
-                        <Alert severity="error" sx={{ mb: 1 }}>
-                          {runSnapshotError}
-                        </Alert>
-                      )}
-                      {runSnapshotLoading && <LinearProgress sx={{ mb: 1 }} />}
-
-                      {previewStep === 0 && !runSnapshotLoading && (
-                        <Box sx={{ mb: 1 }}>
-                          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-                            计划 / 剧本提要（快照）
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-wrap', mb: 1 }}>
-                            {snapshotPlanText.trim() || '暂无计划/提要快照（可能仍在生成或尚未落库）。'}
-                          </Typography>
-
-                          {snapshotScriptText.trim() ? (
-                            <Accordion>
-                              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                                  <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                                    剧本（快照）
-                                  </Typography>
-                                  <Chip size="small" label={snapshotScriptApproved ? '已通过' : '未通过'} color={snapshotScriptApproved ? 'success' : 'default'} />
-                                  <Chip size="small" label={`长度: ${snapshotScriptText.length}`} />
-                                </Stack>
-                              </AccordionSummary>
-                              <AccordionDetails>
-                                <Box
-                                  sx={{
-                                    whiteSpace: 'pre-wrap',
-                                    fontFamily: 'monospace',
-                                    fontSize: 12,
-                                    bgcolor: '#fafafa',
-                                    border: '1px solid #eee',
-                                    borderRadius: 2,
-                                    p: 1.5,
-                                    maxHeight: 260,
-                                    overflow: 'auto',
-                                  }}
-                                >
-                                  {snapshotScriptText.length > 6000 ? `${snapshotScriptText.slice(0, 6000)}\n…` : snapshotScriptText}
-                                </Box>
-                              </AccordionDetails>
-                            </Accordion>
-                          ) : (
-                            <Typography variant="body2" color="text.secondary">
-                              尚无可用剧本快照（可能仍在生成，或尚未落库）。
-                            </Typography>
-                          )}
-                        </Box>
-                      )}
-
-                      {previewStep === 1 && !runSnapshotLoading && (
-                        <Box sx={{ mb: 1 }}>
-                          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-                            镜头列表
-                          </Typography>
-                          {snapshotShots.length ? (
-                            <List dense sx={{ bgcolor: '#fff', border: '1px solid #eee', borderRadius: 2 }}>
-                              {snapshotShots.slice(0, 12).map((shot: any) => (
-                                <ListItem key={shot.shot_key || shot.shot_index} disablePadding sx={{ px: 1, py: 0.25 }}>
-                                  <ListItemText
-                                    primary={`#${shot.shot_index} ${shot.desc || ''}`.trim()}
-                                    secondary={`场景: ${shot.scene_id || '-'}  时长: ${typeof shot.duration_s === 'number' ? shot.duration_s.toFixed(1) : '-'}s`}
-                                  />
-                                </ListItem>
-                              ))}
-                            </List>
-                          ) : (
-                            <Typography variant="body2" color="text.secondary">
-                              尚无可用分镜快照（可能仍在生成，或尚未落库）。
-                            </Typography>
-                          )}
-                        </Box>
-                      )}
-
-                        {previewStep === 3 && !runSnapshotLoading && snapshotShots.length > 0 && (
-                          <Box sx={{ mb: 1 }}>
-                            <Stack direction="row" spacing={1} flexWrap="wrap" mb={0.5}>
-                              <Chip size="small" label={`镜头: ${snapshotShots.length}`} />
-                              <Chip size="small" label={`资产: ${snapshotAssetCount}`} />
-                              <Chip size="small" label={`KF: ${snapshotAssetSummary.keyframes.length}`} />
-                              <Chip size="small" label={`MF: ${snapshotAssetSummary.midframes.length}`} />
-                              <Chip size="small" label={`VC: ${snapshotAssetSummary.videoClips.length}`} />
-                            </Stack>
-                            {(snapshotAssetSummary.keyframes.length > 0 || snapshotAssetSummary.midframes.length > 0 || snapshotAssetSummary.videoClips.length > 0) && (
-                              <Typography variant="caption" color="text.secondary" display="block">
-                                快照路径：
-                                {formatPaths(snapshotAssetSummary.keyframes.slice(-3)) ? `KF ${formatPaths(snapshotAssetSummary.keyframes.slice(-3))}` : ''}
-                                {formatPaths(snapshotAssetSummary.midframes.slice(-3)) ? `  MF ${formatPaths(snapshotAssetSummary.midframes.slice(-3))}` : ''}
-                                {formatPaths(snapshotAssetSummary.videoClips.slice(-3).map((v) => v.path)) ? `  VC ${formatPaths(snapshotAssetSummary.videoClips.slice(-3).map((v) => v.path))}` : ''}
-                              </Typography>
-                            )}
-                            {renderRunAssetPreviewGrid('关键帧（快照）', snapshotAssetSummary.keyframes.slice(-6), 'image')}
-                            {renderRunAssetPreviewGrid('中间帧（快照）', snapshotAssetSummary.midframes.slice(-6), 'image')}
-                            {renderRunAssetPreviewGrid(
-                              '镜头片段（快照）',
-                              snapshotAssetSummary.videoClips.slice(-3).map((v) => v.path),
-                              'video',
-                            )}
-                          </Box>
-                        )}
-
-                      {previewStep === 4 && !runSnapshotLoading && (
-                        <Box sx={{ mb: 1 }}>
-                          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-                            合成视频（快照）
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            {snapshotMergedVideo ? `合成视频：${snapshotMergedVideo}` : '暂无合成视频快照'}
-                          </Typography>
-                          {snapshotMergedVideo && (
-                            <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mt: 1 }}>
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                onClick={loadMergedVideoPreview}
-                                disabled={!currentRunId || mergedVideoLoading}
-                              >
-                                {mergedVideoLoading ? '加载中…' : mergedVideoPreviewUrl ? '重新加载合成视频' : '加载合成视频预览'}
-                              </Button>
-                              <Button
-                                size="small"
-                                variant="contained"
-                                onClick={downloadMergedVideo}
-                                disabled={!currentRunId || mergedVideoLoading}
-                              >
-                                下载合成视频
-                              </Button>
-                            </Stack>
-                          )}
-                          {mergedVideoError && (
-                            <Alert severity="error" sx={{ mt: 1 }}>
-                              {mergedVideoError}
-                            </Alert>
-                          )}
-                          {mergedVideoPreviewUrl && (
-                            <Box sx={{ mt: 1, bgcolor: '#000', borderRadius: 2, overflow: 'hidden' }}>
-                              <Box component="video" src={mergedVideoPreviewUrl} controls sx={{ width: '100%', display: 'block' }} />
-                            </Box>
-                          )}
-                        </Box>
-                      )}
-                      <Stack direction="row" spacing={1} flexWrap="wrap" mb={1} alignItems="center">
-                        {taskArtifacts?.storyboard_count != null && (
-                          <Chip label={`SB: ${taskArtifacts.storyboard_count}`} size="small" />
-                        )}
-                        {taskArtifacts?.keyframes_count != null && (
-                          <Chip label={`KF: ${taskArtifacts.keyframes_count}`} size="small" />
-                        )}
-                        {taskArtifacts?.midframes_count != null && (
-                          <Chip label={`MF: ${taskArtifacts.midframes_count}`} size="small" />
-                        )}
-                        {taskArtifacts?.video_clips_count != null && (
-                          <Chip label={`VC: ${taskArtifacts.video_clips_count}`} size="small" />
-                        )}
-                        {taskArtifacts?.stage_artifacts?.camera_tree_mode && (
-                          <Chip label={`CamTree: ${taskArtifacts.stage_artifacts.camera_tree_mode}`} size="small" variant="outlined" />
-                        )}
-                        {taskArtifacts?.stage_artifacts?.camera_count != null && (
-                          <Chip label={`Cam: ${taskArtifacts.stage_artifacts.camera_count}`} size="small" />
-                        )}
-                        {taskArtifacts?.stage_artifacts?.camera_states_count != null && (
-                          <Chip label={`CamState: ${taskArtifacts.stage_artifacts.camera_states_count}`} size="small" />
-                        )}
-                        {taskArtifacts?.stage_artifacts?.camera_scenes_count != null && (
-                          <Chip label={`CamScene: ${taskArtifacts.stage_artifacts.camera_scenes_count}`} size="small" />
-                        )}
-                        <Button
-                          size="small"
-                          variant="text"
-                          startIcon={<ContentCopyIcon fontSize="small" />}
-                          onClick={copyDebugInfo}
-                        >
-                          复制调试信息
-                        </Button>
-                        <Button
-                          size="small"
-                          variant="text"
-                          startIcon={<BugReportIcon fontSize="small" />}
-                          onClick={() => {
-                            setDiagnosticActionError(null)
-                            setDiagnosticOpen(true)
-                          }}
-                          disabled={!currentRunId}
-                        >
-                          诊断面板
-                        </Button>
-                      </Stack>
-                      {(taskArtifacts?.last_keyframe_path || taskArtifacts?.last_midframe_path || taskArtifacts?.last_video_clip_path) && (
-                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
-                          Last: {formatPath(taskArtifacts.last_keyframe_path) ? `KF ${formatPath(taskArtifacts.last_keyframe_path)}` : ''}
-                          {formatPath(taskArtifacts.last_midframe_path) ? `  MF ${formatPath(taskArtifacts.last_midframe_path)}` : ''}
-                          {formatPath(taskArtifacts.last_video_clip_path) ? `  VC ${formatPath(taskArtifacts.last_video_clip_path)}` : ''}
-                        </Typography>
-                      )}
-                      {(taskArtifacts?.keyframes_tail_paths || taskArtifacts?.midframes_tail_paths || taskArtifacts?.video_clips_tail_paths) && (
-                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
-                          {formatPaths(taskArtifacts.keyframes_tail_paths) ? `KF: ${formatPaths(taskArtifacts.keyframes_tail_paths)}` : ''}
-                          {formatPaths(taskArtifacts.midframes_tail_paths) ? `  MF: ${formatPaths(taskArtifacts.midframes_tail_paths)}` : ''}
-                          {formatPaths(taskArtifacts.video_clips_tail_paths) ? `  VC: ${formatPaths(taskArtifacts.video_clips_tail_paths)}` : ''}
-                        </Typography>
-                      )}
-                      {taskArtifacts?.rework_reason && (
-                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
-                          Rework: {JSON.stringify(taskArtifacts.rework_reason)}
-                        </Typography>
-                      )}
-                      {taskArtifacts?.stage_artifacts && (
-                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
-                          Stage artifacts: {JSON.stringify(taskArtifacts.stage_artifacts)}
-                        </Typography>
-                      )}
-                      <Typography variant="body2" color="text.secondary">
-                        任务执行中，完成后将自动展示分镜/首尾帧/视频产物。
-                      </Typography>
-                      <Accordion sx={{ mt: 1 }}>
-                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                            调试面板（Artifacts）
-                          </Typography>
-                        </AccordionSummary>
-                        <AccordionDetails>
-                          <Box
-                            sx={{
-                              whiteSpace: 'pre-wrap',
-                              fontFamily: 'monospace',
-                              fontSize: 12,
-                              bgcolor: '#fafafa',
-                              border: '1px solid #eee',
-                              borderRadius: 2,
-                              p: 1.5,
-                            }}
-                          >
-                            {JSON.stringify(taskArtifacts, null, 2)}
-                          </Box>
-                        </AccordionDetails>
-                      </Accordion>
-                    </Box>
-                  ) : waitingApproval ? (
-                    waitingScriptApproval ? (
-                      previewStep === 0 ? (
-                      <Box>
-                        <Stack direction="row" spacing={1} flexWrap="wrap" mb={1} alignItems="center">
-                          {scriptGenerationLabel && <Chip label={`剧本生成: ${scriptGenerationLabel}`} size="small" />}
-                          {scriptDirty && <Chip label="未保存" size="small" color="warning" />}
-                        </Stack>
-
-                        {scriptRequiresReview ? (
-                          scriptApproved ? (
-                            <Alert severity="success" sx={{ mb: 1 }}>
-                              剧本已通过：现在可以点击“继续生成”进入分镜与素材库阶段。
-                            </Alert>
-                          ) : (
-                            <Alert severity="warning" sx={{ mb: 1 }}>
-                              剧本待审核：请先加载/编辑剧本并点击“通过”，通过后再继续生成分镜与素材库。
-                            </Alert>
-                          )
-                        ) : (
-                          <Alert severity="info" sx={{ mb: 1 }}>
-                            当前配置无需剧本审核：可直接点击“继续生成”进入分镜与素材库阶段。
-                          </Alert>
-                        )}
-                        {scriptDirty && (
-                          <Alert severity="info" sx={{ mb: 1 }}>
-                            剧本已修改但未保存：请先点击“保存”，再点击“通过”。
-                          </Alert>
-                        )}
-                        {scriptGeneration?.mode === 'rule_fallback' && scriptGeneration?.error && (
-                          <Alert severity="info" sx={{ mb: 1 }}>
-                            LLM 调用失败，已回退为规则剧本：{scriptGeneration.error}
-                            <br />
-                            建议检查 `.env` 的 `DASHSCOPE_API_KEY` / `DASHSCOPE_API_BASE` 以及 `DREAMWEAVER_*_MODEL`（如 `qwen-plus`），并重启后端与 Celery worker。
-                          </Alert>
-                        )}
-
-                        <Stack direction="row" spacing={1} flexWrap="wrap" mb={1}>
-                          <Button size="small" variant="contained" onClick={loadScript} disabled={!currentRunId || scriptLoading}>
-                            加载剧本
-                          </Button>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            onClick={saveScript}
-                            disabled={!currentRunId || scriptLoading || !scriptDirty || !scriptText.trim()}
-                          >
-                            保存
-                          </Button>
-                          <Button
-                            size="small"
-                            variant="contained"
-                            color="success"
-                            onClick={() => approveScript(true)}
-                            disabled={!currentRunId || scriptLoading || scriptDirty || !scriptText.trim()}
-                          >
-                            通过
-                          </Button>
-                          <Button
-                            size="small"
-                            variant="text"
-                            onClick={() => approveScript(false)}
-                            disabled={!currentRunId || scriptLoading || !scriptApproved}
-                          >
-                            撤销通过
-                          </Button>
-                          <Button
-                            size="small"
-                            variant="contained"
-                            color="success"
-                            onClick={resumeGeneration}
-                            disabled={!canResumeFromScript}
-                          >
-                            {resumeLoading ? '继续生成中…' : '继续生成'}
-                          </Button>
-                        </Stack>
-
-                        {scriptError && (
-                          <Alert severity="error" sx={{ mb: 1 }}>
-                            {scriptError}
-                          </Alert>
-                        )}
-
-                        {scriptLoading && <LinearProgress sx={{ mb: 1 }} />}
-
-                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                          审核状态：{scriptRequiresReview ? (scriptApproved ? '已通过' : '待审核') : '无需审核'}
-                          {scriptGenerationLabel ? `  生成：${scriptGenerationLabel}` : ''}
-                          {scriptEntities
-                            ? `  实体：角色 ${Array.isArray((scriptEntities as any).characters) ? (scriptEntities as any).characters.length : 0}，场景 ${Array.isArray((scriptEntities as any).scenes) ? (scriptEntities as any).scenes.length : 0}，道具 ${Array.isArray((scriptEntities as any).props) ? (scriptEntities as any).props.length : 0}`
-                            : ''}
-                        </Typography>
-
-                        <TextField
-                          label="剧本（可编辑）"
-                          value={scriptText}
-                          onChange={(e) => setScriptText(e.target.value)}
-                          fullWidth
-                          multiline
-                          minRows={10}
-                          maxRows={22}
-                          disabled={scriptLoading}
-                          sx={{ bgcolor: '#fff' }}
-                        />
-
-                        <Accordion sx={{ mt: 1 }}>
-                          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                              调试面板（Artifacts）
-                            </Typography>
-                          </AccordionSummary>
-                          <AccordionDetails>
-                            <Box
-                              sx={{
-                                whiteSpace: 'pre-wrap',
-                                fontFamily: 'monospace',
-                                fontSize: 12,
-                                bgcolor: '#fafafa',
-                                border: '1px solid #eee',
-                                borderRadius: 2,
-                                p: 1.5,
-                              }}
-                            >
-                              {JSON.stringify(taskArtifacts, null, 2)}
-                            </Box>
-                          </AccordionDetails>
-                        </Accordion>
-                      </Box>
-                    ) : (
-                      <Alert
-                        severity={scriptRequiresReview && !scriptApproved ? 'info' : 'success'}
-                        sx={{ mb: 1 }}
-                        action={
-                          <Stack direction="row" spacing={1} alignItems="center">
-                            <Button size="small" variant="text" onClick={() => handleClickStep(0)}>
-                              查看剧本
-                            </Button>
-                            <Button size="small" variant="contained" color="success" onClick={resumeGeneration} disabled={!canResumeFromScript}>
-                              {resumeLoading ? '继续生成中…' : '继续生成'}
-                            </Button>
-                          </Stack>
-                        }
-                      >
-                        {scriptRequiresReview && !scriptApproved
-                          ? '剧本待审核：请先在“剧本”完成审核；审核通过后可继续生成。'
-                          : '剧本审核已完成：可继续生成进入分镜与素材库阶段。'}
-                      </Alert>
-                    )
-                  ) : waitingVideoConfirmation ? (
-                    previewStep === 3 ? (
-                      <Box>
-                        <Alert severity="info" sx={{ mb: 1 }}>
-                          当前阶段启用“逐镜头确认生成”：点击卡片右侧按钮确认/触发生成；若镜头需要“上一镜头尾帧→本镜头首帧”桥接，依赖未就绪时会保持阻塞。
-                        </Alert>
-
-                        {videoJobActionError && (
-                          <Alert severity="error" sx={{ mb: 1 }}>
-                            {videoJobActionError}
-                          </Alert>
-                        )}
-
-                        <Stack direction="row" spacing={1} flexWrap="wrap" mb={1}>
-                          <Button size="small" variant="outlined" onClick={rebuildVideoJobs} disabled={!persistedRunId || runSnapshotLoading}>
-                            {runSnapshotLoading ? '刷新中…' : '刷新任务卡'}
-                          </Button>
-                        </Stack>
-
-                        {videoClipJobs.length ? (
-                          <List dense sx={{ bgcolor: '#fff', border: '1px solid #eee', borderRadius: 2 }}>
-                            {videoClipJobs.map((job: any, idx: number) => {
-                              const sid = String(job?.shot_id || '').trim()
-                              const desc = String(job?.desc || '').trim()
-                              const status = String(job?.status || '').trim().toLowerCase()
-                              const confirmed = Boolean(job?.confirmed)
-                              const requiresBridge = Boolean(job?.requires_bridge)
-                              const dep = String(job?.depends_on_shot_id || '').trim()
-
-                              const statusLabel =
-                                status === 'done'
-                                  ? '已生成'
-                                  : status === 'blocked'
-                                    ? '依赖未就绪'
-                                    : status === 'confirmed'
-                                      ? '已确认'
-                                      : '待确认'
-
-                              const confirming = videoJobConfirmingShotId === sid
-                              const disabled = !sid || running || confirming || status === 'done'
-                              const actionLabel =
-                                status === 'done'
-                                  ? '已生成'
-                                  : confirming
-                                    ? '处理中…'
-                                    : confirmed
-                                      ? '开始生成'
-                                      : requiresBridge
-                                        ? '确认（桥接）'
-                                        : '确认生成'
-
-                              return (
-                                <ListItem
-                                  key={sid || String(idx)}
-                                  disableGutters
-                                  sx={{ px: 1, py: 0.75, borderBottom: '1px solid #f0f0f0', alignItems: 'flex-start' }}
-                                >
-                                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                                    <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
-                                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                                        {sid || '(unknown)'}
-                                      </Typography>
-                                      <Chip size="small" label={statusLabel} color={status === 'done' ? 'success' : status === 'blocked' ? 'warning' : 'default'} />
-                                      {confirmed && status !== 'done' && <Chip size="small" label="已确认" color="primary" />}
-                                      {requiresBridge && <Chip size="small" label={`桥接依赖: ${dep || '-'}`} />}
-                                    </Stack>
-                                    {desc && (
-                                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
-                                        {desc}
-                                      </Typography>
-                                    )}
-                                  </Box>
-
-                                  <Box sx={{ pl: 1 }}>
-                                    <Button size="small" variant="contained" onClick={() => confirmVideoJob(sid)} disabled={disabled}>
-                                      {actionLabel}
-                                    </Button>
-                                  </Box>
-                                </ListItem>
-                              )
-                            })}
-                          </List>
-                        ) : (
-                          <Alert severity="warning">未找到视频任务卡（video_clip_jobs）。可点击“刷新任务卡”或重试生成到 VIDEO 阶段。</Alert>
-                        )}
-                      </Box>
-                    ) : (
-                      <Alert
-                        severity="info"
-                        sx={{ mb: 1 }}
-                        action={
-                          <Button size="small" variant="text" onClick={() => handleClickStep(3)}>
-                            查看视频任务卡
-                          </Button>
-                        }
-                      >
-                        当前阶段正在等待镜头视频确认：请切换到“镜头/视频”查看并逐段确认生成。
-                      </Alert>
-                    )
-                  ) : (
-                    previewStep === 2 ? (
-                      <Box>
-
-                      <Alert severity={libraryApproved ? 'success' : 'warning'} sx={{ mb: 1 }}>
-                        {libraryApproved
-                          ? '素材库已审核通过：可点击“继续生成”进入镜头阶段。'
-                          : '素材库待审核：请先审核角色/场景/道具素材库，确认后点击“继续生成”。'}
-                      </Alert>
- 
-                      <Stack direction="row" spacing={1} flexWrap="wrap" mb={1}>
-                        <Button
-                          size="small"
-                          variant="contained"
-                          onClick={loadLibrary}
-                          disabled={!selectedProjectId || libraryLoading}
-                        >
-                          加载素材库
-                        </Button>
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          onClick={() => approveLibrary({ approve_all: true, approved: true })}
-                          disabled={!selectedProjectId || libraryLoading}
-                        >
-                          全部通过
-                        </Button>
-                          <Button
-                            size="small"
-                            variant="contained"
-                            color="success"
-                            onClick={resumeGeneration}
-                            disabled={!canResumeFromLibrary}
-                          >
-                            {resumeLoading ? '继续生成中…' : '继续生成'}
-                          </Button>
-                      </Stack>
-
-                      {libraryError && (
-                        <Alert severity="error" sx={{ mb: 1 }}>
-                          {libraryError}
-                        </Alert>
-                      )}
-
-                      {libraryLoading && <LinearProgress sx={{ mb: 1 }} />}
-
-                      {library?.review && (
-                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                          审核状态：缺失 {Array.isArray(library.review.missing_roles) ? library.review.missing_roles.length : 0}，未通过{' '}
-                          {Array.isArray(library.review.unapproved_roles) ? library.review.unapproved_roles.length : 0}
-                        </Typography>
-                      )}
-
-                      {library?.assets?.length ? (
-                        <ImageList cols={3} gap={8} sx={{ m: 0 }}>
-                          {library.assets.map((asset) => {
-                            const approved = Boolean(asset.meta?.approved)
-                            const title = asset.meta?.entity_name || asset.role
-                            const preview = libraryPreviews[asset.id]
-                            const aspectRatio = libraryAssetToCssAspectRatio(asset, libraryPreviewAspectRatio)
-                            return (
-                              <ImageListItem key={asset.id} sx={{ border: '1px solid #eee', borderRadius: 2, overflow: 'hidden' }}>
-                                <Box sx={{ width: '100%', aspectRatio, bgcolor: '#f5f5f5', position: 'relative' }}>
-                                  {preview && (
-                                    <Box
-                                      component="img"
-                                      src={preview}
-                                      alt={title}
-                                      loading="lazy"
-                                      sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                                    />
-                                  )}
-                                </Box>
-                                <Box sx={{ p: 1 }}>
-                                  <Typography variant="caption" sx={{ fontWeight: 600 }} display="block">
-                                    {title}
-                                  </Typography>
-                                  <Stack direction="row" spacing={1} alignItems="center" mt={0.5} flexWrap="wrap">
-                                    <Chip size="small" label={approved ? '已通过' : '待审核'} color={approved ? 'success' : 'default'} />
-                                    <Button
-                                      size="small"
-                                      variant="text"
-                                      onClick={() => approveLibrary({ roles: [asset.role], approved: !approved })}
-                                      disabled={libraryLoading}
-                                    >
-                                      {approved ? '撤销' : '通过'}
-                                    </Button>
-                                    <Button
-                                      size="small"
-                                      variant="text"
-                                      onClick={() => openRegenerateDialog(asset)}
-                                      disabled={libraryLoading}
-                                    >
-                                      重生成
-                                    </Button>
-                                  </Stack>
-                                </Box>
-                              </ImageListItem>
-                            )
-                          })}
-                        </ImageList>
-                      ) : (
-                        <Typography variant="body2" color="text.secondary">
-                          未加载素材库或当前项目暂无可审核素材。
-                        </Typography>
-                      )}
-
-                      <Accordion sx={{ mt: 1 }}>
-                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                            调试面板（Artifacts）
-                          </Typography>
-                        </AccordionSummary>
-                        <AccordionDetails>
-                          <Box
-                            sx={{
-                              whiteSpace: 'pre-wrap',
-                              fontFamily: 'monospace',
-                              fontSize: 12,
-                              bgcolor: '#fafafa',
-                              border: '1px solid #eee',
-                              borderRadius: 2,
-                              p: 1.5,
-                            }}
-                          >
-                            {JSON.stringify(taskArtifacts, null, 2)}
-                          </Box>
-                        </AccordionDetails>
-                      </Accordion>
-                    </Box>
-                    ) : (
-                      <Box>
-                        <Alert
-                          severity={libraryApproved ? 'success' : 'info'}
-                          sx={{ mb: 1 }}
-                          action={
-                            <Stack direction="row" spacing={1} alignItems="center">
-                              <Button size="small" variant="text" onClick={() => handleClickStep(2)}>
-                                查看素材
-                              </Button>
-                              <Button size="small" variant="contained" color="success" onClick={resumeGeneration} disabled={!canResumeFromLibrary}>
-                                {resumeLoading ? '继续生成中…' : '继续生成'}
-                              </Button>
-                            </Stack>
-                          }
-                        >
-                          {libraryApproved ? '素材库已审核通过：可继续生成进入镜头阶段。' : '当前阶段正在等待素材库审核：请先在“素材”完成审核后继续。'}
-                        </Alert>
-
-                        {persistedRunId && (
-                          <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" mb={1}>
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              onClick={loadRunSnapshot}
-                              disabled={!persistedRunId || runSnapshotLoading}
-                            >
-                              {runSnapshotLoading ? '加载中…' : '刷新运行快照'}
-                            </Button>
-                            {runSnapshot && runSnapshot.run_id === persistedRunId && (
-                              <Chip size="small" label="快照已加载" color="success" />
-                            )}
-                          </Stack>
-                        )}
-                        {runSnapshotError && (
-                          <Alert severity="error" sx={{ mb: 1 }}>
-                            {runSnapshotError}
-                          </Alert>
-                        )}
-                        {runSnapshotLoading && <LinearProgress sx={{ mb: 1 }} />}
-
-                        {previewStep === 0 && !runSnapshotLoading && (
-                          <Box sx={{ mb: 1 }}>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-                              计划 / 剧本提要（快照）
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-wrap', mb: 1 }}>
-                              {snapshotPlanText.trim() || '暂无计划/提要快照（可能尚未落库）。'}
-                            </Typography>
-
-                            {snapshotScriptText.trim() ? (
-                              <Accordion>
-                                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                                    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                                      剧本（快照）
-                                    </Typography>
-                                    <Chip
-                                      size="small"
-                                      label={snapshotScriptApproved ? '已通过' : '未通过'}
-                                      color={snapshotScriptApproved ? 'success' : 'default'}
-                                    />
-                                    <Chip size="small" label={`长度: ${snapshotScriptText.length}`} />
-                                  </Stack>
-                                </AccordionSummary>
-                                <AccordionDetails>
-                                  <Box
-                                    sx={{
-                                      whiteSpace: 'pre-wrap',
-                                      fontFamily: 'monospace',
-                                      fontSize: 12,
-                                      bgcolor: '#fafafa',
-                                      border: '1px solid #eee',
-                                      borderRadius: 2,
-                                      p: 1.5,
-                                      maxHeight: 260,
-                                      overflow: 'auto',
-                                    }}
-                                  >
-                                    {snapshotScriptText.length > 6000 ? `${snapshotScriptText.slice(0, 6000)}\n…` : snapshotScriptText}
-                                  </Box>
-                                </AccordionDetails>
-                              </Accordion>
-                            ) : (
-                              <Typography variant="body2" color="text.secondary">
-                                尚无可用剧本快照（可能尚未落库）。
-                              </Typography>
-                            )}
-                          </Box>
-                        )}
-
-                        {previewStep === 1 && !runSnapshotLoading && (
-                          <Box sx={{ mb: 1 }}>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-                              镜头列表
-                            </Typography>
-                            {snapshotShots.length ? (
-                              <List dense sx={{ bgcolor: '#fff', border: '1px solid #eee', borderRadius: 2 }}>
-                                {snapshotShots.slice(0, 12).map((shot: any) => (
-                                  <ListItem key={shot.shot_key || shot.shot_index} disablePadding sx={{ px: 1, py: 0.25 }}>
-                                    <ListItemText
-                                      primary={`#${shot.shot_index} ${shot.desc || ''}`.trim()}
-                                      secondary={`场景: ${shot.scene_id || '-'}  时长: ${typeof shot.duration_s === 'number' ? shot.duration_s.toFixed(1) : '-'}s`}
-                                    />
-                                  </ListItem>
-                                ))}
-                              </List>
-                            ) : (
-                              <Typography variant="body2" color="text.secondary">
-                                尚无可用分镜快照（可能尚未落库）。
-                              </Typography>
-                            )}
-                          </Box>
-                        )}
-
-                        {previewStep === 3 && !runSnapshotLoading && snapshotShots.length > 0 && (
-                          <Box sx={{ mb: 1 }}>
-                            <Stack direction="row" spacing={1} flexWrap="wrap" mb={0.5}>
-                              <Chip size="small" label={`镜头: ${snapshotShots.length}`} />
-                              <Chip size="small" label={`资产: ${snapshotAssetCount}`} />
-                              <Chip size="small" label={`KF: ${snapshotAssetSummary.keyframes.length}`} />
-                              <Chip size="small" label={`MF: ${snapshotAssetSummary.midframes.length}`} />
-                              <Chip size="small" label={`VC: ${snapshotAssetSummary.videoClips.length}`} />
-                            </Stack>
-                            {(snapshotAssetSummary.keyframes.length > 0 ||
-                              snapshotAssetSummary.midframes.length > 0 ||
-                              snapshotAssetSummary.videoClips.length > 0) && (
-                              <Typography variant="caption" color="text.secondary" display="block">
-                                快照路径：
-                                {formatPaths(snapshotAssetSummary.keyframes.slice(-3)) ? `KF ${formatPaths(snapshotAssetSummary.keyframes.slice(-3))}` : ''}
-                                {formatPaths(snapshotAssetSummary.midframes.slice(-3)) ? `  MF ${formatPaths(snapshotAssetSummary.midframes.slice(-3))}` : ''}
-                                {formatPaths(snapshotAssetSummary.videoClips.slice(-3).map((v) => v.path))
-                                  ? `  VC ${formatPaths(snapshotAssetSummary.videoClips.slice(-3).map((v) => v.path))}`
-                                  : ''}
-                              </Typography>
-                            )}
-                            {renderRunAssetPreviewGrid('关键帧（快照）', snapshotAssetSummary.keyframes.slice(-6), 'image')}
-                            {renderRunAssetPreviewGrid('中间帧（快照）', snapshotAssetSummary.midframes.slice(-6), 'image')}
-                            {renderRunAssetPreviewGrid(
-                              '镜头片段（快照）',
-                              snapshotAssetSummary.videoClips.slice(-3).map((v) => v.path),
-                              'video',
-                            )}
-                          </Box>
-                        )}
-
-                        {previewStep === 4 && !runSnapshotLoading && (
-                          <Box sx={{ mb: 1 }}>
-                            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-                              合成视频（快照）
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              {snapshotMergedVideo ? `合成视频：${snapshotMergedVideo}` : '暂无合成视频快照'}
-                            </Typography>
-                            {snapshotMergedVideo && (
-                              <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mt: 1 }}>
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  onClick={loadMergedVideoPreview}
-                                  disabled={!currentRunId || mergedVideoLoading}
-                                >
-                                  {mergedVideoLoading ? '加载中…' : mergedVideoPreviewUrl ? '重新加载合成视频' : '加载合成视频预览'}
-                                </Button>
-                                <Button
-                                  size="small"
-                                  variant="contained"
-                                  onClick={downloadMergedVideo}
-                                  disabled={!currentRunId || mergedVideoLoading}
-                                >
-                                  下载合成视频
-                                </Button>
-                              </Stack>
-                            )}
-                            {mergedVideoError && (
-                              <Alert severity="error" sx={{ mt: 1 }}>
-                                {mergedVideoError}
-                              </Alert>
-                            )}
-                            {mergedVideoPreviewUrl && (
-                              <Box sx={{ mt: 1, bgcolor: '#000', borderRadius: 2, overflow: 'hidden' }}>
-                                <Box component="video" src={mergedVideoPreviewUrl} controls sx={{ width: '100%', display: 'block' }} />
-                              </Box>
-                            )}
-                          </Box>
-                        )}
-                      </Box>
-                    )
-                    )
-                  ) : (
-                    <Typography variant="body2" color="text.secondary">
-                      点击“开始生成”后，这里会展示「{DREAMWEAVER_PREVIEW_STEPS[previewStep]}」相关产物与进度。
-                    </Typography>
-                  )
+                  renderPendingView()
                 ) : (
                   <Box>
                     <Stack direction="row" spacing={1} flexWrap="wrap" mb={1.5} alignItems="center">
@@ -3986,6 +5771,42 @@ export default function DreamWeaverRunPage() {
                     </Accordion>
 
                     <Divider sx={{ my: 1.5 }} />
+
+                    <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={loadRunSnapshot}
+                        disabled={!persistedRunId || runSnapshotLoading}
+                      >
+                        {runSnapshotLoading ? '加载中…' : '刷新运行快照'}
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => currentRunId && syncDreamweaverEvents(currentRunId)}
+                        disabled={!currentRunId || eventSyncing}
+                      >
+                        {eventSyncing ? '同步中…' : '同步事件'}
+                      </Button>
+                      {runSnapshot && runSnapshot.run_id === persistedRunId && (
+                        <Chip size="small" label="快照已加载" color="success" />
+                      )}
+                      {eventCursor > 0 && <Chip size="small" label={`事件#${eventCursor}`} variant="outlined" />}
+                    </Stack>
+                    {runSnapshotError && (
+                      <Alert severity="error" sx={{ mb: 1 }}>
+                        {runSnapshotError}
+                      </Alert>
+                    )}
+                    {eventSyncError && (
+                      <Alert severity="warning" sx={{ mb: 1 }}>
+                        {eventSyncError}
+                      </Alert>
+                    )}
+                    {runSnapshotLoading && <LinearProgress sx={{ mb: 1 }} />}
+
+                    {renderStreamingPreview(previewStep)}
 
                     {(previewStep === 0 || previewStep === 4) && (
                       <>
@@ -4029,14 +5850,48 @@ export default function DreamWeaverRunPage() {
                         {previewStep === 1 && runSnapshotLoading && <LinearProgress sx={{ mt: 1 }} />}
                         {previewStep === 1 && !runSnapshotLoading && snapshotShots.length > 0 && (
                           <List dense sx={{ mt: 1, bgcolor: '#fff', border: '1px solid #eee', borderRadius: 2 }}>
-                            {snapshotShots.slice(0, 12).map((shot: any) => (
-                              <ListItem key={shot.shot_key || shot.shot_index} disablePadding sx={{ px: 1, py: 0.25 }}>
-                                <ListItemText
-                                  primary={`#${shot.shot_index} ${shot.desc || ''}`.trim()}
-                                  secondary={`场景: ${shot.scene_id || '-'}  时长: ${typeof shot.duration_s === 'number' ? shot.duration_s.toFixed(1) : '-'}s`}
-                                />
-                              </ListItem>
-                            ))}
+                            {snapshotShots.slice(0, 12).map((shot: any, idx: number) => {
+                              const shotKey = String(shot?.shot_key || shot?.shot_id || shot?.shot_index || idx).trim()
+                              const expanded = Boolean(shotPromptExpanded[shotKey])
+                              const headPrompt = String(shot?.head_frame?.prompt || '').trim()
+                              const tailPrompt = String(shot?.tail_frame?.prompt || '').trim()
+                              const overridePrompt = String(shot?.shot_schema_v2?.meta?.video_prompt_override || '').trim()
+                              const hasPrompt = Boolean(headPrompt || tailPrompt || overridePrompt)
+                              const promptLines: string[] = []
+                              const formatPrompt = (value: string) => (expanded || value.length <= 120 ? value : `${value.slice(0, 120)}…`)
+                              if (headPrompt) promptLines.push(`首帧: ${formatPrompt(headPrompt)}`)
+                              if (tailPrompt) promptLines.push(`尾帧: ${formatPrompt(tailPrompt)}`)
+                              if (overridePrompt) {
+                                promptLines.push(`视频覆盖: ${formatPrompt(overridePrompt)}`)
+                              }
+                              const promptText = hasPrompt ? promptLines.join('\n') : '暂无提示词快照'
+                              return (
+                                <ListItem key={shotKey || String(idx)} disablePadding sx={{ px: 1, py: 0.25 }}>
+                                  <ListItemText
+                                    primary={`#${shot.shot_index} ${shot.desc || ''}`.trim()}
+                                    secondary={
+                                      <>
+                                        <Typography variant="caption" color="text.secondary" display="block">
+                                          场景: {shot.scene_id || '-'}  时长: {typeof shot.duration_s === 'number' ? shot.duration_s.toFixed(1) : '-'}s
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary" display="block" sx={{ whiteSpace: 'pre-wrap' }}>
+                                          {promptText}
+                                        </Typography>
+                                        <Button
+                                          size="small"
+                                          variant="text"
+                                          onClick={() => toggleShotPromptExpanded(shotKey)}
+                                          disabled={!hasPrompt}
+                                          sx={{ px: 0, mt: 0.25 }}
+                                        >
+                                          {expanded ? '收起提示词' : '展开提示词'}
+                                        </Button>
+                                      </>
+                                    }
+                                  />
+                                </ListItem>
+                              )
+                            })}
                           </List>
                         )}
                       </>
@@ -4700,6 +6555,78 @@ export default function DreamWeaverRunPage() {
                       disabled={regenSubmitting || !regenRole}
                     >
                       {regenSubmitting ? '重生成中…' : '确认重生成'}
+                    </Button>
+                  </DialogActions>
+                </Dialog>
+
+                <Dialog
+                  open={promptEditOpen}
+                  onClose={() => {
+                    if (promptEditSaving) return
+                    setPromptEditOpen(false)
+                  }}
+                  fullWidth
+                  maxWidth="md"
+                >
+                  <DialogTitle>
+                    提示词审核：{String(promptEditShot?.shot_key || promptEditShot?.shot_id || '').trim() || '未选中'}
+                  </DialogTitle>
+                  <DialogContent dividers>
+                    {promptEditShot && (
+                      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                        镜头描述：{String(promptEditShot?.desc || '').trim() || '-'}
+                      </Typography>
+                    )}
+                    <Stack spacing={1.5}>
+                      <TextField
+                        label="首帧提示词"
+                        fullWidth
+                        multiline
+                        minRows={3}
+                        value={promptEditHead}
+                        onChange={(e) => setPromptEditHead(e.target.value)}
+                        disabled={promptEditSaving}
+                      />
+                      <TextField
+                        label="尾帧提示词"
+                        fullWidth
+                        multiline
+                        minRows={3}
+                        value={promptEditTail}
+                        onChange={(e) => setPromptEditTail(e.target.value)}
+                        disabled={promptEditSaving}
+                      />
+                      <TextField
+                        label="视频提示词（自动）"
+                        fullWidth
+                        multiline
+                        minRows={3}
+                        value={promptEditGenerated || '暂无自动提示词（可能尚未生成或未落库）'}
+                        InputProps={{ readOnly: true }}
+                      />
+                      <TextField
+                        label="视频提示词覆盖（可选）"
+                        fullWidth
+                        multiline
+                        minRows={3}
+                        value={promptEditVideo}
+                        onChange={(e) => setPromptEditVideo(e.target.value)}
+                        disabled={promptEditSaving}
+                        placeholder="留空则使用系统拼接的默认视频提示词"
+                      />
+                    </Stack>
+                    {promptEditError && (
+                      <Alert severity="error" sx={{ mt: 1 }}>
+                        {promptEditError}
+                      </Alert>
+                    )}
+                  </DialogContent>
+                  <DialogActions>
+                    <Button onClick={() => setPromptEditOpen(false)} disabled={promptEditSaving}>
+                      取消
+                    </Button>
+                    <Button variant="contained" onClick={savePromptEdit} disabled={promptEditSaving}>
+                      {promptEditSaving ? '保存中…' : '保存'}
                     </Button>
                   </DialogActions>
                 </Dialog>
