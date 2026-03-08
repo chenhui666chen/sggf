@@ -7,10 +7,34 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from adapters.model_adapters import ModelAdapterFactory
 
-from agents.image_edit_utils import resolve_image_edit_adapter_name
+from agents.image_edit_utils import (
+    resolve_image_edit_adapter_name,
+    resolve_image_edit_multi_ref,
+    resolve_image_edit_ref_max_images,
+)
 from agents.painter import _generate_edit_with_candidates, _generate_t2i_with_candidates
 from pipeline.media_presets import ensure_media_payload, normalize_frame_ratio, resolve_frame_size
 from pipeline.style_presets import ensure_style_payload
+
+
+_CHARACTER_BACKGROUND_LINE = "背景：纯灰色背景板，背景完全干净，无场景元素、无杂物、无文字、无多余人物。"
+_CHARACTER_CONSTRAINT_LINE = "约束：无文字，无水印，无logo，无边框，无拼贴。"
+
+
+def _character_compose_line(view: str) -> str:
+    if view == "side":
+        return "构图：侧面全身单人立绘，头顶到脚底完整入镜，四肢完整不裁切。"
+    if view == "back":
+        return "构图：背面全身单人立绘，头顶到脚底完整入镜，四肢完整不裁切。"
+    return "构图：正面全身单人立绘，头顶到脚底完整入镜，四肢完整不裁切。"
+
+
+def _character_consistency_line(view: str) -> str:
+    if view == "side":
+        return "一致性要求：与正面图保持同一角色身份锚点，不改变灰白背头、冷峻眉眼与紧抿薄唇，不改变深色高领制服与金色徽章，不改变肩部半透明数据流黑袍。"
+    if view == "back":
+        return "一致性要求：与正面和侧面图保持同一角色身份锚点，不改变发型轮廓、制服版型与配色、金色徽章位置及肩部半透明数据流黑袍。"
+    return "一致性要求：角色身份锚点必须保持一致，不改变灰白背头、冷峻眉眼与紧抿薄唇，不改变深色高领制服与金色徽章，不改变肩部半透明数据流黑袍。"
 
 
 def _ensure_dir(path: Path) -> None:
@@ -49,6 +73,13 @@ def _parse_float(value: Any, default: float) -> float:
         return float(value)
     except Exception:  # noqa: BLE001
         return float(default)
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return bool(default)
+    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _parse_character_views_env() -> List[str]:
@@ -100,22 +131,15 @@ def _build_prompt(
 
     if entity_type == "character":
         v = str(view or "front").strip().lower()
-        view_line = "视角：正面"
-        view_hint = "正面或三分之二正面，脸部特征清晰可辨。"
-        if v == "side":
-            view_line = "视角：侧面"
-            view_hint = "侧面视角（profile），保持与正面一致的发型/服装/配色，尽量保留可识别特征。"
-        elif v == "back":
-            view_line = "视角：背面"
-            view_hint = "背面视角（back view），重点展示发型、服装与体态轮廓，严格保持与正面一致。"
         return (
             f"风格：{style}（严格保持一致，不要混合风格）\n"
             f"画幅：{ratio_norm}\n"
-            f"{view_line}\n"
             f"角色：{name}\n"
             f"人物设定：{descriptor}\n"
-            f"要求：单人角色立绘/肖像，主体清晰，{view_hint}避免多余人物与文字水印，背景干净。\n"
-            "约束：无文字，无水印，无logo，无边框，无拼贴。"
+            f"{_character_compose_line(v)}\n"
+            f"{_CHARACTER_BACKGROUND_LINE}\n"
+            f"{_character_consistency_line(v)}\n"
+            f"{_CHARACTER_CONSTRAINT_LINE}"
         )
     if entity_type == "scene":
         return (
@@ -136,6 +160,39 @@ def _build_prompt(
             "约束：无文字，无水印，无logo，无边框，无拼贴。"
         )
     return f"风格：{style}\n画幅：{ratio_norm}\n{name}\n{descriptor}\n约束：无文字，无水印，无logo，无边框，无拼贴。"
+
+
+def _append_character_prompt_constraints(
+    prompt: str,
+    *,
+    view: Optional[str],
+    full_body: bool,
+    clean_background: bool,
+) -> str:
+    text = str(prompt or "").strip()
+    if not text:
+        return text
+
+    hints: List[str] = []
+    if full_body:
+        hints.append(_character_compose_line(str(view or "front").strip().lower()))
+    if clean_background:
+        hints.append(_CHARACTER_BACKGROUND_LINE)
+
+    v = str(view or "front").strip().lower()
+    hints.append(_character_consistency_line(v))
+    hints.append(_CHARACTER_CONSTRAINT_LINE)
+
+    existing = text.lower()
+    merged = text
+    for hint in hints:
+        hint_plain = "".join(ch for ch in hint.lower() if not ch.isspace())
+        existing_plain = "".join(ch for ch in existing if not ch.isspace())
+        if hint_plain in existing_plain:
+            continue
+        merged = f"{merged}\n{hint}"
+        existing = merged.lower()
+    return merged.strip()
 
 
 def _library_root(project_id: int) -> Path:
@@ -239,36 +296,11 @@ def run(ctx: Any) -> None:
     selector = _safe_str(image_cfg.get("image_selector"), "first").strip().lower()
     keep_candidates = bool(image_cfg.get("keep_candidates", False))
 
+    manual_mode = _env_flag("DREAMWEAVER_LIBRARY_MANUAL", True)
+    ctx.payload["asset_library_manual"] = bool(manual_mode)
+
     asset_parallelism = _parse_int(os.getenv("DREAMWEAVER_ASSET_LIBRARY_PARALLELISM"), 1)
     asset_parallelism = max(1, min(int(asset_parallelism), 8))
-
-    factory = ModelAdapterFactory()
-    t2i = factory.get_adapter("wan_t2i")
-    image_edit_adapter_name = resolve_image_edit_adapter_name(
-        image_cfg,
-        purpose="library_character_view",
-        default_adapter="wan_image_edit",
-    )
-    image_edit_strength = _parse_float(image_cfg.get("image_edit_strength") or os.getenv("DREAMWEAVER_IMAGE_EDIT_STRENGTH") or 0.65, 0.65)
-    image_edit_guidance = _parse_float(image_cfg.get("image_edit_guidance") or os.getenv("DREAMWEAVER_IMAGE_EDIT_GUIDANCE") or 7.5, 7.5)
-    image_edit_strength = max(0.0, min(float(image_edit_strength), 1.0))
-    image_edit_guidance = max(0.1, min(float(image_edit_guidance), 50.0))
-    try:
-        image_edit_adapter = factory.get_adapter(image_edit_adapter_name)
-    except Exception:  # noqa: BLE001
-        image_edit_adapter = None
-
-    vlm_adapter = None
-    if selector in {"vlm", "semantic"}:
-        try:
-            vlm_adapter = factory.get_adapter(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus"))
-        except Exception:  # noqa: BLE001
-            vlm_adapter = None
-    vlm_criteria = [
-        s.strip()
-        for s in os.getenv("DREAMWEAVER_VLM_CRITERIA", "clarity,composition,lighting,color,style").split(",")
-        if s.strip()
-    ]
 
     root = _library_root(project_id)
     _ensure_dir(root)
@@ -324,6 +356,82 @@ def run(ctx: Any) -> None:
     if regen_role_set:
         required_role_set = set(required_roles)
         regen_role_set = {r for r in regen_role_set if r in required_role_set}
+
+    if manual_mode:
+        unapproved_roles: List[str] = []
+        ready_count = 0
+        pending_count = 0
+        for spec_item in role_specs:
+            entity_type = str(spec_item.get("entity_type") or "").strip()
+            entity_id = int(spec_item.get("entity_id") or 0)
+            view = spec_item.get("view")
+            view_str = str(view).strip().lower() if isinstance(view, str) and view.strip() else None
+            role = str(spec_item.get("role") or "").strip()
+            if not role:
+                continue
+            out_path = _output_path(root, entity_type, entity_id, view=view_str)
+            if _asset_exists(existing_by_role.get(role), expected=out_path):
+                ready_count += 1
+            else:
+                pending_count += 1
+            asset = existing_by_role.get(role)
+            if isinstance(asset, dict):
+                meta = asset.get("meta") if isinstance(asset.get("meta"), dict) else {}
+                if not bool(meta.get("approved")):
+                    unapproved_roles.append(role)
+
+        ctx.payload["project_assets"] = [existing_by_role[r] for r in sorted(existing_by_role.keys())]
+        ctx.payload["asset_library"] = {
+            "project_id": project_id,
+            "generated": ready_count,
+            "skipped": 0,
+            "required_count": len(required_roles),
+            "ready_count": ready_count,
+            "pending_count": pending_count,
+            "unapproved_count": len(unapproved_roles),
+            "generated_this_call": 0,
+            "force_regenerate": False,
+            "regenerate_roles_count": len(regen_role_set),
+            "regenerate_pending": len(regen_role_set),
+            "current": None,
+        }
+        ctx.payload["asset_library_done"] = True
+        ctx.payload["asset_library_requires_review"] = bool(pending_count > 0 or unapproved_roles)
+        return
+
+    factory = ModelAdapterFactory()
+    t2i = factory.get_adapter("wan_t2i")
+    image_edit_adapter_name = resolve_image_edit_adapter_name(
+        image_cfg,
+        purpose="library_character_view",
+        default_adapter="wan_image_edit",
+    )
+    force_view_chain_image_edit = _env_flag("DREAMWEAVER_LIBRARY_VIEW_CHAIN_FORCE_IMAGE_EDIT", True)
+    enable_back_multi_ref = _env_flag("DREAMWEAVER_LIBRARY_VIEW_CHAIN_BACK_MULTI_REF", True)
+    character_full_body = _env_flag("DREAMWEAVER_LIBRARY_CHARACTER_FULL_BODY", True)
+    character_clean_background = _env_flag("DREAMWEAVER_LIBRARY_CLEAN_BACKGROUND", True)
+    image_edit_multi_ref = resolve_image_edit_multi_ref(image_cfg=image_cfg, adapter_name=image_edit_adapter_name)
+    image_edit_ref_max_images = resolve_image_edit_ref_max_images(image_cfg=image_cfg, default_max=2)
+    image_edit_strength = _parse_float(image_cfg.get("image_edit_strength") or os.getenv("DREAMWEAVER_IMAGE_EDIT_STRENGTH") or 0.65, 0.65)
+    image_edit_guidance = _parse_float(image_cfg.get("image_edit_guidance") or os.getenv("DREAMWEAVER_IMAGE_EDIT_GUIDANCE") or 7.5, 7.5)
+    image_edit_strength = max(0.0, min(float(image_edit_strength), 1.0))
+    image_edit_guidance = max(0.1, min(float(image_edit_guidance), 50.0))
+    try:
+        image_edit_adapter = factory.get_adapter(image_edit_adapter_name)
+    except Exception:  # noqa: BLE001
+        image_edit_adapter = None
+
+    vlm_adapter = None
+    if selector in {"vlm", "semantic"}:
+        try:
+            vlm_adapter = factory.get_adapter(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus"))
+        except Exception:  # noqa: BLE001
+            vlm_adapter = None
+    vlm_criteria = [
+        s.strip()
+        for s in os.getenv("DREAMWEAVER_VLM_CRITERIA", "clarity,composition,lighting,color,style").split(",")
+        if s.strip()
+    ]
 
     progress = (
         ctx.payload.get("asset_library_progress")
@@ -450,19 +558,43 @@ def run(ctx: Any) -> None:
                             continue
 
             if entity_type == "character" and view_str in {"side", "back"}:
+                dependencies: List[Tuple[str, Path]] = []
                 front_role = _build_role("character", entity_id, view="front")
                 front_path = _output_path(root, "character", entity_id, view="front")
-                if regenerate_only:
-                    if front_role in regen_role_set and front_role not in regen_processed:
-                        continue
-                elif force_regenerate:
-                    if front_role not in processed_roles:
-                        continue
-                else:
-                    if not _asset_exists(existing_by_role.get(front_role), expected=front_path):
-                        continue
+                dependencies.append((front_role, front_path))
+                if view_str == "back":
+                    side_role = _build_role("character", entity_id, view="side")
+                    side_path = _output_path(root, "character", entity_id, view="side")
+                    dependencies.append((side_role, side_path))
+
+                blocked = False
+                for dep_role, dep_path in dependencies:
+                    if regenerate_only:
+                        if dep_role in regen_role_set:
+                            if dep_role not in regen_processed:
+                                blocked = True
+                                break
+                        elif not _asset_exists(existing_by_role.get(dep_role), expected=dep_path):
+                            blocked = True
+                            break
+                    elif force_regenerate:
+                        if dep_role not in processed_roles:
+                            blocked = True
+                            break
+                    elif not _asset_exists(existing_by_role.get(dep_role), expected=dep_path):
+                        blocked = True
+                        break
+                if blocked:
+                    continue
 
             prompt = _build_prompt(entity_type, name, descriptor, style_prompt, frame_ratio, view=view_str)
+            if entity_type == "character":
+                prompt = _append_character_prompt_constraints(
+                    prompt,
+                    view=view_str,
+                    full_body=character_full_body,
+                    clean_background=character_clean_background,
+                )
             jobs.append(
                 {
                     "entity_type": entity_type,
@@ -514,22 +646,62 @@ def run(ctx: Any) -> None:
         via = "t2i"
         edit_base: Optional[Path] = None
         edit_base_role = ""
+        edit_reference_images: List[Dict[str, Any]] = []
+        force_view_edit = bool(
+            force_view_chain_image_edit
+            and entity_type == "character"
+            and view in {"side", "back"}
+        )
+        generation_meta: Dict[str, Any] = {}
         if entity_type == "character" and view in {"side", "back"}:
-            edit_base_role = _build_role("character", entity_id, view="front")
-            base_expected = _output_path(root, "character", entity_id, view="front")
-            if base_expected.exists():
-                edit_base = base_expected
-            else:
-                existing_base = existing_by_role.get(edit_base_role) if isinstance(existing_by_role.get(edit_base_role), dict) else None
-                if isinstance(existing_base, dict):
-                    edit_base = _resolve_uri_path(existing_base.get("uri"))
+            front_role = _build_role("character", entity_id, view="front")
+            side_role = _build_role("character", entity_id, view="side")
+            front_expected = _output_path(root, "character", entity_id, view="front")
+            side_expected = _output_path(root, "character", entity_id, view="side")
+
+            def _resolve_chain_path(role_name: str, expected_path: Path) -> Optional[Path]:
+                if expected_path.exists():
+                    return expected_path
+                existing_asset = existing_by_role.get(role_name) if isinstance(existing_by_role.get(role_name), dict) else None
+                if not isinstance(existing_asset, dict):
+                    return None
+                resolved_path = _resolve_uri_path(existing_asset.get("uri"))
+                if isinstance(resolved_path, Path) and resolved_path.exists():
+                    return resolved_path
+                return None
+
+            front_path = _resolve_chain_path(front_role, front_expected)
+            side_path = _resolve_chain_path(side_role, side_expected)
+
+            if view == "side":
+                edit_base_role = front_role
+                edit_base = front_path
+            elif view == "back":
+                edit_base_role = side_role
+                edit_base = side_path
+                if front_path is not None and enable_back_multi_ref:
+                    edit_reference_images.append(
+                        {
+                            "path": front_path,
+                            "desc": f"front character view ({name or entity_id})",
+                            "role": front_role,
+                        }
+                    )
+
             if not (isinstance(edit_base, Path) and edit_base.exists()):
                 edit_base = None
 
         try:
+            if force_view_edit:
+                if edit_base is None:
+                    raise RuntimeError(f"missing view-chain edit base for role={role}")
+                if local_image_edit is None:
+                    raise RuntimeError("image_edit adapter unavailable for forced view-chain role")
+
             if edit_base is not None and local_image_edit is not None:
                 via = "image_edit"
-                _generate_edit_with_candidates(
+                use_multi_ref = bool(view == "back" and enable_back_multi_ref and image_edit_multi_ref)
+                generation_meta = _generate_edit_with_candidates(
                     adapter=local_image_edit,
                     image_path=edit_base,
                     edit_prompt=prompt,
@@ -545,11 +717,14 @@ def run(ctx: Any) -> None:
                     selector=selector,
                     vlm_adapter=local_vlm,
                     vlm_criteria=vlm_criteria,
+                    reference_images=edit_reference_images if use_multi_ref else None,
                     keep_candidates=keep_candidates,
                     bypass_hash_cache=bypass_hash_cache,
+                    use_multi_ref=use_multi_ref,
+                    max_ref_images=max(1, int(image_edit_ref_max_images)),
                 )
             else:
-                _generate_t2i_with_candidates(
+                generation_meta = _generate_t2i_with_candidates(
                     adapter=local_t2i,
                     prompt=prompt,
                     negative_prompt=style_negative_prompt,
@@ -583,6 +758,7 @@ def run(ctx: Any) -> None:
             "view": view,
             "prompt": prompt,
             "via": via,
+            "view_chain_force_image_edit": bool(force_view_edit),
             "style_preset": style_preset,
             "style_prompt": style_prompt,
             "ratio": frame_ratio,
@@ -599,6 +775,29 @@ def run(ctx: Any) -> None:
                 "strength": float(image_edit_strength),
                 "guidance_scale": float(image_edit_guidance),
             }
+            if edit_reference_images:
+                refs_meta: List[Dict[str, str]] = []
+                for item in edit_reference_images:
+                    if not isinstance(item, dict):
+                        continue
+                    raw_path = item.get("path")
+                    path_text = str(raw_path) if isinstance(raw_path, Path) else str(raw_path or "").strip()
+                    if not path_text:
+                        continue
+                    refs_meta.append(
+                        {
+                            "role": str(item.get("role") or "").strip(),
+                            "uri": path_text,
+                            "desc": str(item.get("desc") or "").strip(),
+                        }
+                    )
+                if refs_meta:
+                    meta["edit_refs"] = refs_meta
+        if isinstance(generation_meta, dict) and generation_meta:
+            meta["generation"] = generation_meta
+            if bool(generation_meta.get("safety_blocked")):
+                meta["safety_blocked"] = True
+                meta["safety_error"] = str(generation_meta.get("safety_error") or "")
         return {
             "entity_type": entity_type,
             "entity_id": int(entity_id),

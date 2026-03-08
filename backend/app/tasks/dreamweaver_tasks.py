@@ -207,7 +207,7 @@ def _build_asset_library_plan_from_payload(payload: Dict[str, Any]) -> List[Dict
         if name and label_suffix:
             label = f"{name} {label_suffix}"
 
-        status = "processing"
+        status = "planned"
         uri = None
         asset_id = None
         approved = None
@@ -216,7 +216,17 @@ def _build_asset_library_plan_from_payload(payload: Dict[str, Any]) -> List[Dict
             uri_raw = asset.get("uri")
             if isinstance(uri_raw, str) and uri_raw.strip():
                 uri = uri_raw
-                status = "done"
+                if "://" in uri:
+                    status = "done"
+                else:
+                    try:
+                        p = resolve_asset_path(uri)
+                        base = Path("runs").resolve()
+                        resolved = p.resolve()
+                        if (resolved == base or base in resolved.parents) and resolved.exists():
+                            status = "done"
+                    except Exception:  # noqa: BLE001
+                        status = "planned"
             if isinstance(asset.get("id"), int):
                 asset_id = int(asset["id"])
             meta = asset.get("meta") if isinstance(asset.get("meta"), dict) else {}
@@ -408,32 +418,38 @@ def _resume_payload_from_contract(
             "shot_schema_v2_meta": schema_meta,
         }
 
-        if isinstance(schema_meta, dict) and schema_meta:
-            def _apply_meta_field(key: str, target_key: Optional[str] = None) -> None:
-                if key not in schema_meta:
-                    return
+        def _apply_schema_field(key: str, target_key: Optional[str] = None) -> None:
+            value = schema_v2.get(key)
+            if (value is None or (isinstance(value, str) and not value.strip()) or (isinstance(value, (list, dict)) and not value)) and isinstance(schema_meta, dict):
                 value = schema_meta.get(key)
-                if value is None:
-                    return
-                if isinstance(value, str) and not value.strip():
-                    return
-                if isinstance(value, (list, dict)) and not value:
-                    return
-                storyboard_item[target_key or key] = value
+            if value is None:
+                return
+            if isinstance(value, str) and not value.strip():
+                return
+            if isinstance(value, (list, dict)) and not value:
+                return
+            storyboard_item[target_key or key] = value
 
-            _apply_meta_field("shot_type")
-            _apply_meta_field("camera_angle")
-            _apply_meta_field("camera_movement")
-            _apply_meta_field("composition_notes")
-            _apply_meta_field("composition")
-            _apply_meta_field("location")
-            _apply_meta_field("time")
-            _apply_meta_field("atmosphere")
-            _apply_meta_field("audio_sync")
-            _apply_meta_field("character_ids")
-            _apply_meta_field("subshots")
-            _apply_meta_field("motion_level")
-            _apply_meta_field("emotion")
+        for field in (
+            "shot_type",
+            "camera_angle",
+            "camera_movement",
+            "composition_notes",
+            "composition",
+            "location",
+            "time",
+            "atmosphere",
+            "audio_sync",
+            "character_ids",
+            "subshots",
+            "motion_level",
+            "emotion",
+            "variation_type",
+            "variation_reason",
+            "video_prompt_override",
+            "video_prompt_generated",
+        ):
+            _apply_schema_field(field)
 
         storyboard.append(storyboard_item)
 

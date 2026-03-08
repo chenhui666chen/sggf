@@ -167,6 +167,65 @@ function ratioIsPortrait(value: string | null | undefined): boolean {
   return height > width
 }
 
+type CharacterViewValue = 'front' | 'side' | 'back' | 'default'
+
+interface CharacterViewChainPlan {
+  forceImageEdit: boolean
+  baseRole: string | null
+  referenceRoles: string[]
+}
+
+function resolveCharacterViewFromRole(role: string): CharacterViewValue {
+  const prefix = String(role || '').trim().split(':', 1)[0]
+  if (prefix === 'lib_character_portrait_side') return 'side'
+  if (prefix === 'lib_character_portrait_back') return 'back'
+  if (prefix === 'lib_character_portrait') return 'front'
+  return 'default'
+}
+
+function parseLibraryRoleEntityId(role: string): number | null {
+  const text = String(role || '').trim()
+  if (!text.includes(':')) return null
+  const parts = text.split(':', 2)
+  if (parts.length < 2) return null
+  const entityId = Number(parts[1])
+  if (!Number.isInteger(entityId) || entityId <= 0) return null
+  return entityId
+}
+
+function resolveCharacterViewChainPlan(role: string): CharacterViewChainPlan {
+  const prefix = String(role || '').trim().split(':', 1)[0]
+  const entityId = parseLibraryRoleEntityId(role)
+  if (!entityId) {
+    return { forceImageEdit: false, baseRole: null, referenceRoles: [] }
+  }
+  const frontRole = `lib_character_portrait:${entityId}`
+  const sideRole = `lib_character_portrait_side:${entityId}`
+  if (prefix === 'lib_character_portrait_side') {
+    return {
+      forceImageEdit: true,
+      baseRole: frontRole,
+      referenceRoles: [frontRole],
+    }
+  }
+  if (prefix === 'lib_character_portrait_back') {
+    return {
+      forceImageEdit: true,
+      baseRole: sideRole,
+      referenceRoles: [sideRole, frontRole],
+    }
+  }
+  return { forceImageEdit: false, baseRole: null, referenceRoles: [] }
+}
+
+function formatReferenceRoleLabel(role: string): string {
+  const view = resolveCharacterViewFromRole(role)
+  if (view === 'front') return '正面图'
+  if (view === 'side') return '侧面图'
+  if (view === 'back') return '背面图'
+  return role
+}
+
 interface Project {
   id: number
   title: string
@@ -550,6 +609,14 @@ export default function DreamWeaverRunPage() {
   const [regenRole, setRegenRole] = useState<string>('')
   const [regenTitle, setRegenTitle] = useState<string>('')
   const [regenPrompt, setRegenPrompt] = useState<string>('')
+  const [regenPromptInitial, setRegenPromptInitial] = useState<string>('')
+  const [regenPromptTemplateSnapshot, setRegenPromptTemplateSnapshot] = useState<string>('')
+  const [regenImageEditAutoCleared, setRegenImageEditAutoCleared] = useState(false)
+  const [regenPromptDirty, setRegenPromptDirty] = useState(false)
+  const [regenPreferImageEdit, setRegenPreferImageEdit] = useState(false)
+  const [regenSuggesting, setRegenSuggesting] = useState(false)
+  const [regenSuggestError, setRegenSuggestError] = useState<string | null>(null)
+  const [regenSmartPromptTriggered, setRegenSmartPromptTriggered] = useState(false)
   const [regenSubmitting, setRegenSubmitting] = useState(false)
   const [regenError, setRegenError] = useState<string | null>(null)
   const [result, setResult] = useState<RunResult | null>(null)
@@ -601,6 +668,127 @@ export default function DreamWeaverRunPage() {
 
   const libraryPreviewAspectRatio = ratioToCssAspectRatio(imageRatio)
   const generationConfigLocked = Boolean(lockedGenerationConfig?.locked)
+  const libraryAssetsByRole = useMemo(() => {
+    const map = new Map<string, LibraryAsset>()
+    const assets = Array.isArray(library?.assets) ? (library.assets as LibraryAsset[]) : []
+    for (const asset of assets) {
+      const role = String(asset?.role || '').trim()
+      if (!role) continue
+      map.set(role, asset)
+    }
+    return map
+  }, [library?.assets])
+  const regenRoleAsset = useMemo(() => {
+    const role = String(regenRole || '').trim()
+    if (!role) return null
+    return libraryAssetsByRole.get(role) || null
+  }, [libraryAssetsByRole, regenRole])
+  const regenHasCurrentImage = useMemo(() => Boolean(regenRoleAsset), [regenRoleAsset])
+  const regenViewChainPlan = useMemo(() => resolveCharacterViewChainPlan(regenRole), [regenRole])
+  const regenView = useMemo(() => resolveCharacterViewFromRole(regenRole), [regenRole])
+  const regenIsSideOrBackView = regenView === 'side' || regenView === 'back'
+  const regenForceImageEdit = regenViewChainPlan.forceImageEdit
+  const regenImageBaseRole = regenViewChainPlan.baseRole
+  const regenImageBaseAsset = useMemo(() => {
+    if (!regenImageBaseRole) return null
+    return libraryAssetsByRole.get(regenImageBaseRole) || null
+  }, [libraryAssetsByRole, regenImageBaseRole])
+  const regenReferenceRoles = useMemo(() => {
+    return (Array.isArray(regenViewChainPlan.referenceRoles) ? regenViewChainPlan.referenceRoles : [])
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+  }, [regenViewChainPlan.referenceRoles])
+  const regenReadyReferenceRoles = useMemo(() => {
+    return regenReferenceRoles.filter((role) => Boolean(libraryAssetsByRole.get(role)))
+  }, [libraryAssetsByRole, regenReferenceRoles])
+  const regenMissingReferenceRoles = useMemo(() => {
+    return regenReferenceRoles.filter((role) => !libraryAssetsByRole.get(role))
+  }, [libraryAssetsByRole, regenReferenceRoles])
+  const regenHasImageBase = useMemo(() => {
+    if (regenForceImageEdit) return Boolean(regenImageBaseAsset)
+    return Boolean(regenRoleAsset)
+  }, [regenForceImageEdit, regenImageBaseAsset, regenRoleAsset])
+  const regenImageEditActive = regenForceImageEdit || (regenPreferImageEdit && regenHasImageBase)
+  const regenImageBaseRoleLabel = useMemo(() => {
+    return regenImageBaseRole ? formatReferenceRoleLabel(regenImageBaseRole) : '前序视角'
+  }, [regenImageBaseRole])
+  const regenForceViewChainEditBase = regenForceImageEdit && regenIsSideOrBackView && regenSmartPromptTriggered
+  const regenAlertBaseLabel = useMemo(() => {
+    if (!regenForceImageEdit) return ''
+    if (regenForceViewChainEditBase) return regenImageBaseRoleLabel
+    if (regenHasCurrentImage) return '当前图'
+    return regenImageBaseRoleLabel
+  }, [regenForceImageEdit, regenForceViewChainEditBase, regenHasCurrentImage, regenImageBaseRoleLabel])
+  const regenAlertReadyReferenceLabel = useMemo(() => {
+    const labels: string[] = []
+    const push = (value: string) => {
+      const text = String(value || '').trim()
+      if (!text) return
+      if (!labels.includes(text)) labels.push(text)
+    }
+
+    if (!regenForceImageEdit) return ''
+
+    if (regenForceViewChainEditBase) {
+      if (regenImageBaseAsset) push(regenImageBaseRoleLabel)
+      for (const role of regenReadyReferenceRoles) push(formatReferenceRoleLabel(role))
+    } else if (regenHasCurrentImage) {
+      push('当前图')
+      for (const role of regenReadyReferenceRoles) push(formatReferenceRoleLabel(role))
+    } else {
+      if (regenImageBaseAsset) push(regenImageBaseRoleLabel)
+      for (const role of regenReadyReferenceRoles) push(formatReferenceRoleLabel(role))
+    }
+
+    return labels.join('、')
+  }, [
+    regenForceImageEdit,
+    regenForceViewChainEditBase,
+    regenHasCurrentImage,
+    regenImageBaseAsset,
+    regenImageBaseRoleLabel,
+    regenReadyReferenceRoles,
+  ])
+  const regenAlertMissingReferenceLabel = useMemo(() => {
+    const labels: string[] = []
+    const push = (value: string) => {
+      const text = String(value || '').trim()
+      if (!text) return
+      if (!labels.includes(text)) labels.push(text)
+    }
+
+    if (!regenForceImageEdit) return ''
+
+    if (regenForceViewChainEditBase) {
+      if (!regenImageBaseAsset) push(regenImageBaseRoleLabel)
+      for (const role of regenMissingReferenceRoles) push(formatReferenceRoleLabel(role))
+    } else if (regenHasCurrentImage) {
+      for (const role of regenMissingReferenceRoles) push(formatReferenceRoleLabel(role))
+    } else {
+      if (!regenImageBaseAsset) push(regenImageBaseRoleLabel)
+      for (const role of regenMissingReferenceRoles) push(formatReferenceRoleLabel(role))
+    }
+
+    return labels.join('、')
+  }, [
+    regenForceImageEdit,
+    regenForceViewChainEditBase,
+    regenHasCurrentImage,
+    regenImageBaseAsset,
+    regenImageBaseRoleLabel,
+    regenMissingReferenceRoles,
+  ])
+  const regenAlertReadyReferenceCount = useMemo(() => {
+    const text = String(regenAlertReadyReferenceLabel || '').trim()
+    if (!text) return 0
+    return text.split('、').map((s) => s.trim()).filter(Boolean).length
+  }, [regenAlertReadyReferenceLabel])
+  const regenPromptInputLabel = useMemo(() => {
+    if (!(regenImageEditActive && regenImageEditAutoCleared)) return '提示词'
+    if (regenForceViewChainEditBase) return '修改要求（基于参考图）'
+    if (regenHasCurrentImage) return '修改要求（基于当前图）'
+    return '修改要求（基于参考图）'
+  }, [regenForceViewChainEditBase, regenHasCurrentImage, regenImageEditActive, regenImageEditAutoCleared])
   const mergedVideoPreviewPortrait = ratioIsPortrait(
     generationConfigLocked ? lockedGenerationConfig?.image_ratio : imageRatio,
   )
@@ -3194,15 +3382,29 @@ export default function DreamWeaverRunPage() {
     }
   }
 
-  const regenerateLibraryAsset = async (role: string, prompt?: string): Promise<string | null> => {
-    if (!selectedProjectId) return '未选择项目'
+  const regenerateLibraryAsset = async (options: {
+    role: string
+    prompt?: string
+    run_id?: string
+    prefer_image_edit?: boolean
+    prefer_view_chain_edit_base?: boolean
+  }): Promise<string | null> => {
+    const role = String(options.role || '').trim()
+    if (!role) return 'missing asset role'
+    if (!selectedProjectId) return 'project not selected'
     setLibraryLoading(true)
     setLibraryError(null)
     try {
-      await apiClient.regenerateDreamweaverLibraryAsset(selectedProjectId, { role, ...(prompt ? { prompt } : {}) })
+      await apiClient.regenerateDreamweaverLibraryAsset(selectedProjectId, {
+        role,
+        ...(options.run_id ? { run_id: options.run_id } : {}),
+        ...(options.prompt ? { prompt: options.prompt } : {}),
+        ...(options.prefer_image_edit ? { prefer_image_edit: true } : {}),
+        ...(options.prefer_view_chain_edit_base ? { prefer_view_chain_edit_base: true } : {}),
+      })
       return await loadLibrary()
     } catch (e: any) {
-      const message = await extractApiErrorMessage(e, '重新生成失败')
+      const message = await extractApiErrorMessage(e, 'regenerate failed')
       setLibraryError(message)
       return message
     } finally {
@@ -3227,16 +3429,94 @@ export default function DreamWeaverRunPage() {
     }
   }
 
+  const suggestRegeneratePrompt = useCallback(
+    async (options: {
+      role: string
+      prompt?: string
+      mode?: 'template' | 'ai'
+      source?: 'auto' | 'manual'
+      preferViewChainSeed?: boolean
+    }): Promise<string | null> => {
+      const role = String(options.role || '').trim()
+      if (!selectedProjectId || !role) return null
+      setRegenSuggesting(true)
+      setRegenSuggestError(null)
+      try {
+        const res = await apiClient.suggestDreamweaverLibraryPrompt(selectedProjectId, {
+          role,
+          ...(currentRunId ? { run_id: currentRunId } : {}),
+          ...(options.prompt ? { prompt: options.prompt } : {}),
+          ...(options.preferViewChainSeed ? { prefer_view_chain_seed: true } : {}),
+          mode: options.mode || 'template',
+        })
+        const nextPrompt = String(res.data?.prompt || '').trim()
+        if (nextPrompt) {
+          setRegenPrompt(nextPrompt)
+          if (options.preferViewChainSeed) setRegenSmartPromptTriggered(true)
+          if ((options.source || 'manual') === 'auto') {
+            setRegenPromptInitial(nextPrompt)
+            setRegenPromptDirty(false)
+          } else {
+            setRegenPromptDirty(nextPrompt.trim() !== regenPromptInitial.trim())
+          }
+          return nextPrompt
+        }
+        return null
+      } catch (e: any) {
+        const message = await extractApiErrorMessage(e, '生成提示词失败')
+        setRegenSuggestError(message)
+        return null
+      } finally {
+        setRegenSuggesting(false)
+      }
+    },
+    [currentRunId, regenPromptInitial, selectedProjectId],
+  )
+
+  const requestSmartRegeneratePrompt = useCallback(
+    (options?: { role?: string; source?: 'auto' | 'manual' }) => {
+      const role = String(options?.role || regenRole || '').trim()
+      if (!role) return
+      const view = resolveCharacterViewFromRole(role)
+      const preferViewChainSeed = view === 'side' || view === 'back'
+      if (preferViewChainSeed) setRegenSmartPromptTriggered(true)
+      void suggestRegeneratePrompt({
+        role,
+        mode: 'template',
+        source: options?.source || 'manual',
+        preferViewChainSeed,
+      })
+    },
+    [regenRole, suggestRegeneratePrompt],
+  )
+
   const openRegenerateDialogForRole = (roleInput: string, titleInput?: string, promptInput?: string) => {
     const role = String(roleInput || '').trim()
     if (!role) return
+    const roleAsset = libraryAssetsByRole.get(role) || null
     const title = String(titleInput || role).trim() || role
-    const prompt = String(promptInput || '').trim()
+    const prompt = String(promptInput || roleAsset?.meta?.prompt || roleAsset?.meta?.suggested_prompt || '').trim()
+    const viewChainPlan = resolveCharacterViewChainPlan(role)
+    const hasCurrentImage = Boolean(roleAsset)
+    const imageEditPref = Boolean(viewChainPlan.forceImageEdit)
+    const shouldAutoClearForImageEdit = imageEditPref && hasCurrentImage
+    const initialPrompt = shouldAutoClearForImageEdit ? '' : prompt
     setRegenRole(role)
     setRegenTitle(title)
-    setRegenPrompt(prompt)
+    setRegenPrompt(initialPrompt)
+    setRegenPromptInitial(initialPrompt)
+    setRegenPromptTemplateSnapshot(prompt)
+    setRegenImageEditAutoCleared(shouldAutoClearForImageEdit)
+    setRegenPromptDirty(false)
+    setRegenPreferImageEdit(imageEditPref)
+    setRegenSmartPromptTriggered(false)
+    setRegenSuggesting(false)
+    setRegenSuggestError(null)
     setRegenError(null)
     setRegenOpen(true)
+    if (!hasCurrentImage) {
+      requestSmartRegeneratePrompt({ role, source: 'auto' })
+    }
   }
 
   const openRegenerateDialog = (asset: LibraryAsset) => {
@@ -3253,7 +3533,19 @@ export default function DreamWeaverRunPage() {
     setRegenSubmitting(true)
     setRegenError(null)
     try {
-      const err = await regenerateLibraryAsset(role, regenPrompt.trim())
+      const promptText = regenPrompt.trim()
+      if (regenImageEditActive && regenImageEditAutoCleared && !promptText) {
+        setRegenError('图像编辑模式下请填写“修改要求”（基于参考原图需要修改的内容）')
+        return
+      }
+      const shouldSendPrompt = regenImageEditActive ? true : Boolean(regenPromptDirty && promptText)
+      const err = await regenerateLibraryAsset({
+        role,
+        ...(shouldSendPrompt ? { prompt: promptText } : {}),
+        run_id: currentRunId || undefined,
+        prefer_image_edit: regenForceImageEdit || (regenPreferImageEdit && regenHasImageBase),
+        ...(regenForceViewChainEditBase ? { prefer_view_chain_edit_base: true } : {}),
+      })
       if (err) {
         setRegenError(err)
         return
@@ -3262,6 +3554,31 @@ export default function DreamWeaverRunPage() {
     } finally {
       setRegenSubmitting(false)
     }
+  }
+
+  const toggleRegenImageEditPreference = () => {
+    if (regenForceImageEdit || !regenHasImageBase) return
+    if (regenPreferImageEdit) {
+      const restore = String(regenPromptTemplateSnapshot || '').trim()
+      setRegenPreferImageEdit(false)
+      setRegenImageEditAutoCleared(false)
+      setRegenPrompt(restore)
+      setRegenPromptInitial(restore)
+      setRegenPromptDirty(false)
+      return
+    }
+    const snapshot = String(regenPrompt || regenPromptInitial || regenPromptTemplateSnapshot || '').trim()
+    setRegenPromptTemplateSnapshot(snapshot)
+    setRegenPreferImageEdit(true)
+    if (regenHasCurrentImage) {
+      setRegenImageEditAutoCleared(true)
+      setRegenPrompt('')
+      setRegenPromptInitial('')
+    } else {
+      // 首次生成（当前无图）保留模板提示词，避免被强制清空。
+      setRegenImageEditAutoCleared(false)
+    }
+    setRegenPromptDirty(false)
   }
 
   const resumeGeneration = async () => {
@@ -6512,7 +6829,6 @@ export default function DreamWeaverRunPage() {
                     <Button onClick={() => setDiagnosticOpen(false)}>关闭</Button>
                   </DialogActions>
                 </Dialog>
-
                 <Dialog
                   open={regenOpen}
                   onClose={() => {
@@ -6525,16 +6841,82 @@ export default function DreamWeaverRunPage() {
                   <DialogTitle>重生成素材：{regenTitle || regenRole}</DialogTitle>
                   <DialogContent dividers>
                     <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                      可在下方编辑该素材的提示词，确认后将覆盖重生成（生成后会变为“待审核”）。
+                      {regenImageEditActive
+                        ? '图像编辑模式：将基于参考图生成，提交后状态变为“待审核”。'
+                        : '可在下方编辑提示词并重生成素材，生成后将变为待审核状态。'}
                     </Typography>
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }} flexWrap="wrap">
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => requestSmartRegeneratePrompt({ source: 'manual' })}
+                        disabled={regenSubmitting || regenSuggesting || !regenRole}
+                      >
+                        {regenSuggesting ? '提示词生成中…' : '智能生成提示词'}
+                      </Button>
+                      {regenForceImageEdit ? (
+                        <Chip size="small" color="secondary" variant="outlined" label="图像编辑：强制" />
+                      ) : (
+                        <Button
+                          size="small"
+                          variant={regenImageEditActive ? 'contained' : 'outlined'}
+                          color={regenImageEditActive ? 'secondary' : 'primary'}
+                          aria-pressed={regenImageEditActive}
+                          onClick={toggleRegenImageEditPreference}
+                          disabled={regenSubmitting || regenSuggesting || !regenHasImageBase}
+                        >
+                          {regenImageEditActive ? '图像编辑：开启' : '使用图像编辑'}
+                        </Button>
+                      )}
+                    </Stack>
+                    {regenForceImageEdit && (
+                      <Alert severity={regenHasImageBase ? 'info' : 'error'} sx={{ mb: 1 }}>
+                        <Typography variant="body2">
+                          {regenHasImageBase
+                            ? `参考基底：${regenAlertBaseLabel}。${
+                                regenAlertReadyReferenceLabel
+                                  ? `参考图已就绪：${regenAlertReadyReferenceLabel}${
+                                      regenAlertReadyReferenceCount > 1
+                                        ? '（生成时将自动上传；额外参考图在模型支持多参考时生效）。'
+                                        : '（生成时将自动上传）。'
+                                    }`
+                                  : '参考图已就绪。'
+                              }`
+                            : `缺少参考图：${regenAlertMissingReferenceLabel || '前序视角'}。请先生成前序视角。`}
+                        </Typography>
+                      </Alert>
+                    )}
+                    {!regenForceImageEdit && !regenHasImageBase && (
+                      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                        当前素材没有可编辑底图，将回退到文生图模式。
+                      </Typography>
+                    )}
+                    {regenSuggestError && (
+                      <Alert severity="error" sx={{ mb: 1 }}>
+                        {regenSuggestError}
+                      </Alert>
+                    )}
+                    {regenImageEditActive && regenImageEditAutoCleared && (
+                      <Typography variant="caption" color="text.disabled" display="block" sx={{ mb: 1 }}>
+                        已清空原提示词，请填写本次需要修改的内容。
+                      </Typography>
+                    )}
                     <TextField
-                      label="提示词"
+                      label={regenPromptInputLabel}
                       fullWidth
                       multiline
                       minRows={8}
                       value={regenPrompt}
-                      onChange={(e) => setRegenPrompt(e.target.value)}
-                      disabled={regenSubmitting}
+                      placeholder={
+                        regenImageEditActive && regenImageEditAutoCleared
+                          ? '示例：保持角色身份锚点不变，改为侧面全身，左肩数据接口更亮，背景保持纯灰色。'
+                          : undefined
+                      }
+                      onChange={(e) => {
+                        setRegenPrompt(e.target.value)
+                        setRegenPromptDirty(e.target.value.trim() !== regenPromptInitial.trim())
+                      }}
+                      disabled={regenSubmitting || regenSuggesting}
                     />
                     {regenError && (
                       <Alert severity="error" sx={{ mt: 1 }}>
@@ -6552,9 +6934,13 @@ export default function DreamWeaverRunPage() {
                     <Button
                       variant="contained"
                       onClick={submitRegenerateDialog}
-                      disabled={regenSubmitting || !regenRole}
+                      disabled={regenSubmitting || regenSuggesting || !regenRole || (regenForceImageEdit && !regenHasImageBase)}
                     >
-                      {regenSubmitting ? '重生成中…' : '确认重生成'}
+                      {regenSubmitting
+                        ? '生成中…'
+                        : regenImageEditActive
+                          ? '开始生成（图像编辑）'
+                          : '开始生成（提示词）'}
                     </Button>
                   </DialogActions>
                 </Dialog>

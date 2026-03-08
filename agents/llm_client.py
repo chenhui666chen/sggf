@@ -85,6 +85,58 @@ def extract_json_object(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def extract_json_array(text: str) -> Optional[List[Any]]:
+    if not isinstance(text, str) or not text.strip():
+        return None
+
+    fenced = re.search(r"```json\s*(\[[\s\S]*?\])\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+    if fenced:
+        candidate = fenced.group(1)
+        try:
+            obj = json.loads(candidate)
+            return obj if isinstance(obj, list) else None
+        except Exception:  # noqa: BLE001
+            pass
+
+    # 扫描并抽取第一个“方括号平衡”的 JSON 数组
+    start = text.find("[")
+    while start >= 0:
+        depth = 0
+        in_str = False
+        escape = False
+        for idx in range(start, len(text)):
+            ch = text[idx]
+            if in_str:
+                if escape:
+                    escape = False
+                    continue
+                if ch == "\\":
+                    escape = True
+                    continue
+                if ch == '"':
+                    in_str = False
+                continue
+
+            if ch == '"':
+                in_str = True
+                continue
+            if ch == "[":
+                depth += 1
+                continue
+            if ch == "]":
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start : idx + 1]
+                    try:
+                        obj = json.loads(candidate)
+                        return obj if isinstance(obj, list) else None
+                    except Exception:  # noqa: BLE001
+                        break
+        start = text.find("[", start + 1)
+
+    return None
+
+
 def _raise_for_status(resp: requests.Response) -> None:
     try:
         resp.raise_for_status()

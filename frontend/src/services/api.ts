@@ -34,20 +34,24 @@ interface DreamweaverLibraryApproveRequest {
 
 interface DreamweaverLibraryRegenerateRequest {
   role: string
+  run_id?: string
   prompt?: string
   style_preset?: string
   image_ratio?: string
   image_resolution?: string
   prefer_image_edit?: boolean
+  prefer_view_chain_edit_base?: boolean
 }
 
 interface DreamweaverLibraryPromptSuggestRequest {
   role: string
+  run_id?: string
   prompt?: string
   style_preset?: string
   image_ratio?: string
   image_resolution?: string
   mode?: 'template' | 'ai'
+  prefer_view_chain_seed?: boolean
 }
 
 interface DreamweaverLibraryPromptSuggestResponse {
@@ -123,7 +127,19 @@ function extractDetailMessage(detail: any): string | null {
     return null
   }
   if (typeof detail === 'object') {
-    if (typeof (detail as any).message === 'string') return String((detail as any).message || '').trim() || null
+    if (typeof (detail as any).message === 'string') {
+      const message = String((detail as any).message || '').trim()
+      const modelErrorRaw = (detail as any).model_error
+      if (typeof modelErrorRaw === 'string') {
+        const modelError = modelErrorRaw.trim()
+        if (modelError) {
+          // 限制长度，避免将超长供应商报文直接塞满 UI
+          const clipped = modelError.length > 240 ? `${modelError.slice(0, 240)}...` : modelError
+          return `${message}（详情：${clipped}）`
+        }
+      }
+      return message || null
+    }
     if (typeof (detail as any).error === 'string') return String((detail as any).error || '').trim() || null
   }
   return null

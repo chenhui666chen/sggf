@@ -151,10 +151,20 @@ def step(ctx: RunContext) -> RunContext:
         elif ctx.state == State.STORYBOARD:
             with _stage_timer(ctx.payload, stage=stage_label(ctx.state)):
                 storyboarder.run(ctx)
+            try:
+                # 在提示词审核前预生成视频提示词，避免前端“自动提示词”为空。
+                dreamweaver.ensure_storyboard_video_prompts(ctx.payload, force=True)
+            except Exception:  # noqa: BLE001
+                pass
             ctx.state = State.ASSET_LIBRARY
         elif ctx.state == State.ASSET_LIBRARY:
             with _stage_timer(ctx.payload, stage=stage_label(ctx.state)):
                 asset_library.run(ctx)
+            try:
+                # 素材库补充后再刷新一次，确保新信息进入视频提示词。
+                dreamweaver.ensure_storyboard_video_prompts(ctx.payload, force=True)
+            except Exception:  # noqa: BLE001
+                pass
             # 允许素材库阶段“增量推进”：单次 step() 只生成一部分素材，
             # 其间保持停留在 ASSET_LIBRARY，便于 Celery/UI 持续刷新进度。
             # 向后兼容：若未设置 asset_library_done，视为已完成本阶段。

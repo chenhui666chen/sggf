@@ -6,7 +6,7 @@ import hashlib
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -460,52 +460,114 @@ def _build_audio_policy_hint() -> str:
 
 
 def _build_wan_i2v_prompt(*, shot: Dict[str, Any], style_preset: str, frame_ratio: str, prompt_fragment: str = "", engine: str = "wan_i2v") -> str:
-    """
-    Wan I2V 仅接收 prompt 字符串（DashScope VideoSynthesis 亦然），因此将结构化字段“语义化拼接”为自然语言。
-    """
+    """构建 Wan I2V/T2V 的视频提示词，优先吸收 storyboard 的结构化字段。"""
     style_prompt = style_prompt_for_preset(style_preset)
     soft_negative = _i2v_soft_negative_hint(style_negative_prompt_for_preset(style_preset))
     engine_value = str(engine or "wan_i2v").strip().lower()
     is_t2v = engine_value in {"wan_t2v", "wan26_t2v", "t2v"}
-    consistency_line = "以参考帧为准，保持主体外观一致" if not is_t2v else "保持主体外观一致（角色/服饰/风格一致）"
+    consistency_line = (
+        "连续性约束：首帧参考图是角色与场景基准，保持人物身份、服装、发型、场景布局与光线逻辑一致，禁止突变。"
+        if not is_t2v
+        else "连续性约束：保持角色身份、场景设定与光线连续，动作过渡自然。"
+    )
 
-    desc = str(shot.get("desc") or "").strip()
-    visual_desc = str(shot.get("visual_desc") or "").strip()
-    ff_desc = str(shot.get("ff_desc") or "").strip()
-    lf_desc = str(shot.get("lf_desc") or "").strip()
-    motion_desc = str(shot.get("motion_desc") or "").strip()
-    state_before = str(shot.get("state_before") or "").replace("\n", " ").strip()
-    state_after = str(shot.get("state_after") or "").replace("\n", " ").strip()
-    if len(state_before) > 120:
-        state_before = state_before[:120]
-    if len(state_after) > 120:
-        state_after = state_after[:120]
+    schema_v2 = shot.get("shot_schema_v2") if isinstance(shot.get("shot_schema_v2"), dict) else {}
+    schema_meta = shot.get("shot_schema_v2_meta") if isinstance(shot.get("shot_schema_v2_meta"), dict) else {}
+    head_frame = shot.get("head_frame") if isinstance(shot.get("head_frame"), dict) else {}
+    tail_frame = shot.get("tail_frame") if isinstance(shot.get("tail_frame"), dict) else {}
 
-    shot_type = str(shot.get("shot_type") or "").strip()
-    camera_angle = str(shot.get("camera_angle") or "").strip()
-    movement = str(shot.get("movement") or "").strip()
-    if not movement:
-        movement = str(shot.get("camera_movement") or "").strip()
-    composition = str(shot.get("composition_notes") or shot.get("composition") or "").strip()
-    location = str(shot.get("location") or "").strip()
-    time = str(shot.get("time") or "").strip()
-    atmosphere = str(shot.get("atmosphere") or "").strip()
-    audio_sync = str(shot.get("audio_sync") or "").strip()
+    def _text(value: Any, *, limit: int = 0) -> str:
+        s = str(value or "").replace("\n", " ").strip()
+        if limit > 0 and len(s) > limit:
+            s = s[:limit]
+        return s
+
+    def _pick_text(*values: Any, limit: int = 0) -> str:
+        for value in values:
+            s = _text(value, limit=0)
+            if s:
+                if limit > 0 and len(s) > limit:
+                    return s[:limit]
+                return s
+        return ""
+
+    def _pick_meta_text(key: str, *, limit: int = 0) -> str:
+        return _pick_text(shot.get(key), schema_v2.get(key), schema_meta.get(key), limit=limit)
+
+    def _pick_meta_any(key: str) -> Any:
+        for container in (shot, schema_v2, schema_meta):
+            if not isinstance(container, dict):
+                continue
+            value = container.get(key)
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            if isinstance(value, (list, dict)) and not value:
+                continue
+            return value
+        return None
+
+    desc = _pick_text(shot.get("desc"), limit=240)
+    visual_desc = _pick_meta_text("visual_desc", limit=240)
+    ff_desc = _pick_text(shot.get("ff_desc"), schema_v2.get("ff_desc"), head_frame.get("prompt"), limit=240)
+    lf_desc = _pick_text(shot.get("lf_desc"), schema_v2.get("lf_desc"), tail_frame.get("prompt"), limit=240)
+    motion_desc = _pick_meta_text("motion_desc", limit=260)
+    audio_desc = _pick_meta_text("audio_desc", limit=200)
+    state_before = _pick_meta_text("state_before", limit=120)
+    state_after = _pick_meta_text("state_after", limit=120)
+
+    shot_type = _pick_meta_text("shot_type", limit=48)
+    camera_angle = _pick_meta_text("camera_angle", limit=48)
+    movement = _pick_text(
+        shot.get("movement"),
+        shot.get("camera_movement"),
+        schema_v2.get("camera_movement"),
+        schema_meta.get("camera_movement"),
+        limit=64,
+    )
+    composition = _pick_text(
+        shot.get("composition_notes"),
+        shot.get("composition"),
+        schema_v2.get("composition_notes"),
+        schema_v2.get("composition"),
+        schema_meta.get("composition_notes"),
+        schema_meta.get("composition"),
+        limit=120,
+    )
+    location = _pick_meta_text("location", limit=120)
+    time_text = _pick_meta_text("time", limit=64)
+    atmosphere = _pick_meta_text("atmosphere", limit=120)
+    emotion = _pick_meta_text("emotion", limit=48)
+    variation_type = _pick_meta_text("variation_type", limit=32)
+    variation_reason = _pick_meta_text("variation_reason", limit=120)
+    scene_id = _text(shot.get("scene_id"), limit=32)
+    shot_id = _text(shot.get("shot_id"), limit=32)
+    cam_idx = _pick_text(
+        shot.get("cam_idx"),
+        shot.get("camera_index"),
+        schema_v2.get("cam_idx"),
+        schema_v2.get("camera_index"),
+        limit=16,
+    )
+
+    audio_sync = _pick_meta_text("audio_sync", limit=240)
     audio_policy = _build_audio_policy_hint()
-    character_ids = shot.get("character_ids")
+    character_ids = _pick_meta_any("character_ids")
 
     if not motion_desc:
         motion_desc = _join_prompt_parts(
             [
                 desc[:120],
-                "镜头缓慢推进",
-                "主体有细微动作变化",
-                "稳定运镜",
-                "电影感",
-            ]
+                "动作连续且自然过渡",
+                "镜头语言稳定清晰",
+                "保持节奏与叙事焦点",
+            ],
+            sep="，",
+            max_parts=4,
         )
 
-    motion_level = str(shot.get("motion_level") or "").strip().lower()
+    motion_level = _pick_meta_text("motion_level", limit=16).lower()
     if motion_level not in {"small", "medium", "large"}:
         motion_level = _infer_motion_level(desc=desc, motion_desc=motion_desc)
     if state_before and state_after:
@@ -513,21 +575,22 @@ def _build_wan_i2v_prompt(*, shot: Dict[str, Any], style_preset: str, frame_rati
             motion_level = "small"
         elif motion_level == "small":
             motion_level = "medium"
-    motion_control = ""
+
     if motion_level == "small":
-        motion_control = "动作幅度小，镜头稳定，过渡自然，避免大幅位移/抖动/变形"
+        motion_control = "运动强度：small；优先微动作、微表情与局部景别变化，避免大幅位移。"
     elif motion_level == "large":
-        motion_control = "动作幅度较大，运镜跟随但保持主体身份一致，动作自然连贯"
+        motion_control = "运动强度：large；允许明显走位和镜头运动，但保持主体可读性与构图稳定。"
     else:
-        motion_control = "动作幅度中等，运镜稳定，避免抖动与突兀跳变"
+        motion_control = "运动强度：medium；主体动作和镜头运动适中，突出叙事信息。"
 
-    vis_chars = _as_str_list(shot.get("ff_vis_char_ids")) + _as_str_list(shot.get("lf_vis_char_ids"))
+    vis_chars = _as_str_list(_pick_meta_any("ff_vis_char_ids")) + _as_str_list(_pick_meta_any("lf_vis_char_ids"))
     vis_chars = [c for i, c in enumerate(vis_chars) if c and c not in vis_chars[:i]]
-    vis_hint = f"人物：{'、'.join(vis_chars[:4])}" if vis_chars else ""
+    vis_hint = f"可见角色：{', '.join(vis_chars[:6])}" if vis_chars else ""
 
-    fragment_hint = _compact_prompt_fragment(prompt_fragment, limit=180)
+    fragment_hint = _compact_prompt_fragment(prompt_fragment, limit=220)
 
-    subshots = shot.get("subshots") if isinstance(shot.get("subshots"), list) else []
+    subshots_raw = _pick_meta_any("subshots")
+    subshots = subshots_raw if isinstance(subshots_raw, list) else []
     multishot_enabled = str(os.getenv("DREAMWEAVER_WAN_I2V_MULTISHOT_PROMPT", "1") or "1").strip().lower() in {
         "1",
         "true",
@@ -537,70 +600,95 @@ def _build_wan_i2v_prompt(*, shot: Dict[str, Any], style_preset: str, frame_rati
     }
     is_multishot = bool(multishot_enabled and subshots)
 
-    override = str(shot.get("video_prompt_override") or "").strip()
-    if not override:
-        meta = shot.get("shot_schema_v2_meta")
-        if isinstance(meta, dict):
-            override = str(meta.get("video_prompt_override") or "").strip()
+    override = _pick_text(shot.get("video_prompt_override"), schema_meta.get("video_prompt_override"))
     if override:
-        max_chars_default = 900 if is_multishot else 420
+        max_chars_default = 1200 if is_multishot else 680
         max_chars = _parse_int(os.getenv("DREAMWEAVER_WAN_I2V_PROMPT_MAX_CHARS"), max_chars_default)
-        max_chars = max(120, min(max_chars, 1200))
+        max_chars = max(240, min(max_chars, 1800))
         if len(override) > max_chars:
-            override = override[:max_chars].rstrip("，,。.；; ")
+            override = override[:max_chars].rstrip("，； ")
         return override
 
     duration_s = normalize_wan_i2v_duration_s(shot.get("duration_s"), default=15.0)
 
     prompt = ""
     if is_multishot:
-        def _sec(v: Any) -> int:
+        def _sec(value: Any) -> int:
             try:
-                return int(round(float(v)))
+                return int(round(float(value)))
             except Exception:  # noqa: BLE001
                 return 0
 
-        header: List[str] = []
-        header.append(f"总时长{int(duration_s)}秒，按时间戳分镜生成（不要新增/删除分镜，严格覆盖[0-{int(duration_s)}秒]）")
+        header: List[str] = [f"镜头任务：生成 {int(duration_s)} 秒连续视频，时间轴 0-{int(duration_s)}s。"]
+        if scene_id:
+            header.append(f"场景ID：{scene_id}")
+        if shot_id:
+            header.append(f"镜头ID：{shot_id}")
+        if cam_idx:
+            header.append(f"机位：{cam_idx}")
+        if shot_type:
+            header.append(f"镜头类型：{shot_type}")
+        if camera_angle:
+            header.append(f"镜头角度：{camera_angle}")
+        if movement:
+            header.append(f"镜头运动：{movement}")
+        if composition:
+            header.append(f"构图：{composition}")
         if location:
-            header.append(f"场景：{location}")
-        if time:
-            header.append(f"时间：{time}")
+            header.append(f"地点：{location}")
+        if time_text:
+            header.append(f"时间：{time_text}")
         if atmosphere:
             header.append(f"氛围：{atmosphere}")
+        if emotion:
+            header.append(f"情绪：{emotion}")
+        if variation_type:
+            header.append(f"变化幅度：{variation_type}")
+        if variation_reason:
+            header.append(f"变化原因：{variation_reason}")
         if visual_desc:
-            header.append(visual_desc)
+            header.append(f"视觉描述：{visual_desc}")
         if desc:
-            header.append(desc[:160])
-        if vis_hint:
-            header.append(vis_hint)
-        if fragment_hint:
-            header.append(f"一致性设定：{fragment_hint}")
+            header.append(f"剧情动作：{desc}")
+        if ff_desc:
+            header.append(f"首帧语义：{ff_desc}")
+        if lf_desc:
+            header.append(f"尾帧语义：{lf_desc}")
+        if motion_desc:
+            header.append(f"运动描述：{motion_desc}")
         if state_before:
-            header.append(f"开始状态：{state_before}")
+            header.append(f"前状态：{state_before}")
         if state_after:
-            header.append(f"结束状态：{state_after}")
+            header.append(f"后状态：{state_after}")
+        if audio_desc:
+            header.append(f"音频提示：{audio_desc}")
         if audio_sync:
-            header.append(f"声画同步：{audio_sync}")
+            header.append(f"音画同步：{audio_sync}")
         if audio_policy:
             header.append(audio_policy)
+        if vis_hint:
+            header.append(vis_hint)
         if character_ids and isinstance(character_ids, list) and character_ids:
-            header.append(f"角色ID：{', '.join([str(c) for c in character_ids[:4]])}")
+            header.append(f"角色ID：{', '.join([str(c) for c in character_ids[:6]])}")
+        if fragment_hint:
+            header.append(f"素材补充：{fragment_hint}")
         if motion_control:
             header.append(motion_control)
         header.append(consistency_line)
-        header.append(style_prompt)
         if frame_ratio:
-            header.append(f"画幅{frame_ratio}")
+            header.append(f"画幅：{frame_ratio}")
+        if style_prompt:
+            header.append(f"风格：{style_prompt}")
         if soft_negative:
             header.append(soft_negative)
 
         lines: List[str] = []
-        lines.append("总体：" + _join_prompt_parts(header, sep="，", max_parts=18))
-        lines.append("分镜：")
+        lines.append(_join_prompt_parts(header, sep="；", max_parts=36))
+        lines.append("时间轴分镜：")
 
         cursor = 0
-        for idx, raw in enumerate(subshots[:8]):
+        valid_subshots = 0
+        for idx, raw in enumerate(subshots[:12]):
             if not isinstance(raw, dict):
                 continue
             start = _sec(raw.get("start_s"))
@@ -609,103 +697,120 @@ def _build_wan_i2v_prompt(*, shot: Dict[str, Any], style_preset: str, frame_rati
                 start = 0
             if end <= start:
                 continue
+
             cursor = max(cursor, end)
             if cursor > int(duration_s):
                 cursor = int(duration_s)
 
-            shot_type_s = str(raw.get("shot_type") or "").strip()
-            angle_s = str(raw.get("camera_angle") or "").strip()
-            move_s = str(raw.get("camera_movement") or "").strip()
-            trans_s = str(raw.get("transition") or "").strip()
-            sub_desc = str(raw.get("visual_desc") or raw.get("desc") or "").strip()
-            if not sub_desc:
-                sub_desc = visual_desc or desc or motion_desc
-            sub_desc = sub_desc.replace("\n", " ").strip()
-            if len(sub_desc) > 180:
-                sub_desc = sub_desc[:180]
-
             sub_parts: List[str] = []
-            if idx > 0 and trans_s:
-                sub_parts.append(f"转场：{trans_s}")
-            if shot_type_s:
-                sub_parts.append(f"景别：{shot_type_s}")
-            if angle_s:
-                sub_parts.append(f"角度：{angle_s}")
-            if move_s:
-                sub_parts.append(f"运镜：{move_s}")
-            sub_parts.append(sub_desc)
+            trans_s = _text(raw.get("transition"), limit=40)
+            shot_type_s = _text(raw.get("shot_type"), limit=40)
+            angle_s = _text(raw.get("camera_angle"), limit=40)
+            move_s = _text(raw.get("camera_movement"), limit=40)
+            emo_s = _text(raw.get("emotion"), limit=40)
+            sub_desc = _pick_text(raw.get("desc"), raw.get("visual_desc"), visual_desc, motion_desc, desc, limit=220)
 
-            lines.append(f"[{start}-{end}秒] " + "，".join(sub_parts))
+            if idx > 0 and trans_s:
+                sub_parts.append(f"转场={trans_s}")
+            if shot_type_s:
+                sub_parts.append(f"镜头={shot_type_s}")
+            if angle_s:
+                sub_parts.append(f"角度={angle_s}")
+            if move_s:
+                sub_parts.append(f"运动={move_s}")
+            if emo_s:
+                sub_parts.append(f"情绪={emo_s}")
+            if sub_desc:
+                sub_parts.append(f"内容={sub_desc}")
+            if not sub_parts:
+                continue
+
+            lines.append(f"[{start}-{end}s] " + _join_prompt_parts(sub_parts, sep="，", max_parts=8))
+            valid_subshots += 1
             if cursor >= int(duration_s):
                 break
 
-        # 兜底：若 subshots 不完整，补上末段，避免总时长不闭合
-        if lines and cursor < int(duration_s):
-            tail_from = max(0, cursor)
-            tail_desc = (lf_desc or motion_desc or desc or visual_desc or "").replace("\n", " ").strip()
-            if len(tail_desc) > 180:
-                tail_desc = tail_desc[:180]
-            lines.append(f"[{tail_from}-{int(duration_s)}秒] {tail_desc or '延续上一镜头，动作自然收束，保持一致性'}")
+        if valid_subshots <= 0:
+            fallback = _pick_text(motion_desc, lf_desc, desc, visual_desc, limit=220) or "保持同一场景内的连续动作与叙事焦点。"
+            lines.append(f"[0-{int(duration_s)}s] {fallback}")
+            cursor = int(duration_s)
 
-        prompt = "\n".join([ln for ln in lines if ln.strip()])
+        if cursor < int(duration_s):
+            tail_desc = _pick_text(lf_desc, motion_desc, desc, visual_desc, limit=220) or "收束镜头并稳定在尾帧语义。"
+            lines.append(f"[{max(0, cursor)}-{int(duration_s)}s] {tail_desc}")
+
+        prompt = "\n".join([line for line in lines if line.strip()])
     else:
         parts: List[str] = []
+        if scene_id:
+            parts.append(f"场景ID：{scene_id}")
+        if shot_id:
+            parts.append(f"镜头ID：{shot_id}")
+        if cam_idx:
+            parts.append(f"机位：{cam_idx}")
         if shot_type:
             parts.append(f"镜头类型：{shot_type}")
         if camera_angle:
-            parts.append(f"拍摄角度：{camera_angle}")
+            parts.append(f"镜头角度：{camera_angle}")
         if movement:
             parts.append(f"镜头运动：{movement}")
         if composition:
             parts.append(f"构图：{composition}")
         if location:
-            parts.append(f"场景：{location}")
-        if time:
-            parts.append(f"时间：{time}")
+            parts.append(f"地点：{location}")
+        if time_text:
+            parts.append(f"时间：{time_text}")
         if atmosphere:
             parts.append(f"氛围：{atmosphere}")
+        if emotion:
+            parts.append(f"情绪：{emotion}")
+        if variation_type:
+            parts.append(f"变化幅度：{variation_type}")
+        if variation_reason:
+            parts.append(f"变化原因：{variation_reason}")
         if visual_desc:
-            parts.append(visual_desc)
+            parts.append(f"视觉描述：{visual_desc}")
         if desc:
-            parts.append(desc[:180])
-        if vis_hint:
-            parts.append(vis_hint)
-        if fragment_hint:
-            parts.append(f"一致性设定：{fragment_hint}")
+            parts.append(f"剧情动作：{desc}")
+        if ff_desc:
+            parts.append(f"首帧语义：{ff_desc}")
+        if lf_desc:
+            parts.append(f"尾帧语义：{lf_desc}")
+        if motion_desc:
+            parts.append(f"运动描述：{motion_desc}")
         if state_before:
-            parts.append(f"开始状态：{state_before}")
+            parts.append(f"前状态：{state_before}")
         if state_after:
-            parts.append(f"结束状态：{state_after}")
+            parts.append(f"后状态：{state_after}")
+        if audio_desc:
+            parts.append(f"音频提示：{audio_desc}")
         if audio_sync:
-            parts.append(f"声画同步：{audio_sync}")
+            parts.append(f"音画同步：{audio_sync}")
         if audio_policy:
             parts.append(audio_policy)
+        if vis_hint:
+            parts.append(vis_hint)
         if character_ids and isinstance(character_ids, list):
-            char_hint = f"角色ID：{', '.join([str(c) for c in character_ids[:4]])}"
-            parts.append(char_hint)
+            parts.append(f"角色ID：{', '.join([str(c) for c in character_ids[:6]])}")
+        if fragment_hint:
+            parts.append(f"素材补充：{fragment_hint}")
         if motion_control:
             parts.append(motion_control)
-
-        if ff_desc:
-            parts.append(ff_desc[:120])
-        if lf_desc:
-            parts.append(lf_desc[:120])
-
-        parts.append(motion_desc[:200])
         parts.append(consistency_line)
-        parts.append(style_prompt)
         if frame_ratio:
-            parts.append(f"画幅{frame_ratio}")
+            parts.append(f"画幅：{frame_ratio}")
+        if style_prompt:
+            parts.append(f"风格：{style_prompt}")
         if soft_negative:
             parts.append(soft_negative)
 
-        prompt = _join_prompt_parts(parts, max_parts=11)
+        prompt = _join_prompt_parts(parts, sep="；", max_parts=36)
 
-    max_chars_default = 900 if is_multishot else 420
+    max_chars_default = 1200 if is_multishot else 680
     max_chars = _parse_int(os.getenv("DREAMWEAVER_WAN_I2V_PROMPT_MAX_CHARS"), max_chars_default)
-    max_chars = max(120, min(max_chars, 1200))
+    max_chars = max(240, min(max_chars, 1800))
     if len(prompt) > max_chars:
-        prompt = prompt[:max_chars].rstrip("，,。.；; ")
+        prompt = prompt[:max_chars].rstrip("，；。 ")
     return prompt
 
 
@@ -720,6 +825,99 @@ def _store_video_prompt_generated(shot: Dict[str, Any], prompt: str) -> None:
         meta = {}
         shot["shot_schema_v2_meta"] = meta
     meta["video_prompt_generated"] = value
+
+    # 同步到前端读取路径 shot_schema_v2.meta，避免弹窗缺失。
+    shot_schema_v2 = shot.get("shot_schema_v2")
+    if isinstance(shot_schema_v2, dict):
+        schema_meta = shot_schema_v2.get("meta") if isinstance(shot_schema_v2.get("meta"), dict) else {}
+        schema_meta["video_prompt_generated"] = value
+        shot_schema_v2["meta"] = schema_meta
+        shot["shot_schema_v2"] = shot_schema_v2
+
+
+def _is_legacy_video_prompt(prompt: str, *, shot: Optional[Dict[str, Any]] = None) -> bool:
+    text = str(prompt or "").strip()
+    if not text:
+        return True
+    if any(token in text for token in ("首帧:", "尾帧:", "单格分镜")):
+        return True
+
+    has_subshots = False
+    if isinstance(shot, dict):
+        for container in (
+            shot,
+            shot.get("shot_schema_v2") if isinstance(shot.get("shot_schema_v2"), dict) else None,
+            shot.get("shot_schema_v2_meta") if isinstance(shot.get("shot_schema_v2_meta"), dict) else None,
+        ):
+            if not isinstance(container, dict):
+                continue
+            subshots = container.get("subshots")
+            if isinstance(subshots, list) and subshots:
+                has_subshots = True
+                break
+    if has_subshots and "时间轴分镜" not in text and re.search(r"\[\d+\-\d+s\]", text) is None:
+        return True
+    return False
+
+
+def ensure_storyboard_video_prompts(payload: Dict[str, Any], *, force: bool = False) -> int:
+    """
+    批量为 storyboard 写入自动视频提示词。
+    - 供提示词审核阶段直接展示，不必等待 VIDEO 阶段。
+    """
+    if not isinstance(payload, dict):
+        return 0
+    ensure_media_payload(payload)
+
+    storyboard = payload.get("storyboard")
+    if not isinstance(storyboard, list) or not storyboard:
+        return 0
+
+    video_cfg = payload.get("video_config") if isinstance(payload.get("video_config"), dict) else {}
+    image_cfg = payload.get("image_config") if isinstance(payload.get("image_config"), dict) else {}
+
+    style_preset = str(payload.get("style_preset") or "").strip()
+    frame_ratio = str(image_cfg.get("ratio") or "").strip() or "16:9"
+    engine = str(video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "wan_i2v").strip().lower()
+    if engine not in {"wan_i2v", "i2v", "wan_t2v", "wan26_t2v", "t2v", "wan_auto", "auto"}:
+        engine = "wan_i2v"
+
+    lib_assets = _library_assets_from_payload(payload)
+    updated = 0
+
+    for item in storyboard:
+        if not isinstance(item, dict):
+            continue
+        shot_id = str(item.get("shot_id") or "").strip()
+        if not shot_id:
+            continue
+
+        existing = ""
+        raw_meta = item.get("shot_schema_v2_meta")
+        if isinstance(raw_meta, dict):
+            existing = str(raw_meta.get("video_prompt_generated") or "").strip()
+        if existing and not force:
+            if _is_legacy_video_prompt(existing, shot=item):
+                existing = ""
+            else:
+                _store_video_prompt_generated(item, existing)
+                continue
+
+        asset_match = _match_library_assets_for_shot(shot=item, library_assets=lib_assets, max_character_refs=3)
+        prompt_fragment = str(asset_match.get("prompt_fragment") or "").strip()
+        generated = _build_wan_i2v_prompt(
+            shot=item,
+            style_preset=style_preset,
+            frame_ratio=frame_ratio,
+            prompt_fragment=prompt_fragment,
+            engine=engine,
+        )
+        if not generated:
+            continue
+        _store_video_prompt_generated(item, generated)
+        updated += 1
+
+    return updated
 
 
 def _clone_adapter_instance(adapter: Any) -> Optional[Any]:
@@ -1161,6 +1359,10 @@ def _run_wan_i2v(
 
             if isinstance(result.data, dict) and isinstance(result.data.get("video_url"), str):
                 meta["remote_url"] = result.data["video_url"]
+            if isinstance(getattr(result, "metadata", None), dict):
+                image_input_mode = result.metadata.get("image_input_mode")
+                if isinstance(image_input_mode, str) and image_input_mode.strip():
+                    meta["image_input_mode"] = image_input_mode.strip()
             meta["seed"] = seed
             if attempts:
                 meta["i2v_attempts"] = attempts
@@ -1750,6 +1952,45 @@ def _build_video_clip_jobs(
     return jobs
 
 
+def _split_wan_auto_shots(
+    *,
+    storyboard: Any,
+    jobs_by_shot: Dict[str, Dict[str, Any]],
+    run_dir: Path,
+    requested_shot_ids: set[str],
+    regenerate_shot_ids: set[str],
+) -> Tuple[set[str], set[str]]:
+    """
+    wan_auto 路由策略：
+    - 默认走 t2v（文本生成视频）
+    - 需要参考图桥接（requires_bridge=True）走 i2v
+    """
+    i2v_shot_ids: set[str] = set()
+    t2v_shot_ids: set[str] = set()
+    if not isinstance(storyboard, list):
+        return i2v_shot_ids, t2v_shot_ids
+
+    for item in storyboard:
+        if not isinstance(item, dict):
+            continue
+        shot_id = str(item.get("shot_id") or "").strip()
+        if not shot_id:
+            continue
+        if requested_shot_ids and shot_id not in requested_shot_ids:
+            continue
+        out = run_dir / f"{shot_id}.mp4"
+        if out.exists() and shot_id not in regenerate_shot_ids:
+            continue
+
+        job = jobs_by_shot.get(shot_id) if isinstance(jobs_by_shot, dict) else None
+        requires_bridge = bool(job.get("requires_bridge")) if isinstance(job, dict) else False
+        if requires_bridge:
+            i2v_shot_ids.add(shot_id)
+        else:
+            t2v_shot_ids.add(shot_id)
+    return i2v_shot_ids, t2v_shot_ids
+
+
 def run_video(ctx: Any) -> None:
     ensure_media_payload(ctx.payload)
 
@@ -1761,7 +2002,10 @@ def run_video(ctx: Any) -> None:
     width, height, _ratio = resolve_frame_size(image_cfg)
     fps = normalize_video_fps(video_cfg.get("fps"), default=24)
     engine = str(video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "ffmpeg_slideshow").strip().lower()
-    bridge_enabled = engine in {"wan_i2v", "i2v"}
+    is_wan_i2v_engine = engine in {"wan_i2v", "i2v"}
+    is_wan_t2v_engine = engine in {"wan_t2v", "wan26_t2v", "t2v"}
+    is_wan_auto_engine = engine in {"wan_auto", "auto"}
+    bridge_enabled = bool(is_wan_i2v_engine or is_wan_auto_engine)
     regen_set = _normalize_regenerate_shot_ids(ctx.payload.get("regenerate_shot_ids"))
     batch_id = _resolve_audio_batch_id(ctx.payload)
     if batch_id and not str(ctx.payload.get("batch_id") or "").strip():
@@ -1822,7 +2066,7 @@ def run_video(ctx: Any) -> None:
             if not dialogues:
                 continue
 
-            if engine in {"wan_i2v", "i2v", "wan_t2v", "wan26_t2v", "t2v"}:
+            if is_wan_i2v_engine or is_wan_t2v_engine or is_wan_auto_engine:
                 target_duration_s = normalize_wan_i2v_duration_s(shot.get("duration_s"), default=5.0)
             else:
                 try:
@@ -1881,10 +2125,21 @@ def run_video(ctx: Any) -> None:
         bridge_enabled=bridge_enabled,
         camera_states=ctx.payload.get("camera_states"),
     )
+    video_jobs_by_shot = _index_video_clip_jobs_by_shot(ctx.payload.get("video_clip_jobs"))
+    auto_i2v_shots: set[str] = set()
+    auto_t2v_shots: set[str] = set()
+    if is_wan_auto_engine:
+        auto_i2v_shots, auto_t2v_shots = _split_wan_auto_shots(
+            storyboard=storyboard,
+            jobs_by_shot=video_jobs_by_shot,
+            run_dir=run_dir,
+            requested_shot_ids=requested_shots,
+            regenerate_shot_ids=regen_set,
+        )
 
     if require_confirmation and not _all_storyboard_shots_have_video(storyboard=storyboard, run_dir=run_dir):
         if requested_shots:
-            if engine in {"wan_i2v", "i2v"}:
+            if is_wan_i2v_engine:
                 _run_wan_i2v(
                     ctx,
                     run_dir=run_dir,
@@ -1895,7 +2150,7 @@ def run_video(ctx: Any) -> None:
                     allowed_shot_ids=requested_shots,
                     character_manager=character_manager,
                 )
-            elif engine in {"wan_t2v", "wan26_t2v", "t2v"}:
+            elif is_wan_t2v_engine:
                 _run_wan_t2v(
                     ctx,
                     run_dir=run_dir,
@@ -1906,6 +2161,29 @@ def run_video(ctx: Any) -> None:
                     regenerate_shot_ids=regen_set,
                     allowed_shot_ids=requested_shots,
                 )
+            elif is_wan_auto_engine:
+                if auto_t2v_shots:
+                    _run_wan_t2v(
+                        ctx,
+                        run_dir=run_dir,
+                        video_cfg=video_cfg,
+                        width=width,
+                        height=height,
+                        fps=fps,
+                        regenerate_shot_ids=regen_set,
+                        allowed_shot_ids=auto_t2v_shots,
+                    )
+                if auto_i2v_shots:
+                    _run_wan_i2v(
+                        ctx,
+                        run_dir=run_dir,
+                        video_cfg=video_cfg,
+                        width=width,
+                        height=height,
+                        regenerate_shot_ids=regen_set,
+                        allowed_shot_ids=auto_i2v_shots,
+                        character_manager=character_manager,
+                    )
             else:
                 ffmpeg = os.getenv("FFMPEG_PATH", "ffmpeg")
                 slideshow_effect = _resolve_slideshow_effect(video_cfg.get("slideshow_effect"))
@@ -1997,7 +2275,7 @@ def run_video(ctx: Any) -> None:
         ctx.payload["video_done"] = _all_storyboard_shots_have_video(storyboard=storyboard, run_dir=run_dir)
         return
 
-    if engine in {"wan_i2v", "i2v"}:
+    if is_wan_i2v_engine:
         _run_wan_i2v(
             ctx,
             run_dir=run_dir,
@@ -2020,7 +2298,7 @@ def run_video(ctx: Any) -> None:
         ctx.payload["video_done"] = True
         return
 
-    if engine in {"wan_t2v", "wan26_t2v", "t2v"}:
+    if is_wan_t2v_engine:
         _run_wan_t2v(
             ctx,
             run_dir=run_dir,
@@ -2038,6 +2316,42 @@ def run_video(ctx: Any) -> None:
             existing_clips_by_shot=_index_video_clips_by_shot(ctx.payload.get("video_clips")),
             requested_shot_ids=requested_shots,
             bridge_enabled=bridge_enabled,
+            camera_states=ctx.payload.get("camera_states"),
+        )
+        ctx.payload["video_done"] = True
+        return
+
+    if is_wan_auto_engine:
+        if auto_t2v_shots:
+            _run_wan_t2v(
+                ctx,
+                run_dir=run_dir,
+                video_cfg=video_cfg,
+                width=width,
+                height=height,
+                fps=fps,
+                regenerate_shot_ids=regen_set,
+                allowed_shot_ids=auto_t2v_shots,
+            )
+        if auto_i2v_shots:
+            _run_wan_i2v(
+                ctx,
+                run_dir=run_dir,
+                video_cfg=video_cfg,
+                width=width,
+                height=height,
+                regenerate_shot_ids=regen_set,
+                allowed_shot_ids=auto_i2v_shots,
+                character_manager=character_manager,
+            )
+        _apply_sfx_to_clips(ctx=ctx, run_dir=run_dir, storyboard=storyboard)
+        ctx.payload["video_clip_jobs"] = _build_video_clip_jobs(
+            storyboard=storyboard,
+            run_dir=run_dir,
+            existing_jobs_by_shot=_index_video_clip_jobs_by_shot(ctx.payload.get("video_clip_jobs")),
+            existing_clips_by_shot=_index_video_clips_by_shot(ctx.payload.get("video_clips")),
+            requested_shot_ids=requested_shots,
+            bridge_enabled=True,
             camera_states=ctx.payload.get("camera_states"),
         )
         ctx.payload["video_done"] = True

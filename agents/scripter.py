@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Tuple
 from datetime import datetime
 from dataclasses import dataclass, field
 
-from agents.llm_client import chat_completions, env_flag, extract_json_object, llm_stream_context
+from agents.llm_client import chat_completions, env_flag, extract_json_array, extract_json_object, llm_stream_context
 from pipeline.style_presets import ensure_style_payload
 
 
@@ -743,7 +743,7 @@ def _generate_character_profiles_with_llm(
                 on_chunk=on_chunk,
             )
         
-        obj = extract_json_object(content)
+        obj = extract_json_array(content)
         if not isinstance(obj, list):
             return []
         
@@ -864,7 +864,7 @@ def _generate_audio_markers_with_llm(
                 on_chunk=on_chunk,
             )
         
-        obj = extract_json_object(content)
+        obj = extract_json_array(content)
         if not isinstance(obj, list):
             return []
         

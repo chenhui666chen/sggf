@@ -1,8 +1,7 @@
+# -*- coding: utf-8 -*-
 """
-模型适配器层 - 支持多种 AI 模型的统一接口。
-
-不依赖 ComfyUI/LoRA，按“能力/供应商”抽象适配。
-"""
+æ¨¡å??é??é??å?¨å±? - æ?¯æ??å¤?ç§? AI æ¨¡å??ç??ç»?ä¸?æ?¥å?£ã??
+ä¸?ä¾?èµ?ComfyUI/LoRAï¼?æ??â??è?½å??ä¾?åº?å??â??æ?½è±¡é??é??ã??"""
 
 from __future__ import annotations
 
@@ -10,10 +9,11 @@ import json
 import os
 import random
 import time
+import copy
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 import requests
@@ -23,7 +23,7 @@ from adapters.rate_limiter import get_rate_limiter
 
 @dataclass
 class ModelConfig:
-    """模型配置"""
+    """æ¨¡å??é??ç½®"""
     api_key: str
     base_url: str
     model_name: str
@@ -36,7 +36,7 @@ class ModelConfig:
 
 @dataclass
 class GenerationResult:
-    """生成结果"""
+    """ç??æ??ç»?æ??"""
     success: bool
     data: Any
     error: Optional[str] = None
@@ -45,7 +45,7 @@ class GenerationResult:
 
 
 class BaseModelAdapter(ABC):
-    """模型适配器基类"""
+    """Base model adapter."""
 
     def __init__(self, config: ModelConfig):
         self.config = config
@@ -62,8 +62,7 @@ class BaseModelAdapter(ABC):
 
     def _base_host(self) -> str:
         """
-        从 base_url 提取 scheme://netloc（用于某些厂商把不同能力挂在不同 path 下的场景）。
-        例如：https://dashscope.aliyuncs.com/compatible-mode/v1 -> https://dashscope.aliyuncs.com
+        ä»?base_url æ??å?? scheme://netlocï¼?ç?¨äº?æ??äº?å??å??æ??ä¸?å??è?½å??æ??å?¨ä¸?å?? path ä¸?ç??å?ºæ?¯ï¼?ã??        ä¾?å¦?ï¼?https://dashscope.aliyuncs.com/compatible-mode/v1 -> https://dashscope.aliyuncs.com
         """
         raw = (self.config.base_url or "").strip()
         if not raw:
@@ -82,8 +81,7 @@ class BaseModelAdapter(ABC):
 
     def _retry_delay_s(self, attempt: int, *, response: Optional[requests.Response] = None) -> float:
         """
-        计算重试等待时间（指数退避 + 抖动）；若响应包含 Retry-After（秒），则优先使用该值。
-        """
+        è®¡ç®?é??è¯?ç­?å¾?æ?¶é?´ï¼?æ??æ?°é??é??+ æ??å?¨ï¼?ï¼?è?¥å??åº?å??å??Retry-Afterï¼?ç§?ï¼?ï¼?å??ä¼?å??ä½¿ç?¨è¯¥å?¼ã??        """
         base = float(2 ** max(int(attempt), 0))
         retry_after: Optional[float] = None
         if isinstance(response, requests.Response):
@@ -103,9 +101,7 @@ class BaseModelAdapter(ABC):
 
     def _http_error_with_detail(self, exc: requests.exceptions.HTTPError) -> requests.exceptions.HTTPError:
         """
-        requests 的 HTTPError 默认不包含响应体细节；这里尝试提取常见错误字段并拼到 message 里，便于排障。
-        注意：仍保持异常类型为 HTTPError，避免破坏上层对 status_code 的分支逻辑（如 404 回退）。
-        """
+        requests ç??HTTPError é»?è®¤ä¸?å??å?«å??åº?ä½?ç»?è??ï¼?è¿?é??å°?è¯?æ??å??å¸¸è§?é??è¯¯å­?æ®µå¹¶æ?¼å?° message é??ï¼?ä¾¿äº?æ??é??ã??        æ³¨æ??ï¼?ä»?ä¿?æ??å¼?å¸¸ç±»å??ä¸?HTTPErrorï¼?é?¿å??ç ´å??ä¸?å±?å¯¹ status_code ç??å??æ?¯é?»è¾?ï¼?å¦? 404 å??é??ï¼?ã??        """
         resp = getattr(exc, "response", None)
         if not isinstance(resp, requests.Response):
             return exc
@@ -154,12 +150,130 @@ class BaseModelAdapter(ABC):
             return exc
         return requests.HTTPError(f"{base_msg} ({detail})", response=resp)
 
+    def _dashscope_error_fields(self, response: Any) -> Tuple[str, str, str]:
+        code = ""
+        message = ""
+        request_id = ""
+        if not isinstance(response, requests.Response):
+            return code, message, request_id
+
+        try:
+            payload = response.json()
+            if isinstance(payload, dict):
+                code_raw = payload.get("code")
+                if isinstance(code_raw, str):
+                    code = code_raw.strip()
+                message_raw = payload.get("message")
+                if isinstance(message_raw, str):
+                    message = message_raw.strip()
+                request_raw = payload.get("request_id") or payload.get("requestId")
+                if isinstance(request_raw, str):
+                    request_id = request_raw.strip()
+                err = payload.get("error")
+                if isinstance(err, dict):
+                    err_code = err.get("code")
+                    err_message = err.get("message") or err.get("msg")
+                    if not code and isinstance(err_code, str):
+                        code = err_code.strip()
+                    if not message and isinstance(err_message, str):
+                        message = err_message.strip()
+                elif not message and isinstance(err, str):
+                    message = err.strip()
+        except Exception:  # noqa: BLE001
+            pass
+
+        if not message:
+            try:
+                text = (response.text or "").strip()
+                if text:
+                    message = text[:500]
+            except Exception:  # noqa: BLE001
+                pass
+        return code, message, request_id
+
+    def _is_dashscope_data_inspection_failed(self, *, response: Any = None, error_text: str = "") -> bool:
+        if not self._is_dashscope():
+            return False
+        code, message, _ = self._dashscope_error_fields(response)
+        text = " ".join(
+            [
+                str(code or ""),
+                str(message or ""),
+                str(error_text or ""),
+            ]
+        ).lower()
+        return (
+            "datainspectionfailed" in text
+            or "inappropriate content" in text
+            or "content check failed" in text
+        )
+
+    def _normalize_safety_strategy(self, raw: str) -> str:
+        value = (raw or "").strip().lower()
+        if value in {"off", "none", "disable", "false", "0"}:
+            return ""
+        if value in {"conservative", "moderate", "aggressive"}:
+            return value
+        return "moderate"
+
+    def _sanitize_payload_prompt_fields(
+        self,
+        payload: Dict[str, Any],
+        *,
+        strategy: str,
+    ) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+        try:
+            from adapters.content_safety_checker import check_and_fix_prompt
+        except Exception:  # noqa: BLE001
+            return None, {"strategy": strategy, "changed_fields": 0, "issues": 0, "field_paths": []}
+
+        target_keys = {"text", "prompt", "edit_prompt", "negative_prompt"}
+        patched: Dict[str, Any] = copy.deepcopy(payload)
+        changed_fields = 0
+        issue_count = 0
+        field_paths: List[str] = []
+
+        def _walk(node: Any, path: str) -> None:
+            nonlocal changed_fields, issue_count
+            if isinstance(node, dict):
+                for key, value in list(node.items()):
+                    child_path = f"{path}.{key}" if path else str(key)
+                    if key in target_keys and isinstance(value, str) and value.strip():
+                        fixed, issues, _ = check_and_fix_prompt(value, strategy=strategy)
+                        if isinstance(issues, list):
+                            issue_count += len(issues)
+                        if isinstance(fixed, str) and fixed and fixed != value:
+                            node[key] = fixed
+                            changed_fields += 1
+                            field_paths.append(child_path)
+                    else:
+                        _walk(value, child_path)
+                return
+
+            if isinstance(node, list):
+                for idx, item in enumerate(node):
+                    _walk(item, f"{path}[{idx}]")
+
+        _walk(patched, "")
+        meta: Dict[str, Any] = {
+            "strategy": strategy,
+            "changed_fields": int(changed_fields),
+            "issues": int(issue_count),
+            "field_paths": field_paths[:20],
+        }
+        if changed_fields <= 0:
+            return None, meta
+        return patched, meta
+
     def _request_json_url(self, *, method: str, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         retries = int(getattr(self.config, "max_retries", 1) or 1)
         if retries <= 0:
             retries = 1
 
         last_exc: Optional[Exception] = None
+        request_payload: Dict[str, Any] = payload
+        safety_retry_used = False
+        safety_retry_meta: Dict[str, Any] = {}
         for attempt in range(retries):
             try:
                 if self._rate_limiter:
@@ -167,7 +281,7 @@ class BaseModelAdapter(ABC):
                 response = self.session.request(
                     str(method or "POST"),
                     str(url),
-                    json=payload,
+                    json=request_payload,
                     timeout=self.config.timeout,
                 )
                 try:
@@ -180,15 +294,54 @@ class BaseModelAdapter(ABC):
                 except Exception as exc:  # noqa: BLE001
                     text = (getattr(response, "text", "") or "").strip()
                     snippet = text[:300] if text else ""
-                    raise ValueError(f"响应不是有效 JSON（url={url}）: {snippet}") from exc
+                    raise ValueError(f"response is not valid JSON (url={url}): {snippet}") from exc
             except requests.exceptions.HTTPError as exc:
                 last_exc = exc
-                status = getattr(getattr(exc, "response", None), "status_code", None)
+                response = getattr(exc, "response", None)
+                status = getattr(response, "status_code", None)
+                if (
+                    int(status or 0) == 400
+                    and self._is_dashscope_data_inspection_failed(response=response, error_text=str(exc))
+                    and not safety_retry_used
+                ):
+                    preferred = self._normalize_safety_strategy(os.getenv("DREAMWEAVER_SAFETY_STRATEGY", "moderate"))
+                    strategies: List[str] = []
+                    if preferred:
+                        strategies.append(preferred)
+                    if "aggressive" not in strategies:
+                        strategies.append("aggressive")
+                    for strategy in strategies:
+                        patched_payload, meta = self._sanitize_payload_prompt_fields(
+                            request_payload,
+                            strategy=strategy,
+                        )
+                        if patched_payload is None:
+                            continue
+                        request_payload = patched_payload
+                        safety_retry_used = True
+                        safety_retry_meta = meta
+                        print(
+                            f"[warn] DashScope content check blocked, retry with safety strategy={strategy}, "
+                            f"changed_fields={meta.get('changed_fields', 0)}"
+                        )
+                        break
+                    if safety_retry_used:
+                        continue
                 if status is not None and int(status) < 500 and int(status) != 429:
+                    if int(status) == 400 and self._is_dashscope_data_inspection_failed(response=response, error_text=str(exc)):
+                        extra_hint = "Input may contain inappropriate content. Please review the prompt."
+                        if safety_retry_used:
+                            strategy = str(safety_retry_meta.get("strategy") or "")
+                            changed_fields = int(safety_retry_meta.get("changed_fields") or 0)
+                            extra_hint = (
+                                f"{extra_hint} Safety retry exhausted(strategy={strategy}, "
+                                f"changed_fields={changed_fields})."
+                            )
+                        raise requests.HTTPError(f"{str(exc)} ({extra_hint})", response=response) from exc
                     raise
                 if attempt >= retries - 1:
                     raise
-                time.sleep(self._retry_delay_s(attempt, response=getattr(exc, "response", None)))
+                time.sleep(self._retry_delay_s(attempt, response=response))
             except requests.exceptions.RequestException as exc:
                 last_exc = exc
                 if attempt >= retries - 1:
@@ -205,7 +358,7 @@ class BaseModelAdapter(ABC):
         payload: Dict[str, Any],
         method: str = "POST"
     ) -> Dict[str, Any]:
-        """发送API请求"""
+        """å??é??APIè¯·æ±?"""
         base_url = (self.config.base_url or "").rstrip("/")
         ep = (endpoint or "").lstrip("/")
         if base_url.endswith("/v1") and ep.startswith("v1/"):
@@ -215,15 +368,15 @@ class BaseModelAdapter(ABC):
 
     @abstractmethod
     def generate(self, **kwargs) -> GenerationResult:
-        """生成内容"""
+        """ç??æ??å??å®¹"""
         pass
 
 
 class Wan26T2IAdapter(BaseModelAdapter):
-    """Wan 2.6 T2I (Text-to-Image) 适配器 - 文生图"""
+    """Wan 2.6 T2I (Text-to-Image) é??é??å??- æ??ç??å??"""
 
     def _dashscope_model_name(self) -> str:
-        # 兼容：用户可能配置了控制台的数字模型ID；DashScope AIGC 接口通常使用模型名（如 wanx-v1）。
+        # 兼容控制台数字模型ID；AIGC 通常需要模型名（如 wanx-v1）
         raw = str(self.config.model_name or "").strip()
         if raw.isdigit():
             explicit = (os.getenv("WAN_T2I_MODEL_NAME") or "").strip()
@@ -245,7 +398,6 @@ class Wan26T2IAdapter(BaseModelAdapter):
 
         url = f"{host}/api/v1/services/aigc/multimodal-generation/generation"
 
-        # 🔧 内容安全检查与自动修复
         from adapters.content_safety_checker import check_and_fix_prompt
 
         raw_prompt = prompt
@@ -260,15 +412,15 @@ class Wan26T2IAdapter(BaseModelAdapter):
         aggressive_prompt: Optional[str] = None
 
         if safety_strategy:
-            print("🔍 [内容安全检查] 检查提示词...")
+            print("[content-safety] Checking T2I prompt...")
             fixed_prompt, issues, fix_description = check_and_fix_prompt(raw_prompt, strategy=safety_strategy)
             if issues:
-                print(f"⚠️ [内容安全检查] {fix_description}")
-                print(f"📝 [内容安全检查] 原始提示词: {raw_prompt}")
-                print(f"✨ [内容安全检查] 修复后提示词: {fixed_prompt}")
+                print(f"[content-safety][warn] {fix_description}")
+                print(f"[content-safety] Original prompt: {raw_prompt}")
+                print(f"[content-safety] Sanitized prompt: {fixed_prompt}")
                 prompt = fixed_prompt
             else:
-                print("✅ [内容安全检查] 提示词安全，无需修复")
+                print("[content-safety] Prompt passed safety precheck.")
                 prompt = raw_prompt
         else:
             prompt = raw_prompt
@@ -425,7 +577,7 @@ class Wan26T2IAdapter(BaseModelAdapter):
                                 if retry_count < max_retries:
                                     retry_count += 1
                                     wait_time = min(5 * (retry_count ** 1.5), 120)
-                                    print(f"⚠️ DashScope T2I rate limit (429), retry {retry_count}/{max_retries}, waiting {wait_time:.1f}s...")
+                                    print(f"[warn] DashScope T2I rate limit (429), retry {retry_count}/{max_retries}, waiting {wait_time:.1f}s...")
                                     time.sleep(wait_time)
                                     continue
                                 else:
@@ -436,16 +588,17 @@ class Wan26T2IAdapter(BaseModelAdapter):
                                 detail = _error_detail(resp_obj)
                                 error_msg = detail.lower()
                                 if "asynchronous" in error_msg and async_enabled:
-                                    print("⚠️ DashScope T2I async not supported (403), switching to sync mode...")
+                                    print("[warn] DashScope T2I async not supported (403), switching to sync mode...")
                                     break
                                 else:
                                     last_error = f"dashscope t2i HTTP {status} (size={size}, async={async_enabled}): {detail}".strip()
                                     break
                             elif status == 400:
                                 detail = _error_detail(resp_obj)
+                                detail_lower = detail.lower()
                                 error_msg = detail.lower()
-                                if "DataInspectionFailed" in detail or "inappropriate content" in error_msg:
-                                    print("⚠️ DashScope T2I content check failed (400): Input may contain inappropriate content")
+                                if "datainspectionfailed" in detail_lower or "inappropriate content" in error_msg:
+                                    print("[warn] DashScope T2I content check failed (400): Input may contain inappropriate content")
                                     print("   Please review and modify your prompt to comply with content policies")
                                     last_error = "dashscope t2i HTTP 400 (DataInspectionFailed): Input may contain inappropriate content. Please review and modify your prompt."
                                     safety_failed = True
@@ -471,7 +624,7 @@ class Wan26T2IAdapter(BaseModelAdapter):
 
             if safety_failed and prompt_index + 1 < len(prompt_candidates):
                 final_error = last_error
-                print("🛡️ [内容安全] 触发内容安全拦截，尝试使用更严格的安全提示词重试...")
+                print("[content-safety][retry] Safety policy triggered; retrying with aggressive prompt sanitization...")
                 continue
 
             if last_error:
@@ -485,13 +638,9 @@ class Wan26T2IAdapter(BaseModelAdapter):
         if not host:
             raise RuntimeError("dashscope host missing from WAN_T2I_BASE_URL")
         url = f"{host}/api/v1/tasks/{task_id}"
-        # DashScope 的 AIGC 接口通常返回异步 task_id，排队 + 生成可能远超单次 HTTP 超时。
-        # 因此这里将“轮询总时长”与“单次请求超时”分离，避免素材生成阶段因短 timeout 误判失败。
-        #
-        # 可通过以下环境变量覆盖（单位秒）：
-        # - WAN_T2I_TASK_TIMEOUT：轮询总时长（默认 1800）
-        # - WAN_T2I_POLL_HTTP_TIMEOUT：轮询接口单次请求超时（默认 min(WAN_T2I_TIMEOUT, 15)）
-        # - WAN_T2I_POLL_INTERVAL_S：轮询间隔（默认 2）
+        # DashScope ç??AIGC æ?¥å?£é??å¸¸è¿?å??å¼?æ­¥ task_idï¼?æ??é??+ ç??æ??å?¯è?½è¿?è¶?å??æ¬¡ HTTP è¶?æ?¶ã??        # å? æ­¤è¿?é??å°?â??è½®è¯¢æ?»æ?¶é?¿â??ä¸?â??å??æ¬¡è¯·æ±?è¶?æ?¶â??å??ç¦»ï¼?é?¿å??ç´ æ??ç??æ??é?¶æ®µå? ç?­ timeout è¯¯å?¤å¤±è´¥ã??        #
+        # å?¯é??è¿?ä»¥ä¸?ç?¯å¢?å??é??è¦?ç??ï¼?å??ä½?ç§?ï¼?ï¼?
+        # - WAN_T2I_TASK_TIMEOUTï¼?è½®è¯¢æ?»æ?¶é?¿ï¼?é»?è®¤ 1800ï¼?        # - WAN_T2I_POLL_HTTP_TIMEOUTï¼?è½®è¯¢æ?¥å?£å??æ¬¡è¯·æ±?è¶?æ?¶ï¼?é»?è®¤ min(WAN_T2I_TIMEOUT, 15)ï¼?        # - WAN_T2I_POLL_INTERVAL_Sï¼?è½®è¯¢é?´é??ï¼?é»?è®¤ 2ï¼?        
         def _env_int(name: str, default: int) -> int:
             raw = os.getenv(name)
             if raw is None or not raw.strip():
@@ -529,7 +678,7 @@ class Wan26T2IAdapter(BaseModelAdapter):
                     if poll_retry_count < max_poll_retries:
                         poll_retry_count += 1
                         wait_time = min(5 * (poll_retry_count ** 1.5), 120)
-                        print(f"⚠️ DashScope task poll rate limit (429), retry {poll_retry_count}/{max_poll_retries}, waiting {wait_time:.1f}s...")
+                        print(f"[warn] DashScope task poll rate limit (429), retry {poll_retry_count}/{max_poll_retries}, waiting {wait_time:.1f}s...")
                         time.sleep(wait_time)
                         continue
                     else:
@@ -573,7 +722,7 @@ class Wan26T2IAdapter(BaseModelAdapter):
         guidance_scale: float = 7.5,
         seed: Optional[int] = None
     ) -> GenerationResult:
-        """生成图像"""
+        """ç??æ??å?¾å??"""
         payload = {
             "model": self.config.model_name,
             "prompt": prompt,
@@ -610,8 +759,7 @@ class Wan26T2IAdapter(BaseModelAdapter):
                 )
         except requests.exceptions.HTTPError as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
-            # DashScope 的 OpenAI Compatible 目前可能不支持 images/generations；
-            # 这里自动切换到官方 AIGC Text2Image 接口，尽量不要求用户改配置。
+            # DashScope ç??OpenAI Compatible ç?®å??å?¯è?½ä¸?æ?¯æ??images/generationsï¼?            # è¿?é??è?ªå?¨å??æ?¢å?°å®?æ??AIGC Text2Image æ?¥å?£ï¼?å°½é??ä¸?è¦?æ±?ç?¨æ?·æ?¹é??ç½®ã??            
             if status == 404 and self._is_dashscope():
                 try:
                     dash_result = self._dashscope_text_to_image(
@@ -637,10 +785,10 @@ class Wan26T2IAdapter(BaseModelAdapter):
 
 
 class Wan26I2VAdapter(BaseModelAdapter):
-    """Wan 2.6 I2V (Image-to-Video) 适配器 - 图生视频"""
+    """Wan 2.6 I2V (Image-to-Video) é??é??å??- å?¾ç??è§?é¢?"""
 
     def _dashscope_model_name(self) -> str:
-        # 兼容：用户可能只配置了控制台的数字模型ID；DashScope/百炼服务侧通常需要模型名（如 wan2.6-i2v）。
+        # 兼容控制台数字模型ID；I2V 接口通常需要模型名（如 wan2.6-i2v）
         raw = str(self.config.model_name or "").strip()
         if raw.isdigit():
             explicit = (os.getenv("WAN_I2V_MODEL_NAME") or "").strip()
@@ -657,16 +805,50 @@ class Wan26I2VAdapter(BaseModelAdapter):
         character_references: Optional[List[Dict[str, Any]]] = None,
     ) -> GenerationResult:
         """
-        DashScope 官方 AIGC 视频接口（/api/v1/services/aigc/video-generation/video-synthesis）。
-
-        说明：
-        - compatible-mode/v1 目前不保证支持 v1/videos/i2v；这里优先使用官方 VideoSynthesis（SDK），避免“调用成功但无 video_url”导致的静态幻灯片回退。
-        - 官方接口参数相对收敛：重点传 size/duration/seed，避免注入不确定参数导致 4xx。
+        DashScope ¹Ù·½ AIGC ÊÓÆµ½Ó¿Ú£¨api/v1/services/aigc/video-generation/video-synthesis£©¡£
+        ËµÃ÷£º
+        - compatible-mode/v1 Ä¿Ç°²»±£Ö¤Ö§³Ö v1/videos/i2v£»ÕâÀïÓÅÏÈÊ¹ÓÃ¹Ù·½ VideoSynthesis£¨SDK£©£¬±ÜÃâ¡°µ÷ÓÃ³É¹¦µ«ÎÞ video_url¡±µ¼ÖÂµÄ¾²Ì¬»ÃµÆÆ¬»ØÍË¡£
+        - ¹Ù·½½Ó¿Ú²ÎÊýÏà¶ÔÊÕÁ²£ºÖØµã´« size/duration/seed£¬±ÜÃâ×¢Èë²»È·¶¨²ÎÊýµ¼ÖÂ 4xx¡£
         """
         try:
             import dashscope  # type: ignore
         except Exception as exc:  # noqa: BLE001
             return GenerationResult(success=False, data=None, error=f"dashscope sdk missing: {exc}")
+
+        def _build_img_url_candidates(path_text: str) -> List[Tuple[str, str]]:
+            raw = str(path_text or "").strip()
+            if not raw:
+                return []
+
+            lower_raw = raw.lower()
+            if lower_raw.startswith(("http://", "https://", "oss://", "data:")):
+                return [("direct", raw)]
+
+            p = Path(raw).expanduser()
+            candidates: List[Tuple[str, str]] = []
+            if p.exists() and p.is_file():
+                try:
+                    import base64
+
+                    suffix = str(p.suffix or "").strip().lower()
+                    mime = "image/png"
+                    if suffix in {".jpg", ".jpeg"}:
+                        mime = "image/jpeg"
+                    elif suffix == ".webp":
+                        mime = "image/webp"
+                    elif suffix == ".bmp":
+                        mime = "image/bmp"
+
+                    encoded = base64.b64encode(p.read_bytes()).decode("utf-8")
+                    candidates.append(("data_url", f"data:{mime};base64,{encoded}"))
+                except Exception:
+                    pass
+
+                # ±£Áô±¾µØÂ·¾¶×÷Îª¶µµ×£¬¼æÈÝ SDK ¶ÔÂ·¾¶Èë²ÎµÄ´¦Àí¡£
+                candidates.append(("local_path", str(p)))
+                return candidates
+
+            return [("raw_text", raw)]
 
         model_value = self._dashscope_model_name()
 
@@ -684,21 +866,18 @@ class Wan26I2VAdapter(BaseModelAdapter):
         if duration_i <= 0:
             duration_i = 5
 
-        # 🔧 内容安全检查与自动修复
         from adapters.content_safety_checker import ContentSafetyChecker, check_and_fix_prompt
-        
-        print(f"🔍 [内容安全检查] 检查 I2V 提示词...")
+
+        print("?? [ÄÚÈÝ°²È«¼ì²é] ¼ì²é I2V ÌáÊ¾´Ê...")
         fixed_prompt, issues, fix_description = check_and_fix_prompt(prompt, strategy="moderate")
-        
+
         if issues:
-            print(f"⚠️ [内容安全检查] {fix_description}")
-            print(f"📝 [内容安全检查] 原始提示词: {prompt}")
-            print(f"✨ [内容安全检查] 修复后提示词: {fixed_prompt}")
-            
-            # 使用修复后的提示词
+            print(f"?? [ÄÚÈÝ°²È«¼ì²é] {fix_description}")
+            print(f"?? [ÄÚÈÝ°²È«¼ì²é] Ô­Ê¼ÌáÊ¾´Ê: {prompt}")
+            print(f"? [ÄÚÈÝ°²È«¼ì²é] ÐÞ¸´ºóÌáÊ¾´Ê: {fixed_prompt}")
             prompt = fixed_prompt
         else:
-            print(f"✅ [内容安全检查] 提示词安全，无需修复")
+            print("? [ÄÚÈÝ°²È«¼ì²é] ÌáÊ¾´Ê°²È«£¬ÎÞÐèÐÞ¸´")
 
         kwargs: Dict[str, Any] = {"duration": duration_i}
         if size:
@@ -708,65 +887,94 @@ class Wan26I2VAdapter(BaseModelAdapter):
         if character_references and isinstance(character_references, list):
             kwargs["character_references"] = character_references
 
+        img_candidates = _build_img_url_candidates(image_path)
+        if not img_candidates:
+            return GenerationResult(success=False, data=None, error=f"invalid image_path: {image_path}")
+
         max_retries = 5
-        retry_count = 0
-        
-        while retry_count <= max_retries:
-            try:
-                if self._rate_limiter:
-                    self._rate_limiter.acquire()
-                resp = dashscope.VideoSynthesis.call(
-                    model=model_value,
-                    prompt=prompt,
-                    img_url=image_path,
-                    api_key=self.config.api_key,
-                    **kwargs,
-                )
-                break
-            except Exception as exc:  # noqa: BLE001
-                error_str = str(exc)
-                if "429" in error_str or "Throttling" in error_str or "RateQuota" in error_str:
-                    if retry_count < max_retries:
-                        retry_count += 1
-                        wait_time = min(5 * (retry_count ** 1.5), 120)
-                        print(f"⚠️ DashScope I2V rate limit, retry {retry_count}/{max_retries}, waiting {wait_time:.1f}s...")
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        return GenerationResult(success=False, data=None, error=f"dashscope video_synthesis rate limit exceeded after {max_retries} retries: {error_str}")
-                else:
-                    return GenerationResult(success=False, data=None, error=str(exc))
+        attempted_sources: List[str] = []
+        last_error = ""
 
-        status_code = getattr(resp, "status_code", None)
-        if status_code is not None and int(status_code) != 200:
-            code = getattr(resp, "code", None)
-            message = getattr(resp, "message", None)
-            return GenerationResult(success=False, data=None, error=f"dashscope video_synthesis failed: {status_code} {code} {message}")
+        for img_source, img_value in img_candidates:
+            attempted_sources.append(img_source)
+            retry_count = 0
+            resp = None
 
-        output = getattr(resp, "output", None)
-        video_url: Optional[str] = None
-        if isinstance(output, dict) and isinstance(output.get("video_url"), str):
-            video_url = output.get("video_url")
-        elif hasattr(output, "get") and isinstance(getattr(output, "get")("video_url"), str):
-            video_url = getattr(output, "get")("video_url")
-        elif isinstance(getattr(output, "video_url", None), str):
-            video_url = getattr(output, "video_url")
+            while retry_count <= max_retries:
+                try:
+                    if self._rate_limiter:
+                        self._rate_limiter.acquire()
+                    resp = dashscope.VideoSynthesis.call(
+                        model=model_value,
+                        prompt=prompt,
+                        img_url=img_value,
+                        api_key=self.config.api_key,
+                        **kwargs,
+                    )
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    error_str = str(exc)
+                    if "429" in error_str or "Throttling" in error_str or "RateQuota" in error_str:
+                        if retry_count < max_retries:
+                            retry_count += 1
+                            wait_time = min(5 * (retry_count ** 1.5), 120)
+                            print(f"?? DashScope I2V rate limit, retry {retry_count}/{max_retries}, waiting {wait_time:.1f}s...")
+                            time.sleep(wait_time)
+                            continue
+                        return GenerationResult(
+                            success=False,
+                            data=None,
+                            error=f"dashscope video_synthesis rate limit exceeded after {max_retries} retries: {error_str}",
+                        )
+                    last_error = error_str
+                    resp = None
+                    break
 
-        if not isinstance(video_url, str) or not video_url.strip():
-            return GenerationResult(success=False, data=None, error=f"dashscope video_synthesis response missing video_url: {str(output)[:300]}")
+            if resp is None:
+                continue
 
+            status_code = getattr(resp, "status_code", None)
+            if status_code is not None and int(status_code) != 200:
+                code = getattr(resp, "code", None)
+                message = getattr(resp, "message", None)
+                last_error = f"dashscope video_synthesis failed: {status_code} {code} {message}"
+                if self._is_dashscope_data_inspection_failed(response=resp, error_text=last_error):
+                    return GenerationResult(success=False, data=None, error=last_error)
+                continue
+
+            output = getattr(resp, "output", None)
+            video_url: Optional[str] = None
+            if isinstance(output, dict) and isinstance(output.get("video_url"), str):
+                video_url = output.get("video_url")
+            elif hasattr(output, "get") and isinstance(getattr(output, "get")("video_url"), str):
+                video_url = getattr(output, "get")("video_url")
+            elif isinstance(getattr(output, "video_url", None), str):
+                video_url = getattr(output, "video_url")
+
+            if not isinstance(video_url, str) or not video_url.strip():
+                last_error = f"dashscope video_synthesis response missing video_url: {str(output)[:300]}"
+                continue
+
+            return GenerationResult(
+                success=True,
+                data={"video_url": video_url},
+                metadata={
+                    "prompt": prompt,
+                    "duration": duration_i,
+                    "model": self.config.model_name,
+                    "dashscope_model": model_value,
+                    "size": size,
+                    "image_input_mode": img_source,
+                },
+            )
+
+        if not last_error:
+            last_error = "dashscope video_synthesis failed"
         return GenerationResult(
-            success=True,
-            data={"video_url": video_url},
-            metadata={
-                "prompt": prompt,
-                "duration": duration_i,
-                "model": self.config.model_name,
-                "dashscope_model": model_value,
-                "size": size,
-            },
+            success=False,
+            data=None,
+            error=f"{last_error} (image_inputs={','.join(attempted_sources)})",
         )
-
     def generate(
         self,
         image_path: str,
@@ -777,8 +985,8 @@ class Wan26I2VAdapter(BaseModelAdapter):
         seed: Optional[int] = None,
         character_references: Optional[List[Dict[str, Any]]] = None
     ) -> GenerationResult:
-        """从图像生成视频"""
-        # DashScope：优先走官方 VideoSynthesis，避免 compatible-mode 接口不支持导致的"静态幻灯片回退"。
+        """ä»?å?¾å??ç??æ??è§?é¢?"""
+        # DashScopeï¼?ä¼?å??èµ°å®?æ?¹ VideoSynthesisï¼?é?¿å??compatible-mode æ?¥å?£ä¸?æ?¯æ??å¯¼è?´ç??"é??æ??å¹»ç?¯ç??å??é??"ã??        
         if self._is_dashscope():
             return self._dashscope_i2v_via_video_synthesis(
                 image_path=image_path,
@@ -788,7 +996,7 @@ class Wan26I2VAdapter(BaseModelAdapter):
                 character_references=character_references,
             )
 
-        # 非 DashScope：读取图像并编码为 base64，走 OpenAI-compatible 自定义 endpoint
+        # é??DashScopeï¼?è¯»å??å?¾å??å¹¶ç¼?ç ?ä¸?base64ï¼?èµ° OpenAI-compatible è?ªå®?ä¹?endpoint
         with open(image_path, "rb") as f:
             import base64
             image_data = base64.b64encode(f.read()).decode()
@@ -840,7 +1048,7 @@ class Wan26I2VAdapter(BaseModelAdapter):
 
 
 class Wan26T2VAdapter(BaseModelAdapter):
-    """Wan 2.6 T2V (Text-to-Video) 适配器 - 文生视频"""
+    """Wan 2.6 T2V (Text-to-Video) é??é??å??- æ??ç??è§?é¢?"""
 
     def _dashscope_model_name(self) -> str:
         raw = str(self.config.model_name or "").strip()
@@ -857,8 +1065,7 @@ class Wan26T2VAdapter(BaseModelAdapter):
         seed: Optional[int],
     ) -> GenerationResult:
         """
-        DashScope 官方 AIGC 视频接口（/api/v1/services/aigc/video-generation/video-synthesis）。
-        """
+        DashScope å®?æ?¹ AIGC è§?é¢?æ?¥å?£ï¼?api/v1/services/aigc/video-generation/video-synthesisï¼?ã??        """
         try:
             import dashscope  # type: ignore
         except Exception as exc:  # noqa: BLE001
@@ -870,21 +1077,20 @@ class Wan26T2VAdapter(BaseModelAdapter):
         if duration_i <= 0:
             duration_i = 5
 
-        # 🔧 内容安全检查与自动修复
+        # ð??§ å??å®¹å®?å?¨æ£?æ?¥ä¸?è?ªå?¨ä¿®å¤?
         from adapters.content_safety_checker import ContentSafetyChecker, check_and_fix_prompt
         
-        print(f"🔍 [内容安全检查] 检查 T2V 提示词...")
+        print(f"ð??? [å??å®¹å®?å?¨æ£?æ?¥] æ£?æ??T2V æ??ç¤ºè¯?..")
         fixed_prompt, issues, fix_description = check_and_fix_prompt(prompt, strategy="moderate")
         
         if issues:
-            print(f"⚠️ [内容安全检查] {fix_description}")
-            print(f"📝 [内容安全检查] 原始提示词: {prompt}")
-            print(f"✨ [内容安全检查] 修复后提示词: {fixed_prompt}")
+            print(f"â? ï¸? [å??å®¹å®?å?¨æ£?æ?¥] {fix_description}")
+            print(f"ð??? [å??å®¹å®?å?¨æ£?æ?¥] å??å§?æ??ç¤ºè¯? {prompt}")
+            print(f"â??[å??å®¹å®?å?¨æ£?æ?¥] ä¿®å¤?å??æ??ç¤ºè¯?: {fixed_prompt}")
             
-            # 使用修复后的提示词
-            prompt = fixed_prompt
+            # ä½¿ç?¨ä¿®å¤?å??ç??æ??ç¤ºè¯?            prompt = fixed_prompt
         else:
-            print(f"✅ [内容安全检查] 提示词安全，无需修复")
+            print(f"â??[å??å®¹å®?å?¨æ£?æ?¥] æ??ç¤ºè¯?å®?å?¨ï¼?æ? é??ä¿®å¤?")
 
         kwargs: Dict[str, Any] = {"duration": duration_i}
         if seed is not None:
@@ -910,7 +1116,7 @@ class Wan26T2VAdapter(BaseModelAdapter):
                     if retry_count < max_retries:
                         retry_count += 1
                         wait_time = min(5 * (retry_count ** 1.5), 120)
-                        print(f"⚠️ DashScope T2V rate limit, retry {retry_count}/{max_retries}, waiting {wait_time:.1f}s...")
+                        print(f"â? ï¸? DashScope T2V rate limit, retry {retry_count}/{max_retries}, waiting {wait_time:.1f}s...")
                         time.sleep(wait_time)
                         continue
                     else:
@@ -959,7 +1165,8 @@ class Wan26T2VAdapter(BaseModelAdapter):
         guidance_scale: float = 7.5,
         seed: Optional[int] = None
     ) -> GenerationResult:
-        """从文本生成视频"""
+        """ä»?æ??æ?¬ç??æ??è§?é¢?"""
+        
         if self._is_dashscope():
             return self._dashscope_t2v_via_video_synthesis(
                 prompt=prompt,
@@ -1014,7 +1221,7 @@ class Wan26T2VAdapter(BaseModelAdapter):
 
 
 class Wan26R2VAdapter(BaseModelAdapter):
-    """Wan 2.6 R2V (Reference-to-Video) 适配器 - 参考视频生成视频"""
+    """Wan 2.6 R2V (Reference-to-Video) é??é??å??- å??è??è§?é¢?ç??æ??è§?é¢?"""
 
     def generate(
         self,
@@ -1024,8 +1231,8 @@ class Wan26R2VAdapter(BaseModelAdapter):
         fps: int = 24,
         seed: Optional[int] = None
     ) -> GenerationResult:
-        """从参考视频生成新视频"""
-        # 读取视频并编码为base64
+        """ä»?å??è??è§?é¢?ç??æ??æ?°è§?é¢?"""
+        # è¯»å??è§?é¢?å¹¶ç¼?ç ?ä¸ºbase64
         with open(reference_video_path, "rb") as f:
             import base64
             video_data = base64.b64encode(f.read()).decode()
@@ -1071,7 +1278,7 @@ class Wan26R2VAdapter(BaseModelAdapter):
 
 
 class QwenImageEditPlusAdapter(BaseModelAdapter):
-    """Qwen-Image-Edit-Plus 适配器 - 图片编辑"""
+    """Qwen-Image-Edit-Plus é??é??å??- å?¾ç??ç¼?è¾?"""
     supports_multi_image = True
 
     def generate(
@@ -1084,7 +1291,7 @@ class QwenImageEditPlusAdapter(BaseModelAdapter):
         seed: Optional[int] = None,
         image_paths: Optional[List[str]] = None
     ) -> GenerationResult:
-        """编辑图像"""
+        """ç¼?è¾?å?¾å??"""
         if not self._is_dashscope():
             return GenerationResult(
                 success=False,
@@ -1192,9 +1399,7 @@ class QwenImageEditPlusAdapter(BaseModelAdapter):
             legacy_payload.pop("prompt", None)
             legacy_payload["edit_prompt"] = edit_prompt
 
-            # OpenAI 的标准路径为 /v1/images/edits；部分旧实现使用 /images/edit。
-            # 这里按“标准路径/标准字段 -> 标准路径/旧字段 -> 旧路径/标准字段 -> 旧路径/旧字段”的顺序兼容。
-            result: Dict[str, Any] | None = None
+            # OpenAI ç??æ ?å??è·¯å¾?ä¸º /v1/images/editsï¼?é?¨å??æ?§å®?ç?°ä½¿ç?¨ /images/editã??            # è¿?é??æ??â??æ ?å??è·¯å¾?æ ?å??å­?æ®µ -> æ ?å??è·¯å¾?/æ?§å­?æ®?-> æ?§è·¯å¾?æ ?å??å­?æ®µ -> æ?§è·¯å¾?æ?§å­?æ®µâ??ç??é¡ºåº?å?¼å®¹ã??            result: Dict[str, Any] | None = None
             last_exc: Exception | None = None
             for endpoint, body in (
                 ("v1/images/edits", payload),
@@ -1241,7 +1446,7 @@ class QwenImageEditPlusAdapter(BaseModelAdapter):
 
 
 class WanImageEditAdapter(QwenImageEditPlusAdapter):
-    """Wan Image Edit é€‚â€¦å™? å›¾åƒ¡ç¼‘è¾‘"""
+    """Wan Image Edit Ã©â?¬â??Ã¢â?¬Â¦Ã¥â?? Ã¥â?ºÂ¾Ã¥Æ?Â¡Ã§Â¼â??Ã¨Â¾â??"""
     supports_multi_image = False
 
 
@@ -1250,7 +1455,7 @@ class QwenImageEditMaxAdapter(QwenImageEditPlusAdapter):
 
 
 class QwenMultiPersonFusionAdapter(BaseModelAdapter):
-    """Qwen-Image-Edit-Plus 多人物融合适配器 - 支持人物提取、场景匹配、多人物融合"""
+    """Qwen-Image-Edit-Plus å¤?äººç?©è??å??é??é??å??- æ?¯æ??äººç?©æ??å??ã??å?ºæ?¯å?¹é??ã??å¤?äººç?©è??å??"""
 
     def _make_request(
         self,
@@ -1259,9 +1464,9 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
         method: str = "POST"
     ) -> Dict[str, Any]:
         """
-        发送API请求 - 重写以使用DashScope原生API端点
+        å??é??APIè¯·æ±? - é??å??ä»¥ä½¿ç?¨DashScopeå??ç??APIç«¯ç?¹
         
-        Qwen-Image-Edit-Plus使用DashScope原生API，不是OpenAI兼容模式
+        Qwen-Image-Edit-Plusä½¿ç?¨DashScopeå??ç??APIï¼?ä¸?æ?¯OpenAIå?¼å®¹æ¨¡å¼?
         """
         base_host = self._base_host()
         if not base_host:
@@ -1273,25 +1478,20 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
     def extract_person(
         self,
         image_path: str,
-        person_prompt: str = "提取图像中的人物",
+        person_prompt: str = "æ??å??å?¾å??ä¸­ç??äººç?©",
         n: int = 1,
-        negative_prompt: str = "低质量",
+        negative_prompt: str = "low quality, blurry, distorted, extra limbs, text, watermark",
         prompt_extend: bool = True,
         watermark: bool = False
     ) -> GenerationResult:
         """
-        从源图像中提取人物元素
-        
+        ä»?æº?å?¾å??ä¸­æ??å??äººç?©å??ç´?        
         Args:
-            image_path: 源图像路径
-            person_prompt: 人物提取提示词
-            n: 生成图片数量
-            negative_prompt: 负向提示词
-            prompt_extend: 是否扩展提示词
-            watermark: 是否添加水印
+            image_path: æº?å?¾å??è·¯å¾?            person_prompt: äººç?©æ??å??æ??ç¤ºè¯?            n: ç??æ??å?¾ç??æ?°é??
+            negative_prompt: è´?å??æ??ç¤ºè¯?            prompt_extend: æ?¯å?¦æ?©å±?æ??ç¤ºè¯?            watermark: æ?¯å?¦æ·»å? æ°´å?°
         
         Returns:
-            GenerationResult: 包含提取后的人物图像URL
+            GenerationResult: å??å?«æ??å??å??ç??äººç?©å?¾å??URL
         """
         with open(image_path, "rb") as f:
             import base64
@@ -1360,26 +1560,22 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
         self,
         person_image_path: str,
         target_scene_path: str,
-        scene_prompt: str = "将人物融合到目标场景中，保持光照和视角一致",
+        scene_prompt: str = "place the character naturally into the target scene with consistent lighting and perspective",
         n: int = 1,
-        negative_prompt: str = "低质量",
+        negative_prompt: str = "low quality, blurry, distorted, extra limbs, text, watermark",
         prompt_extend: bool = True,
         watermark: bool = False
     ) -> GenerationResult:
         """
-        将人物与目标场景匹配，确保光照、视角一致
-        
+        å°?äººç?©ä¸?ç?®æ ?å?ºæ?¯å?¹é??ï¼?ç¡®ä¿?å??ç?§ã??è§?è§?ä¸?è??        
         Args:
-            person_image_path: 人物图像路径
-            target_scene_path: 目标场景图像路径
-            scene_prompt: 场景匹配提示词
-            n: 生成图片数量
-            negative_prompt: 负向提示词
-            prompt_extend: 是否扩展提示词
-            watermark: 是否添加水印
+            person_image_path: äººç?©å?¾å??è·¯å¾?
+            target_scene_path: ç?®æ ?å?ºæ?¯å?¾å??è·¯å¾?
+            scene_prompt: å?ºæ?¯å?¹é??æ??ç¤ºè¯?            n: ç??æ??å?¾ç??æ?°é??
+            negative_prompt: è´?å??æ??ç¤ºè¯?            prompt_extend: æ?¯å?¦æ?©å±?æ??ç¤ºè¯?            watermark: æ?¯å?¦æ·»å? æ°´å?°
         
         Returns:
-            GenerationResult: 包含匹配后的图像URL
+            GenerationResult: å??å?«å?¹é??å??ç??å?¾å??URL
         """
         import base64
         
@@ -1455,28 +1651,24 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
         self,
         person_images: List[str],
         target_scene_path: str,
-        fusion_prompt: str = "将多个人物自然地融合到同一场景中，保持人物一致性和场景协调",
+        fusion_prompt: str = "å°?å¤?ä¸ªäººç?©è?ªç?¶å?°è??å??å?°å??ä¸?å?ºæ?¯ä¸­ï¼?ä¿?æ??äººç?©ä¸?è?´æ?§å??å?ºæ?¯å??è°?",
         layout_description: Optional[str] = None,
         n: int = 1,
-        negative_prompt: str = "低质量",
+        negative_prompt: str = "low quality, blurry, distorted, extra limbs, text, watermark",
         prompt_extend: bool = True,
         watermark: bool = False
     ) -> GenerationResult:
         """
-        将多个人物融合到同一场景中
-        
+        å°?å¤?ä¸ªäººç?©è??å??å?°å??ä¸?å?ºæ?¯ä¸?        
         Args:
-            person_images: 多个人物图像路径列表
-            target_scene_path: 目标场景图像路径
-            fusion_prompt: 融合提示词
-            layout_description: 布局描述（可选，用于指定人物在场景中的位置）
-            n: 生成图片数量
-            negative_prompt: 负向提示词
-            prompt_extend: 是否扩展提示词
-            watermark: 是否添加水印
+            person_images: å¤?ä¸ªäººç?©å?¾å??è·¯å¾?å??è¡¨
+            target_scene_path: ç?®æ ?å?ºæ?¯å?¾å??è·¯å¾?
+            fusion_prompt: è??å??æ??ç¤ºè¯?            layout_description: å¸?å±?æ??è¿°ï¼?å?¯é??ï¼?ç?¨äº?æ??å®?äººç?©å?¨å?ºæ?¯ä¸­ç??ä½?ç½®ï¼?
+            n: ç??æ??å?¾ç??æ?°é??
+            negative_prompt: è´?å??æ??ç¤ºè¯?            prompt_extend: æ?¯å?¦æ?©å±?æ??ç¤ºè¯?            watermark: æ?¯å?¦æ·»å? æ°´å?°
         
         Returns:
-            GenerationResult: 包含融合后的图像URL
+            GenerationResult: å??å?«è??å??å??ç??å?¾å??URL
         """
         import base64
         
@@ -1489,7 +1681,7 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
         
         enhanced_prompt = fusion_prompt
         if layout_description:
-            enhanced_prompt = f"{fusion_prompt}\n布局要求：{layout_description}"
+            enhanced_prompt = f"{fusion_prompt}\nå¸?å±?è¦?æ±?ï¼?{layout_description}"
         
         if len(person_images) == 1:
             return self.match_scene(
@@ -1513,23 +1705,20 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
         image_path: str,
         lighting_prompt: str,
         n: int = 1,
-        negative_prompt: str = "低质量",
+        negative_prompt: str = "low quality, blurry, distorted, extra limbs, text, watermark",
         prompt_extend: bool = True,
         watermark: bool = False
     ) -> GenerationResult:
         """
-        调整图像的光照效果
-        
+        è°?æ?´å?¾å??ç??å??ç?§æ??æ??        
         Args:
-            image_path: 图像路径
-            lighting_prompt: 光照调整提示词（如"添加柔和的侧光"、"增强自然光"等）
-            n: 生成图片数量
-            negative_prompt: 负向提示词
-            prompt_extend: 是否扩展提示词
-            watermark: 是否添加水印
+            image_path: å?¾å??è·¯å¾?
+            lighting_prompt: å??ç?§è°?æ?´æ??ç¤ºè¯?ï¼?å¦?æ·»å? æ??å??ç??ä¾§å??ã??å¢?å¼ºè?ªç?¶å??ç­?ï¼?
+            n: ç??æ??å?¾ç??æ?°é??
+            negative_prompt: è´?å??æ??ç¤ºè¯?            prompt_extend: æ?¯å?¦æ?©å±?æ??ç¤ºè¯?            watermark: æ?¯å?¦æ·»å? æ°´å?°
         
         Returns:
-            GenerationResult: 包含调整后的图像URL
+            GenerationResult: å??å?«è°?æ?´å??ç??å?¾å??URL
         """
         with open(image_path, "rb") as f:
             import base64
@@ -1600,21 +1789,19 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
         **kwargs
     ) -> GenerationResult:
         """
-        统一的生成接口，根据operation类型调用不同的功能
-        
+        ç»?ä¸?ç??ç??æ??æ?¥å?£ï¼?æ ¹æ?®operationç±»å??è°?ç?¨ä¸?å??ç??å??è??        
         Args:
-            operation: 操作类型 (extract_person, match_scene, fuse_multiple_persons, adjust_lighting)
-            **kwargs: 操作相关的参数
-        
+            operation: æ??ä½?ç±»å?? (extract_person, match_scene, fuse_multiple_persons, adjust_lighting)
+            **kwargs: æ??ä½?ç?¸å?³ç??å??æ??        
         Returns:
-            GenerationResult: 操作结果
+            GenerationResult: æ??ä½?ç»?æ??
         """
         if operation == "extract_person":
             return self.extract_person(
                 image_path=kwargs.get("image_path"),
-                person_prompt=kwargs.get("person_prompt", "提取图像中的人物"),
+                person_prompt=kwargs.get("person_prompt", "æ??å??å?¾å??ä¸­ç??äººç?©"),
                 n=kwargs.get("n", 1),
-                negative_prompt=kwargs.get("negative_prompt", "低质量"),
+                negative_prompt=kwargs.get("negative_prompt", "low quality, blurry, distorted, extra limbs, text, watermark"),
                 prompt_extend=kwargs.get("prompt_extend", True),
                 watermark=kwargs.get("watermark", False)
             )
@@ -1622,9 +1809,9 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
             return self.match_scene(
                 person_image_path=kwargs.get("person_image_path"),
                 target_scene_path=kwargs.get("target_scene_path"),
-                scene_prompt=kwargs.get("scene_prompt", "将人物融合到目标场景中，保持光照和视角一致"),
+                scene_prompt=kwargs.get("scene_prompt", "place the character naturally into the target scene with consistent lighting and perspective"),
                 n=kwargs.get("n", 1),
-                negative_prompt=kwargs.get("negative_prompt", "低质量"),
+                negative_prompt=kwargs.get("negative_prompt", "low quality, blurry, distorted, extra limbs, text, watermark"),
                 prompt_extend=kwargs.get("prompt_extend", True),
                 watermark=kwargs.get("watermark", False)
             )
@@ -1632,10 +1819,10 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
             return self.fuse_multiple_persons(
                 person_images=kwargs.get("person_images", []),
                 target_scene_path=kwargs.get("target_scene_path"),
-                fusion_prompt=kwargs.get("fusion_prompt", "将多个人物自然地融合到同一场景中，保持人物一致性和场景协调"),
+                fusion_prompt=kwargs.get("fusion_prompt", "å°?å¤?ä¸ªäººç?©è?ªç?¶å?°è??å??å?°å??ä¸?å?ºæ?¯ä¸­ï¼?ä¿?æ??äººç?©ä¸?è?´æ?§å??å?ºæ?¯å??è°?"),
                 layout_description=kwargs.get("layout_description"),
                 n=kwargs.get("n", 1),
-                negative_prompt=kwargs.get("negative_prompt", "低质量"),
+                negative_prompt=kwargs.get("negative_prompt", "low quality, blurry, distorted, extra limbs, text, watermark"),
                 prompt_extend=kwargs.get("prompt_extend", True),
                 watermark=kwargs.get("watermark", False)
             )
@@ -1644,7 +1831,7 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
                 image_path=kwargs.get("image_path"),
                 lighting_prompt=kwargs.get("lighting_prompt"),
                 n=kwargs.get("n", 1),
-                negative_prompt=kwargs.get("negative_prompt", "低质量"),
+                negative_prompt=kwargs.get("negative_prompt", "low quality, blurry, distorted, extra limbs, text, watermark"),
                 prompt_extend=kwargs.get("prompt_extend", True),
                 watermark=kwargs.get("watermark", False)
             )
@@ -1657,14 +1844,13 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
 
 
 class Qwen3VLPlusAdapter(BaseModelAdapter):
-    """Qwen3-VL-Plus 适配器 - 图片与视频理解（质量评估）"""
+    """Qwen3-VL-Plus é??é??å??- å?¾ç??ä¸?è§?é¢?ç??è§£ï¼?è´¨é??è¯?ä¼°ï¼?"""
 
     def generate(self, **kwargs) -> GenerationResult:  # noqa: ANN003
         """
-        兼容 BaseModelAdapter 抽象接口：
-        - analyze_image: 传入 image_path
-        - analyze_video: 传入 video_path
-        - chat: 传入 messages
+        å?¼å®¹ BaseModelAdapter æ?½è±¡æ?¥å?£ï¼?        - analyze_image: ä¼ å?¥ image_path
+        - analyze_video: ä¼ å?¥ video_path
+        - chat: ä¼ å?¥ messages
         """
         if "messages" in kwargs:
             return self.chat(
@@ -1696,10 +1882,8 @@ class Qwen3VLPlusAdapter(BaseModelAdapter):
         response_format: Optional[Dict[str, Any]] = None,
     ) -> GenerationResult:
         """
-        OpenAI-Compatible Chat Completions（用于多模态评选/参考选择）。
-
-        注意：message schema 由调用方保证（role/content），content 可为纯文本或多模态数组。
-        """
+        OpenAI-Compatible Chat Completionsï¼?ç?¨äº?å¤?æ¨¡æ??è¯?é??å??è??é??æ?©ï¼?ã??
+        æ³¨æ??ï¼?message schema ç?±è°?ç?¨æ?¹ä¿?è¯?ï¼?role/contentï¼?ï¼?content å?¯ä¸ºçº¯æ??æ?¬æ??å¤?æ¨¡æ??æ?°ç»?ã??        """
         if not isinstance(messages, list):
             return GenerationResult(success=False, data=None, error="messages must be a list")
 
@@ -1738,7 +1922,7 @@ class Qwen3VLPlusAdapter(BaseModelAdapter):
         analysis_type: str = "quality",
         criteria: Optional[List[str]] = None
     ) -> GenerationResult:
-        """分析图像质量"""
+        """å??æ??å?¾å??è´¨é??"""
         with open(image_path, "rb") as f:
             import base64
             image_data = base64.b64encode(f.read()).decode()
@@ -1775,7 +1959,7 @@ class Qwen3VLPlusAdapter(BaseModelAdapter):
         analysis_type: str = "quality",
         criteria: Optional[List[str]] = None
     ) -> GenerationResult:
-        """分析视频质量"""
+        """å??æ??è§?é¢?è´¨é??"""
         with open(video_path, "rb") as f:
             import base64
             video_data = base64.b64encode(f.read()).decode()
@@ -1808,7 +1992,7 @@ class Qwen3VLPlusAdapter(BaseModelAdapter):
 
 
 class Qwen3TTSAdapter(BaseModelAdapter):
-    """Qwen3-TTS 适配器 - 文本转语音（用于声画同步）"""
+    """Qwen3-TTS é??é??å??- æ??æ?¬è½¬è¯­é?³ï¼?ç?¨äº?å£°ç?»å??æ­¥ï¼?"""
 
     def generate(
         self,
@@ -1821,20 +2005,15 @@ class Qwen3TTSAdapter(BaseModelAdapter):
         volume: float = 1.0
     ) -> GenerationResult:
         """
-        生成语音（文本转语音）
-        
+        ç??æ??è¯­é?³ï¼?æ??æ?¬è½¬è¯­é?³ï¼?        
         Args:
-            text: 要转换的文本
-            voice_style: 语音风格（natural/emotional/humorous等）
-            character_id: 角色ID（用于音色匹配）
-            voice_id: 音色ID（优先使用）
-            speed: 语速（0.5-2.0）
-            pitch: 音调（0.5-2.0）
-            volume: 音量（0.0-1.0）
-        
+            text: è¦?è½¬æ?¢ç??æ??æ?¬
+            voice_style: è¯­é?³é£?æ ¼ï¼?natural/emotional/humorousç­?ï¼?
+            character_id: è§?è?²IDï¼?ç?¨äº?é?³è?²å?¹é??ï¼?
+            voice_id: é?³è?²IDï¼?ä¼?å??ä½¿ç?¨ï¼?
+            speed: è¯­é??ï¼?0.5-2.0ï¼?            pitch: é?³è°?ï¼?.5-2.0ï¼?            volume: é?³é??ï¼?.0-1.0ï¼?        
         Returns:
-            GenerationResult: 包含生成的音频数据（base64编码）
-        """
+            GenerationResult: å??å?«ç??æ??ç??é?³é¢?æ?°æ?®ï¼?base64ç¼?ç ?ï¼?        """
         if not text or not text.strip():
             return GenerationResult(
                 success=False,
@@ -1907,8 +2086,7 @@ class Qwen3TTSAdapter(BaseModelAdapter):
     
     def _dashscope_tts(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
-        使用DashScope原生API进行文本转语音
-        """
+        ä½¿ç?¨DashScopeå??ç??APIè¿?è¡?æ??æ?¬è½¬è¯­é??        """
         dashscope_payload = {
             "model": self.config.model_name,
             "input": {
@@ -1951,7 +2129,7 @@ class Qwen3TTSAdapter(BaseModelAdapter):
 
 
 class JianyingAPIAdapter(BaseModelAdapter):
-    """剪影API适配器 - 视频编辑"""
+    """å?ªå½±APIé??é??å??- è§?é¢?ç¼?è¾?"""
 
     def generate(
         self,
@@ -1962,9 +2140,8 @@ class JianyingAPIAdapter(BaseModelAdapter):
         subtitles: Optional[List[Dict[str, Any]]] = None,
         effects: Optional[List[Dict[str, Any]]] = None
     ) -> GenerationResult:
-        """编辑视频"""
-        # 读取所有视频文件
-        videos_data = []
+        """ç¼?è¾?è§?é¢?"""
+        # è¯»å??æ??æ??è§?é¢?æ??ä»?        videos_data = []
         for video_path in video_paths:
             with open(video_path, "rb") as f:
                 import base64
@@ -1987,11 +2164,10 @@ class JianyingAPIAdapter(BaseModelAdapter):
             result = self._make_request("v1/videos/edit", payload)
             
             if "data" in result:
-                # 保存编辑后的视频
+                # ä¿?å­?ç¼?è¾?å??ç??è§?é¢?
                 video_url = result["data"].get("video_url")
                 if video_url:
-                    # 下载视频到指定路径
-                    response = requests.get(video_url, timeout=60)
+                    # ä¸?è½½è§?é¢?å?°æ??å®?è·¯å¾?                    response = requests.get(video_url, timeout=60)
                     response.raise_for_status()
                     
                     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -2022,7 +2198,7 @@ class JianyingAPIAdapter(BaseModelAdapter):
 
 
 class ModelAdapterFactory:
-    """模型适配器工厂"""
+    """æ¨¡å??é??é??å?¨å·¥å??"""
 
     def __init__(self) -> None:
         self._cache: Dict[str, BaseModelAdapter] = {}
@@ -2032,7 +2208,7 @@ class ModelAdapterFactory:
         adapter_type: str,
         config: ModelConfig
     ) -> BaseModelAdapter:
-        """创建适配器实例"""
+        """å??å»ºé??é??å?¨å®?ä¾?"""
         adapters = {
             "wan26_t2i": Wan26T2IAdapter,
             "wan26_i2v": Wan26I2VAdapter,
@@ -2055,10 +2231,8 @@ class ModelAdapterFactory:
 
     def get_adapter(self, name: str) -> BaseModelAdapter:
         """
-        从环境变量加载配置并获取模型适配器实例。
-
-        支持别名（便于 Agent 层复用）：
-        - wan_t2i / wan26_t2i
+        ä»?ç?¯å¢?å??é??å? è½½é??ç½®å¹¶è?·å??æ¨¡å??é??é??å?¨å®?ä¾?ã??
+        æ?¯æ??å?«å??ï¼?ä¾¿äº?Agent å±?å¤?ç?¨ï¼?ï¼?        - wan_t2i / wan26_t2i
         - wan_i2v / wan26_i2v
         - wan_t2v / wan26_t2v
         - wan_r2v / wan26_r2v
@@ -2123,8 +2297,8 @@ class ModelAdapterFactory:
             )
 
         if not model_name:
-            # 兼容：部分 OpenAI-Compatible 网关在配置中只需要 API_KEY/BASE_URL
-            # 默认值仅用于 Qwen 系列，避免影响 Wan/Jianying 等显式依赖 model_id 的链路。
+            # å?¼å®¹ï¼?é?¨å??OpenAI-Compatible ç½?å?³å?¨é??ç½®ä¸­å?ªé??è¦?API_KEY/BASE_URL
+            # é»?è®¤å?¼ä»?ç?¨äº? Qwen ç³»å??ï¼?é?¿å??å½±å??Wan/Jianying ç­?æ?¾å¼?ä¾?èµ?model_id ç??é?¾è·¯ã??            
             if env_prefix == "QWEN_VL_PLUS":
                 model_name = "qwen3-vl-plus"
             elif env_prefix == "QWEN_IMAGE_EDIT":

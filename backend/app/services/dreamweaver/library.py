@@ -20,6 +20,24 @@ LIB_ROLE_PREFIX = "lib_"
 LIBRARY_ANCHOR_STATUS = "library"
 
 
+def _backend_root_dir() -> Path:
+    # library.py -> dreamweaver -> services -> app -> backend_root
+    return Path(__file__).resolve().parents[3]
+
+
+def _normalize_local_asset_uri(uri: str) -> str:
+    text = str(uri or "").strip()
+    if not text:
+        return ""
+    if "://" in text:
+        return text
+    return text.replace("\\", "/")
+
+
+def runs_root_path() -> Path:
+    return (_backend_root_dir() / "runs").resolve()
+
+
 def build_library_role(*, entity_type: str, entity_id: int) -> str:
     t = (entity_type or "").strip().lower()
     if t == "character":
@@ -50,11 +68,12 @@ def build_library_prompt(
 
     if entity_type == "character":
         return (
+            f"人物设定：{descriptor}\n"
+            "构图：正面全身单人立绘，头顶到脚底完整入镜，四肢完整不裁切。\n"
             f"风格：{style}（严格保持一致，不要混合风格）\n"
             f"画幅：{ratio_norm}\n"
-            f"角色：{name}\n"
-            f"人物设定：{descriptor}\n"
-            "要求：单人角色立绘/肖像，主体清晰，避免多余人物与文字水印，背景干净。\n"
+            "背景：纯灰色背景板，背景完全干净，无场景元素、无杂物、无文字、无多余人物。\n"
+            "一致性要求：角色身份锚点保持一致，突出发型、五官、服饰与配件等可识别特征。\n"
             "约束：无文字，无水印，无logo，无边框，无拼贴。"
         )
     if entity_type == "scene":
@@ -135,7 +154,7 @@ def build_library_spec(
         name = str(getattr(c, "name", "") or "").strip()
         if not name:
             continue
-        descriptor = _coalesce_text(getattr(c, "summary", None), getattr(c, "profile", None), limit=260)
+        descriptor = _coalesce_text(getattr(c, "summary", None), getattr(c, "profile", None), limit=640)
         if not descriptor:
             descriptor = _coalesce_text(getattr(c, "gender", None), str(getattr(c, "age", "") or ""), limit=120)
         character_entities.append(
@@ -169,7 +188,7 @@ def build_library_spec(
         name = str(getattr(item, "name", "") or "").strip()
         if not name:
             continue
-        descriptor = _coalesce_text(getattr(item, "summary", None), getattr(item, "content", None), limit=260)
+        descriptor = _coalesce_text(getattr(item, "summary", None), getattr(item, "content", None), limit=420)
         scene_entities.append(
             LibraryEntity(entity_type="scene", entity_id=int(item.id), name=name, descriptor=descriptor)
         )
@@ -179,7 +198,7 @@ def build_library_spec(
         name = str(getattr(item, "name", "") or "").strip()
         if not name:
             continue
-        descriptor = _coalesce_text(getattr(item, "summary", None), getattr(item, "content", None), limit=260)
+        descriptor = _coalesce_text(getattr(item, "summary", None), getattr(item, "content", None), limit=420)
         prop_entities.append(
             LibraryEntity(entity_type="prop", entity_id=int(item.id), name=name, descriptor=descriptor)
         )
@@ -237,7 +256,7 @@ def build_library_spec_from_script_entities(
         row = characters_by_name.get(name)
         if row is None or getattr(row, "id", None) is None:
             continue
-        resolved = descriptor or _coalesce_text(getattr(row, "summary", None), getattr(row, "profile", None), limit=260)
+        resolved = descriptor or _coalesce_text(getattr(row, "summary", None), getattr(row, "profile", None), limit=640)
         if not resolved:
             resolved = _coalesce_text(getattr(row, "gender", None), str(getattr(row, "age", "") or ""), limit=120)
         character_entities.append(LibraryEntity(entity_type="character", entity_id=int(row.id), name=name, descriptor=resolved))
@@ -275,7 +294,7 @@ def build_library_spec_from_script_entities(
         row = scenes_by_name.get(name)
         if row is None or getattr(row, "id", None) is None:
             continue
-        resolved = descriptor or _coalesce_text(getattr(row, "summary", None), getattr(row, "content", None), limit=260)
+        resolved = descriptor or _coalesce_text(getattr(row, "summary", None), getattr(row, "content", None), limit=420)
         scene_entities.append(LibraryEntity(entity_type="scene", entity_id=int(row.id), name=name, descriptor=resolved))
 
     # 3) Props
@@ -288,7 +307,7 @@ def build_library_spec_from_script_entities(
         row = props_by_name.get(name)
         if row is None or getattr(row, "id", None) is None:
             continue
-        resolved = descriptor or _coalesce_text(getattr(row, "summary", None), getattr(row, "content", None), limit=260)
+        resolved = descriptor or _coalesce_text(getattr(row, "summary", None), getattr(row, "content", None), limit=420)
         prop_entities.append(LibraryEntity(entity_type="prop", entity_id=int(row.id), name=name, descriptor=resolved))
 
     return {
@@ -316,7 +335,22 @@ def load_latest_library_assets(
         .all()
     )
 
-    latest: Dict[str, Tuple[datetime, DreamweaverAsset, DreamweaverProject]] = {}
+    def _uri_available(uri: str) -> bool:
+        text = _normalize_local_asset_uri(uri)
+        if not text:
+            return False
+        if "://" in text:
+            return True
+        try:
+            p = resolve_asset_path(text).resolve()
+            base = runs_root_path()
+            if (p != base and base not in p.parents) or (not p.exists()):
+                return False
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    latest: Dict[str, Tuple[bool, datetime, DreamweaverAsset, DreamweaverProject]] = {}
     for asset, project in rows:
         role = str(getattr(asset, "role", "") or "")
         if not is_library_role(role):
@@ -324,12 +358,19 @@ def load_latest_library_assets(
         updated_at = getattr(asset, "updated_at", None) or getattr(asset, "created_at", None)
         if not isinstance(updated_at, datetime):
             continue
+        uri_ok = _uri_available(str(getattr(asset, "uri", "") or ""))
         prev = latest.get(role)
-        if prev is None or updated_at > prev[0]:
-            latest[role] = (updated_at, asset, project)
+        if prev is None:
+            latest[role] = (uri_ok, updated_at, asset, project)
+            continue
+
+        prev_uri_ok, prev_updated_at, _prev_asset, _prev_project = prev
+        # Prefer assets whose underlying file actually exists; within same availability, pick latest.
+        if (uri_ok and not prev_uri_ok) or (uri_ok == prev_uri_ok and updated_at > prev_updated_at):
+            latest[role] = (uri_ok, updated_at, asset, project)
 
     result: Dict[str, Dict[str, Any]] = {}
-    for role, (_ts, asset, project) in latest.items():
+    for role, (uri_ok, _ts, asset, project) in latest.items():
         meta = asset.meta_json if isinstance(asset.meta_json, dict) else {}
         approved = bool(meta.get("approved")) if isinstance(meta, dict) else False
 
@@ -395,6 +436,7 @@ def load_latest_library_assets(
             merged_meta["width"] = int(inferred_width)
         if inferred_height > 0 and existing_height <= 0:
             merged_meta["height"] = int(inferred_height)
+        merged_meta["file_available"] = bool(uri_ok)
 
         result[role] = {
             "id": int(asset.id),
@@ -489,7 +531,7 @@ def default_library_asset_uri(*, project_id: int, role: str) -> str:
             filename = f"{int(entity_id)}_side.png"
         elif str(role).startswith("lib_character_portrait_back:"):
             filename = f"{int(entity_id)}_back.png"
-    return str(Path("runs") / "library" / f"project_{int(project_id)}" / sub / filename)
+    return (Path("runs") / "library" / f"project_{int(project_id)}" / sub / filename).as_posix()
 
 
 def _infer_latest_runtime_meta(project: DreamweaverProject) -> Dict[str, Any]:
@@ -722,7 +764,7 @@ def compute_library_review(
             continue
         if "://" not in uri:
             p = resolve_asset_path(uri)
-            base = Path("runs").resolve()
+            base = runs_root_path()
             resolved = p.resolve()
             if (resolved != base and base not in resolved.parents) or not resolved.exists():
                 missing.append(role)
@@ -775,10 +817,11 @@ def approve_latest_library_assets(
 
 
 def resolve_asset_path(uri: str) -> Path:
-    p = Path(str(uri)).expanduser()
+    normalized = _normalize_local_asset_uri(uri)
+    p = Path(str(normalized)).expanduser()
     if p.is_absolute():
         return p
-    return Path.cwd() / p
+    return _backend_root_dir() / p
 
 
 def enrich_payload_with_library(

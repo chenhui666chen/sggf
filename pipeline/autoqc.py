@@ -1181,12 +1181,14 @@ def run(payload: Dict[str, Any]) -> Dict[str, Any]:
     video_cfg = payload.get("video_config") if isinstance(payload.get("video_config"), dict) else {}
     video_engine = str(video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "").strip().lower()
     is_t2v_engine = video_engine in {"wan_t2v", "wan26_t2v", "t2v"}
+    is_auto_engine = video_engine in {"wan_auto", "auto"}
     require_i2v_cfg = cfg.get("require_i2v", DEFAULT_REQUIRE_I2V)
     if isinstance(require_i2v_cfg, bool):
         require_i2v = bool(require_i2v_cfg)
     else:
-        # 默认策略：quality_mode=quality 且配置了 I2V 才会强制 require_i2v；当用户显式选择 T2V 引擎时不强制（可手动 override）。
-        require_i2v = (quality_mode == "quality" and _is_wan_i2v_configured()) and (not is_t2v_engine)
+        # 默认策略：quality_mode=quality 且配置了 I2V 才会强制 require_i2v；
+        # 当用户显式选择 T2V 或 wan_auto 时不强制（可手动 override）。
+        require_i2v = (quality_mode == "quality" and _is_wan_i2v_configured()) and (not is_t2v_engine) and (not is_auto_engine)
 
     cfg_effective = {
         "similarity_threshold": cfg.get("similarity_threshold", DEFAULT_SIMILARITY_THRESHOLD),

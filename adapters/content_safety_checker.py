@@ -24,7 +24,7 @@ class ContentSafetyChecker:
     # 敏感词库（按类别分类）
     SENSITIVE_KEYWORDS = {
         "violence": {
-            "high": ["杀", "死", "血", "伤", "武器", "枪", "刀", "剑", "砍", "刺", "打", "击", "攻击", "暴力", "战斗", "战争", "屠杀", "谋杀", "伤害", "流血", "伤口", "尸体", "死亡"],
+            "high": ["杀", "死", "血", "伤", "武器", "枪", "刀", "剑", "砍", "刺", "打击", "击打", "打", "击", "攻击", "暴力", "战斗", "战争", "屠杀", "谋杀", "伤害", "流血", "伤口", "尸体", "死亡"],
             "medium": ["击倒", "击败", "制服", "战斗", "交锋", "对峙"],
             "low": ["对抗", "较量", "比武", "切磋"]
         },
@@ -58,6 +58,8 @@ class ContentSafetyChecker:
             "剑": ["长兵", "法剑", "兵器"],
             "砍": ["挥舞", "施展", "使用"],
             "刺": ["突进", "冲锋", "攻击"],
+            "打击": ["冲击", "影响", "触及"],
+            "击打": ["照射", "作用", "触及"],
             "打": ["击打", "攻击", "施展"],
             "击": ["攻击", "打击", "施展"],
             "攻击": ["进攻", "出击", "施展"],
@@ -140,6 +142,11 @@ class ContentSafetyChecker:
                             severity=severity,
                             suggestions=suggestions
                         ))
+
+        # 处理重叠命中，避免“击打/打击”与单字“击/打”同时命中导致描述和替换噪声
+        detected_keywords = {issue.keyword for issue in self.issues}
+        if "击打" in detected_keywords or "打击" in detected_keywords:
+            self.issues = [issue for issue in self.issues if issue.keyword not in {"击", "打"}]
         
         return self.issues
     
@@ -157,7 +164,6 @@ class ContentSafetyChecker:
         Returns:
             修复后的提示词
         """
-        fixed_prompt = prompt
         issues = self.check(prompt)
         
         # 根据策略筛选需要修复的问题
@@ -175,15 +181,20 @@ class ContentSafetyChecker:
             "low": 2
         }.get(x.severity, 3))
         
-        # 应用替换
+        replacement_map: Dict[str, str] = {}
         for issue in issues_to_fix:
-            if issue.suggestions:
-                # 使用第一个建议进行替换
-                replacement = issue.suggestions[0]
-                # 使用正则表达式替换，避免重复替换
-                pattern = re.compile(re.escape(issue.keyword))
-                fixed_prompt = pattern.sub(replacement, fixed_prompt)
-        
+            if not issue.suggestions:
+                continue
+            if issue.keyword not in replacement_map:
+                replacement_map[issue.keyword] = issue.suggestions[0]
+
+        if not replacement_map:
+            return prompt
+
+        # 单次扫描原始文本，避免把替换结果再次命中并继续替换
+        ordered_keywords = sorted(replacement_map.keys(), key=len, reverse=True)
+        pattern = re.compile("|".join(re.escape(keyword) for keyword in ordered_keywords))
+        fixed_prompt = pattern.sub(lambda m: replacement_map.get(m.group(0), m.group(0)), prompt)
         return fixed_prompt
     
     def get_fix_suggestions(self, prompt: str) -> Dict[str, List[Tuple[str, List[str]]]]:

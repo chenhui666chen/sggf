@@ -1193,6 +1193,20 @@ def _generate_edit_with_candidates(
 ) -> Dict[str, Any]:
     cache_enabled = _hash_cache_enabled(enable_hash_cache) and not bool(bypass_hash_cache)
     payload = ctx.payload if hasattr(ctx, "payload") and isinstance(getattr(ctx, "payload", None), dict) else None
+    raw_edit_prompt = edit_prompt
+    edit_prompt, safety_meta = _sanitize_prompt_for_safety(edit_prompt)
+    aggressive_edit_prompt: Optional[str] = None
+    if _env_flag("DREAMWEAVER_SAFETY_AGGRESSIVE_FALLBACK", True):
+        try:
+            from adapters.content_safety_checker import check_and_fix_prompt
+
+            aggressive_edit_prompt, _, _ = check_and_fix_prompt(raw_edit_prompt, strategy="aggressive")
+            if not aggressive_edit_prompt or aggressive_edit_prompt == edit_prompt:
+                aggressive_edit_prompt = None
+        except Exception:  # noqa: BLE001
+            aggressive_edit_prompt = None
+    if payload is not None and safety_meta.get("issues"):
+        _bump_telemetry_counter(payload, "image_edit_safety_fixes", 1)
     base_image_hash = ""
     if cache_enabled:
         base_image_hash = hashlib.sha256(image_path.read_bytes()).hexdigest()
@@ -1253,24 +1267,71 @@ def _generate_edit_with_candidates(
 
         if payload is not None:
             _bump_telemetry_counter(payload, "image_edit_generate_calls", 1)
-        if use_multi_ref:
-            result = adapter.generate(
-                image_path=str(image_path),
-                edit_prompt=edit_prompt,
-                strength=strength,
-                guidance_scale=guidance_scale,
-                seed=seed_value,
-                image_paths=ref_paths,
-            )
-        else:
-            result = adapter.generate(
-                image_path=str(image_path),
-                edit_prompt=edit_prompt,
-                strength=strength,
-                guidance_scale=guidance_scale,
-                seed=seed_value,
-            )
-        _write_image_from_generation_result(result, output_path)
+        used_fallback = False
+        try:
+            try:
+                if use_multi_ref:
+                    result = adapter.generate(
+                        image_path=str(image_path),
+                        edit_prompt=edit_prompt,
+                        strength=strength,
+                        guidance_scale=guidance_scale,
+                        seed=seed_value,
+                        image_paths=ref_paths,
+                    )
+                else:
+                    result = adapter.generate(
+                        image_path=str(image_path),
+                        edit_prompt=edit_prompt,
+                        strength=strength,
+                        guidance_scale=guidance_scale,
+                        seed=seed_value,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                error_text = str(exc)
+                if _is_safety_block_error(error_text) and aggressive_edit_prompt:
+                    if use_multi_ref:
+                        result = adapter.generate(
+                            image_path=str(image_path),
+                            edit_prompt=aggressive_edit_prompt,
+                            strength=strength,
+                            guidance_scale=guidance_scale,
+                            seed=seed_value,
+                            image_paths=ref_paths,
+                        )
+                    else:
+                        result = adapter.generate(
+                            image_path=str(image_path),
+                            edit_prompt=aggressive_edit_prompt,
+                            strength=strength,
+                            guidance_scale=guidance_scale,
+                            seed=seed_value,
+                        )
+                    used_fallback = True
+                    if payload is not None:
+                        _bump_telemetry_counter(payload, "image_edit_safety_retries", 1)
+                else:
+                    raise
+            _write_image_from_generation_result(result, output_path)
+        except Exception as exc:  # noqa: BLE001
+            error_text = str(exc)
+            if _is_safety_block_error(error_text):
+                _write_png_placeholder(output_path, width=None, height=None)
+                if payload is not None:
+                    _bump_telemetry_counter(payload, "image_edit_safety_blocked", 1)
+                return {
+                    "candidate_count": 1,
+                    "selected": 0,
+                    "selector": "safety_placeholder",
+                    "seed": seed_value,
+                    "cache_hit": False if cache_enabled else None,
+                    "cache_key": cache_key,
+                    "safety_blocked": True,
+                    "safety_error": error_text,
+                }
+            raise
+        if used_fallback:
+            cache_key = None
         if cache_enabled and cache_key:
             _save_to_hash_cache(key=cache_key, src_path=output_path)
         return {
@@ -1321,7 +1382,11 @@ def _generate_edit_with_candidates(
         else:
             _close_adapter_session(probe)
 
+    safety_blocked_any = False
+    safety_error_sample: Optional[str] = None
+
     def _generate_one(idx: int) -> Path:
+        nonlocal safety_blocked_any, safety_error_sample
         seed = _derive_seed(base_seed=base_seed, ctx=ctx, shot_id=shot_id, role=role, idx=idx)
         cand_path = cand_dir / f"{shot_id}_{role}_c{idx}.png"
         cache_key = None
@@ -1347,27 +1412,66 @@ def _generate_edit_with_candidates(
                 raise RuntimeError("adapter clone failed for parallel candidate generation")
             local_adapter = cloned
         try:
-            if use_multi_ref:
-                result = local_adapter.generate(
-                    image_path=str(image_path),
-                    edit_prompt=edit_prompt,
-                    strength=strength,
-                    guidance_scale=guidance_scale,
-                    seed=seed,
-                    image_paths=ref_paths,
-                )
-            else:
-                result = local_adapter.generate(
-                    image_path=str(image_path),
-                    edit_prompt=edit_prompt,
-                    strength=strength,
-                    guidance_scale=guidance_scale,
-                    seed=seed,
-                )
-            _write_image_from_generation_result(result, cand_path)
-            if cache_enabled and cache_key:
-                _save_to_hash_cache(key=cache_key, src_path=cand_path)
-            return cand_path
+            used_fallback = False
+            try:
+                try:
+                    if use_multi_ref:
+                        result = local_adapter.generate(
+                            image_path=str(image_path),
+                            edit_prompt=edit_prompt,
+                            strength=strength,
+                            guidance_scale=guidance_scale,
+                            seed=seed,
+                            image_paths=ref_paths,
+                        )
+                    else:
+                        result = local_adapter.generate(
+                            image_path=str(image_path),
+                            edit_prompt=edit_prompt,
+                            strength=strength,
+                            guidance_scale=guidance_scale,
+                            seed=seed,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    error_text = str(exc)
+                    if _is_safety_block_error(error_text) and aggressive_edit_prompt:
+                        if use_multi_ref:
+                            result = local_adapter.generate(
+                                image_path=str(image_path),
+                                edit_prompt=aggressive_edit_prompt,
+                                strength=strength,
+                                guidance_scale=guidance_scale,
+                                seed=seed,
+                                image_paths=ref_paths,
+                            )
+                        else:
+                            result = local_adapter.generate(
+                                image_path=str(image_path),
+                                edit_prompt=aggressive_edit_prompt,
+                                strength=strength,
+                                guidance_scale=guidance_scale,
+                                seed=seed,
+                            )
+                        used_fallback = True
+                        if payload is not None:
+                            _bump_telemetry_counter(payload, "image_edit_safety_retries", 1)
+                    else:
+                        raise
+                _write_image_from_generation_result(result, cand_path)
+                if used_fallback:
+                    cache_key = None
+                if cache_enabled and cache_key:
+                    _save_to_hash_cache(key=cache_key, src_path=cand_path)
+                return cand_path
+            except Exception as exc:  # noqa: BLE001
+                error_text = str(exc)
+                if _is_safety_block_error(error_text):
+                    safety_blocked_any = True
+                    if safety_error_sample is None:
+                        safety_error_sample = error_text
+                    _write_png_placeholder(cand_path, width=None, height=None)
+                    return cand_path
+                raise
         finally:
             if local_adapter is not adapter:
                 _close_adapter_session(local_adapter)
@@ -1403,6 +1507,8 @@ def _generate_edit_with_candidates(
         if cache_enabled:
             _bump_telemetry_counter(payload, "image_edit_cache_hits", int(cache_hits))
             _bump_telemetry_counter(payload, "image_edit_cache_misses", int(candidate_count) - int(cache_hits))
+        if safety_blocked_any:
+            _bump_telemetry_counter(payload, "image_edit_safety_blocked", 1)
     out = {
         "candidate_count": candidate_count,
         "selected": int(pick["best_index"]),
@@ -1412,6 +1518,10 @@ def _generate_edit_with_candidates(
         "candidate_seeds": candidate_seeds,
         "selected_seed": candidate_seeds[int(pick["best_index"])] if isinstance(pick.get("best_index"), int) and 0 <= int(pick["best_index"]) < len(candidate_seeds) else None,
     }
+    if safety_blocked_any:
+        out["safety_blocked"] = True
+        if safety_error_sample:
+            out["safety_error"] = safety_error_sample
     if keep_candidates:
         out["candidates"] = [str(p) for p in candidate_paths]
     return out
@@ -3128,7 +3238,7 @@ def run_midframes(ctx: Any) -> None:
 
     video_cfg = ctx.payload.get("video_config") if isinstance(ctx.payload.get("video_config"), dict) else {}
     video_engine = str(video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "").strip().lower()
-    if video_engine in {"wan_i2v", "i2v", "wan_t2v", "wan26_t2v", "t2v"}:
+    if video_engine in {"wan_i2v", "i2v", "wan_t2v", "wan26_t2v", "t2v", "wan_auto", "auto"}:
         # Wan2.6 视频生成（I2V/T2V）不会用到 midframes；跳过以减少成本与耗时。
         ctx.payload["midframes"] = []
         return

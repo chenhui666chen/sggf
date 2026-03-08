@@ -155,6 +155,13 @@ export default function DreamWeaverLibraryPage() {
   const [regenError, setRegenError] = useState<string | null>(null)
   const [characterViewsOpen, setCharacterViewsOpen] = useState(false)
   const [characterViewsEntityId, setCharacterViewsEntityId] = useState<number | null>(null)
+  const regenRoleInfo = useMemo(() => parseLibraryRole(regenRole), [regenRole])
+  const regenIsSideOrBack = useMemo(() => {
+    return (
+      regenRoleInfo.entityType === 'character' &&
+      (regenRoleInfo.view === 'side' || regenRoleInfo.view === 'back')
+    )
+  }, [regenRoleInfo])
 
   const loadLibrary = useCallback(async () => {
     if (!projectId) return
@@ -296,6 +303,7 @@ export default function DreamWeaverLibraryPage() {
           prompt: regenPrompt,
           style_preset: regenStylePreset,
           image_ratio: regenImageRatio,
+          ...(regenIsSideOrBack ? { prefer_view_chain_seed: true } : {}),
           mode,
         })
         const nextPrompt = String(res.data?.prompt || '').trim()
@@ -306,7 +314,7 @@ export default function DreamWeaverLibraryPage() {
         setRegenSuggesting(false)
       }
     },
-    [projectId, regenImageRatio, regenPrompt, regenRole, regenStylePreset],
+    [projectId, regenImageRatio, regenIsSideOrBack, regenPrompt, regenRole, regenStylePreset],
   )
 
   useEffect(() => {
@@ -748,7 +756,7 @@ export default function DreamWeaverLibraryPage() {
             {characterViewsCard?.descriptor || '暂无角色描述'}
           </Typography>
           <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
-            建议：先生成正面，再生成侧面/背面；侧面/背面会尽量基于正面图做图像编辑以保持一致性。
+            建议：先生成正面，再生成侧面/背面；侧面/背面将强制基于前序视角参考图做图像编辑以保持一致性。
           </Typography>
           <Divider sx={{ my: 2 }} />
           <Box
@@ -899,6 +907,11 @@ export default function DreamWeaverLibraryPage() {
           <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
             限制：将覆盖重生成并把该素材标记为“待审核”；上传替换仅支持 PNG。
           </Typography>
+          {regenIsSideOrBack && (
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+              说明：当前为侧面/背面素材。“AI 生成提示词”会按侧/背面首次生成路径重建，不沿用当前图提示词。
+            </Typography>
+          )}
           {lockedConfig?.locked && (
             <Alert severity="info" sx={{ mb: 1 }}>
               当前项目的风格/比例/分辨率已锁定，素材库会强制使用锁定配置。
