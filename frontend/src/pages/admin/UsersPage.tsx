@@ -34,7 +34,6 @@ import {
   Block as BlockIcon,
   CheckCircle as CheckCircleIcon,
   Delete as DeleteIcon,
-  Add as AddIcon,
 } from '@mui/icons-material'
 import { apiClient } from '@/services/api'
 
@@ -116,7 +115,7 @@ export default function AdminUsersPage() {
 
   const handleToggleStatus = async (user: User) => {
     try {
-      await apiClient.patch(`/api/v1/admin/users/${user.id}/status`, {
+      await apiClient.client.patch(`/api/v1/admin/users/${user.id}/status`, {
         is_active: !user.is_active
       })
       fetchUsers()
@@ -281,7 +280,7 @@ export default function AdminUsersPage() {
             component="div"
             count={total}
             page={page}
-            onPageChange={(e, newPage) => setPage(newPage)}
+            onPageChange={(_, newPage) => setPage(newPage)}
             rowsPerPage={rowsPerPage}
             onRowsPerPageChange={(e) => {
               setRowsPerPage(parseInt(e.target.value, 10))
