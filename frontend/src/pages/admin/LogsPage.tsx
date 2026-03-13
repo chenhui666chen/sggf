@@ -12,7 +12,6 @@ import {
   TableRow,
   TablePagination,
   Paper,
-  Button,
   TextField,
   FormControl,
   InputLabel,
@@ -25,7 +24,6 @@ import {
   Tab,
 } from '@mui/material'
 import {
-  Search as SearchIcon,
   History as HistoryIcon,
   Login as LoginIcon,
 } from '@mui/icons-material'
@@ -177,7 +175,7 @@ export default function LogsPage() {
       create: 'success',
       update: 'primary',
       delete: 'error',
-      login: 'info',
+      login: 'primary',
       logout: 'default',
     }
     return colors[type] || 'default'

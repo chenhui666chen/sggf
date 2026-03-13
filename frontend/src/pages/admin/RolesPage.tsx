@@ -19,24 +19,15 @@ import {
   DialogContent,
   DialogActions,
   TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   CircularProgress,
   Alert,
-  Tooltip,
   Checkbox,
   FormControlLabel,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
 } from '@mui/material'
 import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  ExpandMore as ExpandMoreIcon,
   Security as SecurityIcon,
 } from '@mui/icons-material'
 import { useSelector } from 'react-redux'
@@ -133,7 +124,7 @@ export default function RolesPage() {
   const handleUpdate = async () => {
     if (!selectedRole) return
     try {
-      await apiClient.patch(`/api/v1/admin/roles/${selectedRole.id}`, {
+      await apiClient.client.patch(`/api/v1/admin/roles/${selectedRole.id}`, {
         ...formData,
         permission_ids: selectedPermissionIds,
       })
