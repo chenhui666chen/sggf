@@ -80,7 +80,7 @@ const modules = [
     description: '短视频剧本创作，快速生成短剧内容（当前为模拟线路）',
     icon: MovieIcon,
     color: '#f57c00',
-    available: false, // 仅管理员可用
+    available: true, // 管理员和管理员可用
     adminOnly: true,
     path: '/drama',
     badge: '内测',
@@ -105,7 +105,10 @@ export default function CreationModulePage() {
   const hasAdminRole = user?.roles?.some((r: any) => r.code === 'admin' || r.code === 'super_admin')
 
   const handleModuleClick = (module: typeof modules[0]) => {
-    if (module.available) {
+    const isAdminOnly = module.adminOnly && !hasAdminRole
+    const isAvailable = module.available && !isAdminOnly
+    
+    if (isAvailable) {
       navigate(module.path)
     }
   }
