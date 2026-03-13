@@ -60,12 +60,15 @@ export default function DashboardPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const dispatch = useDispatch<AppDispatch>()
   const { projects } = useSelector((state: RootState) => state.project)
+  const { user } = useSelector((state: RootState) => state.auth)
   const [openDialog, setOpenDialog] = useState(false)
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     genre: '',
   })
+  
+  const hasAdminRole = user?.roles?.some((r: any) => r.code === 'admin' || r.code === 'super_admin')
 
   // 生成功能状态
   const [generatingProjectId, setGeneratingProjectId] = useState<number | null>(null)
@@ -923,24 +926,26 @@ export default function DashboardPage() {
               width: { xs: '100%', sm: 'auto' },
               justifyContent: { xs: 'flex-end', sm: 'flex-start' }
             }}>
-              <Button
-                variant="outlined"
-                startIcon={<ScienceIcon />}
-                onClick={() => navigate('/prompt-evolution')}
-                sx={{
-                  color: 'white',
-                  borderColor: 'rgba(255,255,255,0.5)',
-                  fontSize: { xs: '0.8125rem', sm: '0.875rem' },
-                  minHeight: { xs: 36, sm: 40 },
-                  display: { xs: 'none', md: 'inline-flex' },
-                  '&:hover': {
-                    borderColor: 'white',
-                    backgroundColor: 'rgba(255,255,255,0.1)',
-                  },
-                }}
-              >
-                提示词优化
-              </Button>
+              {hasAdminRole && (
+                <Button
+                  variant="outlined"
+                  startIcon={<ScienceIcon />}
+                  onClick={() => navigate('/prompt-evolution')}
+                  sx={{
+                    color: 'white',
+                    borderColor: 'rgba(255,255,255,0.5)',
+                    fontSize: { xs: '0.8125rem', sm: '0.875rem' },
+                    minHeight: { xs: 36, sm: 40 },
+                    display: { xs: 'none', md: 'inline-flex' },
+                    '&:hover': {
+                      borderColor: 'white',
+                      backgroundColor: 'rgba(255,255,255,0.1)',
+                    },
+                  }}
+                >
+                  提示词优化
+                </Button>
+              )}
               <Button
                 variant="outlined"
                 onClick={handleLogout}

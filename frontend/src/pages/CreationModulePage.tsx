@@ -80,7 +80,8 @@ const modules = [
     description: '短视频剧本创作，快速生成短剧内容（当前为模拟线路）',
     icon: MovieIcon,
     color: '#f57c00',
-    available: true,
+    available: false, // 仅管理员可用
+    adminOnly: true,
     path: '/drama',
     badge: '内测',
   },
@@ -165,24 +166,50 @@ export default function CreationModulePage() {
               选择你的创作模式，开启智能创作之旅
             </Typography>
           </Box>
-          <Button
-            variant="outlined"
-            size="small"
-            startIcon={<LogoutIcon />}
-            onClick={handleLogout}
-            sx={{
-              color: 'white',
-              borderColor: 'rgba(255,255,255,0.5)',
-              minHeight: { xs: 44, sm: 36 },
-              fontSize: { xs: '0.875rem', sm: '0.875rem' },
-              '&:hover': {
-                borderColor: 'white',
-                backgroundColor: 'rgba(255,255,255,0.1)',
-              },
-            }}
-          >
-            退出登录
-          </Button>
+          <Box sx={{ 
+            display: 'flex', 
+            gap: { xs: 1, sm: 1.5 },
+            alignItems: 'center'
+          }}>
+            {hasAdminRole && (
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<AdminPanelSettingsIcon />}
+                onClick={() => navigate('/admin')}
+                sx={{
+                  color: 'white',
+                  borderColor: 'rgba(255,255,255,0.5)',
+                  minHeight: { xs: 44, sm: 36 },
+                  fontSize: { xs: '0.875rem', sm: '0.875rem' },
+                  '&:hover': {
+                    borderColor: 'white',
+                    backgroundColor: 'rgba(255,255,255,0.1)',
+                  },
+                }}
+              >
+                管理控制台
+              </Button>
+            )}
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<LogoutIcon />}
+              onClick={handleLogout}
+              sx={{
+                color: 'white',
+                borderColor: 'rgba(255,255,255,0.5)',
+                minHeight: { xs: 44, sm: 36 },
+                fontSize: { xs: '0.875rem', sm: '0.875rem' },
+                '&:hover': {
+                  borderColor: 'white',
+                  backgroundColor: 'rgba(255,255,255,0.1)',
+                },
+              }}
+            >
+              退出登录
+            </Button>
+          </Box>
         </Box>
 
         {/* 模块卡片网格 */}
@@ -190,6 +217,8 @@ export default function CreationModulePage() {
           {modules.map((module) => {
             const IconComponent = module.icon
             const isNovel = module.id === 'novel'
+            const isAdminOnly = module.adminOnly && !hasAdminRole
+            const isAvailable = module.available && !isAdminOnly
             return (
               <Grid item xs={12} sm={6} md={6} key={module.id}>
                 <Card
@@ -198,11 +227,11 @@ export default function CreationModulePage() {
                     minHeight: { xs: 140, sm: 180, md: 200 },
                     borderRadius: { xs: 2, sm: 3 },
                     transition: 'all 0.3s ease',
-                    opacity: module.available ? 1 : 0.7,
+                    opacity: isAvailable ? 1 : 0.6,
                     position: 'relative',
                     '&:hover': {
-                      transform: module.available ? 'translateY(-4px)' : 'none',
-                      boxShadow: module.available ? '0 12px 24px rgba(0,0,0,0.15)' : 'none',
+                      transform: isAvailable ? 'translateY(-4px)' : 'none',
+                      boxShadow: isAvailable ? '0 12px 24px rgba(0,0,0,0.15)' : 'none',
                     },
                   }}
                 >
@@ -236,7 +265,7 @@ export default function CreationModulePage() {
                   )}
                   <CardActionArea
                     onClick={() => handleModuleClick(module)}
-                    disabled={!module.available}
+                    disabled={!isAvailable}
                     sx={{ height: '100%', p: { xs: 1.5, sm: 2 } }}
                   >
                     <CardContent sx={{ textAlign: 'center', py: { xs: 0.5, sm: 1 }, px: { xs: 1, sm: 2 } }}>
@@ -294,7 +323,20 @@ export default function CreationModulePage() {
                           }}
                         />
                       )}
-                      {!module.available && (
+                      {!isAvailable && module.adminOnly && (
+                        <Chip 
+                          label="管理员专属" 
+                          size="small" 
+                          sx={{ 
+                            mb: 1, 
+                            backgroundColor: '#f5f5f5',
+                            color: '#757575',
+                            fontSize: { xs: '0.7rem', sm: '0.75rem' },
+                            height: { xs: 22, sm: 24 }
+                          }} 
+                        />
+                      )}
+                      {!isAvailable && !module.adminOnly && (
                         <Chip 
                           label="敬请期待" 
                           size="small" 
@@ -325,26 +367,6 @@ export default function CreationModulePage() {
           })}
         </Grid>
       </Container>
-      
-      {/* 管理控制台入口 */}
-      {hasAdminRole && (
-        <Fab
-          color="secondary"
-          onClick={() => navigate('/admin')}
-          sx={{
-            position: 'fixed',
-            bottom: 24,
-            right: 24,
-            zIndex: 1000,
-            boxShadow: 3,
-            '&:hover': {
-              boxShadow: 6,
-            },
-          }}
-        >
-          <AdminPanelSettingsIcon />
-        </Fab>
-      )}
     </Box>
   )
 }
