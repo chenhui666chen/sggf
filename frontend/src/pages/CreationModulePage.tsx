@@ -12,14 +12,18 @@ import {
   alpha,
   IconButton,
   Tooltip,
+  Fab,
 } from '@mui/material'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
 import HeadphonesIcon from '@mui/icons-material/Headphones'
 import MovieIcon from '@mui/icons-material/Movie'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import LogoutIcon from '@mui/icons-material/Logout'
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings'
 import { useDispatch } from 'react-redux'
 import { logout } from '@/store/slices/authSlice'
+import { useSelector } from 'react-redux'
+import { RootState } from '@/store/store'
 
 // 破碎书册 SVG 图标（拆书工具入口）
 const BrokenBookIcon = () => (
@@ -95,6 +99,9 @@ const modules = [
 export default function CreationModulePage() {
   const navigate = useNavigate()
   const dispatch = useDispatch()
+  const { user } = useSelector((state: RootState) => state.auth)
+  
+  const hasAdminRole = user?.roles?.some((r: any) => r.code === 'admin' || r.code === 'super_admin')
 
   const handleModuleClick = (module: typeof modules[0]) => {
     if (module.available) {
@@ -318,6 +325,26 @@ export default function CreationModulePage() {
           })}
         </Grid>
       </Container>
+      
+      {/* 管理控制台入口 */}
+      {hasAdminRole && (
+        <Fab
+          color="secondary"
+          onClick={() => navigate('/admin')}
+          sx={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            zIndex: 1000,
+            boxShadow: 3,
+            '&:hover': {
+              boxShadow: 6,
+            },
+          }}
+        >
+          <AdminPanelSettingsIcon />
+        </Fab>
+      )}
     </Box>
   )
 }
