@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Container,
@@ -42,16 +42,26 @@ import Tooltip from '@mui/material/Tooltip'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import SyncIcon from '@mui/icons-material/Sync'
 import { logger } from '@/utils/logger'
-import MarkdownRenderer from '@/components/MarkdownRenderer'
-import VditorEditor from '@/components/VditorEditor'
 import { apiClient } from '@/services/api'
-import SettingTreeView from '@/components/SettingTreeView'
-import SettingRecommendations from '@/components/SettingRecommendations'
-import ConflictDetector from '@/components/ConflictDetector'
-import RelationshipGraph from '@/components/RelationshipGraph'
-import CharacterCardManager from '@/components/CharacterCardManager'
-import ExpansionConfigDialog from '@/components/workflow/ExpansionConfigDialog'
 import FormattedContent from '@/components/common/FormattedContent'
+
+const loadMarkdownRenderer = () => import('@/components/MarkdownRenderer')
+const loadVditorEditor = () => import('@/components/VditorEditor')
+const loadSettingTreeView = () => import('@/components/SettingTreeView')
+const loadSettingRecommendations = () => import('@/components/SettingRecommendations')
+const loadConflictDetector = () => import('@/components/ConflictDetector')
+const loadRelationshipGraph = () => import('@/components/RelationshipGraph')
+const loadCharacterCardManager = () => import('@/components/CharacterCardManager')
+const loadExpansionConfigDialog = () => import('@/components/workflow/ExpansionConfigDialog')
+
+const LazyMarkdownRenderer = lazy(loadMarkdownRenderer)
+const LazyVditorEditor = lazy(loadVditorEditor)
+const LazySettingTreeView = lazy(loadSettingTreeView)
+const LazySettingRecommendations = lazy(loadSettingRecommendations)
+const LazyConflictDetector = lazy(loadConflictDetector)
+const LazyRelationshipGraph = lazy(loadRelationshipGraph)
+const LazyCharacterCardManager = lazy(loadCharacterCardManager)
+const LazyExpansionConfigDialog = lazy(loadExpansionConfigDialog)
 
 // ==================== 接口定义 ====================
 
@@ -98,6 +108,25 @@ function TabPanel(props: TabPanelProps) {
       {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
     </div>
   )
+}
+
+function LazySectionFallback({ minHeight = 240 }: { minHeight?: number }) {
+  return (
+    <Box
+      sx={{
+        minHeight,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <CircularProgress size={28} />
+    </Box>
+  )
+}
+
+function warmImport(loader: () => Promise<unknown>) {
+  void loader()
 }
 
 // Category 中文名称映射（与后端 HIERARCHY_DEFAULTS 保持一致 - 33种体系）
@@ -302,6 +331,54 @@ export default function KnowledgeBasePage() {
   // 🆕 控制图标高亮动效的key（每次有新结果时+1触发动画）
   const [characterButtonHighlightKey, setCharacterButtonHighlightKey] = useState(0)
   
+  const preloadCharacterTabResources = (tabValue: number) => {
+    if (tabValue === 1) {
+      warmImport(loadCharacterCardManager)
+      return
+    }
+
+    warmImport(loadMarkdownRenderer)
+  }
+
+  const preloadSettingTabResources = (tabValue: number) => {
+    if (tabValue === 1) {
+      warmImport(loadSettingRecommendations)
+      return
+    }
+
+    if (tabValue === 2) {
+      warmImport(loadRelationshipGraph)
+      return
+    }
+
+    warmImport(loadSettingTreeView)
+  }
+
+  const preloadMainTabResources = (tabValue: number) => {
+    if (tabValue <= 2) {
+      warmImport(loadMarkdownRenderer)
+    }
+
+    if (tabValue === 1) {
+      preloadCharacterTabResources(characterSubTabValue)
+      return
+    }
+
+    if (tabValue === 2) {
+      warmImport(loadExpansionConfigDialog)
+      return
+    }
+
+    if (tabValue === 3) {
+      preloadSettingTabResources(settingSubTabValue)
+      return
+    }
+
+    if (tabValue === 4) {
+      warmImport(loadConflictDetector)
+    }
+  }
+
   // 🔢 计算当前已有人物数
   const getCurrentCharacterCount = (): number => {
     if (!characters) return 0
@@ -730,6 +807,19 @@ export default function KnowledgeBasePage() {
       setSelectedItem(null)
     }
   }, [selectedCollection])
+
+  useEffect(() => {
+    preloadMainTabResources(mainTabValue)
+
+    if (isEditing) {
+      warmImport(loadVditorEditor)
+    }
+
+    if (showExpansionConfig) {
+      warmImport(loadExpansionConfigDialog)
+    }
+  }, [mainTabValue, characterSubTabValue, settingSubTabValue, isEditing, showExpansionConfig])
+
 
   // 加载历史记录
   useEffect(() => {
@@ -1964,7 +2054,7 @@ export default function KnowledgeBasePage() {
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
         <Tabs
           value={mainTabValue}
-          onChange={(_, newValue) => setMainTabValue(newValue)}
+          onChange={(_, newValue) => { preloadMainTabResources(newValue); setMainTabValue(newValue) }}
           sx={{
             '& .MuiTab-root': {
               fontWeight: 600,
@@ -1973,11 +2063,11 @@ export default function KnowledgeBasePage() {
             }
           }}
         >
-          <Tab label="🌍 世界观设定" />
-          <Tab label="👥 人物设定" />
-          <Tab label="📋 大纲设定" />
-          <Tab label="🎨 设定中心" />
-          <Tab label="⚠️ 冲突检测" />
+          <Tab label="🌍 世界观设定" onMouseEnter={() => preloadMainTabResources(0)} onFocus={() => preloadMainTabResources(0)} />
+          <Tab label="👥 人物设定" onMouseEnter={() => preloadMainTabResources(1)} onFocus={() => preloadMainTabResources(1)} />
+          <Tab label="📋 大纲设定" onMouseEnter={() => preloadMainTabResources(2)} onFocus={() => preloadMainTabResources(2)} />
+          <Tab label="🎨 设定中心" onMouseEnter={() => preloadMainTabResources(3)} onFocus={() => preloadMainTabResources(3)} />
+          <Tab label="⚠️ 冲突检测" onMouseEnter={() => preloadMainTabResources(4)} onFocus={() => preloadMainTabResources(4)} />
         </Tabs>
       </Box>
 
@@ -1989,10 +2079,10 @@ export default function KnowledgeBasePage() {
             <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
               <Tabs
                 value={characterSubTabValue}
-                onChange={(_, newValue) => setCharacterSubTabValue(newValue)}
+                onChange={(_, newValue) => { preloadCharacterTabResources(newValue); setCharacterSubTabValue(newValue) }}
               >
-                <Tab label="📝 人物文本" />
-                <Tab label="🎴 人物卡管理" />
+                <Tab label="📝 人物文本" onMouseEnter={() => preloadCharacterTabResources(0)} onFocus={() => preloadCharacterTabResources(0)} />
+                <Tab label="🎴 人物卡管理" onMouseEnter={() => preloadCharacterTabResources(1)} onFocus={() => preloadCharacterTabResources(1)} />
               </Tabs>
             </Box>
           )}
@@ -2023,6 +2113,8 @@ export default function KnowledgeBasePage() {
                       variant="contained"
                       startIcon={<EditIcon />}
                       onClick={handleStartEdit}
+                      onMouseEnter={() => warmImport(loadVditorEditor)}
+                      onFocus={() => warmImport(loadVditorEditor)}
                       disabled={!getCurrentContent() || expandingCharacters || expandingOutline}
                       sx={{ borderRadius: 2 }}
                     >
@@ -2039,6 +2131,8 @@ export default function KnowledgeBasePage() {
                         <Button
                           variant="contained"
                           startIcon={<ArticleIcon />}
+                          onMouseEnter={() => warmImport(loadExpansionConfigDialog)}
+                          onFocus={() => warmImport(loadExpansionConfigDialog)}
                           onClick={() => {
                             // 💡 打开对话框前自动选中推荐模式
                             console.log('💡 打开大纲扩展配置，自动选中推荐模式：', recommendedMode)
@@ -2190,12 +2284,14 @@ export default function KnowledgeBasePage() {
                   {characterSubTabValue === 0 && (
                     <>
                       {isEditing ? (
-                        <VditorEditor
+                        <Suspense fallback={<LazySectionFallback minHeight={500} />}>
+                          <LazyVditorEditor
                           value={editedContent}
                           onChange={(val) => setEditedContent(val)}
                           placeholder={`${getTabTitle()}内容（支持 Markdown 格式）...`}
                           height={500}
-                        />
+                          />
+                        </Suspense>
                       ) : (
                         <Paper
                           elevation={0}
@@ -2209,7 +2305,9 @@ export default function KnowledgeBasePage() {
                           }}
                         >
                           {getCurrentContent() ? (
-                            <MarkdownRenderer content={getCurrentContent()} />
+                            <Suspense fallback={<LazySectionFallback minHeight={240} />}>
+                              <LazyMarkdownRenderer content={getCurrentContent()}  />
+                            </Suspense>
                           ) : (
                             <Typography color="text.secondary" sx={{ textAlign: 'center', py: 8 }}>
                               📭 暂无{getTabTitle()}，请先在工作流中生成
@@ -2222,13 +2320,15 @@ export default function KnowledgeBasePage() {
 
                   {/* 子Tab 1: 人物卡管理 */}
                   {characterSubTabValue === 1 && (
-                    <CharacterCardManager
+                    <Suspense fallback={<LazySectionFallback minHeight={360} />}>
+                      <LazyCharacterCardManager
                       projectId={Number(projectId)}
                       onCharacterUpdate={() => {
                         // 角色更新后，可以刷新其他相关数据
                         console.log('角色已更新')
                       }}
-                    />
+                      />
+                    </Suspense>
                   )}
 
                   {/* 已移除“扩展人物”子页；改为顶部与“编辑人物设定”并排的输入框+按钮展示，复用原有逻辑 */}
@@ -2237,12 +2337,14 @@ export default function KnowledgeBasePage() {
                 // 世界观设定和大纲设定Tab的原有内容
                 <>
                   {isEditing ? (
-                <VditorEditor
+                <Suspense fallback={<LazySectionFallback minHeight={500} />}>
+                  <LazyVditorEditor
                   value={editedContent}
                   onChange={(val) => setEditedContent(val)}
                   placeholder={`${getTabTitle()}内容（支持 Markdown 格式）...`}
                   height={500}
-                />
+                  />
+                </Suspense>
               ) : (
                 <Paper
                   elevation={0}
@@ -2256,7 +2358,9 @@ export default function KnowledgeBasePage() {
                   }}
                 >
                   {getCurrentContent() ? (
-                    <MarkdownRenderer content={getCurrentContent()} />
+                    <Suspense fallback={<LazySectionFallback minHeight={240} />}>
+                      <LazyMarkdownRenderer content={getCurrentContent()}  />
+                    </Suspense>
                   ) : (
                     <Typography color="text.secondary" sx={{ textAlign: 'center', py: 8 }}>
                       📭 暂无{getTabTitle()}，请先在工作流中生成
@@ -2273,15 +2377,15 @@ export default function KnowledgeBasePage() {
 
       {/* ==================== Tab 3: 设定中心 ==================== */}
       <TabPanel value={mainTabValue} index={3}>
-        {/* 子Tab导航栏 */}
+        {/* Tab 3 Nav */}
         <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
           <Tabs
             value={settingSubTabValue}
-            onChange={(_, newValue) => setSettingSubTabValue(newValue)}
+            onChange={(_, newValue) => { preloadSettingTabResources(newValue); setSettingSubTabValue(newValue) }}
           >
-            <Tab label="📋 设定管理" />
-            <Tab label="⭐ 热门设定" />
-            <Tab label="🌐 关系网络" />
+            <Tab label={'\u8bbe\u5b9a\u7ba1\u7406'} onMouseEnter={() => preloadSettingTabResources(0)} onFocus={() => preloadSettingTabResources(0)} />
+            <Tab label={'\u70ed\u95e8\u8bbe\u5b9a'} onMouseEnter={() => preloadSettingTabResources(1)} onFocus={() => preloadSettingTabResources(1)} />
+            <Tab label={'\u5173\u7cfb\u7f51\u7edc'} onMouseEnter={() => preloadSettingTabResources(2)} onFocus={() => preloadSettingTabResources(2)} />
           </Tabs>
         </Box>
 
@@ -2433,7 +2537,8 @@ export default function KnowledgeBasePage() {
                   <Box sx={{ display: 'flex', gap: 2, flex: 1, minHeight: 0 }}>
                     {/* 左：树形视图 */}
                     <Box sx={{ width: '60%', borderRight: '1px solid', borderColor: 'grey.200', pr: 1 }}>
-                      <SettingTreeView
+                      <Suspense fallback={<LazySectionFallback minHeight={360} />}>
+                        <LazySettingTreeView
                         collectionId={selectedCollection.id}
                         selectedItemId={selectedItem?.id}
                         refreshTrigger={treeRefreshTrigger}
@@ -2449,7 +2554,8 @@ export default function KnowledgeBasePage() {
                         onAddItem={handleTreeAddItem}
                         onDeleteItem={handleTreeDeleteItem}
                         title="层级视图"
-                      />
+                        />
+                      </Suspense>
                     </Box>
 
                     {/* 右：详情/列表（根据选择切换） */}
@@ -2615,7 +2721,8 @@ export default function KnowledgeBasePage() {
         {/* 子Tab 1: 热门设定 */}
         {settingSubTabValue === 1 && (
           <Box>
-            <SettingRecommendations
+            <Suspense fallback={<LazySectionFallback minHeight={320} />}>
+              <LazySettingRecommendations
               projectId={Number(projectId)}
               limit={50}
               showInsertButton={false}
@@ -2644,7 +2751,8 @@ export default function KnowledgeBasePage() {
                 }
               }}
               title="热门设定"
-            />
+              />
+            </Suspense>
           </Box>
         )}
 
@@ -2652,7 +2760,8 @@ export default function KnowledgeBasePage() {
         {settingSubTabValue === 2 && (
           <Box>
             {selectedItem ? (
-              <RelationshipGraph
+              <Suspense fallback={<LazySectionFallback minHeight={360} />}>
+                <LazyRelationshipGraph
                 itemId={selectedItem.id}
                 itemName={selectedItem.name}
                 onNodeClick={(nodeId) => {
@@ -2670,7 +2779,8 @@ export default function KnowledgeBasePage() {
                     }
                   }
                 }}
-              />
+                />
+              </Suspense>
             ) : (
               <Alert severity="info" sx={{ mt: 2 }}>
                 请先在"设定管理"中选择一个设定项，以查看其关系网络图
@@ -2682,7 +2792,8 @@ export default function KnowledgeBasePage() {
 
       {/* ==================== Tab 4: 冲突检测 ==================== */}
       <TabPanel value={mainTabValue} index={4}>
-        <ConflictDetector
+        <Suspense fallback={<LazySectionFallback minHeight={360} />}>
+          <LazyConflictDetector
           projectId={Number(projectId)}
           onSelectItem={(itemId) => {
             // 跳转到设定中心Tab并查找该设定项
@@ -2710,7 +2821,8 @@ export default function KnowledgeBasePage() {
             }
           }}
           title="设定冲突检测"
-        />
+          />
+        </Suspense>
       </TabPanel>
 
       {/* ==================== 对话框 ==================== */}
@@ -3516,51 +3628,56 @@ export default function KnowledgeBasePage() {
         </DialogActions>
       </Dialog>
 
-      {/* ⚙️ 扩展配置对话框 */}
-      <ExpansionConfigDialog
-        open={showExpansionConfig}
-        onClose={() => setShowExpansionConfig(false)}
-        expansionMode={expansionMode}
-        targetChapterCount={targetChapterCount}
-        incrementalStep={incrementalStep}
-        totalVolumes={totalVolumes}
-        totalChaptersMin={totalChaptersMin}
-        totalChaptersMax={totalChaptersMax}
-        // 🔥 删除了 autoExpandAllVolumes 参数
-        frameworkMetadata={frameworkMetadata}
-        loadingFramework={loadingFramework}
-        onExpansionModeChange={(mode) => {
-          setExpansionMode(mode)
-          // 如果切换到史诗框架模式，需要加载框架
-          if (mode === 'epic_framework' && !frameworkMetadata) {
-            loadEpicFramework()
-          }
-        }}
-        onTargetChapterCountChange={setTargetChapterCount}
-        onIncrementalStepChange={setIncrementalStep}
-        onTotalVolumesChange={setTotalVolumes}
-        onTotalChaptersMinChange={setTotalChaptersMin}
-        onTotalChaptersMaxChange={setTotalChaptersMax}
-        // 🖅 删除了 onAutoExpandAllVolumesChange 参数
-        targetVolumeIndex={targetVolumeIndex}
-        volumeChaptersMin={volumeChaptersMin}
-        volumeChaptersMax={volumeChaptersMax}
-        onTargetVolumeIndexChange={setTargetVolumeIndex}
-        onVolumeChaptersMinChange={setVolumeChaptersMin}
-        onVolumeChaptersMaxChange={setVolumeChaptersMax}
-        onConfirm={() => {
-          setShowExpansionConfig(false)
-          // 调用扩展函数
-          handleExpandOutline()
-        }}
-        genre={projectInfo?.genre || ''}
-        recommendedMode={recommendedMode}
-        recommendedVolumes={recommendedVolumes}
-        recommendedChaptersPerVolumeMin={recommendedChaptersPerVolumeMin}
-        recommendedChaptersPerVolumeMax={recommendedChaptersPerVolumeMax}
-        // 🖅 删除了 recommendedAutoExpandAllVolumes 参数
-        recommendationReason={recommendationReason}
-      />
+      {/* ??? ???????????*/}
+      {showExpansionConfig && (
+        <Suspense fallback={null}>
+          <LazyExpansionConfigDialog
+            open={showExpansionConfig}
+            onClose={() => setShowExpansionConfig(false)}
+            expansionMode={expansionMode}
+            targetChapterCount={targetChapterCount}
+            incrementalStep={incrementalStep}
+            totalVolumes={totalVolumes}
+            totalChaptersMin={totalChaptersMin}
+            totalChaptersMax={totalChaptersMax}
+            // ?? ?????autoExpandAllVolumes ???
+            frameworkMetadata={frameworkMetadata}
+            loadingFramework={loadingFramework}
+            onExpansionModeChange={(mode) => {
+              setExpansionMode(mode)
+              // ????????????????????????????
+              if (mode === 'epic_framework' && !frameworkMetadata) {
+                loadEpicFramework()
+              }
+            }}
+            onTargetChapterCountChange={setTargetChapterCount}
+            onIncrementalStepChange={setIncrementalStep}
+            onTotalVolumesChange={setTotalVolumes}
+            onTotalChaptersMinChange={setTotalChaptersMin}
+            onTotalChaptersMaxChange={setTotalChaptersMax}
+            // ?? ?????onAutoExpandAllVolumesChange ???
+            targetVolumeIndex={targetVolumeIndex}
+            volumeChaptersMin={volumeChaptersMin}
+            volumeChaptersMax={volumeChaptersMax}
+            onTargetVolumeIndexChange={setTargetVolumeIndex}
+            onVolumeChaptersMinChange={setVolumeChaptersMin}
+            onVolumeChaptersMaxChange={setVolumeChaptersMax}
+            onConfirm={() => {
+              setShowExpansionConfig(false)
+              // ?????????
+              handleExpandOutline()
+            }}
+            genre={projectInfo?.genre || ''}
+            recommendedMode={recommendedMode}
+            recommendedVolumes={recommendedVolumes}
+            recommendedChaptersPerVolumeMin={recommendedChaptersPerVolumeMin}
+            recommendedChaptersPerVolumeMax={recommendedChaptersPerVolumeMax}
+            // ?? ?????recommendedAutoExpandAllVolumes ???
+            recommendationReason={recommendationReason}
+          />
+        </Suspense>
+      )}
+
 
       {/* 🆕 二次确认对话框 */}
       <Dialog

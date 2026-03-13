@@ -155,6 +155,58 @@ interface DreamweaverVideoJobsRebuildResponse {
   video_clip_jobs: any[]
 }
 
+interface OAuthAuthUrlRequest {
+  redirect_uri: string
+  state?: string
+}
+
+interface PasswordResetCodeRequest {
+  account: string
+}
+
+interface PasswordResetRequest {
+  account: string
+  code: string
+  new_password: string
+}
+
+const AUTH_PUBLIC_ENDPOINTS = new Set([
+  '/api/v1/auth/login',
+  '/api/v1/auth/register',
+  '/api/v1/auth/reset-password/request-code',
+  '/api/v1/auth/reset-password',
+  '/api/v1/auth/alipay/callback',
+  '/api/v1/auth/wechat/callback',
+])
+
+function normalizeRequestPath(url?: string): string {
+  if (!url) return ''
+
+  try {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return new URL(url).pathname
+    }
+  } catch {
+    return url
+  }
+
+  return url
+}
+
+function shouldRedirectToLogin(error: AxiosError): boolean {
+  if (error.response?.status !== 401) {
+    return false
+  }
+
+  const requestPath = normalizeRequestPath(error.config?.url)
+  if (AUTH_PUBLIC_ENDPOINTS.has(requestPath)) {
+    return false
+  }
+
+  const currentPath = typeof window !== 'undefined' ? window.location.pathname : ''
+  return currentPath !== '/login' && currentPath !== '/register'
+}
+
 function extractDetailMessage(detail: any): string | null {
   if (!detail) return null
   if (typeof detail === 'string') return detail.trim() || null
@@ -272,8 +324,9 @@ class ApiClient {
     this.client.interceptors.response.use(
       (response) => response,
       (error: AxiosError) => {
-        if (error.response?.status === 401) {
+        if (shouldRedirectToLogin(error)) {
           localStorage.removeItem('access_token')
+          localStorage.removeItem('user')
           window.location.href = '/login'
         }
         return Promise.reject(error)
@@ -282,7 +335,7 @@ class ApiClient {
   }
 
   // 认证API
-  register(data: { username: string; email: string; password: string; full_name?: string }) {
+  register(data: { username: string; email: string; password: string; phone?: string; full_name?: string }) {
     return this.client.post('/api/v1/auth/register', data)
   }
 
@@ -302,8 +355,24 @@ class ApiClient {
     return this.client.post('/api/v1/auth/change-password', data)
   }
 
+  requestPasswordResetCode(data: PasswordResetCodeRequest) {
+    return this.client.post('/api/v1/auth/reset-password/request-code', data)
+  }
+
+  resetPassword(data: PasswordResetRequest) {
+    return this.client.post('/api/v1/auth/reset-password', data)
+  }
+
+  getAlipayAuthUrl(data: OAuthAuthUrlRequest) {
+    return this.client.post('/api/v1/auth/alipay/auth-url', data)
+  }
+
   alipayCallback(code: string) {
     return this.client.post('/api/v1/auth/alipay/callback', { code })
+  }
+
+  getWechatAuthUrl(data: OAuthAuthUrlRequest) {
+    return this.client.post('/api/v1/auth/wechat/auth-url', data)
   }
 
   wechatCallback(code: string) {

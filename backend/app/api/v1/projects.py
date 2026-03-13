@@ -399,10 +399,13 @@ async def auto_assign_project_audio_voices(
         from app.services.llm_client import get_llm_client
 
         llm_client = get_llm_client(strategy="conservative")
-    except Exception:
+        logger.info(f"✅ LLM 客户端初始化成功，将为角色声线推荐提供智能分析")
+    except Exception as e:
+        logger.warning(f"⚠️ LLM 客户端初始化失败：{e}，将使用规则推断模式")
         llm_client = None
 
     vm = create_voice_manager(tts_model=tts_model, llm_client=llm_client)
+    logger.info(f"🎙️ VoiceManager 初始化完成，LLM 支持：{'启用' if llm_client else '禁用'}")
     result_characters = []
 
     # 先放入“其他”条目（如旁白）
@@ -512,6 +515,7 @@ async def auto_assign_project_audio_voices(
         return None
 
     def _build_traits_from_character(char: Character) -> dict:
+        """从角色信息中构建特征字典，优先使用结构化字段"""
         tags = _parse_tags(char.tags)
         role = _normalize_text(char.role)
         importance = _normalize_text(char.importance_level)
@@ -519,40 +523,94 @@ async def auto_assign_project_audio_voices(
         profile = _normalize_text(char.profile)
         faction = _normalize_text(char.faction)
 
+        # 构建完整的上下文文本（用于 LLM 分析和关键词匹配）
         text_parts = [char.name, role, importance, summary, profile, faction, " ".join(tags)]
         text = " ".join([_normalize_text(p) for p in text_parts if _normalize_text(p)])
         text_lower = text.lower()
 
         traits: dict = {}
-        traits["gender"] = _infer_gender(char, text_lower)
-
-        age_group = _infer_age_group(char, text_lower)
-        traits["age_group"] = age_group or "unknown"
-
+        
+        # 1. 优先使用结构化字段
+        gender_raw = _normalize_text(char.gender).lower()
+        if gender_raw in ("男", "male", "m", "man", "boy"):
+            traits["gender"] = "male"
+        elif gender_raw in ("女", "female", "f", "woman", "girl"):
+            traits["gender"] = "female"
+        else:
+            # 使用关键词推断
+            traits["gender"] = _infer_gender(char, text_lower)
+        
+        # 2. 优先使用年龄字段
+        if char.age is not None:
+            age = char.age
+            if age < 12:
+                traits["age_group"] = "child"
+            elif age < 18:
+                traits["age_group"] = "teen"
+            elif age < 30:
+                traits["age_group"] = "young"
+            elif age < 60:
+                traits["age_group"] = "adult"
+            else:
+                traits["age_group"] = "elder"
+        else:
+            age_group = _infer_age_group(char, text_lower)
+            traits["age_group"] = age_group or "unknown"
+        
+        # 3. 性格推断：优先从 profile/summary 中提取
         personality = _infer_personality(text_lower)
         if not personality:
+            # 从角色重要性推断
             if "主角" in importance or "重要" in importance or "protagonist" in text_lower or "hero" in text_lower:
                 personality = "energetic"
             elif "龙套" in importance or "群众" in importance or "配角" in importance or "supporting" in text_lower:
                 personality = "calm"
         if personality:
             traits["personality"] = personality
-
-        role_text = " ".join([role, importance, summary, profile, " ".join(tags)]).strip()
-        if role_text:
-            traits["role_type"] = role_text
-
+        
+        # 4. 构建详细的上下文信息（用于 LLM 分析）
+        context_parts = []
+        if role:
+            context_parts.append(f"角色定位：{role}")
+        if importance:
+            context_parts.append(f"重要程度：{importance}")
+        if summary:
+            context_parts.append(f"角色简介：{summary}")
+        if profile:
+            context_parts.append(f"详细设定：{profile}")
+        if faction:
+            context_parts.append(f"所属势力：{faction}")
+        if tags:
+            context_parts.append(f"标签：{', '.join(tags)}")
+        
+        if context_parts:
+            traits["context"] = "；".join(context_parts)
+        
+        logger.debug(f"📊 角色 '{char.name}' 特征分析结果：{traits}")
+        
         return traits
 
     for char in characters:
         existing_manual = manual_configs_by_id.get(char.id)
         if existing_manual and existing_manual.get("voice_id"):
             # 用户手动配置优先，直接保留
+            logger.info(f"✅ 角色 '{char.name}' 已有手动配置，跳过智能推荐")
             result_characters.append(existing_manual)
             continue
 
+        logger.info(f"🔍 开始为角色 '{char.name}' 进行智能声线分析...")
         traits = _build_traits_from_character(char)
+        logger.info(f"📊 角色 '{char.name}' 特征：{traits}")
+        
+        # 如果有 LLM 客户端，记录 LLM 调用状态
+        if hasattr(vm, 'llm_client') and vm.llm_client:
+            logger.info(f"🤖 将使用 LLM 进行智能特征分析")
+        else:
+            logger.info(f"📖 将使用规则推断模式")
+        
         profile = vm.assign_voice(char.name, character_info=traits or None)
+        
+        logger.info(f"🎤 角色 '{char.name}' 分配音色: {profile.voice_id}")
 
         result_characters.append(
             {

@@ -16,6 +16,7 @@ const cache = createCache({
 // 懒加载页面组件
 const LoginPage = lazy(() => import('@/pages/LoginPage'))
 const LoginCallbackPage = lazy(() => import('@/pages/LoginCallbackPage'))
+const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPasswordPage'))
 const RegisterPage = lazy(() => import('@/pages/RegisterPage'))
 const CreationModulePage = lazy(() => import('@/pages/CreationModulePage'))
 const DashboardPage = lazy(() => import('@/pages/DashboardPage'))
@@ -96,6 +97,7 @@ function App() {
             <Routes>
               <Route path="/login" element={<LoginPage />} />
               <Route path="/login/callback" element={<LoginCallbackPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/register" element={<RegisterPage />} />
           {/* 创作模块入口页 */}
           <Route

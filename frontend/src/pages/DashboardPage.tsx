@@ -30,7 +30,6 @@ import {
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
-import CheckIcon from '@mui/icons-material/Check'
 import CloseIcon from '@mui/icons-material/Close'
 import HeadphonesIcon from '@mui/icons-material/Headphones'
 import TheatersIcon from '@mui/icons-material/Theaters'
@@ -95,9 +94,6 @@ export default function DashboardPage() {
   const [deletingChapter, setDeletingChapter] = useState(false)
 
 
-  // 🆕 标题编辑状态
-  const [editingProjectId, setEditingProjectId] = useState<number | null>(null)
-  const [editedTitle, setEditedTitle] = useState('')
 
   // 🆕 类型编辑状态
   const [editingGenreProjectId, setEditingGenreProjectId] = useState<number | null>(null)
@@ -555,53 +551,6 @@ export default function DashboardPage() {
     }
   }
 
-  // 🆕 处理标题编辑
-  const handleStartEditTitle = (projectId: number, currentTitle: string) => {
-    setEditingProjectId(projectId)
-    setEditedTitle(currentTitle)
-  }
-
-  const handleCancelEditTitle = () => {
-    setEditingProjectId(null)
-    setEditedTitle('')
-  }
-
-  const handleSaveTitle = async (projectId: number) => {
-    if (!editedTitle.trim()) {
-      // 使用 Snackbar 显示错误提示（取代 alert）
-      setSnackbarMessage('项目标题不能为空')
-      setSnackbarSeverity('info')
-      setSnackbarOpen(true)
-      return
-    }
-
-    try {
-      logger.log('📝 开始更新项目标题:', { projectId, newTitle: editedTitle })
-      
-      await dispatch(updateProject({ 
-        projectId, 
-        data: { title: editedTitle.trim() } 
-      }))
-      
-      logger.log('✅ 标题更新成功')
-      setEditingProjectId(null)
-      setEditedTitle('')
-      
-      // 显示成功提示
-      setSnackbarMessage('项目标题更新成功')
-      setSnackbarSeverity('success')
-      setSnackbarOpen(true)
-      
-      // 刷新项目列表
-      dispatch(fetchProjects())
-    } catch (error) {
-      logger.error('❌ 更新标题失败:', error)
-      // 使用 Snackbar 显示错误提示（取代 alert）
-      setSnackbarMessage('更新标题失败，请重试')
-      setSnackbarSeverity('error')
-      setSnackbarOpen(true)
-    }
-  }
 
   // 🆕 编辑类型功能
   const handleStartEditGenre = (projectId: number, currentGenre: string) => {
@@ -609,10 +558,6 @@ export default function DashboardPage() {
     setEditedGenre(currentGenre || '')
   }
 
-  const handleCancelEditGenre = () => {
-    setEditingGenreProjectId(null)
-    setEditedGenre('')
-  }
 
   // 选择风格并立即保存
   const handleGenreMenuSelect = async (genre: string) => {
@@ -633,42 +578,6 @@ export default function DashboardPage() {
     }
   }
 
-  const handleSaveGenre = async (projectId: number) => {
-    if (!editedGenre) {
-      // 使用 Snackbar 显示错误提示（取代 alert）
-      setSnackbarMessage('请选择项目类型')
-      setSnackbarSeverity('info')
-      setSnackbarOpen(true)
-      return
-    }
-
-    try {
-      logger.log('📝 开始更新项目类型:', { projectId, newGenre: editedGenre })
-      
-      await dispatch(updateProject({ 
-        projectId, 
-        data: { genre: editedGenre } 
-      }))
-      
-      logger.log('✅ 类型更新成功')
-      setEditingGenreProjectId(null)
-      setEditedGenre('')
-      
-      // 刷新项目列表
-      dispatch(fetchProjects())
-      
-      // 显示成功提示
-      setSnackbarMessage(`✅ 类型已更新为：${getGenreLabel(editedGenre)}`)
-      setSnackbarSeverity('success')
-      setSnackbarOpen(true)
-    } catch (error) {
-      logger.error('❌ 更新类型失败:', error)
-      // 使用 Snackbar 显示错误提示（取代 alert）
-      setSnackbarMessage('更新类型失败，请重试')
-      setSnackbarSeverity('error')
-      setSnackbarOpen(true)
-    }
-  }
 
   // 🆕 生成下一章功能（与 WorkflowControlPage 完全相同）
   const handleGenerateNextChapter = async (projectId: number) => {

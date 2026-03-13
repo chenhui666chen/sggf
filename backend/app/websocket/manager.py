@@ -378,6 +378,19 @@ def verify_websocket_token(token: str) -> Optional[dict]:
         return None
 
 
+def verify_standard_websocket_token(token: str) -> Optional[dict]:
+    """仅接受标准 JWT，避免复用旧的非签名 token 兼容逻辑。"""
+    try:
+        return jwt.decode(
+            token,
+            settings.JWT_SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+    except JWTError as exc:
+        logger.warning("WebSocket token verification failed: %s", exc)
+        return None
+
+
 @sio.event
 async def join_project(sid, data):
     """加入项目房间 - 带项目所有权验证"""
@@ -396,7 +409,7 @@ async def join_project(sid, data):
             return
 
         # 验证 token
-        payload = verify_websocket_token(token)
+        payload = verify_standard_websocket_token(token)
         if not payload:
             await sio.emit('error', {'message': '无效的认证令牌'}, room=sid)
             return
@@ -409,6 +422,11 @@ async def join_project(sid, data):
         # 验证项目所有权
         db = next(get_db())
         try:
+            user = db.query(User).filter(User.id == int(user_id)).first()
+            if not user or not user.is_active:
+                await sio.emit('error', {'message': '账号不可用'}, room=sid)
+                return
+
             project = db.query(Project).filter(
                 Project.id == project_id,
                 Project.user_id == int(user_id)
@@ -478,7 +496,7 @@ async def join_audiobook(sid, data):
             return
 
         # 验证 token
-        payload = verify_websocket_token(token)
+        payload = verify_standard_websocket_token(token)
         if not payload:
             await sio.emit('error', {'message': '无效的认证令牌'}, room=sid)
             return
@@ -492,6 +510,11 @@ async def join_audiobook(sid, data):
         from app.models.audiobook import AudiobookProject
         db = next(get_db())
         try:
+            user = db.query(User).filter(User.id == int(user_id)).first()
+            if not user or not user.is_active:
+                await sio.emit('error', {'message': '账号不可用'}, room=sid)
+                return
+
             audiobook_project = db.query(AudiobookProject).filter(
                 AudiobookProject.id == audiobook_project_id
             ).first()

@@ -1,48 +1,63 @@
 import { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import {
+  Alert,
+  Box,
+  Button,
   Container,
+  Divider,
+  Fade,
+  IconButton,
+  InputAdornment,
   Paper,
   TextField,
-  Button,
-  Box,
   Typography,
-  Alert,
-  Divider,
-  InputAdornment,
-  IconButton,
-  Fade,
   Zoom,
 } from '@mui/material'
 import {
+  Chat,
   Email,
   Lock,
-  Chat,
   Payment,
+  RocketLaunch,
   Visibility,
   VisibilityOff,
-  RocketLaunch,
 } from '@mui/icons-material'
+
+import { apiClient, extractApiErrorMessage } from '@/services/api'
 import { RootState, AppDispatch } from '@/store/store'
-import { login, clearError } from '@/store/slices/authSlice'
+import { clearError, login } from '@/store/slices/authSlice'
+import {
+  clearOAuthContext,
+  generateOAuthState,
+  storeOAuthContext,
+  type OAuthProvider,
+} from '@/utils/auth'
+
+const EMAIL_PATTERN = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
+const PHONE_PATTERN = /^1[3-9]\d{9}$/
+
+function isValidLoginIdentifier(value: string) {
+  const trimmed = value.trim()
+  return (
+    EMAIL_PATTERN.test(trimmed) ||
+    PHONE_PATTERN.test(trimmed) ||
+    (trimmed.length >= 2 && trimmed.length <= 50)
+  )
+}
 
 export default function LoginPage() {
   const navigate = useNavigate()
   const dispatch = useDispatch<AppDispatch>()
   const { isLoading, error } = useSelector((state: RootState) => state.auth)
+
   const [showPassword, setShowPassword] = useState(false)
+  const [formError, setFormError] = useState('')
   const [formData, setFormData] = useState({
-    username: '', // 邮箱或手机号
+    username: '',
     password: '',
   })
-  const [formError, setFormError] = useState('')
-
-  const validateLoginUsername = (value: string) => {
-    const emailPattern = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/
-    const phonePattern = /^1[3-9]\d{9}$/
-    return emailPattern.test(value) || phonePattern.test(value)
-  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
@@ -50,68 +65,58 @@ export default function LoginPage() {
       ...prev,
       [name]: value,
     }))
-    // 清除错误
+
     if (formError) {
       setFormError('')
+    }
+
+    if (error) {
+      dispatch(clearError())
     }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
-    // 验证邮箱/手机号格式
-    if (!validateLoginUsername(formData.username)) {
-      setFormError('请输入有效的邮箱或手机号码')
+
+    const username = formData.username.trim()
+    if (!isValidLoginIdentifier(username)) {
+      setFormError('请输入有效的用户名、邮箱或手机号')
       return
     }
-    
-    const result = await dispatch(login(formData))
+
+    const result = await dispatch(
+      login({
+        username,
+        password: formData.password,
+      }),
+    )
+
     if (login.fulfilled.match(result)) {
       navigate('/home')
     }
   }
 
-  const handleAlipayLogin = async () => {
+  const startOAuthLogin = async (provider: OAuthProvider) => {
     try {
-      localStorage.setItem('oauth_provider', 'alipay')
+      clearOAuthContext()
+      const state = generateOAuthState()
       const redirectUri = `${window.location.origin}/login/callback`
-      const response = await fetch('/api/v1/auth/alipay/auth-url', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          redirect_uri: redirectUri,
-        }),
-      })
-      const data = await response.json()
-      if (data.auth_url) {
-        window.location.href = data.auth_url
-      }
-    } catch (error) {
-      console.error('Alipay login error:', error)
-    }
-  }
+      const response =
+        provider === 'alipay'
+          ? await apiClient.getAlipayAuthUrl({ redirect_uri: redirectUri, state })
+          : await apiClient.getWechatAuthUrl({ redirect_uri: redirectUri, state })
 
-  const handleWechatLogin = async () => {
-    try {
-      localStorage.setItem('oauth_provider', 'wechat')
-      const redirectUri = `${window.location.origin}/login/callback`
-      const response = await fetch('/api/v1/auth/wechat/auth-url', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          redirect_uri: redirectUri,
-        }),
-      })
-      const data = await response.json()
-      if (data.auth_url) {
-        window.location.href = data.auth_url
+      const authUrl = response.data?.auth_url
+      if (!authUrl) {
+        setFormError('未获取到有效的第三方登录地址')
+        return
       }
-    } catch (error) {
-      console.error('WeChat login error:', error)
+
+      storeOAuthContext(provider, state)
+      window.location.href = authUrl
+    } catch (oauthError) {
+      clearOAuthContext()
+      setFormError(await extractApiErrorMessage(oauthError, '第三方登录初始化失败'))
     }
   }
 
@@ -129,16 +134,13 @@ export default function LoginPage() {
         '&::before': {
           content: '""',
           position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05' fill-opacity='1'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
+          inset: 0,
+          background:
+            'url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23ffffff\' fill-opacity=\'0.05\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
           opacity: 0.3,
         },
       }}
     >
-      {/* 装饰性圆形背景 - 响应式调整 */}
       <Box
         sx={{
           position: 'absolute',
@@ -165,14 +167,14 @@ export default function LoginPage() {
       />
 
       <Zoom in timeout={1000}>
-        <Container 
-          maxWidth="sm" 
-          sx={{ 
-            position: 'relative', 
-            zIndex: 1, 
+        <Container
+          maxWidth="sm"
+          sx={{
+            position: 'relative',
+            zIndex: 1,
             px: { xs: 0, sm: 3 },
             width: '100%',
-            maxWidth: { xs: '100%', sm: '600px' }
+            maxWidth: { xs: '100%', sm: '600px' },
           }}
         >
           <Fade in timeout={1500}>
@@ -183,11 +185,13 @@ export default function LoginPage() {
                 borderRadius: { xs: 3, sm: 4 },
                 backdropFilter: 'blur(10px)',
                 backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                boxShadow: { xs: '0 10px 30px rgba(0, 0, 0, 0.2)', md: '0 20px 60px rgba(0, 0, 0, 0.3)' },
+                boxShadow: {
+                  xs: '0 10px 30px rgba(0, 0, 0, 0.2)',
+                  md: '0 20px 60px rgba(0, 0, 0, 0.3)',
+                },
                 mx: { xs: 1, sm: 0 },
               }}
             >
-              {/* Logo 和标题 */}
               <Box sx={{ textAlign: 'center', mb: { xs: 3, sm: 4 } }}>
                 <Zoom in timeout={2000}>
                   <Box
@@ -222,12 +226,11 @@ export default function LoginPage() {
                 >
                   拾光工坊
                 </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.875rem', sm: '0.875rem' } }}>
+                <Typography variant="body2" color="text.secondary">
                   欢迎回来，请登录您的账户
                 </Typography>
               </Box>
 
-              {/* 错误提示 */}
               <Fade in={!!error || !!formError}>
                 <Box>
                   <Alert
@@ -236,25 +239,24 @@ export default function LoginPage() {
                       dispatch(clearError())
                       setFormError('')
                     }}
-                    sx={{ mb: { xs: 2, sm: 3 }, fontSize: { xs: '0.875rem', sm: '0.875rem' } }}
+                    sx={{ mb: { xs: 2, sm: 3 } }}
                   >
                     {error || formError}
                   </Alert>
                 </Box>
               </Fade>
 
-              {/* 登录表单 */}
               <Box component="form" onSubmit={handleSubmit} noValidate>
                 <Fade in timeout={1000}>
                   <TextField
                     fullWidth
-                    label="邮箱/手机号"
+                    label="用户名 / 邮箱 / 手机号"
                     name="username"
                     value={formData.username}
                     onChange={handleChange}
                     required
                     autoComplete="username"
-                    placeholder="请输入邮箱或手机号码"
+                    placeholder="请输入用户名、邮箱或手机号"
                     error={!!formError}
                     InputProps={{
                       startAdornment: (
@@ -275,9 +277,6 @@ export default function LoginPage() {
                         '&.Mui-focused fieldset': {
                           borderColor: '#667eea',
                         },
-                      },
-                      '& .MuiInputLabel-root': {
-                        fontSize: { xs: '0.9375rem', sm: '1rem' },
                       },
                     }}
                   />
@@ -302,7 +301,7 @@ export default function LoginPage() {
                       endAdornment: (
                         <InputAdornment position="end">
                           <IconButton
-                            onClick={() => setShowPassword(!showPassword)}
+                            onClick={() => setShowPassword((prev) => !prev)}
                             edge="end"
                             size="medium"
                             sx={{ padding: { xs: 1, sm: 1.5 } }}
@@ -325,9 +324,6 @@ export default function LoginPage() {
                           borderColor: '#667eea',
                         },
                       },
-                      '& .MuiInputLabel-root': {
-                        fontSize: { xs: '0.9375rem', sm: '1rem' },
-                      },
                     }}
                   />
                 </Fade>
@@ -338,7 +334,7 @@ export default function LoginPage() {
                     variant="contained"
                     type="submit"
                     size="large"
-                    disabled={isLoading || !formData.username || !formData.password}
+                    disabled={isLoading || !formData.username.trim() || !formData.password}
                     sx={{
                       py: { xs: 1.5, sm: 1.8 },
                       mb: { xs: 2, sm: 3 },
@@ -362,40 +358,57 @@ export default function LoginPage() {
                     {isLoading ? '登录中...' : '登录'}
                   </Button>
                 </Fade>
+
+                <Fade in timeout={1500}>
+                  <Box sx={{ textAlign: 'right', mb: { xs: 2, sm: 3 } }}>
+                    <Link
+                      to="/forgot-password"
+                      style={{
+                        color: '#667eea',
+                        textDecoration: 'none',
+                        fontWeight: 'bold',
+                        fontSize: '0.875rem',
+                      }}
+                    >
+                      找回密码
+                    </Link>
+                  </Box>
+                </Fade>
               </Box>
 
-              {/* 分割线 */}
               <Divider
                 sx={{
                   my: { xs: 2, sm: 3 },
-                  '&::before, ::after': {
+                  '&::before, &::after': {
                     borderColor: 'rgba(0, 0, 0, 0.12)',
                   },
                 }}
               >
-                <Typography
-                  variant="caption"
-                  sx={{ color: 'text.secondary', fontWeight: 'medium', fontSize: { xs: '0.75rem', sm: '0.75rem' } }}
-                >
+                <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 'medium' }}>
                   或使用以下方式登录
                 </Typography>
               </Divider>
 
-              {/* 第三方登录 */}
               <Fade in timeout={1600}>
-                <Box sx={{ display: 'flex', gap: { xs: 1.5, sm: 2 }, mb: { xs: 2, sm: 3 }, flexDirection: { xs: 'column', sm: 'row' } }}>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    gap: { xs: 1.5, sm: 2 },
+                    mb: { xs: 2, sm: 3 },
+                    flexDirection: { xs: 'column', sm: 'row' },
+                  }}
+                >
                   <Button
                     fullWidth
                     variant="outlined"
                     startIcon={<Payment />}
-                    onClick={handleAlipayLogin}
+                    onClick={() => void startOAuthLogin('alipay')}
                     sx={{
                       py: { xs: 1.2, sm: 1.5 },
                       borderRadius: 2,
                       borderColor: '#1677FF',
                       color: '#1677FF',
                       minHeight: { xs: 48, sm: 52 },
-                      fontSize: { xs: '0.9375rem', sm: '1rem' },
                       '&:hover': {
                         borderColor: '#1677FF',
                         backgroundColor: 'rgba(22, 119, 255, 0.08)',
@@ -411,14 +424,13 @@ export default function LoginPage() {
                     fullWidth
                     variant="outlined"
                     startIcon={<Chat />}
-                    onClick={handleWechatLogin}
+                    onClick={() => void startOAuthLogin('wechat')}
                     sx={{
                       py: { xs: 1.2, sm: 1.5 },
                       borderRadius: 2,
                       borderColor: '#07C160',
                       color: '#07C160',
                       minHeight: { xs: 48, sm: 52 },
-                      fontSize: { xs: '0.9375rem', sm: '1rem' },
                       '&:hover': {
                         borderColor: '#07C160',
                         backgroundColor: 'rgba(7, 193, 96, 0.08)',
@@ -433,10 +445,9 @@ export default function LoginPage() {
                 </Box>
               </Fade>
 
-              {/* 注册链接 */}
               <Fade in timeout={1800}>
                 <Box sx={{ textAlign: 'center' }}>
-                  <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.875rem', sm: '0.875rem' } }}>
+                  <Typography variant="body2" color="text.secondary">
                     还没有账户？{' '}
                     <Link
                       to="/register"
@@ -444,10 +455,7 @@ export default function LoginPage() {
                         color: '#667eea',
                         textDecoration: 'none',
                         fontWeight: 'bold',
-                        transition: 'color 0.2s',
                       }}
-                      onMouseEnter={(e) => (e.currentTarget.style.color = '#764ba2')}
-                      onMouseLeave={(e) => (e.currentTarget.style.color = '#667eea')}
                     >
                       立即注册
                     </Link>

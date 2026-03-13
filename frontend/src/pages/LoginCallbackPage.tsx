@@ -1,9 +1,23 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useDispatch } from 'react-redux'
-import { Container, Box, Typography, CircularProgress, Alert } from '@mui/material'
+import { Alert, Box, CircularProgress, Container, Typography } from '@mui/material'
+
 import { AppDispatch } from '@/store/store'
 import { alipayLogin, wechatLogin } from '@/store/slices/authSlice'
+import { clearOAuthContext, getStoredOAuthContext } from '@/utils/auth'
+
+function normalizeCallbackError(error: unknown, fallback: string): string {
+  if (typeof error === 'string' && error.trim()) {
+    return error
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+
+  return fallback
+}
 
 export default function LoginCallbackPage() {
   const navigate = useNavigate()
@@ -13,43 +27,58 @@ export default function LoginCallbackPage() {
 
   useEffect(() => {
     const handleCallback = async () => {
+      const oauthError = searchParams.get('error_description') || searchParams.get('error')
+      if (oauthError) {
+        clearOAuthContext()
+        setError(oauthError)
+        return
+      }
+
       const code = searchParams.get('code')
-      const provider = localStorage.getItem('oauth_provider')
+      const callbackState = searchParams.get('state')
+      const { provider, state: storedState } = getStoredOAuthContext()
 
       if (!code) {
+        clearOAuthContext()
         setError('缺少授权码')
         return
       }
 
       if (!provider) {
-        setError('缺少登录提供商信息')
+        clearOAuthContext()
+        setError('缺少登录上下文，请重新发起登录')
+        return
+      }
+
+      if (provider !== 'alipay' && provider !== 'wechat') {
+        clearOAuthContext()
+        setError('无效的登录提供方，请重新尝试')
+        return
+      }
+
+      if (!callbackState || !storedState || callbackState !== storedState) {
+        clearOAuthContext()
+        setError('登录状态校验失败，请重新尝试')
         return
       }
 
       try {
-        let result
         if (provider === 'alipay') {
-          result = await dispatch(alipayLogin(code))
-        } else if (provider === 'wechat') {
-          result = await dispatch(wechatLogin(code))
+          await dispatch(alipayLogin(code)).unwrap()
         } else {
-          setError('无效的登录提供商')
-          return
+          await dispatch(wechatLogin(code)).unwrap()
         }
 
-        if (alipayLogin.fulfilled.match(result) || wechatLogin.fulfilled.match(result)) {
-          localStorage.removeItem('oauth_provider')
-          navigate('/home')
-        } else {
-          setError(result.error?.message || '登录失败')
-        }
+        clearOAuthContext()
+        navigate('/home', { replace: true })
       } catch (err) {
-        setError(err instanceof Error ? err.message : '登录失败')
+        clearOAuthContext()
+        setError(normalizeCallbackError(err, '登录失败'))
       }
     }
 
     handleCallback()
-  }, [searchParams, navigate, dispatch])
+  }, [dispatch, navigate, searchParams])
 
   if (error) {
     return (
@@ -66,7 +95,7 @@ export default function LoginCallbackPage() {
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}
           </Alert>
-          <Typography variant="body2" color="textSecondary">
+          <Typography variant="body2" color="text.secondary">
             <a href="/login" style={{ color: '#1976d2' }}>
               返回登录页面
             </a>
@@ -91,8 +120,8 @@ export default function LoginCallbackPage() {
         <Typography variant="h6" gutterBottom>
           正在登录...
         </Typography>
-        <Typography variant="body2" color="textSecondary">
-          请稍候，我们正在验证您的身份
+        <Typography variant="body2" color="text.secondary">
+          请稍候，我们正在校验您的身份
         </Typography>
       </Box>
     </Container>

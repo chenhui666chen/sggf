@@ -1,4 +1,4 @@
-﻿"""
+"""
 音色管理器 - 智能分配与管理角色音色
 
 核心功能：
@@ -556,19 +556,53 @@ class VoiceManager:
         
         try:
             from app.services.model_optimizer import TaskType
-            import asyncio
             import json
+            import asyncio
             
-            response = asyncio.run(self.llm_client.chat(
-                messages=[{"role": "user", "content": prompt}],
-                task_type=TaskType.AUDIOBOOK_SCRIPT,
-                max_tokens=500,
-                response_format={"type": "json_object"},
-                use_cache=True,  # 启用缓存，相同名字不重复调用
-            ))
+            # 检查当前是否有运行中的事件循环
+            try:
+                loop = asyncio.get_running_loop()
+                # 如果有运行中的事件循环，则使用 run_in_executor 或其他方式
+                logger.debug("🔄 当前已有事件循环，使用异步调用")
+                
+                # 为同步上下文提供异步调用方法
+                import concurrent.futures
+                import threading
+                
+                def run_llm_call():
+                    # 创建新的事件循环用于LLM调用
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        return asyncio.run(self.llm_client.chat(
+                            messages=[{"role": "user", "content": prompt}],
+                            task_type=TaskType.AUDIOBOOK_SCRIPT,
+                            max_tokens=500,
+                            response_format={"type": "json_object"},
+                            use_cache=True,  # 启用缓存，相同名字不重复调用
+                        ))
+                    finally:
+                        new_loop.close()
+                
+                # 在线程池中运行异步调用
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(run_llm_call)
+                    response = future.result(timeout=30)  # 30秒超时
+                    
+            except RuntimeError:
+                # 如果没有运行中的事件循环，则可以直接使用 asyncio.run
+                logger.debug("🔄 当前无事件循环，直接运行LLM调用")
+                response = asyncio.run(self.llm_client.chat(
+                    messages=[{"role": "user", "content": prompt}],
+                    task_type=TaskType.AUDIOBOOK_SCRIPT,
+                    max_tokens=500,
+                    response_format={"type": "json_object"},
+                    use_cache=True,  # 启用缓存，相同名字不重复调用
+                ))
             
             # 解析JSON
             result = json.loads(response.strip())
+            logger.debug(f"🤖 LLM响应解析结果: {result}")
             
             # 验证结果
             if result.get("gender") and result.get("age_group"):
@@ -592,14 +626,18 @@ class VoiceManager:
                     if personality in ("calm", "energetic", "gentle", "serious"):
                         traits["personality"] = personality
 
+                    logger.info(f"🤖 LLM成功推断角色特征: {traits} (置信度: {confidence:.2f})")
                     return traits or None
                 else:
                     logger.info(f"📊 LLM置信度较低 ({confidence:.2f})，回退到规则推断")
             
             return None
             
+        except json.JSONDecodeError as e:
+            logger.warning(f"⚠️ LLM返回非JSON格式: {e}")
+            return None
         except Exception as e:
-            logger.debug(f"🤖 LLM推断失败: {e}")
+            logger.warning(f"🤖 LLM推断失败: {e}")
             return None
     
     def _rule_based_infer_traits(self, character_name: str) -> Dict[str, Any]:

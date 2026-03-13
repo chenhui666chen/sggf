@@ -1,139 +1,141 @@
 """
 安全和认证工具
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import logging
 from typing import Optional
-from jose import JWTError, jwt
+
 import bcrypt
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
+
 from app.core.config import settings
 from app.db.base import get_db
 from app.models.user import User
 
-# HTTP Bearer认证
+logger = logging.getLogger(__name__)
+
 security = HTTPBearer()
+optional_security = HTTPBearer(auto_error=False)
+UNUSABLE_PASSWORD_PREFIX = "!oauth-disabled!"
 
 
 def hash_password(password: str) -> str:
-    """哈希密码"""
-    # 使用 bcrypt 直接处理，避免 passlib 兼容性问题
-    password_bytes = password.encode('utf-8')
+    """使用 bcrypt 哈希密码。"""
+    password_bytes = password.encode("utf-8")
     salt = bcrypt.gensalt()
     hashed = bcrypt.hashpw(password_bytes, salt)
-    return hashed.decode('utf-8')
+    return hashed.decode("utf-8")
 
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """验证密码"""
-    password_bytes = plain_password.encode('utf-8')
-    hashed_bytes = hashed_password.encode('utf-8')
-    return bcrypt.checkpw(password_bytes, hashed_bytes)
+def make_unusable_password_hash() -> str:
+    """为第三方登录账户生成不可用于本地密码登录的占位哈希。"""
+    return UNUSABLE_PASSWORD_PREFIX
+
+
+def has_usable_password_hash(hashed_password: Optional[str]) -> bool:
+    """判断账户是否配置了可用于密码登录的哈希。"""
+    return bool(hashed_password) and not hashed_password.startswith(UNUSABLE_PASSWORD_PREFIX)
+
+
+def verify_password(plain_password: str, hashed_password: Optional[str]) -> bool:
+    """校验密码，兼容第三方账户和异常哈希。"""
+    if not has_usable_password_hash(hashed_password):
+        return False
+
+    password_bytes = plain_password.encode("utf-8")
+    try:
+        hashed_bytes = hashed_password.encode("utf-8")
+        return bcrypt.checkpw(password_bytes, hashed_bytes)
+    except ValueError:
+        logger.warning("Detected invalid password hash during login attempt")
+        return False
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    """创建JWT token"""
+    """创建 JWT token。"""
     to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(hours=settings.JWT_EXPIRATION_HOURS)
-    
+    now = datetime.now(timezone.utc)
+    expire = (
+        now + expires_delta
+        if expires_delta
+        else now + timedelta(hours=settings.JWT_EXPIRATION_HOURS)
+    )
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(
+    return jwt.encode(
         to_encode,
         settings.JWT_SECRET,
-        algorithm=settings.JWT_ALGORITHM
+        algorithm=settings.JWT_ALGORITHM,
     )
-    return encoded_jwt
 
 
 def verify_token(token: str) -> dict:
-    """验证JWT token，兼容旧的Base64格式"""
+    """验证并解析 JWT。"""
     try:
-        print(f"🔐 验证令牌...")
-        print(f"   JWT_SECRET: {settings.JWT_SECRET[:20]}...")
-        print(f"   JWT_ALGORITHM: {settings.JWT_ALGORITHM}")
-        print(f"   Token: {token[:50]}...")
-
-        # 尝试解码标准JWT
-        payload = jwt.decode(
+        return jwt.decode(
             token,
             settings.JWT_SECRET,
-            algorithms=[settings.JWT_ALGORITHM]
+            algorithms=[settings.JWT_ALGORITHM],
         )
-        print(f"✅ 令牌验证成功 (JWT): {payload}")
-        return payload
-    except JWTError as e:
-        # JWT解码失败，尝试Base64旧格式
-        print(f"⚠️  JWT解码失败: {e}，尝试Base64格式...")
-        try:
-            import base64
-            decoded = base64.b64decode(token).decode()
-            # 旧格式: "user_id:username"
-            if ':' in decoded:
-                user_id, username = decoded.split(':', 1)
-                print(f"✅ 令牌验证成功 (Base64): user_id={user_id}, username={username}")
-                return {"sub": user_id, "username": username}
-        except Exception as e2:
-            print(f"❌ Base64解码也失败: {e2}")
-        
-        # 两种格式都失败
-        print(f"❌ 令牌验证失败: {e}")
+    except JWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token"
-        )
+            detail="Invalid token",
+        ) from exc
 
 
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
-) -> User:
-    """获取当前用户"""
-    token = credentials.credentials
-    payload = verify_token(token)
-    user_id = payload.get("sub")
-
-    if user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token"
-        )
-
-    user = db.query(User).filter(User.id == int(user_id)).first()
+def _validate_user_status(user: Optional[User]) -> User:
+    """统一校验用户存在性和可用状态。"""
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found"
+            detail="User not found",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is disabled",
         )
 
     return user
 
 
-# 🆕 可选的用户验证（用于支持 sendBeacon 等无法携带 Authorization header 的请求）
-optional_security = HTTPBearer(auto_error=False)
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+) -> User:
+    """获取当前用户。"""
+    payload = verify_token(credentials.credentials)
+    user_id = payload.get("sub")
+
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+        )
+
+    user = db.query(User).filter(User.id == int(user_id)).first()
+    return _validate_user_status(user)
 
 
 async def get_current_user_optional(
     credentials: HTTPAuthorizationCredentials | None = Depends(optional_security),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ) -> User | None:
-    """获取当前用户（可选，不强制要求认证）"""
+    """获取当前用户，可选认证。"""
     if credentials is None:
         return None
 
     try:
-        token = credentials.credentials
-        payload = verify_token(token)
+        payload = verify_token(credentials.credentials)
         user_id = payload.get("sub")
-
         if user_id is None:
             return None
 
         user = db.query(User).filter(User.id == int(user_id)).first()
-        return user
+        return user if user and user.is_active else None
     except Exception:
         return None
-
