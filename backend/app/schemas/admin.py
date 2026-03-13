@@ -47,7 +47,7 @@ class PermissionBase(BaseModel):
 class PermissionResponse(PermissionBase):
     id: int
     created_at: datetime
-    children: List["PermissionResponse"] = []
+    children: Optional[List["PermissionResponse"]] = None
 
     class Config:
         from_attributes = True
