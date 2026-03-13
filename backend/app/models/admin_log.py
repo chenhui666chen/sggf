@@ -3,8 +3,8 @@
 """
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, DateTime, Text, Integer, JSON
-from sqlalchemy.orm import Mapped, mapped_column, ForeignKey
+from sqlalchemy import String, DateTime, Text, Integer, JSON, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 from app.db.base import Base
 
