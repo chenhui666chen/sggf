@@ -260,7 +260,7 @@ export default function PromptEvolutionPage() {
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/dashboard')}>返回</Button>
+          <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/admin')}>返回控制台</Button>
           <ScienceIcon color="primary" sx={{ fontSize: 32 }} />
           <Typography variant="h5">提示词进化优化（实验性）</Typography>
         </Box>

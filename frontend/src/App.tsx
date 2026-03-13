@@ -168,9 +168,9 @@ function App() {
           <Route
             path="/prompt-evolution"
             element={
-              <ProtectedRoute>
+              <AdminProtectedRoute>
                 <PromptEvolutionPage />
-              </ProtectedRoute>
+              </AdminProtectedRoute>
             }
           />
           <Route
