@@ -41,6 +41,9 @@ const AICreationPlatformPage = lazy(() => import('@/pages/AICreationPlatformPage
 const AdminLayout = lazy(() => import('@/pages/admin/AdminLayout'))
 const AdminDashboardPage = lazy(() => import('@/pages/admin/DashboardPage'))
 const AdminUsersPage = lazy(() => import('@/pages/admin/UsersPage'))
+const RolesPage = lazy(() => import('@/pages/admin/RolesPage'))
+const LogsPage = lazy(() => import('@/pages/admin/LogsPage'))
+const SystemPage = lazy(() => import('@/pages/admin/SystemPage'))
 
 // 加载中组件
 const LoadingFallback = () => (
@@ -271,6 +274,9 @@ function App() {
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<AdminDashboardPage />} />
             <Route path="users" element={<AdminUsersPage />} />
+            <Route path="roles" element={<RolesPage />} />
+            <Route path="logs" element={<LogsPage />} />
+            <Route path="system" element={<SystemPage />} />
           </Route>
           
             {/* 默认跳转到创作模块入口页 */}
