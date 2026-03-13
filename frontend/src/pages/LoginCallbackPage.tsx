@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useDispatch, useSelector } from 'react-redux'
+import { useDispatch } from 'react-redux'
 import { Container, Box, Typography, CircularProgress, Alert } from '@mui/material'
-import { RootState, AppDispatch } from '@/store/store'
+import { AppDispatch } from '@/store/store'
 import { alipayLogin, wechatLogin } from '@/store/slices/authSlice'
 
 export default function LoginCallbackPage() {
@@ -10,7 +10,6 @@ export default function LoginCallbackPage() {
   const dispatch = useDispatch<AppDispatch>()
   const [searchParams] = useSearchParams()
   const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const handleCallback = async () => {
@@ -19,13 +18,11 @@ export default function LoginCallbackPage() {
 
       if (!code) {
         setError('缺少授权码')
-        setLoading(false)
         return
       }
 
       if (!provider) {
         setError('缺少登录提供商信息')
-        setLoading(false)
         return
       }
 
@@ -37,7 +34,6 @@ export default function LoginCallbackPage() {
           result = await dispatch(wechatLogin(code))
         } else {
           setError('无效的登录提供商')
-          setLoading(false)
           return
         }
 
@@ -46,11 +42,9 @@ export default function LoginCallbackPage() {
           navigate('/home')
         } else {
           setError(result.error?.message || '登录失败')
-          setLoading(false)
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : '登录失败')
-        setLoading(false)
       }
     }
 

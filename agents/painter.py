@@ -2190,7 +2190,7 @@ def run_keyframes(ctx: Any) -> None:
             asset_match = _match_library_assets_for_shot(
                 shot=item,
                 library_assets=lib_assets,
-                max_character_refs=min(3, int(max_refs)),
+                max_character_refs=min(4, int(max_refs)),
             )
             prompt_fragment = str(asset_match.get("prompt_fragment") or "").strip()
             ref_images: List[Dict[str, Any]] = []
@@ -3385,7 +3385,7 @@ def run_midframes(ctx: Any) -> None:
         asset_match = _match_library_assets_for_shot(
             shot=item,
             library_assets=lib_assets,
-            max_character_refs=min(3, int(max_refs)),
+            max_character_refs=min(4, int(max_refs)),
         )
         prompt_fragment = str(asset_match.get("prompt_fragment") or "").strip()
         ref_images: List[Dict[str, Any]] = []

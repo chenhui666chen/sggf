@@ -1,7 +1,7 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
-æ¨¡å??é??é??å?¨å±? - æ?¯æ??å¤?ç§? AI æ¨¡å??ç??ç»?ä¸?æ?¥å?£ã??
-ä¸?ä¾?èµ?ComfyUI/LoRAï¼?æ??â??è?½å??ä¾?åº?å??â??æ?½è±¡é??é??ã??"""
+忙篓隆氓??茅??茅??氓?篓氓卤? - 忙?炉忙??氓陇?莽搂? AI 忙篓隆氓??莽??莽禄?盲赂?忙?楼氓?拢茫??
+盲赂?盲戮?猫碌?ComfyUI/LoRA茂录?忙??芒??猫?陆氓??盲戮?氓潞?氓??芒??忙?陆猫卤隆茅??茅??茫??"""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from adapters.rate_limiter import get_rate_limiter
 
 @dataclass
 class ModelConfig:
-    """æ¨¡å??é??ç½®"""
+    """忙篓隆氓??茅??莽陆庐"""
     api_key: str
     base_url: str
     model_name: str
@@ -36,7 +36,7 @@ class ModelConfig:
 
 @dataclass
 class GenerationResult:
-    """ç??æ??ç»?æ??"""
+    """莽??忙??莽禄?忙??"""
     success: bool
     data: Any
     error: Optional[str] = None
@@ -62,7 +62,7 @@ class BaseModelAdapter(ABC):
 
     def _base_host(self) -> str:
         """
-        ä»?base_url æ??å?? scheme://netlocï¼?ç?¨äº?æ??äº?å??å??æ??ä¸?å??è?½å??æ??å?¨ä¸?å?? path ä¸?ç??å?ºæ?¯ï¼?ã??        ä¾?å¦?ï¼?https://dashscope.aliyuncs.com/compatible-mode/v1 -> https://dashscope.aliyuncs.com
+        盲禄?base_url 忙??氓?? scheme://netloc茂录?莽?篓盲潞?忙??盲潞?氓??氓??忙??盲赂?氓??猫?陆氓??忙??氓?篓盲赂?氓?? path 盲赂?莽??氓?潞忙?炉茂录?茫??        盲戮?氓娄?茂录?https://dashscope.aliyuncs.com/compatible-mode/v1 -> https://dashscope.aliyuncs.com
         """
         raw = (self.config.base_url or "").strip()
         if not raw:
@@ -81,7 +81,7 @@ class BaseModelAdapter(ABC):
 
     def _retry_delay_s(self, attempt: int, *, response: Optional[requests.Response] = None) -> float:
         """
-        è®¡ç®?é??è¯?ç­?å¾?æ?¶é?´ï¼?æ??æ?°é??é??+ æ??å?¨ï¼?ï¼?è?¥å??åº?å??å??Retry-Afterï¼?ç§?ï¼?ï¼?å??ä¼?å??ä½¿ç?¨è¯¥å?¼ã??        """
+        猫庐隆莽庐?茅??猫炉?莽颅?氓戮?忙?露茅?麓茂录?忙??忙?掳茅??茅??+ 忙??氓?篓茂录?茂录?猫?楼氓??氓潞?氓??氓??Retry-After茂录?莽搂?茂录?茂录?氓??盲录?氓??盲陆驴莽?篓猫炉楼氓?录茫??        """
         base = float(2 ** max(int(attempt), 0))
         retry_after: Optional[float] = None
         if isinstance(response, requests.Response):
@@ -101,7 +101,7 @@ class BaseModelAdapter(ABC):
 
     def _http_error_with_detail(self, exc: requests.exceptions.HTTPError) -> requests.exceptions.HTTPError:
         """
-        requests ç??HTTPError é»?è®¤ä¸?å??å?«å??åº?ä½?ç»?è??ï¼?è¿?é??å°?è¯?æ??å??å¸¸è§?é??è¯¯å­?æ®µå¹¶æ?¼å?° message é??ï¼?ä¾¿äº?æ??é??ã??        æ³¨æ??ï¼?ä»?ä¿?æ??å¼?å¸¸ç±»å??ä¸?HTTPErrorï¼?é?¿å??ç ´å??ä¸?å±?å¯¹ status_code ç??å??æ?¯é?»è¾?ï¼?å¦? 404 å??é??ï¼?ã??        """
+        requests 莽??HTTPError 茅禄?猫庐陇盲赂?氓??氓?芦氓??氓潞?盲陆?莽禄?猫??茂录?猫驴?茅??氓掳?猫炉?忙??氓??氓赂赂猫搂?茅??猫炉炉氓颅?忙庐碌氓鹿露忙?录氓?掳 message 茅??茂录?盲戮驴盲潞?忙??茅??茫??        忙鲁篓忙??茂录?盲禄?盲驴?忙??氓录?氓赂赂莽卤禄氓??盲赂?HTTPError茂录?茅?驴氓??莽聽麓氓??盲赂?氓卤?氓炉鹿 status_code 莽??氓??忙?炉茅?禄猫戮?茂录?氓娄? 404 氓??茅??茂录?茫??        """
         resp = getattr(exc, "response", None)
         if not isinstance(resp, requests.Response):
             return exc
@@ -358,7 +358,7 @@ class BaseModelAdapter(ABC):
         payload: Dict[str, Any],
         method: str = "POST"
     ) -> Dict[str, Any]:
-        """å??é??APIè¯·æ±?"""
+        """氓??茅??API猫炉路忙卤?"""
         base_url = (self.config.base_url or "").rstrip("/")
         ep = (endpoint or "").lstrip("/")
         if base_url.endswith("/v1") and ep.startswith("v1/"):
@@ -368,16 +368,15 @@ class BaseModelAdapter(ABC):
 
     @abstractmethod
     def generate(self, **kwargs) -> GenerationResult:
-        """ç??æ??å??å®¹"""
+        """莽??忙??氓??氓庐鹿"""
         pass
 
 
 class Wan26T2IAdapter(BaseModelAdapter):
-    """Wan 2.6 T2I (Text-to-Image) é??é??å??- æ??ç??å??"""
+    """Wan 2.6 T2I (Text-to-Image) 茅??茅??氓??- 忙??莽??氓??"""
 
     def _dashscope_model_name(self) -> str:
-        # 兼容控制台数字模型ID；AIGC 通常需要模型名（如 wanx-v1）
-        raw = str(self.config.model_name or "").strip()
+        # 鍏煎鎺у埗鍙版暟瀛楁ā鍨婭D锛汚IGC 閫氬父闇€瑕佹ā鍨嬪悕锛堝 wanx-v1锛?        raw = str(self.config.model_name or "").strip()
         if raw.isdigit():
             explicit = (os.getenv("WAN_T2I_MODEL_NAME") or "").strip()
             return explicit or "wanx-v1"
@@ -638,9 +637,9 @@ class Wan26T2IAdapter(BaseModelAdapter):
         if not host:
             raise RuntimeError("dashscope host missing from WAN_T2I_BASE_URL")
         url = f"{host}/api/v1/tasks/{task_id}"
-        # DashScope ç??AIGC æ?¥å?£é??å¸¸è¿?å??å¼?æ­¥ task_idï¼?æ??é??+ ç??æ??å?¯è?½è¿?è¶?å??æ¬¡ HTTP è¶?æ?¶ã??        # å? æ­¤è¿?é??å°?â??è½®è¯¢æ?»æ?¶é?¿â??ä¸?â??å??æ¬¡è¯·æ±?è¶?æ?¶â??å??ç¦»ï¼?é?¿å??ç´ æ??ç??æ??é?¶æ®µå? ç?­ timeout è¯¯å?¤å¤±è´¥ã??        #
-        # å?¯é??è¿?ä»¥ä¸?ç?¯å¢?å??é??è¦?ç??ï¼?å??ä½?ç§?ï¼?ï¼?
-        # - WAN_T2I_TASK_TIMEOUTï¼?è½®è¯¢æ?»æ?¶é?¿ï¼?é»?è®¤ 1800ï¼?        # - WAN_T2I_POLL_HTTP_TIMEOUTï¼?è½®è¯¢æ?¥å?£å??æ¬¡è¯·æ±?è¶?æ?¶ï¼?é»?è®¤ min(WAN_T2I_TIMEOUT, 15)ï¼?        # - WAN_T2I_POLL_INTERVAL_Sï¼?è½®è¯¢é?´é??ï¼?é»?è®¤ 2ï¼?        
+        # DashScope 莽??AIGC 忙?楼氓?拢茅??氓赂赂猫驴?氓??氓录?忙颅楼 task_id茂录?忙??茅??+ 莽??忙??氓?炉猫?陆猫驴?猫露?氓??忙卢隆 HTTP 猫露?忙?露茫??        # 氓?聽忙颅陇猫驴?茅??氓掳?芒??猫陆庐猫炉垄忙?禄忙?露茅?驴芒??盲赂?芒??氓??忙卢隆猫炉路忙卤?猫露?忙?露芒??氓??莽娄禄茂录?茅?驴氓??莽麓聽忙??莽??忙??茅?露忙庐碌氓?聽莽?颅 timeout 猫炉炉氓?陇氓陇卤猫麓楼茫??        #
+        # 氓?炉茅??猫驴?盲禄楼盲赂?莽?炉氓垄?氓??茅??猫娄?莽??茂录?氓??盲陆?莽搂?茂录?茂录?
+        # - WAN_T2I_TASK_TIMEOUT茂录?猫陆庐猫炉垄忙?禄忙?露茅?驴茂录?茅禄?猫庐陇 1800茂录?        # - WAN_T2I_POLL_HTTP_TIMEOUT茂录?猫陆庐猫炉垄忙?楼氓?拢氓??忙卢隆猫炉路忙卤?猫露?忙?露茂录?茅禄?猫庐陇 min(WAN_T2I_TIMEOUT, 15)茂录?        # - WAN_T2I_POLL_INTERVAL_S茂录?猫陆庐猫炉垄茅?麓茅??茂录?茅禄?猫庐陇 2茂录?        
         def _env_int(name: str, default: int) -> int:
             raw = os.getenv(name)
             if raw is None or not raw.strip():
@@ -722,7 +721,7 @@ class Wan26T2IAdapter(BaseModelAdapter):
         guidance_scale: float = 7.5,
         seed: Optional[int] = None
     ) -> GenerationResult:
-        """ç??æ??å?¾å??"""
+        """莽??忙??氓?戮氓??"""
         payload = {
             "model": self.config.model_name,
             "prompt": prompt,
@@ -759,7 +758,7 @@ class Wan26T2IAdapter(BaseModelAdapter):
                 )
         except requests.exceptions.HTTPError as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
-            # DashScope ç??OpenAI Compatible ç?®å??å?¯è?½ä¸?æ?¯æ??images/generationsï¼?            # è¿?é??è?ªå?¨å??æ?¢å?°å®?æ??AIGC Text2Image æ?¥å?£ï¼?å°½é??ä¸?è¦?æ±?ç?¨æ?·æ?¹é??ç½®ã??            
+            # DashScope 莽??OpenAI Compatible 莽?庐氓??氓?炉猫?陆盲赂?忙?炉忙??images/generations茂录?            # 猫驴?茅??猫?陋氓?篓氓??忙?垄氓?掳氓庐?忙??AIGC Text2Image 忙?楼氓?拢茂录?氓掳陆茅??盲赂?猫娄?忙卤?莽?篓忙?路忙?鹿茅??莽陆庐茫??            
             if status == 404 and self._is_dashscope():
                 try:
                     dash_result = self._dashscope_text_to_image(
@@ -785,11 +784,10 @@ class Wan26T2IAdapter(BaseModelAdapter):
 
 
 class Wan26I2VAdapter(BaseModelAdapter):
-    """Wan 2.6 I2V (Image-to-Video) é??é??å??- å?¾ç??è§?é¢?"""
+    """Wan 2.6 I2V (Image-to-Video) 茅??茅??氓??- 氓?戮莽??猫搂?茅垄?"""
 
     def _dashscope_model_name(self) -> str:
-        # 兼容控制台数字模型ID；I2V 接口通常需要模型名（如 wan2.6-i2v）
-        raw = str(self.config.model_name or "").strip()
+        # 鍏煎鎺у埗鍙版暟瀛楁ā鍨婭D锛汭2V 鎺ュ彛閫氬父闇€瑕佹ā鍨嬪悕锛堝 wan2.6-i2v锛?        raw = str(self.config.model_name or "").strip()
         if raw.isdigit():
             explicit = (os.getenv("WAN_I2V_MODEL_NAME") or "").strip()
             return explicit or "wan2.6-i2v"
@@ -805,10 +803,10 @@ class Wan26I2VAdapter(BaseModelAdapter):
         character_references: Optional[List[Dict[str, Any]]] = None,
     ) -> GenerationResult:
         """
-        DashScope ¹Ù·½ AIGC ÊÓÆµ½Ó¿Ú£¨api/v1/services/aigc/video-generation/video-synthesis£©¡£
-        ËµÃ÷£º
-        - compatible-mode/v1 Ä¿Ç°²»±£Ö¤Ö§³Ö v1/videos/i2v£»ÕâÀïÓÅÏÈÊ¹ÓÃ¹Ù·½ VideoSynthesis£¨SDK£©£¬±ÜÃâ¡°µ÷ÓÃ³É¹¦µ«ÎÞ video_url¡±µ¼ÖÂµÄ¾²Ì¬»ÃµÆÆ¬»ØÍË¡£
-        - ¹Ù·½½Ó¿Ú²ÎÊýÏà¶ÔÊÕÁ²£ºÖØµã´« size/duration/seed£¬±ÜÃâ×¢Èë²»È·¶¨²ÎÊýµ¼ÖÂ 4xx¡£
+        DashScope 鹿脵路陆 AIGC 脢脫脝碌陆脫驴脷拢篓api/v1/services/aigc/video-generation/video-synthesis拢漏隆拢
+        脣碌脙梅拢潞
+        - compatible-mode/v1 脛驴脟掳虏禄卤拢脰陇脰搂鲁脰 v1/videos/i2v拢禄脮芒脌茂脫脜脧脠脢鹿脫脙鹿脵路陆 VideoSynthesis拢篓SDK拢漏拢卢卤脺脙芒隆掳碌梅脫脙鲁脡鹿娄碌芦脦脼 video_url隆卤碌录脰脗碌脛戮虏脤卢禄脙碌脝脝卢禄脴脥脣隆拢
+        - 鹿脵路陆陆脫驴脷虏脦脢媒脧脿露脭脢脮脕虏拢潞脰脴碌茫麓芦 size/duration/seed拢卢卤脺脙芒脳垄脠毛虏禄脠路露篓虏脦脢媒碌录脰脗 4xx隆拢
         """
         try:
             import dashscope  # type: ignore
@@ -844,7 +842,7 @@ class Wan26I2VAdapter(BaseModelAdapter):
                 except Exception:
                     pass
 
-                # ±£Áô±¾µØÂ·¾¶×÷Îª¶µµ×£¬¼æÈÝ SDK ¶ÔÂ·¾¶Èë²ÎµÄ´¦Àí¡£
+                # 卤拢脕么卤戮碌脴脗路戮露脳梅脦陋露碌碌脳拢卢录忙脠脻 SDK 露脭脗路戮露脠毛虏脦碌脛麓娄脌铆隆拢
                 candidates.append(("local_path", str(p)))
                 return candidates
 
@@ -868,16 +866,16 @@ class Wan26I2VAdapter(BaseModelAdapter):
 
         from adapters.content_safety_checker import ContentSafetyChecker, check_and_fix_prompt
 
-        print("?? [ÄÚÈÝ°²È«¼ì²é] ¼ì²é I2V ÌáÊ¾´Ê...")
+        print("?? [脛脷脠脻掳虏脠芦录矛虏茅] 录矛虏茅 I2V 脤谩脢戮麓脢...")
         fixed_prompt, issues, fix_description = check_and_fix_prompt(prompt, strategy="moderate")
 
         if issues:
-            print(f"?? [ÄÚÈÝ°²È«¼ì²é] {fix_description}")
-            print(f"?? [ÄÚÈÝ°²È«¼ì²é] Ô­Ê¼ÌáÊ¾´Ê: {prompt}")
-            print(f"? [ÄÚÈÝ°²È«¼ì²é] ÐÞ¸´ºóÌáÊ¾´Ê: {fixed_prompt}")
+            print(f"?? [脛脷脠脻掳虏脠芦录矛虏茅] {fix_description}")
+            print(f"?? [脛脷脠脻掳虏脠芦录矛虏茅] 脭颅脢录脤谩脢戮麓脢: {prompt}")
+            print(f"? [脛脷脠脻掳虏脠芦录矛虏茅] 脨脼赂麓潞贸脤谩脢戮麓脢: {fixed_prompt}")
             prompt = fixed_prompt
         else:
-            print("? [ÄÚÈÝ°²È«¼ì²é] ÌáÊ¾´Ê°²È«£¬ÎÞÐèÐÞ¸´")
+            print("? [脛脷脠脻掳虏脠芦录矛虏茅] 脤谩脢戮麓脢掳虏脠芦拢卢脦脼脨猫脨脼赂麓")
 
         kwargs: Dict[str, Any] = {"duration": duration_i}
         if size:
@@ -985,8 +983,8 @@ class Wan26I2VAdapter(BaseModelAdapter):
         seed: Optional[int] = None,
         character_references: Optional[List[Dict[str, Any]]] = None
     ) -> GenerationResult:
-        """ä»?å?¾å??ç??æ??è§?é¢?"""
-        # DashScopeï¼?ä¼?å??èµ°å®?æ?¹ VideoSynthesisï¼?é?¿å??compatible-mode æ?¥å?£ä¸?æ?¯æ??å¯¼è?´ç??"é??æ??å¹»ç?¯ç??å??é??"ã??        
+        """盲禄?氓?戮氓??莽??忙??猫搂?茅垄?"""
+        # DashScope茂录?盲录?氓??猫碌掳氓庐?忙?鹿 VideoSynthesis茂录?茅?驴氓??compatible-mode 忙?楼氓?拢盲赂?忙?炉忙??氓炉录猫?麓莽??"茅??忙??氓鹿禄莽?炉莽??氓??茅??"茫??        
         if self._is_dashscope():
             return self._dashscope_i2v_via_video_synthesis(
                 image_path=image_path,
@@ -996,7 +994,7 @@ class Wan26I2VAdapter(BaseModelAdapter):
                 character_references=character_references,
             )
 
-        # é??DashScopeï¼?è¯»å??å?¾å??å¹¶ç¼?ç ?ä¸?base64ï¼?èµ° OpenAI-compatible è?ªå®?ä¹?endpoint
+        # 茅??DashScope茂录?猫炉禄氓??氓?戮氓??氓鹿露莽录?莽聽?盲赂?base64茂录?猫碌掳 OpenAI-compatible 猫?陋氓庐?盲鹿?endpoint
         with open(image_path, "rb") as f:
             import base64
             image_data = base64.b64encode(f.read()).decode()
@@ -1048,7 +1046,7 @@ class Wan26I2VAdapter(BaseModelAdapter):
 
 
 class Wan26T2VAdapter(BaseModelAdapter):
-    """Wan 2.6 T2V (Text-to-Video) é??é??å??- æ??ç??è§?é¢?"""
+    """Wan 2.6 T2V (Text-to-Video) 茅??茅??氓??- 忙??莽??猫搂?茅垄?"""
 
     def _dashscope_model_name(self) -> str:
         raw = str(self.config.model_name or "").strip()
@@ -1065,7 +1063,7 @@ class Wan26T2VAdapter(BaseModelAdapter):
         seed: Optional[int],
     ) -> GenerationResult:
         """
-        DashScope å®?æ?¹ AIGC è§?é¢?æ?¥å?£ï¼?api/v1/services/aigc/video-generation/video-synthesisï¼?ã??        """
+        DashScope 氓庐?忙?鹿 AIGC 猫搂?茅垄?忙?楼氓?拢茂录?api/v1/services/aigc/video-generation/video-synthesis茂录?茫??        """
         try:
             import dashscope  # type: ignore
         except Exception as exc:  # noqa: BLE001
@@ -1077,20 +1075,20 @@ class Wan26T2VAdapter(BaseModelAdapter):
         if duration_i <= 0:
             duration_i = 5
 
-        # ð??§ å??å®¹å®?å?¨æ£?æ?¥ä¸?è?ªå?¨ä¿®å¤?
+        # 冒??搂 氓??氓庐鹿氓庐?氓?篓忙拢?忙?楼盲赂?猫?陋氓?篓盲驴庐氓陇?
         from adapters.content_safety_checker import ContentSafetyChecker, check_and_fix_prompt
         
-        print(f"ð??? [å??å®¹å®?å?¨æ£?æ?¥] æ£?æ??T2V æ??ç¤ºè¯?..")
+        print(f"冒??? [氓??氓庐鹿氓庐?氓?篓忙拢?忙?楼] 忙拢?忙??T2V 忙??莽陇潞猫炉?..")
         fixed_prompt, issues, fix_description = check_and_fix_prompt(prompt, strategy="moderate")
         
         if issues:
-            print(f"â? ï¸? [å??å®¹å®?å?¨æ£?æ?¥] {fix_description}")
-            print(f"ð??? [å??å®¹å®?å?¨æ£?æ?¥] å??å§?æ??ç¤ºè¯? {prompt}")
-            print(f"â??[å??å®¹å®?å?¨æ£?æ?¥] ä¿®å¤?å??æ??ç¤ºè¯?: {fixed_prompt}")
+            print(f"芒?聽茂赂? [氓??氓庐鹿氓庐?氓?篓忙拢?忙?楼] {fix_description}")
+            print(f"冒??? [氓??氓庐鹿氓庐?氓?篓忙拢?忙?楼] 氓??氓搂?忙??莽陇潞猫炉? {prompt}")
+            print(f"芒??[氓??氓庐鹿氓庐?氓?篓忙拢?忙?楼] 盲驴庐氓陇?氓??忙??莽陇潞猫炉?: {fixed_prompt}")
             
-            # ä½¿ç?¨ä¿®å¤?å??ç??æ??ç¤ºè¯?            prompt = fixed_prompt
+            # 盲陆驴莽?篓盲驴庐氓陇?氓??莽??忙??莽陇潞猫炉?            prompt = fixed_prompt
         else:
-            print(f"â??[å??å®¹å®?å?¨æ£?æ?¥] æ??ç¤ºè¯?å®?å?¨ï¼?æ? é??ä¿®å¤?")
+            print(f"芒??[氓??氓庐鹿氓庐?氓?篓忙拢?忙?楼] 忙??莽陇潞猫炉?氓庐?氓?篓茂录?忙?聽茅??盲驴庐氓陇?")
 
         kwargs: Dict[str, Any] = {"duration": duration_i}
         if seed is not None:
@@ -1116,7 +1114,7 @@ class Wan26T2VAdapter(BaseModelAdapter):
                     if retry_count < max_retries:
                         retry_count += 1
                         wait_time = min(5 * (retry_count ** 1.5), 120)
-                        print(f"â? ï¸? DashScope T2V rate limit, retry {retry_count}/{max_retries}, waiting {wait_time:.1f}s...")
+                        print(f"芒?聽茂赂? DashScope T2V rate limit, retry {retry_count}/{max_retries}, waiting {wait_time:.1f}s...")
                         time.sleep(wait_time)
                         continue
                     else:
@@ -1165,7 +1163,7 @@ class Wan26T2VAdapter(BaseModelAdapter):
         guidance_scale: float = 7.5,
         seed: Optional[int] = None
     ) -> GenerationResult:
-        """ä»?æ??æ?¬ç??æ??è§?é¢?"""
+        """盲禄?忙??忙?卢莽??忙??猫搂?茅垄?"""
         
         if self._is_dashscope():
             return self._dashscope_t2v_via_video_synthesis(
@@ -1221,7 +1219,7 @@ class Wan26T2VAdapter(BaseModelAdapter):
 
 
 class Wan26R2VAdapter(BaseModelAdapter):
-    """Wan 2.6 R2V (Reference-to-Video) é??é??å??- å??è??è§?é¢?ç??æ??è§?é¢?"""
+    """Wan 2.6 R2V (Reference-to-Video) 茅??茅??氓??- 氓??猫??猫搂?茅垄?莽??忙??猫搂?茅垄?"""
 
     def generate(
         self,
@@ -1231,8 +1229,8 @@ class Wan26R2VAdapter(BaseModelAdapter):
         fps: int = 24,
         seed: Optional[int] = None
     ) -> GenerationResult:
-        """ä»?å??è??è§?é¢?ç??æ??æ?°è§?é¢?"""
-        # è¯»å??è§?é¢?å¹¶ç¼?ç ?ä¸ºbase64
+        """盲禄?氓??猫??猫搂?茅垄?莽??忙??忙?掳猫搂?茅垄?"""
+        # 猫炉禄氓??猫搂?茅垄?氓鹿露莽录?莽聽?盲赂潞base64
         with open(reference_video_path, "rb") as f:
             import base64
             video_data = base64.b64encode(f.read()).decode()
@@ -1278,7 +1276,7 @@ class Wan26R2VAdapter(BaseModelAdapter):
 
 
 class QwenImageEditPlusAdapter(BaseModelAdapter):
-    """Qwen-Image-Edit-Plus é??é??å??- å?¾ç??ç¼?è¾?"""
+    """Qwen-Image-Edit-Plus 茅??茅??氓??- 氓?戮莽??莽录?猫戮?"""
     supports_multi_image = True
 
     def generate(
@@ -1291,7 +1289,7 @@ class QwenImageEditPlusAdapter(BaseModelAdapter):
         seed: Optional[int] = None,
         image_paths: Optional[List[str]] = None
     ) -> GenerationResult:
-        """ç¼?è¾?å?¾å??"""
+        """莽录?猫戮?氓?戮氓??"""
         if not self._is_dashscope():
             return GenerationResult(
                 success=False,
@@ -1352,91 +1350,86 @@ class QwenImageEditPlusAdapter(BaseModelAdapter):
             if seed is not None:
                 payload["parameters"]["seed"] = int(seed)
 
-            result = self._request_json_url(method="POST", url=url, payload=payload)
-
-            output = result.get("output", {})
-            choices = output.get("choices", [])
-
-            if choices and len(choices) > 0:
-                message = choices[0].get("message", {})
-                content = message.get("content", [])
-
-                for item in content:
-                    if isinstance(item, dict) and "image" in item:
-                        image_url = item["image"]
-                        return GenerationResult(
-                            success=True,
-                            data={"image_url": image_url},
-                            metadata={
-                                "edit_prompt": edit_prompt,
-                                "strength": strength,
-                                "model": self.config.model_name
-                            }
-                        )
-
-            return GenerationResult(
-                success=False,
-                data=None,
-                error="No image data returned"
-            )
-        except Exception as e:
-            return GenerationResult(
-                success=False,
-                data=None,
-                error=str(e)
-            )
-        
-        if mask_path:
-            with open(mask_path, "rb") as f:
-                mask_data = base64.b64encode(f.read()).decode()
-            payload["mask"] = mask_data
-        
-        if seed is not None:
-            payload["seed"] = seed
-        
-        try:
-            legacy_payload = dict(payload)
-            legacy_payload.pop("prompt", None)
-            legacy_payload["edit_prompt"] = edit_prompt
-
-            # OpenAI ç??æ ?å??è·¯å¾?ä¸º /v1/images/editsï¼?é?¨å??æ?§å®?ç?°ä½¿ç?¨ /images/editã??            # è¿?é??æ??â??æ ?å??è·¯å¾?æ ?å??å­?æ®µ -> æ ?å??è·¯å¾?/æ?§å­?æ®?-> æ?§è·¯å¾?æ ?å??å­?æ®µ -> æ?§è·¯å¾?æ?§å­?æ®µâ??ç??é¡ºåº?å?¼å®¹ã??            result: Dict[str, Any] | None = None
-            last_exc: Exception | None = None
-            for endpoint, body in (
-                ("v1/images/edits", payload),
-                ("v1/images/edits", legacy_payload),
-                ("v1/images/edit", payload),
-                ("v1/images/edit", legacy_payload),
-            ):
-                try:
-                    result = self._make_request(endpoint, body)
-                    last_exc = None
-                    break
-                except requests.exceptions.HTTPError as e:
-                    last_exc = e
-                    status = getattr(getattr(e, "response", None), "status_code", None)
-                    if status in {400, 404}:
+            def _extract_first_image_url(raw_result: Dict[str, Any]) -> str:
+                output = raw_result.get("output", {}) if isinstance(raw_result, dict) else {}
+                choices = output.get("choices", []) if isinstance(output, dict) else []
+                if not isinstance(choices, list):
+                    return ""
+                for choice in choices:
+                    if not isinstance(choice, dict):
                         continue
-                    raise
-            if result is None and last_exc is not None:
-                raise last_exc
-             
-            if "data" in result and len(result["data"]) > 0:
-                image_url = result["data"][0]["url"]
+                    message = choice.get("message", {})
+                    content = message.get("content", []) if isinstance(message, dict) else []
+                    if not isinstance(content, list):
+                        continue
+                    for item in content:
+                        if isinstance(item, dict) and isinstance(item.get("image"), str) and str(item.get("image")).strip():
+                            return str(item.get("image")).strip()
+                return ""
+
+            if not content_items:
+                raise RuntimeError("no valid reference image provided")
+
+            def _is_message_schema_error(exc: Exception) -> bool:
+                detail = str(exc or "").lower()
+                return (
+                    "for image editing, the message must" in detail
+                    or ("invalidparameter" in detail and "message must" in detail)
+                )
+
+            primary_content = content_items + [{"text": edit_prompt}]
+            single_image_content = [content_items[0], {"text": edit_prompt}]
+            single_text_first_content = [{"text": edit_prompt}, content_items[0]]
+
+            default_mode = "multi" if len(content_items) > 1 else "single_image_first"
+            attempt_contents: List[Tuple[str, List[Dict[str, Any]]]] = [(default_mode, primary_content)]
+            if len(content_items) > 1:
+                attempt_contents.append(("single_image_first", single_image_content))
+                attempt_contents.append(("single_text_first", single_text_first_content))
+            else:
+                attempt_contents.append(("single_text_first", single_text_first_content))
+
+            result: Dict[str, Any] = {}
+            selected_mode = default_mode
+            last_exc: Optional[Exception] = None
+            for idx, (mode, candidate_content) in enumerate(attempt_contents):
+                request_payload = copy.deepcopy(payload)
+                request_payload["input"]["messages"][0]["content"] = candidate_content
+                try:
+                    result = self._request_json_url(method="POST", url=url, payload=request_payload)
+                    selected_mode = mode
+                    break
+                except Exception as req_exc:
+                    last_exc = req_exc
+                    should_try_next = idx < len(attempt_contents) - 1 and _is_message_schema_error(req_exc)
+                    if not should_try_next:
+                        raise
+            else:
+                if last_exc is not None:
+                    raise last_exc
+                raise RuntimeError("image edit request failed")
+
+            image_url = _extract_first_image_url(result)
+            if image_url:
                 return GenerationResult(
                     success=True,
                     data={"image_url": image_url},
                     metadata={
                         "edit_prompt": edit_prompt,
                         "strength": strength,
-                        "model": self.config.model_name
+                        "model": self.config.model_name,
+                        "ref_image_count": len(content_items) if len(content_items) > 1 and selected_mode == "multi" else 1,
+                        "request_mode": selected_mode,
+                        "multi_ref_fallback": bool(len(content_items) > 1 and selected_mode != "multi"),
+                        "content_order_fallback": selected_mode == "single_text_first",
                     }
                 )
-            else:
-                return GenerationResult(
-                    success=False,
-                    data=None,
-                    error="No image data returned"
-                )
+
+            return GenerationResult(
+                success=False,
+                data=None,
+                error=f"No image data returned. API response: {result}"
+            )
         except Exception as e:
             return GenerationResult(
                 success=False,
@@ -1444,9 +1437,8 @@ class QwenImageEditPlusAdapter(BaseModelAdapter):
                 error=str(e)
             )
 
-
 class WanImageEditAdapter(QwenImageEditPlusAdapter):
-    """Wan Image Edit Ã©â?¬â??Ã¢â?¬Â¦Ã¥â?? Ã¥â?ºÂ¾Ã¥Æ?Â¡Ã§Â¼â??Ã¨Â¾â??"""
+    """Wan Image Edit 脙漏芒?卢芒??脙垄芒?卢脗娄脙楼芒?? 脙楼芒?潞脗戮脙楼脝?脗隆脙搂脗录芒??脙篓脗戮芒??"""
     supports_multi_image = False
 
 
@@ -1455,7 +1447,7 @@ class QwenImageEditMaxAdapter(QwenImageEditPlusAdapter):
 
 
 class QwenMultiPersonFusionAdapter(BaseModelAdapter):
-    """Qwen-Image-Edit-Plus å¤?äººç?©è??å??é??é??å??- æ?¯æ??äººç?©æ??å??ã??å?ºæ?¯å?¹é??ã??å¤?äººç?©è??å??"""
+    """Qwen-Image-Edit-Plus 氓陇?盲潞潞莽?漏猫??氓??茅??茅??氓??- 忙?炉忙??盲潞潞莽?漏忙??氓??茫??氓?潞忙?炉氓?鹿茅??茫??氓陇?盲潞潞莽?漏猫??氓??"""
 
     def _make_request(
         self,
@@ -1464,9 +1456,9 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
         method: str = "POST"
     ) -> Dict[str, Any]:
         """
-        å??é??APIè¯·æ±? - é??å??ä»¥ä½¿ç?¨DashScopeå??ç??APIç«¯ç?¹
+        氓??茅??API猫炉路忙卤? - 茅??氓??盲禄楼盲陆驴莽?篓DashScope氓??莽??API莽芦炉莽?鹿
         
-        Qwen-Image-Edit-Plusä½¿ç?¨DashScopeå??ç??APIï¼?ä¸?æ?¯OpenAIå?¼å®¹æ¨¡å¼?
+        Qwen-Image-Edit-Plus盲陆驴莽?篓DashScope氓??莽??API茂录?盲赂?忙?炉OpenAI氓?录氓庐鹿忙篓隆氓录?
         """
         base_host = self._base_host()
         if not base_host:
@@ -1478,20 +1470,20 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
     def extract_person(
         self,
         image_path: str,
-        person_prompt: str = "æ??å??å?¾å??ä¸­ç??äººç?©",
+        person_prompt: str = "忙??氓??氓?戮氓??盲赂颅莽??盲潞潞莽?漏",
         n: int = 1,
         negative_prompt: str = "low quality, blurry, distorted, extra limbs, text, watermark",
         prompt_extend: bool = True,
         watermark: bool = False
     ) -> GenerationResult:
         """
-        ä»?æº?å?¾å??ä¸­æ??å??äººç?©å??ç´?        
+        盲禄?忙潞?氓?戮氓??盲赂颅忙??氓??盲潞潞莽?漏氓??莽麓?        
         Args:
-            image_path: æº?å?¾å??è·¯å¾?            person_prompt: äººç?©æ??å??æ??ç¤ºè¯?            n: ç??æ??å?¾ç??æ?°é??
-            negative_prompt: è´?å??æ??ç¤ºè¯?            prompt_extend: æ?¯å?¦æ?©å±?æ??ç¤ºè¯?            watermark: æ?¯å?¦æ·»å? æ°´å?°
+            image_path: 忙潞?氓?戮氓??猫路炉氓戮?            person_prompt: 盲潞潞莽?漏忙??氓??忙??莽陇潞猫炉?            n: 莽??忙??氓?戮莽??忙?掳茅??
+            negative_prompt: 猫麓?氓??忙??莽陇潞猫炉?            prompt_extend: 忙?炉氓?娄忙?漏氓卤?忙??莽陇潞猫炉?            watermark: 忙?炉氓?娄忙路禄氓?聽忙掳麓氓?掳
         
         Returns:
-            GenerationResult: å??å?«æ??å??å??ç??äººç?©å?¾å??URL
+            GenerationResult: 氓??氓?芦忙??氓??氓??莽??盲潞潞莽?漏氓?戮氓??URL
         """
         with open(image_path, "rb") as f:
             import base64
@@ -1567,15 +1559,15 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
         watermark: bool = False
     ) -> GenerationResult:
         """
-        å°?äººç?©ä¸?ç?®æ ?å?ºæ?¯å?¹é??ï¼?ç¡®ä¿?å??ç?§ã??è§?è§?ä¸?è??        
+        氓掳?盲潞潞莽?漏盲赂?莽?庐忙聽?氓?潞忙?炉氓?鹿茅??茂录?莽隆庐盲驴?氓??莽?搂茫??猫搂?猫搂?盲赂?猫??        
         Args:
-            person_image_path: äººç?©å?¾å??è·¯å¾?
-            target_scene_path: ç?®æ ?å?ºæ?¯å?¾å??è·¯å¾?
-            scene_prompt: å?ºæ?¯å?¹é??æ??ç¤ºè¯?            n: ç??æ??å?¾ç??æ?°é??
-            negative_prompt: è´?å??æ??ç¤ºè¯?            prompt_extend: æ?¯å?¦æ?©å±?æ??ç¤ºè¯?            watermark: æ?¯å?¦æ·»å? æ°´å?°
+            person_image_path: 盲潞潞莽?漏氓?戮氓??猫路炉氓戮?
+            target_scene_path: 莽?庐忙聽?氓?潞忙?炉氓?戮氓??猫路炉氓戮?
+            scene_prompt: 氓?潞忙?炉氓?鹿茅??忙??莽陇潞猫炉?            n: 莽??忙??氓?戮莽??忙?掳茅??
+            negative_prompt: 猫麓?氓??忙??莽陇潞猫炉?            prompt_extend: 忙?炉氓?娄忙?漏氓卤?忙??莽陇潞猫炉?            watermark: 忙?炉氓?娄忙路禄氓?聽忙掳麓氓?掳
         
         Returns:
-            GenerationResult: å??å?«å?¹é??å??ç??å?¾å??URL
+            GenerationResult: 氓??氓?芦氓?鹿茅??氓??莽??氓?戮氓??URL
         """
         import base64
         
@@ -1651,7 +1643,7 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
         self,
         person_images: List[str],
         target_scene_path: str,
-        fusion_prompt: str = "å°?å¤?ä¸ªäººç?©è?ªç?¶å?°è??å??å?°å??ä¸?å?ºæ?¯ä¸­ï¼?ä¿?æ??äººç?©ä¸?è?´æ?§å??å?ºæ?¯å??è°?",
+        fusion_prompt: str = "氓掳?氓陇?盲赂陋盲潞潞莽?漏猫?陋莽?露氓?掳猫??氓??氓?掳氓??盲赂?氓?潞忙?炉盲赂颅茂录?盲驴?忙??盲潞潞莽?漏盲赂?猫?麓忙?搂氓??氓?潞忙?炉氓??猫掳?",
         layout_description: Optional[str] = None,
         n: int = 1,
         negative_prompt: str = "low quality, blurry, distorted, extra limbs, text, watermark",
@@ -1659,16 +1651,16 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
         watermark: bool = False
     ) -> GenerationResult:
         """
-        å°?å¤?ä¸ªäººç?©è??å??å?°å??ä¸?å?ºæ?¯ä¸?        
+        氓掳?氓陇?盲赂陋盲潞潞莽?漏猫??氓??氓?掳氓??盲赂?氓?潞忙?炉盲赂?        
         Args:
-            person_images: å¤?ä¸ªäººç?©å?¾å??è·¯å¾?å??è¡¨
-            target_scene_path: ç?®æ ?å?ºæ?¯å?¾å??è·¯å¾?
-            fusion_prompt: è??å??æ??ç¤ºè¯?            layout_description: å¸?å±?æ??è¿°ï¼?å?¯é??ï¼?ç?¨äº?æ??å®?äººç?©å?¨å?ºæ?¯ä¸­ç??ä½?ç½®ï¼?
-            n: ç??æ??å?¾ç??æ?°é??
-            negative_prompt: è´?å??æ??ç¤ºè¯?            prompt_extend: æ?¯å?¦æ?©å±?æ??ç¤ºè¯?            watermark: æ?¯å?¦æ·»å? æ°´å?°
+            person_images: 氓陇?盲赂陋盲潞潞莽?漏氓?戮氓??猫路炉氓戮?氓??猫隆篓
+            target_scene_path: 莽?庐忙聽?氓?潞忙?炉氓?戮氓??猫路炉氓戮?
+            fusion_prompt: 猫??氓??忙??莽陇潞猫炉?            layout_description: 氓赂?氓卤?忙??猫驴掳茂录?氓?炉茅??茂录?莽?篓盲潞?忙??氓庐?盲潞潞莽?漏氓?篓氓?潞忙?炉盲赂颅莽??盲陆?莽陆庐茂录?
+            n: 莽??忙??氓?戮莽??忙?掳茅??
+            negative_prompt: 猫麓?氓??忙??莽陇潞猫炉?            prompt_extend: 忙?炉氓?娄忙?漏氓卤?忙??莽陇潞猫炉?            watermark: 忙?炉氓?娄忙路禄氓?聽忙掳麓氓?掳
         
         Returns:
-            GenerationResult: å??å?«è??å??å??ç??å?¾å??URL
+            GenerationResult: 氓??氓?芦猫??氓??氓??莽??氓?戮氓??URL
         """
         import base64
         
@@ -1681,7 +1673,7 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
         
         enhanced_prompt = fusion_prompt
         if layout_description:
-            enhanced_prompt = f"{fusion_prompt}\nå¸?å±?è¦?æ±?ï¼?{layout_description}"
+            enhanced_prompt = f"{fusion_prompt}\n氓赂?氓卤?猫娄?忙卤?茂录?{layout_description}"
         
         if len(person_images) == 1:
             return self.match_scene(
@@ -1710,15 +1702,15 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
         watermark: bool = False
     ) -> GenerationResult:
         """
-        è°?æ?´å?¾å??ç??å??ç?§æ??æ??        
+        猫掳?忙?麓氓?戮氓??莽??氓??莽?搂忙??忙??        
         Args:
-            image_path: å?¾å??è·¯å¾?
-            lighting_prompt: å??ç?§è°?æ?´æ??ç¤ºè¯?ï¼?å¦?æ·»å? æ??å??ç??ä¾§å??ã??å¢?å¼ºè?ªç?¶å??ç­?ï¼?
-            n: ç??æ??å?¾ç??æ?°é??
-            negative_prompt: è´?å??æ??ç¤ºè¯?            prompt_extend: æ?¯å?¦æ?©å±?æ??ç¤ºè¯?            watermark: æ?¯å?¦æ·»å? æ°´å?°
+            image_path: 氓?戮氓??猫路炉氓戮?
+            lighting_prompt: 氓??莽?搂猫掳?忙?麓忙??莽陇潞猫炉?茂录?氓娄?忙路禄氓?聽忙??氓??莽??盲戮搂氓??茫??氓垄?氓录潞猫?陋莽?露氓??莽颅?茂录?
+            n: 莽??忙??氓?戮莽??忙?掳茅??
+            negative_prompt: 猫麓?氓??忙??莽陇潞猫炉?            prompt_extend: 忙?炉氓?娄忙?漏氓卤?忙??莽陇潞猫炉?            watermark: 忙?炉氓?娄忙路禄氓?聽忙掳麓氓?掳
         
         Returns:
-            GenerationResult: å??å?«è°?æ?´å??ç??å?¾å??URL
+            GenerationResult: 氓??氓?芦猫掳?忙?麓氓??莽??氓?戮氓??URL
         """
         with open(image_path, "rb") as f:
             import base64
@@ -1789,17 +1781,17 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
         **kwargs
     ) -> GenerationResult:
         """
-        ç»?ä¸?ç??ç??æ??æ?¥å?£ï¼?æ ¹æ?®operationç±»å??è°?ç?¨ä¸?å??ç??å??è??        
+        莽禄?盲赂?莽??莽??忙??忙?楼氓?拢茂录?忙聽鹿忙?庐operation莽卤禄氓??猫掳?莽?篓盲赂?氓??莽??氓??猫??        
         Args:
-            operation: æ??ä½?ç±»å?? (extract_person, match_scene, fuse_multiple_persons, adjust_lighting)
-            **kwargs: æ??ä½?ç?¸å?³ç??å??æ??        
+            operation: 忙??盲陆?莽卤禄氓?? (extract_person, match_scene, fuse_multiple_persons, adjust_lighting)
+            **kwargs: 忙??盲陆?莽?赂氓?鲁莽??氓??忙??        
         Returns:
-            GenerationResult: æ??ä½?ç»?æ??
+            GenerationResult: 忙??盲陆?莽禄?忙??
         """
         if operation == "extract_person":
             return self.extract_person(
                 image_path=kwargs.get("image_path"),
-                person_prompt=kwargs.get("person_prompt", "æ??å??å?¾å??ä¸­ç??äººç?©"),
+                person_prompt=kwargs.get("person_prompt", "忙??氓??氓?戮氓??盲赂颅莽??盲潞潞莽?漏"),
                 n=kwargs.get("n", 1),
                 negative_prompt=kwargs.get("negative_prompt", "low quality, blurry, distorted, extra limbs, text, watermark"),
                 prompt_extend=kwargs.get("prompt_extend", True),
@@ -1819,7 +1811,7 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
             return self.fuse_multiple_persons(
                 person_images=kwargs.get("person_images", []),
                 target_scene_path=kwargs.get("target_scene_path"),
-                fusion_prompt=kwargs.get("fusion_prompt", "å°?å¤?ä¸ªäººç?©è?ªç?¶å?°è??å??å?°å??ä¸?å?ºæ?¯ä¸­ï¼?ä¿?æ??äººç?©ä¸?è?´æ?§å??å?ºæ?¯å??è°?"),
+                fusion_prompt=kwargs.get("fusion_prompt", "氓掳?氓陇?盲赂陋盲潞潞莽?漏猫?陋莽?露氓?掳猫??氓??氓?掳氓??盲赂?氓?潞忙?炉盲赂颅茂录?盲驴?忙??盲潞潞莽?漏盲赂?猫?麓忙?搂氓??氓?潞忙?炉氓??猫掳?"),
                 layout_description=kwargs.get("layout_description"),
                 n=kwargs.get("n", 1),
                 negative_prompt=kwargs.get("negative_prompt", "low quality, blurry, distorted, extra limbs, text, watermark"),
@@ -1844,13 +1836,13 @@ class QwenMultiPersonFusionAdapter(BaseModelAdapter):
 
 
 class Qwen3VLPlusAdapter(BaseModelAdapter):
-    """Qwen3-VL-Plus é??é??å??- å?¾ç??ä¸?è§?é¢?ç??è§£ï¼?è´¨é??è¯?ä¼°ï¼?"""
+    """Qwen3-VL-Plus 茅??茅??氓??- 氓?戮莽??盲赂?猫搂?茅垄?莽??猫搂拢茂录?猫麓篓茅??猫炉?盲录掳茂录?"""
 
     def generate(self, **kwargs) -> GenerationResult:  # noqa: ANN003
         """
-        å?¼å®¹ BaseModelAdapter æ?½è±¡æ?¥å?£ï¼?        - analyze_image: ä¼ å?¥ image_path
-        - analyze_video: ä¼ å?¥ video_path
-        - chat: ä¼ å?¥ messages
+        氓?录氓庐鹿 BaseModelAdapter 忙?陆猫卤隆忙?楼氓?拢茂录?        - analyze_image: 盲录聽氓?楼 image_path
+        - analyze_video: 盲录聽氓?楼 video_path
+        - chat: 盲录聽氓?楼 messages
         """
         if "messages" in kwargs:
             return self.chat(
@@ -1882,8 +1874,8 @@ class Qwen3VLPlusAdapter(BaseModelAdapter):
         response_format: Optional[Dict[str, Any]] = None,
     ) -> GenerationResult:
         """
-        OpenAI-Compatible Chat Completionsï¼?ç?¨äº?å¤?æ¨¡æ??è¯?é??å??è??é??æ?©ï¼?ã??
-        æ³¨æ??ï¼?message schema ç?±è°?ç?¨æ?¹ä¿?è¯?ï¼?role/contentï¼?ï¼?content å?¯ä¸ºçº¯æ??æ?¬æ??å¤?æ¨¡æ??æ?°ç»?ã??        """
+        OpenAI-Compatible Chat Completions茂录?莽?篓盲潞?氓陇?忙篓隆忙??猫炉?茅??氓??猫??茅??忙?漏茂录?茫??
+        忙鲁篓忙??茂录?message schema 莽?卤猫掳?莽?篓忙?鹿盲驴?猫炉?茂录?role/content茂录?茂录?content 氓?炉盲赂潞莽潞炉忙??忙?卢忙??氓陇?忙篓隆忙??忙?掳莽禄?茫??        """
         if not isinstance(messages, list):
             return GenerationResult(success=False, data=None, error="messages must be a list")
 
@@ -1922,7 +1914,7 @@ class Qwen3VLPlusAdapter(BaseModelAdapter):
         analysis_type: str = "quality",
         criteria: Optional[List[str]] = None
     ) -> GenerationResult:
-        """å??æ??å?¾å??è´¨é??"""
+        """氓??忙??氓?戮氓??猫麓篓茅??"""
         with open(image_path, "rb") as f:
             import base64
             image_data = base64.b64encode(f.read()).decode()
@@ -1959,7 +1951,7 @@ class Qwen3VLPlusAdapter(BaseModelAdapter):
         analysis_type: str = "quality",
         criteria: Optional[List[str]] = None
     ) -> GenerationResult:
-        """å??æ??è§?é¢?è´¨é??"""
+        """氓??忙??猫搂?茅垄?猫麓篓茅??"""
         with open(video_path, "rb") as f:
             import base64
             video_data = base64.b64encode(f.read()).decode()
@@ -1992,7 +1984,7 @@ class Qwen3VLPlusAdapter(BaseModelAdapter):
 
 
 class Qwen3TTSAdapter(BaseModelAdapter):
-    """Qwen3-TTS é??é??å??- æ??æ?¬è½¬è¯­é?³ï¼?ç?¨äº?å£°ç?»å??æ­¥ï¼?"""
+    """Qwen3-TTS 茅??茅??氓??- 忙??忙?卢猫陆卢猫炉颅茅?鲁茂录?莽?篓盲潞?氓拢掳莽?禄氓??忙颅楼茂录?"""
 
     def generate(
         self,
@@ -2005,15 +1997,15 @@ class Qwen3TTSAdapter(BaseModelAdapter):
         volume: float = 1.0
     ) -> GenerationResult:
         """
-        ç??æ??è¯­é?³ï¼?æ??æ?¬è½¬è¯­é?³ï¼?        
+        莽??忙??猫炉颅茅?鲁茂录?忙??忙?卢猫陆卢猫炉颅茅?鲁茂录?        
         Args:
-            text: è¦?è½¬æ?¢ç??æ??æ?¬
-            voice_style: è¯­é?³é£?æ ¼ï¼?natural/emotional/humorousç­?ï¼?
-            character_id: è§?è?²IDï¼?ç?¨äº?é?³è?²å?¹é??ï¼?
-            voice_id: é?³è?²IDï¼?ä¼?å??ä½¿ç?¨ï¼?
-            speed: è¯­é??ï¼?0.5-2.0ï¼?            pitch: é?³è°?ï¼?.5-2.0ï¼?            volume: é?³é??ï¼?.0-1.0ï¼?        
+            text: 猫娄?猫陆卢忙?垄莽??忙??忙?卢
+            voice_style: 猫炉颅茅?鲁茅拢?忙聽录茂录?natural/emotional/humorous莽颅?茂录?
+            character_id: 猫搂?猫?虏ID茂录?莽?篓盲潞?茅?鲁猫?虏氓?鹿茅??茂录?
+            voice_id: 茅?鲁猫?虏ID茂录?盲录?氓??盲陆驴莽?篓茂录?
+            speed: 猫炉颅茅??茂录?0.5-2.0茂录?            pitch: 茅?鲁猫掳?茂录?.5-2.0茂录?            volume: 茅?鲁茅??茂录?.0-1.0茂录?        
         Returns:
-            GenerationResult: å??å?«ç??æ??ç??é?³é¢?æ?°æ?®ï¼?base64ç¼?ç ?ï¼?        """
+            GenerationResult: 氓??氓?芦莽??忙??莽??茅?鲁茅垄?忙?掳忙?庐茂录?base64莽录?莽聽?茂录?        """
         if not text or not text.strip():
             return GenerationResult(
                 success=False,
@@ -2086,7 +2078,7 @@ class Qwen3TTSAdapter(BaseModelAdapter):
     
     def _dashscope_tts(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
-        ä½¿ç?¨DashScopeå??ç??APIè¿?è¡?æ??æ?¬è½¬è¯­é??        """
+        盲陆驴莽?篓DashScope氓??莽??API猫驴?猫隆?忙??忙?卢猫陆卢猫炉颅茅??        """
         dashscope_payload = {
             "model": self.config.model_name,
             "input": {
@@ -2129,7 +2121,7 @@ class Qwen3TTSAdapter(BaseModelAdapter):
 
 
 class JianyingAPIAdapter(BaseModelAdapter):
-    """å?ªå½±APIé??é??å??- è§?é¢?ç¼?è¾?"""
+    """氓?陋氓陆卤API茅??茅??氓??- 猫搂?茅垄?莽录?猫戮?"""
 
     def generate(
         self,
@@ -2140,8 +2132,8 @@ class JianyingAPIAdapter(BaseModelAdapter):
         subtitles: Optional[List[Dict[str, Any]]] = None,
         effects: Optional[List[Dict[str, Any]]] = None
     ) -> GenerationResult:
-        """ç¼?è¾?è§?é¢?"""
-        # è¯»å??æ??æ??è§?é¢?æ??ä»?        videos_data = []
+        """莽录?猫戮?猫搂?茅垄?"""
+        # 猫炉禄氓??忙??忙??猫搂?茅垄?忙??盲禄?        videos_data = []
         for video_path in video_paths:
             with open(video_path, "rb") as f:
                 import base64
@@ -2164,10 +2156,10 @@ class JianyingAPIAdapter(BaseModelAdapter):
             result = self._make_request("v1/videos/edit", payload)
             
             if "data" in result:
-                # ä¿?å­?ç¼?è¾?å??ç??è§?é¢?
+                # 盲驴?氓颅?莽录?猫戮?氓??莽??猫搂?茅垄?
                 video_url = result["data"].get("video_url")
                 if video_url:
-                    # ä¸?è½½è§?é¢?å?°æ??å®?è·¯å¾?                    response = requests.get(video_url, timeout=60)
+                    # 盲赂?猫陆陆猫搂?茅垄?氓?掳忙??氓庐?猫路炉氓戮?                    response = requests.get(video_url, timeout=60)
                     response.raise_for_status()
                     
                     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -2197,83 +2189,73 @@ class JianyingAPIAdapter(BaseModelAdapter):
             )
 
 
+
 class ModelAdapterFactory:
-    """æ¨¡å??é??é??å?¨å·¥å??"""
+    """统一模型适配器入口（兼容旧调用签名）。"""
+
+    _KEY_ALIAS_MAP = {
+        "wan_t2i": "wan26_t2i",
+        "wan_i2v": "wan26_i2v",
+        "wan_t2v": "wan26_t2v",
+        "wan_r2v": "wan26_r2v",
+        "wan-t2i": "wan26_t2i",
+        "wan-i2v": "wan26_i2v",
+        "wan-t2v": "wan26_t2v",
+        "wan-r2v": "wan26_r2v",
+    }
+    _BRIDGE_MODEL_MAP = {
+        "wan26_t2i": "wanx-v1",
+        "wan26_i2v": "wan2.6-t2v",
+        "wan26_t2v": "wan2.6-t2v",
+    }
+    _ENV_PREFIX_MAP = {
+        "wan26_t2i": "WAN_T2I",
+        "wan26_i2v": "WAN_I2V",
+        "wan26_t2v": "WAN_T2V",
+        "wan26_r2v": "WAN_R2V",
+        "wan_image_edit": "WAN_IMAGE_EDIT",
+        "qwen_image_edit_plus": "QWEN_IMAGE_EDIT",
+        "qwen_image_edit_max": "QWEN_IMAGE_EDIT_MAX",
+        "qwen_multiperson_fusion": "QWEN_IMAGE_EDIT",
+        "qwen3_vl_plus": "QWEN_VL_PLUS",
+        "qwen3_tts": "QWEN3_TTS",
+        "jianying": "JIANYING",
+    }
+    _DEFAULT_MODEL_NAME_BY_ENV = {
+        "QWEN_VL_PLUS": "qwen3-vl-plus",
+        "QWEN_IMAGE_EDIT": "qwen-image-edit-plus",
+        "QWEN_IMAGE_EDIT_MAX": "qwen-image-edit-max-2026-01-16",
+    }
 
     def __init__(self) -> None:
-        self._cache: Dict[str, BaseModelAdapter] = {}
+        self._cache: Dict[str, Any] = {}
 
     @staticmethod
-    def create_adapter(
-        adapter_type: str,
-        config: ModelConfig
-    ) -> BaseModelAdapter:
-        """å??å»ºé??é??å?¨å®?ä¾?"""
-        adapters = {
-            "wan26_t2i": Wan26T2IAdapter,
-            "wan26_i2v": Wan26I2VAdapter,
-            "wan26_t2v": Wan26T2VAdapter,
-            "wan26_r2v": Wan26R2VAdapter,
-            "wan_image_edit": WanImageEditAdapter,
-            "qwen_image_edit_plus": QwenImageEditPlusAdapter,
-            "qwen_image_edit_max": QwenImageEditMaxAdapter,
-            "qwen_multiperson_fusion": QwenMultiPersonFusionAdapter,
-            "qwen3_vl_plus": Qwen3VLPlusAdapter,
-            "qwen3_tts": Qwen3TTSAdapter,
-            "jianying": JianyingAPIAdapter,
-        }
-        
-        adapter_class = adapters.get(adapter_type)
-        if not adapter_class:
-            raise ValueError(f"Unknown adapter type: {adapter_type}")
-        
-        return adapter_class(config)
+    def _safe_int_env(var_name: str) -> Optional[int]:
+        raw = os.getenv(var_name)
+        if raw is None:
+            return None
+        text = str(raw).strip()
+        if not text:
+            return None
+        try:
+            return int(text)
+        except Exception:  # noqa: BLE001
+            return None
 
-    def get_adapter(self, name: str) -> BaseModelAdapter:
-        """
-        ä»?ç?¯å¢?å??é??å? è½½é??ç½®å¹¶è?·å??æ¨¡å??é??é??å?¨å®?ä¾?ã??
-        æ?¯æ??å?«å??ï¼?ä¾¿äº?Agent å±?å¤?ç?¨ï¼?ï¼?        - wan_t2i / wan26_t2i
-        - wan_i2v / wan26_i2v
-        - wan_t2v / wan26_t2v
-        - wan_r2v / wan26_r2v
-        - wan_image_edit
-        - qwen_image_edit_plus
-        - qwen_image_edit_max
-        - qwen3_vl_plus
-        - qwen3_tts
-        - jianying
-        """
-        key = (name or "").strip().lower()
+    def _normalize_key(self, name: str) -> str:
+        key = str(name or "").strip().lower()
         if not key:
             raise ValueError("adapter name is required")
+        return self._KEY_ALIAS_MAP.get(key, key)
 
-        if key in self._cache:
-            return self._cache[key]
+    def _resolve_bridge_name(self, normalized_key: str) -> str:
+        return self._BRIDGE_MODEL_MAP.get(normalized_key, normalized_key)
 
-        alias_map = {
-            "wan_t2i": "wan26_t2i",
-            "wan_i2v": "wan26_i2v",
-            "wan_t2v": "wan26_t2v",
-            "wan_r2v": "wan26_r2v",
-        }
-        adapter_type = alias_map.get(key, key)
-
-        env_prefix_map = {
-            "wan26_t2i": "WAN_T2I",
-            "wan26_i2v": "WAN_I2V",
-            "wan26_t2v": "WAN_T2V",
-            "wan26_r2v": "WAN_R2V",
-            "wan_image_edit": "WAN_IMAGE_EDIT",
-            "qwen_image_edit_plus": "QWEN_IMAGE_EDIT",
-            "qwen_image_edit_max": "QWEN_IMAGE_EDIT_MAX",
-            "qwen_multiperson_fusion": "QWEN_IMAGE_EDIT",
-            "qwen3_vl_plus": "QWEN_VL_PLUS",
-            "qwen3_tts": "QWEN3_TTS",
-            "jianying": "JIANYING",
-        }
-        env_prefix = env_prefix_map.get(adapter_type)
+    def _build_bridge_kwargs(self, normalized_key: str, bridge_name: str) -> Dict[str, Any]:
+        env_prefix = self._ENV_PREFIX_MAP.get(normalized_key)
         if not env_prefix:
-            raise ValueError(f"Unknown adapter type: {key}")
+            return {}
 
         api_key = os.getenv(f"{env_prefix}_API_KEY", "").strip()
         base_url = os.getenv(f"{env_prefix}_BASE_URL", "").strip()
@@ -2281,6 +2263,8 @@ class ModelAdapterFactory:
             os.getenv(f"{env_prefix}_MODEL_NAME", "").strip()
             or os.getenv(f"{env_prefix}_MODEL_ID", "").strip()
             or os.getenv(f"{env_prefix}_MODEL", "").strip()
+            or self._DEFAULT_MODEL_NAME_BY_ENV.get(env_prefix, "")
+            or bridge_name
         )
 
         if env_prefix == "QWEN_IMAGE_EDIT_MAX" and (not api_key or not base_url):
@@ -2291,63 +2275,33 @@ class ModelAdapterFactory:
             if not base_url:
                 base_url = fallback_base
 
-        if not api_key or not base_url:
-            raise RuntimeError(
-                f"Missing {env_prefix} config: require {env_prefix}_API_KEY and {env_prefix}_BASE_URL"
-            )
+        timeout_default = 600 if env_prefix in {"WAN_I2V", "WAN_T2V", "WAN_R2V"} else 60
+        timeout = self._safe_int_env(f"{env_prefix}_TIMEOUT")
+        max_retries = self._safe_int_env(f"{env_prefix}_MAX_RETRIES")
 
-        if not model_name:
-            # å?¼å®¹ï¼?é?¨å??OpenAI-Compatible ç½?å?³å?¨é??ç½®ä¸­å?ªé??è¦?API_KEY/BASE_URL
-            # é»?è®¤å?¼ä»?ç?¨äº? Qwen ç³»å??ï¼?é?¿å??å½±å??Wan/Jianying ç­?æ?¾å¼?ä¾?èµ?model_id ç??é?¾è·¯ã??            
-            if env_prefix == "QWEN_VL_PLUS":
-                model_name = "qwen3-vl-plus"
-            elif env_prefix == "QWEN_IMAGE_EDIT":
-                model_name = "qwen-image-edit-plus"
-            elif env_prefix == "QWEN_IMAGE_EDIT_MAX":
-                model_name = "qwen-image-edit-max-2026-01-16"
+        return {
+            "api_key": api_key or None,
+            "base_url": base_url or None,
+            "model_name": model_name or bridge_name,
+            "timeout": int(timeout if timeout is not None else timeout_default),
+            "max_retries": int(max_retries if max_retries is not None else 3),
+        }
 
-        if not model_name and adapter_type != "jianying":
-            raise RuntimeError(
-                f"Missing {env_prefix} model: set {env_prefix}_MODEL_NAME (or {env_prefix}_MODEL_ID)"
-            )
+    def get_adapter(self, name: str) -> Any:
+        normalized_key = self._normalize_key(name)
+        if normalized_key in self._cache:
+            return self._cache[normalized_key]
 
-        if adapter_type == "jianying" and not model_name:
-            model_name = "jianying"
+        bridge_name = self._resolve_bridge_name(normalized_key)
+        if bridge_name in self._cache:
+            adapter = self._cache[bridge_name]
+            self._cache[normalized_key] = adapter
+            return adapter
 
-        default_timeout_s = 60
-        if env_prefix in {"WAN_I2V", "WAN_T2V", "WAN_R2V"}:
-            default_timeout_s = 600
-        timeout = int(os.getenv(f"{env_prefix}_TIMEOUT", str(default_timeout_s)) or str(default_timeout_s))
-        max_retries = int(os.getenv(f"{env_prefix}_MAX_RETRIES", "3") or "3")
+        from adapters.legacy_bridge import ModelAdapterFactory as UnifiedFactory
 
-        def _optional_int(var_name: str) -> Optional[int]:
-            raw = os.getenv(var_name)
-            if raw is None:
-                return None
-            raw = raw.strip()
-            if not raw:
-                return None
-            try:
-                return int(raw)
-            except Exception:  # noqa: BLE001
-                return None
-
-        max_requests_per_minute = _optional_int(f"{env_prefix}_MAX_REQUESTS_PER_MINUTE")
-        max_requests_per_day = _optional_int(f"{env_prefix}_MAX_REQUESTS_PER_DAY")
-
-        adapter = self.create_adapter(
-            adapter_type=adapter_type,
-            config=ModelConfig(
-                api_key=api_key,
-                base_url=base_url.rstrip("/"),
-                model_name=model_name,
-                timeout=timeout,
-                max_retries=max_retries,
-                max_requests_per_minute=max_requests_per_minute,
-                max_requests_per_day=max_requests_per_day,
-                rate_limit_key=env_prefix,
-            ),
-        )
-
-        self._cache[key] = adapter
+        kwargs = self._build_bridge_kwargs(normalized_key, bridge_name)
+        adapter = UnifiedFactory.create(bridge_name, **kwargs)
+        self._cache[normalized_key] = adapter
+        self._cache[bridge_name] = adapter
         return adapter

@@ -57,6 +57,16 @@ import WarningIcon from '@mui/icons-material/Warning'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import { workflowWebSocket } from '@/services/websocket'
 import FormattedContent from '@/components/common/FormattedContent'
+import {
+  CHARACTER_VIEW_ORDER,
+  CHARACTER_VIEW_RANK,
+  characterViewLabel,
+  formatReferenceRoleLabel,
+  parseLibraryRole,
+  resolveCharacterViewChainPlan,
+  type CharacterView,
+} from '@/utils/dreamweaverLibraryRole'
+import { hasRenderableLibraryImage, resolveLibraryAssetImageState, type LibraryAssetImageState } from '@/utils/dreamweaverLibraryAssetState'
 
 // 织梦映心：生成流程页
 
@@ -167,63 +177,15 @@ function ratioIsPortrait(value: string | null | undefined): boolean {
   return height > width
 }
 
-type CharacterViewValue = 'front' | 'side' | 'back' | 'default'
-
-interface CharacterViewChainPlan {
-  forceImageEdit: boolean
-  baseRole: string | null
-  referenceRoles: string[]
-}
-
-function resolveCharacterViewFromRole(role: string): CharacterViewValue {
-  const prefix = String(role || '').trim().split(':', 1)[0]
-  if (prefix === 'lib_character_portrait_side') return 'side'
-  if (prefix === 'lib_character_portrait_back') return 'back'
-  if (prefix === 'lib_character_portrait') return 'front'
-  return 'default'
-}
-
-function parseLibraryRoleEntityId(role: string): number | null {
-  const text = String(role || '').trim()
-  if (!text.includes(':')) return null
-  const parts = text.split(':', 2)
-  if (parts.length < 2) return null
-  const entityId = Number(parts[1])
-  if (!Number.isInteger(entityId) || entityId <= 0) return null
-  return entityId
-}
-
-function resolveCharacterViewChainPlan(role: string): CharacterViewChainPlan {
-  const prefix = String(role || '').trim().split(':', 1)[0]
-  const entityId = parseLibraryRoleEntityId(role)
-  if (!entityId) {
-    return { forceImageEdit: false, baseRole: null, referenceRoles: [] }
-  }
-  const frontRole = `lib_character_portrait:${entityId}`
-  const sideRole = `lib_character_portrait_side:${entityId}`
-  if (prefix === 'lib_character_portrait_side') {
-    return {
-      forceImageEdit: true,
-      baseRole: frontRole,
-      referenceRoles: [frontRole],
-    }
-  }
-  if (prefix === 'lib_character_portrait_back') {
-    return {
-      forceImageEdit: true,
-      baseRole: sideRole,
-      referenceRoles: [sideRole, frontRole],
-    }
-  }
-  return { forceImageEdit: false, baseRole: null, referenceRoles: [] }
-}
-
-function formatReferenceRoleLabel(role: string): string {
-  const view = resolveCharacterViewFromRole(role)
-  if (view === 'front') return '正面图'
-  if (view === 'side') return '侧面图'
-  if (view === 'back') return '背面图'
-  return role
+function isPlaceholderEntityName(value: unknown): boolean {
+  const text = String(value ?? '').trim()
+  if (!text) return true
+  const lowered = text.toLowerCase()
+  if (lowered === 'unknown' || lowered === 'n/a' || lowered === 'na') return true
+  if (lowered.startsWith('lib_character_portrait')) return true
+  if (lowered.startsWith('lib_scene_card:')) return true
+  if (lowered.startsWith('lib_prop_card:')) return true
+  return false
 }
 
 interface Project {
@@ -336,12 +298,90 @@ interface LibraryDisplayItem {
   approved: boolean
   status: 'planned' | 'processing' | 'done'
   group: 'character' | 'scene' | 'prop' | 'other'
-  view?: 'front' | 'side' | 'back' | null
+  view?: CharacterView | null
   viewRank: number
   asset?: LibraryAsset
   missing?: boolean
+  placeholder?: boolean
+  hasRenderableImage?: boolean
+  imageState?: LibraryAssetImageState | null
   safety_blocked?: boolean
   safety_error?: string | null
+}
+
+function buildLibraryPlanItemsFromPayload(data: LibraryPayload | null | undefined): DreamweaverLibraryPlanItem[] {
+  if (!data || typeof data !== 'object') return []
+
+  const assets = Array.isArray(data.assets) ? data.assets : []
+  const assetsByRole = new Map<string, LibraryAsset>()
+  for (const asset of assets) {
+    const role = String(asset?.role || '').trim()
+    if (!role) continue
+    assetsByRole.set(role, asset)
+  }
+
+  const entityNameByKey = new Map<string, string>()
+  const spec = data.spec && typeof data.spec === 'object' ? data.spec : {}
+  const sections: Array<{ key: string; entityType: 'character' | 'scene' | 'prop' }> = [
+    { key: 'characters', entityType: 'character' },
+    { key: 'scenes', entityType: 'scene' },
+    { key: 'props', entityType: 'prop' },
+  ]
+  for (const section of sections) {
+    const items = Array.isArray((spec as any)?.[section.key]) ? ((spec as any)[section.key] as any[]) : []
+    for (const item of items) {
+      if (!item || typeof item !== 'object') continue
+      const entityId = Number.parseInt(String((item as any).entity_id ?? ''), 10)
+      if (!Number.isFinite(entityId) || entityId <= 0) continue
+      const name = String((item as any).name || '').trim()
+      if (!name) continue
+      entityNameByKey.set(`${section.entityType}:${entityId}`, name)
+    }
+  }
+
+  const requiredRolesRaw = Array.isArray((data.review as any)?.required_roles) ? (((data.review as any).required_roles as any[]) ?? []) : []
+  const requiredRoles = requiredRolesRaw
+    .map((raw) => String(raw || '').trim())
+    .filter((role) => role)
+
+  const orderedRoles = requiredRoles.length
+    ? requiredRoles
+    : Array.from(assetsByRole.keys()).sort((a, b) => a.localeCompare(b, 'zh-CN'))
+
+  const seen = new Set<string>()
+  const items: DreamweaverLibraryPlanItem[] = []
+  for (const role of orderedRoles) {
+    if (seen.has(role)) continue
+    seen.add(role)
+    const parsed = parseLibraryRole(role)
+    const asset = assetsByRole.get(role) || null
+    const entityType = parsed.entityType === 'unknown' ? null : parsed.entityType
+    const entityId = typeof parsed.entityId === 'number' && parsed.entityId > 0 ? parsed.entityId : null
+    const nameFromSpec = entityType && entityId ? entityNameByKey.get(`${entityType}:${entityId}`) || '' : ''
+    const nameFromAsset = String(asset?.meta?.entity_name || '').trim()
+    const entityName = nameFromSpec || (!isPlaceholderEntityName(nameFromAsset) ? nameFromAsset : '') || null
+    const hasUri = Boolean(asset && String(asset.uri || '').trim())
+    const status: DreamweaverLibraryPlanItem['status'] = hasUri ? 'done' : 'planned'
+    const viewLabel = parsed.entityType === 'character' && parsed.view ? characterViewLabel(parsed.view) : ''
+    const baseLabel = entityName || role
+    const label = viewLabel && !baseLabel.includes(viewLabel) ? `${baseLabel} ${viewLabel}` : baseLabel
+
+    items.push({
+      id: role,
+      role,
+      entity_type: entityType,
+      entity_id: entityId,
+      entity_name: entityName,
+      label,
+      view: parsed.entityType === 'character' && parsed.view ? parsed.view : null,
+      status,
+      kind: 'image',
+      uri: hasUri ? String(asset!.uri || '').trim() : null,
+      asset_id: asset?.id ?? null,
+      approved: typeof asset?.meta?.approved === 'boolean' ? Boolean(asset?.meta?.approved) : null,
+    })
+  }
+  return items
 }
 
 function extractMergedVideoFromContract(contract: any): string | null {
@@ -536,7 +576,10 @@ export default function DreamWeaverRunPage() {
   const navigate = useNavigate()
   const { projectId: projectIdParam } = useParams()
   const theme = useTheme()
-  const configDialogFullScreen = useMediaQuery(theme.breakpoints.down('sm'))
+  const smDown = useMediaQuery(theme.breakpoints.down('sm'))
+  const mdDown = useMediaQuery(theme.breakpoints.down('md'))
+  const configDialogFullScreen = smDown
+  const libraryGridCols = smDown ? 1 : mdDown ? 2 : 3
   const [projects, setProjects] = useState<Project[]>([])
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null)
@@ -668,6 +711,10 @@ export default function DreamWeaverRunPage() {
 
   const libraryPreviewAspectRatio = ratioToCssAspectRatio(imageRatio)
   const generationConfigLocked = Boolean(lockedGenerationConfig?.locked)
+  const missingRoleSet = useMemo(() => {
+    const missingRoles = Array.isArray(library?.review?.missing_roles) ? (library.review!.missing_roles as string[]) : []
+    return new Set(missingRoles.map((role) => String(role || '').trim()).filter(Boolean))
+  }, [library?.review])
   const libraryAssetsByRole = useMemo(() => {
     const map = new Map<string, LibraryAsset>()
     const assets = Array.isArray(library?.assets) ? (library.assets as LibraryAsset[]) : []
@@ -683,36 +730,46 @@ export default function DreamWeaverRunPage() {
     if (!role) return null
     return libraryAssetsByRole.get(role) || null
   }, [libraryAssetsByRole, regenRole])
-  const regenHasCurrentImage = useMemo(() => Boolean(regenRoleAsset), [regenRoleAsset])
+  const regenRoleInfo = useMemo(() => parseLibraryRole(regenRole), [regenRole])
+  const regenIsDerivedCharacterView = useMemo(
+    () => regenRoleInfo.entityType === 'character' && Boolean(regenRoleInfo.view) && regenRoleInfo.view !== 'front',
+    [regenRoleInfo],
+  )
+  const regenHasCurrentImage = useMemo(
+    () => hasRenderableLibraryImage(regenRoleAsset, { missingRoleSet }),
+    [missingRoleSet, regenRoleAsset],
+  )
   const regenViewChainPlan = useMemo(() => resolveCharacterViewChainPlan(regenRole), [regenRole])
-  const regenView = useMemo(() => resolveCharacterViewFromRole(regenRole), [regenRole])
-  const regenIsSideOrBackView = regenView === 'side' || regenView === 'back'
   const regenForceImageEdit = regenViewChainPlan.forceImageEdit
   const regenImageBaseRole = regenViewChainPlan.baseRole
   const regenImageBaseAsset = useMemo(() => {
     if (!regenImageBaseRole) return null
     return libraryAssetsByRole.get(regenImageBaseRole) || null
   }, [libraryAssetsByRole, regenImageBaseRole])
+  const regenHasRenderableBaseImage = useMemo(
+    () => hasRenderableLibraryImage(regenImageBaseAsset, { missingRoleSet }),
+    [missingRoleSet, regenImageBaseAsset],
+  )
   const regenReferenceRoles = useMemo(() => {
     return (Array.isArray(regenViewChainPlan.referenceRoles) ? regenViewChainPlan.referenceRoles : [])
       .map((item) => String(item || '').trim())
       .filter(Boolean)
   }, [regenViewChainPlan.referenceRoles])
   const regenReadyReferenceRoles = useMemo(() => {
-    return regenReferenceRoles.filter((role) => Boolean(libraryAssetsByRole.get(role)))
-  }, [libraryAssetsByRole, regenReferenceRoles])
+    return regenReferenceRoles.filter((role) => hasRenderableLibraryImage(libraryAssetsByRole.get(role) || null, { missingRoleSet }))
+  }, [libraryAssetsByRole, missingRoleSet, regenReferenceRoles])
   const regenMissingReferenceRoles = useMemo(() => {
-    return regenReferenceRoles.filter((role) => !libraryAssetsByRole.get(role))
-  }, [libraryAssetsByRole, regenReferenceRoles])
+    return regenReferenceRoles.filter((role) => !hasRenderableLibraryImage(libraryAssetsByRole.get(role) || null, { missingRoleSet }))
+  }, [libraryAssetsByRole, missingRoleSet, regenReferenceRoles])
   const regenHasImageBase = useMemo(() => {
-    if (regenForceImageEdit) return Boolean(regenImageBaseAsset)
-    return Boolean(regenRoleAsset)
-  }, [regenForceImageEdit, regenImageBaseAsset, regenRoleAsset])
+    if (regenForceImageEdit) return regenHasRenderableBaseImage
+    return regenHasCurrentImage
+  }, [regenForceImageEdit, regenHasCurrentImage, regenHasRenderableBaseImage])
   const regenImageEditActive = regenForceImageEdit || (regenPreferImageEdit && regenHasImageBase)
   const regenImageBaseRoleLabel = useMemo(() => {
     return regenImageBaseRole ? formatReferenceRoleLabel(regenImageBaseRole) : '前序视角'
   }, [regenImageBaseRole])
-  const regenForceViewChainEditBase = regenForceImageEdit && regenIsSideOrBackView && regenSmartPromptTriggered
+  const regenForceViewChainEditBase = regenForceImageEdit && regenIsDerivedCharacterView && regenSmartPromptTriggered
   const regenAlertBaseLabel = useMemo(() => {
     if (!regenForceImageEdit) return ''
     if (regenForceViewChainEditBase) return regenImageBaseRoleLabel
@@ -730,13 +787,13 @@ export default function DreamWeaverRunPage() {
     if (!regenForceImageEdit) return ''
 
     if (regenForceViewChainEditBase) {
-      if (regenImageBaseAsset) push(regenImageBaseRoleLabel)
+      if (regenHasRenderableBaseImage) push(regenImageBaseRoleLabel)
       for (const role of regenReadyReferenceRoles) push(formatReferenceRoleLabel(role))
     } else if (regenHasCurrentImage) {
       push('当前图')
       for (const role of regenReadyReferenceRoles) push(formatReferenceRoleLabel(role))
     } else {
-      if (regenImageBaseAsset) push(regenImageBaseRoleLabel)
+      if (regenHasRenderableBaseImage) push(regenImageBaseRoleLabel)
       for (const role of regenReadyReferenceRoles) push(formatReferenceRoleLabel(role))
     }
 
@@ -745,7 +802,7 @@ export default function DreamWeaverRunPage() {
     regenForceImageEdit,
     regenForceViewChainEditBase,
     regenHasCurrentImage,
-    regenImageBaseAsset,
+    regenHasRenderableBaseImage,
     regenImageBaseRoleLabel,
     regenReadyReferenceRoles,
   ])
@@ -760,12 +817,12 @@ export default function DreamWeaverRunPage() {
     if (!regenForceImageEdit) return ''
 
     if (regenForceViewChainEditBase) {
-      if (!regenImageBaseAsset) push(regenImageBaseRoleLabel)
+      if (!regenHasRenderableBaseImage) push(regenImageBaseRoleLabel)
       for (const role of regenMissingReferenceRoles) push(formatReferenceRoleLabel(role))
     } else if (regenHasCurrentImage) {
       for (const role of regenMissingReferenceRoles) push(formatReferenceRoleLabel(role))
     } else {
-      if (!regenImageBaseAsset) push(regenImageBaseRoleLabel)
+      if (!regenHasRenderableBaseImage) push(regenImageBaseRoleLabel)
       for (const role of regenMissingReferenceRoles) push(formatReferenceRoleLabel(role))
     }
 
@@ -774,7 +831,7 @@ export default function DreamWeaverRunPage() {
     regenForceImageEdit,
     regenForceViewChainEditBase,
     regenHasCurrentImage,
-    regenImageBaseAsset,
+    regenHasRenderableBaseImage,
     regenImageBaseRoleLabel,
     regenMissingReferenceRoles,
   ])
@@ -1156,14 +1213,19 @@ export default function DreamWeaverRunPage() {
   const renderStageOverview = () => null
   const renderLibraryDisplayCard = (item: LibraryDisplayItem) => {
     const asset = item.asset
-    const missing = Boolean(item.missing) && !asset
-    const approved = asset ? Boolean(asset.meta?.approved) : Boolean(item.approved)
-    const safetyBlocked = item.safety_blocked || Boolean(asset?.meta?.safety_blocked)
+    const imageState = item.imageState || resolveLibraryAssetImageState(asset || null, { missingRoleSet })
+    const hasRenderableImage = Boolean(item.hasRenderableImage ?? imageState.hasRenderableImage)
+    const missing = Boolean(item.missing || imageState.markedMissing)
+    const placeholder = Boolean(item.placeholder || (asset && imageState.placeholder && !missing && !imageState.safetyBlocked))
+    const approved = hasRenderableImage && (asset ? Boolean(asset.meta?.approved) : Boolean(item.approved))
+    const safetyBlocked = Boolean(item.safety_blocked || imageState.safetyBlocked || asset?.meta?.safety_blocked)
     const safetyError = item.safety_error || (asset?.meta?.safety_error as string | undefined) || null
     const statusLabel = missing
       ? '缺失'
       : safetyBlocked
         ? '安全拦截'
+        : placeholder
+          ? '占位'
         : asset
           ? approved
             ? '已通过'
@@ -1173,10 +1235,12 @@ export default function DreamWeaverRunPage() {
             : item.status === 'planned'
               ? '待生成'
               : '生成中'
-    const statusColor: 'default' | 'success' | 'info' | 'error' = missing
+    const statusColor: 'default' | 'success' | 'info' | 'error' | 'warning' = missing
       ? 'error'
       : safetyBlocked
         ? 'error'
+        : placeholder
+          ? 'warning'
         : asset
           ? (approved ? 'success' : 'default')
           : item.status === 'done'
@@ -1184,11 +1248,13 @@ export default function DreamWeaverRunPage() {
             : item.status === 'planned'
               ? 'default'
               : 'info'
-    const preview = asset ? item.preview : ''
+    const preview = asset && hasRenderableImage ? item.preview : ''
     const placeholderText = missing
       ? '素材缺失'
       : safetyBlocked
         ? '安全拦截'
+        : placeholder
+          ? '占位图'
         : asset
           ? '待加载预览'
           : item.status === 'done'
@@ -1199,7 +1265,7 @@ export default function DreamWeaverRunPage() {
     const previewLoading = asset ? Boolean(libraryPreviewLoading[asset.id]) : false
     const previewError = asset ? libraryPreviewErrors[asset.id] : null
     const canGenerate = !asset && (missing || item.status === 'done')
-    const roleLabel = item.role ? `role: ${item.role}` : ''
+    const roleLabel = item.group === 'other' && item.role ? `role: ${item.role}` : ''
 
     return (
       <ImageListItem key={item.key} sx={{ border: '1px solid #eee', borderRadius: 2, overflow: 'hidden' }}>
@@ -1207,7 +1273,7 @@ export default function DreamWeaverRunPage() {
           sx={{
             width: '100%',
             aspectRatio: item.aspectRatio,
-            bgcolor: safetyBlocked || missing ? '#fff5f5' : '#f5f5f5',
+            bgcolor: safetyBlocked || missing ? '#fff5f5' : placeholder ? '#fffaf0' : '#f5f5f5',
             position: 'relative',
             overflow: 'hidden',
           }}
@@ -1229,11 +1295,13 @@ export default function DreamWeaverRunPage() {
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: safetyBlocked || missing ? 'error.main' : 'text.secondary',
+                color: safetyBlocked || missing ? 'error.main' : placeholder ? 'warning.main' : 'text.secondary',
                 fontSize: 12,
                 backgroundImage: safetyBlocked || missing
                   ? 'repeating-linear-gradient(45deg, rgba(211,47,47,0.05) 0, rgba(211,47,47,0.05) 8px, rgba(211,47,47,0.1) 8px, rgba(211,47,47,0.1) 16px)'
-                  : 'repeating-linear-gradient(45deg, rgba(0,0,0,0.02) 0, rgba(0,0,0,0.02) 8px, rgba(0,0,0,0.04) 8px, rgba(0,0,0,0.04) 16px)',
+                  : placeholder
+                    ? 'repeating-linear-gradient(45deg, rgba(245,124,0,0.05) 0, rgba(245,124,0,0.05) 8px, rgba(245,124,0,0.1) 8px, rgba(245,124,0,0.1) 16px)'
+                    : 'repeating-linear-gradient(45deg, rgba(0,0,0,0.02) 0, rgba(0,0,0,0.02) 8px, rgba(0,0,0,0.04) 8px, rgba(0,0,0,0.04) 16px)',
               }}
             >
               {safetyBlocked && (
@@ -1250,9 +1318,9 @@ export default function DreamWeaverRunPage() {
           <Box sx={{ position: 'absolute', top: 8, left: 8 }}>
             <Chip size="small" label={statusLabel} color={statusColor} />
           </Box>
-          {!asset && !safetyBlocked && !missing && (
+          {placeholder && (
             <Box sx={{ position: 'absolute', top: 8, right: 8 }}>
-              <Chip size="small" label="占位" variant="outlined" />
+              <Chip size="small" label="占位" variant="outlined" color="warning" />
             </Box>
           )}
         </Box>
@@ -1278,7 +1346,7 @@ export default function DreamWeaverRunPage() {
           <Stack direction="row" spacing={1} alignItems="center" mt={0.5} flexWrap="wrap">
             {asset ? (
               <>
-                {!safetyBlocked && (
+                {!safetyBlocked && hasRenderableImage && (
                   <Button
                     size="small"
                     variant="text"
@@ -1288,7 +1356,7 @@ export default function DreamWeaverRunPage() {
                     {approved ? '撤销' : '通过'}
                   </Button>
                 )}
-                {!safetyBlocked && (!preview || previewError) && (
+                {!safetyBlocked && hasRenderableImage && (!preview || previewError) && (
                   <Button
                     size="small"
                     variant="text"
@@ -1305,7 +1373,7 @@ export default function DreamWeaverRunPage() {
                   onClick={() => openRegenerateDialog(asset)}
                   disabled={libraryLoading}
                 >
-                  {safetyBlocked ? '重新生成' : '重新生成'}
+                  {hasRenderableImage ? '重新生成' : '生成素材'}
                 </Button>
               </>
             ) : canGenerate ? (
@@ -3327,10 +3395,15 @@ export default function DreamWeaverRunPage() {
       const res = await apiClient.getDreamweaverLibrary(selectedProjectId, scopedRunId ? { run_id: scopedRunId } : undefined)
       const data = res.data as LibraryPayload
       setLibrary(data)
+      setLibraryPlanItems(buildLibraryPlanItemsFromPayload(data))
 
       const assets = Array.isArray(data.assets) ? data.assets : []
+      const missingRoles = Array.isArray(data?.review?.missing_roles) ? (data.review.missing_roles as string[]) : []
+      const scopedMissingRoleSet = new Set(missingRoles.map((role) => String(role || '').trim()).filter(Boolean))
       const previewEntries = await Promise.all(
-        assets.map(async (asset) => {
+        assets
+          .filter((asset) => hasRenderableLibraryImage(asset, { missingRoleSet: scopedMissingRoleSet }))
+          .map(async (asset) => {
           try {
             const fileRes = await apiClient.getDreamweaverLibraryAssetFile(asset.id)
             const url = URL.createObjectURL(fileRes.data)
@@ -3339,7 +3412,7 @@ export default function DreamWeaverRunPage() {
             const message = await extractApiErrorMessage(e, '加载预览失败')
             return { id: asset.id, url: '', error: message }
           }
-        }),
+          }),
       )
       const previewMap: Record<number, string> = {}
       const previewErrorMap: Record<number, string> = {}
@@ -3414,6 +3487,10 @@ export default function DreamWeaverRunPage() {
 
   const loadLibraryPreview = async (asset: LibraryAsset, options?: { force?: boolean }): Promise<void> => {
     if (!asset?.id) return
+    if (!hasRenderableLibraryImage(asset, { missingRoleSet })) {
+      setLibraryPreviewErrors((prev) => ({ ...prev, [asset.id]: '素材为占位/缺失，暂无可预览图片' }))
+      return
+    }
     if (!options?.force && libraryPreviews[asset.id]) return
     setLibraryPreviewLoading((prev) => ({ ...prev, [asset.id]: true }))
     setLibraryPreviewErrors((prev) => ({ ...prev, [asset.id]: '' }))
@@ -3477,8 +3554,8 @@ export default function DreamWeaverRunPage() {
     (options?: { role?: string; source?: 'auto' | 'manual' }) => {
       const role = String(options?.role || regenRole || '').trim()
       if (!role) return
-      const view = resolveCharacterViewFromRole(role)
-      const preferViewChainSeed = view === 'side' || view === 'back'
+      const parsed = parseLibraryRole(role)
+      const preferViewChainSeed = parsed.entityType === 'character' && Boolean(parsed.view) && parsed.view !== 'front'
       if (preferViewChainSeed) setRegenSmartPromptTriggered(true)
       void suggestRegeneratePrompt({
         role,
@@ -3497,7 +3574,7 @@ export default function DreamWeaverRunPage() {
     const title = String(titleInput || role).trim() || role
     const prompt = String(promptInput || roleAsset?.meta?.prompt || roleAsset?.meta?.suggested_prompt || '').trim()
     const viewChainPlan = resolveCharacterViewChainPlan(role)
-    const hasCurrentImage = Boolean(roleAsset)
+    const hasCurrentImage = hasRenderableLibraryImage(roleAsset, { missingRoleSet })
     const imageEditPref = Boolean(viewChainPlan.forceImageEdit)
     const shouldAutoClearForImageEdit = imageEditPref && hasCurrentImage
     const initialPrompt = shouldAutoClearForImageEdit ? '' : prompt
@@ -3735,9 +3812,18 @@ export default function DreamWeaverRunPage() {
     setMergedVideoLoading(false)
     setMergedVideoError(null)
     setMergedVideoPreviewUrl(null)
+    setLibrary(null)
+    clearLibraryPreviews()
+    setLibraryPlanItems([])
     clearRunAssetPreviews()
 
     try {
+      const missingRoleCount = Array.isArray(library?.review?.missing_roles) ? library.review.missing_roles.length : 0
+      const autoAssetRolesFromMissingViews =
+        startStateRaw === 'ASSET_LIBRARY' &&
+        normalizedShotIds.length === 0 &&
+        normalizedCamIdxs.length === 0 &&
+        missingRoleCount > 0
       const res = await apiClient.restartDreamweaverAsync(currentRunId, {
         start_state: startStateRaw,
         reset_policy: 'downstream',
@@ -3745,6 +3831,7 @@ export default function DreamWeaverRunPage() {
         smart_tuning: smartTuning,
         ...(normalizedShotIds.length > 0 ? { shot_ids: normalizedShotIds } : {}),
         ...(normalizedCamIdxs.length > 0 ? { cam_idxs: normalizedCamIdxs } : {}),
+        ...(autoAssetRolesFromMissingViews ? { auto_asset_roles_from_missing_views: true } : {}),
       })
       const data = res.data as { task_id: string; run_id: string; status: string }
       setTaskId(data.task_id)
@@ -4178,41 +4265,66 @@ export default function DreamWeaverRunPage() {
 
   const libraryDisplayItems = useMemo<LibraryDisplayItem[]>(() => {
     const assets = Array.isArray(library?.assets) ? (library?.assets as LibraryAsset[]) : []
-    const missingRoles = Array.isArray(library?.review?.missing_roles) ? (library.review!.missing_roles as string[]) : []
-    const normalizedMissingRoles = missingRoles.map((role) => String(role || '').trim()).filter((role) => role)
-    const missingRoleSet = new Set(normalizedMissingRoles)
+    const normalizedMissingRoles = Array.from(missingRoleSet.values())
+    const characterNameById = new Map<number, string>()
+    const rememberCharacterName = (entityIdRaw: unknown, nameRaw: unknown) => {
+      const entityId = Number.parseInt(String(entityIdRaw ?? ''), 10)
+      const name = String(nameRaw || '').trim()
+      if (!Number.isFinite(entityId) || entityId <= 0 || isPlaceholderEntityName(name)) return
+      const prev = characterNameById.get(entityId)
+      if (!prev || isPlaceholderEntityName(prev)) {
+        characterNameById.set(entityId, name)
+      }
+    }
+    const specCharacters = Array.isArray(library?.spec?.characters) ? (library!.spec!.characters as any[]) : []
+    for (const item of specCharacters) {
+      rememberCharacterName(item?.entity_id, item?.name)
+    }
+    for (const plan of libraryPlanItems) {
+      if (String(plan?.entity_type || '').trim().toLowerCase() !== 'character') continue
+      rememberCharacterName(plan?.entity_id, plan?.entity_name)
+    }
     const assetsByRole = new Map<string, LibraryAsset>()
     for (const asset of assets) {
       const role = String(asset?.role || '').trim()
       if (!role) continue
       assetsByRole.set(role, asset)
+      const parsed = parseLibraryRole(role)
+      if (parsed.entityType === 'character' && parsed.entityId) {
+        rememberCharacterName(parsed.entityId, asset?.meta?.entity_name)
+      }
     }
 
     const normalizeRole = (rawRole: string) => {
       const role = String(rawRole || '').trim()
+      const parsed = parseLibraryRole(role)
       let group: LibraryDisplayItem['group'] = 'other'
       let view: LibraryDisplayItem['view'] = null
-      if (role.startsWith('lib_character_portrait_back:')) {
+      if (parsed.entityType === 'character') {
         group = 'character'
-        view = 'back'
-      } else if (role.startsWith('lib_character_portrait_side:')) {
-        group = 'character'
-        view = 'side'
-      } else if (role.startsWith('lib_character_portrait:')) {
-        group = 'character'
-        view = 'front'
-      } else if (role.startsWith('lib_scene_card:')) {
+        view = parsed.view || null
+      } else if (parsed.entityType === 'scene') {
         group = 'scene'
-      } else if (role.startsWith('lib_prop_card:')) {
+      } else if (parsed.entityType === 'prop') {
         group = 'prop'
       }
-      const viewRank = view === 'front' ? 0 : view === 'side' ? 1 : view === 'back' ? 2 : 9
-      const viewLabel = view === 'front' ? '正面' : view === 'side' ? '侧面' : view === 'back' ? '背面' : ''
+      const viewRank = view ? CHARACTER_VIEW_RANK[view] : 99
+      const viewLabel = view ? characterViewLabel(view) : ''
       return { role, group, view, viewRank, viewLabel }
     }
 
     const formatTitle = (rawTitle: string, role: string, viewLabel: string) => {
-      const base = String(rawTitle || '').trim() || role
+      const parsed = parseLibraryRole(role)
+      const raw = String(rawTitle || '').trim()
+      let base = raw || role
+      if (parsed.entityType === 'character' && parsed.entityId) {
+        const mapped = characterNameById.get(parsed.entityId) || ''
+        const fallbackCharacterName = mapped || `角色#${parsed.entityId}`
+        if (raw === role || isPlaceholderEntityName(raw)) {
+          base = fallbackCharacterName
+        }
+        if (!String(base || '').trim()) base = fallbackCharacterName
+      }
       if (viewLabel && !base.includes(viewLabel)) return `${base} ${viewLabel}`
       return base
     }
@@ -4221,11 +4333,14 @@ export default function DreamWeaverRunPage() {
       const { role, group, view, viewRank, viewLabel } = normalizeRole(String(asset?.role || '').trim() || key)
       const rawTitle = String(asset?.meta?.entity_name || asset?.role || '').trim()
       const title = formatTitle(rawTitle, role, viewLabel)
-      const preview = libraryPreviews[asset.id] || ''
+      const imageState = resolveLibraryAssetImageState(asset, { missingRoleSet })
+      const hasRenderableImage = imageState.hasRenderableImage
+      const preview = hasRenderableImage ? libraryPreviews[asset.id] || '' : ''
       const aspectRatio = libraryAssetToCssAspectRatio(asset, libraryPreviewAspectRatio)
-      const approved = Boolean(asset.meta?.approved)
-      const safety_blocked = Boolean(asset.meta?.safety_blocked)
+      const approved = hasRenderableImage && Boolean(asset.meta?.approved)
+      const safety_blocked = Boolean(imageState.safetyBlocked || asset.meta?.safety_blocked)
       const safety_error = typeof asset.meta?.safety_error === 'string' ? asset.meta.safety_error : null
+      const placeholder = Boolean(imageState.placeholder && !imageState.markedMissing && !imageState.safetyBlocked)
       return {
         key,
         role,
@@ -4238,6 +4353,10 @@ export default function DreamWeaverRunPage() {
         view,
         viewRank,
         asset,
+        missing: imageState.markedMissing,
+        placeholder,
+        hasRenderableImage,
+        imageState,
         safety_blocked,
         safety_error,
       }
@@ -4263,6 +4382,9 @@ export default function DreamWeaverRunPage() {
         view,
         viewRank,
         missing: true,
+        placeholder: false,
+        hasRenderableImage: false,
+        imageState: null,
       })
       usedRoles.add(role)
     }
@@ -4292,6 +4414,9 @@ export default function DreamWeaverRunPage() {
           view,
           viewRank,
           missing: !asset && missingRoleSet.has(role),
+          placeholder: false,
+          hasRenderableImage: false,
+          imageState: null,
         })
       }
       for (const asset of assets) {
@@ -4315,7 +4440,7 @@ export default function DreamWeaverRunPage() {
       pushMissingItem(role)
     }
     return items
-  }, [library?.assets, library?.review, libraryPlanItems, libraryPreviews, libraryPreviewAspectRatio])
+  }, [library?.assets, library?.spec, libraryPlanItems, libraryPreviews, libraryPreviewAspectRatio, missingRoleSet])
 
   const librarySummary = useMemo(() => {
     const total = libraryDisplayItems.length
@@ -4325,14 +4450,14 @@ export default function DreamWeaverRunPage() {
     let approved = 0
     let pendingReview = 0
     for (const item of libraryDisplayItems) {
-      if (item.asset || item.status === 'done') {
+      if (item.hasRenderableImage) {
         generated += 1
-      } else if (item.status === 'planned') {
-        planned += 1
-      } else {
+      } else if (!item.asset && item.status === 'processing') {
         processing += 1
+      } else {
+        planned += 1
       }
-      if (item.asset) {
+      if (item.asset && item.hasRenderableImage) {
         if (item.approved) approved += 1
         else pendingReview += 1
       }
@@ -4363,7 +4488,15 @@ export default function DreamWeaverRunPage() {
     for (const key of order) {
       const items = groups.get(key) || []
       if (!items.length) continue
-      const stripView = (value: string) => value.replace(/\s+(正面|侧面|背面)$/, '')
+      const viewSuffixes = CHARACTER_VIEW_ORDER.map((view) => characterViewLabel(view)).sort((a, b) => b.length - a.length)
+      const stripView = (value: string) => {
+        const text = String(value || '').trim()
+        for (const suffix of viewSuffixes) {
+          const candidate = ` ${suffix}`
+          if (text.endsWith(candidate)) return text.slice(0, -candidate.length)
+        }
+        return text
+      }
       const sorted = [...items].sort((a, b) => {
         const nameA = stripView(String(a.title || ''))
         const nameB = stripView(String(b.title || ''))
@@ -4373,11 +4506,11 @@ export default function DreamWeaverRunPage() {
       })
       const summary = {
         total: sorted.length,
-        generated: sorted.filter((i) => i.asset || i.status === 'done').length,
+        generated: sorted.filter((i) => i.hasRenderableImage).length,
         processing: sorted.filter((i) => !i.asset && i.status === 'processing').length,
-        planned: sorted.filter((i) => !i.asset && i.status === 'planned').length,
-        approved: sorted.filter((i) => i.asset && i.approved).length,
-        pendingReview: sorted.filter((i) => i.asset && !i.approved).length,
+        planned: sorted.filter((i) => !i.hasRenderableImage && (i.asset || i.status === 'planned' || i.status === 'done')).length,
+        approved: sorted.filter((i) => i.asset && i.hasRenderableImage && i.approved).length,
+        pendingReview: sorted.filter((i) => i.asset && i.hasRenderableImage && !i.approved).length,
       }
       result.push({ key, label: labels[key], items: sorted, summary })
     }
@@ -5240,24 +5373,99 @@ export default function DreamWeaverRunPage() {
                             )}
                           </Stack>
 
-                          {libraryGroups.map((group) => (
-                            <Box key={group.key} sx={{ mb: 2 }}>
-                              <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 0.5 }}>
-                                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                                  {group.label}
-                                </Typography>
-                                <Chip size="small" label={`总计 ${group.summary.total}`} />
-                                <Chip size="small" label={`已生成 ${group.summary.generated}`} color={group.summary.generated ? 'success' : 'default'} />
-                                <Chip size="small" label={`生成中 ${group.summary.processing}`} color={group.summary.processing ? 'info' : 'default'} />
-                                <Chip size="small" label={`待生成 ${group.summary.planned}`} />
-                                {group.summary.approved > 0 && <Chip size="small" label={`已通过 ${group.summary.approved}`} color="success" />}
-                                {group.summary.pendingReview > 0 && <Chip size="small" label={`待审核 ${group.summary.pendingReview}`} color="warning" />}
-                              </Stack>
-                              <ImageList cols={3} gap={8} sx={{ m: 0 }}>
-                                {group.items.map(renderLibraryDisplayCard)}
-                              </ImageList>
-                            </Box>
-                          ))}
+                          {libraryGroups.map((group) => {
+                            const renderGroupGrid = () => {
+                              if (group.key !== 'character') {
+                                return (
+                                  <ImageList cols={libraryGridCols} gap={8} sx={{ m: 0 }}>
+                                    {group.items.map(renderLibraryDisplayCard)}
+                                  </ImageList>
+                                )
+                              }
+
+                              const viewSuffixes = CHARACTER_VIEW_ORDER.map((view) => characterViewLabel(view)).sort((a, b) => b.length - a.length)
+                              const stripViewSuffix = (value: string) => {
+                                const text = String(value || '').trim()
+                                for (const suffix of viewSuffixes) {
+                                  const candidate = ` ${suffix}`
+                                  if (text.endsWith(candidate)) return text.slice(0, -candidate.length).trim()
+                                }
+                                return text
+                              }
+
+                              const buckets = new Map<
+                                string,
+                                { bucketKey: string; entityId: number; name: string; items: LibraryDisplayItem[] }
+                              >()
+                              for (const item of group.items) {
+                                const parsed = parseLibraryRole(item.role)
+                                const parsedEntityId = typeof parsed.entityId === 'number' ? parsed.entityId : 0
+                                const entityId = parsed.entityType === 'character' && parsedEntityId > 0 ? parsedEntityId : 0
+                                const fallbackName = entityId > 0 ? `角色#${entityId}` : '未命名角色'
+                                const strippedTitle = stripViewSuffix(item.title)
+                                const baseName = isPlaceholderEntityName(strippedTitle) || strippedTitle === item.role ? fallbackName : strippedTitle
+                                const bucketKey = entityId > 0 ? `character:${entityId}` : `character:${baseName}`
+                                if (!buckets.has(bucketKey)) {
+                                  buckets.set(bucketKey, { bucketKey, entityId, name: baseName, items: [] })
+                                }
+                                buckets.get(bucketKey)!.items.push(item)
+                              }
+
+                              const orderedBuckets = Array.from(buckets.values())
+                                .map((bucket) => ({
+                                  ...bucket,
+                                  items: [...bucket.items].sort((a, b) => {
+                                    if (a.viewRank !== b.viewRank) return a.viewRank - b.viewRank
+                                    return String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN')
+                                  }),
+                                }))
+                                .sort((a, b) => {
+                                  if (a.entityId > 0 && b.entityId > 0) return a.entityId - b.entityId
+                                  if (a.entityId > 0) return -1
+                                  if (b.entityId > 0) return 1
+                                  return a.name.localeCompare(b.name, 'zh-CN')
+                                })
+
+                              return (
+                                <Stack spacing={1}>
+                                  {orderedBuckets.map((bucket) => {
+                                    const generatedCount = bucket.items.filter((it) => it.hasRenderableImage).length
+                                    return (
+                                      <Box key={bucket.bucketKey} sx={{ border: '1px solid #eee', borderRadius: 2, p: 1, bgcolor: '#fcfcfc' }}>
+                                        <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 0.5 }}>
+                                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                            {bucket.name}
+                                          </Typography>
+                                          <Chip size="small" label={`视角 ${bucket.items.length}`} variant="outlined" />
+                                          <Chip size="small" label={`已生成 ${generatedCount}`} color={generatedCount ? 'success' : 'default'} />
+                                        </Stack>
+                                        <ImageList cols={libraryGridCols} gap={8} sx={{ m: 0 }}>
+                                          {bucket.items.map(renderLibraryDisplayCard)}
+                                        </ImageList>
+                                      </Box>
+                                    )
+                                  })}
+                                </Stack>
+                              )
+                            }
+
+                            return (
+                              <Box key={group.key} sx={{ mb: 2 }}>
+                                <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 0.5 }}>
+                                  <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                                    {group.label}
+                                  </Typography>
+                                  <Chip size="small" label={`总计 ${group.summary.total}`} />
+                                  <Chip size="small" label={`已生成 ${group.summary.generated}`} color={group.summary.generated ? 'success' : 'default'} />
+                                  <Chip size="small" label={`生成中 ${group.summary.processing}`} color={group.summary.processing ? 'info' : 'default'} />
+                                  <Chip size="small" label={`待生成 ${group.summary.planned}`} />
+                                  {group.summary.approved > 0 && <Chip size="small" label={`已通过 ${group.summary.approved}`} color="success" />}
+                                  {group.summary.pendingReview > 0 && <Chip size="small" label={`待审核 ${group.summary.pendingReview}`} color="warning" />}
+                                </Stack>
+                                {renderGroupGrid()}
+                              </Box>
+                            )
+                          })}
                         </Box>
                       ) : (
                         <Typography variant="body2" color="text.secondary">{'未加载素材库或当前项目暂无可审核素材。'}</Typography>

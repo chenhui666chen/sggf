@@ -83,8 +83,8 @@ const modules = [
   {
     id: 'ai-detect',
     title: '织文无迹',
-    subtitle: 'AI痕迹降低',
-    description: '检测与降低AI痕迹，让创作更自然流畅',
+    subtitle: 'AI 痕迹降低',
+    description: '检测与降低 AI 痕迹，让创作更自然流畅',
     icon: AutoFixHighIcon,
     color: '#2e7d32',
     available: true,
@@ -110,21 +110,51 @@ export default function CreationModulePage() {
   return (
     <Box
       sx={{
-        height: '100vh',
+        minHeight: '100dvh',
         background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        py: 3,
+        py: { xs: 2, sm: 3, md: 4 },
+        px: { xs: 1, sm: 2 },
         display: 'flex',
         flexDirection: 'column',
       }}
     >
-      <Container maxWidth="lg" sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <Container 
+        maxWidth="lg" 
+        sx={{ 
+          flex: 1, 
+          display: 'flex', 
+          flexDirection: 'column',
+          px: { xs: 0, sm: 2 }
+        }}
+      >
         {/* 头部 */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Box sx={{ 
+          display: 'flex', 
+          flexDirection: { xs: 'column', sm: 'row' },
+          justifyContent: 'space-between', 
+          alignItems: { xs: 'flex-start', sm: 'center' }, 
+          mb: { xs: 2, sm: 3 },
+          gap: { xs: 1.5, sm: 0 }
+        }}>
           <Box>
-            <Typography variant="h4" sx={{ color: 'white', fontWeight: 700, mb: 0.5 }}>
+            <Typography 
+              variant="h4" 
+              sx={{ 
+                color: 'white', 
+                fontWeight: 700, 
+                mb: 0.5,
+                fontSize: { xs: '1.5rem', sm: '1.75rem', md: '2rem' }
+              }}
+            >
               创作工坊
             </Typography>
-            <Typography variant="body1" sx={{ color: 'rgba(255,255,255,0.8)' }}>
+            <Typography 
+              variant="body1" 
+              sx={{ 
+                color: 'rgba(255,255,255,0.8)',
+                fontSize: { xs: '0.875rem', sm: '1rem' }
+              }}
+            >
               选择你的创作模式，开启智能创作之旅
             </Typography>
           </Box>
@@ -136,6 +166,8 @@ export default function CreationModulePage() {
             sx={{
               color: 'white',
               borderColor: 'rgba(255,255,255,0.5)',
+              minHeight: { xs: 44, sm: 36 },
+              fontSize: { xs: '0.875rem', sm: '0.875rem' },
               '&:hover': {
                 borderColor: 'white',
                 backgroundColor: 'rgba(255,255,255,0.1)',
@@ -147,19 +179,20 @@ export default function CreationModulePage() {
         </Box>
 
         {/* 模块卡片网格 */}
-        <Grid container spacing={2.5} sx={{ flex: 1 }}>
+        <Grid container spacing={{ xs: 1.5, sm: 2, md: 2.5 }} sx={{ flex: 1 }}>
           {modules.map((module) => {
             const IconComponent = module.icon
-            const isNovel = module.id === 'novel' // 灵感方舟模块
+            const isNovel = module.id === 'novel'
             return (
               <Grid item xs={12} sm={6} md={6} key={module.id}>
                 <Card
                   sx={{
                     height: '100%',
-                    borderRadius: 3,
+                    minHeight: { xs: 140, sm: 180, md: 200 },
+                    borderRadius: { xs: 2, sm: 3 },
                     transition: 'all 0.3s ease',
                     opacity: module.available ? 1 : 0.7,
-                    position: 'relative', // 用于拆书入口定位
+                    position: 'relative',
                     '&:hover': {
                       transform: module.available ? 'translateY(-4px)' : 'none',
                       boxShadow: module.available ? '0 12px 24px rgba(0,0,0,0.15)' : 'none',
@@ -176,11 +209,11 @@ export default function CreationModulePage() {
                         }}
                         sx={{
                           position: 'absolute',
-                          top: 8,
-                          right: 8,
+                          top: { xs: 6, sm: 8 },
+                          right: { xs: 6, sm: 8 },
                           zIndex: 10,
-                          width: 40,
-                          height: 40,
+                          width: { xs: 36, sm: 40 },
+                          height: { xs: 36, sm: 40 },
                           backgroundColor: 'rgba(0, 131, 143, 0.1)',
                           color: '#00838f',
                           transition: 'all 0.3s ease',
@@ -197,31 +230,47 @@ export default function CreationModulePage() {
                   <CardActionArea
                     onClick={() => handleModuleClick(module)}
                     disabled={!module.available}
-                    sx={{ height: '100%', p: 2 }}
+                    sx={{ height: '100%', p: { xs: 1.5, sm: 2 } }}
                   >
-                    <CardContent sx={{ textAlign: 'center', py: 1 }}>
+                    <CardContent sx={{ textAlign: 'center', py: { xs: 0.5, sm: 1 }, px: { xs: 1, sm: 2 } }}>
                       {/* 图标 */}
                       <Box
                         sx={{
-                          width: 64,
-                          height: 64,
+                          width: { xs: 48, sm: 56, md: 64 },
+                          height: { xs: 48, sm: 56, md: 64 },
                           borderRadius: '50%',
                           mx: 'auto',
-                          mb: 1.5,
+                          mb: { xs: 1, sm: 1.5 },
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           backgroundColor: alpha(module.color, 0.1),
                         }}
                       >
-                        <IconComponent sx={{ fontSize: 32, color: module.color }} />
+                        <IconComponent sx={{ fontSize: { xs: 24, sm: 28, md: 32 }, color: module.color }} />
                       </Box>
                       {/* 标题 */}
-                      <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.3, color: module.color }}>
+                      <Typography 
+                        variant="h6" 
+                        sx={{ 
+                          fontWeight: 600, 
+                          mb: 0.3, 
+                          color: module.color,
+                          fontSize: { xs: '1rem', sm: '1.1rem', md: '1.25rem' }
+                        }}
+                      >
                         {module.title}
                       </Typography>
                       {/* 副标题 */}
-                      <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 0.5 }}>
+                      <Typography 
+                        variant="caption" 
+                        sx={{ 
+                          color: 'text.secondary', 
+                          display: 'block', 
+                          mb: 0.5,
+                          fontSize: { xs: '0.75rem', sm: '0.75rem' }
+                        }}
+                      >
                         {module.subtitle}
                       </Typography>
                       {/* 状态标签 */}
@@ -229,14 +278,36 @@ export default function CreationModulePage() {
                         <Chip
                           label={module.badge}
                           size="small"
-                          sx={{ mb: 1, backgroundColor: alpha(module.color, 0.1), color: module.color }}
+                          sx={{ 
+                            mb: 1, 
+                            backgroundColor: alpha(module.color, 0.1), 
+                            color: module.color,
+                            fontSize: { xs: '0.7rem', sm: '0.75rem' },
+                            height: { xs: 22, sm: 24 }
+                          }}
                         />
                       )}
                       {!module.available && (
-                        <Chip label="敬请期待" size="small" sx={{ mb: 1, backgroundColor: '#f5f5f5' }} />
+                        <Chip 
+                          label="敬请期待" 
+                          size="small" 
+                          sx={{ 
+                            mb: 1, 
+                            backgroundColor: '#f5f5f5',
+                            fontSize: { xs: '0.7rem', sm: '0.75rem' },
+                            height: { xs: 22, sm: 24 }
+                          }} 
+                        />
                       )}
                       {/* 描述 */}
-                      <Typography variant="body2" color="text.secondary">
+                      <Typography 
+                        variant="body2" 
+                        color="text.secondary"
+                        sx={{
+                          fontSize: { xs: '0.8125rem', sm: '0.875rem' },
+                          display: { xs: 'none', sm: 'block' }
+                        }}
+                      >
                         {module.description}
                       </Typography>
                     </CardContent>

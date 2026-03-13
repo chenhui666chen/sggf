@@ -667,6 +667,12 @@ def build_contract_from_payload(
         runtime_config["video_clip_jobs"] = payload.get("video_clip_jobs")
     if isinstance(payload.get("asset_library_config"), dict):
         runtime_config["asset_library_config"] = payload["asset_library_config"]
+    if isinstance(payload.get("asset_library_spec"), dict):
+        runtime_config["asset_library_spec"] = payload.get("asset_library_spec")
+    if isinstance(payload.get("asset_library_review"), dict):
+        runtime_config["asset_library_review"] = payload.get("asset_library_review")
+    if isinstance(payload.get("asset_library_scope"), dict):
+        runtime_config["asset_library_scope"] = payload.get("asset_library_scope")
     if isinstance(payload.get("plan"), dict):
         runtime_config["plan"] = payload.get("plan")
     if isinstance(payload.get("script_text"), str) and payload.get("script_text").strip():

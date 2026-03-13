@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from 'react'
+﻿import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   Alert,
@@ -20,15 +20,25 @@ import {
   MenuItem,
   Select,
   Stack,
-  TextField,
   Typography,
+  useMediaQuery,
 } from '@mui/material'
+import { useTheme } from '@mui/material/styles'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import MovieIcon from '@mui/icons-material/Movie'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
+import LibraryRegenerateDialog from '@/components/dreamweaver/LibraryRegenerateDialog'
+import {
+  CHARACTER_VIEW_ORDER,
+  characterViewLabel,
+  characterViewRole,
+  parseLibraryRole,
+  type CharacterView,
+} from '@/utils/dreamweaverLibraryRole'
+import { hasRenderableLibraryImage, resolveLibraryAssetImageState } from '@/utils/dreamweaverLibraryAssetState'
 
 interface LibraryAsset {
   id: number
@@ -84,7 +94,16 @@ function assetTitle(asset: LibraryAsset): string {
   return String(asset?.role || '')
 }
 
-type CharacterView = 'front' | 'side' | 'back'
+function isPlaceholderEntityName(value: unknown): boolean {
+  const text = String(value || '').trim()
+  if (!text) return true
+  if (/^[?\s]+$/.test(text)) return true
+  const lowered = text.toLowerCase()
+  if (lowered === 'unknown' || lowered === 'n/a' || lowered === 'na') return true
+  if (text === '未知' || text === '未命名' || text === '角色' || text === '人物' || text === '角色名') return true
+  if (text.startsWith('lib_')) return true
+  return false
+}
 
 type CharacterCard = {
   kind: 'character'
@@ -97,38 +116,22 @@ type CharacterCard = {
 type AssetCard = { kind: 'asset'; asset: LibraryAsset }
 
 type LibraryCard = CharacterCard | AssetCard
+type LibraryCardGroupKey = 'character' | 'scene' | 'prop' | 'other'
 
-function parseLibraryRole(
-  role: string,
-): { entityType: 'character' | 'scene' | 'prop' | 'unknown'; entityId: number | null; view?: CharacterView } {
-  const text = String(role || '').trim()
-  const [prefix, rawId] = text.split(':')
-  const entityId = Number.parseInt(String(rawId || '').trim(), 10)
-  if (!Number.isFinite(entityId) || entityId <= 0) return { entityType: 'unknown', entityId: null }
-
-  if (prefix === 'lib_character_portrait') return { entityType: 'character', entityId, view: 'front' }
-  if (prefix === 'lib_character_portrait_side') return { entityType: 'character', entityId, view: 'side' }
-  if (prefix === 'lib_character_portrait_back') return { entityType: 'character', entityId, view: 'back' }
-  if (prefix === 'lib_scene_card') return { entityType: 'scene', entityId }
-  if (prefix === 'lib_prop_card') return { entityType: 'prop', entityId }
-  return { entityType: 'unknown', entityId: null }
-}
-
-function characterViewLabel(view: CharacterView): string {
-  if (view === 'front') return '正面'
-  if (view === 'side') return '侧面'
-  return '背面'
-}
-
-function characterViewRole(view: CharacterView, entityId: number): string {
-  if (view === 'front') return `lib_character_portrait:${entityId}`
-  if (view === 'side') return `lib_character_portrait_side:${entityId}`
-  return `lib_character_portrait_back:${entityId}`
-}
+const LIBRARY_CARD_GROUP_ORDER: ReadonlyArray<{ key: LibraryCardGroupKey; label: string }> = [
+  { key: 'character', label: '人物' },
+  { key: 'scene', label: '场景' },
+  { key: 'prop', label: '道具' },
+  { key: 'other', label: '其他' },
+]
 
 export default function DreamWeaverLibraryPage() {
   const navigate = useNavigate()
   const params = useParams()
+  const theme = useTheme()
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
+  const isTablet = useMediaQuery(theme.breakpoints.down('md'))
+  const cardCols = isMobile ? 1 : isTablet ? 2 : 3
 
   const projectId = useMemo(() => {
     const raw = String(params.projectId || '').trim()
@@ -153,14 +156,12 @@ export default function DreamWeaverLibraryPage() {
   const [regenSuggesting, setRegenSuggesting] = useState(false)
   const [regenSuggestError, setRegenSuggestError] = useState<string | null>(null)
   const [regenError, setRegenError] = useState<string | null>(null)
+  const regenSuggestRequestIdRef = useRef(0)
   const [characterViewsOpen, setCharacterViewsOpen] = useState(false)
   const [characterViewsEntityId, setCharacterViewsEntityId] = useState<number | null>(null)
   const regenRoleInfo = useMemo(() => parseLibraryRole(regenRole), [regenRole])
-  const regenIsSideOrBack = useMemo(() => {
-    return (
-      regenRoleInfo.entityType === 'character' &&
-      (regenRoleInfo.view === 'side' || regenRoleInfo.view === 'back')
-    )
+  const regenIsDerivedCharacterView = useMemo(() => {
+    return regenRoleInfo.entityType === 'character' && Boolean(regenRoleInfo.view) && regenRoleInfo.view !== 'front'
   }, [regenRoleInfo])
 
   const loadLibrary = useCallback(async () => {
@@ -188,7 +189,7 @@ export default function DreamWeaverLibraryPage() {
       const missingRoleSet = new Set(missingRoles.map((r) => String(r || '').trim()).filter((r) => r))
       const previewEntries = await Promise.all(
         assets
-          .filter((asset) => !missingRoleSet.has(String(asset?.role || '').trim()))
+          .filter((asset) => hasRenderableLibraryImage(asset, { missingRoleSet }))
           .map(async (asset) => {
           try {
             const fileRes = await apiClient.getDreamweaverLibraryAssetFile(asset.id)
@@ -244,7 +245,6 @@ export default function DreamWeaverLibraryPage() {
     },
     [loadLibrary, projectId],
   )
-
   const uploadLibraryAsset = useCallback(
     async (assetId: number, file: File) => {
       if (!projectId) return
@@ -272,14 +272,29 @@ export default function DreamWeaverLibraryPage() {
     [loadLibrary, projectId],
   )
 
-  const openRegenerateDialog = (asset: LibraryAsset) => {
-    const role = String(asset?.role || '').trim()
+  const openRegenerateDialogForRole = (roleInput: string, titleInput?: string) => {
+    const role = String(roleInput || '').trim()
     if (!role) return
-    const title = String(asset?.meta?.entity_name || asset?.role || '').trim() || role
-    const prompt = String(asset?.meta?.prompt || asset?.meta?.suggested_prompt || '').trim()
+    const roleAsset = assetsByRole.get(role) || null
+    const parsed = parseLibraryRole(role)
+    const rawTitle = String(titleInput || roleAsset?.meta?.entity_name || roleAsset?.role || role).trim()
+    let title = rawTitle || role
+    if (parsed.entityType === 'character' && parsed.entityId) {
+      const mapped = characterNameById.get(parsed.entityId) || `角色#${parsed.entityId}`
+      if (isPlaceholderEntityName(title) || title === role || title.startsWith('lib_character_portrait')) {
+        title = mapped
+      }
+      if (parsed.view) {
+        const viewLabel = characterViewLabel(parsed.view)
+        if (!title.includes(viewLabel)) title = `${title} ${viewLabel}`
+      }
+    }
+    const prompt = String(roleAsset?.meta?.prompt || roleAsset?.meta?.suggested_prompt || '').trim()
     const locked = Boolean(lockedConfig?.locked)
-    const stylePreset = locked ? normalizeStylePresetValue(lockedConfig?.style_preset) : normalizeStylePresetValue(asset?.meta?.style_preset)
-    const ratio = locked ? normalizeImageRatioValue(lockedConfig?.image_ratio) : normalizeImageRatioValue(asset?.meta?.ratio)
+    const stylePreset = locked
+      ? normalizeStylePresetValue(lockedConfig?.style_preset)
+      : normalizeStylePresetValue(roleAsset?.meta?.style_preset)
+    const ratio = locked ? normalizeImageRatioValue(lockedConfig?.image_ratio) : normalizeImageRatioValue(roleAsset?.meta?.ratio)
     setRegenRole(role)
     setRegenTitle(title)
     setRegenPrompt(prompt)
@@ -291,39 +306,67 @@ export default function DreamWeaverLibraryPage() {
     setRegenOpen(true)
   }
 
+  const openRegenerateDialog = (asset: LibraryAsset) => {
+    openRegenerateDialogForRole(String(asset?.role || '').trim(), String(asset?.meta?.entity_name || asset?.role || '').trim())
+  }
+
   const suggestPrompt = useCallback(
-    async (mode: 'template' | 'ai') => {
+    async (options: { mode?: 'template' | 'ai'; source?: 'auto' | 'manual'; prompt?: string }): Promise<string | null> => {
       const role = String(regenRole || '').trim()
-      if (!projectId || !role) return
+      if (!projectId || !role) return null
+      const requestId = regenSuggestRequestIdRef.current + 1
+      regenSuggestRequestIdRef.current = requestId
       setRegenSuggesting(true)
       setRegenSuggestError(null)
       try {
+        const parsed = parseLibraryRole(role)
+        const preferViewChainSeed = parsed.entityType === 'character' && Boolean(parsed.view) && parsed.view !== 'front'
         const res = await apiClient.suggestDreamweaverLibraryPrompt(projectId, {
           role,
-          prompt: regenPrompt,
+          ...(options.prompt ? { prompt: options.prompt } : {}),
           style_preset: regenStylePreset,
           image_ratio: regenImageRatio,
-          ...(regenIsSideOrBack ? { prefer_view_chain_seed: true } : {}),
-          mode,
+          ...(preferViewChainSeed ? { prefer_view_chain_seed: true } : {}),
+          mode: options.mode || 'template',
         })
+        if (regenSuggestRequestIdRef.current !== requestId) return null
         const nextPrompt = String(res.data?.prompt || '').trim()
-        if (nextPrompt) setRegenPrompt(nextPrompt)
+        if (nextPrompt) {
+          setRegenPrompt(nextPrompt)
+          return nextPrompt
+        }
+        return null
       } catch (e: any) {
+        if (regenSuggestRequestIdRef.current !== requestId) return null
         setRegenSuggestError(await extractApiErrorMessage(e, '生成提示词失败'))
+        return null
       } finally {
-        setRegenSuggesting(false)
+        if (regenSuggestRequestIdRef.current === requestId) {
+          setRegenSuggesting(false)
+        }
       }
     },
-    [projectId, regenImageRatio, regenIsSideOrBack, regenPrompt, regenRole, regenStylePreset],
+    [projectId, regenImageRatio, regenRole, regenStylePreset],
+  )
+
+  const requestSmartRegeneratePrompt = useCallback(
+    (options?: { role?: string; source?: 'auto' | 'manual'; mode?: 'template' | 'ai'; prompt?: string }) => {
+      const role = String(options?.role || regenRole || '').trim()
+      if (!role) return
+      void suggestPrompt({
+        mode: options?.mode || 'template',
+        source: options?.source || 'manual',
+        prompt: options?.prompt,
+      })
+    },
+    [regenRole, suggestPrompt],
   )
 
   useEffect(() => {
-    if (!regenOpen) return
-    if (!projectId) return
-    if (!String(regenRole || '').trim()) return
-    void suggestPrompt('template')
-  }, [regenOpen, regenStylePreset, regenImageRatio])
-
+    if (regenOpen) return
+    regenSuggestRequestIdRef.current += 1
+    setRegenSuggesting(false)
+  }, [regenOpen])
   const submitRegenerateDialog = async () => {
     const role = String(regenRole || '').trim()
     if (!projectId || !role) return
@@ -366,6 +409,52 @@ export default function DreamWeaverLibraryPage() {
     return map
   }, [assets])
 
+  const characterNameById = useMemo(() => {
+    const map = new Map<number, string>()
+    const remember = (entityIdRaw: unknown, nameRaw: unknown) => {
+      const entityId = Number.parseInt(String(entityIdRaw ?? ''), 10)
+      const name = String(nameRaw || '').trim()
+      if (!Number.isFinite(entityId) || entityId <= 0 || isPlaceholderEntityName(name)) return
+      if (!map.has(entityId)) map.set(entityId, name)
+    }
+
+    const specCharacters = Array.isArray(library?.spec?.characters) ? (library!.spec!.characters as any[]) : []
+    for (const item of specCharacters) {
+      remember(item?.entity_id, item?.name)
+    }
+    for (const asset of assets) {
+      const parsed = parseLibraryRole(String(asset?.role || '').trim())
+      if (parsed.entityType !== 'character' || !parsed.entityId) continue
+      remember(parsed.entityId, asset?.meta?.entity_name)
+    }
+    return map
+  }, [assets, library?.spec])
+  const regenRoleAsset = useMemo(() => {
+    const role = String(regenRole || '').trim()
+    if (!role) return null
+    return assetsByRole.get(role) || null
+  }, [assetsByRole, regenRole])
+  const regenHasCurrentImage = useMemo(
+    () => hasRenderableLibraryImage(regenRoleAsset, { missingRoleSet }),
+    [missingRoleSet, regenRoleAsset],
+  )
+
+  useEffect(() => {
+    if (!regenOpen) return
+    if (!projectId) return
+    if (!String(regenRole || '').trim()) return
+    if (regenHasCurrentImage) return
+    void requestSmartRegeneratePrompt({ source: 'auto', mode: 'template' })
+  }, [
+    projectId,
+    regenHasCurrentImage,
+    regenImageRatio,
+    regenOpen,
+    regenRole,
+    regenStylePreset,
+    requestSmartRegeneratePrompt,
+  ])
+
   const cards = useMemo(() => {
     const spec = library?.spec
     const specCharacters = Array.isArray(spec?.characters) ? (spec!.characters as any[]) : []
@@ -378,13 +467,13 @@ export default function DreamWeaverLibraryPage() {
     for (const item of specCharacters) {
       const entityId = Number.parseInt(String(item?.entity_id ?? ''), 10)
       if (!Number.isFinite(entityId) || entityId <= 0) continue
-      const title = String(item?.name || '').trim() || `角色:${entityId}`
+      const rawName = String(item?.name || '').trim()
+      const mappedName = characterNameById.get(entityId) || ''
+      const title = isPlaceholderEntityName(rawName) ? mappedName || `角色#${entityId}` : rawName
       const descriptor = String(item?.descriptor || '').trim()
-      const views: Record<CharacterView, LibraryAsset | null> = {
-        front: assetsByRole.get(characterViewRole('front', entityId)) || null,
-        side: assetsByRole.get(characterViewRole('side', entityId)) || null,
-        back: assetsByRole.get(characterViewRole('back', entityId)) || null,
-      }
+      const views = Object.fromEntries(
+        CHARACTER_VIEW_ORDER.map((view) => [view, assetsByRole.get(characterViewRole(view, entityId)) || null]),
+      ) as Record<CharacterView, LibraryAsset | null>
       for (const viewAsset of Object.values(views)) {
         if (viewAsset?.role) usedRoles.add(String(viewAsset.role).trim())
       }
@@ -413,11 +502,42 @@ export default function DreamWeaverLibraryPage() {
     for (const asset of assets) {
       const role = String(asset?.role || '').trim()
       if (!role || usedRoles.has(role)) continue
+      const parsed = parseLibraryRole(role)
+      // Character assets should be displayed through the merged character card only.
+      if (parsed.entityType === 'character') continue
       out.push({ kind: 'asset', asset })
       usedRoles.add(role)
     }
     return out
-  }, [assets, assetsByRole, library?.spec])
+  }, [assets, assetsByRole, characterNameById, library?.spec])
+
+  const cardGroups = useMemo(() => {
+    const groups: Record<LibraryCardGroupKey, LibraryCard[]> = {
+      character: [],
+      scene: [],
+      prop: [],
+      other: [],
+    }
+    for (const card of cards) {
+      if (card.kind === 'character') {
+        groups.character.push(card)
+        continue
+      }
+      const parsed = parseLibraryRole(card.asset.role)
+      if (parsed.entityType === 'character') groups.character.push(card)
+      else if (parsed.entityType === 'scene') groups.scene.push(card)
+      else if (parsed.entityType === 'prop') groups.prop.push(card)
+      else groups.other.push(card)
+    }
+    const sortKey = (card: LibraryCard) => {
+      if (card.kind === 'character') return String(card.title || '').trim()
+      return String(card.asset?.meta?.entity_name || card.asset?.role || '').trim()
+    }
+    ;(Object.keys(groups) as LibraryCardGroupKey[]).forEach((groupKey) => {
+      groups[groupKey].sort((a, b) => sortKey(a).localeCompare(sortKey(b), 'zh-CN'))
+    })
+    return groups
+  }, [cards])
 
   const characterViewsCard = useMemo(() => {
     if (!characterViewsEntityId) return null
@@ -435,6 +555,278 @@ export default function DreamWeaverLibraryPage() {
     if (loading || regenSubmitting) return
     setCharacterViewsOpen(false)
     setCharacterViewsEntityId(null)
+  }
+
+  const renderLibraryCard = (card: LibraryCard) => {
+    if (card.kind === 'character') {
+      const viewItems = CHARACTER_VIEW_ORDER.map((view) => {
+        const role = characterViewRole(view, card.entityId)
+        const asset = card.views[view]
+        const state = resolveLibraryAssetImageState(asset, { missingRoleSet })
+        const markedMissing = Boolean(role && missingRoleSet.has(role)) || state.markedMissing
+        const placeholder = Boolean(asset && state.placeholder && !markedMissing && !state.safetyBlocked)
+        return { view, role, asset, state, markedMissing, placeholder }
+      })
+      const coverItem =
+        viewItems.find((item) => item.asset && item.state.hasRenderableImage && previews[item.asset.id]) ||
+        viewItems.find((item) => item.asset && item.state.hasRenderableImage) ||
+        viewItems.find((item) => Boolean(item.asset)) ||
+        null
+      const coverAsset = coverItem?.asset || null
+      const coverPreview = coverAsset && coverItem?.state.hasRenderableImage ? previews[coverAsset.id] || '' : ''
+      const coverAspectRatio = coverAsset
+        ? previewAspectRatios[coverAsset.id] || assetToCssAspectRatio(coverAsset, '16 / 9')
+        : '16 / 9'
+      const totalViews = CHARACTER_VIEW_ORDER.length
+      const generatedViews = viewItems.filter((item) => item.state.hasRenderableImage).length
+      const missingViews = viewItems.filter((item) => item.markedMissing).length
+      const placeholderViews = viewItems.filter((item) => item.placeholder).length
+      const blockedViews = viewItems.filter((item) => item.asset && item.state.safetyBlocked).length
+      const approvedViews = viewItems.filter((item) => item.asset && item.state.hasRenderableImage && Boolean(item.asset.meta?.approved)).length
+
+      let emptyText = '暂无预览'
+      if (generatedViews <= 0) {
+        if (missingViews >= totalViews) emptyText = '未生成（缺失）'
+        else if (blockedViews > 0) emptyText = '安全拦截'
+        else if (placeholderViews > 0) emptyText = '占位图'
+        else emptyText = '未生成'
+      }
+
+      return (
+        <ImageListItem
+          key={`character:${card.entityId}`}
+          sx={{
+            border: '1px solid rgba(255,255,255,0.14)',
+            borderRadius: 2,
+            overflow: 'hidden',
+            bgcolor: 'rgba(255,255,255,0.06)',
+            breakInside: 'avoid',
+            cursor: 'pointer',
+            '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' },
+          }}
+          onClick={() => openCharacterViews(card)}
+          role="button"
+          tabIndex={0}
+          aria-label={`查看角色多视角：${card.title}`}
+        >
+          <Box sx={{ width: '100%', aspectRatio: coverAspectRatio, bgcolor: 'rgba(0,0,0,0.25)', position: 'relative' }}>
+            {coverPreview && coverAsset && (
+              <Box
+                component="img"
+                src={coverPreview}
+                alt={card.title}
+                loading="lazy"
+                onLoad={(e: SyntheticEvent<HTMLImageElement>) => {
+                  const target = e.currentTarget
+                  const width = target.naturalWidth
+                  const height = target.naturalHeight
+                  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return
+                  const cssAspectRatio = `${width} / ${height}`
+                  setPreviewAspectRatios((prev) => (prev[coverAsset.id] === cssAspectRatio ? prev : { ...prev, [coverAsset.id]: cssAspectRatio }))
+                }}
+                sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+              />
+            )}
+            {!coverPreview && (
+              <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.65)', fontSize: 13 }}>
+                {emptyText}
+              </Box>
+            )}
+          </Box>
+          <Box sx={{ p: 1 }}>
+            <Typography variant="caption" sx={{ fontWeight: 700, color: 'rgba(255,255,255,0.92)' }} display="block">
+              角色：{card.title}
+            </Typography>
+            <Stack direction="row" spacing={1} alignItems="center" mt={0.5} flexWrap="wrap">
+              <Chip size="small" label={`六视角：${generatedViews}/${totalViews}`} variant="outlined" />
+              <Chip size="small" label={`已通过：${approvedViews}/${totalViews}`} color={approvedViews ? 'success' : 'default'} variant="outlined" />
+              {missingViews > 0 && <Chip size="small" label={`缺失：${missingViews}`} color="warning" variant="outlined" />}
+              {placeholderViews > 0 && <Chip size="small" label={`占位：${placeholderViews}`} variant="outlined" />}
+              {blockedViews > 0 && <Chip size="small" label={`拦截：${blockedViews}`} color="error" variant="outlined" />}
+            </Stack>
+            {card.descriptor && (
+              <Typography
+                variant="caption"
+                sx={{
+                  mt: 0.75,
+                  color: 'rgba(255,255,255,0.72)',
+                  display: '-webkit-box',
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {card.descriptor}
+              </Typography>
+            )}
+            <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: 'rgba(255,255,255,0.55)' }}>
+              点击查看六视角详情并生成/替换
+            </Typography>
+          </Box>
+        </ImageListItem>
+      )
+    }
+
+    const asset = card.asset
+    const parsed = parseLibraryRole(asset.role)
+    const rawEntityName = String(asset?.meta?.entity_name || '').trim()
+    const fallbackCharacterName = parsed.entityType === 'character' && parsed.entityId ? characterNameById.get(parsed.entityId) || `角色#${parsed.entityId}` : ''
+    const normalizedEntityName = isPlaceholderEntityName(rawEntityName) ? fallbackCharacterName : rawEntityName
+    const title =
+      parsed.entityType === 'character' && parsed.entityId
+        ? normalizedEntityName && parsed.view
+          ? `${normalizedEntityName} ${characterViewLabel(parsed.view)}`
+          : normalizedEntityName || assetTitle(asset)
+        : assetTitle(asset)
+    const imageState = resolveLibraryAssetImageState(asset, { missingRoleSet })
+    const preview = imageState.hasRenderableImage ? previews[asset.id] : ''
+    const aspectRatio = previewAspectRatios[asset.id] || assetToCssAspectRatio(asset, '16 / 9')
+    const approved = imageState.hasRenderableImage && Boolean(asset?.meta?.approved)
+    const missing = imageState.markedMissing
+    const placeholder = imageState.placeholder && !missing && !imageState.safetyBlocked
+    const chineseRole =
+      parsed.entityType === 'scene'
+        ? '场景卡'
+        : parsed.entityType === 'prop'
+          ? '道具卡'
+          : parsed.entityType === 'character' && parsed.view
+            ? `角色立绘（${characterViewLabel(parsed.view)}）`
+            : ''
+    const showRawRole = parsed.entityType === 'unknown'
+    const descriptor = String(asset?.meta?.descriptor || '').trim()
+    const promptPreview = String(asset?.meta?.prompt || asset?.meta?.suggested_prompt || '').trim()
+    const statusText = missing ? '未生成（缺失）' : imageState.safetyBlocked ? '安全拦截' : placeholder ? '占位图' : '暂无预览'
+
+    return (
+      <ImageListItem
+        key={asset.id}
+        sx={{
+          border: '1px solid rgba(255,255,255,0.14)',
+          borderRadius: 2,
+          overflow: 'hidden',
+          bgcolor: 'rgba(255,255,255,0.06)',
+          breakInside: 'avoid',
+        }}
+      >
+        <Box sx={{ width: '100%', aspectRatio, bgcolor: 'rgba(0,0,0,0.25)', position: 'relative' }}>
+          {preview && (
+            <Box
+              component="img"
+              src={preview}
+              alt={title}
+              loading="lazy"
+              onLoad={(e: SyntheticEvent<HTMLImageElement>) => {
+                const target = e.currentTarget
+                const width = target.naturalWidth
+                const height = target.naturalHeight
+                if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return
+                const cssAspectRatio = `${width} / ${height}`
+                setPreviewAspectRatios((prev) => (prev[asset.id] === cssAspectRatio ? prev : { ...prev, [asset.id]: cssAspectRatio }))
+              }}
+              sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
+          )}
+          {!preview && (
+            <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.65)', fontSize: 13 }}>
+              {statusText}
+            </Box>
+          )}
+        </Box>
+        <Box sx={{ p: 1 }}>
+          <Typography variant="caption" sx={{ fontWeight: 700, color: 'rgba(255,255,255,0.92)' }} display="block">
+            {title}
+          </Typography>
+          <Stack direction="row" spacing={1} alignItems="center" mt={0.5} flexWrap="wrap">
+            <Chip size="small" label={approved ? '已通过' : '待审核'} color={approved ? 'success' : 'default'} />
+            {missing && <Chip size="small" label="缺失" color="warning" variant="outlined" />}
+            {placeholder && <Chip size="small" label="占位" variant="outlined" />}
+            {imageState.safetyBlocked && <Chip size="small" label="安全拦截" color="error" variant="outlined" />}
+            {chineseRole && <Chip size="small" label={chineseRole} variant="outlined" />}
+            {showRawRole && (
+              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.65)', fontFamily: 'monospace' }}>
+                {asset.role}
+              </Typography>
+            )}
+          </Stack>
+          {(descriptor || promptPreview) && (
+            <Box sx={{ mt: 0.75 }}>
+              {descriptor && (
+                <Typography
+                  variant="caption"
+                  sx={{
+                    color: 'rgba(255,255,255,0.72)',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                    whiteSpace: 'pre-wrap',
+                  }}
+                >
+                  {descriptor}
+                </Typography>
+              )}
+              {promptPreview && (
+                <Typography
+                  variant="caption"
+                  sx={{
+                    mt: 0.5,
+                    color: 'rgba(255,255,255,0.55)',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                    whiteSpace: 'pre-wrap',
+                    fontFamily: 'monospace',
+                  }}
+                >
+                  {promptPreview}
+                </Typography>
+              )}
+            </Box>
+          )}
+          <Stack direction="row" spacing={1} alignItems="center" mt={1} flexWrap="wrap">
+            <Button
+              size="small"
+              variant="text"
+              onClick={() => void approveLibraryRole(asset.role, !approved)}
+              disabled={loading || !imageState.hasRenderableImage || imageState.safetyBlocked}
+            >
+              {approved ? '撤销通过' : '通过'}
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              component="label"
+              startIcon={<UploadFileIcon fontSize="small" />}
+              disabled={loading}
+            >
+              上传替换
+              <input
+                hidden
+                type="file"
+                accept="image/png"
+                onChange={(e) => {
+                  const f = e.target.files && e.target.files[0]
+                  e.target.value = ''
+                  if (!f) return
+                  void uploadLibraryAsset(asset.id, f)
+                }}
+              />
+            </Button>
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<AutoFixHighIcon fontSize="small" />}
+              onClick={() => openRegenerateDialog(asset)}
+              disabled={loading}
+            >
+              {imageState.hasRenderableImage ? '重生成' : '生成'}
+            </Button>
+          </Stack>
+        </Box>
+      </ImageListItem>
+    )
   }
 
   return (
@@ -505,241 +897,25 @@ export default function DreamWeaverLibraryPage() {
         )}
 
         {cards.length ? (
-          <ImageList variant="masonry" cols={4} gap={10} sx={{ m: 0 }}>
-            {cards.map((card) => {
-              if (card.kind === 'character') {
-                const coverAsset = card.views.front || card.views.side || card.views.back
-                const coverPreview = coverAsset ? previews[coverAsset.id] : ''
-                const coverAspectRatio = coverAsset
-                  ? previewAspectRatios[coverAsset.id] || assetToCssAspectRatio(coverAsset, '16 / 9')
-                  : '16 / 9'
-                const viewAssets = (['front', 'side', 'back'] as const)
-                  .map((v) => card.views[v])
-                  .filter((a): a is LibraryAsset => Boolean(a))
-                const totalViews = viewAssets.length
-                const missingViews = viewAssets.filter((a) => missingRoleSet.has(String(a.role || '').trim())).length
-                const approvedViews = viewAssets.filter((a) => Boolean(a?.meta?.approved)).length
-                const generatedViews = Math.max(0, totalViews - missingViews)
-                return (
-                  <ImageListItem
-                    key={`character:${card.entityId}`}
-                    sx={{
-                      border: '1px solid rgba(255,255,255,0.14)',
-                      borderRadius: 2,
-                      overflow: 'hidden',
-                      bgcolor: 'rgba(255,255,255,0.06)',
-                      breakInside: 'avoid',
-                      cursor: 'pointer',
-                      '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' },
-                    }}
-                    onClick={() => openCharacterViews(card)}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`查看角色多视角：${card.title}`}
-                  >
-                    <Box sx={{ width: '100%', aspectRatio: coverAspectRatio, bgcolor: 'rgba(0,0,0,0.25)', position: 'relative' }}>
-                      {coverPreview && coverAsset && (
-                        <Box
-                          component="img"
-                          src={coverPreview}
-                          alt={card.title}
-                          loading="lazy"
-                          onLoad={(e: SyntheticEvent<HTMLImageElement>) => {
-                            const target = e.currentTarget
-                            const width = target.naturalWidth
-                            const height = target.naturalHeight
-                            if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return
-                            const cssAspectRatio = `${width} / ${height}`
-                            setPreviewAspectRatios((prev) =>
-                              prev[coverAsset.id] === cssAspectRatio ? prev : { ...prev, [coverAsset.id]: cssAspectRatio },
-                            )
-                          }}
-                          sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                        />
-                      )}
-                      {!coverPreview && (
-                        <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.65)', fontSize: 13 }}>
-                          {totalViews === 0 ? '未启用' : missingViews >= totalViews ? '未生成（缺失）' : '暂无预览'}
-                        </Box>
-                      )}
-                    </Box>
-                    <Box sx={{ p: 1 }}>
-                      <Typography variant="caption" sx={{ fontWeight: 700, color: 'rgba(255,255,255,0.92)' }} display="block">
-                        角色：{card.title}
-                      </Typography>
-                      <Stack direction="row" spacing={1} alignItems="center" mt={0.5} flexWrap="wrap">
-                        <Chip size="small" label={`多视角：${generatedViews}/${totalViews || 0}`} variant="outlined" />
-                        <Chip size="small" label={`已通过：${approvedViews}/${totalViews || 0}`} color={approvedViews ? 'success' : 'default'} variant="outlined" />
-                        {missingViews > 0 && <Chip size="small" label={`缺失：${missingViews}`} color="warning" variant="outlined" />}
-                      </Stack>
-                      {card.descriptor && (
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            mt: 0.75,
-                            color: 'rgba(255,255,255,0.72)',
-                            display: '-webkit-box',
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: 'vertical',
-                            overflow: 'hidden',
-                            whiteSpace: 'pre-wrap',
-                          }}
-                        >
-                          {card.descriptor}
-                        </Typography>
-                      )}
-                      <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: 'rgba(255,255,255,0.55)' }}>
-                        点击查看正/侧/背面并生成/替换
-                      </Typography>
-                    </Box>
-                  </ImageListItem>
-                )
-              }
-
-              const asset = card.asset
-              const title = assetTitle(asset)
-              const preview = previews[asset.id]
-              const aspectRatio = previewAspectRatios[asset.id] || assetToCssAspectRatio(asset, '16 / 9')
-              const approved = Boolean(asset?.meta?.approved)
-              const missing = missingRoleSet.has(String(asset.role || '').trim())
-              const parsed = parseLibraryRole(asset.role)
-              const chineseRole =
-                parsed.entityType === 'scene'
-                  ? '场景卡'
-                  : parsed.entityType === 'prop'
-                    ? '道具卡'
-                    : parsed.entityType === 'character' && parsed.view
-                      ? `角色立绘（${characterViewLabel(parsed.view)}）`
-                      : ''
-              const descriptor = String(asset?.meta?.descriptor || '').trim()
-              const promptPreview = String(asset?.meta?.prompt || asset?.meta?.suggested_prompt || '').trim()
+          <Stack spacing={2}>
+            {LIBRARY_CARD_GROUP_ORDER.map((group) => {
+              const items = cardGroups[group.key] || []
+              if (!items.length) return null
               return (
-                <ImageListItem
-                  key={asset.id}
-                  sx={{
-                    border: '1px solid rgba(255,255,255,0.14)',
-                    borderRadius: 2,
-                    overflow: 'hidden',
-                    bgcolor: 'rgba(255,255,255,0.06)',
-                    breakInside: 'avoid',
-                  }}
-                >
-                  <Box sx={{ width: '100%', aspectRatio, bgcolor: 'rgba(0,0,0,0.25)', position: 'relative' }}>
-                    {preview && (
-                      <Box
-                        component="img"
-                        src={preview}
-                        alt={title}
-                        loading="lazy"
-                        onLoad={(e: SyntheticEvent<HTMLImageElement>) => {
-                          const target = e.currentTarget
-                          const width = target.naturalWidth
-                          const height = target.naturalHeight
-                          if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return
-                          const cssAspectRatio = `${width} / ${height}`
-                          setPreviewAspectRatios((prev) => (prev[asset.id] === cssAspectRatio ? prev : { ...prev, [asset.id]: cssAspectRatio }))
-                        }}
-                        sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                      />
-                    )}
-                    {!preview && (
-                      <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.65)', fontSize: 13 }}>
-                        {!asset ? '未启用' : missing ? '未生成（缺失）' : '暂无预览'}
-                      </Box>
-                    )}
-                  </Box>
-                  <Box sx={{ p: 1 }}>
-                    <Typography variant="caption" sx={{ fontWeight: 700, color: 'rgba(255,255,255,0.92)' }} display="block">
-                      {title}
+                <Box key={group.key}>
+                  <Stack direction="row" spacing={1} alignItems="center" mb={1} flexWrap="wrap">
+                    <Typography variant="subtitle2" sx={{ color: 'rgba(255,255,255,0.95)', fontWeight: 700 }}>
+                      {group.label}
                     </Typography>
-                    <Stack direction="row" spacing={1} alignItems="center" mt={0.5} flexWrap="wrap">
-                      <Chip size="small" label={approved ? '已通过' : '待审核'} color={approved ? 'success' : 'default'} />
-                      {missing && <Chip size="small" label="缺失" color="warning" variant="outlined" />}
-                      {chineseRole && <Chip size="small" label={chineseRole} variant="outlined" />}
-                      <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.65)', fontFamily: 'monospace' }}>
-                        {asset.role}
-                      </Typography>
-                    </Stack>
-                    {(descriptor || promptPreview) && (
-                      <Box sx={{ mt: 0.75 }}>
-                        {descriptor && (
-                          <Typography
-                            variant="caption"
-                            sx={{
-                              color: 'rgba(255,255,255,0.72)',
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical',
-                              overflow: 'hidden',
-                              whiteSpace: 'pre-wrap',
-                            }}
-                          >
-                            {descriptor}
-                          </Typography>
-                        )}
-                        {promptPreview && (
-                          <Typography
-                            variant="caption"
-                            sx={{
-                              mt: 0.5,
-                              color: 'rgba(255,255,255,0.55)',
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical',
-                              overflow: 'hidden',
-                              whiteSpace: 'pre-wrap',
-                              fontFamily: 'monospace',
-                            }}
-                          >
-                            {promptPreview}
-                          </Typography>
-                        )}
-                      </Box>
-                    )}
-                    <Stack direction="row" spacing={1} alignItems="center" mt={1} flexWrap="wrap">
-                      <Button
-                        size="small"
-                        variant="text"
-                        onClick={() => void approveLibraryRole(asset.role, !approved)}
-                        disabled={loading}
-                      >
-                        {approved ? '撤销通过' : '通过'}
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        component="label"
-                        startIcon={<UploadFileIcon fontSize="small" />}
-                        disabled={loading}
-                      >
-                        上传替换
-                        <input
-                          hidden
-                          type="file"
-                          accept="image/png"
-                          onChange={(e) => {
-                            const f = e.target.files && e.target.files[0]
-                            e.target.value = ''
-                            if (!f) return
-                            void uploadLibraryAsset(asset.id, f)
-                          }}
-                        />
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="contained"
-                        startIcon={<AutoFixHighIcon fontSize="small" />}
-                        onClick={() => openRegenerateDialog(asset)}
-                        disabled={loading}
-                      >
-                        {missing ? '生成' : '重生成'}
-                      </Button>
-                    </Stack>
-                  </Box>
-                </ImageListItem>
+                    <Chip size="small" label={`数量：${items.length}`} variant="outlined" />
+                  </Stack>
+                  <ImageList variant="standard" cols={cardCols} gap={10} sx={{ m: 0 }}>
+                    {items.map(renderLibraryCard)}
+                  </ImageList>
+                </Box>
               )
             })}
-          </ImageList>
+          </Stack>
         ) : (
           !loading && (
             <Typography sx={{ color: 'rgba(255,255,255,0.75)' }}>
@@ -756,7 +932,7 @@ export default function DreamWeaverLibraryPage() {
             {characterViewsCard?.descriptor || '暂无角色描述'}
           </Typography>
           <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
-            建议：先生成正面，再生成侧面/背面；侧面/背面将强制基于前序视角参考图做图像编辑以保持一致性。
+            建议：按六视角顺序生成；非正面视角会优先复用前序视角作为参考，保证角色一致性。
           </Typography>
           <Divider sx={{ my: 2 }} />
           <Box
@@ -766,13 +942,18 @@ export default function DreamWeaverLibraryPage() {
               gap: 1.5,
             }}
           >
-            {(['front', 'side', 'back'] as const).map((view) => {
+            {CHARACTER_VIEW_ORDER.map((view) => {
+              const role = characterViewsCard ? characterViewRole(view, characterViewsCard.entityId) : ''
               const asset = characterViewsCard?.views?.[view] || null
+              const state = resolveLibraryAssetImageState(asset, { missingRoleSet })
+              const hasRenderableImage = state.hasRenderableImage
               const title = asset ? assetTitle(asset) : ''
-              const preview = asset ? previews[asset.id] : ''
+              const preview = asset && hasRenderableImage ? previews[asset.id] : ''
               const aspectRatio = asset ? previewAspectRatios[asset.id] || assetToCssAspectRatio(asset, '16 / 9') : '16 / 9'
-              const approved = Boolean(asset?.meta?.approved)
-              const missing = asset ? missingRoleSet.has(String(asset.role || '').trim()) : true
+              const approved = hasRenderableImage && Boolean(asset?.meta?.approved)
+              const missing = Boolean(role && missingRoleSet.has(role)) || state.markedMissing
+              const placeholder = Boolean(asset && state.placeholder && !missing && !state.safetyBlocked)
+              const stateText = missing ? '未生成（缺失）' : !asset ? '未生成' : state.safetyBlocked ? '安全拦截' : placeholder ? '占位图' : '暂无预览'
               return (
                 <Box
                   key={view}
@@ -816,7 +997,7 @@ export default function DreamWeaverLibraryPage() {
                     )}
                     {!preview && (
                       <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.65)', fontSize: 13 }}>
-                        {missing ? '未生成（缺失）' : '暂无预览'}
+                        {stateText}
                       </Box>
                     )}
                   </Box>
@@ -829,13 +1010,15 @@ export default function DreamWeaverLibraryPage() {
                     <Stack direction="row" spacing={1} alignItems="center" mt={0.75} flexWrap="wrap">
                       <Chip size="small" label={approved ? '已通过' : '待审核'} color={approved ? 'success' : 'default'} />
                       {missing && <Chip size="small" label="缺失" color="warning" variant="outlined" />}
+                      {placeholder && <Chip size="small" label="占位" variant="outlined" />}
+                      {state.safetyBlocked && <Chip size="small" label="安全拦截" color="error" variant="outlined" />}
                     </Stack>
                     <Stack direction="row" spacing={0.75} alignItems="center" mt={1} sx={{ flexWrap: 'nowrap' }}>
                       <Button
                         size="small"
                         variant="text"
                         onClick={() => asset && void approveLibraryRole(asset.role, !approved)}
-                        disabled={loading || !asset}
+                        disabled={loading || !asset || !hasRenderableImage || state.safetyBlocked}
                         sx={{ minWidth: 'auto', px: 0.75 }}
                       >
                         {approved ? '撤销通过' : '通过'}
@@ -869,15 +1052,23 @@ export default function DreamWeaverLibraryPage() {
                         size="small"
                         variant="contained"
                         startIcon={<AutoFixHighIcon fontSize="small" />}
-                        onClick={() => asset && openRegenerateDialog(asset)}
-                        disabled={loading || !asset}
+                        onClick={() => {
+                          if (asset) {
+                            openRegenerateDialog(asset)
+                            return
+                          }
+                          if (!role) return
+                          const roleTitle = `${characterViewsCard?.title || '角色'}-${characterViewLabel(view)}`
+                          openRegenerateDialogForRole(role, roleTitle)
+                        }}
+                        disabled={loading || !role}
                         sx={{
                           minWidth: 'auto',
                           px: 1,
                           '& .MuiButton-startIcon': { mr: 0.5 },
                         }}
                       >
-                        {missing ? '生成' : '重生成'}
+                        {hasRenderableImage ? '重生成' : '生成'}
                       </Button>
                     </Stack>
                   </Box>
@@ -893,114 +1084,78 @@ export default function DreamWeaverLibraryPage() {
         </DialogActions>
       </Dialog>
 
-      <Dialog
+      <LibraryRegenerateDialog
         open={regenOpen}
-        onClose={() => {
-          if (regenSubmitting) return
-          setRegenOpen(false)
+        title={regenTitle || regenRole}
+        role={regenRole}
+        submitting={regenSubmitting}
+        suggesting={regenSuggesting}
+        imageEditActive={regenPreferImageEdit}
+        forceImageEdit={false}
+        hasImageBase={regenHasCurrentImage}
+        imageBaseLabel="当前图"
+        readyReferenceLabel=""
+        readyReferenceCount={0}
+        missingReferenceLabel=""
+        imageEditAutoCleared={false}
+        promptInputLabel="提示词（可选）"
+        promptValue={regenPrompt}
+        promptPlaceholder={regenPreferImageEdit ? '可以输入要求对原图进行编辑~' : undefined}
+        suggestError={regenSuggestError}
+        error={regenError}
+        submitDisabled={regenSubmitting || regenSuggesting || !regenRole || (regenPreferImageEdit && !regenHasCurrentImage)}
+        suggestDisabled={regenSubmitting || regenSuggesting || !regenRole}
+        canToggleImageEdit={!(regenSubmitting || regenSuggesting || !regenHasCurrentImage)}
+        onClose={() => setRegenOpen(false)}
+        onSuggest={() => requestSmartRegeneratePrompt({ source: 'manual', mode: 'template' })}
+        onToggleImageEdit={() => {
+          setRegenPreferImageEdit((prev) => {
+            const next = !prev
+            if (next) setRegenPrompt('')
+            return next
+          })
         }}
-        fullWidth
-        maxWidth="md"
-      >
-        <DialogTitle>重生成素材：{regenTitle || regenRole}</DialogTitle>
-        <DialogContent dividers>
-          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-            限制：将覆盖重生成并把该素材标记为“待审核”；上传替换仅支持 PNG。
-          </Typography>
-          {regenIsSideOrBack && (
+        onPromptChange={(value) => setRegenPrompt(value)}
+        onSubmit={submitRegenerateDialog}
+        showDerivedViewHint={regenIsDerivedCharacterView}
+        derivedViewHintText="说明：当前为非正面角色素材。智能生成提示词会按视角链路重建，不沿用当前图提示词。"
+        lockedInfoText={lockedConfig?.locked ? '当前项目的风格、比例已锁定，素材库会强制使用锁定配置。' : undefined}
+        extraSettings={
+          <>
             <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-              说明：当前为侧面/背面素材。“AI 生成提示词”会按侧/背面首次生成路径重建，不沿用当前图提示词。
+              限制：将覆盖重生成并把该素材标记为“待审核”；上传替换仅支持 PNG。
             </Typography>
-          )}
-          {lockedConfig?.locked && (
-            <Alert severity="info" sx={{ mb: 1 }}>
-              当前项目的风格/比例/分辨率已锁定，素材库会强制使用锁定配置。
-            </Alert>
-          )}
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1 }}>
-            <FormControl fullWidth size="small" disabled={regenSubmitting || regenSuggesting || Boolean(lockedConfig?.locked)}>
-              <InputLabel id="library-style-preset-label">风格预设</InputLabel>
-              <Select
-                labelId="library-style-preset-label"
-                value={regenStylePreset}
-                label="风格预设"
-                onChange={(e) => setRegenStylePreset(String(e.target.value))}
-              >
-                <MenuItem value="cinematic_realistic">电影写实</MenuItem>
-                <MenuItem value="anime">二次元动画</MenuItem>
-                <MenuItem value="ink_wash">国风水墨</MenuItem>
-                <MenuItem value="cyberpunk">赛博朋克</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl fullWidth size="small" disabled={regenSubmitting || regenSuggesting || Boolean(lockedConfig?.locked)}>
-              <InputLabel id="library-image-ratio-label">画幅</InputLabel>
-              <Select
-                labelId="library-image-ratio-label"
-                value={regenImageRatio}
-                label="画幅"
-                onChange={(e) => setRegenImageRatio(String(e.target.value))}
-              >
-                <MenuItem value="16:9">横屏 16:9</MenuItem>
-                <MenuItem value="9:16">竖屏 9:16</MenuItem>
-              </Select>
-            </FormControl>
-          </Stack>
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }} flexWrap="wrap">
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<AutoFixHighIcon fontSize="small" />}
-              onClick={() => void suggestPrompt('ai')}
-              disabled={regenSubmitting || regenSuggesting || !regenRole}
-            >
-              {regenSuggesting ? '处理中…' : 'AI 生成提示词'}
-            </Button>
-            <Button
-              size="small"
-              variant={regenPreferImageEdit ? 'contained' : 'outlined'}
-              aria-pressed={regenPreferImageEdit}
-              onClick={() => {
-                setRegenPreferImageEdit((prev) => {
-                  const next = !prev
-                  if (next) setRegenPrompt('')
-                  return next
-                })
-              }}
-              disabled={regenSubmitting || regenSuggesting}
-            >
-              编辑图像
-            </Button>
-          </Stack>
-          {regenSuggestError && (
-            <Alert severity="error" sx={{ mb: 1 }}>
-              {regenSuggestError}
-            </Alert>
-          )}
-          <TextField
-            label="提示词（可选）"
-            fullWidth
-            multiline
-            minRows={8}
-            placeholder={regenPreferImageEdit ? '可以输入要求对原图进行编辑~' : undefined}
-            value={regenPrompt}
-            onChange={(e) => setRegenPrompt(e.target.value)}
-            disabled={regenSubmitting || regenSuggesting}
-          />
-          {regenError && (
-            <Alert severity="error" sx={{ mt: 1 }}>
-              {regenError}
-            </Alert>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setRegenOpen(false)} disabled={regenSubmitting}>
-            取消
-          </Button>
-          <Button variant="contained" onClick={submitRegenerateDialog} disabled={regenSubmitting || !regenRole}>
-            {regenSubmitting ? '重生成中…' : '确认重生成'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1 }}>
+              <FormControl fullWidth size="small" disabled={regenSubmitting || regenSuggesting || Boolean(lockedConfig?.locked)}>
+                <InputLabel id="library-style-preset-label">风格预设</InputLabel>
+                <Select
+                  labelId="library-style-preset-label"
+                  value={regenStylePreset}
+                  label="风格预设"
+                  onChange={(e) => setRegenStylePreset(String(e.target.value))}
+                >
+                  <MenuItem value="cinematic_realistic">电影写实</MenuItem>
+                  <MenuItem value="anime">二次元动画</MenuItem>
+                  <MenuItem value="ink_wash">国风水墨</MenuItem>
+                  <MenuItem value="cyberpunk">赛博朋克</MenuItem>
+                </Select>
+              </FormControl>
+              <FormControl fullWidth size="small" disabled={regenSubmitting || regenSuggesting || Boolean(lockedConfig?.locked)}>
+                <InputLabel id="library-image-ratio-label">画幅</InputLabel>
+                <Select
+                  labelId="library-image-ratio-label"
+                  value={regenImageRatio}
+                  label="画幅"
+                  onChange={(e) => setRegenImageRatio(String(e.target.value))}
+                >
+                  <MenuItem value="16:9">横屏 16:9</MenuItem>
+                  <MenuItem value="9:16">竖屏 9:16</MenuItem>
+                </Select>
+              </FormControl>
+            </Stack>
+          </>
+        }
+      />
     </Box>
   )
 }

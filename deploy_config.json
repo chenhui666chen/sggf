@@ -1,0 +1,88 @@
+{
+  "server": {
+    "ip": "101.132.154.143",
+    "user": "root",
+    "remote_path": "/root/novel_writing_agent"
+  },
+  "sync_rules": {
+    "backend": {
+      "include": [
+        "backend/app/**/*.py",
+        "backend/app/**/*.json",
+        "backend/alembic/**/*.py",
+        "backend/requirements.txt",
+        "backend/Dockerfile"
+      ],
+      "exclude": [
+        "backend/**/__pycache__/**",
+        "backend/**/*.pyc",
+        "backend/.venv/**"
+      ]
+    },
+    "frontend": {
+      "include": [
+        "frontend/src/**/*.tsx",
+        "frontend/src/**/*.ts",
+        "frontend/src/**/*.css",
+        "frontend/public/**/*",
+        "frontend/package.json",
+        "frontend/Dockerfile"
+      ],
+      "exclude": [
+        "frontend/node_modules/**",
+        "frontend/.next/**",
+        "frontend/dist/**",
+        "frontend/build/**"
+      ]
+    },
+    "agents": {
+      "include": [
+        "agents/**/*.py"
+      ],
+      "exclude": []
+    },
+    "adapters": {
+      "include": [
+        "adapters/**/*.py"
+      ],
+      "exclude": []
+    },
+    "pipeline": {
+      "include": [
+        "pipeline/**/*.py"
+      ],
+      "exclude": []
+    },
+    "shared": {
+      "include": [
+        "shared/**/*.py"
+      ],
+      "exclude": []
+    },
+    "config": {
+      "include": [
+        "docker-compose.yml",
+        "nginx-prod.conf",
+        ".env.example",
+        "deploy.sh"
+      ],
+      "exclude": []
+    }
+  },
+  "build": {
+    "backend": {
+      "rebuild": true,
+      "no_cache": false,
+      "timeout": 600
+    },
+    "frontend": {
+      "rebuild": false,
+      "restart": true
+    }
+  },
+  "validation": {
+    "check_api": true,
+    "api_endpoint": "/api/v1/health",
+    "timeout": 30
+  }
+}

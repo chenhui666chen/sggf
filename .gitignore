@@ -151,3 +151,7 @@ test_old_sdk.wav
 .turbo/
 .vercel/
 .netlify/
+
+# Cleanup archives
+project_cleanup_archive_*/
+.cleanup_backup/

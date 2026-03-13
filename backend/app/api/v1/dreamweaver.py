@@ -41,12 +41,16 @@ from app.services.dreamweaver.library import (
     build_library_spec_from_script_entities,
     compute_library_review,
     default_library_asset_uri,
+    empty_library_spec,
     ensure_required_library_assets,
     enrich_payload_with_library,
+    has_any_library_entities,
     load_latest_library_assets,
+    parse_library_role,
     runs_root_path,
     required_library_roles,
     resolve_asset_path,
+    strip_crowd_characters_from_spec,
 )
 from app.services.dreamweaver.config_lock import (
     DreamweaverProjectConfigLockedError,
@@ -58,6 +62,10 @@ from app.services.dreamweaver.library_prompt import suggest_library_prompt
 
 from pipeline.state_machine import RunContext, State, progress_percent, run_until_done, stage_label
 from pipeline.media_presets import resolve_frame_size
+from pipeline.library_regenerate_roles import (
+    build_missing_character_view_regenerate_roles,
+    build_missing_character_view_summary,
+)
 from pipeline.style_presets import normalize_style_preset, style_negative_prompt_for_preset, style_prompt_for_preset
 from pipeline.artifacts_io import download_url_to_path as _download_url_to_path
 from agents.image_edit_utils import (
@@ -73,26 +81,26 @@ logger = logging.getLogger(__name__)
 class RunRequest(BaseModel):
     project_id: int
     chapter_ids: List[int] = Field(default_factory=list)
-    # 閺夆晜鍔橀、鎴﹀籍閼搁潧鐏囬柡?閻犳劑鍔戦崳鐑橈紣閸曨噮鍟庨柨娑樼墕瑜版煡鏌呮径娑氱闁挎稒顒玼ality=闁哄牃鍋撳Δ鍌涱焾瀹告繈鏌岃箛銉х闁哄洤鐡ㄩ崣?闁哄洨顥愰崥褰掓晬婢舵稓绀塩ost=濞达絽瀛╅崹姘跺嫉椤掑﹦绀勯柡鍥ㄦ綑閹?闁哄洤顕〒鐑芥晬?
+    # 闁哄鏅滈崝姗€銆侀幋锕€绫嶉柤鎼佹涧閻忓洭鏌?闁荤姵鍔戦崝鎴﹀闯閻戞﹫绱ｉ柛鏇ㄥ櫘閸熷酣鏌ㄥ☉妯煎鐟滅増鐓￠弻鍛緞濞戞氨顦梺鎸庣⊕椤掔幖ality=闂佸搫鐗冮崑鎾澄旈崒娑辩劸鐎瑰憡绻堥弻宀冪疀閵壯咁槱闂佸搫娲ら悺銊╁矗?闂佸搫娲ㄩˉ鎰板触瑜版帗鏅鑸电〒缁€濉﹐st=婵炶揪绲界€涒晠宕瑰璺哄珘妞ゆ帒锕︾粈鍕煛閸ャ劍缍戦柟?闂佸搫娲ら顓炪€掗悜鑺ユ櫖?
     quality_mode: Optional[Literal["quality", "cost"]] = Field(default=None)
-    # 闁哄懘缂氶崗妯兼嫬閸愩劌妫橀柨娑樼墕瑜版煡鏌呮径娑氱闁挎稒鐡杛ue=闁圭顦抽～澶愬礆濞嗘帒娈伴柛鏂诲姀閻ㄧ喖寮弶鎴斿亾濞嗘挴鍋撴径瀣/閻犲浂鍘虹粻鐔烘嫻閵婏富姊惧Λ鏉垮閻ｈ崵绮垫径娑氬耿False=濞达綀娉曢弫銈夊炊閸濆嫮鏆板Λ鏉垮椤?闁归潧顑呮慨鈺呮煀瀹ュ洨鏋?
+    # 闂佸搫鎳樼紓姘跺礂濡吋瀚柛鎰╁妼濡﹢鏌ㄥ☉妯煎鐟滅増鐓￠弻鍛緞濞戞氨顦梺鎸庣⊕閻℃潧ue=闂佸湱顭堥ˇ鎶斤綖婢舵劕绀嗘繛鍡樺笒濞堜即鏌涢弬璇插闁汇劎鍠栧顐﹀级閹存柨浜炬繛鍡樻尨閸嬫挻寰勭€ｎ偅顔?闁荤姴娴傞崢铏圭不閻旂儤瀚婚柕濠忓瘜濮婃儳螞閺夊灝顏柣锝堝吹缁灚寰勫☉姘€縁alse=婵炶揪缍€濞夋洟寮妶澶婄倞闁告繂瀚弳鏉课涢弶鍨伂妞?闂佸綊娼ч鍛叏閳哄懏鐓€鐎广儱娲ㄩ弸?
     smart_tuning: Optional[bool] = Field(default=None)
-    # A/B 閻庡湱鍋ら悰娆撳冀閸モ晩鍔柨娑樼墕瑜版煡鏌呮径娑氱闁挎稒鐭划搴ㄦ偨閵娿倗鑹鹃柡宥呮穿椤斿洭鐛捄渚殸婵絾姊荤划铏规媼閳藉懐绀夊☉鎾崇С缁变即鎳涢鍕楅柡鈧悷鏉跨秮闁汇垻鍠愰崹姘舵焻閺勫繒甯?
+    # A/B 闁诲骸婀遍崑銈夋偘濞嗘挸鍐€闁搞儮鏅╅崝顕€鏌ㄥ☉妯煎鐟滅増鐓￠弻鍛緞濞戞氨顦梺鎸庣⊕閻喚鍒掓惔銊﹀仺闁靛鍊楅懝楣冩煛瀹ュ懏绌挎い鏂挎喘閻涱喚鎹勬笟顖氭濠殿噯绲惧鑽ゅ垝閾忚濯奸柍钘夋噽缁€澶娾槈閹惧磭小缂佸彉鍗抽幊娑㈩敂閸曨倣妤呮煛閳ь剟鎮烽弶璺ㄧМ闂佹眹鍨婚崰鎰板垂濮樿埖鐒婚柡鍕箳鐢?
     ab_variant: Optional[str] = Field(default=None)
-    # 閻犳劑鍔嶉ˉ鍛緞鏉堫偉袝濠㈣泛瀚幃濠勭驳閺嶎偅娈ｉ柨娑樼墕瑜版煡鏌呮径娑氱闁挎稒鐡杛ue=濞寸姴鎳撻鐔煎川婵犱胶鐟濋柟鍑ら檮閸╁懘宕欓搹鐟邦暬闁挎稑鐗呯划娑欏濮橆剚韬紓浣规尰閻忓绋夐锛勭闁?autoqc/qc_warning闁?
+    # 闁荤姵鍔戦崝宥壦夐崨顔肩窞閺夊牜鍋夎婵犮垼娉涚€氼噣骞冩繝鍕┏闁哄稁鍋呭▓锝夋煥濞戞澧曠憸鐗堢叀閺屽懏寰勫☉姘鳖槴闂佹寧绋掗悺鏉泆e=婵炲濮撮幊鎾活敆閻旂厧宸濆┑鐘辫兌閻熸繈鏌熼崙銈夋闁糕晛鎳樺畷娆撴惞閻熼偊鏆梺鎸庣☉閻楀懐鍒掑☉娆忣嚤婵﹩鍓氶煬顒傜磽娴ｈ灏伴柣蹇擃槹缁嬪顢橀敍鍕唹闂?autoqc/qc_warning闂?
     qc_allow_fail: Optional[bool] = Field(default=None)
-    # 濡炲瀛╅悧鍛婏紣閸曨噮鍟庨柨娑樼墕瑜版煡鏌呮径娑氱闁挎稒姘ㄩ弫銈嗙鎼达絿鍩犲☉鎾亾缂佽京濮靛妤佹償?闁告帒妫濋弳?濡絾鐗曢悢顒傛暜瑜旈ˉ鎾诲冀?
+    # 婵＄偛顑呯€涒晠鎮ч崨濠忕矗闁告洦鍣崯搴ㄦ煥濞戞澧曠憸鐗堢叀閺屽懏寰勫☉姘鳖槴闂佹寧绋掑銊╁极閵堝棛顩查幖杈剧悼閸╃姴鈽夐幘顖氫壕缂備浇浜慨闈涱焽濡や焦鍎?闂佸憡甯掑Λ婵嬪汲?婵☆偓绲鹃悧鏇㈡偄椤掑倹鏆滅憸鏃埶夐幘璇插唨?
     style_preset: Optional[str] = Field(default=None)
-    # 闁汇垹顭峰鏉啃掗弬鍓т紣闁挎稑鐗嗚ぐ鏌ユ焻婢舵稓绀嗛柨娑欐皑閺併倖绂嶆惔锝囧煚濞戞挴鍋撻柛鎺戞閺?ratio 濞戞挸楠搁崣褔鏌ㄩ鍏煎闁告帒妫滄ご鎼佹偝閸ラ绀勫〒姘儏椤?16:9 / 9:16闁?
+    # 闂佹眹鍨归…宄邦焽閺夊晝鎺楀棘閸撗傜矗闂佹寧绋戦悧鍡氥亹閺屻儲鐒诲鑸电〒缁€鍡涙煥濞戞瑦鐨戦柡浣靛€栫粋宥嗘償閿濆洤鐓氭繛鎴炴尨閸嬫捇鏌涢幒鎴烆棦闁?ratio 婵炴垶鎸告鎼佸矗瑜旈弻銊╊敊閸忕厧顫撻梺鍛婂笒濡粍銇旈幖浣瑰仢闁搞儵顥撶粈鍕€掑顒夊剰妞?16:9 / 9:16闂?
     image_ratio: Optional[str] = Field(default=None)
-    # 闁告帒妫滄ご鎼佹偝閸ャ劊鈧倹鎷呭蹇曠闁告瑯鍨堕埀顒€顧€缁辨岸鏁?20p / 1080p闁挎稑鐗呯粭宀勬偨婵犳碍妗ㄦ慨锝嗘煣缁躲儵宕楅崡鐐村€遍柛鎰暱閻ｉ箖寮甸埀顒傜磼?width/height闁?
+    # 闂佸憡甯掑Λ婊勩仈閹间焦鍋濋柛銉ｅ妸閳ь剙鍊归幏鍛吋韫囨洜顦╅梺鍛婄懐閸ㄥ爼鍩€椤掆偓椤р偓缂佽鲸宀搁弫?20p / 1080p闂佹寧绋戦悧鍛箔瀹€鍕仺濠电姵纰嶅銊︽叏閿濆棙鐓ｇ紒韬插劦瀹曟宕￠悙鏉戔偓閬嶆煕閹邦剙鏆遍柣锝夌畺瀵敻鍩€椤掑倻纾?width/height闂?
     image_resolution: Optional[str] = Field(default=None)
-    # 閻熸瑥妫濋。鍓佹暜瑜忓濂告晬閸繂璁查梺顐㈩檧缁辨岸鏁嶅杈ㄦ殢濞?I2V/FFmpeg 闁告艾鐗婇崹姘舵晬?~60闁?
+    # 闁荤喐鐟ュΛ婵嬨€傞崜浣规殰鐟滃繐顔忔總鍛婃櫖闁割偅绻傜拋鏌ユ⒑椤愩埄妾х紒杈ㄥ哺閺佸秴顫濇潏銊︽婵?I2V/FFmpeg 闂佸憡鑹鹃悧濠囧垂濮樿埖鏅?~60闂?
     video_fps: Optional[int] = Field(default=None, ge=1, le=60)
-    # 閻熸瑥妫濋。鍫曟偨閻旂鐏囬柡鍕靛灠閹線妫侀埀顒傛啺娓氣偓閳ь剚鍔欓弳鍛緞鐎电硶鈧鎷嬮妶蹇曠闁告瑯鍨堕埀顒€顧€缁辨岸鏁嶅宄硊e=VIDEO 闂傚啳鍩栭宀勫礂閸垺鏅搁柟?video_clip_jobs 濞寸姾顕ф慨鐔煎础閳ュ疇瀚欑紒娑橆槸缁剁喓娑甸娆惧悋
+    # 闁荤喐鐟ュΛ婵嬨€傞崼鏇熷仺闁绘梻顭堥悘鍥煛閸曢潧鐏犻柟顖欑窔濡線鍩€椤掑倹鍟哄〒姘ｅ亾闁逞屽墯閸旀瑩寮抽崨顔肩窞閻庣數纭堕埀顒侇焽閹峰濡惰箛鏇狀槱闂佸憡鐟崹鍫曞焵椤掆偓椤р偓缂佽鲸宀搁弫宥咁潰瀹勭e=VIDEO 闂傚倸鍟抽崺鏍敊瀹€鍕闁割偁鍨洪弲鎼佹煙?video_clip_jobs 婵炲濮鹃褎鎱ㄩ悢鐓庣闁炽儱鐤囩€氭瑧绱掑☉姗嗘Ц缂佸墎鍠撳☉鐢割敊濞嗘儳鎮?
     video_require_confirmation: Optional[bool] = Field(default=None)
     prompt_review_required: Optional[bool] = Field(default=None)
-    # 闁活潿鍔嬬花顒勬偋閸喐鎷遍柛鏍ㄧ墪椤ㄦ牜鐥敂璺ㄧ憿閻犙冨妤犲洭鏌ㄥ鍗炰化闁挎稑鐗嗚ぐ鏌ユ焻婢舵稓绀夊娑欘焾椤?0.1.0闁?
+    # 闂佹椿娼块崝瀣姳椤掑嫭鍋嬮柛顐ゅ枑閹烽亶鏌涢弽銊уⅹ妞ゃ劍鐗滈惀顏堟晜鐠恒劎鎲块柣鐘欏啫顏уΔ鐘叉喘閺屻劌顫濋崡鐐板寲闂佹寧绋戦悧鍡氥亹閺屻儲鐒诲鑸电〒缁€澶婎潡濞戞瑯鐒炬い?0.1.0闂?
     schema_version: Optional[str] = None
 
 
@@ -211,6 +219,8 @@ class RestartAsyncRequest(BaseModel):
     shot_ids: List[str] = Field(default_factory=list)
     cam_idxs: List[int] = Field(default_factory=list)
     asset_roles: List[str] = Field(default_factory=list)
+    auto_asset_roles_from_missing_views: bool = Field(default=False)
+    auto_asset_character_ids: List[int] = Field(default_factory=list)
 
 
 class LibraryRegenerateRequest(BaseModel):
@@ -222,6 +232,11 @@ class LibraryRegenerateRequest(BaseModel):
     image_resolution: Optional[str] = None
     prefer_image_edit: Optional[bool] = None
     prefer_view_chain_edit_base: Optional[bool] = None
+
+
+class LibraryAutoRegenerateRolesRequest(BaseModel):
+    run_id: Optional[str] = None
+    character_ids: List[int] = Field(default_factory=list)
 
 
 class LibraryPromptSuggestRequest(BaseModel):
@@ -330,7 +345,7 @@ def _dreamweaver_celery_queue() -> str:
 def _normalize_run_id(run_id: str) -> str:
     value = str(run_id or "").strip()
     if not value:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run_id 涓嶈兘涓虹┖")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run_id 娑撳秷鍏樻稉铏光敄")
     if "/" in value or "\\" in value or ".." in value:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run_id 格式不合法")
     return value
@@ -347,7 +362,7 @@ def _read_upload_bytes(upload: UploadFile, *, max_bytes: int) -> bytes:
             break
         buf.extend(chunk)
         if len(buf) > max_bytes:
-            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="涓婁紶鏂囦欢杩囧ぇ")
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="上传文件大小超出限制")
     return bytes(buf)
 
 
@@ -364,7 +379,7 @@ def _ensure_path_under_runs(path: Path) -> Path:
     base = _runs_base_dir()
     resolved = path.resolve()
     if resolved != base and base not in resolved.parents:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="路径必须位于 runs 目录中")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="路径必须位于 runs 目录下")
     return resolved
 
 
@@ -378,20 +393,20 @@ def _runs_base_dir() -> Path:
 def _ensure_run_not_running(row: DreamweaverProjectModel, *, action: str) -> None:
     status_lower = str(getattr(row, "status", "") or "").strip().lower()
     if status_lower == "running":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"run 正在执行，无法执行 {action}")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"run 姝ｅ湪鎵ц锛屾棤娉曟墽琛?{action}")
 
 
 def _find_contract_shot(contract: Dict[str, Any], *, shot_id: str) -> Dict[str, Any]:
     episodes = contract.get("episodes") if isinstance(contract.get("episodes"), list) else []
     if not episodes or not isinstance(episodes[0], dict):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="contract 缂哄皯 episodes")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="contract 缂傚搫鐨?episodes")
     shots = episodes[0].get("shots") if isinstance(episodes[0].get("shots"), list) else []
     for shot in shots:
         if not isinstance(shot, dict):
             continue
         if str(shot.get("shot_key") or "").strip() == shot_id:
             return shot
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="shot_id 未找到")
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到对应的 shot_id")
 
 
 def _ensure_contract_shot_assets(shot: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -422,13 +437,50 @@ def _write_image_from_generation_result(result: Any, out_path: Path) -> None:
     raise RuntimeError("unsupported image payload: missing image_url/base64")
 
 
+_CHARACTER_VIEW_PREFIX_TO_VIEW = {
+    "lib_character_portrait": "front",
+    "lib_character_portrait_side": "side",
+    "lib_character_portrait_back": "back",
+    "lib_character_portrait_bust": "bust_front",
+    "lib_character_portrait_bust_three_quarter": "bust_three_quarter",
+    "lib_character_portrait_bust_side": "bust_side",
+}
+_CHARACTER_VIEW_TO_PREFIX = {value: key for key, value in _CHARACTER_VIEW_PREFIX_TO_VIEW.items()}
+_CHARACTER_VIEW_SEED_BASE = {
+    "side": "front",
+    "back": "side",
+    "bust_front": "front",
+    "bust_three_quarter": "bust_front",
+    "bust_side": "bust_three_quarter",
+}
+_CHARACTER_VIEW_REFERENCE_EXTRA = {
+    "side": ["bust_front"],
+    "back": ["front", "bust_front"],
+    "bust_front": [],
+    "bust_three_quarter": ["front", "side"],
+    "bust_side": ["side", "bust_front"],
+}
+
+
+def _character_view_from_role(role: str) -> str:
+    prefix = str(role or "").strip().split(":", 1)[0]
+    return _CHARACTER_VIEW_PREFIX_TO_VIEW.get(prefix, "default")
+
+
+def _character_role_for_view(*, entity_id: int, view: str) -> str:
+    prefix = _CHARACTER_VIEW_TO_PREFIX.get(str(view or "").strip().lower())
+    if not prefix:
+        raise ValueError(f"unsupported character view: {view!r}")
+    return f"{prefix}:{int(entity_id)}"
+
+
 def _parse_library_role(role: str) -> Tuple[str, int]:
     text = (role or "").strip()
     if ":" not in text:
         raise ValueError("invalid role")
     prefix, raw_id = text.split(":", 1)
     entity_id = int(raw_id)
-    if prefix in {"lib_character_portrait", "lib_character_portrait_side", "lib_character_portrait_back"}:
+    if prefix in _CHARACTER_VIEW_PREFIX_TO_VIEW:
         return "character", entity_id
     if prefix == "lib_scene_card":
         return "scene", entity_id
@@ -444,7 +496,7 @@ def _build_library_prompt(
     style_prompt: Optional[str] = None,
     ratio: Optional[str] = None,
 ) -> str:
-    # 闁稿繒鍘ч鎰板籍瑜戦惃鐔兼偨閵娧冧化闁挎稒姘ㄧ划鐑樼▔閳ь剚寰勫鍥ㄦ殢 services 閻忕偛鍊诲▓?prompt 婵☆垪鍓濆姗€濡?
+    # 闂佺绻掗崢褔顢欓幇鏉跨睄鐟滄垿鎯冮悢鍏煎仺闁靛ě鍐у寲闂佹寧绋掑銊у垝閻戞鈻旈柍褜鍓氬鍕吋閸ャ劍娈?services 闁诲繒鍋涢崐璇测枔?prompt 濠碘槅鍨崜婵嗩熆濮椻偓婵?
     return build_library_prompt(
         entity_type=entity_type,
         name=name,
@@ -463,11 +515,7 @@ def _augment_library_prompt_for_role(*, role: str, prompt: str) -> str:
         return ""
 
     prefix = str(role or "").strip().split(":", 1)[0]
-    if prefix not in {
-        "lib_character_portrait",
-        "lib_character_portrait_side",
-        "lib_character_portrait_back",
-    }:
+    if prefix not in _CHARACTER_VIEW_PREFIX_TO_VIEW:
         return text
 
     def _norm_key(s: str) -> str:
@@ -475,18 +523,27 @@ def _augment_library_prompt_for_role(*, role: str, prompt: str) -> str:
         return "".join(ch for ch in lowered if ch.isalnum())
 
     hints: List[str] = [
-        "背景：纯灰色背景板，背景完全干净，无场景元素、无杂物、无文字、无多余人物。",
-        "约束：无文字，无水印，无logo，无边框，无拼贴。",
+        "背景：纯色背景，画面干净，无场景杂物、无文字、无水印、无 logo。",
+        "约束：单人主体，完整构图，避免裁切关键部位。",
     ]
     if prefix == "lib_character_portrait_side":
-        hints.append("构图：侧面全身单人立绘，头顶到脚底完整入镜，四肢完整不裁切。")
-        hints.append("一致性要求：与正面图保持同一角色身份锚点，重点保持发型、五官、服饰、配件和体态一致。")
+        hints.append("构图：侧面全身单人立绘，头顶到脚底完整入镜，四肢完整不被裁切。")
+        hints.append("一致性要求：与正面图保持同一角色身份锚点，重点保持发型、五官、服装和配件一致。")
     elif prefix == "lib_character_portrait_back":
-        hints.append("构图：背面全身单人立绘，头顶到脚底完整入镜，四肢完整不裁切。")
-        hints.append("一致性要求：与正面和侧面图保持同一角色身份锚点，重点保持发型轮廓、服饰版型与配色、配件位置一致。")
+        hints.append("构图：背面全身单人立绘，头顶到脚底完整入镜，四肢完整不被裁切。")
+        hints.append("一致性要求：与正面和侧面图保持同一角色身份锚点，重点保持发型轮廓、服装版型与配色一致。")
+    elif prefix == "lib_character_portrait_bust":
+        hints.append("构图：正面半身单人肖像（胸像到腰部），面部为主并保留肩颈与上半身服饰结构。")
+        hints.append("一致性要求：与全身正面保持同一角色身份锚点，重点保持五官、发型、领口与肩颈服饰细节一致。")
+    elif prefix == "lib_character_portrait_bust_three_quarter":
+        hints.append("构图：3/4 视角半身单人肖像（胸像到腰部），面部为主并清晰呈现肩颈与上半身服饰结构。")
+        hints.append("一致性要求：与半身正面和全身侧面保持同一角色身份锚点，重点保持侧脸轮廓与上半身服饰结构一致。")
+    elif prefix == "lib_character_portrait_bust_side":
+        hints.append("构图：侧面半身单人肖像（胸像到腰部），突出侧脸轮廓并保留肩颈与上半身服饰结构。")
+        hints.append("一致性要求：与半身 3/4 和全身侧面保持同一角色身份锚点，重点保持侧脸轮廓、发型与肩颈服饰细节一致。")
     else:
-        hints.append("构图：正面全身单人立绘，头顶到脚底完整入镜，四肢完整不裁切。")
-        hints.append("一致性要求：角色身份锚点保持一致，突出发型、五官、服饰与配件等特征。")
+        hints.append("构图：正面全身单人立绘，头顶到脚底完整入镜，四肢完整不被裁切。")
+        hints.append("一致性要求：保持角色身份锚点稳定，突出发型、五官、服装与配件特征。")
 
     merged = text
     existing_key = _norm_key(text)
@@ -542,7 +599,7 @@ def _is_placeholder_entity_name(value: Any) -> bool:
     text = str(value or "").strip()
     if not text:
         return True
-    if re.fullmatch(r"[?？\s]+", text):
+    if re.fullmatch(r"[?\s]+", text):
         return True
     lowered = text.lower()
     if lowered in {"unknown", "n/a", "na"}:
@@ -559,8 +616,8 @@ def _resolve_character_view_prompt_seed(
     role: str,
     assets_by_role: Dict[str, Dict[str, Any]],
 ) -> Dict[str, Any]:
-    prefix = str(role or "").strip().split(":", 1)[0]
-    if prefix not in {"lib_character_portrait_side", "lib_character_portrait_back"}:
+    view = _character_view_from_role(role)
+    if view not in _CHARACTER_VIEW_SEED_BASE:
         return {}
 
     try:
@@ -568,30 +625,32 @@ def _resolve_character_view_prompt_seed(
     except Exception:  # noqa: BLE001
         return {}
 
-    front_role = f"lib_character_portrait:{int(entity_id)}"
-    side_role = f"lib_character_portrait_side:{int(entity_id)}"
+    front_role = _character_role_for_view(entity_id=int(entity_id), view="front")
+    base_view = _CHARACTER_VIEW_SEED_BASE.get(view, "front")
+    base_role = _character_role_for_view(entity_id=int(entity_id), view=base_view)
 
-    front_asset = assets_by_role.get(front_role) if isinstance(assets_by_role.get(front_role), dict) else {}
-    side_asset = assets_by_role.get(side_role) if isinstance(assets_by_role.get(side_role), dict) else {}
-    front_meta = front_asset.get("meta") if isinstance(front_asset.get("meta"), dict) else {}
-    side_meta = side_asset.get("meta") if isinstance(side_asset.get("meta"), dict) else {}
+    def _asset_meta(role_name: str) -> Dict[str, Any]:
+        asset = assets_by_role.get(role_name) if isinstance(assets_by_role.get(role_name), dict) else {}
+        return asset.get("meta") if isinstance(asset.get("meta"), dict) else {}
 
-    if prefix == "lib_character_portrait_side":
-        seed_role = front_role
-        seed_meta = front_meta
-    else:
-        seed_role = side_role if side_meta else front_role
-        seed_meta = side_meta if side_meta else front_meta
+    front_meta = _asset_meta(front_role)
+    base_meta = _asset_meta(base_role)
+    seed_role = base_role if base_meta else front_role
+    seed_meta = base_meta if base_meta else front_meta
 
     seed_prompt = _meta_prompt_text(seed_meta) or _meta_prompt_text(front_meta)
-    # Prefer front descriptor as identity anchor to avoid side/back prompt drift.
+    # Prefer front descriptor as identity anchor to avoid derived-view prompt drift.
     anchor_descriptor = _meta_descriptor_text(front_meta) or _meta_descriptor_text(seed_meta)
 
     ref_roles: List[str] = []
-    if front_meta:
+    ref_views = [base_view] + _CHARACTER_VIEW_REFERENCE_EXTRA.get(view, [])
+    for ref_view in ref_views:
+        ref_role = _character_role_for_view(entity_id=int(entity_id), view=ref_view)
+        ref_meta = _asset_meta(ref_role)
+        if ref_meta and ref_role not in ref_roles:
+            ref_roles.append(ref_role)
+    if front_meta and front_role not in ref_roles:
         ref_roles.append(front_role)
-    if prefix == "lib_character_portrait_back" and side_meta:
-        ref_roles.append(side_role)
 
     return {
         "seed_role": seed_role,
@@ -621,8 +680,8 @@ def _resolve_prompt_seed_for_role(
     manual_override = bool(request_prompt_text and request_prompt_text != current_prompt_text)
     raw_prompt = request_prompt_text or current_prompt_text
 
-    # Explicitly support "smart prompt" on side/back with existing image:
-    # keep the prompt seed aligned with side/back first-generation path.
+    # Explicitly support "smart prompt" on derived views with existing image:
+    # keep the prompt seed aligned with derived-view first-generation path.
     if force_view_chain_seed and seed_prompt:
         manual_override = False
         raw_prompt = seed_prompt
@@ -657,12 +716,36 @@ def _attach_view_chain_prompt_meta(
     return meta
 
 
+def _build_project_library_spec(
+    db: Session,
+    *,
+    project_id: int,
+    full_scope: bool,
+) -> Dict[str, Any]:
+    if full_scope:
+        return build_library_spec(
+            db,
+            project_id=project_id,
+            max_characters=0,
+            max_scenes=0,
+            max_props=0,
+        )
+    return build_library_spec(
+        db,
+        project_id=project_id,
+        max_characters=_env_int("DREAMWEAVER_LIBRARY_MAX_CHARACTERS", 12),
+        max_scenes=_env_int("DREAMWEAVER_LIBRARY_MAX_SCENES", 8),
+        max_props=_env_int("DREAMWEAVER_LIBRARY_MAX_PROPS", 8),
+    )
+
+
 def _build_scoped_library_spec_from_run(
     db: Session,
     *,
     project_id: int,
     user_id: int,
     run_id: Optional[str],
+    strict: bool = False,
 ) -> Optional[Dict[str, Any]]:
     safe_run_id = str(run_id or "").strip()
     if not safe_run_id:
@@ -676,19 +759,129 @@ def _build_scoped_library_spec_from_run(
         )
         .first()
     )
-    if row is None or not isinstance(getattr(row, "contract_json", None), dict):
+    if row is None:
+        if strict:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id not found for this project")
+        return None
+    if not isinstance(getattr(row, "contract_json", None), dict):
+        if strict:
+            return empty_library_spec(project_id=project_id)
         return None
     contract = row.contract_json if isinstance(row.contract_json, dict) else {}
     runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
     entities = runtime_cfg.get("script_entities") if isinstance(runtime_cfg.get("script_entities"), dict) else {}
     spec_candidate = build_library_spec_from_script_entities(db, project_id=project_id, entities=entities)
-    has_any = any(
-        isinstance(spec_candidate.get(key), list) and len(spec_candidate.get(key) or []) > 0
-        for key in ("characters", "scenes", "props")
-    )
-    if has_any:
-        return spec_candidate
+    stripped = strip_crowd_characters_from_spec(db, project_id=project_id, spec=spec_candidate)
+    if has_any_library_entities(stripped):
+        return stripped
+    if strict:
+        return empty_library_spec(project_id=project_id)
     return None
+
+
+def _normalize_positive_int_list(raw: Any, *, limit: int = 200) -> List[int]:
+    if not isinstance(raw, list):
+        return []
+    out: List[int] = []
+    for item in raw:
+        if isinstance(item, bool):
+            continue
+        try:
+            value = int(item)
+        except Exception:  # noqa: BLE001
+            continue
+        if value <= 0 or value in out:
+            continue
+        out.append(value)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _resolve_character_view_missing_regenerate_roles(
+    db: Session,
+    *,
+    project_id: int,
+    user_id: int,
+    run_id: Optional[str],
+    character_ids: Optional[List[int]] = None,
+) -> Dict[str, Any]:
+    safe_run_id = str(run_id or "").strip()
+    scoped = False
+    scope_mode = "project"
+    if safe_run_id:
+        spec = (
+            _build_scoped_library_spec_from_run(
+                db,
+                project_id=project_id,
+                user_id=user_id,
+                run_id=safe_run_id,
+                strict=True,
+            )
+            or empty_library_spec(project_id=project_id)
+        )
+        scoped = True
+        scope_mode = "run"
+    else:
+        spec = _build_project_library_spec(db, project_id=project_id, full_scope=True)
+
+    spec = strip_crowd_characters_from_spec(db, project_id=project_id, spec=spec)
+    created = ensure_required_library_assets(db, project_id=project_id, user_id=user_id, spec=spec)
+    required_roles = required_library_roles(spec)
+
+    assets_by_role_all = load_latest_library_assets(db, project_id=project_id, user_id=user_id)
+    assets_by_role_for_review = {r: assets_by_role_all[r] for r in required_roles if r in assets_by_role_all}
+    review = compute_library_review(spec=spec, assets_by_role=assets_by_role_for_review)
+    missing_roles_raw = review.get("missing_roles") if isinstance(review.get("missing_roles"), list) else []
+
+    target_character_ids = _normalize_positive_int_list(character_ids or [])
+    target_character_ids_or_none: Optional[List[int]] = target_character_ids or None
+
+    character_name_by_id: Dict[int, str] = {}
+    for item in spec.get("characters", []) if isinstance(spec.get("characters"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            entity_id = int(item.get("entity_id"))
+        except Exception:  # noqa: BLE001
+            continue
+        if entity_id <= 0:
+            continue
+        name = str(item.get("name") or "").strip()
+        if _is_placeholder_entity_name(name):
+            name = ""
+        if name:
+            character_name_by_id[entity_id] = name
+
+    regenerate_roles = build_missing_character_view_regenerate_roles(
+        required_roles=required_roles,
+        missing_roles=missing_roles_raw,
+        character_ids=target_character_ids_or_none,
+    )
+    summary = build_missing_character_view_summary(
+        required_roles=required_roles,
+        missing_roles=missing_roles_raw,
+        character_ids=target_character_ids_or_none,
+        entity_names=character_name_by_id,
+    )
+    summary = [
+        row
+        for row in summary
+        if isinstance(row, dict) and isinstance(row.get("missing_views"), list) and bool(row.get("missing_views"))
+    ]
+
+    return {
+        "project_id": int(project_id),
+        "scoped": bool(scoped),
+        "scope_mode": scope_mode,
+        "run_id": safe_run_id if scoped else None,
+        "character_ids": target_character_ids,
+        "regenerate_roles": regenerate_roles,
+        "total": len(regenerate_roles),
+        "character_view_missing_summary": summary,
+        "review_missing_roles_count": len(missing_roles_raw),
+        "synced": {"created": created},
+    }
 
 
 def _resolve_library_entity_info(
@@ -729,14 +922,16 @@ def _resolve_library_entity_info(
         specs: List[Dict[str, Any]] = []
         if isinstance(scoped_spec, dict):
             specs.append(scoped_spec)
-        # 闁搞儳鍋ら埀顑藉亾闁挎稒鐭划鐘诲灳濠婂懍绱ラ柟鎵枑閺岀喖鎳滈悢娴嬪亾濠靛牊鐣辩紓浣规尰閻庮垶宕犻弽顒夋健闁?閻犱焦鍎抽悾鐐▔椤撯埛澶嬵瀲?name/descriptor
+        # 闂佹悶鍎抽崑銈夊焵椤戣棄浜鹃梺鎸庣⊕閻喚鍒掗悩璇茬伋婵犲﹤鎳嶇槐銉╂煙閹殿喖鏋戦柡宀€鍠栭幊婊堟偄濞村浜炬繝闈涚墛閻ｈ京绱撴担瑙勫鞍闁诲寒鍨跺畷鐘诲冀椤掑鍋ラ梺?闁荤姳鐒﹂崕鎶芥偩閻愵剛鈻旀い鎾煕婢跺鐎?name/descriptor
         specs.append(
-            build_library_spec(
+            strip_crowd_characters_from_spec(
                 db,
                 project_id=project_id,
-                max_characters=_env_int("DREAMWEAVER_LIBRARY_MAX_CHARACTERS", 12),
-                max_scenes=_env_int("DREAMWEAVER_LIBRARY_MAX_SCENES", 8),
-                max_props=_env_int("DREAMWEAVER_LIBRARY_MAX_PROPS", 8),
+                spec=_build_project_library_spec(
+                    db,
+                    project_id=project_id,
+                    full_scope=True,
+                ),
             )
         )
 
@@ -762,7 +957,7 @@ def _resolve_library_entity_info(
                 break
 
     if _is_placeholder_entity_name(name):
-        fallback_prefix = "角色" if entity_type == "character" else "场景" if entity_type == "scene" else "道具"
+        fallback_prefix = "瑙掕壊" if entity_type == "character" else "鍦烘櫙" if entity_type == "scene" else "閬撳叿"
         name = f"{fallback_prefix}{int(entity_id)}"
     return str(entity_type), int(entity_id), name, descriptor
 
@@ -787,9 +982,9 @@ def _build_source_text(chapters: List[Chapter]) -> str:
 
 def _quality_mode_to_runtime_config(quality_mode: Optional[str]) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     """
-    閻?UI 濞撴皜鍛暠闁瑰瓨鍔栧﹢?閻犳劑鍔戦崳娲焻婢跺顏ラ柡鍕Т閻ㄧ姵绋?pipeline 閺夆晜鍔橀、鎴﹀籍閸洖甯崇紓鍐惧枔閳?
+    闁?UI 婵炴挻鐨滈崨顔炬殸闂佺懓鐡ㄩ崝鏍э耿?闁荤姵鍔戦崝鎴﹀闯濞差亝鐒诲璺侯儏椤忋儵鏌￠崟顓炐㈤柣銊уУ缁?pipeline 闁哄鏅滈崝姗€銆侀幋锕€绫嶉柛顐ｆ礀鐢磭绱撻崘鎯ф灁闁?
 
-    閺夆晜鏌ㄥú鏍晬?image_config, qc_config, video_config)
+    闁哄鏅滈弻銊ッ洪弽顓熸櫖?image_config, qc_config, video_config)
     """
     mode = (quality_mode or "").strip().lower()
     if mode == "quality":
@@ -812,7 +1007,7 @@ def _quality_mode_to_runtime_config(quality_mode: Optional[str]) -> Tuple[Dict[s
             },
             {
                 "enable_semantic_qc": True,
-                # 閻犲浂鍘虹粻?QC 濮掓稒顭堥濠氬磻濮橈絺鍋撳鍕枙闁?+ 濡澘瀚悾濠氬灳濠靛洤浠橀柛鎺曨啇缁辨繈鏌嗛崹顔煎赋婵絽绻嬮柌?shot 闂侇喖鈧喓娈堕柣顫妺缁旀潙鈻?VLM
+                # 闁荤姴娴傞崢铏圭不?QC 婵帗绋掗…鍫ヮ敇婵犳艾纾绘慨姗堢岛閸嬫挸顭ㄩ崟顐熸灆闂?+ 婵☆偅婢樼€氼噣鎮炬繝姘伋婵犻潧娲ゆ禒姗€鏌涢幒鏇ㄥ晣缂佽鲸绻堥弻鍡涘垂椤旂厧璧嬪┑顕嗙到缁诲鏌?shot 闂備緡鍠栭埀顒傚枔濞堝爼鏌ｉ～顒€濡虹紒鏃€娼欓埢?VLM
                 "semantic_frames": "head",
                 "semantic_sample_rate": 0.6,
                 "semantic_max_checks": 12,
@@ -852,7 +1047,7 @@ def run_pipeline(
     db: Session = Depends(get_db),
 ):
     """
-    缂備礁娲﹂埅鐢稿及閻樿尙濡囨繛缈犺兌閳诲ジ鏁嶅鎰佸殺闁告瑦鐗犻妴宥夋儎椤斿墽褰块柤鍝勫亰缁辨繃绋夐懠棰濇斀闁圭瑳鍡╂斀 DreamWeaver 闁绘鍩栭埀顑跨劍濠р偓闁挎稑鐭佺换鎴﹀炊閻愪即鐛撻柣妞绘櫈閻儳顕ラ崟顏嗙憿闂傚啳鍩栭灞剧┍閳╁啩绱栭柕?
+    缂傚倷绀佸ú锕傚焻閻㈢鍙婇柣妯垮皺婵″洦绻涚紙鐘哄厡闁宠銈搁弫宥咁潩閹颁礁娈洪梺鍛婄懄閻楃娀濡村澶嬪剮妞ゆ柨澧借ぐ鍧楁煠閸濆嫬浜扮紒杈ㄧ箖缁嬪鎳犳０婵囨杸闂佸湱鐟抽崱鈺傛杸 DreamWeaver 闂佺粯顭堥崺鏍焵椤戣法鍔嶆繝褉鍋撻梺鎸庣☉閻胶鎹㈤幋锕€鐐婇柣鎰嵆閻涙捇鏌ｅ缁樻珗闁活厽鍎抽銉╁礋椤忓棛鎲块梻鍌氬暢閸╂牠顢欑仦鍓р攳闁斥晛鍟╃槐鏍煏?
     """
     project = (
         db.query(Project)
@@ -893,7 +1088,7 @@ def run_pipeline(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "message": "鐟滅増鎸告晶鐘炽亜閸︻厽绐楅柣銊ュ椤ユ捇寮?婵絾鏌х欢?闁告帒妫滄ご鎼佹偝閸パ冨殥闂佸じ绀侀悾楣冩晬鐏炶偐鐟濋柛蹇庢祰椤斿繑绋夐鈶╁亾閺傚灝鐎奸柟璇℃緛缁辫鲸淇婇崒鐐翠粯闁哄洤鐡ㄩ弫鑲╂嫚闁垮鐓€鐎点倖妞介妴宥夋儎椤旇棄鐏楅柛蹇撶墛缁斿鎮堕崱姘煎殙濡炪倕婀卞ú浼存儍?DreamWeaver runs",
+                "message": "閻熸粎澧楅幐鍛婃櫠閻樼偨浜滈柛锔诲幗缁愭鏌ｉ妸銉ヮ伃妞ゃ儲鎹囧?濠殿噯绲鹃弻褏娆?闂佸憡甯掑Λ婊勩仈閹间焦鍋濋柛銉戝啫娈ラ梻浣搞仒缁€渚€鎮炬ィ鍐╂櫖閻忕偠鍋愰悷婵嬫煕韫囧孩绁版い鏂跨箲缁嬪顢橀埗鈺佷壕闁哄倸鐏濋悗濂告煙鐠団剝绶涚紒杈哺娣囧﹪宕掗悙缈犵帛闂佸搫娲ら悺銊╁极閼测晜瀚氶梺鍨儐閻撯偓閻庣偣鍊栧浠嬪Υ瀹ュ鍎庢い鏃囨閻忔鏌涜箛鎾跺缂佹柨顭烽幃鍫曞幢濮樼厧娈欐俊鐐€曞﹢鍗灻烘导瀛樺剭?DreamWeaver runs",
                 "locked": {
                     "style_preset": exc.locked.style_preset,
                     "image_ratio": exc.locked.image_ratio,
@@ -968,7 +1163,7 @@ def run_pipeline(
 
     ctx = run_until_done(ctx)
 
-    # 闁告艾鏈鐐哄箳閵夈儱缍撳☉鏃傚枙閹倖鎯旈幙鍕濞ｅ洦绻冪€垫梹绋夋惔锛勭＝婵縿鍎扮粩鎾嚊鏉堝墽绀勫〒姘仒缁剟宕ユ惔锝囨暰濠㈣泛绉堕獮鍥ㄧ▔鎼粹槅鍤犳慨锝嗘缁?
+    # 闂佸憡鑹鹃張顒勵敆閻愬搫绠抽柕澶堝劚缂嶆挸鈽夐弮鍌氭灆闁诡垬鍊栭幆鏃堝箼閸曨厾顦繛锝呮处缁诲啰鈧灚姊圭粙澶嬫償閿涘嫮锛濆┑顔界缚閸庢壆绮╅幘顔藉殜閺夊牆澧界粈鍕€掑顑句粧缂侇煈鍓熷畷銉︽償閿濆洦鏆版繝銏ｆ硾缁夊爼鐛崶銊р枖閹肩补妲呴崵鐘虫叏閿濆棙顥栫紒?
     try:
         from app.services.dreamweaver.persistence import build_contract_from_payload, persist_contract
 
@@ -993,7 +1188,7 @@ def run_pipeline(
             progress=progress_percent(ctx.state),
         )
     except Exception:
-        # 闁告艾鏈鐐哄箳閵夈儱缍撳☉鎾崇Т濞叉粓鎷冮挊澶屾皑濠㈡儼绮剧憴锕傛嚀鐏炶棄顨涢柛婵嗙С缂嶅顨ュ畝瀣闂佹寧鐟ㄩ銈夋偨鏉堛劍锛夐煫?DB 濞撴皜鍕瑩闁?
+        # 闂佸憡鑹鹃張顒勵敆閻愬搫绠抽柕澶堝劚缂嶆挸鈽夐幘宕囆㈡繛鍙夌矒閹峰啴鎸婃径灞剧殤婵犮垺鍎肩划鍓ф喆閿曞倹鍤€閻忕偠妫勯〃娑㈡煕濠靛棛小缂傚秴顑嗛〃銉ョ暆鐎ｎ剛顦梻浣瑰閻熴劑顢氶妶澶嬪仺閺夊牄鍔嶉敍澶愮叓?DB 婵炴挻鐨滈崟顐ょ懇闂?
         pass
 
     return RunResponse(
@@ -1025,7 +1220,7 @@ def run_pipeline_async(
     db: Session = Depends(get_db),
 ):
     """
-    缂備礁娲﹂埅鐢稿及閻樿尙濡囨繛缈犺兌閳诲ジ鏁嶉崼婵堢＝婵縿鍎荤槐姘舵晬濮橆剙鏅搁柛?generation_history 妤犵偞婀瑰锔剧磼?Celery 闁圭瑳鍡╂斀闁?
+    缂傚倷绀佸ú锕傚焻閻㈢鍙婇柣妯垮皺婵″洦绻涚紙鐘哄厡闁宠銈搁弫宥夊醇濠靛牏锛濆┑顔界缚閸庤崵妲愬鑸垫櫖婵﹩鍓欓弲鎼佹煕?generation_history 濡ょ姷鍋炲﹢鐟邦潩閿斿墽纾?Celery 闂佸湱鐟抽崱鈺傛杸闂?
     """
     project = (
         db.query(Project)
@@ -1057,7 +1252,7 @@ def run_pipeline_async(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "message": "鐟滅増鎸告晶鐘炽亜閸︻厽绐楅柣銊ュ椤ユ捇寮?婵絾鏌х欢?闁告帒妫滄ご鎼佹偝閸パ冨殥闂佸じ绀侀悾楣冩晬鐏炶偐鐟濋柛蹇庢祰椤斿繑绋夐鈶╁亾閺傚灝鐎奸柟璇℃緛缁辫鲸淇婇崒鐐翠粯闁哄洤鐡ㄩ弫鑲╂嫚闁垮鐓€鐎点倖妞介妴宥夋儎椤旇棄鐏楅柛蹇撶墛缁斿鎮堕崱姘煎殙濡炪倕婀卞ú浼存儍?DreamWeaver runs",
+                "message": "閻熸粎澧楅幐鍛婃櫠閻樼偨浜滈柛锔诲幗缁愭鏌ｉ妸銉ヮ伃妞ゃ儲鎹囧?濠殿噯绲鹃弻褏娆?闂佸憡甯掑Λ婊勩仈閹间焦鍋濋柛銉戝啫娈ラ梻浣搞仒缁€渚€鎮炬ィ鍐╂櫖閻忕偠鍋愰悷婵嬫煕韫囧孩绁版い鏂跨箲缁嬪顢橀埗鈺佷壕闁哄倸鐏濋悗濂告煙鐠団剝绶涚紒杈哺娣囧﹪宕掗悙缈犵帛闂佸搫娲ら悺銊╁极閼测晜瀚氶梺鍨儐閻撯偓閻庣偣鍊栧浠嬪Υ瀹ュ鍎庢い鏃囨閻忔鏌涜箛鎾跺缂佹柨顭烽幃鍫曞幢濮樼厧娈欐俊鐐€曞﹢鍗灻烘导瀛樺剭?DreamWeaver runs",
                 "locked": {
                     "style_preset": exc.locked.style_preset,
                     "image_ratio": exc.locked.image_ratio,
@@ -1073,7 +1268,7 @@ def run_pipeline_async(
     task_id = str(uuid.uuid4())
     schema_version = request.schema_version or DREAMWEAVER_SCHEMA_VERSION
 
-    # 濞达綀娉曢弫?ASCII 闁稿繑绮岀花鎶芥晬瀹€鍕級闁稿繐绉剁槐顏堟儘娓氣偓濡埖锛愬Ο鍝勵殯闁告繂绉抽幑銏ゅ礉閳ュ啿鏅搁柛蹇嬪劙缁楀矂骞嶈椤㈡垿濡?
+    # 婵炶揪缍€濞夋洟寮?ASCII 闂佺绻戠划宀€鑺遍幎鑺ユ櫖鐎光偓閸曨亞绱氶梺绋跨箰缁夊墎妲愰鍫熷剺濞撴埃鍋撴俊顐ュ煐閿涙劕螣閸濆嫷娈梺鍛婄箓缁夋娊骞戦姀銈呯闁炽儱鍟块弲鎼佹煕韫囧鍔欑紒妤€鐭傞獮宥堫樁妞ゃ垺鍨挎俊?
     source_text = "\n\n".join(
         [
             f"{(c.title or f'Chapter {c.chapter_number}')}\n{(c.content or '')}"
@@ -1187,7 +1382,7 @@ def get_task_status(
     db: Session = Depends(get_db),
 ):
     """
-    闁哄被鍎撮妤冪磼閸ャ劉鍙洪柡鍕Т缁烘儳顕ｉ崒娑卞妱濞寸姾顕ф慨鐔兼偐閼哥鍋撴担纰樺亾?
+    闂佸搫琚崕鎾敋濡ゅ啰纾奸柛銉ｅ妷閸欐椽鏌￠崟顓炐㈢紒鐑樺劤椤曪綁宕掑☉鍗炲Ρ婵炲濮鹃褎鎱ㄩ悢鍏煎亹闁煎摜顣介崑鎾存媴绾版ê浜?
     """
     query = text(
         """
@@ -1232,8 +1427,8 @@ def get_task_status(
         except Exception:
             run_id = None
 
-    # generation_history 闁?SQLite 濡ゅ倹锚閼荤喖宕ｉ幋婵嗘櫢闁稿繈鍎插鍌炲矗椤栨繂鍘撮柛鎴ｆ楠炲洭鎯岄鐔哥暞闂佸じ绀侀崯璺ㄧ玻娓氬﹦绀夐悗浣冨閸?status 闂傗偓閹稿孩顦ч梻鍌涙綑娴犵娀鎮惧▎蹇旇含 running闁?
-    # DreamweaverProject.contract_json 闁哄嫷鍨卞ú鍧楀矗椤栫偞娴嗛柣銊ュ鐎垫梹绋婇崨顓烆嚙闊浂鍋嗛崣搴ㄦ晬鐏炶棄璁查柣顫妺缁剟宕楀鍐亢 UI 閺夌儐鍠涢妤冧沪閺囩姰浠涢柕?
+    # generation_history 闂?SQLite 婵°倕鍊归敋闁艰崵鍠栧畷锝夊箣濠靛棙娅㈤梺绋跨箞閸庢彃顪冮崒鐐茬煑妞ゆ牗绻傞崢鎾煕閹达絾顏犳鐐叉喘閹矂顢橀悢鍝ユ殲闂備礁銇樼粈渚€宕捄銊х幓濞撴艾锕︾粈澶愭倵娴ｅ啫顥嶉柛?status 闂傚倵鍋撻柟绋垮椤ρ囨⒒閸屾稒缍戝ù鐘靛█閹儳鈻庤箛鏃囧惈 running闂?
+    # DreamweaverProject.contract_json 闂佸搫瀚烽崹鍗灻洪崸妤€鐭楁い鏍仦濞村棝鏌ｉ妸銉ヮ仾閻庡灚姊圭粙濠囧川椤撶儐鍤欓棅顐㈡祩閸嬪棝宕ｆ惔銊︽櫖閻忕偠妫勭拋鏌ユ煟椤剙濡虹紒顭戝墴瀹曟顭ㄩ崘顏冧孩 UI 闁哄鍎愰崰娑㈩敋濡ゅ啩娌柡鍥╁О娴犳盯鏌?
     dw_row = None
     if isinstance(run_id, str) and run_id.strip():
         dw_row = (
@@ -1244,8 +1439,8 @@ def get_task_status(
         if dw_row is not None:
             dw_status = str(getattr(dw_row, "status", "") or "").strip().lower()
 
-            # generation_history.status 闁告瑯鍨甸崗姗€宕?SQLite 闂佸じ绀侀崯璺ㄧ玻娴ｈВ鍋撳畝鍕瘣闁哄啫鐖煎Λ鍧楀磻濠婂懏娈岄柛?queued/running闁?
-            # DreamweaverProject.status 闁哄洤鐡ㄧ敮瀛樻交閹寸姵鍩傞悗鍦仦婢х晫鎮板畝鈧慨鎼佸箑娓氬﹦绀夐柣顫妺缁剟宕楀鍐亢 UI 閻忕偞娲滈妵姘舵晬閸粎鐭岄柛瀣焹閳ь剚绮屾晶鐘虫交濞戞巻鍋撳┑濠庢船闁烩晜鐗槐婵囩▔瀹ュ懍绮甸梻鍕Ф妤犲洭鏁嶆径鍫氬亾?
+            # generation_history.status 闂佸憡鐟崹鐢稿礂濮椻偓瀹?SQLite 闂備礁銇樼粈渚€宕捄銊х幓濞达綀袙閸嬫挸鐣濋崟顒佺槪闂佸搫鍟悥鐓幬涢崸妤€纾绘繝濠傛噺濞堝矂鏌?queued/running闂?
+            # DreamweaverProject.status 闂佸搫娲ら悺銊ф暜鐎涙ɑ浜ら柟瀵稿У閸╁倿鎮楅崷顓炰沪濠⒀呮櫕閹澘鐣濋埀顒佹叏閹间礁绠戝〒姘功缁€澶愭煟椤剙濡虹紒顭戝墴瀹曟顭ㄩ崘顏冧孩 UI 闁诲繒鍋炲ú婊堝Φ濮樿埖鏅柛顐ｇ矌閻矂鏌涚€ｎ偄鐒归柍褜鍓氱划灞炬櫠閻樿櫕浜ゆ繛鎴炲坊閸嬫挸鈹戞繝搴㈣埞闂佺儵鏅滈悧顓犳濠靛洨鈻旂€广儱鎳嶇划鐢告⒒閸曨偆肖濡ょ姴娲弫宥嗗緞閸艾浜?
             if status_str == "queued":
                 if dw_status in {"running", "completed", "failed"}:
                     status_str = dw_status
@@ -1256,10 +1451,10 @@ def get_task_status(
 
             dw_progress = getattr(dw_row, "progress", None)
             if isinstance(dw_progress, int):
-                # 濞村吋锚閸樻稒鎷呯捄銊︽殢 generation_history.result 闁告劕鎳愬▓?progress/state/stage闁挎稑鐗嗛幐銊╁礂閼稿灚笑 queued -> running 闁汇劌瀚ч埀顒佺矎閹癸絿鎹勯弬銉㈠亾濠靛懍绻嗛柟顓у灲缁辨岸濡?
-                # 濞寸姴鎳庡﹢顏呯閵夈倗鐟撻柟顖氭噹閸犲本绋夌€ｎ剚鏆?DreamweaverProject 闁稿鑹鹃崢瑙勬償?闁圭粯鍔曞畷宀勬晬?
-                # - generation_history 婵炲备鍓濆﹢浣规交閺傛寧绀€ progress闁挎稑鐗撶划顖滄媼閵堝應鍋撻梻瀵哥憹闁告瑯鍨跺顒勬晬婢舵稓骞?
-                # - DreamweaverProject.progress 闁哄洦娼欓妵鍥晬閸絻鈧啰绮堥悜妯荤函闂傚牏濮撮幃妤呮⒓閼告鍞介柨娑橆槶閳?
+                # 婵炴潙鍚嬮敋闁告ɑ绋掗幏鍛崉閵婏附娈?generation_history.result 闂佸憡鍔曢幊鎰枔?progress/state/stage闂佹寧绋戦悧鍡涘箰閵娾晛绀傞柤绋跨仛绗?queued -> running 闂佹眹鍔岀€氀囧焵椤掍胶鐭庨柟鐧哥悼閹瑰嫰寮妷銏犱壕婵犻潧鎳嶇换鍡涙煙椤撗冪伈缂佽鲸宀告俊?
+                # 婵炲濮撮幊搴★耿椤忓懐顩烽柕澶堝€楅悷鎾绘煙椤栨碍鍣归柛鐘叉湰缁嬪鈧綆鍓氶弳?DreamweaverProject 闂佺顑嗛懝楣冨储鐟欏嫭鍎?闂佸湱绮崝鏇炵暦瀹€鍕櫖?
+                # - generation_history 濠电偛澶囬崜婵嗭耿娴ｈ浜ら柡鍌涘缁€鈧?progress闂佹寧绋戦悧鎾跺垝椤栨粍濯奸柕鍫濇噳閸嬫捇姊荤€靛摜鎲归梺鍛婄懐閸ㄨ泛顭囬鍕櫖濠㈣埖绋撻獮?
+                # - DreamweaverProject.progress 闂佸搫娲﹀娆撳Φ閸ヮ剚鏅柛顐祷閳ь剙鍟扮划鍫ユ倻濡崵鍑介梻鍌氱墢婵挳骞冨Δ鍛挀闁煎憡顔栭崬浠嬫煥濞戞﹩妲堕柍?
                 should_override = (not progress_from_payload) or (dw_progress > progress)
                 if should_override:
                     progress = int(dw_progress)
@@ -1305,57 +1500,37 @@ def get_asset_library(
 ):
     project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在或无权访问")
-
-    max_characters = _env_int("DREAMWEAVER_LIBRARY_MAX_CHARACTERS", 12)
-    max_scenes = _env_int("DREAMWEAVER_LIBRARY_MAX_SCENES", 8)
-    max_props = _env_int("DREAMWEAVER_LIBRARY_MAX_PROPS", 8)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="椤圭洰涓嶅瓨鍦ㄦ垨鏃犳潈璁块棶")
 
     scoped = False
+    scope_mode = "project"
     spec: Dict[str, Any]
     safe_run_id = str(run_id or "").strip()
     if safe_run_id:
-        dw_row = (
-            db.query(DreamweaverProjectModel)
-            .filter(
-                DreamweaverProjectModel.run_id == safe_run_id,
-                DreamweaverProjectModel.user_id == current_user.id,
-                DreamweaverProjectModel.source_project_id == project_id,
+        spec = (
+            _build_scoped_library_spec_from_run(
+                db,
+                project_id=project_id,
+                user_id=current_user.id,
+                run_id=safe_run_id,
+                strict=True,
             )
-            .first()
+            or empty_library_spec(project_id=project_id)
         )
-        contract = dw_row.contract_json if dw_row is not None and isinstance(getattr(dw_row, "contract_json", None), dict) else {}
-        runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
-        entities = runtime_cfg.get("script_entities") if isinstance(runtime_cfg.get("script_entities"), dict) else {}
-        spec_candidate = build_library_spec_from_script_entities(db, project_id=project_id, entities=entities)
-        has_any = any(
-            isinstance(spec_candidate.get(key), list) and len(spec_candidate.get(key) or []) > 0
-            for key in ("characters", "scenes", "props")
-        )
-        if has_any:
-            spec = spec_candidate
-            scoped = True
-        else:
-            spec = build_library_spec(db, project_id=project_id, max_characters=max_characters, max_scenes=max_scenes, max_props=max_props)
+        scoped = True
+        scope_mode = "run"
     else:
-        spec = build_library_spec(db, project_id=project_id, max_characters=max_characters, max_scenes=max_scenes, max_props=max_props)
+        spec = _build_project_library_spec(db, project_id=project_id, full_scope=True)
+    spec = strip_crowd_characters_from_spec(db, project_id=project_id, spec=spec)
     created = ensure_required_library_assets(db, project_id=project_id, user_id=current_user.id, spec=spec)
+    required = required_library_roles(spec)
+    required_set = set(required)
 
     assets_by_role_all = load_latest_library_assets(db, project_id=project_id, user_id=current_user.id)
-    assets_by_role_available = {
-        role: asset
-        for role, asset in assets_by_role_all.items()
-        if isinstance(asset, dict)
-        and isinstance(asset.get("meta"), dict)
-        and bool((asset.get("meta") or {}).get("file_available"))
-    }
-    assets_by_role_for_review = assets_by_role_available
-    if scoped:
-        required = required_library_roles(spec)
-        assets_by_role_for_review = {r: assets_by_role_available[r] for r in required if r in assets_by_role_available}
+    assets_by_role_for_review = {r: assets_by_role_all[r] for r in required if r in assets_by_role_all}
     review = compute_library_review(spec=spec, assets_by_role=assets_by_role_for_review)
 
-    # 闁稿繒鍘ч鎰板灳濠婂牜鏆曢柣銏㈠枑閸ㄦ氨妲愰悩铏稄閹煎瓨鎸撮埀顒佺箑缁楀矂寮缁侇偅绂嶈缁辨壆鎮伴妷鈺冪Х entity/descriptor闁挎稑鑻懟鐔虹磼?UI 闁圭粯鍔掔欢鐢稿矗椤栨粎妞介弶鍫熷灩濞堟垶顪€濡鍚?prompt闁?
+    # 闂佺绻掗崢褔顢欓幇鏉跨伋婵犲﹤鐗滈弳鏇㈡煟閵忋垹鏋戦柛銊︽皑濡叉劙鎮╅搹顐ょ▌闁圭厧鐡ㄩ幐鎾焵椤掍胶绠戠紒妤€鐭傚顔款樁缂佷緡鍋呯粋宥堫檪缂佽鲸澹嗛幃浼村Ψ閳哄啰啸 entity/descriptor闂佹寧绋戦懟顖炴嚐閻旇櫣纾?UI 闂佸湱绮崝鎺旀閻㈢鐭楁い鏍ㄧ矌濡炰粙寮堕崼鐔风仼婵炲牊鍨堕—鈧俊顖涱儥閸?prompt闂?
     role_to_entity: Dict[str, Dict[str, Any]] = {}
     for section_key, default_entity_type in (("characters", "character"), ("scenes", "scene"), ("props", "prop")):
         items = spec.get(section_key)
@@ -1371,7 +1546,7 @@ def get_asset_library(
                 continue
             try:
                 if str(entity_type).strip().lower() == "character":
-                    # 閻熸瑦甯熸竟濠冨緞濮樻剚娼掗悷娆愬釜缁辩櫞ront/side/back 闂侇喖鈧啎澶嬵瀲閹邦剙鐓?meta闁挎稑鐭傛导鈺呭礂?UI 闁告垼娅ｉ獮鍥灳濠婂嫭锟ラ柛姘Ф琚ㄩ柛妤嬬磿婢ф牠鍨?
+                    # 闁荤喐鐟︾敮鐔哥珶婵犲啫绶炴慨妯诲墯濞兼帡鎮峰▎鎰嚋缂佽京娅瀝ont/side/back 闂備緡鍠栭埀顒傚晭婢跺鐎查柟閭﹀墮閻?meta闂佹寧绋戦惌鍌涘閳哄懎绀?UI 闂佸憡鍨煎▍锝夌嵁閸ヮ剙鐏虫繝濠傚閿熴儵鏌涘顒傂ょ悮銊╂煕濡ゅ纾垮褎鐗犻崹?
                     mini_spec = {"characters": [{"entity_type": "character", "entity_id": int(entity_id)}], "scenes": [], "props": []}
                     for r in required_library_roles(mini_spec):
                         role_to_entity[r] = {
@@ -1392,14 +1567,32 @@ def get_asset_library(
                 "descriptor": str(item.get("descriptor") or "").strip(),
             }
 
-    for asset in assets_by_role_available.values():
+    character_ids: set[int] = set()
+    for role in required_set:
+        try:
+            entity_type, entity_id = parse_library_role(role)
+        except Exception:  # noqa: BLE001
+            continue
+        if entity_type == "character" and int(entity_id) > 0:
+            character_ids.add(int(entity_id))
+    character_rows_by_id: Dict[int, Character] = {}
+    if character_ids:
+        rows = (
+            db.query(Character)
+            .filter(Character.project_id == project_id, Character.id.in_(sorted(character_ids)))
+            .all()
+        )
+        character_rows_by_id = {int(getattr(row, "id", 0)): row for row in rows if getattr(row, "id", None) is not None}
+
+    for role in required:
+        asset = assets_by_role_all.get(role)
         if not isinstance(asset, dict):
             continue
-        role = str(asset.get("role") or "").strip()
-        if not role:
+        role_text = str(asset.get("role") or "").strip()
+        if not role_text:
             continue
         meta = asset.get("meta") if isinstance(asset.get("meta"), dict) else {}
-        entity = role_to_entity.get(role) or {}
+        entity = role_to_entity.get(role_text) or {}
         if entity:
             if not str(meta.get("entity_type") or "").strip() and str(entity.get("entity_type") or "").strip():
                 meta["entity_type"] = entity.get("entity_type")
@@ -1409,6 +1602,24 @@ def get_asset_library(
                 meta["entity_name"] = entity.get("entity_name")
             if not str(meta.get("descriptor") or "").strip() and str(entity.get("descriptor") or "").strip():
                 meta["descriptor"] = entity.get("descriptor")
+
+        # Fallback name completion for legacy assets that only have role but no entity_name.
+        if _is_placeholder_entity_name(meta.get("entity_name")):
+            try:
+                parsed_type, parsed_id = parse_library_role(role_text)
+            except Exception:  # noqa: BLE001
+                parsed_type, parsed_id = "", 0
+            if parsed_type == "character":
+                row = character_rows_by_id.get(int(parsed_id))
+                row_name = str(getattr(row, "name", "") or "").strip() if row is not None else ""
+                if row_name:
+                    meta["entity_name"] = row_name
+                    meta.setdefault("entity_type", "character")
+                    meta.setdefault("entity_id", int(parsed_id))
+                    if not str(meta.get("descriptor") or "").strip() and row is not None:
+                        row_desc = str(getattr(row, "summary", "") or "").strip() or str(getattr(row, "profile", "") or "").strip()
+                        if row_desc:
+                            meta["descriptor"] = row_desc
 
         entity_type = str(meta.get("entity_type") or "").strip()
         entity_name = str(meta.get("entity_name") or "").strip()
@@ -1430,7 +1641,7 @@ def get_asset_library(
                     style_preset=preset,
                     ratio=ratio or "",
                     style_prompt=style,
-                    role=role,
+                    role=role_text,
                     enable_anchor_analysis=False,
                     enable_descriptor_enrichment=False,
                 )
@@ -1445,7 +1656,7 @@ def get_asset_library(
                 )
             if used_fallback_prompt:
                 # Main path is already enhanced in suggest_library_prompt; keep this only for fallback.
-                suggested = _augment_library_prompt_for_role(role=role, prompt=suggested)
+                suggested = _augment_library_prompt_for_role(role=role_text, prompt=suggested)
             meta["suggested_prompt"] = suggested
             if isinstance(suggested_meta, dict) and suggested_meta:
                 meta["suggested_prompt_meta"] = suggested_meta
@@ -1455,11 +1666,35 @@ def get_asset_library(
         asset["meta"] = meta
     return {
         "project_id": project_id,
+        "scoped": bool(scoped),
+        "scope_mode": scope_mode,
+        "run_id": safe_run_id if scoped else None,
         "spec": spec,
         "review": review,
-        "assets": list(assets_by_role_available.values()),
+        "assets": [assets_by_role_all[r] for r in required if r in assets_by_role_all],
         "synced": {"created": created},
     }
+
+
+@router.post("/library/{project_id}/regenerate-roles", response_model=dict)
+def suggest_asset_library_regenerate_roles(
+    project_id: int,
+    request: LibraryAutoRegenerateRolesRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在或无权限")
+
+    payload = _resolve_character_view_missing_regenerate_roles(
+        db,
+        project_id=project_id,
+        user_id=current_user.id,
+        run_id=request.run_id,
+        character_ids=request.character_ids,
+    )
+    return payload
 
 
 @router.post("/library/{project_id}/prompt-suggest", response_model=LibraryPromptSuggestResponse)
@@ -1471,11 +1706,32 @@ def suggest_asset_library_prompt(
 ):
     project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在或无权访问")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="椤圭洰涓嶅瓨鍦ㄦ垨鏃犳潈璁块棶")
 
     role = str(request.role or "").strip()
     if not role.startswith("lib_"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="鏃犳晥鐨勭礌鏉?role 鍙傛暟")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="role 参数不合法")
+
+
+    safe_run_id = str(request.run_id or "").strip()
+    if safe_run_id:
+        allowed_spec = (
+            _build_scoped_library_spec_from_run(
+                db,
+                project_id=project_id,
+                user_id=current_user.id,
+                run_id=safe_run_id,
+                strict=True,
+            )
+            or empty_library_spec(project_id=project_id)
+        )
+    else:
+        allowed_spec = _build_project_library_spec(db, project_id=project_id, full_scope=True)
+    allowed_spec = strip_crowd_characters_from_spec(db, project_id=project_id, spec=allowed_spec)
+    allowed_roles = set(required_library_roles(allowed_spec))
+    if role not in allowed_roles:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该角色不在当前素材库生成范围内（群像角色不会生成素材）")
+    ensure_required_library_assets(db, project_id=project_id, user_id=current_user.id, spec=allowed_spec)
 
     locked_cfg = get_project_locked_generation_config(db, project_id=project_id, user_id=current_user.id)
     try:
@@ -1489,7 +1745,7 @@ def suggest_asset_library_prompt(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "message": "当前项目的风格和画幅配置已锁定，重生成素材必须与锁定配置一致。请先解锁配置或切换到对应的 DreamWeaver run。",
+                "message": "当前项目的风格和画幅配置已锁定，重生素材必须与锁定配置一致。请先解锁配置或切换到对应的 DreamWeaver run。",
                 "locked": {
                     "style_preset": exc.locked.style_preset,
                     "image_ratio": exc.locked.image_ratio,
@@ -1501,24 +1757,7 @@ def suggest_asset_library_prompt(
             },
         ) from exc
 
-    max_characters = _env_int("DREAMWEAVER_LIBRARY_MAX_CHARACTERS", 12)
-    max_scenes = _env_int("DREAMWEAVER_LIBRARY_MAX_SCENES", 8)
-    max_props = _env_int("DREAMWEAVER_LIBRARY_MAX_PROPS", 8)
-
-    scoped_spec = _build_scoped_library_spec_from_run(
-        db,
-        project_id=project_id,
-        user_id=current_user.id,
-        run_id=request.run_id,
-    )
-    spec = scoped_spec or build_library_spec(
-        db,
-        project_id=project_id,
-        max_characters=max_characters,
-        max_scenes=max_scenes,
-        max_props=max_props,
-    )
-    ensure_required_library_assets(db, project_id=project_id, user_id=current_user.id, spec=spec)
+    spec = allowed_spec
 
     assets_by_role = load_latest_library_assets(db, project_id=project_id, user_id=current_user.id)
     target = assets_by_role.get(role)
@@ -1531,7 +1770,7 @@ def suggest_asset_library_prompt(
         project_id=project_id,
         role=role,
         meta=meta0,
-        scoped_spec=scoped_spec,
+        scoped_spec=spec,
     )
     request_prompt = str(request.prompt or "").strip()
     current_prompt = _meta_prompt_text(meta0)
@@ -1578,7 +1817,7 @@ def suggest_asset_library_prompt(
     except RuntimeError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"message": "鎻愮ず璇嶇敓鎴愭湇鍔℃殏鏃朵笉鍙敤锛岃绋嶅悗閲嶈瘯", "retryable": True},
+            detail={"message": "提示词建议服务暂时不可用，请稍后重试。", "retryable": True},
         ) from exc
 
     if isinstance(meta, dict):
@@ -1607,19 +1846,16 @@ def approve_asset_library(
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="?????????")
 
-    spec = build_library_spec(
-        db,
-        project_id=project_id,
-        max_characters=_env_int("DREAMWEAVER_LIBRARY_MAX_CHARACTERS", 12),
-        max_scenes=_env_int("DREAMWEAVER_LIBRARY_MAX_SCENES", 8),
-        max_props=_env_int("DREAMWEAVER_LIBRARY_MAX_PROPS", 8),
-    )
+    spec = _build_project_library_spec(db, project_id=project_id, full_scope=True)
+    spec = strip_crowd_characters_from_spec(db, project_id=project_id, spec=spec)
     created = ensure_required_library_assets(db, project_id=project_id, user_id=current_user.id, spec=spec)
+    allowed_roles = set(required_library_roles(spec))
 
     roles = request.roles
     if request.approve_all:
-        assets_by_role = load_latest_library_assets(db, project_id=project_id, user_id=current_user.id)
-        roles = list(assets_by_role.keys())
+        roles = sorted(allowed_roles)
+    else:
+        roles = [r for r in roles if r in allowed_roles]
 
     updated = approve_latest_library_assets(
         db,
@@ -1640,11 +1876,31 @@ def regenerate_asset_library(
 ):
     project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在或无权访问")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="椤圭洰涓嶅瓨鍦ㄦ垨鏃犳潈璁块棶")
 
     role = str(request.role or "").strip()
     if not role.startswith("lib_"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="鏃犳晥鐨勭礌鏉?role 鍙傛暟")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="role 参数不合法")
+    safe_run_id = str(request.run_id or "").strip()
+    if safe_run_id:
+        allowed_spec = (
+            _build_scoped_library_spec_from_run(
+                db,
+                project_id=project_id,
+                user_id=current_user.id,
+                run_id=safe_run_id,
+                strict=True,
+            )
+            or empty_library_spec(project_id=project_id)
+        )
+    else:
+        allowed_spec = _build_project_library_spec(db, project_id=project_id, full_scope=True)
+    allowed_spec = strip_crowd_characters_from_spec(db, project_id=project_id, spec=allowed_spec)
+    allowed_roles = set(required_library_roles(allowed_spec))
+    if role not in allowed_roles:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该角色不在当前素材库生成范围内（群像角色不会生成素材）")
+    ensure_required_library_assets(db, project_id=project_id, user_id=current_user.id, spec=allowed_spec)
+
 
     locked_cfg = get_project_locked_generation_config(db, project_id=project_id, user_id=current_user.id)
     try:
@@ -1658,7 +1914,7 @@ def regenerate_asset_library(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "message": "当前项目的风格和画幅配置已锁定，重生成素材必须与锁定配置一致。请先解锁配置或切换到对应的 DreamWeaver run。",
+                "message": "当前项目的风格和画幅配置已锁定，重生素材必须与锁定配置一致。请先解锁配置或切换到对应的 DreamWeaver run。",
                 "locked": {
                     "style_preset": exc.locked.style_preset,
                     "image_ratio": exc.locked.image_ratio,
@@ -1682,10 +1938,10 @@ def regenerate_asset_library(
     if not asset_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="目标素材记录不存在")
 
-    # SQLAlchemy 闁?JSON 閻庢稒顨嗛灞绢渶濡鍚囧☉鎾崇Х缁愶繝鐓?dict 闁汇劌瀚敮顐﹀捶妫颁焦鍙忛柡鈧惂鍝ュ耿閺夆晜鐟╅崳鐑藉及閹呯濠㈣泛绉撮崺妤呮焼閸喖甯抽柍銉︾矋濞插潡寮０浣虹憹闁解偓閽樺姘ㄩ柍銉︾缚閳?
+    # SQLAlchemy 闂?JSON 闁诲孩绋掗〃鍡涱敊鐏炵虎娓舵俊顖涱儥閸氬洤鈽夐幘宕囆ョ紒鎰剁節閻?dict 闂佹眹鍔岀€氼剛鏁锕€鎹跺Λ棰佺劍閸欏繘鏌￠埀顒勬儌閸濄儱鑰块柡澶嗘櫆閻熲晠宕抽悜钘夊強闁诡垎鍛攨婵犮垼娉涚粔鎾春濡ゅ懏鐒奸柛顭戝枛鐢娊鏌嶉妷锔剧煁婵炴彃娼″顒侊紣娴ｈ櫣鎲归梺瑙ｅ亾闁芥ê顦卞銊╂煃閵夛妇缂氶柍?
     current_meta = dict(asset_row.meta_json) if isinstance(asset_row.meta_json, dict) else {}
 
-    # 濮掓稒顭堥璇测柦鐠恒劍鏆忛悹鍥ュ劦閵嗗秹鎯勯鑺ヤ粯闁哄倿顣︾粩鏉戔枎?DreamWeaver run 闁汇劌瀚伴ˉ鎾诲冀婵傜甯崇紓鍐惧櫙缁辨瑩鎳熼妷褍绻佸璺哄船閸垶宕堕悙琛″亾閳ь剟宕?cinematic_realistic闁挎稑顦埀?
+    # 婵帗绋掗…鍫ヮ敇鐠囨祴鏌﹂悹鎭掑妽閺嗗繘鎮归崶銉ュ姦闁靛棗绉归幆鍕敊閼恒儰绮梺鍝勫€块。锔剧博閺夋垟鏋?DreamWeaver run 闂佹眹鍔岀€氫即藟閹捐鍐€濠靛倻顭堢敮宕囩磽閸愭儳娅欑紒杈ㄧ懇閹崇喖濡疯缁讳礁顭跨捄鍝勮埞闁割煈鍨跺畷鍫曟倷鐞涒€充壕闁逞屽墴瀹?cinematic_realistic闂佹寧绋戦ˇ顓㈠焵?
     style_prompt = os.getenv("DREAMWEAVER_LIBRARY_STYLE", "").strip()
     style_preset = normalize_style_preset(None)
     image_cfg: Dict[str, Any] = {}
@@ -1749,18 +2005,12 @@ def regenerate_asset_library(
 
     width, height, ratio = resolve_frame_size(image_cfg)
 
-    scoped_spec = _build_scoped_library_spec_from_run(
-        db,
-        project_id=project_id,
-        user_id=current_user.id,
-        run_id=request.run_id,
-    )
     entity_type, entity_id, name, descriptor = _resolve_library_entity_info(
         db,
         project_id=project_id,
         role=role,
         meta=current_meta,
-        scoped_spec=scoped_spec,
+        scoped_spec=allowed_spec,
     )
     request_prompt = str(request.prompt or "").strip()
     current_prompt = _meta_prompt_text(current_meta)
@@ -1855,9 +2105,9 @@ def regenerate_asset_library(
             return None, {}
         return asset_path, asset.get("meta") if isinstance(asset.get("meta"), dict) else {}
 
-    view_prefix = str(role or "").strip().split(":", 1)[0]
+    view_key = _character_view_from_role(role)
     prefer_view_chain_edit_base = bool(request.prefer_view_chain_edit_base)
-    if view_prefix in {"lib_character_portrait_side", "lib_character_portrait_back"}:
+    if view_key in _CHARACTER_VIEW_SEED_BASE:
         force_view_edit = bool(view_chain_force_image_edit)
         entity_id_for_view: Optional[int]
         try:
@@ -1877,37 +2127,43 @@ def regenerate_asset_library(
             edit_reference_roles.append(role_name)
 
         if entity_id_for_view is not None:
-            front_role = f"lib_character_portrait:{int(entity_id_for_view)}"
-            side_role = f"lib_character_portrait_side:{int(entity_id_for_view)}"
-            front_path, front_meta = _resolve_role_asset(front_role)
-            side_path, side_meta = _resolve_role_asset(side_role)
+            base_view = _CHARACTER_VIEW_SEED_BASE.get(view_key, "front")
+            base_role = _character_role_for_view(entity_id=int(entity_id_for_view), view=base_view)
+            extra_ref_roles = [
+                _character_role_for_view(entity_id=int(entity_id_for_view), view=v)
+                for v in _CHARACTER_VIEW_REFERENCE_EXTRA.get(view_key, [])
+            ]
+            front_role = _character_role_for_view(entity_id=int(entity_id_for_view), view="front")
+            resolve_roles = [base_role] + extra_ref_roles + [front_role]
+            resolved_assets: Dict[str, Tuple[Optional[Path], Dict[str, Any]]] = {
+                role_name: _resolve_role_asset(role_name) for role_name in resolve_roles
+            }
+            base_path, base_meta = resolved_assets.get(base_role, (None, {}))
 
             # Distinguish first generation vs iterative edit:
             # - If current view already has an image, use current view as edit base.
-            # - If current view has no image yet, use view-chain base (side <- front, back <- side).
+            # - If current view has no image yet, use view-chain base.
             if current_view_path is not None and not prefer_view_chain_edit_base:
                 edit_base_path = current_view_path
                 edit_base_meta = current_view_meta
                 edit_base_role = role
                 view_edit_base_source = "current_view"
-                if view_prefix == "lib_character_portrait_side":
-                    _append_reference(front_path, front_role)
-                else:
-                    _append_reference(side_path, side_role)
-                    _append_reference(front_path, front_role)
+                for ref_role in [base_role] + extra_ref_roles:
+                    ref_path, _ref_meta = resolved_assets.get(ref_role, (None, {}))
+                    _append_reference(ref_path, ref_role)
             else:
                 edit_base_path = None
                 edit_base_meta = {}
                 edit_base_role = ""
                 view_edit_base_source = "view_chain_forced" if prefer_view_chain_edit_base else "view_chain"
-                if view_prefix == "lib_character_portrait_side":
-                    edit_base_path = front_path
-                    edit_base_meta = front_meta
-                    edit_base_role = front_role
-                else:
-                    edit_base_path = side_path
-                    edit_base_meta = side_meta
-                    edit_base_role = side_role
+                edit_base_path = base_path
+                edit_base_meta = base_meta if isinstance(base_meta, dict) else {}
+                edit_base_role = base_role
+                for ref_role in extra_ref_roles:
+                    ref_path, _ref_meta = resolved_assets.get(ref_role, (None, {}))
+                    _append_reference(ref_path, ref_role)
+                if front_role != base_role:
+                    front_path, _front_meta = resolved_assets.get(front_role, (None, {}))
                     _append_reference(front_path, front_role)
 
         if force_view_edit and edit_base_path is None:
@@ -1955,7 +2211,7 @@ def regenerate_asset_library(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
-                    "message": "当前视角强制图像编辑，画幅需与参考图一致。",
+                    "message": "当前视角强制图像编辑，画幅必须与参考图一致。",
                     "code": "force_view_edit_ratio_mismatch",
                     "role": role,
                     "base_ratio": base_ratio,
@@ -1968,7 +2224,7 @@ def regenerate_asset_library(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
-                    "message": "当前视角强制图像编辑，分辨率需与参考图一致。",
+                    "message": "当前视角强制图像编辑，分辨率必须与参考图一致。",
                     "code": "force_view_edit_resolution_mismatch",
                     "role": role,
                     "base_width": base_width,
@@ -2063,10 +2319,7 @@ def regenerate_asset_library(
             }
             if (
                 force_view_edit
-                and (
-                    view_prefix == "lib_character_portrait_side"
-                    or (view_prefix == "lib_character_portrait_back" and view_chain_back_multi_ref)
-                )
+                and (view_key != "back" or view_chain_back_multi_ref)
                 and edit_multi_ref_enabled
                 and bool(getattr(image_edit, "supports_multi_image", False))
                 and edit_reference_paths
@@ -2087,7 +2340,7 @@ def regenerate_asset_library(
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail={
-                        "message": "图像生成服务暂时不可用，请稍后重试",
+                        "message": "图像生成服务暂时不可用，请稍后重试。",
                         "retryable": True,
                         "via": "image_edit",
                         "decision": {**decision, "fallback_to": "disabled"},
@@ -2123,7 +2376,7 @@ def regenerate_asset_library(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
-                    "message": "生成失败：提示词触发内容安全限制，请调整后重试",
+                    "message": "生成失败：提示词触发内容安全限制，请调整后重试。",
                     "code": "DataInspectionFailed",
                     "retryable": False,
                     "via": via,
@@ -2136,7 +2389,7 @@ def regenerate_asset_library(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
-                "message": "图像生成服务暂时不可用，请稍后重试",
+                "message": "图像生成服务暂时不可用，请稍后重试。",
                 "retryable": True,
                 "via": via,
                 "decision": decision,
@@ -2267,8 +2520,8 @@ def upload_library_asset_file(
     db: Session = Depends(get_db),
 ):
     """
-    闁归潧顑呮慨鈺傜▔婵犱胶鐐婇柡鍥ㄥ瀹曞弶銇勯崷顓熺獥缂佺嫏鍛槺闁哄鍔曠花杈╂導閸曨亪鐛撻柨娑樻饯ib_*闁挎稑顦埀?
-    闂傚嫭鍔曢崺妤呮晬濮橆偆鐭岄柛蹇庢祰椤?PNG闁挎稒绋掗弸鍐╃閺堢數绐楅悷鏇炴濞插﹪宕樺▎蹇撳汲閻犲洢鍎寸粊顐ｇ瑜忓▓?uri 閻犱警鍨扮欢鐐烘晬濞戞鐟愬ù鑲╁Т閹鎳涢鍕楅柡宥呮穿椤斿洦绋夐崫鍕閻庡厜鍓濋悧鎶芥晬閸у嵅proved=false闁挎稑顦埀?
+    闂佸綊娼ч鍛叏閳哄倻鈻斿┑鐘辫兌閻愬﹪鏌￠崶銊ヮ嚋鐎规洖寮堕妵鍕捶椤撶喓鐛ョ紓浣哄珡閸涱垼妲洪梺鍝勵槹閸旀洜鑺辨潏鈺傚皫闁告洦浜悰鎾绘煥濞戞ɑ楗痠b_*闂佹寧绋戦ˇ顓㈠焵?
+    闂傚倸瀚崝鏇㈠春濡ゅ懏鏅慨姗嗗亞閻矂鏌涜箛搴㈢グ妞?PNG闂佹寧绋掔粙鎺楀几閸愨晝顩烽柡鍫㈡暩缁愭鎮烽弴鐐搭棤婵炴彃锕畷妯衡枎韫囨挸姹查柣鐘叉储閸庡绮婇锝囶洸鐟滃繐鈻?uri 闁荤姳璀﹂崹鎵閻愮儤鏅繛鎴烆殘閻熸劕霉閼测晛孝闁诡喗顨婇幊娑㈩敂閸曨倣妤呮煛瀹ュ懏绌挎い鏂挎处缁嬪宕崟顓狀€€闁诲骸鍘滈崜婵嬫偋閹惰姤鏅柛褍宓卲roved=false闂佹寧绋戦ˇ顓㈠焵?
     """
     row = (
         db.query(DreamweaverAssetModel, DreamweaverProjectModel)
@@ -2343,7 +2596,7 @@ def list_project_runs(
     db: Session = Depends(get_db),
 ):
     """
-    闁告帗顨呴崵顓㈠箰閸パ呮毎濡炪倕婀卞ú鐗堢▔鐎ｎ剚鐣?DreamWeaver 闁告ê妫楄ぐ?runs闁挎稑鐗忛弫銈嗙鎼粹€愁枀缂佹棏鍨幑銏ゅ礉?闁告ê妫楄ぐ鍓佺不閿涘嫭鍊為柨娑橆槶閳?
+    闂佸憡甯楅〃鍛村吹椤撱垹绠伴柛銉戝懏姣庢俊鐐€曞﹢鍗灻洪悧鍫⑩枖閻庯綆鍓氶悾?DreamWeaver 闂佸憡锚濡銇?runs闂佹寧绋戦悧蹇涘极閵堝棛顩查幖绮光偓鎰佹瀫缂備焦妫忛崹顖炲箲閵忋倕绀?闂佸憡锚濡銇愰崜浣轰笉闁挎稑瀚崐鐐烘煥濞戞﹩妲堕柍?
     """
     project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
     if not project:
@@ -2367,12 +2620,12 @@ def delete_project_generated(
     db: Session = Depends(get_db),
 ):
     """
-    婵炴挸鎳愰幃濠囧箰閸パ呮毎濡炪倕婀卞ú鏉款啅閼碱剚鏅搁柟瀛樺姉濞?DreamWeaver 闁告劕鎳庨鎰版晬閸粎鐟濋柛娆樺灡娴狀喗寰勫蹇曠闁?
-    - 闁告帞濞€濞呭酣宕㈤崱妤€钑?runs闁挎稑婀払 閻犱焦婢樼紞?+ runs/{run_id} 濞存籂鍛挅闁哄倸娲ｅ▎銏ゆ晬?
-    - 婵炴挸鎳愰幃濠冦亜閸︻厽绐楃紒杈╁У濞兼鎯旈幘鑸垫櫢闁瑰瓨鍔曞ù姗€鎮ч崶椋庣runs/library/project_{project_id}闁?
+    濠电偞鎸搁幊鎰板箖婵犲洤绠伴柛銉戝懏姣庢俊鐐€曞﹢鍗灻洪弶娆惧晠闁肩⒈鍓氶弲鎼佹煙鐎涙ê濮夋繛?DreamWeaver 闂佸憡鍔曢幊搴敊閹扮増鏅柛顐ｇ矌閻熸繈鏌涘▎妯虹仭濞寸媭鍠楀鍕吋韫囨洜顦梺?
+    - 闂佸憡甯炴繛鈧繛鍛叄瀹曘垽宕卞Δ鈧拺?runs闂佹寧绋戝﹢鎵?闁荤姳鐒﹀妯肩礊?+ runs/{run_id} 婵炲瓨绫傞崨顓涙寘闂佸搫鍊稿ú锝呪枎閵忋倖鏅?
+    - 濠电偞鎸搁幊鎰板箖婵犲啨浜滈柛锔诲幗缁愭绱掓潏鈺佇ｆ繛鍏碱殕閹棃骞橀懜鍨闂佺懓鐡ㄩ崝鏇灻瑰鈧幃褔宕舵搴ｎ槱runs/library/project_{project_id}闂?
 
-    濞戞挻妞芥导鈺呭礂瀹ュ懎顨涢柛婵嗙Х缁绘鎮扮仦鑹板幀闁汇劌瀚幑銏ゅ礉閳藉懐绐楅柤姹囧劚閻°劑宕?running/queued run闁挎稑濂旂槐鎵崉鐎圭姷绠栭弶鈺傜懁缁?run闁?
-    妤犵偞鍎奸悜锔芥交閸モ晝顦遍柡澶嬪姇缁ㄥ崬銆掗崨顖涘€為柨娑樻饯ibrary闁挎稑顦甸崕鎾礆閸℃劏鍋?
+    婵炴垶鎸诲鑺ュ閳哄懎绀傜€广儱鎳庨〃娑㈡煕濠靛棛啸缂佺粯顭囬幃鎵沪閼规澘骞€闂佹眹鍔岀€氼亪骞戦姀銈呯闁宠棄鎳愮粣妤呮煠濮瑰洤鍔氶柣掳鍔戝畷?running/queued run闂佹寧绋戞總鏃傛閹殿喗宕夐悗鍦Х缁犳牠寮堕埡鍌滄噥缂?run闂?
+    濡ょ姷鍋為崕濂告倻閿旇姤浜ら柛銉㈡櫇椤﹂亶鏌℃径瀣缂併劌宕妴鎺楀川椤栨稑鈧偤鏌ㄥ☉妯婚クibrary闂佹寧绋戦ˇ鐢稿磿閹绢喖绀嗛柛鈩冨姀閸?
     """
     project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
     if not project:
@@ -2414,7 +2667,7 @@ def delete_project_generated(
     deleted_library_dir = False
     deleted_library_anchor_projects = 0
     library_skipped = bool(skipped_runs)
-    library_skip_reason = "閻庢稒锚濠€顏呮交閹邦垼鏀藉☉?闁圭儤甯″Σ锔界▔椤撶姵鐣?run闁挎稑鑻崙锛勬崉鐎圭姷绠栫紒杈╁У濞兼鎯旈幘瀵割伕闁荤偛妫旀禍鎺楁焼閸喖甯崇憸鏉垮船閹奸攱绂掔拠鎻掝潳" if library_skipped else None
+    library_skip_reason = "闁诲孩绋掗敋婵犫偓椤忓懏浜ら柟閭﹀灱閺€钘夆槈?闂佸湱鍎ょ敮鈥澄ｉ敂鐣屸枖妞ゆ挾濮甸悾?run闂佹寧绋戦懟顖炲礄閿涘嫭宕夐悗鍦Х缁犳牜绱掓潏鈺佇ｆ繛鍏碱殕閹棃骞樼€靛壊浼曢梺鑽ゅ仜濡梹绂嶉幒妤佺劶闁割煈鍠栫敮宕囨喐閺夊灝鑸归柟濂告敱缁傛帞鎷犻幓鎺濇匠" if library_skipped else None
 
     runs_root = _runs_base_dir()
 
@@ -2512,7 +2765,7 @@ def get_run_script(
         .first()
     )
     if not row:
-        # 闁稿繑绮岀花鎶芥晬濮濈n 閻忓繑纰嶅﹢顓㈠箰娴ｉ鐣介柛鏍ㄧ墪閸?dreamweaver_projects 闁哄啳顔愮槐婵嬪炊閻愯　鍋撻埀顒勫礆?generation_history
+        # 闂佺绻戠划宀€鑺遍幎鑺ユ櫖婵繄顢弉 闁诲繐绻戠喊宥咃耿椤撱垹绠板ù锝夘棑閻ｄ粙鏌涢弽銊уⅹ闁?dreamweaver_projects 闂佸搫鍟抽鎰濠靛鐐婇柣鎰€€閸嬫捇鍩€椤掑嫬绀?generation_history
         gh_query = text(
             """
             SELECT gh.status, gh.result, gh.error, gh.created_at, gh.completed_at
@@ -2528,7 +2781,7 @@ def get_run_script(
         needle = f'%\"run_id\": \"{run_id}\"%'
         gh_row = db.execute(gh_query, {"user_id": current_user.id, "needle": needle}).fetchone()
         if not gh_row:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 濞戞挸绉撮悺銊╁捶閵婏箑鐏楅柡鍐У濞煎牏鎷嬮崸妤侊紪")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 婵炴垶鎸哥粔鎾偤閵娾晛鎹堕柕濠忕畱閻忔鏌￠崘顏勑ｆ繛鐓庣墢閹峰宕稿Δ渚婄椽")
 
         status_str = str(gh_row[0] or "").strip()
         result_raw = gh_row[1]
@@ -2614,10 +2867,10 @@ def update_run_script(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 濞戞挸绉撮悺銊╁捶閵婏箑鐏楅柡鍐У濞煎牏鎷嬮崸妤侊紪")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 婵炴垶鎸哥粔鎾偤閵娾晛鎹堕柕濠忕畱閻忔鏌￠崘顏勑ｆ繛鐓庣墢閹峰宕稿Δ渚婄椽")
 
     if str(row.stage or "").strip() != "waiting_script_approval":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="鐟滅増鎸告晶?run 濞戞挸绉撮ˇ鈺傜鎼粹€斥挃闁哄牜鍓欑欢鐔衡偓鍏夊墲閻楁娊姊奸懜娈垮斀")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="閻熸粎澧楅幐鍛婃櫠?run 婵炴垶鎸哥粔鎾囬埡鍌滎洸閹肩补鈧枼鎸冮梺鍝勭墱閸撴瑧娆㈤悢琛″亾閸忓澧查柣妤佸▕濮婂ジ鎳滃▓鍨杸")
 
     contract = row.contract_json if isinstance(row.contract_json, dict) else {}
     runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
@@ -2648,10 +2901,10 @@ def approve_run_script(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 濞戞挸绉撮悺銊╁捶閵婏箑鐏楅柡鍐У濞煎牏鎷嬮崸妤侊紪")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 婵炴垶鎸哥粔鎾偤閵娾晛鎹堕柕濠忕畱閻忔鏌￠崘顏勑ｆ繛鐓庣墢閹峰宕稿Δ渚婄椽")
 
     if str(row.stage or "").strip() != "waiting_script_approval":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="鐟滅増鎸告晶?run 濞戞挸绉撮ˇ鈺傜鎼粹€斥挃闁哄牜鍓欑欢鐔衡偓鍏夊墲閻楁娊姊奸懜娈垮斀")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="閻熸粎澧楅幐鍛婃櫠?run 婵炴垶鎸哥粔鎾囬埡鍌滎洸閹肩补鈧枼鎸冮梺鍝勭墱閸撴瑧娆㈤悢琛″亾閸忓澧查柣妤佸▕濮婂ジ鎳滃▓鍨杸")
 
     contract = row.contract_json if isinstance(row.contract_json, dict) else {}
     runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
@@ -2717,13 +2970,13 @@ def resume_run_async(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 濞戞挸绉撮悺銊╁捶閵婏箑鐏楅柡鍐У濞煎牏鎷嬮崸妤侊紪")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 婵炴垶鎸哥粔鎾偤閵娾晛鎹堕柕濠忕畱閻忔鏌￠崘顏勑ｆ繛鐓庣墢閹峰宕稿Δ渚婄椽")
 
     project_id = int(row.source_project_id)
 
     state = str(row.state or "").strip()
     stage = str(row.stage or "").strip()
-    # 闁稿繒鍘ч鎰版晬濮橆偆鍠橀柛蹇撶墔婵炲洭鎮?stage闁挎稑鑻崣鎯р枎閳ヨ櫕绀€闂侇偀鍋撻柛?state
+    # 闂佺绻掗崢褔顢欓幇鐗堟櫖婵﹩鍋嗛崰姗€鏌涜箛鎾跺濠电偛娲幃?stage闂佹寧绋戦懟顖炲矗閹€鏋庨柍銉ㄦ珪缁€鈧梻渚囧亐閸嬫捇鏌?state
     waiting_kind = stage or state
     start_state = "STORYBOARD"
 
@@ -2738,13 +2991,17 @@ def resume_run_async(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": "????????????", "script_review": script_review})
         start_state = "STORYBOARD"
     elif waiting_kind == "waiting_approval" or waiting_kind == "WAITING_APPROVAL":
-        spec = build_library_spec(
-            db,
-            project_id=project_id,
-            max_characters=_env_int("DREAMWEAVER_LIBRARY_MAX_CHARACTERS", 12),
-            max_scenes=_env_int("DREAMWEAVER_LIBRARY_MAX_SCENES", 8),
-            max_props=_env_int("DREAMWEAVER_LIBRARY_MAX_PROPS", 8),
+        spec = (
+            _build_scoped_library_spec_from_run(
+                db,
+                project_id=project_id,
+                user_id=current_user.id,
+                run_id=run_id,
+                strict=True,
+            )
+            or empty_library_spec(project_id=project_id)
         )
+        spec = strip_crowd_characters_from_spec(db, project_id=project_id, spec=spec)
         assets_by_role = load_latest_library_assets(db, project_id=project_id, user_id=current_user.id)
         review = compute_library_review(spec=spec, assets_by_role=assets_by_role)
         if not bool(review.get("approved")):
@@ -2773,8 +3030,8 @@ def resume_run_async(
         VALUES (:project_id, :task_type, :task_id, :status, :result, :created_at)
         """
     )
-    # 闁稿繑濞婇弫顓㈡晬濮橆偆鐭?waiting_* 缂備綀鍛暰闁汇垻鍠愰崹姘跺籍鐠佸湱绀夐柛蹇撶墛婵?DreamweaverProject 闁?status/stage/state 闁告挸绉朵簺闁?queued闁?
-    # 闁告熬绠戦崹顖炲礈瀹ュ浂浼傞柛娆樺灥閸忔﹢宕欓搹鐟扮疀闁炽儲绮岄崙鈩冩交濞戞ê寮抽梻鈧鍐︿粓闂傚啳鍩栭灞炬媴閸℃洜鐭濋柡鍕⒔閵囨氨绮垫径濠勭閻庡厜鍓濋悧鎶藉灳濠靛牊鐣遍梺鎸庣懆椤酣鏁嶉崼鐔革紜 waiting 闁绘鍩栭埀顑挎祰椤╊偊鎯勯弽锔惧晩閺夌儐鍠涢妤冪磼閹惧浜柨娑橆槶閳?
+    # 闂佺绻戞繛濠囧极椤撱垺鏅慨姗嗗亞閻?waiting_* 缂傚倷缍€閸涱垱鏆伴梺姹囧灮閸犳劙宕瑰璺虹睄閻犱礁婀辩粈澶愭煕韫囨挾澧涘┑?DreamweaverProject 闂?status/stage/state 闂佸憡鎸哥粔鏈电昂闂?queued闂?
+    # 闂佸憡鐔粻鎴﹀垂椤栫偛绀堢€广儱娴傛导鍌炴煕濞嗘ê鐏ラ柛蹇旓耿瀹曟瑩鎼归悷鎵杸闂佺偨鍎茬划宀勫礄閳╁啯浜ゆ繛鎴灻鎶芥⒒閳ь剙顭ㄩ崘锔跨矒闂傚倸鍟抽崺鏍敊鐏炵偓濯撮柛鈩冩礈閻繈鏌￠崟顐⑩挃闁靛洦姘ㄧ划鍨緞婵犲嫮顎€闁诲骸鍘滈崜婵嬫偋閹惰棄鐏虫繝闈涚墛閻ｉ亶姊洪幐搴ｆ噯妞ゎ偄閰ｉ弫宥夊醇閻旈潻绱?waiting 闂佺粯顭堥崺鏍焵椤戞寧绁版い鈺婂亰閹嫰寮介敂鎯ф櫓闁哄鍎愰崰娑㈩敋濡ゅ啰纾奸柟鎯ь嚟娴滎垶鏌ㄥ☉姗嗘Ф闁?
     row.status = "queued"
     row.state = start_state
     row.stage = stage_label(start_state_enum)
@@ -2954,7 +3211,7 @@ def confirm_video_job_async(
 
     project_id = int(getattr(row, "source_project_id", 0) or 0)
     if project_id <= 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run 缂傚倸鎼惃?source_project_id")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run 缂傚倸鍊搁幖顐︽儍?source_project_id")
 
     task_id = str(uuid.uuid4())
     start_state_enum = State.VIDEO
@@ -3138,7 +3395,7 @@ def rebuild_video_jobs(
                 break
 
     if not storyboard:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="contract 缂傚倸鎼惃?shots闁挎稑鏈Λ銈呪枖閺囥垹娅㈢€点倝缂氶～瀣紣閹存粍宕查柛鏂衡偓鍐插耿")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="contract 中缺少有效 shots，无法生成视频任务")
 
     run_dir = Path("runs") / safe_run_id
     import agents.dreamweaver as dreamweaver_mod
@@ -3170,9 +3427,9 @@ def restart_run_async(
     db: Session = Depends(get_db),
 ):
     """
-    濞寸姴瀛╃€垫氨鈧?DreamWeaver 闁绘鍩栭埀顑跨窔閸ｆ悂寮弶璺ㄧ；濠殿喖顑嗘晶鐣屾偘瀹€瀣閻熸洖妫涘ú濠傤嚕韫囨稑娅㈤悹鐑樺煀缁辨岸濡?
-    - reset_policy=downstream闁挎稒纰嶇粩濠氭偠閸℃凹鍤夐梻鍐煐椤斿矂宕ｆ繝鍌氬緭濞戞挸顑嗛悥鑸电瑜忔晶鍧楁晬閸垺鏆犲ù鐘侯嚙婵喐绗熻婢х晫鎮板畝瀣
-    - 濞存籂鍛挅闁哄倸娲ｅ▎銏☆渶濡鍚?overwrite闁挎稑鐗呯粭澶愬磻濮橆剛绉烘俊妤嬬秶缁?
+    婵炲濮寸€涒晝鈧灚姘ㄩ埀?DreamWeaver 闂佺粯顭堥崺鏍焵椤戣法绐旈柛锝嗘倐瀵剟寮剁捄銊э紱婵犳鍠栭鍡樻櫠閻ｅ本鍋樼€光偓鐎ｎ剛顦╅柣鐔告礀濡稑煤婵犲偆鍤曢煫鍥ㄧ☉濞呫垽鎮归悜妯虹厐缂佽鲸宀告俊?
+    - reset_policy=downstream闂佹寧绋掔喊宥囩博婵犳碍鍋犻柛鈩冨嚬閸ゅ姊婚崘顓炵厫妞ゆ柨鐭傚畷锝嗙節閸屾艾绶繛鎴炴尭椤戝棝鎮ラ懜鐢殿洸鐟滃繑鏅堕崸妤佹櫖闁割偁鍨洪弳鐘裁归悩渚殭濠殿喚鍠愮粭鐔活槼濠⒀呮櫕閹澘鐣濈€ｎ剛顦?
+    - 婵炲瓨绫傞崨顓涙寘闂佸搫鍊稿ú锝呪枎閵忊槅娓舵俊顖涱儥閸?overwrite闂佹寧绋戦悧鍛箔婢舵劕纾绘慨姗嗗墰缁夌儤淇婂Δ瀣Ф缂?
     """
     row = (
         db.query(DreamweaverProjectModel)
@@ -3239,6 +3496,44 @@ def restart_run_async(
     shot_ids = _normalize_str_list(request.shot_ids)
     cam_idxs = _normalize_int_list(request.cam_idxs)
     asset_roles = _normalize_str_list(request.asset_roles)
+    auto_asset_roles_from_missing_views = bool(request.auto_asset_roles_from_missing_views)
+    auto_asset_character_ids = _normalize_positive_int_list(request.auto_asset_character_ids)
+
+    if auto_asset_roles_from_missing_views and asset_roles:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="auto_asset_roles_from_missing_views 与 asset_roles 不能同时传入",
+        )
+    if auto_asset_roles_from_missing_views and start_state_raw != "ASSET_LIBRARY":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="auto_asset_roles_from_missing_views 仅支持 ASSET_LIBRARY 阶段",
+        )
+    if auto_asset_roles_from_missing_views and (shot_ids or cam_idxs):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="auto_asset_roles_from_missing_views 不能与 shot_ids/cam_idxs 同时使用",
+        )
+    if auto_asset_roles_from_missing_views:
+        auto_roles_payload = _resolve_character_view_missing_regenerate_roles(
+            db,
+            project_id=project_id,
+            user_id=current_user.id,
+            run_id=run_id,
+            character_ids=auto_asset_character_ids,
+        )
+        raw_auto_roles = auto_roles_payload.get("regenerate_roles")
+        asset_roles = (
+            _normalize_str_list(raw_auto_roles)
+            if isinstance(raw_auto_roles, list)
+            else []
+        )
+        if not asset_roles:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="当前范围内未发现缺失的角色视角素材，无需自动补生",
+            )
+
     if shot_ids and cam_idxs:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="shot_ids ? cam_idxs ?????")
     if cam_idxs and asset_roles:
@@ -3270,6 +3565,26 @@ def restart_run_async(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="?? shot_ids/asset_roles ????? reset_policy=downstream",
         )
+    if asset_roles:
+        allowed_spec = (
+            _build_scoped_library_spec_from_run(
+                db,
+                project_id=project_id,
+                user_id=current_user.id,
+                run_id=run_id,
+                strict=True,
+            )
+            or empty_library_spec(project_id=project_id)
+        )
+        allowed_spec = strip_crowd_characters_from_spec(db, project_id=project_id, spec=allowed_spec)
+        allowed_roles = set(required_library_roles(allowed_spec))
+        filtered_roles = [role for role in asset_roles if role in allowed_roles]
+        if not filtered_roles:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="asset_roles 不在当前素材库可生成范围内（群像角色不会生成素材）",
+            )
+        asset_roles = filtered_roles
 
     task_id = str(uuid.uuid4())
     try:
@@ -3357,7 +3672,7 @@ def delete_run(
     db: Session = Depends(get_db),
 ):
     """
-    闁告帞濞€濞呭酣骞愰崶褏鏆?DreamWeaver run闁挎稑鐗忔鍥嚂閺冣偓缁斿鎮?DB 閻犱焦婢樼紞宥嗙▔?runs/{run_id} 濞存籂鍛挅闁挎稑顦埀?
+    闂佸憡甯炴繛鈧繛鍛叄楠炴劙宕惰閺?DreamWeaver run闂佹寧绋戦悧蹇旑殽閸ヮ剚鍤傞柡鍐ｅ亾缂佹柨顭烽幃?DB 闁荤姳鐒﹀妯肩礊瀹ュ棛鈻?runs/{run_id} 婵炲瓨绫傞崨顓涙寘闂佹寧绋戦ˇ顓㈠焵?
     """
     safe_run_id = _normalize_run_id(run_id)
 
@@ -3531,7 +3846,7 @@ def list_run_events(
     db: Session = Depends(get_db),
 ):
     """
-    闁兼儳鍢茶ぐ?DreamWeaver run 濞存粌顑勫▎銏犆规笟濠勭闁活潿鍔嬬花顒勫礈瀹ュ浂浼傞柛銉у仦閺?闁哄偆鍘鹃崵搴ｆ偘閵夈儰缂夐柨娑橆槶閳?
+    闂佸吋鍎抽崲鑼躲亹?DreamWeaver run 婵炲瓨绮岄鍕枎閵忕妴瑙勭瑹婵犲嫮顦╅梺娲绘娇閸斿鑺遍鍕鐎广儱娴傛导鍌炴煕閵壯冧沪闁?闂佸搫鍋嗛崢楣冨吹鎼达絾鍋橀柕澶堝劙缂傚鏌ㄥ☉姗嗘Ф闁?
     """
     row = (
         db.query(DreamweaverProjectModel)
@@ -3595,12 +3910,12 @@ def upload_run_shot_asset_file(
     db: Session = Depends(get_db),
 ):
     """
-    闁归潧顑呮慨鈺傜▔婵犱胶鐐婇柡鍥ㄥ瀹曟煡骞愰崶褏鏆?run 闁汇劌瀚伴弳鍛緞鐎靛摜顦遍柡澶嬪姂閳?
+    闂佸綊娼ч鍛叏閳哄倻鈻斿┑鐘辫兌閻愬﹪鏌￠崶銊ヮ嚋鐎规洘鐓￠獮鎰板炊瑜忛弳?run 闂佹眹鍔岀€氫即寮抽崨顔肩窞閻庨潧鎽滈ˇ閬嶆煛婢跺濮傞柍?
 
-    闂傚嫭鍔曢崺妤呮晬?
-    - 濞寸姴鎳庨崢鎴犳媼濮濆矈娲柣鈺傜壄缁辩櫠ead_frame/tail_frame/mid_frame闁挎稑婀G闁挎稑顦粭?video_clip闁挎稑婀4闁挎稑顦埀?
-    - run 濞戞挸绉烽崗妯诲緞閸曨亞鑹?running 闁绘鍩栭埀顑块檷閳?
-    - 闁哄倸娲ｅ▎銏ゅ矗椤忓啰绐楅柛鎰懃閸?runs/{run_id}/ 濞戞挸顑囧▓鎴﹀炊閸濆嫮鏆伴柛娑滄閹洜鎹勯姘辩獮闁挎稑鐗撴导鈺呭礂瀹ュ牏鐔呯€垫澘瀚弫鐐哄礂閵夘垳绀嗛柕?
+    闂傚倸瀚崝鏇㈠春濡ゅ懏鏅?
+    - 婵炲濮撮幊搴ㄥ储閹寸姵濯兼慨婵嗙焾濞差剟鏌ｉ埡鍌滃缂佽京娅爀ad_frame/tail_frame/mid_frame闂佹寧绋戝﹢顪擥闂佹寧绋戦ˇ顔剧箔?video_clip闂佹寧绋戝﹢顤?闂佹寧绋戦ˇ顓㈠焵?
+    - run 婵炴垶鎸哥粔鐑藉礂濡绶為柛鏇ㄤ簽閼?running 闂佺粯顭堥崺鏍焵椤戝潡妾烽柍?
+    - 闂佸搫鍊稿ú锝呪枎閵忋倕鐭楁い蹇撳暟缁愭鏌涢幇顓犳噧闁?runs/{run_id}/ 婵炴垶鎸搁鍥р枔閹达箑鐐婇柛婵嗗閺嗕即鏌涘☉婊勵棄闁诡喗娲滈幑鍕敍濮樿京鐛梺鎸庣☉閻楁挻瀵奸埡鍛鐎广儱鐗忛悢鍛偓鍨緲鐎氼參寮悙鍝勭闁靛鍨崇粈鍡涙煏?
     """
     safe_run_id = _normalize_run_id(run_id)
     safe_shot_id = str(shot_id or "").strip()
@@ -3683,7 +3998,7 @@ def upload_run_shot_asset_file(
         )
     shot["assets"] = assets
 
-    # 闁告艾鏈鐐哄礆?DB闁挎稑鐗呯粚鑸电鎼粹剝鍊电紓渚囧幖閸ㄥ綊姊介妶鍥╁煚閻?闁哄被鍎撮妤佺▔閳ь剟鎳涙潏鍓х
+    # 闂佸憡鑹鹃張顒勵敆閻愬搫绀?DB闂佹寧绋戦悧鍛矚閼哥數顩查幖绮瑰墲閸婄數绱撴笟鍥у箹闁搞劌缍婂浠嬪Χ閸モ晛鐓氶柣?闂佸搫琚崕鎾敋濡や胶鈻旈柍褜鍓熼幊娑欐綇閸撗咁槴
     episode_row = (
         db.query(DreamweaverEpisodeModel)
         .filter(DreamweaverEpisodeModel.dreamweaver_project_id == int(row.id))
@@ -3904,8 +4219,8 @@ def update_run_shot_video_prompt(
     db: Session = Depends(get_db),
 ):
     """
-    闁哄洤鐡ㄩ弻濠囧箰閸パ呮毎 run/shot 闁汇劌瀚～瀣紣閹寸偛绲圭紒鈧ウ璺ㄦГ閻熸洖妫涘ú濠囨晬閸垺鏆忓ù?VIDEO 闂傚啳鍩栭宀勬儍?prompt闁挎稑顦埀?
-    prompt 濞戞捁娅ｉ埞鏍籍閼哥數顏搁梻鍕╁€涢々顐︽儎閺嶃儮鍋?
+    闂佸搫娲ら悺銊╁蓟婵犲洤绠伴柛銉戝懏姣?run/shot 闂佹眹鍔岀€氼垶锝炵€ｎ偓绱ｉ柟瀵稿仜缁插湱绱掗埀顒併偊鐠恒劍袚闁荤喐娲栧Λ娑樏烘繝鍥ㄦ櫖闁割偁鍨洪弳蹇撁?VIDEO 闂傚倸鍟抽崺鏍敊瀹€鍕剭?prompt闂佹寧绋戦ˇ顓㈠焵?
+    prompt 婵炴垶鎹佸▍锝夊煘閺嶎厼绫嶉柤鍝ユ暩椤忔悂姊婚崟鈺佲偓娑€呴锔藉剮闁哄秲鍎崑?
     """
     safe_run_id = _normalize_run_id(run_id)
     safe_shot_id = str(shot_id or "").strip()
@@ -3964,7 +4279,7 @@ def get_run_merged_video_file(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 濞戞挸绉撮悺銊╁捶閵婏箑鐏楅柡鍐У濞煎牏鎷嬮崸妤侊紪")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 婵炴垶鎸哥粔鎾偤閵娾晛鎹堕柕濠忕畱閻忔鏌￠崘顏勑ｆ繛鐓庣墢閹峰宕稿Δ渚婄椽")
 
     contract = row.contract_json if isinstance(row.contract_json, dict) else {}
     uri: Optional[str] = None
@@ -4051,15 +4366,15 @@ def get_run_asset_file(
     db: Session = Depends(get_db),
 ):
     """
-    濞戞挸顑堝ù?濡澘瀚～宥夊箰閸パ呮毎 run 闁汇劌瀚鍥偋閳哄倹鐎ù鐘侯啇缁辨瑩宕楅幎鑺ユ殯閻?濞戞搩鍙冨Λ璺ㄦ暜?闁绘娲﹂?缂佽京濮靛妤佹償閹惧墎鎼奸柨娑橆槶閳?
-    閻庣懓顦崣蹇曠驳閺嶎偅娈ｉ柨娑欒壘瑜把囧礂娴ｇ瓔鍟呴悹浣告健濡墎鎷?run 闁?contract 濞戞搩鍘肩槐鈺呮偨閵娿劎绠栭柣?uri闁挎稑鑻懟鐔哥▔閺冨洦鍎伴柛?runs/ 闁烩晩鍠栫紞宥嗙▔鐎ｃ劉鍋?
+    婵炴垶鎸搁鍫澝?婵☆偅婢樼€氼垶锝炲澶婄闁搞儜鍛瘞 run 闂佹眹鍔岀€氼亝顨ラ崶顒佸亱闁冲搫鍊归悗顔济归悩渚晣缂佽鲸鐟╁畷妤呭箮閼恒儲娈柣?婵炴垶鎼╅崣鍐ㄎ涚捄銊︽殰?闂佺粯顨呭ú锕傤敊?缂備浇浜慨闈涱焽濡や焦鍎熼柟鎯у閹煎ジ鏌ㄥ☉姗嗘Ф闁?
+    闁诲海鎳撻ˇ顖炲矗韫囨洜椹抽柡宥庡亝濞堬綁鏌ㄥ☉娆掑鐟滄妸鍥х濞达絿鐡旈崯鍛存偣娴ｅ憡鍋ユ俊顐㈠閹?run 闂?contract 婵炴垶鎼╅崢鑲╂閳哄懏鍋ㄩ柕濞垮妿缁犳牠鏌?uri闂佹寧绋戦懟顖炴嚐閻斿摜鈻旈柡鍐ㄦ处閸庝即鏌?runs/ 闂佺儵鏅╅崰鏍礊瀹ュ棛鈻旈悗锝冨妷閸?
     """
     safe_run_id = _normalize_run_id(run_id)
     target_uri = str(uri or "").strip()
     if not target_uri:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="缂傚倸鎼惃?uri")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="缂傚倸鍊搁幖顐︽儍?uri")
     if "://" in target_uri:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="闁哄棗鍊风粭澶愬绩椤栨稑鐦弶鈺傜矌閳?uri")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="闂佸搫妫楅崐椋庣箔婢舵劕缁╂い鏍ㄧ☉閻︻噣寮堕埡鍌滅煂闁?uri")
 
     row = (
         db.query(DreamweaverProjectModel)

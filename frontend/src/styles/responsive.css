@@ -1,0 +1,460 @@
+/* ========================================
+   响应式设计全局样式
+   ======================================== */
+
+/* 响应式断点定义
+   - 手机: 320px - 767px
+   - 平板: 768px - 1024px
+   - 电脑: 1025px+
+   - 大屏: 1920px+
+*/
+
+:root {
+  /* 断点变量（CSS变量仅用于参考，实际使用媒体查询） */
+  --breakpoint-mobile: 767px;
+  --breakpoint-tablet: 1024px;
+  --breakpoint-desktop: 1025px;
+  --breakpoint-large: 1920px;
+
+  /* 响应式字体大小 */
+  --font-size-xs: clamp(0.75rem, 0.7rem + 0.25vw, 0.875rem);
+  --font-size-sm: clamp(0.875rem, 0.8rem + 0.375vw, 1rem);
+  --font-size-base: clamp(1rem, 0.9rem + 0.5vw, 1.125rem);
+  --font-size-lg: clamp(1.125rem, 1rem + 0.625vw, 1.25rem);
+  --font-size-xl: clamp(1.25rem, 1.1rem + 0.75vw, 1.5rem);
+  --font-size-2xl: clamp(1.5rem, 1.25rem + 1.25vw, 2rem);
+  --font-size-3xl: clamp(1.875rem, 1.5rem + 1.875vw, 2.5rem);
+  --font-size-4xl: clamp(2.25rem, 1.75rem + 2.5vw, 3rem);
+
+  /* 响应式间距 */
+  --spacing-xs: clamp(0.25rem, 0.2rem + 0.25vw, 0.5rem);
+  --spacing-sm: clamp(0.5rem, 0.4rem + 0.5vw, 0.75rem);
+  --spacing-md: clamp(0.75rem, 0.6rem + 0.75vw, 1rem);
+  --spacing-lg: clamp(1rem, 0.8rem + 1vw, 1.5rem);
+  --spacing-xl: clamp(1.5rem, 1.2rem + 1.5vw, 2rem);
+  --spacing-2xl: clamp(2rem, 1.5rem + 2.5vw, 3rem);
+
+  /* 响应式容器宽度 */
+  --container-mobile: 100%;
+  --container-tablet: 750px;
+  --container-desktop: 960px;
+  --container-large: 1200px;
+  --container-xl: 1400px;
+}
+
+/* 全局响应式基础样式 */
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+}
+
+body {
+  font-size: var(--font-size-base);
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 响应式容器 */
+.container-responsive {
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--spacing-md);
+  padding-right: var(--spacing-md);
+}
+
+@media (min-width: 768px) {
+  .container-responsive {
+    max-width: var(--container-tablet);
+  }
+}
+
+@media (min-width: 1025px) {
+  .container-responsive {
+    max-width: var(--container-desktop);
+  }
+}
+
+@media (min-width: 1920px) {
+  .container-responsive {
+    max-width: var(--container-xl);
+  }
+}
+
+/* 响应式网格系统 */
+.grid-responsive {
+  display: grid;
+  gap: var(--spacing-md);
+}
+
+.grid-responsive-2 {
+  grid-template-columns: repeat(1, 1fr);
+}
+
+.grid-responsive-3 {
+  grid-template-columns: repeat(1, 1fr);
+}
+
+.grid-responsive-4 {
+  grid-template-columns: repeat(1, 1fr);
+}
+
+@media (min-width: 768px) {
+  .grid-responsive-2 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .grid-responsive-3 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .grid-responsive-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1025px) {
+  .grid-responsive-3 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  
+  .grid-responsive-4 {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* 响应式 Flexbox 工具类 */
+.flex-responsive {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-md);
+}
+
+.flex-responsive-row {
+  flex-direction: column;
+}
+
+@media (min-width: 768px) {
+  .flex-responsive-row {
+    flex-direction: row;
+  }
+}
+
+.flex-responsive-col {
+  flex-direction: column;
+}
+
+/* 响应式隐藏/显示工具类 */
+.hide-mobile {
+  display: none !important;
+}
+
+.hide-tablet {
+  display: block !important;
+}
+
+.hide-desktop {
+  display: block !important;
+}
+
+.show-mobile-only {
+  display: block !important;
+}
+
+.show-tablet-only {
+  display: none !important;
+}
+
+.show-desktop-only {
+  display: none !important;
+}
+
+@media (min-width: 768px) {
+  .hide-mobile {
+    display: block !important;
+  }
+  
+  .show-mobile-only {
+    display: none !important;
+  }
+  
+  .show-tablet-only {
+    display: block !important;
+  }
+}
+
+@media (min-width: 1025px) {
+  .hide-tablet {
+    display: none !important;
+  }
+  
+  .show-tablet-only {
+    display: none !important;
+  }
+  
+  .show-desktop-only {
+    display: block !important;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1024px) {
+  .hide-tablet {
+    display: none !important;
+  }
+}
+
+@media (min-width: 1025px) {
+  .hide-desktop {
+    display: none !important;
+  }
+}
+
+/* 响应式文字对齐 */
+.text-center-mobile {
+  text-align: center;
+}
+
+@media (min-width: 1025px) {
+  .text-center-mobile {
+    text-align: left;
+  }
+}
+
+/* 响应式间距工具类 */
+.p-responsive {
+  padding: var(--spacing-md);
+}
+
+.px-responsive {
+  padding-left: var(--spacing-md);
+  padding-right: var(--spacing-md);
+}
+
+.py-responsive {
+  padding-top: var(--spacing-md);
+  padding-bottom: var(--spacing-md);
+}
+
+.m-responsive {
+  margin: var(--spacing-md);
+}
+
+.mx-responsive {
+  margin-left: var(--spacing-md);
+  margin-right: var(--spacing-md);
+}
+
+.my-responsive {
+  margin-top: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+/* 响应式卡片样式 */
+.card-responsive {
+  padding: var(--spacing-lg);
+  border-radius: clamp(8px, 1vw, 16px);
+}
+
+@media (max-width: 767px) {
+  .card-responsive {
+    padding: var(--spacing-md);
+    border-radius: 8px;
+  }
+}
+
+/* 响应式按钮 */
+.btn-responsive {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  font-size: var(--font-size-base);
+  min-height: 44px;
+  min-width: 44px;
+}
+
+@media (max-width: 767px) {
+  .btn-responsive {
+    width: 100%;
+    padding: var(--spacing-md);
+  }
+}
+
+/* 响应式输入框 */
+.input-responsive {
+  font-size: var(--font-size-base);
+  padding: var(--spacing-sm) var(--spacing-md);
+  min-height: 44px;
+}
+
+/* 响应式图片 */
+.img-responsive {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* 响应式表格 */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 767px) {
+  .table-responsive table {
+    display: block;
+  }
+  
+  .table-responsive thead {
+    display: none;
+  }
+  
+  .table-responsive tbody tr {
+    display: block;
+    margin-bottom: var(--spacing-md);
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: var(--spacing-md);
+  }
+  
+  .table-responsive tbody td {
+    display: flex;
+    justify-content: space-between;
+    padding: var(--spacing-xs) 0;
+  }
+  
+  .table-responsive tbody td::before {
+    content: attr(data-label);
+    font-weight: bold;
+    margin-right: var(--spacing-md);
+  }
+}
+
+/* 响应式导航栏 */
+.nav-responsive {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+@media (min-width: 1025px) {
+  .nav-responsive {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+}
+
+/* 响应式侧边栏 */
+.sidebar-responsive {
+  position: fixed;
+  left: -100%;
+  top: 0;
+  height: 100vh;
+  width: 280px;
+  z-index: 1000;
+  transition: left 0.3s ease;
+}
+
+.sidebar-responsive.open {
+  left: 0;
+}
+
+@media (min-width: 1025px) {
+  .sidebar-responsive {
+    position: relative;
+    left: 0;
+    width: 250px;
+    height: auto;
+  }
+}
+
+/* 响应式模态框 */
+.modal-responsive {
+  width: 90%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+@media (min-width: 768px) {
+  .modal-responsive {
+    width: 80%;
+    max-width: 600px;
+  }
+}
+
+@media (min-width: 1025px) {
+  .modal-responsive {
+    width: auto;
+    max-width: 800px;
+  }
+}
+
+/* 响应式工具提示 */
+@media (max-width: 767px) {
+  .tooltip-desktop-only {
+    display: none !important;
+  }
+}
+
+/* 响应式触摸目标大小（移动端最小 44x44px） */
+@media (max-width: 767px) {
+  .touch-target {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* 响应式滚动条 */
+@media (max-width: 767px) {
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+  }
+}
+
+/* 响应式字体粗细 */
+@media (max-width: 767px) {
+  .font-weight-mobile-normal {
+    font-weight: normal !important;
+  }
+}
+
+/* 响应式行高 */
+.line-height-responsive {
+  line-height: 1.4;
+}
+
+@media (min-width: 768px) {
+  .line-height-responsive {
+    line-height: 1.6;
+  }
+}
+
+/* 响应式过渡动画 */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* 打印样式 */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  
+  .print-break-before {
+    page-break-before: always;
+  }
+  
+  .print-break-after {
+    page-break-after: always;
+  }
+}

@@ -6,6 +6,24 @@ from typing import Any, Dict, List, Optional, Tuple
 from pipeline.media_presets import normalize_frame_ratio
 from pipeline.style_presets import normalize_style_preset
 
+_CHARACTER_VIEWS = ("front", "bust_front", "side", "bust_three_quarter", "bust_side", "back")
+_CHARACTER_VIEW_LABELS = {
+    "front": "正面全身",
+    "bust_front": "正面半身",
+    "side": "侧面全身",
+    "bust_three_quarter": "3/4半身",
+    "bust_side": "侧面半身",
+    "back": "背面全身",
+}
+_CHARACTER_ROLE_PREFIX_TO_VIEW = {
+    "lib_character_portrait": "front",
+    "lib_character_portrait_bust": "bust_front",
+    "lib_character_portrait_side": "side",
+    "lib_character_portrait_bust_three_quarter": "bust_three_quarter",
+    "lib_character_portrait_bust_side": "bust_side",
+    "lib_character_portrait_back": "back",
+}
+
 
 def _parse_entity_id_from_role(role: Any) -> Optional[int]:
     text = str(role or "").strip()
@@ -20,39 +38,60 @@ def _parse_entity_id_from_role(role: Any) -> Optional[int]:
 
 def _coerce_character_view(value: Any) -> Optional[str]:
     v = str(value or "").strip().lower()
-    if v in {"front", "side", "back"}:
+    if v in _CHARACTER_VIEWS:
         return v
     return None
 
 
 def _infer_character_view_from_role(role: Any) -> Optional[str]:
-    text = str(role or "").strip()
-    if text.startswith("lib_character_portrait_side"):
-        return "side"
-    if text.startswith("lib_character_portrait_back"):
-        return "back"
-    if text.startswith("lib_character_portrait"):
-        return "front"
-    return None
+    prefix = str(role or "").strip().split(":", 1)[0]
+    return _CHARACTER_ROLE_PREFIX_TO_VIEW.get(prefix)
 
 
-def _infer_shot_character_view_prefs(text: str) -> List[str]:
+def _infer_shot_character_view_prefs(*, text: str, shot_type: str = "") -> List[str]:
     """
-    从镜头文本中推断更需要的“角色参考视角”，用于按需注入 side/back 角色卡。
+    从镜头文本与镜头类型中推断更需要的“角色参考视角”。
     说明（KISS）：
-    - 仅做关键词触发，不做复杂 NLP；
-    - 未触发时返回空列表（保持默认只用正面角色卡）。
+    - 仅做关键词/类型触发，不做复杂 NLP；
+    - 输出稳定顺序，供匹配器按优先级补图。
     """
     t = str(text or "").lower()
+    st = str(shot_type or "").strip().lower()
     prefs: List[str] = []
-    back_keywords = ("背面", "背影", "背对", "背身", "from behind", "back view", "rear view")
-    side_keywords = ("侧面", "侧身", "侧脸", "侧视", "profile", "side view")
-    back_hits = any(k in t for k in back_keywords)
-    side_hits = any(k in t for k in side_keywords)
-    if back_hits:
-        prefs.append("back")
-    if side_hits:
-        prefs.append("side")
+
+    def _push(view: str) -> None:
+        if view in _CHARACTER_VIEWS and view not in prefs:
+            prefs.append(view)
+
+    # 1) 镜头类型先给默认偏好（用于没有明确关键词时）。
+    if st in {"extreme_close_up", "close_up"}:
+        for v in ("bust_front", "bust_three_quarter", "bust_side", "front"):
+            _push(v)
+    elif st in {"medium_close_up", "medium_shot", "medium"}:
+        for v in ("bust_front", "front", "bust_three_quarter", "side"):
+            _push(v)
+    elif st in {"wide_shot", "long_shot", "full_shot", "establishing_shot"}:
+        for v in ("front", "side", "back", "bust_front"):
+            _push(v)
+
+    # 2) 文本关键词覆盖/补充（显式表达优先）。
+    if any(k in t for k in ("背面", "背影", "背对", "背身", "from behind", "back view", "rear view")):
+        _push("back")
+    if any(k in t for k in ("侧面", "侧身", "侧脸", "侧视", "profile", "side view")):
+        _push("side")
+        _push("bust_side")
+    if any(k in t for k in ("三分之四", "四分之三", "3/4", "three quarter", "three-quarter")):
+        _push("bust_three_quarter")
+    if any(k in t for k in ("半身", "胸像", "上半身", "portrait", "head and shoulders")):
+        _push("bust_front")
+    if any(k in t for k in ("特写", "close-up", "close up", "extreme close-up", "extreme close up")):
+        _push("bust_front")
+        _push("bust_three_quarter")
+        _push("bust_side")
+
+    # 3) 兜底：始终给出稳定顺序，避免匹配器退化到随机视角。
+    for v in _CHARACTER_VIEWS:
+        _push(v)
     return prefs
 
 
@@ -147,7 +186,7 @@ def library_assets_from_payload(payload: Any) -> List[Dict[str, Any]]:
         if short_desc:
             label = f"{label}：{short_desc}"
         if entity_type == "character":
-            view_tag = {"front": "正面", "side": "侧面", "back": "背面"}.get(view or "front", "正面")
+            view_tag = _CHARACTER_VIEW_LABELS.get(view or "front", _CHARACTER_VIEW_LABELS["front"])
             label = label.replace(f"[{tag}]", f"[{tag}][{view_tag}]", 1)
 
         assets.append(
@@ -231,7 +270,7 @@ def match_library_assets_for_shot(
                 char_name_by_key[key] = name
 
             view = str(asset.get("view") or "").strip().lower()
-            if view not in {"front", "side", "back"}:
+            if view not in _CHARACTER_VIEWS:
                 view = _infer_character_view_from_role(asset.get("role")) or "front"
             char_groups[key].setdefault(view, asset)
 
@@ -263,8 +302,8 @@ def match_library_assets_for_shot(
         if k in matched_by_text:
             _push_key(k)
 
-    # 先保证“每个命中角色至少 1 张正面卡”（或退化任意可用卡），再按视角补齐 side/back
-    view_prefs = _infer_shot_character_view_prefs(text)
+    # 先保证“每个命中角色至少 1 张主参考”，再按镜头偏好补齐视角。
+    view_prefs = _infer_shot_character_view_prefs(text=text, shot_type=str(shot.get("shot_type") or ""))
     if max_character_refs > 0 and matched_keys and char_groups:
         seen_roles: set[str] = set()
 
@@ -277,8 +316,8 @@ def match_library_assets_for_shot(
             seen_roles.add(role)
             character_assets.append(a)
 
-        def _front_or_any(group: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-            for v in ("front", "side", "back"):
+        def _preferred_or_any(group: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+            for v in view_prefs:
                 a = group.get(v)
                 if isinstance(a, dict):
                     return a
@@ -287,9 +326,9 @@ def match_library_assets_for_shot(
         for k in matched_keys:
             if len(character_assets) >= max_character_refs:
                 break
-            _push_asset(_front_or_any(char_groups.get(k) or {}))
+            _push_asset(_preferred_or_any(char_groups.get(k) or {}))
 
-        # 主角色补齐：按 prefs 逐个尝试（例如背面/侧面）
+        # 主角色补齐：按 prefs 逐个尝试。
         if view_prefs and len(character_assets) < max_character_refs:
             primary = matched_keys[0]
             group = char_groups.get(primary) or {}
@@ -298,7 +337,7 @@ def match_library_assets_for_shot(
                     break
                 _push_asset(group.get(v))
 
-            # 次要角色只补首选视角 1 张，避免挤占角色覆盖面（KISS）
+            # 次要角色只补首选视角 1 张，避免挤占角色覆盖面（KISS）。
             if len(character_assets) < max_character_refs and len(matched_keys) > 1:
                 secondary_view = view_prefs[0]
                 for k in matched_keys[1:]:

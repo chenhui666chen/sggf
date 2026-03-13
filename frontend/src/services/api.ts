@@ -3,6 +3,10 @@ import axios, { AxiosInstance, AxiosError } from 'axios'
 // 在开发环境中直接连接到后端，不使用Vite代理
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 const DREAMWEAVER_SCHEMA_VERSION = '0.1.0'
+const DREAMWEAVER_LIBRARY_REGENERATE_TIMEOUT_MS = Math.max(
+  120000,
+  Number.parseInt(String(import.meta.env.VITE_DREAMWEAVER_LIBRARY_REGENERATE_TIMEOUT_MS || '600000'), 10) || 600000,
+)
 
 type DreamweaverQualityMode = 'quality' | 'cost'
 
@@ -43,6 +47,30 @@ interface DreamweaverLibraryRegenerateRequest {
   prefer_view_chain_edit_base?: boolean
 }
 
+interface DreamweaverLibraryAutoRegenerateRolesRequest {
+  run_id?: string
+  character_ids?: number[]
+}
+
+interface DreamweaverLibraryAutoRegenerateRolesResponse {
+  project_id: number
+  scoped: boolean
+  scope_mode: 'project' | 'run'
+  run_id?: string | null
+  character_ids: number[]
+  regenerate_roles: string[]
+  total: number
+  character_view_missing_summary: Array<{
+    entity_id: number
+    entity_name?: string
+    required_views: string[]
+    missing_views: string[]
+    missing_roles: string[]
+  }>
+  review_missing_roles_count: number
+  synced?: { created?: number }
+}
+
 interface DreamweaverLibraryPromptSuggestRequest {
   role: string
   run_id?: string
@@ -76,6 +104,16 @@ interface DreamweaverProjectGeneratedDeleteResponse {
   failed_runs: Array<{ run_id: string; error: string }>
 }
 
+interface FrontendEventPayload {
+  event: string
+  module?: string
+  action?: string
+  labels?: Record<string, string>
+  value?: number
+  duration_ms?: number
+  success?: boolean
+}
+
 interface DreamweaverScriptUpdateRequest {
   script_text: string
 }
@@ -100,6 +138,8 @@ interface DreamweaverRestartRequest {
   shot_ids?: string[]
   cam_idxs?: number[]
   asset_roles?: string[]
+  auto_asset_roles_from_missing_views?: boolean
+  auto_asset_character_ids?: number[]
 }
 
 interface DreamweaverVideoJobConfirmAsyncResponse {
@@ -725,8 +765,19 @@ class ApiClient {
 
   regenerateDreamweaverLibraryAsset(projectId: number, payload: DreamweaverLibraryRegenerateRequest) {
     return this.client.post(`/api/v1/dreamweaver/library/${projectId}/regenerate`, payload, {
-      timeout: 120000,
+      timeout: DREAMWEAVER_LIBRARY_REGENERATE_TIMEOUT_MS,
     })
+  }
+
+  suggestDreamweaverLibraryRegenerateRoles(
+    projectId: number,
+    payload: DreamweaverLibraryAutoRegenerateRolesRequest,
+  ) {
+    return this.client.post<DreamweaverLibraryAutoRegenerateRolesResponse>(
+      `/api/v1/dreamweaver/library/${projectId}/regenerate-roles`,
+      payload,
+      { timeout: 15000 },
+    )
   }
 
   suggestDreamweaverLibraryPrompt(projectId: number, payload: DreamweaverLibraryPromptSuggestRequest) {
@@ -872,6 +923,12 @@ class ApiClient {
     return this.client.delete(`/api/v1/dreamweaver/runs/${encodeURIComponent(runId)}`, {
       params: { delete_files: deleteFiles },
       timeout: 15000,
+    })
+  }
+
+  trackFrontendEvent(payload: FrontendEventPayload) {
+    return this.client.post('/api/v1/monitoring/frontend-event', payload, {
+      timeout: 5000,
     })
   }
 

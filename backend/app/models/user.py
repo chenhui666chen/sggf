@@ -14,9 +14,14 @@ class User(Base):
     __tablename__ = "users"
     
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    # 昵称（原 username 字段，用于展示，不作为登录凭证）
     username: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    # 邮箱（作为登录凭证）
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    # 手机号（可选，也可作为登录凭证）
+    phone: Mapped[Optional[str]] = mapped_column(String(20), unique=True, index=True, nullable=True)
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # 昵称（用于展示，与 username 相同，保留 full_name 字段以兼容）
     full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     avatar_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

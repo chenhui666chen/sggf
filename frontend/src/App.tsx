@@ -33,6 +33,7 @@ const DreamWeaverPage = lazy(() => import('@/pages/DreamWeaverPage')) // 织梦�
 const DreamWeaverRunPage = lazy(() => import('@/pages/DreamWeaverRunPage')) // 织梦映心生成页
 const DreamWeaverLibraryPage = lazy(() => import('@/pages/DreamWeaverLibraryPage')) // 织梦映心项目素材库
 const TrashPage = lazy(() => import('@/pages/TrashPage')) // 回收站
+const AICreationPlatformPage = lazy(() => import('@/pages/AICreationPlatformPage')) // AI 创作平台
 
 // 加载中组件
 const LoadingFallback = () => (
@@ -238,6 +239,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <TrashPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/ai-creation-platform"
+            element={
+              <ProtectedRoute>
+                <AICreationPlatformPage />
               </ProtectedRoute>
             }
           />

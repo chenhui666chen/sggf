@@ -2801,14 +2801,15 @@ export default function WorkflowControlPage() {
   }, [workflow.currentStage, conceptContent, worldContent, workflow.stages.concept.status, workflow.stages.structure.status, workflow.stages.concept.agents])
 
   return (
-    <Container maxWidth="lg" sx={{ py: 2 }}>
+    <Container maxWidth="lg" sx={{ py: { xs: 1, sm: 2 }, px: { xs: 1, sm: 2 } }}>
       {/* 顶部区域：返回按钮 + 标题居中 */}
       <Box sx={{ 
         display: 'flex', 
         alignItems: 'center', 
         justifyContent: 'space-between',
-        mb: 2,
+        mb: { xs: 1.5, sm: 2 },
         py: 1,
+        position: 'relative',
       }}>
         {/* 返回按钮 */}
         <Button
@@ -2819,7 +2820,12 @@ export default function WorkflowControlPage() {
           }}
           variant="outlined"
           size="small"
-          sx={{ py: 0.5, px: 1.5, fontSize: '0.8rem' }}
+          sx={{ 
+            py: { xs: 0.4, sm: 0.5 }, 
+            px: { xs: 1, sm: 1.5 }, 
+            fontSize: { xs: '0.75rem', sm: '0.8rem' },
+            minHeight: { xs: 32, sm: 36 }
+          }}
         >
           返回
         </Button>
@@ -2828,7 +2834,7 @@ export default function WorkflowControlPage() {
         <Box sx={{ 
           display: 'flex', 
           alignItems: 'center', 
-          gap: 1,
+          gap: { xs: 0.5, sm: 1 },
           position: 'absolute',
           left: '50%',
           transform: 'translateX(-50%)',
@@ -2836,7 +2842,7 @@ export default function WorkflowControlPage() {
           <Typography 
             component="span" 
             sx={{ 
-              fontSize: '1.8rem',
+              fontSize: { xs: '1.2rem', sm: '1.5rem', md: '1.8rem' },
               animation: 'float 3s ease-in-out infinite',
               '@keyframes float': {
                 '0%, 100%': { transform: 'translateY(0)' },
@@ -2855,7 +2861,7 @@ export default function WorkflowControlPage() {
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
               fontStyle: 'italic',
-              letterSpacing: '2px',
+              letterSpacing: { xs: '1px', sm: '2px' },
               textShadow: '2px 2px 4px rgba(0,0,0,0.1)',
               animation: 'shimmer 3s ease-in-out infinite',
               '@keyframes shimmer': {
@@ -2864,6 +2870,7 @@ export default function WorkflowControlPage() {
                 '100%': { backgroundPosition: '0% 50%' },
               },
               backgroundSize: '200% 200%',
+              fontSize: { xs: '1.1rem', sm: '1.4rem', md: '1.5rem' }
             }}
           >
             灵感方舟
@@ -2871,13 +2878,13 @@ export default function WorkflowControlPage() {
         </Box>
 
         {/* 右侧占位，保持平衡 */}
-        <Box sx={{ width: 60 }} />
+        <Box sx={{ width: { xs: 40, sm: 60 } }} />
       </Box>
 
       {/* 项目信息 */}
       {(currentProject || workflow.projectId) && (
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1.5, flexWrap: 'wrap', mb: 2 }}>
-          <Typography variant="body2" color="text.secondary">
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: { xs: 1, sm: 1.5 }, flexWrap: 'wrap', mb: { xs: 1.5, sm: 2 } }}>
+          <Typography variant="body2" color="text.secondary" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
             当前项目:
           </Typography>
           {currentProject && (
@@ -2886,7 +2893,7 @@ export default function WorkflowControlPage() {
               color="primary"
               variant="outlined"
               size="small"
-              sx={{ fontSize: '0.8rem', height: '28px' }}
+              sx={{ fontSize: { xs: '0.7rem', sm: '0.8rem' }, height: { xs: 24, sm: 28 } }}
             />
           )}
           {workflow.projectId && (
@@ -2894,7 +2901,7 @@ export default function WorkflowControlPage() {
               label={`ID: ${workflow.projectId}`}
               variant="outlined"
               size="small"
-              sx={{ height: '28px' }}
+              sx={{ height: { xs: 24, sm: 28 }, fontSize: { xs: '0.7rem', sm: '0.8rem' } }}
             />
           )}
         </Box>

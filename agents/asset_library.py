@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -17,24 +18,77 @@ from pipeline.media_presets import ensure_media_payload, normalize_frame_ratio, 
 from pipeline.style_presets import ensure_style_payload
 
 
-_CHARACTER_BACKGROUND_LINE = "背景：纯灰色背景板，背景完全干净，无场景元素、无杂物、无文字、无多余人物。"
-_CHARACTER_CONSTRAINT_LINE = "约束：无文字，无水印，无logo，无边框，无拼贴。"
+_CHARACTER_BACKGROUND_LINE = "Background: solid color, clean frame, no scene elements, no clutter, no text, no extra people."
+_CHARACTER_CONSTRAINT_LINE = "Constraints: no text, no watermark, no logo, no border, no collage."
+_CHARACTER_VIEW_ORDER_DEFAULT = ["front", "bust_front", "side", "bust_three_quarter", "bust_side", "back"]
+_CHARACTER_VIEW_DEPENDENCIES = {
+    "bust_front": ["front"],
+    "side": ["front", "bust_front"],
+    "bust_three_quarter": ["bust_front", "side"],
+    "bust_side": ["bust_three_quarter", "side"],
+    "back": ["side", "front", "bust_front"],
+}
+_CHARACTER_VIEW_BASE = {
+    "bust_front": "front",
+    "side": "front",
+    "bust_three_quarter": "bust_front",
+    "bust_side": "bust_three_quarter",
+    "back": "side",
+}
+_CHARACTER_VIEW_EXTRA_REFS = {
+    "bust_front": [],
+    "side": ["bust_front"],
+    "bust_three_quarter": ["front", "side"],
+    "bust_side": ["side", "bust_front"],
+    "back": ["front", "bust_front"],
+}
+_CHARACTER_VIEW_CN_LABEL = {
+    "front": "front full-body",
+    "side": "side full-body",
+    "back": "back full-body",
+    "bust_front": "front bust",
+    "bust_three_quarter": "bust 3/4",
+    "bust_side": "side bust",
+}
 
 
 def _character_compose_line(view: str) -> str:
     if view == "side":
-        return "构图：侧面全身单人立绘，头顶到脚底完整入镜，四肢完整不裁切。"
+        return "Composition: side-view full-body single-character sheet."
     if view == "back":
-        return "构图：背面全身单人立绘，头顶到脚底完整入镜，四肢完整不裁切。"
-    return "构图：正面全身单人立绘，头顶到脚底完整入镜，四肢完整不裁切。"
+        return "Composition: back-view full-body single-character sheet."
+    if view == "bust_front":
+        return "Composition: front-view bust portrait, keep face and shoulder outfit details."
+    if view == "bust_three_quarter":
+        return "Composition: 3/4-view bust portrait."
+    if view == "bust_side":
+        return "Composition: side-view bust portrait."
+    return "Composition: front-view full-body single-character sheet."
 
 
 def _character_consistency_line(view: str) -> str:
     if view == "side":
-        return "一致性要求：与正面图保持同一角色身份锚点，不改变灰白背头、冷峻眉眼与紧抿薄唇，不改变深色高领制服与金色徽章，不改变肩部半透明数据流黑袍。"
+        return "Consistency: keep the same identity anchors as front view."
     if view == "back":
-        return "一致性要求：与正面和侧面图保持同一角色身份锚点，不改变发型轮廓、制服版型与配色、金色徽章位置及肩部半透明数据流黑袍。"
-    return "一致性要求：角色身份锚点必须保持一致，不改变灰白背头、冷峻眉眼与紧抿薄唇，不改变深色高领制服与金色徽章，不改变肩部半透明数据流黑袍。"
+        return "Consistency: keep hairstyle outline and outfit structure aligned with front/side."
+    if view == "bust_front":
+        return "Consistency: keep facial features and upper-body clothing details aligned."
+    if view == "bust_three_quarter":
+        return "Consistency: align with front bust and side full-body references."
+    if view == "bust_side":
+        return "Consistency: align with bust 3/4 and side full-body references."
+    return "Consistency: keep identity anchors stable across all views."
+
+
+def _is_character_view(value: Any) -> bool:
+    return str(value or "").strip().lower() in {
+        "front",
+        "side",
+        "back",
+        "bust_front",
+        "bust_three_quarter",
+        "bust_side",
+    }
 
 
 def _ensure_dir(path: Path) -> None:
@@ -50,6 +104,49 @@ def _safe_int(value: Any, default: int) -> int:
 
 def _safe_str(value: Any, default: str) -> str:
     return str(value) if value is not None else default
+
+
+def _workspace_root() -> Path:
+    # asset_library.py -> agents -> workspace_root
+    return Path(__file__).resolve().parents[1]
+
+
+def _backend_root() -> Path:
+    return (_workspace_root() / "backend").resolve()
+
+
+_CROWD_TOKENS = (
+    "crowd",
+    "extra",
+    "extras",
+    "group",
+    "people",
+    "bystander",
+    "background people",
+    "npc",
+)
+_CROWD_MULTI_PERSON_PATTERN = re.compile(
+    r"(?:[2-9]\\d*|[0-9]+)\s*(?:people|persons)|multi(?:-| )person|group|crowd|bystander[s]?|background people|npc[s]?|extra[s]?"
+)
+
+
+def _normalize_match_token(value: Any) -> str:
+    return str(value or "").strip().lower().replace(" ", "")
+
+
+def _is_crowd_character_entity(*, name: Any, descriptor: Any = None, importance: Any = None) -> bool:
+    compact = "|".join(
+        [
+            _normalize_match_token(name),
+            _normalize_match_token(descriptor),
+            _normalize_match_token(importance),
+        ]
+    )
+    if not compact or compact == "|":
+        return False
+    if any(token in compact for token in _CROWD_TOKENS):
+        return True
+    return bool(_CROWD_MULTI_PERSON_PATTERN.search(compact))
 
 
 def _close_adapter_session(adapter: Any) -> None:
@@ -83,18 +180,32 @@ def _env_flag(name: str, default: bool) -> bool:
 
 
 def _parse_character_views_env() -> List[str]:
-    raw = str(os.getenv("DREAMWEAVER_LIBRARY_CHARACTER_VIEWS", "front,side,back") or "").strip().lower()
+    raw = str(
+        os.getenv(
+            "DREAMWEAVER_LIBRARY_CHARACTER_VIEWS",
+            ",".join(_CHARACTER_VIEW_ORDER_DEFAULT),
+        )
+        or ""
+    ).strip().lower()
     views = [v.strip() for v in raw.split(",") if v.strip()]
     picked: List[str] = []
     for v in views:
-        if v not in {"front", "side", "back"}:
+        if not _is_character_view(v):
             continue
         if v in picked:
             continue
         picked.append(v)
     if "front" not in picked:
         picked.insert(0, "front")
-    return picked
+    ordered: List[str] = []
+    # Keep deterministic chain order while respecting user-defined subset.
+    for v in _CHARACTER_VIEW_ORDER_DEFAULT:
+        if v in picked and v not in ordered:
+            ordered.append(v)
+    for v in picked:
+        if v not in ordered:
+            ordered.append(v)
+    return ordered
 
 
 def _build_role(entity_type: str, entity_id: int, *, view: Optional[str] = None) -> str:
@@ -105,6 +216,12 @@ def _build_role(entity_type: str, entity_id: int, *, view: Optional[str] = None)
             return f"lib_character_portrait_side:{int(entity_id)}"
         if v == "back":
             return f"lib_character_portrait_back:{int(entity_id)}"
+        if v == "bust_front":
+            return f"lib_character_portrait_bust:{int(entity_id)}"
+        if v == "bust_three_quarter":
+            return f"lib_character_portrait_bust_three_quarter:{int(entity_id)}"
+        if v == "bust_side":
+            return f"lib_character_portrait_bust_side:{int(entity_id)}"
         return f"lib_character_portrait:{int(entity_id)}"
     if t == "scene":
         return f"lib_scene_card:{int(entity_id)}"
@@ -123,7 +240,7 @@ def _build_prompt(
     view: Optional[str] = None,
 ) -> str:
     style = (style_prompt or "").strip() or os.getenv(
-        "DREAMWEAVER_LIBRARY_STYLE", "写实风格，电影质感，光影真实，高清细节，统一风格"
+        "DREAMWEAVER_LIBRARY_STYLE", "cinematic realism, unified style, high detail"
     )
     ratio_norm = normalize_frame_ratio(ratio)
     name = (name or "").strip()
@@ -132,34 +249,34 @@ def _build_prompt(
     if entity_type == "character":
         v = str(view or "front").strip().lower()
         return (
-            f"风格：{style}（严格保持一致，不要混合风格）\n"
-            f"画幅：{ratio_norm}\n"
-            f"角色：{name}\n"
-            f"人物设定：{descriptor}\n"
-            f"{_character_compose_line(v)}\n"
-            f"{_CHARACTER_BACKGROUND_LINE}\n"
-            f"{_character_consistency_line(v)}\n"
+            f"Style: {style}\\n"
+            f"Ratio: {ratio_norm}\\n"
+            f"Character: {name}\\n"
+            f"Descriptor: {descriptor}\\n"
+            f"{_character_compose_line(v)}\\n"
+            f"{_CHARACTER_BACKGROUND_LINE}\\n"
+            f"{_character_consistency_line(v)}\\n"
             f"{_CHARACTER_CONSTRAINT_LINE}"
         )
     if entity_type == "scene":
         return (
-            f"风格：{style}（严格保持一致，不要混合风格）\n"
-            f"画幅：{ratio_norm}\n"
-            f"场景：{name}\n"
-            f"场景设定：{descriptor}\n"
-            "要求：无人物的环境概念图，空间结构清晰，避免文字水印。\n"
-            "约束：无文字，无水印，无logo，无边框，无拼贴。"
+            f"Style: {style}\\n"
+            f"Ratio: {ratio_norm}\\n"
+            f"Scene: {name}\\n"
+            f"Descriptor: {descriptor}\\n"
+            "Requirements: environment concept only, no characters, clean composition.\\n"
+            "Constraints: no text, no watermark, no logo, no border, no collage."
         )
     if entity_type == "prop":
         return (
-            f"风格：{style}（严格保持一致，不要混合风格）\n"
-            f"画幅：{ratio_norm}\n"
-            f"道具：{name}\n"
-            f"道具设定：{descriptor}\n"
-            "要求：单一物品特写，材质细节清晰，背景简洁干净，避免文字水印。\n"
-            "约束：无文字，无水印，无logo，无边框，无拼贴。"
+            f"Style: {style}\\n"
+            f"Ratio: {ratio_norm}\\n"
+            f"Prop: {name}\\n"
+            f"Descriptor: {descriptor}\\n"
+            "Requirements: single-object closeup, clean background, clear material details.\\n"
+            "Constraints: no text, no watermark, no logo, no border, no collage."
         )
-    return f"风格：{style}\n画幅：{ratio_norm}\n{name}\n{descriptor}\n约束：无文字，无水印，无logo，无边框，无拼贴。"
+    return f"Style: {style}\\nRatio: {ratio_norm}\\n{name}\\n{descriptor}\\nConstraints: no text, no watermark, no logo, no border, no collage."
 
 
 def _append_character_prompt_constraints(
@@ -196,6 +313,9 @@ def _append_character_prompt_constraints(
 
 
 def _library_root(project_id: int) -> Path:
+    backend_runs = _backend_root() / "runs"
+    if backend_runs.exists():
+        return backend_runs / "library" / f"project_{int(project_id)}"
     return Path("runs") / "library" / f"project_{int(project_id)}"
 
 
@@ -214,6 +334,12 @@ def _output_path(root: Path, entity_type: str, entity_id: int, *, view: Optional
             filename = f"{int(entity_id)}_side.png"
         elif v == "back":
             filename = f"{int(entity_id)}_back.png"
+        elif v == "bust_front":
+            filename = f"{int(entity_id)}_bust.png"
+        elif v == "bust_three_quarter":
+            filename = f"{int(entity_id)}_bust_34.png"
+        elif v == "bust_side":
+            filename = f"{int(entity_id)}_bust_side.png"
     return root / sub / filename
 
 
@@ -249,6 +375,9 @@ def _iter_spec_entities(spec: Dict[str, Any]) -> List[Tuple[str, int, str, str]]
             if not name:
                 continue
             descriptor = _safe_str(item.get("descriptor"), "").strip()
+            importance = _safe_str(item.get("importance") or item.get("importance_level"), "").strip()
+            if entity_type == "character" and _is_crowd_character_entity(name=name, descriptor=descriptor, importance=importance):
+                continue
             entities.append((entity_type, eid, name, descriptor))
     return entities
 
@@ -258,7 +387,15 @@ def _resolve_uri_path(uri: Any) -> Optional[Path]:
         return None
     p = Path(str(uri)).expanduser()
     if not p.is_absolute():
-        p = Path.cwd() / p
+        candidates = [
+            Path.cwd() / p,
+            _backend_root() / p,
+            _workspace_root() / p,
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        p = candidates[0]
     return p
 
 
@@ -269,6 +406,63 @@ def _asset_exists(existing: Any, *, expected: Optional[Path] = None) -> bool:
         return False
     p = _resolve_uri_path(existing.get("uri"))
     return bool(p and p.exists())
+
+
+def _build_character_view_summary(
+    *,
+    role_specs: List[Dict[str, Any]],
+    existing_by_role: Dict[str, Dict[str, Any]],
+    root: Path,
+) -> List[Dict[str, Any]]:
+    summary_by_entity: Dict[int, Dict[str, Any]] = {}
+    for spec_item in role_specs:
+        entity_type = str(spec_item.get("entity_type") or "").strip().lower()
+        if entity_type != "character":
+            continue
+        try:
+            entity_id = int(spec_item.get("entity_id") or 0)
+        except Exception:  # noqa: BLE001
+            continue
+        if entity_id <= 0:
+            continue
+        name = str(spec_item.get("entity_name") or "").strip()
+        view = spec_item.get("view")
+        view_str = str(view).strip().lower() if isinstance(view, str) and view.strip() else ""
+        role = str(spec_item.get("role") or "").strip()
+        if not role or not view_str:
+            continue
+
+        expected = _output_path(root, "character", entity_id, view=view_str)
+        ready = _asset_exists(existing_by_role.get(role), expected=expected)
+        item = summary_by_entity.setdefault(
+            entity_id,
+            {
+                "entity_id": int(entity_id),
+                "entity_name": name,
+                "required_views": [],
+                "ready_views": [],
+                "missing_views": [],
+            },
+        )
+        if view_str not in item["required_views"]:
+            item["required_views"].append(view_str)
+        target_list = item["ready_views"] if ready else item["missing_views"]
+        if view_str not in target_list:
+            target_list.append(view_str)
+
+    out: List[Dict[str, Any]] = []
+    for entity_id in sorted(summary_by_entity.keys()):
+        item = summary_by_entity[entity_id]
+        # Keep order stable and aligned with configured view order.
+        ordered_required = [v for v in _CHARACTER_VIEW_ORDER_DEFAULT if v in item["required_views"]]
+        for v in item["required_views"]:
+            if v not in ordered_required:
+                ordered_required.append(v)
+        item["required_views"] = ordered_required
+        item["ready_views"] = [v for v in ordered_required if v in item["ready_views"]]
+        item["missing_views"] = [v for v in ordered_required if v in item["missing_views"]]
+        out.append(item)
+    return out
 
 
 def run(ctx: Any) -> None:
@@ -297,7 +491,6 @@ def run(ctx: Any) -> None:
     keep_candidates = bool(image_cfg.get("keep_candidates", False))
 
     manual_mode = _env_flag("DREAMWEAVER_LIBRARY_MANUAL", True)
-    ctx.payload["asset_library_manual"] = bool(manual_mode)
 
     asset_parallelism = _parse_int(os.getenv("DREAMWEAVER_ASSET_LIBRARY_PARALLELISM"), 1)
     asset_parallelism = max(1, min(int(asset_parallelism), 8))
@@ -320,6 +513,9 @@ def run(ctx: Any) -> None:
             if len(regen_roles) >= 200:
                 break
     regen_role_set = set(regen_roles)
+    # Explicit regenerate requests should bypass passive/manual-only mode.
+    manual_mode = bool(manual_mode and not force_regenerate and not bool(regen_role_set))
+    ctx.payload["asset_library_manual"] = bool(manual_mode)
     style_prompt = str(ctx.payload.get("style_prompt") or "")
     style_preset = str(ctx.payload.get("style_preset") or "").strip()
     style_negative_prompt = str(ctx.payload.get("style_negative_prompt") or "").strip()
@@ -380,6 +576,11 @@ def run(ctx: Any) -> None:
                 if not bool(meta.get("approved")):
                     unapproved_roles.append(role)
 
+        character_view_summary = _build_character_view_summary(
+            role_specs=role_specs,
+            existing_by_role=existing_by_role,
+            root=root,
+        )
         ctx.payload["project_assets"] = [existing_by_role[r] for r in sorted(existing_by_role.keys())]
         ctx.payload["asset_library"] = {
             "project_id": project_id,
@@ -394,6 +595,9 @@ def run(ctx: Any) -> None:
             "regenerate_roles_count": len(regen_role_set),
             "regenerate_pending": len(regen_role_set),
             "current": None,
+            "manual_mode": True,
+            "character_views": list(character_views),
+            "character_view_summary": character_view_summary,
         }
         ctx.payload["asset_library_done"] = True
         ctx.payload["asset_library_requires_review"] = bool(pending_count > 0 or unapproved_roles)
@@ -524,7 +728,7 @@ def run(ctx: Any) -> None:
                         existing_ratio = str(meta.get("ratio") or "").strip()
                         existing_width = _safe_int(meta.get("width"), 0)
                         existing_height = _safe_int(meta.get("height"), 0)
-                        # 风格/画幅一致则跳过；不一致/未知则覆盖重生成，避免混合风格或画幅不一致（即便该素材已被审核通过）。
+                        # Match style/ratio/size to avoid mixing inconsistent asset variants.
                         style_ok = (not existing_style) or existing_style == style_preset
                         ratio_ok = (not existing_ratio) or normalize_frame_ratio(existing_ratio) == normalize_frame_ratio(frame_ratio)
                         size_ok = (existing_width <= 0 or existing_width == int(frame_width)) and (
@@ -557,15 +761,12 @@ def run(ctx: Any) -> None:
                                 existing["meta"] = meta
                             continue
 
-            if entity_type == "character" and view_str in {"side", "back"}:
+            if entity_type == "character" and view_str in _CHARACTER_VIEW_DEPENDENCIES:
                 dependencies: List[Tuple[str, Path]] = []
-                front_role = _build_role("character", entity_id, view="front")
-                front_path = _output_path(root, "character", entity_id, view="front")
-                dependencies.append((front_role, front_path))
-                if view_str == "back":
-                    side_role = _build_role("character", entity_id, view="side")
-                    side_path = _output_path(root, "character", entity_id, view="side")
-                    dependencies.append((side_role, side_path))
+                for dep_view in _CHARACTER_VIEW_DEPENDENCIES.get(view_str, []):
+                    dep_role = _build_role("character", entity_id, view=dep_view)
+                    dep_path = _output_path(root, "character", entity_id, view=dep_view)
+                    dependencies.append((dep_role, dep_path))
 
                 blocked = False
                 for dep_role, dep_path in dependencies:
@@ -650,14 +851,13 @@ def run(ctx: Any) -> None:
         force_view_edit = bool(
             force_view_chain_image_edit
             and entity_type == "character"
-            and view in {"side", "back"}
+            and view in _CHARACTER_VIEW_DEPENDENCIES
         )
         generation_meta: Dict[str, Any] = {}
-        if entity_type == "character" and view in {"side", "back"}:
-            front_role = _build_role("character", entity_id, view="front")
-            side_role = _build_role("character", entity_id, view="side")
-            front_expected = _output_path(root, "character", entity_id, view="front")
-            side_expected = _output_path(root, "character", entity_id, view="side")
+        if entity_type == "character" and view in _CHARACTER_VIEW_DEPENDENCIES:
+            dependency_views = _CHARACTER_VIEW_DEPENDENCIES.get(view, [])
+            base_view = _CHARACTER_VIEW_BASE.get(view or "")
+            extra_ref_views = _CHARACTER_VIEW_EXTRA_REFS.get(view, [])
 
             def _resolve_chain_path(role_name: str, expected_path: Path) -> Optional[Path]:
                 if expected_path.exists():
@@ -670,23 +870,28 @@ def run(ctx: Any) -> None:
                     return resolved_path
                 return None
 
-            front_path = _resolve_chain_path(front_role, front_expected)
-            side_path = _resolve_chain_path(side_role, side_expected)
+            chain_paths: Dict[str, Optional[Path]] = {}
+            for dep_view in dependency_views:
+                dep_role = _build_role("character", entity_id, view=dep_view)
+                dep_expected = _output_path(root, "character", entity_id, view=dep_view)
+                chain_paths[dep_view] = _resolve_chain_path(dep_role, dep_expected)
 
-            if view == "side":
-                edit_base_role = front_role
-                edit_base = front_path
-            elif view == "back":
-                edit_base_role = side_role
-                edit_base = side_path
-                if front_path is not None and enable_back_multi_ref:
-                    edit_reference_images.append(
-                        {
-                            "path": front_path,
-                            "desc": f"front character view ({name or entity_id})",
-                            "role": front_role,
-                        }
-                    )
+            if base_view:
+                edit_base_role = _build_role("character", entity_id, view=base_view)
+                edit_base = chain_paths.get(base_view)
+
+            for ref_view in extra_ref_views:
+                ref_path = chain_paths.get(ref_view)
+                if ref_path is None or ref_view == base_view:
+                    continue
+                ref_role = _build_role("character", entity_id, view=ref_view)
+                edit_reference_images.append(
+                    {
+                        "path": ref_path,
+                        "desc": f"{_CHARACTER_VIEW_CN_LABEL.get(ref_view, ref_view)} reference ({name or entity_id})",
+                        "role": ref_role,
+                    }
+                )
 
             if not (isinstance(edit_base, Path) and edit_base.exists()):
                 edit_base = None
@@ -700,12 +905,13 @@ def run(ctx: Any) -> None:
 
             if edit_base is not None and local_image_edit is not None:
                 via = "image_edit"
-                use_multi_ref = bool(view == "back" and enable_back_multi_ref and image_edit_multi_ref)
+                allow_multi_ref = bool(view != "back" or enable_back_multi_ref)
+                use_multi_ref = bool(edit_reference_images and allow_multi_ref and image_edit_multi_ref)
                 generation_meta = _generate_edit_with_candidates(
                     adapter=local_image_edit,
                     image_path=edit_base,
                     edit_prompt=prompt,
-                    reference_desc=f"正面角色卡（{name or entity_id}）",
+                    reference_desc=f"{_CHARACTER_VIEW_CN_LABEL.get(_CHARACTER_VIEW_BASE.get(view or ''), 'base')} ({name or entity_id})",
                     strength=float(image_edit_strength),
                     guidance_scale=float(image_edit_guidance),
                     base_seed=None,
@@ -886,6 +1092,11 @@ def run(ctx: Any) -> None:
     if regen_done:
         ctx.payload.pop("asset_library_regenerate_roles", None)
 
+    character_view_summary = _build_character_view_summary(
+        role_specs=role_specs,
+        existing_by_role=existing_by_role,
+        root=root,
+    )
     ctx.payload["asset_library"] = {
         "project_id": project_id,
         "generated": ready_count,
@@ -899,6 +1110,9 @@ def run(ctx: Any) -> None:
         "regenerate_roles_count": len(regen_role_set),
         "regenerate_pending": regen_pending,
         "current": current,
+        "manual_mode": False,
+        "character_views": list(character_views),
+        "character_view_summary": character_view_summary,
     }
     ctx.payload["asset_library_done"] = done
     ctx.payload["asset_library_requires_review"] = bool(done and unapproved_roles)
@@ -907,3 +1121,6 @@ def run(ctx: Any) -> None:
         ctx.payload.pop("asset_library_progress", None)
         ctx.payload.pop("asset_library_regenerate_roles", None)
         ctx.payload.pop("asset_library_regenerate_progress", None)
+
+
+

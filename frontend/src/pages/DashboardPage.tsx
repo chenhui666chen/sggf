@@ -151,6 +151,22 @@ export default function DashboardPage() {
     return genreMap[genre || ''] || genre || '未设置'
   }
 
+  // 风格对应颜色映射
+  const GENRE_COLORS: Record<string, string> = {
+    '修仙': '#e8c46a',
+    '玄幻': '#d4a0ff',
+    '奇幻': '#72e2a0',
+    '都市': '#e8a87c',
+    '言情': '#ffb5c8',
+    '耐美': '#f9a8d4',
+    '悬疑': '#f87171',
+    '科幻': '#38bdf8',
+    '纯文学': '#c8b99a',
+    '浪漫': '#fda4af',
+    '惊悚': '#fb923c',
+    '其他': '#94a3b8',
+  }
+
   useEffect(() => {
     dispatch(fetchProjects())
   }, [dispatch])
@@ -349,8 +365,8 @@ export default function DashboardPage() {
 
       // 创建一个临时项目用于工作流程
       const tempProjectData = {
-        title: 'New Novel',
-        description: 'New novel creation',
+        title: '未命名项目',
+        description: '新建创作项目',
         genre: 'Fantasy',
       }
 
@@ -596,6 +612,25 @@ export default function DashboardPage() {
   const handleCancelEditGenre = () => {
     setEditingGenreProjectId(null)
     setEditedGenre('')
+  }
+
+  // 选择风格并立即保存
+  const handleGenreMenuSelect = async (genre: string) => {
+    const projectId = editingGenreProjectId
+    if (!projectId) return
+    setEditingGenreProjectId(null)
+    setEditedGenre('')
+    try {
+      await dispatch(updateProject({ projectId, data: { genre } }))
+      dispatch(fetchProjects())
+      setSnackbarMessage(`✅ 类型已更新为：${getGenreLabel(genre)}`)
+      setSnackbarSeverity('success')
+      setSnackbarOpen(true)
+    } catch {
+      setSnackbarMessage('更新类型失败，请重试')
+      setSnackbarSeverity('error')
+      setSnackbarOpen(true)
+    }
   }
 
   const handleSaveGenre = async (projectId: number) => {
@@ -916,15 +951,21 @@ export default function DashboardPage() {
       <Box
         sx={{
           background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
-          py: 3,
-          px: 3,
+          py: { xs: 2, sm: 2.5, md: 3 },
+          px: { xs: 2, sm: 3 },
           boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
         }}
       >
         <Container maxWidth="lg">
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box sx={{ 
+            display: 'flex', 
+            flexDirection: { xs: 'column', sm: 'row' },
+            justifyContent: 'space-between', 
+            alignItems: { xs: 'flex-start', sm: 'center' },
+            gap: { xs: 1.5, sm: 0 }
+          }}>
             {/* 左侧：返回按钮 + 标题 */}
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1.5, sm: 2 } }}>
               <IconButton
                 onClick={() => navigate('/home')}
                 sx={{
@@ -938,8 +979,8 @@ export default function DashboardPage() {
               >
                 <ArrowBackIcon />
               </IconButton>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                <AutoStoriesIcon sx={{ fontSize: 32, color: 'white' }} />
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 1.5 } }}>
+                <AutoStoriesIcon sx={{ fontSize: { xs: 24, sm: 28, md: 32 }, color: 'white' }} />
                 <Box>
                   <Typography
                     variant="h5"
@@ -947,13 +988,18 @@ export default function DashboardPage() {
                       color: 'white',
                       fontWeight: 700,
                       letterSpacing: '0.5px',
+                      fontSize: { xs: '1.25rem', sm: '1.5rem', md: '1.5rem' }
                     }}
                   >
                     灵感方舟
                   </Typography>
                   <Typography
                     variant="body2"
-                    sx={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.85rem' }}
+                    sx={{ 
+                      color: 'rgba(255,255,255,0.8)', 
+                      fontSize: { xs: '0.75rem', sm: '0.85rem' },
+                      display: { xs: 'none', sm: 'block' }
+                    }}
                   >
                     小说创作 · 管理您的创作项目
                   </Typography>
@@ -962,22 +1008,12 @@ export default function DashboardPage() {
             </Box>
 
             {/* 右侧：操作按钮 */}
-            <Box sx={{ display: 'flex', gap: 1.5 }}>
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={handleStartCreation}
-                sx={{
-                  backgroundColor: 'white',
-                  color: '#1976d2',
-                  fontWeight: 600,
-                  '&:hover': {
-                    backgroundColor: 'rgba(255,255,255,0.9)',
-                  },
-                }}
-              >
-                新建项目
-              </Button>
+            <Box sx={{ 
+              display: 'flex', 
+              gap: { xs: 1, sm: 1.5 },
+              width: { xs: '100%', sm: 'auto' },
+              justifyContent: { xs: 'flex-end', sm: 'flex-start' }
+            }}>
               <Button
                 variant="outlined"
                 startIcon={<ScienceIcon />}
@@ -985,6 +1021,9 @@ export default function DashboardPage() {
                 sx={{
                   color: 'white',
                   borderColor: 'rgba(255,255,255,0.5)',
+                  fontSize: { xs: '0.8125rem', sm: '0.875rem' },
+                  minHeight: { xs: 36, sm: 40 },
+                  display: { xs: 'none', md: 'inline-flex' },
                   '&:hover': {
                     borderColor: 'white',
                     backgroundColor: 'rgba(255,255,255,0.1)',
@@ -999,6 +1038,8 @@ export default function DashboardPage() {
                 sx={{
                   color: 'white',
                   borderColor: 'rgba(255,255,255,0.5)',
+                  fontSize: { xs: '0.8125rem', sm: '0.875rem' },
+                  minHeight: { xs: 36, sm: 40 },
                   '&:hover': {
                     borderColor: 'white',
                     backgroundColor: 'rgba(255,255,255,0.1)',
@@ -1013,45 +1054,110 @@ export default function DashboardPage() {
       </Box>
 
       {/* 项目列表区域 */}
-      <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Container maxWidth="lg" sx={{ py: { xs: 2, sm: 3, md: 4 }, px: { xs: 1, sm: 2 } }}>
 
-      <Grid container spacing={3}>
+      <Grid container spacing={{ xs: 1.5, sm: 2, md: 3 }}>
         {projects.map((project) => {
-          // 根据题材选择书本封面颜色
+          // 根据题材选择现代化配色方案
           const getBookColors = (genre: string | undefined) => {
-            const colors: Record<string, { primary: string; secondary: string; accent: string; text: string }> = {
-              '修仙': { primary: '#1e3a8a', secondary: '#2563eb', accent: '#fbbf24', text: '#fef3c7' },
-              '玄幻': { primary: '#6b21a8', secondary: '#7c3aed', accent: '#fb923c', text: '#fed7aa' },
-              '奇幻': { primary: '#14532d', secondary: '#166534', accent: '#fbbf24', text: '#fef3c7' },
-              '都市': { primary: '#ea580c', secondary: '#f97316', accent: '#fef3c7', text: '#fef3c7' },
-              '言情': { primary: '#f472b6', secondary: '#f9a8d4', accent: '#f59e0b', text: '#fef3c7' },
-              '耽美': { primary: '#831843', secondary: '#9f1239', accent: '#fda4af', text: '#fce7f3' },
-              '悬疑': { primary: '#0f172a', secondary: '#1e293b', accent: '#dc2626', text: '#fecaca' },
-              '科幻': { primary: '#0891b2', secondary: '#06b6d4', accent: '#a5f3fc', text: '#ecfeff' },
-              '纯文学': { primary: '#44403c', secondary: '#57534e', accent: '#d6d3d1', text: '#f5f5f4' },
-              'Fantasy': { primary: '#14532d', secondary: '#166534', accent: '#fbbf24', text: '#fef3c7' },
+            const colors: Record<string, { primary: string; secondary: string; accent: string; text: string; gradient: string }> = {
+              '修仙': {
+                primary: '#0c1e4a',
+                secondary: '#1a3a7a',
+                accent: '#e8c46a',
+                text: '#fef0c7',
+                gradient: 'linear-gradient(160deg, #0c1e4a 0%, #162e68 45%, #1d3d82 75%, #243a6e 100%)',
+              },
+              '玄幻': {
+                primary: '#2d0a4e',
+                secondary: '#4a1272',
+                accent: '#d4a0ff',
+                text: '#f3e4ff',
+                gradient: 'linear-gradient(160deg, #1e0535 0%, #2d0a4e 40%, #3f1168 70%, #4a1272 100%)',
+              },
+              '奇幻': {
+                primary: '#0a2e14',
+                secondary: '#133d1e',
+                accent: '#72e2a0',
+                text: '#d4f7e4',
+                gradient: 'linear-gradient(160deg, #051a0b 0%, #0a2e14 40%, #0f3d1a 70%, #165226 100%)',
+              },
+              '都市': {
+                primary: '#1a1a2e',
+                secondary: '#16213e',
+                accent: '#e8a87c',
+                text: '#ffeedd',
+                gradient: 'linear-gradient(160deg, #12121f 0%, #1a1a2e 40%, #1e2545 70%, #0f3460 100%)',
+              },
+              '言情': {
+                primary: '#3d0b20',
+                secondary: '#6b1535',
+                accent: '#ffb5c8',
+                text: '#ffe4ed',
+                gradient: 'linear-gradient(160deg, #2a0716 0%, #3d0b20 40%, #5a1030 70%, #6b1535 100%)',
+              },
+              '耽美': {
+                primary: '#1a0a2e',
+                secondary: '#2d1052',
+                accent: '#f9a8d4',
+                text: '#fce7f3',
+                gradient: 'linear-gradient(160deg, #130820 0%, #1a0a2e 40%, #260d42 70%, #2d1052 100%)',
+              },
+              '悬疑': {
+                primary: '#080c14',
+                secondary: '#0f172a',
+                accent: '#dc2626',
+                text: '#fecaca',
+                gradient: 'linear-gradient(160deg, #030508 0%, #080c14 40%, #0f172a 70%, #1e2438 100%)',
+              },
+              '科幻': {
+                primary: '#020c1b',
+                secondary: '#0a2240',
+                accent: '#38bdf8',
+                text: '#e0f2fe',
+                gradient: 'linear-gradient(160deg, #010810 0%, #020c1b 40%, #0a2240 70%, #0c3060 100%)',
+              },
+              '纯文学': {
+                primary: '#2c2218',
+                secondary: '#3d2e20',
+                accent: '#c8b99a',
+                text: '#f5ede0',
+                gradient: 'linear-gradient(160deg, #1c1410 0%, #2c2218 40%, #3d2e20 70%, #4a3828 100%)',
+              },
+              'Fantasy': {
+                primary: '#0a2e14',
+                secondary: '#133d1e',
+                accent: '#72e2a0',
+                text: '#d4f7e4',
+                gradient: 'linear-gradient(160deg, #051a0b 0%, #0a2e14 40%, #0f3d1a 70%, #165226 100%)',
+              },
             }
-            return colors[genre || ''] || { primary: '#713f12', secondary: '#92400e', accent: '#fbbf24', text: '#fef3c7' }
+                        return colors[genre || ''] || {
+              primary: '#1c1a2e',
+              secondary: '#2d2a4a',
+              accent: '#c4a882',
+              text: '#f0e6d3',
+              gradient: 'linear-gradient(160deg, #12101e 0%, #1c1a2e 40%, #2d2a4a 70%, #3a3560 100%)',
+            }
           }
           const bookColors = getBookColors(project.genre)
           const isDisabled = generatingProjectId === project.id || generatingNextChapter[project.id]
 
           return (
           <Grid item xs={6} sm={4} md={3} lg={2.4} key={project.id}>
-            {/* 书本容器 - 包含书脊和页面效果 */}
+            {/* 现代化书本卡片 - 3D 效果 */}
             <Tooltip title={isDisabled ? '正在处理中...' : projectConceptStatus[project.id] === false ? '点击开始创作' : '点击进入工作流'} arrow placement="top">
             <Box
               sx={{
                 position: 'relative',
-                height: '300px',
-                maxWidth: '240px',
+                height: { xs: '220px', sm: '260px', md: '300px' },
+                maxWidth: { xs: '160px', sm: '200px', md: '230px' },
                 margin: '0 auto',
-                perspective: '1000px',
+                perspective: '1500px',
                 cursor: isDisabled ? 'default' : 'pointer',
               }}
               onClick={() => {
                 if (!isDisabled) {
-                  // 🔥 空白项目智能跳转：跳转到输入框区域自动触发对话框
                   const hasConcept = projectConceptStatus[project.id]
                   if (hasConcept === false) {
                     logger.log(`📝 检测到空白项目 ${project.id}，跳转到工作流并自动打开创作对话框`)
@@ -1063,53 +1169,58 @@ export default function DashboardPage() {
                 }
               }}
             >
-              
-              {/* 书本主体 */}
+              {/* 整体容器 - 包含 3D 变换 */}
               <Box
                 sx={{
-                  position: 'absolute',
-                  left: 0,
-                  right: 14,
-                  top: 0,
-                  bottom: 0,
-                  display: 'flex',
-                  opacity: isDisabled ? 0.7 : 1,
-                  transition: 'all 0.3s ease-in-out',
-                  transform: isDisabled ? 'none' : 'rotateY(0deg)',
-                  '&:hover': {
-                    transform: isDisabled ? 'none' : 'translateX(-8px) rotateY(-5deg)',
-                    '& .book-spine': {
-                      boxShadow: isDisabled ? undefined : '4px 0 8px rgba(0,0,0,0.3)',
+                  position: 'relative',
+                  width: '100%',
+                  height: '100%',
+                  transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                  transformStyle: 'preserve-3d',
+                  ...(isDisabled ? {} : {
+                    '&:hover': {
+                      transform: 'translateY(-10px) rotateY(-5deg)',
+                      '& .book-cover': {
+                        boxShadow: '8px 20px 48px rgba(0,0,0,0.65), 1px 1px 0 rgba(255,255,255,0.08) inset',
+                      },
+                      '& .book-spine': {
+                        boxShadow: '-4px 0 16px rgba(0,0,0,0.5)',
+                      },
+                      '& .book-pages': {
+                        transform: 'translateX(-3px)',
+                      },
                     },
-                  },
-                  '&:hover ~ .book-pages': {
-                    transform: 'translateX(-8px)',
-                    boxShadow: 'inset -2px 0 6px rgba(0,0,0,0.15), 2px 0 8px rgba(0,0,0,0.2)',
-                  },
+                  }),
                 }}
               >
-                {/* 书脊 */}
+                {/* 书脊 - 左侧 */}
                 <Box
                   className="book-spine"
                   sx={{
-                    width: '22px',
-                    background: `linear-gradient(135deg, ${bookColors.secondary} 0%, ${bookColors.primary} 50%, ${bookColors.secondary} 100%)`,
+                    position: 'absolute',
+                    left: 0,
+                    top: { xs: '3px', sm: '4px' },
+                    bottom: { xs: '3px', sm: '4px' },
+                    width: { xs: '14px', sm: '18px', md: '20px' },
+                    background: `linear-gradient(to right, ${bookColors.primary}ff 0%, ${bookColors.secondary}aa 100%)`,
                     borderRadius: '3px 0 0 3px',
-                    boxShadow: '2px 0 4px rgba(0,0,0,0.2)',
+                    boxShadow: '-3px 0 12px rgba(0,0,0,0.45)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    position: 'relative',
-                    transition: 'box-shadow 0.3s ease',
+                    overflow: 'hidden',
+                    transition: 'all 0.4s ease',
+                    zIndex: 2,
                     '&::before': {
                       content: '""',
                       position: 'absolute',
-                      top: '10%',
-                      bottom: '10%',
+                      top: '15%',
+                      bottom: '15%',
                       left: '50%',
-                      width: '1px',
-                      background: `linear-gradient(to bottom, transparent, ${bookColors.accent}40, ${bookColors.accent}, ${bookColors.accent}40, transparent)`,
+                      width: '2px',
+                      background: `linear-gradient(to bottom, transparent, ${bookColors.accent}60, ${bookColors.accent}, ${bookColors.accent}60, transparent)`,
                       transform: 'translateX(-50%)',
+                      opacity: 0.6,
                     },
                   }}
                 >
@@ -1118,30 +1229,37 @@ export default function DashboardPage() {
                       writingMode: 'vertical-rl',
                       textOrientation: 'mixed',
                       color: bookColors.accent,
-                      fontSize: '0.55rem',
-                      fontWeight: 600,
-                      letterSpacing: '1px',
-                      textShadow: '0 0 4px rgba(0,0,0,0.5)',
+                      fontSize: { xs: '0.4rem', sm: '0.45rem', md: '0.5rem' },
+                      fontWeight: 700,
+                      letterSpacing: { xs: '1px', sm: '2px' },
+                      textShadow: '0 1px 3px rgba(0,0,0,0.6)',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       maxHeight: '85%',
+                      opacity: 0.9,
                     }}
                   >
                     {project.title}
                   </Typography>
                 </Box>
 
-                {/* 封面 */}
+                {/* 封面主体 */}
                 <Box
+                  className="book-cover"
                   sx={{
-                    flex: 1,
-                    background: `linear-gradient(145deg, ${bookColors.primary} 0%, ${bookColors.secondary} 100%)`,
-                    borderRadius: '0 4px 4px 0',
-                    position: 'relative',
-                    overflow: 'hidden',
-                    boxShadow: '4px 4px 12px rgba(0,0,0,0.3)',
+                    position: 'absolute',
+                    left: { xs: '12px', sm: '14px', md: '16px' },
+                    right: { xs: '8px', sm: '9px', md: '10px' },
+                    top: 0,
+                    bottom: 0,
+                    background: bookColors.gradient,
+                    borderRadius: '2px 6px 6px 2px',
+                    boxShadow: '3px 6px 28px rgba(0,0,0,0.55), 1px 1px 0 rgba(255,255,255,0.06) inset',
                     display: 'flex',
                     flexDirection: 'column',
+                    overflow: 'hidden',
+                    transition: 'all 0.4s ease',
+                    zIndex: 3,
                     '&::before': {
                       content: '""',
                       position: 'absolute',
@@ -1149,467 +1267,442 @@ export default function DashboardPage() {
                       left: 0,
                       right: 0,
                       bottom: 0,
-                      background: `radial-gradient(circle at 30% 30%, ${bookColors.accent}15 0%, transparent 60%), repeating-linear-gradient(45deg, transparent, transparent 10px, ${bookColors.accent}08 10px, ${bookColors.accent}08 11px)`,
+                      background: `
+                        repeating-linear-gradient(
+                          0deg,
+                          transparent,
+                          transparent 3px,
+                          rgba(255,255,255,0.012) 3px,
+                          rgba(255,255,255,0.012) 4px
+                        ),
+                        radial-gradient(ellipse at 30% 15%, rgba(255,255,255,0.2) 0%, transparent 55%),
+                        linear-gradient(170deg, rgba(255,255,255,0.08) 0%, transparent 40%, rgba(0,0,0,0.25) 100%)
+                      `,
                       pointerEvents: 'none',
-                      zIndex: 0,
+                      zIndex: 1,
                     },
                     '&::after': {
                       content: '""',
                       position: 'absolute',
-                      top: 12,
-                      left: 12,
-                      right: 12,
-                      bottom: 12,
-                      border: `1px solid ${bookColors.accent}40`,
-                      borderRadius: '2px',
+                      top: { xs: '8px', sm: '9px', md: '10px' },
+                      left: { xs: '8px', sm: '9px', md: '10px' },
+                      right: { xs: '8px', sm: '9px', md: '10px' },
+                      bottom: { xs: '8px', sm: '9px', md: '10px' },
+                      border: `1px solid ${bookColors.accent}38`,
+                      borderRadius: '1px',
                       pointerEvents: 'none',
-                      zIndex: 1,
+                      zIndex: 2,
                     },
                   }}
                 >
-                  {/* 四角装饰 - 左上 */}
-                  <Box
-                    sx={{
-                      position: 'absolute',
-                      top: 8,
-                      left: 8,
-                      width: '30px',
-                      height: '30px',
-                      borderTop: `2px solid ${bookColors.accent}50`,
-                      borderLeft: `2px solid ${bookColors.accent}50`,
-                      borderRadius: '2px 0 0 0',
-                      zIndex: 2,
-                      '&::before': {
-                        content: '""',
-                        position: 'absolute',
-                        top: -2,
-                        left: -2,
-                        width: '8px',
-                        height: '8px',
-                        background: bookColors.accent,
-                        opacity: 0.4,
-                        borderRadius: '50%',
-                      },
-                    }}
-                  />
-                  {/* 四角装饰 - 右上 */}
-                  <Box
-                    sx={{
-                      position: 'absolute',
-                      top: 8,
-                      right: 8,
-                      width: '30px',
-                      height: '30px',
-                      borderTop: `2px solid ${bookColors.accent}50`,
-                      borderRight: `2px solid ${bookColors.accent}50`,
-                      borderRadius: '0 2px 0 0',
-                      zIndex: 2,
-                      '&::before': {
-                        content: '""',
-                        position: 'absolute',
-                        top: -2,
-                        right: -2,
-                        width: '8px',
-                        height: '8px',
-                        background: bookColors.accent,
-                        opacity: 0.4,
-                        borderRadius: '50%',
-                      },
-                    }}
-                  />
-                  {/* 四角装饰 - 左下 */}
-                  <Box
-                    sx={{
-                      position: 'absolute',
-                      bottom: 8,
-                      left: 8,
-                      width: '30px',
-                      height: '30px',
-                      borderBottom: `2px solid ${bookColors.accent}50`,
-                      borderLeft: `2px solid ${bookColors.accent}50`,
-                      borderRadius: '0 0 0 2px',
-                      zIndex: 2,
-                      '&::before': {
-                        content: '""',
-                        position: 'absolute',
-                        bottom: -2,
-                        left: -2,
-                        width: '8px',
-                        height: '8px',
-                        background: bookColors.accent,
-                        opacity: 0.4,
-                        borderRadius: '50%',
-                      },
-                    }}
-                  />
-                  {/* 四角装饰 - 右下 */}
-                  <Box
-                    sx={{
-                      position: 'absolute',
-                      bottom: 8,
-                      right: 8,
-                      width: '30px',
-                      height: '30px',
-                      borderBottom: `2px solid ${bookColors.accent}50`,
-                      borderRight: `2px solid ${bookColors.accent}50`,
-                      borderRadius: '0 0 2px 0',
-                      zIndex: 2,
-                      '&::before': {
-                        content: '""',
-                        position: 'absolute',
-                        bottom: -2,
-                        right: -2,
-                        width: '8px',
-                        height: '8px',
-                        background: bookColors.accent,
-                        opacity: 0.4,
-                        borderRadius: '50%',
-                      },
-                    }}
-                  />
-                  {/* 生成中的加载指示器 */}
-                  {generatingProjectId === project.id && (
-                    <Box
+                  {/* 上部横线装饰 */}
+                  <Box sx={{
+                    position: 'absolute',
+                    top: { xs: '18px', sm: '21px', md: '24px' },
+                    left: { xs: '16px', sm: '19px', md: '22px' },
+                    right: { xs: '16px', sm: '19px', md: '22px' },
+                    height: '1px',
+                    background: `linear-gradient(to right, transparent, ${bookColors.accent}50, transparent)`,
+                    zIndex: 3,
+                  }} />
+
+                  {/* 标题区域 */}
+                  <Box sx={{
+                    px: { xs: 1.5, sm: 2, md: 2.5 },
+                    pt: { xs: 2.5, sm: 3.5, md: 4.5 },
+                    pb: 1,
+                    textAlign: 'center',
+                    position: 'relative',
+                    zIndex: 3,
+                    flexGrow: 1,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center',
+                  }}>
+                    <Typography
                       sx={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                        zIndex: 10,
-                        borderRadius: '0 4px 4px 0',
+                        fontFamily: '"Noto Serif SC", "Source Han Serif SC", "STSong", "宋体", serif',
+                        fontSize: { xs: '0.75rem', sm: '0.875rem', md: '1rem' },
+                        fontWeight: 900,
+                        color: bookColors.text,
+                        lineHeight: 1.7,
+                        letterSpacing: { xs: '2px', sm: '3px', md: '4px' },
+                        textShadow: '0 2px 10px rgba(0,0,0,0.55)',
+                        mb: { xs: 0.8, sm: 1.2, md: 1.5 },
+                        display: '-webkit-box',
+                        WebkitLineClamp: 3,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        minHeight: '2.5em',
                       }}
                     >
-                      <Box sx={{ textAlign: 'center' }}>
-                        <CircularProgress size={40} sx={{ mb: 1, color: bookColors.accent }} />
-                        <Typography variant="caption" sx={{ color: bookColors.text, display: 'block' }}>执笔中...</Typography>
-                      </Box>
-                    </Box>
-                  )}
+                      {project.title}
+                    </Typography>
 
-                  {/* 封面内容区 */}
-                  <Box sx={{ p: 1.5, pt: 2, flexGrow: 1, position: 'relative', zIndex: 1 }}>
-                    {/* 装饰性顶部花纹 */}
-                    <Box sx={{ 
-                      textAlign: 'center', 
-                      mb: 1,
-                      color: bookColors.accent,
-                      fontSize: '0.75rem',
-                      opacity: 0.8,
-                      letterSpacing: '4px',
-                    }}>
-                      ✦ ✦ ✦
-                    </Box>
-
-                    {/* 书名 */}
-                    {editingProjectId === project.id ? (
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 2 }} onClick={(e) => e.stopPropagation()}>
-                        <TextField
-                          size="small"
-                          value={editedTitle}
-                          onChange={(e) => setEditedTitle(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleSaveTitle(project.id)
-                            else if (e.key === 'Escape') handleCancelEditTitle()
-                          }}
-                          autoFocus
-                          fullWidth
-                          sx={{ 
-                            flex: 1,
-                            '& .MuiOutlinedInput-root': {
-                              color: bookColors.text,
-                              backgroundColor: 'rgba(255,255,255,0.1)',
-                              '& fieldset': { borderColor: bookColors.accent },
-                            },
-                            '& .MuiOutlinedInput-input': { color: bookColors.text },
-                          }}
-                        />
-                        <IconButton size="small" onClick={() => handleSaveTitle(project.id)} sx={{ color: bookColors.accent }}>
-                          <CheckIcon fontSize="small" />
-                        </IconButton>
-                        <IconButton size="small" onClick={handleCancelEditTitle} sx={{ color: bookColors.text }}>
-                          <CloseIcon fontSize="small" />
-                        </IconButton>
+                    {/* 题材标签 - 点击可编辑 */}
+                    {editingGenreProjectId === project.id ? (
+                      <Box
+                        onClick={(e) => e.stopPropagation()}
+                        sx={{ mx: 'auto', textAlign: 'center' }}
+                      >
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: { xs: 0.4, sm: 0.6, md: 0.8 }, mb: 0.5 }}>
+                          {['修仙', '玄幻', '奇幻', '都市', '言情', '耐美', '悬疑', '科幻', '纯文学'].map((g) => (
+                            <Typography
+                              key={g}
+                              onClick={() => handleGenreMenuSelect(g)}
+                              sx={{
+                                fontFamily: '楷体, KaiTi, serif',
+                                fontSize: { xs: '0.45rem', sm: '0.55rem', md: '0.6rem' },
+                                color: editedGenre === g
+                                  ? (GENRE_COLORS[g] || bookColors.accent)
+                                  : `${GENRE_COLORS[g] || bookColors.accent}88`,
+                                letterSpacing: '1px',
+                                cursor: 'pointer',
+                                fontWeight: editedGenre === g ? 700 : 400,
+                                transition: 'all 0.15s ease',
+                                '&:hover': { color: GENRE_COLORS[g] || bookColors.accent, transform: 'scale(1.1)' },
+                              }}
+                            >
+                              {g}
+                            </Typography>
+                          ))}
+                        </Box>
+                        <Typography
+                          onClick={() => { setEditingGenreProjectId(null); setEditedGenre('') }}
+                          sx={{ fontSize: { xs: '0.4rem', sm: '0.45rem', md: '0.5rem' }, color: 'rgba(255,255,255,0.3)', cursor: 'pointer', letterSpacing: '1px' }}
+                        >
+                          取消
+                        </Typography>
                       </Box>
                     ) : (
                       <Typography
-                        onClick={(e) => { e.stopPropagation(); handleStartEditTitle(project.id, project.title) }}
-                        title="点击编辑书名"
+                        onClick={(e) => { e.stopPropagation(); handleStartEditGenre(project.id, project.genre || '') }}
                         sx={{
                           fontFamily: '"STKaiti", "KaiTi", "楷体", serif',
-                          fontSize: '1.1rem',
-                          fontWeight: 700,
-                          color: bookColors.accent,
-                          textAlign: 'center',
-                          mb: 1,
-                          textShadow: `0 1px 3px rgba(0,0,0,0.5), 0 0 15px ${bookColors.accent}30`,
-                          letterSpacing: '2px',
+                          fontSize: { xs: '0.5rem', sm: '0.58rem', md: '0.65rem' },
+                          color: GENRE_COLORS[getGenreLabel(project.genre)] || bookColors.accent,
+                          letterSpacing: { xs: '2px', sm: '2.5px', md: '3px' },
+                          fontWeight: 600,
+                          textShadow: `0 1px 6px rgba(0,0,0,0.5)`,
                           cursor: 'pointer',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          display: '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical',
-                          lineHeight: 1.3,
-                          minHeight: '2.6em',
-                          transition: 'text-shadow 0.3s ease',
-                          '&:hover': {
-                            textShadow: `0 2px 4px rgba(0,0,0,0.5), 0 0 25px ${bookColors.accent}60`,
-                          },
+                          mx: 'auto',
+                          display: 'block',
+                          transition: 'all 0.2s ease',
+                          '&:hover': { opacity: 0.75, letterSpacing: '4px' },
                         }}
                       >
-                        {project.title}
+                        {getGenreLabel(project.genre)}
                       </Typography>
                     )}
 
-                    {/* 描述 */}
+                    {/* 字数 */}
                     <Typography
                       sx={{
-                        fontFamily: '"STFangsong", "FangSong", "仿宋", serif',
-                        fontSize: '0.7rem',
+                        fontFamily: '"Courier New", monospace',
+                        fontSize: { xs: '0.45rem', sm: '0.52rem', md: '0.58rem' },
                         color: bookColors.text,
-                        opacity: 0.85,
-                        textAlign: 'center',
-                        mb: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
-                        lineHeight: 1.5,
-                        minHeight: '2.1em',
+                        opacity: 0.5,
+                        letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' },
+                        mt: { xs: 0.8, sm: 1, md: 1.2 },
                       }}
                     >
-                      {project.description || '一段传奇即将开始...'}
-                    </Typography>
-
-                    {/* 题材标签 */}
-                    <Box sx={{ textAlign: 'center', mb: 0.5 }}>
-                      {editingGenreProjectId === project.id ? (
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }} onClick={(e) => e.stopPropagation()}>
-                          <FormControl size="small" sx={{ minWidth: 100 }}>
-                            <Select
-                              value={editedGenre}
-                              onChange={(e) => setEditedGenre(e.target.value)}
-                              sx={{ 
-                                fontSize: '0.75rem', 
-                                height: '28px',
-                                color: bookColors.text,
-                                backgroundColor: 'rgba(255,255,255,0.1)',
-                                '& .MuiOutlinedInput-notchedOutline': { borderColor: bookColors.accent },
-                                '& .MuiSvgIcon-root': { color: bookColors.accent },
-                              }}
-                            >
-                              <MenuItem value="修仙">修仙</MenuItem>
-                              <MenuItem value="玄幻">玄幻</MenuItem>
-                              <MenuItem value="奇幻">奇幻</MenuItem>
-                              <MenuItem value="都市">都市</MenuItem>
-                              <MenuItem value="言情">言情</MenuItem>
-                              <MenuItem value="耽美">耽美</MenuItem>
-                              <MenuItem value="悬疑">悬疑</MenuItem>
-                              <MenuItem value="科幻">科幻</MenuItem>
-                              <MenuItem value="纯文学">纯文学</MenuItem>
-                              <MenuItem value="Fantasy">奇幻（英）</MenuItem>
-                              <MenuItem value="Other">其他</MenuItem>
-                            </Select>
-                          </FormControl>
-                          <IconButton size="small" onClick={() => handleSaveGenre(project.id)} sx={{ color: bookColors.accent }}>
-                            <CheckIcon fontSize="small" />
-                          </IconButton>
-                          <IconButton size="small" onClick={handleCancelEditGenre} sx={{ color: bookColors.text }}>
-                            <CloseIcon fontSize="small" />
-                          </IconButton>
-                        </Box>
-                      ) : (
-                        <Chip
-                          label={`『${getGenreLabel(project.genre)}』`}
-                          size="small"
-                          onClick={(e) => { e.stopPropagation(); handleStartEditGenre(project.id, project.genre || '') }}
-                          sx={{
-                            backgroundColor: 'transparent',
-                            border: `1px solid ${bookColors.accent}60`,
-                            color: bookColors.accent,
-                            fontFamily: '"STKaiti", "KaiTi", "楷体", serif',
-                            fontSize: '0.65rem',
-                            height: '20px',
-                            letterSpacing: '1px',
-                            cursor: 'pointer',
-                            '&:hover': {
-                              backgroundColor: `${bookColors.accent}20`,
-                            },
-                          }}
-                        />
-                      )}
-                    </Box>
-
-                    {/* 字数统计 */}
-                    <Typography
-                      sx={{
-                        textAlign: 'center',
-                        color: bookColors.text,
-                        opacity: 0.6,
-                        fontSize: '0.6rem',
-                        fontStyle: 'italic',
-                      }}
-                    >
-                      ─ {(chapterWordCounts[project.id] || 0).toLocaleString()}字 ─
+                      {(chapterWordCounts[project.id] || 0).toLocaleString()} 字
                     </Typography>
                   </Box>
 
-                  {/* 底部操作区 - 古籍艺术字风格 */}
+                  {/* 底部功能按钮区 */}
                   <Box
                     sx={{
-                      p: 1,
-                      pt: 0.5,
+                      px: { xs: 0.8, sm: 1, md: 1.2 },
+                      pt: { xs: 0.5, sm: 0.6, md: 0.8 },
+                      pb: { xs: 0.8, sm: 1, md: 1.2 },
                       display: 'flex',
-                      flexDirection: 'column',
-                      gap: 0.3,
+                      justifyContent: 'space-around',
                       alignItems: 'center',
                       position: 'relative',
-                      zIndex: 1,
+                      zIndex: 3,
                     }}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    {/* 第一排：典籍 | 目录 */}
-                    <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-                      <Tooltip title="进入知识库" arrow>
-                        <Typography
-                          onClick={() => !isDisabled && navigate(`/knowledge-base/${project.id}`)}
-                          sx={{
-                            fontFamily: '楷体, KaiTi, serif',
-                            fontSize: '0.85rem',
-                            color: bookColors.text,
-                            cursor: isDisabled ? 'default' : 'pointer',
-                            opacity: isDisabled ? 0.5 : 0.85,
-                            letterSpacing: '2px',
-                            transition: 'all 0.2s ease',
-                            textShadow: `0 0 8px ${bookColors.primary}`,
-                            '&:hover': {
-                              opacity: 1,
-                              color: bookColors.accent,
-                              textShadow: `0 0 12px ${bookColors.accent}`,
-                              transform: 'scale(1.05)',
-                            },
-                          }}
-                        >
-                          典 籍
-                        </Typography>
-                      </Tooltip>
-                      <Typography sx={{ color: `${bookColors.text}40`, fontSize: '0.7rem' }}>|</Typography>
-                      <Tooltip title="查看章节列表" arrow>
-                        <Typography
-                          onClick={() => !isDisabled && handleOpenChaptersDrawer(project.id)}
-                          sx={{
-                            fontFamily: '楷体, KaiTi, serif',
-                            fontSize: '0.85rem',
-                            color: bookColors.text,
-                            cursor: isDisabled ? 'default' : 'pointer',
-                            opacity: isDisabled ? 0.5 : 0.85,
-                            letterSpacing: '2px',
-                            transition: 'all 0.2s ease',
-                            textShadow: `0 0 8px ${bookColors.primary}`,
-                            '&:hover': {
-                              opacity: 1,
-                              color: bookColors.accent,
-                              textShadow: `0 0 12px ${bookColors.accent}`,
-                              transform: 'scale(1.05)',
-                            },
-                          }}
-                        >
-                          目 录
-                        </Typography>
-                      </Tooltip>
-                    </Box>
-                    {/* 第二排：焚毁 | 续写 */}
-                    <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-                      <Tooltip title="删除项目" arrow>
-                        <Typography
-                          onClick={() => !isDisabled && handleDeleteProject(project.id)}
-                          sx={{
-                            fontFamily: '楷体, KaiTi, serif',
-                            fontSize: '0.8rem',
-                            color: '#ef5350',
-                            cursor: isDisabled ? 'default' : 'pointer',
-                            opacity: isDisabled ? 0.4 : 0.7,
-                            letterSpacing: '2px',
-                            transition: 'all 0.2s ease',
-                            '&:hover': {
-                              opacity: 1,
-                              textShadow: '0 0 8px #ef5350',
-                              transform: 'scale(1.05)',
-                            },
-                          }}
-                        >
-                          焚 毁
-                        </Typography>
-                      </Tooltip>
-                      <Typography sx={{ color: `${bookColors.text}40`, fontSize: '0.7rem' }}>|</Typography>
-                      <Tooltip title="续写下一章" arrow>
-                        <Typography
-                          onClick={() => !isDisabled && handleGenerateNextChapter(project.id)}
-                          sx={{
-                            fontFamily: '楷体, KaiTi, serif',
-                            fontSize: '0.85rem',
-                            color: bookColors.accent,
-                            cursor: isDisabled ? 'default' : 'pointer',
-                            opacity: isDisabled ? 0.5 : 1,
-                            letterSpacing: '2px',
-                            fontWeight: 600,
-                            transition: 'all 0.2s ease',
-                            textShadow: `0 0 8px ${bookColors.accent}60`,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 0.5,
-                            '&:hover': {
-                              textShadow: `0 0 16px ${bookColors.accent}`,
-                              transform: 'scale(1.08)',
-                            },
-                          }}
-                        >
-                          {generatingNextChapter[project.id] 
-                            ? <><CircularProgress size={12} sx={{ color: 'inherit' }} /> 续写中...</>
-                            : '续 写'
+                    {/* 单行四按鈕：典籍 · 目录 │ 焚毁 · 续写 */}
+                    <Tooltip title="进入知识库" arrow>
+                      <Box
+                        onClick={() => !isDisabled && navigate(`/knowledge-base/${project.id}`)}
+                        sx={{ cursor: isDisabled ? 'default' : 'pointer', opacity: isDisabled ? 0.45 : 1, transition: 'all 0.25s ease', '&:hover': isDisabled ? {} : { transform: 'translateY(-1px)' } }}
+                      >
+                        <Typography sx={{ fontFamily: '楷体, KaiTi, serif', fontSize: { xs: '0.5rem', sm: '0.58rem', md: '0.68rem' }, color: bookColors.accent, letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 600 }}>典籍</Typography>
+                      </Box>
+                    </Tooltip>
+                    <Box sx={{ width: '1px', height: { xs: '8px', sm: '9px', md: '10px' }, backgroundColor: `${bookColors.accent}25` }} />
+                    <Tooltip title="查看章节列表" arrow>
+                      <Box
+                        onClick={() => !isDisabled && handleOpenChaptersDrawer(project.id)}
+                        sx={{ cursor: isDisabled ? 'default' : 'pointer', opacity: isDisabled ? 0.45 : 1, transition: 'all 0.25s ease', '&:hover': isDisabled ? {} : { transform: 'translateY(-1px)' } }}
+                      >
+                        <Typography sx={{ fontFamily: '楷体, KaiTi, serif', fontSize: { xs: '0.5rem', sm: '0.58rem', md: '0.68rem' }, color: bookColors.accent, letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 600 }}>目录</Typography>
+                      </Box>
+                    </Tooltip>
+                    <Box sx={{ width: '1px', height: { xs: '10px', sm: '12px', md: '14px' }, backgroundColor: `${bookColors.accent}40` }} />
+                    <Tooltip title="删除项目" arrow>
+                      <Box
+                        onClick={() => !isDisabled && handleDeleteProject(project.id)}
+                        sx={{ cursor: isDisabled ? 'default' : 'pointer', opacity: isDisabled ? 0.45 : 1, transition: 'all 0.25s ease', '&:hover': isDisabled ? {} : { transform: 'translateY(-1px)' } }}
+                      >
+                        <Typography sx={{ fontFamily: '楷体, KaiTi, serif', fontSize: { xs: '0.5rem', sm: '0.58rem', md: '0.68rem' }, color: '#f87171', letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 600, textShadow: '0 1px 3px rgba(239,83,80,0.3)' }}>焚毁</Typography>
+                      </Box>
+                    </Tooltip>
+                    <Box sx={{ width: '1px', height: { xs: '8px', sm: '9px', md: '10px' }, backgroundColor: `${bookColors.accent}25` }} />
+                    <Tooltip title="续写下一章" arrow>
+                      <Box
+                        onClick={() => !isDisabled && handleGenerateNextChapter(project.id)}
+                        sx={{ cursor: isDisabled ? 'default' : 'pointer', opacity: isDisabled ? 0.45 : 1, transition: 'all 0.25s ease', '&:hover': isDisabled ? {} : { transform: 'translateY(-1px)' } }}
+                      >
+                        <Typography sx={{ fontFamily: '楷体, KaiTi, serif', fontSize: { xs: '0.5rem', sm: '0.58rem', md: '0.68rem' }, color: bookColors.accent, letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.4 }}>
+                          {generatingNextChapter[project.id]
+                            ? <><CircularProgress size={9} sx={{ color: 'inherit' }} />续写中</>
+                            : '续写'
                           }
                         </Typography>
-                      </Tooltip>
-                    </Box>
+                      </Box>
+                    </Tooltip>
                   </Box>
+
+                  {/* 四角装饰 - L 形精雅角标 */}
+                  {[
+                    { top: 13, left: 13, borderTop: 1, borderLeft: 1, borderRight: 0, borderBottom: 0 },
+                    { top: 13, right: 13, borderTop: 1, borderLeft: 0, borderRight: 1, borderBottom: 0 },
+                    { bottom: 13, left: 13, borderTop: 0, borderLeft: 1, borderRight: 0, borderBottom: 1 },
+                    { bottom: 13, right: 13, borderTop: 0, borderLeft: 0, borderRight: 1, borderBottom: 1 },
+                  ].map((pos, index) => (
+                    <Box
+                      key={index}
+                      sx={{
+                        position: 'absolute',
+                        top: pos.top,
+                        left: pos.left,
+                        right: pos.right,
+                        bottom: pos.bottom,
+                        width: '12px',
+                        height: '12px',
+                        zIndex: 4,
+                        borderTop: pos.borderTop ? `1px solid ${bookColors.accent}55` : 'none',
+                        borderLeft: pos.borderLeft ? `1px solid ${bookColors.accent}55` : 'none',
+                        borderRight: pos.borderRight ? `1px solid ${bookColors.accent}55` : 'none',
+                        borderBottom: pos.borderBottom ? `1px solid ${bookColors.accent}55` : 'none',
+                      }}
+                    />
+                  ))}
                 </Box>
+
+                {/* 书页效果 - 右侧 */}
+                <Box
+                  className="book-pages"
+                  sx={{
+                    position: 'absolute',
+                    right: '0px',
+                    top: '8px',
+                    bottom: '8px',
+                    width: '9px',
+                    background: 'linear-gradient(to right, #ede0c8 0%, #ddd0b0 50%, #ccc090 100%)',
+                    borderRadius: '0 2px 2px 0',
+                    transition: 'all 0.4s ease',
+                    zIndex: 1,
+                    '&::before': {
+                      content: '""',
+                      position: 'absolute',
+                      top: 0,
+                      bottom: 0,
+                      left: 0,
+                      width: '100%',
+                      background: 'repeating-linear-gradient(to bottom, transparent 0px, transparent 2px, rgba(0,0,0,0.04) 2px, rgba(0,0,0,0.04) 3px)',
+                      opacity: 0.6,
+                    },
+                  }}
+                />
               </Box>
-            
-            {/* 页面层叠效果 */}
-            <Box
-              className="book-pages"
-              sx={{
-                position: 'absolute',
-                right: 2,
-                top: 8,
-                bottom: 8,
-                width: '12px',
-                background: 'linear-gradient(to right, #f5f5dc 0%, #fffef0 50%, #f0ead6 100%)',
-                borderRadius: '0 2px 2px 0',
-                boxShadow: 'inset -2px 0 4px rgba(0,0,0,0.1)',
-                transition: 'all 0.3s ease-in-out',
-                '&::before': {
-                  content: '""',
-                  position: 'absolute',
-                  top: 0,
-                  bottom: 0,
-                  left: 0,
-                  width: '100%',
-                  background: 'repeating-linear-gradient(to bottom, transparent 0px, transparent 3px, rgba(0,0,0,0.03) 3px, rgba(0,0,0,0.03) 4px)',
-                },
-              }}
-            />
             </Box>
             </Tooltip>
           </Grid>
         )
       })}
+      
+      {/* 新建项目空白卡片 - 放在项目列表末尾 */}
+      <Grid item xs={6} sm={4} md={3} lg={2.4}>
+        <Box
+          onClick={handleStartCreation}
+          sx={{
+            position: 'relative',
+            height: { xs: '220px', sm: '260px', md: '300px' },
+            maxWidth: { xs: '160px', sm: '200px', md: '230px' },
+            margin: '0 auto',
+            cursor: 'pointer',
+            transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+            '&:hover': {
+              transform: 'translateY(-10px)',
+              '& .new-card-inner': {
+                boxShadow: '8px 20px 48px rgba(0,0,0,0.65)',
+              },
+              '& .plus-icon': {
+                transform: 'scale(1.1) rotate(90deg)',
+                borderColor: 'rgba(180,160,120,0.6)',
+                background: 'rgba(180,160,120,0.12)',
+              },
+              '& .add-text': {
+                color: '#e8d5b0',
+                letterSpacing: '5px',
+              },
+            },
+          }}
+        >
+          {/* 书脊装饰 */}
+          <Box sx={{
+            position: 'absolute',
+            left: 0,
+            top: { xs: '2px', sm: '3px' },
+            bottom: { xs: '2px', sm: '3px' },
+            width: { xs: '14px', sm: '18px', md: '20px' },
+            background: 'linear-gradient(to right, #1a1812 0%, #2a2618 100%)',
+            borderRadius: '3px 0 0 3px',
+            boxShadow: '-3px 0 12px rgba(0,0,0,0.45)',
+            zIndex: 2,
+            '&::after': {
+              content: '""',
+              position: 'absolute',
+              top: 0,
+              left: '50%',
+              width: '1px',
+              height: '100%',
+              background: 'linear-gradient(to bottom, transparent 5%, rgba(200,180,120,0.25) 50%, transparent 95%)',
+              transform: 'translateX(-50%)',
+            },
+          }} />
+
+          {/* 封面主体 */}
+          <Box
+            className="new-card-inner"
+            sx={{
+              position: 'absolute',
+              left: { xs: '12px', sm: '16px', md: '18px' },
+              right: { xs: '6px', sm: '7px', md: '8px' },
+              top: 0,
+              bottom: 0,
+              background: 'linear-gradient(160deg, #18160e 0%, #221e12 40%, #2c2818 70%, #242010 100%)',
+              borderRadius: '2px 6px 6px 2px',
+              boxShadow: '3px 6px 28px rgba(0,0,0,0.5)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: { xs: 1.5, sm: 1.8, md: 2 },
+              overflow: 'hidden',
+              transition: 'all 0.4s ease',
+              zIndex: 3,
+              border: '1px solid rgba(180,160,80,0.12)',
+              '&::after': {
+                content: '""',
+                position: 'absolute',
+                top: { xs: '8px', sm: '10px', md: '12px' },
+                left: { xs: '8px', sm: '10px', md: '12px' },
+                right: { xs: '8px', sm: '10px', md: '12px' },
+                bottom: { xs: '8px', sm: '10px', md: '12px' },
+                border: '1px solid rgba(180,160,80,0.18)',
+                borderRadius: '1px',
+                pointerEvents: 'none',
+              },
+            }}
+          >
+            {/* 加号图标 */}
+            <Box
+              className="plus-icon"
+              sx={{
+                width: { xs: 40, sm: 48, md: 56 },
+                height: { xs: 40, sm: 48, md: 56 },
+                borderRadius: '50%',
+                border: '1px solid rgba(180,160,100,0.35)',
+                background: 'rgba(180,160,100,0.07)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                zIndex: 1,
+              }}
+            >
+              <AddIcon sx={{ fontSize: { xs: 24, sm: 28, md: 32 }, color: 'rgba(200,180,110,0.75)', transition: 'all 0.3s ease' }} />
+            </Box>
+
+            {/* 文字说明 */}
+            <Box sx={{ textAlign: 'center', zIndex: 1 }}>
+              <Typography
+                className="add-text"
+                sx={{
+                  fontFamily: '"Noto Serif SC", "宋体", serif',
+                  fontSize: { xs: '0.75rem', sm: '0.85rem', md: '0.95rem' },
+                  color: 'rgba(200,180,120,0.7)',
+                  fontWeight: 600,
+                  letterSpacing: { xs: '2px', sm: '3px', md: '4px' },
+                  mb: { xs: 0.5, sm: 0.8, md: 1 },
+                  transition: 'all 0.3s ease',
+                }}
+              >
+                新建项目
+              </Typography>
+
+              <Typography
+                sx={{
+                  fontFamily: '"STKaiti", "楷体", serif',
+                  fontSize: '0.65rem',
+                  color: 'rgba(160,140,100,0.55)',
+                  letterSpacing: '2px',
+                }}
+              >
+                开始创作你的小说
+              </Typography>
+            </Box>
+
+            {/* L 形角标 */}
+            {[
+              { top: 16, left: 16, bt: 1, bl: 1, br: 0, bb: 0 },
+              { top: 16, right: 16, bt: 1, bl: 0, br: 1, bb: 0 },
+              { bottom: 16, left: 16, bt: 0, bl: 1, br: 0, bb: 1 },
+              { bottom: 16, right: 16, bt: 0, bl: 0, br: 1, bb: 1 },
+            ].map((pos, i) => (
+              <Box key={i} sx={{
+                position: 'absolute',
+                top: pos.top,
+                left: pos.left,
+                right: pos.right,
+                bottom: pos.bottom,
+                width: '10px',
+                height: '10px',
+                zIndex: 4,
+                borderTop: pos.bt ? '1px solid rgba(180,160,80,0.3)' : 'none',
+                borderLeft: pos.bl ? '1px solid rgba(180,160,80,0.3)' : 'none',
+                borderRight: pos.br ? '1px solid rgba(180,160,80,0.3)' : 'none',
+                borderBottom: pos.bb ? '1px solid rgba(180,160,80,0.3)' : 'none',
+              }} />
+            ))}
+          </Box>
+
+          {/* 书页效果 */}
+          <Box sx={{
+            position: 'absolute',
+            right: '0px',
+            top: '8px',
+            bottom: '8px',
+            width: '9px',
+            background: 'linear-gradient(to right, #e8dcc8 0%, #d4c8a8 60%, #c4b890 100%)',
+            borderRadius: '0 2px 2px 0',
+            zIndex: 1,
+            '&::before': {
+              content: '""',
+              position: 'absolute',
+              top: 0, bottom: 0, left: 0, width: '100%',
+              background: 'repeating-linear-gradient(to bottom, transparent 0px, transparent 2px, rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 3px)',
+            },
+          }} />
+        </Box>
+      </Grid>
       </Grid>
 
       <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth>

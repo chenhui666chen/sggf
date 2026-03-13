@@ -22,6 +22,14 @@ _RATIO_PREFIXES = ("画幅：", "画幅:", "比例：", "比例:", "ratio:")
 _CHARACTER_BG_REQUIREMENT = "背景要求：纯灰色背景板，背景完全干净，无场景元素、无杂物、无文字、无多余人物。"
 _CHARACTER_BACKGROUND_LINE = "背景：纯灰色背景板，背景完全干净，无场景元素、无杂物、无文字、无多余人物。"
 _CHARACTER_CONSTRAINT_LINE = "约束：无文字，无水印，无logo，无边框，无拼贴。"
+_CHARACTER_ROLE_PREFIXES = {
+    "lib_character_portrait",
+    "lib_character_portrait_side",
+    "lib_character_portrait_back",
+    "lib_character_portrait_bust",
+    "lib_character_portrait_bust_three_quarter",
+    "lib_character_portrait_bust_side",
+}
 
 
 def _is_placeholder_name(text: str) -> bool:
@@ -69,6 +77,12 @@ def _character_compose_line(view: str) -> str:
         return "构图：侧面全身单人立绘，头顶到脚底完整入镜，四肢完整不裁切；严格侧面全身视角（接近90°侧身），避免正脸占主导，突出侧脸轮廓与服装侧面结构。"
     if view == "back":
         return "构图：背面全身单人立绘，头顶到脚底完整入镜，四肢完整不裁切；严格背面全身视角（背身），不出现完整正脸，突出后脑发型、肩背轮廓与服装背部结构。"
+    if view == "bust_front":
+        return "构图：正面半身单人角色肖像（胸像到腰部），面部主导并保留肩颈与上半身服装结构，避免纯头部裁切。"
+    if view == "bust_three_quarter":
+        return "构图：3/4正面半身单人角色肖像（胸像到腰部），面部主导并清晰呈现侧脸轮廓、肩颈与上半身服装结构。"
+    if view == "bust_side":
+        return "构图：侧面半身单人角色肖像（胸像到腰部），突出侧脸轮廓并保留肩颈与上半身服装结构，避免正脸占主导。"
     return "构图：正面全身单人立绘，头顶到脚底完整入镜，四肢完整不裁切；正面全身视角，五官与服装正面结构清晰可辨。"
 
 
@@ -132,7 +146,7 @@ def _segment_conflicts_view_visibility(seg: str, view: str) -> bool:
             return True
         if any(token in text for token in ("正面", "正脸", "面向镜头", "直视镜头", "目视镜头")):
             return True
-    if view == "side":
+    if view in {"side", "bust_side"}:
         if any(token in text for token in ("正面", "正脸", "面向镜头", "直视镜头", "目视镜头")):
             return True
     return False
@@ -142,7 +156,7 @@ def _limit_identity_anchor_by_view(identity_anchor: str, view: str) -> str:
     text = str(identity_anchor or "").strip()
     if not text:
         return ""
-    limit = 6 if view in {"side", "back"} else 8
+    limit = 6 if view in {"side", "back", "bust_three_quarter", "bust_side"} else 8
     segments = [s.strip(" \t\n；;，,。.") for s in re.split(r"[；;，,\n]+", text) if s.strip()]
     if not segments:
         return ""
@@ -167,6 +181,12 @@ def _adapt_character_descriptor_for_view(text: str, view: str) -> str:
         kept.append("侧脸轮廓清晰，鼻梁线与下颌线可辨，耳侧与发丝走向明确")
     elif view == "back":
         kept.append("后脑发型轮廓与后颈线清晰，肩背线条与服装背部结构明确")
+    elif view == "bust_front":
+        kept.append("面部主导且肩颈结构清晰，上半身服装关键细节可辨")
+    elif view == "bust_three_quarter":
+        kept.append("3/4半身视角下侧脸轮廓清晰，肩颈与上半身服装结构完整")
+    elif view == "bust_side":
+        kept.append("侧面半身轮廓清晰，耳侧发丝走向与肩颈服装结构明确")
 
     return _merge_unique_segments("；".join(kept), limit=900)
 
@@ -300,6 +320,18 @@ def _filter_identity_anchor_by_view(identity_anchor: str, view: str) -> str:
 
 def _character_consistency_line(view: str, identity_anchor: str = "") -> str:
     anchor_text = _filter_identity_anchor_by_view(identity_anchor, view)
+    if view == "bust_front":
+        if anchor_text:
+            return f"一致性要求：与全身正面图保持同一角色身份锚点（{anchor_text}）。"
+        return "一致性要求：与全身正面图保持同一角色身份锚点，重点保持五官、发型、领口与肩颈服装细节一致。"
+    if view == "bust_three_quarter":
+        if anchor_text:
+            return f"一致性要求：与半身正面和全身侧面图保持同一角色身份锚点（{anchor_text}）。"
+        return "一致性要求：与半身正面和全身侧面图保持同一角色身份锚点，重点保持侧脸轮廓与上半身服装结构一致。"
+    if view == "bust_side":
+        if anchor_text:
+            return f"一致性要求：与半身3/4和全身侧面图保持同一角色身份锚点（{anchor_text}）。"
+        return "一致性要求：与半身3/4和全身侧面图保持同一角色身份锚点，重点保持侧脸轮廓、发型与肩颈服装细节一致。"
     if view == "side":
         if anchor_text:
             return f"一致性要求：与正面图保持同一角色身份锚点（{anchor_text}）。"
@@ -319,6 +351,12 @@ def _character_view_from_role(role: str) -> str:
         return "side"
     if prefix == "lib_character_portrait_back":
         return "back"
+    if prefix == "lib_character_portrait_bust":
+        return "bust_front"
+    if prefix == "lib_character_portrait_bust_three_quarter":
+        return "bust_three_quarter"
+    if prefix == "lib_character_portrait_bust_side":
+        return "bust_side"
     if prefix == "lib_character_portrait":
         return "front"
     return "default"
@@ -807,7 +845,7 @@ def _finalize_identity_anchor_text(identity_anchor: str, fallback_candidates: li
     if audited:
         return audited, "llm_anchor"
 
-    deterministic_limit = 6 if view in {"side", "back"} else 8
+    deterministic_limit = 6 if view in {"side", "back", "bust_three_quarter", "bust_side"} else 8
     deterministic = _deterministic_filter_character_anchor_candidates(
         fallback_candidates,
         limit=deterministic_limit,
@@ -840,10 +878,11 @@ def _append_unique_hints(text: str, hints: list[str]) -> str:
 def _clean_character_prompt_conflicts(*, prompt: str, role: str) -> str:
     text = str(prompt or "").replace("\r\n", "\n").strip()
     prefix = str(role or "").strip().split(":", 1)[0]
-    if prefix not in {"lib_character_portrait", "lib_character_portrait_side", "lib_character_portrait_back"}:
+    if prefix not in _CHARACTER_ROLE_PREFIXES:
         return text
     if not text:
         return text
+    target_view = _character_view_from_role(role)
 
     # Remove legacy English constraints to keep a single Chinese prompt style.
     text = re.sub(
@@ -873,9 +912,15 @@ def _clean_character_prompt_conflicts(*, prompt: str, role: str) -> str:
         if not item:
             return ""
         item = re.sub(r"正面\s*或\s*(?:3\s*/\s*4|四分之三|三分之二)\s*正面", "正面", item, flags=re.IGNORECASE)
-        item = item.replace("单人角色立绘/肖像", "单人角色全身立绘")
-        item = item.replace("立绘/肖像", "全身立绘")
-        item = item.replace("单人肖像", "单人全身立绘")
+        if target_view in {"bust_front", "bust_three_quarter", "bust_side"}:
+            item = item.replace("单人角色立绘/肖像", "单人角色半身肖像")
+            item = item.replace("立绘/肖像", "半身肖像")
+            item = item.replace("单人肖像", "单人半身肖像")
+            item = item.replace("全身立绘", "半身肖像")
+        else:
+            item = item.replace("单人角色立绘/肖像", "单人角色全身立绘")
+            item = item.replace("立绘/肖像", "全身立绘")
+            item = item.replace("单人肖像", "单人全身立绘")
         item = item.replace("背景细节丰富", "纯灰色背景板，背景完全干净")
         item = item.replace("背景干净简洁", "纯灰色背景板，背景完全干净")
         item = item.replace("背景干净", "纯灰色背景板，背景完全干净")
@@ -935,7 +980,7 @@ def _canonicalize_character_prompt(
 ) -> str:
     text = str(prompt or "").strip()
     prefix = str(role or "").strip().split(":", 1)[0]
-    if prefix not in {"lib_character_portrait", "lib_character_portrait_side", "lib_character_portrait_back"}:
+    if prefix not in _CHARACTER_ROLE_PREFIXES:
         return text
 
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
@@ -1061,6 +1106,33 @@ def _apply_role_focus(*, entity_type: str, role: str, descriptor: str) -> str:
             _CHARACTER_BG_REQUIREMENT,
             limit=1600,
         )
+    if view == "bust_front":
+        return _merge_unique_segments(
+            text,
+            "构图建议：正面半身单人角色肖像（胸像到腰部），面部占主导并保留肩颈与上半身服装结构。",
+            "视角约束：避免纯头部裁切，保留领口、肩颈与上半身关键服装结构。",
+            "一致性要求：与该角色全身正面设定保持同一人特征（五官、发型、服饰、配色）。",
+            _CHARACTER_BG_REQUIREMENT,
+            limit=1600,
+        )
+    if view == "bust_three_quarter":
+        return _merge_unique_segments(
+            text,
+            "构图建议：3/4正面半身单人角色肖像（胸像到腰部），面部主导并保留肩颈与上半身服装结构。",
+            "视角约束：突出侧脸轮廓、鼻梁线、下颌线，避免完全正脸或纯背面。",
+            "一致性要求：与该角色半身正面/全身侧面设定保持同一人特征（发型、五官、服饰、配色）。",
+            _CHARACTER_BG_REQUIREMENT,
+            limit=1600,
+        )
+    if view == "bust_side":
+        return _merge_unique_segments(
+            text,
+            "构图建议：侧面半身单人角色肖像（胸像到腰部），突出侧脸轮廓并保留肩颈与上半身服装结构。",
+            "视角约束：侧面视角突出鼻梁线、下颌线、耳侧发丝走向，避免正脸占主导。",
+            "一致性要求：与该角色半身3/4/全身侧面设定保持同一人特征（发型、服饰、体态、配色）。",
+            _CHARACTER_BG_REQUIREMENT,
+            limit=1600,
+        )
     if view == "front":
         return _merge_unique_segments(
             text,
@@ -1075,19 +1147,14 @@ def _apply_role_focus(*, entity_type: str, role: str, descriptor: str) -> str:
 def _augment_character_prompt(prompt: str, role: str) -> str:
     text = str(prompt or "").strip()
     prefix = str(role or "").strip().split(":", 1)[0]
-    if prefix not in {"lib_character_portrait", "lib_character_portrait_side", "lib_character_portrait_back"}:
+    if prefix not in _CHARACTER_ROLE_PREFIXES:
         return text
 
     hints = [
         _character_compose_line(_character_view_from_role(role)),
         _CHARACTER_BACKGROUND_LINE,
+        _character_consistency_line(_character_view_from_role(role)),
     ]
-    if prefix == "lib_character_portrait_side":
-        hints.append(_character_consistency_line("side"))
-    elif prefix == "lib_character_portrait_back":
-        hints.append(_character_consistency_line("back"))
-    else:
-        hints.append(_character_consistency_line("front"))
 
     return _append_unique_hints(text, hints)
 
@@ -1155,7 +1222,7 @@ def _llm_refine_character_identity_anchor(
         "你是图像生成提示词专家。"
         "请把角色身份锚点候选整理为更适合生图的一致性描述。"
         "只允许使用输入中已有信息，不可补充未给出的设定。"
-        "视角规则：背面视角不保留正脸细节（瞳色、鼻唇、完整表情）；侧面视角优先轮廓线与侧面可见结构。"
+        "视角规则：背面视角不保留正脸细节（瞳色、鼻唇、完整表情）；侧向视角（侧面/半身侧面）优先轮廓线与侧面可见结构。"
         "避免风格词、背景词、镜头词和安全约束词。"
         "输出 JSON：{\"identity_anchor\":\"...\"}。"
         "identity_anchor 用中文分号连接 4-8 个短语。"
@@ -1315,7 +1382,7 @@ def suggest_library_prompt(
             anchor_timeout_s = int(os.getenv("DREAMWEAVER_LIBRARY_ANCHOR_TIMEOUT", "90") or "90")
 
             view_for_anchor = _character_view_from_role(role_text)
-            default_anchor_limit = 6 if view_for_anchor in {"side", "back"} else 8
+            default_anchor_limit = 6 if view_for_anchor in {"side", "back", "bust_three_quarter", "bust_side"} else 8
             anchor_candidates_final = _deterministic_filter_character_anchor_candidates(
                 anchor_candidates,
                 limit=default_anchor_limit,

@@ -15,8 +15,7 @@
     "@mui/icons-material": "^5.14.0",
     "@mui/lab": "^5.0.0-alpha.129",
     "@mui/material": "^5.14.0",
-    "@mui/styled-engine": "^7.3.7",
-    "@mui/styled-engine-sc": "^7.3.7",
+    "@mui/styled-engine": "^5.18.0",
     "@reduxjs/toolkit": "^1.9.7",
     "@uiw/react-md-editor": "^4.0.8",
     "axios": "^1.6.0",
@@ -34,6 +33,7 @@
     "vditor": "^3.11.2"
   },
   "devDependencies": {
+    "@emotion/babel-plugin": "^11.13.5",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",

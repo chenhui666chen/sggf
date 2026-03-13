@@ -25,6 +25,7 @@ from app.services.dreamweaver.events import DreamweaverEventEmitter
 from app.services.dreamweaver.library import parse_library_role, required_library_roles
 from pipeline.state_machine import RunContext, State, progress_percent, stage_label, step
 from pipeline.restart_reset import apply_restart_reset as _apply_restart_reset_impl
+from pipeline.step_budget import estimate_pipeline_max_steps_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,16 @@ def _env_float(name: str, default: float) -> float:
         return float(raw)
     except Exception:  # noqa: BLE001
         return default
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return bool(default)
+    text = str(raw).strip()
+    if not text:
+        return bool(default)
+    return text.lower() not in {"0", "false", "no", "off"}
 
 
 def _safe_int_list(value: Any) -> List[int]:
@@ -75,6 +86,30 @@ def _safe_str_list(value: Any, *, limit: int = 200) -> List[str]:
         if len(out) >= limit:
             break
     return out
+
+
+def _estimate_pipeline_max_steps(payload: Dict[str, Any]) -> int:
+    required_roles = 0
+    manual_mode_override: Optional[bool] = None
+    try:
+        spec = payload.get("asset_library_spec")
+        if isinstance(spec, dict):
+            required_roles = len(required_library_roles(spec))
+
+        regenerate_roles = _safe_str_list(payload.get("asset_library_regenerate_roles"))
+        if regenerate_roles:
+            required_roles = len(regenerate_roles)
+
+        env_manual_mode = _env_flag("DREAMWEAVER_LIBRARY_MANUAL", True)
+        force_regenerate = bool(payload.get("asset_library_force_regenerate"))
+        manual_mode_override = bool(env_manual_mode and not force_regenerate and not bool(regenerate_roles))
+    except Exception:  # noqa: BLE001
+        required_roles = 0
+        manual_mode_override = None
+    return estimate_pipeline_max_steps_from_env(
+        required_roles_count=required_roles,
+        manual_mode_override=manual_mode_override,
+    )
 
 
 def _build_asset_plan_from_storyboard(storyboard: Any) -> List[Dict[str, Any]]:
@@ -179,6 +214,7 @@ def _build_asset_library_plan_from_payload(payload: Dict[str, Any]) -> List[Dict
         if not role or role in seen_roles:
             continue
         seen_roles.add(role)
+
         try:
             entity_type, entity_id = parse_library_role(role)
         except Exception:  # noqa: BLE001
@@ -186,7 +222,16 @@ def _build_asset_library_plan_from_payload(payload: Dict[str, Any]) -> List[Dict
 
         view = None
         label_suffix = ""
-        if role.startswith("lib_character_portrait_side:"):
+        if role.startswith("lib_character_portrait_bust_three_quarter:"):
+            view = "bust_three_quarter"
+            label_suffix = "半身3/4"
+        elif role.startswith("lib_character_portrait_bust_side:"):
+            view = "bust_side"
+            label_suffix = "半身侧面"
+        elif role.startswith("lib_character_portrait_bust:"):
+            view = "bust_front"
+            label_suffix = "半身正面"
+        elif role.startswith("lib_character_portrait_side:"):
             view = "side"
             label_suffix = "侧面"
         elif role.startswith("lib_character_portrait_back:"):
@@ -203,6 +248,22 @@ def _build_asset_library_plan_from_payload(payload: Dict[str, Any]) -> List[Dict
         entity_key = (str(entity_type).strip().lower(), int(entity_id))
         entity = entity_map.get(entity_key) or {}
         name = str(entity.get("name") or "").strip()
+
+        asset = assets_by_role.get(role)
+        if not name and isinstance(asset, dict):
+            meta = asset.get("meta") if isinstance(asset.get("meta"), dict) else {}
+            candidate_name = str(meta.get("entity_name") or "").strip()
+            if candidate_name and not candidate_name.startswith("lib_"):
+                name = candidate_name
+
+        if not name:
+            if entity_type == "character":
+                name = f"角色#{int(entity_id)}"
+            elif entity_type == "scene":
+                name = f"场景#{int(entity_id)}"
+            elif entity_type == "prop":
+                name = f"道具#{int(entity_id)}"
+
         label = name or role
         if name and label_suffix:
             label = f"{name} {label_suffix}"
@@ -211,7 +272,6 @@ def _build_asset_library_plan_from_payload(payload: Dict[str, Any]) -> List[Dict
         uri = None
         asset_id = None
         approved = None
-        asset = assets_by_role.get(role)
         if isinstance(asset, dict):
             uri_raw = asset.get("uri")
             if isinstance(uri_raw, str) and uri_raw.strip():
@@ -530,6 +590,9 @@ def _resume_payload_from_contract(
                     "video_config",
                     "video_clip_jobs",
                     "asset_library_config",
+                    "asset_library_spec",
+                    "asset_library_review",
+                    "asset_library_scope",
                     "script_text",
                     "script_entities",
                     "script_generation",
@@ -747,8 +810,8 @@ def _update_generation_history(task_id: str, **changes: Any) -> None:
         """
     )
 
-    # SQLite 在 FastAPI + Celery 并发写入时容易出现短暂锁冲突。
-    # 这里对“database is locked”做有限次退避重试，避免任务因状态写入失败而整体失败。
+    # SQLite under FastAPI + Celery concurrent writes may hit short lock contention.
+    # Retry a few times on "database is locked" to avoid failing the whole task.
     max_retries = max(0, _env_int("SQLITE_WRITE_RETRIES", 8))
     base_sleep_s = max(0.05, _env_float("SQLITE_WRITE_RETRY_BASE_S", 0.15))
     max_sleep_s = max(0.2, _env_float("SQLITE_WRITE_RETRY_MAX_S", 2.0))
@@ -783,7 +846,7 @@ def _update_generation_history(task_id: str, **changes: Any) -> None:
         finally:
             session.close()
 
-    # 写入状态失败不应导致整条生成链路直接失败：记录日志，交由后续轮询/下一次写入覆盖。
+    # 写入状态失败不应导致整条生成链路直接失败：记录日志，交由后续轮询覆盖。
     if last_exc is not None and _is_sqlite_locked_error(last_exc):
         logger.warning("update generation_history failed after retries (task_id=%s): %s", task_id, last_exc)
         return
@@ -816,8 +879,8 @@ def run_dreamweaver_task(
             runtime_config = args_list.pop()
         args = tuple(args_list)
 
-        # 兼容旧队列消息：历史版本参数为 (task_id, run_id, project_id, chapter_ids, source_text)
-        # 新版本参数为 (task_id, run_id, project_id, user_id, chapter_ids, source_text, schema_version?, runtime_config?)
+        # 鍏煎鏃ч槦鍒楁秷鎭細鍘嗗彶鐗堟湰鍙傛暟涓?(task_id, run_id, project_id, chapter_ids, source_text)
+        # 鏂扮増鏈弬鏁颁负 (task_id, run_id, project_id, user_id, chapter_ids, source_text, schema_version?, runtime_config?)
         if len(args) == 2:
             chapter_ids, source_text = args
             user_id = None
@@ -905,7 +968,7 @@ def run_dreamweaver_task(
         if not isinstance(payload.get("source_text"), str):
             payload["source_text"] = str(payload.get("source_text") or "")
 
-        # 让统计与后续链路使用“最终 chapter_ids”（resume 时原始 args 可能为空）
+        # 让统计与后续链路使用最终 chapter_ids（resume 时原始 args 可能为空）
         chapter_ids = payload["chapter_ids"]
         source_text = str(payload.get("source_text") or "")
 
@@ -913,7 +976,7 @@ def run_dreamweaver_task(
             start_state_raw = str(resume_config.get("start_state") or "").strip().upper()
             reset_policy = str(resume_config.get("reset_policy") or "none").strip().lower()
             if start_state_raw:
-                # 局部返工：只在 reset_policy=downstream 的“重启式重跑”中生效，避免影响正常 resume。
+                # 局部重跑仅在 reset_policy=downstream 时生效，避免影响正常 resume
                 if reset_policy == "downstream":
                     shot_ids = _safe_str_list(resume_config.get("regenerate_shot_ids"))
                     if shot_ids:
@@ -950,8 +1013,22 @@ def run_dreamweaver_task(
                 max_props=_env_int("DREAMWEAVER_LIBRARY_MAX_PROPS", 8),
             )
         except Exception:
-            # 素材库仅做增强，不影响主流程（例如项目没有设定体系/角色）
+            # 素材库仅做增强，不影响主流程
             pass
+        else:
+            try:
+                spec = payload.get("asset_library_spec")
+                if isinstance(spec, dict):
+                    allowed_roles = set(required_library_roles(spec))
+                    regen_roles = _safe_str_list(payload.get("asset_library_regenerate_roles"))
+                    if regen_roles:
+                        filtered_roles = [role for role in regen_roles if role in allowed_roles]
+                        if filtered_roles:
+                            payload["asset_library_regenerate_roles"] = filtered_roles
+                        else:
+                            payload.pop("asset_library_regenerate_roles", None)
+            except Exception:
+                pass
 
         emitter = DreamweaverEventEmitter(project_id=project_id, user_id=user_id, run_id=run_id)
         ctx = RunContext(
@@ -966,8 +1043,7 @@ def run_dreamweaver_task(
             except Exception:  # noqa: BLE001
                 ctx.state = State.INIT
 
-        # 任务真正开始执行：将 generation_history 从 queued 切换为 running，
-        # 避免 UI 长时间停留在 INIT/0% 造成“卡住”的误判。
+        # 任务开始执行后，先将 generation_history 从 queued 切到 running，避免 UI 长时间停留在 INIT/0%。
         queue_name = None
         try:
             delivery = getattr(getattr(self, "request", None), "delivery_info", None)
@@ -996,8 +1072,9 @@ def run_dreamweaver_task(
         asset_plan_emitted = False
         library_plan_emitted = False
         emitted_asset_keys: set[str] = set()
-        # 逐步执行，实时写入 progress/state，便于前端轮询展示
-        max_steps = 50
+        # 逐步执行并持续刷新 progress/state，便于前端轮询展示。
+        max_steps = _estimate_pipeline_max_steps(payload=ctx.payload)
+        loop_exhausted = True
         for _ in range(max_steps):
             if ctx.state in (
                 State.DONE,
@@ -1006,6 +1083,7 @@ def run_dreamweaver_task(
                 State.WAITING_APPROVAL,
                 State.WAITING_VIDEO_CONFIRMATION,
             ):
+                loop_exhausted = False
                 break
             prev_stage = stage_label(ctx.state)
             prev_state = ctx.state.name
@@ -1044,7 +1122,7 @@ def run_dreamweaver_task(
                 emitted_keys=emitted_asset_keys,
             )
 
-            # 将剧本阶段抽取的实体同步写入项目库（角色/场景/道具），并刷新素材库 spec。
+            # 将剧本阶段抽取到的实体同步回项目，并刷新素材库 spec
             try:
                 entities = ctx.payload.get("script_entities")
                 if isinstance(entities, dict) and not bool(ctx.payload.get("script_entities_synced")):
@@ -1138,6 +1216,20 @@ def run_dreamweaver_task(
                 result=json.dumps(running_payload, ensure_ascii=False),
                 error=None,
             )
+
+        if loop_exhausted and ctx.state not in (
+            State.DONE,
+            State.FAILED,
+            State.WAITING_SCRIPT_APPROVAL,
+            State.WAITING_APPROVAL,
+            State.WAITING_VIDEO_CONFIRMATION,
+        ):
+            ctx.payload.setdefault(
+                "error",
+                f"pipeline step budget exhausted (max_steps={max_steps}, state={ctx.state.name})",
+            )
+            ctx.payload.setdefault("failed_from_state", ctx.state.name)
+            ctx.state = State.FAILED
 
         if emitter is not None:
             emitter.emit_stage_end(
@@ -1266,3 +1358,4 @@ def run_dreamweaver_task(
         raise
     finally:
         session.close()
+

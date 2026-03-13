@@ -1,200 +1,341 @@
 #!/bin/bash
+# 拾光工坊 - 一键部署脚本
+# 使用方法：./deploy.sh [选项]
+# 选项：
+#   --update    仅更新代码，不重新构建
+#   --rebuild   重新构建所有镜像
+#   --backup    部署前备份数据库
+#   --help      显示帮助信息
 
-# 阿里云ECS部署脚本
-# 用于在阿里云ECS上部署拾光工坊应用
-
-set -e
-
-echo "=========================================="
-echo "  拾光工坊 - 阿里云ECS部署脚本"
-echo "=========================================="
-echo ""
+set -e  # 遇到错误立即退出
 
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# 检查是否为root用户
-if [ "$EUID" -ne 0 ]; then 
-    echo -e "${RED}请使用root用户执行此脚本${NC}"
-    exit 1
-fi
-
-# 检查系统
-echo -e "${GREEN}[1/8] 检查系统环境...${NC}"
-if [ -f /etc/alinux-release ]; then
-    echo -e "${GREEN}检测到 Alibaba Cloud Linux${NC}"
-    OS="alinux"
-elif [ -f /etc/redhat-release ]; then
-    echo -e "${GREEN}检测到 CentOS/RHEL${NC}"
-    OS="centos"
-elif [ -f /etc/debian_version ]; then
-    echo -e "${GREEN}检测到 Debian/Ubuntu${NC}"
-    OS="debian"
-else
-    echo -e "${RED}不支持的操作系统${NC}"
-    exit 1
-fi
-echo ""
-
-# 安装Docker
-echo -e "${GREEN}[2/8] 安装Docker...${NC}"
-if ! command -v docker &> /dev/null; then
-    echo "正在安装Docker..."
-    curl -fsSL https://get.docker.com | bash -s docker --mirror Aliyun
-    systemctl start docker
-    systemctl enable docker
-    echo -e "${GREEN}Docker安装完成${NC}"
-else
-    echo -e "${YELLOW}Docker已安装${NC}"
-fi
-echo ""
-
-# 安装Docker Compose
-echo -e "${GREEN}[3/8] 安装Docker Compose...${NC}"
-if ! command -v docker-compose &> /dev/null; then
-    echo "正在安装Docker Compose..."
-    curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-    chmod +x /usr/local/bin/docker-compose
-    echo -e "${GREEN}Docker Compose安装完成${NC}"
-else
-    echo -e "${YELLOW}Docker Compose已安装${NC}"
-fi
-echo ""
-
-# 配置防火墙
-echo -e "${GREEN}[4/8] 配置防火墙...${NC}"
-if command -v firewall-cmd &> /dev/null; then
-    echo "配置firewalld..."
-    firewall-cmd --permanent --add-port=80/tcp
-    firewall-cmd --permanent --add-port=443/tcp
-    firewall-cmd --permanent --add-port=8000/tcp
-    firewall-cmd --permanent --add-port=3000/tcp
-    firewall-cmd --reload
-    echo -e "${GREEN}防火墙配置完成${NC}"
-elif command -v ufw &> /dev/null; then
-    echo "配置ufw..."
-    ufw allow 80/tcp
-    ufw allow 443/tcp
-    ufw allow 8000/tcp
-    ufw allow 3000/tcp
-    echo -e "${GREEN}防火墙配置完成${NC}"
-else
-    echo -e "${YELLOW}未检测到防火墙，跳过配置${NC}"
-fi
-echo ""
-
-# 创建项目目录
-echo -e "${GREEN}[5/8] 创建项目目录...${NC}"
+# 配置
 PROJECT_DIR="/root/novel_writing_agent"
-if [ ! -d "$PROJECT_DIR" ]; then
-    mkdir -p "$PROJECT_DIR"
-    echo -e "${GREEN}项目目录创建完成: $PROJECT_DIR${NC}"
-else
-    echo -e "${YELLOW}项目目录已存在: $PROJECT_DIR${NC}"
-fi
-echo ""
+BACKUP_DIR="/root/backups"
+LOG_FILE="/root/deploy.log"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
-# 检查项目文件
-echo -e "${GREEN}[6/8] 检查项目文件...${NC}"
-if [ ! -f "$PROJECT_DIR/docker-compose.yml" ]; then
-    echo -e "${RED}错误: 未找到docker-compose.yml文件${NC}"
-    echo "请先上传项目文件到 $PROJECT_DIR"
-    exit 1
-fi
-if [ ! -f "$PROJECT_DIR/backend/.env" ]; then
-    echo -e "${RED}错误: 未找到backend/.env文件${NC}"
-    echo "请先配置backend/.env文件"
-    exit 1
-fi
-if [ ! -d "$PROJECT_DIR/ssl" ]; then
-    echo -e "${RED}错误: 未找到ssl目录${NC}"
-    echo "请先准备SSL证书文件"
-    exit 1
-fi
-echo -e "${GREEN}项目文件检查通过${NC}"
-echo ""
+# 打印带颜色的消息
+print_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
 
-# 停止旧容器
-echo -e "${GREEN}[7/8] 停止旧容器...${NC}"
-cd "$PROJECT_DIR"
-docker-compose down 2>/dev/null || true
-echo -e "${GREEN}旧容器已停止${NC}"
-echo ""
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# 检查命令行参数
+UPDATE_ONLY=false
+REBUILD=false
+BACKUP=false
+
+for arg in "$@"; do
+    case $arg in
+        --update)
+            UPDATE_ONLY=true
+            ;;
+        --rebuild)
+            REBUILD=true
+            ;;
+        --backup)
+            BACKUP=true
+            ;;
+        --help)
+            echo "用法: $0 [选项]"
+            echo ""
+            echo "选项:"
+            echo "  --update    仅更新代码，不重新构建"
+            echo "  --rebuild   重新构建所有镜像"
+            echo "  --backup    部署前备份数据库"
+            echo "  --help      显示此帮助信息"
+            exit 0
+            ;;
+    esac
+done
+
+# 记录日志
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> $LOG_FILE
+}
+
+# 创建备份目录
+create_backup_dir() {
+    print_info "创建备份目录..."
+    mkdir -p $BACKUP_DIR
+    log "创建备份目录: $BACKUP_DIR"
+}
+
+# 备份数据库
+backup_database() {
+    print_info "备份数据库..."
+    local backup_file="$BACKUP_DIR/db_backup_$TIMESTAMP.sql"
+    
+    cd $PROJECT_DIR
+    docker-compose exec -T postgres pg_dump -U novel_user novel_db > $backup_file
+    
+    if [ $? -eq 0 ]; then
+        print_success "数据库备份成功: $backup_file"
+        log "数据库备份成功: $backup_file"
+        
+        # 删除 7 天前的备份
+        find $BACKUP_DIR -name "db_backup_*.sql" -mtime +7 -delete
+        print_info "已删除 7 天前的旧备份"
+    else
+        print_error "数据库备份失败"
+        log "数据库备份失败"
+        exit 1
+    fi
+}
+
+# 备份 Redis
+backup_redis() {
+    print_info "备份 Redis 数据..."
+    local backup_file="$BACKUP_DIR/redis_backup_$TIMESTAMP.rdb"
+    
+    cd $PROJECT_DIR
+    docker-compose exec redis redis-cli -a NovelRedis2024! BGSAVE
+    sleep 2
+    docker cp novel_redis:/data/dump.rdb $backup_file
+    
+    if [ $? -eq 0 ]; then
+        print_success "Redis 备份成功: $backup_file"
+        log "Redis 备份成功: $backup_file"
+    else
+        print_warning "Redis 备份失败（继续部署）"
+    fi
+}
+
+# 备份上传文件
+backup_uploads() {
+    print_info "备份上传文件..."
+    local backup_file="$BACKUP_DIR/uploads_backup_$TIMESTAMP.tar.gz"
+    
+    cd $PROJECT_DIR
+    tar -czf $backup_file backend/uploads 2>/dev/null || true
+    
+    if [ $? -eq 0 ]; then
+        print_success "上传文件备份成功: $backup_file"
+        log "上传文件备份成功: $backup_file"
+    else
+        print_warning "上传文件备份失败（继续部署）"
+    fi
+}
+
+# 停止服务
+stop_services() {
+    print_info "停止服务..."
+    cd $PROJECT_DIR
+    docker-compose down
+    log "停止服务"
+    print_success "服务已停止"
+}
+
+# 拉取最新代码
+pull_code() {
+    print_info "拉取最新代码..."
+    cd $PROJECT_DIR
+    
+    if [ -d ".git" ]; then
+        git fetch origin
+        git reset --hard origin/main
+        log "拉取最新代码"
+        print_success "代码更新成功"
+    else
+        print_warning "不是 Git 仓库，跳过代码更新"
+    fi
+}
+
+# 上传本地代码
+upload_code() {
+    print_info "上传代码到服务器..."
+    print_warning "请确保在本地执行以下命令上传代码："
+    echo ""
+    echo "scp -r C:\\Users\\cuigu\\novel_writing_agent root@101.132.154.143:/root/"
+    echo ""
+    read -p "代码已上传？(y/n) " uploaded
+    if [ "$uploaded" != "y" ]; then
+        print_error "请先上传代码"
+        exit 1
+    fi
+}
+
+# 构建镜像
+build_images() {
+    print_info "构建 Docker 镜像..."
+    cd $PROJECT_DIR
+    
+    if [ "$REBUILD" = true ]; then
+        print_info "强制重新构建所有镜像..."
+        docker-compose build --no-cache
+    else
+        print_info "构建镜像（使用缓存）..."
+        docker-compose build
+    fi
+    
+    log "构建镜像"
+    print_success "镜像构建完成"
+}
 
 # 启动服务
-echo -e "${GREEN}[8/8] 启动服务...${NC}"
-docker-compose up -d
-echo ""
+start_services() {
+    print_info "启动服务..."
+    cd $PROJECT_DIR
+    
+    if [ "$UPDATE_ONLY" = true ]; then
+        docker-compose up -d
+    else
+        docker-compose up -d --build
+    fi
+    
+    log "启动服务"
+    print_success "服务已启动"
+}
 
-# 等待服务启动
-echo -e "${GREEN}等待服务启动...${NC}"
-sleep 10
+# 等待服务就绪
+wait_for_services() {
+    print_info "等待服务就绪..."
+    sleep 10
+    
+    local max_attempts=30
+    local attempt=0
+    
+    while [ $attempt -lt $max_attempts ]; do
+        # 检查后端
+        if curl -sf http://localhost:8000/api/v1/health > /dev/null; then
+            print_success "后端服务就绪"
+            break
+        fi
+        
+        # 检查前端
+        if curl -sf http://localhost:3000 > /dev/null; then
+            print_success "前端服务就绪"
+            break
+        fi
+        
+        attempt=$((attempt + 1))
+        echo -n "."
+        sleep 2
+    done
+    
+    echo ""
+    
+    if [ $attempt -ge $max_attempts ]; then
+        print_error "服务启动超时，请检查日志"
+        log "服务启动超时"
+        exit 1
+    fi
+}
 
-# 检查服务状态
-echo -e "${GREEN}检查服务状态...${NC}"
-docker-compose ps
+# 运行数据库迁移
+run_migrations() {
+    print_info "运行数据库迁移..."
+    cd $PROJECT_DIR
+    docker-compose exec backend alembic upgrade head
+    
+    if [ $? -eq 0 ]; then
+        print_success "数据库迁移完成"
+        log "数据库迁移完成"
+    else
+        print_warning "数据库迁移失败（可能已经是最新的）"
+    fi
+}
 
-# 健康检查
-echo ""
-echo -e "${GREEN}执行健康检查...${NC}"
-sleep 5
+# 显示服务状态
+show_status() {
+    print_info "服务状态："
+    cd $PROJECT_DIR
+    docker-compose ps
+    echo ""
+    
+    print_info "资源使用："
+    docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
+}
 
-# 检查PostgreSQL
-if docker-compose ps | grep -q "novel_postgres.*Up"; then
-    echo -e "${GREEN}✓ PostgreSQL 运行正常${NC}"
-else
-    echo -e "${RED}✗ PostgreSQL 启动失败${NC}"
-fi
+# 显示部署摘要
+show_summary() {
+    echo ""
+    echo "=========================================="
+    print_success "部署完成！"
+    echo "=========================================="
+    echo ""
+    echo "访问地址："
+    echo "  HTTP:  http://101.132.154.143"
+    echo "  HTTPS: https://sggf.net"
+    echo "  域名: https://www.sggf.net"
+    echo ""
+    echo "常用命令："
+    echo "  查看日志: cd $PROJECT_DIR && docker-compose logs -f"
+    echo "  重启服务: cd $PROJECT_DIR && docker-compose restart"
+    echo "  停止服务: cd $PROJECT_DIR && docker-compose stop"
+    echo "  查看状态: cd $PROJECT_DIR && docker-compose ps"
+    echo ""
+    echo "日志文件: $LOG_FILE"
+    echo "=========================================="
+}
 
-# 检查Redis
-if docker-compose ps | grep -q "novel_redis.*Up"; then
-    echo -e "${GREEN}✓ Redis 运行正常${NC}"
-else
-    echo -e "${RED}✗ Redis 启动失败${NC}"
-fi
+# 主部署流程
+main() {
+    echo ""
+    echo "=========================================="
+    echo "  拾光工坊 - 自动部署脚本"
+    echo "=========================================="
+    echo ""
+    log "开始部署流程"
+    
+    # 检查是否在服务器上
+    if [ ! -d "$PROJECT_DIR" ]; then
+        print_error "项目目录不存在: $PROJECT_DIR"
+        print_info "请先上传代码到服务器"
+        exit 1
+    fi
+    
+    # 备份
+    if [ "$BACKUP" = true ]; then
+        create_backup_dir
+        backup_database
+        backup_redis
+        backup_uploads
+    fi
+    
+    # 停止服务
+    stop_services
+    
+    # 更新代码
+    pull_code
+    
+    # 构建和启动
+    build_images
+    start_services
+    
+    # 等待就绪
+    wait_for_services
+    
+    # 运行迁移
+    run_migrations
+    
+    # 显示状态
+    show_status
+    
+    # 显示摘要
+    show_summary
+    
+    log "部署完成"
+}
 
-# 检查Backend
-if docker-compose ps | grep -q "novel_backend.*Up"; then
-    echo -e "${GREEN}✓ Backend 运行正常${NC}"
-else
-    echo -e "${RED}✗ Backend 启动失败${NC}"
-fi
-
-# 检查Frontend
-if docker-compose ps | grep -q "novel_frontend.*Up"; then
-    echo -e "${GREEN}✓ Frontend 运行正常${NC}"
-else
-    echo -e "${RED}✗ Frontend 启动失败${NC}"
-fi
-
-# 检查Nginx
-if docker-compose ps | grep -q "novel_nginx.*Up"; then
-    echo -e "${GREEN}✓ Nginx 运行正常${NC}"
-else
-    echo -e "${RED}✗ Nginx 启动失败${NC}"
-fi
-
-echo ""
-echo "=========================================="
-echo -e "${GREEN}部署完成！${NC}"
-echo "=========================================="
-echo ""
-echo "访问地址："
-echo "  - HTTP:  http://sggf.net"
-echo "  - HTTPS: https://sggf.net"
-echo "  - API:   https://sggf.net/api"
-echo ""
-echo "管理命令："
-echo "  - 查看日志: docker-compose logs -f"
-echo "  - 停止服务: docker-compose down"
-echo "  - 重启服务: docker-compose restart"
-echo "  - 查看状态: docker-compose ps"
-echo ""
-echo -e "${YELLOW}重要提示：${NC}"
-echo "  1. 请在阿里云控制台配置安全组，开放80、443端口"
-echo "  2. 请确保域名sggf.net已解析到服务器IP: 101.132.154.143"
-echo "  3. 首次部署需要执行数据库迁移"
-echo ""
+# 执行主流程
+main "$@"

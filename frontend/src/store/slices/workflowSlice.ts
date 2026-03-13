@@ -231,12 +231,15 @@ export const completeWorkflowAndCreateProject = createAsyncThunk(
     iterationOutput: any
   }) => {
     // 从概念输出中提取项目标题
-    let projectTitle = 'New Novel'
+    let projectTitle = '未命名项目'
     if (typeof conceptOutput === 'string') {
       // 尝试从概念输出中提取标题
       const titleMatch = conceptOutput.match(/标题[：:]\s*《?([^》\n]+)》?/i)
       if (titleMatch) {
-        projectTitle = titleMatch[1].trim()
+        const extractedTitle = titleMatch[1].trim()
+        if (extractedTitle) {
+          projectTitle = extractedTitle
+        }
       }
     }
 
