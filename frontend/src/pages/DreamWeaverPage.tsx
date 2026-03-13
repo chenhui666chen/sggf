@@ -34,7 +34,6 @@ import MoreHorizIcon from '@mui/icons-material/MoreHoriz'
 import MovieIcon from '@mui/icons-material/Movie'
 import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary'
 import SearchIcon from '@mui/icons-material/Search'
-import ScienceIcon from '@mui/icons-material/Science'
 import LogoutIcon from '@mui/icons-material/Logout'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 
@@ -446,19 +445,6 @@ export default function DreamWeaverPage() {
             </Box>
 
             <Box sx={{ display: 'flex', gap: 1.5 }}>
-              <Button
-                variant="outlined"
-                startIcon={<ScienceIcon />}
-                onClick={() => navigate('/prompt-evolution')}
-                sx={{
-                  color: 'white',
-                  borderColor: 'rgba(255,255,255,0.5)',
-                  '&:hover': { borderColor: 'white', backgroundColor: 'rgba(255,255,255,0.1)' },
-                  ...keyboardFocusRingSx,
-                }}
-              >
-                提示词优化
-              </Button>
               <Button
                 variant="outlined"
                 startIcon={<LogoutIcon />}

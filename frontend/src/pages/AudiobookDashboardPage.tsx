@@ -38,7 +38,6 @@ import {
   Headphones as HeadphonesIcon,
   History as HistoryIcon,
   Logout as LogoutIcon,
-  Science as ScienceIcon,
   Search as SearchIcon,
 } from '@mui/icons-material'
 import { useDispatch } from 'react-redux'
@@ -420,21 +419,6 @@ const AudiobookDashboardPage = () => {
                 }}
               >
                 新建项目
-              </Button>
-              <Button
-                variant="outlined"
-                startIcon={<ScienceIcon />}
-                onClick={() => navigate('/prompt-evolution')}
-                sx={{
-                  color: 'white',
-                  borderColor: 'rgba(255,255,255,0.5)',
-                  '&:hover': {
-                    borderColor: 'white',
-                    backgroundColor: 'rgba(255,255,255,0.1)',
-                  },
-                }}
-              >
-                提示词优化
               </Button>
               <Button
                 variant="outlined"

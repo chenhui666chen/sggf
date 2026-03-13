@@ -21,6 +21,7 @@ import {
   History as HistoryIcon,
   Settings as SettingsIcon,
   Home as HomeIcon,
+  Science as ScienceIcon,
 } from '@mui/icons-material'
 import { RootState } from '@/store/store'
 
@@ -30,6 +31,7 @@ const menuItems = [
   { text: '数据仪表盘', icon: <DashboardIcon />, path: '/admin/dashboard' },
   { text: '用户管理', icon: <PeopleIcon />, path: '/admin/users' },
   { text: '角色权限', icon: <SecurityIcon />, path: '/admin/roles' },
+  { text: '提示词优化', icon: <ScienceIcon />, path: '/prompt-evolution' },
   { text: '操作日志', icon: <HistoryIcon />, path: '/admin/logs' },
   { text: '系统配置', icon: <SettingsIcon />, path: '/admin/system', superAdminOnly: true },
 ]
