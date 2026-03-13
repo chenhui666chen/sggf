@@ -24,6 +24,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.db.base import Base, engine
 from app.api.v1 import auth, projects, chapters, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters, ai_detect, prompt_evolution, ai_trace, book_parser, audiobook, monitoring, script_review, dreamweaver
+from app.api.v1.admin import router as admin_router
 import socketio
 
 
@@ -137,6 +138,7 @@ app.include_router(audiobook.router)  # 耳畔星河 - 有声书生成 API
 app.include_router(monitoring.router)  # 监控与指标 API
 app.include_router(script_review.router)  # 剧本审核与调整 API
 app.include_router(dreamweaver.router)  # 织梦映心 - 短剧生成 API
+app.include_router(admin_router)  # 管理控制台 API
 
 
 # 🔌 挂载 Socket.IO

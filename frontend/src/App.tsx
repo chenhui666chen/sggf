@@ -7,6 +7,7 @@ import createCache from '@emotion/cache'
 import { RootState, AppDispatch } from '@/store/store'
 import { getCurrentUser } from '@/store/slices/authSlice'
 import ProtectedRoute from '@/components/ProtectedRoute'
+import AdminProtectedRoute from '@/components/admin/AdminProtectedRoute'
 
 const cache = createCache({
   key: 'css',
@@ -35,6 +36,11 @@ const DreamWeaverRunPage = lazy(() => import('@/pages/DreamWeaverRunPage')) // �
 const DreamWeaverLibraryPage = lazy(() => import('@/pages/DreamWeaverLibraryPage')) // 织梦映心项目素材库
 const TrashPage = lazy(() => import('@/pages/TrashPage')) // 回收站
 const AICreationPlatformPage = lazy(() => import('@/pages/AICreationPlatformPage')) // AI 创作平台
+
+// 管理控制台页面
+const AdminLayout = lazy(() => import('@/pages/admin/AdminLayout'))
+const AdminDashboardPage = lazy(() => import('@/pages/admin/DashboardPage'))
+const AdminUsersPage = lazy(() => import('@/pages/admin/UsersPage'))
 
 // 加载中组件
 const LoadingFallback = () => (
@@ -252,6 +258,21 @@ function App() {
               </ProtectedRoute>
             }
           />
+          
+          {/* 管理控制台路由 */}
+          <Route
+            path="/admin"
+            element={
+              <AdminProtectedRoute>
+                <AdminLayout />
+              </AdminProtectedRoute>
+            }
+          >
+            <Route index element={<Navigate to="dashboard" replace />} />
+            <Route path="dashboard" element={<AdminDashboardPage />} />
+            <Route path="users" element={<AdminUsersPage />} />
+          </Route>
+          
             {/* 默认跳转到创作模块入口页 */}
             <Route path="/" element={<Navigate to="/home" replace />} />
           </Routes>

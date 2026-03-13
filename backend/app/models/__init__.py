@@ -9,6 +9,12 @@ from .character import Character, CharacterTechnique
 from .review import Review
 from .graph import KnowledgeGraphEdge
 
+# RBAC权限模型
+from .role import Role, Permission, user_roles, role_permissions
+
+# 管理员日志模型
+from .admin_log import AdminOperationLog, AdminLoginLog
+
 # 拆书工具模型
 from .book_parser import (
     BookSource, 
@@ -34,6 +40,14 @@ __all__ = [
     "CharacterTechnique",
     "Review",
     "KnowledgeGraphEdge",
+    # RBAC权限
+    "Role",
+    "Permission",
+    "user_roles",
+    "role_permissions",
+    # 管理员日志
+    "AdminOperationLog",
+    "AdminLoginLog",
     # 拆书工具
     "BookSource",
     "BookChapter",

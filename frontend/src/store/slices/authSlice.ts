@@ -1,6 +1,12 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 
+interface Role {
+  id: number
+  code: string
+  name: string
+}
+
 interface User {
   id: number
   username: string
@@ -11,6 +17,7 @@ interface User {
   is_active: boolean
   created_at: string
   updated_at: string
+  roles?: Role[]
 }
 
 interface AuthSuccessPayload {

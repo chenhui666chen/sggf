@@ -2,6 +2,7 @@
 用户 Schema
 """
 from datetime import datetime
+from typing import List
 import re
 
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
@@ -9,6 +10,15 @@ from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 
 EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 PHONE_PATTERN = re.compile(r"^1[3-9]\d{9}$")
+
+
+class RoleSimple(BaseModel):
+    """角色简单 Schema"""
+    id: int
+    code: str
+    name: str
+    
+    model_config = ConfigDict(from_attributes=True)
 
 
 def normalize_identity(value: str) -> str:
@@ -114,6 +124,7 @@ class UserResponse(UserBase):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    roles: List[RoleSimple] = []
 
     model_config = ConfigDict(from_attributes=True)
 
