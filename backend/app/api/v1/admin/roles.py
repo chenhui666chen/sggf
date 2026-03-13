@@ -5,7 +5,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.core.permissions import require_admin, require_super_admin, require_permission
+from app.core.permissions import require_admin, require_super_admin
 from app.db.base import get_db
 from app.models.user import User
 from app.models.role import Role, Permission
@@ -40,7 +40,7 @@ async def list_roles(
 @router.post("", response_model=RoleResponse, status_code=status.HTTP_201_CREATED)
 async def create_role(
     role_data: RoleCreate,
-    current_user: User = Depends(require_permission("role:write")),
+    current_user: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
     """创建角色"""
@@ -93,7 +93,7 @@ async def get_role(
 async def update_role(
     role_id: int,
     role_data: RoleUpdate,
-    current_user: User = Depends(require_permission("role:write")),
+    current_user: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
     """编辑角色"""
@@ -128,7 +128,7 @@ async def update_role(
 @router.delete("/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_role(
     role_id: int,
-    current_user: User = Depends(require_permission("role:delete")),
+    current_user: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
     """删除角色"""
@@ -171,7 +171,7 @@ async def list_permissions(
 async def assign_role_permissions(
     role_id: int,
     permission_ids: List[int],
-    current_user: User = Depends(require_permission("role:write")),
+    current_user: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
     """批量分配权限"""

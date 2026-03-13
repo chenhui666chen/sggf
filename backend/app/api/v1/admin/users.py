@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 
-from app.core.permissions import require_admin, require_permission
+from app.core.permissions import require_admin
 from app.core.security import hash_password
 from app.db.base import get_db
 from app.models.user import User
@@ -93,7 +93,7 @@ async def get_user(
 @router.post("", response_model=UserAdminResponse, status_code=status.HTTP_201_CREATED)
 async def create_user(
     user_data: UserCreateByAdmin,
-    current_user: User = Depends(require_permission("user:write")),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """新建用户"""
@@ -138,7 +138,7 @@ async def create_user(
 async def update_user(
     user_id: int,
     user_data: UserUpdateByAdmin,
-    current_user: User = Depends(require_permission("user:write")),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """编辑用户信息"""
@@ -168,7 +168,7 @@ async def update_user(
 async def update_user_status(
     user_id: int,
     status_data: UserStatusUpdate,
-    current_user: User = Depends(require_permission("user:write")),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """启用/禁用账号"""
@@ -196,7 +196,7 @@ async def update_user_status(
 async def assign_user_roles(
     user_id: int,
     role_data: UserRoleUpdate,
-    current_user: User = Depends(require_permission("user:write")),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """分配角色"""
@@ -219,7 +219,7 @@ async def assign_user_roles(
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: int,
-    current_user: User = Depends(require_permission("user:delete")),
+    current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """删除用户"""

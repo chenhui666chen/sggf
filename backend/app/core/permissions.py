@@ -65,7 +65,7 @@ async def require_super_admin(
 
 
 def require_permission(permission_code: str):
-    """权限检查装饰器"""
+    """权限检查依赖"""
     async def permission_checker(
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
@@ -76,4 +76,4 @@ def require_permission(permission_code: str):
                 detail=f"需要权限: {permission_code}"
             )
         return current_user
-    return Depends(permission_checker)
+    return permission_checker
