@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = 'add_admin_rbac'
-down_revision = 'add_chapter_summary_fields'
+down_revision = 'add_chapter_summary_fields_to_existing_table'
 branch_labels = None
 depends_on = None
 

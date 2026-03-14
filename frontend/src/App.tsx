@@ -26,7 +26,6 @@ const KnowledgeBasePage = lazy(() => import('@/pages/KnowledgeBasePage'))
 const ReviewPage = lazy(() => import('@/pages/ReviewPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 const WorkflowControlPage = lazy(() => import('@/pages/WorkflowControlPage'))
-const PromptEvolutionPage = lazy(() => import('@/pages/PromptEvolutionPage'))
 const AITracePage = lazy(() => import('@/pages/AITracePage'))
 const BookParserPage = lazy(() => import('@/pages/BookParserPage'))
 const AudiobookDashboardPage = lazy(() => import('@/pages/AudiobookDashboardPage'))  // 耳畔星河仪表盘
@@ -44,6 +43,8 @@ const AdminUsersPage = lazy(() => import('@/pages/admin/UsersPage'))
 const RolesPage = lazy(() => import('@/pages/admin/RolesPage'))
 const LogsPage = lazy(() => import('@/pages/admin/LogsPage'))
 const SystemPage = lazy(() => import('@/pages/admin/SystemPage'))
+const DatabaseQueryPage = lazy(() => import('@/pages/admin/DatabaseQueryPage'))
+const PromptEvolutionPage = lazy(() => import('@/pages/admin/PromptEvolutionPage'))
 
 // 加载中组件
 const LoadingFallback = () => (
@@ -165,14 +166,7 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route
-            path="/prompt-evolution"
-            element={
-              <AdminProtectedRoute>
-                <PromptEvolutionPage />
-              </AdminProtectedRoute>
-            }
-          />
+
           <Route
             path="/ai-trace"
             element={
@@ -275,6 +269,8 @@ function App() {
             <Route path="dashboard" element={<AdminDashboardPage />} />
             <Route path="users" element={<AdminUsersPage />} />
             <Route path="roles" element={<RolesPage />} />
+            <Route path="query" element={<DatabaseQueryPage />} />
+            <Route path="prompt-evolution" element={<PromptEvolutionPage />} />
             <Route path="logs" element={<LogsPage />} />
             <Route path="system" element={<SystemPage />} />
           </Route>

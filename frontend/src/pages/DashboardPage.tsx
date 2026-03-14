@@ -97,6 +97,10 @@ export default function DashboardPage() {
   // 🆕 类型编辑状态
   const [editingGenreProjectId, setEditingGenreProjectId] = useState<number | null>(null)
   const [editedGenre, setEditedGenre] = useState('')
+  
+  // 🆕 书名编辑状态
+  const [editingTitleProjectId, setEditingTitleProjectId] = useState<number | null>(null)
+  const [editedTitle, setEditedTitle] = useState('')
 
   // 🆕 生成下一章状态
   const [generatingNextChapter, setGeneratingNextChapter] = useState<Record<number, boolean>>({})
@@ -555,6 +559,32 @@ export default function DashboardPage() {
   const handleStartEditGenre = (projectId: number, currentGenre: string) => {
     setEditingGenreProjectId(projectId)
     setEditedGenre(currentGenre || '')
+  }
+  
+  // 开始编辑书名
+  const handleStartEditTitle = (projectId: number, currentTitle: string) => {
+    setEditingTitleProjectId(projectId)
+    setEditedTitle(currentTitle || '')
+  }
+  
+  // 保存书名
+  const handleSaveTitle = async () => {
+    const projectId = editingTitleProjectId
+    if (!projectId || !editedTitle.trim()) {
+      setEditingTitleProjectId(null)
+      setEditedTitle('')
+      return
+    }
+    
+    try {
+      await dispatch(updateProject({ projectId: projectId, data: { title: editedTitle.trim() } })).unwrap()
+      setEditingTitleProjectId(null)
+      setEditedTitle('')
+    } catch (error) {
+      console.error('更新书名失败:', error)
+      setEditingTitleProjectId(null)
+      setEditedTitle('')
+    }
   }
 
 
@@ -1147,7 +1177,7 @@ export default function DashboardPage() {
                     boxShadow: '3px 6px 28px rgba(0,0,0,0.55), 1px 1px 0 rgba(255,255,255,0.06) inset',
                     display: 'flex',
                     flexDirection: 'column',
-                    overflow: 'hidden',
+                    overflow: 'visible',
                     transition: 'all 0.4s ease',
                     zIndex: 3,
                     '&::before': {
@@ -1209,26 +1239,93 @@ export default function DashboardPage() {
                     flexDirection: 'column',
                     justifyContent: 'center',
                   }}>
-                    <Typography
-                      sx={{
-                        fontFamily: '"Noto Serif SC", "Source Han Serif SC", "STSong", "宋体", serif',
-                        fontSize: { xs: '0.75rem', sm: '0.875rem', md: '1rem' },
-                        fontWeight: 900,
-                        color: bookColors.text,
-                        lineHeight: 1.7,
-                        letterSpacing: { xs: '2px', sm: '3px', md: '4px' },
-                        textShadow: '0 2px 10px rgba(0,0,0,0.55)',
-                        mb: { xs: 0.8, sm: 1.2, md: 1.5 },
-                        display: '-webkit-box',
-                        WebkitLineClamp: 3,
-                        WebkitBoxOrient: 'vertical',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        minHeight: '2.5em',
-                      }}
-                    >
-                      {project.title}
-                    </Typography>
+                    {editingTitleProjectId === project.id ? (
+                      <Box
+                        onClick={(e) => e.stopPropagation()}
+                        sx={{ mb: { xs: 0.8, sm: 1.2, md: 1.5 } }}
+                      >
+                        <TextField
+                          value={editedTitle}
+                          onChange={(e) => setEditedTitle(e.target.value)}
+                          autoFocus
+                          size="small"
+                          sx={{
+                            '& .MuiInputBase-input': {
+                              fontFamily: '"Noto Serif SC", "Source Han Serif SC", "STSong", "宋体", serif',
+                              fontSize: { xs: '0.75rem', sm: '0.875rem', md: '1rem' },
+                              fontWeight: 900,
+                              color: bookColors.text,
+                              textAlign: 'center',
+                              letterSpacing: { xs: '2px', sm: '3px', md: '4px' },
+                            },
+                            '& .MuiOutlinedInput-root': {
+                              backgroundColor: 'rgba(255,255,255,0.1)',
+                            },
+                          }}
+                          onKeyPress={(e) => {
+                            if (e.key === 'Enter') {
+                              handleSaveTitle()
+                            }
+                          }}
+                        />
+                        <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, mt: 0.5 }}>
+                          <Typography
+                            onClick={handleSaveTitle}
+                            sx={{
+                              fontSize: { xs: '0.4rem', sm: '0.45rem', md: '0.5rem' },
+                              color: bookColors.accent,
+                              cursor: 'pointer',
+                              letterSpacing: '1px',
+                            }}
+                          >
+                            保存
+                          </Typography>
+                          <Typography
+                            onClick={() => { setEditingTitleProjectId(null); setEditedTitle('') }}
+                            sx={{
+                              fontSize: { xs: '0.4rem', sm: '0.45rem', md: '0.5rem' },
+                              color: 'rgba(255,255,255,0.3)',
+                              cursor: 'pointer',
+                              letterSpacing: '1px',
+                            }}
+                          >
+                            取消
+                          </Typography>
+                        </Box>
+                      </Box>
+                    ) : (
+                      <Typography
+                        onClick={(e) => { e.stopPropagation(); handleStartEditTitle(project.id, project.title) }}
+                        sx={{
+                          fontFamily: '"Noto Serif SC", "Source Han Serif SC", "STSong", "宋体", serif',
+                          fontSize: { xs: '0.75rem', sm: '0.875rem', md: '1rem' },
+                          fontWeight: 900,
+                          color: bookColors.text,
+                          lineHeight: 1.7,
+                          letterSpacing: { xs: '2px', sm: '3px', md: '4px' },
+                          textShadow: '0 2px 10px rgba(0,0,0,0.55)',
+                          mb: { xs: 0.8, sm: 1.2, md: 1.5 },
+                          display: '-webkit-box',
+                          WebkitLineClamp: 3,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          minHeight: '2.5em',
+                          cursor: 'pointer',
+                          transition: 'all 0.25s ease',
+                          px: 1,
+                          py: 0.5,
+                          '&:hover': { 
+                            transform: 'translateY(-2px)',
+                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)',
+                            backgroundColor: `${bookColors.accent}15`,
+                            borderRadius: '4px',
+                          },
+                        }}
+                      >
+                        {project.title}
+                      </Typography>
+                    )}
 
                     {/* 题材标签 - 点击可编辑 */}
                     {editingGenreProjectId === project.id ? (
@@ -1250,8 +1347,16 @@ export default function DashboardPage() {
                                 letterSpacing: '1px',
                                 cursor: 'pointer',
                                 fontWeight: editedGenre === g ? 700 : 400,
-                                transition: 'all 0.15s ease',
-                                '&:hover': { color: GENRE_COLORS[g] || bookColors.accent, transform: 'scale(1.1)' },
+                                transition: 'all 0.25s ease',
+                                px: 1,
+                                py: 0.5,
+                                '&:hover': { 
+                                  color: GENRE_COLORS[g] || bookColors.accent, 
+                                  transform: 'translateY(-2px)',
+                                  boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)',
+                                  backgroundColor: `${GENRE_COLORS[g] || bookColors.accent}15`,
+                                  borderRadius: '4px',
+                                },
                               }}
                             >
                               {g}
@@ -1278,8 +1383,17 @@ export default function DashboardPage() {
                           cursor: 'pointer',
                           mx: 'auto',
                           display: 'block',
-                          transition: 'all 0.2s ease',
-                          '&:hover': { opacity: 0.75, letterSpacing: '4px' },
+                          transition: 'all 0.25s ease',
+                          px: 2,
+                          py: 0.5,
+                          '&:hover': { 
+                            opacity: 0.75, 
+                            letterSpacing: '4px',
+                            transform: 'translateY(-2px)',
+                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)',
+                            backgroundColor: `${GENRE_COLORS[getGenreLabel(project.genre)] || bookColors.accent}15`,
+                            borderRadius: '4px',
+                          },
                         }}
                       >
                         {getGenreLabel(project.genre)}
@@ -1301,64 +1415,118 @@ export default function DashboardPage() {
                     </Typography>
                   </Box>
 
-                  {/* 底部功能按钮区 */}
+                  {/* 底部功能按钮区 - 两行两列布局 */}
                   <Box
                     sx={{
-                      px: { xs: 0.8, sm: 1, md: 1.2 },
+                      px: { xs: 1, sm: 1, md: 1.2 },
                       pt: { xs: 0.5, sm: 0.6, md: 0.8 },
                       pb: { xs: 0.8, sm: 1, md: 1.2 },
-                      display: 'flex',
-                      justifyContent: 'space-around',
-                      alignItems: 'center',
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr',
+                      gridTemplateRows: 'auto auto',
+                      gap: { xs: 0.8, sm: 0.9, md: 1 },
                       position: 'relative',
                       zIndex: 3,
+                      overflow: 'visible',
                     }}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    {/* 单行四按鈕：典籍 · 目录 │ 焚毁 · 续写 */}
+                    {/* 第一行：典籍 | 目录 */}
                     <Tooltip title="进入知识库" arrow>
                       <Box
                         onClick={() => !isDisabled && navigate(`/knowledge-base/${project.id}`)}
-                        sx={{ cursor: isDisabled ? 'default' : 'pointer', opacity: isDisabled ? 0.45 : 1, transition: 'all 0.25s ease', '&:hover': isDisabled ? {} : { transform: 'translateY(-1px)' } }}
+                        sx={{ 
+                          cursor: isDisabled ? 'default' : 'pointer', 
+                          opacity: isDisabled ? 0.45 : 1, 
+                          transition: 'all 0.25s ease',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          py: { xs: 0.6, sm: 0.7 },
+                          '&:hover': isDisabled ? {} : { 
+                            transform: 'translateY(-4px)',
+                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)',
+                            backgroundColor: `${bookColors.accent}15`,
+                            borderRadius: '4px',
+                          },
+                        }}
                       >
-                        <Typography sx={{ fontFamily: '楷体, KaiTi, serif', fontSize: { xs: '0.5rem', sm: '0.58rem', md: '0.68rem' }, color: bookColors.accent, letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 600 }}>典籍</Typography>
+                        <Typography sx={{ fontFamily: '楷体，KaiTi, serif', fontSize: { xs: '0.65rem', sm: '0.7rem', md: '0.75rem' }, color: bookColors.accent, letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 600 }}>典籍</Typography>
                       </Box>
                     </Tooltip>
-                    <Box sx={{ width: '1px', height: { xs: '8px', sm: '9px', md: '10px' }, backgroundColor: `${bookColors.accent}25` }} />
                     <Tooltip title="查看章节列表" arrow>
                       <Box
                         onClick={() => !isDisabled && handleOpenChaptersDrawer(project.id)}
-                        sx={{ cursor: isDisabled ? 'default' : 'pointer', opacity: isDisabled ? 0.45 : 1, transition: 'all 0.25s ease', '&:hover': isDisabled ? {} : { transform: 'translateY(-1px)' } }}
+                        sx={{ 
+                          cursor: isDisabled ? 'default' : 'pointer', 
+                          opacity: isDisabled ? 0.45 : 1, 
+                          transition: 'all 0.25s ease',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          py: { xs: 0.6, sm: 0.7 },
+                          '&:hover': isDisabled ? {} : { 
+                            transform: 'translateY(-4px)',
+                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)',
+                            backgroundColor: `${bookColors.accent}15`,
+                            borderRadius: '4px',
+                          },
+                        }}
                       >
-                        <Typography sx={{ fontFamily: '楷体, KaiTi, serif', fontSize: { xs: '0.5rem', sm: '0.58rem', md: '0.68rem' }, color: bookColors.accent, letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 600 }}>目录</Typography>
+                        <Typography sx={{ fontFamily: '楷体，KaiTi, serif', fontSize: { xs: '0.65rem', sm: '0.7rem', md: '0.75rem' }, color: bookColors.accent, letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 600 }}>目录</Typography>
                       </Box>
                     </Tooltip>
-                    <Box sx={{ width: '1px', height: { xs: '10px', sm: '12px', md: '14px' }, backgroundColor: `${bookColors.accent}40` }} />
+                    {/* 第二行：焚毁 | 续写 */}
                     <Tooltip title="删除项目" arrow>
                       <Box
                         onClick={() => !isDisabled && handleDeleteProject(project.id)}
-                        sx={{ cursor: isDisabled ? 'default' : 'pointer', opacity: isDisabled ? 0.45 : 1, transition: 'all 0.25s ease', '&:hover': isDisabled ? {} : { transform: 'translateY(-1px)' } }}
+                        sx={{ 
+                          cursor: isDisabled ? 'default' : 'pointer', 
+                          opacity: isDisabled ? 0.45 : 1, 
+                          transition: 'all 0.25s ease',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          py: { xs: 0.6, sm: 0.7 },
+                          '&:hover': isDisabled ? {} : { 
+                            transform: 'translateY(-4px)',
+                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)',
+                            backgroundColor: 'rgba(239,83,80,0.15)',
+                            borderRadius: '4px',
+                          },
+                        }}
                       >
-                        <Typography sx={{ fontFamily: '楷体, KaiTi, serif', fontSize: { xs: '0.5rem', sm: '0.58rem', md: '0.68rem' }, color: '#f87171', letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 600, textShadow: '0 1px 3px rgba(239,83,80,0.3)' }}>焚毁</Typography>
+                        <Typography sx={{ fontFamily: '楷体，KaiTi, serif', fontSize: { xs: '0.65rem', sm: '0.7rem', md: '0.75rem' }, color: '#f87171', letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 600, textShadow: '0 1px 3px rgba(239,83,80,0.3)' }}>焚毁</Typography>
                       </Box>
                     </Tooltip>
-                    <Box sx={{ width: '1px', height: { xs: '8px', sm: '9px', md: '10px' }, backgroundColor: `${bookColors.accent}25` }} />
                     <Tooltip title="续写下一章" arrow>
                       <Box
                         onClick={() => !isDisabled && handleGenerateNextChapter(project.id)}
-                        sx={{ cursor: isDisabled ? 'default' : 'pointer', opacity: isDisabled ? 0.45 : 1, transition: 'all 0.25s ease', '&:hover': isDisabled ? {} : { transform: 'translateY(-1px)' } }}
+                        sx={{ 
+                          cursor: isDisabled ? 'default' : 'pointer', 
+                          opacity: isDisabled ? 0.45 : 1, 
+                          transition: 'all 0.25s ease',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          py: { xs: 0.6, sm: 0.7 },
+                          '&:hover': isDisabled ? {} : { 
+                            transform: 'translateY(-4px)',
+                            boxShadow: '0 12px 28px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1)',
+                            backgroundColor: `${bookColors.accent}15`,
+                            borderRadius: '4px',
+                          },
+                        }}
                       >
-                        <Typography sx={{ fontFamily: '楷体, KaiTi, serif', fontSize: { xs: '0.5rem', sm: '0.58rem', md: '0.68rem' }, color: bookColors.accent, letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.4 }}>
+                        <Typography sx={{ fontFamily: '楷体，KaiTi, serif', fontSize: { xs: '0.65rem', sm: '0.7rem', md: '0.75rem' }, color: bookColors.accent, letterSpacing: { xs: '1px', sm: '1.5px', md: '2px' }, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.4 }}>
                           {generatingNextChapter[project.id]
-                            ? <><CircularProgress size={9} sx={{ color: 'inherit' }} />续写中</>
+                            ? <><CircularProgress size={10} sx={{ color: 'inherit' }} />续写</>
                             : '续写'
                           }
                         </Typography>
                       </Box>
                     </Tooltip>
                   </Box>
-
-                  {/* 四角装饰 - L 形精雅角标 */}
                   {[
                     { top: 13, left: 13, borderTop: 1, borderLeft: 1, borderRight: 0, borderBottom: 0 },
                     { top: 13, right: 13, borderTop: 1, borderLeft: 0, borderRight: 1, borderBottom: 0 },
