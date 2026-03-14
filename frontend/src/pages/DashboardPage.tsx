@@ -30,8 +30,6 @@ import {
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
 import CloseIcon from '@mui/icons-material/Close'
-import HeadphonesIcon from '@mui/icons-material/Headphones'
-import TheatersIcon from '@mui/icons-material/Theaters'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
@@ -663,84 +661,6 @@ export default function DashboardPage() {
     }
     // 🔧 关键：移除 finally 块，不自动重置状态
     // 让 WorkflowControlPage 在任务完成时重置
-  }
-
-  // 🆕 导出到有声小说模块
-  const handleExportToAudio = async (chapter: any, e: React.MouseEvent) => {
-    e.stopPropagation()
-    setExportingChapter(chapter.id)
-    
-    try {
-      // 获取章节完整内容
-      const response = await fetch(`/api/v1/chapters/${chapter.id}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-      
-      if (response.ok) {
-        const data = await response.json()
-        // 暂存到 localStorage
-        localStorage.setItem('audio_import_content', JSON.stringify({
-          fromProjectId: selectedProjectId,
-          chapterId: chapter.id,
-          title: data.title,
-          content: data.content,
-        }))
-        
-        setSnackbarMessage('📖 章节内容已准备，有声小说模块开发中...')
-        setSnackbarSeverity('info')
-        setSnackbarOpen(true)
-        // 未来跳转: navigate('/audio?from=novel&chapterId=' + chapter.id)
-      } else {
-        throw new Error('获取章节内容失败')
-      }
-    } catch (error) {
-      logger.error('❌ 导出到有声小说失败:', error)
-      setSnackbarMessage('导出失败，请重试')
-      setSnackbarSeverity('error')
-      setSnackbarOpen(true)
-    } finally {
-      setExportingChapter(null)
-    }
-  }
-
-  // 🆕 导出到短剧模块
-  const handleExportToDrama = async (chapter: any, e: React.MouseEvent) => {
-    e.stopPropagation()
-    setExportingChapter(chapter.id)
-    
-    try {
-      const response = await fetch(`/api/v1/chapters/${chapter.id}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-      
-      if (response.ok) {
-        const data = await response.json()
-        localStorage.setItem('drama_import_content', JSON.stringify({
-          fromProjectId: selectedProjectId,
-          chapterId: chapter.id,
-          title: data.title,
-          content: data.content,
-        }))
-        
-        setSnackbarMessage('🎬 章节内容已准备，短剧模块开发中...')
-        setSnackbarSeverity('info')
-        setSnackbarOpen(true)
-        // 未来跳转: navigate('/drama?from=novel&chapterId=' + chapter.id)
-      } else {
-        throw new Error('获取章节内容失败')
-      }
-    } catch (error) {
-      logger.error('❌ 导出到短剧失败:', error)
-      setSnackbarMessage('导出失败，请重试')
-      setSnackbarSeverity('error')
-      setSnackbarOpen(true)
-    } finally {
-      setExportingChapter(null)
-    }
   }
 
   // 🆕 导出到织文无迹模块
@@ -2008,40 +1928,6 @@ export default function DashboardPage() {
                 disablePadding
                 secondaryAction={
                   <Box sx={{ display: 'flex', gap: 0.5 }}>
-                    {/* 🎧 导出到有声小说 */}
-                    <IconButton
-                      edge="end"
-                      aria-label="export-audio"
-                      size="small"
-                      color="primary"
-                      onClick={(e) => handleExportToAudio(chapter, e)}
-                      title="导入有声小说模块"
-                      disabled={exportingChapter === chapter.id}
-                      sx={{
-                        '&:hover': {
-                          backgroundColor: '#e3f2fd'
-                        }
-                      }}
-                    >
-                      <HeadphonesIcon fontSize="small" />
-                    </IconButton>
-                    {/* 🎬 导出到短剧 */}
-                    <IconButton
-                      edge="end"
-                      aria-label="export-drama"
-                      size="small"
-                      color="secondary"
-                      onClick={(e) => handleExportToDrama(chapter, e)}
-                      title="导入短剧模块"
-                      disabled={exportingChapter === chapter.id}
-                      sx={{
-                        '&:hover': {
-                          backgroundColor: '#f3e5f5'
-                        }
-                      }}
-                    >
-                      <TheatersIcon fontSize="small" />
-                    </IconButton>
                     {/* ✨ 导出到织文无迹 */}
                     <IconButton
                       edge="end"
