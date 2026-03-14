@@ -23,11 +23,9 @@ import {
   AlertTitle,
   Tabs,
   Tab,
-  IconButton,
   List,
   ListItem,
   ListItemText,
-  Collapse,
   Accordion,
   AccordionSummary,
   AccordionDetails,
@@ -91,7 +89,6 @@ const DatabaseQueryPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [tables, setTables] = useState<TableInfo[]>([])
-  const [selectedTable, setSelectedTable] = useState<string | null>(null)
   const [tableSchema, setTableSchema] = useState<TableSchema | null>(null)
   const [history, setHistory] = useState<QueryHistory[]>([])
   const [expandedHistory, setExpandedHistory] = useState<number | false>(false)
@@ -127,7 +124,7 @@ const DatabaseQueryPage: React.FC = () => {
       })
 
       if (response) {
-        setQueryResult(response as QueryResult)
+        setQueryResult(response.data as QueryResult)
       }
     } catch (error: any) {
       setErrorMessage(error.response?.data?.detail || '查询执行失败')
@@ -148,13 +145,12 @@ const DatabaseQueryPage: React.FC = () => {
   }
 
   const loadTableSchema = async (tableName: string) => {
-    setSelectedTable(tableName)
     try {
       const response = await apiClient.client.get(
         `/api/v1/admin/query/table-schema/${tableName}`,
       )
       if (response) {
-        setTableSchema(response as TableSchema)
+        setTableSchema(response.data as TableSchema)
       }
     } catch (error) {
       console.error('加载表结构失败:', error)
@@ -198,7 +194,7 @@ const DatabaseQueryPage: React.FC = () => {
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
         <Tabs
           value={tabValue}
-          onChange={(e, newValue) => setTabValue(newValue)}
+          onChange={(_e, newValue) => setTabValue(newValue)}
           aria-label="database query tabs"
         >
           <Tab icon={<CodeIcon />} label="查询执行" iconPosition="start" />
@@ -495,14 +491,15 @@ const DatabaseQueryPage: React.FC = () => {
             </Box>
 
             {history.length > 0 ? (
-              <Accordion
-                expanded={expandedHistory !== false}
-                onChange={(e, isExpanded) =>
-                  setExpandedHistory(isExpanded ? (e.target as any).value : false)
-                }
-              >
+              <Box>
                 {history.map((item) => (
-                  <Accordion key={item.id} value={item.id}>
+                  <Accordion 
+                    key={item.id} 
+                    expanded={expandedHistory === item.id}
+                    onChange={(_e, isExpanded) =>
+                      setExpandedHistory(isExpanded ? item.id : false)
+                    }
+                  >
                     <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                       <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', gap: 2 }}>
                         <Typography sx={{ flex: 1, fontFamily: 'monospace', fontSize: '13px' }} noWrap>
@@ -542,7 +539,7 @@ const DatabaseQueryPage: React.FC = () => {
                     </AccordionDetails>
                   </Accordion>
                 ))}
-              </Accordion>
+              </Box>
             ) : (
               <Typography color="text.secondary">暂无查询历史</Typography>
             )}
