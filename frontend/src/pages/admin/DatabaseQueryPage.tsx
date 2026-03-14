@@ -41,7 +41,7 @@ import {
   ExpandMore as ExpandMoreIcon,
   Code as CodeIcon,
 } from '@mui/icons-material'
-import { apiClient } from '../../utils/api'
+import { apiClient } from '../../services/api'
 
 interface QueryResult {
   columns: string[]
