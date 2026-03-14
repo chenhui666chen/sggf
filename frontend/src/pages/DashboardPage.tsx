@@ -2079,32 +2079,30 @@ export default function DashboardPage() {
                   </Box>
                 }
               >
-                <ListItemButton
+                <ListItemText
                   onClick={() => handleChapterClick(chapter.id)}
                   sx={{
                     py: 1.5,
+                    cursor: 'pointer',
                     '&:hover': {
                       backgroundColor: 'action.hover',
                     },
                   }}
-                >
-                  <ListItemText
-                    primary={(
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <span>{chapter.title}</span>
-                        {postSaveProcessing.has(chapter.id) && (
-                          <Chip
-                            label="处理中..."
-                            size="small"
-                            color="primary"
-                            sx={{ height: 20, fontSize: '0.7rem' }}
-                          />
-                        )}
-                      </Box>
-                    )}
-                    secondary={`📝 ${chapter.word_count || 0} 字`}
-                  />
-                </ListItemButton>
+                  primary={(
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <span>{chapter.title}</span>
+                      {postSaveProcessing.has(chapter.id) && (
+                        <Chip
+                          label="处理中..."
+                          size="small"
+                          color="primary"
+                          sx={{ height: 20, fontSize: '0.7rem' }}
+                        />
+                      )}
+                    </Box>
+                  )}
+                  secondary={`📝 ${chapter.word_count || 0} 字`}
+                />
               </ListItem>
             ))}
           </List>
