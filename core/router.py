@@ -10,6 +10,8 @@ import random
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
+from core.config import config
+
 if TYPE_CHECKING:
     from schemas.task_spec import TaskSpec
     from schemas.model_spec import ModelSpec
@@ -123,7 +125,7 @@ class ModelScorer:
         if estimated_cost <= 0:
             return 1.0
         
-        max_reasonable_cost = 1.0
+        max_reasonable_cost = config.router.MAX_REASONABLE_COST
         score = max(0, 1.0 - estimated_cost / max_reasonable_cost)
         
         return score
@@ -139,7 +141,7 @@ class ModelScorer:
         if estimated_latency <= 0:
             return 1.0
         
-        max_reasonable_latency = 120.0
+        max_reasonable_latency = config.router.MAX_REASONABLE_LATENCY
         score = max(0, 1.0 - estimated_latency / max_reasonable_latency)
         
         perf = self._performance_stats.get(model.id, {})

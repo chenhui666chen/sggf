@@ -28,6 +28,30 @@ from schemas.model_spec import (
 from schemas.common import SupportLevel, ModelStatus
 
 
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        return int(raw)
+    except Exception:  # noqa: BLE001
+        return default
+
+
+def _build_wan_config(prefix: str, default_model_name: str) -> AdapterConfig:
+    return AdapterConfig(
+        api_key=(os.getenv(f"{prefix}_API_KEY") or os.getenv("DASHSCOPE_API_KEY") or "").strip(),
+        base_url=(
+            os.getenv(f"{prefix}_BASE_URL")
+            or os.getenv("DASHSCOPE_BASE_URL")
+            or "https://dashscope.aliyuncs.com"
+        ).strip(),
+        timeout=_env_int(f"{prefix}_TIMEOUT", 300),
+        max_retries=_env_int(f"{prefix}_MAX_RETRIES", 3),
+        extra={"env_prefix": prefix, "model_name": default_model_name},
+    )
+
+
 @register_model("wan2.6-t2v")
 class Wan26VideoAdapter(BaseVideoAdapter):
     """Alibaba Cloud Wan2.6 text-to-video adapter."""
@@ -309,4 +333,48 @@ class Wan26FastVideoAdapter(Wan26VideoAdapter):
     def _map_task_to_request(self, task: TaskSpec) -> Dict[str, Any]:
         request = super()._map_task_to_request(task)
         request["model"] = "wan2.6-t2v-fast"
+        return request
+
+
+@register_model("wan2.6-i2v")
+class Wan26ImageToVideoAdapter(Wan26VideoAdapter):
+    """Wan2.6 image-to-video adapter."""
+
+    def __init__(self, spec: ModelSpec, config: Optional[AdapterConfig] = None):
+        super().__init__(spec, config or _build_wan_config("WAN_I2V", "wan2.6-i2v"))
+
+    @classmethod
+    def get_model_spec(cls) -> ModelSpec:
+        spec = super().get_model_spec()
+        spec.id = "wan2.6-i2v"
+        spec.name = "Wan 2.6 Image-to-Video"
+        spec.modality = ["image_to_video"]
+        spec.tags = ["video", "image-to-video", "alibaba"]
+        return spec
+
+    def _map_task_to_request(self, task: TaskSpec) -> Dict[str, Any]:
+        request = super()._map_task_to_request(task)
+        request["model"] = "wan2.6-i2v"
+        return request
+
+
+@register_model("wan2.6-r2v")
+class Wan26ReferenceVideoAdapter(Wan26VideoAdapter):
+    """Wan2.6 reference-video adapter."""
+
+    def __init__(self, spec: ModelSpec, config: Optional[AdapterConfig] = None):
+        super().__init__(spec, config or _build_wan_config("WAN_R2V", "wan2.6-r2v"))
+
+    @classmethod
+    def get_model_spec(cls) -> ModelSpec:
+        spec = super().get_model_spec()
+        spec.id = "wan2.6-r2v"
+        spec.name = "Wan 2.6 Reference-to-Video"
+        spec.modality = ["video_to_video"]
+        spec.tags = ["video", "reference-to-video", "alibaba"]
+        return spec
+
+    def _map_task_to_request(self, task: TaskSpec) -> Dict[str, Any]:
+        request = super()._map_task_to_request(task)
+        request["model"] = "wan2.6-r2v"
         return request

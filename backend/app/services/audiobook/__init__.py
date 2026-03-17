@@ -1,4 +1,4 @@
-"""
+﻿"""
 有声书生成服务模块
 
 核心组件：
@@ -30,7 +30,7 @@ def get_engine_instance() -> AudiobookEngine:
     global _global_engine_instance
     if _global_engine_instance is None:
         # 🆕 创建LLM客户端用于初始化引擎
-        from app.services.llm_client import get_llm_client
+        from core.unified_llm_client import get_llm_client
         llm_client = get_llm_client()
         _global_engine_instance = AudiobookEngine(llm_client=llm_client)
     return _global_engine_instance
@@ -55,3 +55,4 @@ __all__ = [
     "get_engine_instance",
     "set_engine_instance",
 ]
+

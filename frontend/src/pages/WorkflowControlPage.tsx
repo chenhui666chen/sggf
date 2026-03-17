@@ -68,6 +68,7 @@ import OutputPreviewPanel from '@/components/workflow/OutputPreviewPanel'
 import AgentStatusIndicator from '@/components/workflow/AgentStatusIndicator'
 import { workflowWebSocket } from '@/services/websocket'
 import { apiClient, extractApiErrorMessage } from '@/services/api'  // ✅ 添加apiClient导入
+import { formatProjectSequenceLabel } from '@/utils/projectDisplay'
 import { ProgressEstimator, type StageDurations, type ProgressState } from '@/utils/progressEstimator'
 import { statisticsService } from '@/services/statistics'
 
@@ -2898,7 +2899,7 @@ export default function WorkflowControlPage() {
           )}
           {workflow.projectId && (
             <Chip
-              label={`ID: ${workflow.projectId}`}
+              label={formatProjectSequenceLabel(currentProject, workflow.projectId)}
               variant="outlined"
               size="small"
               sx={{ height: { xs: 24, sm: 28 }, fontSize: { xs: '0.7rem', sm: '0.8rem' } }}

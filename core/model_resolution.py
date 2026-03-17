@@ -1,0 +1,98 @@
+from __future__ import annotations
+
+from enum import Enum
+from typing import Any, Optional
+
+
+class TaskType(str, Enum):
+    """统一任务类型枚举。"""
+
+    CONCEPT_WORLD = "concept_world"
+    CONCEPT_CHARACTER = "concept_character"
+    CONCEPT_STORY = "concept_story"
+    STRUCTURE_PLOT = "structure_plot"
+    STRUCTURE_EVENTS = "structure_events"
+    CONTENT_DRAFT = "content_draft"
+    CONTENT_STYLE = "content_style"
+    REVIEW_CHECK = "review_check"
+    ITERATION_OPTIMIZE = "iteration_optimize"
+    REWRITE = "rewrite"
+    BOOK_ANALYSIS = "book_analysis"
+    BOOK_SYNTHESIS = "book_synthesis"
+    AUDIOBOOK_DIRECTOR = "audiobook_director"
+    AUDIOBOOK_SCRIPT = "audiobook_script"
+    AUDIOBOOK_VOICE = "audiobook_voice"
+    AUDIOBOOK_SOUND = "audiobook_sound"
+    AUDIOBOOK_MUSIC = "audiobook_music"
+    AUDIOBOOK_REVIEW = "audiobook_review"
+
+
+TASK_TYPE_ALIASES = {
+    "default": "chapter",
+    "concept_world": "concept",
+    "concept_character": "character",
+    "concept_story": "concept",
+    "outline": "outline_expand",
+    "content_draft": "chapter",
+    "content_style": "dialogue",
+    "review_check": "review",
+    "iteration_optimize": "rewrite",
+    "ai_trace": "rewrite",
+    "book_analysis": "entity_extract",
+    "book_synthesis": "book_synthesis",
+    "chapter_summary": "summarize",
+}
+
+MODEL_ALIASES = {
+    "deepseek-r1": "deepseek-reasoner",
+    "qwen-max": "qwen3-max",
+    "qwen-plus": "qwen-long",
+    "qwen2.5-turbo": "qwen-turbo",
+    "qwen3_vl_plus": "qwen3-vl-plus",
+    "qwen3_tts": "qwen3-tts-flash",
+    "qwen_image_edit_plus": "qwen-image-edit-plus",
+    "qwen_image_edit_max": "qwen-image-edit-max",
+    "qwen_multiperson_fusion": "qwen-image-edit-plus",
+    "wan_t2i": "wanx-v1",
+    "wan26_t2i": "wanx-v1",
+    "wan_t2v": "wan2.6-t2v",
+    "wan26_t2v": "wan2.6-t2v",
+    "wan_i2v": "wan2.6-i2v",
+    "wan26_i2v": "wan2.6-i2v",
+    "wan_r2v": "wan2.6-r2v",
+    "wan26_r2v": "wan2.6-r2v",
+    "wan_image_edit": "qwen-image-edit-plus",
+}
+
+
+def _coerce_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+
+    raw = value.value if hasattr(value, "value") else value
+    text = str(raw).strip()
+    if not text:
+        return None
+    return text
+
+
+def normalize_task_type(task_type: Any) -> Optional[str]:
+    """将历史任务类型和值对象统一映射到当前中心可识别的任务名。"""
+
+    text = _coerce_value(task_type)
+    if text is None:
+        return None
+
+    normalized = text.strip().lower().replace("-", "_")
+    return TASK_TYPE_ALIASES.get(normalized, normalized)
+
+
+def normalize_model_id(model_id: Any) -> Optional[str]:
+    """将历史模型别名统一映射到当前注册中心中的模型 ID。"""
+
+    text = _coerce_value(model_id)
+    if text is None:
+        return None
+
+    normalized = text.strip().lower()
+    return MODEL_ALIASES.get(normalized, normalized)

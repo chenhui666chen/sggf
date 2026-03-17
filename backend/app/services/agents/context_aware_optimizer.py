@@ -1,10 +1,10 @@
-"""
+﻿"""
 上下文感知优化器 - 基于记忆管理器优化提示词，准确捕捉作者创作意图
 """
 from typing import Dict, Any, List, Optional
 from langchain_core.messages import SystemMessage, HumanMessage
 from .config import Config
-from .llm_singleton import create_deepseek_llm
+from core.langchain_bridge import create_task_llm
 from .memory_manager import NovelMemoryManager
 from .knowledge_base import NovelKnowledgeBase
 
@@ -17,7 +17,7 @@ class ContextAwareOptimizer:
         """初始化上下文感知优化器"""
         self.memory_manager = memory_manager or NovelMemoryManager()
         self.knowledge_base = knowledge_base or NovelKnowledgeBase()
-        self.llm = create_deepseek_llm()
+        self.llm = create_task_llm()
         
         # 存储优化历史
         self.optimization_history = []
@@ -258,3 +258,4 @@ class ContextAwareOptimizer:
             "timeline_consistency": "未能分析",
             "suggestions": []
         }
+

@@ -10,6 +10,7 @@ import json
 import yaml
 import importlib
 import sys
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Type, Any, TYPE_CHECKING
 from dataclasses import dataclass, field
@@ -20,6 +21,8 @@ if TYPE_CHECKING:
     from schemas.task_spec import TaskSpec
     from schemas.model_spec import ModelSpec
     from adapters.base import BaseAdapter, AdapterConfig
+
+_logger = logging.getLogger("model_adapter.registry")
 
 
 @dataclass
@@ -133,6 +136,7 @@ class ModelRegistry:
             module_names = [
                 "adapters.wanx_adapter",
                 "adapters.wan26_video_adapter",
+                "adapters.qwen_multimodal_adapter",
             ]
             # Keep imports explicit and minimal to avoid implicit side effects.
             for module_name in module_names:
@@ -150,6 +154,12 @@ class ModelRegistry:
                             importlib.reload(loaded)
                     except Exception:
                         pass
+            config_path = Path(__file__).resolve().parent.parent / "config" / "models.yaml"
+            if config_path.exists():
+                try:
+                    self.load_from_yaml(str(config_path))
+                except Exception:
+                    pass
             self._builtin_loaded = True
     
     def register(
@@ -169,7 +179,7 @@ class ModelRegistry:
                 self._adapter_instances.pop(key, None)
             if config:
                 self._config_cache[model_spec.id] = config
-            print(f"[Registry] Registered model: {model_spec.name} ({model_spec.id})")
+            _logger.info(f"Registered model: {model_spec.name} ({model_spec.id})")
     
     def unregister(self, model_id: str) -> bool:
         """Unregister a model."""
@@ -210,11 +220,15 @@ class ModelRegistry:
         with self._state_lock:
             adapter = self._adapter_instances.get(cache_key)
             if adapter is not None:
+                import time
+                adapter._last_used_time = time.time()
                 return adapter
 
             adapter_class = self._adapter_classes[model_id]
             spec = self._specs[model_id]
             adapter = adapter_class(spec, effective_config)
+            import time
+            adapter._last_used_time = time.time()
             self._adapter_instances[cache_key] = adapter
             return adapter
     
@@ -246,6 +260,19 @@ class ModelRegistry:
             spec for spec in self._specs.values()
             if tag in spec.tags
         ]
+
+    def get_model_info(self, model_id: str) -> Optional[Dict[str, Any]]:
+        """Get structured model metadata by ID."""
+        self._ensure_builtin_registration()
+        spec = self._specs.get(model_id)
+        if spec is None:
+            return None
+
+        info = spec.to_dict()
+        stats = self._performance_stats.get(model_id)
+        if stats is not None:
+            info["stats"] = stats.to_dict()
+        return info
     
     def find_capable_models(self, task: "TaskSpec") -> List["ModelSpec"]:
         """Find all models that can handle the given task."""
@@ -293,7 +320,7 @@ class ModelRegistry:
         self._ensure_builtin_registration()
         path = Path(yaml_path)
         if not path.exists():
-            print(f"[Registry] YAML file not found: {yaml_path}")
+            _logger.warning(f"YAML file not found: {yaml_path}")
             return 0
         
         with open(path, "r", encoding="utf-8") as f:
@@ -311,9 +338,9 @@ class ModelRegistry:
                 self._specs[spec.id] = spec
                 self._performance_stats.setdefault(spec.id, ModelPerformanceStats())
                 loaded_count += 1
-                print(f"[Registry] Loaded model from YAML: {spec.name} ({spec.id})")
+                _logger.info(f"Loaded model from YAML: {spec.name} ({spec.id})")
             except Exception as e:
-                print(f"[Registry] Failed to load model: {e}")
+                _logger.error(f"Failed to load model: {e}")
         
         return loaded_count
     
@@ -332,14 +359,51 @@ class ModelRegistry:
         return True
     
     def clear(self) -> None:
-        """Clear all registered models."""
+        """Clear all registered models and release resources."""
         with self._state_lock:
+            for adapter in self._adapter_instances.values():
+                if adapter and hasattr(adapter, 'close'):
+                    try:
+                        adapter.close()
+                    except Exception:
+                        pass
             self._specs.clear()
             self._adapter_classes.clear()
             self._adapter_instances.clear()
             self._performance_stats.clear()
             self._config_cache.clear()
             self._builtin_loaded = False
+    
+    def cleanup_idle_adapters(self, max_age_seconds: float = 300.0) -> int:
+        """Clean up adapter instances that haven't been used recently."""
+        import time
+        current_time = time.time()
+        cleaned = 0
+        
+        with self._state_lock:
+            keys_to_remove = []
+            for key, adapter in self._adapter_instances.items():
+                if adapter is None:
+                    keys_to_remove.append(key)
+                    continue
+                
+                last_used = getattr(adapter, '_last_used_time', None)
+                if last_used is None:
+                    last_used = current_time
+                
+                if current_time - last_used > max_age_seconds:
+                    if hasattr(adapter, 'close'):
+                        try:
+                            adapter.close()
+                        except Exception:
+                            pass
+                    keys_to_remove.append(key)
+                    cleaned += 1
+            
+            for key in keys_to_remove:
+                self._adapter_instances.pop(key, None)
+        
+        return cleaned
 
 
 def register_model(model_id: str):

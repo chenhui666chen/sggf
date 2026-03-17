@@ -25,7 +25,6 @@ langchain-community>=0.0.10
 langchain-core>=1.1.0
 langchain-text-splitters
 langchain-chroma>=1.0.0
-langchain-openai>=1.1.0
 langchain-classic
 chromadb>=0.4.22
 dashscope>=1.14.2

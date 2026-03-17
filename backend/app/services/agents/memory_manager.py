@@ -1,11 +1,11 @@
-"""
+﻿"""
 记忆管理器 - 管理对话上下文和短期记忆
 增加持久化功能
 """
 from typing import List, Dict, Any
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from typing import Optional
-from .llm_singleton import create_deepseek_llm
+from core.langchain_bridge import create_task_llm
 
 
 # 简化Memory实现（替代LangChain已移除的Memory模块）
@@ -39,7 +39,7 @@ class NovelMemoryManager:
             memory_type: 记忆类型 ("buffer" 或 "summary")
             persist_directory: 持久化目录
         """
-        self.llm = create_deepseek_llm()
+        self.llm = create_task_llm()
         self.persist_directory = persist_directory
         self.memory_file = None
         self.memory_type = memory_type
@@ -239,4 +239,5 @@ class NovelMemoryManager:
         except Exception as e:
             print(f"❌ 列出记忆文件失败: {e}")
             return []
+
 

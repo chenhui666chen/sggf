@@ -1,4 +1,4 @@
-"""
+﻿"""
 AI辅助智能截断器 - 混合规则+AI语义理解
 
 功能：
@@ -9,7 +9,7 @@ AI辅助智能截断器 - 混合规则+AI语义理解
 from typing import Dict, Any
 import re
 from langchain_core.messages import SystemMessage, HumanMessage
-from .llm_singleton import create_deepseek_llm
+from core.langchain_bridge import create_task_llm
 
 
 class IntelligentTruncator:
@@ -17,7 +17,7 @@ class IntelligentTruncator:
     
     def __init__(self):
         # 使用qwen-turbo做快速摘要（成本低、速度快、100万tokens上下文）
-        self.summarizer_llm = create_deepseek_llm(task_type="summarize")
+        self.summarizer_llm = create_task_llm(task_type="summarize")
     
     def intelligent_truncate(
         self, 
@@ -342,3 +342,4 @@ def smart_truncate_for_context(
         content_type=content_type,
         preserve_ratio=preserve_ratio
     )
+

@@ -1,4 +1,4 @@
-"""
+﻿"""
 书籍内容分析器
 
 使用AI提取书籍中的核心要素：
@@ -11,14 +11,12 @@ import os
 import json
 import asyncio
 import logging
-import httpx
 from typing import List, Dict, Any, Optional, Callable, Awaitable
 from dataclasses import dataclass
 from enum import Enum
-from openai import AsyncOpenAI
 
-from app.services.llm_client import get_llm_client, OptimizedLLMClient
-from app.services.model_optimizer import TaskType
+from core.unified_llm_client import get_llm_client, UnifiedLLMClient
+from core.model_resolution import TaskType
 from .chapter_splitter import ChapterInfo, ChapterType
 
 logger = logging.getLogger(__name__)
@@ -87,7 +85,7 @@ class ContentAnalyzer:
     # 最大重试次数
     MAX_RETRIES = 3
     
-    def __init__(self, llm_client: Optional[OptimizedLLMClient] = None):
+    def __init__(self, llm_client: Optional[UnifiedLLMClient] = None):
         """
         初始化分析器
         
@@ -95,20 +93,6 @@ class ContentAnalyzer:
             llm_client: LLM客户端实例，不传则使用全局单例
         """
         self.llm = llm_client or get_llm_client()
-        
-        # 🛡️ 创建禁用代理的httpx客户端
-        aliyun_http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(180.0, connect=30.0),
-            trust_env=False  # 不读取环境变量中的代理配置
-        )
-        
-        # 🆕 初始化阿里云API客户端（用于qwen-long）
-        self.aliyun_client = AsyncOpenAI(
-            api_key=os.getenv("DASHSCOPE_API_KEY"),
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-            timeout=180.0,  # 长文本需要更长超时
-            http_client=aliyun_http_client  # 🛡️ 使用禁用代理的客户端
-        )
     
     async def analyze_all(
         self,
@@ -1487,14 +1471,13 @@ class ContentAnalyzer:
         last_error = None
         for attempt in range(max_retries):
             try:
-                response = await self.aliyun_client.chat.completions.create(
+                content = await self.llm.chat(
+                    messages=messages,
                     model="qwen-long",
-                    messages=messages,  # type: ignore[arg-type]
                     temperature=0.3,
-                    max_tokens=8000  # 输出可以多一些
+                    max_tokens=8000,
                 )
-                
-                content = response.choices[0].message.content
+
                 logger.info(f"✅ qwen-long调用成功 | 输入: {len(prompt)}字 | 输出: {len(content)}字")
                 return content
                 
@@ -1670,3 +1653,5 @@ class ContentAnalyzer:
 
         result = await self._call_llm_with_retry(prompt, TaskType.BOOK_ANALYSIS)
         return self._parse_json_response(result)
+
+

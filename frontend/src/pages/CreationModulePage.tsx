@@ -12,7 +12,6 @@ import {
   alpha,
   IconButton,
   Tooltip,
-  Fab,
 } from '@mui/material'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
 import HeadphonesIcon from '@mui/icons-material/Headphones'

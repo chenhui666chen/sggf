@@ -10,6 +10,7 @@ from app.models.user import User
 from app.models.project import Project, Chapter, ChapterRevision
 from app.schemas.project import ChapterUpdate, ChapterResponse, ChapterCreate, ChapterRevisionResponse
 from app.core.security import get_current_user
+from app.utils.datetime_utils import ensure_utc_datetime, utc_now
 import re
 from io import BytesIO
 from datetime import datetime
@@ -732,7 +733,7 @@ async def delete_chapter(
     try:
         from app.services.content_evolution import get_engine
         import logging
-        
+
         logger = logging.getLogger("uvicorn.error")
         evolution_engine = get_engine()
         await evolution_engine.on_chapter_delete(chapter_id=chapter.id)
@@ -741,16 +742,15 @@ async def delete_chapter(
         import logging
         logger = logging.getLogger("uvicorn.error")
         logger.debug(f"   ⚠️ 内容进化器反馈收集失败（不影响主流程）: {evo_err}")
-    
-    # 软删除章节（设置deleted_at字段）
-    chapter.deleted_at = datetime.now()
+
+    # 彻底删除章节（级联删除版本历史）
+    db.delete(chapter)
     db.commit()
-    
+
     return {
         "message": "Chapter deleted successfully",
         "chapter_id": chapter.id,
-        "chapter_number": chapter.chapter_number,
-        "deleted_at": chapter.deleted_at
+        "chapter_number": chapter.chapter_number
     }
 
 
@@ -886,9 +886,9 @@ async def auto_save_chapter(
             ChapterRevision.chapter_id == chapter_id
         ).order_by(ChapterRevision.created_at.desc()).first()
         
-        if latest_revision:
-            time_diff = datetime.now() - latest_revision.created_at.replace(tzinfo=None)
-            if time_diff < timedelta(minutes=5):
+        if latest_revision and latest_revision.created_at:
+            latest_revision_at = ensure_utc_datetime(latest_revision.created_at)
+            if latest_revision_at and utc_now() - latest_revision_at < timedelta(minutes=5):
                 should_create_revision = False
         
         # 如果内容变化且距离上次版本超过5分钟，创建版本
@@ -1118,4 +1118,3 @@ async def export_chapter_docx(
             "Content-Disposition": f"attachment; filename*=UTF-8''{filename_encoded}"
         }
     )
-

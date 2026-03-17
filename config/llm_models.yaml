@@ -1,0 +1,448 @@
+# -*- coding: utf-8 -*-
+# LLM 模型配置文件
+# 定义项目当前接入的文本大模型能力、约束、路由与档案信息。
+
+llm_models:
+  - id: qwen3-max
+    name: Qwen3 Max
+    provider: alibaba
+    model_type: llm
+    version: v1
+    status: active
+
+    capabilities:
+      - name: creative
+        level: native
+        score: 0.9
+        description: 擅长创意写作、故事扩展和角色扮演类内容生成
+      - name: dialogue
+        level: native
+        score: 0.85
+        description: 多轮对话与角色口吻控制能力较强
+      - name: reasoning
+        level: native
+        score: 0.8
+        description: 具备通用复杂任务处理能力，但不是纯推理优先模型
+      - name: writing
+        level: native
+        score: 0.9
+        description: 适合作为中文长文写作主力模型
+      - name: chinese
+        level: native
+        score: 0.95
+        description: 中文理解与表达能力优秀
+
+    constraints:
+      max_context_tokens: 32000
+      max_output_tokens: 8192
+      supports_streaming: true
+      supports_function_call: true
+      supports_vision: false
+      supports_json_mode: true
+      supports_timeout_param: true
+      supports_max_retries: true
+      supports_temperature: true
+      supports_system_prompt: true
+      supports_multi_turn: true
+
+    api_config:
+      api_key_env: DASHSCOPE_API_KEY
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      default_timeout: 120
+      default_max_retries: 3
+
+    performance:
+      quality_score: 8.5
+      avg_latency_seconds: 2.5
+      p95_latency_seconds: 5.0
+      tokens_per_second: 80
+      cost_per_1k_input_tokens: 0.004
+      cost_per_1k_output_tokens: 0.012
+      currency: CNY
+
+    routing:
+      task_types:
+        - concept
+        - chapter
+        - dialogue
+        - creative
+        - writing
+        - audiobook_director
+        - audiobook_voice
+        - audiobook_sound
+        - audiobook_music
+        - audiobook_review
+      priority: 1
+      fallback_models:
+        - deepseek-chat
+      weight: 1.0
+      enabled: true
+
+    default_params:
+      temperature: 0.7
+      max_tokens: 4096
+
+    summary: 项目中的中文创作主力模型。官方资料显示 Qwen Max 系列适合高质量内容生成、角色扮演、复杂指令理解和结构化输出；本项目内部使用 qwen3-max 作为创意与正文写作入口。
+    recommended_scenarios:
+      - 故事概念生成与题材差异化发散
+      - 章节正文起草与重写
+      - 对话润色、语气统一和风格保持
+      - 需要 JSON 输出的创作辅助流程
+    limitations:
+      - 并非项目内最强推理模型，严谨审校任务仍优先 deepseek-reasoner
+      - 成本高于 qwen-turbo，低价值提取任务不建议优先使用
+      - 超长整书上下文处理能力不如 qwen-long
+    integration_notes:
+      - 内部 task_type=chapter、concept、dialogue 默认优先路由到该模型
+      - 当前通过 DashScope OpenAI 兼容接口接入
+      - 该模型档案参考阿里云通义千问 Max 系列官方文档整理，内部 id 为项目统一别名
+    best_practice_tips:
+      - 适合创意写作、章节生成与角色扮演
+      - 中文内容质量稳定，适合作为默认正文模型
+      - 支持流式输出与 JSON 模式，适合工作流编排
+    documentation_url: https://help.aliyun.com/zh/model-studio/getting-started/models
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/getting-started/models
+      - https://help.aliyun.com/zh/model-studio/text-generation
+
+    tags:
+      - creative
+      - dialogue
+      - chinese
+      - alibaba
+
+  - id: qwen-long
+    name: Qwen Long
+    provider: alibaba
+    model_type: llm
+    version: v1
+    status: active
+
+    capabilities:
+      - name: long_context
+        level: native
+        score: 0.98
+        description: 支持超长上下文输入，适合整书级分析
+      - name: summarization
+        level: native
+        score: 0.85
+        description: 长文摘要与信息整合能力强
+      - name: analysis
+        level: native
+        score: 0.8
+        description: 适合整章、整卷、整书级别分析与扩写
+
+    constraints:
+      max_context_tokens: 10000000
+      max_output_tokens: 8192
+      supports_streaming: true
+      supports_timeout_param: true
+      supports_max_retries: true
+
+    api_config:
+      api_key_env: DASHSCOPE_API_KEY
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      default_timeout: 180
+
+    performance:
+      quality_score: 8.0
+      avg_latency_seconds: 5.0
+      p95_latency_seconds: 15.0
+      cost_per_1k_input_tokens: 0.0005
+      cost_per_1k_output_tokens: 0.002
+      currency: CNY
+
+    routing:
+      task_types:
+        - outline_expand
+        - book_synthesis
+        - long_context
+        - summarize_long
+      priority: 1
+      fallback_models:
+        - qwen3-max
+      enabled: true
+
+    summary: 项目中的超长上下文模型。阿里云官方资料明确将 Qwen-Long 定位为百万级到千万级上下文处理模型，适合长篇资料理解、长书摘要和大纲扩展。
+    recommended_scenarios:
+      - 长篇大纲扩展
+      - 全书剧情汇总与问题定位
+      - 大量检索结果拼接后的再加工
+      - 长文本解析、实体归纳和阶段性总结
+    limitations:
+      - 延迟高于 qwen3-max 和 qwen-turbo
+      - 不适合作为高频低延迟的日常对话模型
+      - 长上下文场景下仍需注意提示结构，否则输出易发散
+    integration_notes:
+      - 内部 task_type=outline_expand、book_synthesis 默认优先路由到该模型
+      - 适合与分层摘要、RAG 结果聚合一起使用
+      - 项目当前将其视为“整书上下文入口”，不是默认正文生成模型
+    best_practice_tips:
+      - 适合处理超长文本与整书分析
+      - 大纲扩展、全书汇总优先使用
+      - 建议将输入按层级组织，避免无结构堆叠
+    documentation_url: https://help.aliyun.com/zh/model-studio/long-context
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/long-context
+      - https://help.aliyun.com/zh/model-studio/getting-started/models
+
+    tags:
+      - long_context
+      - chinese
+      - alibaba
+
+  - id: qwen-turbo
+    name: Qwen Turbo
+    provider: alibaba
+    model_type: llm
+    version: v1
+    status: active
+
+    capabilities:
+      - name: fast
+        level: native
+        score: 0.95
+        description: 响应速度快，吞吐高
+      - name: simple
+        level: native
+        score: 0.8
+        description: 适合简单直接的结构化处理任务
+      - name: extraction
+        level: native
+        score: 0.85
+        description: 适合实体提取、摘要和轻量改写
+
+    constraints:
+      max_context_tokens: 8192
+      max_output_tokens: 4096
+      supports_streaming: true
+
+    api_config:
+      api_key_env: DASHSCOPE_API_KEY
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      default_timeout: 60
+
+    performance:
+      quality_score: 7.0
+      avg_latency_seconds: 1.0
+      p95_latency_seconds: 2.0
+      cost_per_1k_input_tokens: 0.0008
+      cost_per_1k_output_tokens: 0.002
+      currency: CNY
+
+    routing:
+      task_types:
+        - entity_extract
+        - summarize
+        - simple
+        - fast
+      priority: 2
+      fallback_models:
+        - qwen3-max
+      enabled: true
+
+    summary: 项目中的轻量快速模型。官方资料将 Qwen Turbo 系列定位为高吞吐、低成本、适合日常问答和轻量结构化处理的模型；项目里主要用于提取与摘要。
+    recommended_scenarios:
+      - 实体提取
+      - 轻量摘要
+      - 快速格式化与简单改写
+      - 批量低成本预处理任务
+    limitations:
+      - 复杂创作质量不如 qwen3-max
+      - 严谨推理与多步分析不如 deepseek-reasoner
+      - 在长上下文整书任务中不应替代 qwen-long
+    integration_notes:
+      - 内部 task_type=entity_extract、summarize 默认优先路由到该模型
+      - 当前项目保持其“快而便宜”的定位，不将其作为高质量正文模型
+      - 若后续升级到新一代 Turbo 家族，可再单独评估上下文窗口与价格策略
+    best_practice_tips:
+      - 适合简单快速任务
+      - 实体提取与摘要优先使用
+      - 作为高质量模型的前置清洗层很合适
+    documentation_url: https://help.aliyun.com/zh/model-studio/getting-started/models
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/getting-started/models
+      - https://help.aliyun.com/zh/model-studio/text-generation
+
+    tags:
+      - fast
+      - cheap
+      - chinese
+      - alibaba
+
+  - id: deepseek-reasoner
+    name: DeepSeek R1
+    provider: deepseek
+    model_type: llm
+    version: v1
+    status: active
+
+    capabilities:
+      - name: reasoning
+        level: native
+        score: 0.95
+        description: 深度推理与复杂问题求解能力最强
+      - name: logic
+        level: native
+        score: 0.95
+        description: 适合逻辑审校、结构评审和规则一致性检查
+      - name: analysis
+        level: native
+        score: 0.9
+        description: 适合复杂分析与多约束综合判断
+      - name: planning
+        level: native
+        score: 0.9
+        description: 适合结构规划、质量评审和策略决策
+
+    constraints:
+      max_context_tokens: 64000
+      max_output_tokens: 8192
+      supports_streaming: false
+      supports_function_call: false
+      supports_timeout_param: false
+      supports_max_retries: false
+      supports_temperature: false
+      supports_system_prompt: true
+      supports_multi_turn: true
+
+    api_config:
+      api_key_env: DEEPSEEK_API_KEY
+      base_url: https://api.deepseek.com/v1
+      default_timeout: 300
+
+    performance:
+      quality_score: 9.0
+      avg_latency_seconds: 15.0
+      p95_latency_seconds: 45.0
+      tokens_per_second: 30
+      cost_per_1k_input_tokens: 0.014
+      cost_per_1k_output_tokens: 0.014
+      currency: CNY
+
+    routing:
+      task_types:
+        - worldview
+        - character
+        - character_expand
+        - structure_plot
+        - structure_events
+        - review
+        - quality_review
+        - final_review
+        - reasoning
+        - audiobook_script
+        - volume_detail_expand
+      priority: 1
+      fallback_models:
+        - qwen3-max
+      enabled: true
+
+    summary: 项目中的高强度推理模型。DeepSeek 官方文档将 Reasoner 系列定位为强化推理模型，适合复杂分析、数学逻辑和多步骤决策；项目中主要承担结构审校、人物逻辑和质量复审。
+    recommended_scenarios:
+      - 世界观规则设计
+      - 人物逻辑与动机审校
+      - 情节结构检查与质量评审
+      - 有声剧本改编中的逻辑约束处理
+    limitations:
+      - 响应慢于 deepseek-chat、qwen3-max 和 qwen-turbo
+      - 当前项目接入层不向它开放 temperature、timeout 和 max_retries 参数
+      - 不适合作为高频流式交互模型
+    integration_notes:
+      - 项目运行时会主动移除返回中的 think 标签内容，仅保留最终可消费文本
+      - 内部 task_type=quality_review、review、structure_plot 等会优先命中该模型
+      - 该模型更适合作为“第二判断层”，而不是大批量前台低延迟调用
+    best_practice_tips:
+      - 深度推理任务首选
+      - 世界观、人物、结构审校优先使用
+      - 适合作为生成后的质量复审模型
+    documentation_url: https://api-docs.deepseek.com/
+    source_urls:
+      - https://api-docs.deepseek.com/
+      - https://api-docs.deepseek.com/quick_start/pricing
+
+    tags:
+      - reasoning
+      - logic
+      - deepseek
+
+  - id: deepseek-chat
+    name: DeepSeek Chat
+    provider: deepseek
+    model_type: llm
+    version: v1
+    status: active
+
+    capabilities:
+      - name: chat
+        level: native
+        score: 0.85
+        description: 适合日常对话、多轮改写和轻量创作
+      - name: writing
+        level: native
+        score: 0.8
+        description: 适合通用写作、润色和过稿
+      - name: fast
+        level: native
+        score: 0.8
+        description: 比推理模型延迟更低，适合快速响应
+
+    constraints:
+      max_context_tokens: 64000
+      max_output_tokens: 8192
+      supports_streaming: true
+      supports_function_call: true
+      supports_timeout_param: true
+      supports_max_retries: true
+
+    api_config:
+      api_key_env: DEEPSEEK_API_KEY
+      base_url: https://api.deepseek.com/v1
+      default_timeout: 120
+
+    performance:
+      quality_score: 8.0
+      avg_latency_seconds: 2.0
+      p95_latency_seconds: 5.0
+      cost_per_1k_input_tokens: 0.001
+      cost_per_1k_output_tokens: 0.002
+      currency: CNY
+
+    routing:
+      task_types:
+        - chat
+        - rewrite
+        - fast
+        - ai_trace
+      priority: 2
+      fallback_models:
+        - qwen3-max
+      enabled: true
+
+    summary: 项目中的通用对话与快速改写模型。DeepSeek 官方文档将 Chat 系列定位为常规高性价比对话模型，适合日常交互、通用问答和轻量写作场景。
+    recommended_scenarios:
+      - AI 痕迹处理
+      - 快速改写与润色
+      - 日常对话与低延迟交互
+      - 轻量创作辅助与说明文整理
+    limitations:
+      - 深度推理、严格逻辑评审不如 deepseek-reasoner
+      - 最终文学性正文质量一般不应替代 qwen3-max
+      - 长篇整体上下文能力不应替代 qwen-long
+    integration_notes:
+      - 内部 task_type=ai_trace、rewrite、chat 默认优先使用
+      - 适合作为统一中心中的“快速通道模型”
+      - 与 qwen3-max 形成质量/成本互补关系
+    best_practice_tips:
+      - 日常对话和快速任务首选
+      - 成本较低，适合作为高频调用模型
+      - AI 痕迹处理与快速改写推荐使用
+    documentation_url: https://api-docs.deepseek.com/
+    source_urls:
+      - https://api-docs.deepseek.com/
+      - https://api-docs.deepseek.com/quick_start/pricing
+
+    tags:
+      - chat
+      - fast
+      - deepseek

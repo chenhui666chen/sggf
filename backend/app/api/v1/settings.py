@@ -14,6 +14,7 @@ from app.models.user import User
 from app.models.project import Project
 from app.models.setting import SettingCollection, SettingItem
 from app.models.graph import KnowledgeGraphEdge
+from app.utils.datetime_utils import ensure_utc_datetime, utc_now
 from app.schemas.settings import (
     SettingCollectionCreate,
     SettingCollectionUpdate,
@@ -754,7 +755,6 @@ async def sync_settings_to_workflow(
     将当前项目的所有设定集合汇总，更新到 project_settings.world_setting 字段
     """
     from sqlalchemy import text
-    from datetime import datetime
     
     _ensure_project_owned(project_id, current_user, db)
     
@@ -778,7 +778,7 @@ async def sync_settings_to_workflow(
     
     db.execute(update_query, {
         "world_setting": json.dumps(summary, ensure_ascii=False),
-        "updated_at": datetime.now().isoformat(),
+        "updated_at": utc_now().isoformat(),
         "project_id": project_id
     })
     db.commit()
@@ -880,8 +880,6 @@ async def get_setting_recommendations(
     Returns:
         推荐的设定项列表，按综合得分排序
     """
-    from datetime import datetime, timedelta
-    
     _ensure_project_owned(project_id, current_user, db)
     
     # 查询项目下的所有设定集合
@@ -910,7 +908,7 @@ async def get_setting_recommendations(
     ).all()
     
     # 计算推荐得分
-    now = datetime.now()
+    now = utc_now()
     recommendations = []
     
     for item in items:
@@ -919,9 +917,10 @@ async def get_setting_recommendations(
         usage_score = item.usage_count / max_usage if max_usage > 0 else 0
         
         # 时间衰减因子（最近引用的权重更高）
+        normalized_last_referenced_at = ensure_utc_datetime(item.last_referenced_at)
         time_score = 0.5  # 默认值
-        if item.last_referenced_at:
-            days_ago = (now - item.last_referenced_at).days
+        if normalized_last_referenced_at:
+            days_ago = max(0, (now - normalized_last_referenced_at).days)
             # 30天内的设定得分更高，30天后逐渐衰减
             if days_ago <= 30:
                 time_score = 1.0
@@ -945,7 +944,7 @@ async def get_setting_recommendations(
             "collection_name": collection.name if collection else "",
             "category": collection.category if collection else "",
             "usage_count": item.usage_count,
-            "last_referenced_at": item.last_referenced_at.isoformat() if item.last_referenced_at else None,
+            "last_referenced_at": normalized_last_referenced_at.isoformat() if normalized_last_referenced_at else None,
             "score": round(final_score, 3),
             "content_preview": (item.content[:100] + "...") if item.content and len(item.content) > 100 else item.content,
             "tags": json.loads(item.tags) if item.tags else None

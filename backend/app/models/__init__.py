@@ -27,6 +27,7 @@ from .book_parser import (
 
 # 有声书模型
 from .audiobook import AudiobookProject, ChapterAudio
+from .audiobook_delete_audit import AudiobookDeleteAudit
 from .audiobook_task import AudiobookTask
 from .dreamweaver import DreamweaverProject, DreamweaverEpisode, DreamweaverShot, DreamweaverAsset, DreamweaverRunEvent
 
@@ -58,6 +59,7 @@ __all__ = [
     # 有声书
     "AudiobookProject",
     "ChapterAudio",
+    "AudiobookDeleteAudit",
     "AudiobookTask",
     # 织梦映心（短剧/漫剧生产）
     "DreamweaverProject",

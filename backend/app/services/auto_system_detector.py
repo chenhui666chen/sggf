@@ -1,4 +1,4 @@
-"""
+﻿"""
 自动体系检测服务
 根据文本内容自动识别涉及的体系类型，并创建对应的设定集合
 """
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from langchain_core.messages import HumanMessage
 
-from app.services.agents.llm_singleton import create_deepseek_llm
+from core.langchain_bridge import create_task_llm
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -67,7 +67,7 @@ class AutoSystemDetector:
     
     def __init__(self):
         """初始化检测器"""
-        self.llm = create_deepseek_llm(task_type="entity_extract")
+        self.llm = create_task_llm(task_type="entity_extract")
     
     def detect_systems(self, content: str) -> List[str]:
         """
@@ -290,3 +290,4 @@ async def auto_create_system_collections(
             "total_detected": 0,
             "error": str(e)
         }
+

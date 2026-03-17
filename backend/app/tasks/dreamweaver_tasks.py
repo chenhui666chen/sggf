@@ -21,6 +21,7 @@ from app.celery_app import celery_app
 from app.db.base import SessionLocal
 from app.models.project import Chapter, Project
 from app.schemas.dreamweaver_contract import DREAMWEAVER_SCHEMA_VERSION
+from app.utils.datetime_utils import utc_now
 from app.services.dreamweaver.events import DreamweaverEventEmitter
 from app.services.dreamweaver.library import parse_library_role, required_library_roles
 from pipeline.state_machine import RunContext, State, progress_percent, stage_label, step
@@ -1280,7 +1281,7 @@ def run_dreamweaver_task(
                 status="completed",
                 result=json.dumps(result_payload, ensure_ascii=False),
                 error=None,
-                completed_at=datetime.now().isoformat(),
+                completed_at=utc_now().isoformat(),
             )
         elif ctx.state in (State.WAITING_SCRIPT_APPROVAL, State.WAITING_APPROVAL, State.WAITING_VIDEO_CONFIRMATION):
             contract = build_contract_from_payload(
@@ -1302,7 +1303,7 @@ def run_dreamweaver_task(
                 status="waiting",
                 result=json.dumps(result_payload, ensure_ascii=False),
                 error=None,
-                completed_at=datetime.now().isoformat(),
+                completed_at=utc_now().isoformat(),
             )
         else:
             error_message = str(ctx.payload.get("error") or "pipeline failed")
@@ -1339,7 +1340,7 @@ def run_dreamweaver_task(
                 status="failed",
                 result=json.dumps(failed_payload, ensure_ascii=False),
                 error=error_message,
-                completed_at=datetime.now().isoformat(),
+                completed_at=utc_now().isoformat(),
             )
     except Exception as exc:  # pragma: no cover - safety
         logger.exception("DreamWeaver task failed: %s", exc)
@@ -1353,7 +1354,7 @@ def run_dreamweaver_task(
             task_id,
             status="failed",
             error=str(exc),
-            completed_at=datetime.now().isoformat(),
+            completed_at=utc_now().isoformat(),
         )
         raise
     finally:

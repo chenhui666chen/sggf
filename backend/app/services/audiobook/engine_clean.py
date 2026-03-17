@@ -16,8 +16,8 @@ from pathlib import Path
 
 from .script_adapter import AudiobookScriptAgent, ScriptSegment
 from .voice_manager import VoiceManager
-from .tts_engine import TTSEngine
 from .audio_mixer import AudioMixer
+from core.unified_media_runtime import create_tts_engine
 
 # 导入专业Agent
 from .agents import (
@@ -58,10 +58,9 @@ class AudiobookEngine:
         
         # 初始化基础组件
         self.voice_manager = VoiceManager()
-        self.tts_engine = TTSEngine(
-            provider="aliyun",
+        self.tts_engine = create_tts_engine(
             enable_cache=enable_cache,
-            max_concurrent=max_concurrent
+            max_concurrent=max_concurrent,
         )
         self.audio_mixer = AudioMixer()
         

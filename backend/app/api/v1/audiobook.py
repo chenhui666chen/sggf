@@ -1,4 +1,4 @@
-"""
+﻿"""
 耳畔星河 - 有声书生成API
 
 功能：
@@ -42,7 +42,7 @@ from app.celery_app import celery_app
 from app.services.audiobook import AudiobookEngine
 from app.services.audiobook.audio_mixer import AudioMixer
 from app.services.audiobook.agents import SoundEffectDesigner
-from app.services.audiobook.tts_engine import RetryConfig, TTSEngine
+from app.services.audiobook.tts_engine import RetryConfig
 from app.services.audiobook.voice_manager import VoiceManager
 from app.services.audiobook.voice_manager_factory import create_voice_manager
 from app.services.audiobook.voice_catalog import get_voice_entry, load_voice_catalog_for_model
@@ -67,6 +67,8 @@ from app.services.audiobook.repository import (
     ProjectRepository,
     AudiobookTaskRepository,
 )
+from app.utils.datetime_utils import utc_now
+from core.unified_media_runtime import synthesize_speech as runtime_synthesize_speech
 from dataclasses import asdict, is_dataclass
 
 logger = logging.getLogger(__name__)
@@ -175,13 +177,6 @@ async def tts_preview(
     # - 额外多 1 次重试（应对偶发断连）
     # - 基础退避更小，避免前端等待过久
     preview_retry = RetryConfig(max_retries=4, base_delay=1.0, max_delay=8.0, exponential_base=2.0, jitter=True)
-    engine = TTSEngine(
-        enable_cache=False,
-        max_concurrent=1,
-        model=model_name,
-        request_delay=0.0,
-        retry_config=preview_retry,
-    )
     # 将前端的 voice_id（如 'male_young_energetic'）映射为真实的 TTS 音色ID
     if model_name == "qwen3-tts-flash":
         preset = VoiceManager.PRESET_VOICES.get(request.voice_id)
@@ -200,7 +195,15 @@ async def tts_preview(
         voice_params["pitch"] = request.pitch
 
     try:
-        audio_bytes = await engine.synthesize(text, voice_params)
+        audio_bytes = await runtime_synthesize_speech(
+            text=text,
+            voice_params=voice_params,
+            model_id=model_name,
+            enable_cache=False,
+            max_concurrent=1,
+            request_delay=0.0,
+            retry_config=preview_retry,
+        )
     except Exception as exc:
         logger.warning("TTS试听失败: %s", exc)
         raise HTTPException(
@@ -940,7 +943,7 @@ async def restore_audiobook_project(
         "success": True,
         "message": "有声书项目已恢复",
         "project_id": restored_project.id,
-        "restored_at": datetime.utcnow().isoformat()
+        "restored_at": utc_now().isoformat()
     }
 
 
@@ -1012,7 +1015,7 @@ async def restore_chapter_audio(
         "success": True,
         "message": "章节音频已恢复",
         "chapter_audio_id": restored_audio.id,
-        "restored_at": datetime.utcnow().isoformat()
+        "restored_at": utc_now().isoformat()
     }
 
 
@@ -1977,16 +1980,17 @@ async def preview_script_segment_audio(
             exponential_base=2.0,
             jitter=True,
         )
-        engine = TTSEngine(
-            enable_cache=False,
-            max_concurrent=1,
-            model=tts_model,
-            request_delay=0.0,
-            retry_config=preview_retry,
-        )
-
         try:
-            voice_audio = await engine.synthesize(text, voice_params_dict, emotion_for_params)
+            voice_audio = await runtime_synthesize_speech(
+                text=text,
+                voice_params=voice_params_dict,
+                emotion=emotion_for_params,
+                model_id=tts_model,
+                enable_cache=False,
+                max_concurrent=1,
+                request_delay=0.0,
+                retry_config=preview_retry,
+            )
         except Exception as exc:
             logger.warning("单段TTS试听失败: %s", exc)
             raise HTTPException(
@@ -2129,7 +2133,7 @@ async def generate_audiobook_scripts_background(
 
         # 初始化引擎
         from app.services.audiobook import get_engine_instance, set_engine_instance
-        from app.services.llm_client import get_llm_client
+        from core.unified_llm_client import get_llm_client
 
         llm_client = get_llm_client(strategy="conservative")
 
@@ -2333,7 +2337,7 @@ async def generate_audiobook_audio_from_scripts_background(
 
         # 3. 初始化引擎
         from app.services.audiobook import get_engine_instance, set_engine_instance
-        from app.services.llm_client import get_llm_client
+        from core.unified_llm_client import get_llm_client
 
         llm_client = get_llm_client(strategy="conservative")
 
@@ -2611,7 +2615,7 @@ async def generate_audiobook_background(
         
         # 初始化引擎（使用全局实例）
         from app.services.audiobook import get_engine_instance, set_engine_instance
-        from app.services.llm_client import get_llm_client
+        from core.unified_llm_client import get_llm_client
         
         # 创建LLM客户端（必需）
         llm_client = get_llm_client(strategy="conservative")
@@ -2801,3 +2805,4 @@ async def generate_audiobook_background(
     
     finally:
         db.close()
+

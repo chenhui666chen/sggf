@@ -111,7 +111,7 @@ def vlm_prefilter_reference_images_text_only(
     """
     if not frame_description or not candidates:
         return None
-    if vlm_adapter is None or not hasattr(vlm_adapter, "chat"):
+    if vlm_adapter is None:
         return None
 
     max_keep = max(1, int(max_keep))
@@ -197,7 +197,7 @@ def vlm_rewrite_t2i_prompt_from_references(
     """
     if not frame_description or not reference_images:
         return None
-    if vlm_adapter is None or not hasattr(vlm_adapter, "chat"):
+    if vlm_adapter is None:
         return None
 
     refs = reference_images[: max(1, int(max_refs))]
@@ -292,7 +292,7 @@ def vlm_build_edit_prompt_from_base_and_refs(
     """
     if not target_description:
         return None
-    if vlm_adapter is None or not hasattr(vlm_adapter, "chat"):
+    if vlm_adapter is None:
         return None
     if not isinstance(base_image_path, Path) or not base_image_path.exists():
         return None

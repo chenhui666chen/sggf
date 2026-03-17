@@ -20,7 +20,7 @@ services:
       # 初始化脚本目录（可选）
       - ./postgres-init:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U novel_user"]
+      test: ["CMD-SHELL", "pg_isready -U novel_user -d novel_db"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -102,6 +102,8 @@ services:
     volumes:
       - ./backend:/app
       - ./shared:/app/shared
+      - ./core:/app/core
+      - ./schemas:/app/schemas
       - ./adapters:/app/adapters
       - ./agents:/app/agents
       - ./pipeline:/app/pipeline

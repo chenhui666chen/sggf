@@ -8,10 +8,11 @@ import hmac
 import json
 import logging
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 from app.core.config import settings
+from app.utils.datetime_utils import parse_datetime_utc, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class PasswordResetService:
         self._redis_checked = False
 
     def _now(self) -> datetime:
-        return datetime.now(timezone.utc)
+        return utc_now()
 
     def _cache_key(self, user_id: int) -> str:
         return f"auth:password-reset:{user_id}"
@@ -45,7 +46,9 @@ class PasswordResetService:
         if not expires_at_raw:
             return 0
 
-        expires_at = datetime.fromisoformat(expires_at_raw)
+        expires_at = parse_datetime_utc(expires_at_raw)
+        if expires_at is None:
+            return 0
         remaining = int((expires_at - self._now()).total_seconds())
         return max(0, remaining)
 
@@ -124,8 +127,8 @@ class PasswordResetService:
         record = await self._read_record(user_id)
         resend_interval = max(0, int(settings.PASSWORD_RESET_RESEND_INTERVAL_SECONDS))
         if record:
-            sent_at = datetime.fromisoformat(str(record["sent_at"]))
-            if (now - sent_at).total_seconds() < resend_interval:
+            sent_at = parse_datetime_utc(record.get("sent_at"))
+            if sent_at and (now - sent_at).total_seconds() < resend_interval:
                 return None
 
         code = self._generate_code()

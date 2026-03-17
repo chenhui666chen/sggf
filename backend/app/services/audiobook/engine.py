@@ -19,8 +19,8 @@ from dataclasses import asdict, is_dataclass
 
 from .script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructure
 from .voice_manager_factory import create_voice_manager
-from .tts_engine import TTSEngine
 from .audio_mixer import AudioMixer
+from core.unified_media_runtime import create_tts_engine
 
 # 导入专业Agent
 from .agents import (
@@ -90,7 +90,7 @@ class AudiobookEngine:
         # - 用户未配置的角色 → LLM智能推断 (如果有llm_client)
         # - LLM推断失败 → 增强版规则推断
         self.voice_manager = create_voice_manager(tts_model=tts_model, llm_client=llm_client)
-        self.tts_engine = TTSEngine(
+        self.tts_engine = create_tts_engine(
             enable_cache=enable_cache,
             max_concurrent=max_concurrent,
             model=tts_model  # 支持 qwen3-tts-flash / cosyvoice-v3-plus

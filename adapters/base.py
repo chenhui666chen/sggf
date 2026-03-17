@@ -73,10 +73,44 @@ class BaseAdapter(ABC):
         self.spec = spec
         self.config = config or AdapterConfig()
         self._client = None
+        self._closed = False
         self._init_client()
     
     def _init_client(self) -> None:
         pass
+    
+    def _cleanup_client(self) -> None:
+        """Clean up client resources. Override in subclasses."""
+        if self._client is not None:
+            if hasattr(self._client, 'close'):
+                try:
+                    self._client.close()
+                except Exception:
+                    pass
+            self._client = None
+    
+    def close(self) -> None:
+        """Explicitly release all resources."""
+        if self._closed:
+            return
+        self._cleanup_client()
+        self._closed = True
+    
+    def __del__(self):
+        """Destructor to ensure resources are released."""
+        self.close()
+    
+    def __enter__(self) -> "BaseAdapter":
+        """Context manager entry."""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit."""
+        self.close()
+    
+    def is_closed(self) -> bool:
+        """Check if adapter is closed."""
+        return self._closed
     
     @abstractmethod
     def _map_task_to_request(self, task: "TaskSpec") -> Dict[str, Any]:
@@ -111,31 +145,53 @@ class BaseAdapter(ABC):
         """Post-process result after parsing."""
         return result
     
+    def _map_error_code(self, error: Exception) -> str:
+        """Map exception to error code. Override in subclasses for provider-specific mapping."""
+        from schemas.common import ErrorCode
+        
+        error_message = str(error)
+        error_str = error_message.lower()
+        
+        if hasattr(error, '__class__'):
+            error_class = error.__class__.__name__.lower()
+            if 'timeout' in error_class or 'timeouterror' in error_class:
+                return ErrorCode.TIMEOUT.value
+            if 'connection' in error_class or 'network' in error_class:
+                return ErrorCode.NETWORK_ERROR.value
+            if 'auth' in error_class or 'unauthorized' in error_class or 'forbidden' in error_class:
+                return ErrorCode.AUTH_ERROR.value
+        
+        if "rate limit" in error_str or "429" in error_str or "too many requests" in error_str:
+            return ErrorCode.RATE_LIMIT.value
+        if "timeout" in error_str or "timed out" in error_str:
+            return ErrorCode.TIMEOUT.value
+        if "content" in error_str and ("safety" in error_str or "inappropriate" in error_str or "blocked" in error_str):
+            return ErrorCode.CONTENT_SAFETY.value
+        if "invalid" in error_str and "parameter" in error_str:
+            return ErrorCode.INVALID_PARAMETER.value
+        if "quota" in error_str or "insufficient" in error_str or "balance" in error_str:
+            return ErrorCode.INSUFFICIENT_QUOTA.value
+        if "unavailable" in error_str or "maintenance" in error_str or "503" in error_str:
+            return ErrorCode.MODEL_UNAVAILABLE.value
+        if "network" in error_str or "connection" in error_str or "dns" in error_str:
+            return ErrorCode.NETWORK_ERROR.value
+        if "unauthorized" in error_str or "401" in error_str or "403" in error_str:
+            return ErrorCode.AUTH_ERROR.value
+        if "invalid" in error_str and "response" in error_str:
+            return ErrorCode.INVALID_RESPONSE.value
+        
+        return ErrorCode.UNKNOWN_ERROR.value
+    
     def _handle_error(
         self, 
         error: Exception, 
         task: "TaskSpec"
     ) -> GenerationResult:
         """Handle errors and create error result."""
-        error_code = "unknown_error"
+        from schemas.common import ErrorCode
+        
+        error_code = self._map_error_code(error)
         error_message = str(error)
-        
-        error_str = error_message.lower()
-        
-        if "rate limit" in error_str or "429" in error_str:
-            error_code = "rate_limit"
-        elif "timeout" in error_str:
-            error_code = "timeout"
-        elif "content" in error_str and ("safety" in error_str or "inappropriate" in error_str):
-            error_code = "content_safety"
-        elif "invalid" in error_str and "parameter" in error_str:
-            error_code = "invalid_parameter"
-        elif "quota" in error_str or "insufficient" in error_str:
-            error_code = "insufficient_quota"
-        elif "unavailable" in error_str or "maintenance" in error_str:
-            error_code = "model_unavailable"
-        elif "network" in error_str or "connection" in error_str:
-            error_code = "network_error"
         
         return GenerationResult(
             success=False,

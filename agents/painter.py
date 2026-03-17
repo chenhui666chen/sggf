@@ -12,7 +12,15 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 
-from adapters.model_adapters import GenerationResult, ModelAdapterFactory
+from adapters.adapter_helpers import (
+    SimpleGenerationResult as GenerationResult,
+    chat_messages,
+    edit_image,
+    generate_image,
+    get_model_info,
+    match_scene as match_scene_with_model,
+    model_supports_capability,
+)
 from agents.best_image_selector import select_best_candidate as _select_best_candidate
 from agents.camera_states import build_camera_states
 from agents.camera_tree import build_camera_parent_map, build_camera_tree
@@ -364,6 +372,8 @@ def _cfg_str(cfg: Dict[str, Any], key: str, *, env_name: str, default: str) -> s
 
 
 def _clone_adapter_instance(adapter: Any) -> Optional[Any]:
+    if isinstance(adapter, str):
+        return adapter
     cfg = getattr(adapter, "config", None)
     if cfg is None:
         return None
@@ -380,6 +390,82 @@ def _close_adapter_session(adapter: Any) -> None:
             session.close()
     except Exception:  # noqa: BLE001
         pass
+
+
+def _model_client_available(model_id: Any) -> bool:
+    if model_id is None:
+        return False
+    if not isinstance(model_id, str):
+        return True
+    return isinstance(get_model_info(model_id), dict)
+
+
+def _supports_multi_image_client(adapter: Any) -> bool:
+    if adapter is None:
+        return False
+    if isinstance(adapter, str):
+        return model_supports_capability(adapter, "multi_image")
+    return bool(getattr(adapter, "supports_multi_image", False))
+
+
+def _generate_t2i_result(
+    *,
+    adapter: Any,
+    prompt: str,
+    negative_prompt: str,
+    width: int,
+    height: int,
+    seed: int,
+) -> GenerationResult:
+    if isinstance(adapter, str):
+        return generate_image(
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            width=width,
+            height=height,
+            seed=seed,
+            model_id=adapter,
+        )
+    return adapter.generate(
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        width=width,
+        height=height,
+        seed=seed,
+    )
+
+
+def _generate_edit_result(
+    *,
+    adapter: Any,
+    image_path: Path,
+    edit_prompt: str,
+    strength: float,
+    guidance_scale: float,
+    seed: int,
+    reference_images: Optional[List[str]] = None,
+) -> GenerationResult:
+    if isinstance(adapter, str):
+        return edit_image(
+            image_path=str(image_path),
+            edit_prompt=edit_prompt,
+            strength=strength,
+            reference_images=reference_images,
+            model_id=adapter,
+            seed=seed,
+            guidance_scale=guidance_scale,
+        )
+
+    kwargs: Dict[str, Any] = {
+        "image_path": str(image_path),
+        "edit_prompt": edit_prompt,
+        "strength": strength,
+        "guidance_scale": guidance_scale,
+        "seed": seed,
+    }
+    if reference_images:
+        kwargs["image_paths"] = reference_images
+    return adapter.generate(**kwargs)
 
 
 def _generate_candidates(
@@ -577,6 +663,12 @@ def _hash_cache_dir() -> Path:
 
 
 def _adapter_fingerprint(adapter: Any) -> Dict[str, Any]:
+    if isinstance(adapter, str):
+        info = get_model_info(adapter) if isinstance(adapter, str) else None
+        return {
+            "model_id": str((info or {}).get("id") or adapter),
+            "provider": (info or {}).get("provider"),
+        }
     cfg = getattr(adapter, "config", None)
     return {
         "class": adapter.__class__.__name__,
@@ -686,18 +778,36 @@ def _vlm_chat_json(
     temperature: float = 0.2,
     max_tokens: int = 400,
 ) -> Optional[Dict[str, Any]]:
-    if vlm_adapter is None or not hasattr(vlm_adapter, "chat"):
+    if vlm_adapter is None:
         return None
 
     try:
-        result = vlm_adapter.chat(
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"},
-        )
-        if not getattr(result, "success", False):
-            result = vlm_adapter.chat(messages=messages, temperature=temperature, max_tokens=max_tokens)
+        if isinstance(vlm_adapter, str):
+            result = chat_messages(
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"},
+                model_id=vlm_adapter,
+            )
+            if not getattr(result, "success", False):
+                result = chat_messages(
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    model_id=vlm_adapter,
+                )
+        else:
+            if not hasattr(vlm_adapter, "chat"):
+                return None
+            result = vlm_adapter.chat(
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"},
+            )
+            if not getattr(result, "success", False):
+                result = vlm_adapter.chat(messages=messages, temperature=temperature, max_tokens=max_tokens)
         if not getattr(result, "success", False):
             return None
         content = ""
@@ -805,6 +915,8 @@ def _is_qwen_image_edit_adapter_name(name: str) -> bool:
 def _is_qwen_image_edit_adapter(adapter: Any) -> bool:
     if adapter is None:
         return False
+    if isinstance(adapter, str):
+        return _is_qwen_image_edit_adapter_name(adapter)
     cfg = getattr(adapter, "config", None)
     model_name = str(getattr(cfg, "model_name", "") or "").strip().lower()
     if _is_qwen_image_edit_adapter_name(model_name):
@@ -922,7 +1034,8 @@ def _generate_t2i_with_candidates(
         used_fallback = False
         try:
             try:
-                result = adapter.generate(
+                result = _generate_t2i_result(
+                    adapter=adapter,
                     prompt=prompt,
                     negative_prompt=negative_prompt,
                     width=width,
@@ -932,7 +1045,8 @@ def _generate_t2i_with_candidates(
             except Exception as exc:  # noqa: BLE001
                 error_text = str(exc)
                 if _is_safety_block_error(error_text) and aggressive_prompt:
-                    result = adapter.generate(
+                    result = _generate_t2i_result(
+                        adapter=adapter,
                         prompt=aggressive_prompt,
                         negative_prompt=negative_prompt,
                         width=width,
@@ -1042,7 +1156,8 @@ def _generate_t2i_with_candidates(
             local_adapter = cloned
         try:
             try:
-                result = local_adapter.generate(
+                result = _generate_t2i_result(
+                    adapter=local_adapter,
                     prompt=prompt,
                     negative_prompt=negative_prompt,
                     width=width,
@@ -1057,7 +1172,8 @@ def _generate_t2i_with_candidates(
                 error_text = str(exc)
                 if _is_safety_block_error(error_text) and aggressive_prompt:
                     try:
-                        result = local_adapter.generate(
+                        result = _generate_t2i_result(
+                            adapter=local_adapter,
                             prompt=aggressive_prompt,
                             negative_prompt=negative_prompt,
                             width=width,
@@ -1210,7 +1326,7 @@ def _generate_edit_with_candidates(
     base_image_hash = ""
     if cache_enabled:
         base_image_hash = hashlib.sha256(image_path.read_bytes()).hexdigest()
-    supports_multi_ref = bool(getattr(adapter, "supports_multi_image", False))
+    supports_multi_ref = _supports_multi_image_client(adapter)
     if _is_qwen_image_edit_adapter(adapter):
         max_ref_images = min(int(max_ref_images), 2)
     ref_paths = (
@@ -1271,17 +1387,19 @@ def _generate_edit_with_candidates(
         try:
             try:
                 if use_multi_ref:
-                    result = adapter.generate(
-                        image_path=str(image_path),
+                    result = _generate_edit_result(
+                        adapter=adapter,
+                        image_path=image_path,
                         edit_prompt=edit_prompt,
                         strength=strength,
                         guidance_scale=guidance_scale,
                         seed=seed_value,
-                        image_paths=ref_paths,
+                        reference_images=ref_paths,
                     )
                 else:
-                    result = adapter.generate(
-                        image_path=str(image_path),
+                    result = _generate_edit_result(
+                        adapter=adapter,
+                        image_path=image_path,
                         edit_prompt=edit_prompt,
                         strength=strength,
                         guidance_scale=guidance_scale,
@@ -1291,17 +1409,19 @@ def _generate_edit_with_candidates(
                 error_text = str(exc)
                 if _is_safety_block_error(error_text) and aggressive_edit_prompt:
                     if use_multi_ref:
-                        result = adapter.generate(
-                            image_path=str(image_path),
+                        result = _generate_edit_result(
+                            adapter=adapter,
+                            image_path=image_path,
                             edit_prompt=aggressive_edit_prompt,
                             strength=strength,
                             guidance_scale=guidance_scale,
                             seed=seed_value,
-                            image_paths=ref_paths,
+                            reference_images=ref_paths,
                         )
                     else:
-                        result = adapter.generate(
-                            image_path=str(image_path),
+                        result = _generate_edit_result(
+                            adapter=adapter,
+                            image_path=image_path,
                             edit_prompt=aggressive_edit_prompt,
                             strength=strength,
                             guidance_scale=guidance_scale,
@@ -1416,17 +1536,19 @@ def _generate_edit_with_candidates(
             try:
                 try:
                     if use_multi_ref:
-                        result = local_adapter.generate(
-                            image_path=str(image_path),
+                        result = _generate_edit_result(
+                            adapter=local_adapter,
+                            image_path=image_path,
                             edit_prompt=edit_prompt,
                             strength=strength,
                             guidance_scale=guidance_scale,
                             seed=seed,
-                            image_paths=ref_paths,
+                            reference_images=ref_paths,
                         )
                     else:
-                        result = local_adapter.generate(
-                            image_path=str(image_path),
+                        result = _generate_edit_result(
+                            adapter=local_adapter,
+                            image_path=image_path,
                             edit_prompt=edit_prompt,
                             strength=strength,
                             guidance_scale=guidance_scale,
@@ -1436,17 +1558,19 @@ def _generate_edit_with_candidates(
                     error_text = str(exc)
                     if _is_safety_block_error(error_text) and aggressive_edit_prompt:
                         if use_multi_ref:
-                            result = local_adapter.generate(
-                                image_path=str(image_path),
+                            result = _generate_edit_result(
+                                adapter=local_adapter,
+                                image_path=image_path,
                                 edit_prompt=aggressive_edit_prompt,
                                 strength=strength,
                                 guidance_scale=guidance_scale,
                                 seed=seed,
-                                image_paths=ref_paths,
+                                reference_images=ref_paths,
                             )
                         else:
-                            result = local_adapter.generate(
-                                image_path=str(image_path),
+                            result = _generate_edit_result(
+                                adapter=local_adapter,
+                                image_path=image_path,
                                 edit_prompt=aggressive_edit_prompt,
                                 strength=strength,
                                 guidance_scale=guidance_scale,
@@ -1739,7 +1863,6 @@ def _drop_anchor_from_refs(refs: List[Dict[str, Any]], anchor: Optional[Dict[str
 
 def _try_generate_multiperson_fusion_head(
     *,
-    factory: ModelAdapterFactory,
     shot_id: str,
     output_path: Path,
     head_prompt: str,
@@ -1793,10 +1916,8 @@ def _try_generate_multiperson_fusion_head(
     if base_scene_path is None:
         return None, {"status": "skipped", "reason": "missing_scene_base"}
 
-    try:
-        fusion_adapter = factory.get_adapter("qwen_multiperson_fusion")
-    except Exception as exc:  # noqa: BLE001
-        return None, {"status": "failed", "reason": "adapter_unavailable", "error": str(exc)}
+    if not _model_client_available("qwen_multiperson_fusion"):
+        return None, {"status": "failed", "reason": "adapter_unavailable", "error": "model_not_registered"}
 
     cand_dir = output_path.parent / "candidates"
     cand_dir.mkdir(parents=True, exist_ok=True)
@@ -1827,7 +1948,7 @@ def _try_generate_multiperson_fusion_head(
             step_prompt = _apply_prompt_fragment(base_prompt, f"当前融合人物（必须出现且保持一致）：{person_hint}")
             out_step_path = fusion_dir / f"{shot_id}_head_fuse_{idx+1}.png"
 
-            result = fusion_adapter.match_scene(
+            result = match_scene_with_model(
                 person_image_path=str(person_path),
                 target_scene_path=str(current_scene_path),
                 scene_prompt=step_prompt,
@@ -1835,6 +1956,7 @@ def _try_generate_multiperson_fusion_head(
                 negative_prompt=style_negative_prompt,
                 prompt_extend=True,
                 watermark=False,
+                model_id="qwen_multiperson_fusion",
             )
             _write_image_from_generation_result(result, out_step_path)
 
@@ -1860,7 +1982,6 @@ def _try_generate_multiperson_fusion_head(
                     pass
     except Exception as exc:  # noqa: BLE001
         return None, {"status": "failed", "reason": "fusion_error", "error": str(exc), "steps": steps}
-
     return (
         output_path,
         {
@@ -1876,8 +1997,7 @@ def run_keyframes(ctx: Any) -> None:
     ensure_style_payload(ctx.payload)
     ensure_media_payload(ctx.payload)
 
-    factory = ModelAdapterFactory()
-    adapter = factory.get_adapter("wan_t2i")
+    adapter = "wan_t2i"
     run_dir = _ensure_run_dir(ctx)
 
     image_cfg = ctx.payload.get("image_config") if isinstance(ctx.payload.get("image_config"), dict) else {}
@@ -1993,10 +2113,8 @@ def run_keyframes(ctx: Any) -> None:
 
     vlm_adapter = None
     if selector in {"vlm", "semantic"} or ref_selector == "vlm":
-        try:
-            vlm_adapter = factory.get_adapter(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus"))
-        except Exception:  # noqa: BLE001
-            vlm_adapter = None
+        candidate_vlm = str(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus") or "").strip() or "qwen3_vl_plus"
+        vlm_adapter = candidate_vlm if _model_client_available(candidate_vlm) else None
     vlm_criteria = [
         s.strip()
         for s in os.getenv("DREAMWEAVER_VLM_CRITERIA", "clarity,composition,lighting,color,style").split(",")
@@ -2477,31 +2595,22 @@ def run_keyframes(ctx: Any) -> None:
             if isinstance(anchor_shot_id, str) and anchor_shot_id.strip():
                 head_base_path = run_dir / f"{anchor_shot_id}_tail.png"
 
-            local_factory = ModelAdapterFactory()
-            local_t2i = local_factory.get_adapter("wan_t2i")
+            local_t2i = "wan_t2i"
 
             local_image_edit_adapters: Dict[str, Any] = {}
             if use_head_image_edit:
-                try:
-                    local_image_edit_adapters[image_edit_adapter_name_head] = local_factory.get_adapter(
-                        image_edit_adapter_name_head
-                    )
-                except Exception:  # noqa: BLE001
-                    local_image_edit_adapters[image_edit_adapter_name_head] = None
+                local_image_edit_adapters[image_edit_adapter_name_head] = (
+                    image_edit_adapter_name_head if _model_client_available(image_edit_adapter_name_head) else None
+                )
             if use_tail_image_edit and image_edit_adapter_name_tail not in local_image_edit_adapters:
-                try:
-                    local_image_edit_adapters[image_edit_adapter_name_tail] = local_factory.get_adapter(
-                        image_edit_adapter_name_tail
-                    )
-                except Exception:  # noqa: BLE001
-                    local_image_edit_adapters[image_edit_adapter_name_tail] = None
+                local_image_edit_adapters[image_edit_adapter_name_tail] = (
+                    image_edit_adapter_name_tail if _model_client_available(image_edit_adapter_name_tail) else None
+                )
 
             local_vlm_adapter = None
             if selector in {"vlm", "semantic"} or ref_selector == "vlm":
-                try:
-                    local_vlm_adapter = local_factory.get_adapter(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus"))
-                except Exception:  # noqa: BLE001
-                    local_vlm_adapter = None
+                candidate_vlm = str(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus") or "").strip() or "qwen3_vl_plus"
+                local_vlm_adapter = candidate_vlm if _model_client_available(candidate_vlm) else None
 
             def _normalize_ref_list(raw: Any) -> List[Dict[str, Any]]:
                 out: List[Dict[str, Any]] = []
@@ -2646,7 +2755,6 @@ def run_keyframes(ctx: Any) -> None:
                 if enable_multiperson_fusion:
                     _bump_telemetry_counter(ctx.payload, "multiperson_fusion_attempts", 1)
                     fused_head_path, fusion_meta = _try_generate_multiperson_fusion_head(
-                        factory=local_factory,
                         shot_id=shot_id,
                         output_path=head_path,
                         head_prompt=head_prompt,
@@ -3232,8 +3340,7 @@ def run_midframes(ctx: Any) -> None:
     ensure_style_payload(ctx.payload)
     ensure_media_payload(ctx.payload)
 
-    factory = ModelAdapterFactory()
-    adapter = factory.get_adapter("wan_t2i")
+    adapter = "wan_t2i"
     run_dir = _ensure_run_dir(ctx)
 
     video_cfg = ctx.payload.get("video_config") if isinstance(ctx.payload.get("video_config"), dict) else {}
@@ -3306,17 +3413,12 @@ def run_midframes(ctx: Any) -> None:
         image_edit_ref_max_images = min(int(image_edit_ref_max_images), 2)
     image_edit_adapter = None
     if use_mid_image_edit:
-        try:
-            image_edit_adapter = factory.get_adapter(image_edit_adapter_name_mid)
-        except Exception:  # noqa: BLE001
-            image_edit_adapter = None
+        image_edit_adapter = image_edit_adapter_name_mid if _model_client_available(image_edit_adapter_name_mid) else None
 
     vlm_adapter = None
     if selector in {"vlm", "semantic"} or ref_selector == "vlm":
-        try:
-            vlm_adapter = factory.get_adapter(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus"))
-        except Exception:  # noqa: BLE001
-            vlm_adapter = None
+        candidate_vlm = str(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus") or "").strip() or "qwen3_vl_plus"
+        vlm_adapter = candidate_vlm if _model_client_available(candidate_vlm) else None
     vlm_criteria = [
         s.strip()
         for s in os.getenv("DREAMWEAVER_VLM_CRITERIA", "clarity,composition,lighting,color,style").split(",")

@@ -44,6 +44,7 @@ import SyncIcon from '@mui/icons-material/Sync'
 import { logger } from '@/utils/logger'
 import { apiClient } from '@/services/api'
 import FormattedContent from '@/components/common/FormattedContent'
+import type { StoryExpansionStrategy } from '@/components/workflow/StoryExpansionDialog'
 
 const loadMarkdownRenderer = () => import('@/components/MarkdownRenderer')
 const loadVditorEditor = () => import('@/components/VditorEditor')
@@ -53,6 +54,7 @@ const loadConflictDetector = () => import('@/components/ConflictDetector')
 const loadRelationshipGraph = () => import('@/components/RelationshipGraph')
 const loadCharacterCardManager = () => import('@/components/CharacterCardManager')
 const loadExpansionConfigDialog = () => import('@/components/workflow/ExpansionConfigDialog')
+const loadStoryExpansionDialog = () => import('@/components/workflow/StoryExpansionDialog')
 
 const LazyMarkdownRenderer = lazy(loadMarkdownRenderer)
 const LazyVditorEditor = lazy(loadVditorEditor)
@@ -62,6 +64,7 @@ const LazyConflictDetector = lazy(loadConflictDetector)
 const LazyRelationshipGraph = lazy(loadRelationshipGraph)
 const LazyCharacterCardManager = lazy(loadCharacterCardManager)
 const LazyExpansionConfigDialog = lazy(loadExpansionConfigDialog)
+const LazyStoryExpansionDialog = lazy(loadStoryExpansionDialog)
 
 // ==================== 接口定义 ====================
 
@@ -274,6 +277,13 @@ export default function KnowledgeBasePage() {
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success')
 
   // ==================== 大纲扩展相关状态 ====================
+  const [expandingStory, setExpandingStory] = useState(false)
+  const [showStoryExpansionDialog, setShowStoryExpansionDialog] = useState(false)
+  const [showStoryExpansionResultDialog, setShowStoryExpansionResultDialog] = useState(false)
+  const [storyExpansionResult, setStoryExpansionResult] = useState<any>(null)
+  const [storyTargetChapterCount, setStoryTargetChapterCount] = useState<number>(0)
+  const [storyTargetCharacterCount, setStoryTargetCharacterCount] = useState<number>(0)
+  const [storyExpansionStrategy, setStoryExpansionStrategy] = useState<StoryExpansionStrategy>('auto')
   const [expandingOutline, setExpandingOutline] = useState(false)  // 🆕 后台任务状态
   const [targetChapterCount, setTargetChapterCount] = useState<number>(0)
   const [outlineHistory, setOutlineHistory] = useState<Array<{timestamp: number, content: string, chapterCount: number}>>([])
@@ -357,6 +367,7 @@ export default function KnowledgeBasePage() {
   const preloadMainTabResources = (tabValue: number) => {
     if (tabValue <= 2) {
       warmImport(loadMarkdownRenderer)
+      warmImport(loadStoryExpansionDialog)
     }
 
     if (tabValue === 1) {
@@ -403,22 +414,44 @@ export default function KnowledgeBasePage() {
   useEffect(() => {
     if (!projectId) return
 
+    const storyKey = `expanding_story_${projectId}`
     const outlineKey = `expanding_outline_${projectId}`
     const charactersKey = `expanding_characters_${projectId}`
+    const storyStartKey = `expanding_story_start_${projectId}`
     const outlineStartKey = `expanding_outline_start_${projectId}`
     const charactersStartKey = `expanding_characters_start_${projectId}`
+    const storyTaskKey = `expanding_story_task_${projectId}`
     const outlineTaskKey = `expanding_outline_task_${projectId}`
     const charactersTaskKey = `expanding_characters_task_${projectId}`
 
+    const savedStoryState = localStorage.getItem(storyKey)
     const savedOutlineState = localStorage.getItem(outlineKey)
     const savedCharactersState = localStorage.getItem(charactersKey)
+    const storyStartTime = localStorage.getItem(storyStartKey)
     const outlineStartTime = localStorage.getItem(outlineStartKey)
     const charactersStartTime = localStorage.getItem(charactersStartKey)
+    const storyTaskId = localStorage.getItem(storyTaskKey)
     const outlineTaskId = localStorage.getItem(outlineTaskKey)
     const charactersTaskId = localStorage.getItem(charactersTaskKey)
 
     const TASK_TIMEOUT = 30 * 60 * 1000  // 30分钟超时
     const now = Date.now()
+
+    if (savedStoryState === 'true') {
+      if (storyStartTime) {
+        const elapsed = now - parseInt(storyStartTime)
+        if (elapsed > TASK_TIMEOUT) {
+          localStorage.removeItem(storyKey)
+          localStorage.removeItem(storyStartKey)
+          localStorage.removeItem(storyTaskKey)
+          showSnackbar('协同拓展任务已超时，请重新发起', 'error')
+        } else {
+          setExpandingStory(true)
+        }
+      } else {
+        setExpandingStory(true)
+      }
+    }
 
     // 检查大纲扩展任务
     if (savedOutlineState === 'true') {
@@ -469,6 +502,7 @@ export default function KnowledgeBasePage() {
     // 🆕 恢复人物扩展结果状态（如果有未查看的结果）
     const characterResultKey = `character_expand_result_${projectId}`
     const characterStateKey = `character_expand_state_${projectId}`
+    const storyResultKey = `story_expand_result_${projectId}`
     
     const savedCharacterState = localStorage.getItem(characterStateKey)
     const savedCharacterResult = localStorage.getItem(characterResultKey)
@@ -477,6 +511,11 @@ export default function KnowledgeBasePage() {
       setCharacterExpandState('resultReady')
       setExpandCharactersResult(JSON.parse(savedCharacterResult))
       console.log('🔄 恢复人物扩展状态：有未查看结果')
+    }
+
+    const savedStoryResult = localStorage.getItem(storyResultKey)
+    if (savedStoryResult) {
+      setStoryExpansionResult(JSON.parse(savedStoryResult))
     }
 
     let cancelled = false
@@ -493,6 +532,32 @@ export default function KnowledgeBasePage() {
       } catch (error) {
         console.warn('?? ????????:', error)
         return null
+      }
+    }
+
+    const recoverStoryIfDone = async () => {
+      if (savedStoryState !== 'true' || !storyTaskId) return
+      const statusData = await fetchTaskStatus(storyTaskId)
+      if (!statusData || cancelled) return
+      const statusRaw = String(statusData.status || '').toLowerCase()
+      if (statusRaw === 'completed') {
+        setExpandingStory(false)
+        localStorage.removeItem(storyKey)
+        localStorage.removeItem(storyStartKey)
+        localStorage.removeItem(storyTaskKey)
+        const resultData = statusData.result || {}
+        setStoryExpansionResult(resultData)
+        localStorage.setItem(storyResultKey, JSON.stringify(resultData))
+        setShowStoryExpansionResultDialog(true)
+        loadWorkflowData()
+        showSnackbar('协同拓展已完成', 'success')
+      } else if (statusRaw === 'failed' || statusRaw === 'timeout') {
+        setExpandingStory(false)
+        localStorage.removeItem(storyKey)
+        localStorage.removeItem(storyStartKey)
+        localStorage.removeItem(storyTaskKey)
+        const errorMsg = statusData.error || '任务失败'
+        showSnackbar(`协同拓展失败: ${errorMsg}`, 'error')
       }
     }
 
@@ -555,6 +620,7 @@ export default function KnowledgeBasePage() {
       }
     }
 
+    void recoverStoryIfDone()
     void recoverOutlineIfDone()
     void recoverCharactersIfDone()
 
@@ -578,6 +644,15 @@ export default function KnowledgeBasePage() {
       }).catch((error: any) => {
         console.error('❌ WebSocket 连接失败:', error)
         // ✅ 修复：使用函数式setState检查并清除状态
+        setExpandingStory(prev => {
+          if (prev) {
+            localStorage.removeItem(`expanding_story_${projectId}`)
+            localStorage.removeItem(`expanding_story_start_${projectId}`)
+            localStorage.removeItem(`expanding_story_task_${projectId}`)
+            showSnackbar('协同拓展任务已因连接中断取消', 'error')
+          }
+          return false
+        })
         setExpandingOutline(prev => {
           if (prev) {
             console.log('❌ WebSocket连接失败，清除大纲扩展状态')
@@ -615,6 +690,27 @@ export default function KnowledgeBasePage() {
         console.log('🔍 是否以 expand-characters 开头:', taskId.startsWith('expand-characters'))
         
         // 大纲扩展完成
+        if (taskId.startsWith('expand-story')) {
+          const resultData = data.result || {}
+          setStoryExpansionResult(resultData)
+          localStorage.setItem(`story_expand_result_${projectId}`, JSON.stringify(resultData))
+          setShowStoryExpansionResultDialog(true)
+          loadWorkflowData()
+          setExpandingStory(false)
+          localStorage.removeItem(`expanding_story_${projectId}`)
+          localStorage.removeItem(`expanding_story_start_${projectId}`)
+          localStorage.removeItem(`expanding_story_task_${projectId}`)
+          showSnackbar(data.message || '协同拓展完成', 'success')
+        }
+
+        if (taskId.startsWith('expand-story')) {
+          showSnackbar(`协同拓展失败: ${error}`, 'error')
+          setExpandingStory(false)
+          localStorage.removeItem(`expanding_story_${projectId}`)
+          localStorage.removeItem(`expanding_story_start_${projectId}`)
+          localStorage.removeItem(`expanding_story_task_${projectId}`)
+        }
+
         if (taskId.startsWith('expand-outline')) {
           console.log('✅ 大纲扩展任务完成', data)
           showSnackbar(data.message || '✅ 大纲扩展完成！', 'success')
@@ -696,7 +792,11 @@ export default function KnowledgeBasePage() {
         const taskId = data.task_id || ''
         const message = data.message || ''
         
-        if (taskId.startsWith('expand-outline') || taskId.startsWith('expand-characters')) {
+        if (
+          taskId.startsWith('expand-story') ||
+          taskId.startsWith('expand-outline') ||
+          taskId.startsWith('expand-characters')
+        ) {
           console.log(`🔄 ${message}`)
           // 可以在这里显示进度条（可选）
         }
@@ -738,6 +838,15 @@ export default function KnowledgeBasePage() {
       workflowWebSocket.onDisconnect(() => {
         console.warn('⚠️ WebSocket 连接断开')
         // ✅ 修复：使用函数式setState检查并清除状态
+        setExpandingStory(prev => {
+          if (prev) {
+            localStorage.removeItem(`expanding_story_${projectId}`)
+            localStorage.removeItem(`expanding_story_start_${projectId}`)
+            localStorage.removeItem(`expanding_story_task_${projectId}`)
+            showSnackbar('❌ 后端服务断开，协同拓展任务已取消', 'error')
+          }
+          return false
+        })
         setExpandingOutline(prev => {
           if (prev) {
             console.log('⚠️ WebSocket断开，清除大纲扩展状态')
@@ -818,7 +927,10 @@ export default function KnowledgeBasePage() {
     if (showExpansionConfig) {
       warmImport(loadExpansionConfigDialog)
     }
-  }, [mainTabValue, characterSubTabValue, settingSubTabValue, isEditing, showExpansionConfig])
+    if (showStoryExpansionDialog) {
+      warmImport(loadStoryExpansionDialog)
+    }
+  }, [mainTabValue, characterSubTabValue, settingSubTabValue, isEditing, showExpansionConfig, showStoryExpansionDialog])
 
 
   // 加载历史记录
@@ -1661,6 +1773,100 @@ export default function KnowledgeBasePage() {
     }
   }
 
+  const openStoryExpansion = () => {
+    const currentChapters = getCurrentChapterCount()
+    const currentCharacters = getCurrentCharacterCount()
+
+    setStoryTargetChapterCount((prev) => {
+      if (prev > currentChapters) return prev
+      return currentChapters > 0 ? currentChapters + 8 : 8
+    })
+    setStoryTargetCharacterCount((prev) => {
+      if (prev > currentCharacters) return prev
+      return currentCharacters > 0 ? currentCharacters + 3 : 3
+    })
+    setShowStoryExpansionDialog(true)
+  }
+
+  const handleExpandStory = async () => {
+    if (!projectId) return
+
+    try {
+      const currentChapters = getCurrentChapterCount()
+      const currentCharacters = getCurrentCharacterCount()
+      const chapterDelta = storyTargetChapterCount - currentChapters
+      const characterDelta = storyTargetCharacterCount - currentCharacters
+
+      if (!plotOutline || !worldSetting) {
+        showSnackbar('请先准备好世界观和情节大纲，再执行协同拓展', 'error')
+        return
+      }
+
+      if (chapterDelta <= 0 && characterDelta <= 0) {
+        showSnackbar('目标章节数或目标人物数至少要有一项高于当前值', 'error')
+        return
+      }
+
+      if (chapterDelta > 30) {
+        showSnackbar('协同拓展单轮最多新增 30 章，请分轮执行', 'error')
+        return
+      }
+
+      if (characterDelta > 10) {
+        showSnackbar('协同拓展单轮最多新增 10 个角色，请分轮执行', 'error')
+        return
+      }
+
+      localStorage.removeItem(`story_expand_result_${projectId}`)
+      setStoryExpansionResult(null)
+      setExpandingStory(true)
+      setShowStoryExpansionDialog(false)
+
+      const payload = {
+        project_id: parseInt(projectId),
+        current_outline: plotOutline || '',
+        world_setting: worldSetting || '',
+        characters: characters || '',
+        current_chapter_count: currentChapters,
+        current_character_count: currentCharacters,
+        target_total_chapters: chapterDelta > 0 ? storyTargetChapterCount : undefined,
+        target_total_characters: characterDelta > 0 ? storyTargetCharacterCount : undefined,
+        strategy: storyExpansionStrategy,
+      }
+
+      const response = await fetch('/api/v1/workflow/expand-story', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (!response.ok) {
+        throw new Error(`协同拓展失败: ${response.status}`)
+      }
+
+      const data = await response.json()
+      if (data?.task_id) {
+        localStorage.setItem(`expanding_story_task_${projectId}`, String(data.task_id))
+      } else {
+        localStorage.removeItem(`expanding_story_task_${projectId}`)
+      }
+
+      localStorage.setItem(`expanding_story_${projectId}`, 'true')
+      localStorage.setItem(`expanding_story_start_${projectId}`, Date.now().toString())
+      showSnackbar('协同拓展任务已启动，正在后台执行', 'success')
+    } catch (error) {
+      console.error('❌ 协同拓展失败:', error)
+      showSnackbar(`协同拓展失败: ${error}`, 'error')
+      setExpandingStory(false)
+      localStorage.removeItem(`expanding_story_${projectId}`)
+      localStorage.removeItem(`expanding_story_start_${projectId}`)
+      localStorage.removeItem(`expanding_story_task_${projectId}`)
+    }
+  }
+
   // 大纲扩展主函数（🆕 异步后台执行）
   const handleExpandOutline = async () => {
     if (!projectId) return
@@ -2115,11 +2321,51 @@ export default function KnowledgeBasePage() {
                       onClick={handleStartEdit}
                       onMouseEnter={() => warmImport(loadVditorEditor)}
                       onFocus={() => warmImport(loadVditorEditor)}
-                      disabled={!getCurrentContent() || expandingCharacters || expandingOutline}
+                      disabled={!getCurrentContent() || expandingStory || expandingCharacters || expandingOutline}
                       sx={{ borderRadius: 2 }}
                     >
                       编辑{getTabTitle()}
                     </Button>
+                    {(mainTabValue === 2 || (mainTabValue === 1 && characterSubTabValue === 0)) && (
+                      <>
+                        <Tooltip
+                          title="协同拓展会同时分析章节缺口和人物缺口，只补新增内容，不会整本重写"
+                          placement="top"
+                          arrow
+                        >
+                          <span>
+                            <Button
+                              variant="contained"
+                              color="secondary"
+                              startIcon={expandingStory ? <CircularProgress size={20} /> : <AutoFixHighIcon />}
+                              onMouseEnter={() => warmImport(loadStoryExpansionDialog)}
+                              onFocus={() => warmImport(loadStoryExpansionDialog)}
+                              onClick={openStoryExpansion}
+                              disabled={expandingStory || expandingOutline || expandingCharacters || !worldSetting || !plotOutline}
+                              sx={{
+                                borderRadius: 2,
+                                bgcolor: '#0f766e',
+                                '&:hover': {
+                                  bgcolor: '#115e59',
+                                },
+                              }}
+                            >
+                              {expandingStory ? '协同拓展中...' : '协同拓展'}
+                            </Button>
+                          </span>
+                        </Tooltip>
+                        {storyExpansionResult && !expandingStory && (
+                          <Button
+                            variant="text"
+                            onClick={() => setShowStoryExpansionResultDialog(true)}
+                            disabled={expandingOutline || expandingCharacters}
+                            sx={{ borderRadius: 2 }}
+                          >
+                            查看协同结果
+                          </Button>
+                        )}
+                      </>
+                    )}
                     
                     {/* 大纲设定扩展按钮 */}
                     {mainTabValue === 2 && (
@@ -2129,7 +2375,7 @@ export default function KnowledgeBasePage() {
                         arrow
                       >
                         <Button
-                          variant="contained"
+                          variant="outlined"
                           startIcon={<ArticleIcon />}
                           onMouseEnter={() => warmImport(loadExpansionConfigDialog)}
                           onFocus={() => warmImport(loadExpansionConfigDialog)}
@@ -2152,10 +2398,10 @@ export default function KnowledgeBasePage() {
                             
                             setShowExpansionConfig(true)
                           }}
-                          disabled={expandingOutline || expandingCharacters}
+                          disabled={expandingStory || expandingOutline || expandingCharacters}
                           sx={{ borderRadius: 2 }}
                         >
-                          扩展大纲
+                          高级大纲扩展
                         </Button>
                       </Tooltip>
                     )}
@@ -2225,7 +2471,7 @@ export default function KnowledgeBasePage() {
                                   handleExpandCharacters()
                                 }
                               }}
-                              disabled={expandingCharacters || expandingOutline || (characterExpandState === 'idle' && (!characters || !worldSetting || !plotOutline))}
+                              disabled={expandingStory || expandingCharacters || expandingOutline || (characterExpandState === 'idle' && (!characters || !worldSetting || !plotOutline))}
                               sx={{ 
                                 borderRadius: 2,
                                 // 🆕 动效：只在状态变为 resultReady 时触发一次
@@ -2244,7 +2490,7 @@ export default function KnowledgeBasePage() {
                                 ? '扩展中...' 
                                 : characterExpandState === 'resultReady'
                                 ? '🔍 查看结果'
-                                : '扩展人物'
+                                : '仅扩展人物'
                               }
                             </Button>
                           </span>
@@ -3335,6 +3581,147 @@ export default function KnowledgeBasePage() {
 
 
       {/* 🆕 扩展大纲结果弹窗 */}
+      <Dialog
+        open={showStoryExpansionResultDialog}
+        onClose={() => setShowStoryExpansionResultDialog(false)}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>协同拓展结果</DialogTitle>
+        <DialogContent dividers>
+          {storyExpansionResult && (
+            <Box>
+              <Paper elevation={2} sx={{ p: 2, mb: 2, bgcolor: 'secondary.50' }}>
+                <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">协同策略</Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+                      {storyExpansionResult.story_strategy || 'auto'}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">章节变化</Typography>
+                    <Typography variant="h6" color="primary.main" sx={{ fontWeight: 'bold' }}>
+                      {(storyExpansionResult.validation_before?.chapter_count ?? 0)} → {(storyExpansionResult.current_chapter_count ?? 0)}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">人物变化</Typography>
+                    <Typography variant="h6" color="success.main" sx={{ fontWeight: 'bold' }}>
+                      {(storyExpansionResult.validation_before?.character_count ?? 0)} → {(storyExpansionResult.current_character_count ?? 0)}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">协同评分</Typography>
+                    <Typography variant="h6" color="warning.main" sx={{ fontWeight: 'bold' }}>
+                      {(storyExpansionResult.validation_before?.score ?? 0)} → {(storyExpansionResult.validation_after?.score ?? 0)}
+                    </Typography>
+                  </Box>
+                </Box>
+                {storyExpansionResult.coordination_summary && (
+                  <Typography variant="body2" sx={{ mt: 2 }}>
+                    {storyExpansionResult.coordination_summary}
+                  </Typography>
+                )}
+              </Paper>
+
+              {!!storyExpansionResult.new_characters?.length && (
+                <Paper elevation={1} sx={{ p: 2, mb: 2 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>
+                    本轮新增角色
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    {storyExpansionResult.new_characters.map((name: string) => (
+                      <Chip key={name} label={name} color="secondary" variant="outlined" />
+                    ))}
+                  </Box>
+                </Paper>
+              )}
+
+              {!!storyExpansionResult.outline_ops?.length && (
+                <Paper elevation={1} sx={{ p: 2, mb: 2 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>
+                    本轮章节操作
+                  </Typography>
+                  {storyExpansionResult.outline_ops.map((op: any, index: number) => (
+                    <Box key={`${op.action}-${index}`} sx={{ mb: index === storyExpansionResult.outline_ops.length - 1 ? 0 : 1.5 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {op.action === 'insert_after' ? `插入到第 ${op.after_chapter} 章后` : '追加到大纲末尾'}
+                        {` · 计划 ${op.requested_count || 0} 章 · 实际 ${op.generated_count || 0} 章`}
+                      </Typography>
+                      {op.goal && (
+                        <Typography variant="body2" color="text.secondary">
+                          {op.goal}
+                        </Typography>
+                      )}
+                      {!!op.generated_titles?.length && (
+                        <Typography variant="caption" color="text.secondary">
+                          {op.generated_titles.join('、')}
+                        </Typography>
+                      )}
+                    </Box>
+                  ))}
+                </Paper>
+              )}
+
+              <Grid container spacing={2}>
+                <Grid item xs={12} md={6}>
+                  <Paper elevation={1} sx={{ p: 2, height: '100%' }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+                        更新后大纲
+                      </Typography>
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          navigator.clipboard.writeText(storyExpansionResult.expanded_outline || '')
+                          showSnackbar('已复制更新后大纲', 'success')
+                        }}
+                      >
+                        复制
+                      </Button>
+                    </Box>
+                    <Box sx={{ maxHeight: 360, overflow: 'auto', p: 2, bgcolor: 'background.default', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                      <Typography component="pre" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', m: 0 }}>
+                        {storyExpansionResult.expanded_outline || '内容为空'}
+                      </Typography>
+                    </Box>
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Paper elevation={1} sx={{ p: 2, height: '100%' }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+                        更新后人物
+                      </Typography>
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          navigator.clipboard.writeText(storyExpansionResult.all_characters || '')
+                          showSnackbar('已复制更新后人物', 'success')
+                        }}
+                      >
+                        复制
+                      </Button>
+                    </Box>
+                    <Box sx={{ maxHeight: 360, overflow: 'auto', p: 2, bgcolor: 'background.default', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                      <Typography component="pre" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', m: 0 }}>
+                        {storyExpansionResult.all_characters || '内容为空'}
+                      </Typography>
+                    </Box>
+                  </Paper>
+                </Grid>
+              </Grid>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowStoryExpansionResultDialog(false)} variant="contained">
+            关闭
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog 
         open={showExpandOutlineDialog} 
         onClose={() => setShowExpandOutlineDialog(false)}
@@ -3627,6 +4014,25 @@ export default function KnowledgeBasePage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {showStoryExpansionDialog && (
+        <Suspense fallback={null}>
+          <LazyStoryExpansionDialog
+            open={showStoryExpansionDialog}
+            loading={expandingStory}
+            currentChapterCount={getCurrentChapterCount()}
+            currentCharacterCount={getCurrentCharacterCount()}
+            targetChapterCount={storyTargetChapterCount}
+            targetCharacterCount={storyTargetCharacterCount}
+            strategy={storyExpansionStrategy}
+            onClose={() => setShowStoryExpansionDialog(false)}
+            onTargetChapterCountChange={setStoryTargetChapterCount}
+            onTargetCharacterCountChange={setStoryTargetCharacterCount}
+            onStrategyChange={setStoryExpansionStrategy}
+            onConfirm={handleExpandStory}
+          />
+        </Suspense>
+      )}
 
       {/* ??? ???????????*/}
       {showExpansionConfig && (

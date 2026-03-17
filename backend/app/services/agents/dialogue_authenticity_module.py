@@ -1,11 +1,11 @@
-"""
+﻿"""
 对话真实性模块 - 增强对话的真实性、潜台词和自然感
 """
 from typing import Dict, Any, List, Optional
 import re
 from langchain_core.messages import HumanMessage, SystemMessage
 from .config import Config
-from .llm_singleton import create_deepseek_llm
+from core.langchain_bridge import create_task_llm
 
 class DialogueAuthenticityEngine:
     """对话真实性引擎 - 增强对话的真实感和潜台词"""
@@ -13,7 +13,7 @@ class DialogueAuthenticityEngine:
     def __init__(self):
         """初始化引擎"""
         Config.validate()
-        self.llm = create_deepseek_llm()
+        self.llm = create_task_llm()
         
         # 填充词库
         self.filler_words = [
@@ -241,4 +241,5 @@ def analyze_dialogue_authenticity(content: str) -> Dict[str, Any]:
     """便捷函数：分析对话真实性"""
     engine = DialogueAuthenticityEngine()
     return engine.analyze_dialogue_authenticity(content)
+
 

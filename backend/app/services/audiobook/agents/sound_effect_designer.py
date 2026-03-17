@@ -1,4 +1,4 @@
-"""
+﻿"""
 SoundEffectDesigner - 音效设计师Agent
 
 核心职责：
@@ -22,7 +22,7 @@ from enum import Enum
 import httpx
 import requests
 from app.core.config import settings
-from app.services.model_optimizer import TaskType
+from core.model_resolution import TaskType
 from app.services.audiobook.ai_music import AIMusicGenerator, MusicGenerationResult, create_music_generator
 from app.services.audiobook.klingai_effect_generator import KlingAIEffectGenerator, create_klingai_generator
 
@@ -1045,3 +1045,4 @@ class SoundEffectDesigner:
         except Exception as e:
             logger.warning(f"⚠️ 下载并注册音效失败: {e}")
             return None
+

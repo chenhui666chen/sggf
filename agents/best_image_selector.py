@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from adapters.adapter_helpers import analyze_image as analyze_image_with_model
 from agents.vlm_utils import clamp_prompt_text, clamp_text_list, file_to_data_url, vlm_chat_json
 
 
@@ -339,11 +340,19 @@ def select_best_candidate(
         for idx, path in enumerate(candidate_paths):
             score_value = float("-inf")
             try:
-                result = vlm_adapter.analyze_image(
-                    image_path=str(path),
-                    analysis_type="quality",
-                    criteria=vlm_criteria,
-                )
+                if isinstance(vlm_adapter, str):
+                    result = analyze_image_with_model(
+                        image_path=str(path),
+                        analysis_type="quality",
+                        criteria=vlm_criteria,
+                        model_id=vlm_adapter,
+                    )
+                else:
+                    result = vlm_adapter.analyze_image(
+                        image_path=str(path),
+                        analysis_type="quality",
+                        criteria=vlm_criteria,
+                    )
                 score = _extract_score(result.data) if getattr(result, "success", False) else None
                 score_value = float(score) if score is not None else float("-inf")
                 scores.append(

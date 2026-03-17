@@ -1,56 +1,75 @@
 # -*- coding: utf-8 -*-
 """
-Core module - Task parsing, routing, and execution.
+统一模型调度中心 (ModelHub)
+
+提供统一的模型调用入口，支持：
+- 自动模型选择
+- 用户指定模型
+- 熔断降级
+- 重试机制
+- 成本追踪
 """
 
-from .task_parser import (
-    TaskParser,
-    TaskSpecBuilder,
-    parse_generation_request,
+from .unified_registry import (
+    UnifiedModelRegistry,
+    BaseLLMAdapter,
+    register_llm_model,
+    registry,
 )
-from .validators import (
-    TaskValidator,
-    ValidationResult,
+
+from .llm_adapters import (
+    OpenAICompatibleAdapter,
+    QwenMaxAdapter,
+    QwenLongAdapter,
+    QwenTurboAdapter,
+    DeepSeekReasonerAdapter,
+    DeepSeekChatAdapter,
 )
-from .router import (
-    SmartRouter,
-    RoutingResult,
-    CapabilityFilter,
-    ModelScorer,
-    LoadBalancer,
-    router,
+
+from .model_hub import (
+    ModelHub,
+    model_hub,
+    get_model_hub,
+    call_llm,
 )
-from .fallback_manager import (
-    FallbackManager,
-    FallbackChain,
-    FallbackAttempt,
-    TaskDegradationStrategy,
-    fallback_manager,
+from .model_resolution import (
+    TaskType,
+    normalize_model_id,
+    normalize_task_type,
 )
-from .execution_engine import (
-    ExecutionEngine,
-    ExecutionResult,
-    engine,
+from .unified_llm_client import (
+    UnifiedLLMClient,
+    get_llm_client,
+)
+from .langchain_bridge import (
+    ModelHubChatModel,
+    create_task_llm,
+    create_model_llm,
+    get_task_llm,
 )
 
 __all__ = [
-    "TaskParser",
-    "TaskSpecBuilder",
-    "parse_generation_request",
-    "TaskValidator",
-    "ValidationResult",
-    "SmartRouter",
-    "RoutingResult",
-    "CapabilityFilter",
-    "ModelScorer",
-    "LoadBalancer",
-    "router",
-    "FallbackManager",
-    "FallbackChain",
-    "FallbackAttempt",
-    "TaskDegradationStrategy",
-    "fallback_manager",
-    "ExecutionEngine",
-    "ExecutionResult",
-    "engine",
+    "UnifiedModelRegistry",
+    "BaseLLMAdapter",
+    "register_llm_model",
+    "registry",
+    "OpenAICompatibleAdapter",
+    "QwenMaxAdapter",
+    "QwenLongAdapter",
+    "QwenTurboAdapter",
+    "DeepSeekReasonerAdapter",
+    "DeepSeekChatAdapter",
+    "ModelHub",
+    "model_hub",
+    "get_model_hub",
+    "call_llm",
+    "TaskType",
+    "normalize_model_id",
+    "normalize_task_type",
+    "UnifiedLLMClient",
+    "get_llm_client",
+    "ModelHubChatModel",
+    "create_task_llm",
+    "create_model_llm",
+    "get_task_llm",
 ]

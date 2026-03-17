@@ -1,10 +1,10 @@
-"""  
+﻿"""  
 章节摘要生成器 - 自动生成核心事件摘要，减少AI上下文长度
 """
 from typing import Dict, Any, List, Optional
 import json
 from .agents import CreativeDirectorAgent
-from .llm_singleton import create_deepseek_llm
+from core.langchain_bridge import create_task_llm
 from .knowledge_base import NovelKnowledgeBase
 from .memory_manager import NovelMemoryManager
 
@@ -35,7 +35,7 @@ class ChapterSummarizer:
         
         # 初始化AI Agent
         self.creative_director = CreativeDirectorAgent(self.knowledge_base, self.memory_manager)
-        self.llm = create_deepseek_llm()
+        self.llm = create_task_llm()
     
     def generate_chapter_summary(self, chapter_number: int, chapter_title: str, 
                                 chapter_content: str, summary_length: int = 300) -> Dict[str, Any]:
@@ -608,3 +608,4 @@ def create_chapter_summarizer(knowledge_base: Optional[NovelKnowledgeBase] = Non
         配置好的ChapterSummarizer实例
     """
     return ChapterSummarizer(knowledge_base, memory_manager, db_session)
+

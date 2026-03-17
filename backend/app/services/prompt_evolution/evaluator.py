@@ -1,4 +1,4 @@
-"""
+﻿"""
 提示词进化系统 - 评估器
 
 封装AI检测调用，评估改写效果
@@ -8,8 +8,8 @@ import logging
 from typing import List, Tuple, Optional, Dict, Any
 
 from app.services.tencent_ai_detect import tencent_ai_detect_service
-from app.services.llm_client import get_llm_client
-from app.services.model_optimizer import TaskType
+from core.unified_llm_client import get_llm_client
+from core.model_resolution import TaskType
 
 from .models import EvaluationResult, AITraceDetail
 from .test_samples import TestSample
@@ -272,4 +272,5 @@ class PromptEvaluator:
             "label": result.get("label"),
             "error": result.get("error")
         }
+
 

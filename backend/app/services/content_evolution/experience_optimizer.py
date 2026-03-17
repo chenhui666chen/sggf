@@ -19,8 +19,8 @@ from datetime import datetime
 from typing import List, Tuple, Dict, Optional
 from dataclasses import dataclass
 
-from ..llm_client import get_llm_client
-from ..model_optimizer import TaskType
+from core.unified_llm_client import get_llm_client
+from core.model_resolution import TaskType
 
 logger = logging.getLogger(__name__)
 

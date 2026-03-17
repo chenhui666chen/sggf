@@ -1,37 +1,35 @@
 # -*- coding: utf-8 -*-
 # Model Specifications Configuration
-# This file defines model capabilities, constraints, and routing preferences.
+# This file stores image, video and audio model records for the project.
 
 models:
-  # ==================== Image Models ====================
-  
   - id: wanx-v1
     name: Wanx v1
     provider: alibaba
     version: v1
     status: active
-    
+
     modality:
       - text_to_image
       - image_to_image
-    
+
     capabilities:
       - name: reference_images
         support_level: native
-        description: Supports reference images for style transfer
+        description: Supports reference images for style and subject transfer
       - name: style_control
         support_level: native
-        description: Supports various art styles
+        description: Supports multiple visual styles and prompt-level style guidance
       - name: negative_prompt
         support_level: native
         description: Supports negative prompts
       - name: seed_control
         support_level: native
-        description: Supports seed for reproducibility
+        description: Supports seed-based reproducibility
       - name: batch_generation
         support_level: emulated
-        description: Batch generation via multiple requests
-    
+        description: Batch generation is implemented by multiple requests
+
     constraints:
       duration: []
       ratios:
@@ -46,7 +44,7 @@ models:
       max_height: 2048
       max_batch_size: 4
       max_prompt_length: 1000
-    
+
     quality_metrics:
       overall_score: 7.5
       character_consistency: 0.7
@@ -54,27 +52,27 @@ models:
       prompt_adherence: 0.75
       visual_quality: 0.8
       style_accuracy: 0.75
-    
+
     cost_profile:
       unit: per_request
       price: 0.0
       currency: CNY
       free_quota: 100
-    
+
     avg_latency_seconds: 15.0
     p95_latency_seconds: 30.0
-    
+
     rate_limit:
       requests_per_minute: 60
       requests_per_hour: 1000
       requests_per_day: 10000
       concurrent_requests: 5
-    
+
     default_params:
       size: "1024*1024"
       n: 1
       style: "<auto>"
-    
+
     best_practice:
       prompt_template: ""
       recommended_params:
@@ -84,9 +82,9 @@ models:
         max_reference_images: 4
       avoided_params: []
       tips:
-        - Use descriptive prompts for better results
-        - Specify style explicitly for consistent output
-    
+        - Use descriptive prompts for better scene control
+        - Add style and subject cues explicitly for consistent results
+
     fallback_strategies:
       - trigger_condition: content_safety
         fallback_model_id: wanx-v1-safe
@@ -96,13 +94,29 @@ models:
         fallback_model_id: sdxl-turbo
         description: Fallback to SDXL when rate limited
         priority: 2
-    
+
     endpoint: /api/v1/services/aigc/multimodal-generation/generation
     auth_method: bearer
     requires_external_network: true
-    
-    documentation_url: https://help.aliyun.com/document_detail/2712575.html
-    
+    summary: Primary text-to-image model in the project. Official DashScope docs position Wanx as a general visual generation model for prompt-based image creation and editing style transfer.
+    recommended_scenarios:
+      - Storyboard concept art
+      - Character visual exploration
+      - Cover draft generation
+      - Style reference based image creation
+    limitations:
+      - Latency is noticeably higher than turbo variants
+      - Character consistency across many rounds still needs reference control
+      - It is not the best choice for ultra-fast preview loops
+    integration_notes:
+      - Used as the default high-quality image model in the project
+      - Registered in adapters registry and also stored here as a searchable record
+      - Best paired with explicit negative prompts and style constraints
+    documentation_url: https://help.aliyun.com/zh/model-studio/text-to-image-v1-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/text-to-image-v1-api-reference
+      - https://help.aliyun.com/zh/model-studio/getting-started/models
+
     tags:
       - image
       - text-to-image
@@ -114,10 +128,10 @@ models:
     provider: alibaba
     version: v1
     status: active
-    
+
     modality:
       - text_to_image
-    
+
     capabilities:
       - name: style_control
         support_level: native
@@ -125,7 +139,7 @@ models:
         support_level: native
       - name: seed_control
         support_level: native
-    
+
     constraints:
       ratios:
         - "1:1"
@@ -136,35 +150,49 @@ models:
       min_height: 256
       max_height: 1024
       max_batch_size: 4
-    
+
     quality_metrics:
       overall_score: 6.5
       visual_quality: 0.7
-    
+
     cost_profile:
       unit: per_request
       price: 0.0
-    
+      currency: CNY
+
     avg_latency_seconds: 5.0
-    
+    summary: Faster preview-oriented variant of Wanx. Suitable when the project needs quick visual drafts before switching to the full-quality model.
+    recommended_scenarios:
+      - Fast thumbnail generation
+      - Prompt iteration and preview
+      - Low-cost early concept screening
+    limitations:
+      - Lower quality than wanx-v1
+      - Resolution ceiling is lower
+      - Not recommended for final delivery assets
+    integration_notes:
+      - Prefer for rapid iteration, then promote successful prompts to wanx-v1
+    documentation_url: https://help.aliyun.com/zh/model-studio/text-to-image-v1-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/text-to-image-v1-api-reference
+      - https://help.aliyun.com/zh/model-studio/getting-started/models
+
     tags:
       - image
       - text-to-image
       - alibaba
       - fast
 
-  # ==================== Video Models ====================
-  
   - id: wan2.6-t2v
     name: Wan 2.6 Text-to-Video
     provider: alibaba
     version: v2.6
     status: active
-    
+
     modality:
       - text_to_video
       - image_to_video
-    
+
     capabilities:
       - name: reference_images
         support_level: native
@@ -184,7 +212,7 @@ models:
         support_level: native
       - name: character_consistency
         support_level: native
-    
+
     constraints:
       duration:
         - 3.0
@@ -201,44 +229,44 @@ models:
       max_height: 1080
       max_batch_size: 1
       max_prompt_length: 500
-    
+
     quality_metrics:
       overall_score: 8.0
       character_consistency: 0.82
       motion_stability: 0.76
       prompt_adherence: 0.78
       visual_quality: 0.85
-      style_accuracy: 0.80
-    
+      style_accuracy: 0.8
+
     cost_profile:
       unit: per_second
       price: 0.0
       currency: CNY
       free_quota: 50
-    
+
     avg_latency_seconds: 45.0
     p95_latency_seconds: 90.0
-    
+
     rate_limit:
       requests_per_minute: 10
       requests_per_hour: 100
       requests_per_day: 500
       concurrent_requests: 2
-    
+
     default_params:
       resolution: "1080P"
       duration: 5
-    
+
     best_practice:
       recommended_params:
         max_reference_images: 1
         max_reference_videos: 1
         optimal_duration: 5
       tips:
-        - Keep prompts concise and descriptive
-        - Use reference images for better character consistency
-        - 5-second videos have the best quality
-    
+        - Keep prompts concise and cinematic
+        - Use reference images to stabilize the main subject
+        - Five-second clips are the safest default in production
+
     fallback_strategies:
       - trigger_condition: content_safety
         fallback_model_id: wan2.6-t2v-safe
@@ -248,10 +276,28 @@ models:
         param_adjustments:
           duration: 3.0
         priority: 2
-    
+
     endpoint: /api/v1/services/aigc/video-generation/video-synthesis
     auth_method: bearer
-    
+    summary: Main text-to-video model tracked by the project. Official DashScope video synthesis docs position Wan 2.6 as the higher-quality path for cinematic generation, reference control and camera motion.
+    recommended_scenarios:
+      - DreamWeaver shot generation
+      - Trailer and teaser clip creation
+      - Character scene animation with reference images
+      - Narrative short clip generation
+    limitations:
+      - Long latency and low concurrency
+      - Best quality is achieved with short clips, not long-form video in one shot
+      - Audio dialogue is not generated by this model path
+    integration_notes:
+      - Project defaults to 5-second clips for stability
+      - Best paired with reference images for recurring characters
+      - Fast fallback should be used on timeout-sensitive workflows
+    documentation_url: https://help.aliyun.com/zh/model-studio/video-synthesis
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/video-synthesis
+      - https://help.aliyun.com/zh/model-studio/getting-started/models
+
     tags:
       - video
       - text-to-video
@@ -263,10 +309,10 @@ models:
     provider: alibaba
     version: v2.6
     status: active
-    
+
     modality:
       - text_to_video
-    
+
     constraints:
       duration:
         - 3.0
@@ -274,51 +320,435 @@ models:
       ratios:
         - "16:9"
         - "9:16"
-    
+
     quality_metrics:
       overall_score: 7.0
-    
+
     avg_latency_seconds: 20.0
-    
+    summary: Speed-first variant for Wan 2.6 workflows. It is suitable for preview or degraded fallback when the main video path times out.
+    recommended_scenarios:
+      - Timeout fallback
+      - Rapid preview clips
+      - Early storyboard validation
+    limitations:
+      - Lower fidelity than wan2.6-t2v
+      - Short duration is strongly preferred
+    integration_notes:
+      - Intended as a degradation target instead of the first-choice generation model
+    documentation_url: https://help.aliyun.com/zh/model-studio/video-synthesis
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/video-synthesis
+
     tags:
       - video
       - text-to-video
       - alibaba
       - fast
 
-  # ==================== Placeholder Models ====================
-  
+  - id: wan2.6-i2v
+    name: Wan 2.6 Image-to-Video
+    provider: alibaba
+    version: v2.6
+    status: active
+
+    modality:
+      - image_to_video
+
+    capabilities:
+      - name: reference_images
+        support_level: native
+      - name: character_consistency
+        support_level: native
+      - name: motion_control
+        support_level: native
+
+    constraints:
+      duration:
+        - 3.0
+        - 5.0
+        - 10.0
+      ratios:
+        - "16:9"
+        - "9:16"
+        - "1:1"
+      max_batch_size: 1
+      max_prompt_length: 500
+
+    quality_metrics:
+      overall_score: 8.0
+      character_consistency: 0.86
+      motion_stability: 0.78
+      prompt_adherence: 0.76
+
+    avg_latency_seconds: 40.0
+    summary: Image-driven video model used in the project via DashScope video synthesis flow. Suitable when a still frame or character card must be animated into a short clip.
+    recommended_scenarios:
+      - Animate storyboard keyframes
+      - Turn portraits into short motion clips
+      - Character consistency focused scene generation
+    limitations:
+      - Motion still needs carefully constrained prompts
+      - Multi-shot continuity remains an orchestration concern, not a single-model guarantee
+    integration_notes:
+      - Used through the project adapter bridge, not yet through the old built-in registry decorator path
+      - Best used with a single dominant reference frame
+    documentation_url: https://help.aliyun.com/zh/model-studio/image-to-video
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/image-to-video
+      - https://help.aliyun.com/zh/model-studio/video-synthesis
+
+    tags:
+      - video
+      - image-to-video
+      - alibaba
+
+  - id: wan2.6-r2v
+    name: Wan 2.6 Reference-to-Video
+    provider: alibaba
+    version: v2.6
+    status: active
+
+    modality:
+      - video_to_video
+      - reference_to_video
+
+    capabilities:
+      - name: reference_images
+        support_level: native
+      - name: reference_videos
+        support_level: native
+      - name: character_consistency
+        support_level: native
+
+    constraints:
+      duration:
+        - 3.0
+        - 5.0
+        - 10.0
+      ratios:
+        - "16:9"
+        - "9:16"
+        - "1:1"
+      max_batch_size: 1
+
+    quality_metrics:
+      overall_score: 7.8
+      character_consistency: 0.88
+      style_accuracy: 0.82
+
+    avg_latency_seconds: 45.0
+    summary: Reference-driven video generation path for style locking and subject preservation. Best when the project already has visual reference material and needs guided video synthesis.
+    recommended_scenarios:
+      - Preserve style across short videos
+      - Reference-based scene continuation
+      - Character look consistency constrained generation
+    limitations:
+      - Requires better reference assets than text-only generation
+      - Not ideal for wide open-ended creative exploration
+    integration_notes:
+      - Project currently treats this as a guided generation path, not the default storyboard path
+    documentation_url: https://help.aliyun.com/zh/model-studio/video-synthesis
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/video-synthesis
+      - https://help.aliyun.com/zh/model-studio/getting-started/models
+
+    tags:
+      - video
+      - reference-to-video
+      - alibaba
+
+  - id: qwen3-vl-plus
+    name: Qwen3-VL-Plus
+    provider: alibaba
+    version: v1
+    status: active
+
+    modality:
+      - multimodal_chat
+      - image_understanding
+      - video_understanding
+
+    capabilities:
+      - name: image_understanding
+        support_level: native
+        description: Supports image analysis and multimodal reasoning
+      - name: video_understanding
+        support_level: native
+        description: Supports video input understanding through OpenAI-compatible messages
+      - name: json_output
+        support_level: native
+        description: Supports structured response formatting
+
+    constraints:
+      max_batch_size: 1
+      max_prompt_length: 10000
+
+    quality_metrics:
+      overall_score: 8.2
+      prompt_adherence: 0.8
+
+    avg_latency_seconds: 8.0
+    summary: Multimodal understanding model used for image and video analysis tasks. Official Qwen-VL docs describe it as an OpenAI-compatible vision model for image/video understanding and multimodal chat.
+    recommended_scenarios:
+      - Image quality review
+      - Video content inspection
+      - Multimodal prompt parsing
+      - Visual asset QA
+    limitations:
+      - It is an analysis model, not a generation model
+      - Large binary assets should still be preprocessed before calling
+    integration_notes:
+      - Project adapters expose chat, analyze_image and analyze_video entry points
+      - Suitable for review and guardrail workflows around generated assets
+    documentation_url: https://help.aliyun.com/zh/model-studio/vision
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/vision
+      - https://help.aliyun.com/zh/model-studio/getting-started/models
+
+    tags:
+      - vision
+      - multimodal
+      - alibaba
+
+  - id: qwen-image-edit-plus
+    name: Qwen-Image-Edit-Plus
+    provider: alibaba
+    version: v1
+    status: active
+
+    modality:
+      - image_to_image_edit
+      - image_edit
+
+    capabilities:
+      - name: image_edit
+        support_level: native
+        description: Supports instruction-based image editing
+      - name: multi_image
+        support_level: native
+        description: Supports multiple image references in the project adapter
+      - name: prompt_extend
+        support_level: native
+        description: Supports prompt enhancement parameters
+
+    constraints:
+      max_batch_size: 1
+      max_prompt_length: 1000
+
+    quality_metrics:
+      overall_score: 8.0
+      prompt_adherence: 0.82
+      style_accuracy: 0.83
+
+    avg_latency_seconds: 12.0
+    summary: Instruction-based image editing model recorded for the project's AIGC editing workflows. Official image-edit API docs position it as a multimodal image editing endpoint.
+    recommended_scenarios:
+      - Character image refinement
+      - Asset cleanup and prompt-directed retouching
+      - Multi-reference editing pipelines
+    limitations:
+      - The message schema is stricter than plain chat-completions style requests
+      - Multi-image requests may require fallback ordering strategies
+    integration_notes:
+      - Project adapter already contains compatibility fallback for message ordering
+      - Prefer for editing and compositional retouching rather than new image generation
+    documentation_url: https://help.aliyun.com/zh/model-studio/image-edit-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/image-edit-api-reference
+      - https://help.aliyun.com/zh/model-studio/getting-started/models
+
+    tags:
+      - image
+      - edit
+      - alibaba
+
+  - id: qwen-image-edit-max
+    name: Qwen-Image-Edit-Max
+    provider: alibaba
+    version: v1
+    status: active
+
+    modality:
+      - image_to_image_edit
+      - image_edit
+
+    capabilities:
+      - name: image_edit
+        support_level: native
+      - name: multi_image
+        support_level: native
+
+    constraints:
+      max_batch_size: 1
+      max_prompt_length: 1000
+
+    quality_metrics:
+      overall_score: 8.4
+      prompt_adherence: 0.85
+      style_accuracy: 0.86
+
+    avg_latency_seconds: 15.0
+    summary: Higher-quality image editing variant for demanding retouching and compositional refinement tasks.
+    recommended_scenarios:
+      - Final-pass image editing
+      - Harder instruction-following edits
+      - Quality-sensitive promotional assets
+    limitations:
+      - Slower than the plus variant
+      - Higher cost path should be reserved for final assets
+    integration_notes:
+      - Good escalation target when qwen-image-edit-plus cannot preserve quality
+    documentation_url: https://help.aliyun.com/zh/model-studio/image-edit-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/image-edit-api-reference
+
+    tags:
+      - image
+      - edit
+      - alibaba
+      - quality
+
+  - id: qwen3-tts-flash
+    name: Qwen3-TTS-Flash
+    provider: alibaba
+    version: v1
+    status: active
+
+    modality:
+      - text_to_speech
+
+    capabilities:
+      - name: speech_synthesis
+        support_level: native
+      - name: word_timestamps
+        support_level: native
+      - name: phoneme_timestamps
+        support_level: native
+      - name: preset_voices
+        support_level: native
+
+    constraints:
+      max_batch_size: 1
+      max_prompt_length: 20000
+
+    quality_metrics:
+      overall_score: 8.0
+      prompt_adherence: 0.8
+
+    avg_latency_seconds: 4.0
+    summary: Default TTS model in the project. Official DashScope speech synthesis docs position Qwen-TTS as the high-throughput, OpenAI-compatible speech synthesis path with many preset voices.
+    recommended_scenarios:
+      - Batch audiobook synthesis
+      - Cost-sensitive chapter narration
+      - Standard voice preview and iteration
+    limitations:
+      - The current project integration does not expose instruct-style fine-grained emotion control on this path
+      - For richer expressive control, cosyvoice-v3-plus is more suitable
+    integration_notes:
+      - Project keeps qwen3-tts-flash as the default audiobook TTS
+      - Voice catalog and speaker normalization are implemented in audiobook services
+      - Timestamp information is preserved when returned by the provider
+    documentation_url: https://help.aliyun.com/zh/model-studio/text-to-speech-syn
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/text-to-speech-syn
+      - https://help.aliyun.com/zh/model-studio/getting-started/models
+
+    tags:
+      - audio
+      - tts
+      - alibaba
+      - audiobook
+
+  - id: cosyvoice-v3-plus
+    name: CosyVoice v3 Plus
+    provider: alibaba
+    version: v3
+    status: active
+
+    modality:
+      - text_to_speech
+      - voice_clone
+
+    capabilities:
+      - name: speech_synthesis
+        support_level: native
+      - name: instruct_control
+        support_level: native
+      - name: voice_clone
+        support_level: native
+      - name: preset_voices
+        support_level: native
+
+    constraints:
+      max_batch_size: 1
+      max_prompt_length: 20000
+
+    quality_metrics:
+      overall_score: 8.8
+      style_accuracy: 0.88
+
+    avg_latency_seconds: 7.0
+    summary: Expressive TTS and voice-clone option used by the audiobook subsystem. Official DashScope speech synthesis and timbre docs describe CosyVoice v3 Plus as the richer emotional and instruct-capable path.
+    recommended_scenarios:
+      - Premium audiobook rendering
+      - Emotion-heavy scenes
+      - Voice cloning workflows
+      - Character-specific expressive narration
+    limitations:
+      - Higher cost and lower throughput than qwen3-tts-flash
+      - Operational complexity is higher because voice management and clone lifecycle must be handled
+    integration_notes:
+      - Project exposes clone creation and management endpoints specifically for this model
+      - Instruct mode is supported and used selectively by audiobook services
+      - Best reserved for premium or emotionally dense content
+    documentation_url: https://help.aliyun.com/zh/model-studio/text-to-speech-syn
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/text-to-speech-syn
+      - https://help.aliyun.com/zh/model-studio/timbre-list
+
+    tags:
+      - audio
+      - tts
+      - voice-clone
+      - alibaba
+      - premium
+
   - id: sdxl-turbo
     name: SDXL Turbo
     provider: stability
     version: v1.0
     status: active
-    
+
     modality:
       - text_to_image
-    
+
     capabilities:
       - name: style_control
         support_level: native
       - name: negative_prompt
         support_level: native
-    
+
     constraints:
       ratios:
         - "1:1"
         - "16:9"
         - "9:16"
       max_batch_size: 1
-    
+
     quality_metrics:
       overall_score: 7.0
-    
+
     cost_profile:
       unit: per_request
       price: 0.002
-    
+
     avg_latency_seconds: 3.0
-    
+    summary: Placeholder fallback image model kept for degradation strategy only.
+    limitations:
+      - Not a primary integrated provider path in this repository
+    integration_notes:
+      - Acts as a fallback record rather than a first-class production path
+
     tags:
       - image
       - text-to-image
@@ -330,17 +760,17 @@ models:
     provider: kuaishou
     version: v1
     status: testing
-    
+
     modality:
       - text_to_video
       - image_to_video
-    
+
     capabilities:
       - name: reference_images
         support_level: native
       - name: character_consistency
         support_level: native
-    
+
     constraints:
       duration:
         - 5.0
@@ -348,49 +778,50 @@ models:
       ratios:
         - "16:9"
         - "9:16"
-    
+
     quality_metrics:
       overall_score: 7.8
       character_consistency: 0.85
-    
+
     avg_latency_seconds: 60.0
-    
+    summary: Testing-only placeholder record for possible external video model comparison.
+    limitations:
+      - Not a production-routed model in the current repository
+
     tags:
       - video
       - text-to-video
       - kuaishou
       - chinese
 
-# ==================== Routing Configuration ====================
-
 routing:
   default_strategy: balanced
-  
+
   strategies:
     quality:
       quality_weight: 0.7
       cost_weight: 0.2
       latency_weight: 0.1
-    
+
     cost:
       quality_weight: 0.2
       cost_weight: 0.7
       latency_weight: 0.1
-    
+
     speed:
       quality_weight: 0.2
       cost_weight: 0.1
       latency_weight: 0.7
-    
+
     balanced:
       quality_weight: 0.4
       cost_weight: 0.3
       latency_weight: 0.3
-  
+
   fallback:
     max_attempts: 5
     degradation_levels: 3
-    
+
     error_handlers:
       content_safety:
         action: degrade_prompt

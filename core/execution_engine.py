@@ -5,10 +5,15 @@ Execution Engine - Unified execution layer for model generation.
 
 from __future__ import annotations
 
+import logging
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+
+from core.config import config
 
 if TYPE_CHECKING:
     from schemas.task_spec import TaskSpec
@@ -17,6 +22,13 @@ if TYPE_CHECKING:
     from adapters.registry import ModelRegistry
     from core.router import SmartRouter
     from core.fallback_manager import FallbackChain
+
+_logger = logging.getLogger("model_adapter.engine")
+
+
+class TimeoutException(Exception):
+    """Exception raised when execution times out."""
+    pass
 
 
 @dataclass
@@ -33,6 +45,7 @@ class ExecutionResult:
     latency: float = 0.0
     attempts: int = 1
     fallback_chain: Optional["FallbackChain"] = None
+    timed_out: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -46,6 +59,7 @@ class ExecutionResult:
             "cost": self.cost,
             "latency": self.latency,
             "attempts": self.attempts,
+            "timed_out": self.timed_out,
         }
 
 
@@ -56,6 +70,7 @@ class ExecutionEngine:
         self,
         registry: "ModelRegistry" = None,
         router: "SmartRouter" = None,
+        default_timeout: float = None,
     ):
         from adapters.registry import registry as default_registry
         from core.router import router as default_router
@@ -64,6 +79,11 @@ class ExecutionEngine:
         self._router = router or default_router
         self._pre_hooks: List[Callable] = []
         self._post_hooks: List[Callable] = []
+        self._default_timeout = default_timeout or config.execution.DEFAULT_TIMEOUT
+        self._executor = ThreadPoolExecutor(
+            max_workers=config.execution.MAX_WORKERS,
+            thread_name_prefix=config.execution.THREAD_NAME_PREFIX,
+        )
     
     def register_pre_hook(self, hook: Callable) -> None:
         """Register a pre-execution hook."""
@@ -80,7 +100,7 @@ class ExecutionEngine:
             try:
                 result = hook(result) or result
             except Exception as e:
-                print(f"[Engine] Pre-hook error: {e}")
+                _logger.warning(f"Pre-hook error: {e}")
         return result
     
     def _run_post_hooks(
@@ -93,7 +113,7 @@ class ExecutionEngine:
             try:
                 hook(task, result)
             except Exception as e:
-                print(f"[Engine] Post-hook error: {e}")
+                _logger.warning(f"Post-hook error: {e}")
         return result
     
     def execute(
@@ -102,16 +122,44 @@ class ExecutionEngine:
         strategy: str = "balanced",
         use_fallback: bool = True,
         max_attempts: int = 5,
+        timeout: float = None,
     ) -> ExecutionResult:
-        """Execute a generation task."""
+        """Execute a generation task with optional timeout."""
         start_time = time.time()
+        effective_timeout = timeout or self._default_timeout
         
         task = self._run_pre_hooks(task)
         
-        if use_fallback:
-            return self._execute_with_fallback(task, max_attempts)
+        def _do_execute():
+            if use_fallback:
+                return self._execute_with_fallback(task, max_attempts)
+            return self._execute_single(task, strategy)
         
-        return self._execute_single(task, strategy)
+        try:
+            future = self._executor.submit(_do_execute)
+            result = future.result(timeout=effective_timeout)
+            return result
+        except FuturesTimeoutError:
+            latency = time.time() - start_time
+            return ExecutionResult(
+                success=False,
+                task_id=task.task_id,
+                model_id="",
+                error=f"Execution timed out after {effective_timeout}s",
+                error_code="timeout",
+                latency=latency,
+                timed_out=True,
+            )
+        except Exception as e:
+            latency = time.time() - start_time
+            return ExecutionResult(
+                success=False,
+                task_id=task.task_id,
+                model_id="",
+                error=str(e),
+                error_code="execution_error",
+                latency=latency,
+            )
     
     def _execute_single(
         self,
@@ -226,23 +274,60 @@ class ExecutionEngine:
         strategy: str = "balanced",
         use_fallback: bool = True,
         max_attempts: int = 5,
+        timeout: float = None,
+        max_workers: int = None,
     ) -> List[ExecutionResult]:
-        """Execute multiple tasks in batch."""
-        results = []
-        for task in tasks:
-            result = self.execute(
+        """Execute multiple tasks in batch with optional parallel execution."""
+        effective_timeout = timeout or config.execution.DEFAULT_BATCH_TIMEOUT
+        effective_max_workers = max_workers or config.execution.MAX_WORKERS
+        
+        def execute_one(task: "TaskSpec") -> ExecutionResult:
+            return self.execute(
                 task=task,
                 strategy=strategy,
                 use_fallback=use_fallback,
                 max_attempts=max_attempts,
             )
-            results.append(result)
-        return results
+        
+        try:
+            futures = []
+            for task in tasks:
+                future = self._executor.submit(execute_one, task)
+                futures.append(future)
+            
+            results = []
+            for future in futures:
+                try:
+                    result = future.result(timeout=effective_timeout)
+                    results.append(result)
+                except FuturesTimeoutError:
+                    results.append(ExecutionResult(
+                        success=False,
+                        task_id="",
+                        model_id="",
+                        error=f"Batch task timed out after {effective_timeout}s",
+                        error_code="timeout",
+                        timed_out=True,
+                    ))
+            return results
+        except Exception as e:
+            return [ExecutionResult(
+                success=False,
+                task_id="",
+                model_id="",
+                error=str(e),
+                error_code="batch_error",
+            )]
+    
+    def shutdown(self, wait: bool = True) -> None:
+        """Shutdown the executor and release resources."""
+        self._executor.shutdown(wait=wait)
     
     def get_stats(self) -> Dict[str, Any]:
         """Get execution statistics."""
         return {
             "registry_stats": self._registry.get_all_performance_stats(),
+            "default_timeout": self._default_timeout,
         }
 
 

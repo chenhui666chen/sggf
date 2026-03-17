@@ -1,4 +1,4 @@
-"""
+﻿"""
 提示词进化系统 - 历史经验智能去重与优化
 
 核心功能：
@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from collections import Counter
 
-from app.services.llm_client import get_llm_client
-from app.services.model_optimizer import TaskType
+from core.unified_llm_client import get_llm_client
+from core.model_resolution import TaskType
 
 logger = logging.getLogger(__name__)
 
@@ -849,3 +849,4 @@ def get_experience_optimizer() -> ExperienceOptimizer:
     if _optimizer is None:
         _optimizer = ExperienceOptimizer()
     return _optimizer
+

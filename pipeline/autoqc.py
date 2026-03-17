@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from adapters.adapter_helpers import chat_messages, get_model_info
 from agents.vlm_utils import clamp_text_list
 
 
@@ -464,7 +465,7 @@ def _semantic_match(
     expected: str,
     max_tokens: int = 400,
 ) -> Optional[Dict[str, Any]]:
-    if not vlm_adapter or not hasattr(vlm_adapter, "chat"):
+    if not vlm_adapter:
         return None
     if not image_path or not expected:
         return None
@@ -489,9 +490,27 @@ def _semantic_match(
     ]
 
     try:
-        res = vlm_adapter.chat(messages=messages, temperature=0.2, max_tokens=max_tokens, response_format={"type": "json_object"})
-        if not getattr(res, "success", False):
-            res = vlm_adapter.chat(messages=messages, temperature=0.2, max_tokens=max_tokens)
+        if isinstance(vlm_adapter, str):
+            res = chat_messages(
+                messages=messages,
+                temperature=0.2,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"},
+                model_id=vlm_adapter,
+            )
+            if not getattr(res, "success", False):
+                res = chat_messages(
+                    messages=messages,
+                    temperature=0.2,
+                    max_tokens=max_tokens,
+                    model_id=vlm_adapter,
+                )
+        else:
+            if not hasattr(vlm_adapter, "chat"):
+                return None
+            res = vlm_adapter.chat(messages=messages, temperature=0.2, max_tokens=max_tokens, response_format={"type": "json_object"})
+            if not getattr(res, "success", False):
+                res = vlm_adapter.chat(messages=messages, temperature=0.2, max_tokens=max_tokens)
         if not getattr(res, "success", False):
             return None
 
@@ -523,7 +542,7 @@ def _state_continuity_match(
     next_state_before: str,
     max_tokens: int = 500,
 ) -> Optional[Dict[str, Any]]:
-    if not vlm_adapter or not hasattr(vlm_adapter, "chat"):
+    if not vlm_adapter:
         return None
     if not prev_tail_path or not next_head_path:
         return None
@@ -568,9 +587,27 @@ def _state_continuity_match(
     ]
 
     try:
-        res = vlm_adapter.chat(messages=messages, temperature=0.2, max_tokens=max_tokens, response_format={"type": "json_object"})
-        if not getattr(res, "success", False):
-            res = vlm_adapter.chat(messages=messages, temperature=0.2, max_tokens=max_tokens)
+        if isinstance(vlm_adapter, str):
+            res = chat_messages(
+                messages=messages,
+                temperature=0.2,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"},
+                model_id=vlm_adapter,
+            )
+            if not getattr(res, "success", False):
+                res = chat_messages(
+                    messages=messages,
+                    temperature=0.2,
+                    max_tokens=max_tokens,
+                    model_id=vlm_adapter,
+                )
+        else:
+            if not hasattr(vlm_adapter, "chat"):
+                return None
+            res = vlm_adapter.chat(messages=messages, temperature=0.2, max_tokens=max_tokens, response_format={"type": "json_object"})
+            if not getattr(res, "success", False):
+                res = vlm_adapter.chat(messages=messages, temperature=0.2, max_tokens=max_tokens)
         if not getattr(res, "success", False):
             return None
 
@@ -1220,24 +1257,19 @@ def run(payload: Dict[str, Any]) -> Dict[str, Any]:
     state_vlm = None
     if enable_semantic_qc or enable_state_qc:
         try:
-            from adapters.model_adapters import ModelAdapterFactory
-
-            factory = ModelAdapterFactory()
-
             if enable_semantic_qc:
-                try:
-                    semantic_vlm = factory.get_adapter(semantic_vlm_adapter)
-                except Exception:  # noqa: BLE001
+                if get_model_info(semantic_vlm_adapter) is not None:
+                    semantic_vlm = semantic_vlm_adapter
+                else:
                     semantic_vlm = None
                     cfg_effective["enable_semantic_qc"] = False
 
             if enable_state_qc:
-                try:
-                    if semantic_vlm is not None and str(semantic_vlm_adapter) == str(state_vlm_adapter):
-                        state_vlm = semantic_vlm
-                    else:
-                        state_vlm = factory.get_adapter(state_vlm_adapter)
-                except Exception:  # noqa: BLE001
+                if semantic_vlm is not None and str(semantic_vlm_adapter) == str(state_vlm_adapter):
+                    state_vlm = semantic_vlm
+                elif get_model_info(state_vlm_adapter) is not None:
+                    state_vlm = state_vlm_adapter
+                else:
                     state_vlm = None
                     cfg_effective["enable_state_qc"] = False
         except Exception:  # noqa: BLE001

@@ -43,6 +43,7 @@ class ProjectUpdate(BaseModel):
 class ProjectResponse(ProjectBase):
     """项目响应Schema"""
     id: int
+    display_no: int
     user_id: int
     status: str
     word_count: int
@@ -109,4 +110,3 @@ class ChapterRevisionResponse(BaseModel):
     
     class Config:
         from_attributes = True
-

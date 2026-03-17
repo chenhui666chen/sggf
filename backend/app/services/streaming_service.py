@@ -1,52 +1,31 @@
 """
-流式输出服务 - 支持 AI 生成内容的实时推送
+流式输出服务 - 基于统一模型中心的实时推送封装
 """
-import os
+
+from __future__ import annotations
+
 import asyncio
-from typing import Optional, Dict, Any, List, Callable, Awaitable
 import logging
-import httpx
-from openai import AsyncOpenAI
+import os
+from typing import Awaitable, Callable, Dict, List, Optional
+
+from core.model_resolution import normalize_model_id
+from core.unified_llm_client import UnifiedLLMClient, get_llm_client
 
 logger = logging.getLogger(__name__)
-
-# 🛡️ 全局禁用代理配置 - 确保直连API
-for proxy_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']:
-    if proxy_var in os.environ:
-        del os.environ[proxy_var]
 
 
 class StreamingService:
     """
     流式输出服务
-    
-    将 AI 生成的内容实时推送到前端
+
+    对外保持既有接口，内部统一改走 ModelHub。
     """
-    
-    def __init__(self):
-        # 🛡️ 创建禁用代理的httpx客户端
-        deepseek_http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(120.0, connect=30.0),
-            trust_env=False  # 不读取环境变量中的代理配置
-        )
-        dashscope_http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(180.0, connect=30.0),
-            trust_env=False
-        )
-        
-        self.deepseek_client = AsyncOpenAI(
-            api_key=os.getenv("DEEPSEEK_API_KEY"),
-            base_url=os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1"),
-            http_client=deepseek_http_client  # 🛡️ 使用禁用代理的客户端
-        )
-        # 阿里云百炼（DashScope）兼容端点，用于 qwen-* 模型
-        self.dashscope_client = AsyncOpenAI(
-            api_key=os.getenv("DASHSCOPE_API_KEY"),
-            base_url=os.getenv("DASHSCOPE_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-            http_client=dashscope_http_client  # 🛡️ 使用禁用代理的客户端
-        )
-        self.default_model = os.getenv("DEEPSEEK_MODEL", "qwen3-max")
-    
+
+    def __init__(self, llm_client: Optional[UnifiedLLMClient] = None):
+        self.llm_client = llm_client or get_llm_client(strategy="auto")
+        self.default_model = normalize_model_id(os.getenv("DEEPSEEK_MODEL", "qwen3-max")) or "qwen3-max"
+
     async def generate_with_streaming(
         self,
         messages: List[Dict[str, str]],
@@ -57,121 +36,59 @@ class StreamingService:
         max_tokens: Optional[int] = None,
         max_retries: int = 3,
     ) -> str:
-        """
-        流式生成内容并实时推送（带重试机制）
-        
-        Args:
-            messages: 消息列表
-            on_chunk: 每个文本块的回调函数 (chunk_text, chunk_index)
-            on_complete: 生成完成时的回调函数 (full_text, total_chars)
-            model: 使用的模型
-            temperature: 温度参数
-            max_tokens: 最大 token 数
-            max_retries: 最大重试次数
-        
-        Returns:
-            完整的生成文本
-        """
-        model = model or self.default_model
-        last_error = None
-        
+        selected_model = normalize_model_id(model or self.default_model) or self.default_model
+        last_error: Optional[Exception] = None
+
         for attempt in range(max_retries):
+            chunk_index = 0
+            collected: List[str] = []
+
+            async def relay(chunk_text: str) -> None:
+                nonlocal chunk_index
+                collected.append(chunk_text)
+                await on_chunk(chunk_text, chunk_index)
+                chunk_index += 1
+
             try:
                 if attempt > 0:
-                    wait_time = 2 ** attempt  # 指数退避：2秒、4秒、8秒
-                    logger.info(f"🔄 第 {attempt + 1}/{max_retries} 次重试，等待 {wait_time} 秒...")
+                    wait_time = 2 ** attempt
+                    logger.info(f"流式生成重试中，第 {attempt + 1}/{max_retries} 次，等待 {wait_time} 秒")
                     await asyncio.sleep(wait_time)
-                
-                logger.info(f"🌊 开始流式生成 | 模型: {model} | 尝试: {attempt + 1}/{max_retries}")
-                
-                # 根据模型类型设置超时时间：R1放宽到5分钟，其它模型120秒
-                request_timeout = 300.0 if str(model).startswith("deepseek-reasoner") else 120.0
-                
-                # 按模型选择正确的客户端（DeepSeek 或 DashScope）
-                client = self.dashscope_client if str(model).startswith("qwen") else self.deepseek_client
-                
-                stream = await client.chat.completions.create(
-                    model=model,
-                    messages=messages,  # type: ignore
+
+                logger.info(f"开始流式生成 | 模型: {selected_model} | 尝试: {attempt + 1}/{max_retries}")
+                content = await self.llm_client.chat_stream(
+                    messages=messages,
+                    on_chunk=relay,
+                    model=selected_model,
                     temperature=temperature,
                     max_tokens=max_tokens,
-                    stream=True,
-                    timeout=request_timeout,
+                    max_retries=1,
                 )
-                
-                full_content = ""
-                chunk_index = 0
-                buffer = ""  # 缓冲区，用于合并小块
-                buffer_threshold = 10  # 每10个字符发送一次
-                last_activity_time = asyncio.get_event_loop().time()
-                
-                async for chunk in stream:
-                    last_activity_time = asyncio.get_event_loop().time()  # 更新活动时间
-                    
-                    if chunk.choices and len(chunk.choices) > 0:
-                        delta = chunk.choices[0].delta
-                        if delta and delta.content:
-                            content_piece = delta.content
-                            full_content += content_piece
-                            buffer += content_piece
-                            
-                            # 当缓冲区达到阈值或遇到换行时发送
-                            if len(buffer) >= buffer_threshold or '\n' in buffer:
-                                try:
-                                    await on_chunk(buffer, chunk_index)
-                                    chunk_index += 1
-                                    buffer = ""
-                                except Exception as e:
-                                    logger.warning(f"⚠️  推送块失败: {e}")
-                
-                # 发送剩余的缓冲区内容
-                if buffer:
-                    try:
-                        await on_chunk(buffer, chunk_index)
-                    except Exception as e:
-                        logger.warning(f"⚠️  推送最后一块失败: {e}")
-                
-                # 🔧 检查是否生成了足够的内容（至少100字符）
-                if len(full_content) < 100:
-                    logger.warning(f"⚠️  生成内容过短 ({len(full_content)} 字符)，可能被截断")
-                    # 如果内容太短，不抛出异常，但记录警告
-                    # 继续执行，返回已生成的内容
-                
-                # 调用完成回调
+
                 if on_complete:
-                    try:
-                        await on_complete(full_content, len(full_content))
-                    except Exception as e:
-                        logger.warning(f"⚠️  完成回调失败: {e}")
-                
-                logger.info(f"✅ 流式生成完成 | 总字符: {len(full_content)} | 块数: {chunk_index + 1}")
-                return full_content
-                
-            except Exception as e:
-                last_error = e
-                error_msg = str(e)
-                
-                # 判断是否是可重试的错误
-                is_retryable = (
-                    'RemoteProtocolError' in error_msg or
-                    'peer closed connection' in error_msg or
-                    'incomplete chunked read' in error_msg or
-                    'Connection reset' in error_msg or
-                    'timeout' in error_msg.lower()
+                    await on_complete(content, len(content))
+
+                logger.info(f"流式生成完成 | 模型: {selected_model} | 字符数: {len(content)} | 块数: {chunk_index}")
+                return content
+
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                error_text = str(exc).lower()
+                retryable = not any(
+                    token in error_text
+                    for token in ("auth_error", "invalid api key", "model_not_registered", "model_not_found")
                 )
-                
-                if is_retryable and attempt < max_retries - 1:
-                    logger.warning(f"⚠️  流式生成中断（可重试）: {error_msg}")
-                    logger.info(f"🔄 将在 {2 ** (attempt + 1)} 秒后重试...")
-                    continue  # 继续下一次重试
-                else:
-                    logger.error(f"❌ 流式生成失败（不可重试或已达最大重试次数）: {error_msg}")
-                    raise
-        
-        # 如果所有重试都失败了
-        logger.error(f"❌ 流式生成失败，已重试 {max_retries} 次")
-        raise last_error if last_error else Exception("流式生成失败")
-    
+                if retryable and attempt < max_retries - 1:
+                    logger.warning(f"流式生成失败，准备重试: {exc}")
+                    continue
+
+                logger.error(f"流式生成失败: {exc}")
+                raise
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("流式生成失败")
+
     async def generate_chapter_streaming(
         self,
         prompt: str,
@@ -179,42 +96,25 @@ class StreamingService:
         on_chunk: Callable[[str, int], Awaitable[None]],
         on_complete: Optional[Callable[[str, int], Awaitable[None]]] = None,
         temperature: float = 0.7,
-        model: Optional[str] = None,  # 🆕 支持自定义模型
+        model: Optional[str] = None,
     ) -> str:
-        """
-        流式生成章节内容
-        
-        Args:
-            prompt: 用户提示词
-            system_prompt: 系统提示词
-            on_chunk: 块回调
-            on_complete: 完成回调
-            temperature: 温度
-            model: 使用的模型（如果不指定则使用默认模型）
-        
-        Returns:
-            完整的章节内容
-        """
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt}
+            {"role": "user", "content": prompt},
         ]
-        
         return await self.generate_with_streaming(
             messages=messages,
             on_chunk=on_chunk,
             on_complete=on_complete,
             temperature=temperature,
-            model=model,  # 🆕 传递模型参数
+            model=model,
         )
 
 
-# 单例实例
 _streaming_service: Optional[StreamingService] = None
 
 
 def get_streaming_service() -> StreamingService:
-    """获取流式输出服务单例"""
     global _streaming_service
     if _streaming_service is None:
         _streaming_service = StreamingService()

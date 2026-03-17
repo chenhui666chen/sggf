@@ -1,10 +1,10 @@
-"""
+﻿"""
 情节大纲和人物扩展器 - 自动扩展简短大纲和增加人物数量
 """
 import os
 from typing import Dict, Any, List, Optional
 from .agents import CreativeDirectorAgent, PlotArchitectAgent, CharacterDesignerAgent
-from .llm_singleton import create_deepseek_llm, create_routed_llm
+from core.langchain_bridge import create_task_llm, create_model_llm
 from .knowledge_base import NovelKnowledgeBase
 from .memory_manager import NovelMemoryManager
 # 🎯 任务6：导入题材自适应模板系统
@@ -15,6 +15,9 @@ from .layered_summarizer import LayeredSummarizer
 from ..volume_connector import VolumeConnector
 from ..foreshadowing_tracker import ForeshadowingTracker
 from ..consistency_validator import ConsistencyValidator, get_consistency_validator, get_chapter_renumberer
+# 🔥 新增：智能人物识别器和协同验证器
+from .character_recognizer import CharacterRecognizer
+from .character_plot_validator import CharacterPlotValidator
 
 
 class OutlineExpander:
@@ -36,6 +39,7 @@ class OutlineExpander:
         self.memory_manager = memory_manager or NovelMemoryManager()
         self.genre = genre  # 🎯 保存题材
         self.planned_chapters_max = planned_chapters_max
+        self.project_id: Optional[int] = None
 
         # 初始化AI Agent
         self.creative_director = CreativeDirectorAgent(self.knowledge_base, self.memory_manager)
@@ -43,20 +47,32 @@ class OutlineExpander:
         self.character_designer = CharacterDesignerAgent(self.knowledge_base, self.memory_manager)
 
         # 🔔 为扩展大纲使用 qwen-long
-        self.llm = create_deepseek_llm(task_type="outline_expand")
+        self.llm = create_task_llm(task_type="outline_expand")
         
         # 🎆 为单卷详细扩展使用 DeepSeek-R1（深度推理能力）
-        from .llm_singleton import get_model_for_task
-        r1_llm = get_model_for_task("volume_detail_expand")
+        from core.langchain_bridge import get_task_llm
+        r1_llm = get_task_llm("volume_detail_expand")
         self.plot_architect_r1 = PlotArchitectAgent(self.knowledge_base, self.memory_manager, llm=r1_llm)
         print("🎆 单卷扩展使用 DeepSeek-R1 模型")
         
         # 🎆 初始化分层摘要器
-        self.layered_summarizer = LayeredSummarizer(self.knowledge_base)
-        
+        self.layered_summarizer = LayeredSummarizer(
+            self.knowledge_base,
+            persist_directory=self.memory_manager.persist_directory,
+        )
+
+        # 🔥 初始化智能人物识别器和协同验证器
+        self.character_recognizer = CharacterRecognizer()
+        self.character_plot_validator = CharacterPlotValidator()
+        print("🔥 已加载智能人物识别器和协同验证器")
+
         # 🎯 任务6.3：获取题材专属Prompt模块
         self.genre_module = GENRE_PROMPT_MODULES.get(genre, DEFAULT_GENRE_MODULE)
         print(f"🎯 题材：{genre}，已加载专属Prompt模块")
+
+    def set_project_context(self, project_id: int) -> None:
+        """设置项目上下文，供分层摘要缓存跨轮复用"""
+        self.project_id = project_id
 
     def count_chapters_in_outline(self, outline: str) -> int:
         """智能识别大纲中的章节数
@@ -190,9 +206,9 @@ class OutlineExpander:
         return suggestion
 
     def count_characters_in_text(self, characters_text: str) -> int:
-        """智能识别人物文本中的人物数
+        """智能识别人物文本中的人物数（使用新的智能识别器）
 
-        通过正则表达式和AI判断识别当前有多少个人物
+        通过智能识别器准确识别人物数量
 
         Args:
             characters_text: 当前的人物设定文本
@@ -200,88 +216,16 @@ class OutlineExpander:
         Returns:
             识别到的人物数
         """
-        import re
-
         if not characters_text or characters_text.strip() == '':
             return 0
 
-        # 方法1：正则表达式匹配 - 优化识别逻辑
-        # 🔥 关键修复：排除标题性关键词，只匹配真实人物名
+        # 🔥 使用智能识别器
+        count, character_names = self.character_recognizer.count_characters(
+            text=characters_text,
+            use_ai_verification=True  # 启用AI验证
+        )
 
-        # 匹配【姓名】格式（最常见的人物档案格式）
-        bracket_names = re.findall(r'【姓名】[：:]\s*([\u4e00-\u9fa5]{2,4})', characters_text)
-
-        if bracket_names:
-            count = len(bracket_names)
-            print(f"✅ 正则识别到人物数: {count} ({', '.join(bracket_names[:5])}...)")
-            return count
-
-        # 备用方案：匹配其他格式
-        character_names = set()
-
-        # 排除的关键词列表（这些不是人物名）
-        exclude_keywords = [
-            '人物', '角色', '主角', '配角', '对手', '支持', '新增', '完整',
-            '列表', '档案', '体系', '关系', '分布', '阵营', '所有', '更新',
-            '姓名', '年龄', '性别', '外貌', '性格', '背景', '动机', '能力',
-            '弱点', '成长', '关键'
-        ]
-
-        # 匹配格式：
-        # 1. 主角、配角A（顿号分隔）
-        comma_names = re.findall(r'([一-龥]{2,4})、', characters_text)
-        for name in comma_names:
-            if name not in exclude_keywords and len(name) >= 2:
-                character_names.add(name)
-
-        # 2. 姓名：张三
-        colon_names = re.findall(r'(?:姓名|角色)[：:]s*([\u4e00-\u9fa5]{2,4})', characters_text)
-        for name in colon_names:
-            if name not in exclude_keywords:
-                character_names.add(name)
-
-        # 3. **姓名** 或 **张三**
-        bold_names = re.findall(r'\*\*([\u4e00-\u9fa5]{2,4})\*\*', characters_text)
-        for name in bold_names:
-            if name not in exclude_keywords and len(name) >= 2:
-                character_names.add(name)
-
-        if character_names:
-            count = len(character_names)
-            print(f"✅ 正则识别到人物数: {count} ({', '.join(list(character_names)[:5])}...)")
-            return count
-
-        # 方法2：如果正则没有匹配到，使用AI判断
-        print("⚠️  正则无法识别人物数，使用AI判断...")
-
-        ai_prompt = f"""请分析以下文本中有多少个具体的人物角色（有姓名的角色）。
-
-【人物文本】
-{characters_text[:1500]}
-
-请统计有明确姓名的角色数量。
-注意：不要统计"主角"、"配角"、"新增角色"等标题性词语。
-
-示例：
-- 如果文本中有主角、配角A、配角B三个人物，返回：3
-- 如果只是标题和分类，没有具体人物，返回：0
-
-只返回一个数字，不要其他内容。"""
-
-        try:
-            ai_result = self.character_designer.process(ai_prompt, {})
-            # 提取数字
-            import re
-            numbers = re.findall(r'\d+', ai_result)
-            if numbers:
-                character_count = int(numbers[0])
-                print(f"✅ AI识别到人物数: {character_count}")
-                return character_count
-        except Exception as e:
-            print(f"❌ AI识别失败: {e}")
-
-        print("⚠️  无法识别人物数，默认返回0")
-        return 0
+        return count
 
     def expand_plot_outline(self, current_outline: str, world_setting: str,
                           characters: str, target_chapters: int = 50) -> Dict[str, Any]:
@@ -726,23 +670,27 @@ Please design人物关系网络， including：
             worldview=world_setting,
             scenario="outline_expand",
             current_count=target_chapters,  # 使用目标章节数选择模型
-            focus_range=None  # 大纲扩展不需要聚焦特定范围
+            focus_range=None,  # 大纲扩展不需要聚焦特定范围
+            project_id=self.project_id,
         )
         
         # 🔥 使用智能选择的模型
         selected_model = context_result["selected_model"]
         optimized_context = context_result["context"]
+        memory_text = context_result.get("memory_text", "")
+        structured_memory = context_result.get("structured_memory", {})
         stats = context_result["stats"]
         
         print(f"\n📊 上下文优化结果:")
         print(f"   - 选择模型: {selected_model}")
         print(f"   - 原始总长: {len(current_outline) + len(characters) + len(world_setting):,}字符")
         print(f"   - 优化后: {len(optimized_context):,}字符 (压缩{(1-stats['compression_ratio'])*100:.1f}%)")
+        print(f"   - 结构化记忆: {len(memory_text):,}字符 / {len(structured_memory)}类")
         print(f"   - Token使用: {stats['total_tokens']:,} / {stats['target_tokens']:,} ({stats['total_tokens']/stats['target_tokens']*100:.1f}%)\n")
         
         # 🎆 更新LLM：使用智能选择的模型
         if selected_model != "qwen-long":  # 如果不是qwen-long，需要创建新的LLM
-            dynamic_llm = create_routed_llm(model=selected_model, temperature=0.7)
+            dynamic_llm = create_model_llm(model=selected_model, temperature=0.7)
             print(f"🔄 动态创建 LLM: {selected_model}\n")
         else:
             dynamic_llm = self.llm  # 使用默认的qwen-long
@@ -758,6 +706,11 @@ Please design人物关系网络， including：
         expansion_prompt = f"""基于以下优化后的上下文，进行整体性扩展到{target_chapters}章。
 
 {optimized_context}
+
+【结构化记忆约束】
+{memory_text or '（无可用结构化记忆）'}
+
+请优先遵循上述结构化记忆中的主线弧线、人物状态、关系边、待回收伏笔和世界规则硬约束。
 
 【网文结构设计原则】
 ⚠️ 网络小说不同于传统文学，需要特别注意：
@@ -1219,6 +1172,38 @@ Please analyze：
             else:
                 print("🆕 未识别到人物，从 0 个开始扩展\n")
 
+        # 🔥 新增：验证人物-情节匹配度
+        if current_character_count > 0 and main_characters and plot_outline:
+            print("🔍 开始验证人物-情节匹配度...")
+            validation = self.character_plot_validator.validate_character_plot_alignment(
+                characters=main_characters,
+                plot_outline=plot_outline,
+                world_setting=world_setting
+            )
+
+            print(f"📊 人物-情节匹配度: {validation['score']}/100")
+
+            # 如果匹配度过低，建议先优化
+            if validation['score'] < 60:
+                print("⚠️ 匹配度较低，建议先优化现有人物与情节的关联")
+                print(f"   冗余人物: {len(validation['redundant_characters'])}个")
+                print(f"   缺失人物: {len(validation['missing_characters'])}个")
+                print(f"   关系问题: {len(validation['relationship_issues'])}个")
+
+                # 返回优化建议
+                return {
+                    "should_optimize_first": True,
+                    "validation_score": validation['score'],
+                    "validation_details": validation,
+                    "current_character_count": current_character_count,
+                    "optimization_suggestions": validation['suggestions'],
+                    "message": "建议先优化现有人物与情节的关联，再进行扩展"
+                }
+            else:
+                print(f"✅ 匹配度良好，可以继续扩展")
+                if validation['missing_characters']:
+                    print(f"💡 建议优先补充: {', '.join(validation['missing_characters'][:3])}")
+
         print(f"\n{'='*70}")
         print(f"【渐进式人物扩展】从 {current_character_count} 个扩展到 {current_character_count + increment} 个")
         print(f"{'='*70}\n")
@@ -1232,12 +1217,15 @@ Please analyze：
             worldview=world_setting,
             scenario="character_expand",
             current_count=target_count,  # 使用目标人物数选择模型
-            focus_range=None  # 人物扩展不需要聚焦特定范围
+            focus_range=None,  # 人物扩展不需要聚焦特定范围
+            project_id=self.project_id,
         )
         
         # 🔥 使用智能选择的模型
         selected_model = context_result["selected_model"]
         optimized_context = context_result["context"]
+        memory_text = context_result.get("memory_text", "")
+        structured_memory = context_result.get("structured_memory", {})
         stats = context_result["stats"]
         
         # 打印优化结果日志
@@ -1245,11 +1233,12 @@ Please analyze：
         print(f"   - 选择模型: {selected_model}")
         print(f"   - 原始总长: {len(plot_outline) + len(main_characters) + len(world_setting):,}字符")
         print(f"   - 优化后: {len(optimized_context):,}字符 (压缩{(1-stats['compression_ratio'])*100:.1f}%)")
+        print(f"   - 结构化记忆: {len(memory_text):,}字符 / {len(structured_memory)}类")
         print(f"   - Token使用: {stats['total_tokens']:,} / {stats['target_tokens']:,}\n")
 
         # 🎆 更新LLM：使用智能选择的模型
         if selected_model != "qwen-long":
-            dynamic_llm = create_routed_llm(model=selected_model, temperature=0.8, max_tokens=4000)
+            dynamic_llm = create_model_llm(model=selected_model, temperature=0.8, max_tokens=4000)
         else:
             dynamic_llm = self.character_designer.llm
         
@@ -1267,6 +1256,11 @@ Please analyze：
             expansion_prompt = f"""基于以下优化后的上下文，扩展到{target_count}个角色。
 
 {optimized_context}
+
+【结构化记忆约束】
+{memory_text or '（无可用结构化记忆）'}
+
+请优先保持现有人物状态、关系边和待回收伏笔的一致性，新角色必须围绕这些约束补位，而不是破坏它们。
 
 【扩展要求】
 - 新增 {increment} 个角色（从第{current_character_count + 1}个开始）
@@ -1378,6 +1372,9 @@ Please直接按阵营分类输出，格式如下（每个人物必须包含完�
 
 【优化后的当前人物上下文】
 {optimized_context}
+
+【结构化记忆约束】
+{memory_text or '（无可用结构化记忆）'}
 
 【新增角色】
 {expansion_content}
@@ -1584,6 +1581,33 @@ Please analyze：
             else:
                 print("⚠️  无法解析AI结果，默认继续扩展")
 
+            # 🔥 新增：扩展后二次验证
+            post_validation_score = 0
+            post_validation_details = {}
+
+            if plot_outline:
+                print("🔍 开始扩展后验证...")
+                post_validation = self.character_plot_validator.validate_character_plot_alignment(
+                    characters=integrated_characters,
+                    plot_outline=plot_outline,
+                    world_setting=world_setting
+                )
+                post_validation_score = post_validation['score']
+                post_validation_details = post_validation
+
+                print(f"📊 扩展后匹配度: {post_validation_score}/100")
+
+                if post_validation_score >= 70:
+                    print("✅ 人物与情节匹配良好")
+                elif post_validation_score >= 60:
+                    print("⚠️ 匹配度一般，建议关注以下问题：")
+                    if post_validation['redundant_characters']:
+                        print(f"   - 冗余人物: {', '.join(post_validation['redundant_characters'][:3])}")
+                    if post_validation['missing_characters']:
+                        print(f"   - 缺失人物: {', '.join(post_validation['missing_characters'][:3])}")
+                else:
+                    print("❌ 匹配度较低，强烈建议优化")
+
             print(f"{'='*70}")
             print(f"【渐进式人物扩展】本轮完成！")
             print(f"{'='*70}\n")
@@ -1594,7 +1618,9 @@ Please analyze：
                 "role_distribution": distribution_dict,  # 🔥 现在生成角色分布
                 "current_character_count": target_count,
                 "should_continue": should_continue,
-                "continue_reason": continue_reason
+                "continue_reason": continue_reason,
+                "post_validation_score": post_validation_score,  # 🔥 新增：扩展后匹配度
+                "post_validation_details": post_validation_details  # 🔥 新增：详细验证结果
             }
         finally:
             # 🔄 恢复原始 LLM
@@ -2212,7 +2238,8 @@ Please输出完整的、重新整合后的网文大纲：
 def create_outline_expander(knowledge_base: Optional[NovelKnowledgeBase] = None,
                            memory_manager: Optional[NovelMemoryManager] = None,
                            genre: str = "",  # 🎯 任务6：添加题材参数
-                           planned_chapters_max: int = 0) -> OutlineExpander:  # 🎯 任务6.1
+                           planned_chapters_max: int = 0,
+                           project_id: Optional[int] = None) -> OutlineExpander:  # 🎯 任务6.1
     """创建大纲扩展器的工厂函数
 
     Args:
@@ -2224,4 +2251,8 @@ def create_outline_expander(knowledge_base: Optional[NovelKnowledgeBase] = None,
     Returns:
         配置好的OutlineExpander实例
     """
-    return OutlineExpander(knowledge_base, memory_manager, genre, planned_chapters_max)
+    expander = OutlineExpander(knowledge_base, memory_manager, genre, planned_chapters_max)
+    if project_id is not None:
+        expander.set_project_context(project_id)
+    return expander
+

@@ -1,7 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios'
 
 // 在开发环境中直接连接到后端，不使用Vite代理
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
 const DREAMWEAVER_SCHEMA_VERSION = '0.1.0'
 const DREAMWEAVER_LIBRARY_REGENERATE_TIMEOUT_MS = Math.max(
   120000,

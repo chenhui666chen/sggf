@@ -1,16 +1,14 @@
-"""
+﻿"""
 小说写作Agent - 整合知识库和记忆管理的智能写作助手
 """
 from typing import Dict, Any, List, Optional
-from langchain_community.chat_models import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from .config import Config
 from .knowledge_base import NovelKnowledgeBase
 from .memory_manager import NovelMemoryManager
 
 
-from .llm_singleton import create_deepseek_llm
+from core.langchain_bridge import create_task_llm
 
 
 class NovelWritingAgent:
@@ -20,7 +18,7 @@ class NovelWritingAgent:
         """初始化Agent"""
         Config.validate()
 
-        self.llm = create_deepseek_llm()
+        self.llm = create_task_llm()
         
         self.knowledge_base = knowledge_base or NovelKnowledgeBase()
         self.memory_manager = memory_manager or NovelMemoryManager()
@@ -154,3 +152,4 @@ class NovelWritingAgent:
                     content=content,
                     metadata=kwargs.get('metadata')
                 )
+

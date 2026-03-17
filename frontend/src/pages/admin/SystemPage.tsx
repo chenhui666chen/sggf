@@ -29,12 +29,6 @@ interface SystemHealth {
   timestamp: string
 }
 
-interface StorageInfo {
-  used: number
-  total: number
-  unit: string
-}
-
 export default function SystemPage() {
   const { user } = useSelector((state: RootState) => state.auth)
   const isSuperAdmin = (user as any)?.roles?.some((r: any) => r.code === 'super_admin')

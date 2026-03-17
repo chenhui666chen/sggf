@@ -3,7 +3,7 @@
 """
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, Text, ForeignKey, DateTime
+from sqlalchemy import String, Text, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -12,8 +12,12 @@ from app.db.base import Base
 class Project(Base):
     """项目表"""
     __tablename__ = "projects"
+    __table_args__ = (
+        UniqueConstraint("user_id", "display_no", name="uq_projects_user_display_no"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    display_no: Mapped[int] = mapped_column(nullable=False)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -134,4 +138,3 @@ class ChapterRevision(Base):
     
     def __repr__(self):
         return f"<ChapterRevision id={self.id} chapter_id={self.chapter_id}>"
-

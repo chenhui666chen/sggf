@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +16,7 @@ from app.models.dreamweaver import (
     DreamweaverProject,
     DreamweaverShot,
 )
+from app.utils.datetime_utils import ensure_utc_datetime, utc_now
 
 
 LIB_ROLE_PREFIX = "lib_"
@@ -74,17 +75,22 @@ def mark_stale_dreamweaver_runs_timeout(
     if timeout_minutes <= 0:
         return 0
 
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=int(timeout_minutes))
+    cutoff = utc_now() - timedelta(minutes=int(timeout_minutes))
     rows = (
         db.query(DreamweaverProject)
         .filter(
             DreamweaverProject.source_project_id == project_id,
             DreamweaverProject.user_id == user_id,
             DreamweaverProject.status == "running",
-            DreamweaverProject.updated_at < cutoff,
         )
         .all()
     )
+    rows = [
+        row
+        for row in rows
+        if (updated_at := ensure_utc_datetime(getattr(row, "updated_at", None))) and updated_at < cutoff
+    ]
+
     if not rows:
         return 0
 

@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-from adapters.model_adapters import GenerationResult, ModelAdapterFactory
+from adapters.adapter_helpers import SimpleGenerationResult as GenerationResult, generate_video
 from agents.audio_sync_manager import AudioSyncManager
 from agents.character_manager import CharacterManager
 from agents.sound_effect_manager import SoundEffectManager
@@ -920,25 +920,6 @@ def ensure_storyboard_video_prompts(payload: Dict[str, Any], *, force: bool = Fa
     return updated
 
 
-def _clone_adapter_instance(adapter: Any) -> Optional[Any]:
-    cfg = getattr(adapter, "config", None)
-    if cfg is None:
-        return None
-    try:
-        return adapter.__class__(cfg)
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _close_adapter_session(adapter: Any) -> None:
-    session = getattr(adapter, "session", None)
-    try:
-        if session is not None:
-            session.close()
-    except Exception:  # noqa: BLE001
-        pass
-
-
 def _write_video_from_generation_result(result: GenerationResult, out_path: Path) -> None:
     if not result.success:
         raise RuntimeError(result.error or "WAN video generate failed")
@@ -1169,9 +1150,7 @@ def _run_wan_i2v(
     allowed_shot_ids: Optional[set[str]] = None,
     character_manager: Optional[CharacterManager] = None,
 ) -> None:
-    factory = ModelAdapterFactory()
     adapter_name = str(video_cfg.get("adapter") or "wan_i2v").strip() or "wan_i2v"
-    i2v = factory.get_adapter(adapter_name)
 
     ffmpeg = os.getenv("FFMPEG_PATH", "ffmpeg")
     fps = WAN_I2V_OUTPUT_FPS
@@ -1228,12 +1207,6 @@ def _run_wan_i2v(
 
     video_parallelism = _parse_int(video_cfg.get("parallelism") or os.getenv("DREAMWEAVER_VIDEO_PARALLELISM"), 1)
     video_parallelism = max(1, min(int(video_parallelism), len(jobs) if jobs else 1))
-    if video_parallelism > 1:
-        probe = _clone_adapter_instance(i2v)
-        if probe is None:
-            video_parallelism = 1
-        else:
-            _close_adapter_session(probe)
 
     def _render_one(
         item: dict,
@@ -1311,51 +1284,44 @@ def _run_wan_i2v(
             )
 
         try:
-            local_i2v = i2v
-            if video_parallelism > 1:
-                cloned = _clone_adapter_instance(i2v)
-                if cloned is None:
-                    raise RuntimeError("adapter clone failed for parallel i2v generation")
-                local_i2v = cloned
-
             result = None
             chosen_input_meta: Optional[Dict[str, Any]] = None
-            try:
-                last_error: Optional[str] = None
-                for idx, (candidate_path, candidate_meta) in enumerate(candidates):
-                    meta["i2v_input"] = candidate_meta
-                    try:
-                        result = local_i2v.generate(
-                            image_path=str(candidate_path),
-                            prompt=motion_prompt,
-                            duration=duration_s,
-                            fps=fps,
-                            motion_bucket_id=motion_bucket_id,
-                            seed=seed,
-                            character_references=character_references if character_references else None,
-                        )
-                        _write_video_from_generation_result(result, out)
-                        chosen_input_meta = candidate_meta
-                        break
-                    except Exception as exc:  # noqa: BLE001
-                        last_error = str(exc)
-                        attempts.append(
-                            {
-                                "attempt": idx + 1,
-                                "image_path": str(candidate_path),
-                                "input_meta": candidate_meta,
-                                "error": last_error,
-                            }
-                        )
-                        result = None
-                        chosen_input_meta = None
-                        continue
+            last_error: Optional[str] = None
+            for idx, (candidate_path, candidate_meta) in enumerate(candidates):
+                meta["i2v_input"] = candidate_meta
+                try:
+                    result = generate_video(
+                        prompt=motion_prompt,
+                        duration=float(duration_s),
+                        width=int(width),
+                        height=int(height),
+                        seed=int(seed),
+                        image_path=str(candidate_path),
+                        model_id=adapter_name,
+                        use_fallback=False,
+                        fps=int(fps),
+                        motion_bucket_id=int(motion_bucket_id),
+                        character_references=character_references if character_references else None,
+                    )
+                    _write_video_from_generation_result(result, out)
+                    chosen_input_meta = candidate_meta
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    last_error = str(exc)
+                    attempts.append(
+                        {
+                            "attempt": idx + 1,
+                            "image_path": str(candidate_path),
+                            "input_meta": candidate_meta,
+                            "error": last_error,
+                        }
+                    )
+                    result = None
+                    chosen_input_meta = None
+                    continue
 
-                if result is None or chosen_input_meta is None:
-                    raise RuntimeError(last_error or "wan_i2v generate failed")
-            finally:
-                if local_i2v is not i2v:
-                    _close_adapter_session(local_i2v)
+            if result is None or chosen_input_meta is None:
+                raise RuntimeError(last_error or "wan_i2v generate failed")
 
             if isinstance(result.data, dict) and isinstance(result.data.get("video_url"), str):
                 meta["remote_url"] = result.data["video_url"]
@@ -1635,9 +1601,7 @@ def _run_wan_t2v(
     regenerate_shot_ids: Optional[set[str]] = None,
     allowed_shot_ids: Optional[set[str]] = None,
 ) -> None:
-    factory = ModelAdapterFactory()
     adapter_name = str(video_cfg.get("adapter") or "wan_t2v").strip() or "wan_t2v"
-    t2v = factory.get_adapter(adapter_name)
 
     regen_set = regenerate_shot_ids or set()
     existing_clips_by_shot = _index_video_clips_by_shot(ctx.payload.get("video_clips"))
@@ -1664,12 +1628,6 @@ def _run_wan_t2v(
 
     video_parallelism = _parse_int(video_cfg.get("parallelism") or os.getenv("DREAMWEAVER_VIDEO_PARALLELISM"), 1)
     video_parallelism = max(1, min(int(video_parallelism), len(jobs) if jobs else 1))
-    if video_parallelism > 1:
-        probe = _clone_adapter_instance(t2v)
-        if probe is None:
-            video_parallelism = 1
-        else:
-            _close_adapter_session(probe)
 
     def _render_one(item: dict) -> dict:
         shot_id = str(item.get("shot_id") or "").strip()
@@ -1691,33 +1649,24 @@ def _run_wan_t2v(
         seed = _stable_seed(str(getattr(ctx, "run_id", "")), shot_id, "t2v_clip")
         meta: Dict[str, Any] = {"engine": "wan_t2v", "adapter": adapter_name, "fps": fps, "width": width, "height": height, "seed": seed}
 
-        local_t2v = t2v
-        if video_parallelism > 1:
-            cloned = _clone_adapter_instance(t2v)
-            if cloned is None:
-                raise RuntimeError("adapter clone failed for parallel t2v generation")
-            local_t2v = cloned
+        kwargs: Dict[str, Any] = {
+            "prompt": prompt,
+            "width": int(width),
+            "height": int(height),
+            "duration": float(duration_s),
+            "seed": int(seed),
+            "model_id": adapter_name,
+            "use_fallback": False,
+            "fps": int(fps),
+        }
+        steps = video_cfg.get("num_inference_steps")
+        if steps is not None:
+            kwargs["num_inference_steps"] = int(steps)
+        guidance = video_cfg.get("guidance_scale")
+        if guidance is not None:
+            kwargs["guidance_scale"] = float(guidance)
 
-        try:
-            kwargs: Dict[str, Any] = {
-                "prompt": prompt,
-                "width": int(width),
-                "height": int(height),
-                "duration": float(duration_s),
-                "fps": int(fps),
-                "seed": int(seed),
-            }
-            steps = video_cfg.get("num_inference_steps")
-            if steps is not None:
-                kwargs["num_inference_steps"] = int(steps)
-            guidance = video_cfg.get("guidance_scale")
-            if guidance is not None:
-                kwargs["guidance_scale"] = float(guidance)
-
-            result = local_t2v.generate(**kwargs)
-        finally:
-            if local_t2v is not t2v:
-                _close_adapter_session(local_t2v)
+        result = generate_video(**kwargs)
 
         _write_video_from_generation_result(result, out)
         if isinstance(result.data, dict) and isinstance(result.data.get("video_url"), str):

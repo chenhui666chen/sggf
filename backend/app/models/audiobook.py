@@ -3,7 +3,7 @@
 """
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, JSON, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from sqlalchemy.sql import func
 
 from app.db.base import Base
 
@@ -11,9 +11,9 @@ from app.db.base import Base
 class AudiobookProject(Base):
     """有声书项目表"""
     __tablename__ = "audiobook_projects"
-    
+
     id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     
     # 状态
     status = Column(String(20), default="pending")  # pending/processing/completed/failed
@@ -33,10 +33,10 @@ class AudiobookProject(Base):
     total_cost = Column(Float, default=0.0)  # 元
     
     # 时间
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    completed_at = Column(DateTime, nullable=True)
-    deleted_at = Column(DateTime, nullable=True, index=True)  # 软删除时间戳
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)  # 软删除时间戳
     
     # 关系
     project = relationship("Project", back_populates="audiobook_projects")
@@ -52,10 +52,10 @@ class AudiobookProject(Base):
 class ChapterAudio(Base):
     """章节音频表"""
     __tablename__ = "chapter_audios"
-    
+
     id = Column(Integer, primary_key=True, index=True)
-    audiobook_project_id = Column(Integer, ForeignKey("audiobook_projects.id"), nullable=False)
-    chapter_id = Column(Integer, ForeignKey("chapters.id"), nullable=False)
+    audiobook_project_id = Column(Integer, ForeignKey("audiobook_projects.id", ondelete="CASCADE"), nullable=False)
+    chapter_id = Column(Integer, ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False)
     
     # 新增：任务状态追踪
     task_id = Column(String(100), nullable=True, index=True)  # 任务ID，用于查询实时状态
@@ -83,9 +83,9 @@ class ChapterAudio(Base):
     final_audio_review_json = Column(Text, nullable=True)  # 最终音频评审结果（JSON字符串）
     
     # 时间
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    deleted_at = Column(DateTime, nullable=True, index=True)  # 软删除时间戳
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    deleted_at = Column(DateTime(timezone=True), nullable=True, index=True)  # 软删除时间戳
     
     # 关系
     audiobook_project = relationship("AudiobookProject", back_populates="chapter_audios")

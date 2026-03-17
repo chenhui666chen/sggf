@@ -55,6 +55,34 @@ class ErrorCode(Enum):
     INSUFFICIENT_QUOTA = "insufficient_quota"
     MODEL_UNAVAILABLE = "model_unavailable"
     NETWORK_ERROR = "network_error"
+    AUTH_ERROR = "auth_error"
+    INVALID_RESPONSE = "invalid_response"
+    NO_OUTPUT = "no_output"
+    ADAPTER_MISSING = "adapter_missing"
+    TASK_CANCELLED = "task_cancelled"
+    DEGRADATION_EXHAUSTED = "degradation_exhausted"
+    
+    @property
+    def is_retryable(self) -> bool:
+        """Check if error is retryable."""
+        retryable_codes = {
+            ErrorCode.RATE_LIMIT,
+            ErrorCode.TIMEOUT,
+            ErrorCode.MODEL_UNAVAILABLE,
+            ErrorCode.NETWORK_ERROR,
+        }
+        return self in retryable_codes
+    
+    @property
+    def should_fallback(self) -> bool:
+        """Check if should fallback to another model."""
+        fallback_codes = {
+            ErrorCode.RATE_LIMIT,
+            ErrorCode.MODEL_UNAVAILABLE,
+            ErrorCode.CONTENT_SAFETY,
+            ErrorCode.INSUFFICIENT_QUOTA,
+        }
+        return self in fallback_codes
 
 
 class ContentType(Enum):

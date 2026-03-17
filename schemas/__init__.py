@@ -27,6 +27,18 @@ from .model_spec import (
     BestPractice,
     FallbackStrategy,
 )
+from .unified_model_spec import (
+    ModelType,
+    DispatchStrategy,
+    LLMCapability,
+    LLMConstraints,
+    APIConfig,
+    RoutingConfig,
+    PerformanceProfile,
+    UnifiedModelSpec,
+    LLMTaskSpec,
+    LLMResult,
+)
 
 __all__ = [
     "Modality",
@@ -47,4 +59,14 @@ __all__ = [
     "CapabilityFeature",
     "BestPractice",
     "FallbackStrategy",
+    "ModelType",
+    "DispatchStrategy",
+    "LLMCapability",
+    "LLMConstraints",
+    "APIConfig",
+    "RoutingConfig",
+    "PerformanceProfile",
+    "UnifiedModelSpec",
+    "LLMTaskSpec",
+    "LLMResult",
 ]

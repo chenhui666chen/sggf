@@ -1,4 +1,4 @@
-"""
+﻿"""
 统一实体提取服务
 一次性调用AI提取：实体 + 地点层级 + 实体关系 + 人物关系
 目标：将多次AI调用合并为1次，减少耗时
@@ -7,7 +7,7 @@ import re
 import json
 from typing import List, Dict, Any, Optional
 import os
-from .agents.llm_singleton import create_routed_llm
+from core.langchain_bridge import create_model_llm
 
 
 class UnifiedExtractionService:
@@ -65,7 +65,7 @@ class UnifiedExtractionService:
             or os.getenv("MODEL_NAME")
             or "deepseek-reasoner"
         )
-        llm = create_routed_llm(model=model, temperature=0.7)
+        llm = create_model_llm(model=model, temperature=0.7)
         
         # 构建统一提示词
         prompt = f"""你是一个小说设定提取专家。请从以下章节中**一次性**提取所有重要信息，包括：
@@ -343,3 +343,4 @@ class UnifiedExtractionService:
             validated.append(rel)
         
         return validated
+

@@ -5,10 +5,10 @@ Phase 2: 自动提取与更新服务
 """
 import json
 from typing import List, Dict, Optional
-from datetime import datetime
 from sqlalchemy.orm import Session
 from app.models.character import Character
 from app.models.setting import SettingItem, SettingCollection
+from app.utils.datetime_utils import utc_now
 
 
 class AutoTrackingService:
@@ -163,7 +163,7 @@ class AutoTrackingService:
                             referenced_chapters.append(chapter_id)
                             item.referenced_chapters = json.dumps(referenced_chapters)
                             item.usage_count = len(referenced_chapters)
-                            item.last_referenced_at = datetime.now()
+                            item.last_referenced_at = utc_now()
                             added_count += 1
                             print(f"  ✅ {name} ({collection.category}) 初始追踪: 第{chapter_id}章")
                     continue
@@ -186,7 +186,7 @@ class AutoTrackingService:
                         referenced_chapters.append(chapter_id)
                         item.referenced_chapters = json.dumps(referenced_chapters)
                         item.usage_count = len(referenced_chapters)
-                        item.last_referenced_at = datetime.now()
+                        item.last_referenced_at = utc_now()
                         added_count += 1
                         print(f"  ✅ {name} ({collection.category}) 新增引用: 第{chapter_id}章")
                 

@@ -67,7 +67,7 @@ async def get_stage_durations(
                     FROM (
                         SELECT
                             task_type,
-                            CAST((julianday(completed_at) - julianday(created_at)) * 86400 AS REAL) as duration_seconds,
+                            EXTRACT(EPOCH FROM (completed_at - created_at)) as duration_seconds,
                             ROW_NUMBER() OVER (PARTITION BY task_type ORDER BY completed_at DESC) as rn
                         FROM generation_history
                         WHERE
@@ -90,7 +90,7 @@ async def get_stage_durations(
                     FROM (
                         SELECT
                             gh.task_type,
-                            CAST((julianday(gh.completed_at) - julianday(gh.created_at)) * 86400 AS REAL) as duration_seconds,
+                            EXTRACT(EPOCH FROM (gh.completed_at - gh.created_at)) as duration_seconds,
                             ROW_NUMBER() OVER (PARTITION BY gh.task_type ORDER BY gh.completed_at DESC) as rn
                         FROM generation_history gh
                         INNER JOIN projects p ON gh.project_id = p.id
@@ -113,7 +113,7 @@ async def get_stage_durations(
                     SELECT
                         task_type,
                         AVG(
-                            CAST((julianday(completed_at) - julianday(created_at)) * 86400 AS REAL)
+                            EXTRACT(EPOCH FROM (completed_at - created_at))
                         ) as avg_duration_seconds
                     FROM generation_history
                     WHERE
@@ -131,7 +131,7 @@ async def get_stage_durations(
                     SELECT
                         gh.task_type,
                         AVG(
-                            CAST((julianday(gh.completed_at) - julianday(gh.created_at)) * 86400 AS REAL)
+                            EXTRACT(EPOCH FROM (gh.completed_at - gh.created_at))
                         ) as avg_duration_seconds
                     FROM generation_history gh
                     INNER JOIN projects p ON gh.project_id = p.id
@@ -217,14 +217,14 @@ async def get_stage_durations_detailed(
         # 构建查询
         if project_id:
             query = text("""
-                SELECT 
+                SELECT
                     task_type,
-                    AVG(CAST((julianday(completed_at) - julianday(created_at)) * 86400 AS REAL)) as avg_duration,
-                    MIN(CAST((julianday(completed_at) - julianday(created_at)) * 86400 AS REAL)) as min_duration,
-                    MAX(CAST((julianday(completed_at) - julianday(created_at)) * 86400 AS REAL)) as max_duration,
+                    AVG(EXTRACT(EPOCH FROM (completed_at - created_at))) as avg_duration,
+                    MIN(EXTRACT(EPOCH FROM (completed_at - created_at))) as min_duration,
+                    MAX(EXTRACT(EPOCH FROM (completed_at - created_at))) as max_duration,
                     COUNT(*) as count
                 FROM generation_history
-                WHERE 
+                WHERE
                     project_id = :project_id
                     AND status = 'completed'
                     AND completed_at IS NOT NULL
@@ -235,15 +235,15 @@ async def get_stage_durations_detailed(
             result = db.execute(query, {"project_id": project_id}).fetchall()
         else:
             query = text("""
-                SELECT 
+                SELECT
                     gh.task_type,
-                    AVG(CAST((julianday(gh.completed_at) - julianday(gh.created_at)) * 86400 AS REAL)) as avg_duration,
-                    MIN(CAST((julianday(gh.completed_at) - julianday(gh.created_at)) * 86400 AS REAL)) as min_duration,
-                    MAX(CAST((julianday(gh.completed_at) - julianday(gh.created_at)) * 86400 AS REAL)) as max_duration,
+                    AVG(EXTRACT(EPOCH FROM (gh.completed_at - gh.created_at))) as avg_duration,
+                    MIN(EXTRACT(EPOCH FROM (gh.completed_at - gh.created_at))) as min_duration,
+                    MAX(EXTRACT(EPOCH FROM (gh.completed_at - gh.created_at))) as max_duration,
                     COUNT(*) as count
                 FROM generation_history gh
                 INNER JOIN projects p ON gh.project_id = p.id
-                WHERE 
+                WHERE
                     p.user_id = :user_id
                     AND gh.status = 'completed'
                     AND gh.completed_at IS NOT NULL

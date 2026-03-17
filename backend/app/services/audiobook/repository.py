@@ -6,7 +6,6 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Iterable, List, Optional
 
 from sqlalchemy.orm import Session
@@ -16,6 +15,7 @@ from app.models.audiobook_delete_audit import AudiobookDeleteAudit
 from app.models.audiobook_task import AudiobookTask
 from app.models.character import Character
 from app.models.project import Chapter, Project
+from app.utils.datetime_utils import utc_now
 
 
 class ProjectRepository:
@@ -217,11 +217,11 @@ class AudiobookProjectRepository:
         total_size = sum(audio.file_size or 0 for audio in chapter_audios)
         
         # 软删除有声书项目
-        audiobook_project.deleted_at = datetime.utcnow()
+        audiobook_project.deleted_at = utc_now()
         
         # 软删除关联的章节音频
         for audio in chapter_audios:
-            audio.deleted_at = datetime.utcnow()
+            audio.deleted_at = utc_now()
         
         # 创建审计日志
         audit_log = AudiobookDeleteAudit(
@@ -235,7 +235,7 @@ class AudiobookProjectRepository:
             total_size=total_size,
             affected_chapters=len(chapter_audios),
             affected_tasks=len(tasks),
-            deleted_at=datetime.utcnow(),
+            deleted_at=utc_now(),
         )
         
         db.add(audit_log)
@@ -286,7 +286,7 @@ class AudiobookProjectRepository:
         ).order_by(AudiobookDeleteAudit.deleted_at.desc()).first()
         
         if audit_log:
-            audit_log.restored_at = datetime.utcnow()
+            audit_log.restored_at = utc_now()
             audit_log.restored_by = user_id
         
         db.commit()
@@ -423,7 +423,7 @@ class ChapterAudioRepository:
         total_size = chapter_audio.file_size or 0
         
         # 软删除章节音频
-        chapter_audio.deleted_at = datetime.utcnow()
+        chapter_audio.deleted_at = utc_now()
         
         # 创建审计日志
         audit_log = AudiobookDeleteAudit(
@@ -437,7 +437,7 @@ class ChapterAudioRepository:
             total_size=total_size,
             affected_chapters=1,
             affected_tasks=len(tasks),
-            deleted_at=datetime.utcnow(),
+            deleted_at=utc_now(),
         )
         
         db.add(audit_log)
@@ -482,7 +482,7 @@ class ChapterAudioRepository:
         ).order_by(AudiobookDeleteAudit.deleted_at.desc()).first()
         
         if audit_log:
-            audit_log.restored_at = datetime.utcnow()
+            audit_log.restored_at = utc_now()
             audit_log.restored_by = user_id
         
         db.commit()

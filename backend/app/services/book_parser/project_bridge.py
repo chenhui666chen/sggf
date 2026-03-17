@@ -6,13 +6,13 @@
 import json
 import logging
 from typing import Dict, Any, List, Optional
-from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.models.book_parser import BookSource, BookChapter, BookAnalysis
 from app.models.project import Project, Chapter
 from app.models.setting import SettingCollection, SettingItem
 from app.models.character import Character
+from app.utils.datetime_utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -522,14 +522,20 @@ class ProjectBridge:
         plot_outline_text = self._build_plot_outline_text(analysis_map, book.id)
         
         # 插入 project_settings 记录
+        now_iso = utc_now().isoformat()
         insert_sql = text("""
-            INSERT INTO project_settings (project_id, concept, world_setting, characters, plot_outline, created_at)
-            VALUES (:project_id, :concept, :world_setting, :characters, :plot_outline, datetime('now'))
+            INSERT INTO project_settings (
+                project_id, concept, world_setting, characters, plot_outline, created_at, updated_at
+            )
+            VALUES (
+                :project_id, :concept, :world_setting, :characters, :plot_outline, :created_at, :updated_at
+            )
             ON CONFLICT(project_id) DO UPDATE SET
                 concept = :concept,
                 world_setting = :world_setting,
                 characters = :characters,
-                plot_outline = :plot_outline
+                plot_outline = :plot_outline,
+                updated_at = :updated_at
         """)
         
         self.db.execute(insert_sql, {
@@ -538,6 +544,8 @@ class ProjectBridge:
             'world_setting': world_setting_text,
             'characters': characters_text,
             'plot_outline': plot_outline_text,
+            'created_at': now_iso,
+            'updated_at': now_iso,
         })
         
         logger.info(f"  → 已初始化工作流阶段内容 (project_settings)")

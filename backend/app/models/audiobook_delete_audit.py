@@ -3,7 +3,7 @@
 """
 from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, ForeignKey
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from sqlalchemy.sql import func
 
 from app.db.base import Base
 
@@ -35,10 +35,10 @@ class AudiobookDeleteAudit(Base):
     affected_tasks = Column(Integer, default=0)  # 影响的任务数
     
     # 时间
-    deleted_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    deleted_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     # 恢复信息
-    restored_at = Column(DateTime, nullable=True)  # 恢复时间
+    restored_at = Column(DateTime(timezone=True), nullable=True)  # 恢复时间
     restored_by = Column(Integer, ForeignKey("users.id"), nullable=True)  # 恢复操作者
     
     # 关系

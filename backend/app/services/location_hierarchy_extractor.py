@@ -1,4 +1,4 @@
-"""
+﻿"""
 地点层级提取服务
 从章节内容中智能提取地点的层级关系并自动构建地图树
 """
@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.models.setting import SettingCollection, SettingItem
-from app.services.agents.llm_singleton import get_model_for_task
+from core.langchain_bridge import get_task_llm
 import os
 
 
@@ -41,7 +41,7 @@ class LocationHierarchyExtractor:
         ]
         """
         # 🛡️ 使用单例管理器获取LLM实例（已禁用代理）
-        llm = get_model_for_task("entity_extract")
+        llm = get_task_llm("entity_extract")
         
         prompt = f"""你是一个小说地点提取专家。请从以下章节中提取所有地点，并识别它们的层级关系。
 
@@ -302,3 +302,4 @@ class LocationHierarchyExtractor:
             "skipped": skipped,
             "details": details,
         }
+

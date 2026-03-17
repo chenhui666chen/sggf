@@ -13,6 +13,7 @@ import os
 from typing import Any, Dict, Optional, Type
 
 from adapters.base import BaseAdapter, AdapterConfig, GenerationResult as NewGenerationResult
+from adapters.legacy_runtime_wrappers import create_runtime_wrapper
 from adapters.registry import registry
 from schemas.task_spec import TaskSpecBuilder
 
@@ -150,40 +151,12 @@ class ModelAdapterFactory:
         try:
             from adapters.model_adapters import (
                 JianyingAPIAdapter,
-                Qwen3TTSAdapter,
-                Qwen3VLPlusAdapter,
-                QwenImageEditMaxAdapter,
-                QwenImageEditPlusAdapter,
-                QwenMultiPersonFusionAdapter,
-                Wan26I2VAdapter,
-                Wan26R2VAdapter,
-                Wan26T2IAdapter,
-                Wan26T2VAdapter,
-                WanImageEditAdapter,
             )
         except Exception:
             # Keep bridge import-safe in restricted environments.
             return
 
         legacy_map: Dict[str, Type] = {
-            "wan_t2i": Wan26T2IAdapter,
-            "wan26_t2i": Wan26T2IAdapter,
-            "wan-t2i": Wan26T2IAdapter,
-            "wan_i2v": Wan26I2VAdapter,
-            "wan26_i2v": Wan26I2VAdapter,
-            "wan-i2v": Wan26I2VAdapter,
-            "wan_t2v": Wan26T2VAdapter,
-            "wan26_t2v": Wan26T2VAdapter,
-            "wan-t2v": Wan26T2VAdapter,
-            "wan_r2v": Wan26R2VAdapter,
-            "wan26_r2v": Wan26R2VAdapter,
-            "wan-r2v": Wan26R2VAdapter,
-            "wan_image_edit": WanImageEditAdapter,
-            "qwen_image_edit_plus": QwenImageEditPlusAdapter,
-            "qwen_image_edit_max": QwenImageEditMaxAdapter,
-            "qwen_multiperson_fusion": QwenMultiPersonFusionAdapter,
-            "qwen3_vl_plus": Qwen3VLPlusAdapter,
-            "qwen3_tts": Qwen3TTSAdapter,
             "jianying": JianyingAPIAdapter,
         }
         for key, adapter_cls in legacy_map.items():
@@ -207,6 +180,22 @@ class ModelAdapterFactory:
         
         if cache_key in cls._instances:
             return cls._instances[cache_key]
+
+        from adapters.model_adapters import ModelConfig
+
+        runtime_wrapper = create_runtime_wrapper(
+            str(name or "").strip().lower(),
+            ModelConfig(
+                api_key=api_key or "",
+                base_url=base_url or "",
+                model_name=model_name or name,
+                timeout=timeout,
+                max_retries=max_retries,
+            ),
+        )
+        if runtime_wrapper is not None:
+            cls._instances[cache_key] = runtime_wrapper
+            return runtime_wrapper
         
         if registry.get_spec(name):
             config = AdapterConfig(
@@ -223,8 +212,6 @@ class ModelAdapterFactory:
                 return wrapper
         
         if name in cls._adapters:
-            from adapters.model_adapters import ModelConfig
-            
             old_config = ModelConfig(
                 api_key=api_key or "",
                 base_url=base_url or "",

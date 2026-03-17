@@ -1,4 +1,4 @@
-"""
+﻿"""
 细纲提取器 - 从已写章节内容反向提取结构化细纲
 
 用于大纲扩展场景：
@@ -7,9 +7,8 @@
 - 避免AI生成与已写内容矛盾的大纲
 """
 
-from typing import Dict, Any, Optional, List
-from langchain_openai import ChatOpenAI
-from .llm_singleton import create_routed_llm
+from typing import Any, Dict, List, Optional
+from core.langchain_bridge import create_model_llm
 import json
 import logging
 
@@ -19,7 +18,7 @@ logger = logging.getLogger(__name__)
 class OutlineExtractor:
     """细纲提取器：从章节内容反向提取结构化细纲"""
     
-    def __init__(self, llm: Optional[ChatOpenAI] = None):
+    def __init__(self, llm: Optional[Any] = None):
         """
         初始化细纲提取器
         
@@ -29,7 +28,7 @@ class OutlineExtractor:
         if llm is None:
             from app.core.config import settings
             model = getattr(settings, "DEEPSEEK_MODEL", None) or getattr(settings, "MODEL_NAME", "qwen3-max")
-            self.llm = create_routed_llm(model=model, temperature=0.3)
+            self.llm = create_model_llm(model=model, temperature=0.3)
         else:
             self.llm = llm
     
@@ -352,7 +351,7 @@ class OutlineExtractor:
         return text
 
 
-def create_outline_extractor(llm: Optional[ChatOpenAI] = None) -> OutlineExtractor:
+def create_outline_extractor(llm: Optional[Any] = None) -> OutlineExtractor:
     """
     创建细纲提取器实例的工厂函数
     
@@ -363,3 +362,4 @@ def create_outline_extractor(llm: Optional[ChatOpenAI] = None) -> OutlineExtract
         OutlineExtractor实例
     """
     return OutlineExtractor(llm=llm)
+

@@ -1,7 +1,6 @@
 """
 Audiobook task metadata stored for Celery job tracking.
 """
-from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
@@ -15,6 +14,7 @@ from sqlalchemy import (
     JSON,
 )
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
 from app.db.base import Base
 
@@ -28,9 +28,9 @@ class AudiobookTask(Base):
     celery_task_id = Column(String(128), unique=True, index=True, nullable=True)
 
     audiobook_project_id = Column(
-        Integer, ForeignKey("audiobook_projects.id"), nullable=False, index=True
+        Integer, ForeignKey("audiobook_projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    chapter_id = Column(Integer, ForeignKey("chapters.id"), nullable=True, index=True)
+    chapter_id = Column(Integer, ForeignKey("chapters.id", ondelete="CASCADE"), nullable=True, index=True)
 
     task_type = Column(String(32), nullable=False)  # full | script_only | audio_from_scripts
     status = Column(String(20), default="pending", nullable=False)
@@ -42,12 +42,12 @@ class AudiobookTask(Base):
     detail_json = Column(JSON, nullable=True)
     error_message = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
-    started_at = Column(DateTime, nullable=True)
-    finished_at = Column(DateTime, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
 
     audiobook_project = relationship(
         "AudiobookProject", back_populates="tasks", lazy="joined"

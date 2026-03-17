@@ -20,6 +20,11 @@ from sqlalchemy.orm.attributes import flag_modified
 from pydantic import BaseModel, Field
 import uuid
 
+from adapters.adapter_helpers import (
+    edit_image as unified_edit_image,
+    generate_image as unified_generate_image,
+    model_supports_capability,
+)
 from app.core.security import get_current_user
 from app.db.base import get_db
 from app.models.character import Character
@@ -33,6 +38,7 @@ from app.models.dreamweaver import (
     DreamweaverShot as DreamweaverShotModel,
 )
 from app.schemas.dreamweaver_contract import DREAMWEAVER_SCHEMA_VERSION
+from app.utils.datetime_utils import utc_now
 from app.services.dreamweaver.library import (
     approve_latest_library_assets,
     build_library_prompt,
@@ -1301,7 +1307,7 @@ def run_pipeline_async(
                 },
                 ensure_ascii=False,
             ),
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "created_at": utc_now().isoformat(),
         },
     )
     db.add(
@@ -2051,8 +2057,6 @@ def regenerate_asset_library(
 
     prompt = _apply_safety_guardrails(prompt)
 
-    from adapters.model_adapters import ModelAdapterFactory
-
     asset_uri = str(getattr(asset_row, "uri", "") or "").strip()
     resolved: Optional[Path] = None
     if asset_uri and "://" not in asset_uri:
@@ -2181,9 +2185,6 @@ def regenerate_asset_library(
     base_width = int(edit_base_meta.get("width") or 0) if edit_base_meta.get("width") is not None else 0
     base_height = int(edit_base_meta.get("height") or 0) if edit_base_meta.get("height") is not None else 0
 
-    factory = ModelAdapterFactory()
-    t2i = factory.get_adapter("wan_t2i")
-
     image_edit_adapter_name = resolve_image_edit_adapter_name(
         image_cfg,
         purpose="library_character_view",
@@ -2298,7 +2299,6 @@ def regenerate_asset_library(
 
     if want_image_edit:
         try:
-            image_edit = factory.get_adapter(image_edit_adapter_name)
             try:
                 strength = float(image_cfg.get("image_edit_strength") or _env_float("DREAMWEAVER_IMAGE_EDIT_STRENGTH", 0.65))
             except Exception:  # noqa: BLE001
@@ -2321,17 +2321,21 @@ def regenerate_asset_library(
                 force_view_edit
                 and (view_key != "back" or view_chain_back_multi_ref)
                 and edit_multi_ref_enabled
-                and bool(getattr(image_edit, "supports_multi_image", False))
+                and model_supports_capability(image_edit_adapter_name, "multi_image")
                 and edit_reference_paths
             ):
                 max_refs = max(1, int(edit_ref_max_images))
-                generate_kwargs["image_paths"] = [str(p) for p in edit_reference_paths[:max_refs]]
+                generate_kwargs["reference_images"] = [str(p) for p in edit_reference_paths[:max_refs]]
                 decision = {
                     **decision,
                     "multi_ref_enabled": True,
-                    "multi_ref_count": len(generate_kwargs["image_paths"]),
+                    "multi_ref_count": len(generate_kwargs["reference_images"]),
                 }
-            result = image_edit.generate(**generate_kwargs)
+            result = unified_edit_image(
+                model_id=image_edit_adapter_name,
+                use_fallback=False,
+                **generate_kwargs,
+            )
             if not getattr(result, "success", False):
                 raise RuntimeError(getattr(result, "error", None) or "image edit failed")
             via = "image_edit"
@@ -2349,9 +2353,23 @@ def regenerate_asset_library(
                 ) from exc
             decision = {**decision, "fallback_error": str(exc), "fallback_to": "t2i"}
             via = "image_edit_fallback"
-            result = t2i.generate(prompt=prompt, negative_prompt=negative_prompt, width=width, height=height)
+            result = unified_generate_image(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                width=width,
+                height=height,
+                model_id="wanx-v1",
+                use_fallback=False,
+            )
     else:
-        result = t2i.generate(prompt=prompt, negative_prompt=negative_prompt, width=width, height=height)
+        result = unified_generate_image(
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            width=width,
+            height=height,
+            model_id="wanx-v1",
+            use_fallback=False,
+        )
 
     try:
         _write_image_from_generation_result(result, resolved)
@@ -3055,7 +3073,7 @@ def resume_run_async(
                 },
                 ensure_ascii=False,
             ),
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "created_at": utc_now().isoformat(),
         },
     )
     db.commit()
@@ -3247,7 +3265,7 @@ def confirm_video_job_async(
                 },
                 ensure_ascii=False,
             ),
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "created_at": utc_now().isoformat(),
         },
     )
     db.commit()
@@ -3639,7 +3657,7 @@ def restart_run_async(
                 },
                 ensure_ascii=False,
             ),
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "created_at": utc_now().isoformat(),
         },
     )
     db.commit()

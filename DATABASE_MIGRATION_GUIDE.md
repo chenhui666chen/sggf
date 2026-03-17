@@ -1,38 +1,24 @@
 # 数据库迁移指南
 
-本文档说明如何使用 Alembic 进行数据库迁移，包括从 SQLite 迁移到 PostgreSQL 的完整流程。
+本文档说明如何使用 Alembic 进行数据库迁移。
 
 ## 概述
 
-- **当前状态**: SQLite 数据库包含历史数据（6 个用户，3 个项目）
-- **目标数据库**: PostgreSQL（生产环境）
+- **当前数据库**: PostgreSQL（生产环境）
 - **迁移工具**: Alembic
-- **迁移脚本**: `migrate_to_postgres.py`
+- **注意**: 项目已完全迁移到 PostgreSQL，不再使用 SQLite
 
 ## 快速开始
 
-### 1. 本地开发环境（SQLite）
-
-```bash
-# 初始化数据库（仅首次）
-cd backend
-python -c "from app.db.base import Base, engine; from app.models import *; Base.metadata.create_all(bind=engine)"
-
-# 或者使用 Alembic（推荐）
-alembic upgrade head
-```
-
-### 2. 生产环境（PostgreSQL）
+### PostgreSQL 环境
 
 ```bash
 # 确保 PostgreSQL 容器正在运行
 docker-compose up -d postgres
 
 # 运行数据库迁移
+cd backend
 alembic upgrade head
-
-# 如果有 SQLite 历史数据需要迁移
-python migrate_to_postgres.py
 ```
 
 ## Alembic 命令参考
@@ -76,73 +62,21 @@ alembic history
 alembic heads
 ```
 
-## 从 SQLite 迁移到 PostgreSQL
-
-### 前置条件
-
-1. PostgreSQL 容器正在运行
-2. 已配置 `DATABASE_URL` 环境变量
-3. SQLite 数据库文件存在（`novel_app.db`）
-
-### 迁移步骤
-
-```bash
-# 1. 确保 PostgreSQL 容器运行
-docker-compose up -d postgres
-
-# 2. 等待 PostgreSQL 就绪
-docker-compose logs -f postgres
-
-# 3. 运行迁移脚本
-python migrate_to_postgres.py
-
-# 4. 验证数据迁移
-# 连接到 PostgreSQL 检查数据
-docker exec -it novel_postgres psql -U novel_user -d novel_db -c "SELECT COUNT(*) FROM users;"
-```
-
-### 迁移脚本说明
-
-`migrate_to_postgres.py` 会执行以下操作：
-
-1. 读取 SQLite 数据库中的所有数据
-2. 在 PostgreSQL 中创建表结构（通过 `Base.metadata.create_all`）
-3. 逐表迁移数据：
-   - 用户（users）
-   - 项目（projects）
-   - 角色（characters）
-   - 记忆（memories）
-   - 书籍（book_sources）
-   - 章节（book_chapters）
-   - 有声书项目（audiobook_projects）
-   - 章节音频（chapter_audios）
-4. 备份 SQLite 数据库为 `.db.backup`
-5. 输出迁移统计信息
-
 ## 生产环境部署
 
 ### 首次部署
 
 ```bash
-# 1. SSH 到服务器
-ssh root@101.132.154.143
-
-# 2. 导航到项目目录
-cd /root/novel_writing_agent
-
-# 3. 启动 PostgreSQL 容器
+# 1. 启动 PostgreSQL 容器
 docker-compose up -d postgres
 
-# 4. 等待 PostgreSQL 就绪
+# 2. 等待 PostgreSQL 就绪
 docker-compose logs -f postgres
 
-# 5. 应用数据库迁移
+# 3. 应用数据库迁移
 docker-compose exec backend alembic upgrade head
 
-# 6. 如果有 SQLite 数据需要迁移
-docker-compose exec backend python migrate_to_postgres.py
-
-# 7. 启动所有服务
+# 4. 启动所有服务
 docker-compose up -d
 ```
 
@@ -165,10 +99,11 @@ docker-compose restart backend
 
 ## 开发环境最佳实践
 
-### 1. 使用 Alembic 管理数据库结构
+### 使用 Alembic 管理数据库结构
 
 ```bash
 # 修改模型后，创建迁移
+cd backend
 alembic revision --autogenerate -m "添加新字段"
 
 # 检查生成的迁移脚本
@@ -178,26 +113,14 @@ alembic revision --autogenerate -m "添加新字段"
 alembic upgrade head
 ```
 
-### 2. 本地开发使用 SQLite
-
-```bash
-# 设置环境变量
-export DATABASE_URL=sqlite:///novel_app.db
-
-# 应用迁移
-alembic upgrade head
-```
-
-### 3. 测试环境使用 PostgreSQL
+### PostgreSQL 开发环境
 
 ```bash
 # 启动 PostgreSQL 容器
 docker-compose up -d postgres
 
-# 设置环境变量
-export DATABASE_URL=postgresql://novel_user:NovelPostgres0t649OyRUaI@localhost:5432/novel_db
-
 # 应用迁移
+cd backend
 alembic upgrade head
 ```
 
@@ -240,14 +163,23 @@ docker-compose logs postgres
 docker-compose exec postgres psql -U novel_user -d novel_db -c "SELECT 1;"
 ```
 
-### 问题 4: 数据迁移失败
+### 问题 4: 外键约束验证
 
-**原因**: SQLite 和 PostgreSQL 数据类型不兼容
+**说明**: PostgreSQL 自动启用外键约束，确保数据完整性
 
-**解决方案**:
-1. 检查 `migrate_to_postgres.py` 中的数据转换逻辑
-2. 手动修复不兼容的数据类型
-3. 重新运行迁移脚本
+**验证方法**:
+```bash
+# 检查外键约束配置
+docker-compose exec postgres psql -U novel_user -d novel_db -c "
+SELECT tc.constraint_name, tc.table_name, kcu.column_name,
+       ccu.table_name AS foreign_table_name, rc.delete_rule
+FROM information_schema.table_constraints AS tc
+JOIN information_schema.key_column_usage AS kcu ON tc.constraint_name = kcu.constraint_name
+JOIN information_schema.constraint_column_usage AS ccu ON ccu.constraint_name = tc.constraint_name
+JOIN information_schema.referential_constraints AS rc ON tc.constraint_name = rc.constraint_name
+WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = 'dreamweaver_projects';
+"
+```
 
 ## 数据库备份与恢复
 
@@ -311,8 +243,7 @@ DB_POOL_PRE_PING=True
 
 ## 相关文件
 
-- [backend/app/main.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/main.py): FastAPI 主应用
-- [backend/app/db/base.py](file:///c:/Users/cuigu/novel_writing_agent/backend/app/db/base.py): 数据库基类配置
-- [backend/alembic/env.py](file:///c:/Users/cuigu/novel_writing_agent/backend/alembic/env.py): Alembic 环境配置
-- [migrate_to_postgres.py](file:///c:/Users/cuigu/novel_writing_agent/migrate_to_postgres.py): SQLite 到 PostgreSQL 迁移脚本
-- [docker-compose.yml](file:///c:/Users/cuigu/novel_writing_agent/docker-compose.yml): Docker Compose 配置
+- [backend/app/main.py](backend/app/main.py): FastAPI 主应用
+- [backend/app/db/base.py](backend/app/db/base.py): 数据库基类配置
+- [backend/alembic/env.py](backend/alembic/env.py): Alembic 环境配置
+- [docker-compose.yml](docker-compose.yml): Docker Compose 配置

@@ -6,9 +6,12 @@ Fallback Manager - Manage fallback chains and error recovery.
 from __future__ import annotations
 
 import copy
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+
+from core.config import config
 
 if TYPE_CHECKING:
     from schemas.task_spec import TaskSpec
@@ -201,10 +204,22 @@ class FallbackManager:
     
     ERROR_HANDLERS: Dict[str, Callable] = {}
     
+    @property
+    def MAX_CHAINS(self) -> int:
+        return config.fallback.MAX_CHAINS
+    
     def __init__(self, router: "SmartRouter" = None):
         from core.router import router as default_router
         self._router = router or default_router
-        self._chains: Dict[str, FallbackChain] = {}
+        self._chains: OrderedDict[str, FallbackChain] = OrderedDict()
+        self._lock = None
+    
+    def _ensure_lock(self):
+        """Lazily initialize lock to avoid import issues."""
+        if self._lock is None:
+            import threading
+            self._lock = threading.RLock()
+        return self._lock
 
     def _is_registered_model_available(self, model_id: str) -> bool:
         """
@@ -377,27 +392,40 @@ class FallbackManager:
     
     def get_chain(self, task_id: str) -> Optional[FallbackChain]:
         """Get fallback chain for a task."""
-        return self._chains.get(task_id)
+        with self._ensure_lock():
+            return self._chains.get(task_id)
     
     def save_chain(self, chain: FallbackChain) -> None:
-        """Save a fallback chain."""
-        self._chains[chain.task_id] = chain
+        """Save a fallback chain with LRU eviction."""
+        with self._ensure_lock():
+            if chain.task_id in self._chains:
+                del self._chains[chain.task_id]
+            self._chains[chain.task_id] = chain
+            while len(self._chains) > self.MAX_CHAINS:
+                self._chains.popitem(last=False)
+    
+    def clear_chains(self) -> None:
+        """Clear all stored chains."""
+        with self._ensure_lock():
+            self._chains.clear()
     
     def get_chain_stats(self) -> Dict[str, Any]:
         """Get statistics about fallback chains."""
-        total = len(self._chains)
-        successful = sum(1 for c in self._chains.values() if c.is_successful())
-        
-        avg_attempts = 0.0
-        if total > 0:
-            avg_attempts = sum(len(c.attempts) for c in self._chains.values()) / total
-        
-        return {
-            "total_chains": total,
-            "successful_chains": successful,
-            "success_rate": successful / total if total > 0 else 0,
-            "avg_attempts": round(avg_attempts, 2),
-        }
+        with self._ensure_lock():
+            total = len(self._chains)
+            successful = sum(1 for c in self._chains.values() if c.is_successful())
+            
+            avg_attempts = 0.0
+            if total > 0:
+                avg_attempts = sum(len(c.attempts) for c in self._chains.values()) / total
+            
+            return {
+                "total_chains": total,
+                "successful_chains": successful,
+                "success_rate": successful / total if total > 0 else 0,
+                "avg_attempts": round(avg_attempts, 2),
+                "max_chains": self.MAX_CHAINS,
+            }
 
 
 fallback_manager = FallbackManager()

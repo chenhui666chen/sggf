@@ -1,4 +1,4 @@
-"""
+﻿"""
 实体抽取服务
 从章节内容中自动抽取设定项（人物、地点、功法、丹药等）并归类
 """
@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 
 from app.models.setting import SettingCollection, SettingItem
-from app.services.agents.llm_singleton import get_model_for_task
+from core.langchain_bridge import get_task_llm
 import os
 
 # 体系名称映射（用于自动创建集合）
@@ -145,7 +145,7 @@ class EntityExtractionService:
         ]
         """
         # 🛡️ 使用单例管理器获取LLM实例（已禁用代理）
-        llm = get_model_for_task("entity_extract")
+        llm = get_task_llm("entity_extract")
         
         prompt = f"""你是一个小说设定提取专家。请从以下章节中提取所有重要的设定元素，包括：
 - 人物/角色（主要配角、重要NPC等）
@@ -234,7 +234,7 @@ class EntityExtractionService:
             return []
         
         # 🛡️ 使用单例管理器获取LLM实例（已禁用代理）
-        llm = get_model_for_task("entity_extract")
+        llm = get_task_llm("entity_extract")
         
         entity_names = [e["name"] for e in entities]
         entity_list_str = "\n".join([f"- {name}" for name in entity_names])
@@ -513,3 +513,4 @@ class EntityExtractionService:
             "skipped": skipped,
             "details": details,
         }
+

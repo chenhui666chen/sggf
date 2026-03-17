@@ -3,6 +3,7 @@ import { apiClient } from '@/services/api'
 
 interface Project {
   id: number
+  display_no: number
   user_id: number
   title: string
   description?: string
@@ -147,4 +148,3 @@ const projectSlice = createSlice({
 
 export const { clearCurrentProject } = projectSlice.actions
 export default projectSlice.reducer
-

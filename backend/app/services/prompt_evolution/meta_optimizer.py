@@ -1,4 +1,4 @@
-"""
+﻿"""
 提示词进化系统 - 元优化器（增强版）
 
 让LLM分析提示词效果并生成改进版本
@@ -9,8 +9,8 @@ import logging
 from typing import List, Optional, Tuple, Dict
 from dataclasses import dataclass, field
 
-from app.services.llm_client import get_llm_client
-from app.services.model_optimizer import TaskType
+from core.unified_llm_client import get_llm_client
+from core.model_resolution import TaskType
 
 from .models import PromptVersion, EvaluationResult
 from .novel_rules import (
@@ -1352,3 +1352,4 @@ class MetaOptimizer:
             "threshold_config": threshold_config or self.experience.threshold_config,
             "genre": self.current_genre
         }
+

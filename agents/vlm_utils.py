@@ -49,18 +49,38 @@ def vlm_chat_json(
     temperature: float = 0.2,
     max_tokens: int = 400,
 ) -> Optional[Dict[str, Any]]:
-    if vlm_adapter is None or not hasattr(vlm_adapter, "chat"):
+    if vlm_adapter is None:
         return None
 
     try:
-        result = vlm_adapter.chat(
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"},
-        )
-        if not getattr(result, "success", False):
-            result = vlm_adapter.chat(messages=messages, temperature=temperature, max_tokens=max_tokens)
+        if isinstance(vlm_adapter, str):
+            from adapters.adapter_helpers import chat_messages
+
+            result = chat_messages(
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"},
+                model_id=vlm_adapter,
+            )
+            if not getattr(result, "success", False):
+                result = chat_messages(
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    model_id=vlm_adapter,
+                )
+        else:
+            if not hasattr(vlm_adapter, "chat"):
+                return None
+            result = vlm_adapter.chat(
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"},
+            )
+            if not getattr(result, "success", False):
+                result = vlm_adapter.chat(messages=messages, temperature=temperature, max_tokens=max_tokens)
         if not getattr(result, "success", False):
             return None
         content = ""

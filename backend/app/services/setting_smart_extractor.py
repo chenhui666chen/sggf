@@ -1,4 +1,4 @@
-"""
+﻿"""
 设定项智能提取服务
 从章节内容中提取与设定项相关的内容，并推荐标签
 使用AI进行语义分析，避免提取垃圾内容
@@ -54,10 +54,10 @@ class SettingSmartExtractor:
             return []
         
         try:
-            from app.services.agents.llm_singleton import get_model_for_task
+            from core.langchain_bridge import get_task_llm
             
             # 🛡️ 使用单例管理器获取LLM实例（已禁用代理）
-            llm = get_model_for_task("summarize")
+            llm = get_task_llm("summarize")
             
             # 准备候选内容
             candidates = []
@@ -376,3 +376,4 @@ class SettingSmartExtractor:
             "referenced_chapters": referenced_chapters,
             "usage_count": item.usage_count or 0,
         }
+

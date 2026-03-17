@@ -79,9 +79,9 @@ echo ================================================================
 echo.
 echo Service URLs:
 echo    - Frontend: http://localhost:5173
-echo    - Backend: http://localhost:8000
-echo    - API Docs: http://localhost:8000/docs
-echo    - WebSocket: ws://localhost:8000/socket.io/
+echo    - Backend: http://127.0.0.1:8000
+echo    - API Docs: http://127.0.0.1:8000/docs
+echo    - WebSocket: ws://127.0.0.1:8000/socket.io/
 echo.
 echo Tips:
 echo    - Four new windows opened (Backend + Celery Audiobook + Celery DreamWeaver + Frontend)

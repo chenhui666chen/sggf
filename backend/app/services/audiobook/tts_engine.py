@@ -188,6 +188,7 @@ class TTSEngine:
         self.enable_cache = enable_cache
         self.max_concurrent = max_concurrent
         self.model = model  # TTS模型版本
+        self._last_synthesis_metadata: Dict[str, Any] = {}
 
         # 根据模型设置单价：v3-plus 成本更高
         if "plus" in model:
@@ -232,7 +233,19 @@ class TTSEngine:
             f"TTS引擎初始化: model={model}, cache={enable_cache}, concurrent={max_concurrent}\n"
             f"   提供商: {' -> '.join(provider_list)} (主提供商 -> 备用)"
         )
-    
+
+    def _reset_last_synthesis_metadata(self) -> None:
+        """Reset provider metadata captured during the last synthesis call."""
+        self._last_synthesis_metadata = {}
+
+    def _set_last_synthesis_metadata(self, metadata: Optional[Dict[str, Any]] = None) -> None:
+        """Store provider metadata for the most recent synthesis call."""
+        self._last_synthesis_metadata = dict(metadata or {})
+
+    def get_last_synthesis_metadata(self) -> Dict[str, Any]:
+        """Return provider metadata captured during the most recent synthesis call."""
+        return dict(self._last_synthesis_metadata or {})
+
     async def synthesize(
         self,
         text: str,
@@ -341,7 +354,22 @@ class TTSEngine:
             await self.cache.set(cache_key, cached_value, ttl=604800)  # 缓存7天
         
         return audio_bytes
-    
+
+    async def synthesize_with_metadata(
+        self,
+        text: str,
+        voice_params: Dict[str, Any],
+        emotion: str = "neutral",
+    ) -> Dict[str, Any]:
+        """Synthesize audio and return bytes together with provider metadata."""
+        self._reset_last_synthesis_metadata()
+        audio_bytes = await self.synthesize(text, voice_params, emotion)
+        return {
+            "audio_bytes": audio_bytes,
+            "format": "wav" if audio_bytes.startswith(b"RIFF") else "mp3",
+            **self.get_last_synthesis_metadata(),
+        }
+
     async def synthesize_batch(
         self,
         segments: List[Dict[str, Any]],
@@ -978,6 +1006,23 @@ class TTSEngine:
             volume = 50
         volume = max(0, min(100, volume))
 
+        def _extract_timing_metadata_from_output(output: dict) -> Dict[str, Any]:
+            metadata: Dict[str, Any] = {}
+            if not isinstance(output, dict):
+                return metadata
+
+            timestamps = output.get("timestamps")
+            if not isinstance(timestamps, list):
+                timestamps = output.get("word_timestamps")
+            if isinstance(timestamps, list):
+                metadata["tts_timestamps"] = timestamps
+
+            phoneme_timestamps = output.get("phoneme_timestamps")
+            if isinstance(phoneme_timestamps, list):
+                metadata["phoneme_timestamps"] = phoneme_timestamps
+
+            return metadata
+
         def _extract_audio_payload_from_output(output: dict) -> tuple[bytes | None, str | None]:
             audio = output.get("audio")
             if isinstance(audio, dict):
@@ -1024,6 +1069,22 @@ class TTSEngine:
                     return _extract_audio_payload_from_output(output_dict)
 
             return None, None
+
+        def _extract_timing_metadata(response) -> Dict[str, Any]:
+            output = getattr(response, "output", None)
+            if isinstance(output, dict):
+                return _extract_timing_metadata_from_output(output)
+
+            try:
+                as_dict = response.to_dict()  # type: ignore[attr-defined]
+            except Exception:  # noqa: BLE001
+                as_dict = None
+            if isinstance(as_dict, dict):
+                output_dict = as_dict.get("output")
+                if isinstance(output_dict, dict):
+                    return _extract_timing_metadata_from_output(output_dict)
+
+            return {}
 
         def _apply_volume_wav(wav_bytes: bytes) -> bytes:
             # 50 视为原始音量，不做处理
@@ -1109,6 +1170,7 @@ class TTSEngine:
                     f"Qwen-TTS failed: status_code={status_code} code={code} message={message}"
                 )
 
+            self._set_last_synthesis_metadata(_extract_timing_metadata(response))
             audio_bytes, audio_url = _extract_audio_payload(response)
             if audio_bytes:
                 return _apply_volume_wav(audio_bytes)

@@ -148,15 +148,21 @@ class OptimizedAudioSyncManager:
             try:
                 self.logger.debug(f"镜头 {shot_id}: 尝试生成音频 (第 {attempt + 1}/{self.max_retries} 次)")
                 
-                from adapters.model_adapters import ModelAdapterFactory
-                
-                factory = ModelAdapterFactory()
-                adapter = factory.get_adapter("qwen3_tts")
-                
-                result = adapter.generate(
+                from adapters.adapter_helpers import synthesize_speech_sync
+
+                result = synthesize_speech_sync(
                     text=dialogue,
-                    voice_style=voice_style,
-                    character_id=character_id
+                    voice_params={
+                        "speaker": voice_id or "Ryan",
+                        "voice_style": voice_style,
+                        "character_id": character_id,
+                        "rate": 1.0,
+                        "speed": 1.0,
+                        "pitch": 1.0,
+                        "volume": 50,
+                    },
+                    emotion="neutral",
+                    model_id="qwen3-tts-flash",
                 )
                 
                 if result.success and result.data:

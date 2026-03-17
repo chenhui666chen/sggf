@@ -1,4 +1,4 @@
-"""
+﻿"""
 音色管理器 - 智能分配与管理角色音色
 
 核心功能：
@@ -555,7 +555,7 @@ class VoiceManager:
 """
         
         try:
-            from app.services.model_optimizer import TaskType
+            from core.model_resolution import TaskType
             import json
             import asyncio
             
@@ -853,4 +853,5 @@ class VoiceManager:
             "age_distribution": age_dist,
             "characters": list(self.character_voices.keys())
         }
+
 

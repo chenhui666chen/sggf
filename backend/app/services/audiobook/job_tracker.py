@@ -3,13 +3,13 @@ Helpers for persisting Celery audiobook job progress.
 """
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 
 from app.db.base import SessionLocal
 from app.models.audiobook_task import AudiobookTask
+from app.utils.datetime_utils import utc_now
 
 
 class AudiobookJobTracker:
@@ -29,7 +29,7 @@ class AudiobookJobTracker:
                 return
             for key, value in changes.items():
                 setattr(task, key, value)
-            task.updated_at = datetime.utcnow()
+            task.updated_at = utc_now()
             session.commit()
         finally:
             session.close()
@@ -38,7 +38,7 @@ class AudiobookJobTracker:
         """Persist the running state."""
         changes = {
             "status": "running",
-            "started_at": datetime.utcnow(),
+            "started_at": utc_now(),
             "error_message": None,
         }
         if celery_task_id:
@@ -71,7 +71,7 @@ class AudiobookJobTracker:
     def mark_completed(self, detail: Optional[Dict[str, Any]] = None) -> None:
         payload = {
             "status": "completed",
-            "finished_at": datetime.utcnow(),
+            "finished_at": utc_now(),
             "progress": 1.0,
             "current_stage": "completed",
         }
@@ -83,6 +83,6 @@ class AudiobookJobTracker:
         self._update(
             status="failed",
             error_message=error_message,
-            finished_at=datetime.utcnow(),
+            finished_at=utc_now(),
             current_stage="failed",
         )

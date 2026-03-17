@@ -5,7 +5,7 @@
 import { io, Socket } from 'socket.io-client'
 
 // 获取 WebSocket 服务器地址
-const SOCKET_URL = import.meta.env.VITE_WS_URL || 'http://localhost:8000'
+const SOCKET_URL = import.meta.env.VITE_WS_URL || 'http://127.0.0.1:8000'
 
 export interface StageUpdateData {
   project_id: number

@@ -61,6 +61,8 @@ class ConstraintSpec:
             "min_height": self.min_height,
             "max_height": self.max_height,
             "max_batch_size": self.max_batch_size,
+            "requires_square_pixels": self.requires_square_pixels,
+            "max_prompt_length": self.max_prompt_length,
         }
 
 
@@ -272,6 +274,11 @@ class ModelSpec:
     auth_method: str = "api_key"
     requires_external_network: bool = True
     
+    summary: str = ""
+    recommended_scenarios: List[str] = field(default_factory=list)
+    limitations: List[str] = field(default_factory=list)
+    integration_notes: List[str] = field(default_factory=list)
+    source_urls: List[str] = field(default_factory=list)
     documentation_url: str = ""
     examples: List[Dict[str, Any]] = field(default_factory=list)
     
@@ -374,13 +381,26 @@ class ModelSpec:
             "quality_metrics": self.quality_metrics.to_dict(),
             "cost_profile": self.cost_profile.to_dict(),
             "avg_latency_seconds": self.avg_latency_seconds,
+            "p95_latency_seconds": self.p95_latency_seconds,
             "rate_limit": self.rate_limit.to_dict(),
+            "parameters": [p.to_dict() for p in self.parameters],
             "default_params": self.default_params,
             "best_practice": self.best_practice.to_dict(),
             "fallback_strategies": [f.to_dict() for f in self.fallback_strategies],
             "endpoint": self.endpoint,
+            "auth_method": self.auth_method,
+            "requires_external_network": self.requires_external_network,
+            "summary": self.summary,
+            "recommended_scenarios": self.recommended_scenarios,
+            "limitations": self.limitations,
+            "integration_notes": self.integration_notes,
+            "source_urls": self.source_urls,
             "documentation_url": self.documentation_url,
+            "examples": self.examples,
+            "version_notes": self.version_notes,
+            "daily_quota": self.daily_quota,
             "success_rate": self.success_rate,
+            "error_counts": self.error_counts,
             "tags": self.tags,
         }
     
@@ -395,6 +415,8 @@ class ModelSpec:
             min_height=constraints_data.get("min_height", 256),
             max_height=constraints_data.get("max_height", 4096),
             max_batch_size=constraints_data.get("max_batch_size", 1),
+            requires_square_pixels=constraints_data.get("requires_square_pixels", False),
+            max_prompt_length=constraints_data.get("max_prompt_length", 1000),
         )
         
         quality_data = data.get("quality_metrics", {})
@@ -404,6 +426,7 @@ class ModelSpec:
             motion_stability=quality_data.get("motion_stability", 0.0),
             prompt_adherence=quality_data.get("prompt_adherence", 0.0),
             visual_quality=quality_data.get("visual_quality", 0.0),
+            style_accuracy=quality_data.get("style_accuracy", 0.0),
         )
         
         cost_data = data.get("cost_profile", {})
@@ -411,6 +434,8 @@ class ModelSpec:
             unit=cost_data.get("unit", "per_request"),
             price=cost_data.get("price", 0.0),
             currency=cost_data.get("currency", "CNY"),
+            min_charge=cost_data.get("min_charge", 0.0),
+            free_quota=cost_data.get("free_quota", 0),
         )
         
         rate_data = data.get("rate_limit", {})
@@ -430,6 +455,29 @@ class ModelSpec:
                 emulation_method=cap_data.get("emulation_method"),
                 notes=cap_data.get("notes", ""),
             ))
+
+        parameters = []
+        for param_data in data.get("parameters", []):
+            parameters.append(ParameterSpec(
+                name=param_data.get("name", ""),
+                type=param_data.get("type", "string"),
+                required=param_data.get("required", False),
+                default=param_data.get("default"),
+                description=param_data.get("description", ""),
+                enum=param_data.get("enum", []),
+                min_value=param_data.get("min_value"),
+                max_value=param_data.get("max_value"),
+                max_length=param_data.get("max_length"),
+            ))
+
+        best_practice_data = data.get("best_practice", {})
+        best_practice = BestPractice(
+            prompt_template=best_practice_data.get("prompt_template", ""),
+            recommended_params=best_practice_data.get("recommended_params", {}),
+            avoided_params=best_practice_data.get("avoided_params", []),
+            common_errors=best_practice_data.get("common_errors", []),
+            tips=best_practice_data.get("tips", []),
+        )
         
         fallback_strategies = []
         for fb_data in data.get("fallback_strategies", []):
@@ -453,11 +501,25 @@ class ModelSpec:
             quality_metrics=quality_metrics,
             cost_profile=cost_profile,
             avg_latency_seconds=data.get("avg_latency_seconds", 0.0),
+            p95_latency_seconds=data.get("p95_latency_seconds", 0.0),
             rate_limit=rate_limit,
+            parameters=parameters,
             default_params=data.get("default_params", {}),
+            best_practice=best_practice,
             fallback_strategies=fallback_strategies,
             endpoint=data.get("endpoint", ""),
+            auth_method=data.get("auth_method", "api_key"),
+            requires_external_network=data.get("requires_external_network", True),
+            summary=data.get("summary", ""),
+            recommended_scenarios=data.get("recommended_scenarios", []),
+            limitations=data.get("limitations", []),
+            integration_notes=data.get("integration_notes", []),
+            source_urls=data.get("source_urls", []),
             documentation_url=data.get("documentation_url", ""),
+            examples=data.get("examples", []),
+            version_notes=data.get("version_notes", ""),
+            daily_quota=data.get("daily_quota", 0),
             success_rate=data.get("success_rate", 1.0),
+            error_counts=data.get("error_counts", {}),
             tags=data.get("tags", []),
         )

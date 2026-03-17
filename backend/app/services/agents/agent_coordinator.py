@@ -1,4 +1,4 @@
-
+﻿
 from typing import Optional, Dict, Any
 import logging
 import json
@@ -7,7 +7,7 @@ import re
 from .knowledge_base import NovelKnowledgeBase
 from .memory_manager import NovelMemoryManager
 from .agents import CreativeDirectorAgent, WorldArchitectAgent, CharacterDesignerAgent, ContentCreatorAgent, QualityReviewerAgent, OutlinePlanParserAgent
-from .llm_singleton import create_deepseek_llm
+from core.langchain_bridge import create_task_llm, create_model_llm
 from .intelligent_truncator import smart_truncate_for_context
 
 # 导入模块化提示词
@@ -1731,24 +1731,31 @@ class CreativeDirectorCoordinator:
         logger.info(f"【分层摘要器】为结构设计阶段准备上下文")
         logger.info(f"{'='*70}\n")
         
-        layered_summarizer = LayeredSummarizer(self.knowledge_base)
+        layered_summarizer = LayeredSummarizer(
+            self.knowledge_base,
+            persist_directory=self.memory_manager.persist_directory,
+        )
         context_result = layered_summarizer.prepare_context_for_expansion(
             outline=concept or "",  # 结构设计阶段使用concept作为大纲
             characters=characters or "",
             worldview=world_setting or "",
             scenario="structure_design",
-            current_count=self.target_chapter_count or 50
+            current_count=self.target_chapter_count or 50,
+            project_id=self.project_id,
         )
         
         # 🔥 使用智能选择的模型和优化后的上下文
         selected_model = context_result["selected_model"]
         optimized_context = context_result["context"]
+        memory_text = context_result.get("memory_text", "")
+        structured_memory = context_result.get("structured_memory", {})
         stats = context_result["stats"]
         
         logger.info(f"📊 上下文优化（结构设计 - 分层摘要）:")
         logger.info(f"   - 选择模型: {selected_model}")
         logger.info(f"   - 原始总长: {len(concept or '') + len(characters or '') + len(world_setting or ''):,}字符")
         logger.info(f"   - 优化后: {len(optimized_context):,}字符 (压缩{(1-stats['compression_ratio'])*100:.1f}%)")
+        logger.info(f"   - 结构化记忆: {len(memory_text):,}字符 / {len(structured_memory)}类")
         logger.info(f"   - 目标tokens: {stats['total_tokens']:,} / {stats['target_tokens']:,}\n")
         
         # 🆕 使用模块化提示词生成结构设计 prompt（方案A - 纯引用式）
@@ -1760,25 +1767,28 @@ class CreativeDirectorCoordinator:
         
         # 🔥 只传optimized_context,避免与分层摘要冲突
         structure_context = {
-            "optimized_context": optimized_context
+            "optimized_context": optimized_context,
+            "structured_memory_text": memory_text,
+            "structured_memory": structured_memory,
         }
+        memory_prompt_block = f"""
+【结构化记忆约束】
+{memory_text}
+
+请优先遵循以上结构化记忆中的人物状态、关系边、伏笔和世界规则，不得随意覆盖或忽略。
+""" if memory_text else ""
         # 🔄 临时切换创意总监到分层摘要器选择的模型
         orig_llm = getattr(self.creative_director, "llm", None)
         try:
-            # 根据分层摘要器选择的模型创建llm实例
-            if selected_model == "deepseek-r1":
-                structure_llm = create_deepseek_llm(task_type="quality_review")  # R1模型
-                logger.info("⚙️ [生效日志] 结构阶段启用R1模型：task_type=quality_review, model=deepseek-reasoner")
-            elif "qwen" in selected_model:
-                # 使用qwen系列模型
-                structure_llm = create_deepseek_llm(task_type="outline_expand" if selected_model == "qwen-long" else "summarize")
-                logger.info(f"⚙️ [生效日志] 结构阶段启用{selected_model}模型")
-            else:
-                structure_llm = create_deepseek_llm(task_type="quality_review")  # 默认R1
-                logger.info("⚙️ [生效日志] 结构阶段默认使用R1模型")
+            # 直接按选中的模型实例化，避免“选了A模型，实际又按task_type路由到B模型”
+            structure_llm = create_model_llm(model=selected_model, temperature=0.7)
+            logger.info(f"⚙️ [生效日志] 结构阶段按模型直连: {selected_model}")
             
             self.creative_director.llm = structure_llm
-            structure_result = self.creative_director.process(structure_prompt, context=structure_context)
+            structure_result = self.creative_director.process(
+                f"{structure_prompt}\n\n{memory_prompt_block}".strip(),
+                context=structure_context
+            )
         finally:
             if orig_llm is not None:
                 self.creative_director.llm = orig_llm
@@ -2113,3 +2123,4 @@ Please confirm：
         
         self.project_context.update({"content": revised_content})
         return {"revised_content": revised_content, "final_review": final_review}
+

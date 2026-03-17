@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 import types
@@ -13,7 +14,7 @@ os.environ["DEBUG"] = "false"
 os.environ["DATABASE_URL"] = "postgresql://test:test@127.0.0.1:5432/test_db"
 
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -35,6 +36,7 @@ sys.modules["app.db.base"] = fake_db_base
 
 from app.core.security import create_access_token, hash_password, make_unusable_password_hash
 from app.db.base import Base, get_db
+from app.models.role import Role, user_roles
 from app.models.user import User
 
 
@@ -52,7 +54,33 @@ def load_auth_module():
 auth = load_auth_module()
 
 
-def build_test_client() -> tuple[TestClient, sessionmaker]:
+class CompatTestClient:
+    """兼容 httpx 0.28+ 的轻量测试客户端。"""
+
+    def __init__(self, app: FastAPI):
+        self._app = app
+        self._base_url = "http://testserver"
+
+    async def _request_async(self, method: str, url: str, **kwargs) -> Response:
+        transport = ASGITransport(app=self._app)
+        async with AsyncClient(
+            transport=transport,
+            base_url=self._base_url,
+            follow_redirects=True,
+        ) as client:
+            return await client.request(method, url, **kwargs)
+
+    def request(self, method: str, url: str, **kwargs) -> Response:
+        return asyncio.run(self._request_async(method, url, **kwargs))
+
+    def post(self, url: str, **kwargs) -> Response:
+        return self.request("POST", url, **kwargs)
+
+    def get(self, url: str, **kwargs) -> Response:
+        return self.request("GET", url, **kwargs)
+
+
+def build_test_client() -> tuple[CompatTestClient, sessionmaker]:
     auth.password_reset_service = auth.PasswordResetService(redis_url="redis://127.0.0.1:0/0")
     auth.password_reset_service._redis_checked = True
     auth.password_reset_email_service = auth.EmailService()
@@ -67,7 +95,7 @@ def build_test_client() -> tuple[TestClient, sessionmaker]:
         autoflush=False,
         bind=engine,
     )
-    Base.metadata.create_all(bind=engine, tables=[User.__table__])
+    Base.metadata.create_all(bind=engine, tables=[User.__table__, Role.__table__, user_roles])
 
     app = FastAPI()
     app.include_router(auth.router)
@@ -80,7 +108,7 @@ def build_test_client() -> tuple[TestClient, sessionmaker]:
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
-    return TestClient(app), testing_session_local
+    return CompatTestClient(app), testing_session_local
 
 
 def create_user(

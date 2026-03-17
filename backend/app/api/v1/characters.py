@@ -11,6 +11,7 @@ from app.models.user import User
 from app.models.project import Project, Chapter
 from app.models.character import Character, CharacterTechnique
 from app.models.setting import SettingItem, SettingCollection
+from app.utils.datetime_utils import utc_now
 from app.schemas.character import (
     CharacterCreate,
     CharacterUpdate,
@@ -599,10 +600,9 @@ async def sync_characters_to_workflow(
         WHERE project_id = :project_id
     """)
     
-    from datetime import datetime
     db.execute(update_query, {
         "content": characters_text,
-        "updated_at": datetime.now().isoformat(),
+        "updated_at": utc_now().isoformat(),
         "project_id": project_id
     })
     db.commit()

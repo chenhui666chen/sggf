@@ -1,9 +1,8 @@
-"""
+﻿"""
 多Agent框架 - 各个专业化Agent的定义
 """
 from typing import Dict, Any, List, Optional, Union
 from abc import ABC, abstractmethod
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 from .config import Config
 from .knowledge_base import NovelKnowledgeBase
@@ -16,7 +15,7 @@ from .quality_assessment import (
 from .context_aware_optimizer import ContextAwareOptimizer
 
 
-from .llm_singleton import create_deepseek_llm, create_routed_llm
+from core.langchain_bridge import create_task_llm, create_model_llm
 
 def _is_dashscope_llm(llm: Any) -> bool:
     model = getattr(llm, "model_name", None) or getattr(llm, "model", None) or ""
@@ -82,7 +81,7 @@ class BaseAgent(ABC):
 
         self.name = name
         self.role = role
-        self.llm = llm if llm is not None else create_deepseek_llm(task_type=task_type)  # ✅ 优先使用传入的llm
+        self.llm = llm if llm is not None else create_task_llm(task_type=task_type)  # ✅ 优先使用传入的llm
         
         self.knowledge_base = knowledge_base or NovelKnowledgeBase()
         self.memory_manager = memory_manager or NovelMemoryManager()
@@ -184,7 +183,7 @@ class BaseAgent(ABC):
                 or Config.MODEL_NAME
                 or "qwen3-max"
             )
-            temp_llm = create_routed_llm(model=model_name, temperature=temperature)
+            temp_llm = create_model_llm(model=model_name, temperature=temperature)
             print(f"🎲 使用自定义 temperature={temperature}")
             try:
                 response_content = _invoke_llm_with_optional_streaming(temp_llm, messages)
@@ -882,4 +881,5 @@ class ChapterLogicChecker(BaseAgent):
             "summary": result,
             "raw_result": result
         }
+
 

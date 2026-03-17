@@ -5,12 +5,12 @@
 """
 import json
 from typing import List, Dict, Any, Optional, Set
-from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.models.character import Character
 from app.models.setting import SettingItem, SettingCollection
 from app.services.llm_service import LLMService
+from app.utils.datetime_utils import utc_now
 
 
 class EntityExtractor:
@@ -218,7 +218,7 @@ class EntityExtractor:
         setting_item.usage_count = len(referenced_chapters)
         
         # 更新最后引用时间
-        setting_item.last_referenced_at = datetime.now()
+        setting_item.last_referenced_at = utc_now()
         
         db.commit()
     
@@ -270,7 +270,7 @@ class EntityExtractor:
             is_leaf=True,
             confidence_score=0.6,  # 自动创建的置信度较低
             usage_count=1,
-            last_referenced_at=datetime.now()
+            last_referenced_at=utc_now()
         )
         
         # 添加元数据

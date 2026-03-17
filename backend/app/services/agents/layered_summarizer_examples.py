@@ -6,6 +6,7 @@
 
 from backend.app.services.agents.layered_summarizer import prepare_smart_context
 from backend.app.services.agents.knowledge_base import NovelKnowledgeBase
+from core.langchain_bridge import create_model_llm
 
 
 # ============================================================================
@@ -191,15 +192,7 @@ def example_integration_in_outline_expander():
     selected_model = context_result["selected_model"]
     
     # 🔥 使用选择的模型进行扩展
-    from langchain_openai import ChatOpenAI
-    from backend.app.services.agents.config import Config
-    
-    llm = ChatOpenAI(
-        model=selected_model,
-        temperature=0.7,
-        api_key=Config.DEEPSEEK_API_KEY if selected_model.startswith("deepseek") else os.getenv("DASHSCOPE_API_KEY"),
-        base_url=Config.DEEPSEEK_API_BASE if selected_model.startswith("deepseek") else "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    )
+    llm = create_model_llm(model=selected_model, temperature=0.7)
     
     # 调用LLM
     # result = llm.invoke([HumanMessage(content=optimized_context)])

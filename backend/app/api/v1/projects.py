@@ -1,7 +1,8 @@
-"""
+﻿"""
 项目API路由
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import re
@@ -64,13 +65,34 @@ class ProjectAudioConfig(BaseModel):
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
 
 
+def _allocate_next_display_no(db: Session, *, user_id: int) -> int:
+    """为同一用户分配稳定递增的展示序号。"""
+    db.execute(
+        select(User.id)
+        .where(User.id == user_id)
+        .with_for_update()
+    ).scalar_one()
+
+    current_max = (
+        db.query(func.max(Project.display_no))
+        .filter(Project.user_id == user_id)
+        .scalar()
+    )
+    return int(current_max or 0) + 1
+
+
 @router.get("", response_model=List[ProjectResponse])
 async def list_projects(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """获取用户的所有项目"""
-    projects = db.query(Project).filter(Project.user_id == current_user.id).all()
+    projects = (
+        db.query(Project)
+        .filter(Project.user_id == current_user.id)
+        .order_by(Project.display_no.asc(), Project.id.asc())
+        .all()
+    )
     return projects
 
 
@@ -82,6 +104,7 @@ async def create_project(
 ):
     """创建新项目"""
     project = Project(
+        display_no=_allocate_next_display_no(db, user_id=current_user.id),
         user_id=current_user.id,
         title=project_data.title,
         description=project_data.description,
@@ -396,7 +419,7 @@ async def auto_assign_project_audio_voices(
 
     llm_client = None
     try:
-        from app.services.llm_client import get_llm_client
+        from core.unified_llm_client import get_llm_client
 
         llm_client = get_llm_client(strategy="conservative")
         logger.info(f"✅ LLM 客户端初始化成功，将为角色声线推荐提供智能分析")
@@ -669,7 +692,7 @@ async def list_chapters(
         chapters = query.order_by(Chapter.chapter_number.desc()).all()
     else:
         chapters = query.order_by(Chapter.chapter_number.asc()).all()
-        
+
     return chapters
 
 
@@ -871,3 +894,4 @@ async def export_all_chapters_docx(
             "Content-Disposition": f"attachment; filename*=UTF-8''{filename_encoded}"
         }
     )
+

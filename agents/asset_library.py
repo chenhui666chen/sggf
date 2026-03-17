@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from adapters.model_adapters import ModelAdapterFactory
+from adapters.adapter_helpers import create_runtime_client
 
 from agents.image_edit_utils import (
     resolve_image_edit_adapter_name,
@@ -603,8 +603,7 @@ def run(ctx: Any) -> None:
         ctx.payload["asset_library_requires_review"] = bool(pending_count > 0 or unapproved_roles)
         return
 
-    factory = ModelAdapterFactory()
-    t2i = factory.get_adapter("wan_t2i")
+    t2i = create_runtime_client("wan_t2i")
     image_edit_adapter_name = resolve_image_edit_adapter_name(
         image_cfg,
         purpose="library_character_view",
@@ -621,14 +620,14 @@ def run(ctx: Any) -> None:
     image_edit_strength = max(0.0, min(float(image_edit_strength), 1.0))
     image_edit_guidance = max(0.1, min(float(image_edit_guidance), 50.0))
     try:
-        image_edit_adapter = factory.get_adapter(image_edit_adapter_name)
+        image_edit_adapter = create_runtime_client(image_edit_adapter_name)
     except Exception:  # noqa: BLE001
         image_edit_adapter = None
 
     vlm_adapter = None
     if selector in {"vlm", "semantic"}:
         try:
-            vlm_adapter = factory.get_adapter(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus"))
+            vlm_adapter = create_runtime_client(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus"))
         except Exception:  # noqa: BLE001
             vlm_adapter = None
     vlm_criteria = [
@@ -832,15 +831,14 @@ def run(ctx: Any) -> None:
         local_vlm = vlm_adapter
         local_image_edit = image_edit_adapter
         if asset_parallelism > 1:
-            local_factory = ModelAdapterFactory()
-            local_t2i = local_factory.get_adapter("wan_t2i")
+            local_t2i = create_runtime_client("wan_t2i")
             if selector in {"vlm", "semantic"}:
                 try:
-                    local_vlm = local_factory.get_adapter(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus"))
+                    local_vlm = create_runtime_client(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus"))
                 except Exception:  # noqa: BLE001
                     local_vlm = None
             try:
-                local_image_edit = local_factory.get_adapter(image_edit_adapter_name)
+                local_image_edit = create_runtime_client(image_edit_adapter_name)
             except Exception:  # noqa: BLE001
                 local_image_edit = None
 

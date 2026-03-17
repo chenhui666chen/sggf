@@ -190,6 +190,7 @@ function isPlaceholderEntityName(value: unknown): boolean {
 
 interface Project {
   id: number
+  display_no?: number
   title: string
   description?: string
 }
