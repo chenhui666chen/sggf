@@ -21,6 +21,7 @@ PROJECT_DIR="/root/novel_writing_agent"
 BACKUP_DIR="/root/backups"
 LOG_FILE="/root/deploy.log"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+COMPOSE_DISPLAY=""
 
 # 打印带颜色的消息
 print_info() {
@@ -37,6 +38,28 @@ print_warning() {
 
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# 检测 Compose 命令
+detect_compose_cmd() {
+    if docker compose version >/dev/null 2>&1; then
+        COMPOSE_DISPLAY="docker compose"
+    elif command -v docker-compose >/dev/null 2>&1; then
+        COMPOSE_DISPLAY="docker-compose"
+    else
+        print_error "未找到可用的 Docker Compose 命令"
+        log "未找到可用的 Docker Compose 命令"
+        exit 1
+    fi
+}
+
+# 统一 Compose 调用入口，兼容 docker compose / docker-compose
+compose() {
+    if [ "$COMPOSE_DISPLAY" = "docker compose" ]; then
+        docker compose "$@"
+    else
+        docker-compose "$@"
+    fi
 }
 
 # 检查命令行参数
@@ -86,7 +109,7 @@ backup_database() {
     local backup_file="$BACKUP_DIR/db_backup_$TIMESTAMP.sql"
     
     cd $PROJECT_DIR
-    docker-compose exec -T postgres pg_dump -U novel_user novel_db > $backup_file
+    compose exec -T postgres pg_dump -U novel_user novel_db > $backup_file
     
     if [ $? -eq 0 ]; then
         print_success "数据库备份成功: $backup_file"
@@ -108,7 +131,7 @@ backup_redis() {
     local backup_file="$BACKUP_DIR/redis_backup_$TIMESTAMP.rdb"
     
     cd $PROJECT_DIR
-    docker-compose exec redis redis-cli -a NovelRedis2024! BGSAVE
+    compose exec redis redis-cli -a NovelRedis2024! BGSAVE
     sleep 2
     docker cp novel_redis:/data/dump.rdb $backup_file
     
@@ -140,7 +163,7 @@ backup_uploads() {
 stop_services() {
     print_info "停止应用服务..."
     cd $PROJECT_DIR
-    docker-compose stop backend frontend nginx
+    compose stop backend frontend nginx
     log "停止应用服务"
     print_success "应用服务已停止"
 }
@@ -222,10 +245,10 @@ build_images() {
     
     if [ "$REBUILD" = true ]; then
         print_info "强制重新构建所有镜像..."
-        docker-compose build --no-cache
+        compose build --no-cache
     else
         print_info "构建镜像（使用缓存）..."
-        docker-compose build
+        compose build
     fi
     
     log "构建镜像"
@@ -237,7 +260,7 @@ start_services() {
     print_info "启动服务..."
     cd $PROJECT_DIR
 
-    docker-compose up -d --remove-orphans
+    compose up -d --remove-orphans
     
     log "启动服务"
     print_success "服务已启动"
@@ -293,7 +316,7 @@ wait_for_services() {
 run_migrations() {
     print_info "运行数据库迁移..."
     cd $PROJECT_DIR
-    docker-compose exec -T backend python -m alembic -c /app/alembic.ini upgrade heads
+    compose exec -T backend python -m alembic -c /app/alembic.ini upgrade heads
     
     if [ $? -eq 0 ]; then
         print_success "数据库迁移完成"
@@ -307,7 +330,7 @@ run_migrations() {
 show_status() {
     print_info "服务状态："
     cd $PROJECT_DIR
-    docker-compose ps
+    compose ps
     echo ""
     
     print_info "资源使用："
@@ -327,10 +350,10 @@ show_summary() {
     echo "  域名: https://www.sggf.net"
     echo ""
     echo "常用命令："
-    echo "  查看日志: cd $PROJECT_DIR && docker-compose logs -f"
-    echo "  重启服务: cd $PROJECT_DIR && docker-compose restart"
-    echo "  停止服务: cd $PROJECT_DIR && docker-compose stop"
-    echo "  查看状态: cd $PROJECT_DIR && docker-compose ps"
+    echo "  查看日志: cd $PROJECT_DIR && $COMPOSE_DISPLAY logs -f"
+    echo "  重启服务: cd $PROJECT_DIR && $COMPOSE_DISPLAY restart"
+    echo "  停止服务: cd $PROJECT_DIR && $COMPOSE_DISPLAY stop"
+    echo "  查看状态: cd $PROJECT_DIR && $COMPOSE_DISPLAY ps"
     echo ""
     echo "日志文件: $LOG_FILE"
     echo "=========================================="
@@ -351,6 +374,8 @@ main() {
         print_info "请先上传代码到服务器"
         exit 1
     fi
+
+    detect_compose_cmd
     
     # 备份
     if [ "$BACKUP" = true ]; then
