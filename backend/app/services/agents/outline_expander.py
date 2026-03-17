@@ -428,6 +428,7 @@ Please分析：
         print("✅ 人物需求分析完成\n")
 
         # 第二步：设计角色定位分布
+        primary_character = main_characters.splitlines()[0] if main_characters else "待定"
         role_distribution_prompt = f"""基于以下分析，设计人物角色定位体系。
 
 【人物需求分析】
@@ -439,7 +440,7 @@ Please分析：
 Please design{target_count}个人物的角色定位， including：
 
 1. **主角阵营**（3-5人）
-   - 主角：{main_characters.split('\\n')[0] if main_characters else '待定'}
+   - 主角：{primary_character}
    - 核心盟友：...
    - 导师/引路人：...
 
