@@ -138,11 +138,11 @@ backup_uploads() {
 
 # 停止服务
 stop_services() {
-    print_info "停止服务..."
+    print_info "停止应用服务..."
     cd $PROJECT_DIR
-    docker-compose down
-    log "停止服务"
-    print_success "服务已停止"
+    docker-compose stop backend frontend nginx
+    log "停止应用服务"
+    print_success "应用服务已停止"
 }
 
 # 拉取最新代码
@@ -151,8 +151,43 @@ pull_code() {
     cd $PROJECT_DIR
     
     if [ -d ".git" ]; then
+        local tracked_changes
+        tracked_changes=$(git status --porcelain --untracked-files=no)
+        if [ -n "$tracked_changes" ]; then
+            print_error "检测到未提交的已跟踪改动，已停止自动拉取以避免覆盖现场文件"
+            git status --short
+            log "Git 工作区存在未提交的已跟踪改动，停止自动拉取"
+            exit 1
+        fi
+
+        local current_branch
+        current_branch=$(git rev-parse --abbrev-ref HEAD)
+        if [ "$current_branch" != "main" ]; then
+            print_error "当前分支不是 main：$current_branch，已停止自动部署"
+            log "当前分支不是 main：$current_branch"
+            exit 1
+        fi
+
         git fetch origin
-        git reset --hard origin/main
+
+        local ahead behind
+        read -r ahead behind <<EOF
+$(git rev-list --left-right --count HEAD...origin/main)
+EOF
+
+        if [ "$ahead" -gt 0 ]; then
+            print_error "当前分支包含未推送或已分叉提交，拒绝自动快进，请人工确认后再部署"
+            log "检测到本地分支 ahead/diverged，停止自动拉取"
+            exit 1
+        fi
+
+        if [ "$behind" -eq 0 ]; then
+            log "代码已是最新"
+            print_success "代码已是最新"
+            return 0
+        fi
+
+        git merge --ff-only origin/main
         log "拉取最新代码"
         print_success "代码更新成功"
     else
@@ -178,6 +213,12 @@ upload_code() {
 build_images() {
     print_info "构建 Docker 镜像..."
     cd $PROJECT_DIR
+
+    if [ "$UPDATE_ONLY" = true ]; then
+        print_info "已启用 --update，跳过镜像构建"
+        log "跳过镜像构建"
+        return 0
+    fi
     
     if [ "$REBUILD" = true ]; then
         print_info "强制重新构建所有镜像..."
@@ -195,12 +236,8 @@ build_images() {
 start_services() {
     print_info "启动服务..."
     cd $PROJECT_DIR
-    
-    if [ "$UPDATE_ONLY" = true ]; then
-        docker-compose up -d
-    else
-        docker-compose up -d --build
-    fi
+
+    docker-compose up -d --remove-orphans
     
     log "启动服务"
     print_success "服务已启动"
@@ -213,18 +250,23 @@ wait_for_services() {
     
     local max_attempts=30
     local attempt=0
+    local backend_ready=false
+    local frontend_ready=false
     
     while [ $attempt -lt $max_attempts ]; do
         # 检查后端
-        if curl -sf http://localhost:8000/api/v1/health > /dev/null; then
-            print_success "后端服务就绪"
-            break
+        if curl -sf http://127.0.0.1:8000/health > /dev/null; then
+            backend_ready=true
         fi
         
         # 检查前端
-        if curl -sf http://localhost:3000 > /dev/null; then
-            print_success "前端服务就绪"
-            break
+        if curl -sfI http://127.0.0.1:3000 > /dev/null; then
+            frontend_ready=true
+        fi
+
+        if [ "$backend_ready" = true ] && [ "$frontend_ready" = true ]; then
+            print_success "后端和前端服务均已就绪"
+            return 0
         fi
         
         attempt=$((attempt + 1))
@@ -235,6 +277,12 @@ wait_for_services() {
     echo ""
     
     if [ $attempt -ge $max_attempts ]; then
+        if [ "$backend_ready" != true ]; then
+            print_error "后端服务未就绪"
+        fi
+        if [ "$frontend_ready" != true ]; then
+            print_error "前端服务未就绪"
+        fi
         print_error "服务启动超时，请检查日志"
         log "服务启动超时"
         exit 1
@@ -245,7 +293,7 @@ wait_for_services() {
 run_migrations() {
     print_info "运行数据库迁移..."
     cd $PROJECT_DIR
-    docker-compose exec backend alembic upgrade head
+    docker-compose exec -T backend python -m alembic -c /app/alembic.ini upgrade heads
     
     if [ $? -eq 0 ]; then
         print_success "数据库迁移完成"
@@ -312,14 +360,16 @@ main() {
         backup_uploads
     fi
     
-    # 停止服务
-    stop_services
-    
     # 更新代码
     pull_code
     
-    # 构建和启动
+    # 先构建镜像，减少停机窗口
     build_images
+
+    # 停止服务
+    stop_services
+
+    # 启动服务
     start_services
     
     # 等待就绪
