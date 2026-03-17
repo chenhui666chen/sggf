@@ -55,9 +55,11 @@ command:
 
 ### 方式一：使用Docker Compose（推荐）
 
+命令示例优先使用 `docker compose`。如果你的环境仍然只有旧版独立命令，也可以替换为 `docker-compose`。
+
 1. **启动服务**
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 2. **验证PostgreSQL连接**
@@ -67,7 +69,7 @@ docker exec -it novel_postgres psql -U novel_user -d novel_db -c "SELECT version
 
 3. **查看日志**
 ```bash
-docker-compose logs postgres
+docker compose logs postgres
 ```
 
 ### 方式二：使用云数据库服务
@@ -79,7 +81,7 @@ docker-compose logs postgres
 DATABASE_URL=postgresql://username:password@host:port/database
 ```
 
-2. **跳过docker-compose中的PostgreSQL服务**
+2. **跳过 Docker Compose 中的 PostgreSQL 服务**
 ```bash
 # 注释掉postgres服务
 # postgres:
@@ -89,7 +91,7 @@ DATABASE_URL=postgresql://username:password@host:port/database
 
 3. **直接启动后端服务**
 ```bash
-docker-compose up -d backend redis frontend nginx
+docker compose up -d backend redis frontend nginx
 ```
 
 ## 数据迁移
@@ -100,7 +102,7 @@ docker-compose up -d backend redis frontend nginx
 
 ```bash
 # 1. 确保PostgreSQL正在运行
-docker-compose up -d postgres
+docker compose up -d postgres
 
 # 2. 运行迁移脚本
 python migrate_to_postgres.py

@@ -120,34 +120,36 @@ start_production.bat
 
 ### 方式二：使用Docker Compose
 
+命令示例优先使用 `docker compose`。如果当前环境只有旧版独立命令，也可以替换为 `docker-compose`。
+
 ```bash
 # 启动所有服务
-docker-compose up -d
+docker compose up -d
 
 # 查看服务状态
-docker-compose ps
+docker compose ps
 
 # 查看日志
-docker-compose logs -f [service]
+docker compose logs -f [service]
 ```
 
 ### 方式三：单独启动服务
 
 ```bash
 # 启动PostgreSQL
-docker-compose up -d postgres
+docker compose up -d postgres
 
 # 启动Redis
-docker-compose up -d redis
+docker compose up -d redis
 
 # 启动Backend
-docker-compose up -d backend
+docker compose up -d backend
 
 # 启动Frontend
-docker-compose up -d frontend
+docker compose up -d frontend
 
 # 启动Nginx
-docker-compose up -d nginx
+docker compose up -d nginx
 ```
 
 ## 🔍 验证部署
@@ -177,7 +179,7 @@ docker exec -it novel_redis redis-cli -a MfDUzsb5%&1uYW9N ping
 
 ```bash
 # 查看所有服务状态
-docker-compose ps
+docker compose ps
 
 # 预期输出：所有服务状态为 Up
 ```
@@ -186,16 +188,16 @@ docker-compose ps
 
 ```bash
 # 查看Backend日志
-docker-compose logs backend
+docker compose logs backend
 
 # 查看PostgreSQL日志
-docker-compose logs postgres
+docker compose logs postgres
 
 # 查看Redis日志
-docker-compose logs redis
+docker compose logs redis
 
 # 查看Nginx日志
-docker-compose logs nginx
+docker compose logs nginx
 ```
 
 ## ⚠️ 常见问题
@@ -229,10 +231,10 @@ ping docker.io
 **解决方案：**
 ```bash
 # 1. 检查PostgreSQL是否启动
-docker-compose ps postgres
+docker compose ps postgres
 
 # 2. 查看PostgreSQL日志
-docker-compose logs postgres
+docker compose logs postgres
 
 # 3. 检查密码配置
 docker exec -it novel_postgres psql -U novel_user -d novel_db
@@ -245,7 +247,7 @@ docker exec -it novel_postgres psql -U novel_user -d novel_db
 **解决方案：**
 ```bash
 # 1. 检查Redis密码配置
-docker-compose logs redis
+docker compose logs redis
 
 # 2. 测试Redis连接
 docker exec -it novel_redis redis-cli -a MfDUzsb5%&1uYW9N ping
@@ -322,7 +324,7 @@ openssl x509 -in ssl/cert.pem -text -noout
 start_production.bat
 
 # 或使用Docker Compose
-docker-compose up -d
+docker compose up -d
 ```
 
 ### 5. 验证部署
@@ -335,7 +337,7 @@ docker-compose up -d
 
 1. **日志文件：**
    - Backend: `backend/logs/app.log`
-   - Docker: `docker-compose logs [service]`
+   - Docker: `docker compose logs [service]`
 
 2. **文档：**
    - [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)

@@ -43,7 +43,7 @@ sudo yum install certbot
 2. **获取证书**
 ```bash
 # 停止nginx（如果运行中）
-docker-compose stop nginx
+docker compose stop nginx
 
 # 获取证书
 certbot certonly --standalone -d sggf.net -d www.sggf.net
@@ -64,7 +64,7 @@ EOF
 4. **设置自动续期**
 ```bash
 # 添加cron任务
-0 0,12 * * * certbot renew --quiet --post-hook "docker-compose restart nginx"
+0 0,12 * * * certbot renew --quiet --post-hook "docker compose restart nginx"
 ```
 
 ### 方式二：购买商业SSL证书（推荐用于正式生产）
@@ -153,7 +153,7 @@ openssl s_client -connect sggf.net:443 -servername sggf.net
 ### Let's Encrypt自动续期
 ```bash
 # 手动续期
-certbot renew --quiet --post-hook "docker-compose restart nginx"
+certbot renew --quiet --post-hook "docker compose restart nginx"
 
 # 测试续期
 certbot renew --dry-run
@@ -200,7 +200,7 @@ chmod 644 ssl/cert.pem
 openssl x509 -in ssl/cert.pem -noout -dates
 
 # 续期证书
-certbot renew --force --post-hook "docker-compose restart nginx"
+certbot renew --force --post-hook "docker compose restart nginx"
 ```
 
 ## 安全建议
