@@ -555,6 +555,17 @@ class StoryExpansionCoordinator:
         if action == "insert_after" and after_chapter:
             placement = f"插入到第{after_chapter}章之后"
 
+        anchor_summary = (
+            f"第{after_chapter}章：{anchor_block.title}\n{anchor_block.body[:800]}"
+            if anchor_block
+            else "无明确锚点"
+        )
+        next_summary = (
+            f"第{next_block.original_number}章：{next_block.title}\n{next_block.body[:800]}"
+            if next_block
+            else "无，表示可在结尾延展"
+        )
+
         prompt = f"""
 你是小说章节拓展策划师。请只生成 {count} 个新增章节，不允许改写旧章节。
 
@@ -562,10 +573,10 @@ class StoryExpansionCoordinator:
 {placement}
 
 【当前锚点章节】
-{f"第{after_chapter}章：{anchor_block.title}\\n{anchor_block.body[:800]}" if anchor_block else "无明确锚点"}
+{anchor_summary}
 
 【后继锁定章节】
-{f"第{next_block.original_number}章：{next_block.title}\\n{next_block.body[:800]}" if next_block else "无，表示可在结尾延展"}
+{next_summary}
 
 【本次剧情目标】
 {op.get("goal") or "补强剧情推进"}
