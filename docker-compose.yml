@@ -148,7 +148,8 @@ services:
       - "443:443"
     volumes:
       - ./nginx-prod.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
+      - ${NGINX_SSL_CERT_PATH:-./ssl/cert.pem}:/etc/nginx/ssl/cert.pem:ro
+      - ${NGINX_SSL_KEY_PATH:-./ssl/key.pem}:/etc/nginx/ssl/key.pem:ro
     depends_on:
       - backend
       - frontend

@@ -1,13 +1,24 @@
 # SSL证书配置说明
 
 ## 证书位置
-证书文件应放置在项目根目录的 `ssl/` 文件夹中：
+本地测试环境可以将证书文件放置在项目根目录的 `ssl/` 文件夹中：
 
 ```
 ssl/
 ├── cert.pem    # SSL证书文件
 └── key.pem     # SSL私钥文件
 ```
+
+生产环境推荐不要把真实证书复制到仓库目录。当前 `docker-compose.yml` 已支持从项目根目录 `.env` 读取宿主机证书路径：
+
+```env
+NGINX_SSL_CERT_PATH=/etc/letsencrypt/live/sggf.net/fullchain.pem
+NGINX_SSL_KEY_PATH=/etc/letsencrypt/live/sggf.net/privkey.pem
+```
+
+说明：
+- `.env` 默认不纳入 Git，可避免整仓部署时覆盖线上真实证书
+- 如果未设置这两个变量，Compose 会回退到仓库内的 `ssl/cert.pem` 与 `ssl/key.pem`
 
 ## 获取SSL证书的方式
 
@@ -42,15 +53,12 @@ certbot certonly --standalone -d sggf.net -d www.sggf.net
 # /etc/letsencrypt/live/sggf.net/privkey.pem   -> ssl/key.pem
 ```
 
-3. **复制证书到项目目录**
+3. **写入 Compose 证书路径**
 ```bash
-mkdir -p ssl
-cp /etc/letsencrypt/live/sggf.net/fullchain.pem ssl/cert.pem
-cp /etc/letsencrypt/live/sggf.net/privkey.pem ssl/key.pem
-
-# 设置权限
-chmod 644 ssl/cert.pem
-chmod 600 ssl/key.pem
+cat >> .env <<'EOF'
+NGINX_SSL_CERT_PATH=/etc/letsencrypt/live/sggf.net/fullchain.pem
+NGINX_SSL_KEY_PATH=/etc/letsencrypt/live/sggf.net/privkey.pem
+EOF
 ```
 
 4. **设置自动续期**
