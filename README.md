@@ -230,6 +230,8 @@ npm run dev
 docker compose up -d --build
 ```
 
+命令示例优先使用 `docker compose`。如果你的环境仍然只有旧版独立命令，也可以替换为 `docker-compose`。
+
 `docker-compose.yml` 当前包含：
 
 - `postgres`
@@ -243,6 +245,23 @@ docker compose up -d --build
 - 前端容器：`http://localhost:3000`
 - Nginx：`http://localhost`
 - 后端 API：`http://127.0.0.1:8000`
+
+### 生产部署补充说明
+
+- 生产环境推荐优先使用 [deploy.sh](deploy.sh) 做服务器内部署，而不是手工拼接长命令。
+- 当前 [deploy.sh](deploy.sh) 已内置更安全的发布行为：
+  - 仅允许在 `main` 分支自动部署
+  - 检测到已跟踪文件的未提交改动时会拒绝继续，避免覆盖现场文件
+  - 代码更新使用 `git merge --ff-only origin/main`，不再使用 `git reset --hard`
+  - 数据库迁移执行 `python -m alembic -c /app/alembic.ini upgrade heads`，兼容当前多头迁移结构
+- 当前生产 `nginx` 证书路径建议放在根目录 `.env` 中，不要把真实证书提交到仓库：
+
+```env
+NGINX_SSL_CERT_PATH=/etc/letsencrypt/live/sggf.net/fullchain.pem
+NGINX_SSL_KEY_PATH=/etc/letsencrypt/live/sggf.net/privkey.pem
+```
+
+- 如果未设置上述变量，Compose 会回退读取仓库内的 `ssl/cert.pem` 与 `ssl/key.pem`，这只建议用于本地测试或占位场景。
 
 ## 关键配置说明
 
