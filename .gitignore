@@ -155,6 +155,10 @@ test_old_sdk.wav
 # Cleanup archives
 project_cleanup_archive_*/
 .cleanup_backup/
+cleanup_analysis_report.json
+cleanup_analysis_report.txt
+cleanup_report_*.json
+backend/memory_data/
 
 # SSL certificates
 ssl/*.pem
