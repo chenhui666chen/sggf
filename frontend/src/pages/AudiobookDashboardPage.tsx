@@ -14,6 +14,8 @@ import {
   Alert,
   Box,
   Button,
+  Card,
+  CardContent,
   Chip,
   CircularProgress,
   Container,
@@ -45,6 +47,8 @@ import { logout } from '@/store/slices/authSlice'
 import ChapterDrawer from '@/components/audiobook/ChapterDrawer'
 import ProjectCard from '@/components/audiobook/ProjectCard'
 import useAudiobookChapterDrawer from '@/hooks/useAudiobookChapterDrawer'
+import BookParserUploadDialog from '@/components/BookParserUploadDialog'
+import type { BookSource } from '@/services/bookParserApi'
 import type {
   AudiobookProjectSummary,
   BookColors,
@@ -63,11 +67,10 @@ const AudiobookDashboardPage = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedGenre, setSelectedGenre] = useState<string>('all')
   
-  // 新建项目对话框
-  const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false)
-  const [newProjectTitle, setNewProjectTitle] = useState('')
-  const [newProjectText, setNewProjectText] = useState('')
-  const [creatingFromBook, setCreatingFromBook] = useState(false)
+  // 书籍上传对话框
+  const [bookUploadDialogOpen, setBookUploadDialogOpen] = useState(false)
+  
+
   
   // 提示消息
   const [snackbar, setSnackbar] = useState<{
@@ -295,63 +298,12 @@ const AudiobookDashboardPage = () => {
     navigate('/login')
   }
 
-  // 创建新项目（从文本）
-  const handleCreateProject = async () => {
-    const rawText = newProjectText.trim()
-    if (!rawText) {
-      setSnackbar({ open: true, message: '请先粘贴文本内容', severity: 'error' })
-      return
-    }
-
-    const title = newProjectTitle.trim() || '从整本书导入的项目'
-
-    // 如果一次输入过多，则跳转到拆书页面
-    const TOO_LONG_THRESHOLD = 10000
-    if (rawText.length > TOO_LONG_THRESHOLD) {
-      setNewProjectDialogOpen(false)
-      navigate('/book-parser', {
-        state: {
-          openUpload: true,
-          prefillTitle: title,
-          prefillContent: rawText,
-        },
-      })
-      return
-    }
-
-    setCreatingFromBook(true)
-    try {
-      const createdProjectRes = await apiClient.createProject({
-        title,
-        description: '从文本导入（单章）',
-      })
-      const createdProject = createdProjectRes.data as Project
-      await apiClient.createChapter(createdProject.id, {
-        project_id: createdProject.id,
-        chapter_number: 1,
-        title: '第1章：导入',
-        content: rawText,
-      })
-
-      setNewProjectDialogOpen(false)
-      setNewProjectTitle('')
-      setNewProjectText('')
-      setSnackbar({
-        open: true,
-        message: '项目创建成功',
-        severity: 'success',
-      })
-      navigate(`/audiobook/${createdProject.id}`)
-    } catch (error: any) {
-      console.error('创建项目失败:', error)
-      setSnackbar({
-        open: true,
-        message: await extractApiErrorMessage(error, '创建项目失败，请稍后重试'),
-        severity: 'error',
-      })
-    } finally {
-      setCreatingFromBook(false)
-    }
+  const handleBookUploadSuccess = (book: BookSource) => {
+    setSnackbar({
+      open: true,
+      message: `书籍《${book.title}》已上传、完成拆书分析并自动导入灵感方舟，可继续用于有声书改编`,
+      severity: 'success',
+    })
   }
 
   return (
@@ -407,19 +359,6 @@ const AudiobookDashboardPage = () => {
 
             {/* 右侧：操作按钮 */}
             <Box sx={{ display: 'flex', gap: 1.5 }}>
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                onClick={() => setNewProjectDialogOpen(true)}
-                sx={{
-                  backgroundColor: 'white',
-                  color: '#1976d2',
-                  fontWeight: 600,
-                  '&:hover': { backgroundColor: 'rgba(255,255,255,0.9)' },
-                }}
-              >
-                新建项目
-              </Button>
               <Button
                 variant="outlined"
                 startIcon={<HistoryIcon />}
@@ -550,7 +489,7 @@ const AudiobookDashboardPage = () => {
                   <Button
                     variant="contained"
                     startIcon={<AddIcon />}
-                    onClick={() => setNewProjectDialogOpen(true)}
+                    onClick={() => setBookUploadDialogOpen(true)}
                     sx={{
                       backgroundColor: 'white',
                       color: '#1976d2',
@@ -578,56 +517,104 @@ const AudiobookDashboardPage = () => {
                     </Grid>
                   )
                 })}
+
+                {/* 新建项目卡片入口 */}
+                <Grid item xs={12} sm={6} md={4} lg={3}>
+                  <Card
+                    sx={{
+                      cursor: 'pointer',
+                      transition: 'transform 0.25s ease, box-shadow 0.25s ease',
+                      background: 'linear-gradient(135deg, rgba(17,24,39,0.55) 0%, rgba(31,41,55,0.45) 100%)',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      position: 'relative',
+                      overflow: 'hidden',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      minHeight: 200,
+                      backdropFilter: 'blur(8px)',
+                      '&:hover': {
+                        transform: 'translateY(-6px)',
+                        boxShadow: '0 16px 36px rgba(0,0,0,0.28)',
+                      },
+                    }}
+                    onClick={() => setBookUploadDialogOpen(true)}
+                  >
+                    <CardContent
+                      sx={{
+                        width: '100%',
+                        position: 'relative',
+                        zIndex: 1,
+                        p: 2.5,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 2,
+                      }}
+                    >
+                      {/* 唱片图标 */}
+                      <Box
+                        sx={{
+                          width: 100,
+                          height: 100,
+                          borderRadius: '50%',
+                          position: 'relative',
+                          backgroundImage:
+                            'radial-gradient(circle at 50% 50%, rgba(255,255,255,0.10) 0%, rgba(0,0,0,0.78) 38%, rgba(0,0,0,0.95) 72%),' +
+                            'repeating-radial-gradient(circle at 50% 50%, rgba(255,255,255,0.06) 0px, rgba(255,255,255,0.06) 1px, rgba(0,0,0,0) 2px, rgba(0,0,0,0) 6px)',
+                          boxShadow: '0 8px 20px rgba(0,0,0,0.25)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            position: 'absolute',
+                            inset: 30,
+                            borderRadius: '50%',
+                            background: 'linear-gradient(145deg, #1976d2 0%, #1565c0 100%)',
+                            border: '1px solid rgba(255,255,255,0.25)',
+                            boxShadow: 'inset 0 0 0 4px rgba(0,0,0,0.25)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <AddIcon sx={{ color: 'white', fontSize: 28 }} />
+                        </Box>
+                      </Box>
+
+                      <Box sx={{ textAlign: 'center' }}>
+                        <Typography
+                          sx={{
+                            color: 'rgba(255,255,255,0.95)',
+                            fontWeight: 700,
+                            fontSize: '1.1rem',
+                            mb: 0.5,
+                          }}
+                        >
+                          新建有声项目
+                        </Typography>
+                        <Typography
+                          sx={{
+                            color: 'rgba(255,255,255,0.65)',
+                            fontSize: '0.85rem',
+                          }}
+                        >
+                          上传书籍创建项目
+                        </Typography>
+                      </Box>
+                    </CardContent>
+                  </Card>
+                </Grid>
               </Grid>
             )}
           </>
         )}
       </Container>
-
-      {/* 新建项目对话框 */}
-      <Dialog
-        open={newProjectDialogOpen}
-        onClose={() => setNewProjectDialogOpen(false)}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>从文本创建项目</DialogTitle>
-      <DialogContent>
-        <Alert severity="info" sx={{ mb: 2 }}>
-            文本较长将自动跳转到拆书工具进行章节切分与AI分析；短文本会作为第1章导入项目。
-          </Alert>
-          <TextField
-            fullWidth
-            label="项目标题"
-            value={newProjectTitle}
-            onChange={(e) => setNewProjectTitle(e.target.value)}
-            sx={{ mb: 2 }}
-          />
-          <TextField
-            fullWidth
-            label="文本内容"
-            value={newProjectText}
-            onChange={(e) => setNewProjectText(e.target.value)}
-            multiline
-            rows={8}
-            placeholder="请粘贴整本书的文本内容..."
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setNewProjectDialogOpen(false)}>取消</Button>
-          <Button
-            onClick={handleCreateProject}
-            variant="contained"
-            disabled={creatingFromBook}
-            sx={{
-              backgroundColor: '#9c27b0',
-              '&:hover': { backgroundColor: '#7b1fa2' },
-            }}
-          >
-            {creatingFromBook ? '创建中...' : '创建项目'}
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       {/* 回收站：已删除有声书项目 */}
       <Dialog
@@ -827,6 +814,13 @@ const AudiobookDashboardPage = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* 书籍上传对话框 */}
+      <BookParserUploadDialog
+        open={bookUploadDialogOpen}
+        onClose={() => setBookUploadDialogOpen(false)}
+        onUploadSuccess={handleBookUploadSuccess}
+      />
     </Box>
   )
 }

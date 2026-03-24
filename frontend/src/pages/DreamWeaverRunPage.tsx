@@ -252,6 +252,15 @@ interface LibraryPayload {
   assets: LibraryAsset[]
 }
 
+interface CollectFeedback {
+  type: 'success' | 'error'
+  text: string
+}
+
+function buildProtectedMergedVideoUrl(runId: string): string {
+  return `protected://dreamweaver-run-merged/${encodeURIComponent(runId)}`
+}
+
 interface DreamweaverEventRecord {
   event_id: number
   run_id: string
@@ -642,6 +651,8 @@ export default function DreamWeaverRunPage() {
   const [mergedVideoLoading, setMergedVideoLoading] = useState(false)
   const [mergedVideoError, setMergedVideoError] = useState<string | null>(null)
   const [mergedVideoPreviewUrl, setMergedVideoPreviewUrl] = useState<string | null>(null)
+  const [mergedVideoCollecting, setMergedVideoCollecting] = useState(false)
+  const [mergedVideoCollectFeedback, setMergedVideoCollectFeedback] = useState<CollectFeedback | null>(null)
   const [runAssetPreviews, setRunAssetPreviews] = useState<Record<string, string>>({})
   const [runAssetPreviewLoading, setRunAssetPreviewLoading] = useState<Record<string, boolean>>({})
   const [runAssetPreviewErrors, setRunAssetPreviewErrors] = useState<Record<string, string>>({})
@@ -3153,6 +3164,131 @@ export default function DreamWeaverRunPage() {
     }
   }, [currentRunId, result?.merged_video])
 
+  const collectMergedVideo = useCallback(async () => {
+    if (!currentRunId) {
+      setMergedVideoCollectFeedback({ type: 'error', text: '缺少 run_id，无法归档合成视频' })
+      return
+    }
+
+    const mergedPath =
+      result?.merged_video ||
+      (runSnapshot?.contract && typeof runSnapshot.contract === 'object'
+        ? extractMergedVideoFromContract(runSnapshot.contract as Record<string, any>)
+        : null)
+
+    setMergedVideoCollecting(true)
+    setMergedVideoCollectFeedback(null)
+
+    try {
+      await apiClient.createUserAsset({
+        project_id: selectedProjectId,
+        source_module: 'dreamweaver_run',
+        asset_kind: 'video',
+        asset_class: 'deliverable',
+        title: `${selectedProject?.title || '短剧项目'} 合成视频`,
+        description: 'DreamWeaver 最终合成成片归档',
+        file_url: buildProtectedMergedVideoUrl(currentRunId),
+        preview_url: buildProtectedMergedVideoUrl(currentRunId),
+        generation_mode: 'merged_video',
+        tags: ['dreamweaver', 'deliverable', 'merged-video'],
+        metadata_json: {
+          run_id: currentRunId,
+          project_id: selectedProjectId,
+          project_title: selectedProject?.title || null,
+          merged_video_path: mergedPath,
+        },
+        source_payload_json: {
+          run_id: currentRunId,
+          project_id: selectedProjectId,
+          type: 'merged_video',
+          path: mergedPath,
+        },
+      })
+      setMergedVideoCollectFeedback({ type: 'success', text: '合成视频已归档到用户中心' })
+    } catch (collectError) {
+      setMergedVideoCollectFeedback({
+        type: 'error',
+        text: await extractApiErrorMessage(collectError, '归档合成视频失败'),
+      })
+    } finally {
+      setMergedVideoCollecting(false)
+    }
+  }, [currentRunId, result?.merged_video, runSnapshot, selectedProject?.title, selectedProjectId])
+
+  const renderMergedVideoPanel = useCallback(
+    (options?: { centeredPreview?: boolean }) => (
+      <>
+        <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mt: 1 }}>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={loadMergedVideoPreview}
+            disabled={!currentRunId || mergedVideoLoading}
+          >
+            {mergedVideoLoading ? '加载中…' : mergedVideoPreviewUrl ? '重新加载合成视频' : '加载合成视频预览'}
+          </Button>
+          <Button
+            size="small"
+            variant="contained"
+            onClick={downloadMergedVideo}
+            disabled={!currentRunId || mergedVideoLoading}
+          >
+            下载合成视频
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => void collectMergedVideo()}
+            disabled={!currentRunId || mergedVideoCollecting}
+          >
+            {mergedVideoCollecting ? '归档中…' : '归档到用户中心'}
+          </Button>
+        </Stack>
+        {mergedVideoCollectFeedback && (
+          <Alert severity={mergedVideoCollectFeedback.type} sx={{ mt: 1 }}>
+            {mergedVideoCollectFeedback.text}
+          </Alert>
+        )}
+        {mergedVideoError && (
+          <Alert severity="error" sx={{ mt: 1 }}>
+            {mergedVideoError}
+          </Alert>
+        )}
+        {mergedVideoPreviewUrl && (
+          <Box
+            sx={{
+              mt: 1,
+              bgcolor: '#000',
+              borderRadius: 2,
+              overflow: 'hidden',
+              ...(options?.centeredPreview
+                ? {
+                    mx: 'auto',
+                    width: '100%',
+                    maxWidth: mergedVideoPreviewPortrait ? 360 : 720,
+                  }
+                : {}),
+            }}
+          >
+            <Box component="video" src={mergedVideoPreviewUrl} controls sx={{ width: '100%', display: 'block' }} />
+          </Box>
+        )}
+      </>
+    ),
+    [
+      collectMergedVideo,
+      currentRunId,
+      downloadMergedVideo,
+      loadMergedVideoPreview,
+      mergedVideoCollectFeedback,
+      mergedVideoCollecting,
+      mergedVideoError,
+      mergedVideoLoading,
+      mergedVideoPreviewPortrait,
+      mergedVideoPreviewUrl,
+    ],
+  )
+
   const loadRunAssetPreview = useCallback(
     async (uri: string) => {
       const targetUri = String(uri || '').trim()
@@ -4845,36 +4981,7 @@ export default function DreamWeaverRunPage() {
                           <Typography variant="body2" color="text.secondary">
                             {snapshotMergedVideo ? `合成视频：${snapshotMergedVideo}` : '暂无合成视频快照'}
                           </Typography>
-                          {snapshotMergedVideo && (
-                            <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mt: 1 }}>
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                onClick={loadMergedVideoPreview}
-                                disabled={!currentRunId || mergedVideoLoading}
-                              >
-                                {mergedVideoLoading ? '加载中…' : mergedVideoPreviewUrl ? '重新加载合成视频' : '加载合成视频预览'}
-                              </Button>
-                              <Button
-                                size="small"
-                                variant="contained"
-                                onClick={downloadMergedVideo}
-                                disabled={!currentRunId || mergedVideoLoading}
-                              >
-                                下载合成视频
-                              </Button>
-                            </Stack>
-                          )}
-                          {mergedVideoError && (
-                            <Alert severity="error" sx={{ mt: 1 }}>
-                              {mergedVideoError}
-                            </Alert>
-                          )}
-                          {mergedVideoPreviewUrl && (
-                            <Box sx={{ mt: 1, bgcolor: '#000', borderRadius: 2, overflow: 'hidden' }}>
-                              <Box component="video" src={mergedVideoPreviewUrl} controls sx={{ width: '100%', display: 'block' }} />
-                            </Box>
-                          )}
+                          {snapshotMergedVideo && renderMergedVideoPanel()}
                         </Box>
                       )}
                       <Stack direction="row" spacing={1} flexWrap="wrap" mb={1} alignItems="center">
@@ -5641,36 +5748,7 @@ export default function DreamWeaverRunPage() {
                             <Typography variant="body2" color="text.secondary">
                               {snapshotMergedVideo ? `合成视频：${snapshotMergedVideo}` : '暂无合成视频快照'}
                             </Typography>
-                            {snapshotMergedVideo && (
-                              <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mt: 1 }}>
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  onClick={loadMergedVideoPreview}
-                                  disabled={!currentRunId || mergedVideoLoading}
-                                >
-                                  {mergedVideoLoading ? '加载中…' : mergedVideoPreviewUrl ? '重新加载合成视频' : '加载合成视频预览'}
-                                </Button>
-                                <Button
-                                  size="small"
-                                  variant="contained"
-                                  onClick={downloadMergedVideo}
-                                  disabled={!currentRunId || mergedVideoLoading}
-                                >
-                                  下载合成视频
-                                </Button>
-                              </Stack>
-                            )}
-                            {mergedVideoError && (
-                              <Alert severity="error" sx={{ mt: 1 }}>
-                                {mergedVideoError}
-                              </Alert>
-                            )}
-                            {mergedVideoPreviewUrl && (
-                              <Box sx={{ mt: 1, bgcolor: '#000', borderRadius: 2, overflow: 'hidden' }}>
-                                <Box component="video" src={mergedVideoPreviewUrl} controls sx={{ width: '100%', display: 'block' }} />
-                              </Box>
-                            )}
+                            {snapshotMergedVideo && renderMergedVideoPanel()}
                           </Box>
                         )}
                       </Box>
@@ -6474,44 +6552,7 @@ export default function DreamWeaverRunPage() {
                           </Typography>
                         )}
                         {result.merged_video && (
-                          <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mt: 1 }}>
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              onClick={loadMergedVideoPreview}
-                              disabled={!currentRunId || mergedVideoLoading}
-                            >
-                              {mergedVideoLoading ? '加载中…' : mergedVideoPreviewUrl ? '重新加载合成视频' : '加载合成视频预览'}
-                            </Button>
-                            <Button
-                              size="small"
-                              variant="contained"
-                              onClick={downloadMergedVideo}
-                              disabled={!currentRunId || mergedVideoLoading}
-                            >
-                              下载合成视频
-                            </Button>
-                          </Stack>
-                        )}
-                        {mergedVideoError && (
-                          <Alert severity="error" sx={{ mt: 1 }}>
-                            {mergedVideoError}
-                          </Alert>
-                        )}
-                        {mergedVideoPreviewUrl && (
-                          <Box
-                            sx={{
-                              mt: 1,
-                              bgcolor: '#000',
-                              borderRadius: 2,
-                              overflow: 'hidden',
-                              mx: 'auto',
-                              width: '100%',
-                              maxWidth: mergedVideoPreviewPortrait ? 360 : 720,
-                            }}
-                          >
-                            <Box component="video" src={mergedVideoPreviewUrl} controls sx={{ width: '100%', display: 'block' }} />
-                          </Box>
+                          renderMergedVideoPanel({ centeredPreview: true })
                         )}
                         {previewStep === 3 && (
                           <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mt: 1 }}>

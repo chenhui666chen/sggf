@@ -556,12 +556,14 @@ class ChapterSummarizer:
             print(f"⚠️ 从数据库加载摘要时出错：{e}")
             return None
     
-    def get_or_generate_summary(self, chapter_id: int, chapter_number: int, 
+    def get_or_generate_summary(self, chapter_id: int, chapter_number: int,
                                chapter_title: str, chapter_content: str,
-                               summary_length: int = 300) -> Dict[str, Any]:
+                               summary_length: int = 300,
+                               force_regenerate: bool = False) -> Dict[str, Any]:
         """获取或生成章节摘要（带缓存）
         
-        优先从数据库加载，如果不存在则生成并保存
+        优先从数据库加载，如果不存在则生成并保存。
+        当章节正文已更新时，可通过 force_regenerate 强制跳过缓存。
         
         Args:
             chapter_id: 章节ID
@@ -569,18 +571,22 @@ class ChapterSummarizer:
             chapter_title: 章节标题
             chapter_content: 章节内容
             summary_length: 摘要目标字数
+            force_regenerate: 是否强制重新生成摘要
             
         Returns:
             摘要数据
         """
         # 1. 尝试从数据库加载
-        cached_summary = self.load_summary_from_db(chapter_id)
-        if cached_summary:
-            print(f"✅ 使用缓存的摘要（章节 ID: {chapter_id}）")
-            return cached_summary
+        if not force_regenerate:
+            cached_summary = self.load_summary_from_db(chapter_id)
+            if cached_summary:
+                print(f"✅ 使用缓存的摘要（章节 ID: {chapter_id}）")
+                return cached_summary
+        else:
+            print(f"🔄 检测到强制重生成，跳过缓存摘要（章节 ID: {chapter_id}）")
         
         # 2. 缓存不存在，生成新摘要
-        print(f"🔄 缓存不存在，开始生成新摘要...")
+        print(f"🔄 缓存不存在或已失效，开始生成新摘要...")
         summary = self.generate_chapter_summary(
             chapter_number=chapter_number,
             chapter_title=chapter_title,

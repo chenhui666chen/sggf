@@ -16,9 +16,11 @@ import os
 import time
 import logging
 import asyncio
+from copy import deepcopy
 from typing import Dict, List, Optional, Any, Callable, Union, TYPE_CHECKING
 from pathlib import Path
 
+from core.model_catalog_runtime import get_model_catalog_runtime_index
 from core.model_resolution import normalize_model_id, normalize_task_type
 
 if TYPE_CHECKING:
@@ -123,32 +125,30 @@ class ModelHub:
         """
         from schemas.unified_model_spec import DispatchStrategy, LLMResult
 
-        if not self.registry.get_all_specs():
-            self.initialize()
-
-        self._ensure_adapters_loaded()
-
-        normalized_task_type = normalize_task_type(task_type)
-        selected_model_id = normalize_model_id(model)
-
-        if selected_model_id is None and normalized_task_type:
-            dispatch_strategy = self._parse_strategy(strategy)
-            selected_spec = self.registry.select_best_model(normalized_task_type, dispatch_strategy)
-            if selected_spec:
-                selected_model_id = selected_spec.id
+        selection = self.resolve_model_request(
+            task_type=task_type,
+            model=model,
+            strategy=strategy,
+        )
+        selected_model_id = selection["resolved_model_id"]
 
         if selected_model_id is None:
             selected_model_id = self._get_default_model()
+            selection["resolved_model_id"] = selected_model_id
+            selection["selection_mode"] = "default"
 
         if selected_model_id is None:
-            return LLMResult(
-                success=False,
-                model_id="",
-                error="没有可用的模型",
-                error_code="no_model_available"
+            return self._attach_resolution_metadata(
+                LLMResult(
+                    success=False,
+                    model_id="",
+                    error="没有可用的模型",
+                    error_code="no_model_available"
+                ),
+                selection,
             )
 
-        return await self._execute_call(
+        result = await self._execute_call(
             model_id=selected_model_id,
             messages=messages,
             temperature=temperature,
@@ -157,6 +157,7 @@ class ModelHub:
             on_chunk=on_chunk,
             **kwargs
         )
+        return self._attach_resolution_metadata(result, selection)
 
     async def _execute_call(
         self,
@@ -203,7 +204,7 @@ class ModelHub:
                 error_code="adapter_missing"
             )
 
-        max_retries = kwargs.get("max_retries", 3)
+        max_retries = self._resolve_max_retries(spec, kwargs)
         last_result = None
 
         for attempt in range(max_retries):
@@ -278,6 +279,137 @@ class ModelHub:
             error="调用失败",
             error_code="call_failed"
         )
+
+    def resolve_model_request(
+        self,
+        *,
+        task_type: Optional[str] = None,
+        model: Optional[str] = None,
+        strategy: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        if not self.registry.get_all_specs():
+            self.initialize()
+
+        self._ensure_adapters_loaded()
+
+        normalized_task_type = normalize_task_type(task_type)
+        requested_model_id = normalize_model_id(model)
+        dispatch_strategy = self._parse_strategy(strategy)
+        resolved_model_id: Optional[str] = None
+        selection_mode = "unresolved"
+        reason: Optional[str] = None
+        requested_signal: Optional[Dict[str, Any]] = None
+
+        if requested_model_id is None and normalized_task_type:
+            selected_spec = self.registry.select_best_model(normalized_task_type, dispatch_strategy)
+            if selected_spec:
+                resolved_model_id = selected_spec.id
+                selection_mode = "task_router"
+        elif requested_model_id is not None:
+            requested_signal = get_model_catalog_runtime_index().get_signal(requested_model_id).to_dict()
+            resolved_model_id = self._resolve_catalog_guarded_model(
+                requested_model_id,
+                task_type=normalized_task_type,
+                strategy=dispatch_strategy,
+            )
+            selection_mode = "explicit_model"
+            if resolved_model_id != requested_model_id:
+                reason = requested_signal.get("reason") or "catalog_guard_reroute"
+
+        return {
+            "task_type": normalized_task_type,
+            "strategy": getattr(dispatch_strategy, "value", str(dispatch_strategy)),
+            "requested_model_id": requested_model_id,
+            "resolved_model_id": resolved_model_id,
+            "requested_catalog_routing": requested_signal,
+            "rerouted": bool(requested_model_id and resolved_model_id and resolved_model_id != requested_model_id),
+            "reason": reason,
+            "selection_mode": selection_mode,
+        }
+
+    def _resolve_max_retries(
+        self,
+        spec: "UnifiedModelSpec",
+        kwargs: Dict[str, Any],
+    ) -> int:
+        """解析本次调用的重试次数，优先使用模型配置。"""
+        explicit_value = kwargs.get("max_retries")
+        if explicit_value is not None:
+            try:
+                return max(1, int(explicit_value))
+            except (TypeError, ValueError):
+                logger.warning(f"⚠️ 非法 max_retries={explicit_value!r}，回退到模型默认配置")
+
+        if not spec.constraints.supports_max_retries:
+            return 1
+
+        configured_retries = spec.api_config.default_max_retries
+        try:
+            return max(1, int(configured_retries))
+        except (TypeError, ValueError):
+            logger.warning(
+                f"⚠️ 模型 {spec.id} 的 default_max_retries={configured_retries!r} 非法，使用默认值 1"
+            )
+            return 1
+
+    def _resolve_catalog_guarded_model(
+        self,
+        model_id: str,
+        *,
+        task_type: Optional[str],
+        strategy: "DispatchStrategy",
+    ) -> str:
+        runtime_index = get_model_catalog_runtime_index()
+        signal = runtime_index.get_signal(model_id)
+        if not signal.blocked:
+            return model_id
+
+        if task_type:
+            alternative = self.registry.select_best_model(task_type, strategy)
+            if alternative and alternative.id != model_id:
+                logger.warning(
+                    "⚠️ 模型 %s 最近联网校验失败，自动切换到任务 %s 的可路由模型 %s",
+                    model_id,
+                    task_type,
+                    alternative.id,
+                )
+                return alternative.id
+
+        spec = self.registry.get_spec(model_id)
+        fallback_id = spec.get_fallback_model() if spec else None
+        if fallback_id and fallback_id != model_id and self.registry._is_available(fallback_id):
+            fallback_signal = runtime_index.get_signal(fallback_id)
+            if not fallback_signal.blocked:
+                logger.warning(
+                    "⚠️ 模型 %s 最近联网校验失败，自动切换到回退模型 %s",
+                    model_id,
+                    fallback_id,
+                )
+                return fallback_id
+
+        logger.warning(
+            "⚠️ 模型 %s 最近联网校验失败，但暂未找到更稳妥的替代模型，保留原始调用",
+            model_id,
+        )
+        return model_id
+
+    def _attach_resolution_metadata(self, result: "LLMResult", selection: Dict[str, Any]) -> "LLMResult":
+        metadata = dict(getattr(result, "metadata", {}) or {})
+        metadata["selection_mode"] = selection.get("selection_mode")
+        metadata["requested_model_id"] = selection.get("requested_model_id")
+        metadata["resolved_model_id"] = selection.get("resolved_model_id")
+        metadata["rerouted"] = bool(selection.get("rerouted"))
+        if selection.get("requested_catalog_routing") is not None:
+            metadata["requested_catalog_routing"] = deepcopy(selection["requested_catalog_routing"])
+        if selection.get("reason"):
+            metadata["routing_reason"] = selection.get("reason")
+        result.metadata = metadata
+        return result
+
+    def _attach_catalog_signal(self, info: Dict[str, Any], model_id: str) -> Dict[str, Any]:
+        payload = dict(info)
+        payload["catalog_routing"] = get_model_catalog_runtime_index().get_signal(model_id).to_dict()
+        return payload
 
     def _parse_strategy(self, strategy: Optional[str]) -> "DispatchStrategy":
         """解析调度策略"""
@@ -395,13 +527,13 @@ class ModelHub:
         if task_type:
             specs = [s for s in specs if s.supports_task_type(task_type)]
 
-        return [s.to_dict() for s in specs]
+        return [self._attach_catalog_signal(s.to_dict(), s.id) for s in specs]
 
     def get_model_info(self, model_id: str) -> Optional[Dict[str, Any]]:
         """获取模型详情"""
         spec = self.registry.get_spec(model_id)
         if spec:
-            info = spec.to_dict()
+            info = self._attach_catalog_signal(spec.to_dict(), spec.id)
             stats = self.registry.get_performance_stats(model_id)
             if stats:
                 info["stats"] = stats.to_dict()

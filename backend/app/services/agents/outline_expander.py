@@ -48,12 +48,24 @@ class OutlineExpander:
 
         # 🔔 为扩展大纲使用 qwen-long
         self.llm = create_task_llm(task_type="outline_expand")
-        
-        # 🎆 为单卷详细扩展使用 DeepSeek-R1（深度推理能力）
-        from core.langchain_bridge import get_task_llm
-        r1_llm = get_task_llm("volume_detail_expand")
+
+        # 🎆 为单卷详细扩展使用 DeepSeek-R1（深度推理能力 + 64K超长输出）
+        # 官方最新能力：max_output_tokens=64K，足够生成70章大纲（约31,000字）
+        r1_llm = create_task_llm(
+            task_type="volume_detail_expand",
+            max_tokens=64000  # 🔥 明确设置64K输出限制
+        )
         self.plot_architect_r1 = PlotArchitectAgent(self.knowledge_base, self.memory_manager, llm=r1_llm)
-        print("🎆 单卷扩展使用 DeepSeek-R1 模型")
+
+        # 🔥 为超大卷（>80章）准备 qwen-long 作为备用模型
+        long_llm = create_task_llm(
+            task_type="outline_expand",
+            max_tokens=8192  # qwen-long 的输出限制
+        )
+        self.plot_architect_long = PlotArchitectAgent(self.knowledge_base, self.memory_manager, llm=long_llm)
+
+        print("🎆 单卷扩展使用 DeepSeek-R1 模型（64K超长输出能力）")
+        print("🎆 超大卷（>80章）自动切换到 qwen-long 模型")
         
         # 🎆 初始化分层摘要器
         self.layered_summarizer = LayeredSummarizer(
@@ -226,6 +238,34 @@ class OutlineExpander:
         )
 
         return count
+
+    def _extract_character_names_summary(self, characters_text: str) -> str:
+        """提取角色名单摘要（仅包含姓名和基本定位，避免上下文溢出）
+
+        Args:
+            characters_text: 完整的人物设定文本
+
+        Returns:
+            简化的角色名单摘要
+        """
+        if not characters_text or characters_text.strip() == '':
+            return "（暂无现有角色）"
+
+        # 使用智能识别器提取角色名
+        _, character_names = self.character_recognizer.count_characters(
+            text=characters_text,
+            use_ai_verification=False  # 不需要AI验证，快速提取即可
+        )
+
+        if not character_names:
+            return "（暂无现有角色）"
+
+        # 构建简化摘要（仅姓名列表）
+        summary_lines = []
+        for idx, name in enumerate(character_names, 1):
+            summary_lines.append(f"{idx}. {name}")
+
+        return "\n".join(summary_lines)
 
     def expand_plot_outline(self, current_outline: str, world_setting: str,
                           characters: str, target_chapters: int = 50) -> Dict[str, Any]:
@@ -1368,11 +1408,14 @@ Please直接按阵营分类输出，格式如下（每个人物必须包含完�
                 traceback.print_exc()
                 raise
 
-            # 第二步：整合更新人物体系（使用优化后的上下文）
+            # 第二步：整合更新人物体系（🔥 优化：仅传递现有角色摘要，避免上下文溢出）
+            # 🔥 从 main_characters 中提取现有角色名单（避免传递完整上下文）
+            existing_characters_summary = self._extract_character_names_summary(main_characters)
+
             integration_prompt = f"""Please将新扩展的角色整合到现有人物体系中，生成一份完整的、结构清晰的人物档案。
 
-【优化后的当前人物上下文】
-{optimized_context}
+【现有角色名单】（共{current_character_count}个）
+{existing_characters_summary}
 
 【结构化记忆约束】
 {memory_text or '（无可用结构化记忆）'}
@@ -1807,7 +1850,23 @@ Please analyze：
         print(f"\n{'='*70}")
         print(f"📖 【单卷详细扩展】第{target_volume_index}卷，从第{start_chapter_num}章开始，生成{chapters_count_range[0]}-{chapters_count_range[1]}章")
         print(f"{'='*70}\n")
-        
+
+        # 🔥 智能模型选择：根据章节数量自动选择最合适的模型
+        avg_chapters = (chapters_count_range[0] + chapters_count_range[1]) // 2
+        estimated_words = avg_chapters * 450  # 每章约450字
+
+        if avg_chapters > 80:
+            # 超大卷（>80章）：使用 qwen-long（超长上下文，适合分段生成）
+            selected_architect = self.plot_architect_long
+            model_name = "qwen-long"
+            print(f"🔄 检测到超大卷（{avg_chapters}章，约{estimated_words}字），自动切换到 qwen-long 模型")
+            print(f"   💡 建议：超大卷可能需要分多次生成，或考虑拆分为多个小卷")
+        else:
+            # 常规卷（≤80章）：使用 DeepSeek-R1（64K输出，质量更高）
+            selected_architect = self.plot_architect_r1
+            model_name = "deepseek-r1"
+            print(f"✅ 使用 DeepSeek-R1 模型（{avg_chapters}章，约{estimated_words}字，64K输出能力）")
+
         # 🛡️ 临时修复：清空历史记忆，避免旧消息导致API错误
         print("🧹 清空历史记忆，避免旧消息影响...")
         self.plot_architect.memory_manager.clear_history()
@@ -1927,11 +1986,18 @@ Please analyze：
 {characters[:2000] if characters else '待完善'}
 
 【扩展要求】
-本卷章节编号从第{start_chapter_num}章开始，生成{chapters_count_range[0]}-{chapters_count_range[1]}章左右的详细大纲。
+本卷章节编号从第{start_chapter_num}章开始，必须生成{chapters_count_range[0]}-{chapters_count_range[1]}章的详细大纲。
+
+⚠️ 【章节数量要求】：
+- 最少章节数：{chapters_count_range[0]}章（不得少于此数量）
+- 最多章节数：{chapters_count_range[1]}章（不得超过此数量）
+- 建议章节数：{(chapters_count_range[0] + chapters_count_range[1]) // 2}章左右
+- 如果剧情需要，可以在上述范围内自由调整，但必须完整输出每一章
+
 {volume_transition_section}
 
 🔥 【章节细纲模板】每章必须严格按以下格式：
-{template_example if template_example else '''第{chapter_num}章：《{chapter_title}》
+## 二、第{target_volume_index}卷详细规划（第{start_chapter_num}-第{start_chapter_num + chapters_count_range[0] - 1}章至第{start_chapter_num + chapters_count_range[1] - 1}章）
 - **场景目标**：（本章核心任务，30-40字）
   格式：[地点] + [在场人物] + [要达成什么]
   
@@ -1962,12 +2028,14 @@ Please输出完整的、重新整合后的网文大纲：
 ## 一、故事概述
 [整合后的完整故事概述，300-500字]
 
-## 二、第{target_volume_index}卷详细规划（第{start_chapter_num}-第X章）
+## 二、第{target_volume_index}卷详细规划（预计{chapters_count_range[0]}-{chapters_count_range[1]}章，从第{start_chapter_num}章开始）
 
 ⚠️ 【极重要】必须逐章完整输出，不得省略任何章节！
+- 本卷必须包含{chapters_count_range[0]}-{chapters_count_range[1]}章，不得少于{chapters_count_range[0]}章
 - 禁止使用"中间章节略"、"......略"、"精选第X章"等占位符
 - 每一章都必须按照上述模板格式完整展开，包含所有必填字段
-- 从第{start_chapter_num}章开始，一直写到本卷最后一章，中间不能断开
+- 从第{start_chapter_num}章开始，一直写到本卷最后一章（至少第{start_chapter_num + chapters_count_range[0] - 1}章），中间不能断开
+- 如果剧情需要更多章节，可以扩展到第{start_chapter_num + chapters_count_range[1] - 1}章
 
 ### 第{start_chapter_num}章：《章节标题》
 - **场景目标**：...
@@ -2025,8 +2093,8 @@ Please输出完整的、重新整合后的网文大纲：
 ✅ 下卷开局场景：（明确描述）
 ✅ 卷尾钩子：（强力悬念）"""
 
-        print("【第一步】详细扩展第{target_volume_index}卷...")
-        
+        print(f"【第一步】详细扩展第{target_volume_index}卷（使用{model_name}模型）...")
+
         # 🛡️ 内容安全重试机制
         max_retries = 3
         for attempt in range(max_retries):
@@ -2044,9 +2112,9 @@ Please输出完整的、重新整合后的网文大纲：
 3. 使用委婉、克制的表达方式
 4. 重点突出正面价值观和人物成长"""
                     detail_prompt_safe = detail_prompt + safety_constraint
-                    volume_content = self.plot_architect_r1.process(detail_prompt_safe, {})  # ✅ 使用R1
+                    volume_content = selected_architect.process(detail_prompt_safe, {})  # ✅ 使用选中的模型
                 else:
-                    volume_content = self.plot_architect_r1.process(detail_prompt, {})  # ✅ 使用R1
+                    volume_content = selected_architect.process(detail_prompt, {})  # ✅ 使用选中的模型
                 
                 print("✅ 单卷详细扩展完成\n")
                 break  # 成功则跳出重试循环

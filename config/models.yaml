@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-# Model Specifications Configuration
-# This file stores image, video and audio model records for the project.
+# 模型规格配置
+# 当前文件存放项目内图像、视频与音频模型的档案记录。
 
 models:
   - id: wanx-v1
@@ -16,19 +16,19 @@ models:
     capabilities:
       - name: reference_images
         support_level: native
-        description: Supports reference images for style and subject transfer
+        description: 支持参考图输入，用于风格迁移与主体约束
       - name: style_control
         support_level: native
-        description: Supports multiple visual styles and prompt-level style guidance
+        description: 支持多种视觉风格与提示词级风格控制
       - name: negative_prompt
         support_level: native
-        description: Supports negative prompts
+        description: 支持负向提示词
       - name: seed_control
         support_level: native
-        description: Supports seed-based reproducibility
+        description: 支持通过种子控制结果复现
       - name: batch_generation
         support_level: emulated
-        description: Batch generation is implemented by multiple requests
+        description: 批量生成功能通过多次请求模拟实现
 
     constraints:
       duration: []
@@ -82,40 +82,40 @@ models:
         max_reference_images: 4
       avoided_params: []
       tips:
-        - Use descriptive prompts for better scene control
-        - Add style and subject cues explicitly for consistent results
+        - 使用更具体的提示词有助于提升场景控制效果
+        - 明确补充风格和主体约束，结果会更稳定
 
     fallback_strategies:
       - trigger_condition: content_safety
         fallback_model_id: wanx-v1-safe
-        description: Fallback to safe mode
+        description: 回退到安全模式
         priority: 1
       - trigger_condition: rate_limit
         fallback_model_id: sdxl-turbo
-        description: Fallback to SDXL when rate limited
+        description: 触发限流时回退到 SDXL
         priority: 2
 
     endpoint: /api/v1/services/aigc/multimodal-generation/generation
     auth_method: bearer
     requires_external_network: true
-    summary: Primary text-to-image model in the project. Official DashScope docs position Wanx as a general visual generation model for prompt-based image creation and editing style transfer.
+    summary: 项目中的主力文生图模型。阿里云百炼官方文档将 Wanx 定位为通用视觉生成模型，适合基于提示词进行图像生成、风格迁移与编辑增强。
     recommended_scenarios:
-      - Storyboard concept art
-      - Character visual exploration
-      - Cover draft generation
-      - Style reference based image creation
+      - 分镜概念图生成
+      - 角色视觉探索
+      - 封面草图生成
+      - 基于风格参考的图像创作
     limitations:
-      - Latency is noticeably higher than turbo variants
-      - Character consistency across many rounds still needs reference control
-      - It is not the best choice for ultra-fast preview loops
+      - 延迟明显高于 turbo 变体
+      - 多轮生成时的角色一致性仍需参考图配合
+      - 不适合极致追求速度的快速预览场景
     integration_notes:
-      - Used as the default high-quality image model in the project
-      - Registered in adapters registry and also stored here as a searchable record
-      - Best paired with explicit negative prompts and style constraints
-    documentation_url: https://help.aliyun.com/zh/model-studio/text-to-image-v1-api-reference
+      - 在项目中作为默认高质量图像模型使用
+      - 已注册到适配器注册表，并同时存档到模型档案中心
+      - 建议搭配明确的负向提示词与风格约束使用
+    documentation_url: https://help.aliyun.com/zh/model-studio/text-to-image-api-reference
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/text-to-image-v1-api-reference
-      - https://help.aliyun.com/zh/model-studio/getting-started/models
+      - https://help.aliyun.com/zh/model-studio/text-to-image-api-reference
+      - https://help.aliyun.com/zh/model-studio/models
 
     tags:
       - image
@@ -161,21 +161,21 @@ models:
       currency: CNY
 
     avg_latency_seconds: 5.0
-    summary: Faster preview-oriented variant of Wanx. Suitable when the project needs quick visual drafts before switching to the full-quality model.
+    summary: Wanx 的快速预览变体，适合在切换到高质量模型前先做低成本、低延迟的视觉草稿探索。
     recommended_scenarios:
-      - Fast thumbnail generation
-      - Prompt iteration and preview
-      - Low-cost early concept screening
+      - 快速缩略图生成
+      - 提示词迭代与预览
+      - 低成本早期概念筛选
     limitations:
-      - Lower quality than wanx-v1
-      - Resolution ceiling is lower
-      - Not recommended for final delivery assets
+      - 成像质量低于 wanx-v1
+      - 分辨率上限更低
+      - 不建议直接用于最终交付素材
     integration_notes:
-      - Prefer for rapid iteration, then promote successful prompts to wanx-v1
-    documentation_url: https://help.aliyun.com/zh/model-studio/text-to-image-v1-api-reference
+      - 适合先快速试词，再将有效提示词切换到 wanx-v1 做正式生成
+    documentation_url: https://help.aliyun.com/zh/model-studio/text-to-image-api-reference
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/text-to-image-v1-api-reference
-      - https://help.aliyun.com/zh/model-studio/getting-started/models
+      - https://help.aliyun.com/zh/model-studio/text-to-image-api-reference
+      - https://help.aliyun.com/zh/model-studio/models
 
     tags:
       - image
@@ -196,22 +196,31 @@ models:
     capabilities:
       - name: reference_images
         support_level: native
-        description: Supports reference images for video generation
+        score: 0.9
+        description: 支持在视频生成中使用参考图
       - name: reference_videos
         support_level: native
-        description: Supports reference videos for style transfer
+        score: 0.85
+        description: 支持通过参考视频进行风格迁移
       - name: camera_control
         support_level: native
-        description: Supports camera movement control
+        score: 0.85
+        description: 支持镜头运动控制
       - name: motion_control
         support_level: native
-        description: Supports motion intensity control
+        score: 0.8
+        description: 支持运动幅度控制
       - name: dialogue_audio
         support_level: unsupported
+        description: 不支持对白音频生成
       - name: sfx_audio
         support_level: native
+        score: 0.7
+        description: 支持音效生成
       - name: character_consistency
         support_level: native
+        score: 0.82
+        description: 支持角色一致性控制
 
     constraints:
       duration:
@@ -263,9 +272,9 @@ models:
         max_reference_videos: 1
         optimal_duration: 5
       tips:
-        - Keep prompts concise and cinematic
-        - Use reference images to stabilize the main subject
-        - Five-second clips are the safest default in production
+        - 提示词尽量简洁，并突出镜头感与电影化表达
+        - 使用参考图有助于稳定主体形象
+        - 生产环境中默认 5 秒片段通常更稳妥
 
     fallback_strategies:
       - trigger_condition: content_safety
@@ -279,30 +288,325 @@ models:
 
     endpoint: /api/v1/services/aigc/video-generation/video-synthesis
     auth_method: bearer
-    summary: Main text-to-video model tracked by the project. Official DashScope video synthesis docs position Wan 2.6 as the higher-quality path for cinematic generation, reference control and camera motion.
+    summary: 项目当前归档的主力文生视频模型。阿里云百炼视频生成文档将 Wan 2.6 定位为更偏高质量的生成路径，适合镜头控制、参考约束和电影化短片生成。
     recommended_scenarios:
-      - DreamWeaver shot generation
-      - Trailer and teaser clip creation
-      - Character scene animation with reference images
-      - Narrative short clip generation
+      - DreamWeaver 分镜镜头生成
+      - 预告片与 teaser 短片制作
+      - 结合参考图的角色场景动画
+      - 叙事型短视频片段生成
     limitations:
-      - Long latency and low concurrency
-      - Best quality is achieved with short clips, not long-form video in one shot
-      - Audio dialogue is not generated by this model path
+      - 延迟较高，并发能力有限
+      - 最佳质量通常来自短片段生成，而非一次性长视频
+      - 该模型链路不负责生成对白音频
     integration_notes:
-      - Project defaults to 5-second clips for stability
-      - Best paired with reference images for recurring characters
-      - Fast fallback should be used on timeout-sensitive workflows
-    documentation_url: https://help.aliyun.com/zh/model-studio/video-synthesis
+      - 项目默认使用 5 秒片段以保证稳定性
+      - 对反复出现的角色，建议搭配参考图使用
+      - 对超时敏感的流程建议启用 fast 回退模型
+    documentation_url: https://help.aliyun.com/zh/model-studio/use-video-generation
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/video-synthesis
-      - https://help.aliyun.com/zh/model-studio/getting-started/models
+      - https://help.aliyun.com/zh/model-studio/use-video-generation
+      - https://help.aliyun.com/zh/model-studio/models
 
     tags:
       - video
       - text-to-video
       - alibaba
       - chinese
+
+    detailed_specs:
+      video_generation:
+        core_function:
+          description: "万相文生视频模型，支持多模态输入（文本/图像/音频），可生成最长15秒、1080P视频"
+          key_features:
+            - "多模态输入（文本/图像/音频）"
+            - "多镜头叙事（wan2.6专属）"
+            - "声画同步（wan2.5+支持）"
+            - "智能改写prompt"
+            - "水印添加"
+        
+        input_modalities:
+          - id: "text"
+            name: "文本"
+            required: true
+            description: "提示词描述视频内容"
+          - id: "image"
+            name: "图像"
+            required: false
+            description: "参考图，约束主体形象"
+          - id: "audio"
+            name: "音频"
+            required: false
+            description: "自定义音频，实现声画同步"
+        
+        output_format:
+          container: "MP4"
+          video_codec: "H.264"
+          audio_codec: "AAC"
+          frame_rate: 30
+          note: "固定输出规格"
+        
+        basic_params:
+          duration:
+            min_seconds: 2
+            max_seconds: 15
+            step_seconds: 1
+            supported_values: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+            recommended: [5, 10]
+            note: "整数秒，生产环境建议 5-10 秒"
+          resolution:
+            options: ["480P", "720P", "1080P"]
+            recommended: "1080P"
+            specs:
+              - value: "480P"
+                width: 854
+                height: 480
+              - value: "720P"
+                width: 1280
+                height: 720
+              - value: "1080P"
+                width: 1920
+                height: 1080
+          aspect_ratio:
+            supported: ["16:9", "9:16", "1:1"]
+            recommended: "16:9"
+        
+        advanced_features:
+          - id: "multi_shot"
+            name: "多镜头叙事"
+            description: "支持生成包含多个镜头的视频，在镜头切换的同时保持主体一致"
+            version_support: "wan2.6+"
+            usage: "在提示词中按时间分段描述每个镜头"
+          - id: "audio_sync"
+            name: "声画同步"
+            description: "支持自动配音，或传入自定义音频文件，实现声画同步"
+            version_support: "wan2.5+"
+            usage: "传入 audio 参数或启用自动配音"
+          - id: "prompt_rewrite"
+            name: "智能改写"
+            description: "自动优化提示词，提升生成质量"
+            usage: "系统自动处理"
+          - id: "watermark"
+            name: "水印添加"
+            description: "支持添加平台水印"
+            usage: "通过参数控制"
+        
+        reference_input:
+          reference_images:
+            enabled: true
+            max_count: 1
+            purpose: "约束主体形象，提升角色一致性"
+            input_spec:
+              formats: ["jpg", "png", "webp"]
+              max_size_mb: 10
+              recommended_resolution: "1024x1024"
+            usage:
+              - scenario: "角色一致性"
+                description: "使用角色立绘作为参考，保持视频中角色外观一致"
+                example: |
+                  reference_image: "character.png"
+                  prompt: "角色在森林中奔跑，镜头跟随"
+              - scenario: "场景约束"
+                description: "使用场景图作为参考，约束视频场景"
+                example: |
+                  reference_image: "scene_concept.jpg"
+                  prompt: "在这个场景中，镜头缓慢推进"
+          
+          reference_videos:
+            enabled: true
+            max_count: 1
+            purpose: "风格迁移，镜头运动参考"
+            input_spec:
+              formats: ["mp4", "mov"]
+              max_size_mb: 100
+              duration_range:
+                min: 1
+                max: 30
+                recommended: 5
+            usage:
+              - scenario: "风格迁移"
+                description: "将参考视频的风格应用到新生成的视频"
+                example: |
+                  reference_video: "style_ref.mp4"
+                  prompt: "使用参考视频的风格，生成一个城市夜景镜头"
+        
+        camera_control:
+          enabled: true
+          preset_movements:
+            - id: "static"
+              name: "固定镜头"
+              description: "镜头静止不动"
+              prompt_keyword: "static shot, fixed camera"
+            - id: "push_in"
+              name: "推进"
+              description: "镜头向前推进"
+              prompt_keyword: "camera push in, dolly in"
+            - id: "pull_out"
+              name: "拉远"
+              description: "镜头向后拉远"
+              prompt_keyword: "camera pull out, dolly out"
+            - id: "pan_left"
+              name: "左摇"
+              description: "镜头向左摇动"
+              prompt_keyword: "pan left, camera pan left"
+            - id: "pan_right"
+              name: "右摇"
+              description: "镜头向右摇动"
+              prompt_keyword: "pan right, camera pan right"
+            - id: "tilt_up"
+              name: "上仰"
+              description: "镜头向上仰"
+              prompt_keyword: "tilt up, camera tilt up"
+            - id: "tilt_down"
+              name: "下俯"
+              description: "镜头向下俯"
+              prompt_keyword: "tilt down, camera tilt down"
+            - id: "orbit"
+              name: "环绕"
+              description: "镜头环绕主体"
+              prompt_keyword: "orbit shot, camera orbit around subject"
+            - id: "tracking"
+              name: "跟随"
+              description: "镜头跟随主体移动"
+              prompt_keyword: "tracking shot, follow subject"
+          custom_control:
+            param_name: "camera_motion"
+            format: "text_description"
+            example: "镜头从远处缓慢推进，然后轻微环绕主体"
+        
+        motion_control:
+          enabled: true
+          motion_intensity:
+            param_name: "motion_intensity"
+            range: [0.0, 1.0]
+            default: 0.5
+            description: "控制画面中物体的运动幅度"
+            values:
+              - value: 0.2
+                label: "轻微运动"
+                description: "适合静态场景、微风吹拂"
+              - value: 0.5
+                label: "中等运动"
+                description: "适合正常行走、日常动作"
+              - value: 0.8
+                label: "剧烈运动"
+                description: "适合奔跑、打斗场景"
+        
+        prompt_best_practices:
+          structure:
+            - component: "主体动作"
+              description: "画面中的主要动作"
+              example: "一位少女在森林中奔跑"
+              weight: 40
+            - component: "场景环境"
+              description: "背景环境描述"
+              example: "阳光透过树叶，地面有斑驳光影"
+              weight: 25
+            - component: "镜头运动"
+              description: "镜头如何移动"
+              example: "镜头跟随主体，轻微晃动"
+              weight: 20
+            - component: "氛围细节"
+              description: "情绪、光线等"
+              example: "温暖阳光，梦幻氛围"
+              weight: 15
+        
+        prompt_examples:
+          - title: "多镜头叙事范例（侦探追查）"
+            description: "展示如何在单个提示词中描述多个镜头，保持主体一致"
+            content: |
+              一段紧张刺激的侦探追查故事，展现电影级叙事能力。
+              第 1 个镜头 [0-3 秒] 全景：雨夜的纽约街头，霓虹灯闪烁，一位身穿黑色风衣的侦探快步行走。
+              第 2 个镜头 [3-6 秒] 中景：侦探进入一栋老旧建筑，雨水打湿了他的外套，门在他身后缓缓关闭。
+              第 3 个镜头 [6-9 秒] 特写：侦探的眼神坚毅专注，远处传来警笛声，他微微皱眉思考。
+              第 4 个镜头 [9-12 秒] 中景：侦探在昏暗走廊中小心前行，手电筒照亮前方。
+              第 5 个镜头 [12-15 秒] 特写：侦探发现关键线索，脸上露出恍然大悟的表情。
+          
+          - title: "多镜头叙事范例（角色日常）"
+            description: "展示日常场景的多镜头叙事"
+            content: |
+              清晨的咖啡时光，温馨惬意。
+              第 1 个镜头 [0-3 秒] 全景：阳光透过窗帘洒进房间，一位年轻女性伸着懒腰起床。
+              第 2 个镜头 [3-6 秒] 中景：她走进厨房，打开咖啡机，蒸汽缓缓升起。
+              第 3 个镜头 [6-9 秒] 特写：咖啡杯被端起，热气袅袅，她的嘴角带着微笑。
+              第 4 个镜头 [9-12 秒] 中景：她坐在窗边，翻看书本，阳光洒在脸上。
+          
+          - title: "单镜头角色奔跑"
+            description: "适合简单场景生成"
+            content: |
+              主体: 一位穿着白色连衣裙的少女在森林小径上奔跑
+              动作: 奔跑，头发和裙摆随风飘动
+              镜头: 跟随镜头，保持主体在画面中央
+              场景: 阳光透过树叶，地面有斑驳光影
+              氛围: 温暖、梦幻、青春
+          
+          - title: "城市夜景"
+            description: "适合氛围感场景"
+            content: |
+              主体: 繁华的城市夜景
+              场景: 高楼大厦，霓虹灯闪烁，车流如织
+              镜头: 缓慢推进，从远景到中景
+              光线: 霓虹灯光，车灯轨迹
+              氛围: 现代都市，繁华热闹
+        
+        best_practices:
+          tips:
+            - "生产环境建议使用 5-10 秒片段以保证稳定性"
+            - "多镜头叙事建议每个镜头 3-5 秒"
+            - "使用参考图有助于稳定主体形象"
+            - "提示词应包含场景、动作、镜头运动三要素"
+            - "多镜头叙事需要在提示词中明确标注每个镜头的时间范围"
+        
+        limitations:
+          - "超过 10 秒的视频生成时间显著增加"
+          - "时长越长，主体一致性越难保证"
+          - "多镜头需要更详细的提示词描述"
+          - "不支持对白音频生成，仅支持背景音效"
+        
+        usage_examples:
+          python:
+            - name: "基础视频生成"
+              code: |
+                from core.unified_media_runtime import media_runtime
+                
+                result = media_runtime.generate_video(
+                    model_id="wan2.6-t2v",
+                    prompt="一位少女在森林中奔跑，镜头跟随",
+                    duration=5,
+                    resolution="1080P"
+                )
+            
+            - name: "多镜头叙事视频"
+              code: |
+                result = media_runtime.generate_video(
+                    model_id="wan2.6-t2v",
+                    prompt="""
+                    一段紧张刺激的侦探追查故事。
+                    第 1 个镜头 [0-3 秒] 全景：雨夜的纽约街头，侦探快步行走。
+                    第 2 个镜头 [3-6 秒] 中景：侦探进入老旧建筑。
+                    第 3 个镜头 [6-9 秒] 特写：侦探眼神坚毅。
+                    """,
+                    duration=9,
+                    resolution="1080P"
+                )
+            
+            - name: "带参考图的视频生成"
+              code: |
+                result = media_runtime.generate_video(
+                    model_id="wan2.6-t2v",
+                    prompt="角色在城市场景中行走，镜头缓慢推进",
+                    reference_image="character.png",
+                    duration=5,
+                    camera_motion="push_in"
+                )
+            
+            - name: "带音频的声画同步视频"
+              code: |
+                result = media_runtime.generate_video(
+                    model_id="wan2.6-t2v",
+                    prompt="角色在森林中奔跑，脚步声与背景音乐同步",
+                    audio="background_music.mp3",
+                    duration=10
+                )
 
   - id: wan2.6-t2v-fast
     name: Wan 2.6 Fast
@@ -325,19 +629,20 @@ models:
       overall_score: 7.0
 
     avg_latency_seconds: 20.0
-    summary: Speed-first variant for Wan 2.6 workflows. It is suitable for preview or degraded fallback when the main video path times out.
+    summary: Wan 2.6 工作流中的速度优先变体，适合作为预览模型或在主视频链路超时时的降级回退模型。
     recommended_scenarios:
-      - Timeout fallback
-      - Rapid preview clips
-      - Early storyboard validation
+      - 超时回退
+      - 快速预览片段
+      - 早期分镜验证
     limitations:
-      - Lower fidelity than wan2.6-t2v
-      - Short duration is strongly preferred
+      - 画面质量低于 wan2.6-t2v
+      - 更适合较短时长的视频片段
     integration_notes:
-      - Intended as a degradation target instead of the first-choice generation model
-    documentation_url: https://help.aliyun.com/zh/model-studio/video-synthesis
+      - 更适合作为降级目标，而不是首选视频生成模型
+    documentation_url: https://help.aliyun.com/zh/model-studio/use-video-generation
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/video-synthesis
+      - https://help.aliyun.com/zh/model-studio/use-video-generation
+      - https://help.aliyun.com/zh/model-studio/models
 
     tags:
       - video
@@ -357,10 +662,27 @@ models:
     capabilities:
       - name: reference_images
         support_level: native
-      - name: character_consistency
+        score: 0.95
+        description: 核心功能，静态图动画化
+      - name: camera_control
         support_level: native
+        score: 0.85
+        description: 支持镜头运动控制
       - name: motion_control
         support_level: native
+        score: 0.8
+        description: 支持运动幅度控制
+      - name: character_consistency
+        support_level: native
+        score: 0.9
+        description: 从静态图保持角色一致性
+      - name: dialogue_audio
+        support_level: unsupported
+        description: 不支持对白音频生成
+      - name: sfx_audio
+        support_level: native
+        score: 0.7
+        description: 支持音效生成
 
     constraints:
       duration:
@@ -371,36 +693,280 @@ models:
         - "16:9"
         - "9:16"
         - "1:1"
+      min_width: 480
+      max_width: 1920
+      min_height: 480
+      max_height: 1080
       max_batch_size: 1
       max_prompt_length: 500
 
     quality_metrics:
-      overall_score: 8.0
-      character_consistency: 0.86
-      motion_stability: 0.78
-      prompt_adherence: 0.76
+      overall_score: 8.2
+      character_consistency: 0.9
+      motion_stability: 0.8
+      prompt_adherence: 0.82
+      visual_quality: 0.88
+      style_accuracy: 0.85
+
+    cost_profile:
+      unit: per_second
+      price: 0.0
+      currency: CNY
+      free_quota: 50
 
     avg_latency_seconds: 40.0
-    summary: Image-driven video model used in the project via DashScope video synthesis flow. Suitable when a still frame or character card must be animated into a short clip.
+    p95_latency_seconds: 80.0
+
+    rate_limit:
+      requests_per_minute: 10
+      requests_per_hour: 100
+      requests_per_day: 500
+      concurrent_requests: 2
+
+    default_params:
+      resolution: "1080P"
+      duration: 5
+
+    best_practice:
+      recommended_params:
+        optimal_duration: 5
+      tips:
+        - 输入图应清晰、主体明确
+        - 适合角色立绘、场景图动画化
+        - 提示词描述期望的动作和镜头运动
+
+    fallback_strategies:
+      - trigger_condition: content_safety
+        fallback_model_id: wan2.6-i2v-safe
+        priority: 1
+      - trigger_condition: timeout
+        fallback_model_id: wan2.6-i2v-fast
+        param_adjustments:
+          duration: 3.0
+        priority: 2
+
+    endpoint: /api/v1/services/aigc/video-generation/video-synthesis
+    auth_method: bearer
+    summary: 图生视频模型，将静态图片转换为短视频。适合角色立绘动画化、场景动画化等场景。
     recommended_scenarios:
-      - Animate storyboard keyframes
-      - Turn portraits into short motion clips
-      - Character consistency focused scene generation
+      - 角色立绘动画化
+      - 场景概念图动画化
+      - 分镜关键帧动画化
+      - 静态素材动态化
     limitations:
-      - Motion still needs carefully constrained prompts
-      - Multi-shot continuity remains an orchestration concern, not a single-model guarantee
+      - 需要提供输入图片
+      - 动画效果受输入图质量影响
+      - 延迟较高
     integration_notes:
-      - Used through the project adapter bridge, not yet through the old built-in registry decorator path
-      - Best used with a single dominant reference frame
-    documentation_url: https://help.aliyun.com/zh/model-studio/image-to-video
+      - 输入图作为视频的首帧或关键帧
+      - 提示词描述期望的动画效果
+      - 建议使用清晰的正面或侧面图
+    documentation_url: https://help.aliyun.com/zh/model-studio/use-video-generation
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/image-to-video
-      - https://help.aliyun.com/zh/model-studio/video-synthesis
+      - https://help.aliyun.com/zh/model-studio/use-video-generation
+      - https://help.aliyun.com/zh/model-studio/models
 
     tags:
       - video
       - image-to-video
       - alibaba
+      - chinese
+
+    detailed_specs:
+      video_generation:
+        core_function:
+          description: "图生视频模型，支持多模态输入（文本+图像+音频），将静态图片转换为有声视频"
+          input_required: "reference_image"
+          key_features:
+            - "静态图动画化"
+            - "多镜头叙事（wan2.6专属）"
+            - "声画同步（wan2.5+支持）"
+            - "保持原图风格和主体"
+        
+        input_modalities:
+          - id: "text"
+            name: "文本"
+            required: true
+            description: "提示词描述动画效果"
+          - id: "image"
+            name: "图像"
+            required: true
+            description: "静态图片作为首帧"
+          - id: "audio"
+            name: "音频"
+            required: false
+            description: "自定义音频，实现声画同步"
+        
+        output_format:
+          container: "MP4"
+          video_codec: "H.264"
+          audio_codec: "AAC"
+          frame_rate: 30
+          note: "固定输出规格"
+        
+        input_image_spec:
+          purpose: "作为视频的首帧或关键帧"
+          formats: ["jpg", "png", "webp"]
+          max_size_mb: 10
+          resolution_range:
+            min: "480x480"
+            max: "1920x1080"
+            recommended: "1280x720"
+          
+          image_type_recommendations:
+            - type: "角色立绘"
+              description: "清晰的角色正面或侧面图"
+              best_for: "角色动画化"
+              tips:
+                - "角色应完整出现在画面中"
+                - "背景简洁或透明更佳"
+                - "姿势自然，适合动画化"
+            - type: "场景图"
+              description: "完整的场景画面"
+              best_for: "场景动画化"
+              tips:
+                - "场景应有明确的主体"
+                - "光线和透视要合理"
+                - "适合添加动态元素"
+            - type: "分镜关键帧"
+              description: "故事板中的关键画面"
+              best_for: "分镜动画化"
+              tips:
+                - "画面构图要完整"
+                - "角色位置要合理"
+                - "适合添加镜头运动"
+        
+        basic_params:
+          duration:
+            min_seconds: 2
+            max_seconds: 15
+            step_seconds: 1
+            supported_values: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+            recommended: [5, 10]
+            note: "整数秒，生产环境建议 5-10 秒"
+          resolution:
+            options: ["480P", "720P", "1080P"]
+            recommended: "1080P"
+            note: "建议与输入图分辨率接近"
+          aspect_ratio:
+            supported: ["16:9", "9:16", "1:1"]
+            note: "建议与输入图比例一致"
+        
+        advanced_features:
+          - id: "multi_shot"
+            name: "多镜头叙事"
+            description: "支持生成包含多个镜头的视频，保持主体一致"
+            version_support: "wan2.6+"
+          - id: "audio_sync"
+            name: "声画同步"
+            description: "支持自动配音或传入自定义音频"
+            version_support: "wan2.5+"
+        
+        animation_control:
+          motion_types:
+            - type: "角色动作"
+              description: "让角色动起来"
+              prompt_examples:
+                - "角色开始行走"
+                - "角色转头看向镜头"
+                - "角色挥手打招呼"
+                - "角色微笑，眨眼"
+            - type: "环境动态"
+              description: "让环境元素动起来"
+              prompt_examples:
+                - "风吹动树叶和头发"
+                - "水面泛起涟漪"
+                - "云朵缓慢移动"
+                - "火焰跳动"
+            - type: "镜头运动"
+              description: "镜头移动"
+              prompt_examples:
+                - "镜头缓慢推进"
+                - "镜头环绕角色"
+                - "镜头从侧面移动到正面"
+        
+        camera_control:
+          enabled: true
+          preset_movements:
+            - id: "static"
+              name: "固定镜头"
+              description: "镜头静止，仅主体动"
+            - id: "push_in"
+              name: "推进"
+              description: "镜头向前推进"
+            - id: "pull_out"
+              name: "拉远"
+              description: "镜头向后拉远"
+            - id: "orbit"
+              name: "环绕"
+              description: "镜头环绕主体"
+            - id: "tracking"
+              name: "跟随"
+              description: "镜头跟随主体移动"
+        
+        prompt_examples:
+          - title: "角色立绘动画化"
+            description: "让静态角色立绘动起来"
+            content: |
+              角色开始微笑，轻微点头，头发随风飘动，眼神温柔地看向镜头。
+          
+          - title: "场景动画化"
+            description: "让静态场景图动起来"
+            content: |
+              水面泛起涟漪，云朵缓慢移动，光线变化，树叶轻轻摇动。
+          
+          - title: "带镜头运动"
+            description: "结合镜头运动增强效果"
+            content: |
+              镜头缓慢推进，角色保持微笑，背景中的树叶轻轻摇动。
+        
+        best_practices:
+          tips:
+            - "输入图应清晰、主体明确"
+            - "角色图建议使用正面或侧面"
+            - "场景图建议有明确的视觉焦点"
+            - "提示词描述具体的动作和效果"
+            - "避免过于复杂的背景"
+        
+        limitations:
+          - "需要提供输入图片"
+          - "动画效果受输入图质量影响"
+          - "延迟较高"
+          - "不支持对白音频生成"
+        
+        usage_examples:
+          python:
+            - name: "基础图生视频"
+              code: |
+                from core.unified_media_runtime import media_runtime
+                
+                result = media_runtime.generate_video(
+                    model_id="wan2.6-i2v",
+                    prompt="角色开始微笑，轻微点头，头发随风飘动",
+                    reference_image="character.png",
+                    duration=5,
+                    resolution="1080P"
+                )
+            
+            - name: "带镜头运动的图生视频"
+              code: |
+                result = media_runtime.generate_video(
+                    model_id="wan2.6-i2v",
+                    prompt="镜头缓慢推进，角色保持微笑，背景中的树叶轻轻摇动",
+                    reference_image="scene.png",
+                    duration=5,
+                    camera_motion="push_in",
+                    motion_intensity=0.3
+                )
+            
+            - name: "场景动画化"
+              code: |
+                result = media_runtime.generate_video(
+                    model_id="wan2.6-i2v",
+                    prompt="水面泛起涟漪，云朵缓慢移动，光线变化",
+                    reference_image="landscape.png",
+                    duration=8
+                )
 
   - id: wan2.6-r2v
     name: Wan 2.6 Reference-to-Video
@@ -411,51 +977,401 @@ models:
     modality:
       - video_to_video
       - reference_to_video
+      - text_to_video
+      - image_to_video
 
     capabilities:
       - name: reference_images
         support_level: native
+        score: 0.95
+        description: 支持多参考图输入，最多5张
       - name: reference_videos
         support_level: native
+        score: 0.9
+        description: 支持参考视频输入
+      - name: first_frame_control
+        support_level: native
+        score: 0.95
+        description: 支持首帧控制
+      - name: last_frame_control
+        support_level: native
+        score: 0.9
+        description: 支持尾帧控制
+      - name: camera_control
+        support_level: native
+        score: 0.85
+        description: 支持镜头运动控制
+      - name: motion_control
+        support_level: native
+        score: 0.8
+        description: 支持运动幅度控制
       - name: character_consistency
         support_level: native
+        score: 0.88
+        description: 支持角色一致性控制
+      - name: dialogue_audio
+        support_level: unsupported
+        description: 不支持对白音频生成
+      - name: sfx_audio
+        support_level: native
+        score: 0.7
+        description: 支持音效生成
 
     constraints:
       duration:
         - 3.0
         - 5.0
         - 10.0
+        - 15.0
       ratios:
         - "16:9"
         - "9:16"
         - "1:1"
+      min_width: 480
+      max_width: 1920
+      min_height: 480
+      max_height: 1080
       max_batch_size: 1
+      max_prompt_length: 500
 
     quality_metrics:
-      overall_score: 7.8
+      overall_score: 8.5
       character_consistency: 0.88
-      style_accuracy: 0.82
+      motion_stability: 0.82
+      prompt_adherence: 0.85
+      visual_quality: 0.9
+      style_accuracy: 0.88
 
-    avg_latency_seconds: 45.0
-    summary: Reference-driven video generation path for style locking and subject preservation. Best when the project already has visual reference material and needs guided video synthesis.
+    cost_profile:
+      unit: per_second
+      price: 0.0
+      currency: CNY
+      free_quota: 50
+
+    avg_latency_seconds: 50.0
+    p95_latency_seconds: 100.0
+
+    rate_limit:
+      requests_per_minute: 8
+      requests_per_hour: 80
+      requests_per_day: 400
+      concurrent_requests: 2
+
+    default_params:
+      resolution: "1080P"
+      duration: 5
+
+    best_practice:
+      recommended_params:
+        max_reference_images: 3
+        max_reference_videos: 1
+        optimal_duration: 5
+      tips:
+        - 角色参考权重建议 0.85-0.95
+        - 场景参考权重建议 0.5-0.7
+        - 首尾帧分辨率应一致
+        - 多参考图之间风格应保持一致
+
+    fallback_strategies:
+      - trigger_condition: content_safety
+        fallback_model_id: wan2.6-r2v-safe
+        priority: 1
+      - trigger_condition: timeout
+        fallback_model_id: wan2.6-t2v-fast
+        param_adjustments:
+          duration: 3.0
+        priority: 2
+
+    endpoint: /api/v1/services/aigc/video-generation/video-synthesis
+    auth_method: bearer
+    summary: 参考生视频模型，支持多参考输入和首尾帧控制。适合需要精确控制视频起始/结束画面、保持角色一致性的场景。
     recommended_scenarios:
-      - Preserve style across short videos
-      - Reference-based scene continuation
-      - Character look consistency constrained generation
+      - 角色一致性视频生成
+      - 首尾帧动画过渡
+      - 多参考素材融合
+      - 风格迁移视频
     limitations:
-      - Requires better reference assets than text-only generation
-      - Not ideal for wide open-ended creative exploration
+      - 延迟较高
+      - 多参考输入会增加处理时间
+      - 首尾帧需要分辨率一致
     integration_notes:
-      - Project currently treats this as a guided generation path, not the default storyboard path
-    documentation_url: https://help.aliyun.com/zh/model-studio/video-synthesis
+      - 支持最多5张参考图和1个参考视频
+      - 首尾帧可精确控制视频起止画面
+      - 权重参数控制各参考素材的影响程度
+    documentation_url: https://help.aliyun.com/zh/model-studio/use-video-generation
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/video-synthesis
-      - https://help.aliyun.com/zh/model-studio/getting-started/models
+      - https://help.aliyun.com/zh/model-studio/use-video-generation
+      - https://help.aliyun.com/zh/model-studio/models
 
     tags:
       - video
       - reference-to-video
       - alibaba
+      - chinese
+      - premium
+
+    detailed_specs:
+      video_generation:
+        core_function:
+          description: "基于参考素材生成视频，保持风格和主体一致性"
+          key_features:
+            - "多参考图输入（最多5张）"
+            - "参考视频输入"
+            - "首帧控制"
+            - "尾帧控制"
+            - "权重控制"
+        
+        reference_input:
+          reference_images:
+            enabled: true
+            max_count: 5
+            recommended_count: 2
+            purpose: "约束主体形象和风格"
+            
+            input_spec:
+              formats: ["jpg", "png", "webp"]
+              max_size_mb: 10
+              resolution_range:
+                min: "256x256"
+                max: "2048x2048"
+                recommended: "1024x1024"
+            
+            input_methods:
+              - type: "url"
+                description: "通过 URL 引用"
+                format: |
+                  reference_images: [
+                    {"url": "https://example.com/ref1.jpg", "weight": 0.9},
+                    {"url": "https://example.com/ref2.jpg", "weight": 0.6}
+                  ]
+              - type: "base64"
+                description: "Base64 编码"
+                format: |
+                  reference_images: [
+                    {"base64": "data:image/jpeg;base64,...", "weight": 0.8}
+                  ]
+              - type: "multipart"
+                description: "表单上传"
+                field_name: "reference_images"
+            
+            weight_control:
+              enabled: true
+              param_name: "weight"
+              range: [0.0, 1.0]
+              default: 0.8
+              description: "控制每个参考图对结果的影响程度"
+              
+              usage_guide:
+                - weight: "0.9-1.0"
+                  usage: "主要参考，决定主体外观"
+                  example: "角色立绘，决定角色外观"
+                - weight: "0.6-0.8"
+                  usage: "次要参考，影响风格和细节"
+                  example: "场景参考，影响背景风格"
+                - weight: "0.3-0.5"
+                  usage: "辅助参考，提供灵感"
+                  example: "氛围参考，影响整体感觉"
+              
+              multi_image_strategy:
+                description: "多图权重会自动归一化"
+                example: |
+                  # 两张图权重分别为 0.9 和 0.6
+                  # 归一化后：第一张占 60%，第二张占 40%
+                  reference_images: [
+                    {"url": "character.jpg", "weight": 0.9},
+                    {"url": "scene.jpg", "weight": 0.6}
+                  ]
+            
+            usage_types:
+              - type: "character_reference"
+                description: "角色参考，约束角色外观"
+                recommended_weight: "0.85-0.95"
+                tips:
+                  - "使用清晰的正面或侧面图"
+                  - "角色应完整出现在画面中"
+                  - "背景简洁更佳"
+              - type: "style_reference"
+                description: "风格参考，迁移画风"
+                recommended_weight: "0.6-0.8"
+                tips:
+                  - "选择与目标风格一致的图片"
+                  - "可以是画作、电影截图等"
+              - type: "scene_reference"
+                description: "场景参考，约束环境"
+                recommended_weight: "0.5-0.7"
+                tips:
+                  - "场景图应与目标场景相似"
+                  - "光线和氛围要匹配"
+          
+          reference_videos:
+            enabled: true
+            max_count: 1
+            purpose: "风格迁移，镜头运动参考"
+            
+            input_spec:
+              formats: ["mp4", "mov", "avi"]
+              max_size_mb: 100
+              duration_range:
+                min: 1
+                max: 30
+                recommended: 5
+            
+            usage_types:
+              - type: "style_transfer"
+                description: "风格迁移，将视频风格应用到生成结果"
+                recommended_weight: "0.7-0.9"
+              - type: "motion_reference"
+                description: "运动参考，参考视频中的动作和镜头"
+                recommended_weight: "0.6-0.8"
+        
+        frame_control:
+          enabled: true
+          description: "控制视频的首帧和尾帧"
+          
+          first_frame:
+            param_name: "first_frame"
+            description: "视频的第一帧，决定视频起始画面"
+            input_spec:
+              formats: ["jpg", "png", "webp"]
+              max_size_mb: 10
+            usage:
+              - scenario: "精确控制起始画面"
+                description: "确保视频从指定画面开始"
+                example: |
+                  first_frame: "start_frame.jpg"
+                  prompt: "从首帧开始，角色转身离开"
+              - scenario: "动画续接"
+                description: "续接已有视频片段"
+                example: |
+                  first_frame: "previous_last_frame.jpg"
+                  prompt: "从首帧继续，角色走进房间"
+          
+          last_frame:
+            param_name: "last_frame"
+            description: "视频的最后一帧，决定视频结束画面"
+            input_spec:
+              formats: ["jpg", "png", "webp"]
+              max_size_mb: 10
+            usage:
+              - scenario: "精确控制结束画面"
+                description: "确保视频在指定画面结束"
+                example: |
+                  last_frame: "end_frame.jpg"
+                  prompt: "角色走向尾帧所示的位置"
+              - scenario: "过渡动画"
+                description: "生成从首帧到尾帧的过渡动画"
+                example: |
+                  first_frame: "pose_a.jpg"
+                  last_frame: "pose_b.jpg"
+                  prompt: "角色从首帧姿势过渡到尾帧姿势"
+          
+          combined_usage:
+            scenario: "首尾帧动画"
+            description: "同时指定首尾帧，生成过渡动画"
+            constraints:
+              - "首尾帧的分辨率应一致"
+              - "首尾帧的主体应相同或相似"
+              - "适合生成姿势过渡、位置移动等动画"
+            example: |
+              first_frame: "standing.jpg"    # 角色站立姿势
+              last_frame: "sitting.jpg"      # 角色坐下姿势
+              prompt: "角色从站立姿势平滑过渡到坐下姿势，动作自然流畅"
+        
+        basic_params:
+          duration:
+            supported_values: [3.0, 5.0, 10.0, 15.0]
+            recommended: 5.0
+          resolution:
+            supported: ["480p", "720p", "1080p"]
+            recommended: "1080p"
+          aspect_ratio:
+            supported: ["16:9", "9:16", "1:1"]
+            recommended: "16:9"
+        
+        camera_control:
+          enabled: true
+          preset_movements:
+            - id: "static"
+              name: "固定镜头"
+              description: "镜头静止不动"
+            - id: "push_in"
+              name: "推进"
+              description: "镜头向前推进"
+            - id: "pull_out"
+              name: "拉远"
+              description: "镜头向后拉远"
+            - id: "pan_left"
+              name: "左摇"
+              description: "镜头向左摇动"
+            - id: "pan_right"
+              name: "右摇"
+              description: "镜头向右摇动"
+            - id: "orbit"
+              name: "环绕"
+              description: "镜头环绕主体"
+            - id: "tracking"
+              name: "跟随"
+              description: "镜头跟随主体移动"
+        
+        usage_examples:
+          python:
+            - name: "基础参考图生成"
+              code: |
+                from core.unified_media_runtime import media_runtime
+                
+                result = media_runtime.generate_video(
+                    model_id="wan2.6-r2v",
+                    prompt="角色在森林中奔跑，镜头跟随",
+                    reference_images=[
+                        {"url": "character.png", "weight": 0.9},
+                        {"url": "forest_scene.jpg", "weight": 0.6}
+                    ],
+                    duration=5.0,
+                    resolution="1080p"
+                )
+            
+            - name: "首尾帧动画"
+              code: |
+                result = media_runtime.generate_video(
+                    model_id="wan2.6-r2v",
+                    prompt="角色从站立姿势平滑过渡到坐下姿势",
+                    first_frame="standing_pose.jpg",
+                    last_frame="sitting_pose.jpg",
+                    duration=5.0
+                )
+            
+            - name: "多参考输入"
+              code: |
+                result = media_runtime.generate_video(
+                    model_id="wan2.6-r2v",
+                    prompt="使用参考风格，生成角色在城市场景中行走的镜头",
+                    reference_images=[
+                        {"url": "character.png", "weight": 0.9, "type": "character_reference"},
+                        {"url": "city_scene.jpg", "weight": 0.6, "type": "scene_reference"},
+                        {"url": "style_sample.jpg", "weight": 0.5, "type": "style_reference"}
+                    ],
+                    reference_video={"url": "camera_motion_ref.mp4", "weight": 0.7},
+                    duration=5.0,
+                    camera_motion="tracking"
+                )
+        
+        best_practices:
+          multi_reference_strategy:
+            title: "多参考输入策略"
+            tips:
+              - "角色参考权重最高 (0.85-0.95)"
+              - "场景参考权重次之 (0.5-0.7)"
+              - "风格参考权重适中 (0.5-0.8)"
+              - "参考图数量建议不超过 3 张"
+              - "参考图之间风格应保持一致"
+          
+          frame_control_tips:
+            title: "首尾帧控制技巧"
+            tips:
+              - "首尾帧分辨率应与输出分辨率一致"
+              - "首尾帧的主体应相同"
+              - "首尾帧的光线条件应相似"
+              - "提示词应描述过渡动作"
 
   - id: qwen3-vl-plus
     name: Qwen3-VL-Plus
@@ -471,13 +1387,13 @@ models:
     capabilities:
       - name: image_understanding
         support_level: native
-        description: Supports image analysis and multimodal reasoning
+        description: 支持图像分析与多模态推理
       - name: video_understanding
         support_level: native
-        description: Supports video input understanding through OpenAI-compatible messages
+        description: 支持通过 OpenAI 兼容消息格式处理视频理解任务
       - name: json_output
         support_level: native
-        description: Supports structured response formatting
+        description: 支持结构化响应输出
 
     constraints:
       max_batch_size: 1
@@ -488,22 +1404,22 @@ models:
       prompt_adherence: 0.8
 
     avg_latency_seconds: 8.0
-    summary: Multimodal understanding model used for image and video analysis tasks. Official Qwen-VL docs describe it as an OpenAI-compatible vision model for image/video understanding and multimodal chat.
+    summary: 用于图像与视频分析的多模态理解模型。Qwen-VL 官方文档将其描述为兼容 OpenAI 接口的视觉理解模型，适合图像理解、视频理解与多模态对话。
     recommended_scenarios:
-      - Image quality review
-      - Video content inspection
-      - Multimodal prompt parsing
-      - Visual asset QA
+      - 图像质量审查
+      - 视频内容检查
+      - 多模态提示词解析
+      - 视觉素材质检
     limitations:
-      - It is an analysis model, not a generation model
-      - Large binary assets should still be preprocessed before calling
+      - 它是分析模型，不负责内容生成
+      - 大体积二进制素材在调用前仍建议预处理
     integration_notes:
-      - Project adapters expose chat, analyze_image and analyze_video entry points
-      - Suitable for review and guardrail workflows around generated assets
-    documentation_url: https://help.aliyun.com/zh/model-studio/vision
+      - 项目适配器已暴露 chat、analyze_image 和 analyze_video 三类入口
+      - 适合用于生成素材周边的审查与护栏工作流
+    documentation_url: https://help.aliyun.com/zh/model-studio/qwen-vl-compatible-with-openai
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/vision
-      - https://help.aliyun.com/zh/model-studio/getting-started/models
+      - https://help.aliyun.com/zh/model-studio/vision/
+      - https://help.aliyun.com/zh/model-studio/models
 
     tags:
       - vision
@@ -523,13 +1439,24 @@ models:
     capabilities:
       - name: image_edit
         support_level: native
-        description: Supports instruction-based image editing
+        score: 0.9
+        description: 支持基于指令的图像编辑
       - name: multi_image
         support_level: native
-        description: Supports multiple image references in the project adapter
+        score: 0.85
+        description: 在项目适配器中支持多图参考编辑
       - name: prompt_extend
         support_level: native
-        description: Supports prompt enhancement parameters
+        score: 0.8
+        description: 支持提示词增强参数
+      - name: local_edit
+        support_level: native
+        score: 0.85
+        description: 支持局部编辑
+      - name: style_transfer
+        support_level: native
+        score: 0.8
+        description: 支持风格迁移
 
     constraints:
       max_batch_size: 1
@@ -541,26 +1468,167 @@ models:
       style_accuracy: 0.83
 
     avg_latency_seconds: 12.0
-    summary: Instruction-based image editing model recorded for the project's AIGC editing workflows. Official image-edit API docs position it as a multimodal image editing endpoint.
+    summary: 项目 AIGC 编辑工作流中使用的指令式图像编辑模型。官方图像编辑接口文档将其定位为多模态图像编辑能力入口。
     recommended_scenarios:
-      - Character image refinement
-      - Asset cleanup and prompt-directed retouching
-      - Multi-reference editing pipelines
+      - 角色图像精修
+      - 素材清理与按提示词修图
+      - 多参考图编辑流程
     limitations:
-      - The message schema is stricter than plain chat-completions style requests
-      - Multi-image requests may require fallback ordering strategies
+      - 消息结构要求比普通 chat-completions 风格更严格
+      - 多图请求在部分场景下可能需要回退排序策略
     integration_notes:
-      - Project adapter already contains compatibility fallback for message ordering
-      - Prefer for editing and compositional retouching rather than new image generation
-    documentation_url: https://help.aliyun.com/zh/model-studio/image-edit-api-reference
+      - 项目适配器已包含消息顺序兼容回退逻辑
+      - 更适合编辑与局部重构，不适合作为纯新图生成入口
+    documentation_url: https://help.aliyun.com/zh/model-studio/qwen-image-edit-api
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/image-edit-api-reference
-      - https://help.aliyun.com/zh/model-studio/getting-started/models
+      - https://help.aliyun.com/zh/model-studio/qwen-image-edit-guide
+      - https://help.aliyun.com/zh/model-studio/models
 
     tags:
       - image
       - edit
       - alibaba
+
+    detailed_specs:
+      image_editing:
+        core_function:
+          description: "基于自然语言指令的图像编辑，支持多图输入"
+          key_features:
+            - "指令式编辑"
+            - "多图参考编辑"
+            - "局部修改"
+            - "风格迁移"
+            - "提示词增强"
+        
+        multi_image_input:
+          enabled: true
+          max_count: 4
+          description: "支持多图输入进行编辑"
+          
+          message_structure:
+            format: "chat-completions with image_url"
+            required_order:
+              - "system message (可选)"
+              - "user message with images"
+              - "assistant response"
+            example: |
+              messages = [
+                {
+                  "role": "user",
+                  "content": [
+                    {"type": "text", "text": "请将这张图片中的人物服装改为红色"},
+                    {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}}
+                  ]
+                }
+              ]
+          
+          multi_image_scenarios:
+            - scenario: "风格迁移"
+              description: "将图1的风格应用到图2"
+              image_count: 2
+              prompt_template: "将第二张图的风格改为与第一张图一致"
+            - scenario: "背景替换"
+              description: "保留主体，替换背景"
+              image_count: 2
+              prompt_template: "保留第一张图的人物，背景替换为第二张图的场景"
+            - scenario: "元素融合"
+              description: "融合多张图的元素"
+              image_count: 2-4
+              prompt_template: "将这几张图中的元素融合到一张图中"
+        
+        edit_instructions:
+          edit_types:
+            - type: "局部修改"
+              description: "修改图片的特定部分"
+              prompt_format: "将图片中的{目标}改为{新内容}"
+              examples:
+                - "将图片中的蓝色裙子改为红色"
+                - "将背景中的树木改为建筑"
+                - "将人物的眼睛改为蓝色"
+            
+            - type: "风格转换"
+              description: "改变图片的艺术风格"
+              prompt_format: "将这张图片转换为{风格}风格"
+              examples:
+                - "将这张照片转换为油画风格"
+                - "将这张图转换为动漫风格"
+                - "将这张图转换为水彩画风格"
+            
+            - type: "内容扩展"
+              description: "扩展图片内容"
+              prompt_format: "在图片中添加{内容}"
+              examples:
+                - "在图片中添加一只飞鸟"
+                - "在背景中添加一座山"
+                - "在人物手中添加一本书"
+            
+            - type: "元素移除"
+              description: "移除图片中的元素"
+              prompt_format: "移除图片中的{目标}"
+              examples:
+                - "移除图片中的水印"
+                - "移除背景中的人物"
+                - "移除图片中的文字"
+            
+            - type: "颜色调整"
+              description: "调整图片颜色"
+              prompt_format: "将图片的{颜色元素}调整为{新颜色}"
+              examples:
+                - "将图片的整体色调调整为暖色调"
+                - "将天空的颜色调整为夕阳的颜色"
+        
+        prompt_extend:
+          enabled: true
+          param_name: "prompt_extend"
+          effect: "自动增强提示词，提升编辑精度"
+          recommended: true
+          description: "启用后系统会自动优化提示词，提高编辑效果"
+        
+        input_spec:
+          formats: ["jpg", "png", "webp"]
+          max_size_mb: 10
+          resolution_range:
+            min: "256x256"
+            max: "2048x2048"
+            recommended: "1024x1024"
+        
+        usage_examples:
+          python:
+            - name: "基础图像编辑"
+              code: |
+                from core.unified_media_runtime import media_runtime
+                
+                result = media_runtime.edit_image(
+                    model_id="qwen-image-edit-plus",
+                    prompt="将图片中人物的衣服颜色改为深蓝色",
+                    image="character.png",
+                    prompt_extend=True
+                )
+            
+            - name: "多图风格迁移"
+              code: |
+                result = media_runtime.edit_image(
+                    model_id="qwen-image-edit-plus",
+                    prompt="将第二张图的风格改为与第一张图一致",
+                    images=["style_reference.jpg", "target_image.jpg"],
+                    prompt_extend=True
+                )
+            
+            - name: "背景替换"
+              code: |
+                result = media_runtime.edit_image(
+                    model_id="qwen-image-edit-plus",
+                    prompt="保留第一张图的人物，背景替换为第二张图的场景",
+                    images=["character.png", "new_background.jpg"]
+                )
+        
+        best_practices:
+          tips:
+            - "编辑指令要具体明确，避免模糊描述"
+            - "多图编辑时，明确说明每张图的用途"
+            - "复杂编辑建议分步进行，每次一个修改"
+            - "使用 prompt_extend 参数提升编辑精度"
+            - "局部修改时，描述要精确到具体位置和颜色"
 
   - id: qwen-image-edit-max
     name: Qwen-Image-Edit-Max
@@ -588,19 +1656,20 @@ models:
       style_accuracy: 0.86
 
     avg_latency_seconds: 15.0
-    summary: Higher-quality image editing variant for demanding retouching and compositional refinement tasks.
+    summary: 更偏高质量的图像编辑变体，适合对细节修饰、构图调整和结果稳定性要求更高的任务。
     recommended_scenarios:
-      - Final-pass image editing
-      - Harder instruction-following edits
-      - Quality-sensitive promotional assets
+      - 最终阶段图像精修
+      - 更复杂的指令跟随式编辑
+      - 对质量敏感的宣传素材处理
     limitations:
-      - Slower than the plus variant
-      - Higher cost path should be reserved for final assets
+      - 速度慢于 plus 变体
+      - 成本更高，建议留给最终素材处理阶段
     integration_notes:
-      - Good escalation target when qwen-image-edit-plus cannot preserve quality
-    documentation_url: https://help.aliyun.com/zh/model-studio/image-edit-api-reference
+      - 当 qwen-image-edit-plus 无法满足质量要求时，可作为升级目标
+    documentation_url: https://help.aliyun.com/zh/model-studio/qwen-image-edit-api
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/image-edit-api-reference
+      - https://help.aliyun.com/zh/model-studio/qwen-image-edit-guide
+      - https://help.aliyun.com/zh/model-studio/models
 
     tags:
       - image
@@ -620,12 +1689,20 @@ models:
     capabilities:
       - name: speech_synthesis
         support_level: native
+        score: 0.85
+        description: 高吞吐语音合成
       - name: word_timestamps
         support_level: native
+        score: 0.9
+        description: 词级时间戳
       - name: phoneme_timestamps
         support_level: native
+        score: 0.85
+        description: 音素级时间戳
       - name: preset_voices
         support_level: native
+        score: 0.8
+        description: 预设音色库
 
     constraints:
       max_batch_size: 1
@@ -636,28 +1713,136 @@ models:
       prompt_adherence: 0.8
 
     avg_latency_seconds: 4.0
-    summary: Default TTS model in the project. Official DashScope speech synthesis docs position Qwen-TTS as the high-throughput, OpenAI-compatible speech synthesis path with many preset voices.
+    summary: 项目默认使用的 TTS 模型。阿里云百炼语音合成文档将 Qwen-TTS 定位为高吞吐、兼容 OpenAI 接口且预设音色较丰富的语音合成路径。
     recommended_scenarios:
-      - Batch audiobook synthesis
-      - Cost-sensitive chapter narration
-      - Standard voice preview and iteration
+      - 批量有声书合成
+      - 对成本敏感的章节旁白
+      - 标准音色预览与快速迭代
     limitations:
-      - The current project integration does not expose instruct-style fine-grained emotion control on this path
-      - For richer expressive control, cosyvoice-v3-plus is more suitable
+      - 当前项目接入未在这条链路上暴露 instruct 风格的细粒度情绪控制
+      - 若需要更强的表现力控制，更适合使用 cosyvoice-v3-plus
     integration_notes:
-      - Project keeps qwen3-tts-flash as the default audiobook TTS
-      - Voice catalog and speaker normalization are implemented in audiobook services
-      - Timestamp information is preserved when returned by the provider
-    documentation_url: https://help.aliyun.com/zh/model-studio/text-to-speech-syn
+      - 项目当前将 qwen3-tts-flash 作为默认有声书 TTS
+      - 音色目录与说话人归一化逻辑已在 audiobook 服务中实现
+      - 当提供商返回时间戳信息时，系统会原样保留
+    documentation_url: https://help.aliyun.com/zh/model-studio/qwen-tts
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/text-to-speech-syn
-      - https://help.aliyun.com/zh/model-studio/getting-started/models
+      - https://help.aliyun.com/zh/model-studio/text-to-speech
+      - https://help.aliyun.com/zh/model-studio/models
 
     tags:
       - audio
       - tts
       - alibaba
       - audiobook
+
+    detailed_specs:
+      voice_synthesis:
+        voice_catalog:
+          description: "预设音色库，适合标准朗读场景，不支持情绪控制"
+          categories:
+            - name: "标准女声"
+              voices:
+                - id: "zhitian"
+                  name: "知甜"
+                  gender: "female"
+                  description: "甜美女声，适合有声书"
+                  recommended_scenarios: ["有声书", "广播剧", "儿童故事"]
+                - id: "zhiyan"
+                  name: "知燕"
+                  gender: "female"
+                  description: "温柔女声，适合情感内容"
+                  recommended_scenarios: ["睡前故事", "情感内容", "散文朗读"]
+                - id: "zhiyue"
+                  name: "知悦"
+                  gender: "female"
+                  description: "活泼女声，适合轻松内容"
+                  recommended_scenarios: ["娱乐内容", "轻松对话"]
+            - name: "标准男声"
+              voices:
+                - id: "zhixiang"
+                  name: "知翔"
+                  gender: "male"
+                  description: "磁性男声，适合有声书"
+                  recommended_scenarios: ["有声书", "纪录片解说", "企业宣传"]
+                - id: "zhida"
+                  name: "知达"
+                  gender: "male"
+                  description: "稳重男声，适合商务内容"
+                  recommended_scenarios: ["企业宣传", "教育内容", "新闻播报"]
+                - id: "zhifan"
+                  name: "知凡"
+                  gender: "male"
+                  description: "年轻男声，适合青春内容"
+                  recommended_scenarios: ["青春小说", "校园故事"]
+          total_count: 12
+          update_note: "音色库持续更新，以官方文档为准"
+        
+        calling_method:
+          param_name: "speaker"
+          format: "voice_id"
+          required: true
+          example: |
+            # Python 调用示例
+            from core.unified_media_runtime import media_runtime
+            
+            audio_bytes = await media_runtime.synthesize_speech(
+                model_id="qwen3-tts-flash",
+                text="这是测试文本",
+                speaker="zhitian"
+            )
+        
+        comparison_with_cosyvoice:
+          instruct_support: false
+          voice_clone_support: false
+          advantage:
+            - "速度更快（4秒 vs 7秒）"
+            - "成本更低"
+            - "吞吐更高，适合批量合成"
+          disadvantage:
+            - "不支持情绪控制（instruct）"
+            - "不支持语音克隆"
+            - "音色表现力较弱"
+          recommended_use: "批量合成、标准朗读、成本敏感场景"
+        
+        timestamp_support:
+          word_timestamps:
+            enabled: true
+            description: "返回每个词的开始和结束时间"
+            format: |
+              {
+                "words": [
+                  {"word": "这是", "start": 0.0, "end": 0.3},
+                  {"word": "测试", "start": 0.3, "end": 0.6}
+                ]
+              }
+          phoneme_timestamps:
+            enabled: true
+            description: "返回音素级别时间戳，适合精确口型同步"
+        
+        usage_examples:
+          python:
+            - name: "基础语音合成"
+              code: |
+                from core.unified_media_runtime import media_runtime
+                
+                audio_bytes = await media_runtime.synthesize_speech(
+                    model_id="qwen3-tts-flash",
+                    text="欢迎收听本期节目，今天我们要聊的是人工智能的发展历程。",
+                    speaker="zhitian"
+                )
+            
+            - name: "批量章节合成"
+              code: |
+                chapters = ["第一章内容...", "第二章内容...", "第三章内容..."]
+                
+                for i, chapter in enumerate(chapters):
+                    audio = await media_runtime.synthesize_speech(
+                        model_id="qwen3-tts-flash",
+                        text=chapter,
+                        speaker="zhixiang"
+                    )
+                    save_audio(f"chapter_{i+1}.mp3", audio)
 
   - id: cosyvoice-v3-plus
     name: CosyVoice v3 Plus
@@ -672,12 +1857,20 @@ models:
     capabilities:
       - name: speech_synthesis
         support_level: native
+        score: 0.95
+        description: 高质量语音合成
       - name: instruct_control
         support_level: native
+        score: 0.9
+        description: 支持情绪控制
       - name: voice_clone
         support_level: native
+        score: 0.85
+        description: 音色克隆
       - name: preset_voices
         support_level: native
+        score: 0.9
+        description: 丰富的预设音色库
 
     constraints:
       max_batch_size: 1
@@ -688,23 +1881,23 @@ models:
       style_accuracy: 0.88
 
     avg_latency_seconds: 7.0
-    summary: Expressive TTS and voice-clone option used by the audiobook subsystem. Official DashScope speech synthesis and timbre docs describe CosyVoice v3 Plus as the richer emotional and instruct-capable path.
+    summary: 有声书子系统中使用的高表现力 TTS 与语音克隆选项。百炼语音合成与音色文档将 CosyVoice v3 Plus 描述为情绪表达更丰富、支持 instruct 控制的能力路径。
     recommended_scenarios:
-      - Premium audiobook rendering
-      - Emotion-heavy scenes
-      - Voice cloning workflows
-      - Character-specific expressive narration
+      - 高质量有声书渲染
+      - 情绪浓度较高的场景
+      - 语音克隆工作流
+      - 角色化、表现力更强的旁白生成
     limitations:
-      - Higher cost and lower throughput than qwen3-tts-flash
-      - Operational complexity is higher because voice management and clone lifecycle must be handled
+      - 成本更高、吞吐低于 qwen3-tts-flash
+      - 由于需要处理音色管理与克隆生命周期，运维复杂度更高
     integration_notes:
-      - Project exposes clone creation and management endpoints specifically for this model
-      - Instruct mode is supported and used selectively by audiobook services
-      - Best reserved for premium or emotionally dense content
-    documentation_url: https://help.aliyun.com/zh/model-studio/text-to-speech-syn
+      - 项目已为该模型单独暴露克隆音色创建与管理接口
+      - audiobook 服务已选择性支持其 instruct 模式
+      - 更适合用于高质量或情绪密集型内容
+    documentation_url: https://help.aliyun.com/zh/model-studio/text-to-speech
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/text-to-speech-syn
-      - https://help.aliyun.com/zh/model-studio/timbre-list
+      - https://help.aliyun.com/zh/model-studio/cosyvoice-clone-design-api
+      - https://help.aliyun.com/zh/model-studio/models
 
     tags:
       - audio
@@ -712,6 +1905,601 @@ models:
       - voice-clone
       - alibaba
       - premium
+
+    detailed_specs:
+      voice_synthesis:
+        voice_catalog:
+          categories:
+            - name: "标准音色"
+              description: "适合日常旁白、新闻播报"
+              voices:
+                - id: "longxiaochun"
+                  name: "龙小淳"
+                  gender: "female"
+                  description: "标准女声，清晰自然，适合旁白"
+                  emotion_tags: ["neutral", "happy", "serious"]
+                  recommended_scenarios: ["有声书旁白", "新闻播报", "教育内容"]
+                - id: "longxiaobei"
+                  name: "龙小北"
+                  gender: "male"
+                  description: "标准男声，稳重专业"
+                  emotion_tags: ["neutral", "serious", "calm"]
+                  recommended_scenarios: ["纪录片解说", "企业宣传", "教育内容"]
+                - id: "yaoyao"
+                  name: "瑶瑶"
+                  gender: "female"
+                  description: "甜美童声"
+                  emotion_tags: ["happy", "cute", "energetic"]
+                  recommended_scenarios: ["儿童故事", "动画角色"]
+            - name: "情感音色"
+              description: "适合情感丰富的内容"
+              voices:
+                - id: "wanwan"
+                  name: "婉婉"
+                  gender: "female"
+                  description: "温柔女声，情感丰富"
+                  emotion_tags: ["love", "gentle", "sad", "tender"]
+                  recommended_scenarios: ["言情小说", "情感故事", "睡前故事"]
+                - id: "chenchen"
+                  name: "沉沉"
+                  gender: "male"
+                  description: "低沉男声，磁性魅力"
+                  emotion_tags: ["serious", "mysterious", "romantic"]
+                  recommended_scenarios: ["悬疑小说", "言情男主", "电影预告"]
+          total_count: 24
+          update_note: "音色库持续更新，以官方文档为准"
+        
+        calling_method:
+          param_name: "speaker"
+          format: "voice_id"
+          required: true
+          example: |
+            # Python 调用示例
+            from core.unified_media_runtime import media_runtime
+            
+            audio_bytes = await media_runtime.synthesize_speech(
+                model_id="cosyvoice-v3-plus",
+                text="这是测试文本",
+                speaker="longxiaochun",
+                instruct="用开心的语气，语速稍快"
+            )
+        
+        instruct_control:
+          enabled: true
+          param_name: "instruct"
+          description: "通过自然语言描述控制情绪、语速、停顿等"
+          supported_emotions:
+            - tag: "happy"
+              label: "开心"
+              intensity_levels: ["mild", "moderate", "strong"]
+              description: "表达愉悦、欢快的情绪"
+              example: "用开心的语气，带着笑意读这句话"
+            - tag: "sad"
+              label: "悲伤"
+              intensity_levels: ["mild", "moderate", "strong"]
+              description: "表达难过、悲伤的情绪"
+              example: "用悲伤的语气，声音略带哽咽"
+            - tag: "angry"
+              label: "生气"
+              intensity_levels: ["moderate", "strong"]
+              description: "表达愤怒、不满的情绪"
+              example: "用生气的语气，声音提高"
+            - tag: "fearful"
+              label: "恐惧"
+              intensity_levels: ["mild", "moderate"]
+              description: "表达害怕、紧张的情绪"
+              example: "用恐惧的低语，声音颤抖"
+            - tag: "surprised"
+              label: "惊讶"
+              intensity_levels: ["mild", "moderate"]
+              description: "表达意外、惊奇的情绪"
+              example: "用惊讶的语气，语调上扬"
+            - tag: "love"
+              label: "爱意"
+              intensity_levels: ["mild", "moderate", "strong"]
+              description: "表达温柔、爱慕的情绪"
+              example: "用充满爱意的语气，温柔地"
+          advanced_control:
+            speed:
+              description: "语速控制"
+              format: "在 instruct 中描述，如'语速稍快'、'语速缓慢'"
+            pause:
+              description: "停顿控制"
+              format: "在文本中使用 [pause:0.5s] 标记停顿"
+              example: "这句话 [pause:0.5s] 中间有停顿"
+          usage_tips:
+            - "instruct 参数应与 speaker 参数配合使用效果最佳"
+            - "情绪强度通过描述词控制，如'微微开心'vs'非常开心'"
+            - "情感音色（如婉婉）对 instruct 的响应更敏感"
+            - "可在 instruct 中指定语速、停顿等细节要求"
+        
+        voice_clone:
+          enabled: true
+          api_endpoint: "/api/v1/audiobook/voice-clones"
+          input_requirements:
+            supported_formats: ["mp3", "wav", "m4a"]
+            min_duration_seconds: 30
+            max_duration_seconds: 600
+            recommended_duration: "60-180 秒"
+            quality_requirements:
+              - "音频清晰，无背景噪音"
+              - "单一说话人"
+              - "自然语速，不要过快或过慢"
+          cloning_time_minutes: 5
+          usage_example: |
+            # 1. 创建克隆音色
+            clone_response = await api_client.post("/api/v1/audiobook/voice-clones", {
+              "name": "我的角色音色",
+              "audio_file": upload(audio),
+              "description": "小说主角的音色"
+            })
+            voice_id = clone_response.id
+            
+            # 2. 使用克隆音色
+            audio = await media_runtime.synthesize_speech(
+              model_id="cosyvoice-v3-plus",
+              text="这是用克隆音色合成的文本",
+              speaker=voice_id
+            )
+        
+        timestamp_support:
+          word_timestamps:
+            enabled: true
+            description: "返回每个词的时间戳"
+          phoneme_timestamps:
+            enabled: true
+            description: "返回音素级别时间戳"
+
+  - id: mureka-o1-instrumental
+    name: Mureka O1 Instrumental
+    provider: kunlun
+    version: o1
+    status: active
+
+    modality:
+      - text_to_audio
+
+    capabilities:
+      - name: music_generation
+        support_level: native
+        score: 0.9
+        description: 高质量音乐生成
+      - name: background_music
+        support_level: native
+        score: 0.9
+        description: 背景音乐生成
+      - name: style_control
+        support_level: native
+        score: 0.85
+        description: 风格控制
+      - name: mood_control
+        support_level: native
+        score: 0.8
+        description: 情绪控制
+      - name: tempo_control
+        support_level: native
+        score: 0.8
+        description: 节奏控制
+
+    constraints:
+      min_duration_seconds: 15
+      max_duration_seconds: 60
+      instrumental_only: true
+      max_prompt_length: 1000
+
+    quality_metrics:
+      overall_score: 8.3
+      style_accuracy: 0.84
+
+    cost_profile:
+      unit: per_request
+      price: 0.0
+      currency: CNY
+
+    avg_latency_seconds: 25.0
+    summary: 项目当前用于纯音乐与氛围配乐生成的模型入口。Mureka 官方文档提供了 instrumental generate 能力，适合在资产工作台快速生成背景音乐草稿。
+    recommended_scenarios:
+      - 资产工作台的背景音乐生成
+      - 短剧预告片配乐草稿
+      - 有声项目的氛围音乐探索
+    limitations:
+      - 当前项目只接入纯音乐 / 环境配乐链路，不生成带歌词的人声歌曲
+      - 生成链路依赖异步任务轮询，首响延迟高于图像与短视频模型
+    integration_notes:
+      - 资产工作台的音乐生成入口直接复用该服务
+      - 结果会落到本地资产输出目录，前端可直接试听
+      - 当前通过 app.services.audiobook.ai_music 适配器接入
+    documentation_url: https://platform.mureka.cn/docs/api/operations/post-v1-instrumental-generate.html
+    source_urls:
+      - https://platform.mureka.cn/docs/
+      - https://platform.mureka.cn/docs/api/operations/post-v1-instrumental-generate.html
+
+    tags:
+      - audio
+      - music
+      - instrumental
+      - asset-studio
+      - kunlun
+
+    task_types:
+      - asset_music
+
+    detailed_specs:
+      music_generation:
+        core_function:
+          description: "纯音乐/氛围配乐生成，不支持人声歌词"
+          key_features:
+            - "风格控制"
+            - "情绪控制"
+            - "节奏控制"
+            - "时长控制"
+        
+        style_control:
+          enabled: true
+          param_name: "style"
+          
+          preset_styles:
+            - id: "cinematic"
+              name: "电影感"
+              description: "史诗、宏大的电影配乐风格"
+              keywords: ["orchestral", "epic", "cinematic"]
+            - id: "ambient"
+              name: "氛围音乐"
+              description: "轻柔、舒缓的背景音乐"
+              keywords: ["ambient", "peaceful", "atmospheric"]
+            - id: "electronic"
+              name: "电子音乐"
+              description: "现代电子音乐风格"
+              keywords: ["electronic", "synth", "modern"]
+            - id: "jazz"
+              name: "爵士"
+              description: "轻松、优雅的爵士风格"
+              keywords: ["jazz", "smooth", "elegant"]
+            - id: "classical"
+              name: "古典"
+              description: "古典管弦乐风格"
+              keywords: ["classical", "orchestral", "symphony"]
+            - id: "chinese"
+              name: "中国风"
+              description: "中国传统音乐风格"
+              keywords: ["chinese", "traditional", "guqin"]
+          
+          custom_style:
+            format: "free_text"
+            example: "赛博朋克风格，霓虹灯光感，未来都市"
+        
+        mood_control:
+          enabled: true
+          param_name: "mood"
+          
+          supported_moods:
+            - tag: "calm"
+              label: "平静"
+              description: "舒缓、宁静的氛围"
+            - tag: "tense"
+              label: "紧张"
+              description: "悬疑、紧张的氛围"
+            - tag: "happy"
+              label: "欢快"
+              description: "愉悦、轻松的氛围"
+            - tag: "sad"
+              label: "悲伤"
+              description: "忧郁、感伤的氛围"
+            - tag: "epic"
+              label: "史诗"
+              description: "宏大、壮丽的氛围"
+            - tag: "romantic"
+              label: "浪漫"
+              description: "温馨、浪漫的氛围"
+            - tag: "mysterious"
+              label: "神秘"
+              description: "神秘、未知的氛围"
+        
+        tempo_control:
+          enabled: true
+          param_name: "tempo"
+          
+          presets:
+            - id: "slow"
+              label: "慢节奏"
+              bpm_range: [60, 90]
+              description: "适合抒情、悲伤场景"
+            - id: "medium"
+              label: "中等节奏"
+              bpm_range: [90, 120]
+              description: "适合日常、叙事场景"
+            - id: "fast"
+              label: "快节奏"
+              bpm_range: [120, 160]
+              description: "适合动作、紧张场景"
+        
+        duration_control:
+          min_seconds: 15
+          max_seconds: 60
+          recommended: 30
+          discrete_values: [15, 30, 45, 60]
+        
+        prompt_best_practices:
+          structure:
+            - component: "场景描述"
+              description: "音乐要配合的场景"
+              example: "夜晚的城市街道"
+              weight: 30
+            - component: "情绪氛围"
+              description: "要表达的情绪"
+              example: "神秘、紧张"
+              weight: 25
+            - component: "风格乐器"
+              description: "音乐风格和主要乐器"
+              example: "电子音乐，合成器为主"
+              weight: 25
+            - component: "节奏速度"
+              description: "音乐的节奏"
+              example: "中等节奏，稳定推进"
+              weight: 20
+          
+          examples:
+            - name: "悬疑场景"
+              prompt: |
+                场景: 阴暗的地下室，只有微弱的灯光
+                情绪: 神秘、紧张、不安
+                风格: 电子氛围音乐，低频铺底
+                乐器: 合成器、低音鼓、弦乐
+                节奏: 缓慢，偶尔有突然的音效
+            - name: "浪漫场景"
+              prompt: |
+                场景: 夕阳下的海边
+                情绪: 温馨、浪漫、感动
+                风格: 轻柔的钢琴曲
+                乐器: 钢琴、小提琴
+                节奏: 缓慢，如流水般流畅
+        
+        usage_examples:
+          python:
+            - name: "基础音乐生成"
+              code: |
+                from core.unified_media_runtime import media_runtime
+                
+                result = media_runtime.generate_audio(
+                    model_id="mureka-o1-instrumental",
+                    prompt="夜晚的城市街道，霓虹灯光闪烁，神秘而紧张的氛围",
+                    style="electronic",
+                    mood="tense",
+                    tempo="medium",
+                    duration=30
+                )
+            
+            - name: "氛围音乐生成"
+              code: |
+                result = media_runtime.generate_audio(
+                    model_id="mureka-o1-instrumental",
+                    prompt="森林中的清晨，鸟鸣声，宁静祥和",
+                    style="ambient",
+                    mood="calm",
+                    tempo="slow",
+                    duration=45
+                )
+        
+        best_practices:
+          tips:
+            - "提示词应包含场景、情绪、风格、节奏四个要素"
+            - "情绪描述要具体，避免模糊"
+            - "风格和乐器要匹配"
+            - "时长建议 30 秒左右，适合大多数场景"
+
+  - id: kling-v1-text-to-audio
+    name: Kling v1 Text to Audio
+    provider: kuaishou
+    version: v1
+    status: testing
+
+    modality:
+      - text_to_audio
+
+    capabilities:
+      - name: sfx_audio
+        support_level: native
+        score: 0.9
+        description: 短音效生成
+      - name: background_music
+        support_level: native
+        score: 0.75
+        description: 背景音乐生成
+      - name: style_control
+        support_level: native
+        score: 0.8
+        description: 风格控制
+      - name: environment_audio
+        support_level: native
+        score: 0.85
+        description: 环境音生成
+
+    constraints:
+      min_duration_seconds: 3
+      max_duration_seconds: 10
+      max_prompt_length: 200
+
+    quality_metrics:
+      overall_score: 7.9
+      style_accuracy: 0.8
+
+    avg_latency_seconds: 18.0
+    summary: 项目当前用于短音效与环境音生成的优先模型档案。可灵官方 textToAudio 文档对应文生音频能力，适合生成动作音、情绪音和短环境音草稿。
+    recommended_scenarios:
+      - 资产工作台的短音效生成
+      - 环境音与动作音快速试听
+      - 音效草稿与素材预研
+    limitations:
+      - 当前仓库主要按音效 / 环境音使用，不承担长篇配乐生成
+      - 需要单独配置可灵 Access Key / Secret Key
+    integration_notes:
+      - 资产工作台音效入口优先使用该模型
+      - 若未配置可灵密钥，当前实现会回退到 Mureka 环境音链路
+      - 当前通过 app.services.audiobook.klingai_effect_generator 适配器接入
+    documentation_url: https://app.klingai.com/cn/dev/document-api/apiReference/model/textToAudio
+    source_urls:
+      - https://app.klingai.com/cn/dev/document-api/apiReference/model/textToAudio
+      - https://klingai.com/cn/
+
+    tags:
+      - audio
+      - sfx
+      - kling
+      - kuaishou
+      - asset-studio
+
+    task_types:
+      - asset_sfx
+
+    detailed_specs:
+      audio_generation:
+        core_function:
+          description: "短音效与环境音生成，时长 3-10 秒"
+          key_features:
+            - "动作音效"
+            - "环境音"
+            - "情绪音"
+            - "风格控制"
+        
+        audio_types:
+          - type: "动作音效"
+            description: "与动作相关的短音效"
+            examples:
+              - "脚步声"
+              - "开门声"
+              - "打斗声"
+              - "碰撞声"
+              - "武器声"
+            prompt_format: "{动作}的{音效类型}声"
+            example: "沉重的脚步声，踩在木地板上"
+          
+          - type: "环境音"
+            description: "背景环境声音"
+            examples:
+              - "雨声"
+              - "风声"
+              - "城市噪音"
+              - "森林鸟鸣"
+              - "海浪声"
+            prompt_format: "{场景}的{环境音}声"
+            example: "夜晚森林中的虫鸣和风声"
+          
+          - type: "情绪音"
+            description: "表达情绪的音效"
+            examples:
+              - "心跳声"
+              - "紧张氛围"
+              - "恐怖音效"
+              - "欢快音效"
+            prompt_format: "{情绪}氛围的音效"
+            example: "紧张的悬疑氛围音效"
+        
+        duration_control:
+          min_seconds: 3
+          max_seconds: 10
+          recommended: 5
+          note: "适合短音效，不适合长配乐"
+        
+        prompt_best_practices:
+          structure:
+            - component: "音效类型"
+              description: "要生成的音效类型"
+              example: "脚步声"
+              weight: 40
+            - component: "场景环境"
+              description: "音效发生的环境"
+              example: "木地板上"
+              weight: 30
+            - component: "细节特征"
+              description: "音效的具体特征"
+              example: "沉重、缓慢"
+              weight: 30
+          
+          examples:
+            - name: "脚步声"
+              prompt: "沉重的脚步声，踩在老旧的木地板上，发出吱呀声"
+            - name: "环境音"
+              prompt: "夜晚森林中的虫鸣声，偶尔有风吹过树叶的沙沙声"
+            - name: "动作音"
+              prompt: "刀剑相撞的金属碰撞声，清脆响亮"
+        
+        usage_examples:
+          python:
+            - name: "基础音效生成"
+              code: |
+                from core.unified_media_runtime import media_runtime
+                
+                result = media_runtime.generate_audio(
+                    model_id="kling-v1-text-to-audio",
+                    prompt="沉重的脚步声，踩在木地板上",
+                    duration=5
+                )
+            
+            - name: "环境音生成"
+              code: |
+                result = media_runtime.generate_audio(
+                    model_id="kling-v1-text-to-audio",
+                    prompt="夜晚森林中的虫鸣和风声",
+                    duration=8
+                )
+        
+        best_practices:
+          tips:
+            - "提示词要具体描述音效特征"
+            - "包含场景信息有助于生成更准确的环境音"
+            - "时长建议 5 秒左右，适合大多数音效"
+            - "不适合生成长配乐，请使用 Mureka"
+
+  - id: kling-v1-video-to-audio
+    name: Kling v1 Video to Audio
+    provider: kuaishou
+    version: v1
+    status: testing
+
+    modality:
+      - video_to_audio
+
+    capabilities:
+      - name: reference_videos
+        support_level: native
+      - name: sfx_audio
+        support_level: native
+      - name: background_music
+        support_level: native
+
+    constraints:
+      max_prompt_length: 200
+      requires_video_input: true
+
+    quality_metrics:
+      overall_score: 7.6
+
+    avg_latency_seconds: 24.0
+    summary: 已纳入统一模型档案管理的视频转音频能力条目，可用于后续为现有视频片段补充环境音、氛围音或声音草稿；当前仓库尚未直接接入工作台。
+    recommended_scenarios:
+      - 为视频片段补环境音或氛围音
+      - 给现有镜头探索音频草稿
+      - 视频转音频能力预研
+    limitations:
+      - 当前仓库尚未把该接口接入资产工作台或短剧工作流
+      - 实际配额、支持格式与时长仍需结合官方权限进一步验证
+    integration_notes:
+      - 已纳入统一模型档案中心，但暂未暴露前端直连入口
+      - 后续若接入，可复用资产工作台音频模块的上传与结果面板
+    documentation_url: https://app.klingai.com/cn/dev/document-api/apiReference/model/videoToAudio
+    source_urls:
+      - https://app.klingai.com/cn/dev/document-api/apiReference/model/videoToAudio
+      - https://klingai.com/cn/
+
+    tags:
+      - audio
+      - video-to-audio
+      - kling
+      - kuaishou
+      - research
+
+    task_types:
+      - asset_audio
 
   - id: sdxl-turbo
     name: SDXL Turbo
@@ -743,11 +2531,15 @@ models:
       price: 0.002
 
     avg_latency_seconds: 3.0
-    summary: Placeholder fallback image model kept for degradation strategy only.
+    summary: 仅用于降级策略占位的备用图像模型记录。
     limitations:
-      - Not a primary integrated provider path in this repository
+      - 当前仓库中并非主集成提供商链路
     integration_notes:
-      - Acts as a fallback record rather than a first-class production path
+      - 当前主要作为回退记录存在，而不是一线生产模型
+    documentation_url: https://huggingface.co/stabilityai/sdxl-turbo
+    source_urls:
+      - https://huggingface.co/stabilityai/sdxl-turbo
+      - https://stability.ai/stable-image
 
     tags:
       - image
@@ -784,9 +2576,13 @@ models:
       character_consistency: 0.85
 
     avg_latency_seconds: 60.0
-    summary: Testing-only placeholder record for possible external video model comparison.
+    summary: 用于外部视频模型对比测试的占位档案记录。
     limitations:
-      - Not a production-routed model in the current repository
+      - 当前仓库中不是生产路由模型
+    documentation_url: https://app.klingai.com/global/
+    source_urls:
+      - https://app.klingai.com/global/
+      - https://klingai.com/cn/
 
     tags:
       - video

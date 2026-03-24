@@ -196,7 +196,7 @@ class FileParser:
             )
         
         try:
-            from ebooklib import epub
+            from ebooklib import ITEM_DOCUMENT, epub
             from bs4 import BeautifulSoup
         except ImportError as e:
             return ParsedContent(
@@ -224,7 +224,7 @@ class FileParser:
             text_parts = []
             
             for item in book.get_items():
-                if item.get_type() == epub.ITEM_DOCUMENT:
+                if item.get_type() == ITEM_DOCUMENT:
                     # 使用 BeautifulSoup 提取纯文本
                     html = item.get_content().decode('utf-8', errors='ignore')
                     soup = BeautifulSoup(html, 'html.parser')

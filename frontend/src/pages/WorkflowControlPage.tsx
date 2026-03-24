@@ -71,6 +71,7 @@ import { apiClient, extractApiErrorMessage } from '@/services/api'  // ✅ 添�
 import { formatProjectSequenceLabel } from '@/utils/projectDisplay'
 import { ProgressEstimator, type StageDurations, type ProgressState } from '@/utils/progressEstimator'
 import { statisticsService } from '@/services/statistics'
+import { buildStoryExpansionCompletionMessage } from '@/utils/storyExpansionFeedback'
 
 
 const stages: StageType[] = ['concept', 'structure', 'content', 'review', 'iteration']
@@ -81,8 +82,6 @@ const stageNames = {
   review: '质量评审',
   iteration: '迭代优化',
 }
-
-
 
 export default function WorkflowControlPage() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -810,52 +809,28 @@ export default function WorkflowControlPage() {
     workflowWebSocket.onTaskComplete((data) => {
       console.log('✅ 收到任务完成:', data)
 
-      // 🆕 处理扩展大纲/人物任务完成
+      // 🆕 处理协同拓展任务完成
       const taskId = data.task_id || ''
-      if (taskId.startsWith('expand-outline')) {
-        console.log('✅ 大纲扩展任务完成，刷新数据...')
-        // 刷新大纲内容
+      if (taskId.startsWith('expand-story')) {
+        const result = data.result || {}
         if (projectId) {
           const token = localStorage.getItem('access_token')
           fetch(`/api/v1/workflow/${projectId}/all-stages-content`, {
             headers: { 'Authorization': `Bearer ${token}` },
           }).then(res => res.json()).then(batchData => {
-            const stages = batchData.stages
+            const stages = batchData.stages || {}
             if (stages.plot_outline) {
               setStructureContent(stages.plot_outline)
               dispatch(updateStageOutput({ stage: 'structure', output: stages.plot_outline }))
-              console.log('✅ 大纲内容已更新')
             }
-          }).catch(err => console.error('❗ 刷新大纲失败:', err))
-          
-          // 🔥 关键修复：刷新章节列表
-          dispatch(fetchChapters(parseInt(projectId)))
-        }
-        setSnackbarMessage('✅ 大纲扩展完成！')
-        setSnackbarSeverity('success')
-        setSnackbarOpen(true)
-        return
-      }
-      
-      if (taskId.startsWith('expand-characters')) {
-        console.log('✅ 人物扩展任务完成，刷新数据...')
-        // 刷新人物内容
-        if (projectId) {
-          const token = localStorage.getItem('access_token')
-          fetch(`/api/v1/workflow/${projectId}/all-stages-content`, {
-            headers: { 'Authorization': `Bearer ${token}` },
-          }).then(res => res.json()).then(batchData => {
-            const stages = batchData.stages
             if (stages.characters) {
               setCharacterContent(stages.characters)
-              console.log('✅ 人物内容已更新')
             }
-          }).catch(err => console.error('❗ 刷新人物失败:', err))
-          
-          // 🔥 关键修复：刷新章节列表
+          }).catch(err => console.error('刷新协同拓展结果失败:', err))
+
           dispatch(fetchChapters(parseInt(projectId)))
         }
-        setSnackbarMessage('✅ 人物扩展完成！')
+        setSnackbarMessage(buildStoryExpansionCompletionMessage('协同拓展完成，已刷新大纲与人物内容', result))
         setSnackbarSeverity('success')
         setSnackbarOpen(true)
         return

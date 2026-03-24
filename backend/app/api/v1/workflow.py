@@ -23,7 +23,10 @@ from app.utils.datetime_utils import parse_datetime_utc, utc_now
 import uuid
 from datetime import datetime
 import json
+import re
 from sqlalchemy import inspect, text
+from core.model_resolution import normalize_model_id
+from core.model_runtime import ensure_model_hub_initialized
 
 # 🎉 导入体系自动检测服务
 from app.services.auto_system_detector import auto_create_system_collections
@@ -31,6 +34,314 @@ from app.services.auto_system_detector import auto_create_system_collections
 # 🔧 配置日志
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+
+def _estimate_tokens_by_chars(text: str) -> int:
+    """估算文本 token 数，中文场景按 1.3 倍字符数近似。"""
+    return int(len(text or "") * 1.3)
+
+
+def _get_safe_input_token_budget(
+    model_name: str,
+    *,
+    usage_ratio: float = 0.72,
+    prompt_overhead_tokens: int = 500,
+) -> int:
+    """从统一模型配置读取上下文限制，计算较保守的输入预算。"""
+    normalized_model = normalize_model_id(model_name) or model_name
+    context_limit = 32000
+    output_limit = 8192
+
+    try:
+        ensure_model_hub_initialized()
+        from core.model_hub import model_hub
+
+        spec = model_hub.registry.get_spec(normalized_model)
+        if spec and spec.constraints:
+            context_limit = int(spec.constraints.max_context_tokens or context_limit)
+            output_limit = int(spec.constraints.max_output_tokens or output_limit)
+    except Exception as exc:
+        logger.warning("读取模型 %s 配置失败，回退默认预算: %s", normalized_model, exc)
+
+    reserve_output_tokens = max(1200, min(output_limit, max(1200, int(context_limit * 0.25))))
+    return max(1500, int(context_limit * usage_ratio) - reserve_output_tokens - prompt_overhead_tokens)
+
+
+def _select_text_model_by_input_tokens(
+    total_tokens: int,
+    *,
+    primary_model: str = "qwen3-max",
+    fallback_model: str = "qwen-long",
+) -> tuple[str, int]:
+    """按统一模型配置选择主模型或长上下文回退模型。"""
+    safe_budget = _get_safe_input_token_budget(primary_model)
+    selected = primary_model if total_tokens < safe_budget else fallback_model
+    return selected, safe_budget
+
+
+def _shrink_prompt_text(value: Any, max_length: int = 80) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= max_length:
+        return text
+    return text[: max(0, max_length - 3)] + "..."
+
+
+def _join_prompt_items(value: Any, *, max_items: int = 4, max_length: int = 60) -> str:
+    if not isinstance(value, list):
+        return ""
+
+    items = []
+    for item in value[:max_items]:
+        if isinstance(item, dict):
+            text = ""
+            for key in ("content", "description", "summary", "name", "term", "title", "result"):
+                candidate = _shrink_prompt_text(item.get(key, ""), max_length=max_length)
+                if candidate:
+                    text = candidate
+                    break
+        else:
+            text = _shrink_prompt_text(item, max_length=max_length)
+
+        if text:
+            items.append(text)
+
+    return "；".join(items)
+
+
+def _format_conflict_arc(conflict_arc: Any) -> str:
+    if not isinstance(conflict_arc, dict):
+        return ""
+
+    parts = []
+    mapping = (
+        ("trigger", "触发"),
+        ("escalation", "升级"),
+        ("resolution", "结果"),
+        ("result", "结果"),
+        ("description", "描述"),
+    )
+    for key, label in mapping:
+        text = _shrink_prompt_text(conflict_arc.get(key, ""), max_length=50)
+        if text:
+            parts.append(f"{label}:{text}")
+
+    deduplicated = []
+    seen = set()
+    for item in parts:
+        if item not in seen:
+            deduplicated.append(item)
+            seen.add(item)
+
+    return "；".join(deduplicated[:3])
+
+
+def _format_chapter_gains(gains: Any) -> str:
+    if not isinstance(gains, dict):
+        return ""
+
+    parts = []
+    for key, label in (
+        ("character_gains", "人物收获"),
+        ("plot_progress", "剧情推进"),
+    ):
+        text = _shrink_prompt_text(gains.get(key, ""), max_length=50)
+        if text:
+            parts.append(f"{label}:{text}")
+
+    return "；".join(parts)
+
+
+def _format_ending_hook(ending_hook: Any, hooks: Any = None) -> str:
+    if isinstance(ending_hook, dict):
+        for key in ("content", "hook", "summary", "description", "type"):
+            text = _shrink_prompt_text(ending_hook.get(key, ""), max_length=60)
+            if text:
+                return text
+
+    text = _shrink_prompt_text(ending_hook, max_length=60)
+    if text:
+        return text
+
+    return _join_prompt_items(hooks, max_items=2, max_length=60)
+
+
+def _has_structured_chapter_assets(summary_data: Any) -> bool:
+    if not isinstance(summary_data, dict):
+        return False
+
+    interesting_keys = (
+        "scene_goal",
+        "key_events",
+        "appearing_characters",
+        "key_characters",
+        "conflict_arc",
+        "emotion_curve",
+        "highlight",
+        "gains",
+        "ending_hook",
+        "hooks",
+        "foreshadowing",
+    )
+    return any(summary_data.get(key) for key in interesting_keys)
+
+
+def _format_recent_chapter_asset(chapter_payload: Dict[str, Any]) -> str:
+    summary_data = chapter_payload.get("summary_data") or {}
+    if not isinstance(summary_data, dict):
+        return ""
+
+    chapter_number = chapter_payload.get("chapter_number", "?")
+    title = (chapter_payload.get("title") or "").strip()
+    chapter_label = f"第{chapter_number}章《{title}》" if title else f"第{chapter_number}章"
+    lines = [chapter_label]
+
+    core_summary = _shrink_prompt_text(
+        summary_data.get("core_summary") or chapter_payload.get("summary", ""),
+        max_length=120,
+    )
+    if core_summary:
+        lines.append(f"- 核心摘要: {core_summary}")
+
+    scene_goal = _shrink_prompt_text(summary_data.get("scene_goal", ""), max_length=60)
+    if scene_goal:
+        lines.append(f"- 场景目标: {scene_goal}")
+
+    key_events = _join_prompt_items(summary_data.get("key_events"), max_items=4, max_length=40)
+    if key_events:
+        lines.append(f"- 关键事件: {key_events}")
+
+    characters = _join_prompt_items(
+        summary_data.get("appearing_characters") or summary_data.get("key_characters"),
+        max_items=5,
+        max_length=20,
+    )
+    if characters:
+        lines.append(f"- 相关人物: {characters}")
+
+    conflict_arc = _format_conflict_arc(summary_data.get("conflict_arc"))
+    if conflict_arc:
+        lines.append(f"- 冲突推进: {conflict_arc}")
+
+    emotion_curve = _shrink_prompt_text(summary_data.get("emotion_curve", ""), max_length=40)
+    if emotion_curve:
+        lines.append(f"- 情绪曲线: {emotion_curve}")
+
+    highlight = summary_data.get("highlight")
+    if isinstance(highlight, dict):
+        highlight_type = _shrink_prompt_text(highlight.get("type", ""), max_length=20)
+        highlight_desc = _shrink_prompt_text(highlight.get("description", ""), max_length=50)
+        highlight_text = "：".join(part for part in (highlight_type, highlight_desc) if part)
+        if highlight_text:
+            lines.append(f"- 高光设计: {highlight_text}")
+
+    gains = _format_chapter_gains(summary_data.get("gains"))
+    if gains:
+        lines.append(f"- 本章收获: {gains}")
+
+    ending_hook = _format_ending_hook(
+        summary_data.get("ending_hook"),
+        summary_data.get("hooks"),
+    )
+    if ending_hook:
+        lines.append(f"- 结尾钩子: {ending_hook}")
+
+    foreshadowing = _join_prompt_items(summary_data.get("foreshadowing"), max_items=3, max_length=50)
+    if foreshadowing:
+        lines.append(f"- 伏笔事项: {foreshadowing}")
+
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
+def _build_recent_chapter_assets_summary(
+    previous_chapters_payload: list[Dict[str, Any]],
+    *,
+    limit: int = 4,
+) -> str:
+    structured_payloads = [
+        payload
+        for payload in previous_chapters_payload
+        if _has_structured_chapter_assets(payload.get("summary_data"))
+    ]
+
+    if not structured_payloads:
+        return ""
+
+    formatted_parts = []
+    for payload in structured_payloads[-limit:]:
+        formatted = _format_recent_chapter_asset(payload)
+        if formatted:
+            formatted_parts.append(formatted)
+
+    return "\n\n".join(formatted_parts)
+
+
+def _build_iteration_revision_prompt(
+    *,
+    chapter_number: int,
+    chapter_content: str,
+    review_text: str,
+    recent_chapter_assets_summary: str = "",
+    include_history_hint: bool = False,
+) -> str:
+    review_section_title = "【必须执行的所有评审意见（包含历史轮次）】" if include_history_hint else "【评审意见】"
+    intro = (
+        f"【重要提示】请严格按照以下所有评审意见逐条修改第{chapter_number}章内容，不要遗漏或忽略任何一条建议。"
+        if include_history_hint
+        else f"请根据以下评审意见优化第{chapter_number}章："
+    )
+
+    continuity_block = (
+        recent_chapter_assets_summary
+        if recent_chapter_assets_summary
+        else "（最近章节没有可用的结构化连续性资产）"
+    )
+
+    return f"""{intro}
+
+【当前章节内容】
+{chapter_content}
+
+【最近章节连续性资产】（必须承接场景目标、冲突推进、人物状态、钩子与伏笔）
+{continuity_block}
+
+{review_section_title}
+{review_text}
+
+【修改要求】
+1. 必须逐条落实上述评审意见中的修改建议
+2. 优先延续最近章节连续性资产中的未完成冲突、人物状态变化、结尾钩子与伏笔
+3. 不得删改会影响后续章节衔接的关键细节
+4. 保持原章节的完整情节和篇幅（不少于原稿80%字数）
+5. 直接输出优化后的完整章节内容（第一行为章节标题）
+6. 不要附加任何修改说明、优化要点等额外内容
+
+请立即输出优化后的章节："""
+
+
+def _build_iteration_review_prompt(
+    *,
+    chapter_number: int,
+    chapter_content: str,
+    chapter_plan: str,
+    recent_chapter_assets_summary: str = "",
+) -> str:
+    continuity_block = (
+        recent_chapter_assets_summary
+        if recent_chapter_assets_summary
+        else "（最近章节没有可用的结构化连续性资产）"
+    )
+
+    return f"""请评审以下第{chapter_number}章：
+
+【章节规划】
+{chapter_plan}
+
+【最近章节连续性资产】（重点检查是否承接场景目标、冲突推进、人物状态、钩子与伏笔）
+{continuity_block}
+
+【章节内容】
+{chapter_content}
+"""
 
 
 # 🆕 导入流式输出服务
@@ -118,11 +429,839 @@ class ExpandStoryRequest(BaseModel):
     target_total_chapters: Optional[int] = None
     target_total_characters: Optional[int] = None
     strategy: str = "auto"
+    intent: str = "auto"
+    enable_auto_supplement: bool = True
+    expansion_mode: str = "auto"
+    total_volumes: Optional[int] = None
+    total_chapters_min: Optional[int] = None
+    total_chapters_max: Optional[int] = None
+    target_volume_index: Optional[int] = None
+    volume_chapters_min: Optional[int] = None
+    volume_chapters_max: Optional[int] = None
+    preserve_written_mode: str = "extract_extend"
     lock_existing_chapters: bool = True
     preserve_existing_characters: bool = True
+    reset_epic_framework: bool = False
 
 
 router = APIRouter(prefix="/api/v1/workflow", tags=["workflow"])
+
+VALID_STORY_EXPANSION_STRATEGIES = {"auto", "balanced", "plot_first", "character_first"}
+VALID_STORY_EXPANSION_INTENTS = {"auto", "outline_led", "character_led", "balanced"}
+VALID_STORY_EXPANSION_MODES = {"auto", "total", "epic_framework", "volume_detail"}
+VALID_PRESERVE_WRITTEN_MODES = {"extract_extend", "preserve_written", "regenerate_all"}
+
+
+def _get_project_expansion_profile(project_id: int, db: Session) -> Dict[str, Any]:
+    """统一获取扩展阶段所需的项目画像，避免不同入口的参数传递漂移。"""
+    project_meta_query = text(
+        """
+        SELECT genre, planned_chapters_max
+        FROM projects
+        WHERE id = :project_id
+        """
+    )
+    project_meta_result = db.execute(project_meta_query, {"project_id": project_id})
+    project_meta = project_meta_result.fetchone() if hasattr(project_meta_result, "fetchone") else None
+    return {
+        "genre": (project_meta[0] if project_meta and project_meta[0] else ""),
+        "planned_chapters_max": (project_meta[1] if project_meta and project_meta[1] else 0),
+    }
+
+
+def _create_project_outline_expander(project_id: int, db: Session) -> Dict[str, Any]:
+    from app.services.agents.outline_expander import create_outline_expander
+
+    project_profile = _get_project_expansion_profile(project_id, db)
+    project_genre = project_profile["genre"] or ""
+    project_planned_chapters = project_profile["planned_chapters_max"] or 0
+
+    return {
+        "expander": create_outline_expander(
+            genre=project_genre,
+            planned_chapters_max=project_planned_chapters,
+            project_id=project_id,
+        ),
+        "genre": project_genre,
+        "planned_chapters_max": project_planned_chapters,
+    }
+
+
+def _build_project_world_setting_context(project_id: int, world_setting: str, db: Session) -> str:
+    settings_summary = build_project_settings_summary(project_id, db)
+    combined_world_setting = world_setting or ""
+    if settings_summary:
+        combined_world_setting = (
+            f"{combined_world_setting}\n\n{settings_summary}"
+            if combined_world_setting
+            else settings_summary
+        )
+    return combined_world_setting
+
+
+def _ensure_project_owned(project_id: int, user_id: int, db: Session) -> Project:
+    project = db.query(Project).filter(
+        (Project.id == project_id) & (Project.user_id == user_id)
+    ).first()
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+    return project
+
+
+def _log_legacy_story_analysis(
+    route_label: str,
+    analysis: Dict[str, Any],
+    route_logger: Optional[logging.Logger] = None,
+) -> None:
+    active_logger = route_logger or logger
+    active_logger.info(
+        "   legacy story analysis [%s]: %s",
+        route_label,
+        analysis.get("analysis_summary", "none"),
+    )
+
+
+def _build_task_start_response(
+    *,
+    task_id: str,
+    message: str,
+    story_expansion_analysis: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    response: Dict[str, Any] = {
+        "success": True,
+        "task_id": task_id,
+        "message": message,
+    }
+    if story_expansion_analysis is not None:
+        response["story_expansion_analysis"] = story_expansion_analysis
+    return response
+
+
+def _estimate_character_count_from_text(characters_text: str) -> int:
+    if not (characters_text or "").strip():
+        return 0
+
+    try:
+        from app.services.story_expansion_coordinator import extract_character_names
+
+        detected_names = extract_character_names(characters_text or "")
+        if detected_names:
+            return len(detected_names)
+    except Exception:
+        logger.warning("⚠️ 人物识别降级为正则统计")
+
+    return len(re.findall(r"【姓名】：", characters_text or ""))
+
+
+def _resolve_story_epic_config(request: ExpandStoryRequest) -> Optional[Dict[str, Any]]:
+    if request.expansion_mode != "epic_framework":
+        return None
+    if (
+        request.total_volumes is None
+        or request.total_chapters_min is None
+        or request.total_chapters_max is None
+    ):
+        return None
+    return {
+        "total_volumes": int(request.total_volumes),
+        "chapter_range": (
+            int(request.total_chapters_min),
+            int(request.total_chapters_max),
+        ),
+    }
+
+
+def _detect_total_volumes_from_framework(framework_text: str) -> int:
+    if not framework_text:
+        return 10
+
+    yaml_match = re.search(r"总卷数:\s*(\d+)", framework_text)
+    if yaml_match:
+        try:
+            return max(1, int(yaml_match.group(1)))
+        except Exception:
+            pass
+
+    volume_matches = re.findall(r"第\s*(\d+)\s*卷", framework_text)
+    if volume_matches:
+        try:
+            return max(int(item) for item in volume_matches)
+        except Exception:
+            pass
+
+    return 10
+
+
+def _resolve_story_volume_detail_config(
+    request: ExpandStoryRequest,
+    db: Session,
+) -> Optional[Dict[str, Any]]:
+    if request.expansion_mode != "volume_detail":
+        return None
+
+    from app.services.outline_merger import parse_epic_volumes_json, parse_framework_to_volumes
+
+    volume_query = text(
+        """
+        SELECT epic_framework, epic_volumes_detail
+        FROM project_settings
+        WHERE project_id = :project_id
+        """
+    )
+    volume_row = db.execute(volume_query, {"project_id": request.project_id}).fetchone()
+
+    if not volume_row or not volume_row[0]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="单卷细化协同需要先生成史诗框架",
+        )
+
+    framework_content = volume_row[0]
+    stored_volumes_json = volume_row[1] or "{}"
+    volumes_data = parse_epic_volumes_json(stored_volumes_json)
+    if not volumes_data.get("volumes"):
+        detected_total_volumes = _detect_total_volumes_from_framework(framework_content)
+        volumes_data = parse_framework_to_volumes(framework_content, detected_total_volumes)
+
+    volumes_dict = volumes_data.get("volumes", {})
+    target_volume_index = int(request.target_volume_index or 0)
+    chapters_min = int(request.volume_chapters_min or 0)
+    chapters_max = int(request.volume_chapters_max or 0)
+    total_volumes = int(volumes_data.get("total_volumes") or len(volumes_dict) or 0)
+
+    if total_volumes > 0 and target_volume_index > total_volumes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"目标卷编号超出范围 (1-{total_volumes})",
+        )
+
+    accumulated_chapters = 0
+    current_total_chapter_count = 0
+    previous_volume_detail = None
+    existing_volume_detail = None
+
+    for vol_key, vol_data in volumes_dict.items():
+        if vol_data.get("type") == "detail":
+            chapter_range = vol_data.get("chapters_range") or [0, 0]
+            try:
+                current_total_chapter_count = max(current_total_chapter_count, int(chapter_range[1] or 0))
+            except Exception:
+                pass
+
+    for vol_num in range(1, target_volume_index):
+        vol_data = volumes_dict.get(str(vol_num)) or {}
+        if vol_data.get("type") == "detail":
+            chapter_range = vol_data.get("chapters_range") or [0, 0]
+            try:
+                accumulated_chapters += max(0, int(chapter_range[1]) - int(chapter_range[0]) + 1)
+            except Exception:
+                pass
+            if vol_num == target_volume_index - 1:
+                previous_volume_detail = vol_data.get("detail")
+
+    target_volume = volumes_dict.get(str(target_volume_index)) or {}
+    if target_volume.get("type") == "detail":
+        existing_volume_detail = target_volume.get("detail")
+
+    start_chapter_num = accumulated_chapters + 1
+    expected_chapter_range = (
+        start_chapter_num,
+        start_chapter_num + chapters_max - 1,
+    )
+    expected_total_chapter_count = max(current_total_chapter_count, expected_chapter_range[1])
+
+    return {
+        "framework_content": framework_content,
+        "target_volume_index": target_volume_index,
+        "chapters_count_range": (chapters_min, chapters_max),
+        "start_chapter_num": start_chapter_num,
+        "framework_header": volumes_data.get("framework_header", ""),
+        "framework_footer": volumes_data.get("framework_footer", ""),
+        "volumes_data": volumes_data,
+        "previous_volume_detail": previous_volume_detail,
+        "existing_volume_detail": existing_volume_detail,
+        "expected_chapter_range": expected_chapter_range,
+        "expected_total_chapter_count": expected_total_chapter_count,
+        "current_total_chapter_count": current_total_chapter_count,
+        "total_volumes": total_volumes,
+    }
+
+
+def _load_story_epic_framework_state(project_id: int, db: Session) -> Dict[str, Any]:
+    framework_query = text(
+        """
+        SELECT epic_framework, epic_framework_generated_at
+        FROM project_settings
+        WHERE project_id = :project_id
+        """
+    )
+    framework_result = db.execute(framework_query, {"project_id": project_id})
+    framework_row = framework_result.fetchone() if hasattr(framework_result, "fetchone") else None
+    epic_framework = framework_row[0] if framework_row and framework_row[0] else ""
+    framework_generated_at = framework_row[1] if framework_row else None
+
+    return {
+        "has_framework": bool((epic_framework or "").strip()) or bool(framework_generated_at),
+        "epic_framework": epic_framework,
+        "framework_generated_at": framework_generated_at,
+    }
+
+
+def _validate_story_framework_mode_switch(
+    request: ExpandStoryRequest,
+    db: Session,
+) -> None:
+    normalized_mode = str(request.expansion_mode or "auto").strip()
+    if normalized_mode in {"epic_framework", "volume_detail"}:
+        return
+
+    if _resolve_story_target_chapters(request) is None:
+        return
+
+    framework_state = _load_story_epic_framework_state(request.project_id, db)
+    if not framework_state["has_framework"]:
+        return
+
+    if request.reset_epic_framework:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+            "当前项目已存在史诗框架。若要继续长篇路线，请使用单卷细化协同；"
+            "若要切回常规协同，请确认清空旧框架后再执行。"
+        ),
+    )
+
+
+def _resolve_story_target_chapters(request: ExpandStoryRequest) -> Optional[int]:
+    if request.expansion_mode == "epic_framework":
+        candidates = [
+            int(value)
+            for value in [request.target_total_chapters, request.total_chapters_max]
+            if value is not None
+        ]
+        return max(candidates) if candidates else None
+    return request.target_total_chapters
+
+
+def _build_story_written_chapter_preview(
+    request: ExpandStoryRequest,
+    db: Session,
+) -> Dict[str, Any]:
+    result = {
+        "effective_outline": request.current_outline or "",
+        "effective_current_chapter_count": int(request.current_chapter_count or 0),
+        "written_chapter_count": 0,
+        "warnings": [],
+        "applied": False,
+    }
+
+    if request.expansion_mode == "volume_detail":
+        return result
+    if getattr(request, "preserve_written_mode", "extract_extend") == "regenerate_all":
+        return result
+
+    chapter_query = text(
+        """
+        SELECT chapter_number, title, content, summary
+        FROM chapters
+        WHERE project_id = :project_id
+          AND content IS NOT NULL
+          AND content != ''
+        ORDER BY chapter_number ASC
+        """
+    )
+    chapter_rows_result = db.execute(chapter_query, {"project_id": request.project_id})
+    chapter_rows = chapter_rows_result.fetchall() if hasattr(chapter_rows_result, "fetchall") else []
+    written_count = len(chapter_rows)
+    result["written_chapter_count"] = written_count
+
+    if written_count <= 0:
+        return result
+
+    preview_sections = []
+    for row in chapter_rows:
+        chapter_number = row[0]
+        chapter_title = row[1] or f"第{chapter_number}章"
+        chapter_content = row[2] or ""
+        chapter_summary = row[3] or ""
+        preview_text = chapter_summary.strip() or chapter_content[:200].strip()
+        if chapter_content and len(chapter_content) > 200 and not chapter_summary.strip():
+            preview_text = f"{preview_text}..."
+        if not preview_text:
+            preview_text = "本章已有正文，待后续协同扩展时继续承接。"
+        preview_sections.append(
+            f"第{chapter_number}章：{chapter_title}\n- 已写摘要：{preview_text}"
+        )
+
+    result["effective_outline"] = "\n\n".join(preview_sections)
+    result["effective_current_chapter_count"] = max(
+        int(request.current_chapter_count or 0),
+        written_count,
+    )
+    result["applied"] = True
+
+    if request.preserve_written_mode == "extract_extend":
+        result["warnings"].append("检测到已写正文，预检阶段先按摘要预览，实际执行前会先提取已写章节细纲。")
+    elif request.preserve_written_mode == "preserve_written":
+        result["warnings"].append("检测到已写正文，预检阶段会按章节摘要保护已写内容。")
+
+    return result
+
+
+async def _prepare_story_execution_request(
+    request: ExpandStoryRequest,
+    db: Session,
+) -> Dict[str, Any]:
+    preview = _build_story_written_chapter_preview(request, db)
+    if not preview.get("applied"):
+        return {
+            "request": request,
+            "written_chapter_count": int(preview.get("written_chapter_count") or 0),
+            "warnings": list(preview.get("warnings") or []),
+            "applied": False,
+        }
+
+    combined_world_setting = _build_project_world_setting_context(
+        request.project_id,
+        request.world_setting,
+        db,
+    )
+
+    from app.services.agents.written_chapters_handler import process_written_chapters
+
+    expander_bundle = _create_project_outline_expander(request.project_id, db)
+    expander = expander_bundle["expander"]
+    project_genre = expander_bundle["genre"]
+
+    written_count, extracted_outline_text = await process_written_chapters(
+        project_id=request.project_id,
+        preserve_written_mode=request.preserve_written_mode,
+        project_genre=project_genre,
+        combined_world_setting=combined_world_setting,
+        db=db,
+        extractor_llm=expander.llm,
+    )
+
+    effective_outline = extracted_outline_text or preview["effective_outline"] or request.current_outline
+    effective_chapter_count = int(preview["effective_current_chapter_count"] or request.current_chapter_count or 0)
+    if written_count > 0 and request.preserve_written_mode in {"extract_extend", "preserve_written"}:
+        effective_chapter_count = written_count
+
+    warnings = list(preview.get("warnings") or [])
+    if written_count > 0 and request.preserve_written_mode == "extract_extend":
+        warnings.append("执行前已根据已写正文提取章节细纲，并据此重新计算协同缺口。")
+    elif written_count > 0 and request.preserve_written_mode == "preserve_written":
+        warnings.append("执行前已按已写章节摘要保护正文内容，并据此重新计算协同缺口。")
+
+    return {
+        "request": request.model_copy(
+            update={
+                "current_outline": effective_outline,
+                "current_chapter_count": effective_chapter_count,
+            }
+        ),
+        "written_chapter_count": written_count,
+        "warnings": warnings,
+        "applied": True,
+    }
+
+
+def _validate_expand_story_request(request: ExpandStoryRequest) -> None:
+    if request.target_total_chapters is None and request.target_total_characters is None:
+        if request.expansion_mode not in {"epic_framework", "volume_detail"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="至少需要提供目标章节数或目标人物数之一",
+            )
+
+    if request.target_total_chapters is not None and request.target_total_chapters <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="目标章节数必须大于 0",
+        )
+
+    if request.target_total_characters is not None and request.target_total_characters <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="目标人物数必须大于 0",
+        )
+
+    if request.strategy not in VALID_STORY_EXPANSION_STRATEGIES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="不支持的协同策略",
+        )
+
+    if request.intent not in VALID_STORY_EXPANSION_INTENTS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="不支持的协同意图",
+        )
+
+    if request.expansion_mode not in VALID_STORY_EXPANSION_MODES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="不支持的协同扩展模式",
+        )
+
+    if request.preserve_written_mode not in VALID_PRESERVE_WRITTEN_MODES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="不支持的已写章节处理模式",
+        )
+
+    if request.expansion_mode == "epic_framework":
+        if request.total_volumes is None or request.total_volumes < 5 or request.total_volumes > 50:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="长篇框架协同需要有效的总卷数 (5-50)",
+            )
+        if (
+            request.total_chapters_min is None
+            or request.total_chapters_max is None
+            or request.total_chapters_min < 400
+            or request.total_chapters_max > 5000
+            or request.total_chapters_min > request.total_chapters_max
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="长篇框架协同需要有效的总章节范围 (400-5000)",
+            )
+
+    if request.expansion_mode == "volume_detail":
+        if request.target_volume_index is None or request.target_volume_index < 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="单卷细化协同需要指定有效的卷编号",
+            )
+        if (
+            request.volume_chapters_min is None
+            or request.volume_chapters_max is None
+            or request.volume_chapters_min < 30
+            or request.volume_chapters_max > 80
+            or request.volume_chapters_min > request.volume_chapters_max
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="单卷细化协同需要有效的本卷章节范围 (30-80)",
+            )
+
+
+def _estimate_legacy_character_count(characters_text: str) -> int:
+    return _estimate_character_count_from_text(characters_text)
+
+
+def _normalize_legacy_outline_analysis_mode(expansion_mode: Optional[str]) -> str:
+    normalized = str(expansion_mode or "total").strip()
+    if normalized in {"epic_framework", "volume_detail"}:
+        return normalized
+    return "total"
+
+
+def _build_legacy_story_analysis_payload(
+    *,
+    story_request: ExpandStoryRequest,
+    db: Session,
+    source: str,
+    requested_entry: str,
+    requested_intent: str,
+    requested_mode: str,
+    mapped_story_mode: str,
+) -> Dict[str, Any]:
+    base_payload = {
+        "available": False,
+        "source": source,
+        "requested_entry": requested_entry,
+        "requested_intent": requested_intent,
+        "requested_mode": requested_mode,
+        "mapped_story_mode": mapped_story_mode,
+        "analysis_summary": "协同兼容分析暂不可用，已回退为旧接口直接执行。",
+        "warnings": [],
+    }
+
+    try:
+        _validate_expand_story_request(story_request)
+
+        preview = _build_story_written_chapter_preview(story_request, db)
+        analysis_request = story_request.model_copy(
+            update={
+                "current_outline": preview["effective_outline"],
+                "current_chapter_count": preview["effective_current_chapter_count"],
+            }
+        )
+        analysis_bundle = _build_story_expansion_analysis(
+            request=analysis_request,
+            db=db,
+        )
+        analysis = dict(analysis_bundle.get("analysis") or {})
+
+        warnings = list(analysis.get("warnings") or [])
+        warnings.extend(preview.get("warnings") or [])
+        if requested_mode != mapped_story_mode:
+            warnings.append(
+                f"兼容分析已将旧模式 {requested_mode} 映射为协同模式 {mapped_story_mode}，"
+                "仅用于建议，不影响本次旧接口实际执行。"
+            )
+        warnings = list(dict.fromkeys(item for item in warnings if item))
+
+        logger.info(
+            "🧭 旧接口协同兼容分析完成: entry=%s, source=%s, summary=%s",
+            requested_entry,
+            source,
+            analysis.get("analysis_summary", ""),
+        )
+
+        return {
+            **base_payload,
+            "available": True,
+            "recommended_intent": analysis.get("recommended_intent"),
+            "effective_intent": analysis.get("effective_intent"),
+            "effective_strategy": analysis.get("effective_strategy"),
+            "execution_mode": analysis.get("execution_mode"),
+            "execution_mode_reason": analysis.get("execution_mode_reason"),
+            "analysis_summary": analysis.get("analysis_summary") or base_payload["analysis_summary"],
+            "effective_target_chapter_count": analysis.get("effective_target_chapter_count"),
+            "effective_target_character_count": analysis.get("effective_target_character_count"),
+            "estimated_rounds": analysis.get("estimated_rounds"),
+            "model_plan": analysis.get("model_plan"),
+            "warnings": warnings,
+            "written_chapter_context": {
+                "applied": bool(preview.get("applied")),
+                "written_chapter_count": int(preview.get("written_chapter_count") or 0),
+                "preserve_written_mode": story_request.preserve_written_mode,
+            },
+        }
+    except HTTPException as exc:
+        fallback_reason = str(getattr(exc, "detail", "") or "协同兼容分析校验失败")
+        logger.warning(
+            "⚠️  旧接口协同兼容分析回退: entry=%s, source=%s, reason=%s",
+            requested_entry,
+            source,
+            fallback_reason,
+        )
+        return {
+            **base_payload,
+            "fallback_reason": fallback_reason,
+            "warnings": [fallback_reason],
+        }
+    except Exception as exc:
+        logger.warning(
+            "⚠️  旧接口协同兼容分析异常，已回退旧执行链路: entry=%s, source=%s, error=%s",
+            requested_entry,
+            source,
+            exc,
+            exc_info=True,
+        )
+        return {
+            **base_payload,
+            "fallback_reason": "协同兼容分析生成失败，已回退为旧接口直接执行。",
+            "warnings": ["协同兼容分析生成失败，已回退为旧接口直接执行。"],
+        }
+
+
+def _build_legacy_outline_story_analysis(
+    request: ExpandOutlineRequest,
+    db: Session,
+    target_total_chapters: int,
+) -> Dict[str, Any]:
+    mapped_story_mode = _normalize_legacy_outline_analysis_mode(request.expansion_mode)
+    story_request = ExpandStoryRequest(
+        project_id=request.project_id,
+        current_outline=request.current_outline,
+        world_setting=request.world_setting,
+        characters=request.characters,
+        current_chapter_count=int(request.current_chapter_count or 0),
+        current_character_count=_estimate_legacy_character_count(request.characters),
+        target_total_chapters=target_total_chapters,
+        target_total_characters=None,
+        strategy="plot_first",
+        intent="outline_led",
+        enable_auto_supplement=True,
+        expansion_mode=mapped_story_mode,
+        total_volumes=request.total_volumes if mapped_story_mode == "epic_framework" else None,
+        total_chapters_min=request.total_chapters_min if mapped_story_mode == "epic_framework" else None,
+        total_chapters_max=request.total_chapters_max if mapped_story_mode == "epic_framework" else None,
+        target_volume_index=request.target_volume_index if mapped_story_mode == "volume_detail" else None,
+        volume_chapters_min=request.volume_chapters_min if mapped_story_mode == "volume_detail" else None,
+        volume_chapters_max=request.volume_chapters_max if mapped_story_mode == "volume_detail" else None,
+        preserve_written_mode=request.preserve_written_mode,
+    )
+    return _build_legacy_story_analysis_payload(
+        story_request=story_request,
+        db=db,
+        source="legacy_outline",
+        requested_entry="expand-outline",
+        requested_intent="outline_led",
+        requested_mode=str(request.expansion_mode or "total").strip(),
+        mapped_story_mode=mapped_story_mode,
+    )
+
+
+def _build_legacy_character_story_analysis(
+    request: ExpandCharactersRequest,
+    db: Session,
+    target_total_characters: int,
+) -> Dict[str, Any]:
+    story_request = ExpandStoryRequest(
+        project_id=request.project_id,
+        current_outline=request.plot_outline,
+        world_setting=request.world_setting,
+        characters=request.main_characters,
+        current_chapter_count=0,
+        current_character_count=max(
+            int(request.current_character_count or 0),
+            _estimate_legacy_character_count(request.main_characters),
+        ),
+        target_total_chapters=None,
+        target_total_characters=target_total_characters,
+        strategy="character_first",
+        intent="character_led",
+        enable_auto_supplement=True,
+        expansion_mode="total",
+        preserve_written_mode="extract_extend",
+    )
+    return _build_legacy_story_analysis_payload(
+        story_request=story_request,
+        db=db,
+        source="legacy_characters",
+        requested_entry="expand-characters",
+        requested_intent="character_led",
+        requested_mode="total",
+        mapped_story_mode="total",
+    )
+
+
+def _build_legacy_outline_story_analysis_from_task(
+    *,
+    db: Session,
+    project_id: int,
+    current_outline: str,
+    world_setting: str,
+    characters: str,
+    current_chapter_count: int,
+    increment: int,
+    target_total_chapters: Optional[int],
+    expansion_mode: str = "total",
+    target_volumes: Optional[int] = None,
+    chapters_per_volume_min: Optional[int] = 20,
+    chapters_per_volume_max: Optional[int] = 30,
+    incremental_step: Optional[int] = 10,
+    total_volumes: Optional[int] = None,
+    total_chapters_min: Optional[int] = None,
+    total_chapters_max: Optional[int] = None,
+    framework_content: Optional[str] = None,
+    target_volume_index: Optional[int] = None,
+    volume_chapters_min: Optional[int] = None,
+    volume_chapters_max: Optional[int] = None,
+    preserve_written_mode: str = "extract_extend",
+) -> Dict[str, Any]:
+    normalized_target_total_chapters = int(target_total_chapters or 0)
+    return _build_legacy_outline_story_analysis(
+        request=ExpandOutlineRequest(
+            project_id=project_id,
+            current_outline=current_outline,
+            world_setting=world_setting,
+            characters=characters,
+            current_chapter_count=current_chapter_count,
+            increment=increment,
+            target_total_chapters=normalized_target_total_chapters,
+            expansion_mode=expansion_mode,
+            target_volumes=target_volumes,
+            chapters_per_volume_min=chapters_per_volume_min,
+            chapters_per_volume_max=chapters_per_volume_max,
+            incremental_step=incremental_step,
+            total_volumes=total_volumes,
+            total_chapters_min=total_chapters_min,
+            total_chapters_max=total_chapters_max,
+            framework_content=framework_content,
+            target_volume_index=target_volume_index,
+            volume_chapters_min=volume_chapters_min,
+            volume_chapters_max=volume_chapters_max,
+            preserve_written_mode=preserve_written_mode,
+        ),
+        db=db,
+        target_total_chapters=normalized_target_total_chapters,
+    )
+
+
+def _build_legacy_character_story_analysis_from_task(
+    *,
+    db: Session,
+    project_id: int,
+    main_characters: str,
+    world_setting: str,
+    plot_outline: str,
+    current_character_count: int,
+    target_total_characters: Optional[int],
+) -> Dict[str, Any]:
+    normalized_target_total_characters = int(target_total_characters or 0)
+    return _build_legacy_character_story_analysis(
+        request=ExpandCharactersRequest(
+            project_id=project_id,
+            main_characters=main_characters,
+            world_setting=world_setting,
+            plot_outline=plot_outline,
+            current_character_count=current_character_count,
+            target_total_characters=normalized_target_total_characters,
+        ),
+        db=db,
+        target_total_characters=normalized_target_total_characters,
+    )
+
+
+def _build_story_expansion_analysis(
+    *,
+    request: ExpandStoryRequest,
+    db: Session,
+) -> Dict[str, Any]:
+    from app.services.story_expansion_coordinator import StoryExpansionCoordinator
+
+    combined_world_setting = _build_project_world_setting_context(
+        request.project_id,
+        request.world_setting,
+        db,
+    )
+
+    project_profile = _get_project_expansion_profile(request.project_id, db)
+    project_genre = project_profile["genre"]
+    project_planned_chapters = project_profile["planned_chapters_max"]
+
+    coordinator = StoryExpansionCoordinator(
+        project_id=request.project_id,
+        genre=project_genre or "",
+        planned_chapters_max=project_planned_chapters or 0,
+    )
+    target_total_chapters = _resolve_story_target_chapters(request)
+    epic_config = _resolve_story_epic_config(request)
+    volume_detail_config = _resolve_story_volume_detail_config(request, db)
+    if volume_detail_config is not None:
+        expected_total = int(volume_detail_config.get("expected_total_chapter_count") or 0)
+        if expected_total > 0:
+            target_total_chapters = max(target_total_chapters or 0, expected_total)
+    analysis = coordinator.analyze_expansion_request(
+        current_outline=request.current_outline,
+        characters=request.characters,
+        world_setting=combined_world_setting,
+        target_total_chapters=target_total_chapters,
+        target_total_characters=request.target_total_characters,
+        strategy=request.strategy,
+        intent=request.intent,
+        enable_auto_supplement=request.enable_auto_supplement,
+        expansion_mode=request.expansion_mode,
+        epic_config=epic_config,
+        volume_detail_config=volume_detail_config,
+    )
+    return {
+        "coordinator": coordinator,
+        "combined_world_setting": combined_world_setting,
+        "analysis": analysis,
+        "volume_detail_config": volume_detail_config,
+    }
 
 
 def _get_workflow_session_columns(db: Session) -> set[str]:
@@ -3595,7 +4734,7 @@ async def generate_next_chapter(
             - 更早章节：使用简要摘要（节省token）
             """
             if not chapters:
-                return "这是第一章，之前没有章节。", []
+                return "这是第一章，之前没有章节。", [], ""
 
             # 局部导入，避免潜在的循环依赖
             from app.services.agents.chapter_summarizer import create_chapter_summarizer
@@ -3612,12 +4751,14 @@ async def generate_next_chapter(
             total = len(chapters)
             RECENT_FULL_COUNT = 2  # 最近2章使用全文
             SUMMARY_COUNT = 8      # 往前8章使用详细摘要
+            RECENT_ASSET_COUNT = 4  # 最近4章优先提取结构化连续性资产
 
             for idx, chapter in enumerate(chapters):
                 chapter_id, chapter_num, title, content, existing_summary = chapter
                 content = content or ""
                 title = title or ""
                 summary_text = (existing_summary or "").strip()
+                summary_data = {}
 
                 # 计算当前章节距离最后一章的距离
                 distance_from_end = total - idx
@@ -3625,8 +4766,18 @@ async def generate_next_chapter(
                 # 判断是否需要生成详细摘要（最近2章之后的8章）
                 needs_detailed_summary = (distance_from_end > RECENT_FULL_COUNT and 
                                         distance_from_end <= RECENT_FULL_COUNT + SUMMARY_COUNT)
+                needs_recent_assets = distance_from_end <= RECENT_ASSET_COUNT
 
-                if summarizer and needs_detailed_summary:
+                if summarizer and (needs_detailed_summary or needs_recent_assets):
+                    try:
+                        cached_summary = summarizer.load_summary_from_db(chapter_id)
+                        if isinstance(cached_summary, dict):
+                            summary_data = cached_summary
+                            summary_text = summary_data.get("core_summary", "").strip() or summary_text
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ 读取第{chapter_num}章缓存摘要失败，将继续使用已有内容: {e}")
+
+                if summarizer and needs_detailed_summary and not summary_data:
                     # 对需要详细摘要的章节，生成200字结构化摘要
                     try:
                         summary_data = summarizer.get_or_generate_summary(
@@ -3652,6 +4803,7 @@ async def generate_next_chapter(
                         "title": title,
                         "content": content,
                         "summary": summary_text,
+                        "summary_data": summary_data,
                     }
                 )
 
@@ -3668,9 +4820,10 @@ async def generate_next_chapter(
                 if total > RECENT_FULL_COUNT + SUMMARY_COUNT:
                     logger.info(f"      - 更早{total - RECENT_FULL_COUNT - SUMMARY_COUNT}章简要摘要: 第1-{total-RECENT_FULL_COUNT-SUMMARY_COUNT}章")
 
-            return "\n\n".join(summaries), previous_chapters_payload
+            recent_chapter_assets_summary = _build_recent_chapter_assets_summary(previous_chapters_payload)
+            return "\n\n".join(summaries), previous_chapters_payload, recent_chapter_assets_summary
 
-        previous_chapters_summary, previous_chapters_payload = summarize_chapters(existing_chapters)
+        previous_chapters_summary, previous_chapters_payload, recent_chapter_assets_summary = summarize_chapters(existing_chapters)
 
         # 6. 生成任务ID并创建任务记录
         task_id = str(uuid.uuid4())
@@ -3707,6 +4860,7 @@ async def generate_next_chapter(
                 previous_ending=previous_ending,
                 previous_chapters_summary=previous_chapters_summary,
                 previous_chapters_payload=previous_chapters_payload,
+                recent_chapter_assets_summary=recent_chapter_assets_summary,
             )
         )
         logger.info(f"   🚀 后台任务已启动")
@@ -3743,6 +4897,7 @@ async def execute_generate_next_chapter_task(
     previous_ending: str,
     previous_chapters_summary: str,
     previous_chapters_payload: list,
+    recent_chapter_assets_summary: str,
 ):
     """
     后台执行生成下一章任务（真流式版本）
@@ -3906,6 +5061,7 @@ async def execute_generate_next_chapter_task(
             'world_setting': '',  # 已包含在优化上下文中
             'characters': '',  # 已包含在优化上下文中
             'previous_chapters_analysis': previous_chapters_summary or '',
+            'recent_chapter_assets_summary': recent_chapter_assets_summary or '',
             'previous_ending': previous_ending or ''
         }
         # 🆕 广播步骤1模型
@@ -3932,6 +5088,9 @@ async def execute_generate_next_chapter_task(
 
 【已完成章节摘要】
 {plan_optimized_context.get('previous_chapters_analysis', previous_chapters_summary) if previous_chapters_summary else '（这是第一章）'}
+
+【最近章节连续性资产】（优先承接拆书细纲、未完成冲突、人物状态、伏笔与钩子）
+{plan_optimized_context.get('recent_chapter_assets_summary', recent_chapter_assets_summary) or '（最近章节没有可用的结构化连续性资产）'}
 
 【前一章结尾】
 {plan_optimized_context.get('previous_ending', previous_ending) if previous_ending else '（这是第一章，没有前一章）'}
@@ -3974,6 +5133,7 @@ async def execute_generate_next_chapter_task(
 - 确保与整本书的情节大纲保持一致
 - 确保与前面章节的剧情连贯
 - 优先遵循结构化记忆中的人物状态、关系边、伏笔和世界规则
+- 如果最近章节连续性资产中已经明确了场景目标、冲突推进、人物出场、结尾钩子或伏笔，必须优先承接，不要丢失
 - 推进故事发展，不能原地踏步
 - 爽点和钩子必须具体、可执行"""
 
@@ -4240,6 +5400,7 @@ Genre-specific refinement (specific implementation of general planning requireme
             next_chapter_number=next_chapter_number,
             chapter_plan=chapter_plan,
             previous_ending=previous_ending or "",
+            recent_chapter_assets_summary=recent_chapter_assets_summary or "",
             rag_character_context=rag_character_context,
             rag_world_context=rag_world_context,
             selected_opening=selected_opening,
@@ -4250,6 +5411,7 @@ Genre-specific refinement (specific implementation of general planning requireme
         logger.info(f"   📉 Prompt优化（精简版）：")
         logger.info(f"      - 章节规划: {len(chapter_plan)} 字")
         logger.info(f"      - 前一章结尾: {len(previous_ending or '')} 字")
+        logger.info(f"      - 最近章节连续性资产: {len(recent_chapter_assets_summary or '')} 字")
         logger.info(f"      - RAG人物: {len(rag_character_context)} 字")
         logger.info(f"      - RAG设定: {len(rag_world_context)} 字")
         logger.info(f"      - 总共: {len(content_user_prompt)} 字（移除冗余情节大纲/世界观/人物/前序章节）")
@@ -4410,7 +5572,8 @@ Genre-specific refinement (specific implementation of general planning requireme
             chapter_plan=chapter_plan,
             chapter_content=chapter_draft,
             plot_outline=plot_outline,
-            genre=review_project_genre
+            genre=review_project_genre,
+            recent_chapter_assets_summary=recent_chapter_assets_summary,
         )
 
         # 🆕 使用真流式 LLM 调用（R1 逻辑检查）
@@ -4538,6 +5701,7 @@ Genre-specific refinement (specific implementation of general planning requireme
 5. 提升整体可读性和爽感
 6. 修正任何语病或不连贯之处
 7. 优化后的章节应完整保留原有情节发展，篇幅不应少于原稿字数的80%
+8. 如果提供了最近章节连续性资产，必须优先承接其中的场景目标、冲突推进、人物状态、结尾钩子与伏笔
 
 【输出格式要求】⚠️
 请直接输出优化后的章节内容，格式必须如下：
@@ -4552,22 +5716,19 @@ Genre-specific refinement (specific implementation of general planning requireme
 - 不要包含任何评论、解释、优化说明等额外文字
 - 只输出：章节标题 + 章节正文内容"""
 
-        iteration_user_prompt = f"""请根据以下评审意见优化第{next_chapter_number}章：
-
-【原始章节内容】
-{chapter_draft}
-
-【评审意见】
-{review_report}
-
-请直接输出优化后的章节内容（第一行为章节标题）："""
+        iteration_user_prompt = _build_iteration_revision_prompt(
+            chapter_number=next_chapter_number,
+            chapter_content=chapter_draft,
+            review_text=review_report,
+            recent_chapter_assets_summary=recent_chapter_assets_summary,
+        )
 
         # 🆕 使用迭代优化（max改稿 + R1打分循环,达到阈值后再输出）
         try:
             # 🎯 根据实际输入长度动态选择改稿模型
             def estimate_tokens(text: str) -> int:
                 """估算文本的 token 数（中文按1.3倍字符数估算）"""
-                return int(len(text) * 1.3)
+                return _estimate_tokens_by_chars(text)
             
             def select_model_by_length(chapter_content: str, reviews: str) -> str:
                 """根据输入长度智能选择模型
@@ -4585,15 +5746,8 @@ Genre-specific refinement (specific implementation of general planning requireme
                 prompt_overhead = 500  # 系统提示词和用户提示词模板的开销
                 
                 total_tokens = chapter_tokens + reviews_tokens + prompt_overhead
-                
-                # qwen3-max 限制：256K tokens（上下文 256K）
-                # 保留 30% 安全余量：179200 tokens
-                max_safe_limit = 179200
-                
-                if total_tokens < max_safe_limit:
-                    return "qwen3-max"
-                else:
-                    return "qwen-long"
+                selected_model, _ = _select_text_model_by_input_tokens(total_tokens)
+                return selected_model
             
             # 初始评审意见
             initial_reviews = review_report or ""
@@ -4604,6 +5758,7 @@ Genre-specific refinement (specific implementation of general planning requireme
             logger.info(f"      - 章节长度: {len(chapter_draft)} 字 ≈ {estimate_tokens(chapter_draft)} tokens")
             logger.info(f"      - 初始评审: {len(initial_reviews)} 字 ≈ {estimate_tokens(initial_reviews)} tokens")
             logger.info(f"      - 预估总计: ≈ {estimate_tokens(chapter_draft) + estimate_tokens(initial_reviews) + 500} tokens")
+            logger.info(f"      - qwen3-max 安全输入预算: ≈ {_get_safe_input_token_budget('qwen3-max')} tokens")
             
             # 🆕 广播步骤4改稿模型（首轮改稿前广播一次）
             await ws_manager.send_model_used(
@@ -4677,21 +5832,13 @@ Genre-specific refinement (specific implementation of general planning requireme
                         model=selected_revision_model,
                         extra={"step": f"iteration_round_{round_idx}", "reason": "context_length_increase"}
                     )
-                iteration_user_prompt_round = f"""【重要提示】请严格按照以下所有评审意见逐条修改第{next_chapter_number}章内容，不要遗漏或忽略任何一条建议。
-
-【当前章节内容】
-{current_version}
-
-【必须执行的所有评审意见（包含历史轮次）】
-{all_reviews_text}
-
-【修改要求】
-1. 必须逐条落实上述所有评审意见中的修改建议（包括历史轮次的意见）
-2. 保持原章节的完整情节和篇幅（不少于原稿80%字数）
-3. 直接输出优化后的完整章节内容（第一行为章节标题）
-4. 不要附加任何修改说明、优化要点等额外内容
-
-请立即输出优化后的章节："""
+                iteration_user_prompt_round = _build_iteration_revision_prompt(
+                    chapter_number=next_chapter_number,
+                    chapter_content=current_version,
+                    review_text=all_reviews_text,
+                    recent_chapter_assets_summary=recent_chapter_assets_summary,
+                    include_history_hint=True,
+                )
 
                 # 仅在最后一轮向前端流式输出正文；前几轮不推送正文
                 on_chunk_cb = on_iteration_chunk if round_idx == max_rounds else noop_chunk
@@ -4711,11 +5858,13 @@ Genre-specific refinement (specific implementation of general planning requireme
                 )
 
                 # 评审打分（R1）
-                review_system_prompt_loop = """你是一位专业的网络小说质量评审官。请使用网文6维度对上面的章节进行评审，并输出：\n1) 综合评分：X/10分\n2) 最重要的3条修改建议。\n请严格包含“综合评分：X/10分”这一行。"""
-                review_user_prompt_loop = f"""请评审以下章节：
-
-{revised_version}
-"""
+                review_system_prompt_loop = """你是一位专业的网络小说质量评审官。请使用网文6维度对上面的章节进行评审，并特别检查它是否承接了最近章节连续性资产中的场景目标、冲突推进、人物状态、结尾钩子与伏笔。\n1) 综合评分：X/10分\n2) 最重要的3条修改建议。\n请严格包含“综合评分：X/10分”这一行。"""
+                review_user_prompt_loop = _build_iteration_review_prompt(
+                    chapter_number=next_chapter_number,
+                    chapter_content=revised_version,
+                    chapter_plan=chapter_plan,
+                    recent_chapter_assets_summary=recent_chapter_assets_summary,
+                )
                 new_review_report = await streaming_service.generate_chapter_streaming(
                     prompt=review_user_prompt_loop,
                     system_prompt=review_system_prompt_loop,
@@ -5157,6 +6306,54 @@ async def get_epic_framework_state(
         )
 
 
+@router.post("/expand-story/analysis")
+async def analyze_expand_story(
+    request: ExpandStoryRequest,
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """分析协同扩展请求，返回推荐方向、模式和模型适配信息。"""
+    try:
+        _validate_expand_story_request(request)
+
+        _ensure_project_owned(request.project_id, current_user.id, db)
+        _validate_story_framework_mode_switch(request, db)
+
+        preview = _build_story_written_chapter_preview(request, db)
+        analysis_request = request.model_copy(
+            update={
+                "current_outline": preview["effective_outline"],
+                "current_chapter_count": preview["effective_current_chapter_count"],
+            }
+        )
+        analysis_bundle = _build_story_expansion_analysis(
+            request=analysis_request,
+            db=db,
+        )
+        analysis = dict(analysis_bundle["analysis"])
+        warnings = list(analysis.get("warnings") or [])
+        warnings.extend(preview.get("warnings") or [])
+        analysis["warnings"] = list(dict.fromkeys(item for item in warnings if item))
+        analysis["written_chapter_context"] = {
+            "applied": bool(preview.get("applied")),
+            "written_chapter_count": int(preview.get("written_chapter_count") or 0),
+            "preserve_written_mode": request.preserve_written_mode,
+        }
+
+        return {
+            "success": True,
+            "analysis": analysis,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 协同扩展预检分析失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+
+
 @router.post("/expand-story")
 async def expand_story(
     request: ExpandStoryRequest,
@@ -5165,39 +6362,10 @@ async def expand_story(
 ):
     """协同拓展大纲与人物，采用真正的 delta 策略异步执行。"""
     try:
-        if request.target_total_chapters is None and request.target_total_characters is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="至少需要提供目标章节数或目标人物数之一",
-            )
+        _validate_expand_story_request(request)
 
-        if request.target_total_chapters is not None and request.target_total_chapters <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="目标章节数必须大于 0",
-            )
-
-        if request.target_total_characters is not None and request.target_total_characters <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="目标人物数必须大于 0",
-            )
-
-        if request.strategy not in {"auto", "balanced", "plot_first", "character_first"}:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="不支持的协同策略",
-            )
-
-        project = db.query(Project).filter(
-            (Project.id == request.project_id) & (Project.user_id == current_user.id)
-        ).first()
-
-        if not project:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Project not found",
-            )
+        _ensure_project_owned(request.project_id, current_user.id, db)
+        _validate_story_framework_mode_switch(request, db)
 
         task_id = f"expand-story-{uuid.uuid4()}"
 
@@ -5214,14 +6382,24 @@ async def expand_story(
                 target_total_chapters=request.target_total_chapters,
                 target_total_characters=request.target_total_characters,
                 strategy=request.strategy,
+                intent=request.intent,
+                enable_auto_supplement=request.enable_auto_supplement,
+                expansion_mode=request.expansion_mode,
+                total_volumes=request.total_volumes,
+                total_chapters_min=request.total_chapters_min,
+                total_chapters_max=request.total_chapters_max,
+                target_volume_index=request.target_volume_index,
+                volume_chapters_min=request.volume_chapters_min,
+                volume_chapters_max=request.volume_chapters_max,
+                preserve_written_mode=request.preserve_written_mode,
+                reset_epic_framework=request.reset_epic_framework,
             )
         )
 
-        return {
-            "success": True,
-            "task_id": task_id,
-            "message": "协同拓展任务已启动，正在后台分析人物与大纲的增量缺口...",
-        }
+        return _build_task_start_response(
+            task_id=task_id,
+            message="协同拓展任务已启动，正在后台分析人物与大纲的增量缺口...",
+        )
 
     except HTTPException:
         raise
@@ -5245,6 +6423,17 @@ async def execute_expand_story_task(
     target_total_chapters: Optional[int],
     target_total_characters: Optional[int],
     strategy: str,
+    intent: str,
+    enable_auto_supplement: bool,
+    expansion_mode: str,
+    total_volumes: Optional[int],
+    total_chapters_min: Optional[int],
+    total_chapters_max: Optional[int],
+    target_volume_index: Optional[int],
+    volume_chapters_min: Optional[int],
+    volume_chapters_max: Optional[int],
+    preserve_written_mode: str,
+    reset_epic_framework: bool = False,
 ):
     """后台执行协同拓展任务。"""
     from app.db.base import SessionLocal
@@ -5260,34 +6449,110 @@ async def execute_expand_story_task(
             message="🧭 开始分析大纲与人物的协同缺口...",
         )
 
-        from app.services.story_expansion_coordinator import StoryExpansionCoordinator
+        prepared_request_bundle = await _prepare_story_execution_request(
+            ExpandStoryRequest(
+                project_id=project_id,
+                current_outline=current_outline,
+                world_setting=world_setting,
+                characters=characters,
+                current_chapter_count=current_chapter_count,
+                current_character_count=current_character_count,
+                target_total_chapters=target_total_chapters,
+                target_total_characters=target_total_characters,
+                strategy=strategy,
+                intent=intent,
+                enable_auto_supplement=enable_auto_supplement,
+                expansion_mode=expansion_mode,
+                total_volumes=total_volumes,
+                total_chapters_min=total_chapters_min,
+                total_chapters_max=total_chapters_max,
+                target_volume_index=target_volume_index,
+                volume_chapters_min=volume_chapters_min,
+                volume_chapters_max=volume_chapters_max,
+                preserve_written_mode=preserve_written_mode,
+                reset_epic_framework=reset_epic_framework,
+            ),
+            db,
+        )
+        prepared_request = prepared_request_bundle["request"]
+        _validate_story_framework_mode_switch(prepared_request, db)
+        execution_context_warnings = list(prepared_request_bundle.get("warnings") or [])
+        written_chapter_context = {
+            "applied": bool(prepared_request_bundle.get("applied")),
+            "written_chapter_count": int(prepared_request_bundle.get("written_chapter_count") or 0),
+            "preserve_written_mode": preserve_written_mode,
+        }
 
-        settings_summary = build_project_settings_summary(project_id, db)
-        combined_world_setting = world_setting or ""
-        if settings_summary:
-            combined_world_setting = (
-                f"{combined_world_setting}\n\n{settings_summary}"
-                if combined_world_setting
-                else settings_summary
+        analysis_bundle = _build_story_expansion_analysis(
+            request=prepared_request,
+            db=db,
+        )
+        coordinator = analysis_bundle["coordinator"]
+        combined_world_setting = analysis_bundle["combined_world_setting"]
+        analysis = analysis_bundle["analysis"]
+        volume_detail_config = analysis_bundle.get("volume_detail_config")
+        effective_target_total_chapters = analysis.get("effective_target_chapter_count")
+        effective_target_total_characters = analysis.get("effective_target_character_count")
+        effective_strategy = analysis.get("effective_strategy") or strategy
+        effective_intent = analysis.get("effective_intent") or intent
+        effective_expansion_mode = analysis.get("effective_expansion_mode") or expansion_mode
+        epic_config = analysis.get("epic_config") or _resolve_story_epic_config(
+            ExpandStoryRequest(
+                project_id=project_id,
+                current_outline=current_outline,
+                world_setting=world_setting,
+                characters=characters,
+                current_chapter_count=current_chapter_count,
+                current_character_count=current_character_count,
+                target_total_chapters=target_total_chapters,
+                target_total_characters=target_total_characters,
+                strategy=strategy,
+                intent=intent,
+                enable_auto_supplement=enable_auto_supplement,
+                expansion_mode=expansion_mode,
+                total_volumes=total_volumes,
+                total_chapters_min=total_chapters_min,
+                total_chapters_max=total_chapters_max,
+                target_volume_index=target_volume_index,
+                volume_chapters_min=volume_chapters_min,
+                volume_chapters_max=volume_chapters_max,
+                preserve_written_mode=preserve_written_mode,
             )
+        )
+        warnings = list(analysis.get("warnings") or [])
+        warnings.extend(execution_context_warnings)
+        analysis["warnings"] = list(dict.fromkeys(item for item in warnings if item))
+        analysis["written_chapter_context"] = written_chapter_context
 
-        coordinator = StoryExpansionCoordinator()
+        mode_info = {
+            "mode": analysis.get("execution_mode", "delta"),
+            "reason": analysis.get("execution_mode_reason", ""),
+        }
+        mode_messages = {
+            "delta": "🧠 正在生成单轮协同 delta 计划...",
+            "iterative": "🧠 正在编排分轮协同扩展计划...",
+            "epic": "🧠 正在规划长篇框架优先的协同扩展...",
+            "volume_detail": "🧠 正在编排单卷细化协同计划...",
+        }
 
         await ws_manager.send_task_progress(
             project_id=project_id,
             task_id=task_id,
             progress=18,
-            message="🧠 正在生成协同 delta 计划...",
+            message=mode_messages.get(mode_info.get("mode", "delta"), "🧠 正在生成协同扩展计划..."),
         )
 
         result = await asyncio.to_thread(
             coordinator.execute,
-            current_outline=current_outline,
+            current_outline=prepared_request.current_outline,
             characters=characters,
             world_setting=combined_world_setting,
-            target_total_chapters=target_total_chapters,
-            target_total_characters=target_total_characters,
-            strategy=strategy,
+            target_total_chapters=effective_target_total_chapters,
+            target_total_characters=effective_target_total_characters,
+            strategy=effective_strategy,
+            expansion_mode=effective_expansion_mode,
+            epic_config=epic_config,
+            volume_detail_config=volume_detail_config,
         )
 
         await ws_manager.send_task_progress(
@@ -5297,24 +6562,88 @@ async def execute_expand_story_task(
             message="💾 正在保存协同拓展结果...",
         )
 
-        update_query = text(
-            """
-            UPDATE project_settings
-            SET plot_outline = :plot_outline,
-                characters = :characters,
-                updated_at = :updated_at
-            WHERE project_id = :project_id
-            """
-        )
-        db.execute(
-            update_query,
-            {
+        if result.get("execution_mode") == "epic" and result.get("epic_framework"):
+            update_query = text(
+                """
+                UPDATE project_settings
+                SET plot_outline = :plot_outline,
+                    characters = :characters,
+                    epic_framework = :epic_framework,
+                    epic_volumes_detail = :epic_volumes_detail,
+                    epic_framework_generated_at = :epic_framework_generated_at,
+                    updated_at = :updated_at
+                WHERE project_id = :project_id
+                """
+            )
+            update_params = {
+                "plot_outline": result["plot_outline"],
+                "characters": result["characters"],
+                "epic_framework": result.get("epic_framework", result["plot_outline"]),
+                "epic_volumes_detail": result.get("epic_volumes_detail", ""),
+                "epic_framework_generated_at": utc_now().isoformat(),
+                "updated_at": utc_now().isoformat(),
+                "project_id": project_id,
+            }
+        elif result.get("execution_mode") == "volume_detail" and result.get("epic_framework"):
+            update_query = text(
+                """
+                UPDATE project_settings
+                SET plot_outline = :plot_outline,
+                    characters = :characters,
+                    epic_framework = :epic_framework,
+                    epic_volumes_detail = :epic_volumes_detail,
+                    updated_at = :updated_at
+                WHERE project_id = :project_id
+                """
+            )
+            update_params = {
+                "plot_outline": result["plot_outline"],
+                "characters": result["characters"],
+                "epic_framework": result.get("epic_framework", result["plot_outline"]),
+                "epic_volumes_detail": result.get("epic_volumes_detail", ""),
+                "updated_at": utc_now().isoformat(),
+                "project_id": project_id,
+            }
+        elif reset_epic_framework:
+            update_query = text(
+                """
+                UPDATE project_settings
+                SET plot_outline = :plot_outline,
+                    characters = :characters,
+                    epic_framework = :epic_framework,
+                    epic_volumes_detail = :epic_volumes_detail,
+                    epic_framework_generated_at = :epic_framework_generated_at,
+                    updated_at = :updated_at
+                WHERE project_id = :project_id
+                """
+            )
+            update_params = {
+                "plot_outline": result["plot_outline"],
+                "characters": result["characters"],
+                "epic_framework": None,
+                "epic_volumes_detail": None,
+                "epic_framework_generated_at": None,
+                "updated_at": utc_now().isoformat(),
+                "project_id": project_id,
+            }
+        else:
+            update_query = text(
+                """
+                UPDATE project_settings
+                SET plot_outline = :plot_outline,
+                    characters = :characters,
+                    updated_at = :updated_at
+                WHERE project_id = :project_id
+                """
+            )
+            update_params = {
                 "plot_outline": result["plot_outline"],
                 "characters": result["characters"],
                 "updated_at": utc_now().isoformat(),
                 "project_id": project_id,
-            },
-        )
+            }
+
+        db.execute(update_query, update_params)
         db.commit()
 
         await ws_manager.send_task_progress(
@@ -5399,11 +6728,11 @@ async def execute_expand_story_task(
         after_stats = result.get("validation_after") or {}
         final_chapter_count = result.get(
             "current_chapter_count",
-            target_total_chapters or current_chapter_count,
+            effective_target_total_chapters or target_total_chapters or prepared_request.current_chapter_count,
         )
         final_character_count = result.get(
             "current_character_count",
-            target_total_characters or current_character_count,
+            effective_target_total_characters or target_total_characters or current_character_count,
         )
 
         await ws_manager.send_task_complete(
@@ -5416,18 +6745,31 @@ async def execute_expand_story_task(
                 "character_delta": result.get("character_delta_text", ""),
                 "character_relationships": result.get("relationship_patch", ""),
                 "outline_ops": result.get("outline_ops_executed", []),
+                "execution_mode": result.get("execution_mode", mode_info.get("mode", "delta")),
+                "execution_mode_reason": result.get("execution_mode_reason", mode_info.get("reason", "")),
+                "execution_rounds": result.get("execution_rounds", []),
                 "new_characters": result.get("new_character_names", []),
-                "story_strategy": result.get("strategy", strategy),
+                "story_strategy": result.get("strategy", effective_strategy),
+                "story_intent": effective_intent,
+                "story_expansion_mode": effective_expansion_mode,
+                "story_preserve_written_mode": preserve_written_mode,
+                "written_chapter_context": written_chapter_context,
+                "volume_index": result.get("volume_index"),
+                "volume_chapter_range": result.get("volume_chapter_range"),
                 "coordination_summary": result.get("summary", ""),
                 "current_chapter_count": final_chapter_count,
-                "target_chapter_count": target_total_chapters or final_chapter_count,
+                "target_chapter_count": effective_target_total_chapters or target_total_chapters or final_chapter_count,
                 "current_character_count": final_character_count,
-                "target_character_count": target_total_characters or final_character_count,
+                "target_character_count": effective_target_total_characters or target_total_characters or final_character_count,
                 "validation_before": before_stats,
                 "validation_after": after_stats,
                 "character_sync": sync_result,
+                "stop_reasons": result.get("stop_reasons", []),
+                "expansion_analysis": analysis,
+                "epic_total_volumes": result.get("epic_total_volumes"),
+                "epic_chapter_range": result.get("epic_chapter_range"),
                 "message": (
-                    f"✅ 协同拓展完成！章节 {before_stats.get('chapter_count', current_chapter_count)}"
+                    f"✅ 协同拓展完成！章节 {before_stats.get('chapter_count', prepared_request.current_chapter_count)}"
                     f" → {final_chapter_count}，人物 {before_stats.get('character_count', current_character_count)}"
                     f" → {final_character_count}"
                 ),
@@ -5445,7 +6787,7 @@ async def execute_expand_story_task(
         db.close()
 
 
-@router.post("/expand-outline")
+@router.post("/expand-outline", include_in_schema=False)
 async def expand_outline(
     request: ExpandOutlineRequest,
     current_user = Depends(get_current_user),
@@ -5486,19 +6828,18 @@ async def expand_outline(
             )
         
         # 2. 验证项目所有权
-        project = db.query(Project).filter(
-            (Project.id == request.project_id) & (Project.user_id == current_user.id)
-        ).first()
-        
-        if not project:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Project not found"
-            )
+        _ensure_project_owned(request.project_id, current_user.id, db)
         
         # 3. 生成任务ID
         task_id = f"expand-outline-{uuid.uuid4()}"
         logger.info(f"   ✅ 任务ID: {task_id}")
+
+        legacy_story_analysis = _build_legacy_outline_story_analysis(
+            request=request,
+            db=db,
+            target_total_chapters=target_count,
+        )
+        _log_legacy_story_analysis("expand-outline", legacy_story_analysis, logger)
         
         # 4. 🆕 启动后台任务
         asyncio.create_task(
@@ -5529,17 +6870,18 @@ async def expand_outline(
                 volume_chapters_max=request.volume_chapters_max,
                 # 🆕 已写章节处理模式
                 preserve_written_mode=request.preserve_written_mode,
+                legacy_story_analysis=legacy_story_analysis,
             )
         )
         
         logger.info(f"   🚀 后台任务已启动，目标章节数: {target_count}")
         
         # 5. 立即返回
-        return {
-            "success": True,
-            "task_id": task_id,
-            "message": f"📖 大纲扩展任务已启动，将扩展至 {target_count} 章..."
-        }
+        return _build_task_start_response(
+            task_id=task_id,
+            message=f"📖 大纲扩展任务已启动，将扩展至 {target_count} 章...",
+            story_expansion_analysis=legacy_story_analysis,
+        )
         
     except HTTPException:
         raise
@@ -5581,6 +6923,7 @@ async def execute_expand_outline_task(
     volume_chapters_max: Optional[int] = None,
     # 🆕 已写章节处理模式
     preserve_written_mode: str = "extract_extend",
+    legacy_story_analysis: Optional[Dict[str, Any]] = None,
 ):
     """后台执行大纲扩展任务（严格遵守目标数）"""
     from sqlalchemy import text
@@ -5600,40 +6943,45 @@ async def execute_expand_outline_task(
             progress=0,
             message="📖 开始扩展大纲..."
         )
+
+        if legacy_story_analysis is None:
+            legacy_story_analysis = _build_legacy_outline_story_analysis_from_task(
+                db=db,
+                project_id=project_id,
+                current_outline=current_outline,
+                world_setting=world_setting,
+                characters=characters,
+                current_chapter_count=current_chapter_count,
+                increment=increment,
+                target_total_chapters=target_total_chapters,
+                expansion_mode=expansion_mode,
+                target_volumes=target_volumes,
+                chapters_per_volume_min=chapters_per_volume_min,
+                chapters_per_volume_max=chapters_per_volume_max,
+                incremental_step=incremental_step,
+                total_volumes=total_volumes,
+                total_chapters_min=total_chapters_min,
+                total_chapters_max=total_chapters_max,
+                framework_content=framework_content,
+                target_volume_index=target_volume_index,
+                volume_chapters_min=volume_chapters_min,
+                volume_chapters_max=volume_chapters_max,
+                preserve_written_mode=preserve_written_mode,
+            )
         
-        # 导入大纲扩展器
-        from app.services.agents.outline_expander import create_outline_expander
-        logger.info("   ✅ 成功导入 outline_expander")
-        
-        # 🎯 任务6：获取项目题材和章节数
-        from sqlalchemy import text
-        project_query = text("""
-            SELECT genre, planned_chapters_max
-            FROM projects
-            WHERE id = :project_id
-        """)
-        project_result = db.execute(project_query, {"project_id": project_id}).fetchone()
-        project_genre = project_result[0] if project_result else ""
-        project_planned_chapters = project_result[1] if project_result else 0
+        expander_bundle = _create_project_outline_expander(project_id, db)
+        expander = expander_bundle["expander"]
+        project_genre = expander_bundle["genre"]
+        project_planned_chapters = expander_bundle["planned_chapters_max"]
         logger.info(f"   🎯 项目题材：{project_genre}，规划章节：{project_planned_chapters}")
-        
-        # 创建扩展器实例（🎯 传入题材参数）
-        expander = create_outline_expander(
-            genre=project_genre,
-            planned_chapters_max=project_planned_chapters,
-            project_id=project_id,
-        )
         logger.info("   ✅ 扩展器实例已创建（含题材配置）")
         
         # 生成类型化设定摘要并注入世界观
-        settings_summary = build_project_settings_summary(project_id, db)
-        combined_world_setting = world_setting or ""
-        if settings_summary:
-            combined_world_setting = (
-                f"{combined_world_setting}\n\n{settings_summary}"
-                if combined_world_setting
-                else settings_summary
-            )
+        combined_world_setting = _build_project_world_setting_context(
+            project_id,
+            world_setting,
+            db,
+        )
         logger.info("   📚 已生成设定摘要并合并到世界观上下文")
         
         # 🌟 根据扩展模式选择不同的执行路径
@@ -5970,19 +7318,11 @@ async def execute_expand_outline_task(
             # ✅ 复用前面读取的数据
             stored_framework = original_result[0]  # 已在上面读取
             
-            # 🔍 解析AI实际生成的章节数
-            import re
-            chapter_pattern = r'第\s*(\d+)\s*章'
-            chapter_matches = re.findall(chapter_pattern, result["expanded_outline"])
-            if chapter_matches:
-                actual_start = int(chapter_matches[0])
-                actual_end = int(chapter_matches[-1])
-                logger.info(f"   📊 AI实际生成：第{actual_start}-{actual_end}章（共{actual_end - actual_start + 1}章）")
-            else:
-                # 如果解析失败，使用预估值
-                actual_start = start_chapter
-                actual_end = start_chapter + volume_chapters_min - 1
-                logger.warning(f"   ⚠️  未能解析实际章节数，使用预估值：第{actual_start}-{actual_end}章")
+            # 🔍 使用expand_volume_detail返回的章节范围（已经过章节编号修正器处理）
+            actual_start = result.get("chapters_start", start_chapter)
+            actual_end = result.get("chapters_end", start_chapter + volume_chapters_min - 1)
+            actual_chapter_count = actual_end - actual_start + 1
+            logger.info(f"   📊 AI实际生成：第{actual_start}-{actual_end}章（共{actual_chapter_count}章）")
             
             # 🌟 新架构：读取并更新卷数据
             volumes_data = parse_epic_volumes_json(epic_volumes_detail_json_from_db)
@@ -6112,6 +7452,7 @@ async def execute_expand_outline_task(
                     "total_volumes": result.get("total_volumes", total_volumes),
                     "estimated_chapters": result.get("estimated_chapters", 0),
                     "framework_type": "epic",
+                    "story_expansion_analysis": legacy_story_analysis,
                     "message": f"✅ 史诗框架生成完成！{result.get('total_volumes', total_volumes)}卷，预计{result.get('estimated_chapters', 0)}章"
                 }
             )
@@ -6124,6 +7465,7 @@ async def execute_expand_outline_task(
                     "expanded_outline": result["expanded_outline"],
                     "volume_index": result.get("volume_index", target_volume_index),
                     "chapter_count": result.get("chapter_count", 0),
+                    "story_expansion_analysis": legacy_story_analysis,
                     "message": f"✅ 第{result.get('volume_index', target_volume_index)}卷详细大纲生成完成！约{result.get('chapter_count', 0)}章"
                 }
             )
@@ -6143,6 +7485,7 @@ async def execute_expand_outline_task(
                     "current_chapter_count": final_count,
                     "target_chapter_count": target_total_chapters,
                     "ai_suggestion": ai_suggestion,
+                    "story_expansion_analysis": legacy_story_analysis,
                     "message": f"✅ 大纲扩展完成！当前 {final_count} 章（目标: {target_total_chapters}）"
                 }
             )
@@ -6162,7 +7505,7 @@ async def execute_expand_outline_task(
         db.close()
 
 
-@router.post("/expand-characters")
+@router.post("/expand-characters", include_in_schema=False)
 async def expand_characters(
     request: ExpandCharactersRequest,
     current_user = Depends(get_current_user),
@@ -6203,19 +7546,18 @@ async def expand_characters(
             )
         
         # 2. 验证项目所有权
-        project = db.query(Project).filter(
-            (Project.id == request.project_id) & (Project.user_id == current_user.id)
-        ).first()
-        
-        if not project:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Project not found"
-            )
+        _ensure_project_owned(request.project_id, current_user.id, db)
         
         # 3. 生成任务ID
         task_id = f"expand-characters-{uuid.uuid4()}"
         logger.info(f"   ✅ 任务ID: {task_id}")
+
+        legacy_story_analysis = _build_legacy_character_story_analysis(
+            request=request,
+            db=db,
+            target_total_characters=target_count,
+        )
+        _log_legacy_story_analysis("expand-characters", legacy_story_analysis, logger)
         
         # 4. 🆕 启动后台任务
         asyncio.create_task(
@@ -6228,17 +7570,18 @@ async def expand_characters(
                 plot_outline=request.plot_outline,
                 current_character_count=request.current_character_count,
                 target_total_characters=target_count,  # 使用严格校验后的目标数
+                legacy_story_analysis=legacy_story_analysis,
             )
         )
         
         logger.info(f"   🚀 后台任务已启动，目标人物数: {target_count}")
         
         # 5. 立即返回
-        return {
-            "success": True,
-            "task_id": task_id,
-            "message": f"👥 人物扩展任务已启动，将扩展至 {target_count} 个人物..."
-        }
+        return _build_task_start_response(
+            task_id=task_id,
+            message=f"👥 人物扩展任务已启动，将扩展至 {target_count} 个人物...",
+            story_expansion_analysis=legacy_story_analysis,
+        )
         
     except HTTPException:
         raise
@@ -6261,6 +7604,7 @@ async def execute_expand_characters_task(
     plot_outline: str,
     current_character_count: int,
     target_total_characters: int,
+    legacy_story_analysis: Optional[Dict[str, Any]] = None,
 ):
     """后台执行人物扩展任务（严格遵守目标数）"""
     from sqlalchemy import text
@@ -6280,33 +7624,37 @@ async def execute_expand_characters_task(
             progress=0,
             message="👥 开始扩展人物..."
         )
+
+        if legacy_story_analysis is None:
+            legacy_story_analysis = _build_legacy_character_story_analysis_from_task(
+                db=db,
+                project_id=project_id,
+                main_characters=main_characters,
+                world_setting=world_setting,
+                plot_outline=plot_outline,
+                current_character_count=current_character_count,
+                target_total_characters=target_total_characters,
+            )
         
-        # 导入扩展器
-        from app.services.agents.outline_expander import create_outline_expander
-        logger.info("   ✅ 成功导入 outline_expander")
-        
-        # 创建扩展器实例
-        expander = create_outline_expander(project_id=project_id)
-        logger.info("   ✅ 扩展器实例已创建")
+        expander_bundle = _create_project_outline_expander(project_id, db)
+        expander = expander_bundle["expander"]
+        project_genre = expander_bundle["genre"]
+        project_planned_chapters = expander_bundle["planned_chapters_max"]
+        logger.info(f"   🎯 项目题材：{project_genre}，规划章节：{project_planned_chapters}")
+        logger.info("   ✅ 扩展器实例已创建（含题材配置）")
         
         # 生成类型化设定摘要并注入世界观
-        settings_summary = build_project_settings_summary(project_id, db)
-        combined_world_setting = world_setting or ""
-        if settings_summary:
-            combined_world_setting = (
-                f"{combined_world_setting}\n\n{settings_summary}"
-                if combined_world_setting
-                else settings_summary
-            )
+        combined_world_setting = _build_project_world_setting_context(
+            project_id,
+            world_setting,
+            db,
+        )
         logger.info("   📚 已生成设定摘要并合并到世界观上下文")
         
         # 🔥 智能识别当前人物数
         if current_character_count == 0:
             logger.info("🔍 开始自动识别当前人物数...")
-            # 简单计数：匹配「姓名】关键字
-            import re
-            name_pattern = r'【姓名】：'
-            detected_count = len(re.findall(name_pattern, main_characters))
+            detected_count = _estimate_character_count_from_text(main_characters)
             if detected_count > 0:
                 current_character_count = detected_count
                 logger.info(f"🎯 识别成功！当前已有 {current_character_count} 个人物")
@@ -6558,6 +7906,7 @@ async def execute_expand_characters_task(
                 "target_character_count": target_total_characters,
                 "ai_suggestion": ai_suggestion,  # AI建议，仅供参考
                 "character_sync": sync_result,
+                "story_expansion_analysis": legacy_story_analysis,
                 "message": f"✅ 人物扩展完成！当前 {final_count} 个人物（目标: {target_total_characters}）"
             }
         )
@@ -6969,14 +8318,12 @@ async def _optimize_chapter_task(
         
         # 选择模型（根据内容长度）
         def estimate_tokens(text: str) -> int:
-            return int(len(text) * 1.3)
+            return _estimate_tokens_by_chars(text)
         
         total_tokens = estimate_tokens(current_content) + estimate_tokens(review_report) + 500
-        max_safe_limit = 21504
+        model_name, max_safe_limit = _select_text_model_by_input_tokens(total_tokens)
         
-        model_name = "qwen3-max" if total_tokens < max_safe_limit else "qwen-long"
-        
-        logger.info(f"🤖 使用模型: {model_name} (预计tokens: {total_tokens})")
+        logger.info(f"🤖 使用模型: {model_name} (预计tokens: {total_tokens}, qwen3-max安全预算: {max_safe_limit})")
         
         # 执行改稿（使用较低temperature保持原文结构）
         optimized_content = content_agent.process(

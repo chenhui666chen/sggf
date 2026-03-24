@@ -22,8 +22,14 @@ from app.db.base import SessionLocal
 from app.models.project import Chapter, Project
 from app.schemas.dreamweaver_contract import DREAMWEAVER_SCHEMA_VERSION
 from app.utils.datetime_utils import utc_now
+from app.services.chapter_adaptation_assets import build_drama_source_text
 from app.services.dreamweaver.events import DreamweaverEventEmitter
 from app.services.dreamweaver.library import parse_library_role, required_library_roles
+from app.services.user_center_points_events import (
+    record_dreamweaver_billing_freeze,
+    record_dreamweaver_billing_release,
+    record_dreamweaver_billing_settle,
+)
 from pipeline.state_machine import RunContext, State, progress_percent, stage_label, step
 from pipeline.restart_reset import apply_restart_reset as _apply_restart_reset_impl
 from pipeline.step_budget import estimate_pipeline_max_steps_from_env
@@ -420,6 +426,7 @@ def _build_source_text(session: Session, *, project_id: int, chapter_ids: List[i
         .order_by(Chapter.chapter_number.asc())
         .all()
     )
+    return build_drama_source_text(chapters)
     parts: List[str] = []
     for c in chapters:
         title = str(getattr(c, "title", "") or "").strip() or f"第{int(getattr(c, 'chapter_number', 0) or 0)}章"
@@ -1202,6 +1209,10 @@ def run_dreamweaver_task(
                 stage=stage_label(ctx.state),
                 progress=progress_percent(ctx.state),
             )
+            try:
+                record_dreamweaver_billing_freeze(db=session, run_id=run_id)
+            except Exception as exc:
+                logger.warning("record_dreamweaver_billing_freeze failed run_id=%s: %s", run_id, exc)
 
             running_payload = {
                 "run_id": run_id,
@@ -1276,6 +1287,10 @@ def run_dreamweaver_task(
                 stage=stage_label(ctx.state),
                 progress=progress_percent(ctx.state),
             )
+            try:
+                record_dreamweaver_billing_settle(db=session, run_id=run_id)
+            except Exception as exc:
+                logger.warning("record_dreamweaver_billing_settle failed run_id=%s: %s", run_id, exc)
             _update_generation_history(
                 task_id,
                 status="completed",
@@ -1335,6 +1350,14 @@ def run_dreamweaver_task(
                 error_type="state_machine_failed",
                 error_message=error_message,
             )
+            try:
+                record_dreamweaver_billing_release(
+                    db=session,
+                    run_id=run_id,
+                    reason="短剧任务失败，已释放冻结积分。",
+                )
+            except Exception as exc:
+                logger.warning("record_dreamweaver_billing_release failed run_id=%s: %s", run_id, exc)
             _update_generation_history(
                 task_id,
                 status="failed",
@@ -1350,6 +1373,18 @@ def run_dreamweaver_task(
                 event_type="run_error",
                 payload={"error": str(exc)},
             )
+        try:
+            session.rollback()
+        except Exception:
+            pass
+        try:
+            record_dreamweaver_billing_release(
+                db=session,
+                run_id=run_id,
+                reason="短剧任务异常中断，已释放冻结积分。",
+            )
+        except Exception as release_exc:
+            logger.warning("record_dreamweaver_billing_release failed run_id=%s: %s", run_id, release_exc)
         _update_generation_history(
             task_id,
             status="failed",

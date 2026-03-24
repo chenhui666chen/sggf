@@ -515,7 +515,8 @@ class GenreAdaptiveReviewPrompts:
         chapter_plan: str,
         chapter_content: str,
         plot_outline: str = "",
-        genre: str = ""
+        genre: str = "",
+        recent_chapter_assets_summary: str = "",
     ) -> str:
         """构建评审 User Prompt
         
@@ -525,6 +526,7 @@ class GenreAdaptiveReviewPrompts:
             chapter_content: 章节内容
             plot_outline: 情节大纲（可选）
             genre: 题材类型（可选）
+            recent_chapter_assets_summary: 最近章节连续性资产（可选）
         
         Returns:
             完整的 User Prompt
@@ -552,6 +554,12 @@ class GenreAdaptiveReviewPrompts:
             user_prompt += f"""
 【情节大纲】（用于检查一致性）
 {plot_outline[:2000]}{'...(已截断)' if len(plot_outline) > 2000 else ''}
+"""
+
+        if recent_chapter_assets_summary:
+            user_prompt += f"""
+【最近章节连续性资产】（用于检查场景目标、冲突推进、人物出场、钩子与伏笔承接）
+{recent_chapter_assets_summary}
 """
         
         user_prompt += f"""
@@ -590,6 +598,13 @@ class GenreAdaptiveReviewPrompts:
 
 ### 6. 内容一致性 ⭐⭐⭐
 - 评价：...
+- 问题：...
+"""
+
+        user_prompt += """
+### 6.1 连续性专项检查 ⭐⭐⭐
+- 是否承接了最近章节连续性资产中的场景目标、关键冲突和人物状态？
+- 是否延续或回应了最近章节留下的结尾钩子、伏笔和未完成事项？
 - 问题：...
 """
         

@@ -129,6 +129,7 @@ class ChapterPromptBuilder:
         next_chapter_number: int,
         chapter_plan: str,
         previous_ending: str,
+        recent_chapter_assets_summary: str,
         rag_character_context: str,
         rag_world_context: str,
         selected_opening: Tuple[str, str, str],
@@ -144,7 +145,7 @@ class ChapterPromptBuilder:
         
         优化逻辑：
         - 章节规划已消化情节大纲、世界观、人物、前序章节信息
-        - 章节创作只需：章节规划 + 前一章结尾 + RAG补充 + 开头结尾方式
+        - 章节创作只需：章节规划 + 前一章结尾 + 最近章节连续性资产 + RAG补充 + 开头结尾方式
         - 移除冗余内容，减少 token 消耗约 60-70%
         """
         return f"""请创作第{next_chapter_number}章内容：
@@ -154,6 +155,9 @@ class ChapterPromptBuilder:
 
 【前一章结尾】⭐⭐（保持连贯）
 {previous_ending if previous_ending else '（这是第一章，请设计一个引人入胜的开场）'}
+
+【最近章节连续性资产】⭐⭐（优先承接场景目标、冲突推进、人物出场、钩子与伏笔）
+{recent_chapter_assets_summary if recent_chapter_assets_summary else '（最近章节没有可用的结构化连续性资产）'}
 
 【RAG检索-人物细节】
 {rag_character_context if rag_character_context else '（无额外人物细节）'}
@@ -168,5 +172,9 @@ class ChapterPromptBuilder:
 
 【本章结尾方式】⚠️ 必须使用【{selected_ending[0]}】
 - 技巧：{selected_ending[1]}
+
+【连续性要求】
+- 优先延续最近章节连续性资产中的未完成冲突、人物状态变化、伏笔与结尾钩子
+- 如果章节规划与最近章节连续性资产存在重叠，以两者一致方式落地，不要遗漏关键承接点
 
 请开始创作第{next_chapter_number}章内容："""

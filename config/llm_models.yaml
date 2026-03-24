@@ -100,9 +100,9 @@ llm_models:
       - 适合创意写作、章节生成与角色扮演
       - 中文内容质量稳定，适合作为默认正文模型
       - 支持流式输出与 JSON 模式，适合工作流编排
-    documentation_url: https://help.aliyun.com/zh/model-studio/getting-started/models
+    documentation_url: https://help.aliyun.com/zh/model-studio/models
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/getting-started/models
+      - https://help.aliyun.com/zh/model-studio/models
       - https://help.aliyun.com/zh/model-studio/text-generation
 
     tags:
@@ -181,10 +181,10 @@ llm_models:
       - 适合处理超长文本与整书分析
       - 大纲扩展、全书汇总优先使用
       - 建议将输入按层级组织，避免无结构堆叠
-    documentation_url: https://help.aliyun.com/zh/model-studio/long-context
+    documentation_url: https://help.aliyun.com/zh/model-studio/long-context-qwen-long
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/long-context
-      - https://help.aliyun.com/zh/model-studio/getting-started/models
+      - https://help.aliyun.com/zh/model-studio/long-context-qwen-long
+      - https://help.aliyun.com/zh/model-studio/models
 
     tags:
       - long_context
@@ -259,9 +259,9 @@ llm_models:
       - 适合简单快速任务
       - 实体提取与摘要优先使用
       - 作为高质量模型的前置清洗层很合适
-    documentation_url: https://help.aliyun.com/zh/model-studio/getting-started/models
+    documentation_url: https://help.aliyun.com/zh/model-studio/models
     source_urls:
-      - https://help.aliyun.com/zh/model-studio/getting-started/models
+      - https://help.aliyun.com/zh/model-studio/models
       - https://help.aliyun.com/zh/model-studio/text-generation
 
     tags:
@@ -296,15 +296,16 @@ llm_models:
         description: 适合结构规划、质量评审和策略决策
 
     constraints:
-      max_context_tokens: 64000
-      max_output_tokens: 8192
+      max_context_tokens: 128000  # 🔥 官方最新：128K上下文（2025-12-01更新）
+      max_output_tokens: 64000  # 🔥 官方最新：默认32K，最大64K（2025-12-01更新）
       supports_streaming: false
-      supports_function_call: false
+      supports_function_call: true  # 🔥 官方最新：支持Tool Calls
       supports_timeout_param: false
       supports_max_retries: false
       supports_temperature: false
       supports_system_prompt: true
       supports_multi_turn: true
+      supports_json_mode: true  # 🔥 官方最新：支持JSON输出
 
     api_config:
       api_key_env: DEEPSEEK_API_KEY
@@ -388,12 +389,13 @@ llm_models:
         description: 比推理模型延迟更低，适合快速响应
 
     constraints:
-      max_context_tokens: 64000
-      max_output_tokens: 8192
+      max_context_tokens: 128000  # 🔥 官方最新：128K上下文（2025-12-01更新）
+      max_output_tokens: 8192  # 🔥 官方最新：默认4K，最大8K
       supports_streaming: true
       supports_function_call: true
       supports_timeout_param: true
       supports_max_retries: true
+      supports_json_mode: true  # 🔥 官方最新：支持JSON输出
 
     api_config:
       api_key_env: DEEPSEEK_API_KEY
@@ -446,3 +448,273 @@ llm_models:
       - chat
       - fast
       - deepseek
+
+audio_models:
+  - id: mureka-o1-instrumental
+    name: Mureka O1 Instrumental
+    provider: kunlun
+    model_type: audio
+    version: v1
+    status: active
+
+    capabilities:
+      - name: music_generation
+        level: native
+        score: 0.9
+        description: 适合生成无歌词配乐、氛围音乐和背景音乐草案
+      - name: background_music
+        level: native
+        score: 0.9
+        description: 适合做镜头配乐、环境氛围和试听版本
+      - name: style_control
+        level: native
+        score: 0.8
+        description: 支持通过风格、情绪和节奏控制音乐方向
+
+    constraints:
+      max_context_tokens: 200
+      max_output_tokens: 60
+      supports_streaming: false
+      supports_function_call: false
+      supports_vision: false
+      supports_json_mode: false
+      supports_timeout_param: false
+      supports_max_retries: false
+      supports_temperature: false
+      supports_system_prompt: false
+      supports_multi_turn: false
+
+    api_config:
+      api_key_env: MUREKA_API_KEY
+      base_url: https://api.mureka.cn
+      default_timeout: 300
+      default_max_retries: 1
+
+    performance:
+      quality_score: 8.2
+      avg_latency_seconds: 30.0
+      p95_latency_seconds: 90.0
+      tokens_per_second: 0
+      cost_per_1k_input_tokens: 0.0
+      cost_per_1k_output_tokens: 0.0
+      currency: CNY
+
+    routing:
+      task_types:
+        - asset_music
+        - audiobook_music
+      priority: 1
+      fallback_models: []
+      weight: 1.0
+      enabled: true
+
+    default_params:
+      duration: 30
+      style: 氛围
+      mood: calm
+      tempo: medium
+
+    summary: 项目中的音乐生成主链路模型，当前由资产工作台音频服务统一代理，适合配乐、氛围音乐和试听版本生成。
+    recommended_scenarios:
+      - 资产工作台背景音乐生成
+      - 短片、预告片和镜头的情绪配乐
+      - 有声内容的试听版配乐草案
+    limitations:
+      - 当前主要面向纯音乐和环境氛围，不适合对白和歌词演唱
+      - 时长和风格控制需要遵循后端工作台离散参数约束
+    integration_notes:
+      - 当前通过 POST /api/v1/asset-studio/audio 统一代理调用
+      - 后端落地服务使用 app.services.audiobook.ai_music.create_music_generator
+      - 已纳入统一模型注册中心，方便和文本、图像、视频模型一起做统一选型
+    best_practice_tips:
+      - 同时写明场景、情绪、节奏和主要乐器，结果更稳定
+      - 更适合背景音乐和氛围铺底，不适合对白音频
+      - 建议先出 15 到 30 秒试听段，再决定是否继续扩展
+    documentation_url: https://platform.mureka.cn/docs/
+    source_urls:
+      - https://platform.mureka.cn/docs/
+      - https://platform.mureka.cn/docs/api/operations/post-v1-instrumental-generate.html
+
+    tags:
+      - audio
+      - music
+      - mureka
+      - asset-studio
+
+  - id: kling-v1-text-to-audio
+    name: Kling v1 Text to Audio
+    provider: kuaishou
+    model_type: audio
+    version: v1
+    status: active
+
+    capabilities:
+      - name: sfx_audio
+        level: native
+        score: 0.88
+        description: 适合动作音、环境音和短时音效生成
+      - name: background_music
+        level: native
+        score: 0.72
+        description: 可生成短时氛围音和非主旋律类声音草案
+      - name: style_control
+        level: native
+        score: 0.75
+        description: 支持通过提示词控制材质、空间感和情绪方向
+
+    constraints:
+      max_context_tokens: 200
+      max_output_tokens: 10
+      supports_streaming: false
+      supports_function_call: false
+      supports_vision: false
+      supports_json_mode: false
+      supports_timeout_param: false
+      supports_max_retries: false
+      supports_temperature: false
+      supports_system_prompt: false
+      supports_multi_turn: false
+
+    api_config:
+      api_key_env: KLINGAI_ACCESS_KEY
+      base_url: https://api.klingai.com/v1/audio/text-to-audio
+      default_timeout: 120
+      default_max_retries: 1
+
+    performance:
+      quality_score: 7.9
+      avg_latency_seconds: 18.0
+      p95_latency_seconds: 45.0
+      tokens_per_second: 0
+      cost_per_1k_input_tokens: 0.0
+      cost_per_1k_output_tokens: 0.0
+      currency: CNY
+
+    routing:
+      task_types:
+        - asset_sfx
+        - audiobook_sound
+        - asset_audio
+      priority: 1
+      fallback_models:
+        - mureka-o1-instrumental
+      weight: 1.0
+      enabled: true
+
+    default_params:
+      duration: 5
+      mood: tense
+      tempo: medium
+
+    summary: 项目中的短音效优先模型，适合环境音、动作音、质感音和短时声音草案生成。
+    recommended_scenarios:
+      - 资产工作台音效生成
+      - 环境音和动作音快速打样
+      - 有声内容中的短时声音预研
+    limitations:
+      - 更适合短时音效，不适合长篇完整配乐
+      - 当前仓库若未配置可灵密钥，会回退到 Mureka 环境音链路
+    integration_notes:
+      - 当前通过 POST /api/v1/asset-studio/audio 统一代理调用
+      - 后端落地服务使用 app.services.audiobook.klingai_effect_generator.create_klingai_generator
+      - 已纳入统一模型注册中心，作为音效任务的默认优先模型
+    best_practice_tips:
+      - 提示词尽量短而具体，描述动作、材质和空间感即可
+      - 先用 3 到 5 秒做验证，再根据结果调整质感关键词
+      - 若要稳定产出，避免把完整剧情写进音效提示词
+    documentation_url: https://app.klingai.com/cn/dev/document-api/apiReference/model/textToAudio
+    source_urls:
+      - https://app.klingai.com/cn/dev/document-api/apiReference/model/textToAudio
+      - https://klingai.com/cn/
+
+    tags:
+      - audio
+      - sfx
+      - kling
+      - asset-studio
+
+  - id: kling-v1-video-to-audio
+    name: Kling v1 Video to Audio
+    provider: kuaishou
+    model_type: audio
+    version: v1
+    status: testing
+
+    capabilities:
+      - name: reference_videos
+        level: native
+        score: 0.9
+        description: 支持基于参考视频推断环境音、动作音和氛围声
+      - name: sfx_audio
+        level: native
+        score: 0.82
+        description: 适合镜头级环境音和动作音补全
+      - name: background_music
+        level: native
+        score: 0.7
+        description: 可用于视频补声音轨和氛围层草案
+
+    constraints:
+      max_context_tokens: 200
+      max_output_tokens: 10
+      supports_streaming: false
+      supports_function_call: false
+      supports_vision: true
+      supports_json_mode: false
+      supports_timeout_param: false
+      supports_max_retries: false
+      supports_temperature: false
+      supports_system_prompt: false
+      supports_multi_turn: false
+
+    api_config:
+      api_key_env: KLINGAI_ACCESS_KEY
+      base_url: https://app.klingai.com/cn/dev/document-api/apiReference/model/videoToAudio
+      default_timeout: 180
+      default_max_retries: 1
+
+    performance:
+      quality_score: 7.6
+      avg_latency_seconds: 24.0
+      p95_latency_seconds: 60.0
+      tokens_per_second: 0
+      cost_per_1k_input_tokens: 0.0
+      cost_per_1k_output_tokens: 0.0
+      currency: CNY
+
+    routing:
+      task_types:
+        - asset_audio
+      priority: 2
+      fallback_models: []
+      weight: 1.0
+      enabled: true
+
+    default_params:
+      duration: 5
+
+    summary: 已纳入统一注册中心的视频转音频能力条目，用于后续给现有镜头补环境音、动作音和氛围声。
+    recommended_scenarios:
+      - 视频镜头补声音轨
+      - 现有片段的环境音与动作音预研
+      - 视频转音频能力选型和归档管理
+    limitations:
+      - 当前仓库仅完成模型配置归档，尚未开放前端直连入口
+      - 实际输入格式和配音策略仍需结合后端接入再做一轮验证
+    integration_notes:
+      - 已纳入统一模型注册中心和模型档案中心
+      - 当前前端工作台暂不直连，只保留统一配置和档案管理
+      - 后续接入时建议复用资产工作台音频模块的上传与结果展示逻辑
+    best_practice_tips:
+      - 更适合用于镜头补声，不建议作为纯音乐模型使用
+      - 提示词应聚焦环境层、动作层和氛围层，而不是剧情概述
+    documentation_url: https://app.klingai.com/cn/dev/document-api/apiReference/model/videoToAudio
+    source_urls:
+      - https://app.klingai.com/cn/dev/document-api/apiReference/model/videoToAudio
+      - https://klingai.com/cn/
+
+    tags:
+      - audio
+      - video-to-audio
+      - kling
+      - research

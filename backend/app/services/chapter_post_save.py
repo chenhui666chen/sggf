@@ -44,21 +44,41 @@ async def _save_character_relations(
     if not character_relations:
         return 0
     
-    # 获取项目下所有人物
     characters = db.query(Character).filter(
         Character.project_id == project_id
     ).all()
     
-    if not characters:
-        logger.info(f"   ℹ️ 项目 {project_id} 没有人物卡，跳过人物关系保存")
-        return 0
-    
-    # 构建名称到人物的映射
     name_to_char = {char.name: char for char in characters}
     
-    # 统计保存的关系数
+    unique_names = set()
+    for rel in character_relations:
+        if rel.get('source'):
+            unique_names.add(rel['source'].strip())
+        if rel.get('target'):
+            unique_names.add(rel['target'].strip())
+    
+    new_char_names = unique_names - set(name_to_char.keys())
+    if new_char_names:
+        logger.info(f"   🆕 自动创建 {len(new_char_names)} 个人物卡：{', '.join(new_char_names)}")
+        for name in new_char_names:
+            if name:
+                new_char = Character(
+                    project_id=project_id,
+                    name=name,
+                    appearance_status="已出场",
+                    life_status="存活",
+                    importance_level="次要角色",
+                )
+                db.add(new_char)
+        db.commit()
+        
+        characters = db.query(Character).filter(
+            Character.project_id == project_id
+        ).all()
+        name_to_char = {char.name: char for char in characters}
+    
     saved_count = 0
-    updated_chars = set()  # 需要更新的人物ID
+    updated_chars = set()
     
     for rel in character_relations:
         source_name = rel.get('source', '').strip()
@@ -69,7 +89,6 @@ async def _save_character_relations(
         if not source_name or not target_name:
             continue
         
-        # 查找源人物
         source_char = name_to_char.get(source_name)
         target_char = name_to_char.get(target_name)
         
@@ -342,7 +361,8 @@ async def process_chapter_post_save(
                     chapter_number=chapter_number,
                     chapter_title=chapter_title,
                     chapter_content=chapter_content,
-                    summary_length=300
+                    summary_length=300,
+                    force_regenerate=True
                 )
                 
                 logger.info(f"   ✅ 章节摘要生成完成")

@@ -100,6 +100,8 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
                 api_key=api_key,
                 base_url=base_url,
                 timeout=self.spec.api_config.default_timeout,
+                # 重试统一由 ModelHub 控制，避免 SDK 与调度层重复重试导致级联超时。
+                max_retries=0,
                 http_client=http_client,
             )
 

@@ -1900,6 +1900,7 @@ class CreativeDirectorCoordinator:
             next_chapter_number=1,
             chapter_plan=chapter_plan,  # ✅ 只传第1章规划(~1500字)
             previous_ending="",  # 第1章无前文
+            recent_chapter_assets_summary="",  # 第1章无连续性资产
             rag_character_context="",  # 初始化时RAG还是空的
             rag_world_context="",  # 初始化时RAG还是空的
             selected_opening=selected_opening,

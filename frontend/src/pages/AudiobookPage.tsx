@@ -1813,20 +1813,6 @@ const AudiobookPage = () => {
 
     const title = newProjectTitle.trim() || '从整本书导入的项目'
 
-    // 如果一次输入过多，则跳转到拆书页面，由拆书工具完成后续流程
-    const TOO_LONG_THRESHOLD = 10000
-    if (rawText.length > TOO_LONG_THRESHOLD) {
-      setNewProjectDialogOpen(false)
-      navigate('/book-parser', {
-        state: {
-          openUpload: true,
-          prefillTitle: title,
-          prefillContent: rawText,
-        },
-      })
-      return
-    }
-
     const waitForStatus = async (bookId: number, targetStatuses: string[]) => {
       // 简单轮询拆书/分析状态
       // 这里不使用全局 pollStatus，避免和两阶段状态混淆
@@ -4135,30 +4121,12 @@ const AudiobookPage = () => {
             onChange={(e) => setNewProjectText(e.target.value)}
           />
           <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-            当前长度：{newProjectText.trim().length.toLocaleString()} 字；超过 10,000 字时，点击「创建并开始配置音色」会自动跳转到拆书工具。
+            当前长度：{newProjectText.trim().length.toLocaleString()} 字；系统会自动拆分章节并创建项目。
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => !creatingFromBook && setNewProjectDialogOpen(false)} disabled={creatingFromBook}>
             取消
-          </Button>
-          <Button
-            onClick={() => {
-              const text = newProjectText.trim()
-              const title = newProjectTitle.trim() || '从耳畔星河导入的书籍'
-              setNewProjectDialogOpen(false)
-              navigate('/book-parser', {
-                state: {
-                  openUpload: true,
-                  prefillTitle: title,
-                  prefillContent: text,
-                  from: 'audiobook',
-                },
-              })
-            }}
-            disabled={creatingFromBook}
-          >
-            导入整本书到拆书工具
           </Button>
           <Button
             variant="contained"

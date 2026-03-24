@@ -15,6 +15,8 @@ from typing import List, Dict, Any, Optional, Callable
 from dataclasses import dataclass, asdict, field
 import json
 
+from app.services.chapter_adaptation_assets import format_audio_adaptation_brief
+
 logger = logging.getLogger(__name__)
 
 
@@ -258,6 +260,7 @@ class AudiobookScriptAgent:
         genre: str = "科幻",
         chapter_number: int = 1,
         enable_chapter_structure: bool = True,  # 🆕 是否启用章节结构化
+        adaptation_context: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[Callable[[float, Optional[Dict[str, Any]]], None]] = None,
     ) -> List[ScriptSegment]:
         """
@@ -277,6 +280,8 @@ class AudiobookScriptAgent:
         """
         logger.info(f"🎬 开始改编章节: {chapter_title}")
         logger.info(f"   原文长度: {len(chapter_content)} 字符")
+
+        audio_adaptation_brief = format_audio_adaptation_brief(adaptation_context)
         
         # 1. 前期分析
         def report_progress(progress: float, metrics: Optional[Dict[str, Any]] = None) -> None:
@@ -289,9 +294,10 @@ class AudiobookScriptAgent:
 
         report_progress(0.02, {"phase": "analysis"})
         analysis = await self._analyze_chapter(
-            chapter_content, 
-            chapter_title, 
-            genre
+            chapter_content,
+            chapter_title,
+            genre,
+            audio_adaptation_brief=audio_adaptation_brief,
         )
         report_progress(0.12, {"phase": "analysis_done"})
         logger.info(f"   ✅ 分析完成: {analysis.get('theme', 'N/A')}")
@@ -311,6 +317,7 @@ class AudiobookScriptAgent:
             chapter_content,
             character_list or [],
             analysis,
+            audio_adaptation_brief=audio_adaptation_brief,
             progress_callback=on_transform_progress,
         )
         report_progress(0.94, {"phase": "transform_done"})
@@ -338,7 +345,8 @@ class AudiobookScriptAgent:
         self,
         content: str,
         title: str,
-        genre: str
+        genre: str,
+        audio_adaptation_brief: str = "",
     ) -> Dict[str, Any]:
         """
         前期分析：理解原著核心
@@ -384,6 +392,11 @@ class AudiobookScriptAgent:
             return head + "\n...\n" + mid + "\n...\n" + tail
 
         sample_content = _build_analysis_sample(content, max_len=6000)
+        adaptation_block = (
+            f"\n**跨模态改编提示（来自章节结构化摘要）**：\n{audio_adaptation_brief}\n"
+            if audio_adaptation_brief
+            else ""
+        )
 
         prompt = f"""你是专业的有声书剧本改编师，负责将网络小说改编成适合音频化播放的有声剧本。
 
@@ -393,6 +406,7 @@ class AudiobookScriptAgent:
 
 **章节标题**: {title}
 **小说类型**: {genre}
+{adaptation_block}
 
 **章节内容节选**（智能采样：开头+中段+结尾，最多6000字）：
 {sample_content}
@@ -459,6 +473,7 @@ class AudiobookScriptAgent:
         content: str,
         character_list: List[str],
         analysis: Dict[str, Any],
+        audio_adaptation_brief: str = "",
         progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> List[ScriptSegment]:
         """
@@ -506,7 +521,8 @@ class AudiobookScriptAgent:
                 segments = await self._transform_paragraph(
                     para,
                     character_list,
-                    analysis
+                    analysis,
+                    audio_adaptation_brief=audio_adaptation_brief,
                 )
                 all_segments.extend(segments)
                 logger.info(f"   ✅ [{idx}/{total_paras}] 完成，生成 {len(segments)} 个片段")
@@ -533,7 +549,8 @@ class AudiobookScriptAgent:
         self,
         paragraph: str,
         character_list: List[str],
-        analysis: Dict[str, Any]
+        analysis: Dict[str, Any],
+        audio_adaptation_brief: str = "",
     ) -> List[ScriptSegment]:
         """转化单个段落"""
         
@@ -557,6 +574,12 @@ class AudiobookScriptAgent:
             instruct_block = """**Qwen3 提示**\n- 可以输出 emotion/performance_notes 作为编剧标注与后续扩展，但不要把它当作可控的 TTS 参数\n"""
 
         six_step_block = """**有声剧本 6 步听觉化重构流程（请严格遵守）**\n1. 心理活动 → 改写为可听见的独白或用音效/环境暗示呈现，避免长篇抽象描写。\n2. 环境描写 → 提炼为可感知的音效标签（如“雨声渐密”“地铁驶过”），填入 sound_effects。\n3. 动作与场景切换 → 用短句 + 停顿 + 过渡性音效，避免连续大段说明。\n4. 对话优化 → 口语化，必要时拆分过长句子，允许适度长句，去掉拗口表达，保证朗读顺畅。\n5. 节奏控制 → 根据情节紧张度调整句长，并通过 pause_before/pause_after 控制呼吸感。\n6. 音乐与情绪 → 为情绪明显的片段给出 music_cue（如“低频紧张弦乐”），避免整章铺满BGM。\n   - 音效密度建议控制在每分钟 2-6 个，仅保留关键动作/场景的音效。\n   - 配乐覆盖建议 15%-40%，低密度时仅保留开头/结尾/高潮等关键位置。\n"""
+
+        adaptation_block = (
+            f"**跨模态改编提示**:\n{audio_adaptation_brief}\n\n"
+            if audio_adaptation_brief
+            else ""
+        )
 
         prompt = f"""你是专业的有声书剧本改编师，负责将网络小说改编成适合音频化播放的有声剧本。
 
@@ -588,6 +611,7 @@ class AudiobookScriptAgent:
 **情感基调**: {analysis.get('emotional_tone', 'neutral')}
 **建议情感**: {', '.join(analysis.get('recommended_emotions', ['natural']))}
 **节奏模式**: {analysis.get('rhythm_pattern', '中等')}
+{adaptation_block}
 
 **原文段落**:
 {paragraph}

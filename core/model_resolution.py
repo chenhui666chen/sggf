@@ -25,6 +25,9 @@ class TaskType(str, Enum):
     AUDIOBOOK_SOUND = "audiobook_sound"
     AUDIOBOOK_MUSIC = "audiobook_music"
     AUDIOBOOK_REVIEW = "audiobook_review"
+    ASSET_MUSIC = "asset_music"
+    ASSET_SFX = "asset_sfx"
+    ASSET_AUDIO = "asset_audio"
 
 
 TASK_TYPE_ALIASES = {

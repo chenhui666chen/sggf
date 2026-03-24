@@ -13,8 +13,12 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      '@mui/icons-material': path.resolve(__dirname, './node_modules/@mui/icons-material/esm'),
+      '@mui/system': path.resolve(__dirname, './node_modules/@mui/system/esm'),
+      '@mui/utils': path.resolve(__dirname, './node_modules/@mui/utils/esm'),
     },
     dedupe: [
+      '@mui/icons-material',
       '@mui/material',
       '@mui/system',
       '@mui/styled-engine',
@@ -102,7 +106,17 @@ export default defineConfig({
       'react-redux',
       '@emotion/react',
       '@emotion/styled',
+      'prop-types',
+      'react-is',
       'axios',
+    ],
+    exclude: [
+      '@mui/material',
+      '@mui/material/styles',
+      '@mui/icons-material',
+      '@mui/lab',
+      '@mui/system',
+      '@mui/styled-engine',
     ],
   },
 })

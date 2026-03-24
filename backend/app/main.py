@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.db.base import Base, engine
-from app.api.v1 import auth, projects, chapters, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters, ai_detect, prompt_evolution, ai_trace, book_parser, audiobook, monitoring, script_review, dreamweaver
+from app.api.v1 import auth, projects, chapters, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters, ai_detect, prompt_evolution, ai_trace, book_parser, audiobook, monitoring, script_review, dreamweaver, model_catalog, asset_studio, user_assets, user_center
 from app.api.v1.admin import router as admin_router
 import socketio
 
@@ -87,7 +87,9 @@ from app.models import (
     User, Project, Memory, SettingCollection, SettingItem,
     Character, CharacterTechnique, Review, KnowledgeGraphEdge,
     BookSource, BookChapter, BookAnalysis,
-    AudiobookProject, ChapterAudio  # 有声书模型
+    AudiobookProject, ChapterAudio,
+    ModelCatalogEntry, ModelCatalogSource,  # 模型档案中心
+    UserAssetRecord,  # 用户资产记录
 )
 
 # ⚠️ 生产环境请使用 Alembic 迁移，不要使用 create_all
@@ -138,6 +140,10 @@ app.include_router(audiobook.router)  # 耳畔星河 - 有声书生成 API
 app.include_router(monitoring.router)  # 监控与指标 API
 app.include_router(script_review.router)  # 剧本审核与调整 API
 app.include_router(dreamweaver.router)  # 织梦映心 - 短剧生成 API
+app.include_router(model_catalog.router)  # 模型档案中心 API
+app.include_router(asset_studio.router)  # 首页资产工作台 API
+app.include_router(user_assets.router)  # 用户资产记录 API
+app.include_router(user_center.router)  # 用户中心汇总与权益 API
 app.include_router(admin_router)  # 管理控制台 API
 
 

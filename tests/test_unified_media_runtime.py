@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import pytest
 
 
@@ -56,6 +57,417 @@ def test_media_runtime_generate_image_respects_explicit_model(monkeypatch: pytes
 
     assert result.success is True
     assert captured["model_id"] == "wanx-v1-turbo"
+
+
+def test_media_runtime_select_model_reroutes_incompatible_preferred_video_model(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from core.unified_media_runtime import UnifiedMediaRuntime
+    from schemas.task_spec import TaskSpecBuilder
+
+    snapshot_path = tmp_path / "model_catalog_runtime.json"
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": {
+                    "wan2.6-t2v": {
+                        "verification_status": "verified",
+                        "last_verified_at": "2026-03-22T00:00:00+00:00",
+                    },
+                    "wan2.6-t2v-fast": {
+                        "verification_status": "verified",
+                        "last_verified_at": "2026-03-22T00:00:00+00:00",
+                    },
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MODEL_CATALOG_RUNTIME_SNAPSHOT_PATH", str(snapshot_path))
+
+    runtime = UnifiedMediaRuntime()
+    task = (
+        TaskSpecBuilder()
+        .with_modality("text_to_video")
+        .with_prompt("角色从暗处走向镜头")
+        .with_dimensions(1920, 1080)
+        .with_duration(10.0)
+        .build()
+    )
+
+    spec = runtime.select_model(
+        operation="generate_video",
+        modality="text_to_video",
+        preferred_model="wan2.6-t2v-fast",
+        strategy="speed",
+        task=task,
+    )
+
+    assert spec.id == "wan2.6-t2v"
+
+
+def test_media_runtime_deprioritizes_failed_catalog_preferred_model(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from core.unified_media_runtime import UnifiedMediaRuntime
+
+    snapshot_path = tmp_path / "model_catalog_runtime.json"
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": {
+                    "wanx-v1": {
+                        "verification_status": "verified",
+                        "last_verified_at": "2026-03-21T00:00:00+00:00",
+                    },
+                    "wanx-v1-turbo": {
+                        "verification_status": "failed",
+                        "last_verified_at": "2026-03-21T00:00:00+00:00",
+                    },
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MODEL_CATALOG_RUNTIME_SNAPSHOT_PATH", str(snapshot_path))
+
+    runtime = UnifiedMediaRuntime()
+    spec = runtime.select_model(
+        operation="generate_image",
+        modality="text_to_image",
+        preferred_model="wanx-v1-turbo",
+        strategy="balanced",
+    )
+
+    assert spec.id == "wanx-v1"
+
+
+def test_media_runtime_multi_image_edit_prefers_verified_multi_image_model(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from core.unified_media_runtime import UnifiedMediaResult, UnifiedMediaRuntime
+
+    snapshot_path = tmp_path / "model_catalog_runtime.json"
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": {
+                    "qwen-image-edit-plus": {
+                        "verification_status": "verified",
+                        "last_verified_at": "2026-03-22T00:00:00+00:00",
+                        "capability_hints": {
+                            "supports_reference_images": True,
+                            "max_reference_images": 4,
+                            "supports_multi_image_edit": True,
+                        },
+                    },
+                    "qwen-image-edit-max": {
+                        "verification_status": "verified",
+                        "last_verified_at": "2026-03-22T00:00:00+00:00",
+                        "capability_hints": {
+                            "supports_reference_images": False,
+                            "max_reference_images": None,
+                            "supports_multi_image_edit": False,
+                        },
+                    },
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MODEL_CATALOG_RUNTIME_SNAPSHOT_PATH", str(snapshot_path))
+
+    runtime = UnifiedMediaRuntime()
+    captured: dict[str, object] = {}
+
+    def fake_execute(self: UnifiedMediaRuntime, model_id: str, task: object) -> UnifiedMediaResult:
+        captured["model_id"] = model_id
+        return UnifiedMediaResult(
+            success=True,
+            model_id=model_id,
+            outputs=["https://example.com/edited.png"],
+        )
+
+    monkeypatch.setattr(UnifiedMediaRuntime, "_execute_adapter_task", fake_execute)
+
+    result = runtime.edit_image(
+        image_path="base.png",
+        edit_prompt="融合三张图的角色与背景",
+        reference_images=["style.png", "scene.png"],
+        strategy="quality",
+        use_fallback=False,
+    )
+
+    assert result.success is True
+    assert captured["model_id"] == "qwen-image-edit-plus"
+
+
+def test_media_runtime_image_to_video_with_last_frame_prefers_frame_control_model(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from core.unified_media_runtime import UnifiedMediaResult, UnifiedMediaRuntime
+
+    snapshot_path = tmp_path / "model_catalog_runtime.json"
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": {
+                    "wan2.6-t2v": {
+                        "verification_status": "verified",
+                        "last_verified_at": "2026-03-22T00:00:00+00:00",
+                        "capability_hints": {
+                            "supports_reference_images": True,
+                            "supports_last_frame": False,
+                        },
+                    },
+                    "wan2.6-i2v": {
+                        "verification_status": "verified",
+                        "last_verified_at": "2026-03-22T00:00:00+00:00",
+                        "capability_hints": {
+                            "supports_reference_images": True,
+                            "supports_last_frame": False,
+                        },
+                    },
+                    "wan2.6-r2v": {
+                        "verification_status": "verified",
+                        "last_verified_at": "2026-03-22T00:00:00+00:00",
+                        "capability_hints": {
+                            "supports_reference_images": True,
+                            "supports_last_frame": True,
+                        },
+                    },
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MODEL_CATALOG_RUNTIME_SNAPSHOT_PATH", str(snapshot_path))
+
+    runtime = UnifiedMediaRuntime()
+    captured: dict[str, object] = {}
+
+    def fake_execute(self: UnifiedMediaRuntime, model_id: str, task: object) -> UnifiedMediaResult:
+        captured["model_id"] = model_id
+        return UnifiedMediaResult(
+            success=True,
+            model_id=model_id,
+            outputs=["https://example.com/video.mp4"],
+        )
+
+    monkeypatch.setattr(UnifiedMediaRuntime, "_execute_adapter_task", fake_execute)
+
+    result = runtime.generate_video(
+        prompt="角色从站立平滑过渡到坐下",
+        image_path="start.png",
+        last_frame="end.png",
+        use_fallback=False,
+    )
+
+    assert result.success is True
+    assert captured["model_id"] == "wan2.6-r2v"
+
+
+def test_media_runtime_image_to_video_reroutes_incompatible_duration_preferred_model(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from core.unified_media_runtime import UnifiedMediaResult, UnifiedMediaRuntime
+
+    snapshot_path = tmp_path / "model_catalog_runtime.json"
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": {
+                    "wan2.6-t2v": {
+                        "verification_status": "verified",
+                        "last_verified_at": "2026-03-22T00:00:00+00:00",
+                        "capability_hints": {
+                            "supports_reference_images": True,
+                            "max_reference_images": 1,
+                        },
+                    },
+                    "wan2.6-i2v": {
+                        "verification_status": "verified",
+                        "last_verified_at": "2026-03-22T00:00:00+00:00",
+                        "capability_hints": {
+                            "supports_reference_images": True,
+                            "max_reference_images": 1,
+                        },
+                    },
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MODEL_CATALOG_RUNTIME_SNAPSHOT_PATH", str(snapshot_path))
+
+    runtime = UnifiedMediaRuntime()
+    captured: dict[str, object] = {}
+
+    def fake_execute(self: UnifiedMediaRuntime, model_id: str, task: object) -> UnifiedMediaResult:
+        captured["model_id"] = model_id
+        captured["task"] = task
+        return UnifiedMediaResult(
+            success=True,
+            model_id=model_id,
+            outputs=["https://example.com/video.mp4"],
+        )
+
+    monkeypatch.setattr(UnifiedMediaRuntime, "_execute_adapter_task", fake_execute)
+
+    result = runtime.generate_video(
+        prompt="让角色保持主体一致并向前推进",
+        image_path="start.png",
+        duration=15.0,
+        model_id="wan2.6-i2v",
+        strategy="balanced",
+        use_fallback=False,
+    )
+
+    assert result.success is True
+    assert captured["model_id"] == "wan2.6-t2v"
+
+
+def test_media_runtime_image_to_video_uses_runtime_snapshot_task_constraints(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from core.unified_media_runtime import UnifiedMediaResult, UnifiedMediaRuntime
+
+    snapshot_path = tmp_path / "model_catalog_runtime.json"
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": {
+                    "wan2.6-i2v": {
+                        "verification_status": "verified",
+                        "last_verified_at": "2026-03-22T00:00:00+00:00",
+                        "capability_hints": {
+                            "supports_reference_images": True,
+                            "max_reference_images": 1,
+                        },
+                        "task_constraints": {
+                            "duration_values": [3.0, 5.0, 10.0, 15.0],
+                            "ratio_values": ["16:9", "9:16", "1:1"],
+                            "min_width": 480,
+                            "max_width": 1920,
+                            "min_height": 480,
+                            "max_height": 1080,
+                        },
+                    },
+                    "wan2.6-t2v": {
+                        "verification_status": "verified",
+                        "last_verified_at": "2026-03-22T00:00:00+00:00",
+                        "capability_hints": {
+                            "supports_reference_images": True,
+                            "max_reference_images": 1,
+                        },
+                    },
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MODEL_CATALOG_RUNTIME_SNAPSHOT_PATH", str(snapshot_path))
+
+    runtime = UnifiedMediaRuntime()
+    captured: dict[str, object] = {}
+
+    def fake_execute(self: UnifiedMediaRuntime, model_id: str, task: object) -> UnifiedMediaResult:
+        captured["model_id"] = model_id
+        return UnifiedMediaResult(
+            success=True,
+            model_id=model_id,
+            outputs=["https://example.com/video.mp4"],
+        )
+
+    monkeypatch.setattr(UnifiedMediaRuntime, "_execute_adapter_task", fake_execute)
+
+    result = runtime.generate_video(
+        prompt="让角色保持主体一致并完成长镜头推进",
+        image_path="start.png",
+        duration=15.0,
+        model_id="wan2.6-i2v",
+        strategy="balanced",
+        use_fallback=False,
+    )
+
+    assert result.success is True
+    assert captured["model_id"] == "wan2.6-i2v"
+
+
+def test_media_runtime_get_model_info_exposes_catalog_routing_signal(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from core.unified_media_runtime import UnifiedMediaRuntime
+
+    snapshot_path = tmp_path / "model_catalog_runtime.json"
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": {
+                    "wanx-v1": {
+                        "verification_status": "verified",
+                        "last_verified_at": "2026-03-21T00:00:00+00:00",
+                        "capability_hints": {
+                            "supports_reference_images": True,
+                            "max_reference_images": 1,
+                        },
+                        "task_constraints": {
+                            "ratio_values": ["1:1", "16:9"],
+                            "min_width": 256,
+                            "max_width": 2048,
+                            "min_height": 256,
+                            "max_height": 2048,
+                        },
+                    },
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MODEL_CATALOG_RUNTIME_SNAPSHOT_PATH", str(snapshot_path))
+
+    runtime = UnifiedMediaRuntime()
+    monkeypatch.setattr(
+        runtime._registry,
+        "get_model_info",
+        lambda model_id: {"id": model_id, "name": "Wanx", "provider": "alibaba"},
+    )
+
+    info = runtime.get_model_info("wanx-v1")
+
+    assert info is not None
+    assert info["catalog_routing"]["verification_status"] == "verified"
+    assert info["catalog_routing"]["blocked"] is False
+    assert info["catalog_capability_hints"]["supports_reference_images"] is True
+    assert info["catalog_task_constraints"]["ratio_values"] == ["1:1", "16:9"]
 
 
 def test_media_runtime_analyze_image_uses_registry_adapter(monkeypatch: pytest.MonkeyPatch) -> None:

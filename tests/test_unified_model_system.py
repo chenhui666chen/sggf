@@ -12,6 +12,8 @@
 
 import pytest
 import asyncio
+import types
+import json
 from unittest.mock import Mock, patch, AsyncMock
 from pathlib import Path
 import tempfile
@@ -342,6 +344,47 @@ class TestLLMAdapters:
             assert adapter_with.supports_streaming() is True
             assert adapter_without.supports_streaming() is False
 
+    def test_adapter_disables_sdk_retry(self):
+        """测试 OpenAI 兼容适配器关闭 SDK 内置重试。"""
+        from core.llm_adapters import OpenAICompatibleAdapter
+        from schemas.unified_model_spec import UnifiedModelSpec, ModelType, APIConfig
+
+        captured_client_kwargs = {}
+
+        class FakeAsyncOpenAI:
+            def __init__(self, **kwargs):
+                captured_client_kwargs.update(kwargs)
+
+        class FakeTimeout:
+            def __init__(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+
+        class FakeAsyncClient:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        fake_openai = types.SimpleNamespace(AsyncOpenAI=FakeAsyncOpenAI)
+        fake_httpx = types.SimpleNamespace(AsyncClient=FakeAsyncClient, Timeout=FakeTimeout)
+
+        spec = UnifiedModelSpec(
+            id="test-adapter",
+            name="Test Adapter",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(
+                api_key_env="TEST_API_KEY",
+                base_url="https://api.test.com/v1",
+                default_timeout=45,
+            ),
+        )
+
+        with patch.dict('os.environ', {'TEST_API_KEY': 'test-key'}):
+            with patch.dict('sys.modules', {'openai': fake_openai, 'httpx': fake_httpx}):
+                OpenAICompatibleAdapter(spec)
+
+        assert captured_client_kwargs["max_retries"] == 0
+
 
 class TestModelHub:
     """测试 ModelHub"""
@@ -390,6 +433,283 @@ class TestModelHub:
             assert spec.id == "test-hub-model"
         finally:
             Path(config_path).unlink()
+
+    @pytest.mark.asyncio
+    async def test_model_hub_uses_spec_default_max_retries(self):
+        """测试 ModelHub 默认按模型配置中的 default_max_retries 重试。"""
+        from core.model_hub import model_hub
+        from core.unified_registry import UnifiedModelRegistry
+        from schemas.unified_model_spec import (
+            UnifiedModelSpec,
+            ModelType,
+            APIConfig,
+            RoutingConfig,
+            LLMConstraints,
+            LLMResult,
+        )
+
+        registry = UnifiedModelRegistry()
+        registry.clear()
+        model_hub.registry = registry
+
+        spec = UnifiedModelSpec(
+            id="retry-test-model",
+            name="Retry Test Model",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(
+                api_key_env="TEST_API_KEY",
+                base_url="https://api.test.com/v1",
+                default_max_retries=2,
+            ),
+            constraints=LLMConstraints(supports_max_retries=True),
+            routing=RoutingConfig(task_types=["retry_test"]),
+        )
+        registry.register(spec)
+
+        adapter = Mock()
+        adapter.generate = AsyncMock(
+            return_value=LLMResult(
+                success=False,
+                model_id="retry-test-model",
+                error="Request timed out.",
+                error_code="timeout",
+            )
+        )
+
+        with patch.object(registry, "get_adapter", return_value=adapter):
+            result = await model_hub._execute_call(
+                model_id="retry-test-model",
+                messages=[{"role": "user", "content": "hello"}],
+                temperature=0.7,
+                max_tokens=None,
+                stream=False,
+                on_chunk=None,
+            )
+
+        assert result.success is False
+        assert adapter.generate.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_model_hub_disables_retry_for_models_without_retry_support(self):
+        """测试不支持重试的模型仅尝试一次后立即回退。"""
+        from core.model_hub import model_hub
+        from core.unified_registry import UnifiedModelRegistry
+        from schemas.unified_model_spec import (
+            UnifiedModelSpec,
+            ModelType,
+            APIConfig,
+            RoutingConfig,
+            LLMConstraints,
+            LLMResult,
+        )
+
+        registry = UnifiedModelRegistry()
+        registry.clear()
+        model_hub.registry = registry
+
+        primary_spec = UnifiedModelSpec(
+            id="primary-no-retry",
+            name="Primary No Retry",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(
+                api_key_env="TEST_API_KEY",
+                base_url="https://api.test.com/v1",
+                default_max_retries=5,
+            ),
+            constraints=LLMConstraints(supports_max_retries=False),
+            routing=RoutingConfig(task_types=["fallback_test"], fallback_models=["fallback-model"]),
+        )
+        fallback_spec = UnifiedModelSpec(
+            id="fallback-model",
+            name="Fallback Model",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(
+                api_key_env="TEST_API_KEY",
+                base_url="https://api.test.com/v1",
+                default_max_retries=2,
+            ),
+            constraints=LLMConstraints(supports_max_retries=True),
+            routing=RoutingConfig(task_types=["fallback_test"]),
+        )
+        registry.register(primary_spec)
+        registry.register(fallback_spec)
+
+        primary_adapter = Mock()
+        primary_adapter.generate = AsyncMock(
+            return_value=LLMResult(
+                success=False,
+                model_id="primary-no-retry",
+                error="Connection error.",
+                error_code="unknown_error",
+            )
+        )
+        fallback_adapter = Mock()
+        fallback_adapter.generate = AsyncMock(
+            return_value=LLMResult(
+                success=True,
+                model_id="fallback-model",
+                content="ok",
+            )
+        )
+
+        def get_adapter(model_id: str):
+            if model_id == "primary-no-retry":
+                return primary_adapter
+            if model_id == "fallback-model":
+                return fallback_adapter
+            return None
+
+        with patch.object(registry, "get_adapter", side_effect=get_adapter):
+            result = await model_hub._execute_call(
+                model_id="primary-no-retry",
+                messages=[{"role": "user", "content": "hello"}],
+                temperature=0.7,
+                max_tokens=None,
+                stream=False,
+                on_chunk=None,
+            )
+
+        assert result.success is True
+        assert result.model_id == "fallback-model"
+        assert primary_adapter.generate.await_count == 1
+        assert fallback_adapter.generate.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_model_hub_reroutes_failed_catalog_model_when_healthier_candidate_exists(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ):
+        """测试模型档案快照标记失败时，ModelHub 会优先切到同任务的健康候选。"""
+        from core.model_hub import model_hub
+        from core.unified_registry import UnifiedModelRegistry
+        from schemas.unified_model_spec import (
+            UnifiedModelSpec,
+            ModelType,
+            APIConfig,
+            RoutingConfig,
+            LLMResult,
+        )
+
+        snapshot_path = tmp_path / "model_catalog_runtime.json"
+        snapshot_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "entries": {
+                        "failed-model": {
+                            "verification_status": "failed",
+                            "last_verified_at": "2026-03-21T00:00:00+00:00",
+                        },
+                        "healthy-model": {
+                            "verification_status": "verified",
+                            "last_verified_at": "2026-03-21T00:00:00+00:00",
+                        },
+                    },
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("MODEL_CATALOG_RUNTIME_SNAPSHOT_PATH", str(snapshot_path))
+
+        registry = UnifiedModelRegistry()
+        registry.clear()
+        model_hub.registry = registry
+
+        failed_spec = UnifiedModelSpec(
+            id="failed-model",
+            name="Failed Model",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(api_key_env="TEST_API_KEY", base_url="https://api.test.com/v1"),
+            routing=RoutingConfig(task_types=["chapter"], fallback_models=["healthy-model"]),
+        )
+        healthy_spec = UnifiedModelSpec(
+            id="healthy-model",
+            name="Healthy Model",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(api_key_env="TEST_API_KEY", base_url="https://api.test.com/v1"),
+            routing=RoutingConfig(task_types=["chapter"]),
+        )
+        registry.register(failed_spec)
+        registry.register(healthy_spec)
+
+        captured: dict[str, str] = {}
+
+        async def fake_execute_call(*, model_id, **kwargs):
+            captured["model_id"] = model_id
+            return LLMResult(success=True, model_id=model_id, content="ok")
+
+        monkeypatch.setattr(model_hub, "_execute_call", fake_execute_call)
+
+        result = await model_hub.call(
+            messages=[{"role": "user", "content": "hello"}],
+            task_type="chapter",
+            model="failed-model",
+        )
+
+        assert result.success is True
+        assert result.model_id == "healthy-model"
+        assert captured["model_id"] == "healthy-model"
+        assert result.metadata["requested_model_id"] == "failed-model"
+        assert result.metadata["resolved_model_id"] == "healthy-model"
+        assert result.metadata["rerouted"] is True
+        assert result.metadata["routing_reason"] == "catalog_verification_failed_recent"
+
+    def test_model_hub_get_model_info_exposes_catalog_routing_signal(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ):
+        """测试 ModelHub 模型详情会附带模型档案路由信号。"""
+        from core.model_hub import model_hub
+        from core.unified_registry import UnifiedModelRegistry
+        from schemas.unified_model_spec import UnifiedModelSpec, ModelType, APIConfig, RoutingConfig
+
+        snapshot_path = tmp_path / "model_catalog_runtime.json"
+        snapshot_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "entries": {
+                        "info-model": {
+                            "verification_status": "verified",
+                            "last_verified_at": "2026-03-21T00:00:00+00:00",
+                        }
+                    },
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("MODEL_CATALOG_RUNTIME_SNAPSHOT_PATH", str(snapshot_path))
+
+        registry = UnifiedModelRegistry()
+        registry.clear()
+        model_hub.registry = registry
+        registry.register(
+            UnifiedModelSpec(
+                id="info-model",
+                name="Info Model",
+                provider="test",
+                model_type=ModelType.LLM,
+                api_config=APIConfig(api_key_env="TEST_API_KEY", base_url="https://api.test.com/v1"),
+                routing=RoutingConfig(task_types=["chapter"]),
+            )
+        )
+
+        info = model_hub.get_model_info("info-model")
+
+        assert info is not None
+        assert info["catalog_routing"]["verification_status"] == "verified"
+        assert info["catalog_routing"]["blocked"] is False
 
 
 class TestCompatibility:
@@ -447,6 +767,42 @@ class TestYAMLConfiguration:
         deepseek_spec = registry.get_spec("deepseek-reasoner")
         assert deepseek_spec is not None
         assert deepseek_spec.provider == "deepseek"
+
+    def test_yaml_audio_model_loading(self):
+        """测试音乐音效模型已纳入统一模型注册中心。"""
+        from core.unified_registry import UnifiedModelRegistry
+        from core.model_hub import model_hub
+        from schemas.unified_model_spec import ModelType
+
+        config_path = Path(__file__).parent.parent / "config" / "llm_models.yaml"
+
+        if not config_path.exists():
+            pytest.skip("YAML 配置文件不存在")
+
+        registry = UnifiedModelRegistry()
+        registry.clear()
+        model_hub.initialize(str(config_path))
+
+        music_spec = registry.get_spec("mureka-o1-instrumental")
+        assert music_spec is not None
+        assert music_spec.model_type == ModelType.AUDIO
+        assert "asset_music" in music_spec.routing.task_types
+
+        sfx_spec = registry.get_spec("kling-v1-text-to-audio")
+        assert sfx_spec is not None
+        assert sfx_spec.model_type == ModelType.AUDIO
+        assert sfx_spec.get_fallback_model() == "mureka-o1-instrumental"
+
+        video_audio_spec = registry.get_spec("kling-v1-video-to-audio")
+        assert video_audio_spec is not None
+        assert video_audio_spec.model_type == ModelType.AUDIO
+
+        audio_specs = registry.get_specs_by_type("audio")
+        audio_ids = {spec.id for spec in audio_specs}
+        assert {"mureka-o1-instrumental", "kling-v1-text-to-audio", "kling-v1-video-to-audio"} <= audio_ids
+
+        assert registry.select_best_model("asset_music").id == "mureka-o1-instrumental"
+        assert registry.select_best_model("asset_sfx").id == "kling-v1-text-to-audio"
 
     def test_yaml_task_type_mapping(self):
         """测试 YAML 任务类型映射"""

@@ -3,13 +3,14 @@
 """
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, func
+from sqlalchemy import or_
 
 from app.core.permissions import require_admin
 from app.core.security import hash_password
 from app.db.base import get_db
+from app.models.admin_log import AdminOperationLog
 from app.models.user import User
 from app.models.role import Role
 from app.schemas.admin import (
@@ -19,10 +20,32 @@ from app.schemas.admin import (
     UserUpdateByAdmin,
     UserStatusUpdate,
     UserRoleUpdate,
+    UserPointsAdjustmentCreate,
+    UserPointsAdjustmentListResponse,
+    UserPointsAdjustmentResponse,
+    UserPointsBillingEventListResponse,
+)
+from app.services.admin_points_billing import points_billing_log_to_response
+from app.services.user_center_points_events import (
+    list_user_points_billing_logs,
 )
 
 router = APIRouter()
 
+
+def _points_adjustment_log_to_response(log: AdminOperationLog) -> UserPointsAdjustmentResponse:
+    payload = log.request_params or {}
+    return UserPointsAdjustmentResponse(
+        id=log.id,
+        target_user_id=int(log.resource_id or payload.get("target_user_id") or 0),
+        operator_user_id=log.user_id,
+        operator_username=log.username,
+        delta=float(payload.get("delta") or 0),
+        reason=str(payload.get("reason") or "").strip(),
+        adjustment_type=str(payload.get("adjustment_type") or "manual_grant").strip() or "manual_grant",
+        expires_at=payload.get("expires_at"),
+        created_at=log.created_at,
+    )
 
 @router.get("", response_model=UserListResponse)
 async def list_users(
@@ -240,3 +263,117 @@ async def delete_user(
     db.commit()
     
     return None
+
+
+@router.get("/{user_id}/points-adjustments", response_model=UserPointsAdjustmentListResponse)
+async def list_user_points_adjustments(
+    user_id: int,
+    limit: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """查询用户的人工积分调整记录"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用户不存在",
+        )
+
+    logs = (
+        db.query(AdminOperationLog)
+        .filter(
+            AdminOperationLog.operation_type == "POINTS_ADJUST",
+            AdminOperationLog.resource_type == "USER_POINTS",
+            AdminOperationLog.resource_id == user_id,
+            AdminOperationLog.response_status < 400,
+        )
+        .order_by(AdminOperationLog.created_at.desc(), AdminOperationLog.id.desc())
+        .limit(limit)
+        .all()
+    )
+
+    return UserPointsAdjustmentListResponse(
+        items=[_points_adjustment_log_to_response(log) for log in logs],
+    )
+
+
+@router.get("/{user_id}/points-billing-events", response_model=UserPointsBillingEventListResponse)
+async def list_user_points_billing_events(
+    user_id: int,
+    limit: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """查询用户正式积分计费事件"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用户不存在",
+        )
+
+    logs = list_user_points_billing_logs(
+        db=db,
+        target_user_id=user_id,
+        limit=limit,
+    )
+
+    return UserPointsBillingEventListResponse(
+        items=[points_billing_log_to_response(log) for log in logs],
+    )
+
+
+@router.post("/{user_id}/points-adjustments", response_model=UserPointsAdjustmentResponse, status_code=status.HTTP_201_CREATED)
+async def create_user_points_adjustment(
+    user_id: int,
+    adjustment_data: UserPointsAdjustmentCreate,
+    request: Request,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """为用户手工补发、充值或扣减积分"""
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用户不存在",
+        )
+
+    if abs(float(adjustment_data.delta)) <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="积分调整值不能为 0",
+        )
+
+    payload = {
+        "target_user_id": target_user.id,
+        "delta": round(float(adjustment_data.delta), 2),
+        "reason": adjustment_data.reason.strip(),
+        "adjustment_type": adjustment_data.adjustment_type.strip() or "manual_grant",
+        "expires_at": adjustment_data.expires_at.isoformat() if adjustment_data.expires_at else None,
+    }
+    sign = "+" if payload["delta"] > 0 else ""
+
+    log = AdminOperationLog(
+        user_id=current_user.id,
+        username=current_user.username,
+        operation_type="POINTS_ADJUST",
+        resource_type="USER_POINTS",
+        resource_id=target_user.id,
+        operation_desc=f"为用户 {target_user.username} 调整积分 {sign}{payload['delta']:.2f}",
+        request_method="POST",
+        request_path=f"/api/v1/admin/users/{target_user.id}/points-adjustments",
+        request_params=payload,
+        response_status=status.HTTP_201_CREATED,
+        ip_address=request.client.host if request.client else "",
+        user_agent=request.headers.get("user-agent"),
+        duration_ms=0,
+        error_message=None,
+    )
+
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+
+    return _points_adjustment_log_to_response(log)

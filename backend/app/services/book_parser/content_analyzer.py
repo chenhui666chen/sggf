@@ -11,6 +11,7 @@ import os
 import json
 import asyncio
 import logging
+import re
 from typing import List, Dict, Any, Optional, Callable, Awaitable
 from dataclasses import dataclass
 from enum import Enum
@@ -60,6 +61,7 @@ class AnalysisResult:
     chapter_range: tuple  # (start, end)
     model_used: str
     token_used: int = 0
+    extra_data: Optional[Dict[str, Any]] = None
 
 
 # 进度回调类型
@@ -93,6 +95,42 @@ class ContentAnalyzer:
             llm_client: LLM客户端实例，不传则使用全局单例
         """
         self.llm = llm_client or get_llm_client()
+
+    def _build_analysis_result(
+        self,
+        *,
+        analysis_type: AnalysisType,
+        content: Dict[str, Any],
+        confidence: float,
+        chapter_range: tuple,
+        model_used: str,
+        token_used: int = 0,
+        extra_data: Optional[Dict[str, Any]] = None,
+    ) -> AnalysisResult:
+        """统一构造分析结果，并对低质量结果做显式降级。"""
+        normalized_content = content if isinstance(content, dict) else {}
+        normalized_extra = dict(extra_data or {})
+
+        if normalized_content.get("parse_error"):
+            raw_response = str(normalized_content.get("raw_response") or "")
+            normalized_extra["parse_error"] = True
+            normalized_extra["quality_warning"] = "LLM 响应未能成功解析为 JSON，当前分析结果已降级，不建议直接导入创作链路。"
+            normalized_extra["raw_response_preview"] = raw_response[:500]
+            normalized_content = {
+                "parse_error": True,
+                "quality_warning": normalized_extra["quality_warning"],
+            }
+            confidence = min(confidence, 0.15)
+
+        return AnalysisResult(
+            analysis_type=analysis_type,
+            content=normalized_content,
+            confidence=confidence,
+            chapter_range=chapter_range,
+            model_used=model_used,
+            token_used=token_used,
+            extra_data=normalized_extra or None,
+        )
     
     async def analyze_all(
         self,
@@ -123,6 +161,7 @@ class ContentAnalyzer:
                 AnalysisType.WORLDVIEW,
                 AnalysisType.PLOT,
                 AnalysisType.STYLE,
+                AnalysisType.CONCEPTS,
             ]
         
         results = []
@@ -134,9 +173,22 @@ class ContentAnalyzer:
                 chapters, analysis_types, on_progress
             )
         else:
+            if chapters:
+                if on_progress:
+                    await on_progress("chapter_extraction", 0, "正在提取章节摘要...")
+
+                chapter_summaries = await self._extract_all_chapter_summaries(
+                    chapters, on_progress
+                )
+                logger.info(f"✅ 小体量作品章节摘要提取完成: {len(chapter_summaries)} 章")
+
             # 原有采样分析流程（适用于少量章节）
             results = await self._sampling_analysis(
-                chapters, analysis_types, on_progress
+                chapters,
+                analysis_types,
+                on_progress,
+                progress_start=50 if chapter_summaries else 0,
+                progress_end=100,
             )
         
         if on_progress:
@@ -200,14 +252,16 @@ class ContentAnalyzer:
         self,
         chapters: List[ChapterInfo],
         analysis_types: List[AnalysisType],
-        on_progress: Optional[ProgressCallback] = None
+        on_progress: Optional[ProgressCallback] = None,
+        progress_start: int = 0,
+        progress_end: int = 100,
     ) -> List[AnalysisResult]:
         """原有采样分析流程（适用于少量章节）"""
         results = []
         total_steps = len(analysis_types)
         
         for i, analysis_type in enumerate(analysis_types):
-            progress = int((i / total_steps) * 100)
+            progress = progress_start + int((i / total_steps) * (progress_end - progress_start))
             
             if on_progress:
                 await on_progress(
@@ -241,6 +295,8 @@ class ContentAnalyzer:
             return await self.analyze_plot(chapters)
         elif analysis_type == AnalysisType.STYLE:
             return await self.analyze_style(chapters)
+        elif analysis_type == AnalysisType.CONCEPTS:
+            return await self.analyze_concepts(chapters)
         else:
             raise ValueError(f"不支持的分析类型: {analysis_type}")
     
@@ -255,6 +311,255 @@ class ContentAnalyzer:
             AnalysisType.THEMES: "主题思想",
         }
         return names.get(analysis_type, analysis_type.value)
+
+    @staticmethod
+    def _split_sentences(text: str) -> List[str]:
+        """按中文语义边界粗切句子，供无模型兜底使用。"""
+        if not text:
+            return []
+
+        raw_parts = re.split(r'(?<=[。！？!?])\s*|\n+', text)
+        sentences: List[str] = []
+        for part in raw_parts:
+            cleaned = str(part or "").strip()
+            if not cleaned:
+                continue
+            if re.fullmatch(r'[-=*_#\s]{3,}', cleaned):
+                continue
+            cleaned = re.sub(r'\s+', ' ', cleaned)
+            if len(cleaned) >= 6:
+                sentences.append(cleaned)
+        return sentences
+
+    @staticmethod
+    def _is_likely_character_name(name: str) -> bool:
+        """基于简单规则过滤明显不是人物的词。"""
+        text = str(name or "").strip()
+        if len(text) < 2 or len(text) > 4:
+            return False
+        if re.search(r'[^\u4e00-\u9fff]', text):
+            return False
+
+        stopwords = {
+            "灰烬区", "水晶区", "记忆", "数据", "系统", "接口", "诊所", "技术员",
+            "技术人", "人员", "局长", "母亲", "妹妹", "年轻人", "控制台", "界面",
+            "传送带", "扫描仪", "日志", "样本", "设备", "空气", "晨光", "街区",
+            "诊疗室", "忆晶", "信号", "代码", "光芒", "波动", "照片", "中心",
+        }
+        if text in stopwords:
+            return False
+
+        common_surnames = set(
+            "赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华"
+            "金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方"
+            "俞任袁柳酆鲍史唐费廉岑薛雷贺倪汤滕殷罗毕郝安常乐于时傅皮"
+            "卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计"
+            "伏成戴谈宋茅庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江"
+            "童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯昝管卢莫经"
+            "房裘缪干解应宗丁宣贲邓郁单杭洪包诸左石崔吉龚程邢裴陆荣翁"
+            "荀羊於惠甄曲家封芮羿储靳汲邴糜松井段富巫乌焦巴弓牧隗山谷车"
+            "侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶"
+            "司韶郜黎蓟薄印宿白怀蒲邰从鄂索咸籍赖卓蔺屠蒙池乔阴鬱胥能苍"
+            "双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍璩桑桂濮牛寿通边扈燕冀郏"
+            "浦尚农温别庄晏柴瞿阎充慕连茹习宦艾鱼容向古易慎戈廖庾终暨居"
+            "衡步都耿满弘匡国文寇广禄阙东欧殳沃利蔚越夔隆师巩厍聂晁勾敖"
+            "融冷訾辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯"
+            "盖益桓公"
+        )
+        prefix_titles = {"小", "老", "阿"}
+        invalid_name_chars = set("说道问答喊看想知在的了着呢吗吧呀么得将于与及并向从给被把让喃")
+
+        if text[0] in prefix_titles:
+            if len(text) < 2 or text[1] not in common_surnames:
+                return False
+        elif text[0] not in common_surnames:
+            return False
+
+        if any(ch in invalid_name_chars for ch in text[1:]):
+            return False
+
+        invalid_suffixes = (
+            "区", "街", "城", "市", "镇", "村", "国", "州", "界", "门", "派", "宗",
+            "会", "院", "局", "室", "楼", "站", "厂", "组", "队", "节", "器", "码",
+        )
+        if text.endswith(invalid_suffixes):
+            return False
+
+        return True
+
+    def _extract_character_names_from_text(self, text: str, limit: int = 8) -> List[str]:
+        """在无模型时，从正文里粗提人物名。"""
+        if not text:
+            return []
+
+        patterns = [
+            r'(?<![\u4e00-\u9fff])([\u4e00-\u9fff]{2,4})(?=的(?:指尖|声音|目光|手指|眼神|袖口|肩膀|档案|神经接口|照片))',
+            r'(?<![\u4e00-\u9fff])([\u4e00-\u9fff]{2,4})(?=(?:说|道|问|答|喊|念着|喃喃|低声|提醒|皱眉|起身|走近|转身|离开|看向|看着|想起|调取|穿过|见到|监测到|重新校准))',
+            r'档案显示[:：]\s*([\u4e00-\u9fff]{2,4})',
+            r'编号[\dA-Za-z]+批次[^。！？\n]{0,40}?([\u4e00-\u9fff]{2,4})',
+        ]
+
+        counters: Dict[str, int] = {}
+        for pattern in patterns:
+            for raw_name in re.findall(pattern, text):
+                name = str(raw_name or "").strip()
+                if not self._is_likely_character_name(name):
+                    continue
+                counters[name] = counters.get(name, 0) + 1
+
+        ordered = sorted(counters.items(), key=lambda item: (-item[1], len(item[0]), item[0]))
+        return [name for name, _ in ordered[:limit]]
+
+    def _extract_setting_hint(self, text: str) -> str:
+        """从章节开头粗提场景地点。"""
+        if not text:
+            return ""
+
+        patterns = [
+            r'([^\n，。]{2,20}(?:中心|诊所|街区|城区|实验室|办公室|控制室|大厦|酒吧|基地))',
+            r'(?:在|来到|走进|进入|穿过)([^\n，。]{2,18})',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text[:600])
+            if match:
+                return match.group(1).strip()[:20]
+        return ""
+
+    def _build_fallback_chapter_summary(
+        self,
+        chapter: ChapterInfo,
+        *,
+        reason: str = "",
+    ) -> Dict[str, Any]:
+        """当模型不可用或解析失败时，生成最低可用章节资产。"""
+        text = chapter.content or ""
+        sentences = self._split_sentences(text)
+        key_events: List[str] = []
+        for sentence in sentences:
+            cleaned = sentence.strip("“”\"'")
+            if not cleaned:
+                continue
+            event = cleaned[:30] + ("..." if len(cleaned) > 30 else "")
+            if event not in key_events:
+                key_events.append(event)
+            if len(key_events) >= 5:
+                break
+
+        summary_candidates = sentences[:3]
+        if len(sentences) > 4:
+            summary_candidates.append(sentences[-1])
+        summary = " ".join(summary_candidates).strip()
+        if not summary:
+            summary = (text[:240] + "...") if len(text) > 240 else text
+
+        characters = self._extract_character_names_from_text(text)
+        setting = self._extract_setting_hint(text)
+
+        logger.warning(
+            "章节摘要提取回退到规则模式: 第%s章《%s》%s",
+            chapter.number,
+            chapter.title,
+            f"| 原因: {reason}" if reason else "",
+        )
+
+        return {
+            "chapter_number": chapter.number,
+            "title": chapter.title,
+            "summary": summary[:400],
+            "characters_appeared": characters,
+            "key_events": key_events,
+            "setting": setting,
+            "character_clues": [],
+            "scene_goal": f"{setting or '本章场景'}中推进核心事件"[:40],
+            "conflict_arc": {
+                "trigger": key_events[0] if key_events else "",
+                "escalation": key_events[1] if len(key_events) > 1 else "",
+                "resolution": key_events[-1] if key_events else "",
+            },
+            "emotion_curve": "平静→紧张→悬念" if key_events else "",
+            "highlight": {"type": "无", "description": "规则兜底摘要，待模型补全", "intensity": "1"},
+            "ending_hook": {
+                "type": "悬念" if len(key_events) >= 2 else "无",
+                "content": key_events[-1] if key_events else "本章需后续补全钩子",
+            },
+            "gains": {
+                "character_gains": "",
+                "plot_progress": key_events[0] if key_events else "",
+            },
+            "foreshadowing": [],
+            "conflict": key_events[1] if len(key_events) > 1 else "",
+            "emotion_tone": "紧张" if key_events else "",
+        }
+
+    def _build_fallback_character_analysis(
+        self,
+        character_appearances: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """当人物汇总模型不可用时，按章节出场频次生成最小人物体系。"""
+        ranked_characters = sorted(
+            [
+                (name, info)
+                for name, info in character_appearances.items()
+                if self._is_likely_character_name(name) and (info.get("count") or 0) > 0
+            ],
+            key=lambda item: (
+                -(item[1].get("count") or 0),
+                item[1].get("first_chapter") or 10**9,
+                item[0],
+            ),
+        )
+
+        main_characters: List[Dict[str, Any]] = []
+        supporting_characters: List[Dict[str, Any]] = []
+        relationship_pairs: List[Dict[str, str]] = []
+
+        for idx, (name, info) in enumerate(ranked_characters[:12]):
+            payload = {
+                "name": name,
+                "description": f"基于章节出场频次识别的人物，累计出现 {info.get('count', 0)} 章",
+                "story_stance": "未提及",
+                "faction": "未提及",
+                "first_appearance_chapter": info.get("first_chapter"),
+                "appearance_count": info.get("count", 0),
+                "importance_score": 1.0 if idx == 0 else round(max(0.3, 1 - idx * 0.08), 2),
+            }
+
+            if idx == 0:
+                payload["role"] = "protagonist"
+                payload["importance_level"] = "核心角色"
+                main_characters.append(payload)
+            elif idx <= 2:
+                payload["role"] = "deuteragonist"
+                payload["importance_level"] = "重要角色"
+                main_characters.append(payload)
+            else:
+                payload["role"] = "supporting"
+                payload["relationship_to_main"] = "与核心剧情相关"
+                payload["importance_level"] = "次要角色"
+                supporting_characters.append(payload)
+
+        if len(main_characters) >= 2:
+            anchor = main_characters[0]["name"]
+            for char in main_characters[1:3]:
+                relationship_pairs.append({
+                    "character1": anchor,
+                    "character2": char["name"],
+                    "relationship": "核心关联人物",
+                    "description": "基于章节共同高频出现的启发式关系",
+                })
+
+        logger.warning(
+            "人物体系分析回退到规则模式: 生成 %s 个主要人物, %s 个配角",
+            len(main_characters),
+            len(supporting_characters),
+        )
+
+        return {
+            "main_characters": main_characters,
+            "supporting_characters": supporting_characters,
+            "character_relationships": relationship_pairs,
+            "character_statistics": character_appearances,
+        }
     
     # ==================== 阶段1: 逐章提取摘要 ====================
     
@@ -357,12 +662,12 @@ class ContentAnalyzer:
     "setting": "主要场景/地点（20字以内）",
     
     "character_clues": [
-        {
+        {{
             "name": "人物姓名",
             "story_stance": "故事立场（主角方/反派方/中立方/亦正亦邪/未提及）",
             "faction": "所属势力/组织/门派（未提及则写未提及）",
             "evidence": "原文证据片段（20-40字，包含明确指向的词句）"
-        }
+        }}
     ],
     
     "scene_goal": "场景目标（40字以内，格式：[地点] + [人物] + [要达成什么]）",
@@ -403,30 +708,36 @@ class ContentAnalyzer:
 6. 情绪曲线要准确反映读者阅读时的情感变化
 7. 故事立场/所属势力必须有明确文本证据，否则写“未提及”"""
 
-        result = await self._call_llm_with_retry(prompt, TaskType.BOOK_ANALYSIS)
-        parsed = self._parse_json_response(result)
-        
-        # 确保必要字段存在（兼容旧格式 + 新增细纲字段）
-        return {
-            "chapter_number": chapter.number,
-            "title": chapter.title,
-            "summary": parsed.get("summary", ""),
-            "characters_appeared": parsed.get("characters_appeared", []),
-            "key_events": parsed.get("key_events", []),
-            "setting": parsed.get("setting", ""),
-            "character_clues": parsed.get("character_clues", []),
-            # 🆕 细纲关键字段
-            "scene_goal": parsed.get("scene_goal", ""),
-            "conflict_arc": parsed.get("conflict_arc", {"trigger": "", "escalation": "", "resolution": ""}),
-            "emotion_curve": parsed.get("emotion_curve", ""),
-            "highlight": parsed.get("highlight", {"type": "无", "description": "", "intensity": "1"}),
-            "ending_hook": parsed.get("ending_hook", {"type": "无", "content": ""}),
-            "gains": parsed.get("gains", {"character_gains": "", "plot_progress": ""}),
-            "foreshadowing": parsed.get("foreshadowing", []),
-            # 兼容旧字段
-            "conflict": parsed.get("conflict", ""),
-            "emotion_tone": parsed.get("emotion_tone", "")
-        }
+        try:
+            result = await self._call_llm_with_retry(prompt, TaskType.BOOK_ANALYSIS)
+            parsed = self._parse_json_response(result)
+
+            if parsed.get("parse_error"):
+                raise ValueError("章节摘要 JSON 解析失败")
+
+            # 确保必要字段存在（兼容旧格式 + 新增细纲字段）
+            return {
+                "chapter_number": chapter.number,
+                "title": chapter.title,
+                "summary": parsed.get("summary", ""),
+                "characters_appeared": parsed.get("characters_appeared", []),
+                "key_events": parsed.get("key_events", []),
+                "setting": parsed.get("setting", ""),
+                "character_clues": parsed.get("character_clues", []),
+                # 🆕 细纲关键字段
+                "scene_goal": parsed.get("scene_goal", ""),
+                "conflict_arc": parsed.get("conflict_arc", {"trigger": "", "escalation": "", "resolution": ""}),
+                "emotion_curve": parsed.get("emotion_curve", ""),
+                "highlight": parsed.get("highlight", {"type": "无", "description": "", "intensity": "1"}),
+                "ending_hook": parsed.get("ending_hook", {"type": "无", "content": ""}),
+                "gains": parsed.get("gains", {"character_gains": "", "plot_progress": ""}),
+                "foreshadowing": parsed.get("foreshadowing", []),
+                # 兼容旧字段
+                "conflict": parsed.get("conflict", ""),
+                "emotion_tone": parsed.get("emotion_tone", "")
+            }
+        except Exception as exc:
+            return self._build_fallback_chapter_summary(chapter, reason=str(exc))
     
     # ==================== 阶段2: 基于摘要汇总分析 ====================
     
@@ -450,6 +761,8 @@ class ContentAnalyzer:
             return await self._synthesize_plot(chapters, summaries)
         elif analysis_type == AnalysisType.STYLE:
             return await self._synthesize_style(chapters, summaries)
+        elif analysis_type == AnalysisType.CONCEPTS:
+            return await self._synthesize_concepts(chapters, summaries)
         else:
             raise ValueError(f"不支持的汇总分析类型: {analysis_type}")
     
@@ -568,8 +881,14 @@ class ContentAnalyzer:
 4. 关系基于事件线索推断"""
 
         # 🆕 使用qwen-long进行汇总分析
-        result = await self._call_qwen_long(prompt)
-        parsed = self._parse_json_response(result)
+        try:
+            result = await self._call_qwen_long(prompt)
+            parsed = self._parse_json_response(result)
+            if parsed.get("parse_error"):
+                raise ValueError("人物汇总 JSON 解析失败")
+        except Exception as exc:
+            logger.warning(f"人物汇总分析失败，回退到规则模式: {exc}")
+            parsed = self._build_fallback_character_analysis(character_appearances)
         
         counts_sorted = sorted(
             [value["count"] for value in character_appearances.values() if value.get("count", 0) > 0],
@@ -626,12 +945,12 @@ class ContentAnalyzer:
         # 补充统计信息
         parsed["character_statistics"] = character_appearances
         
-        return AnalysisResult(
+        return self._build_analysis_result(
             analysis_type=AnalysisType.CHARACTERS,
             content=parsed,
             confidence=0.90,  # 基于全书统计，可信度更高
             chapter_range=(1, len(chapters)),
-            model_used="qwen-long"  # 🆕 更新模型标识
+            model_used="qwen-long",  # 🆕 更新模型标识
         )
     
     async def _synthesize_worldview(
@@ -698,12 +1017,12 @@ class ContentAnalyzer:
         # 补充统计信息
         parsed["setting_statistics"] = dict(top_settings)
         
-        return AnalysisResult(
+        return self._build_analysis_result(
             analysis_type=AnalysisType.WORLDVIEW,
             content=parsed,
             confidence=0.85,
             chapter_range=(1, len(chapters)),
-            model_used="qwen-long"  # 🆕 更新模型标识
+            model_used="qwen-long",  # 🆕 更新模型标识
         )
     
     async def _synthesize_plot(
@@ -795,12 +1114,12 @@ class ContentAnalyzer:
         parsed["total_chapters"] = total
         parsed["chapter_summaries"] = [s["summary"] for s in summaries]
         
-        return AnalysisResult(
+        return self._build_analysis_result(
             analysis_type=AnalysisType.PLOT,
             content=parsed,
             confidence=0.88,
             chapter_range=(1, len(chapters)),
-            model_used="qwen-long"  # 🆕 更新模型标识
+            model_used="qwen-long",  # 🆕 更新模型标识
         )
     
     async def _synthesize_style(
@@ -850,14 +1169,85 @@ class ContentAnalyzer:
         # 补充统计信息
         parsed["emotion_statistics"] = emotion_dist
         
-        return AnalysisResult(
+        return self._build_analysis_result(
             analysis_type=AnalysisType.STYLE,
             content=parsed,
             confidence=0.82,
             chapter_range=(1, len(chapters)),
-            model_used="qwen-long"  # 🆕 更新模型标识
+            model_used="qwen-long",  # 🆕 更新模型标识
         )
-    
+
+    async def _synthesize_concepts(
+        self,
+        chapters: List[ChapterInfo],
+        summaries: List[Dict[str, Any]]
+    ) -> AnalysisResult:
+        """基于章节摘要汇总关键概念/术语。"""
+        summary_payload = [
+            {
+                "chapter_number": summary.get("chapter_number"),
+                "title": summary.get("title"),
+                "summary": summary.get("summary"),
+                "key_events": summary.get("key_events", []),
+                "setting": summary.get("setting", ""),
+                "scene_goal": summary.get("scene_goal", ""),
+                "foreshadowing": summary.get("foreshadowing", []),
+            }
+            for summary in summaries
+        ]
+
+        prompt = f"""基于以下章节摘要，提取适合小说续写复用的关键概念、专有名词、重要物品与术语。
+
+【章节摘要】
+{json.dumps(summary_payload[:80], ensure_ascii=False, indent=2)}
+
+请输出JSON：
+{{
+    "terms": [
+        {{
+            "term": "术语/概念名",
+            "definition": "简明定义（40字以内）",
+            "category": "术语/组织/物品/能力/地点/规则",
+            "first_mention_chapter": 1
+        }}
+    ],
+    "special_items": [
+        {{
+            "name": "重要物品名",
+            "description": "物品作用（30字以内）"
+        }}
+    ],
+    "techniques": [
+        {{
+            "name": "能力/技巧名",
+            "description": "能力说明（30字以内）"
+        }}
+    ]
+}}
+
+要求：
+1. 只保留对续写稳定有用的专有内容，不要提取普通常用词
+2. 优先提取反复出现或推动剧情的概念
+3. 若无法确认定义，请基于摘要做保守描述，不要过度脑补"""
+
+        result = await self._call_qwen_long(prompt)
+        parsed = self._parse_json_response(result)
+
+        if "terms" not in parsed:
+            parsed["terms"] = []
+        if "special_items" not in parsed:
+            parsed["special_items"] = []
+        if "techniques" not in parsed:
+            parsed["techniques"] = []
+
+        return self._build_analysis_result(
+            analysis_type=AnalysisType.CONCEPTS,
+            content=parsed,
+            confidence=0.78,
+            chapter_range=(1, len(chapters)),
+            model_used="qwen-long",
+        )
+
     # ==================== 人物分析 ====================
     
     async def analyze_characters(
@@ -977,12 +1367,12 @@ class ContentAnalyzer:
             char.setdefault("faction", "未提及")
             char["importance_level"] = "边缘角色"
 
-        return AnalysisResult(
+        return self._build_analysis_result(
             analysis_type=AnalysisType.CHARACTERS,
             content=parsed,
             confidence=0.85,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3-max"
+            model_used="qwen3-max",
         )
     
     # ==================== 世界观分析 ====================
@@ -1055,12 +1445,12 @@ class ContentAnalyzer:
         result = await self._call_llm_with_retry(prompt, TaskType.BOOK_ANALYSIS)
         parsed = self._parse_json_response(result)
         
-        return AnalysisResult(
+        return self._build_analysis_result(
             analysis_type=AnalysisType.WORLDVIEW,
             content=parsed,
             confidence=0.80,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3-max"
+            model_used="qwen3-max",
         )
     
     # ==================== 情节分析 ====================
@@ -1155,12 +1545,12 @@ class ContentAnalyzer:
         if "key_events" not in parsed:
             parsed["key_events"] = batch_results[:30]
         
-        return AnalysisResult(
+        return self._build_analysis_result(
             analysis_type=AnalysisType.PLOT,
             content=parsed,
             confidence=0.75,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3-max"
+            model_used="qwen3-max",
         )
     
     # ==================== 写作风格分析 ====================
@@ -1223,14 +1613,80 @@ class ContentAnalyzer:
         result = await self._call_llm_with_retry(prompt, TaskType.BOOK_ANALYSIS)
         parsed = self._parse_json_response(result)
         
-        return AnalysisResult(
+        return self._build_analysis_result(
             analysis_type=AnalysisType.STYLE,
             content=parsed,
             confidence=0.80,
             chapter_range=(1, len(chapters)),
-            model_used="qwen3-max"
+            model_used="qwen3-max",
         )
-    
+
+    async def analyze_concepts(
+        self,
+        chapters: List[ChapterInfo],
+        sample_chapters: int = 15
+    ) -> AnalysisResult:
+        """
+        分析关键概念/术语
+
+        提取续写阶段最需要复用的专有名词、规则、物品与能力。
+        """
+        samples = self._select_sample_chapters(chapters, sample_chapters)
+        content_for_analysis = self._build_chapter_summary(samples, 1000)
+
+        prompt = f"""请分析以下小说内容，提取适合后续续写使用的关键概念与专有名词。
+
+【小说片段】
+{content_for_analysis}
+
+请以JSON格式输出：
+{{
+    "terms": [
+        {{
+            "term": "术语/概念名",
+            "definition": "简明定义（40字以内）",
+            "category": "术语/组织/物品/能力/地点/规则",
+            "first_mention_chapter": 1
+        }}
+    ],
+    "special_items": [
+        {{
+            "name": "重要物品名",
+            "description": "物品作用（30字以内）"
+        }}
+    ],
+    "techniques": [
+        {{
+            "name": "能力/技巧名",
+            "description": "能力说明（30字以内）"
+        }}
+    ]
+}}
+
+要求：
+1. 仅提取明确出现且对世界观/剧情推进有价值的概念
+2. 普通称呼、泛化名词不要纳入 terms
+3. first_mention_chapter 尽量依据文本判断，无法确认时填首次明显出现的章节
+4. definition 要面向续写使用，强调“是什么、有什么用”"""
+
+        result = await self._call_llm_with_retry(prompt, TaskType.BOOK_ANALYSIS)
+        parsed = self._parse_json_response(result)
+
+        if "terms" not in parsed:
+            parsed["terms"] = []
+        if "special_items" not in parsed:
+            parsed["special_items"] = []
+        if "techniques" not in parsed:
+            parsed["techniques"] = []
+
+        return self._build_analysis_result(
+            analysis_type=AnalysisType.CONCEPTS,
+            content=parsed,
+            confidence=0.78,
+            chapter_range=(1, len(chapters)),
+            model_used="qwen3-max",
+        )
+
     # ==================== 辅助方法 ====================
     
     def _estimate_tokens(self, text: str) -> int:

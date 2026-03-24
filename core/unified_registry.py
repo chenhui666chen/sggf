@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+from core.model_catalog_runtime import get_model_catalog_runtime_index
 from schemas.unified_model_spec import (
     UnifiedModelSpec, LLMTaskSpec, LLMResult, DispatchStrategy,
     ModelType, ModelStatus, LLMCapability, LLMConstraints,
@@ -372,12 +373,23 @@ class UnifiedModelRegistry:
                     return self._specs.get(fallback_id)
             return None
 
+        runtime_index = get_model_catalog_runtime_index()
+        routable = [
+            spec for spec in available
+            if not runtime_index.get_signal(spec.id).blocked
+        ]
+        selection_pool = routable or available
+
         scored = [
-            (spec, spec.calculate_dispatch_score(strategy))
-            for spec in available
+            (
+                spec,
+                runtime_index.get_signal(spec.id).priority,
+                spec.calculate_dispatch_score(strategy),
+            )
+            for spec in selection_pool
         ]
 
-        scored.sort(key=lambda x: (-x[1], x[0].routing.priority))
+        scored.sort(key=lambda x: (-x[1], -x[2], x[0].routing.priority))
 
         best = scored[0][0]
         logger.info(f"🎯 任务 '{task_type}' 选择模型: {best.name} ({best.id})")

@@ -6,8 +6,10 @@ Implements the new ModelSpec-based adapter pattern.
 
 from __future__ import annotations
 
+import base64
 import os
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -26,6 +28,43 @@ from schemas.model_spec import (
     FallbackStrategy,
 )
 from schemas.common import SupportLevel, ModelStatus
+
+
+def _normalize_request_url(base_url: str, endpoint: str) -> str:
+    resolved_base = (base_url or "").rstrip("/")
+    resolved_endpoint = endpoint.lstrip("/")
+
+    if resolved_base.endswith("/compatible-mode/v1") and resolved_endpoint.startswith("api/"):
+      resolved_base = resolved_base[: -len("/compatible-mode/v1")]
+    elif resolved_base.endswith("/v1") and resolved_endpoint.startswith("v1/"):
+      resolved_endpoint = resolved_endpoint[len("v1/") :]
+
+    return f"{resolved_base}/{resolved_endpoint}"
+
+
+def _encode_local_or_remote_image(path_text: str) -> str:
+    value = str(path_text or "").strip()
+    if not value:
+        return value
+
+    if value.startswith(("http://", "https://", "data:")):
+        return value
+
+    path = Path(value)
+    if not path.exists():
+        return value
+
+    suffix = path.suffix.lower()
+    mime = "image/png"
+    if suffix in {".jpg", ".jpeg"}:
+        mime = "image/jpeg"
+    elif suffix == ".webp":
+        mime = "image/webp"
+    elif suffix == ".bmp":
+        mime = "image/bmp"
+
+    encoded = base64.b64encode(path.read_bytes()).decode("utf-8")
+    return f"data:{mime};base64,{encoded}"
 
 
 @register_model("wanx-v1")
@@ -204,15 +243,13 @@ class WanxAdapter(BaseImageAdapter):
             payload["parameters"]["seed"] = task.seed
         
         if task.reference and task.reference.images:
-            payload["input"]["ref_image_url"] = task.reference.images[0]
+            payload["input"]["ref_image_url"] = _encode_local_or_remote_image(task.reference.images[0])
         
         return payload
     
     def _call_api(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Call Wanx API."""
-        base_url = self.config.base_url.rstrip("/")
-        endpoint = self.spec.endpoint.lstrip("/")
-        url = f"{base_url}/{endpoint}"
+        url = _normalize_request_url(self.config.base_url or "", self.spec.endpoint)
         
         for attempt in range(self.config.max_retries):
             try:

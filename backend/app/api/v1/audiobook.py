@@ -15,7 +15,7 @@ import math
 from pathlib import Path
 from urllib.parse import quote
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Body, Depends, HTTPException, status, Response, Query, UploadFile, File
+from fastapi import APIRouter, Body, Depends, HTTPException, status, Response, Query, UploadFile, File, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -66,6 +66,11 @@ from app.services.audiobook.repository import (
     ChapterAudioRepository,
     ProjectRepository,
     AudiobookTaskRepository,
+)
+from app.services.user_center_points_events import (
+    record_audiobook_billing_freeze,
+    record_audiobook_billing_release,
+    record_audiobook_billing_settle,
 )
 from app.utils.datetime_utils import utc_now
 from core.unified_media_runtime import synthesize_speech as runtime_synthesize_speech
@@ -355,6 +360,7 @@ async def delete_cosyvoice_v3_plus_voice_clone(
 @router.post("/projects", response_model=dict)
 async def create_audiobook_project(
     request: AudiobookProjectCreate,
+    raw_request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -400,6 +406,19 @@ async def create_audiobook_project(
         )
     async_result = signature.delay()
     AudiobookTaskRepository.attach_celery_id(db, task_record.id, async_result.id)
+
+    if job_type != "script_only":
+        try:
+            record_audiobook_billing_freeze(
+                db=db,
+                actor_user_id=current_user.id,
+                actor_username=current_user.username,
+                audiobook_project_id=audiobook_project.id,
+                chapter_ids=list(request.chapter_ids or []),
+                request_context=raw_request,
+            )
+        except Exception as exc:
+            logger.warning("记录有声书积分冻结失败 audiobook_project_id=%s: %s", audiobook_project.id, exc)
 
     return {
         "success": True,
@@ -607,6 +626,7 @@ async def list_user_audiobook_projects(
 async def trigger_generate_audio_from_scripts(
     audiobook_project_id: int,
     request: GenerateAudioFromScriptsRequest,
+    raw_request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -682,6 +702,18 @@ async def trigger_generate_audio_from_scripts(
     )
     async_result = signature.delay()
     AudiobookTaskRepository.attach_celery_id(db, task_record.id, async_result.id)
+
+    try:
+        record_audiobook_billing_freeze(
+            db=db,
+            actor_user_id=current_user.id,
+            actor_username=current_user.username,
+            audiobook_project_id=audiobook_project_id,
+            chapter_ids=target_chapter_ids,
+            request_context=raw_request,
+        )
+    except Exception as exc:
+        logger.warning("记录二阶段有声书积分冻结失败 audiobook_project_id=%s: %s", audiobook_project_id, exc)
 
     return {
         "success": True,
@@ -2235,6 +2267,9 @@ async def generate_audiobook_scripts_background(
                     chapter_id=chapter_id,
                     character_list=character_list,
                     audiobook_project_id=audiobook_project_id,
+                    chapter_title=chapter.title or "",
+                    chapter_summary=chapter.summary or "",
+                    summary_data=chapter.summary_data,
                 )
 
                 # upsert ChapterAudio
@@ -2560,6 +2595,11 @@ async def generate_audiobook_audio_from_scripts_background(
         audiobook_project.total_cost = total_cost
         db.commit()
 
+        try:
+            record_audiobook_billing_settle(db=db, audiobook_project_id=audiobook_project_id)
+        except Exception as exc:
+            logger.warning("记录有声书积分结算失败 audiobook_project_id=%s: %s", audiobook_project_id, exc)
+
         logger.info("🎉 基于剧本的有声书音频生成完成!")
         logger.info(
             f"   - 成功: {audiobook_project.completed_chapters}/{audiobook_project.total_chapters}"
@@ -2575,6 +2615,14 @@ async def generate_audiobook_audio_from_scripts_background(
         if audiobook_project:
             audiobook_project.status = "failed"
             db.commit()
+            try:
+                record_audiobook_billing_release(
+                    db=db,
+                    audiobook_project_id=audiobook_project_id,
+                    reason="有声书音频生成失败，已释放冻结积分。",
+                )
+            except Exception as release_exc:
+                logger.warning("释放有声书冻结积分失败 audiobook_project_id=%s: %s", audiobook_project_id, release_exc)
 
     finally:
         db.close()
@@ -2690,7 +2738,10 @@ async def generate_audiobook_background(
                     chapter_content=chapter.content or "",
                     chapter_id=chapter_id,
                     character_list=character_list,
-                    output_path=f"audiobooks/project_{audiobook_project.project_id}/chapter_{chapter.chapter_number:03d}.mp3"
+                    output_path=f"audiobooks/project_{audiobook_project.project_id}/chapter_{chapter.chapter_number:03d}.mp3",
+                    chapter_title=chapter.title or "",
+                    chapter_summary=chapter.summary or "",
+                    summary_data=chapter.summary_data,
                 )
                 
                 # 记录task_id到数据库（可选）
@@ -2787,7 +2838,12 @@ async def generate_audiobook_background(
         audiobook_project.total_duration = total_duration
         audiobook_project.total_cost = total_cost
         db.commit()
-        
+
+        try:
+            record_audiobook_billing_settle(db=db, audiobook_project_id=audiobook_project_id)
+        except Exception as exc:
+            logger.warning("记录有声书积分结算失败 audiobook_project_id=%s: %s", audiobook_project_id, exc)
+
         logger.info(f"🎉 有声书生成完成!")
         logger.info(f"   - 成功: {audiobook_project.completed_chapters}/{audiobook_project.total_chapters}")
         logger.info(f"   - 总时长: {total_duration:.1f}秒")
@@ -2802,6 +2858,14 @@ async def generate_audiobook_background(
         if audiobook_project:
             audiobook_project.status = "failed"
             db.commit()
+            try:
+                record_audiobook_billing_release(
+                    db=db,
+                    audiobook_project_id=audiobook_project_id,
+                    reason="有声书生成失败，已释放冻结积分。",
+                )
+            except Exception as release_exc:
+                logger.warning("释放有声书冻结积分失败 audiobook_project_id=%s: %s", audiobook_project_id, release_exc)
     
     finally:
         db.close()

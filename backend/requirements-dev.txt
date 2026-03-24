@@ -10,6 +10,8 @@ python-socketio==5.10.0
 python-engineio==4.8.0
 python-dotenv==1.0.0
 httpx==0.25.2
+ebooklib>=0.18
+beautifulsoup4>=4.12.3
+PyPDF2>=3.0.1
 pytest==7.4.3
 pytest-asyncio==0.21.1
-

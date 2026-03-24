@@ -36,6 +36,9 @@ import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary'
 import SearchIcon from '@mui/icons-material/Search'
 import LogoutIcon from '@mui/icons-material/Logout'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import AddIcon from '@mui/icons-material/Add'
+import BookParserUploadDialog from '@/components/BookParserUploadDialog'
+import type { BookSource } from '@/services/bookParserApi'
 
 interface Project {
   id: number
@@ -117,6 +120,7 @@ export default function DreamWeaverPage() {
   const [renameSubmitting, setRenameSubmitting] = useState(false)
   const actionMenuId = 'dreamweaver-project-actions-menu'
   const searchTrackedRef = useRef(false)
+  const [bookUploadDialogOpen, setBookUploadDialogOpen] = useState(false)
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -221,6 +225,13 @@ export default function DreamWeaverPage() {
   const handleLogout = () => {
     dispatch(logout())
     navigate('/login')
+  }
+
+  const handleBookUploadSuccess = (book: BookSource) => {
+    setActionAlert({
+      severity: 'success',
+      message: `书籍《${book.title}》已上传、完成拆书分析并自动导入灵感方舟，可直接用于短剧生成`,
+    })
   }
 
   const navigateToRunPage = (project: Project, source: 'card' | 'primary_button') => {
@@ -551,7 +562,7 @@ export default function DreamWeaverPage() {
           <Box sx={{ py: 8, display: 'flex', justifyContent: 'center' }}>
             <CircularProgress />
           </Box>
-        ) : sortedFilteredProjects.length ? (
+        ) : (
           <Grid container spacing={3}>
             {sortedFilteredProjects.map((project) => {
               const displayTitle = getDisplayTitle(project.title)
@@ -844,23 +855,106 @@ export default function DreamWeaverPage() {
                 </Grid>
               )
             })}
+
+            {/* 新建项目卡片入口 - 放在已有项目之后 */}
+            <Grid item xs={12} sm={6} md={4} lg={3}>
+              <Card
+                sx={{
+                  width: '100%',
+                  maxWidth: 360,
+                  mx: 'auto',
+                  height: '100%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  borderRadius: 3,
+                  overflow: 'hidden',
+                  backgroundColor: 'rgba(0,0,0,0.2)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  boxShadow: '0 10px 24px rgba(0,0,0,0.18)',
+                  transition: 'transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease',
+                  cursor: 'pointer',
+                  '&:hover': {
+                    transform: 'translateY(-4px)',
+                    boxShadow: '0 14px 30px rgba(0,0,0,0.26)',
+                    borderColor: 'rgba(255,255,255,0.25)',
+                  },
+                }}
+                onClick={() => setBookUploadDialogOpen(true)}
+              >
+                <Box
+                  sx={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'stretch',
+                    flex: 1,
+                    aspectRatio: { xs: '16 / 10', sm: '6 / 5' },
+                    minHeight: 240,
+                  }}
+                >
+                  {/* 场记板顶条 */}
+                  <Box
+                    sx={{
+                      height: 34,
+                      background:
+                        'repeating-linear-gradient(135deg, rgba(17,24,39,0.95) 0 12px, rgba(229,231,235,0.95) 12px 24px)',
+                      borderBottom: '1px solid rgba(255,255,255,0.12)',
+                    }}
+                  />
+                  
+                  {/* 胶片主体 */}
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      flex: 1,
+                      background: 'linear-gradient(135deg, rgba(17,24,39,0.9) 0%, rgba(55,65,81,0.9) 100%)',
+                    }}
+                  >
+                    <FilmPerforationColumn />
+                    <Box sx={{ flex: 1, minWidth: 0, px: 2, py: 1.75, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                      {/* 加号图标 */}
+                      <Box
+                        sx={{
+                          width: 80,
+                          height: 80,
+                          borderRadius: '50%',
+                          background: 'linear-gradient(145deg, rgba(245,158,11,0.2) 0%, rgba(217,119,6,0.15) 100%)',
+                          border: '1px solid rgba(245,158,11,0.4)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          mb: 2,
+                        }}
+                      >
+                        <AddIcon sx={{ fontSize: 36, color: 'rgba(255,255,255,0.9)' }} />
+                      </Box>
+
+                      <Typography
+                        variant="subtitle1"
+                        sx={{
+                          fontWeight: 700,
+                          color: 'rgba(255,255,255,0.97)',
+                          textAlign: 'center',
+                          mb: 0.5,
+                        }}
+                      >
+                        创建新项目
+                      </Typography>
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          color: 'rgba(255,255,255,0.7)',
+                          textAlign: 'center',
+                        }}
+                      >
+                        上传书籍创建项目
+                      </Typography>
+                    </Box>
+                    <FilmPerforationColumn />
+                  </Box>
+                </Box>
+              </Card>
+            </Grid>
           </Grid>
-        ) : (
-          <Box sx={{ py: 8, textAlign: 'center' }}>
-            <Typography sx={{ color: 'rgba(255,255,255,0.85)', fontWeight: 600 }}>
-              未找到匹配的项目
-            </Typography>
-            <Typography sx={{ color: 'rgba(255,255,255,0.65)', mt: 1 }}>
-              可前往“灵感方舟”创建项目并生成章节后再回来开始短剧制作。
-            </Typography>
-            <Button
-              sx={{ mt: 2 }}
-              variant="contained"
-              onClick={() => navigate('/dashboard')}
-            >
-              前往灵感方舟
-            </Button>
-          </Box>
         )}
 
         <Menu
@@ -945,6 +1039,13 @@ export default function DreamWeaverPage() {
             </Button>
           </DialogActions>
         </Dialog>
+
+        {/* 书籍上传对话框 */}
+        <BookParserUploadDialog
+          open={bookUploadDialogOpen}
+          onClose={() => setBookUploadDialogOpen(false)}
+          onUploadSuccess={handleBookUploadSuccess}
+        />
       </Container>
     </Box>
   )

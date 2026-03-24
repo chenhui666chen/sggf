@@ -17,6 +17,7 @@ import {
 import {
   Dashboard as DashboardIcon,
   People as PeopleIcon,
+  ReceiptLong as ReceiptLongIcon,
   Security as SecurityIcon,
   History as HistoryIcon,
   Settings as SettingsIcon,
@@ -31,6 +32,7 @@ const drawerWidth = 240
 const menuItems = [
   { text: '数据仪表盘', icon: <DashboardIcon />, path: '/admin/dashboard' },
   { text: '用户管理', icon: <PeopleIcon />, path: '/admin/users' },
+  { text: '计费事件', icon: <ReceiptLongIcon />, path: '/admin/billing' },
   { text: '角色权限', icon: <SecurityIcon />, path: '/admin/roles' },
   { text: '数据库查询', icon: <StorageIcon />, path: '/admin/query' },
   { text: '提示词优化', icon: <ScienceIcon />, path: '/admin/prompt-evolution' },

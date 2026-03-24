@@ -6,8 +6,10 @@ Implements the new ModelSpec-based adapter pattern.
 
 from __future__ import annotations
 
+import base64
 import os
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -50,6 +52,43 @@ def _build_wan_config(prefix: str, default_model_name: str) -> AdapterConfig:
         max_retries=_env_int(f"{prefix}_MAX_RETRIES", 3),
         extra={"env_prefix": prefix, "model_name": default_model_name},
     )
+
+
+def _normalize_request_url(base_url: str, endpoint: str) -> str:
+    resolved_base = (base_url or "").rstrip("/")
+    resolved_endpoint = endpoint.lstrip("/")
+
+    if resolved_base.endswith("/compatible-mode/v1") and resolved_endpoint.startswith("api/"):
+        resolved_base = resolved_base[: -len("/compatible-mode/v1")]
+    elif resolved_base.endswith("/v1") and resolved_endpoint.startswith("v1/"):
+        resolved_endpoint = resolved_endpoint[len("v1/") :]
+
+    return f"{resolved_base}/{resolved_endpoint}"
+
+
+def _encode_local_or_remote_image(path_text: str) -> str:
+    value = str(path_text or "").strip()
+    if not value:
+        return value
+
+    if value.startswith(("http://", "https://", "data:")):
+        return value
+
+    path = Path(value)
+    if not path.exists():
+        return value
+
+    suffix = path.suffix.lower()
+    mime = "image/png"
+    if suffix in {".jpg", ".jpeg"}:
+        mime = "image/jpeg"
+    elif suffix == ".webp":
+        mime = "image/webp"
+    elif suffix == ".bmp":
+        mime = "image/bmp"
+
+    encoded = base64.b64encode(path.read_bytes()).decode("utf-8")
+    return f"data:{mime};base64,{encoded}"
 
 
 @register_model("wan2.6-t2v")
@@ -224,6 +263,7 @@ class Wan26VideoAdapter(BaseVideoAdapter):
             "parameters": {
                 "duration": int(task.duration or 5),
                 "resolution": f"{task.width}x{task.height}",
+                "size": f"{task.width}*{task.height}",
             },
         }
         
@@ -232,8 +272,11 @@ class Wan26VideoAdapter(BaseVideoAdapter):
         
         if task.reference:
             if task.reference.images:
-                payload["input"]["ref_image_url"] = task.reference.images[0]
+                image_value = _encode_local_or_remote_image(task.reference.images[0])
+                payload["input"]["img_url"] = image_value
+                payload["input"]["ref_image_url"] = image_value
             if task.reference.videos:
+                payload["input"]["video_url"] = task.reference.videos[0]
                 payload["input"]["ref_video_url"] = task.reference.videos[0]
         
         if task.camera_control:
@@ -246,19 +289,54 @@ class Wan26VideoAdapter(BaseVideoAdapter):
     
     def _call_api(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Call Wan2.6 API."""
-        base_url = self.config.base_url.rstrip("/")
-        endpoint = self.spec.endpoint.lstrip("/")
-        url = f"{base_url}/{endpoint}"
+        url = _normalize_request_url(self.config.base_url or "", self.spec.endpoint)
+        base_url = (url.rsplit("/api/v1/", 1)[0] if "/api/v1/" in url else url.rsplit("/", 1)[0]).rstrip("/")
+        poll_url_template = f"{base_url}/api/v1/tasks/{{task_id}}"
+        poll_interval = max(2, min(10, int(os.getenv("WAN_VIDEO_POLL_INTERVAL_S", "5") or 5)))
+        deadline = time.time() + max(int(self.config.timeout or 300), 60)
         
         for attempt in range(self.config.max_retries):
             try:
                 response = self._session.post(
                     url,
                     json=request,
+                    headers={"X-DashScope-Async": "enable"},
                     timeout=self.config.timeout,
                 )
                 response.raise_for_status()
-                return response.json()
+                initial_payload = response.json()
+                task_id = (
+                    initial_payload.get("output", {}).get("task_id")
+                    if isinstance(initial_payload, dict)
+                    else None
+                )
+                if not task_id:
+                    return initial_payload
+
+                while time.time() < deadline:
+                    status_response = self._session.get(
+                        poll_url_template.format(task_id=task_id),
+                        timeout=min(int(self.config.timeout or 300), 60),
+                    )
+                    status_response.raise_for_status()
+                    status_payload = status_response.json()
+                    task_status = str(status_payload.get("output", {}).get("task_status") or "").upper()
+
+                    if task_status == "SUCCEEDED":
+                        return status_payload
+                    if task_status in {"FAILED", "CANCELED"}:
+                        return status_payload
+
+                    time.sleep(poll_interval)
+
+                return {
+                    "code": "timeout",
+                    "message": "video generation timeout",
+                    "output": {
+                        "task_id": task_id,
+                        "task_status": "FAILED",
+                    },
+                }
             
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 429:
@@ -283,10 +361,28 @@ class Wan26VideoAdapter(BaseVideoAdapter):
         outputs = []
         
         output = response.get("output", {})
-        video_url = output.get("video_url")
+        video_candidates = [
+            output.get("video_url"),
+            output.get("videoUrl"),
+        ]
+        if isinstance(output.get("results"), list):
+            for item in output.get("results", []):
+                if isinstance(item, dict):
+                    video_candidates.append(item.get("video_url"))
+                    video_candidates.append(item.get("url"))
+        for value in video_candidates:
+            if isinstance(value, str) and value.strip():
+                outputs.append(value.strip())
         
-        if video_url:
-            outputs.append(video_url)
+        if not outputs and str(output.get("task_status") or "").upper() in {"FAILED", "CANCELED"}:
+            return GenerationResult(
+                success=False,
+                task_id=task.task_id,
+                model_id=self.spec.id,
+                error=str(output.get("message") or response.get("message") or "Video generation failed"),
+                error_code=str(response.get("code") or "task_failed"),
+                raw_response=response,
+            )
         
         if not outputs:
             code = response.get("code", "unknown")

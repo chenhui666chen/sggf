@@ -262,7 +262,8 @@ async def create_chapter(
             chapter_title=final_title,
             chapter_content=chapter_data.content or "",
             chapter_number=chapter.chapter_number,
-            project_id=chapter_data.project_id
+            project_id=chapter_data.project_id,
+            generate_summary=True
         )
         
     except Exception as e:
@@ -446,7 +447,8 @@ async def update_chapter(
                 chapter_title=chapter.title,
                 chapter_content=chapter_data.content,
                 chapter_number=chapter.chapter_number,
-                project_id=chapter.project_id
+                project_id=chapter.project_id,
+                generate_summary=True
             )
             
         except Exception as e:

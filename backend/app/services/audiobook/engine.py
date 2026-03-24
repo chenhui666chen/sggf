@@ -20,6 +20,7 @@ from dataclasses import asdict, is_dataclass
 from .script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructure
 from .voice_manager_factory import create_voice_manager
 from .audio_mixer import AudioMixer
+from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
 
 # 导入专业Agent
@@ -336,7 +337,10 @@ class AudiobookEngine:
         novel_theme: str = "未知主题",
         enable_quality_review: bool = True,
         quality_threshold: float = 70.0,
-        audiobook_project_id: Optional[int] = None  # 新增：用于WebSocket推送
+        audiobook_project_id: Optional[int] = None,  # 新增：用于WebSocket推送
+        chapter_title: str = "",
+        chapter_summary: str = "",
+        summary_data: Any = None,
     ) -> Dict[str, Any]:
         """
         生成单章节有声书
@@ -441,11 +445,17 @@ class AudiobookEngine:
                     metrics,
                 )
 
+            audio_adaptation_context = build_audio_adaptation_hint(
+                summary_data,
+                chapter_title=chapter_title,
+                chapter_summary=chapter_summary,
+            )
             adapted_result = await self.script_adapter.adapt_chapter(
                 chapter_content=chapter_content,
                 character_list=character_list,
-                chapter_title=f"Chapter {chapter_id}",
+                chapter_title=chapter_title or f"Chapter {chapter_id}",
                 genre=novel_genre,
+                adaptation_context=audio_adaptation_context,
                 progress_callback=on_script_progress,
             )
             
@@ -2017,6 +2027,9 @@ class AudiobookEngine:
         enable_quality_review: bool = True,
         quality_threshold: float = 70.0,
         audiobook_project_id: Optional[int] = None,
+        chapter_title: str = "",
+        chapter_summary: str = "",
+        summary_data: Any = None,
     ) -> Dict[str, Any]:
         """仅生成章节剧本与剧本质量评审，不执行TTS和混音。
 
@@ -2103,11 +2116,17 @@ class AudiobookEngine:
                     metrics,
                 )
 
+            audio_adaptation_context = build_audio_adaptation_hint(
+                summary_data,
+                chapter_title=chapter_title,
+                chapter_summary=chapter_summary,
+            )
             adapted_result = await self.script_adapter.adapt_chapter(
                 chapter_content=chapter_content,
                 character_list=character_list,
-                chapter_title=f"Chapter {chapter_id}",
+                chapter_title=chapter_title or f"Chapter {chapter_id}",
                 genre=novel_genre,
+                adaptation_context=audio_adaptation_context,
                 progress_callback=on_script_progress,
             )
 
@@ -2713,7 +2732,10 @@ class AudiobookEngine:
                 chapter_content=chapter["content"],
                 chapter_id=chapter_id,
                 character_list=character_list,
-                output_path=output_path
+                output_path=output_path,
+                chapter_title=chapter.get("title") or "",
+                chapter_summary=chapter.get("summary") or "",
+                summary_data=chapter.get("summary_data"),
             )
             
             if result["success"]:
@@ -2798,7 +2820,9 @@ class AudiobookEngine:
                     "id": chapter.id,
                     "number": chapter.chapter_number,
                     "title": chapter.title,
-                    "content": chapter.content
+                    "content": chapter.content,
+                    "summary": getattr(chapter, "summary", None),
+                    "summary_data": getattr(chapter, "summary_data", None),
                 }
             return None
         except Exception as e:
@@ -2885,7 +2909,10 @@ class AudiobookEngine:
                         chapter_id=chapter_id,
                         character_list=character_list,
                         output_path=output_path,
-                        audiobook_project_id=audiobook_project_id
+                        audiobook_project_id=audiobook_project_id,
+                        chapter_title=chapter_info.get("title") or "",
+                        chapter_summary=chapter_info.get("summary") or "",
+                        summary_data=chapter_info.get("summary_data"),
                     )
                     
                     if result["success"]:

@@ -65,6 +65,7 @@ from app.services.dreamweaver.config_lock import (
     get_project_locked_generation_config,
 )
 from app.services.dreamweaver.library_prompt import suggest_library_prompt
+from app.services.chapter_adaptation_assets import build_drama_source_text
 
 from pipeline.state_machine import RunContext, State, progress_percent, run_until_done, stage_label
 from pipeline.media_presets import resolve_frame_size
@@ -978,12 +979,7 @@ def _load_project_chapters(
 
 
 def _build_source_text(chapters: List[Chapter]) -> str:
-    return "\n\n".join(
-        [
-            f"{c.title or f'??{c.chapter_number}'}\n{c.content or ''}"
-            for c in chapters
-        ]
-    )
+    return build_drama_source_text(chapters)
 
 
 def _quality_mode_to_runtime_config(quality_mode: Optional[str]) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
@@ -1073,12 +1069,7 @@ def run_pipeline(
             status_code=status.HTTP_400_BAD_REQUEST, detail="????????????????"
         )
 
-    source_text = "\n\n".join(
-        [
-            f"{c.title or f'??{c.chapter_number}'}\n{c.content or ''}"
-            for c in chapters
-        ]
-    )
+    source_text = _build_source_text(chapters)
 
     run_id = f"drama_{request.project_id}_{int(time.time())}"
 
@@ -1275,12 +1266,7 @@ def run_pipeline_async(
     schema_version = request.schema_version or DREAMWEAVER_SCHEMA_VERSION
 
     # 婵炶揪缍€濞夋洟寮?ASCII 闂佺绻戠划宀€鑺遍幎鑺ユ櫖鐎光偓閸曨亞绱氶梺绋跨箰缁夊墎妲愰鍫熷剺濞撴埃鍋撴俊顐ュ煐閿涙劕螣閸濆嫷娈梺鍛婄箓缁夋娊骞戦姀銈呯闁炽儱鍟块弲鎼佹煕韫囧鍔欑紒妤€鐭傞獮宥堫樁妞ゃ垺鍨挎俊?
-    source_text = "\n\n".join(
-        [
-            f"{(c.title or f'Chapter {c.chapter_number}')}\n{(c.content or '')}"
-            for c in chapters
-        ]
-    )
+    source_text = _build_source_text(chapters)
     chapter_id_list = [c.id for c in chapters]
 
     insert_query = text(

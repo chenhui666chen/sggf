@@ -20,14 +20,16 @@ const LoginCallbackPage = lazy(() => import('@/pages/LoginCallbackPage'))
 const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPasswordPage'))
 const RegisterPage = lazy(() => import('@/pages/RegisterPage'))
 const CreationModulePage = lazy(() => import('@/pages/CreationModulePage'))
+const AssetStudioPage = lazy(() => import('@/pages/AssetStudioPage'))
 const DashboardPage = lazy(() => import('@/pages/DashboardPage'))
 const EditorPage = lazy(() => import('@/pages/EditorPage'))
 const KnowledgeBasePage = lazy(() => import('@/pages/KnowledgeBasePage'))
+const ModelCatalogPage = lazy(() => import('@/pages/ModelCatalogPage'))
 const ReviewPage = lazy(() => import('@/pages/ReviewPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
+const UserCenterPage = lazy(() => import('@/pages/UserCenterPage'))
 const WorkflowControlPage = lazy(() => import('@/pages/WorkflowControlPage'))
 const AITracePage = lazy(() => import('@/pages/AITracePage'))
-const BookParserPage = lazy(() => import('@/pages/BookParserPage'))
 const AudiobookDashboardPage = lazy(() => import('@/pages/AudiobookDashboardPage'))  // 耳畔星河仪表盘
 const AudiobookPage = lazy(() => import('@/pages/AudiobookPage'))  // 耳畔星河
 const DreamWeaverPage = lazy(() => import('@/pages/DreamWeaverPage')) // 织梦映心
@@ -40,6 +42,7 @@ const AICreationPlatformPage = lazy(() => import('@/pages/AICreationPlatformPage
 const AdminLayout = lazy(() => import('@/pages/admin/AdminLayout'))
 const AdminDashboardPage = lazy(() => import('@/pages/admin/DashboardPage'))
 const AdminUsersPage = lazy(() => import('@/pages/admin/UsersPage'))
+const PointsBillingPage = lazy(() => import('@/pages/admin/PointsBillingPage'))
 const RolesPage = lazy(() => import('@/pages/admin/RolesPage'))
 const LogsPage = lazy(() => import('@/pages/admin/LogsPage'))
 const SystemPage = lazy(() => import('@/pages/admin/SystemPage'))
@@ -108,179 +111,196 @@ function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/login/callback" element={<LoginCallbackPage />} />
               <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-            <Route path="/register" element={<RegisterPage />} />
-          {/* 创作模块入口页 */}
-          <Route
-            path="/home"
-            element={
-              <ProtectedRoute>
-                <CreationModulePage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <DashboardPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/editor/:projectId/:chapterId"
-            element={
-              <ProtectedRoute>
-                <EditorPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/knowledge-base/:projectId"
-            element={
-              <ProtectedRoute>
-                <KnowledgeBasePage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/review/:chapterId"
-            element={
-              <ProtectedRoute>
-                <ReviewPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/settings"
-            element={
-              <ProtectedRoute>
-                <SettingsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/workflow/:projectId"
-            element={
-              <ProtectedRoute>
-                <WorkflowControlPage />
-              </ProtectedRoute>
-            }
-          />
+              <Route path="/register" element={<RegisterPage />} />
+              {/* 创作模块入口页 */}
+              <Route
+                path="/home"
+                element={
+                  <ProtectedRoute>
+                    <CreationModulePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/asset-studio"
+                element={
+                  <ProtectedRoute>
+                    <AssetStudioPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/dashboard"
+                element={
+                  <ProtectedRoute>
+                    <DashboardPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/editor/:projectId/:chapterId"
+                element={
+                  <ProtectedRoute>
+                    <EditorPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/model-catalog"
+                element={
+                  <ProtectedRoute>
+                    <ModelCatalogPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/knowledge-base/:projectId"
+                element={
+                  <ProtectedRoute>
+                    <KnowledgeBasePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/review/:chapterId"
+                element={
+                  <ProtectedRoute>
+                    <ReviewPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/user-center"
+                element={
+                  <ProtectedRoute>
+                    <UserCenterPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/settings"
+                element={
+                  <ProtectedRoute>
+                    <SettingsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/workflow/:projectId"
+                element={
+                  <ProtectedRoute>
+                    <WorkflowControlPage />
+                  </ProtectedRoute>
+                }
+              />
 
-          <Route
-            path="/ai-trace"
-            element={
-              <ProtectedRoute>
-                <AITracePage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/book-parser"
-            element={
-              <ProtectedRoute>
-                <BookParserPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/audiobook-dashboard"
-            element={
-              <ProtectedRoute>
-                <AudiobookDashboardPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/audiobook/:projectId"
-            element={
-              <ProtectedRoute>
-                <AudiobookPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/drama"
-            element={
-              <ProtectedRoute>
-                <DreamWeaverPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/drama/:projectId"
-            element={
-              <ProtectedRoute>
-                <DreamWeaverRunPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/drama/:projectId/library"
-            element={
-              <ProtectedRoute>
-                <DreamWeaverLibraryPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/drama/run"
-            element={
-              <ProtectedRoute>
-                <DreamWeaverRunPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/modules"
-            element={
-              <ProtectedRoute>
-                <CreationModulePage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/trash"
-            element={
-              <ProtectedRoute>
-                <TrashPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/ai-creation-platform"
-            element={
-              <ProtectedRoute>
-                <AICreationPlatformPage />
-              </ProtectedRoute>
-            }
-          />
-          
-          {/* 管理控制台路由 */}
-          <Route
-            path="/admin"
-            element={
-              <AdminProtectedRoute>
-                <AdminLayout />
-              </AdminProtectedRoute>
-            }
-          >
-            <Route index element={<Navigate to="dashboard" replace />} />
-            <Route path="dashboard" element={<AdminDashboardPage />} />
-            <Route path="users" element={<AdminUsersPage />} />
-            <Route path="roles" element={<RolesPage />} />
-            <Route path="query" element={<DatabaseQueryPage />} />
-            <Route path="prompt-evolution" element={<PromptEvolutionPage />} />
-            <Route path="logs" element={<LogsPage />} />
-            <Route path="system" element={<SystemPage />} />
-          </Route>
-          
-            {/* 默认跳转到创作模块入口页 */}
-            <Route path="/" element={<Navigate to="/home" replace />} />
-          </Routes>
-        </Suspense>
-      </BrowserRouter>
-    </ThemeProvider>
+              <Route
+                path="/ai-trace"
+                element={
+                  <ProtectedRoute>
+                    <AITracePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/audiobook-dashboard"
+                element={
+                  <ProtectedRoute>
+                    <AudiobookDashboardPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/audiobook/:projectId"
+                element={
+                  <ProtectedRoute>
+                    <AudiobookPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/drama"
+                element={
+                  <ProtectedRoute>
+                    <DreamWeaverPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/drama/:projectId"
+                element={
+                  <ProtectedRoute>
+                    <DreamWeaverRunPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/drama/:projectId/library"
+                element={
+                  <ProtectedRoute>
+                    <DreamWeaverLibraryPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/drama/run"
+                element={
+                  <ProtectedRoute>
+                    <DreamWeaverRunPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/modules"
+                element={
+                  <ProtectedRoute>
+                    <CreationModulePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/trash"
+                element={
+                  <ProtectedRoute>
+                    <TrashPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/ai-creation-platform"
+                element={
+                  <ProtectedRoute>
+                    <AICreationPlatformPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* 管理控制台路由 */}
+              <Route
+                path="/admin"
+                element={
+                  <AdminProtectedRoute>
+                    <AdminLayout />
+                  </AdminProtectedRoute>
+                }
+              >
+                <Route index element={<Navigate to="dashboard" replace />} />
+                <Route path="dashboard" element={<AdminDashboardPage />} />
+                <Route path="users" element={<AdminUsersPage />} />
+                <Route path="billing" element={<PointsBillingPage />} />
+                <Route path="roles" element={<RolesPage />} />
+                <Route path="query" element={<DatabaseQueryPage />} />
+                <Route path="prompt-evolution" element={<PromptEvolutionPage />} />
+                <Route path="logs" element={<LogsPage />} />
+                <Route path="system" element={<SystemPage />} />
+              </Route>
+
+              {/* 默认跳转到创作模块入口页 */}
+              <Route path="/" element={<Navigate to="/home" replace />} />
+            </Routes>
+          </Suspense>
+        </BrowserRouter>
+      </ThemeProvider>
     </CacheProvider>
   )
 }

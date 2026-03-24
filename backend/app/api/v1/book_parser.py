@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.db.base import get_db
 from app.core.security import get_current_user
@@ -79,6 +79,18 @@ class ChapterResponse(BaseModel):
         from_attributes = True
 
 
+class ChapterContentResponse(BaseModel):
+    """章节详情响应"""
+    chapter_number: int
+    title: str
+    content: str
+    word_count: int
+    summary: Optional[str] = None
+    key_events: List[str] = Field(default_factory=list)
+    appearing_characters: List[str] = Field(default_factory=list)
+    outline_data: Dict[str, Any] = Field(default_factory=dict)
+
+
 class AnalysisResponse(BaseModel):
     """分析结果响应"""
     id: int
@@ -86,6 +98,7 @@ class AnalysisResponse(BaseModel):
     content: Dict[str, Any]
     confidence: float
     completeness: float
+    extra_data: Optional[Dict[str, Any]] = None
     created_at: str
 
     class Config:
@@ -123,6 +136,46 @@ def get_task_status(book_id: int) -> Dict[str, Any]:
         "progress": 0,
         "message": "未找到任务"
     })
+
+
+def _safe_parse_json_field(raw_value: Any, default: Any) -> Any:
+    """安全解析 JSON 字段，失败时回退默认值。"""
+    if raw_value is None or raw_value == "":
+        return default
+
+    if isinstance(raw_value, str):
+        try:
+            return json.loads(raw_value)
+        except json.JSONDecodeError:
+            return default
+
+    return raw_value
+
+
+def _build_chapter_content_response(chapter: BookChapter) -> ChapterContentResponse:
+    """构建带结构化资产的章节详情响应。"""
+    key_events = _safe_parse_json_field(chapter.key_events, [])
+    if not isinstance(key_events, list):
+        key_events = []
+
+    appearing_characters = _safe_parse_json_field(chapter.appearing_characters, [])
+    if not isinstance(appearing_characters, list):
+        appearing_characters = []
+
+    outline_data = _safe_parse_json_field(chapter.outline_data, {})
+    if not isinstance(outline_data, dict):
+        outline_data = {}
+
+    return ChapterContentResponse(
+        chapter_number=chapter.chapter_number,
+        title=chapter.title,
+        content=chapter.content or "",
+        word_count=chapter.word_count,
+        summary=chapter.summary,
+        key_events=key_events,
+        appearing_characters=appearing_characters,
+        outline_data=outline_data,
+    )
 
 
 def update_task_status(book_id: int, status: str, progress: int, message: str, error: Optional[str] = None):
@@ -439,6 +492,7 @@ async def get_book_analyses(
             content=json.loads(a.content) if isinstance(a.content, str) else a.content,
             confidence=a.confidence,
             completeness=a.completeness,
+            extra_data=json.loads(a.extra_data) if isinstance(a.extra_data, str) and a.extra_data else a.extra_data,
             created_at=a.created_at.isoformat() if a.created_at else "",
         )
         for a in analyses
@@ -698,6 +752,7 @@ async def _do_analyze_book(book_id: int):
                 completeness=result.confidence,  # 暂时使用相同值
                 chapter_range_start=result.chapter_range[0],
                 chapter_range_end=result.chapter_range[1],
+                extra_data=json.dumps(result.extra_data, ensure_ascii=False) if result.extra_data else None,
                 model_used=result.model_used,
             )
             db.add(analysis)
@@ -789,7 +844,7 @@ async def delete_book(
     return {"message": "删除成功", "book_id": book_id}
 
 
-@router.get("/{book_id}/chapter/{chapter_number}/content")
+@router.get("/{book_id}/chapter/{chapter_number}/content", response_model=ChapterContentResponse)
 async def get_chapter_content(
     book_id: int,
     chapter_number: int,
@@ -815,12 +870,7 @@ async def get_chapter_content(
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     
-    return {
-        "chapter_number": chapter.chapter_number,
-        "title": chapter.title,
-        "content": chapter.content,
-        "word_count": chapter.word_count,
-    }
+    return _build_chapter_content_response(chapter)
 
 
 @router.get("/{book_id}/preview")

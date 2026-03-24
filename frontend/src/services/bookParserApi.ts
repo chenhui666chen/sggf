@@ -3,11 +3,15 @@
  */
 import axios from 'axios'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const RAW_API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+
+function normalizeApiBaseUrl(baseURL: string): string {
+  return baseURL === '/api' ? '' : baseURL
+}
 
 // 创建专用的 axios 实例
 const bookParserClient = axios.create({
-  baseURL: API_URL,
+  baseURL: normalizeApiBaseUrl(RAW_API_URL),
   timeout: 300000, // 5分钟超时（AI分析可能较慢）
   headers: {
     'Content-Type': 'application/json',
@@ -62,6 +66,17 @@ export interface BookChapter {
   volume_number: number | null
   volume_title: string | null
   summary: string | null
+}
+
+export interface BookChapterDetail {
+  chapter_number: number
+  title: string
+  content: string
+  word_count: number
+  summary: string | null
+  key_events: string[]
+  appearing_characters: string[]
+  outline_data: Record<string, any>
 }
 
 export interface BookAnalysis {
@@ -164,7 +179,7 @@ export async function getBookChapters(bookId: number): Promise<BookChapter[]> {
 export async function getChapterContent(
   bookId: number,
   chapterNumber: number
-): Promise<{ chapter_number: number; title: string; content: string; word_count: number }> {
+): Promise<BookChapterDetail> {
   const response = await bookParserClient.get(
     `/api/v1/book-parser/${bookId}/chapter/${chapterNumber}/content`
   )

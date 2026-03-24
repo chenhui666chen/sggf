@@ -1,4 +1,5 @@
 import axios, { AxiosInstance, AxiosError } from 'axios'
+import type { UserAudiobookProjectOverview } from '@/types/audiobook'
 
 // 在开发环境中直接连接到后端，不使用Vite代理
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
@@ -112,6 +113,365 @@ interface FrontendEventPayload {
   value?: number
   duration_ms?: number
   success?: boolean
+}
+
+export interface AssetStudioGenerateResponse {
+  kind: string
+  mode: string
+  model_id: string
+  outputs: string[]
+  primary_output?: string | null
+  metadata?: Record<string, any>
+}
+
+export interface AssetStudioVisionCriterionScore {
+  name: string
+  label: string
+  score?: number | null
+  comment?: string | null
+}
+
+export interface AssetStudioVisionReviewResponse {
+  kind: string
+  mode: string
+  model_id: string
+  asset_type: string
+  overall_score?: number | null
+  summary: string
+  strengths: string[]
+  issues: string[]
+  prompt_suggestions: string[]
+  revised_prompt: string
+  criteria_scores: AssetStudioVisionCriterionScore[]
+  metadata?: Record<string, any>
+}
+
+export interface UserAssetRecord {
+  id: number
+  user_id: number
+  project_id?: number | null
+  source_module: string
+  asset_kind: string
+  asset_class: string
+  title: string
+  description?: string | null
+  file_url?: string | null
+  preview_url?: string | null
+  model_id?: string | null
+  generation_mode?: string | null
+  tags: string[]
+  metadata_json?: Record<string, any>
+  source_payload_json?: Record<string, any>
+  is_favorite: boolean
+  archived_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface UserAssetRecordCreatePayload {
+  project_id?: number | null
+  source_module: string
+  asset_kind: string
+  asset_class?: string
+  title: string
+  description?: string | null
+  file_url: string
+  preview_url?: string | null
+  model_id?: string | null
+  generation_mode?: string | null
+  tags?: string[]
+  metadata_json?: Record<string, any>
+  source_payload_json?: Record<string, any>
+  is_favorite?: boolean
+}
+
+export interface UserAssetRecordUpdatePayload {
+  title?: string
+  description?: string | null
+  asset_class?: string
+  tags?: string[]
+  is_favorite?: boolean
+  archived?: boolean
+}
+
+export interface UserAssetRecordBatchUpdatePayload {
+  asset_ids: number[]
+  updates: UserAssetRecordUpdatePayload
+}
+
+export interface UserAssetRecordBatchUpdateResponse {
+  updated_count: number
+  asset_ids: number[]
+  assets: UserAssetRecord[]
+}
+
+export interface UserCenterPointsAccount {
+  balance?: number | null
+  frozen?: number | null
+  expiring_soon?: number | null
+  status: 'planned' | 'partial'
+  connected_source_count: number
+  pending_source_count: number
+}
+
+export interface UserCenterConnectedOverview {
+  project_count: number
+  user_asset_count: number
+  audiobook_project_count: number
+  audiobook_total_cost: number
+  dreamweaver_run_count: number
+}
+
+export interface UserCenterBenefitItem {
+  key: string
+  label: string
+  summary: string
+  status: 'connected' | 'planned'
+}
+
+export interface UserCenterLedgerEntry {
+  key: string
+  module_label: string
+  event_label: string
+  title: string
+  summary: string
+  amount: number
+  occurred_at?: string | null
+  project_label?: string | null
+  action_path?: string | null
+  action_label?: string | null
+}
+
+export interface UserCenterPendingLedgerSignal {
+  key: string
+  module_label: string
+  signal_label: string
+  summary: string
+  action_path?: string | null
+  action_label?: string | null
+}
+
+export interface UserCenterPointsRuleOverview {
+  reusable_asset_reward: number
+  deliverable_asset_reward: number
+  audiobook_completion_reward: number
+  dreamweaver_completion_reward: number
+  running_audiobook_frozen: number
+  running_dreamweaver_frozen: number
+  reward_ttl_days: number
+  expiring_notice_days: number
+  source: 'default' | 'admin_log'
+  updated_at?: string | null
+  updated_by_user_id?: number | null
+  updated_by_username?: string | null
+}
+
+export interface UserCenterPointsPricingPolicyOverview {
+  points_per_yuan: number
+  user_price_basis: 'public_list_price' | 'standard_price_table'
+  user_price_rate: number
+  freeze_buffer_rate: number
+  source: 'default' | 'admin_log'
+  updated_at?: string | null
+  updated_by_user_id?: number | null
+  updated_by_username?: string | null
+}
+
+export interface UserCenterPointsEntry {
+  key: string
+  source_key: string
+  source_label: string
+  title: string
+  summary: string
+  amount: number
+  direction: 'income' | 'expense' | 'hold'
+  status: 'active' | 'expired' | 'frozen'
+  occurred_at?: string | null
+  expires_at?: string | null
+  action_path?: string | null
+  action_label?: string | null
+}
+
+export interface UserCenterTaskBillingItem {
+  key: string
+  module_key: string
+  module_label: string
+  title: string
+  summary: string
+  task_status: 'running' | 'completed'
+  pricing_status: 'actual' | 'estimated' | 'pending'
+  actual_yuan?: number | null
+  actual_points?: number | null
+  estimated_yuan?: number | null
+  estimated_points?: number | null
+  suggested_frozen_points?: number | null
+  occurred_at?: string | null
+  action_path?: string | null
+  action_label?: string | null
+}
+
+export interface UserCenterTaskBillingOverview {
+  actual_spend_yuan: number
+  actual_spend_points: number
+  estimated_running_spend_yuan: number
+  estimated_running_spend_points: number
+  suggested_frozen_points: number
+  actual_task_count: number
+  estimated_task_count: number
+  pending_task_count: number
+  items: UserCenterTaskBillingItem[]
+}
+
+export interface UserCenterPointsOverviewResponse {
+  points_account: UserCenterPointsAccount
+  points_rules: UserCenterPointsRuleOverview
+  pricing_policy: UserCenterPointsPricingPolicyOverview
+  points_entries: UserCenterPointsEntry[]
+  connected_overview: UserCenterConnectedOverview
+  benefits: {
+    connected_items: UserCenterBenefitItem[]
+    planned_items: UserCenterBenefitItem[]
+  }
+  ledger: {
+    connected_entries: UserCenterLedgerEntry[]
+    pending_signals: UserCenterPendingLedgerSignal[]
+  }
+  task_billing: UserCenterTaskBillingOverview
+}
+
+export interface AdminSystemHealth {
+  database: string
+  timestamp: string
+}
+
+export interface AdminPointsRuleConfig {
+  reusable_asset_reward: number
+  deliverable_asset_reward: number
+  audiobook_completion_reward: number
+  dreamweaver_completion_reward: number
+  running_audiobook_frozen: number
+  running_dreamweaver_frozen: number
+  reward_ttl_days: number
+  expiring_notice_days: number
+  source: 'default' | 'admin_log'
+  updated_at?: string | null
+  updated_by_user_id?: number | null
+  updated_by_username?: string | null
+}
+
+export interface AdminPointsRuleUpdatePayload {
+  reusable_asset_reward: number
+  deliverable_asset_reward: number
+  audiobook_completion_reward: number
+  dreamweaver_completion_reward: number
+  running_audiobook_frozen: number
+  running_dreamweaver_frozen: number
+  reward_ttl_days: number
+  expiring_notice_days: number
+}
+
+export interface AdminPointsPricingPolicy {
+  points_per_yuan: number
+  user_price_basis: 'public_list_price' | 'standard_price_table'
+  user_price_rate: number
+  provider_discount_capture_rate: number
+  freeze_buffer_rate: number
+  margin_warning_rate: number
+  negative_margin_block_enabled: boolean
+  source: 'default' | 'admin_log'
+  updated_at?: string | null
+  updated_by_user_id?: number | null
+  updated_by_username?: string | null
+  operating_snapshots?: AdminPointsPricingOperatingSnapshot[]
+}
+
+export interface AdminPointsPricingPolicyUpdatePayload {
+  points_per_yuan: number
+  user_price_basis: 'public_list_price' | 'standard_price_table'
+  user_price_rate: number
+  provider_discount_capture_rate: number
+  freeze_buffer_rate: number
+  margin_warning_rate: number
+  negative_margin_block_enabled: boolean
+}
+
+export interface AdminPointsPricingOperatingSnapshot {
+  module_key: string
+  module_label: string
+  provider_key?: string | null
+  user_basis_yuan: number
+  user_billed_yuan: number
+  supplier_list_price_yuan: number
+  supplier_discount_rate: number
+  supplier_discount_rate_source: string
+  supplier_discounted_cost_yuan: number
+  supplier_discount_yuan: number
+  captured_discount_yuan: number
+  shared_discount_yuan: number
+  policy_target_user_billed_yuan: number
+  policy_alignment_gap_yuan: number
+  platform_gross_profit_yuan: number
+  platform_margin_rate?: number | null
+  margin_status: 'healthy' | 'warning' | 'negative'
+  negative_margin_blocked: boolean
+}
+
+export interface AdminPointsBillingEvent {
+  id: number
+  target_user_id: number
+  operator_user_id: number
+  operator_username: string
+  operation_type: string
+  module_key: string
+  module_label: string
+  event_kind: 'freeze' | 'settle' | 'release'
+  event_label: string
+  billing_key: string
+  title: string
+  summary: string
+  amount_points: number
+  amount_yuan?: number | null
+  pricing_status?: string | null
+  task_status?: string | null
+  project_id?: number | null
+  audiobook_project_id?: number | null
+  run_id?: string | null
+  stage?: string | null
+  action_path?: string | null
+  action_label?: string | null
+  created_at: string
+  operating_snapshot?: AdminPointsPricingOperatingSnapshot | null
+}
+
+export interface AdminPointsBillingModuleSummary {
+  module_key: string
+  module_label: string
+  settle_event_count: number
+  warning_event_count: number
+  negative_event_count: number
+  total_user_billed_yuan: number
+  total_platform_gross_profit_yuan: number
+  blended_margin_rate?: number | null
+}
+
+export interface AdminPointsBillingSummary {
+  recent_7d_settle_count: number
+  settle_event_count: number
+  warning_event_count: number
+  negative_event_count: number
+  total_user_billed_yuan: number
+  total_platform_gross_profit_yuan: number
+  blended_margin_rate?: number | null
+  module_summaries: AdminPointsBillingModuleSummary[]
+}
+
+export interface AdminPointsBillingEventListResponse {
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+  summary: AdminPointsBillingSummary
+  items: AdminPointsBillingEvent[]
 }
 
 interface DreamweaverScriptUpdateRequest {
@@ -392,6 +752,35 @@ class ApiClient {
     return this.client.get(`/api/v1/projects/${projectId}`)
   }
 
+  getModelCatalogOverview(params?: {
+    category?: string
+    provider?: string
+    verification_status?: string
+  }) {
+    return this.client.get('/api/v1/model-catalog/overview', { params })
+  }
+
+  getModelCatalogEntries(params?: {
+    category?: string
+    provider?: string
+    verification_status?: string
+    keyword?: string
+  }) {
+    return this.client.get('/api/v1/model-catalog/entries', { params })
+  }
+
+  getModelCatalogEntry(modelKey: string) {
+    return this.client.get(`/api/v1/model-catalog/entries/${encodeURIComponent(modelKey)}`)
+  }
+
+  syncModelCatalog(payload?: {
+    force_refresh?: boolean
+    model_keys?: string[]
+    max_verification_age_hours?: number
+  }) {
+    return this.client.post('/api/v1/model-catalog/sync', payload ?? { force_refresh: true })
+  }
+
   updateProject(projectId: number, data: any) {
     return this.client.put(`/api/v1/projects/${projectId}`, data)
   }
@@ -666,6 +1055,10 @@ class ApiClient {
     return this.client.get(`/api/v1/audiobook/projects/by-project/${projectId}`, { params })
   }
 
+  listUserAudiobookProjects() {
+    return this.client.get<UserAudiobookProjectOverview[]>('/api/v1/audiobook/projects')
+  }
+
   getAudiobookProject(audiobookProjectId: number) {
     return this.client.get(`/api/v1/audiobook/projects/${audiobookProjectId}`)
   }
@@ -730,7 +1123,65 @@ class ApiClient {
     })
   }
 
+  listUserAssets(params?: {
+    asset_kind?: string
+    asset_class?: string
+    favorites_only?: boolean
+    include_archived?: boolean
+    limit?: number
+  }) {
+    return this.client.get<UserAssetRecord[]>('/api/v1/user-assets', { params })
+  }
+
+  createUserAsset(payload: UserAssetRecordCreatePayload) {
+    return this.client.post<UserAssetRecord>('/api/v1/user-assets', payload)
+  }
+
+  updateUserAsset(assetId: number, payload: UserAssetRecordUpdatePayload) {
+    return this.client.patch<UserAssetRecord>(`/api/v1/user-assets/${assetId}`, payload)
+  }
+
   // 通用API方法
+  batchUpdateUserAssets(payload: UserAssetRecordBatchUpdatePayload) {
+    return this.client.patch<UserAssetRecordBatchUpdateResponse>('/api/v1/user-assets/batch', payload)
+  }
+
+  getUserCenterPointsOverview() {
+    return this.client.get<UserCenterPointsOverviewResponse>('/api/v1/user-center/points-overview')
+  }
+
+  getAdminSystemHealth() {
+    return this.client.get<AdminSystemHealth>('/api/v1/admin/stats/system/health')
+  }
+
+  getAdminPointsRules() {
+    return this.client.get<AdminPointsRuleConfig>('/api/v1/admin/system/points-rules')
+  }
+
+  updateAdminPointsRules(payload: AdminPointsRuleUpdatePayload) {
+    return this.client.put<AdminPointsRuleConfig>('/api/v1/admin/system/points-rules', payload)
+  }
+
+  getAdminPointsPricingPolicy() {
+    return this.client.get<AdminPointsPricingPolicy>('/api/v1/admin/system/points-pricing-policy')
+  }
+
+  updateAdminPointsPricingPolicy(payload: AdminPointsPricingPolicyUpdatePayload) {
+    return this.client.put<AdminPointsPricingPolicy>('/api/v1/admin/system/points-pricing-policy', payload)
+  }
+
+  getAdminPointsBillingEvents(params?: {
+    page?: number
+    page_size?: number
+    user_id?: number
+    module_key?: string
+    event_kind?: string
+    margin_status?: string
+    keyword?: string
+  }) {
+    return this.client.get<AdminPointsBillingEventListResponse>('/api/v1/admin/billing/points-events', { params })
+  }
+
   get(url: string, config?: any) {
     return this.client.get(url, config)
   }
@@ -743,8 +1194,47 @@ class ApiClient {
     return this.client.put(url, data, config)
   }
 
+  patch(url: string, data?: any, config?: any) {
+    return this.client.patch(url, data, config)
+  }
+
   delete(url: string, config?: any) {
     return this.client.delete(url, config)
+  }
+
+  generateAssetStudioImage(payload: FormData) {
+    return this.client.post<AssetStudioGenerateResponse>('/api/v1/asset-studio/image', payload, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
+    })
+  }
+
+  generateAssetStudioVideo(payload: FormData) {
+    return this.client.post<AssetStudioGenerateResponse>('/api/v1/asset-studio/video', payload, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 600000,
+    })
+  }
+
+  generateAssetStudioMotion(payload: FormData) {
+    return this.client.post<AssetStudioGenerateResponse>('/api/v1/asset-studio/motion', payload, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 600000,
+    })
+  }
+
+  generateAssetStudioAudio(payload: FormData) {
+    return this.client.post<AssetStudioGenerateResponse>('/api/v1/asset-studio/audio', payload, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 600000,
+    })
+  }
+
+  reviewAssetStudioVision(payload: FormData) {
+    return this.client.post<AssetStudioVisionReviewResponse>('/api/v1/asset-studio/vision-review', payload, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
+    })
   }
 
   // AI生成任务API（异步）

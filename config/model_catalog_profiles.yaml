@@ -1,0 +1,323 @@
+# -*- coding: utf-8 -*-
+# 模型档案配置中心
+# 用于补充模型的项目级 Prompt 模板、路由策略、部署接入与工具识别信息。
+
+profiles:
+  qwen3-max:
+    role_summary: 当前模型是项目里的中文正文创作主力，负责创意发散、章节起草、对话润色和有声创作前期文案生成。
+    system_role: 你是中文长篇小说创作与角色对话专家，擅长章节起草、重写润色、人物口吻控制与结构化输出。
+    prompt_patterns:
+      - title: 正文创作模板
+        template: |
+          任务目标：
+          - 生成章节正文 / 对话片段 / 创意草稿
+
+          必填约束：
+          - 题材与文风
+          - 当前章节目标
+          - 角色关系与口吻
+          - 禁止事项
+
+          输出要求：
+          - 先保证叙事流畅，再保证风格统一
+          - 如需结构化结果，按 JSON 输出
+      - title: AI 编程工具识别模板
+        template: |
+          当任务包含以下关键词时优先识别为 qwen3-max：
+          - chapter / concept / dialogue / writing
+          - 中文创作 / 章节重写 / 角色对话
+          推荐从统一入口 create_task_llm(task_type="chapter") 或 create_model_llm(model="qwen3-max") 调用。
+    router_rules:
+      - when: 检测到章节写作、创意发散、角色对话或正文重写
+        action: 优先路由到 qwen3-max
+        reason: 它是项目当前默认的中文创作主力模型。
+      - when: 任务要求 JSON 输出且仍属于创作辅助
+        action: 保持 qwen3-max，不必切到轻量模型
+        reason: 该模型同时具备较好的中文生成质量和结构化输出能力。
+    best_practice_tips:
+      - 适合在系统提示中明确“文风、叙述视角、人物口吻”三类约束。
+      - 创作类任务建议提供上一章摘要与本章目标，减少剧情漂移。
+      - 若输出给后续程序消费，优先要求 JSON 字段固定。
+    tooling_badges:
+      - 创作主力
+      - 章节默认
+    project_entrypoints:
+      - label: 小说创作入口
+        value: create_task_llm(task_type="chapter")
+      - label: 显式点名入口
+        value: create_model_llm(model="qwen3-max", temperature=0.7)
+    local_deployment_note: 当前项目主要通过阿里云兼容接口调用；如后续需要本地替代，应在统一封装层额外映射开源中文写作模型，而不是直接改业务层代码。
+
+  qwen-long:
+    role_summary: 当前模型是整书级上下文入口，负责超长资料理解、大纲扩展、分层摘要和整书汇总。
+    system_role: 你是超长文本理解与整书规划专家，擅长大纲扩展、分层摘要、整卷汇总与长上下文一致性检查。
+    prompt_patterns:
+      - title: 长上下文分析模板
+        template: |
+          输入结构建议：
+          1. 项目概念
+          2. 角色信息
+          3. 已有大纲 / 已写章节摘要
+          4. 当前分析目标
+
+          输出要求：
+          - 先做归纳
+          - 再给结构化结论
+          - 最后给下一步行动建议
+    router_rules:
+      - when: 检测到 outline_expand / book_synthesis / summarize_long / long_context
+        action: 优先路由到 qwen-long
+        reason: 它是项目定义的长上下文专用模型。
+    best_practice_tips:
+      - 建议把输入按层级组织，而不是把长文本直接拼成一段。
+      - 对整书任务优先要求“先摘要后判断”，减少输出发散。
+    tooling_badges:
+      - 整书上下文
+      - 长文分析
+
+  qwen-turbo:
+    role_summary: 当前模型是轻量快写与预处理入口，适合提取、摘要、简单格式化和低成本批量任务。
+    system_role: 你是高吞吐结构化处理助手，优先输出简洁、稳定、便于后处理的结果。
+    prompt_patterns:
+      - title: 轻量提取模板
+        template: |
+          目标：
+          - 提取实体 / 摘要 / 简单改写
+
+          输出要求：
+          - 尽量简洁
+          - 优先列表或 JSON
+          - 不做额外创作扩写
+    router_rules:
+      - when: 检测到 entity_extract / summarize / simple / fast
+        action: 优先路由到 qwen-turbo
+        reason: 该模型在成本和速度上更适合预处理任务。
+    best_practice_tips:
+      - 不适合承担高质量正文创作。
+      - 适合放在高质量模型前面做清洗和预提取。
+    tooling_badges:
+      - 预处理
+      - 低成本
+
+  deepseek-reasoner:
+    role_summary: 当前模型是项目的严谨推理与复审入口，主要承担逻辑审校、结构检查、世界观约束和高难度判断。
+    system_role: 你是严谨的推理审校专家，优先处理复杂规则、结构一致性、逻辑漏洞和多约束决策。
+    prompt_patterns:
+      - title: 结构审校模板
+        template: |
+          请按以下结构输出：
+          1. 核心判断
+          2. 发现的问题
+          3. 问题证据
+          4. 修复建议
+          5. 风险等级
+      - title: 编程工具识别模板
+        template: |
+          当任务包含 review / quality_review / structure_plot / reasoning 时，
+          优先识别为 deepseek-reasoner。
+          注意：当前项目不会向该模型开放 temperature、timeout 和 max_retries 参数。
+    router_rules:
+      - when: 检测到复杂逻辑审校、世界观约束、人物动机复核或质量复审
+        action: 优先路由到 deepseek-reasoner
+        reason: 该模型在项目中承担“第二判断层”和高强度复审职责。
+    best_practice_tips:
+      - 更适合审校与判断，不适合高频流式互动。
+      - 提示词要明确评估标准，否则容易给出冗长推理。
+    tooling_badges:
+      - 质量复审
+      - 推理优先
+    project_entrypoints:
+      - label: 审校类入口
+        value: create_task_llm(task_type="quality_review")
+      - label: 结构类入口
+        value: create_task_llm(task_type="structure_plot")
+    local_deployment_note: 当前项目通过官方 API 调用该模型，并依赖其推理与审校特性；如果本地替代，需额外评估是否会影响复审结论的一致性。
+
+  qwen3-vl-plus:
+    role_summary: 当前模型用于视觉理解、视频检查和多模态提示解析，是多模态短剧与素材质检链路的分析入口。
+    system_role: 你是视觉内容审查与多模态解析专家，负责图像理解、视频理解、镜头问题定位与结构化质检输出。
+    prompt_patterns:
+      - title: 图像质检模板
+        template: |
+          输入：图像素材 + 检查目标
+          输出：
+          - 问题列表
+          - 严重程度
+          - 修复建议
+          - 是否建议回炉生成
+      - title: 视频分析模板
+        template: |
+          输入：视频片段 + 关注点（角色一致性 / 镜头错误 / 画面问题）
+          输出：结论 + 证据 + 下一步建议
+    router_rules:
+      - when: 检测到 analyze_image / analyze_video / 视觉 QA
+        action: 优先路由到 qwen3-vl-plus
+        reason: 它是项目当前唯一的统一多模态理解入口。
+    best_practice_tips:
+      - 先给出检查目标，再上传素材，结果更稳定。
+      - 适合输出结构化质检结果，便于工作流继续处理。
+    tooling_badges:
+      - 多模态分析
+      - 视觉质检
+
+  wanx-v1:
+    role_summary: 当前模型是项目默认的高质量图像生成入口，适合概念图、角色探索和封面草稿。
+    prompt_patterns:
+      - title: 图像生成模板
+        template: |
+          主体 + 场景 + 构图 + 光影 + 风格 + 质感 + 负向约束
+      - title: 分镜概念图模板
+        template: |
+          镜头景别 + 角色动作 + 环境氛围 + 画面风格 + 不要出现的元素
+    router_rules:
+      - when: 检测到高质量文生图、概念图或角色视觉探索
+        action: 优先路由到 wanx-v1
+        reason: 它是项目当前默认高质量图像模型。
+    best_practice_tips:
+      - 适合搭配负向提示词约束杂乱元素。
+      - 涉及角色一致性时建议同时提供参考图。
+    tooling_badges:
+      - 高质量文生图
+      - 短剧素材
+    project_entrypoints:
+      - label: 图像生成入口
+        value: media_runtime.generate_image(model_id="wanx-v1", ...)
+
+  wan2.6-t2v:
+    role_summary: 当前模型是主力视频生成入口，适合短片段镜头、预告视频和受控叙事镜头生成。
+    prompt_patterns:
+      - title: 镜头脚本模板
+        template: |
+          主体 + 动作 + 镜头运动 + 场景 + 时长 + 画面风格 + 禁止项
+    router_rules:
+      - when: 检测到高质量短视频生成、镜头生成或叙事短片任务
+        action: 优先路由到 wan2.6-t2v
+        reason: 它是项目当前的视频主力模型。
+      - when: 主链路超时或只需要快速预览
+        action: 回退到 wan2.6-t2v-fast
+        reason: 当前项目已经为它配置了速度优先的降级位。
+    best_practice_tips:
+      - 生产环境建议默认 5 秒片段，稳定性更高。
+      - 对角色镜头建议补充参考图。
+    tooling_badges:
+      - 主力视频
+      - 镜头生成
+    project_entrypoints:
+      - label: 视频生成入口
+        value: media_runtime.generate_video(model_id="wan2.6-t2v", duration=5.0, ...)
+
+  qwen3-tts-flash:
+    role_summary: 当前模型是项目默认 TTS，适合大规模章节朗读、标准旁白和低成本批量语音合成。
+    prompt_patterns:
+      - title: 标准朗读模板
+        template: |
+          文本内容 + 音色 / speaker + 语速 + 停顿要求 + 是否返回时间戳
+    router_rules:
+      - when: 检测到标准有声书朗读、批量章节合成或成本敏感语音任务
+        action: 优先路由到 qwen3-tts-flash
+        reason: 它是项目当前默认有声书 TTS。
+    best_practice_tips:
+      - 适合批量合成与标准旁白，不适合情绪演绎要求特别高的场景。
+      - 如需更强表现力，可升级到 cosyvoice-v3-plus。
+    tooling_badges:
+      - 默认 TTS
+      - 批量合成
+
+  cosyvoice-v3-plus:
+    role_summary: 当前模型用于高表现力语音合成和音色克隆，适合角色化旁白与情绪浓度高的有声内容。
+    system_role: 你是有声剧表现力规划助手，负责情绪、语气、音色与 instruct 参数设计。
+    prompt_patterns:
+      - title: 表现力朗读模板
+        template: |
+          文本内容 + 角色身份 + 情绪标签 + 语气 + 停顿 + 是否启用 instruct
+      - title: 角色化旁白模板
+        template: |
+          角色定位 + 声线目标 + 情绪变化 + 关键句强调方式
+    router_rules:
+      - when: 检测到高质量旁白、情绪化朗读、角色音色区分或音色克隆任务
+        action: 优先路由到 cosyvoice-v3-plus
+        reason: 它是当前项目的高表现力音频模型。
+    best_practice_tips:
+      - 适合重点片段、情绪高潮和角色化演绎。
+      - 需要结合音色管理与 instruct 参数一起设计。
+    tooling_badges:
+      - 高表现力 TTS
+      - 音色克隆
+    project_entrypoints:
+      - label: 高表现力语音入口
+        value: media_runtime.synthesize_speech(model_id="cosyvoice-v3-plus", ...)
+
+  mureka-o1-instrumental:
+    role_summary: 当前模型用于资产工作台的纯音乐与氛围配乐生成，适合为镜头、预告片和有声内容快速出一版可试听配乐。
+    system_role: 你是音乐提示词与配乐策略助手，负责把场景、情绪、节奏和风格要求整理成可直接用于生成纯音乐的描述。
+    prompt_patterns:
+      - title: 背景音乐模板
+        template: |
+          场景 + 情绪 + 节奏 + 风格 + 主要乐器 + 时长
+      - title: 预告片配乐模板
+        template: |
+          片段定位 + 节奏推进方式 + 氛围关键词 + 不要出现的人声或歌词
+    router_rules:
+      - when: 检测到资产工作台的背景音乐、氛围配乐或纯音乐草稿任务
+        action: 优先路由到 mureka-o1-instrumental
+        reason: 它是当前仓库已接入的纯音乐生成链路。
+    best_practice_tips:
+      - 提示词里最好同时写明情绪、节奏和配器，否则结果容易过泛。
+      - 适合生成背景音乐，不适合承担对白或歌词演唱。
+    tooling_badges:
+      - 资产配乐
+      - 纯音乐
+    project_entrypoints:
+      - label: 资产工作台音乐入口
+        value: POST /api/v1/asset-studio/audio (generation_type=music, model_id="mureka-o1-instrumental")
+      - label: 后端服务入口
+        value: app.services.audiobook.ai_music.create_music_generator()
+    local_deployment_note: 当前项目通过 Mureka 官方托管接口生成纯音乐，并在后端落盘到资产输出目录；如果未来要做统一运行时封装，建议抽出独立的 generate_audio 能力，而不是继续塞进 TTS 入口。
+
+  kling-v1-text-to-audio:
+    role_summary: 当前模型用于资产工作台的短音效与环境音生成，适合快速产出动作音、情绪音和短环境声。
+    system_role: 你是音效提示词设计助手，负责把动作、环境和质感描述收束成适合短音效生成的精简提示词。
+    prompt_patterns:
+      - title: 动作音模板
+        template: |
+          动作主体 + 材质 + 强度 + 持续时间 + 不要旋律化
+      - title: 环境音模板
+        template: |
+          场景环境 + 远近层次 + 情绪氛围 + 时长 + 是否需要循环感
+    router_rules:
+      - when: 检测到资产工作台的短音效、环境音或动作音任务
+        action: 优先路由到 kling-v1-text-to-audio
+        reason: 它是当前仓库接入的短音效优先链路。
+    best_practice_tips:
+      - 提示词应尽量短而明确，强调材质、动作和环境，不要写成长段剧情。
+      - 如果未配置可灵密钥，当前实现会自动回退到 Mureka 环境音链路。
+    tooling_badges:
+      - 资产音效
+      - 文生音频
+    project_entrypoints:
+      - label: 资产工作台音效入口
+        value: POST /api/v1/asset-studio/audio (generation_type=sound-effect, model_id="kling-v1-text-to-audio")
+      - label: 后端服务入口
+        value: app.services.audiobook.klingai_effect_generator.create_klingai_generator()
+    local_deployment_note: 当前项目通过可灵官方文生音频接口生成短音效；如果需要统一代理，建议保留 JWT 鉴权签名逻辑在服务端，不要前端直连。
+
+  kling-v1-video-to-audio:
+    role_summary: 当前模型是已归档的视频转音频能力条目，用于后续给现有视频镜头补声音草稿；当前仓库还没有把它直接接到工作台。
+    system_role: 你是视频补声音策略助手，负责根据镜头内容规划环境音、节奏音和氛围声的生成策略。
+    prompt_patterns:
+      - title: 视频转音频模板
+        template: |
+          输入视频 + 关注的声音层（环境 / 动作 / 氛围） + 希望保留或避免的声音元素
+    router_rules:
+      - when: 检测到基于已有视频补声音、视频转音频或镜头音频预研任务
+        action: 记录为 kling-v1-video-to-audio 候选链路
+        reason: 该能力已纳入统一档案，但当前项目尚未直接接入。
+    best_practice_tips:
+      - 现阶段更适合作为能力档案和后续路线参考，而不是直接生产入口。
+    tooling_badges:
+      - 视频转音频
+      - 预研能力
+    project_entrypoints:
+      - label: 当前状态
+        value: 已纳入模型档案中心，暂未暴露前端直连入口
+    local_deployment_note: 若后续接入，建议复用资产工作台音频模块的上传、轮询与结果展示逻辑，而不是新开一套独立页面。

@@ -34,6 +34,7 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AutoStoriesIcon from '@mui/icons-material/AutoStories'
 import FileDownloadIcon from '@mui/icons-material/FileDownload'
+import HubIcon from '@mui/icons-material/Hub'
 import Menu from '@mui/material/Menu'
 import Snackbar from '@mui/material/Snackbar'
 import Alert from '@mui/material/Alert'
@@ -50,6 +51,7 @@ import { generationService, GenerationTask } from '@/services/generation'
 import { apiClient } from '@/services/api'
 import GenerationProgressDialog from '@/components/GenerationProgressDialog'
 import { logger } from '@/utils/logger'
+import { buildStoryExpansionCompletionMessage } from '@/utils/storyExpansionFeedback'
 
 export default function DashboardPage() {
   const navigate = useNavigate()
@@ -305,17 +307,25 @@ export default function DashboardPage() {
         }
       })
 
-      // 🆕 监听任务完成事件（大纲扩展、人物扩展）
+      // 🆕 监听协同拓展任务完成事件
       workflowWebSocket.onTaskComplete((data: any) => {
         logger.log('✅ 收到任务完成:', data)
         const taskId = data.task_id || ''
+        const result = data.result || {}
         
-        // 如果是扩展大纲或人物任务，刷新章节列表
-        if (taskId.startsWith('expand-outline') || taskId.startsWith('expand-characters')) {
-          logger.log('🔄 扩展任务完成，刷新章节列表...')
+        if (taskId.startsWith('expand-story')) {
+          logger.log('🔄 协同拓展任务完成，刷新章节列表...')
           if (selectedProjectId) {
             loadChapters(selectedProjectId)
           }
+
+          const baseMessage = typeof result.message === 'string' && result.message.trim()
+            ? result.message.trim()
+            : '协同拓展完成'
+
+          setSnackbarMessage(buildStoryExpansionCompletionMessage(baseMessage, result))
+          setSnackbarSeverity('success')
+          setSnackbarOpen(true)
         }
       })
     })
@@ -871,6 +881,23 @@ export default function DashboardPage() {
               width: { xs: '100%', sm: 'auto' },
               justifyContent: { xs: 'flex-end', sm: 'flex-start' }
             }}>
+              <Button
+                variant="outlined"
+                onClick={() => navigate('/model-catalog')}
+                startIcon={<HubIcon />}
+                sx={{
+                  color: 'white',
+                  borderColor: 'rgba(255,255,255,0.5)',
+                  fontSize: { xs: '0.8125rem', sm: '0.875rem' },
+                  minHeight: { xs: 36, sm: 40 },
+                  '&:hover': {
+                    borderColor: 'white',
+                    backgroundColor: 'rgba(255,255,255,0.1)',
+                  },
+                }}
+              >
+                模型档案
+              </Button>
               <Button
                 variant="outlined"
                 onClick={handleLogout}

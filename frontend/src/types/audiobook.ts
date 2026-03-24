@@ -32,10 +32,27 @@ export interface AudiobookProjectSummary {
   id: number
   status?: string
   created_at?: string
+  updated_at?: string | null
   completed_chapters?: number
   total_chapters?: number
   total_duration?: number
+  total_cost?: number
   chapter_audios?: ChapterAudio[]
+}
+
+export interface UserAudiobookProjectOverview {
+  id: number
+  project_id: number
+  project_title?: string | null
+  project_description?: string | null
+  status?: string | null
+  total_chapters?: number | null
+  completed_chapters?: number | null
+  failed_chapters?: number | null
+  total_duration?: number | null
+  total_cost?: number | null
+  created_at?: string | null
+  updated_at?: string | null
 }
 
 export interface DeletedAudiobookProject {

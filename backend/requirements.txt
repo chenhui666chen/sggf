@@ -35,6 +35,9 @@ tiktoken>=0.7.0
 
 # Document Processing
 python-docx
+ebooklib>=0.18
+beautifulsoup4>=4.12.3
+PyPDF2>=3.0.1
 email-validator
 pydub>=0.25.1  # 音频处理
 

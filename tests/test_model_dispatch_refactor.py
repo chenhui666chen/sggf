@@ -58,6 +58,68 @@ def test_langchain_bridge_routes_through_model_hub() -> None:
     assert mocked_call.await_args.kwargs["task_type"] == "chapter"
 
 
+def test_create_model_llm_resolves_catalog_guarded_model_at_construction(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from core.langchain_bridge import create_model_llm
+    from core.model_runtime import get_model_base_url
+    from core.model_hub import model_hub
+    from core.unified_registry import UnifiedModelRegistry
+    from schemas.unified_model_spec import UnifiedModelSpec, ModelType, APIConfig, RoutingConfig
+
+    snapshot_path = tmp_path / "model_catalog_runtime.json"
+    snapshot_path.write_text(
+        """
+{
+  "version": 1,
+  "entries": {
+    "failed-model": {
+      "verification_status": "failed",
+      "last_verified_at": "2026-03-21T00:00:00+00:00"
+    },
+    "healthy-model": {
+      "verification_status": "verified",
+      "last_verified_at": "2026-03-21T00:00:00+00:00"
+    }
+  }
+}
+        """.strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MODEL_CATALOG_RUNTIME_SNAPSHOT_PATH", str(snapshot_path))
+
+    registry = UnifiedModelRegistry()
+    registry.clear()
+    model_hub.registry = registry
+    registry.register(
+        UnifiedModelSpec(
+            id="failed-model",
+            name="Failed Model",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(api_key_env="TEST_API_KEY", base_url="https://failed.example/v1"),
+            routing=RoutingConfig(task_types=["chapter"], fallback_models=["healthy-model"]),
+        )
+    )
+    registry.register(
+        UnifiedModelSpec(
+            id="healthy-model",
+            name="Healthy Model",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(api_key_env="TEST_API_KEY", base_url="https://healthy.example/v1"),
+            routing=RoutingConfig(task_types=["chapter"]),
+        )
+    )
+
+    llm = create_model_llm("failed-model")
+
+    assert llm.model_name == "healthy-model"
+    assert llm.openai_api_base == "https://healthy.example/v1"
+    assert get_model_base_url("failed-model") == "https://healthy.example/v1"
+
+
 def test_no_legacy_llm_imports_in_runtime_code() -> None:
     project_root = Path(__file__).parent.parent
     targets = [

@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   Alert,
@@ -52,6 +52,20 @@ interface LibraryPayload {
   spec?: Record<string, any>
   review?: Record<string, any>
   assets: LibraryAsset[]
+}
+
+interface CollectFeedback {
+  type: 'success' | 'error'
+  text: string
+}
+
+interface CollectState {
+  loading: boolean
+  feedback: CollectFeedback | null
+}
+
+function buildProtectedLibraryAssetUrl(assetId: number): string {
+  return `protected://dreamweaver-library/${assetId}`
 }
 
 function normalizeStylePresetValue(raw: any): string {
@@ -159,6 +173,7 @@ export default function DreamWeaverLibraryPage() {
   const regenSuggestRequestIdRef = useRef(0)
   const [characterViewsOpen, setCharacterViewsOpen] = useState(false)
   const [characterViewsEntityId, setCharacterViewsEntityId] = useState<number | null>(null)
+  const [collectStates, setCollectStates] = useState<Record<number, CollectState>>({})
   const regenRoleInfo = useMemo(() => parseLibraryRole(regenRole), [regenRole])
   const regenIsDerivedCharacterView = useMemo(() => {
     return regenRoleInfo.entityType === 'character' && Boolean(regenRoleInfo.view) && regenRoleInfo.view !== 'front'
@@ -557,6 +572,113 @@ export default function DreamWeaverLibraryPage() {
     setCharacterViewsEntityId(null)
   }
 
+  const updateCollectState = useCallback((assetId: number, patch: Partial<CollectState>) => {
+    setCollectStates((prev) => ({
+      ...prev,
+      [assetId]: {
+        ...prev[assetId],
+        loading: false,
+        feedback: null,
+        ...patch,
+      },
+    }))
+  }, [])
+
+  const getLibraryAssetDisplayTitle = useCallback(
+    (asset: LibraryAsset) => {
+      const parsed = parseLibraryRole(asset.role)
+      const rawEntityName = String(asset?.meta?.entity_name || '').trim()
+      const fallbackCharacterName =
+        parsed.entityType === 'character' && parsed.entityId
+          ? characterNameById.get(parsed.entityId) || `角色#${parsed.entityId}`
+          : ''
+      const normalizedEntityName = isPlaceholderEntityName(rawEntityName) ? fallbackCharacterName : rawEntityName
+
+      if (parsed.entityType === 'character' && parsed.entityId) {
+        if (normalizedEntityName && parsed.view) {
+          return `${normalizedEntityName} ${characterViewLabel(parsed.view)}`
+        }
+        return normalizedEntityName || assetTitle(asset)
+      }
+
+      return assetTitle(asset)
+    },
+    [characterNameById],
+  )
+
+  const collectLibraryAsset = useCallback(
+    async (asset: LibraryAsset) => {
+      const assetId = Number(asset?.id || 0)
+      if (!projectId || !assetId) return
+
+      const parsed = parseLibraryRole(asset.role)
+      const displayTitle = getLibraryAssetDisplayTitle(asset)
+      const descriptor = String(asset?.meta?.descriptor || '').trim()
+      const promptPreview = String(asset?.meta?.prompt || asset?.meta?.suggested_prompt || '').trim()
+      const approved = Boolean(asset?.meta?.approved)
+      const tags = ['dreamweaver', 'library', parsed.entityType || 'other']
+      if (parsed.view) {
+        tags.push(parsed.view)
+      }
+      if (approved) {
+        tags.push('approved')
+      }
+
+      updateCollectState(assetId, { loading: true, feedback: null })
+
+      try {
+        await apiClient.createUserAsset({
+          project_id: projectId,
+          source_module: 'dreamweaver_library',
+          asset_kind: 'image',
+          asset_class: 'reusable',
+          title: displayTitle,
+          description: descriptor || promptPreview || null,
+          file_url: buildProtectedLibraryAssetUrl(assetId),
+          preview_url: buildProtectedLibraryAssetUrl(assetId),
+          model_id:
+            String(asset?.meta?.model_id || asset?.meta?.model || asset?.meta?.image_model || '').trim() || null,
+          generation_mode: 'library_asset',
+          tags,
+          metadata_json: {
+            ...asset.meta,
+            project_id: projectId,
+            library_asset_id: assetId,
+            library_role: asset.role,
+            library_uri: asset.uri,
+            entity_type: parsed.entityType,
+            entity_id: parsed.entityId ?? null,
+            view: parsed.view ?? null,
+            approved,
+          },
+          source_payload_json: {
+            project_id: projectId,
+            asset_id: assetId,
+            role: asset.role,
+            uri: asset.uri,
+            entity_type: parsed.entityType,
+            entity_id: parsed.entityId ?? null,
+            view: parsed.view ?? null,
+            approved,
+          },
+        })
+        updateCollectState(assetId, {
+          loading: false,
+          feedback: { type: 'success', text: '已收录到用户资产' },
+        })
+      } catch (collectError) {
+        updateCollectState(assetId, {
+          loading: false,
+          feedback: {
+            type: 'error',
+            text: await extractApiErrorMessage(collectError, '收录到用户资产失败'),
+          },
+        })
+      }
+    },
+    [getLibraryAssetDisplayTitle, projectId, updateCollectState],
+  )
+
   const renderLibraryCard = (card: LibraryCard) => {
     if (card.kind === 'character') {
       const viewItems = CHARACTER_VIEW_ORDER.map((view) => {
@@ -661,7 +783,7 @@ export default function DreamWeaverLibraryPage() {
               </Typography>
             )}
             <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: 'rgba(255,255,255,0.55)' }}>
-              点击查看六视角详情并生成/替换
+              点击查看六视角详情并生成/替换；已通过的单视角素材可收录到用户中心
             </Typography>
           </Box>
         </ImageListItem>
@@ -670,21 +792,14 @@ export default function DreamWeaverLibraryPage() {
 
     const asset = card.asset
     const parsed = parseLibraryRole(asset.role)
-    const rawEntityName = String(asset?.meta?.entity_name || '').trim()
-    const fallbackCharacterName = parsed.entityType === 'character' && parsed.entityId ? characterNameById.get(parsed.entityId) || `角色#${parsed.entityId}` : ''
-    const normalizedEntityName = isPlaceholderEntityName(rawEntityName) ? fallbackCharacterName : rawEntityName
-    const title =
-      parsed.entityType === 'character' && parsed.entityId
-        ? normalizedEntityName && parsed.view
-          ? `${normalizedEntityName} ${characterViewLabel(parsed.view)}`
-          : normalizedEntityName || assetTitle(asset)
-        : assetTitle(asset)
+    const title = getLibraryAssetDisplayTitle(asset)
     const imageState = resolveLibraryAssetImageState(asset, { missingRoleSet })
     const preview = imageState.hasRenderableImage ? previews[asset.id] : ''
     const aspectRatio = previewAspectRatios[asset.id] || assetToCssAspectRatio(asset, '16 / 9')
     const approved = imageState.hasRenderableImage && Boolean(asset?.meta?.approved)
     const missing = imageState.markedMissing
     const placeholder = imageState.placeholder && !missing && !imageState.safetyBlocked
+    const collectState = collectStates[asset.id] || { loading: false, feedback: null }
     const chineseRole =
       parsed.entityType === 'scene'
         ? '场景卡'
@@ -823,7 +938,25 @@ export default function DreamWeaverLibraryPage() {
             >
               {imageState.hasRenderableImage ? '重生成' : '生成'}
             </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => void collectLibraryAsset(asset)}
+              disabled={loading || collectState.loading || !approved || !imageState.hasRenderableImage || imageState.safetyBlocked}
+            >
+              {collectState.loading ? '收录中...' : '收录到用户资产'}
+            </Button>
           </Stack>
+          {collectState.feedback ? (
+            <Alert severity={collectState.feedback.type} sx={{ mt: 1, borderRadius: 2 }}>
+              {collectState.feedback.text}
+            </Alert>
+          ) : null}
+          {!approved && imageState.hasRenderableImage && !imageState.safetyBlocked ? (
+            <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: 'rgba(255,255,255,0.55)' }}>
+              建议先通过审核，再收录到用户中心，避免把未确认素材沉淀为可复用资产。
+            </Typography>
+          ) : null}
         </Box>
       </ImageListItem>
     )
@@ -953,6 +1086,7 @@ export default function DreamWeaverLibraryPage() {
               const approved = hasRenderableImage && Boolean(asset?.meta?.approved)
               const missing = Boolean(role && missingRoleSet.has(role)) || state.markedMissing
               const placeholder = Boolean(asset && state.placeholder && !missing && !state.safetyBlocked)
+              const collectState = asset ? collectStates[asset.id] || { loading: false, feedback: null } : { loading: false, feedback: null }
               const stateText = missing ? '未生成（缺失）' : !asset ? '未生成' : state.safetyBlocked ? '安全拦截' : placeholder ? '占位图' : '暂无预览'
               return (
                 <Box
@@ -1071,6 +1205,22 @@ export default function DreamWeaverLibraryPage() {
                         {hasRenderableImage ? '重生成' : '生成'}
                       </Button>
                     </Stack>
+                    {asset ? (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => void collectLibraryAsset(asset)}
+                        disabled={loading || collectState.loading || !approved || !hasRenderableImage || state.safetyBlocked}
+                        sx={{ mt: 1, width: '100%' }}
+                      >
+                        {collectState.loading ? '收录中...' : '收录到用户资产'}
+                      </Button>
+                    ) : null}
+                    {collectState.feedback ? (
+                      <Alert severity={collectState.feedback.type} sx={{ mt: 1, borderRadius: 2 }}>
+                        {collectState.feedback.text}
+                      </Alert>
+                    ) : null}
                   </Box>
                 </Box>
               )

@@ -74,13 +74,14 @@ def get_model_base_url(model_id: Optional[str]) -> str:
     """读取指定模型的 base_url，供 LangChain 兼容层和旧判断逻辑使用。"""
 
     ensure_model_hub_initialized()
-    normalized_model = normalize_model_id(model_id)
-    if normalized_model is None:
-        return ""
-
     from core.model_hub import model_hub
 
-    spec = model_hub.registry.get_spec(normalized_model)
+    selection = model_hub.resolve_model_request(model=model_id)
+    resolved_model_id = selection.get("resolved_model_id")
+    if resolved_model_id is None:
+        return ""
+
+    spec = model_hub.registry.get_spec(resolved_model_id)
     if spec is None:
         return ""
 
@@ -92,18 +93,10 @@ def resolve_model_for_task(task_type: Optional[str], model: Optional[str]) -> Op
 
     ensure_model_hub_initialized()
 
-    normalized_model = normalize_model_id(model)
-    if normalized_model is not None:
-        return normalized_model
-
-    normalized_task = normalize_task_type(task_type)
-    if normalized_task is None:
-        return None
-
     from core.model_hub import model_hub
 
-    spec = model_hub.select_model(normalized_task)
-    if spec is None:
-        return None
-
-    return spec.id
+    selection = model_hub.resolve_model_request(
+        task_type=normalize_task_type(task_type),
+        model=normalize_model_id(model),
+    )
+    return selection.get("resolved_model_id")

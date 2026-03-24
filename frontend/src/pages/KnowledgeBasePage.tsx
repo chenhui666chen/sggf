@@ -37,14 +37,24 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import FolderIcon from '@mui/icons-material/Folder'
 import ArticleIcon from '@mui/icons-material/Article'
-import PeopleAltIcon from '@mui/icons-material/PeopleAlt'
 import Tooltip from '@mui/material/Tooltip'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import SyncIcon from '@mui/icons-material/Sync'
 import { logger } from '@/utils/logger'
 import { apiClient } from '@/services/api'
 import FormattedContent from '@/components/common/FormattedContent'
-import type { StoryExpansionStrategy } from '@/components/workflow/StoryExpansionDialog'
+import StoryExpansionResultDialog from '@/components/workflow/StoryExpansionResultDialog'
+import {
+  buildStoryExpansionCompletionMessage,
+  getStoryExpansionSummary,
+} from '@/utils/storyExpansionFeedback'
+import type {
+  StoryExpansionAnalysis,
+  StoryExpansionIntent,
+  StoryExpansionMode,
+  StoryPreserveWrittenMode,
+  StoryExpansionStrategy,
+} from '@/components/workflow/StoryExpansionDialog'
 
 const loadMarkdownRenderer = () => import('@/components/MarkdownRenderer')
 const loadVditorEditor = () => import('@/components/VditorEditor')
@@ -53,7 +63,6 @@ const loadSettingRecommendations = () => import('@/components/SettingRecommendat
 const loadConflictDetector = () => import('@/components/ConflictDetector')
 const loadRelationshipGraph = () => import('@/components/RelationshipGraph')
 const loadCharacterCardManager = () => import('@/components/CharacterCardManager')
-const loadExpansionConfigDialog = () => import('@/components/workflow/ExpansionConfigDialog')
 const loadStoryExpansionDialog = () => import('@/components/workflow/StoryExpansionDialog')
 
 const LazyMarkdownRenderer = lazy(loadMarkdownRenderer)
@@ -63,7 +72,6 @@ const LazySettingRecommendations = lazy(loadSettingRecommendations)
 const LazyConflictDetector = lazy(loadConflictDetector)
 const LazyRelationshipGraph = lazy(loadRelationshipGraph)
 const LazyCharacterCardManager = lazy(loadCharacterCardManager)
-const LazyExpansionConfigDialog = lazy(loadExpansionConfigDialog)
 const LazyStoryExpansionDialog = lazy(loadStoryExpansionDialog)
 
 // ==================== 接口定义 ====================
@@ -130,6 +138,32 @@ function LazySectionFallback({ minHeight = 240 }: { minHeight?: number }) {
 
 function warmImport(loader: () => Promise<unknown>) {
   void loader()
+}
+
+const STORY_EXPANSION_MODE_LABELS: Record<string, string> = {
+  total: '常规协同',
+  epic_framework: '长篇框架协同',
+  volume_detail: '单卷细化协同',
+}
+
+const STORY_STRATEGY_LABELS: Record<string, string> = {
+  auto: '自动协同',
+  balanced: '均衡推进',
+  plot_first: '剧情优先',
+  character_first: '人物优先',
+}
+
+const STORY_INTENT_LABELS: Record<string, string> = {
+  auto: '自动判断',
+  outline_led: '大纲主导',
+  character_led: '人物主导',
+  balanced: '均衡协同',
+}
+
+const STORY_PRESERVE_WRITTEN_MODE_LABELS: Record<string, string> = {
+  extract_extend: '提取后扩展',
+  preserve_written: '仅保护正文',
+  regenerate_all: '忽略已写正文',
 }
 
 // Category 中文名称映射（与后端 HIERARCHY_DEFAULTS 保持一致 - 33种体系）
@@ -205,10 +239,6 @@ export default function KnowledgeBasePage() {
   // 人物设定子 Tab 状态 (0=人物文本, 1=人物卡管理)
   const [characterSubTabValue, setCharacterSubTabValue] = useState(0)
 
-  // 🆕 扩展人物结果弹窗状态
-  const [showExpandCharactersDialog, setShowExpandCharactersDialog] = useState(false)
-  const [expandCharactersResult, setExpandCharactersResult] = useState<any>(null)
-
   // ==================== 文本内容相关状态 ====================
   const [loading, setLoading] = useState(false)  // 🔥 修复：初始值为false，避免页面初始时一直加载
   const [saving, setSaving] = useState(false)
@@ -283,39 +313,47 @@ export default function KnowledgeBasePage() {
   const [storyExpansionResult, setStoryExpansionResult] = useState<any>(null)
   const [storyTargetChapterCount, setStoryTargetChapterCount] = useState<number>(0)
   const [storyTargetCharacterCount, setStoryTargetCharacterCount] = useState<number>(0)
+  const [storyExpansionMode, setStoryExpansionMode] = useState<StoryExpansionMode>('total')
+  const [storyTotalVolumes, setStoryTotalVolumes] = useState<number>(30)
+  const [storyTotalChaptersMin, setStoryTotalChaptersMin] = useState<number>(2000)
+  const [storyTotalChaptersMax, setStoryTotalChaptersMax] = useState<number>(2500)
+  const [storyTargetVolumeIndex, setStoryTargetVolumeIndex] = useState<number>(0)
+  const [storyVolumeChaptersMin, setStoryVolumeChaptersMin] = useState<number>(50)
+  const [storyVolumeChaptersMax, setStoryVolumeChaptersMax] = useState<number>(80)
   const [storyExpansionStrategy, setStoryExpansionStrategy] = useState<StoryExpansionStrategy>('auto')
-  const [expandingOutline, setExpandingOutline] = useState(false)  // 🆕 后台任务状态
-  const [targetChapterCount, setTargetChapterCount] = useState<number>(0)
+  const [storyExpansionIntent, setStoryExpansionIntent] = useState<StoryExpansionIntent>('auto')
+  const [storyAutoSupplementEnabled, setStoryAutoSupplementEnabled] = useState(true)
+  const [storyPreserveWrittenMode, setStoryPreserveWrittenMode] = useState<StoryPreserveWrittenMode>('extract_extend')
+  const [storyExpansionAnalysis, setStoryExpansionAnalysis] = useState<StoryExpansionAnalysis | null>(null)
+  const [storyExpansionAnalysisLoading, setStoryExpansionAnalysisLoading] = useState(false)
   const [outlineHistory, setOutlineHistory] = useState<Array<{timestamp: number, content: string, chapterCount: number}>>([])
   const [showHistoryDialog, setShowHistoryDialog] = useState(false)
-  
-  // 🔥 多模式扩展状态
-  const [expansionMode, setExpansionMode] = useState<'total' | 'volume' | 'incremental' | 'epic_framework' | 'volume_detail'>('total')
-  const [targetVolumes] = useState<number>(3)
-  const [chaptersPerVolumeMin] = useState<number>(20)
-  const [chaptersPerVolumeMax] = useState<number>(30)
-  const [incrementalStep, setIncrementalStep] = useState<number>(10)
-  const [showExpansionConfig, setShowExpansionConfig] = useState(false)  // 显示高级配置弹窗
-  
-  // 🌟 史诗框架模式状态
-  const [totalVolumes, setTotalVolumes] = useState<number>(30)  // 总卷数
-  const [totalChaptersMin, setTotalChaptersMin] = useState<number>(2000)  // 总章节范围最小值
-  const [totalChaptersMax, setTotalChaptersMax] = useState<number>(2500)  // 总章节范围最大值
-  // 🗑️ 删除了 autoExpandAllVolumes 状态，因为技术上不可行
-  
-  // 🆕 单卷扩展相关
-  const [savedFramework] = useState<string>('')  // 保存的史诗框架（仅读）
-  const [targetVolumeIndex, setTargetVolumeIndex] = useState<number>(0)  // 扩展第几卷（0表示未选择）
-  const [volumeChaptersMin, setVolumeChaptersMin] = useState<number>(50)  // 本卷章节数量最小值
-  const [volumeChaptersMax, setVolumeChaptersMax] = useState<number>(80)  // 本卷章节数量最大值
-  const [loadingFramework, setLoadingFramework] = useState<boolean>(false)  // 🆕 加载框架状态
   const [frameworkMetadata, setFrameworkMetadata] = useState<any>(null)  // 🆕 框架元数据
-  
-  // 🆕 二次确认对话框状态
-  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
-  const [confirmDialogType, setConfirmDialogType] = useState<'regenerate' | 'duplicate' | null>(null)
-  const [confirmDialogMessage, setConfirmDialogMessage] = useState('')
-  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
+  const storyExpansionFeedback = getStoryExpansionSummary(storyExpansionResult)
+  const storyExpansionModeLabel =
+    STORY_EXPANSION_MODE_LABELS[storyExpansionResult?.story_expansion_mode || ''] ||
+    storyExpansionResult?.story_expansion_mode ||
+    '常规协同'
+  const storyExpansionStrategyLabel =
+    STORY_STRATEGY_LABELS[storyExpansionResult?.story_strategy || ''] ||
+    storyExpansionResult?.story_strategy ||
+    '自动协同'
+  const storyExpansionIntentLabel =
+    STORY_INTENT_LABELS[storyExpansionResult?.story_intent || ''] ||
+    storyExpansionResult?.story_intent ||
+    '自动判断'
+  const storyExpansionPreserveWrittenModeLabel =
+    STORY_PRESERVE_WRITTEN_MODE_LABELS[storyExpansionResult?.story_preserve_written_mode || ''] ||
+    storyExpansionResult?.story_preserve_written_mode ||
+    '提取后扩展'
+  const storyExpansionWrittenContextLabel = storyExpansionResult?.written_chapter_context?.applied
+    ? STORY_PRESERVE_WRITTEN_MODE_LABELS[
+        storyExpansionResult?.written_chapter_context?.preserve_written_mode || ''
+      ] || STORY_PRESERVE_WRITTEN_MODE_LABELS[storyExpansionResult?.story_preserve_written_mode || ''] ||
+      storyExpansionResult?.written_chapter_context?.preserve_written_mode ||
+      storyExpansionResult?.story_preserve_written_mode ||
+      '提取后扩展'
+    : ''
   
   // 💡 智能推荐相关状态
   const [recommendedMode, setRecommendedMode] = useState<'total' | 'epic_framework' | 'incremental'>('total')
@@ -324,23 +362,10 @@ export default function KnowledgeBasePage() {
   const [recommendedChaptersPerVolumeMax, setRecommendedChaptersPerVolumeMax] = useState(30)
   // 🗑️ 删除了 recommendedAutoExpandAllVolumes 状态
   const [recommendationReason, setRecommendationReason] = useState('')
-  
-  // 🆕 扩展结果对话框状态
-  const [showExpandOutlineDialog, setShowExpandOutlineDialog] = useState(false)
-  const [expandOutlineResult, setExpandOutlineResult] = useState<any>(null)
-  
+
   // 🆕 项目信息
   const [projectInfo, setProjectInfo] = useState<any>(null)
 
-  // ==================== 人物扩展相关状态 ====================
-  const [expandingCharacters, setExpandingCharacters] = useState(false)
-  const [targetCharacterCount, setTargetCharacterCount] = useState<number>(0)
-  
-  // 🆕 人物扩展按钮状态：idle | loading | resultReady
-  const [characterExpandState, setCharacterExpandState] = useState<'idle' | 'loading' | 'resultReady'>('idle')
-  // 🆕 控制图标高亮动效的key（每次有新结果时+1触发动画）
-  const [characterButtonHighlightKey, setCharacterButtonHighlightKey] = useState(0)
-  
   const preloadCharacterTabResources = (tabValue: number) => {
     if (tabValue === 1) {
       warmImport(loadCharacterCardManager)
@@ -375,11 +400,6 @@ export default function KnowledgeBasePage() {
       return
     }
 
-    if (tabValue === 2) {
-      warmImport(loadExpansionConfigDialog)
-      return
-    }
-
     if (tabValue === 3) {
       preloadSettingTabResources(settingSubTabValue)
       return
@@ -399,6 +419,23 @@ export default function KnowledgeBasePage() {
     return matches ? matches.length : 0
   }
 
+  useEffect(() => {
+    if (!projectId) return
+
+    const legacyKeys = [
+      `expanding_outline_${projectId}`,
+      `expanding_outline_start_${projectId}`,
+      `expanding_outline_task_${projectId}`,
+      `expanding_characters_${projectId}`,
+      `expanding_characters_start_${projectId}`,
+      `expanding_characters_task_${projectId}`,
+      `character_expand_result_${projectId}`,
+      `character_expand_state_${projectId}`,
+    ]
+
+    legacyKeys.forEach((key) => localStorage.removeItem(key))
+  }, [projectId])
+
   // 🔢 计算当前已有章节数
   const getCurrentChapterCount = (): number => {
     if (!plotOutline) return 0
@@ -415,24 +452,12 @@ export default function KnowledgeBasePage() {
     if (!projectId) return
 
     const storyKey = `expanding_story_${projectId}`
-    const outlineKey = `expanding_outline_${projectId}`
-    const charactersKey = `expanding_characters_${projectId}`
     const storyStartKey = `expanding_story_start_${projectId}`
-    const outlineStartKey = `expanding_outline_start_${projectId}`
-    const charactersStartKey = `expanding_characters_start_${projectId}`
     const storyTaskKey = `expanding_story_task_${projectId}`
-    const outlineTaskKey = `expanding_outline_task_${projectId}`
-    const charactersTaskKey = `expanding_characters_task_${projectId}`
 
     const savedStoryState = localStorage.getItem(storyKey)
-    const savedOutlineState = localStorage.getItem(outlineKey)
-    const savedCharactersState = localStorage.getItem(charactersKey)
     const storyStartTime = localStorage.getItem(storyStartKey)
-    const outlineStartTime = localStorage.getItem(outlineStartKey)
-    const charactersStartTime = localStorage.getItem(charactersStartKey)
     const storyTaskId = localStorage.getItem(storyTaskKey)
-    const outlineTaskId = localStorage.getItem(outlineTaskKey)
-    const charactersTaskId = localStorage.getItem(charactersTaskKey)
 
     const TASK_TIMEOUT = 30 * 60 * 1000  // 30分钟超时
     const now = Date.now()
@@ -453,65 +478,7 @@ export default function KnowledgeBasePage() {
       }
     }
 
-    // 检查大纲扩展任务
-    if (savedOutlineState === 'true') {
-      if (outlineStartTime) {
-        const elapsed = now - parseInt(outlineStartTime)
-        if (elapsed > TASK_TIMEOUT) {
-          // 超时，清除状态
-          console.warn('⚠️ 大纲扩展任务超时，已自动清除')
-          localStorage.removeItem(outlineKey)
-          localStorage.removeItem(outlineStartKey)
-          localStorage.removeItem(outlineTaskKey)
-          showSnackbar('⚠️ 大纲扩展任务超时30分钟，可能已失败，请重试', 'error')
-        } else {
-          // 未超时，恢复状态
-          setExpandingOutline(true)
-          console.log('🔄 恢复大纲扩展状态：进行中')
-        }
-      } else {
-        // 没有开始时间，恢复状态
-        setExpandingOutline(true)
-        console.log('🔄 恢复大纲扩展状态：进行中')
-      }
-    }
-
-    // 检查人物扩展任务
-    if (savedCharactersState === 'true') {
-      if (charactersStartTime) {
-        const elapsed = now - parseInt(charactersStartTime)
-        if (elapsed > TASK_TIMEOUT) {
-          // 超时，清除状态
-          console.warn('⚠️ 人物扩展任务超时，已自动清除')
-          localStorage.removeItem(charactersKey)
-          localStorage.removeItem(charactersStartKey)
-          localStorage.removeItem(charactersTaskKey)
-          showSnackbar('⚠️ 人物扩展任务超时30分钟，可能已失败，请重试', 'error')
-        } else {
-          // 未超时，恢复状态
-          setExpandingCharacters(true)
-          console.log('🔄 恢复人物扩展状态：进行中')
-        }
-      } else {
-        // 没有开始时间，恢复状态
-        setExpandingCharacters(true)
-        console.log('🔄 恢复人物扩展状态：进行中')
-      }
-    }
-    
-    // 🆕 恢复人物扩展结果状态（如果有未查看的结果）
-    const characterResultKey = `character_expand_result_${projectId}`
-    const characterStateKey = `character_expand_state_${projectId}`
     const storyResultKey = `story_expand_result_${projectId}`
-    
-    const savedCharacterState = localStorage.getItem(characterStateKey)
-    const savedCharacterResult = localStorage.getItem(characterResultKey)
-    
-    if (savedCharacterState === 'resultReady' && savedCharacterResult) {
-      setCharacterExpandState('resultReady')
-      setExpandCharactersResult(JSON.parse(savedCharacterResult))
-      console.log('🔄 恢复人物扩展状态：有未查看结果')
-    }
 
     const savedStoryResult = localStorage.getItem(storyResultKey)
     if (savedStoryResult) {
@@ -550,7 +517,10 @@ export default function KnowledgeBasePage() {
         localStorage.setItem(storyResultKey, JSON.stringify(resultData))
         setShowStoryExpansionResultDialog(true)
         loadWorkflowData()
-        showSnackbar('协同拓展已完成', 'success')
+        const baseMessage = typeof resultData.message === 'string' && resultData.message.trim()
+          ? resultData.message.trim()
+          : '协同拓展已完成'
+        showSnackbar(buildStoryExpansionCompletionMessage(baseMessage, resultData), 'success')
       } else if (statusRaw === 'failed' || statusRaw === 'timeout') {
         setExpandingStory(false)
         localStorage.removeItem(storyKey)
@@ -561,68 +531,7 @@ export default function KnowledgeBasePage() {
       }
     }
 
-    const recoverOutlineIfDone = async () => {
-      if (savedOutlineState !== 'true' || !outlineTaskId) return
-      const statusData = await fetchTaskStatus(outlineTaskId)
-      if (!statusData || cancelled) return
-      const statusRaw = String(statusData.status || '').toLowerCase()
-      if (statusRaw === 'completed') {
-        setExpandingOutline(false)
-        localStorage.removeItem(outlineKey)
-        localStorage.removeItem(outlineStartKey)
-        localStorage.removeItem(outlineTaskKey)
-        const resultData = statusData.result || {}
-        if (Object.keys(resultData || {}).length) {
-          setExpandOutlineResult(resultData)
-          setShowExpandOutlineDialog(true)
-        }
-        loadWorkflowData()
-        const isEpicFramework = resultData.framework_type === 'epic' || resultData.volume_index > 0
-        if (isEpicFramework) {
-          loadEpicFramework()
-        }
-        showSnackbar('? ???????????????', 'success')
-      } else if (statusRaw === 'failed' || statusRaw === 'timeout') {
-        setExpandingOutline(false)
-        localStorage.removeItem(outlineKey)
-        localStorage.removeItem(outlineStartKey)
-        localStorage.removeItem(outlineTaskKey)
-        const errorMsg = statusData.error || '??????'
-        showSnackbar(`? ??????: ${errorMsg}`, 'error')
-      }
-    }
-
-    const recoverCharactersIfDone = async () => {
-      if (savedCharactersState !== 'true' || !charactersTaskId) return
-      const statusData = await fetchTaskStatus(charactersTaskId)
-      if (!statusData || cancelled) return
-      const statusRaw = String(statusData.status || '').toLowerCase()
-      if (statusRaw === 'completed') {
-        setExpandingCharacters(false)
-        localStorage.removeItem(charactersKey)
-        localStorage.removeItem(charactersStartKey)
-        localStorage.removeItem(charactersTaskKey)
-        const resultData = statusData.result || {}
-        setExpandCharactersResult(resultData)
-        localStorage.setItem(`character_expand_result_${projectId}`, JSON.stringify(resultData))
-        setCharacterExpandState('resultReady')
-        localStorage.setItem(`character_expand_state_${projectId}`, 'resultReady')
-        setCharacterButtonHighlightKey(prev => prev + 1)
-        loadWorkflowData()
-        showSnackbar('? ???????????????', 'success')
-      } else if (statusRaw === 'failed' || statusRaw === 'timeout') {
-        setExpandingCharacters(false)
-        localStorage.removeItem(charactersKey)
-        localStorage.removeItem(charactersStartKey)
-        localStorage.removeItem(charactersTaskKey)
-        const errorMsg = statusData.error || '??????'
-        showSnackbar(`? ??????: ${errorMsg}`, 'error')
-      }
-    }
-
     void recoverStoryIfDone()
-    void recoverOutlineIfDone()
-    void recoverCharactersIfDone()
 
     return () => {
       cancelled = true
@@ -653,26 +562,6 @@ export default function KnowledgeBasePage() {
           }
           return false
         })
-        setExpandingOutline(prev => {
-          if (prev) {
-            console.log('❌ WebSocket连接失败，清除大纲扩展状态')
-            localStorage.removeItem(`expanding_outline_${projectId}`)
-            localStorage.removeItem(`expanding_outline_start_${projectId}`)
-            localStorage.removeItem(`expanding_outline_task_${projectId}`)
-            showSnackbar('❌ 后端服务断开，大纲扩展任务已取消', 'error')
-          }
-          return false
-        })
-        setExpandingCharacters(prev => {
-          if (prev) {
-            console.log('❌ WebSocket连接失败，清除人物扩展状态')
-            localStorage.removeItem(`expanding_characters_${projectId}`)
-            localStorage.removeItem(`expanding_characters_start_${projectId}`)
-            localStorage.removeItem(`expanding_characters_task_${projectId}`)
-            showSnackbar('❌ 后端服务断开，人物扩展任务已取消', 'error')
-          }
-          return false
-        })
       })
 
       // 监听任务完成
@@ -686,101 +575,23 @@ export default function KnowledgeBasePage() {
         })
         const taskId = data.task_id || ''
         console.log('🔍 提取的 taskId:', taskId)
-        console.log('🔍 是否以 expand-outline 开头:', taskId.startsWith('expand-outline'))
-        console.log('🔍 是否以 expand-characters 开头:', taskId.startsWith('expand-characters'))
         
-        // 大纲扩展完成
+        // 协同拓展完成
         if (taskId.startsWith('expand-story')) {
           const resultData = data.result || {}
           setStoryExpansionResult(resultData)
           localStorage.setItem(`story_expand_result_${projectId}`, JSON.stringify(resultData))
           setShowStoryExpansionResultDialog(true)
           loadWorkflowData()
+          void loadEpicFramework()
           setExpandingStory(false)
           localStorage.removeItem(`expanding_story_${projectId}`)
           localStorage.removeItem(`expanding_story_start_${projectId}`)
           localStorage.removeItem(`expanding_story_task_${projectId}`)
-          showSnackbar(data.message || '协同拓展完成', 'success')
-        }
-
-        if (taskId.startsWith('expand-story')) {
-          showSnackbar(`协同拓展失败: ${error}`, 'error')
-          setExpandingStory(false)
-          localStorage.removeItem(`expanding_story_${projectId}`)
-          localStorage.removeItem(`expanding_story_start_${projectId}`)
-          localStorage.removeItem(`expanding_story_task_${projectId}`)
-        }
-
-        if (taskId.startsWith('expand-outline')) {
-          console.log('✅ 大纲扩展任务完成', data)
-          showSnackbar(data.message || '✅ 大纲扩展完成！', 'success')
-          
-          // 🆕 显示结果弹窗（不再使用通用结果弹窗）
-          setExpandOutlineResult(data.result)
-          setShowExpandOutlineDialog(true)
-          
-          // 🔄 刷新数据（立即加载最新大纲）
-          console.log('🔄 开始刷新工作流数据...')
-          loadWorkflowData().then(() => {
-            console.log('✅ 工作流数据刷新完成')
-            console.log('📝 当前 plotOutline 长度:', plotOutline.length)
-            
-            // 🆕 通过返回数据判断是否需要刷新框架状态（避免闭包陷阱）
-            const isEpicFramework = data.result?.framework_type === 'epic' || data.result?.volume_index > 0
-            console.log('🔍 检测扩展类型:', {
-              framework_type: data.result?.framework_type,
-              volume_index: data.result?.volume_index,
-              isEpicFramework
-            })
-            
-            if (isEpicFramework) {
-              console.log('🔄 刷新史诗框架状态...')
-              loadEpicFramework()
-            } else {
-              console.log('ℹ️ 非史诗框架模式，跳过框架刷新')
-            }
-          })
-          
-          // ✅ 修复：使用函数式setState，避免闭包陷阱
-          setExpandingOutline(prev => {
-            console.log('🔄 清除扩展状态: prev =', prev, '-> false')
-            return false
-          })
-          // 🆕 清除localStorage状态
-          localStorage.removeItem(`expanding_outline_${projectId}`)
-          localStorage.removeItem(`expanding_outline_start_${projectId}`)
-          localStorage.removeItem(`expanding_outline_task_${projectId}`)
-        }
-        
-        // 人物扩展完成
-        if (taskId.startsWith('expand-characters')) {
-          console.log('✅ 人物扩展任务完成', data)
-          showSnackbar(data.message || '✅ 人物扩展完成！可点击「查看结果」查看AI建议', 'success')
-          
-          // 🆕 存储结果到 localStorage + state
-          const resultData = data.result || {}
-          setExpandCharactersResult(resultData)
-          localStorage.setItem(`character_expand_result_${projectId}`, JSON.stringify(resultData))
-          
-          // 🆕 切换按钮状态为 resultReady
-          setCharacterExpandState('resultReady')
-          localStorage.setItem(`character_expand_state_${projectId}`, 'resultReady')
-          
-          // 🆕 触发一次动效
-          setCharacterButtonHighlightKey(prev => prev + 1)
-          
-          // 刷新数据
-          loadWorkflowData()
-          
-          // ✅ 修复：使用函数式setState，避免闭包陷阱
-          setExpandingCharacters(prev => {
-            console.log('🔄 清除人物扩展状态: prev =', prev, '-> false')
-            return false
-          })
-          // 🆕 清除localStorage状态
-          localStorage.removeItem(`expanding_characters_${projectId}`)
-          localStorage.removeItem(`expanding_characters_start_${projectId}`)
-          localStorage.removeItem(`expanding_characters_task_${projectId}`)
+          const baseMessage = typeof resultData.message === 'string' && resultData.message.trim()
+            ? resultData.message.trim()
+            : (data.message || '协同拓展完成')
+          showSnackbar(buildStoryExpansionCompletionMessage(baseMessage, resultData), 'success')
         }
       }
       
@@ -792,11 +603,7 @@ export default function KnowledgeBasePage() {
         const taskId = data.task_id || ''
         const message = data.message || ''
         
-        if (
-          taskId.startsWith('expand-story') ||
-          taskId.startsWith('expand-outline') ||
-          taskId.startsWith('expand-characters')
-        ) {
+        if (taskId.startsWith('expand-story')) {
           console.log(`🔄 ${message}`)
           // 可以在这里显示进度条（可选）
         }
@@ -806,31 +613,13 @@ export default function KnowledgeBasePage() {
       workflowWebSocket.onTaskError((data: any) => {
         const taskId = data.task_id || ''
         const error = data.error || '任务失败'
-        
-        if (taskId.startsWith('expand-outline')) {
-          showSnackbar(`❌ 大纲扩展失败: ${error}`, 'error')
-          // ✅ 修复：使用函数式setState
-          setExpandingOutline(prev => {
-            console.log('❌ 大纲扩展失败，清除状态: prev =', prev, '-> false')
-            return false
-          })
-          // 🆕 清除localStorage状态
-          localStorage.removeItem(`expanding_outline_${projectId}`)
-          localStorage.removeItem(`expanding_outline_start_${projectId}`)
-          localStorage.removeItem(`expanding_outline_task_${projectId}`)
-        }
-        
-        if (taskId.startsWith('expand-characters')) {
-          showSnackbar(`❌ 人物扩展失败: ${error}`, 'error')
-          // ✅ 修复：使用函数式setState
-          setExpandingCharacters(prev => {
-            console.log('❌ 人物扩展失败，清除状态: prev =', prev, '-> false')
-            return false
-          })
-          // 🆕 清除localStorage状态
-          localStorage.removeItem(`expanding_characters_${projectId}`)
-          localStorage.removeItem(`expanding_characters_start_${projectId}`)
-          localStorage.removeItem(`expanding_characters_task_${projectId}`)
+
+        if (taskId.startsWith('expand-story')) {
+          showSnackbar(`❌ 协同拓展失败: ${error}`, 'error')
+          setExpandingStory(false)
+          localStorage.removeItem(`expanding_story_${projectId}`)
+          localStorage.removeItem(`expanding_story_start_${projectId}`)
+          localStorage.removeItem(`expanding_story_task_${projectId}`)
         }
       })
 
@@ -844,26 +633,6 @@ export default function KnowledgeBasePage() {
             localStorage.removeItem(`expanding_story_start_${projectId}`)
             localStorage.removeItem(`expanding_story_task_${projectId}`)
             showSnackbar('❌ 后端服务断开，协同拓展任务已取消', 'error')
-          }
-          return false
-        })
-        setExpandingOutline(prev => {
-          if (prev) {
-            console.log('⚠️ WebSocket断开，清除大纲扩展状态')
-            localStorage.removeItem(`expanding_outline_${projectId}`)
-            localStorage.removeItem(`expanding_outline_start_${projectId}`)
-            localStorage.removeItem(`expanding_outline_task_${projectId}`)
-            showSnackbar('❌ 后端服务断开，大纲扩展任务已取消', 'error')
-          }
-          return false
-        })
-        setExpandingCharacters(prev => {
-          if (prev) {
-            console.log('⚠️ WebSocket断开，清除人物扩展状态')
-            localStorage.removeItem(`expanding_characters_${projectId}`)
-            localStorage.removeItem(`expanding_characters_start_${projectId}`)
-            localStorage.removeItem(`expanding_characters_task_${projectId}`)
-            showSnackbar('❌ 后端服务断开，人物扩展任务已取消', 'error')
           }
           return false
         })
@@ -924,13 +693,10 @@ export default function KnowledgeBasePage() {
       warmImport(loadVditorEditor)
     }
 
-    if (showExpansionConfig) {
-      warmImport(loadExpansionConfigDialog)
-    }
     if (showStoryExpansionDialog) {
       warmImport(loadStoryExpansionDialog)
     }
-  }, [mainTabValue, characterSubTabValue, settingSubTabValue, isEditing, showExpansionConfig, showStoryExpansionDialog])
+  }, [mainTabValue, characterSubTabValue, settingSubTabValue, isEditing, showStoryExpansionDialog])
 
 
   // 加载历史记录
@@ -1744,7 +1510,6 @@ export default function KnowledgeBasePage() {
     if (!projectId) return
 
     try {
-      setLoadingFramework(true)
       // 🆕 使用新的状态检测API
       const response = await apiClient.getEpicFrameworkState(parseInt(projectId))
       const data = response.data
@@ -1756,7 +1521,7 @@ export default function KnowledgeBasePage() {
           metadata: {
             total_volumes: data.total_volumes,
             expanded_volumes: data.expanded_volumes,
-            total_chapters_range: [totalChaptersMin, totalChaptersMax],  // 使用当前设置
+            total_chapters_range: [storyTotalChaptersMin, storyTotalChaptersMax],
           },
           framework_generated_at: data.framework_generated_at
         })
@@ -1768,23 +1533,141 @@ export default function KnowledgeBasePage() {
     } catch (error) {
       console.error('❌ 加载框架状态失败:', error)
       setFrameworkMetadata(null)
-    } finally {
-      setLoadingFramework(false)
     }
   }
 
-  const openStoryExpansion = () => {
+  const loadStoryExpansionAnalysis = async () => {
+    if (!projectId) return
+    if (!worldSetting || (!plotOutline && !characters)) return
+
+    setStoryExpansionAnalysisLoading(true)
+    try {
+      const currentChapters = getCurrentChapterCount()
+      const currentCharacters = getCurrentCharacterCount()
+      const requestedTargetChapters =
+        storyExpansionMode === 'epic_framework'
+          ? (storyTotalChaptersMax > currentChapters ? storyTotalChaptersMax : undefined)
+          : (
+            storyExpansionMode === 'volume_detail'
+              ? undefined
+              : (storyTargetChapterCount > currentChapters ? storyTargetChapterCount : undefined)
+          )
+      const requestedTargetCharacters =
+        storyTargetCharacterCount > currentCharacters ? storyTargetCharacterCount : undefined
+      const requiresEpicFrameworkReset =
+        storyExpansionMode === 'total'
+        && !!frameworkMetadata?.has_framework
+        && requestedTargetChapters !== undefined
+
+      const response = await fetch('/api/v1/workflow/expand-story/analysis', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          project_id: parseInt(projectId),
+          current_outline: plotOutline || '',
+          world_setting: worldSetting || '',
+          characters: characters || '',
+          current_chapter_count: currentChapters,
+          current_character_count: currentCharacters,
+          target_total_chapters: requestedTargetChapters,
+          target_total_characters: requestedTargetCharacters,
+          strategy: storyExpansionStrategy,
+          intent: storyExpansionIntent,
+          enable_auto_supplement: storyAutoSupplementEnabled,
+          expansion_mode: storyExpansionMode,
+          total_volumes: storyExpansionMode === 'epic_framework' ? storyTotalVolumes : undefined,
+          total_chapters_min: storyExpansionMode === 'epic_framework' ? storyTotalChaptersMin : undefined,
+          total_chapters_max: storyExpansionMode === 'epic_framework' ? storyTotalChaptersMax : undefined,
+          target_volume_index: storyExpansionMode === 'volume_detail' ? storyTargetVolumeIndex : undefined,
+          volume_chapters_min: storyExpansionMode === 'volume_detail' ? storyVolumeChaptersMin : undefined,
+          volume_chapters_max: storyExpansionMode === 'volume_detail' ? storyVolumeChaptersMax : undefined,
+          preserve_written_mode: storyPreserveWrittenMode,
+          reset_epic_framework: requiresEpicFrameworkReset,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`协同预检失败: ${response.status}`)
+      }
+
+      const data = await response.json()
+      setStoryExpansionAnalysis(data?.analysis || null)
+    } catch (error) {
+      console.error('❌ 协同预检失败:', error)
+      setStoryExpansionAnalysis(null)
+    } finally {
+      setStoryExpansionAnalysisLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!showStoryExpansionDialog || !projectId) return
+    if (!worldSetting || (!plotOutline && !characters)) return
+
+    void loadStoryExpansionAnalysis()
+  }, [
+    showStoryExpansionDialog,
+    projectId,
+    plotOutline,
+    worldSetting,
+    characters,
+    storyTargetChapterCount,
+    storyTargetCharacterCount,
+    storyExpansionMode,
+    storyTotalVolumes,
+    storyTotalChaptersMin,
+    storyTotalChaptersMax,
+    storyTargetVolumeIndex,
+    storyVolumeChaptersMin,
+    storyVolumeChaptersMax,
+    storyExpansionStrategy,
+    storyExpansionIntent,
+    storyAutoSupplementEnabled,
+    storyPreserveWrittenMode,
+    frameworkMetadata,
+  ])
+
+  const openStoryExpansion = (entryPoint: 'outline' | 'character' = 'outline') => {
     const currentChapters = getCurrentChapterCount()
     const currentCharacters = getCurrentCharacterCount()
+    const defaultChapterTarget = currentChapters > 0 ? currentChapters + 8 : 8
+    const defaultCharacterTarget = currentCharacters > 0 ? currentCharacters + 3 : 3
 
-    setStoryTargetChapterCount((prev) => {
-      if (prev > currentChapters) return prev
-      return currentChapters > 0 ? currentChapters + 8 : 8
-    })
-    setStoryTargetCharacterCount((prev) => {
-      if (prev > currentCharacters) return prev
-      return currentCharacters > 0 ? currentCharacters + 3 : 3
-    })
+    setStoryExpansionStrategy('auto')
+    setStoryAutoSupplementEnabled(true)
+    setStoryExpansionIntent(entryPoint === 'character' ? 'character_led' : 'outline_led')
+    setStoryExpansionMode(
+      entryPoint === 'character'
+        ? 'total'
+        : (recommendedMode === 'epic_framework' ? 'epic_framework' : 'total')
+    )
+    setStoryTargetChapterCount(entryPoint === 'character' ? currentChapters : defaultChapterTarget)
+    setStoryTargetCharacterCount(entryPoint === 'character' ? defaultCharacterTarget : currentCharacters)
+    setStoryTotalVolumes((prev) => prev || (recommendedMode === 'epic_framework' ? recommendedVolumes : 30))
+    setStoryTotalChaptersMin((prev) => (
+      prev || (
+        recommendedMode === 'epic_framework'
+          ? recommendedVolumes * recommendedChaptersPerVolumeMin
+          : 2000
+      )
+    ))
+    setStoryTotalChaptersMax((prev) => (
+      prev || (
+        recommendedMode === 'epic_framework'
+          ? recommendedVolumes * recommendedChaptersPerVolumeMax
+          : 2500
+      )
+    ))
+    setStoryTargetVolumeIndex((prev) => prev || 1)
+    setStoryVolumeChaptersMin((prev) => prev || 50)
+    setStoryVolumeChaptersMax((prev) => prev || 80)
+    if (!frameworkMetadata) {
+      void loadEpicFramework()
+    }
+    setStoryExpansionAnalysis(null)
     setShowStoryExpansionDialog(true)
   }
 
@@ -1794,33 +1677,114 @@ export default function KnowledgeBasePage() {
     try {
       const currentChapters = getCurrentChapterCount()
       const currentCharacters = getCurrentCharacterCount()
-      const chapterDelta = storyTargetChapterCount - currentChapters
+      const requestedTargetChapterCount =
+        storyExpansionMode === 'epic_framework'
+          ? storyTotalChaptersMax
+          : (storyExpansionMode === 'volume_detail' ? undefined : storyTargetChapterCount)
+      const chapterDelta = (requestedTargetChapterCount ?? currentChapters) - currentChapters
       const characterDelta = storyTargetCharacterCount - currentCharacters
+      const requiresEpicFrameworkReset =
+        storyExpansionMode === 'total'
+        && !!frameworkMetadata?.has_framework
+        && chapterDelta > 0
 
-      if (!plotOutline || !worldSetting) {
+      if (!worldSetting || (!plotOutline && !characters)) {
         showSnackbar('请先准备好世界观和情节大纲，再执行协同拓展', 'error')
         return
       }
 
-      if (chapterDelta <= 0 && characterDelta <= 0) {
+      const isVolumeDetailMode = storyExpansionMode === 'volume_detail'
+      if (!isVolumeDetailMode && chapterDelta <= 0 && characterDelta <= 0) {
         showSnackbar('目标章节数或目标人物数至少要有一项高于当前值', 'error')
         return
       }
 
-      if (chapterDelta > 30) {
-        showSnackbar('协同拓展单轮最多新增 30 章，请分轮执行', 'error')
+      if (storyExpansionMode === 'epic_framework') {
+        if (!storyTotalVolumes || storyTotalVolumes < 5 || storyTotalVolumes > 50) {
+          showSnackbar('长篇框架协同需要有效的总卷数 (5-50)', 'error')
+          return
+        }
+        if (
+          !storyTotalChaptersMin ||
+          !storyTotalChaptersMax ||
+          storyTotalChaptersMin < 400 ||
+          storyTotalChaptersMax > 5000 ||
+          storyTotalChaptersMin > storyTotalChaptersMax
+        ) {
+          showSnackbar('长篇框架协同需要有效的总章节范围 (400-5000)', 'error')
+          return
+        }
+      }
+
+      if (isVolumeDetailMode) {
+        if (!frameworkMetadata?.has_framework) {
+          showSnackbar('单卷细化协同需要先生成史诗框架', 'error')
+          return
+        }
+        if (
+          !storyTargetVolumeIndex ||
+          storyTargetVolumeIndex < 1 ||
+          storyTargetVolumeIndex > (frameworkMetadata.metadata?.total_volumes || 50)
+        ) {
+          showSnackbar(`请输入有效的卷编号 (1-${frameworkMetadata.metadata?.total_volumes || 50})`, 'error')
+          return
+        }
+        if (
+          !storyVolumeChaptersMin ||
+          !storyVolumeChaptersMax ||
+          storyVolumeChaptersMin < 30 ||
+          storyVolumeChaptersMax > 80 ||
+          storyVolumeChaptersMin > storyVolumeChaptersMax
+        ) {
+          showSnackbar('请输入有效的本卷章节范围 (30-80)', 'error')
+          return
+        }
+        if (frameworkMetadata.metadata?.expanded_volumes?.includes(storyTargetVolumeIndex)) {
+          const confirmed = confirm(`第${storyTargetVolumeIndex}卷细纲已存在，重新协同生成将覆盖现有细纲。\n\n确认继续吗？`)
+          if (!confirmed) {
+            return
+          }
+        }
+      }
+
+      if ((requestedTargetChapterCount || 0) > Math.max(5000, currentChapters)) {
+        showSnackbar('协同拓展当前目标超出章节规划上限，请缩小目标范围', 'error')
         return
       }
 
-      if (characterDelta > 10) {
-        showSnackbar('协同拓展单轮最多新增 10 个角色，请分轮执行', 'error')
+      if (storyTargetCharacterCount > Math.max(200, currentCharacters)) {
+        showSnackbar('协同拓展当前目标超出人物规划上限，请缩小目标范围', 'error')
         return
+      }
+
+      if (requiresEpicFrameworkReset) {
+        const confirmed = confirm(
+          '当前项目已存在史诗框架与卷细纲。\n\n继续使用“常规协同”补章节会清空旧框架状态，后续将以新的章节大纲为准。\n\n确认继续吗？'
+        )
+        if (!confirmed) {
+          return
+        }
       }
 
       localStorage.removeItem(`story_expand_result_${projectId}`)
       setStoryExpansionResult(null)
       setExpandingStory(true)
       setShowStoryExpansionDialog(false)
+
+      const effectiveTargetChapterCount =
+        storyExpansionAnalysis?.effective_target_chapter_count &&
+        storyExpansionAnalysis.effective_target_chapter_count > currentChapters
+          ? storyExpansionAnalysis.effective_target_chapter_count
+          : (isVolumeDetailMode
+            ? undefined
+            : (chapterDelta > 0 ? requestedTargetChapterCount : undefined))
+      const effectiveTargetCharacterCount =
+        storyExpansionAnalysis?.effective_target_character_count &&
+        storyExpansionAnalysis.effective_target_character_count > currentCharacters
+          ? storyExpansionAnalysis.effective_target_character_count
+          : (characterDelta > 0 ? storyTargetCharacterCount : undefined)
+      const effectiveStrategy =
+        (storyExpansionAnalysis?.effective_strategy as StoryExpansionStrategy | undefined) || storyExpansionStrategy
 
       const payload = {
         project_id: parseInt(projectId),
@@ -1829,9 +1793,20 @@ export default function KnowledgeBasePage() {
         characters: characters || '',
         current_chapter_count: currentChapters,
         current_character_count: currentCharacters,
-        target_total_chapters: chapterDelta > 0 ? storyTargetChapterCount : undefined,
-        target_total_characters: characterDelta > 0 ? storyTargetCharacterCount : undefined,
-        strategy: storyExpansionStrategy,
+        target_total_chapters: effectiveTargetChapterCount,
+        target_total_characters: effectiveTargetCharacterCount,
+        strategy: effectiveStrategy,
+        intent: storyExpansionIntent,
+        enable_auto_supplement: storyAutoSupplementEnabled,
+        expansion_mode: storyExpansionMode,
+        total_volumes: storyExpansionMode === 'epic_framework' ? storyTotalVolumes : undefined,
+        total_chapters_min: storyExpansionMode === 'epic_framework' ? storyTotalChaptersMin : undefined,
+        total_chapters_max: storyExpansionMode === 'epic_framework' ? storyTotalChaptersMax : undefined,
+        target_volume_index: storyExpansionMode === 'volume_detail' ? storyTargetVolumeIndex : undefined,
+        volume_chapters_min: storyExpansionMode === 'volume_detail' ? storyVolumeChaptersMin : undefined,
+        volume_chapters_max: storyExpansionMode === 'volume_detail' ? storyVolumeChaptersMax : undefined,
+        preserve_written_mode: storyPreserveWrittenMode,
+        reset_epic_framework: requiresEpicFrameworkReset,
       }
 
       const response = await fetch('/api/v1/workflow/expand-story', {
@@ -1864,297 +1839,6 @@ export default function KnowledgeBasePage() {
       localStorage.removeItem(`expanding_story_${projectId}`)
       localStorage.removeItem(`expanding_story_start_${projectId}`)
       localStorage.removeItem(`expanding_story_task_${projectId}`)
-    }
-  }
-
-  // 大纲扩展主函数（🆕 异步后台执行）
-  const handleExpandOutline = async () => {
-    if (!projectId) return
-
-    try {
-      // 🆕 阶段1: 检测框架状态（针对史诗框架模式和单卷详细模式）
-      if (expansionMode === 'epic_framework' || expansionMode === 'volume_detail') {
-        const response = await apiClient.getEpicFrameworkState(parseInt(projectId))
-        const state = response.data
-        
-        // 情兵1: 史诗框架模式 - 已有框架且没有选择具体卷，提示重生
-        if (expansionMode === 'epic_framework' && state.has_framework && targetVolumeIndex === 0) {
-          setConfirmDialogType('regenerate')
-          setConfirmDialogMessage(
-            `已存在${state.total_volumes}卷框架，重新生成将清除所有已扩展的卷细纲（${state.expanded_volumes.length}个卷）。\n\n确认要重生框架吗？`
-          )
-          setConfirmDialogOpen(true)
-          setPendingAction(() => executeExpandOutline)
-          return  // 等待用户确认
-        }
-        
-        // 情况2: 史诗框架模式 - 选择了具体卷 OR 单卷详细模式 - 检查是否已有该卷细纲
-        if (targetVolumeIndex > 0 && state.has_framework && state.expanded_volumes.includes(targetVolumeIndex)) {
-          setConfirmDialogType('duplicate')
-          setConfirmDialogMessage(
-            `第${targetVolumeIndex}卷细纲已存在，重新生成将覆盖现有内容。\n\n确认要重新生成该卷吗？`
-          )
-          setConfirmDialogOpen(true)
-          setPendingAction(() => executeExpandOutline)
-          console.log(`⚠️ 第${targetVolumeIndex}卷已存在，等待用户确认...`)
-          return  // 等待用户确认
-        }
-      }
-      
-      // 直接执行扩展
-      await executeExpandOutline()
-      
-    } catch (error) {
-      console.error('❌ 检测框架状态失败:', error)
-      // 失败也继续执行
-      await executeExpandOutline()
-    }
-  }
-
-  // 🆕 实际执行扩展的函数
-  const executeExpandOutline = async () => {
-    if (!projectId) return
-
-    try {
-      setExpandingOutline(true)
-      console.log('📖 开始扩展大纲...')
-      
-      // 🔥 根据模式验证参数
-      let calculatedTargetChapters = targetChapterCount
-      
-      if (expansionMode === 'epic_framework') {
-        // 🌟 史诗框架模式:验证卷数和章节范围
-        if (!totalVolumes || totalVolumes < 5 || totalVolumes > 50) {
-          showSnackbar('请输入有效的总卷数 (5-50)', 'error')
-          setExpandingOutline(false)
-          return
-        }
-        if (!totalChaptersMin || !totalChaptersMax || totalChaptersMin < 400 || totalChaptersMax > 5000 || totalChaptersMin > totalChaptersMax) {
-          showSnackbar('请输入有效的总章节范围 (400-5000)', 'error')
-          setExpandingOutline(false)
-          return
-        }
-        console.log(`🌟 史诗框架模式: ${totalVolumes}卷, ${totalChaptersMin}-${totalChaptersMax}章`)
-        
-        // 🔥 如果选择了具体卷编号，验证单卷参数
-        if (targetVolumeIndex > 0) {
-          if (targetVolumeIndex > (frameworkMetadata?.metadata?.total_volumes || totalVolumes)) {
-            showSnackbar(`卷编号超出范围 (1-${frameworkMetadata?.metadata?.total_volumes || totalVolumes})`, 'error')
-            setExpandingOutline(false)
-            return
-          }
-          if (!volumeChaptersMin || !volumeChaptersMax || volumeChaptersMin < 30 || volumeChaptersMax > 80 || volumeChaptersMin > volumeChaptersMax) {
-            showSnackbar('请输入有效的本卷章节范围 (30-80)，增加章数请增加卷数', 'error')
-            setExpandingOutline(false)
-            return
-          }
-          console.log(`📖 将扩展第${targetVolumeIndex}卷: ${volumeChaptersMin}-${volumeChaptersMax}章`)
-        }
-      } else if (expansionMode === 'volume_detail') {
-        // 📖 单卷详细模式:验证框架内容和卷编号
-        if (!savedFramework || savedFramework.trim().length < 100) {
-          showSnackbar('请先使用史诗框架模式生成框架', 'error')
-          setExpandingOutline(false)
-          return
-        }
-        if (!targetVolumeIndex || targetVolumeIndex < 1 || targetVolumeIndex > (frameworkMetadata?.total_volumes || 50)) {
-          showSnackbar(`请输入有效的卷编号 (1-${frameworkMetadata?.total_volumes || 50})`, 'error')
-          setExpandingOutline(false)
-          return
-        }
-        if (!volumeChaptersMin || !volumeChaptersMax || volumeChaptersMin < 30 || volumeChaptersMax > 80 || volumeChaptersMin > volumeChaptersMax) {
-          showSnackbar('请输入有效的本卷章节范围 (30-80)，增加章数请增加卷数', 'error')
-          setExpandingOutline(false)
-          return
-        }
-        console.log(`📖 单卷详细模式: 扩展第${targetVolumeIndex}卷, ${volumeChaptersMin}-${volumeChaptersMax}章`)
-      } else if (expansionMode === 'volume') {
-        // 按卷模式:计算目标总章节数
-        if (!targetVolumes || targetVolumes < 1 || targetVolumes > 10) {
-          showSnackbar('请输入有效的目标卷数 (1-10)', 'error')
-          setExpandingOutline(false)
-          return
-        }
-        const avgChapters = Math.floor((chaptersPerVolumeMin + chaptersPerVolumeMax) / 2)
-        calculatedTargetChapters = targetVolumes * avgChapters
-        console.log(`📚 按卷模式: ${targetVolumes}卷 x 约${avgChapters}章 = ${calculatedTargetChapters}章`)
-      } else if (expansionMode === 'incremental') {
-        // 渐进式模式:当前章节数 + 增量
-        const currentChapters = getCurrentChapterCount()
-        if (!incrementalStep || incrementalStep < 5 || incrementalStep > 30) {
-          showSnackbar('请输入有效的每次扩展章节数 (5-30)', 'error')
-          setExpandingOutline(false)
-          return
-        }
-        calculatedTargetChapters = currentChapters + incrementalStep
-        console.log(`🔄 渐进式模式: ${currentChapters}章 + ${incrementalStep}章 = ${calculatedTargetChapters}章`)
-      } else {
-        // 按总章数模式:校验目标章节数
-        if (!calculatedTargetChapters || calculatedTargetChapters < 10 || calculatedTargetChapters > 200) {
-          showSnackbar('请输入有效的目标章节数 (10-200)', 'error')
-          setExpandingOutline(false)
-          return
-        }
-      }
-
-      // 从当前阶段获取数据
-      let currentOutline = plotOutline || ''
-      const worldSettingData = worldSetting || ''
-      const charactersData = characters || ''
-
-      if (!currentOutline) {
-        showSnackbar('⚠️ 请先完成结构设计阶段，生成情节大纲', 'error')
-        setExpandingOutline(false)
-        return
-      }
-
-      // 🆕 确定实际发送的扩展模式
-      let actualExpansionMode = expansionMode
-      
-      // 如果是史诗框架模式 + 手动选卷 + 选择了具体卷编号，切换到 volume_detail 模式
-      if (expansionMode === 'epic_framework' && targetVolumeIndex > 0) {
-        actualExpansionMode = 'volume_detail'
-        console.log(`📖 自动切换到单卷详细模式: 第${targetVolumeIndex}卷`)
-      }
-
-      // 🆕 启动后台任务（只调用一次，立即返回）
-      const increment = 10
-      const response = await fetch('/api/v1/workflow/expand-outline', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          project_id: parseInt(projectId),
-          current_outline: currentOutline,
-          world_setting: worldSettingData,
-          characters: charactersData,
-          current_chapter_count: 0,  // 自动识别
-          increment: increment,
-          target_total_chapters: calculatedTargetChapters,  // 严格遵守目标数
-          // 🔥 多模式参数
-          expansion_mode: actualExpansionMode,  // 🆕 使用实际模式
-          target_volumes: targetVolumes,
-          chapters_per_volume_min: chaptersPerVolumeMin,
-          chapters_per_volume_max: chaptersPerVolumeMax,
-          incremental_step: incrementalStep,
-          // 🌟 史诗框架模式参数
-          total_volumes: totalVolumes,
-          total_chapters_min: totalChaptersMin,
-          total_chapters_max: totalChaptersMax,
-          // 🔥 删除了 auto_expand_all_volumes 参数
-          // 📖 单卷详细模式参数
-          framework_content: savedFramework,
-          target_volume_index: targetVolumeIndex,
-          volume_chapters_min: volumeChaptersMin,
-          volume_chapters_max: volumeChaptersMax,
-          // 🆕 已写章节处理模式（自动检测+提取，保证质量）
-          preserve_written_mode: "extract_extend",
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error(`扩展大纲失败: ${response.status}`)
-      }
-
-      const data = await response.json()
-      if (data?.task_id) {
-        localStorage.setItem(`expanding_outline_task_${projectId}`, String(data.task_id))
-      } else {
-        localStorage.removeItem(`expanding_outline_task_${projectId}`)
-      }
-      console.log(`✅ 后台任务已启动，Task ID: ${data.task_id}`)
-
-      // 🆕 保存到localStorage
-      localStorage.setItem(`expanding_outline_${projectId}`, 'true')
-      // 🆕 记录任务开始时间
-      localStorage.setItem(`expanding_outline_start_${projectId}`, Date.now().toString())
-
-      showSnackbar('📖 大纲扩展任务已启动，正在后台执行，你可以切换到其他页面', 'success')
-      
-      // ✅ 保持按钮禁用状态，直到WebSocket接收到任务完成消息
-      // setExpandingOutline(false) —— 已移除，由WebSocket监听器清除状态
-      
-    } catch (error) {
-      console.error('❌ 扩展大纲失败:', error)
-      showSnackbar(`扩展大纲失败: ${error}`, 'error')
-      setExpandingOutline(false)
-      localStorage.removeItem(`expanding_outline_start_${projectId}`)
-      localStorage.removeItem(`expanding_outline_task_${projectId}`)
-    }
-  }
-
-  // 🆕 人物扩展主函数（异步后台执行）
-  const handleExpandCharacters = async () => {
-    if (!projectId) return
-
-    try {
-      setExpandingCharacters(true)
-      console.log('👥 开始扩展人物...')
-      
-      // 🔴 校验目标人物数
-      if (!targetCharacterCount || targetCharacterCount < 5 || targetCharacterCount > 50) {
-        showSnackbar('请输入有效的目标人物数 (5-50)', 'error')
-        setExpandingCharacters(false)
-        return
-      }
-
-      const mainCharacters = characters || ''
-      const worldSettingData = worldSetting || ''
-      const plotOutlineData = plotOutline || ''
-
-      if (!mainCharacters) {
-        showSnackbar('⚠️ 请先完成人物设定', 'error')
-        setExpandingCharacters(false)
-        return
-      }
-
-      // 🆕 启动后台任务（立即返回）
-      const response = await fetch('/api/v1/workflow/expand-characters', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          project_id: parseInt(projectId),
-          main_characters: mainCharacters,
-          world_setting: worldSettingData,
-          plot_outline: plotOutlineData,
-          current_character_count: 0,  // 自动识别
-          target_total_characters: targetCharacterCount || 25,  // 严格遵守目标数
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error(`扩展人物失败: ${response.status}`)
-      }
-
-      const data = await response.json()
-      if (data?.task_id) {
-        localStorage.setItem(`expanding_characters_task_${projectId}`, String(data.task_id))
-      } else {
-        localStorage.removeItem(`expanding_characters_task_${projectId}`)
-      }
-      console.log('✅ 后台任务已启动:', data)
-
-      // 🆕 保存到localStorage
-      localStorage.setItem(`expanding_characters_${projectId}`, 'true')
-      // 🆕 记录任务开始时间
-      localStorage.setItem(`expanding_characters_start_${projectId}`, Date.now().toString())
-
-      showSnackbar('👥 人物扩展任务已启动，正在后台执行，你可以切换到其他页面', 'success')
-      
-      // ✅ 保持按钮禁用状态，直到WebSocket接收到任务完成消息
-      // setExpandingCharacters(false) —— 已移除，由WebSocket监听器清除状态
-      
-    } catch (error) {
-      console.error('❌ 扩展人物失败:', error)
-      showSnackbar(`扩展人物失败: ${error}`, 'error')
-      setExpandingCharacters(false)
-      localStorage.removeItem(`expanding_characters_start_${projectId}`)
-      localStorage.removeItem(`expanding_characters_task_${projectId}`)
     }
   }
 
@@ -2321,7 +2005,7 @@ export default function KnowledgeBasePage() {
                       onClick={handleStartEdit}
                       onMouseEnter={() => warmImport(loadVditorEditor)}
                       onFocus={() => warmImport(loadVditorEditor)}
-                      disabled={!getCurrentContent() || expandingStory || expandingCharacters || expandingOutline}
+                      disabled={!getCurrentContent() || expandingStory}
                       sx={{ borderRadius: 2 }}
                     >
                       编辑{getTabTitle()}
@@ -2329,7 +2013,7 @@ export default function KnowledgeBasePage() {
                     {(mainTabValue === 2 || (mainTabValue === 1 && characterSubTabValue === 0)) && (
                       <>
                         <Tooltip
-                          title="协同拓展会同时分析章节缺口和人物缺口，只补新增内容，不会整本重写"
+                          title={recommendationReason || '协同拓展会同时分析章节缺口和人物缺口，只补新增内容，不会整本重写'}
                           placement="top"
                           arrow
                         >
@@ -2340,8 +2024,8 @@ export default function KnowledgeBasePage() {
                               startIcon={expandingStory ? <CircularProgress size={20} /> : <AutoFixHighIcon />}
                               onMouseEnter={() => warmImport(loadStoryExpansionDialog)}
                               onFocus={() => warmImport(loadStoryExpansionDialog)}
-                              onClick={openStoryExpansion}
-                              disabled={expandingStory || expandingOutline || expandingCharacters || !worldSetting || !plotOutline}
+                              onClick={() => openStoryExpansion(mainTabValue === 1 ? 'character' : 'outline')}
+                              disabled={expandingStory || !worldSetting || (!plotOutline && !characters)}
                               sx={{
                                 borderRadius: 2,
                                 bgcolor: '#0f766e',
@@ -2358,143 +2042,11 @@ export default function KnowledgeBasePage() {
                           <Button
                             variant="text"
                             onClick={() => setShowStoryExpansionResultDialog(true)}
-                            disabled={expandingOutline || expandingCharacters}
                             sx={{ borderRadius: 2 }}
                           >
                             查看协同结果
                           </Button>
                         )}
-                      </>
-                    )}
-                    
-                    {/* 大纲设定扩展按钮 */}
-                    {mainTabValue === 2 && (
-                      <Tooltip
-                        title="💡 建议扩展人物和扩展大纲交替进行，直到满意再进行后续创作，人物和大纲是后续创作的根基"
-                        placement="top"
-                        arrow
-                      >
-                        <Button
-                          variant="outlined"
-                          startIcon={<ArticleIcon />}
-                          onMouseEnter={() => warmImport(loadExpansionConfigDialog)}
-                          onFocus={() => warmImport(loadExpansionConfigDialog)}
-                          onClick={() => {
-                            // 💡 打开对话框前自动选中推荐模式
-                            console.log('💡 打开大纲扩展配置，自动选中推荐模式：', recommendedMode)
-                            setExpansionMode(recommendedMode)
-                            
-                            // 🔄 如果推荐史诗框架，同步推荐的参数
-                            if (recommendedMode === 'epic_framework') {
-                              setTotalVolumes(recommendedVolumes)
-                              setTotalChaptersMin(recommendedVolumes * recommendedChaptersPerVolumeMin)
-                              setTotalChaptersMax(recommendedVolumes * recommendedChaptersPerVolumeMax)
-                              // 🔥 删除了智能推荐自动扩展逻辑
-                              // setAutoExpandAllVolumes(recommendedAutoExpandAllVolumes)
-                            }
-                            
-                            // 🆕 始终加载框架状态（无论是否为史诗模式）
-                            loadEpicFramework()
-                            
-                            setShowExpansionConfig(true)
-                          }}
-                          disabled={expandingStory || expandingOutline || expandingCharacters}
-                          sx={{ borderRadius: 2 }}
-                        >
-                          高级大纲扩展
-                        </Button>
-                      </Tooltip>
-                    )}
-                    {mainTabValue === 1 && characterSubTabValue === 0 && (
-                      <>
-                        <TextField
-                          label="目标人物数"
-                          type="number"
-                          size="small"
-                          value={targetCharacterCount || ''}
-                          onChange={(e) => {
-                            const value = parseInt(e.target.value, 10)
-                            setTargetCharacterCount(Number.isNaN(value) ? 0 : value)
-                          }}
-                          placeholder={`已有 ${getCurrentCharacterCount()} 个人物`}
-                          inputProps={{ min: 5, max: 50 }}
-                          error={targetCharacterCount > 0 && (targetCharacterCount < 5 || targetCharacterCount > 50)}
-                          helperText={
-                            targetCharacterCount > 0 && (targetCharacterCount < 5 || targetCharacterCount > 50)
-                              ? '请输入 5-50 之间的数字'
-                              : ''
-                          }
-                          sx={{ width: 150 }}
-                        />
-                        <Tooltip
-                          title={
-                            expandingCharacters 
-                              ? "扩展进行中，请稍候" 
-                              : characterExpandState === 'resultReady'
-                              ? "查看AI生成的人物扩展结果与建议"
-                              : "💡 建议扩展人物和扩展大纲交替进行，直到满意再进行后续创作，人物和大纲是后续创作的根基"
-                          }
-                          placement="top"
-                          arrow
-                        >
-                          <span>
-                            <Button
-                              variant="outlined"
-                              color="primary"
-                              startIcon={
-                                expandingCharacters 
-                                  ? <CircularProgress size={20} /> 
-                                  : characterExpandState === 'resultReady'
-                                  ? <Box sx={{ position: 'relative', display: 'inline-flex' }}>
-                                      <PeopleAltIcon />
-                                      <Box
-                                        sx={{
-                                          position: 'absolute',
-                                          top: -4,
-                                          right: -4,
-                                          width: 8,
-                                          height: 8,
-                                          borderRadius: '50%',
-                                          bgcolor: '#ff5252',
-                                          border: '2px solid white',
-                                        }}
-                                      />
-                                    </Box>
-                                  : <PeopleAltIcon />
-                              }
-                              onClick={() => {
-                                if (characterExpandState === 'resultReady') {
-                                  // 🆕 查看结果模式：直接打开结果弹窗
-                                  setShowExpandCharactersDialog(true)
-                                } else {
-                                  // 🆕 正常模式：执行扩展逻辑
-                                  handleExpandCharacters()
-                                }
-                              }}
-                              disabled={expandingStory || expandingCharacters || expandingOutline || (characterExpandState === 'idle' && (!characters || !worldSetting || !plotOutline))}
-                              sx={{ 
-                                borderRadius: 2,
-                                // 🆕 动效：只在状态变为 resultReady 时触发一次
-                                animation: characterExpandState === 'resultReady' && characterButtonHighlightKey > 0
-                                  ? 'characterButtonPulse 0.8s ease-in-out'
-                                  : 'none',
-                                '@keyframes characterButtonPulse': {
-                                  '0%': { transform: 'scale(1)' },
-                                  '30%': { transform: 'scale(1.05)' },
-                                  '60%': { transform: 'scale(0.98)' },
-                                  '100%': { transform: 'scale(1)' },
-                                },
-                              }}
-                            >
-                              {expandingCharacters 
-                                ? '扩展中...' 
-                                : characterExpandState === 'resultReady'
-                                ? '🔍 查看结果'
-                                : '仅扩展人物'
-                              }
-                            </Button>
-                          </span>
-                        </Tooltip>
                       </>
                     )}
                   </>
@@ -3579,544 +3131,65 @@ export default function KnowledgeBasePage() {
         </DialogActions>
       </Dialog>
 
-
-      {/* 🆕 扩展大纲结果弹窗 */}
-      <Dialog
+      <StoryExpansionResultDialog
         open={showStoryExpansionResultDialog}
+        result={storyExpansionResult}
+        expansionModeLabel={storyExpansionModeLabel}
+        strategyLabel={storyExpansionStrategyLabel}
+        intentLabel={storyExpansionIntentLabel}
+        preserveWrittenModeLabel={storyExpansionPreserveWrittenModeLabel}
+        writtenContextLabel={storyExpansionWrittenContextLabel}
+        summary={storyExpansionFeedback}
         onClose={() => setShowStoryExpansionResultDialog(false)}
-        maxWidth="lg"
-        fullWidth
-      >
-        <DialogTitle>协同拓展结果</DialogTitle>
-        <DialogContent dividers>
-          {storyExpansionResult && (
-            <Box>
-              <Paper elevation={2} sx={{ p: 2, mb: 2, bgcolor: 'secondary.50' }}>
-                <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary">协同策略</Typography>
-                    <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-                      {storyExpansionResult.story_strategy || 'auto'}
-                    </Typography>
-                  </Box>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary">章节变化</Typography>
-                    <Typography variant="h6" color="primary.main" sx={{ fontWeight: 'bold' }}>
-                      {(storyExpansionResult.validation_before?.chapter_count ?? 0)} → {(storyExpansionResult.current_chapter_count ?? 0)}
-                    </Typography>
-                  </Box>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary">人物变化</Typography>
-                    <Typography variant="h6" color="success.main" sx={{ fontWeight: 'bold' }}>
-                      {(storyExpansionResult.validation_before?.character_count ?? 0)} → {(storyExpansionResult.current_character_count ?? 0)}
-                    </Typography>
-                  </Box>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary">协同评分</Typography>
-                    <Typography variant="h6" color="warning.main" sx={{ fontWeight: 'bold' }}>
-                      {(storyExpansionResult.validation_before?.score ?? 0)} → {(storyExpansionResult.validation_after?.score ?? 0)}
-                    </Typography>
-                  </Box>
-                </Box>
-                {storyExpansionResult.coordination_summary && (
-                  <Typography variant="body2" sx={{ mt: 2 }}>
-                    {storyExpansionResult.coordination_summary}
-                  </Typography>
-                )}
-              </Paper>
-
-              {!!storyExpansionResult.new_characters?.length && (
-                <Paper elevation={1} sx={{ p: 2, mb: 2 }}>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>
-                    本轮新增角色
-                  </Typography>
-                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                    {storyExpansionResult.new_characters.map((name: string) => (
-                      <Chip key={name} label={name} color="secondary" variant="outlined" />
-                    ))}
-                  </Box>
-                </Paper>
-              )}
-
-              {!!storyExpansionResult.outline_ops?.length && (
-                <Paper elevation={1} sx={{ p: 2, mb: 2 }}>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>
-                    本轮章节操作
-                  </Typography>
-                  {storyExpansionResult.outline_ops.map((op: any, index: number) => (
-                    <Box key={`${op.action}-${index}`} sx={{ mb: index === storyExpansionResult.outline_ops.length - 1 ? 0 : 1.5 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                        {op.action === 'insert_after' ? `插入到第 ${op.after_chapter} 章后` : '追加到大纲末尾'}
-                        {` · 计划 ${op.requested_count || 0} 章 · 实际 ${op.generated_count || 0} 章`}
-                      </Typography>
-                      {op.goal && (
-                        <Typography variant="body2" color="text.secondary">
-                          {op.goal}
-                        </Typography>
-                      )}
-                      {!!op.generated_titles?.length && (
-                        <Typography variant="caption" color="text.secondary">
-                          {op.generated_titles.join('、')}
-                        </Typography>
-                      )}
-                    </Box>
-                  ))}
-                </Paper>
-              )}
-
-              <Grid container spacing={2}>
-                <Grid item xs={12} md={6}>
-                  <Paper elevation={1} sx={{ p: 2, height: '100%' }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                      <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-                        更新后大纲
-                      </Typography>
-                      <Button
-                        size="small"
-                        onClick={() => {
-                          navigator.clipboard.writeText(storyExpansionResult.expanded_outline || '')
-                          showSnackbar('已复制更新后大纲', 'success')
-                        }}
-                      >
-                        复制
-                      </Button>
-                    </Box>
-                    <Box sx={{ maxHeight: 360, overflow: 'auto', p: 2, bgcolor: 'background.default', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-                      <Typography component="pre" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', m: 0 }}>
-                        {storyExpansionResult.expanded_outline || '内容为空'}
-                      </Typography>
-                    </Box>
-                  </Paper>
-                </Grid>
-                <Grid item xs={12} md={6}>
-                  <Paper elevation={1} sx={{ p: 2, height: '100%' }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                      <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-                        更新后人物
-                      </Typography>
-                      <Button
-                        size="small"
-                        onClick={() => {
-                          navigator.clipboard.writeText(storyExpansionResult.all_characters || '')
-                          showSnackbar('已复制更新后人物', 'success')
-                        }}
-                      >
-                        复制
-                      </Button>
-                    </Box>
-                    <Box sx={{ maxHeight: 360, overflow: 'auto', p: 2, bgcolor: 'background.default', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-                      <Typography component="pre" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', m: 0 }}>
-                        {storyExpansionResult.all_characters || '内容为空'}
-                      </Typography>
-                    </Box>
-                  </Paper>
-                </Grid>
-              </Grid>
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowStoryExpansionResultDialog(false)} variant="contained">
-            关闭
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog 
-        open={showExpandOutlineDialog} 
-        onClose={() => setShowExpandOutlineDialog(false)}
-        maxWidth="md" 
-        fullWidth
-      >
-        <DialogTitle>📖 大纲扩展结果</DialogTitle>
-        <DialogContent dividers>
-          {expandOutlineResult && (
-            <Box>
-              {/* 基本信息 */}
-              <Paper elevation={2} sx={{ p: 2, mb: 2, bgcolor: 'primary.50' }}>
-                {expandOutlineResult.framework_type === 'epic' ? (
-                  // 🌟 史诗框架模式
-                  <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">总卷数</Typography>
-                      <Typography variant="h4" color="primary.main" sx={{ fontWeight: 'bold' }}>
-                        {expandOutlineResult.total_volumes || 0}
-                      </Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">预计章节</Typography>
-                      <Typography variant="h4" color="success.main" sx={{ fontWeight: 'bold' }}>
-                        {expandOutlineResult.estimated_chapters || 0}
-                      </Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">字数</Typography>
-                      <Typography variant="h6" color="text.primary">
-                        {expandOutlineResult.expanded_outline?.length || 0}
-                      </Typography>
-                    </Box>
-                  </Box>
-                ) : expandOutlineResult.volume_index ? (
-                  // 📖 单卷详细模式
-                  <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">卷编号</Typography>
-                      <Typography variant="h4" color="primary.main" sx={{ fontWeight: 'bold' }}>
-                        第{expandOutlineResult.volume_index}卷
-                      </Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">章节数</Typography>
-                      <Typography variant="h4" color="success.main" sx={{ fontWeight: 'bold' }}>
-                        {expandOutlineResult.chapter_count || 0}
-                      </Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">字数</Typography>
-                      <Typography variant="h6" color="text.primary">
-                        {expandOutlineResult.expanded_outline?.length || 0}
-                      </Typography>
-                    </Box>
-                  </Box>
-                ) : (
-                  // 原有模式
-                  <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">当前章节数</Typography>
-                      <Typography variant="h4" color="primary.main" sx={{ fontWeight: 'bold' }}>
-                        {expandOutlineResult.current_chapter_count || 0}
-                      </Typography>
-                    </Box>
-                    {expandOutlineResult.target_chapter_count && (
-                      <Box>
-                        <Typography variant="caption" color="text.secondary">目标章节数</Typography>
-                        <Typography variant="h4" color="success.main" sx={{ fontWeight: 'bold' }}>
-                          {expandOutlineResult.target_chapter_count}
-                        </Typography>
-                      </Box>
-                    )}
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">字数</Typography>
-                      <Typography variant="h6" color="text.primary">
-                        {expandOutlineResult.expanded_outline?.length || 0}
-                      </Typography>
-                    </Box>
-                  </Box>
-                )}
-              </Paper>
-
-              {/* 🤖 AI建议显示 */}
-              {expandOutlineResult.ai_suggestion && expandOutlineResult.ai_suggestion.reason && (
-                <Box sx={{ 
-                  mt: 2, 
-                  p: 1.5, 
-                  bgcolor: expandOutlineResult.ai_suggestion.should_continue ? 'info.50' : 'success.50', 
-                  borderRadius: 1, 
-                  border: '1px solid', 
-                  borderColor: expandOutlineResult.ai_suggestion.should_continue ? 'info.200' : 'success.200' 
-                }}>
-                  <Typography variant="body2" color={expandOutlineResult.ai_suggestion.should_continue ? 'info.dark' : 'success.dark'} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <span>🤖</span>
-                    <strong>AI建议：</strong>
-                    {expandOutlineResult.ai_suggestion.reason}
-                  </Typography>
-                </Box>
-              )}
-
-              {/* 内容预览 */}
-              <Paper elevation={1} sx={{ p: 2, mt: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-                    📝 内容预览
-                  </Typography>
-                  <Button
-                    size="small"
-                    onClick={() => {
-                      navigator.clipboard.writeText(expandOutlineResult.expanded_outline || '');
-                      showSnackbar('✅ 已复制到剪贴板', 'success');
-                    }}
-                  >
-                    📋 复制全部
-                  </Button>
-                </Box>
-                <Box sx={{
-                  maxHeight: 400,
-                  overflow: 'auto',
-                  p: 2,
-                  bgcolor: 'background.default',
-                  borderRadius: 1,
-                  border: '1px solid',
-                  borderColor: 'divider'
-                }}>
-                  <Typography 
-                    component="pre" 
-                    sx={{ 
-                      whiteSpace: 'pre-wrap', 
-                      wordBreak: 'break-word',
-                      fontFamily: 'inherit',
-                      margin: 0
-                    }}
-                  >
-                    {expandOutlineResult.expanded_outline || '内容为空'}
-                  </Typography>
-                </Box>
-              </Paper>
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowExpandOutlineDialog(false)} variant="contained">
-            关闭
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* 🆕 扩展人物结果弹窗 */}
-      <Dialog 
-        open={showExpandCharactersDialog} 
-        onClose={() => {
-          setShowExpandCharactersDialog(false)
-          // 🆕 关闭弹窗后，恢复按钮状态为 idle
-          setCharacterExpandState('idle')
-          localStorage.setItem(`character_expand_state_${projectId}`, 'idle')
-          // 🆕 保留结果内容以便查看历史（可选）
-          // localStorage.removeItem(`character_expand_result_${projectId}`)
-        }}
-        maxWidth="md" 
-        fullWidth
-      >
-        <DialogTitle>👥 人物扩展结果</DialogTitle>
-        <DialogContent dividers>
-          {expandCharactersResult && (
-            <Box>
-              {/* 基本信息 */}
-              <Paper elevation={2} sx={{ p: 2, mb: 2, bgcolor: 'primary.50' }}>
-                <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary">当前人物数</Typography>
-                    <Typography variant="h4" color="primary.main" sx={{ fontWeight: 'bold' }}>
-                      {expandCharactersResult.current_character_count || 0}
-                    </Typography>
-                  </Box>
-                  {expandCharactersResult.target_character_count && (
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">目标人物数</Typography>
-                      <Typography variant="h4" color="success.main" sx={{ fontWeight: 'bold' }}>
-                        {expandCharactersResult.target_character_count}
-                      </Typography>
-                    </Box>
-                  )}
-                  <Box>
-                    <Typography variant="caption" color="text.secondary">字数</Typography>
-                    <Typography variant="h6" color="text.primary">
-                      {expandCharactersResult.all_characters?.length || 0}
-                    </Typography>
-                  </Box>
-                  {expandCharactersResult.character_sync && (
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">同步结果</Typography>
-                      <Typography variant="body2" color="text.primary">
-                        解析{expandCharactersResult.character_sync.parsed}个 • 
-                        创建{expandCharactersResult.character_sync.created}个 • 
-                        更新{expandCharactersResult.character_sync.updated}个
-                      </Typography>
-                    </Box>
-                  )}
-                </Box>
-                
-                {/* 🤖 AI建议显示 */}
-                {expandCharactersResult.ai_suggestion && expandCharactersResult.ai_suggestion.reason && (
-                  <Box sx={{ 
-                    mt: 2, 
-                    p: 1.5, 
-                    bgcolor: expandCharactersResult.ai_suggestion.should_continue ? 'info.50' : 'success.50', 
-                    borderRadius: 1, 
-                    border: '1px solid', 
-                    borderColor: expandCharactersResult.ai_suggestion.should_continue ? 'info.200' : 'success.200' 
-                  }}>
-                    <Typography variant="body2" color={expandCharactersResult.ai_suggestion.should_continue ? 'info.dark' : 'success.dark'} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <span>🤖</span>
-                      <strong>AI建议：</strong>
-                      {expandCharactersResult.ai_suggestion.reason}
-                    </Typography>
-                  </Box>
-                )}
-              </Paper>
-
-              {/* 内容预览 */}
-              <Paper elevation={1} sx={{ p: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-                    📝 内容预览
-                  </Typography>
-                  <Button
-                    size="small"
-                    onClick={() => {
-                      navigator.clipboard.writeText(expandCharactersResult.all_characters || '');
-                      showSnackbar('✅ 已复制到剪贴板', 'success');
-                    }}
-                  >
-                    📋 复制全部
-                  </Button>
-                </Box>
-                <Box sx={{
-                  maxHeight: 400,
-                  overflow: 'auto',
-                  p: 2,
-                  bgcolor: 'background.default',
-                  borderRadius: 1,
-                  border: '1px solid',
-                  borderColor: 'divider'
-                }}>
-                  <Typography 
-                    component="pre" 
-                    sx={{ 
-                      whiteSpace: 'pre-wrap', 
-                      wordBreak: 'break-word',
-                      fontFamily: 'inherit',
-                      margin: 0
-                    }}
-                  >
-                    {expandCharactersResult.all_characters || '内容为空'}
-                  </Typography>
-                </Box>
-              </Paper>
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          {/* 🆕 如果AI建议继续扩展，显示“继续扩展人物”按钮 */}
-          {expandCharactersResult?.ai_suggestion?.should_continue && (
-            <Button 
-              onClick={() => {
-                setShowExpandCharactersDialog(false)
-                // 恢复按钮状态
-                setCharacterExpandState('idle')
-                localStorage.setItem(`character_expand_state_${projectId}`, 'idle')
-                // 继续扩展：再次触发扩展逻辑
-                handleExpandCharacters()
-              }} 
-              variant="outlined"
-              color="primary"
-            >
-              👥 继续扩展人物
-            </Button>
-          )}
-          <Button 
-            onClick={() => {
-              setShowExpandCharactersDialog(false)
-              setCharacterExpandState('idle')
-              localStorage.setItem(`character_expand_state_${projectId}`, 'idle')
-            }} 
-            variant="contained"
-          >
-            关闭
-          </Button>
-        </DialogActions>
-      </Dialog>
+        onCopied={(message) => showSnackbar(message, 'success')}
+      />
 
       {showStoryExpansionDialog && (
         <Suspense fallback={null}>
           <LazyStoryExpansionDialog
             open={showStoryExpansionDialog}
             loading={expandingStory}
+            analysisLoading={storyExpansionAnalysisLoading}
             currentChapterCount={getCurrentChapterCount()}
             currentCharacterCount={getCurrentCharacterCount()}
             targetChapterCount={storyTargetChapterCount}
             targetCharacterCount={storyTargetCharacterCount}
+            expansionMode={storyExpansionMode}
+            totalVolumes={storyTotalVolumes}
+            totalChaptersMin={storyTotalChaptersMin}
+            totalChaptersMax={storyTotalChaptersMax}
             strategy={storyExpansionStrategy}
+            intent={storyExpansionIntent}
+            autoSupplementEnabled={storyAutoSupplementEnabled}
+            preserveWrittenMode={storyPreserveWrittenMode}
+            analysis={storyExpansionAnalysis}
             onClose={() => setShowStoryExpansionDialog(false)}
             onTargetChapterCountChange={setStoryTargetChapterCount}
             onTargetCharacterCountChange={setStoryTargetCharacterCount}
+            onExpansionModeChange={(mode) => {
+              setStoryExpansionMode(mode)
+              if ((mode === 'epic_framework' || mode === 'volume_detail') && !frameworkMetadata) {
+                void loadEpicFramework()
+              }
+            }}
+            onTotalVolumesChange={setStoryTotalVolumes}
+            onTotalChaptersMinChange={setStoryTotalChaptersMin}
+            onTotalChaptersMaxChange={setStoryTotalChaptersMax}
+            frameworkMetadata={frameworkMetadata}
+            targetVolumeIndex={storyTargetVolumeIndex}
+            volumeChaptersMin={storyVolumeChaptersMin}
+            volumeChaptersMax={storyVolumeChaptersMax}
+            onTargetVolumeIndexChange={setStoryTargetVolumeIndex}
+            onVolumeChaptersMinChange={setStoryVolumeChaptersMin}
+            onVolumeChaptersMaxChange={setStoryVolumeChaptersMax}
             onStrategyChange={setStoryExpansionStrategy}
+            onIntentChange={setStoryExpansionIntent}
+            onAutoSupplementChange={setStoryAutoSupplementEnabled}
+            onPreserveWrittenModeChange={setStoryPreserveWrittenMode}
             onConfirm={handleExpandStory}
           />
         </Suspense>
       )}
-
-      {/* ??? ???????????*/}
-      {showExpansionConfig && (
-        <Suspense fallback={null}>
-          <LazyExpansionConfigDialog
-            open={showExpansionConfig}
-            onClose={() => setShowExpansionConfig(false)}
-            expansionMode={expansionMode}
-            targetChapterCount={targetChapterCount}
-            incrementalStep={incrementalStep}
-            totalVolumes={totalVolumes}
-            totalChaptersMin={totalChaptersMin}
-            totalChaptersMax={totalChaptersMax}
-            // ?? ?????autoExpandAllVolumes ???
-            frameworkMetadata={frameworkMetadata}
-            loadingFramework={loadingFramework}
-            onExpansionModeChange={(mode) => {
-              setExpansionMode(mode)
-              // ????????????????????????????
-              if (mode === 'epic_framework' && !frameworkMetadata) {
-                loadEpicFramework()
-              }
-            }}
-            onTargetChapterCountChange={setTargetChapterCount}
-            onIncrementalStepChange={setIncrementalStep}
-            onTotalVolumesChange={setTotalVolumes}
-            onTotalChaptersMinChange={setTotalChaptersMin}
-            onTotalChaptersMaxChange={setTotalChaptersMax}
-            // ?? ?????onAutoExpandAllVolumesChange ???
-            targetVolumeIndex={targetVolumeIndex}
-            volumeChaptersMin={volumeChaptersMin}
-            volumeChaptersMax={volumeChaptersMax}
-            onTargetVolumeIndexChange={setTargetVolumeIndex}
-            onVolumeChaptersMinChange={setVolumeChaptersMin}
-            onVolumeChaptersMaxChange={setVolumeChaptersMax}
-            onConfirm={() => {
-              setShowExpansionConfig(false)
-              // ?????????
-              handleExpandOutline()
-            }}
-            genre={projectInfo?.genre || ''}
-            recommendedMode={recommendedMode}
-            recommendedVolumes={recommendedVolumes}
-            recommendedChaptersPerVolumeMin={recommendedChaptersPerVolumeMin}
-            recommendedChaptersPerVolumeMax={recommendedChaptersPerVolumeMax}
-            // ?? ?????recommendedAutoExpandAllVolumes ???
-            recommendationReason={recommendationReason}
-          />
-        </Suspense>
-      )}
-
-
-      {/* 🆕 二次确认对话框 */}
-      <Dialog
-        open={confirmDialogOpen}
-        onClose={() => setConfirmDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>
-          {confirmDialogType === 'regenerate' ? '⚠️ 确认重生框架' : '⚠️ 确认重新生成'}
-        </DialogTitle>
-        <DialogContent>
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            {confirmDialogMessage}
-          </Alert>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setConfirmDialogOpen(false)}>取消</Button>
-          <Button
-            onClick={() => {
-              setConfirmDialogOpen(false)
-              if (pendingAction) {
-                pendingAction()
-                setPendingAction(null)
-              }
-            }}
-            variant="contained"
-            color="warning"
-          >
-            确认继续
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       {/* 提示消息 */}
       <Snackbar
