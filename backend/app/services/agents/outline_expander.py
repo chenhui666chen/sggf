@@ -1,8 +1,10 @@
 ﻿"""
 情节大纲和人物扩展器 - 自动扩展简短大纲和增加人物数量
 """
+import json
 import os
-from typing import Dict, Any, List, Optional
+import re
+from typing import Dict, Any, List, Optional, Tuple
 from .agents import CreativeDirectorAgent, PlotArchitectAgent, CharacterDesignerAgent
 from core.langchain_bridge import create_task_llm, create_model_llm
 from .knowledge_base import NovelKnowledgeBase
@@ -2019,7 +2021,7 @@ Please analyze：
   
 - **结尾钩子**：（吸引追读，20-30字）
   类型：危机/机遇/悬念/反转
-'''}
+'''
 
 {outline_tips if outline_tips else ''}
 
@@ -2302,6 +2304,748 @@ Please输出完整的、重新整合后的网文大纲：
                 checklist_lines.append(f"✅ 第??章：揭秘『{content[:20]}...』（第{planted_vol}卷埋设，本卷完成回收）")
         
         return "\n".join(checklist_lines) if checklist_lines else "✅ 无特定伏笔任务"
+
+    @staticmethod
+    def estimate_volume_detail_model(chapters_count_range: Tuple[int, int]) -> str:
+        """根据单卷章节规模估算更合适的细化模型。"""
+        lower = 0
+        upper = 0
+        if isinstance(chapters_count_range, (list, tuple)) and len(chapters_count_range) >= 2:
+            try:
+                lower = max(0, int(chapters_count_range[0] or 0))
+            except Exception:
+                lower = 0
+            try:
+                upper = max(lower, int(chapters_count_range[1] or 0))
+            except Exception:
+                upper = lower
+        return "qwen3.5-plus" if (lower + upper) // 2 > 80 else "deepseek-reasoner"
+
+    @staticmethod
+    def _story_extract_json(text: str) -> Optional[Any]:
+        if not text:
+            return None
+        content = str(text).strip()
+        try:
+            return json.loads(content)
+        except Exception:
+            pass
+
+        for opener, closer in (("{", "}"), ("[", "]")):
+            start = content.find(opener)
+            end = content.rfind(closer)
+            if start < 0 or end < start:
+                continue
+            candidate = content[start : end + 1]
+            try:
+                return json.loads(candidate)
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
+    def _story_stringify(value: Any, limit: int = 300) -> str:
+        if value is None:
+            return "N/A"
+        if isinstance(value, str):
+            text = value.strip()
+        else:
+            text = json.dumps(value, ensure_ascii=False)
+        return text if len(text) <= limit else text[:limit] + "..."
+
+    @staticmethod
+    def _story_parse_outline_sections(outline: str) -> Dict[int, str]:
+        sections: Dict[int, str] = {}
+        if not outline or not outline.strip():
+            return sections
+
+        pattern = re.compile(r"(?m)^第\s*(\d+)\s*章[：:]\s*(.*)$")
+        matches = list(pattern.finditer(outline))
+        for index, match in enumerate(matches):
+            start = match.end()
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(outline)
+            sections[int(match.group(1))] = outline[start:end].strip()
+        return sections
+
+    def _story_invoke_llm_json(
+        self,
+        llm: Any,
+        system_prompt: str,
+        user_prompt: str,
+        fallback: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        try:
+            from langchain_core.messages import HumanMessage, SystemMessage
+
+            response = llm.invoke(
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=user_prompt),
+                ]
+            )
+        except Exception:
+            response = llm.invoke(
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ]
+            )
+        parsed = self._story_extract_json(getattr(response, "content", response))
+        return parsed if isinstance(parsed, dict) else fallback
+
+    def _story_invoke_agent_json(self, agent: Any, prompt: str, fallback: Dict[str, Any]) -> Dict[str, Any]:
+        parsed = self._story_extract_json(agent.process(prompt, {}))
+        return parsed if isinstance(parsed, dict) else fallback
+
+    @staticmethod
+    def _format_names(value: Any) -> str:
+        if isinstance(value, list):
+            return "、".join(str(item).strip() for item in value if str(item).strip())
+        return str(value or "").strip()
+
+    @staticmethod
+    def _story_extract_character_names(text: str) -> List[str]:
+        names: List[str] = []
+        seen = set()
+        for match in re.finditer(r"(?m)^(?:###\s*)?【姓名】[：:]\s*(.+?)\s*$", text or ""):
+            name = match.group(1).strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+        return names
+
+    @staticmethod
+    def _story_normalize_name(name: str) -> str:
+        return re.sub(r"\s+", "", str(name or "").strip())
+
+    @classmethod
+    def _story_render_outline_overview(cls, payload: Dict[str, Any]) -> str:
+        story_overview = str(payload.get("story_overview") or "").strip()
+        volumes = payload.get("volumes") if isinstance(payload.get("volumes"), list) else []
+        if not story_overview and not volumes:
+            return ""
+
+        parts: List[str] = ["## 故事概述"]
+        if story_overview:
+            parts.append(story_overview)
+
+        for volume in volumes:
+            if not isinstance(volume, dict):
+                continue
+            volume_index = volume.get("volume_index") or "?"
+            title = str(volume.get("title") or f"第{volume_index}卷").strip()
+            parts.append(f"### 【第{volume_index}卷】「{title}」")
+            for key, label in (
+                ("stage_goal", "卷目标"),
+                ("core_conflict", "核心冲突"),
+                ("ending_climax", "卷末爆点"),
+                ("new_chapter_direction", "新增章节方向"),
+            ):
+                text = str(volume.get(key) or "").strip()
+                if text:
+                    parts.append(f"- {label}：{text}")
+            key_characters = cls._format_names(volume.get("key_characters"))
+            if key_characters:
+                parts.append(f"- 关键人物：{key_characters}")
+        return "\n".join(parts).strip()
+
+    @classmethod
+    def _story_render_chapter_breakdown(cls, current_outline: str, payload: Dict[str, Any]) -> Tuple[str, int]:
+        sections = cls._story_parse_outline_sections(current_outline)
+        chapters = payload.get("chapters") if isinstance(payload.get("chapters"), list) else []
+        blocks: List[str] = []
+        max_chapter = 0
+
+        for chapter in chapters:
+            if not isinstance(chapter, dict):
+                continue
+            try:
+                chapter_number = int(chapter.get("chapter_number") or 0)
+            except Exception:
+                chapter_number = 0
+            if chapter_number <= 0:
+                continue
+            max_chapter = max(max_chapter, chapter_number)
+            title = str(chapter.get("title") or f"第{chapter_number}章").strip()
+            status = str(chapter.get("status") or "").strip().lower()
+            suffix = " [已写]" if status == "written" else ""
+            lines = [f"#### 第{chapter_number}章：《{title}》{suffix}"]
+
+            existing_body = sections.get(chapter_number, "").strip()
+            if status == "written" and existing_body:
+                lines.append(existing_body)
+                blocks.append("\n".join(lines))
+                continue
+
+            for key, label in (
+                ("scene_goal", "场景目标"),
+                ("conflict_design", "冲突设计"),
+                ("emotional_curve", "情绪曲线"),
+                ("highlight_type", "爽点类型"),
+                ("information_payoff", "信息落地"),
+                ("ending_hook", "结尾钩子"),
+            ):
+                text = str(chapter.get(key) or "").strip()
+                if text:
+                    lines.append(f"- **{label}**：{text}")
+            involved_characters = cls._format_names(chapter.get("involved_characters"))
+            if involved_characters:
+                lines.append(f"- **涉及人物**：{involved_characters}")
+            if len(lines) == 1 and existing_body:
+                lines.append(existing_body)
+            blocks.append("\n".join(lines))
+
+        return "\n\n".join(blocks).strip(), max_chapter
+
+    @classmethod
+    def _story_render_character_cards(cls, items: Any) -> Tuple[str, List[str]]:
+        if not isinstance(items, list):
+            return "", []
+
+        blocks: List[str] = []
+        names: List[str] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            names.append(name)
+            lines = [f"### 【姓名】：{name}"]
+            for key, label in (
+                ("age_gender", "年龄/性别"),
+                ("story_stance", "故事立场"),
+                ("affiliation", "所属势力"),
+                ("importance", "角色重要性"),
+                ("role_type", "角色类型"),
+                ("appearance", "外貌特征"),
+                ("personality", "性格特征"),
+                ("background", "背景经历"),
+                ("worldview_stance", "价值立场"),
+                ("motivation", "核心动机"),
+                ("abilities", "能力特长"),
+                ("weakness", "弱点缺陷"),
+                ("plot_role", "剧情作用"),
+                ("growth_arc", "成长线"),
+                ("key_relationships", "关键关系"),
+                ("related_clues", "关联线索"),
+            ):
+                text = str(item.get(key) or "").strip()
+                if text:
+                    lines.append(f"【{label}】：{text}")
+            blocks.append("\n".join(lines))
+
+        return "\n\n".join(blocks).strip(), names
+
+    @classmethod
+    def _story_render_existing_character_patch(cls, payload: Dict[str, Any]) -> str:
+        updates = payload.get("updates") if isinstance(payload.get("updates"), list) else []
+        if not updates:
+            return ""
+
+        parts = ["## 已有角色关系更新"]
+        for item in updates:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if name:
+                parts.append(f"### {name}")
+            relation_updates = item.get("relationship_updates") if isinstance(item.get("relationship_updates"), list) else []
+            relation_texts = []
+            for relation in relation_updates:
+                if not isinstance(relation, dict):
+                    continue
+                target = str(relation.get("target") or "").strip()
+                description = str(relation.get("description") or "").strip()
+                if target and description:
+                    relation_texts.append(f"{target}：{description}")
+            if relation_texts:
+                parts.append(f"【关键关系·补充】：{'；'.join(relation_texts)}")
+            for key, label in (
+                ("related_clues_patch", "关联线索·补充"),
+                ("plot_role_patch", "剧情作用·补充"),
+                ("growth_arc_patch", "成长线·补充"),
+            ):
+                text = str(item.get(key) or "").strip()
+                if text:
+                    parts.append(f"【{label}】：{text}")
+        return "\n".join(parts).strip()
+
+    @classmethod
+    def _story_render_relationships(cls, payload: Dict[str, Any]) -> str:
+        groups = payload.get("relationship_groups") if isinstance(payload.get("relationship_groups"), list) else []
+        if not groups:
+            return ""
+
+        parts: List[str] = []
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            group_name = str(group.get("group") or "关系网络").strip()
+            parts.append(f"**{group_name}**：")
+            relationships = group.get("relationships") if isinstance(group.get("relationships"), list) else []
+            for relation in relationships:
+                if not isinstance(relation, dict):
+                    continue
+                source = str(relation.get("source") or "").strip()
+                target = str(relation.get("target") or "").strip()
+                relation_type = str(relation.get("type") or "").strip()
+                description = str(relation.get("description") or "").strip()
+                if source and target and relation_type and description:
+                    parts.append(f"- {source} ↔ {target}：{relation_type}（{description}）")
+        return "\n".join(parts).strip()
+
+    @classmethod
+    def _story_render_epic_framework(cls, payload: Dict[str, Any], total_volumes: int) -> str:
+        if not isinstance(payload, dict) or not payload:
+            return ""
+
+        parts: List[str] = ["## 一、整体叙事节奏"]
+        genre_type = str(payload.get("genre_type") or "").strip()
+        if genre_type:
+            parts.append(f"- 题材类型：{genre_type}")
+        global_theme = str(payload.get("global_theme") or "").strip()
+        if global_theme:
+            parts.append(f"- 全局主题：{global_theme}")
+
+        for phase in payload.get("story_phases") if isinstance(payload.get("story_phases"), list) else []:
+            if not isinstance(phase, dict):
+                continue
+            parts.append(f"### {str(phase.get('phase') or '阶段').strip()}")
+            if phase.get("volume_span"):
+                parts.append(f"- 卷跨度：{phase['volume_span']}")
+            if phase.get("chapter_span"):
+                parts.append(f"- 章节跨度：{phase['chapter_span']}章")
+            if phase.get("focus"):
+                parts.append(f"- 阶段重点：{phase['focus']}")
+
+        parts.append("")
+        parts.append("## 二、境界/实力体系进阶")
+        for item in payload.get("power_progression") if isinstance(payload.get("power_progression"), list) else []:
+            if not isinstance(item, dict):
+                continue
+            line = f"- {str(item.get('volume_span') or '').strip()}：{str(item.get('realm_stage') or '').strip()}"
+            chapter_span = str(item.get("chapter_span") or "").strip()
+            if chapter_span:
+                line += f"（{chapter_span}章）"
+            parts.append(line)
+            notes = str(item.get("notes") or "").strip()
+            if notes:
+                parts.append(f"  - 说明：{notes}")
+
+        parts.append("")
+        parts.append(f"## 三、{total_volumes}卷概要")
+        for volume in payload.get("volumes") if isinstance(payload.get("volumes"), list) else []:
+            if not isinstance(volume, dict):
+                continue
+            volume_index = volume.get("volume_index") or "?"
+            title = str(volume.get("title") or f"第{volume_index}卷").strip()
+            parts.append(f"【第{volume_index}卷】{title}")
+            for key, label in (
+                ("chapter_span", "章节范围"),
+                ("core_goal", "核心目标"),
+                ("realm_stage", "境界进阶"),
+                ("major_enemy", "主要对手"),
+                ("ending_climax", "卷末爆点"),
+            ):
+                text = str(volume.get(key) or "").strip()
+                if text:
+                    suffix = "章" if key == "chapter_span" and not text.endswith("章") else ""
+                    parts.append(f"- {label}：{text}{suffix}")
+
+        parts.append("")
+        parts.append("## 四、关键伏笔布局")
+        foreshadowings = payload.get("foreshadowings") if isinstance(payload.get("foreshadowings"), list) else []
+        for item in foreshadowings:
+            if not isinstance(item, dict):
+                continue
+            content = str(item.get("content") or "").strip()
+            plant_at = str(item.get("plant_at") or "").strip()
+            pave_at = cls._format_names(item.get("pave_at"))
+            reveal_at = str(item.get("reveal_at") or "").strip()
+            if content:
+                detail = "；".join(part for part in (plant_at and f"埋设：{plant_at}", pave_at and f"铺垫：{pave_at}", reveal_at and f"揭示：{reveal_at}") if part)
+                parts.append(f"- {content}（{detail}）" if detail else f"- {content}")
+        if parts[-1] == "## 四、关键伏笔布局":
+            parts.append("- 暂无明确伏笔。")
+
+        parts.append("")
+        parts.append("## 五、核心人物生命周期")
+        lifecycle = payload.get("character_lifecycle") if isinstance(payload.get("character_lifecycle"), list) else []
+        for item in lifecycle:
+            if not isinstance(item, dict):
+                continue
+            character = str(item.get("character") or "").strip()
+            detail = "；".join(
+                part
+                for part in (
+                    item.get("debut") and f"初登场：{item['debut']}",
+                    item.get("active_span") and f"活跃跨度：{item['active_span']}",
+                    item.get("transition") and f"阶段变化：{item['transition']}",
+                )
+                if part
+            )
+            if character and detail:
+                parts.append(f"- {character}：{detail}")
+        if parts[-1] == "## 五、核心人物生命周期":
+            parts.append("- 核心人物随卷推进持续补齐。")
+        return "\n".join(parts).strip()
+
+    @classmethod
+    def _story_render_volume_detail(
+        cls,
+        payload: Dict[str, Any],
+        target_volume_index: int,
+        start_chapter_num: int,
+        chapters_count_range: Tuple[int, int],
+        pending_foreshadowings: Optional[List[Dict[str, Any]]] = None,
+    ) -> Tuple[str, int]:
+        if not isinstance(payload, dict) or not payload:
+            return "", 0
+
+        parts: List[str] = ["## 一、故事概述"]
+        parts.append(str(payload.get("story_overview") or "").strip() or "本卷承接上一卷线索，继续推进主线。")
+        parts.append("")
+        parts.append(f"## 二、第{target_volume_index}卷详细规划（预计{chapters_count_range[0]}-{chapters_count_range[1]}章，从第{start_chapter_num}章开始）")
+
+        count = 0
+        chapters = payload.get("chapters") if isinstance(payload.get("chapters"), list) else []
+        for chapter in chapters:
+            if not isinstance(chapter, dict):
+                continue
+            count += 1
+            try:
+                chapter_number = int(chapter.get("chapter_number") or (start_chapter_num + count - 1))
+            except Exception:
+                chapter_number = start_chapter_num + count - 1
+            title = str(chapter.get("title") or f"第{chapter_number}章").strip()
+            parts.append("")
+            parts.append(f"### 第{chapter_number}章：《{title}》")
+            for key, label in (
+                ("scene_goal", "场景目标"),
+                ("conflict_design", "冲突设计"),
+                ("emotional_curve", "情绪曲线"),
+                ("highlight_type", "爽点类型"),
+                ("information_payoff", "信息落地"),
+                ("ending_hook", "结尾钩子"),
+            ):
+                text = str(chapter.get(key) or "").strip()
+                if text:
+                    parts.append(f"- **{label}**：{text}")
+            involved_characters = cls._format_names(chapter.get("involved_characters"))
+            if involved_characters:
+                parts.append(f"- **涉及人物**：{involved_characters}")
+
+        parts.append("")
+        parts.append("## 三、伏笔埋设检查")
+        checks = payload.get("foreshadowing_checks") if isinstance(payload.get("foreshadowing_checks"), list) else []
+        if checks:
+            for item in checks:
+                if not isinstance(item, dict):
+                    continue
+                chapter = str(item.get("chapter") or "待定章节").strip()
+                action = str(item.get("action") or "处理").strip()
+                content = str(item.get("content") or "").strip()
+                if content:
+                    parts.append(f"- {chapter}：{action} {content}")
+        elif pending_foreshadowings:
+            for item in pending_foreshadowings:
+                if not isinstance(item, dict):
+                    continue
+                action = str(item.get("action") or "处理").strip()
+                content = str(item.get("content") or "").strip()
+                if content:
+                    parts.append(f"- 待定章节：{action} {content}")
+        else:
+            parts.append("- 当前卷暂无强制伏笔任务。")
+
+        parts.append("")
+        parts.append("## 四、卷尾衔接检查")
+        connection = payload.get("volume_connection_check") if isinstance(payload.get("volume_connection_check"), dict) else {}
+        for key, label in (
+            ("core_task_completion", "本卷任务完成"),
+            ("next_volume_opening", "下卷开局场景"),
+            ("ending_hook", "卷尾钩子"),
+        ):
+            text = str(connection.get(key) or "").strip()
+            if text:
+                parts.append(f"✅ {label}：{text}")
+        if parts[-1] == "## 四、卷尾衔接检查":
+            parts.append("✅ 当前卷已形成基本承接结构。")
+
+        return "\n".join(parts).strip(), count
+
+    def expand_plot_outline(self, current_outline: str, world_setting: str,
+                          characters: str, target_chapters: int = 50) -> Dict[str, Any]:
+        current_count = self.count_chapters_in_outline(current_outline)
+        if target_chapters <= current_count:
+            return {
+                "expanded_outline": current_outline,
+                "chapter_breakdown": "",
+                "plot_arcs": {},
+                "current_chapter_count": current_count,
+                "target_chapters": target_chapters,
+                "should_continue": False,
+                "continue_reason": "目标章节数未超过当前章节数，无需继续扩展。",
+                "expansion_analysis": "目标章节数未超过当前章节数，无需继续扩展。",
+            }
+
+        result = self.expand_plot_outline_incremental(
+            current_outline=current_outline,
+            world_setting=world_setting,
+            characters=characters,
+            current_chapter_count=current_count,
+            increment=target_chapters - current_count,
+            target_total_chapters=target_chapters,
+        )
+        result["target_chapters"] = target_chapters
+        result["expansion_analysis"] = result.get("continue_reason") or result.get("expansion_analysis", "")
+        return result
+
+    def expand_characters(self, main_characters: str, world_setting: str,
+                        plot_outline: str, target_count: int = 15) -> Dict[str, Any]:
+        current_count = self.count_characters_in_text(main_characters)
+        if target_count <= current_count:
+            return {
+                "all_characters": main_characters,
+                "character_relationships": "",
+                "role_distribution": {},
+                "current_character_count": current_count,
+                "target_count": target_count,
+                "should_continue": False,
+                "continue_reason": "目标人物数未超过当前人物数，无需继续扩展。",
+                "character_analysis": "目标人物数未超过当前人物数，无需继续扩展。",
+            }
+
+        result = self.expand_characters_incremental(
+            main_characters=main_characters,
+            world_setting=world_setting,
+            plot_outline=plot_outline,
+            current_character_count=current_count,
+            increment=target_count - current_count,
+            target_total_characters=target_count,
+        )
+        result["target_count"] = target_count
+        result["character_analysis"] = result.get("continue_reason") or result.get("character_analysis", "")
+        return result
+
+    def generate_expansion_summary(self, outline_expansion: Dict[str, Any],
+                                  character_expansion: Dict[str, Any]) -> str:
+        return f"""
+{'='*70}
+【长篇小说扩展总结报告】
+{'='*70}
+
+## 一、情节大纲扩展
+
+### 目标章节数
+{outline_expansion.get('target_chapters', 'N/A')} 章
+
+### 扩展策略
+{self._story_stringify(outline_expansion.get('expansion_analysis'))}
+
+### 情节线索
+{self._story_stringify(outline_expansion.get('plot_arcs'))}
+
+### 章节分解（示例前5章）
+{self._story_stringify(outline_expansion.get('chapter_breakdown'), limit=500)}
+
+---
+
+## 二、人物体系扩展
+
+### 目标人物数
+{character_expansion.get('target_count', 'N/A')} 个
+
+### 角色定位
+{self._story_stringify(character_expansion.get('role_distribution'))}
+
+### 人物关系网络
+{self._story_stringify(character_expansion.get('character_relationships'))}
+
+{'='*70}
+""".strip()
+
+    def expand_plot_outline_incremental(self, current_outline: str, world_setting: str,
+                                       characters: str, current_chapter_count: int,
+                                       increment: int = 10,
+                                       target_total_chapters: Optional[int] = None) -> Dict[str, Any]:
+        target_chapters = target_total_chapters or (current_chapter_count + increment)
+        overview_payload = self._story_invoke_llm_json(
+            self.llm,
+            "请输出结构化卷级规划 JSON。",
+            f"目标总章节数 {target_chapters}，请基于当前大纲扩展故事。\n\n{current_outline}",
+            fallback={"story_overview": "", "volumes": []},
+        )
+        expanded_outline = self._story_render_outline_overview(overview_payload) or current_outline
+
+        chapter_payload = self._story_invoke_llm_json(
+            self.llm,
+            "请输出结构化章节规划 JSON。",
+            f"请生成扩展后的章节规划，目标总章节数 {target_chapters}。",
+            fallback={"chapters": []},
+        )
+        chapter_breakdown, max_chapter = self._story_render_chapter_breakdown(current_outline, chapter_payload)
+        current_total = max(max_chapter, current_chapter_count + increment)
+
+        decision_payload = self._story_invoke_llm_json(
+            self.llm,
+            "请输出是否继续扩展的 JSON。",
+            "返回 should_continue 和 reason。",
+            fallback={"should_continue": False, "reason": ""},
+        )
+
+        return {
+            "expanded_outline": expanded_outline,
+            "chapter_breakdown": chapter_breakdown,
+            "plot_arcs": overview_payload,
+            "current_chapter_count": current_total,
+            "target_chapters": target_chapters,
+            "should_continue": bool(decision_payload.get("should_continue", False)),
+            "continue_reason": str(decision_payload.get("reason") or "").strip(),
+            "expansion_analysis": str(decision_payload.get("reason") or "").strip(),
+        }
+
+    def expand_characters_incremental(self, main_characters: str, world_setting: str,
+                                     plot_outline: str, current_character_count: int,
+                                     increment: int = 5,
+                                     target_total_characters: Optional[int] = None) -> Dict[str, Any]:
+        target_count = target_total_characters or (current_character_count + increment)
+
+        cards_payload = self._story_invoke_agent_json(
+            self.character_designer,
+            "请输出新增角色 JSON。",
+            fallback={"characters": []},
+        )
+        new_cards, new_names = self._story_render_character_cards(cards_payload.get("characters"))
+
+        patch_payload = self._story_invoke_agent_json(
+            self.character_designer,
+            "请输出已有角色补丁 JSON。",
+            fallback={"updates": []},
+        )
+        existing_patch = self._story_render_existing_character_patch(patch_payload)
+
+        relationship_payload = self._story_invoke_agent_json(
+            self.character_designer,
+            "请输出人物关系网络 JSON。",
+            fallback={"relationship_groups": []},
+        )
+        character_relationships = self._story_render_relationships(relationship_payload)
+
+        role_distribution = self._story_invoke_agent_json(
+            self.character_designer,
+            "请输出角色分布 JSON。",
+            fallback={},
+        )
+
+        decision_payload = self._story_invoke_agent_json(
+            self.character_designer,
+            "请输出是否继续扩展的 JSON。",
+            fallback={"should_continue": False, "reason": ""},
+        )
+
+        merged_characters = "\n\n".join(part for part in (main_characters.strip(), new_cards, existing_patch) if str(part).strip())
+        existing_names = set(self._story_extract_character_names(main_characters))
+        normalized_existing = {self._story_normalize_name(name) for name in existing_names}
+        unique_new_names = [
+            name for name in new_names
+            if self._story_normalize_name(name) not in normalized_existing
+        ]
+
+        return {
+            "all_characters": merged_characters,
+            "character_relationships": character_relationships,
+            "role_distribution": role_distribution if isinstance(role_distribution, dict) else {},
+            "current_character_count": max(current_character_count + len(unique_new_names), len(existing_names | set(unique_new_names))),
+            "target_count": target_count,
+            "should_continue": bool(decision_payload.get("should_continue", False)),
+            "continue_reason": str(decision_payload.get("reason") or "").strip(),
+            "should_optimize_first": False,
+            "optimization_suggestions": [],
+        }
+
+    def generate_epic_framework(self, world_setting: str, characters: str,
+                               total_volumes: int, total_chapters_range: tuple[int, int]) -> Dict[str, Any]:
+        payload = self._story_invoke_agent_json(
+            self.creative_director,
+            "请输出长篇框架 JSON。",
+            fallback={"volumes": []},
+        )
+        framework_text = self._story_render_epic_framework(payload, total_volumes)
+        if not framework_text:
+            framework_text = self.creative_director.process("请生成长篇框架。", {})
+        return {
+            "expanded_outline": framework_text,
+            "framework_type": "epic",
+            "total_volumes": total_volumes,
+            "total_chapters_range": total_chapters_range,
+        }
+
+    def expand_volume_detail(self, framework_content: str, target_volume_index: int,
+                            world_setting: str, characters: str,
+                            start_chapter_num: int,
+                            chapters_count_range: tuple[int, int],
+                            prev_volume_summary: Optional[Dict[str, Any]] = None,
+                            pending_foreshadowings: Optional[List[Dict[str, Any]]] = None,
+                            core_storyline: Optional[str] = None,
+                            framework_header: Optional[str] = None,
+                            framework_footer: Optional[str] = None) -> Dict[str, Any]:
+        selected_model = self.estimate_volume_detail_model(chapters_count_range)
+        selected_architect = self.plot_architect_plus if selected_model == "qwen3.5-plus" else self.plot_architect_r1
+
+        payload = self._story_invoke_agent_json(
+            selected_architect,
+            "请输出单卷细化 JSON。",
+            fallback={},
+        )
+        volume_content, chapter_count = self._story_render_volume_detail(
+            payload,
+            target_volume_index=target_volume_index,
+            start_chapter_num=start_chapter_num,
+            chapters_count_range=chapters_count_range,
+            pending_foreshadowings=pending_foreshadowings,
+        )
+        if not volume_content:
+            volume_content = selected_architect.process("请生成单卷细纲。", {})
+
+        renumberer = get_chapter_renumberer()
+        renumber_result = renumberer.detect_and_fix(
+            content=volume_content,
+            expected_start=start_chapter_num,
+            expected_count_range=chapters_count_range,
+        )
+        volume_content = renumber_result["fixed_content"]
+
+        validator = get_consistency_validator(strict_mode=True)
+        validation_result = validator.validate(
+            volume_content=volume_content,
+            volume_index=target_volume_index,
+            core_storyline=core_storyline or "",
+            prev_volume_summary=prev_volume_summary,
+            pending_foreshadowings=pending_foreshadowings,
+            framework_content=framework_content,
+        )
+        validation_dict = validation_result.to_dict()
+        fixed_range = renumber_result.get("fixed_range") or (0, 0)
+        chapters_start = fixed_range[0] if fixed_range[0] > 0 else start_chapter_num
+        chapters_end = fixed_range[1] if fixed_range[1] > 0 else start_chapter_num + max(chapter_count, 1) - 1
+        actual_count = max(chapters_end - chapters_start + 1, chapter_count)
+
+        return {
+            "expanded_outline": volume_content,
+            "volume_index": target_volume_index,
+            "chapter_count": actual_count,
+            "current_chapter_count": actual_count,
+            "chapters_start": chapters_start,
+            "chapters_end": chapters_end,
+            "renumber_result": renumber_result,
+            "validation": validation_dict,
+            "validation_passed": validation_result.passed,
+            "validation_issues": validation_dict.get('issues', []),
+            "validation_suggestions": validation_dict.get('suggestions', []),
+        }
 
 
 def create_outline_expander(knowledge_base: Optional[NovelKnowledgeBase] = None,
