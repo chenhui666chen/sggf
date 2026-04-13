@@ -317,7 +317,6 @@ class ModelRegistry:
     
     def load_from_yaml(self, yaml_path: str) -> int:
         """Load model specifications from a YAML file."""
-        self._ensure_builtin_registration()
         path = Path(yaml_path)
         if not path.exists():
             _logger.warning(f"YAML file not found: {yaml_path}")

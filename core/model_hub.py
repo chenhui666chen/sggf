@@ -205,6 +205,8 @@ class ModelHub:
             )
 
         max_retries = self._resolve_max_retries(spec, kwargs)
+        retry_kwargs = dict(kwargs)
+        timeout_auto_tuning_enabled = retry_kwargs.get("timeout") is None
         last_result = None
 
         for attempt in range(max_retries):
@@ -215,7 +217,7 @@ class ModelHub:
                         on_chunk=on_chunk,
                         temperature=temperature,
                         max_tokens=max_tokens,
-                        **kwargs
+                        **retry_kwargs
                     )
                 else:
                     result = await adapter.generate(
@@ -224,7 +226,7 @@ class ModelHub:
                         max_tokens=max_tokens,
                         stream=stream,
                         on_chunk=on_chunk,
-                        **kwargs
+                        **retry_kwargs
                     )
 
                 if result.success:
@@ -241,11 +243,35 @@ class ModelHub:
 
                 if result.error_code in ["auth_error", "model_not_found"]:
                     break
+                if result.error_code == "content_safety":
+                    break  # 同 prompt 重试无意义，由下方内容安全回退链路处理
 
                 if result.error_code == "rate_limit":
                     wait_time = min(2 ** attempt, 30)
                     logger.warning(f"⚠️ 限流，等待 {wait_time}秒后重试")
                     await asyncio.sleep(wait_time)
+                elif result.error_code in {"timeout", "network_error"} and attempt < max_retries - 1:
+                    wait_time = min(2 ** attempt, 20)
+                    logger.warning(f"⚠️ 网络波动/超时，等待 {wait_time}秒后重试 | model={model_id}")
+                    await asyncio.sleep(wait_time)
+
+                    if result.error_code == "timeout" and timeout_auto_tuning_enabled:
+                        previous_timeout, next_timeout = self._increase_retry_timeout_budget(
+                            spec,
+                            retry_kwargs,
+                            max_tokens=max_tokens,
+                        )
+                        if (
+                            previous_timeout is not None
+                            and next_timeout is not None
+                            and next_timeout > previous_timeout
+                        ):
+                            logger.warning(
+                                "Retry timeout budget increased | model=%s previous=%ss next=%ss",
+                                model_id,
+                                previous_timeout,
+                                next_timeout,
+                            )
 
                 self.registry.record_failure(model_id, result.error_code or "unknown")
 
@@ -259,6 +285,36 @@ class ModelHub:
                     error=str(e),
                     error_code="exception"
                 )
+                if attempt < max_retries - 1:
+                    wait_time = min(2 ** attempt, 20)
+                    logger.warning(f"⚠️ 调用异常，等待 {wait_time}秒后重试 | model={model_id}")
+                    await asyncio.sleep(wait_time)
+
+        # 内容安全回退链路：换用不同安全策略的模型重试
+        _CONTENT_SAFETY_FALLBACK_CHAIN = ["deepseek-reasoner", "qwen3.5-plus"]
+        if last_result and last_result.error_code == "content_safety":
+            tried = {model_id}
+            strip_kwargs = {k: v for k, v in kwargs.items() if k != "max_retries"}
+            for alt_id in _CONTENT_SAFETY_FALLBACK_CHAIN:
+                if alt_id in tried or not self.registry._is_available(alt_id):
+                    continue
+                tried.add(alt_id)
+                logger.warning(
+                    f"⚠️ 模型 {model_id} 触发内容安全审查，尝试换用 {alt_id} 重试"
+                )
+                alt_result = await self._execute_call(
+                    model_id=alt_id,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=stream,
+                    on_chunk=on_chunk,
+                    **strip_kwargs,
+                )
+                if alt_result.success or alt_result.error_code != "content_safety":
+                    return alt_result
+            # 所有内容安全回退均失败，返回原始结果
+            return last_result
 
         fallback_id = spec.get_fallback_model() if spec else None
         if fallback_id and fallback_id != model_id:
@@ -351,6 +407,48 @@ class ModelHub:
                 f"⚠️ 模型 {spec.id} 的 default_max_retries={configured_retries!r} 非法，使用默认值 1"
             )
             return 1
+
+    def _increase_retry_timeout_budget(
+        self,
+        spec: "UnifiedModelSpec",
+        kwargs: Dict[str, Any],
+        *,
+        max_tokens: Optional[int],
+    ) -> tuple[Optional[int], Optional[int]]:
+        if not spec.constraints.supports_timeout_param:
+            return None, None
+
+        previous_timeout = self._safe_positive_int(kwargs.get("timeout"))
+        if previous_timeout is None:
+            previous_timeout = self._safe_positive_int(spec.api_config.default_timeout) or 120
+
+        growth_factor = 1.5
+        requested_tokens = self._safe_positive_int(max_tokens)
+        model_max_tokens = self._safe_positive_int(spec.constraints.max_output_tokens)
+        if (
+            requested_tokens is not None
+            and model_max_tokens is not None
+            and requested_tokens >= max(4096, model_max_tokens // 4)
+        ):
+            growth_factor = 2.0
+
+        ceiling = max(self._safe_positive_int(spec.api_config.default_timeout) or 120, 600)
+        next_timeout = min(int(previous_timeout * growth_factor), ceiling)
+        if next_timeout <= previous_timeout:
+            return previous_timeout, previous_timeout
+
+        kwargs["timeout"] = next_timeout
+        return previous_timeout, next_timeout
+
+    @staticmethod
+    def _safe_positive_int(value: Any) -> Optional[int]:
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError):
+            return None
+        if normalized <= 0:
+            return None
+        return normalized
 
     def _resolve_catalog_guarded_model(
         self,

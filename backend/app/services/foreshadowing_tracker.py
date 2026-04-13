@@ -2,7 +2,7 @@
 伏笔追踪系统 - 确保长篇小说伏笔不丢失、不遗忘
 
 核心功能：
-1. 从史诗框架中自动提取伏笔清单
+1. 从长篇框架中自动提取伏笔清单
 2. 管理伏笔的生命周期（planted → paving → revealed）
 3. 根据当前卷获取待处理的伏笔任务
 4. 生成伏笔约束提示词
@@ -12,7 +12,7 @@
 - 支持持久化和跨会话访问
 
 三层体系定位：
-- 顶层框架锚定：伏笔清单来源于史诗框架
+- 顶层框架锚定：伏笔清单来源于长篇框架
 - 卷级接口约束：每卷的伏笔任务（埋设/铺垫/揭秘）
 - 章节锚点承接：伏笔检查清单嵌入提示词
 """
@@ -126,17 +126,17 @@ class ForeshadowingTracker:
         self._loaded = False
     
     def extract_from_framework(self, framework_content: str) -> List[Foreshadowing]:
-        """从史诗框架中提取伏笔清单
+        """从长篇框架中提取伏笔清单
         
-        解析史诗框架的「关键伏笔布局」表格，提取所有伏笔信息
+        解析长篇框架的「关键伏笔布局」表格，提取所有伏笔信息
         
         Args:
-            framework_content: 史诗框架内容
+            framework_content: 长篇框架内容
             
         Returns:
             提取的伏笔列表
         """
-        logger.info(f"📝 开始从史诗框架中提取伏笔清单...")
+        logger.info(f"📝 开始从长篇框架中提取伏笔清单...")
         
         if not framework_content:
             logger.warning("⚠️ 框架内容为空")
@@ -277,9 +277,9 @@ class ForeshadowingTracker:
         # 限制输入长度
         content_limited = content[:6000] if len(content) > 6000 else content
         
-        prompt = f"""请从以下史诗框架中提取所有伏笔信息。
+        prompt = f"""请从以下长篇框架中提取所有伏笔信息。
 
-【史诗框架】
+【长篇框架】
 {content_limited}
 
 【提取要求】

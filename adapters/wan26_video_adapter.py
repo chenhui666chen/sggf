@@ -16,6 +16,7 @@ import requests
 
 from adapters.base import BaseAdapter, BaseVideoAdapter, AdapterConfig, GenerationResult
 from adapters.registry import register_model
+from core.model_catalog_runtime import get_model_catalog_runtime_index
 from schemas.task_spec import TaskSpec
 from schemas.model_spec import (
     ModelSpec,
@@ -91,18 +92,39 @@ def _encode_local_or_remote_image(path_text: str) -> str:
     return f"data:{mime};base64,{encoded}"
 
 
+def _resolution_rank(option: str) -> int:
+    text = str(option or "").strip().upper()
+    if text.endswith("P") and text[:-1].isdigit():
+        return int(text[:-1])
+    if text in {"2K", "4K", "8K"}:
+        return {"2K": 1440, "4K": 2160, "8K": 4320}[text]
+    return 0
+
+
+def _pick_resolution_label(width: int, height: int, options: List[str]) -> str:
+    normalized_options = [
+        str(option).strip().upper()
+        for option in options
+        if _resolution_rank(str(option)) > 0
+    ]
+    if not normalized_options:
+        return f"{max(1, min(int(width or 0), int(height or 0)))}P"
+
+    short_edge = max(1, min(int(width or 0), int(height or 0)))
+    sorted_options = sorted(normalized_options, key=_resolution_rank)
+    for option in sorted_options:
+        if short_edge <= _resolution_rank(option):
+            return option
+    return sorted_options[-1]
+
+
 @register_model("wan2.6-t2v")
 class Wan26VideoAdapter(BaseVideoAdapter):
     """Alibaba Cloud Wan2.6 text-to-video adapter."""
     
     def __init__(self, spec: ModelSpec, config: Optional[AdapterConfig] = None):
         if config is None:
-            config = AdapterConfig(
-                api_key=os.getenv("DASHSCOPE_API_KEY", ""),
-                base_url=os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com"),
-                timeout=300,
-                max_retries=3,
-            )
+            config = _build_wan_config("WAN_T2V", "wan2.6-t2v")
         super().__init__(spec, config)
         self._session = requests.Session()
         self._session.headers.update({
@@ -112,6 +134,54 @@ class Wan26VideoAdapter(BaseVideoAdapter):
     
     def _init_client(self) -> None:
         pass
+
+    @property
+    def model_name(self) -> str:
+        extra = getattr(self.config, "extra", {}) or {}
+        return str(extra.get("model_name") or self.spec.id)
+
+    def _supported_resolution_options(self) -> List[str]:
+        constraints = get_model_catalog_runtime_index().get_task_constraints(self.spec.id)
+        options = constraints.get("resolution_options")
+        if isinstance(options, list) and options:
+            return [str(item).strip().upper() for item in options if str(item).strip()]
+        return ["480P", "720P", "1080P"]
+
+    def _request_needs_oss_resolve(self, request: Dict[str, Any]) -> bool:
+        input_payload = request.get("input", {}) if isinstance(request, dict) else {}
+        for key in ("img_url", "ref_image_url", "video_url", "ref_video_url"):
+            value = str(input_payload.get(key) or "").strip()
+            if value.startswith("oss://"):
+                return True
+        return False
+
+    def _extract_error_message(self, response: requests.Response) -> str:
+        status_code = int(getattr(response, "status_code", 0) or 0)
+        request_id = ""
+        code = ""
+        message = ""
+
+        try:
+            payload = response.json()
+        except Exception:  # noqa: BLE001
+            payload = None
+
+        if isinstance(payload, dict):
+            code = str(payload.get("code") or payload.get("error_code") or "").strip()
+            message = str(payload.get("message") or payload.get("error") or "").strip()
+            request_id = str(payload.get("request_id") or "").strip()
+
+        if not message:
+            message = str(getattr(response, "text", "") or getattr(response, "reason", "")).strip()
+
+        parts = [f"DashScope HTTP {status_code}"]
+        if code:
+            parts.append(code)
+        if message:
+            parts.append(message)
+        if request_id:
+            parts.append(f"request_id={request_id}")
+        return " | ".join(parts)
     
     @classmethod
     def get_model_spec(cls) -> ModelSpec:
@@ -255,14 +325,19 @@ class Wan26VideoAdapter(BaseVideoAdapter):
     
     def _map_task_to_request(self, task: TaskSpec) -> Dict[str, Any]:
         """Map TaskSpec to Wan2.6 API request."""
+        resolution_label = _pick_resolution_label(
+            task.width,
+            task.height,
+            self._supported_resolution_options(),
+        )
         payload = {
-            "model": "wan2.6-t2v",
+            "model": self.model_name,
             "input": {
                 "text": task.prompt,
             },
             "parameters": {
                 "duration": int(task.duration or 5),
-                "resolution": f"{task.width}x{task.height}",
+                "resolution": resolution_label,
                 "size": f"{task.width}*{task.height}",
             },
         }
@@ -300,10 +375,22 @@ class Wan26VideoAdapter(BaseVideoAdapter):
                 response = self._session.post(
                     url,
                     json=request,
-                    headers={"X-DashScope-Async": "enable"},
+                    headers={
+                        "X-DashScope-Async": "enable",
+                        **(
+                            {"X-DashScope-OssResourceResolve": "enable"}
+                            if self._request_needs_oss_resolve(request)
+                            else {}
+                        ),
+                    },
                     timeout=self.config.timeout,
                 )
-                response.raise_for_status()
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get("Retry-After", 60))
+                    time.sleep(min(retry_after, 60))
+                    continue
+                if response.status_code >= 400:
+                    raise RuntimeError(self._extract_error_message(response))
                 initial_payload = response.json()
                 task_id = (
                     initial_payload.get("output", {}).get("task_id")
@@ -318,7 +405,8 @@ class Wan26VideoAdapter(BaseVideoAdapter):
                         poll_url_template.format(task_id=task_id),
                         timeout=min(int(self.config.timeout or 300), 60),
                     )
-                    status_response.raise_for_status()
+                    if status_response.status_code >= 400:
+                        raise RuntimeError(self._extract_error_message(status_response))
                     status_payload = status_response.json()
                     task_status = str(status_payload.get("output", {}).get("task_status") or "").upper()
 
@@ -337,13 +425,6 @@ class Wan26VideoAdapter(BaseVideoAdapter):
                         "task_status": "FAILED",
                     },
                 }
-            
-            except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 429:
-                    retry_after = int(e.response.headers.get("Retry-After", 60))
-                    time.sleep(min(retry_after, 60))
-                    continue
-                raise
             
             except requests.exceptions.RequestException as e:
                 if attempt == self.config.max_retries - 1:
@@ -414,6 +495,9 @@ class Wan26VideoAdapter(BaseVideoAdapter):
 @register_model("wan2.6-t2v-fast")
 class Wan26FastVideoAdapter(Wan26VideoAdapter):
     """Wan2.6 Fast - faster but lower quality."""
+
+    def __init__(self, spec: ModelSpec, config: Optional[AdapterConfig] = None):
+        super().__init__(spec, config or _build_wan_config("WAN_T2V_FAST", "wan2.6-t2v-fast"))
     
     @classmethod
     def get_model_spec(cls) -> ModelSpec:
@@ -428,7 +512,7 @@ class Wan26FastVideoAdapter(Wan26VideoAdapter):
     
     def _map_task_to_request(self, task: TaskSpec) -> Dict[str, Any]:
         request = super()._map_task_to_request(task)
-        request["model"] = "wan2.6-t2v-fast"
+        request["model"] = self.model_name
         return request
 
 
@@ -450,7 +534,7 @@ class Wan26ImageToVideoAdapter(Wan26VideoAdapter):
 
     def _map_task_to_request(self, task: TaskSpec) -> Dict[str, Any]:
         request = super()._map_task_to_request(task)
-        request["model"] = "wan2.6-i2v"
+        request["model"] = self.model_name
         return request
 
 
@@ -472,5 +556,5 @@ class Wan26ReferenceVideoAdapter(Wan26VideoAdapter):
 
     def _map_task_to_request(self, task: TaskSpec) -> Dict[str, Any]:
         request = super()._map_task_to_request(task)
-        request["model"] = "wan2.6-r2v"
+        request["model"] = self.model_name
         return request

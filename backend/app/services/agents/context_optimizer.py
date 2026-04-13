@@ -8,7 +8,11 @@
 4. 确保总输入不超过 qwen3-max 的 256K tokens 限制
 """
 from typing import Dict, Any, Optional, Tuple
+import logging
 import re
+
+
+logger = logging.getLogger(__name__)
 
 
 class ContextOptimizer:
@@ -63,12 +67,12 @@ class ContextOptimizer:
         self.max_tokens = self.MODEL_LIMITS[self.selected_model]
         self.target_tokens = int(self.max_tokens * self.target_token_ratio)
         
-        print(f"📊 上下文优化器初始化:")
-        print(f"   - 当前章节: 第{self.current_chapter}章")
-        print(f"   - 阶段: {stage}")
-        print(f"   - 选择模型: {self.selected_model}")
-        print(f"   - 最大tokens: {self.max_tokens:,}")
-        print(f"   - 目标tokens: {self.target_tokens:,} ({self.target_token_ratio*100:.0f}%使用率)")
+        logger.debug(f"📊 上下文优化器初始化:")
+        logger.debug(f"   - 当前章节: 第{self.current_chapter}章")
+        logger.debug(f"   - 阶段: {stage}")
+        logger.debug(f"   - 选择模型: {self.selected_model}")
+        logger.debug(f"   - 最大tokens: {self.max_tokens:,}")
+        logger.debug(f"   - 目标tokens: {self.target_tokens:,} ({self.target_token_ratio*100:.0f}%使用率)")
     
     def _select_model_and_ratio(self) -> tuple:
         """根据章节数和阶段智能选择模型和目标比例
@@ -290,7 +294,7 @@ class ContextOptimizer:
             return full_outline
         
         original_length = len(full_outline)
-        print(f"\n🎯 【智能大纲提取】目标章节: 第{target_chapter}章, 原始长度: {original_length}字符")
+        logger.debug(f"\n🎯 【智能大纲提取】目标章节: 第{target_chapter}章, 原始长度: {original_length}字符")
         
         result_parts = []
         
@@ -298,13 +302,13 @@ class ContextOptimizer:
         story_overview = self._extract_story_overview(full_outline)
         if story_overview:
             result_parts.append(story_overview)
-            print(f"   ✅ 提取故事概述: {len(story_overview)}字符")
+            logger.debug(f"   ✅ 提取故事概述: {len(story_overview)}字符")
         
         # 2️⃣ 提取当前卷概述（如果有卷结构）
         volume_info = self._extract_current_volume_info(full_outline, target_chapter)
         if volume_info:
             result_parts.append(volume_info)
-            print(f"   ✅ 提取当前卷信息: {len(volume_info)}字符")
+            logger.debug(f"   ✅ 提取当前卷信息: {len(volume_info)}字符")
         
         # 3️⃣ 提取当前章节 + 前后N章的细纲（核心）
         chapters_outline = self._extract_chapters_range(
@@ -314,19 +318,19 @@ class ContextOptimizer:
         )
         if chapters_outline:
             result_parts.append(chapters_outline)
-            print(f"   ✅ 提取章节细纲(第{max(1, target_chapter-context_range)}-{target_chapter+context_range}章): {len(chapters_outline)}字符")
+            logger.debug(f"   ✅ 提取章节细纲(第{max(1, target_chapter-context_range)}-{target_chapter+context_range}章): {len(chapters_outline)}字符")
         
         # 4️⃣ 提取涉及当前章节的伏笔信息
         foreshadowing = self._extract_relevant_foreshadowing(full_outline, target_chapter)
         if foreshadowing:
             result_parts.append(foreshadowing)
-            print(f"   ✅ 提取相关伏笔: {len(foreshadowing)}字符")
+            logger.debug(f"   ✅ 提取相关伏笔: {len(foreshadowing)}字符")
         
         # 5️⃣ 提取本卷活跃的人物生命周期
         character_lifecycle = self._extract_active_characters(full_outline, target_chapter)
         if character_lifecycle:
             result_parts.append(character_lifecycle)
-            print(f"   ✅ 提取人物生命周期: {len(character_lifecycle)}字符")
+            logger.debug(f"   ✅ 提取人物生命周期: {len(character_lifecycle)}字符")
         
         # 合并结果
         if result_parts:
@@ -334,11 +338,11 @@ class ContextOptimizer:
             extracted_length = len(extracted)
             savings = original_length - extracted_length
             savings_pct = (savings / original_length * 100) if original_length > 0 else 0
-            print(f"   💾 提取后长度: {extracted_length}字符, 节省: {savings}字符 ({savings_pct:.1f}%)")
+            logger.debug(f"   💾 提取后长度: {extracted_length}字符, 节省: {savings}字符 ({savings_pct:.1f}%)")
             return extracted
         
         # 如果无法提取，返回原始大纲（稍后会被压缩）
-        print(f"   ⚠️  无法识别大纲结构，返回原始内容")
+        logger.debug(f"   ⚠️  无法识别大纲结构，返回原始内容")
         return full_outline
     
     def _extract_story_overview(self, outline: str) -> str:
@@ -495,9 +499,9 @@ class ContextOptimizer:
         Returns:
             (优化后的上下文字典, 统计信息)
         """
-        print(f"\n{'='*70}")
-        print(f"【上下文优化器】开始优化上下文...")
-        print(f"{'='*70}\n")
+        logger.debug(f"\n{'='*70}")
+        logger.debug(f"【上下文优化器】开始优化上下文...")
+        logger.debug(f"{'='*70}\n")
         
         # 1. 估算各部分的token消耗
         token_usage = {}
@@ -507,13 +511,13 @@ class ContextOptimizer:
             tokens = self.estimate_tokens(content)
             token_usage[key] = tokens
             total_tokens += tokens
-            print(f"📊 {key}: {tokens} tokens ({len(content)} 字符)")
+            logger.debug(f"📊 {key}: {tokens} tokens ({len(content)} 字符)")
         
-        print(f"\n💾 当前总token数: {total_tokens} / {self.target_tokens} (目标)")
+        logger.debug(f"\n💾 当前总token数: {total_tokens} / {self.target_tokens} (目标)")
         
         # 2. 如果未超标，直接返回
         if total_tokens <= self.target_tokens:
-            print(f"✅ Token使用在安全范围内，无需优化\n")
+            logger.debug(f"✅ Token使用在安全范围内，无需优化\n")
             return context_parts, {
                 'original_tokens': total_tokens,
                 'optimized_tokens': total_tokens,
@@ -523,7 +527,7 @@ class ContextOptimizer:
             }
         
         # 3. 需要优化：按优先级压缩
-        print(f"\n⚠️  Token超标 ({total_tokens - self.target_tokens} tokens)，开始智能压缩...\n")
+        logger.debug(f"\n⚠️  Token超标 ({total_tokens - self.target_tokens} tokens)，开始智能压缩...\n")
         
         optimized_parts = {}
         optimized_tokens = 0
@@ -571,18 +575,18 @@ class ContextOptimizer:
                 optimized_tokens += original_tokens
         
         # 打印优化日志
-        print("压缩详情:")
+        logger.debug("压缩详情:")
         for log in compression_log:
-            print(f"   {log}")
+            logger.debug(f"   {log}")
         
-        print(f"\n💾 优化后总token数: {optimized_tokens} / {self.target_tokens} (目标)")
+        logger.debug(f"\n💾 优化后总token数: {optimized_tokens} / {self.target_tokens} (目标)")
         savings = total_tokens - optimized_tokens
         savings_pct = (savings / total_tokens * 100) if total_tokens > 0 else 0
-        print(f"📉 节省: {savings} tokens ({savings_pct:.1f}%)\n")
+        logger.debug(f"📉 节省: {savings} tokens ({savings_pct:.1f}%)\n")
         
         # 4. 如果还是超标，进一步压缩大纲
         if optimized_tokens > self.target_tokens:
-            print(f"⚠️  仍然超标，对情节大纲进行进一步压缩...")
+            logger.debug(f"⚠️  仍然超标，对情节大纲进行进一步压缩...")
             
             if 'plot_outline' in optimized_parts:
                 outline = optimized_parts['plot_outline']
@@ -596,10 +600,10 @@ class ContextOptimizer:
                 new_tokens = self.estimate_tokens(optimized_parts['plot_outline'])
                 
                 optimized_tokens = optimized_tokens - outline_tokens + new_tokens
-                print(f"   🔧 plot_outline: {outline_tokens} → {new_tokens} tokens")
-                print(f"   💾 最终token数: {optimized_tokens}")
+                logger.debug(f"   🔧 plot_outline: {outline_tokens} → {new_tokens} tokens")
+                logger.debug(f"   💾 最终token数: {optimized_tokens}")
         
-        print(f"{'='*70}\n")
+        logger.debug(f"{'='*70}\n")
         
         return optimized_parts, {
             'original_tokens': total_tokens,

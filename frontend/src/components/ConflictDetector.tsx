@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Box,
   Button,
@@ -45,6 +45,16 @@ interface AbilityMismatchConflict {
   severity: 'high' | 'medium' | 'low'
 }
 
+interface RelationConflict {
+  conflict_type: 'relation_conflict'
+  source: string
+  target: string
+  forward_relation: string
+  reverse_relation: string
+  description: string
+  severity: 'high' | 'medium' | 'low'
+}
+
 interface ConflictDetectorProps {
   projectId: number
   onSelectItem?: (itemId: number) => void
@@ -58,8 +68,20 @@ export default function ConflictDetector(props: ConflictDetectorProps) {
   const [error, setError] = useState<string | null>(null)
   const [duplicateNames, setDuplicateNames] = useState<DuplicateNameConflict[]>([])
   const [abilityMismatches, setAbilityMismatches] = useState<AbilityMismatchConflict[]>([])
+  const [relationConflicts, setRelationConflicts] = useState<RelationConflict[]>([])
   const [totalConflicts, setTotalConflicts] = useState(0)
   const [hasDetected, setHasDetected] = useState(false)
+  const relationConflictCount = relationConflicts.length
+
+  useEffect(() => {
+    if (projectId) {
+      setHasDetected(false)
+      setDuplicateNames([])
+      setAbilityMismatches([])
+      setRelationConflicts([])
+      setTotalConflicts(0)
+    }
+  }, [projectId])
 
   const handleDetect = async () => {
     setLoading(true)
@@ -72,10 +94,10 @@ export default function ConflictDetector(props: ConflictDetectorProps) {
 
       setDuplicateNames(data.duplicate_names || [])
       setAbilityMismatches(data.ability_mismatches || [])
+      setRelationConflicts(data.relation_conflicts || [])
       setTotalConflicts(data.total_conflicts || 0)
       setHasDetected(true)
     } catch (err: any) {
-      console.error('冲突检测失败', err)
       setError(await extractApiErrorMessage(err, '检测失败'))
     } finally {
       setLoading(false)
@@ -276,6 +298,57 @@ export default function ConflictDetector(props: ConflictDetectorProps) {
                               <Typography variant="caption" display="block" color="error.main">
                                 要求境界: {conflict.required_realm}
                               </Typography>
+                            </Box>
+                          }
+                        />
+                      </ListItem>
+                    </Box>
+                  ))}
+                </List>
+              </Box>
+            )}
+
+            {/* 关系冲突 */}
+            {relationConflictCount > 0 && (
+              <Box>
+                <Typography variant="subtitle2" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <ErrorOutlineIcon fontSize="small" color="error" />
+                  关系矛盾 ({relationConflictCount})
+                </Typography>
+                <List dense>
+                  {relationConflicts.map((conflict, index) => (
+                    <Box key={index}>
+                      <ListItem
+                        sx={{
+                          py: 1.5,
+                          bgcolor: 'error.light',
+                          borderRadius: 1,
+                          mb: 1,
+                        }}
+                      >
+                        <ListItemText
+                          primary={
+                            <Box display="flex" alignItems="center" gap={1} mb={0.5}>
+                              <Typography variant="body2" fontWeight={500}>
+                                {conflict.source} ↔ {conflict.target}
+                              </Typography>
+                              <Chip
+                                label={getSeverityLabel(conflict.severity)}
+                                size="small"
+                                color={getSeverityColor(conflict.severity)}
+                                sx={{ height: 20 }}
+                              />
+                            </Box>
+                          }
+                          secondary={
+                            <Box>
+                              <Typography variant="caption" display="block">
+                                {conflict.description}
+                              </Typography>
+                              <Box display="flex" gap={1} mt={0.5}>
+                                <Chip label={`${conflict.source}→${conflict.target}: ${conflict.forward_relation}`} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
+                                <Chip label={`${conflict.target}→${conflict.source}: ${conflict.reverse_relation}`} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
+                              </Box>
                             </Box>
                           }
                         />

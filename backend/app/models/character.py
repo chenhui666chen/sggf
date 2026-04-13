@@ -35,6 +35,9 @@ class Character(Base):
     role: Mapped[Optional[str]] = mapped_column(  # 故事立场：主角方 / 反派方 / 中立方 / 亦正亦邪
         String(50), nullable=True
     )
+    role_position: Mapped[Optional[str]] = mapped_column(  # 角色定位：主角 / 盟友 / 导师 / 对手 / 情报角色 等
+        String(100), nullable=True
+    )
     gender: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     age: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
@@ -100,6 +103,19 @@ class Character(Base):
     )
     relations: Mapped[Optional[str]] = mapped_column(  # 与其他角色/势力的关系，可后续统一 UI
         Text, nullable=True
+    )
+
+    # 题材专属字段（通用 JSON 存储，适配所有题材的动态字段）
+    # 修仙: {"修炼资质": "...", "当前修为": "...", "主修功法": "...", "法宝/灵器": "...", "势力地位": "..."}
+    # 玄幻: {"血脉类型": "...", "当前等级": "...", "核心武技": "...", "核心武器": "...", "所属世界/区域": "..."}
+    # 都市: {"社会地位": "...", "财富等级": "...", "核心资源": "...", "职业背景": "...", "都市技能": "..."}
+    # 悬疑: {"信息掌控层级": "...", "调查权限": "...", "隐藏身份": "...", "关键秘密": "..."}
+    # 言情: {"情感状态": "...", "魅力标签": "...", "社交圈层": "...", "情感创伤": "..."}
+    # 耽美: {"情感状态": "...", "攻受属性": "...", "内心防线": "...", "关系认知": "..."}
+    # 科幻: {"科技等级": "...", "基因改造": "...", "机械强化": "...", "AI融合度": "..."}
+    # 纯文学: {"精神状态": "...", "价值观锚点": "...", "人生阶段": "...", "内心矛盾": "..."}
+    genre_fields_json: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="题材专属字段(JSON)，键名由 genre_registry 定义"
     )
 
     created_at: Mapped[datetime] = mapped_column(

@@ -9,7 +9,8 @@ import logging
 import os
 from typing import Awaitable, Callable, Dict, List, Optional
 
-from core.model_resolution import normalize_model_id
+from core.model_resolution import normalize_model_id, normalize_task_type
+from core.model_runtime import resolve_model_for_task
 from core.unified_llm_client import UnifiedLLMClient, get_llm_client
 
 logger = logging.getLogger(__name__)
@@ -32,11 +33,18 @@ class StreamingService:
         on_chunk: Callable[[str, int], Awaitable[None]],
         on_complete: Optional[Callable[[str, int], Awaitable[None]]] = None,
         model: Optional[str] = None,
+        task_type: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         max_retries: int = 3,
     ) -> str:
-        selected_model = normalize_model_id(model or self.default_model) or self.default_model
+        normalized_task_type = normalize_task_type(task_type)
+        explicit_model = normalize_model_id(model)
+        selected_model = (
+            resolve_model_for_task(normalized_task_type, explicit_model)
+            or explicit_model
+            or self.default_model
+        )
         last_error: Optional[Exception] = None
 
         for attempt in range(max_retries):
@@ -59,7 +67,8 @@ class StreamingService:
                 content = await self.llm_client.chat_stream(
                     messages=messages,
                     on_chunk=relay,
-                    model=selected_model,
+                    task_type=normalized_task_type,
+                    model=explicit_model,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     max_retries=1,
@@ -97,6 +106,7 @@ class StreamingService:
         on_complete: Optional[Callable[[str, int], Awaitable[None]]] = None,
         temperature: float = 0.7,
         model: Optional[str] = None,
+        task_type: Optional[str] = None,
     ) -> str:
         messages = [
             {"role": "system", "content": system_prompt},
@@ -108,6 +118,7 @@ class StreamingService:
             on_complete=on_complete,
             temperature=temperature,
             model=model,
+            task_type=task_type,
         )
 
 

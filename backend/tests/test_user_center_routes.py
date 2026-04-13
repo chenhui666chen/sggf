@@ -566,7 +566,7 @@ def test_points_overview_returns_rule_based_account_and_admin_benefits():
     payload = response.json()
 
     assert payload["points_account"] == {
-        "balance": 19.0,
+        "balance": 16.0,
         "frozen": 0.0,
         "expiring_soon": 3.0,
         "status": "partial",
@@ -609,7 +609,7 @@ def test_points_overview_returns_rule_based_account_and_admin_benefits():
     assert pending_signals["asset-ledger"]["signal_label"] == "2 项资产"
     assert pending_signals["points-ledger"]["signal_label"] == "充值 / 补发规则待接入"
 
-    assert len(payload["points_entries"]) == 4
+    assert len(payload["points_entries"]) == 3
     points_entries = {item["key"]: item for item in payload["points_entries"]}
     assert points_entries["audiobook-reward-1"]["source_label"] == "有声书完成"
     assert points_entries["audiobook-reward-1"]["direction"] == "income"

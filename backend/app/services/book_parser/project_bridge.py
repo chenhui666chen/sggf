@@ -16,6 +16,12 @@ from app.models.setting import SettingCollection, SettingItem
 from app.models.character import Character
 from app.models.user import User
 from app.services.chapter_adaptation_assets import attach_cross_media_adaptation_hints
+from app.services.character_parser import (
+    _build_ability_and_limit_text,
+    _build_mainline_binding_text,
+    _build_personality_anchor_text,
+    infer_story_stance_from_text_evidence,
+)
 from app.services.setting_templates import get_hierarchy_config_json
 from app.utils.datetime_utils import utc_now
 
@@ -31,7 +37,6 @@ class ProjectBridge:
     - 导入设定（人物、世界观）
     - 导入章节（可选）
     """
-    
     # 设定类型映射
     ANALYSIS_TO_COLLECTION = {
         'characters': '人物设定',
@@ -47,6 +52,23 @@ class ProjectBridge:
         "pending_foreshadowings": 12,
         "world_rules_hard_constraints": 10,
     }
+    CANONICAL_STORY_STANCES = frozenset({"主角方", "反派方", "中立方", "亦正亦邪"})
+    CANONICAL_ROLE_POSITIONS = frozenset({
+        "主角",
+        "盟友",
+        "导师",
+        "对手",
+        "守护者",
+        "情报角色",
+        "中立角色",
+        "摇摆角色",
+        "治疗者",
+        "首领",
+        "受害者",
+        "主线角色",
+        "功能角色",
+    })
+    GENERIC_ROLE_POSITIONS = frozenset({"盟友", "对手", "中立角色", "摇摆角色", "主线角色", "功能角色"})
     
     def __init__(self, db: Session):
         self.db = db
@@ -162,29 +184,22 @@ class ProjectBridge:
         )
 
         imported_by_key: Dict[str, Character] = {}
-        main_characters = content.get('main_characters', []) or []
-        supporting_characters = content.get('supporting_characters', []) or []
+        characters = self._get_character_entries(content)
+        primary_count = 0
 
-        for char_data in main_characters:
+        for char_data in characters:
+            is_primary = self._is_primary_character_entry(char_data)
+            if is_primary:
+                primary_count += 1
             self._upsert_import_character(
                 project=project,
                 imported_by_key=imported_by_key,
                 char_data=char_data,
                 mention_map=mention_map,
                 relationship_lookup=relationship_lookup,
-                default_role='protagonist',
-                default_importance='重要角色',
-            )
-
-        for char_data in supporting_characters:
-            self._upsert_import_character(
-                project=project,
-                imported_by_key=imported_by_key,
-                char_data=char_data,
-                mention_map=mention_map,
-                relationship_lookup=relationship_lookup,
-                default_role='supporting',
-                default_importance='次要角色',
+                default_story_stance='',
+                default_role_position='主线角色' if is_primary else '功能角色',
+                default_importance='重要角色' if is_primary else '次要角色',
             )
 
         missing_character_keys = set(mention_map.keys()) | set(relationship_lookup.keys())
@@ -212,7 +227,8 @@ class ProjectBridge:
                 char_data={"name": mention_info.get("name") or key},
                 mention_map=mention_map,
                 relationship_lookup=relationship_lookup,
-                default_role='supporting',
+                default_story_stance='',
+                default_role_position='功能角色',
                 default_importance='次要角色',
                 is_backfilled=True,
             )
@@ -220,9 +236,64 @@ class ProjectBridge:
                 auto_created += 1
 
         logger.info(
-            f"  → 导入 {len(main_characters)} 个主要人物, {len(supporting_characters)} 个配角, "
+            f"  → 导入 {primary_count} 个主线人物, {max(len(characters) - primary_count, 0)} 个功能人物, "
             f"自动补建 {auto_created} 个章节人物卡"
         )
+
+    @classmethod
+    def _get_character_entries(cls, content: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """从人物分析结果中读取标准化后的单一人物列表。"""
+        if not isinstance(content, dict):
+            return []
+
+        items = content.get("characters")
+        if not isinstance(items, list):
+            return []
+
+        deduped: Dict[str, Dict[str, Any]] = {}
+        order: List[str] = []
+        for raw_item in items:
+            if not isinstance(raw_item, dict):
+                continue
+            name = cls._normalize_import_character_name(raw_item.get("name"))
+            if not name:
+                continue
+            item = dict(raw_item)
+            item["name"] = name
+            if name not in deduped:
+                deduped[name] = item
+                order.append(name)
+                continue
+
+            existing = deduped[name]
+            for key, value in item.items():
+                if key == "name" or value in (None, "", [], {}):
+                    continue
+                if existing.get(key) in (None, "", [], {}):
+                    existing[key] = value
+                elif isinstance(existing.get(key), str) and isinstance(value, str) and len(value) > len(existing[key]):
+                    existing[key] = value
+
+        return [deduped[name] for name in order]
+
+    @classmethod
+    def _is_primary_character_entry(cls, char_data: Dict[str, Any]) -> bool:
+        """判断人物条目是否属于主线核心人物。"""
+        importance = cls._stringify_import_value(
+            char_data.get("importance_level") or char_data.get("importance")
+        )
+        role_position = cls._normalize_role_position_value(char_data.get("role_position"))
+        story_stance = cls._normalize_story_stance_value(char_data.get("story_stance"))
+
+        if role_position == "主角" or "主角" in importance:
+            return True
+        if any(keyword in importance for keyword in ("核心", "重要")):
+            return True
+        if role_position in {"盟友", "导师", "对手", "首领", "主线角色"}:
+            return True
+        if story_stance in {"主角方", "反派方", "亦正亦邪"} and role_position not in {"功能角色", "中立角色", ""}:
+            return True
+        return False
 
     @staticmethod
     def _normalize_import_character_name(name: Any) -> str:
@@ -248,6 +319,145 @@ class ProjectBridge:
         if isinstance(value, list):
             return "、".join(str(item).strip() for item in value if str(item).strip())
         return str(value).strip()
+
+    @classmethod
+    def _normalize_story_stance_value(cls, value: Any) -> str:
+        """标准化故事立场，仅接受正式值或可直接归类的中文描述。"""
+        text = str(value or "").strip()
+        if not text or text == "未提及":
+            return ""
+        if text in cls.CANONICAL_STORY_STANCES:
+            return text
+
+        if "亦正亦邪" in text:
+            return "亦正亦邪"
+        if any(keyword in text for keyword in ("中立", "旁观", "游离")):
+            return "中立方"
+        if any(keyword in text for keyword in ("对手", "反派", "敌", "宿敌", "追杀", "围杀", "阻挠")):
+            return "反派方"
+        if any(keyword in text for keyword in ("主角", "主角方", "主角阵营", "正派", "正义", "盟友", "导师", "同伴", "队友", "助力", "守护")):
+            return "主角方"
+        return ""
+
+    @classmethod
+    def _infer_role_position_from_relationship(cls, relationship_to_main: Any) -> str:
+        """从与主角关系中提炼更可用的角色定位。"""
+        text = str(relationship_to_main or "").strip()
+        if not text or text == "未提及":
+            return ""
+        if any(keyword in text for keyword in ("导师", "师父", "老师")):
+            return "导师"
+        if any(keyword in text for keyword in ("盟友", "伙伴", "搭档", "同伴", "队友", "同盟")):
+            return "盟友"
+        if any(keyword in text for keyword in ("对手", "敌", "宿敌", "追杀", "阻挠", "围杀", "压制")):
+            return "对手"
+        if any(keyword in text for keyword in ("守护", "保护", "护卫")):
+            return "守护者"
+        if any(keyword in text for keyword in ("情报", "线人", "内应")):
+            return "情报角色"
+        if any(keyword in text for keyword in ("受害", "目标", "被害")):
+            return "受害者"
+        if any(keyword in text for keyword in ("中立", "旁观", "游离")):
+            return "中立角色"
+        return ""
+
+    @classmethod
+    def _normalize_role_position_value(
+        cls,
+        value: Any,
+        *,
+        relationship_to_main: Any = None,
+        fallback: Any = None,
+    ) -> str:
+        """标准化角色定位，并优先使用关系信息把泛化定位细化。"""
+
+        def normalize_candidate(raw_value: Any) -> str:
+            text = str(raw_value or "").strip()
+            if not text or text == "未提及":
+                return ""
+            if text == "主角方":
+                return "主角"
+            if text == "反派方":
+                return "对手"
+            if text == "中立方":
+                return "中立角色"
+            if text == "亦正亦邪":
+                return "摇摆角色"
+            return text
+
+        mapped_value = normalize_candidate(value) or normalize_candidate(fallback)
+
+        relationship_position = cls._infer_role_position_from_relationship(relationship_to_main)
+        if relationship_position and (not mapped_value or mapped_value in cls.GENERIC_ROLE_POSITIONS):
+            return relationship_position
+        return mapped_value
+
+    @classmethod
+    def _infer_story_stance(
+        cls,
+        *,
+        explicit_stance: Any = None,
+        role_position: Any = None,
+        relationship_to_main: Any = None,
+        fallback: Any = None,
+        additional_texts: Optional[List[Any]] = None,
+    ) -> str:
+        """综合显式字段、角色定位和关系信息推断故事立场。"""
+        explicit = cls._normalize_story_stance_value(explicit_stance)
+        if explicit:
+            return explicit
+
+        relationship_text = str(relationship_to_main or "").strip()
+        if any(keyword in relationship_text for keyword in ("盟友", "伙伴", "搭档", "同伴", "队友", "同盟", "协助", "帮助", "守护", "保护")):
+            return "主角方"
+        if any(keyword in relationship_text for keyword in ("对手", "敌", "宿敌", "追杀", "阻挠", "围杀", "压制")):
+            return "反派方"
+        if any(keyword in relationship_text for keyword in ("中立", "旁观", "游离")):
+            return "中立方"
+
+        role_position_text = str(role_position or "").strip()
+        if role_position_text and role_position_text not in {"主线角色", "功能角色"}:
+            inferred = cls._normalize_story_stance_value(role_position_text)
+            if inferred:
+                return inferred
+
+        evidence_stance = infer_story_stance_from_text_evidence(
+            role_position,
+            relationship_to_main,
+            *(additional_texts or []),
+        )
+        if evidence_stance:
+            return evidence_stance
+        return cls._normalize_story_stance_value(fallback)
+
+    @classmethod
+    def _should_replace_story_stance(cls, existing_value: Any, new_value: str, *, explicit: bool = False) -> bool:
+        """只在旧值缺失、非规范或新值更可信时覆盖故事立场。"""
+        if not new_value:
+            return False
+
+        existing_text = str(existing_value or "").strip()
+        existing_normalized = cls._normalize_story_stance_value(existing_text)
+        if not existing_text or existing_text != existing_normalized:
+            return True
+        if explicit and existing_normalized != new_value:
+            return True
+        return False
+
+    @classmethod
+    def _should_replace_role_position(cls, existing_value: Any, new_value: str) -> bool:
+        """只在旧值缺失、明显泛化或被故事立场污染时覆盖角色定位。"""
+        if not new_value:
+            return False
+
+        existing_text = str(existing_value or "").strip()
+        if not existing_text:
+            return True
+        if existing_text in cls.CANONICAL_STORY_STANCES:
+            return True
+        if existing_text in cls.GENERIC_ROLE_POSITIONS and new_value not in cls.GENERIC_ROLE_POSITIONS:
+            return True
+        return False
 
     def _collect_book_parser_character_mentions(self, book_id: Optional[int]) -> Dict[str, Dict[str, Any]]:
         """汇总拆书章节中出现过的人物及首次出场信息。"""
@@ -358,7 +568,10 @@ class ProjectBridge:
         is_backfilled: bool,
     ) -> str:
         """生成导入人物的摘要文本。"""
-        description = self._stringify_import_value(char_data.get("description"))
+        description = self._stringify_import_value(
+            char_data.get("description")
+            or char_data.get("mainline_role")
+        )
         if description:
             return description
 
@@ -381,29 +594,77 @@ class ProjectBridge:
         relationship_entries: List[Dict[str, str]],
         canonical_name: str,
         is_backfilled: bool,
+        default_story_stance: str = "",
+        default_role_position: str = "",
     ) -> str:
         """把拆书人物分析整理成更适合创作复用的人物档案。"""
         aliases = self._collect_import_character_aliases(char_data, mention_info, canonical_name)
         parts: List[str] = []
+        relation_to_main = self._stringify_import_value(char_data.get("relationship_to_main"))
+        role_position = self._normalize_role_position_value(
+            char_data.get("role_position"),
+            relationship_to_main=relation_to_main,
+            fallback=default_role_position,
+        )
+        story_stance = self._infer_story_stance(
+            explicit_stance=char_data.get("story_stance"),
+            role_position=role_position,
+            relationship_to_main=relation_to_main,
+            fallback=default_story_stance,
+            additional_texts=[
+                char_data.get("description"),
+                char_data.get("background_status"),
+                char_data.get("mainline_role"),
+                char_data.get("growth_direction"),
+            ],
+        )
+
+        faction = self._stringify_import_value(char_data.get("faction"))
+        appearance = self._stringify_import_value(char_data.get("appearance_anchor"))
+        personality = self._stringify_import_value(char_data.get("personality_anchor"))
+        worldview = self._stringify_import_value(char_data.get("worldview"))
+        background = self._stringify_import_value(char_data.get("background_status"))
+        motivation = self._stringify_import_value(char_data.get("motivation"))
+        abilities = self._stringify_import_value(char_data.get("ability_outline"))
+        limitation = self._stringify_import_value(char_data.get("limitation"))
+        growth_direction = self._stringify_import_value(char_data.get("growth_direction"))
+        mainline_role = self._stringify_import_value(char_data.get("mainline_role"))
+        mainline_clues = self._stringify_import_value(char_data.get("mainline_clues"))
 
         if aliases:
             parts.append(f"别名/称呼: {'、'.join(aliases)}")
 
+        relationship_lines: List[str] = []
+        if relation_to_main:
+            relationship_lines.append(f"与主角：{relation_to_main}")
+        for relation in relationship_entries:
+            target = self._stringify_import_value(relation.get("target"))
+            relation_type = self._stringify_import_value(relation.get("type")) or "关联"
+            description = self._stringify_import_value(relation.get("description"))
+            if target and description:
+                relationship_lines.append(f"{target}（{relation_type}）：{description}")
+            elif target:
+                relationship_lines.append(f"{target}（{relation_type}）")
+        relationship_text = "；".join(
+            list(dict.fromkeys([line for line in relationship_lines if line]))
+        )
+
         field_pairs = [
-            ("简介", char_data.get("description")),
-            ("故事立场", None if self._stringify_import_value(char_data.get("story_stance")) == "未提及" else char_data.get("story_stance")),
-            ("所属势力", None if self._stringify_import_value(char_data.get("faction")) == "未提及" else char_data.get("faction")),
-            ("与主角关系", char_data.get("relationship_to_main")),
-            ("性格", char_data.get("personality")),
-            ("能力", char_data.get("abilities")),
-            ("背景", char_data.get("background") or char_data.get("backstory")),
-            ("核心动机", char_data.get("motivation") or char_data.get("goal")),
-            ("成长线", char_data.get("arc") or char_data.get("growth")),
+            ("【故事立场】", story_stance),
+            ("【角色定位】", role_position),
+            ("【所属势力】", "" if faction == "未提及" else faction),
+            ("【外貌锚点】", appearance),
+            ("【性格锚点】", _build_personality_anchor_text(personality, worldview)),
+            ("【背景/当前处境】", background),
+            ("【核心动机】", motivation),
+            ("【能力与限制】", _build_ability_and_limit_text(abilities, limitation)),
+            ("【关键关系】", relationship_text),
+            ("【主线绑定】", _build_mainline_binding_text(mainline_role, mainline_clues)),
+            ("【成长方向】", growth_direction),
         ]
-        for label, raw_value in field_pairs:
-            text_value = self._stringify_import_value(raw_value)
+        for label, text_value in field_pairs:
             if text_value:
-                parts.append(f"{label}: {text_value}")
+                parts.append(f"{label}：{text_value}")
 
         first_chapter = mention_info.get("first_appearance_chapter") or char_data.get("first_appearance_chapter")
         if first_chapter:
@@ -412,19 +673,6 @@ class ProjectBridge:
         appearance_count = mention_info.get("count")
         if appearance_count:
             parts.append(f"拆书识别出场次数: {appearance_count}")
-
-        if relationship_entries:
-            relation_text = []
-            for relation in relationship_entries:
-                target = self._stringify_import_value(relation.get("target"))
-                relation_type = self._stringify_import_value(relation.get("type")) or "关联"
-                description = self._stringify_import_value(relation.get("description"))
-                if target and description:
-                    relation_text.append(f"{target}（{relation_type}）: {description}")
-                elif target:
-                    relation_text.append(f"{target}（{relation_type}）")
-            if relation_text:
-                parts.append("关键关系: " + "；".join(relation_text))
 
         if is_backfilled and not parts:
             parts.append("拆书章节中识别出的出场人物，待补充完整人物卡。")
@@ -440,12 +688,16 @@ class ProjectBridge:
         """提取便于检索和展示的标签。"""
         tags: List[str] = []
 
-        raw_personality = char_data.get("personality")
+        raw_personality = char_data.get("personality_anchor")
         if isinstance(raw_personality, list):
             for item in raw_personality:
                 value = str(item or "").strip()
                 if value and value not in tags:
                     tags.append(value)
+        else:
+            value = str(raw_personality or "").strip()
+            if value and value not in {"未提及", "待补充"} and value not in tags:
+                tags.append(value)
 
         for alias in self._collect_import_character_aliases(char_data, mention_info, canonical_name):
             alias_tag = f"别名:{alias}"
@@ -824,11 +1076,9 @@ class ProjectBridge:
         if explicit_value:
             return explicit_value
 
-        role = str(char_data.get("role") or "").strip().lower()
-        if role == "protagonist":
+        role_position = self._normalize_role_position_value(char_data.get("role_position"))
+        if role_position == "主角":
             return "主角"
-        if role in {"antagonist", "deuteragonist"}:
-            return "重要角色"
         return default_importance
 
     def _upsert_import_character(
@@ -838,7 +1088,8 @@ class ProjectBridge:
         char_data: Dict[str, Any],
         mention_map: Dict[str, Dict[str, Any]],
         relationship_lookup: Dict[str, List[Dict[str, str]]],
-        default_role: str,
+        default_story_stance: str,
+        default_role_position: str,
         default_importance: str,
         is_backfilled: bool = False,
     ) -> Optional[Character]:
@@ -861,9 +1112,28 @@ class ProjectBridge:
             relationship_entries=relationship_entries,
             canonical_name=canonical_name,
             is_backfilled=is_backfilled,
+            default_story_stance=default_story_stance,
+            default_role_position=default_role_position,
         )
         tags = self._build_import_character_tags(char_data, mention_info, canonical_name)
-        role = self._map_role(char_data.get("role", default_role))
+        relation_to_main = self._stringify_import_value(char_data.get("relationship_to_main"))
+        role_position = self._normalize_role_position_value(
+            char_data.get("role_position"),
+            relationship_to_main=relation_to_main,
+            fallback=default_role_position,
+        )
+        explicit_story_stance = self._normalize_story_stance_value(char_data.get("story_stance"))
+        role = explicit_story_stance or self._infer_story_stance(
+            role_position=role_position,
+            relationship_to_main=relation_to_main,
+            fallback=default_story_stance,
+            additional_texts=[
+                char_data.get("description"),
+                char_data.get("background_status"),
+                char_data.get("mainline_role"),
+                char_data.get("growth_direction"),
+            ],
+        )
         importance_level = self._resolve_importance_level(char_data, default_importance)
         faction = self._stringify_import_value(char_data.get("faction"))
         if faction == "未提及":
@@ -881,11 +1151,13 @@ class ProjectBridge:
             existing.profile = self._prefer_longer_text(existing.profile, profile)
             if faction and not existing.faction:
                 existing.faction = faction
-            if role and (not existing.role or existing.role == "supporting" or role in {"protagonist", "antagonist"}):
+            if self._should_replace_story_stance(existing.role, role, explicit=bool(explicit_story_stance)):
                 existing.role = role
+            if self._should_replace_role_position(existing.role_position, role_position):
+                existing.role_position = role_position
             if importance_level and (
                 not existing.importance_level
-                or existing.importance_level == "次要角色"
+                or existing.importance_level in {"次要角色", "边缘角色", "群众角色"}
                 or importance_level == "主角"
             ):
                 existing.importance_level = importance_level
@@ -905,6 +1177,7 @@ class ProjectBridge:
             project_id=project.id,
             name=canonical_name,
             role=role,
+            role_position=role_position or None,
             faction=faction or None,
             summary=summary or None,
             profile=profile or None,
@@ -919,19 +1192,6 @@ class ProjectBridge:
         self.db.add(character)
         imported_by_key[canonical_name] = character
         return character
-    
-    def _map_role(self, role: str) -> str:
-        """映射角色类型"""
-        role_map = {
-            'protagonist': 'protagonist',
-            'antagonist': 'antagonist',
-            'deuteragonist': 'supporting',
-            'supporting': 'supporting',
-        }
-        normalized_role = str(role or "").strip().lower()
-        if not normalized_role:
-            return 'supporting'
-        return role_map.get(normalized_role, 'supporting')
 
     def _ensure_setting_collection(
         self,
@@ -1209,18 +1469,31 @@ class ProjectBridge:
 
     @staticmethod
     def _build_character_system_role_label(character: Character) -> str:
-        """将人物 role 映射为角色体系中的分类标签。"""
-        role = str(character.role or "").strip().lower()
-        if role == "protagonist":
+        """将人物档案映射为角色体系中的角色定位标签。"""
+        role_position = ProjectBridge._normalize_role_position_value(getattr(character, "role_position", None))
+        if role_position:
+            return role_position
+
+        story_stance = ProjectBridge._normalize_story_stance_value(character.role)
+        importance = str(character.importance_level or "").strip()
+        if story_stance == "主角方":
+            if "主角" in importance:
+                return "主角"
+            return "盟友"
+        if story_stance == "反派方":
+            return "对手"
+        if story_stance == "中立方":
+            return "中立角色"
+        if story_stance == "亦正亦邪":
+            return "摇摆角色"
+
+        if "主角" in importance:
             return "主角"
-        if role == "antagonist":
-            return "反派"
-        if role == "supporting":
-            importance = str(character.importance_level or "").strip()
-            if "重要" in importance or "核心" in importance:
-                return "核心配角"
-            return "配角"
-        return "待分类"
+        if "重要" in importance or "核心" in importance:
+            return "主线角色"
+        if any(keyword in importance for keyword in ("次要", "边缘", "群众")):
+            return "功能角色"
+        return "功能角色"
 
     def _build_character_setting_relations(
         self,
@@ -1298,7 +1571,10 @@ class ProjectBridge:
         """生成角色体系条目的正文，便于直接用于创作参考。"""
         lines: List[str] = []
 
+        story_stance = self._normalize_story_stance_value(character.role)
         role_label = self._build_character_system_role_label(character)
+        if story_stance:
+            lines.append(f"故事立场: {story_stance}")
         if role_label:
             lines.append(f"角色定位: {role_label}")
 
@@ -1346,6 +1622,10 @@ class ProjectBridge:
         role_label = self._build_character_system_role_label(character)
         if role_label and role_label not in tags:
             tags.append(role_label)
+
+        story_stance = self._normalize_story_stance_value(character.role)
+        if story_stance and story_stance not in tags:
+            tags.append(story_stance)
 
         importance = str(character.importance_level or "").strip()
         if importance and importance not in tags:
@@ -1697,6 +1977,346 @@ class ProjectBridge:
 
         return raw_value
 
+    @staticmethod
+    def _try_parse_json_text(raw_text: Any) -> Optional[Any]:
+        """尽量从原始文本中解析出 JSON。"""
+        if not isinstance(raw_text, str):
+            return None
+
+        text = raw_text.strip()
+        if not text:
+            return None
+
+        candidates = [text]
+
+        code_block_match = re.search(r"```json\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
+        if code_block_match:
+            candidates.append(code_block_match.group(1).strip())
+
+        brace_match = re.search(r"\{[\s\S]*\}", text)
+        if brace_match:
+            candidates.append(brace_match.group(0).strip())
+
+        for candidate in candidates:
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+
+        return None
+
+    @staticmethod
+    def _extract_json_string_field(raw_text: str, field_name: str) -> str:
+        """从近似 JSON 文本中提取字符串字段。"""
+        if not raw_text:
+            return ""
+
+        match = re.search(
+            rf'"{re.escape(field_name)}"\s*:\s*"((?:\\.|[^"\\])*)"',
+            raw_text,
+        )
+        if not match:
+            return ""
+
+        try:
+            return json.loads(f'"{match.group(1)}"')
+        except json.JSONDecodeError:
+            return match.group(1).strip()
+
+    @classmethod
+    def _extract_json_objects_from_array_field(cls, raw_text: str, field_name: str) -> List[Dict[str, Any]]:
+        """从截断的 JSON 数组中提取已经完整闭合的对象。"""
+        if not raw_text:
+            return []
+
+        field_match = re.search(rf'"{re.escape(field_name)}"\s*:\s*\[', raw_text)
+        if not field_match:
+            return []
+
+        array_text = raw_text[field_match.end():]
+        objects: List[Dict[str, Any]] = []
+        depth = 0
+        start_index: Optional[int] = None
+        in_string = False
+        escape = False
+
+        for index, char in enumerate(array_text):
+            if in_string:
+                if escape:
+                    escape = False
+                elif char == "\\":
+                    escape = True
+                elif char == '"':
+                    in_string = False
+                continue
+
+            if char == '"':
+                in_string = True
+                continue
+
+            if char == "{":
+                if depth == 0:
+                    start_index = index
+                depth += 1
+                continue
+
+            if char == "}":
+                if depth == 0:
+                    continue
+                depth -= 1
+                if depth == 0 and start_index is not None:
+                    candidate = array_text[start_index:index + 1]
+                    parsed = cls._try_parse_json_text(candidate)
+                    if isinstance(parsed, dict):
+                        objects.append(parsed)
+                    start_index = None
+                continue
+
+            if char == "]" and depth == 0:
+                break
+
+        return objects
+
+    def _recover_plot_content_from_analysis(self, analysis: Optional[BookAnalysis]) -> Dict[str, Any]:
+        """在 plot 解析失败时，尽量从原始响应预览中恢复关键结构。"""
+        if not analysis:
+            return {}
+
+        content = self._decode_json_field(getattr(analysis, "content", None), {})
+        if isinstance(content, dict) and content and not content.get("parse_error"):
+            return content
+
+        extra_data = self._decode_json_field(getattr(analysis, "extra_data", None), {})
+        raw_candidates: List[str] = []
+
+        if isinstance(content, dict):
+            raw_response = content.get("raw_response")
+            if isinstance(raw_response, str) and raw_response.strip():
+                raw_candidates.append(raw_response)
+
+        if isinstance(extra_data, dict):
+            for key in ("raw_response", "raw_response_preview"):
+                raw_text = extra_data.get(key)
+                if isinstance(raw_text, str) and raw_text.strip():
+                    raw_candidates.append(raw_text)
+
+        for raw_text in raw_candidates:
+            parsed = self._try_parse_json_text(raw_text)
+            if isinstance(parsed, dict) and parsed:
+                logger.warning("plot分析包含 parse_error 标记，已从原始响应中恢复完整 JSON")
+                return parsed
+
+        recovered: Dict[str, Any] = {}
+        for raw_text in raw_candidates:
+            main_plot = self._extract_json_string_field(raw_text, "main_plot")
+            if main_plot and not self._normalize_memory_text(recovered.get("main_plot")):
+                recovered["main_plot"] = main_plot
+
+            for field_name in ("plot_arcs", "turning_points"):
+                if recovered.get(field_name):
+                    continue
+                items = self._extract_json_objects_from_array_field(raw_text, field_name)
+                if items:
+                    recovered[field_name] = items
+
+        if recovered:
+            logger.warning("plot分析包含 parse_error 标记，已从原始响应预览中恢复部分结构")
+
+        return recovered
+
+    def _build_plot_fallback_content_from_chapters(self, book_id: int) -> Dict[str, Any]:
+        """基于章节摘要生成最小可用的大纲结构。"""
+        book_chapters = self.db.query(BookChapter).filter(
+            BookChapter.book_id == book_id
+        ).order_by(BookChapter.chapter_number).all()
+
+        chapter_snapshots: List[Dict[str, Any]] = []
+        for chapter in book_chapters:
+            summary = str(chapter.summary or "").strip()
+
+            if not summary:
+                outline_data = self._decode_json_field(chapter.outline_data, {})
+                if isinstance(outline_data, dict):
+                    summary = self._normalize_memory_text(
+                        outline_data.get("core_summary") or outline_data.get("scene_goal")
+                    )
+                    if not summary:
+                        ending_hook = outline_data.get("ending_hook")
+                        if isinstance(ending_hook, dict):
+                            summary = self._normalize_memory_text(
+                                ending_hook.get("content")
+                                or ending_hook.get("summary")
+                                or ending_hook.get("hook")
+                            )
+
+            if not summary:
+                summary = str(chapter.title or "").strip()
+
+            if not summary:
+                continue
+
+            chapter_snapshots.append(
+                {
+                    "chapter": chapter.chapter_number,
+                    "summary": summary,
+                }
+            )
+
+        if not chapter_snapshots:
+            main_plot = "拆书情节分析解析失败，当前已回退为最小可用大纲，建议重新提取以获得更完整的情节脉络。"
+            return {
+                "main_plot": main_plot,
+                "concept": {"summary": main_plot},
+                "plot_arcs": [
+                    {
+                        "name": "主线推进",
+                        "description": "当前仅保留兜底大纲，后续可重新执行情节分析补全主线、转折与结局设计。",
+                        "type": "兜底",
+                    }
+                ],
+                "turning_points": [],
+                "chapter_summaries": [],
+            }
+
+        first_snapshot = chapter_snapshots[0]
+        last_snapshot = chapter_snapshots[-1]
+
+        if first_snapshot["chapter"] == last_snapshot["chapter"]:
+            main_plot = f"故事围绕第{first_snapshot['chapter']}章展开：{first_snapshot['summary']}"
+        else:
+            main_plot = (
+                f"故事从第{first_snapshot['chapter']}章的“{first_snapshot['summary']}”展开，"
+                f"并逐步推进至第{last_snapshot['chapter']}章的“{last_snapshot['summary']}”。"
+            )
+
+        plot_arcs: List[Dict[str, Any]] = [
+            {
+                "name": "开篇引子",
+                "description": first_snapshot["summary"],
+                "chapters": [first_snapshot["chapter"], first_snapshot["chapter"]],
+                "type": "开端",
+            }
+        ]
+
+        if len(chapter_snapshots) >= 3:
+            middle_snapshot = chapter_snapshots[len(chapter_snapshots) // 2]
+            if middle_snapshot["chapter"] not in {first_snapshot["chapter"], last_snapshot["chapter"]}:
+                plot_arcs.append(
+                    {
+                        "name": "中段升级",
+                        "description": middle_snapshot["summary"],
+                        "chapters": [middle_snapshot["chapter"], middle_snapshot["chapter"]],
+                        "type": "发展",
+                    }
+                )
+
+        if last_snapshot["chapter"] != first_snapshot["chapter"]:
+            plot_arcs.append(
+                {
+                    "name": "结局收束",
+                    "description": last_snapshot["summary"],
+                    "chapters": [last_snapshot["chapter"], last_snapshot["chapter"]],
+                    "type": "结局",
+                }
+            )
+        else:
+            plot_arcs[0]["name"] = "主线推进"
+            plot_arcs[0]["type"] = "主线"
+
+        candidate_indices = [0]
+        if len(chapter_snapshots) >= 4:
+            candidate_indices.extend([len(chapter_snapshots) // 3, (len(chapter_snapshots) * 2) // 3])
+        elif len(chapter_snapshots) >= 3:
+            candidate_indices.append(len(chapter_snapshots) // 2)
+        if len(chapter_snapshots) >= 2:
+            candidate_indices.append(len(chapter_snapshots) - 1)
+
+        turning_points: List[Dict[str, Any]] = []
+        labels = ["故事开端", "局势升级", "关键转折", "结局收束"]
+        unique_indices: List[int] = []
+        seen_indices = set()
+        for index in candidate_indices:
+            normalized_index = max(0, min(index, len(chapter_snapshots) - 1))
+            if normalized_index in seen_indices:
+                continue
+            seen_indices.add(normalized_index)
+            unique_indices.append(normalized_index)
+
+        for label, index in zip(labels, unique_indices):
+            snapshot = chapter_snapshots[index]
+            turning_points.append(
+                {
+                    "chapter": snapshot["chapter"],
+                    "event": snapshot["summary"],
+                    "significance": label,
+                }
+            )
+
+        chapter_summaries = [
+            f"第{snapshot['chapter']}章：{snapshot['summary']}"
+            for snapshot in chapter_snapshots[:12]
+        ]
+
+        return {
+            "main_plot": main_plot,
+            "concept": {"summary": main_plot},
+            "plot_arcs": plot_arcs,
+            "turning_points": turning_points,
+            "chapter_summaries": chapter_summaries,
+        }
+
+    def _merge_plot_content(self, primary: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[str, Any]:
+        """用章节级兜底补齐 plot 核心字段，确保大纲可生成。"""
+        merged = dict(primary or {})
+
+        if not self._normalize_memory_text(merged.get("main_plot")):
+            merged["main_plot"] = fallback.get("main_plot", "")
+
+        for field_name in ("plot_arcs", "turning_points", "chapter_summaries"):
+            current_value = merged.get(field_name)
+            if isinstance(current_value, list) and current_value:
+                continue
+            fallback_value = fallback.get(field_name) or []
+            if fallback_value:
+                merged[field_name] = fallback_value
+
+        concept = merged.get("concept")
+        fallback_concept = fallback.get("concept")
+        if not isinstance(concept, dict):
+            if isinstance(fallback_concept, dict) and fallback_concept:
+                merged["concept"] = dict(fallback_concept)
+        elif isinstance(fallback_concept, dict):
+            summary = self._normalize_memory_text(concept.get("summary"))
+            if not summary:
+                fallback_summary = self._normalize_memory_text(fallback_concept.get("summary"))
+                if fallback_summary:
+                    concept["summary"] = fallback_summary
+
+        return merged
+
+    def _load_plot_content_with_fallback(
+        self,
+        analysis_map: Dict[str, BookAnalysis],
+        book_id: int,
+    ) -> Dict[str, Any]:
+        """为 plot 提供恢复与兜底后的可用结构。"""
+        analysis = analysis_map.get("plot")
+        if not analysis:
+            return {}
+
+        fallback = self._build_plot_fallback_content_from_chapters(book_id)
+        content = self._load_analysis_content(analysis_map, "plot")
+        if isinstance(content, dict) and content:
+            return self._merge_plot_content(content, fallback)
+
+        recovered = self._recover_plot_content_from_analysis(analysis)
+        if recovered:
+            logger.warning("plot分析解析失败，已使用原始响应恢复并补齐大纲内容")
+        else:
+            logger.warning("plot分析解析失败，已使用章节摘要生成最小可用大纲")
+
+        return self._merge_plot_content(recovered, fallback)
+
     def _build_imported_chapter_summary_data(self, book_chapter: BookChapter) -> Optional[str]:
         """
         将拆书章节的摘要/细纲信息转换为项目章节可直接复用的结构化摘要。
@@ -1852,7 +2472,7 @@ class ProjectBridge:
     def _count_items(self, analysis_type: str, content: Dict) -> int:
         """统计分析结果中的项目数量"""
         if analysis_type == 'characters':
-            return len(content.get('main_characters', [])) + len(content.get('supporting_characters', []))
+            return len(self._get_character_entries(content))
         elif analysis_type == 'worldview':
             return (
                 len(content.get('locations', [])) +
@@ -1952,13 +2572,538 @@ class ProjectBridge:
 
         return "\n".join(parts).strip()
 
+    @staticmethod
+    def _parse_plot_outline_chapter_number(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            chapter_number = int(value)
+            return chapter_number if chapter_number > 0 else None
+
+        match = re.search(r"\d+", str(value))
+        if not match:
+            return None
+
+        chapter_number = int(match.group(0))
+        return chapter_number if chapter_number > 0 else None
+
+    @classmethod
+    def _normalize_plot_outline_title(cls, value: Any, *, default: str) -> str:
+        title = str(value or "").strip()
+        title = re.sub(
+            r"^第\s*[0-9一二三四五六七八九十百千两零〇]+\s*章[：:\-\s]*",
+            "",
+            title,
+        ).strip()
+        title = title.strip("《》【】[]()（）-:： ")
+        title = re.split(r"[。！？!?；;\n]", title)[0].strip()
+        title = cls._clean_memory_line(title, max_length=24)
+        return title or default
+
+    @classmethod
+    def _normalize_plot_outline_item_list(cls, value: Any, *, limit: int = 6) -> List[str]:
+        raw_items = value if isinstance(value, list) else [value]
+        items: List[str] = []
+
+        for raw_item in raw_items:
+            if isinstance(raw_item, dict):
+                text_parts = [
+                    cls._normalize_memory_text(raw_item.get(key))
+                    for key in ("content", "description", "summary", "event", "name")
+                ]
+                text = "；".join(part for part in text_parts if part)
+            else:
+                text = cls._normalize_memory_text(raw_item)
+
+            if not text:
+                continue
+
+            for line in str(text).splitlines():
+                normalized = re.sub(r"^\d+\s*[.、]\s*", "", line.strip())
+                if normalized:
+                    items.append(normalized)
+
+        return cls._deduplicate_memory_items(items, limit=limit)
+
+    @classmethod
+    def _format_book_parser_conflict_design(cls, conflict_arc: Any, fallback: Any = "") -> str:
+        fallback_text = cls._normalize_memory_text(fallback)
+        if fallback_text:
+            return fallback_text
+
+        if not isinstance(conflict_arc, dict):
+            return cls._normalize_memory_text(conflict_arc)
+
+        pieces: List[str] = []
+        for key, label in (
+            ("type", "冲突类型"),
+            ("trigger", "起因"),
+            ("escalation", "升级"),
+            ("resolution", "结果"),
+            ("result", "结果"),
+            ("description", "说明"),
+            ("stakes", "代价"),
+            ("obstacle", "阻碍"),
+        ):
+            text = cls._normalize_memory_text(conflict_arc.get(key))
+            if text:
+                pieces.append(f"{label}：{text}")
+
+        return "；".join(dict.fromkeys(pieces))
+
+    @classmethod
+    def _format_book_parser_highlight(cls, highlight: Any) -> str:
+        if not isinstance(highlight, dict):
+            return cls._normalize_memory_text(highlight)
+
+        type_text = cls._normalize_memory_text(highlight.get("type"))
+        description = cls._normalize_memory_text(
+            highlight.get("description") or highlight.get("content")
+        )
+        intensity = cls._normalize_memory_text(highlight.get("intensity"))
+
+        parts: List[str] = []
+        if type_text and type_text != "无":
+            parts.append(type_text)
+        if description:
+            parts.append(f"内容：{description}")
+        if intensity and intensity not in {"0", "无"}:
+            parts.append(f"强度：{intensity}")
+
+        if parts:
+            return "；".join(parts)
+        return type_text
+
+    @classmethod
+    def _format_book_parser_ending_hook(cls, ending_hook: Any) -> str:
+        if not isinstance(ending_hook, dict):
+            return cls._normalize_memory_text(ending_hook)
+
+        hook_type = cls._normalize_memory_text(ending_hook.get("type"))
+        hook_content = cls._normalize_memory_text(
+            ending_hook.get("content")
+            or ending_hook.get("summary")
+            or ending_hook.get("hook")
+        )
+
+        if hook_type and hook_type != "无" and hook_content:
+            return f"{hook_type} / {hook_content}"
+        return hook_content or hook_type
+
+    @classmethod
+    def _format_book_parser_gains(cls, gains: Any, *, prefer: str) -> str:
+        if not isinstance(gains, dict):
+            return cls._normalize_memory_text(gains)
+
+        character_gains = cls._normalize_memory_text(
+            gains.get("character_gains")
+            or gains.get("character_growth")
+            or gains.get("relationship_change")
+            or gains.get("status_change")
+        )
+        plot_progress = cls._normalize_memory_text(
+            gains.get("plot_progress")
+            or gains.get("information_gain")
+            or gains.get("clue_progress")
+        )
+
+        if prefer == "character":
+            return character_gains or plot_progress
+        if prefer == "information":
+            parts: List[str] = []
+            if character_gains:
+                parts.append(f"角色收获：{character_gains}")
+            if plot_progress:
+                parts.append(f"主线推进：{plot_progress}")
+            if parts:
+                return "；".join(parts)
+
+        fallback_parts = [
+            cls._normalize_memory_text(value)
+            for value in gains.values()
+        ]
+        fallback_parts = [part for part in fallback_parts if part]
+        return "；".join(dict.fromkeys(fallback_parts))
+
+    @classmethod
+    def _infer_plot_outline_function(
+        cls,
+        chapter_index: int,
+        total_chapters: int,
+        *,
+        has_hook: bool,
+        has_foreshadowing: bool,
+    ) -> str:
+        if total_chapters <= 1:
+            return "概括当前章节的核心推进，并为后续延展保留空间。"
+        if chapter_index == 0:
+            return "开篇立题，建立基础局势与核心矛盾。"
+        if chapter_index == total_chapters - 1:
+            return "阶段收束并抛出后续升级钩子。" if has_hook else "阶段收束，完成当前阶段结果交代。"
+        if has_hook or has_foreshadowing:
+            return "承接前文并推进主线，同时埋设后续升级点。"
+        return "承接前文并推进当前主线。"
+
+    def _build_plot_outline_blocks_from_book_chapters(self, book_id: int) -> List[Dict[str, Any]]:
+        book_chapters = self.db.query(BookChapter).filter(
+            BookChapter.book_id == book_id
+        ).order_by(BookChapter.chapter_number).all()
+
+        total_chapters = len(book_chapters)
+        blocks: List[Dict[str, Any]] = []
+
+        for index, chapter in enumerate(book_chapters):
+            outline_data = self._decode_json_field(chapter.outline_data, {})
+            outline_data = outline_data if isinstance(outline_data, dict) else {}
+
+            summary = self._normalize_memory_text(chapter.summary)
+            key_events = self._normalize_plot_outline_item_list(
+                self._decode_json_field(chapter.key_events, [])
+            )
+            appearing_characters = self._normalize_plot_outline_item_list(
+                self._decode_json_field(chapter.appearing_characters, [])
+            )
+
+            scene_goal = self._normalize_memory_text(outline_data.get("scene_goal")) or summary
+            if not scene_goal:
+                scene_goal = f"围绕第{chapter.chapter_number}章核心事件推进当前主线。"
+
+            conflict_design = self._format_book_parser_conflict_design(
+                outline_data.get("conflict_arc"),
+                fallback=outline_data.get("conflict"),
+            )
+            highlight_type = self._format_book_parser_highlight(outline_data.get("highlight")) or "待补充"
+            involved_characters = "、".join(appearing_characters) or "待补充"
+            character_progress = self._format_book_parser_gains(
+                outline_data.get("gains"),
+                prefer="character",
+            )
+            plot_progress_hint = self._format_book_parser_gains(
+                outline_data.get("gains"),
+                prefer="information",
+            )
+            ending_hook = self._format_book_parser_ending_hook(outline_data.get("ending_hook")) or "无"
+            foreshadowing_item = "；".join(
+                self._normalize_plot_outline_item_list(outline_data.get("foreshadowing"))
+            ) or "无"
+
+            if not key_events and summary:
+                key_events = [summary]
+
+            if not conflict_design:
+                conflict_design = summary or scene_goal
+            if not character_progress:
+                if involved_characters != "待补充":
+                    character_progress = f"{involved_characters}在本章的状态或关系出现推进。"
+                else:
+                    character_progress = "主角与关键角色的状态出现阶段性变化。"
+            plot_function = self._normalize_memory_text(outline_data.get("plot_function"))
+            if not plot_function:
+                plot_function = plot_progress_hint or self._infer_plot_outline_function(
+                    index,
+                    total_chapters,
+                    has_hook=ending_hook != "无",
+                    has_foreshadowing=foreshadowing_item != "无",
+                )
+
+            blocks.append(
+                {
+                    "chapter_number": int(chapter.chapter_number or index + 1),
+                    "title": self._normalize_plot_outline_title(
+                        chapter.title,
+                        default=f"章节推进{chapter.chapter_number or index + 1}",
+                    ),
+                    "scene_goal": scene_goal,
+                    "conflict_design": conflict_design,
+                    "highlight_type": highlight_type,
+                    "involved_characters": involved_characters,
+                    "character_progress": character_progress,
+                    "plot_function": plot_function,
+                    "ending_hook": ending_hook,
+                    "foreshadowing_item": foreshadowing_item,
+                    "key_events": key_events,
+                }
+            )
+
+        return blocks
+
+    def _build_plot_outline_blocks_from_plot_content(self, content: Dict[str, Any]) -> List[Dict[str, Any]]:
+        if not isinstance(content, dict) or not content:
+            return []
+
+        main_plot = self._normalize_memory_text(content.get("main_plot"))
+        if not main_plot:
+            concept = content.get("concept") or {}
+            if isinstance(concept, dict):
+                main_plot = self._normalize_memory_text(
+                    concept.get("summary") or concept.get("logline")
+                )
+
+        blocks_by_chapter: Dict[int, Dict[str, Any]] = {}
+
+        def ensure_block(chapter_number: int, default_title: str) -> Dict[str, Any]:
+            block = blocks_by_chapter.setdefault(
+                chapter_number,
+                {
+                    "chapter_number": chapter_number,
+                    "title": "",
+                    "scene_goal": "",
+                    "conflict_design": "",
+                    "highlight_type": "",
+                    "involved_characters": "",
+                    "character_progress": "",
+                    "plot_function": "",
+                    "ending_hook": "",
+                    "foreshadowing_item": "",
+                    "key_events": [],
+                },
+            )
+            if default_title and not block["title"]:
+                block["title"] = default_title
+            return block
+
+        chapter_summaries = content.get("chapter_summaries") or []
+        for index, raw_item in enumerate(chapter_summaries, start=1):
+            if isinstance(raw_item, dict):
+                chapter_number = (
+                    self._parse_plot_outline_chapter_number(
+                        raw_item.get("chapter") or raw_item.get("chapter_number")
+                    )
+                    or index
+                )
+                summary_text = self._normalize_memory_text(
+                    raw_item.get("summary")
+                    or raw_item.get("content")
+                    or raw_item.get("title")
+                )
+                title_source = raw_item.get("title") or summary_text
+            else:
+                summary_text = self._normalize_memory_text(raw_item)
+                if not summary_text:
+                    continue
+                match = re.match(r"^第\s*(\d+)\s*章[：:]\s*(.+)$", summary_text)
+                if match:
+                    chapter_number = int(match.group(1))
+                    summary_text = match.group(2).strip()
+                else:
+                    chapter_number = index
+                title_source = summary_text
+
+            if not summary_text:
+                continue
+
+            block = ensure_block(
+                chapter_number,
+                self._normalize_plot_outline_title(
+                    title_source,
+                    default=f"章节推进{chapter_number}",
+                ),
+            )
+            if not block["scene_goal"]:
+                block["scene_goal"] = summary_text
+            if not block["plot_function"]:
+                block["plot_function"] = summary_text or "概括该章节的阶段推进与结果。"
+            if not block["key_events"]:
+                block["key_events"].append(summary_text)
+
+        normalized_turning_points: List[Dict[str, Any]] = []
+        for index, raw_turning_point in enumerate(content.get("turning_points") or [], start=1):
+            turning_point = raw_turning_point if isinstance(raw_turning_point, dict) else {"event": raw_turning_point}
+            event_text = self._normalize_memory_text(turning_point.get("event"))
+            significance = self._normalize_memory_text(turning_point.get("significance"))
+            if not event_text and not significance:
+                continue
+
+            chapter_number = self._parse_plot_outline_chapter_number(turning_point.get("chapter")) or index
+            block = ensure_block(
+                chapter_number,
+                self._normalize_plot_outline_title(
+                    event_text or significance,
+                    default=f"关键转折{index}",
+                ),
+            )
+            if not block["scene_goal"]:
+                block["scene_goal"] = event_text or significance or main_plot
+            if not block["conflict_design"]:
+                block["conflict_design"] = significance or event_text or main_plot
+            if not block["highlight_type"]:
+                block["highlight_type"] = "关键转折 / 局势升级"
+            if not block["plot_function"]:
+                block["plot_function"] = significance or "推动主线进入下一阶段。"
+            if event_text:
+                block["key_events"].append(event_text)
+
+            normalized_turning_points.append(
+                {
+                    "chapter_number": chapter_number,
+                    "event": event_text,
+                    "significance": significance,
+                }
+            )
+
+        for index, item in enumerate(normalized_turning_points):
+            block = blocks_by_chapter.get(item["chapter_number"])
+            if not block or block["ending_hook"]:
+                continue
+            next_event = ""
+            if index + 1 < len(normalized_turning_points):
+                next_event = normalized_turning_points[index + 1]["event"]
+            block["ending_hook"] = next_event or item["significance"] or main_plot
+
+        for index, raw_arc in enumerate(content.get("plot_arcs") or [], start=1):
+            arc = raw_arc if isinstance(raw_arc, dict) else {"name": raw_arc}
+            arc_name = self._normalize_memory_text(arc.get("name"))
+            arc_description = self._normalize_memory_text(arc.get("description"))
+            arc_type = self._normalize_memory_text(arc.get("type"))
+            chapters = arc.get("chapters") or []
+            start_chapter = (
+                self._parse_plot_outline_chapter_number(chapters[0])
+                if isinstance(chapters, list) and chapters
+                else None
+            ) or index
+            end_chapter = (
+                self._parse_plot_outline_chapter_number(chapters[1])
+                if isinstance(chapters, list) and len(chapters) >= 2
+                else None
+            ) or start_chapter
+
+            block = ensure_block(
+                start_chapter,
+                self._normalize_plot_outline_title(
+                    arc_name or arc_description,
+                    default=f"主线推进{start_chapter}",
+                ),
+            )
+            if not block["scene_goal"]:
+                block["scene_goal"] = arc_description or arc_name or main_plot
+            if not block["conflict_design"]:
+                block["conflict_design"] = arc_description or arc_type or main_plot
+            if not block["highlight_type"]:
+                block["highlight_type"] = arc_type or arc_name or "主线推进"
+            if not block["plot_function"]:
+                plot_function_parts = [part for part in (arc_name, arc_type) if part]
+                if end_chapter != start_chapter:
+                    plot_function_parts.append(f"覆盖第{start_chapter}-{end_chapter}章")
+                block["plot_function"] = " / ".join(plot_function_parts) or "承接前文并推进主线。"
+            if not block["ending_hook"] and end_chapter != start_chapter:
+                block["ending_hook"] = f"该段剧情将推进至第{end_chapter}章。"
+
+        if not blocks_by_chapter and main_plot:
+            block = ensure_block(
+                1,
+                self._normalize_plot_outline_title(main_plot, default="主线开启"),
+            )
+            block["scene_goal"] = main_plot
+            block["conflict_design"] = main_plot
+            block["plot_function"] = main_plot
+            block["key_events"].append(main_plot)
+
+        chapter_numbers = sorted(blocks_by_chapter.keys())
+        rendered_blocks: List[Dict[str, Any]] = []
+
+        for index, chapter_number in enumerate(chapter_numbers):
+            raw_block = blocks_by_chapter[chapter_number]
+            next_block = blocks_by_chapter.get(chapter_numbers[index + 1]) if index + 1 < len(chapter_numbers) else None
+            scene_goal = raw_block["scene_goal"] or main_plot or f"推进第{chapter_number}章主线。"
+            conflict_design = raw_block["conflict_design"] or scene_goal
+            ending_hook = raw_block["ending_hook"]
+            if not ending_hook and next_block:
+                ending_hook = f"下一节点：{next_block['title']}"
+            if not ending_hook:
+                ending_hook = main_plot or "无"
+
+            rendered_blocks.append(
+                {
+                    "chapter_number": chapter_number,
+                    "title": self._normalize_plot_outline_title(
+                        raw_block["title"],
+                        default=f"章节推进{chapter_number}",
+                    ),
+                    "scene_goal": scene_goal,
+                    "conflict_design": conflict_design,
+                    "highlight_type": raw_block["highlight_type"] or "待补充",
+                    "involved_characters": raw_block["involved_characters"] or "待补充",
+                    "character_progress": raw_block["character_progress"] or "待补充",
+                    "plot_function": raw_block["plot_function"] or self._infer_plot_outline_function(
+                        index,
+                        len(chapter_numbers),
+                        has_hook=bool(ending_hook and ending_hook != "无"),
+                        has_foreshadowing=False,
+                    ),
+                    "ending_hook": ending_hook,
+                    "foreshadowing_item": raw_block["foreshadowing_item"] or "无",
+                    "key_events": self._deduplicate_memory_items(
+                        raw_block["key_events"] or [scene_goal],
+                        limit=5,
+                    ),
+                }
+            )
+
+        return rendered_blocks
+
+    def _build_plot_outline_text(self, analysis_map: Dict[str, BookAnalysis], book_id: int) -> str:
+        """生成与大纲扩展一致的章节细纲文本。"""
+        content = self._load_plot_content_with_fallback(analysis_map, book_id)
+        if not isinstance(content, dict) or not content:
+            return ""
+
+        main_plot = self._normalize_memory_text(content.get("main_plot"))
+        if not main_plot:
+            concept = content.get("concept") or {}
+            if isinstance(concept, dict):
+                main_plot = self._normalize_memory_text(
+                    concept.get("summary") or concept.get("logline")
+                )
+
+        blocks = self._build_plot_outline_blocks_from_book_chapters(book_id)
+        if not blocks:
+            blocks = self._build_plot_outline_blocks_from_plot_content(content)
+
+        if not blocks:
+            return f"故事总纲：{main_plot}" if main_plot else ""
+
+        parts: List[str] = []
+        if main_plot:
+            parts.append(f"故事总纲：{main_plot}")
+            parts.append("")
+
+        for block in blocks:
+            chapter_number = int(block.get("chapter_number") or 0) or 1
+            title = self._normalize_plot_outline_title(
+                block.get("title"),
+                default=f"章节推进{chapter_number}",
+            )
+            key_events = self._normalize_plot_outline_item_list(
+                block.get("key_events"),
+                limit=5,
+            ) or ["待补充"]
+            parts.append(f"第{chapter_number}章：{title}")
+            parts.append(f"- 场景目标：{self._normalize_memory_text(block.get('scene_goal')) or '待补充'}")
+            parts.append(f"- 冲突设计：{self._normalize_memory_text(block.get('conflict_design')) or '待补充'}")
+            parts.append("- 关键事件：")
+            for event_index, event in enumerate(key_events, start=1):
+                parts.append(f"  {event_index}. {event}")
+            parts.append(f"- 涉及人物：{self._normalize_memory_text(block.get('involved_characters')) or '待补充'}")
+            parts.append(f"- 人物推进：{self._normalize_memory_text(block.get('character_progress')) or '待补充'}")
+            parts.append(f"- 情节作用：{self._normalize_memory_text(block.get('plot_function')) or '待补充'}")
+            parts.append(f"- 结尾钩子：{self._normalize_memory_text(block.get('ending_hook')) or '无'}")
+            highlight_type = self._normalize_memory_text(block.get('highlight_type'))
+            if highlight_type:
+                parts.append(f"- 爽点类型：{highlight_type}")
+            foreshadowing_item = self._normalize_memory_text(block.get('foreshadowing_item'))
+            if foreshadowing_item:
+                parts.append(f"- 伏笔事项：{foreshadowing_item}")
+            parts.append("")
+
+        return "\n".join(parts).strip()
+
     def _build_import_structured_memory_payload(
         self,
         analysis_map: Dict[str, BookAnalysis],
         book: BookSource,
     ) -> Optional[Dict[str, Any]]:
         """基于拆书结果构建可直接用于工作流的结构化记忆。"""
-        plot_content = self._load_analysis_content(analysis_map, 'plot')
+        plot_content = self._load_plot_content_with_fallback(analysis_map, book.id)
         character_content = self._load_analysis_content(analysis_map, 'characters')
         worldview_content = self._load_analysis_content(analysis_map, 'worldview')
         concepts_content = self._load_analysis_content(analysis_map, 'concepts')
@@ -2004,29 +3149,42 @@ class ProjectBridge:
                     global_story_arcs.append(f"第{chapter.chapter_number}章：{chapter.summary}")
 
         character_states: List[str] = []
-        for bucket_name in ('main_characters', 'supporting_characters'):
-            for char in (character_content.get(bucket_name) or []):
-                if not isinstance(char, dict):
-                    continue
-                name = self._normalize_memory_text(char.get('name'))
-                if not name:
-                    continue
-                fragments = [name]
-                role = self._normalize_memory_text(char.get('role'))
-                if role:
-                    fragments.append(f"定位={role}")
-                stance = self._normalize_memory_text(char.get('story_stance'))
-                if stance and stance != '未提及':
-                    fragments.append(f"立场={stance}")
-                faction = self._normalize_memory_text(char.get('faction'))
-                if faction and faction != '未提及':
-                    fragments.append(f"势力={faction}")
-                description = self._normalize_memory_text(
-                    char.get('description') or char.get('relationship_to_main')
-                )
-                if description:
-                    fragments.append(description)
-                character_states.append("；".join(fragments))
+        for char in self._get_character_entries(character_content):
+            if not isinstance(char, dict):
+                continue
+            name = self._normalize_memory_text(char.get('name'))
+            if not name:
+                continue
+            fragments = [name]
+            relation_to_main = self._normalize_memory_text(char.get('relationship_to_main'))
+            role_position = self._normalize_role_position_value(
+                char.get('role_position'),
+                relationship_to_main=relation_to_main,
+            )
+            if role_position:
+                fragments.append(f"定位={role_position}")
+            stance = self._infer_story_stance(
+                explicit_stance=char.get('story_stance'),
+                role_position=role_position,
+                relationship_to_main=relation_to_main,
+                additional_texts=[
+                    char.get('description'),
+                    char.get('background_status'),
+                    char.get('mainline_role'),
+                    char.get('growth_direction'),
+                ],
+            )
+            if stance:
+                fragments.append(f"立场={stance}")
+            faction = self._normalize_memory_text(char.get('faction'))
+            if faction and faction != '未提及':
+                fragments.append(f"势力={faction}")
+            description = self._normalize_memory_text(
+                char.get('description') or char.get('relationship_to_main')
+            )
+            if description:
+                fragments.append(description)
+            character_states.append("；".join(fragments))
 
         relationship_edges: List[str] = []
         for rel in (character_content.get('character_relationships') or [])[:12]:
@@ -2351,7 +3509,7 @@ class ProjectBridge:
         parts = []
         
         # 从情节分析提取概念信息
-        plot_content = self._load_analysis_content(analysis_map, 'plot')
+        plot_content = self._load_plot_content_with_fallback(analysis_map, book.id)
         worldview_content = self._load_analysis_content(analysis_map, 'worldview')
         concept_data = plot_content.get('concept', {}) if isinstance(plot_content, dict) else {}
         
@@ -2492,33 +3650,264 @@ class ProjectBridge:
         if not isinstance(content, dict) or not content:
             return ""
 
-        def normalize_text(value: Any) -> str:
+        def raw_text(value: Any, separator: str = "、") -> str:
             if value is None:
                 return ""
             if isinstance(value, list):
-                items = [str(v).strip() for v in value if str(v).strip()]
-                return "、".join(items)
+                items = [raw_text(v, separator=separator) for v in value]
+                items = [item for item in items if item]
+                return separator.join(items)
+            if isinstance(value, dict):
+                return ""
             return str(value).strip()
 
-        def pick_first(*values: Any) -> str:
+        def is_placeholder_text(value: Any, *, allow_not_mentioned: bool = False) -> bool:
+            text = raw_text(value)
+            if not text:
+                return True
+
+            compact = re.sub(r"\s+", "", text).lower()
+            placeholders = {
+                "待补充",
+                "未知",
+                "不详",
+                "暂无",
+                "暂无信息",
+                "暂无描写",
+                "未说明",
+                "未交代",
+                "未明确提及",
+                "未明确说明",
+                "none",
+                "null",
+                "n/a",
+                "na",
+            }
+            if not allow_not_mentioned:
+                placeholders.add("未提及")
+
+            if compact in placeholders:
+                return True
+
+            return bool(re.fullmatch(r"[?？.。·•…]+", text))
+
+        def normalize_text(value: Any, *, allow_not_mentioned: bool = False, separator: str = "、") -> str:
+            if isinstance(value, list):
+                items = [
+                    normalize_text(item, allow_not_mentioned=allow_not_mentioned, separator=separator)
+                    for item in value
+                ]
+                items = [item for item in items if item]
+                return separator.join(list(dict.fromkeys(items)))
+
+            text = raw_text(value, separator=separator)
+            if is_placeholder_text(text, allow_not_mentioned=allow_not_mentioned):
+                return ""
+            return text
+
+        def pick_first(*values: Any, allow_not_mentioned: bool = False, separator: str = "、") -> str:
             for value in values:
-                text_value = normalize_text(value)
+                text_value = normalize_text(
+                    value,
+                    allow_not_mentioned=allow_not_mentioned,
+                    separator=separator,
+                )
                 if text_value:
                     return text_value
             return ""
 
-        def build_role_text(role_value: str, fallback: str) -> str:
-            role_map = {
-                'protagonist': '主角',
-                'antagonist': '反派',
-                'deuteragonist': '核心配角',
-                'supporting': '支持角色',
-            }
-            if role_value:
-                normalized = str(role_value).strip().lower()
-                if normalized:
-                    return role_map.get(normalized, role_value)
-            return fallback
+        def truncate_text(value: str, limit: int = 36) -> str:
+            text = normalize_text(value)
+            if not text:
+                return ""
+            if len(text) <= limit:
+                return text
+            return text[: limit - 3].rstrip("，。；; ") + "..."
+
+        def extract_action_phrase(text: str) -> str:
+            patterns = [
+                r"(追查[^，。；]{2,30})",
+                r"(追寻[^，。；]{2,30})",
+                r"(寻找[^，。；]{2,30})",
+                r"(调查[^，。；]{2,30})",
+                r"(揭开[^，。；]{2,30})",
+                r"(查明[^，。；]{2,30})",
+                r"(保护[^，。；]{2,30})",
+                r"(守护[^，。；]{2,30})",
+                r"(营救[^，。；]{2,30})",
+                r"(反抗[^，。；]{2,30})",
+                r"(阻止[^，。；]{2,30})",
+                r"(夺回[^，。；]{2,30})",
+                r"(掌控[^，。；]{2,30})",
+                r"(复仇[^，。；]{2,30})",
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, text)
+                if match:
+                    return truncate_text(match.group(1), 28)
+            return ""
+
+        def resolve_character_display_fields(
+            char_data: Dict[str, Any],
+            *,
+            default_story_stance: str,
+            default_role_position: str,
+        ) -> tuple[str, str]:
+            relation_to_main = pick_first(char_data.get('relationship_to_main'))
+            role_position = self._normalize_role_position_value(
+                char_data.get('role_position'),
+                relationship_to_main=relation_to_main,
+                fallback=default_role_position,
+            )
+            story_stance = self._infer_story_stance(
+                explicit_stance=char_data.get('story_stance'),
+                role_position=role_position,
+                relationship_to_main=relation_to_main,
+                fallback=default_story_stance,
+                additional_texts=[
+                    char_data.get('description'),
+                    char_data.get('background_status'),
+                    char_data.get('mainline_role'),
+                    char_data.get('growth_direction'),
+                ],
+            )
+            return story_stance, role_position
+
+        def infer_motivation(description: str, mainline_role: str, relation_to_main: str, role_text: str) -> str:
+            action_phrase = extract_action_phrase("；".join(filter(None, [description, mainline_role, relation_to_main])))
+            if action_phrase:
+                return action_phrase
+            if relation_to_main:
+                return f"围绕{truncate_text(relation_to_main, 18)}作出关键行动选择"
+            if mainline_role:
+                return f"其个人目标与{truncate_text(mainline_role, 18)}直接相关"
+            if role_text == "主角":
+                return "主动追索主线真相并推动事件进展"
+            if role_text == "对手":
+                return "维护自身立场并阻断主角推进"
+            return "围绕主线冲突作出选择并影响局势"
+
+        def infer_abilities(description: str, relation_to_main: str, role_text: str) -> str:
+            source = "；".join(filter(None, [description, relation_to_main]))
+            ability_rules = [
+                (("工程师", "技术", "程序", "黑客", "接口", "系统", "数据分析"), "技术分析、系统操作与信息处理"),
+                (("研究员", "科学家", "实验"), "研究分析与实验推进"),
+                (("医生", "医师", "诊所", "治疗"), "医疗救治与应急判断"),
+                (("警察", "警员", "军", "特工", "队长", "执法", "安保"), "战术执行、追踪与正面压制"),
+                (("记者", "调查员", "调查"), "调查取证与信息整合"),
+                (("首领", "负责人", "指挥", "组织", "抵抗"), "组织协调、资源调度与行动策划"),
+                (("觉醒", "异能", "能力"), "特殊能力运用与高风险行动"),
+            ]
+            for keywords, text in ability_rules:
+                if any(keyword in source for keyword in keywords):
+                    return text
+            if role_text == "对手":
+                return "资源调动与局势压制能力"
+            return "与主线任务相关的执行与应变能力"
+
+        def infer_limitation(description: str, relation_to_main: str, role_text: str) -> str:
+            source = "；".join(filter(None, [description, relation_to_main]))
+            if any(keyword in source for keyword in ("真相", "追查", "追寻", "调查", "复仇", "执念")):
+                return "对目标投入过深，关键节点容易冒险"
+            if any(keyword in source for keyword in ("威胁", "胁迫", "受制", "被迫")):
+                return "受外部压力牵制，立场稳定性有限"
+            if role_text == "对手":
+                return "立场强硬，容易低估对手与变量"
+            if role_text == "主角":
+                return "情感与目标绑定过深，容易承担过高风险"
+            return "受立场、资源或情绪牵制，行动存在代价"
+
+        def infer_growth_direction(mainline_role: str, relation_to_main: str, role_text: str) -> str:
+            if role_text == "主角":
+                return "从被动卷入事件，到主动追查真相并承担核心抉择"
+            if role_text == "对手":
+                return "从单纯阻力角色，逐步成为主线价值冲突的关键对照"
+            if relation_to_main:
+                return f"从{truncate_text(relation_to_main, 16)}的位置出发，逐步影响主线走向"
+            if mainline_role:
+                return "随着主线推进，其立场与选择不断被重新定义"
+            return "在主线冲突中完成立场与关系的调整"
+
+        def infer_age_gender(description: str, background: str, relation_to_main: str) -> str:
+            source = "；".join(filter(None, [description, background, relation_to_main]))
+            age_value = ""
+            gender_value = ""
+
+            age_rules = [
+                ("少女", "少女"),
+                ("少年", "少年"),
+                ("青年", "青年"),
+                ("年轻", "青年"),
+                ("中年", "中年"),
+                ("老人", "老年"),
+                ("奶奶", "老年"),
+            ]
+            gender_rules = [
+                ("母亲", "女性"),
+                ("姐姐", "女性"),
+                ("妹妹", "女性"),
+                ("女士", "女性"),
+                ("奶奶", "女性"),
+                ("父亲", "男性"),
+                ("哥哥", "男性"),
+                ("弟弟", "男性"),
+                ("男孩", "男性"),
+                ("女孩", "女性"),
+            ]
+
+            for keyword, value in age_rules:
+                if keyword in source:
+                    age_value = value
+                    break
+            for keyword, value in gender_rules:
+                if keyword in source:
+                    gender_value = value
+                    break
+
+            if age_value and gender_value:
+                return f"{age_value}/{gender_value}"
+            return age_value or gender_value
+
+        def infer_appearance(description: str, background: str, personality: str) -> str:
+            source = "；".join(filter(None, [description, background, personality]))
+            rules = [
+                (("工程师", "系统", "接口", "数据"), "气质冷静克制，带长期高压工作的疲惫感"),
+                (("医生", "诊疗", "医疗"), "衣着整洁利落，举止带有职业性的克制感"),
+                (("高层", "局长", "负责人", "首领"), "仪表严整，带有长期掌控局势的压迫感"),
+                (("地下", "黑市", "抵抗"), "装束偏低调实用，神情警惕而锋利"),
+                (("老人", "老周", "奶奶"), "带有岁月沉淀感，神情沉稳而略显疲惫"),
+            ]
+            for keywords, text in rules:
+                if any(keyword in source for keyword in keywords):
+                    return text
+            return "外在特征以身份气质为主，缺少明确细节描写"
+
+        def infer_worldview(description: str, background: str, motivation: str, story_stance: str, faction: str) -> str:
+            source = "；".join(filter(None, [description, background, motivation, story_stance, faction]))
+            if any(keyword in source for keyword in ("真相", "自由", "自主", "主权", "揭露", "反抗")):
+                return "倾向真相优先与个体记忆自主"
+            if any(keyword in source for keyword in ("稳定", "秩序", "系统", "控制")):
+                return "倾向秩序优先，但在控制与伦理间摇摆"
+            if any(keyword in source for keyword in ("救治", "保护", "守护", "修复")):
+                return "重视生命伦理、修复与个体保护"
+            if story_stance:
+                return f"立场偏向{story_stance}"
+            return "在生存、伦理与真相之间不断权衡"
+
+        def build_mainline_clues(char_data: Dict[str, Any], description: str, relation_to_main: str) -> str:
+            parts: List[str] = []
+            first_appearance = char_data.get('first_appearance_chapter')
+            appearance_count = char_data.get('appearance_count')
+            if isinstance(first_appearance, int) and first_appearance > 0:
+                parts.append(f"首次在第{first_appearance}章出场")
+            if isinstance(appearance_count, int) and appearance_count > 0:
+                parts.append(f"累计出场{appearance_count}章")
+            if relation_to_main:
+                parts.append(f"与主角关系：{truncate_text(relation_to_main, 18)}")
+            if description:
+                parts.append(f"关键事件指向：{truncate_text(description, 24)}")
+            deduped = list(dict.fromkeys([part for part in parts if part]))
+            return "；".join(deduped)
 
         relationship_map: Dict[str, List[str]] = {}
         for rel in (content.get('character_relationships', []) or []):
@@ -2540,102 +3929,134 @@ class ProjectBridge:
             relationship_map.setdefault(char_b, []).append(line_b)
 
         def value_or_default(value: str) -> str:
-            return value if value else "待补充"
+            return normalize_text(value) or "待补充"
 
-        def append_character_card(target: List[str], char_data: Dict[str, Any], role_text: str) -> None:
+        def append_character_card(
+            target: List[str],
+            char_data: Dict[str, Any],
+            story_stance_text: str,
+            role_text: str,
+        ) -> None:
             name = normalize_text(char_data.get('name')) or "待补充"
             age_gender = pick_first(char_data.get('age_gender'), char_data.get('age'), char_data.get('gender'))
-            appearance = pick_first(char_data.get('appearance'), char_data.get('looks'), char_data.get('appearance_feature'))
-            personality = pick_first(char_data.get('personality'), char_data.get('traits'))
-            background = pick_first(char_data.get('background'), char_data.get('backstory'))
-            worldview = pick_first(char_data.get('worldview'), char_data.get('values'), char_data.get('worldview_position'))
-            motivation = pick_first(char_data.get('motivation'), char_data.get('goal'))
-            abilities = pick_first(char_data.get('abilities'), char_data.get('skills'), char_data.get('strengths'))
-            weakness = pick_first(char_data.get('weakness'), char_data.get('weaknesses'), char_data.get('flaws'))
-            plot_role = pick_first(char_data.get('plot_role'), char_data.get('role_in_plot'), char_data.get('description'))
-            growth_arc = pick_first(char_data.get('arc'), char_data.get('development'), char_data.get('growth'))
-            related_clues = pick_first(char_data.get('clues'), char_data.get('related_clues'))
+            appearance = pick_first(char_data.get('appearance_anchor'))
+            personality = pick_first(char_data.get('personality_anchor'))
+            background = pick_first(char_data.get('background_status'))
+            worldview = pick_first(char_data.get('worldview'))
+            description = pick_first(char_data.get('description'))
+            relation_to_main = pick_first(char_data.get('relationship_to_main'))
+            mainline_role = pick_first(char_data.get('mainline_role'), description, relation_to_main)
+            motivation = pick_first(char_data.get('motivation'))
+            story_stance = story_stance_text or pick_first(char_data.get('story_stance'), allow_not_mentioned=True)
+            faction = pick_first(char_data.get('faction'), allow_not_mentioned=True)
+            abilities = pick_first(char_data.get('ability_outline'))
+            limitation = pick_first(char_data.get('limitation'))
+            growth_direction = pick_first(char_data.get('growth_direction'))
+            mainline_clues = pick_first(char_data.get('mainline_clues'), separator="；")
 
             relationship_lines: List[str] = []
-            relation_to_main = normalize_text(char_data.get('relationship_to_main'))
             if relation_to_main:
                 relationship_lines.append(f"与主角：{relation_to_main}")
             relationship_lines.extend(relationship_map.get(name, []))
             relationship_text = "；".join(list(dict.fromkeys([line for line in relationship_lines if line]))) or "待补充"
 
+            if not motivation:
+                motivation = infer_motivation(description, mainline_role, relation_to_main, role_text)
+            if not age_gender:
+                age_gender = infer_age_gender(description, background, relation_to_main)
+            if not appearance:
+                appearance = infer_appearance(description, background, personality)
+            if not worldview:
+                worldview = infer_worldview(description, background, motivation, story_stance, faction)
+            if not abilities:
+                abilities = infer_abilities(description, relation_to_main, role_text)
+            if not limitation:
+                limitation = infer_limitation(description, relation_to_main, role_text)
+            if not growth_direction:
+                growth_direction = infer_growth_direction(mainline_role, relation_to_main, role_text)
+            if not mainline_clues:
+                mainline_clues = build_mainline_clues(char_data, description or mainline_role, relation_to_main)
+
             target.append(f"### 【姓名】：{name}")
             target.append("")
             target.append(f"【年龄/性别】：{value_or_default(age_gender)}")
             target.append("")
+            target.append(f"【故事立场】：{value_or_default(story_stance)}")
+            target.append("")
             target.append(f"【角色定位】：{value_or_default(role_text)}")
             target.append("")
-            target.append(f"【外貌特征】：{value_or_default(appearance)}")
+            target.append(f"【所属势力】：{value_or_default(faction)}")
             target.append("")
-            target.append(f"【性格特点】：{value_or_default(personality)}")
+            target.append(f"【外貌锚点】：{value_or_default(appearance)}")
             target.append("")
-            target.append(f"【背景故事】：{value_or_default(background)}")
+            target.append(
+                f"【性格锚点】：{value_or_default(_build_personality_anchor_text(personality, worldview))}"
+            )
             target.append("")
-            target.append(f"【世界观/价值观立场】：{value_or_default(worldview)}")
+            target.append(f"【背景/当前处境】：{value_or_default(background)}")
             target.append("")
             target.append(f"【核心动机】：{value_or_default(motivation)}")
             target.append("")
-            target.append(f"【能力/特长】：{value_or_default(abilities)}")
-            target.append("")
-            target.append(f"【弱点/缺陷】：{value_or_default(weakness)}")
-            target.append("")
-            target.append(f"【在情节中的作用】：{value_or_default(plot_role)}")
-            target.append("")
-            target.append(f"【人物成长线】：{value_or_default(growth_arc)}")
+            target.append(
+                f"【能力与限制】：{value_or_default(_build_ability_and_limit_text(abilities, limitation))}"
+            )
             target.append("")
             target.append(f"【关键关系】：{value_or_default(relationship_text)}")
             target.append("")
-            target.append(f"【关联线索】：{value_or_default(related_clues)}")
+            target.append(
+                f"【主线绑定】：{value_or_default(_build_mainline_binding_text(mainline_role, mainline_clues))}"
+            )
+            target.append("")
+            target.append(f"【成长方向】：{value_or_default(growth_direction)}")
             target.append("")
             target.append("---")
             target.append("")
 
         parts: List[str] = []
-        main_characters = content.get('main_characters', []) or []
-        supporting_characters = content.get('supporting_characters', []) or []
-
-        main_names = {normalize_text(c.get('name')) for c in main_characters if normalize_text(c.get('name'))}
-        supporting_characters = [c for c in supporting_characters if normalize_text(c.get('name')) not in main_names]
+        characters = self._get_character_entries(content)
 
         groups: Dict[str, List[Any]] = {
             "主角阵营": [],
             "对手阵营": [],
             "支持角色": [],
             "中立角色": [],
+            "摇摆角色": [],
         }
 
-        for char in main_characters:
-            role = str(char.get('role') or '').lower()
-            if role == 'protagonist':
-                groups["主角阵营"].append((char, build_role_text(role, "主角")))
-            elif role == 'antagonist':
-                groups["对手阵营"].append((char, build_role_text(role, "反派")))
-            elif role in {'deuteragonist', 'supporting'}:
-                groups["支持角色"].append((char, build_role_text(role, "支持角色")))
+        for char in characters:
+            is_primary = self._is_primary_character_entry(char)
+            story_stance, role_text = resolve_character_display_fields(
+                char,
+                default_story_stance='',
+                default_role_position='主线角色' if is_primary else '功能角色',
+            )
+            if story_stance == "主角方":
+                if role_text == "主角":
+                    groups["主角阵营"].append((char, story_stance, role_text))
+                else:
+                    groups["支持角色"].append((char, story_stance, role_text or "盟友"))
+            elif story_stance == "反派方":
+                groups["对手阵营"].append((char, story_stance, role_text or "对手"))
+            elif story_stance == "中立方":
+                groups["中立角色"].append((char, story_stance, role_text or "中立角色"))
+            elif story_stance == "亦正亦邪":
+                groups["摇摆角色"].append((char, story_stance, role_text or "摇摆角色"))
             else:
-                groups["中立角色"].append((char, build_role_text(role, "中立角色")))
-
-        for char in supporting_characters:
-            role = str(char.get('role') or '').lower()
-            groups["支持角色"].append((char, build_role_text(role, "支持角色")))
+                groups["支持角色"].append((char, story_stance, role_text or "盟友"))
 
         for group_name, entries in groups.items():
             if not entries:
                 continue
             parts.append(f"## {group_name}")
             parts.append("")
-            for char_data, role_text in entries:
-                append_character_card(parts, char_data, role_text)
+            for char_data, story_stance_text, role_text in entries:
+                append_character_card(parts, char_data, story_stance_text, role_text)
 
         return "\n".join(parts).strip()
 
-    def _build_plot_outline_text(self, analysis_map: Dict[str, BookAnalysis], book_id: int) -> str:
-        """生成与大纲扩展一致的情节大纲文本。"""
-        content = self._load_analysis_content(analysis_map, 'plot')
+    def _build_plot_outline_text_legacy(self, analysis_map: Dict[str, BookAnalysis], book_id: int) -> str:
+        """旧版总览式情节大纲生成逻辑，保留仅供定位对比。"""
+        content = self._load_plot_content_with_fallback(analysis_map, book_id)
         if not isinstance(content, dict) or not content:
             return ""
 

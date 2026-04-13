@@ -132,7 +132,7 @@ class SoundEffectDesigner:
                     }
                 ]
             scene_info: 场景信息（可选）
-            allow_asset_generation: ????????/??????
+            allow_asset_generation: 是否允许生成新素材
         
         Returns:
             音效提示列表

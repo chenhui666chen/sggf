@@ -156,8 +156,7 @@ export default function useAudiobookChapterDrawer({ onNotify }: { onNotify?: (pa
           }
         }
         setMergedChapterAudiosByNumber(merged)
-      } catch (err) {
-        console.error('加载章节目录失败:', err)
+      } catch {
         setError('加载章节目录失败，请稍后重试。')
       } finally {
         if (requestId !== requestIdRef.current) return
@@ -222,8 +221,7 @@ export default function useAudiobookChapterDrawer({ onNotify }: { onNotify?: (pa
 
         await audio.play()
         setPlayingChapterNumber(chapterNumber)
-      } catch (err) {
-        console.error('播放音频失败:', err)
+      } catch {
         notify({ message: '播放失败，请稍后重试', severity: 'error' })
         setPlayingChapterNumber(null)
       }

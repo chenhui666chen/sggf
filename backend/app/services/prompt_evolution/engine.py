@@ -288,7 +288,7 @@ class PromptEvolutionEngine:
                 self.no_improvement_count = 0
                 # 有改善时退出探索模式
                 if self.exploration_mode:
-                    print("   ✅ 探索模式成功找到改善方向，退出探索模式")
+                    logger.debug("   ✅ 探索模式成功找到改善方向，退出探索模式")
                     self.exploration_mode = False
                     self.exploration_attempts = 0
 
@@ -299,7 +299,7 @@ class PromptEvolutionEngine:
                     self.exploration_mode = True
                     self.exploration_attempts += 1
                     self.convergence_count = 0  # 重置计数
-                    print(f"   🔍 进入探索模式（第{self.exploration_attempts}次尝试），使用更高温度和随机策略")
+                    logger.debug(f"   🔍 进入探索模式（第{self.exploration_attempts}次尝试），使用更高温度和随机策略")
                     # 不返回停止，继续进化
                 else:
                     # 探索模式也无法改善，真正停止
@@ -483,20 +483,20 @@ class PromptEvolutionEngine:
             # 🆕 重置停止条件追踪
             self._reset_stop_tracking()
 
-            print("🚀🚀🚀 [进化引擎] 开始提示词进化优化...")
+            logger.debug("🚀🚀🚀 [进化引擎] 开始提示词进化优化...")
             logger.info("🚀 开始提示词进化优化")
             await self._notify_progress(on_progress, "🚀 开始提示词进化优化", 0, {})
 
             # 获取测试样本（用于题材检测，需早于经验加载/经验优化）
             samples = self.sample_manager.get_samples(self.config.samples_per_iteration)
-            print(f"📝 获取到 {len(samples)} 个测试样本")
+            logger.debug(f"📝 获取到 {len(samples)} 个测试样本")
 
             # 🆕 自动检测题材（如果未指定）
             if not self.genre:
-                print("🔍 未指定题材，开始自动检测...")
+                logger.debug("🔍 未指定题材，开始自动检测...")
                 detector = get_genre_detector()
                 self.genre = detector.detect_from_samples(samples)
-                print(f"🎭 自动检测到题材: {self.genre}")
+                logger.debug(f"🎭 自动检测到题材: {self.genre}")
 
             if self.genre:
                 # 统一设置题材上下文，确保经验加载/经验优化可用
@@ -519,7 +519,7 @@ class PromptEvolutionEngine:
                 
                 if optimizer.should_trigger_optimization(total_reports, last_opt_count):
                     logger.info(f"🔧 触发经验优化：当前 {total_reports} 个报告，上次优化 {last_opt_count} 个")
-                    print(f"🔧 开始优化历史经验...")
+                    logger.debug(f"🔧 开始优化历史经验...")
                     await self._notify_progress(on_progress, "🔧 正在优化历史经验...", 1.2, {})
                     
                     try:
@@ -532,7 +532,7 @@ class PromptEvolutionEngine:
                         self.storage.update_optimization_metadata(total_reports)
                         
                         # 输出优化摘要
-                        print(opt_result.optimization_summary)
+                        logger.debug(opt_result.optimization_summary)
                         logger.info(opt_result.optimization_summary)
                         
                         await self._notify_progress(
@@ -543,14 +543,14 @@ class PromptEvolutionEngine:
                         )
                     except Exception as e:
                         logger.error(f"❌ 经验优化失败: {e}", exc_info=True)
-                        print(f"⚠️ 经验优化失败，继续使用原始经验: {e}")
+                        logger.debug(f"⚠️ 经验优化失败，继续使用原始经验: {e}")
             
             if historical_reports:
                 loaded_count = self.meta_optimizer.load_historical_experience(historical_reports, genre=self.genre)
-                print(f"📚 从历史批次加载经验: {loaded_count} 条")
+                logger.debug(f"📚 从历史批次加载经验: {loaded_count} 条")
                 await self._notify_progress(on_progress, f"📚 加载历史经验 {loaded_count} 条", 2, {})
             else:
-                print("📚 无历史经验，从零开始")
+                logger.debug("📚 无历史经验，从零开始")
 
             # 尝试使用历史最佳提示词作为起点
             initial_prompt = self._get_best_starting_prompt()
@@ -563,16 +563,16 @@ class PromptEvolutionEngine:
             cached = self._get_cached_evaluation(initial_prompt)
             if cached:
                 avg_score, results = cached
-                print(f"🔥 热启动：使用缓存的评估结果，平均得分: {avg_score:.1f}")
+                logger.debug(f"🔥 热启动：使用缓存的评估结果，平均得分: {avg_score:.1f}")
                 await self._notify_progress(on_progress, f"🔥 热启动：使用缓存结果 {avg_score:.1f}", 5, {})
             else:
                 # 评估初始版本
-                print("📊 开始评估初始提示词...")
+                logger.debug("📊 开始评估初始提示词...")
                 await self._notify_progress(on_progress, "📊 评估初始提示词...", 5, {})
                 avg_score, results = await self.evaluator.evaluate_prompt(
                     initial_prompt, samples, self.config.temperature
                 )
-                print(f"📊 初始评估完成，平均得分: {avg_score:.1f}")
+                logger.debug(f"📊 初始评估完成，平均得分: {avg_score:.1f}")
                 # 缓存结果（传入综合评分）
                 # 此时还未计算综合评分，先用AI分数
                 self._cache_evaluation(initial_prompt, avg_score, results, composite_score=avg_score)
@@ -592,7 +592,7 @@ class PromptEvolutionEngine:
             current_version.avg_readability = sum(readability_scores) / len(readability_scores) if readability_scores else 80
             current_version.avg_writing = sum(writing_scores) / len(writing_scores) if writing_scores else 50
             current_version.avg_composite_score = sum(composite_scores) / len(composite_scores) if composite_scores else avg_score
-            print(f"📖 初始版本多维评分 - 可读性: {current_version.avg_readability:.1f}, 文笔: {current_version.avg_writing:.1f}, 综合: {current_version.avg_composite_score:.1f}")
+            logger.debug(f"📖 初始版本多维评分 - 可读性: {current_version.avg_readability:.1f}, 文笔: {current_version.avg_writing:.1f}, 综合: {current_version.avg_composite_score:.1f}")
 
             self._update_best_versions(current_version)
             self.history.all_versions.append(current_version)
@@ -607,7 +607,7 @@ class PromptEvolutionEngine:
             
             # 迭代优化
             for iteration in range(1, self.config.max_iterations + 1):
-                print(f"\n🔄🔄🔄 [进化引擎] 开始迭代 {iteration}/{self.config.max_iterations}")
+                logger.debug(f"\n🔄🔄🔄 [进化引擎] 开始迭代 {iteration}/{self.config.max_iterations}")
                 self.history.current_iteration = iteration
                 progress = 10 + int(80 * iteration / self.config.max_iterations)
 
@@ -621,7 +621,7 @@ class PromptEvolutionEngine:
                 )
 
                 # 元优化：生成改进的提示词
-                print(f"🧠 调用元优化器生成改进提示词...")
+                logger.debug(f"🧠 调用元优化器生成改进提示词...")
                 # 🆕 传入探索模式和反向优化标志
                 improved_prompt, analysis = await self.meta_optimizer.optimize_prompt(
                     current_version,
@@ -634,9 +634,9 @@ class PromptEvolutionEngine:
                     mode_info = "🔍探索模式"
                     if self.reverse_optimization_mode:
                         mode_info += " + 🔀反向优化"
-                    print(f"{mode_info} 元优化完成，分析: {analysis[:100]}...")
+                    logger.debug(f"{mode_info} 元优化完成，分析: {analysis[:100]}...")
                 else:
-                    print(f"🧠 元优化完成，分析: {analysis[:100]}...")
+                    logger.debug(f"🧠 元优化完成，分析: {analysis[:100]}...")
 
                 # 🔧 A/B测试：根据配置间隔生成变体进行对比
                 best_prompt = improved_prompt
@@ -645,7 +645,7 @@ class PromptEvolutionEngine:
 
                 ab_interval = self.config.ab_test_interval
                 if iteration % ab_interval == 0 and iteration > 0:
-                    print(f"🔬 进行A/B测试...")
+                    logger.debug(f"🔬 进行A/B测试...")
                     await self._notify_progress(
                         on_progress,
                         f"🔬 迭代 {iteration}: 进行A/B变体测试...",
@@ -670,32 +670,32 @@ class PromptEvolutionEngine:
                             variant_hash = self._get_prompt_hash(variant_prompt)
                             fail_count = self._failed_variants.get(variant_hash, 0)
                             if fail_count >= 3:
-                                print(f"   ⏭️ 跳过失败变体（已失败{fail_count}次）: {variant_desc}")
+                                logger.debug(f"   ⏭️ 跳过失败变体（已失败{fail_count}次）: {variant_desc}")
                                 skipped_count += 1
                             else:
                                 filtered_variants.append((variant_prompt, variant_desc))
                     
                     if not filtered_variants:
-                        print(f"   ℹ️ 所有变体均已失败，跳过A/B测试")
+                        logger.debug(f"   ℹ️ 所有变体均已失败，跳过A/B测试")
                     else:
                         if skipped_count > 0:
-                            print(f"   🛡️ 已过滤 {skipped_count} 个失败变体")
+                            logger.debug(f"   🛡️ 已过滤 {skipped_count} 个失败变体")
                         
                         # 🔧 使用配置的样本数进行A/B评估
                         ab_sample_count = min(self.config.ab_test_sample_count, len(samples))
                         ab_samples = samples[:ab_sample_count]
-                        print(f"   📋 使用 {ab_sample_count} 个样本进行A/B评估（{len(filtered_variants)}个有效变体）")
+                        logger.debug(f"   📋 使用 {ab_sample_count} 个样本进行A/B评估（{len(filtered_variants)}个有效变体）")
 
                         # 🆕 评估原始版本（优先使用缓存）
                         cached_orig = self._get_cached_evaluation(improved_prompt)
                         if cached_orig:
                             orig_score, orig_results = cached_orig
-                            print(f"   📊 原始版本得分: {orig_score:.1f} (💾缓存)")
+                            logger.debug(f"   📊 原始版本得分: {orig_score:.1f} (💾缓存)")
                         else:
                             orig_score, orig_results = await self.evaluator.evaluate_prompt(
                                 improved_prompt, ab_samples, self.config.temperature
                             )
-                            print(f"   📊 原始版本得分: {orig_score:.1f}")
+                            logger.debug(f"   📊 原始版本得分: {orig_score:.1f}")
                             # 缓存原始版本评估结果
                             self._cache_evaluation(improved_prompt, orig_score, orig_results)
                         
@@ -712,12 +712,12 @@ class PromptEvolutionEngine:
                             cached_var = self._get_cached_evaluation(variant_prompt)
                             if cached_var:
                                 var_score, var_results = cached_var
-                                print(f"   📊 变体{i}得分: {var_score:.1f} ({variant_desc}) (💾缓存)")
+                                logger.debug(f"   📊 变体{i}得分: {var_score:.1f} ({variant_desc}) (💾缓存)")
                             else:
                                 var_score, var_results = await self.evaluator.evaluate_prompt(
                                     variant_prompt, ab_samples, self.config.temperature
                                 )
-                                print(f"   📊 变体{i}得分: {var_score:.1f} ({variant_desc})")
+                                logger.debug(f"   📊 变体{i}得分: {var_score:.1f} ({variant_desc})")
                                 # 缓存变体评估结果
                                 self._cache_evaluation(variant_prompt, var_score, var_results)
                             
@@ -733,9 +733,9 @@ class PromptEvolutionEngine:
                             best_score = winner_score
                             best_prompt = winner_prompt
                             best_analysis = f"{analysis} [A/B胜出: {winner_desc}, ↓{score_diff:.1f}分]"
-                            print(f"   ✨ {winner_desc}显著胜出! (差异: {score_diff:.1f}分)")
+                            logger.debug(f"   ✨ {winner_desc}显著胜出! (差异: {score_diff:.1f}分)")
                         elif winner_prompt != improved_prompt:
-                            print(f"   ➡️ 差异不显著({score_diff:.1f}<{self.config.ab_test_min_diff})，保持原版本")
+                            logger.debug(f"   ➡️ 差异不显著({score_diff:.1f}<{self.config.ab_test_min_diff})，保持原版本")
                             # 🆕 记录失败变体
                             for var_score, var_prompt, var_desc in all_scores[1:]:
                                 if var_prompt != improved_prompt:  # 排除原始版本
@@ -743,7 +743,7 @@ class PromptEvolutionEngine:
                                     self._failed_variants[var_hash] = self._failed_variants.get(var_hash, 0) + 1
                                     fail_count = self._failed_variants[var_hash]
                                     if fail_count >= 3:
-                                        print(f"   ⚠️ {var_desc}已失败{fail_count}次，将被标记")
+                                        logger.debug(f"   ⚠️ {var_desc}已失败{fail_count}次，将被标记")
 
                 # 创建新版本
                 new_version = PromptVersion(
@@ -757,7 +757,7 @@ class PromptEvolutionEngine:
                 # 🔧 使用动态温度（探索模式时使用更高温度）
                 current_temp = self._get_current_temperature()
                 if self.exploration_mode:
-                    print(f"   🔍 探索模式：使用温度 {current_temp}")
+                    logger.debug(f"   🔍 探索模式：使用温度 {current_temp}")
                 avg_score, results = await self.evaluator.evaluate_prompt(
                     best_prompt, samples, current_temp
                 )
@@ -801,13 +801,13 @@ class PromptEvolutionEngine:
                     new_version.genre = self.genre
                     new_version.genre_optimized = True
 
-                print(
+                logger.debug(
                     f"   📖 平均可读性: {avg_readability:.1f}, 平均文笔: {avg_writing:.1f}, "
                     f"平均保真: {avg_fidelity_similarity:.1f}, 综合评分: {avg_composite:.1f}",
                     flush=True
                 )
                 if self.genre:
-                    print(f"   🎭 题材标签: {self.genre}", flush=True)
+                    logger.debug(f"   🎭 题材标签: {self.genre}", flush=True)
 
                 # 🆕 缓存评估结果（传入综合评分以便优化缓存策略）
                 self._cache_evaluation(best_prompt, avg_score, results, composite_score=avg_composite)
@@ -816,10 +816,10 @@ class PromptEvolutionEngine:
                 stop_reason = self._check_stop_conditions(avg_score, avg_readability, avg_writing, avg_fidelity_similarity)
 
                 if stop_reason.should_stop:
-                    print(f"\n   {stop_reason.reason_message}", flush=True)
+                    logger.debug(f"\n   {stop_reason.reason_message}", flush=True)
 
                     if stop_reason.should_rollback and self.best_ever_version:
-                        print(f"   🔄 {stop_reason.rollback_reason}", flush=True)
+                        logger.debug(f"   🔄 {stop_reason.rollback_reason}", flush=True)
                         # 回滚到最优版本
                         current_version = self.best_ever_version
                         self._update_best_versions(current_version)
@@ -857,32 +857,32 @@ class PromptEvolutionEngine:
                     self.best_ever_score = avg_score
                     self.best_ever_version = new_version
                     self.consecutive_worse_count = 0
-                    print(f"   🏆 新的最优版本! AI:{avg_score:.1f} 可读性:{avg_readability:.1f} 文笔:{avg_writing:.1f} (↓{score_diff:.1f})", flush=True)
+                    logger.debug(f"   🏆 新的最优版本! AI:{avg_score:.1f} 可读性:{avg_readability:.1f} 文笔:{avg_writing:.1f} (↓{score_diff:.1f})", flush=True)
                 elif is_better:
                     # 有改善但不显著，仍更新最优记录
                     self.best_ever_score = avg_score
                     self.best_ever_version = new_version
                     self.consecutive_worse_count = 0
-                    print(f"   ✅ 略有改善 AI:{avg_score:.1f} 可读性:{avg_readability:.1f} 文笔:{avg_writing:.1f} (↓{score_diff:.1f})", flush=True)
+                    logger.debug(f"   ✅ 略有改善 AI:{avg_score:.1f} 可读性:{avg_readability:.1f} 文笔:{avg_writing:.1f} (↓{score_diff:.1f})", flush=True)
                 elif is_equivalent:
                     # 🔧 新增：保持相当状态，不累加退化计数，但也不更新最优版本
-                    print(f"   ➡️ 保持相当 AI:{avg_score:.1f} 可读性:{avg_readability:.1f} 文笔:{avg_writing:.1f} (±{abs(score_diff):.1f})", flush=True)
+                    logger.debug(f"   ➡️ 保持相当 AI:{avg_score:.1f} 可读性:{avg_readability:.1f} 文笔:{avg_writing:.1f} (±{abs(score_diff):.1f})", flush=True)
                     # 不累加 consecutive_worse_count，给系统更多探索机会
                 else:
                     # 新版本确实变差或质量不合格
                     self.consecutive_worse_count += 1
                     if not readability_ok:
-                        print(f"   ⚠️ 可读性不合格({avg_readability:.1f})，连续{self.consecutive_worse_count}次未改善", flush=True)
+                        logger.debug(f"   ⚠️ 可读性不合格({avg_readability:.1f})，连续{self.consecutive_worse_count}次未改善", flush=True)
                     elif not writing_ok:
-                        print(f"   ⚠️ 文笔不合格({avg_writing:.1f})，连续{self.consecutive_worse_count}次未改善", flush=True)
+                        logger.debug(f"   ⚠️ 文笔不合格({avg_writing:.1f})，连续{self.consecutive_worse_count}次未改善", flush=True)
                     else:
                         degradation = avg_score - self.best_ever_score
-                        print(f"   ⚠️ 效果变差 (+{degradation:.1f}分)，连续{self.consecutive_worse_count}次", flush=True)
+                        logger.debug(f"   ⚠️ 效果变差 (+{degradation:.1f}分)，连续{self.consecutive_worse_count}次", flush=True)
 
                     # 连续3次变差，触发回滚
                     if self.consecutive_worse_count >= 3 and self.best_ever_version:
                         should_rollback = True
-                        print(f"   🔄 触发回滚！恢复到最优版本 (得分: {self.best_ever_score:.1f})", flush=True)
+                        logger.debug(f"   🔄 触发回滚！恢复到最优版本 (得分: {self.best_ever_score:.1f})", flush=True)
                         await self._notify_progress(
                             on_progress,
                             f"🔄 连续退化，回滚到最优版本 (得分: {self.best_ever_score:.1f})",
@@ -1043,15 +1043,15 @@ class PromptEvolutionEngine:
 
         # 使用找到的最佳提示词
         if best_prompt:
-            print(f"✨ 使用{best_source}提示词作为起点 (综合评分: {best_score:.1f}, AI分数: {best_ai_score:.1f})")
+            logger.debug(f"✨ 使用{best_source}提示词作为起点 (综合评分: {best_score:.1f}, AI分数: {best_ai_score:.1f})")
             logger.info(f"✨ 使用{best_source}提示词: {best_version_id}, 综合评分: {best_score}, AI分数: {best_ai_score}")
             return best_prompt
 
         # 3. 使用默认初始提示词（🔧 支持按题材定制）
         if self.genre:
-            print(f"📝 使用默认初始提示词（题材: {self.genre}）")
+            logger.debug(f"📝 使用默认初始提示词（题材: {self.genre}）")
         else:
-            print("📝 使用默认初始提示词")
+            logger.debug("📝 使用默认初始提示词")
         return self.meta_optimizer.get_initial_prompt(genre=self.genre)
 
     async def _notify_progress(

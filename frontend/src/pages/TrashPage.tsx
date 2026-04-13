@@ -17,7 +17,8 @@ import {
   DialogContentText,
   DialogActions,
 } from '@mui/material'
-import { Restore as RestoreIcon, DeleteForever as DeleteForeverIcon } from '@mui/icons-material'
+import DeleteForeverIcon from '@mui/icons-material/DeleteForever'
+import RestoreIcon from '@mui/icons-material/Restore'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import { useNavigate } from 'react-router-dom'
 

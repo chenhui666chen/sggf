@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy import text
-from app.utils.datetime_utils import parse_datetime_utc, utc_now
+
+from ...utils.datetime_utils import parse_datetime_utc, utc_now
 
 logger = logging.getLogger(__name__)
 

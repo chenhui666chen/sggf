@@ -8,6 +8,9 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import Any, Dict, Iterator
 
+DEFAULT_MAX_STEPS = 50
+MAX_STEPS_WARNING_THRESHOLD = 100
+
 PROJECT_ROOT = str(Path(__file__).resolve().parents[1])
 if PROJECT_ROOT in sys.path:
     sys.path.remove(PROJECT_ROOT)
@@ -296,12 +299,15 @@ def step(ctx: RunContext) -> RunContext:
         else:
             ctx.state = ctx.state
     except Exception as exc:  # noqa: BLE001
+        import traceback
         failed_from = ctx.state
         if ctx.bump_retry(ctx.state):
             return ctx
         ctx.payload["failed_from_state"] = failed_from.name
         ctx.state = State.FAILED
         ctx.payload["error"] = str(exc)
+        ctx.payload["error_type"] = type(exc).__name__
+        ctx.payload["error_traceback"] = traceback.format_exc()
     finally:
         if ctx.state in (State.DONE, State.FAILED):
             telemetry = _ensure_telemetry(ctx.payload)
@@ -310,7 +316,7 @@ def step(ctx: RunContext) -> RunContext:
     return ctx
 
 
-def run_until_done(ctx: RunContext, max_steps: int = 50) -> RunContext:
+def run_until_done(ctx: RunContext, max_steps: int = DEFAULT_MAX_STEPS) -> RunContext:
     for _ in range(max_steps):
         if ctx.state in (
             State.DONE,

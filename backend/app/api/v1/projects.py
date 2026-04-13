@@ -2,7 +2,7 @@
 项目API路由
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import re
@@ -17,6 +17,7 @@ from app.schemas.project import (
     ChapterCreate, ChapterUpdate, ChapterResponse
 )
 from app.core.security import get_current_user
+from app.services.workflow_context_builder import WorkflowContextBuilder
 from app.services.audiobook.project_audio_config import (
     get_audio_fx,
     get_characters_for_model,
@@ -81,6 +82,34 @@ def _allocate_next_display_no(db: Session, *, user_id: int) -> int:
     return int(current_max or 0) + 1
 
 
+def _is_untitled_project(title: Optional[str]) -> bool:
+    normalized_title = (title or "").strip()
+    return not normalized_title or normalized_title == "未命名项目"
+
+
+def _sync_project_title_from_saved_concept(db: Session, project: Project) -> bool:
+    if not _is_untitled_project(project.title):
+        return False
+
+    concept_text = WorkflowContextBuilder(db).read_stage_content(
+        project.id,
+        "concept",
+        pretty_json=True,
+    )
+    if not concept_text:
+        return False
+
+    from app.api.v1.workflow import _extract_project_title_from_concept
+
+    extracted_title = _extract_project_title_from_concept(concept_text)
+    if not extracted_title:
+        return False
+
+    project.title = extracted_title
+    db.add(project)
+    return True
+
+
 @router.get("", response_model=List[ProjectResponse])
 async def list_projects(
     current_user: User = Depends(get_current_user),
@@ -93,6 +122,13 @@ async def list_projects(
         .order_by(Project.display_no.asc(), Project.id.asc())
         .all()
     )
+
+    updated_projects = [project for project in projects if _sync_project_title_from_saved_concept(db, project)]
+    if updated_projects:
+        db.commit()
+        for project in updated_projects:
+            db.refresh(project)
+
     return projects
 
 
@@ -137,6 +173,10 @@ async def get_project(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found"
         )
+
+    if _sync_project_title_from_saved_concept(db, project):
+        db.commit()
+        db.refresh(project)
     
     # 不需要手动赋值，SQLAlchemy的relationship会自动加载
     # chapters = db.query(Chapter).filter(Chapter.project_id == project_id).all()
@@ -541,13 +581,14 @@ async def auto_assign_project_audio_voices(
         """从角色信息中构建特征字典，优先使用结构化字段"""
         tags = _parse_tags(char.tags)
         role = _normalize_text(char.role)
+        role_position = _normalize_text(getattr(char, "role_position", None))
         importance = _normalize_text(char.importance_level)
         summary = _normalize_text(char.summary)
         profile = _normalize_text(char.profile)
         faction = _normalize_text(char.faction)
 
         # 构建完整的上下文文本（用于 LLM 分析和关键词匹配）
-        text_parts = [char.name, role, importance, summary, profile, faction, " ".join(tags)]
+        text_parts = [char.name, role, role_position, importance, summary, profile, faction, " ".join(tags)]
         text = " ".join([_normalize_text(p) for p in text_parts if _normalize_text(p)])
         text_lower = text.lower()
 
@@ -584,9 +625,9 @@ async def auto_assign_project_audio_voices(
         personality = _infer_personality(text_lower)
         if not personality:
             # 从角色重要性推断
-            if "主角" in importance or "重要" in importance or "protagonist" in text_lower or "hero" in text_lower:
+            if "主角" in importance or "核心" in importance or role_position == "主角":
                 personality = "energetic"
-            elif "龙套" in importance or "群众" in importance or "配角" in importance or "supporting" in text_lower:
+            elif any(keyword in importance for keyword in ("边缘", "群众", "次要")):
                 personality = "calm"
         if personality:
             traits["personality"] = personality
@@ -594,7 +635,9 @@ async def auto_assign_project_audio_voices(
         # 4. 构建详细的上下文信息（用于 LLM 分析）
         context_parts = []
         if role:
-            context_parts.append(f"角色定位：{role}")
+            context_parts.append(f"故事立场：{role}")
+        if role_position:
+            context_parts.append(f"角色定位：{role_position}")
         if importance:
             context_parts.append(f"重要程度：{importance}")
         if summary:
@@ -894,4 +937,3 @@ async def export_all_chapters_docx(
             "Content-Disposition": f"attachment; filename*=UTF-8''{filename_encoded}"
         }
     )
-

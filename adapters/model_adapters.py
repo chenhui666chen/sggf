@@ -995,6 +995,7 @@ class ModelAdapterFactory:
 
     _KEY_ALIAS_MAP = {
         "wan_t2i": "wan26_t2i",
+        "wan2.6-t2i": "wan26_t2i",
         "wan_i2v": "wan26_i2v",
         "wan_t2v": "wan26_t2v",
         "wan_r2v": "wan26_r2v",
@@ -1004,7 +1005,7 @@ class ModelAdapterFactory:
         "wan-r2v": "wan26_r2v",
     }
     _BRIDGE_MODEL_MAP = {
-        "wan26_t2i": "wanx-v1",
+        "wan26_t2i": "wan2.6-t2i",
         "wan26_i2v": "wan2.6-i2v",
         "wan26_t2v": "wan2.6-t2v",
         "wan26_r2v": "wan2.6-r2v",

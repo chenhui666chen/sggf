@@ -243,11 +243,12 @@ BookAnalysis.content 字段存储 JSON 格式数据，各类型结构如下：
 
 1. characters (人物体系):
 {
-    "main_characters": [
+    "characters": [
         {
             "name": "张三",
             "aliases": ["阿三", "三哥"],
-            "role": "protagonist",
+            "role_position": "主角",
+            "story_stance": "主角方",
             "description": "...",
             "personality": ["勇敢", "正义"],
             "relationships": [{"target": "李四", "relation": "师徒"}],
@@ -255,8 +256,7 @@ BookAnalysis.content 字段存储 JSON 格式数据，各类型结构如下：
             "importance_score": 0.9
         }
     ],
-    "supporting_characters": [...],
-    "minor_characters": [...]
+    "character_relationships": [...]
 }
 
 2. worldview (世界观设定):

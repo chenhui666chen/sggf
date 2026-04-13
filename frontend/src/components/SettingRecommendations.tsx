@@ -45,14 +45,39 @@ interface SettingRecommendationsProps {
 
 const CATEGORY_LABELS: Record<string, string> = {
   all: '全部',
-  cultivation_system: '境界体系',
-  technique_system: '功法体系',
-  artifact_system: '法宝体系',
-  pill_system: '丹药体系',
   map_system: '地图体系',
-  faction_system: '势力体系',
-  profession_system: '职业体系',
-  race_system: '种族体系',
+  cultivation_realm_system: '修仙境界体系',
+  martial_realm_system: '武道境界体系',
+  technique_system: '功法体系',
+  pill_system: '丹药体系',
+  formation_system: '阵法体系',
+  talisman_system: '符箓体系',
+  weapon_system: '法宝体系',
+  resource_system: '资源体系',
+  organization_force_system: '势力体系',
+  ability_system: '异能体系',
+  ability_realm_system: '异能境界体系',
+  network_social_relationship_system: '人脉关系体系',
+  special_artifact_relic_system: '道具遗物体系',
+  wealth_business_empire_system: '财富商业体系',
+  magic_realm_system: '魔法境界体系',
+  magic_system: '魔法体系',
+  race_bloodline_system: '种族血脉体系',
+  profession_class_system: '职业体系',
+  interstellar_travel_exploration_system: '星际航行体系',
+  ai_robot_system: 'AI机器人体系',
+  survivor_settlement_order_system: '聚落秩序体系',
+  mutation_infection_aberration_system: '变异感染体系',
+  skill_talent_system: '技能天赋体系',
+  character_system: '角色体系',
+  power_official_system: '权力官制体系',
+  military_warfare_system: '军事战争体系',
+  economy_taxation_system: '经济财税体系',
+  culture_etiquette_examination_system: '文化礼制体系',
+  legal_criminal_system: '律法刑罚体系',
+  communication_intelligence_system: '通讯情报体系',
+  historical_event_legend_system: '历史传说体系',
+  lifestyle_custom_system: '民生风俗体系',
 }
 
 export default function SettingRecommendations(props: SettingRecommendationsProps) {
@@ -71,6 +96,10 @@ export default function SettingRecommendations(props: SettingRecommendationsProp
   const [recommendations, setRecommendations] = useState<SettingRecommendation[]>([])
   const [category, setCategory] = useState<string>(defaultCategory || 'all')
   const [totalItems, setTotalItems] = useState(0)
+  const categoryOptions = Object.entries(CATEGORY_LABELS).map(([value, label]) => ({
+    value,
+    label,
+  }))
 
   const loadRecommendations = async () => {
     if (!projectId) return
@@ -86,7 +115,6 @@ export default function SettingRecommendations(props: SettingRecommendationsProp
       setRecommendations(data.recommendations || [])
       setTotalItems(data.total_items || 0)
     } catch (err: any) {
-      console.error('加载推荐设定失败', err)
       setError(await extractApiErrorMessage(err, '加载失败'))
     } finally {
       setLoading(false)
@@ -156,15 +184,11 @@ export default function SettingRecommendations(props: SettingRecommendationsProp
               onChange={(e) => setCategory(e.target.value)}
               label="类型筛选"
             >
-              <MenuItem value="all">全部</MenuItem>
-              <MenuItem value="cultivation_system">境界体系</MenuItem>
-              <MenuItem value="technique_system">功法体系</MenuItem>
-              <MenuItem value="artifact_system">法宝体系</MenuItem>
-              <MenuItem value="pill_system">丹药体系</MenuItem>
-              <MenuItem value="map_system">地图体系</MenuItem>
-              <MenuItem value="faction_system">势力体系</MenuItem>
-              <MenuItem value="profession_system">职业体系</MenuItem>
-              <MenuItem value="race_system">种族体系</MenuItem>
+              {categoryOptions.map((option) => (
+                <MenuItem key={option.value} value={option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
             </Select>
           </FormControl>
         </Box>

@@ -1,5 +1,5 @@
 """
-史诗框架与卷细纲智能拼接模块
+长篇框架与卷细纲智能拼接模块
 
 功能：
 1. 框架生成时添加锚点标记
@@ -14,11 +14,12 @@ from typing import Dict, List, Tuple, Optional
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+MAX_CHAPTERS_PER_VOLUME = 100
 
 
 def add_volume_anchors(framework: str, total_volumes: int) -> str:
     """
-    为史诗框架添加锚点标记
+    为长篇框架添加锚点标记
     
     Args:
         framework: 原始框架内容
@@ -115,7 +116,7 @@ def merge_framework_with_volumes(
     智能拼接框架与卷细纲
     
     Args:
-        framework: 史诗框架内容（可能包含锚点，也可能不包含）
+        framework: 长篇框架内容（可能包含锚点，也可能不包含）
         volumes_detail: 已扩展的卷细纲 {1: "第1卷细纲", 3: "第3卷细纲"}
     
     Returns:
@@ -379,11 +380,11 @@ def validate_outline_integrity(
                 "volume": vol_num,
                 "message": f"第{vol_num}卷只有{chapters_count}章，建议至少10章"
             })
-        elif chapters_count > 80:
+        elif chapters_count > MAX_CHAPTERS_PER_VOLUME:
             issues.append({
                 "type": "volume_too_long",
                 "volume": vol_num,
-                "message": f"第{vol_num}卷有{chapters_count}章，超过每卷80章上限，建议拆分为多卷"
+                "message": f"第{vol_num}卷有{chapters_count}章，超过每卷{MAX_CHAPTERS_PER_VOLUME}章上限，建议拆分为多卷"
             })
     
     result = {

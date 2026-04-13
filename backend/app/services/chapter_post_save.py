@@ -20,6 +20,68 @@ from app.db.base import SessionLocal
 
 logger = logging.getLogger("uvicorn.error")
 
+# 🆕 存储主事件循环的引用
+_main_event_loop: asyncio.AbstractEventLoop | None = None
+
+
+def set_main_event_loop(loop: asyncio.AbstractEventLoop):
+    """🆕 设置主事件循环的引用（在应用启动时调用）"""
+    global _main_event_loop
+    _main_event_loop = loop
+
+
+def get_main_event_loop() -> asyncio.AbstractEventLoop | None:
+    """🆕 获取主事件循环的引用"""
+    return _main_event_loop
+
+
+async def _broadcast_project_event(
+    *,
+    project_id: int,
+    event: str,
+    data: Dict[str, Any],
+) -> bool:
+    """
+    在正确的事件循环中推送项目广播。
+
+    章节后处理运行在线程创建的新事件循环中，而 Socket.IO 服务绑定在主事件循环。
+    这里统一切回主事件循环发消息，避免 Future attached to a different loop。
+    """
+    from app.websocket.manager import ws_manager
+
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
+    main_loop = get_main_event_loop()
+    if main_loop and not main_loop.is_closed() and current_loop is not main_loop:
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                ws_manager.broadcast_to_project(
+                    project_id=project_id,
+                    event=event,
+                    data=data,
+                ),
+                main_loop,
+            )
+            return bool(await asyncio.wrap_future(future))
+        except Exception as exc:
+            logger.warning(f"⚠️ 跨事件循环广播失败（{event}）: {exc}")
+            return False
+
+    try:
+        return bool(
+            await ws_manager.broadcast_to_project(
+                project_id=project_id,
+                event=event,
+                data=data,
+            )
+        )
+    except Exception as exc:
+        logger.warning(f"⚠️ 广播失败（{event}）: {exc}")
+        return False
+
 
 async def _save_character_relations(
     db: Session,
@@ -98,7 +160,7 @@ async def _save_character_relations(
         # 解析现有关系
         try:
             existing_relations = json.loads(source_char.relations) if source_char.relations else []
-        except:
+        except Exception:
             existing_relations = []
         
         if not isinstance(existing_relations, list):
@@ -165,8 +227,7 @@ async def process_chapter_post_save(
         
         # 🔔 推送任务开始事件
         try:
-            from app.websocket.manager import ws_manager
-            await ws_manager.broadcast_to_project(
+            pushed = await _broadcast_project_event(
                 project_id=project_id,
                 event='post_save_task_start',
                 data={
@@ -175,7 +236,10 @@ async def process_chapter_post_save(
                     'status': 'processing'
                 }
             )
-            logger.info(f"📡 已推送任务开始事件")
+            if pushed:
+                logger.info("📡 已推送任务开始事件")
+            else:
+                logger.warning("⚠️ 任务开始事件未成功推送")
         except Exception as ws_error:
             logger.warning(f"⚠️ WebSocket 推送失败: {ws_error}")
         
@@ -277,39 +341,25 @@ async def process_chapter_post_save(
                 
                 logger.info(f"   🔗 开始保存 {len(relations)} 个关系...")
                 
+                project_items = db.query(SettingItem).join(
+                    SettingItem.collection
+                ).filter(
+                    SettingItem.collection.has(project_id=project_id)
+                ).all()
+                items_by_name: dict = {}
+                for si in project_items:
+                    items_by_name.setdefault(si.name, []).append(si)
+                
                 for rel in relations:
-                    # 查找 source 和 target 的 ID
                     source_name = rel.get('source', '').strip()
                     target_name = rel.get('target', '').strip()
                     relation_type = rel.get('relation_type', '相关')
                     confidence = rel.get('confidence', 0.6)
                     
-                    source_item = db.query(SettingItem).filter(
-                        SettingItem.name == source_name
-                    ).filter(
-                        SettingItem.collection_id.in_(
-                            db.query(SettingItem.collection_id).join(
-                                SettingItem.collection
-                            ).filter(
-                                SettingItem.collection.has(project_id=project_id)
-                            )
-                        )
-                    ).first()
-                    
-                    target_item = db.query(SettingItem).filter(
-                        SettingItem.name == target_name
-                    ).filter(
-                        SettingItem.collection_id.in_(
-                            db.query(SettingItem.collection_id).join(
-                                SettingItem.collection
-                            ).filter(
-                                SettingItem.collection.has(project_id=project_id)
-                            )
-                        )
-                    ).first()
+                    source_item = items_by_name.get(source_name, [None])[0]
+                    target_item = items_by_name.get(target_name, [None])[0]
                     
                     if source_item and target_item:
-                        # 检查是否已存在该关系
                         existing_edge = db.query(KnowledgeGraphEdge).filter(
                             KnowledgeGraphEdge.source_item_id == source_item.id,
                             KnowledgeGraphEdge.target_item_id == target_item.id,
@@ -378,8 +428,7 @@ async def process_chapter_post_save(
         
         # 🔔 推送任务完成事件
         try:
-            from app.websocket.manager import ws_manager
-            await ws_manager.broadcast_to_project(
+            pushed = await _broadcast_project_event(
                 project_id=project_id,
                 event='post_save_task_complete',
                 data={
@@ -388,12 +437,15 @@ async def process_chapter_post_save(
                     'status': 'completed'
                 }
             )
-            logger.info(f"📡 已推送任务完成事件")
+            if pushed:
+                logger.info("📡 已推送任务完成事件")
+            else:
+                logger.warning("⚠️ 任务完成事件未成功推送")
         except Exception as ws_error:
-            logger.warning(f"⚠️ WebSocket 推送失败: {ws_error}")
+            logger.warning(f"⚠️ WebSocket 推送失败：{ws_error}")
         
     except Exception as e:
-        logger.error(f"❌ 后台处理失败：章节 {chapter_id}, 错误: {e}")
+        logger.error(f"❌ 后台处理失败：章节 {chapter_id}, 错误：{e}")
         import traceback
         traceback.print_exc()
     finally:

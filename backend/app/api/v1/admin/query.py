@@ -2,6 +2,7 @@
 数据库查询管理 API
 提供安全的 SQL 查询功能，包含权限控制、安全验证、审计日志
 """
+import logging
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -16,6 +17,7 @@ from app.utils.sql_validator import SQLValidator, SQLSecurityError
 from app.models.admin_log import AdminOperationLog
 
 router = APIRouter(prefix="/query", tags=["admin-query"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/execute")
@@ -383,5 +385,5 @@ def log_operation(
         
     except Exception as e:
         # 日志记录失败不应影响主流程
-        print(f"记录查询日志失败：{e}")
+        logger.debug(f"记录查询日志失败：{e}")
         db.rollback()

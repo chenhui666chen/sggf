@@ -23,10 +23,8 @@ import {
   Tabs,
   Tab,
 } from '@mui/material'
-import {
-  History as HistoryIcon,
-  Login as LoginIcon,
-} from '@mui/icons-material'
+import HistoryIcon from '@mui/icons-material/History'
+import LoginIcon from '@mui/icons-material/Login'
 import { apiClient } from '@/services/api'
 
 interface OperationLog {

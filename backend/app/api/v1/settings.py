@@ -1,8 +1,11 @@
 """
 类型化设定管理API
 """
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -37,6 +40,7 @@ from app.services.setting_templates import (
 )
 from app.services.setting_auto_merge import SettingAutoMergeService
 from app.services.setting_consistency import SettingConsistencyService
+from app.services.workflow_context_builder import WorkflowContextBuilder
 
 router = APIRouter(prefix="/api/v1", tags=["settings"])
 
@@ -59,6 +63,10 @@ class ApplyTemplateRequest(BaseModel):
     clear_existing: bool = False
 
 
+class RollbackRequest(BaseModel):
+    snapshot_index: int
+
+
 def _ensure_project_owned(project_id: int, current_user: User, db: Session) -> Project:
     project = (
         db.query(Project)
@@ -77,7 +85,7 @@ def _item_to_schema(item: SettingItem) -> SettingItemResponse:
     try:
         tags: Optional[List[str]] = json.loads(item.tags) if item.tags else None
     except Exception:
-        tags = (item.tags.split(',') if item.tags else None)
+        tags = None
     relations = json.loads(item.relations) if item.relations else None
 
     return SettingItemResponse(
@@ -100,6 +108,490 @@ def _item_to_schema(item: SettingItem) -> SettingItemResponse:
         created_at=item.created_at,
         updated_at=item.updated_at,
     )
+
+
+def _parse_json_list(value: Optional[str]) -> List[Any]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, list) else []
+    except Exception:
+        return []
+
+
+def _serialize_tags(tags: Optional[List[str]]) -> Optional[str]:
+    if tags is None:
+        return None
+    normalized = [tag.strip() for tag in tags if isinstance(tag, str) and tag.strip()]
+    return json.dumps(normalized, ensure_ascii=False) if normalized else None
+
+
+def _serialize_relations(relations: Optional[Dict[str, Any]]) -> Optional[str]:
+    if relations is None:
+        return None
+    return json.dumps(relations, ensure_ascii=False)
+
+
+def _validate_collection_name(name: str) -> str:
+    normalized = (name or "").strip()
+    if not normalized:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Collection name cannot be empty",
+        )
+    if "/" in normalized:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Collection name cannot contain '/'",
+        )
+    return normalized
+
+
+def _validate_item_name(name: str) -> str:
+    normalized = (name or "").strip()
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Item name cannot be empty")
+    if "/" in normalized:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Item name cannot contain '/'",
+        )
+    return normalized
+
+
+def _split_path_segments(path: Optional[str]) -> List[str]:
+    if not path:
+        return []
+    return [segment.strip() for segment in str(path).split("/") if segment and segment.strip()]
+
+
+def _normalize_parent_path(collection: SettingCollection, parent_path: Optional[str]) -> str:
+    segments = _split_path_segments(parent_path)
+    if not segments:
+        return collection.name
+    if segments[0] != collection.name:
+        segments = [collection.name] + segments
+    return "/".join(segments)
+
+
+def _normalize_item_path(
+    collection: SettingCollection,
+    item_name: str,
+    raw_path: Optional[str] = None,
+    *,
+    parent_path: Optional[str] = None,
+) -> str:
+    normalized_name = _validate_item_name(item_name)
+    if parent_path is not None:
+        return f"{_normalize_parent_path(collection, parent_path)}/{normalized_name}"
+
+    segments = _split_path_segments(raw_path)
+    if not segments:
+        return f"{collection.name}/{normalized_name}"
+    if segments[0] != collection.name:
+        segments = [collection.name] + segments
+    if len(segments) == 1:
+        segments.append(normalized_name)
+    else:
+        segments[-1] = normalized_name
+    return "/".join(segments)
+
+
+def _compute_depth_from_path(collection: SettingCollection, path: str) -> int:
+    segments = _split_path_segments(path)
+    if len(segments) < 2 or segments[0] != collection.name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid item path",
+        )
+    return len(segments) - 1
+
+
+def _load_hierarchy_level_config(collection: SettingCollection, depth: int) -> Optional[Dict[str, Any]]:
+    if not collection.hierarchy_config:
+        return None
+    try:
+        config = json.loads(collection.hierarchy_config)
+    except Exception:
+        return None
+    if not isinstance(config, dict):
+        return None
+    levels = config.get("levels")
+    if not isinstance(levels, list):
+        return None
+    for level in levels:
+        if isinstance(level, dict) and level.get("depth") == depth:
+            return level
+    return None
+
+
+def _apply_hierarchy_defaults(
+    collection: SettingCollection,
+    depth: int,
+    *,
+    node_type: Optional[str],
+    is_leaf: Optional[bool],
+) -> Tuple[str, bool]:
+    level_config = _load_hierarchy_level_config(collection, depth)
+
+    resolved_node_type = node_type
+    if resolved_node_type is None and level_config and level_config.get("type"):
+        resolved_node_type = str(level_config["type"])
+    if resolved_node_type is None:
+        resolved_node_type = (
+            "category"
+            if collection.category == "map_system" and depth < (collection.max_depth or 1)
+            else "detail"
+        )
+
+    resolved_is_leaf = is_leaf
+    if resolved_is_leaf is None and level_config and "leaf" in level_config:
+        resolved_is_leaf = bool(level_config["leaf"])
+    if resolved_is_leaf is None:
+        resolved_is_leaf = depth >= (collection.max_depth or 1) or collection.category != "map_system"
+
+    return resolved_node_type, resolved_is_leaf
+
+
+def _ensure_depth_allowed(collection: SettingCollection, depth: int) -> None:
+    max_depth = collection.max_depth or 2
+    if depth > max_depth:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Item depth exceeds collection max_depth ({max_depth})",
+        )
+
+
+def _ensure_parent_path_exists(
+    db: Session,
+    collection: SettingCollection,
+    path: str,
+    *,
+    exclude_item_ids: Optional[Sequence[int]] = None,
+) -> None:
+    segments = _split_path_segments(path)
+    if len(segments) <= 2:
+        return
+
+    parent_path = "/".join(segments[:-1])
+    query = db.query(SettingItem).filter(
+        SettingItem.collection_id == collection.id,
+        SettingItem.path == parent_path,
+    )
+    if exclude_item_ids:
+        query = query.filter(~SettingItem.id.in_(list(exclude_item_ids)))
+
+    parent_item = query.first()
+    if not parent_item:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Parent path does not exist: {parent_path}",
+        )
+    if parent_item.is_leaf:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot attach child under leaf item: {parent_item.name}",
+        )
+
+
+def _ensure_unique_path(
+    db: Session,
+    collection_id: int,
+    path: str,
+    *,
+    exclude_item_ids: Optional[Sequence[int]] = None,
+) -> None:
+    query = db.query(SettingItem).filter(
+        SettingItem.collection_id == collection_id,
+        SettingItem.path == path,
+    )
+    if exclude_item_ids:
+        query = query.filter(~SettingItem.id.in_(list(exclude_item_ids)))
+    existing = query.first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Duplicate item path: {path}",
+        )
+
+
+def _ensure_unique_subtree_paths(
+    db: Session,
+    collection_id: int,
+    pending_paths: Dict[int, str],
+    *,
+    exclude_ids: Optional[Sequence[int]] = None,
+) -> None:
+    if not pending_paths:
+        return
+
+    seen_paths: Dict[str, int] = {}
+    for item_id, path in pending_paths.items():
+        if path in seen_paths:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Duplicate item path: {path}",
+            )
+        seen_paths[path] = item_id
+
+    query = db.query(SettingItem).filter(
+        SettingItem.collection_id == collection_id,
+        SettingItem.path.in_(list(pending_paths.values())),
+    )
+    if exclude_ids:
+        query = query.filter(~SettingItem.id.in_(list(exclude_ids)))
+    existing = query.first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Duplicate item path: {existing.path}",
+        )
+
+
+def _build_item_structure(
+    db: Session,
+    collection: SettingCollection,
+    *,
+    item_name: str,
+    raw_path: Optional[str] = None,
+    parent_path: Optional[str] = None,
+    node_type: Optional[str] = None,
+    is_leaf: Optional[bool] = None,
+    exclude_item_ids: Optional[Sequence[int]] = None,
+) -> Tuple[str, int, str, bool]:
+    path = _normalize_item_path(collection, item_name, raw_path, parent_path=parent_path)
+    depth = _compute_depth_from_path(collection, path)
+    _ensure_depth_allowed(collection, depth)
+    _ensure_parent_path_exists(
+        db,
+        collection,
+        path,
+        exclude_item_ids=exclude_item_ids,
+    )
+    resolved_node_type, resolved_is_leaf = _apply_hierarchy_defaults(
+        collection,
+        depth,
+        node_type=node_type,
+        is_leaf=is_leaf,
+    )
+    _ensure_unique_path(db, collection.id, path, exclude_item_ids=exclude_item_ids)
+    return path, depth, resolved_node_type, resolved_is_leaf
+
+
+def _collect_descendants(
+    db: Session,
+    collection_id: int,
+    root_path: Optional[str],
+    *,
+    exclude_item_id: Optional[int] = None,
+) -> List[SettingItem]:
+    if not root_path:
+        return []
+    query = db.query(SettingItem).filter(
+        SettingItem.collection_id == collection_id,
+        SettingItem.path.like(f"{root_path}/%"),
+    )
+    if exclude_item_id is not None:
+        query = query.filter(SettingItem.id != exclude_item_id)
+    return query.order_by(SettingItem.depth, SettingItem.id).all()
+
+
+def _cascade_descendant_paths(
+    db: Session,
+    *,
+    source_collection_id: int,
+    old_root_path: Optional[str],
+    target_collection: SettingCollection,
+    new_root_path: str,
+    root_item_id: int,
+) -> List[SettingItem]:
+    descendants = _collect_descendants(
+        db,
+        source_collection_id,
+        old_root_path,
+        exclude_item_id=root_item_id,
+    )
+    if not descendants or not old_root_path:
+        return []
+
+    pending_paths: Dict[int, str] = {}
+    for descendant in descendants:
+        descendant_path = descendant.path or ""
+        if not descendant_path.startswith(f"{old_root_path}/"):
+            continue
+        suffix = descendant_path[len(old_root_path) :]
+        next_path = f"{new_root_path}{suffix}"
+        depth = _compute_depth_from_path(target_collection, next_path)
+        _ensure_depth_allowed(target_collection, depth)
+        pending_paths[descendant.id] = next_path
+
+    _ensure_unique_subtree_paths(
+        db,
+        target_collection.id,
+        pending_paths,
+        exclude_ids=[root_item_id, *pending_paths.keys()],
+    )
+
+    for descendant in descendants:
+        next_path = pending_paths.get(descendant.id)
+        if not next_path:
+            continue
+        descendant.collection_id = target_collection.id
+        descendant.path = next_path
+        descendant.depth = _compute_depth_from_path(target_collection, next_path)
+        db.add(descendant)
+
+    return descendants
+
+
+def _sync_setting_vector(item: SettingItem, collection: SettingCollection) -> None:
+    try:
+        from app.services.vector_sync import (
+            delete_setting_from_vector_db,
+            upsert_setting_to_vector_db,
+        )
+
+        content = (item.content or "").strip()
+        if content:
+            upsert_setting_to_vector_db(
+                setting_id=item.id,
+                setting_name=item.name,
+                content=content,
+                project_id=collection.project_id,
+                category=collection.category or "",
+            )
+        else:
+            delete_setting_from_vector_db(item.id, collection.project_id)
+    except Exception as exc:
+        logger.warning("同步设定向量失败: %s", exc)
+
+
+def _delete_setting_vectors(project_id: int, setting_ids: Sequence[int]) -> None:
+    if not setting_ids:
+        return
+    try:
+        from app.services.vector_sync import delete_setting_from_vector_db
+
+        for setting_id in setting_ids:
+            delete_setting_from_vector_db(setting_id, project_id)
+    except Exception as exc:
+        logger.warning("删除设定向量失败: %s", exc)
+
+
+def _sync_setting_vectors_for_items(items: Sequence[SettingItem], collection: SettingCollection) -> None:
+    for item in items:
+        _sync_setting_vector(item, collection)
+
+
+def _rebase_collection_item_paths(
+    db: Session,
+    collection: SettingCollection,
+    *,
+    old_name: str,
+) -> List[SettingItem]:
+    if old_name == collection.name:
+        return []
+
+    items = (
+        db.query(SettingItem)
+        .filter(SettingItem.collection_id == collection.id)
+        .order_by(SettingItem.depth, SettingItem.id)
+        .all()
+    )
+    if not items:
+        return []
+
+    pending_paths: Dict[int, str] = {}
+    for item in items:
+        current_path = item.path or f"{old_name}/{item.name}"
+        segments = _split_path_segments(current_path)
+        if len(segments) < 2:
+            segments = [old_name, item.name]
+        segments[0] = collection.name
+        pending_paths[item.id] = "/".join(segments)
+
+    _ensure_unique_subtree_paths(
+        db,
+        collection.id,
+        pending_paths,
+        exclude_ids=list(pending_paths.keys()),
+    )
+
+    for item in items:
+        next_path = pending_paths[item.id]
+        item.path = next_path
+        item.depth = _compute_depth_from_path(collection, next_path)
+        db.add(item)
+
+    return items
+
+
+def _relocate_item_subtree(
+    db: Session,
+    *,
+    item: SettingItem,
+    source_collection: SettingCollection,
+    target_collection: SettingCollection,
+    new_parent_path: Optional[str] = None,
+) -> Tuple[str, int, str, bool]:
+    old_path = item.path or _normalize_item_path(source_collection, item.name)
+    descendants = _collect_descendants(
+        db,
+        source_collection.id,
+        old_path,
+        exclude_item_id=item.id,
+    )
+
+    raw_path = old_path
+    if target_collection.id != source_collection.id:
+        raw_path = old_path.replace(source_collection.name, target_collection.name, 1)
+
+    normalized_parent_path = None
+    if new_parent_path is not None:
+        normalized_parent_path = _normalize_parent_path(target_collection, new_parent_path)
+        if target_collection.id == source_collection.id and (
+            normalized_parent_path == old_path
+            or normalized_parent_path.startswith(f"{old_path}/")
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot move item under itself or its own descendants",
+            )
+
+    next_path, next_depth, resolved_node_type, resolved_is_leaf = _build_item_structure(
+        db,
+        target_collection,
+        item_name=item.name,
+        raw_path=None if normalized_parent_path is not None else raw_path,
+        parent_path=normalized_parent_path,
+        node_type=item.node_type,
+        is_leaf=False if descendants else item.is_leaf,
+        exclude_item_ids=[item.id],
+    )
+
+    if next_path != old_path and next_path.startswith(f"{old_path}/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot move item under itself or its own descendants",
+        )
+
+    item.collection_id = target_collection.id
+    item.path = next_path
+    item.depth = next_depth
+    item.node_type = resolved_node_type
+    item.is_leaf = resolved_is_leaf
+
+    _cascade_descendant_paths(
+        db,
+        source_collection_id=source_collection.id,
+        old_root_path=old_path,
+        target_collection=target_collection,
+        new_root_path=next_path,
+        root_item_id=item.id,
+    )
+    db.add(item)
+    return next_path, next_depth, resolved_node_type, resolved_is_leaf
 
 
 @router.get(
@@ -135,10 +627,11 @@ async def create_setting_collection(
 ):
     """创建设定集合"""
     _ensure_project_owned(project_id, current_user, db)
+    collection_name = _validate_collection_name(data.name)
 
     collection = SettingCollection(
         project_id=project_id,
-        name=data.name,
+        name=collection_name,
         category=data.category,
         description=data.description,
         order=data.order,
@@ -165,12 +658,46 @@ async def update_setting_collection(
 
     _ensure_project_owned(collection.project_id, current_user, db)
 
-    for key, value in data.dict(exclude_unset=True).items():
+    data_dict = data.dict(exclude_unset=True)
+    if not data_dict:
+        return collection
+
+    if "name" in data_dict:
+        data_dict["name"] = _validate_collection_name(data_dict["name"])
+
+    next_max_depth = data_dict.get("max_depth")
+    if next_max_depth is not None:
+        deepest_item = (
+            db.query(SettingItem.depth)
+            .filter(SettingItem.collection_id == collection.id)
+            .order_by(SettingItem.depth.desc(), SettingItem.id.desc())
+            .first()
+        )
+        if deepest_item and deepest_item[0] and deepest_item[0] > next_max_depth:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Collection max_depth cannot be smaller than existing item depth "
+                    f"({deepest_item[0]})"
+                ),
+            )
+
+    old_name = collection.name
+    old_category = collection.category
+    for key, value in data_dict.items():
         setattr(collection, key, value)
 
+    rebased_items = _rebase_collection_item_paths(db, collection, old_name=old_name)
     db.add(collection)
     db.commit()
     db.refresh(collection)
+    if old_category != collection.category:
+        items = rebased_items or (
+            db.query(SettingItem)
+            .filter(SettingItem.collection_id == collection.id)
+            .all()
+        )
+        _sync_setting_vectors_for_items(items, collection)
     return collection
 
 
@@ -186,9 +713,17 @@ async def delete_setting_collection(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Collection not found")
 
     _ensure_project_owned(collection.project_id, current_user, db)
+    items_to_delete = (
+        db.query(SettingItem)
+        .filter(SettingItem.collection_id == collection_id)
+        .all()
+    )
+    setting_ids = [it.id for it in items_to_delete]
+    project_id = collection.project_id
 
     db.delete(collection)
     db.commit()
+    _delete_setting_vectors(project_id, setting_ids)
 
 
 @router.get("/setting-collections/{collection_id}/items", response_model=List[SettingItemResponse])
@@ -302,29 +837,35 @@ async def create_setting_item(
     _ensure_project_owned(collection.project_id, current_user, db)
 
     # 计算默认层级与路径
-    default_depth = 2
-    default_node_type = "category" if (collection.category == "map_system") else "detail"
-    default_is_leaf = False if (collection.category == "map_system") else True
-    default_path = f"{collection.name}/{data.name}"
+    item_name = _validate_item_name(data.name)
+    path, depth, node_type, is_leaf = _build_item_structure(
+        db,
+        collection,
+        item_name=item_name,
+        raw_path=data.path,
+        node_type=data.node_type,
+        is_leaf=data.is_leaf,
+    )
 
     item = SettingItem(
         collection_id=collection_id,
-        name=data.name,
+        name=item_name,
         code=data.code,
         level=data.level,
-        tags=json.dumps(data.tags) if data.tags is not None else None,
+        tags=_serialize_tags(data.tags),
         content=data.content,
-        relations=json.dumps(data.relations) if data.relations is not None else None,
+        relations=_serialize_relations(data.relations),
         order=data.order,
-        depth=(data.depth if data.depth is not None else default_depth),
-        node_type=(data.node_type if data.node_type is not None else default_node_type),
-        is_leaf=(data.is_leaf if data.is_leaf is not None else default_is_leaf),
-        path=(data.path if data.path is not None else default_path),
+        depth=depth,
+        node_type=node_type,
+        is_leaf=is_leaf,
+        path=path,
         summary=data.summary,
     )
     db.add(item)
     db.commit()
     db.refresh(item)
+    _sync_setting_vector(item, collection)
     return _item_to_schema(item)
 
 
@@ -347,41 +888,67 @@ async def update_setting_item(
     _ensure_project_owned(collection.project_id, current_user, db)
 
     data_dict = data.dict(exclude_unset=True)
-    if "tags" in data_dict:
-        item.tags = json.dumps(data_dict.pop("tags")) if data_dict["tags"] is not None else None
-    if "relations" in data_dict:
-        item.relations = (
-            json.dumps(data_dict.pop("relations")) if data_dict["relations"] is not None else None
+    if not data_dict:
+        return _item_to_schema(item)
+
+    old_path = item.path or _normalize_item_path(collection, item.name)
+    descendants = _collect_descendants(db, collection.id, old_path, exclude_item_id=item.id)
+    SettingAutoMergeService.save_snapshot(item, db, commit=False)
+
+    next_name = _validate_item_name(data_dict.get("name", item.name))
+    next_raw_path = data_dict.get("path") if ("path" in data_dict or "name" in data_dict) else item.path
+    next_node_type = data_dict.get("node_type", item.node_type)
+    next_is_leaf = data_dict.get("is_leaf", item.is_leaf)
+    if descendants:
+        next_is_leaf = False
+
+    next_path, next_depth, resolved_node_type, resolved_is_leaf = _build_item_structure(
+        db,
+        collection,
+        item_name=next_name,
+        raw_path=next_raw_path,
+        node_type=next_node_type,
+        is_leaf=next_is_leaf,
+        exclude_item_ids=[item.id],
+    )
+    if next_path != old_path and next_path.startswith(f"{old_path}/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot move item under itself or its own descendants",
         )
 
-    for key, value in data_dict.items():
-        setattr(item, key, value)
+    item.name = next_name
+    item.code = data_dict.get("code", item.code)
+    item.level = data_dict.get("level", item.level)
+    item.tags = _serialize_tags(data_dict["tags"]) if "tags" in data_dict else item.tags
+    item.content = data_dict.get("content", item.content)
+    item.relations = (
+        _serialize_relations(data_dict["relations"])
+        if "relations" in data_dict
+        else item.relations
+    )
+    item.order = data_dict.get("order", item.order)
+    item.path = next_path
+    item.depth = next_depth
+    item.node_type = resolved_node_type
+    item.is_leaf = resolved_is_leaf
+    item.summary = data_dict.get("summary", item.summary)
 
     # 若仅更新了 path 未传 depth，则自动根据 path 段数计算 depth
-    if ("path" in data_dict) and ("depth" not in data_dict) and item.path:
-      try:
-        item.depth = max(1, len((item.path or "").split("/")) - 1)
-      except Exception:
-        pass
+    if next_path != old_path:
+        _cascade_descendant_paths(
+            db,
+            source_collection_id=collection.id,
+            old_root_path=old_path,
+            target_collection=collection,
+            new_root_path=next_path,
+            root_item_id=item.id,
+        )
 
     db.add(item)
     db.commit()
     db.refresh(item)
-    
-    # 🆕 同步到向量库
-    try:
-        from app.services.vector_sync import upsert_setting_to_vector_db
-        if item.content:  # 只同步有内容的设定项
-            upsert_setting_to_vector_db(
-                setting_id=item.id,
-                setting_name=item.name,
-                content=item.content,
-                project_id=collection.project_id,
-                category=collection.category
-            )
-    except Exception as e:
-        print(f"⚠️ 同步设定到向量库失败: {e}")
-    
+    _sync_setting_vector(item, collection)
     return _item_to_schema(item)
 
 
@@ -439,11 +1006,22 @@ async def move_setting_item(
     if source_collection.project_id != target_collection.project_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cross-project move is not allowed")
 
-    # 执行移动
-    item.collection_id = target_collection_id
-    db.add(item)
+    SettingAutoMergeService.save_snapshot(item, db, commit=False)
+    _relocate_item_subtree(
+        db,
+        item=item,
+        source_collection=source_collection,
+        target_collection=target_collection,
+    )
     db.commit()
     db.refresh(item)
+    descendants = _collect_descendants(
+        db,
+        target_collection.id,
+        item.path,
+        exclude_item_id=item.id,
+    )
+    _sync_setting_vectors_for_items([item, *descendants], target_collection)
     return _item_to_schema(item)
 
 @router.delete("/setting-items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -464,17 +1042,18 @@ async def delete_setting_item(
     _ensure_project_owned(collection.project_id, current_user, db)
 
     # 🆕 从向量库删除
-    project_id = collection.project_id
-    setting_id = item.id
-    
+    descendants = _collect_descendants(
+        db,
+        collection.id,
+        item.path or _normalize_item_path(collection, item.name),
+        exclude_item_id=item.id,
+    )
+    delete_ids = [item.id, *[descendant.id for descendant in descendants]]
+    for descendant in descendants:
+        db.delete(descendant)
     db.delete(item)
     db.commit()
-    
-    try:
-        from app.services.vector_sync import delete_setting_from_vector_db
-        delete_setting_from_vector_db(setting_id, project_id)
-    except Exception as e:
-        print(f"⚠️ 从向量库删除设定失败: {e}")
+    _delete_setting_vectors(collection.project_id, delete_ids)
 
 
 @router.patch(
@@ -534,37 +1113,53 @@ async def bulk_move_setting_items(
 
     items = db.query(SettingItem).filter(SettingItem.id.in_(payload.item_ids)).all()
 
-    moved_ids: List[int] = []
-    for it in items:
-        # 若未指定目标集合，仅允许操作当前集合内项
-        if (not target_collection) and (it.collection_id != collection_id):
+    destination_collection = target_collection or collection
+    candidate_items: List[Tuple[SettingItem, SettingCollection, str]] = []
+    for item in items:
+        source_collection = db.query(SettingCollection).get(item.collection_id)
+        if not source_collection:
+            continue
+        if source_collection.project_id != collection.project_id:
+            continue
+        if not target_collection and item.collection_id != collection_id:
             continue
 
-        # 变更集合与根路径段
-        if target_collection:
-            it.collection_id = target_collection.id
-            segs = (it.path or f"{collection.name}/{it.name}").split("/")
-            segs[0] = target_collection.name
-            it.path = "/".join(segs)
+        source_path = item.path or _normalize_item_path(source_collection, item.name)
+        candidate_items.append((item, source_collection, source_path))
 
-        # 设定新的父路径
-        if payload.new_parent_path:
-            base = (target_collection.name if target_collection else collection.name)
-            parent_path = payload.new_parent_path
-            if not parent_path.startswith(base + "/"):
-                parent_path = f"{base}/{parent_path}"
-            it.path = f"{parent_path}/{it.name}"
+    candidate_items.sort(key=lambda entry: len(_split_path_segments(entry[2])))
 
-        # 重算 depth
-        try:
-            it.depth = max(1, len((it.path or "").split("/")) - 1)
-        except Exception:
-            pass
+    moved_ids: List[int] = []
+    moved_roots: List[str] = []
+    moved_collections: Dict[int, int] = {}
+    for item, source_collection, source_path in candidate_items:
+        if any(source_path == root or source_path.startswith(f"{root}/") for root in moved_roots):
+            continue
 
-        db.add(it)
-        moved_ids.append(it.id)
+        SettingAutoMergeService.save_snapshot(item, db, commit=False)
+        _relocate_item_subtree(
+            db,
+            item=item,
+            source_collection=source_collection,
+            target_collection=destination_collection,
+            new_parent_path=payload.new_parent_path,
+        )
+        moved_ids.append(item.id)
+        moved_roots.append(source_path)
+        moved_collections[item.id] = destination_collection.id
 
     db.commit()
+    for item_id in moved_ids:
+        moved_item = db.query(SettingItem).get(item_id)
+        moved_collection = db.query(SettingCollection).get(moved_collections.get(item_id))
+        if moved_item and moved_collection:
+            descendants = _collect_descendants(
+                db,
+                moved_collection.id,
+                moved_item.path,
+                exclude_item_id=moved_item.id,
+            )
+            _sync_setting_vectors_for_items([moved_item, *descendants], moved_collection)
     return {"moved_count": len(moved_ids), "moved_ids": moved_ids}
 
 @router.post("/setting-items/{item_id}/set-parent", response_model=SettingItemResponse)
@@ -585,20 +1180,24 @@ async def set_parent_for_item(
 
     _ensure_project_owned(collection.project_id, current_user, db)
 
-    parent_path = payload.new_parent_path
-    base = collection.name
-    if not parent_path.startswith(base + "/"):
-        parent_path = f"{base}/{parent_path}"
+    SettingAutoMergeService.save_snapshot(item, db, commit=False)
+    _relocate_item_subtree(
+        db,
+        item=item,
+        source_collection=collection,
+        target_collection=collection,
+        new_parent_path=payload.new_parent_path or None,
+    )
 
-    item.path = f"{parent_path}/{item.name}"
-    try:
-        item.depth = max(1, len((item.path or "").split("/")) - 1)
-    except Exception:
-        pass
-
-    db.add(item)
     db.commit()
     db.refresh(item)
+    descendants = _collect_descendants(
+        db,
+        collection.id,
+        item.path,
+        exclude_item_id=item.id,
+    )
+    _sync_setting_vectors_for_items([item, *descendants], collection)
     return _item_to_schema(item)
 
 @router.patch(
@@ -618,13 +1217,10 @@ async def reorder_under_parent(
 
     _ensure_project_owned(collection.project_id, current_user, db)
 
-    base = collection.name
-    parent_path = payload.parent_path
-    if not parent_path.startswith(base + "/"):
-        parent_path = f"{base}/{parent_path}"
+    parent_path = _normalize_parent_path(collection, payload.parent_path)
 
     # 直接子节点：path 以 parent_path/ 开头，且 depth = parent_depth + 1
-    parent_depth = max(1, len(parent_path.split("/")) - 1)
+    parent_depth = len(_split_path_segments(parent_path)) - 1
     children = (
         db.query(SettingItem)
         .filter(
@@ -667,12 +1263,19 @@ async def apply_setting_template(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
 
     # 可选：清空已有设定集合
+    cleared_setting_ids: List[int] = []
     if payload.clear_existing:
         collections = (
             db.query(SettingCollection)
             .filter(SettingCollection.project_id == project_id)
             .all()
         )
+        cleared_setting_ids = [
+            item.id
+            for item in db.query(SettingItem)
+            .filter(SettingItem.collection_id.in_([col.id for col in collections]))
+            .all()
+        ]
         for col in collections:
             db.delete(col)
         db.flush()
@@ -687,6 +1290,7 @@ async def apply_setting_template(
     start_order = max_order_row[0] + 1 if max_order_row and max_order_row[0] is not None else 0
 
     created_collections = 0
+    created_items: List[Tuple[SettingItem, SettingCollection]] = []
 
     for idx, collection_data in enumerate(template.get("collections", [])):
         collection = SettingCollection(
@@ -705,24 +1309,35 @@ async def apply_setting_template(
         created_collections += 1
 
         for item_idx, item_data in enumerate(collection_data.get("items", [])):
+            item_name = _validate_item_name(item_data.get("name", ""))
+            path, depth, node_type, is_leaf = _build_item_structure(
+                db,
+                collection,
+                item_name=item_name,
+                raw_path=f"{collection.name}/{item_name}",
+            )
             item = SettingItem(
                 collection_id=collection.id,
-                name=item_data.get("name", ""),
+                name=item_name,
                 code=item_data.get("code"),
                 level=item_data.get("level"),
-                tags=json.dumps(item_data.get("tags")) if item_data.get("tags") is not None else None,
+                tags=_serialize_tags(item_data.get("tags")),
                 content=item_data.get("content"),
-                relations=json.dumps(item_data.get("relations")) if item_data.get("relations") is not None else None,
+                relations=_serialize_relations(item_data.get("relations")),
                 order=item_idx,
-                depth=2,
-                node_type=("category" if (collection.category == "map_system") else "detail"),
-                is_leaf=(False if (collection.category == "map_system") else True),
-                path=f"{collection.name}/{item_data.get('name','')}" or None,
+                depth=depth,
+                node_type=node_type,
+                is_leaf=is_leaf,
+                path=path,
                 summary=None,
             )
             db.add(item)
+            created_items.append((item, collection))
 
     db.commit()
+    _delete_setting_vectors(project_id, cleared_setting_ids)
+    for item, item_collection in created_items:
+        _sync_setting_vector(item, item_collection)
 
     return {
         "success": True,
@@ -750,49 +1365,51 @@ async def sync_settings_to_workflow(
     db: Session = Depends(get_db),
 ):
     """
-    同步设定到工作流的世界观设定字段
-    
-    将当前项目的所有设定集合汇总，更新到 project_settings.world_setting 字段
+    校验设定中心在工作流中的摘要注入效果。
+
+    该接口只返回当前设定摘要预览，不再写入 project_settings.world_setting。
     """
-    from sqlalchemy import text
+    context_builder = WorkflowContextBuilder(db)
     
     _ensure_project_owned(project_id, current_user, db)
     
     # 生成设定摘要
-    summary = build_project_settings_summary(project_id, db)
+    world_context = context_builder.build_world_setting_context(project_id)
+    summary = world_context.settings_summary
     
     if not summary:
         return {
             "success": True,
-            "message": "暂无设定项需要同步",
-            "synced_length": 0
+            "synced_length": 0,
+            "message": "当前没有可供工作流注入的设定摘要",
+            "writes_world_setting": False,
+            "summary": ""
         }
-    
-    # 更新到 project_settings 表
-    update_query = text("""
-        UPDATE project_settings
-        SET world_setting = :world_setting,
-            updated_at = :updated_at
-        WHERE project_id = :project_id
-    """)
-    
-    db.execute(update_query, {
-        "world_setting": json.dumps(summary, ensure_ascii=False),
-        "updated_at": utc_now().isoformat(),
-        "project_id": project_id
-    })
-    db.commit()
     
     return {
         "success": True,
-        "message": f"已同步 {len(summary)} 字符的设定到工作流",
-        "synced_length": len(summary)
+        "message": f"已生成当前工作流设定摘要预览，共 {len(summary)} 字；工作流会实时读取，不再覆盖世界观字段",
+        "synced_length": len(summary),
+        "writes_world_setting": False,
+        "summary": summary,
     }
+
+
+
+
+
+
+
+
+class AutoMergeRequest(BaseModel):
+    chapter_plan: str = ""
+    chapter_content: str = ""
 
 
 @router.post("/projects/{project_id}/auto-merge-settings")
 async def auto_merge_high_confidence_settings(
     project_id: int,
+    payload: AutoMergeRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -804,11 +1421,8 @@ async def auto_merge_high_confidence_settings(
         "chapter_content": str  # 章节正文内容
     }
     """
-    from fastapi import Body
-    
     _ensure_project_owned(project_id, current_user, db)
     
-    # 获取候选集合
     candidate_collection = (
         db.query(SettingCollection)
         .filter(
@@ -825,13 +1439,12 @@ async def auto_merge_high_confidence_settings(
             "merged_count": 0,
         }
     
-    # 执行自动合并（这里使用空字符串，实际应从章节生成流程传入）
     result = SettingAutoMergeService.auto_merge_high_confidence_items(
         db=db,
         project_id=project_id,
         candidate_collection_id=candidate_collection.id,
-        chapter_plan="",  # 应从请求体获取
-        chapter_content="",  # 应从请求体获取
+        chapter_plan=payload.chapter_plan,
+        chapter_content=payload.chapter_content,
     )
     
     return {
@@ -839,6 +1452,34 @@ async def auto_merge_high_confidence_settings(
         "merged_count": result["merged_count"],
         "skipped_count": result["skipped_count"],
         "details": result["details"],
+    }
+
+
+@router.post("/projects/{project_id}/llm-reclassify-candidates")
+async def llm_reclassify_candidate_settings(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    使用LLM对候选集合中规则匹配失败的项进行再分类
+
+    仅处理规则引擎无法归类的候选项，使用 qwen-turbo 低成本模型。
+    每次最多处理20个候选项。
+    """
+    _ensure_project_owned(project_id, current_user, db)
+
+    result = await SettingAutoMergeService.llm_reclassify_candidates(
+        db=db,
+        project_id=project_id,
+    )
+
+    return {
+        "success": True,
+        "reclassified": result.get("reclassified", 0),
+        "skipped": result.get("skipped", 0),
+        "details": result.get("details", []),
+        "model": result.get("model", "qwen-turbo"),
     }
 
 
@@ -858,6 +1499,7 @@ async def detect_setting_conflicts(
         "total_conflicts": conflicts["total_count"],
         "duplicate_names": conflicts["duplicate_names"],
         "ability_mismatches": conflicts["ability_mismatches"],
+        "relation_conflicts": conflicts["relation_conflicts"],
     }
 
 
@@ -874,7 +1516,7 @@ async def get_setting_recommendations(
     
     Args:
         project_id: 项目ID
-        category: 设定类型过滤（可选，如technique_system、artifact_system等）
+        category: 设定类型过滤（可选，如technique_system、weapon_system等）
         limit: 返回数量限制（默认10）
     
     Returns:
@@ -910,10 +1552,11 @@ async def get_setting_recommendations(
     # 计算推荐得分
     now = utc_now()
     recommendations = []
+    max_usage = max([item.usage_count for item in items], default=1)
+    collection_map = {entry.id: entry for entry in collections}
     
     for item in items:
         # 基础分：使用次数（归一化到0-1）
-        max_usage = max([i.usage_count for i in items]) if items else 1
         usage_score = item.usage_count / max_usage if max_usage > 0 else 0
         
         # 时间衰减因子（最近引用的权重更高）
@@ -935,7 +1578,7 @@ async def get_setting_recommendations(
         final_score = usage_score * 0.6 + time_score * 0.4
         
         # 获取集合信息
-        collection = next((c for c in collections if c.id == item.collection_id), None)
+        collection = collection_map.get(item.collection_id)
         
         recommendations.append({
             "id": item.id,
@@ -965,7 +1608,7 @@ async def get_setting_recommendations(
 @router.post("/setting-items/{item_id}/rollback")
 async def rollback_setting_item(
     item_id: int,
-    snapshot_index: int,
+    payload: RollbackRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -986,23 +1629,65 @@ async def rollback_setting_item(
     except Exception:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid snapshots data")
     
+    snapshot_index = payload.snapshot_index
     if snapshot_index < 0 or snapshot_index >= len(snapshots):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid snapshot index")
     
     snapshot = snapshots[snapshot_index]
-    
+
     # 保存当前状态为新快照
-    SettingAutoMergeService.save_snapshot(item, db)
+    old_path = item.path or _normalize_item_path(collection, item.name)
+    descendants = _collect_descendants(
+        db,
+        collection.id,
+        old_path,
+        exclude_item_id=item.id,
+    )
+    SettingAutoMergeService.save_snapshot(item, db, commit=False)
     
     # 恢复到指定快照
-    item.name = snapshot.get("name", item.name)
+    item.name = _validate_item_name(snapshot.get("name", item.name))
+    item.code = snapshot.get("code", item.code)
+    item.level = snapshot.get("level", item.level)
     item.content = snapshot.get("content", item.content)
     item.tags = snapshot.get("tags", item.tags)
     item.relations = snapshot.get("relations", item.relations)
-    item.confidence_score = snapshot.get("confidence_score")
+    item.order = snapshot.get("order", item.order)
+    item.confidence_score = snapshot.get("confidence_score", item.confidence_score)
+    item.summary = snapshot.get("summary", item.summary)
+    item.node_type = snapshot.get("node_type", item.node_type)
+    item.is_leaf = snapshot.get("is_leaf", item.is_leaf)
+    next_path, next_depth, resolved_node_type, resolved_is_leaf = _build_item_structure(
+        db,
+        collection,
+        item_name=item.name,
+        raw_path=snapshot.get("path", item.path),
+        node_type=item.node_type,
+        is_leaf=item.is_leaf,
+        exclude_item_ids=[item.id],
+    )
+    if next_path != old_path and next_path.startswith(f"{old_path}/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot move item under itself or its own descendants",
+        )
+    item.path = next_path
+    item.depth = next_depth
+    item.node_type = resolved_node_type
+    item.is_leaf = resolved_is_leaf
+    if descendants and next_path != old_path:
+        _cascade_descendant_paths(
+            db,
+            source_collection_id=collection.id,
+            old_root_path=old_path,
+            target_collection=collection,
+            new_root_path=next_path,
+            root_item_id=item.id,
+        )
     
     db.commit()
     db.refresh(item)
+    _sync_setting_vector(item, collection)
     
     return _item_to_schema(item)
 
@@ -1054,6 +1739,12 @@ async def create_graph_edge(
 
     _ensure_project_owned(src_col.project_id, current_user, db)
     _ensure_project_owned(tgt_col.project_id, current_user, db)
+
+    if src_col.project_id != tgt_col.project_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot create edge across projects",
+        )
 
     edge = KnowledgeGraphEdge(
         source_item_id=payload.source_item_id,
@@ -1216,7 +1907,17 @@ async def find_shortest_path(
     if not source_col:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source collection not found")
     
+    target_col = db.query(SettingCollection).get(target.collection_id)
+    if not target_col:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target collection not found")
+    
     _ensure_project_owned(source_col.project_id, current_user, db)
+    
+    if source_col.project_id != target_col.project_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot find path across projects",
+        )
     
     path = KnowledgeGraphService.find_shortest_path(
         db=db,
@@ -1242,6 +1943,8 @@ async def find_shortest_path(
 class SmartExtractRequest(BaseModel):
     """智能提取请求"""
     item_name: str
+    project_id: Optional[int] = None
+    collection_id: Optional[int] = None
     max_excerpts: int = 5
     use_ai_validation: bool = True
 
@@ -1312,8 +2015,8 @@ async def smart_extract_setting_content(
     if item.tags:
         try:
             existing_tags = json.loads(item.tags)
-        except:
-            existing_tags = item.tags.split(',') if item.tags else []
+        except Exception:
+            existing_tags = []
     
     return {
         "item": {
@@ -1354,6 +2057,17 @@ async def smart_extract_by_name(
             _ensure_project_owned(collection.project_id, current_user, db)
             project_id = collection.project_id
             category = collection.category
+
+    if not project_id and request.collection_id:
+        collection = db.query(SettingCollection).get(request.collection_id)
+        if collection:
+            _ensure_project_owned(collection.project_id, current_user, db)
+            project_id = collection.project_id
+            category = collection.category
+
+    if not project_id and request.project_id:
+        _ensure_project_owned(request.project_id, current_user, db)
+        project_id = request.project_id
     
     if not project_id:
         raise HTTPException(
@@ -1416,6 +2130,7 @@ async def apply_smart_suggestions(
     _ensure_project_owned(collection.project_id, current_user, db)
     
     updated = False
+    SettingAutoMergeService.save_snapshot(item, db, commit=False)
     
     # 应用新标签
     if request.new_tags:
@@ -1423,10 +2138,9 @@ async def apply_smart_suggestions(
         if item.tags:
             try:
                 existing_tags = json.loads(item.tags)
-            except:
-                existing_tags = item.tags.split(',') if item.tags else []
+            except Exception:
+                existing_tags = []
         
-        # 合并标签（去重）
         merged_tags = list(set(existing_tags + request.new_tags))
         item.tags = json.dumps(merged_tags, ensure_ascii=False)
         updated = True
@@ -1442,6 +2156,7 @@ async def apply_smart_suggestions(
     if updated:
         db.commit()
         db.refresh(item)
+        _sync_setting_vector(item, collection)
     
     return {
         "success": True,

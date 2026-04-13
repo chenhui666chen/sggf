@@ -84,10 +84,10 @@ def test_model_catalog_loads_all_seed_models():
     assert len(seeds) >= 18
     assert seed_map["qwen3-max"].category == "llm"
     assert seed_map["qwen3-vl-plus"].category == "multimodal"
+    assert seed_map["wan2.6-t2i"].category == "image"
     assert seed_map["mureka-o1-instrumental"].category == "audio"
     assert seed_map["kling-v1-text-to-audio"].subcategory == "文生音频"
     assert seed_map["kling-v1-video-to-audio"].subcategory == "视频转音频"
-    assert "https://huggingface.co/stabilityai/sdxl-turbo" in seed_map["sdxl-turbo"].source_urls
     assert len(seed_map["kling-v1"].source_urls) >= 2
     assert seed_map["qwen3-max"].raw_config["catalog_profile"]["system_role"].startswith("你是中文长篇小说创作")
     assert "创作主力" in seed_map["qwen3-max"].raw_config["catalog_profile"]["tooling_badges"]
@@ -225,7 +225,7 @@ def test_model_catalog_runtime_snapshot_includes_task_constraints(monkeypatch, t
         model_key="runtime-video-model",
         name="Runtime Video Model",
         category="video",
-        subcategory="瑙嗛鐢熸垚",
+        subcategory="视频生成",
         modalities=["image_to_video"],
         constraints={
             "duration": [3.0, 5.0, 10.0],
@@ -275,7 +275,7 @@ def test_model_catalog_runtime_snapshot_includes_task_constraints(monkeypatch, t
             page_title="Runtime Video Model",
             page_excerpt="Runtime Video Model supports image to video.",
             matched_keywords=["alias:runtime video model"],
-            verification_note="鏍￠獙閫氳繃",
+            verification_note="校验通过",
             raw_metadata={"final_url": "https://example.com/doc"},
             fetched_at=verification_time,
             score=0.9,
@@ -381,15 +381,15 @@ def test_model_catalog_verification_marks_soft_404_as_unreachable():
     assert "错误页" in verification.verification_note
 
 
-def test_model_catalog_verification_rejects_generic_fragment_matches():
+def test_model_catalog_verification_accepts_wan26_canonical_keywords():
     service = ModelCatalogSyncService(config_dir=ROOT_DIR.parent / "config")
     seed = build_seed(
-        model_key="wanx-v1-turbo",
-        name="Wanx v1 Turbo",
+        model_key="wan2.6-t2i",
+        name="Wan 2.6 Text-to-Image",
         provider="alibaba",
         category="image",
         subcategory="文生图",
-        model_family="Wanx v1",
+        model_family="Wan 2.6",
         documentation_url="https://help.aliyun.com/zh/model-studio/text-to-image-api-reference",
         source_urls=["https://help.aliyun.com/zh/model-studio/text-to-image-api-reference"],
         modalities=["text_to_image"],
@@ -401,9 +401,9 @@ def test_model_catalog_verification_rejects_generic_fragment_matches():
         <html>
           <head>
             <title>文生图 API</title>
-            <meta name="description" content="阿里云百炼图像生成接口，支持 wanx-v1 与 turbo 模式。" />
+            <meta name="description" content="阿里云百炼图像生成接口，支持 wan2.6-t2i 文生图模式。" />
           </head>
-          <body>wanx-v1 支持高质量生成，也提供 turbo 模式用于快速预览。</body>
+          <body>wan2.6-t2i 支持高质量文生图与风格化图像生成。</body>
         </html>
         """,
         headers={"content-type": "text/html"},
@@ -416,8 +416,8 @@ def test_model_catalog_verification_rejects_generic_fragment_matches():
     )
 
     assert verification.reachable is True
-    assert verification.verified is False
-    assert not any(keyword.startswith("alias:") for keyword in verification.matched_keywords)
+    assert verification.verified is True
+    assert "alias:wan2.6-t2i" in verification.matched_keywords
 
 
 def test_model_catalog_verification_uses_kling_url_hint_when_page_lacks_alias():
@@ -427,7 +427,7 @@ def test_model_catalog_verification_uses_kling_url_hint_when_page_lacks_alias():
         name="Kling v1 Text-to-Audio",
         provider="kuaishou",
         category="audio",
-        subcategory="鏂囩敓闊抽",
+        subcategory="文生音频",
         model_family="Kling v1",
         documentation_url="https://app.klingai.com/cn/dev/document-api/apiReference/model/textToAudio",
         source_urls=["https://app.klingai.com/cn/dev/document-api/apiReference/model/textToAudio"],
@@ -591,6 +591,123 @@ def test_model_catalog_sync_refreshes_stale_entries_when_ttl_has_expired(monkeyp
     assert result["processed"] == 1
     assert result["skipped"] == 0
     assert result["skipped_recent"] == 0
+
+    db.close()
+
+
+def test_model_catalog_sync_prunes_obsolete_entries_and_runtime_snapshot(monkeypatch, tmp_path):
+    session_factory = build_session()
+    db = session_factory()
+
+    service = ModelCatalogSyncService(config_dir=tmp_path)
+    active_seed = build_seed(
+        model_key="demo-model",
+        source_urls=["https://example.com/doc"],
+        raw_config={"id": "demo-model"},
+    )
+    obsolete_seed = build_seed(
+        model_key="obsolete-image-model",
+        name="Obsolete Image Model",
+        provider="example",
+        category="image",
+        subcategory="文生图",
+        model_family="Obsolete",
+        source_urls=["https://example.com/obsolete"],
+        modalities=["text_to_image"],
+        raw_config={"id": "obsolete-image-model"},
+    )
+
+    obsolete_entry = ModelCatalogEntry(model_key=obsolete_seed.model_key)
+    service._apply_seed_to_entry(obsolete_entry, obsolete_seed)
+    db.add(obsolete_entry)
+    db.flush()
+    db.add(
+        ModelCatalogSource(
+            entry_id=obsolete_entry.id,
+            url="https://example.com/obsolete",
+            source_type="documentation",
+            source_domain="example.com",
+            http_status=200,
+            reachable=True,
+            verified=True,
+            page_title="Obsolete Model",
+            page_excerpt="obsolete",
+            matched_keywords=["alias:obsolete-image-model"],
+            verification_note="obsolete",
+            raw_metadata_json={"final_url": "https://example.com/obsolete"},
+            fetched_at=datetime.now(timezone.utc),
+        )
+    )
+    db.commit()
+    db.expunge_all()
+
+    verification_time = datetime.now(timezone.utc)
+    verifications = [
+        SourceVerification(
+            url="https://example.com/doc",
+            source_type="documentation",
+            source_domain="example.com",
+            http_status=200,
+            reachable=True,
+            verified=True,
+            page_title="Demo Model Official",
+            page_excerpt="Demo Model supports text generation.",
+            matched_keywords=["alias:demo-model"],
+            verification_note="verified",
+            raw_metadata={"final_url": "https://example.com/doc"},
+            fetched_at=verification_time,
+            score=0.9,
+        )
+    ]
+
+    monkeypatch.setattr(service, "load_catalog_seeds", lambda: [active_seed])
+    monkeypatch.setattr(service, "_verify_seed", lambda _seed: verifications)
+
+    result = service.sync_catalog(db, force_refresh=True)
+    snapshot_path = tmp_path / "model_catalog_runtime.json"
+    payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+
+    assert result["deleted_obsolete_entries"] == 1
+    assert result["deleted_model_keys"] == ["obsolete-image-model"]
+    assert (
+        db.query(ModelCatalogEntry).filter(ModelCatalogEntry.model_key == "obsolete-image-model").first()
+        is None
+    )
+    assert "obsolete-image-model" not in payload["entries"]
+    assert "demo-model" in payload["entries"]
+
+    db.close()
+
+
+def test_model_catalog_get_entry_queryset_hides_obsolete_entries(monkeypatch):
+    session_factory = build_session()
+    db = session_factory()
+
+    service = ModelCatalogSyncService(config_dir=ROOT_DIR.parent / "config")
+    active_seed = build_seed(model_key="demo-model", raw_config={"id": "demo-model"})
+    obsolete_seed = build_seed(
+        model_key="obsolete-image-preview-model",
+        name="Obsolete Image Preview Model",
+        provider="example",
+        category="image",
+        subcategory="文生图",
+        model_family="Obsolete",
+        modalities=["text_to_image"],
+        raw_config={"id": "obsolete-image-preview-model"},
+    )
+
+    active_entry = ModelCatalogEntry(model_key=active_seed.model_key)
+    service._apply_seed_to_entry(active_entry, active_seed)
+    obsolete_entry = ModelCatalogEntry(model_key=obsolete_seed.model_key)
+    service._apply_seed_to_entry(obsolete_entry, obsolete_seed)
+    db.add_all([active_entry, obsolete_entry])
+    db.commit()
+
+    monkeypatch.setattr(service, "load_catalog_seeds", lambda: [active_seed])
+
+    entries = service.get_entry_queryset(db).order_by(ModelCatalogEntry.model_key).all()
+
+    assert [entry.model_key for entry in entries] == ["demo-model"]
 
     db.close()
 

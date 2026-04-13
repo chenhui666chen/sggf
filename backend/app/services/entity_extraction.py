@@ -1,9 +1,12 @@
-﻿"""
+"""
 实体抽取服务
 从章节内容中自动抽取设定项（人物、地点、功法、丹药等）并归类
 """
 import re
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 
@@ -11,99 +14,62 @@ from app.models.setting import SettingCollection, SettingItem
 from core.langchain_bridge import get_task_llm
 import os
 
-# 体系名称映射（用于自动创建集合）
-CATEGORY_NAME_MAP = {
-    "character_system": "角色体系",
-    "cultivation_realm_system": "修仙境界体系",
-    "technique_system": "功法体系",
-    "pill_system": "丹药体系",
-    "formation_system": "阵法体系",
-    "weapon_system": "武器法宝体系",
-    "resource_system": "资源体系",
-    "map_system": "地图体系",
-    "organization_force_system": "组织势力体系",
-    "talisman_system": "符箓体系",
-    "magic_system": "魔法体系",
-    "profession_class_system": "职业体系",
-    "martial_realm_system": "武道境界体系",
-}
+from app.services.setting_categories import SYSTEM_CATEGORIES, TYPE_TO_CATEGORY_MAP
+
+CATEGORY_NAME_MAP = dict(SYSTEM_CATEGORIES)
 
 
 class EntityExtractionService:
     """实体抽取服务"""
 
-    # 类型映射到集合类别（完善版本）
-    ENTITY_TYPE_TO_CATEGORY = {
-        # 人物/角色
-        "人物": "character_system",
-        "角色": "character_system",
+    ENTITY_TYPE_TO_CATEGORY = dict(TYPE_TO_CATEGORY_MAP)
+    ENTITY_TYPE_TO_CATEGORY.update({
         "NPC": "character_system",
-        
-        # 境界体系
-        "境界": "cultivation_realm_system",
-        "修为": "cultivation_realm_system",
+        "灵兽": "character_system",
+        "妖兽": "character_system",
+        "魔兽": "character_system",
+        "宠物": "character_system",
         "修炼境界": "cultivation_realm_system",
-        "等级": "cultivation_realm_system",
-        
-        # 功法/技能
-        "功法": "technique_system",
-        "武学": "technique_system",
         "武功": "technique_system",
         "心法": "technique_system",
         "秘法": "technique_system",
-        "技能": "technique_system",
-        
-        # 丹药体系
-        "丹药": "pill_system",
+        "秘术": "technique_system",
+        "术法": "technique_system",
         "丹方": "pill_system",
-        "灵丹": "pill_system",
-        
-        # 阵法体系
-        "阵法": "formation_system",
-        "结界": "formation_system",
         "禁制": "formation_system",
-        
-        # 武器法宝体系
-        "法宝": "weapon_system",
-        "武器": "weapon_system",
-        "灵器": "weapon_system",
         "灵宝": "weapon_system",
         "仙器": "weapon_system",
-        
-        # 资源体系
-        "资源": "resource_system",
-        "灵草": "resource_system",
+        "宝物": "special_artifact_relic_system",
+        "神器": "weapon_system",
         "灵石": "resource_system",
-        "材料": "resource_system",
         "矿石": "resource_system",
         "灵物": "resource_system",
-        
-        # 地点/地图体系
-        "秘境": "map_system",
-        "遗迹": "map_system",
-        "城市": "map_system",
-        "城镇": "map_system",
-        "地点": "map_system",
         "洞府": "map_system",
-        "宗门": "map_system",
-        
-        # 势力体系
-        "势力": "organization_force_system",
-        "组织": "organization_force_system",
-        "门派": "organization_force_system",
         "家族": "organization_force_system",
         "帮派": "organization_force_system",
-        
-        # 魔法/职业体系
-        "魔法": "magic_system",
-        "职业": "profession_class_system",
-        "武道": "martial_realm_system",
-        
-        # 符箓体系
-        "符箓": "talisman_system",
+        "商会": "wealth_business_empire_system",
         "符文": "talisman_system",
         "符咒": "talisman_system",
-    }
+        "异能者": "ability_system",
+        "觉醒": "ability_realm_system",
+        "血脉": "race_bloodline_system",
+        "种族": "race_bloodline_system",
+        "妖族": "race_bloodline_system",
+        "龙族": "race_bloodline_system",
+        "精灵": "race_bloodline_system",
+        "官制": "power_official_system",
+        "官职": "power_official_system",
+        "军事": "military_warfare_system",
+        "战争": "military_warfare_system",
+        "经济": "economy_taxation_system",
+        "礼制": "culture_etiquette_examination_system",
+        "科举": "culture_etiquette_examination_system",
+        "律法": "legal_criminal_system",
+        "情报": "communication_intelligence_system",
+        "历史": "historical_event_legend_system",
+        "传说": "historical_event_legend_system",
+        "风俗": "lifestyle_custom_system",
+    })
     
     # Phase 6: 关系类型枚举
     RELATION_TYPES = {
@@ -209,7 +175,7 @@ class EntityExtractionService:
             return validated
             
         except Exception as e:
-            print(f"实体抽取失败: {e}")
+            logger.debug(f"实体抽取失败: {e}")
             return []
     
     @staticmethod
@@ -299,7 +265,7 @@ class EntityExtractionService:
             return validated
             
         except Exception as e:
-            print(f"关系抽取失败: {e}")
+            logger.debug(f"关系抽取失败: {e}")
             return []
 
     @staticmethod
@@ -361,6 +327,19 @@ class EntityExtractionService:
             
             # 查找目标分类
             target_category = EntityExtractionService.ENTITY_TYPE_TO_CATEGORY.get(typ)
+
+            if not target_category and typ:
+                for cat_key in TYPE_TO_CATEGORY_MAP:
+                    if cat_key in typ or typ in cat_key:
+                        target_category = TYPE_TO_CATEGORY_MAP[cat_key]
+                        break
+
+            if not target_category and typ:
+                from app.services.setting_categories import SYSTEM_CATEGORIES
+                for cat_key, cat_label in SYSTEM_CATEGORIES.items():
+                    if typ in cat_label or cat_label in typ:
+                        target_category = cat_key
+                        break
             
             target_collection = None
             if target_category:
@@ -386,7 +365,7 @@ class EntityExtractionService:
                     db.add(target_collection)
                     db.commit()
                     db.refresh(target_collection)
-                    print(f"✅ 自动创建集合: {collection_name} ({target_category})")
+                    logger.debug(f"✅ 自动创建集合: {collection_name} ({target_category})")
             
             # 优先直写规则
             if target_collection:

@@ -3,7 +3,7 @@
 """
 from datetime import datetime
 from typing import Literal, Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RoleBase(BaseModel):
@@ -31,8 +31,7 @@ class RoleResponse(RoleBase):
     updated_at: datetime
     permissions: List["PermissionResponse"] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PermissionBase(BaseModel):
@@ -49,8 +48,7 @@ class PermissionResponse(PermissionBase):
     created_at: datetime
     children: Optional[List["PermissionResponse"]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserAdminResponse(BaseModel):
@@ -65,8 +63,7 @@ class UserAdminResponse(BaseModel):
     updated_at: datetime
     roles: List[RoleResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserListQuery(BaseModel):
@@ -140,8 +137,7 @@ class AdminOperationLogResponse(BaseModel):
     error_message: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AdminLoginLogResponse(BaseModel):
@@ -154,8 +150,7 @@ class AdminLoginLogResponse(BaseModel):
     failure_reason: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LogQuery(BaseModel):

@@ -54,9 +54,16 @@ import BugReportIcon from '@mui/icons-material/BugReport'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import WarningIcon from '@mui/icons-material/Warning'
-import { apiClient, extractApiErrorMessage } from '@/services/api'
+import {
+  apiClient,
+  describeTaskPointsPrecheckErrorDetail,
+  extractApiErrorMessage,
+  extractTaskPointsPrecheckErrorDetail,
+  type TaskPointsPrecheckErrorDetail,
+} from '@/services/api'
 import { workflowWebSocket } from '@/services/websocket'
 import FormattedContent from '@/components/common/FormattedContent'
+import TaskPointsPrecheckAlert from '@/components/common/TaskPointsPrecheckAlert'
 import {
   CHARACTER_VIEW_ORDER,
   CHARACTER_VIEW_RANK,
@@ -64,9 +71,17 @@ import {
   formatReferenceRoleLabel,
   parseLibraryRole,
   resolveCharacterViewChainPlan,
-  type CharacterView,
 } from '@/utils/dreamweaverLibraryRole'
 import { hasRenderableLibraryImage, resolveLibraryAssetImageState, type LibraryAssetImageState } from '@/utils/dreamweaverLibraryAssetState'
+import {
+  DREAMWEAVER_STAGES,
+  STYLE_PRESETS,
+  IMAGE_RATIOS,
+  IMAGE_RESOLUTIONS,
+  stageToPreviewStep as stageToPreviewStepConstant,
+} from '@/constants/dreamweaver'
+import { TaskHeader } from '@/components/dreamweaver/TaskHeader'
+import type { CharacterView } from '@/utils/dreamweaverLibraryRole'
 
 // 织梦映心：生成流程页
 
@@ -145,14 +160,7 @@ function clearPersistedDreamWeaverRun(projectId: number) {
 }
 
 function stageToPreviewStep(stage: string | null | undefined): number {
-  const value = (stage || '').trim().toLowerCase()
-  if (!value) return 0
-  if (value === 'init' || value === 'script' || value === 'waiting_script_approval') return 0
-  if (value === 'storyboard') return 1
-  if (value === 'asset_library' || value === 'waiting_approval') return 2
-  if (value === 'keyframes' || value === 'midframes' || value === 'video' || value === 'waiting_video_confirmation') return 3
-  if (value === 'edit' || value === 'review' || value === 'done' || value === 'rework' || value === 'failed') return 4
-  return 0
+  return stageToPreviewStepConstant(stage)
 }
 
 function ratioToCssAspectRatio(value: string | null | undefined, fallback = '16 / 9'): string {
@@ -600,9 +608,9 @@ export default function DreamWeaverRunPage() {
   const [videoRequireConfirmation, setVideoRequireConfirmation] = useState(true)
   const [promptReviewRequired, setPromptReviewRequired] = useState(true)
   const [abVariant, setAbVariant] = useState<string>('')
-  const [stylePreset, setStylePreset] = useState<string>('cinematic_realistic')
-  const [imageRatio, setImageRatio] = useState<string>('16:9')
-  const [imageResolution, setImageResolution] = useState<string>('720p')
+  const [stylePreset, setStylePreset] = useState<string>(STYLE_PRESETS.CINEMATIC_REALISTIC)
+  const [imageRatio, setImageRatio] = useState<string>(IMAGE_RATIOS.LANDSCAPE_16_9)
+  const [imageResolution, setImageResolution] = useState<string>(IMAGE_RESOLUTIONS.HD_720P)
   const [loadingChapters, setLoadingChapters] = useState(false)
   const [running, setRunning] = useState(false)
   const [taskId, setTaskId] = useState<string | null>(null)
@@ -676,9 +684,11 @@ export default function DreamWeaverRunPage() {
   const [regenError, setRegenError] = useState<string | null>(null)
   const [result, setResult] = useState<RunResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [taskPointsPrecheckError, setTaskPointsPrecheckError] = useState<TaskPointsPrecheckErrorDetail | null>(null)
   const [eventCursor, setEventCursor] = useState(0)
   const [eventSyncing, setEventSyncing] = useState(false)
   const [eventSyncError, setEventSyncError] = useState<string | null>(null)
+  const [wsError, setWsError] = useState<string | null>(null)
   const [streamTextByKey, setStreamTextByKey] = useState<Record<string, string>>({})
   const [streamMetaByKey, setStreamMetaByKey] = useState<Record<string, { stage?: string | null; done?: boolean }>>({})
   const [assetPlanItems, setAssetPlanItems] = useState<DreamweaverAssetPlanItem[]>([])
@@ -1222,7 +1232,6 @@ export default function DreamWeaverRunPage() {
     )
   }
 
-  const renderStageOverview = () => null
   const renderLibraryDisplayCard = (item: LibraryDisplayItem) => {
     const asset = item.asset
     const imageState = item.imageState || resolveLibraryAssetImageState(asset || null, { missingRoleSet })
@@ -1232,48 +1241,41 @@ export default function DreamWeaverRunPage() {
     const approved = hasRenderableImage && (asset ? Boolean(asset.meta?.approved) : Boolean(item.approved))
     const safetyBlocked = Boolean(item.safety_blocked || imageState.safetyBlocked || asset?.meta?.safety_blocked)
     const safetyError = item.safety_error || (asset?.meta?.safety_error as string | undefined) || null
-    const statusLabel = missing
-      ? '缺失'
-      : safetyBlocked
-        ? '安全拦截'
-        : placeholder
-          ? '占位'
-        : asset
-          ? approved
-            ? '已通过'
-            : '待审核'
-          : item.status === 'done'
-            ? '已生成'
-            : item.status === 'planned'
-              ? '待生成'
-              : '生成中'
-    const statusColor: 'default' | 'success' | 'info' | 'error' | 'warning' = missing
-      ? 'error'
-      : safetyBlocked
-        ? 'error'
-        : placeholder
-          ? 'warning'
-        : asset
-          ? (approved ? 'success' : 'default')
-          : item.status === 'done'
-            ? 'success'
-            : item.status === 'planned'
-              ? 'default'
-              : 'info'
+
+    const getAssetStatusLabel = (): string => {
+      if (missing) return '缺失'
+      if (safetyBlocked) return '安全拦截'
+      if (placeholder) return '占位'
+      if (asset) return approved ? '已通过' : '待审核'
+      if (item.status === 'done') return '已生成'
+      if (item.status === 'planned') return '待生成'
+      return '生成中'
+    }
+    const statusLabel = getAssetStatusLabel()
+
+    const getAssetStatusColor = (): 'default' | 'success' | 'info' | 'error' | 'warning' => {
+      if (missing) return 'error'
+      if (safetyBlocked) return 'error'
+      if (placeholder) return 'warning'
+      if (asset) return approved ? 'success' : 'default'
+      if (item.status === 'done') return 'success'
+      if (item.status === 'planned') return 'default'
+      return 'info'
+    }
+    const statusColor = getAssetStatusColor()
+
     const preview = asset && hasRenderableImage ? item.preview : ''
-    const placeholderText = missing
-      ? '素材缺失'
-      : safetyBlocked
-        ? '安全拦截'
-        : placeholder
-          ? '占位图'
-        : asset
-          ? '待加载预览'
-          : item.status === 'done'
-            ? '已生成，等待入库'
-            : item.status === 'planned'
-              ? '待生成'
-              : '生成中'
+
+    const getPlaceholderText = (): string => {
+      if (missing) return '素材缺失'
+      if (safetyBlocked) return '安全拦截'
+      if (placeholder) return '占位图'
+      if (asset) return '待加载预览'
+      if (item.status === 'done') return '已生成，等待入库'
+      if (item.status === 'planned') return '待生成'
+      return '生成中'
+    }
+    const placeholderText = getPlaceholderText()
     const previewLoading = asset ? Boolean(libraryPreviewLoading[asset.id]) : false
     const previewError = asset ? libraryPreviewErrors[asset.id] : null
     const canGenerate = !asset && (missing || item.status === 'done')
@@ -2299,9 +2301,9 @@ export default function DreamWeaverRunPage() {
       const waitingKind = String(stage || state || '').trim().toLowerCase()
       const waiting =
         statusLower === 'waiting' ||
-        waitingKind === 'waiting_script_approval' ||
-        waitingKind === 'waiting_approval' ||
-        waitingKind === 'waiting_video_confirmation'
+        waitingKind === DREAMWEAVER_STAGES.WAITING_SCRIPT_APPROVAL ||
+        waitingKind === DREAMWEAVER_STAGES.WAITING_APPROVAL ||
+        waitingKind === DREAMWEAVER_STAGES.WAITING_VIDEO_CONFIRMATION
       setWaitingApproval(waiting)
 
       const isRunning = statusLower === 'running' || statusLower === 'queued'
@@ -2656,6 +2658,7 @@ export default function DreamWeaverRunPage() {
     setVideoJobConfirmingShotId(null)
     setResult(null)
     setError(null)
+    setTaskPointsPrecheckError(null)
     setLibrary(null)
     setLibraryError(null)
     setLibraryPreviews({})
@@ -2683,7 +2686,13 @@ export default function DreamWeaverRunPage() {
       void refreshLockedGenerationConfig(selectedProjectId)
       return true
     } catch (e: any) {
-      setError(await extractApiErrorMessage(e, '任务提交失败'))
+      const precheckDetail = await extractTaskPointsPrecheckErrorDetail(e)
+      setTaskPointsPrecheckError(precheckDetail)
+      setError(
+        precheckDetail
+          ? describeTaskPointsPrecheckErrorDetail(precheckDetail)
+          : ((await extractApiErrorMessage(e, '任务提交失败')) || '任务提交失败')
+      )
       setRunning(false)
       return false
     } finally {
@@ -2979,8 +2988,8 @@ export default function DreamWeaverRunPage() {
 
   const scriptDirty = scriptText !== scriptSavedText
   const waitingKind = (taskStage || taskState || '').toString().toLowerCase()
-  const waitingScriptApproval = waitingApproval && waitingKind === 'waiting_script_approval'
-  const waitingVideoConfirmation = waitingApproval && waitingKind === 'waiting_video_confirmation'
+  const waitingScriptApproval = waitingApproval && waitingKind === DREAMWEAVER_STAGES.WAITING_SCRIPT_APPROVAL
+  const waitingVideoConfirmation = waitingApproval && waitingKind === DREAMWEAVER_STAGES.WAITING_VIDEO_CONFIRMATION
   const persistedRunId = taskRunId || result?.run_id || null
   const currentRunId = persistedRunId
   const libraryApproved = Boolean(library?.review?.approved)
@@ -3039,7 +3048,7 @@ export default function DreamWeaverRunPage() {
       if (!active) return
       workflowWebSocket.joinProject(selectedProjectId)
     }).catch((error) => {
-      console.error('WebSocket 连接失败:', error)
+      setWsError(`WebSocket 连接失败: ${error instanceof Error ? error.message : String(error)}`)
     })
 
     workflowWebSocket.onDreamweaverEvent((data) => {
@@ -4881,6 +4890,11 @@ export default function DreamWeaverRunPage() {
                           {runSnapshotError}
                         </Alert>
                       )}
+                      {wsError && (
+                        <Alert severity="warning" sx={{ mb: 1 }} onClose={() => setWsError(null)}>
+                          {wsError}
+                        </Alert>
+                      )}
                       {runSnapshotLoading && <LinearProgress sx={{ mb: 1 }} />}
                       {renderSafetyBlockedAlert()}
 
@@ -5803,7 +5817,16 @@ export default function DreamWeaverRunPage() {
             </Stack>
           </DialogTitle>
           <DialogContent dividers sx={{ pt: 2 }}>
-            {error && (
+            {taskPointsPrecheckError ? (
+              <TaskPointsPrecheckAlert
+                detail={taskPointsPrecheckError}
+                onClose={() => {
+                  setTaskPointsPrecheckError(null)
+                  setError(null)
+                }}
+                sx={{ mb: 2 }}
+              />
+            ) : error && (
               <Alert severity="error" sx={{ mb: 2 }}>
                 {error}
               </Alert>
@@ -6133,7 +6156,16 @@ export default function DreamWeaverRunPage() {
 
         <Grid container spacing={2.5}>
           <Grid item xs={12} md={12}>
-            {error && (
+            {taskPointsPrecheckError ? (
+              <TaskPointsPrecheckAlert
+                detail={taskPointsPrecheckError}
+                onClose={() => {
+                  setTaskPointsPrecheckError(null)
+                  setError(null)
+                }}
+                sx={{ mb: 2 }}
+              />
+            ) : error && (
               <Alert severity="error" sx={{ mb: 2 }}>
                 {error}
               </Alert>
@@ -6335,7 +6367,14 @@ export default function DreamWeaverRunPage() {
                     ))}
                   </Stepper>
                 </Paper>
-                {renderStageOverview()}
+                <TaskHeader
+                  runId={runId}
+                  taskStage={taskStage}
+                  taskState={taskState}
+                  taskProgress={taskProgress}
+                  taskStatus={taskStatus}
+                  waitingApproval={waitingApproval}
+                />
                 {!result ? (
                   renderPendingView()
                 ) : (

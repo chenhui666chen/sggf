@@ -1,6 +1,8 @@
 """
 AI辅助功能API - 自动生成角色档案、冲突检测、一致性检查
 """
+import json
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
@@ -12,6 +14,8 @@ from app.models.user import User
 from app.models.project import Project
 from app.db.base import get_db
 
+logger = logging.getLogger(__name__)
+
 # 导入Agent
 try:
     from app.services.agents.agents import CharacterDesignerAgent, EventValidatorAgent, WorldArchitectAgent, ChapterLogicChecker
@@ -21,7 +25,7 @@ try:
     _WorldAgent = WorldArchitectAgent
     _ChapterLogicAgent = ChapterLogicChecker
 except ImportError as e:
-    print(f"⚠️ Agent模块导入失败: {e}")
+    logger.debug(f"⚠️ Agent模块导入失败: {e}")
     AGENTS_AVAILABLE = False
     _CharacterAgent = None  # type: ignore
     _EventAgent = None  # type: ignore
@@ -120,7 +124,7 @@ async def generate_character(
     - name: 角色名称
     - brief_description: 简单描述
     - genre: 小说类型（奇幻、科幻、现代等）
-    - role: 角色定位（主角、配角、反派等）
+    - role: 角色定位（如主角、盟友、导师、对手等）
     - project_id: 项目ID（可选）
 
     返回:
@@ -178,7 +182,7 @@ async def generate_character(
             prompt,
             context={
                 "genre": request.genre,
-                "role": request.role,
+                "role_position": request.role,
                 "project_id": request.project_id
             }
         )
@@ -501,7 +505,6 @@ async def check_chapter_logic(
             # 从tags中解析需求境界
             req_realm = "未知"
             if item.tags:
-                import json
                 try:
                     tags = json.loads(item.tags) if isinstance(item.tags, str) else item.tags
                     if isinstance(tags, list):

@@ -1,5 +1,22 @@
 import axios, { AxiosInstance, AxiosError } from 'axios'
 import type { UserAudiobookProjectOverview } from '@/types/audiobook'
+import type { Project, ProjectCreatePayload, ProjectUpdatePayload } from '@/types/project'
+import type {
+  SettingCollection,
+  SettingCollectionCreatePayload,
+  SettingCollectionUpdatePayload,
+  SettingItem,
+  SettingItemCreatePayload,
+  SettingItemsTreeResponse,
+  SettingItemUpdatePayload,
+  SettingSmartExtractResponse,
+  SettingTemplateMetadata,
+} from '@/types/settings'
+import type {
+  StoryExpansionAnalysisResponse,
+  StoryExpansionRequestPayload,
+  StoryExpansionStartResponse,
+} from '@/types/storyExpansion'
 
 // 在开发环境中直接连接到后端，不使用Vite代理
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
@@ -530,6 +547,32 @@ interface PasswordResetRequest {
   new_password: string
 }
 
+export interface TaskPointsPrecheckOperatingSnapshot {
+  margin_status?: string | null
+  negative_margin_blocked?: boolean
+  platform_gross_profit_yuan?: number | null
+}
+
+export interface TaskPointsPrecheckErrorDetail {
+  message: string
+  module_key?: string | null
+  module_label?: string | null
+  allowed?: boolean
+  failure_code?: string | null
+  estimated_yuan?: number | null
+  estimated_points?: number | null
+  required_frozen_points?: number | null
+  existing_frozen_points?: number | null
+  additional_frozen_points?: number | null
+  balance_points?: number | null
+  frozen_points?: number | null
+  available_points?: number | null
+  effective_available_points?: number | null
+  reclaimed_running_frozen_points?: number | null
+  estimated_shot_count?: number | null
+  operating_snapshot?: TaskPointsPrecheckOperatingSnapshot | null
+}
+
 const AUTH_PUBLIC_ENDPOINTS = new Set([
   '/api/v1/auth/login',
   '/api/v1/auth/register',
@@ -609,10 +652,187 @@ function extractErrorMessageFromResponseData(data: any): string | null {
   return null
 }
 
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
+}
+
+function formatAmount(value: number | null | undefined): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return value.toFixed(2)
+}
+
+function extractApiErrorMessageFromUnknown(error: unknown, fallback: string): string {
+  if (axios.isAxiosError(error)) {
+    const responseData = (error as AxiosError).response?.data as any
+    return extractErrorMessageFromResponseData(responseData) || (error as AxiosError).message || fallback
+  }
+
+  if (typeof error === 'string') return error.trim() || fallback
+  if (error && typeof error === 'object' && typeof (error as any).message === 'string') {
+    return String((error as any).message || '').trim() || fallback
+  }
+
+  return fallback
+}
+
+function extractTaskPointsPrecheckErrorDetailFromResponseData(data: any): TaskPointsPrecheckErrorDetail | null {
+  if (!data || typeof data !== 'object') return null
+  const detail = (data as any).detail
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return null
+
+  const failureCode =
+    typeof (detail as any).failure_code === 'string' ? String((detail as any).failure_code || '').trim() : ''
+  const moduleKey =
+    typeof (detail as any).module_key === 'string' ? String((detail as any).module_key || '').trim() : ''
+  const message = extractDetailMessage(detail)
+
+  if (!failureCode || !moduleKey || !message) return null
+
+  const operatingSnapshotRaw = (detail as any).operating_snapshot
+  const operatingSnapshot =
+    operatingSnapshotRaw && typeof operatingSnapshotRaw === 'object' && !Array.isArray(operatingSnapshotRaw)
+      ? {
+          margin_status:
+            typeof operatingSnapshotRaw.margin_status === 'string'
+              ? String(operatingSnapshotRaw.margin_status || '').trim() || null
+              : null,
+          negative_margin_blocked:
+            typeof operatingSnapshotRaw.negative_margin_blocked === 'boolean'
+              ? operatingSnapshotRaw.negative_margin_blocked
+              : undefined,
+          platform_gross_profit_yuan: toFiniteNumber(operatingSnapshotRaw.platform_gross_profit_yuan),
+        }
+      : null
+
+  return {
+    message,
+    module_key: moduleKey,
+    module_label:
+      typeof (detail as any).module_label === 'string' ? String((detail as any).module_label || '').trim() || null : null,
+    allowed: typeof (detail as any).allowed === 'boolean' ? (detail as any).allowed : undefined,
+    failure_code: failureCode,
+    estimated_yuan: toFiniteNumber((detail as any).estimated_yuan),
+    estimated_points: toFiniteNumber((detail as any).estimated_points),
+    required_frozen_points: toFiniteNumber((detail as any).required_frozen_points),
+    existing_frozen_points: toFiniteNumber((detail as any).existing_frozen_points),
+    additional_frozen_points: toFiniteNumber((detail as any).additional_frozen_points),
+    balance_points: toFiniteNumber((detail as any).balance_points),
+    frozen_points: toFiniteNumber((detail as any).frozen_points),
+    available_points: toFiniteNumber((detail as any).available_points),
+    effective_available_points: toFiniteNumber((detail as any).effective_available_points),
+    reclaimed_running_frozen_points: toFiniteNumber((detail as any).reclaimed_running_frozen_points),
+    estimated_shot_count: toFiniteNumber((detail as any).estimated_shot_count),
+    operating_snapshot: operatingSnapshot,
+  }
+}
+
+function buildTaskPointsPrecheckErrorMessage(detail: TaskPointsPrecheckErrorDetail | null): string | null {
+  if (!detail) return null
+
+  const baseMessage = detail.message
+  const moduleKey = String(detail.module_key || '').trim().toLowerCase()
+
+  if (detail.failure_code === 'insufficient_available_points') {
+    const available =
+      typeof detail.effective_available_points === 'number' ? detail.effective_available_points : detail.available_points
+    const target =
+      typeof detail.additional_frozen_points === 'number' && detail.additional_frozen_points > 0
+        ? detail.additional_frozen_points
+        : detail.required_frozen_points
+
+    const gap =
+      typeof available === 'number' && typeof target === 'number'
+        ? Math.max(target - available, 0)
+        : null
+    const gapText = formatAmount(gap)
+
+    if (moduleKey === 'dreamweaver') {
+      const shotCount =
+        typeof detail.estimated_shot_count === 'number' && Number.isFinite(detail.estimated_shot_count)
+          ? Math.max(Math.round(detail.estimated_shot_count), 0)
+          : null
+      const shotHint = shotCount && shotCount > 0 ? `当前按约 ${shotCount} 个镜头估算，` : ''
+      const gapHint = gapText ? `还差 ${gapText} 积分，` : ''
+      return `${baseMessage} ${shotHint}${gapHint}可减少章节范围、切换成本模式，或先补充积分后再试。`.trim()
+    }
+
+    if (moduleKey === 'audiobook') {
+      const existingFrozen = formatAmount(detail.existing_frozen_points)
+      const frozenHint = existingFrozen && Number(existingFrozen) > 0 ? ` 当前已有 ${existingFrozen} 积分处于正式冻结状态。` : ''
+      const gapHint = gapText ? `还差 ${gapText} 积分，` : ''
+      return `${baseMessage} ${gapHint}可减少本次生成章节，或先补充积分后再试。${frozenHint}`.trim()
+    }
+
+    return baseMessage
+  }
+
+  if (detail.failure_code === 'negative_margin_blocked') {
+    if (moduleKey === 'dreamweaver') {
+      return `${baseMessage} 可尝试减少章节范围或切换成本模式；若仍失败，需要管理员调整积分定价策略。`
+    }
+    if (moduleKey === 'audiobook') {
+      return `${baseMessage} 可尝试减少生成章节、先仅生成剧本，或联系管理员调整积分定价策略。`
+    }
+    return `${baseMessage} 当前被积分定价策略拦截，如需继续请联系管理员检查定价配置。`
+  }
+
+  return baseMessage
+}
+
+export function describeTaskPointsPrecheckErrorDetail(detail: TaskPointsPrecheckErrorDetail | null): string | null {
+  return buildTaskPointsPrecheckErrorMessage(detail)
+}
+
+async function extractApiErrorResponseData(error: unknown): Promise<any | null> {
+  if (!axios.isAxiosError(error)) return null
+  const responseData = (error as AxiosError).response?.data as any
+  if (responseData instanceof Blob) {
+    try {
+      const text = await responseData.text()
+      if (text && text.trim()) {
+        try {
+          return JSON.parse(text)
+        } catch {
+          return text.trim()
+        }
+      }
+    } catch {
+      return null
+    }
+    return null
+  }
+  return responseData
+}
+
+export async function extractTaskPointsPrecheckErrorDetail(error: unknown): Promise<TaskPointsPrecheckErrorDetail | null> {
+  try {
+    const responseData = await extractApiErrorResponseData(error)
+    return extractTaskPointsPrecheckErrorDetailFromResponseData(responseData)
+  } catch {
+    return null
+  }
+}
+
+export async function extractTaskPointsPrecheckErrorMessage(
+  error: unknown,
+  fallback: string = '请求失败',
+): Promise<string | null> {
+  const detail = await extractTaskPointsPrecheckErrorDetail(error)
+  if (detail) {
+    return describeTaskPointsPrecheckErrorDetail(detail)
+  }
+  return extractApiErrorMessage(error, fallback)
+}
+
 export async function extractApiErrorMessage(error: unknown, fallback: string = '请求失败'): Promise<string> {
   try {
     if (axios.isAxiosError(error)) {
-      const responseData = (error as AxiosError).response?.data as any
+      const responseData = await extractApiErrorResponseData(error)
       if (responseData instanceof Blob) {
         try {
           const text = await responseData.text()
@@ -632,14 +852,9 @@ export async function extractApiErrorMessage(error: unknown, fallback: string = 
       return extractErrorMessageFromResponseData(responseData) || (error as AxiosError).message || fallback
     }
 
-    if (typeof error === 'string') return error.trim() || fallback
-    if (error && typeof error === 'object' && typeof (error as any).message === 'string') {
-      return String((error as any).message || '').trim() || fallback
-    }
-
-    return fallback
+    return extractApiErrorMessageFromUnknown(error, fallback)
   } catch {
-    return fallback
+    return extractApiErrorMessageFromUnknown(error, fallback)
   }
 }
 
@@ -663,8 +878,6 @@ class ApiClient {
       // ✅ 禁用自动重试，避免重复请求
       maxRedirects: 0,
     })
-
-    console.log('🔧 ApiClient初始化, baseURL:', baseURL)
 
     // 请求拦截器
     this.client.interceptors.request.use((config) => {
@@ -741,15 +954,15 @@ class ApiClient {
 
   // 项目API
   getProjects() {
-    return this.client.get('/api/v1/projects')
+    return this.client.get<Project[]>('/api/v1/projects')
   }
 
-  createProject(data: { title: string; description?: string; genre?: string }) {
-    return this.client.post('/api/v1/projects', data)
+  createProject(data: ProjectCreatePayload) {
+    return this.client.post<Project>('/api/v1/projects', data)
   }
 
   getProject(projectId: number) {
-    return this.client.get(`/api/v1/projects/${projectId}`)
+    return this.client.get<Project>(`/api/v1/projects/${projectId}`)
   }
 
   getModelCatalogOverview(params?: {
@@ -781,8 +994,8 @@ class ApiClient {
     return this.client.post('/api/v1/model-catalog/sync', payload ?? { force_refresh: true })
   }
 
-  updateProject(projectId: number, data: any) {
-    return this.client.put(`/api/v1/projects/${projectId}`, data)
+  updateProject(projectId: number, data: ProjectUpdatePayload) {
+    return this.client.put<Project>(`/api/v1/projects/${projectId}`, data)
   }
 
   deleteProject(projectId: number) {
@@ -847,15 +1060,15 @@ class ApiClient {
 
   // 设定管理API
   getSettingCollections(projectId: number) {
-    return this.client.get(`/api/v1/projects/${projectId}/setting-collections`)
+    return this.client.get<SettingCollection[]>(`/api/v1/projects/${projectId}/setting-collections`)
   }
 
-  createSettingCollection(projectId: number, data: any) {
-    return this.client.post(`/api/v1/projects/${projectId}/setting-collections`, data)
+  createSettingCollection(projectId: number, data: SettingCollectionCreatePayload) {
+    return this.client.post<SettingCollection>(`/api/v1/projects/${projectId}/setting-collections`, data)
   }
 
-  updateSettingCollection(collectionId: number, data: any) {
-    return this.client.put(`/api/v1/setting-collections/${collectionId}`, data)
+  updateSettingCollection(collectionId: number, data: SettingCollectionUpdatePayload) {
+    return this.client.put<SettingCollection>(`/api/v1/setting-collections/${collectionId}`, data)
   }
 
   deleteSettingCollection(collectionId: number) {
@@ -863,15 +1076,19 @@ class ApiClient {
   }
 
   getSettingItems(collectionId: number) {
-    return this.client.get(`/api/v1/setting-collections/${collectionId}/items`)
+    return this.client.get<SettingItem[]>(`/api/v1/setting-collections/${collectionId}/items`)
   }
 
-  createSettingItem(collectionId: number, data: any) {
-    return this.client.post(`/api/v1/setting-collections/${collectionId}/items`, data)
+  getSettingItem(itemId: number) {
+    return this.client.get<SettingItem>(`/api/v1/setting-items/${itemId}`)
   }
 
-  updateSettingItem(itemId: number, data: any) {
-    return this.client.put(`/api/v1/setting-items/${itemId}`, data)
+  createSettingItem(collectionId: number, data: SettingItemCreatePayload) {
+    return this.client.post<SettingItem>(`/api/v1/setting-collections/${collectionId}/items`, data)
+  }
+
+  updateSettingItem(itemId: number, data: SettingItemUpdatePayload) {
+    return this.client.put<SettingItem>(`/api/v1/setting-items/${itemId}`, data)
   }
 
   moveSettingItem(itemId: number, targetCollectionId: number) {
@@ -892,11 +1109,11 @@ class ApiClient {
     const params: any = {}
     if (prefix) params.prefix = prefix
     if (maxDepth != null) params.max_depth = maxDepth
-    return this.client.get(`/api/v1/setting-collections/${collectionId}/items/by-path`, { params })
+    return this.client.get<SettingItem[]>(`/api/v1/setting-collections/${collectionId}/items/by-path`, { params })
   }
 
   getSettingItemsTree(collectionId: number) {
-    return this.client.get(`/api/v1/setting-collections/${collectionId}/items/tree`)
+    return this.client.get<SettingItemsTreeResponse>(`/api/v1/setting-collections/${collectionId}/items/tree`)
   }
 
   getGraphEdgesForItem(itemId: number, direction: 'both' | 'out' | 'in' = 'both') {
@@ -928,20 +1145,35 @@ class ApiClient {
 
   // 设定模板与摘要
   getSettingTemplates() {
-    return this.client.get('/api/v1/setting-templates')
+    return this.client.get<SettingTemplateMetadata[]>('/api/v1/setting-templates')
   }
 
   applySettingTemplate(projectId: number, payload: { template_key: string; clear_existing?: boolean }) {
     return this.client.post(`/api/v1/projects/${projectId}/setting-templates/apply`, payload)
   }
 
+  getSettingItemSmartExtract(itemId: number) {
+    return this.client.get<SettingSmartExtractResponse>(`/api/v1/setting-items/${itemId}/smart-extract`)
+  }
+
   getSettingsSummary(projectId: number) {
     return this.client.get(`/api/v1/projects/${projectId}/settings-summary`)
   }
 
+  syncSettingsToWorkflow(projectId: number) {
+    return this.client.post(`/api/v1/projects/${projectId}/sync-settings-to-workflow`)
+  }
+
   // 设定自动合并与冲突检测
-  autoMergeSettings(projectId: number) {
-    return this.client.post(`/api/v1/projects/${projectId}/auto-merge-settings`)
+  autoMergeSettings(projectId: number, chapterPlan: string = '', chapterContent: string = '') {
+    return this.client.post(`/api/v1/projects/${projectId}/auto-merge-settings`, {
+      chapter_plan: chapterPlan,
+      chapter_content: chapterContent,
+    })
+  }
+
+  llmReclassifyCandidates(projectId: number) {
+    return this.client.post(`/api/v1/projects/${projectId}/llm-reclassify-candidates`)
   }
 
   detectConflicts(projectId: number) {
@@ -1491,9 +1723,17 @@ class ApiClient {
     })
   }
 
-  // 🌟 史诗框架状态检测API
+  // 🌟 长篇框架状态检测API
   getEpicFrameworkState(projectId: number) {
     return this.client.get(`/api/v1/workflow/epic-framework-state/${projectId}`)
+  }
+
+  analyzeExpandStory(payload: StoryExpansionRequestPayload) {
+    return this.client.post<StoryExpansionAnalysisResponse>('/api/v1/workflow/expand-story/analysis', payload)
+  }
+
+  expandStory(payload: StoryExpansionRequestPayload) {
+    return this.client.post<StoryExpansionStartResponse>('/api/v1/workflow/expand-story', payload)
   }
 }
 

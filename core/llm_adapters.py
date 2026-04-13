@@ -7,10 +7,12 @@ LLM 适配器实现 - 支持阿里云 DashScope 和 DeepSeek
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 import logging
 import inspect
+import threading
 from typing import Dict, List, Optional, Any, Callable, TYPE_CHECKING
 
 from core.unified_registry import BaseLLMAdapter, register_llm_model
@@ -19,6 +21,13 @@ if TYPE_CHECKING:
     from schemas.unified_model_spec import LLMResult, UnifiedModelSpec
 
 logger = logging.getLogger(__name__)
+
+
+def _is_truthy_env(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 class OpenAICompatibleAdapter(BaseLLMAdapter):
@@ -30,6 +39,8 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
 
     def __init__(self, spec: "UnifiedModelSpec"):
         super().__init__(spec)
+        self._client_pool: Dict[tuple[int, Optional[int]], Any] = {}
+        self._client_pool_lock = threading.RLock()
         self._init_client()
 
     def _build_completion_params(
@@ -44,8 +55,24 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
             "messages": messages,
         }
 
+        # OpenAI SDK 标准参数白名单；不在此列的参数统一放入 extra_body 透传给后端
+        _OPENAI_STANDARD_KEYS = {
+            "temperature", "max_tokens", "top_p", "frequency_penalty",
+            "presence_penalty", "stop", "seed", "response_format",
+            "tools", "tool_choice", "stream", "n", "logprobs",
+            "top_logprobs", "user",
+        }
         if self.spec.default_params:
-            params.update({k: v for k, v in self.spec.default_params.items() if v is not None})
+            extra_body = params.get("extra_body") or {}
+            for k, v in self.spec.default_params.items():
+                if v is None:
+                    continue
+                if k in _OPENAI_STANDARD_KEYS:
+                    params[k] = v
+                else:
+                    extra_body[k] = v
+            if extra_body:
+                params["extra_body"] = extra_body
 
         if self.spec.constraints.supports_temperature and temperature is not None:
             params["temperature"] = temperature
@@ -69,43 +96,152 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
             if value is not None:
                 params[key] = value
 
-        timeout = extra_kwargs.get("timeout")
+        timeout = self._build_request_timeout(extra_kwargs.get("timeout"))
         if timeout is not None and self.spec.constraints.supports_timeout_param:
             params["timeout"] = timeout
 
         return params
 
+    def _normalize_requested_max_tokens(self, max_tokens: Optional[int]) -> Optional[int]:
+        if max_tokens is None:
+            return None
+
+        try:
+            normalized = int(max_tokens)
+        except (TypeError, ValueError):
+            logger.warning("Ignore invalid max_tokens=%r for model %s", max_tokens, self.spec.id)
+            return None
+
+        if normalized <= 0:
+            return None
+
+        max_output_tokens = int(getattr(self.spec.constraints, "max_output_tokens", 0) or 0)
+        if max_output_tokens > 0 and normalized > max_output_tokens:
+            logger.warning(
+                "Clamp max_tokens for model %s from %s to %s",
+                self.spec.id,
+                normalized,
+                max_output_tokens,
+            )
+            return max_output_tokens
+
+        return normalized
+
+    def _build_request_timeout(self, timeout_value: Optional[Any]) -> Optional[Any]:
+        if timeout_value is None:
+            return None
+
+        try:
+            normalized = max(1.0, float(timeout_value))
+        except (TypeError, ValueError):
+            logger.warning("Ignore invalid timeout=%r for model %s", timeout_value, self.spec.id)
+            return None
+
+        import httpx
+
+        return httpx.Timeout(
+            normalized,
+            connect=min(normalized, 30.0),
+            write=min(normalized, 60.0),
+            pool=min(normalized, 30.0),
+        )
+
+    def _get_client_context_key(self) -> tuple[int, Optional[int]]:
+        loop_id: Optional[int] = None
+        try:
+            loop_id = id(asyncio.get_running_loop())
+        except RuntimeError:
+            loop_id = None
+        return threading.get_ident(), loop_id
+
+    def _create_client(self, api_key: str) -> Any:
+        from openai import AsyncOpenAI
+        import httpx
+
+        http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(
+                self.spec.api_config.default_timeout,
+                connect=30.0
+            ),
+            trust_env=_is_truthy_env("MODEL_HTTP_TRUST_ENV", default=False),
+        )
+
+        return AsyncOpenAI(
+            api_key=api_key,
+            base_url=self.spec.api_config.base_url,
+            timeout=self.spec.api_config.default_timeout,
+            max_retries=0,
+            http_client=http_client,
+        )
+
+    def _get_client_for_current_context(self) -> Any:
+        api_key = self.spec.api_config.get_api_key()
+        if not api_key:
+            logger.warning(f"⚠️ 模型 {self.spec.id} 未配置 API Key")
+            self._initialized = False
+            return None
+
+        context_key = self._get_client_context_key()
+        with self._client_pool_lock:
+            client = self._client_pool.get(context_key)
+            if client is None:
+                client = self._create_client(api_key)
+                self._client_pool[context_key] = client
+                logger.debug(
+                    "✅ 为模型 %s 创建上下文隔离客户端 | thread=%s loop=%s",
+                    self.spec.id,
+                    context_key[0],
+                    context_key[1],
+                )
+
+            self._client = client
+            self._initialized = True
+            return client
+
+    def _close_client_instance(self, client: Any) -> None:
+        close_method = getattr(client, "close", None)
+        if not callable(close_method):
+            return
+
+        try:
+            close_result = close_method()
+            if inspect.isawaitable(close_result):
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    asyncio.run(close_result)
+                else:
+                    loop.create_task(close_result)
+        except Exception:
+            pass
+
+    def _reset_current_context_client(self, reason: Optional[str] = None) -> None:
+        context_key = self._get_client_context_key()
+        with self._client_pool_lock:
+            client = self._client_pool.pop(context_key, None)
+            if self._client is client:
+                self._client = next(iter(self._client_pool.values()), None)
+
+        if client is not None:
+            self._close_client_instance(client)
+            logger.debug(
+                "🔄 已重置模型 %s 的上下文客户端 | thread=%s loop=%s reason=%s",
+                self.spec.id,
+                context_key[0],
+                context_key[1],
+                reason or "unknown",
+            )
+
     def _init_client(self) -> None:
         """初始化 OpenAI 客户端"""
         try:
-            from openai import AsyncOpenAI
-            import httpx
-
             api_key = self.spec.api_config.get_api_key()
-            base_url = self.spec.api_config.base_url
 
             if not api_key:
                 logger.warning(f"⚠️ 模型 {self.spec.id} 未配置 API Key")
                 return
 
-            http_client = httpx.AsyncClient(
-                timeout=httpx.Timeout(
-                    self.spec.api_config.default_timeout,
-                    connect=30.0
-                ),
-                trust_env=False,
-            )
-
-            self._client = AsyncOpenAI(
-                api_key=api_key,
-                base_url=base_url,
-                timeout=self.spec.api_config.default_timeout,
-                # 重试统一由 ModelHub 控制，避免 SDK 与调度层重复重试导致级联超时。
-                max_retries=0,
-                http_client=http_client,
-            )
-
-            self._initialized = True
+            self._client = self._get_client_for_current_context()
             logger.debug(f"✅ 初始化客户端: {self.spec.id}")
 
         except ImportError:
@@ -122,7 +258,8 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
         """生成响应"""
         from schemas.unified_model_spec import LLMResult
 
-        if not self._initialized or not self._client:
+        client = self._get_client_for_current_context()
+        if not self._initialized or not client:
             return LLMResult(
                 success=False,
                 model_id=self.spec.id,
@@ -133,7 +270,7 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
         start_time = time.time()
 
         try:
-            effective_max_tokens = max_tokens or self.spec.constraints.max_output_tokens
+            effective_max_tokens = self._normalize_requested_max_tokens(max_tokens)
 
             params = self._build_completion_params(messages, temperature, effective_max_tokens, kwargs)
 
@@ -146,7 +283,7 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
                     kwargs,
                 )
 
-            response = await self._client.chat.completions.create(**params)
+            response = await client.chat.completions.create(**params)
 
             content = response.choices[0].message.content or ""
 
@@ -181,13 +318,21 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
         except Exception as e:
             latency = time.time() - start_time
             error_code = self._map_error_code(e)
+            error_msg = str(e) or f"[{type(e).__name__}] (empty message)"
 
-            logger.error(f"❌ LLM调用失败 | 模型: {self.spec.id} | 错误: {e}")
+            if error_code in {"network_error", "timeout"}:
+                self._reset_current_context_client(reason=error_code)
+
+            logger.error(
+                f"❌ LLM调用失败 | 模型: {self.spec.id} | 错误码: {error_code} | "
+                f"异常类型: {type(e).__name__} | 错误: {error_msg}",
+                exc_info=True,
+            )
 
             return LLMResult(
                 success=False,
                 model_id=self.spec.id,
-                error=str(e),
+                error=error_msg,
                 error_code=error_code,
                 latency=latency,
             )
@@ -202,7 +347,11 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
     ) -> "LLMResult":
         """流式生成响应"""
         return await self._generate_stream_internal(
-            messages, temperature, max_tokens, on_chunk, kwargs
+            messages,
+            temperature,
+            self._normalize_requested_max_tokens(max_tokens),
+            on_chunk,
+            kwargs,
         )
 
     async def _generate_stream_internal(
@@ -216,7 +365,8 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
         """内部流式生成实现"""
         from schemas.unified_model_spec import LLMResult
 
-        if not self._initialized or not self._client:
+        client = self._get_client_for_current_context()
+        if not self._initialized or not client:
             return LLMResult(
                 success=False,
                 model_id=self.spec.id,
@@ -227,17 +377,15 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
         start_time = time.time()
 
         try:
-            effective_max_tokens = max_tokens or self.spec.constraints.max_output_tokens
-
             params = self._build_completion_params(
                 messages,
                 temperature,
-                effective_max_tokens,
+                max_tokens,
                 extra_kwargs or {},
             )
             params["stream"] = True
 
-            stream = await self._client.chat.completions.create(**params)
+            stream = await client.chat.completions.create(**params)
 
             content = ""
             chunk_count = 0
@@ -276,30 +424,75 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
         except Exception as e:
             latency = time.time() - start_time
             error_code = self._map_error_code(e)
+            error_msg = str(e) or f"[{type(e).__name__}] (empty message)"
 
-            logger.error(f"❌ LLM流式调用失败 | 模型: {self.spec.id} | 错误: {e}")
+            if error_code in {"network_error", "timeout"}:
+                self._reset_current_context_client(reason=error_code)
+
+            logger.error(
+                f"❌ LLM流式调用失败 | 模型: {self.spec.id} | 错误码: {error_code} | "
+                f"异常类型: {type(e).__name__} | 错误: {error_msg}",
+                exc_info=True,
+            )
 
             return LLMResult(
                 success=False,
                 model_id=self.spec.id,
-                error=str(e),
+                error=error_msg,
                 error_code=error_code,
                 latency=latency,
             )
 
+    def close(self) -> None:
+        with self._client_pool_lock:
+            clients = list(self._client_pool.values())
+            self._client_pool.clear()
+            self._client = None
+
+        for client in clients:
+            self._close_client_instance(client)
+
+        self._initialized = False
+
     def _map_error_code(self, error: Exception) -> str:
         """映射错误码"""
         error_str = str(error).lower()
+        error_type = type(error).__name__.lower()
 
         if "rate limit" in error_str or "429" in error_str:
             return "rate_limit"
         if "timeout" in error_str or "timed out" in error_str:
             return "timeout"
+        if any(
+            marker in error_str
+            for marker in (
+                "connection error",
+                "connect error",
+                "connection refused",
+                "connection reset",
+                "network is unreachable",
+                "name or service not known",
+                "temporary failure in name resolution",
+                "nodename nor servname",
+                "dns",
+                "ssl",
+                "tls",
+                "proxyerror",
+            )
+        ) or any(
+            marker in error_type
+            for marker in (
+                "apiconnectionerror",
+                "connecterror",
+                "networkerror",
+            )
+        ):
+            return "network_error"
         if "unauthorized" in error_str or "401" in error_str or "invalid api key" in error_str:
             return "auth_error"
         if "quota" in error_str or "insufficient" in error_str:
             return "insufficient_quota"
-        if "content" in error_str and ("safety" in error_str or "blocked" in error_str):
+        if ("content" in error_str and ("safety" in error_str or "blocked" in error_str)) or "inappropriate content" in error_str:
             return "content_safety"
         if "model" in error_str and ("not found" in error_str or "unavailable" in error_str):
             return "model_unavailable"
@@ -350,6 +543,31 @@ class QwenMaxAdapter(OpenAICompatibleAdapter):
 )
 class QwenLongAdapter(OpenAICompatibleAdapter):
     """阿里云 Qwen Long 适配器 - 支持超长上下文"""
+
+    pass
+
+
+@register_llm_model(
+    model_id="qwen3.5-plus",
+    name="Qwen3.5 Plus",
+    provider="alibaba",
+    capabilities=["creative", "reasoning", "long_context", "writing", "multimodal"],
+    task_types=["outline_expand", "volume_outline", "chapter_batch", "long_writing", "multimodal_analysis"],
+    max_context_tokens=1000000,
+    max_output_tokens=65536,
+    quality_score=8.8,
+    avg_latency_seconds=2.0,
+    cost_per_1k_input_tokens=0.0008,
+    cost_per_1k_output_tokens=0.0048,
+    api_key_env="DASHSCOPE_API_KEY",
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    supports_vision=True,
+    priority=1,
+    fallback_models=["qwen3-max", "qwen-long"],
+    tags=["creative", "reasoning", "long_context", "chinese"],
+)
+class Qwen35PlusAdapter(OpenAICompatibleAdapter):
+    """阿里云 Qwen3.5 Plus 适配器"""
 
     pass
 
@@ -411,7 +629,8 @@ class DeepSeekReasonerAdapter(OpenAICompatibleAdapter):
         """生成响应 - R1 特殊处理"""
         from schemas.unified_model_spec import LLMResult
 
-        if not self._initialized or not self._client:
+        client = self._get_client_for_current_context()
+        if not self._initialized or not client:
             return LLMResult(
                 success=False,
                 model_id=self.spec.id,
@@ -422,12 +641,12 @@ class DeepSeekReasonerAdapter(OpenAICompatibleAdapter):
         start_time = time.time()
 
         try:
-            effective_max_tokens = max_tokens or self.spec.constraints.max_output_tokens
+            effective_max_tokens = self._normalize_requested_max_tokens(max_tokens)
 
             params = self._build_completion_params(messages, temperature, effective_max_tokens, kwargs)
             params.pop("temperature", None)
 
-            response = await self._client.chat.completions.create(**params)
+            response = await client.chat.completions.create(**params)
 
             content = response.choices[0].message.content or ""
 
@@ -466,7 +685,10 @@ class DeepSeekReasonerAdapter(OpenAICompatibleAdapter):
             latency = time.time() - start_time
             error_code = self._map_error_code(e)
 
-            logger.error(f"❌ DeepSeek R1调用失败 | 错误: {e}")
+            if error_code in {"network_error", "timeout"}:
+                self._reset_current_context_client(reason=error_code)
+
+            logger.error(f"❌ DeepSeek R1调用失败 | 错误码: {error_code} | 错误: {e}")
 
             return LLMResult(
                 success=False,

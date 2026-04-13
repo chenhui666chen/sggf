@@ -1,5 +1,7 @@
 """角色与角色功法管理 API"""
 
+import json
+import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -11,7 +13,7 @@ from app.models.user import User
 from app.models.project import Project, Chapter
 from app.models.character import Character, CharacterTechnique
 from app.models.setting import SettingItem, SettingCollection
-from app.utils.datetime_utils import utc_now
+from app.services.workflow_context_builder import WorkflowContextBuilder
 from app.schemas.character import (
     CharacterCreate,
     CharacterUpdate,
@@ -21,6 +23,7 @@ from app.schemas.character import (
 )
 
 router = APIRouter(prefix="/api/v1", tags=["characters"])
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -82,14 +85,13 @@ async def create_character(
 ) -> CharacterResponse:
     """在项目下创建新角色"""
 
-    import json
-
     _ensure_project_owned(project_id, current_user, db)
 
     character = Character(
         project_id=project_id,
         name=data.name,
         role=data.role,
+        role_position=data.role_position,
         gender=data.gender,
         age=data.age,
         faction=data.faction,
@@ -138,8 +140,6 @@ async def update_character(
 ) -> CharacterResponse:
     """更新角色信息"""
 
-    import json
-
     character = db.query(Character).get(character_id)
     if not character:
         raise HTTPException(
@@ -178,7 +178,8 @@ async def update_character(
         # 生成人物向量内容
         vector_content = f"""
 人物名称: {character.name}
-角色类型: {character.role or '未设定'}
+故事立场: {character.role or '未设定'}
+角色定位: {character.role_position or '未设定'}
 所属势力: {character.faction or '未设定'}
 状态: {character.life_status or '未知'}
 简介: {character.summary or ''}
@@ -191,7 +192,7 @@ async def update_character(
             project_id=character.project_id
         )
     except Exception as e:
-        print(f"⚠️ 同步人物到向量库失败: {e}")
+        logger.debug(f"⚠️ 同步人物到向量库失败: {e}")
     
     return character
 
@@ -224,7 +225,7 @@ async def delete_character(
         from app.services.vector_sync import delete_character_from_vector_db
         delete_character_from_vector_db(char_id, project_id)
     except Exception as e:
-        print(f"⚠️ 从向量库删除人物失败: {e}")
+        logger.debug(f"⚠️ 从向量库删除人物失败: {e}")
 
 
 @router.get("/characters/{character_id}/auto-tracked-relations")
@@ -243,7 +244,6 @@ async def get_character_auto_tracked_relations(
         "locations": [{"id": 3, "name": "某地点", "chapters": [1,2]}]
     }
     """
-    import json
     
     character = db.query(Character).get(character_id)
     if not character:
@@ -490,7 +490,6 @@ async def get_character_appearance_timeline(
     - 章节基本信息（章节号、标题、字数）
     - 人物在该章的相关摘要
     """
-    import json
     import re
     
     character = db.query(Character).get(character_id)
@@ -577,7 +576,6 @@ async def sync_characters_to_workflow(
         "preview": "# 人物设定\n\n## 主角\n\n### 林风..."
     }
     """
-    from sqlalchemy import text
     from app.services.character_text_generator import CharacterTextGenerator
     
     _ensure_project_owned(project_id, current_user, db)
@@ -593,19 +591,11 @@ async def sync_characters_to_workflow(
     # 2. 获取统计信息
     stats = CharacterTextGenerator.get_character_stats(project_id, db)
     
-    # 3. 更新到project_settings表
-    update_query = text("""
-        UPDATE project_settings
-        SET characters = :content, updated_at = :updated_at
-        WHERE project_id = :project_id
-    """)
-    
-    db.execute(update_query, {
-        "content": characters_text,
-        "updated_at": utc_now().isoformat(),
-        "project_id": project_id
-    })
-    db.commit()
+    # 3. 更新到 project_settings 表
+    WorkflowContextBuilder(db).update_project_settings_fields(
+        project_id,
+        characters=characters_text,
+    )
     
     # 4. 返回结果
     preview = characters_text[:500] + "..." if len(characters_text) > 500 else characters_text
@@ -675,7 +665,6 @@ async def get_character_relationship_graph(
         "stats": {"total_nodes": 10, "total_edges": 15}
     }
     """
-    import json
     
     _ensure_project_owned(project_id, current_user, db)
     
@@ -698,16 +687,19 @@ async def get_character_relationship_graph(
     # 重要程度颜色映射
     importance_colors = {
         "主角": "#ff6b6b",
-        "配角": "#4ecdc4",
-        "跑龙套": "#95e1d3",
-        "群众演员": "#dfe6e9",
+        "核心角色": "#ff8fab",
+        "重要角色": "#4ecdc4",
+        "次要角色": "#95e1d3",
+        "边缘角色": "#dfe6e9",
+        "群众角色": "#dfe6e9",
     }
     
-    # 角色类型颜色
+    # 故事立场颜色
     role_colors = {
         "主角方": "#74b9ff",
-        "对手方": "#fd79a8",
+        "反派方": "#fd79a8",
         "中立方": "#ffeaa7",
+        "亦正亦邪": "#a29bfe",
     }
     
     for char in characters:
@@ -716,7 +708,8 @@ async def get_character_relationship_graph(
             "character_id": char.id,  # 🆕 添加数字ID用于前端点击编辑
             "name": char.name,
             "role": char.role or "未分类",
-            "importance": char.importance_level or "配角",
+            "role_position": char.role_position or "",
+            "importance": char.importance_level or "次要角色",
             "gender": char.gender,
             "age": char.age,
             "faction": char.faction,
@@ -755,7 +748,7 @@ async def get_character_relationship_graph(
                                         "label": rel_type,
                                         "type": "smoothstep",
                                     })
-            except:
+            except Exception:
                 pass
         
         # 从 relationship_network 字段解析
@@ -780,7 +773,7 @@ async def get_character_relationship_graph(
                                         "label": rel_type,
                                         "type": "smoothstep",
                                     })
-            except:
+            except Exception:
                 pass
     
     return {

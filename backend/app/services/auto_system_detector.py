@@ -1,4 +1,4 @@
-﻿"""
+"""
 自动体系检测服务
 根据文本内容自动识别涉及的体系类型，并创建对应的设定集合
 """
@@ -10,56 +10,9 @@ from sqlalchemy import text
 from langchain_core.messages import HumanMessage
 
 from core.langchain_bridge import create_task_llm
+from app.services.setting_categories import SYSTEM_CATEGORIES
 
 logger = logging.getLogger("uvicorn.error")
-
-# 27种体系类型映射
-SYSTEM_CATEGORIES = {
-    # 地理与世界观
-    "map_system": "地图体系",
-    
-    # 修仙/玄幻体系
-    "cultivation_realm_system": "修仙境界体系",
-    "martial_realm_system": "武道境界体系",
-    "technique_system": "功法体系",
-    "pill_system": "丹药体系",
-    "formation_system": "阵法体系",
-    "talisman_system": "符箓体系",
-    "weapon_system": "武器与法宝体系",
-    "resource_system": "资源体系",
-    "force_system": "势力体系",
-    
-    # 都市异能体系
-    "ability_realm_system": "异能境界体系",
-    "ability_awakening_growth_system": "异能体系",
-    "hidden_organization_force_system": "组织势力体系",
-    "network_social_relationship_system": "人脉关系体系",
-    "special_artifact_relic_system": "道具遗物体系",
-    "wealth_business_empire_system": "财富商业体系",
-    
-    # 西幻/魔法体系
-    "magic_realm_system": "魔法境界体系",
-    "magic_system": "魔法体系",
-    "race_bloodline_system": "种族血脉体系",
-    "profession_class_system": "职业体系",
-    
-    # 科幻体系
-    "interstellar_travel_exploration_system": "星际航行体系",
-    "ai_robot_system": "AI机器人体系",
-    
-    # 末世废土体系
-    "survivor_settlement_order_system": "聚落秩序体系",
-    "mutation_infection_aberration_system": "变异感染体系",
-    
-    # 游戏系统体系
-    "skill_talent_system": "技能天赋体系",
-    
-    # 角色体系
-    "character_system": "角色体系",
-    
-    # 特殊
-    "organization_system": "组织体系",
-}
 
 
 class AutoSystemDetector:
@@ -99,12 +52,11 @@ class AutoSystemDetector:
 - talisman_system: 符箓体系（如符箓、符文、咒符等）
 - weapon_system: 武器与法宝体系（如法宝、灵器、仙器等）
 - resource_system: 资源体系（如灵石、材料、宝物等）
-- force_system: 势力体系（如宗门、门派、家族等）
+- organization_force_system: 组织势力体系（如宗门、门派、家族等）
 
 ### 都市异能体系
 - ability_realm_system: 异能境界体系（如觉醒、进化等级等）
-- ability_awakening_growth_system: 异能体系（如火系、冰系、精神系等）
-- hidden_organization_force_system: 组织势力体系（如异能组织、秘密机构等）
+- ability_system: 异能体系（如火系、冰系、精神系等）
 - network_social_relationship_system: 人脉关系体系（如社交网络、人际关系等）
 - special_artifact_relic_system: 道具遗物体系（如古代遗物、神器等）
 - wealth_business_empire_system: 财富商业体系（如商业帝国、集团等）
@@ -176,8 +128,11 @@ class AutoSystemDetector:
             return valid_systems
             
         except json.JSONDecodeError as e:
-            logger.error(f"❌ AI返回的JSON格式无效: {e}")
-            logger.error(f"   响应内容: {response[:500]}")
+            logger.error(f"AI返回的JSON格式无效: {e}")
+            try:
+                logger.error(f"响应内容: {response.content[:500]}")
+            except Exception:
+                pass
             return []
         except Exception as e:
             logger.error(f"❌ 体系检测失败: {e}")

@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.base import get_db
 from app.core.security import get_current_user
@@ -60,8 +60,7 @@ class BookResponse(BaseModel):
     created_at: str
     imported_project_id: Optional[int]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChapterResponse(BaseModel):
@@ -75,8 +74,7 @@ class ChapterResponse(BaseModel):
     volume_title: Optional[str]
     summary: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChapterContentResponse(BaseModel):
@@ -101,8 +99,7 @@ class AnalysisResponse(BaseModel):
     extra_data: Optional[Dict[str, Any]] = None
     created_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ParseStatusResponse(BaseModel):
@@ -127,15 +124,32 @@ class ImportRequest(BaseModel):
 
 # 存储后台任务状态
 _task_status: Dict[str, Dict[str, Any]] = {}
+_task_status_lock = threading.Lock()
 
 
-def get_task_status(book_id: int) -> Dict[str, Any]:
-    """获取任务状态"""
-    return _task_status.get(str(book_id), {
-        "status": "unknown",
-        "progress": 0,
-        "message": "未找到任务"
-    })
+def _build_task_status_payload(
+    book_id: int,
+    status: str,
+    progress: int,
+    message: str,
+    error: Optional[str] = None,
+) -> Dict[str, Any]:
+    """构建任务状态快照。"""
+    return {
+        "book_id": book_id,
+        "status": status,
+        "progress": max(0, min(100, int(progress))),
+        "message": message,
+        "error": error,
+        "updated_at": datetime.now().isoformat()
+    }
+
+
+def get_task_status(book_id: int) -> Optional[Dict[str, Any]]:
+    """获取任务状态。"""
+    with _task_status_lock:
+        snapshot = _task_status.get(str(book_id))
+        return dict(snapshot) if snapshot else None
 
 
 def _safe_parse_json_field(raw_value: Any, default: Any) -> Any:
@@ -179,14 +193,102 @@ def _build_chapter_content_response(chapter: BookChapter) -> ChapterContentRespo
 
 
 def update_task_status(book_id: int, status: str, progress: int, message: str, error: Optional[str] = None):
-    """更新任务状态"""
-    _task_status[str(book_id)] = {
-        "status": status,
-        "progress": progress,
-        "message": message,
-        "error": error,
-        "updated_at": datetime.now().isoformat()
+    """更新任务状态。"""
+    payload = _build_task_status_payload(book_id, status, progress, message, error)
+    with _task_status_lock:
+        _task_status[str(book_id)] = payload
+
+
+def _reserve_task_status(
+    book_id: int,
+    status: str,
+    progress: int,
+    message: str,
+    error: Optional[str] = None,
+) -> tuple[Dict[str, Any], bool]:
+    """为任务预留状态位，防止并发恢复时重复启动。"""
+    with _task_status_lock:
+        existing = _task_status.get(str(book_id))
+        if existing:
+            return dict(existing), False
+
+        payload = _build_task_status_payload(book_id, status, progress, message, error)
+        _task_status[str(book_id)] = payload
+        return dict(payload), True
+
+
+def _default_status_message(status: str) -> str:
+    """当内存状态丢失时，基于数据库状态兜底提示文案。"""
+    messages = {
+        ParseStatus.PENDING.value: "等待开始处理...",
+        ParseStatus.PARSING.value: "正在解析章节...",
+        ParseStatus.CHAPTERS_DONE.value: "章节解析完成",
+        ParseStatus.ANALYZING.value: "正在进行 AI 分析...",
+        ParseStatus.COMPLETED.value: "分析完成",
+        ParseStatus.FAILED.value: "处理失败",
     }
+    return messages.get(status, "任务状态未知")
+
+
+def _normalized_recovery_progress(book: BookSource) -> int:
+    """修正热重载后可能残留的进度值。"""
+    progress = max(0, min(100, int(book.parse_progress or 0)))
+    if book.status in {ParseStatus.PARSING.value, ParseStatus.ANALYZING.value} and progress >= 100:
+        return 0
+    if book.status in {ParseStatus.PARSING.value, ParseStatus.ANALYZING.value}:
+        return min(progress, 95)
+    return progress
+
+
+def _launch_parse_task(book_id: int):
+    """启动章节解析线程。"""
+    thread = threading.Thread(
+        target=lambda: _do_parse_book(book_id),
+        daemon=True,
+        name=f"book-parser-parse-{book_id}"
+    )
+    thread.start()
+
+
+def _launch_analyze_task(book_id: int):
+    """启动 AI 分析线程。"""
+    thread = threading.Thread(
+        target=lambda: asyncio.run(_do_analyze_book(book_id)),
+        daemon=True,
+        name=f"book-parser-analyze-{book_id}"
+    )
+    thread.start()
+
+
+def _recover_interrupted_task(book: BookSource) -> Optional[Dict[str, Any]]:
+    """当开发服务器热重载导致内存任务丢失时，自动恢复任务。"""
+    if book.status not in {ParseStatus.PARSING.value, ParseStatus.ANALYZING.value}:
+        return None
+
+    snapshot, should_start = _reserve_task_status(
+        book.id,
+        book.status,
+        _normalized_recovery_progress(book),
+        "检测到后台任务上下文丢失，正在自动恢复..."
+    )
+    if not should_start:
+        return snapshot
+
+    logger.warning(
+        "检测到 book_parser 任务上下文丢失，准备自动恢复 | book_id=%s | status=%s",
+        book.id,
+        book.status,
+    )
+    try:
+        if book.status == ParseStatus.PARSING.value:
+            _launch_parse_task(book.id)
+        else:
+            _launch_analyze_task(book.id)
+    except Exception as exc:
+        logger.exception("自动恢复 book_parser 任务失败 | book_id=%s", book.id)
+        update_task_status(book.id, ParseStatus.FAILED.value, 0, "自动恢复失败", str(exc))
+
+    return get_task_status(book.id)
 
 
 # ==================== API 接口 ====================
@@ -522,19 +624,24 @@ async def parse_book(
     if not book.file_path or not os.path.exists(book.file_path):
         raise HTTPException(status_code=400, detail="书籍文本文件不存在")
     
+    active_task = get_task_status(book_id)
+    if book.status == ParseStatus.PARSING.value and active_task:
+        return {
+            "message": "章节解析任务已在进行中",
+            "book_id": book_id,
+            "status": "parsing"
+        }
+
     # 更新状态
     book.status = ParseStatus.PARSING.value
     book.parse_progress = 0
+    book.error_message = None
     db.commit()
     
     update_task_status(book_id, "parsing", 0, "开始解析章节...")
     
     # 启动后台任务
-    def run_parse():
-        _do_parse_book(book_id)
-    
-    thread = threading.Thread(target=run_parse, daemon=True)
-    thread.start()
+    _launch_parse_task(book_id)
     
     return {
         "message": "章节解析任务已启动",
@@ -556,17 +663,27 @@ def _do_parse_book(book_id: int):
             update_task_status(book_id, "failed", 0, "书籍不存在", "书籍记录未找到")
             return
         
+        book.status = ParseStatus.PARSING.value
+        if (book.parse_progress or 0) >= 100:
+            book.parse_progress = 0
+        book.error_message = None
+        db.commit()
+        
         # 读取文本
         with open(book.file_path, "r", encoding="utf-8") as f:
             text = f.read()
         
         update_task_status(book_id, "parsing", 20, "正在分析章节结构...")
+        book.parse_progress = 20
+        db.commit()
         
         # 切分章节
         splitter = ChapterSplitter()
         result = splitter.split(text)
         
         update_task_status(book_id, "parsing", 60, f"识别到 {len(result.chapters)} 个章节，正在保存...")
+        book.parse_progress = 60
+        db.commit()
         
         # 删除旧章节
         db.query(BookChapter).filter(BookChapter.book_id == book_id).delete()
@@ -595,6 +712,7 @@ def _do_parse_book(book_id: int):
         book.total_words = result.total_words
         book.status = ParseStatus.CHAPTERS_DONE.value
         book.parse_progress = 100
+        book.error_message = None
         
         db.commit()
         
@@ -609,6 +727,7 @@ def _do_parse_book(book_id: int):
             book = db.query(BookSource).filter(BookSource.id == book_id).first()
             if book:
                 book.status = ParseStatus.FAILED.value
+                book.parse_progress = 0
                 book.error_message = str(e)
                 db.commit()
         except Exception:
@@ -636,21 +755,31 @@ async def analyze_book(
     if not book:
         raise HTTPException(status_code=404, detail="书籍不存在")
     
-    if book.status not in [ParseStatus.CHAPTERS_DONE.value, ParseStatus.COMPLETED.value]:
+    active_task = get_task_status(book_id)
+    if book.status == ParseStatus.ANALYZING.value and active_task:
+        return {
+            "message": "AI 分析任务已在进行中",
+            "book_id": book_id,
+            "status": "analyzing"
+        }
+    
+    if book.status not in [
+        ParseStatus.CHAPTERS_DONE.value,
+        ParseStatus.COMPLETED.value,
+        ParseStatus.ANALYZING.value,
+    ]:
         raise HTTPException(status_code=400, detail="请先完成章节切分")
     
     # 更新状态
     book.status = ParseStatus.ANALYZING.value
+    book.parse_progress = 0
+    book.error_message = None
     db.commit()
     
     update_task_status(book_id, "analyzing", 0, "开始AI分析...")
     
     # 启动后台任务
-    def run_analyze():
-        asyncio.run(_do_analyze_book(book_id))
-    
-    thread = threading.Thread(target=run_analyze, daemon=True)
-    thread.start()
+    _launch_analyze_task(book_id)
     
     return {
         "message": "AI分析任务已启动",
@@ -671,6 +800,12 @@ async def _do_analyze_book(book_id: int):
         if not book:
             update_task_status(book_id, "failed", 0, "书籍不存在", "书籍记录未找到")
             return
+        
+        book.status = ParseStatus.ANALYZING.value
+        if (book.parse_progress or 0) >= 100:
+            book.parse_progress = 0
+        book.error_message = None
+        db.commit()
         
         # 获取章节
         chapters_db = db.query(BookChapter).filter(
@@ -701,6 +836,12 @@ async def _do_analyze_book(book_id: int):
         # 进度回调
         async def on_progress(stage: str, progress: int, message: str):
             update_task_status(book_id, "analyzing", progress, message)
+            normalized_progress = max(0, min(100, int(progress)))
+            if book.parse_progress != normalized_progress or book.status != ParseStatus.ANALYZING.value:
+                book.status = ParseStatus.ANALYZING.value
+                book.parse_progress = normalized_progress
+                book.error_message = None
+                db.commit()
         
         # 执行分析
         results, chapter_summaries = await analyzer.analyze_all(chapters, on_progress=on_progress)
@@ -758,7 +899,9 @@ async def _do_analyze_book(book_id: int):
             db.add(analysis)
         
         book.status = ParseStatus.COMPLETED.value
+        book.parse_progress = 100
         book.parsed_at = datetime.now()
+        book.error_message = None
         db.commit()
         
         update_task_status(book_id, "completed", 100, f"分析完成，提取了 {len(results)} 类信息")
@@ -774,6 +917,7 @@ async def _do_analyze_book(book_id: int):
             book = db.query(BookSource).filter(BookSource.id == book_id).first()
             if book:
                 book.status = ParseStatus.FAILED.value
+                book.parse_progress = 0
                 book.error_message = str(e)
                 db.commit()
         except Exception:
@@ -801,13 +945,32 @@ async def get_parse_status(
     
     # 获取任务状态
     task_status = get_task_status(book_id)
+    if task_status is None:
+        task_status = _recover_interrupted_task(book)
+
+    db_status = book.status
+    status_value = task_status.get("status") if task_status else db_status
+    if db_status in {
+        ParseStatus.CHAPTERS_DONE.value,
+        ParseStatus.COMPLETED.value,
+        ParseStatus.FAILED.value,
+    }:
+        status_value = db_status
+
+    progress_value = int(task_status.get("progress", book.parse_progress) if task_status else (book.parse_progress or 0))
+    if status_value in {ParseStatus.CHAPTERS_DONE.value, ParseStatus.COMPLETED.value}:
+        progress_value = 100
+
+    message_value = task_status.get("message") if task_status else ""
+    if not message_value:
+        message_value = _default_status_message(status_value)
     
     return ParseStatusResponse(
-        status=task_status.get("status", book.status),
-        progress=task_status.get("progress", book.parse_progress),
-        message=task_status.get("message", ""),
+        status=status_value,
+        progress=progress_value,
+        message=message_value,
         chapters_count=book.total_chapters,
-        error=task_status.get("error") or book.error_message,
+        error=(task_status.get("error") if task_status else None) or book.error_message,
     )
 
 

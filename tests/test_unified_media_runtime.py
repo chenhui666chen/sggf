@@ -51,12 +51,12 @@ def test_media_runtime_generate_image_respects_explicit_model(monkeypatch: pytes
 
     result = runtime.generate_image(
         prompt="hero portrait",
-        model_id="wanx-v1-turbo",
+        model_id="wan2.6-t2i",
         use_fallback=False,
     )
 
     assert result.success is True
-    assert captured["model_id"] == "wanx-v1-turbo"
+    assert captured["model_id"] == "wan2.6-t2i"
 
 
 def test_media_runtime_select_model_reroutes_incompatible_preferred_video_model(
@@ -110,7 +110,7 @@ def test_media_runtime_select_model_reroutes_incompatible_preferred_video_model(
     assert spec.id == "wan2.6-t2v"
 
 
-def test_media_runtime_deprioritizes_failed_catalog_preferred_model(
+def test_media_runtime_select_model_keeps_canonical_wan_image_model(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
@@ -122,12 +122,8 @@ def test_media_runtime_deprioritizes_failed_catalog_preferred_model(
             {
                 "version": 1,
                 "entries": {
-                    "wanx-v1": {
+                    "wan2.6-t2i": {
                         "verification_status": "verified",
-                        "last_verified_at": "2026-03-21T00:00:00+00:00",
-                    },
-                    "wanx-v1-turbo": {
-                        "verification_status": "failed",
                         "last_verified_at": "2026-03-21T00:00:00+00:00",
                     },
                 },
@@ -143,11 +139,11 @@ def test_media_runtime_deprioritizes_failed_catalog_preferred_model(
     spec = runtime.select_model(
         operation="generate_image",
         modality="text_to_image",
-        preferred_model="wanx-v1-turbo",
+        preferred_model="wan2.6-t2i",
         strategy="balanced",
     )
 
-    assert spec.id == "wanx-v1"
+    assert spec.id == "wan2.6-t2i"
 
 
 def test_media_runtime_multi_image_edit_prefers_verified_multi_image_model(
@@ -430,7 +426,7 @@ def test_media_runtime_get_model_info_exposes_catalog_routing_signal(
             {
                 "version": 1,
                 "entries": {
-                    "wanx-v1": {
+                    "wan2.6-t2i": {
                         "verification_status": "verified",
                         "last_verified_at": "2026-03-21T00:00:00+00:00",
                         "capability_hints": {
@@ -458,10 +454,10 @@ def test_media_runtime_get_model_info_exposes_catalog_routing_signal(
     monkeypatch.setattr(
         runtime._registry,
         "get_model_info",
-        lambda model_id: {"id": model_id, "name": "Wanx", "provider": "alibaba"},
+        lambda model_id: {"id": model_id, "name": "Wan 2.6 T2I", "provider": "alibaba"},
     )
 
-    info = runtime.get_model_info("wanx-v1")
+    info = runtime.get_model_info("wan2.6-t2i")
 
     assert info is not None
     assert info["catalog_routing"]["verification_status"] == "verified"

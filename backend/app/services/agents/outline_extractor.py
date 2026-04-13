@@ -54,12 +54,15 @@ class OutlineExtractor:
             结构化细纲字典，包含：
             - chapter_number: 章节号
             - title: 章节标题
-            - scene_objective: 场景目标
+            - scene_goal: 场景目标
             - conflict_design: 冲突设计
-            - emotion_curve: 情绪曲线
-            - climax_points: 爽点类型
-            - ending_hook: 结尾钩子
             - key_events: 关键事件列表
+            - involved_characters: 涉及人物
+            - character_progress: 人物推进
+            - plot_function: 情节作用
+            - ending_hook: 结尾钩子
+            - highlight_type: 爽点类型（可选）
+            - foreshadowing_item: 伏笔事项（可选）
         """
         logger.info(f"🔍 开始提取第{chapter_number}章细纲：{chapter_title}")
         
@@ -188,20 +191,29 @@ class OutlineExtractor:
 ## 冲突设计
 （80-120字，本章的主要冲突是什么？冲突如何展开和升级？包含几个关键节点）
 
-## 情绪曲线
-（30-50字，读者情绪如何变化？从什么状态到什么状态？）
-
-## 爽点类型
-（20-40字，本章的核心爽点是什么？打脸/逆袭/获得/突破/揭秘等）
-
-## 结尾钩子
-（20-40字，章节结尾留下什么悬念或期待？）
-
 ## 关键事件
 （列出3-5个关键情节节点，每个10-20字）
 1. 
 2. 
 3. 
+
+## 涉及人物
+（列出本章最关键的出场人物，使用顿号分隔）
+
+## 人物推进
+（30-60字，本章人物关系、立场、心理或能力出现了什么关键变化）
+
+## 情节作用
+（30-60字，本章在整段剧情中的职责，例如承接/升级/转折/伏笔回收）
+
+## 结尾钩子
+（20-40字，章节结尾留下什么悬念或下一章驱动力）
+
+## 爽点类型
+（可选，20-40字；如本章没有明确爽点可写“无”）
+
+## 伏笔事项
+（可选，20-40字；如没有明确伏笔可写“无”）
 
 【注意事项】
 1. 必须基于实际内容提取，不要添加原文没有的情节
@@ -216,12 +228,15 @@ class OutlineExtractor:
         
         # 初始化结果字典
         extracted = {
-            "scene_objective": "",
+            "scene_goal": "",
             "conflict_design": "",
-            "emotion_curve": "",
-            "climax_points": "",
+            "key_events": [],
+            "involved_characters": "",
+            "character_progress": "",
+            "plot_function": "",
             "ending_hook": "",
-            "key_events": []
+            "highlight_type": "",
+            "foreshadowing_item": "",
         }
         
         try:
@@ -236,27 +251,12 @@ class OutlineExtractor:
                 # 提取场景目标
                 if section.startswith("场景目标") or section.startswith("场景目标"):
                     content = section.split("\n", 1)[-1].strip()
-                    extracted["scene_objective"] = content.replace("（", "").replace("）", "")[:200]
+                    extracted["scene_goal"] = content.replace("（", "").replace("）", "")[:200]
                 
                 # 提取冲突设计
                 elif section.startswith("冲突设计"):
                     content = section.split("\n", 1)[-1].strip()
                     extracted["conflict_design"] = content.replace("（", "").replace("）", "")[:300]
-                
-                # 提取情绪曲线
-                elif section.startswith("情绪曲线"):
-                    content = section.split("\n", 1)[-1].strip()
-                    extracted["emotion_curve"] = content.replace("（", "").replace("）", "")[:200]
-                
-                # 提取爽点类型
-                elif section.startswith("爽点类型"):
-                    content = section.split("\n", 1)[-1].strip()
-                    extracted["climax_points"] = content.replace("（", "").replace("）", "")[:150]
-                
-                # 提取结尾钩子
-                elif section.startswith("结尾钩子"):
-                    content = section.split("\n", 1)[-1].strip()
-                    extracted["ending_hook"] = content.replace("（", "").replace("）", "")[:150]
                 
                 # 提取关键事件
                 elif section.startswith("关键事件"):
@@ -270,12 +270,42 @@ class OutlineExtractor:
                             if event and len(event) > 3:
                                 events.append(event[:100])
                     extracted["key_events"] = events[:5]  # 最多5个
+
+                elif section.startswith("涉及人物"):
+                    content = section.split("\n", 1)[-1].strip()
+                    extracted["involved_characters"] = content.replace("（", "").replace("）", "")[:120]
+
+                elif section.startswith("人物推进"):
+                    content = section.split("\n", 1)[-1].strip()
+                    extracted["character_progress"] = content.replace("（", "").replace("）", "")[:200]
+
+                elif section.startswith("情节作用"):
+                    content = section.split("\n", 1)[-1].strip()
+                    extracted["plot_function"] = content.replace("（", "").replace("）", "")[:200]
+
+                elif section.startswith("结尾钩子"):
+                    content = section.split("\n", 1)[-1].strip()
+                    extracted["ending_hook"] = content.replace("（", "").replace("）", "")[:150]
+
+                elif section.startswith("爽点类型"):
+                    content = section.split("\n", 1)[-1].strip()
+                    extracted["highlight_type"] = content.replace("（", "").replace("）", "")[:150]
+
+                elif section.startswith("伏笔事项"):
+                    content = section.split("\n", 1)[-1].strip()
+                    extracted["foreshadowing_item"] = content.replace("（", "").replace("）", "")[:150]
             
             # 验证关键字段
-            if not extracted["scene_objective"]:
-                extracted["scene_objective"] = "场景目标未明确提取"
+            if not extracted["scene_goal"]:
+                extracted["scene_goal"] = "场景目标未明确提取"
             if not extracted["conflict_design"]:
                 extracted["conflict_design"] = "冲突设计未明确提取"
+            if not extracted["involved_characters"]:
+                extracted["involved_characters"] = "待补充"
+            if not extracted["character_progress"]:
+                extracted["character_progress"] = "人物关系或状态出现阶段性变化。"
+            if not extracted["plot_function"]:
+                extracted["plot_function"] = "承接本章已发生事件并推动后续主线。"
             
             return extracted
             
@@ -297,12 +327,15 @@ class OutlineExtractor:
         return {
             "chapter_number": chapter_number,
             "title": chapter_title,
-            "scene_objective": f"[自动提取] {chapter_title}",
+            "scene_goal": f"[自动提取] {chapter_title}",
             "conflict_design": summary,
-            "emotion_curve": "未提取",
-            "climax_points": "未提取",
-            "ending_hook": "未提取",
             "key_events": [],
+            "involved_characters": "待补充",
+            "character_progress": "人物关系或状态出现阶段性变化。",
+            "plot_function": "承接本章已发生事件并推动后续主线。",
+            "ending_hook": "待补充",
+            "highlight_type": "",
+            "foreshadowing_item": "",
             "extraction_method": "fallback"
         }
     
@@ -322,24 +355,12 @@ class OutlineExtractor:
         text = f"### 第{chapter_num}章：{title}\n\n"
         
         # 场景目标
-        if outline_data.get("scene_objective"):
-            text += f"**场景目标**：{outline_data['scene_objective']}\n\n"
+        if outline_data.get("scene_goal"):
+            text += f"**场景目标**：{outline_data['scene_goal']}\n\n"
         
         # 冲突设计
         if outline_data.get("conflict_design"):
             text += f"**冲突设计**：{outline_data['conflict_design']}\n\n"
-        
-        # 情绪曲线
-        if outline_data.get("emotion_curve"):
-            text += f"**情绪曲线**：{outline_data['emotion_curve']}\n\n"
-        
-        # 爽点类型
-        if outline_data.get("climax_points"):
-            text += f"**爽点类型**：{outline_data['climax_points']}\n\n"
-        
-        # 结尾钩子
-        if outline_data.get("ending_hook"):
-            text += f"**结尾钩子**：{outline_data['ending_hook']}\n\n"
         
         # 关键事件
         if outline_data.get("key_events"):
@@ -347,6 +368,24 @@ class OutlineExtractor:
             for idx, event in enumerate(outline_data["key_events"], 1):
                 text += f"{idx}. {event}\n"
             text += "\n"
+
+        if outline_data.get("involved_characters"):
+            text += f"**涉及人物**：{outline_data['involved_characters']}\n\n"
+
+        if outline_data.get("character_progress"):
+            text += f"**人物推进**：{outline_data['character_progress']}\n\n"
+
+        if outline_data.get("plot_function"):
+            text += f"**情节作用**：{outline_data['plot_function']}\n\n"
+
+        if outline_data.get("ending_hook"):
+            text += f"**结尾钩子**：{outline_data['ending_hook']}\n\n"
+
+        if outline_data.get("highlight_type"):
+            text += f"**爽点类型**：{outline_data['highlight_type']}\n\n"
+
+        if outline_data.get("foreshadowing_item"):
+            text += f"**伏笔事项**：{outline_data['foreshadowing_item']}\n\n"
         
         return text
 

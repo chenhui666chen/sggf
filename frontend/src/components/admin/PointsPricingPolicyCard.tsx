@@ -17,7 +17,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import { PriceCheck as PriceCheckIcon } from '@mui/icons-material'
+import PriceCheckIcon from '@mui/icons-material/PriceCheck'
 import {
   type AdminPointsPricingPolicy,
   type AdminPointsPricingPolicyUpdatePayload,

@@ -1,0 +1,640 @@
+import { useMemo, type RefObject } from 'react'
+import {
+  Box,
+  Button,
+  Chip,
+  Grid,
+  Paper,
+  Stack,
+  Typography,
+} from '@mui/material'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import FormattedContent from '../common/FormattedContent'
+import {
+  formatStoryExpansionDocument,
+  type StoryExpansionContentKind,
+} from '@/utils/storyExpansionResultFormatter'
+import type {
+  StoryExpansionChangeCardTone,
+  StoryExpansionChangeCardView,
+  StoryExpansionDeltaSectionView,
+  StoryExpansionExecutionRoundView,
+  StoryExpansionFinalSectionView,
+  StoryExpansionResultDisplayView,
+  StoryExpansionResultQuickJumpItem,
+  StoryExpansionResultSectionKey,
+} from '@/utils/storyExpansionResultView'
+
+export interface StoryExpansionSummaryCard {
+  label: string
+  text: string
+}
+
+export interface StoryExpansionQuickJumpItemWithRef extends StoryExpansionResultQuickJumpItem {
+  targetRef: RefObject<HTMLDivElement | null>
+}
+
+interface MetricCardProps {
+  label: string
+  value: string
+  helperText?: string
+  accentColor?: string
+}
+
+interface TextSectionCardProps {
+  title: string
+  content: string
+  emptyText?: string
+  contentKind?: StoryExpansionContentKind
+  minHeight?: number
+  onCopy?: () => void
+}
+
+function getChangeCardAppearance(tone: StoryExpansionChangeCardTone): {
+  borderColor: string
+  background?: string
+  backgroundColor?: string
+  itemBackground: string
+} {
+  if (tone === 'success') {
+    return {
+      borderColor: 'rgba(22, 163, 74, 0.24)',
+      background: 'linear-gradient(180deg, rgba(240,253,244,0.94) 0%, rgba(255,255,255,0.98) 100%)',
+      itemBackground: '#f7fff9',
+    }
+  }
+
+  if (tone === 'warning') {
+    return {
+      borderColor: 'rgba(217, 119, 6, 0.25)',
+      background: 'linear-gradient(180deg, rgba(255,251,235,0.92) 0%, rgba(255,255,255,0.98) 100%)',
+      itemBackground: '#fffdf7',
+    }
+  }
+
+  return {
+    borderColor: 'divider',
+    backgroundColor: 'background.paper',
+    itemBackground: '#fffdf5',
+  }
+}
+
+function MetricCard({
+  label,
+  value,
+  helperText,
+  accentColor = '#0f766e',
+}: MetricCardProps) {
+  return (
+    <Paper
+      variant="outlined"
+      sx={{
+        p: 1.75,
+        height: '100%',
+        borderRadius: 2,
+        borderColor: 'rgba(15, 118, 110, 0.16)',
+        background:
+          'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.98) 100%)',
+      }}
+    >
+      <Typography variant="caption" color="text.secondary">
+        {label}
+      </Typography>
+      <Typography
+        variant="h6"
+        sx={{
+          mt: 0.6,
+          fontWeight: 700,
+          color: accentColor,
+          lineHeight: 1.25,
+          wordBreak: 'break-word',
+        }}
+      >
+        {value}
+      </Typography>
+      {helperText ? (
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
+          {helperText}
+        </Typography>
+      ) : null}
+    </Paper>
+  )
+}
+
+function TextSectionCard({
+  title,
+  content,
+  emptyText = '内容为空',
+  contentKind = 'generic',
+  minHeight = 220,
+  onCopy,
+}: TextSectionCardProps) {
+  const formattedContent = useMemo(
+    () => formatStoryExpansionDocument(content || '', contentKind),
+    [content, contentKind],
+  )
+
+  return (
+    <Paper
+      elevation={0}
+      sx={{
+        p: 2,
+        height: '100%',
+        borderRadius: 2.5,
+        border: '1px solid',
+        borderColor: 'divider',
+        backgroundColor: 'background.paper',
+      }}
+    >
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 1,
+          mb: 1.5,
+        }}
+      >
+        <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+          {title}
+        </Typography>
+        {onCopy ? (
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<ContentCopyIcon fontSize="small" />}
+            onClick={onCopy}
+            sx={{ borderRadius: 1.5, textTransform: 'none' }}
+          >
+            复制
+          </Button>
+        ) : null}
+      </Box>
+
+      <Box
+        sx={{
+          maxHeight: minHeight,
+          minHeight: Math.min(minHeight, 180),
+          overflow: 'auto',
+          p: 2,
+          borderRadius: 2,
+          border: '1px solid',
+          borderColor: 'divider',
+          bgcolor: '#fbfcfe',
+        }}
+      >
+        {formattedContent ? (
+          <FormattedContent
+            content={formattedContent}
+            sx={{
+              fontSize: '0.92rem',
+              lineHeight: 1.8,
+              '& p:first-of-type': {
+                marginTop: 0,
+              },
+              '& p:last-of-type': {
+                marginBottom: 0,
+              },
+            }}
+          />
+        ) : (
+          <Typography variant="body2" color="text.secondary">
+            {emptyText}
+          </Typography>
+        )}
+      </Box>
+    </Paper>
+  )
+}
+
+interface StoryExpansionOverviewSectionProps {
+  expansionModeLabel: string
+  strategyLabel: string
+  intentLabel: string
+  preserveWrittenModeLabel: string
+  executionModeLabel: string
+  resultDisplay: StoryExpansionResultDisplayView
+}
+
+export function StoryExpansionOverviewSection({
+  expansionModeLabel,
+  strategyLabel,
+  intentLabel,
+  preserveWrittenModeLabel,
+  executionModeLabel,
+  resultDisplay,
+}: StoryExpansionOverviewSectionProps) {
+  return (
+    <Paper
+      elevation={0}
+      sx={{
+        p: 2.25,
+        borderRadius: 3,
+        border: '1px solid',
+        borderColor: 'rgba(15, 118, 110, 0.18)',
+        background:
+          'linear-gradient(135deg, rgba(240,253,250,0.95) 0%, rgba(248,250,252,0.98) 52%, rgba(255,255,255,0.98) 100%)',
+      }}
+    >
+      <Stack spacing={1.5}>
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            gap: 2,
+            flexWrap: 'wrap',
+          }}
+        >
+          <Box>
+            <Typography variant="overline" sx={{ color: '#0f766e', letterSpacing: 1.4 }}>
+              协同总览
+            </Typography>
+            <Typography variant="h5" sx={{ fontWeight: 800, mt: 0.5 }}>
+              {expansionModeLabel}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
+              {resultDisplay.executionModeReasonText}
+            </Typography>
+          </Box>
+
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+            <Chip label={`策略：${strategyLabel}`} color="primary" variant="outlined" />
+            <Chip label={`意图：${intentLabel}`} color="secondary" variant="outlined" />
+            <Chip label={`正文处理：${preserveWrittenModeLabel}`} variant="outlined" />
+            <Chip label={`执行方式：${executionModeLabel}`} variant="outlined" />
+          </Stack>
+        </Box>
+
+        <Grid container spacing={1.5}>
+          <Grid item xs={12} sm={6} lg={3}>
+            <MetricCard
+              label="细化章节变化"
+              value={resultDisplay.chapterMetricValue}
+              accentColor="#0f766e"
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} lg={3}>
+            <MetricCard
+              label="人物变化"
+              value={resultDisplay.characterMetricValue}
+              accentColor="#15803d"
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} lg={3}>
+            <MetricCard
+              label="协同评分"
+              value={resultDisplay.scoreMetricValue}
+              helperText={resultDisplay.scoreMetricHelperText}
+              accentColor="#b45309"
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} lg={3}>
+            <MetricCard
+              label="执行轮次"
+              value={resultDisplay.roundsMetricValue}
+              helperText={resultDisplay.roundsMetricHelperText}
+              accentColor="#1d4ed8"
+            />
+          </Grid>
+        </Grid>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+          <Chip
+            label={resultDisplay.addedChapterChipLabel}
+            color={resultDisplay.addedChapterCount > 0 ? 'success' : 'default'}
+            variant="outlined"
+          />
+          <Chip
+            label={resultDisplay.addedCharacterChipLabel}
+            color={resultDisplay.addedCharacterCount > 0 ? 'secondary' : 'default'}
+            variant="outlined"
+          />
+          {resultDisplay.executionRoundsChipLabel ? (
+            <Chip label={resultDisplay.executionRoundsChipLabel} variant="outlined" />
+          ) : null}
+          {resultDisplay.alignmentRepairsChipLabel ? (
+            <Chip
+              label={resultDisplay.alignmentRepairsChipLabel}
+              color="success"
+              variant="outlined"
+            />
+          ) : null}
+          {resultDisplay.alignmentWarningsChipLabel ? (
+            <Chip
+              label={resultDisplay.alignmentWarningsChipLabel}
+              color="warning"
+              variant="outlined"
+            />
+          ) : null}
+        </Stack>
+      </Stack>
+    </Paper>
+  )
+}
+
+interface StoryExpansionQuickJumpBarProps {
+  items: StoryExpansionQuickJumpItemWithRef[]
+  onJump: (sectionRef: RefObject<HTMLDivElement | null>) => void
+}
+
+export function StoryExpansionQuickJumpBar({
+  items,
+  onJump,
+}: StoryExpansionQuickJumpBarProps) {
+  return (
+    <Paper
+      elevation={0}
+      sx={{
+        p: 1.5,
+        borderRadius: 2.5,
+        border: '1px solid',
+        borderColor: 'divider',
+        backgroundColor: 'rgba(248, 250, 252, 0.92)',
+        backdropFilter: 'blur(8px)',
+        position: 'sticky',
+        top: -17,
+        zIndex: 2,
+      }}
+    >
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+        快速定位
+      </Typography>
+      <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+        {items.map((item) => (
+          <Chip
+            key={item.key}
+            label={item.label}
+            clickable
+            onClick={() => onJump(item.targetRef)}
+            variant="outlined"
+            sx={{ borderRadius: 1.5 }}
+          />
+        ))}
+      </Stack>
+    </Paper>
+  )
+}
+
+interface StoryExpansionSummarySectionProps {
+  summary: StoryExpansionSummaryCard
+}
+
+export function StoryExpansionSummarySection({
+  summary,
+}: StoryExpansionSummarySectionProps) {
+  return (
+    <Paper
+      elevation={0}
+      sx={{
+        p: 2,
+        borderRadius: 2.5,
+        border: '1px solid',
+        borderColor: 'divider',
+        backgroundColor: 'background.paper',
+      }}
+    >
+      <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
+        {summary.label}
+      </Typography>
+      <FormattedContent
+        content={summary.text}
+        sx={{
+          fontSize: '0.95rem',
+          lineHeight: 1.8,
+          '& p': { margin: 0 },
+        }}
+      />
+    </Paper>
+  )
+}
+
+interface StoryExpansionChangeCardsSectionProps {
+  cards: StoryExpansionChangeCardView[]
+}
+
+export function StoryExpansionChangeCardsSection({
+  cards,
+}: StoryExpansionChangeCardsSectionProps) {
+  return (
+    <Grid container spacing={2}>
+      {cards.map((card) => {
+        const appearance = getChangeCardAppearance(card.tone)
+
+        return (
+          <Grid item xs={12} md={card.kind === 'outline_operations' ? true : 4} key={card.key}>
+            <Paper
+              elevation={0}
+              sx={{
+                p: 2,
+                height: '100%',
+                borderRadius: 2.5,
+                border: '1px solid',
+                borderColor: appearance.borderColor,
+                ...(appearance.background ? { background: appearance.background } : {}),
+                ...(appearance.backgroundColor ? { backgroundColor: appearance.backgroundColor } : {}),
+              }}
+            >
+              <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.25 }}>
+                {card.title}
+              </Typography>
+
+              {card.kind === 'chips' ? (
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                  {card.chips.map((name) => (
+                    <Chip key={name} label={name} color="secondary" variant="outlined" />
+                  ))}
+                </Box>
+              ) : null}
+
+              {card.kind === 'messages' ? (
+                <Stack spacing={1}>
+                  {card.messages.map((message, index) => (
+                    <Paper
+                      key={`${message}-${index}`}
+                      variant="outlined"
+                      sx={{ p: 1.25, borderRadius: 2, bgcolor: appearance.itemBackground }}
+                    >
+                      <Typography variant="body2" color="text.secondary">
+                        {message}
+                      </Typography>
+                    </Paper>
+                  ))}
+                </Stack>
+              ) : null}
+
+              {card.kind === 'outline_operations' ? (
+                <Stack spacing={1.25}>
+                  {card.outlineOperations.map((op) => (
+                    <Paper
+                      key={op.key}
+                      variant="outlined"
+                      sx={{ p: 1.5, borderRadius: 2 }}
+                    >
+                      <Stack
+                        direction="row"
+                        spacing={1}
+                        useFlexGap
+                        flexWrap="wrap"
+                        alignItems="center"
+                        sx={{ mb: op.goal ? 0.75 : 0 }}
+                      >
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                          {op.title}
+                        </Typography>
+                        <Chip
+                          size="small"
+                          label={op.requestedLabel}
+                          variant="outlined"
+                        />
+                        <Chip
+                          size="small"
+                          label={op.generatedLabel}
+                          color="success"
+                          variant="outlined"
+                        />
+                      </Stack>
+                      {op.goal ? (
+                        <Typography variant="body2" color="text.secondary">
+                          {op.goal}
+                        </Typography>
+                      ) : null}
+                      {op.generatedTitles.length > 0 ? (
+                        <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mt: 1 }}>
+                          {op.generatedTitles.map((title) => (
+                            <Chip key={title} label={title} size="small" />
+                          ))}
+                        </Box>
+                      ) : null}
+                    </Paper>
+                  ))}
+                </Stack>
+              ) : null}
+            </Paper>
+          </Grid>
+        )
+      })}
+    </Grid>
+  )
+}
+
+interface StoryExpansionExecutionRoundsSectionProps {
+  rounds: StoryExpansionExecutionRoundView[]
+}
+
+export function StoryExpansionExecutionRoundsSection({
+  rounds,
+}: StoryExpansionExecutionRoundsSectionProps) {
+  return (
+    <Paper
+      elevation={0}
+      sx={{
+        p: 2,
+        borderRadius: 2.5,
+        border: '1px solid',
+        borderColor: 'divider',
+        backgroundColor: 'background.paper',
+      }}
+    >
+      <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.25 }}>
+        协同轮次详情
+      </Typography>
+      <Grid container spacing={1.5}>
+        {rounds.map((round) => (
+          <Grid item xs={12} md={6} xl={4} key={round.key}>
+            <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, height: '100%' }}>
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                  {round.title}
+                </Typography>
+                {round.strategyLabel ? (
+                  <Chip size="small" label={round.strategyLabel} variant="outlined" />
+                ) : null}
+              </Stack>
+
+              <Stack spacing={0.6}>
+                <Typography variant="body2" color="text.secondary">
+                  {round.chapterRangeText}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {round.characterRangeText}
+                </Typography>
+                {round.plotIncrementText ? (
+                  <Typography variant="body2" color="text.secondary">
+                    {round.plotIncrementText}
+                  </Typography>
+                ) : null}
+                {round.characterIncrementText ? (
+                  <Typography variant="body2" color="text.secondary">
+                    {round.characterIncrementText}
+                  </Typography>
+                ) : null}
+                {round.postValidationScoreText ? (
+                  <Typography variant="body2" color="text.secondary">
+                    {round.postValidationScoreText}
+                  </Typography>
+                ) : null}
+              </Stack>
+            </Paper>
+          </Grid>
+        ))}
+      </Grid>
+    </Paper>
+  )
+}
+
+interface StoryExpansionDeltaSectionsProps {
+  sections: StoryExpansionDeltaSectionView[]
+  onCopy: (text: string, message: string) => void
+}
+
+export function StoryExpansionDeltaSections({
+  sections,
+  onCopy,
+}: StoryExpansionDeltaSectionsProps) {
+  return (
+    <Grid container spacing={2}>
+      {sections.map((section) => (
+        <Grid item xs={12} lg={4} key={section.key}>
+          <TextSectionCard
+            title={section.title}
+            content={section.content}
+            contentKind={section.contentKind}
+            minHeight={260}
+            onCopy={() => onCopy(section.content, section.copyMessage)}
+          />
+        </Grid>
+      ))}
+    </Grid>
+  )
+}
+
+interface StoryExpansionFinalSectionsProps {
+  sections: StoryExpansionFinalSectionView[]
+  sectionRefs: Record<StoryExpansionResultSectionKey, RefObject<HTMLDivElement | null>>
+  onCopy: (text: string, message: string) => void
+}
+
+export function StoryExpansionFinalSections({
+  sections,
+  sectionRefs,
+  onCopy,
+}: StoryExpansionFinalSectionsProps) {
+  return (
+    <Grid container spacing={2}>
+      {sections.map((section) => (
+        <Grid item xs={12} lg={section.lg} key={section.key}>
+          <Box ref={sectionRefs[section.key]} sx={{ height: '100%' }}>
+            <TextSectionCard
+              title={section.title}
+              content={section.content}
+              contentKind={section.contentKind}
+              minHeight={560}
+              onCopy={() => onCopy(section.content, section.copyMessage)}
+            />
+          </Box>
+        </Grid>
+      ))}
+    </Grid>
+  )
+}

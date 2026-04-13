@@ -1,11 +1,13 @@
 """
-FastAPI主应用
+FastAPI 主应用
 """
 import logging
 import sys
 import os
+import asyncio
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 # 允许后端直接 import 项目根目录下的轻量模块（如：pipeline/agents/adapters）
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -23,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.db.base import Base, engine
+from app.db.schema_compat import ensure_runtime_schema_compatibility
 from app.api.v1 import auth, projects, chapters, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters, ai_detect, prompt_evolution, ai_trace, book_parser, audiobook, monitoring, script_review, dreamweaver, model_catalog, asset_studio, user_assets, user_center
 from app.api.v1.admin import router as admin_router
 import socketio
@@ -32,8 +35,26 @@ import socketio
 class FlushHandler(logging.StreamHandler):
     """每次写入后强制刷新的 Handler"""
     def emit(self, record):
-        super().emit(record)
-        self.flush()
+        try:
+            message = self.format(record)
+            stream = self.stream
+            payload = message + self.terminator
+
+            try:
+                stream.write(payload)
+            except UnicodeEncodeError:
+                stream_encoding = getattr(stream, "encoding", None) or "utf-8"
+                safe_payload = payload.encode(stream_encoding, errors="replace").decode(
+                    stream_encoding,
+                    errors="replace",
+                )
+                stream.write(safe_payload)
+
+            self.flush()
+        except RecursionError:
+            raise
+        except Exception:
+            self.handleError(record)
 
 
 # 🔧 配置日志 - 确保所有模块的日志都能输出
@@ -96,11 +117,30 @@ from app.models import (
 # 开发环境如果需要快速重置数据库，可以取消下面的注释
 # Base.metadata.create_all(bind=engine)
 
-# 创建FastAPI应用
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """🆕 应用生命周期管理"""
+    ensure_runtime_schema_compatibility()
+
+    # 启动时：初始化主事件循环引用
+    from app.services.chapter_post_save import set_main_event_loop
+    loop = asyncio.get_running_loop()
+    set_main_event_loop(loop)
+    logging.info("✅ 主事件循环已初始化")
+    
+    yield
+    
+    # 关闭时：清理资源
+    logging.info("👋 应用正在关闭...")
+
+
+# 创建 FastAPI 应用
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    debug=settings.DEBUG
+    debug=settings.DEBUG,
+    lifespan=lifespan
 )
 
 # 添加CORS中间件

@@ -320,7 +320,7 @@ NGINX_SSL_KEY_PATH=/etc/letsencrypt/live/sggf.net/privkey.pem
 - `audiobook` 相关 TTS 试听与引擎初始化已改走统一多模态运行时
 - `adapters/adapter_helpers.py` 现在会通过统一多模态运行时执行，不再把显式 `model_id` 当成无效附加参数
 - `SimpleAdapterFactory` 现已支持 runtime wrapper 懒代理，历史代码对 `chat`、`analyze_image`、`analyze_video`、`match_scene` 等旧方法的调用也会自动转发到新机制
-- `qwen3-vl-plus`、`qwen-image-edit-plus`、`qwen-image-edit-max`、`wanx-v1`、`wan2.6-t2v`、`wan2.6-i2v`、`wan2.6-r2v` 已补齐 registry-backed adapter，不再依赖统一运行时内部的 legacy bridge 分支
+- `qwen3-vl-plus`、`qwen-image-edit-plus`、`qwen-image-edit-max`、`wan2.6-t2i`、`wan2.6-t2v`、`wan2.6-i2v`、`wan2.6-r2v` 已补齐 registry-backed adapter，不再依赖统一运行时内部的 legacy bridge 分支
 - `adapters/model_adapters.py` 现在会优先为 `wan_t2i/wan26_t2i`、`wan_t2v/wan26_t2v`、`qwen3_vl_plus`、`qwen3_tts`、`qwen_image_edit_plus`、`qwen_image_edit_max`、`wan_image_edit`、`wan_i2v/wan26_i2v`、`wan_r2v/wan26_r2v`、`qwen_multiperson_fusion` 创建 runtime wrapper，旧 Agent 继续使用旧签名时也会转发到新 registry / TaskSpec 路径
 - 历史媒体 adapter 被直接实例化时，`generate`、`chat`、`analyze_image`、`analyze_video`、`match_scene` 等公开入口现在也会优先薄代理到 runtime wrapper，不再回落到旧 HTTP / DashScope 主链路
 - `legacy_bridge` 对已 wrapper 化的媒体模型旧 fallback 已基本清空，当前仅保留 `jianying` 的旧式兜底；`Qwen3TTSAdapter` 已改为统一委托到新 TTS helper，不再保留独立的旧 DashScope TTS 调用链
@@ -344,7 +344,6 @@ NGINX_SSL_KEY_PATH=/etc/letsencrypt/live/sggf.net/privkey.pem
 
 本次模型调度改造的专项测试报告见：
 
-- [docs/MODEL_DISPATCH_REFACTOR_TEST_REPORT_20260315.md](docs/MODEL_DISPATCH_REFACTOR_TEST_REPORT_20260315.md)
 - [docs/MODEL_DISPATCH_REFACTOR_TEST_REPORT_FINAL_20260315.md](docs/MODEL_DISPATCH_REFACTOR_TEST_REPORT_FINAL_20260315.md)
 - [docs/UNIFIED_MEDIA_RUNTIME_TEST_REPORT_20260315.md](docs/UNIFIED_MEDIA_RUNTIME_TEST_REPORT_20260315.md)
 - [docs/MODEL_KNOWLEDGE_BASE_20260315.md](docs/MODEL_KNOWLEDGE_BASE_20260315.md)

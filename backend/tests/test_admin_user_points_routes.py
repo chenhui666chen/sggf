@@ -12,8 +12,11 @@ from sqlalchemy.pool import StaticPool
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
+REPO_ROOT = ROOT_DIR.parent
+for path in (REPO_ROOT, ROOT_DIR):
+    normalized_path = str(path)
+    if normalized_path not in sys.path:
+        sys.path.insert(0, normalized_path)
 
 os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/test_db")

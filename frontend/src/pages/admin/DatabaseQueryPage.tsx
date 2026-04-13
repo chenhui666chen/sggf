@@ -30,15 +30,13 @@ import {
   AccordionSummary,
   AccordionDetails,
 } from '@mui/material'
-import {
-  PlayArrow as PlayArrowIcon,
-  Clear as ClearIcon,
-  Refresh as RefreshIcon,
-  TableChart as TableChartIcon,
-  History as HistoryIcon,
-  ExpandMore as ExpandMoreIcon,
-  Code as CodeIcon,
-} from '@mui/icons-material'
+import ClearIcon from '@mui/icons-material/Clear'
+import CodeIcon from '@mui/icons-material/Code'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import HistoryIcon from '@mui/icons-material/History'
+import PlayArrowIcon from '@mui/icons-material/PlayArrow'
+import RefreshIcon from '@mui/icons-material/Refresh'
+import TableChartIcon from '@mui/icons-material/TableChart'
 import { apiClient } from '../../services/api'
 
 interface QueryResult {
@@ -139,8 +137,8 @@ const DatabaseQueryPage: React.FC = () => {
       if (response) {
         setTables((response as any).tables || [])
       }
-    } catch (error) {
-      console.error('加载表列表失败:', error)
+    } catch {
+      // 加载表列表失败
     }
   }
 
@@ -152,8 +150,8 @@ const DatabaseQueryPage: React.FC = () => {
       if (response) {
         setTableSchema(response.data as TableSchema)
       }
-    } catch (error) {
-      console.error('加载表结构失败:', error)
+    } catch {
+      // 加载表结构失败
     }
   }
 
@@ -163,8 +161,8 @@ const DatabaseQueryPage: React.FC = () => {
       if (response) {
         setHistory((response as any).items || [])
       }
-    } catch (error) {
-      console.error('加载历史失败:', error)
+    } catch {
+      // 加载历史失败
     }
   }
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta
 import shutil
 from dataclasses import dataclass
@@ -9,6 +10,8 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.models.dreamweaver import (
     DreamweaverAsset,
@@ -255,7 +258,8 @@ def delete_dreamweaver_run(
             ),
             {"project_id": project_id, "pattern": f"%{run_id}%"},
         ).fetchall()
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to query generation_history for run_id=%s: %s", run_id, e)
         gh_rows = []
 
     for gh_id, gh_result in gh_rows:
@@ -263,12 +267,14 @@ def delete_dreamweaver_run(
             continue
         try:
             payload = json.loads(gh_result)
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to parse generation_history JSON for id=%s: %s", gh_id, e)
             continue
         if isinstance(payload, dict) and str(payload.get("run_id") or "").strip() == run_id:
             try:
                 gh_ids.append(int(gh_id))
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to convert gh_id to int: %s", e)
                 continue
 
     if gh_ids:
@@ -323,7 +329,8 @@ def delete_dreamweaver_run(
             try:
                 shutil.rmtree(target)
                 deleted_run_dir = True
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to delete run directory %s: %s", target, e)
                 failed_paths.append(str(target))
 
     return DreamweaverRunDeleteResult(

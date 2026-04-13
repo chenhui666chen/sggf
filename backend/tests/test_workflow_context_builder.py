@@ -1,0 +1,212 @@
+import os
+import sys
+from pathlib import Path
+
+import pytest
+from fastapi import HTTPException
+
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+os.environ.setdefault("DEBUG", "false")
+
+from app.api.v1 import workflow as workflow_module
+from app.services.workflow_context_builder import WorkflowContextBuilder
+
+
+class DummyResult:
+    def __init__(self, row=None):
+        self._row = row
+
+    def fetchone(self):
+        return self._row
+
+
+class DummySession:
+    def __init__(self, rows=None):
+        self.rows = list(rows or [])
+        self.executed = []
+        self.commits = 0
+
+    def execute(self, statement, params=None):
+        self.executed.append((str(statement), params or {}))
+        row = self.rows.pop(0) if self.rows else None
+        return DummyResult(row)
+
+    def commit(self):
+        self.commits += 1
+
+
+def test_load_stage_contents_snapshot_pretty_formats_json_fields() -> None:
+    db = DummySession(
+        rows=[
+            (
+                '{"title":"设定中心"}',
+                '"世界观正文"',
+                '["林岩","扳手"]',
+                '{"outline":"第一幕"}',
+                '"章节初稿"',
+                '"评审报告"',
+                '"终稿"',
+            )
+        ]
+    )
+
+    builder = WorkflowContextBuilder(db)
+    snapshot = builder.load_stage_contents_snapshot(1, pretty_json=True)
+
+    assert snapshot["concept"] == '{\n  "title": "设定中心"\n}'
+    assert snapshot["world_setting"] == "世界观正文"
+    assert snapshot["characters"] == '[\n  "林岩",\n  "扳手"\n]'
+
+
+def test_load_stage_status_snapshot_returns_pending_defaults_when_missing() -> None:
+    db = DummySession(rows=[None])
+
+    builder = WorkflowContextBuilder(db)
+    snapshot = builder.load_stage_status_snapshot(7)
+
+    assert snapshot == {
+        "stage_one_status": "pending",
+        "stage_two_status": "pending",
+        "stage_three_status": "pending",
+        "stage_four_status": "pending",
+        "stage_five_status": "pending",
+    }
+
+
+def test_load_concept_storage_state_parses_json_values() -> None:
+    db = DummySession(rows=[('"故事概念"', '{"阵营":"主角方"}', '["林岩","扳手"]')])
+
+    builder = WorkflowContextBuilder(db)
+    state = builder.load_concept_storage_state(3)
+
+    assert state.concept_value == "故事概念"
+    assert state.world_setting_value == {"阵营": "主角方"}
+    assert state.characters_value == ["林岩", "扳手"]
+
+
+def test_load_epic_framework_state_decodes_framework_fields() -> None:
+    db = DummySession(
+        rows=[
+            (
+                '"长篇框架正文"',
+                "2026-04-13T10:00:00",
+                '"总纲内容"',
+                '{"volumes":[{"volume_number":1}]}',
+            )
+        ]
+    )
+
+    builder = WorkflowContextBuilder(db)
+    state = builder.load_epic_framework_state(11)
+
+    assert state.epic_framework == "长篇框架正文"
+    assert state.framework_generated_at == "2026-04-13T10:00:00"
+    assert state.plot_outline == "总纲内容"
+    assert "volumes" in state.epic_volumes_detail
+    assert "volume_number" in state.epic_volumes_detail
+
+
+def test_read_stage_content_flattens_character_cards_for_prompt_usage() -> None:
+    db = DummySession(rows=[('["林岩","扳手"]',)])
+
+    builder = WorkflowContextBuilder(db)
+    content = builder.read_stage_content(2, "character_designer")
+
+    assert content == "林岩\n扳手"
+
+
+def test_update_project_settings_fields_records_allowed_fields_and_commits() -> None:
+    db = DummySession(rows=[(1,)])
+
+    builder = WorkflowContextBuilder(db)
+    builder.update_project_settings_fields(
+        9,
+        plot_outline="大纲正文",
+        stage_two_status="completed",
+    )
+
+    assert db.commits == 1
+    sql, params = db.executed[-1]
+    assert "UPDATE project_settings" in sql
+    assert "plot_outline = :plot_outline" in sql
+    assert "stage_two_status = :stage_two_status" in sql
+    assert params["project_id"] == 9
+    assert params["plot_outline"] == "大纲正文"
+    assert params["stage_two_status"] == "completed"
+    assert "updated_at" in params
+
+
+def test_update_project_settings_fields_auto_creates_settings_record_when_missing() -> None:
+    db = DummySession(rows=[None, None])
+
+    builder = WorkflowContextBuilder(db)
+    builder.update_project_settings_fields(
+        5,
+        review_report="评审内容",
+    )
+
+    assert db.commits == 2
+    assert "INSERT INTO project_settings" in db.executed[1][0]
+    assert "UPDATE project_settings" in db.executed[2][0]
+
+
+def test_write_stage_content_rejects_unknown_stage() -> None:
+    db = DummySession()
+    builder = WorkflowContextBuilder(db)
+
+    with pytest.raises(ValueError, match="Unsupported workflow stage"):
+        builder.write_stage_content(1, "unknown_stage", "test")
+
+
+def test_validate_story_framework_mode_switch_blocks_total_mode_when_framework_exists() -> None:
+    db = DummySession(rows=[('"现有长篇框架"', "2026-04-13T10:00:00", "", "")])
+    request = workflow_module.ExpandStoryRequest(
+        project_id=18,
+        current_outline="",
+        world_setting="",
+        characters="",
+        target_total_chapters=320,
+        expansion_mode="total",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        workflow_module._validate_story_framework_mode_switch(request, db)
+
+    assert "已存在长篇框架" in exc_info.value.detail
+
+
+def test_validate_story_framework_mode_switch_allows_total_mode_without_framework() -> None:
+    db = DummySession(rows=[None])
+    request = workflow_module.ExpandStoryRequest(
+        project_id=19,
+        current_outline="",
+        world_setting="",
+        characters="",
+        target_total_chapters=120,
+        expansion_mode="total",
+    )
+
+    workflow_module._validate_story_framework_mode_switch(request, db)
+
+
+def test_load_project_chapter_context_prefers_stage_outline_and_builder_data() -> None:
+    db = DummySession(
+        rows=[
+            ("项目标题", "科幻", "太空歌剧", "long", 120, 300, "用户自定义大纲"),
+            ("", '"世界观设定"', '["林岩","回声"]', '"阶段大纲"', "", "", ""),
+        ]
+    )
+
+    context = workflow_module._load_project_chapter_context(db, project_id=22)
+
+    assert context["genre"] == "科幻"
+    assert context["outline"] == "阶段大纲"
+    assert context["world_setting"] == "世界观设定"
+    assert context["characters"] == "林岩\n回声"

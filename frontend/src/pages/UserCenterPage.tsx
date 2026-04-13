@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import {
   Alert,
@@ -114,6 +114,14 @@ const tabs: Array<{ value: UserCenterTab; label: string }> = [
   { value: 'records', label: '记录与回收站' },
   { value: 'security', label: '账户与安全' },
 ]
+
+const USER_CENTER_TAB_VALUES = new Set<UserCenterTab>(tabs.map((tab) => tab.value))
+const USER_CENTER_POINTS_PATH = '/user-center?tab=points'
+
+function normalizeUserCenterTab(value: string | null | undefined): UserCenterTab {
+  if (!value) return 'overview'
+  return USER_CENTER_TAB_VALUES.has(value as UserCenterTab) ? (value as UserCenterTab) : 'overview'
+}
 
 const runningStatuses = new Set(['queued', 'running', 'waiting', 'pending', 'processing'])
 const failedStatuses = new Set(['failed', 'error', 'timeout'])
@@ -287,10 +295,10 @@ function MetricCard(props: { title: string; value: string | number; helper: stri
 
 export default function UserCenterPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const dispatch = useDispatch<AppDispatch>()
   const { user } = useSelector((state: RootState) => state.auth)
 
-  const [activeTab, setActiveTab] = useState<UserCenterTab>('overview')
   const [projects, setProjects] = useState<ProjectRecord[]>([])
   const [audiobookMap, setAudiobookMap] = useState<Record<number, AudiobookProjectSummary[]>>({})
   const [dreamweaverMap, setDreamweaverMap] = useState<Record<number, DreamweaverRunSummary[]>>({})
@@ -326,6 +334,29 @@ export default function UserCenterPage() {
   const userIdentity = user?.email || user?.username || '暂无账号标识'
   const userAvatarFallback = userDisplayName.slice(0, 1).toUpperCase()
   const roleNames = (user?.roles || []).map((role) => role.name).filter(Boolean)
+  const activeTab = normalizeUserCenterTab(searchParams.get('tab'))
+
+  const handleTabChange = useCallback(
+    (nextTab: UserCenterTab) => {
+      const nextSearchParams = new URLSearchParams(searchParams)
+      if (nextTab === 'overview') {
+        nextSearchParams.delete('tab')
+      } else {
+        nextSearchParams.set('tab', nextTab)
+      }
+      setSearchParams(nextSearchParams, { replace: true })
+    },
+    [searchParams, setSearchParams],
+  )
+
+  useEffect(() => {
+    const rawTab = searchParams.get('tab')
+    if (!rawTab) return
+    if (normalizeUserCenterTab(rawTab) === rawTab) return
+    const nextSearchParams = new URLSearchParams(searchParams)
+    nextSearchParams.delete('tab')
+    setSearchParams(nextSearchParams, { replace: true })
+  }, [searchParams, setSearchParams])
 
   const loadUserAssets = useCallback(async (silent = false) => {
     if (!silent) setAssetListLoading(true)
@@ -562,14 +593,14 @@ export default function UserCenterPage() {
   const pointsAccountStatusMeta = useMemo(() => {
     if (pointsAccountStatus === 'partial') {
       return {
-        label: '部分接入',
-        description: '已有真实账本来源接入用户中心，后续会继续扩展更多消费和权益来源。',
+        label: '已接入账本',
+        description: '已有真实积分账本与任务计费链路接入用户中心，后续会继续扩展更多消费和权益来源。',
         color: 'info' as const,
       }
     }
     return {
-      label: '规划中',
-      description: '积分账户结构已预留，当前以已接入账本和待接入信号并存的方式落地。',
+      label: '逐步扩展',
+      description: '积分账户结构已就绪，当前已支持积分预检和部分任务计费，更多权益与消费来源会继续接入。',
       color: 'warning' as const,
     }
   }, [pointsAccountStatus])
@@ -1461,7 +1492,7 @@ export default function UserCenterPage() {
                         size="small"
                         variant="outlined"
                         disabled={isSubmitting}
-                        onClick={() => void handleUpdateUserAsset(asset.id, { archived: !Boolean(asset.archived_at) })}
+                        onClick={() => void handleUpdateUserAsset(asset.id, { archived: !asset.archived_at })}
                       >
                         {asset.archived_at ? '恢复活跃' : '归档'}
                       </Button>
@@ -1623,7 +1654,7 @@ export default function UserCenterPage() {
                 </Stack>
               </Stack>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1.25 }}>
-                这里先展示读模型口径的实际消耗、运行中预估和建议冻结，不直接改动正式积分余额。
+                这里展示积分读模型聚合后的实际消耗、运行中预估和建议冻结，冻结、释放与结算事件会同步反映到账本视图。
               </Typography>
               <Grid container spacing={2} sx={{ mt: 0.5 }}>
                 <Grid item xs={12} sm={6}>
@@ -1703,7 +1734,7 @@ export default function UserCenterPage() {
                         <Chip size="small" color="warning" label={`建议冻结 ${formatAccountMetric(item.suggested_frozen_points)} 积分`} />
                       ) : null}
                       {item.actionPath ? (
-                        <Button size="small" variant="outlined" onClick={() => navigate(item.actionPath || '/user-center')}>
+                        <Button size="small" variant="outlined" onClick={() => navigate(item.actionPath || USER_CENTER_POINTS_PATH)}>
                           {item.actionLabel || '查看来源'}
                         </Button>
                       ) : null}
@@ -1803,7 +1834,7 @@ export default function UserCenterPage() {
                     <Stack spacing={1} alignItems={{ xs: 'flex-start', sm: 'flex-end' }}>
                       <Chip color="warning" variant="outlined" label={formatCurrency(entry.amount)} />
                       {entry.actionPath ? (
-                        <Button size="small" variant="outlined" onClick={() => navigate(entry.actionPath || '/user-center')}>
+                        <Button size="small" variant="outlined" onClick={() => navigate(entry.actionPath || USER_CENTER_POINTS_PATH)}>
                           {entry.actionLabel || '查看来源'}
                         </Button>
                       ) : null}
@@ -1840,7 +1871,7 @@ export default function UserCenterPage() {
                       </Typography>
                     </Box>
                     {signal.actionPath ? (
-                      <Button size="small" variant="outlined" onClick={() => navigate(signal.actionPath || '/user-center')}>
+                      <Button size="small" variant="outlined" onClick={() => navigate(signal.actionPath || USER_CENTER_POINTS_PATH)}>
                         {signal.actionLabel || '查看来源'}
                       </Button>
                     ) : null}
@@ -2106,7 +2137,7 @@ export default function UserCenterPage() {
                         label={formatPointsDelta(entry.amount, entry.direction)}
                       />
                       {entry.actionPath ? (
-                        <Button size="small" variant="outlined" onClick={() => navigate(entry.actionPath || '/user-center')}>
+                        <Button size="small" variant="outlined" onClick={() => navigate(entry.actionPath || USER_CENTER_POINTS_PATH)}>
                           {entry.actionLabel || '查看来源'}
                         </Button>
                       ) : null}
@@ -2147,7 +2178,7 @@ export default function UserCenterPage() {
                     <Stack spacing={1} alignItems={{ xs: 'flex-start', sm: 'flex-end' }}>
                       <Chip color="warning" variant="outlined" label={formatCurrency(entry.amount)} />
                       {entry.actionPath ? (
-                        <Button size="small" variant="outlined" onClick={() => navigate(entry.actionPath || '/user-center')}>
+                        <Button size="small" variant="outlined" onClick={() => navigate(entry.actionPath || USER_CENTER_POINTS_PATH)}>
                           {entry.actionLabel || '查看来源'}
                         </Button>
                       ) : null}
@@ -2184,7 +2215,7 @@ export default function UserCenterPage() {
                       </Typography>
                     </Box>
                     {signal.actionPath ? (
-                      <Button size="small" variant="outlined" onClick={() => navigate(signal.actionPath || '/user-center')}>
+                      <Button size="small" variant="outlined" onClick={() => navigate(signal.actionPath || USER_CENTER_POINTS_PATH)}>
                         {signal.actionLabel || '查看来源'}
                       </Button>
                     ) : null}
@@ -2423,7 +2454,7 @@ export default function UserCenterPage() {
                   {roleNames.length > 0 ? (
                     <Chip size="small" label={roleNames.join(' / ')} sx={{ color: 'white', bgcolor: 'rgba(255,255,255,0.14)' }} />
                   ) : null}
-                  <Chip size="small" label="积分能力分阶段接入" sx={{ color: 'white', bgcolor: 'rgba(255,255,255,0.14)' }} />
+                  <Chip size="small" label="积分账本持续扩展" sx={{ color: 'white', bgcolor: 'rgba(255,255,255,0.14)' }} />
                 </Stack>
               </Box>
             </Stack>
@@ -2472,7 +2503,7 @@ export default function UserCenterPage() {
         <Paper sx={{ mt: 3, borderRadius: 4, overflow: 'hidden' }}>
           <Tabs
             value={activeTab}
-            onChange={(_, value: UserCenterTab) => setActiveTab(value)}
+            onChange={(_, value: UserCenterTab) => handleTabChange(value)}
             variant="scrollable"
             scrollButtons="auto"
             sx={{ px: 1.5, pt: 1.5, borderBottom: '1px solid rgba(15, 23, 42, 0.08)' }}

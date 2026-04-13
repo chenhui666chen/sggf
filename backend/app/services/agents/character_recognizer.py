@@ -1,9 +1,13 @@
 """
 人物识别器 - 智能识别文本中的真实人物
 """
+import logging
 import re
 from typing import List, Set, Tuple
 from core.langchain_bridge import create_task_llm
+
+
+logger = logging.getLogger(__name__)
 
 
 class CharacterRecognizer:
@@ -170,7 +174,7 @@ class CharacterRecognizer:
             return results
 
         except Exception as e:
-            print(f"⚠️ AI验证失败: {e}")
+            logger.debug(f"⚠️ AI验证失败: {e}")
             # 失败时保守处理，只保留高置信度的
             return [(name, True) for name in names]
 
@@ -191,7 +195,7 @@ class CharacterRecognizer:
         candidates = self.extract_names_with_confidence(text)
 
         if not candidates:
-            print("⚠️ 未识别到任何候选人名")
+            logger.debug("⚠️ 未识别到任何候选人名")
             return 0, []
 
         # 第二步：按置信度分类
@@ -203,13 +207,13 @@ class CharacterRecognizer:
         # 第三步：对低置信度的使用AI验证
         if low_confidence and use_ai_verification:
             low_conf_names = [name for name, _ in low_confidence]
-            print(f"🔍 对 {len(low_conf_names)} 个低置信度词汇进行AI验证...")
+            logger.debug(f"🔍 对 {len(low_conf_names)} 个低置信度词汇进行AI验证...")
 
             verified = self.verify_names_with_context(low_conf_names, text)
             for name, is_char in verified:
                 if is_char:
                     confirmed_names.append(name)
 
-        print(f"✅ 识别到 {len(confirmed_names)} 个人物: {', '.join(confirmed_names[:10])}{'...' if len(confirmed_names) > 10 else ''}")
+        logger.debug(f"✅ 识别到 {len(confirmed_names)} 个人物: {', '.join(confirmed_names[:10])}{'...' if len(confirmed_names) > 10 else ''}")
 
         return len(confirmed_names), confirmed_names

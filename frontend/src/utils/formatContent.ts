@@ -17,6 +17,7 @@ export function formatMarkdownToHtml(content: string): string {
   if (!content) return ''
 
   let html = content
+  const isBlockHtmlLine = (line: string): boolean => /^(<h\d\b|<hr\b|<(ul|ol|li)\b|<\/(ul|ol|li)>)/.test(line)
 
   // 0. 处理转义的换行符（将 \n 转换为实际换行符）
   html = html.replace(/\\n/g, '\n')
@@ -71,13 +72,7 @@ export function formatMarkdownToHtml(content: string): string {
     }
     
     // 如果是标题、列表、分隔线等特殊元素，单独成段
-    if (
-      trimmedLine.startsWith('<h') ||
-      trimmedLine.startsWith('<hr') ||
-      trimmedLine.startsWith('<ul') ||
-      trimmedLine.startsWith('<ol') ||
-      trimmedLine.startsWith('<li')
-    ) {
+    if (isBlockHtmlLine(trimmedLine)) {
       if (currentParagraph.length > 0) {
         paragraphs.push(currentParagraph.join('<br />'))
         currentParagraph = []
@@ -97,7 +92,7 @@ export function formatMarkdownToHtml(content: string): string {
   html = paragraphs
     .map((p) => {
       // 如果已经是 HTML 标签，不包装
-      if (p.startsWith('<h') || p.startsWith('<hr') || p.startsWith('<ul') || p.startsWith('<ol')) {
+      if (isBlockHtmlLine(p)) {
         return p
       }
       return `<p style="margin: 12px 0; line-height: 1.6;">${p}</p>`
@@ -127,7 +122,7 @@ export function hasMarkdownFormat(content: string): boolean {
   if (!content) return false
   
   return (
-    content.includes('###') ||
+    /^#{1,6}\s+/m.test(content) ||
     content.includes('**') ||
     content.includes('---') ||
     /^-\s+/m.test(content) ||

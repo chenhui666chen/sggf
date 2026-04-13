@@ -1,26 +1,6 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit'
 import { apiClient } from '@/services/api'
-
-interface Project {
-  id: number
-  display_no: number
-  user_id: number
-  title: string
-  description?: string
-  genre?: string
-  
-  // 🆕 题材与篇幅规划字段
-  sub_genre?: string
-  planned_length_type?: string  // short/mid/long/epic
-  planned_chapters_min?: number
-  planned_chapters_max?: number
-  user_outline_plan?: string
-  
-  status: string
-  word_count: number
-  created_at: string
-  updated_at: string
-}
+import type { Project, ProjectCreatePayload, ProjectUpdatePayload } from '@/types/project'
 
 interface ProjectState {
   projects: Project[]
@@ -46,16 +26,7 @@ export const fetchProjects = createAsyncThunk(
 
 export const createProject = createAsyncThunk(
   'project/createProject',
-  async (data: { 
-    title: string; 
-    description?: string; 
-    genre?: string;
-    sub_genre?: string;
-    planned_length_type?: string;
-    planned_chapters_min?: number;
-    planned_chapters_max?: number;
-    user_outline_plan?: string;
-  }) => {
+  async (data: ProjectCreatePayload) => {
     const response = await apiClient.createProject(data)
     return response.data
   }
@@ -71,7 +42,7 @@ export const fetchProject = createAsyncThunk(
 
 export const updateProject = createAsyncThunk(
   'project/updateProject',
-  async ({ projectId, data }: { projectId: number; data: any }) => {
+  async ({ projectId, data }: { projectId: number; data: ProjectUpdatePayload }) => {
     const response = await apiClient.updateProject(projectId, data)
     return response.data
   }

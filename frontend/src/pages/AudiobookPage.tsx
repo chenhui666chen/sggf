@@ -10,8 +10,15 @@
  */
 import { useState, useEffect, useMemo, useRef, useCallback, ChangeEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { apiClient, extractApiErrorMessage } from '../services/api'
+import {
+  apiClient,
+  describeTaskPointsPrecheckErrorDetail,
+  extractApiErrorMessage,
+  extractTaskPointsPrecheckErrorDetail,
+  type TaskPointsPrecheckErrorDetail,
+} from '../services/api'
 import * as bookParserApi from '../services/bookParserApi'
+import TaskPointsPrecheckAlert from '../components/common/TaskPointsPrecheckAlert'
 import {
   Box,
   Container,
@@ -47,20 +54,18 @@ import {
   FormControlLabel,
   Menu,
 } from '@mui/material'
-import {
-  ArrowBack as ArrowBackIcon,
-  Headphones as HeadphonesIcon,
-  PlayArrow as PlayIcon,
-  Pause as PauseIcon,
-  Download as DownloadIcon,
-  RecordVoiceOver as VoiceIcon,
-  GraphicEq as AudioIcon,
-  CheckCircle as CheckIcon,
-  History as HistoryIcon,
-  Delete as DeleteIcon,
-  Warning as WarningIcon,
-  MoreVert as MoreVertIcon,
-} from '@mui/icons-material'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import AudioIcon from '@mui/icons-material/GraphicEq'
+import CheckIcon from '@mui/icons-material/CheckCircle'
+import DeleteIcon from '@mui/icons-material/Delete'
+import DownloadIcon from '@mui/icons-material/Download'
+import HeadphonesIcon from '@mui/icons-material/Headphones'
+import HistoryIcon from '@mui/icons-material/History'
+import MoreVertIcon from '@mui/icons-material/MoreVert'
+import PauseIcon from '@mui/icons-material/Pause'
+import PlayIcon from '@mui/icons-material/PlayArrow'
+import VoiceIcon from '@mui/icons-material/RecordVoiceOver'
+import WarningIcon from '@mui/icons-material/Warning'
 
 // 类型定义
 interface Project {
@@ -409,8 +414,8 @@ const detectNavigationType = (): NavigationType => {
           return 'navigate'
       }
     }
-  } catch (error) {
-    console.warn('无法检测导航类型:', error)
+  } catch {
+    // 无法检测导航类型
   }
   return 'navigate'
 }
@@ -1304,6 +1309,7 @@ const AudiobookPage = () => {
     message: '',
     severity: 'info',
   })
+  const [taskPointsPrecheckError, setTaskPointsPrecheckError] = useState<TaskPointsPrecheckErrorDetail | null>(null)
   const [voicePresets, setVoicePresets] = useState<VoicePreset[]>([])
   const [voiceCatalogMeta, setVoiceCatalogMeta] = useState<VoiceCatalogMeta | null>(null)
   const [voiceLoading, setVoiceLoading] = useState(false)
@@ -1414,10 +1420,8 @@ const AudiobookPage = () => {
           const saved = JSON.parse(savedSession)
           // 如果URL中的projectId与保存的projectId相同，则不清除会话缓存
           if (saved.projectId === parseInt(projectId)) {
-            console.log('项目ID匹配，保留会话状态')
             // 恢复会话状态中的activeStep
             if (typeof saved.activeStep === 'number') {
-              console.log('恢复activeStep:', saved.activeStep)
               setActiveStep(saved.activeStep)
             }
             if (saved.taskId) {
@@ -1434,21 +1438,18 @@ const AudiobookPage = () => {
               apiClient.getAudiobookProject(saved.audiobookProjectId)
                 .then(detailRes => {
                   setAudiobookProject(detailRes.data)
-                  console.log('恢复audiobookProject:', detailRes.data)
                 })
-                .catch(error => {
-                  console.warn('恢复有声书项目失败:', error)
+                .catch(() => {
+                  // 恢复有声书项目失败
                 })
             }
             // 设置标志，防止restoreSession effect重复执行
             sessionHydratedRef.current = true
           } else {
-            console.log('项目ID不匹配，清除旧会话缓存')
             localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
             sessionHydratedRef.current = true
           }
-        } catch (e) {
-          console.warn('解析会话数据失败，清除缓存:', e)
+        } catch {
           localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
           sessionHydratedRef.current = true
         }
@@ -1462,7 +1463,6 @@ const AudiobookPage = () => {
         setSelectedProject(project)
         await handleSelectProject(project, { skipStepReset: true })
       } catch (error: any) {
-        console.error('加载项目失败:', error)
         const msg = await extractApiErrorMessage(error, '加载项目失败')
         setSnackbar({ open: true, message: msg, severity: 'error' })
         navigate('/audiobook-dashboard')
@@ -1496,7 +1496,6 @@ const AudiobookPage = () => {
       })
       setVoiceError(null)
     } catch (error: any) {
-      console.error('加载音色库失败:', error)
       const message = await extractApiErrorMessage(error, '加载音色库失败')
       setVoiceError(message)
     } finally {
@@ -1731,8 +1730,7 @@ const AudiobookPage = () => {
           music_density: (savedFx.music_density as AudioFxConfig['music_density']) || 'medium',
         })
       }
-    } catch (error) {
-      console.error('加载项目音色配置失败:', error)
+    } catch {
       setCharacterVoicesForModel(model, [baseNarratorVoice])
     } finally {
       setLoadingCharacters(false)
@@ -1766,8 +1764,8 @@ const AudiobookPage = () => {
     try {
       const res = await apiClient.getAudiobookProjectsByProject(selectedProject.id)
       setHistoryProjects(res.data)
-    } catch (error) {
-      console.error('获取历史记录失败:', error)
+    } catch {
+      // 获取历史记录失败
     } finally {
       setLoadingHistory(false)
     }
@@ -1782,8 +1780,7 @@ const AudiobookPage = () => {
       setCurrentAudiobookProjectId(data.id)
       setActiveStep(2) // 跳转到完成页面
       setShowHistory(false)
-    } catch (error) {
-      console.error('查看历史失败:', error)
+    } catch {
       setSnackbar({ open: true, message: '加载失败', severity: 'error' })
     }
   }
@@ -1796,7 +1793,6 @@ const AudiobookPage = () => {
       // 重新获取历史记录以更新列表
       await fetchHistory()
     } catch (error: any) {
-      console.error('删除历史失败:', error)
       const errorMessage = error?.response?.status === 404 
         ? '项目不存在或已被删除' 
         : await extractApiErrorMessage(error, '删除失败，请重试')
@@ -1882,7 +1878,6 @@ const AudiobookPage = () => {
         severity: 'success',
       })
     } catch (error: any) {
-      console.error('从文本创建项目失败:', error)
       const msg = await extractApiErrorMessage(error, '从文本创建项目失败，请稍后重试')
       setSnackbar({
         open: true,
@@ -1901,6 +1896,7 @@ const AudiobookPage = () => {
     setSelectedProject(project)
     setCurrentAudiobookProjectId(null)
     setCurrentTaskId(null)
+    setTaskPointsPrecheckError(null)
     setTaskStatuses({})
     setCharacterVoices([])
     setVoiceDraftsByModel({})
@@ -1934,8 +1930,8 @@ const AudiobookPage = () => {
         try {
           const audioConfigRes = await apiClient.getProjectAudioConfig(project.id, ttsModel)
           projectAudioConfig = audioConfigRes.data
-        } catch (e) {
-          console.warn('获取项目音频配置失败:', e)
+        } catch {
+          // 获取项目音频配置失败
         }
       
         const savedCharacters = projectAudioConfig?.characters || []
@@ -1990,8 +1986,7 @@ const AudiobookPage = () => {
             music_density: 'medium',
           })
         }
-      } catch (error) {
-        console.error('获取角色列表失败:', error)
+      } catch {
         setCharacterVoices([baseNarratorVoice])
       } finally {
         setLoadingCharacters(false)
@@ -2000,8 +1995,7 @@ const AudiobookPage = () => {
       if (!options?.skipStepReset) {
         setActiveStep(0)
       }
-    } catch (error) {
-      console.error('获取章节失败:', error)
+    } catch {
       setSnackbar({ open: true, message: '网络错误，请重试', severity: 'error' })
     }
   }, [ttsModel, setCharacterVoicesForCurrentModel])
@@ -2052,7 +2046,6 @@ const AudiobookPage = () => {
       })
       handleCloseDeleteChapterDialog()
     } catch (error: any) {
-      console.error('删除章节失败:', error)
       const msg = await extractApiErrorMessage(error, '删除章节失败')
       setSnackbar({
         open: true,
@@ -2120,8 +2113,8 @@ const AudiobookPage = () => {
             if (!cancelled) {
               await handleSelectProject(projectRes.data, { skipStepReset: true })
             }
-          } catch (error) {
-            console.warn('恢复项目失败:', error)
+          } catch {
+            // 恢复项目失败
           }
         }
 
@@ -2132,8 +2125,8 @@ const AudiobookPage = () => {
             if (!cancelled) {
               setAudiobookProject(detailRes.data)
             }
-          } catch (error) {
-            console.warn('恢复有声书项目失败:', error)
+          } catch {
+            // 恢复有声书项目失败
           }
         }
 
@@ -2144,8 +2137,7 @@ const AudiobookPage = () => {
         } else if (typeof saved.activeStep === 'number' && !cancelled) {
           setActiveStep(saved.activeStep)
         }
-      } catch (error) {
-        console.warn('恢复会话失败:', error)
+      } catch {
         localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
       } finally {
         if (!cancelled) {
@@ -2272,8 +2264,7 @@ const AudiobookPage = () => {
           severity: 'warning',
         })
       }
-    } catch (err) {
-      console.error('? 自动推荐声线失败:', err)
+    } catch {
       setSnackbar({
         open: true,
         message: '自动推荐声线失败，请稍后重试',
@@ -2311,7 +2302,6 @@ const AudiobookPage = () => {
         window.URL.revokeObjectURL(url)
       }
     } catch (error) {
-      console.error('角色音试听失败:', error)
       setSnackbar({ open: true, message: await extractApiErrorMessage(error, '角色音试听失败，请稍后重试'), severity: 'error' })
     } finally {
       setPreviewingCharacterId(null)
@@ -2359,9 +2349,8 @@ const AudiobookPage = () => {
       } else {
         throw new Error('下载失败')
       }
-    } catch (error) {
-      console.error('下载音频失败:', error)
-      setSnackbar({ open: true, message: '? 下载失败，请重试', severity: 'error' })
+    } catch {
+      setSnackbar({ open: true, message: '下载失败，请重试', severity: 'error' })
     }
   }
   
@@ -2413,9 +2402,8 @@ const AudiobookPage = () => {
       }
       
         setSnackbar({ open: true, message: '开始播放', severity: 'success' })
-    } catch (error) {
-      console.error('播放音频失败:', error)
-      setSnackbar({ open: true, message: '? 播放失败，请重试', severity: 'error' })
+    } catch {
+      setSnackbar({ open: true, message: '播放失败，请重试', severity: 'error' })
       setPlayingChapter(null)
     }
   }
@@ -2528,7 +2516,6 @@ const AudiobookPage = () => {
       }
       setSnackbar({ open: true, message: '片段音频已生成并开始播放', severity: 'success' })
     } catch (error) {
-      console.error('生成片段音频失败:', error)
       setSnackbar({
         open: true,
         message: await extractApiErrorMessage(error) || '生成片段音频失败，请重试',
@@ -2568,7 +2555,6 @@ const AudiobookPage = () => {
       })
       setScriptEditorDialogOpen(true)
     } catch (err: any) {
-      console.error('获取章节剧本失败:', err)
       setSnackbar({ open: true, message: err.message || '获取章节剧本失败', severity: 'error' })
     } finally {
       setScriptEditorLoading(false)
@@ -2605,6 +2591,7 @@ const AudiobookPage = () => {
     if (!audiobookProject || !scriptEditorChapter || !scriptEditorData) return
 
     try {
+      setTaskPointsPrecheckError(null)
       resetSegmentPreviewState()
       setScriptEditorLoading(true)
 
@@ -2635,8 +2622,16 @@ const AudiobookPage = () => {
       // 保存后不自动关闭，方便继续修改；如需可在此关闭
       // handleCloseScriptEditorDialog()
     } catch (err: any) {
-      console.error('保存/生成失败:', err)
-      setSnackbar({ open: true, message: err.message || '保存失败', severity: 'error' })
+      const precheckDetail = await extractTaskPointsPrecheckErrorDetail(err)
+      setTaskPointsPrecheckError(precheckDetail)
+      const message = precheckDetail
+        ? describeTaskPointsPrecheckErrorDetail(precheckDetail)
+        : await extractApiErrorMessage(err, '保存失败，请稍后重试')
+      setSnackbar({
+        open: true,
+        message: message || '保存失败，请稍后重试',
+        severity: 'error',
+      })
     } finally {
       setScriptEditorLoading(false)
     }
@@ -2649,6 +2644,7 @@ const AudiobookPage = () => {
     }
 
     try {
+      setTaskPointsPrecheckError(null)
       const res = await apiClient.generateAudioFromScripts(audiobookProject.id, {
         tts_model: ttsModel,
       })
@@ -2663,10 +2659,14 @@ const AudiobookPage = () => {
         severity: 'success',
       })
     } catch (err: any) {
-      console.error('批量生成音频失败:', err)
+      const precheckDetail = await extractTaskPointsPrecheckErrorDetail(err)
+      setTaskPointsPrecheckError(precheckDetail)
+      const message = precheckDetail
+        ? describeTaskPointsPrecheckErrorDetail(precheckDetail)
+        : await extractApiErrorMessage(err, '批量生成音频失败，请稍后重试')
       setSnackbar({
         open: true,
-        message: err.message || '批量生成音频失败，请稍后重试',
+        message: message || '批量生成音频失败，请稍后重试',
         severity: 'error',
       })
     }
@@ -2687,6 +2687,7 @@ const AudiobookPage = () => {
       return
     }
     
+    setTaskPointsPrecheckError(null)
     setGenerating(true)
     setActiveStep(1)
     setLastGenerationMode(scriptOnlyMode ? 'script_only' : 'full')
@@ -2712,8 +2713,8 @@ const AudiobookPage = () => {
 
         try {
           await apiClient.updateProjectAudioConfig(projectIdForRequest, projectAudioConfigBody, ttsModel)
-        } catch (err) {
-          console.warn('保存项目音频配置失败:', err)
+        } catch {
+          // 保存项目音频配置失败
         }
       }
 
@@ -2755,7 +2756,6 @@ const AudiobookPage = () => {
         try {
           const statusResponse = await apiClient.getAudiobookProject(projectId)
           const statusData = statusResponse.data
-          console.log('轮询项目状态:', statusData)
 
           // 首次获取到完整数据时设置audiobookProject
           if (!audiobookProject && statusData) {
@@ -2774,15 +2774,19 @@ const AudiobookPage = () => {
             setSnackbar({ open: true, message: '生成失败，请重试', severity: 'error' })
             setActiveStep(0)
           }
-        } catch (err) {
-          console.error('轮询有声书项目状态失败:', err)
+        } catch {
+          // 轮询有声书项目状态失败
         }
       }, 2000) // 每2秒查询一次
     } catch (error: any) {
-      console.error('生成失败:', error)
+      const precheckDetail = await extractTaskPointsPrecheckErrorDetail(error)
+      setTaskPointsPrecheckError(precheckDetail)
+      const message = precheckDetail
+        ? describeTaskPointsPrecheckErrorDetail(precheckDetail)
+        : await extractApiErrorMessage(error, '生成失败，请重试')
       setSnackbar({ 
         open: true, 
-        message: error.message || '生成失败，请重试', 
+        message: message || '生成失败，请重试', 
         severity: 'error' 
       })
       setGenerating(false)
@@ -2807,7 +2811,6 @@ const AudiobookPage = () => {
         })
 
         if (!response.ok) {
-          console.error('查询任务列表失败:', response.status, response.statusText)
           return
         }
 
@@ -2826,8 +2829,8 @@ const AudiobookPage = () => {
           }))
           setCurrentTaskId(matched.task_id)
         }
-      } catch (error) {
-        console.error('查询任务列表异常:', error)
+      } catch {
+        // 查询任务列表异常
       }
     }
 
@@ -2885,14 +2888,11 @@ const AudiobookPage = () => {
             setGenerating(true)
           }
         } else if (response.status === 404) {
-          console.warn('任务不存在，停止轮询')
           setGenerating(false)
           setCurrentTaskId(null)
-        } else {
-          console.error('查询任务状态失败:', response.status, response.statusText)
         }
-      } catch (error) {
-        console.error('查询任务状态异常:', error)
+      } catch {
+        // 查询任务状态异常
       }
     }
 
@@ -3123,6 +3123,14 @@ const AudiobookPage = () => {
             ))}
           </Stepper>
         </Paper>
+
+        {taskPointsPrecheckError && (
+          <TaskPointsPrecheckAlert
+            detail={taskPointsPrecheckError}
+            onClose={() => setTaskPointsPrecheckError(null)}
+            sx={{ mb: 3 }}
+          />
+        )}
 
         {/* 步骤1: 配置音色（章节选择 + 角色音频设置） */}
         {activeStep === 0 && (

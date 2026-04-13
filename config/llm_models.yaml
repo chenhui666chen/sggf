@@ -154,32 +154,36 @@ llm_models:
 
     routing:
       task_types:
-        - outline_expand
         - book_synthesis
         - long_context
         - summarize_long
-      priority: 1
+        - super_long_input
+      priority: 2
       fallback_models:
+        - qwen3.5-plus
         - qwen3-max
       enabled: true
 
-    summary: 项目中的超长上下文模型。阿里云官方资料明确将 Qwen-Long 定位为百万级到千万级上下文处理模型，适合长篇资料理解、长书摘要和大纲扩展。
+    summary: 项目中的超长上下文模型。阿里云官方资料明确将 Qwen-Long 定位为百万级到千万级上下文处理模型，适合长篇资料理解、长书摘要和整书分析。注意：输出限制仅8K，不适合需要大量输出的场景。
     recommended_scenarios:
-      - 长篇大纲扩展
+      - 整书级别分析（输入超过100万tokens）
       - 全书剧情汇总与问题定位
       - 大量检索结果拼接后的再加工
       - 长文本解析、实体归纳和阶段性总结
     limitations:
+      - 输出限制仅8K tokens，不适合大纲扩展等需要大量输出的场景
       - 延迟高于 qwen3-max 和 qwen-turbo
       - 不适合作为高频低延迟的日常对话模型
       - 长上下文场景下仍需注意提示结构，否则输出易发散
     integration_notes:
-      - 内部 task_type=outline_expand、book_synthesis 默认优先路由到该模型
+      - 内部 task_type=book_synthesis、long_context 默认路由到该模型
       - 适合与分层摘要、RAG 结果聚合一起使用
-      - 项目当前将其视为“整书上下文入口”，不是默认正文生成模型
+      - 大纲扩展场景优先使用 qwen3.5-plus（输出能力更强）
+      - 项目当前将其视为"整书上下文入口"，不是默认正文生成模型
     best_practice_tips:
       - 适合处理超长文本与整书分析
-      - 大纲扩展、全书汇总优先使用
+      - 整书汇总优先使用
+      - 大纲扩展场景建议使用 qwen3.5-plus（输出能力65K vs 8K）
       - 建议将输入按层级组织，避免无结构堆叠
     documentation_url: https://help.aliyun.com/zh/model-studio/long-context-qwen-long
     source_urls:
@@ -188,6 +192,122 @@ llm_models:
 
     tags:
       - long_context
+      - chinese
+      - alibaba
+
+  - id: qwen3.5-plus
+    name: Qwen3.5 Plus
+    provider: alibaba
+    model_type: llm
+    version: v1
+    status: active
+
+    capabilities:
+      - name: creative
+        level: native
+        score: 0.92
+        description: 原生多模态合一训练，创意写作能力媲美Qwen3-Max
+      - name: reasoning
+        level: native
+        score: 0.88
+        description: 支持思考模式，复杂推理能力强
+      - name: long_context
+        level: native
+        score: 0.90
+        description: 支持100万tokens上下文，适合长篇创作
+      - name: multimodal
+        level: native
+        score: 0.90
+        description: 原生支持文本、图像、视频输入
+      - name: writing
+        level: native
+        score: 0.92
+        description: 适合长篇大纲扩展与章节生成
+      - name: chinese
+        level: native
+        score: 0.95
+        description: 中文理解与表达能力优秀
+
+    constraints:
+      max_context_tokens: 1000000
+      max_output_tokens: 65536
+      max_thinking_tokens: 81920
+      supports_streaming: true
+      supports_function_call: true
+      supports_vision: true
+      supports_json_mode: true
+      supports_timeout_param: true
+      supports_max_retries: true
+      supports_temperature: true
+      supports_system_prompt: true
+      supports_multi_turn: true
+      supports_thinking_mode: true
+
+    api_config:
+      api_key_env: DASHSCOPE_API_KEY
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      default_timeout: 180
+      default_max_retries: 3
+
+    performance:
+      quality_score: 8.8
+      avg_latency_seconds: 2.0
+      p95_latency_seconds: 4.0
+      tokens_per_second: 100
+      cost_per_1k_input_tokens: 0.0008
+      cost_per_1k_output_tokens: 0.0048
+      currency: CNY
+
+    routing:
+      task_types:
+        - outline_expand
+        - volume_outline
+        - chapter_batch
+        - long_writing
+        - multimodal_analysis
+      priority: 1
+      fallback_models:
+        - qwen3-max
+        - qwen-long
+      weight: 1.0
+      enabled: true
+
+    default_params:
+      temperature: 0.7
+      max_tokens: 32768
+      enable_thinking: false
+
+    summary: 阿里云2026年2月发布的旗舰模型，采用Gated Delta Networks线性注意力机制，原生多模态合一训练。纯文本表现媲美Qwen3-Max，速度更快、成本更低；输出能力达65K tokens，是大纲扩展和长篇创作的理想选择。
+    recommended_scenarios:
+      - 长篇大纲扩展（一次性生成更多章节）
+      - 单卷细纲生成（50-150章）
+      - 复杂推理任务（开启思考模式）
+      - 多模态内容分析（文本+图像+视频）
+      - 整卷级别的内容规划
+    limitations:
+      - 输入上下文限制100万tokens，超长整书分析仍需qwen-long
+      - 思考模式会消耗额外tokens
+      - 多模态功能需要额外参数配置
+    integration_notes:
+      - 内部 task_type=outline_expand、volume_outline 可优先路由到该模型
+      - 支持 enable_thinking 参数开启思考模式
+      - 输出能力是qwen-long的8倍，适合一次性生成大量内容
+      - 通过 DashScope OpenAI 兼容接口接入，模型名为 qwen3.5-plus
+    best_practice_tips:
+      - 大纲扩展优先使用，输出能力远超qwen-long
+      - 复杂推理任务开启思考模式
+      - 100万上下文足够处理大多数长篇创作场景
+      - 成本效益比优于qwen3-max
+    documentation_url: https://help.aliyun.com/zh/model-studio/models
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://chat.qwen.ai
+
+    tags:
+      - creative
+      - reasoning
+      - long_context
+      - multimodal
       - chinese
       - alibaba
 

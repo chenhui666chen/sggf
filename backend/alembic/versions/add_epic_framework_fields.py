@@ -4,8 +4,8 @@ Revision ID: add_epic_framework_fields
 Revises: 
 Create Date: 2025-12-12
 
-为支持史诗框架模式下的框架与细纲分离存储，添加以下字段：
-- epic_framework: 存储史诗框架（纯框架结构）
+为支持长篇框架模式下的框架与细纲分离存储，添加以下字段：
+- epic_framework: 存储长篇框架（纯框架结构）
 - epic_framework_generated_at: 框架生成时间
 - epic_volumes_detail: 存储已扩展的卷细纲（JSON格式）
 
@@ -21,7 +21,7 @@ depends_on = None
 
 
 def upgrade():
-    """添加史诗框架相关字段"""
+    """添加长篇框架相关字段"""
     # 为 project_settings 表添加新字段
     op.execute("""
         ALTER TABLE project_settings
@@ -42,7 +42,7 @@ def upgrade():
 
 
 def downgrade():
-    """回滚：删除史诗框架相关字段"""
+    """回滚：删除长篇框架相关字段"""
     op.execute("""
         ALTER TABLE project_settings
         DROP COLUMN IF EXISTS epic_framework;
@@ -58,4 +58,4 @@ def downgrade():
         DROP COLUMN IF EXISTS epic_volumes_detail;
     """)
     
-    print("✅ 已删除史诗框架相关字段")
+    print("✅ 已删除长篇框架相关字段")

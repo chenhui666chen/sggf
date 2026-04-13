@@ -144,7 +144,7 @@ class Qwen3VLPlusRuntimeWrapper(_BaseLegacyRuntimeWrapper):
 
 
 class Wan26T2IRuntimeWrapper(_BaseLegacyRuntimeWrapper):
-    TARGET_MODEL_ID = "wanx-v1"
+    TARGET_MODEL_ID = "wan2.6-t2i"
 
     def generate(
         self,
@@ -412,6 +412,7 @@ _RUNTIME_WRAPPER_CLASSES: Dict[str, Type[_BaseLegacyRuntimeWrapper]] = {
 _RUNTIME_WRAPPER_ALIASES: Dict[str, str] = {
     "wan_t2i": "wan26_t2i",
     "wan-t2i": "wan26_t2i",
+    "wan2.6-t2i": "wan26_t2i",
     "wan_t2v": "wan26_t2v",
     "wan-t2v": "wan26_t2v",
     "wan_i2v": "wan26_i2v",

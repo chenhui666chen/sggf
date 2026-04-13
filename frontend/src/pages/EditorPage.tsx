@@ -138,7 +138,6 @@ export default function EditorPage() {
       // 🔧 修复：将自动保存间隔从3秒增加到60秒，避免误操作
       autoSaveTimer.current = setTimeout(() => {
         if (chapterId && content) {
-          console.log('💾 自动保存触发...')
           dispatch(autoSaveChapter({
             chapterId: parseInt(chapterId),
             data: { content },
@@ -192,8 +191,8 @@ export default function EditorPage() {
         const data = await response.json()
         setRevisions(data)
       }
-    } catch (error) {
-      console.error('加载版本历史失败:', error)
+    } catch {
+      // 加载版本历史失败
     } finally {
       setLoadingRevisions(false)
     }
@@ -242,7 +241,6 @@ export default function EditorPage() {
       // 轮询任务状态
       pollOptimizeTaskStatus(data.task_id)
     } catch (error: any) {
-      console.error('再次优化失败:', error)
       setSaveError(error.message || '再次优化失败，请稍后重试')
       setOptimizing(false)
     }
@@ -290,7 +288,6 @@ export default function EditorPage() {
       // 轮询任务状态
       pollRegenerateTaskStatus(data.task_id)
     } catch (error: any) {
-      console.error('重新生成章节失败:', error)
       setSaveError(error.message || '重新生成章节失败，请稍后重试')
       setRegenerating(false)
     }
@@ -328,8 +325,7 @@ export default function EditorPage() {
             } else {
               setSaveError('重新生成结果为空，请重试')
             }
-          } catch (parseError) {
-            console.error('解析重新生成结果失败:', parseError)
+          } catch {
             setSaveError('解析重新生成结果失败')
           }
 
@@ -342,8 +338,8 @@ export default function EditorPage() {
           // 更新进度提示
           setSaveMessage(`🔄 重新生成中... (进度: ${data.progress || 50}%)`)
         }
-      } catch (error) {
-        console.error('轮询任务状态失败:', error)
+      } catch {
+        // 轮询任务状态失败
       }
     }, 2000) // 每2秒轮询一次
 
@@ -389,8 +385,7 @@ export default function EditorPage() {
             } else {
               setSaveError('优化结果为空，请重试')
             }
-          } catch (parseError) {
-            console.error('解析优化结果失败:', parseError)
+          } catch {
             setSaveError('解析优化结果失败')
           }
           
@@ -403,8 +398,8 @@ export default function EditorPage() {
           // 更新进度提示
           setSaveMessage(`🔄 优化中... (进度: ${data.progress || 50}%)`)
         }
-      } catch (error) {
-        console.error('轮询任务状态失败:', error)
+      } catch {
+        // 轮询任务状态失败
       }
     }, 2000) // 每2秒轮询一次
     
@@ -435,15 +430,13 @@ export default function EditorPage() {
         }),
       })
       if (!response.ok) {
-        console.error('章节逻辑检查失败:', response.status)
         setSaveError('章节逻辑检查失败，请稍后重试')
         return
       }
       const data = await response.json()
       setLogicCheckResult(data)
       setLogicCheckDialogOpen(true)
-    } catch (error) {
-      console.error('调用章节逻辑检查接口时出错:', error)
+    } catch {
       setSaveError('调用章节逻辑检查接口时出错，请检查网络连接')
     } finally {
       setCheckingLogic(false)
@@ -481,9 +474,8 @@ export default function EditorPage() {
       } else {
         setSaveError('❌ 恢复版本失败，请重试')
       }
-    } catch (error) {
-      console.error('恢复版本失败:', error)
-      setSaveError('❌ 恢复版本失败，请检查网络连接')
+    } catch {
+      setSaveError('恢复版本失败，请检查网络连接')
     } finally {
       setRestoringRevision(false)
     }
@@ -514,9 +506,8 @@ export default function EditorPage() {
       } else {
         setSaveError('❌ 导出TXT失败，请重试')
       }
-    } catch (error) {
-      console.error('导出TXT失败:', error)
-      setSaveError('❌ 导出TXT失败，请检查网络连接')
+    } catch {
+      setSaveError('导出TXT失败，请检查网络连接')
     } finally {
       setExporting(false)
     }
@@ -547,9 +538,8 @@ export default function EditorPage() {
       } else {
         setSaveError('❌ 导出DOCX失败，请重试')
       }
-    } catch (error) {
-      console.error('导出DOCX失败:', error)
-      setSaveError('❌ 导出DOCX失败，请检查网络连接')
+    } catch {
+      setSaveError('导出DOCX失败，请检查网络连接')
     } finally {
       setExporting(false)
     }

@@ -160,7 +160,7 @@ profiles:
       - 多模态分析
       - 视觉质检
 
-  wanx-v1:
+  wan2.6-t2i:
     role_summary: 当前模型是项目默认的高质量图像生成入口，适合概念图、角色探索和封面草稿。
     prompt_patterns:
       - title: 图像生成模板
@@ -171,7 +171,7 @@ profiles:
           镜头景别 + 角色动作 + 环境氛围 + 画面风格 + 不要出现的元素
     router_rules:
       - when: 检测到高质量文生图、概念图或角色视觉探索
-        action: 优先路由到 wanx-v1
+        action: 优先路由到 wan2.6-t2i
         reason: 它是项目当前默认高质量图像模型。
     best_practice_tips:
       - 适合搭配负向提示词约束杂乱元素。
@@ -181,7 +181,7 @@ profiles:
       - 短剧素材
     project_entrypoints:
       - label: 图像生成入口
-        value: media_runtime.generate_image(model_id="wanx-v1", ...)
+        value: media_runtime.generate_image(model_id="wan2.6-t2i", ...)
 
   wan2.6-t2v:
     role_summary: 当前模型是主力视频生成入口，适合短片段镜头、预告视频和受控叙事镜头生成。

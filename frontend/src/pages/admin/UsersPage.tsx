@@ -28,14 +28,12 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import {
-  Block as BlockIcon,
-  CheckCircle as CheckCircleIcon,
-  Delete as DeleteIcon,
-  Edit as EditIcon,
-  Search as SearchIcon,
-  StarsOutlined as StarsOutlinedIcon,
-} from '@mui/icons-material'
+import BlockIcon from '@mui/icons-material/Block'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import DeleteIcon from '@mui/icons-material/Delete'
+import EditIcon from '@mui/icons-material/Edit'
+import SearchIcon from '@mui/icons-material/Search'
+import StarsOutlinedIcon from '@mui/icons-material/StarsOutlined'
 import { apiClient } from '@/services/api'
 
 interface User {
@@ -253,8 +251,8 @@ export default function AdminUsersPage() {
     try {
       const response = await apiClient.get('/api/v1/admin/roles')
       setRoles(Array.isArray(response.data?.items) ? response.data.items : [])
-    } catch (err) {
-      console.error('获取角色列表失败', err)
+    } catch {
+      // 获取角色列表失败
     }
   }
 

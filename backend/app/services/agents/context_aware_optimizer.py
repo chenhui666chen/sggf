@@ -61,7 +61,7 @@ class ContextAwareOptimizer:
                 json_str = response_text[start_idx:end_idx]
                 intent_data = json.loads(json_str)
                 return intent_data
-        except:
+        except Exception:
             pass
         
         return {
@@ -105,9 +105,11 @@ class ContextAwareOptimizer:
     def retrieve_relevant_knowledge(self, query: str, top_k: int = 3) -> List[str]:
         """从知识库检索相关信息"""
         try:
-            results = self.knowledge_base.search(query, k=top_k)
+            context = self.memory_manager.get_context()
+            project_id = context.get("project_id") if isinstance(context, dict) else None
+            results = self.knowledge_base.search(query, k=top_k, project_id=project_id)
             return [result.page_content for result in results]
-        except:
+        except Exception:
             return []
     
     def optimize_prompt(self, base_prompt: str, user_input: Optional[str] = None) -> str:
@@ -246,7 +248,7 @@ class ContextAwareOptimizer:
                 json_str = response_text[start_idx:end_idx]
                 analysis = json.loads(json_str)
                 return analysis
-        except:
+        except Exception:
             pass
         
         return {

@@ -7,30 +7,16 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
 import { apiClient } from '@/services/api'
+import type {
+  SettingItem,
+  SettingItemsTreeResponse,
+  SettingTreeActionItem,
+  SettingTreeApiNode,
+} from '@/types/settings'
 
-interface SettingItem {
-  id: number
-  collection_id: number
-  name: string
-  code?: string
-  level?: number
-  tags?: string[]
-  content?: string
-  depth?: number
-  node_type?: string
-  is_leaf?: boolean
-  path?: string
-  summary?: string
-  order: number
-  created_at: string
-}
-
-interface TreeNode {
-  name: string
-  depth: number | null
-  is_leaf: boolean
-  item: SettingItem | null
+interface TreeNode extends Omit<SettingTreeApiNode, 'children'> {
   children: TreeNode[]
+  name: string
   path: string
 }
 
@@ -41,7 +27,7 @@ interface SettingTreeViewProps {
   onSelectCategory?: (categoryPath: string, categoryItem: SettingItem | null) => void  // 🆕 添加 categoryItem 参数
   onSelectInstance?: (item: SettingItem) => void
   onAddItem?: (parentPath: string, parentItem: SettingItem | null) => void
-  onDeleteItem?: (item: SettingItem) => void
+  onDeleteItem?: (item: SettingTreeActionItem) => void
   title?: string
   showHeader?: boolean
   showActions?: boolean  // 是否显示添加/删除按钮
@@ -63,9 +49,9 @@ export default function SettingTreeView(props: SettingTreeViewProps) {
     setError(null)
     try {
       const resp = await apiClient.getSettingItemsTree(collectionId)
-      const data = resp.data as { collection: string; tree: any[] }
+      const data: SettingItemsTreeResponse = resp.data
 
-      const buildWithPath = (nodes: any[], parentPath: string): TreeNode[] => {
+      const buildWithPath = (nodes: SettingTreeApiNode[], parentPath: string): TreeNode[] => {
         return nodes.map((node) => {
           const currentPath = parentPath ? `${parentPath}/${node.name}` : node.name
           const children = buildWithPath(node.children || [], currentPath)
@@ -86,8 +72,7 @@ export default function SettingTreeView(props: SettingTreeViewProps) {
       const initialExpanded = new Set<string>()
       treeWithPath.forEach((n) => initialExpanded.add(n.path))
       setExpanded(initialExpanded)
-    } catch (e) {
-      console.error('加载设定树失败', e)
+    } catch {
       setError('加载设定树失败')
     } finally {
       setLoading(false)
@@ -138,13 +123,13 @@ export default function SettingTreeView(props: SettingTreeViewProps) {
   const handleDelete = (e: React.MouseEvent, node: TreeNode) => {
     e.stopPropagation()
     if (onDeleteItem) {
-      // 传递节点信息，包含路径和is_leaf标志
-      onDeleteItem({
-        ...node.item,
+      const nextItem: SettingTreeActionItem = {
+        ...(node.item ?? {}),
         path: node.path,
         is_leaf: node.is_leaf,
         name: node.name,
-      } as any)
+      }
+      onDeleteItem(nextItem)
     }
   }
 

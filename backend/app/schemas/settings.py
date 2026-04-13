@@ -4,7 +4,7 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class SettingCollectionBase(BaseModel):
@@ -35,8 +35,7 @@ class SettingCollectionResponse(SettingCollectionBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SettingItemBase(BaseModel):
@@ -81,8 +80,7 @@ class SettingItemResponse(SettingItemBase):
     snapshots: Optional[str] = None
     confidence_score: Optional[float] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ItemOrderUpdate(BaseModel):
@@ -126,7 +124,6 @@ class GraphEdgeResponse(BaseModel):
     auto_extracted: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 

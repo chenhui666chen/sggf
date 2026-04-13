@@ -114,21 +114,21 @@ export default function PromptEvolutionPage() {
     try {
       const res = await apiClient.client.get('/api/v1/prompt-evolution/status')
       setStatus(res.data)
-    } catch (e) { console.error(e) }
+    } catch { /* 获取状态失败 */ }
   }, [])
 
   const fetchHistories = useCallback(async () => {
     try {
       const res = await apiClient.client.get('/api/v1/prompt-evolution/history')
       setHistories(res.data)
-    } catch (e) { console.error(e) }
+    } catch { /* 获取历史失败 */ }
   }, [])
 
   const fetchApprovedPrompts = useCallback(async () => {
     try {
       const res = await apiClient.client.get('/api/v1/prompt-evolution/approved')
       setApprovedPrompts(res.data.approved_prompts || [])
-    } catch (e) { console.error(e) }
+    } catch { /* 获取已批准提示词失败 */ }
   }, [])
 
   useEffect(() => {

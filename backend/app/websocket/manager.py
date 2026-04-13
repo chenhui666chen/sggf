@@ -46,14 +46,16 @@ class WorkflowWebSocketManager:
     """工作流 WebSocket 管理器"""
     
     @staticmethod
-    async def broadcast_to_project(project_id: int, event: str, data: dict):
+    async def broadcast_to_project(project_id: int, event: str, data: dict) -> bool:
         """向指定项目的所有连接广播消息"""
         room = f'project_{project_id}'
         try:
             await sio.emit(event, data, room=room)
             logger.info(f"📡 广播到房间 {room}: {event}")
+            return True
         except Exception as e:
             logger.error(f"❌ 广播失败: {e}")
+            return False
     
     @staticmethod
     async def send_stage_update(project_id: int, stage: str, status: str, output: str | None = None, progress: int | None = None):
@@ -335,7 +337,7 @@ class WorkflowWebSocketManager:
 @sio.event
 async def connect(sid, environ):
     """客户端连接"""
-    print(f"🔌 [WebSocket] 客户端连接: {sid}")  # 使用 print 确保输出
+    logger.debug(f"🔌 [WebSocket] 客户端连接: {sid}")  # 使用 print 确保输出
     logger.info(f"🔌 客户端连接: {sid}")
     await sio.emit('connected', {'message': 'WebSocket 连接成功'}, room=sid)
 
@@ -343,12 +345,14 @@ async def connect(sid, environ):
 @sio.event
 async def disconnect(sid):
     """客户端断开"""
-    print(f"🔌 [WebSocket] 客户端断开: {sid}")  # 使用 print 确保输出
+    logger.debug(f"🔌 [WebSocket] 客户端断开: {sid}")  # 使用 print 确保输出
     logger.info(f"🔌 客户端断开: {sid}")
     # 从所有房间中移除
     for project_id, sessions in list(project_rooms.items()):
         if sid in sessions:
             sessions.remove(sid)
+            if not sessions:
+                project_rooms.pop(project_id, None)
             logger.info(f"📤 从项目房间移除: project_{project_id}")
 
 
@@ -394,7 +398,7 @@ def verify_standard_websocket_token(token: str) -> Optional[dict]:
 @sio.event
 async def join_project(sid, data):
     """加入项目房间 - 带项目所有权验证"""
-    print(f"📥 [WebSocket] 收到 join_project 请求: sid={sid}, data={data}")  # 调试日志
+    logger.debug(f"📥 [WebSocket] 收到 join_project 请求: sid={sid}, data={data}")  # 调试日志
     try:
         project_id = data.get('project_id')
         token = data.get('token')
@@ -409,6 +413,12 @@ async def join_project(sid, data):
             return
 
         # 验证 token
+        try:
+            project_id = int(project_id)
+        except (TypeError, ValueError):
+            await sio.emit('error', {'message': 'project_id 格式无效'}, room=sid)
+            return
+
         payload = verify_standard_websocket_token(token)
         if not payload:
             await sio.emit('error', {'message': '无效的认证令牌'}, room=sid)
@@ -438,6 +448,20 @@ async def join_project(sid, data):
                 return
 
             # 验证通过，加入房间
+            for joined_project_id, sessions in list(project_rooms.items()):
+                if joined_project_id == project_id or sid not in sessions:
+                    continue
+
+                await sio.leave_room(sid, f'project_{joined_project_id}')
+                sessions.remove(sid)
+                if not sessions:
+                    project_rooms.pop(joined_project_id, None)
+                logger.info(
+                    "Client %s switched projects, leaving room project_%s before join",
+                    sid,
+                    joined_project_id,
+                )
+
             room = f'project_{project_id}'
             await sio.enter_room(sid, room)
 
@@ -464,6 +488,11 @@ async def leave_project(sid, data):
         project_id = data.get('project_id')
         if not project_id:
             return
+
+        try:
+            project_id = int(project_id)
+        except (TypeError, ValueError):
+            return
         
         room = f'project_{project_id}'
         await sio.leave_room(sid, room)
@@ -471,6 +500,8 @@ async def leave_project(sid, data):
         # 从记录中移除
         if project_id in project_rooms and sid in project_rooms[project_id]:
             project_rooms[project_id].remove(sid)
+            if not project_rooms[project_id]:
+                project_rooms.pop(project_id, None)
         
         logger.info(f"📤 客户端 {sid} 离开房间: {room}")
         await sio.emit('left_project', {'project_id': project_id}, room=sid)
@@ -481,7 +512,7 @@ async def leave_project(sid, data):
 @sio.event
 async def join_audiobook(sid, data):
     """加入有声书项目房间 - 用于接收实时进度推送"""
-    print(f"📥 [WebSocket] 收到 join_audiobook 请求: sid={sid}, data={data}")
+    logger.debug(f"📥 [WebSocket] 收到 join_audiobook 请求: sid={sid}, data={data}")
     try:
         audiobook_project_id = data.get('audiobook_project_id')
         token = data.get('token')

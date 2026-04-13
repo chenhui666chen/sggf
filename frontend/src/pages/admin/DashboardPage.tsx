@@ -7,12 +7,10 @@ import {
   Grid,
   CircularProgress,
 } from '@mui/material'
-import {
-  People as PeopleIcon,
-  Folder as FolderIcon,
-  Headphones as HeadphonesIcon,
-  AdminPanelSettings as AdminIcon,
-} from '@mui/icons-material'
+import AdminIcon from '@mui/icons-material/AdminPanelSettings'
+import FolderIcon from '@mui/icons-material/Folder'
+import HeadphonesIcon from '@mui/icons-material/Headphones'
+import PeopleIcon from '@mui/icons-material/People'
 import { apiClient } from '@/services/api'
 
 interface StatsOverview {

@@ -278,9 +278,6 @@ _GLOBAL_FALLBACK_SOURCES: dict[str, list[str]] = {
 }
 
 _MODEL_FALLBACK_SOURCES: dict[str, list[str]] = {
-    "sdxl-turbo": [
-        "https://huggingface.co/stabilityai/sdxl-turbo",
-    ],
     "kling-v1": [
         "https://klingai.com/cn/",
         "https://app.klingai.com/global/",
@@ -303,6 +300,10 @@ _MODEL_ALIAS_KEYWORDS: dict[str, list[str]] = {
     "qwen3-max": ["qwen-max", "qwen max", "千问max", "千问 max"],
     "qwen3-vl-plus": ["qwen-vl-plus", "qwen vl plus"],
     "deepseek-reasoner": ["deepseek-r1", "deepseek r1"],
+    "wan2.6-t2i": [
+        "wan 2.6 text-to-image",
+        "wan2.6 text-to-image",
+    ],
 }
 
 _ERROR_PAGE_KEYWORDS = [
@@ -428,7 +429,11 @@ class ModelCatalogSyncService:
     def get_entry_queryset(self, db: Session):
         """统一封装查询，默认带来源预加载。"""
 
-        return db.query(ModelCatalogEntry).options(selectinload(ModelCatalogEntry.sources))
+        active_model_keys = sorted({seed.model_key for seed in self.load_catalog_seeds()})
+        query = db.query(ModelCatalogEntry).options(selectinload(ModelCatalogEntry.sources))
+        if not active_model_keys:
+            return query.filter(ModelCatalogEntry.id == -1)
+        return query.filter(ModelCatalogEntry.model_key.in_(active_model_keys))
 
     def sync_catalog(
         self,
@@ -440,9 +445,13 @@ class ModelCatalogSyncService:
     ) -> dict[str, Any]:
         """执行配置归档与联网校验同步。"""
 
-        seeds = self.load_catalog_seeds()
+        all_seeds = self.load_catalog_seeds()
+        all_seed_keys = {seed.model_key for seed in all_seeds}
+        seeds = all_seeds
+        requested_model_keys: Optional[set[str]] = None
         if model_keys:
             allowed = {item.strip() for item in model_keys if item and item.strip()}
+            requested_model_keys = allowed
             seeds = [seed for seed in seeds if seed.model_key in allowed]
 
         now = datetime.now(timezone.utc)
@@ -458,6 +467,8 @@ class ModelCatalogSyncService:
             "network_requests": 0,
             "cached_response_count": 0,
             "skipped_recent": 0,
+            "deleted_obsolete_entries": 0,
+            "deleted_model_keys": [],
         }
         previous_cache = self._response_cache
         previous_hits = self._fetch_cache_hits
@@ -467,6 +478,14 @@ class ModelCatalogSyncService:
         self._fetch_cache_misses = 0
 
         try:
+            deleted_model_keys = self._prune_obsolete_entries(
+                db,
+                active_model_keys=all_seed_keys,
+                restrict_to_model_keys=requested_model_keys,
+            )
+            stats["deleted_obsolete_entries"] = len(deleted_model_keys)
+            stats["deleted_model_keys"] = deleted_model_keys
+
             for seed in seeds:
                 entry = db.query(ModelCatalogEntry).filter(ModelCatalogEntry.model_key == seed.model_key).first()
                 if entry and self._should_skip_refresh(
@@ -539,6 +558,37 @@ class ModelCatalogSyncService:
             self._response_cache = previous_cache
             self._fetch_cache_hits = previous_hits
             self._fetch_cache_misses = previous_misses
+
+    def _prune_obsolete_entries(
+        self,
+        db: Session,
+        *,
+        active_model_keys: set[str],
+        restrict_to_model_keys: Optional[set[str]] = None,
+    ) -> list[str]:
+        deleted_model_keys: list[str] = []
+        existing_entries = db.query(ModelCatalogEntry).all()
+
+        for entry in existing_entries:
+            model_key = str(entry.model_key or "").strip()
+            if not model_key:
+                continue
+            if model_key in active_model_keys:
+                continue
+            if restrict_to_model_keys is not None and model_key not in restrict_to_model_keys:
+                continue
+
+            db.query(ModelCatalogSource).filter(ModelCatalogSource.entry_id == entry.id).delete(
+                synchronize_session=False
+            )
+            db.query(ModelCatalogEntry).filter(ModelCatalogEntry.id == entry.id).delete(
+                synchronize_session=False
+            )
+            deleted_model_keys.append(model_key)
+
+        if deleted_model_keys:
+            db.flush()
+        return deleted_model_keys
 
     def _should_skip_refresh(
         self,
@@ -2072,13 +2122,10 @@ def _derive_env_bindings(entry: ModelCatalogEntry) -> list[dict[str, Any]]:
         _push("模型名 / Deployment", entry.model_key)
         return bindings
 
-    if entry.model_key == "wanx-v1":
+    if entry.model_key == "wan2.6-t2i":
         _push("API Key", "WAN_T2I_API_KEY")
         _push("Base URL", "WAN_T2I_BASE_URL")
-    elif entry.model_key == "wanx-v1-turbo":
-        _push("API Key", "WAN_T2I_API_KEY", required=False)
-        _push("Base URL", "WAN_T2I_BASE_URL", required=False)
-        _push("模型名 / Deployment", entry.model_key)
+        _push("模型名 / Deployment", "WAN_T2I_MODEL_NAME / WAN_T2I_MODEL_ID / wan2.6-t2i", required=False)
     elif entry.model_key.startswith("wan2.6-"):
         upper_model = entry.model_key.upper().replace(".", "_").replace("-", "_")
         _push("API Key", "DASHSCOPE_API_KEY")
@@ -2206,7 +2253,7 @@ def _build_llm_python_template(entry: ModelCatalogEntry) -> str:
         f"    max_tokens={max_tokens},\n"
         f"    stream={stream_value},\n"
         ")\n"
-        "print(result.content)\n"
+        "logger.debug(result.content)\n"
     )
 
 
@@ -2260,7 +2307,7 @@ def _build_media_python_template(entry: ModelCatalogEntry) -> str:
             "    width=1024,\n"
             "    height=1024,\n"
             ")\n"
-            "print(result.outputs)\n"
+            "logger.debug(result.outputs)\n"
         )
     if method_name == "edit_image":
         return (
@@ -2270,7 +2317,7 @@ def _build_media_python_template(entry: ModelCatalogEntry) -> str:
             "    prompt=\"请根据参考图完成图像编辑\",\n"
             "    reference_images=[\"./reference.png\"],\n"
             ")\n"
-            "print(result.outputs)\n"
+            "logger.debug(result.outputs)\n"
         )
     if method_name == "generate_video":
         return (
@@ -2282,7 +2329,7 @@ def _build_media_python_template(entry: ModelCatalogEntry) -> str:
             "    width=1280,\n"
             "    height=720,\n"
             ")\n"
-            "print(result.outputs)\n"
+            "logger.debug(result.outputs)\n"
         )
     if method_name == "generate_audio":
         if _supports_video_reference_input(entry):
@@ -2294,7 +2341,7 @@ def _build_media_python_template(entry: ModelCatalogEntry) -> str:
                 "    \"generation_type\": \"sound-effect\",\n"
                 "    \"prompt\": \"根据视频补充环境音、动作音和氛围声\",\n"
                 "}\n"
-                "print(payload)\n"
+                "logger.debug(payload)\n"
             )
         generation_type = "music" if _is_music_generation_model(entry) else "sound-effect"
         duration = "30" if generation_type == "music" else "5"
@@ -2315,7 +2362,7 @@ def _build_media_python_template(entry: ModelCatalogEntry) -> str:
             "    response = await client.post(\"/api/v1/asset-studio/audio\", data=payload)\n"
             "    response.raise_for_status()\n"
             "    result = response.json()\n"
-            "    print(result[\"primary_output\"])\n"
+            "    logger.debug(result[\"primary_output\"])\n"
         )
     if method_name == "synthesize_speech":
         return (
@@ -2325,7 +2372,7 @@ def _build_media_python_template(entry: ModelCatalogEntry) -> str:
             "    text=\"这是需要合成的文本。\",\n"
             "    speaker=\"默认音色\",\n"
             ")\n"
-            "print(len(audio_bytes))\n"
+            "logger.debug(len(audio_bytes))\n"
         )
     return (
         "from core.unified_media_runtime import media_runtime\n\n"

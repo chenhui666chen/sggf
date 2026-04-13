@@ -14,17 +14,15 @@ import {
   ListItemText,
   ListItemButton,
 } from '@mui/material'
-import {
-  Dashboard as DashboardIcon,
-  People as PeopleIcon,
-  ReceiptLong as ReceiptLongIcon,
-  Security as SecurityIcon,
-  History as HistoryIcon,
-  Settings as SettingsIcon,
-  Home as HomeIcon,
-  Science as ScienceIcon,
-  Storage as StorageIcon,
-} from '@mui/icons-material'
+import DashboardIcon from '@mui/icons-material/Dashboard'
+import HistoryIcon from '@mui/icons-material/History'
+import HomeIcon from '@mui/icons-material/Home'
+import PeopleIcon from '@mui/icons-material/People'
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong'
+import ScienceIcon from '@mui/icons-material/Science'
+import SecurityIcon from '@mui/icons-material/Security'
+import SettingsIcon from '@mui/icons-material/Settings'
+import StorageIcon from '@mui/icons-material/Storage'
 import { RootState } from '@/store/store'
 
 const drawerWidth = 240

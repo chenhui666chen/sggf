@@ -118,7 +118,7 @@ def test_legacy_factory_wan_t2i_uses_registry_image_generation_path(
             return RegistryGenerationResult(
                 success=True,
                 task_id=task.task_id,
-                model_id="wanx-v1",
+                model_id="wan2.6-t2i",
                 outputs=["https://example.com/generated.png"],
                 metadata={"source": "registry"},
             )
@@ -142,7 +142,7 @@ def test_legacy_factory_wan_t2i_uses_registry_image_generation_path(
     )
 
     task = captured["task"]
-    assert captured["model_id"] == "wanx-v1"
+    assert captured["model_id"] == "wan2.6-t2i"
     assert task.modality.value == "text_to_image"
     assert task.prompt == "hero portrait"
     assert task.negative_prompt == "blurry"
@@ -499,7 +499,7 @@ def test_normalize_model_id_supports_legacy_multimodal_aliases() -> None:
 
     assert normalize_model_id("qwen3_vl_plus") == "qwen3-vl-plus"
     assert normalize_model_id("qwen3_tts") == "qwen3-tts-flash"
-    assert normalize_model_id("wan_t2i") == "wanx-v1"
+    assert normalize_model_id("wan_t2i") == "wan2.6-t2i"
     assert normalize_model_id("wan_t2v") == "wan2.6-t2v"
     assert normalize_model_id("wan_i2v") == "wan2.6-i2v"
     assert normalize_model_id("qwen_multiperson_fusion") == "qwen-image-edit-plus"

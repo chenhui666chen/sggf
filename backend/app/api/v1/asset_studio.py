@@ -20,6 +20,7 @@ from app.models.user import User
 from app.services.audiobook.ai_music import MusicGenerationRequest, MusicStyle, create_music_generator
 from app.services.audiobook.klingai_effect_generator import create_klingai_generator
 from core.model_catalog_runtime import get_model_catalog_runtime_index
+from core.model_resolution import normalize_model_id
 from core.unified_media_runtime import UnifiedMediaResult, media_runtime
 
 router = APIRouter(prefix="/api/v1/asset-studio", tags=["asset-studio"])
@@ -28,15 +29,16 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 ASSET_STUDIO_UPLOAD_DIR = PROJECT_ROOT / "backend" / "data" / "asset_studio_uploads"
 ASSET_STUDIO_OUTPUT_DIR = PROJECT_ROOT / "backend" / "data" / "asset_studio_outputs"
 
-IMAGE_GENERATION_MODELS = {"wanx-v1", "wanx-v1-turbo"}
+IMAGE_GENERATION_MODELS = {"wan2.6-t2i"}
 IMAGE_EDIT_MODELS = {"qwen-image-edit-plus", "qwen-image-edit-max"}
-VIDEO_MODELS = {"wan2.6-t2v", "wan2.6-t2v-fast", "wan2.6-i2v"}
+VIDEO_MODELS = {"wan2.6-t2v", "wan2.6-t2v-fast", "wan2.6-i2v", "wan2.6-r2v"}
 VISION_REVIEW_MODELS = {"qwen3-vl-plus"}
 AUDIO_MODELS = {"mureka-o1-instrumental", "kling-v1-text-to-audio"}
 VIDEO_DURATION_OPTIONS: dict[str, tuple[float, ...]] = {
     "wan2.6-t2v": (3.0, 5.0, 10.0, 15.0),
     "wan2.6-t2v-fast": (3.0, 5.0),
     "wan2.6-i2v": (3.0, 5.0, 10.0),
+    "wan2.6-r2v": (3.0, 5.0, 10.0, 15.0),
 }
 AUDIO_DURATION_OPTIONS: dict[str, tuple[int, ...]] = {
     "music": (15, 30, 45, 60),
@@ -900,7 +902,18 @@ def _raise_for_failed_result(result: UnifiedMediaResult, *, fallback_message: st
 
     error_message = str(result.error or fallback_message).strip() or fallback_message
     lowered = error_message.lower()
-    status_code = status.HTTP_400_BAD_REQUEST if "safety" in lowered or "inspection" in lowered else status.HTTP_503_SERVICE_UNAVAILABLE
+    error_code = str(result.error_code or "").strip().lower()
+    bad_request_codes = {"invalid_parameter", "unsupported_task", "content_safety"}
+    is_bad_request = (
+        error_code in bad_request_codes
+        or "safety" in lowered
+        or "inspection" in lowered
+        or "invalidparameter" in lowered
+        or "invalid parameter" in lowered
+        or "400 client error" in lowered
+        or "bad request" in lowered
+    )
+    status_code = status.HTTP_400_BAD_REQUEST if is_bad_request else status.HTTP_503_SERVICE_UNAVAILABLE
     raise HTTPException(status_code=status_code, detail=error_message)
 
 
@@ -1124,7 +1137,7 @@ async def generate_audio_asset(
 def generate_image_asset(
     prompt: str = Form(...),
     negative_prompt: str = Form(default=""),
-    model_id: str = Form(default="wanx-v1"),
+    model_id: str = Form(default="wan2.6-t2i"),
     width: int = Form(default=1024),
     height: int = Form(default=1024),
     quality: str = Form(default="standard"),
@@ -1154,7 +1167,8 @@ def generate_image_asset(
             height,
             request_label="图片",
         )
-        resolved_model_id = model_id if model_id in IMAGE_EDIT_MODELS else "qwen-image-edit-plus"
+        normalized_model_id = normalize_model_id(model_id) or ""
+        resolved_model_id = normalized_model_id if normalized_model_id in IMAGE_EDIT_MODELS else "qwen-image-edit-plus"
         result = media_runtime.edit_image(
             image_path=str(saved_reference_paths[0]),
             edit_prompt=cleaned_prompt,
@@ -1189,7 +1203,8 @@ def generate_image_asset(
         height,
         request_label="图片",
     )
-    resolved_model_id = model_id if model_id in IMAGE_GENERATION_MODELS else "wanx-v1"
+    normalized_model_id = normalize_model_id(model_id) or ""
+    resolved_model_id = normalized_model_id if normalized_model_id in IMAGE_GENERATION_MODELS else "wan2.6-t2i"
     result = media_runtime.generate_image(
         prompt=cleaned_prompt,
         negative_prompt=negative_prompt.strip(),

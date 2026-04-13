@@ -44,23 +44,23 @@ describe('formatContent', () => {
 
     it('应该转换加粗文本', () => {
       const result = formatMarkdownToHtml('这是**加粗**文本')
-      expect(result).toContain('<strong>')
+      expect(result).toContain('<strong')
       expect(result).toContain('加粗')
     })
 
     it('应该转换无序列表', () => {
       const input = '- 项目1\n- 项目2'
       const result = formatMarkdownToHtml(input)
-      expect(result).toContain('<ul>')
-      expect(result).toContain('<li>')
+      expect(result).toContain('<ul')
+      expect(result).toContain('<li')
       expect(result).toContain('项目1')
     })
 
     it('应该转换有序列表', () => {
       const input = '1. 第一项\n2. 第二项'
       const result = formatMarkdownToHtml(input)
-      expect(result).toContain('<ol>')
-      expect(result).toContain('<li>')
+      expect(result).toContain('<ol')
+      expect(result).toContain('<li')
       expect(result).toContain('第一项')
     })
 
@@ -72,7 +72,7 @@ describe('formatContent', () => {
     it('应该转换段落', () => {
       const input = '第一段\n\n第二段'
       const result = formatMarkdownToHtml(input)
-      expect(result).toContain('<p>')
+      expect(result).toContain('<p style=')
       expect(result).toContain('第一段')
       expect(result).toContain('第二段')
     })
@@ -95,7 +95,7 @@ describe('formatContent', () => {
       const input = '### 标题\n\n这是**加粗**文本'
       const result = smartFormat(input)
       expect(result).toContain('<h3')
-      expect(result).toContain('<strong>')
+      expect(result).toContain('<strong')
     })
 
     it('应该对纯文本使用 formatSimpleText', () => {
@@ -135,18 +135,18 @@ describe('formatContent', () => {
       expect(result).toContain('质量评审报告')
       
       // 检查列表
-      expect(result).toContain('<ul>')
-      expect(result).toContain('<li>')
+      expect(result).toContain('<ul')
+      expect(result).toContain('<li')
       
       // 检查加粗
-      expect(result).toContain('<strong>')
+      expect(result).toContain('<strong')
       expect(result).toContain('8.2/10分')
       
       // 检查分隔线
       expect(result).toContain('<hr')
       
       // 检查有序列表
-      expect(result).toContain('<ol>')
+      expect(result).toContain('<ol')
     })
 
     it('应该处理混合格式内容', () => {
@@ -171,10 +171,10 @@ describe('formatContent', () => {
       expect(result).toContain('<h1')
       expect(result).toContain('<h2')
       expect(result).toContain('<h3')
-      expect(result).toContain('<ul>')
-      expect(result).toContain('<ol>')
+      expect(result).toContain('<ul')
+      expect(result).toContain('<ol')
       expect(result).toContain('<hr')
-      expect(result).toContain('<strong>')
+      expect(result).toContain('<strong')
     })
   })
 })

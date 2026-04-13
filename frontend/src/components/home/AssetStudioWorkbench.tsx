@@ -216,14 +216,9 @@ function Select<T extends string = string>(props: SelectProps<T>) {
 
 const IMAGE_GENERATION_MODEL_OPTIONS: ModelOption[] = [
   {
-    value: 'wanx-v1',
-    label: 'wanx-v1',
-    helper: '质量优先，适合正式出图、封面草图和最终素材。',
-  },
-  {
-    value: 'wanx-v1-turbo',
-    label: 'wanx-v1-turbo',
-    helper: '速度优先，适合试词、快速预览和早期探索。',
+    value: 'wan2.6-t2i',
+    label: 'wan2.6-t2i',
+    helper: '统一到实际调用名的主力文生图模型，适合正式出图、封面草图和角色概念图。',
   },
 ]
 
@@ -259,18 +254,28 @@ const VIDEO_IMAGE_MODEL_OPTIONS: ModelOption[] = [
     label: 'wan2.6-i2v',
     helper: '首帧驱动模型，适合基于参考图生成更稳定的人物或场景视频。',
   },
+  {
+    value: 'wan2.6-r2v',
+    label: 'wan2.6-r2v',
+    helper: '参考视频+多图驱动，支持首帧/尾帧控制，适合风格一致的镜头续接。',
+  },
 ]
 
 const MOTION_MODEL_OPTIONS: ModelOption[] = [
   {
+    value: 'wan2.6-r2v',
+    label: 'wan2.6-r2v',
+    helper: '动作控制首选，支持参考视频+多图（最多5张），首尾帧控制，主体一致性最强。',
+  },
+  {
     value: 'wan2.6-i2v',
     label: 'wan2.6-i2v',
-    helper: '动作控制首选，强调主体一致性和参考图驱动。',
+    helper: '单图驱动动画化，适合从静态图生成运动画面。',
   },
   {
     value: 'wan2.6-t2v',
     label: 'wan2.6-t2v',
-    helper: '更适合镜头语言更强的运动片段，可额外控制镜头运动。',
+    helper: '纯提示词驱动，镜头语言更强的运动片段。',
   },
 ]
 
@@ -289,6 +294,12 @@ const VIDEO_DURATION_OPTIONS_BY_MODEL: Record<string, DurationOption[]> = {
     { value: '3', label: '3 秒' },
     { value: '5', label: '5 秒' },
     { value: '10', label: '10 秒' },
+  ],
+  'wan2.6-r2v': [
+    { value: '3', label: '3 秒' },
+    { value: '5', label: '5 秒' },
+    { value: '10', label: '10 秒' },
+    { value: '15', label: '15 秒' },
   ],
 }
 
@@ -1059,7 +1070,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
 
   const [imagePrompt, setImagePrompt] = useState('')
   const [imageNegativePrompt, setImageNegativePrompt] = useState('')
-  const [imageModelId, setImageModelId] = useState('wanx-v1')
+  const [imageModelId, setImageModelId] = useState('wan2.6-t2i')
   const [imageSize, setImageSize] = useState(IMAGE_SIZE_OPTIONS[0].value)
   const [imageReferenceFiles, setImageReferenceFiles] = useState<File[]>([])
   const [imageLoading, setImageLoading] = useState(false)
@@ -1266,7 +1277,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
       return
     }
     if (!imageUsesReferenceMode && imageModelId.startsWith('qwen-image-edit')) {
-      setImageModelId(recommendedImageModel?.value || 'wanx-v1')
+      setImageModelId(recommendedImageModel?.value || 'wan2.6-t2i')
     }
   }, [activeTabId, imageModelId, imageUsesReferenceMode, recommendedImageModel])
 
@@ -1555,7 +1566,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                   <Chip size="small" label={imageUsesReferenceMode ? '参考图编辑模式' : '纯提示词生成'} variant="outlined" sx={{ color: 'white' }} />
                   <Chip
                     size="small"
-                    label={imageModelId === 'wanx-v1-turbo' ? '速度优先' : imageModelId === 'qwen-image-edit-max' ? '质量优先' : '推荐主力'}
+                    label={imageModelId === 'qwen-image-edit-max' ? '质量优先' : '推荐主力'}
                     variant="outlined"
                     sx={{ color: 'white' }}
                   />

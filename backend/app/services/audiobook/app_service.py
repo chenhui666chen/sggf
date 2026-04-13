@@ -7,13 +7,14 @@
 """
 import json
 import logging
+from dataclasses import dataclass
 from typing import Dict, List
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.audiobook import AudiobookProject, ChapterAudio
-from app.models.project import Project
+from app.models.project import Chapter, Project
 from app.models.user import User
 from app.schemas.audiobook import AudiobookProjectCreate, CharacterVoiceConfig
 from app.services.audiobook.repository import (
@@ -26,6 +27,12 @@ from app.services.audiobook.project_audio_config import get_characters_for_model
 from app.services.audiobook.voice_manager_factory import create_voice_manager
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PreparedAudiobookProjectCreation:
+    project: Project
+    chapters: List[Chapter]
 
 
 class AudiobookAppService:
@@ -43,7 +50,7 @@ class AudiobookAppService:
         self.character_repo = CharacterRepository
         self.audiobook_repo = AudiobookProjectRepository
 
-    # -------- 椤圭洰涓庣珷鑺傛牎楠?---------
+    # -------- 项目与章节校验 --------
     def _get_user_project(self, project_id: int) -> Project:
         project = self.project_repo.get_user_project(
             self.db, user_id=self.current_user.id, project_id=project_id
@@ -55,11 +62,11 @@ class AudiobookAppService:
             )
         return project
 
-    def _validate_chapters(self, project_id: int, chapter_ids: List[int]) -> List[Project]:
+    def _validate_chapters(self, project_id: int, chapter_ids: List[int]) -> List[Chapter]:
         if not chapter_ids:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="绔犺妭鍒楄〃涓嶈兘涓虹┖",
+                detail="章节列表不能为空",
             )
 
         chapters = self.chapter_repo.get_project_chapters_by_ids(
@@ -75,6 +82,14 @@ class AudiobookAppService:
         return chapters
 
     # -------- voice_mapping 构建逻辑 ---------
+    def prepare_audiobook_project_creation(
+        self,
+        request: AudiobookProjectCreate,
+    ) -> PreparedAudiobookProjectCreation:
+        validated_project = self._get_user_project(request.project_id)
+        chapters = self._validate_chapters(validated_project.id, request.chapter_ids)
+        return PreparedAudiobookProjectCreation(project=validated_project, chapters=chapters)
+
     def _load_project_voice_mapping(self, project: Project, tts_model: str) -> Dict[str, Dict]:
         voice_mapping: Dict[str, Dict] = {}
         config = parse_project_audio_config(project.audio_config or "")
@@ -216,7 +231,12 @@ class AudiobookAppService:
         return reused
 
     # -------- 对外用例方法 ---------
-    def create_audiobook_project(self, request: AudiobookProjectCreate) -> AudiobookProject:
+    def create_audiobook_project(
+        self,
+        request: AudiobookProjectCreate,
+        *,
+        prepared: PreparedAudiobookProjectCreation | None = None,
+    ) -> AudiobookProject:
         logger.info(
             "创建有声书项目 user_id=%s project_id=%s",
             self.current_user.id,
@@ -224,10 +244,10 @@ class AudiobookAppService:
         )
 
         # 1. 验证项目权限
-        project = self._get_user_project(request.project_id)
+        prepared_request = prepared or self.prepare_audiobook_project_creation(request)
+        project = prepared_request.project
 
         # 2. 验证章节
-        self._validate_chapters(project.id, request.chapter_ids)
 
         # 3. 构建 voice_mapping
         tts_model = (request.tts_model or "qwen3-tts-flash").strip()

@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import Optional, List, Any, Union
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class CharacterBase(BaseModel):
@@ -16,6 +16,7 @@ class CharacterBase(BaseModel):
 
     name: str
     role: Optional[str] = None
+    role_position: Optional[str] = None
     gender: Optional[str] = None
     age: Optional[int] = None
 
@@ -86,6 +87,7 @@ class CharacterUpdate(BaseModel):
 
     name: Optional[str] = None
     role: Optional[str] = None
+    role_position: Optional[str] = None
     gender: Optional[str] = None
     age: Optional[int] = None
 
@@ -116,8 +118,7 @@ class CharacterResponse(CharacterBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CharacterTechniqueBase(BaseModel):
@@ -158,6 +159,5 @@ class CharacterTechniqueResponse(CharacterTechniqueBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 

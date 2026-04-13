@@ -88,8 +88,8 @@ function App() {
       if (token && isAuthenticated) {
         try {
           await dispatch(getCurrentUser())
-        } catch (error) {
-          console.error('Failed to load user:', error)
+        } catch {
+          // 加载用户失败
         }
       }
     }

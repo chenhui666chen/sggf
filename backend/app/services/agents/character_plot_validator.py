@@ -1,8 +1,12 @@
 """
 人物-大纲协同验证器 - 确保人物与情节相辅相成
 """
+import logging
 from typing import Dict, List, Any, Optional
 from core.langchain_bridge import create_task_llm
+
+
+logger = logging.getLogger(__name__)
 
 
 class CharacterPlotValidator:
@@ -92,7 +96,7 @@ class CharacterPlotValidator:
             return validation_result
 
         except Exception as e:
-            print(f"❌ 验证失败: {e}")
+            logger.debug(f"❌ 验证失败: {e}")
             return {
                 "success": False,
                 "error": str(e),
@@ -221,7 +225,7 @@ class CharacterPlotValidator:
             }
 
         except Exception as e:
-            print(f"❌ 建议生成失败: {e}")
+            logger.debug(f"❌ 建议生成失败: {e}")
             return {
                 "success": False,
                 "error": str(e),
@@ -254,10 +258,10 @@ class CharacterPlotValidator:
             characters, plot_outline, world_setting
         )
 
-        print(f"\n📊 当前人物-情节匹配度: {validation['score']}/100")
+        logger.debug(f"\n📊 当前人物-情节匹配度: {validation['score']}/100")
 
         if validation['score'] < 60:
-            print("⚠️ 匹配度较低，建议先优化现有人物与情节的关联")
+            logger.debug("⚠️ 匹配度较低，建议先优化现有人物与情节的关联")
 
         # 第二步：生成扩展计划
         prompt = f"""请制定人物与大纲的协同扩展计划。
@@ -307,7 +311,7 @@ class CharacterPlotValidator:
             }
 
         except Exception as e:
-            print(f"❌ 计划生成失败: {e}")
+            logger.debug(f"❌ 计划生成失败: {e}")
             return {
                 "success": False,
                 "error": str(e),

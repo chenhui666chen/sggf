@@ -277,21 +277,20 @@ def test_build_import_structured_memory_payload_from_book_parser_assets() -> Non
             analysis_type="characters",
             content=json.dumps(
                 {
-                    "main_characters": [
+                    "characters": [
                         {
                             "name": "林舟",
-                            "role": "protagonist",
+                            "role_position": "主角",
                             "story_stance": "主角方",
                             "faction": "青石调查司",
                             "description": "执着追查旧案的调查者",
-                        }
-                    ],
-                    "supporting_characters": [
+                        },
                         {
                             "name": "顾晚",
-                            "role": "supporting",
+                            "role_position": "盟友",
+                            "story_stance": "主角方",
                             "relationship_to_main": "林舟的重要盟友",
-                        }
+                        },
                     ],
                     "character_relationships": [
                         {
@@ -424,6 +423,109 @@ def test_load_analysis_content_skips_parse_error_results() -> None:
     }
 
     assert bridge._load_analysis_content(analysis_map, "plot") == {}
+
+
+def legacy_test_build_plot_outline_text_recovers_from_raw_response_preview() -> None:
+    bridge = ProjectBridge(_FakeDB([]))
+    recovered_payload = {
+        "main_plot": "林舟沿着密道线索追查黑匣子的真正归属。",
+        "plot_arcs": [
+            {
+                "name": "密道追查",
+                "description": "主角从残卷与旧案之间找到隐藏入口。",
+                "chapters": [1, 18],
+                "type": "发展",
+            }
+        ],
+        "turning_points": [
+            {
+                "chapter": 9,
+                "event": "发现密道入口",
+                "significance": "故事由明线调查转入暗线真相",
+            }
+        ],
+    }
+    analysis_map = {
+        "plot": BookAnalysis(
+            book_id=1,
+            analysis_type="plot",
+            content=json.dumps(
+                {
+                    "parse_error": True,
+                    "quality_warning": "LLM 响应未能成功解析为 JSON",
+                },
+                ensure_ascii=False,
+            ),
+            extra_data=json.dumps(
+                {
+                    "parse_error": True,
+                    "raw_response_preview": json.dumps(recovered_payload, ensure_ascii=False),
+                },
+                ensure_ascii=False,
+            ),
+        )
+    }
+
+    outline_text = bridge._build_plot_outline_text(analysis_map, 1)
+
+    assert "1. 故事概述" in outline_text
+    assert "林舟沿着密道线索追查黑匣子的真正归属。" in outline_text
+    assert "密道追查" in outline_text
+    assert "第9章" in outline_text
+
+
+def legacy_test_build_plot_outline_text_falls_back_to_chapter_summaries_when_plot_parse_error() -> None:
+    fake_db = _FakeDB(
+        [
+            BookChapter(
+                book_id=1,
+                chapter_number=1,
+                title="雨夜入城",
+                summary="林舟抵达青石城，决定重查旧案。",
+            ),
+            BookChapter(
+                book_id=1,
+                chapter_number=6,
+                title="暗线浮现",
+                summary="顾晚带来密道地图，调查从明线转入暗线。",
+            ),
+            BookChapter(
+                book_id=1,
+                chapter_number=12,
+                title="真相逼近",
+                summary="黑匣子归属浮出水面，众人被迫提前决战。",
+            ),
+        ]
+    )
+    bridge = ProjectBridge(fake_db)
+    analysis_map = {
+        "plot": BookAnalysis(
+            book_id=1,
+            analysis_type="plot",
+            content=json.dumps(
+                {
+                    "parse_error": True,
+                    "quality_warning": "LLM 响应未能成功解析为 JSON",
+                },
+                ensure_ascii=False,
+            ),
+            extra_data=json.dumps(
+                {
+                    "parse_error": True,
+                    "raw_response_preview": '{"main_plot":"截断在这里"',
+                },
+                ensure_ascii=False,
+            ),
+        )
+    }
+
+    outline_text = bridge._build_plot_outline_text(analysis_map, 1)
+
+    assert "1. 故事概述" in outline_text
+    assert "林舟抵达青石城" in outline_text
+    assert "黑匣子归属浮出水面" in outline_text
+    assert "2. 情节发展" in outline_text
+    assert "5. 结局规划" in outline_text
 
 
 def test_build_world_setting_text_skips_parse_error_worldview() -> None:
@@ -618,27 +720,26 @@ def test_import_characters_normalizes_mentions_and_backfills_missing_cards() -> 
         analysis_type="characters",
         content=json.dumps(
             {
-                "main_characters": [
+                "characters": [
                     {
                         "name": "\u6797\u6f88",
                         "aliases": ["\u961f\u957f"],
-                        "role": "protagonist",
+                        "role_position": "\u4e3b\u89d2",
                         "story_stance": "\u4e3b\u89d2\u65b9",
                         "faction": "\u9752\u77f3\u8c03\u67e5\u5c40",
                         "description": "\u6267\u7740\u8ffd\u67e5\u65e7\u6848\u7684\u8c03\u67e5\u8005",
-                        "personality": ["\u51b7\u9759", "\u654f\u9510"],
-                        "abilities": ["\u75d5\u8ff9\u63a8\u6f14"],
+                        "personality_anchor": ["\u51b7\u9759", "\u654f\u9510"],
+                        "ability_outline": ["\u75d5\u8ff9\u63a8\u6f14"],
                         "first_appearance_chapter": 1,
                         "importance_level": "\u6838\u5fc3\u89d2\u8272",
-                    }
-                ],
-                "supporting_characters": [
+                    },
                     {
                         "name": "\u987e\u665a",
-                        "role": "supporting",
+                        "role_position": "\u76df\u53cb",
+                        "story_stance": "\u4e3b\u89d2\u65b9",
                         "relationship_to_main": "\u6797\u6f88\u7684\u91cd\u8981\u76df\u53cb",
                         "description": "\u5171\u540c\u8ffd\u67e5\u7684\u6863\u6848\u7ba1\u7406\u5458",
-                    }
+                    },
                 ],
                 "character_relationships": [
                     {
@@ -668,9 +769,12 @@ def test_import_characters_normalizes_mentions_and_backfills_missing_cards() -> 
     assert lin_che.appearance_status == "\u5df2\u51fa\u573a"
     assert lin_che.first_appearance_chapter == 1
     assert lin_che.faction == "\u9752\u77f3\u8c03\u67e5\u5c40"
+    assert lin_che.role == "\u4e3b\u89d2\u65b9"
+    assert lin_che.role_position == "\u4e3b\u89d2"
     assert "\u961f\u957f" in (lin_che.profile or "")
     assert "\u51b7\u9759" in (lin_che.profile or "")
     assert "\u75d5\u8ff9\u63a8\u6f14" in (lin_che.profile or "")
+    assert "\u3010\u89d2\u8272\u5b9a\u4f4d\u3011\uff1a\u4e3b\u89d2" in (lin_che.profile or "")
     assert any(
         relation.get("target") == "\u987e\u665a" and relation.get("type") == "\u76df\u53cb"
         for relation in json.loads(lin_che.relations or "[]")
@@ -678,12 +782,100 @@ def test_import_characters_normalizes_mentions_and_backfills_missing_cards() -> 
 
     assert gu_wan.appearance_status == "\u5df2\u51fa\u573a"
     assert gu_wan.first_appearance_chapter == 1
+    assert gu_wan.role == "\u4e3b\u89d2\u65b9"
+    assert gu_wan.role_position == "\u76df\u53cb"
     assert "\u91cd\u8981\u76df\u53cb" in (gu_wan.summary or "") or "\u91cd\u8981\u76df\u53cb" in (gu_wan.profile or "")
 
     assert shen_yan.appearance_status == "\u5df2\u51fa\u573a"
     assert shen_yan.first_appearance_chapter == 2
     assert shen_yan.importance_level == "\u6b21\u8981\u89d2\u8272"
+    assert shen_yan.role in {None, ""}
+    assert shen_yan.role_position == "\u529f\u80fd\u89d2\u8272"
     assert "\u62c6\u4e66" in (shen_yan.summary or "")
+
+
+def test_import_characters_accept_new_semantic_character_alias_fields() -> None:
+    fake_db = _FakeDB([])
+    bridge = ProjectBridge(fake_db)
+    project = Project(id=52, user_id=1, title="Alias Import")
+    characters_analysis = BookAnalysis(
+        book_id=1,
+        analysis_type="characters",
+        content=json.dumps(
+            {
+                "characters": [
+                    {
+                        "name": "林澈",
+                        "role_position": "主角",
+                        "story_stance": "主角方",
+                        "faction": "青石调查局",
+                        "appearance_anchor": "眉眼冷厉，习惯先观察后开口",
+                        "personality_anchor": ["冷静", "执拗"],
+                        "background_status": "停职调查员，仍暗中追查旧案",
+                        "motivation": "查明黑匣子真相并洗清旧案污名",
+                        "ability_outline": "痕迹推演与现场复盘",
+                        "limitation": "过度冒险，难以及时止损",
+                        "mainline_role": "负责追查旧案并撬开主线缺口",
+                        "mainline_clues": "掌握黑匣子与旧档案两条关键线索",
+                        "growth_direction": "从独胆追查转向主动协作",
+                    }
+                ],
+                "character_relationships": [],
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+    bridge._import_characters(project, characters_analysis)
+
+    character = next(item for item in fake_db.added if isinstance(item, Character) and item.name == "林澈")
+
+    assert character.summary == "负责追查旧案并撬开主线缺口"
+    assert "【外貌锚点】：眉眼冷厉，习惯先观察后开口" in (character.profile or "")
+    assert "【性格锚点】：性格：冷静、执拗" in (character.profile or "")
+    assert "【背景/当前处境】：停职调查员，仍暗中追查旧案" in (character.profile or "")
+    assert "【能力与限制】：能力：痕迹推演与现场复盘" in (character.profile or "")
+    assert "限制：过度冒险，难以及时止损" in (character.profile or "")
+    assert "【主线绑定】：剧情职责：负责追查旧案并撬开主线缺口" in (character.profile or "")
+    assert "关联线索：掌握黑匣子与旧档案两条关键线索" in (character.profile or "")
+    assert "【成长方向】：从独胆追查转向主动协作" in (character.profile or "")
+
+
+def test_build_characters_text_outputs_story_stance_and_role_position() -> None:
+    fake_db = _FakeDB([])
+    bridge = ProjectBridge(fake_db)
+    characters_analysis = BookAnalysis(
+        book_id=1,
+        analysis_type="characters",
+        content=json.dumps(
+            {
+                "characters": [
+                    {
+                        "name": "林澈",
+                        "role_position": "主角",
+                        "story_stance": "主角方",
+                        "description": "负责追查旧案的调查员",
+                    },
+                    {
+                        "name": "顾晚",
+                        "role_position": "盟友",
+                        "story_stance": "主角方",
+                        "relationship_to_main": "林澈的重要盟友",
+                        "description": "协助查卷的档案管理员",
+                    },
+                ],
+                "character_relationships": [],
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+    text = bridge._build_characters_text({"characters": characters_analysis})
+
+    assert "【故事立场】：主角方" in text
+    assert "【角色定位】：主角" in text
+    assert "【角色定位】：盟友" in text
+    assert "## 支持角色" in text
 
 
 def test_imported_characters_link_to_projected_standard_collections() -> None:
@@ -695,16 +887,16 @@ def test_imported_characters_link_to_projected_standard_collections() -> None:
         analysis_type="characters",
         content=json.dumps(
             {
-                "main_characters": [
+                "characters": [
                     {
                         "name": "林澈",
-                        "role": "protagonist",
+                        "role_position": "主角",
+                        "story_stance": "主角方",
                         "faction": "青石调查局",
                         "description": "负责追查旧案的调查员",
-                        "background": "常驻青石城藏书楼，负责保管旧案卷宗",
+                        "background_status": "常驻青石城藏书楼，负责保管旧案卷宗",
                     }
                 ],
-                "supporting_characters": [],
                 "character_relationships": [],
             },
             ensure_ascii=False,
@@ -786,22 +978,22 @@ def test_sync_imported_characters_to_character_system_creates_reusable_items() -
         analysis_type="characters",
         content=json.dumps(
             {
-                "main_characters": [
+                "characters": [
                     {
                         "name": "林澈",
-                        "role": "protagonist",
+                        "role_position": "主角",
+                        "story_stance": "主角方",
                         "faction": "青石调查局",
                         "description": "负责追查旧案的调查员",
-                        "background": "常驻青石城藏书楼，负责保管旧案卷宗",
-                    }
-                ],
-                "supporting_characters": [
+                        "background_status": "常驻青石城藏书楼，负责保管旧案卷宗",
+                    },
                     {
                         "name": "顾晚",
-                        "role": "supporting",
+                        "role_position": "盟友",
+                        "story_stance": "主角方",
                         "description": "协助查卷的档案管理员",
                         "relationship_to_main": "林澈的重要盟友",
-                    }
+                    },
                 ],
                 "character_relationships": [
                     {
@@ -867,7 +1059,7 @@ def test_sync_imported_characters_to_character_system_creates_reusable_items() -
     assert any(relation.get("type") == "faction" and relation.get("target") == "青石调查局" for relation in lin_che_relations)
     assert any(relation.get("type") == "location" and relation.get("target") == "青石城" for relation in lin_che_relations)
     assert any(relation.get("type") == "盟友" and relation.get("target") == "顾晚" for relation in lin_che_relations)
-    assert "配角" in json.loads(gu_wan.tags or "[]")
+    assert "盟友" in json.loads(gu_wan.tags or "[]")
 
 
 def test_sync_imported_characters_to_character_system_is_idempotent() -> None:
@@ -879,15 +1071,15 @@ def test_sync_imported_characters_to_character_system_is_idempotent() -> None:
         analysis_type="characters",
         content=json.dumps(
             {
-                "main_characters": [
+                "characters": [
                     {
                         "name": "林澈",
-                        "role": "protagonist",
+                        "role_position": "主角",
+                        "story_stance": "主角方",
                         "faction": "青石调查局",
                         "description": "负责追查旧案的调查员",
                     }
                 ],
-                "supporting_characters": [],
                 "character_relationships": [],
             },
             ensure_ascii=False,
@@ -926,16 +1118,16 @@ def test_link_imported_characters_to_settings_prefers_system_collections() -> No
         analysis_type="characters",
         content=json.dumps(
             {
-                "main_characters": [
+                "characters": [
                     {
                         "name": "林澈",
-                        "role": "protagonist",
+                        "role_position": "主角",
+                        "story_stance": "主角方",
                         "faction": "青石调查局",
                         "description": "负责追查旧案的调查员",
-                        "background": "常驻青石城藏书楼，负责保管旧案卷宗",
+                        "background_status": "常驻青石城藏书楼，负责保管旧案卷宗",
                     }
                 ],
-                "supporting_characters": [],
                 "character_relationships": [],
             },
             ensure_ascii=False,
@@ -1022,16 +1214,16 @@ def test_link_imported_characters_to_settings_falls_back_to_worldview_items() ->
         analysis_type="characters",
         content=json.dumps(
             {
-                "main_characters": [
+                "characters": [
                     {
                         "name": "林澈",
-                        "role": "protagonist",
+                        "role_position": "主角",
+                        "story_stance": "主角方",
                         "faction": "青石调查局（外勤组）",
                         "description": "负责追查旧案的调查员",
-                        "background": "长期驻守青石城（东区），追查失踪案",
+                        "background_status": "长期驻守青石城（东区），追查失踪案",
                     }
                 ],
-                "supporting_characters": [],
                 "character_relationships": [],
             },
             ensure_ascii=False,
@@ -1089,3 +1281,169 @@ def test_link_imported_characters_to_settings_falls_back_to_worldview_items() ->
     assert set(json.loads(character.related_locations_json or "[]")) == {worldview_location_item.id}
     assert json.loads(worldview_force_item.related_characters or "[]") == [character.id]
     assert json.loads(worldview_location_item.related_characters or "[]") == [character.id]
+
+
+def test_build_plot_outline_text_recovers_from_raw_response_preview() -> None:
+    bridge = ProjectBridge(_FakeDB([]))
+    recovered_payload = {
+        "main_plot": "林舟沿着密道线索追查黑匣子的真正归属。",
+        "plot_arcs": [
+            {
+                "name": "密道追查",
+                "description": "主角从残卷与旧案之间找到隐藏入口。",
+                "chapters": [1, 18],
+                "type": "发展",
+            }
+        ],
+        "turning_points": [
+            {
+                "chapter": 9,
+                "event": "发现密道入口",
+                "significance": "故事由明线调查转入暗线真相。",
+            }
+        ],
+    }
+    analysis_map = {
+        "plot": BookAnalysis(
+            book_id=1,
+            analysis_type="plot",
+            content=json.dumps(
+                {
+                    "parse_error": True,
+                    "quality_warning": "LLM 响应未能成功解析为 JSON",
+                },
+                ensure_ascii=False,
+            ),
+            extra_data=json.dumps(
+                {
+                    "parse_error": True,
+                    "raw_response_preview": json.dumps(recovered_payload, ensure_ascii=False),
+                },
+                ensure_ascii=False,
+            ),
+        )
+    }
+
+    outline_text = bridge._build_plot_outline_text(analysis_map, 1)
+
+    assert "故事总纲：" in outline_text
+    assert "第9章：" in outline_text
+    assert "- 场景目标：" in outline_text
+    assert "发现密道入口" in outline_text
+    assert "- 情节作用：" in outline_text
+    assert "- 关键事件：" in outline_text
+
+
+def test_build_plot_outline_text_falls_back_to_chapter_summaries_when_plot_parse_error() -> None:
+    fake_db = _FakeDB(
+        [
+            BookChapter(
+                book_id=1,
+                chapter_number=1,
+                title="雨夜入城",
+                summary="林舟抵达青石城，决定重查旧案。",
+            ),
+            BookChapter(
+                book_id=1,
+                chapter_number=6,
+                title="暗线浮现",
+                summary="顾晚带来密道地图，调查从明线转入暗线。",
+            ),
+            BookChapter(
+                book_id=1,
+                chapter_number=12,
+                title="真相逼近",
+                summary="黑匣子归属浮出水面，众人被迫提前决战。",
+            ),
+        ]
+    )
+    bridge = ProjectBridge(fake_db)
+    analysis_map = {
+        "plot": BookAnalysis(
+            book_id=1,
+            analysis_type="plot",
+            content=json.dumps(
+                {
+                    "parse_error": True,
+                    "quality_warning": "LLM 响应未能成功解析为 JSON",
+                },
+                ensure_ascii=False,
+            ),
+            extra_data=json.dumps(
+                {
+                    "parse_error": True,
+                    "raw_response_preview": '{"main_plot":"截断在这里',
+                },
+                ensure_ascii=False,
+            ),
+        )
+    }
+
+    outline_text = bridge._build_plot_outline_text(analysis_map, 1)
+
+    assert "第1章：雨夜入城" in outline_text
+    assert "第6章：暗线浮现" in outline_text
+    assert "第12章：真相逼近" in outline_text
+    assert "- 场景目标：林舟抵达青石城" in outline_text
+    assert "- 关键事件：" in outline_text
+    assert "故事总纲：" in outline_text
+
+
+def test_build_plot_outline_text_maps_book_parser_outline_fields_to_standard_schema() -> None:
+    fake_db = _FakeDB(
+        [
+            BookChapter(
+                book_id=1,
+                chapter_number=3,
+                title="潜入书阁",
+                summary="林舟与顾晚潜入书阁查卷，险些被巡逻弟子发现。",
+                key_events=json.dumps(["潜入书阁查卷", "险逃巡逻追捕"], ensure_ascii=False),
+                appearing_characters=json.dumps(["林舟", "顾晚"], ensure_ascii=False),
+                outline_data=json.dumps(
+                    {
+                        "scene_goal": "潜入书阁查卷并确认密道入口",
+                        "conflict_arc": {"type": "追捕", "result": "险逃"},
+                        "emotion_curve": "谨慎→紧张→喘息未定",
+                        "highlight": {
+                            "type": "反转",
+                            "description": "暗门在旧卷后显现",
+                            "intensity": "4星",
+                        },
+                        "ending_hook": {"type": "悬念", "content": "密道尽头传来脚步声"},
+                        "gains": {
+                            "character_gains": "取得旧卷",
+                            "plot_progress": "确认密道通向旧档库",
+                        },
+                        "foreshadowing": ["黑匣子的来历未明"],
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        ]
+    )
+    bridge = ProjectBridge(fake_db)
+    analysis_map = {
+        "plot": BookAnalysis(
+            book_id=1,
+            analysis_type="plot",
+            content=json.dumps(
+                {
+                    "main_plot": "林舟沿着旧案与密道线索逼近黑匣子的真正归属。",
+                },
+                ensure_ascii=False,
+            ),
+        )
+    }
+
+    outline_text = bridge._build_plot_outline_text(analysis_map, 1)
+
+    assert "第3章：潜入书阁" in outline_text
+    assert "- 场景目标：潜入书阁查卷并确认密道入口" in outline_text
+    assert "- 冲突设计：冲突类型：追捕；结果：险逃" in outline_text
+    assert "- 关键事件：" in outline_text
+    assert "- 爽点类型：反转；内容：暗门在旧卷后显现；强度：4星" in outline_text
+    assert "- 涉及人物：林舟、顾晚" in outline_text
+    assert "- 人物推进：取得旧卷" in outline_text
+    assert "- 情节作用：" in outline_text
+    assert "- 结尾钩子：悬念 / 密道尽头传来脚步声" in outline_text
+    assert "- 伏笔事项：黑匣子的来历未明" in outline_text

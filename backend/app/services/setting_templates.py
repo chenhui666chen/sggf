@@ -1,5 +1,5 @@
 """类型化设定模板与设定摘要工具函数"""
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import json
 
 from sqlalchemy.orm import Session
@@ -1329,17 +1329,42 @@ def get_templates_metadata() -> List[Dict[str, Any]]:
     ]
 
 
-def build_project_settings_summary(project_id: int, db: Session) -> str:
-    """为指定项目生成世界观设定摘要（供AI Prompt或前端展示使用）"""
-    collections = (
-        db.query(SettingCollection)
-        .filter(SettingCollection.project_id == project_id)
-        .order_by(SettingCollection.order, SettingCollection.id)
-        .all()
+def build_project_settings_summary(
+    project_id: int,
+    db: Session,
+    relevant_categories: Optional[List[str]] = None,
+    max_content_length: int = 300,
+) -> str:
+    """为指定项目生成世界观设定摘要（供AI Prompt或前端展示使用）
+
+    Args:
+        project_id: 项目ID
+        db: 数据库会话
+        relevant_categories: 需要包含的体系类别列表，None 表示全部
+        max_content_length: 单条设定内容的最大长度
+    """
+    query = db.query(SettingCollection).filter(
+        SettingCollection.project_id == project_id,
+        SettingCollection.category != "candidate",
     )
+    if relevant_categories:
+        query = query.filter(SettingCollection.category.in_(relevant_categories))
+
+    collections = query.order_by(SettingCollection.order, SettingCollection.id).all()
 
     if not collections:
         return ""
+
+    collection_ids = [collection.id for collection in collections]
+    items = (
+        db.query(SettingItem)
+        .filter(SettingItem.collection_id.in_(collection_ids))
+        .order_by(SettingItem.collection_id, SettingItem.order, SettingItem.id)
+        .all()
+    )
+    items_by_collection: Dict[int, List[SettingItem]] = {}
+    for item in items:
+        items_by_collection.setdefault(item.collection_id, []).append(item)
 
     lines: List[str] = []
     lines.append("## 世界观设定体系")
@@ -1353,28 +1378,39 @@ def build_project_settings_summary(project_id: int, db: Session) -> str:
         if collection.description:
             lines.append(collection.description.strip())
 
-        items = (
-            db.query(SettingItem)
-            .filter(SettingItem.collection_id == collection.id)
-            .order_by(SettingItem.order, SettingItem.id)
-            .all()
-        )
-
-        for item in items:
+        for item in items_by_collection.get(collection.id, []):
             try:
                 tags = json.loads(item.tags) if item.tags else None
             except Exception:
                 tags = None
             tag_str = f" [{'、'.join(tags)}]" if tags else ""
-            level_part = f"Lv.{item.level} " if item.level is not None else ""
             code_part = f"（{item.code}）" if item.code else ""
-            lines.append(f"- {level_part}{item.name}{code_part}{tag_str}")
+
+            indent = "  " * max((item.depth or 1) - 1, 0)
+            lines.append(f"{indent}- {item.name}{code_part}{tag_str}")
             if item.content:
                 content = item.content.strip()
-                # 控制单条过长内容，避免Prompt过度膨胀
-                if len(content) > 200:
-                    content = content[:200] + "..."
-                lines.append(f"  - {content}")
+                if len(content) > max_content_length:
+                    content = content[:max_content_length] + "..."
+                lines.append(f"{indent}  - {content}")
 
     return "\n".join(lines)
+
+
+def extract_relevant_categories_from_text(text: str) -> List[str]:
+    """从文本中提取涉及的体系类别关键词，用于按需注入设定摘要。
+
+    扫描文本中出现的类别关键词，返回匹配的体系类别列表。
+    """
+    from app.services.setting_categories import TYPE_TO_CATEGORY_MAP
+
+    if not text:
+        return []
+
+    matched: set = set()
+    for keyword, category in TYPE_TO_CATEGORY_MAP.items():
+        if keyword in text:
+            matched.add(category)
+
+    return list(matched)
 

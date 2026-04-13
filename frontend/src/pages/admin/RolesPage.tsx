@@ -24,12 +24,10 @@ import {
   Checkbox,
   FormControlLabel,
 } from '@mui/material'
-import {
-  Add as AddIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
-  Security as SecurityIcon,
-} from '@mui/icons-material'
+import AddIcon from '@mui/icons-material/Add'
+import DeleteIcon from '@mui/icons-material/Delete'
+import EditIcon from '@mui/icons-material/Edit'
+import SecurityIcon from '@mui/icons-material/Security'
 import { useSelector } from 'react-redux'
 import { apiClient } from '@/services/api'
 import { RootState } from '@/store/store'
@@ -102,8 +100,8 @@ export default function RolesPage() {
     try {
       const response = await apiClient.get('/api/v1/admin/roles/permissions/all')
       setPermissions(response.data)
-    } catch (err) {
-      console.error('获取权限列表失败', err)
+    } catch {
+      // 获取权限列表失败
     }
   }
 

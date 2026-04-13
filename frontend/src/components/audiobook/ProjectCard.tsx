@@ -1,4 +1,4 @@
-import { MoreVert as MoreVertIcon } from '@mui/icons-material'
+import MoreVertIcon from '@mui/icons-material/MoreVert'
 import { Box, Card, CardContent, Chip, IconButton, Typography } from '@mui/material'
 import type { BookColors, Project } from '@/types/audiobook'
 
@@ -302,4 +302,3 @@ export default function ProjectCard({
     </Card>
   )
 }
-

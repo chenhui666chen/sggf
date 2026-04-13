@@ -427,12 +427,6 @@ def _build_source_text(session: Session, *, project_id: int, chapter_ids: List[i
         .all()
     )
     return build_drama_source_text(chapters)
-    parts: List[str] = []
-    for c in chapters:
-        title = str(getattr(c, "title", "") or "").strip() or f"第{int(getattr(c, 'chapter_number', 0) or 0)}章"
-        content = str(getattr(c, "content", "") or "")
-        parts.append(f"{title}\n{content}")
-    return "\n\n".join(parts)
 
 
 def _resume_payload_from_contract(
@@ -887,8 +881,8 @@ def run_dreamweaver_task(
             runtime_config = args_list.pop()
         args = tuple(args_list)
 
-        # 鍏煎鏃ч槦鍒楁秷鎭細鍘嗗彶鐗堟湰鍙傛暟涓?(task_id, run_id, project_id, chapter_ids, source_text)
-        # 鏂扮増鏈弬鏁颁负 (task_id, run_id, project_id, user_id, chapter_ids, source_text, schema_version?, runtime_config?)
+        # 兼容旧任务参数格式：(task_id, run_id, project_id, chapter_ids, source_text)
+        # 新任务参数格式：(task_id, run_id, project_id, user_id, chapter_ids, source_text, schema_version?, runtime_config?)
         if len(args) == 2:
             chapter_ids, source_text = args
             user_id = None
@@ -1020,9 +1014,8 @@ def run_dreamweaver_task(
                 max_scenes=_env_int("DREAMWEAVER_LIBRARY_MAX_SCENES", 8),
                 max_props=_env_int("DREAMWEAVER_LIBRARY_MAX_PROPS", 8),
             )
-        except Exception:
-            # 素材库仅做增强，不影响主流程
-            pass
+        except Exception as e:
+            logger.warning("Failed to build library spec for project %s: %s", project_id, e)
         else:
             try:
                 spec = payload.get("asset_library_spec")
@@ -1035,8 +1028,8 @@ def run_dreamweaver_task(
                             payload["asset_library_regenerate_roles"] = filtered_roles
                         else:
                             payload.pop("asset_library_regenerate_roles", None)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to filter regenerate roles: %s", e)
 
         emitter = DreamweaverEventEmitter(project_id=project_id, user_id=user_id, run_id=run_id)
         ctx = RunContext(
@@ -1048,16 +1041,17 @@ def run_dreamweaver_task(
         if isinstance(resume_config, dict) and isinstance(resume_config.get("start_state"), str):
             try:
                 ctx.state = State[resume_config["start_state"]]
-            except Exception:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
+                logger.debug("Invalid start_state '%s': %s, falling back to INIT", resume_config.get("start_state"), e)
                 ctx.state = State.INIT
 
-        # 任务开始执行后，先将 generation_history 从 queued 切到 running，避免 UI 长时间停留在 INIT/0%。
         queue_name = None
         try:
             delivery = getattr(getattr(self, "request", None), "delivery_info", None)
             if isinstance(delivery, dict) and isinstance(delivery.get("routing_key"), str):
                 queue_name = str(delivery.get("routing_key") or "").strip() or None
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Failed to get queue name from delivery_info: %s", e)
             queue_name = None
         running_payload = {
             "run_id": run_id,
@@ -1189,10 +1183,10 @@ def run_dreamweaver_task(
                                 max_scenes=_env_int("DREAMWEAVER_LIBRARY_MAX_SCENES", 8),
                                 max_props=_env_int("DREAMWEAVER_LIBRARY_MAX_PROPS", 8),
                             )
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+                        except Exception as e:
+                            logger.debug("enrich_payload_with_library failed for project %s: %s", project_id, e)
+            except Exception as e:
+                logger.debug("Failed to enrich payload with library data for project %s: %s", project_id, e)
 
             contract = build_contract_from_payload(
                 run_id=run_id,
@@ -1375,8 +1369,8 @@ def run_dreamweaver_task(
             )
         try:
             session.rollback()
-        except Exception:
-            pass
+        except Exception as rollback_exc:
+            logger.debug("session.rollback failed in exception handler for run_id=%s: %s", run_id, rollback_exc)
         try:
             record_dreamweaver_billing_release(
                 db=session,

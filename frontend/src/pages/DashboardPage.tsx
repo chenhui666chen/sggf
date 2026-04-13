@@ -52,6 +52,10 @@ import { apiClient } from '@/services/api'
 import GenerationProgressDialog from '@/components/GenerationProgressDialog'
 import { logger } from '@/utils/logger'
 import { buildStoryExpansionCompletionMessage } from '@/utils/storyExpansionFeedback'
+import {
+  getStoryExpansionResultFromTaskComplete,
+  isStoryExpansionTaskId,
+} from '@/utils/storyExpansionEvents'
 
 export default function DashboardPage() {
   const navigate = useNavigate()
@@ -278,17 +282,28 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!selectedProjectId) return
 
+    let unsubscribePostSaveTaskStart: () => void = () => undefined
+    let unsubscribePostSaveTaskComplete: () => void = () => undefined
+    let unsubscribeTaskComplete: () => void = () => undefined
+    let disposed = false
+
     // 导入 WebSocket 实例
     import('@/services/websocket').then(({ workflowWebSocket }) => {
+      if (disposed) {
+        return
+      }
       // 连接 WebSocket
       workflowWebSocket.connect().then(() => {
+        if (disposed) {
+          return
+        }
         workflowWebSocket.joinProject(selectedProjectId)
-      }).catch((error: any) => {
-        console.error('❗ WebSocket 连接失败:', error)
+      }).catch(() => {
+        // WebSocket 连接失败
       })
 
       // 监听后台任务开始
-      workflowWebSocket.onPostSaveTaskStart((data: any) => {
+      unsubscribePostSaveTaskStart = workflowWebSocket.onPostSaveTaskStart((data: any) => {
         logger.log('📡 收到后台任务开始:', data)
         if (data.chapter_id) {
           setPostSaveProcessing(prev => new Set(prev).add(data.chapter_id))
@@ -296,7 +311,7 @@ export default function DashboardPage() {
       })
 
       // 监听后台任务完成
-      workflowWebSocket.onPostSaveTaskComplete((data: any) => {
+      unsubscribePostSaveTaskComplete = workflowWebSocket.onPostSaveTaskComplete((data: any) => {
         logger.log('✅ 收到后台任务完成:', data)
         if (data.chapter_id) {
           setPostSaveProcessing(prev => {
@@ -308,12 +323,11 @@ export default function DashboardPage() {
       })
 
       // 🆕 监听协同拓展任务完成事件
-      workflowWebSocket.onTaskComplete((data: any) => {
+      unsubscribeTaskComplete = workflowWebSocket.onTaskComplete((data) => {
         logger.log('✅ 收到任务完成:', data)
-        const taskId = data.task_id || ''
-        const result = data.result || {}
+        const result = getStoryExpansionResultFromTaskComplete(data) ?? {}
         
-        if (taskId.startsWith('expand-story')) {
+        if (isStoryExpansionTaskId(data.task_id)) {
           logger.log('🔄 协同拓展任务完成，刷新章节列表...')
           if (selectedProjectId) {
             loadChapters(selectedProjectId)
@@ -332,31 +346,28 @@ export default function DashboardPage() {
 
     // 清理：组件卸载时移除监听器（不断开连接）
     return () => {
-      import('@/services/websocket').then(({ workflowWebSocket }) => {
+      disposed = true
         // 只移除监听器，保持 WebSocket 连接（其他页面可能还在用）
-        workflowWebSocket.onPostSaveTaskStart(() => {})
-        workflowWebSocket.onPostSaveTaskComplete(() => {})
-        workflowWebSocket.onTaskComplete(() => {})
-      })
+      unsubscribePostSaveTaskStart()
+      unsubscribePostSaveTaskComplete()
+      unsubscribeTaskComplete()
     }
   }, [selectedProjectId])
 
   const handleCreateProject = async () => {
     if (formData.title.trim()) {
       try {
-        const result = await dispatch(createProject(formData))
-        if (result.payload) {
-          const newProjectId = result.payload.id
-          setFormData({ title: '', description: '', genre: '' })
-          setOpenDialog(false)
-          // 重新获取项目列表
-          dispatch(fetchProjects())
+        const newProject = await dispatch(createProject(formData)).unwrap()
+        const newProjectId = newProject.id
+        setFormData({ title: '', description: '', genre: '' })
+        setOpenDialog(false)
+        // 重新获取项目列表
+        dispatch(fetchProjects())
 
-          // 自动初始化五阶段工作流程
-          setTimeout(() => {
-            handleInitializeWorkflow(newProjectId, result.payload)
-          }, 500)
-        }
+        // 自动初始化五阶段工作流程
+        setTimeout(() => {
+          handleInitializeWorkflow(newProjectId, newProject)
+        }, 500)
       } catch (error) {
         logger.error('Failed to create project:', error)
         alert('Failed to create project. Please try again.')
@@ -378,25 +389,15 @@ export default function DashboardPage() {
 
       logger.log('🔍 [DEBUG] 准备创建项目，数据:', tempProjectData)
 
-      const result = await dispatch(createProject(tempProjectData))
+      const newProject = await dispatch(createProject(tempProjectData)).unwrap()
 
-      logger.log('🔍 [DEBUG] dispatch 返回结果:', result)
-      logger.log('🔍 [DEBUG] result.payload:', result.payload)
+      logger.log('🔍 [DEBUG] 项目创建成功:', newProject)
+      logger.log('🔍 [DEBUG] 准备跳转到 /workflow/' + newProject.id)
 
-      if (result.payload) {
-        const newProjectId = result.payload.id
-        logger.log('🔍 [DEBUG] 项目创建成功，ID:', newProjectId)
-        logger.log('🔍 [DEBUG] 准备跳转到 /workflow/' + newProjectId)
+      // 直接跳转到工作流程页面，带上 autoStart 参数自动打开开始创作对话框
+      navigate(`/workflow/${newProject.id}?autoStart=true`)
 
-        // 直接跳转到工作流程页面，带上 autoStart 参数自动打开开始创作对话框
-        navigate(`/workflow/${newProjectId}?autoStart=true`)
-
-        logger.log('🔍 [DEBUG] 跳转完成')
-      } else {
-        logger.error('❌ [ERROR] result.payload 为空')
-        logger.error('❌ [ERROR] 完整的 result 对象:', result)
-        alert('Failed to create project. Please try again.')
-      }
+      logger.log('🔍 [DEBUG] 跳转完成')
     } catch (error) {
       logger.error('❌ [ERROR] 捕获到异常:', error)
       logger.error('Failed to create temporary project:', error)
@@ -501,7 +502,6 @@ export default function DashboardPage() {
   }
 
   const handleChapterSortOrderChange = async (newOrder: 'asc' | 'desc') => {
-    console.log('切换排序方式:', newOrder)
     setChapterSortOrder(newOrder)
     // 🔧 修复：保存到 localStorage
     localStorage.setItem('chapterSortOrder', newOrder)
@@ -587,8 +587,7 @@ export default function DashboardPage() {
       await dispatch(updateProject({ projectId: projectId, data: { title: editedTitle.trim() } })).unwrap()
       setEditingTitleProjectId(null)
       setEditedTitle('')
-    } catch (error) {
-      console.error('更新书名失败:', error)
+    } catch {
       setEditingTitleProjectId(null)
       setEditedTitle('')
     }

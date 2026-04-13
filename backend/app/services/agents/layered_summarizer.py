@@ -6,6 +6,7 @@
 2. shape_context: 保留局部原文，只把远端内容压成结构化骨架
 3. map_reduce: 超大文本才执行分块摘要 + 汇总
 """
+import logging
 import os
 import re
 from typing import Dict, Any, Optional, Tuple, List
@@ -23,6 +24,8 @@ from core.model_runtime import ensure_model_hub_initialized
 from .knowledge_base import NovelKnowledgeBase
 from .structured_memory_store import StructuredMemoryStore
 
+logger = logging.getLogger(__name__)
+
 
 class LayeredSummarizer:
     """分层摘要器 - 根据模型能力自适应整形上下文"""
@@ -35,21 +38,25 @@ class LayeredSummarizer:
     # 模型选择只决定“最终任务用什么模型更合适”，上下文是否压缩由 mode 再决定
     MODEL_SELECTION_RULES = {
         "outline_expand": [
-            ((0, 40), ("qwen3-max", 0.72)),
-            ((40, 9999), ("qwen-long", 0.28)),
+            ((0, 40), ("qwen3.5-plus", 0.70)),
+            ((40, 150), ("qwen3.5-plus", 0.65)),
+            ((150, 9999), ("qwen-long", 0.28)),
         ],
         "character_expand": [
-            ((0, 20), ("deepseek-reasoner", 0.70)),
-            ((20, 60), ("qwen3-max", 0.65)),
-            ((60, 9999), ("qwen-long", 0.28)),
+            ((0, 15), ("qwen3.5-plus", 0.65)),
+            ((15, 60), ("qwen3.5-plus", 0.60)),
+            ((60, 200), ("qwen3.5-plus", 0.55)),
+            ((200, 9999), ("qwen-long", 0.28)),
         ],
         "chapter_generation": [
             ((0, 40), ("qwen3-max", 0.78)),
-            ((40, 9999), ("qwen-long", 0.35)),
+            ((40, 150), ("qwen3.5-plus", 0.70)),
+            ((150, 9999), ("qwen-long", 0.35)),
         ],
         "structure_design": [
             ((0, 60), ("deepseek-reasoner", 0.70)),
-            ((60, 9999), ("qwen-long", 0.32)),
+            ((60, 200), ("qwen3.5-plus", 0.65)),
+            ((200, 9999), ("qwen-long", 0.32)),
         ],
     }
 
@@ -106,10 +113,10 @@ class LayeredSummarizer:
             }
         """
 
-        print(f"\n{'=' * 70}")
-        print(f"【分层摘要器】开始处理 {scenario}")
-        print(f"   当前规模: {current_count} {'章' if 'chapter' in scenario or 'outline' in scenario else '人'}")
-        print(f"{'=' * 70}\n")
+        logger.debug(f"\n{'=' * 70}")
+        logger.debug(f"【分层摘要器】开始处理 {scenario}")
+        logger.debug(f"   当前规模: {current_count} {'章' if 'chapter' in scenario or 'outline' in scenario else '人'}")
+        logger.debug(f"{'=' * 70}\n")
 
         selected_model, target_ratio = self._select_model(scenario, current_count)
         model_limit = self._get_model_limit(selected_model)
@@ -128,12 +135,12 @@ class LayeredSummarizer:
         persisted_payload = self.structured_memory_store.load(project_id)
         persisted_memory = persisted_payload.get("structured_memory", {}) if isinstance(persisted_payload, dict) else {}
 
-        print("📊 模型选择:")
-        print(f"   - 选择模型: {selected_model}")
-        print(f"   - 模型上下文上限: {model_limit:,}")
-        print(f"   - 目标tokens: {target_tokens:,} ({target_ratio * 100:.0f}%使用率)")
-        print(f"   - 原始tokens: {original_tokens:,}")
-        print(f"   - 处理模式: {mode}\n")
+        logger.debug("📊 模型选择:")
+        logger.debug(f"   - 选择模型: {selected_model}")
+        logger.debug(f"   - 模型上下文上限: {model_limit:,}")
+        logger.debug(f"   - 目标tokens: {target_tokens:,} ({target_ratio * 100:.0f}%使用率)")
+        logger.debug(f"   - 原始tokens: {original_tokens:,}")
+        logger.debug(f"   - 处理模式: {mode}\n")
 
         if mode == "pass_through":
             current_structured_memory = self._build_structured_memory(
@@ -270,25 +277,25 @@ class LayeredSummarizer:
                 "worldview": worldview_strategy,
             }
 
-            print("📋 上下文整形完成:")
-            print(f"   - 大纲策略: {outline_strategy}")
-            print(f"   - 人物策略: {character_strategy}")
-            print(f"   - 世界观策略: {worldview_strategy}")
-            print(f"   - 结构化记忆tokens: {memory_tokens:,}")
-            print(f"   - 骨架tokens: {skeleton_tokens:,}")
-            print(f"   - 详细片段tokens: {detail_tokens:,}\n")
+            logger.debug("📋 上下文整形完成:")
+            logger.debug(f"   - 大纲策略: {outline_strategy}")
+            logger.debug(f"   - 人物策略: {character_strategy}")
+            logger.debug(f"   - 世界观策略: {worldview_strategy}")
+            logger.debug(f"   - 结构化记忆tokens: {memory_tokens:,}")
+            logger.debug(f"   - 骨架tokens: {skeleton_tokens:,}")
+            logger.debug(f"   - 详细片段tokens: {detail_tokens:,}\n")
 
         final_tokens = self._estimate_tokens(final_context)
         effective_context_ratio = final_tokens / max(original_tokens, 1)
         token_compression_ratio = min(effective_context_ratio, 1.0)
         char_compression_ratio = len(final_context) / max(len(outline) + len(characters) + len(worldview), 1)
 
-        print("✅ 上下文准备完成:")
-        print(f"   - 最终tokens: {final_tokens:,} / {target_tokens:,}")
-        print(f"   - token上下文比: {effective_context_ratio * 100:.1f}%")
-        print(f"   - token压缩比(兼容口径): {token_compression_ratio * 100:.1f}%")
-        print(f"   - 字符压缩比: {char_compression_ratio * 100:.1f}%")
-        print(f"{'=' * 70}\n")
+        logger.debug("✅ 上下文准备完成:")
+        logger.debug(f"   - 最终tokens: {final_tokens:,} / {target_tokens:,}")
+        logger.debug(f"   - token上下文比: {effective_context_ratio * 100:.1f}%")
+        logger.debug(f"   - token压缩比(兼容口径): {token_compression_ratio * 100:.1f}%")
+        logger.debug(f"   - 字符压缩比: {char_compression_ratio * 100:.1f}%")
+        logger.debug(f"{'=' * 70}\n")
 
         if project_id is not None:
             self.structured_memory_store.save(
@@ -324,16 +331,32 @@ class LayeredSummarizer:
             },
         }
 
-    def _select_model(self, scenario: str, current_count: int) -> Tuple[str, float]:
-        """根据场景和规模智能选择模型"""
-        rules = self.MODEL_SELECTION_RULES.get(scenario, self.MODEL_SELECTION_RULES["outline_expand"])
+    @classmethod
+    def estimate_selected_model_and_ratio(cls, scenario: str, current_count: int) -> Tuple[str, float]:
+        """基于场景和规模预估最终任务使用的模型和安全上下文比例"""
+        try:
+            normalized_count = max(0, int(current_count or 0))
+        except Exception:
+            normalized_count = 0
+
+        rules = cls.MODEL_SELECTION_RULES.get(scenario, cls.MODEL_SELECTION_RULES["outline_expand"])
 
         for (min_count, max_count), (model, ratio) in rules:
-            if min_count <= current_count < max_count:
+            if min_count <= normalized_count < max_count:
                 normalized_model = normalize_model_id(model) or model
                 return normalized_model, ratio
 
         return normalize_model_id("qwen-long") or "qwen-long", 0.30
+
+    @classmethod
+    def estimate_selected_model(cls, scenario: str, current_count: int) -> str:
+        """仅返回最终任务的预估模型，用于分析/计划阶段对齐执行选模逻辑"""
+        model, _ = cls.estimate_selected_model_and_ratio(scenario, current_count)
+        return model
+
+    def _select_model(self, scenario: str, current_count: int) -> Tuple[str, float]:
+        """根据场景和规模智能选择模型"""
+        return self.estimate_selected_model_and_ratio(scenario, current_count)
 
     def _get_model_limit(self, model_id: str) -> int:
         """从统一模型注册中心读取模型上下文限制"""
@@ -347,7 +370,7 @@ class LayeredSummarizer:
             if spec and spec.constraints and spec.constraints.max_context_tokens:
                 return int(spec.constraints.max_context_tokens)
         except Exception as exc:
-            print(f"⚠️  读取模型配置失败: {exc}，回退到默认上限 {self.DEFAULT_MODEL_LIMIT}")
+            logger.debug(f"⚠️  读取模型配置失败: {exc}，回退到默认上限 {self.DEFAULT_MODEL_LIMIT}")
 
         return self.DEFAULT_MODEL_LIMIT
 
@@ -476,7 +499,7 @@ class LayeredSummarizer:
             skeleton = str(response.content).strip()
             return self._shrink_text_to_token_budget(skeleton, target_tokens)
         except Exception as exc:
-            print(f"⚠️  骨架生成失败: {exc}，回退到规则截断")
+            logger.debug(f"⚠️  骨架生成失败: {exc}，回退到规则截断")
             return self._rule_based_truncate(content, target_chars)
 
     def _generate_skeleton_map_reduce(self, content: str, content_type: str, target_tokens: int) -> str:
@@ -530,7 +553,7 @@ class LayeredSummarizer:
             reduced = str(response.content).strip()
             return self._shrink_text_to_token_budget(reduced, target_tokens)
         except Exception as exc:
-            print(f"⚠️  map-reduce 汇总失败: {exc}，回退到规则截断")
+            logger.debug(f"⚠️  map-reduce 汇总失败: {exc}，回退到规则截断")
             return self._rule_based_truncate(combined_summary, self._tokens_to_chars(target_tokens))
 
     def _build_skeleton_prompt(self, content: str, content_type: str, target_chars: int) -> str:
@@ -726,13 +749,13 @@ class LayeredSummarizer:
         else:
             target_range = (max(1, current_count - 10), current_count + 10)
 
-        print(f"🔍 聚焦范围: 第{target_range[0]}-{target_range[1]}章")
+        logger.debug(f"🔍 聚焦范围: 第{target_range[0]}-{target_range[1]}章")
 
         if self.knowledge_base:
             rag_text = self._rag_retrieve_relevant(target_range=target_range, available_tokens=available_tokens)
             if rag_text.strip():
                 return rag_text
-            print("   - RAG 未返回可用内容，回退到章节块抽取")
+            logger.debug("   - RAG 未返回可用内容，回退到章节块抽取")
 
         return self._regex_extract_range(outline=outline, target_range=target_range, available_tokens=available_tokens)
 
@@ -744,7 +767,7 @@ class LayeredSummarizer:
             results = self.knowledge_base.search(query, k=k)
 
             if not results:
-                print("   - RAG 检索结果为空")
+                logger.debug("   - RAG 检索结果为空")
                 return ""
 
             relevant_docs: List[str] = []
@@ -765,10 +788,10 @@ class LayeredSummarizer:
                 else:
                     break
 
-            print(f"   - RAG检索: {len(relevant_docs)}篇文档, {total_chars:,}字符")
+            logger.debug(f"   - RAG检索: {len(relevant_docs)}篇文档, {total_chars:,}字符")
             return "\n\n".join(relevant_docs)
         except Exception as exc:
-            print(f"⚠️  RAG检索失败: {exc}，回退到章节块抽取")
+            logger.debug(f"⚠️  RAG检索失败: {exc}，回退到章节块抽取")
             return ""
 
     def _regex_extract_range(
@@ -780,7 +803,7 @@ class LayeredSummarizer:
         """从大纲中提取指定章节范围的完整章节块"""
         blocks = self._extract_chapter_blocks(outline)
         if not blocks:
-            print("   - 未识别到结构化章节，回退到窗口截断")
+            logger.debug("   - 未识别到结构化章节，回退到窗口截断")
             return self._shrink_text_to_token_budget(outline, available_tokens)
 
         start, end = target_range
@@ -794,12 +817,12 @@ class LayeredSummarizer:
         while selected_blocks:
             candidate = "\n\n".join(block["text"] for block in selected_blocks)
             if len(candidate) <= max_chars:
-                print(f"   - 章节块提取: {len(selected_blocks)}章, {len(candidate):,}字符")
+                logger.debug(f"   - 章节块提取: {len(selected_blocks)}章, {len(candidate):,}字符")
                 return candidate
 
             if len(selected_blocks) == 1:
                 trimmed = self._shrink_text_to_token_budget(selected_blocks[0]["text"], available_tokens)
-                print(f"   - 单章过长，截断后返回: {len(trimmed):,}字符")
+                logger.debug(f"   - 单章过长，截断后返回: {len(trimmed):,}字符")
                 return trimmed
 
             left_distance = abs(selected_blocks[0]["number"] - center)
@@ -1111,7 +1134,17 @@ class LayeredSummarizer:
 
         heading = lines[0]
         details: List[str] = []
-        preferred_keywords = ("主要内容", "关键事件", "核心冲突", "信息落地", "结尾钩子", "线索")
+        preferred_keywords = (
+            "场景目标",
+            "冲突设计",
+            "关键事件",
+            "人物推进",
+            "情节作用",
+            "信息落地",
+            "结尾钩子",
+            "伏笔事项",
+            "线索",
+        )
 
         for line in lines[1:]:
             if any(keyword in line for keyword in preferred_keywords):

@@ -7,7 +7,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status, Body, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import Dict, Any, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from app.db.base import get_db, SessionLocal
 from app.services.agent_coordinator import (
     coordinator,
@@ -17,8 +17,14 @@ from app.services.agent_coordinator import (
 from app.core.security import get_current_user
 from app.models.project import Project, Chapter
 from app.models.setting import SettingCollection
+from app.schemas.story_expansion import (
+    StoryExpansionAnalysisPayload,
+    StoryExpansionAnalysisRouteResponse,
+    StoryExpansionStartResponse,
+    StoryExpansionTaskResultResponse,
+)
 from app.websocket.manager import ws_manager
-from app.services.setting_templates import build_project_settings_summary
+from app.services.workflow_context_builder import WorkflowContextBuilder
 from app.utils.datetime_utils import parse_datetime_utc, utc_now
 import uuid
 from datetime import datetime
@@ -26,7 +32,11 @@ import json
 import re
 from sqlalchemy import inspect, text
 from core.model_resolution import normalize_model_id
-from core.model_runtime import ensure_model_hub_initialized
+from core.model_runtime import ensure_model_hub_initialized, resolve_model_for_task
+from app.services.prompts.stages.world_building import (
+    CharacterDesignPrompts,
+    get_genre_character_fields,
+)
 
 # 🎉 导入体系自动检测服务
 from app.services.auto_system_detector import auto_create_system_collections
@@ -34,6 +44,50 @@ from app.services.auto_system_detector import auto_create_system_collections
 # 🔧 配置日志
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+_workflow_execution_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_workflow_execution_lock(project_id: int) -> asyncio.Lock:
+    lock = _workflow_execution_locks.get(project_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _workflow_execution_locks[project_id] = lock
+    return lock
+
+
+async def _run_execute_stage_background_serialized(
+    task_id: str,
+    project_id: int,
+    stage_enum: StageType,
+    user_id: int,
+    db: Session,
+    regenerate: bool = False,
+    targets: Optional[list[str]] = None,
+    feedback: Optional[str] = None,
+):
+    async with _get_workflow_execution_lock(project_id):
+        await execute_stage_background(
+            task_id,
+            project_id,
+            stage_enum,
+            user_id,
+            db,
+            regenerate,
+            targets,
+            feedback,
+        )
+
+
+async def _run_execute_stage_with_streaming_serialized(
+    task_id: str,
+    project_id: int,
+    stage_enum: StageType,
+    user_id: int,
+    db: Session,
+):
+    async with _get_workflow_execution_lock(project_id):
+        await execute_stage_with_streaming(task_id, project_id, stage_enum, user_id, db)
 
 
 def _estimate_tokens_by_chars(text: str) -> int:
@@ -108,6 +162,108 @@ def _join_prompt_items(value: Any, *, max_items: int = 4, max_length: int = 60) 
     return "；".join(items)
 
 
+_PROJECT_TITLE_LABEL_RE = re.compile(
+    r"^\s*(?:[-*]\s*)?(?:\d+\.\s*)?(?:\*\*\s*)?(?:\d+\.\s*)?"
+    r"(?:日志标题(?:（[^）]+）)?|项目标题|项目题目|书名)"
+    r"\s*(?:\*\*)?\s*(?:[：:]\s*(?P<inline>.*))?\s*$"
+)
+
+
+def _looks_like_field_label(line: str) -> bool:
+    return bool(
+        re.match(
+            r"^\s*(?:[-*]\s*)?(?:\d+\.\s*)?(?:\*\*\s*)?(?:\d+\.\s*)?[^《》\n]{1,30}(?:\s*\*\*)?\s*[：:]\s*$",
+            line,
+        )
+    )
+
+
+def _normalize_project_title_candidate(raw_value: str) -> Optional[str]:
+    candidate = (raw_value or "").strip()
+    if not candidate:
+        return None
+
+    candidate = re.sub(r"^\s*(?:[-*]\s+|\d+\.\s+)", "", candidate).strip()
+
+    quoted_match = re.search(r"《([^》\n]+)》", candidate)
+    if quoted_match:
+        candidate = quoted_match.group(1).strip()
+    else:
+        wrapped_quote_match = re.search(r"[“\"]([^”\"\n]+)[”\"]", candidate)
+        if wrapped_quote_match:
+            candidate = wrapped_quote_match.group(1).strip()
+        else:
+            candidate = re.sub(r"^\*\*(.*?)\*\*$", r"\1", candidate).strip()
+            candidate = candidate.strip("《》“”\"'` ")
+
+    candidate = re.sub(r"\s+", " ", candidate).strip().rstrip("。；;")
+    if len(candidate) < 2:
+        return None
+    if _PROJECT_TITLE_LABEL_RE.match(candidate):
+        return None
+
+    return candidate
+
+
+def _extract_project_title_from_concept(concept_text: str) -> Optional[str]:
+    if not isinstance(concept_text, str):
+        return None
+
+    lines = concept_text.splitlines()
+    for index, line in enumerate(lines):
+        match = _PROJECT_TITLE_LABEL_RE.match(line)
+        if not match:
+            continue
+
+        inline_title = _normalize_project_title_candidate(match.group("inline") or "")
+        if inline_title:
+            return inline_title
+
+        for next_line in lines[index + 1 : index + 4]:
+            stripped_line = next_line.strip()
+            if not stripped_line:
+                continue
+            if _PROJECT_TITLE_LABEL_RE.match(stripped_line) or _looks_like_field_label(stripped_line):
+                break
+
+            multiline_title = _normalize_project_title_candidate(stripped_line)
+            if multiline_title:
+                return multiline_title
+            break
+
+    return None
+
+
+def _sync_project_title_from_concept(
+    db: Session,
+    project_id: int,
+    concept_text: Any,
+    *,
+    mode_label: str = "",
+) -> Optional[str]:
+    if not isinstance(concept_text, str):
+        return None
+
+    project_title = _extract_project_title_from_concept(concept_text)
+    if not project_title:
+        return None
+
+    update_title_query = text("""
+        UPDATE projects SET title = :title, updated_at = :updated_at
+        WHERE id = :project_id
+    """)
+    db.execute(update_title_query, {
+        "title": project_title,
+        "updated_at": utc_now().isoformat(),
+        "project_id": project_id,
+    })
+    db.commit()
+
+    mode_suffix = f"（{mode_label}）" if mode_label else ""
+    logger.info(f"   📝 已从故事概念更新项目title{mode_suffix}: {project_title}")
+    return project_title
+
+
 def _format_conflict_arc(conflict_arc: Any) -> str:
     if not isinstance(conflict_arc, dict):
         return ""
@@ -175,7 +331,6 @@ def _has_structured_chapter_assets(summary_data: Any) -> bool:
         "appearing_characters",
         "key_characters",
         "conflict_arc",
-        "emotion_curve",
         "highlight",
         "gains",
         "ending_hook",
@@ -221,10 +376,6 @@ def _format_recent_chapter_asset(chapter_payload: Dict[str, Any]) -> str:
     conflict_arc = _format_conflict_arc(summary_data.get("conflict_arc"))
     if conflict_arc:
         lines.append(f"- 冲突推进: {conflict_arc}")
-
-    emotion_curve = _shrink_prompt_text(summary_data.get("emotion_curve", ""), max_length=40)
-    if emotion_curve:
-        lines.append(f"- 情绪曲线: {emotion_curve}")
 
     highlight = summary_data.get("highlight")
     if isinstance(highlight, dict):
@@ -380,46 +531,9 @@ class SaveStageContentRequest(BaseModel):
     content: str
     continue_workflow: bool = False
 
-class ExpandOutlineRequest(BaseModel):
-    project_id: int
-    current_outline: str
-    world_setting: str
-    characters: str
-    current_chapter_count: int = 0  # 🆕 当前已有的章节数
-    increment: int = 10  # 🆕 本次扩展的章节数（5-10章）
-    target_total_chapters: Optional[int] = 100  # 🆕 长篇小说目标总章节数（默认按100章规划）
-    
-    # 🔥 多模式扩展参数
-    expansion_mode: str = "total"  # total(按总章数) / volume(按卷) / incremental(渐进式) / epic_framework(史诗框架) / volume_detail(单卷详细)
-    target_volumes: Optional[int] = None  # 按卷模式:目标卷数
-    chapters_per_volume_min: Optional[int] = 20  # 按卷模式:每卷最少章节数
-    chapters_per_volume_max: Optional[int] = 30  # 按卷模式:每卷最多章节数
-    incremental_step: Optional[int] = 10  # 渐进式模式:每次扩展章节数
-    
-    # 🌟 史诗框架模式参数(epic_framework)
-    total_volumes: Optional[int] = None  # 史诗框架:总卷数(10-50卷)
-    total_chapters_min: Optional[int] = None  # 史诗框架:总章节范围最小值
-    total_chapters_max: Optional[int] = None  # 史诗框架:总章节范围最大值
-    
-    # 📖 单卷详细模式参数(volume_detail)
-    framework_content: Optional[str] = None  # 基于的史诗框架内容
-    target_volume_index: Optional[int] = None  # 扩展第几卷
-    volume_chapters_min: Optional[int] = None  # 本卷章节范围最小值
-    volume_chapters_max: Optional[int] = None  # 本卷章节范围最大值
-    
-    # 🆕 已写章节处理模式参数
-    preserve_written_mode: str = "extract_extend"  # preserve_written(仅保护) / extract_extend(提取+扩展) / regenerate_all(重新生成全部)
-
-class ExpandCharactersRequest(BaseModel):
-    project_id: int
-    main_characters: str
-    world_setting: str
-    plot_outline: str
-    current_character_count: int = 0  # 🆕 当前已有的人物数
-    increment: int = 5  # 🆕 本次扩展的人物数（3-6个）
-    target_total_characters: Optional[int] = 25  # 🆕 长篇小说目标人物数（默认按25人规划）
-
 class ExpandStoryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     project_id: int
     current_outline: str
     world_setting: str
@@ -438,6 +552,7 @@ class ExpandStoryRequest(BaseModel):
     target_volume_index: Optional[int] = None
     volume_chapters_min: Optional[int] = None
     volume_chapters_max: Optional[int] = None
+    volume_character_increment: Optional[int] = None
     preserve_written_mode: str = "extract_extend"
     lock_existing_chapters: bool = True
     preserve_existing_characters: bool = True
@@ -450,22 +565,22 @@ VALID_STORY_EXPANSION_STRATEGIES = {"auto", "balanced", "plot_first", "character
 VALID_STORY_EXPANSION_INTENTS = {"auto", "outline_led", "character_led", "balanced"}
 VALID_STORY_EXPANSION_MODES = {"auto", "total", "epic_framework", "volume_detail"}
 VALID_PRESERVE_WRITTEN_MODES = {"extract_extend", "preserve_written", "regenerate_all"}
+VOLUME_DETAIL_MIN_CHAPTERS = 20
+VOLUME_DETAIL_MAX_CHAPTERS = 100
+
+
+def _get_conventional_collaboration_max_target_chapters(current_chapter_count: int) -> int:
+    from app.services.story_expansion_coordinator import StoryExpansionCoordinator
+
+    return StoryExpansionCoordinator.CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS
 
 
 def _get_project_expansion_profile(project_id: int, db: Session) -> Dict[str, Any]:
     """统一获取扩展阶段所需的项目画像，避免不同入口的参数传递漂移。"""
-    project_meta_query = text(
-        """
-        SELECT genre, planned_chapters_max
-        FROM projects
-        WHERE id = :project_id
-        """
-    )
-    project_meta_result = db.execute(project_meta_query, {"project_id": project_id})
-    project_meta = project_meta_result.fetchone() if hasattr(project_meta_result, "fetchone") else None
+    project_profile = WorkflowContextBuilder(db).get_project_profile(project_id)
     return {
-        "genre": (project_meta[0] if project_meta and project_meta[0] else ""),
-        "planned_chapters_max": (project_meta[1] if project_meta and project_meta[1] else 0),
+        "genre": project_profile.genre,
+        "planned_chapters_max": project_profile.planned_chapters_max,
     }
 
 
@@ -488,15 +603,28 @@ def _create_project_outline_expander(project_id: int, db: Session) -> Dict[str, 
 
 
 def _build_project_world_setting_context(project_id: int, world_setting: str, db: Session) -> str:
-    settings_summary = build_project_settings_summary(project_id, db)
-    combined_world_setting = world_setting or ""
-    if settings_summary:
-        combined_world_setting = (
-            f"{combined_world_setting}\n\n{settings_summary}"
-            if combined_world_setting
-            else settings_summary
+    context_builder = WorkflowContextBuilder(db)
+    return context_builder.build_world_setting_context(
+        project_id,
+        world_setting,
+    ).combined_world_setting
+
+
+def _sync_real_coordinator_project_context(
+    project_id: int,
+    context_builder: WorkflowContextBuilder,
+    project_profile: Any = None,
+) -> tuple[Any, Any]:
+    project_profile = project_profile or context_builder.get_project_profile(project_id)
+    real_coord = coordinator.get_real_coordinator(project_id)
+    if real_coord and hasattr(real_coord, "project_context"):
+        real_coord.project_context.update(project_profile.to_project_context_payload())
+        logger.info(
+            "   ✅ 已注入项目基本信息：title=%s, genre=%s",
+            project_profile.title or "未命名项目",
+            project_profile.genre or "通用",
         )
-    return combined_world_setting
+    return project_profile, real_coord
 
 
 def _ensure_project_owned(project_id: int, user_id: int, db: Session) -> Project:
@@ -511,49 +639,638 @@ def _ensure_project_owned(project_id: int, user_id: int, db: Session) -> Project
     return project
 
 
-def _log_legacy_story_analysis(
-    route_label: str,
-    analysis: Dict[str, Any],
-    route_logger: Optional[logging.Logger] = None,
-) -> None:
-    active_logger = route_logger or logger
-    active_logger.info(
-        "   legacy story analysis [%s]: %s",
-        route_label,
-        analysis.get("analysis_summary", "none"),
-    )
-
-
 def _build_task_start_response(
     *,
     task_id: str,
     message: str,
-    story_expansion_analysis: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    response: Dict[str, Any] = {
+    return {
         "success": True,
         "task_id": task_id,
         "message": message,
     }
-    if story_expansion_analysis is not None:
-        response["story_expansion_analysis"] = story_expansion_analysis
-    return response
+
+
+CONCEPT_SIMILARITY_PATTERN_GROUPS: Dict[str, list[str]] = {
+    "高频主角名": ["林尘", "苏辰", "叶凡", "萧凡", "秦风", "楚天", "陈长生"],
+    "高频开局身份": ["宗门杂役", "杂役弟子", "废灵根", "无灵根", "外门弟子", "底层弟子", "濒死觉醒"],
+    "高频金手指": ["系统流", "逆修系统", "反向修炼系统", "吞噬灵根", "悖论灵根", "掠夺他人修为", "越被看不起修为越暴涨", "扮猪吃虎"],
+    "高频世界命名": ["九寰界", "九寰界域", "九大仙域", "九大仙宗", "七大仙宗", "上三界", "中三界", "下三界"],
+    "高频终局真相": ["高维存在", "天外之眼", "监察者", "飞升骗局", "养蛊游戏", "轮回骗局", "历史被循环重置"],
+}
+
+
+def _safe_prompt_context_text(value: Any) -> str:
+    if value is None:
+        return ""
+
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+
+    if not isinstance(value, str):
+        return str(value or "")
+
+    stripped = value.strip()
+    if not stripped:
+        return ""
+
+    should_try_json = stripped.startswith(("{", "[")) or (
+        stripped.startswith('"') and stripped.endswith('"')
+    )
+    if not should_try_json:
+        return value
+
+    try:
+        parsed = json.loads(stripped)
+    except Exception:
+        return value
+
+    if isinstance(parsed, (dict, list)):
+        return json.dumps(parsed, ensure_ascii=False)
+    return str(parsed or "")
+
+
+def _normalize_story_request_text_fields(request: ExpandStoryRequest) -> ExpandStoryRequest:
+    from app.services.story_text_utils import normalize_story_text
+
+    return request.model_copy(
+        update={
+            "current_outline": normalize_story_text(request.current_outline),
+            "world_setting": normalize_story_text(request.world_setting),
+            "characters": normalize_story_text(request.characters),
+        }
+    )
+
+
+def _clip_prompt_context(text_value: str, limit: int = 220) -> str:
+    normalized = re.sub(r"\s+", " ", text_value or "").strip()
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[:limit]}..."
+
+
+def _build_recent_project_avoidance_context(
+    db: Session,
+    *,
+    project_id: int,
+    user_id: int,
+    genre: Optional[str],
+    limit: int = 4,
+) -> tuple[str, str]:
+    recent_query = text(
+        """
+        SELECT p.id, p.title, p.genre, ps.concept, ps.world_setting, ps.characters
+        FROM projects p
+        LEFT JOIN project_settings ps ON ps.project_id = p.id
+        WHERE p.user_id = :user_id
+          AND p.id <> :project_id
+          AND (
+            COALESCE(ps.concept, '') <> ''
+            OR COALESCE(ps.world_setting, '') <> ''
+            OR COALESCE(ps.characters, '') <> ''
+          )
+        ORDER BY COALESCE(p.updated_at, p.created_at) DESC
+        LIMIT 8
+        """
+    )
+    rows = db.execute(
+        recent_query,
+        {"user_id": user_id, "project_id": project_id},
+    ).fetchall()
+
+    if not rows:
+        return "", ""
+
+    selected_rows = sorted(
+        rows,
+        key=lambda row: (
+            0 if genre and row[2] and str(row[2]) == str(genre) else 1,
+        ),
+    )[:limit]
+
+    signature_sections: list[str] = []
+    combined_text_parts: list[str] = []
+
+    for idx, row in enumerate(selected_rows, start=1):
+        recent_title = row[1] or f"项目{row[0]}"
+        recent_genre = row[2] or "未标注"
+        concept_txt = _safe_prompt_context_text(row[3])
+        world_txt = _safe_prompt_context_text(row[4])
+        characters_txt = _safe_prompt_context_text(row[5])
+        combined_text_parts.extend([concept_txt, world_txt, characters_txt])
+
+        signature_sections.append(
+            "\n".join(
+                [
+                    f"{idx}. 《{recent_title}》",
+                    f"- 题材：{recent_genre}",
+                    f"- 故事概念摘要：{_clip_prompt_context(concept_txt, 180) or '暂无'}",
+                    f"- 世界观摘要：{_clip_prompt_context(world_txt, 120) or '暂无'}",
+                ]
+            )
+        )
+
+    combined_text = "\n".join(part for part in combined_text_parts if part)
+    detected_groups: Dict[str, list[str]] = {}
+    for group_name, patterns in CONCEPT_SIMILARITY_PATTERN_GROUPS.items():
+        hits: list[str] = []
+        for pattern in patterns:
+            if pattern in combined_text and pattern not in hits:
+                hits.append(pattern)
+        if hits:
+            detected_groups[group_name] = hits[:4]
+
+    extracted_world_names = []
+    for match in re.findall(r"(?:此界名为|世界名为)[“\"《]?([\u4e00-\u9fffA-Za-z0-9]{2,12})", combined_text):
+        if match not in extracted_world_names:
+            extracted_world_names.append(match)
+    if extracted_world_names:
+        detected_groups["已用世界名"] = extracted_world_names[:4]
+
+    recent_signatures = "【近期项目摘要（仅供避重，不可复写）】\n" + "\n".join(signature_sections)
+    recent_avoidance = ""
+    if detected_groups:
+        avoidance_lines = [
+            f"- {group_name}：{'、'.join(items)}"
+            for group_name, items in detected_groups.items()
+            if items
+        ]
+        recent_avoidance = (
+            "【近期项目避重清单】\n"
+            "- 以下元素在你最近生成的项目中已经出现，除非用户明确要求，否则默认禁止复用。\n"
+            + "\n".join(avoidance_lines)
+        )
+
+    return recent_signatures, recent_avoidance
+
+
+def _inject_recent_project_novelty_context(
+    db: Session,
+    *,
+    project_id: int,
+    user_id: int,
+    real_coord: Any,
+    genre: Optional[str],
+) -> None:
+    if not real_coord or not hasattr(real_coord, "project_context"):
+        return
+
+    recent_signatures, recent_avoidance = _build_recent_project_avoidance_context(
+        db,
+        project_id=project_id,
+        user_id=user_id,
+        genre=genre,
+    )
+    real_coord.project_context.update(
+        {
+            "recent_project_signatures": recent_signatures,
+            "recent_project_avoidance": recent_avoidance,
+        }
+    )
+
+
+def _build_story_execution_task_kwargs(
+    *,
+    task_id: str,
+    request: ExpandStoryRequest,
+    user_id: int,
+) -> Dict[str, Any]:
+    return {
+        "task_id": task_id,
+        "project_id": request.project_id,
+        "user_id": user_id,
+        "current_outline": request.current_outline,
+        "world_setting": request.world_setting,
+        "characters": request.characters,
+        "current_chapter_count": request.current_chapter_count,
+        "current_character_count": request.current_character_count,
+        "target_total_chapters": request.target_total_chapters,
+        "target_total_characters": request.target_total_characters,
+        "strategy": request.strategy,
+        "intent": request.intent,
+        "enable_auto_supplement": request.enable_auto_supplement,
+        "expansion_mode": request.expansion_mode,
+        "total_volumes": request.total_volumes,
+        "total_chapters_min": request.total_chapters_min,
+        "total_chapters_max": request.total_chapters_max,
+        "target_volume_index": request.target_volume_index,
+        "volume_chapters_min": request.volume_chapters_min,
+        "volume_chapters_max": request.volume_chapters_max,
+        "volume_character_increment": request.volume_character_increment,
+        "preserve_written_mode": request.preserve_written_mode,
+        "reset_epic_framework": request.reset_epic_framework,
+    }
+
+
+def _enqueue_story_expansion_task(
+    *,
+    task_id: str,
+    request: ExpandStoryRequest,
+    user_id: int,
+) -> None:
+    asyncio.create_task(
+        execute_expand_story_task(
+            **_build_story_execution_task_kwargs(
+                task_id=task_id,
+                request=request,
+                user_id=user_id,
+            )
+        )
+    )
+
+
+def _create_story_expansion_history_record(
+    db: Session,
+    *,
+    project_id: int,
+    task_id: str,
+) -> None:
+    insert_query = text(
+        """
+        INSERT INTO generation_history
+        (project_id, task_type, task_id, status, created_at)
+        VALUES (:project_id, :task_type, :task_id, :status, :created_at)
+        """
+    )
+
+    db.execute(
+        insert_query,
+        {
+            "project_id": project_id,
+            "task_type": "expand_story",
+            "task_id": task_id,
+            "status": "running",
+            "created_at": utc_now().isoformat(),
+        },
+    )
+    db.commit()
+
+
+def _update_story_expansion_history_record(
+    db: Session,
+    *,
+    task_id: str,
+    status: str,
+    result: Optional[Dict[str, Any]] = None,
+    error: Optional[str] = None,
+) -> None:
+    update_query = text(
+        """
+        UPDATE generation_history
+        SET status = :status,
+            result = :result,
+            error = :error,
+            completed_at = :completed_at
+        WHERE task_id = :task_id
+        """
+    )
+
+    try:
+        db.execute(
+            update_query,
+            {
+                "task_id": task_id,
+                "status": status,
+                "result": json.dumps(result, ensure_ascii=False) if result is not None else None,
+                "error": error,
+                "completed_at": utc_now().isoformat(),
+            },
+        )
+        db.commit()
+    except Exception as history_error:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        logger.warning("更新协同扩展任务记录失败: task_id=%s, error=%s", task_id, history_error)
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _normalize_story_result_outline_ops(result: Dict[str, Any]) -> list[Dict[str, Any]]:
+    normalized_ops: list[Dict[str, Any]] = []
+    raw_ops = result.get("outline_ops")
+    if not isinstance(raw_ops, list):
+        return normalized_ops
+
+    for item in raw_ops:
+        if not isinstance(item, dict):
+            continue
+
+        action = str(item.get("action") or "").strip()
+        if action in {"append", "insert_after"} or "generated_count" in item or "requested_count" in item:
+            normalized_ops.append(
+                {
+                    "action": action or "append",
+                    "after_chapter": item.get("after_chapter"),
+                    "requested_count": item.get("requested_count"),
+                    "generated_count": item.get("generated_count"),
+                    "goal": item.get("goal"),
+                    "generated_titles": list(item.get("generated_titles") or []),
+                }
+            )
+            continue
+
+        stage = str(item.get("stage") or item.get("mode") or "").strip()
+
+        if stage in {"delta", "iterative"} or item.get("round") is not None:
+            before_chapter_count = _safe_int(item.get("before_chapter_count"))
+            after_chapter_count = _safe_int(item.get("after_chapter_count"))
+            requested_count = _safe_int((item.get("plot") or {}).get("increment_requested"))
+            generated_count = max(0, after_chapter_count - before_chapter_count)
+            if requested_count <= 0:
+                requested_count = _safe_int(item.get("chapters_generated"), generated_count)
+
+            round_label = f"第{_safe_int(item.get('round'), 1)}轮协同"
+            strategy = str(item.get("strategy") or "").strip()
+            goal = f"{round_label}推进章节补强"
+            if strategy:
+                goal += f"（策略：{strategy}）"
+
+            normalized_ops.append(
+                {
+                    "action": "insert_after" if before_chapter_count > 0 else "append",
+                    "after_chapter": before_chapter_count if before_chapter_count > 0 else None,
+                    "requested_count": requested_count if requested_count > 0 else None,
+                    "generated_count": generated_count if generated_count > 0 else None,
+                    "goal": goal,
+                    "generated_titles": [],
+                }
+            )
+            continue
+
+        if stage == "epic_framework":
+            target_chapter_range = item.get("target_chapter_range") or []
+            estimated_chapters = _safe_int(item.get("estimated_chapters"))
+            total_volumes = _safe_int(item.get("volumes"))
+            if estimated_chapters <= 0 and isinstance(target_chapter_range, list) and len(target_chapter_range) >= 2:
+                estimated_chapters = _safe_int(target_chapter_range[1])
+
+            goal_parts = []
+            if total_volumes > 0:
+                goal_parts.append(f"生成 {total_volumes} 卷长篇框架")
+            else:
+                goal_parts.append("生成长篇框架")
+            if isinstance(target_chapter_range, list) and len(target_chapter_range) >= 2:
+                goal_parts.append(
+                    f"规划 { _safe_int(target_chapter_range[0]) }-{ _safe_int(target_chapter_range[1]) } 章"
+                )
+
+            normalized_ops.append(
+                {
+                    "action": "append",
+                    "after_chapter": None,
+                    "requested_count": estimated_chapters if estimated_chapters > 0 else None,
+                    "generated_count": estimated_chapters if estimated_chapters > 0 else None,
+                    "goal": "，".join(part for part in goal_parts if part),
+                    "generated_titles": [],
+                }
+            )
+            continue
+
+        if stage == "volume_detail":
+            chapter_range = item.get("chapter_range") or []
+            start_chapter = _safe_int(chapter_range[0]) if isinstance(chapter_range, list) and len(chapter_range) >= 1 else 0
+            end_chapter = _safe_int(chapter_range[1]) if isinstance(chapter_range, list) and len(chapter_range) >= 2 else 0
+            generated_count = max(0, end_chapter - start_chapter + 1) if start_chapter > 0 and end_chapter >= start_chapter else 0
+            volume_index = _safe_int(item.get("volume_index"))
+            goal = (
+                f"细化第{volume_index}卷，第{start_chapter}-{end_chapter}章"
+                if volume_index > 0 and generated_count > 0
+                else "执行单卷细化协同"
+            )
+
+            normalized_ops.append(
+                {
+                    "action": "insert_after" if start_chapter > 1 else "append",
+                    "after_chapter": start_chapter - 1 if start_chapter > 1 else None,
+                    "requested_count": generated_count if generated_count > 0 else None,
+                    "generated_count": generated_count if generated_count > 0 else None,
+                    "goal": goal,
+                    "generated_titles": [],
+                }
+            )
+
+    return normalized_ops
+
+
+def _normalize_story_character_sync_result(sync_result: Any) -> tuple[Optional[Dict[str, Any]], list[str]]:
+    if not isinstance(sync_result, dict):
+        return None, []
+
+    warnings: list[str] = []
+    raw_errors = sync_result.get("errors")
+    if isinstance(raw_errors, list):
+        warnings.extend(str(item).strip() for item in raw_errors if str(item).strip())
+    elif raw_errors:
+        warning_text = str(raw_errors).strip()
+        if warning_text:
+            warnings.append(warning_text)
+
+    parsed_value = sync_result.get("parsed")
+    if parsed_value is None and sync_result.get("total") is not None:
+        parsed_value = sync_result.get("total")
+
+    normalized: Dict[str, Any] = {
+        "parsed": _safe_int(parsed_value, 0),
+        "created": _safe_int(sync_result.get("created"), 0),
+        "updated": _safe_int(sync_result.get("updated"), 0),
+        "skipped": _safe_int(sync_result.get("skipped"), 0),
+    }
+
+    relationships = sync_result.get("relationships")
+    if isinstance(relationships, dict):
+        normalized["relationships"] = {
+            "parsed": _safe_int(relationships.get("parsed"), 0),
+            "saved": _safe_int(relationships.get("saved"), 0),
+            "characters_updated": _safe_int(relationships.get("characters_updated"), 0),
+        }
+
+    return normalized, list(dict.fromkeys(item for item in warnings if item))
+
+
+def _has_structured_character_cards(characters_text: Any) -> bool:
+    if not isinstance(characters_text, str):
+        return False
+
+    if not characters_text.strip():
+        return False
+
+    try:
+        from app.services.character_parser import has_parseable_character_cards
+
+        return has_parseable_character_cards(characters_text)
+    except Exception:
+        return bool(
+            re.search(
+                r"(?:^|\n)\s*(?:###\s*)?(?:\*\*)?【姓名】(?:\*\*)?[：:]\s*\S+",
+                characters_text,
+            )
+        )
+
+
+def _normalize_concept_stage_characters_for_storage(
+    project_id: int,
+    characters_text: Any,
+    *,
+    concept_text: str = "",
+    world_setting_text: str = "",
+) -> str:
+    if not isinstance(characters_text, str):
+        return ""
+
+    normalized = characters_text.strip()
+    if not normalized:
+        return ""
+
+    workflow_state: Dict[str, Any] = {}
+    try:
+        workflow_state = coordinator.get_workflow_state(project_id) or {}
+    except Exception:
+        logger.warning("⚠️ 读取工作流状态失败，人物存储预处理将使用默认上下文")
+
+    requirement = str(workflow_state.get("requirement") or "")
+
+    try:
+        real_coordinator = coordinator.get_real_coordinator(project_id)
+    except Exception:
+        real_coordinator = None
+        logger.warning("⚠️ 获取真实协调器失败，人物存储预处理将跳过重排")
+
+    normalize_fn = getattr(real_coordinator, "_normalize_character_cards_if_needed", None)
+    if callable(normalize_fn):
+        try:
+            normalized = normalize_fn(
+                normalized,
+                requirement=requirement,
+                concept=str(concept_text or ""),
+                world_setting=str(world_setting_text or ""),
+            )
+        except Exception as exc:
+            logger.warning("⚠️ 概念阶段人物重排失败，准备执行落库拦截: %s", exc)
+
+    if not _has_structured_character_cards(normalized):
+        try:
+            from app.services.character_parser import convert_legacy_grouped_characters_to_cards
+
+            converted = convert_legacy_grouped_characters_to_cards(normalized)
+            if _has_structured_character_cards(converted):
+                normalized = converted
+        except Exception as exc:
+            logger.warning("⚠️ 概念阶段人物规则转换失败，准备执行落库拦截: %s", exc)
+
+    if _has_structured_character_cards(normalized):
+        return normalized
+
+    logger.warning(
+        "⚠️ 概念阶段人物文本未通过结构化校验，跳过写入 project_settings.characters: project_id=%s",
+        project_id,
+    )
+    return ""
+
+
+def _build_concept_stage_character_prompts(
+    project_genre: str,
+    requirement: str,
+    concept_text: str,
+    world_setting_text: str,
+) -> tuple[str, str]:
+    genre_extra_fields = get_genre_character_fields(project_genre or "")
+    system_prompt = CharacterDesignPrompts.get_system_prompt(project_genre or "")
+    base_user_prompt = CharacterDesignPrompts.get_character_prompt(
+        requirement=requirement or "暂无特别要求",
+        genre_extra_fields=genre_extra_fields,
+    )
+    user_prompt = f"""{base_user_prompt}
+
+【故事概念】
+{concept_text}
+
+【世界观设定】
+{world_setting_text}"""
+    return system_prompt, user_prompt
+
+
+def _select_story_character_sync_source(result: Any) -> tuple[str, str]:
+    if not isinstance(result, dict):
+        return "", ""
+
+    for source_name in ("character_delta", "characters"):
+        characters_text = result.get(source_name)
+        if _has_structured_character_cards(characters_text):
+            return str(characters_text), source_name
+
+    return "", ""
 
 
 def _estimate_character_count_from_text(characters_text: str) -> int:
     if not (characters_text or "").strip():
         return 0
 
+    normalized_text = characters_text or ""
     try:
         from app.services.story_expansion_coordinator import extract_character_names
+        from app.services.story_text_utils import normalize_story_text
 
-        detected_names = extract_character_names(characters_text or "")
+        normalized_text = normalize_story_text(characters_text)
+        detected_names = extract_character_names(normalized_text)
         if detected_names:
             return len(detected_names)
     except Exception:
         logger.warning("⚠️ 人物识别降级为正则统计")
 
-    return len(re.findall(r"【姓名】：", characters_text or ""))
+    return len(re.findall(r"【姓名】：", normalized_text))
+
+
+def _estimate_chapter_count_from_text(outline_text: str) -> int:
+    if not (outline_text or "").strip():
+        return 0
+
+    normalized_text = outline_text or ""
+    try:
+        from app.services.story_expansion_coordinator import parse_outline_blocks
+        from app.services.story_text_utils import normalize_story_text
+
+        normalized_text = normalize_story_text(outline_text)
+        _, blocks = parse_outline_blocks(normalized_text)
+        if blocks:
+            return len(blocks)
+    except Exception:
+        logger.warning("⚠️ 章节识别降级为正则统计")
+
+    return len(
+        re.findall(
+            r"(?m)^(?:#{1,6}\s*)?(?:[一二三四五六七八九十百千万零两〇]+[、.．]\s*)?第\s*[0-9一二三四五六七八九十百千万零两〇]+\s*章(?:\s*$|[：:、\-\s])",
+            normalized_text,
+        )
+    )
+
+
+def _coerce_non_negative_int(value: Any) -> int:
+    try:
+        return max(0, int(value))
+    except Exception:
+        return 0
+
+
+def _resolve_story_result_count(
+    *,
+    reported_count: Any,
+    parsed_count: int,
+    validation_count: Any,
+    fallback_count: Any,
+) -> int:
+    return max(
+        _coerce_non_negative_int(reported_count),
+        _coerce_non_negative_int(parsed_count),
+        _coerce_non_negative_int(validation_count),
+        _coerce_non_negative_int(fallback_count),
+    )
 
 
 def _resolve_story_epic_config(request: ExpandStoryRequest) -> Optional[Dict[str, Any]]:
@@ -595,6 +1312,71 @@ def _detect_total_volumes_from_framework(framework_text: str) -> int:
     return 10
 
 
+def _estimate_story_volume_chapter_count_from_text(content: str) -> int:
+    text_content = str(content or "")
+    if not text_content.strip():
+        return 0
+
+    coverage_match = re.search(r"覆盖章节[：:]\s*(\d+)\s*[-~—至到]+\s*(\d+)\s*章?", text_content)
+    if coverage_match:
+        try:
+            start = int(coverage_match.group(1))
+            end = int(coverage_match.group(2))
+            if end >= start > 0:
+                return end - start + 1
+        except Exception:
+            pass
+
+    range_span_match = re.search(r"章节规模[：:]\s*(\d+)\s*[-~—至到]+\s*(\d+)\s*章?", text_content)
+    if range_span_match:
+        try:
+            lower = int(range_span_match.group(1))
+            upper = int(range_span_match.group(2))
+            return max(lower, upper, 0)
+        except Exception:
+            pass
+
+    exact_span_match = re.search(r"章节规模[：:]\s*(\d+)\s*章?", text_content)
+    if exact_span_match:
+        try:
+            return max(0, int(exact_span_match.group(1)))
+        except Exception:
+            pass
+
+    estimated_match = re.search(r"预计\s*(\d+)(?:\s*[-~—至到]+\s*(\d+))?\s*章", text_content)
+    if estimated_match:
+        try:
+            lower = int(estimated_match.group(1))
+            upper = int(estimated_match.group(2) or lower)
+            return max(lower, upper, 0)
+        except Exception:
+            pass
+
+    return 0
+
+
+def _estimate_story_volume_chapter_count(vol_data: Dict[str, Any]) -> int:
+    if not isinstance(vol_data, dict):
+        return 0
+
+    chapter_range = vol_data.get("chapters_range") or [0, 0]
+    if isinstance(chapter_range, (list, tuple)) and len(chapter_range) >= 2:
+        try:
+            start = int(chapter_range[0] or 0)
+            end = int(chapter_range[1] or 0)
+            if start > 0 and end >= start:
+                return end - start + 1
+        except Exception:
+            pass
+
+    for field in ("summary", "detail"):
+        estimated = _estimate_story_volume_chapter_count_from_text(str(vol_data.get(field) or ""))
+        if estimated > 0:
+            return estimated
+
+    return 0
+
+
 def _resolve_story_volume_detail_config(
     request: ExpandStoryRequest,
     db: Session,
@@ -604,23 +1386,16 @@ def _resolve_story_volume_detail_config(
 
     from app.services.outline_merger import parse_epic_volumes_json, parse_framework_to_volumes
 
-    volume_query = text(
-        """
-        SELECT epic_framework, epic_volumes_detail
-        FROM project_settings
-        WHERE project_id = :project_id
-        """
-    )
-    volume_row = db.execute(volume_query, {"project_id": request.project_id}).fetchone()
+    epic_framework_state = WorkflowContextBuilder(db).load_epic_framework_state(request.project_id)
 
-    if not volume_row or not volume_row[0]:
+    if not epic_framework_state.epic_framework:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="单卷细化协同需要先生成史诗框架",
+            detail="单卷细化协同需要先生成长篇框架",
         )
 
-    framework_content = volume_row[0]
-    stored_volumes_json = volume_row[1] or "{}"
+    framework_content = epic_framework_state.epic_framework
+    stored_volumes_json = epic_framework_state.epic_volumes_detail or "{}"
     volumes_data = parse_epic_volumes_json(stored_volumes_json)
     if not volumes_data.get("volumes"):
         detected_total_volumes = _detect_total_volumes_from_framework(framework_content)
@@ -653,14 +1428,9 @@ def _resolve_story_volume_detail_config(
 
     for vol_num in range(1, target_volume_index):
         vol_data = volumes_dict.get(str(vol_num)) or {}
-        if vol_data.get("type") == "detail":
-            chapter_range = vol_data.get("chapters_range") or [0, 0]
-            try:
-                accumulated_chapters += max(0, int(chapter_range[1]) - int(chapter_range[0]) + 1)
-            except Exception:
-                pass
-            if vol_num == target_volume_index - 1:
-                previous_volume_detail = vol_data.get("detail")
+        accumulated_chapters += _estimate_story_volume_chapter_count(vol_data)
+        if vol_num == target_volume_index - 1 and vol_data.get("type") == "detail":
+            previous_volume_detail = vol_data.get("detail")
 
     target_volume = volumes_dict.get(str(target_volume_index)) or {}
     if target_volume.get("type") == "detail":
@@ -690,26 +1460,6 @@ def _resolve_story_volume_detail_config(
     }
 
 
-def _load_story_epic_framework_state(project_id: int, db: Session) -> Dict[str, Any]:
-    framework_query = text(
-        """
-        SELECT epic_framework, epic_framework_generated_at
-        FROM project_settings
-        WHERE project_id = :project_id
-        """
-    )
-    framework_result = db.execute(framework_query, {"project_id": project_id})
-    framework_row = framework_result.fetchone() if hasattr(framework_result, "fetchone") else None
-    epic_framework = framework_row[0] if framework_row and framework_row[0] else ""
-    framework_generated_at = framework_row[1] if framework_row else None
-
-    return {
-        "has_framework": bool((epic_framework or "").strip()) or bool(framework_generated_at),
-        "epic_framework": epic_framework,
-        "framework_generated_at": framework_generated_at,
-    }
-
-
 def _validate_story_framework_mode_switch(
     request: ExpandStoryRequest,
     db: Session,
@@ -721,8 +1471,11 @@ def _validate_story_framework_mode_switch(
     if _resolve_story_target_chapters(request) is None:
         return
 
-    framework_state = _load_story_epic_framework_state(request.project_id, db)
-    if not framework_state["has_framework"]:
+    epic_framework_state = WorkflowContextBuilder(db).load_epic_framework_state(request.project_id)
+    has_framework = bool((epic_framework_state.epic_framework or "").strip()) or bool(
+        epic_framework_state.framework_generated_at
+    )
+    if not has_framework:
         return
 
     if request.reset_epic_framework:
@@ -731,7 +1484,7 @@ def _validate_story_framework_mode_switch(
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=(
-            "当前项目已存在史诗框架。若要继续长篇路线，请使用单卷细化协同；"
+            "当前项目已存在长篇框架。若要继续长篇路线，请使用单卷细化协同；"
             "若要切回常规协同，请确认清空旧框架后再执行。"
         ),
     )
@@ -746,6 +1499,16 @@ def _resolve_story_target_chapters(request: ExpandStoryRequest) -> Optional[int]
         ]
         return max(candidates) if candidates else None
     return request.target_total_chapters
+
+
+def _resolve_story_target_characters(request: ExpandStoryRequest) -> Optional[int]:
+    if request.expansion_mode == "volume_detail" and request.volume_character_increment is not None:
+        increment = max(0, int(request.volume_character_increment))
+        current_count = max(0, int(request.current_character_count or 0))
+        parsed_count = _estimate_character_count_from_text(request.characters or "")
+        current_count = max(current_count, parsed_count)
+        return current_count + increment
+    return request.target_total_characters
 
 
 def _build_story_written_chapter_preview(
@@ -767,7 +1530,7 @@ def _build_story_written_chapter_preview(
 
     chapter_query = text(
         """
-        SELECT chapter_number, title, content, summary
+        SELECT chapter_number, title, content, summary, summary_data
         FROM chapters
         WHERE project_id = :project_id
           AND content IS NOT NULL
@@ -783,17 +1546,22 @@ def _build_story_written_chapter_preview(
     if written_count <= 0:
         return result
 
+    from app.services.agents.written_chapters_handler import build_written_chapter_summary_preview
+
     preview_sections = []
     for row in chapter_rows:
         chapter_number = row[0]
         chapter_title = row[1] or f"第{chapter_number}章"
         chapter_content = row[2] or ""
         chapter_summary = row[3] or ""
-        preview_text = chapter_summary.strip() or chapter_content[:200].strip()
-        if chapter_content and len(chapter_content) > 200 and not chapter_summary.strip():
-            preview_text = f"{preview_text}..."
-        if not preview_text:
-            preview_text = "本章已有正文，待后续协同扩展时继续承接。"
+        chapter_summary_data = row[4]
+        preview_text = build_written_chapter_summary_preview(
+            chapter_number=chapter_number,
+            title=chapter_title,
+            content=chapter_content,
+            summary=chapter_summary,
+            summary_data=chapter_summary_data,
+        )
         preview_sections.append(
             f"第{chapter_number}章：{chapter_title}\n- 已写摘要：{preview_text}"
         )
@@ -817,6 +1585,7 @@ async def _prepare_story_execution_request(
     request: ExpandStoryRequest,
     db: Session,
 ) -> Dict[str, Any]:
+    request = _normalize_story_request_text_fields(request)
     preview = _build_story_written_chapter_preview(request, db)
     if not preview.get("applied"):
         return {
@@ -871,9 +1640,13 @@ async def _prepare_story_execution_request(
     }
 
 
-def _validate_expand_story_request(request: ExpandStoryRequest) -> None:
+def _validate_expand_story_request(
+    request: ExpandStoryRequest,
+    *,
+    allow_empty_targets_for_analysis: bool = False,
+) -> None:
     if request.target_total_chapters is None and request.target_total_characters is None:
-        if request.expansion_mode not in {"epic_framework", "volume_detail"}:
+        if request.expansion_mode not in {"epic_framework", "volume_detail"} and not allow_empty_targets_for_analysis:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="至少需要提供目标章节数或目标人物数之一",
@@ -890,6 +1663,13 @@ def _validate_expand_story_request(request: ExpandStoryRequest) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="目标人物数必须大于 0",
         )
+
+    if request.volume_character_increment is not None:
+        if request.volume_character_increment < 0 or request.volume_character_increment > 30:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="单卷细化的人物新增上限必须在 0-30 之间",
+            )
 
     if request.strategy not in VALID_STORY_EXPANSION_STRATEGIES:
         raise HTTPException(
@@ -915,22 +1695,34 @@ def _validate_expand_story_request(request: ExpandStoryRequest) -> None:
             detail="不支持的已写章节处理模式",
         )
 
-    if request.expansion_mode == "epic_framework":
-        if request.total_volumes is None or request.total_volumes < 5 or request.total_volumes > 50:
+    if request.expansion_mode == "total":
+        max_target_chapters = _get_conventional_collaboration_max_target_chapters(request.current_chapter_count)
+        effective_total_chapters = max(
+            int(request.current_chapter_count or 0),
+            int(request.target_total_chapters or request.current_chapter_count or 0),
+        )
+        if effective_total_chapters > max_target_chapters:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="长篇框架协同需要有效的总卷数 (5-50)",
+                detail="常规协同仅支持总规模不超过 300 个细化章节；超过 300 章后必须改用长篇框架协同",
+            )
+
+    if request.expansion_mode == "epic_framework":
+        if request.total_volumes is None or request.total_volumes < 3 or request.total_volumes > 50:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="长篇框架协同需要有效的总卷数 (3-50)",
             )
         if (
             request.total_chapters_min is None
             or request.total_chapters_max is None
-            or request.total_chapters_min < 400
+            or request.total_chapters_min < 300
             or request.total_chapters_max > 5000
             or request.total_chapters_min > request.total_chapters_max
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="长篇框架协同需要有效的总章节范围 (400-5000)",
+                detail="长篇框架协同需要有效的总章节范围 (300-5000)",
             )
 
     if request.expansion_mode == "volume_detail":
@@ -942,276 +1734,14 @@ def _validate_expand_story_request(request: ExpandStoryRequest) -> None:
         if (
             request.volume_chapters_min is None
             or request.volume_chapters_max is None
-            or request.volume_chapters_min < 30
-            or request.volume_chapters_max > 80
+            or request.volume_chapters_min < VOLUME_DETAIL_MIN_CHAPTERS
+            or request.volume_chapters_max > VOLUME_DETAIL_MAX_CHAPTERS
             or request.volume_chapters_min > request.volume_chapters_max
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="单卷细化协同需要有效的本卷章节范围 (30-80)",
+                detail=f"单卷细化协同需要有效的本卷章节范围 ({VOLUME_DETAIL_MIN_CHAPTERS}-{VOLUME_DETAIL_MAX_CHAPTERS})",
             )
-
-
-def _estimate_legacy_character_count(characters_text: str) -> int:
-    return _estimate_character_count_from_text(characters_text)
-
-
-def _normalize_legacy_outline_analysis_mode(expansion_mode: Optional[str]) -> str:
-    normalized = str(expansion_mode or "total").strip()
-    if normalized in {"epic_framework", "volume_detail"}:
-        return normalized
-    return "total"
-
-
-def _build_legacy_story_analysis_payload(
-    *,
-    story_request: ExpandStoryRequest,
-    db: Session,
-    source: str,
-    requested_entry: str,
-    requested_intent: str,
-    requested_mode: str,
-    mapped_story_mode: str,
-) -> Dict[str, Any]:
-    base_payload = {
-        "available": False,
-        "source": source,
-        "requested_entry": requested_entry,
-        "requested_intent": requested_intent,
-        "requested_mode": requested_mode,
-        "mapped_story_mode": mapped_story_mode,
-        "analysis_summary": "协同兼容分析暂不可用，已回退为旧接口直接执行。",
-        "warnings": [],
-    }
-
-    try:
-        _validate_expand_story_request(story_request)
-
-        preview = _build_story_written_chapter_preview(story_request, db)
-        analysis_request = story_request.model_copy(
-            update={
-                "current_outline": preview["effective_outline"],
-                "current_chapter_count": preview["effective_current_chapter_count"],
-            }
-        )
-        analysis_bundle = _build_story_expansion_analysis(
-            request=analysis_request,
-            db=db,
-        )
-        analysis = dict(analysis_bundle.get("analysis") or {})
-
-        warnings = list(analysis.get("warnings") or [])
-        warnings.extend(preview.get("warnings") or [])
-        if requested_mode != mapped_story_mode:
-            warnings.append(
-                f"兼容分析已将旧模式 {requested_mode} 映射为协同模式 {mapped_story_mode}，"
-                "仅用于建议，不影响本次旧接口实际执行。"
-            )
-        warnings = list(dict.fromkeys(item for item in warnings if item))
-
-        logger.info(
-            "🧭 旧接口协同兼容分析完成: entry=%s, source=%s, summary=%s",
-            requested_entry,
-            source,
-            analysis.get("analysis_summary", ""),
-        )
-
-        return {
-            **base_payload,
-            "available": True,
-            "recommended_intent": analysis.get("recommended_intent"),
-            "effective_intent": analysis.get("effective_intent"),
-            "effective_strategy": analysis.get("effective_strategy"),
-            "execution_mode": analysis.get("execution_mode"),
-            "execution_mode_reason": analysis.get("execution_mode_reason"),
-            "analysis_summary": analysis.get("analysis_summary") or base_payload["analysis_summary"],
-            "effective_target_chapter_count": analysis.get("effective_target_chapter_count"),
-            "effective_target_character_count": analysis.get("effective_target_character_count"),
-            "estimated_rounds": analysis.get("estimated_rounds"),
-            "model_plan": analysis.get("model_plan"),
-            "warnings": warnings,
-            "written_chapter_context": {
-                "applied": bool(preview.get("applied")),
-                "written_chapter_count": int(preview.get("written_chapter_count") or 0),
-                "preserve_written_mode": story_request.preserve_written_mode,
-            },
-        }
-    except HTTPException as exc:
-        fallback_reason = str(getattr(exc, "detail", "") or "协同兼容分析校验失败")
-        logger.warning(
-            "⚠️  旧接口协同兼容分析回退: entry=%s, source=%s, reason=%s",
-            requested_entry,
-            source,
-            fallback_reason,
-        )
-        return {
-            **base_payload,
-            "fallback_reason": fallback_reason,
-            "warnings": [fallback_reason],
-        }
-    except Exception as exc:
-        logger.warning(
-            "⚠️  旧接口协同兼容分析异常，已回退旧执行链路: entry=%s, source=%s, error=%s",
-            requested_entry,
-            source,
-            exc,
-            exc_info=True,
-        )
-        return {
-            **base_payload,
-            "fallback_reason": "协同兼容分析生成失败，已回退为旧接口直接执行。",
-            "warnings": ["协同兼容分析生成失败，已回退为旧接口直接执行。"],
-        }
-
-
-def _build_legacy_outline_story_analysis(
-    request: ExpandOutlineRequest,
-    db: Session,
-    target_total_chapters: int,
-) -> Dict[str, Any]:
-    mapped_story_mode = _normalize_legacy_outline_analysis_mode(request.expansion_mode)
-    story_request = ExpandStoryRequest(
-        project_id=request.project_id,
-        current_outline=request.current_outline,
-        world_setting=request.world_setting,
-        characters=request.characters,
-        current_chapter_count=int(request.current_chapter_count or 0),
-        current_character_count=_estimate_legacy_character_count(request.characters),
-        target_total_chapters=target_total_chapters,
-        target_total_characters=None,
-        strategy="plot_first",
-        intent="outline_led",
-        enable_auto_supplement=True,
-        expansion_mode=mapped_story_mode,
-        total_volumes=request.total_volumes if mapped_story_mode == "epic_framework" else None,
-        total_chapters_min=request.total_chapters_min if mapped_story_mode == "epic_framework" else None,
-        total_chapters_max=request.total_chapters_max if mapped_story_mode == "epic_framework" else None,
-        target_volume_index=request.target_volume_index if mapped_story_mode == "volume_detail" else None,
-        volume_chapters_min=request.volume_chapters_min if mapped_story_mode == "volume_detail" else None,
-        volume_chapters_max=request.volume_chapters_max if mapped_story_mode == "volume_detail" else None,
-        preserve_written_mode=request.preserve_written_mode,
-    )
-    return _build_legacy_story_analysis_payload(
-        story_request=story_request,
-        db=db,
-        source="legacy_outline",
-        requested_entry="expand-outline",
-        requested_intent="outline_led",
-        requested_mode=str(request.expansion_mode or "total").strip(),
-        mapped_story_mode=mapped_story_mode,
-    )
-
-
-def _build_legacy_character_story_analysis(
-    request: ExpandCharactersRequest,
-    db: Session,
-    target_total_characters: int,
-) -> Dict[str, Any]:
-    story_request = ExpandStoryRequest(
-        project_id=request.project_id,
-        current_outline=request.plot_outline,
-        world_setting=request.world_setting,
-        characters=request.main_characters,
-        current_chapter_count=0,
-        current_character_count=max(
-            int(request.current_character_count or 0),
-            _estimate_legacy_character_count(request.main_characters),
-        ),
-        target_total_chapters=None,
-        target_total_characters=target_total_characters,
-        strategy="character_first",
-        intent="character_led",
-        enable_auto_supplement=True,
-        expansion_mode="total",
-        preserve_written_mode="extract_extend",
-    )
-    return _build_legacy_story_analysis_payload(
-        story_request=story_request,
-        db=db,
-        source="legacy_characters",
-        requested_entry="expand-characters",
-        requested_intent="character_led",
-        requested_mode="total",
-        mapped_story_mode="total",
-    )
-
-
-def _build_legacy_outline_story_analysis_from_task(
-    *,
-    db: Session,
-    project_id: int,
-    current_outline: str,
-    world_setting: str,
-    characters: str,
-    current_chapter_count: int,
-    increment: int,
-    target_total_chapters: Optional[int],
-    expansion_mode: str = "total",
-    target_volumes: Optional[int] = None,
-    chapters_per_volume_min: Optional[int] = 20,
-    chapters_per_volume_max: Optional[int] = 30,
-    incremental_step: Optional[int] = 10,
-    total_volumes: Optional[int] = None,
-    total_chapters_min: Optional[int] = None,
-    total_chapters_max: Optional[int] = None,
-    framework_content: Optional[str] = None,
-    target_volume_index: Optional[int] = None,
-    volume_chapters_min: Optional[int] = None,
-    volume_chapters_max: Optional[int] = None,
-    preserve_written_mode: str = "extract_extend",
-) -> Dict[str, Any]:
-    normalized_target_total_chapters = int(target_total_chapters or 0)
-    return _build_legacy_outline_story_analysis(
-        request=ExpandOutlineRequest(
-            project_id=project_id,
-            current_outline=current_outline,
-            world_setting=world_setting,
-            characters=characters,
-            current_chapter_count=current_chapter_count,
-            increment=increment,
-            target_total_chapters=normalized_target_total_chapters,
-            expansion_mode=expansion_mode,
-            target_volumes=target_volumes,
-            chapters_per_volume_min=chapters_per_volume_min,
-            chapters_per_volume_max=chapters_per_volume_max,
-            incremental_step=incremental_step,
-            total_volumes=total_volumes,
-            total_chapters_min=total_chapters_min,
-            total_chapters_max=total_chapters_max,
-            framework_content=framework_content,
-            target_volume_index=target_volume_index,
-            volume_chapters_min=volume_chapters_min,
-            volume_chapters_max=volume_chapters_max,
-            preserve_written_mode=preserve_written_mode,
-        ),
-        db=db,
-        target_total_chapters=normalized_target_total_chapters,
-    )
-
-
-def _build_legacy_character_story_analysis_from_task(
-    *,
-    db: Session,
-    project_id: int,
-    main_characters: str,
-    world_setting: str,
-    plot_outline: str,
-    current_character_count: int,
-    target_total_characters: Optional[int],
-) -> Dict[str, Any]:
-    normalized_target_total_characters = int(target_total_characters or 0)
-    return _build_legacy_character_story_analysis(
-        request=ExpandCharactersRequest(
-            project_id=project_id,
-            main_characters=main_characters,
-            world_setting=world_setting,
-            plot_outline=plot_outline,
-            current_character_count=current_character_count,
-            target_total_characters=normalized_target_total_characters,
-        ),
-        db=db,
-        target_total_characters=normalized_target_total_characters,
-    )
 
 
 def _build_story_expansion_analysis(
@@ -1237,6 +1767,7 @@ def _build_story_expansion_analysis(
         planned_chapters_max=project_planned_chapters or 0,
     )
     target_total_chapters = _resolve_story_target_chapters(request)
+    target_total_characters = _resolve_story_target_characters(request)
     epic_config = _resolve_story_epic_config(request)
     volume_detail_config = _resolve_story_volume_detail_config(request, db)
     if volume_detail_config is not None:
@@ -1248,11 +1779,12 @@ def _build_story_expansion_analysis(
         characters=request.characters,
         world_setting=combined_world_setting,
         target_total_chapters=target_total_chapters,
-        target_total_characters=request.target_total_characters,
+        target_total_characters=target_total_characters,
         strategy=request.strategy,
         intent=request.intent,
         enable_auto_supplement=request.enable_auto_supplement,
         expansion_mode=request.expansion_mode,
+        volume_character_increment=request.volume_character_increment,
         epic_config=epic_config,
         volume_detail_config=volume_detail_config,
     )
@@ -1488,24 +2020,26 @@ async def start_workflow(
                 logger.info(f"   ✅ 已删除 {cleared_data['chapters']} 个章节")
 
                 # 2. 清空 project_settings 中的旧内容
-                clear_settings_query = text("""
-                    UPDATE project_settings
-                    SET concept = NULL,
-                        world_setting = NULL,
-                        characters = NULL,
-                        plot_outline = NULL,
-                        chapter_draft = NULL,
-                        review_report = NULL,
-                        final_version = NULL,
-                        updated_at = :updated_at
-                    WHERE project_id = :project_id
-                """)
-                db.execute(clear_settings_query, {
-                    "project_id": project_id,
-                    "updated_at": utc_now().isoformat()
-                })
+                WorkflowContextBuilder(db).update_project_settings_fields(
+                    project_id,
+                    concept=None,
+                    world_setting=None,
+                    characters=None,
+                    plot_outline=None,
+                    chapter_draft=None,
+                    review_report=None,
+                    final_version=None,
+                    epic_framework=None,
+                    epic_volumes_detail=None,
+                    epic_framework_generated_at=None,
+                    stage_one_status="pending",
+                    stage_two_status="pending",
+                    stage_three_status="pending",
+                    stage_four_status="pending",
+                    stage_five_status="pending",
+                )
                 cleared_data["settings"] = True
-                logger.info(f"   ✅ 已清空项目设定（概念、大纲、世界观、人物等）")
+                logger.info(f"   ✅ 已清空项目设定与阶段状态（概念、大纲、世界观、人物、长篇框架等）")
 
                 # 4. 清理记忆管理
                 try:
@@ -1555,13 +2089,13 @@ async def start_workflow(
             # 不抛出异常，继续执行工作流
 
         # 保存工作流程状态（内存中）
-        coordinator.workflow_state = {
+        coordinator.set_workflow_state(project_id, {
             "project_id": project_id,
             "user_id": current_user.id,
             "requirement": requirement,
             "status": "running",
             "target_chapter_count": target_chapter_count,
-        }
+        })
 
         # 返回初始化的阶段信息
         stages = {
@@ -1570,55 +2104,35 @@ async def start_workflow(
                 "name": "概念开发",
                 "status": "pending",
                 "progress": 0,
-                "agents": [
-                    agent
-                    for agent in coordinator.agents.values()
-                    if agent["stage"] == StageType.CONCEPT
-                ],
+                "agents": coordinator.get_stage_agents(project_id, StageType.CONCEPT),
             },
             "structure": {
                 "id": "structure",
                 "name": "结构设计",
                 "status": "pending",
                 "progress": 0,
-                "agents": [
-                    agent
-                    for agent in coordinator.agents.values()
-                    if agent["stage"] == StageType.STRUCTURE
-                ],
+                "agents": coordinator.get_stage_agents(project_id, StageType.STRUCTURE),
             },
             "content": {
                 "id": "content",
                 "name": "内容创作",
                 "status": "pending",
                 "progress": 0,
-                "agents": [
-                    agent
-                    for agent in coordinator.agents.values()
-                    if agent["stage"] == StageType.CONTENT
-                ],
+                "agents": coordinator.get_stage_agents(project_id, StageType.CONTENT),
             },
             "review": {
                 "id": "review",
                 "name": "质量评审",
                 "status": "pending",
                 "progress": 0,
-                "agents": [
-                    agent
-                    for agent in coordinator.agents.values()
-                    if agent["stage"] == StageType.REVIEW
-                ],
+                "agents": coordinator.get_stage_agents(project_id, StageType.REVIEW),
             },
             "iteration": {
                 "id": "iteration",
                 "name": "迭代优化",
                 "status": "pending",
                 "progress": 0,
-                "agents": [
-                    agent
-                    for agent in coordinator.agents.values()
-                    if agent["stage"] == StageType.ITERATION
-                ],
+                "agents": coordinator.get_stage_agents(project_id, StageType.ITERATION),
             },
         }
 
@@ -1688,7 +2202,7 @@ async def execute_stage(
             "stage": stage,
             "output": stage_output.output,
             "agents": [
-                coordinator.agents[agent_id]
+                coordinator.get_agents(project_id)[agent_id]
                 for agent_id in stage_output.agents_involved
             ],
         }
@@ -1800,13 +2314,28 @@ async def execute_stage_async(
         if streaming_enabled:
             # 使用流式输出执行
             asyncio.create_task(
-                execute_stage_with_streaming(task_id, project_id, stage_enum, current_user.id, db)
+                _run_execute_stage_with_streaming_serialized(
+                    task_id,
+                    project_id,
+                    stage_enum,
+                    current_user.id,
+                    db,
+                )
             )
             logger.info(f"   🌊 流式后台任务已启动")
         else:
     # 使用传统方式执行
             asyncio.create_task(
-                execute_stage_background(task_id, project_id, stage_enum, current_user.id, db, getattr(request, 'regenerate', False), getattr(request, 'targets', None), getattr(request, 'feedback', None))
+                _run_execute_stage_background_serialized(
+                    task_id,
+                    project_id,
+                    stage_enum,
+                    current_user.id,
+                    db,
+                    getattr(request, "regenerate", False),
+                    getattr(request, "targets", None),
+                    getattr(request, "feedback", None),
+                )
             )
             logger.info(f"   🚀 后台任务已启动")
 
@@ -1886,6 +2415,9 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
     
     try:
         logger.info(f"🔥 开始执行后台任务: {task_id}")
+        workflow_context_builder = WorkflowContextBuilder(db)
+        project_profile = workflow_context_builder.get_project_profile(project_id)
+        real_coord = coordinator.get_real_coordinator(project_id)
         
         # 🆕 关键修复：确保协调器已初始化
         if not coordinator._coordinator_initialized:
@@ -1893,28 +2425,36 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
             await coordinator.initialize_agents()
             logger.info("   ✅ 协调器初始化完成")
         
-        # 🆕 确保 project_settings 记录存在（关键修复！）
-        check_query = text("""
-            SELECT id FROM project_settings WHERE project_id = :project_id
-        """)
-        existing = db.execute(check_query, {"project_id": project_id}).fetchone()
+        # 🔧 关键修复：设置当前项目上下文，避免项目间数据污染
+        coordinator.set_project_context(project_id)
+        logger.info(f"   ✅ 已设置项目上下文：project_id={project_id}")
         
-        if not existing:
+        # 🔧 关键修复：立即从数据库加载当前项目的基本信息，注入到 project_context
+        try:
+            project_profile, real_coord = _sync_real_coordinator_project_context(
+                project_id,
+                workflow_context_builder,
+                project_profile,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ 项目基本信息注入失败：{e}")
+
+        if stage_enum == StageType.CONCEPT:
+            try:
+                _inject_recent_project_novelty_context(
+                    db,
+                    project_id=project_id,
+                    user_id=user_id,
+                    real_coord=real_coord,
+                    genre=project_profile.genre or None,
+                )
+                logger.info("   ✅ 已注入近期项目避重约束")
+            except Exception as e:
+                logger.warning(f"⚠️ 近期项目避重约束注入失败：{e}")
+
+        # 🆕 确保 project_settings 记录存在（关键修复！）
+        if workflow_context_builder.ensure_project_settings_record(project_id):
             logger.info(f"   📝 初始化 project_settings 记录")
-            init_query = text("""
-                INSERT INTO project_settings 
-                (project_id, stage_one_status, stage_two_status, stage_three_status, 
-                 stage_four_status, stage_five_status, created_at, updated_at)
-                VALUES 
-                (:project_id, 'pending', 'pending', 'pending', 'pending', 'pending', 
-                 :created_at, :updated_at)
-            """)
-            db.execute(init_query, {
-                "project_id": project_id,
-                "created_at": utc_now().isoformat(),
-                "updated_at": utc_now().isoformat()
-            })
-            db.commit()
             logger.info(f"   ✅ project_settings 记录已创建")
         
         requirement, requirement_source = _resolve_workflow_requirement(db, project_id)
@@ -1924,69 +2464,57 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
         # 🆕 题材与篇幅规划注入（概念阶段首次启动时）
         if stage_enum == StageType.CONCEPT and not regenerate:
             try:
-                # 读取项目的题材与篇幅信息
-                project_info_query = text("""
-                    SELECT genre, sub_genre, planned_length_type, 
-                           planned_chapters_min, planned_chapters_max, user_outline_plan
-                    FROM projects 
-                    WHERE id = :project_id
-                """)
-                proj_info = db.execute(project_info_query, {"project_id": project_id}).fetchone()
-                
-                if proj_info:
-                    genre = proj_info[0]
-                    sub_genre = proj_info[1]
-                    planned_length_type = proj_info[2]
-                    planned_chapters_min = proj_info[3]
-                    planned_chapters_max = proj_info[4]
-                    user_outline_plan = proj_info[5]
+                genre = project_profile.genre
+                sub_genre = project_profile.sub_genre
+                planned_length_type = project_profile.planned_length_type
+                planned_chapters_min = project_profile.planned_chapters_min
+                planned_chapters_max = project_profile.planned_chapters_max
+                user_outline_plan = project_profile.user_outline_plan
+
+                # 🆕 如果有自定义大纲规划，先解析
+                if user_outline_plan and user_outline_plan.strip():
+                    logger.info("📝 检测到用户自定义大纲规划，开始解析...")
+
+                    # 调用规划解析Agent
+                    if real_coord and hasattr(real_coord, 'parse_outline_plan'):
+                        parsed_plan = real_coord.parse_outline_plan(
+                            user_outline_plan=user_outline_plan,
+                            genre=genre or "",
+                            planned_length_type=planned_length_type or ""
+                        )
+
+                        if parsed_plan:
+                            logger.info(f"✅ 大纲规划解析完成: {list(parsed_plan.keys())}")
+
+                            # 将解析结果注入到项目上下文
+                            real_coord.project_context.update({
+                                "genre": genre,
+                                "sub_genre": sub_genre,
+                                "planned_length_type": planned_length_type,
+                                "planned_chapters_min": planned_chapters_min,
+                                "planned_chapters_max": planned_chapters_max,
+                                "parsed_outline_plan": parsed_plan
+                            })
+                        else:
+                            logger.warning("⚠️ 大纲规划解析返回空结果")
+
+                # 将题材篇幅信息添加到需求文本（供prompt使用）
+                if genre or planned_length_type:
+                    genre_info = f"\n\n【题材与篇幅信息】\n"
+                    if genre:
+                        genre_info += f"- 题材类型：{genre}"
+                        if sub_genre:
+                            genre_info += f" / {sub_genre}"
+                        genre_info += "\n"
+                    if planned_length_type:
+                        length_labels = {"short": "短篇", "mid": "中篇", "long": "长篇", "epic": "超长篇"}
+                        genre_info += f"- 篇幅规划：{length_labels.get(planned_length_type, planned_length_type)}"
+                        if planned_chapters_min and planned_chapters_max:
+                            genre_info += f"（{planned_chapters_min}-{planned_chapters_max}章）"
+                        genre_info += "\n"
                     
-                    # 🆕 如果有自定义大纲规划，先解析
-                    if user_outline_plan and user_outline_plan.strip():
-                        logger.info("📝 检测到用户自定义大纲规划，开始解析...")
-                        
-                        # 调用规划解析Agent
-                        if hasattr(coordinator, '_real_coordinator'):
-                            real_coord = coordinator._real_coordinator
-                            if real_coord and hasattr(real_coord, 'parse_outline_plan'):
-                                parsed_plan = real_coord.parse_outline_plan(
-                                    user_outline_plan=user_outline_plan,
-                                    genre=genre or "",
-                                    planned_length_type=planned_length_type or ""
-                                )
-                                
-                                if parsed_plan:
-                                    logger.info(f"✅ 大纲规划解析完成: {list(parsed_plan.keys())}")
-                                    
-                                    # 将解析结果注入到项目上下文
-                                    real_coord.project_context.update({
-                                        "genre": genre,
-                                        "sub_genre": sub_genre,
-                                        "planned_length_type": planned_length_type,
-                                        "planned_chapters_min": planned_chapters_min,
-                                        "planned_chapters_max": planned_chapters_max,
-                                        "parsed_outline_plan": parsed_plan
-                                    })
-                                else:
-                                    logger.warning("⚠️ 大纲规划解析返回空结果")
-                    
-                    # 将题材篇幅信息添加到需求文本（供prompt使用）
-                    if genre or planned_length_type:
-                        genre_info = f"\n\n【题材与篇幅信息】\n"
-                        if genre:
-                            genre_info += f"- 题材类型：{genre}"
-                            if sub_genre:
-                                genre_info += f" / {sub_genre}"
-                            genre_info += "\n"
-                        if planned_length_type:
-                            length_labels = {"short": "短篇", "mid": "中篇", "long": "长篇", "epic": "超长篇"}
-                            genre_info += f"- 篇幅规划：{length_labels.get(planned_length_type, planned_length_type)}"
-                            if planned_chapters_min and planned_chapters_max:
-                                genre_info += f"（{planned_chapters_min}-{planned_chapters_max}章）"
-                            genre_info += "\n"
-                        
-                        requirement += genre_info
-                        logger.info(f"✅ 已注入题材与篇幅信息到需求文本")
+                    requirement += genre_info
+                    logger.info(f"✅ 已注入题材与篇幅信息到需求文本")
                         
             except Exception as e:
                 logger.warning(f"⚠️ 题材与篇幅信息注入失败: {e}")
@@ -2000,24 +2528,10 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
         # 🆕 相互参考约束注入（仅重生时）
         if stage_enum == StageType.CONCEPT and regenerate:
             try:
-                ref_query = text("SELECT concept, world_setting, characters FROM project_settings WHERE project_id = :project_id")
-                ref_row = db.execute(ref_query, {"project_id": project_id}).fetchone()
-                existing_concept = ref_row[0] if ref_row else None
-                existing_world = ref_row[1] if ref_row else None
-                existing_characters = ref_row[2] if ref_row else None
-
-                def safe_text(value):
-                    try:
-                        val = json.loads(value) if value else ""
-                        if isinstance(val, (list, dict)):
-                            val = json.dumps(val, ensure_ascii=False)
-                        return str(val)
-                    except Exception:
-                        return str(value or "")
-
-                concept_txt = safe_text(existing_concept)
-                world_txt = safe_text(existing_world)
-                char_txt = safe_text(existing_characters)
+                existing_context = workflow_context_builder.load_stage_text_context(project_id)
+                concept_txt = existing_context.concept
+                world_txt = existing_context.world_setting
+                char_txt = existing_context.characters
 
                 def clip(s, n=1200):
                     return s[:n] if isinstance(s, str) else ""
@@ -2133,8 +2647,8 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
             logger.info(f"   ✅ 已启用任务分块执行模式")
 
         # 🔧 将重生信息注入到真实协调器的 project_context（供概念阶段条件执行使用）
-        if stage_enum == StageType.CONCEPT and hasattr(coordinator, '_real_coordinator'):
-            real_coord = coordinator._real_coordinator
+        if stage_enum == StageType.CONCEPT:
+            real_coord = coordinator.get_real_coordinator(project_id)
             if real_coord and hasattr(real_coord, 'project_context'):
                 real_coord.project_context["regenerate"] = regenerate
                 real_coord.project_context["regenerate_targets"] = targets or []
@@ -2193,28 +2707,10 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
             if stage_enum == StageType.CONCEPT:
                 # 保存概念开发结果（支持评审/重生的目标字段选择）
                 output_data = stage_output.output if isinstance(stage_output.output, dict) else {}
-                # 读取现有值以便选择性覆盖
-                existing_query = text("""
-                    SELECT concept, world_setting, characters FROM project_settings WHERE project_id = :project_id
-                """)
-                existing_row = db.execute(existing_query, {"project_id": project_id}).fetchone()
-                existing_concept = existing_row[0] if existing_row else None
-                existing_world = existing_row[1] if existing_row else None
-                existing_characters = existing_row[2] if existing_row else None
-
-                # 安全解析现有JSON字符串
-                def safe_json(value, default):
-                    try:
-                        if value is None:
-                            return default
-                        parsed = json.loads(value)
-                        return parsed
-                    except Exception:
-                        return default
-
-                existing_concept_val = safe_json(existing_concept, "")
-                existing_world_val = safe_json(existing_world, "")
-                existing_characters_val = safe_json(existing_characters, [])
+                existing_storage_state = workflow_context_builder.load_concept_storage_state(project_id)
+                existing_concept_val = existing_storage_state.concept_value
+                existing_world_val = existing_storage_state.world_setting_value
+                existing_characters_val = existing_storage_state.characters_value
 
                 targets_set = set(targets or [])
                 is_regen = bool(regenerate)
@@ -2223,63 +2719,27 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
                 concept_to_save = output_data.get("concept", "") if not is_regen or ("story" in targets_set) else existing_concept_val
                 world_to_save = output_data.get("worldview", output_data.get("world_setting", "")) if not is_regen or ("world" in targets_set) else existing_world_val
                 characters_to_save = output_data.get("characters", []) if not is_regen else existing_characters_val
+                if not is_regen:
+                    characters_to_save = _normalize_concept_stage_characters_for_storage(
+                        project_id,
+                        characters_to_save,
+                        concept_text=str(concept_to_save or ""),
+                        world_setting_text=str(world_to_save or ""),
+                    )
 
-                save_query = text("""
-                    UPDATE project_settings
-                    SET concept = :concept,
-                        world_setting = :world_setting,
-                        characters = :characters,
-                        stage_one_status = 'completed',
-                        updated_at = :updated_at
-                    WHERE project_id = :project_id
-                """)
-                
-                db.execute(save_query, {
-                    "concept": json.dumps(concept_to_save, ensure_ascii=False),
-                    "world_setting": json.dumps(world_to_save, ensure_ascii=False),
-                    "characters": json.dumps(characters_to_save, ensure_ascii=False),
-                    "updated_at": utc_now().isoformat(),
-                    "project_id": project_id
-                })
-                db.commit()
+                workflow_context_builder.update_project_settings_fields(
+                    project_id,
+                    concept=json.dumps(concept_to_save, ensure_ascii=False),
+                    world_setting=json.dumps(world_to_save, ensure_ascii=False),
+                    characters=json.dumps(characters_to_save, ensure_ascii=False),
+                    stage_one_status="completed",
+                )
                 logger.info(f"   💾 已保存概念开发结果到 project_settings（重生={is_regen}, targets={list(targets_set) if targets_set else []}）")
                 
                 # 🆕 从故事概念中提取日志标题，自动更新项目title
                 if concept_to_save and isinstance(concept_to_save, str):
                     try:
-                        import re
-                        # 匹配日志标题（支持多种格式）
-                        # 格式1: **日志标题（短标题）**：《...》 或 **日志标题**：《...》
-                        # 格式2: 2. **日志标题...**：《...》
-                        patterns = [
-                            r'\*\*日志标题[^：:*]*\*\*[：:]\s*《([^》]+)》',
-                            r'\d+\.\s*\*\*日志标题[^：:*]*\*\*[：:]\s*《([^》]+)》',
-                            r'日志标题[：:]\s*《([^》]+)》',
-                            r'\*\*日志标题[^：:*]*\*\*[：:]\s*([^\n。]+)',
-                        ]
-                        
-                        log_title = None
-                        for pattern in patterns:
-                            match = re.search(pattern, concept_to_save)
-                            if match:
-                                log_title = match.group(1).strip()
-                                # 移除可能的《》书名号
-                                log_title = log_title.strip('《》')
-                                break
-                        
-                        if log_title and len(log_title) >= 2:
-                            # 更新项目标题
-                            update_title_query = text("""
-                                UPDATE projects SET title = :title, updated_at = :updated_at
-                                WHERE id = :project_id
-                            """)
-                            db.execute(update_title_query, {
-                                "title": log_title,
-                                "updated_at": utc_now().isoformat(),
-                                "project_id": project_id
-                            })
-                            db.commit()
-                            logger.info(f"   📝 已从日志标题更新项目title: {log_title}")
+                        _sync_project_title_from_concept(db, project_id, concept_to_save)
                     except Exception as e:
                         logger.warning(f"   ⚠️  提取日志标题失败: {e}")
                 
@@ -2337,7 +2797,8 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
                             # 使用Character模型的实际字段
                             char_content = f"""
 人物名称: {char.name}
-角色类型: {char.role or '未设定'}
+故事立场: {char.role or '未设定'}
+角色定位: {getattr(char, 'role_position', None) or '未设定'}
 所属势力: {char.faction or '未设定'}
 状态: {char.life_status or '未知'}
 简介: {char.summary or ''}
@@ -2352,7 +2813,8 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
                                 metadata={
                                     "character_id": str(char.id),
                                     "name": char.name,
-                                    "role": char.role or ''
+                                    "role": char.role or '',
+                                    "role_position": getattr(char, "role_position", None) or "",
                                 }
                             )
                         logger.info(f"   ✅ 已同步 {len(characters_in_db)} 个人物到向量库")
@@ -2395,21 +2857,11 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
                 # 保存结构设计结果
                 output_data = stage_output.output if isinstance(stage_output.output, dict) else {}
                 plot_outline_content = output_data.get("plot_outline", "")
-                
-                save_query = text("""
-                    UPDATE project_settings
-                    SET plot_outline = :plot_outline,
-                        stage_two_status = 'completed',
-                        updated_at = :updated_at
-                    WHERE project_id = :project_id
-                """)
-                
-                db.execute(save_query, {
-                    "plot_outline": json.dumps(plot_outline_content, ensure_ascii=False),
-                    "updated_at": utc_now().isoformat(),
-                    "project_id": project_id
-                })
-                db.commit()
+                workflow_context_builder.update_project_settings_fields(
+                    project_id,
+                    plot_outline=json.dumps(plot_outline_content, ensure_ascii=False),
+                    stage_two_status="completed",
+                )
                 logger.info(f"   💾 已保存结构设计结果到 project_settings")
                 
                 # 🆕 同步情节大纲到向量库
@@ -2444,60 +2896,32 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
             elif stage_enum == StageType.CONTENT:
                 # 保存内容创作结果
                 output_data = stage_output.output if isinstance(stage_output.output, dict) else {}
-                save_query = text("""
-                    UPDATE project_settings
-                    SET chapter_draft = :chapter_draft,
-                        stage_three_status = 'completed',
-                        updated_at = :updated_at
-                    WHERE project_id = :project_id
-                """)
-                
-                db.execute(save_query, {
-                    "chapter_draft": json.dumps(output_data.get("content", output_data.get("chapters", "")), ensure_ascii=False),
-                    "updated_at": utc_now().isoformat(),
-                    "project_id": project_id
-                })
-                db.commit()
+                workflow_context_builder.update_project_settings_fields(
+                    project_id,
+                    chapter_draft=json.dumps(output_data.get("content", output_data.get("chapters", "")), ensure_ascii=False),
+                    stage_three_status="completed",
+                )
                 logger.info(f"   💾 已保存内容创作结果到 project_settings")
             
             elif stage_enum == StageType.REVIEW:
                 # 保存质量评审结果
                 output_data = stage_output.output if isinstance(stage_output.output, dict) else {}
-                save_query = text("""
-                    UPDATE project_settings
-                    SET review_report = :review_report,
-                        stage_four_status = 'completed',
-                        updated_at = :updated_at
-                    WHERE project_id = :project_id
-                """)
-                
-                db.execute(save_query, {
-                    "review_report": json.dumps(output_data.get("review", ""), ensure_ascii=False),
-                    "updated_at": utc_now().isoformat(),
-                    "project_id": project_id
-                })
-                db.commit()
+                workflow_context_builder.update_project_settings_fields(
+                    project_id,
+                    review_report=json.dumps(output_data.get("review", ""), ensure_ascii=False),
+                    stage_four_status="completed",
+                )
                 logger.info(f"   💾 已保存质量评审结果到 project_settings")
             
             elif stage_enum == StageType.ITERATION:
                 # 保存迭代优化结果
                 # 🔥 关键修复：直接使用已经解析好的 result_str，而不是重新解析
                 final_version_content = result_str  # result_str 已经是正确的 revised_content
-
-                save_query = text("""
-                    UPDATE project_settings
-                    SET final_version = :final_version,
-                        stage_five_status = 'completed',
-                        updated_at = :updated_at
-                    WHERE project_id = :project_id
-                """)
-
-                db.execute(save_query, {
-                    "final_version": json.dumps(final_version_content, ensure_ascii=False),
-                    "updated_at": utc_now().isoformat(),
-                    "project_id": project_id
-                })
-                db.commit()
+                workflow_context_builder.update_project_settings_fields(
+                    project_id,
+                    final_version=json.dumps(final_version_content, ensure_ascii=False),
+                    stage_five_status="completed",
+                )
                 logger.info(f"   💾 已保存迭代优化结果到 project_settings，内容字数: {len(final_version_content) if final_version_content else 0}")
         
         except Exception as save_error:
@@ -2638,9 +3062,12 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
 
     # 🔧 关键修复：创建新的独立 db session（避免使用请求级别的 session）
     db = SessionLocal()
+    workflow_context_builder = WorkflowContextBuilder(db)
     
     try:
         logger.info(f"🌊 开始流式执行后台任务: {task_id}")
+        project_profile = workflow_context_builder.get_project_profile(project_id)
+        real_coord = coordinator.get_real_coordinator(project_id)
 
         # 确保协调器已初始化
         if not coordinator._coordinator_initialized:
@@ -2648,28 +3075,37 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
             await coordinator.initialize_agents()
             logger.info("   ✅ 协调器初始化完成")
 
-        # 确保 project_settings 记录存在
-        check_query = text("""
-            SELECT id FROM project_settings WHERE project_id = :project_id
-        """)
-        existing = db.execute(check_query, {"project_id": project_id}).fetchone()
+        # 🔧 关键修复：设置当前项目上下文，避免项目间数据污染
+        coordinator.set_project_context(project_id)
+        logger.info(f"   ✅ 已设置项目上下文：project_id={project_id}")
+        
+        # 🔧 关键修复：立即从数据库加载当前项目的基本信息，注入到 project_context
+        try:
+            project_profile, real_coord = _sync_real_coordinator_project_context(
+                project_id,
+                workflow_context_builder,
+                project_profile,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ 项目基本信息注入失败：{e}")
 
-        if not existing:
+        if stage_enum == StageType.CONCEPT:
+            try:
+                _inject_recent_project_novelty_context(
+                    db,
+                    project_id=project_id,
+                    user_id=user_id,
+                    real_coord=real_coord,
+                    genre=project_profile.genre or None,
+                )
+                logger.info("   ✅ 已注入近期项目避重约束（流式）")
+            except Exception as e:
+                logger.warning(f"⚠️ 近期项目避重约束注入失败（流式）：{e}")
+        
+        # 确保 project_settings 记录存在
+        if workflow_context_builder.ensure_project_settings_record(project_id):
             logger.info(f"   📝 初始化 project_settings 记录")
-            init_query = text("""
-                INSERT INTO project_settings
-                (project_id, stage_one_status, stage_two_status, stage_three_status,
-                 stage_four_status, stage_five_status, created_at, updated_at)
-                VALUES
-                (:project_id, 'pending', 'pending', 'pending', 'pending', 'pending',
-                 :created_at, :updated_at)
-            """)
-            db.execute(init_query, {
-                "project_id": project_id,
-                "created_at": utc_now().isoformat(),
-                "updated_at": utc_now().isoformat()
-            })
-            db.commit()
+            logger.info("   ✅ project_settings 记录已创建")
 
         requirement, requirement_source = _resolve_workflow_requirement(db, project_id)
         logger.info(f"   ✅ 用户需求来源: {requirement_source}")
@@ -2688,19 +3124,25 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
             default_content_model = getattr(settings, "DEFAULT_CONTENT_MODEL", "qwen3-max")
         except Exception:
             default_content_model = "qwen3-max"
-        stage_model = None
+        stage_task_type = None
+        stage_model_override = None
         if stage_enum == StageType.CONTENT:
-            stage_model = default_content_model
+            stage_task_type = "chapter"
+            stage_model_override = default_content_model
         elif stage_enum == StageType.REVIEW:
-            stage_model = "deepseek-reasoner"
+            stage_task_type = "review"
         elif stage_enum == StageType.ITERATION:
-            stage_model = "deepseek-reasoner"
+            stage_task_type = "review"
+        stage_model = resolve_model_for_task(stage_task_type, stage_model_override) if stage_task_type else None
         if stage_model:
             await ws_manager.send_model_used(
                 project_id=project_id,
                 stage=stage_enum.value,
                 model=stage_model,
-                extra={"source": "execute_stage_with_streaming"}
+                extra={
+                    "source": "execute_stage_with_streaming",
+                    "task_type": stage_task_type,
+                }
             )
 
         # 🌊 发送流式输出开始通知
@@ -2783,35 +3225,19 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                 streaming_service = get_streaming_service()
 
                 # 获取项目上下文（用于构建提示词）
-                context_query = text("""
-                    SELECT concept, world_setting, characters, plot_outline, chapter_draft, review_report
-                    FROM project_settings WHERE project_id = :project_id
-                """)
-                context_result = db.execute(context_query, {"project_id": project_id}).fetchone()
+                stage_context = workflow_context_builder.load_stage_text_context(project_id)
 
                 # 构建流式调用的提示词
                 if stage_enum == StageType.CONTENT:
                     # 内容创作阶段
-                    plot_outline = ""
-                    world_setting = ""
-                    characters = ""
-                    if context_result:
-                        plot_outline = context_result[3] or ""
-                        world_setting = context_result[1] or ""
-                        characters = context_result[2] or ""
-                        # 尝试解析 JSON
-                        try:
-                            if plot_outline.startswith('"'):
-                                plot_outline = json.loads(plot_outline)
-                            if world_setting.startswith('"'):
-                                world_setting = json.loads(world_setting)
-                            if characters.startswith('"') or characters.startswith('['):
-                                characters = json.loads(characters)
-                                if isinstance(characters, list):
-                                    characters = "\n".join(str(c) for c in characters)
-                        except:
-                            pass
-
+                    plot_outline = stage_context.plot_outline
+                    world_setting = stage_context.world_setting
+                    characters = stage_context.characters
+                    world_context = workflow_context_builder.build_world_setting_context(
+                        project_id,
+                        world_setting,
+                    )
+                    world_setting = world_context.combined_world_setting
                     # 🆕 开头/结尾方式定义（从头创作共享模块）
                     opening_styles = {
                         "对话开头": ("对话开头", "直接进入冲突或紧张场景，用对话抽出矛盾", ""),
@@ -2901,14 +3327,92 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
 
 请开始创作第一章内容："""
 
+                    from app.services.agents.chapter_prompt_builder import ChapterPromptBuilder
+                    from app.services.agents.intelligent_truncator import smart_truncate_for_context
+
+                    content_plan_parts = []
+                    if stage_context.concept:
+                        content_plan_parts.append(f"【故事概念】\n{stage_context.concept}")
+                    if plot_outline:
+                        content_plan_parts.append(f"【第一章结构大纲】\n{plot_outline}")
+                    if requirement:
+                        content_plan_parts.append(f"【补充要求】\n{requirement}")
+                    content_plan = "\n\n".join(
+                        part for part in content_plan_parts if part.strip()
+                    ) or plot_outline
+
+                    first_chapter_rag = workflow_context_builder.build_typed_rag_context(
+                        project_id,
+                        content_plan or requirement or world_setting,
+                        fallback_max_content_length=180,
+                    )
+                    rag_character_context = first_chapter_rag.rag_character_context
+                    rag_world_context = first_chapter_rag.rag_world_context
+                    if not rag_character_context and characters:
+                        rag_character_context = smart_truncate_for_context(
+                            characters,
+                            max_tokens=220,
+                            content_type="prompt_context",
+                            preserve_ratio=0.9,
+                        )
+                    if not rag_world_context:
+                        rag_world_context = smart_truncate_for_context(
+                            world_setting,
+                            max_tokens=260,
+                            content_type="prompt_context",
+                            preserve_ratio=0.9,
+                        )
+
+                    real_coord = coordinator.get_real_coordinator(project_id)
+                    project_context = getattr(real_coord, "project_context", {}) if real_coord else {}
+                    project_genre = (
+                        project_context.get("genre")
+                        or project_context.get("project_genre")
+                        or ""
+                    )
+                    prompt_builder = ChapterPromptBuilder(genre=project_genre)
+                    system_prompt = prompt_builder.build_system_prompt()
+                    user_prompt = prompt_builder.build_user_prompt(
+                        next_chapter_number=1,
+                        chapter_plan=content_plan,
+                        previous_ending="",
+                        recent_chapter_assets_summary="",
+                        rag_character_context=rag_character_context,
+                        rag_world_context=rag_world_context,
+                        selected_opening=selected_opening,
+                        selected_ending=selected_ending,
+                    )
+
                 elif stage_enum == StageType.CONCEPT:
                     # 概念开发阶段 - 分三个子阶段流式输出
                     logger.info(f"   🌊 概念开发阶段开始流式输出...")
                     
                     # 1. 故事概念生成
                     await ws_manager.send_stream_start(project_id, stage_enum.value, "正在生成故事概念...")
+
+                    real_coord = coordinator.get_real_coordinator(project_id)
+                    project_context = getattr(real_coord, "project_context", {}) if real_coord else {}
+                    project_title = project_context.get("title") or project_context.get("project_title") or "未命名项目"
+                    project_genre = project_context.get("genre") or project_context.get("project_genre") or "通用题材"
+                    recent_project_signatures = project_context.get("recent_project_signatures") or ""
+                    recent_project_avoidance = project_context.get("recent_project_avoidance") or ""
                     
-                    concept_system_prompt = """你是一名擅长网文结构设计的\"创意总监\"，需要为一个新项目生成【故事概念】和初步【世界观设定】。
+                    concept_system_prompt = f"""你是一名擅长网文结构设计的\"创意总监\"，需要为一个新项目生成【故事概念】和初步【世界观设定】。
+
+【已知信息】
+- 项目题目：{project_title}
+- 题材类型：{project_genre}
+
+【强避重约束】
+{recent_project_avoidance or "（暂无近期项目避重清单，但仍需主动回避高频修仙模板。）"}
+- 除非用户明确要求，否则不要使用“林尘”作为主角名。
+- 除非用户明确要求，不要以“宗门杂役 / 杂役弟子 / 废灵根 / 无灵根少年濒死觉醒”作为标准开局。
+- 除非用户明确要求，不要使用“吞噬灵根 / 逆修系统 / 反向修炼系统 / 越被羞辱越变强”作为核心机制。
+- 除非用户明确要求，不要把世界命名为“九寰界 / 九寰界域”，也不要直接使用“九大仙宗 / 九大仙域 / 上中下三界”作为世界骨架。
+- 除非用户明确要求，不要直接复用“飞升骗局 / 高维收割 / 天外监察者 / 养蛊游戏”作为终局真相模板。
+- 如果你的方案与近期项目在“主角名、起点身份、核心能力、世界名称、势力骨架、终局真相”中重合达到 3 项及以上，视为不合格，必须先推翻再重想。
+
+{recent_project_signatures}
 
 【总体要求】
 1. 先完成\"故事概念\"六段标准输出，再给出一个与之匹配的高度概括版世界观（可简略）。
@@ -2919,6 +3423,7 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
 
 1. **一句话卖点（Logline）**：
 - 用一句极具吸引力的网文式概括，包含主角类型、核心能力/优势、主要对手/系统，以及最具爽感的长期目标或爆点。
+- 优先使用“主角行动 + 意外结果”句式，例如：“档案修补员篡改禁城时序，反成帝国唯一合法继承人”，而不是单纯罗列设定。
 
 2. **日志标题（短标题）**：
 - 用 4–10 个字给出一个便于读者记忆的项目名，偏网文风格。
@@ -2942,8 +3447,8 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                     
                     concept_user_prompt = f"""请为以下项目生成故事概念：
 
-【项目题目】：未命名项目
-【题材类型】：通用题材
+【项目题目】：{project_title}
+【题材类型】：{project_genre}
 【用户初始想法】：{requirement or "暂无"}"""
                     
                     # 执行故事概念生成的流式调用
@@ -2966,7 +3471,7 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                         system_prompt=concept_system_prompt,
                         on_chunk=on_concept_chunk,
                         temperature=0.9,
-                        model="qwen3-max",
+                        task_type="concept",
                     )
                     
                     # 2. 世界观设定生成
@@ -3003,26 +3508,18 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                         system_prompt=world_system_prompt,
                         on_chunk=on_world_chunk,
                         temperature=0.7,
-                        model="deepseek-reasoner",
+                        task_type="worldview",
                     )
                     
                     # 3. 人物设定生成
                     await ws_manager.send_stream_start(project_id, stage_enum.value, "正在生成人物设定...")
                     
-                    character_system_prompt = """你是一名\"人物设计师\"，需要基于故事概念和世界观设定，设计主要人物。
-
-【要求】
-1. 设计主角、配角和反派
-2. 保持与故事概念和世界观的一致性
-3. 输出详细的人物设定"""
-                    
-                    character_user_prompt = f"""请基于以下故事概念和世界观设定生成人物设定：
-
-【故事概念】
-{concept_result}
-
-【世界观设定】
-{world_result}"""
+                    character_system_prompt, character_user_prompt = _build_concept_stage_character_prompts(
+                        project_genre=project_genre,
+                        requirement=requirement or "",
+                        concept_text=concept_result,
+                        world_setting_text=world_result,
+                    )
                     
                     # 执行人物设定生成的流式调用
                     character_result = ""
@@ -3044,7 +3541,7 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                         system_prompt=character_system_prompt,
                         on_chunk=on_character_chunk,
                         temperature=0.7,
-                        model="deepseek-reasoner",
+                        task_type="character",
                     )
                     
                     # 组合结果
@@ -3063,25 +3560,9 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                     logger.info(f"   🌊 结构设计阶段开始流式输出...")
                     
                     # 获取概念开发阶段的成果
-                    concept_data = ""
-                    world_setting = ""
-                    characters = ""
-                    if context_result:
-                        concept_data = context_result[0] or ""
-                        world_setting = context_result[1] or ""
-                        characters = context_result[2] or ""
-                        # 尝试解析 JSON
-                        try:
-                            if concept_data.startswith('"'):
-                                concept_data = json.loads(concept_data)
-                            if world_setting.startswith('"'):
-                                world_setting = json.loads(world_setting)
-                            if characters.startswith('"') or characters.startswith('['):
-                                characters = json.loads(characters)
-                                if isinstance(characters, list):
-                                    characters = "\n".join(str(c) for c in characters)
-                        except:
-                            pass
+                    concept_data = stage_context.concept
+                    world_setting = stage_context.world_setting
+                    characters = stage_context.characters
                     
                     await ws_manager.send_stream_start(project_id, stage_enum.value, "正在生成情节大纲...")
                     
@@ -3125,6 +3606,11 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
 {requirement}"""
                     
                     # 执行结构设计的流式调用
+                    world_setting = _build_project_world_setting_context(
+                        project_id,
+                        world_setting,
+                        db,
+                    )
                     structure_result = ""
                     async def on_structure_chunk(chunk: str, idx: int):
                         nonlocal structure_result
@@ -3143,7 +3629,7 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                         system_prompt=structure_system_prompt,
                         on_chunk=on_structure_chunk,
                         temperature=0.7,
-                        model="deepseek-reasoner",
+                        task_type="structure_plot",
                     )
                     
                     result_str = structure_result
@@ -3156,14 +3642,7 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
 
                 elif stage_enum == StageType.REVIEW:
                     # 质量评审阶段
-                    chapter_draft = ""
-                    if context_result:
-                        chapter_draft = context_result[4] or ""
-                        try:
-                            if chapter_draft.startswith('"'):
-                                chapter_draft = json.loads(chapter_draft)
-                        except:
-                            pass
+                    chapter_draft = stage_context.chapter_draft
 
                     # 🆕 网文6维度评审体系（从头创作版本）
                     system_prompt = """你是一位专业的网络小说质量评审官。请使用【网文6维度评审体系】对第一章内容进行评审。
@@ -3247,18 +3726,8 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
 
                 elif stage_enum == StageType.ITERATION:
                     # 迭代优化阶段
-                    chapter_draft = ""
-                    review_report = ""
-                    if context_result:
-                        chapter_draft = context_result[4] or ""
-                        review_report = context_result[5] or ""
-                        try:
-                            if chapter_draft.startswith('"'):
-                                chapter_draft = json.loads(chapter_draft)
-                            if review_report.startswith('"'):
-                                review_report = json.loads(review_report)
-                        except:
-                            pass
+                    chapter_draft = stage_context.chapter_draft
+                    review_report = stage_context.review_report
 
                     # 🆕 增强版迭代优化提示词
                     system_prompt = """你是一位资深的网络小说编辑。请根据评审意见对第一章内容进行优化修改。
@@ -3301,6 +3770,8 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                 logger.info(f"   🌊 开始流式 LLM 调用...")
                 # 🆕 按阶段选择模型，避免使用默认deepseek-chat
                 stage_model = None
+                stage_task_type = None
+                stage_model_override = None
                 try:
                     from app.core.config import settings
                     default_content_model = getattr(settings, "DEFAULT_CONTENT_MODEL", "qwen3-max")
@@ -3308,20 +3779,27 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                     default_content_model = "qwen3-max"
                 
                 if stage_enum == StageType.CONTENT:
-                    stage_model = default_content_model  # 内容创作：优先 qwen3-max（或按配置）
+                    stage_task_type = "chapter"
+                    stage_model_override = default_content_model
                 elif stage_enum == StageType.REVIEW:
-                    stage_model = "deepseek-reasoner"   # 质量评审：R1
+                    stage_task_type = "review"
                 elif stage_enum == StageType.ITERATION:
-                    stage_model = "deepseek-reasoner"   # 迭代优化（通用入口）：R1（专用生成下一章流程已改为max改稿+R1打分）
+                    stage_task_type = "review"
+                stage_model = (
+                    resolve_model_for_task(stage_task_type, stage_model_override)
+                    if stage_task_type
+                    else None
+                )
                 
                 # 对于非CONCEPT阶段，执行流式调用
-                if stage_enum != StageType.CONCEPT:
+                if stage_enum in {StageType.CONTENT, StageType.REVIEW, StageType.ITERATION}:
                     result_str = await streaming_service.generate_chapter_streaming(
                         prompt=user_prompt,
                         system_prompt=system_prompt,
                         on_chunk=on_stream_chunk,
                         temperature=0.7,
-                        model=stage_model,
+                        model=stage_model_override,
+                        task_type=stage_task_type,
                     )
                     logger.info(f"   ✅ 流式 LLM 调用完成，生成 {len(result_str)} 字符")
 
@@ -3454,9 +3932,9 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
         logger.info(f"   ✅ 流式任务完成: {task_id}")
 
         # 保存阶段输出到 project_settings
-        print(f"\n{'='*50}")
-        print(f"🔍 准备保存到 project_settings: stage={stage_enum.value}, project_id={project_id}, result_len={len(result_str) if result_str else 0}")
-        print(f"{'='*50}\n")
+        logger.debug(f"\n{'='*50}")
+        logger.debug(f"🔍 准备保存到 project_settings: stage={stage_enum.value}, project_id={project_id}, result_len={len(result_str) if result_str else 0}")
+        logger.debug(f"{'='*50}\n")
         logger.info(f"   🔍 准备保存到 project_settings: stage={stage_enum.value}, project_id={project_id}, result_len={len(result_str) if result_str else 0}")
         try:
             # 🔧 添加 CONCEPT 阶段的保存（同时保存 concept, world_setting, characters）
@@ -3466,119 +3944,62 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                 concept_data = output_data.get("concept", result_str) if isinstance(output_data, dict) and output_data else result_str
                 worldview_data = output_data.get("worldview", "") or output_data.get("world_setting", "") if isinstance(output_data, dict) and output_data else ""
                 characters_data = output_data.get("characters", "") if isinstance(output_data, dict) and output_data else ""
+                characters_data = _normalize_concept_stage_characters_for_storage(
+                    project_id,
+                    characters_data,
+                    concept_text=str(concept_data or ""),
+                    world_setting_text=str(worldview_data or ""),
+                )
                 
                 logger.info(f"   🔍 CONCEPT 数据: concept={len(str(concept_data))}字, worldview={len(str(worldview_data))}字, characters={len(str(characters_data))}字")
-                
-                save_query = text("""
-                    UPDATE project_settings
-                    SET concept = :concept,
-                        world_setting = :world_setting,
-                        characters = :characters,
-                        stage_one_status = 'completed',
-                        updated_at = :updated_at
-                    WHERE project_id = :project_id
-                """)
-                result = db.execute(save_query, {
-                    "concept": json.dumps(concept_data, ensure_ascii=False) if concept_data else None,
-                    "world_setting": json.dumps(worldview_data, ensure_ascii=False) if worldview_data else None,
-                    "characters": json.dumps(characters_data, ensure_ascii=False) if characters_data else None,
-                    "updated_at": utc_now().isoformat(),
-                    "project_id": project_id
-                })
-                logger.info(f"   🔍 UPDATE 执行完成，影响行数: {result.rowcount}")
-                db.commit()
+
+                workflow_context_builder.update_project_settings_fields(
+                    project_id,
+                    concept=json.dumps(concept_data, ensure_ascii=False) if concept_data else None,
+                    world_setting=json.dumps(worldview_data, ensure_ascii=False) if worldview_data else None,
+                    characters=json.dumps(characters_data, ensure_ascii=False) if characters_data else None,
+                    stage_one_status="completed",
+                )
+                logger.info("   🔍 UPDATE 执行完成，字段已通过统一 helper 写入")
                 logger.info(f"   💾 已保存概念/世界观/人物到 project_settings（流式模式）")
                 
                 # 🆕 从故事概念中提取日志标题，自动更新项目title（流式模式）
                 if concept_data and isinstance(concept_data, str):
                     try:
-                        import re
-                        patterns = [
-                            r'\*\*日志标题[^：:*]*\*\*[：:]\s*《([^》]+)》',
-                            r'\d+\.\s*\*\*日志标题[^：:*]*\*\*[：:]\s*《([^》]+)》',
-                            r'日志标题[：:]\s*《([^》]+)》',
-                            r'\*\*日志标题[^：:*]*\*\*[：:]\s*([^\n。]+)',
-                        ]
-                        
-                        log_title = None
-                        for pattern in patterns:
-                            match = re.search(pattern, concept_data)
-                            if match:
-                                log_title = match.group(1).strip().strip('《》')
-                                break
-                        
-                        if log_title and len(log_title) >= 2:
-                            update_title_query = text("""
-                                UPDATE projects SET title = :title, updated_at = :updated_at
-                                WHERE id = :project_id
-                            """)
-                            db.execute(update_title_query, {
-                                "title": log_title,
-                                "updated_at": utc_now().isoformat(),
-                                "project_id": project_id
-                            })
-                            db.commit()
-                            logger.info(f"   📝 已从日志标题更新项目title: {log_title}（流式模式）")
+                        _sync_project_title_from_concept(
+                            db,
+                            project_id,
+                            concept_data,
+                            mode_label="流式模式",
+                        )
                     except Exception as e:
                         logger.warning(f"   ⚠️  提取日志标题失败（流式模式）: {e}")
             # 🔧 添加 STRUCTURE 阶段的保存
             elif stage_enum == StageType.STRUCTURE:
-                save_query = text("""
-                    UPDATE project_settings
-                    SET plot_outline = :plot_outline,
-                        stage_two_status = 'completed',
-                        updated_at = :updated_at
-                    WHERE project_id = :project_id
-                """)
-                db.execute(save_query, {
-                    "plot_outline": json.dumps(result_str, ensure_ascii=False),
-                    "updated_at": utc_now().isoformat(),
-                    "project_id": project_id
-                })
-                db.commit()
+                workflow_context_builder.update_project_settings_fields(
+                    project_id,
+                    plot_outline=json.dumps(result_str, ensure_ascii=False),
+                    stage_two_status="completed",
+                )
                 logger.info(f"   💾 已保存结构大纲到 project_settings（流式模式）")
             elif stage_enum == StageType.CONTENT:
-                save_query = text("""
-                    UPDATE project_settings
-                    SET chapter_draft = :chapter_draft,
-                        stage_three_status = 'completed',
-                        updated_at = :updated_at
-                    WHERE project_id = :project_id
-                """)
-                db.execute(save_query, {
-                    "chapter_draft": json.dumps(result_str, ensure_ascii=False),
-                    "updated_at": utc_now().isoformat(),
-                    "project_id": project_id
-                })
-                db.commit()
+                workflow_context_builder.update_project_settings_fields(
+                    project_id,
+                    chapter_draft=json.dumps(result_str, ensure_ascii=False),
+                    stage_three_status="completed",
+                )
             elif stage_enum == StageType.REVIEW:
-                save_query = text("""
-                    UPDATE project_settings
-                    SET review_report = :review_report,
-                        stage_four_status = 'completed',
-                        updated_at = :updated_at
-                    WHERE project_id = :project_id
-                """)
-                db.execute(save_query, {
-                    "review_report": json.dumps(result_str, ensure_ascii=False),
-                    "updated_at": utc_now().isoformat(),
-                    "project_id": project_id
-                })
-                db.commit()
+                workflow_context_builder.update_project_settings_fields(
+                    project_id,
+                    review_report=json.dumps(result_str, ensure_ascii=False),
+                    stage_four_status="completed",
+                )
             elif stage_enum == StageType.ITERATION:
-                save_query = text("""
-                    UPDATE project_settings
-                    SET final_version = :final_version,
-                        stage_five_status = 'completed',
-                        updated_at = :updated_at
-                    WHERE project_id = :project_id
-                """)
-                db.execute(save_query, {
-                    "final_version": json.dumps(result_str, ensure_ascii=False),
-                    "updated_at": utc_now().isoformat(),
-                    "project_id": project_id
-                })
-                db.commit()
+                workflow_context_builder.update_project_settings_fields(
+                    project_id,
+                    final_version=json.dumps(result_str, ensure_ascii=False),
+                    stage_five_status="completed",
+                )
         except Exception as save_error:
             logger.error(f"   ⚠️  保存到 project_settings 失败: {save_error}")
             # 🆕 添加详细堆栈跟踪
@@ -3747,7 +4168,7 @@ async def regenerate_stage(
             "stage": stage,
             "output": stage_output.output,
             "agents": [
-                coordinator.agents[agent_id]
+                coordinator.get_agents(project_id)[agent_id]
                 for agent_id in stage_output.agents_involved
             ],
         }
@@ -3785,7 +4206,7 @@ async def get_workflow_status(
                 detail="Project not found or access denied"
             )
 
-        status_data = await coordinator.get_workflow_status()
+        status_data = await coordinator.get_workflow_status(project_id)
         return {
             "status": "success",
             "project_id": project_id,
@@ -3828,44 +4249,23 @@ async def get_stage_content(
                 detail="Project not found"
             )
 
-        # 2. 从 project_settings 表读取内容
-        from sqlalchemy import text
-
-        # 映射阶段名称到数据库列名
-        stage_column_map = {
-            'concept': 'concept',
-            'world_builder': 'world_setting',
-            'character_designer': 'characters',
-            'structure': 'plot_outline',
-            'content': 'chapter_draft',
-            'review': 'review_report',
-            'iteration': 'final_version',
-        }
-
-        column_name = stage_column_map.get(stage)
-        if not column_name:
+        # 2. 从统一工作流上下文读取内容
+        workflow_context_builder = WorkflowContextBuilder(db)
+        if not workflow_context_builder.get_stage_field_name(stage):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid stage: {stage}"
             )
 
-        # 查询内容
-        query = text(f"""
-            SELECT {column_name}
-            FROM project_settings
-            WHERE project_id = :project_id
-        """)
-
-        result = db.execute(query, {"project_id": project_id}).fetchone()
-
-        if not result:
-            # 如果没有记录，返回空内容
-            return {
-                "content": "",
-                "stage": stage
-            }
-
-        content = result[0] or ""
+        content = workflow_context_builder.read_stage_content(
+            project_id,
+            stage,
+            pretty_json=True,
+        )
+        return {
+            "content": content,
+            "stage": stage
+        }
 
         # 🔧 修复JSON解码错误：如果内容是JSON字符串，先解析
         import json
@@ -4084,40 +4484,15 @@ async def save_stage_content(
             else:
                 logger.info(f"   ✅ 未发现重复章节，将创建新章节")
 
-        # 3. 保存内容到project_settings表
-        from sqlalchemy import text
-
-        # 映射阶段名称到数据库列名
-        stage_column_map = {
-            'concept': 'concept',
-            'world_builder': 'world_setting',
-            'character_designer': 'characters',
-            'structure': 'plot_outline',
-            'content': 'chapter_draft',
-            'review': 'review_report',
-            'iteration': 'final_version',
-        }
-
-        column_name = stage_column_map.get(stage)
-        if not column_name:
+        # 3. 保存内容到 project_settings 表
+        workflow_context_builder = WorkflowContextBuilder(db)
+        if not workflow_context_builder.get_stage_field_name(stage):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid stage: {stage}"
             )
 
-        # 更新project_settings表
-        update_query = text(f"""
-            UPDATE project_settings
-            SET {column_name} = :content, updated_at = :updated_at
-            WHERE project_id = :project_id
-        """)
-
-        db.execute(update_query, {
-            "content": request.content,
-            "updated_at": utc_now().isoformat(),
-            "project_id": project_id
-        })
-        db.commit()
+        workflow_context_builder.write_stage_content(project_id, stage, request.content)
 
         # 4. 如果continue_workflow为true，创建任务记录并启动后台任务
         task_id = None
@@ -4160,14 +4535,14 @@ async def save_stage_content(
                     # 启动后台任务
                     if streaming_enabled:
                         asyncio.create_task(
-                            execute_stage_with_streaming(
+                            _run_execute_stage_with_streaming_serialized(
                                 task_id, project_id, next_stage_enum, current_user.id, db
                             )
                         )
                         logger.info(f"   🌊 流式后台任务已启动: {next_stage_name}")
                     else:
                         asyncio.create_task(
-                            execute_stage_background(
+                            _run_execute_stage_background_serialized(
                                 task_id, project_id, next_stage_enum, current_user.id, db, False, None, None
                             )
                         )
@@ -4312,15 +4687,10 @@ async def get_running_tasks(
 
         # 🆕 首先检查 project_settings 中的 stage 状态
         # 如果所有 stage 都已完成，则将 running 任务标记为 completed（状态不一致修复）
-        stage_query = text("""
-            SELECT stage_one_status, stage_two_status, stage_three_status,
-                   stage_four_status, stage_five_status
-            FROM project_settings
-            WHERE project_id = :project_id
-        """)
         stage_result = None
         try:
-            stage_result = db.execute(stage_query, {"project_id": project_id}).fetchone()
+            stage_statuses = WorkflowContextBuilder(db).load_stage_status_snapshot(project_id)
+            stage_result = tuple(stage_statuses.values())
         except Exception as exc:
             err_text = str(exc)
             if "project_settings" in err_text and "does not exist" in err_text:
@@ -4481,73 +4851,14 @@ async def get_all_stages_content(
                 detail="项目不存在"
             )
 
-        # 一次查询获取所有阶段内容
-        query = text("""
-            SELECT 
-                concept, 
-                world_setting, 
-                characters, 
-                plot_outline, 
-                chapter_draft, 
-                review_report, 
-                final_version 
-            FROM project_settings 
-            WHERE project_id = :project_id
-        """)
-        result = db.execute(query, {"project_id": project_id}).fetchone()
-
-        if result:
-            import json
-
-            # 辅助函数：解析 JSON 存储的内容
-            def parse_json_content(content):
-                if not content:
-                    return ""
-                
-                # ✅ 修复：优先检查是否为 JSON 对象/数组，避免误解析 Markdown 文本
-                # 大纲扩展后的内容以 "# " 或 "---" 开头，不应被解析为 JSON
-                try:
-                    # 只解析明确的 JSON 对象或数组格式
-                    if content.startswith('{') or content.startswith('['):
-                        parsed = json.loads(content)
-                        if isinstance(parsed, str):
-                            return parsed
-                        elif isinstance(parsed, (dict, list)):
-                            return json.dumps(parsed, ensure_ascii=False, indent=2)
-                        else:
-                            return str(parsed)
-                    # ⚠️ 移除对 "..." 格式的 JSON 解析，避免将 Markdown 文本误识别
-                    # 如果内容以 " 开头但不是有效 JSON 字符串，直接返回原内容
-                except (json.JSONDecodeError, AttributeError):
-                    pass
-                return content
-
-            response = {
-                "project_id": project_id,
-                "stages": {
-                    "concept": parse_json_content(result[0]),
-                    "world_setting": parse_json_content(result[1]),
-                    "characters": parse_json_content(result[2]),
-                    "plot_outline": parse_json_content(result[3]),
-                    "chapter_draft": parse_json_content(result[4]),
-                    "review_report": parse_json_content(result[5]),
-                    "final_version": parse_json_content(result[6])
-                }
-            }
-        else:
-            # 如果没有记录，返回空内容
-            response = {
-                "project_id": project_id,
-                "stages": {
-                    "concept": "",
-                    "world_setting": "",
-                    "characters": "",
-                    "plot_outline": "",
-                    "chapter_draft": "",
-                    "review_report": "",
-                    "final_version": ""
-                }
-            }
+        workflow_context_builder = WorkflowContextBuilder(db)
+        response = {
+            "project_id": project_id,
+            "stages": workflow_context_builder.load_stage_contents_snapshot(
+                project_id,
+                pretty_json=True,
+            ),
+        }
 
         return response
 
@@ -4593,38 +4904,11 @@ async def get_stage_status(
                 detail="项目不存在"
             )
 
-        # 获取所有阶段状态
-        query = text("""
-            SELECT 
-                stage_one_status, 
-                stage_two_status, 
-                stage_three_status, 
-                stage_four_status, 
-                stage_five_status 
-            FROM project_settings 
-            WHERE project_id = :project_id
-        """)
-        result = db.execute(query, {"project_id": project_id}).fetchone()
-
-        if result:
-            response = {
-                "project_id": project_id,
-                "stage_one_status": result[0] or "pending",
-                "stage_two_status": result[1] or "pending",
-                "stage_three_status": result[2] or "pending",
-                "stage_four_status": result[3] or "pending",
-                "stage_five_status": result[4] or "pending"
-            }
-        else:
-            # 如果没有记录，返回默认状态
-            response = {
-                "project_id": project_id,
-                "stage_one_status": "pending",
-                "stage_two_status": "pending",
-                "stage_three_status": "pending",
-                "stage_four_status": "pending",
-                "stage_five_status": "pending"
-            }
+        workflow_context_builder = WorkflowContextBuilder(db)
+        response = {
+            "project_id": project_id,
+            **workflow_context_builder.load_stage_status_snapshot(project_id),
+        }
 
         return response
 
@@ -4670,6 +4954,7 @@ async def generate_next_chapter(
 
     try:
         logger.info(f"📍 开始生成下一章（异步模式），项目ID: {project_id}")
+        workflow_context_builder = WorkflowContextBuilder(db)
         
         # 1. 验证项目存在且属于用户
         project = db.query(Project).filter(
@@ -4685,20 +4970,25 @@ async def generate_next_chapter(
         logger.info(f"   ✓ 项目验证通过: {project.title}")
         
         # 2. 获取项目设定
-        query = text("""
-            SELECT concept, world_setting, characters, plot_outline 
-            FROM project_settings 
-            WHERE project_id = :project_id
-        """)
-        settings = db.execute(query, {"project_id": project_id}).fetchone()
+        settings_context = workflow_context_builder.load_stage_text_context(project_id)
         
-        if not settings:
+        if not any(
+            [
+                settings_context.concept,
+                settings_context.world_setting,
+                settings_context.characters,
+                settings_context.plot_outline,
+            ]
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="项目设定不存在，请先完成工作流程初始化"
             )
         
-        concept, world_setting, characters, plot_outline = settings
+        concept = settings_context.concept
+        world_setting = settings_context.world_setting
+        characters = settings_context.characters
+        plot_outline = settings_context.plot_outline
         logger.info(f"   ✓ 项目设定已加载")
         
         # 3. 获取已生成章节
@@ -4846,6 +5136,17 @@ async def generate_next_chapter(
         db.commit()
         logger.info(f"   ✅ 任务记录已创建")
 
+        world_context = workflow_context_builder.build_world_setting_context(
+            project_id,
+            world_setting,
+        )
+        merged_world_setting = world_context.combined_world_setting
+        if world_context.settings_summary:
+            logger.info(
+                "   ✓ 已统一装配工作流世界观上下文（设定摘要%s）",
+                "去重复用" if world_context.summary_already_embedded else "实时注入",
+            )
+
         # 7. 启动后台任务
         asyncio.create_task(
             execute_generate_next_chapter_task(
@@ -4854,7 +5155,7 @@ async def generate_next_chapter(
                 user_id=current_user.id,
                 next_chapter_number=next_chapter_number,
                 concept=concept or '',
-                world_setting=world_setting or '',
+                world_setting=merged_world_setting,
                 characters=characters or '',
                 plot_outline=plot_outline or '',
                 previous_ending=previous_ending,
@@ -4941,6 +5242,8 @@ async def execute_generate_next_chapter_task(
     }
 
     try:
+        workflow_context_builder = WorkflowContextBuilder(db)
+        project_profile = workflow_context_builder.get_project_profile(project_id)
         # ==================== 步骤1：章节规划（真流式） ====================
         # 🆕 推送步骤1的 Agent 开始工作状态
         step1_agents = STEP_AGENTS['structure']
@@ -4970,7 +5273,12 @@ async def execute_generate_next_chapter_task(
             await coordinator.initialize_agents()
             logger.info("   ✅ 协调器初始化完成")
 
-        real_coordinator = coordinator._real_coordinator
+        coordinator.set_project_context(project_id)
+        project_profile, real_coordinator = _sync_real_coordinator_project_context(
+            project_id,
+            workflow_context_builder,
+            project_profile,
+        )
         if not real_coordinator:
             raise Exception("Agent协调器未初始化")
 
@@ -5011,15 +5319,8 @@ async def execute_generate_next_chapter_task(
         climax_instruction = get_climax_instruction(next_chapter_number)
         
         # 🆕 获取项目题材
-        plan_project_genre = ""
-        try:
-            plan_genre_query = text("SELECT genre FROM projects WHERE id = :project_id")
-            plan_genre_result = db.execute(plan_genre_query, {"project_id": project_id}).fetchone()
-            if plan_genre_result:
-                plan_project_genre = plan_genre_result[0] or ""
-            logger.info(f"   🎯 项目题材: {plan_project_genre or '通用'}")
-        except Exception as e:
-            logger.warning(f"   ⚠️ 获取项目题材失败: {e}")
+        plan_project_genre = project_profile.genre or ""
+        logger.info(f"   🎯 项目题材: {plan_project_genre or '通用'}")
         
         # 🆕 获取题材专属章节规划指导
         plan_genre_module = GENRE_PROMPT_MODULES.get(plan_project_genre, DEFAULT_GENRE_MODULE)
@@ -5051,6 +5352,7 @@ async def execute_generate_next_chapter_task(
         logger.info(f"      - 结构化记忆: {len(plan_memory_text):,}字符 / {len(plan_structured_memory)}类")
         logger.info(f"      - Token使用: {plan_stats['total_tokens']:,} / {plan_stats['target_tokens']:,}")
         logger.info(f"      - 聚焦范围: 第{max(1, next_chapter_number - 5)}-{next_chapter_number + 5}章")
+        resolved_plan_model = resolve_model_for_task(None, selected_plan_model) or selected_plan_model
         
         # 构建包含各部分的上下文字典（用于后续提示词构建）
         plan_optimized_context = {
@@ -5068,8 +5370,12 @@ async def execute_generate_next_chapter_task(
         await ws_manager.send_model_used(
             project_id=project_id,
             stage='structure',
-            model=selected_plan_model,
-            extra={"step": "chapter_plan", "chapter_number": next_chapter_number}
+            model=resolved_plan_model,
+            extra={
+                "step": "chapter_plan",
+                "chapter_number": next_chapter_number,
+                "requested_model": selected_plan_model,
+            }
         )
 
         # 🆕 构建章节规划提示词（使用模块化系统）
@@ -5113,7 +5419,7 @@ async def execute_generate_next_chapter_task(
 - 爽点具体内容描述
 - 铺垫方式（如何让爽点更有冲击力）
 
-## 4. 人物发展
+## 4. 人物推进
 - 主角本章的成长或变化
 - 重要配角的表现
 - 人物关系推进
@@ -5342,57 +5648,49 @@ Genre-specific refinement (specific implementation of general planning requireme
         
         # 🆕 获取优化器选择的模型（不再需要 optimize_for_chapter_generation，因为章节规划已消化上下文）
         selected_content_model = context_optimizer.selected_model
-        logger.info(f"   🤖 内容创作使用模型: {selected_content_model}")
+        resolved_content_model = resolve_model_for_task(None, selected_content_model) or selected_content_model
+        logger.info(f"   🤖 内容创作使用模型: {resolved_content_model} (requested={selected_content_model})")
         # 🆕 广播步骤2模型
         await ws_manager.send_model_used(
             project_id=project_id,
             stage='content',
-            model=selected_content_model,
-            extra={"step": "chapter_content", "chapter_number": next_chapter_number}
+            model=resolved_content_model,
+            extra={
+                "step": "chapter_content",
+                "chapter_number": next_chapter_number,
+                "requested_model": selected_content_model,
+            }
         )
 
         # 🆕 Typed-RAG（按类型检索并注入提示）
-        try:
-            from app.core.config import settings
-            from app.services.vector_sync import get_vector_kb
-            kb = get_vector_kb()
-            rag_character_context = ""
-            rag_world_context = ""
-            if kb and getattr(settings, "ENABLE_TYPED_RAG", True):
-                # 使用章节规划作为查询上下文
-                char_docs = kb.search(query=chapter_plan, k=getattr(settings, "TYPED_RAG_K_CHAR", 4), filter_type="character", project_id=project_id)
-                world_docs = kb.search(query=chapter_plan, k=getattr(settings, "TYPED_RAG_K_WORLD", 5), filter_type="world_setting", project_id=project_id)
-                if char_docs:
-                    # 🆕 使用智能截断替代手动截断
-                    from app.services.agents.intelligent_truncator import smart_truncate_for_context
-                    rag_character_context = "\n".join([
-                        f"- {d.metadata.get('name','未知角色')}: {smart_truncate_for_context(d.page_content, max_tokens=200, content_type='rag_doc', preserve_ratio=0.9)}"
-                        for d in char_docs
-                    ])
-                if world_docs:
-                    from app.services.agents.intelligent_truncator import smart_truncate_for_context
-                    rag_world_context = "\n".join([
-                        f"- {d.metadata.get('title','设定')}: {smart_truncate_for_context(d.page_content, max_tokens=250, content_type='rag_doc', preserve_ratio=0.9)}"
-                        for d in world_docs
-                    ])
-                logger.info(f"   📚 RAG注入：人物{len(char_docs)}条，设定{len(world_docs)}条")
-        except Exception as rag_e:
-            logger.warning(f"   ⚠️ Typed-RAG 注入失败: {rag_e}")
-            rag_character_context = ""
-            rag_world_context = ""
+        rag_character_context = ""
+        rag_world_context = ""
+        rag_bundle = workflow_context_builder.build_typed_rag_context(
+            project_id,
+            chapter_plan,
+            fallback_max_content_length=200,
+        )
+        rag_character_context = rag_bundle.rag_character_context
+        rag_world_context = rag_bundle.rag_world_context
+        if rag_bundle.relevant_categories:
+            logger.info(f"   📆 章节规划涉及体系: {rag_bundle.relevant_categories}")
+        if rag_bundle.used_vector_search:
+            logger.info(
+                "   📚 RAG注入：人物%s条，设定%s条",
+                rag_bundle.character_hits,
+                rag_bundle.world_hits,
+            )
+        if rag_bundle.used_summary_fallback:
+            logger.info(
+                "   📚 RAG fallback: 从设定中心直接查询%s个相关体系",
+                len(rag_bundle.relevant_categories),
+            )
 
         # 🆕 构建内容创作提示词（精简版 - 章节规划已消化大部分上下文）
         from app.services.agents.chapter_prompt_builder import ChapterPromptBuilder
         
         # 获取项目题材
-        project_genre = ""
-        try:
-            genre_query = text("SELECT genre FROM projects WHERE id = :project_id")
-            genre_result = db.execute(genre_query, {"project_id": project_id}).fetchone()
-            if genre_result:
-                project_genre = genre_result[0] or ""
-        except Exception as e:
-            logger.warning(f"   ⚠️ 获取项目题材失败: {e}")
+        project_genre = project_profile.genre or ""
         
         builder = ChapterPromptBuilder(genre=project_genre)
         content_system_prompt = builder.build_system_prompt()
@@ -5480,17 +5778,10 @@ Genre-specific refinement (specific implementation of general planning requireme
 
         # 保存章节初稿到 project_settings
         logger.info(f"   💾 开始保存章节初稿到数据库...")
-        update_query = text("""
-            UPDATE project_settings
-            SET chapter_draft = :chapter_draft, updated_at = :updated_at
-            WHERE project_id = :project_id
-        """)
-        db.execute(update_query, {
-            "chapter_draft": chapter_draft,
-            "updated_at": utc_now().isoformat(),
-            "project_id": project_id
-        })
-        db.commit()
+        workflow_context_builder.update_project_settings_fields(
+            project_id,
+            chapter_draft=chapter_draft,
+        )
         logger.info(f"   ✓ 章节初稿已同步到数据库")
 
         logger.info(f"   📡 发送步骤2完成进度通知...")
@@ -5550,15 +5841,8 @@ Genre-specific refinement (specific implementation of general planning requireme
             )
 
          # 🆕 获取项目题材（用于题材自适应评审）
-        review_project_genre = ""
-        try:
-            review_genre_query = text("SELECT genre FROM projects WHERE id = :project_id")
-            review_genre_result = db.execute(review_genre_query, {"project_id": project_id}).fetchone()
-            if review_genre_result:
-                review_project_genre = review_genre_result[0] or ""
-            logger.info(f"   🎯 评审使用题材: {review_project_genre or '通用'}")
-        except Exception as e:
-            logger.warning(f"   ⚠️ 获取项目题材失败: {e}")
+        review_project_genre = project_profile.genre or ""
+        logger.info(f"   🎯 评审使用题材: {review_project_genre or '通用'}")
         
         # 🆕 使用题材自适应评审提示词
         from app.services.prompts.review_prompts import GenreAdaptiveReviewPrompts
@@ -5576,16 +5860,16 @@ Genre-specific refinement (specific implementation of general planning requireme
             recent_chapter_assets_summary=recent_chapter_assets_summary,
         )
 
-        # 🆕 使用真流式 LLM 调用（R1 逻辑检查）
+        # 🆕 使用真流式 LLM 调用（按 review 任务路由）
         try:
             review_report = await streaming_service.generate_chapter_streaming(
                 prompt=review_user_prompt,
                 system_prompt=review_system_prompt,
                 on_chunk=on_review_chunk,
                 temperature=0.7,
-                model="deepseek-reasoner",  # 🔥 步骤3：质量评审使用R1做逻辑检查
+                task_type="review",
             )
-            logger.info(f"   ✓ 评审完成（真流式 + R1模型），报告长度: {len(review_report)}")
+            logger.info(f"   ✓ 评审完成（真流式 + review任务路由），报告长度: {len(review_report)}")
         except Exception as e:
             logger.error(f"   ⚠️ 真流式调用失败，回退到同步调用: {e}")
             # 回退到同步调用
@@ -5623,17 +5907,10 @@ Genre-specific refinement (specific implementation of general planning requireme
         logger.info(f"   📡 已发送 {len(step3_agents)} 个 Agent 完成状态（步骤3）")
 
         # 保存评审报告到 project_settings
-        update_query = text("""
-            UPDATE project_settings
-            SET review_report = :review_report, updated_at = :updated_at
-            WHERE project_id = :project_id
-        """)
-        db.execute(update_query, {
-            "review_report": review_report,
-            "updated_at": utc_now().isoformat(),
-            "project_id": project_id
-        })
-        db.commit()
+        workflow_context_builder.update_project_settings_fields(
+            project_id,
+            review_report=review_report,
+        )
         logger.info(f"   ✓ 评审报告已同步到数据库")
 
         await ws_manager.send_task_progress(
@@ -5646,35 +5923,63 @@ Genre-specific refinement (specific implementation of general planning requireme
         # ==================== 步骤4：迭代优化（真流式） ====================
         # 🆕 推送步骤4的 Agent 开始工作状态
         step4_agents = STEP_AGENTS['iteration']
+        try:
+            from app.core.config import settings
+            pass_score_threshold = float(getattr(settings, 'ITERATION_PASS_SCORE', 9.0))
+            max_rounds = int(getattr(settings, 'ITERATION_MAX_ROUNDS', 2))
+        except Exception:
+            pass_score_threshold = 8.5
+            max_rounds = 2
+
+        initial_review_score = _extract_iteration_review_score(review_report)
+        skip_iteration_optimization = initial_review_score >= pass_score_threshold
+        logger.info(
+            f"   🎯 迭代优化目标分值: {pass_score_threshold} | 最大轮次: {max_rounds} | "
+            f"初始评审分值: {initial_review_score:.1f}/10"
+        )
         for agent in step4_agents:
             await ws_manager.send_agent_status(
                 project_id=project_id,
                 stage=agent['stage'],
                 agent_id=agent['id'],
                 agent_name=agent['name'],
-                status='working',
-                progress=0,
-                message=f'{agent["name"]}正在优化章节内容...'
+                status='completed' if skip_iteration_optimization else 'working',
+                progress=100 if skip_iteration_optimization else 0,
+                message=(
+                    f'{agent["name"]}检测到初始评审已达标，已跳过迭代优化'
+                    if skip_iteration_optimization
+                    else f'{agent["name"]}正在迭代章节内容...'
+                )
             )
-        logger.info(f"   📡 已发送 {len(step4_agents)} 个 Agent 开始状态（步骤4）")
+        logger.info(
+            f"   📡 已发送 {len(step4_agents)} 个 Agent "
+            f"{'完成状态（步骤4-跳过优化）' if skip_iteration_optimization else '开始状态（步骤4）'}"
+        )
 
         await ws_manager.send_task_progress(
             project_id=project_id,
             task_id=task_id,
             progress=80,
-            message=f"步骤 4/4: 正在优化第{next_chapter_number}章内容..."
+            message=(
+                f"步骤 4/4: 初始评审已达标（{initial_review_score:.1f}/10），跳过迭代优化"
+                if skip_iteration_optimization
+                else "步骤 4/4: 正在迭代中，请等待..."
+            )
         )
-        logger.info(f"   → 步骤4: 迭代优化（真流式）...")
+        logger.info(
+            f"   → 步骤4: {'初始评审已达标，跳过迭代优化' if skip_iteration_optimization else '迭代优化（真流式）...'}"
+        )
 
         # 🆕 发送流式开始通知
-        await ws_manager.send_stream_start(project_id, 'iteration', f"第{next_chapter_number}章迭代优化开始...")
-        # 🔔 推送阶段开始状态（生成下一章 - 步骤4）
-        await ws_manager.send_stage_update(
-            project_id=project_id,
-            stage='iteration',
-            status='active',
-            progress=75
-        )
+        if not skip_iteration_optimization:
+            await ws_manager.send_stream_start(project_id, 'iteration', f"第{next_chapter_number}章迭代优化开始...")
+            # 🔔 推送阶段开始状态（生成下一章 - 步骤4）
+            await ws_manager.send_stage_update(
+                project_id=project_id,
+                stage='iteration',
+                status='active',
+                progress=75
+            )
 
         # 🆕 创建流式输出回调
         iteration_chunk_index = [0]
@@ -5754,64 +6059,57 @@ Genre-specific refinement (specific implementation of general planning requireme
             
             # 选择初始模型
             selected_revision_model = select_model_by_length(chapter_draft, initial_reviews)
-            logger.info(f"   🤖 迭代优化改稿模型: {selected_revision_model}")
+            resolved_revision_model = resolve_model_for_task(None, selected_revision_model) or selected_revision_model
+            logger.info(f"   🤖 迭代优化改稿模型: {resolved_revision_model} (requested={selected_revision_model})")
             logger.info(f"      - 章节长度: {len(chapter_draft)} 字 ≈ {estimate_tokens(chapter_draft)} tokens")
             logger.info(f"      - 初始评审: {len(initial_reviews)} 字 ≈ {estimate_tokens(initial_reviews)} tokens")
             logger.info(f"      - 预估总计: ≈ {estimate_tokens(chapter_draft) + estimate_tokens(initial_reviews) + 500} tokens")
             logger.info(f"      - qwen3-max 安全输入预算: ≈ {_get_safe_input_token_budget('qwen3-max')} tokens")
             
             # 🆕 广播步骤4改稿模型（首轮改稿前广播一次）
-            await ws_manager.send_model_used(
-                project_id=project_id,
-                stage='iteration',
-                model=selected_revision_model,
-                extra={"step": "iteration_revision", "chapter_number": next_chapter_number}
-            )
+            if not skip_iteration_optimization:
+                await ws_manager.send_model_used(
+                    project_id=project_id,
+                    stage='iteration',
+                    model=resolved_revision_model,
+                    extra={
+                        "step": "iteration_revision",
+                        "chapter_number": next_chapter_number,
+                        "requested_model": selected_revision_model,
+                    }
+                )
 
-            # 配置：通过分值与最大轮次
-            try:
-                from app.core.config import settings
-                pass_score_threshold = getattr(settings, 'ITERATION_PASS_SCORE', 9.0)
-                max_rounds = getattr(settings, 'ITERATION_MAX_ROUNDS', 2)
-            except Exception:
-                pass_score_threshold = 8.5
-                max_rounds = 2
-            logger.info(f"   🎯 迭代优化目标分值: {pass_score_threshold} | 最大轮次: {max_rounds}")
-
-            # 辅助：解析评审报告中的综合评分
-            import re
-            def extract_score(text: str) -> float:
-                if not text:
-                    return 0.0
-                m = re.search(r"综合评分\s*[:：]\s*([0-9]+(?:\.[0-9]+)?)\s*/\s*10", text)
-                try:
-                    return float(m.group(1)) if m else 0.0
-                except Exception:
-                    return 0.0
+            effective_rounds = 0 if skip_iteration_optimization else max_rounds
 
             # 初始版本与评审
             current_version = chapter_draft
             current_review = review_report
             final_version = current_version
-            reached_pass = False
+            reached_pass = skip_iteration_optimization
             best_version = current_version
             # 初始化最佳分数为已有评审的分数（若无法提取则为0）
-            best_score = extract_score(current_review)
+            best_score = _extract_iteration_review_score(current_review)
             # 🆕 累积所有轮次的评审意见，作为改稿参考
             all_reviews = [f"【第0轮评审（初稿）】\n{current_review}"]
+
+            if skip_iteration_optimization:
+                logger.info(
+                    f"   🎉 初始评审已达标（{initial_review_score:.1f}/10 >= {pass_score_threshold:.1f}/10），"
+                    f"跳过后续迭代优化"
+                )
 
             # 不透出中间稿的流式回调（前端只看最终稿）
             async def noop_chunk(chunk: str, idx: int):
                 return
 
-            for round_idx in range(1, max_rounds + 1):
+            for round_idx in range(1, effective_rounds + 1):
                 logger.info(f"   🔄 迭代优化第{round_idx}/{max_rounds}轮：开始改稿")
                 # 🆕 推送迭代轮次信息到前端
                 await ws_manager.send_task_progress(
                     project_id=project_id,
                     task_id=task_id,
                     progress=min(95, 70 + round_idx * 5),
-                    message=f"正在迭代第{round_idx}/{max_rounds}轮..."
+                    message=f"步骤 4/4: 正在迭代中（第{round_idx}/{effective_rounds}轮），请等待..."
                 )
                 # 第N轮：根据所有历史评审意见进行改稿
                 # 🆕 将所有评审意见汇总，按轮次展示
@@ -5821,7 +6119,13 @@ Genre-specific refinement (specific implementation of general planning requireme
                 current_model = select_model_by_length(current_version, all_reviews_text)
                 if current_model != selected_revision_model:
                     selected_revision_model = current_model
-                    logger.info(f"   🔄 第{round_idx}轮模型切换: {selected_revision_model}")
+                    resolved_revision_model = (
+                        resolve_model_for_task(None, selected_revision_model) or selected_revision_model
+                    )
+                    logger.info(
+                        f"   🔄 第{round_idx}轮模型切换: {resolved_revision_model} "
+                        f"(requested={selected_revision_model})"
+                    )
                     logger.info(f"      - 当前章节: {len(current_version)} 字 ≈ {estimate_tokens(current_version)} tokens")
                     logger.info(f"      - 累积评审: {len(all_reviews_text)} 字 ≈ {estimate_tokens(all_reviews_text)} tokens")
                     logger.info(f"      - 预估总计: ≈ {estimate_tokens(current_version) + estimate_tokens(all_reviews_text) + 500} tokens")
@@ -5829,8 +6133,12 @@ Genre-specific refinement (specific implementation of general planning requireme
                     await ws_manager.send_model_used(
                         project_id=project_id,
                         stage='iteration',
-                        model=selected_revision_model,
-                        extra={"step": f"iteration_round_{round_idx}", "reason": "context_length_increase"}
+                        model=resolved_revision_model,
+                        extra={
+                            "step": f"iteration_round_{round_idx}",
+                            "reason": "context_length_increase",
+                            "requested_model": selected_revision_model,
+                        }
                     )
                 iteration_user_prompt_round = _build_iteration_revision_prompt(
                     chapter_number=next_chapter_number,
@@ -5854,7 +6162,7 @@ Genre-specific refinement (specific implementation of general planning requireme
                     project_id=project_id,
                     task_id=task_id,
                     progress=min(95, 72 + round_idx * 5),
-                    message=f"第{round_idx}轮改稿完成，正在评审..."
+                    message=f"步骤 4/4: 第{round_idx}轮改稿完成，正在复评..."
                 )
 
                 # 评审打分（R1）
@@ -5870,15 +6178,15 @@ Genre-specific refinement (specific implementation of general planning requireme
                     system_prompt=review_system_prompt_loop,
                     on_chunk=noop_chunk,  # 评分不流式推送正文
                     temperature=0.3,
-                    model="deepseek-reasoner",
+                    task_type="review",
                 )
-                score = extract_score(new_review_report)
+                score = _extract_iteration_review_score(new_review_report)
                 logger.info(f"   🧮 第{round_idx}轮评分：{score:.1f}/10")
                 await ws_manager.send_task_progress(
                     project_id=project_id,
                     task_id=task_id,
                     progress=min(95, 80 + round_idx * 3),
-                    message=f"迭代优化第{round_idx}轮评分：{score:.1f}/10"
+                    message=f"步骤 4/4: 正在迭代中（第{round_idx}轮评分 {score:.1f}/10）..."
                 )
                 
                 # 🆕 将本轮评审意见加入历史记录
@@ -5952,7 +6260,8 @@ Genre-specific refinement (specific implementation of general planning requireme
             )
             final_version = chapter_draft
 
-        await ws_manager.send_stream_end(project_id, 'iteration', len(final_version), f"第{next_chapter_number}章迭代优化完成")
+        if not skip_iteration_optimization:
+            await ws_manager.send_stream_end(project_id, 'iteration', len(final_version), f"第{next_chapter_number}章迭代优化完成")
         # 🔔 推送阶段完成状态（生成下一章 - 步骤4）
         await ws_manager.send_stage_update(
             project_id=project_id,
@@ -5976,17 +6285,10 @@ Genre-specific refinement (specific implementation of general planning requireme
         logger.info(f"   📡 已发送 {len(step4_agents)} 个 Agent 完成状态（步骤4）")
 
         # 保存最终版本到 project_settings
-        update_query = text("""
-            UPDATE project_settings
-            SET final_version = :final_version, updated_at = :updated_at
-            WHERE project_id = :project_id
-        """)
-        db.execute(update_query, {
-            "final_version": final_version,
-            "updated_at": utc_now().isoformat(),
-            "project_id": project_id
-        })
-        db.commit()
+        workflow_context_builder.update_project_settings_fields(
+            project_id,
+            final_version=final_version,
+        )
         logger.info(f"   ✓ 最终版本已同步到数据库")
 
         await ws_manager.send_task_progress(
@@ -6031,22 +6333,14 @@ Genre-specific refinement (specific implementation of general planning requireme
 
         logger.info(f"   ✓ 章节标题: {chapter_title}")
 
-        # 保存到 chapters 表（PostgreSQL 使用 RETURNING 获取 ID）
-        insert_query = text("""
-            INSERT INTO chapters (project_id, chapter_number, title, content, word_count, created_at)
-            VALUES (:project_id, :chapter_number, :title, :content, :word_count, :created_at)
-            RETURNING id
-        """)
-        result = db.execute(insert_query, {
-            "project_id": project_id,
-            "chapter_number": next_chapter_number,
-            "title": chapter_title,
-            "content": final_version,
-            "word_count": len(final_version),
-            "created_at": utc_now().isoformat()
-        })
-        new_chapter_id = result.scalar()
-        db.commit()
+        new_chapter = _create_generated_chapter(
+            db,
+            project_id=project_id,
+            chapter_number=next_chapter_number,
+            title=chapter_title,
+            content=final_version,
+        )
+        new_chapter_id = new_chapter.id
 
         logger.info(f"   ✅ 章节已保存: id={new_chapter_id}")
         
@@ -6195,7 +6489,7 @@ async def get_epic_framework_state(
     db: Session = Depends(get_db),
 ):
     """
-    🔍 检测史诗框架状态
+    🔍 检测长篇框架状态
     
     返回:
     {
@@ -6212,7 +6506,7 @@ async def get_epic_framework_state(
     logger = logging.getLogger("uvicorn.error")
     
     try:
-        logger.info(f"🔍 检测史诗框架状态，项目ID: {project_id}")
+        logger.info(f"🔍 检测长篇框架状态，项目ID: {project_id}")
         
         # 验证项目所有权
         project = db.query(Project).filter(
@@ -6226,14 +6520,14 @@ async def get_epic_framework_state(
             )
         
         # 读取框架数据
-        query = text("""
-            SELECT epic_framework, epic_framework_generated_at, plot_outline, epic_volumes_detail
-            FROM project_settings
-            WHERE project_id = :project_id
-        """)
-        result = db.execute(query, {"project_id": project_id}).fetchone()
+        epic_framework_state = WorkflowContextBuilder(db).load_epic_framework_state(project_id)
         
-        if not result:
+        if not (
+            epic_framework_state.epic_framework
+            or epic_framework_state.framework_generated_at
+            or epic_framework_state.plot_outline
+            or epic_framework_state.epic_volumes_detail
+        ):
             logger.info(f"   ✅ 未找到项目设置，返回空状态")
             return {
                 "has_framework": False,
@@ -6242,10 +6536,10 @@ async def get_epic_framework_state(
                 "framework_generated_at": None
             }
         
-        epic_framework = result[0]
-        framework_generated_at = result[1]
-        plot_outline = result[2] or ""
-        epic_volumes_detail_json = result[3] or ""
+        epic_framework = epic_framework_state.epic_framework
+        framework_generated_at = epic_framework_state.framework_generated_at
+        plot_outline = epic_framework_state.plot_outline or ""
+        epic_volumes_detail_json = epic_framework_state.epic_volumes_detail or ""
         
         # 🌟 新架构：使用 parse_epic_volumes_json 和 get_volume_state
         from app.services.outline_merger import parse_epic_volumes_json, get_volume_state
@@ -6306,7 +6600,7 @@ async def get_epic_framework_state(
         )
 
 
-@router.post("/expand-story/analysis")
+@router.post("/expand-story/analysis", response_model=StoryExpansionAnalysisRouteResponse)
 async def analyze_expand_story(
     request: ExpandStoryRequest,
     current_user = Depends(get_current_user),
@@ -6314,11 +6608,12 @@ async def analyze_expand_story(
 ):
     """分析协同扩展请求，返回推荐方向、模式和模型适配信息。"""
     try:
-        _validate_expand_story_request(request)
+        _validate_expand_story_request(request, allow_empty_targets_for_analysis=True)
 
         _ensure_project_owned(request.project_id, current_user.id, db)
         _validate_story_framework_mode_switch(request, db)
 
+        request = _normalize_story_request_text_fields(request)
         preview = _build_story_written_chapter_preview(request, db)
         analysis_request = request.model_copy(
             update={
@@ -6340,10 +6635,16 @@ async def analyze_expand_story(
             "preserve_written_mode": request.preserve_written_mode,
         }
 
-        return {
-            "success": True,
-            "analysis": analysis,
-        }
+        response_payload = StoryExpansionAnalysisRouteResponse.model_validate(
+            {
+                "success": True,
+                "analysis": StoryExpansionAnalysisPayload.model_validate(analysis).model_dump(
+                    mode="python",
+                    exclude_none=True,
+                ),
+            }
+        )
+        return response_payload.model_dump(mode="python", exclude_none=True)
     except HTTPException:
         raise
     except Exception as e:
@@ -6354,7 +6655,7 @@ async def analyze_expand_story(
         )
 
 
-@router.post("/expand-story")
+@router.post("/expand-story", response_model=StoryExpansionStartResponse)
 async def expand_story(
     request: ExpandStoryRequest,
     current_user = Depends(get_current_user),
@@ -6369,37 +6670,25 @@ async def expand_story(
 
         task_id = f"expand-story-{uuid.uuid4()}"
 
-        asyncio.create_task(
-            execute_expand_story_task(
-                task_id=task_id,
-                project_id=request.project_id,
-                user_id=current_user.id,
-                current_outline=request.current_outline,
-                world_setting=request.world_setting,
-                characters=request.characters,
-                current_chapter_count=request.current_chapter_count,
-                current_character_count=request.current_character_count,
-                target_total_chapters=request.target_total_chapters,
-                target_total_characters=request.target_total_characters,
-                strategy=request.strategy,
-                intent=request.intent,
-                enable_auto_supplement=request.enable_auto_supplement,
-                expansion_mode=request.expansion_mode,
-                total_volumes=request.total_volumes,
-                total_chapters_min=request.total_chapters_min,
-                total_chapters_max=request.total_chapters_max,
-                target_volume_index=request.target_volume_index,
-                volume_chapters_min=request.volume_chapters_min,
-                volume_chapters_max=request.volume_chapters_max,
-                preserve_written_mode=request.preserve_written_mode,
-                reset_epic_framework=request.reset_epic_framework,
-            )
+        _create_story_expansion_history_record(
+            db,
+            project_id=request.project_id,
+            task_id=task_id,
         )
 
-        return _build_task_start_response(
+        _enqueue_story_expansion_task(
             task_id=task_id,
-            message="协同拓展任务已启动，正在后台分析人物与大纲的增量缺口...",
+            request=request,
+            user_id=current_user.id,
         )
+
+        response_payload = StoryExpansionStartResponse.model_validate(
+            _build_task_start_response(
+                task_id=task_id,
+                message="协同拓展任务已启动，正在后台分析人物与大纲的增量缺口...",
+            )
+        )
+        return response_payload.model_dump(mode="python", exclude_none=True)
 
     except HTTPException:
         raise
@@ -6433,6 +6722,7 @@ async def execute_expand_story_task(
     volume_chapters_min: Optional[int],
     volume_chapters_max: Optional[int],
     preserve_written_mode: str,
+    volume_character_increment: Optional[int] = None,
     reset_epic_framework: bool = False,
 ):
     """后台执行协同拓展任务。"""
@@ -6469,6 +6759,7 @@ async def execute_expand_story_task(
                 target_volume_index=target_volume_index,
                 volume_chapters_min=volume_chapters_min,
                 volume_chapters_max=volume_chapters_max,
+                volume_character_increment=volume_character_increment,
                 preserve_written_mode=preserve_written_mode,
                 reset_epic_framework=reset_epic_framework,
             ),
@@ -6516,6 +6807,7 @@ async def execute_expand_story_task(
                 target_volume_index=target_volume_index,
                 volume_chapters_min=volume_chapters_min,
                 volume_chapters_max=volume_chapters_max,
+                volume_character_increment=volume_character_increment,
                 preserve_written_mode=preserve_written_mode,
             )
         )
@@ -6523,6 +6815,15 @@ async def execute_expand_story_task(
         warnings.extend(execution_context_warnings)
         analysis["warnings"] = list(dict.fromkeys(item for item in warnings if item))
         analysis["written_chapter_context"] = written_chapter_context
+        analysis = StoryExpansionAnalysisPayload.model_validate(analysis).model_dump(
+            mode="python",
+            exclude_none=True,
+        )
+        auto_supplement_plan = (
+            analysis.get("auto_supplement")
+            if enable_auto_supplement and prepared_request.target_total_characters is None
+            else None
+        )
 
         mode_info = {
             "mode": analysis.get("execution_mode", "delta"),
@@ -6553,6 +6854,7 @@ async def execute_expand_story_task(
             expansion_mode=effective_expansion_mode,
             epic_config=epic_config,
             volume_detail_config=volume_detail_config,
+            auto_supplement_plan=auto_supplement_plan,
         )
 
         await ws_manager.send_task_progress(
@@ -6562,89 +6864,36 @@ async def execute_expand_story_task(
             message="💾 正在保存协同拓展结果...",
         )
 
+        workflow_context_builder = WorkflowContextBuilder(db)
+        update_fields = {
+            "plot_outline": result["plot_outline"],
+            "characters": result["characters"],
+        }
         if result.get("execution_mode") == "epic" and result.get("epic_framework"):
-            update_query = text(
-                """
-                UPDATE project_settings
-                SET plot_outline = :plot_outline,
-                    characters = :characters,
-                    epic_framework = :epic_framework,
-                    epic_volumes_detail = :epic_volumes_detail,
-                    epic_framework_generated_at = :epic_framework_generated_at,
-                    updated_at = :updated_at
-                WHERE project_id = :project_id
-                """
+            update_fields.update(
+                {
+                    "epic_framework": result.get("epic_framework", result["plot_outline"]),
+                    "epic_volumes_detail": result.get("epic_volumes_detail", ""),
+                    "epic_framework_generated_at": utc_now().isoformat(),
+                }
             )
-            update_params = {
-                "plot_outline": result["plot_outline"],
-                "characters": result["characters"],
-                "epic_framework": result.get("epic_framework", result["plot_outline"]),
-                "epic_volumes_detail": result.get("epic_volumes_detail", ""),
-                "epic_framework_generated_at": utc_now().isoformat(),
-                "updated_at": utc_now().isoformat(),
-                "project_id": project_id,
-            }
         elif result.get("execution_mode") == "volume_detail" and result.get("epic_framework"):
-            update_query = text(
-                """
-                UPDATE project_settings
-                SET plot_outline = :plot_outline,
-                    characters = :characters,
-                    epic_framework = :epic_framework,
-                    epic_volumes_detail = :epic_volumes_detail,
-                    updated_at = :updated_at
-                WHERE project_id = :project_id
-                """
+            update_fields.update(
+                {
+                    "epic_framework": result.get("epic_framework", result["plot_outline"]),
+                    "epic_volumes_detail": result.get("epic_volumes_detail", ""),
+                }
             )
-            update_params = {
-                "plot_outline": result["plot_outline"],
-                "characters": result["characters"],
-                "epic_framework": result.get("epic_framework", result["plot_outline"]),
-                "epic_volumes_detail": result.get("epic_volumes_detail", ""),
-                "updated_at": utc_now().isoformat(),
-                "project_id": project_id,
-            }
         elif reset_epic_framework:
-            update_query = text(
-                """
-                UPDATE project_settings
-                SET plot_outline = :plot_outline,
-                    characters = :characters,
-                    epic_framework = :epic_framework,
-                    epic_volumes_detail = :epic_volumes_detail,
-                    epic_framework_generated_at = :epic_framework_generated_at,
-                    updated_at = :updated_at
-                WHERE project_id = :project_id
-                """
+            update_fields.update(
+                {
+                    "epic_framework": None,
+                    "epic_volumes_detail": None,
+                    "epic_framework_generated_at": None,
+                }
             )
-            update_params = {
-                "plot_outline": result["plot_outline"],
-                "characters": result["characters"],
-                "epic_framework": None,
-                "epic_volumes_detail": None,
-                "epic_framework_generated_at": None,
-                "updated_at": utc_now().isoformat(),
-                "project_id": project_id,
-            }
-        else:
-            update_query = text(
-                """
-                UPDATE project_settings
-                SET plot_outline = :plot_outline,
-                    characters = :characters,
-                    updated_at = :updated_at
-                WHERE project_id = :project_id
-                """
-            )
-            update_params = {
-                "plot_outline": result["plot_outline"],
-                "characters": result["characters"],
-                "updated_at": utc_now().isoformat(),
-                "project_id": project_id,
-            }
 
-        db.execute(update_query, update_params)
-        db.commit()
+        workflow_context_builder.update_project_settings_fields(project_id, **update_fields)
 
         await ws_manager.send_task_progress(
             project_id=project_id,
@@ -6662,16 +6911,31 @@ async def execute_expand_story_task(
                 parse_and_sync_relationships,
             )
 
-            sync_result = parse_and_sync_characters(
-                project_id=project_id,
-                characters_text=result["characters"],
-                db_session=db,
-            )
+            character_sync_text, character_sync_source = _select_story_character_sync_source(result)
+            if character_sync_text:
+                sync_result = parse_and_sync_characters(
+                    project_id=project_id,
+                    characters_text=character_sync_text,
+                    db_session=db,
+                )
+                logger.info(
+                    "✅ 协同拓展人物卡同步完成：project_id=%s, source=%s, parsed=%s, created=%s, updated=%s",
+                    project_id,
+                    character_sync_source,
+                    sync_result.get("parsed", 0),
+                    sync_result.get("created", 0),
+                    sync_result.get("updated", 0),
+                )
+            else:
+                logger.info(
+                    "ℹ️ 协同拓展未检测到可解析人物卡，跳过同步：project_id=%s",
+                    project_id,
+                )
 
-            if result.get("relationship_patch"):
+            if result.get("character_relationships"):
                 relationship_result = parse_and_sync_relationships(
                     project_id=project_id,
-                    relationships_text=result["relationship_patch"],
+                    relationships_text=result["character_relationships"],
                     db_session=db,
                 )
                 sync_result["relationships"] = relationship_result
@@ -6704,7 +6968,8 @@ async def execute_expand_story_task(
             for char in characters_in_db:
                 char_content = f"""
 人物名称: {char.name}
-角色类型: {char.role or '未设定'}
+故事立场: {char.role or '未设定'}
+角色定位: {getattr(char, 'role_position', None) or '未设定'}
 所属势力: {char.faction or '未设定'}
 状态: {char.life_status or '未知'}
 简介: {char.summary or ''}
@@ -6719,6 +6984,7 @@ async def execute_expand_story_task(
                         "character_id": str(char.id),
                         "name": char.name,
                         "role": char.role or "",
+                        "role_position": getattr(char, "role_position", None) or "",
                     },
                 )
         except Exception as vector_error:
@@ -6726,29 +6992,37 @@ async def execute_expand_story_task(
 
         before_stats = result.get("validation_before") or {}
         after_stats = result.get("validation_after") or {}
-        final_chapter_count = result.get(
-            "current_chapter_count",
-            effective_target_total_chapters or target_total_chapters or prepared_request.current_chapter_count,
+        final_chapter_count = _resolve_story_result_count(
+            reported_count=result.get("current_chapter_count"),
+            parsed_count=_estimate_chapter_count_from_text(result.get("plot_outline", "")),
+            validation_count=after_stats.get("chapter_count"),
+            fallback_count=prepared_request.current_chapter_count,
         )
-        final_character_count = result.get(
-            "current_character_count",
-            effective_target_total_characters or target_total_characters or current_character_count,
+        final_character_count = _resolve_story_result_count(
+            reported_count=result.get("current_character_count"),
+            parsed_count=_estimate_character_count_from_text(result.get("characters", "")),
+            validation_count=after_stats.get("character_count"),
+            fallback_count=current_character_count,
         )
+        normalized_character_sync, character_sync_warnings = _normalize_story_character_sync_result(sync_result)
+        alignment_warnings = list(result.get("alignment_warnings", []))
+        alignment_warnings.extend(character_sync_warnings)
+        alignment_warnings = list(dict.fromkeys(str(item).strip() for item in alignment_warnings if str(item).strip()))
+        result_plan = result.get("plan") or {}
 
-        await ws_manager.send_task_complete(
-            project_id=project_id,
-            task_id=task_id,
-            result={
+        task_result_payload = StoryExpansionTaskResultResponse.model_validate(
+            {
                 "expanded_outline": result["plot_outline"],
                 "all_characters": result["characters"],
-                "outline_delta": result.get("outline_delta_text", ""),
-                "character_delta": result.get("character_delta_text", ""),
-                "character_relationships": result.get("relationship_patch", ""),
-                "outline_ops": result.get("outline_ops_executed", []),
+                "outline_delta": result.get("outline_delta", ""),
+                "character_delta": result.get("character_delta", ""),
+                "character_relationships": result.get("character_relationships", ""),
+                "outline_ops": _normalize_story_result_outline_ops(result),
                 "execution_mode": result.get("execution_mode", mode_info.get("mode", "delta")),
                 "execution_mode_reason": result.get("execution_mode_reason", mode_info.get("reason", "")),
                 "execution_rounds": result.get("execution_rounds", []),
-                "new_characters": result.get("new_character_names", []),
+                "new_characters": result.get("new_characters", []),
+                "alignment_repairs": result.get("alignment_repairs", []),
                 "story_strategy": result.get("strategy", effective_strategy),
                 "story_intent": effective_intent,
                 "story_expansion_mode": effective_expansion_mode,
@@ -6756,14 +7030,25 @@ async def execute_expand_story_task(
                 "written_chapter_context": written_chapter_context,
                 "volume_index": result.get("volume_index"),
                 "volume_chapter_range": result.get("volume_chapter_range"),
-                "coordination_summary": result.get("summary", ""),
+                "coordination_summary": result.get("coordination_summary", ""),
                 "current_chapter_count": final_chapter_count,
-                "target_chapter_count": effective_target_total_chapters or target_total_chapters or final_chapter_count,
+                "target_chapter_count": (
+                    result_plan.get("target_chapter_count")
+                    or effective_target_total_chapters
+                    or target_total_chapters
+                    or final_chapter_count
+                ),
                 "current_character_count": final_character_count,
-                "target_character_count": effective_target_total_characters or target_total_characters or final_character_count,
+                "target_character_count": (
+                    result_plan.get("target_character_count")
+                    or effective_target_total_characters
+                    or target_total_characters
+                    or final_character_count
+                ),
                 "validation_before": before_stats,
                 "validation_after": after_stats,
-                "character_sync": sync_result,
+                "alignment_warnings": alignment_warnings,
+                "character_sync": normalized_character_sync,
                 "stop_reasons": result.get("stop_reasons", []),
                 "expansion_analysis": analysis,
                 "epic_total_volumes": result.get("epic_total_volumes"),
@@ -6773,11 +7058,29 @@ async def execute_expand_story_task(
                     f" → {final_chapter_count}，人物 {before_stats.get('character_count', current_character_count)}"
                     f" → {final_character_count}"
                 ),
-            },
+            }
+        ).model_dump(mode="python", exclude_none=True)
+
+        _update_story_expansion_history_record(
+            db,
+            task_id=task_id,
+            status="completed",
+            result=task_result_payload,
+        )
+        await ws_manager.send_task_complete(
+            project_id=project_id,
+            task_id=task_id,
+            result=task_result_payload,
         )
 
     except Exception as e:
         logger.error(f"❌ 后台协同拓展失败: {str(e)}")
+        _update_story_expansion_history_record(
+            db,
+            task_id=task_id,
+            status="failed",
+            error=str(e),
+        )
         await ws_manager.send_task_error(
             project_id=project_id,
             task_id=task_id,
@@ -6785,1246 +7088,6 @@ async def execute_expand_story_task(
         )
     finally:
         db.close()
-
-
-@router.post("/expand-outline", include_in_schema=False)
-async def expand_outline(
-    request: ExpandOutlineRequest,
-    current_user = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    扩展情节大纲（异步后台执行）
-    
-    请求体:
-    {
-        "project_id": 1,
-        "current_outline": "当前的简短大纲...",
-        "world_setting": "世界观设定...",
-        "characters": "人物设定...",
-        "target_chapters": 50
-    }
-    
-    响应:
-    {
-        "success": true,
-        "task_id": "xxx-xxx-xxx",
-        "message": "大纲扩展任务已启动，正在后台执行..."
-    }
-    """
-    import logging
-    
-    logger = logging.getLogger("uvicorn.error")
-    
-    try:
-        logger.info(f"📖 开始扩展大纲，项目ID: {request.project_id}")
-        
-        # 1. 严格校验目标章节数
-        target_count = request.target_total_chapters or 100
-        if target_count < 10 or target_count > 200:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"目标章节数必须在 10-200 之间，当前输入: {target_count}"
-            )
-        
-        # 2. 验证项目所有权
-        _ensure_project_owned(request.project_id, current_user.id, db)
-        
-        # 3. 生成任务ID
-        task_id = f"expand-outline-{uuid.uuid4()}"
-        logger.info(f"   ✅ 任务ID: {task_id}")
-
-        legacy_story_analysis = _build_legacy_outline_story_analysis(
-            request=request,
-            db=db,
-            target_total_chapters=target_count,
-        )
-        _log_legacy_story_analysis("expand-outline", legacy_story_analysis, logger)
-        
-        # 4. 🆕 启动后台任务
-        asyncio.create_task(
-            execute_expand_outline_task(
-                task_id=task_id,
-                project_id=request.project_id,
-                user_id=current_user.id,
-                current_outline=request.current_outline,
-                world_setting=request.world_setting,
-                characters=request.characters,
-                current_chapter_count=request.current_chapter_count,
-                increment=request.increment,
-                target_total_chapters=target_count,  # 使用严格校验后的目标数
-                # 🔥 多模式参数
-                expansion_mode=request.expansion_mode,
-                target_volumes=request.target_volumes,
-                chapters_per_volume_min=request.chapters_per_volume_min,
-                chapters_per_volume_max=request.chapters_per_volume_max,
-                incremental_step=request.incremental_step,
-                # 🌟 史诗框架参数
-                total_volumes=request.total_volumes,
-                total_chapters_min=request.total_chapters_min,
-                total_chapters_max=request.total_chapters_max,
-                # 📖 单卷详细参数
-                framework_content=request.framework_content,
-                target_volume_index=request.target_volume_index,
-                volume_chapters_min=request.volume_chapters_min,
-                volume_chapters_max=request.volume_chapters_max,
-                # 🆕 已写章节处理模式
-                preserve_written_mode=request.preserve_written_mode,
-                legacy_story_analysis=legacy_story_analysis,
-            )
-        )
-        
-        logger.info(f"   🚀 后台任务已启动，目标章节数: {target_count}")
-        
-        # 5. 立即返回
-        return _build_task_start_response(
-            task_id=task_id,
-            message=f"📖 大纲扩展任务已启动，将扩展至 {target_count} 章...",
-            story_expansion_analysis=legacy_story_analysis,
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ 启动扩展大纲任务失败: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-
-
-async def execute_expand_outline_task(
-    task_id: str,
-    project_id: int,
-    user_id: int,
-    current_outline: str,
-    world_setting: str,
-    characters: str,
-    current_chapter_count: int,
-    increment: int,
-    target_total_chapters: Optional[int],
-    # 🔥 多模式参数
-    expansion_mode: str = "total",
-    target_volumes: Optional[int] = None,
-    chapters_per_volume_min: Optional[int] = 20,
-    chapters_per_volume_max: Optional[int] = 30,
-    incremental_step: Optional[int] = 10,
-    # 🌟 史诗框架参数
-    total_volumes: Optional[int] = None,
-    total_chapters_min: Optional[int] = None,
-    total_chapters_max: Optional[int] = None,
-    auto_expand_all_volumes: bool = False,
-    # 📖 单卷详细参数
-    framework_content: Optional[str] = None,
-    target_volume_index: Optional[int] = None,
-    volume_chapters_min: Optional[int] = None,
-    volume_chapters_max: Optional[int] = None,
-    # 🆕 已写章节处理模式
-    preserve_written_mode: str = "extract_extend",
-    legacy_story_analysis: Optional[Dict[str, Any]] = None,
-):
-    """后台执行大纲扩展任务（严格遵守目标数）"""
-    from sqlalchemy import text
-    from app.db.base import SessionLocal
-    
-    logger = logging.getLogger("uvicorn.error")
-    logger.info(f"🚀 开始执行后台任务: {task_id}, 扩展大纲")
-    
-    # 创建独立的数据库会话
-    db = SessionLocal()
-    
-    try:
-        # 发送任务开始消息
-        await ws_manager.send_task_progress(
-            project_id=project_id,
-            task_id=task_id,
-            progress=0,
-            message="📖 开始扩展大纲..."
-        )
-
-        if legacy_story_analysis is None:
-            legacy_story_analysis = _build_legacy_outline_story_analysis_from_task(
-                db=db,
-                project_id=project_id,
-                current_outline=current_outline,
-                world_setting=world_setting,
-                characters=characters,
-                current_chapter_count=current_chapter_count,
-                increment=increment,
-                target_total_chapters=target_total_chapters,
-                expansion_mode=expansion_mode,
-                target_volumes=target_volumes,
-                chapters_per_volume_min=chapters_per_volume_min,
-                chapters_per_volume_max=chapters_per_volume_max,
-                incremental_step=incremental_step,
-                total_volumes=total_volumes,
-                total_chapters_min=total_chapters_min,
-                total_chapters_max=total_chapters_max,
-                framework_content=framework_content,
-                target_volume_index=target_volume_index,
-                volume_chapters_min=volume_chapters_min,
-                volume_chapters_max=volume_chapters_max,
-                preserve_written_mode=preserve_written_mode,
-            )
-        
-        expander_bundle = _create_project_outline_expander(project_id, db)
-        expander = expander_bundle["expander"]
-        project_genre = expander_bundle["genre"]
-        project_planned_chapters = expander_bundle["planned_chapters_max"]
-        logger.info(f"   🎯 项目题材：{project_genre}，规划章节：{project_planned_chapters}")
-        logger.info("   ✅ 扩展器实例已创建（含题材配置）")
-        
-        # 生成类型化设定摘要并注入世界观
-        combined_world_setting = _build_project_world_setting_context(
-            project_id,
-            world_setting,
-            db,
-        )
-        logger.info("   📚 已生成设定摘要并合并到世界观上下文")
-        
-        # 🌟 根据扩展模式选择不同的执行路径
-        if expansion_mode == "epic_framework":
-            # ==================== 史诗框架模式 ====================
-            logger.info(f"🌟 史诗框架模式: {total_volumes}卷, {total_chapters_min}-{total_chapters_max}章")
-            
-            await ws_manager.send_task_progress(
-                project_id=project_id,
-                task_id=task_id,
-                progress=20,
-                message=f"🎨 正在生成{total_volumes}卷的史诗框架..."
-            )
-            
-            result = await asyncio.to_thread(
-                expander.generate_epic_framework,
-                world_setting=combined_world_setting,
-                characters=characters,
-                total_volumes=total_volumes,
-                total_chapters_range=(total_chapters_min, total_chapters_max),
-            )
-            
-            logger.info("   ✅ 史诗框架生成完成")
-            
-        elif expansion_mode == "volume_detail":
-            # ==================== 单卷详细模式 ====================
-            logger.info(f"📖 单卷详细模式: 扩展第{target_volume_index}卷, 输入章节数量范围: {volume_chapters_min}-{volume_chapters_max}章")
-            
-            # 🆕 导入拼接模块（提前导入）
-            from app.services.outline_merger import (
-                parse_volumes_detail_json,
-                build_volumes_detail_json,
-                merge_framework_with_volumes
-            )
-            
-            # 🔍 读取原有框架和已有卷细纲，计算章节编号
-            original_data_query = text("""
-                SELECT epic_framework, epic_volumes_detail 
-                FROM project_settings 
-                WHERE project_id = :project_id
-            """)
-            original_result = db.execute(original_data_query, {"project_id": project_id}).fetchone()
-            
-            if not original_result or not original_result[0]:
-                raise ValueError("⚠️  未找到史诗框架！请先生成史诗框架后再扩展单卷")
-            
-            # 🌟 优先使用数据库中的框架内容（而不是请求参数）
-            stored_epic_framework = original_result[0]
-            effective_framework_content = stored_epic_framework
-            logger.info(f"   📚 已从数据库加载史诗框架，长度: {len(effective_framework_content)} 字符")
-            
-            # 解析已有卷细纲（支持新旧结构）
-            stored_volumes_json = original_result[1] or '{}'
-            epic_volumes_detail_json_from_db = stored_volumes_json  # 保存原始JSON供后续使用
-            
-            # 🌟 新架构：使用 parse_epic_volumes_json
-            from app.services.outline_merger import parse_epic_volumes_json
-            volumes_data = parse_epic_volumes_json(stored_volumes_json)
-            volumes_dict = volumes_data.get("volumes", {})
-            
-            # 🌟 提取框架头部和尾部信息（用于全局约束）
-            framework_header = volumes_data.get("framework_header", "")
-            framework_footer = volumes_data.get("framework_footer", "")
-            
-            logger.info(f"   📚 已加载 {len(volumes_dict)} 个已有卷条目")
-            if framework_header:
-                logger.info(f"   🌟 框架头部: {len(framework_header)} 字符（叙事节奏/境界体系）")
-            if framework_footer:
-                logger.info(f"   🌟 框架尾部: {len(framework_footer)} 字符（伏笔布局/人物周期）")
-            
-            # ✅ 检测是否覆盖：如果目标卷已存在，记录警告
-            vol_key = str(target_volume_index)
-            if vol_key in volumes_dict and volumes_dict[vol_key].get("type") == "detail":
-                existing_vol = volumes_dict[vol_key]
-                chapters_range = existing_vol.get("chapters_range", [0, 0])
-                logger.warning(
-                    f"   ⚠️  第{target_volume_index}卷已存在（第{chapters_range[0]}-{chapters_range[1]}章），将被覆盖！"
-                )
-            
-            # 📊 计算章节编号：基于前面所有卷的累计章节数
-            accumulated_chapters = 0
-            for vol_num in range(1, target_volume_index):
-                vol_key = str(vol_num)
-                if vol_key in volumes_dict:
-                    vol_data = volumes_dict[vol_key]
-                    if vol_data.get("type") == "detail":
-                        chapters_range = vol_data.get("chapters_range", [0, 0])
-                        vol_chapters = chapters_range[1] - chapters_range[0] + 1
-                        accumulated_chapters += vol_chapters
-                        logger.info(f"   📖 第{vol_num}卷: 第{chapters_range[0]}-{chapters_range[1]}章（{vol_chapters}章）")
-            
-            # ✅ 计算实际章节编号范围：从累计章节数+1开始
-            start_chapter = accumulated_chapters + 1
-            
-            logger.info(f"   🎯 计算结果：第{target_volume_index}卷将从第{start_chapter}章开始，生成{volume_chapters_min}-{volume_chapters_max}章（AI自由发挥）")
-            
-            # 🌟 新架构：提取上一卷摘要信息（用于卷间衔接）
-            prev_volume_summary = None
-            if target_volume_index > 1:
-                prev_vol_key = str(target_volume_index - 1)
-                if prev_vol_key in volumes_dict:
-                    prev_vol_data = volumes_dict[prev_vol_key]
-                    if prev_vol_data.get("type") == "detail" and prev_vol_data.get("detail"):
-                        logger.info(f"   📚 正在提取第{target_volume_index - 1}卷摘要用于衔接...")
-                        try:
-                            from app.services.volume_connector import VolumeConnector
-                            connector = VolumeConnector(llm=expander.llm)
-                            prev_volume_summary = connector.extract_volume_summary(
-                                prev_vol_data["detail"],
-                                target_volume_index - 1
-                            )
-                            logger.info(f"   ✅ 已提取第{target_volume_index - 1}卷摘要：{prev_volume_summary.get('extraction_method', 'unknown')}方式")
-                        except Exception as e:
-                            logger.warning(f"   ⚠️  提取上一卷摘要失败: {e}，将不使用衔接信息")
-                            prev_volume_summary = None
-                    else:
-                        logger.info(f"   ℹ️  第{target_volume_index - 1}卷尚未展开细纲，跳过衔接提取")
-                else:
-                    logger.info(f"   ℹ️  未找到第{target_volume_index - 1}卷数据，跳过衔接提取")
-            
-            await ws_manager.send_task_progress(
-                project_id=project_id,
-                task_id=task_id,
-                progress=20,
-                message=f"📝 正在详细扩展第{target_volume_index}卷（从第{start_chapter}章开始，预计{volume_chapters_min}-{volume_chapters_max}章）..."
-            )
-            
-            result = await asyncio.to_thread(
-                expander.expand_volume_detail,
-                framework_content=effective_framework_content,  # 🌟 修复：使用数据库中的框架
-                target_volume_index=target_volume_index,
-                world_setting=combined_world_setting,
-                characters=characters,
-                start_chapter_num=start_chapter,  # ✅ 起始章节号
-                chapters_count_range=(volume_chapters_min, volume_chapters_max),  # ✅ 章节数量范围（让AI自由发挥）
-                prev_volume_summary=prev_volume_summary,  # 🌟 上一卷摘要用于衔接
-                framework_header=framework_header,  # 🌟 新增：框架头部（叙事节奏/境界体系）
-                framework_footer=framework_footer,  # 🌟 新增：框架尾部（伏笔布局/人物周期）
-            )
-            
-            logger.info("   ✅ 单卷详细扩展完成")
-            
-        else:
-            # ==================== 原有模式(total/volume/incremental) ====================
-            # 🆕 处理已写章节
-            from app.services.agents.written_chapters_handler import process_written_chapters
-            
-            written_count, extracted_outline_text = await process_written_chapters(
-                project_id=project_id,
-                preserve_written_mode=preserve_written_mode,
-                project_genre=project_genre,
-                combined_world_setting=combined_world_setting,
-                db=db,
-                extractor_llm=expander.llm,
-                ws_manager=ws_manager,
-                task_id=task_id,
-            )
-            
-            # 更新current_chapter_count
-            if written_count > 0 and preserve_written_mode in ["extract_extend", "preserve_written"]:
-                current_chapter_count = written_count
-            
-            # 🔥 智能识别当前章节数（如果没有已写章节）
-            if current_chapter_count == 0 and written_count == 0:
-                logger.info("🔍 开始自动识别当前章节数...")
-                # 匹配章节标记，如 "第1章"、"第 1 章" 等
-                import re
-                chapter_pattern = r'第\s*\d+\s*章'
-                detected_count = len(re.findall(chapter_pattern, current_outline))
-                if detected_count > 0:
-                    current_chapter_count = detected_count
-                    logger.info(f"🎯 识别成功！当前已有 {current_chapter_count} 章")
-                else:
-                    logger.info("🆕 未识别到章节，从 0 章开始扩展")
-            
-            # 🔥 真正的渐进式扩展逻辑
-            total_needed = target_total_chapters - current_chapter_count
-            if total_needed <= 0:
-                raise ValueError(f"目标章节数 ({target_total_chapters}) 必须大于当前章节数 ({current_chapter_count})")
-
-            logger.info(f"📊 当前 {current_chapter_count} 章 → 目标 {target_total_chapters} 章 = 需新增 {total_needed} 章")
-            logger.info(f"🔄 采用渐进式扩展策略，每轮最多扩展10章")
-
-            # 渐进式扩展参数
-            MAX_INCREMENT_PER_ROUND = 10  # 每轮最多扩展10章
-            MAX_ITERATIONS = 20  # 最多20轮
-
-            iteration = 0
-            current_count = current_chapter_count
-            current_outline_text = extracted_outline_text if extracted_outline_text else current_outline
-
-            # 渐进式扩展循环
-            while current_count < target_total_chapters and iteration < MAX_ITERATIONS:
-                iteration += 1
-
-                # 计算本轮扩展数量
-                remaining = target_total_chapters - current_count
-                increment = min(MAX_INCREMENT_PER_ROUND, remaining)
-
-                logger.info(f"\n{'='*70}")
-                logger.info(f"🔄 第{iteration}轮扩展：{current_count} → {current_count + increment} 章")
-                logger.info(f"{'='*70}")
-
-                # 发送进度
-                base_progress = 50
-                expansion_progress = int((current_count - current_chapter_count) / total_needed * 30)
-                await ws_manager.send_task_progress(
-                    project_id=project_id,
-                    task_id=task_id,
-                    progress=base_progress + expansion_progress,
-                    message=f"🔄 第{iteration}轮扩展：{current_count} → {current_count + increment} 章（共{target_total_chapters}章）"
-                )
-
-                # 执行本轮扩展
-                try:
-                    result = await asyncio.to_thread(
-                        expander.expand_plot_outline_incremental,
-                        current_outline=current_outline_text,
-                        world_setting=combined_world_setting,
-                        characters=characters,
-                        current_chapter_count=current_count,
-                        increment=increment,
-                        target_total_chapters=target_total_chapters,
-                    )
-                except Exception as e:
-                    logger.error(f"❌ 第{iteration}轮扩展失败: {e}")
-                    logger.info(f"⚠️ 已完成 {current_count} 章的扩展，停止继续扩展")
-                    break
-
-                # 更新当前状态
-                new_count = result.get('current_chapter_count', current_count + increment)
-                current_outline_text = result.get('expanded_outline', current_outline_text)
-
-                logger.info(f"✅ 第{iteration}轮完成：{current_count} → {new_count} 章")
-
-                # 🔥 关键：根据AI判断决定是否继续
-                should_continue = result.get('should_continue', True)
-                continue_reason = result.get('continue_reason', '')
-
-                if not should_continue:
-                    logger.info(f"✅ AI建议停止扩展：{continue_reason}")
-                    logger.info(f"✅ 最终章节数: {new_count}")
-                    current_count = new_count
-                    break
-
-                # 更新计数
-                current_count = new_count
-
-                # 如果已达到目标，退出循环
-                if current_count >= target_total_chapters:
-                    logger.info(f"🎉 已达到目标章节数: {current_count}/{target_total_chapters}")
-                    break
-
-                # 如果AI建议继续但有理由，记录日志
-                if continue_reason:
-                    logger.info(f"💡 AI建议继续扩展：{continue_reason}")
-
-            # 检查是否达到最大迭代次数
-            if iteration >= MAX_ITERATIONS:
-                logger.warning(f"⚠️ 已达到最大迭代次数({MAX_ITERATIONS})，停止扩展")
-                logger.info(f"   当前章节数: {current_count}/{target_total_chapters}")
-
-            # 最终结果
-            result = {
-                "expanded_outline": current_outline_text,
-                "current_chapter_count": current_count,
-                "iterations": iteration,
-                "reached_target": current_count >= target_total_chapters
-            }
-
-            logger.info(f"\n{'='*70}")
-            logger.info(f"✅ 渐进式大纲扩展完成")
-            logger.info(f"   总轮数: {iteration}")
-            logger.info(f"   最终章节数: {current_count}/{target_total_chapters}")
-            logger.info(f"   是否达标: {'是' if result['reached_target'] else '否'}")
-            logger.info(f"{'='*70}\n")
-        
-        # 保存扩展结果到project_settings
-        await ws_manager.send_task_progress(
-            project_id=project_id,
-            task_id=task_id,
-            progress=80,
-            message="💾 正在保存扩展结果..."
-        )
-        
-        # 🆕 导入拼接模块（新架构）
-        from app.services.outline_merger import (
-            parse_framework_to_volumes,
-            parse_epic_volumes_json,
-            build_epic_volumes_json,
-            update_volume_detail,
-            merge_volumes_to_outline,
-            # 旧版兼容
-            parse_volumes_detail_json,
-            build_volumes_detail_json
-        )
-        
-        # 🌟 处理史诗框架：使用新的卷级存储结构
-        outline_content = result["expanded_outline"]
-        epic_framework = None  # 纯框架内容
-        epic_volumes_detail_json = None  # 卷级数据（JSON格式）
-        
-        if expansion_mode == "epic_framework":
-            # ==================== 史诗框架模式 ====================
-            # 🌟 新架构：解析框架内容，为每个卷创建独立存储条目
-            volumes_data = parse_framework_to_volumes(
-                result["expanded_outline"],
-                total_volumes
-            )
-            logger.info(f"🌟 新架构：已解析框架为 {len(volumes_data['volumes'])} 个卷条目")
-            
-            # 保存原始框架内容（不再需要锚点）
-            epic_framework = result["expanded_outline"]
-            epic_volumes_detail_json = build_epic_volumes_json(volumes_data)
-            
-            # 📝 生成展示大纲（使用新的拼接函数）
-            outline_content = merge_volumes_to_outline(volumes_data)
-            
-            # 添加YAML头部标记
-            outline_content = f"""---
-类型: 史诗框架
-总卷数: {total_volumes}
-总章节范围: [{total_chapters_min}, {total_chapters_max}]
-生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
----
-
-{outline_content}"""
-            logger.info(f"   🌟 史诗框架已保存：{total_volumes}卷，各卷状态=framework")
-
-        elif expansion_mode == "volume_detail":
-            # 📖 单卷详细模式：使用新架构更新指定卷
-            logger.info(f"   🔄 单卷详细模式：将第{target_volume_index}卷展开为细纲")
-            
-            # ✅ 复用前面读取的数据
-            stored_framework = original_result[0]  # 已在上面读取
-            
-            # 🔍 使用expand_volume_detail返回的章节范围（已经过章节编号修正器处理）
-            actual_start = result.get("chapters_start", start_chapter)
-            actual_end = result.get("chapters_end", start_chapter + volume_chapters_min - 1)
-            actual_chapter_count = actual_end - actual_start + 1
-            logger.info(f"   📊 AI实际生成：第{actual_start}-{actual_end}章（共{actual_chapter_count}章）")
-            
-            # 🌟 新架构：读取并更新卷数据
-            volumes_data = parse_epic_volumes_json(epic_volumes_detail_json_from_db)
-            
-            # 如果volumes_data为空（老数据或首次扩展），重新解析框架
-            if not volumes_data.get("volumes"):
-                logger.info("🔄 volumes_data为空，从框架重新解析...")
-                stored_framework = original_result[0] if original_result else ""
-                total_vol_match = re.search(r'总卷数:\s*(\d+)', stored_framework)
-                detected_total = int(total_vol_match.group(1)) if total_vol_match else 10
-                volumes_data = parse_framework_to_volumes(stored_framework, detected_total)
-            
-            # 更新指定卷的细纲
-            volumes_data = update_volume_detail(
-                volumes_data,
-                target_volume_index,
-                result["expanded_outline"],
-                [actual_start, actual_end]
-            )
-            
-            # 生成拼接后的大纲
-            outline_content = merge_volumes_to_outline(volumes_data)
-            
-            # 保存
-            epic_framework = original_result[0] if original_result else ""
-            epic_volumes_detail_json = build_epic_volumes_json(volumes_data)
-            
-            logger.info(f"   🎯 新架构拼接完成：第{target_volume_index}卷已展开")
-        
-        # 🆕 根据模式选择更新策略
-        if expansion_mode in ["epic_framework", "volume_detail"]:
-            # 史诗框架模式：同时更新 epic_framework 和 epic_volumes_detail
-            update_query = text("""
-                UPDATE project_settings
-                SET plot_outline = :plot_outline,
-                    epic_framework = :epic_framework,
-                    epic_volumes_detail = :epic_volumes_detail,
-                    epic_framework_generated_at = :generated_at,
-                    updated_at = :updated_at
-                WHERE project_id = :project_id
-            """)
-            
-            db.execute(update_query, {
-                "plot_outline": outline_content,
-                "epic_framework": epic_framework,
-                "epic_volumes_detail": epic_volumes_detail_json,
-                "generated_at": utc_now().isoformat() if epic_framework else None,
-                "updated_at": utc_now().isoformat(),
-                "project_id": project_id
-            })
-            logger.info("💾 史诗框架模式：已保存框架和卷数据（新架构）")
-                        
-            # 🔍 关键诊断：立即验证保存是否成功
-            verify_query = text("""
-                SELECT epic_framework, epic_volumes_detail, epic_framework_generated_at 
-                FROM project_settings 
-                WHERE project_id = :project_id
-            """)
-            verify_result = db.execute(verify_query, {"project_id": project_id}).fetchone()
-            if verify_result:
-                saved_framework = verify_result[0]
-                saved_volumes = verify_result[1]
-                saved_generated_at = verify_result[2]
-                # 新架构验证：检查volumes数据
-                has_volumes = saved_volumes and '"volumes"' in saved_volumes
-                logger.info(f"💾 保存验证: epic_framework长度={len(saved_framework or '')}, 有volumes数据={has_volumes}, generated_at={saved_generated_at}")
-                            
-                if not saved_framework:
-                    logger.error("⚠️  保存失败！epic_framework为空")
-                if not has_volumes:
-                    logger.warning(f"⚠️  保存注意！epic_volumes_detail不是新结构")
-            else:
-                logger.error("⚠️  保存失败！未找到project_settings记录")
-        else:
-            # 原有模式：只更新 plot_outline
-            update_query = text("""
-                UPDATE project_settings
-                SET plot_outline = :plot_outline,
-                    updated_at = :updated_at
-                WHERE project_id = :project_id
-            """)
-            
-            db.execute(update_query, {
-                "plot_outline": outline_content,
-                "updated_at": utc_now().isoformat(),
-                "project_id": project_id
-            })
-        db.commit()
-        logger.info("   💾 扩展大纲已保存到数据库")
-        
-        # 🆕 同步扩展大纲到向量库
-        try:
-            from app.services.vector_sync import sync_to_vector_db
-            
-            await ws_manager.send_task_progress(
-                project_id=project_id,
-                task_id=task_id,
-                progress=90,
-                message="🔄 正在同步到向量库..."
-            )
-            
-            if result["expanded_outline"] and isinstance(result["expanded_outline"], str) and result["expanded_outline"].strip():
-                sync_to_vector_db(
-                    kb_type="plot",
-                    name="情节大纲",
-                    content=result["expanded_outline"],
-                    metadata={
-                        "project_id": str(project_id),
-                        "title": "情节大纲",
-                        "type": "plot_outline"
-                    }
-                )
-                logger.info("   ✅ 已同步扩展大纲到向量库")
-        except Exception as vector_error:
-            logger.warning(f"   ⚠️  同步扩展大纲到向量库失败: {vector_error}")
-            import traceback
-            traceback.print_exc()
-        
-        # 发送完成消息
-        if expansion_mode == "epic_framework":
-            # 🌟 史诗框架模式:不显示章节数
-            await ws_manager.send_task_complete(
-                project_id=project_id,
-                task_id=task_id,
-                result={
-                    "expanded_outline": result["expanded_outline"],
-                    "total_volumes": result.get("total_volumes", total_volumes),
-                    "estimated_chapters": result.get("estimated_chapters", 0),
-                    "framework_type": "epic",
-                    "story_expansion_analysis": legacy_story_analysis,
-                    "message": f"✅ 史诗框架生成完成！{result.get('total_volumes', total_volumes)}卷，预计{result.get('estimated_chapters', 0)}章"
-                }
-            )
-        elif expansion_mode == "volume_detail":
-            # 📖 单卷详细模式:显示单卷信息
-            await ws_manager.send_task_complete(
-                project_id=project_id,
-                task_id=task_id,
-                result={
-                    "expanded_outline": result["expanded_outline"],
-                    "volume_index": result.get("volume_index", target_volume_index),
-                    "chapter_count": result.get("chapter_count", 0),
-                    "story_expansion_analysis": legacy_story_analysis,
-                    "message": f"✅ 第{result.get('volume_index', target_volume_index)}卷详细大纲生成完成！约{result.get('chapter_count', 0)}章"
-                }
-            )
-        else:
-            # 原有模式(total/volume/incremental):显示章节数
-            final_count = result.get("current_chapter_count", target_total_chapters)
-            ai_suggestion = {
-                "should_continue": result.get("should_continue", False),
-                "reason": result.get("continue_reason", "")
-            }
-            
-            await ws_manager.send_task_complete(
-                project_id=project_id,
-                task_id=task_id,
-                result={
-                    "expanded_outline": result["expanded_outline"],
-                    "current_chapter_count": final_count,
-                    "target_chapter_count": target_total_chapters,
-                    "ai_suggestion": ai_suggestion,
-                    "story_expansion_analysis": legacy_story_analysis,
-                    "message": f"✅ 大纲扩展完成！当前 {final_count} 章（目标: {target_total_chapters}）"
-                }
-            )
-        
-    except Exception as e:
-        logger.error(f"❌ 后台扩展大纲失败: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        
-        # 发送错误消息
-        await ws_manager.send_task_error(
-            project_id=project_id,
-            task_id=task_id,
-            error=str(e)
-        )
-    finally:
-        db.close()
-
-
-@router.post("/expand-characters", include_in_schema=False)
-async def expand_characters(
-    request: ExpandCharactersRequest,
-    current_user = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    扩展人物体系（异步后台执行）
-    
-    请求体:
-    {
-        "project_id": 1,
-        "main_characters": "当前主要人物...",
-        "world_setting": "世界观设定...",
-        "plot_outline": "情节大纲...",
-        "target_count": 15
-    }
-    
-    响应:
-    {
-        "success": true,
-        "task_id": "xxx-xxx-xxx",
-        "message": "人物扩展任务已启动，正在后台执行..."
-    }
-    """
-    import logging
-    
-    logger = logging.getLogger("uvicorn.error")
-    
-    try:
-        logger.info(f"👥 开始扩展人物，项目ID: {request.project_id}")
-        
-        # 1. 严格校验目标人物数
-        target_count = request.target_total_characters or 25
-        if target_count < 5 or target_count > 50:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"目标人物数必须在 5-50 之间，当前输入: {target_count}"
-            )
-        
-        # 2. 验证项目所有权
-        _ensure_project_owned(request.project_id, current_user.id, db)
-        
-        # 3. 生成任务ID
-        task_id = f"expand-characters-{uuid.uuid4()}"
-        logger.info(f"   ✅ 任务ID: {task_id}")
-
-        legacy_story_analysis = _build_legacy_character_story_analysis(
-            request=request,
-            db=db,
-            target_total_characters=target_count,
-        )
-        _log_legacy_story_analysis("expand-characters", legacy_story_analysis, logger)
-        
-        # 4. 🆕 启动后台任务
-        asyncio.create_task(
-            execute_expand_characters_task(
-                task_id=task_id,
-                project_id=request.project_id,
-                user_id=current_user.id,
-                main_characters=request.main_characters,
-                world_setting=request.world_setting,
-                plot_outline=request.plot_outline,
-                current_character_count=request.current_character_count,
-                target_total_characters=target_count,  # 使用严格校验后的目标数
-                legacy_story_analysis=legacy_story_analysis,
-            )
-        )
-        
-        logger.info(f"   🚀 后台任务已启动，目标人物数: {target_count}")
-        
-        # 5. 立即返回
-        return _build_task_start_response(
-            task_id=task_id,
-            message=f"👥 人物扩展任务已启动，将扩展至 {target_count} 个人物...",
-            story_expansion_analysis=legacy_story_analysis,
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ 启动扩展人物任务失败: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-
-
-async def execute_expand_characters_task(
-    task_id: str,
-    project_id: int,
-    user_id: int,
-    main_characters: str,
-    world_setting: str,
-    plot_outline: str,
-    current_character_count: int,
-    target_total_characters: int,
-    legacy_story_analysis: Optional[Dict[str, Any]] = None,
-):
-    """后台执行人物扩展任务（严格遵守目标数）"""
-    from sqlalchemy import text
-    from app.db.base import SessionLocal
-    
-    logger = logging.getLogger("uvicorn.error")
-    logger.info(f"🚀 开始执行后台任务: {task_id}, 扩展人物")
-    
-    # 创建独立的数据库会话
-    db = SessionLocal()
-    
-    try:
-        # 发送任务开始消息
-        await ws_manager.send_task_progress(
-            project_id=project_id,
-            task_id=task_id,
-            progress=0,
-            message="👥 开始扩展人物..."
-        )
-
-        if legacy_story_analysis is None:
-            legacy_story_analysis = _build_legacy_character_story_analysis_from_task(
-                db=db,
-                project_id=project_id,
-                main_characters=main_characters,
-                world_setting=world_setting,
-                plot_outline=plot_outline,
-                current_character_count=current_character_count,
-                target_total_characters=target_total_characters,
-            )
-        
-        expander_bundle = _create_project_outline_expander(project_id, db)
-        expander = expander_bundle["expander"]
-        project_genre = expander_bundle["genre"]
-        project_planned_chapters = expander_bundle["planned_chapters_max"]
-        logger.info(f"   🎯 项目题材：{project_genre}，规划章节：{project_planned_chapters}")
-        logger.info("   ✅ 扩展器实例已创建（含题材配置）")
-        
-        # 生成类型化设定摘要并注入世界观
-        combined_world_setting = _build_project_world_setting_context(
-            project_id,
-            world_setting,
-            db,
-        )
-        logger.info("   📚 已生成设定摘要并合并到世界观上下文")
-        
-        # 🔥 智能识别当前人物数
-        if current_character_count == 0:
-            logger.info("🔍 开始自动识别当前人物数...")
-            detected_count = _estimate_character_count_from_text(main_characters)
-            if detected_count > 0:
-                current_character_count = detected_count
-                logger.info(f"🎯 识别成功！当前已有 {current_character_count} 个人物")
-            else:
-                logger.info("🆕 未识别到人物，从 0 个开始扩展")
-        
-        # 🔥 真正的渐进式扩展逻辑
-        total_needed = target_total_characters - current_character_count
-        if total_needed <= 0:
-            raise ValueError(f"目标人物数 ({target_total_characters}) 必须大于当前人物数 ({current_character_count})")
-
-        logger.info(f"📊 当前 {current_character_count} 个人物 → 目标 {target_total_characters} 个人物 = 需新增 {total_needed} 个")
-        logger.info(f"🔄 采用渐进式扩展策略，每轮最多扩展5个人物")
-
-        # 渐进式扩展参数
-        MAX_INCREMENT_PER_ROUND = 5  # 每轮最多扩展5个
-        MAX_ITERATIONS = 20  # 最多20轮（防止无限循环）
-
-        iteration = 0
-        current_count = current_character_count
-        current_characters = main_characters
-
-        # 渐进式扩展循环
-        while current_count < target_total_characters and iteration < MAX_ITERATIONS:
-            iteration += 1
-
-            # 计算本轮扩展数量
-            remaining = target_total_characters - current_count
-            increment = min(MAX_INCREMENT_PER_ROUND, remaining)
-
-            logger.info(f"\n{'='*70}")
-            logger.info(f"🔄 第{iteration}轮扩展：{current_count} → {current_count + increment} 个人物")
-            logger.info(f"{'='*70}")
-
-            # 发送进度
-            base_progress = 20
-            expansion_progress = int((current_count - current_character_count) / total_needed * 50)
-            await ws_manager.send_task_progress(
-                project_id=project_id,
-                task_id=task_id,
-                progress=base_progress + expansion_progress,
-                message=f"🔄 第{iteration}轮扩展：{current_count} → {current_count + increment} 个人物（共{target_total_characters}个）"
-            )
-
-            # 执行本轮扩展
-            try:
-                result = await asyncio.to_thread(
-                    expander.expand_characters_incremental,
-                    main_characters=current_characters,
-                    world_setting=combined_world_setting,
-                    plot_outline=plot_outline,
-                    current_character_count=current_count,
-                    increment=increment,
-                    target_total_characters=target_total_characters,
-                )
-            except Exception as e:
-                logger.error(f"❌ 第{iteration}轮扩展失败: {e}")
-                logger.info(f"⚠️ 已完成 {current_count} 个人物的扩展，停止继续扩展")
-                break
-
-            # 更新当前状态
-            new_count = result.get('current_character_count', current_count + increment)
-            current_characters = result.get('all_characters', current_characters)
-
-            logger.info(f"✅ 第{iteration}轮完成：{current_count} → {new_count} 个人物")
-
-            # 🔥 关键：检查是否需要优化
-            if result.get('should_optimize_first', False):
-                logger.warning(f"⚠️ 人物-情节匹配度过低，需要先优化现有人物")
-                logger.info(f"   优化建议: {result.get('optimization_suggestions', [])}")
-                logger.info(f"⚠️ 停止扩展，当前人物数: {new_count}")
-                current_count = new_count
-                break
-
-            # 🔥 关键：根据AI判断决定是否继续
-            should_continue = result.get('should_continue', True)
-            continue_reason = result.get('continue_reason', '')
-
-            if not should_continue:
-                logger.info(f"✅ AI建议停止扩展：{continue_reason}")
-                logger.info(f"✅ 最终人物数: {new_count}")
-                current_count = new_count
-                break
-
-            # 🔥 关键：根据匹配度决定是否继续
-            validation_score = result.get('post_validation_score', 0)
-            if validation_score > 0 and validation_score < 60:
-                logger.warning(f"⚠️ 人物-情节匹配度过低({validation_score}/100)，停止扩展")
-                logger.info(f"⚠️ 建议优化现有人物与情节的关联后再继续")
-                current_count = new_count
-                break
-            elif validation_score >= 60:
-                logger.info(f"📊 当前匹配度: {validation_score}/100")
-
-            # 更新计数
-            current_count = new_count
-
-            # 如果已达到目标，退出循环
-            if current_count >= target_total_characters:
-                logger.info(f"🎉 已达到目标人物数: {current_count}/{target_total_characters}")
-                break
-
-            # 如果AI建议继续但有理由，记录日志
-            if continue_reason:
-                logger.info(f"💡 AI建议继续扩展：{continue_reason}")
-
-        # 检查是否达到最大迭代次数
-        if iteration >= MAX_ITERATIONS:
-            logger.warning(f"⚠️ 已达到最大迭代次数({MAX_ITERATIONS})，停止扩展")
-            logger.info(f"   当前人物数: {current_count}/{target_total_characters}")
-
-        # 最终结果
-        result = {
-            "all_characters": current_characters,
-            "current_character_count": current_count,
-            "iterations": iteration,
-            "reached_target": current_count >= target_total_characters
-        }
-
-        logger.info(f"\n{'='*70}")
-        logger.info(f"✅ 渐进式人物扩展完成")
-        logger.info(f"   总轮数: {iteration}")
-        logger.info(f"   最终人物数: {current_count}/{target_total_characters}")
-        logger.info(f"   是否达标: {'是' if result['reached_target'] else '否'}")
-        logger.info(f"{'='*70}\n")
-        
-        # 保存扩展结果到project_settings
-        await ws_manager.send_task_progress(
-            project_id=project_id,
-            task_id=task_id,
-            progress=70,
-            message="💾 正在保存扩展结果..."
-        )
-        
-        update_query = text("""
-            UPDATE project_settings
-            SET characters = :characters,
-                updated_at = :updated_at
-            WHERE project_id = :project_id
-        """)
-        
-        db.execute(update_query, {
-            "characters": result["all_characters"],
-            "updated_at": utc_now().isoformat(),
-            "project_id": project_id
-        })
-        db.commit()
-        logger.info("   💾 扩展人物已保存到数据库")
-        
-        # 自动解析人物卡并同步到结构化characters表
-        await ws_manager.send_task_progress(
-            project_id=project_id,
-            task_id=task_id,
-            progress=85,
-            message="🔄 正在同步人物卡..."
-        )
-        
-        sync_result = {"parsed": 0, "created": 0, "updated": 0, "skipped": 0}
-        try:
-            from app.services.character_parser import parse_and_sync_characters
-            
-            sync_result = parse_and_sync_characters(
-                project_id=project_id,
-                characters_text=result["all_characters"],
-                db_session=db
-            )
-            logger.info(f"   🔄 人物卡同步完成: 解析 {sync_result['parsed']} 个, "
-                       f"创建 {sync_result['created']} 个, 更新 {sync_result['updated']} 个")
-            
-            # 🆕 同步扩展人物到向量库
-            await ws_manager.send_task_progress(
-                project_id=project_id,
-                task_id=task_id,
-                progress=90,
-                message="🔄 正在同步到向量库..."
-            )
-            
-            try:
-                from app.services.vector_sync import upsert_character_to_vector_db
-                from app.models.character import Character
-                
-                logger.info(f"   🔄 开始同步扩展人物到向量库...")
-                
-                # 查询所有人物(包括新增的)
-                characters_in_db = db.query(Character).filter(
-                    Character.project_id == project_id
-                ).all()
-                
-                if characters_in_db:
-                    for char in characters_in_db:
-                        # 使用Character模型的实际字段: name, role, faction, summary, profile等
-                        char_content = f"""
-人物名称: {char.name}
-角色类型: {char.role or '未设定'}
-所属势力: {char.faction or '未设定'}
-状态: {char.life_status or '未知'}
-简介: {char.summary or ''}
-详细信息: {char.profile or ''}
-""".strip()
-                        
-                        upsert_character_to_vector_db(
-                            character_id=char.id,
-                            character_name=char.name,
-                            content=char_content,
-                            project_id=project_id,
-                            metadata={
-                                "character_id": str(char.id),
-                                "name": char.name,
-                                "role": char.role or ''
-                            }
-                        )
-                    
-                    logger.info(f"   ✅ 已同步 {len(characters_in_db)} 个人物到向量库")
-            except Exception as vector_error:
-                logger.warning(f"   ⚠️  同步人物到向量库失败: {vector_error}")
-                import traceback
-                traceback.print_exc()
-            
-            # 🆕 解析人物关系文本并写入Character.relations
-            if result.get("character_relationships"):
-                from app.services.character_parser import parse_and_sync_relationships
-                
-                rel_result = parse_and_sync_relationships(
-                    project_id=project_id,
-                    relationships_text=result["character_relationships"],
-                    db_session=db
-                )
-                logger.info(f"   🔗 人物关系同步完成: 解析 {rel_result['parsed']} 条, "
-                           f"保存 {rel_result['saved']} 条, 更新 {rel_result['characters_updated']} 个人物")
-                sync_result["relationships"] = rel_result
-        except Exception as e:
-            logger.warning(f"   ⚠️  自动同步人物卡失败: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        # 发送完成消息
-        final_count = result.get("current_character_count", target_total_characters)
-        ai_suggestion = {
-            "should_continue": result.get("should_continue", False),
-            "reason": result.get("continue_reason", "")
-        }
-        
-        await ws_manager.send_task_complete(
-            project_id=project_id,
-            task_id=task_id,
-            result={
-                "all_characters": result["all_characters"],
-                "current_character_count": final_count,
-                "target_character_count": target_total_characters,
-                "ai_suggestion": ai_suggestion,  # AI建议，仅供参考
-                "character_sync": sync_result,
-                "story_expansion_analysis": legacy_story_analysis,
-                "message": f"✅ 人物扩展完成！当前 {final_count} 个人物（目标: {target_total_characters}）"
-            }
-        )
-        
-    except Exception as e:
-        logger.error(f"❌ 后台扩展人物失败: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        
-        # 发送错误消息
-        await ws_manager.send_task_error(
-            project_id=project_id,
-            task_id=task_id,
-            error=str(e)
-        )
-    finally:
-        db.close()
-
-
-@router.get("/epic-framework/{project_id}")
-async def get_epic_framework(
-    project_id: int,
-    current_user = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    获取项目的史诗框架
-    
-    返回:
-    {
-        "has_framework": true,
-        "framework_content": "史诗框架内容...",
-        "metadata": {
-            "total_volumes": 30,
-            "total_chapters_range": [1000, 2500],
-            "generated_at": "2025-12-08T..."
-        }
-    }
-    """
-    import re
-    from sqlalchemy import text
-    
-    try:
-        # 验证项目所有权
-        project = db.query(Project).filter(
-            (Project.id == project_id) & (Project.user_id == current_user.id)
-        ).first()
-        
-        if not project:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Project not found"
-            )
-        
-        # 获取 plot_outline
-        query = text("""
-            SELECT plot_outline
-            FROM project_settings
-            WHERE project_id = :project_id
-        """)
-        
-        result = db.execute(query, {"project_id": project_id}).fetchone()
-        
-        if not result or not result[0]:
-            return {
-                "has_framework": False,
-                "framework_content": "",
-                "metadata": None
-            }
-        
-        plot_outline = result[0]
-        
-        # 检查是否是史诗框架（查找 YAML 头部，兼容中英文字段）
-        # 中文字段格式
-        yaml_pattern_cn = r'^---\s*\n类型:\s*史诗框架\s*\n总卷数:\s*(\d+)\s*\n总章节范围:\s*\[(\d+),\s*(\d+)\]\s*\n生成时间:\s*([^\n]+)\s*\n---\s*\n'
-        # 英文字段格式（兼容旧数据）
-        yaml_pattern_en = r'^---\s*\ntype:\s*epic_framework\s*\ntotal_volumes:\s*(\d+)\s*\ntotal_chapters_range:\s*\[(\d+),\s*(\d+)\]\s*\ngenerated_at:\s*([^\n]+)\s*\n---\s*\n'
-        
-        match = re.match(yaml_pattern_cn, plot_outline, re.MULTILINE)
-        if not match:
-            match = re.match(yaml_pattern_en, plot_outline, re.MULTILINE)
-        
-        if match:
-            # 是史诗框架，提取元数据
-            total_volumes = int(match.group(1))
-            chapters_min = int(match.group(2))
-            chapters_max = int(match.group(3))
-            generated_at = match.group(4)
-            
-            # 移除 YAML 头部，只返回内容
-            framework_content = plot_outline[match.end():]
-            
-            return {
-                "has_framework": True,
-                "framework_content": framework_content.strip(),
-                "metadata": {
-                    "total_volumes": total_volumes,
-                    "total_chapters_range": [chapters_min, chapters_max],
-                    "generated_at": generated_at
-                }
-            }
-        else:
-            # 不是史诗框架
-            return {
-                "has_framework": False,
-                "framework_content": "",
-                "metadata": None
-            }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
 
 
 @router.post("/optimize-chapter")
@@ -8130,6 +7193,97 @@ async def optimize_chapter(
         "message": "优化任务已提交"
     }
 
+def _safe_db_rollback(db: Session, reason: Optional[str] = None) -> None:
+    try:
+        db.rollback()
+    except Exception as rollback_error:
+        if reason:
+            logger.warning(f"⚠️ 数据库回滚失败（{reason}）: {rollback_error}")
+        else:
+            logger.warning(f"⚠️ 数据库回滚失败: {rollback_error}")
+
+
+def _create_generated_chapter(
+    db: Session,
+    *,
+    project_id: int,
+    chapter_number: int,
+    title: str,
+    content: str,
+) -> Chapter:
+    chapter = Chapter(
+        project_id=project_id,
+        chapter_number=chapter_number,
+        title=title,
+        content=content,
+        status="draft",
+        word_count=len(content or ""),
+    )
+
+    try:
+        db.add(chapter)
+        db.commit()
+        db.refresh(chapter)
+        return chapter
+    except Exception:
+        _safe_db_rollback(db, "保存生成章节失败")
+        raise
+
+
+def _extract_iteration_review_score(text: str) -> float:
+    if not text:
+        return 0.0
+
+    patterns = [
+        r"综合评分(?:\*\*)?\s*[:：]\s*([0-9]+(?:\.[0-9]+)?)\s*/\s*10",
+        r"\*\*?\s*综合评分\s*\*\*?\s*[:：]\s*([0-9]+(?:\.[0-9]+)?)\s*/\s*10",
+        r"综合评分[^0-9\n]{0,12}([0-9]+(?:\.[0-9]+)?)\s*分",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        try:
+            return float(match.group(1))
+        except (TypeError, ValueError):
+            continue
+
+    return 0.0
+
+
+def _load_latest_chapter_plan(db: Session, *, project_id: int, chapter_id: int) -> str:
+    query = text("""
+        SELECT content
+        FROM chapter_plans
+        WHERE project_id = :project_id AND chapter_id = :chapter_id
+        ORDER BY id DESC
+        LIMIT 1
+    """)
+    plan_result = db.execute(query, {
+        "project_id": project_id,
+        "chapter_id": chapter_id,
+    }).fetchone()
+
+    if not plan_result or not plan_result[0]:
+        return ""
+
+    return plan_result[0]
+
+
+def _load_project_chapter_context(db: Session, *, project_id: int) -> Dict[str, str]:
+    workflow_context_builder = WorkflowContextBuilder(db)
+    project_profile = workflow_context_builder.get_project_profile(project_id)
+    stage_context = workflow_context_builder.load_stage_text_context(project_id)
+    outline = (stage_context.plot_outline or "").strip() or (project_profile.user_outline_plan or "").strip()
+
+    return {
+        "genre": project_profile.genre or "",
+        "outline": outline,
+        "world_setting": stage_context.world_setting or "",
+        "characters": stage_context.characters or "",
+    }
+
 
 async def _optimize_chapter_task(
     task_id: str,
@@ -8181,30 +7335,22 @@ async def _optimize_chapter_task(
         # 获取章节计划（可选）
         chapter_plan = ""
         try:
-            query = text("""
-                SELECT chapter_plan
-                FROM chapter_plans
-                WHERE project_id = :project_id AND chapter_number = :chapter_number
-                ORDER BY id DESC
-                LIMIT 1
-            """)
-            plan_result = db.execute(query, {
-                "project_id": project_id,
-                "chapter_number": chapter.chapter_number
-            }).fetchone()
-            
-            chapter_plan = plan_result[0] if plan_result else ""
+            chapter_plan = _load_latest_chapter_plan(
+                db,
+                project_id=project_id,
+                chapter_id=chapter.id,
+            )
         except Exception as e:
+            _safe_db_rollback(db, "加载章节计划失败")
             logger.warning(f"获取章节计划失败: {e}，将继续执行")
         
         # 获取项目题材
         genre = ""
         try:
-            genre_query = text("SELECT genre FROM projects WHERE id = :project_id")
-            genre_result = db.execute(genre_query, {"project_id": project_id}).fetchone()
-            if genre_result:
-                genre = genre_result[0] or ""
+            project_context = _load_project_chapter_context(db, project_id=project_id)
+            genre = project_context["genre"]
         except Exception as e:
+            _safe_db_rollback(db, "加载项目上下文失败")
             logger.warning(f"获取项目题材失败: {e}")
         
         # 📝 步骤1：质量评审
@@ -8372,6 +7518,7 @@ async def _optimize_chapter_task(
         import traceback
         traceback.print_exc()
         logger.error(f"❌ 章节优化任务失败: {e}")
+        _safe_db_rollback(db, "章节优化任务异常")
         
         # 更新任务状态为失败
         update_query = text("""
@@ -8382,13 +7529,17 @@ async def _optimize_chapter_task(
             WHERE task_id = :task_id
         """)
         
-        db.execute(update_query, {
-            "task_id": task_id,
-            "status": "failed",
-            "error": str(e),
-            "completed_at": utc_now().isoformat()
-        })
-        db.commit()
+        try:
+            db.execute(update_query, {
+                "task_id": task_id,
+                "status": "failed",
+                "error": str(e),
+                "completed_at": utc_now().isoformat()
+            })
+            db.commit()
+        except Exception as status_error:
+            _safe_db_rollback(db, "写入章节优化失败状态")
+            logger.error(f"❌ 写入章节优化失败状态失败: {status_error}")
     finally:
         db.close()
 
@@ -8543,56 +7694,27 @@ async def _regenerate_chapter_task(
         # 获取章节计划
         chapter_plan = ""
         try:
-            query = text("""
-                SELECT chapter_plan
-                FROM chapter_plans
-                WHERE project_id = :project_id AND chapter_number = :chapter_number
-                ORDER BY id DESC
-                LIMIT 1
-            """)
-            plan_result = db.execute(query, {
-                "project_id": project_id,
-                "chapter_number": chapter.chapter_number
-            }).fetchone()
-            
-            chapter_plan = plan_result[0] if plan_result else ""
+            chapter_plan = _load_latest_chapter_plan(
+                db,
+                project_id=project_id,
+                chapter_id=chapter.id,
+            )
         except Exception as e:
+            _safe_db_rollback(db, "加载章节计划失败")
             logger.warning(f"获取章节计划失败: {e}，将继续执行")
         
-        # 获取项目大纲
         outline = ""
-        try:
-            outline_query = text("SELECT outline FROM projects WHERE id = :project_id")
-            outline_result = db.execute(outline_query, {"project_id": project_id}).fetchone()
-            if outline_result:
-                outline = outline_result[0] or ""
-        except Exception as e:
-            logger.warning(f"获取项目大纲失败: {e}")
-        
-        # 获取项目题材
         genre = ""
+        world_setting = ""
+        characters = ""
         try:
-            genre_query = text("SELECT genre FROM projects WHERE id = :project_id")
-            genre_result = db.execute(genre_query, {"project_id": project_id}).fetchone()
-            if genre_result:
-                genre = genre_result[0] or ""
+            project_context = _load_project_chapter_context(db, project_id=project_id)
+            outline = project_context["outline"]
+            genre = project_context["genre"]
+            world_setting = project_context["world_setting"]
+            characters = project_context["characters"]
         except Exception as e:
-            logger.warning(f"获取项目题材失败: {e}")
-        
-        # 获取项目设定
-        world_builder = ""
-        character_designer = ""
-        try:
-            settings_query = text("""
-                SELECT world_builder, character_designer
-                FROM project_settings
-                WHERE project_id = :project_id
-            """)
-            settings_result = db.execute(settings_query, {"project_id": project_id}).fetchone()
-            if settings_result:
-                world_builder = settings_result[0] or ""
-                character_designer = settings_result[1] or ""
-        except Exception as e:
+            _safe_db_rollback(db, "加载项目上下文失败")
             logger.warning(f"获取项目设定失败: {e}")
         
         # 更新进度：准备生成
@@ -8610,10 +7732,11 @@ async def _regenerate_chapter_task(
             "title": chapter.title,
             "outline": chapter_plan or outline,
             "main_characters": [],  # 可以从character_designer中解析
-            "setting": "",  # 可以从world_builder中解析
+            "setting": world_setting,
             "project_genre": genre,
-            "world_builder": world_builder,
-            "character_designer": character_designer,
+            "world_builder": world_setting,
+            "character_designer": characters,
+            "characters": characters,
             "user_feedback": user_feedback
         }
         
@@ -8688,6 +7811,7 @@ async def _regenerate_chapter_task(
         import traceback
         traceback.print_exc()
         logger.error(f"❌ 章节重新生成任务失败: {e}")
+        _safe_db_rollback(db, "章节重新生成任务异常")
         
         # 更新任务状态为失败
         update_query = text("""
@@ -8698,12 +7822,16 @@ async def _regenerate_chapter_task(
             WHERE task_id = :task_id
         """)
         
-        db.execute(update_query, {
-            "task_id": task_id,
-            "status": "failed",
-            "error": str(e),
-            "completed_at": utc_now().isoformat()
-        })
-        db.commit()
+        try:
+            db.execute(update_query, {
+                "task_id": task_id,
+                "status": "failed",
+                "error": str(e),
+                "completed_at": utc_now().isoformat()
+            })
+            db.commit()
+        except Exception as status_error:
+            _safe_db_rollback(db, "写入章节重生成失败状态")
+            logger.error(f"❌ 写入章节重生成失败状态失败: {status_error}")
     finally:
         db.close()

@@ -63,7 +63,6 @@ export default function RelationshipGraph(props: RelationshipGraphProps) {
       const graphEdges = data.edges || []
 
       // 🔧 优化：改进的多层级布局算法
-      console.log('📊 开始布局计算, 节点数:', graphNodes.length, '边数:', graphEdges.length)
       
       // 1. 使用BFS计算每个节点的层级
       const nodeLevels = new Map<number, number>()
@@ -96,8 +95,6 @@ export default function RelationshipGraph(props: RelationshipGraphProps) {
         })
       }
       
-      console.log('✅ 层级计算完成:', Object.fromEntries(nodeLevels))
-      
       // 2. 按层级分组节点
       const nodesByLevel = new Map<number, any[]>()
       graphNodes.forEach((node: any) => {
@@ -107,8 +104,6 @@ export default function RelationshipGraph(props: RelationshipGraphProps) {
         }
         nodesByLevel.get(level)!.push(node)
       })
-      
-      console.log('📂 分层结果:', Array.from(nodesByLevel.entries()).map(([k, v]) => [k, v.length]))
       
       // 3. 布局参数
       const centerX = 500
@@ -141,10 +136,6 @@ export default function RelationshipGraph(props: RelationshipGraphProps) {
           
           x = centerX + radius * Math.cos(angle)
           y = centerY + radius * Math.sin(angle)
-          
-          console.log(`🔵 节点 ${node.name} (ID:${node.id}) - 层级:${level}, 位置:(${Math.round(x)}, ${Math.round(y)}), 半径:${Math.round(radius)}`)
-        } else {
-          console.log(`🟢 中心节点 ${node.name} (ID:${node.id}) - 位置:(${x}, ${y})`)
         }
 
         return {
@@ -178,29 +169,32 @@ export default function RelationshipGraph(props: RelationshipGraphProps) {
         }
       })
 
-      const flowEdges: Edge[] = graphEdges.map((edge: any) => ({
-        id: `${edge.source}-${edge.target}`,
-        source: String(edge.source),
-        target: String(edge.target),
-        label: edge.relation_type,
-        type: 'smoothstep',
-        animated: edge.confidence > 0.8,
-        style: {
-          stroke: edge.confidence > 0.8 ? '#1976d2' : '#999',
-          strokeWidth: 2,
-        },
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: edge.confidence > 0.8 ? '#1976d2' : '#999',
-        },
-        labelStyle: { fontSize: 12, fill: '#666' },
-        labelBgStyle: { fill: '#fff', fillOpacity: 0.9 },
-      }))
+      const flowEdges: Edge[] = graphEdges.map((edge: any) => {
+        const confidence = typeof edge.confidence === 'number' ? edge.confidence : 0
+        const accentColor = confidence > 0.8 ? '#1976d2' : '#999'
+        return {
+          id: String(edge.id ?? `${edge.source}-${edge.target}-${edge.relation_type}`),
+          source: String(edge.source),
+          target: String(edge.target),
+          label: edge.relation_type,
+          type: 'smoothstep',
+          animated: confidence > 0.8,
+          style: {
+            stroke: accentColor,
+            strokeWidth: 2,
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: accentColor,
+          },
+          labelStyle: { fontSize: 12, fill: '#666' },
+          labelBgStyle: { fill: '#fff', fillOpacity: 0.9 },
+        }
+      })
 
       setNodes(flowNodes)
       setEdges(flowEdges)
     } catch (err: any) {
-      console.error('加载关系图谱失败', err)
       setError(await extractApiErrorMessage(err, '加载失败'))
     } finally {
       setLoading(false)

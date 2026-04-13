@@ -4,6 +4,9 @@
 用于自动更新人物出场记录、设定项引用追踪
 """
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import List, Dict, Any, Optional, Set
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -38,9 +41,9 @@ class EntityExtractor:
                 "characters": [{"name": "主角", "mentions": 5}],
                 "locations": [{"name": "某宗门", "type": "map_system"}],
                 "techniques": [{"name": "某功法", "type": "technique_system"}],
-                "artifacts": [{"name": "某法宝", "type": "artifact_system"}],
+                "artifacts": [{"name": "某法宝", "type": "weapon_system"}],
                 "realms": [{"name": "筑基期", "type": "cultivation_realm_system"}],
-                "factions": [{"name": "某势力", "type": "force_system"}]
+                "factions": [{"name": "某势力", "type": "organization_force_system"}]
             }
         """
         # 1. 获取项目的已有人物和设定项
@@ -93,7 +96,7 @@ class EntityExtractor:
 【已知实体参考】
 人物: {', '.join([c['name'] for c in existing_data['characters'][:20]])}
 地点: {', '.join([s['name'] for s in existing_data['settings'].get('map_system', [])[:20]])}
-势力: {', '.join([s['name'] for s in existing_data['settings'].get('force_system', [])[:20]])}
+势力: {', '.join([s['name'] for s in existing_data['settings'].get('organization_force_system', [])[:20]])}
 
 【提取要求】
 1. 识别所有出现的人物名称（包括代词指代的人物）
@@ -120,13 +123,13 @@ class EntityExtractor:
     {{"name": "某功法", "type": "technique_system", "level": "玄级上品"}}
   ],
   "artifacts": [
-    {{"name": "某法宝", "type": "artifact_system"}}
+    {{"name": "某法宝", "type": "weapon_system"}}
   ],
   "realms": [
     {{"name": "筑基期", "type": "cultivation_realm_system"}}
   ],
   "factions": [
-    {{"name": "某势力", "type": "force_system"}}
+    {{"name": "某势力", "type": "organization_force_system"}}
   ]
 }}
 ```
@@ -157,8 +160,8 @@ class EntityExtractor:
                 "factions": entities.get("factions", [])
             }
         except json.JSONDecodeError as e:
-            print(f"⚠️ JSON解析失败: {e}")
-            print(f"AI返回内容: {ai_response[:500]}")
+            logger.debug(f"⚠️ JSON解析失败: {e}")
+            logger.debug(f"AI返回内容: {ai_response[:500]}")
             # 返回空结果
             return {
                 "characters": [],
@@ -249,7 +252,7 @@ class EntityExtractor:
         ).first()
         
         if not collection:
-            print(f"⚠️ 未找到体系: {category}")
+            logger.debug(f"⚠️ 未找到体系: {category}")
             return None
         
         # 2. 检查是否已存在同名设定项
@@ -282,5 +285,5 @@ class EntityExtractor:
         db.commit()
         db.refresh(new_item)
         
-        print(f"✅ 自动创建设定项: {entity_name} ({category})")
+        logger.debug(f"✅ 自动创建设定项: {entity_name} ({category})")
         return new_item.id

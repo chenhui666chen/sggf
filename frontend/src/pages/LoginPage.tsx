@@ -15,15 +15,13 @@ import {
   Typography,
   Zoom,
 } from '@mui/material'
-import {
-  Chat,
-  Email,
-  Lock,
-  Payment,
-  RocketLaunch,
-  Visibility,
-  VisibilityOff,
-} from '@mui/icons-material'
+import Chat from '@mui/icons-material/Chat'
+import Email from '@mui/icons-material/Email'
+import Lock from '@mui/icons-material/Lock'
+import Payment from '@mui/icons-material/Payment'
+import RocketLaunch from '@mui/icons-material/RocketLaunch'
+import Visibility from '@mui/icons-material/Visibility'
+import VisibilityOff from '@mui/icons-material/VisibilityOff'
 
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import { RootState, AppDispatch } from '@/store/store'

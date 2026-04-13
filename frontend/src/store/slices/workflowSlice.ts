@@ -291,7 +291,6 @@ const workflowSlice = createSlice({
                              state.projectId !== action.payload
       
       if (isProjectSwitch) {
-        console.log(`🔄 项目切换：${state.projectId} → ${action.payload}，清理工作流状态`)
         // 重置工作流状态
         state.currentStage = 'concept'
         state.stages = deepCloneStages(initialStages)  // 🔧 使用深拷贝
@@ -305,11 +304,10 @@ const workflowSlice = createSlice({
         state.createdProjectId = null
         state.createProjectError = null
       } else if (state.projectId === null || state.projectId === 0) {
-        console.log(`💾 页面初始化：设置project_id=${action.payload}（不重置阶段，由localStorage恢复）`)
+        // 页面初始化：设置project_id（不重置阶段，由localStorage恢复）
       }
       
       state.projectId = action.payload
-      console.log(`✅ 工作流已设置项目上下文：project_id=${action.payload}`)
     },
     setCurrentStage: (state, action: PayloadAction<StageType>) => {
       state.currentStage = action.payload
@@ -334,8 +332,6 @@ const workflowSlice = createSlice({
           agent.message = ''
         })
       }
-      
-      console.log(`✅ 已重置 ${action.payload} 之后的所有阶段状态为 pending`)
     },
     updateAgentStatus: (
       state,
@@ -396,7 +392,6 @@ const workflowSlice = createSlice({
         streamContent: '',
         isRunning: true,
       }
-      console.log(`📝 开始生成第${action.payload.chapterNumber}章，任务ID: ${action.payload.taskId}`)
     },
     updateGenerateNextChapterProgress: (state, action: PayloadAction<{ progress: number; currentStep: number }>) => {
       state.generateNextChapter.progress = action.payload.progress
@@ -409,7 +404,6 @@ const workflowSlice = createSlice({
       state.generateNextChapter.streamContent = ''
     },
     completeGenerateNextChapter: (state) => {
-      console.log(`✅ 第${state.generateNextChapter.chapterNumber}章生成完成`)
       state.generateNextChapter = {
         taskId: null,
         chapterNumber: null,

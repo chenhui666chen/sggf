@@ -18,16 +18,14 @@ import {
   Typography,
   Zoom,
 } from '@mui/material'
-import {
-  AccountCircle,
-  CheckCircle,
-  Email,
-  Lock,
-  Phone,
-  RocketLaunch,
-  Visibility,
-  VisibilityOff,
-} from '@mui/icons-material'
+import AccountCircle from '@mui/icons-material/AccountCircle'
+import CheckCircle from '@mui/icons-material/CheckCircle'
+import Email from '@mui/icons-material/Email'
+import Lock from '@mui/icons-material/Lock'
+import Phone from '@mui/icons-material/Phone'
+import RocketLaunch from '@mui/icons-material/RocketLaunch'
+import Visibility from '@mui/icons-material/Visibility'
+import VisibilityOff from '@mui/icons-material/VisibilityOff'
 
 import { RootState, AppDispatch } from '@/store/store'
 import { clearError, register } from '@/store/slices/authSlice'

@@ -53,7 +53,8 @@ import {
   updateStageStatus,
   updateAgentStatus,  // ✅ 添加导入
   resetFollowingStages,  // ✅ 导入新的 action
-  StageType,
+  type AgentStatus,
+  type StageType,
   // 🆕 生成下一章 actions
   startGenerateNextChapter,
   updateGenerateNextChapterProgress,
@@ -72,6 +73,10 @@ import { formatProjectSequenceLabel } from '@/utils/projectDisplay'
 import { ProgressEstimator, type StageDurations, type ProgressState } from '@/utils/progressEstimator'
 import { statisticsService } from '@/services/statistics'
 import { buildStoryExpansionCompletionMessage } from '@/utils/storyExpansionFeedback'
+import {
+  getStoryExpansionResultFromTaskComplete,
+  isStoryExpansionTaskId,
+} from '@/utils/storyExpansionEvents'
 
 
 const stages: StageType[] = ['concept', 'structure', 'content', 'review', 'iteration']
@@ -81,6 +86,24 @@ const stageNames = {
   content: '内容创作',
   review: '质量评审',
   iteration: '迭代优化',
+}
+
+const isStageType = (value: string | null | undefined): value is StageType => {
+  return Boolean(value && stages.includes(value as StageType))
+}
+
+const coerceAgentStatus = (value: string | null | undefined): AgentStatus => {
+  switch (value) {
+    case 'idle':
+    case 'working':
+    case 'completed':
+    case 'error':
+      return value
+    case 'failed':
+      return 'error'
+    default:
+      return 'working'
+  }
 }
 
 export default function WorkflowControlPage() {
@@ -110,7 +133,6 @@ export default function WorkflowControlPage() {
   useEffect(() => {
     const savedProjectId = localStorage.getItem('lastWorkflowProjectId')
     if (savedProjectId && !projectId) {
-      console.log(`🔄 恢复上次的项目: ${savedProjectId}`)
       navigate(`/workflow/${savedProjectId}`)
     }
   }, [])
@@ -119,7 +141,6 @@ export default function WorkflowControlPage() {
   useEffect(() => {
     if (projectId) {
       localStorage.setItem('lastWorkflowProjectId', projectId)
-      console.log(`💾 已保存项目ID: ${projectId}`)
     }
   }, [projectId])
 
@@ -127,7 +148,6 @@ export default function WorkflowControlPage() {
   useEffect(() => {
     const autoStart = searchParams.get('autoStart')
     if (autoStart === 'true' && projectId) {
-      console.log('🚀 检测到 autoStart 参数，自动打开开始创作对话框')
       // 移除 autoStart 参数，避免刷新时重复触发
       searchParams.delete('autoStart')
       setSearchParams(searchParams, { replace: true })
@@ -137,6 +157,85 @@ export default function WorkflowControlPage() {
       }, 300)
     }
   }, [projectId, searchParams, setSearchParams])
+
+  // 项目切换时重置项目级本地状态，避免旧项目上下文串入新项目
+  useEffect(() => {
+    if (!projectId) return
+    setTaskPollingInterval((currentInterval) => {
+      if (currentInterval) {
+        clearInterval(currentInterval)
+      }
+      return null
+    })
+
+    setRequirement('')
+    setGenre('')
+    setPlannedLengthType('')
+    setPlannedChaptersMin('')
+    setPlannedChaptersMax('')
+    setUserOutlinePlan('')
+
+    setOpenDialog(false)
+    setIsRunning(false)
+    setIsStarting(false)
+    setShowSaveDialog(false)
+    setChapterTitle('')
+    setShowContentWarningDialog(false)
+
+    setConceptContent('')
+    setWorldContent('')
+    setCharacterContent('')
+    setStructureContent('')
+    setEditedStructureContent('')
+    setContentDraftContent('')
+    setEditedContentDraftContent('')
+    setReviewReportContent('')
+    setEditedReviewReportContent('')
+    setFinalVersionContent('')
+    setEditedFinalVersionContent('')
+
+    setShowStructureDialog(false)
+    setStructureLoading(false)
+    setStructureSaving(false)
+    setShowContentDialog(false)
+    setContentLoading(false)
+    setContentSaving(false)
+    setShowFinalVersionDialog(false)
+    setFinalVersionLoading(false)
+    setShowReviewDialog(false)
+    setReviewLoading(false)
+    setReviewSaving(false)
+
+    setIsStreaming(false)
+    setStreamingStage(null)
+    setProgressMessage('')
+    setSelectedConceptView('concept')
+
+    setShowRegenerateDialog(false)
+    setRegenerateTarget('both')
+    setRegenerateFeedback('')
+    setConceptDecisionShownThisSession(false)
+    setDecisionReady(false)
+    setShowDecisionDialog(false)
+    setLeftDrawerOpen(false)
+
+    setSnackbarOpen(false)
+    setSnackbarMessage('')
+    setSnackbarSeverity('success')
+
+    setGeneratingNextChapter(false)
+    setSavingChapter(false)
+    setChapterTitleInput('')
+    setCurrentTaskId(null)
+    setTaskProgress(0)
+    setConversationHistory([])
+
+    dispatch(updateStageOutput({ stage: 'concept', output: '' }))
+    dispatch(updateStageOutput({ stage: 'structure', output: '' }))
+    dispatch(updateStageOutput({ stage: 'content', output: '' }))
+    dispatch(updateStageOutput({ stage: 'review', output: '' }))
+    dispatch(updateStageOutput({ stage: 'iteration', output: '' }))
+  }, [projectId, dispatch])
 
   // 🆕 保护机制：已有内容警告对话框
   const [showContentWarningDialog, setShowContentWarningDialog] = useState(false)
@@ -251,13 +350,11 @@ export default function WorkflowControlPage() {
 
         if (!hasEnoughData) {
           // 如果最近3次任务数据不足，回退到全局平均
-          console.log('⚠️ 最近3次任务数据不足，回退到全局平均耗时')
           durations = await statisticsService.getStageDurations(
             undefined  // 不传 projectId，统计所有项目
           )
         }
 
-        console.log('📊 最终使用的阶段耗时（跨项目统计）:', durations)
         setStageDurations(durations)
 
         // 🆕 获取置信区间（同样跨项目）
@@ -268,8 +365,8 @@ export default function WorkflowControlPage() {
         // 创建进度估算器（传入置信区间）
         const estimator = new ProgressEstimator(durations, durationRanges || undefined)
         setProgressEstimator(estimator)
-      } catch (error) {
-        console.error('初始化进度估算器失败:', error)
+      } catch {
+        // 初始化进度估算器失败，使用默认值
       }
     }
 
@@ -318,14 +415,12 @@ export default function WorkflowControlPage() {
       const mappedGenre = genreMapping[currentProject.genre] || currentProject.genre
       if (mappedGenre) {
         setGenre(mappedGenre)
-        console.log('📍 自动填充题材:', currentProject.genre, '→', mappedGenre)
       }
     }
 
     // 自动填充篇幅设置
     if (currentProject.planned_length_type && !plannedLengthType) {
       setPlannedLengthType(currentProject.planned_length_type)
-      console.log('📍 自动填充篇幅:', currentProject.planned_length_type)
     }
 
     // 自动填充章节范围
@@ -373,22 +468,19 @@ export default function WorkflowControlPage() {
             // 恢复对话历史
             if (memory.messages && Array.isArray(memory.messages)) {
               setConversationHistory(memory.messages)
-              console.log(`🔄 已恢复对话历史: ${memory.messages.length} 条`)
             }
             // 恢复写作目标
             if (memory.writing_goal && !requirement) {
               setRequirement(memory.writing_goal)
-              console.log(`🔄 已恢复写作目标: ${memory.writing_goal.substring(0, 50)}...`)
             }
             // 更新最后保存时间
             if (memory.updated_at) {
               setLastSaveTime(new Date(memory.updated_at))
             }
-            console.log(`✅ 记忆快照已恢复，项目: ${projectId}`)
           }
         }
-      } catch (error) {
-        console.error('❌ 恢复记忆快照失败:', error)
+      } catch {
+        // 恢复记忆快照失败，使用默认状态
       }
     }
 
@@ -426,7 +518,6 @@ export default function WorkflowControlPage() {
   // 🆕 处理 Redux 状态（从 DashboardPage 跳转过来时）
   useEffect(() => {
     if (generateNextChapterTaskId) {
-      console.log(`📍 检测到生成下一章任务: taskId=${generateNextChapterTaskId}, chapterNumber=${generateNextChapterNumber}`)
       setGeneratingNextChapter(true)
       setIsGenerateNextChapterFlow(true)
     }
@@ -434,41 +525,30 @@ export default function WorkflowControlPage() {
 
   // 🔥 监控Redux状态变化，调试按钮状态
   useEffect(() => {
-    const conceptStatus = workflow.stages.concept.status
-    const conceptAgents = workflow.stages.concept.agents
-    const hasWorkingAgent = conceptAgents.some(a => a.status === 'working')
-    const allCompleted = conceptAgents.every(a => a.status === 'completed')
-    const buttonShouldShowGenerating = conceptStatus === 'active' || hasWorkingAgent
-    
-    console.log(`🔔 [Redux状态监控] concept状态=${conceptStatus}, hasWorkingAgent=${hasWorkingAgent}, allCompleted=${allCompleted}, 按钮应显示=[生成中:${buttonShouldShowGenerating}]`)
+    // 仅用于调试，可在此处设置断点
   }, [workflow.stages.concept.status, workflow.stages.concept.agents])
 
   // 🔥 关键修复：设置WebSocket加入房间后的回调，主动查询状态
   useEffect(() => {
     // 注册加入房间成功后的回调
     workflowWebSocket.setOnRoomJoined(async (joinedProjectId) => {
-      console.log(`🎉 [房间加入成功] projectId=${joinedProjectId}，开始主动查询阶段状态...`)
-      
       if (!projectId || Number(projectId) !== joinedProjectId) {
-        console.warn(`⚠️  [项目不匹配] 当前projectId=${projectId}, 加入的projectId=${joinedProjectId}`)
         return
       }
       
       try {
+        dispatch(fetchProject(Number(projectId)))
         const token = localStorage.getItem('access_token')
         const response = await fetch(`/api/v1/workflow/${projectId}/all-stages-content`, {
           headers: { 'Authorization': `Bearer ${token}` },
         })
         
         if (!response.ok) {
-          console.error(`❌ [查询失败] HTTP ${response.status}`)
           return
         }
         
         const batchData = await response.json()
         const stages = batchData.stages || {}
-        
-        console.log(`📥 [加入房间后查询] 收到数据:`, Object.keys(stages))
         
         // 更新概念阶段状态
         if (stages.concept && stages.concept.trim()) {
@@ -493,20 +573,16 @@ export default function WorkflowControlPage() {
           
           // 重置isRunning
           setIsRunning(false)
-          
-          console.log(`✅ [加入房间后同步] concept状态已更新为completed，所有Agent已设置为completed`)
         }
         
         if (stages.world_setting) {
           setWorldContent(stages.world_setting)
         }
         
-        if (stages.characters) {
-          setCharacterContent(stages.characters)
-        }
+        setCharacterContent(stages.characters || '')
         
-      } catch (error) {
-        console.error('❌ [加入房间后查询失败]', error)
+      } catch {
+        // 查询失败，忽略
       }
     })
     
@@ -520,19 +596,19 @@ export default function WorkflowControlPage() {
   useEffect(() => {
     if (!projectId) return
 
-    console.log('🔌 初始化 WebSocket 连接...')
-
     // 连接 WebSocket （异步）
+    const activeProjectId = Number(projectId)
+    const isCurrentProjectEvent = (eventProjectId?: number) => Number(eventProjectId) === activeProjectId
+
     workflowWebSocket.connect().then(() => {
-      console.log('✅ WebSocket 连接就绪，加入项目房间')
-      workflowWebSocket.joinProject(Number(projectId))
-    }).catch((error) => {
-      console.error('❌ WebSocket 连接失败:', error)
+      workflowWebSocket.joinProject(activeProjectId)
+    }).catch(() => {
+      // WebSocket 连接失败，忽略
     })
 
     // 监听阶段更新
     workflowWebSocket.onStageUpdate((data) => {
-      console.log('📊 收到阶段更新:', data)
+      if (!isCurrentProjectEvent(data.project_id)) return
 
       const stageType = data.stage as StageType
 
@@ -551,18 +627,13 @@ export default function WorkflowControlPage() {
             message: '执行中...'
           }))
         })
-        console.log(`✅ 阶段 ${stageType} 开始，所有 Agent 设置为工作中`)
       } else if (data.status === 'completed') {
         // 🔥 关键修复：从Redux store直接读取最新状态，避免闭包问题
         const currentState = store.getState()
         const agents = currentState.workflow.stages[stageType].agents
         
-        console.log(`🎯 [阶段完成] stage=${stageType}, status=completed, output存在=${!!data.output}, projectId=${projectId}`)
-        console.log(`📊 [当前状态] 该阶段有 ${agents.length} 个Agent，正在更新为completed...`)
-        
         // 第一步：更新Redux状态（阶段状态）
         dispatch(updateStageStatus({ stage: stageType, status: 'completed' }))
-        console.log(`✅ [Redux-阶段] ${stageType} 状态已更新为completed`)
         
         // 第二步：更新Redux状态（所有Agent状态）
         agents.forEach(agent => {
@@ -574,53 +645,34 @@ export default function WorkflowControlPage() {
             message: '执行完成'
           }))
         })
-        console.log(`✅ [Redux-Agent] ${stageType} 阶段的 ${agents.length} 个Agent已全部设为completed`)
         
         // 🔥 关键修复：不要立即重置 isRunning，让 useEffect 自动执行逻辑来判断是否继续
         // 只有在概念阶段完成时才暂停（等待用户决策）
         if (stageType === 'concept') {
           setIsRunning(false)
-          console.log(`✅ [状态重置-1] 概念阶段完成，已重置 isRunning=false（等待用户决策）`)
-        } else {
-          // 其他阶段完成后保持 isRunning=true，让自动执行逻辑继续下一阶段
-          console.log(`📍 [阶段完成] ${stageType} 阶段完成，保持 isRunning 状态，等待自动推进到下一阶段`)
         }
 
         // 第四步：同步更新 Redux store（如果有output）
         if (data.output) {
           dispatch(updateStageOutput({ stage: stageType, output: data.output }))
-          console.log(`✅ [Redux-输出] 已更新 ${stageType} 阶段输出到store: ${data.output.length} 字符`)
-          
-          if (stageType === 'concept') {
-            const hasCharacterSection = typeof data.output === 'string' && /人物设定|人物体系|主角阵营|对手阵营|支持角色|中立角色/.test(data.output)
-            if (hasCharacterSection) {
-              setCharacterContent(data.output)
-              console.log(`✅ [人物内容] 检测到人物设定，已同步更新`)
-            }
-          }
         }
         
         // 🔥 第五步：强制触发组件重新渲染（通过读取Redux最新状态）
         // 通过setTimeout确保Redux更新已经完成
         setTimeout(() => {
-          const latestState = store.getState()
-          const stageStatus = latestState.workflow.stages[stageType].status
-          const agentStatuses = latestState.workflow.stages[stageType].agents.map(a => a.status)
-          console.log(`🔍 [验证状态] ${stageType}阶段状态=${stageStatus}, Agent状态=${agentStatuses.join(',')}`)
+          // Redux状态验证
         }, 100)
 
         // 第六步：概念阶段完成 - 统一处理刷新与弹窗逻辑
         if (stageType === 'concept') {
-          console.log(`🔄 [概念阶段处理] 开始刷新内容，conceptDecisionShownThisSession=${conceptDecisionShownThisSession}`)
           try {
             if (projectId) {
+              dispatch(fetchProject(Number(projectId)))
               const token = localStorage.getItem('access_token')
-              console.log(`📡 [API调用] 请求 /api/v1/workflow/${projectId}/all-stages-content`)
               
               fetch(`/api/v1/workflow/${projectId}/all-stages-content`, {
                 headers: { 'Authorization': `Bearer ${token}` },
               }).then(res => res.json()).then(batchData => {
-                console.log(`📥 [API响应] 收到数据:`, Object.keys(batchData.stages || {}))
                 const stages = batchData.stages || {}
                 
                 // 更新本地state
@@ -628,65 +680,39 @@ export default function WorkflowControlPage() {
                   setConceptContent(stages.concept)
                   // 同时更新Redux store
                   dispatch(updateStageOutput({ stage: 'concept', output: stages.concept }))
-                  console.log(`✅ [故事概念] 已更新: ${stages.concept.length} 字符`)
                 }
                 if (stages.world_setting) {
                   setWorldContent(stages.world_setting)
-                  console.log(`✅ [世界观] 已更新: ${stages.world_setting.length} 字符`)
                 }
-                if (stages.characters) {
-                  setCharacterContent(stages.characters)
-                  console.log(`✅ [人物设定] 已更新: ${stages.characters.length} 字符`)
-                }
+                setCharacterContent(stages.characters || '')
                 
                 // 强制触发组件重新渲染
                 setSelectedConceptView('concept')
-                console.log(`✅ [视图刷新] 已切换到concept视图`)
                 
                 // 检查是否需要弹窗（仅在会话中首次）
                 const hasConcept = !!(stages.concept && stages.concept.trim())
                 if (hasConcept && !conceptDecisionShownThisSession) {
                   setDecisionReady(true)
                   setConceptDecisionShownThisSession(true)
-                  console.log(`🎉 [弹窗触发] 故事概念就绪，显示决策弹窗`)
-                } else {
-                  console.log(`⏭️  [弹窗跳过] hasConcept=${hasConcept}, shown=${conceptDecisionShownThisSession}`)
                 }
                 
                 // 数据刷新完成后，最终确认状态
                 setTimeout(() => {
-                  const finalState = store.getState()
-                  const conceptStatus = finalState.workflow.stages.concept.status
-                  const conceptAgents = finalState.workflow.stages.concept.agents
-                  const allCompleted = conceptAgents.every(a => a.status === 'completed')
-                  console.log(`🏁 [最终验证] concept状态=${conceptStatus}, 所有Agent完成=${allCompleted}`)
+                  // 状态验证完成
                 }, 200)
-              }).catch(err => {
-                console.error('❌ [API错误] 刷新概念阶段内容失败:', err)
+              }).catch(() => {
                 // 即使刷新失败也要重置状态（概念阶段需要停止）
                 setIsRunning(false)
-                const errorState = store.getState()
-                console.log(`🔥 [状态重置-异常] catch块中重置 isRunning=false, concept状态=${errorState.workflow.stages.concept.status}`)
               })
-            } else {
-              console.warn(`⚠️  [跳过刷新] projectId不存在`)
             }
-          } catch (err) {
-            console.error('❌ [异常] 概念阶段完成处理失败:', err)
+          } catch {
             // 确保异常时也重置状态（概念阶段需要停止）
             setIsRunning(false)
-            const errorState = store.getState()
-            console.log(`🔥 [状态重置-异常] try-catch块中重置 isRunning=false, concept状态=${errorState.workflow.stages.concept.status}`)
           }
         } else {
           // 🔥 非概念阶段：也需要验证状态
-          console.log(`✅ [非概念阶段] ${stageType}阶段完成，验证Redux状态...`)
           setTimeout(() => {
-            const nonConceptState = store.getState()
-            const status = nonConceptState.workflow.stages[stageType].status
-            const agents = nonConceptState.workflow.stages[stageType].agents
-            const allCompleted = agents.every(a => a.status === 'completed')
-            console.log(`🏁 [最终验证-${stageType}] 阶段状态=${status}, 所有Agent完成=${allCompleted}`)
+            // 状态验证完成
           }, 100)
         }
 
@@ -697,13 +723,10 @@ export default function WorkflowControlPage() {
           // 🔥 关键修复：同步更新组件本地状态
           if (stageType === 'iteration') {
             setFinalVersionContent(data.output)
-            console.log(`🔄 迭代优化阶段完成，已同步 finalVersionContent，长度: ${data.output.length}`)
           } else if (stageType === 'review') {
             setReviewReportContent(data.output)
-            console.log(`🔄 质量评审阶段完成，已同步 reviewReportContent，长度: ${data.output.length}`)
           } else if (stageType === 'content') {
             setContentDraftContent(data.output)
-            console.log(`🔄 内容创作阶段完成，已同步 contentDraftContent，长度: ${data.output.length}`)
           }
 
           // 🆕 收集对话历史：将阶段输出添加到对话记录
@@ -718,7 +741,6 @@ export default function WorkflowControlPage() {
                 timestamp: new Date().toISOString()
               }
             ])
-            console.log(`💬 对话历史已更新，阶段: ${stageType}`)
           }
         }
       }
@@ -745,7 +767,7 @@ export default function WorkflowControlPage() {
 
     // 监听任务进度
     workflowWebSocket.onTaskProgress((data) => {
-      console.log('📈 收到任务进度:', data)
+      if (!isCurrentProjectEvent(data.project_id)) return
 
       // 🆕 从 Redux store 直接读取最新状态（避免闭包问题）
       const currentState = store.getState()
@@ -753,7 +775,6 @@ export default function WorkflowControlPage() {
 
       // 🆕 检查是否是"生成下一章"任务
       if (data.task_id && currentTaskId && data.task_id === currentTaskId) {
-        console.log('📈 生成下一章任务进度:', data.progress, data.message)
         const progress = data.progress || 0
 
         // 🆕 根据进度计算当前步骤
@@ -782,7 +803,6 @@ export default function WorkflowControlPage() {
 
         // 切换工作流阶段
         dispatch(setCurrentStage(targetStage))
-        console.log(`📍 生成下一章: 自动切换到 ${targetStage} 阶段 (进度: ${progress}%)`)
 
         return  // 不更新普通任务进度
       }
@@ -800,19 +820,32 @@ export default function WorkflowControlPage() {
         setProgressMessage(data.message)
         
         setSnackbarMessage(data.message)
-        setSnackbarSeverity('info' as any)
+        setSnackbarSeverity('info')
         setSnackbarOpen(true)
       }
     })
 
     // 监听任务完成
     workflowWebSocket.onTaskComplete((data) => {
-      console.log('✅ 收到任务完成:', data)
+      if (!isCurrentProjectEvent(data.project_id)) return
+
+      const storyExpansionResult = getStoryExpansionResultFromTaskComplete(data)
+      const completedResult = (
+        data.result && typeof data.result === 'object' && !Array.isArray(data.result)
+      )
+        ? data.result as {
+            chapter?: {
+              chapter_number?: number
+              title?: string
+              word_count?: number
+            }
+            output?: string
+          }
+        : null
 
       // 🆕 处理协同拓展任务完成
-      const taskId = data.task_id || ''
-      if (taskId.startsWith('expand-story')) {
-        const result = data.result || {}
+      if (isStoryExpansionTaskId(data.task_id)) {
+        const result = storyExpansionResult ?? {}
         if (projectId) {
           const token = localStorage.getItem('access_token')
           fetch(`/api/v1/workflow/${projectId}/all-stages-content`, {
@@ -823,10 +856,10 @@ export default function WorkflowControlPage() {
               setStructureContent(stages.plot_outline)
               dispatch(updateStageOutput({ stage: 'structure', output: stages.plot_outline }))
             }
-            if (stages.characters) {
-              setCharacterContent(stages.characters)
-            }
-          }).catch(err => console.error('刷新协同拓展结果失败:', err))
+            setCharacterContent(stages.characters || '')
+          }).catch(() => {
+            // 刷新协同拓展结果失败
+          })
 
           dispatch(fetchChapters(parseInt(projectId)))
         }
@@ -842,13 +875,10 @@ export default function WorkflowControlPage() {
 
       // 🆕 检查是否是"生成下一章"任务
       if (data.task_id && currentTaskId && data.task_id === currentTaskId) {
-        console.log('✅ 生成下一章任务完成:', data.result)
-
         // 🔥 关键修复：显式标记所有阶段为完成
         const allStages: StageType[] = ['concept', 'structure', 'content', 'review', 'iteration']
         allStages.forEach(stage => {
           dispatch(updateStageStatus({ stage, status: 'completed' }))
-          console.log(`✅ 阶段 ${stage} 已标记为完成`)
         })
 
         // 使用 Redux action 清除任务状态
@@ -869,7 +899,7 @@ export default function WorkflowControlPage() {
         }
 
         // 提取章节信息
-        const chapter = data.result?.chapter
+        const chapter = completedResult?.chapter
         if (chapter) {
           setSnackbarMessage(`🎉 第${chapter.chapter_number}章已生成：${chapter.title} (${chapter.word_count}字)`)
         } else {
@@ -896,10 +926,9 @@ export default function WorkflowControlPage() {
 
       // 🆕 尝试从 data 中提取阶段信息并更新 Redux
       // 注意：需要后端在 send_task_complete 中传递 stage 和 output
-      if (data.result && typeof data.result === 'object') {
-        const result = data.result as any
+      if (completedResult) {
+        const result = completedResult
         if (result.output) {
-          console.log('✅ 任务结果包含输出内容，可能需要更新 Redux')
           // 如果后端传递了 stage 信息，可以在这里更新
           // dispatch(updateStageOutput({ stage: data.stage, output: result.output }))
         }
@@ -908,13 +937,11 @@ export default function WorkflowControlPage() {
       setSnackbarMessage('任务完成！')
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
-
-      console.log('💡 WebSocket 任务完成通知已处理，无需轮询')
     })
 
     // 监听任务错误
     workflowWebSocket.onTaskError((data) => {
-      console.log('❌ 收到任务错误:', data)
+      if (!isCurrentProjectEvent(data.project_id)) return
 
       // 🆕 从 Redux store 直接读取最新状态（避免闭包问题）
       const currentState = store.getState()
@@ -922,8 +949,6 @@ export default function WorkflowControlPage() {
 
       // 🆕 检查是否是"生成下一章"任务
       if (data.task_id && currentTaskId && data.task_id === currentTaskId) {
-        console.log('❌ 生成下一章任务失败:', data.error)
-
         // 使用 Redux action 清除任务状态
         dispatch(completeGenerateNextChapter())
         setGeneratingNextChapter(false)
@@ -953,11 +978,11 @@ export default function WorkflowControlPage() {
 
     // 监听 Agent 状态
     workflowWebSocket.onAgentStatus((data) => {
-      console.log('🤖 收到 Agent 状态:', data)
+      if (!isCurrentProjectEvent(data.project_id)) return
 
       // ✅ 更新 Redux 状态
       // 尝试从 agent_id 或 agent_name 推断阶段
-      let stage: StageType | null = data.stage as StageType || null
+      let stage: StageType | null = isStageType(data.stage) ? data.stage : null
       const agentId = data.agent_id || data.agent_name.toLowerCase().replace(/\s+/g, '-')
 
       // 如果没有阶段信息，尝试从 agent_id 推断
@@ -983,17 +1008,17 @@ export default function WorkflowControlPage() {
         dispatch(updateAgentStatus({
           stage: stage,
           agentId: agentId,
-          status: data.status as any,  // 强制类型转换
+          status: coerceAgentStatus(data.status),
           progress: data.progress || 0,
           message: data.message || ''
         }))
-        console.log(`✅ Agent 状态已更新: ${agentId} (${stage}) -> ${data.status}`)
       }
     })
 
     // 🆕 监听流式输出开始（移除自动打开对话框，直接在主页面显示）
     workflowWebSocket.onStreamStart((data) => {
-      console.log('🌊 流式输出开始:', data)
+      if (!isCurrentProjectEvent(data.project_id)) return
+
       setIsStreaming(true)
       setStreamingStage(data.stage as StageType)
 
@@ -1026,18 +1051,17 @@ export default function WorkflowControlPage() {
 
     // 🆕 监听流式输出块（打字机效果 - 直接在主页面的输出预览区显示）
     workflowWebSocket.onStreamChunk((data) => {
+      if (!isCurrentProjectEvent(data.project_id)) return
+
       const stageType = data.stage as StageType
 
       // 🆕 从 Redux store 直接读取最新状态（避免闭包问题）
       const currentState = store.getState()
       const currentTaskId = currentState.workflow.generateNextChapter.taskId
 
-      console.log(`🌊 stream_chunk: stage=${stageType}, taskId=${currentTaskId}, chunkLen=${data.chunk?.length}`)
-
       // 🆕 如果是"生成下一章"任务，使用临时流式内容状态
       if (currentTaskId) {
         // 生成下一章模式：流式内容存入临时状态（不保存到数据库缓存）
-        console.log(`📝 追加流式内容到 Redux, 当前总长度=${currentState.workflow.generateNextChapter.streamContent.length}`)
         dispatch(appendGenerateNextChapterStream(data.chunk))
         return
       }
@@ -1050,7 +1074,6 @@ export default function WorkflowControlPage() {
           
           // 🆕 自动切换视图：只在target变化时切换，避免频繁切换
           if (target !== selectedConceptView) {
-            console.log(`🔀 概念阶段视图自动切换: ${selectedConceptView} → ${target}`)
             setSelectedConceptView(target as 'concept' | 'world' | 'character')
           }
           
@@ -1062,6 +1085,8 @@ export default function WorkflowControlPage() {
               setWorldContent(prev => prev + data.chunk)
               break;
             case 'character':
+              // 流式阶段先展示原始生成人物内容，便于用户实时查看进度；
+              // 阶段完成后仍会由后端标准化落库结果覆盖，保证最终展示一致。
               setCharacterContent(prev => prev + data.chunk)
               break;
             default:
@@ -1084,7 +1109,8 @@ export default function WorkflowControlPage() {
 
     // 🆕 监听流式输出结束
     workflowWebSocket.onStreamEnd((data) => {
-      console.log('🌊 流式输出结束:', data)
+      if (!isCurrentProjectEvent(data.project_id)) return
+
       setIsStreaming(false)
       setStreamingStage(null)
       // 🆕 清空进度消息（流式输出结束）
@@ -1097,14 +1123,9 @@ export default function WorkflowControlPage() {
 
     // 🔔 组件卸载时：清除监听器，但不断开 WebSocket 连接
     return () => {
-      console.log('🔌 清理 WebSocket 监听器（保持连接）...')
       // 🔔 修改：使用新方法，只移除监听器，不断开连接
       workflowWebSocket.removeEventListeners()  // ✅ 使用新方法
-      // 🔔 不离开房间，以便在后台继续接收消息
-      // if (projectId) {
-      //   workflowWebSocket.leaveProject(Number(projectId))  // 🚫 删除此行
-      // }
-      console.log('✅ WebSocket 连接已保持，可在后台继续接收消息')
+      workflowWebSocket.leaveProject(activeProjectId)
     }
   }, [projectId, dispatch])
 
@@ -1119,11 +1140,8 @@ export default function WorkflowControlPage() {
           // 🔧 关键修复: 确保Token存在才执行请求
           const token = localStorage.getItem('access_token')
           if (!token) {
-            console.log('🔐 用户未登录，等待登录后自动加载内容')
             return
           }
-
-          console.log('📍 开始加载所有阶段内容...')
 
           // 🔧 关键修复：使用局部变量跟踪恢复状态，避免异步状态更新问题
           let hasRestoredRunningTask = false
@@ -1147,14 +1165,12 @@ export default function WorkflowControlPage() {
 
               // 🔧 新增：显示超时任务提示
               if (timeoutTasks.length > 0) {
-                console.log(`⏰ 检测到 ${timeoutTasks.length} 个超时任务已被自动清理`)
                 setSnackbarMessage(`⏰ 检测到 ${timeoutTasks.length} 个超时任务已被自动清理`)
                 setSnackbarSeverity('warning')
                 setSnackbarOpen(true)
               }
 
               if (runningTasks.length > 0) {
-                console.log(`🔍 发现 ${runningTasks.length} 个正在运行的任务，开始恢复...`)
 
                 // 恢复最新的任务
                 const latestTask = runningTasks[0]
@@ -1167,11 +1183,9 @@ export default function WorkflowControlPage() {
                 // 🔧 验证 stageType 是否有效
                 const validStages: StageType[] = ['concept', 'structure', 'content', 'review', 'iteration']
                 if (!validStages.includes(stageType)) {
-                  console.warn(`⚠️  无效的阶段类型: ${stageType}，跳过恢复`)
                 } else {
                   // 🔧 新增：显示任务运行时间
                   const ageMinutes = latestTask.age_minutes || 0
-                  console.log(`📌 恢复任务: ${latestTask.task_id}, 阶段: ${stageType}, 已运行: ${ageMinutes.toFixed(1)}分钟`)
 
                   // 更新状态
                   setCurrentTaskId(latestTask.task_id)
@@ -1185,10 +1199,7 @@ export default function WorkflowControlPage() {
 
                   // 🔔 关键：开始轮询任务状态（如果 WebSocket 未连接）
                   if (!workflowWebSocket.isConnected()) {
-                    console.log('⚠️  WebSocket 未连接，启动轮询模式')
                     pollTaskStatus(latestTask.task_id, stageType)
-                  } else {
-                    console.log('✅ WebSocket 已连接，等待实时通知')
                   }
 
                   setSnackbarMessage(`✅ 工作流已恢复，继续执行 ${stageNames[stageType]}（已运行${ageMinutes.toFixed(0)}分钟）`)
@@ -1196,7 +1207,6 @@ export default function WorkflowControlPage() {
                   setSnackbarOpen(true)
                 }
               } else {
-                console.log('✅ 没有正在运行的任务')
                 // 🔧 修复：如果没有正在运行的任务，确保停止运行状态
                 setIsRunning(false)
                 setCurrentTaskId(null)
@@ -1207,8 +1217,8 @@ export default function WorkflowControlPage() {
                 }
               }
             }
-          } catch (error) {
-            console.warn('⚠️  检查运行中任务失败:', error)
+          } catch {
+            // 检查运行中任务失败
           }
 
           // ⚡ 步骤2：性能优化: 使用批量接口一次性获取所有阶段内容
@@ -1220,58 +1230,26 @@ export default function WorkflowControlPage() {
 
           if (batchResponse.ok) {
             const batchData = await batchResponse.json()
-            const stages = batchData.stages
+            const stages = batchData.stages || {}
+
+            setConceptContent(stages.concept || '')
+            setWorldContent(stages.world_setting || '')
+            setCharacterContent(stages.characters || '')
+            setStructureContent(stages.plot_outline || '')
+            setContentDraftContent(stages.chapter_draft || '')
+            setReviewReportContent(stages.review_report || '')
+            setFinalVersionContent(stages.final_version || '')
+
+            dispatch(updateStageOutput({ stage: 'concept', output: stages.concept || '' }))
+            dispatch(updateStageOutput({ stage: 'structure', output: stages.plot_outline || '' }))
+            dispatch(updateStageOutput({ stage: 'content', output: stages.chapter_draft || '' }))
+            dispatch(updateStageOutput({ stage: 'review', output: stages.review_report || '' }))
+            dispatch(updateStageOutput({ stage: 'iteration', output: stages.final_version || '' }))
 
             // 设置所有按钮内容
-            if (stages.concept) {
-              setConceptContent(stages.concept)
-              console.log(`✅ 故事概念已加载，内容长度: ${stages.concept.length}`)
-            }
-            if (stages.world_setting) {
-              setWorldContent(stages.world_setting)
-              console.log(`✅ 世界观设定已加载，内容长度: ${stages.world_setting.length}`)
-            }
-            if (stages.characters) {
-              setCharacterContent(stages.characters)
-              console.log(`✅ 人物设定已加载，内容长度: ${stages.characters.length}`)
-            }
-            if (stages.plot_outline) {
-              setStructureContent(stages.plot_outline)
-              console.log(`✅ 情节大纲已加载，内容长度: ${stages.plot_outline.length}`)
-            }
-            if (stages.chapter_draft) {
-              setContentDraftContent(stages.chapter_draft)
-              console.log(`✅ 章节初稿已加载，内容长度: ${stages.chapter_draft.length}`)
-            }
-            if (stages.final_version) {
-              setFinalVersionContent(stages.final_version)
-              console.log(`✅ 最终版本已加载，内容长度: ${stages.final_version.length}`)
-            }
-            if (stages.review_report) {
-              setReviewReportContent(stages.review_report)
-              console.log(`✅ 评审报告已加载，内容长度: ${stages.review_report.length}`)
-            }
 
             // 更新Redux store的output字段，用于输出预览显示
-            if (stages.concept) {
-              dispatch(updateStageOutput({ stage: 'concept', output: stages.concept }))
-            }
-            if (stages.plot_outline) {
-              dispatch(updateStageOutput({ stage: 'structure', output: stages.plot_outline }))
-            }
-            if (stages.chapter_draft) {
-              dispatch(updateStageOutput({ stage: 'content', output: stages.chapter_draft }))
-            }
-            if (stages.review_report) {
-              dispatch(updateStageOutput({ stage: 'review', output: stages.review_report }))
-            }
-            if (stages.final_version) {
-              dispatch(updateStageOutput({ stage: 'iteration', output: stages.final_version }))
-            }
-
-            console.log('⚡ 批量加载完成，性能大幅提升！')
           } else {
-            console.warn('⚠️  批量接口不可用，使用传统方式加载')
             // 备用方案: 使用原有的分别请求方式
             // 这里可以保留原有代码逻辑
           }
@@ -1286,7 +1264,6 @@ export default function WorkflowControlPage() {
 
             if (statusResponse.ok) {
               const statusData = await statusResponse.json()
-              console.log('📊 阶段状态数据:', statusData)
 
               // 更新Redux store中的阶段状态
               const stageStatusMap: Record<string, StageType> = {
@@ -1305,11 +1282,9 @@ export default function WorkflowControlPage() {
                 if (status === 'completed') {
                   // 🔧 关键修复：如果该阶段正在运行，不要覆盖为 completed
                   if (hasRestoredRunningTask && stageName === restoredStage) {
-                    console.log(`⚠️ 跳过更新阶段状态: ${stageName} (当前正在运行)`)
                     // 保持 active 状态，不更新为 completed
                   } else {
                     dispatch(updateStageStatus({ stage: stageName, status: 'completed' }))
-                    console.log(`✅ 阶段状态已更新: ${stageName} = completed`)
                     lastCompletedStage = stageName
                   }
                 }
@@ -1318,7 +1293,6 @@ export default function WorkflowControlPage() {
               // 🔧 关键修复：使用局部变量判断，避免 React 状态异步更新问题
               // 如果已经恢复了运行中的任务，就不要再设置当前阶段了
               if (hasRestoredRunningTask) {
-                console.log(`🔒 跳过设置当前阶段，因为已恢复运行中的任务: ${restoredStage}`)
               } else {
                 // 🆕 从 Redux 读取"生成下一章"任务状态（关键：避免闭包中的旧值）
                 const reduxState = store.getState()
@@ -1328,27 +1302,21 @@ export default function WorkflowControlPage() {
                 // 🆕 如果正在执行"生成下一章"任务，设置为 structure 阶段（章节规划从这里开始）
                 if (generateNextChapterTaskId || isGeneratingNextChapter) {
                   dispatch(setCurrentStage('structure'))
-                  console.log(`🔒 检测到"生成下一章"任务 (taskId=${generateNextChapterTaskId})，设置当前阶段为: structure`)
                 } else if (lastCompletedStage) {
                   // 🔧 关键修复：刷新时保持在最后完成的阶段，不要跳转到下一阶段
                   dispatch(setCurrentStage(lastCompletedStage))
-                  console.log(`📍 刷新后保持在已完成阶段: ${lastCompletedStage}`)
                 } else {
                   // 没有完成的阶段,显示第一个阶段
                   dispatch(setCurrentStage('concept'))
-                  console.log(`📍 没有完成的阶段,显示第一个阶段: concept`)
                 }
               }
-            } else {
-              console.warn('⚠️  无法加载阶段状态')
             }
-          } catch (error) {
-            console.warn('⚠️  加载阶段状态失败:', error)
+          } catch {
+            // 加载阶段状态失败
           }
 
-          console.log('✅ 所有阶段内容和状态加载完成')
-        } catch (error) {
-          console.error('❌ 加载阶段内容失败:', error)
+        } catch {
+          // 加载阶段内容失败
           // 不显示错误提示，避免干扰用户体验
         }
       }
@@ -1366,7 +1334,6 @@ export default function WorkflowControlPage() {
 
     // 如果当前有异步任务正在执行，跳过
     if (currentTaskId) {
-      console.log('⏳ 当前有异步任务正在执行，跳过自动执行')
       return
     }
 
@@ -1374,7 +1341,6 @@ export default function WorkflowControlPage() {
     const currentStageData = workflow.stages[workflow.currentStage]
 
     if (currentStageData.status === 'pending') {
-      console.log(`🚀 自动执行阶段（异步模式）: ${workflow.currentStage}`)
       executeStageAsync(workflow.currentStage)
     } else if (currentStageData.status === 'completed') {
       // 当前阶段已完成 - 检查是否需要执行下一阶段
@@ -1387,27 +1353,22 @@ export default function WorkflowControlPage() {
       if (currentIndex < stages.length - 1) {
         // 移动到下一阶段
         const nextStage = stages[currentIndex + 1]
-        console.log(`✅ 阶段 ${workflow.currentStage} 已完成，移动到下一阶段: ${nextStage}`)
         dispatch(setCurrentStage(nextStage))
         // 注意：不在这里执行，等待下次useEffect触发时执行
       } else {
         // 所有阶段都已完成
-        console.log('🎉 所有阶段已完成！')
         setIsRunning(false)
 
         // 🔧 关键修复：只有在“非生成下一章”流程才自动保存
         if (isGenerateNextChapterFlow) {
-          console.log('💾 跳过自动保存（生成下一章已经保存）')
           // 重置标记
           setIsGenerateNextChapterFlow(false)
           // 直接跳转
-          console.log('📍 1.5秒后跳转到Dashboard...')
           setTimeout(() => {
             navigate(`/dashboard?projectId=${projectId}`)
           }, 1500)
         } else {
           // 普通工作流，需要自动保存
-          console.log('💾 开始自动保存章节...')
           autoSaveChapter()
         }
       }
@@ -1459,7 +1420,6 @@ export default function WorkflowControlPage() {
         // 或者使用特殊的 endpoint 来处理
         const url = `/api/v1/projects/${projectId}/memories/auto-save?token=${token}`
         navigator.sendBeacon(url, blob)
-        console.log('💾 [beforeunload] 使用 sendBeacon 保存记忆')
       }
     }
 
@@ -1479,8 +1439,6 @@ export default function WorkflowControlPage() {
     // return
 
     try {
-      console.log(`💾 保存记忆快照 [${trigger}]...`)
-
       // 收集当前工作流状态数据
       const memoryData = {
         messages: conversationHistory,
@@ -1502,7 +1460,6 @@ export default function WorkflowControlPage() {
       if (response.ok) {
         const savedMemory = await response.json()
         setLastSaveTime(new Date(savedMemory.updated_at))
-        console.log(`✅ 记忆快照已保存 [${trigger}]:`, savedMemory.id)
 
         // 仅在手动保存时显示提示
         if (trigger === 'manual') {
@@ -1510,11 +1467,9 @@ export default function WorkflowControlPage() {
           setSnackbarSeverity('success')
           setSnackbarOpen(true)
         }
-      } else {
-        console.error('❌ 保存记忆快照失败')
       }
-    } catch (error) {
-      console.error('❌ 保存记忆快照异常:', error)
+    } catch {
+      // 保存记忆快照异常
     }
   }
 
@@ -1523,8 +1478,6 @@ export default function WorkflowControlPage() {
     if (!projectId) return
 
     try {
-      console.log(`🚀 开始异步执行阶段: ${stage}`)
-
       // 🔧 立即更新阶段状态为 'active'，显示执行中的UI
       dispatch(updateStageStatus({ stage, status: 'active' }))
 
@@ -1555,7 +1508,6 @@ export default function WorkflowControlPage() {
 
       // 🆕 流式输出阶段：清空之前的内容，准备接收流式数据
       if (enableStreaming) {
-        console.log(`🌊 阶段 ${stage} 支持流式输出，清空之前的内容`)
         if (stage === 'concept') {
           setConceptContent('')
           setWorldContent('')
@@ -1597,7 +1549,6 @@ export default function WorkflowControlPage() {
         throw new Error('未返回task_id')
       }
 
-      console.log(`✅ 任务已提交: ${taskId}`)
       setCurrentTaskId(taskId)
       setTaskProgress(0)
 
@@ -1609,21 +1560,16 @@ export default function WorkflowControlPage() {
           setEstimatedRemainingTimeMax(Math.round(state.remainingTimeMax))  // 🆕
           setTaskProgress(Math.round(state.displayProgress))
         })
-        console.log(`📊 进度估算器已启动: ${stage}`)
       }
 
       // 🆕 检查 WebSocket 是否连接
       if (workflowWebSocket.isConnected()) {
-        console.log('💡 WebSocket 已连接，使用实时通知模式（不启动轮询）')
-        console.log('   等待 task_complete 或 task_error 事件...')
         // 依赖 WebSocket 事件监听器，不启动轮询
       } else {
-        console.log('⚠️  WebSocket 未连接，降级到 HTTP 轮询模式')
         // WebSocket 不可用时启动轮询
         pollTaskStatus(taskId, stage)
       }
-    } catch (error) {
-      console.error(`❌ 异步执行阶段失败:`, error)
+    } catch {
       // 🔧 失败时重置状态
       dispatch(updateStageStatus({ stage, status: 'error' }))
       setSnackbarMessage(`执行${stageNames[stage]}失败，请重试`)
@@ -1644,7 +1590,6 @@ export default function WorkflowControlPage() {
     const interval = setInterval(async () => {
       try {
         pollCount++
-        console.log(`🔄 轮询任务状态 [${pollCount}/${maxPolls}]: ${taskId}`)
 
         const response = await fetch(`/api/v1/workflow/task/${taskId}`, {
           headers: {
@@ -1656,7 +1601,6 @@ export default function WorkflowControlPage() {
           // 🔧 处理404错误
           if (response.status === 404) {
             consecutiveErrors++
-            console.warn(`⚠️  任务不存在 (${consecutiveErrors}/${maxConsecutiveErrors}): ${taskId}`)
 
             if (consecutiveErrors >= maxConsecutiveErrors) {
               clearInterval(interval)
@@ -1670,7 +1614,6 @@ export default function WorkflowControlPage() {
               setSnackbarSeverity('error')
               setSnackbarOpen(true)
 
-              console.error(`❌ 连续${maxConsecutiveErrors}次404错误，停止轮询`)
               return
             }
             // 继续轮询，等待后端任务初始化
@@ -1684,7 +1627,6 @@ export default function WorkflowControlPage() {
         consecutiveErrors = 0
 
         const data = await response.json()
-        console.log(`📊 任务状态:`, data)
 
         const progress = Math.min(95, pollCount * 3)
         setTaskProgress(progress)
@@ -1695,7 +1637,9 @@ export default function WorkflowControlPage() {
           setTaskProgress(100)
           setCurrentTaskId(null)
 
-          console.log(`✅ 任务完成:`, data.result)
+          if (stage === 'concept' && projectId) {
+            dispatch(fetchProject(Number(projectId)))
+          }
 
           dispatch(updateStageStatus({ stage, status: 'completed' }))
           dispatch(updateStageOutput({ stage, output: data.result || '' }))
@@ -1704,13 +1648,10 @@ export default function WorkflowControlPage() {
           const resultContent = data.result || ''
           if (stage === 'iteration' && resultContent) {
             setFinalVersionContent(resultContent)
-            console.log(`🔄 [轮询] 迭代优化阶段完成，已同步 finalVersionContent，长度: ${resultContent.length}`)
           } else if (stage === 'review' && resultContent) {
             setReviewReportContent(resultContent)
-            console.log(`🔄 [轮询] 质量评审阶段完成，已同步 reviewReportContent，长度: ${resultContent.length}`)
           } else if (stage === 'content' && resultContent) {
             setContentDraftContent(resultContent)
-            console.log(`🔄 [轮询] 内容创作阶段完成，已同步 contentDraftContent，长度: ${resultContent.length}`)
           }
 
           setSnackbarMessage(`✅ ${stageNames[stage]}完成！`)
@@ -1736,17 +1677,14 @@ export default function WorkflowControlPage() {
 
               // 🔧 关键修复：只有在“非生成下一章”流程才自动保存
               if (isGenerateNextChapterFlow) {
-                console.log('💾 跳过自动保存（生成下一章已经保存）')
                 // 重置标记
                 setIsGenerateNextChapterFlow(false)
                 // 直接跳转
-                console.log('📍 1.5秒后跳转到Dashboard...')
                 setTimeout(() => {
                   navigate(`/dashboard?projectId=${projectId}`)
                 }, 1500)
               } else {
                 // 普通工作流，需要自动保存
-                console.log('💾 开始自动保存章节...')
                 autoSaveChapter()
               }
             }
@@ -1756,8 +1694,6 @@ export default function WorkflowControlPage() {
           setTaskPollingInterval(null)
           setTaskProgress(0)
           setCurrentTaskId(null)
-
-          console.error(`❌ 任务失败:`, data.error)
 
           dispatch(updateStageStatus({ stage, status: 'error' }))
 
@@ -1772,8 +1708,6 @@ export default function WorkflowControlPage() {
           setTaskProgress(0)
           setCurrentTaskId(null)
 
-          console.error(`❌ 轮询超时`)
-
           dispatch(updateStageStatus({ stage, status: 'error' }))
 
           setSnackbarMessage(`❌ ${stageNames[stage]}超时，请重试`)
@@ -1782,8 +1716,7 @@ export default function WorkflowControlPage() {
 
           setIsRunning(false)
         }
-      } catch (error) {
-        console.error(`❌ 轮询任务状态失败:`, error)
+      } catch {
         // 🔧 其他错误也计入连续错误
         consecutiveErrors++
 
@@ -1795,7 +1728,7 @@ export default function WorkflowControlPage() {
 
           dispatch(updateStageStatus({ stage, status: 'error' }))
 
-          setSnackbarMessage(`❌ 轮询失败: ${error}`)
+          setSnackbarMessage(`❌ 轮询失败，请重试`)
           setSnackbarSeverity('error')
           setSnackbarOpen(true)
         }
@@ -1844,9 +1777,8 @@ export default function WorkflowControlPage() {
             planned_chapters_max: plannedChaptersMax || undefined,
             user_outline_plan: userOutlinePlan || undefined,
           })
-          console.log('✅ 项目题材与篇幅信息已更新')
-        } catch (error) {
-          console.error('⚠️ 更新项目信息失败:', error)
+        } catch {
+          // 更新项目信息失败
         }
       }
       
@@ -1869,8 +1801,7 @@ export default function WorkflowControlPage() {
         setSnackbarSeverity('success')
         setSnackbarOpen(true)
       }
-    } catch (error) {
-      console.error('Failed to start workflow:', error)
+    } catch {
       setIsStarting(false)  // 启动失败，隐藏加载状态
       setIsRestartMode(false)  // 🆕 重置重新开始标志
       setSnackbarMessage('启动工作流失败，请重试')
@@ -1889,8 +1820,8 @@ export default function WorkflowControlPage() {
           stage: workflow.currentStage,
         })
       ).unwrap()
-    } catch (error) {
-      console.error('Failed to regenerate stage:', error)
+    } catch {
+      // 重新生成阶段失败
     }
   }
 
@@ -1913,7 +1844,6 @@ export default function WorkflowControlPage() {
 
   const handleSaveAsChapter = async () => {
     if (!projectId) {
-      console.error('❌ 项目ID不存在')
       setSnackbarMessage('项目ID不存在')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
@@ -1924,17 +1854,13 @@ export default function WorkflowControlPage() {
     setSavingChapter(true)
 
     try {
-      console.log('📍 开始保存章节，projectId:', projectId)
-
       // 🔥 关键修复：从后端API获取最新的迭代阶段内容 - 使用apiClient
-      console.log('📍 步骤1: 从后端获取最新的迭代阶段内容...')
       const getContentResponse = await apiClient.get(`/api/v1/workflow/${projectId}/stage/iteration/content`)
 
       const contentData = getContentResponse.data
       const content = contentData.content || ''
 
       if (!content || content.trim() === '') {
-        console.error('❌ 章节内容为空')
         setSnackbarMessage('没有可保存的章节内容')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
@@ -1942,15 +1868,10 @@ export default function WorkflowControlPage() {
         return
       }
 
-      console.log('✅ 成功获取迭代阶段内容，长度:', content.length)
-
-
       // 如果用户没有输入标题，后端会自动生成
       const titleToSave = chapterTitle.trim() || ''
-      console.log('📍 章节标题:', titleToSave || '(自动生成)')
 
       // 🔥 修复：直接创建章节记录 - 使用apiClient，URL末尾添加斜杠避免307重定向
-      console.log('📍 步骤2: 创建章节记录...')
       const response = await apiClient.post('/api/v1/chapters/', {
         project_id: parseInt(projectId),
         content: content,
@@ -1959,7 +1880,6 @@ export default function WorkflowControlPage() {
 
       // axios成功响应（2xx状态码）
       const data = response.data
-      console.log('✅ 章节创建成功:', data)
 
       setSnackbarMessage(`✅ 章节已保存：${data.title} (${data.word_count} 字)`)
       setSnackbarSeverity('success')
@@ -1970,28 +1890,21 @@ export default function WorkflowControlPage() {
       setChapterTitle('')
 
       // 🔧 修复：1.5秒后跳转到Dashboard页面，并自动展开章节列表
-      console.log('📍 1.5秒后跳转到Dashboard并自动展开章节列表...')
       setTimeout(() => {
-        console.log('📍 跳转到: /dashboard?projectId=' + projectId)
         navigate(`/dashboard?projectId=${projectId}`)  // 带projectId参数，自动展开章节列表
       }, 1500)
     } catch (error: any) {
-      console.error('❌ 保存章节异常:', error)
-
       let errorMessage = '保存章节失败，请重试'
 
       if (error.response) {
         // 服务器返回错误响应
         errorMessage = await extractApiErrorMessage(error, errorMessage)
-        console.error('❌ 服务器错误:', error.response.status, error.response.data)
       } else if (error.request) {
         // 请求已发送但无响应
         errorMessage = '无法连接到服务器，请检查后端服务是否启动'
-        console.error('❌ 网络错误: 无响应')
       } else {
         // 其他错误
         errorMessage = error.message || errorMessage
-        console.error('❌ 请求配置错误:', error.message)
       }
 
       setSnackbarMessage(errorMessage)
@@ -2000,34 +1913,27 @@ export default function WorkflowControlPage() {
     } finally {
       // ✅ 确保一定会重置保存状态
       setSavingChapter(false)
-      console.log('🛡️ [保存状态] savingChapter 已设置为 false')
     }
   }
 
   // 🆕 自动保存章节（无需用户输入标题）
   const autoSaveChapter = async () => {
     if (!projectId) {
-      console.error('❌ 项目ID不存在')
       return
     }
 
     try {
-      console.log('💾 开始自动保存章节，projectId:', projectId)
-
       // 获取最新的迭代阶段内容
       const getContentResponse = await apiClient.get(`/api/v1/workflow/${projectId}/stage/iteration/content`)
       const contentData = getContentResponse.data
       const content = contentData.content || ''
 
       if (!content || content.trim() === '') {
-        console.error('❌ 章节内容为空，跳过自动保存')
         setSnackbarMessage('⚠️ 没有可保存的章节内容')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
         return
       }
-
-      console.log('✅ 获取内容成功，长度:', content.length)
 
       // 创建章节记录（标题自动生成）
       const response = await apiClient.post('/api/v1/chapters/', {
@@ -2037,7 +1943,6 @@ export default function WorkflowControlPage() {
       })
 
       const data = response.data
-      console.log('✅ 自动保存成功:', data)
 
       // 显示成功提示
       setSnackbarMessage(`✅ 章节已自动保存：${data.title} (${data.word_count} 字)`)
@@ -2045,14 +1950,11 @@ export default function WorkflowControlPage() {
       setSnackbarOpen(true)
 
       // 1.5秒后跳转到Dashboard
-      console.log('📍 1.5秒后跳转到Dashboard...')
       setTimeout(() => {
         navigate(`/dashboard?projectId=${projectId}`)
       }, 1500)
 
     } catch (error: any) {
-      console.error('❌ 自动保存章节失败:', error)
-
       let errorMessage = '自动保存失败'
 
       if (error.response) {
@@ -2071,7 +1973,6 @@ export default function WorkflowControlPage() {
 
   // 🆕 点击故事概念按钮 - 切换预览区域显示
   const handleOpenConceptDialog = () => {
-    console.log('📍 切换到故事概念预览')
     setSelectedConceptView('concept')
   }
 
@@ -2081,7 +1982,6 @@ export default function WorkflowControlPage() {
 
     // ⚡ 优化：如果已经有缓存内容，直接使用，不再请求
     if (structureContent && structureContent.trim() !== '') {
-      console.log('⚡ 使用缓存的情节大纲内容，长度:', structureContent.length)
       setEditedStructureContent(structureContent)
       return
     }
@@ -2090,7 +1990,6 @@ export default function WorkflowControlPage() {
     setStructureLoading(true)
 
     try {
-      console.log('📍 从API获取最新的情节大纲内容...')
       const response = await fetch(`/api/v1/workflow/${projectId}/stage/structure/content`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
@@ -2102,13 +2001,11 @@ export default function WorkflowControlPage() {
         setStructureContent(data.content || '')
         setEditedStructureContent(data.content || '')
       } else {
-        console.error('❌ 获取情节大纲失败，状态码:', response.status)
         setSnackbarMessage('获取情节大纲失败')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
       }
-    } catch (error) {
-      console.error('❌ 获取情节大纲异常:', error)
+    } catch {
       setSnackbarMessage('获取情节大纲失败')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
@@ -2159,8 +2056,7 @@ export default function WorkflowControlPage() {
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
       }
-    } catch (error) {
-      console.error('Failed to save structure:', error)
+    } catch {
       setSnackbarMessage('保存失败，请重试')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
@@ -2175,7 +2071,6 @@ export default function WorkflowControlPage() {
 
     // ⚡ 优化：如果已经有缓存内容，直接使用，不再请求
     if (contentDraftContent && contentDraftContent.trim() !== '') {
-      console.log('⚡ 使用缓存的章节初稿内容，长度:', contentDraftContent.length)
       setEditedContentDraftContent(contentDraftContent)
       return
     }
@@ -2184,7 +2079,6 @@ export default function WorkflowControlPage() {
     setContentLoading(true)
 
     try {
-      console.log('📍 从API获取最新的章节初稿内容...')
       const response = await fetch(`/api/v1/workflow/${projectId}/stage/content/content`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
@@ -2194,17 +2088,14 @@ export default function WorkflowControlPage() {
       if (response.ok) {
         const data = await response.json()
         const content = data.content || ''
-        console.log('✅ 章节初稿已加载，长度:', content.length)
         setContentDraftContent(content)
         setEditedContentDraftContent(content)
       } else {
-        console.error('❌ 获取章节初稿失败，状态码:', response.status)
         setSnackbarMessage('获取章节初稿失败')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
       }
-    } catch (error) {
-      console.error('❌ 获取章节初稿异常:', error)
+    } catch {
       setSnackbarMessage('获取章节初稿失败')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
@@ -2226,7 +2117,6 @@ export default function WorkflowControlPage() {
 
     // ⚡ 优化：如果已经有缓存内容，直接使用，不再请求
     if (reviewReportContent && reviewReportContent.trim() !== '') {
-      console.log('⚡ 使用缓存的评审报告内容，长度:', reviewReportContent.length)
       setEditedReviewReportContent(reviewReportContent)
       return
     }
@@ -2235,7 +2125,6 @@ export default function WorkflowControlPage() {
     setReviewLoading(true)
 
     try {
-      console.log('📍 从API获取最新的评审报告内容...')
       const response = await fetch(`/api/v1/workflow/${projectId}/stage/review/content`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
@@ -2245,17 +2134,14 @@ export default function WorkflowControlPage() {
       if (response.ok) {
         const data = await response.json()
         const content = data.content || ''
-        console.log('✅ 评审报告已加载，长度:', content.length)
         setReviewReportContent(content)
         setEditedReviewReportContent(content)
       } else {
-        console.error('❌ 获取评审报告失败，状态码:', response.status)
         setSnackbarMessage('获取评审报告失败')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
       }
-    } catch (error) {
-      console.error('❌ 获取评审报告异常:', error)
+    } catch {
       setSnackbarMessage('获取评审报告失败')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
@@ -2301,9 +2187,8 @@ export default function WorkflowControlPage() {
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
       }
-    } catch (error) {
-      console.error('保存评审报告失败:', error)
-      setSnackbarMessage('保存失败')
+    } catch {
+      setSnackbarMessage('保存评审报告失败')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
     } finally {
@@ -2319,7 +2204,6 @@ export default function WorkflowControlPage() {
 
     try {
       // 1. 保存内容并指示继续工作流
-      console.log('📍 开始保存评审报告并继续工作流...')
       const saveResponse = await fetch(`/api/v1/workflow/${projectId}/stage/review/content`, {
         method: 'PUT',
         headers: {
@@ -2332,19 +2216,15 @@ export default function WorkflowControlPage() {
         }),
       })
 
-      console.log('📍 保存响应状态:', saveResponse.status, saveResponse.ok)
-
       if (!saveResponse.ok) {
         const errorData = await saveResponse.json().catch(() => ({}))
-        console.error('❌ 保存失败:', errorData)
         setSnackbarMessage(errorData.detail || '保存失败，请重试')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
         return
       }
 
-      const saveData = await saveResponse.json()
-      console.log('✅ 保存成功，响应数据:', saveData)
+      const saveData = await saveResponse.json().catch(() => ({}))
 
       // ✅ 更新缓存
       setReviewReportContent(editedReviewReportContent)
@@ -2370,9 +2250,7 @@ export default function WorkflowControlPage() {
       // ✅ 关键修复：后端已经启动后台任务，前端只需设置isRunning=true等待WebSocket更新
       setIsRunning(true)
       dispatch(setCurrentStage('iteration'))
-      console.log('🚀 后端已启动迭代优化阶段，等待WebSocket通知...')
-    } catch (error) {
-      console.error('❌ 保存评审报告失败:', error)
+    } catch {
       setSnackbarMessage('保存失败，请重试')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
@@ -2435,9 +2313,7 @@ export default function WorkflowControlPage() {
       // ✅ 关键修复：后端已经启动后台任务，前端只需设置isRunning=true等待WebSocket更新
       setIsRunning(true)
       dispatch(setCurrentStage('review'))
-      console.log('🚀 后端已启动质量评审阶段，等待WebSocket通知...')
-    } catch (error) {
-      console.error('Failed to save content:', error)
+    } catch {
       setSnackbarMessage('保存失败，请重试')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
@@ -2480,8 +2356,7 @@ export default function WorkflowControlPage() {
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
       }
-    } catch (error) {
-      console.error('Failed to save content:', error)
+    } catch {
       setSnackbarMessage('保存失败，请重试')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
@@ -2492,13 +2367,11 @@ export default function WorkflowControlPage() {
 
   // 🆕 点击世界观设定按钮 - 切换预览区域显示
   const handleOpenWorldDialog = () => {
-    console.log('📍 切换到世界观预览')
     setSelectedConceptView('world')
   }
 
   // 🆕 点击人物设定按钮 - 切换预览区域显示
   const handleOpenCharacterDialog = () => {
-    console.log('📍 切换到人物设定预览')
     setSelectedConceptView('character')
   }
 
@@ -2508,7 +2381,6 @@ export default function WorkflowControlPage() {
 
     // ⚡ 优化：如果已经有缓存内容，直接使用，不再请求
     if (finalVersionContent && finalVersionContent.trim() !== '') {
-      console.log('⚡ 使用缓存的最终版本内容，长度:', finalVersionContent.length)
       setEditedFinalVersionContent(finalVersionContent)
       return
     }
@@ -2517,7 +2389,6 @@ export default function WorkflowControlPage() {
     setFinalVersionLoading(true)
 
     try {
-      console.log('📏 从API获取最新的最终版本内容...')
       const response = await fetch(`/api/v1/workflow/${projectId}/stage/iteration/content`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
@@ -2527,17 +2398,14 @@ export default function WorkflowControlPage() {
       if (response.ok) {
         const data = await response.json()
         const content = data.content || ''
-        console.log('✅ 最终版本已加载，长度:', content.length)
         setFinalVersionContent(content)
         setEditedFinalVersionContent(content)
       } else {
-        console.error('❌ 获取最终版本失败，状态码:', response.status)
         setSnackbarMessage('获取最终版本失败')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
       }
-    } catch (error) {
-      console.error('❌ 获取最终版本异常:', error)
+    } catch {
       setSnackbarMessage('获取最终版本失败')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
@@ -2553,7 +2421,6 @@ export default function WorkflowControlPage() {
     setGeneratingNextChapter(true)
 
     try {
-      console.log('📍 开始生成下一章（异步模式）...')
 
       const response = await fetch(`/api/v1/workflow/${projectId}/generate-next-chapter`, {
         method: 'POST',
@@ -2565,7 +2432,6 @@ export default function WorkflowControlPage() {
 
       if (response.ok) {
         const data = await response.json()
-        console.log('✅ 异步任务已创建:', data)
 
         // 后端返回: { task_id, status, message, next_chapter_number }
         const { task_id, next_chapter_number } = data
@@ -2581,15 +2447,13 @@ export default function WorkflowControlPage() {
         // 注意：不再设置 setGeneratingNextChapter(false)，等待 WebSocket 完成事件
       } else {
         const errorData = await response.json()
-        console.error('❌ 创建生成任务失败:', errorData)
 
         setSnackbarMessage(errorData.detail || errorData.error || '创建生成任务失败，请重试')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
         setGeneratingNextChapter(false)
       }
-    } catch (error) {
-      console.error('❌ 生成下一章异常:', error)
+    } catch {
       setSnackbarMessage('创建生成任务失败，请重试')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
@@ -2636,14 +2500,12 @@ export default function WorkflowControlPage() {
         setIsRunning(false)
         return
       }
-      const data = await response.json()
-      console.log('✅ 概念阶段重生任务已提交:', data)
+      await response.json()
       setSnackbarMessage('已提交重新生成，请稍候完成')
       setSnackbarSeverity('success')
       setSnackbarOpen(true)
       // 等待任务完成后由现有状态/事件再决定是否再次弹出确认
-    } catch (error) {
-      console.error('提交重新生成异常:', error)
+    } catch {
       setSnackbarMessage('提交重新生成失败，请重试')
       setSnackbarSeverity('error')
       setSnackbarOpen(true)
@@ -2672,12 +2534,6 @@ export default function WorkflowControlPage() {
     setSavingChapter(true)
 
     try {
-      console.log('📏 开始保存最终版本为章节...', {
-        projectId,
-        contentLength: editedFinalVersionContent.length,
-        title: chapterTitleInput,
-        token: localStorage.getItem('access_token') ? '存在' : '不存在'
-      })
 
       // ✅ 更新state，保持已保存的内容
       setFinalVersionContent(editedFinalVersionContent)
@@ -2691,7 +2547,6 @@ export default function WorkflowControlPage() {
 
       // axios成功响应（2xx状态码）
       const data = response.data
-      console.log('✅ 章节保存成功:', data)
 
       // ✅ 关闭对话框
       handleCloseFinalVersionDialog()
@@ -2703,27 +2558,21 @@ export default function WorkflowControlPage() {
 
       // ✅ 返回 Dashboard 并自动展开章节列表
       setTimeout(() => {
-        console.log('📏 返回 Dashboard')
         navigate(`/dashboard?projectId=${projectId}`)
       }, 1000)
     } catch (error: any) {
       // axios错误响应（非2xx状态码或网络错误）
-      console.error('❌ 保存章节异常:', error)
-
       let errorMessage = '保存章节失败，请重试'
 
       if (error.response) {
         // 服务器返回错误响应
         errorMessage = await extractApiErrorMessage(error, errorMessage)
-        console.error('❌ 服务器错误:', error.response.status, error.response.data)
       } else if (error.request) {
         // 请求已发送但无响应
         errorMessage = '无法连接到服务器，请检查后端服务是否启动'
-        console.error('❌ 网络错误: 无响应')
       } else {
         // 其他错误
         errorMessage = error.message || errorMessage
-        console.error('❌ 请求配置错误:', error.message)
       }
 
       setSnackbarMessage(errorMessage)
@@ -2732,7 +2581,6 @@ export default function WorkflowControlPage() {
     } finally {
       // ✅ 确保一定会执行
       setSavingChapter(false)
-      console.log('🛡️ [保存状态] savingChapter 已设置为 false')
     }
   }
 
@@ -2763,17 +2611,6 @@ export default function WorkflowControlPage() {
     
     const shouldShow = scenario1 || scenario2 || scenario3
     setDecisionReady(shouldShow)
-    
-    console.log('📊 评审按钮显示逻辑:', {
-      isConceptStage,
-      conceptCompleted,
-      conceptActive,
-      hasConceptAgentWorking,
-      structureStarted,
-      hasContent,
-      shouldShow,
-      '结构阶段状态': workflow.stages.structure.status
-    })
   }, [workflow.currentStage, conceptContent, worldContent, workflow.stages.concept.status, workflow.stages.structure.status, workflow.stages.concept.agents])
 
   return (
@@ -3117,18 +2954,6 @@ export default function WorkflowControlPage() {
         {/* 概念开发阶段：显示“故事概念”、“世界观设定”、“人物设定”按钮 */}
         {workflow.currentStage === 'concept' ? (
           <Box sx={{ display: 'flex', gap: 1 }}>
-            {(() => {
-              // 🔥 添加调试日志：监控按钮渲染状态
-              const conceptStatus = workflow.stages.concept.status
-              const conceptAgents = workflow.stages.concept.agents
-              const hasWorkingAgent = conceptAgents.some(a => a.status === 'working')
-              const isButtonDisabled = conceptStatus === 'active' || hasWorkingAgent
-              const buttonText = isButtonDisabled ? '生成中' : '评审结果'
-                      
-              console.log(`🎬 [按钮渲染] decisionReady=${decisionReady}, conceptStatus=${conceptStatus}, hasWorkingAgent=${hasWorkingAgent}, disabled=${isButtonDisabled}, text=${buttonText}`)
-                      
-              return null // 不渲染任何内容，只执行日志
-            })()}
             {decisionReady && (
               <Badge color="error" variant="dot" overlap="rectangular" anchorOrigin={{ vertical: 'top', horizontal: 'left' }}>
               <Button
@@ -3389,13 +3214,13 @@ export default function WorkflowControlPage() {
                   setPlannedChaptersMin(3)
                   setPlannedChaptersMax(30)
                 } else if (value === 'mid') {
-                  setPlannedChaptersMin(30)
-                  setPlannedChaptersMax(100)
+                  setPlannedChaptersMin(31)
+                  setPlannedChaptersMax(300)
                 } else if (value === 'long') {
-                  setPlannedChaptersMin(100)
-                  setPlannedChaptersMax(500)
+                  setPlannedChaptersMin(301)
+                  setPlannedChaptersMax(799)
                 } else if (value === 'epic') {
-                  setPlannedChaptersMin(500)
+                  setPlannedChaptersMin(800)
                   setPlannedChaptersMax(1000)
                 }
               }}
@@ -3404,9 +3229,9 @@ export default function WorkflowControlPage() {
             >
               <MenuItem value="">请选择</MenuItem>
               <MenuItem value="short">短篇 (3-30章)</MenuItem>
-              <MenuItem value="mid">中篇 (30-100章)</MenuItem>
-              <MenuItem value="long">长篇 (100-500章)</MenuItem>
-              <MenuItem value="epic">超长篇 (500+章)</MenuItem>
+              <MenuItem value="mid">中篇 (31-300章)</MenuItem>
+              <MenuItem value="long">长篇 (301-799章)</MenuItem>
+              <MenuItem value="epic">超长篇 (800+章)</MenuItem>
             </Select>
             <FormHelperText>系统将根据篇幅推荐适合的大纲扩展模式</FormHelperText>
           </FormControl>

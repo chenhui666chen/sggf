@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated_at": "2026-03-21T17:46:20.610285+00:00",
-  "entry_count": 21,
+  "generated_at": "2026-03-28T05:43:07.167404+00:00",
+  "entry_count": 20,
   "entries": {
     "mureka-o1-instrumental": {
       "model_key": "mureka-o1-instrumental",
@@ -15,8 +15,8 @@
       "total_source_count": 2,
       "reachable_source_count": 2,
       "verified_source_count": 0,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
       "capability_hints": {
         "supports_reference_images": false,
         "max_reference_images": null,
@@ -32,53 +32,8 @@
       },
       "task_constraints": {}
     },
-    "wanx-v1-turbo": {
-      "model_key": "wanx-v1-turbo",
-      "provider": "alibaba",
-      "category": "image",
-      "modalities": [
-        "text_to_image"
-      ],
-      "verification_status": "partial",
-      "verification_score": 0.675,
-      "total_source_count": 2,
-      "reachable_source_count": 2,
-      "verified_source_count": 0,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
-      "capability_hints": {
-        "supports_reference_images": false,
-        "max_reference_images": null,
-        "supports_reference_videos": false,
-        "max_reference_videos": null,
-        "supports_first_frame": false,
-        "supports_last_frame": false,
-        "supports_audio_input": true,
-        "supports_multi_image_edit": false,
-        "supports_camera_control": false,
-        "supports_motion_control": false,
-        "declared_input_modalities": []
-      },
-      "task_constraints": {
-        "ratio_values": [
-          "1:1",
-          "16:9",
-          "9:16"
-        ],
-        "min_width": 256,
-        "max_width": 1024,
-        "min_height": 256,
-        "max_height": 1024,
-        "max_batch_size": 4,
-        "resolution_options": [
-          "480P",
-          "720P",
-          "1080P"
-        ]
-      }
-    },
-    "qwen3-max": {
-      "model_key": "qwen3-max",
+    "qwen-long": {
+      "model_key": "qwen-long",
       "provider": "alibaba",
       "category": "llm",
       "modalities": [
@@ -89,8 +44,8 @@
       "total_source_count": 2,
       "reachable_source_count": 2,
       "verified_source_count": 2,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
       "capability_hints": {
         "supports_reference_images": false,
         "max_reference_images": null,
@@ -106,6 +61,143 @@
       },
       "task_constraints": {
         "resolution_options": [
+          "4K",
+          "480P",
+          "720P",
+          "1080P"
+        ]
+      }
+    },
+    "cosyvoice-v3-plus": {
+      "model_key": "cosyvoice-v3-plus",
+      "provider": "alibaba",
+      "category": "audio",
+      "modalities": [
+        "text_to_speech",
+        "voice_clone"
+      ],
+      "verification_status": "verified",
+      "verification_score": 0.9667,
+      "total_source_count": 3,
+      "reachable_source_count": 3,
+      "verified_source_count": 3,
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
+      "capability_hints": {
+        "supports_reference_images": true,
+        "max_reference_images": null,
+        "supports_reference_videos": false,
+        "max_reference_videos": null,
+        "supports_first_frame": false,
+        "supports_last_frame": false,
+        "supports_audio_input": true,
+        "supports_multi_image_edit": false,
+        "supports_camera_control": false,
+        "supports_motion_control": false,
+        "declared_input_modalities": [
+          "text",
+          "image",
+          "audio"
+        ]
+      },
+      "task_constraints": {
+        "max_batch_size": 1,
+        "resolution_options": [
+          "4K",
+          "480P",
+          "720P",
+          "1080P"
+        ]
+      }
+    },
+    "kling-v1-text-to-audio": {
+      "model_key": "kling-v1-text-to-audio",
+      "provider": "kuaishou",
+      "category": "audio",
+      "modalities": [
+        "text_to_audio"
+      ],
+      "verification_status": "verified",
+      "verification_score": 0.725,
+      "total_source_count": 2,
+      "reachable_source_count": 2,
+      "verified_source_count": 1,
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
+      "capability_hints": {
+        "supports_reference_images": false,
+        "max_reference_images": null,
+        "supports_reference_videos": false,
+        "max_reference_videos": null,
+        "supports_first_frame": false,
+        "supports_last_frame": false,
+        "supports_audio_input": false,
+        "supports_multi_image_edit": false,
+        "supports_camera_control": false,
+        "supports_motion_control": false,
+        "declared_input_modalities": []
+      },
+      "task_constraints": {}
+    },
+    "kling-v1-video-to-audio": {
+      "model_key": "kling-v1-video-to-audio",
+      "provider": "kuaishou",
+      "category": "audio",
+      "modalities": [
+        "video_to_audio"
+      ],
+      "verification_status": "verified",
+      "verification_score": 0.725,
+      "total_source_count": 2,
+      "reachable_source_count": 2,
+      "verified_source_count": 1,
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
+      "capability_hints": {
+        "supports_reference_images": false,
+        "max_reference_images": null,
+        "supports_reference_videos": false,
+        "max_reference_videos": null,
+        "supports_first_frame": false,
+        "supports_last_frame": false,
+        "supports_audio_input": false,
+        "supports_multi_image_edit": false,
+        "supports_camera_control": false,
+        "supports_motion_control": false,
+        "declared_input_modalities": []
+      },
+      "task_constraints": {}
+    },
+    "qwen-turbo": {
+      "model_key": "qwen-turbo",
+      "provider": "alibaba",
+      "category": "llm",
+      "modalities": [
+        "text_generation"
+      ],
+      "verification_status": "verified",
+      "verification_score": 0.975,
+      "total_source_count": 2,
+      "reachable_source_count": 2,
+      "verified_source_count": 2,
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
+      "capability_hints": {
+        "supports_reference_images": false,
+        "max_reference_images": null,
+        "supports_reference_videos": false,
+        "max_reference_videos": null,
+        "supports_first_frame": false,
+        "supports_last_frame": false,
+        "supports_audio_input": true,
+        "supports_multi_image_edit": false,
+        "supports_camera_control": false,
+        "supports_motion_control": false,
+        "declared_input_modalities": []
+      },
+      "task_constraints": {
+        "resolution_options": [
+          "4K",
           "480P",
           "720P",
           "1080P"
@@ -125,8 +217,8 @@
       "total_source_count": 3,
       "reachable_source_count": 3,
       "verified_source_count": 3,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
       "capability_hints": {
         "supports_reference_images": true,
         "max_reference_images": 4,
@@ -143,26 +235,28 @@
       "task_constraints": {
         "max_batch_size": 1,
         "resolution_options": [
+          "4K",
           "480P",
           "720P",
           "1080P"
         ]
       }
     },
-    "deepseek-chat": {
-      "model_key": "deepseek-chat",
-      "provider": "deepseek",
-      "category": "llm",
+    "wan2.6-t2i": {
+      "model_key": "wan2.6-t2i",
+      "provider": "alibaba",
+      "category": "image",
       "modalities": [
-        "text_generation"
+        "text_to_image",
+        "image_to_image"
       ],
       "verification_status": "verified",
-      "verification_score": 0.975,
+      "verification_score": 0.825,
       "total_source_count": 2,
       "reachable_source_count": 2,
-      "verified_source_count": 2,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
+      "verified_source_count": 1,
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
       "capability_hints": {
         "supports_reference_images": false,
         "max_reference_images": null,
@@ -170,28 +264,128 @@
         "max_reference_videos": null,
         "supports_first_frame": false,
         "supports_last_frame": false,
-        "supports_audio_input": false,
+        "supports_audio_input": true,
         "supports_multi_image_edit": false,
         "supports_camera_control": false,
         "supports_motion_control": false,
         "declared_input_modalities": []
       },
-      "task_constraints": {}
+      "task_constraints": {
+        "ratio_values": [
+          "1:1",
+          "16:9",
+          "9:16",
+          "4:3",
+          "3:4"
+        ],
+        "min_width": 256,
+        "max_width": 2048,
+        "min_height": 256,
+        "max_height": 2048,
+        "max_batch_size": 4,
+        "resolution_options": [
+          "4K",
+          "480P",
+          "720P",
+          "1080P"
+        ]
+      }
     },
-    "deepseek-reasoner": {
-      "model_key": "deepseek-reasoner",
-      "provider": "deepseek",
-      "category": "llm",
+    "qwen3-tts-flash": {
+      "model_key": "qwen3-tts-flash",
+      "provider": "alibaba",
+      "category": "audio",
       "modalities": [
-        "text_generation"
+        "text_to_speech"
       ],
       "verification_status": "verified",
-      "verification_score": 0.975,
-      "total_source_count": 2,
-      "reachable_source_count": 2,
+      "verification_score": 0.8667,
+      "total_source_count": 3,
+      "reachable_source_count": 3,
       "verified_source_count": 2,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
+      "capability_hints": {
+        "supports_reference_images": true,
+        "max_reference_images": null,
+        "supports_reference_videos": false,
+        "max_reference_videos": null,
+        "supports_first_frame": false,
+        "supports_last_frame": false,
+        "supports_audio_input": true,
+        "supports_multi_image_edit": false,
+        "supports_camera_control": false,
+        "supports_motion_control": false,
+        "declared_input_modalities": [
+          "text",
+          "image",
+          "audio"
+        ]
+      },
+      "task_constraints": {
+        "max_batch_size": 1,
+        "resolution_options": [
+          "4K",
+          "480P",
+          "720P",
+          "1080P"
+        ]
+      }
+    },
+    "qwen-image-edit-max": {
+      "model_key": "qwen-image-edit-max",
+      "provider": "alibaba",
+      "category": "image",
+      "modalities": [
+        "image_to_image_edit",
+        "image_edit"
+      ],
+      "verification_status": "verified",
+      "verification_score": 0.9667,
+      "total_source_count": 3,
+      "reachable_source_count": 3,
+      "verified_source_count": 3,
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
+      "capability_hints": {
+        "supports_reference_images": true,
+        "max_reference_images": null,
+        "supports_reference_videos": false,
+        "max_reference_videos": null,
+        "supports_first_frame": false,
+        "supports_last_frame": false,
+        "supports_audio_input": true,
+        "supports_multi_image_edit": false,
+        "supports_camera_control": false,
+        "supports_motion_control": false,
+        "declared_input_modalities": []
+      },
+      "task_constraints": {
+        "max_batch_size": 1,
+        "resolution_options": [
+          "4K",
+          "480P",
+          "720P",
+          "1080P"
+        ]
+      }
+    },
+    "qwen3-vl-plus": {
+      "model_key": "qwen3-vl-plus",
+      "provider": "alibaba",
+      "category": "multimodal",
+      "modalities": [
+        "multimodal_chat",
+        "image_understanding",
+        "video_understanding"
+      ],
+      "verification_status": "verified",
+      "verification_score": 0.9667,
+      "total_source_count": 3,
+      "reachable_source_count": 3,
+      "verified_source_count": 3,
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
       "capability_hints": {
         "supports_reference_images": false,
         "max_reference_images": null,
@@ -199,13 +393,21 @@
         "max_reference_videos": null,
         "supports_first_frame": false,
         "supports_last_frame": false,
-        "supports_audio_input": false,
+        "supports_audio_input": true,
         "supports_multi_image_edit": false,
         "supports_camera_control": false,
         "supports_motion_control": false,
         "declared_input_modalities": []
       },
-      "task_constraints": {}
+      "task_constraints": {
+        "max_batch_size": 1,
+        "resolution_options": [
+          "4K",
+          "480P",
+          "720P",
+          "1080P"
+        ]
+      }
     },
     "wan2.6-r2v": {
       "model_key": "wan2.6-r2v",
@@ -222,8 +424,8 @@
       "total_source_count": 2,
       "reachable_source_count": 2,
       "verified_source_count": 2,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
       "capability_hints": {
         "supports_reference_images": true,
         "max_reference_images": 5,
@@ -265,6 +467,136 @@
         ]
       }
     },
+    "qwen3-max": {
+      "model_key": "qwen3-max",
+      "provider": "alibaba",
+      "category": "llm",
+      "modalities": [
+        "text_generation"
+      ],
+      "verification_status": "verified",
+      "verification_score": 0.975,
+      "total_source_count": 2,
+      "reachable_source_count": 2,
+      "verified_source_count": 2,
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
+      "capability_hints": {
+        "supports_reference_images": false,
+        "max_reference_images": null,
+        "supports_reference_videos": false,
+        "max_reference_videos": null,
+        "supports_first_frame": false,
+        "supports_last_frame": false,
+        "supports_audio_input": true,
+        "supports_multi_image_edit": false,
+        "supports_camera_control": false,
+        "supports_motion_control": false,
+        "declared_input_modalities": []
+      },
+      "task_constraints": {
+        "resolution_options": [
+          "4K",
+          "480P",
+          "720P",
+          "1080P"
+        ]
+      }
+    },
+    "qwen3.5-plus": {
+      "model_key": "qwen3.5-plus",
+      "provider": "alibaba",
+      "category": "llm",
+      "modalities": [
+        "text_generation"
+      ],
+      "verification_status": "verified",
+      "verification_score": 0.775,
+      "total_source_count": 2,
+      "reachable_source_count": 2,
+      "verified_source_count": 1,
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
+      "capability_hints": {
+        "supports_reference_images": false,
+        "max_reference_images": null,
+        "supports_reference_videos": false,
+        "max_reference_videos": null,
+        "supports_first_frame": false,
+        "supports_last_frame": false,
+        "supports_audio_input": true,
+        "supports_multi_image_edit": false,
+        "supports_camera_control": false,
+        "supports_motion_control": false,
+        "declared_input_modalities": []
+      },
+      "task_constraints": {
+        "resolution_options": [
+          "4K",
+          "480P",
+          "720P",
+          "1080P"
+        ]
+      }
+    },
+    "deepseek-chat": {
+      "model_key": "deepseek-chat",
+      "provider": "deepseek",
+      "category": "llm",
+      "modalities": [
+        "text_generation"
+      ],
+      "verification_status": "verified",
+      "verification_score": 0.975,
+      "total_source_count": 2,
+      "reachable_source_count": 2,
+      "verified_source_count": 2,
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
+      "capability_hints": {
+        "supports_reference_images": false,
+        "max_reference_images": null,
+        "supports_reference_videos": false,
+        "max_reference_videos": null,
+        "supports_first_frame": false,
+        "supports_last_frame": false,
+        "supports_audio_input": false,
+        "supports_multi_image_edit": false,
+        "supports_camera_control": false,
+        "supports_motion_control": false,
+        "declared_input_modalities": []
+      },
+      "task_constraints": {}
+    },
+    "deepseek-reasoner": {
+      "model_key": "deepseek-reasoner",
+      "provider": "deepseek",
+      "category": "llm",
+      "modalities": [
+        "text_generation"
+      ],
+      "verification_status": "verified",
+      "verification_score": 0.975,
+      "total_source_count": 2,
+      "reachable_source_count": 2,
+      "verified_source_count": 2,
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
+      "capability_hints": {
+        "supports_reference_images": false,
+        "max_reference_images": null,
+        "supports_reference_videos": false,
+        "max_reference_videos": null,
+        "supports_first_frame": false,
+        "supports_last_frame": false,
+        "supports_audio_input": false,
+        "supports_multi_image_edit": false,
+        "supports_camera_control": false,
+        "supports_motion_control": false,
+        "declared_input_modalities": []
+      },
+      "task_constraints": {}
+    },
     "wan2.6-t2v-fast": {
       "model_key": "wan2.6-t2v-fast",
       "provider": "alibaba",
@@ -277,8 +609,8 @@
       "total_source_count": 2,
       "reachable_source_count": 2,
       "verified_source_count": 0,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
       "capability_hints": {
         "supports_reference_images": true,
         "max_reference_images": null,
@@ -306,230 +638,7 @@
           "9:16"
         ],
         "resolution_options": [
-          "480P",
-          "720P",
-          "1080P"
-        ]
-      }
-    },
-    "cosyvoice-v3-plus": {
-      "model_key": "cosyvoice-v3-plus",
-      "provider": "alibaba",
-      "category": "audio",
-      "modalities": [
-        "text_to_speech",
-        "voice_clone"
-      ],
-      "verification_status": "verified",
-      "verification_score": 0.9667,
-      "total_source_count": 3,
-      "reachable_source_count": 3,
-      "verified_source_count": 3,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
-      "capability_hints": {
-        "supports_reference_images": true,
-        "max_reference_images": null,
-        "supports_reference_videos": false,
-        "max_reference_videos": null,
-        "supports_first_frame": false,
-        "supports_last_frame": false,
-        "supports_audio_input": true,
-        "supports_multi_image_edit": false,
-        "supports_camera_control": false,
-        "supports_motion_control": false,
-        "declared_input_modalities": [
-          "text",
-          "image",
-          "audio"
-        ]
-      },
-      "task_constraints": {
-        "max_batch_size": 1,
-        "resolution_options": [
-          "480P",
-          "720P",
-          "1080P"
-        ]
-      }
-    },
-    "qwen3-tts-flash": {
-      "model_key": "qwen3-tts-flash",
-      "provider": "alibaba",
-      "category": "audio",
-      "modalities": [
-        "text_to_speech"
-      ],
-      "verification_status": "verified",
-      "verification_score": 0.8667,
-      "total_source_count": 3,
-      "reachable_source_count": 3,
-      "verified_source_count": 2,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
-      "capability_hints": {
-        "supports_reference_images": true,
-        "max_reference_images": null,
-        "supports_reference_videos": false,
-        "max_reference_videos": null,
-        "supports_first_frame": false,
-        "supports_last_frame": false,
-        "supports_audio_input": true,
-        "supports_multi_image_edit": false,
-        "supports_camera_control": false,
-        "supports_motion_control": false,
-        "declared_input_modalities": [
-          "text",
-          "image",
-          "audio"
-        ]
-      },
-      "task_constraints": {
-        "max_batch_size": 1,
-        "resolution_options": [
-          "480P",
-          "720P",
-          "1080P"
-        ]
-      }
-    },
-    "sdxl-turbo": {
-      "model_key": "sdxl-turbo",
-      "provider": "stability",
-      "category": "image",
-      "modalities": [
-        "text_to_image"
-      ],
-      "verification_status": "partial",
-      "verification_score": 0.475,
-      "total_source_count": 2,
-      "reachable_source_count": 1,
-      "verified_source_count": 1,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
-      "capability_hints": {
-        "supports_reference_images": false,
-        "max_reference_images": null,
-        "supports_reference_videos": false,
-        "max_reference_videos": null,
-        "supports_first_frame": false,
-        "supports_last_frame": false,
-        "supports_audio_input": false,
-        "supports_multi_image_edit": false,
-        "supports_camera_control": false,
-        "supports_motion_control": false,
-        "declared_input_modalities": []
-      },
-      "task_constraints": {
-        "ratio_values": [
-          "1:1",
-          "16:9",
-          "9:16"
-        ],
-        "max_batch_size": 1
-      }
-    },
-    "qwen-long": {
-      "model_key": "qwen-long",
-      "provider": "alibaba",
-      "category": "llm",
-      "modalities": [
-        "text_generation"
-      ],
-      "verification_status": "verified",
-      "verification_score": 0.975,
-      "total_source_count": 2,
-      "reachable_source_count": 2,
-      "verified_source_count": 2,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
-      "capability_hints": {
-        "supports_reference_images": false,
-        "max_reference_images": null,
-        "supports_reference_videos": false,
-        "max_reference_videos": null,
-        "supports_first_frame": false,
-        "supports_last_frame": false,
-        "supports_audio_input": true,
-        "supports_multi_image_edit": false,
-        "supports_camera_control": false,
-        "supports_motion_control": false,
-        "declared_input_modalities": []
-      },
-      "task_constraints": {
-        "resolution_options": [
-          "480P",
-          "720P",
-          "1080P"
-        ]
-      }
-    },
-    "qwen-image-edit-max": {
-      "model_key": "qwen-image-edit-max",
-      "provider": "alibaba",
-      "category": "image",
-      "modalities": [
-        "image_to_image_edit",
-        "image_edit"
-      ],
-      "verification_status": "verified",
-      "verification_score": 0.9667,
-      "total_source_count": 3,
-      "reachable_source_count": 3,
-      "verified_source_count": 3,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
-      "capability_hints": {
-        "supports_reference_images": true,
-        "max_reference_images": null,
-        "supports_reference_videos": false,
-        "max_reference_videos": null,
-        "supports_first_frame": false,
-        "supports_last_frame": false,
-        "supports_audio_input": true,
-        "supports_multi_image_edit": false,
-        "supports_camera_control": false,
-        "supports_motion_control": false,
-        "declared_input_modalities": []
-      },
-      "task_constraints": {
-        "max_batch_size": 1,
-        "resolution_options": [
-          "480P",
-          "720P",
-          "1080P"
-        ]
-      }
-    },
-    "qwen-turbo": {
-      "model_key": "qwen-turbo",
-      "provider": "alibaba",
-      "category": "llm",
-      "modalities": [
-        "text_generation"
-      ],
-      "verification_status": "verified",
-      "verification_score": 0.975,
-      "total_source_count": 2,
-      "reachable_source_count": 2,
-      "verified_source_count": 2,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
-      "capability_hints": {
-        "supports_reference_images": false,
-        "max_reference_images": null,
-        "supports_reference_videos": false,
-        "max_reference_videos": null,
-        "supports_first_frame": false,
-        "supports_last_frame": false,
-        "supports_audio_input": true,
-        "supports_multi_image_edit": false,
-        "supports_camera_control": false,
-        "supports_motion_control": false,
-        "declared_input_modalities": []
-      },
-      "task_constraints": {
-        "resolution_options": [
+          "4K",
           "480P",
           "720P",
           "1080P"
@@ -548,8 +657,8 @@
       "total_source_count": 2,
       "reachable_source_count": 2,
       "verified_source_count": 2,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
       "capability_hints": {
         "supports_reference_images": true,
         "max_reference_images": null,
@@ -614,8 +723,8 @@
       "total_source_count": 2,
       "reachable_source_count": 2,
       "verified_source_count": 2,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
       "capability_hints": {
         "supports_reference_images": true,
         "max_reference_images": 1,
@@ -684,150 +793,6 @@
         ]
       }
     },
-    "kling-v1-text-to-audio": {
-      "model_key": "kling-v1-text-to-audio",
-      "provider": "kuaishou",
-      "category": "audio",
-      "modalities": [
-        "text_to_audio"
-      ],
-      "verification_status": "verified",
-      "verification_score": 0.725,
-      "total_source_count": 2,
-      "reachable_source_count": 2,
-      "verified_source_count": 1,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
-      "capability_hints": {
-        "supports_reference_images": false,
-        "max_reference_images": null,
-        "supports_reference_videos": false,
-        "max_reference_videos": null,
-        "supports_first_frame": false,
-        "supports_last_frame": false,
-        "supports_audio_input": false,
-        "supports_multi_image_edit": false,
-        "supports_camera_control": false,
-        "supports_motion_control": false,
-        "declared_input_modalities": []
-      },
-      "task_constraints": {}
-    },
-    "kling-v1-video-to-audio": {
-      "model_key": "kling-v1-video-to-audio",
-      "provider": "kuaishou",
-      "category": "audio",
-      "modalities": [
-        "video_to_audio"
-      ],
-      "verification_status": "verified",
-      "verification_score": 0.725,
-      "total_source_count": 2,
-      "reachable_source_count": 2,
-      "verified_source_count": 1,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
-      "capability_hints": {
-        "supports_reference_images": false,
-        "max_reference_images": null,
-        "supports_reference_videos": false,
-        "max_reference_videos": null,
-        "supports_first_frame": false,
-        "supports_last_frame": false,
-        "supports_audio_input": false,
-        "supports_multi_image_edit": false,
-        "supports_camera_control": false,
-        "supports_motion_control": false,
-        "declared_input_modalities": []
-      },
-      "task_constraints": {}
-    },
-    "wanx-v1": {
-      "model_key": "wanx-v1",
-      "provider": "alibaba",
-      "category": "image",
-      "modalities": [
-        "text_to_image",
-        "image_to_image"
-      ],
-      "verification_status": "verified",
-      "verification_score": 0.975,
-      "total_source_count": 2,
-      "reachable_source_count": 2,
-      "verified_source_count": 2,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
-      "capability_hints": {
-        "supports_reference_images": false,
-        "max_reference_images": null,
-        "supports_reference_videos": false,
-        "max_reference_videos": null,
-        "supports_first_frame": false,
-        "supports_last_frame": false,
-        "supports_audio_input": true,
-        "supports_multi_image_edit": false,
-        "supports_camera_control": false,
-        "supports_motion_control": false,
-        "declared_input_modalities": []
-      },
-      "task_constraints": {
-        "ratio_values": [
-          "1:1",
-          "16:9",
-          "9:16",
-          "4:3",
-          "3:4"
-        ],
-        "min_width": 256,
-        "max_width": 2048,
-        "min_height": 256,
-        "max_height": 2048,
-        "max_batch_size": 4,
-        "resolution_options": [
-          "480P",
-          "720P",
-          "1080P"
-        ]
-      }
-    },
-    "qwen3-vl-plus": {
-      "model_key": "qwen3-vl-plus",
-      "provider": "alibaba",
-      "category": "multimodal",
-      "modalities": [
-        "multimodal_chat",
-        "image_understanding",
-        "video_understanding"
-      ],
-      "verification_status": "verified",
-      "verification_score": 0.9667,
-      "total_source_count": 3,
-      "reachable_source_count": 3,
-      "verified_source_count": 3,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
-      "capability_hints": {
-        "supports_reference_images": false,
-        "max_reference_images": null,
-        "supports_reference_videos": false,
-        "max_reference_videos": null,
-        "supports_first_frame": false,
-        "supports_last_frame": false,
-        "supports_audio_input": true,
-        "supports_multi_image_edit": false,
-        "supports_camera_control": false,
-        "supports_motion_control": false,
-        "declared_input_modalities": []
-      },
-      "task_constraints": {
-        "max_batch_size": 1,
-        "resolution_options": [
-          "480P",
-          "720P",
-          "1080P"
-        ]
-      }
-    },
     "kling-v1": {
       "model_key": "kling-v1",
       "provider": "kuaishou",
@@ -841,8 +806,8 @@
       "total_source_count": 2,
       "reachable_source_count": 2,
       "verified_source_count": 0,
-      "last_verified_at": "2026-03-21T17:46:20.610285+00:00",
-      "last_synced_at": "2026-03-21T17:46:20.610285+00:00",
+      "last_verified_at": "2026-03-28T05:43:07.167404+00:00",
+      "last_synced_at": "2026-03-28T05:43:07.167404+00:00",
       "capability_hints": {
         "supports_reference_images": true,
         "max_reference_images": null,

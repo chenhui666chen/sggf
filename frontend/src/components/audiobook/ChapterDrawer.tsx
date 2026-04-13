@@ -16,14 +16,12 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
-import {
-  Close as CloseIcon,
-  Delete as DeleteIcon,
-  MoreVert as MoreVertIcon,
-  Pause as PauseIcon,
-  PlayArrow as PlayIcon,
-  SwapVert as SwapVertIcon,
-} from '@mui/icons-material'
+import CloseIcon from '@mui/icons-material/Close'
+import DeleteIcon from '@mui/icons-material/Delete'
+import MoreVertIcon from '@mui/icons-material/MoreVert'
+import PauseIcon from '@mui/icons-material/Pause'
+import PlayIcon from '@mui/icons-material/PlayArrow'
+import SwapVertIcon from '@mui/icons-material/SwapVert'
 import MiniPlayer from './MiniPlayer'
 import type {
   AudiobookProjectSummary,
@@ -325,4 +323,3 @@ export default function ChapterDrawer({
     </>
   )
 }
-

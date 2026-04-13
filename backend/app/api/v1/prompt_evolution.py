@@ -131,21 +131,21 @@ async def start_evolution(
     # 在后台启动进化任务
     async def run_task():
         global _current_evolution_id
-        print("🚀🚀🚀 [API] 后台任务开始执行...")
+        logger.debug("🚀🚀🚀 [API] 后台任务开始执行...")
         try:
             history = await engine.run_evolution()
             _current_evolution_id = history.evolution_id
-            print(f"✅✅✅ [API] 进化任务完成: {history.evolution_id}")
+            logger.debug(f"✅✅✅ [API] 进化任务完成: {history.evolution_id}")
             logger.info(f"✅ 进化任务完成: {history.evolution_id}")
         except Exception as e:
-            print(f"❌❌❌ [API] 进化任务失败: {e}")
+            logger.debug(f"❌❌❌ [API] 进化任务失败: {e}")
             logger.error(f"❌ 进化任务失败: {e}")
             import traceback
             traceback.print_exc()
 
-    print("🚀 [API] 创建后台任务...")
+    logger.debug("🚀 [API] 创建后台任务...")
     _running_task = asyncio.create_task(run_task())
-    print("🚀 [API] 后台任务已创建")
+    logger.debug("🚀 [API] 后台任务已创建")
     
     # 等待任务开始并获取ID
     await asyncio.sleep(0.5)
@@ -179,7 +179,7 @@ async def get_evolution_status(current_user: User = Depends(get_current_user)):
             if history_obj:
                 history_obj.status = "interrupted"
                 storage.save_evolution_history(history_obj)
-                print(f"⚠️ 检测到遗留的running状态任务 {running_history['evolution_id']}，已标记为interrupted")
+                logger.debug(f"⚠️ 检测到遗留的running状态任务 {running_history['evolution_id']}，已标记为interrupted")
         return EvolutionStatusResponse(is_running=is_running)
 
     storage = get_evolution_storage()
@@ -192,7 +192,7 @@ async def get_evolution_status(current_user: User = Depends(get_current_user)):
     if history.status == "running" and not is_running:
         history.status = "interrupted"
         storage.save_evolution_history(history)
-        print(f"⚠️ 任务 {_current_evolution_id} 已中断，更新状态")
+        logger.debug(f"⚠️ 任务 {_current_evolution_id} 已中断，更新状态")
 
     best_score = history.best_versions[0].avg_ai_score if history.best_versions else None
 
@@ -226,7 +226,7 @@ async def list_evolution_histories(current_user: User = Depends(get_current_user
                     history_obj.status = "interrupted"
                     storage.save_evolution_history(history_obj)
                     h["status"] = "interrupted"
-                    print(f"⚠️ 清理遗留running状态: {h['evolution_id']}")
+                    logger.debug(f"⚠️ 清理遗留running状态: {h['evolution_id']}")
 
     return histories
 

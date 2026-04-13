@@ -1,6 +1,8 @@
-﻿"""
+"""
 多Agent框架 - 各个专业化Agent的定义
 """
+import json
+import logging
 from typing import Dict, Any, List, Optional, Union
 from abc import ABC, abstractmethod
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
@@ -13,6 +15,8 @@ from .quality_assessment import (
     create_structure_metrics, create_innovation_metrics
 )
 from .context_aware_optimizer import ContextAwareOptimizer
+
+logger = logging.getLogger(__name__)
 
 
 from core.langchain_bridge import create_task_llm, create_model_llm
@@ -157,22 +161,22 @@ class BaseAgent(ABC):
                 if hasattr(msg, 'content') and msg.content and isinstance(msg.content, str) and msg.content.strip():
                     valid_history.append(msg)
                 else:
-                    print(f"⚠️ 过滤空消息: {type(msg).__name__}")
+                    logger.debug(f"⚠️ 过滤空消息: {type(msg).__name__}")
             else:
-                print(f"⚠️ 过滤无效消息类型: {type(msg)}")
+                logger.debug(f"⚠️ 过滤无效消息类型: {type(msg)}")
         
         messages.extend(valid_history)
 
         messages.append(HumanMessage(content=user_input))
         
         # 📝 调试：打印最终传递给API的消息列表
-        print(f"📦 准备调用LLM，消息数量: {len(messages)}")
+        logger.debug(f"📦 准备调用LLM，消息数量: {len(messages)}")
         for i, msg in enumerate(messages):
             msg_type = type(msg).__name__
             # 检查是否有 role 属性
             role = getattr(msg, 'role', 'N/A')
             content_preview = (msg.content[:50] + '...') if len(msg.content) > 50 else msg.content
-            print(f"  [{i}] {msg_type} (role={role}): {content_preview}")
+            logger.debug(f"  [{i}] {msg_type} (role={role}): {content_preview}")
 
         # 🔥 关键修复：支持动态设置 temperature
         if temperature is not None:
@@ -184,18 +188,18 @@ class BaseAgent(ABC):
                 or "qwen3-max"
             )
             temp_llm = create_model_llm(model=model_name, temperature=temperature)
-            print(f"🎲 使用自定义 temperature={temperature}")
+            logger.debug(f"🎲 使用自定义 temperature={temperature}")
             try:
                 response_content = _invoke_llm_with_optional_streaming(temp_llm, messages)
             except Exception as e:
                 # 捕获并详细记录错误
                 import traceback
                 error_details = traceback.format_exc()
-                print(f"❌ LLM调用失败: {str(e)}")
-                print(f"📋 完整错误信息:\n{error_details}")
+                logger.debug(f"❌ LLM调用失败: {str(e)}")
+                logger.debug(f"📋 完整错误信息:\n{error_details}")
                 # 如果是JSON解析错误,记录更多信息
                 if "JSON" in str(e) or "Expecting value" in str(e):
-                    print("⚠️ 检测到JSON解析错误,可能是API返回格式异常")
+                    logger.debug("⚠️ 检测到JSON解析错误,可能是API返回格式异常")
                 raise
         else:
             response_content = _invoke_llm_with_optional_streaming(self.llm, messages)
@@ -216,6 +220,7 @@ class BaseAgent(ABC):
         MODEL_LIMITS = {
             'qwen-max': 30720,          # 30K tokens
             'qwen3-max': 256000,        # 256K tokens（上下文 256K）
+            'qwen3.5-plus': 1000000,    # 1M tokens（上下文 100万，输出 65K）
             'qwen-plus': 1000000,       # 1M tokens
             'qwen-long': 10000000,      # 10M tokens
             'qwen-turbo': 8000,         # 8K tokens
@@ -309,6 +314,16 @@ class CharacterDesignerAgent(BaseAgent):
 2. 心理分析：分析人物心理特征、动机和成长弧光
 3. 关系构建：设计人物之间的关系网络和互动模式
 4. 一致性维护：确保人物性格和行为的一致性
+5. 结构优先：优先输出可解析、可复用的标准人物卡，而不是散文式人物策划案
+
+输出时必须遵守以下约束：
+- 每个角色必须以 `### 【姓名】：` 开头
+- 只输出标准人物卡，不要输出“核心主角/核心盟友/核心反派/人物关系网/mermaid/总结”
+- 不要把组织、势力、阵营直接写成人物条目
+- 【故事立场】只能从“主角方 / 反派方 / 中立方 / 亦正亦邪”四选一
+- 【角色定位】必须是单一标签，不要写成“系统/辅助”“导师/情报角色”这类复合值
+- 【关键关系】必须写成“角色名：关系性质/当前张力”，不能只列人名
+- 重点保证字段完整、边界清晰、后续工作流可解析
 
 请创建深度、立体的人物形象，包括外貌、性格、背景、动机等多个维度。"""
 
@@ -862,7 +877,6 @@ class ChapterLogicChecker(BaseAgent):
         result = self.process(check_prompt, context)
 
         # 尝试解析JSON结果
-        import json
         try:
             # 尝试从结果中提取JSON
             json_start = result.find('{')

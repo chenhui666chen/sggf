@@ -2,22 +2,24 @@
 Knowledge Base Management - Store and retrieve novel settings using vector database
 """
 from typing import List, Dict, Any, Optional
+from pathlib import Path
 import os
+import logging
 
-# 🛡️ 全局禁用代理配置 - 确保直连API
+# Disable proxy variables to keep vector and embedding requests predictable in local runs.
 for proxy_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']:
     if proxy_var in os.environ:
         del os.environ[proxy_var]
 
 try:
-    from langchain_chroma import Chroma  # 优先使用新包，避免弃用警告
+    from langchain_chroma import Chroma  # Preferred modern Chroma integration.
     CHROMA_SRC = "langchain_chroma"
 except ImportError:
     try:
-        from langchain_community.vectorstores import Chroma  # 回退兼容
+        from langchain_community.vectorstores import Chroma  # Compatibility fallback for older installs.
         CHROMA_SRC = "langchain_community.vectorstores"
     except ImportError:
-        from langchain.vectorstores import Chroma  # 最后一层回退
+        from langchain.vectorstores import Chroma  # Legacy fallback for very old LangChain releases.
         CHROMA_SRC = "langchain.vectorstores"
 from langchain_core.embeddings import Embeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -27,9 +29,11 @@ import os
 import requests
 import numpy as np
 
+logger = logging.getLogger(__name__)
+
 
 class AliyunEmbeddings(Embeddings):
-    """阿里云百炼 Embeddings 适配器"""
+    """Aliyun embedding adapter."""
 
     def __init__(
         self,
@@ -38,12 +42,12 @@ class AliyunEmbeddings(Embeddings):
         model: str = "text-embedding-v4"
     ):
         """
-        初始化阿里云百炼 Embeddings
+        Initialize the Aliyun embedding adapter.
         
         Args:
-            api_key: 阿里云百炼 API Key
-            api_base: API 基础 URL
-            model: 使用的模型名称，默认为 text-embedding-v4
+            api_key: DashScope API key.
+            api_base: Base URL for the embedding API.
+            model: Embedding model name, defaults to text-embedding-v4.
         """
         self.api_key = api_key or os.getenv("DASHSCOPE_API_KEY") or Config.DEEPSEEK_API_KEY
         self.api_base = api_base
@@ -53,7 +57,7 @@ class AliyunEmbeddings(Embeddings):
             raise ValueError("Aliyun API key is required. Please set DASHSCOPE_API_KEY in .env file")
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        """为文档列表生成 embeddings"""
+        """Embed a batch of documents."""
         embeddings = []
         for text in texts:
             embedding = self._get_embedding(text)
@@ -61,18 +65,18 @@ class AliyunEmbeddings(Embeddings):
         return embeddings
 
     def embed_query(self, text: str) -> List[float]:
-        """为查询文本生成 embedding"""
+        """Embed a single query string."""
         return self._get_embedding(text)
 
     def _get_embedding(self, text: str) -> List[float]:
         """
-        调用阿里云百炼 API 获取文本 embedding
+        Request one embedding vector from the remote API.
         
         Args:
-            text: 输入文本
+            text: Input text to embed.
             
         Returns:
-            文本的 embedding 向量
+            A single embedding vector.
         """
         try:
             headers = {
@@ -83,7 +87,7 @@ class AliyunEmbeddings(Embeddings):
             data = {
                 "model": self.model,
                 "input": text,
-                "dimensions": 2048  # 指定使用2048维向量
+                "dimensions": 2048  # text-embedding-v4 currently returns 2048 dimensions.
             }
 
             response = requests.post(
@@ -91,7 +95,7 @@ class AliyunEmbeddings(Embeddings):
                 headers=headers,
                 json=data,
                 timeout=30,
-                proxies={'http': None, 'https': None}  # 🛡️ 禁用代理
+                proxies={'http': None, 'https': None}  # Force direct requests and ignore host proxy settings.
             )
 
             if response.status_code == 200:
@@ -99,17 +103,17 @@ class AliyunEmbeddings(Embeddings):
                 if "data" in result and len(result["data"]) > 0:
                     return result["data"][0]["embedding"]
                 else:
-                    print(f"Warning: Aliyun Embedding API returned empty data: {result}")
+                    logger.debug(f"Warning: Aliyun Embedding API returned empty data: {result}")
             else:
-                print(f"Warning: Aliyun Embedding API call failed with status {response.status_code}: {response.text}")
+                logger.debug(f"Warning: Aliyun Embedding API call failed with status {response.status_code}: {response.text}")
                 
         except Exception as e:
-            print(f"Warning: Error getting embedding from Aliyun: {e}")
+            logger.debug(f"Warning: Error getting embedding from Aliyun: {e}")
             
         # Fallback to deterministic random vector
-        print(f"Using fallback vector for text: {text[:50]}...")
+        logger.debug(f"Using fallback vector for text: {text[:50]}...")
         np.random.seed(hash(text) % 2**32)
-        return np.random.randn(2048).tolist()  # text-embedding-v4 默认维度是2048
+        return np.random.randn(2048).tolist()  # Fallback vector with the expected 2048 dimensions.
 
 
 class NovelKnowledgeBase:
@@ -118,39 +122,92 @@ class NovelKnowledgeBase:
     def __init__(self, persist_directory: Optional[str] = None):
         """Initialize knowledge base"""
         self.persist_directory = persist_directory or Config.CHROMA_PERSIST_DIRECTORY
+        self.active_persist_directory: Optional[str] = None
+        self.vectorstore_mode = "uninitialized"
         self.embeddings = AliyunEmbeddings(
             api_key=os.getenv("DASHSCOPE_API_KEY") or Config.EMBEDDING_API_KEY,
             api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
             model="text-embedding-v4"
         )
 
-        # 使用兼容模式初始化Chroma，避免RustBindingsAPI问题
-        import chromadb
-        from chromadb.config import Settings
-        
-        # 创建PersistentClient并禁用默认tenant检查
-        chroma_client = chromadb.PersistentClient(
-            path=self.persist_directory,
-            settings=Settings(
-                anonymized_telemetry=False,
-                allow_reset=True
+        # Try the persistent Chroma client first, then fall back to older bindings if needed.
+        try:
+            import chromadb
+            from chromadb.config import Settings
+
+            self.vectorstore = self._create_persistent_vectorstore(
+                chromadb=chromadb,
+                settings_cls=Settings,
+                persist_directory=self.persist_directory,
             )
-        )
-        
-        self.vectorstore = Chroma(
-            client=chroma_client,
-            embedding_function=self.embeddings,
-            collection_name="novel_knowledge"
-        )
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"🔧 Using Chroma from: {CHROMA_SRC}")
+        except BaseException as exc:
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+
+            logger.warning(
+                "Primary persistent Chroma initialization failed: %s",
+                exc,
+            )
+            fallback_directory = self._build_fallback_persist_directory(self.persist_directory)
+            try:
+                import chromadb
+                from chromadb.config import Settings
+
+                self.vectorstore = self._create_persistent_vectorstore(
+                    chromadb=chromadb,
+                    settings_cls=Settings,
+                    persist_directory=fallback_directory,
+                )
+                logger.warning(
+                    "Using fallback persistent Chroma directory after primary failure: %s",
+                    fallback_directory,
+                )
+            except BaseException as fallback_exc:
+                if isinstance(fallback_exc, (KeyboardInterrupt, SystemExit)):
+                    raise
+
+                logger.warning(
+                    "Fallback persistent Chroma initialization failed, falling back to in-memory store: %s",
+                    fallback_exc,
+                )
+                self.vectorstore = Chroma(
+                    embedding_function=self.embeddings,
+                    collection_name="novel_knowledge"
+                )
+                self.vectorstore_mode = "in_memory"
+                self.active_persist_directory = None
+                logger.warning("Using in-memory Chroma fallback from: %s", CHROMA_SRC)
 
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=200,
             length_function=len,
         )
+
+    def _create_persistent_vectorstore(self, chromadb, settings_cls, persist_directory: str):
+        chroma_client = chromadb.PersistentClient(
+            path=persist_directory,
+            settings=settings_cls(
+                anonymized_telemetry=False,
+                allow_reset=True
+            )
+        )
+
+        vectorstore = Chroma(
+            client=chroma_client,
+            embedding_function=self.embeddings,
+            collection_name="novel_knowledge"
+        )
+        self.vectorstore_mode = "persistent"
+        self.active_persist_directory = persist_directory
+        logger.info("Using persistent Chroma from %s via: %s", persist_directory, CHROMA_SRC)
+        return vectorstore
+
+    @staticmethod
+    def _build_fallback_persist_directory(persist_directory: str) -> str:
+        base_path = Path(persist_directory)
+        fallback_name = f"{base_path.name}_runtime_fallback"
+        return str(base_path.parent / fallback_name)
     
     def add_world_setting(self, title: str, content: str, metadata: Optional[Dict[str, Any]] = None):
         """Add world setting"""
@@ -160,7 +217,7 @@ class NovelKnowledgeBase:
 
             chunks = self.text_splitter.split_text(content)
             if not chunks:
-                print(f"Warning: World setting is empty: {title}")
+                logger.debug(f"Warning: World setting is empty: {title}")
                 return
 
             documents = [Document(page_content=chunk, metadata=meta) for chunk in chunks]
@@ -168,11 +225,11 @@ class NovelKnowledgeBase:
             if documents:
                 self.vectorstore.add_documents(documents)
                 # Note: Chroma 0.4.x+ auto-persists, no need to call persist()
-                print(f"Added world setting: {title}")
+                logger.debug(f"Added world setting: {title}")
             else:
-                print(f"Warning: Cannot create documents: {title}")
+                logger.debug(f"Warning: Cannot create documents: {title}")
         except Exception as e:
-            print(f"Warning: Error adding world setting: {e}")
+            logger.debug(f"Warning: Error adding world setting: {e}")
     
     def add_character(self, name: str, profile: str, metadata: Optional[Dict[str, Any]] = None):
         """Add character profile"""
@@ -182,7 +239,7 @@ class NovelKnowledgeBase:
 
             chunks = self.text_splitter.split_text(profile)
             if not chunks:
-                print(f"Warning: Character profile is empty: {name}")
+                logger.debug(f"Warning: Character profile is empty: {name}")
                 return
 
             documents = [Document(page_content=chunk, metadata=meta) for chunk in chunks]
@@ -190,11 +247,11 @@ class NovelKnowledgeBase:
             if documents:
                 self.vectorstore.add_documents(documents)
                 # Note: Chroma 0.4.x+ auto-persists, no need to call persist()
-                print(f"Added character profile: {name}")
+                logger.debug(f"Added character profile: {name}")
             else:
-                print(f"Warning: Cannot create documents: {name}")
+                logger.debug(f"Warning: Cannot create documents: {name}")
         except Exception as e:
-            print(f"Warning: Error adding character profile: {e}")
+            logger.debug(f"Warning: Error adding character profile: {e}")
     
     def add_chapter(self, chapter_num: int, title: str, content: str, metadata: Optional[Dict[str, Any]] = None):
         """Add written chapter"""
@@ -204,7 +261,7 @@ class NovelKnowledgeBase:
 
             chunks = self.text_splitter.split_text(content)
             if not chunks:
-                print(f"Warning: Chapter content is empty: Chapter {chapter_num} - {title}")
+                logger.debug(f"Warning: Chapter content is empty: Chapter {chapter_num} - {title}")
                 return
 
             documents = [Document(page_content=chunk, metadata=meta) for chunk in chunks]
@@ -212,11 +269,11 @@ class NovelKnowledgeBase:
             if documents:
                 self.vectorstore.add_documents(documents)
                 # Note: Chroma 0.4.x+ auto-persists, no need to call persist()
-                print(f"Added chapter: Chapter {chapter_num} - {title}")
+                logger.debug(f"Added chapter: Chapter {chapter_num} - {title}")
             else:
-                print(f"Warning: Cannot create documents: Chapter {chapter_num} - {title}")
+                logger.debug(f"Warning: Cannot create documents: Chapter {chapter_num} - {title}")
         except Exception as e:
-            print(f"Warning: Error adding chapter: {e}")
+            logger.debug(f"Warning: Error adding chapter: {e}")
     
     def search(
         self, 
@@ -225,48 +282,48 @@ class NovelKnowledgeBase:
         filter_type: Optional[str] = None,
         project_id: Optional[int] = None
     ) -> List[Document]:
-        """Search related knowledge
+        """Search related knowledge.
         
         Args:
-            query: 搜索查询
-            k: 返回结果数量
-            filter_type: 类型过滤 (world_setting, character, chapter)
-            project_id: 项目ID过滤（强烈推荐，确保项目隔离）
+            query: Search query text.
+            k: Maximum number of documents to return.
+            filter_type: Optional knowledge type filter, such as world_setting or character.
+            project_id: Optional project scope.
         
         Returns:
-            List[Document]: 搜索结果
+            List[Document]: Matching documents.
         """
-        # 构建过滤条件（使用正确的 ChromaDB 格式）
+        # Build metadata filters for Chroma when project or type scoping is requested.
         filter_dict = None
         
-        # 构建条件列表
+        # Collect filter conditions.
         conditions = []
         if project_id is not None:
             conditions.append({"project_id": str(project_id)})
         if filter_type:
             conditions.append({"type": filter_type})
         
-        # 根据条件数量选择格式
+        # Chroma expects a single filter object when only one condition is present.
         if len(conditions) == 0:
             filter_dict = None
         elif len(conditions) == 1:
-            # 单条件：直接使用字典
+            # Single-condition filter.
             filter_dict = conditions[0]
         else:
-            # 多条件：使用 $and 操作符
+            # Multiple conditions are combined with $and.
             filter_dict = {"$and": conditions}
         
-        # 执行搜索
+        # Execute the search.
         try:
             if filter_dict is None:
-                # 无过滤条件
+                # Unfiltered similarity search.
                 results = self.vectorstore.similarity_search(query, k=k)
             else:
-                # 使用过滤条件
+                # Filtered similarity search.
                 results = self.vectorstore.similarity_search(query, k=k, filter=filter_dict)
         except Exception as e:
-            # 如果过滤器格式不正确，尝试不使用过滤器
-            print(f"Warning: Chroma filter error: {e}, falling back to unfiltered search")
+            # Some Chroma backends reject complex filters; fall back to unfiltered search.
+            logger.debug(f"Warning: Chroma filter error: {e}, falling back to unfiltered search")
             results = self.vectorstore.similarity_search(query, k=k)
         
         return results
@@ -283,30 +340,30 @@ class NovelKnowledgeBase:
         tags: Optional[List[str]] = None,
         min_score: float = 0.0,
     ) -> List[Dict[str, Any]]:
-        """增强RAG检索，支持结构化过滤
+        """Run enhanced knowledge search with structured filters.
         
         Args:
-            query: 搜索查询文本
-            k: 返回结果数量
-            project_id: 项目ID（强烈推荐，确保项目隔离）
-            filter_types: 类型过滤列表，如 ['chapter', 'character', 'world_setting']
-            categories: 设定体系过滤，如 ['cultivation_realm_system', 'technique_system']
-            chapter_range: 章节范围 (start, end)，如 (1, 10)
-            character_names: 人物名称过滤，搜索与这些人物相关的内容
-            tags: 标签过滤
-            min_score: 最小相关性分数阈值 (0-1)
+            query: Search query text.
+            k: Maximum number of results to keep after post-filtering.
+            project_id: Optional project scope.
+            filter_types: Optional list of knowledge types.
+            categories: Optional list of category values.
+            chapter_range: Optional inclusive chapter range as (start, end).
+            character_names: Optional character names used for result filtering.
+            tags: Optional metadata tags.
+            min_score: Minimum normalized similarity score between 0 and 1.
         
         Returns:
-            List[Dict]: 搜索结果列表，包含 content, metadata, score
+            List[Dict]: Result items containing content, metadata, and score.
         """
-        # 构建过滤条件
+        # Collect structured filter conditions for vector search.
         conditions = []
         
-        # 项目ID过滤
+        # Restrict to the requested project when provided.
         if project_id is not None:
             conditions.append({"project_id": str(project_id)})
         
-        # 多类型过滤（使用 $or）
+        # Type filters are combined with $or when multiple values are provided.
         if filter_types and len(filter_types) > 0:
             if len(filter_types) == 1:
                 conditions.append({"type": filter_types[0]})
@@ -314,7 +371,7 @@ class NovelKnowledgeBase:
                 type_conditions = [{"type": t} for t in filter_types]
                 conditions.append({"$or": type_conditions})
         
-        # 设定体系过滤
+        # Category filters are combined with $or when multiple values are provided.
         if categories and len(categories) > 0:
             if len(categories) == 1:
                 conditions.append({"category": categories[0]})
@@ -322,7 +379,7 @@ class NovelKnowledgeBase:
                 cat_conditions = [{"category": c} for c in categories]
                 conditions.append({"$or": cat_conditions})
         
-        # 构建最终过滤字典
+        # Build the final Chroma filter payload.
         filter_dict = None
         if len(conditions) == 0:
             filter_dict = None
@@ -331,8 +388,8 @@ class NovelKnowledgeBase:
         else:
             filter_dict = {"$and": conditions}
         
-        # 执行向量搜索（搜索更多结果用于后续过滤）
-        search_k = k * 3  # 搜索更多用于过滤
+        # Retrieve extra candidates first so local post-filtering still has room to trim.
+        search_k = k * 3  # Search a wider window before applying local filters.
         
         try:
             if filter_dict is None:
@@ -342,24 +399,24 @@ class NovelKnowledgeBase:
                     query, k=search_k, filter=filter_dict
                 )
         except Exception as e:
-            print(f"Warning: Enhanced search filter error: {e}, falling back to basic search")
+            logger.debug(f"Warning: Enhanced search filter error: {e}, falling back to basic search")
             results_with_scores = self.vectorstore.similarity_search_with_score(query, k=search_k)
         
-        # 后处理过滤
+        # Apply score and metadata filtering in Python.
         filtered_results = []
         
         for doc, score in results_with_scores:
-            # 转换分数（ChromaDB返回距离，转为相似度）
-            # 距离越小越相似，转为 0-1 分数
-            similarity_score = max(0, 1 - score / 2)  # 简单的转换公式
+            # Chroma distance is smaller when two vectors are more similar.
+            # Convert the distance into a simple 0-1 similarity score for UI use.
+            similarity_score = max(0, 1 - score / 2)  # Normalize distance to a comparable similarity score.
             
-            # 最小分数过滤
+            # Drop low-confidence results early.
             if similarity_score < min_score:
                 continue
             
             metadata = doc.metadata or {}
             
-            # 章节范围过滤
+            # Apply chapter range filtering when requested.
             if chapter_range:
                 chapter_num = metadata.get('chapter_num')
                 if chapter_num is not None:
@@ -370,7 +427,7 @@ class NovelKnowledgeBase:
                     except (ValueError, TypeError):
                         pass
             
-            # 人物名称过滤（检查内容中是否包含人物名）
+            # Apply character-name filtering against result metadata.
             if character_names:
                 content = doc.page_content.lower()
                 found_any = False
@@ -381,7 +438,7 @@ class NovelKnowledgeBase:
                 if not found_any:
                     continue
             
-            # 标签过滤
+            # Apply tag filtering.
             if tags:
                 doc_tags = metadata.get('tags', [])
                 if isinstance(doc_tags, str):
@@ -389,7 +446,7 @@ class NovelKnowledgeBase:
                 if not any(tag in doc_tags for tag in tags):
                     continue
             
-            # 添加到结果
+            # Collect the normalized result payload.
             filtered_results.append({
                 'content': doc.page_content,
                 'metadata': metadata,
@@ -397,7 +454,7 @@ class NovelKnowledgeBase:
                 'type': metadata.get('type', 'unknown'),
             })
         
-        # 按分数排序并限制数量
+        # Keep only the top-k results after all filters are applied.
         filtered_results.sort(key=lambda x: x['score'], reverse=True)
         return filtered_results[:k]
     
@@ -409,17 +466,17 @@ class NovelKnowledgeBase:
         include_chapters: bool = True,
         include_settings: bool = True,
     ) -> List[Dict[str, Any]]:
-        """根据人物名称搜索相关内容
+        """Search knowledge related to a group of characters.
         
         Args:
-            character_names: 人物名称列表
-            project_id: 项目ID
-            k: 返回结果数量
-            include_chapters: 是否包含章节内容
-            include_settings: 是否包含设定内容
+            character_names: Character names to search for.
+            project_id: Project identifier.
+            k: Maximum number of results.
+            include_chapters: Whether to search chapter content.
+            include_settings: Whether to search character and world-setting entries.
         
         Returns:
-            与人物相关的内容列表
+            Search results filtered by the requested character names.
         """
         filter_types = []
         if include_chapters:
@@ -427,7 +484,7 @@ class NovelKnowledgeBase:
         if include_settings:
             filter_types.extend(['character', 'world_setting'])
         
-        # 用人物名作为查询
+        # Reuse the character names as the primary search query.
         query = ' '.join(character_names)
         
         return self.search_enhanced(
@@ -445,18 +502,18 @@ class NovelKnowledgeBase:
         last_n_chapters: int = 5,
         k: int = 10,
     ) -> List[Dict[str, Any]]:
-        """在最近N章中搜索
+        """Search the most recent chapters for related knowledge.
         
         Args:
-            query: 搜索查询
-            project_id: 项目ID
-            last_n_chapters: 最近几章
-            k: 返回结果数量
+            query: Search query text.
+            project_id: Project identifier.
+            last_n_chapters: Number of recent chapters to include.
+            k: Maximum number of results.
         
         Returns:
-            搜索结果列表
+            Matching chapter documents.
         """
-        # 先获取最大章节号
+        # Query chapter metadata directly to discover the latest chapter number.
         try:
             collection = self.vectorstore._collection
             results = collection.get(
@@ -471,7 +528,7 @@ class NovelKnowledgeBase:
             if not results or not results['metadatas']:
                 return []
             
-            # 找出最大章节号
+            # Find the highest stored chapter number.
             max_chapter = 0
             for meta in results['metadatas']:
                 ch_num = meta.get('chapter_num')
@@ -484,7 +541,7 @@ class NovelKnowledgeBase:
             if max_chapter == 0:
                 return []
             
-            # 计算章节范围
+            # Limit the search to the requested recent chapter window.
             start_chapter = max(1, max_chapter - last_n_chapters + 1)
             
             return self.search_enhanced(
@@ -495,17 +552,17 @@ class NovelKnowledgeBase:
                 chapter_range=(start_chapter, max_chapter),
             )
         except Exception as e:
-            print(f"Error in search_recent_chapters: {e}")
+            logger.debug(f"Error in search_recent_chapters: {e}")
             return []
     
     def get_character_info(self, character_name: str, project_id: Optional[int] = None) -> List[Document]:
         """Get all information for a specific character
         
         Args:
-            character_name: 角色名称
-            project_id: 项目ID（推荐提供以确保项目隔离）
+            character_name: Character name to search for.
+            project_id: Optional project scope.
         """
-        # 构建条件列表
+        # Build filters for character records.
         conditions = [
             {"type": "character"},
             {"name": character_name}
@@ -513,7 +570,7 @@ class NovelKnowledgeBase:
         if project_id is not None:
             conditions.append({"project_id": str(project_id)})
         
-        # 使用 $and 操作符（多条件）
+        # Chroma requires $and when combining type and name filters.
         filter_dict = {"$and": conditions}
         
         try:
@@ -521,17 +578,17 @@ class NovelKnowledgeBase:
                 character_name, k=10, filter=filter_dict
             )
         except Exception as e:
-            print(f"Warning: Chroma filter error in get_character_info: {e}, falling back to unfiltered search")
+            logger.debug(f"Warning: Chroma filter error in get_character_info: {e}, falling back to unfiltered search")
             return self.vectorstore.similarity_search(character_name, k=10)
     
     def get_chapter_summary(self, chapter_num: int, project_id: Optional[int] = None) -> List[Document]:
         """Get content for a specific chapter
         
         Args:
-            chapter_num: 章节编号
-            project_id: 项目ID（推荐提供以确保项目隔离）
+            chapter_num: Chapter number to search for.
+            project_id: Optional project scope.
         """
-        # 构建条件列表
+        # Build filters for chapter records.
         conditions = [
             {"type": "chapter"},
             {"chapter_num": str(chapter_num)}
@@ -539,7 +596,7 @@ class NovelKnowledgeBase:
         if project_id is not None:
             conditions.append({"project_id": str(project_id)})
         
-        # 使用 $and 操作符（多条件）
+        # Chroma requires $and when combining chapter and project filters.
         filter_dict = {"$and": conditions}
         
         try:
@@ -547,25 +604,25 @@ class NovelKnowledgeBase:
                 f"Chapter {chapter_num}", k=10, filter=filter_dict
             )
         except Exception as e:
-            print(f"Warning: Chroma filter error in get_chapter_summary: {e}, falling back to unfiltered search")
+            logger.debug(f"Warning: Chroma filter error in get_chapter_summary: {e}, falling back to unfiltered search")
             return self.vectorstore.similarity_search(f"Chapter {chapter_num}", k=10)
     
     def delete_chapter(self, chapter_number: int, project_id: Optional[int] = None) -> int:
         """Delete chapter from vector database
 
         Args:
-            chapter_number: 章节号
-            project_id: 项目ID (可选,用于更精确的过滤)
+            chapter_number: Chapter number to delete.
+            project_id: Optional project scope used to narrow the deletion.
 
         Returns:
-            int: 删除的文档数量
+            int: Number of deleted documents.
         """
         try:
             collection = self.vectorstore._collection
 
-            # 构建过滤条件（使用 $and 操作符）
+            # Build the metadata filter used to read candidate chapter documents.
             if project_id is not None:
-                # 多条件查询，需要使用 $and
+                # Project-scoped delete uses a combined $and filter.
                 where_filter = {
                     "$and": [
                         {"type": "chapter"},
@@ -573,51 +630,52 @@ class NovelKnowledgeBase:
                     ]
                 }
             else:
-                # 单条件查询
+                # Global delete only filters by chapter type.
                 where_filter = {"type": "chapter"}
 
-            # 获取所有章节文档
+            # Load candidate chapter documents first, then delete by id.
             results = collection.get(where=where_filter)
 
             if not results or not results['ids']:
-                print(f"No chapter documents found in vector database")
+                logger.debug(f"No chapter documents found in vector database")
                 return 0
 
-            # 筛选出该章节的文档
+            # Match the stored chapter number or a recognizable chapter title.
             ids_to_delete = []
             for doc_id, metadata in zip(results['ids'], results['metadatas']):
                 if metadata and (
                     metadata.get('chapter_number') == chapter_number or
                     metadata.get('chapter_number') == str(chapter_number) or
-                    f'第{chapter_number}章' in str(metadata.get('title', ''))
+                    f"第{chapter_number}章" in str(metadata.get("title", "")) or
+                    f"Chapter {chapter_number}" in str(metadata.get("title", ""))
                 ):
                     ids_to_delete.append(doc_id)
 
             if ids_to_delete:
                 collection.delete(ids=ids_to_delete)
-                print(f"Deleted {len(ids_to_delete)} documents for chapter {chapter_number}")
+                logger.debug(f"Deleted {len(ids_to_delete)} documents for chapter {chapter_number}")
                 return len(ids_to_delete)
             else:
-                print(f"No documents found for chapter {chapter_number}")
+                logger.debug(f"No documents found for chapter {chapter_number}")
                 return 0
 
         except Exception as e:
-            print(f"Error deleting chapter from vector database: {e}")
+            logger.debug(f"Error deleting chapter from vector database: {e}")
             return 0
 
     def delete_project(self, project_id: int) -> int:
         """Delete all vector data for a project
 
         Args:
-            project_id: 项目ID
+            project_id: Project identifier.
 
         Returns:
-            int: 删除的文档数量
+            int: Number of deleted documents.
         """
         try:
             collection = self.vectorstore._collection
 
-            # 获取该项目的所有文档
+            # Load all project-scoped documents, then delete them by id.
             results = collection.get(
                 where={"project_id": str(project_id)}
             )
@@ -625,20 +683,20 @@ class NovelKnowledgeBase:
             if results and results['ids']:
                 deleted_count = len(results['ids'])
                 collection.delete(ids=results['ids'])
-                print(f"Deleted {deleted_count} documents for project {project_id}")
+                logger.debug(f"Deleted {deleted_count} documents for project {project_id}")
                 return deleted_count
             else:
-                print(f"No documents found for project {project_id}")
+                logger.debug(f"No documents found for project {project_id}")
                 return 0
 
         except Exception as e:
-            print(f"Error deleting project from vector database: {e}")
+            logger.debug(f"Error deleting project from vector database: {e}")
             return 0
 
     def clear_database(self):
         """Clear knowledge base (use with caution)"""
         self.vectorstore.delete_collection()
-        print("Knowledge base cleared")
+        logger.debug("Knowledge base cleared")
 
     def load_from_markdown(self, file_path: str, doc_type: str, metadata: Optional[Dict[str, Any]] = None):
         """Load data from Markdown file to knowledge base"""
@@ -651,28 +709,28 @@ class NovelKnowledgeBase:
             if doc_type == "world_setting":
                 title = f"World setting loaded from {file_path}"
                 self.add_world_setting(title, content, meta)
-                print(f"Loaded world setting from {file_path}")
+                logger.debug(f"Loaded world setting from {file_path}")
 
             elif doc_type == "character":
                 name = f"Character loaded from {file_path}"
                 self.add_character(name, content, meta)
-                print(f"Loaded character profile from {file_path}")
+                logger.debug(f"Loaded character profile from {file_path}")
 
             elif doc_type == "plot":
                 self.add_chapter(0, f"Plot outline loaded from {file_path}", content, meta)
-                print(f"Loaded plot outline from {file_path}")
+                logger.debug(f"Loaded plot outline from {file_path}")
 
             else:
-                print(f"Unknown document type: {doc_type}")
+                logger.debug(f"Unknown document type: {doc_type}")
                 return False
 
             return True
 
         except FileNotFoundError:
-            print(f"File not found: {file_path}")
+            logger.debug(f"File not found: {file_path}")
             return False
         except Exception as e:
-            print(f"Error loading file: {str(e)}")
+            logger.debug(f"Error loading file: {str(e)}")
             return False
 
     def load_from_directory(self, directory: str, metadata: Optional[Dict[str, Any]] = None):
@@ -697,9 +755,9 @@ class NovelKnowledgeBase:
                 if self.load_from_markdown(plot_file, "plot", metadata):
                     files_loaded += 1
 
-            print(f"Loaded {files_loaded} files from directory")
+            logger.debug(f"Loaded {files_loaded} files from directory")
             return files_loaded > 0
 
         except Exception as e:
-            print(f"Error loading directory: {str(e)}")
+            logger.debug(f"Error loading directory: {str(e)}")
             return False

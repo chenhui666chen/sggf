@@ -127,3 +127,33 @@ def test_build_analysis_result_marks_parse_error_as_low_confidence() -> None:
     assert result.extra_data["parse_error"] is True
     assert "quality_warning" in result.extra_data
     assert result.extra_data["raw_response_preview"] == "not-json-response"
+
+
+def test_normalize_character_entries_maps_new_semantic_aliases() -> None:
+    parsed = {
+        "characters": [
+            {
+                "name": "林澈",
+                "appearance_anchor": "眉眼冷厉",
+                "personality_anchor": ["冷静", "执拗"],
+                "background_status": "停职调查员，仍暗中追查旧案",
+                "ability_outline": "痕迹推演与现场复盘",
+                "limitation": "过度冒险，难以及时止损",
+                "growth_direction": "从独胆追查转向主动协作",
+                "mainline_role": "负责追查旧案并撬开主线缺口",
+                "mainline_clues": "掌握黑匣子与旧档案两条关键线索",
+            }
+        ]
+    }
+
+    characters = ContentAnalyzer._normalize_character_entries(parsed)
+
+    assert len(characters) == 1
+    assert characters[0]["appearance_anchor"] == "眉眼冷厉"
+    assert characters[0]["personality_anchor"] == ["冷静", "执拗"]
+    assert characters[0]["background_status"] == "停职调查员，仍暗中追查旧案"
+    assert characters[0]["ability_outline"] == "痕迹推演与现场复盘"
+    assert characters[0]["limitation"] == "过度冒险，难以及时止损"
+    assert characters[0]["growth_direction"] == "从独胆追查转向主动协作"
+    assert characters[0]["mainline_role"] == "负责追查旧案并撬开主线缺口"
+    assert characters[0]["mainline_clues"] == "掌握黑匣子与旧档案两条关键线索"

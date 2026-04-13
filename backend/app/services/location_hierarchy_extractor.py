@@ -4,6 +4,9 @@
 """
 import re
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 
@@ -132,7 +135,7 @@ class LocationHierarchyExtractor:
             return validated
             
         except Exception as e:
-            print(f"地点层级提取失败: {e}")
+            logger.debug(f"地点层级提取失败: {e}")
             return []
     
     @staticmethod

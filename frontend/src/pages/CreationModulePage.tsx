@@ -164,6 +164,11 @@ export default function CreationModulePage() {
     navigate('/user-center')
   }
 
+  const handleOpenPointsCenter = () => {
+    handleCloseUserMenu()
+    navigate('/user-center?tab=points')
+  }
+
   const handleLogout = () => {
     handleCloseUserMenu()
     dispatch(logout())
@@ -403,7 +408,7 @@ export default function CreationModulePage() {
                 />
                 <Chip
                   size="small"
-                  label="积分系统规划中"
+                  label="积分账本已接入"
                   sx={{
                     height: 22,
                     fontSize: '0.7rem',
@@ -424,11 +429,11 @@ export default function CreationModulePage() {
             <ListItemText primary="用户中心" secondary="查看创作概览、资产规划、账户与安全设置" />
           </MenuItem>
 
-          <MenuItem disabled>
+          <MenuItem onClick={handleOpenPointsCenter}>
             <ListItemIcon>
               <StarsOutlinedIcon fontSize="small" />
             </ListItemIcon>
-            <ListItemText primary="积分中心" secondary="后续接入积分、权益与消耗明细" />
+            <ListItemText primary="积分中心" secondary="直达用户中心的积分与权益页" />
           </MenuItem>
 
           <Divider />

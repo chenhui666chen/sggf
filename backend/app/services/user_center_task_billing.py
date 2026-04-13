@@ -517,7 +517,7 @@ def build_user_center_task_billing_overview(
                 UserCenterTaskBillingItemSnapshot(
                     key=f"dreamweaver-billing-{run_id}",
                     module_key="dreamweaver",
-                    module_label="鐭墽",
+                    module_label="短剧",
                     title=title,
                     summary=(
                         f"任务已完成{shot_summary}，按最终短剧合同快照结算，"

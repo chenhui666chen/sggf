@@ -3,7 +3,11 @@
 
 Phase 2: 自动提取与更新服务
 """
+import re
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
 from app.models.character import Character
@@ -13,6 +17,17 @@ from app.utils.datetime_utils import utc_now
 
 class AutoTrackingService:
     """自动追踪服务（简化版）"""
+
+    @staticmethod
+    def _name_matches(name: str, content: str) -> bool:
+        """使用词边界匹配，避免短名称误匹配"""
+        pattern = r'(?<![a-zA-Z\u4e00-\u9fff])' + re.escape(name) + r'(?![a-zA-Z\u4e00-\u9fff])'
+        return bool(re.search(pattern, content))
+
+    @staticmethod
+    def _split_sentences(content: str) -> List[str]:
+        """按多种标点分割句子"""
+        return [s.strip() for s in re.split(r'[。！？；\n]+', content) if s.strip()]
     
     @staticmethod
     def update_character_appearances_smart(
@@ -55,7 +70,7 @@ class AutoTrackingService:
             
             # 🆕 初始追踪模式：只处理新增
             if is_initial_tracking:
-                now_mentioned = name in new_content
+                now_mentioned = AutoTrackingService._name_matches(name, new_content)
                 if now_mentioned:
                     appearance_chapters = json.loads(character.appearance_chapters or "[]")
                     if chapter_id not in appearance_chapters:
@@ -69,15 +84,14 @@ class AutoTrackingService:
                             character.last_appearance_chapter_id = chapter_id
                         
                         added_count += 1
-                        print(f"  ✅ {name} 初始追踪: 第{chapter_id}章")
+                        logger.debug(f"  ✅ {name} 初始追踪: 第{chapter_id}章")
                 continue
             
             # 🔄 差异检测模式
             # 检测变化
-            was_mentioned = name in old_content
-            now_mentioned = name in new_content
+            was_mentioned = AutoTrackingService._name_matches(name, old_content)
+            now_mentioned = AutoTrackingService._name_matches(name, new_content)
             
-            # 无变化，跳过
             if was_mentioned == now_mentioned:
                 unchanged_count += 1
                 continue
@@ -89,14 +103,14 @@ class AutoTrackingService:
                 if chapter_id not in appearance_chapters:
                     appearance_chapters.append(chapter_id)
                     added_count += 1
-                    print(f"  ✅ {name} 新增出场: 第{chapter_id}章")
+                    logger.debug(f"  ✅ {name} 新增出场: 第{chapter_id}章")
             
             elif was_mentioned and not now_mentioned:
                 # 🗑️ 移除出场
                 if chapter_id in appearance_chapters:
                     appearance_chapters.remove(chapter_id)
                     removed_count += 1
-                    print(f"  ❌ {name} 移除出场: 第{chapter_id}章")
+                    logger.debug(f"  ❌ {name} 移除出场: 第{chapter_id}章")
             
             # 更新出场章节列表
             character.appearance_chapters = json.dumps(appearance_chapters)
@@ -156,7 +170,7 @@ class AutoTrackingService:
                 
                 # 🆕 初始追踪模式：只处理新增
                 if is_initial_tracking:
-                    now_mentioned = name in new_content
+                    now_mentioned = AutoTrackingService._name_matches(name, new_content)
                     if now_mentioned:
                         referenced_chapters = json.loads(item.referenced_chapters or "[]")
                         if chapter_id not in referenced_chapters:
@@ -165,15 +179,14 @@ class AutoTrackingService:
                             item.usage_count = len(referenced_chapters)
                             item.last_referenced_at = utc_now()
                             added_count += 1
-                            print(f"  ✅ {name} ({collection.category}) 初始追踪: 第{chapter_id}章")
+                            logger.debug(f"  ✅ {name} ({collection.category}) 初始追踪: 第{chapter_id}章")
                     continue
                 
                 # 🔄 差异检测模式
                 # 检测变化
-                was_mentioned = name in old_content
-                now_mentioned = name in new_content
+                was_mentioned = AutoTrackingService._name_matches(name, old_content)
+                now_mentioned = AutoTrackingService._name_matches(name, new_content)
                 
-                # 无变化，跳过
                 if was_mentioned == now_mentioned:
                     unchanged_count += 1
                     continue
@@ -188,7 +201,7 @@ class AutoTrackingService:
                         item.usage_count = len(referenced_chapters)
                         item.last_referenced_at = utc_now()
                         added_count += 1
-                        print(f"  ✅ {name} ({collection.category}) 新增引用: 第{chapter_id}章")
+                        logger.debug(f"  ✅ {name} ({collection.category}) 新增引用: 第{chapter_id}章")
                 
                 elif was_mentioned and not now_mentioned:
                     # 🗑️ 移除引用
@@ -198,7 +211,7 @@ class AutoTrackingService:
                         item.usage_count = len(referenced_chapters)
                         # last_referenced_at 不更新（保留最后一次真实引用时间）
                         removed_count += 1
-                        print(f"  ❌ {name} ({collection.category}) 移除引用: 第{chapter_id}章")
+                        logger.debug(f"  ❌ {name} ({collection.category}) 移除引用: 第{chapter_id}章")
         
         db.commit()
         
@@ -230,7 +243,7 @@ class AutoTrackingService:
         # 1. 关联所属势力
         if character.faction and not character.faction_item_id:
             faction_item = AutoTrackingService._find_setting_item_by_name(
-                character.faction, "force_system", project_id, db
+                character.faction, "organization_force_system", project_id, db
             )
             if faction_item:
                 character.faction_item_id = faction_item.id
@@ -303,7 +316,7 @@ class AutoTrackingService:
         
         for character in characters:
             char_name = character.name
-            if not char_name or char_name not in chapter_content:
+            if not char_name or not AutoTrackingService._name_matches(char_name, chapter_content):
                 continue
             
             # 1️⃣ 检测人物-功法关联
@@ -328,7 +341,7 @@ class AutoTrackingService:
                             char_techniques.append(tech.id)
                             character.techniques_json = json.dumps(char_techniques)
                             technique_count += 1
-                            print(f"  📚 {char_name} 关联功法: {tech.name}")
+                            logger.debug(f"  📚 {char_name} 关联功法: {tech.name}")
                         
                         # 更新设定项的related_characters字段
                         tech_chars = json.loads(tech.related_characters or "[]")
@@ -337,30 +350,27 @@ class AutoTrackingService:
                             tech.related_characters = json.dumps(tech_chars)
             
             # 2️⃣ 检测人物-法宝关联
-            if 'artifact_system' in collections_by_category:
-                artifact_coll = collections_by_category['artifact_system']
-                artifacts = db.query(SettingItem).filter(
-                    SettingItem.collection_id == artifact_coll.id
+            if 'weapon_system' in collections_by_category:
+                weapon_coll = collections_by_category['weapon_system']
+                weapons = db.query(SettingItem).filter(
+                    SettingItem.collection_id == weapon_coll.id
                 ).all()
                 
-                for art in artifacts:
+                for art in weapons:
                     if not art.name:
                         continue
                     
-                    # 匹配模式："人物名 + [手持|获得|使用|佩戴] + 法宝名"
                     if AutoTrackingService._match_relation(
                         chapter_content, char_name, art.name,
                         ['手持', '获得', '使用', '佩戴', '持有', '拿出']
                     ):
-                        # 更新人物的artifacts_json字段
                         char_artifacts = json.loads(character.artifacts_json or "[]")
                         if art.id not in char_artifacts:
                             char_artifacts.append(art.id)
                             character.artifacts_json = json.dumps(char_artifacts)
                             artifact_count += 1
-                            print(f"  ⚔️ {char_name} 关联法宝: {art.name}")
+                            logger.debug(f"  ⚔️ {char_name} 关联法宝: {art.name}")
                         
-                        # 更新设定项的related_characters字段
                         art_chars = json.loads(art.related_characters or "[]")
                         if character.id not in art_chars:
                             art_chars.append(character.id)
@@ -388,7 +398,7 @@ class AutoTrackingService:
                             char_locations.append(loc.id)
                             character.related_locations_json = json.dumps(char_locations)
                             location_count += 1
-                            print(f"  📍 {char_name} 关联地点: {loc.name}")
+                            logger.debug(f"  📍 {char_name} 关联地点: {loc.name}")
                         
                         # 更新设定项的related_characters字段
                         loc_chars = json.loads(loc.related_characters or "[]")
@@ -423,7 +433,7 @@ class AutoTrackingService:
         - "主角在某地点修炼" → True
         """
         # 简单匹配：在同一句中同时出现人物、关键词、设定项
-        sentences = content.split('。')  # 按句号分割
+        sentences = AutoTrackingService._split_sentences(content)  # 按句号分割
         
         for sentence in sentences:
             if char_name in sentence and item_name in sentence:

@@ -13,7 +13,8 @@ if str(ROOT_DIR) not in sys.path:
 
 os.environ.setdefault("DEBUG", "false")
 
-from app.api.v1.asset_studio import _validate_dimensions_for_models, _validate_video_duration
+from app.api.v1.asset_studio import _raise_for_failed_result, _validate_dimensions_for_models, _validate_video_duration
+from core.unified_media_runtime import UnifiedMediaResult
 
 
 def test_asset_studio_video_duration_uses_runtime_union(monkeypatch, tmp_path) -> None:
@@ -140,3 +141,32 @@ def test_asset_studio_dimensions_reject_unsupported_ratio(monkeypatch, tmp_path)
 
     assert exc_info.value.status_code == 400
     assert "1536x2048（3:4）" in str(exc_info.value.detail)
+
+
+def test_asset_studio_failed_result_uses_bad_request_for_invalid_parameter() -> None:
+    result = UnifiedMediaResult(
+        success=False,
+        model_id="wan2.6-t2i",
+        error="DashScope HTTP 400 | InvalidParameter | messages.content is required",
+        error_code="invalid_parameter",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        _raise_for_failed_result(result, fallback_message="图片生成失败")
+
+    assert exc_info.value.status_code == 400
+    assert "InvalidParameter" in str(exc_info.value.detail)
+
+
+def test_asset_studio_failed_result_keeps_service_unavailable_for_runtime_failure() -> None:
+    result = UnifiedMediaResult(
+        success=False,
+        model_id="wan2.6-t2i",
+        error="upstream timeout",
+        error_code="timeout",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        _raise_for_failed_result(result, fallback_message="图片生成失败")
+
+    assert exc_info.value.status_code == 503

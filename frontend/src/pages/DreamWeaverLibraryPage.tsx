@@ -4,6 +4,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Container,
@@ -18,6 +19,7 @@ import {
   InputLabel,
   LinearProgress,
   MenuItem,
+  Paper,
   Select,
   Stack,
   Typography,
@@ -39,6 +41,14 @@ import {
   type CharacterView,
 } from '@/utils/dreamweaverLibraryRole'
 import { hasRenderableLibraryImage, resolveLibraryAssetImageState } from '@/utils/dreamweaverLibraryAssetState'
+import {
+  STYLE_PRESETS,
+  IMAGE_RATIOS,
+  STYLE_PRESET_LABELS,
+} from '@/constants/dreamweaver'
+
+type StylePresetValue = typeof STYLE_PRESETS[keyof typeof STYLE_PRESETS]
+type ImageRatioValue = typeof IMAGE_RATIOS[keyof typeof IMAGE_RATIOS]
 
 interface LibraryAsset {
   id: number
@@ -68,21 +78,23 @@ function buildProtectedLibraryAssetUrl(assetId: number): string {
   return `protected://dreamweaver-library/${assetId}`
 }
 
-function normalizeStylePresetValue(raw: any): string {
+function normalizeStylePresetValue(raw: any): StylePresetValue {
   const text = String(raw || '').trim()
-  const allowed = new Set(['cinematic_realistic', 'anime', 'ink_wash', 'cyberpunk'])
-  if (allowed.has(text)) return text
-  if (text === '电影写实') return 'cinematic_realistic'
-  if (text === '二次元动画') return 'anime'
-  if (text === '国风水墨') return 'ink_wash'
-  if (text === '赛博朋克') return 'cyberpunk'
-  return 'cinematic_realistic'
+  const allowed = new Set<string>(Object.values(STYLE_PRESETS))
+  if (allowed.has(text)) return text as StylePresetValue
+  if (text === STYLE_PRESET_LABELS[STYLE_PRESETS.CINEMATIC_REALISTIC]) return STYLE_PRESETS.CINEMATIC_REALISTIC
+  if (text === STYLE_PRESET_LABELS[STYLE_PRESETS.ANIME]) return STYLE_PRESETS.ANIME
+  if (text === STYLE_PRESET_LABELS[STYLE_PRESETS.INK_WASH]) return STYLE_PRESETS.INK_WASH
+  if (text === STYLE_PRESET_LABELS[STYLE_PRESETS.CYBERPUNK]) return STYLE_PRESETS.CYBERPUNK
+  return STYLE_PRESETS.CINEMATIC_REALISTIC
 }
 
-function normalizeImageRatioValue(raw: any): string {
+function normalizeImageRatioValue(raw: any): ImageRatioValue {
   const text = String(raw || '').trim()
-  if (text === '16:9' || text === '9:16') return text
-  return '16:9'
+  if (text === IMAGE_RATIOS.LANDSCAPE_16_9 || text === IMAGE_RATIOS.PORTRAIT_9_16) {
+    return text as ImageRatioValue
+  }
+  return IMAGE_RATIOS.LANDSCAPE_16_9
 }
 
 function ratioToCssAspectRatio(raw: any, fallback: string): string {
@@ -164,16 +176,40 @@ export default function DreamWeaverLibraryPage() {
   const [regenTitle, setRegenTitle] = useState('')
   const [regenPrompt, setRegenPrompt] = useState('')
   const [regenPreferImageEdit, setRegenPreferImageEdit] = useState(false)
-  const [regenStylePreset, setRegenStylePreset] = useState('cinematic_realistic')
-  const [regenImageRatio, setRegenImageRatio] = useState('16:9')
+  const [regenStylePreset, setRegenStylePreset] = useState<StylePresetValue>(STYLE_PRESETS.CINEMATIC_REALISTIC)
+  const [regenImageRatio, setRegenImageRatio] = useState<ImageRatioValue>(IMAGE_RATIOS.LANDSCAPE_16_9)
   const [regenSubmitting, setRegenSubmitting] = useState(false)
   const [regenSuggesting, setRegenSuggesting] = useState(false)
   const [regenSuggestError, setRegenSuggestError] = useState<string | null>(null)
   const [regenError, setRegenError] = useState<string | null>(null)
   const regenSuggestRequestIdRef = useRef(0)
+  const previewUrlsRef = useRef<Set<string>>(new Set())
   const [characterViewsOpen, setCharacterViewsOpen] = useState(false)
   const [characterViewsEntityId, setCharacterViewsEntityId] = useState<number | null>(null)
   const [collectStates, setCollectStates] = useState<Record<number, CollectState>>({})
+  const [showAllCards, setShowAllCards] = useState(false)
+  const [selectedRoles, setSelectedRoles] = useState<Set<string>>(new Set())
+  const [batchApproving, setBatchApproving] = useState(false)
+  const INITIAL_CARD_LIMIT = 20
+
+  const selectedRolesCount = selectedRoles.size
+  const hasSelection = selectedRolesCount > 0
+
+  const toggleRoleSelection = useCallback((role: string) => {
+    setSelectedRoles((prev) => {
+      const next = new Set(prev)
+      if (next.has(role)) {
+        next.delete(role)
+      } else {
+        next.add(role)
+      }
+      return next
+    })
+  }, [])
+
+  const clearSelection = useCallback(() => {
+    setSelectedRoles(new Set())
+  }, [])
   const regenRoleInfo = useMemo(() => parseLibraryRole(regenRole), [regenRole])
   const regenIsDerivedCharacterView = useMemo(() => {
     return regenRoleInfo.entityType === 'character' && Boolean(regenRoleInfo.view) && regenRoleInfo.view !== 'front'
@@ -185,6 +221,14 @@ export default function DreamWeaverLibraryPage() {
     setError(null)
     setLibrary(null)
     setLockedConfig(null)
+    previewUrlsRef.current.forEach((url) => {
+      try {
+        URL.revokeObjectURL(url)
+      } catch {
+        // ignore
+      }
+    })
+    previewUrlsRef.current.clear()
     setPreviews({})
     setPreviewAspectRatios({})
     try {
@@ -209,6 +253,7 @@ export default function DreamWeaverLibraryPage() {
           try {
             const fileRes = await apiClient.getDreamweaverLibraryAssetFile(asset.id)
             const url = URL.createObjectURL(fileRes.data)
+            previewUrlsRef.current.add(url)
             return [asset.id, url] as const
           } catch {
             return [asset.id, ''] as const
@@ -233,15 +278,16 @@ export default function DreamWeaverLibraryPage() {
 
   useEffect(() => {
     return () => {
-      Object.values(previews).forEach((url) => {
+      previewUrlsRef.current.forEach((url) => {
         try {
           URL.revokeObjectURL(url)
         } catch {
           // ignore
         }
       })
+      previewUrlsRef.current.clear()
     }
-  }, [previews])
+  }, [])
 
   const approveLibraryRole = useCallback(
     async (role: string, approved: boolean) => {
@@ -259,6 +305,25 @@ export default function DreamWeaverLibraryPage() {
       }
     },
     [loadLibrary, projectId],
+  )
+
+  const batchApproveLibraryRoles = useCallback(
+    async (approved: boolean) => {
+      if (!projectId || !selectedRolesCount) return
+      setBatchApproving(true)
+      setError(null)
+      try {
+        const roles = Array.from(selectedRoles)
+        await apiClient.approveDreamweaverLibrary(projectId, { roles, approved })
+        clearSelection()
+        await loadLibrary()
+      } catch (e: any) {
+        setError(await extractApiErrorMessage(e, '批量审核失败'))
+      } finally {
+        setBatchApproving(false)
+      }
+    },
+    [loadLibrary, projectId, selectedRoles, selectedRolesCount, clearSelection],
   )
   const uploadLibraryAsset = useCallback(
     async (assetId: number, file: File) => {
@@ -825,6 +890,22 @@ export default function DreamWeaverLibraryPage() {
         }}
       >
         <Box sx={{ width: '100%', aspectRatio, bgcolor: 'rgba(0,0,0,0.25)', position: 'relative' }}>
+          <Checkbox
+            size="small"
+            checked={selectedRoles.has(asset.role)}
+            onChange={() => toggleRoleSelection(asset.role)}
+            onClick={(e: React.MouseEvent<HTMLButtonElement>) => e.stopPropagation()}
+            sx={{
+              position: 'absolute',
+              top: 4,
+              left: 4,
+              zIndex: 2,
+              bgcolor: 'rgba(0,0,0,0.5)',
+              borderRadius: 1,
+              '& .MuiSvgIcon-root': { fontSize: 18, color: 'white' },
+              '&.Mui-checked .MuiSvgIcon-root': { color: 'primary.main' },
+            }}
+          />
           {preview && (
             <Box
               component="img"
@@ -1023,6 +1104,49 @@ export default function DreamWeaverLibraryPage() {
           <Chip label={`待审核：${unapprovedCount}`} color={unapprovedCount ? 'warning' : 'default'} variant="outlined" />
         </Stack>
 
+        {hasSelection && (
+          <Paper
+            elevation={2}
+            sx={{
+              mb: 2,
+              p: 1.5,
+              bgcolor: 'rgba(33, 150, 243, 0.15)',
+              border: '1px solid rgba(33, 150, 243, 0.4)',
+              borderRadius: 2,
+            }}
+          >
+            <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap">
+              <Chip
+                size="small"
+                label={`已选择 ${selectedRolesCount} 个素材`}
+                color="primary"
+                onDelete={clearSelection}
+              />
+              <Button
+                size="small"
+                variant="contained"
+                color="success"
+                disabled={batchApproving || loading}
+                onClick={() => void batchApproveLibraryRoles(true)}
+              >
+                批量通过
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                color="warning"
+                disabled={batchApproving || loading}
+                onClick={() => void batchApproveLibraryRoles(false)}
+              >
+                批量撤销
+              </Button>
+              <Button size="small" variant="text" onClick={clearSelection}>
+                取消选择
+              </Button>
+            </Stack>
+          </Paper>
+        )}
+
         {!loading && !library && !error && (
           <Box sx={{ py: 8, display: 'flex', justifyContent: 'center' }}>
             <CircularProgress />
@@ -1034,6 +1158,8 @@ export default function DreamWeaverLibraryPage() {
             {LIBRARY_CARD_GROUP_ORDER.map((group) => {
               const items = cardGroups[group.key] || []
               if (!items.length) return null
+              const displayItems = showAllCards ? items : items.slice(0, INITIAL_CARD_LIMIT)
+              const hasMore = items.length > INITIAL_CARD_LIMIT
               return (
                 <Box key={group.key}>
                   <Stack direction="row" spacing={1} alignItems="center" mb={1} flexWrap="wrap">
@@ -1041,13 +1167,43 @@ export default function DreamWeaverLibraryPage() {
                       {group.label}
                     </Typography>
                     <Chip size="small" label={`数量：${items.length}`} variant="outlined" />
+                    {hasMore && !showAllCards && (
+                      <Chip
+                        size="small"
+                        label={`显示更多`}
+                        variant="outlined"
+                        color="primary"
+                        onClick={() => setShowAllCards(true)}
+                        sx={{ cursor: 'pointer' }}
+                      />
+                    )}
                   </Stack>
                   <ImageList variant="standard" cols={cardCols} gap={10} sx={{ m: 0 }}>
-                    {items.map(renderLibraryCard)}
+                    {displayItems.map(renderLibraryCard)}
                   </ImageList>
+                  {hasMore && !showAllCards && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => setShowAllCards(true)}
+                      sx={{ mt: 1, color: 'rgba(255,255,255,0.85)', borderColor: 'rgba(255,255,255,0.3)' }}
+                    >
+                      显示全部 {items.length} 个素材
+                    </Button>
+                  )}
                 </Box>
               )
             })}
+            {showAllCards && cards.length > INITIAL_CARD_LIMIT && (
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => setShowAllCards(false)}
+                sx={{ color: 'rgba(255,255,255,0.85)', borderColor: 'rgba(255,255,255,0.3)' }}
+              >
+                收起
+              </Button>
+            )}
           </Stack>
         ) : (
           !loading && (
@@ -1282,7 +1438,7 @@ export default function DreamWeaverLibraryPage() {
                   labelId="library-style-preset-label"
                   value={regenStylePreset}
                   label="风格预设"
-                  onChange={(e) => setRegenStylePreset(String(e.target.value))}
+                  onChange={(e) => setRegenStylePreset(normalizeStylePresetValue(e.target.value))}
                 >
                   <MenuItem value="cinematic_realistic">电影写实</MenuItem>
                   <MenuItem value="anime">二次元动画</MenuItem>
@@ -1296,7 +1452,7 @@ export default function DreamWeaverLibraryPage() {
                   labelId="library-image-ratio-label"
                   value={regenImageRatio}
                   label="画幅"
-                  onChange={(e) => setRegenImageRatio(String(e.target.value))}
+                  onChange={(e) => setRegenImageRatio(normalizeImageRatioValue(e.target.value))}
                 >
                   <MenuItem value="16:9">横屏 16:9</MenuItem>
                   <MenuItem value="9:16">竖屏 9:16</MenuItem>

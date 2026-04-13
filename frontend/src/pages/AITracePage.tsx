@@ -72,11 +72,9 @@ export default function AITracePage() {
       try {
         const data = JSON.parse(importedContent)
         setInputText(data.content || '')
-        // 清除已使用的数据
         localStorage.removeItem('zhiwen_import_content')
-        console.log('✅ 已导入章节:', data.title)
-      } catch (error) {
-        console.error('❌ 解析导入数据失败:', error)
+      } catch {
+        // 解析导入数据失败
       }
     }
   }, [])

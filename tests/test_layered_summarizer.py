@@ -175,3 +175,20 @@ def test_prepare_context_reuses_persisted_structured_memory_across_rounds(tmp_pa
 
     assert "城门暗号为何提前泄露" in merged_foreshadowings
     assert "夜禁期间城门不会无故开启" in merged_rules
+
+
+def test_summarize_chapter_block_prefers_standardized_outline_fields():
+    summarizer = LayeredSummarizer()
+
+    block = """第12章：黑市试探
+- 场景目标：林舟潜入黑市确认卷宗下落。
+- 冲突设计：线人设局试探林舟的真实立场。
+- 人物推进：林舟与顾晚从互相试探转向有限合作。
+- 信息落地：确认卷宗已经被第三方势力截走。
+- 结尾钩子：黑市深处有人提前留下了林舟的名字。"""
+
+    summary = summarizer._summarize_chapter_block(block)
+
+    assert summary.startswith("第12章：黑市试探：")
+    assert "场景目标：林舟潜入黑市确认卷宗下落。" in summary
+    assert "冲突设计：线人设局试探林舟的真实立场。" in summary

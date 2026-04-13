@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import difflib
 import json
 import logging
@@ -65,6 +66,10 @@ from app.services.dreamweaver.config_lock import (
     get_project_locked_generation_config,
 )
 from app.services.dreamweaver.library_prompt import suggest_library_prompt
+from app.services.points_task_precheck import (
+    build_dreamweaver_task_points_precheck,
+    build_task_points_precheck_error_detail,
+)
 from app.services.chapter_adaptation_assets import build_drama_source_text
 
 from pipeline.state_machine import RunContext, State, progress_percent, run_until_done, stage_label
@@ -85,29 +90,41 @@ router = APIRouter(prefix="/api/v1/dreamweaver", tags=["dreamweaver"])
 logger = logging.getLogger(__name__)
 
 
+def _ensure_dreamweaver_points_precheck_passed(precheck: object) -> None:
+    if bool(getattr(precheck, "allowed", False)):
+        return
+    detail = build_task_points_precheck_error_detail(
+        precheck=precheck,
+        module_key="dreamweaver",
+        module_label="短剧",
+        default_message="短剧积分预检未通过",
+    )
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
 class RunRequest(BaseModel):
     project_id: int
     chapter_ids: List[int] = Field(default_factory=list)
-    # 闁哄鏅滈崝姗€銆侀幋锕€绫嶉柤鎼佹涧閻忓洭鏌?闁荤姵鍔戦崝鎴﹀闯閻戞﹫绱ｉ柛鏇ㄥ櫘閸熷酣鏌ㄥ☉妯煎鐟滅増鐓￠弻鍛緞濞戞氨顦梺鎸庣⊕椤掔幖ality=闂佸搫鐗冮崑鎾澄旈崒娑辩劸鐎瑰憡绻堥弻宀冪疀閵壯咁槱闂佸搫娲ら悺銊╁矗?闂佸搫娲ㄩˉ鎰板触瑜版帗鏅鑸电〒缁€濉﹐st=婵炶揪绲界€涒晠宕瑰璺哄珘妞ゆ帒锕︾粈鍕煛閸ャ劍缍戦柟?闂佸搫娲ら顓炪€掗悜鑺ユ櫖?
+    # 质量模式：quality=高质量优先（生图更精细），cost=成本优先（生图更快更省）
     quality_mode: Optional[Literal["quality", "cost"]] = Field(default=None)
-    # 闂佸搫鎳樼紓姘跺礂濡吋瀚柛鎰╁妼濡﹢鏌ㄥ☉妯煎鐟滅増鐓￠弻鍛緞濞戞氨顦梺鎸庣⊕閻℃潧ue=闂佸湱顭堥ˇ鎶斤綖婢舵劕绀嗘繛鍡樺笒濞堜即鏌涢弬璇插闁汇劎鍠栧顐﹀级閹存柨浜炬繛鍡樻尨閸嬫挻寰勭€ｎ偅顔?闁荤姴娴傞崢铏圭不閻旂儤瀚婚柕濠忓瘜濮婃儳螞閺夊灝顏柣锝堝吹缁灚寰勫☉姘€縁alse=婵炶揪缍€濞夋洟寮妶澶婄倞闁告繂瀚弳鏉课涢弶鍨伂妞?闂佸綊娼ч鍛叏閳哄懏鐓€鐎广儱娲ㄩ弸?
+    # 智能调参：开启后自动优化提示词和参数，默认true=开启智能调参优化，false=关闭
     smart_tuning: Optional[bool] = Field(default=None)
-    # A/B 闁诲骸婀遍崑銈夋偘濞嗘挸鍐€闁搞儮鏅╅崝顕€鏌ㄥ☉妯煎鐟滅増鐓￠弻鍛緞濞戞氨顦梺鎸庣⊕閻喚鍒掓惔銊﹀仺闁靛鍊楅懝楣冩煛瀹ュ懏绌挎い鏂挎喘閻涱喚鎹勬笟顖氭濠殿噯绲惧鑽ゅ垝閾忚濯奸柍钘夋噽缁€澶娾槈閹惧磭小缂佸彉鍗抽幊娑㈩敂閸曨倣妤呮煛閳ь剟鎮烽弶璺ㄧМ闂佹眹鍨婚崰鎰板垂濮樿埖鐒婚柡鍕箳鐢?
+    # A/B 测试变体标识，用于实验分流
     ab_variant: Optional[str] = Field(default=None)
-    # 闁荤姵鍔戦崝宥壦夐崨顔肩窞閺夊牜鍋夎婵犮垼娉涚€氼噣骞冩繝鍕┏闁哄稁鍋呭▓锝夋煥濞戞澧曠憸鐗堢叀閺屽懏寰勫☉姘鳖槴闂佹寧绋掗悺鏉泆e=婵炲濮撮幊鎾活敆閻旂厧宸濆┑鐘辫兌閻熸繈鏌熼崙銈夋闁糕晛鎳樺畷娆撴惞閻熼偊鏆梺鎸庣☉閻楀懐鍒掑☉娆忣嚤婵﹩鍓氶煬顒傜磽娴ｈ灏伴柣蹇擃槹缁嬪顢橀敍鍕唹闂?autoqc/qc_warning闂?
+    # 是否允许质检失败后继续，用于 autoqc/qc_warning 模式
     qc_allow_fail: Optional[bool] = Field(default=None)
-    # 婵＄偛顑呯€涒晠鎮ч崨濠忕矗闁告洦鍣崯搴ㄦ煥濞戞澧曠憸鐗堢叀閺屽懏寰勫☉姘鳖槴闂佹寧绋掑銊╁极閵堝棛顩查幖杈剧悼閸╃姴鈽夐幘顖氫壕缂備浇浜慨闈涱焽濡や焦鍎?闂佸憡甯掑Λ婵嬪汲?婵☆偓绲鹃悧鏇㈡偄椤掑倹鏆滅憸鏃埶夐幘璇插唨?
+    # 风格预设：影响生图提示词风格，可选 cinematic_realistic/anime/ink_wash/cyberpunk
     style_preset: Optional[str] = Field(default=None)
-    # 闂佹眹鍨归…宄邦焽閺夊晝鎺楀棘閸撗傜矗闂佹寧绋戦悧鍡氥亹閺屻儲鐒诲鑸电〒缁€鍡涙煥濞戞瑦鐨戦柡浣靛€栫粋宥嗘償閿濆洤鐓氭繛鎴炴尨閸嬫捇鏌涢幒鎴烆棦闁?ratio 婵炴垶鎸告鎼佸矗瑜旈弻銊╊敊閸忕厧顫撻梺鍛婂笒濡粍銇旈幖浣瑰仢闁搞儵顥撶粈鍕€掑顒夊剰妞?16:9 / 9:16闂?
+    # 图片比例：影响生图宽高比，ratio 参数控制输出 16:9 / 9:16
     image_ratio: Optional[str] = Field(default=None)
-    # 闂佸憡甯掑Λ婊勩仈閹间焦鍋濋柛銉ｅ妸閳ь剙鍊归幏鍛吋韫囨洜顦╅梺鍛婄懐閸ㄥ爼鍩€椤掆偓椤р偓缂佽鲸宀搁弫?20p / 1080p闂佹寧绋戦悧鍛箔瀹€鍕仺濠电姵纰嶅銊︽叏閿濆棙鐓ｇ紒韬插劦瀹曟宕￠悙鏉戔偓閬嶆煕閹邦剙鏆遍柣锝夌畺瀵敻鍩€椤掑倻纾?width/height闂?
+    # 图片分辨率：720p / 1080p 等，最终转换为 width/height
     image_resolution: Optional[str] = Field(default=None)
-    # 闁荤喐鐟ュΛ婵嬨€傞崜浣规殰鐟滃繐顔忔總鍛婃櫖闁割偅绻傜拋鏌ユ⒑椤愩埄妾х紒杈ㄥ哺閺佸秴顫濇潏銊︽婵?I2V/FFmpeg 闂佸憡鑹鹃悧濠囧垂濮樿埖鏅?~60闂?
+    # 视频帧率：I2V/FFmpeg 视频生成时使用，范围 1~60
     video_fps: Optional[int] = Field(default=None, ge=1, le=60)
-    # 闁荤喐鐟ュΛ婵嬨€傞崼鏇熷仺闁绘梻顭堥悘鍥煛閸曢潧鐏犻柟顖欑窔濡線鍩€椤掑倹鍟哄〒姘ｅ亾闁逞屽墯閸旀瑩寮抽崨顔肩窞閻庣數纭堕埀顒侇焽閹峰濡惰箛鏇狀槱闂佸憡鐟崹鍫曞焵椤掆偓椤р偓缂佽鲸宀搁弫宥咁潰瀹勭e=VIDEO 闂傚倸鍟抽崺鏍敊瀹€鍕闁割偁鍨洪弲鎼佹煙?video_clip_jobs 婵炲濮鹃褎鎱ㄩ悢鐓庣闁炽儱鐤囩€氭瑧绱掑☉姗嗘Ц缂佸墎鍠撳☉鐢割敊濞嗘儳鎮?
+    # 视频生成是否需要确认：默认 VIDEO 模式下自动生成 video_clip_jobs 并等待确认
     video_require_confirmation: Optional[bool] = Field(default=None)
     prompt_review_required: Optional[bool] = Field(default=None)
-    # 闂佹椿娼块崝瀣姳椤掑嫭鍋嬮柛顐ゅ枑閹烽亶鏌涢弽銊уⅹ妞ゃ劍鐗滈惀顏堟晜鐠恒劎鎲块柣鐘欏啫顏уΔ鐘叉喘閺屻劌顫濋崡鐐板寲闂佹寧绋戦悧鍡氥亹閺屻儲鐒诲鑸电〒缁€澶婎潡濞戞瑯鐒炬い?0.1.0闂?
+    # 契约版本号，当前为 0.1.0
     schema_version: Optional[str] = None
 
 
@@ -350,12 +367,24 @@ def _dreamweaver_celery_queue() -> str:
 
 
 def _normalize_run_id(run_id: str) -> str:
+    import urllib.parse
     value = str(run_id or "").strip()
     if not value:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run_id 娑撳秷鍏樻稉铏光敄")
-    if "/" in value or "\\" in value or ".." in value:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run_id 格式不合法")
-    return value
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run_id 不能为空")
+    try:
+        decoded = urllib.parse.unquote(value)
+    except Exception as e:
+        logger.debug("Failed to URL decode run_id '%s': %s, using raw value", value, e)
+        decoded = value
+    dangerous_patterns = ["/", "\\", "..", "%2f", "%5c", "%2e%2e"]
+    lowered = decoded.lower()
+    for pattern in dangerous_patterns:
+        if pattern.lower() in lowered:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run_id 格式不合法")
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9_\-]+", decoded):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run_id 仅允许字母、数字、下划线和连字符")
+    return decoded
 
 
 def _read_upload_bytes(upload: UploadFile, *, max_bytes: int) -> bytes:
@@ -393,20 +422,21 @@ def _ensure_path_under_runs(path: Path) -> Path:
 def _runs_base_dir() -> Path:
     try:
         return runs_root_path().resolve()
-    except Exception:  # noqa: BLE001
+    except Exception as e:
+        logger.warning("Failed to resolve runs_root_path, falling back to 'runs' directory: %s", e)
         return Path("runs").resolve()
 
 
 def _ensure_run_not_running(row: DreamweaverProjectModel, *, action: str) -> None:
     status_lower = str(getattr(row, "status", "") or "").strip().lower()
     if status_lower == "running":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"run 姝ｅ湪鎵ц锛屾棤娉曟墽琛?{action}")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"run 正在执行，无法执行{action}")
 
 
 def _find_contract_shot(contract: Dict[str, Any], *, shot_id: str) -> Dict[str, Any]:
     episodes = contract.get("episodes") if isinstance(contract.get("episodes"), list) else []
     if not episodes or not isinstance(episodes[0], dict):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="contract 缂傚搫鐨?episodes")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="contract 缺少有效的 episodes")
     shots = episodes[0].get("shots") if isinstance(episodes[0].get("shots"), list) else []
     for shot in shots:
         if not isinstance(shot, dict):
@@ -481,21 +511,6 @@ def _character_role_for_view(*, entity_id: int, view: str) -> str:
     return f"{prefix}:{int(entity_id)}"
 
 
-def _parse_library_role(role: str) -> Tuple[str, int]:
-    text = (role or "").strip()
-    if ":" not in text:
-        raise ValueError("invalid role")
-    prefix, raw_id = text.split(":", 1)
-    entity_id = int(raw_id)
-    if prefix in _CHARACTER_VIEW_PREFIX_TO_VIEW:
-        return "character", entity_id
-    if prefix == "lib_scene_card":
-        return "scene", entity_id
-    if prefix == "lib_prop_card":
-        return "prop", entity_id
-    raise ValueError("unsupported role")
-
-
 def _build_library_prompt(
     entity_type: str,
     name: str,
@@ -503,7 +518,7 @@ def _build_library_prompt(
     style_prompt: Optional[str] = None,
     ratio: Optional[str] = None,
 ) -> str:
-    # 闂佺绻掗崢褔顢欓幇鏉跨睄鐟滄垿鎯冮悢鍏煎仺闁靛ě鍐у寲闂佹寧绋掑銊у垝閻戞鈻旈柍褜鍓氬鍕吋閸ャ劍娈?services 闁诲繒鍋涢崐璇测枔?prompt 濠碘槅鍨崜婵嗩熆濮椻偓婵?
+    # Reuse the shared library prompt builder so API and services stay consistent.
     return build_library_prompt(
         entity_type=entity_type,
         name=name,
@@ -628,8 +643,9 @@ def _resolve_character_view_prompt_seed(
         return {}
 
     try:
-        _entity_type, entity_id = _parse_library_role(role)
-    except Exception:  # noqa: BLE001
+        _entity_type, entity_id = parse_library_role(role)
+    except Exception as e:
+        logger.debug("Failed to parse library role '%s' for view prompt seed: %s", role, e)
         return {}
 
     front_role = _character_role_for_view(entity_id=int(entity_id), view="front")
@@ -899,7 +915,7 @@ def _resolve_library_entity_info(
     meta: Dict[str, Any],
     scoped_spec: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, int, str, str]:
-    entity_type, entity_id = _parse_library_role(role)
+    entity_type, entity_id = parse_library_role(role)
     name = str(meta.get("entity_name") or meta.get("name") or "").strip()
     if _is_placeholder_entity_name(name):
         name = ""
@@ -929,7 +945,7 @@ def _resolve_library_entity_info(
         specs: List[Dict[str, Any]] = []
         if isinstance(scoped_spec, dict):
             specs.append(scoped_spec)
-        # 闂佹悶鍎抽崑銈夊焵椤戣棄浜鹃梺鎸庣⊕閻喚鍒掗悩璇茬伋婵犲﹤鎳嶇槐銉╂煙閹殿喖鏋戦柡宀€鍠栭幊婊堟偄濞村浜炬繝闈涚墛閻ｈ京绱撴担瑙勫鞍闁诲寒鍨跺畷鐘诲冀椤掑鍋ラ梺?闁荤姳鐒﹂崕鎶芥偩閻愵剛鈻旀い鎾煕婢跺鐎?name/descriptor
+        # Fallback to scoped specs and remove crowd placeholders when the primary fields are incomplete.
         specs.append(
             strip_crowd_characters_from_spec(
                 db,
@@ -964,7 +980,7 @@ def _resolve_library_entity_info(
                 break
 
     if _is_placeholder_entity_name(name):
-        fallback_prefix = "瑙掕壊" if entity_type == "character" else "鍦烘櫙" if entity_type == "scene" else "閬撳叿"
+        fallback_prefix = "角色" if entity_type == "character" else "场景" if entity_type == "scene" else "道具"
         name = f"{fallback_prefix}{int(entity_id)}"
     return str(entity_type), int(entity_id), name, descriptor
 
@@ -984,9 +1000,9 @@ def _build_source_text(chapters: List[Chapter]) -> str:
 
 def _quality_mode_to_runtime_config(quality_mode: Optional[str]) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     """
-    闁?UI 婵炴挻鐨滈崨顔炬殸闂佺懓鐡ㄩ崝鏍э耿?闁荤姵鍔戦崝鎴﹀闯濞差亝鐒诲璺侯儏椤忋儵鏌￠崟顓炐㈤柣銊уУ缁?pipeline 闁哄鏅滈崝姗€銆侀幋锕€绫嶉柛顐ｆ礀鐢磭绱撻崘鎯ф灁闁?
+    Translate a quality mode from the UI into default runtime configuration blocks.
 
-    闁哄鏅滈弻銊ッ洪弽顓熸櫖?image_config, qc_config, video_config)
+    Returns a tuple of (image_config, qc_config, video_config).
     """
     mode = (quality_mode or "").strip().lower()
     if mode == "quality":
@@ -1009,7 +1025,7 @@ def _quality_mode_to_runtime_config(quality_mode: Optional[str]) -> Tuple[Dict[s
             },
             {
                 "enable_semantic_qc": True,
-                # 闁荤姴娴傞崢铏圭不?QC 婵帗绋掗…鍫ヮ敇婵犳艾纾绘慨姗堢岛閸嬫挸顭ㄩ崟顐熸灆闂?+ 婵☆偅婢樼€氼噣鎮炬繝姘伋婵犻潧娲ゆ禒姗€鏌涢幒鏇ㄥ晣缂佽鲸绻堥弻鍡涘垂椤旂厧璧嬪┑顕嗙到缁诲鏌?shot 闂備緡鍠栭埀顒傚枔濞堝爼鏌ｉ～顒€濡虹紒鏃€娼欓埢?VLM
+                # 开启语义 QC：对首帧进行语义质检，通过 VLM 验证画面与提示词一致性
                 "semantic_frames": "head",
                 "semantic_sample_rate": 0.6,
                 "semantic_max_checks": 12,
@@ -1042,6 +1058,56 @@ def _quality_mode_to_runtime_config(quality_mode: Optional[str]) -> Tuple[Dict[s
     return {}, {}, {}
 
 
+def _build_dreamweaver_runtime_config_from_request(request: RunRequest) -> Dict[str, Any]:
+    runtime_config: Dict[str, Any] = {}
+
+    if isinstance(request.quality_mode, str) and request.quality_mode.strip():
+        image_config, qc_config, video_config = _quality_mode_to_runtime_config(request.quality_mode)
+        runtime_config.update(
+            {
+                "quality_mode": request.quality_mode.strip().lower(),
+                "image_config": image_config,
+                "qc_config": qc_config,
+                "video_config": video_config,
+            }
+        )
+    if request.smart_tuning is not None:
+        runtime_config["smart_tuning"] = bool(request.smart_tuning)
+    if isinstance(request.ab_variant, str) and request.ab_variant.strip():
+        runtime_config["ab_variant"] = request.ab_variant.strip()
+    if request.qc_allow_fail is not None:
+        qc_cfg = runtime_config.get("qc_config") if isinstance(runtime_config.get("qc_config"), dict) else {}
+        qc_cfg["allow_fail"] = bool(request.qc_allow_fail)
+        runtime_config["qc_config"] = qc_cfg
+    if isinstance(request.style_preset, str) and request.style_preset.strip():
+        runtime_config["style_preset"] = request.style_preset.strip()
+    if isinstance(request.image_ratio, str) and request.image_ratio.strip():
+        image_cfg = runtime_config.get("image_config") if isinstance(runtime_config.get("image_config"), dict) else {}
+        image_cfg["ratio"] = request.image_ratio.strip()
+        runtime_config["image_config"] = image_cfg
+    if isinstance(request.image_resolution, str) and request.image_resolution.strip():
+        image_cfg = runtime_config.get("image_config") if isinstance(runtime_config.get("image_config"), dict) else {}
+        image_cfg["resolution"] = request.image_resolution.strip()
+        runtime_config["image_config"] = image_cfg
+    if request.video_fps is not None:
+        video_cfg = runtime_config.get("video_config") if isinstance(runtime_config.get("video_config"), dict) else {}
+        video_cfg["fps"] = int(request.video_fps)
+        runtime_config["video_config"] = video_cfg
+    if request.video_require_confirmation is not None:
+        video_cfg = runtime_config.get("video_config") if isinstance(runtime_config.get("video_config"), dict) else {}
+        video_cfg["require_confirmation"] = bool(request.video_require_confirmation)
+        runtime_config["video_config"] = video_cfg
+
+    prompt_review_required = request.prompt_review_required
+    if prompt_review_required is None:
+        prompt_review_required = _env_flag("DREAMWEAVER_PROMPT_REVIEW_REQUIRED", default=False)
+    runtime_config["prompt_review_required"] = bool(prompt_review_required)
+    if prompt_review_required:
+        runtime_config["prompt_review"] = {"approved": False}
+
+    return runtime_config
+
+
 @router.post("/run", response_model=RunResponse)
 def run_pipeline(
     request: RunRequest,
@@ -1049,7 +1115,7 @@ def run_pipeline(
     db: Session = Depends(get_db),
 ):
     """
-    缂傚倷绀佸ú锕傚焻閻㈢鍙婇柣妯垮皺婵″洦绻涚紙鐘哄厡闁宠銈搁弫宥咁潩閹颁礁娈洪梺鍛婄懄閻楃娀濡村澶嬪剮妞ゆ柨澧借ぐ鍧楁煠閸濆嫬浜扮紒杈ㄧ箖缁嬪鎳犳０婵囨杸闂佸湱鐟抽崱鈺傛杸 DreamWeaver 闂佺粯顭堥崺鏍焵椤戣法鍔嶆繝褉鍋撻梺鎸庣☉閻胶鎹㈤幋锕€鐐婇柣鎰嵆閻涙捇鏌ｅ缁樻珗闁活厽鍎抽銉╁礋椤忓棛鎲块梻鍌氬暢閸╂牠顢欑仦鍓р攳闁斥晛鍟╃槐鏍煏?
+    创建 DreamWeaver 运行并返回同步执行结果。
     """
     project = (
         db.query(Project)
@@ -1058,7 +1124,7 @@ def run_pipeline(
     )
     if not project:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="?????????"
+            status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在或无权限访问"
         )
 
     chapters = _load_project_chapters(
@@ -1066,12 +1132,12 @@ def run_pipeline(
     )
     if not chapters:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="????????????????"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="章节不存在或为空"
         )
 
     source_text = _build_source_text(chapters)
-
-    run_id = f"drama_{request.project_id}_{int(time.time())}"
+    chapter_id_list = [c.id for c in chapters]
+    schema_version = request.schema_version or DREAMWEAVER_SCHEMA_VERSION
 
     locked_cfg = get_project_locked_generation_config(db, project_id=request.project_id, user_id=current_user.id)
     try:
@@ -1085,7 +1151,7 @@ def run_pipeline(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "message": "閻熸粎澧楅幐鍛婃櫠閻樼偨浜滈柛锔诲幗缁愭鏌ｉ妸銉ヮ伃妞ゃ儲鎹囧?濠殿噯绲鹃弻褏娆?闂佸憡甯掑Λ婊勩仈閹间焦鍋濋柛銉戝啫娈ラ梻浣搞仒缁€渚€鎮炬ィ鍐╂櫖閻忕偠鍋愰悷婵嬫煕韫囧孩绁版い鏂跨箲缁嬪顢橀埗鈺佷壕闁哄倸鐏濋悗濂告煙鐠団剝绶涚紒杈哺娣囧﹪宕掗悙缈犵帛闂佸搫娲ら悺銊╁极閼测晜瀚氶梺鍨儐閻撯偓閻庣偣鍊栧浠嬪Υ瀹ュ鍎庢い鏃囨閻忔鏌涜箛鎾跺缂佹柨顭烽幃鍫曞幢濮樼厧娈欐俊鐐€曞﹢鍗灻烘导瀛樺剭?DreamWeaver runs",
+                "message": "当前项目的风格和画幅配置已锁定，新建运行必须与锁定配置一致。请先解锁配置或切换到对应的 DreamWeaver run。",
                 "locked": {
                     "style_preset": exc.locked.style_preset,
                     "image_ratio": exc.locked.image_ratio,
@@ -1097,54 +1163,30 @@ def run_pipeline(
             },
         ) from exc
 
+    runtime_config = apply_locked_generation_config(
+        _build_dreamweaver_runtime_config_from_request(request),
+        locked_cfg,
+    )
+    precheck = build_dreamweaver_task_points_precheck(
+        db=db,
+        user_id=current_user.id,
+        project_id=request.project_id,
+        project_title=project.title,
+        chapter_rows=chapters,
+        chapter_ids=chapter_id_list,
+        runtime_config=runtime_config,
+        schema_version=schema_version,
+    )
+    _ensure_dreamweaver_points_precheck_passed(precheck)
+
+    run_id = f"drama_{request.project_id}_{int(time.time())}"
+
     payload: Dict[str, Any] = {
         "project_id": request.project_id,
-        "chapter_ids": [c.id for c in chapters],
+        "chapter_ids": chapter_id_list,
         "source_text": source_text,
     }
-    if isinstance(request.style_preset, str) and request.style_preset.strip():
-        payload["style_preset"] = request.style_preset.strip()
-    if isinstance(request.quality_mode, str) and request.quality_mode.strip():
-        image_config, qc_config, video_config = _quality_mode_to_runtime_config(request.quality_mode)
-        if image_config:
-            payload["image_config"] = image_config
-        if qc_config:
-            payload["qc_config"] = qc_config
-        if video_config:
-            payload["video_config"] = video_config
-        payload["quality_mode"] = request.quality_mode.strip().lower()
-    if request.smart_tuning is not None:
-        payload["smart_tuning"] = bool(request.smart_tuning)
-    if isinstance(request.ab_variant, str) and request.ab_variant.strip():
-        payload["ab_variant"] = request.ab_variant.strip()
-    if request.qc_allow_fail is not None:
-        qc_cfg = payload.get("qc_config") if isinstance(payload.get("qc_config"), dict) else {}
-        qc_cfg["allow_fail"] = bool(request.qc_allow_fail)
-        payload["qc_config"] = qc_cfg
-    if isinstance(request.image_ratio, str) and request.image_ratio.strip():
-        image_cfg = payload.get("image_config") if isinstance(payload.get("image_config"), dict) else {}
-        image_cfg["ratio"] = request.image_ratio.strip()
-        payload["image_config"] = image_cfg
-    if isinstance(request.image_resolution, str) and request.image_resolution.strip():
-        image_cfg = payload.get("image_config") if isinstance(payload.get("image_config"), dict) else {}
-        image_cfg["resolution"] = request.image_resolution.strip()
-        payload["image_config"] = image_cfg
-    if request.video_fps is not None:
-        video_cfg = payload.get("video_config") if isinstance(payload.get("video_config"), dict) else {}
-        video_cfg["fps"] = int(request.video_fps)
-        payload["video_config"] = video_cfg
-    if request.video_require_confirmation is not None:
-        video_cfg = payload.get("video_config") if isinstance(payload.get("video_config"), dict) else {}
-        video_cfg["require_confirmation"] = bool(request.video_require_confirmation)
-        payload["video_config"] = video_cfg
-    prompt_review_required = request.prompt_review_required
-    if prompt_review_required is None:
-        prompt_review_required = _env_flag("DREAMWEAVER_PROMPT_REVIEW_REQUIRED", default=False)
-    payload["prompt_review_required"] = bool(prompt_review_required)
-    if prompt_review_required:
-        payload["prompt_review"] = {"approved": False}
-
-    payload = apply_locked_generation_config(payload, locked_cfg)
+    payload.update(copy.deepcopy(runtime_config))
 
     enrich_payload_with_library(
         db,
@@ -1160,11 +1202,10 @@ def run_pipeline(
 
     ctx = run_until_done(ctx)
 
-    # 闂佸憡鑹鹃張顒勵敆閻愬搫绠抽柕澶堝劚缂嶆挸鈽夐弮鍌氭灆闁诡垬鍊栭幆鏃堝箼閸曨厾顦繛锝呮处缁诲啰鈧灚姊圭粙澶嬫償閿涘嫮锛濆┑顔界缚閸庢壆绮╅幘顔藉殜閺夊牆澧界粈鍕€掑顑句粧缂侇煈鍓熷畷銉︽償閿濆洦鏆版繝銏ｆ硾缁夊爼鐛崶銊р枖閹肩补妲呴崵鐘虫叏閿濆棙顥栫紒?
+    # 将已完成的合同快照持久化到 DreamWeaver 项目记录。
     try:
         from app.services.dreamweaver.persistence import build_contract_from_payload, persist_contract
 
-        schema_version = request.schema_version or DREAMWEAVER_SCHEMA_VERSION
         contract = build_contract_from_payload(
             run_id=run_id,
             source_project_id=request.project_id,
@@ -1184,9 +1225,8 @@ def run_pipeline(
             stage=stage_label(ctx.state),
             progress=progress_percent(ctx.state),
         )
-    except Exception:
-        # 闂佸憡鑹鹃張顒勵敆閻愬搫绠抽柕澶堝劚缂嶆挸鈽夐幘宕囆㈡繛鍙夌矒閹峰啴鎸婃径灞剧殤婵犮垺鍎肩划鍓ф喆閿曞倹鍤€閻忕偠妫勯〃娑㈡煕濠靛棛小缂傚秴顑嗛〃銉ョ暆鐎ｎ剛顦梻浣瑰閻熴劑顢氶妶澶嬪仺閺夊牄鍔嶉敍澶愮叓?DB 婵炴挻鐨滈崟顐ょ懇闂?
-        pass
+    except Exception as e:
+        logger.debug("Failed to persist contract for run_id=%s: %s", run_id, e)
 
     return RunResponse(
         run_id=run_id,
@@ -1217,7 +1257,7 @@ def run_pipeline_async(
     db: Session = Depends(get_db),
 ):
     """
-    缂傚倷绀佸ú锕傚焻閻㈢鍙婇柣妯垮皺婵″洦绻涚紙鐘哄厡闁宠銈搁弫宥夊醇濠靛牏锛濆┑顔界缚閸庤崵妲愬鑸垫櫖婵﹩鍓欓弲鎼佹煕?generation_history 濡ょ姷鍋炲﹢鐟邦潩閿斿墽纾?Celery 闂佸湱鐟抽崱鈺傛杸闂?
+    以异步方式创建 DreamWeaver 运行。
     """
     project = (
         db.query(Project)
@@ -1226,7 +1266,7 @@ def run_pipeline_async(
     )
     if not project:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="?????????"
+            status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在或无权限访问"
         )
 
     chapters = _load_project_chapters(
@@ -1234,7 +1274,7 @@ def run_pipeline_async(
     )
     if not chapters:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="????????????????"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="章节不存在或为空"
         )
 
     locked_cfg = get_project_locked_generation_config(db, project_id=request.project_id, user_id=current_user.id)
@@ -1249,7 +1289,7 @@ def run_pipeline_async(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "message": "閻熸粎澧楅幐鍛婃櫠閻樼偨浜滈柛锔诲幗缁愭鏌ｉ妸銉ヮ伃妞ゃ儲鎹囧?濠殿噯绲鹃弻褏娆?闂佸憡甯掑Λ婊勩仈閹间焦鍋濋柛銉戝啫娈ラ梻浣搞仒缁€渚€鎮炬ィ鍐╂櫖閻忕偠鍋愰悷婵嬫煕韫囧孩绁版い鏂跨箲缁嬪顢橀埗鈺佷壕闁哄倸鐏濋悗濂告煙鐠団剝绶涚紒杈哺娣囧﹪宕掗悙缈犵帛闂佸搫娲ら悺銊╁极閼测晜瀚氶梺鍨儐閻撯偓閻庣偣鍊栧浠嬪Υ瀹ュ鍎庢い鏃囨閻忔鏌涜箛鎾跺缂佹柨顭烽幃鍫曞幢濮樼厧娈欐俊鐐€曞﹢鍗灻烘导瀛樺剭?DreamWeaver runs",
+                "message": "当前项目的风格和画幅配置已锁定，新建运行必须与锁定配置一致。请先解锁配置或切换到对应的 DreamWeaver run。",
                 "locked": {
                     "style_preset": exc.locked.style_preset,
                     "image_ratio": exc.locked.image_ratio,
@@ -1261,13 +1301,27 @@ def run_pipeline_async(
             },
         ) from exc
 
-    run_id = f"drama_{request.project_id}_{int(time.time())}"
-    task_id = str(uuid.uuid4())
-    schema_version = request.schema_version or DREAMWEAVER_SCHEMA_VERSION
-
-    # 婵炶揪缍€濞夋洟寮?ASCII 闂佺绻戠划宀€鑺遍幎鑺ユ櫖鐎光偓閸曨亞绱氶梺绋跨箰缁夊墎妲愰鍫熷剺濞撴埃鍋撴俊顐ュ煐閿涙劕螣閸濆嫷娈梺鍛婄箓缁夋娊骞戦姀銈呯闁炽儱鍟块弲鎼佹煕韫囧鍔欑紒妤€鐭傞獮宥堫樁妞ゃ垺鍨挎俊?
     source_text = _build_source_text(chapters)
     chapter_id_list = [c.id for c in chapters]
+    schema_version = request.schema_version or DREAMWEAVER_SCHEMA_VERSION
+    runtime_config = apply_locked_generation_config(
+        _build_dreamweaver_runtime_config_from_request(request),
+        locked_cfg,
+    )
+    precheck = build_dreamweaver_task_points_precheck(
+        db=db,
+        user_id=current_user.id,
+        project_id=request.project_id,
+        project_title=project.title,
+        chapter_rows=chapters,
+        chapter_ids=chapter_id_list,
+        runtime_config=runtime_config,
+        schema_version=schema_version,
+    )
+    _ensure_dreamweaver_points_precheck_passed(precheck)
+
+    run_id = f"drama_{request.project_id}_{int(time.time())}"
+    task_id = str(uuid.uuid4())
 
     insert_query = text(
         """
@@ -1312,52 +1366,6 @@ def run_pipeline_async(
 
     from app.tasks.dreamweaver_tasks import run_dreamweaver_task
 
-    runtime_config: Dict[str, Any] = {}
-    if isinstance(request.quality_mode, str) and request.quality_mode.strip():
-        image_config, qc_config, video_config = _quality_mode_to_runtime_config(request.quality_mode)
-        runtime_config.update(
-            {
-                "quality_mode": request.quality_mode.strip().lower(),
-                "image_config": image_config,
-                "qc_config": qc_config,
-                "video_config": video_config,
-            }
-        )
-    if request.smart_tuning is not None:
-        runtime_config["smart_tuning"] = bool(request.smart_tuning)
-    if isinstance(request.ab_variant, str) and request.ab_variant.strip():
-        runtime_config["ab_variant"] = request.ab_variant.strip()
-    if request.qc_allow_fail is not None:
-        qc_cfg = runtime_config.get("qc_config") if isinstance(runtime_config.get("qc_config"), dict) else {}
-        qc_cfg["allow_fail"] = bool(request.qc_allow_fail)
-        runtime_config["qc_config"] = qc_cfg
-    if isinstance(request.style_preset, str) and request.style_preset.strip():
-        runtime_config["style_preset"] = request.style_preset.strip()
-    if isinstance(request.image_ratio, str) and request.image_ratio.strip():
-        image_cfg = runtime_config.get("image_config") if isinstance(runtime_config.get("image_config"), dict) else {}
-        image_cfg["ratio"] = request.image_ratio.strip()
-        runtime_config["image_config"] = image_cfg
-    if isinstance(request.image_resolution, str) and request.image_resolution.strip():
-        image_cfg = runtime_config.get("image_config") if isinstance(runtime_config.get("image_config"), dict) else {}
-        image_cfg["resolution"] = request.image_resolution.strip()
-        runtime_config["image_config"] = image_cfg
-    if request.video_fps is not None:
-        video_cfg = runtime_config.get("video_config") if isinstance(runtime_config.get("video_config"), dict) else {}
-        video_cfg["fps"] = int(request.video_fps)
-        runtime_config["video_config"] = video_cfg
-    if request.video_require_confirmation is not None:
-        video_cfg = runtime_config.get("video_config") if isinstance(runtime_config.get("video_config"), dict) else {}
-        video_cfg["require_confirmation"] = bool(request.video_require_confirmation)
-        runtime_config["video_config"] = video_cfg
-    prompt_review_required = request.prompt_review_required
-    if prompt_review_required is None:
-        prompt_review_required = _env_flag("DREAMWEAVER_PROMPT_REVIEW_REQUIRED", default=False)
-    runtime_config["prompt_review_required"] = bool(prompt_review_required)
-    if prompt_review_required:
-        runtime_config["prompt_review"] = {"approved": False}
-
-    runtime_config = apply_locked_generation_config(runtime_config, locked_cfg)
-
     task_args: List[Any] = [task_id, run_id, request.project_id, current_user.id, chapter_id_list, source_text, schema_version]
     if runtime_config:
         task_args.append(runtime_config)
@@ -1374,7 +1382,7 @@ def get_task_status(
     db: Session = Depends(get_db),
 ):
     """
-    闂佸搫琚崕鎾敋濡ゅ啰纾奸柛銉ｅ妷閸欐椽鏌￠崟顓炐㈢紒鐑樺劤椤曪綁宕掑☉鍗炲Ρ婵炲濮鹃褎鎱ㄩ悢鍏煎亹闁煎摜顣介崑鎾存媴绾版ê浜?
+    查询生成任务状态，优先融合 generation_history 与 DreamweaverProject 的状态信息。
     """
     query = text(
         """
@@ -1387,7 +1395,7 @@ def get_task_status(
     row = db.execute(query, {"task_id": task_id, "user_id": current_user.id}).fetchone()
     if not row:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="?????????"
+            status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在或无权限访问"
         )
 
     status_str = row[1]
@@ -1416,11 +1424,12 @@ def get_task_status(
                     progress_from_payload = True
                 if status_str == "completed" and {"run_id", "state", "source_chapter_count"}.issubset(payload):
                     parsed_result = RunResponse(**payload)
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to parse run result from generation_history: %s", e)
             run_id = None
 
-    # generation_history 闂?SQLite 婵°倕鍊归敋闁艰崵鍠栧畷锝夊箣濠靛棙娅㈤梺绋跨箞閸庢彃顪冮崒鐐茬煑妞ゆ牗绻傞崢鎾煕閹达絾顏犳鐐叉喘閹矂顢橀悢鍝ユ殲闂備礁銇樼粈渚€宕捄銊х幓濞撴艾锕︾粈澶愭倵娴ｅ啫顥嶉柛?status 闂傚倵鍋撻柟绋垮椤ρ囨⒒閸屾稒缍戝ù鐘靛█閹儳鈻庤箛鏃囧惈 running闂?
-    # DreamweaverProject.contract_json 闂佸搫瀚烽崹鍗灻洪崸妤€鐭楁い鏍仦濞村棝鏌ｉ妸銉ヮ仾閻庡灚姊圭粙濠囧川椤撶儐鍤欓棅顐㈡祩閸嬪棝宕ｆ惔銊︽櫖閻忕偠妫勭拋鏌ユ煟椤剙濡虹紒顭戝墴瀹曟顭ㄩ崘顏冧孩 UI 闁哄鍎愰崰娑㈩敋濡ゅ啩娌柡鍥╁О娴犳盯鏌?
+    # generation_history 保存的是兼容 SQLite 的通用任务状态。
+    # DreamweaverProject.contract_json 保存更完整的运行上下文，用于补充 UI 需要的信息。
     dw_row = None
     if isinstance(run_id, str) and run_id.strip():
         dw_row = (
@@ -1431,8 +1440,8 @@ def get_task_status(
         if dw_row is not None:
             dw_status = str(getattr(dw_row, "status", "") or "").strip().lower()
 
-            # generation_history.status 闂佸憡鐟崹鐢稿礂濮椻偓瀹?SQLite 闂備礁銇樼粈渚€宕捄銊х幓濞达綀袙閸嬫挸鐣濋崟顒佺槪闂佸搫鍟悥鐓幬涢崸妤€纾绘繝濠傛噺濞堝矂鏌?queued/running闂?
-            # DreamweaverProject.status 闂佸搫娲ら悺銊ф暜鐎涙ɑ浜ら柟瀵稿У閸╁倿鎮楅崷顓炰沪濠⒀呮櫕閹澘鐣濋埀顒佹叏閹间礁绠戝〒姘功缁€澶愭煟椤剙濡虹紒顭戝墴瀹曟顭ㄩ崘顏冧孩 UI 闁诲繒鍋炲ú婊堝Φ濮樿埖鏅柛顐ｇ矌閻矂鏌涚€ｎ偄鐒归柍褜鍓氱划灞炬櫠閻樿櫕浜ゆ繛鎴炲坊閸嬫挸鈹戞繝搴㈣埞闂佺儵鏅滈悧顓犳濠靛洨鈻旂€广儱鎳嶇划鐢告⒒閸曨偆肖濡ょ姴娲弫宥嗗緞閸艾浜?
+            # generation_history.status 在 SQLite 模型下可能落后于实际运行状态。
+            # DreamweaverProject.status 用于修正 queued/running 等过渡阶段，让 UI 显示更准确。
             if status_str == "queued":
                 if dw_status in {"running", "completed", "failed"}:
                     status_str = dw_status
@@ -1443,10 +1452,10 @@ def get_task_status(
 
             dw_progress = getattr(dw_row, "progress", None)
             if isinstance(dw_progress, int):
-                # 婵炴潙鍚嬮敋闁告ɑ绋掗幏鍛崉閵婏附娈?generation_history.result 闂佸憡鍔曢幊鎰枔?progress/state/stage闂佹寧绋戦悧鍡涘箰閵娾晛绀傞柤绋跨仛绗?queued -> running 闂佹眹鍔岀€氀囧焵椤掍胶鐭庨柟鐧哥悼閹瑰嫰寮妷銏犱壕婵犻潧鎳嶇换鍡涙煙椤撗冪伈缂佽鲸宀告俊?
-                # 婵炲濮撮幊搴★耿椤忓懐顩烽柕澶堝€楅悷鎾绘煙椤栨碍鍣归柛鐘叉湰缁嬪鈧綆鍓氶弳?DreamweaverProject 闂佺顑嗛懝楣冨储鐟欏嫭鍎?闂佸湱绮崝鏇炵暦瀹€鍕櫖?
-                # - generation_history 濠电偛澶囬崜婵嗭耿娴ｈ浜ら柡鍌涘缁€鈧?progress闂佹寧绋戦悧鎾跺垝椤栨粍濯奸柕鍫濇噳閸嬫捇姊荤€靛摜鎲归梺鍛婄懐閸ㄨ泛顭囬鍕櫖濠㈣埖绋撻獮?
-                # - DreamweaverProject.progress 闂佸搫娲﹀娆撳Φ閸ヮ剚鏅柛顐祷閳ь剙鍟扮划鍫ユ倻濡崵鍑介梻鍌氱墢婵挳骞冨Δ鍛挀闁煎憡顔栭崬浠嬫煥濞戞﹩妲堕柍?
+                # 实际进度优先使用 DreamweaverProject.progress 修正后的值。
+                # generation_history.result 里的 progress/state/stage 更像是任务快照。
+                # - generation_history.progress 适合用于补充过程中状态。
+                # - DreamweaverProject.progress 适合作为最终进度显示。
                 should_override = (not progress_from_payload) or (dw_progress > progress)
                 if should_override:
                     progress = int(dw_progress)
@@ -1492,7 +1501,7 @@ def get_asset_library(
 ):
     project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="椤圭洰涓嶅瓨鍦ㄦ垨鏃犳潈璁块棶")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在或无权限访问")
 
     scoped = False
     scope_mode = "project"
@@ -1522,7 +1531,7 @@ def get_asset_library(
     assets_by_role_for_review = {r: assets_by_role_all[r] for r in required if r in assets_by_role_all}
     review = compute_library_review(spec=spec, assets_by_role=assets_by_role_for_review)
 
-    # 闂佺绻掗崢褔顢欓幇鏉跨伋婵犲﹤鐗滈弳鏇㈡煟閵忋垹鏋戦柛銊︽皑濡叉劙鎮╅搹顐ょ▌闁圭厧鐡ㄩ幐鎾焵椤掍胶绠戠紒妤€鐭傚顔款樁缂佷緡鍋呯粋宥堫檪缂佽鲸澹嗛幃浼村Ψ閳哄啰啸 entity/descriptor闂佹寧绋戦懟顖炴嚐閻旇櫣纾?UI 闂佸湱绮崝鎺旀閻㈢鐭楁い鏍ㄧ矌濡炰粙寮堕崼鐔风仼婵炲牊鍨堕—鈧俊顖涱儥閸?prompt闂?
+    # 为素材审核结果构建 role -> entity/descriptor 映射，方便 UI 和 prompt 使用。
     role_to_entity: Dict[str, Dict[str, Any]] = {}
     for section_key, default_entity_type in (("characters", "character"), ("scenes", "scene"), ("props", "prop")):
         items = spec.get(section_key)
@@ -1538,7 +1547,7 @@ def get_asset_library(
                 continue
             try:
                 if str(entity_type).strip().lower() == "character":
-                    # 闁荤喐鐟︾敮鐔哥珶婵犲啫绶炴慨妯诲墯濞兼帡鎮峰▎鎰嚋缂佽京娅瀝ont/side/back 闂備緡鍠栭埀顒傚晭婢跺鐎查柟閭﹀墮閻?meta闂佹寧绋戦惌鍌涘閳哄懎绀?UI 闂佸憡鍨煎▍锝夌嵁閸ヮ剙鐏虫繝濠傚閿熴儵鏌涘顒傂ょ悮銊╂煕濡ゅ纾垮褎鐗犻崹?
+                    # 角色视图需要单独展开 front/side/back 等子 role，便于解析和组装 meta。
                     mini_spec = {"characters": [{"entity_type": "character", "entity_id": int(entity_id)}], "scenes": [], "props": []}
                     for r in required_library_roles(mini_spec):
                         role_to_entity[r] = {
@@ -1698,7 +1707,7 @@ def suggest_asset_library_prompt(
 ):
     project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="椤圭洰涓嶅瓨鍦ㄦ垨鏃犳潈璁块棶")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在或无权限访问")
 
     role = str(request.role or "").strip()
     if not role.startswith("lib_"):
@@ -1836,7 +1845,7 @@ def approve_asset_library(
 ):
     project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="?????????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="素材不存在或无权限访问")
 
     spec = _build_project_library_spec(db, project_id=project_id, full_scope=True)
     spec = strip_crowd_characters_from_spec(db, project_id=project_id, spec=spec)
@@ -1868,7 +1877,7 @@ def regenerate_asset_library(
 ):
     project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="椤圭洰涓嶅瓨鍦ㄦ垨鏃犳潈璁块棶")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在或无权限访问")
 
     role = str(request.role or "").strip()
     if not role.startswith("lib_"):
@@ -1930,10 +1939,10 @@ def regenerate_asset_library(
     if not asset_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="目标素材记录不存在")
 
-    # SQLAlchemy 闂?JSON 闁诲孩绋掗〃鍡涱敊鐏炵虎娓舵俊顖涱儥閸氬洤鈽夐幘宕囆ョ紒鎰剁節閻?dict 闂佹眹鍔岀€氼剛鏁锕€鎹跺Λ棰佺劍閸欏繘鏌￠埀顒勬儌閸濄儱鑰块柡澶嗘櫆閻熲晠宕抽悜钘夊強闁诡垎鍛攨婵犮垼娉涚粔鎾春濡ゅ懏鐒奸柛顭戝枛鐢娊鏌嶉妷锔剧煁婵炴彃娼″顒侊紣娴ｈ櫣鎲归梺瑙ｅ亾闁芥ê顦卞銊╂煃閵夛妇缂氶柍?
+    # SQLAlchemy 对 JSON 字段可能返回已可变对象，这里显式拷贝一份 dict 再修改。
     current_meta = dict(asset_row.meta_json) if isinstance(asset_row.meta_json, dict) else {}
 
-    # 婵帗绋掗…鍫ヮ敇鐠囨祴鏌﹂悹鎭掑妽閺嗗繘鎮归崶銉ュ姦闁靛棗绉归幆鍕敊閼恒儰绮梺鍝勫€块。锔剧博閺夋垟鏋?DreamWeaver run 闂佹眹鍔岀€氫即藟閹捐鍐€濠靛倻顭堢敮宕囩磽閸愭儳娅欑紒杈ㄧ懇閹崇喖濡疯缁讳礁顭跨捄鍝勮埞闁割煈鍨跺畷鍫曟倷鐞涒€充壕闁逞屽墴瀹?cinematic_realistic闂佹寧绋戦ˇ顓㈠焵?
+    # 素材重生时默认沿用 DreamWeaver run 已锁定的风格，缺省时回落到 cinematic_realistic。
     style_prompt = os.getenv("DREAMWEAVER_LIBRARY_STYLE", "").strip()
     style_preset = normalize_style_preset(None)
     image_cfg: Dict[str, Any] = {}
@@ -1961,8 +1970,8 @@ def regenerate_asset_library(
                 style_prompt = style_prompt_for_preset(runtime_cfg.get("style_preset"))
             if isinstance(runtime_cfg.get("image_config"), dict):
                 image_cfg = runtime_cfg.get("image_config") or {}
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to read style config from latest run for project %s: %s", project_id, e)
 
     if locked_cfg.locked:
         style_preset = locked_cfg.style_preset
@@ -2101,8 +2110,9 @@ def regenerate_asset_library(
         force_view_edit = bool(view_chain_force_image_edit)
         entity_id_for_view: Optional[int]
         try:
-            _etype, entity_id_for_view = _parse_library_role(role)
-        except Exception:  # noqa: BLE001
+            _etype, entity_id_for_view = parse_library_role(role)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Failed to parse library role '%s' for view edit: %s", role, e)
             entity_id_for_view = None
 
         def _append_reference(path: Optional[Path], role_name: str) -> None:
@@ -2185,7 +2195,8 @@ def regenerate_asset_library(
     prompt_similarity_threshold = image_cfg.get("image_edit_min_prompt_similarity")
     try:
         threshold_value = float(prompt_similarity_threshold) if prompt_similarity_threshold is not None else _env_float("DREAMWEAVER_IMAGE_EDIT_MIN_PROMPT_SIMILARITY", 0.0)
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        logger.debug("Failed to parse prompt similarity threshold '%s': %s, using default 0.0", prompt_similarity_threshold, e)
         threshold_value = 0.0
     threshold_value = max(0.0, min(float(threshold_value), 1.0))
 
@@ -2287,11 +2298,13 @@ def regenerate_asset_library(
         try:
             try:
                 strength = float(image_cfg.get("image_edit_strength") or _env_float("DREAMWEAVER_IMAGE_EDIT_STRENGTH", 0.65))
-            except Exception:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
+                logger.debug("Failed to parse image_edit_strength: %s, using default 0.65", e)
                 strength = 0.65
             try:
                 guidance_scale = float(image_cfg.get("image_edit_guidance") or _env_float("DREAMWEAVER_IMAGE_EDIT_GUIDANCE", 7.5))
-            except Exception:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
+                logger.debug("Failed to parse image_edit_guidance: %s, using default 7.5", e)
                 guidance_scale = 7.5
             strength = max(0.0, min(float(strength), 1.0))
             guidance_scale = max(0.1, min(float(guidance_scale), 50.0))
@@ -2344,7 +2357,7 @@ def regenerate_asset_library(
                 negative_prompt=negative_prompt,
                 width=width,
                 height=height,
-                model_id="wanx-v1",
+                model_id="wan2.6-t2i",
                 use_fallback=False,
             )
     else:
@@ -2353,7 +2366,7 @@ def regenerate_asset_library(
             negative_prompt=negative_prompt,
             width=width,
             height=height,
-            model_id="wanx-v1",
+            model_id="wan2.6-t2i",
             use_fallback=False,
         )
 
@@ -2494,16 +2507,16 @@ def get_library_asset_file(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="?????????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在或无权限访问")
 
     asset, _proj = row
     path = resolve_asset_path(str(asset.uri))
     base = _runs_base_dir()
     resolved = path.resolve()
     if resolved != base and base not in resolved.parents:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="???????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文件路径不合法")
     if not resolved.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="???????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在")
 
     suffix = resolved.suffix.lower()
     media_type = "application/octet-stream"
@@ -2524,8 +2537,8 @@ def upload_library_asset_file(
     db: Session = Depends(get_db),
 ):
     """
-    闂佸綊娼ч鍛叏閳哄倻鈻斿┑鐘辫兌閻愬﹪鏌￠崶銊ヮ嚋鐎规洖寮堕妵鍕捶椤撶喓鐛ョ紓浣哄珡閸涱垼妲洪梺鍝勵槹閸旀洜鑺辨潏鈺傚皫闁告洦浜悰鎾绘煥濞戞ɑ楗痠b_*闂佹寧绋戦ˇ顓㈠焵?
-    闂傚倸瀚崝鏇㈠春濡ゅ懏鏅慨姗嗗亞閻矂鏌涜箛搴㈢グ妞?PNG闂佹寧绋掔粙鎺楀几閸愨晝顩烽柡鍫㈡暩缁愭鎮烽弴鐐搭棤婵炴彃锕畷妯衡枎韫囨挸姹查柣鐘叉储閸庡绮婇锝囶洸鐟滃繐鈻?uri 闁荤姳璀﹂崹鎵閻愮儤鏅繛鎴烆殘閻熸劕霉閼测晛孝闁诡喗顨婇幊娑㈩敂閸曨倣妤呮煛瀹ュ懏绌挎い鏂挎处缁嬪宕崟顓狀€€闁诲骸鍘滈崜婵嬫偋閹惰姤鏅柛褍宓卲roved=false闂佹寧绋戦ˇ顓㈠焵?
+    上传单个 shot 的契约素材，当前只允许写入 head_frame、tail_frame、mid_frame 或 video_clip。
+    上传 PNG 或 MP4 时会验证文件格式、目标 uri 和对应 shot 的 approved 状态。
     """
     row = (
         db.query(DreamweaverAssetModel, DreamweaverProjectModel)
@@ -2534,23 +2547,23 @@ def upload_library_asset_file(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="?????????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="素材不存在或无权限访问")
 
     asset, project = row
     role = str(getattr(asset, "role", "") or "").strip()
     if not role.startswith("lib_"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="????????(lib_*)")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持上传素材库角色（lib_*）")
     if str(getattr(asset, "asset_type", "") or "").strip() != "image":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="??? image ????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持 image 类型素材")
 
     filename = str(getattr(file, "filename", "") or "").strip().lower()
     if not filename.endswith(".png"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="??? PNG ??")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持上传 PNG 文件")
 
     max_mb = max(1, _env_int("DREAMWEAVER_UPLOAD_MAX_IMAGE_MB", 10))
     data = _read_upload_bytes(file, max_bytes=max_mb * 1024 * 1024)
     if not _is_png(data):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="???????? PNG")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="上传内容不是有效的 PNG 文件")
 
     out_path = _ensure_path_under_runs(resolve_asset_path(str(asset.uri)))
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2580,7 +2593,7 @@ def get_project_locked_generation_config_api(
 ):
     project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="?????????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="素材不存在或无权限访问")
 
     locked_cfg = get_project_locked_generation_config(db, project_id=project_id, user_id=current_user.id)
     return ProjectLockedGenerationConfigResponse(
@@ -2600,11 +2613,11 @@ def list_project_runs(
     db: Session = Depends(get_db),
 ):
     """
-    闂佸憡甯楅〃鍛村吹椤撱垹绠伴柛銉戝懏姣庢俊鐐€曞﹢鍗灻洪悧鍫⑩枖閻庯綆鍓氶悾?DreamWeaver 闂佸憡锚濡銇?runs闂佹寧绋戦悧蹇涘极閵堝棛顩查幖绮光偓鎰佹瀫缂備焦妫忛崹顖炲箲閵忋倕绀?闂佸憡锚濡銇愰崜浣轰笉闁挎稑瀚崐鐐烘煥濞戞﹩妲堕柍?
+    列出指定项目的 DreamWeaver runs，并在返回前顺带标记超时任务。
     """
     project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="?????????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="素材不存在或无权限访问")
 
     limit_safe = max(1, min(int(limit or 50), 200))
 
@@ -2624,16 +2637,16 @@ def delete_project_generated(
     db: Session = Depends(get_db),
 ):
     """
-    濠电偞鎸搁幊鎰板箖婵犲洤绠伴柛銉戝懏姣庢俊鐐€曞﹢鍗灻洪弶娆惧晠闁肩⒈鍓氶弲鎼佹煙鐎涙ê濮夋繛?DreamWeaver 闂佸憡鍔曢幊搴敊閹扮増鏅柛顐ｇ矌閻熸繈鏌涘▎妯虹仭濞寸媭鍠楀鍕吋韫囨洜顦梺?
-    - 闂佸憡甯炴繛鈧繛鍛叄瀹曘垽宕卞Δ鈧拺?runs闂佹寧绋戝﹢鎵?闁荤姳鐒﹀妯肩礊?+ runs/{run_id} 婵炲瓨绫傞崨顓涙寘闂佸搫鍊稿ú锝呪枎閵忋倖鏅?
-    - 濠电偞鎸搁幊鎰板箖婵犲啨浜滈柛锔诲幗缁愭绱掓潏鈺佇ｆ繛鍏碱殕閹棃骞橀懜鍨闂佺懓鐡ㄩ崝鏇灻瑰鈧幃褔宕舵搴ｎ槱runs/library/project_{project_id}闂?
+    删除项目下 DreamWeaver 生成的运行产物。
+    - 删除 runs/{run_id} 下的运行目录与对应 run 记录。
+    - 删除 runs/library/project_{project_id} 下的素材库目录。
 
-    婵炴垶鎸诲鑺ュ閳哄懎绀傜€广儱鎳庨〃娑㈡煕濠靛棛啸缂佺粯顭囬幃鎵沪閼规澘骞€闂佹眹鍔岀€氼亪骞戦姀銈呯闁宠棄鎳愮粣妤呮煠濮瑰洤鍔氶柣掳鍔戝畷?running/queued run闂佹寧绋戞總鏃傛閹殿喗宕夐悗鍦Х缁犳牠寮堕埡鍌滄噥缂?run闂?
-    濡ょ姷鍋為崕濂告倻閿旇姤浜ら柛銉㈡櫇椤﹂亶鏌℃径瀣缂併劌宕妴鎺楀川椤栨稑鈧偤鏌ㄥ☉妯婚クibrary闂佹寧绋戦ˇ鐢稿磿閹绢喖绀嗛柛鈩冨姀閸?
+    如果存在 running/queued run，会跳过这些 run 并保留素材库相关数据。
+    返回值会包含已删除条目、失败路径和跳过原因。
     """
     project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="?????????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在或无权限访问")
 
     from app.services.dreamweaver.run_management import (
         DreamweaverRunNotFoundError,
@@ -2671,7 +2684,7 @@ def delete_project_generated(
     deleted_library_dir = False
     deleted_library_anchor_projects = 0
     library_skipped = bool(skipped_runs)
-    library_skip_reason = "闁诲孩绋掗敋婵犫偓椤忓懏浜ら柟閭﹀灱閺€钘夆槈?闂佸湱鍎ょ敮鈥澄ｉ敂鐣屸枖妞ゆ挾濮甸悾?run闂佹寧绋戦懟顖炲礄閿涘嫭宕夐悗鍦Х缁犳牜绱掓潏鈺佇ｆ繛鍏碱殕閹棃骞樼€靛壊浼曢梺鑽ゅ仜濡梹绂嶉幒妤佺劶闁割煈鍠栫敮宕囨喐閺夊灝鑸归柟濂告敱缁傛帞鎷犻幓鎺濇匠" if library_skipped else None
+    library_skip_reason = "存在运行中或排队中的 run，已跳过素材库相关清理" if library_skipped else None
 
     runs_root = _runs_base_dir()
 
@@ -2769,7 +2782,7 @@ def get_run_script(
         .first()
     )
     if not row:
-        # 闂佺绻戠划宀€鑺遍幎鑺ユ櫖婵繄顢弉 闁诲繐绻戠喊宥咃耿椤撱垹绠板ù锝夘棑閻ｄ粙鏌涢弽銊уⅹ闁?dreamweaver_projects 闂佸搫鍟抽鎰濠靛鐐婇柣鎰€€閸嬫捇鍩€椤掑嫬绀?generation_history
+        # 优先回退到 generation_history 查找旧运行记录。
         gh_query = text(
             """
             SELECT gh.status, gh.result, gh.error, gh.created_at, gh.completed_at
@@ -2785,7 +2798,7 @@ def get_run_script(
         needle = f'%\"run_id\": \"{run_id}\"%'
         gh_row = db.execute(gh_query, {"user_id": current_user.id, "needle": needle}).fetchone()
         if not gh_row:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 婵炴垶鎸哥粔鎾偤閵娾晛鎹堕柕濠忕畱閻忔鏌￠崘顏勑ｆ繛鐓庣墢閹峰宕稿Δ渚婄椽")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
 
         status_str = str(gh_row[0] or "").strip()
         result_raw = gh_row[1]
@@ -2808,8 +2821,8 @@ def get_run_script(
                         error_type = str(payload.get("error_type") or "").strip() or None
                     if not error_message and isinstance(payload.get("error_message"), str):
                         error_message = str(payload.get("error_message") or "").strip() or None
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to extract error info from payload: %s", e)
 
         if not isinstance(progress, int):
             if status_str == "running":
@@ -2871,10 +2884,10 @@ def update_run_script(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 婵炴垶鎸哥粔鎾偤閵娾晛鎹堕柕濠忕畱閻忔鏌￠崘顏勑ｆ繛鐓庣墢閹峰宕稿Δ渚婄椽")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
 
     if str(row.stage or "").strip() != "waiting_script_approval":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="閻熸粎澧楅幐鍛婃櫠?run 婵炴垶鎸哥粔鎾囬埡鍌滎洸閹肩补鈧枼鎸冮梺鍝勭墱閸撴瑧娆㈤悢琛″亾閸忓澧查柣妤佸▕濮婂ジ鎳滃▓鍨杸")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前 run 不在脚本审核阶段")
 
     contract = row.contract_json if isinstance(row.contract_json, dict) else {}
     runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
@@ -2905,10 +2918,10 @@ def approve_run_script(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 婵炴垶鎸哥粔鎾偤閵娾晛鎹堕柕濠忕畱閻忔鏌￠崘顏勑ｆ繛鐓庣墢閹峰宕稿Δ渚婄椽")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
 
     if str(row.stage or "").strip() != "waiting_script_approval":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="閻熸粎澧楅幐鍛婃櫠?run 婵炴垶鎸哥粔鎾囬埡鍌滎洸閹肩补鈧枼鎸冮梺鍝勭墱閸撴瑧娆㈤悢琛″亾閸忓澧查柣妤佸▕濮婂ジ鎳滃▓鍨杸")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前 run 不在脚本审核阶段")
 
     contract = row.contract_json if isinstance(row.contract_json, dict) else {}
     runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
@@ -2938,13 +2951,13 @@ def approve_prompt_review(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id ???????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
 
     stage = str(row.stage or "").strip().lower()
     if stage != "waiting_approval":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="?? run ???????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前 run 不在提示词审核阶段")
 
-    _ensure_run_not_running(row, action="???????")
+    _ensure_run_not_running(row, action="提交提示词审核")
 
     contract = row.contract_json if isinstance(row.contract_json, dict) else {}
     runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
@@ -2974,13 +2987,13 @@ def resume_run_async(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 婵炴垶鎸哥粔鎾偤閵娾晛鎹堕柕濠忕畱閻忔鏌￠崘顏勑ｆ繛鐓庣墢閹峰宕稿Δ渚婄椽")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
 
     project_id = int(row.source_project_id)
 
     state = str(row.state or "").strip()
     stage = str(row.stage or "").strip()
-    # 闂佺绻掗崢褔顢欓幇鐗堟櫖婵﹩鍋嗛崰姗€鏌涜箛鎾跺濠电偛娲幃?stage闂佹寧绋戦懟顖炲矗閹€鏋庨柍銉ㄦ珪缁€鈧梻渚囧亐閸嬫捇鏌?state
+    # waiting_* 阶段优先使用 stage，缺失时再回退到 state。
     waiting_kind = stage or state
     start_state = "STORYBOARD"
 
@@ -2992,7 +3005,7 @@ def resume_run_async(
         approved = bool(script_review.get("approved"))
         requires_review = bool(runtime_cfg.get("script_requires_review"))
         if requires_review and not approved:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": "????????????", "script_review": script_review})
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": "脚本审核未通过，无法继续", "script_review": script_review})
         start_state = "STORYBOARD"
     elif waiting_kind == "waiting_approval" or waiting_kind == "WAITING_APPROVAL":
         spec = (
@@ -3009,18 +3022,18 @@ def resume_run_async(
         assets_by_role = load_latest_library_assets(db, project_id=project_id, user_id=current_user.id)
         review = compute_library_review(spec=spec, assets_by_role=assets_by_role)
         if not bool(review.get("approved")):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": "????????????", "review": review})
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"message": "素材库审核未通过，无法继续", "review": review})
         prompt_review_required = bool(runtime_cfg.get("prompt_review_required"))
         prompt_review = runtime_cfg.get("prompt_review") if isinstance(runtime_cfg.get("prompt_review"), dict) else {}
         prompt_review_approved = bool(prompt_review.get("approved"))
         if prompt_review_required and not prompt_review_approved:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": "?????????????", "prompt_review": prompt_review},
+                detail={"message": "提示词审核未通过，无法继续", "prompt_review": prompt_review},
             )
         start_state = "KEYFRAMES"
     else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="?? run ?????????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前 run 不在可恢复状态")
 
     task_id = str(uuid.uuid4())
     try:
@@ -3034,8 +3047,8 @@ def resume_run_async(
         VALUES (:project_id, :task_type, :task_id, :status, :result, :created_at)
         """
     )
-    # 闂佺绻戞繛濠囧极椤撱垺鏅慨姗嗗亞閻?waiting_* 缂傚倷缍€閸涱垱鏆伴梺姹囧灮閸犳劙宕瑰璺虹睄閻犱礁婀辩粈澶愭煕韫囨挾澧涘┑?DreamweaverProject 闂?status/stage/state 闂佸憡鎸哥粔鏈电昂闂?queued闂?
-    # 闂佸憡鐔粻鎴﹀垂椤栫偛绀堢€广儱娴傛导鍌炴煕濞嗘ê鐏ラ柛蹇旓耿瀹曟瑩鎼归悷鎵杸闂佺偨鍎茬划宀勫礄閳╁啯浜ゆ繛鎴灻鎶芥⒒閳ь剙顭ㄩ崘锔跨矒闂傚倸鍟抽崺鏍敊鐏炵偓濯撮柛鈩冩礈閻繈鏌￠崟顐⑩挃闁靛洦姘ㄧ划鍨緞婵犲嫮顎€闁诲骸鍘滈崜婵嬫偋閹惰棄鐏虫繝闈涚墛閻ｉ亶姊洪幐搴ｆ噯妞ゎ偄閰ｉ弫宥夊醇閻旈潻绱?waiting 闂佺粯顭堥崺鏍焵椤戞寧绁版い鈺婂亰閹嫰寮介敂鎯ф櫓闁哄鍎愰崰娑㈩敋濡ゅ啰纾奸柟鎯ь嚟娴滎垶鏌ㄥ☉姗嗘Ф闁?
+    # 恢复任务时需要先将 waiting_* 运行状态重新推进到 queued。
+    # DreamweaverProject 与 generation_history 都会用同一个 task_id 继续执行后续流程。
     row.status = "queued"
     row.state = start_state
     row.stage = stage_label(start_state_enum)
@@ -3084,7 +3097,7 @@ def confirm_video_job_async(
     safe_run_id = _normalize_run_id(run_id)
     safe_shot_id = str(shot_id or "").strip()
     if not safe_shot_id or "/" in safe_shot_id or "\\" in safe_shot_id or ".." in safe_shot_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="shot_id ?????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="shot_id 格式不合法")
 
     row = (
         db.query(DreamweaverProjectModel)
@@ -3092,22 +3105,22 @@ def confirm_video_job_async(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id ???????")
-    _ensure_run_not_running(row, action="??????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
+    _ensure_run_not_running(row, action="确认视频任务")
 
     stage = str(getattr(row, "stage", "") or "").strip().lower()
     state = str(getattr(row, "state", "") or "").strip().upper()
     if stage != "waiting_video_confirmation" and state != "WAITING_VIDEO_CONFIRMATION":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="?? run ?????????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前 run 不在视频确认阶段")
 
     contract = row.contract_json if isinstance(getattr(row, "contract_json", None), dict) else None
     if not isinstance(contract, dict):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="contract_json ?????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="contract_json 缺失或无效")
 
     runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
     jobs = runtime_cfg.get("video_clip_jobs")
     if not isinstance(jobs, list) or not jobs:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="?? video_clip_jobs???????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前 run 不存在可确认的 video_clip_jobs")
 
     target_job = None
     for item in jobs:
@@ -3117,7 +3130,7 @@ def confirm_video_job_async(
             target_job = item
             break
     if not isinstance(target_job, dict):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="????? shot ?????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到对应的 shot 视频任务")
 
     target_job["confirmed"] = True
     target_job["confirmed_ts"] = float(time.time())
@@ -3200,7 +3213,7 @@ def confirm_video_job_async(
         return VideoJobConfirmAsyncResponse(
             run_id=safe_run_id,
             status="noop",
-            message="???????????????",
+            message="该镜头的视频片段已生成，无需重复确认",
             video_clip_jobs=jobs,
         )
 
@@ -3209,13 +3222,13 @@ def confirm_video_job_async(
         return VideoJobConfirmAsyncResponse(
             run_id=safe_run_id,
             status="blocked",
-            message="???????????????????",
+            message="当前镜头仍有前置依赖未满足，暂时无法进入视频生成",
             video_clip_jobs=jobs,
         )
 
     project_id = int(getattr(row, "source_project_id", 0) or 0)
     if project_id <= 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run 缂傚倸鍊搁幖顐︽儍?source_project_id")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run 缺少有效的 source_project_id")
 
     task_id = str(uuid.uuid4())
     start_state_enum = State.VIDEO
@@ -3267,7 +3280,7 @@ def confirm_video_job_async(
         run_id=safe_run_id,
         status="queued",
         task_id=task_id,
-        message="???????",
+        message="已加入视频生成队列",
         video_clip_jobs=jobs,
     )
 
@@ -3285,18 +3298,18 @@ def rebuild_video_jobs(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id ???????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
 
-    _ensure_run_not_running(row, action="??????")
+    _ensure_run_not_running(row, action="重建视频任务")
 
     stage = str(getattr(row, "stage", "") or "").strip().lower()
     state = str(getattr(row, "state", "") or "").strip().upper()
     if stage != "waiting_video_confirmation" and state != "WAITING_VIDEO_CONFIRMATION":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="?? run ???????????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前 run 不在视频确认阶段")
 
     contract = row.contract_json if isinstance(getattr(row, "contract_json", None), dict) else None
     if not isinstance(contract, dict):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="contract_json ?????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="contract_json 缺失或无效")
 
     runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
     video_cfg = runtime_cfg.get("video_config") if isinstance(runtime_cfg.get("video_config"), dict) else {}
@@ -3431,9 +3444,9 @@ def restart_run_async(
     db: Session = Depends(get_db),
 ):
     """
-    婵炲濮寸€涒晝鈧灚姘ㄩ埀?DreamWeaver 闂佺粯顭堥崺鏍焵椤戣法绐旈柛锝嗘倐瀵剟寮剁捄銊э紱婵犳鍠栭鍡樻櫠閻ｅ本鍋樼€光偓鐎ｎ剛顦╅柣鐔告礀濡稑煤婵犲偆鍤曢煫鍥ㄧ☉濞呫垽鎮归悜妯虹厐缂佽鲸宀告俊?
-    - reset_policy=downstream闂佹寧绋掔喊宥囩博婵犳碍鍋犻柛鈩冨嚬閸ゅ姊婚崘顓炵厫妞ゆ柨鐭傚畷锝嗙節閸屾艾绶繛鎴炴尭椤戝棝鎮ラ懜鐢殿洸鐟滃繑鏅堕崸妤佹櫖闁割偁鍨洪弳鐘裁归悩渚殭濠殿喚鍠愮粭鐔活槼濠⒀呮櫕閹澘鐣濈€ｎ剛顦?
-    - 婵炲瓨绫傞崨顓涙寘闂佸搫鍊稿ú锝呪枎閵忊槅娓舵俊顖涱儥閸?overwrite闂佹寧绋戦悧鍛箔婢舵劕纾绘慨姗嗗墰缁夌儤淇婂Δ瀣Ф缂?
+    异步重启 DreamWeaver 运行。
+    - reset_policy=downstream 会清理当前阶段之后的产物并重新排队。
+    - overwrite 为 true 时会覆盖已有中间结果。
     """
     row = (
         db.query(DreamweaverProjectModel)
@@ -3441,15 +3454,15 @@ def restart_run_async(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id ???????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
 
     if str(row.status or "").strip().lower() == "running":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run ??????????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run 正在执行，无法重建视频任务")
 
     project_id = int(row.source_project_id)
     start_state_raw = str(request.start_state or "").strip().upper()
     if not start_state_raw:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="start_state ????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="start_state 不能为空")
 
     allowed = {
         "SCRIPT",
@@ -3462,7 +3475,7 @@ def restart_run_async(
         "REVIEW",
     }
     if start_state_raw not in allowed:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"start_state ??: {start_state_raw}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"start_state 不合法: {start_state_raw}")
 
     def _normalize_str_list(raw: Any, *, limit: int = 200) -> List[str]:
         if not isinstance(raw, list):
@@ -3539,35 +3552,35 @@ def restart_run_async(
             )
 
     if shot_ids and cam_idxs:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="shot_ids ? cam_idxs ?????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="shot_ids 与 cam_idxs 不能同时传入")
     if cam_idxs and asset_roles:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cam_idxs ? asset_roles ?????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cam_idxs 与 asset_roles 不能同时传入")
     if shot_ids and asset_roles:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="shot_ids ? asset_roles ?????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="shot_ids 与 asset_roles 不能同时传入")
     if cam_idxs and start_state_raw not in {"KEYFRAMES", "MIDFRAMES", "VIDEO"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="cam_idxs ???? KEYFRAMES/MIDFRAMES/VIDEO ??",
+            detail="cam_idxs 仅支持 KEYFRAMES/MIDFRAMES/VIDEO 阶段",
         )
     if shot_ids and start_state_raw not in {"KEYFRAMES", "MIDFRAMES", "VIDEO"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="shot_ids ???? KEYFRAMES/MIDFRAMES/VIDEO ??",
+            detail="shot_ids 仅支持 KEYFRAMES/MIDFRAMES/VIDEO 阶段",
         )
     if asset_roles and start_state_raw != "ASSET_LIBRARY":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="asset_roles ???? ASSET_LIBRARY ??",
+            detail="asset_roles 仅支持 ASSET_LIBRARY 阶段",
         )
     if cam_idxs and str(request.reset_policy or "").strip().lower() != "downstream":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="?? cam_idxs ????? reset_policy=downstream",
+            detail="使用 cam_idxs 时必须指定 reset_policy=downstream",
         )
     if (shot_ids or asset_roles) and str(request.reset_policy or "").strip().lower() != "downstream":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="?? shot_ids/asset_roles ????? reset_policy=downstream",
+            detail="使用 shot_ids/asset_roles 时必须指定 reset_policy=downstream",
         )
     if asset_roles:
         allowed_spec = (
@@ -3676,7 +3689,7 @@ def delete_run(
     db: Session = Depends(get_db),
 ):
     """
-    闂佸憡甯炴繛鈧繛鍛叄楠炴劙宕惰閺?DreamWeaver run闂佹寧绋戦悧蹇旑殽閸ヮ剚鍤傞柡鍐ｅ亾缂佹柨顭烽幃?DB 闁荤姳鐒﹀妯肩礊瀹ュ棛鈻?runs/{run_id} 婵炲瓨绫傞崨顓涙寘闂佹寧绋戦ˇ顓㈠焵?
+    返回指定 DreamWeaver run 的合同快照与基础状态信息。
     """
     safe_run_id = _normalize_run_id(run_id)
 
@@ -3697,10 +3710,10 @@ def delete_run(
         )
     except DreamweaverRunRunningError:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run ?????????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run 正在执行，无法删除")
     except DreamweaverRunNotFoundError:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id ???????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
     except Exception as exc:  # noqa: BLE001
         db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
@@ -3824,8 +3837,8 @@ def get_persisted_run_contract(
                             meta["video_prompt_generated"] = generated
                             schema_v2["meta"] = meta
                             sh["shot_schema_v2"] = schema_v2
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to generate video prompt for shot: %s", e)
 
     return {
         "dreamweaver_project_id": row.id,
@@ -3850,7 +3863,7 @@ def list_run_events(
     db: Session = Depends(get_db),
 ):
     """
-    闂佸吋鍎抽崲鑼躲亹?DreamWeaver run 婵炲瓨绮岄鍕枎閵忕妴瑙勭瑹婵犲嫮顦╅梺娲绘娇閸斿鑺遍鍕鐎广儱娴傛导鍌炴煕閵壯冧沪闁?闂佸搫鍋嗛崢楣冨吹鎼达絾鍋橀柕澶堝劙缂傚鏌ㄥ☉姗嗘Ф闁?
+    下载 DreamWeaver run 的合并视频文件。
     """
     row = (
         db.query(DreamweaverProjectModel)
@@ -3874,7 +3887,7 @@ def list_run_events(
         gh_row = db.execute(gh_query, {"user_id": current_user.id, "needle": needle}).fetchone()
         if gh_row:
             return []
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id ???????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
 
     safe_after_id = max(0, int(after_id or 0))
     safe_limit = max(1, min(int(limit or 0), 1000))
@@ -3914,17 +3927,17 @@ def upload_run_shot_asset_file(
     db: Session = Depends(get_db),
 ):
     """
-    闂佸綊娼ч鍛叏閳哄倻鈻斿┑鐘辫兌閻愬﹪鏌￠崶銊ヮ嚋鐎规洘鐓￠獮鎰板炊瑜忛弳?run 闂佹眹鍔岀€氫即寮抽崨顔肩窞閻庨潧鎽滈ˇ閬嶆煛婢跺濮傞柍?
+    上传单个 run 下某个 shot 的契约素材。
 
-    闂傚倸瀚崝鏇㈠春濡ゅ懏鏅?
-    - 婵炲濮撮幊搴ㄥ储閹寸姵濯兼慨婵嗙焾濞差剟鏌ｉ埡鍌滃缂佽京娅爀ad_frame/tail_frame/mid_frame闂佹寧绋戝﹢顪擥闂佹寧绋戦ˇ顔剧箔?video_clip闂佹寧绋戝﹢顤?闂佹寧绋戦ˇ顓㈠焵?
-    - run 婵炴垶鎸哥粔鐑藉礂濡绶為柛鏇ㄤ簽閼?running 闂佺粯顭堥崺鏍焵椤戝潡妾烽柍?
-    - 闂佸搫鍊稿ú锝呪枎閵忋倕鐭楁い蹇撳暟缁愭鏌涢幇顓犳噧闁?runs/{run_id}/ 婵炴垶鎸搁鍥р枔閹达箑鐐婇柛婵嗗閺嗕即鏌涘☉婊勵棄闁诡喗娲滈幑鍕敍濮樿京鐛梺鎸庣☉閻楁挻瀵奸埡鍛鐎广儱鐗忛悢鍛偓鍨緲鐎氼參寮悙鍝勭闁靛鍨崇粈鍡涙煏?
+    支持的 role 包括：
+    - head_frame、tail_frame、mid_frame 和 video_clip。
+    - run 必须处于非 running 状态才能更新。
+    - 上传成功后会将资源写入 runs/{run_id}/ 目录并同步到 contract 中。
     """
     safe_run_id = _normalize_run_id(run_id)
     safe_shot_id = str(shot_id or "").strip()
     if not safe_shot_id or "/" in safe_shot_id or "\\" in safe_shot_id or ".." in safe_shot_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="shot_id ?????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="shot_id 格式不合法")
 
     role_norm = str(role or "").strip()
     role_to_spec = {
@@ -3935,7 +3948,7 @@ def upload_run_shot_asset_file(
     }
     spec = role_to_spec.get(role_norm)
     if not spec:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="?? role???? head_frame/tail_frame/mid_frame/video_clip")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持 role 为 head_frame/tail_frame/mid_frame/video_clip")
 
     row = (
         db.query(DreamweaverProjectModel)
@@ -3943,24 +3956,24 @@ def upload_run_shot_asset_file(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id ???????")
-    _ensure_run_not_running(row, action="????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
+    _ensure_run_not_running(row, action="上传素材")
 
     contract = row.contract_json if isinstance(getattr(row, "contract_json", None), dict) else None
     if not isinstance(contract, dict):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="contract_json ?????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="contract_json 缺失或无效")
 
     asset_ext = str(spec["ext"])
     filename = str(getattr(file, "filename", "") or "").strip().lower()
     if not filename.endswith(asset_ext):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"???????? {asset_ext}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"文件类型不匹配，期望 {asset_ext}")
 
     max_mb = max(1, _env_int("DREAMWEAVER_UPLOAD_MAX_VIDEO_MB", 200) if asset_ext == ".mp4" else _env_int("DREAMWEAVER_UPLOAD_MAX_IMAGE_MB", 10))
     data = _read_upload_bytes(file, max_bytes=max_mb * 1024 * 1024)
     if asset_ext == ".png" and not _is_png(data):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="???????? PNG")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="上传内容不是有效的 PNG 文件")
     if asset_ext == ".mp4" and not _is_mp4(data):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="???????? MP4")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="上传内容不是有效的 MP4 文件")
 
     out_rel = (Path("runs") / safe_run_id / str(spec["filename"])).as_posix()
     out_path = _ensure_path_under_runs(Path(out_rel))
@@ -4002,7 +4015,7 @@ def upload_run_shot_asset_file(
         )
     shot["assets"] = assets
 
-    # 闂佸憡鑹鹃張顒勵敆閻愬搫绀?DB闂佹寧绋戦悧鍛矚閼哥數顩查幖绮瑰墲閸婄數绱撴笟鍥у箹闁搞劌缍婂浠嬪Χ閸モ晛鐓氶柣?闂佸搫琚崕鎾敋濡や胶鈻旈柍褜鍓熼幊娑欐綇閸撗咁槴
+    # 先写入 contract 和数据库，再更新剧集级聚合状态。
     episode_row = (
         db.query(DreamweaverEpisodeModel)
         .filter(DreamweaverEpisodeModel.dreamweaver_project_id == int(row.id))
@@ -4010,7 +4023,7 @@ def upload_run_shot_asset_file(
         .first()
     )
     if not episode_row:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run ?? episode ??")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="run 缺少有效的 episode 数据")
 
     shot_row = (
         db.query(DreamweaverShotModel)
@@ -4018,7 +4031,7 @@ def upload_run_shot_asset_file(
         .first()
     )
     if not shot_row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="????? shot")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到对应的 shot")
 
     asset_row = (
         db.query(DreamweaverAssetModel)
@@ -4197,8 +4210,8 @@ def update_run_shot_frame_prompt(
             meta_for_prompt["video_prompt_generated"] = generated
             shot_schema_v2["meta"] = meta_for_prompt
             shot["shot_schema_v2"] = shot_schema_v2
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to generate video prompt for shot %s: %s", safe_shot_id, e)
 
     runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
     if bool(runtime_cfg.get("prompt_review_required")):
@@ -4223,13 +4236,13 @@ def update_run_shot_video_prompt(
     db: Session = Depends(get_db),
 ):
     """
-    闂佸搫娲ら悺銊╁蓟婵犲洤绠伴柛銉戝懏姣?run/shot 闂佹眹鍔岀€氼垶锝炵€ｎ偓绱ｉ柟瀵稿仜缁插湱绱掗埀顒併偊鐠恒劍袚闁荤喐娲栧Λ娑樏烘繝鍥ㄦ櫖闁割偁鍨洪弳蹇撁?VIDEO 闂傚倸鍟抽崺鏍敊瀹€鍕剭?prompt闂佹寧绋戦ˇ顓㈠焵?
-    prompt 婵炴垶鎹佸▍锝夊煘閺嶎厼绫嶉柤鍝ユ暩椤忔悂姊婚崟鈺佲偓娑€呴锔藉剮闁哄秲鍎崑?
+    更新 run/shot 上的视频 prompt 覆盖值。
+    prompt 被清空时会移除覆盖值并重置需要再次审核的标记。
     """
     safe_run_id = _normalize_run_id(run_id)
     safe_shot_id = str(shot_id or "").strip()
     if not safe_shot_id or "/" in safe_shot_id or "\\" in safe_shot_id or ".." in safe_shot_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="shot_id ?????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="shot_id 格式不合法")
 
     row = (
         db.query(DreamweaverProjectModel)
@@ -4237,12 +4250,12 @@ def update_run_shot_video_prompt(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id ???????")
-    _ensure_run_not_running(row, action="???????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
+    _ensure_run_not_running(row, action="更新视频提示词")
 
     contract = row.contract_json if isinstance(getattr(row, "contract_json", None), dict) else None
     if not isinstance(contract, dict):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="contract_json ?????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="contract_json 缺失或无效")
 
     shot = _find_contract_shot(contract, shot_id=safe_shot_id)
     shot_schema_v2 = shot.get("shot_schema_v2") if isinstance(shot.get("shot_schema_v2"), dict) else {}
@@ -4283,7 +4296,7 @@ def get_run_merged_video_file(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 婵炴垶鎸哥粔鎾偤閵娾晛鎹堕柕濠忕畱閻忔鏌￠崘顏勑ｆ繛鐓庣墢閹峰宕稿Δ渚婄椽")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
 
     contract = row.contract_json if isinstance(row.contract_json, dict) else {}
     uri: Optional[str] = None
@@ -4305,15 +4318,15 @@ def get_run_merged_video_file(
                 break
 
     if not uri:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="???????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到可下载的视频文件")
 
     path = resolve_asset_path(uri)
     base = _runs_base_dir()
     resolved = path.resolve()
     if resolved != base and base not in resolved.parents:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="???????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文件路径不合法")
     if not resolved.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="???????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在")
 
     suffix = resolved.suffix.lower()
     media_type = "application/octet-stream"
@@ -4370,15 +4383,15 @@ def get_run_asset_file(
     db: Session = Depends(get_db),
 ):
     """
-    婵炴垶鎸搁鍫澝?婵☆偅婢樼€氼垶锝炲澶婄闁搞儜鍛瘞 run 闂佹眹鍔岀€氼亝顨ラ崶顒佸亱闁冲搫鍊归悗顔济归悩渚晣缂佽鲸鐟╁畷妤呭箮閼恒儲娈柣?婵炴垶鎼╅崣鍐ㄎ涚捄銊︽殰?闂佺粯顨呭ú锕傤敊?缂備浇浜慨闈涱焽濡や焦鍎熼柟鎯у閹煎ジ鏌ㄥ☉姗嗘Ф闁?
-    闁诲海鎳撻ˇ顖炲矗韫囨洜椹抽柡宥庡亝濞堬綁鏌ㄥ☉娆掑鐟滄妸鍥х濞达絿鐡旈崯鍛存偣娴ｅ憡鍋ユ俊顐㈠閹?run 闂?contract 婵炴垶鎼╅崢鑲╂閳哄懏鍋ㄩ柕濞垮妿缁犳牠鏌?uri闂佹寧绋戦懟顖炴嚐閻斿摜鈻旈柡鍐ㄦ处閸庝即鏌?runs/ 闂佺儵鏅╅崰鏍礊瀹ュ棛鈻旈悗锝冨妷閸?
+    按 run 与 uri 返回契约中声明的本地资源文件。
+    仅允许访问当前 run contract 中记录的 uri，且必须落在 runs/ 目录下。
     """
     safe_run_id = _normalize_run_id(run_id)
     target_uri = str(uri or "").strip()
     if not target_uri:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="缂傚倸鍊搁幖顐︽儍?uri")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="缺少必填参数 uri")
     if "://" in target_uri:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="闂佸搫妫楅崐椋庣箔婢舵劕缁╂い鏍ㄧ☉閻︻噣寮堕埡鍌滅煂闁?uri")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持外部 URI")
 
     row = (
         db.query(DreamweaverProjectModel)
@@ -4386,19 +4399,19 @@ def get_run_asset_file(
         .first()
     )
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id ???????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 不存在或无权限访问")
 
     contract = row.contract_json if isinstance(row.contract_json, dict) else {}
     if not _contract_contains_asset_uri(contract, target_uri):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="?????? run")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="该资源不属于当前 run")
 
     path = resolve_asset_path(target_uri)
     base = _runs_base_dir()
     resolved = path.resolve()
     if resolved != base and base not in resolved.parents:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="???????")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文件路径不合法")
     if not resolved.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="???????")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在")
 
     suffix = resolved.suffix.lower()
     media_type = "application/octet-stream"

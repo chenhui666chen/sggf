@@ -3,10 +3,10 @@
 # 当前文件存放项目内图像、视频与音频模型的档案记录。
 
 models:
-  - id: wanx-v1
-    name: Wanx v1
+  - id: wan2.6-t2i
+    name: Wan 2.6 Text-to-Image
     provider: alibaba
-    version: v1
+    version: v2.6
     status: active
 
     modality:
@@ -85,20 +85,12 @@ models:
         - 使用更具体的提示词有助于提升场景控制效果
         - 明确补充风格和主体约束，结果会更稳定
 
-    fallback_strategies:
-      - trigger_condition: content_safety
-        fallback_model_id: wanx-v1-safe
-        description: 回退到安全模式
-        priority: 1
-      - trigger_condition: rate_limit
-        fallback_model_id: sdxl-turbo
-        description: 触发限流时回退到 SDXL
-        priority: 2
+    fallback_strategies: []
 
     endpoint: /api/v1/services/aigc/multimodal-generation/generation
     auth_method: bearer
     requires_external_network: true
-    summary: 项目中的主力文生图模型。阿里云百炼官方文档将 Wanx 定位为通用视觉生成模型，适合基于提示词进行图像生成、风格迁移与编辑增强。
+    summary: 项目中的主力文生图模型，统一使用实际调用名称 wan2.6-t2i，适合基于提示词进行图像生成、风格迁移与编辑增强。
     recommended_scenarios:
       - 分镜概念图生成
       - 角色视觉探索
@@ -122,66 +114,6 @@ models:
       - text-to-image
       - alibaba
       - chinese
-
-  - id: wanx-v1-turbo
-    name: Wanx v1 Turbo
-    provider: alibaba
-    version: v1
-    status: active
-
-    modality:
-      - text_to_image
-
-    capabilities:
-      - name: style_control
-        support_level: native
-      - name: negative_prompt
-        support_level: native
-      - name: seed_control
-        support_level: native
-
-    constraints:
-      ratios:
-        - "1:1"
-        - "16:9"
-        - "9:16"
-      min_width: 256
-      max_width: 1024
-      min_height: 256
-      max_height: 1024
-      max_batch_size: 4
-
-    quality_metrics:
-      overall_score: 6.5
-      visual_quality: 0.7
-
-    cost_profile:
-      unit: per_request
-      price: 0.0
-      currency: CNY
-
-    avg_latency_seconds: 5.0
-    summary: Wanx 的快速预览变体，适合在切换到高质量模型前先做低成本、低延迟的视觉草稿探索。
-    recommended_scenarios:
-      - 快速缩略图生成
-      - 提示词迭代与预览
-      - 低成本早期概念筛选
-    limitations:
-      - 成像质量低于 wanx-v1
-      - 分辨率上限更低
-      - 不建议直接用于最终交付素材
-    integration_notes:
-      - 适合先快速试词，再将有效提示词切换到 wanx-v1 做正式生成
-    documentation_url: https://help.aliyun.com/zh/model-studio/text-to-image-api-reference
-    source_urls:
-      - https://help.aliyun.com/zh/model-studio/text-to-image-api-reference
-      - https://help.aliyun.com/zh/model-studio/models
-
-    tags:
-      - image
-      - text-to-image
-      - alibaba
-      - fast
 
   - id: wan2.6-t2v
     name: Wan 2.6 Text-to-Video
@@ -2500,52 +2432,6 @@ models:
 
     task_types:
       - asset_audio
-
-  - id: sdxl-turbo
-    name: SDXL Turbo
-    provider: stability
-    version: v1.0
-    status: active
-
-    modality:
-      - text_to_image
-
-    capabilities:
-      - name: style_control
-        support_level: native
-      - name: negative_prompt
-        support_level: native
-
-    constraints:
-      ratios:
-        - "1:1"
-        - "16:9"
-        - "9:16"
-      max_batch_size: 1
-
-    quality_metrics:
-      overall_score: 7.0
-
-    cost_profile:
-      unit: per_request
-      price: 0.002
-
-    avg_latency_seconds: 3.0
-    summary: 仅用于降级策略占位的备用图像模型记录。
-    limitations:
-      - 当前仓库中并非主集成提供商链路
-    integration_notes:
-      - 当前主要作为回退记录存在，而不是一线生产模型
-    documentation_url: https://huggingface.co/stabilityai/sdxl-turbo
-    source_urls:
-      - https://huggingface.co/stabilityai/sdxl-turbo
-      - https://stability.ai/stable-image
-
-    tags:
-      - image
-      - text-to-image
-      - stability
-      - fast
 
   - id: kling-v1
     name: Kling v1

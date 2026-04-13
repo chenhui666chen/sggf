@@ -77,8 +77,8 @@ class GenerationService {
         if (task.status === 'completed' || task.status === 'failed') {
           this.stopPolling(taskId)
         }
-      } catch (error) {
-        console.error(`Failed to poll task ${taskId}:`, error)
+      } catch {
+        // 轮询任务状态失败
       }
     }
 
@@ -278,12 +278,9 @@ class GenerationService {
    */
   async getProjectDetails(projectId: number): Promise<any> {
     try {
-      console.log('📍 generationService.getProjectDetails 调用，projectId:', projectId)
       const response = await apiClient.getProject(projectId)
-      console.log('✅ getProject 响应:', response)
       return response.data
     } catch (error) {
-      console.error('❌ getProjectDetails 错误:', error)
       throw error
     }
   }

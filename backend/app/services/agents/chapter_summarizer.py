@@ -3,6 +3,9 @@
 """
 from typing import Dict, Any, List, Optional
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 from .agents import CreativeDirectorAgent
 from core.langchain_bridge import create_task_llm
 from .knowledge_base import NovelKnowledgeBase
@@ -58,7 +61,7 @@ class ChapterSummarizer:
             - plot_advancement: 情节推进描述
             - hooks: 悬念/伏笔
         """
-        print(f"\n【章节摘要生成器】正在为第{chapter_number}章生成摘要...")
+        logger.debug(f"\n【章节摘要生成器】正在为第{chapter_number}章生成摘要...")
         
         # 生成核心摘要
         summary_prompt = f"""你是一位专业的内容提炼专家。请为以下章节生成精炼的核心事件摘要。
@@ -146,10 +149,10 @@ class ChapterSummarizer:
             "summary_length": len(summary_result)
         }
         
-        print(f"✅ 第{chapter_number}章摘要生成完成（{result['summary_length']}字）")
-        print(f"   - 核心摘要：{len(result['core_summary'])}字")
-        print(f"   - 关键人物：{len(result['key_characters'])}个")
-        print(f"   - 核心事件：{len(result['key_events'])}个")
+        logger.debug(f"✅ 第{chapter_number}章摘要生成完成（{result['summary_length']}字）")
+        logger.debug(f"   - 核心摘要：{len(result['core_summary'])}字")
+        logger.debug(f"   - 关键人物：{len(result['key_characters'])}个")
+        logger.debug(f"   - 核心事件：{len(result['key_events'])}个")
         
         return result
     
@@ -164,9 +167,9 @@ class ChapterSummarizer:
         Returns:
             摘要列表
         """
-        print(f"\n{'='*70}")
-        print(f"【批量摘要生成】开始为 {len(chapters)} 个章节生成摘要")
-        print(f"{'='*70}\n")
+        logger.debug(f"\n{'='*70}")
+        logger.debug(f"【批量摘要生成】开始为 {len(chapters)} 个章节生成摘要")
+        logger.debug(f"{'='*70}\n")
         
         summaries = []
         
@@ -176,7 +179,7 @@ class ChapterSummarizer:
             chapter_content = chapter.get("content", "")
             
             if not chapter_content:
-                print(f"⚠️ 第{chapter_number}章内容为空，跳过")
+                logger.debug(f"⚠️ 第{chapter_number}章内容为空，跳过")
                 continue
             
             # 生成摘要
@@ -189,11 +192,11 @@ class ChapterSummarizer:
             
             summaries.append(summary)
             
-            print(f"进度：{i}/{len(chapters)} 完成\n")
+            logger.debug(f"进度：{i}/{len(chapters)} 完成\n")
         
-        print(f"{'='*70}")
-        print(f"【批量摘要生成】全部完成！共生成 {len(summaries)} 个摘要")
-        print(f"{'='*70}\n")
+        logger.debug(f"{'='*70}")
+        logger.debug(f"【批量摘要生成】全部完成！共生成 {len(summaries)} 个摘要")
+        logger.debug(f"{'='*70}\n")
         
         return summaries
     
@@ -215,7 +218,7 @@ class ChapterSummarizer:
         Returns:
             优化后的上下文字符串
         """
-        print(f"\n【上下文优化器】为新章节创建优化上下文...")
+        logger.debug(f"\n【上下文优化器】为新章节创建优化上下文...")
         
         context_parts = []
         
@@ -265,11 +268,11 @@ class ChapterSummarizer:
         
         context = "\n".join(context_parts)
         
-        print(f"✅ 上下文优化完成")
-        print(f"   - 总章节数：{total_chapters}")
-        print(f"   - 使用摘要：{summary_count} 章")
-        print(f"   - 使用完整内容：{full_count} 章")
-        print(f"   - 总上下文长度：{len(context)} 字符\n")
+        logger.debug(f"✅ 上下文优化完成")
+        logger.debug(f"   - 总章节数：{total_chapters}")
+        logger.debug(f"   - 使用摘要：{summary_count} 章")
+        logger.debug(f"   - 使用完整内容：{full_count} 章")
+        logger.debug(f"   - 总上下文长度：{len(context)} 字符\n")
         
         return context
     
@@ -330,42 +333,42 @@ class ChapterSummarizer:
         Args:
             savings_stats: estimate_context_savings的返回值
         """
-        print(f"\n{'='*70}")
-        print("【上下文优化效果报告】")
-        print(f"{'='*70}\n")
+        logger.debug(f"\n{'='*70}")
+        logger.debug("【上下文优化效果报告】")
+        logger.debug(f"{'='*70}\n")
         
-        print(f"📊 章节统计")
-        print(f"   - 总章节数：{savings_stats['total_chapters']} 章")
-        print(f"   - 使用摘要：{savings_stats['early_chapter_count']} 章")
-        print(f"   - 保留完整：{savings_stats['recent_full_count']} 章")
-        print(f"   - 平均章节长度：{savings_stats['avg_chapter_length']:,} 字符\n")
+        logger.debug(f"📊 章节统计")
+        logger.debug(f"   - 总章节数：{savings_stats['total_chapters']} 章")
+        logger.debug(f"   - 使用摘要：{savings_stats['early_chapter_count']} 章")
+        logger.debug(f"   - 保留完整：{savings_stats['recent_full_count']} 章")
+        logger.debug(f"   - 平均章节长度：{savings_stats['avg_chapter_length']:,} 字符\n")
         
-        print(f"💾 上下文长度对比")
-        print(f"   - 原始上下文：{savings_stats['full_context_length']:,} 字符")
-        print(f"   - 优化后上下文：{savings_stats['optimized_context_length']:,} 字符")
-        print(f"   - 节省量：{savings_stats['savings']:,} 字符")
-        print(f"   - 节省比例：{savings_stats['savings_percentage']:.1f}%\n")
+        logger.debug(f"💾 上下文长度对比")
+        logger.debug(f"   - 原始上下文：{savings_stats['full_context_length']:,} 字符")
+        logger.debug(f"   - 优化后上下文：{savings_stats['optimized_context_length']:,} 字符")
+        logger.debug(f"   - 节省量：{savings_stats['savings']:,} 字符")
+        logger.debug(f"   - 节省比例：{savings_stats['savings_percentage']:.1f}%\n")
         
-        print(f"🎯 效果评估")
+        logger.debug(f"🎯 效果评估")
         if savings_stats['savings_percentage'] >= 70:
-            print(f"   ✅ 优秀！大幅减少了上下文长度")
+            logger.debug(f"   ✅ 优秀！大幅减少了上下文长度")
         elif savings_stats['savings_percentage'] >= 50:
-            print(f"   ✅ 良好！有效减少了上下文长度")
+            logger.debug(f"   ✅ 良好！有效减少了上下文长度")
         elif savings_stats['savings_percentage'] >= 30:
-            print(f"   ⚠️  一般，建议增加使用摘要的章节数")
+            logger.debug(f"   ⚠️  一般，建议增加使用摘要的章节数")
         else:
-            print(f"   ⚠️  效果有限，可能是因为章节总数较少")
+            logger.debug(f"   ⚠️  效果有限，可能是因为章节总数较少")
         
-        print(f"\n💡 建议")
+        logger.debug(f"\n💡 建议")
         if savings_stats['total_chapters'] <= 5:
-            print(f"   - 当前章节较少，暂时不需要使用摘要优化")
+            logger.debug(f"   - 当前章节较少，暂时不需要使用摘要优化")
         elif savings_stats['total_chapters'] <= 20:
-            print(f"   - 建议保留最近 2-3 章完整内容，其余使用摘要")
+            logger.debug(f"   - 建议保留最近 2-3 章完整内容，其余使用摘要")
         else:
-            print(f"   - 建议保留最近 2-3 章完整内容，其余使用摘要")
-            print(f"   - 预计可节省 {savings_stats['savings_percentage']:.0f}% 的上下文长度")
+            logger.debug(f"   - 建议保留最近 2-3 章完整内容，其余使用摘要")
+            logger.debug(f"   - 预计可节省 {savings_stats['savings_percentage']:.0f}% 的上下文长度")
         
-        print(f"\n{'='*70}\n")
+        logger.debug(f"\n{'='*70}\n")
 
 
     def _parse_summary_result(self, summary_text: str) -> Dict[str, Any]:
@@ -435,8 +438,8 @@ class ChapterSummarizer:
                     parsed["hooks"] = [line.lstrip("- ").strip() for line in lines]
         
         except Exception as e:
-            print(f"⚠️ 解析摘要时出现错误：{e}")
-            print(f"   将使用完整摘要作为核心摘要")
+            logger.debug(f"⚠️ 解析摘要时出现错误：{e}")
+            logger.debug(f"   将使用完整摘要作为核心摘要")
             parsed["core_summary"] = summary_text
         
         return parsed
@@ -452,7 +455,7 @@ class ChapterSummarizer:
             是否保存成功
         """
         if not self.db_session:
-            print("⚠️ 未配置数据库会话，无法保存摘要")
+            logger.debug("⚠️ 未配置数据库会话，无法保存摘要")
             return False
         
         try:
@@ -482,15 +485,15 @@ class ChapterSummarizer:
             })
             
             if result.rowcount == 0:
-                print(f"⚠️ 找不到章节 ID: {chapter_id}")
+                logger.debug(f"⚠️ 找不到章节 ID: {chapter_id}")
                 return False
             
             self.db_session.commit()
-            print(f"✅ 摘要已保存到数据库（章节 ID: {chapter_id}）")
+            logger.debug(f"✅ 摘要已保存到数据库（章节 ID: {chapter_id}）")
             return True
             
         except Exception as e:
-            print(f"❌ 保存摘要到数据库时出错：{e}")
+            logger.debug(f"❌ 保存摘要到数据库时出错：{e}")
             self.db_session.rollback()
             return False
     
@@ -538,7 +541,7 @@ class ChapterSummarizer:
                 try:
                     summary_data = json.loads(summary_data_json)
                     summary_dict.update(summary_data)
-                except:
+                except Exception:
                     pass
             else:
                 # 如果没有结构化数据，使用默认值
@@ -553,7 +556,7 @@ class ChapterSummarizer:
             return summary_dict
             
         except Exception as e:
-            print(f"⚠️ 从数据库加载摘要时出错：{e}")
+            logger.debug(f"⚠️ 从数据库加载摘要时出错：{e}")
             return None
     
     def get_or_generate_summary(self, chapter_id: int, chapter_number: int,
@@ -580,13 +583,13 @@ class ChapterSummarizer:
         if not force_regenerate:
             cached_summary = self.load_summary_from_db(chapter_id)
             if cached_summary:
-                print(f"✅ 使用缓存的摘要（章节 ID: {chapter_id}）")
+                logger.debug(f"✅ 使用缓存的摘要（章节 ID: {chapter_id}）")
                 return cached_summary
         else:
-            print(f"🔄 检测到强制重生成，跳过缓存摘要（章节 ID: {chapter_id}）")
+            logger.debug(f"🔄 检测到强制重生成，跳过缓存摘要（章节 ID: {chapter_id}）")
         
         # 2. 缓存不存在，生成新摘要
-        print(f"🔄 缓存不存在或已失效，开始生成新摘要...")
+        logger.debug(f"🔄 缓存不存在或已失效，开始生成新摘要...")
         summary = self.generate_chapter_summary(
             chapter_number=chapter_number,
             chapter_title=chapter_title,

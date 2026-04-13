@@ -34,14 +34,12 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import {
-  Add as AddIcon,
-  ArrowBack as ArrowBackIcon,
-  Headphones as HeadphonesIcon,
-  History as HistoryIcon,
-  Logout as LogoutIcon,
-  Search as SearchIcon,
-} from '@mui/icons-material'
+import AddIcon from '@mui/icons-material/Add'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import HeadphonesIcon from '@mui/icons-material/Headphones'
+import HistoryIcon from '@mui/icons-material/History'
+import LogoutIcon from '@mui/icons-material/Logout'
+import SearchIcon from '@mui/icons-material/Search'
 import { useDispatch } from 'react-redux'
 import { logout } from '@/store/slices/authSlice'
 import ChapterDrawer from '@/components/audiobook/ChapterDrawer'
@@ -114,8 +112,7 @@ const AudiobookDashboardPage = () => {
       setLoading(true)
       const res = await apiClient.getProjects()
       setProjects(res.data)
-    } catch (error) {
-      console.error('获取项目失败:', error)
+    } catch {
       setSnackbar({ open: true, message: '网络错误，无法加载项目列表', severity: 'error' })
     } finally {
       setLoading(false)
@@ -157,7 +154,6 @@ const AudiobookDashboardPage = () => {
       const projects = Array.isArray(data?.projects) ? (data.projects as DeletedAudiobookProject[]) : []
       setDeletedAudiobookProjects(projects)
     } catch (error: any) {
-      console.error('加载回收站失败:', error)
       setSnackbar({
         open: true,
         message: await extractApiErrorMessage(error, '加载回收站失败，请稍后重试'),
@@ -180,7 +176,6 @@ const AudiobookDashboardPage = () => {
       setSnackbar({ open: true, message: '已恢复到项目列表', severity: 'success' })
       await fetchDeletedAudiobookProjects()
     } catch (error: any) {
-      console.error('恢复有声书失败:', error)
       setSnackbar({
         open: true,
         message: await extractApiErrorMessage(error, '恢复失败，请稍后重试'),
@@ -217,7 +212,6 @@ const AudiobookDashboardPage = () => {
       chapterDrawer.closeDrawer()
       await fetchProjects()
     } catch (error: any) {
-      console.error('删除有声书失败:', error)
       setSnackbar({
         open: true,
         message: await extractApiErrorMessage(error, '删除有声书失败，请稍后重试'),
@@ -248,7 +242,6 @@ const AudiobookDashboardPage = () => {
       setDeleteChapterDialogOpen(false)
       setChapterAudioToDelete(null)
     } catch (error: any) {
-      console.error('删除章节音频失败:', error)
       setSnackbar({
         open: true,
         message: await extractApiErrorMessage(error, '删除章节音频失败，请稍后重试'),

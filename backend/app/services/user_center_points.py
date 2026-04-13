@@ -304,6 +304,13 @@ def _resolve_occurred_at(row: object) -> datetime | None:
     )
 
 
+def _resolve_asset_occurred_at(asset: object) -> datetime | None:
+    # Asset rewards should expire from their first availability, not from later metadata edits.
+    return ensure_utc_datetime(
+        getattr(asset, "created_at", None) or getattr(asset, "updated_at", None),
+    )
+
+
 def _to_finite_float(value: object | None) -> float:
     try:
         amount = float(value or 0)
@@ -319,6 +326,9 @@ def _build_user_asset_reward_events(
 ) -> list[_RewardEvent]:
     events: list[_RewardEvent] = []
     for index, asset in enumerate(user_assets, start=1):
+        if ensure_utc_datetime(getattr(asset, "archived_at", None)) is not None:
+            continue
+
         reward_amount = _resolve_asset_reward(asset, config)
         if reward_amount <= 0:
             continue
@@ -336,7 +346,7 @@ def _build_user_asset_reward_events(
                 title=_safe_text(getattr(asset, "title", None), f"{asset_class_label} #{asset_id or index}"),
                 summary=f"{asset_class_label}沉淀奖励{asset_kind_summary}",
                 amount=reward_amount,
-                occurred_at=_resolve_occurred_at(asset),
+                occurred_at=_resolve_asset_occurred_at(asset),
             )
         )
     return events

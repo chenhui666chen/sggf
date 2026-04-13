@@ -29,9 +29,11 @@ celery_app = Celery(
 # 确保 worker 侧也具备最新表结构（开发环境 create_all 兜底；生产建议用 Alembic）
 try:
     from app.db.base import Base, engine  # noqa: WPS433
+    from app.db.schema_compat import ensure_runtime_schema_compatibility  # noqa: WPS433
     import app.models  # noqa: F401,WPS433
 
     Base.metadata.create_all(bind=engine)
+    ensure_runtime_schema_compatibility()
 except Exception:
     # 避免 Celery 启动因建表失败而直接退出，错误可在后续任务中暴露
     pass

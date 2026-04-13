@@ -6,10 +6,14 @@ AI辅助智能截断器 - 混合规则+AI语义理解
 2. AI语义摘要(压缩超出部分)
 3. 确保关键信息不丢失
 """
+import logging
 from typing import Dict, Any
 import re
 from langchain_core.messages import SystemMessage, HumanMessage
 from core.langchain_bridge import create_task_llm
+
+
+logger = logging.getLogger(__name__)
 
 
 class IntelligentTruncator:
@@ -56,23 +60,23 @@ class IntelligentTruncator:
                 "compression_ratio": 1.0
             }
         
-        print(f"\n{'='*70}")
-        print(f"【智能截断器】开始处理 {content_type}")
-        print(f"   原始长度: {len(content):,}字符")
-        print(f"   目标长度: {target_length:,}字符")
-        print(f"   需压缩: {(1 - target_length/len(content))*100:.1f}%")
-        print(f"{'='*70}\n")
+        logger.debug(f"\n{'='*70}")
+        logger.debug(f"【智能截断器】开始处理 {content_type}")
+        logger.debug(f"   原始长度: {len(content):,}字符")
+        logger.debug(f"   目标长度: {target_length:,}字符")
+        logger.debug(f"   需压缩: {(1 - target_length/len(content))*100:.1f}%")
+        logger.debug(f"{'='*70}\n")
         
         # 第一步: 规则筛选高优先级内容
         high_priority = self._extract_by_rules(content)
         
         current_length = len(high_priority)
-        print(f"📋 规则筛选后: {current_length:,}字符 (保留{current_length/len(content)*100:.1f}%)")
+        logger.debug(f"📋 规则筛选后: {current_length:,}字符 (保留{current_length/len(content)*100:.1f}%)")
         
         # 第二步: 评估是否需要AI摘要
         if current_length <= target_length:
             # 规则筛选已满足，无需AI
-            print(f"✅ 规则筛选已满足目标，无需AI摘要\n")
+            logger.debug(f"✅ 规则筛选已满足目标，无需AI摘要\n")
             return {
                 "content": high_priority,
                 "method": "rule_based",
@@ -82,7 +86,7 @@ class IntelligentTruncator:
             }
         
         # 第三步: AI语义摘要（仅处理超出部分）
-        print(f"🤖 启动AI摘要: 处理超出的 {current_length - target_length:,}字符...")
+        logger.debug(f"🤖 启动AI摘要: 处理超出的 {current_length - target_length:,}字符...")
         
         # 计算保留多少规则筛选的内容
         keep_length = int(target_length * preserve_ratio)  # 使用传入的保留比例
@@ -100,8 +104,8 @@ class IntelligentTruncator:
             
             result = kept_part + "\n\n" + summary
             
-            print(f"✅ AI摘要完成: {len(overflow_part):,}字 → {len(summary):,}字")
-            print(f"📊 最终结果: {len(result):,}字符 (压缩{(1-len(result)/len(content))*100:.1f}%)\n")
+            logger.debug(f"✅ AI摘要完成: {len(overflow_part):,}字 → {len(summary):,}字")
+            logger.debug(f"📊 最终结果: {len(result):,}字符 (压缩{(1-len(result)/len(content))*100:.1f}%)\n")
             
             return {
                 "content": result,
@@ -112,7 +116,7 @@ class IntelligentTruncator:
             }
             
         except Exception as e:
-            print(f"⚠️  AI摘要失败，回退到规则截断: {e}\n")
+            logger.debug(f"⚠️  AI摘要失败，回退到规则截断: {e}\n")
             fallback = high_priority[:target_length] + "\n\n⚠️ [已截断]"
             return {
                 "content": fallback,

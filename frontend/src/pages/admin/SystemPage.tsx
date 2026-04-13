@@ -12,13 +12,11 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import {
-  CheckCircle as CheckCircleIcon,
-  ErrorOutline as ErrorOutlineIcon,
-  Refresh as RefreshIcon,
-  SettingsSuggest as SettingsSuggestIcon,
-  Tune as TuneIcon,
-} from '@mui/icons-material'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
+import RefreshIcon from '@mui/icons-material/Refresh'
+import SettingsSuggestIcon from '@mui/icons-material/SettingsSuggest'
+import TuneIcon from '@mui/icons-material/Tune'
 import { useSelector } from 'react-redux'
 import {
   type AdminPointsRuleConfig,

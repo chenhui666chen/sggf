@@ -71,24 +71,15 @@
 
 ## 3. 图像与多模态模型
 
-### wanx-v1
+### wan2.6-t2i
 
-- 定位：项目主图像生成模型
+- 定位：项目主图像生成模型，统一使用实际调用名 `wan2.6-t2i`
 - 适用：封面草图、角色概念图、分镜概念图、带参考图的风格生成
-- 限制：速度慢于 Turbo 变体，多轮一致性仍依赖提示词与参考图
-- 项目备注：作为高质量图像默认路径保留
+- 限制：多轮一致性仍依赖提示词与参考图
+- 项目备注：项目内统一使用正式调用名称 `wan2.6-t2i`
 - 官方资料：
   - https://help.aliyun.com/zh/model-studio/text-to-image-v1-api-reference
   - https://help.aliyun.com/zh/model-studio/getting-started/models
-
-### wanx-v1-turbo
-
-- 定位：快速预览图像模型
-- 适用：提示词试错、草图预览、低成本快速迭代
-- 限制：质量与分辨率上限低于 `wanx-v1`
-- 项目备注：适合做前置筛选，不建议直接作为最终交付图
-- 官方资料：
-  - https://help.aliyun.com/zh/model-studio/text-to-image-v1-api-reference
 
 ### qwen3-vl-plus
 
@@ -214,12 +205,12 @@
 - `SimpleAdapterFactory` 已支持对 runtime wrapper 的懒代理，旧方法如 `chat/analyze_image/match_scene` 在历史 Agent 中也能继续落到新机制
 - 有声书业务中的 TTS 试听接口与 `AudiobookEngine` 初始化已改走统一多模态运行时 / TTS 工厂
 - `config/models.yaml` 继续作为图像 / 视频 / TTS / 多模态模型档案中心，运行时会读取这些档案做模型选择
-- `qwen3-vl-plus`、`qwen-image-edit-plus`、`qwen-image-edit-max`、`wanx-v1`、`wan2.6-t2v`、`wan2.6-i2v`、`wan2.6-r2v` 已具备 registry-backed adapter，可直接由统一运行时通过 registry 获取
+- `qwen3-vl-plus`、`qwen-image-edit-plus`、`qwen-image-edit-max`、`wan2.6-t2i`、`wan2.6-t2v`、`wan2.6-i2v`、`wan2.6-r2v` 已具备 registry-backed adapter，可直接由统一运行时通过 registry 获取
 - `wan_t2i/wan26_t2i`、`wan_t2v/wan26_t2v`、`qwen3_tts` 等历史 key 已优先接入 runtime wrapper，不再默认回退到旧 media adapter 链路
 
 仍然保留的工程边界：
 
 - 仍有部分历史 Agent 代码直接使用 `adapters/model_adapters.py` 里的 `ModelAdapterFactory`，这些调用点尚未全部迁到新的 registry/runtime facade
 - `legacy_bridge` 目前仅保留少量非统一媒体路径的旧式兜底，媒体模型侧的旧 fallback 已基本清空
-- 占位模型如 `sdxl-turbo`、`kling-v1` 目前仍只有档案记录，不参与生产路由
+- 占位模型如 `kling-v1` 目前仍只有档案记录，不参与生产路由
 - 如果后续继续推进，建议继续把各个 Agent 内部直接 new / get 旧式 `ModelAdapterFactory` 的位置逐步改成调用统一多模态运行时

@@ -227,6 +227,18 @@ class UnifiedModelRegistry:
             adapter_class: 适配器类（可选）
         """
         with self._state_lock:
+            previous_spec = self._specs.get(spec.id)
+            if previous_spec is not None:
+                # 同一模型重复注册时，先清理旧 task_type 映射，避免脏路由残留。
+                for task_type in previous_spec.routing.task_types:
+                    if task_type not in self._task_type_mapping:
+                        continue
+                    self._task_type_mapping[task_type] = [
+                        model_id for model_id in self._task_type_mapping[task_type] if model_id != spec.id
+                    ]
+                    if not self._task_type_mapping[task_type]:
+                        del self._task_type_mapping[task_type]
+
             self._specs[spec.id] = spec
             self._performance_stats[spec.id] = ModelPerformanceStats()
             self._circuit_breakers[spec.id] = CircuitBreakerState()
@@ -572,6 +584,13 @@ def register_llm_model(
             UnifiedModelSpec, LLMCapability, LLMConstraints,
             APIConfig, PerformanceProfile, RoutingConfig, SupportLevel
         )
+        registry = UnifiedModelRegistry()
+
+        existing_spec = registry.get_spec(model_id)
+        if existing_spec is not None:
+            # YAML 已定义模型时，以 YAML 为权威，只挂载适配器。
+            registry.register(existing_spec, adapter_class)
+            return adapter_class
 
         capability_objs = [
             LLMCapability(name=cap, level=SupportLevel.NATIVE, score=0.8)
@@ -621,7 +640,6 @@ def register_llm_model(
             tags=kwargs.get("tags", []),
         )
 
-        registry = UnifiedModelRegistry()
         registry.register(spec, adapter_class)
 
         return adapter_class

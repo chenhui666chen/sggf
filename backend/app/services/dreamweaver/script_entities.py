@@ -68,7 +68,7 @@ def sync_script_entities_to_project(
     将 scripter 产出的 script_entities 以“最小可用”的方式 upsert 到项目库：
     - characters -> Character
     - scenes -> SettingItem（category=map_system）
-    - props -> SettingItem（category=artifact_system）
+    - props -> SettingItem（category=weapon_system）
     """
     project_id_int = int(project_id)
     if project_id_int <= 0:
@@ -171,11 +171,11 @@ def sync_script_entities_to_project(
         if getattr(existing, "id", None) is not None:
             scene_item_ids.append(int(existing.id))
 
-    # 3) Props -> artifact_system
+    # 3) Props -> weapon_system
     prop_cols = _ensure_collections(
         db,
         project_id=project_id_int,
-        category="artifact_system",
+        category="weapon_system",
         default_name="道具体系",
         default_description="DreamWeaver 自动抽取：道具/物品（用于素材库复用）",
     )

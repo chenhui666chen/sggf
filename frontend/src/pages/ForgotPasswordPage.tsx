@@ -13,15 +13,13 @@ import {
   Typography,
   Zoom,
 } from '@mui/material'
-import {
-  Badge,
-  LockReset,
-  MarkEmailUnread,
-  Password,
-  RocketLaunch,
-  Visibility,
-  VisibilityOff,
-} from '@mui/icons-material'
+import Badge from '@mui/icons-material/Badge'
+import LockReset from '@mui/icons-material/LockReset'
+import MarkEmailUnread from '@mui/icons-material/MarkEmailUnread'
+import Password from '@mui/icons-material/Password'
+import RocketLaunch from '@mui/icons-material/RocketLaunch'
+import Visibility from '@mui/icons-material/Visibility'
+import VisibilityOff from '@mui/icons-material/VisibilityOff'
 
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 

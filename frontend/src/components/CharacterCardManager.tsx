@@ -46,6 +46,17 @@ interface CharacterCardManagerProps {
   onCharacterUpdate?: () => void
 }
 
+const EMPTY_CHARACTER_FORM = {
+  name: '',
+  role: '',
+  role_position: '',
+  faction: '',
+  importance_level: '',
+}
+
+const STORY_STANCE_OPTIONS = ['主角方', '反派方', '中立方', '亦正亦邪']
+const IMPORTANCE_OPTIONS = ['主角', '核心角色', '重要角色', '次要角色', '边缘角色', '群众角色']
+
 export default function CharacterCardManager({ projectId, onCharacterUpdate }: CharacterCardManagerProps) {
   const [characters, setCharacters] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
@@ -105,8 +116,8 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         const data = await response.json()
         setCharacters(data)
       }
-    } catch (error) {
-      console.error('加载角色列表失败:', error)
+    } catch {
+      // 加载角色列表失败
     } finally {
       setLoading(false)
     }
@@ -131,7 +142,6 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
       })
 
       if (!collectionsRes.ok) {
-        console.error('获取设定集合失败')
         setAvailableRealms([])
         return
       }
@@ -162,8 +172,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
       }
 
       setAvailableRealms(realmItems)
-    } catch (error) {
-      console.error('加载境界列表失败:', error)
+    } catch {
       setAvailableRealms([])
     }
   }
@@ -186,8 +195,8 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         const data = await response.json()
         setAvailableTechniques(data)
       }
-    } catch (error) {
-      console.error('加载功法列表失败:', error)
+    } catch {
+      // 加载功法列表失败
     }
   }
 
@@ -203,8 +212,8 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         const data = await response.json()
         setCharacterTechniques(data)
       }
-    } catch (error) {
-      console.error('加载角色功法失败:', error)
+    } catch {
+      // 加载角色功法失败
     }
   }
 
@@ -221,8 +230,8 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         const data = await response.json()
         setAutoTrackedData(data)
       }
-    } catch (error) {
-      console.error('加载自动追踪数据失败:', error)
+    } catch {
+      // 加载自动追踪数据失败
     } finally {
       setAutoTrackedLoading(false)
     }
@@ -230,7 +239,6 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
 
   // 打开编辑对话框
   const handleOpenEditDialog = async (character?: any) => {
-    console.log('📝 [人物卡管理] 打开编辑对话框, character:', character)
     try {
       if (character) {
         setEditingCharacter(character)
@@ -248,7 +256,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         }
       } else {
         setEditingCharacter(null)
-        setFormData({ name: '', role: '', faction: '' })
+        setFormData({ ...EMPTY_CHARACTER_FORM })
         setAutoTrackedData(null)
         setCharacterTechniques([])
         setCharacterRelations([])
@@ -257,9 +265,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
       setNewRelationTarget('')
       setNewRelationType('')
       setEditDialogOpen(true)
-      console.log('✅ [人物卡管理] 编辑对话框已打开')
-    } catch (error) {
-      console.error('❌ [人物卡管理] 打开编辑对话框失败:', error)
+    } catch {
       setSnackbar({ open: true, message: '打开编辑对话框失败', severity: 'error' })
     }
   }
@@ -268,7 +274,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
   const handleCloseEditDialog = () => {
     setEditDialogOpen(false)
     setEditingCharacter(null)
-    setFormData({})
+    setFormData({ ...EMPTY_CHARACTER_FORM })
     setAutoTrackedData(null)
     setCharacterTechniques([])
     setSelectedTechniqueId('')
@@ -339,7 +345,6 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
 
   // 保存角色
   const handleSaveCharacter = async () => {
-    console.log('💾 [人物卡管理] 开始保存角色, editingCharacter:', editingCharacter)
     setSaving(true)
     try {
       // 🆕 将关系数据转换为字典格式（后端期望 dict 类型）
@@ -354,8 +359,6 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         ...formData,
         relations: Object.keys(relationsDict).length > 0 ? relationsDict : null
       }
-      console.log('📦 [人物卡管理] 保存数据:', dataToSave)
-      console.log('📦 [人物卡管理] 关系数据:', relationsDict)
       
       let savedCharacter = dataToSave
       const url = editingCharacter
@@ -363,7 +366,6 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         : `/api/v1/projects/${projectId}/characters`
       
       const method = editingCharacter ? 'PUT' : 'POST'
-      console.log('🌐 [人物卡管理] 请求:', method, url)
       
       const response = await fetch(url, {
         method,
@@ -373,12 +375,9 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         },
         body: JSON.stringify(dataToSave),
       })
-
-      console.log('📡 [人物卡管理] 响应状态:', response.status)
       
       if (response.ok) {
         savedCharacter = await response.json()
-        console.log('✅ [人物卡管理] 角色保存成功:', savedCharacter)
         
         // 保存功法列表（覆盖式）
         if (savedCharacter.id) {
@@ -390,7 +389,6 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
               notes: t.notes || null,
             })),
           }
-          console.log('📚 [人物卡管理] 保存功法列表:', techniquesPayload)
           await fetch(`/api/v1/characters/${savedCharacter.id}/techniques`, {
             method: 'PUT',
             headers: {
@@ -407,11 +405,9 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         setSnackbar({ open: true, message: '保存成功', severity: 'success' })
       } else {
         const errorText = await response.text()
-        console.error('❌ [人物卡管理] 保存失败:', response.status, errorText)
         setSnackbar({ open: true, message: `保存失败: ${errorText}`, severity: 'error' })
       }
-    } catch (error) {
-      console.error('❌ [人物卡管理] 保存角色异常:', error)
+    } catch {
       setSnackbar({ open: true, message: '保存失败，请重试', severity: 'error' })
     } finally {
       setSaving(false)
@@ -434,8 +430,8 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         await loadCharacters()
         onCharacterUpdate?.()
       }
-    } catch (error) {
-      console.error('删除角色失败:', error)
+    } catch {
+      // 删除角色失败
     }
   }
 
@@ -455,11 +451,9 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
       if (response.ok) {
         const data = await response.json()
         setTimelineData(data)
-      } else {
-        console.error('加载出场历程失败')
       }
-    } catch (error) {
-      console.error('加载出场历程失败:', error)
+    } catch {
+      // 加载出场历程失败
     } finally {
       setTimelineLoading(false)
     }
@@ -481,11 +475,9 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
       if (response.ok) {
         const data = await response.json()
         setSyncPreview(data)
-      } else {
-        console.error('加载预览失败')
       }
-    } catch (error) {
-      console.error('加载预览失败:', error)
+    } catch {
+      // 加载预览失败
     } finally {
       setSyncPreviewLoading(false)
     }
@@ -511,8 +503,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
       } else {
         setSnackbar({ open: true, message: '同步失败，请重试', severity: 'error' })
       }
-    } catch (error) {
-      console.error('同步失败:', error)
+    } catch {
       setSnackbar({ open: true, message: '同步失败，请重试', severity: 'error' })
     } finally {
       setSyncing(false)
@@ -536,7 +527,6 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         
         // 转换为 React Flow 格式
         // 🔧 优化：使用多层级布局算法防止节点重叠
-        console.log('📊 关系图开始布局, 节点数:', data.nodes.length, '边数:', data.edges.length)
         
         // 1. 构建BFS邻接表
         const adjacency = new Map<string, Set<string>>()
@@ -571,8 +561,6 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
           })
         }
         
-        console.log('✅ 层级计算完成:', Object.fromEntries(nodeLevels))
-        
         // 3. 按层级分组
         const nodesByLevel = new Map<number, any[]>()
         data.nodes.forEach((node: any) => {
@@ -580,8 +568,6 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
           if (!nodesByLevel.has(level)) nodesByLevel.set(level, [])
           nodesByLevel.get(level)!.push(node)
         })
-        
-        console.log('📂 分层结果:', Array.from(nodesByLevel.entries()).map(([k, v]) => [k, v.length]))
         
         // 4. 布局参数
         const centerX = 400
@@ -662,8 +648,8 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         setSelectedNodeId(null)  // 🆕 重置选中状态
         setGraphStats(data.stats)
       }
-    } catch (error) {
-      console.error('加载关系图失败:', error)
+    } catch {
+      // 加载关系图失败
     } finally {
       setGraphLoading(false)
     }
@@ -822,6 +808,9 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                   
                   <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                     {character.role && <Chip size="small" label={character.role} color="primary" />}
+                    {character.role_position && (
+                      <Chip size="small" label={character.role_position} variant="outlined" />
+                    )}
                     {character.faction && <Chip size="small" label={character.faction} />}
                     {character.importance_level && (
                       <Chip size="small" label={character.importance_level} color="secondary" />
@@ -866,7 +855,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         <DialogTitle>{editingCharacter ? '编辑角色' : '新建角色'}</DialogTitle>
         <DialogContent>
           <Grid container spacing={2}>
-            {/* 第一行：姓名 + 故事立场 + 性别 */}
+            {/* 第一行：姓名 + 故事立场 + 角色定位 */}
             <Grid item xs={4}>
               <TextField
                 autoFocus
@@ -886,13 +875,27 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                 value={formData.role || ''}
                 onChange={(e) => setFormData((prev: any) => ({ ...prev, role: e.target.value }))}
               >
-                <MenuItem value="">自定义</MenuItem>
-                <MenuItem value="主角方">主角方</MenuItem>
-                <MenuItem value="对手方">对手方</MenuItem>
-                <MenuItem value="中立方">中立方</MenuItem>
+                <MenuItem value="">未设置</MenuItem>
+                {STORY_STANCE_OPTIONS.map((option) => (
+                  <MenuItem key={option} value={option}>
+                    {option}
+                  </MenuItem>
+                ))}
               </TextField>
             </Grid>
             <Grid item xs={4}>
+              <TextField
+                margin="dense"
+                label="角色定位"
+                fullWidth
+                placeholder="如：主角 / 盟友 / 导师 / 对手 / 情报角色"
+                value={formData.role_position || ''}
+                onChange={(e) => setFormData((prev: any) => ({ ...prev, role_position: e.target.value }))}
+              />
+            </Grid>
+
+            {/* 第二行：性别 + 年龄 + 所属势力 + 重要性 */}
+            <Grid item xs={3}>
               <TextField
                 margin="dense"
                 label="性别"
@@ -901,9 +904,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                 onChange={(e) => setFormData((prev: any) => ({ ...prev, gender: e.target.value }))}
               />
             </Grid>
-
-            {/* 第二行：年龄 + 所属势力 + 重要性 */}
-            <Grid item xs={4}>
+            <Grid item xs={3}>
               <TextField
                 margin="dense"
                 label="年龄"
@@ -913,7 +914,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                 onChange={(e) => setFormData((prev: any) => ({ ...prev, age: e.target.value }))}
               />
             </Grid>
-            <Grid item xs={4}>
+            <Grid item xs={3}>
               <TextField
                 margin="dense"
                 label="所属势力"
@@ -922,20 +923,21 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
                 onChange={(e) => setFormData((prev: any) => ({ ...prev, faction: e.target.value }))}
               />
             </Grid>
-            <Grid item xs={4}>
+            <Grid item xs={3}>
               <TextField
                 select
                 margin="dense"
-                label="重要性（战力权重）"
+                label="重要性"
                 fullWidth
                 value={formData.importance_level || ''}
                 onChange={(e) => setFormData((prev: any) => ({ ...prev, importance_level: e.target.value }))}
               >
                 <MenuItem value="">未设置</MenuItem>
-                <MenuItem value="主角">主角</MenuItem>
-                <MenuItem value="重要配角">重要配角</MenuItem>
-                <MenuItem value="普通配角">普通配角</MenuItem>
-                <MenuItem value="龙套">龙套</MenuItem>
+                {IMPORTANCE_OPTIONS.map((option) => (
+                  <MenuItem key={option} value={option}>
+                    {option}
+                  </MenuItem>
+                ))}
               </TextField>
             </Grid>
 

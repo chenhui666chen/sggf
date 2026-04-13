@@ -2925,7 +2925,7 @@ class AudiobookEngine:
                         # 解析成本字符串（如 "￥0.12"）
                         try:
                             cost = float(cost_str.replace("￥", "").replace("$", ""))
-                        except:
+                        except Exception:
                             cost = 0.0
                         total_cost += cost
                         

@@ -11,6 +11,10 @@ import {
 import { StageType } from '@/store/slices/workflowSlice'
 import FormattedContent from '../common/FormattedContent'
 import { useNavigate } from 'react-router-dom'
+import {
+  getWorkflowPreviewEmptyMessage,
+  getWorkflowPreviewLoadingLabel,
+} from '@/utils/workflowPreviewMessages'
 
 interface OutputPreviewPanelProps {
   stage: StageType
@@ -63,12 +67,7 @@ export default function OutputPreviewPanel({
   const navigate = useNavigate()
   // 🆕 根据当前阶段和选择获取对应的内容
   const getContent = (): string => {
-    // 🆕 调试日志
-    console.log(`🖥️ OutputPreviewPanel: stage=${stage}, selectedConceptView=${selectedConceptView}, isGeneratingNextChapter=${isGeneratingNextChapter}`)
-
-    // 🆕 如果正在生成下一章，优先显示临时流式内容
     if (isGeneratingNextChapter && generateNextChapterStreamContent) {
-      console.log(`✅ 显示临时流式内容，长度=${generateNextChapterStreamContent.length}`)
       return generateNextChapterStreamContent
     }
 
@@ -149,7 +148,7 @@ export default function OutputPreviewPanel({
             {isCurrentStageStreaming && (
               <Chip
                 icon={<CircularProgress size={12} color="inherit" />}
-                label="正在生成..."
+                label={getWorkflowPreviewLoadingLabel(stage, isGeneratingNextChapter)}
                 color="primary"
                 size="small"
                 variant="outlined"
@@ -192,7 +191,7 @@ export default function OutputPreviewPanel({
             >
               <Typography variant="body2">
                 {isCurrentStageStreaming
-                  ? (progressMessage || '等待内容生成...')  // 🆕 优先显示进度消息
+                  ? getWorkflowPreviewEmptyMessage(stage, progressMessage, isGeneratingNextChapter)
                   : '暂无内容，请执行当前阶段生成内容'}
               </Typography>
             </Box>
@@ -221,4 +220,3 @@ export default function OutputPreviewPanel({
     </Card>
   )
 }
-

@@ -1,6 +1,7 @@
 ﻿"""
 小说写作Agent - 整合知识库和记忆管理的智能写作助手
 """
+import logging
 from typing import Dict, Any, List, Optional
 from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from .config import Config
@@ -9,6 +10,9 @@ from .memory_manager import NovelMemoryManager
 
 
 from core.langchain_bridge import create_task_llm
+
+
+logger = logging.getLogger(__name__)
 
 
 class NovelWritingAgent:
@@ -39,16 +43,16 @@ class NovelWritingAgent:
     
     def process_request(self, user_input: str) -> str:
         """处理用户请求的核心工作流程"""
-        print(f"\n{'='*60}")
-        print(f"用户请求: {user_input}")
-        print(f"{'='*60}\n")
+        logger.debug(f"\n{'='*60}")
+        logger.debug(f"用户请求: {user_input}")
+        logger.debug(f"{'='*60}\n")
         
         self.memory_manager.add_user_message(user_input)
         
-        print(" 正在检索相关知识...")
+        logger.debug(" 正在检索相关知识...")
         retrieved_docs = self.knowledge_base.search(user_input, k=5)
         retrieved_context = self._format_retrieved_docs(retrieved_docs)
-        print(f" 检索到 {len(retrieved_docs)} 条相关信息\n")
+        logger.debug(f" 检索到 {len(retrieved_docs)} 条相关信息\n")
         
         current_context = self.memory_manager.get_context_string()
         chat_history = self.memory_manager.get_chat_history_string()
@@ -60,14 +64,14 @@ class NovelWritingAgent:
             chat_history=chat_history
         )
         
-        print("  正在生成内容...\n")
+        logger.debug("  正在生成内容...\n")
         response = self._generate_response(enhanced_prompt)
         
         self.memory_manager.add_ai_message(response)
         
-        print(f"\n{'='*60}")
-        print(" 生成完成")
-        print(f"{'='*60}\n")
+        logger.debug(f"\n{'='*60}")
+        logger.debug(" 生成完成")
+        logger.debug(f"{'='*60}\n")
         
         return response
     

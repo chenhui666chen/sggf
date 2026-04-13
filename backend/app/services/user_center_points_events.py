@@ -127,6 +127,28 @@ def list_user_points_billing_logs(
     return query.all()
 
 
+def get_active_points_billing_freeze_amount(
+    *,
+    db: Session,
+    target_user_id: int,
+    billing_key: str,
+) -> float:
+    if not str(billing_key or "").strip():
+        return 0.0
+
+    existing_logs = _list_billing_logs_for_key(
+        db=db,
+        target_user_id=target_user_id,
+        billing_key=billing_key,
+    )
+    active_freeze_log = _resolve_active_freeze_log(existing_logs, billing_key=billing_key)
+    if active_freeze_log is None:
+        return 0.0
+
+    payload = getattr(active_freeze_log, "request_params", None) or {}
+    return round(_to_non_negative_float(payload.get("amount_points")), 2)
+
+
 def _list_billing_logs_for_key(
     *,
     db: Session,
@@ -377,13 +399,13 @@ def record_audiobook_billing_freeze(
         amount_points=amount_points,
         amount_yuan=_to_non_negative_float(item.estimated_yuan),
         title=_safe_text(item.title, f"有声书项目 #{row.id}"),
-        summary=_safe_text(item.summary, "有声书任务已生成正式冻结积分。"),
+        summary=_safe_text(item.summary, "\u6709\u58f0\u4e66\u4efb\u52a1\u5df2\u751f\u6210\u6b63\u5f0f\u51bb\u7ed3\u79ef\u5206\u3002"),
         action_path=item.action_path,
         action_label=item.action_label,
         request_context=request_context,
         default_request_method="POST",
         default_request_path=f"/api/v1/audiobook/projects/{row.id}/billing-freeze",
-        operation_desc=f"记录有声书积分冻结 {amount_points:.2f}",
+        operation_desc=f"有声书任务正式冻结积分 {amount_points:.2f}",
         extra_payload={
             "project_id": int(row.project_id or 0),
             "audiobook_project_id": int(row.id or 0),
@@ -449,13 +471,21 @@ def record_audiobook_billing_settle(
         pricing_config=pricing_snapshot.config,
     )
     if not task_billing.items:
-        return None
+        return record_audiobook_billing_release(
+            db=db,
+            audiobook_project_id=audiobook_project_id,
+            reason="\u6709\u58f0\u4e66\u4efb\u52a1\u5b8c\u6210\u4f46\u672a\u4ea7\u751f\u53ef\u7ed3\u7b97\u6210\u672c\uff0c\u5df2\u91ca\u653e\u51bb\u7ed3\u79ef\u5206\u3002",
+        )
 
     item = task_billing.items[0]
     amount_points = _to_non_negative_float(item.actual_points)
     amount_yuan = _to_non_negative_float(item.actual_yuan)
     if amount_points <= 0 or amount_yuan <= 0:
-        return None
+        return record_audiobook_billing_release(
+            db=db,
+            audiobook_project_id=audiobook_project_id,
+            reason="\u6709\u58f0\u4e66\u4efb\u52a1\u5b8c\u6210\u4f46\u672a\u4ea7\u751f\u53ef\u7ed3\u7b97\u6210\u672c\uff0c\u5df2\u91ca\u653e\u51bb\u7ed3\u79ef\u5206\u3002",
+        )
 
     return _create_points_billing_event_log(
         db=db,
@@ -469,13 +499,13 @@ def record_audiobook_billing_settle(
         amount_points=amount_points,
         amount_yuan=amount_yuan,
         title=_safe_text(item.title, f"有声书项目 #{row.id}"),
-        summary=_safe_text(item.summary, "有声书任务已按实际成本完成积分结算。"),
+        summary=_safe_text(item.summary, "\u6709\u58f0\u4e66\u4efb\u52a1\u5df2\u6309\u5b9e\u9645\u6210\u672c\u5b8c\u6210\u79ef\u5206\u7ed3\u7b97\u3002"),
         action_path=item.action_path,
         action_label=item.action_label,
         request_context=None,
         default_request_method="SYSTEM",
         default_request_path=f"/internal/audiobook/{row.id}/billing-settle",
-        operation_desc=f"记录有声书积分结算 {amount_points:.2f}",
+        operation_desc=f"有声书任务完成积分结算 {amount_points:.2f}",
         extra_payload={
             "project_id": int(row.project_id or 0),
             "audiobook_project_id": int(row.id or 0),
@@ -530,7 +560,7 @@ def record_audiobook_billing_release(
     amount_points = _to_non_negative_float(freeze_payload.get("amount_points"))
     amount_yuan = _to_non_negative_float(freeze_payload.get("amount_yuan"))
     action_path = _safe_text(freeze_payload.get("action_path"), "") or f"/audiobook/{int(row.project_id or 0)}"
-    action_label = _safe_text(freeze_payload.get("action_label"), "") or "查看有声书项目"
+    action_label = _safe_text(freeze_payload.get("action_label"), "") or "\u67e5\u770b\u6709\u58f0\u4e66\u9879\u76ee"
 
     return _create_points_billing_event_log(
         db=db,
@@ -544,13 +574,13 @@ def record_audiobook_billing_release(
         amount_points=amount_points,
         amount_yuan=amount_yuan,
         title=_safe_text(freeze_payload.get("title"), f"有声书项目 #{row.id}"),
-        summary=_safe_text(reason, "有声书任务已释放冻结积分。"),
+        summary=_safe_text(reason, "\u6709\u58f0\u4e66\u4efb\u52a1\u5df2\u91ca\u653e\u51bb\u7ed3\u79ef\u5206\u3002"),
         action_path=action_path,
         action_label=action_label,
         request_context=None,
         default_request_method="SYSTEM",
         default_request_path=f"/internal/audiobook/{row.id}/billing-release",
-        operation_desc=f"释放有声书冻结积分 {amount_points:.2f}",
+        operation_desc=f"有声书任务释放冻结积分 {amount_points:.2f}",
         extra_payload={
             "project_id": int(row.project_id or 0),
             "audiobook_project_id": int(row.id or 0),
@@ -621,13 +651,13 @@ def record_dreamweaver_billing_freeze(
         amount_points=amount_points,
         amount_yuan=_to_non_negative_float(item.estimated_yuan),
         title=_safe_text(item.title, f"短剧运行 {row.run_id}"),
-        summary=_safe_text(item.summary, "短剧任务已生成正式冻结积分。"),
+        summary=_safe_text(item.summary, "\u77ed\u5267\u4efb\u52a1\u5df2\u751f\u6210\u6b63\u5f0f\u51bb\u7ed3\u79ef\u5206\u3002"),
         action_path=item.action_path,
         action_label=item.action_label,
         request_context=None,
         default_request_method="SYSTEM",
         default_request_path=f"/internal/dreamweaver/{row.run_id}/billing-freeze",
-        operation_desc=f"记录短剧积分冻结 {amount_points:.2f}",
+        operation_desc=f"短剧任务正式冻结积分 {amount_points:.2f}",
         extra_payload={
             "project_id": int(row.source_project_id or 0),
             "run_id": _safe_text(row.run_id, ""),
@@ -698,7 +728,11 @@ def record_dreamweaver_billing_settle(
     amount_points = _to_non_negative_float(item.actual_points)
     amount_yuan = _to_non_negative_float(item.actual_yuan)
     if amount_points <= 0 or amount_yuan <= 0:
-        return None
+        return record_dreamweaver_billing_release(
+            db=db,
+            run_id=run_id,
+            reason="\u77ed\u5267\u4efb\u52a1\u5b8c\u6210\u4f46\u672a\u4ea7\u751f\u53ef\u7ed3\u7b97\u6210\u672c\uff0c\u5df2\u91ca\u653e\u51bb\u7ed3\u79ef\u5206\u3002",
+        )
 
     return _create_points_billing_event_log(
         db=db,
@@ -712,13 +746,13 @@ def record_dreamweaver_billing_settle(
         amount_points=amount_points,
         amount_yuan=amount_yuan,
         title=_safe_text(item.title, f"短剧运行 {row.run_id}"),
-        summary=_safe_text(item.summary, "短剧任务已按最终合同快照完成积分结算。"),
+        summary=_safe_text(item.summary, "\u77ed\u5267\u4efb\u52a1\u5df2\u6309\u6700\u7ec8\u5feb\u7167\u5b8c\u6210\u79ef\u5206\u7ed3\u7b97\u3002"),
         action_path=item.action_path,
         action_label=item.action_label,
         request_context=None,
         default_request_method="SYSTEM",
         default_request_path=f"/internal/dreamweaver/{row.run_id}/billing-settle",
-        operation_desc=f"记录短剧积分结算 {amount_points:.2f}",
+        operation_desc=f"短剧任务完成积分结算 {amount_points:.2f}",
         extra_payload={
             "project_id": int(row.source_project_id or 0),
             "run_id": _safe_text(row.run_id, ""),
@@ -775,7 +809,7 @@ def record_dreamweaver_billing_release(
     amount_points = _to_non_negative_float(freeze_payload.get("amount_points"))
     amount_yuan = _to_non_negative_float(freeze_payload.get("amount_yuan"))
     action_path = _safe_text(freeze_payload.get("action_path"), "") or f"/drama/{int(row.source_project_id or 0)}"
-    action_label = _safe_text(freeze_payload.get("action_label"), "") or "查看短剧项目"
+    action_label = _safe_text(freeze_payload.get("action_label"), "") or "\u67e5\u770b\u77ed\u5267\u6a21\u5757"
 
     return _create_points_billing_event_log(
         db=db,
@@ -789,13 +823,13 @@ def record_dreamweaver_billing_release(
         amount_points=amount_points,
         amount_yuan=amount_yuan,
         title=_safe_text(freeze_payload.get("title"), f"短剧运行 {row.run_id}"),
-        summary=_safe_text(reason, "短剧任务已释放冻结积分。"),
+        summary=_safe_text(reason, "\u77ed\u5267\u4efb\u52a1\u5df2\u91ca\u653e\u51bb\u7ed3\u79ef\u5206\u3002"),
         action_path=action_path,
         action_label=action_label,
         request_context=None,
         default_request_method="SYSTEM",
         default_request_path=f"/internal/dreamweaver/{row.run_id}/billing-release",
-        operation_desc=f"释放短剧冻结积分 {amount_points:.2f}",
+        operation_desc=f"短剧任务释放冻结积分 {amount_points:.2f}",
         extra_payload={
             "project_id": int(row.source_project_id or 0),
             "run_id": _safe_text(row.run_id, ""),

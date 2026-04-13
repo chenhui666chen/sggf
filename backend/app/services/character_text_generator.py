@@ -3,11 +3,19 @@
 将结构化人物数据转换为工作流可用的文本格式
 """
 import json
+import re
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 
-from app.models.character import Character, CharacterTechnique
-from app.models.setting import SettingItem
+from app.models.character import Character
+from app.services.character_parser import (
+    CharacterTextParser,
+    ParsedCharacter,
+    _build_ability_and_limit_text,
+    _build_mainline_binding_text,
+    _build_personality_anchor_text,
+    _extract_prefixed_character_value,
+)
 
 
 class CharacterTextGenerator:
@@ -15,16 +23,25 @@ class CharacterTextGenerator:
     
     # 重要程度映射
     IMPORTANCE_MAP = {
-        "protagonist": "主角",
-        "major": "重要角色", 
-        "minor": "次要角色",
-        "extra": "群众角色",
+        "主角": "主角",
+        "核心角色": "核心角色",
+        "重要角色": "重要角色",
+        "次要角色": "次要角色",
+        "边缘角色": "边缘角色",
+        "群众角色": "群众角色",
     }
     
     # 角色立场映射
     ROLE_MAP = {
-        "protagonist_side": "主角方",
-        "antagonist_side": "反派方",
+        "主角方": "主角方",
+        "反派方": "反派方",
+        "中立方": "中立方",
+        "亦正亦邪": "亦正亦邪",
+        "protagonist": "主角方",
+        "ally": "主角方",
+        "supporting": "主角方",
+        "antagonist": "反派方",
+        "enemy": "反派方",
         "neutral": "中立方",
         "ambiguous": "亦正亦邪",
     }
@@ -43,6 +60,329 @@ class CharacterTextGenerator:
         "missing": "失踪",
         "unknown": "未知",
     }
+
+    DETAIL_FIELD_NAMES = (
+        "appearance",
+        "personality",
+        "background",
+        "worldview",
+        "motivation",
+        "abilities",
+        "limitation",
+        "mainline_role",
+        "growth_direction",
+        "relationships",
+        "mainline_clues",
+    )
+    PROFILE_SECTION_FIELD_MAP = {
+        "外貌特征": "appearance",
+        "外貌锚点": "appearance",
+        "性格特点": "personality",
+        "性格锚点": "personality",
+        "背景故事": "background",
+        "背景/当前处境": "background",
+        "世界观/价值观立场": "worldview",
+        "核心动机": "motivation",
+        "能力/特长": "abilities",
+        "能力与限制": "abilities",
+        "弱点/缺陷": "limitation",
+        "在情节中的作用": "mainline_role",
+        "人物成长线": "growth_direction",
+        "成长方向": "growth_direction",
+        "关键关系": "relationships",
+        "关联线索": "mainline_clues",
+        "主线绑定": "mainline_clues",
+    }
+
+    @staticmethod
+    def _clean_text(value: Any) -> Optional[str]:
+        text = str(value or "").strip()
+        return text or None
+
+    @staticmethod
+    def _join_unique_parts(parts: List[Optional[str]], separator: str = "\n") -> Optional[str]:
+        normalized_parts: List[str] = []
+        seen = set()
+        for item in parts:
+            text = CharacterTextGenerator._clean_text(item)
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            normalized_parts.append(text)
+        return separator.join(normalized_parts) if normalized_parts else None
+
+    @staticmethod
+    def _pick_first_text(*values: Any) -> Optional[str]:
+        for value in values:
+            text = CharacterTextGenerator._clean_text(value)
+            if text:
+                return text
+        return None
+
+    @staticmethod
+    def _parse_profile_character(character: Character) -> Optional[ParsedCharacter]:
+        profile_text = CharacterTextGenerator._clean_text(character.profile)
+        if not profile_text:
+            return None
+
+        parser = CharacterTextParser()
+        parse_source = (
+            profile_text
+            if "【姓名】" in profile_text or re.search(r"^\s*###", profile_text, re.MULTILINE)
+            else f"### 【姓名】：{character.name}\n{profile_text}"
+        )
+        parsed = parser.parse_all_characters(parse_source)
+        return parsed[0] if parsed else None
+
+    @staticmethod
+    def _merge_parsed_character(base: ParsedCharacter, incoming: Optional[ParsedCharacter]) -> ParsedCharacter:
+        if incoming is None:
+            return base
+
+        for field_name in (
+            "age",
+            "gender",
+            "role",
+            "role_position",
+            "faction",
+            "importance_level",
+            *CharacterTextGenerator.DETAIL_FIELD_NAMES,
+        ):
+            current_value = getattr(base, field_name, None)
+            incoming_value = getattr(incoming, field_name, None)
+            if incoming_value in (None, ""):
+                continue
+            if current_value in (None, ""):
+                setattr(base, field_name, incoming_value)
+                continue
+            if isinstance(current_value, str) and isinstance(incoming_value, str) and len(incoming_value) > len(current_value):
+                setattr(base, field_name, incoming_value)
+
+        return base
+
+    @staticmethod
+    def _extract_profile_sections(profile_text: Optional[str]) -> Dict[str, str]:
+        text = CharacterTextGenerator._clean_text(profile_text)
+        if not text:
+            return {}
+
+        sections: Dict[str, str] = {}
+        pattern = re.compile(r"【(?P<label>[^】]+)】\s*(?:[:：]\s*)?(?P<value>.*?)(?=\n\s*【[^】]+】|\Z)", re.S)
+        for match in pattern.finditer(text):
+            raw_label = match.group("label").strip()
+            value = CharacterTextGenerator._clean_text(match.group("value"))
+            if not value:
+                continue
+
+            if raw_label == "性格锚点":
+                personality = _extract_prefixed_character_value(value, ("性格",))
+                worldview = _extract_prefixed_character_value(value, ("价值倾向",))
+                if personality:
+                    sections["personality"] = personality
+                if worldview:
+                    sections["worldview"] = worldview
+                continue
+
+            if raw_label == "能力与限制":
+                abilities = _extract_prefixed_character_value(value, ("能力",))
+                limitation = _extract_prefixed_character_value(value, ("限制", "弱点", "代价"))
+                if abilities:
+                    sections["abilities"] = abilities
+                if limitation:
+                    sections["limitation"] = limitation
+                continue
+
+            if raw_label == "主线绑定":
+                mainline_role = _extract_prefixed_character_value(value, ("剧情职责", "主线职责"))
+                mainline_clues = _extract_prefixed_character_value(value, ("关联线索",))
+                if mainline_role:
+                    sections["mainline_role"] = mainline_role
+                if mainline_clues:
+                    sections["mainline_clues"] = mainline_clues
+                continue
+
+            label = CharacterTextGenerator.PROFILE_SECTION_FIELD_MAP.get(raw_label)
+            if label:
+                sections[label] = value
+        return sections
+
+    @staticmethod
+    def _format_technique_names(character: Character) -> List[str]:
+        if not character.character_techniques:
+            return []
+
+        technique_names: List[str] = []
+        for relation in character.character_techniques:
+            if not relation.technique_item:
+                continue
+            name = relation.technique_item.name
+            if relation.proficiency:
+                name += f"（{relation.proficiency}）"
+            technique_names.append(name)
+        return technique_names
+
+    @staticmethod
+    def _extract_relation_lines(value: Any) -> List[str]:
+        if value in (None, ""):
+            return []
+
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return []
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                return [text]
+            return CharacterTextGenerator._extract_relation_lines(parsed)
+
+        if isinstance(value, dict):
+            if CharacterTextGenerator._clean_text(value.get("text")):
+                return [CharacterTextGenerator._clean_text(value.get("text"))]  # type: ignore[list-item]
+
+            target = CharacterTextGenerator._clean_text(value.get("target"))
+            relation_type = CharacterTextGenerator._clean_text(value.get("type"))
+            description = CharacterTextGenerator._pick_first_text(
+                value.get("description"),
+                value.get("detail"),
+                value.get("notes"),
+            )
+            relation_text = "：".join(part for part in (target, relation_type) if part)
+            if relation_text and description:
+                relation_text = f"{relation_text}（{description}）"
+            elif not relation_text:
+                relation_text = description or ""
+            return [relation_text] if relation_text else []
+
+        if isinstance(value, list):
+            lines: List[str] = []
+            for item in value:
+                lines.extend(CharacterTextGenerator._extract_relation_lines(item))
+            return lines
+
+        text = CharacterTextGenerator._clean_text(value)
+        return [text] if text else []
+
+    @staticmethod
+    def _build_relation_text(character: Character) -> Optional[str]:
+        lines = CharacterTextGenerator._extract_relation_lines(character.relations)
+        lines.extend(CharacterTextGenerator._extract_relation_lines(character.relationship_network))
+        return CharacterTextGenerator._join_unique_parts(lines)
+
+    @staticmethod
+    def _build_abilities_text(
+        character: Character,
+        existing_value: Optional[str],
+        include_techniques: bool,
+    ) -> Optional[str]:
+        additions: List[str] = []
+
+        if character.current_realm:
+            additions.append(f"当前境界：{character.current_realm.name}")
+        if character.profession_item:
+            additions.append(f"职业：{character.profession_item.name}")
+        if character.race_item:
+            additions.append(f"种族：{character.race_item.name}")
+
+        if include_techniques:
+            technique_names = CharacterTextGenerator._format_technique_names(character)
+            if technique_names:
+                additions.append(f"掌握能力：{', '.join(technique_names)}")
+
+        if character.tags:
+            try:
+                parsed_tags = json.loads(character.tags)
+                if isinstance(parsed_tags, list) and parsed_tags:
+                    additions.append(f"人物标签：{', '.join(str(tag).strip() for tag in parsed_tags if str(tag).strip())}")
+            except Exception:
+                text = CharacterTextGenerator._clean_text(character.tags)
+                if text:
+                    additions.append(f"人物标签：{text}")
+
+        return CharacterTextGenerator._join_unique_parts([existing_value, *additions])
+
+    @staticmethod
+    def _build_mainline_clues_text(character: Character, existing_value: Optional[str]) -> Optional[str]:
+        additions: List[str] = []
+
+        appearance_status = CharacterTextGenerator.APPEARANCE_STATUS_MAP.get(
+            character.appearance_status,
+            character.appearance_status or "",
+        )
+        life_status = CharacterTextGenerator.LIFE_STATUS_MAP.get(
+            character.life_status,
+            character.life_status or "",
+        )
+
+        if appearance_status:
+            additions.append(f"出场状态：{appearance_status}")
+        if life_status:
+            additions.append(f"当前状态：{life_status}")
+        if character.first_appearance_chapter:
+            additions.append(f"首次出场章节：第{character.first_appearance_chapter}章")
+
+        return CharacterTextGenerator._join_unique_parts([existing_value, *additions])
+
+    @staticmethod
+    def _build_canonical_character(character: Character, include_relations: bool, include_techniques: bool) -> ParsedCharacter:
+        role_text = CharacterTextGenerator._pick_first_text(
+            CharacterTextGenerator.ROLE_MAP.get(character.role),
+            character.role,
+        )
+        importance_text = CharacterTextGenerator._pick_first_text(
+            CharacterTextGenerator.IMPORTANCE_MAP.get(character.importance_level),
+            character.importance_level,
+        )
+        faction_text = CharacterTextGenerator._pick_first_text(
+            character.faction,
+            getattr(character.faction_item, "name", None),
+        )
+
+        parsed = ParsedCharacter(
+            name=character.name.strip(),
+            age=character.age,
+            gender=CharacterTextGenerator._clean_text(character.gender),
+            role=role_text,
+            role_position=CharacterTextGenerator._clean_text(getattr(character, "role_position", None)),
+            faction=faction_text,
+            importance_level=importance_text,
+            raw_text=CharacterTextGenerator._clean_text(character.profile) or "",
+        )
+        parsed = CharacterTextGenerator._merge_parsed_character(
+            parsed,
+            CharacterTextGenerator._parse_profile_character(character),
+        )
+        for field_name, value in CharacterTextGenerator._extract_profile_sections(character.profile).items():
+            current_value = getattr(parsed, field_name, None)
+            if current_value in (None, "") or (isinstance(current_value, str) and len(value) > len(current_value)):
+                setattr(parsed, field_name, value)
+
+        summary_text = CharacterTextGenerator._clean_text(character.summary)
+        if summary_text and not parsed.mainline_role:
+            parsed.mainline_role = summary_text
+        if summary_text and not parsed.background and not CharacterTextGenerator._clean_text(character.profile):
+            parsed.background = summary_text
+
+        parsed.abilities = CharacterTextGenerator._build_abilities_text(
+            character,
+            parsed.abilities,
+            include_techniques=include_techniques,
+        )
+        parsed.mainline_clues = CharacterTextGenerator._build_mainline_clues_text(character, parsed.mainline_clues)
+
+        if include_relations:
+            parsed.relationships = CharacterTextGenerator._join_unique_parts(
+                [parsed.relationships, CharacterTextGenerator._build_relation_text(character)],
+            )
+
+        return parsed
+
+    @staticmethod
+    def _render_field(label: str, value: Optional[str]) -> Optional[str]:
+        text = CharacterTextGenerator._clean_text(value)
+        if not text:
+            return None
+        return f"【{label}】：{text}"
 
     @staticmethod
     def generate_single_character_text(
@@ -63,117 +403,43 @@ class CharacterTextGenerator:
         Returns:
             格式化的人物文本
         """
-        lines = []
-        
-        # 标题
-        lines.append(f"### {character.name}")
-        
-        # 基本信息
-        basic_info = []
-        if character.gender:
-            basic_info.append(f"性别：{character.gender}")
-        if character.age:
-            basic_info.append(f"年龄：{character.age}岁")
-        if character.role:
-            role_display = CharacterTextGenerator.ROLE_MAP.get(character.role, character.role)
-            basic_info.append(f"立场：{role_display}")
-        if character.importance_level:
-            importance = CharacterTextGenerator.IMPORTANCE_MAP.get(
-                character.importance_level, character.importance_level
-            )
-            basic_info.append(f"戏份：{importance}")
-        
-        if basic_info:
-            lines.append("**基本信息**：" + " | ".join(basic_info))
-        
-        # 境界信息
-        if character.current_realm:
-            lines.append(f"**当前境界**：{character.current_realm.name}")
-        
-        # 势力/职业/种族
-        affiliations = []
-        if character.faction:
-            affiliations.append(f"势力：{character.faction}")
-        elif character.faction_item:
-            affiliations.append(f"势力：{character.faction_item.name}")
-        if character.profession_item:
-            affiliations.append(f"职业：{character.profession_item.name}")
-        if character.race_item:
-            affiliations.append(f"种族：{character.race_item.name}")
-        
-        if affiliations:
-            lines.append("**归属**：" + " | ".join(affiliations))
-        
-        # 状态信息
-        status_info = []
-        if character.appearance_status:
-            status = CharacterTextGenerator.APPEARANCE_STATUS_MAP.get(
-                character.appearance_status, character.appearance_status
-            )
-            status_info.append(f"出场：{status}")
-        if character.life_status:
-            life = CharacterTextGenerator.LIFE_STATUS_MAP.get(
-                character.life_status, character.life_status
-            )
-            status_info.append(f"状态：{life}")
-        if character.first_appearance_chapter:
-            status_info.append(f"首次出场：第{character.first_appearance_chapter}章")
-        
-        if status_info:
-            lines.append("**当前状态**：" + " | ".join(status_info))
-        
-        # 功法
-        if include_techniques and character.character_techniques:
-            technique_names = []
-            for ct in character.character_techniques:
-                if ct.technique_item:
-                    name = ct.technique_item.name
-                    if ct.proficiency:
-                        name += f"({ct.proficiency})"
-                    technique_names.append(name)
-            if technique_names:
-                lines.append(f"**功法**：{', '.join(technique_names)}")
-        
-        # 标签
-        if character.tags:
-            try:
-                tags = json.loads(character.tags)
-                if tags:
-                    lines.append(f"**标签**：{', '.join(tags)}")
-            except:
-                if character.tags:
-                    lines.append(f"**标签**：{character.tags}")
-        
-        # 人物简介
-        if character.summary:
-            lines.append(f"**简介**：{character.summary}")
-        
-        # 关系网络
-        if include_relations and character.relations:
-            try:
-                relations = json.loads(character.relations)
-                if relations:
-                    rel_strs = []
-                    for rel in relations:
-                        if isinstance(rel, dict):
-                            target = rel.get("target", "")
-                            rel_type = rel.get("type", "")
-                            if target and rel_type:
-                                rel_strs.append(f"{target}({rel_type})")
-                        elif isinstance(rel, str):
-                            rel_strs.append(rel)
-                    if rel_strs:
-                        lines.append(f"**人物关系**：{', '.join(rel_strs)}")
-            except:
-                pass
-        
-        # 完整档案（去重处理）
-        if character.profile:
-            # 只添加profile中未在其他字段出现的内容
-            profile_text = character.profile.strip()
-            if profile_text and profile_text != character.summary:
-                lines.append(f"**详细档案**：\n{profile_text}")
-        
+        parsed = CharacterTextGenerator._build_canonical_character(
+            character,
+            include_relations=include_relations,
+            include_techniques=include_techniques,
+        )
+
+        age_gender_parts: List[str] = []
+        if parsed.age is not None:
+            age_gender_parts.append(f"{parsed.age}岁")
+        if parsed.gender:
+            age_gender_parts.append(parsed.gender)
+
+        lines = [f"### 【姓名】：{parsed.name}"]
+        field_lines = [
+            CharacterTextGenerator._render_field("年龄/性别", "/".join(age_gender_parts) if age_gender_parts else None),
+            CharacterTextGenerator._render_field("故事立场", parsed.role),
+            CharacterTextGenerator._render_field("角色定位", parsed.role_position),
+            CharacterTextGenerator._render_field("所属势力", parsed.faction),
+            CharacterTextGenerator._render_field("外貌锚点", parsed.appearance),
+            CharacterTextGenerator._render_field(
+                "性格锚点",
+                _build_personality_anchor_text(parsed.personality, parsed.worldview),
+            ),
+            CharacterTextGenerator._render_field("背景/当前处境", parsed.background),
+            CharacterTextGenerator._render_field("核心动机", parsed.motivation),
+            CharacterTextGenerator._render_field(
+                "能力与限制",
+                _build_ability_and_limit_text(parsed.abilities, parsed.limitation),
+            ),
+            CharacterTextGenerator._render_field("关键关系", parsed.relationships),
+            CharacterTextGenerator._render_field(
+                "主线绑定",
+                _build_mainline_binding_text(parsed.mainline_role, parsed.mainline_clues),
+            ),
+            CharacterTextGenerator._render_field("成长方向", parsed.growth_direction),
+        ]
+        lines.extend(line for line in field_lines if line)
         return "\n".join(lines)
 
     @staticmethod
@@ -219,10 +485,12 @@ class CharacterTextGenerator:
     ) -> str:
         """按重要程度分组生成文本"""
         groups = {
-            "protagonist": [],
-            "major": [],
-            "minor": [],
-            "extra": [],
+            "主角": [],
+            "核心角色": [],
+            "重要角色": [],
+            "次要角色": [],
+            "边缘角色": [],
+            "群众角色": [],
             "unknown": [],
         }
         
@@ -237,10 +505,12 @@ class CharacterTextGenerator:
         lines.append("# 人物设定\n")
         
         group_titles = [
-            ("protagonist", "## 主角"),
-            ("major", "## 重要角色"),
-            ("minor", "## 次要角色"),
-            ("extra", "## 群众角色"),
+            ("主角", "## 主角"),
+            ("核心角色", "## 核心角色"),
+            ("重要角色", "## 重要角色"),
+            ("次要角色", "## 次要角色"),
+            ("边缘角色", "## 边缘角色"),
+            ("群众角色", "## 群众角色"),
             ("unknown", "## 其他角色"),
         ]
         
@@ -315,6 +585,8 @@ class CharacterTextGenerator:
             if char.role:
                 role = CharacterTextGenerator.ROLE_MAP.get(char.role, char.role)
                 parts.append(role)
+            if getattr(char, "role_position", None):
+                parts.append(char.role_position)
             
             if char.current_realm:
                 parts.append(char.current_realm.name)

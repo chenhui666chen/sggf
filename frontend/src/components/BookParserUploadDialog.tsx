@@ -259,13 +259,13 @@ export default function BookParserUploadDialog({
           <Box
             sx={{
               border: '2px dashed',
-              borderColor: 'divider',
+              borderColor: file ? 'success.main' : 'divider',
               borderRadius: 2,
               p: 4,
               textAlign: 'center',
               cursor: loading ? 'not-allowed' : 'pointer',
               opacity: loading ? 0.7 : 1,
-              '&:hover': { borderColor: 'primary.main' },
+              '&:hover': { borderColor: file ? 'success.main' : 'primary.main' },
             }}
             onClick={() => {
               if (loading) return
@@ -280,8 +280,12 @@ export default function BookParserUploadDialog({
               disabled={loading}
               onChange={(e) => setFile(e.target.files?.[0] || null)}
             />
-            <CloudUploadIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
-            <Typography variant="body1" color="text.secondary">
+            <CloudUploadIcon sx={{ fontSize: 48, color: file ? 'success.main' : 'text.secondary', mb: 1 }} />
+            <Typography
+              variant="body1"
+              color={file ? 'success.main' : 'text.secondary'}
+              sx={file ? { fontWeight: 600 } : undefined}
+            >
               {file ? file.name : '点击选择 TXT / EPUB / PDF 文件'}
             </Typography>
             <Typography variant="caption" color="text.secondary">

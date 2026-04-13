@@ -3,7 +3,7 @@
 """
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class AudiobookProjectCreate(BaseModel):
@@ -42,8 +42,7 @@ class AudiobookProjectResponse(BaseModel):
     total_cost: float
     created_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChapterAudioResponse(BaseModel):
@@ -56,8 +55,7 @@ class ChapterAudioResponse(BaseModel):
     file_size: int
     tts_cost: float
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CharacterVoiceConfig(BaseModel):
@@ -114,5 +112,4 @@ class AudiobookTaskStatus(BaseModel):
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

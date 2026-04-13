@@ -390,10 +390,10 @@ class TTSEngine:
             音频列表
         """
         total = len(segments)
-        print(f"\n{'='*70}")
-        print(f"[TTS] Starting batch synthesis: {total} segments")
-        print(f"      Batch strategy: {batch_size} per batch, {batch_interval}s interval")
-        print(f"{'='*70}\n")
+        logger.debug(f"\n{'='*70}")
+        logger.debug(f"[TTS] Starting batch synthesis: {total} segments")
+        logger.debug(f"      Batch strategy: {batch_size} per batch, {batch_interval}s interval")
+        logger.debug(f"{'='*70}\n")
         logger.info("开始批量TTS合成: %s 个片段", total)
         logger.info("分批策略: 每批%s个，批次间隔%s秒", batch_size, batch_interval)
         

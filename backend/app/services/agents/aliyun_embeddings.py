@@ -7,6 +7,9 @@ from langchain.embeddings.base import Embeddings
 import requests
 import os
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 import numpy as np
 from .config import Config
 
@@ -87,15 +90,15 @@ class AliyunEmbeddings(Embeddings):
                 if "data" in result and len(result["data"]) > 0:
                     return result["data"][0]["embedding"]
                 else:
-                    print(f"Warning: Aliyun Embedding API returned empty data: {result}")
+                    logger.debug(f"Warning: Aliyun Embedding API returned empty data: {result}")
             else:
-                print(f"Warning: Aliyun Embedding API call failed with status {response.status_code}: {response.text}")
+                logger.debug(f"Warning: Aliyun Embedding API call failed with status {response.status_code}: {response.text}")
                 
         except Exception as e:
-            print(f"Warning: Error getting embedding from Aliyun: {e}")
+            logger.debug(f"Warning: Error getting embedding from Aliyun: {e}")
             
         # Fallback to deterministic random vector
-        print(f"Using fallback vector for text: {text[:50]}...")
+        logger.debug(f"Using fallback vector for text: {text[:50]}...")
         np.random.seed(hash(text) % 2**32)
         return np.random.randn(2048).tolist()  # text-embedding-v4 默认维度是2048
 

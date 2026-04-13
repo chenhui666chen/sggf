@@ -66,6 +66,36 @@ def test_model_registry_auto_loads_catalog_yaml() -> None:
     assert any("text-to-speech" in url for url in spec.source_urls)
 
 
+def test_model_registry_load_from_yaml_does_not_reenter_bootstrap(monkeypatch, tmp_path: Path) -> None:
+    from adapters.registry import ModelRegistry
+
+    registry = ModelRegistry()
+    registry.clear()
+
+    yaml_path = tmp_path / "models.yaml"
+    yaml_path.write_text(
+        """
+models:
+  - id: demo-image
+    name: Demo Image
+    provider: demo
+    modality:
+      - text_to_image
+""".strip(),
+        encoding="utf-8",
+    )
+
+    def _should_not_run() -> None:
+        raise AssertionError("_ensure_builtin_registration should not be called from load_from_yaml")
+
+    monkeypatch.setattr(registry, "_ensure_builtin_registration", _should_not_run)
+
+    loaded = registry.load_from_yaml(str(yaml_path))
+
+    assert loaded == 1
+    assert registry._specs["demo-image"].name == "Demo Image"
+
+
 def test_catalog_files_exist() -> None:
     project_root = Path(__file__).parent.parent
 

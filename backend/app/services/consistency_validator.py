@@ -2,7 +2,7 @@
 一致性校验器 - 确保生成的细纲不偏离、不断裂、不遗漏
 
 核心功能：
-1. 主线一致性校验：检查本卷是否偏离史诗框架的核心主线
+1. 主线一致性校验：检查本卷是否偏离长篇框架的核心主线
 2. 卷间衔接校验：检查本卷开头是否承接上卷结尾
 3. 伏笔完整性校验：检查本卷应处理的伏笔是否有遗漏
 
@@ -128,7 +128,7 @@ class ConsistencyValidator:
             core_storyline: 核心主线描述
             prev_volume_summary: 上一卷摘要（来自VolumeConnector）
             pending_foreshadowings: 本卷伏笔任务（来自ForeshadowingTracker）
-            framework_content: 史诗框架内容
+            framework_content: 长篇框架内容
             
         Returns:
             ValidationResult 校验结果

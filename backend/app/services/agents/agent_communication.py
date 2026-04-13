@@ -1,10 +1,14 @@
 """
 Agent通信模块 - 支持Agent之间的直接通信和协作
 """
+import logging
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+
+
+logger = logging.getLogger(__name__)
 
 
 class MessageType(Enum):
@@ -58,19 +62,19 @@ class AgentCommunicationHub:
     def register_agent(self, agent_name: str, agent_instance: Any):
         """注册Agent"""
         self.agent_registry[agent_name] = agent_instance
-        print(f"✓ Agent '{agent_name}' 已注册到通信中心")
+        logger.debug(f"✓ Agent '{agent_name}' 已注册到通信中心")
     
     def send_message(self, message: Message) -> bool:
         """发送消息"""
         if message.receiver not in self.agent_registry:
-            print(f"✗ 接收者 '{message.receiver}' 未注册")
+            logger.debug(f"✗ 接收者 '{message.receiver}' 未注册")
             return False
         
         self.message_queue.append(message)
         self.message_history.append(message)
         
-        print(f"📨 [{message.sender}] → [{message.receiver}]: {message.message_type.value}")
-        print(f"   内容: {message.content[:100]}...")
+        logger.debug(f"📨 [{message.sender}] → [{message.receiver}]: {message.message_type.value}")
+        logger.debug(f"   内容: {message.content[:100]}...")
         
         return True
     
@@ -103,8 +107,8 @@ class AgentCommunicationHub:
     def request_collaboration(self, requester: str, collaborators: List[str], 
                             task: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
         """请求多个Agent协作"""
-        print(f"\n【协作请求】{requester} 请求 {collaborators} 协作")
-        print(f"任务: {task}\n")
+        logger.debug(f"\n【协作请求】{requester} 请求 {collaborators} 协作")
+        logger.debug(f"任务: {task}\n")
         
         results = {}
         
@@ -124,7 +128,7 @@ class AgentCommunicationHub:
                 agent = self.agent_registry[collaborator]
                 response = agent.process(task, context or {})
                 results[collaborator] = response
-                print(f"✓ {collaborator} 完成任务\n")
+                logger.debug(f"✓ {collaborator} 完成任务\n")
         
         return results
     
@@ -163,7 +167,7 @@ class AgentCommunicationHub:
     def resolve_conflicts(self, conflicts: List[Dict[str, Any]], 
                          mediator: str) -> Dict[str, str]:
         """通过中介Agent解决冲突"""
-        print(f"\n【冲突解决】由 {mediator} 调解\n")
+        logger.debug(f"\n【冲突解决】由 {mediator} 调解\n")
         
         resolutions = {}
         
@@ -182,7 +186,7 @@ class AgentCommunicationHub:
                 mediator_agent = self.agent_registry[mediator]
                 resolution = mediator_agent.process(mediation_request, {})
                 resolutions[f"{agent1}_vs_{agent2}"] = resolution
-                print(f"✓ 冲突已调解: {agent1} vs {agent2}\n")
+                logger.debug(f"✓ 冲突已调解: {agent1} vs {agent2}\n")
         
         return resolutions
     
@@ -199,28 +203,28 @@ class AgentCommunicationHub:
     
     def print_communication_log(self):
         """打印通信日志"""
-        print(f"\n{'='*70}")
-        print("【通信日志】")
-        print(f"{'='*70}\n")
+        logger.debug(f"\n{'='*70}")
+        logger.debug("【通信日志】")
+        logger.debug(f"{'='*70}\n")
         
         for msg in self.message_history:
             timestamp_str = msg.timestamp.strftime('%H:%M:%S') if msg.timestamp else 'N/A'
-            print(f"[{timestamp_str}] {msg.sender} → {msg.receiver}")
-            print(f"  类型: {msg.message_type.value}")
-            print(f"  内容: {msg.content[:100]}...")
-            print()
+            logger.debug(f"[{timestamp_str}] {msg.sender} → {msg.receiver}")
+            logger.debug(f"  类型: {msg.message_type.value}")
+            logger.debug(f"  内容: {msg.content[:100]}...")
+            logger.debug()
         
         if self.conflict_log:
-            print(f"\n【冲突日志】")
+            logger.debug(f"\n【冲突日志】")
             for conflict in self.conflict_log:
-                print(f"  {conflict['agent1']} vs {conflict['agent2']}: {conflict['pattern']}")
+                logger.debug(f"  {conflict['agent1']} vs {conflict['agent2']}: {conflict['pattern']}")
     
     def clear_history(self):
         """清空历史"""
         self.message_queue.clear()
         self.message_history.clear()
         self.conflict_log.clear()
-        print("✓ 通信历史已清空")
+        logger.debug("✓ 通信历史已清空")
 
 
 class AgentTeam:
@@ -241,7 +245,7 @@ class AgentTeam:
     def set_team_context(self, **kwargs):
         """设置团队上下文"""
         self.team_context.update(kwargs)
-        print(f"✓ 团队上下文已更新")
+        logger.debug(f"✓ 团队上下文已更新")
     
     def get_team_context(self) -> Dict[str, Any]:
         """获取团队上下文"""
@@ -249,11 +253,11 @@ class AgentTeam:
     
     def execute_collaborative_task(self, task: str, lead_agent: str) -> Dict[str, Any]:
         """执行协作任务"""
-        print(f"\n{'='*70}")
-        print(f"【团队任务】{self.team_name}")
-        print(f"【领导】{lead_agent}")
-        print(f"【任务】{task}")
-        print(f"{'='*70}\n")
+        logger.debug(f"\n{'='*70}")
+        logger.debug(f"【团队任务】{self.team_name}")
+        logger.debug(f"【领导】{lead_agent}")
+        logger.debug(f"【任务】{task}")
+        logger.debug(f"{'='*70}\n")
         
         # 请求所有成员协作
         collaborators = [name for name in self.members.keys() if name != lead_agent]
@@ -269,7 +273,7 @@ class AgentTeam:
         conflicts = self.communication_hub.detect_conflicts(results)
         
         if conflicts:
-            print(f"\n⚠ 检测到 {len(conflicts)} 个冲突")
+            logger.debug(f"\n⚠ 检测到 {len(conflicts)} 个冲突")
             resolutions = self.communication_hub.resolve_conflicts(conflicts, lead_agent)
             results["resolutions"] = resolutions
         
@@ -277,11 +281,11 @@ class AgentTeam:
     
     def print_team_status(self):
         """打印团队状态"""
-        print(f"\n{'='*70}")
-        print(f"【团队状态】{self.team_name}")
-        print(f"{'='*70}")
-        print(f"成员数: {len(self.members)}")
-        print(f"成员: {', '.join(self.members.keys())}")
-        print(f"上下文: {self.team_context}")
-        print(f"{'='*70}\n")
+        logger.debug(f"\n{'='*70}")
+        logger.debug(f"【团队状态】{self.team_name}")
+        logger.debug(f"{'='*70}")
+        logger.debug(f"成员数: {len(self.members)}")
+        logger.debug(f"成员: {', '.join(self.members.keys())}")
+        logger.debug(f"上下文: {self.team_context}")
+        logger.debug(f"{'='*70}\n")
 

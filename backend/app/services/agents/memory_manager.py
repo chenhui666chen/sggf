@@ -25,6 +25,9 @@ class SimpleChatMemory:
         self.messages = []
 import pickle
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 import os
 from pathlib import Path
 
@@ -83,7 +86,7 @@ class NovelMemoryManager:
     def update_context(self, **kwargs):
         """更新当前写作上下文"""
         self.current_context.update(kwargs)
-        print(f" 上下文已更新: {kwargs}")
+        logger.debug(f" 上下文已更新: {kwargs}")
     
     def get_context(self) -> Dict[str, Any]:
         """获取当前写作上下文"""
@@ -106,7 +109,7 @@ class NovelMemoryManager:
     def clear_history(self):
         """清空对话历史"""
         self.chat_memory.clear()
-        print(" 对话历史已清空")
+        logger.debug(" 对话历史已清空")
     
     def clear_context(self):
         """清空写作上下文"""
@@ -116,7 +119,7 @@ class NovelMemoryManager:
             "active_characters": [],
             "writing_goal": None
         }
-        print("✅ 写作上下文已清空")
+        logger.debug("✅ 写作上下文已清空")
 
     # 🆕 持久化功能
     
@@ -142,11 +145,11 @@ class NovelMemoryManager:
                 json.dump(self.current_context, f, ensure_ascii=False, indent=2)
             
             self.memory_file = memory_file
-            print(f"✅ 记忆已保存到: {memory_file}")
+            logger.debug(f"✅ 记忆已保存到: {memory_file}")
             return True
             
         except Exception as e:
-            print(f"❌ 保存记忆失败: {e}")
+            logger.debug(f"❌ 保存记忆失败: {e}")
             return False
     
     def load_from_disk(self, project_id: str | int) -> bool:
@@ -164,7 +167,7 @@ class NovelMemoryManager:
             
             # 检查文件是否存在
             if not os.path.exists(memory_file):
-                print(f"⚠️ 记忆文件不存在: {memory_file}")
+                logger.debug(f"⚠️ 记忆文件不存在: {memory_file}")
                 return False
             
             # 加载对话记忆
@@ -178,12 +181,12 @@ class NovelMemoryManager:
                     self.current_context = json.load(f)
             
             self.memory_file = memory_file
-            print(f"✅ 记忆已加载从: {memory_file}")
-            print(f"✅ 加载了 {len(messages)} 条对话记录")
+            logger.debug(f"✅ 记忆已加载从: {memory_file}")
+            logger.debug(f"✅ 加载了 {len(messages)} 条对话记录")
             return True
             
         except Exception as e:
-            print(f"❌ 加载记忆失败: {e}")
+            logger.debug(f"❌ 加载记忆失败: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -212,14 +215,14 @@ class NovelMemoryManager:
                 deleted = True
             
             if deleted:
-                print(f"✅ 记忆文件已删除: memory_{project_id}.*")
+                logger.debug(f"✅ 记忆文件已删除: memory_{project_id}.*")
                 return True
             else:
-                print(f"⚠️ 没有找到记忆文件: memory_{project_id}.*")
+                logger.debug(f"⚠️ 没有找到记忆文件: memory_{project_id}.*")
                 return False
                 
         except Exception as e:
-            print(f"❌ 删除记忆失败: {e}")
+            logger.debug(f"❌ 删除记忆失败: {e}")
             return False
     
     def list_saved_memories(self) -> List[str]:
@@ -237,7 +240,7 @@ class NovelMemoryManager:
                     memory_files.append(project_id)
             return memory_files
         except Exception as e:
-            print(f"❌ 列出记忆文件失败: {e}")
+            logger.debug(f"❌ 列出记忆文件失败: {e}")
             return []
 
 

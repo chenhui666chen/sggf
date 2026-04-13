@@ -52,14 +52,14 @@ class PromptEvaluator:
         success_count = 0
         
         for sample in samples:
-            print(f"📝 [评估器] 评估样本: {sample.sample_id} ({sample.genre})")
+            logger.debug(f"📝 [评估器] 评估样本: {sample.sample_id} ({sample.genre})")
             logger.info(f"📝 评估样本: {sample.sample_id} ({sample.genre})")
 
             try:
                 # 1. 使用提示词改写文本
-                print(f"   ⏳ 正在改写文本...")
+                logger.debug(f"   ⏳ 正在改写文本...")
                 rewritten = await self._rewrite_text(prompt, sample.text, temperature)
-                print(f"   ✅ 改写完成，长度: {len(rewritten)}")
+                logger.debug(f"   ✅ 改写完成，长度: {len(rewritten)}")
                 
                 if not rewritten or len(rewritten.strip()) < 50:
                     results.append(EvaluationResult(
@@ -75,7 +75,7 @@ class PromptEvaluator:
                     continue
                 
                 # 2. 检测原始文本的AI率
-                print(f"   ⏳ 检测原始文本AI率...")
+                logger.debug(f"   ⏳ 检测原始文本AI率...")
                 original_result = await self.ai_detector.detect_ai_content(sample.text[:5000])
                 original_trace_detail = None
                 if original_result.get("success"):
@@ -92,11 +92,11 @@ class PromptEvaluator:
                         )
                 else:
                     original_score = 100
-                    print(f"   ⚠️ 原始文本检测失败: {original_result.get('error', '未知错误')}")
-                print(f"   📊 原始AI得分: {original_score}")
+                    logger.debug(f"   ⚠️ 原始文本检测失败: {original_result.get('error', '未知错误')}")
+                logger.debug(f"   📊 原始AI得分: {original_score}")
 
                 # 3. 检测改写后文本的AI率
-                print(f"   ⏳ 检测改写后文本AI率...")
+                logger.debug(f"   ⏳ 检测改写后文本AI率...")
                 rewritten_result = await self.ai_detector.detect_ai_content(rewritten[:5000])
                 rewritten_trace_detail = None
                 if rewritten_result.get("success"):
@@ -113,13 +113,13 @@ class PromptEvaluator:
                         )
                         # 输出发现的问题
                         if trace_data.get("hit_keywords"):
-                            print(f"   🔍 发现AI痕迹关键词: {trace_data['hit_keywords']}")
+                            logger.debug(f"   🔍 发现AI痕迹关键词: {trace_data['hit_keywords']}")
                         if trace_data.get("detection_method"):
-                            print(f"   🔍 检测方法: {trace_data['detection_method']}")
+                            logger.debug(f"   🔍 检测方法: {trace_data['detection_method']}")
                 else:
                     rewritten_score = 100
-                    print(f"   ⚠️ 改写文本检测失败: {rewritten_result.get('error', '未知错误')}")
-                print(f"   📊 改写后AI得分: {rewritten_score}")
+                    logger.debug(f"   ⚠️ 改写文本检测失败: {rewritten_result.get('error', '未知错误')}")
+                logger.debug(f"   📊 改写后AI得分: {rewritten_score}")
 
                 # 4. 计算得分下降
                 score_reduction = original_score - rewritten_score
@@ -129,9 +129,9 @@ class PromptEvaluator:
                 rewritten_metrics = calculate_text_metrics(rewritten)
                 metrics_comparison = compare_metrics(original_metrics, rewritten_metrics)
 
-                print(f"   📈 原文指标: {original_metrics.to_summary()}")
-                print(f"   📈 改写指标: {rewritten_metrics.to_summary()}")
-                print(f"   📈 指标变化: {metrics_comparison}")
+                logger.debug(f"   📈 原文指标: {original_metrics.to_summary()}")
+                logger.debug(f"   📈 改写指标: {rewritten_metrics.to_summary()}")
+                logger.debug(f"   📈 指标变化: {metrics_comparison}")
 
                 # 🆕 6. 计算多维评分（含可读性 + 保真度）
                 # 🔧 传入AI检测分数，应用AI率软性约束
@@ -147,23 +147,23 @@ class PromptEvaluator:
                 rewritten_multi_score.fidelity_score = fidelity_score
                 rewritten_multi_score.details["fidelity"] = f"相似度{100-fidelity_score:.0f}%"
 
-                print(f"   🎯 原文多维评分: {original_multi_score.to_summary()}", flush=True)
-                print(f"   🎯 改写多维评分: {rewritten_multi_score.to_summary()}", flush=True)
+                logger.debug(f"   🎯 原文多维评分: {original_multi_score.to_summary()}", flush=True)
+                logger.debug(f"   🎯 改写多维评分: {rewritten_multi_score.to_summary()}", flush=True)
 
                 # 🔧 显示AI率调整信息
                 if "ai_rate_adjustment" in rewritten_multi_score.details:
-                    print(f"   📊 AI率调整: {rewritten_multi_score.details['ai_rate_adjustment']}", flush=True)
+                    logger.debug(f"   📊 AI率调整: {rewritten_multi_score.details['ai_rate_adjustment']}", flush=True)
 
                 # 🆕 显示可读性警告
                 if rewritten_multi_score.readability_warnings:
-                    print(f"   ⚠️ 可读性警告:", flush=True)
+                    logger.debug(f"   ⚠️ 可读性警告:", flush=True)
                     for warning in rewritten_multi_score.readability_warnings[:3]:  # 最多显示3条
-                        print(f"      - {warning}", flush=True)
+                        logger.debug(f"      - {warning}", flush=True)
 
                 # 🆕 可读性严重下降时给出强警告
                 if rewritten_multi_score.readability_score < 60:
-                    print(f"   🚨 可读性严重下降! (得分: {rewritten_multi_score.readability_score:.0f})", flush=True)
-                    print(f"      建议: 当前改写可能过度优化，影响阅读体验", flush=True)
+                    logger.debug(f"   🚨 可读性严重下降! (得分: {rewritten_multi_score.readability_score:.0f})", flush=True)
+                    logger.debug(f"      建议: 当前改写可能过度优化，影响阅读体验", flush=True)
 
                 results.append(EvaluationResult(
                     sample_id=sample.sample_id,

@@ -159,7 +159,7 @@ print("api_import_ok", audiobook.router.prefix)
   - `qwen3-vl-plus -> Qwen3VLPlusRegistryAdapter`
   - `qwen-image-edit-plus -> QwenImageEditPlusRegistryAdapter`
   - `qwen-image-edit-max -> QwenImageEditMaxRegistryAdapter`
-  - `wanx-v1 -> WanxAdapter`
+  - `wan2.6-t2i -> WanxAdapter`
   - `wan2.6-t2v -> Wan26VideoAdapter`
   - `wan2.6-i2v -> Wan26ImageToVideoAdapter`
   - `wan2.6-r2v -> Wan26ReferenceVideoAdapter`
@@ -175,8 +175,8 @@ print("api_import_ok", audiobook.router.prefix)
 - `qwen_multiperson_fusion` 已接入统一模型别名归一化与 `adapter_helpers.match_scene(...)` helper，`agents/painter.py` 的候选生成与多人物融合底层 helper 已支持直接传入字符串 `model_id`，并行路径也不再需要为字符串模型额外构造 runtime wrapper，业务层对 runtime wrapper 对象的依赖进一步缩小
 - `legacy_runtime_wrappers.py` 当前更多承担的是“旧签名兼容壳”而不是“独立执行实现”，与 `adapter_helpers` 的职责重叠已进一步减少
 - `SimpleAdapterFactory` 现已支持 runtime wrapper 懒代理，历史调用 `qwen3_vl_plus.chat(...)`、`analyze_image(...)`、`qwen_multiperson_fusion.match_scene(...)` 等旧方法时，也会转发到新 registry / TaskSpec 路径
-- `wan_t2i/wan26_t2i` 与 `wan_t2v/wan26_t2v` 也已迁入 runtime wrapper，历史旧工厂调用现在会直接转发到 `wanx-v1` / `wan2.6-t2v` 的 registry / TaskSpec 路径
-- `qwen3-vl-plus`、`qwen-image-edit-*`、`wanx-v1`、`wan2.6-t2v`、`wan2.6-i2v/r2v` 已迁入 registry-backed adapter，统一运行时内部不再保留这些链路的 legacy bridge fallback 分支
+- `wan_t2i/wan26_t2i` 与 `wan_t2v/wan26_t2v` 也已迁入 runtime wrapper，历史旧工厂调用现在会直接转发到 `wan2.6-t2i` / `wan2.6-t2v` 的 registry / TaskSpec 路径
+- `qwen3-vl-plus`、`qwen-image-edit-*`、`wan2.6-t2i`、`wan2.6-t2v`、`wan2.6-i2v/r2v` 已迁入 registry-backed adapter，统一运行时内部不再保留这些链路的 legacy bridge fallback 分支
 - `adapters/model_adapters.py` 已新增 runtime wrapper 兼容层，历史 Agent 对 `wan_t2i/wan_t2v`、`qwen3_vl_plus`、`qwen3_tts`、`qwen_image_edit_*`、`wan_image_edit`、`wan_i2v/wan_r2v`、`qwen_multiperson_fusion` 的旧签名调用已转发到新 registry / TaskSpec 机制
 - `adapters/model_adapters.py` 中历史媒体 adapter 类被直接实例化时，公开的 `generate/chat/analyze_image/analyze_video/match_scene` 入口也会优先薄代理到 runtime wrapper，不再重新走旧 HTTP / DashScope 主链路
 - `legacy_bridge` 对已 wrapper 化的媒体模型旧 fallback 已基本移除，当前仅保留 `jianying` 旧式适配路径
@@ -185,5 +185,5 @@ print("api_import_ok", audiobook.router.prefix)
 ## 7. 剩余边界
 
 - 仍有部分历史 Agent 代码直接依赖 `adapters/model_adapters.py` 的 `ModelAdapterFactory`，但高频多模态旧 key 已由 runtime wrapper 接管
-- 占位模型如 `sdxl-turbo`、`kling-v1` 仍只保留档案，不参与生产路由
+- 占位模型如 `kling-v1` 仍只保留档案，不参与生产路由
 - `python-jose` 的 `datetime.utcnow()` 弃用告警依旧存在，但不是本次改造引入

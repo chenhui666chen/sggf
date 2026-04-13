@@ -14,6 +14,7 @@ import pytest
 import asyncio
 import types
 import json
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch, AsyncMock
 from pathlib import Path
 import tempfile
@@ -385,6 +386,65 @@ class TestLLMAdapters:
 
         assert captured_client_kwargs["max_retries"] == 0
 
+    @pytest.mark.asyncio
+    async def test_adapter_omits_max_tokens_when_not_explicitly_requested(self):
+        from core.llm_adapters import OpenAICompatibleAdapter
+        from schemas.unified_model_spec import UnifiedModelSpec, ModelType, APIConfig, LLMConstraints
+
+        captured_request_kwargs = {}
+
+        class FakeCompletions:
+            async def create(self, **kwargs):
+                captured_request_kwargs.update(kwargs)
+                return types.SimpleNamespace(
+                    choices=[types.SimpleNamespace(message=types.SimpleNamespace(content="ok"))],
+                    usage=None,
+                )
+
+        class FakeChat:
+            def __init__(self):
+                self.completions = FakeCompletions()
+
+        class FakeAsyncOpenAI:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+                self.chat = FakeChat()
+
+        class FakeTimeout:
+            def __init__(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+
+        class FakeAsyncClient:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        fake_openai = types.SimpleNamespace(AsyncOpenAI=FakeAsyncOpenAI)
+        fake_httpx = types.SimpleNamespace(AsyncClient=FakeAsyncClient, Timeout=FakeTimeout)
+
+        spec = UnifiedModelSpec(
+            id="test-adapter",
+            name="Test Adapter",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(
+                api_key_env="TEST_API_KEY",
+                base_url="https://api.test.com/v1",
+            ),
+            constraints=LLMConstraints(max_output_tokens=65536),
+        )
+
+        with patch.dict('os.environ', {'TEST_API_KEY': 'test-key'}):
+            with patch.dict('sys.modules', {'openai': fake_openai, 'httpx': fake_httpx}):
+                adapter = OpenAICompatibleAdapter(spec)
+                result = await adapter.generate(
+                    messages=[{"role": "user", "content": "hello"}],
+                    temperature=0.7,
+                )
+
+        assert result.success is True
+        assert "max_tokens" not in captured_request_kwargs
+
 
 class TestModelHub:
     """测试 ModelHub"""
@@ -491,6 +551,91 @@ class TestModelHub:
         assert adapter.generate.await_count == 2
 
     @pytest.mark.asyncio
+    async def test_model_hub_increases_timeout_budget_after_timeout(self, monkeypatch: pytest.MonkeyPatch):
+        import importlib
+        from core.model_hub import model_hub
+        from core.unified_registry import UnifiedModelRegistry
+        from schemas.unified_model_spec import (
+            UnifiedModelSpec,
+            ModelType,
+            APIConfig,
+            RoutingConfig,
+            LLMConstraints,
+            LLMResult,
+        )
+
+        model_hub_module = importlib.import_module("core.model_hub")
+
+        async def _noop_sleep(_: float) -> None:
+            return
+
+        monkeypatch.setattr(model_hub_module.asyncio, "sleep", _noop_sleep)
+
+        registry = UnifiedModelRegistry()
+        registry.clear()
+
+        spec = UnifiedModelSpec(
+            id="retry-timeout-model",
+            name="Retry Timeout Model",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(
+                api_key_env="TEST_API_KEY",
+                base_url="https://api.test.com/v1",
+                default_timeout=120,
+                default_max_retries=2,
+            ),
+            constraints=LLMConstraints(
+                supports_max_retries=True,
+                supports_timeout_param=True,
+                max_output_tokens=65536,
+            ),
+            routing=RoutingConfig(task_types=["retry_timeout_test"]),
+        )
+        registry.register(spec)
+
+        call_timeouts = []
+
+        async def _generate(**kwargs):
+            call_timeouts.append(kwargs.get("timeout"))
+            if len(call_timeouts) == 1:
+                return LLMResult(
+                    success=False,
+                    model_id="retry-timeout-model",
+                    error="Request timed out.",
+                    error_code="timeout",
+                )
+            return LLMResult(
+                success=True,
+                model_id="retry-timeout-model",
+                content="ok",
+                usage={},
+                latency=0.0,
+                cost=0.0,
+            )
+
+        adapter = Mock()
+        adapter.generate = AsyncMock(side_effect=_generate)
+
+        original_registry = model_hub.registry
+        model_hub.registry = registry
+        try:
+            with patch.object(registry, "get_adapter", return_value=adapter):
+                result = await model_hub._execute_call(
+                    model_id="retry-timeout-model",
+                    messages=[{"role": "user", "content": "hello"}],
+                    temperature=0.7,
+                    max_tokens=20000,
+                    stream=False,
+                    on_chunk=None,
+                )
+        finally:
+            model_hub.registry = original_registry
+
+        assert result.success is True
+        assert call_timeouts == [None, 240]
+
+    @pytest.mark.asyncio
     async def test_model_hub_disables_retry_for_models_without_retry_support(self):
         """测试不支持重试的模型仅尝试一次后立即回退。"""
         from core.model_hub import model_hub
@@ -594,6 +739,7 @@ class TestModelHub:
             LLMResult,
         )
 
+        recent_verified_at = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         snapshot_path = tmp_path / "model_catalog_runtime.json"
         snapshot_path.write_text(
             json.dumps(
@@ -602,11 +748,11 @@ class TestModelHub:
                     "entries": {
                         "failed-model": {
                             "verification_status": "failed",
-                            "last_verified_at": "2026-03-21T00:00:00+00:00",
+                            "last_verified_at": recent_verified_at,
                         },
                         "healthy-model": {
                             "verification_status": "verified",
-                            "last_verified_at": "2026-03-21T00:00:00+00:00",
+                            "last_verified_at": recent_verified_at,
                         },
                     },
                 },

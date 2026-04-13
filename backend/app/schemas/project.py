@@ -1,7 +1,7 @@
 """
 项目和章节Schema
 """
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 from typing import Optional, List
 
@@ -50,8 +50,7 @@ class ProjectResponse(ProjectBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChapterBase(BaseModel):
@@ -89,8 +88,7 @@ class ChapterResponse(ChapterBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProjectDetailResponse(ProjectResponse):
@@ -108,5 +106,4 @@ class ChapterRevisionResponse(BaseModel):
     created_at: datetime
     created_by: Optional[int] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

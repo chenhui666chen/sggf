@@ -67,6 +67,10 @@ from app.services.audiobook.repository import (
     ProjectRepository,
     AudiobookTaskRepository,
 )
+from app.services.points_task_precheck import (
+    build_audiobook_task_points_precheck,
+    build_task_points_precheck_error_detail,
+)
 from app.services.user_center_points_events import (
     record_audiobook_billing_freeze,
     record_audiobook_billing_release,
@@ -77,6 +81,18 @@ from core.unified_media_runtime import synthesize_speech as runtime_synthesize_s
 from dataclasses import asdict, is_dataclass
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_audiobook_points_precheck_passed(precheck: object) -> None:
+    if bool(getattr(precheck, "allowed", False)):
+        return
+    detail = build_task_points_precheck_error_detail(
+        precheck=precheck,
+        module_key="audiobook",
+        module_label="有声书",
+        default_message="有声书积分预检未通过",
+    )
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
 
 def serialize_dataclass_to_dict(obj):
@@ -371,10 +387,21 @@ async def create_audiobook_project(
     2. 根据 generation_mode 启动对应的后台生成任务
     """
     service = AudiobookAppService(db=db, current_user=current_user)
-    audiobook_project = service.create_audiobook_project(request)
-
     # 4. 后台启动生成任务（通过 Celery 队列）
     job_type = "script_only" if getattr(request, "generation_mode", "full") == "script_only" else "full"
+    prepared_request = service.prepare_audiobook_project_creation(request)
+    if job_type != "script_only":
+        precheck = build_audiobook_task_points_precheck(
+            db=db,
+            user_id=current_user.id,
+            project_id=prepared_request.project.id,
+            project_title=prepared_request.project.title,
+            chapter_ids=list(request.chapter_ids or []),
+            tts_provider=request.tts_provider,
+        )
+        _ensure_audiobook_points_precheck_passed(precheck)
+
+    audiobook_project = service.create_audiobook_project(request, prepared=prepared_request)
     task_record = AudiobookTaskRepository.create_task(
         db,
         audiobook_project_id=audiobook_project.id,
@@ -681,6 +708,16 @@ async def trigger_generate_audio_from_scripts(
         )
 
     target_chapter_ids = [ca.chapter_id for ca in chapter_audios]
+    precheck = build_audiobook_task_points_precheck(
+        db=db,
+        user_id=current_user.id,
+        project_id=project.id,
+        project_title=project.title,
+        chapter_ids=target_chapter_ids,
+        tts_provider=audiobook_project.tts_provider,
+        audiobook_project_id=audiobook_project_id,
+    )
+    _ensure_audiobook_points_precheck_passed(precheck)
 
     # 4. 启动后台任务
     task_record = AudiobookTaskRepository.create_task(

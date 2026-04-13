@@ -1,4 +1,5 @@
-import type { SvgIconComponent } from '@mui/icons-material'
+import type { ElementType } from 'react'
+import type { SvgIconProps } from '@mui/material/SvgIcon'
 import CenterFocusStrongOutlinedIcon from '@mui/icons-material/CenterFocusStrongOutlined'
 import GraphicEqOutlinedIcon from '@mui/icons-material/GraphicEqOutlined'
 import ImageOutlinedIcon from '@mui/icons-material/ImageOutlined'
@@ -13,7 +14,7 @@ export interface ModelUseEntry {
   subtitle: string
   description: string
   color: string
-  icon: SvgIconComponent
+  icon: ElementType<SvgIconProps>
   status: 'ready' | 'planned'
 }
 

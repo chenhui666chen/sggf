@@ -55,7 +55,7 @@ def test_wan26_t2i_adapter_generate_delegates_to_runtime_wrapper(
         methods={"generate": {"image_url": "https://example.com/generated.png"}},
     )
 
-    adapter = Wan26T2IAdapter(ModelConfig(api_key="", base_url="", model_name="wanx-v1"))
+    adapter = Wan26T2IAdapter(ModelConfig(api_key="", base_url="", model_name="wan2.6-t2i"))
     monkeypatch.setattr(adapter, "_make_request", lambda *args, **kwargs: pytest.fail("old request path should not run"))
 
     result = adapter.generate(
