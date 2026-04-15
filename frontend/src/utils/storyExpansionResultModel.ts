@@ -126,6 +126,11 @@ function coerceExecutionRound(value: unknown): StoryExpansionExecutionRound | nu
       ? {
         increment_requested: asInteger(character.increment_requested) ?? null,
         post_validation_score: asNumber(character.post_validation_score) ?? null,
+        cards_response_mode: asString(character.cards_response_mode),
+        cards_retry_used:
+          typeof character.cards_retry_used === 'boolean' ? character.cards_retry_used : undefined,
+        recognized_new_character_count: asInteger(character.recognized_new_character_count) ?? null,
+        recognized_new_character_names: coerceStringArray(character.recognized_new_character_names),
       }
       : undefined,
   }

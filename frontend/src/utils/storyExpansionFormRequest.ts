@@ -62,6 +62,7 @@ export function createStoryExpansionRequestPayloadFromForm(
   const requestTargets = resolveStoryExpansionRequestTargets({
     currentChapterCount: input.currentChapterCount,
     currentCharacterCount: input.currentCharacterCount,
+    expansionMode: input.form.expansionMode,
     requestPlan,
     analysis: input.analysis,
     preferAnalysis: input.preferAnalysis,

@@ -20,8 +20,14 @@ import {
   resolveStoryExpansionRequestControls,
   type StoryExpansionEntryPoint,
 } from '@/utils/storyExpansionDefaults'
-import { createStoryExpansionRequestPayloadFromForm } from '@/utils/storyExpansionFormRequest'
+import {
+  createStoryExpansionRequestPayloadFromForm,
+  createStoryExpansionRequestPlanFromForm,
+} from '@/utils/storyExpansionFormRequest'
+import { shouldSkipStoryExpansionAnalysisRequest } from '@/utils/storyExpansionPlanning'
 import type { StoryExpansionRecommendation } from '@/utils/storyExpansionRecommendation'
+
+const STORY_EXPANSION_ANALYSIS_DEBOUNCE_MS = 280
 
 interface UseStoryExpansionComposerOptions {
   projectId?: string
@@ -92,6 +98,12 @@ export function useStoryExpansionComposer({
     getCurrentCharacterCountRef.current = getCurrentCharacterCount
   }, [getCurrentCharacterCount])
 
+  const clearStoryExpansionAnalysis = useCallback(() => {
+    analysisRequestIdRef.current += 1
+    setStoryExpansionAnalysis(null)
+    setStoryExpansionAnalysisLoading(false)
+  }, [])
+
   const dialogForm = useMemo<StoryExpansionDialogFormState>(() => ({
     targetChapterCount: storyTargetChapterCount,
     targetCharacterCount: storyTargetCharacterCount,
@@ -159,7 +171,31 @@ export function useStoryExpansionComposer({
     if (!Number.isFinite(numericProjectId)) {
       return
     }
-    if (!worldSetting || (!plotOutline && !characters)) {
+
+    const currentChapters = getCurrentChapterCountRef.current()
+    const currentCharacters = getCurrentCharacterCountRef.current()
+    const requestPlan = createStoryExpansionRequestPlanFromForm({
+      currentChapterCount: currentChapters,
+      currentCharacterCount: currentCharacters,
+      form: dialogForm,
+    })
+
+    if (shouldSkipStoryExpansionAnalysisRequest({
+      expansionMode: dialogForm.expansionMode,
+      currentChapterCount: currentChapters,
+      currentCharacterCount: currentCharacters,
+      targetChapterCount: dialogForm.targetChapterCount,
+      targetCharacterCount: dialogForm.targetCharacterCount,
+      totalVolumes: dialogForm.totalVolumes,
+      totalChaptersMin: dialogForm.totalChaptersMin,
+      totalChaptersMax: dialogForm.totalChaptersMax,
+      frameworkMetadata: dialogForm.frameworkMetadata,
+      targetVolumeIndex: dialogForm.targetVolumeIndex,
+      volumeChaptersMin: dialogForm.volumeChaptersMin,
+      volumeChaptersMax: dialogForm.volumeChaptersMax,
+      hasStoryContext: Boolean(worldSetting && (plotOutline || characters)),
+    })) {
+      clearStoryExpansionAnalysis()
       return
     }
 
@@ -168,8 +204,6 @@ export function useStoryExpansionComposer({
     setStoryExpansionAnalysisLoading(true)
 
     try {
-      const currentChapters = getCurrentChapterCountRef.current()
-      const currentCharacters = getCurrentCharacterCountRef.current()
       const payload = createStoryExpansionRequestPayloadFromForm({
         projectId: numericProjectId,
         content: {
@@ -181,6 +215,7 @@ export function useStoryExpansionComposer({
         currentCharacterCount: currentCharacters,
         form: dialogForm,
         requestControls,
+        requestPlan,
       })
       const response = await apiClient.analyzeExpandStory(payload)
 
@@ -198,6 +233,7 @@ export function useStoryExpansionComposer({
     }
   }, [
     characters,
+    clearStoryExpansionAnalysis,
     dialogForm,
     plotOutline,
     projectId,
@@ -211,7 +247,13 @@ export function useStoryExpansionComposer({
       return
     }
 
-    void loadStoryExpansionAnalysis()
+    const timer = globalThis.setTimeout(() => {
+      void loadStoryExpansionAnalysis()
+    }, STORY_EXPANSION_ANALYSIS_DEBOUNCE_MS)
+
+    return () => {
+      globalThis.clearTimeout(timer)
+    }
   }, [loadStoryExpansionAnalysis, showStoryExpansionDialog])
 
   const closeStoryExpansionDialog = useCallback(() => {

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildStoryExpansionRequestPlan,
   getStoryExpansionValidationError,
+  shouldSkipStoryExpansionAnalysisRequest,
   shouldConfirmStoryExpansionVolumeOverwrite,
 } from '../storyExpansionPlanning'
 
@@ -178,5 +179,70 @@ describe('storyExpansionPlanning', () => {
         4,
       ),
     ).toBe(false)
+  })
+
+  it('允许常规协同在目标留空时继续请求分析以便系统自动估算', () => {
+    expect(
+      shouldSkipStoryExpansionAnalysisRequest({
+        expansionMode: 'total',
+        currentChapterCount: 20,
+        currentCharacterCount: 5,
+        targetChapterCount: null,
+        targetCharacterCount: null,
+        hasStoryContext: true,
+      }),
+    ).toBe(false)
+  })
+
+  it('会在单卷细化配置未填完整时跳过分析请求', () => {
+    expect(
+      shouldSkipStoryExpansionAnalysisRequest({
+        expansionMode: 'volume_detail',
+        currentChapterCount: 80,
+        currentCharacterCount: 14,
+        hasStoryContext: true,
+        frameworkMetadata: {
+          has_framework: true,
+          metadata: {
+            total_volumes: 6,
+          },
+        },
+        targetVolumeIndex: 3,
+        volumeChaptersMin: 30,
+        volumeChaptersMax: null,
+      }),
+    ).toBe(true)
+  })
+
+  it('会在单卷细化配置完整后允许分析请求', () => {
+    expect(
+      shouldSkipStoryExpansionAnalysisRequest({
+        expansionMode: 'volume_detail',
+        currentChapterCount: 80,
+        currentCharacterCount: 14,
+        hasStoryContext: true,
+        frameworkMetadata: {
+          has_framework: true,
+          metadata: {
+            total_volumes: 6,
+          },
+        },
+        targetVolumeIndex: 3,
+        volumeChaptersMin: 30,
+        volumeChaptersMax: 45,
+      }),
+    ).toBe(false)
+  })
+
+  it('会在常规协同目标越界时跳过分析请求', () => {
+    expect(
+      shouldSkipStoryExpansionAnalysisRequest({
+        expansionMode: 'total',
+        currentChapterCount: 20,
+        currentCharacterCount: 8,
+        targetChapterCount: 301,
+        hasStoryContext: true,
+      }),
+    ).toBe(true)
   })
 })

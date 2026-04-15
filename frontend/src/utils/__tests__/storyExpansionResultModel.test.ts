@@ -65,7 +65,21 @@ describe('storyExpansionResultModel', () => {
       outline_delta: '新增第3章',
       character_delta: '新增顾晚',
       character_relationships: '林舟 -> 顾晚',
-      execution_rounds: [{ round: 1, before_chapter_count: 2, after_chapter_count: 3 }],
+      execution_rounds: [
+        {
+          round: 1,
+          before_chapter_count: 2,
+          after_chapter_count: 3,
+          character: {
+            increment_requested: 1,
+            post_validation_score: 82,
+            cards_response_mode: 'raw_cards',
+            cards_retry_used: true,
+            recognized_new_character_count: 1,
+            recognized_new_character_names: ['椤炬櫄'],
+          },
+        },
+      ],
       outline_ops: [{ action: 'append', requested_count: 1, generated_count: 1 }],
       new_characters: ['顾晚'],
       alignment_repairs: ['修复人物承接'],
@@ -97,6 +111,12 @@ describe('storyExpansionResultModel', () => {
       allCharacters: '角色',
     })
     expect(view?.executionRounds).toHaveLength(1)
+    expect(view?.executionRounds[0].character).toMatchObject({
+      cards_response_mode: 'raw_cards',
+      cards_retry_used: true,
+      recognized_new_character_count: 1,
+      recognized_new_character_names: ['椤炬櫄'],
+    })
     expect(view?.outlineOps).toHaveLength(1)
     expect(view?.newCharacters).toEqual(['顾晚'])
   })

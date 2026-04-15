@@ -636,6 +636,93 @@ class TestModelHub:
         assert call_timeouts == [None, 240]
 
     @pytest.mark.asyncio
+    async def test_model_hub_increases_explicit_timeout_budget_after_timeout(self, monkeypatch: pytest.MonkeyPatch):
+        import importlib
+        from core.model_hub import model_hub
+        from core.unified_registry import UnifiedModelRegistry
+        from schemas.unified_model_spec import (
+            UnifiedModelSpec,
+            ModelType,
+            APIConfig,
+            RoutingConfig,
+            LLMConstraints,
+            LLMResult,
+        )
+
+        model_hub_module = importlib.import_module("core.model_hub")
+
+        async def _noop_sleep(_: float) -> None:
+            return
+
+        monkeypatch.setattr(model_hub_module.asyncio, "sleep", _noop_sleep)
+
+        registry = UnifiedModelRegistry()
+        registry.clear()
+
+        spec = UnifiedModelSpec(
+            id="retry-explicit-timeout-model",
+            name="Retry Explicit Timeout Model",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(
+                api_key_env="TEST_API_KEY",
+                base_url="https://api.test.com/v1",
+                default_timeout=120,
+                default_max_retries=2,
+            ),
+            constraints=LLMConstraints(
+                supports_max_retries=True,
+                supports_timeout_param=True,
+                max_output_tokens=65536,
+            ),
+            routing=RoutingConfig(task_types=["retry_explicit_timeout_test"]),
+            default_params={"max_tokens": 32768},
+        )
+        registry.register(spec)
+
+        call_timeouts = []
+
+        async def _generate(**kwargs):
+            call_timeouts.append(kwargs.get("timeout"))
+            if len(call_timeouts) == 1:
+                return LLMResult(
+                    success=False,
+                    model_id="retry-explicit-timeout-model",
+                    error="Request timed out.",
+                    error_code="timeout",
+                )
+            return LLMResult(
+                success=True,
+                model_id="retry-explicit-timeout-model",
+                content="ok",
+                usage={},
+                latency=0.0,
+                cost=0.0,
+            )
+
+        adapter = Mock()
+        adapter.generate = AsyncMock(side_effect=_generate)
+
+        original_registry = model_hub.registry
+        model_hub.registry = registry
+        try:
+            with patch.object(registry, "get_adapter", return_value=adapter):
+                result = await model_hub._execute_call(
+                    model_id="retry-explicit-timeout-model",
+                    messages=[{"role": "user", "content": "hello"}],
+                    temperature=0.7,
+                    max_tokens=None,
+                    stream=False,
+                    on_chunk=None,
+                    timeout=120,
+                )
+        finally:
+            model_hub.registry = original_registry
+
+        assert result.success is True
+        assert call_timeouts == [120, 240]
+
+    @pytest.mark.asyncio
     async def test_model_hub_disables_retry_for_models_without_retry_support(self):
         """测试不支持重试的模型仅尝试一次后立即回退。"""
         from core.model_hub import model_hub
@@ -819,6 +906,7 @@ class TestModelHub:
         from schemas.unified_model_spec import UnifiedModelSpec, ModelType, APIConfig, RoutingConfig
 
         snapshot_path = tmp_path / "model_catalog_runtime.json"
+        recent_verified_at = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         snapshot_path.write_text(
             json.dumps(
                 {
@@ -826,7 +914,7 @@ class TestModelHub:
                     "entries": {
                         "info-model": {
                             "verification_status": "verified",
-                            "last_verified_at": "2026-03-21T00:00:00+00:00",
+                            "last_verified_at": recent_verified_at,
                         }
                     },
                 },

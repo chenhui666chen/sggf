@@ -114,7 +114,7 @@ class OutlineExpander:
         self.plot_architect = PlotArchitectAgent(self.knowledge_base, self.memory_manager)
         self.character_designer = CharacterDesignerAgent(self.knowledge_base, self.memory_manager)
 
-        # 🔔 为扩展大纲使用 qwen-long
+        # 🔔 为扩展大纲固定使用 qwen3.5-plus
         self.llm = create_task_llm(task_type="outline_expand")
 
         # 🎆 为单卷详细扩展使用 DeepSeek-R1（深度推理能力 + 64K超长输出）
@@ -132,15 +132,15 @@ class OutlineExpander:
         )
         self.plot_architect_plus = PlotArchitectAgent(self.knowledge_base, self.memory_manager, llm=plus_llm)
 
-        # legacy 旧链路保留 qwen-long 作为超长上下文兜底
-        long_llm = create_task_llm(
-            task_type="outline_expand",
-            max_tokens=8192  # qwen-long 的输出限制
+        # 大卷场景也固定使用 qwen3.5-plus，严禁回退到 qwen-long
+        large_volume_llm = create_task_llm(
+            model="qwen3.5-plus",
+            max_tokens=32768,
         )
-        self.plot_architect_long = PlotArchitectAgent(self.knowledge_base, self.memory_manager, llm=long_llm)
+        self.plot_architect_large = PlotArchitectAgent(self.knowledge_base, self.memory_manager, llm=large_volume_llm)
 
         logger.debug("🎆 单卷扩展使用 DeepSeek-R1 模型（64K超长输出能力）")
-        logger.debug("🎆 单卷扩展在章节上限超过80章时优先切换到 qwen3.5-plus")
+        logger.debug("🎆 单卷扩展在章节上限超过80章时固定切换到 qwen3.5-plus")
         
         # 🎆 初始化分层摘要器
         self.layered_summarizer = LayeredSummarizer(
@@ -1827,11 +1827,11 @@ Please analyze：
         estimated_words = avg_chapters * 450  # 每章约450字
 
         if avg_chapters > 80:
-            # 超大卷（>80章）：使用 qwen-long（超长上下文，适合分段生成）
-            selected_architect = self.plot_architect_long
-            model_name = "qwen-long"
-            logger.debug(f"🔄 检测到超大卷（{avg_chapters}章，约{estimated_words}字），自动切换到 qwen-long 模型")
-            logger.debug(f"   💡 建议：超大卷可能需要分多次生成，或考虑拆分为多个小卷")
+            # 超大卷（>80章）：固定使用 qwen3.5-plus
+            selected_architect = self.plot_architect_large
+            model_name = "qwen3.5-plus"
+            logger.debug(f"🔄 检测到超大卷（{avg_chapters}章，约{estimated_words}字），固定使用 qwen3.5-plus 模型")
+            logger.debug("   💡 已禁用 qwen-long 回退，大卷仍只允许 qwen3.5-plus / DeepSeek")
         else:
             # 常规卷（≤80章）：使用 DeepSeek-R1（64K输出，质量更高）
             selected_architect = self.plot_architect_r1
@@ -2447,6 +2447,16 @@ Please输出完整的、重新整合后的网文大纲：
             chapter_numbers.append(chapter_number)
         return chapter_numbers
 
+    @classmethod
+    def _story_extract_rendered_volume_detail_chapter_range(
+        cls,
+        volume_content: str,
+    ) -> Tuple[int, int]:
+        chapter_numbers = cls._story_extract_rendered_volume_detail_chapter_numbers(volume_content)
+        if not chapter_numbers:
+            return (0, 0)
+        return (chapter_numbers[0], chapter_numbers[-1])
+
     @staticmethod
     def _story_expected_volume_detail_chapter_end(
         *,
@@ -2487,7 +2497,14 @@ Please输出完整的、重新整合后的网文大纲：
             start_chapter_num=expected_start,
             chapters_count_range=chapters_count_range,
         )
-        rendered_chapters = set(cls._story_extract_rendered_volume_detail_chapter_numbers(content))
+        rendered_chapter_numbers = cls._story_extract_rendered_volume_detail_chapter_numbers(content)
+        rendered_chapters = set(rendered_chapter_numbers)
+        actual_chapter_count = len(rendered_chapter_numbers)
+        try:
+            required_min_count = max(1, int(chapters_count_range[0] or 1))
+        except Exception:
+            required_min_count = 1
+        last_rendered_chapter = rendered_chapter_numbers[-1] if rendered_chapter_numbers else expected_start - 1
         shortcuts: List[Tuple[int, int]] = []
 
         for pattern in (VOLUME_DETAIL_RANGE_SHORTCUT_PATTERN, VOLUME_DETAIL_GROUP_RANGE_PATTERN):
@@ -2505,7 +2522,17 @@ Please输出完整的、重新整合后的网文大纲：
                 if overlap_start > overlap_end:
                     continue
 
-                if all(chapter_number in rendered_chapters for chapter_number in range(overlap_start, overlap_end + 1)):
+                missing_numbers = [
+                    chapter_number
+                    for chapter_number in range(overlap_start, overlap_end + 1)
+                    if chapter_number not in rendered_chapters
+                ]
+                if not missing_numbers:
+                    continue
+                if (
+                    actual_chapter_count >= required_min_count
+                    and all(chapter_number > last_rendered_chapter for chapter_number in missing_numbers)
+                ):
                     continue
 
                 shortcut = (range_start, range_end)
@@ -2679,11 +2706,34 @@ Please输出完整的、重新整合后的网文大纲：
         if not base_text:
             return base_text
 
+        supplement_text = str(supplement_content or "").strip()
+        if not supplement_text:
+            return base_text
+
         supplement_block_map = cls._story_extract_volume_detail_chapter_block_map(
-            supplement_content,
+            supplement_text,
             min_chapter_number=next_chapter_number,
             max_chapter_number=max_chapter_number,
         )
+        if not supplement_block_map:
+            try:
+                expected_max_count = (
+                    max(1, int(max_chapter_number or next_chapter_number) - int(next_chapter_number) + 1)
+                    if max_chapter_number is not None
+                    else 20
+                )
+            except Exception:
+                expected_max_count = 20
+            renumber_result = get_chapter_renumberer().detect_and_fix(
+                content=supplement_text,
+                expected_start=next_chapter_number,
+                expected_count_range=(1, expected_max_count),
+            )
+            supplement_block_map = cls._story_extract_volume_detail_chapter_block_map(
+                renumber_result.get("fixed_content") or supplement_text,
+                min_chapter_number=next_chapter_number,
+                max_chapter_number=max_chapter_number,
+            )
         if not supplement_block_map:
             return base_text
 
@@ -3158,6 +3208,49 @@ Please输出完整的、重新整合后的网文大纲：
             blocks.append("\n".join(lines))
 
         return "\n\n".join(blocks).strip(), names
+
+    @classmethod
+    def _story_parse_character_cards_response(
+        cls,
+        response_text: Any,
+        *,
+        existing_names: Optional[List[str]] = None,
+    ) -> Tuple[str, List[str], str]:
+        content = str(response_text or "").strip()
+        if not content:
+            return "", [], "empty"
+
+        payload = cls._story_extract_json(content)
+        if isinstance(payload, dict):
+            rendered_cards, names = cls._story_render_character_cards(payload.get("characters"))
+            if rendered_cards.strip():
+                return rendered_cards, names, "json"
+
+        parser = CharacterTextParser()
+        parsed_characters = parser.parse_all_characters(content)
+        if not parsed_characters:
+            return "", [], "empty"
+
+        existing_name_keys = {
+            normalize_character_name(name) or cls._story_normalize_name(name)
+            for name in (existing_names or [])
+            if str(name or "").strip()
+        }
+        rendered_blocks: List[str] = []
+        names: List[str] = []
+        seen_keys: set[str] = set()
+
+        for character in parsed_characters:
+            normalized_name = normalize_character_name(character.name) or cls._story_normalize_name(character.name)
+            if not normalized_name or normalized_name in existing_name_keys or normalized_name in seen_keys:
+                continue
+            seen_keys.add(normalized_name)
+            names.append(character.name)
+            rendered_blocks.append(cls._story_render_parsed_character_card(character))
+
+        if rendered_blocks:
+            return "\n\n".join(rendered_blocks).strip(), names, "raw_cards"
+        return "", [], "empty"
 
     @classmethod
     def _story_render_existing_character_patch(cls, payload: Dict[str, Any]) -> str:
@@ -3965,6 +4058,10 @@ Please输出完整的、重新整合后的网文大纲：
             ensure_ascii=False,
             indent=2,
         )
+        characters_excerpt = self._story_build_character_context(
+            characters,
+            detail_limit=CHARACTER_EXPANSION_CARD_CONTEXT_LIMIT,
+        ) or "（暂无人物体系）"
         chapter_user_prompt = f"""请基于当前大纲执行“常规协同”的纯章节式扩展。
 
 【协同模式约束】
@@ -3984,7 +4081,7 @@ Please输出完整的、重新整合后的网文大纲：
 {current_outline}
 
 【人物体系】
-{characters}
+{characters_excerpt}
 
 【世界观】
 {world_setting}
@@ -4163,12 +4260,57 @@ Please输出完整的、重新整合后的网文大纲：
 3. 每个新角色都必须承担明确剧情职责，至少与一个现有角色或主线冲突形成关系。
 4. 不要输出 Markdown，不要解释，只返回合法 JSON。"""
 
-        cards_payload = self._story_invoke_agent_json(
-            self.character_designer,
-            cards_prompt,
-            fallback={"characters": []},
+        cards_retry_used = False
+        cards_response = self.character_designer.process(cards_prompt, {})
+        new_cards, new_names, cards_response_mode = self._story_parse_character_cards_response(
+            cards_response,
+            existing_names=existing_names,
         )
-        new_cards, new_names = self._story_render_character_cards(cards_payload.get("characters"))
+        if characters_needed > 0 and not new_names:
+            cards_retry_used = True
+            retry_cards_response = self.character_designer.process(
+                cards_prompt
+                + f"""
+
+补充要求：
+1. 上次结果未识别到有效新增角色，本次必须至少补出 {characters_needed} 个新角色。
+2. 优先返回合法 JSON；如果仍无法稳定输出 JSON，允许直接输出标准人物卡正文，但每个新角色都必须以 `### 【姓名】：` 开头。
+3. 禁止只返回分析、建议、阵营标题或人物名单，必须给出可直接并入人物体系的完整角色卡。""",
+                {},
+            )
+            new_cards, new_names, cards_response_mode = self._story_parse_character_cards_response(
+                retry_cards_response,
+                existing_names=existing_names,
+            )
+        elif characters_needed > 0 and len(new_names) < characters_needed:
+            cards_retry_used = True
+            remaining_count = max(0, characters_needed - len(new_names))
+            recognized_names_text = "、".join(new_names) if new_names else "无"
+            retry_cards_response = self.character_designer.process(
+                cards_prompt
+                + f"""
+
+补充要求：
+1. 上次仅识别到 {len(new_names)} 个有效新增角色，仍缺 {remaining_count} 个。
+2. 本次只补足剩余 {remaining_count} 个新角色，禁止重复输出已经给出的角色：{recognized_names_text}。
+3. 优先返回合法 JSON；如果仍无法稳定输出 JSON，允许直接输出标准人物卡正文，但每个新角色都必须以 `### 【姓名】：` 开头。
+4. 禁止只返回分析、建议、阵营标题或人物名单，必须补齐可直接并入人物体系的完整角色卡。""",
+                {},
+            )
+            retry_cards, retry_names, retry_mode = self._story_parse_character_cards_response(
+                retry_cards_response,
+                existing_names=[*existing_names, *new_names],
+            )
+            if retry_cards.strip():
+                new_cards = (
+                    f"{new_cards.rstrip()}\n\n{retry_cards.strip()}"
+                    if new_cards.strip()
+                    else retry_cards.strip()
+                )
+            if retry_names:
+                new_names = list(dict.fromkeys([*new_names, *retry_names]))
+            if retry_mode and not cards_response_mode:
+                cards_response_mode = retry_mode
 
         new_cards_excerpt = self._story_build_character_context(
             new_cards,
@@ -4321,25 +4463,33 @@ Please输出完整的、重新整合后的网文大纲：
 3. 若大纲仍存在明显角色槽位缺口且目标人数未达到，可返回 true。
 4. “当前可确认人物数”只能按结构化人物卡数量计算，不要把关系网提及、补丁提及、阵营引用重复计入。"""
 
+        current_confirmed_count = max(
+            current_character_count + len(unique_new_names),
+            len(set(existing_names) | set(unique_new_names)),
+        )
         decision_payload = self._story_invoke_agent_json(
             self.character_designer,
             decision_prompt,
-            fallback={"should_continue": False, "reason": ""},
+            fallback={
+                "should_continue": bool(unique_new_names) and current_confirmed_count < target_count,
+                "reason": "",
+            },
         )
 
         return {
             "all_characters": merged_characters,
             "character_relationships": character_relationships,
             "role_distribution": role_distribution if isinstance(role_distribution, dict) else {},
-            "current_character_count": max(
-                current_character_count + len(unique_new_names),
-                len(set(existing_names) | set(unique_new_names)),
-            ),
+            "current_character_count": current_confirmed_count,
             "target_count": target_count,
             "should_continue": bool(decision_payload.get("should_continue", False)),
             "continue_reason": str(decision_payload.get("reason") or "").strip(),
             "should_optimize_first": False,
             "optimization_suggestions": [],
+            "cards_response_mode": cards_response_mode,
+            "cards_retry_used": cards_retry_used,
+            "recognized_new_character_count": len(unique_new_names),
+            "recognized_new_character_names": unique_new_names,
         }
 
     def generate_epic_framework(self, world_setting: str, characters: str,
@@ -4760,16 +4910,6 @@ Please输出完整的、重新整合后的网文大纲：
                 start_chapter_num=start_chapter_num,
                 chapters_count_range=chapters_count_range,
             )
-            fixed_range_after_repair = renumber_result.get("fixed_range") or (0, 0)
-            if (
-                not range_shortcuts
-                and fixed_range_after_repair[0] > 0
-                and fixed_range_after_repair[1] >= fixed_range_after_repair[0]
-            ):
-                actual_chapter_count = max(
-                    actual_chapter_count,
-                    fixed_range_after_repair[1] - fixed_range_after_repair[0] + 1,
-                )
 
         if range_shortcuts:
             missing_ranges = self._story_extract_missing_volume_detail_chapter_ranges(
@@ -4825,22 +4965,16 @@ Please输出完整的、重新整合后的网文大纲：
                     start_chapter_num=start_chapter_num,
                     chapters_count_range=chapters_count_range,
                 )
-                fixed_range_after_merge = renumber_result.get("fixed_range") or (0, 0)
-                if (
-                    not range_shortcuts
-                    and fixed_range_after_merge[0] > 0
-                    and fixed_range_after_merge[1] >= fixed_range_after_merge[0]
-                ):
-                    actual_chapter_count = max(
-                        actual_chapter_count,
-                        fixed_range_after_merge[1] - fixed_range_after_merge[0] + 1,
-                    )
                 if not range_shortcuts:
                     break
 
         if 0 < actual_chapter_count < chapters_count_range[0]:
-            fixed_range = renumber_result.get("fixed_range") or (0, 0)
-            last_chapter_num = fixed_range[1] if fixed_range[1] > 0 else start_chapter_num + actual_chapter_count - 1
+            rendered_chapter_range = self._story_extract_rendered_volume_detail_chapter_range(volume_content)
+            last_chapter_num = (
+                rendered_chapter_range[1]
+                if rendered_chapter_range[1] > 0
+                else start_chapter_num + actual_chapter_count - 1
+            )
             next_chapter_num = max(start_chapter_num, last_chapter_num + 1)
             required_last_chapter = start_chapter_num + chapters_count_range[0] - 1
             allowed_last_chapter = start_chapter_num + chapters_count_range[1] - 1
@@ -4884,16 +5018,69 @@ Please输出完整的、重新整合后的网文大纲：
                     start_chapter_num=start_chapter_num,
                     chapters_count_range=chapters_count_range,
                 )
-                fixed_range_after_tail_supplement = renumber_result.get("fixed_range") or (0, 0)
-                if (
-                    not range_shortcuts
-                    and fixed_range_after_tail_supplement[0] > 0
-                    and fixed_range_after_tail_supplement[1] >= fixed_range_after_tail_supplement[0]
+
+        if 0 < actual_chapter_count < chapters_count_range[0]:
+            minimum_missing_ranges = self._story_extract_missing_volume_detail_chapter_ranges(
+                volume_content,
+                start_chapter_num=start_chapter_num,
+                chapters_count_range=(chapters_count_range[0], chapters_count_range[0]),
+            )
+            chunked_minimum_missing_ranges = self._story_chunk_volume_detail_chapter_ranges(
+                minimum_missing_ranges,
+                chunk_size=15,
+            )
+            for missing_start, missing_end in chunked_minimum_missing_ranges:
+                if actual_chapter_count >= chapters_count_range[0]:
+                    break
+                rendered_chapters_now = set(self._story_extract_rendered_volume_detail_chapter_numbers(volume_content))
+                if all(
+                    chapter_number in rendered_chapters_now
+                    for chapter_number in range(missing_start, missing_end + 1)
                 ):
-                    actual_chapter_count = max(
-                        actual_chapter_count,
-                        fixed_range_after_tail_supplement[1] - fixed_range_after_tail_supplement[0] + 1,
-                    )
+                    continue
+                main_section_excerpt = self._story_truncate_text(
+                    self._story_extract_volume_detail_main_section(volume_content),
+                    limit=6000,
+                ) or "（当前正文规划区提取失败，请严格按框架补齐最低章节数要求所需的缺失章节。）"
+                minimum_prompt = f"""你上一版第{target_volume_index}卷细纲还没有达到最低章节数要求，第{missing_start}-{missing_end}章仍缺失。
+
+请不要重写整卷，只补写这段缺失章节：
+- 只输出第{missing_start}章到第{missing_end}章的章节区块
+- 不要重复已经写出的章节
+- 不要输出“故事概述 / 伏笔埋设检查 / 卷尾衔接检查 / 解释 / 代码块”
+- 这是为了补齐本卷至少 {chapters_count_range[0]} 章的最低要求，章号必须和前文连续衔接
+- 每一章都必须单独写出：场景目标、冲突设计、关键事件、涉及人物、人物推进、情节作用、结尾钩子；可选补充爽点类型、伏笔事项
+
+【当前卷框架摘要】
+{volume_outline_excerpt}
+
+【上一卷承接信息】
+{prev_volume_text}
+
+【当前已生成正文规划区摘录】
+{main_section_excerpt}
+"""
+                supplemented_content = self._story_merge_volume_detail_supplement(
+                    volume_content,
+                    supplement_architect.process(minimum_prompt, {}),
+                    next_chapter_number=missing_start,
+                    max_chapter_number=missing_end,
+                )
+                if supplemented_content == volume_content:
+                    continue
+                volume_content = supplemented_content
+                renumber_result = renumberer.detect_and_fix(
+                    content=volume_content,
+                    expected_start=start_chapter_num,
+                    expected_count_range=chapters_count_range,
+                )
+                volume_content = renumber_result["fixed_content"]
+                actual_chapter_count = self._story_count_rendered_volume_detail_chapters(volume_content)
+                range_shortcuts = self._story_find_volume_detail_range_shortcuts(
+                    volume_content,
+                    start_chapter_num=start_chapter_num,
+                    chapters_count_range=chapters_count_range,
+                )
 
         if range_shortcuts:
             shortcut_text = "、".join(f"第{start}-{end}章" for start, end in range_shortcuts)
@@ -4918,14 +5105,14 @@ Please输出完整的、重新整合后的网文大纲：
             framework_content=framework_content,
         )
         validation_dict = validation_result.to_dict()
-        fixed_range = renumber_result.get("fixed_range") or (0, 0)
-        chapters_start = fixed_range[0] if fixed_range[0] > 0 else start_chapter_num
-        chapters_end = fixed_range[1] if fixed_range[1] > 0 else start_chapter_num + max(actual_chapter_count, 1) - 1
+        rendered_chapter_range = self._story_extract_rendered_volume_detail_chapter_range(volume_content)
+        chapters_start = rendered_chapter_range[0] if rendered_chapter_range[0] > 0 else start_chapter_num
+        chapters_end = (
+            rendered_chapter_range[1]
+            if rendered_chapter_range[1] > 0
+            else start_chapter_num + max(actual_chapter_count, 1) - 1
+        )
         actual_count = actual_chapter_count
-        if chapters_end >= chapters_start:
-            normalized_count = chapters_end - chapters_start + 1
-            if normalized_count == actual_chapter_count:
-                actual_count = normalized_count
 
         return {
             "expanded_outline": volume_content,

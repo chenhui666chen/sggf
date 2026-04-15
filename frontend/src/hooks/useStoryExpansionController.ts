@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { StoryExpansionDialogProps } from '@/components/workflow/StoryExpansionDialog'
 import type {
@@ -10,6 +10,11 @@ import type { StoryExpansionEntryPoint } from '@/utils/storyExpansionDefaults'
 import { getStoryExpansionSummary } from '@/utils/storyExpansionFeedback'
 import { getStoryExpansionResultLabels } from '@/utils/storyExpansionLabels'
 import type { StoryExpansionRecommendation } from '@/utils/storyExpansionRecommendation'
+import type { StoryExpansionConfirmDialogConfig } from '@/utils/storyExpansionSubmission'
+import {
+  formatStoryExpansionDurationRange,
+  formatStoryExpansionElapsedDuration,
+} from '@/utils/storyExpansionTiming'
 import { useStoryExpansionComposer } from '@/hooks/useStoryExpansionComposer'
 import { useStoryExpansionSubmit } from '@/hooks/useStoryExpansionSubmit'
 import { useStoryExpansionTask } from '@/hooks/useStoryExpansionTask'
@@ -30,6 +35,10 @@ interface UseStoryExpansionControllerReturn {
   expandingStory: boolean
   hasStoryExpansionResult: boolean
   showStoryExpansionDialog: boolean
+  storyExpansionWaitInfo: {
+    summary: string
+    detail: string
+  } | null
   openStoryExpansion: (entryPoint?: StoryExpansionEntryPoint) => Promise<void>
   openStoryExpansionResultDialog: () => void
   storyExpansionDialogProps: StoryExpansionDialogProps
@@ -47,6 +56,10 @@ export function useStoryExpansionController({
   refreshWorkflowData,
   showSnackbar,
 }: UseStoryExpansionControllerOptions): UseStoryExpansionControllerReturn {
+  const [storyExpansionConfirmDialog, setStoryExpansionConfirmDialog] =
+    useState<StoryExpansionConfirmDialogConfig | null>(null)
+  const storyExpansionConfirmResolverRef = useRef<((confirmed: boolean) => void) | null>(null)
+
   const {
     showStoryExpansionDialog,
     closeStoryExpansionDialog,
@@ -71,6 +84,8 @@ export function useStoryExpansionController({
     showStoryExpansionResultDialog,
     setShowStoryExpansionResultDialog,
     storyExpansionResult,
+    storyExpansionTaskEstimate,
+    storyExpansionElapsedMs,
     beginStoryExpansionRequest,
     handleStoryExpansionTaskStarted,
     handleStoryExpansionTaskFailure,
@@ -80,6 +95,32 @@ export function useStoryExpansionController({
     refreshFramework: loadEpicFramework,
     showSnackbar,
   })
+
+  const resolveStoryExpansionConfirm = useCallback((confirmed: boolean) => {
+    const pendingResolver = storyExpansionConfirmResolverRef.current
+    storyExpansionConfirmResolverRef.current = null
+    setStoryExpansionConfirmDialog(null)
+    pendingResolver?.(confirmed)
+  }, [])
+
+  const requestStoryExpansionConfirm = useCallback((confirmDialog: StoryExpansionConfirmDialogConfig) => (
+    new Promise<boolean>((resolve) => {
+      storyExpansionConfirmResolverRef.current?.(false)
+      storyExpansionConfirmResolverRef.current = resolve
+      setStoryExpansionConfirmDialog(confirmDialog)
+    })
+  ), [])
+
+  useEffect(() => () => {
+    storyExpansionConfirmResolverRef.current?.(false)
+    storyExpansionConfirmResolverRef.current = null
+  }, [])
+
+  useEffect(() => {
+    if (!showStoryExpansionDialog && storyExpansionConfirmResolverRef.current) {
+      resolveStoryExpansionConfirm(false)
+    }
+  }, [resolveStoryExpansionConfirm, showStoryExpansionDialog])
 
   const { handleExpandStory } = useStoryExpansionSubmit({
     projectId,
@@ -93,6 +134,7 @@ export function useStoryExpansionController({
     form: dialogForm,
     requestControls,
     analysis: dialogContext.analysis,
+    confirmAction: requestStoryExpansionConfirm,
     lifecycle: {
       beginStoryExpansionRequest,
       closeStoryExpansionDialog,
@@ -116,6 +158,41 @@ export function useStoryExpansionController({
     setShowStoryExpansionResultDialog(true)
   }, [setShowStoryExpansionResultDialog])
 
+  const storyExpansionWaitInfo = useMemo(() => {
+    if (!expandingStory) {
+      return null
+    }
+
+    const durationText = formatStoryExpansionDurationRange(
+      storyExpansionTaskEstimate?.estimated_duration_minutes_min ?? null,
+      storyExpansionTaskEstimate?.estimated_duration_minutes_max ?? null,
+    )
+    const waitHint = typeof storyExpansionTaskEstimate?.wait_hint === 'string'
+      ? storyExpansionTaskEstimate.wait_hint.trim()
+      : ''
+    const elapsedText = storyExpansionElapsedMs != null
+      ? formatStoryExpansionElapsedDuration(storyExpansionElapsedMs)
+      : ''
+
+    return {
+      summary: durationText
+        ? `协同扩展正在执行，预计耗时 ${durationText}`
+        : '协同扩展正在执行，长任务属于正常现象',
+      detail: [
+        elapsedText ? `已等待 ${elapsedText}` : '',
+        durationText ? `预估区间 ${durationText}` : '',
+        waitHint,
+        '刷新页面后会继续尝试恢复任务状态',
+      ].filter(Boolean).join('，'),
+    }
+  }, [
+    expandingStory,
+    storyExpansionElapsedMs,
+    storyExpansionTaskEstimate?.estimated_duration_minutes_max,
+    storyExpansionTaskEstimate?.estimated_duration_minutes_min,
+    storyExpansionTaskEstimate?.wait_hint,
+  ])
+
   const storyExpansionDialogHandlers = useMemo<StoryExpansionDialogHandlers>(() => ({
     onClose: closeStoryExpansionDialog,
     ...dialogFormHandlers,
@@ -134,11 +211,16 @@ export function useStoryExpansionController({
     context: dialogContext,
     form: dialogForm,
     handlers: storyExpansionDialogHandlers,
+    confirmDialog: storyExpansionConfirmDialog,
+    onConfirmDialogClose: () => resolveStoryExpansionConfirm(false),
+    onConfirmDialogConfirm: () => resolveStoryExpansionConfirm(true),
   }), [
+    resolveStoryExpansionConfirm,
     dialogContext,
     dialogForm,
     expandingStory,
     showStoryExpansionDialog,
+    storyExpansionConfirmDialog,
     storyExpansionDialogHandlers,
   ])
 
@@ -170,6 +252,7 @@ export function useStoryExpansionController({
     expandingStory,
     hasStoryExpansionResult: storyExpansionResult !== null,
     showStoryExpansionDialog,
+    storyExpansionWaitInfo,
     openStoryExpansion,
     openStoryExpansionResultDialog,
     storyExpansionDialogProps,

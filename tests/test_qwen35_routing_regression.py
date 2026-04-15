@@ -71,6 +71,40 @@ def test_qwen35_plus_has_adapter_and_outline_expand_routes_to_plus() -> None:
     assert resolve_model_for_task("review", None) == "deepseek-reasoner"
 
 
+def test_story_expansion_routes_only_to_deepseek_and_qwen35_plus() -> None:
+    from core.model_runtime import resolve_model_for_task
+    from core.model_hub import model_hub
+
+    expected_routes = {
+        "concept": "qwen3.5-plus",
+        "outline_expand": "qwen3.5-plus",
+        "character": "deepseek-reasoner",
+        "character_expand": "deepseek-reasoner",
+        "volume_detail_expand": "deepseek-reasoner",
+    }
+
+    for task_type, expected_model in expected_routes.items():
+        assert resolve_model_for_task(task_type, None) == expected_model
+
+    qwen35_spec = model_hub.registry.get_spec("qwen3.5-plus")
+    deepseek_reasoner_spec = model_hub.registry.get_spec("deepseek-reasoner")
+    deepseek_chat_spec = model_hub.registry.get_spec("deepseek-chat")
+    qwen_max_spec = model_hub.registry.get_spec("qwen3-max")
+    qwen_long_spec = model_hub.registry.get_spec("qwen-long")
+
+    assert qwen35_spec is not None
+    assert deepseek_reasoner_spec is not None
+    assert deepseek_chat_spec is not None
+    assert qwen_max_spec is not None
+    assert qwen_long_spec is not None
+
+    assert qwen35_spec.routing.fallback_models == ["deepseek-chat"]
+    assert deepseek_reasoner_spec.routing.fallback_models == ["qwen3.5-plus"]
+    assert deepseek_chat_spec.routing.fallback_models == ["qwen3.5-plus"]
+    assert "concept" not in qwen_max_spec.routing.task_types
+    assert "outline_expand" not in qwen_long_spec.routing.task_types
+
+
 class _FakeLLMClient:
     def __init__(self) -> None:
         self.calls: List[Dict[str, Any]] = []

@@ -179,12 +179,14 @@ async def _chat_once(
     model: str,
     messages: List[Dict[str, Any]],
     temperature: float,
+    timeout_s: int,
 ) -> str:
     client = get_llm_client(strategy="auto")
     return await client.chat(
         messages=messages,  # type: ignore[arg-type]
         model=model,
         temperature=temperature,
+        timeout=timeout_s,
     )
 
 
@@ -193,6 +195,7 @@ async def _chat_stream_once(
     model: str,
     messages: List[Dict[str, Any]],
     temperature: float,
+    timeout_s: int,
     on_chunk: Callable[[str, int], None],
 ) -> str:
     client = get_llm_client(strategy="auto")
@@ -207,6 +210,7 @@ async def _chat_stream_once(
         messages=messages,  # type: ignore[arg-type]
         model=model,
         temperature=temperature,
+        timeout=timeout_s,
         on_chunk=relay,
     )
 
@@ -222,15 +226,17 @@ def chat_completions(
     on_chunk: Optional[Callable[[str, int], None]] = None,
     stream: Optional[bool] = None,
 ) -> str:
-    del api_key, base_url, timeout_s
+    del api_key, base_url
 
     selected_model = normalize_model_id(model) or model
+    effective_timeout_s = max(1, int(timeout_s))
     if on_chunk and stream is not False:
         return run_async_compat(
             lambda: _chat_stream_once(
                 model=selected_model,
                 messages=messages,
                 temperature=temperature,
+                timeout_s=effective_timeout_s,
                 on_chunk=on_chunk,
             )
         )
@@ -240,6 +246,7 @@ def chat_completions(
             model=selected_model,
             messages=messages,
             temperature=temperature,
+            timeout_s=effective_timeout_s,
         )
     )
 

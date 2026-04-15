@@ -3,6 +3,7 @@ import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
 import { Box, Typography, Divider, Paper } from '@mui/material'
 import type { Components } from 'react-markdown'
+import { normalizeMarkdownContent } from '@/utils/normalizeMarkdownContent'
 
 interface MarkdownRendererProps {
   content: string
@@ -248,8 +249,8 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
     return null
   }
 
-  // 🌟 预处理：清理多余空行（将3个以上连续换行压缩为2个）
-  const cleanedContent = content.replace(/\n{3,}/g, '\n\n')
+  // 预处理：统一混合 Markdown/纯文本大纲格式，避免卷标题和字段黏连成一个段落
+  const cleanedContent = normalizeMarkdownContent(content)
 
   return (
     <Box
@@ -300,4 +301,3 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
     </Box>
   )
 }
-

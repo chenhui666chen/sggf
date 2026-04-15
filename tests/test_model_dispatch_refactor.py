@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -37,6 +38,61 @@ async def test_unified_llm_client_normalizes_aliases() -> None:
     assert mocked_call.await_args.kwargs["model"] == "deepseek-reasoner"
 
 
+def test_agents_llm_client_forwards_timeout_to_chat() -> None:
+    from agents.llm_client import chat_completions
+
+    captured: dict[str, object] = {}
+
+    class _FakeClient:
+        async def chat(self, **kwargs: object) -> str:
+            captured.update(kwargs)
+            return "ok"
+
+    with patch("agents.llm_client.get_llm_client", return_value=_FakeClient()):
+        content = chat_completions(
+            api_key="test-key",
+            base_url="https://example.test/v1",
+            model="qwen3.5-plus",
+            messages=[{"role": "user", "content": "hello"}],
+            timeout_s=321,
+        )
+
+    assert content == "ok"
+    assert captured["timeout"] == 321
+
+
+def test_agents_llm_client_forwards_timeout_to_chat_stream() -> None:
+    from agents.llm_client import chat_completions
+
+    captured: dict[str, object] = {}
+    streamed_chunks: list[str] = []
+
+    class _FakeClient:
+        async def chat_stream(self, **kwargs: object) -> str:
+            captured.update(kwargs)
+            on_chunk = kwargs.get("on_chunk")
+            assert callable(on_chunk)
+            await on_chunk("chunk")  # type: ignore[misc]
+            return "stream-ok"
+
+    def _on_chunk(text: str, idx: int) -> None:
+        streamed_chunks.append(f"{idx}:{text}")
+
+    with patch("agents.llm_client.get_llm_client", return_value=_FakeClient()):
+        content = chat_completions(
+            api_key="test-key",
+            base_url="https://example.test/v1",
+            model="qwen3.5-plus",
+            messages=[{"role": "user", "content": "hello"}],
+            timeout_s=654,
+            on_chunk=_on_chunk,
+        )
+
+    assert content == "stream-ok"
+    assert captured["timeout"] == 654
+    assert streamed_chunks == ["0:chunk"]
+
+
 def test_langchain_bridge_routes_through_model_hub() -> None:
     from core.langchain_bridge import create_task_llm
 
@@ -68,22 +124,23 @@ def test_create_model_llm_resolves_catalog_guarded_model_at_construction(
     from core.unified_registry import UnifiedModelRegistry
     from schemas.unified_model_spec import UnifiedModelSpec, ModelType, APIConfig, RoutingConfig
 
+    recent_verified_at = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
     snapshot_path = tmp_path / "model_catalog_runtime.json"
     snapshot_path.write_text(
-        """
-{
+        f"""
+{{
   "version": 1,
-  "entries": {
-    "failed-model": {
+  "entries": {{
+    "failed-model": {{
       "verification_status": "failed",
-      "last_verified_at": "2026-03-21T00:00:00+00:00"
-    },
-    "healthy-model": {
+      "last_verified_at": "{recent_verified_at}"
+    }},
+    "healthy-model": {{
       "verification_status": "verified",
-      "last_verified_at": "2026-03-21T00:00:00+00:00"
-    }
-  }
-}
+      "last_verified_at": "{recent_verified_at}"
+    }}
+  }}
+}}
         """.strip(),
         encoding="utf-8",
     )

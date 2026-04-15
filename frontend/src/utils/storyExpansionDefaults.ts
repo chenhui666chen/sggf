@@ -48,22 +48,20 @@ export interface StoryExpansionDialogDefaults extends StoryExpansionDefaults {
 }
 
 const MIN_EPIC_TOTAL_CHAPTERS = 300
+const DEFAULT_VOLUME_DETAIL_CHAPTERS_MIN = 60
+const DEFAULT_VOLUME_DETAIL_CHAPTERS_MAX = 80
 
 function getSafeConfiguredNumber(value: number, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? value : fallback
 }
 
 function getDefaultVolumeChapterWindow(
-  recommendedChaptersPerVolumeMin: number,
-  recommendedChaptersPerVolumeMax: number,
+  _recommendedChaptersPerVolumeMin: number,
+  _recommendedChaptersPerVolumeMax: number,
 ): { min: number; max: number } {
-  const safeMin = getSafeConfiguredNumber(recommendedChaptersPerVolumeMin, 20)
-  const safeMax = Math.max(safeMin, getSafeConfiguredNumber(recommendedChaptersPerVolumeMax, safeMin))
-  const normalizedMin = Math.max(20, Math.min(40, safeMin))
-  const normalizedMax = Math.max(normalizedMin, Math.min(60, safeMax))
   return {
-    min: normalizedMin,
-    max: normalizedMax,
+    min: DEFAULT_VOLUME_DETAIL_CHAPTERS_MIN,
+    max: DEFAULT_VOLUME_DETAIL_CHAPTERS_MAX,
   }
 }
 
@@ -99,14 +97,13 @@ export function resolveStoryExpansionDefaults(
     entryPoint,
     recommendedMode,
     frameworkMetadata,
-    currentCharacterCount,
   } = input
 
   if (frameworkMetadata?.has_framework) {
     return {
       expansionMode: 'volume_detail',
       targetChapterCount: null,
-      targetCharacterCount: currentCharacterCount,
+      targetCharacterCount: null,
       targetVolumeIndex: getPreferredStoryVolumeIndex(frameworkMetadata),
     }
   }
@@ -186,7 +183,7 @@ export function resolveStoryExpansionModeDefaults(
       ...baseDefaults,
       expansionMode: 'volume_detail',
       targetChapterCount: null,
-      targetCharacterCount: input.currentCharacterCount,
+      targetCharacterCount: null,
       targetVolumeIndex: getPreferredStoryVolumeIndex(input.frameworkMetadata),
     }
   }

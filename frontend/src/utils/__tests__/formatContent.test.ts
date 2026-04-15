@@ -76,6 +76,19 @@ describe('formatContent', () => {
       expect(result).toContain('第一段')
       expect(result).toContain('第二段')
     })
+
+    it('应该将分卷标题识别为独立块级标题', () => {
+      const input = `## 五、分卷规划（共3卷）
+【第1卷】 枯荣逆旅
+下卷交接：地脉波动引来赤发老鬼的贪念与天律盟的正式调查。
+【第2卷】 黑松诡影
+章节规模：60-80章`
+      const result = formatMarkdownToHtml(input)
+
+      expect(result).toContain('>【第1卷】 枯荣逆旅</h3>')
+      expect(result).toContain('>【第2卷】 黑松诡影</h3>')
+      expect(result).not.toContain('下卷交接：地脉波动引来赤发老鬼的贪念与天律盟的正式调查。<br />【第2卷】 黑松诡影')
+    })
   })
 
   describe('formatSimpleText', () => {

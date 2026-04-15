@@ -2,6 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 
 import { workflowWebSocket } from '@/services/websocket'
+import type {
+  StoryExpansionAnalysis,
+  StoryExpansionResult,
+  StoryExpansionTaskMeta,
+} from '@/types/storyExpansion'
 import { buildStoryExpansionCompletionMessage } from '@/utils/storyExpansionFeedback'
 import {
   getStoryExpansionResultFromTaskComplete,
@@ -13,10 +18,12 @@ import {
   coerceStoryExpansionResult,
   getStoryExpansionStorageKeys,
   parseStoredStoryExpansionResult,
+  parseStoredStoryExpansionTaskMeta,
+  persistStoryExpansionTaskMeta,
   persistStoryExpansionTaskPersistence,
   storeStoryExpansionResult,
 } from '@/utils/storyExpansionStorage'
-import type { StoryExpansionResult } from '@/types/storyExpansion'
+import { getStoryExpansionTaskMeta } from '@/utils/storyExpansionTiming'
 
 interface UseStoryExpansionTaskOptions {
   projectId?: string
@@ -30,7 +37,10 @@ interface UseStoryExpansionTaskReturn {
   showStoryExpansionResultDialog: boolean
   setShowStoryExpansionResultDialog: Dispatch<SetStateAction<boolean>>
   storyExpansionResult: StoryExpansionResult | null
-  beginStoryExpansionRequest: () => void
+  storyExpansionTaskEstimate: StoryExpansionTaskMeta | null
+  storyExpansionTaskStartedAt: number | null
+  storyExpansionElapsedMs: number | null
+  beginStoryExpansionRequest: (analysis?: StoryExpansionAnalysis | null) => void
   handleStoryExpansionTaskStarted: (taskId: string | null | undefined) => void
   handleStoryExpansionTaskFailure: (message: string) => void
 }
@@ -41,7 +51,7 @@ interface StoryTaskStatusResponse {
   error?: unknown
 }
 
-const STORY_TASK_TIMEOUT_MS = 30 * 60 * 1000
+const STORY_EXPANSION_RECOVERY_MISSING_TASK_ID_MESSAGE = '协同扩展任务无法恢复，请重新发起'
 
 export function useStoryExpansionTask({
   projectId,
@@ -52,11 +62,16 @@ export function useStoryExpansionTask({
   const [expandingStory, setExpandingStory] = useState(false)
   const [showStoryExpansionResultDialog, setShowStoryExpansionResultDialog] = useState(false)
   const [storyExpansionResult, setStoryExpansionResult] = useState<StoryExpansionResult | null>(null)
+  const [storyExpansionTaskEstimate, setStoryExpansionTaskEstimate] = useState<StoryExpansionTaskMeta | null>(null)
+  const [storyExpansionTaskStartedAt, setStoryExpansionTaskStartedAt] = useState<number | null>(null)
+  const [storyExpansionElapsedTick, setStoryExpansionElapsedTick] = useState(() => Date.now())
 
   const refreshWorkflowDataRef = useRef(refreshWorkflowData)
   const refreshFrameworkRef = useRef(refreshFramework)
   const showSnackbarRef = useRef(showSnackbar)
   const activeTaskIdRef = useRef<string | null>(null)
+  const activeTaskStartedAtRef = useRef<number | null>(null)
+  const activeTaskEstimateRef = useRef<StoryExpansionTaskMeta | null>(null)
 
   useEffect(() => {
     refreshWorkflowDataRef.current = refreshWorkflowData
@@ -74,6 +89,37 @@ export function useStoryExpansionTask({
     void Promise.resolve(action()).catch(() => undefined)
   }, [])
 
+  const resetStoryExpansionTaskTracking = useCallback(() => {
+    activeTaskIdRef.current = null
+    activeTaskStartedAtRef.current = null
+    activeTaskEstimateRef.current = null
+    setStoryExpansionTaskStartedAt(null)
+    setStoryExpansionTaskEstimate(null)
+    setStoryExpansionElapsedTick(Date.now())
+  }, [])
+
+  const storyExpansionElapsedMs = (
+    expandingStory
+    && storyExpansionTaskStartedAt != null
+  )
+    ? Math.max(0, storyExpansionElapsedTick - storyExpansionTaskStartedAt)
+    : null
+
+  useEffect(() => {
+    if (!expandingStory || storyExpansionTaskStartedAt == null) {
+      return
+    }
+
+    setStoryExpansionElapsedTick(Date.now())
+    const intervalId = window.setInterval(() => {
+      setStoryExpansionElapsedTick(Date.now())
+    }, 30_000)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [expandingStory, storyExpansionTaskStartedAt])
+
   const resolveStoryExpansionResult = useCallback((payload: unknown): StoryExpansionResult | null => {
     if (typeof payload === 'string') {
       try {
@@ -90,7 +136,7 @@ export function useStoryExpansionTask({
     resultData: StoryExpansionResult,
     fallbackMessage = '协同扩展已完成',
   ) => {
-    activeTaskIdRef.current = null
+    resetStoryExpansionTaskTracking()
     setStoryExpansionResult(resultData)
     setShowStoryExpansionResultDialog(true)
     setExpandingStory(false)
@@ -107,12 +153,12 @@ export function useStoryExpansionTask({
       ? resultData.message.trim()
       : fallbackMessage
     showSnackbarRef.current(buildStoryExpansionCompletionMessage(baseMessage, resultData), 'success')
-  }, [projectId, triggerRefreshSafely])
+  }, [projectId, resetStoryExpansionTaskTracking, triggerRefreshSafely])
 
   const handleStoryExpansionTaskResultParseFailure = useCallback((
     message = '协同扩展已完成，但结果解析失败，已刷新最新数据',
   ) => {
-    activeTaskIdRef.current = null
+    resetStoryExpansionTaskTracking()
     setExpandingStory(false)
 
     if (projectId) {
@@ -122,23 +168,33 @@ export function useStoryExpansionTask({
     triggerRefreshSafely(() => refreshWorkflowDataRef.current())
     triggerRefreshSafely(() => refreshFrameworkRef.current())
     showSnackbarRef.current(message, 'error')
-  }, [projectId, triggerRefreshSafely])
+  }, [projectId, resetStoryExpansionTaskTracking, triggerRefreshSafely])
 
   const handleStoryExpansionTaskFailure = useCallback((message: string) => {
-    activeTaskIdRef.current = null
+    resetStoryExpansionTaskTracking()
     setExpandingStory(false)
     if (projectId) {
       clearStoryExpansionTaskPersistence(projectId)
     }
     showSnackbarRef.current(message, 'error')
-  }, [projectId])
+  }, [projectId, resetStoryExpansionTaskTracking])
 
-  const beginStoryExpansionRequest = useCallback(() => {
+  const beginStoryExpansionRequest = useCallback((analysis?: StoryExpansionAnalysis | null) => {
+    const startedAt = Date.now()
+    const taskEstimate = getStoryExpansionTaskMeta(analysis)
+
     activeTaskIdRef.current = null
+    activeTaskStartedAtRef.current = startedAt
+    activeTaskEstimateRef.current = taskEstimate
+    setStoryExpansionTaskStartedAt(startedAt)
+    setStoryExpansionTaskEstimate(taskEstimate)
+    setStoryExpansionElapsedTick(startedAt)
 
     if (projectId) {
       clearStoredStoryExpansionResult(projectId)
       clearStoryExpansionTaskPersistence(projectId)
+      persistStoryExpansionTaskPersistence(projectId, null, startedAt)
+      persistStoryExpansionTaskMeta(projectId, taskEstimate)
     }
 
     setStoryExpansionResult(null)
@@ -150,13 +206,18 @@ export function useStoryExpansionTask({
     const normalizedTaskId = typeof taskId === 'string' && taskId.trim()
       ? taskId.trim()
       : null
+    const startedAt = activeTaskStartedAtRef.current ?? Date.now()
 
     activeTaskIdRef.current = normalizedTaskId
+    activeTaskStartedAtRef.current = startedAt
+    setStoryExpansionTaskStartedAt(startedAt)
 
     if (!projectId) {
       return
     }
-    persistStoryExpansionTaskPersistence(projectId, normalizedTaskId)
+
+    persistStoryExpansionTaskPersistence(projectId, normalizedTaskId, startedAt)
+    persistStoryExpansionTaskMeta(projectId, activeTaskEstimateRef.current)
   }, [projectId])
 
   const fetchTaskStatus = useCallback(async (taskId: string): Promise<StoryTaskStatusResponse | null> => {
@@ -213,7 +274,7 @@ export function useStoryExpansionTask({
 
   useEffect(() => {
     if (!projectId) {
-      activeTaskIdRef.current = null
+      resetStoryExpansionTaskTracking()
       return
     }
 
@@ -221,25 +282,31 @@ export function useStoryExpansionTask({
     const savedStoryState = localStorage.getItem(storyStorageKeys.taskState)
     const storyStartTime = localStorage.getItem(storyStorageKeys.taskStartedAt)
     const storyTaskIdRaw = localStorage.getItem(storyStorageKeys.taskId)
+    const savedTaskMeta = parseStoredStoryExpansionTaskMeta(localStorage.getItem(storyStorageKeys.taskMeta))
     const storyTaskId = typeof storyTaskIdRaw === 'string' && storyTaskIdRaw.trim()
       ? storyTaskIdRaw.trim()
       : null
+    const parsedStoryStartedAt = storyStartTime
+      ? Number.parseInt(storyStartTime, 10)
+      : Number.NaN
+    const storyStartedAt = Number.isFinite(parsedStoryStartedAt)
+      ? parsedStoryStartedAt
+      : null
 
     activeTaskIdRef.current = storyTaskId
+    activeTaskStartedAtRef.current = storyStartedAt
+    activeTaskEstimateRef.current = savedTaskMeta
+    setStoryExpansionTaskStartedAt(storyStartedAt)
+    setStoryExpansionTaskEstimate(savedTaskMeta)
+    setStoryExpansionElapsedTick(Date.now())
 
-    const now = Date.now()
     if (savedStoryState === 'true') {
-      if (storyStartTime) {
-        const elapsed = now - Number.parseInt(storyStartTime, 10)
-        if (elapsed > STORY_TASK_TIMEOUT_MS) {
-          clearStoryExpansionTaskPersistence(projectId)
-          activeTaskIdRef.current = null
-          showSnackbarRef.current('协同扩展任务已超时，请重新发起', 'error')
-        } else {
-          setExpandingStory(true)
-        }
-      } else {
+      if (storyTaskId) {
         setExpandingStory(true)
+      } else {
+        clearStoryExpansionTaskPersistence(projectId)
+        resetStoryExpansionTaskTracking()
+        showSnackbarRef.current(STORY_EXPANSION_RECOVERY_MISSING_TASK_ID_MESSAGE, 'error')
       }
     }
 
@@ -265,10 +332,14 @@ export function useStoryExpansionTask({
         return
       }
 
-      applyRecoveredTaskStatus(statusData, {
+      const resolved = applyRecoveredTaskStatus(statusData, {
         successMessage: '协同扩展完成',
         parseFailureMessage: '协同扩展已完成，但结果解析失败，已刷新最新数据',
       })
+
+      if (!resolved && !cancelled) {
+        setExpandingStory(true)
+      }
     }
 
     void recoverStoryIfDone()
@@ -276,7 +347,7 @@ export function useStoryExpansionTask({
     return () => {
       cancelled = true
     }
-  }, [applyRecoveredTaskStatus, fetchTaskStatus, projectId])
+  }, [applyRecoveredTaskStatus, fetchTaskStatus, projectId, resetStoryExpansionTaskTracking])
 
   useEffect(() => {
     if (!projectId) {
@@ -371,6 +442,9 @@ export function useStoryExpansionTask({
     showStoryExpansionResultDialog,
     setShowStoryExpansionResultDialog,
     storyExpansionResult,
+    storyExpansionTaskEstimate,
+    storyExpansionTaskStartedAt,
+    storyExpansionElapsedMs,
     beginStoryExpansionRequest,
     handleStoryExpansionTaskStarted,
     handleStoryExpansionTaskFailure,

@@ -903,7 +903,7 @@ class StoryExpansionCoordinator:
         volume_detail_config: Optional[Dict[str, Any]] = None,
     ) -> str:
         if execution_mode == "epic":
-            return self._estimate_stage_model("concept", "qwen3-max")
+            return self._estimate_stage_model("concept", "qwen3.5-plus")
         if execution_mode == "volume_detail":
             chapter_range = None
             if isinstance(volume_detail_config, dict):
@@ -912,7 +912,7 @@ class StoryExpansionCoordinator:
         return self._estimate_context_model("outline_expand", target_chapter_count, "qwen3.5-plus")
 
     def _estimate_character_model_for_plan(self, target_character_count: int) -> str:
-        return self._estimate_context_model("character_expand", target_character_count, "qwen3.5-plus")
+        return self._estimate_context_model("character_expand", target_character_count, "deepseek-reasoner")
 
     def _estimate_character_density_multiplier(self) -> float:
         genre_text = normalize_story_text(self.genre or "").lower()
@@ -1042,6 +1042,132 @@ class StoryExpansionCoordinator:
                 ),
             )
         return max(2, min(self.AUTO_CHARACTER_INCREMENT_SOFT_CAP, int(math.ceil(effective_delta / 6))))
+
+    @staticmethod
+    def _resolve_volume_detail_target_span(volume_detail_config: Optional[Dict[str, Any]]) -> int:
+        normalized = StoryExpansionCoordinator._normalize_volume_detail_config(volume_detail_config)
+        chapter_window = normalized.get("chapters_count_range")
+        if isinstance(chapter_window, tuple) and len(chapter_window) == 2:
+            try:
+                lower = max(1, int(chapter_window[0]))
+                upper = max(lower, int(chapter_window[1]))
+                return upper
+            except Exception:
+                pass
+
+        chapter_range = normalized.get("expected_chapter_range")
+        if isinstance(chapter_range, tuple) and len(chapter_range) == 2:
+            try:
+                start = int(chapter_range[0])
+                end = int(chapter_range[1])
+                return max(1, end - start + 1)
+            except Exception:
+                pass
+
+        expected_total = max(0, int(normalized.get("expected_total_chapter_count") or 0))
+        current_total = max(0, int(normalized.get("current_total_chapter_count") or 0))
+        if expected_total > current_total:
+            return expected_total - current_total
+
+        return 0
+
+    def _build_volume_detail_reference_text(
+        self,
+        volume_detail_config: Optional[Dict[str, Any]],
+    ) -> str:
+        normalized = self._normalize_volume_detail_config(volume_detail_config)
+        parts: List[str] = []
+
+        existing_volume_detail = str(normalized.get("existing_volume_detail") or "").strip()
+        if existing_volume_detail:
+            parts.append(existing_volume_detail)
+
+        target_volume_index = normalized.get("target_volume_index")
+        volumes_data = normalized.get("volumes_data")
+        if isinstance(volumes_data, dict) and target_volume_index:
+            volume_data = ((volumes_data.get("volumes") or {}) or {}).get(str(target_volume_index)) or {}
+            for key in ("title", "summary", "detail"):
+                value = str(volume_data.get(key) or "").strip()
+                if value:
+                    parts.append(value)
+
+        if not parts:
+            framework_content = str(normalized.get("framework_content") or "").strip()
+            if framework_content:
+                parts.append(framework_content)
+
+        deduped_parts: List[str] = []
+        seen = set()
+        for value in parts:
+            normalized_value = normalize_story_text(value or "").strip()
+            if not normalized_value or normalized_value in seen:
+                continue
+            seen.add(normalized_value)
+            deduped_parts.append(normalized_value)
+
+        return "\n\n".join(deduped_parts)
+
+    def _estimate_volume_detail_auto_character_increment(
+        self,
+        *,
+        current_character_count: int,
+        characters_text: str,
+        volume_detail_config: Optional[Dict[str, Any]],
+    ) -> Dict[str, int]:
+        volume_span = max(0, self._resolve_volume_detail_target_span(volume_detail_config))
+        recommended_min, recommended_max = self._estimate_character_target_range(max(1, volume_span))
+        if volume_span <= 0:
+            return {
+                "increment": 0,
+                "recommended_min": recommended_min,
+                "recommended_max": recommended_max,
+                "volume_span": 0,
+                "referenced_character_count": 0,
+            }
+
+        reference_text = self._build_volume_detail_reference_text(volume_detail_config)
+        known_character_names = extract_character_names(characters_text or "")
+        referenced_character_names = [
+            name for name in known_character_names if name and name in reference_text
+        ]
+        referenced_character_count = len(referenced_character_names)
+        increment_cap = self._estimate_character_increment_cap(
+            volume_span,
+            expansion_mode="volume_detail",
+        )
+        has_existing_detail = bool(
+            str(self._normalize_volume_detail_config(volume_detail_config).get("existing_volume_detail") or "").strip()
+        )
+
+        if has_existing_detail:
+            base_required = max(0, recommended_min - referenced_character_count)
+        else:
+            conservative_floor = max(2, int(math.ceil(recommended_min * 0.6)))
+            base_required = max(0, conservative_floor - referenced_character_count)
+
+        minimum_increment = 0
+        if volume_span >= 24:
+            minimum_increment = 2
+        if volume_span >= 32:
+            minimum_increment = 3
+        if referenced_character_count >= max(2, recommended_min - 1):
+            minimum_increment = 0
+
+        if not reference_text.strip() and current_character_count <= 1:
+            minimum_increment = max(minimum_increment, 3 if volume_span >= 30 else 2)
+
+        suggested_increment = min(
+            increment_cap,
+            max(0, base_required, minimum_increment),
+        )
+
+        return {
+            "increment": max(0, suggested_increment),
+            "recommended_min": recommended_min,
+            "recommended_max": recommended_max,
+            "volume_span": volume_span,
+            "referenced_character_count": referenced_character_count,
+        }
 
     def _build_auto_character_growth_plan(
         self,
@@ -1239,6 +1365,73 @@ class StoryExpansionCoordinator:
             return max(1, max(chapter_rounds, character_rounds))
         return 1
 
+    @classmethod
+    def _estimate_duration_minutes_range_from_mode_info(
+        cls,
+        mode_info: Dict[str, Any],
+        estimated_rounds: int,
+    ) -> Tuple[int, int]:
+        mode = str(mode_info.get("mode") or "delta").strip()
+        current_chapter_count = max(0, int(mode_info.get("current_chapter_count") or 0))
+        target_chapter_count = max(
+            current_chapter_count,
+            int(mode_info.get("target_chapter_count") or current_chapter_count),
+        )
+        current_character_count = max(0, int(mode_info.get("current_character_count") or 0))
+        target_character_count = max(
+            current_character_count,
+            int(mode_info.get("target_character_count") or current_character_count),
+        )
+        chapter_delta = max(0, target_chapter_count - current_chapter_count)
+        character_delta = max(0, target_character_count - current_character_count)
+        rounds = max(1, int(estimated_rounds or 1))
+
+        if mode == "iterative":
+            min_estimate = 4.0 + rounds * 2.2 + max(0, character_delta - 5) * 0.15
+            max_estimate = 8.0 + rounds * 3.3 + max(0, character_delta - 5) * 0.25
+        elif mode == "epic":
+            epic_total_volumes = max(
+                cls.EPIC_MIN_VOLUMES,
+                int(
+                    mode_info.get("epic_total_volumes")
+                    or math.ceil(
+                        max(target_chapter_count, cls.EPIC_CHAPTER_THRESHOLD)
+                        / cls.EPIC_DEFAULT_CHAPTERS_PER_VOLUME
+                    )
+                ),
+            )
+            min_estimate = (
+                15.0
+                + epic_total_volumes * 0.9
+                + max(0, target_chapter_count - cls.CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS) * 0.01
+                + max(0, character_delta - 8) * 0.2
+            )
+            max_estimate = (
+                24.0
+                + epic_total_volumes * 1.4
+                + max(0, target_chapter_count - cls.CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS) * 0.018
+                + max(0, character_delta - 8) * 0.35
+            )
+        elif mode == "volume_detail":
+            volume_range = mode_info.get("volume_chapter_range")
+            if isinstance(volume_range, (list, tuple)) and len(volume_range) == 2:
+                try:
+                    volume_span = max(1, int(volume_range[1]) - int(volume_range[0]) + 1)
+                except Exception:
+                    volume_span = max(1, chapter_delta or cls.ITERATIVE_CHAPTER_STEP)
+            else:
+                volume_span = max(1, chapter_delta or cls.ITERATIVE_CHAPTER_STEP)
+
+            min_estimate = 7.0 + volume_span * 0.2 + character_delta * 0.4
+            max_estimate = 12.0 + volume_span * 0.35 + character_delta * 0.6
+        else:
+            min_estimate = 4.0 + chapter_delta * 0.18 + character_delta * 0.25
+            max_estimate = 7.0 + chapter_delta * 0.28 + character_delta * 0.4
+
+        min_minutes = max(5, int(math.ceil(min_estimate)))
+        max_minutes = max(min_minutes + 3, int(math.ceil(max_estimate)))
+        return min_minutes, max_minutes
+
     @staticmethod
     def _normalize_expansion_mode(expansion_mode: str) -> str:
         normalized = str(expansion_mode or "auto").strip()
@@ -1365,10 +1558,12 @@ class StoryExpansionCoordinator:
         *,
         current_chapter_count: int,
         current_character_count: int,
+        characters_text: str,
         target_total_chapters: Optional[int],
         target_total_characters: Optional[int],
         validation: Dict[str, Any],
         expansion_mode: str = "auto",
+        volume_detail_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         plan = {
             "suggested_target_chapters": target_total_chapters,
@@ -1384,21 +1579,23 @@ class StoryExpansionCoordinator:
         character_count = int(validation.get("character_count") or current_character_count or 0)
 
         if expansion_mode == "volume_detail" and target_total_chapters is not None and target_total_characters is None:
-            character_plan = self._estimate_auto_character_increment(
-                current_chapter_count=current_chapter_count,
+            character_plan = self._estimate_volume_detail_auto_character_increment(
                 current_character_count=character_count,
-                target_chapter_count=int(target_total_chapters),
-                coverage_ratio=coverage_ratio,
-                expansion_mode=expansion_mode,
+                characters_text=characters_text,
+                volume_detail_config=volume_detail_config,
             )
             suggested_characters = int(character_plan["increment"] or 0)
+            volume_span = max(
+                0,
+                int(character_plan.get("volume_span") or 0),
+            )
             growth_plan = self._build_auto_character_growth_plan(
                 current_character_count=character_count,
                 suggested_increment=suggested_characters,
                 recommended_min=int(character_plan["recommended_min"] or 0),
                 recommended_max=int(character_plan["recommended_max"] or 0),
                 expansion_mode=expansion_mode,
-                chapter_delta=max(0, int(target_total_chapters) - current_chapter_count),
+                chapter_delta=volume_span,
             )
             plan["character_plan"] = growth_plan
             if suggested_characters > 0:
@@ -1564,10 +1761,12 @@ class StoryExpansionCoordinator:
         support_plan = self._build_cross_support_plan(
             current_chapter_count=int(requested_mode_info.get("current_chapter_count") or 0),
             current_character_count=int(requested_mode_info.get("current_character_count") or 0),
+            characters_text=characters or "",
             target_total_chapters=target_total_chapters,
             target_total_characters=target_total_characters,
             validation=validation,
             expansion_mode=normalized_expansion_mode,
+            volume_detail_config=normalized_volume_detail_config,
         )
 
         effective_target_chapters = target_total_chapters
@@ -1619,6 +1818,12 @@ class StoryExpansionCoordinator:
         current_character_count = int(effective_mode_info.get("current_character_count") or 0)
         execution_mode = str(effective_mode_info.get("mode") or "delta").strip()
         estimated_rounds = self._estimate_execution_rounds_from_mode_info(effective_mode_info)
+        estimated_duration_minutes_min, estimated_duration_minutes_max = (
+            self._estimate_duration_minutes_range_from_mode_info(
+                effective_mode_info,
+                estimated_rounds,
+            )
+        )
         effective_expansion_mode = (
             "epic_framework"
             if execution_mode == "epic"
@@ -1785,6 +1990,8 @@ class StoryExpansionCoordinator:
             "auto_supplement_applied": auto_supplement_applied,
             "auto_supplement": support_plan,
             "estimated_rounds": estimated_rounds,
+            "estimated_duration_minutes_min": estimated_duration_minutes_min,
+            "estimated_duration_minutes_max": estimated_duration_minutes_max,
             "mode_suitability": mode_suitability,
             "model_plan": model_plan,
             "warnings": warnings,
@@ -2361,6 +2568,12 @@ class StoryExpansionCoordinator:
     def _estimate_total_chapters_from_volumes_data(volumes_data: Optional[Dict[str, Any]]) -> int:
         if not isinstance(volumes_data, dict):
             return 0
+        try:
+            from app.services.outline_merger import normalize_volume_detail_layout
+
+            volumes_data = normalize_volume_detail_layout(volumes_data)
+        except Exception:
+            pass
         total = 0
         for vol_data in (volumes_data.get("volumes") or {}).values():
             if vol_data.get("type") != "detail":
@@ -3120,6 +3333,10 @@ class StoryExpansionCoordinator:
                     "after_character_count": next_count,
                     "increment_requested": increment,
                     "post_validation_score": round_result.get("post_validation_score", 0),
+                    "cards_response_mode": round_result.get("cards_response_mode"),
+                    "cards_retry_used": bool(round_result.get("cards_retry_used", False)),
+                    "recognized_new_character_count": int(round_result.get("recognized_new_character_count") or 0),
+                    "recognized_new_character_names": list(round_result.get("recognized_new_character_names") or []),
                 }
             )
 
@@ -3526,6 +3743,10 @@ class StoryExpansionCoordinator:
                     "after_character_count": current_character_count,
                     "post_validation_score": result.get("post_validation_score", 0),
                     "continue_reason": result.get("continue_reason", ""),
+                    "cards_response_mode": result.get("cards_response_mode"),
+                    "cards_retry_used": bool(result.get("cards_retry_used", False)),
+                    "recognized_new_character_count": int(result.get("recognized_new_character_count") or 0),
+                    "recognized_new_character_names": list(result.get("recognized_new_character_names") or []),
                 }
 
             if round_strategy == "plot_first":
@@ -3921,10 +4142,11 @@ class StoryExpansionCoordinator:
         plot_outline = merge_volumes_to_outline(volumes_data)
 
         if resolved_strategy != "character_first" and target_character_count > current_character_count:
+            character_focus_outline = str(volume_result.get("expanded_outline") or "").strip() or plot_outline
             character_program = self._expand_characters_to_target(
                 current_characters=current_characters,
                 world_setting=world_setting,
-                plot_outline=plot_outline,
+                plot_outline=character_focus_outline,
                 current_character_count=current_character_count,
                 target_total_characters=target_character_count,
             )

@@ -32,21 +32,21 @@ class LayeredSummarizer:
 
     DEFAULT_MODEL_LIMIT = 32000
     DEFAULT_TARGET_TOKENS = 2048
-    CHUNK_SUMMARY_MODEL = "qwen-turbo"
-    REDUCE_SUMMARY_MODEL = "qwen-long"
+    CHUNK_SUMMARY_MODEL = "qwen3.5-plus"
+    REDUCE_SUMMARY_MODEL = "qwen3.5-plus"
 
     # 模型选择只决定“最终任务用什么模型更合适”，上下文是否压缩由 mode 再决定
     MODEL_SELECTION_RULES = {
         "outline_expand": [
             ((0, 40), ("qwen3.5-plus", 0.70)),
             ((40, 150), ("qwen3.5-plus", 0.65)),
-            ((150, 9999), ("qwen-long", 0.28)),
+            ((150, 9999), ("qwen3.5-plus", 0.28)),
         ],
         "character_expand": [
             ((0, 15), ("qwen3.5-plus", 0.65)),
             ((15, 60), ("qwen3.5-plus", 0.60)),
             ((60, 200), ("qwen3.5-plus", 0.55)),
-            ((200, 9999), ("qwen-long", 0.28)),
+            ((200, 9999), ("qwen3.5-plus", 0.28)),
         ],
         "chapter_generation": [
             ((0, 40), ("qwen3-max", 0.78)),
@@ -346,7 +346,7 @@ class LayeredSummarizer:
                 normalized_model = normalize_model_id(model) or model
                 return normalized_model, ratio
 
-        return normalize_model_id("qwen-long") or "qwen-long", 0.30
+        return normalize_model_id("qwen3.5-plus") or "qwen3.5-plus", 0.30
 
     @classmethod
     def estimate_selected_model(cls, scenario: str, current_count: int) -> str:

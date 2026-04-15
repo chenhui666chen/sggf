@@ -4,6 +4,7 @@ import type {
   StoryExpansionMode,
 } from '@/types/storyExpansion'
 import { buildStoryExpansionRequestPlan } from './storyExpansionPlanning'
+import { formatStoryExpansionDurationRange } from './storyExpansionTiming'
 import {
   getStoryExpansionExecutionModeLabel,
   STORY_EXPANSION_INTENT_LABELS,
@@ -483,6 +484,10 @@ export function createStoryExpansionDialogView(
   const effectiveStrategy = trimText(analysis?.effective_strategy) || trimText(analysis?.recommended_strategy)
   const effectiveExpansionMode = trimText(analysis?.effective_expansion_mode)
   const estimatedRounds = analysis?.estimated_rounds ?? analysis?.model_plan?.estimated_rounds ?? 1
+  const estimatedDurationText = formatStoryExpansionDurationRange(
+    analysis?.estimated_duration_minutes_min ?? null,
+    analysis?.estimated_duration_minutes_max ?? null,
+  )
   const precheckChips: StoryExpansionDialogChipView[] = analysis
     ? [
       {
@@ -535,6 +540,13 @@ export function createStoryExpansionDialogView(
       },
     ]
     : []
+  if (estimatedDurationText && precheckChips.length > 0) {
+    precheckChips.splice(Math.max(0, precheckChips.length - 1), 0, {
+      key: 'estimated-duration',
+      label: `预计耗时 ${estimatedDurationText}`,
+      color: 'default',
+    })
+  }
 
   const modeSuitabilityView = analysis?.mode_suitability?.mode === 'total'
     ? {
@@ -772,12 +784,12 @@ export function createStoryExpansionDialogView(
           max: Math.max(1, input.frameworkMetadata?.metadata?.total_volumes || 50),
           flex: '1 1 160px',
         }),
-        createField('volumeChaptersMin', '本卷最少章节', '建议 20-60 章', {
+        createField('volumeChaptersMin', '本卷最少章节', '建议 60-80 章', {
           min: 20,
           max: VOLUME_DETAIL_INPUT_MAX_CHAPTERS,
           flex: '1 1 180px',
         }),
-        createField('volumeChaptersMax', '本卷最多章节', '建议尽量控制在 60 章内；必要时可放宽到 100 章', {
+        createField('volumeChaptersMax', '本卷最多章节', '建议尽量控制在 80 章内；必要时可放宽到 100 章', {
           min: 20,
           max: VOLUME_DETAIL_INPUT_MAX_CHAPTERS,
           flex: '1 1 180px',
@@ -791,7 +803,7 @@ export function createStoryExpansionDialogView(
         key: 'volume-character-info',
         severity: 'info',
         variant: 'outlined',
-        text: '下方人物字段仍表示全书目标人物总数；系统会优先补齐与当前卷剧情承接相关的人物。若本轮只想细化卷纲，保持与当前人物数一致即可。',
+        text: '下方只读人物字段仅作全书角色规模参考；系统会优先补齐与当前卷剧情承接相关的人物。若本轮人物留空，请将“本卷新增人物上限”留空，由系统自动估算。',
       },
     })
     configBlocks.push({

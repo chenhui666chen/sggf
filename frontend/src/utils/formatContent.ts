@@ -18,6 +18,14 @@ export function formatMarkdownToHtml(content: string): string {
 
   let html = content
   const isBlockHtmlLine = (line: string): boolean => /^(<h\d\b|<hr\b|<(ul|ol|li)\b|<\/(ul|ol|li)>)/.test(line)
+  const textHeadingPatterns = [
+    /^【第[零一二三四五六七八九十百千万两\d]+[章节卷回幕篇]】(?:\s*\S.*)?$/,
+    /^(?:第[零一二三四五六七八九十百千万两\d]+[章节卷回幕篇]|卷[零一二三四五六七八九十百千万两\d]+)(?:[：:]\s*|\s{1,2})\S.+$/,
+  ]
+  const isStandaloneTextHeadingLine = (line: string): boolean =>
+    textHeadingPatterns.some((pattern) => pattern.test(line))
+  const buildStandaloneTextHeading = (line: string): string =>
+    `<h3 style="font-size: 1.1rem; font-weight: 600; margin: 16px 0 8px 0; color: inherit;">${line}</h3>`
 
   // 0. 处理转义的换行符（将 \n 转换为实际换行符）
   html = html.replace(/\\n/g, '\n')
@@ -68,6 +76,15 @@ export function formatMarkdownToHtml(content: string): string {
         paragraphs.push(currentParagraph.join('<br />'))
         currentParagraph = []
       }
+      continue
+    }
+
+    if (isStandaloneTextHeadingLine(trimmedLine)) {
+      if (currentParagraph.length > 0) {
+        paragraphs.push(currentParagraph.join('<br />'))
+        currentParagraph = []
+      }
+      paragraphs.push(buildStandaloneTextHeading(trimmedLine))
       continue
     }
     

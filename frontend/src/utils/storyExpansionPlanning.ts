@@ -218,3 +218,49 @@ export function getStoryExpansionValidationError(
 
   return null
 }
+
+export function shouldSkipStoryExpansionAnalysisRequest(
+  input: StoryExpansionValidationInput,
+): boolean {
+  if (!input.hasStoryContext) {
+    return true
+  }
+
+  const plan = buildStoryExpansionRequestPlan(input)
+
+  if (input.expansionMode === 'volume_detail') {
+    if (!input.frameworkMetadata?.has_framework) {
+      return true
+    }
+    if (!plan.isVolumeDetailConfigured) {
+      return true
+    }
+  }
+
+  if (input.expansionMode === 'epic_framework' && !plan.isEpicFrameworkConfigured) {
+    return true
+  }
+
+  if (
+    input.expansionMode === 'total'
+    && Math.max(
+      input.currentChapterCount,
+      plan.requestedTargetChapterCount ?? input.currentChapterCount,
+    ) > getConventionalCollaborationMaxTargetChapterCount()
+  ) {
+    return true
+  }
+
+  if (
+    input.expansionMode === 'epic_framework'
+    && (plan.requestedTargetChapterCount ?? 0) > Math.max(5000, input.currentChapterCount)
+  ) {
+    return true
+  }
+
+  if ((plan.requestedTargetCharacterCount ?? 0) > Math.max(200, input.currentCharacterCount)) {
+    return true
+  }
+
+  return false
+}

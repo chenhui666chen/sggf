@@ -121,6 +121,8 @@ class StoryExpansionAnalysisPayload(_StrictModel):
     requested_expansion_mode: Optional[str] = None
     effective_expansion_mode: Optional[str] = None
     estimated_rounds: Optional[int] = None
+    estimated_duration_minutes_min: Optional[int] = None
+    estimated_duration_minutes_max: Optional[int] = None
     auto_supplement_applied: Optional[bool] = None
     analysis_summary: Optional[str] = None
     warnings: list[str] = Field(default_factory=list)

@@ -28,10 +28,7 @@ export interface StoryExpansionSubmitPreflightInput {
 export interface StoryExpansionSubmitPreflight {
   requestPlan: StoryExpansionRequestPlan
   validationError: string | null
-  requiresVolumeOverwriteConfirm: boolean
-  volumeOverwriteConfirmMessage: string
-  requiresResetFrameworkConfirm: boolean
-  resetFrameworkConfirmMessage: string
+  confirmDialogs: StoryExpansionConfirmDialogConfig[]
 }
 
 export interface StoryExpansionSubmitPayloadInput {
@@ -45,7 +42,23 @@ export interface StoryExpansionSubmitPayloadInput {
   requestPlan?: StoryExpansionRequestPlan
 }
 
-export type StoryExpansionConfirmAction = (message: string) => boolean
+export interface StoryExpansionConfirmDialogConfig {
+  kind: 'volume_overwrite' | 'framework_reset'
+  title: string
+  description: string
+  detail: string
+  confirmLabel: string
+  cancelLabel: string
+  message: string
+}
+
+export type StoryExpansionConfirmAction = (
+  confirmDialog: StoryExpansionConfirmDialogConfig,
+) => boolean | Promise<boolean>
+
+function getStoryExpansionVolumeLabel(targetVolumeIndex: number | null | undefined): string {
+  return Number.isFinite(targetVolumeIndex) ? `第 ${targetVolumeIndex} 卷` : '当前卷'
+}
 
 export function getStoryExpansionVolumeOverwriteConfirmMessage(
   targetVolumeIndex: number | null | undefined,
@@ -55,6 +68,34 @@ export function getStoryExpansionVolumeOverwriteConfirmMessage(
 
 export function getStoryExpansionFrameworkResetConfirmMessage(): string {
   return '当前项目已存在长篇框架与卷细纲。\n\n继续使用“常规协同”补细化章节会清空旧框架状态，后续将以新的章节大纲为准。\n\n确认继续吗？'
+}
+
+export function getStoryExpansionVolumeOverwriteConfirmDialog(
+  targetVolumeIndex: number | null | undefined,
+): StoryExpansionConfirmDialogConfig {
+  const volumeLabel = getStoryExpansionVolumeLabel(targetVolumeIndex)
+
+  return {
+    kind: 'volume_overwrite',
+    title: '覆盖现有细纲',
+    description: `${volumeLabel}已存在细纲。重新协同生成会覆盖当前卷的现有内容。`,
+    detail: `确认后将按当前配置重新生成${volumeLabel}细纲，不影响其他卷。`,
+    confirmLabel: '继续覆盖',
+    cancelLabel: '取消',
+    message: getStoryExpansionVolumeOverwriteConfirmMessage(targetVolumeIndex),
+  }
+}
+
+export function getStoryExpansionFrameworkResetConfirmDialog(): StoryExpansionConfirmDialogConfig {
+  return {
+    kind: 'framework_reset',
+    title: '重置长篇框架状态',
+    description: '当前项目已存在长篇框架与卷细纲。继续使用“常规协同”补细化章节，会清空现有框架状态。',
+    detail: '后续将以新的章节大纲为准，原有卷级细纲需要重新协同生成。',
+    confirmLabel: '继续重置',
+    cancelLabel: '取消',
+    message: getStoryExpansionFrameworkResetConfirmMessage(),
+  }
 }
 
 export function createStoryExpansionSubmitPreflight(
@@ -84,42 +125,34 @@ export function createStoryExpansionSubmitPreflight(
   )
   const requiresResetFrameworkConfirm = requestPlan.requiresEpicFrameworkReset
 
+  const confirmDialogs: StoryExpansionConfirmDialogConfig[] = []
+
+  if (requiresVolumeOverwriteConfirm) {
+    confirmDialogs.push(getStoryExpansionVolumeOverwriteConfirmDialog(input.form.targetVolumeIndex))
+  }
+
+  if (requiresResetFrameworkConfirm) {
+    confirmDialogs.push(getStoryExpansionFrameworkResetConfirmDialog())
+  }
+
   return {
     requestPlan,
     validationError,
-    requiresVolumeOverwriteConfirm,
-    volumeOverwriteConfirmMessage: requiresVolumeOverwriteConfirm
-      ? getStoryExpansionVolumeOverwriteConfirmMessage(input.form.targetVolumeIndex)
-      : '',
-    requiresResetFrameworkConfirm,
-    resetFrameworkConfirmMessage: requiresResetFrameworkConfirm
-      ? getStoryExpansionFrameworkResetConfirmMessage()
-      : '',
+    confirmDialogs,
   }
 }
 
-export function confirmStoryExpansionSubmitPreflight(
+export async function confirmStoryExpansionSubmitPreflight(
   preflight: Pick<
     StoryExpansionSubmitPreflight,
-    | 'requiresVolumeOverwriteConfirm'
-    | 'volumeOverwriteConfirmMessage'
-    | 'requiresResetFrameworkConfirm'
-    | 'resetFrameworkConfirmMessage'
+    'confirmDialogs'
   >,
   confirmAction: StoryExpansionConfirmAction,
-): boolean {
-  if (
-    preflight.requiresVolumeOverwriteConfirm
-    && !confirmAction(preflight.volumeOverwriteConfirmMessage)
-  ) {
-    return false
-  }
-
-  if (
-    preflight.requiresResetFrameworkConfirm
-    && !confirmAction(preflight.resetFrameworkConfirmMessage)
-  ) {
-    return false
+): Promise<boolean> {
+  for (const confirmDialog of preflight.confirmDialogs) {
+    if (!await confirmAction(confirmDialog)) {
+      return false
+    }
   }
 
   return true

@@ -20,6 +20,7 @@ import app.db.base as db_base
 import app.services.character_parser as character_parser
 import app.services.vector_sync as vector_sync
 import backend.app.api.v1.workflow as workflow
+import backend.app.services.outline_merger as outline_merger
 
 
 class _FakeQuery:
@@ -50,7 +51,10 @@ class _FakeDBSession:
 
     def execute(self, query: Any, params: Any = None) -> SimpleNamespace:
         self.execute_calls.append((query, params))
-        return SimpleNamespace()
+        query_text = str(query)
+        if "SELECT epic_framework, epic_framework_generated_at, plot_outline, epic_volumes_detail" in query_text:
+            return SimpleNamespace(fetchone=lambda: (None, None, None, None))
+        return SimpleNamespace(fetchone=lambda: None)
 
     def commit(self) -> None:
         self.committed = True
@@ -73,9 +77,9 @@ class _FrameworkGuardDBSession(_FakeDBSession):
     def execute(self, query: Any, params: Any = None) -> Any:
         self.execute_calls.append((query, params))
         query_text = str(query)
-        if "SELECT epic_framework, epic_framework_generated_at" in query_text:
-            return SimpleNamespace(fetchone=lambda: (self.epic_framework, self.framework_generated_at))
-        return SimpleNamespace()
+        if "SELECT epic_framework, epic_framework_generated_at, plot_outline, epic_volumes_detail" in query_text:
+            return SimpleNamespace(fetchone=lambda: (self.epic_framework, self.framework_generated_at, None, ""))
+        return SimpleNamespace(fetchone=lambda: None)
 
 
 class _VolumeDetailConfigDBSession(_FakeDBSession):
@@ -87,9 +91,28 @@ class _VolumeDetailConfigDBSession(_FakeDBSession):
     def execute(self, query: Any, params: Any = None) -> Any:
         self.execute_calls.append((query, params))
         query_text = str(query)
-        if "SELECT epic_framework, epic_volumes_detail" in query_text:
-            return SimpleNamespace(fetchone=lambda: (self.epic_framework, self.epic_volumes_detail))
+        if "SELECT epic_framework, epic_framework_generated_at, plot_outline, epic_volumes_detail" in query_text:
+            return SimpleNamespace(fetchone=lambda: (self.epic_framework, None, None, self.epic_volumes_detail))
         return SimpleNamespace()
+
+
+def _build_volume_detail_text(*, volume_index: int, start: int, end: int) -> str:
+    chapter_blocks = "\n\n".join(
+        (
+            f"### 第{chapter_number}章：《卷{volume_index}章节{chapter_number - start + 1}》\n"
+            f"- 场景目标：承接第{chapter_number - 1}章并推进本章矛盾。\n"
+            f"- 关键事件：第{chapter_number}章发生关键转折。"
+        )
+        for chapter_number in range(start, end + 1)
+    )
+    return (
+        "## 一、故事概述\n"
+        f"- 承接第{start - 1}章的尾声冲突，展开本卷主线。\n\n"
+        f"## 二、第{volume_index}卷详细规划（预计{end - start + 1}章，从第{start}章开始）\n\n"
+        f"{chapter_blocks}\n\n"
+        "## 三、伏笔埋设检查\n"
+        f"- 第{start}-{min(start + 4, end)}章：完成第一轮伏笔铺垫。"
+    )
 
 
 def test_legacy_expand_routes_are_removed_from_schema() -> None:
@@ -213,6 +236,153 @@ def test_resolve_story_volume_detail_config_estimates_start_chapter_from_framewo
     assert config["start_chapter_num"] == 61
     assert config["expected_chapter_range"] == (61, 100)
     assert config["expected_total_chapter_count"] == 100
+
+
+def test_resolve_story_volume_detail_config_keeps_continuous_numbering_from_existing_volume_detail_text() -> None:
+    first_volume_detail = "\n\n".join(
+        f"### 第{index}章：卷一章节{index}\n- 场景目标：推进卷一第{index}章。"
+        for index in range(1, 61)
+    )
+    fake_db = _VolumeDetailConfigDBSession(
+        epic_framework="## 五、分卷规划（共2卷）\n【第1卷】枯荣复苏\n- 卷定位：宗门重建\n【第2卷】山雨欲来\n- 卷定位：外患压境",
+        epic_volumes_detail=json.dumps(
+            {
+                "total_volumes": 2,
+                "framework_header": "## 故事总纲",
+                "framework_footer": "## 关键伏笔",
+                "volumes": {
+                    "1": {
+                        "type": "detail",
+                        "title": "枯荣复苏",
+                        "summary": "- 卷定位：宗门重建",
+                        "detail": first_volume_detail,
+                        "chapters_range": [0, 0],
+                        "expanded_at": None,
+                    },
+                    "2": {
+                        "type": "framework",
+                        "title": "山雨欲来",
+                        "summary": "- 卷定位：外患压境",
+                        "detail": None,
+                        "chapters_range": [0, 0],
+                        "expanded_at": None,
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+    )
+    request = workflow.ExpandStoryRequest(
+        project_id=1,
+        current_outline="## 五、分卷规划（共2卷）",
+        world_setting="修仙世界",
+        characters="### 【姓名】：顾长歌\n【角色定位】：主角",
+        expansion_mode="volume_detail",
+        target_volume_index=2,
+        volume_chapters_min=40,
+        volume_chapters_max=40,
+    )
+
+    config = workflow._resolve_story_volume_detail_config(request, fake_db)
+
+    assert config is not None
+    assert config["start_chapter_num"] == 61
+    assert config["expected_chapter_range"] == (61, 100)
+    assert config["current_total_chapter_count"] == 60
+    assert config["expected_total_chapter_count"] == 100
+
+
+def test_resolve_story_volume_detail_config_renumbers_existing_detail_after_previous_volume_changes() -> None:
+    first_volume_detail = _build_volume_detail_text(volume_index=1, start=1, end=70)
+    second_volume_detail = _build_volume_detail_text(volume_index=2, start=61, end=120)
+    fake_db = _VolumeDetailConfigDBSession(
+        epic_framework="## 五、分卷规划（共2卷）\n【第1卷】枯荣复苏\n- 卷定位：宗门重建\n【第2卷】山雨欲来\n- 卷定位：外患压境",
+        epic_volumes_detail=json.dumps(
+            {
+                "total_volumes": 2,
+                "framework_header": "## 故事总纲",
+                "framework_footer": "## 关键伏笔",
+                "volumes": {
+                    "1": {
+                        "type": "detail",
+                        "title": "枯荣复苏",
+                        "summary": "- 卷定位：宗门重建",
+                        "detail": first_volume_detail,
+                        "chapters_range": [1, 70],
+                        "chapter_count": 70,
+                        "expanded_at": None,
+                    },
+                    "2": {
+                        "type": "detail",
+                        "title": "山雨欲来",
+                        "summary": "- 卷定位：外患压境",
+                        "detail": second_volume_detail,
+                        "chapters_range": [61, 120],
+                        "chapter_count": 60,
+                        "expanded_at": None,
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+    )
+    request = workflow.ExpandStoryRequest(
+        project_id=1,
+        current_outline="## 五、分卷规划（共2卷）",
+        world_setting="修仙世界",
+        characters="### 【姓名】：顾长歌\n【角色定位】：主角",
+        expansion_mode="volume_detail",
+        target_volume_index=2,
+        volume_chapters_min=60,
+        volume_chapters_max=60,
+    )
+
+    config = workflow._resolve_story_volume_detail_config(request, fake_db)
+
+    assert config is not None
+    assert config["start_chapter_num"] == 71
+    assert config["expected_chapter_range"] == (71, 130)
+    assert "### 第71章" in config["existing_volume_detail"]
+    assert "### 第61章" not in config["existing_volume_detail"]
+    assert "承接第70章" in config["existing_volume_detail"]
+
+
+def test_merge_volumes_to_outline_recalculates_following_detail_ranges_and_headings() -> None:
+    volumes_data = {
+        "total_volumes": 2,
+        "framework_generated_at": "2026-04-15T00:00:00",
+        "framework_header": "## 故事总纲",
+        "framework_footer": "## 关键伏笔",
+        "volumes": {
+            "1": {
+                "type": "detail",
+                "title": "枯荣复苏",
+                "summary": "- 卷定位：宗门重建",
+                "detail": _build_volume_detail_text(volume_index=1, start=1, end=70),
+                "chapters_range": [1, 70],
+                "chapter_count": 70,
+                "expanded_at": None,
+            },
+            "2": {
+                "type": "detail",
+                "title": "山雨欲来",
+                "summary": "- 卷定位：外患压境",
+                "detail": _build_volume_detail_text(volume_index=2, start=61, end=120),
+                "chapters_range": [61, 120],
+                "chapter_count": 60,
+                "expanded_at": None,
+            },
+        },
+    }
+
+    merged = outline_merger.merge_volumes_to_outline(volumes_data)
+
+    assert "📖 第2卷详细章节（第71-130章" in merged
+    assert "## 二、第2卷详细规划（预计60章，从第71章开始）" in merged
+    assert "### 第71章：《卷2章节1》" in merged
+    assert "### 第130章：《卷2章节60》" in merged
+    assert "### 第61章：《卷2章节1》" not in merged
+    assert "承接第70章" in merged
 
 
 def test_validate_expand_story_request_accepts_layered_epic_framework_thresholds() -> None:
@@ -1282,9 +1452,11 @@ def test_build_project_world_setting_context_appends_settings_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        workflow,
-        "build_project_settings_summary",
-        lambda *args, **kwargs: "【设定摘要】门派体系稳定。",
+        workflow.WorkflowContextBuilder,
+        "build_world_setting_context",
+        lambda self, project_id, world_setting: SimpleNamespace(
+            combined_world_setting=f"{world_setting}\n\n【设定摘要】门派体系稳定。"
+        ),
     )
 
     result = workflow._build_project_world_setting_context(

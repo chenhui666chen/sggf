@@ -5,6 +5,7 @@
 import React from 'react'
 import { Box, SxProps, Theme } from '@mui/material'
 import { smartFormat } from '../../utils/formatContent'
+import { normalizeMarkdownContent } from '../../utils/normalizeMarkdownContent'
 
 interface FormattedContentProps {
   content: string
@@ -25,7 +26,7 @@ export default function FormattedContent({ content, sx, className }: FormattedCo
     if (!content) return ''
     
     // 前端展示排除开发说明：移除全角括号及其中内容
-    let text = content.replace(/（[^）]*）/g, '')
+    let text = normalizeMarkdownContent(content).replace(/（[^）]*）/g, '')
     
     // 🌟 保护 details/summary 标签块，避免被 smartFormat 转义
     const detailsBlocks: string[] = []

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   getStoryExpansionStorageKeys,
+  parseStoredStoryExpansionTaskMeta,
   parseStoredStoryExpansionResult,
 } from '../storyExpansionStorage'
 
@@ -11,7 +12,22 @@ describe('storyExpansionStorage', () => {
       taskState: 'expanding_story_12',
       taskStartedAt: 'expanding_story_start_12',
       taskId: 'expanding_story_task_12',
+      taskMeta: 'expanding_story_meta_12',
       result: 'story_expand_result_12',
+    })
+  })
+
+  it('恢复任务元数据时保留耗时区间与等待提示', () => {
+    const raw = JSON.stringify({
+      estimated_duration_minutes_min: 45,
+      estimated_duration_minutes_max: 80,
+      wait_hint: '当前按分轮协同推进：首轮先补到 18 人，本次任务预计补到 38 人。',
+    })
+
+    expect(parseStoredStoryExpansionTaskMeta(raw)).toEqual({
+      estimated_duration_minutes_min: 45,
+      estimated_duration_minutes_max: 80,
+      wait_hint: '当前按分轮协同推进：首轮先补到 18 人，本次任务预计补到 38 人。',
     })
   })
 

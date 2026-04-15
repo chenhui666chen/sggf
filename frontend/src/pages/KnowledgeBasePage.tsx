@@ -290,6 +290,7 @@ export default function KnowledgeBasePage() {
     expandingStory,
     hasStoryExpansionResult,
     showStoryExpansionDialog,
+    storyExpansionWaitInfo,
     openStoryExpansion,
     openStoryExpansionResultDialog,
     storyExpansionDialogProps,
@@ -305,6 +306,9 @@ export default function KnowledgeBasePage() {
     refreshWorkflowData: loadWorkflowData,
     showSnackbar,
   })
+
+  const currentCharacterCount = getCurrentCharacterCount()
+  const hasCharacterText = Boolean((characters || '').trim())
 
   const preloadCharacterTabResources = (tabValue: number) => {
     if (tabValue === 1) {
@@ -1139,6 +1143,7 @@ export default function KnowledgeBasePage() {
             <>
               {/* 世界观/人物页操作区，仅在对应标签显示 */}
               {(mainTabValue !== 1 || characterSubTabValue === 0) && (
+              <>
               <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
                 {!isEditing ? (
                   <>
@@ -1220,6 +1225,17 @@ export default function KnowledgeBasePage() {
                   </>
                 )}
               </Box>
+              {expandingStory && storyExpansionWaitInfo && (
+                <Alert severity="info" variant="outlined" sx={{ mb: 3 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
+                    {storyExpansionWaitInfo.summary}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {storyExpansionWaitInfo.detail}
+                  </Typography>
+                </Alert>
+              )}
+              </>
               )}
 
               {/* 人物主内容区域 */}
@@ -1228,6 +1244,47 @@ export default function KnowledgeBasePage() {
                   {/* 子标签 0: 人物设定 */}
                   {characterSubTabValue === 0 && (
                     <>
+                      <Paper
+                        elevation={0}
+                        sx={{
+                          mb: 3,
+                          p: 2.5,
+                          borderRadius: 2,
+                          border: '1px solid',
+                          borderColor: 'primary.light',
+                          background: 'linear-gradient(135deg, rgba(15,118,110,0.08) 0%, rgba(255,255,255,0.96) 100%)',
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: { xs: 'flex-start', md: 'center' },
+                            flexDirection: { xs: 'column', md: 'row' },
+                            gap: 2,
+                          }}
+                        >
+                          <Box>
+                            <Typography variant="overline" sx={{ color: 'primary.dark', fontWeight: 700 }}>
+                              人物信息总览
+                            </Typography>
+                            <Typography variant="h5" sx={{ fontWeight: 700, mb: 0.5 }}>
+                              当前共识别 {currentCharacterCount} 位人物
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              基于当前人物文本自动统计，方便快速判断是否还需要继续补人物、关系线或配套承接角色。
+                            </Typography>
+                          </Box>
+                          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                            <Chip label={`人物总数 ${currentCharacterCount}`} color="primary" variant="outlined" />
+                            <Chip
+                              label={hasCharacterText ? '人物文本已录入' : '人物文本待补充'}
+                              color={hasCharacterText ? 'success' : 'default'}
+                              variant="outlined"
+                            />
+                          </Box>
+                        </Box>
+                      </Paper>
                       {isEditing ? (
                         <Suspense fallback={<LazySectionFallback minHeight={500} />}>
                           <LazyVditorEditor

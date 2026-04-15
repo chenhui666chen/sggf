@@ -5,7 +5,9 @@ import {
   confirmStoryExpansionSubmitPreflight,
   createStoryExpansionSubmitPayload,
   createStoryExpansionSubmitPreflight,
+  getStoryExpansionFrameworkResetConfirmDialog,
   getStoryExpansionFrameworkResetConfirmMessage,
+  getStoryExpansionVolumeOverwriteConfirmDialog,
   getStoryExpansionVolumeOverwriteConfirmMessage,
 } from '../storyExpansionSubmission'
 
@@ -29,7 +31,7 @@ function createBaseForm(overrides: Partial<StoryExpansionDialogFormState> = {}):
 }
 
 describe('storyExpansionSubmission', () => {
-  it('returns validation error when story context is missing', () => {
+  it('returns a validation error when story context is missing', () => {
     expect(
       createStoryExpansionSubmitPreflight({
         content: {
@@ -44,13 +46,35 @@ describe('storyExpansionSubmission', () => {
     ).toBe('请先准备好世界观和情节大纲，再执行协同扩展')
   })
 
-  it('requests overwrite confirmation for expanded volume regeneration', () => {
+  it('builds structured overwrite dialog copy for volume detail regeneration', () => {
+    expect(getStoryExpansionVolumeOverwriteConfirmDialog(2)).toMatchObject({
+      title: '覆盖现有细纲',
+      description: '第 2 卷已存在细纲。重新协同生成会覆盖当前卷的现有内容。',
+      detail: '确认后将按当前配置重新生成第 2 卷细纲，不影响其他卷。',
+      confirmLabel: '继续覆盖',
+      cancelLabel: '取消',
+      message: getStoryExpansionVolumeOverwriteConfirmMessage(2),
+    })
+  })
+
+  it('builds structured framework reset dialog copy for regular expansion', () => {
+    expect(getStoryExpansionFrameworkResetConfirmDialog()).toMatchObject({
+      title: '重置长篇框架状态',
+      description: '当前项目已存在长篇框架与卷细纲。继续使用“常规协同”补细化章节，会清空现有框架状态。',
+      detail: '后续将以新的章节大纲为准，原有卷级细纲需要重新协同生成。',
+      confirmLabel: '继续重置',
+      cancelLabel: '取消',
+      message: getStoryExpansionFrameworkResetConfirmMessage(),
+    })
+  })
+
+  it('requests overwrite confirmation for regenerating an expanded volume', () => {
     expect(
       createStoryExpansionSubmitPreflight({
         content: {
-          worldSetting: '世界观',
-          plotOutline: '大纲',
-          characters: '人物',
+          worldSetting: 'world',
+          plotOutline: 'outline',
+          characters: 'characters',
         },
         currentChapterCount: 80,
         currentCharacterCount: 10,
@@ -71,10 +95,9 @@ describe('storyExpansionSubmission', () => {
       }),
     ).toMatchObject({
       validationError: null,
-      requiresVolumeOverwriteConfirm: true,
-      volumeOverwriteConfirmMessage: getStoryExpansionVolumeOverwriteConfirmMessage(2),
-      requiresResetFrameworkConfirm: false,
-      resetFrameworkConfirmMessage: '',
+      confirmDialogs: [
+        getStoryExpansionVolumeOverwriteConfirmDialog(2),
+      ],
     })
   })
 
@@ -82,9 +105,9 @@ describe('storyExpansionSubmission', () => {
     expect(
       createStoryExpansionSubmitPreflight({
         content: {
-          worldSetting: '世界观',
-          plotOutline: '大纲',
-          characters: '人物',
+          worldSetting: 'world',
+          plotOutline: 'outline',
+          characters: 'characters',
         },
         currentChapterCount: 20,
         currentCharacterCount: 5,
@@ -98,22 +121,21 @@ describe('storyExpansionSubmission', () => {
       }),
     ).toMatchObject({
       validationError: null,
-      requiresVolumeOverwriteConfirm: false,
-      volumeOverwriteConfirmMessage: '',
-      requiresResetFrameworkConfirm: true,
-      resetFrameworkConfirmMessage: getStoryExpansionFrameworkResetConfirmMessage(),
+      confirmDialogs: [
+        getStoryExpansionFrameworkResetConfirmDialog(),
+      ],
     })
   })
 
-  it('runs confirmations in order before submit', () => {
+  it('runs confirmations in order', async () => {
     const confirmMessages: string[] = []
-    const result = confirmStoryExpansionSubmitPreflight({
-      requiresVolumeOverwriteConfirm: true,
-      volumeOverwriteConfirmMessage: getStoryExpansionVolumeOverwriteConfirmMessage(2),
-      requiresResetFrameworkConfirm: true,
-      resetFrameworkConfirmMessage: getStoryExpansionFrameworkResetConfirmMessage(),
-    }, (message) => {
-      confirmMessages.push(message)
+    const result = await confirmStoryExpansionSubmitPreflight({
+      confirmDialogs: [
+        getStoryExpansionVolumeOverwriteConfirmDialog(2),
+        getStoryExpansionFrameworkResetConfirmDialog(),
+      ],
+    }, (confirmDialog) => {
+      confirmMessages.push(confirmDialog.message)
       return true
     })
 
@@ -124,15 +146,15 @@ describe('storyExpansionSubmission', () => {
     ])
   })
 
-  it('stops follow-up confirmations after cancellation', () => {
+  it('stops follow-up confirmations after cancellation', async () => {
     const confirmMessages: string[] = []
-    const result = confirmStoryExpansionSubmitPreflight({
-      requiresVolumeOverwriteConfirm: true,
-      volumeOverwriteConfirmMessage: getStoryExpansionVolumeOverwriteConfirmMessage(3),
-      requiresResetFrameworkConfirm: true,
-      resetFrameworkConfirmMessage: getStoryExpansionFrameworkResetConfirmMessage(),
-    }, (message) => {
-      confirmMessages.push(message)
+    const result = await confirmStoryExpansionSubmitPreflight({
+      confirmDialogs: [
+        getStoryExpansionVolumeOverwriteConfirmDialog(3),
+        getStoryExpansionFrameworkResetConfirmDialog(),
+      ],
+    }, (confirmDialog) => {
+      confirmMessages.push(confirmDialog.message)
       return false
     })
 
@@ -142,14 +164,14 @@ describe('storyExpansionSubmission', () => {
     ])
   })
 
-  it('builds payload with analysis overrides', () => {
+  it('builds submit payload with analysis overrides when both targets are explicit', () => {
     expect(
       createStoryExpansionSubmitPayload({
         projectId: 9,
         content: {
-          worldSetting: '世界观',
-          plotOutline: '大纲',
-          characters: '人物',
+          worldSetting: 'world',
+          plotOutline: 'outline',
+          characters: 'characters',
         },
         currentChapterCount: 20,
         currentCharacterCount: 5,
@@ -170,9 +192,9 @@ describe('storyExpansionSubmission', () => {
       }),
     ).toMatchObject({
       project_id: 9,
-      current_outline: '大纲',
-      world_setting: '世界观',
-      characters: '人物',
+      current_outline: 'outline',
+      world_setting: 'world',
+      characters: 'characters',
       current_chapter_count: 20,
       current_character_count: 5,
       target_total_chapters: 40,
@@ -185,14 +207,55 @@ describe('storyExpansionSubmission', () => {
     })
   })
 
+  it('keeps blank character target out of submit payload when total mode will auto-continue across rounds', () => {
+    expect(
+      createStoryExpansionSubmitPayload({
+        projectId: 11,
+        content: {
+          worldSetting: 'world',
+          plotOutline: 'outline',
+          characters: 'characters',
+        },
+        currentChapterCount: 20,
+        currentCharacterCount: 7,
+        form: createBaseForm({
+          targetChapterCount: 300,
+          targetCharacterCount: null,
+        }),
+        requestControls: {
+          strategy: 'auto',
+          intent: 'outline_led',
+        },
+        analysis: {
+          effective_target_chapter_count: 300,
+          effective_target_character_count: 15,
+          effective_expansion_mode: 'total',
+          auto_supplement: {
+            character_delta: 8,
+            character_plan: {
+              stage_target_characters: 15,
+              task_target_characters: 35,
+            },
+          },
+        },
+      }),
+    ).toMatchObject({
+      project_id: 11,
+      target_total_chapters: 300,
+      target_total_characters: undefined,
+      enable_auto_supplement: true,
+      expansion_mode: 'total',
+    })
+  })
+
   it('does not send total chapter target for volume detail mode', () => {
     expect(
       createStoryExpansionSubmitPayload({
         projectId: 12,
         content: {
-          worldSetting: '世界观',
-          plotOutline: '大纲',
-          characters: '人物',
+          worldSetting: 'world',
+          plotOutline: 'outline',
+          characters: 'characters',
         },
         currentChapterCount: 120,
         currentCharacterCount: 18,
@@ -224,6 +287,53 @@ describe('storyExpansionSubmission', () => {
       target_total_chapters: undefined,
       target_total_characters: 22,
       target_volume_index: 3,
+    })
+  })
+
+  it('sends the analysis-derived character target for volume detail mode when the form leaves characters blank', () => {
+    expect(
+      createStoryExpansionSubmitPayload({
+        projectId: 13,
+        content: {
+          worldSetting: 'world',
+          plotOutline: 'outline',
+          characters: 'characters',
+        },
+        currentChapterCount: 120,
+        currentCharacterCount: 18,
+        form: createBaseForm({
+          expansionMode: 'volume_detail',
+          frameworkMetadata: {
+            has_framework: true,
+            metadata: {
+              total_volumes: 6,
+              expanded_volumes: [1, 2],
+            },
+          },
+          targetChapterCount: null,
+          targetCharacterCount: null,
+          targetVolumeIndex: 3,
+          volumeCharacterIncrement: null,
+        }),
+        requestControls: {
+          strategy: 'auto',
+          intent: 'outline_led',
+        },
+        analysis: {
+          effective_target_chapter_count: 300,
+          effective_target_character_count: 22,
+          volume_detail: {
+            character_increment: 4,
+            target_character_count: 22,
+          },
+        },
+      }),
+    ).toMatchObject({
+      expansion_mode: 'volume_detail',
+      target_total_chapters: undefined,
+      target_total_characters: 22,
+      target_volume_index: 3,
+      volume_character_increment: undefined,
     })
   })
 })

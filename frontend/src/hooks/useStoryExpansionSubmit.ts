@@ -26,7 +26,7 @@ interface UseStoryExpansionSubmitOptions {
   analysis: StoryExpansionAnalysis | null
   confirmAction?: StoryExpansionConfirmAction
   lifecycle: {
-    beginStoryExpansionRequest: () => void
+    beginStoryExpansionRequest: (analysis?: StoryExpansionAnalysis | null) => void
     closeStoryExpansionDialog: () => void
     handleStoryExpansionTaskStarted: (taskId: string | null | undefined) => void
     handleStoryExpansionTaskFailure: (message: string) => void
@@ -70,7 +70,10 @@ export function useStoryExpansionSubmit({
         return
       }
 
-      if (!confirmStoryExpansionSubmitPreflight(preflight, confirmAction ?? window.confirm)) {
+      if (!await confirmStoryExpansionSubmitPreflight(
+        preflight,
+        confirmAction ?? ((confirmDialog) => window.confirm(confirmDialog.message)),
+      )) {
         return
       }
 
@@ -85,7 +88,7 @@ export function useStoryExpansionSubmit({
         requestPlan: preflight.requestPlan,
       })
 
-      lifecycle.beginStoryExpansionRequest()
+      lifecycle.beginStoryExpansionRequest(analysis)
       lifecycle.closeStoryExpansionDialog()
 
       const response = await apiClient.expandStory(payload)

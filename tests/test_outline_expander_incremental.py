@@ -1678,6 +1678,7 @@ def test_expand_volume_detail_raises_when_retries_still_have_too_few_chapters(mo
 ✅ 本卷任务完成：进入宗门
 """,
             "仍旧没有新增章节。",
+            "仍旧没有新增章节。",
         ]
     )
     expander.plot_architect_plus = _QueueAgent([])
@@ -1706,7 +1707,8 @@ def test_expand_volume_detail_raises_when_retries_still_have_too_few_chapters(mo
             ],
         )
 
-    assert len(expander.plot_architect_r1.prompts) == 4
+    assert len(expander.plot_architect_r1.prompts) == 5
     assert "补充纠偏" in expander.plot_architect_r1.prompts[1]
     assert "强制纠偏" in expander.plot_architect_r1.prompts[2]
     assert "只补写缺失的后续章节" in expander.plot_architect_r1.prompts[3]
+    assert "第32-32章仍缺失" in expander.plot_architect_r1.prompts[4]

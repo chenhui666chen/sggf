@@ -12,7 +12,16 @@ export interface StoryExpansionFrameworkMetadata {
   framework_generated_at?: string | null
 }
 
-export interface StoryExpansionAnalysis {
+export interface StoryExpansionDurationEstimate {
+  estimated_duration_minutes_min?: number | null
+  estimated_duration_minutes_max?: number | null
+}
+
+export interface StoryExpansionTaskMeta extends StoryExpansionDurationEstimate {
+  wait_hint?: string | null
+}
+
+export interface StoryExpansionAnalysis extends StoryExpansionDurationEstimate {
   execution_mode?: string
   execution_mode_reason?: string
   recommended_strategy?: StoryExpansionStrategy | string
@@ -137,6 +146,10 @@ export interface StoryExpansionExecutionRound {
   character?: {
     increment_requested?: number | null
     post_validation_score?: number | null
+    cards_response_mode?: string
+    cards_retry_used?: boolean
+    recognized_new_character_count?: number | null
+    recognized_new_character_names?: string[]
   }
 }
 

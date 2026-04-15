@@ -15,6 +15,195 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 MAX_CHAPTERS_PER_VOLUME = 100
+CHAPTER_RANGE_LABEL_PATTERN = re.compile(
+    r'(?P<label>覆盖章节|章节范围|章节区间|章节：)\s*[：:]\s*(?P<start>\d+)\s*[-~—至到]+\s*(?P<end>\d+)(?P<suffix>\s*章?)'
+)
+CHAPTER_RANGE_PATTERN = re.compile(
+    r'第\s*(?P<start>\d+)\s*[-~—至到]+\s*(?:第\s*)?(?P<end>\d+)\s*章'
+)
+CHAPTER_NUMBER_PATTERN = re.compile(r'第\s*(?P<number>\d+)\s*章')
+VOLUME_DETAIL_CHAPTER_HEADING_PATTERN = re.compile(
+    r'(?m)^(?:#{1,6}\s*)?(?:\*\*)?\s*第\s*(?P<number>\d+)\s*章(?:\s*[：:、\-]\s*|\s+)?'
+)
+
+
+def _safe_int(value: object, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _extract_volume_detail_heading_numbers(detail_content: str) -> List[int]:
+    if not detail_content or not detail_content.strip():
+        return []
+
+    numbers: List[int] = []
+    seen: set[int] = set()
+    for match in VOLUME_DETAIL_CHAPTER_HEADING_PATTERN.finditer(detail_content):
+        chapter_number = _safe_int(match.group("number"), 0)
+        if chapter_number <= 0 or chapter_number in seen:
+            continue
+        seen.add(chapter_number)
+        numbers.append(chapter_number)
+    return numbers
+
+
+def _extract_volume_detail_count_from_text(content: str) -> int:
+    if not content or not content.strip():
+        return 0
+
+    heading_numbers = _extract_volume_detail_heading_numbers(content)
+    if heading_numbers:
+        return len(heading_numbers)
+
+    range_match = CHAPTER_RANGE_PATTERN.search(content)
+    if range_match:
+        start = _safe_int(range_match.group("start"), 0)
+        end = _safe_int(range_match.group("end"), 0)
+        if end >= start > 0:
+            return end - start + 1
+
+    labeled_range_match = CHAPTER_RANGE_LABEL_PATTERN.search(content)
+    if labeled_range_match:
+        start = _safe_int(labeled_range_match.group("start"), 0)
+        end = _safe_int(labeled_range_match.group("end"), 0)
+        if end >= start > 0:
+            return end - start + 1
+
+    estimated_match = re.search(r'预计\s*(\d+)(?:\s*[-~—至到]+\s*(\d+))?\s*章', content)
+    if estimated_match:
+        lower = _safe_int(estimated_match.group(1), 0)
+        upper = _safe_int(estimated_match.group(2) or lower, 0)
+        return max(lower, upper, 0)
+
+    exact_match = re.search(r'章节规模[：:]\s*(\d+)\s*章?', content)
+    if exact_match:
+        return max(_safe_int(exact_match.group(1), 0), 0)
+
+    return 0
+
+
+def _estimate_volume_chapter_count(vol_data: Dict[str, any]) -> int:
+    if not isinstance(vol_data, dict):
+        return 0
+
+    chapter_count = max(_safe_int(vol_data.get("chapter_count"), 0), 0)
+    if chapter_count > 0:
+        return chapter_count
+
+    chapter_range = vol_data.get("chapters_range") or [0, 0]
+    if isinstance(chapter_range, (list, tuple)) and len(chapter_range) >= 2:
+        start = _safe_int(chapter_range[0], 0)
+        end = _safe_int(chapter_range[1], 0)
+        if start > 0 and end >= start:
+            return end - start + 1
+
+    for field in ("detail", "summary"):
+        estimated = _extract_volume_detail_count_from_text(str(vol_data.get(field) or ""))
+        if estimated > 0:
+            return estimated
+
+    return 0
+
+
+def _shift_chapter_references(text: str, delta: int) -> str:
+    if not text or delta == 0:
+        return text
+
+    def replace_labeled_range(match: re.Match[str]) -> str:
+        start = _safe_int(match.group("start"), 0)
+        end = _safe_int(match.group("end"), 0)
+        return (
+            f"{match.group('label')}：{start + delta}-{end + delta}{match.group('suffix') or ''}"
+            if start > 0 and end > 0
+            else match.group(0)
+        )
+
+    def replace_range(match: re.Match[str]) -> str:
+        start = _safe_int(match.group("start"), 0)
+        end = _safe_int(match.group("end"), 0)
+        if start <= 0 or end <= 0:
+            return match.group(0)
+        return f"第{start + delta}-{end + delta}章"
+
+    def replace_single(match: re.Match[str]) -> str:
+        number = _safe_int(match.group("number"), 0)
+        if number <= 0:
+            return match.group(0)
+        return f"第{number + delta}章"
+
+    shifted = CHAPTER_RANGE_LABEL_PATTERN.sub(replace_labeled_range, text)
+    shifted = CHAPTER_RANGE_PATTERN.sub(replace_range, shifted)
+    shifted = CHAPTER_NUMBER_PATTERN.sub(replace_single, shifted)
+    return shifted
+
+
+def _renumber_volume_detail_content(
+    detail_content: str,
+    *,
+    expected_start: int,
+    original_start: int = 0,
+) -> str:
+    if not detail_content or not detail_content.strip():
+        return detail_content
+
+    heading_numbers = _extract_volume_detail_heading_numbers(detail_content)
+    detected_start = heading_numbers[0] if heading_numbers else max(_safe_int(original_start, 0), 0)
+    if detected_start <= 0:
+        return detail_content
+
+    delta = int(expected_start or 0) - detected_start
+    return _shift_chapter_references(detail_content, delta)
+
+
+def normalize_volume_detail_layout(
+    volumes_data: Dict[str, any],
+    *,
+    rewrite_detail_content: bool = False,
+) -> Dict[str, any]:
+    if not isinstance(volumes_data, dict):
+        return {
+            "total_volumes": 0,
+            "framework_generated_at": None,
+            "framework_header": "",
+            "framework_footer": "",
+            "volumes": {},
+        }
+
+    normalized = json.loads(json.dumps(volumes_data, ensure_ascii=False))
+    volumes = normalized.get("volumes")
+    if not isinstance(volumes, dict):
+        normalized["volumes"] = {}
+        return normalized
+
+    running_chapter_end = 0
+    for vol_key, vol_data in sorted(volumes.items(), key=lambda item: int(item[0])):
+        if not isinstance(vol_data, dict):
+            continue
+
+        chapter_count = _estimate_volume_chapter_count(vol_data)
+        if chapter_count <= 0:
+            continue
+
+        expected_start = running_chapter_end + 1
+        expected_end = expected_start + chapter_count - 1
+        original_range = vol_data.get("chapters_range") or [0, 0]
+        original_start = _safe_int(original_range[0], 0)
+
+        vol_data["chapter_count"] = chapter_count
+        if vol_data.get("type") == "detail":
+            vol_data["chapters_range"] = [expected_start, expected_end]
+            if rewrite_detail_content and vol_data.get("detail"):
+                vol_data["detail"] = _renumber_volume_detail_content(
+                    str(vol_data.get("detail") or ""),
+                    expected_start=expected_start,
+                    original_start=original_start,
+                )
+
+        running_chapter_end = expected_end
+
+    return normalized
 
 
 def add_volume_anchors(framework: str, total_volumes: int) -> str:
@@ -459,6 +648,7 @@ def create_volume_entry(
     title: str,
     summary: str,
     chapters_range: List[int] = None,
+    chapter_count: int | None = None,
     detail: str = None,
     expanded_at: str = None
 ) -> Dict[str, any]:
@@ -470,6 +660,7 @@ def create_volume_entry(
         title: 卷标题
         summary: 框架阶段的卷概要
         chapters_range: 章节范围 [start, end]
+        chapter_count: 章节数量（与全局起止编号解耦）
         detail: 细纲内容（展开后填入）
         expanded_at: 展开时间
     
@@ -482,6 +673,7 @@ def create_volume_entry(
         "summary": summary,                             # 保留原始概要（可回退）
         "detail": detail,                               # 细纲内容
         "chapters_range": chapters_range or [0, 0],
+        "chapter_count": chapter_count,
         "expanded_at": expanded_at
     }
 
@@ -532,6 +724,12 @@ def parse_epic_volumes_json(json_str: str) -> Dict[str, any]:
             data["framework_header"] = ""
         if "framework_footer" not in data:
             data["framework_footer"] = ""
+        if isinstance(data.get("volumes"), dict):
+            for vol_data in data["volumes"].values():
+                if not isinstance(vol_data, dict):
+                    continue
+                if "chapter_count" not in vol_data:
+                    vol_data["chapter_count"] = _estimate_volume_chapter_count(vol_data)
         
         return data
     except json.JSONDecodeError as e:
@@ -574,6 +772,10 @@ def _migrate_old_format(old_data: Dict) -> Dict[str, any]:
                     vol_data.get("chapters_start", 0),
                     vol_data.get("chapters_end", 0)
                 ],
+                "chapter_count": max(
+                    0,
+                    _safe_int(vol_data.get("chapters_end"), 0) - _safe_int(vol_data.get("chapters_start"), 0) + 1,
+                ),
                 "expanded_at": vol_data.get("generated_at")
             }
         except (ValueError, TypeError):
@@ -811,12 +1013,14 @@ def update_volume_detail(
         更新后的volumes数据
     """
     vol_key = str(volume_num)
+    chapter_count = max(0, _safe_int(chapters_range[1], 0) - _safe_int(chapters_range[0], 0) + 1)
     
     if vol_key in volumes_data["volumes"]:
         # 更新现有卷
         volumes_data["volumes"][vol_key]["type"] = "detail"
         volumes_data["volumes"][vol_key]["detail"] = detail_content
         volumes_data["volumes"][vol_key]["chapters_range"] = chapters_range
+        volumes_data["volumes"][vol_key]["chapter_count"] = chapter_count
         volumes_data["volumes"][vol_key]["expanded_at"] = datetime.now().isoformat()
         logger.info(f"✅ 已更新第{volume_num}卷细纲（第{chapters_range[0]}-{chapters_range[1]}章）")
     else:
@@ -826,12 +1030,13 @@ def update_volume_detail(
             title=f"第{volume_num}卷",
             summary="",
             chapters_range=chapters_range,
+            chapter_count=chapter_count,
             detail=detail_content,
             expanded_at=datetime.now().isoformat()
         )
         logger.warning(f"⚠️ 第{volume_num}卷不存在，已新增")
     
-    return volumes_data
+    return normalize_volume_detail_layout(volumes_data, rewrite_detail_content=True)
 
 
 def get_volume_state(volumes_data: Dict[str, any]) -> Dict[str, any]:
@@ -846,7 +1051,8 @@ def get_volume_state(volumes_data: Dict[str, any]) -> Dict[str, any]:
             "frameworkGeneratedAt": str or None
         }
     """
-    if not volumes_data or not volumes_data.get("volumes"):
+    normalized_data = normalize_volume_detail_layout(volumes_data)
+    if not normalized_data or not normalized_data.get("volumes"):
         return {
             "hasFramework": False,
             "totalVolumes": 0,
@@ -855,7 +1061,7 @@ def get_volume_state(volumes_data: Dict[str, any]) -> Dict[str, any]:
         }
     
     expanded = []
-    for vol_key, vol_data in volumes_data["volumes"].items():
+    for vol_key, vol_data in normalized_data["volumes"].items():
         if vol_data.get("type") == "detail":
             try:
                 expanded.append(int(vol_key))
@@ -863,10 +1069,10 @@ def get_volume_state(volumes_data: Dict[str, any]) -> Dict[str, any]:
                 pass
     
     return {
-        "hasFramework": len(volumes_data["volumes"]) > 0,
-        "totalVolumes": volumes_data.get("total_volumes", len(volumes_data["volumes"])),
+        "hasFramework": len(normalized_data["volumes"]) > 0,
+        "totalVolumes": normalized_data.get("total_volumes", len(normalized_data["volumes"])),
         "expandedVolumes": sorted(expanded),
-        "frameworkGeneratedAt": volumes_data.get("framework_generated_at")
+        "frameworkGeneratedAt": normalized_data.get("framework_generated_at")
     }
 
 
@@ -885,14 +1091,15 @@ def merge_volumes_to_outline(volumes_data: Dict[str, any]) -> str:
     Returns:
         拼接后的大纲内容
     """
-    if not volumes_data or not volumes_data.get("volumes"):
+    normalized_data = normalize_volume_detail_layout(volumes_data, rewrite_detail_content=True)
+    if not normalized_data or not normalized_data.get("volumes"):
         return ""
     
     result = []
     expanded_list = []
     
     # 🌟 1. 添加头部内容（整体叙事节奏、境界体系等）
-    framework_header = volumes_data.get("framework_header", "")
+    framework_header = normalized_data.get("framework_header", "")
     if framework_header:
         result.append(framework_header)
         result.append('')
@@ -905,7 +1112,7 @@ def merge_volumes_to_outline(volumes_data: Dict[str, any]) -> str:
     
     # 按卷号排序
     sorted_volumes = sorted(
-        volumes_data["volumes"].items(),
+        normalized_data["volumes"].items(),
         key=lambda x: int(x[0])
     )
     
@@ -936,7 +1143,7 @@ def merge_volumes_to_outline(volumes_data: Dict[str, any]) -> str:
         result.append('')
     
     # 🌟 3. 添加尾部内容（伏笔布局、人物周期等）
-    framework_footer = volumes_data.get("framework_footer", "")
+    framework_footer = normalized_data.get("framework_footer", "")
     if framework_footer:
         result.append('---')
         result.append('')
@@ -945,7 +1152,7 @@ def merge_volumes_to_outline(volumes_data: Dict[str, any]) -> str:
     
     # 添加拼接统计
     result.append('---')
-    result.append(f'_✅ 共{volumes_data.get("total_volumes", len(sorted_volumes))}卷 | 已展开：{expanded_list if expanded_list else "无"} | 拼接时间：{datetime.now().strftime("%Y-%m-%d %H:%M")}_')
+    result.append(f'_✅ 共{normalized_data.get("total_volumes", len(sorted_volumes))}卷 | 已展开：{expanded_list if expanded_list else "无"} | 拼接时间：{datetime.now().strftime("%Y-%m-%d %H:%M")}_')
     
     logger.info(f"✅ 大纲拼接完成：{len(expanded_list)}/{len(sorted_volumes)} 卷已展开")
     return '\n'.join(result)
@@ -977,6 +1184,7 @@ def parse_volumes_detail_json(json_str: str) -> Dict[int, Dict[str, any]]:
         
         # 检测新结构
         if "volumes" in raw_dict:
+            raw_dict = normalize_volume_detail_layout(raw_dict, rewrite_detail_content=True)
             # 新结构：转换为旧格式返回
             result = {}
             for vol_key, vol_data in raw_dict["volumes"].items():

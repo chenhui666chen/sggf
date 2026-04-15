@@ -505,7 +505,7 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
     name="Qwen3 Max",
     provider="alibaba",
     capabilities=["creative", "dialogue", "reasoning", "writing"],
-    task_types=["concept", "chapter", "dialogue", "creative", "writing"],
+    task_types=["chapter", "dialogue", "creative", "writing"],
     max_context_tokens=32000,
     max_output_tokens=8192,
     quality_score=8.5,
@@ -529,7 +529,7 @@ class QwenMaxAdapter(OpenAICompatibleAdapter):
     name="Qwen Long",
     provider="alibaba",
     capabilities=["long_context", "summarization", "analysis"],
-    task_types=["outline_expand", "book_synthesis", "long_context"],
+    task_types=["book_synthesis", "long_context"],
     max_context_tokens=10000000,
     max_output_tokens=8192,
     quality_score=8.0,
@@ -552,7 +552,7 @@ class QwenLongAdapter(OpenAICompatibleAdapter):
     name="Qwen3.5 Plus",
     provider="alibaba",
     capabilities=["creative", "reasoning", "long_context", "writing", "multimodal"],
-    task_types=["outline_expand", "volume_outline", "chapter_batch", "long_writing", "multimodal_analysis"],
+    task_types=["concept", "outline_expand", "volume_outline", "chapter_batch", "long_writing", "multimodal_analysis"],
     max_context_tokens=1000000,
     max_output_tokens=65536,
     quality_score=8.8,
@@ -563,7 +563,7 @@ class QwenLongAdapter(OpenAICompatibleAdapter):
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     supports_vision=True,
     priority=1,
-    fallback_models=["qwen3-max", "qwen-long"],
+    fallback_models=["deepseek-chat"],
     tags=["creative", "reasoning", "long_context", "chinese"],
 )
 class Qwen35PlusAdapter(OpenAICompatibleAdapter):
@@ -600,7 +600,7 @@ class QwenTurboAdapter(OpenAICompatibleAdapter):
     name="DeepSeek R1",
     provider="deepseek",
     capabilities=["reasoning", "logic", "analysis", "planning"],
-    task_types=["worldview", "character", "structure_plot", "review", "reasoning"],
+    task_types=["worldview", "character", "character_expand", "volume_detail_expand", "structure_plot", "review", "reasoning"],
     max_context_tokens=64000,
     max_output_tokens=8192,
     quality_score=9.0,
@@ -613,7 +613,7 @@ class QwenTurboAdapter(OpenAICompatibleAdapter):
     supports_timeout_param=False,
     supports_max_retries=False,
     priority=1,
-    fallback_models=["qwen3-max"],
+    fallback_models=["qwen3.5-plus"],
     tags=["reasoning", "logic"],
 )
 class DeepSeekReasonerAdapter(OpenAICompatibleAdapter):
@@ -714,7 +714,7 @@ class DeepSeekReasonerAdapter(OpenAICompatibleAdapter):
     api_key_env="DEEPSEEK_API_KEY",
     base_url="https://api.deepseek.com/v1",
     priority=2,
-    fallback_models=["qwen3-max"],
+    fallback_models=["qwen3.5-plus"],
     tags=["chat", "fast"],
 )
 class DeepSeekChatAdapter(OpenAICompatibleAdapter):

@@ -38,7 +38,7 @@ describe('storyExpansionRecommendation', () => {
       recommendedChaptersPerVolumeMin: 45,
       recommendedChaptersPerVolumeMax: 70,
     })
-    expect(recommendation.recommendationReason).toContain('单卷细化建议：45-70章')
+    expect(recommendation.recommendationReason).toContain('单卷细化默认预填：60-80章')
     expect(recommendation.recommendationReason).toContain('先生成总纲、阶段路线图和分卷框架，再按卷滚动细化')
   })
 
@@ -56,6 +56,7 @@ describe('storyExpansionRecommendation', () => {
       recommendedChaptersPerVolumeMax: 60,
     })
     expect(recommendation.recommendationReason).toContain('题材：修仙（境界体系）')
+    expect(recommendation.recommendationReason).toContain('单卷细化默认预填：60-80章')
     expect(recommendation.recommendationReason).toContain('适用：先锁定境界大阶段，再按卷滚动细化每个故事台阶')
     expect(recommendation.recommendationReason).toContain('先生成总纲、阶段路线图和分卷框架，再按卷滚动细化')
   })

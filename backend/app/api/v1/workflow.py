@@ -6,7 +6,7 @@ import logging
 import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status, Body, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 from pydantic import BaseModel, ConfigDict
 from app.db.base import get_db, SessionLocal
 from app.services.agent_coordinator import (
@@ -1312,6 +1312,38 @@ def _detect_total_volumes_from_framework(framework_text: str) -> int:
     return 10
 
 
+def _extract_story_volume_chapter_bounds_from_text(content: str) -> Optional[Tuple[int, int]]:
+    text_content = str(content or "")
+    if not text_content.strip():
+        return None
+
+    try:
+        from app.services.story_expansion_coordinator import parse_outline_blocks
+        from app.services.story_text_utils import normalize_story_text
+
+        normalized_text = normalize_story_text(text_content)
+        _, blocks = parse_outline_blocks(normalized_text)
+        chapter_numbers = [
+            int(block.original_number)
+            for block in blocks
+            if int(getattr(block, "original_number", 0) or 0) > 0
+        ]
+        if chapter_numbers:
+            return min(chapter_numbers), max(chapter_numbers)
+    except Exception:
+        pass
+
+    chapter_number_matches = [
+        int(match)
+        for match in re.findall(r"(?m)^(?:#{1,6}\s*)?(?:\*\*)?\s*第\s*(\d+)\s*章", text_content)
+        if str(match).isdigit()
+    ]
+    if chapter_number_matches:
+        return min(chapter_number_matches), max(chapter_number_matches)
+
+    return None
+
+
 def _estimate_story_volume_chapter_count_from_text(content: str) -> int:
     text_content = str(content or "")
     if not text_content.strip():
@@ -1352,12 +1384,22 @@ def _estimate_story_volume_chapter_count_from_text(content: str) -> int:
         except Exception:
             pass
 
+    chapter_bounds = _extract_story_volume_chapter_bounds_from_text(text_content)
+    if chapter_bounds:
+        start, end = chapter_bounds
+        if end >= start > 0:
+            return end - start + 1
+
     return 0
 
 
 def _estimate_story_volume_chapter_count(vol_data: Dict[str, Any]) -> int:
     if not isinstance(vol_data, dict):
         return 0
+
+    chapter_count = int(vol_data.get("chapter_count") or 0)
+    if chapter_count > 0:
+        return chapter_count
 
     chapter_range = vol_data.get("chapters_range") or [0, 0]
     if isinstance(chapter_range, (list, tuple)) and len(chapter_range) >= 2:
@@ -1384,7 +1426,11 @@ def _resolve_story_volume_detail_config(
     if request.expansion_mode != "volume_detail":
         return None
 
-    from app.services.outline_merger import parse_epic_volumes_json, parse_framework_to_volumes
+    from app.services.outline_merger import (
+        normalize_volume_detail_layout,
+        parse_epic_volumes_json,
+        parse_framework_to_volumes,
+    )
 
     epic_framework_state = WorkflowContextBuilder(db).load_epic_framework_state(request.project_id)
 
@@ -1400,6 +1446,7 @@ def _resolve_story_volume_detail_config(
     if not volumes_data.get("volumes"):
         detected_total_volumes = _detect_total_volumes_from_framework(framework_content)
         volumes_data = parse_framework_to_volumes(framework_content, detected_total_volumes)
+    volumes_data = normalize_volume_detail_layout(volumes_data, rewrite_detail_content=True)
 
     volumes_dict = volumes_data.get("volumes", {})
     target_volume_index = int(request.target_volume_index or 0)
@@ -1421,10 +1468,16 @@ def _resolve_story_volume_detail_config(
     for vol_key, vol_data in volumes_dict.items():
         if vol_data.get("type") == "detail":
             chapter_range = vol_data.get("chapters_range") or [0, 0]
+            detected_end = 0
             try:
-                current_total_chapter_count = max(current_total_chapter_count, int(chapter_range[1] or 0))
+                detected_end = int(chapter_range[1] or 0)
             except Exception:
-                pass
+                detected_end = 0
+            if detected_end <= 0:
+                chapter_bounds = _extract_story_volume_chapter_bounds_from_text(str(vol_data.get("detail") or ""))
+                if chapter_bounds:
+                    detected_end = int(chapter_bounds[1])
+            current_total_chapter_count = max(current_total_chapter_count, detected_end)
 
     for vol_num in range(1, target_volume_index):
         vol_data = volumes_dict.get(str(vol_num)) or {}
@@ -4680,7 +4733,14 @@ async def get_running_tasks(
     logger = logging.getLogger("uvicorn.error")
 
     # 🔧 超时阈值：30分钟
-    TASK_TIMEOUT_MINUTES = 30
+    DEFAULT_TASK_TIMEOUT_MINUTES = 30
+    EXPAND_STORY_TASK_TIMEOUT_MINUTES = 180
+
+    def resolve_task_timeout_minutes(task_type: Any) -> int:
+        normalized_task_type = str(task_type or "").strip().lower()
+        if normalized_task_type == "expand_story":
+            return EXPAND_STORY_TASK_TIMEOUT_MINUTES
+        return DEFAULT_TASK_TIMEOUT_MINUTES
 
     try:
         logger.info(f"🔍 查询项目 {project_id} 的正在运行任务...")
@@ -4724,6 +4784,7 @@ async def get_running_tasks(
             task_type = row[1]
             status = row[2]
             created_at_str = row[3]
+            task_timeout_minutes = resolve_task_timeout_minutes(task_type)
 
             # 解析创建时间
             created_at = parse_datetime_utc(created_at_str, default=now) or now
@@ -4759,7 +4820,7 @@ async def get_running_tasks(
 
                 logger.info(f"   ✅ 已将过时任务 {task_id} 标记为 completed")
 
-            elif task_age_minutes > TASK_TIMEOUT_MINUTES:
+            elif task_age_minutes > task_timeout_minutes:
                 # 标记为超时
                 logger.warning(f"⏰ 检测到超时任务: {task_id}, 运行时间: {task_age_minutes:.1f}分钟")
 
@@ -4772,7 +4833,7 @@ async def get_running_tasks(
                 """)
 
                 db.execute(update_query, {
-                    "error": f"任务超时（运行超过{TASK_TIMEOUT_MINUTES}分钟）",
+                    "error": f"任务超时（运行超过{task_timeout_minutes}分钟）",
                     "completed_at": now.isoformat(),
                     "task_id": task_id
                 })

@@ -6,13 +6,13 @@ import {
 } from '../storyExpansionRequest'
 
 describe('storyExpansionRequest', () => {
-  it('常规协同只带通用字段', () => {
+  it('builds a total-mode payload with shared fields only', () => {
     expect(
       buildStoryExpansionRequestPayload({
         projectId: 1,
-        currentOutline: '第1章：开场',
-        worldSetting: '蒸汽仙侠世界',
-        characters: '林舟',
+        currentOutline: 'Chapter 1: Opening',
+        worldSetting: 'Steam fantasy world',
+        characters: 'Lin Zhou',
         currentChapterCount: 10,
         currentCharacterCount: 3,
         targetTotalChapters: 18,
@@ -33,9 +33,9 @@ describe('storyExpansionRequest', () => {
       }),
     ).toEqual({
       project_id: 1,
-      current_outline: '第1章：开场',
-      world_setting: '蒸汽仙侠世界',
-      characters: '林舟',
+      current_outline: 'Chapter 1: Opening',
+      world_setting: 'Steam fantasy world',
+      characters: 'Lin Zhou',
       current_chapter_count: 10,
       current_character_count: 3,
       target_total_chapters: 18,
@@ -49,12 +49,12 @@ describe('storyExpansionRequest', () => {
     })
   })
 
-  it('长篇框架协同带上总卷与总章范围', () => {
+  it('adds epic framework range fields to epic payloads', () => {
     expect(
       buildStoryExpansionRequestPayload({
         projectId: 2,
         currentOutline: '',
-        worldSetting: '玄幻世界',
+        worldSetting: 'Fantasy world',
         characters: '',
         currentChapterCount: 40,
         currentCharacterCount: 8,
@@ -75,13 +75,13 @@ describe('storyExpansionRequest', () => {
     })
   })
 
-  it('单卷细化协同带上卷级参数与人物增量', () => {
+  it('adds volume detail fields and character increment to volume payloads', () => {
     expect(
       buildStoryExpansionRequestPayload({
         projectId: 3,
-        currentOutline: '## 分卷概要',
-        worldSetting: '都市异能',
-        characters: '顾晚',
+        currentOutline: '## Volume Summary',
+        worldSetting: 'Urban supernatural',
+        characters: 'Gu Wan',
         currentChapterCount: 60,
         currentCharacterCount: 9,
         strategy: 'plot_first',
@@ -105,7 +105,7 @@ describe('storyExpansionRequest', () => {
     })
   })
 
-  it('分析阶段默认使用请求计划中的目标值', () => {
+  it('uses planned request targets when analysis is not preferred', () => {
     expect(
       resolveStoryExpansionRequestTargets({
         currentChapterCount: 20,
@@ -124,11 +124,12 @@ describe('storyExpansionRequest', () => {
     })
   })
 
-  it('正式提交阶段优先使用分析返回的有效目标', () => {
+  it('prefers analysis targets when the user explicitly provided both fields', () => {
     expect(
       resolveStoryExpansionRequestTargets({
         currentChapterCount: 20,
         currentCharacterCount: 5,
+        expansionMode: 'total',
         preferAnalysis: true,
         requestPlan: {
           isVolumeDetailMode: false,
@@ -148,11 +149,45 @@ describe('storyExpansionRequest', () => {
     })
   })
 
-  it('正式提交阶段在单卷细化下不会误带章节总目标', () => {
+  it('keeps the character target blank when phased total-mode auto supplement should continue on the server', () => {
+    expect(
+      resolveStoryExpansionRequestTargets({
+        currentChapterCount: 20,
+        currentCharacterCount: 7,
+        expansionMode: 'total',
+        preferAnalysis: true,
+        requestPlan: {
+          isVolumeDetailMode: false,
+          requestedTargetChapterCount: 300,
+          requestedTargetCharacterCount: undefined,
+          requestedChapterDelta: 280,
+          requestedCharacterDelta: 0,
+        },
+        analysis: {
+          effective_target_chapter_count: 300,
+          effective_target_character_count: 15,
+          effective_expansion_mode: 'total',
+          auto_supplement: {
+            character_delta: 8,
+            character_plan: {
+              stage_target_characters: 15,
+              task_target_characters: 35,
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      targetTotalChapters: 300,
+      targetTotalCharacters: undefined,
+    })
+  })
+
+  it('still omits total chapter target for volume detail mode', () => {
     expect(
       resolveStoryExpansionRequestTargets({
         currentChapterCount: 120,
         currentCharacterCount: 18,
+        expansionMode: 'volume_detail',
         preferAnalysis: true,
         requestPlan: {
           isVolumeDetailMode: true,
@@ -169,6 +204,35 @@ describe('storyExpansionRequest', () => {
     ).toEqual({
       targetTotalChapters: undefined,
       targetTotalCharacters: 24,
+    })
+  })
+
+  it('uses analysis character target for volume detail mode when the form leaves characters blank', () => {
+    expect(
+      resolveStoryExpansionRequestTargets({
+        currentChapterCount: 120,
+        currentCharacterCount: 18,
+        expansionMode: 'volume_detail',
+        preferAnalysis: true,
+        requestPlan: {
+          isVolumeDetailMode: true,
+          requestedTargetChapterCount: undefined,
+          requestedTargetCharacterCount: undefined,
+          requestedChapterDelta: 0,
+          requestedCharacterDelta: 0,
+        },
+        analysis: {
+          effective_target_chapter_count: 200,
+          effective_target_character_count: 22,
+          volume_detail: {
+            character_increment: 4,
+            target_character_count: 22,
+          },
+        },
+      }),
+    ).toEqual({
+      targetTotalChapters: undefined,
+      targetTotalCharacters: 22,
     })
   })
 })

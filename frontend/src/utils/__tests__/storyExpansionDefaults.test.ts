@@ -51,7 +51,7 @@ describe('storyExpansionDefaults', () => {
     ).toEqual({
       expansionMode: 'volume_detail',
       targetChapterCount: null,
-      targetCharacterCount: 9,
+      targetCharacterCount: null,
       targetVolumeIndex: 4,
     })
   })
@@ -93,8 +93,8 @@ describe('storyExpansionDefaults', () => {
       totalVolumes: 8,
       totalChaptersMin: 480,
       totalChaptersMax: 640,
-      volumeChaptersMin: 40,
-      volumeChaptersMax: 60,
+      volumeChaptersMin: 60,
+      volumeChaptersMax: 80,
       volumeCharacterIncrement: null,
     })
   })
@@ -120,13 +120,13 @@ describe('storyExpansionDefaults', () => {
     ).toEqual({
       expansionMode: 'volume_detail',
       targetChapterCount: null,
-      targetCharacterCount: 14,
+      targetCharacterCount: null,
       targetVolumeIndex: 3,
       totalVolumes: 12,
       totalChaptersMin: 600,
       totalChaptersMax: 840,
-      volumeChaptersMin: 40,
-      volumeChaptersMax: 60,
+      volumeChaptersMin: 60,
+      volumeChaptersMax: 80,
       volumeCharacterIncrement: null,
     })
   })
@@ -151,8 +151,8 @@ describe('storyExpansionDefaults', () => {
       totalVolumes: 6,
       totalChaptersMin: 300,
       totalChaptersMax: 420,
-      volumeChaptersMin: 40,
-      volumeChaptersMax: 60,
+      volumeChaptersMin: 60,
+      volumeChaptersMax: 80,
       volumeCharacterIncrement: null,
     })
   })
@@ -177,8 +177,8 @@ describe('storyExpansionDefaults', () => {
       totalVolumes: 30,
       totalChaptersMin: 2000,
       totalChaptersMax: 2500,
-      volumeChaptersMin: 40,
-      volumeChaptersMax: 60,
+      volumeChaptersMin: 60,
+      volumeChaptersMax: 80,
       volumeCharacterIncrement: null,
     })
   })
@@ -204,13 +204,13 @@ describe('storyExpansionDefaults', () => {
     ).toEqual({
       expansionMode: 'volume_detail',
       targetChapterCount: null,
-      targetCharacterCount: 12,
+      targetCharacterCount: null,
       targetVolumeIndex: 3,
       totalVolumes: 30,
       totalChaptersMin: 2000,
       totalChaptersMax: 2500,
-      volumeChaptersMin: 40,
-      volumeChaptersMax: 60,
+      volumeChaptersMin: 60,
+      volumeChaptersMax: 80,
       volumeCharacterIncrement: null,
     })
   })
@@ -236,13 +236,13 @@ describe('storyExpansionDefaults', () => {
     ).toEqual({
       expansionMode: 'volume_detail',
       targetChapterCount: null,
-      targetCharacterCount: 18,
+      targetCharacterCount: null,
       targetVolumeIndex: 4,
       totalVolumes: 10,
       totalChaptersMin: 600,
       totalChaptersMax: 800,
-      volumeChaptersMin: 40,
-      volumeChaptersMax: 60,
+      volumeChaptersMin: 60,
+      volumeChaptersMax: 80,
       volumeCharacterIncrement: null,
     })
   })

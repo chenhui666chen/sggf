@@ -869,6 +869,55 @@ def test_iterative_mode_can_raise_auto_character_target_with_chapter_progress():
     assert result["execution_rounds"][-1]["character"]["target_character_count"] == 22
 
 
+def test_iterative_mode_can_reach_total_task_character_target_for_blank_total_mode_request():
+    current_outline = "\n\n".join(
+        f"第{index}章：章节{index}\n- 场景目标：推进第{index}章剧情。\n- 涉及人物：角色1"
+        for index in range(1, 11)
+    )
+    current_characters = "\n\n".join(
+        f"### 【姓名】：角色{index}\n【角色定位】：配角"
+        for index in range(1, 11)
+    )
+    coordinator = _IterativeDynamicAutoCharacterCoordinator()
+
+    result = coordinator._execute_iterative_mode(
+        current_outline=current_outline,
+        characters=current_characters,
+        world_setting="",
+        target_total_chapters=300,
+        target_total_characters=18,
+        strategy="plot_first",
+        mode_info={
+            "reason": "test",
+            "current_chapter_count": 10,
+            "current_character_count": 10,
+            "target_chapter_count": 300,
+            "target_character_count": 18,
+            "chapters_needed": 290,
+            "characters_needed": 8,
+        },
+        auto_supplement_plan={
+            "character_plan": {
+                "stage_target_characters": 18,
+                "task_target_characters": 38,
+            }
+        },
+    )
+
+    character_round_targets = [
+        round_record["character"]["target_character_count"]
+        for round_record in result["execution_rounds"]
+        if round_record.get("character")
+    ]
+
+    assert result["current_character_count"] == 38
+    assert result["plan"]["target_character_count"] == 38
+    assert character_round_targets
+    assert character_round_targets[-1] == 38
+    assert max(coordinator.character_targets) == 38
+    assert coordinator.character_targets[0] > 18
+
+
 def test_normalize_character_stop_reason_rewrites_false_no_growth_claim_after_real_growth():
     reason = StoryExpansionCoordinator._normalize_character_stop_reason(
         "本轮未新增有效角色，但目标人物数20，当前仅8，缺口12个。需先完成本轮新增，或调整扩展策略。",
@@ -990,6 +1039,46 @@ class _VolumeDetailCoordinator(_AnalysisCoordinator):
                 }
 
         return _FakeExpander()
+
+
+class _VolumeDetailCharacterFocusCoordinator(_VolumeDetailCoordinator):
+    def __init__(self):
+        super().__init__()
+        self.character_plot_outlines = []
+
+    def _expand_characters_to_target(
+        self,
+        current_characters: str,
+        world_setting: str,
+        plot_outline: str,
+        current_character_count: int,
+        target_total_characters: int,
+    ) -> dict:
+        self.character_plot_outlines.append(plot_outline)
+        return {
+            "characters_text": current_characters + "\n\n### 【姓名】：顾晚\n【角色定位】：盟友",
+            "current_character_count": target_total_characters,
+            "character_delta": "### 【姓名】：顾晚\n【角色定位】：盟友",
+            "character_relationships": "",
+            "cards_response_mode": "json",
+            "cards_retry_used": False,
+            "recognized_new_character_count": 1,
+            "recognized_new_character_names": ["顾晚"],
+            "rounds": [
+                {
+                    "round": 1,
+                    "before_character_count": current_character_count,
+                    "after_character_count": target_total_characters,
+                    "increment_requested": max(0, target_total_characters - current_character_count),
+                    "post_validation_score": 80,
+                    "cards_response_mode": "json",
+                    "cards_retry_used": False,
+                    "recognized_new_character_count": 1,
+                    "recognized_new_character_names": ["顾晚"],
+                }
+            ],
+            "stop_reasons": [],
+        }
 
 
 def test_analyze_expansion_request_can_auto_add_supporting_characters():
@@ -1123,7 +1212,7 @@ def test_analyze_expansion_request_reports_epic_mode_and_model_plan():
     )
 
     assert analysis["execution_mode"] == "epic"
-    assert analysis["model_plan"]["outline_expansion_model"] == "qwen3-max"
+    assert analysis["model_plan"]["outline_expansion_model"] == "qwen3.5-plus"
     assert analysis["estimated_rounds"] >= 1
     assert any("目标章节规模较大" in note for note in analysis["model_plan"]["notes"])
 
@@ -1192,7 +1281,7 @@ def test_analyze_expansion_request_honors_explicit_epic_framework_mode():
     assert analysis["effective_expansion_mode"] == "epic_framework"
     assert analysis["epic_config"]["total_volumes"] == 12
     assert analysis["epic_config"]["chapter_range"] == [900, 1200]
-    assert analysis["model_plan"]["outline_expansion_model"] == "qwen3-max"
+    assert analysis["model_plan"]["outline_expansion_model"] == "qwen3.5-plus"
 
 
 def test_analyze_expansion_request_uses_phased_character_plan_for_epic_framework_auto_supplement():
@@ -1312,6 +1401,56 @@ def test_analyze_expansion_request_can_auto_estimate_volume_detail_characters():
     assert analysis["volume_detail"]["character_increment"] >= 2
 
 
+def test_analyze_expansion_request_volume_detail_auto_characters_use_current_volume_gap_when_total_is_already_full():
+    coordinator = _AnalysisCoordinator()
+    coordinator.genre = "玄幻群像"
+
+    current_characters = "\n\n".join(
+        f"### 【姓名】：角色{index}\n【角色定位】：配角"
+        for index in range(1, 13)
+    )
+    existing_volume_detail = """第61章：卷二开场
+- 涉及人物：角色1
+
+第62章：暗潮试探
+- 涉及人物：角色1、角色2"""
+
+    analysis = coordinator.analyze_expansion_request(
+        current_outline="## 📚 分卷概要",
+        characters=current_characters,
+        world_setting="",
+        target_total_chapters=100,
+        target_total_characters=None,
+        strategy="auto",
+        intent="auto",
+        enable_auto_supplement=True,
+        expansion_mode="volume_detail",
+        volume_detail_config={
+            "framework_content": "第1卷：旧卷\n第2卷：新卷",
+            "target_volume_index": 2,
+            "chapters_count_range": (30, 40),
+            "start_chapter_num": 61,
+            "expected_chapter_range": (61, 100),
+            "expected_total_chapter_count": 100,
+            "current_total_chapter_count": 100,
+            "existing_volume_detail": existing_volume_detail,
+            "volumes_data": {
+                "total_volumes": 2,
+                "volumes": {
+                    "1": {"title": "第一卷", "summary": "旧卷概要", "detail": "", "type": "detail"},
+                    "2": {"title": "第二卷", "summary": "卷二承接旧案与新敌", "detail": existing_volume_detail, "type": "detail"},
+                },
+            },
+        },
+    )
+
+    assert analysis["execution_mode"] == "volume_detail"
+    assert analysis["effective_target_character_count"] is not None
+    assert analysis["effective_target_character_count"] >= 15
+    assert analysis["volume_detail"]["character_increment"] >= 3
+    assert analysis["auto_supplement"]["character_plan"]["stage_target_characters"] == analysis["effective_target_character_count"]
+
+
 def test_analyze_expansion_request_adds_notes_for_sparse_outline_and_large_character_scale():
     coordinator = _AnalysisCoordinator()
 
@@ -1383,5 +1522,57 @@ def test_execute_volume_detail_mode_uses_explicit_volume_config():
     assert result["epic_total_volumes"] == 2
     assert coordinator.volume_calls[0]["target_volume_index"] == 2
     assert coordinator.volume_calls[0]["chapters_count_range"] == (30, 40)
+
+
+def test_execute_volume_detail_mode_uses_generated_volume_detail_for_character_focus():
+    coordinator = _VolumeDetailCharacterFocusCoordinator()
+
+    result = coordinator.execute(
+        current_outline="## 📚 分卷概要",
+        characters="### 【姓名】：林舟\n【角色定位】：主角",
+        world_setting="蒸汽仙侠世界",
+        target_total_chapters=60,
+        target_total_characters=2,
+        strategy="plot_first",
+        expansion_mode="volume_detail",
+        volume_detail_config={
+            "framework_content": "第1卷：旧卷\n第2卷：新卷",
+            "target_volume_index": 2,
+            "chapters_count_range": (30, 40),
+            "start_chapter_num": 21,
+            "framework_header": "## 整体节奏",
+            "framework_footer": "## 伏笔布局",
+            "volumes_data": {
+                "total_volumes": 2,
+                "framework_header": "## 整体节奏",
+                "framework_footer": "## 伏笔布局",
+                "volumes": {
+                    "1": {
+                        "type": "detail",
+                        "title": "第一卷",
+                        "summary": "",
+                        "detail": "第1章：旧卷开端",
+                        "chapters_range": [1, 20],
+                    },
+                    "2": {
+                        "type": "framework",
+                        "title": "第二卷",
+                        "summary": "新卷概要",
+                        "detail": None,
+                        "chapters_range": [0, 0],
+                    },
+                },
+            },
+            "expected_chapter_range": (21, 60),
+            "expected_total_chapter_count": 60,
+            "current_total_chapter_count": 20,
+            "total_volumes": 2,
+        },
+    )
+
+    assert result["execution_mode"] == "volume_detail"
+    assert coordinator.character_plot_outlines
+    assert coordinator.character_plot_outlines[0] == "第21章：新卷开场\n- 场景目标：卷级主线启动。"
+    assert result["execution_rounds"][-1]["recognized_new_character_count"] == 1
 
 

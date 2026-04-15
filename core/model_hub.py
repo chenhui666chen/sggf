@@ -167,10 +167,14 @@ class ModelHub:
         max_tokens: Optional[int],
         stream: bool,
         on_chunk: Optional[Callable[[str], None]],
+        attempted_models: Optional[set[str]] = None,
         **kwargs
     ) -> "LLMResult":
         """执行实际调用"""
         from schemas.unified_model_spec import LLMResult
+
+        attempted = set(attempted_models or set())
+        attempted.add(model_id)
 
         spec = self.registry.get_spec(model_id)
         if not spec:
@@ -182,11 +186,19 @@ class ModelHub:
             )
 
         if not self.registry._is_available(model_id):
-            fallback_id = spec.get_fallback_model()
-            if fallback_id and self.registry._is_available(fallback_id):
+            fallback_id = self._select_fallback_model(spec, attempted)
+            if fallback_id:
                 logger.warning(f"⚠️ 模型 {model_id} 不可用，切换到回退模型 {fallback_id}")
-                model_id = fallback_id
-                spec = self.registry.get_spec(model_id)
+                return await self._execute_call(
+                    model_id=fallback_id,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=stream,
+                    on_chunk=on_chunk,
+                    attempted_models=attempted,
+                    **{k: v for k, v in kwargs.items() if k != "max_retries"}
+                )
             else:
                 return LLMResult(
                     success=False,
@@ -206,7 +218,7 @@ class ModelHub:
 
         max_retries = self._resolve_max_retries(spec, kwargs)
         retry_kwargs = dict(kwargs)
-        timeout_auto_tuning_enabled = retry_kwargs.get("timeout") is None
+        timeout_auto_tuning_enabled = retry_kwargs.pop("disable_timeout_auto_tuning", False) is not True
         last_result = None
 
         for attempt in range(max_retries):
@@ -293,7 +305,7 @@ class ModelHub:
         # 内容安全回退链路：换用不同安全策略的模型重试
         _CONTENT_SAFETY_FALLBACK_CHAIN = ["deepseek-reasoner", "qwen3.5-plus"]
         if last_result and last_result.error_code == "content_safety":
-            tried = {model_id}
+            tried = set(attempted)
             strip_kwargs = {k: v for k, v in kwargs.items() if k != "max_retries"}
             for alt_id in _CONTENT_SAFETY_FALLBACK_CHAIN:
                 if alt_id in tried or not self.registry._is_available(alt_id):
@@ -309,6 +321,7 @@ class ModelHub:
                     max_tokens=max_tokens,
                     stream=stream,
                     on_chunk=on_chunk,
+                    attempted_models=tried,
                     **strip_kwargs,
                 )
                 if alt_result.success or alt_result.error_code != "content_safety":
@@ -316,8 +329,8 @@ class ModelHub:
             # 所有内容安全回退均失败，返回原始结果
             return last_result
 
-        fallback_id = spec.get_fallback_model() if spec else None
-        if fallback_id and fallback_id != model_id:
+        fallback_id = self._select_fallback_model(spec, attempted)
+        if fallback_id:
             logger.warning(f"⚠️ 模型 {model_id} 调用失败，尝试回退模型 {fallback_id}")
             return await self._execute_call(
                 model_id=fallback_id,
@@ -326,6 +339,7 @@ class ModelHub:
                 max_tokens=max_tokens,
                 stream=stream,
                 on_chunk=on_chunk,
+                attempted_models=attempted,
                 **{k: v for k, v in kwargs.items() if k != "max_retries"}
             )
 
@@ -408,6 +422,24 @@ class ModelHub:
             )
             return 1
 
+    def _select_fallback_model(
+        self,
+        spec: Optional["UnifiedModelSpec"],
+        attempted_models: set[str],
+    ) -> Optional[str]:
+        if spec is None:
+            return None
+
+        fallback_ids = list(getattr(spec.routing, "fallback_models", []) or [])
+        for fallback_id in fallback_ids:
+            normalized_id = normalize_model_id(fallback_id) or str(fallback_id).strip()
+            if not normalized_id or normalized_id in attempted_models:
+                continue
+            if self.registry._is_available(normalized_id):
+                return normalized_id
+
+        return None
+
     def _increase_retry_timeout_budget(
         self,
         spec: "UnifiedModelSpec",
@@ -424,6 +456,8 @@ class ModelHub:
 
         growth_factor = 1.5
         requested_tokens = self._safe_positive_int(max_tokens)
+        if requested_tokens is None:
+            requested_tokens = self._safe_positive_int((getattr(spec, "default_params", {}) or {}).get("max_tokens"))
         model_max_tokens = self._safe_positive_int(spec.constraints.max_output_tokens)
         if (
             requested_tokens is not None

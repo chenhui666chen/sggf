@@ -3,6 +3,38 @@ import { describe, expect, it } from 'vitest'
 import { createStoryExpansionDialogView } from '../storyExpansionDialogView'
 
 describe('storyExpansionDialogView', () => {
+  it('展示分析返回的预计耗时区间', () => {
+    const view = createStoryExpansionDialogView({
+      currentChapterCount: 20,
+      currentCharacterCount: 6,
+      targetChapterCount: 300,
+      targetCharacterCount: 18,
+      expansionMode: 'total',
+      totalVolumes: null,
+      totalChaptersMin: null,
+      totalChaptersMax: null,
+      frameworkMetadata: null,
+      targetVolumeIndex: null,
+      volumeChaptersMin: null,
+      volumeChaptersMax: null,
+      volumeCharacterIncrement: null,
+      analysis: {
+        effective_target_chapter_count: 300,
+        effective_target_character_count: 18,
+        estimated_rounds: 20,
+        estimated_duration_minutes_min: 45,
+        estimated_duration_minutes_max: 80,
+      },
+    })
+
+    expect(view.precheckChips).toEqual(expect.arrayContaining([
+      {
+        key: 'estimated-duration',
+        label: '预计耗时 45 分钟 - 1 小时 20 分钟',
+        color: 'default',
+      },
+    ]))
+  })
   it('常规协同在目标留空且分析给出建议时展示系统估算提示', () => {
     expect(
       createStoryExpansionDialogView({
@@ -653,8 +685,8 @@ describe('storyExpansionDialogView', () => {
           key: 'volume-detail-fields',
           fields: [
             { key: 'targetVolumeIndex', label: '目标卷编号', helperText: '范围 1-6', min: 1, max: 6, flex: '1 1 160px' },
-            { key: 'volumeChaptersMin', label: '本卷最少章节', helperText: '建议 20-60 章', min: 20, max: 100, flex: '1 1 180px' },
-            { key: 'volumeChaptersMax', label: '本卷最多章节', helperText: '建议尽量控制在 60 章内；必要时可放宽到 100 章', min: 20, max: 100, flex: '1 1 180px' },
+            { key: 'volumeChaptersMin', label: '本卷最少章节', helperText: '建议 60-80 章', min: 20, max: 100, flex: '1 1 180px' },
+            { key: 'volumeChaptersMax', label: '本卷最多章节', helperText: '建议尽量控制在 80 章内；必要时可放宽到 100 章', min: 20, max: 100, flex: '1 1 180px' },
           ],
         },
         {
@@ -664,7 +696,7 @@ describe('storyExpansionDialogView', () => {
             key: 'volume-character-info',
             severity: 'info',
             variant: 'outlined',
-            text: '下方人物字段仍表示全书目标人物总数；系统会优先补齐与当前卷剧情承接相关的人物。若本轮只想细化卷纲，保持与当前人物数一致即可。',
+            text: '下方只读人物字段仅作全书角色规模参考；系统会优先补齐与当前卷剧情承接相关的人物。若本轮人物留空，请将“本卷新增人物上限”留空，由系统自动估算。',
           },
         },
         {

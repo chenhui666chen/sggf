@@ -62,7 +62,6 @@ llm_models:
 
     routing:
       task_types:
-        - concept
         - chapter
         - dialogue
         - creative
@@ -161,7 +160,6 @@ llm_models:
       priority: 2
       fallback_models:
         - qwen3.5-plus
-        - qwen3-max
       enabled: true
 
     summary: 项目中的超长上下文模型。阿里云官方资料明确将 Qwen-Long 定位为百万级到千万级上下文处理模型，适合长篇资料理解、长书摘要和整书分析。注意：输出限制仅8K，不适合需要大量输出的场景。
@@ -260,6 +258,7 @@ llm_models:
 
     routing:
       task_types:
+        - concept
         - outline_expand
         - volume_outline
         - chapter_batch
@@ -267,8 +266,7 @@ llm_models:
         - multimodal_analysis
       priority: 1
       fallback_models:
-        - qwen3-max
-        - qwen-long
+        - deepseek-chat
       weight: 1.0
       enabled: true
 
@@ -358,7 +356,7 @@ llm_models:
         - fast
       priority: 2
       fallback_models:
-        - qwen3-max
+        - qwen3.5-plus
       enabled: true
 
     summary: 项目中的轻量快速模型。官方资料将 Qwen Turbo 系列定位为高吞吐、低成本、适合日常问答和轻量结构化处理的模型；项目里主要用于提取与摘要。
@@ -456,7 +454,7 @@ llm_models:
         - volume_detail_expand
       priority: 1
       fallback_models:
-        - qwen3-max
+        - qwen3.5-plus
       enabled: true
 
     summary: 项目中的高强度推理模型。DeepSeek 官方文档将 Reasoner 系列定位为强化推理模型，适合复杂分析、数学逻辑和多步骤决策；项目中主要承担结构审校、人物逻辑和质量复审。
@@ -538,7 +536,7 @@ llm_models:
         - ai_trace
       priority: 2
       fallback_models:
-        - qwen3-max
+        - qwen3.5-plus
       enabled: true
 
     summary: 项目中的通用对话与快速改写模型。DeepSeek 官方文档将 Chat 系列定位为常规高性价比对话模型，适合日常交互、通用问答和轻量写作场景。

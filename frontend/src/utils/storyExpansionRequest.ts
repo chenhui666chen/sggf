@@ -35,6 +35,7 @@ export interface BuildStoryExpansionRequestPayloadInput {
 export interface ResolveStoryExpansionRequestTargetsInput {
   currentChapterCount: number
   currentCharacterCount: number
+  expansionMode?: StoryExpansionMode | string
   requestPlan: Pick<
     StoryExpansionRequestPlan,
     | 'isVolumeDetailMode'
@@ -60,6 +61,54 @@ function resolveAnalysisTarget(value: number | null | undefined, currentValue: n
   return typeof value === 'number' && value > currentValue ? value : undefined
 }
 
+function normalizeExpansionMode(value: StoryExpansionMode | string | undefined | null): StoryExpansionMode | undefined {
+  if (value === 'total' || value === 'epic_framework' || value === 'volume_detail') {
+    return value
+  }
+  return undefined
+}
+
+function resolvePositiveTarget(value: number | null | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : undefined
+}
+
+function shouldPreserveBlankAutoCharacterTarget(
+  input: ResolveStoryExpansionRequestTargetsInput,
+): boolean {
+  if (!input.preferAnalysis) {
+    return false
+  }
+  if (input.requestPlan.isVolumeDetailMode) {
+    return false
+  }
+  if (typeof input.requestPlan.requestedTargetCharacterCount === 'number') {
+    return false
+  }
+
+  const effectiveMode = normalizeExpansionMode(
+    input.expansionMode
+    ?? input.analysis?.effective_expansion_mode
+    ?? input.analysis?.requested_expansion_mode,
+  )
+  if (effectiveMode !== 'total') {
+    return false
+  }
+
+  const stageTarget = resolvePositiveTarget(
+    input.analysis?.auto_supplement?.character_plan?.stage_target_characters,
+  )
+  const taskTarget = resolvePositiveTarget(
+    input.analysis?.auto_supplement?.character_plan?.task_target_characters,
+  )
+
+  return typeof stageTarget === 'number'
+    && typeof taskTarget === 'number'
+    && stageTarget > input.currentCharacterCount
+    && taskTarget > stageTarget
+}
+
 export function resolveStoryExpansionRequestTargets(
   input: ResolveStoryExpansionRequestTargetsInput,
 ): StoryExpansionResolvedRequestTargets {
@@ -78,6 +127,7 @@ export function resolveStoryExpansionRequestTargets(
     input.analysis?.effective_target_character_count,
     input.currentCharacterCount,
   )
+  const preserveBlankCharacterTarget = shouldPreserveBlankAutoCharacterTarget(input)
 
   return {
     targetTotalChapters: input.requestPlan.isVolumeDetailMode
@@ -89,11 +139,19 @@ export function resolveStoryExpansionRequestTargets(
             : undefined
         )
       ),
-    targetTotalCharacters: analysisTargetCharacterCount ?? (
-      input.requestPlan.requestedCharacterDelta > 0
-        ? input.requestPlan.requestedTargetCharacterCount
-        : undefined
-    ),
+    targetTotalCharacters: preserveBlankCharacterTarget
+      ? (
+        input.requestPlan.requestedCharacterDelta > 0
+          ? input.requestPlan.requestedTargetCharacterCount
+          : undefined
+      )
+      : (
+        analysisTargetCharacterCount ?? (
+          input.requestPlan.requestedCharacterDelta > 0
+            ? input.requestPlan.requestedTargetCharacterCount
+            : undefined
+        )
+      ),
   }
 }
 

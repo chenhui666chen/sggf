@@ -275,7 +275,9 @@ class UnifiedModelRegistry:
             if model_id in self._adapter_instances:
                 adapter = self._adapter_instances[model_id]
                 if adapter:
-                    adapter.close()
+                    close_adapter = getattr(adapter, "close", None)
+                    if callable(close_adapter):
+                        close_adapter()
                 del self._adapter_instances[model_id]
 
             if model_id in self._performance_stats:
@@ -528,7 +530,9 @@ class UnifiedModelRegistry:
         with self._state_lock:
             for adapter in self._adapter_instances.values():
                 if adapter:
-                    adapter.close()
+                    close_adapter = getattr(adapter, "close", None)
+                    if callable(close_adapter):
+                        close_adapter()
 
             self._specs.clear()
             self._adapters.clear()
