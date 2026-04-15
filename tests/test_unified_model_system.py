@@ -445,6 +445,66 @@ class TestLLMAdapters:
         assert result.success is True
         assert "max_tokens" not in captured_request_kwargs
 
+    @pytest.mark.asyncio
+    async def test_adapter_uses_request_model_override(self):
+        from core.llm_adapters import OpenAICompatibleAdapter
+        from schemas.unified_model_spec import UnifiedModelSpec, ModelType, APIConfig
+
+        captured_request_kwargs = {}
+
+        class FakeCompletions:
+            async def create(self, **kwargs):
+                captured_request_kwargs.update(kwargs)
+                return types.SimpleNamespace(
+                    choices=[types.SimpleNamespace(message=types.SimpleNamespace(content="ok"))],
+                    usage=None,
+                )
+
+        class FakeChat:
+            def __init__(self):
+                self.completions = FakeCompletions()
+
+        class FakeAsyncOpenAI:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+                self.chat = FakeChat()
+
+        class FakeTimeout:
+            def __init__(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+
+        class FakeAsyncClient:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        fake_openai = types.SimpleNamespace(AsyncOpenAI=FakeAsyncOpenAI)
+        fake_httpx = types.SimpleNamespace(AsyncClient=FakeAsyncClient, Timeout=FakeTimeout)
+
+        spec = UnifiedModelSpec(
+            id="deepseek-reasoner",
+            name="DeepSeek R1",
+            provider="deepseek",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(
+                api_key_env="TEST_API_KEY",
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            ),
+            default_params={"request_model": "deepseek-r1"},
+        )
+
+        with patch.dict('os.environ', {'TEST_API_KEY': 'test-key'}):
+            with patch.dict('sys.modules', {'openai': fake_openai, 'httpx': fake_httpx}):
+                adapter = OpenAICompatibleAdapter(spec)
+                result = await adapter.generate(
+                    messages=[{"role": "user", "content": "hello"}],
+                    temperature=0.7,
+                )
+
+        assert result.success is True
+        assert captured_request_kwargs["model"] == "deepseek-r1"
+        assert "request_model" not in captured_request_kwargs.get("extra_body", {})
+
 
 class TestModelHub:
     """测试 ModelHub"""
@@ -1001,6 +1061,15 @@ class TestYAMLConfiguration:
         deepseek_spec = registry.get_spec("deepseek-reasoner")
         assert deepseek_spec is not None
         assert deepseek_spec.provider == "deepseek"
+        assert deepseek_spec.api_config.api_key_env == "DASHSCOPE_API_KEY"
+        assert deepseek_spec.api_config.base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        assert deepseek_spec.default_params["request_model"] == "deepseek-r1"
+
+        deepseek_chat_spec = registry.get_spec("deepseek-chat")
+        assert deepseek_chat_spec is not None
+        assert deepseek_chat_spec.api_config.api_key_env == "DASHSCOPE_API_KEY"
+        assert deepseek_chat_spec.api_config.base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        assert deepseek_chat_spec.default_params["request_model"] == "deepseek-v3"
 
     def test_yaml_audio_model_loading(self):
         """测试音乐音效模型已纳入统一模型注册中心。"""

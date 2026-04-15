@@ -1054,8 +1054,18 @@ class ApiClient {
     return this.client.post(`/api/v1/chapters/${chapterId}/restore`)
   }
 
-  getDeletedChapters(projectId: number) {
-    return this.client.get(`/api/v1/chapters/deleted`, { params: { project_id: projectId } })
+  async getDeletedChapters(projectId: number) {
+    const response = await this.client.get(`/api/v1/chapters/deleted`, { params: { project_id: projectId } })
+    const normalizedData = Array.isArray(response.data)
+      ? response.data
+      : Array.isArray(response.data?.deleted_chapters)
+        ? response.data.deleted_chapters
+        : []
+
+    return {
+      ...response,
+      data: normalizedData,
+    }
   }
 
   // 设定管理API

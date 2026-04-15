@@ -45,21 +45,17 @@ dreamweaver = load_dreamweaver_module()
 
 
 CURRENT_DIR = Path(__file__).resolve().parent
-HELPERS_PATH = CURRENT_DIR / "test_user_center_routes.py"
-HELPERS_SPEC = spec_from_file_location("dreamweaver_route_test_helpers", HELPERS_PATH)
-if HELPERS_SPEC is None or HELPERS_SPEC.loader is None:
-    raise RuntimeError("无法加载短剧路由测试辅助模块")
+if str(CURRENT_DIR) not in sys.path:
+    sys.path.insert(0, str(CURRENT_DIR))
 
-HELPERS_MODULE = module_from_spec(HELPERS_SPEC)
-sys.modules.setdefault("dreamweaver_route_test_helpers", HELPERS_MODULE)
-HELPERS_SPEC.loader.exec_module(HELPERS_MODULE)
-
-create_user = HELPERS_MODULE.create_user
-create_project = HELPERS_MODULE.create_project
-create_chapter = HELPERS_MODULE.create_chapter
-create_user_asset = HELPERS_MODULE.create_user_asset
-create_points_rule_snapshot = HELPERS_MODULE.create_points_rule_snapshot
-create_points_pricing_policy_snapshot = HELPERS_MODULE.create_points_pricing_policy_snapshot
+from user_center_test_helpers import (
+    create_chapter,
+    create_points_pricing_policy_snapshot,
+    create_points_rule_snapshot,
+    create_project,
+    create_user,
+    create_user_asset,
+)
 
 
 class CompatTestClient:

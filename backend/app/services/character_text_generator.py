@@ -237,8 +237,20 @@ class CharacterTextGenerator:
             return CharacterTextGenerator._extract_relation_lines(parsed)
 
         if isinstance(value, dict):
-            if CharacterTextGenerator._clean_text(value.get("text")):
-                return [CharacterTextGenerator._clean_text(value.get("text"))]  # type: ignore[list-item]
+            text = CharacterTextGenerator._clean_text(value.get("text"))
+            if text:
+                return [text]
+
+            current_summary = CharacterTextGenerator._clean_text(value.get("current_summary"))
+            if current_summary:
+                return [current_summary]
+
+            if isinstance(value.get("items"), list):
+                lines: List[str] = []
+                for item in value["items"]:
+                    lines.extend(CharacterTextGenerator._extract_relation_lines(item))
+                if lines:
+                    return lines
 
             target = CharacterTextGenerator._clean_text(value.get("target"))
             relation_type = CharacterTextGenerator._clean_text(value.get("type"))

@@ -30,6 +30,9 @@ def _is_truthy_env(name: str, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+_SPECIAL_DEFAULT_PARAM_KEYS = {"request_model"}
+
+
 class OpenAICompatibleAdapter(BaseLLMAdapter):
     """
     OpenAI 兼容 API 适配器基类
@@ -51,7 +54,7 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
         extra_kwargs: Dict[str, Any],
     ) -> Dict[str, Any]:
         params: Dict[str, Any] = {
-            "model": self.spec.id,
+            "model": self._resolve_request_model(),
             "messages": messages,
         }
 
@@ -66,6 +69,8 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
             extra_body = params.get("extra_body") or {}
             for k, v in self.spec.default_params.items():
                 if v is None:
+                    continue
+                if k in _SPECIAL_DEFAULT_PARAM_KEYS:
                     continue
                 if k in _OPENAI_STANDARD_KEYS:
                     params[k] = v
@@ -101,6 +106,13 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
             params["timeout"] = timeout
 
         return params
+
+    def _resolve_request_model(self) -> str:
+        default_params = self.spec.default_params or {}
+        request_model = default_params.get("request_model")
+        if isinstance(request_model, str) and request_model.strip():
+            return request_model.strip()
+        return self.spec.id
 
     def _normalize_requested_max_tokens(self, max_tokens: Optional[int]) -> Optional[int]:
         if max_tokens is None:
@@ -607,13 +619,14 @@ class QwenTurboAdapter(OpenAICompatibleAdapter):
     avg_latency_seconds=15.0,
     cost_per_1k_input_tokens=0.014,
     cost_per_1k_output_tokens=0.014,
-    api_key_env="DEEPSEEK_API_KEY",
-    base_url="https://api.deepseek.com/v1",
+    api_key_env="DASHSCOPE_API_KEY",
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     supports_streaming=False,
     supports_timeout_param=False,
     supports_max_retries=False,
     priority=1,
     fallback_models=["qwen3.5-plus"],
+    default_params={"request_model": "deepseek-r1"},
     tags=["reasoning", "logic"],
 )
 class DeepSeekReasonerAdapter(OpenAICompatibleAdapter):
@@ -711,9 +724,10 @@ class DeepSeekReasonerAdapter(OpenAICompatibleAdapter):
     avg_latency_seconds=2.0,
     cost_per_1k_input_tokens=0.001,
     cost_per_1k_output_tokens=0.002,
-    api_key_env="DEEPSEEK_API_KEY",
-    base_url="https://api.deepseek.com/v1",
+    api_key_env="DASHSCOPE_API_KEY",
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     priority=2,
+    default_params={"request_model": "deepseek-v3"},
     fallback_models=["qwen3.5-plus"],
     tags=["chat", "fast"],
 )

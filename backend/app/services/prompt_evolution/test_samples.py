@@ -136,6 +136,10 @@ class TestSampleManager:
         """随机获取指定数量的样本"""
         import random
         return random.sample(self.samples, min(count, len(self.samples)))
+
+    def get_samples(self, count: int) -> List[TestSample]:
+        """按数量获取样本，兼容进化引擎的批量取样接口"""
+        return self.get_random_samples(count)
     
     def add_sample(self, sample: TestSample):
         """添加样本"""

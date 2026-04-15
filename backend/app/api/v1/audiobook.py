@@ -24,6 +24,7 @@ from app.db.base import get_db
 from app.models.user import User
 from app.models.project import Project, Chapter
 from app.models.audiobook import AudiobookProject, ChapterAudio
+from app.models.audiobook_delete_audit import AudiobookDeleteAudit
 from app.models.character import Character
 from app.models.audiobook_task import AudiobookTask
 from app.schemas.audiobook import (
@@ -457,7 +458,7 @@ async def create_audiobook_project(
     }
 
 
-@router.get("/projects/{audiobook_project_id}", response_model=dict)
+@router.get("/projects/{audiobook_project_id:int}", response_model=dict)
 async def get_audiobook_project(
     audiobook_project_id: int,
     current_user: User = Depends(get_current_user),
@@ -525,7 +526,7 @@ async def get_audiobook_project(
     }
 
 
-@router.get("/projects/by-project/{project_id}")
+@router.get("/projects/by-project/{project_id:int}")
 async def list_audiobook_projects(
     project_id: int,
     include_chapter_audios: bool = Query(False, description="是否包含章节音频列表"),
@@ -649,7 +650,7 @@ async def list_user_audiobook_projects(
     return result
 
 
-@router.post("/projects/{audiobook_project_id}/generate-audio-from-scripts", response_model=dict)
+@router.post("/projects/{audiobook_project_id:int}/generate-audio-from-scripts", response_model=dict)
 async def trigger_generate_audio_from_scripts(
     audiobook_project_id: int,
     request: GenerateAudioFromScriptsRequest,
@@ -762,7 +763,7 @@ async def trigger_generate_audio_from_scripts(
 
 
 
-@router.delete("/projects/{audiobook_project_id}")
+@router.delete("/projects/{audiobook_project_id:int}")
 async def delete_audiobook_project(
     audiobook_project_id: int,
     delete_reason: Optional[str] = None,
@@ -858,7 +859,7 @@ async def delete_audiobook_project(
     }
 
 
-@router.delete("/chapter-audios/{chapter_audio_id}")
+@router.delete("/chapter-audios/{chapter_audio_id:int}")
 async def delete_chapter_audio(
     chapter_audio_id: int,
     delete_reason: Optional[str] = None,
@@ -961,7 +962,7 @@ async def delete_chapter_audio(
     }
 
 
-@router.post("/projects/{audiobook_project_id}/restore")
+@router.post("/projects/{audiobook_project_id:int}/restore")
 async def restore_audiobook_project(
     audiobook_project_id: int,
     current_user: User = Depends(get_current_user),
@@ -1016,7 +1017,7 @@ async def restore_audiobook_project(
     }
 
 
-@router.post("/chapter-audios/{chapter_audio_id}/restore")
+@router.post("/chapter-audios/{chapter_audio_id:int}/restore")
 async def restore_chapter_audio(
     chapter_audio_id: int,
     current_user: User = Depends(get_current_user),
@@ -1340,7 +1341,7 @@ async def stream_chapter_audio(
 
 # ==================== 剧本编辑与音频生成（两阶段相关） ====================
 
-@router.get("/projects/{audiobook_project_id}/chapters/{chapter_id}/script", response_model=dict)
+@router.get("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/script", response_model=dict)
 async def get_chapter_script(
     audiobook_project_id: int,
     chapter_id: int,
@@ -1444,7 +1445,7 @@ async def get_chapter_script(
     }
 
 
-@router.put("/projects/{audiobook_project_id}/chapters/{chapter_id}/script", response_model=dict)
+@router.put("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/script", response_model=dict)
 async def update_chapter_script(
     audiobook_project_id: int,
     chapter_id: int,
@@ -1539,7 +1540,7 @@ async def update_chapter_script(
     }
 
 
-@router.post("/projects/{audiobook_project_id}/chapters/{chapter_id}/segments/preview")
+@router.post("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/segments/preview")
 async def preview_script_segment_audio(
     audiobook_project_id: int,
     chapter_id: int,
@@ -2438,11 +2439,11 @@ async def generate_audiobook_audio_from_scripts_background(
             try:
                 from app.services.audiobook.project_audio_config import parse_project_audio_config
                 config_data = parse_project_audio_config(project.audio_config or "")
-                logger.info(f"🔍 [调试] 项目音频配置: {get_characters_for_model(config_data, tts_model)}")
-                for item in get_characters_for_model(config_data, tts_model):
+                characters = get_characters_for_model(config_data, tts_model)
+                for item in characters:
                     name = item.get("name")
                     if not name:
-                        logger.warning(f"⚠️ [调试] 跳过无名称的配置项: {item}")
+                        logger.warning("⚠️ 跳过无名称的角色音配置项")
                         continue
                     effective_voice_mapping[name] = {
                         "voice_id": item.get("voice_id"),
@@ -2450,7 +2451,6 @@ async def generate_audiobook_audio_from_scripts_background(
                         "speed": item.get("speed"),
                         "pitch": item.get("pitch"),
                     }
-                    logger.info(f"✅ [调试] 加载角色音配置: {name} -> {item.get('voice_id')}")
             except Exception as e:
                 logger.warning(f"⚠️ 合并项目级角色音配置失败，将继续使用已有 voice_mapping: {e}")
 

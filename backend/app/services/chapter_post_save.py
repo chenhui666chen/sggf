@@ -17,6 +17,10 @@ import json
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from app.db.base import SessionLocal
+from app.services.character_runtime_context import (
+    build_character_relations_payload,
+    extract_character_relation_items,
+)
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -159,17 +163,16 @@ async def _save_character_relations(
         
         # 解析现有关系
         try:
-            existing_relations = json.loads(source_char.relations) if source_char.relations else []
+            existing_relations = json.loads(source_char.relations) if source_char.relations else None
         except Exception:
-            existing_relations = []
-        
-        if not isinstance(existing_relations, list):
-            existing_relations = []
+            existing_relations = source_char.relations or None
+
+        existing_relation_items = extract_character_relation_items(existing_relations)
         
         # 检查是否已存在相同关系
         already_exists = any(
             r.get('target') == target_name and r.get('type') == rel_type
-            for r in existing_relations if isinstance(r, dict)
+            for r in existing_relation_items if isinstance(r, dict)
         )
         
         if not already_exists:
@@ -181,8 +184,19 @@ async def _save_character_relations(
             if description and description != rel_type:
                 new_relation["description"] = description
             
-            existing_relations.append(new_relation)
-            source_char.relations = json.dumps(existing_relations, ensure_ascii=False)
+            source_char.relations = json.dumps(
+                build_character_relations_payload(
+                    {
+                        "text": (
+                            existing_relations.get("text")
+                            if isinstance(existing_relations, dict)
+                            else (existing_relations if isinstance(existing_relations, str) else "")
+                        ),
+                        "items": [*existing_relation_items, new_relation],
+                    }
+                ),
+                ensure_ascii=False,
+            )
             updated_chars.add(source_char.id)
             saved_count += 1
             

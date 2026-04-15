@@ -102,15 +102,12 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "./uploads"
 
     # DeepSeek API配置
-    DEEPSEEK_API_KEY: str = "your-deepseek-api-key"
-    DEEPSEEK_API_URL: str = "https://api.deepseek.com/v1"
-    DEEPSEEK_API_BASE: str = "https://api.deepseek.com/v1"
     DEEPSEEK_MODEL: str = "deepseek-reasoner"
-    DEEPSEEK_EMBEDDING_MODEL: str = "deepseek-embedding"
     MODEL_NAME: str = "deepseek-reasoner"
     
     # 阿里云百炼 API配置
     DASHSCOPE_API_KEY: str = "your-dashscope-api-key"
+    DASHSCOPE_API_BASE: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
     # Mureka AI 音乐服务配置
     MUREKA_API_KEY: str = ""

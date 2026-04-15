@@ -36,7 +36,13 @@ class AliyunEmbeddings(Embeddings):
             api_base: API 基础 URL
             model: 使用的模型名称，默认为 text-embedding-v4
         """
-        self.api_key = api_key or os.getenv("DASHSCOPE_API_KEY") or Config.DEEPSEEK_API_KEY
+        self.api_key = (
+            api_key
+            or os.getenv("EMBEDDING_API_KEY")
+            or os.getenv("DASHSCOPE_API_KEY")
+            or Config.EMBEDDING_API_KEY
+            or Config.DASHSCOPE_API_KEY
+        )
         self.api_base = api_base
         self.model = model
         
@@ -112,7 +118,12 @@ def create_aliyun_embeddings() -> AliyunEmbeddings:
         AliyunEmbeddings 实例
     """
     return AliyunEmbeddings(
-        api_key=os.getenv("DASHSCOPE_API_KEY") or Config.DEEPSEEK_API_KEY,
+        api_key=(
+            os.getenv("EMBEDDING_API_KEY")
+            or os.getenv("DASHSCOPE_API_KEY")
+            or Config.EMBEDDING_API_KEY
+            or Config.DASHSCOPE_API_KEY
+        ),
         api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
         model="text-embedding-v4"
     )

@@ -20,9 +20,7 @@ def _resolve_backend_storage_path(raw_path: str) -> str:
 class Config:
     """System configuration."""
 
-    # DeepSeek LLM settings
-    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-    DEEPSEEK_API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1")
+    # DeepSeek model routing settings (served through DashScope compatible API)
     MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-reasoner")
 
     # DashScope settings
@@ -30,9 +28,9 @@ class Config:
     DASHSCOPE_API_BASE = os.getenv("DASHSCOPE_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 
     # Embedding settings
-    EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "deepseek-embedding")
+    EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-v4")
     EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY", "")
-    EMBEDDING_API_BASE = os.getenv("EMBEDDING_API_BASE", "https://api.deepseek.com/v1")
+    EMBEDDING_API_BASE = os.getenv("EMBEDDING_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 
     # Vector store persistence directory
     CHROMA_PERSIST_DIRECTORY = _resolve_backend_storage_path(
@@ -49,17 +47,9 @@ class Config:
         errors = []
         warnings = []
 
-        if not cls.DEEPSEEK_API_KEY:
-            errors.append("Missing DEEPSEEK_API_KEY")
-            errors.append("Please set DEEPSEEK_API_KEY in .env")
-        elif cls.DEEPSEEK_API_KEY in {"your-api-key-here", "your-deepseek-api-key-here"}:
-            warnings.append("DEEPSEEK_API_KEY is still using a placeholder value")
-
         if not cls.EMBEDDING_API_KEY:
             if cls.DASHSCOPE_API_KEY:
                 warnings.append("EMBEDDING_API_KEY is missing, falling back to DASHSCOPE_API_KEY")
-            elif cls.DEEPSEEK_API_KEY:
-                warnings.append("EMBEDDING_API_KEY is missing, falling back to DEEPSEEK_API_KEY")
 
         if not cls.DASHSCOPE_API_KEY:
             errors.append("Missing DASHSCOPE_API_KEY")

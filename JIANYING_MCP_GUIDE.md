@@ -224,44 +224,43 @@ JIANYING_BASE_URL=https://api.jianying.com/v1
 # 其他相关配置（示例）
 # ========================================
 
-# DeepSeek API
-DEEPSEEK_API_KEY=sk-20c13bda117e4c7c8cc569aaa8ae5ab5
+# DeepSeek 通过阿里云百炼兼容接口调用，无需单独配置官方 DEEPSEEK_API_KEY
 
 # 阿里云百炼API
-DASHSCOPE_API_KEY=***REDACTED-DASHSCOPE-KEY***
+DASHSCOPE_API_KEY=your-dashscope-api-key-here
 DASHSCOPE_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
 
 # 通义万相模型配置
-WAN_T2I_API_KEY=***REDACTED-DASHSCOPE-KEY***
+WAN_T2I_API_KEY=your-dashscope-api-key-here
 WAN_T2I_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 WAN_T2I_MODEL_ID=2862677
 
-WAN_I2V_API_KEY=***REDACTED-DASHSCOPE-KEY***
+WAN_I2V_API_KEY=your-dashscope-api-key-here
 WAN_I2V_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 WAN_I2V_MODEL_ID=2867393
 
-WAN_T2V_API_KEY=***REDACTED-DASHSCOPE-KEY***
+WAN_T2V_API_KEY=your-dashscope-api-key-here
 WAN_T2V_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 WAN_T2V_MODEL_ID=3001146
 
-WAN_R2V_API_KEY=***REDACTED-DASHSCOPE-KEY***
+WAN_R2V_API_KEY=your-dashscope-api-key-here
 WAN_R2V_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 WAN_R2V_MODEL_ID=2976416
 
-WAN_IMAGE_EDIT_API_KEY=***REDACTED-DASHSCOPE-KEY***
+WAN_IMAGE_EDIT_API_KEY=your-dashscope-api-key-here
 WAN_IMAGE_EDIT_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 WAN_IMAGE_EDIT_MODEL_ID=2712576
 
 # Qwen系列模型配置
-QWEN_IMAGE_EDIT_API_KEY=***REDACTED-DASHSCOPE-KEY***
+QWEN_IMAGE_EDIT_API_KEY=your-dashscope-api-key-here
 QWEN_IMAGE_EDIT_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 
-QWEN_VL_PLUS_API_KEY=***REDACTED-DASHSCOPE-KEY***
+QWEN_VL_PLUS_API_KEY=your-dashscope-api-key-here
 QWEN_VL_PLUS_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 
 # Embedding模型配置
 EMBEDDING_MODEL=text-embedding-v3
-EMBEDDING_API_KEY=***REDACTED-DASHSCOPE-KEY***
+EMBEDDING_API_KEY=your-dashscope-api-key-here
 EMBEDDING_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
 ```
 

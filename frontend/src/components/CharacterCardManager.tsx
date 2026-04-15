@@ -40,6 +40,10 @@ import ReactFlow, {
   Edge,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
+import {
+  buildCharacterRelationsPayload,
+  parseCharacterRelations,
+} from '@/utils/characterRelations'
 
 interface CharacterCardManagerProps {
   projectId: number
@@ -248,12 +252,7 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
         // 加载角色功法
         loadCharacterTechniques(character.id)
         // 🆕 加载人物关系
-        try {
-          const relations = character.relations ? JSON.parse(character.relations) : []
-          setCharacterRelations(Array.isArray(relations) ? relations : [])
-        } catch {
-          setCharacterRelations([])
-        }
+        setCharacterRelations(parseCharacterRelations(character.relations))
       } else {
         setEditingCharacter(null)
         setFormData({ ...EMPTY_CHARACTER_FORM })
@@ -347,17 +346,9 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
   const handleSaveCharacter = async () => {
     setSaving(true)
     try {
-      // 🆕 将关系数据转换为字典格式（后端期望 dict 类型）
-      const relationsDict: Record<string, string> = {}
-      characterRelations.forEach((r: any) => {
-        if (r.target && r.type) {
-          relationsDict[r.target] = r.type
-        }
-      })
-      
       const dataToSave = {
         ...formData,
-        relations: Object.keys(relationsDict).length > 0 ? relationsDict : null
+        relations: buildCharacterRelationsPayload(characterRelations),
       }
       
       let savedCharacter = dataToSave

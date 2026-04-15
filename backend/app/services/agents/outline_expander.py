@@ -86,6 +86,7 @@ from ..character_parser import (
     _merge_parsed_character,
     normalize_character_name,
 )
+from ..character_runtime_context import build_character_prompt_context_from_text
 
 
 class OutlineExpander:
@@ -353,6 +354,17 @@ class OutlineExpander:
         if not content:
             return ""
 
+        try:
+            summarized_context = build_character_prompt_context_from_text(
+                content,
+                detail_limit=detail_limit,
+                summary_limit=summary_limit,
+            )
+            if summarized_context:
+                return summarized_context
+        except Exception:
+            logger.debug("人物运行时摘要构建失败，回退到原始截断", exc_info=True)
+
         detail_excerpt = self._story_truncate_text(content, limit=detail_limit)
         if len(content) <= detail_limit:
             return detail_excerpt
@@ -617,8 +629,8 @@ Please为{target_count}个人物生成详细档案，每个人物包括：
 【背景/当前处境】：（3-5句，简要说明过去经历与当前局面）
 【核心动机】：（为什么参与故事，想要什么）
 【能力与限制】：（可写成“能力：... / 限制：...”）
-【关键关系】：（与3-5个其他人物的关系）
-【主线绑定】：（可写成“剧情职责：... / 关联线索：...”）
+【关键关系】：（仅保留当前阶段最关键的3-5条关系）
+【主线绑定】：（只写当前仍驱动剧情的“剧情职责：... / 关联线索：...”）
 【成长方向】：（在故事中的变化，尽量用“从……到……”描述）
 ---
 
@@ -627,6 +639,8 @@ Please为{target_count}个人物生成详细档案，每个人物包括：
 2. 避免脸谱化和刻板印象
 3. 确保人物之间有化学反应
 4. 每个人物都要有存在的价值
+5. 【关键关系】不要累加已解决、已击杀、已退场或纯背景关系
+6. 【主线绑定】不要写成跨阶段总账，只保留当前可直接调度的职责与线索
 """
 
         logger.debug(f"【第三步】生成{target_count}个人物完整档案...")
@@ -1427,7 +1441,7 @@ Please输出完整的、重新整合后的人物档案，**每个字段后必须
 【能力与限制】：能力：...
 限制：...
 
-【关键关系】：（与主要角色及重要配角的关系）
+【关键关系】：（仅保留当前阶段最关键的3-5条关系）
 
 【主线绑定】：剧情职责：...
 关联线索：...
@@ -4258,7 +4272,9 @@ Please输出完整的、重新整合后的网文大纲：
 1. 严格新增 {characters_needed} 个角色，禁止复写现有角色卡。
 2. 新角色姓名不得与现有角色重复，且必须符合当前题材。
 3. 每个新角色都必须承担明确剧情职责，至少与一个现有角色或主线冲突形成关系。
-4. 不要输出 Markdown，不要解释，只返回合法 JSON。"""
+4. `key_relationships` 只保留当前最关键的 3-5 条关系，不要写已解决或纯历史背景关系总账。
+5. `mainline_role` / `mainline_clues` 只保留当前阶段仍驱动剧情的内容，不要把多个阶段职责堆在一起。
+6. 不要输出 Markdown，不要解释，只返回合法 JSON。"""
 
         cards_retry_used = False
         cards_response = self.character_designer.process(cards_prompt, {})

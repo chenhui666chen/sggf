@@ -437,16 +437,6 @@ export default function WorkflowControlPage() {
     }
   }, [currentProject])
 
-  // 🔧 修复：移除 localStorage 阶段保存逻辑
-  // 原因：localStorage 中的阶段可能与后端实际状态不一致
-  // 改为完全依赖后端 API 返回的状态
-  // useEffect(() => {
-  //   if (projectId && workflow.currentStage) {
-  //     localStorage.setItem(`project_${projectId}_currentStage`, workflow.currentStage)
-  //     console.log(`💾 保存项目 ${projectId} 的当前阶段: ${workflow.currentStage}`)
-  //   }
-  // }, [projectId, workflow.currentStage])
-
   // 🆕 页面加载时恢复记忆快照
   useEffect(() => {
     if (!projectId) return
@@ -1433,10 +1423,6 @@ export default function WorkflowControlPage() {
   // 🆕 保存记忆快照函数
   const saveMemorySnapshot = async (trigger: 'auto' | 'stage' | 'beforeUnload' | 'manual') => {
     if (!projectId) return
-
-    // ⚠️  暂时禁用：后端尚未实现记忆保存API
-    // console.log(`💾 [记忆快照] 功能已禁用，等待后端API实现`)
-    // return
 
     try {
       // 收集当前工作流状态数据

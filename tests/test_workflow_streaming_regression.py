@@ -41,6 +41,13 @@ class _FakeQuery:
     def first(self) -> Any:
         return self._first_result
 
+    def all(self) -> list[Any]:
+        if self._first_result is None:
+            return []
+        if isinstance(self._first_result, list):
+            return list(self._first_result)
+        return [self._first_result]
+
 
 class _FakeDBSession:
     def __init__(self) -> None:

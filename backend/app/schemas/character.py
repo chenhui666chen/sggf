@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Optional, List, Any, Union
 
 from pydantic import BaseModel, ConfigDict, field_validator
+from app.services.character_runtime_context import normalize_character_relations_payload
 
 
 class CharacterBase(BaseModel):
@@ -54,18 +55,10 @@ class CharacterBase(BaseModel):
     @field_validator('relations', mode='before')
     @classmethod
     def parse_relations(cls, v: Any) -> Optional[dict]:
-        """将数据库中的 JSON 字符串反序列化为字典"""
+        """将数据库中的旧关系结构统一归一化为字典 payload"""
         if v is None:
             return None
-        if isinstance(v, dict):
-            return v
-        if isinstance(v, str):
-            try:
-                parsed = json.loads(v)
-                return parsed if isinstance(parsed, dict) else None
-            except (json.JSONDecodeError, TypeError):
-                return None
-        return None
+        return normalize_character_relations_payload(v)
 
 
 class CharacterCreate(CharacterBase):

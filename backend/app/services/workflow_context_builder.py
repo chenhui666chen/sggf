@@ -8,6 +8,7 @@ from typing import Any, List, Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.services.character_runtime_context import build_character_prompt_context_from_text
 from app.services.setting_templates import (
     build_project_settings_summary,
     extract_relevant_categories_from_text,
@@ -297,6 +298,73 @@ def _merge_distinct_text_blocks(primary: str, secondary: str) -> tuple[str, bool
     if primary_text in secondary_text:
         return secondary_text, True
     return f"{primary_text}\n\n{secondary_text}", False
+
+
+def _get_character_doc_identity(doc: Any) -> str:
+    metadata = getattr(doc, "metadata", {}) or {}
+    for key in ("character_id", "character_name", "name", "title"):
+        text = _decode_prompt_text(metadata.get(key)).strip()
+        if text:
+            return text
+    return _decode_prompt_text(getattr(doc, "page_content", "")).strip()[:80]
+
+
+def _flatten_character_prompt_summary(value: Any) -> str:
+    text = _decode_prompt_text(value).strip()
+    if not text:
+        return ""
+
+    if text.startswith("【角色名单摘要】"):
+        blocks = [block.strip() for block in text.split("\n\n") if block.strip()]
+        text = blocks[-1] if blocks else text
+
+    if text.startswith("【人物运行摘要】"):
+        parts = text.split("\n", 1)
+        text = parts[1].strip() if len(parts) == 2 else text.replace("【人物运行摘要】", "").strip()
+
+    if text.startswith("- "):
+        text = text[2:].strip()
+
+    return text
+
+
+def _build_character_doc_context_line(doc: Any, *, smart_truncate_for_context: Any) -> str:
+    metadata = getattr(doc, "metadata", {}) or {}
+    name = _decode_prompt_text(
+        metadata.get("character_name") or metadata.get("name") or "未知角色"
+    ).strip() or "未知角色"
+
+    runtime_summary = _flatten_character_prompt_summary(metadata.get("runtime_summary"))
+    if runtime_summary:
+        return f"- {name}: {runtime_summary}"
+
+    current_relationships = _decode_prompt_text(metadata.get("current_relationships")).strip()
+    current_mainline = _decode_prompt_text(metadata.get("current_mainline")).strip()
+    metadata_parts = []
+    if current_relationships:
+        metadata_parts.append(f"当前关系：{current_relationships}")
+    if current_mainline:
+        metadata_parts.append(f"当前主线：{current_mainline}")
+    if metadata_parts:
+        return f"- {name}: {'；'.join(metadata_parts)}"
+
+    fallback_summary = _flatten_character_prompt_summary(
+        build_character_prompt_context_from_text(
+            getattr(doc, "page_content", ""),
+            detail_limit=220,
+            summary_limit=120,
+            max_characters=1,
+        )
+    )
+    if not fallback_summary:
+        fallback_summary = smart_truncate_for_context(
+            _decode_prompt_text(getattr(doc, "page_content", "")),
+            max_tokens=200,
+            content_type="rag_doc",
+            preserve_ratio=0.9,
+        )
+
+    return f"- {name}: {fallback_summary}" if fallback_summary else ""
 
 
 class WorkflowContextBuilder:
@@ -655,18 +723,26 @@ class WorkflowContextBuilder:
                             fallback_docs.append(doc)
                     world_docs = prioritized_docs + fallback_docs
 
-                character_hits = len(char_docs)
+                deduped_char_docs = []
+                seen_character_keys = set()
+                for doc in char_docs:
+                    doc_key = _get_character_doc_identity(doc)
+                    if doc_key in seen_character_keys:
+                        continue
+                    seen_character_keys.add(doc_key)
+                    deduped_char_docs.append(doc)
+
+                character_hits = len(deduped_char_docs)
                 world_hits = len(world_docs)
 
-                if char_docs:
+                if deduped_char_docs:
                     rag_character_context = "\n".join(
-                        [
-                            (
-                                f"- {doc.metadata.get('name', '未知角色')}: "
-                                f"{smart_truncate_for_context(doc.page_content, max_tokens=200, content_type='rag_doc', preserve_ratio=0.9)}"
-                            )
-                            for doc in char_docs
-                        ]
+                        line
+                        for doc in deduped_char_docs
+                        if (line := _build_character_doc_context_line(
+                            doc,
+                            smart_truncate_for_context=smart_truncate_for_context,
+                        ))
                     )
 
                 if world_docs:

@@ -4,11 +4,16 @@
 解析AI生成的文本格式人物卡，提取结构化字段，
 并同步到数据库的characters表中。
 """
+import json
 import re
 import logging
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 
+from app.services.character_runtime_context import (
+    build_character_relations_payload,
+    extract_character_relation_items,
+)
 from app.services.story_text_utils import (
     extract_preferred_character_name,
     normalize_story_text,
@@ -1223,16 +1228,15 @@ def sync_parsed_characters_to_db(
 
                 # 更新关系字段（JSON格式）
                 if parsed.relationships:
-                    import json
-                    existing.relations = json.dumps({
-                        "text": parsed.relationships
-                    }, ensure_ascii=False)
+                    existing.relations = json.dumps(
+                        build_character_relations_payload(parsed.relationships),
+                        ensure_ascii=False,
+                    )
 
                 updated_count += 1
                 logger.debug(f"   📝 更新角色: {parsed.name}")
             else:
                 # 创建新角色
-                import json
                 new_char = Character(
                     project_id=project_id,
                     name=parsed.name,
@@ -1244,7 +1248,14 @@ def sync_parsed_characters_to_db(
                     importance_level=parsed.importance_level,
                     summary=parsed.build_summary(),
                     profile=parsed.build_profile(),
-                    relations=json.dumps({"text": parsed.relationships}, ensure_ascii=False) if parsed.relationships else None,
+                    relations=(
+                        json.dumps(
+                            build_character_relations_payload(parsed.relationships),
+                            ensure_ascii=False,
+                        )
+                        if parsed.relationships
+                        else None
+                    ),
                     appearance_status="未出场",  # 默认未出场
                     life_status="存活",  # 默认存活
                 )
@@ -1353,7 +1364,6 @@ def parse_and_sync_relationships(
     Returns:
         解析和同步的统计信息
     """
-    import json
     from app.models.character import Character
     
     logger.info(f"🔗 开始解析人物关系文本，项目ID: {project_id}")
@@ -1438,17 +1448,16 @@ def parse_and_sync_relationships(
         
         # 解析现有关系
         try:
-            existing_relations = json.loads(source_char.relations) if source_char.relations else []
+            existing_relations = json.loads(source_char.relations) if source_char.relations else None
         except Exception:
-            existing_relations = []
-        
-        if not isinstance(existing_relations, list):
-            existing_relations = []
+            existing_relations = source_char.relations or None
+
+        existing_relation_items = extract_character_relation_items(existing_relations)
         
         # 检查是否已存在相同关系
         already_exists = any(
             r.get('target') == target_name and r.get('type') == rel_type
-            for r in existing_relations if isinstance(r, dict)
+            for r in existing_relation_items if isinstance(r, dict)
         )
         
         if not already_exists:
@@ -1457,8 +1466,19 @@ def parse_and_sync_relationships(
                 "target": target_name,
                 "type": rel_type
             }
-            existing_relations.append(new_relation)
-            source_char.relations = json.dumps(existing_relations, ensure_ascii=False)
+            source_char.relations = json.dumps(
+                build_character_relations_payload(
+                    {
+                        "text": (
+                            existing_relations.get("text")
+                            if isinstance(existing_relations, dict)
+                            else (existing_relations if isinstance(existing_relations, str) else "")
+                        ),
+                        "items": [*existing_relation_items, new_relation],
+                    }
+                ),
+                ensure_ascii=False,
+            )
             updated_chars.add(source_char.id)
             saved_count += 1
             logger.debug(f"   → {source_name} --[{rel_type}]--> {target_name}")

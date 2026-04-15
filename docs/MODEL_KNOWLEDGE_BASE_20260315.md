@@ -56,8 +56,8 @@
 - 限制：延迟高；当前项目接入层不向其开放 `temperature / timeout / max_retries`
 - 项目备注：项目运行时会剥离推理痕迹标签，只保留最终可消费文本
 - 官方资料：
-  - https://api-docs.deepseek.com/
-  - https://api-docs.deepseek.com/quick_start/pricing
+  - https://help.aliyun.com/zh/model-studio/deepseek-api
+  - https://help.aliyun.com/zh/model-studio/models
 
 ### deepseek-chat
 
@@ -66,8 +66,8 @@
 - 限制：深度逻辑与多步分析不如 `deepseek-reasoner`
 - 项目备注：当前 `rewrite / ai_trace / chat` 优先使用该模型
 - 官方资料：
-  - https://api-docs.deepseek.com/
-  - https://api-docs.deepseek.com/quick_start/pricing
+  - https://help.aliyun.com/zh/model-studio/deepseek-api
+  - https://help.aliyun.com/zh/model-studio/models
 
 ## 3. 图像与多模态模型
 

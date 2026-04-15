@@ -24,6 +24,7 @@ except ImportError:
 from langchain_core.embeddings import Embeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
+from app.services.character_runtime_context import build_character_runtime_metadata
 from .config import Config
 import os
 import requests
@@ -49,7 +50,13 @@ class AliyunEmbeddings(Embeddings):
             api_base: Base URL for the embedding API.
             model: Embedding model name, defaults to text-embedding-v4.
         """
-        self.api_key = api_key or os.getenv("DASHSCOPE_API_KEY") or Config.DEEPSEEK_API_KEY
+        self.api_key = (
+            api_key
+            or os.getenv("EMBEDDING_API_KEY")
+            or os.getenv("DASHSCOPE_API_KEY")
+            or Config.EMBEDDING_API_KEY
+            or Config.DASHSCOPE_API_KEY
+        )
         self.api_base = api_base
         self.model = model
         
@@ -125,7 +132,12 @@ class NovelKnowledgeBase:
         self.active_persist_directory: Optional[str] = None
         self.vectorstore_mode = "uninitialized"
         self.embeddings = AliyunEmbeddings(
-            api_key=os.getenv("DASHSCOPE_API_KEY") or Config.EMBEDDING_API_KEY,
+            api_key=(
+                os.getenv("EMBEDDING_API_KEY")
+                or os.getenv("DASHSCOPE_API_KEY")
+                or Config.EMBEDDING_API_KEY
+                or Config.DASHSCOPE_API_KEY
+            ),
             api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
             model="text-embedding-v4"
         )
@@ -234,8 +246,12 @@ class NovelKnowledgeBase:
     def add_character(self, name: str, profile: str, metadata: Optional[Dict[str, Any]] = None):
         """Add character profile"""
         try:
-            meta = metadata or {}
+            meta = dict(metadata or {})
             meta.update({"type": "character", "name": name})
+            runtime_meta = build_character_runtime_metadata(name, profile)
+            for key, value in runtime_meta.items():
+                if value and not meta.get(key):
+                    meta[key] = value
 
             chunks = self.text_splitter.split_text(profile)
             if not chunks:

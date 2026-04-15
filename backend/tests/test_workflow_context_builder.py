@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -16,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
 os.environ.setdefault("DEBUG", "false")
 
 from app.api.v1 import workflow as workflow_module
+from app.core.config import settings as app_settings
 from app.services.workflow_context_builder import WorkflowContextBuilder
 
 
@@ -210,3 +212,54 @@ def test_load_project_chapter_context_prefers_stage_outline_and_builder_data() -
     assert context["outline"] == "阶段大纲"
     assert context["world_setting"] == "世界观设定"
     assert context["characters"] == "林岩\n回声"
+
+
+def test_build_typed_rag_context_prefers_character_runtime_metadata_and_dedupes(monkeypatch: pytest.MonkeyPatch) -> None:
+    class DummyKB:
+        def search(self, query, k, filter_type=None, project_id=None):
+            if filter_type == "character":
+                return [
+                    SimpleNamespace(
+                        page_content="### 【姓名】：林澈\n【角色定位】：主角\n【关键关系】：顾晚：盟友/互相信任",
+                        metadata={
+                            "character_id": "1",
+                            "name": "林澈",
+                            "runtime_summary": "林澈（主角 / 主角方） | 当前关系：顾晚：盟友/互补 | 当前主线：剧情职责：追查旧案",
+                        },
+                    ),
+                    SimpleNamespace(
+                        page_content="重复分片",
+                        metadata={
+                            "character_id": "1",
+                            "name": "林澈",
+                            "runtime_summary": "不应重复出现",
+                        },
+                    ),
+                    SimpleNamespace(
+                        page_content=(
+                            "### 【姓名】：顾晚\n"
+                            "【故事立场】：主角方\n"
+                            "【角色定位】：盟友\n"
+                            "【关键关系】：林澈：盟友/互相信任\n"
+                            "【主线绑定】：剧情职责：协助追查旧案 / 关联线索：掌握藏书楼线索"
+                        ),
+                        metadata={
+                            "character_id": "2",
+                            "name": "顾晚",
+                        },
+                    ),
+                ]
+            return []
+
+    monkeypatch.setattr("app.services.vector_sync.get_vector_kb", lambda: DummyKB())
+    monkeypatch.setattr(app_settings, "ENABLE_TYPED_RAG", True, raising=False)
+
+    builder = WorkflowContextBuilder(DummySession())
+    result = builder.build_typed_rag_context(project_id=3, query_text="旧案调查")
+
+    assert result.used_vector_search is True
+    assert result.character_hits == 2
+    assert result.rag_character_context.count("- 林澈:") == 1
+    assert "林澈（主角 / 主角方）" in result.rag_character_context
+    assert "顾晚" in result.rag_character_context
+    assert "协助追查旧案" in result.rag_character_context

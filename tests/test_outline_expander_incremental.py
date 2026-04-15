@@ -184,8 +184,9 @@ def test_story_build_character_context_adds_roster_summary_before_truncated_card
     assert "【角色名单摘要】" in context
     assert "1. 角色1" in context
     assert "2. 角色2" in context
-    assert "【人物卡节选】" in context
-    assert "已截断" in context
+    assert "【人物运行摘要】" in context
+    assert "角色1（配角）" in context
+    assert "背景信息背景信息背景信息" not in context
 
 
 def test_expand_plot_outline_legacy_entry_delegates_to_incremental():
@@ -493,7 +494,8 @@ def test_expand_characters_incremental_structured_prompts_include_story_context(
     assert "青石城旧案" in designer.prompts[0]
     assert "本轮需新增：1 个" in designer.prompts[0]
     assert "【本轮新增角色卡】" in designer.prompts[1]
-    assert "### 【姓名】：顾晚" in designer.prompts[1]
+    assert "【人物运行摘要】" in designer.prompts[1]
+    assert "顾晚" in designer.prompts[1]
     assert "【当前大纲】" in designer.prompts[2]
     assert "【人物体系】" in designer.prompts[3]
     assert "【完整人物体系】" in designer.prompts[4]

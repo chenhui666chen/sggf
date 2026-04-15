@@ -1,7 +1,6 @@
 import sys
 import os
 from datetime import datetime, timedelta, timezone
-from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -11,6 +10,7 @@ if str(ROOT_DIR) not in sys.path:
 os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/test_db")
 
+from app.models.admin_log import AdminOperationLog
 from app.services.user_center_points_events import (
     record_audiobook_billing_freeze,
     record_audiobook_billing_release,
@@ -22,24 +22,20 @@ from app.services.user_center_points_events import (
 
 
 CURRENT_DIR = Path(__file__).resolve().parent
-HELPERS_PATH = CURRENT_DIR / "test_user_center_routes.py"
-HELPERS_SPEC = spec_from_file_location("user_center_test_helpers", HELPERS_PATH)
-if HELPERS_SPEC is None or HELPERS_SPEC.loader is None:
-    raise RuntimeError("无法加载用户中心测试辅助模块")
+if str(CURRENT_DIR) not in sys.path:
+    sys.path.insert(0, str(CURRENT_DIR))
 
-HELPERS_MODULE = module_from_spec(HELPERS_SPEC)
-sys.modules.setdefault("user_center_test_helpers", HELPERS_MODULE)
-HELPERS_SPEC.loader.exec_module(HELPERS_MODULE)
-
-build_test_client = HELPERS_MODULE.build_test_client
-build_auth_headers = HELPERS_MODULE.build_auth_headers
-create_audiobook_project = HELPERS_MODULE.create_audiobook_project
-create_chapter = HELPERS_MODULE.create_chapter
-create_project = HELPERS_MODULE.create_project
-create_dreamweaver_run = HELPERS_MODULE.create_dreamweaver_run
-create_points_billing_event = HELPERS_MODULE.create_points_billing_event
-create_points_pricing_policy_snapshot = HELPERS_MODULE.create_points_pricing_policy_snapshot
-create_user = HELPERS_MODULE.create_user
+from user_center_test_helpers import (
+    build_auth_headers,
+    build_test_client,
+    create_audiobook_project,
+    create_chapter,
+    create_dreamweaver_run,
+    create_points_billing_event,
+    create_points_pricing_policy_snapshot,
+    create_project,
+    create_user,
+)
 
 
 def test_audiobook_freeze_event_records_expected_payload():
@@ -234,7 +230,7 @@ def test_dreamweaver_freeze_event_is_idempotent():
     try:
         first_log = record_dreamweaver_billing_freeze(db=db, run_id=run.run_id)
         second_log = record_dreamweaver_billing_freeze(db=db, run_id=run.run_id)
-        logs = db.query(HELPERS_MODULE.AdminOperationLog).all()
+        logs = db.query(AdminOperationLog).all()
     finally:
         db.close()
 
@@ -508,7 +504,7 @@ def test_dreamweaver_settle_event_is_idempotent():
     try:
         first_log = record_dreamweaver_billing_settle(db=db, run_id=run.run_id)
         second_log = record_dreamweaver_billing_settle(db=db, run_id=run.run_id)
-        logs = db.query(HELPERS_MODULE.AdminOperationLog).all()
+        logs = db.query(AdminOperationLog).all()
     finally:
         db.close()
 
@@ -588,7 +584,7 @@ def test_dreamweaver_settlement_event_includes_operating_snapshot():
 
         db = session_factory()
         try:
-            stored_log = db.query(HELPERS_MODULE.AdminOperationLog).filter(HELPERS_MODULE.AdminOperationLog.id == log.id).first()
+            stored_log = db.query(AdminOperationLog).filter(AdminOperationLog.id == log.id).first()
             assert stored_log is not None
             payload = stored_log.request_params or {}
         finally:
@@ -762,7 +758,7 @@ def test_audiobook_settle_event_is_idempotent():
     try:
         first_log = record_audiobook_billing_settle(db=db, audiobook_project_id=audiobook_project.id)
         second_log = record_audiobook_billing_settle(db=db, audiobook_project_id=audiobook_project.id)
-        logs = db.query(HELPERS_MODULE.AdminOperationLog).all()
+        logs = db.query(AdminOperationLog).all()
     finally:
         db.close()
 

@@ -17,6 +17,7 @@ from app.models.book_parser import BookAnalysis, BookChapter, BookSource
 from app.models.character import Character
 from app.models.project import Project
 from app.models.setting import SettingCollection, SettingItem
+from app.services.character_runtime_context import extract_character_relation_items
 from app.services.agents.chapter_summarizer import ChapterSummarizer
 from app.services.book_parser.project_bridge import ProjectBridge
 from app.services.setting_templates import build_project_settings_summary
@@ -777,7 +778,7 @@ def test_import_characters_normalizes_mentions_and_backfills_missing_cards() -> 
     assert "\u3010\u89d2\u8272\u5b9a\u4f4d\u3011\uff1a\u4e3b\u89d2" in (lin_che.profile or "")
     assert any(
         relation.get("target") == "\u987e\u665a" and relation.get("type") == "\u76df\u53cb"
-        for relation in json.loads(lin_che.relations or "[]")
+        for relation in extract_character_relation_items(lin_che.relations)
     )
 
     assert gu_wan.appearance_status == "\u5df2\u51fa\u573a"
@@ -1045,7 +1046,7 @@ def test_sync_imported_characters_to_character_system_creates_reusable_items() -
     ]
     lin_che = next(item for item in character_items if item.name == "林澈")
     gu_wan = next(item for item in character_items if item.name == "顾晚")
-    lin_che_relations = json.loads(lin_che.relations or "[]")
+    lin_che_relations = extract_character_relation_items(lin_che.relations)
 
     assert result["collection_created"] == 1
     assert result["items_synced"] == 2

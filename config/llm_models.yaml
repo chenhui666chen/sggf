@@ -426,8 +426,8 @@ llm_models:
       supports_json_mode: true  # 🔥 官方最新：支持JSON输出
 
     api_config:
-      api_key_env: DEEPSEEK_API_KEY
-      base_url: https://api.deepseek.com/v1
+      api_key_env: DASHSCOPE_API_KEY
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
       default_timeout: 300
 
     performance:
@@ -457,6 +457,9 @@ llm_models:
         - qwen3.5-plus
       enabled: true
 
+    default_params:
+      request_model: deepseek-r1
+
     summary: 项目中的高强度推理模型。DeepSeek 官方文档将 Reasoner 系列定位为强化推理模型，适合复杂分析、数学逻辑和多步骤决策；项目中主要承担结构审校、人物逻辑和质量复审。
     recommended_scenarios:
       - 世界观规则设计
@@ -475,10 +478,10 @@ llm_models:
       - 深度推理任务首选
       - 世界观、人物、结构审校优先使用
       - 适合作为生成后的质量复审模型
-    documentation_url: https://api-docs.deepseek.com/
+    documentation_url: https://help.aliyun.com/zh/model-studio/deepseek-api
     source_urls:
-      - https://api-docs.deepseek.com/
-      - https://api-docs.deepseek.com/quick_start/pricing
+      - https://help.aliyun.com/zh/model-studio/deepseek-api
+      - https://help.aliyun.com/zh/model-studio/models
 
     tags:
       - reasoning
@@ -516,8 +519,8 @@ llm_models:
       supports_json_mode: true  # 🔥 官方最新：支持JSON输出
 
     api_config:
-      api_key_env: DEEPSEEK_API_KEY
-      base_url: https://api.deepseek.com/v1
+      api_key_env: DASHSCOPE_API_KEY
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
       default_timeout: 120
 
     performance:
@@ -539,6 +542,9 @@ llm_models:
         - qwen3.5-plus
       enabled: true
 
+    default_params:
+      request_model: deepseek-v3
+
     summary: 项目中的通用对话与快速改写模型。DeepSeek 官方文档将 Chat 系列定位为常规高性价比对话模型，适合日常交互、通用问答和轻量写作场景。
     recommended_scenarios:
       - AI 痕迹处理
@@ -557,10 +563,10 @@ llm_models:
       - 日常对话和快速任务首选
       - 成本较低，适合作为高频调用模型
       - AI 痕迹处理与快速改写推荐使用
-    documentation_url: https://api-docs.deepseek.com/
+    documentation_url: https://help.aliyun.com/zh/model-studio/deepseek-api
     source_urls:
-      - https://api-docs.deepseek.com/
-      - https://api-docs.deepseek.com/quick_start/pricing
+      - https://help.aliyun.com/zh/model-studio/deepseek-api
+      - https://help.aliyun.com/zh/model-studio/models
 
     tags:
       - chat

@@ -24,6 +24,7 @@ from app.schemas.story_expansion import (
     StoryExpansionTaskResultResponse,
 )
 from app.websocket.manager import ws_manager
+from app.services.character_runtime_context import build_character_prompt_context_from_text
 from app.services.workflow_context_builder import WorkflowContextBuilder
 from app.utils.datetime_utils import parse_datetime_utc, utc_now
 import uuid
@@ -3401,6 +3402,12 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                     )
                     rag_character_context = first_chapter_rag.rag_character_context
                     rag_world_context = first_chapter_rag.rag_world_context
+                    if not rag_character_context and characters:
+                        rag_character_context = build_character_prompt_context_from_text(
+                            characters,
+                            detail_limit=560,
+                            summary_limit=240,
+                        )
                     if not rag_character_context and characters:
                         rag_character_context = smart_truncate_for_context(
                             characters,

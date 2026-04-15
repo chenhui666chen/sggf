@@ -14,6 +14,13 @@ if str(PROJECT_ROOT) not in sys.path:
 os.environ.setdefault("DEBUG", "false")
 
 from app.models.character import Character
+from app.services.character_runtime_context import (
+    build_character_prompt_context_from_text,
+    build_character_relations_payload,
+    build_current_mainline_summary,
+    build_current_relationship_summary,
+    normalize_character_relations_payload,
+)
 from app.services.character_parser import CharacterTextParser, infer_story_stance_from_text_evidence
 from app.services.character_text_generator import CharacterTextGenerator
 from app.services.story_expansion_coordinator import extract_character_names, parse_outline_blocks
@@ -200,3 +207,115 @@ def test_parse_outline_blocks_supports_chapter_outline_sections() -> None:
     assert len(blocks) == 1
     assert blocks[0].original_number == 1
     assert blocks[0].title == "第一滴恐惧"
+
+
+def test_build_character_relations_payload_prioritizes_current_relations() -> None:
+    raw_relations = (
+        "苏晚晴：雇主/庇护者与潜在的背叛风险；"
+        "云无月：监视者/追捕者与理念冲突下的奇异吸引；"
+        "影舞：直接威胁/持续观察的猎手；"
+        "石磊：实际恩主与战略领袖/获得其无条件忠诚；"
+        "黑风煞：已击杀的敌对首领/其死亡揭示的龙怨警告被验证；"
+        "墨渊：间接的知识提供者/通过云无月或白鹤真人接触"
+    )
+
+    payload = build_character_relations_payload(raw_relations, max_current_items=4, max_current_chars=160)
+
+    assert payload["version"] == 2
+    assert len(payload["items"]) >= 5
+    assert "苏晚晴" in payload["current_summary"]
+    assert "影舞" in payload["current_summary"]
+    assert "石磊" in payload["current_summary"]
+    assert "黑风煞" not in payload["current_summary"]
+
+
+def test_normalize_character_relations_payload_supports_legacy_target_type_mapping() -> None:
+    payload = normalize_character_relations_payload({
+        "顾晚": "盟友",
+        "影舞": "威胁",
+    })
+
+    assert payload is not None
+    assert payload["version"] == 2
+    assert payload["current_summary"] == "顾晚：盟友；影舞：威胁"
+    assert [item["target"] for item in payload["items"]] == ["顾晚", "影舞"]
+    assert [item["type"] for item in payload["items"]] == ["盟友", "威胁"]
+    assert all(int(item["priority"]) > 0 for item in payload["items"])
+
+
+def test_build_current_mainline_summary_filters_resolved_total_ledger_text() -> None:
+    mainline_role = (
+        "剧情职责：需承担导师职责，整合并领导新附庸势力；"
+        "作为寻龙堂创立者与领导者，需统筹研究方向并亲自带队执行首次高危勘探；"
+        "黑风煞死亡引发的连锁反应已被处理"
+    )
+    mainline_clues = (
+        "关联线索：通过墨渊获取上古风水师被天律盟抹杀的历史；"
+        "黑风煞遗留的裂缝隐患成为首个长期监控对象；"
+        "赤岩尊者勾结葬骨城的证据已被处理"
+    )
+
+    summary = build_current_mainline_summary(mainline_role, mainline_clues, max_chars=200)
+
+    assert "寻龙堂" in summary
+    assert "墨渊" in summary or "上古风水师" in summary
+    assert "已被处理" not in summary
+
+
+def test_character_text_generator_supports_relation_payload_dict() -> None:
+    relations = build_character_relations_payload("顾晚：盟友/互相信任；影舞：直接威胁/持续观察")
+    character = Character(
+        project_id=1,
+        name="林澈",
+        role="主角方",
+        role_position="主角",
+        importance_level="主角",
+        relations=json.dumps(relations, ensure_ascii=False),
+    )
+
+    text = CharacterTextGenerator.generate_single_character_text(
+        character,
+        db=None,
+        include_relations=True,
+        include_techniques=False,
+    )
+
+    assert "【关键关系】" in text
+    assert "顾晚：盟友/互相信任" in text
+    assert "影舞：直接威胁/持续观察" in text
+
+
+def test_build_character_prompt_context_from_text_uses_runtime_summary_instead_of_raw_cards() -> None:
+    characters = "\n\n".join(
+        [
+            (
+                "### 【姓名】：顾长歌\n"
+                "【故事立场】：主角方\n"
+                "【角色定位】：主角\n"
+                "【关键关系】：苏晚晴：雇主/庇护者与潜在的背叛风险；影舞：直接威胁/持续观察的猎手；"
+                "黑风煞：已击杀的敌对首领/其死亡揭示的龙怨警告被验证\n"
+                "【主线绑定】：剧情职责：整合并领导新附庸势力；关联线索：通过墨渊获取上古风水师历史\n"
+                f"【背景/当前处境】：{'背景信息' * 20}"
+            ),
+            (
+                "### 【姓名】：苏晚晴\n"
+                "【故事立场】：亦正亦邪\n"
+                "【角色定位】：危险盟友\n"
+                "【关键关系】：顾长歌：雇主/依赖与试探并存\n"
+                "【主线绑定】：剧情职责：左右主角资源入口"
+            ),
+        ]
+    )
+
+    context = build_character_prompt_context_from_text(
+        characters,
+        detail_limit=180,
+        summary_limit=120,
+        max_characters=2,
+    )
+
+    assert "【角色名单摘要】" in context
+    assert "【人物运行摘要】" in context
+    assert "当前关系" in context
+    assert "黑风煞" not in context
+    assert "背景信息背景信息背景信息" not in context

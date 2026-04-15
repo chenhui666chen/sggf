@@ -13,13 +13,17 @@ if str(ROOT_DIR) not in sys.path:
 os.environ["DEBUG"] = "false"
 os.environ["DATABASE_URL"] = "postgresql://test:test@127.0.0.1:5432/test_db"
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request, status
 from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+import app.core.security as security
 fake_db_base = types.ModuleType("app.db.base")
+_original_db_base_module = sys.modules.get("app.db.base")
+_original_user_module = sys.modules.get("app.models.user")
+_original_role_module = sys.modules.get("app.models.role")
 
 
 class AuthTestBase(DeclarativeBase):
@@ -32,7 +36,10 @@ def stub_get_db():
 
 fake_db_base.Base = AuthTestBase
 fake_db_base.get_db = stub_get_db
+fake_db_base.SessionLocal = lambda: None
 sys.modules["app.db.base"] = fake_db_base
+for polluted_module in ("app.models.user", "app.models.role"):
+    sys.modules.pop(polluted_module, None)
 
 from app.core.security import create_access_token, hash_password, make_unusable_password_hash
 from app.db.base import Base, get_db
@@ -52,6 +59,22 @@ def load_auth_module():
 
 
 auth = load_auth_module()
+
+# 清理模块级 monkeypatch，避免污染后续测试的真实导入链路。
+if _original_db_base_module is not None:
+    sys.modules["app.db.base"] = _original_db_base_module
+else:
+    sys.modules.pop("app.db.base", None)
+
+if _original_user_module is not None:
+    sys.modules["app.models.user"] = _original_user_module
+else:
+    sys.modules.pop("app.models.user", None)
+
+if _original_role_module is not None:
+    sys.modules["app.models.role"] = _original_role_module
+else:
+    sys.modules.pop("app.models.role", None)
 
 
 class CompatTestClient:
@@ -107,7 +130,36 @@ def build_test_client() -> tuple[CompatTestClient, sessionmaker]:
         finally:
             db.close()
 
+    async def override_get_current_user(request: Request) -> User:
+        auth_header = request.headers.get("Authorization", "")
+        scheme, _, token = auth_header.partition(" ")
+        if scheme.lower() != "bearer" or not token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token",
+            )
+
+        payload = security.verify_token(token)
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token",
+            )
+
+        db = testing_session_local()
+        try:
+            user = db.query(User).filter(User.id == int(user_id)).first()
+            validated_user = security._validate_user_status(user)
+            db.expunge(validated_user)
+            return validated_user
+        finally:
+            db.close()
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[security.get_db] = override_get_db
+    app.dependency_overrides[auth.get_current_user] = override_get_current_user
+    app.dependency_overrides[security.get_current_user] = override_get_current_user
     return CompatTestClient(app), testing_session_local
 
 

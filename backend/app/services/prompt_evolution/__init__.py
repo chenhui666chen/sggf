@@ -1,41 +1,22 @@
 """
 提示词自动优化系统 (Prompt Evolution Engine)
 
-这是一个独立的实验性模块，用于自动化优化"降低AI痕迹"的提示词。
-不会自动应用到生产环境，所有优化结果需要人工审核确认。
-
-主要组件：
-- PromptEvolutionEngine: 核心进化引擎
-- PromptEvaluator: 评估器（调用AI检测）
-- MetaOptimizer: 元优化器（分析并改进提示词）
-- EvolutionStorage: 存储管理
-- TestSampleManager: 测试样本管理
+这里使用懒加载，避免导入样本模块时连带拉起 AI 检测、LLM 客户端等重依赖。
 """
 
-from .engine import PromptEvolutionEngine, run_evolution
-from .models import (
-    PromptVersion,
-    EvaluationResult,
-    EvolutionHistory,
-    EvolutionConfig,
-    ApprovalStatus
-)
-from .storage import EvolutionStorage
-from .evaluator import PromptEvaluator
-from .meta_optimizer import MetaOptimizer
-from .test_samples import TestSampleManager, DEFAULT_TEST_SAMPLES
+from __future__ import annotations
+
+from importlib import import_module
+
 
 __all__ = [
-    # 核心引擎
     "PromptEvolutionEngine",
     "run_evolution",
-    # 数据模型
     "PromptVersion",
-    "EvaluationResult", 
+    "EvaluationResult",
     "EvolutionHistory",
     "EvolutionConfig",
     "ApprovalStatus",
-    # 组件
     "EvolutionStorage",
     "PromptEvaluator",
     "MetaOptimizer",
@@ -43,3 +24,28 @@ __all__ = [
     "DEFAULT_TEST_SAMPLES",
 ]
 
+_ATTRIBUTE_TO_MODULE = {
+    "PromptEvolutionEngine": ".engine",
+    "run_evolution": ".engine",
+    "PromptVersion": ".models",
+    "EvaluationResult": ".models",
+    "EvolutionHistory": ".models",
+    "EvolutionConfig": ".models",
+    "ApprovalStatus": ".models",
+    "EvolutionStorage": ".storage",
+    "PromptEvaluator": ".evaluator",
+    "MetaOptimizer": ".meta_optimizer",
+    "TestSampleManager": ".test_samples",
+    "DEFAULT_TEST_SAMPLES": ".test_samples",
+}
+
+
+def __getattr__(name: str):
+    target_module = _ATTRIBUTE_TO_MODULE.get(name)
+    if not target_module:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    module = import_module(target_module, __name__)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value

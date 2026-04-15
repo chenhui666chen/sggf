@@ -31,7 +31,15 @@ class _FakeDB:
         self.rollbacks = 0
 
     def execute(self, query: Any, params: Any = None) -> _FakeExecuteResult:
-        self.execute_calls.append((str(query), params))
+        query_text = str(query)
+        self.execute_calls.append((query_text, params))
+
+        if "SELECT title, genre, sub_genre" in query_text:
+            return _FakeExecuteResult(("测试项目", "玄幻", "", "", 0, 0, "用户大纲"))
+
+        if "SELECT concept, world_setting, characters, plot_outline" in query_text:
+            return _FakeExecuteResult(("", "世界观设定", "人物设定", "结构大纲", "", "", ""))
+
         return _FakeExecuteResult(self._fetchone_result)
 
     def rollback(self) -> None:
@@ -65,7 +73,7 @@ def test_load_latest_chapter_plan_uses_current_schema() -> None:
 
 
 def test_load_project_chapter_context_prefers_plot_outline() -> None:
-    fake_db = _FakeDB(("玄幻", "结构大纲", "用户大纲", "世界观设定", "人物设定"))
+    fake_db = _FakeDB()
 
     result = workflow._load_project_chapter_context(fake_db, project_id=9)
 

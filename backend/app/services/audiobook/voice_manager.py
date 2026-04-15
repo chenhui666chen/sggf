@@ -715,27 +715,17 @@ class VoiceManager:
     def get_narrator_voice(self) -> VoiceProfile:
         """获取旁白音色"""
         if "旁白" not in self.character_voices:
-            logger.info("🔍 [调试] 旁白未配置，使用默认音色: male_narrator")
             voice_config = self.PRESET_VOICES["male_narrator"]  # 修复：使用正确的key
             self.character_voices["旁白"] = self._create_profile(
                 "旁白",
                 "male_narrator",
                 voice_config
             )
-        else:
-            profile = self.character_voices["旁白"]
-            # 🔍 详细调试：输出旁白的实际参数
-            logger.info(f"✅ [调试] 旁白已配置: {profile.voice_id} ({profile.tts_speaker_id})")
-            logger.info(f"   📦 旁白参数: pitch_base={profile.pitch_base}, speed_base={profile.speed_base}, volume_base={profile.volume_base}")
         return self.character_voices["旁白"]
     
     def get_voice(self, character_name: str) -> Optional[VoiceProfile]:
         """获取角色音色"""
-        profile = self.character_voices.get(character_name)
-        if profile:
-            # 🔍 调试：输出角色的实际参数
-            logger.debug(f"   📦 {character_name}参数: pitch_base={profile.pitch_base}, speed_base={profile.speed_base}, volume_base={profile.volume_base}")
-        return profile
+        return self.character_voices.get(character_name)
     
     def apply_project_voice_mapping(self, voice_mapping: Dict[str, Any]):
         """应用项目级的角色音配置（用户配置优先）
@@ -750,8 +740,6 @@ class VoiceManager:
         """
         if not voice_mapping:
             return
-        
-        logger.info(f"🎵 [调试] 应用音色配置: {list(voice_mapping.keys())}")
 
         for character_name, config in voice_mapping.items():
             if not isinstance(config, dict):
@@ -801,7 +789,6 @@ class VoiceManager:
             profile = self._create_profile(character_name, voice_id, voice_config)
             self.character_voices[character_name] = profile
             self.used_voice_ids.add(voice_id)
-            logger.info(f"✅ [调试] 已配置 {character_name}: {voice_id} ({preset.get('description', '')})")
             logger.info(
                 f"🎛 应用用户音频配置: {character_name} -> {voice_id} "
                 f"(volume={voice_config.get('volume_base')})"

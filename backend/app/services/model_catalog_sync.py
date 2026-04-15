@@ -269,8 +269,8 @@ _GLOBAL_FALLBACK_SOURCES: dict[str, list[str]] = {
         "https://help.aliyun.com/zh/model-studio/models",
     ],
     "deepseek": [
-        "https://api-docs.deepseek.com/",
-        "https://api-docs.deepseek.com/quick_start/pricing",
+        "https://help.aliyun.com/zh/model-studio/deepseek-api",
+        "https://help.aliyun.com/zh/model-studio/models",
     ],
     "kunlun": [
         "https://platform.mureka.cn/docs/",

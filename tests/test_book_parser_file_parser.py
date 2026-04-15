@@ -4,7 +4,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-from ebooklib import epub
+import pytest
+
+
+epub = pytest.importorskip("ebooklib.epub")
 
 
 ROOT_DIR = os.path.join(os.path.dirname(__file__), "..")

@@ -14,7 +14,7 @@ interface UseWebSocketReconnectOptions {
 }
 
 export function useWebSocketReconnect(options: UseWebSocketReconnectOptions) {
-  const { runId, onEvent, onStateChange } = options
+  const { runId, onStateChange } = options
 
   const [state, setState] = useState<WebSocketState>({
     connected: false,
@@ -33,14 +33,10 @@ export function useWebSocketReconnect(options: UseWebSocketReconnectOptions) {
   useEffect(() => {
     updateState({ connected: true })
 
-    if (onEvent) {
-      console.log('[WebSocket] Setting up event handler for run:', runId)
-    }
-
     return () => {
       updateState({ connected: false })
     }
-  }, [runId, onEvent, updateState])
+  }, [runId, updateState])
 
   return state
 }

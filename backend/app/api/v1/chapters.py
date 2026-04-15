@@ -1,8 +1,8 @@
 """
 章节API路由
 """
-from typing import cast, List
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import cast, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.orm import Session
 from app.db.base import get_db
@@ -19,6 +19,23 @@ from docx.shared import Pt, Inches
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 
 router = APIRouter(prefix="/api/v1/chapters", tags=["chapters"])
+
+
+def _serialize_deleted_chapter(chapter: Chapter, project_name: Optional[str] = None) -> dict:
+    """将已删除章节转换为前端可直接消费的稳定结构。"""
+    return {
+        "id": chapter.id,
+        "project_id": chapter.project_id,
+        "project_name": project_name,
+        "chapter_number": chapter.chapter_number,
+        "title": chapter.title,
+        "content": chapter.content or "",
+        "word_count": chapter.word_count or 0,
+        "created_at": chapter.created_at.isoformat() if chapter.created_at else None,
+        "updated_at": chapter.updated_at.isoformat() if chapter.updated_at else None,
+        "deleted_at": chapter.deleted_at.isoformat() if chapter.deleted_at else None,
+        "status": chapter.status,
+    }
 
 
 def extract_title_from_content(content: str, chapter_number: int) -> str:
@@ -274,7 +291,7 @@ async def create_chapter(
     return chapter
 
 
-@router.get("/{chapter_id}", response_model=ChapterResponse)
+@router.get("/{chapter_id:int}", response_model=ChapterResponse)
 async def get_chapter(
     chapter_id: int,
     current_user: User = Depends(get_current_user),
@@ -310,7 +327,7 @@ async def get_chapter(
     return chapter
 
 
-@router.put("/{chapter_id}", response_model=ChapterResponse)
+@router.put("/{chapter_id:int}", response_model=ChapterResponse)
 async def update_chapter(
     chapter_id: int,
     chapter_data: ChapterUpdate,
@@ -544,7 +561,7 @@ async def update_chapter(
     return chapter
 
 
-@router.delete("/{chapter_id}")
+@router.delete("/{chapter_id:int}")
 async def delete_chapter(
     chapter_id: int,
     current_user: User = Depends(get_current_user),
@@ -756,7 +773,7 @@ async def delete_chapter(
     }
 
 
-@router.post("/{chapter_id}/restore")
+@router.post("/{chapter_id:int}/restore")
 async def restore_chapter(
     chapter_id: int,
     current_user: User = Depends(get_current_user),
@@ -811,31 +828,57 @@ async def restore_chapter(
 
 @router.get("/deleted")
 async def get_deleted_chapters(
-    project_id: int,
+    project_id: int = Query(default=0, ge=0),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取项目中所有已删除的章节"""
-    # 检查项目权限
+    """获取已删除章节列表，支持按项目查询或跨项目聚合。"""
+    if project_id <= 0:
+        rows = (
+            db.query(Chapter, Project.title)
+            .join(Project, Project.id == Chapter.project_id)
+            .filter(
+                Project.user_id == current_user.id,
+                Chapter.deleted_at.isnot(None),
+            )
+            .order_by(Chapter.deleted_at.desc())
+            .all()
+        )
+
+        deleted_chapters = [
+            _serialize_deleted_chapter(chapter, project_name)
+            for chapter, project_name in rows
+        ]
+
+        return {
+            "project_id": None,
+            "deleted_chapters": deleted_chapters,
+            "count": len(deleted_chapters)
+        }
+
     project = db.query(Project).filter(Project.id == project_id).first()
     if project is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found"
         )
-    
+
     if project.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied"
         )
-    
-    # 获取已删除的章节
-    deleted_chapters = db.query(Chapter).filter(
+
+    chapters = db.query(Chapter).filter(
         (Chapter.project_id == project_id) &
         (Chapter.deleted_at.isnot(None))
     ).order_by(Chapter.deleted_at.desc()).all()
-    
+
+    deleted_chapters = [
+        _serialize_deleted_chapter(chapter, project.title)
+        for chapter in chapters
+    ]
+
     return {
         "project_id": project_id,
         "deleted_chapters": deleted_chapters,
@@ -843,7 +886,7 @@ async def get_deleted_chapters(
     }
 
 
-@router.post("/{chapter_id}/auto-save")
+@router.post("/{chapter_id:int}/auto-save")
 async def auto_save_chapter(
     chapter_id: int,
     chapter_data: ChapterUpdate,
@@ -923,7 +966,7 @@ async def auto_save_chapter(
 # 版本历史API端点
 # ===========================
 
-@router.get("/{chapter_id}/revisions", response_model=List[ChapterRevisionResponse])
+@router.get("/{chapter_id:int}/revisions", response_model=List[ChapterRevisionResponse])
 async def get_chapter_revisions(
     chapter_id: int,
     current_user: User = Depends(get_current_user),
@@ -954,7 +997,7 @@ async def get_chapter_revisions(
     return revisions
 
 
-@router.post("/{chapter_id}/revisions/{revision_id}/restore", response_model=ChapterResponse)
+@router.post("/{chapter_id:int}/revisions/{revision_id:int}/restore", response_model=ChapterResponse)
 async def restore_chapter_revision(
     chapter_id: int,
     revision_id: int,
@@ -1016,7 +1059,7 @@ async def restore_chapter_revision(
 # 导出API端点
 # ===========================
 
-@router.get("/{chapter_id}/export/txt")
+@router.get("/{chapter_id:int}/export/txt")
 async def export_chapter_txt(
     chapter_id: int,
     current_user: User = Depends(get_current_user),
@@ -1057,7 +1100,7 @@ async def export_chapter_txt(
     )
 
 
-@router.get("/{chapter_id}/export/docx")
+@router.get("/{chapter_id:int}/export/docx")
 async def export_chapter_docx(
     chapter_id: int,
     current_user: User = Depends(get_current_user),

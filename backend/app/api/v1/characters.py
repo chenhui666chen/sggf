@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -13,6 +13,10 @@ from app.models.user import User
 from app.models.project import Project, Chapter
 from app.models.character import Character, CharacterTechnique
 from app.models.setting import SettingItem, SettingCollection
+from app.services.character_runtime_context import (
+    extract_character_relation_items,
+    normalize_character_relations_payload,
+)
 from app.services.workflow_context_builder import WorkflowContextBuilder
 from app.schemas.character import (
     CharacterCreate,
@@ -43,6 +47,31 @@ def _ensure_project_owned(project_id: int, current_user: User, db: Session) -> P
             status_code=status.HTTP_404_NOT_FOUND, detail="Project not found",
         )
     return project
+
+
+def _sync_character_vector(character: Character, db: Session) -> None:
+    from app.services.character_text_generator import CharacterTextGenerator
+    from app.services.vector_sync import upsert_character_to_vector_db
+
+    vector_content = CharacterTextGenerator.generate_single_character_text(
+        character,
+        db=db,
+        include_relations=True,
+        include_techniques=True,
+    )
+    upsert_character_to_vector_db(
+        character_id=character.id,
+        character_name=character.name,
+        content=vector_content,
+        project_id=character.project_id,
+    )
+
+
+def _serialize_character_relations(value: Any) -> str | None:
+    normalized = normalize_character_relations_payload(value)
+    if normalized is None:
+        return None
+    return json.dumps(normalized, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -103,12 +132,18 @@ async def create_character(
         summary=data.summary,
         profile=data.profile,
         tags=None if data.tags is None else json.dumps(data.tags),
-        relations=None if data.relations is None else json.dumps(data.relations),
+        relations=_serialize_character_relations(data.relations),
     )
 
     db.add(character)
     db.commit()
     db.refresh(character)
+
+    try:
+        _sync_character_vector(character, db)
+    except Exception as e:
+        logger.debug(f"⚠️ 同步人物到向量库失败: {e}")
+
     return character
 
 
@@ -161,7 +196,7 @@ async def update_character(
         character.relations = (
             None
             if data_dict["relations"] is None
-            else json.dumps(data_dict["relations"])
+            else _serialize_character_relations(data_dict["relations"])
         )
         data_dict.pop("relations")
 
@@ -172,25 +207,8 @@ async def update_character(
     db.commit()
     db.refresh(character)
     
-    # 🆕 同步到向量库
     try:
-        from app.services.vector_sync import upsert_character_to_vector_db
-        # 生成人物向量内容
-        vector_content = f"""
-人物名称: {character.name}
-故事立场: {character.role or '未设定'}
-角色定位: {character.role_position or '未设定'}
-所属势力: {character.faction or '未设定'}
-状态: {character.life_status or '未知'}
-简介: {character.summary or ''}
-详细信息: {character.profile or ''}
-""".strip()
-        upsert_character_to_vector_db(
-            character_id=character.id,
-            character_name=character.name,
-            content=vector_content,
-            project_id=character.project_id
-        )
+        _sync_character_vector(character, db)
     except Exception as e:
         logger.debug(f"⚠️ 同步人物到向量库失败: {e}")
     
@@ -415,6 +433,13 @@ async def update_character_techniques(
         .order_by(CharacterTechnique.id)
         .all()
     )
+
+    try:
+        db.refresh(character)
+        _sync_character_vector(character, db)
+    except Exception as e:
+        logger.debug(f"⚠️ 同步人物功法变更到向量库失败: {e}")
+
     return [_to_tech_response(ct) for ct in refreshed]
 
 
@@ -728,26 +753,25 @@ async def get_character_relationship_graph(
         # 从 relations 字段解析关系
         if char.relations:
             try:
-                relations = json.loads(char.relations)
-                if isinstance(relations, list):
-                    for rel in relations:
-                        if isinstance(rel, dict):
-                            target_name = rel.get("target", "")
-                            rel_type = rel.get("type", "关联")
-                            if target_name and target_name in character_id_map:
-                                source_id = str(char.id)
-                                target_id = character_id_map[target_name]
-                                # 去重（双向只保留一条）
-                                edge_key = tuple(sorted([source_id, target_id]))
-                                if edge_key not in edge_set:
-                                    edge_set.add(edge_key)
-                                    edges.append({
-                                        "id": f"e{source_id}-{target_id}",
-                                        "source": source_id,
-                                        "target": target_id,
-                                        "label": rel_type,
-                                        "type": "smoothstep",
-                                    })
+                relations = extract_character_relation_items(char.relations)
+                for rel in relations:
+                    if isinstance(rel, dict):
+                        target_name = rel.get("target", "")
+                        rel_type = rel.get("type") or rel.get("detail") or "关联"
+                        if target_name and target_name in character_id_map:
+                            source_id = str(char.id)
+                            target_id = character_id_map[target_name]
+                            # 去重（双向只保留一条）
+                            edge_key = tuple(sorted([source_id, target_id]))
+                            if edge_key not in edge_set:
+                                edge_set.add(edge_key)
+                                edges.append({
+                                    "id": f"e{source_id}-{target_id}",
+                                    "source": source_id,
+                                    "target": target_id,
+                                    "label": rel_type,
+                                    "type": "smoothstep",
+                                })
             except Exception:
                 pass
         

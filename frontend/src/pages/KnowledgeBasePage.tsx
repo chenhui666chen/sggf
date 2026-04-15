@@ -1324,11 +1324,7 @@ export default function KnowledgeBasePage() {
                   {characterSubTabValue === 1 && (
                     <Suspense fallback={<LazySectionFallback minHeight={360} />}>
                       <LazyCharacterCardManager
-                      projectId={Number(projectId)}
-                      onCharacterUpdate={() => {
-                        // 角色更新后刷新设定树
-                        console.log('角色已更新')
-                      }}
+                        projectId={Number(projectId)}
                       />
                     </Suspense>
                   )}

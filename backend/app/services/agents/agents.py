@@ -169,15 +169,6 @@ class BaseAgent(ABC):
 
         messages.append(HumanMessage(content=user_input))
         
-        # 📝 调试：打印最终传递给API的消息列表
-        logger.debug(f"📦 准备调用LLM，消息数量: {len(messages)}")
-        for i, msg in enumerate(messages):
-            msg_type = type(msg).__name__
-            # 检查是否有 role 属性
-            role = getattr(msg, 'role', 'N/A')
-            content_preview = (msg.content[:50] + '...') if len(msg.content) > 50 else msg.content
-            logger.debug(f"  [{i}] {msg_type} (role={role}): {content_preview}")
-
         # 🔥 关键修复：支持动态设置 temperature
         if temperature is not None:
             # 创建一个临时的 LLM 实例，使用指定的 temperature
