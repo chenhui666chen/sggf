@@ -5,7 +5,7 @@ param(
     [string]$ServerIP = "101.132.154.143",
     [string]$ServerUser = "root",
     [string]$LocalPath = "C:\Users\cuigu\novel_writing_agent",
-    [string]$RemotePath = "/root/novel_writing_agent",
+    [string]$RemotePath = "/data/apps/novel_writing_agent",
     [switch]$DryRun = $false,
     [switch]$SkipDelete = $false
 )

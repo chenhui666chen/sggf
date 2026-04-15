@@ -2,7 +2,7 @@
   "server": {
     "ip": "101.132.154.143",
     "user": "root",
-    "remote_path": "/root/novel_writing_agent"
+    "remote_path": "/data/apps/novel_writing_agent"
   },
   "sync_rules": {
     "backend": {
@@ -10,13 +10,19 @@
         "backend/app/**/*.py",
         "backend/app/**/*.json",
         "backend/alembic/**/*.py",
+        "backend/backend/data/**/*.json",
+        "backend/*.ini",
         "backend/requirements.txt",
+        "backend/*.json",
         "backend/Dockerfile"
       ],
       "exclude": [
         "backend/**/__pycache__/**",
         "backend/**/*.pyc",
-        "backend/.venv/**"
+        "backend/.venv/**",
+        "backend/data/**",
+        "backend/memory_data/**",
+        "backend/runs/**"
       ]
     },
     "frontend": {
@@ -26,6 +32,12 @@
         "frontend/src/**/*.css",
         "frontend/public/**/*",
         "frontend/package.json",
+        "frontend/package-lock.json",
+        "frontend/vite.config.ts",
+        "frontend/*.json",
+        "frontend/*.js",
+        "frontend/*.ts",
+        "frontend/*.html",
         "frontend/Dockerfile"
       ],
       "exclude": [
@@ -55,7 +67,12 @@
     },
     "shared": {
       "include": [
-        "shared/**/*.py"
+        "shared/**/*.py",
+        "core/**/*.py",
+        "schemas/**/*.py",
+        "config/**/*.json",
+        "config/**/*.yml",
+        "config/**/*.yaml"
       ],
       "exclude": []
     },
@@ -64,7 +81,8 @@
         "docker-compose.yml",
         "nginx-prod.conf",
         ".env.example",
-        "deploy.sh"
+        "deploy.sh",
+        "deploy_config.json"
       ],
       "exclude": []
     }
@@ -76,13 +94,13 @@
       "timeout": 600
     },
     "frontend": {
-      "rebuild": false,
+      "rebuild": true,
       "restart": true
     }
   },
   "validation": {
     "check_api": true,
-    "api_endpoint": "/api/v1/health",
+    "api_endpoint": "/health",
     "timeout": 30
   }
 }

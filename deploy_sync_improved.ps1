@@ -1,204 +1,604 @@
-# Novel Writing Agent - Improved Bidirectional Sync Script
-# Fixes: upload failures, delete hangs, better error handling
+# Novel Writing Agent - Improved Bidirectional Deployment Script
+# Features:
+# - Config-driven file selection
+# - Bidirectional sync with remote deletion
+# - Retryable uploads
+# - Backend/frontend rebuild and restart
+# - Basic deployment validation
 
 param(
-    [string]$ServerIP = "101.132.154.143",
-    [string]$ServerUser = "root",
-    [string]$LocalPath = "C:\Users\cuigu\novel_writing_agent",
-    [string]$RemotePath = "/root/novel_writing_agent",
+    [string]$ConfigFile = "deploy_config.json",
+    [string]$ServerIP = "",
+    [string]$ServerUser = "",
+    [string]$LocalPath = "",
+    [string]$RemotePath = "",
     [int]$MaxRetries = 3,
     [int]$TimeoutSeconds = 30,
     [switch]$DryRun = $false,
-    [switch]$SkipDelete = $false
+    [switch]$SkipDelete = $false,
+    [switch]$SkipBuild = $false,
+    [switch]$SkipValidation = $false
 )
 
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+function Get-PropertyValue {
+    param(
+        [Parameter(Mandatory = $false)]$Object,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $false)]$Default = $null
+    )
+
+    if ($null -eq $Object) {
+        return $Default
+    }
+
+    if ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($Name)) {
+            return $Object[$Name]
+        }
+        return $Default
+    }
+
+    if ($Object.PSObject.Properties.Match($Name).Count -gt 0) {
+        return $Object.$Name
+    }
+
+    return $Default
+}
+
+function Normalize-RelativePath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $normalized = $Path.Replace("\", "/")
+    while ($normalized.StartsWith("./")) {
+        $normalized = $normalized.Substring(2)
+    }
+    return $normalized.TrimStart("/")
+}
+
+function Quote-Posix {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    return "'" + $Value.Replace("'", "'""'""'") + "'"
+}
+
+function Test-MatchesAnyPattern {
+    param(
+        [Parameter(Mandatory = $true)][string]$RelativePath,
+        [Parameter(Mandatory = $false)][AllowEmptyCollection()][string[]]$Patterns = @()
+    )
+
+    if ($null -eq $Patterns -or $Patterns.Count -eq 0) {
+        return $false
+    }
+
+    $normalizedPath = Normalize-RelativePath $RelativePath
+
+    foreach ($pattern in $Patterns) {
+        $regexPattern = Convert-GlobToRegex -Pattern $pattern
+        if ([System.Text.RegularExpressions.Regex]::IsMatch($normalizedPath, $regexPattern)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Convert-GlobToRegex {
+    param(
+        [Parameter(Mandatory = $true)][string]$Pattern
+    )
+
+    $normalizedPattern = Normalize-RelativePath $Pattern
+    $builder = New-Object System.Text.StringBuilder
+    $index = 0
+
+    while ($index -lt $normalizedPattern.Length) {
+        if (($index + 2) -lt $normalizedPattern.Length -and $normalizedPattern.Substring($index, 3) -eq "**/") {
+            $null = $builder.Append("(?:.*/)?")
+            $index += 3
+            continue
+        }
+
+        if (($index + 1) -lt $normalizedPattern.Length -and $normalizedPattern.Substring($index, 2) -eq "**") {
+            $null = $builder.Append(".*")
+            $index += 2
+            continue
+        }
+
+        $char = $normalizedPattern[$index]
+        switch ($char) {
+            '*' {
+                $null = $builder.Append("[^/]*")
+                break
+            }
+            '?' {
+                $null = $builder.Append("[^/]")
+                break
+            }
+            default {
+                $null = $builder.Append([System.Text.RegularExpressions.Regex]::Escape([string]$char))
+                break
+            }
+        }
+
+        $index += 1
+    }
+
+    return "^$builder$"
+}
+
+function Merge-UniqueStrings {
+    param(
+        [Parameter(Mandatory = $false)][string[]]$Primary = @(),
+        [Parameter(Mandatory = $false)][string[]]$Secondary = @()
+    )
+
+    $result = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($Primary) + @($Secondary)) {
+        if ([string]::IsNullOrWhiteSpace($item)) {
+            continue
+        }
+        if (-not $result.Contains($item)) {
+            $null = $result.Add($item)
+        }
+    }
+    return $result.ToArray()
+}
+
+function Test-ShouldSyncFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$RelativePath,
+        [Parameter(Mandatory = $true)]$SyncSections
+    )
+
+    foreach ($section in $SyncSections.Values) {
+        $includePatterns = @($section.include)
+        $excludePatterns = @($section.exclude)
+
+        if ((Test-MatchesAnyPattern -RelativePath $RelativePath -Patterns $includePatterns) -and
+            (-not (Test-MatchesAnyPattern -RelativePath $RelativePath -Patterns $excludePatterns))) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Get-DefaultSyncSections {
+    return @{
+        backend = @{
+            include = @(
+                "backend/app/**/*.py",
+                "backend/app/**/*.json",
+                "backend/alembic/**/*.py",
+                "backend/backend/data/**/*.json",
+                "backend/*.ini",
+                "backend/*.txt",
+                "backend/*.json",
+                "backend/Dockerfile"
+            )
+            exclude = @(
+                "backend/**/__pycache__/**",
+                "backend/**/*.pyc",
+                "backend/.venv/**",
+                "backend/data/**",
+                "backend/memory_data/**",
+                "backend/runs/**"
+            )
+        }
+        frontend = @{
+            include = @(
+                "frontend/src/**/*.tsx",
+                "frontend/src/**/*.ts",
+                "frontend/src/**/*.css",
+                "frontend/public/**/*",
+                "frontend/*.json",
+                "frontend/*.js",
+                "frontend/*.ts",
+                "frontend/*.mjs",
+                "frontend/*.cjs",
+                "frontend/*.html",
+                "frontend/Dockerfile"
+            )
+            exclude = @(
+                "frontend/node_modules/**",
+                "frontend/.next/**",
+                "frontend/dist/**",
+                "frontend/build/**"
+            )
+        }
+        shared = @{
+            include = @(
+                "agents/**/*.py",
+                "adapters/**/*.py",
+                "pipeline/**/*.py",
+                "shared/**/*.py",
+                "core/**/*.py",
+                "schemas/**/*.py",
+                "config/**/*.json",
+                "config/**/*.yml",
+                "config/**/*.yaml",
+                "docker-compose.yml",
+                "nginx-prod.conf",
+                ".env.example",
+                "deploy.sh",
+                "deploy_config.json"
+            )
+            exclude = @()
+        }
+    }
+}
+
+function Get-SyncSections {
+    param(
+        [Parameter(Mandatory = $true)]$ConfigRoot
+    )
+
+    $defaults = Get-DefaultSyncSections
+    $resolved = @{}
+    $configuredRules = Get-PropertyValue -Object $ConfigRoot -Name "sync_rules" -Default $null
+
+    foreach ($sectionName in $defaults.Keys) {
+        $configuredSection = Get-PropertyValue -Object $configuredRules -Name $sectionName -Default $null
+        $defaultSection = $defaults[$sectionName]
+
+        $resolved[$sectionName] = @{
+            include = Merge-UniqueStrings -Primary @($defaultSection.include) -Secondary @((Get-PropertyValue -Object $configuredSection -Name "include" -Default @()))
+            exclude = Merge-UniqueStrings -Primary @($defaultSection.exclude) -Secondary @((Get-PropertyValue -Object $configuredSection -Name "exclude" -Default @()))
+        }
+    }
+
+    if ($null -ne $configuredRules) {
+        foreach ($property in $configuredRules.PSObject.Properties) {
+            if ($resolved.ContainsKey($property.Name)) {
+                continue
+            }
+
+            $resolved[$property.Name] = @{
+                include = @((Get-PropertyValue -Object $property.Value -Name "include" -Default @()))
+                exclude = @((Get-PropertyValue -Object $property.Value -Name "exclude" -Default @()))
+            }
+        }
+    }
+
+    return $resolved
+}
+
+function Get-LocalFileMap {
+    param(
+        [Parameter(Mandatory = $true)][string]$BasePath,
+        [Parameter(Mandatory = $true)]$SyncSections
+    )
+
+    $fileMap = @{}
+    $allFiles = Get-ChildItem -Path $BasePath -Recurse -File | Where-Object {
+        $_.FullName -notmatch "[\\/]\.git([\\/]|$)"
+    }
+
+    foreach ($file in $allFiles) {
+        $relativePath = Normalize-RelativePath($file.FullName.Substring($BasePath.Length).TrimStart([char[]]"\/"))
+        if (Test-ShouldSyncFile -RelativePath $relativePath -SyncSections $SyncSections) {
+            $fileMap[$relativePath] = $file.FullName
+        }
+    }
+
+    return $fileMap
+}
+
+function Get-RemoteFileSet {
+    param(
+        [Parameter(Mandatory = $true)][string]$HostUser,
+        [Parameter(Mandatory = $true)][string]$HostIP,
+        [Parameter(Mandatory = $true)][string]$HostPath,
+        [Parameter(Mandatory = $true)]$SyncSections,
+        [Parameter(Mandatory = $true)][int]$ConnectTimeout
+    )
+
+    $remoteSet = @{}
+    $quotedRemotePath = Quote-Posix $HostPath
+    $findCommand = "cd $quotedRemotePath && find . -type f -printf '%P\n' 2>/dev/null"
+    $remoteFiles = ssh -o ConnectTimeout=$ConnectTimeout "$HostUser@$HostIP" $findCommand 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to scan remote files: $remoteFiles"
+    }
+
+    foreach ($file in $remoteFiles) {
+        $relativePath = Normalize-RelativePath($file)
+        if ([string]::IsNullOrWhiteSpace($relativePath)) {
+            continue
+        }
+        if (Test-ShouldSyncFile -RelativePath $relativePath -SyncSections $SyncSections) {
+            $remoteSet[$relativePath] = $true
+        }
+    }
+
+    return $remoteSet
+}
+
+function Ensure-RemoteDirectories {
+    param(
+        [Parameter(Mandatory = $true)][string]$HostUser,
+        [Parameter(Mandatory = $true)][string]$HostIP,
+        [Parameter(Mandatory = $true)][string]$HostPath,
+        [Parameter(Mandatory = $true)]$LocalFileMap,
+        [Parameter(Mandatory = $true)][int]$ConnectTimeout
+    )
+
+    $directories = New-Object System.Collections.Generic.HashSet[string]
+    $null = $directories.Add($HostPath.TrimEnd("/"))
+
+    foreach ($relativePath in $LocalFileMap.Keys) {
+        $directory = Split-Path $relativePath -Parent
+        if ([string]::IsNullOrWhiteSpace($directory)) {
+            continue
+        }
+
+        $normalizedDirectory = Normalize-RelativePath $directory
+        $null = $directories.Add(($HostPath.TrimEnd("/") + "/" + $normalizedDirectory))
+    }
+
+    $quotedDirectories = $directories | Sort-Object | ForEach-Object { Quote-Posix $_ }
+    $mkdirCommand = "mkdir -p " + ($quotedDirectories -join " ")
+    $null = ssh -o ConnectTimeout=$ConnectTimeout "$HostUser@$HostIP" $mkdirCommand 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create remote directories."
+    }
+}
+
+function Invoke-RemoteCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$HostUser,
+        [Parameter(Mandatory = $true)][string]$HostIP,
+        [Parameter(Mandatory = $true)][string]$Command,
+        [Parameter(Mandatory = $true)][int]$ConnectTimeout
+    )
+
+    $stdoutFile = [System.IO.Path]::GetTempFileName()
+    $stderrFile = [System.IO.Path]::GetTempFileName()
+
+    try {
+        $process = Start-Process -FilePath "ssh" `
+            -ArgumentList @("-o", "ConnectTimeout=$ConnectTimeout", "$HostUser@$HostIP", $Command) `
+            -NoNewWindow `
+            -Wait `
+            -PassThru `
+            -RedirectStandardOutput $stdoutFile `
+            -RedirectStandardError $stderrFile
+
+        $stdout = if (Test-Path $stdoutFile) {
+            Get-Content -Path $stdoutFile -Raw -Encoding utf8
+        } else {
+            ""
+        }
+        $stderr = if (Test-Path $stderrFile) {
+            Get-Content -Path $stderrFile -Raw -Encoding utf8
+        } else {
+            ""
+        }
+
+        $combined = @($stdout, $stderr) -join ""
+    } finally {
+        Remove-Item -LiteralPath $stdoutFile, $stderrFile -ErrorAction SilentlyContinue
+    }
+
+    return [PSCustomObject]@{
+        Output = $combined
+        ExitCode = $process.ExitCode
+    }
+}
+
+$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+if ([string]::IsNullOrWhiteSpace($LocalPath)) {
+    $LocalPath = $scriptRoot
+}
+
+$LocalPath = (Resolve-Path $LocalPath).Path.TrimEnd("\")
+$configPath = Join-Path $LocalPath $ConfigFile
+$configRoot = $null
+
+if (Test-Path $configPath) {
+    $configRoot = Get-Content -Path $configPath -Raw -Encoding utf8 | ConvertFrom-Json
+}
+
+$serverConfig = Get-PropertyValue -Object $configRoot -Name "server" -Default $null
+$validationConfig = Get-PropertyValue -Object $configRoot -Name "validation" -Default $null
+
+if ([string]::IsNullOrWhiteSpace($ServerIP)) {
+    $ServerIP = Get-PropertyValue -Object $serverConfig -Name "ip" -Default "101.132.154.143"
+}
+
+if ([string]::IsNullOrWhiteSpace($ServerUser)) {
+    $ServerUser = Get-PropertyValue -Object $serverConfig -Name "user" -Default "root"
+}
+
+if ([string]::IsNullOrWhiteSpace($RemotePath)) {
+    $RemotePath = Get-PropertyValue -Object $serverConfig -Name "remote_path" -Default "/data/apps/novel_writing_agent"
+}
+
+$apiEndpoint = Get-PropertyValue -Object $validationConfig -Name "api_endpoint" -Default "/api/v1/health"
+
+$syncSections = Get-SyncSections -ConfigRoot $configRoot
 
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "  Improved Sync Script v2.0" -ForegroundColor Cyan
-Write-Host "  - Retry mechanism for uploads" -ForegroundColor Cyan
-Write-Host "  - Batch delete for performance" -ForegroundColor Cyan
-Write-Host "  - Better error handling" -ForegroundColor Cyan
+Write-Host "  Improved Bidirectional Deployment v3.0" -ForegroundColor Cyan
+Write-Host "  Sync + Delete + Build + Validate" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Server: $ServerUser@$ServerIP" -ForegroundColor Yellow
+Write-Host "Local:  $LocalPath" -ForegroundColor Yellow
+Write-Host "Remote: $RemotePath" -ForegroundColor Yellow
+Write-Host "DryRun: $DryRun" -ForegroundColor Yellow
 Write-Host ""
 
 Set-Location $LocalPath
 
-# Step 1: Get local file list
-Write-Host "[Step 1/5] Scanning local files..." -ForegroundColor Yellow
-
-$localFiles = Get-ChildItem -Path . -Recurse -File -Include *.py,*.tsx,*.ts,*.json,*.yml,*.yaml,*.conf | 
-    Where-Object { $_.FullName -notmatch "node_modules|\.venv|__pycache__|\.git|\.next|dist|build|\.tmp" }
-
-$localFileList = @{}
-foreach ($file in $localFiles) {
-    $relativePath = $file.FullName.Substring($LocalPath.Length + 1)
-    $relativePath = $relativePath.Replace("\", "/")
-    $localFileList[$relativePath] = $true
-}
-
-Write-Host "  Local files: $($localFileList.Count)" -ForegroundColor Green
+Write-Host "[Step 1/7] Scanning local files..." -ForegroundColor Yellow
+$localFileMap = Get-LocalFileMap -BasePath $LocalPath -SyncSections $syncSections
+Write-Host "  Local files selected: $($localFileMap.Count)" -ForegroundColor Green
 Write-Host ""
 
-# Step 2: Get remote file list
-Write-Host "[Step 2/5] Scanning remote files..." -ForegroundColor Yellow
-
-$remoteFileList = @{}
-$remoteFiles = ssh -o ConnectTimeout=30 $ServerUser@$ServerIP "cd $RemotePath && find . -type f \( -name '*.py' -o -name '*.tsx' -o -name '*.ts' -o -name '*.json' -o -name '*.yml' -o -name '*.yaml' -o -name '*.conf' \) ! -path '*/node_modules/*' ! -path '*/.venv/*' ! -path '*/__pycache__/*' ! -path '*/.git/*' ! -path '*/.next/*' ! -path '*/dist/*' ! -path '*/build/*' ! -path '*/.tmp/*' 2>/dev/null"
-
-foreach ($file in $remoteFiles) {
-    if ($file -match "^\./(.+)$") {
-        $relativePath = $matches[1]
-        $remoteFileList[$relativePath] = $true
-    }
-}
-
-Write-Host "  Remote files: $($remoteFileList.Count)" -ForegroundColor Green
+Write-Host "[Step 2/7] Scanning remote files..." -ForegroundColor Yellow
+$remoteFileSet = Get-RemoteFileSet -HostUser $ServerUser -HostIP $ServerIP -HostPath $RemotePath -SyncSections $syncSections -ConnectTimeout $TimeoutSeconds
+Write-Host "  Remote files selected: $($remoteFileSet.Count)" -ForegroundColor Green
 Write-Host ""
 
-# Step 3: Find files to delete
-Write-Host "[Step 3/5] Finding files to delete..." -ForegroundColor Yellow
-
-$filesToDelete = @()
-foreach ($remoteFile in $remoteFileList.Keys) {
-    if (-not $localFileList.ContainsKey($remoteFile)) {
-        $filesToDelete += $remoteFile
-    }
-}
-
+Write-Host "[Step 3/7] Calculating remote deletions..." -ForegroundColor Yellow
+$filesToDelete = @($remoteFileSet.Keys | Where-Object { -not $localFileMap.ContainsKey($_) } | Sort-Object)
 if ($filesToDelete.Count -gt 0) {
-    Write-Host "  Files to delete: $($filesToDelete.Count)" -ForegroundColor Red
+    Write-Host "  Remote files to delete: $($filesToDelete.Count)" -ForegroundColor Red
+    foreach ($file in $filesToDelete) {
+        Write-Host "    - $file" -ForegroundColor Red
+    }
 } else {
-    Write-Host "  No files to delete" -ForegroundColor Green
+    Write-Host "  No remote files need deletion" -ForegroundColor Green
 }
 Write-Host ""
 
-# Step 4: Upload local files with retry
-Write-Host "[Step 4/5] Uploading local files (with retry)..." -ForegroundColor Yellow
-
-# First, ensure all directories exist on remote
-Write-Host "  Creating remote directories..." -ForegroundColor Yellow
-$directories = @{}
-foreach ($localPath_item in $localFileList.Keys) {
-    $dir = Split-Path $localPath_item -Parent
-    if ($dir -and -not $directories.ContainsKey($dir)) {
-        $directories[$dir] = $true
-    }
+if ($DryRun) {
+    Write-Host "[Step 4/7] Dry run mode - skipping upload" -ForegroundColor Magenta
+    Write-Host "[Step 5/7] Dry run mode - skipping delete" -ForegroundColor Magenta
+    Write-Host "[Step 6/7] Dry run mode - skipping build/restart" -ForegroundColor Magenta
+    Write-Host "[Step 7/7] Dry run mode - skipping validation" -ForegroundColor Magenta
+    Write-Host ""
+    Write-Host "Dry run completed. No changes were made." -ForegroundColor Magenta
+    exit 0
 }
 
-$dirList = $directories.Keys -join " "
-$mkdirCmd = "mkdir -p $RemotePath/" + ($directories.Keys | ForEach-Object { $_.Replace("`"", "\`"") }) -join " "
-ssh -o ConnectTimeout=60 $ServerUser@$ServerIP "cd $RemotePath && mkdir -p $($directories.Keys -join ' ')" 2>&1 | Out-Null
-Write-Host "  Created $($directories.Count) directories" -ForegroundColor Green
+Write-Host "[Step 4/7] Uploading files..." -ForegroundColor Yellow
+Ensure-RemoteDirectories -HostUser $ServerUser -HostIP $ServerIP -HostPath $RemotePath -LocalFileMap $localFileMap -ConnectTimeout $TimeoutSeconds
 
 $uploaded = 0
 $failed = 0
 $failedFiles = @()
 
-foreach ($localPath_item in $localFileList.Keys) {
-    $localFile = Join-Path $LocalPath $localPath_item.Replace("/", "\")
-    $remoteFile = "$($ServerUser)@$($ServerIP):$($RemotePath)/$($localPath_item)"
-    
-    Write-Host "  Uploading: $localPath_item" -NoNewline
-    
+foreach ($relativePath in ($localFileMap.Keys | Sort-Object)) {
+    $localFile = $localFileMap[$relativePath]
+    $remoteFile = "${ServerUser}@${ServerIP}:$($RemotePath.TrimEnd('/'))/$relativePath"
+
+    Write-Host "  Uploading: $relativePath" -NoNewline
+
     $success = $false
-    for ($retry = 1; $retry -le $MaxRetries; $retry++) {
-        try {
-            $result = scp -o StrictHostKeyChecking=no -o ConnectTimeout=$TimeoutSeconds $localFile $remoteFile 2>&1
-            
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host " [OK]" -ForegroundColor Green
-                $uploaded++
-                $success = $true
-                break
-            } else {
-                if ($retry -lt $MaxRetries) {
-                    Write-Host " [Retry $retry/$MaxRetries]" -ForegroundColor Yellow -NoNewline
-                    Start-Sleep -Seconds 2
-                }
-            }
-        } catch {
-            if ($retry -lt $MaxRetries) {
-                Write-Host " [Retry $retry/$MaxRetries]" -ForegroundColor Yellow -NoNewline
-                Start-Sleep -Seconds 2
-            }
+    for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
+        $null = scp -o StrictHostKeyChecking=no -o ConnectTimeout=$TimeoutSeconds "$localFile" "$remoteFile" 2>&1
+
+        if ($LASTEXITCODE -eq 0) {
+            $success = $true
+            break
+        }
+
+        if ($attempt -lt $MaxRetries) {
+            Write-Host " [retry $attempt/$MaxRetries]" -ForegroundColor Yellow -NoNewline
+            Start-Sleep -Seconds 2
         }
     }
-    
-    if (-not $success) {
-        Write-Host " [FAILED]" -ForegroundColor Red
+
+    if ($success) {
+        $uploaded++
+        Write-Host " [OK]" -ForegroundColor Green
+    } else {
         $failed++
-        $failedFiles += $localPath_item
+        $failedFiles += $relativePath
+        Write-Host " [FAILED]" -ForegroundColor Red
     }
 }
 
 Write-Host ""
-Write-Host "Upload completed:" -ForegroundColor Green
+Write-Host "Upload summary:" -ForegroundColor Yellow
 Write-Host "  Success: $uploaded" -ForegroundColor Green
-Write-Host "  Failed: $failed" -ForegroundColor $(if ($failed -gt 0) { "Red" } else { "Green" })
+Write-Host "  Failed:  $failed" -ForegroundColor $(if ($failed -gt 0) { "Red" } else { "Green" })
 
 if ($failedFiles.Count -gt 0) {
     Write-Host ""
-    Write-Host "Failed files:" -ForegroundColor Red
-    foreach ($f in $failedFiles) {
-        Write-Host "  - $f" -ForegroundColor Red
+    Write-Host "Failed uploads:" -ForegroundColor Red
+    foreach ($file in $failedFiles) {
+        Write-Host "  - $file" -ForegroundColor Red
     }
+    throw "Upload step failed. Deployment stopped."
 }
-Write-Host ""
 
-# Step 5: Batch delete remote files
-if (-not $SkipDelete -and $filesToDelete.Count -gt 0) {
-    Write-Host "[Step 5/5] Deleting remote files (batch mode)..." -ForegroundColor Yellow
-    
-    if ($DryRun) {
-        Write-Host "  [DRY RUN] Would delete $($filesToDelete.Count) files:" -ForegroundColor Magenta
-        foreach ($file in $filesToDelete) {
-            Write-Host "    - $file" -ForegroundColor Magenta
+Write-Host ""
+Write-Host "[Step 5/7] Deleting remote files..." -ForegroundColor Yellow
+if ($SkipDelete) {
+    Write-Host "  Skipped by parameter" -ForegroundColor Yellow
+} elseif ($filesToDelete.Count -eq 0) {
+    Write-Host "  Nothing to delete" -ForegroundColor Green
+} else {
+    $deleteCommands = $filesToDelete | ForEach-Object {
+        "rm -f " + (Quote-Posix ($RemotePath.TrimEnd("/") + "/" + $_))
+    }
+    $deleteCommands += "find " + (Quote-Posix $RemotePath) + " -type d -empty -delete"
+    $deleteCommand = $deleteCommands -join "; "
+
+    $deleteResult = Invoke-RemoteCommand -HostUser $ServerUser -HostIP $ServerIP -Command $deleteCommand -ConnectTimeout $TimeoutSeconds
+    if ($deleteResult.ExitCode -ne 0) {
+        throw "Remote delete failed: $($deleteResult.Output)"
+    }
+
+    Write-Host "  Deleted remote files: $($filesToDelete.Count)" -ForegroundColor Green
+}
+
+Write-Host ""
+Write-Host "[Step 6/7] Rebuilding and restarting services..." -ForegroundColor Yellow
+if ($SkipBuild) {
+    Write-Host "  Skipped by parameter" -ForegroundColor Yellow
+} else {
+    $quotedRemotePath = Quote-Posix $RemotePath
+    $deployCommand = "cd $quotedRemotePath && docker-compose up -d --build backend frontend && docker-compose up -d nginx"
+    $deployResult = Invoke-RemoteCommand -HostUser $ServerUser -HostIP $ServerIP -Command $deployCommand -ConnectTimeout 60
+
+    if ($deployResult.ExitCode -ne 0) {
+        throw "Service rebuild/restart failed: $($deployResult.Output)"
+    }
+
+    Write-Host "  Services rebuilt and restarted" -ForegroundColor Green
+}
+
+Write-Host ""
+Write-Host "[Step 7/7] Validating deployment..." -ForegroundColor Yellow
+if ($SkipValidation) {
+    Write-Host "  Skipped by parameter" -ForegroundColor Yellow
+} else {
+    Start-Sleep -Seconds 10
+
+    $quotedRemotePath = Quote-Posix $RemotePath
+    $statusResult = Invoke-RemoteCommand -HostUser $ServerUser -HostIP $ServerIP -Command "cd $quotedRemotePath && docker-compose ps" -ConnectTimeout $TimeoutSeconds
+    Write-Host "  Container status:" -ForegroundColor Cyan
+    $statusResult.Output | ForEach-Object { Write-Host "    $_" }
+
+    $healthCommand = "curl -fsS http://127.0.0.1:8000$apiEndpoint"
+    $healthResult = $null
+    $maxHealthAttempts = 6
+
+    for ($attempt = 1; $attempt -le $maxHealthAttempts; $attempt++) {
+        $healthResult = Invoke-RemoteCommand -HostUser $ServerUser -HostIP $ServerIP -Command $healthCommand -ConnectTimeout $TimeoutSeconds
+        if ($healthResult.ExitCode -eq 0) {
+            break
         }
-    } else {
-        # Batch delete - create delete script on remote
-        $deleteScript = $filesToDelete | ForEach-Object { "rm -f '$RemotePath/$_'" }
-        $deleteScriptStr = $deleteScript -join "`n"
-        
-        Write-Host "  Deleting $($filesToDelete.Count) files in batch..." -NoNewline
-        
-        try {
-            $result = ssh -o ConnectTimeout=60 $ServerUser@$ServerIP "cd $RemotePath && $deleteScriptStr" 2>&1
-            
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host " [OK]" -ForegroundColor Green
-                Write-Host "  Deleted: $($filesToDelete.Count) files" -ForegroundColor Green
-            } else {
-                Write-Host " [PARTIAL]" -ForegroundColor Yellow
-                Write-Host "  Some files may not have been deleted" -ForegroundColor Yellow
-            }
-        } catch {
-            Write-Host " [ERROR]" -ForegroundColor Red
-            Write-Host "  Error: $_" -ForegroundColor Red
+
+        if ($attempt -lt $maxHealthAttempts) {
+            Start-Sleep -Seconds 5
         }
     }
-} else {
-    Write-Host "[Step 5/5] Skipping file deletion" -ForegroundColor Yellow
+
+    if ($null -eq $healthResult -or $healthResult.ExitCode -ne 0) {
+        throw "Backend health check failed after $maxHealthAttempts attempts: $($healthResult.Output)"
+    }
+
+    Write-Host "  Backend health check: $($healthResult.Output)" -ForegroundColor Green
 }
 
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "[SUCCESS] Sync completed!" -ForegroundColor Green
+Write-Host "[SUCCESS] Deployment completed!" -ForegroundColor Green
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Summary:" -ForegroundColor Yellow
-Write-Host "  Uploaded: $uploaded files" -ForegroundColor Green
-Write-Host "  Failed: $failed files" -ForegroundColor $(if ($failed -gt 0) { "Red" } else { "Green" })
-Write-Host "  Deleted: $(if ($SkipDelete) { 'Skipped' } else { $filesToDelete.Count }) files" -ForegroundColor $(if ($SkipDelete) { "Yellow" } else { "Red" })
-Write-Host ""
-
-if ($DryRun) {
-    Write-Host "This was a DRY RUN. No changes were made." -ForegroundColor Magenta
-    Write-Host "Run without -DryRun to apply changes." -ForegroundColor Yellow
-}
-
-if ($failedFiles.Count -gt 0) {
-    Write-Host ""
-    Write-Host "To retry failed files, run:" -ForegroundColor Yellow
-    Write-Host "  .\deploy_sync_improved.ps1" -ForegroundColor Cyan
-}
+Write-Host "  Uploaded files: $uploaded" -ForegroundColor Green
+Write-Host "  Deleted files:  $(if ($SkipDelete) { 'Skipped' } else { $filesToDelete.Count })" -ForegroundColor Green
+Write-Host "  Server:         $ServerUser@$ServerIP" -ForegroundColor Green
+Write-Host "  Remote path:    $RemotePath" -ForegroundColor Green

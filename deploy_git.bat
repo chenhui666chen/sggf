@@ -9,7 +9,7 @@ echo.
 set SERVER_IP=101.132.154.143
 set SERVER_USER=root
 set LOCAL_PATH=%~dp0
-set REMOTE_PATH=/root/novel_writing_agent
+set REMOTE_PATH=/data/apps/novel_writing_agent
 
 cd /d "%LOCAL_PATH%"
 

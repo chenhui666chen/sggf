@@ -2404,13 +2404,14 @@ def _build_media_javascript_template(entry: ModelCatalogEntry) -> str:
                 "console.log(\"待接入的视频转音频能力\", payload);\n"
             )
         generation_type = "music" if _is_music_generation_model(entry) else "sound-effect"
+        style_line = "formData.append(\"style\", \"氛围\");\n" if generation_type == "music" else ""
         return (
             "const formData = new FormData();\n"
             "formData.append(\"prompt\", \"夜色中的城市氛围，低频铺底，带轻微紧张感\");\n"
             f"formData.append(\"generation_type\", \"{generation_type}\");\n"
             f"formData.append(\"model_id\", \"{entry.model_key}\");\n"
             f"formData.append(\"duration\", \"{'30' if generation_type == 'music' else '5'}\");\n"
-            f"{'formData.append(\"style\", \"氛围\");\\n' if generation_type == 'music' else ''}"
+            f"{style_line}"
             "formData.append(\"mood\", \"tense\");\n"
             "formData.append(\"tempo\", \"medium\");\n\n"
             "// 建议经后端统一代理到 /api/v1/asset-studio/audio，不要前端直连供应商密钥。\n"

@@ -11,7 +11,7 @@ echo.
 set SERVER_IP=101.132.154.143
 set SERVER_USER=root
 set LOCAL_PATH=%~dp0
-set REMOTE_PATH=/root/novel_writing_agent
+set REMOTE_PATH=/data/apps/novel_writing_agent
 set TIMESTAMP=%date:~0,10%_%time:~0,2%%time:~3,2%%time:~6,2%
 set TIMESTAMP=%TIMESTAMP: =0%
 set LOG_FILE=deploy_%TIMESTAMP%.log

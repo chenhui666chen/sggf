@@ -615,9 +615,11 @@ def build_current_mainline_summary(
 
     parts: list[str] = []
     if selected_roles:
-        parts.append(f"\u5267\u60c5\u804c\u8d23\uff1a{'\uff1b'.join(selected_roles)}")
+        joined_roles = "\uff1b".join(selected_roles)
+        parts.append(f"\u5267\u60c5\u804c\u8d23\uff1a{joined_roles}")
     if selected_clues:
-        parts.append(f"\u5173\u8054\u7ebf\u7d22\uff1a{'\uff1b'.join(selected_clues)}")
+        joined_clues = "\uff1b".join(selected_clues)
+        parts.append(f"\u5173\u8054\u7ebf\u7d22\uff1a{joined_clues}")
     return _truncate_text("\uff1b".join(parts), max_chars)
 
 
@@ -693,7 +695,8 @@ def build_character_runtime_metadata(name: str, profile_text: Any) -> dict[str, 
     parsed = parser.parse_all_characters(parse_source)
     if not parsed:
         summary = _truncate_text(profile, 220)
-        return {"runtime_summary": f"{_clean_text(name) or '\u89d2\u8272'}\uff1a{summary}" if summary else ""}
+        fallback_runtime_name = _clean_text(name) or "\u89d2\u8272"
+        return {"runtime_summary": f"{fallback_runtime_name}\uff1a{summary}" if summary else ""}
 
     first = parsed[0]
     current_relationships = build_current_relationship_summary(first.relationships)
