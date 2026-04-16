@@ -15,6 +15,7 @@
 
 - [快速开始指南](QUICK_START_GUIDE.md)
 - [多 Agent 完整指南](MULTI_AGENT_GUIDE.md)
+- [部署指南](DEPLOY_GUIDE.md)
 - [数据库迁移说明](DATABASE_MIGRATION_GUIDE.md)
 - [PostgreSQL 部署说明](docs/POSTGRESQL_DEPLOYMENT.md)
 - [有声书任务队列说明](docs/AUDIOBOOK_TASK_QUEUE.md)
@@ -248,12 +249,13 @@ docker compose up -d --build
 
 ### 生产部署补充说明
 
-- 生产环境推荐优先使用 [deploy.sh](deploy.sh) 做服务器内部署，而不是手工拼接长命令。
-- 当前 [deploy.sh](deploy.sh) 已内置更安全的发布行为：
-  - 仅允许在 `main` 分支自动部署
-  - 检测到已跟踪文件的未提交改动时会拒绝继续，避免覆盖现场文件
-  - 代码更新使用 `git merge --ff-only origin/main`，不再使用 `git reset --hard`
-  - 数据库迁移执行 `python -m alembic -c /app/alembic.ini upgrade heads`，兼容当前多头迁移结构
+- 生产环境统一使用 [DEPLOY_GUIDE.md](DEPLOY_GUIDE.md) 中定义的部署链路。
+- 当前正式入口为 `deploy_unified.bat` 和 `deploy_sync_improved.ps1`，部署配置统一收敛在 `deploy_config.json`。
+- 当前主脚本的实际行为：
+  - 基于 `deploy_config.json` 按规则同步文件，并支持远端多余文件删除
+  - 在远端自动探测 `docker compose` 或 `docker-compose`，兼容两种 Compose 环境
+  - 重建并拉起 `backend`、`frontend` 和 `nginx`
+  - 通过后端健康检查验证部署结果
 - 当前生产 `nginx` 证书路径建议放在根目录 `.env` 中，不要把真实证书提交到仓库：
 
 ```env
@@ -420,10 +422,10 @@ NGINX_SSL_KEY_PATH=/etc/letsencrypt/live/sggf.net/privkey.pem
 ## 相关文档
 
 - [快速开始指南](QUICK_START_GUIDE.md)
+- [部署指南](DEPLOY_GUIDE.md)
 - [数据库迁移说明](DATABASE_MIGRATION_GUIDE.md)
 - [PostgreSQL 部署说明](docs/POSTGRESQL_DEPLOYMENT.md)
 - [有声书任务队列说明](docs/AUDIOBOOK_TASK_QUEUE.md)
-- [生产部署检查清单](PRODUCTION_DEPLOYMENT_CHECKLIST.md)
 
 ## 许可证
 

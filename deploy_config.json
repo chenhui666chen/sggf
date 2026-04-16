@@ -81,7 +81,6 @@
         "docker-compose.yml",
         "nginx-prod.conf",
         ".env.example",
-        "deploy.sh",
         "deploy_config.json"
       ],
       "exclude": []

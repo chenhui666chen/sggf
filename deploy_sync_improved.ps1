@@ -5,6 +5,7 @@
 # - Retryable uploads
 # - Backend/frontend rebuild and restart
 # - Basic deployment validation
+# - Auto-detect remote docker compose command
 
 param(
     [string]$ConfigFile = "deploy_config.json",
@@ -224,7 +225,6 @@ function Get-DefaultSyncSections {
                 "docker-compose.yml",
                 "nginx-prod.conf",
                 ".env.example",
-                "deploy.sh",
                 "deploy_config.json"
             )
             exclude = @()
@@ -392,6 +392,28 @@ function Invoke-RemoteCommand {
     }
 }
 
+function Get-RemoteDockerComposeCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$HostUser,
+        [Parameter(Mandatory = $true)][string]$HostIP,
+        [Parameter(Mandatory = $true)][int]$ConnectTimeout
+    )
+
+    $detectCommand = "if docker compose version >/dev/null 2>&1; then printf 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then printf 'docker-compose'; else exit 1; fi"
+    $detectResult = Invoke-RemoteCommand -HostUser $HostUser -HostIP $HostIP -Command $detectCommand -ConnectTimeout $ConnectTimeout
+
+    if ($detectResult.ExitCode -ne 0) {
+        throw "Remote Docker Compose command not found. Install 'docker compose' plugin or 'docker-compose'."
+    }
+
+    $composeCommand = $detectResult.Output.Trim()
+    if ([string]::IsNullOrWhiteSpace($composeCommand)) {
+        throw "Remote Docker Compose detection returned an empty result."
+    }
+
+    return $composeCommand
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 if ([string]::IsNullOrWhiteSpace($LocalPath)) {
     $LocalPath = $scriptRoot
@@ -436,6 +458,11 @@ Write-Host "DryRun: $DryRun" -ForegroundColor Yellow
 Write-Host ""
 
 Set-Location $LocalPath
+
+Write-Host "[Preflight] Detecting remote Docker Compose command..." -ForegroundColor Yellow
+$composeCommand = Get-RemoteDockerComposeCommand -HostUser $ServerUser -HostIP $ServerIP -ConnectTimeout $TimeoutSeconds
+Write-Host "  Remote Compose command: $composeCommand" -ForegroundColor Green
+Write-Host ""
 
 Write-Host "[Step 1/7] Scanning local files..." -ForegroundColor Yellow
 $localFileMap = Get-LocalFileMap -BasePath $LocalPath -SyncSections $syncSections
@@ -548,7 +575,7 @@ if ($SkipBuild) {
     Write-Host "  Skipped by parameter" -ForegroundColor Yellow
 } else {
     $quotedRemotePath = Quote-Posix $RemotePath
-    $deployCommand = "cd $quotedRemotePath && docker-compose up -d --build backend frontend && docker-compose up -d nginx"
+    $deployCommand = "cd $quotedRemotePath && $composeCommand up -d --build backend frontend && $composeCommand up -d nginx"
     $deployResult = Invoke-RemoteCommand -HostUser $ServerUser -HostIP $ServerIP -Command $deployCommand -ConnectTimeout 60
 
     if ($deployResult.ExitCode -ne 0) {
@@ -566,7 +593,7 @@ if ($SkipValidation) {
     Start-Sleep -Seconds 10
 
     $quotedRemotePath = Quote-Posix $RemotePath
-    $statusResult = Invoke-RemoteCommand -HostUser $ServerUser -HostIP $ServerIP -Command "cd $quotedRemotePath && docker-compose ps" -ConnectTimeout $TimeoutSeconds
+    $statusResult = Invoke-RemoteCommand -HostUser $ServerUser -HostIP $ServerIP -Command "cd $quotedRemotePath && $composeCommand ps" -ConnectTimeout $TimeoutSeconds
     Write-Host "  Container status:" -ForegroundColor Cyan
     $statusResult.Output | ForEach-Object { Write-Host "    $_" }
 

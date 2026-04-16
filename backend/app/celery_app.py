@@ -3,20 +3,17 @@ Celery application instance for background audiobook jobs.
 """
 import os
 import sys
-from pathlib import Path
 
 from celery import Celery
+from app.core.env_loader import get_project_root, load_project_env
 
 # 允许 Celery worker 直接 import 项目根目录下的轻量模块（如：pipeline/agents/adapters）
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = get_project_root()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 # ⚠️ 重要：先加载环境变量（必须在导入 settings 之前）
-from dotenv import load_dotenv
-
-load_dotenv(PROJECT_ROOT / "backend" / ".env", override=False)
-load_dotenv(PROJECT_ROOT / ".env", override=False)
+load_project_env(override=False)
 
 from app.core.config import settings
 

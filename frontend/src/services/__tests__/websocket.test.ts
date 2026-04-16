@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type Listener = (...args: unknown[]) => void
 
@@ -69,6 +69,10 @@ describe('workflowWebSocket', () => {
     }
   })
 
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, 'window')
+  })
+
   it('connect 会复用进行中的连接请求，只创建一个 socket', async () => {
     const socket = new MockSocket()
     ioMock.mockReturnValue(socket)
@@ -121,5 +125,34 @@ describe('workflowWebSocket', () => {
 
     expect(listenerA).toHaveBeenCalledTimes(1)
     expect(listenerB).toHaveBeenCalledTimes(2)
+  })
+
+  it('默认使用当前站点 origin，并通过 /socket.io 建立连接', async () => {
+    const socket = new MockSocket()
+    ioMock.mockReturnValue(socket)
+    Object.defineProperty(globalThis, 'window', {
+      value: {
+        location: {
+          origin: 'https://sggf.net',
+        },
+      },
+      configurable: true,
+    })
+
+    const { workflowWebSocket } = await import('../websocket')
+
+    const connectPromise = workflowWebSocket.connect()
+
+    expect(ioMock).toHaveBeenCalledWith(
+      'https://sggf.net',
+      expect.objectContaining({
+        path: '/socket.io',
+      }),
+    )
+
+    socket.connected = true
+    socket.trigger('connect')
+
+    await expect(connectPromise).resolves.toBeUndefined()
   })
 })

@@ -10,15 +10,15 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 
 # 允许后端直接 import 项目根目录下的轻量模块（如：pipeline/agents/adapters）
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+from app.core.env_loader import get_project_root, load_project_env
+
+PROJECT_ROOT = get_project_root()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 # ⚠️ 重要：首先加载环境变量（必须在所有导入之前）
-from dotenv import load_dotenv
-# 兼容从项目根目录或 backend/ 目录启动：优先加载 backend/.env，其次加载根目录 .env（作为兜底）。
-load_dotenv(PROJECT_ROOT / "backend" / ".env", override=False)
-load_dotenv(PROJECT_ROOT / ".env", override=False)
+# 统一兼容本地源码与 Docker 容器运行：优先 backend/.env，其次根目录 .env（作为兜底）。
+load_project_env(override=False)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

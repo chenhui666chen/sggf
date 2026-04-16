@@ -4,9 +4,9 @@ Agent configuration helpers.
 import os
 import logging
 from pathlib import Path
-from dotenv import load_dotenv
+from app.core.env_loader import load_project_env
 
-load_dotenv()
+load_project_env(override=False)
 logger = logging.getLogger(__name__)
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 

@@ -691,6 +691,51 @@ def _safe_prompt_context_text(value: Any) -> str:
     return str(parsed or "")
 
 
+def _extract_recent_project_tags(text_value: str, limit: int = 4) -> list[str]:
+    text = _safe_prompt_context_text(text_value)
+    if not text:
+        return []
+
+    tags: list[str] = []
+    for match in re.findall(r"#([^\s#，。；、,.;:：]{2,16})", text):
+        normalized = match.strip()
+        if normalized and normalized not in tags:
+            tags.append(normalized)
+        if len(tags) >= limit:
+            break
+    return tags
+
+
+def _extract_recent_project_world_names(text_value: str, limit: int = 2) -> list[str]:
+    text = _safe_prompt_context_text(text_value)
+    if not text:
+        return []
+
+    world_names: list[str] = []
+    for match in re.findall(r"(?:此界名为|世界名为)[“\"《]?([\u4e00-\u9fffA-Za-z0-9]{2,12})", text):
+        normalized = match.strip()
+        if normalized and normalized not in world_names:
+            world_names.append(normalized)
+        if len(world_names) >= limit:
+            break
+    return world_names
+
+
+def _extract_recent_project_pattern_hits(text_value: str, limit: int = 3) -> list[str]:
+    text = _safe_prompt_context_text(text_value)
+    if not text:
+        return []
+
+    hits: list[str] = []
+    for patterns in CONCEPT_SIMILARITY_PATTERN_GROUPS.values():
+        for pattern in patterns:
+            if pattern in text and pattern not in hits:
+                hits.append(pattern)
+            if len(hits) >= limit:
+                return hits
+    return hits
+
+
 def _normalize_story_request_text_fields(request: ExpandStoryRequest) -> ExpandStoryRequest:
     from app.services.story_text_utils import normalize_story_text
 
@@ -760,16 +805,30 @@ def _build_recent_project_avoidance_context(
         characters_txt = _safe_prompt_context_text(row[5])
         combined_text_parts.extend([concept_txt, world_txt, characters_txt])
 
-        signature_sections.append(
-            "\n".join(
-                [
-                    f"{idx}. 《{recent_title}》",
-                    f"- 题材：{recent_genre}",
-                    f"- 故事概念摘要：{_clip_prompt_context(concept_txt, 180) or '暂无'}",
-                    f"- 世界观摘要：{_clip_prompt_context(world_txt, 120) or '暂无'}",
-                ]
-            )
+        tag_candidates = _extract_recent_project_tags(concept_txt)
+        if not tag_candidates:
+            tag_candidates = _extract_recent_project_tags(world_txt)
+
+        world_names = _extract_recent_project_world_names(world_txt)
+        if not world_names:
+            world_names = _extract_recent_project_world_names(concept_txt)
+
+        pattern_hits = _extract_recent_project_pattern_hits(
+            "\n".join(part for part in (concept_txt, world_txt, characters_txt) if part)
         )
+
+        section_lines = [
+            f"{idx}. 《{recent_title}》",
+            f"- 题材：{recent_genre}",
+        ]
+        if tag_candidates:
+            section_lines.append(f"- 核心标签：{'、'.join(tag_candidates[:4])}")
+        if world_names:
+            section_lines.append(f"- 世界名：{'、'.join(world_names[:2])}")
+        if pattern_hits:
+            section_lines.append(f"- 已出现元素：{'、'.join(pattern_hits[:3])}")
+
+        signature_sections.append("\n".join(section_lines))
 
     combined_text = "\n".join(part for part in combined_text_parts if part)
     detected_groups: Dict[str, list[str]] = {}
@@ -788,7 +847,7 @@ def _build_recent_project_avoidance_context(
     if extracted_world_names:
         detected_groups["已用世界名"] = extracted_world_names[:4]
 
-    recent_signatures = "【近期项目摘要（仅供避重，不可复写）】\n" + "\n".join(signature_sections)
+    recent_signatures = "【近期项目关键避重锚点（仅供避重，不可复写）】\n" + "\n".join(signature_sections)
     recent_avoidance = ""
     if detected_groups:
         avoidance_lines = [

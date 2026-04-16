@@ -18,7 +18,7 @@
 ### Cron 任务内容
 
 ```bash
-0 0,12 * * * certbot renew --quiet --post-hook 'cd /root/novel_writing_agent && cp /etc/letsencrypt/live/sggf.net/fullchain.pem ssl/cert.pem && cp /etc/letsencrypt/live/sggf.net/privkey.pem ssl/key.pem && docker-compose restart nginx'
+0 0,12 * * * certbot renew --quiet --post-hook 'cd /data/apps/novel_writing_agent && cp /etc/letsencrypt/live/sggf.net/fullchain.pem ssl/cert.pem && cp /etc/letsencrypt/live/sggf.net/privkey.pem ssl/key.pem && docker-compose restart nginx'
 ```
 
 ### 执行时间
@@ -55,7 +55,7 @@ grep CRON /var/log/cron
 
 ### 手动执行续期命令
 ```bash
-cd /root/novel_writing_agent
+cd /data/apps/novel_writing_agent
 cp /etc/letsencrypt/live/sggf.net/fullchain.pem ssl/cert.pem
 cp /etc/letsencrypt/live/sggf.net/privkey.pem ssl/key.pem
 docker-compose restart nginx
@@ -65,8 +65,8 @@ docker-compose restart nginx
 
 | 类型 | Let's Encrypt 路径 | 项目路径 |
 |------|-------------------|----------|
-| 完整证书 | `/etc/letsencrypt/live/sggf.net/fullchain.pem` | `/root/novel_writing_agent/ssl/cert.pem` |
-| 私钥 | `/etc/letsencrypt/live/sggf.net/privkey.pem` | `/root/novel_writing_agent/ssl/key.pem` |
+| 完整证书 | `/etc/letsencrypt/live/sggf.net/fullchain.pem` | `/data/apps/novel_writing_agent/ssl/cert.pem` |
+| 私钥 | `/etc/letsencrypt/live/sggf.net/privkey.pem` | `/data/apps/novel_writing_agent/ssl/key.pem` |
 
 ## 🔧 Nginx SSL 配置
 

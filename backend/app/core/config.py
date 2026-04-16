@@ -6,13 +6,20 @@ from typing import Any
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from app.core.env_loader import load_project_env
+
+
+# 统一环境加载顺序：
+# 1. backend/.env
+# 2. 仓库根目录 .env（仅作为兜底）
+# 3. 已注入到进程的系统环境变量优先级最高
+load_project_env(override=False)
 
 
 class Settings(BaseSettings):
     """应用配置"""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
         case_sensitive=True,
         extra="allow",
     )

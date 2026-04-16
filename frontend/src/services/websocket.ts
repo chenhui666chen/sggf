@@ -3,7 +3,63 @@
  */
 import { io, Socket } from 'socket.io-client'
 
-const SOCKET_URL = import.meta.env.VITE_WS_URL || 'http://127.0.0.1:8000'
+const DEFAULT_SOCKET_IO_PATH = '/socket.io'
+
+interface SocketEndpointConfig {
+  url?: string
+  path: string
+}
+
+function getBrowserOrigin(): string | undefined {
+  if (typeof window === 'undefined' || !window.location?.origin || window.location.origin === 'null') {
+    return undefined
+  }
+  return window.location.origin
+}
+
+function normalizeSocketPath(rawPath?: string | null): string {
+  const value = String(rawPath || '').trim()
+  if (!value || value === '/') {
+    return DEFAULT_SOCKET_IO_PATH
+  }
+  return value.startsWith('/') ? value : `/${value}`
+}
+
+function resolveSocketEndpoint(rawTarget?: string | null): SocketEndpointConfig {
+  const value = String(rawTarget || '').trim()
+  if (!value) {
+    return {
+      url: getBrowserOrigin(),
+      path: DEFAULT_SOCKET_IO_PATH,
+    }
+  }
+
+  if (value.startsWith('/')) {
+    return {
+      url: getBrowserOrigin(),
+      path: normalizeSocketPath(value),
+    }
+  }
+
+  const normalizedUrl = value
+    .replace(/^ws:\/\//i, 'http://')
+    .replace(/^wss:\/\//i, 'https://')
+
+  try {
+    const parsed = new URL(normalizedUrl)
+    return {
+      url: parsed.origin,
+      path: normalizeSocketPath(parsed.pathname),
+    }
+  } catch {
+    return {
+      url: normalizedUrl,
+      path: DEFAULT_SOCKET_IO_PATH,
+    }
+  }
+}
+
+const SOCKET_ENDPOINT = resolveSocketEndpoint(import.meta.env.VITE_WS_URL)
 
 export interface StageUpdateData {
   project_id: number
@@ -109,7 +165,8 @@ class WorkflowWebSocket {
     }
 
     if (!this.socket) {
-      const socket = io(SOCKET_URL, {
+      const socket = io(SOCKET_ENDPOINT.url, {
+        path: SOCKET_ENDPOINT.path,
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionAttempts: this.maxReconnectAttempts,
