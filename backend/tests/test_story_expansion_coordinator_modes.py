@@ -103,3 +103,31 @@ def test_character_only_target_respects_total_mode_chapter_cap() -> None:
     assert analysis["effective_target_character_count"] == 190
     assert analysis["effective_target_chapter_count"] == 300
     assert analysis["auto_supplement"]["suggested_target_chapters"] == 300
+
+
+def test_epic_framework_analysis_uses_single_round_and_minute_level_estimate() -> None:
+    coordinator = StoryExpansionCoordinator()
+
+    analysis = coordinator.analyze_expansion_request(
+        current_outline="""
+#### 第1章：雨夜入城
+#### 第2章：旧档案馆
+#### 第3章：第一枚钥匙
+""".strip(),
+        characters="""
+### 【姓名】：林澈
+### 【姓名】：苏遥
+### 【姓名】：闻川
+""".strip(),
+        world_setting="架空都市与遗迹网络并存，旧秩序正在崩解。",
+        target_total_chapters=900,
+        target_total_characters=30,
+        enable_auto_supplement=True,
+        expansion_mode="epic_framework",
+    )
+
+    assert analysis["execution_mode"] == "epic"
+    assert analysis["effective_expansion_mode"] == "epic_framework"
+    assert analysis["estimated_rounds"] == 1
+    assert analysis["estimated_duration_minutes_min"] < analysis["estimated_duration_minutes_max"]
+    assert analysis["estimated_duration_minutes_max"] <= 25

@@ -1,15 +1,51 @@
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import rehypeRaw from 'rehype-raw'
-import { Box, Typography, Divider, Paper } from '@mui/material'
+import type { ReactNode } from 'react'
+import { Box, Divider, Paper, Typography } from '@mui/material'
+import type { SxProps, Theme } from '@mui/material/styles'
 import type { Components } from 'react-markdown'
+import ReactMarkdown from 'react-markdown'
+import rehypeRaw from 'rehype-raw'
+import remarkGfm from 'remark-gfm'
 import { normalizeMarkdownContent } from '@/utils/normalizeMarkdownContent'
 
 interface MarkdownRendererProps {
   content: string
 }
 
-// 自定义 Markdown 组件样式
+type MarkdownContentSegment =
+  | {
+      type: 'markdown'
+      content: string
+    }
+  | {
+      type: 'details'
+      open: boolean
+      summary: string
+      content: string
+    }
+
+const DETAILS_BLOCK_PATTERN = /<details(?<attrs>[^>]*)>(?<inner>[\s\S]*?)<\/details>/gi
+const SUMMARY_PATTERN = /<summary>(?<summary>[\s\S]*?)<\/summary>/i
+
+const detailsContainerSx: SxProps<Theme> = {
+  my: 1.5,
+  p: 1.5,
+  bgcolor: 'grey.50',
+  borderRadius: 1,
+  border: '1px solid',
+  borderColor: 'divider',
+}
+
+const detailsSummarySx: SxProps<Theme> = {
+  cursor: 'pointer',
+  fontWeight: 600,
+  color: 'primary.main',
+  py: 0.5,
+  userSelect: 'none',
+  '&:hover': {
+    color: 'primary.dark',
+  },
+}
+
 const markdownComponents: Components = {
   h1: ({ children }) => (
     <Typography
@@ -82,8 +118,8 @@ const markdownComponents: Components = {
         fontSize: '1rem',
         color: 'text.primary',
         textAlign: 'justify',
-        whiteSpace: 'pre-wrap',  // 🆕 确保换行符生效
-        wordBreak: 'break-word',  // 🆕 长单词自动换行
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
       }}
     >
       {children}
@@ -173,9 +209,7 @@ const markdownComponents: Components = {
       {children}
     </Paper>
   ),
-  hr: () => (
-    <Divider sx={{ my: 3 }} />
-  ),
+  hr: () => <Divider sx={{ my: 3 }} />,
   code: ({ children, className }) => {
     const isInline = !className
     if (isInline) {
@@ -197,6 +231,7 @@ const markdownComponents: Components = {
         </Box>
       )
     }
+
     return (
       <Paper
         component="pre"
@@ -244,18 +279,118 @@ const markdownComponents: Components = {
   ),
 }
 
+function stripHtmlTags(value: string): string {
+  return value.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+export function splitMarkdownContentSegments(content: string): MarkdownContentSegment[] {
+  if (!content) {
+    return []
+  }
+
+  const normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const segments: MarkdownContentSegment[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+  DETAILS_BLOCK_PATTERN.lastIndex = 0
+
+  while ((match = DETAILS_BLOCK_PATTERN.exec(normalized)) !== null) {
+    const matchStart = match.index ?? 0
+    if (matchStart > lastIndex) {
+      const markdownContent = normalized.slice(lastIndex, matchStart)
+      if (markdownContent.trim()) {
+        segments.push({
+          type: 'markdown',
+          content: markdownContent,
+        })
+      }
+    }
+
+    const attrs = match.groups?.attrs ?? ''
+    const inner = match.groups?.inner ?? ''
+    const summaryMatch = SUMMARY_PATTERN.exec(inner)
+    const summary = stripHtmlTags(summaryMatch?.groups?.summary ?? '')
+    const body = summaryMatch
+      ? inner.slice((summaryMatch.index ?? 0) + summaryMatch[0].length).trim()
+      : inner.trim()
+
+    segments.push({
+      type: 'details',
+      open: /(?:^|\s)open(?:\s|=|$)/i.test(attrs),
+      summary,
+      content: body,
+    })
+
+    lastIndex = matchStart + match[0].length
+  }
+
+  if (lastIndex < normalized.length) {
+    const markdownContent = normalized.slice(lastIndex)
+    if (markdownContent.trim()) {
+      segments.push({
+        type: 'markdown',
+        content: markdownContent,
+      })
+    }
+  }
+
+  return segments
+}
+
+function renderMarkdownBlock(content: string, key: string) {
+  const cleanedContent = normalizeMarkdownContent(content)
+  if (!cleanedContent) {
+    return null
+  }
+
+  return (
+    <ReactMarkdown
+      key={key}
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeRaw]}
+      components={markdownComponents}
+    >
+      {cleanedContent}
+    </ReactMarkdown>
+  )
+}
+
+function renderMarkdownSegments(content: string, keyPrefix: string): ReactNode[] {
+  return splitMarkdownContentSegments(content)
+    .map((segment, index) => {
+      const key = `${keyPrefix}-${index}`
+
+      if (segment.type === 'markdown') {
+        return renderMarkdownBlock(segment.content, key)
+      }
+
+      return (
+        <Box component="details" key={key} open={segment.open} sx={detailsContainerSx}>
+          <Box component="summary" sx={detailsSummarySx}>
+            {segment.summary || '展开详情'}
+          </Box>
+          <Box sx={{ mt: 1 }}>
+            {renderMarkdownSegments(segment.content, `${key}-content`)}
+          </Box>
+        </Box>
+      )
+    })
+    .filter(Boolean)
+}
+
 export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
   if (!content) {
     return null
   }
 
-  // 预处理：统一混合 Markdown/纯文本大纲格式，避免卷标题和字段黏连成一个段落
-  const cleanedContent = normalizeMarkdownContent(content)
+  const segments = renderMarkdownSegments(content, 'markdown')
+  if (segments.length === 0) {
+    return null
+  }
 
   return (
     <Box
       sx={{
-        // 样式确保正常换行，但不保留过多空白
         wordBreak: 'break-word',
         overflowWrap: 'break-word',
         '& > *:first-of-type': {
@@ -263,25 +398,6 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
         },
         '& > *:last-child': {
           mb: 0,
-        },
-        // 🌟 details/summary 标签样式（可展开/收起）
-        '& details': {
-          my: 1.5,
-          p: 1.5,
-          bgcolor: 'grey.50',
-          borderRadius: 1,
-          border: '1px solid',
-          borderColor: 'divider',
-        },
-        '& summary': {
-          cursor: 'pointer',
-          fontWeight: 600,
-          color: 'primary.main',
-          py: 0.5,
-          userSelect: 'none',
-          '&:hover': {
-            color: 'primary.dark',
-          },
         },
         '& details[open] > summary': {
           mb: 1,
@@ -291,13 +407,7 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
         },
       }}
     >
-      <ReactMarkdown 
-        remarkPlugins={[remarkGfm]} 
-        rehypePlugins={[rehypeRaw]}
-        components={markdownComponents}
-      >
-        {cleanedContent}
-      </ReactMarkdown>
+      {segments}
     </Box>
   )
 }

@@ -46,6 +46,7 @@ import {
   estimateCharacterCount,
 } from '@/utils/workflowContentMetrics'
 import { apiClient } from '@/services/api'
+import BackToTopButton from '@/components/common/BackToTopButton'
 import FormattedContent from '@/components/common/FormattedContent'
 import { useKnowledgeBaseWorkflowContent } from '@/hooks/useKnowledgeBaseWorkflowContent'
 import { useStoryExpansionController } from '@/hooks/useStoryExpansionController'
@@ -2310,6 +2311,12 @@ export default function KnowledgeBasePage() {
           {snackbarMessage}
         </Alert>
       </Snackbar>
+
+      <BackToTopButton
+        threshold={320}
+        right={16}
+        bottom="calc(env(safe-area-inset-bottom, 0px) + 24px)"
+      />
     </Container>
   )
 }

@@ -1357,8 +1357,9 @@ class StoryExpansionCoordinator:
             character_rounds = (characters_needed + cls.ITERATIVE_CHARACTER_STEP - 1) // cls.ITERATIVE_CHARACTER_STEP
             return max(1, 1 + character_rounds)
         if mode == "epic":
-            character_rounds = (characters_needed + cls.ITERATIVE_CHARACTER_STEP - 1) // cls.ITERATIVE_CHARACTER_STEP
-            return max(1, 1 + character_rounds)
+            # 长篇框架协同在一次任务内完成框架生成与必要的人物补足，
+            # 不应按“分轮协同”展示为多轮任务。
+            return 1
         if mode == "iterative":
             chapter_rounds = (chapters_needed + cls.ITERATIVE_CHAPTER_STEP - 1) // cls.ITERATIVE_CHAPTER_STEP
             character_rounds = (characters_needed + cls.ITERATIVE_CHARACTER_STEP - 1) // cls.ITERATIVE_CHARACTER_STEP
@@ -1401,16 +1402,16 @@ class StoryExpansionCoordinator:
                 ),
             )
             min_estimate = (
-                15.0
-                + epic_total_volumes * 0.9
-                + max(0, target_chapter_count - cls.CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS) * 0.01
-                + max(0, character_delta - 8) * 0.2
+                3.0
+                + epic_total_volumes * 0.25
+                + max(0, target_chapter_count - cls.CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS) * 0.002
+                + max(0, character_delta - 8) * 0.08
             )
             max_estimate = (
-                24.0
-                + epic_total_volumes * 1.4
-                + max(0, target_chapter_count - cls.CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS) * 0.018
-                + max(0, character_delta - 8) * 0.35
+                6.0
+                + epic_total_volumes * 0.4
+                + max(0, target_chapter_count - cls.CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS) * 0.004
+                + max(0, character_delta - 8) * 0.15
             )
         elif mode == "volume_detail":
             volume_range = mode_info.get("volume_chapter_range")
