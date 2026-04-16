@@ -4,6 +4,9 @@
     "user": "root",
     "remote_path": "/data/apps/novel_writing_agent"
   },
+  "upload": {
+    "strategy": "Auto"
+  },
   "sync_rules": {
     "backend": {
       "include": [

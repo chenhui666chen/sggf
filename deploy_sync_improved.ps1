@@ -2,7 +2,7 @@
 # Features:
 # - Config-driven file selection
 # - Bidirectional sync with remote deletion
-# - Retryable uploads
+# - Archive-first uploads with per-file fallback
 # - Backend/frontend rebuild and restart
 # - Basic deployment validation
 # - Auto-detect remote docker compose command
@@ -13,6 +13,8 @@ param(
     [string]$ServerUser = "",
     [string]$LocalPath = "",
     [string]$RemotePath = "",
+    [ValidateSet("Auto", "Archive", "PerFile")]
+    [string]$UploadStrategy = "Auto",
     [int]$MaxRetries = 3,
     [int]$TimeoutSeconds = 30,
     [switch]$DryRun = $false,
@@ -63,6 +65,22 @@ function Quote-Posix {
     param([Parameter(Mandatory = $true)][string]$Value)
 
     return "'" + $Value.Replace("'", "'""'""'") + "'"
+}
+
+function Format-ByteSize {
+    param([Parameter(Mandatory = $true)][long]$Bytes)
+
+    if ($Bytes -ge 1GB) {
+        return "{0:N2} GB" -f ($Bytes / 1GB)
+    }
+    if ($Bytes -ge 1MB) {
+        return "{0:N2} MB" -f ($Bytes / 1MB)
+    }
+    if ($Bytes -ge 1KB) {
+        return "{0:N2} KB" -f ($Bytes / 1KB)
+    }
+
+    return "$Bytes B"
 }
 
 function Test-MatchesAnyPattern {
@@ -267,6 +285,54 @@ function Get-SyncSections {
     return $resolved
 }
 
+function Get-ScanSpecs {
+    param(
+        [Parameter(Mandatory = $true)]$SyncSections
+    )
+
+    $scanSpecMap = @{}
+
+    foreach ($section in $SyncSections.Values) {
+        foreach ($pattern in @($section.include)) {
+            if ([string]::IsNullOrWhiteSpace($pattern)) {
+                continue
+            }
+
+            $normalizedPattern = Normalize-RelativePath $pattern
+            $specType = ""
+            $specPath = ""
+
+            if ($normalizedPattern -notmatch "[\*\?]") {
+                $specType = "file"
+                $specPath = $normalizedPattern
+            } elseif ($normalizedPattern.Contains("**")) {
+                $doubleWildcardIndex = $normalizedPattern.IndexOf("**")
+                $specType = "dir_recursive"
+                $specPath = $normalizedPattern.Substring(0, $doubleWildcardIndex).TrimEnd("/")
+                if ([string]::IsNullOrWhiteSpace($specPath)) {
+                    $specPath = "."
+                }
+            } else {
+                $specType = "dir_flat"
+                $specPath = Normalize-RelativePath (Split-Path $normalizedPattern -Parent)
+                if ([string]::IsNullOrWhiteSpace($specPath)) {
+                    $specPath = "."
+                }
+            }
+
+            $specKey = "$specType|$specPath"
+            if (-not $scanSpecMap.ContainsKey($specKey)) {
+                $scanSpecMap[$specKey] = [PSCustomObject]@{
+                    Type = $specType
+                    Path = $specPath
+                }
+            }
+        }
+    }
+
+    return @($scanSpecMap.Values | Sort-Object Type, Path)
+}
+
 function Get-LocalFileMap {
     param(
         [Parameter(Mandatory = $true)][string]$BasePath,
@@ -274,14 +340,52 @@ function Get-LocalFileMap {
     )
 
     $fileMap = @{}
-    $allFiles = Get-ChildItem -Path $BasePath -Recurse -File | Where-Object {
-        $_.FullName -notmatch "[\\/]\.git([\\/]|$)"
-    }
+    $scanSpecs = Get-ScanSpecs -SyncSections $SyncSections
 
-    foreach ($file in $allFiles) {
-        $relativePath = Normalize-RelativePath($file.FullName.Substring($BasePath.Length).TrimStart([char[]]"\/"))
-        if (Test-ShouldSyncFile -RelativePath $relativePath -SyncSections $SyncSections) {
-            $fileMap[$relativePath] = $file.FullName
+    foreach ($scanSpec in $scanSpecs) {
+        $targetPath = if ($scanSpec.Path -eq ".") {
+            $BasePath
+        } else {
+            Join-Path $BasePath ($scanSpec.Path.Replace("/", [System.IO.Path]::DirectorySeparatorChar))
+        }
+
+        switch ($scanSpec.Type) {
+            "file" {
+                if (-not (Test-Path -LiteralPath $targetPath -PathType Leaf)) {
+                    continue
+                }
+
+                $relativePath = Normalize-RelativePath($targetPath.Substring($BasePath.Length).TrimStart([char[]]"\/"))
+                if (Test-ShouldSyncFile -RelativePath $relativePath -SyncSections $SyncSections) {
+                    $fileMap[$relativePath] = $targetPath
+                }
+            }
+            "dir_flat" {
+                if (-not (Test-Path -LiteralPath $targetPath -PathType Container)) {
+                    continue
+                }
+
+                $files = Get-ChildItem -LiteralPath $targetPath -File
+                foreach ($file in $files) {
+                    $relativePath = Normalize-RelativePath($file.FullName.Substring($BasePath.Length).TrimStart([char[]]"\/"))
+                    if (Test-ShouldSyncFile -RelativePath $relativePath -SyncSections $SyncSections) {
+                        $fileMap[$relativePath] = $file.FullName
+                    }
+                }
+            }
+            "dir_recursive" {
+                if (-not (Test-Path -LiteralPath $targetPath -PathType Container)) {
+                    continue
+                }
+
+                $files = Get-ChildItem -LiteralPath $targetPath -Recurse -File
+                foreach ($file in $files) {
+                    $relativePath = Normalize-RelativePath($file.FullName.Substring($BasePath.Length).TrimStart([char[]]"\/"))
+                    if (Test-ShouldSyncFile -RelativePath $relativePath -SyncSections $SyncSections) {
+                        $fileMap[$relativePath] = $file.FullName
+                    }
+                }
+            }
         }
     }
 
@@ -298,8 +402,35 @@ function Get-RemoteFileSet {
     )
 
     $remoteSet = @{}
+    $scanSpecs = Get-ScanSpecs -SyncSections $SyncSections
     $quotedRemotePath = Quote-Posix $HostPath
-    $findCommand = "cd $quotedRemotePath && find . -type f -printf '%P\n' 2>/dev/null"
+    $commandParts = @("cd $quotedRemotePath 2>/dev/null || exit 0")
+
+    foreach ($scanSpec in $scanSpecs) {
+        $quotedScanPath = Quote-Posix $scanSpec.Path
+
+        switch ($scanSpec.Type) {
+            "file" {
+                $commandParts += "if [ -f $quotedScanPath ]; then printf '%s\n' $quotedScanPath; fi"
+            }
+            "dir_flat" {
+                if ($scanSpec.Path -eq ".") {
+                    $commandParts += "find . -maxdepth 1 -type f -print 2>/dev/null"
+                } else {
+                    $commandParts += "if [ -d $quotedScanPath ]; then find $quotedScanPath -maxdepth 1 -type f -print 2>/dev/null; fi"
+                }
+            }
+            "dir_recursive" {
+                if ($scanSpec.Path -eq ".") {
+                    $commandParts += "find . -type f -print 2>/dev/null"
+                } else {
+                    $commandParts += "if [ -d $quotedScanPath ]; then find $quotedScanPath -type f -print 2>/dev/null; fi"
+                }
+            }
+        }
+    }
+
+    $findCommand = $commandParts -join "; "
     $remoteFiles = ssh -o ConnectTimeout=$ConnectTimeout "$HostUser@$HostIP" $findCommand 2>&1
 
     if ($LASTEXITCODE -ne 0) {
@@ -392,6 +523,62 @@ function Invoke-RemoteCommand {
     }
 }
 
+function Invoke-LocalProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $false)][string[]]$ArgumentList = @(),
+        [Parameter(Mandatory = $false)][string]$WorkingDirectory = ""
+    )
+
+    $stdoutFile = [System.IO.Path]::GetTempFileName()
+    $stderrFile = [System.IO.Path]::GetTempFileName()
+    $process = $null
+
+    try {
+        $startProcessArgs = @{
+            FilePath               = $FilePath
+            ArgumentList           = $ArgumentList
+            NoNewWindow            = $true
+            Wait                   = $true
+            PassThru               = $true
+            RedirectStandardOutput = $stdoutFile
+            RedirectStandardError  = $stderrFile
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+            $startProcessArgs.WorkingDirectory = $WorkingDirectory
+        }
+
+        $process = Start-Process @startProcessArgs
+
+        $stdout = if (Test-Path $stdoutFile) {
+            Get-Content -Path $stdoutFile -Raw -Encoding utf8
+        } else {
+            ""
+        }
+        $stderr = if (Test-Path $stderrFile) {
+            Get-Content -Path $stderrFile -Raw -Encoding utf8
+        } else {
+            ""
+        }
+
+        $combined = @($stdout, $stderr) -join ""
+    } finally {
+        Remove-Item -LiteralPath $stdoutFile, $stderrFile -ErrorAction SilentlyContinue
+    }
+
+    return [PSCustomObject]@{
+        Output   = $combined
+        ExitCode = if ($null -ne $process) { $process.ExitCode } else { 1 }
+    }
+}
+
+function Test-LocalCommandAvailable {
+    param([Parameter(Mandatory = $true)][string]$CommandName)
+
+    return $null -ne (Get-Command $CommandName -ErrorAction SilentlyContinue)
+}
+
 function Get-RemoteDockerComposeCommand {
     param(
         [Parameter(Mandatory = $true)][string]$HostUser,
@@ -414,6 +601,227 @@ function Get-RemoteDockerComposeCommand {
     return $composeCommand
 }
 
+function Test-RemoteTarAvailable {
+    param(
+        [Parameter(Mandatory = $true)][string]$HostUser,
+        [Parameter(Mandatory = $true)][string]$HostIP,
+        [Parameter(Mandatory = $true)][int]$ConnectTimeout
+    )
+
+    $checkResult = Invoke-RemoteCommand -HostUser $HostUser -HostIP $HostIP -Command "command -v tar >/dev/null 2>&1" -ConnectTimeout $ConnectTimeout
+    return $checkResult.ExitCode -eq 0
+}
+
+function Resolve-UploadStrategy {
+    param(
+        [Parameter(Mandatory = $true)][string]$PreferredStrategy,
+        [Parameter(Mandatory = $true)][string]$HostUser,
+        [Parameter(Mandatory = $true)][string]$HostIP,
+        [Parameter(Mandatory = $true)][int]$ConnectTimeout
+    )
+
+    if ($PreferredStrategy -eq "PerFile") {
+        return [PSCustomObject]@{
+            Strategy = "PerFile"
+            Reason   = "Upload strategy forced to PerFile."
+        }
+    }
+
+    $hasLocalTar = Test-LocalCommandAvailable -CommandName "tar"
+    $hasRemoteTar = Test-RemoteTarAvailable -HostUser $HostUser -HostIP $HostIP -ConnectTimeout $ConnectTimeout
+
+    if ($PreferredStrategy -eq "Archive") {
+        if (-not $hasLocalTar) {
+            throw "Upload strategy 'Archive' requires local 'tar', but it was not found."
+        }
+        if (-not $hasRemoteTar) {
+            throw "Upload strategy 'Archive' requires remote 'tar', but it was not found."
+        }
+
+        return [PSCustomObject]@{
+            Strategy = "Archive"
+            Reason   = "Upload strategy forced to Archive and local/remote tar are available."
+        }
+    }
+
+    if ($hasLocalTar -and $hasRemoteTar) {
+        return [PSCustomObject]@{
+            Strategy = "Archive"
+            Reason   = "Auto-selected archive upload because local and remote tar are available."
+        }
+    }
+
+    $missingParts = New-Object System.Collections.Generic.List[string]
+    if (-not $hasLocalTar) {
+        $null = $missingParts.Add("local tar")
+    }
+    if (-not $hasRemoteTar) {
+        $null = $missingParts.Add("remote tar")
+    }
+
+    return [PSCustomObject]@{
+        Strategy = "PerFile"
+        Reason   = "Falling back to per-file upload because " + ($missingParts -join " and ") + " is unavailable."
+    }
+}
+
+function New-DeploymentArchive {
+    param(
+        [Parameter(Mandatory = $true)][string]$BasePath,
+        [Parameter(Mandatory = $true)]$LocalFileMap
+    )
+
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("novel_deploy_" + [System.Guid]::NewGuid().ToString("N"))
+    $stageRoot = Join-Path $tempRoot "payload"
+    $archivePath = Join-Path $tempRoot "payload.tar.gz"
+
+    New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null
+
+    foreach ($relativePath in ($LocalFileMap.Keys | Sort-Object)) {
+        $sourceFile = $LocalFileMap[$relativePath]
+        $destinationFile = Join-Path $stageRoot ($relativePath.Replace("/", [System.IO.Path]::DirectorySeparatorChar))
+        $destinationDirectory = Split-Path $destinationFile -Parent
+
+        if (-not [string]::IsNullOrWhiteSpace($destinationDirectory)) {
+            New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null
+        }
+
+        Copy-Item -LiteralPath $sourceFile -Destination $destinationFile -Force
+    }
+
+    $tarResult = Invoke-LocalProcess -FilePath "tar" -ArgumentList @("-czf", $archivePath, "-C", $stageRoot, ".") -WorkingDirectory $BasePath
+    if ($tarResult.ExitCode -ne 0 -or -not (Test-Path $archivePath)) {
+        throw "Failed to create deployment archive: $($tarResult.Output)"
+    }
+
+    $archiveItem = Get-Item -LiteralPath $archivePath
+    return [PSCustomObject]@{
+        TempRoot    = $tempRoot
+        StageRoot   = $stageRoot
+        ArchivePath = $archivePath
+        SizeBytes   = [int64]$archiveItem.Length
+        FileCount   = $LocalFileMap.Count
+    }
+}
+
+function Upload-FilesPerFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$HostUser,
+        [Parameter(Mandatory = $true)][string]$HostIP,
+        [Parameter(Mandatory = $true)][string]$HostPath,
+        [Parameter(Mandatory = $true)]$LocalFileMap,
+        [Parameter(Mandatory = $true)][int]$MaxRetryCount,
+        [Parameter(Mandatory = $true)][int]$ConnectTimeout
+    )
+
+    Ensure-RemoteDirectories -HostUser $HostUser -HostIP $HostIP -HostPath $HostPath -LocalFileMap $LocalFileMap -ConnectTimeout $ConnectTimeout
+
+    $uploaded = 0
+    $failed = 0
+    $failedFiles = @()
+
+    foreach ($relativePath in ($LocalFileMap.Keys | Sort-Object)) {
+        $localFile = $LocalFileMap[$relativePath]
+        $remoteFile = "${HostUser}@${HostIP}:$($HostPath.TrimEnd('/'))/$relativePath"
+
+        Write-Host "  Uploading: $relativePath" -NoNewline
+
+        $success = $false
+        for ($attempt = 1; $attempt -le $MaxRetryCount; $attempt++) {
+            $scpResult = Invoke-LocalProcess -FilePath "scp" -ArgumentList @(
+                "-o", "StrictHostKeyChecking=no",
+                "-o", "ConnectTimeout=$ConnectTimeout",
+                $localFile,
+                $remoteFile
+            )
+
+            if ($scpResult.ExitCode -eq 0) {
+                $success = $true
+                break
+            }
+
+            if ($attempt -lt $MaxRetryCount) {
+                Write-Host " [retry $attempt/$MaxRetryCount]" -ForegroundColor Yellow -NoNewline
+                Start-Sleep -Seconds 2
+            }
+        }
+
+        if ($success) {
+            $uploaded++
+            Write-Host " [OK]" -ForegroundColor Green
+        } else {
+            $failed++
+            $failedFiles += $relativePath
+            Write-Host " [FAILED]" -ForegroundColor Red
+        }
+    }
+
+    return [PSCustomObject]@{
+        Uploaded    = $uploaded
+        Failed      = $failed
+        FailedFiles = $failedFiles
+    }
+}
+
+function Upload-FilesByArchive {
+    param(
+        [Parameter(Mandatory = $true)][string]$HostUser,
+        [Parameter(Mandatory = $true)][string]$HostIP,
+        [Parameter(Mandatory = $true)][string]$HostPath,
+        [Parameter(Mandatory = $true)]$ArchiveInfo,
+        [Parameter(Mandatory = $true)][int]$MaxRetryCount,
+        [Parameter(Mandatory = $true)][int]$ConnectTimeout
+    )
+
+    $remoteArchivePath = "/tmp/novel_deploy_" + [System.Guid]::NewGuid().ToString("N") + ".tar.gz"
+    Write-Host "  Packaging selected files into archive..." -ForegroundColor Cyan
+    Write-Host "  Archive size: $(Format-ByteSize -Bytes $ArchiveInfo.SizeBytes)" -ForegroundColor Cyan
+    Write-Host "  Uploading archive to remote host..." -ForegroundColor Cyan
+
+    $success = $false
+    for ($attempt = 1; $attempt -le $MaxRetryCount; $attempt++) {
+        $scpResult = Invoke-LocalProcess -FilePath "scp" -ArgumentList @(
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "ConnectTimeout=$ConnectTimeout",
+            $ArchiveInfo.ArchivePath,
+            "${HostUser}@${HostIP}:$remoteArchivePath"
+        )
+
+        if ($scpResult.ExitCode -eq 0) {
+            $success = $true
+            break
+        }
+
+        if ($attempt -lt $MaxRetryCount) {
+            Write-Host "  Archive upload retry $attempt/$MaxRetryCount" -ForegroundColor Yellow
+            Start-Sleep -Seconds 2
+        } else {
+            throw "Archive upload failed: $($scpResult.Output)"
+        }
+    }
+
+    if (-not $success) {
+        throw "Archive upload failed for unknown reasons."
+    }
+
+    $quotedRemotePath = Quote-Posix $HostPath
+    $quotedRemoteArchivePath = Quote-Posix $remoteArchivePath
+    $extractCommand = "mkdir -p $quotedRemotePath && tar -xzf $quotedRemoteArchivePath -C $quotedRemotePath && rm -f $quotedRemoteArchivePath"
+    $extractResult = Invoke-RemoteCommand -HostUser $HostUser -HostIP $HostIP -Command $extractCommand -ConnectTimeout $ConnectTimeout
+
+    if ($extractResult.ExitCode -ne 0) {
+        $cleanupCommand = "rm -f $quotedRemoteArchivePath"
+        $null = Invoke-RemoteCommand -HostUser $HostUser -HostIP $HostIP -Command $cleanupCommand -ConnectTimeout $ConnectTimeout
+        throw "Archive extraction failed: $($extractResult.Output)"
+    }
+
+    return [PSCustomObject]@{
+        Uploaded    = $ArchiveInfo.FileCount
+        Failed      = 0
+        FailedFiles = @()
+    }
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 if ([string]::IsNullOrWhiteSpace($LocalPath)) {
     $LocalPath = $scriptRoot
@@ -428,6 +836,7 @@ if (Test-Path $configPath) {
 }
 
 $serverConfig = Get-PropertyValue -Object $configRoot -Name "server" -Default $null
+$uploadConfig = Get-PropertyValue -Object $configRoot -Name "upload" -Default $null
 $validationConfig = Get-PropertyValue -Object $configRoot -Name "validation" -Default $null
 
 if ([string]::IsNullOrWhiteSpace($ServerIP)) {
@@ -440,6 +849,10 @@ if ([string]::IsNullOrWhiteSpace($ServerUser)) {
 
 if ([string]::IsNullOrWhiteSpace($RemotePath)) {
     $RemotePath = Get-PropertyValue -Object $serverConfig -Name "remote_path" -Default "/data/apps/novel_writing_agent"
+}
+
+if (-not $PSBoundParameters.ContainsKey("UploadStrategy")) {
+    $UploadStrategy = Get-PropertyValue -Object $uploadConfig -Name "strategy" -Default $UploadStrategy
 }
 
 $apiEndpoint = Get-PropertyValue -Object $validationConfig -Name "api_endpoint" -Default "/api/v1/health"
@@ -464,8 +877,18 @@ $composeCommand = Get-RemoteDockerComposeCommand -HostUser $ServerUser -HostIP $
 Write-Host "  Remote Compose command: $composeCommand" -ForegroundColor Green
 Write-Host ""
 
+Write-Host "[Preflight] Resolving upload strategy..." -ForegroundColor Yellow
+$resolvedUploadStrategy = Resolve-UploadStrategy -PreferredStrategy $UploadStrategy -HostUser $ServerUser -HostIP $ServerIP -ConnectTimeout $TimeoutSeconds
+$effectiveUploadStrategy = $resolvedUploadStrategy.Strategy
+Write-Host "  Upload strategy: $effectiveUploadStrategy" -ForegroundColor Green
+Write-Host "  Reason: $($resolvedUploadStrategy.Reason)" -ForegroundColor DarkGray
+Write-Host ""
+
 Write-Host "[Step 1/7] Scanning local files..." -ForegroundColor Yellow
 $localFileMap = Get-LocalFileMap -BasePath $LocalPath -SyncSections $syncSections
+if ($localFileMap.Count -eq 0) {
+    throw "No files matched the configured sync rules. Deployment stopped."
+}
 Write-Host "  Local files selected: $($localFileMap.Count)" -ForegroundColor Green
 Write-Host ""
 
@@ -497,42 +920,25 @@ if ($DryRun) {
 }
 
 Write-Host "[Step 4/7] Uploading files..." -ForegroundColor Yellow
-Ensure-RemoteDirectories -HostUser $ServerUser -HostIP $ServerIP -HostPath $RemotePath -LocalFileMap $localFileMap -ConnectTimeout $TimeoutSeconds
+$uploadResult = $null
+$archiveInfo = $null
 
-$uploaded = 0
-$failed = 0
-$failedFiles = @()
-
-foreach ($relativePath in ($localFileMap.Keys | Sort-Object)) {
-    $localFile = $localFileMap[$relativePath]
-    $remoteFile = "${ServerUser}@${ServerIP}:$($RemotePath.TrimEnd('/'))/$relativePath"
-
-    Write-Host "  Uploading: $relativePath" -NoNewline
-
-    $success = $false
-    for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
-        $null = scp -o StrictHostKeyChecking=no -o ConnectTimeout=$TimeoutSeconds "$localFile" "$remoteFile" 2>&1
-
-        if ($LASTEXITCODE -eq 0) {
-            $success = $true
-            break
-        }
-
-        if ($attempt -lt $MaxRetries) {
-            Write-Host " [retry $attempt/$MaxRetries]" -ForegroundColor Yellow -NoNewline
-            Start-Sleep -Seconds 2
-        }
-    }
-
-    if ($success) {
-        $uploaded++
-        Write-Host " [OK]" -ForegroundColor Green
+try {
+    if ($effectiveUploadStrategy -eq "Archive") {
+        $archiveInfo = New-DeploymentArchive -BasePath $LocalPath -LocalFileMap $localFileMap
+        $uploadResult = Upload-FilesByArchive -HostUser $ServerUser -HostIP $ServerIP -HostPath $RemotePath -ArchiveInfo $archiveInfo -MaxRetryCount $MaxRetries -ConnectTimeout $TimeoutSeconds
     } else {
-        $failed++
-        $failedFiles += $relativePath
-        Write-Host " [FAILED]" -ForegroundColor Red
+        $uploadResult = Upload-FilesPerFile -HostUser $ServerUser -HostIP $ServerIP -HostPath $RemotePath -LocalFileMap $localFileMap -MaxRetryCount $MaxRetries -ConnectTimeout $TimeoutSeconds
+    }
+} finally {
+    if ($null -ne $archiveInfo -and -not [string]::IsNullOrWhiteSpace($archiveInfo.TempRoot) -and (Test-Path $archiveInfo.TempRoot)) {
+        Remove-Item -LiteralPath $archiveInfo.TempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
+
+$uploaded = $uploadResult.Uploaded
+$failed = $uploadResult.Failed
+$failedFiles = @($uploadResult.FailedFiles)
 
 Write-Host ""
 Write-Host "Upload summary:" -ForegroundColor Yellow
@@ -626,6 +1032,7 @@ Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Summary:" -ForegroundColor Yellow
 Write-Host "  Uploaded files: $uploaded" -ForegroundColor Green
+Write-Host "  Upload mode:    $effectiveUploadStrategy" -ForegroundColor Green
 Write-Host "  Deleted files:  $(if ($SkipDelete) { 'Skipped' } else { $filesToDelete.Count })" -ForegroundColor Green
 Write-Host "  Server:         $ServerUser@$ServerIP" -ForegroundColor Green
 Write-Host "  Remote path:    $RemotePath" -ForegroundColor Green
