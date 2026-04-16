@@ -43,7 +43,7 @@ export interface StoryExpansionSubmitPayloadInput {
 }
 
 export interface StoryExpansionConfirmDialogConfig {
-  kind: 'volume_overwrite' | 'framework_reset'
+  kind: 'volume_overwrite' | 'framework_reset' | 'framework_regenerate'
   title: string
   description: string
   detail: string
@@ -68,6 +68,10 @@ export function getStoryExpansionVolumeOverwriteConfirmMessage(
 
 export function getStoryExpansionFrameworkResetConfirmMessage(): string {
   return '当前项目已存在长篇框架与卷细纲。\n\n继续使用“常规协同”补细化章节会清空旧框架状态，后续将以新的章节大纲为准。\n\n确认继续吗？'
+}
+
+export function getStoryExpansionFrameworkRegenerateConfirmMessage(): string {
+  return '当前项目已存在长篇框架与卷细纲。\n\n继续使用“长篇框架协同”重新生成后，会覆盖现有框架，并清空已展开卷的细纲。\n\n确认继续吗？'
 }
 
 export function getStoryExpansionVolumeOverwriteConfirmDialog(
@@ -98,6 +102,18 @@ export function getStoryExpansionFrameworkResetConfirmDialog(): StoryExpansionCo
   }
 }
 
+export function getStoryExpansionFrameworkRegenerateConfirmDialog(): StoryExpansionConfirmDialogConfig {
+  return {
+    kind: 'framework_regenerate',
+    title: '重新生成长篇框架',
+    description: '当前项目已存在长篇框架与卷细纲。继续重新生成会覆盖现有框架，并清空已展开卷的细纲。',
+    detail: '成功后将以新的分卷框架为准，原有单卷细化内容需要按新框架重新生成。',
+    confirmLabel: '继续重生成',
+    cancelLabel: '取消',
+    message: getStoryExpansionFrameworkRegenerateConfirmMessage(),
+  }
+}
+
 export function createStoryExpansionSubmitPreflight(
   input: StoryExpansionSubmitPreflightInput,
 ): StoryExpansionSubmitPreflight {
@@ -124,6 +140,10 @@ export function createStoryExpansionSubmitPreflight(
     && shouldConfirmStoryExpansionVolumeOverwrite(input.form.frameworkMetadata, input.form.targetVolumeIndex)
   )
   const requiresResetFrameworkConfirm = requestPlan.requiresEpicFrameworkReset
+  const requiresFrameworkRegenerateConfirm = (
+    input.form.expansionMode === 'epic_framework'
+    && Boolean(input.form.frameworkMetadata?.has_framework)
+  )
 
   const confirmDialogs: StoryExpansionConfirmDialogConfig[] = []
 
@@ -133,6 +153,10 @@ export function createStoryExpansionSubmitPreflight(
 
   if (requiresResetFrameworkConfirm) {
     confirmDialogs.push(getStoryExpansionFrameworkResetConfirmDialog())
+  }
+
+  if (requiresFrameworkRegenerateConfirm) {
+    confirmDialogs.push(getStoryExpansionFrameworkRegenerateConfirmDialog())
   }
 
   return {

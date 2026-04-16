@@ -153,6 +153,7 @@ class WorkflowWebSocket {
   private reconnectAttempts = 0
   private maxReconnectAttempts = 5
   private reconnectDelay = 1000
+  private connectionTimeout = 60000
   private onRoomJoinedCallback: ((projectId: number) => void) | null = null
 
   connect(): Promise<void> {
@@ -168,14 +169,16 @@ class WorkflowWebSocket {
       const socket = io(SOCKET_ENDPOINT.url, {
         path: SOCKET_ENDPOINT.path,
         transports: ['websocket', 'polling'],
+        tryAllTransports: true,
         reconnection: true,
         reconnectionAttempts: this.maxReconnectAttempts,
         reconnectionDelay: this.reconnectDelay,
         reconnectionDelayMax: 5000,
-        timeout: 60000,
+        timeout: this.connectionTimeout,
         forceNew: false,
+        autoConnect: false,
         upgrade: true,
-        rememberUpgrade: true,
+        rememberUpgrade: false,
       })
 
       this.socket = socket
@@ -187,11 +190,29 @@ class WorkflowWebSocket {
       return Promise.reject(new Error('Socket initialization failed'))
     }
 
+    if (socket.connected) {
+      return Promise.resolve()
+    }
+
     this.connectPromise = new Promise((resolve, reject) => {
+      let lastError: Error | null = null
+      const manager = socket.io
+      const timeoutId = setTimeout(() => {
+        if (this.socket !== socket) {
+          cleanup()
+          return
+        }
+
+        cleanup()
+        this.connectPromise = null
+        reject(lastError ?? new Error('Connection timeout'))
+      }, this.connectionTimeout + 1000)
+
       const cleanup = () => {
         socket.off('connect', onConnect)
         socket.off('connect_error', onConnectError)
-        socket.off('connect_timeout', onConnectTimeout)
+        manager.off('reconnect_failed', onReconnectFailed)
+        clearTimeout(timeoutId)
       }
 
       const onConnect = () => {
@@ -205,11 +226,16 @@ class WorkflowWebSocket {
         resolve()
       }
 
-      const onConnectError = () => {
-        // Wait for the built-in reconnect cycle to finish.
+      const onConnectError = (error: Error) => {
+        if (this.socket !== socket) {
+          cleanup()
+          return
+        }
+
+        lastError = error
       }
 
-      const onConnectTimeout = () => {
+      const onReconnectFailed = () => {
         if (this.socket !== socket) {
           cleanup()
           return
@@ -217,16 +243,14 @@ class WorkflowWebSocket {
 
         cleanup()
         this.connectPromise = null
-        reject(new Error('Connection timeout'))
+        reject(lastError ?? new Error('WebSocket connection failed'))
       }
 
       socket.once('connect', onConnect)
       socket.on('connect_error', onConnectError)
-      socket.once('connect_timeout', onConnectTimeout)
+      manager.once('reconnect_failed', onReconnectFailed)
 
-      if (!socket.active) {
-        socket.connect()
-      }
+      socket.connect()
     })
 
     return this.connectPromise
@@ -297,25 +321,38 @@ class WorkflowWebSocket {
   }
 
   joinProject(projectId: number, retryCount = 0, socket: Socket | null = this.socket) {
-    if (!socket || this.socket !== socket) {
+    const previousProjectId = this.projectId
+    this.projectId = projectId
+
+    if (!socket) {
+      void this.connect().catch(() => undefined)
+      return
+    }
+
+    if (this.socket !== socket) {
       return
     }
 
     if (!socket.connected) {
-      if (retryCount < 3) {
+      if (!socket.active) {
+        socket.connect()
+      }
+
+      if (retryCount < 10) {
         setTimeout(() => this.joinProject(projectId, retryCount + 1, socket), 500)
       }
       return
     }
 
     const token = localStorage.getItem('access_token')
-    if (!token) return
-
-    if (this.projectId && this.projectId !== projectId) {
-      socket.emit('leave_project', { project_id: this.projectId })
+    if (!token) {
+      return
     }
 
-    this.projectId = projectId
+    if (previousProjectId && previousProjectId !== projectId) {
+      socket.emit('leave_project', { project_id: previousProjectId })
+    }
+
     socket.emit('join_project', {
       project_id: projectId,
       token,

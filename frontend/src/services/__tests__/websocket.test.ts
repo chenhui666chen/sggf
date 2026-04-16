@@ -2,18 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type Listener = (...args: unknown[]) => void
 
-class MockSocket {
-  active = false
-  connected = false
+class MockEmitter {
   private listeners = new Map<string, Set<Listener>>()
-  emit = vi.fn()
-  connect = vi.fn(() => {
-    this.active = true
-  })
-  disconnect = vi.fn(() => {
-    this.connected = false
-    this.active = false
-  })
 
   on(eventName: string, listener: Listener) {
     const current = this.listeners.get(eventName) ?? new Set<Listener>()
@@ -54,6 +44,38 @@ class MockSocket {
   }
 }
 
+class MockSocket {
+  active = false
+  connected = false
+  io = new MockEmitter()
+  private emitter = new MockEmitter()
+
+  emit = vi.fn()
+  connect = vi.fn(() => {
+    this.active = true
+  })
+  disconnect = vi.fn(() => {
+    this.connected = false
+    this.active = false
+  })
+
+  on(eventName: string, listener: Listener) {
+    return this.emitter.on(eventName, listener)
+  }
+
+  once(eventName: string, listener: Listener) {
+    return this.emitter.once(eventName, listener)
+  }
+
+  off(eventName: string, listener?: Listener) {
+    return this.emitter.off(eventName, listener)
+  }
+
+  trigger(eventName: string, ...args: unknown[]) {
+    this.emitter.trigger(eventName, ...args)
+  }
+}
+
 const ioMock = vi.fn()
 
 vi.mock('socket.io-client', () => ({
@@ -64,16 +86,31 @@ describe('workflowWebSocket', () => {
   beforeEach(() => {
     ioMock.mockReset()
     vi.resetModules()
-    if ('localStorage' in globalThis) {
-      globalThis.localStorage.clear()
-    }
+
+    const storage = new Map<string, string>()
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => {
+          storage.set(key, value)
+        },
+        removeItem: (key: string) => {
+          storage.delete(key)
+        },
+        clear: () => {
+          storage.clear()
+        },
+      },
+      configurable: true,
+    })
   })
 
   afterEach(() => {
     Reflect.deleteProperty(globalThis, 'window')
+    Reflect.deleteProperty(globalThis, 'localStorage')
   })
 
-  it('connect 会复用进行中的连接请求，只创建一个 socket', async () => {
+  it('会复用进行中的连接请求，只创建一个 socket', async () => {
     const socket = new MockSocket()
     ioMock.mockReturnValue(socket)
 
@@ -84,12 +121,46 @@ describe('workflowWebSocket', () => {
 
     expect(ioMock).toHaveBeenCalledTimes(1)
     expect(first).toBe(second)
+    expect(socket.connect).toHaveBeenCalledTimes(1)
 
     socket.connected = true
     socket.trigger('connect')
 
     await expect(first).resolves.toBeUndefined()
     await expect(second).resolves.toBeUndefined()
+  })
+
+  it('使用更稳妥的连接配置建立 Socket.IO 连接', async () => {
+    const socket = new MockSocket()
+    ioMock.mockReturnValue(socket)
+    Object.defineProperty(globalThis, 'window', {
+      value: {
+        location: {
+          origin: 'https://sggf.net',
+        },
+      },
+      configurable: true,
+    })
+
+    const { workflowWebSocket } = await import('../websocket')
+
+    const connectPromise = workflowWebSocket.connect()
+
+    expect(ioMock).toHaveBeenCalledWith(
+      'https://sggf.net',
+      expect.objectContaining({
+        path: '/socket.io',
+        autoConnect: false,
+        rememberUpgrade: false,
+        tryAllTransports: true,
+        transports: ['websocket', 'polling'],
+      }),
+    )
+
+    socket.connected = true
+    socket.trigger('connect')
+
+    await expect(connectPromise).resolves.toBeUndefined()
   })
 
   it('task_complete 监听可以并存，取消订阅只移除自身监听器', async () => {
@@ -127,32 +198,25 @@ describe('workflowWebSocket', () => {
     expect(listenerB).toHaveBeenCalledTimes(2)
   })
 
-  it('默认使用当前站点 origin，并通过 /socket.io 建立连接', async () => {
+  it('joinProject 可以在连接完成前缓存项目，并在连上后自动入房', async () => {
     const socket = new MockSocket()
     ioMock.mockReturnValue(socket)
-    Object.defineProperty(globalThis, 'window', {
-      value: {
-        location: {
-          origin: 'https://sggf.net',
-        },
-      },
-      configurable: true,
-    })
+    globalThis.localStorage.setItem('access_token', 'jwt-token')
 
     const { workflowWebSocket } = await import('../websocket')
 
     const connectPromise = workflowWebSocket.connect()
+    workflowWebSocket.joinProject(13)
 
-    expect(ioMock).toHaveBeenCalledWith(
-      'https://sggf.net',
-      expect.objectContaining({
-        path: '/socket.io',
-      }),
-    )
+    expect(socket.emit).not.toHaveBeenCalledWith('join_project', expect.anything())
 
     socket.connected = true
     socket.trigger('connect')
 
     await expect(connectPromise).resolves.toBeUndefined()
+    expect(socket.emit).toHaveBeenCalledWith('join_project', {
+      project_id: 13,
+      token: 'jwt-token',
+    })
   })
 })

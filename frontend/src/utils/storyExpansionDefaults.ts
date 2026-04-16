@@ -178,7 +178,7 @@ export function resolveStoryExpansionModeDefaults(
     currentCharacterCount: input.currentCharacterCount,
   })
 
-  if (input.mode === 'volume_detail' || input.frameworkMetadata?.has_framework) {
+  if (input.mode === 'volume_detail') {
     return {
       ...baseDefaults,
       expansionMode: 'volume_detail',

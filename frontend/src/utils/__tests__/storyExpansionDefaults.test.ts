@@ -215,7 +215,7 @@ describe('storyExpansionDefaults', () => {
     })
   })
 
-  it('模式切换在检测到已有框架后会强制收敛到单卷细化', () => {
+  it('已有框架后仍允许主动切换回长篇框架协同重新生成', () => {
     expect(
       resolveStoryExpansionModeDefaults({
         entryPoint: 'outline',
@@ -234,10 +234,10 @@ describe('storyExpansionDefaults', () => {
         recommendedChaptersPerVolumeMax: 80,
       }),
     ).toEqual({
-      expansionMode: 'volume_detail',
+      expansionMode: 'epic_framework',
       targetChapterCount: null,
       targetCharacterCount: null,
-      targetVolumeIndex: 4,
+      targetVolumeIndex: 1,
       totalVolumes: 10,
       totalChaptersMin: 600,
       totalChaptersMax: 800,

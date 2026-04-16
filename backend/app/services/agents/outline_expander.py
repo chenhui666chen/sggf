@@ -2374,15 +2374,110 @@ Please输出完整的、重新整合后的网文大纲：
         return content if len(content) <= limit else content[:limit].rstrip() + "\n...(已截断)"
 
     @staticmethod
-    def _story_extract_volume_block(framework_content: str, target_volume_index: int) -> str:
+    def _story_match_volume_heading(line: str) -> Optional[int]:
+        stripped = str(line or "").strip()
+        if not stripped:
+            return None
+
+        arabic_patterns = (
+            re.compile(r"^(?:#{1,6}\s*)?【第\s*(\d+)\s*卷】(?:\s*[《「『]?.*)?$"),
+            re.compile(r"^(?:#{1,6}\s*)?(?:\*\*)?第\s*(\d+)\s*卷(?:\*\*)?(?:\s*[:：]\s*.*|\s+.+)?$"),
+        )
+        for pattern in arabic_patterns:
+            match = pattern.match(stripped)
+            if not match:
+                continue
+            try:
+                volume_index = int(match.group(1))
+            except (TypeError, ValueError):
+                continue
+            if volume_index > 0:
+                return volume_index
+
+        cn_num_map = {
+            "一": 1,
+            "二": 2,
+            "三": 3,
+            "四": 4,
+            "五": 5,
+            "六": 6,
+            "七": 7,
+            "八": 8,
+            "九": 9,
+            "十": 10,
+            "十一": 11,
+            "十二": 12,
+            "十三": 13,
+            "十四": 14,
+            "十五": 15,
+            "十六": 16,
+            "十七": 17,
+            "十八": 18,
+            "十九": 19,
+            "二十": 20,
+        }
+        chinese_patterns = (
+            re.compile(r"^(?:#{1,6}\s*)?【第\s*([一二三四五六七八九十]+)\s*卷】(?:\s*[《「『]?.*)?$"),
+            re.compile(r"^(?:#{1,6}\s*)?(?:\*\*)?第\s*([一二三四五六七八九十]+)\s*卷(?:\*\*)?(?:\s*[:：]\s*.*|\s+.+)?$"),
+        )
+        for pattern in chinese_patterns:
+            match = pattern.match(stripped)
+            if not match:
+                continue
+            volume_index = cn_num_map.get(match.group(1).strip())
+            if volume_index:
+                return volume_index
+
+        return None
+
+    @staticmethod
+    def _story_is_global_footer_heading(line: str) -> bool:
+        stripped = str(line or "").strip()
+        if not stripped:
+            return False
+        footer_patterns = (
+            re.compile(r"^(?:#{1,6}\s*)?[四五六七八九十0-9]+[、.．，,]?\s*(关键伏笔|伏笔布局|核心人物|人物生命周期|人物关系|\w+周期)"),
+            re.compile(r"^(?:#{1,6}\s*)?(关键伏笔|伏笔布局|核心人物|人物生命周期|人物关系|\w+周期)"),
+        )
+        return any(pattern.match(stripped) for pattern in footer_patterns)
+
+    @classmethod
+    def _story_list_volume_heading_positions(cls, framework_content: str) -> List[Tuple[int, int]]:
+        positions: List[Tuple[int, int]] = []
+        for line_index, line in enumerate(str(framework_content or "").splitlines()):
+            volume_index = cls._story_match_volume_heading(line)
+            if volume_index is None:
+                continue
+            positions.append((volume_index, line_index))
+        return positions
+
+    @classmethod
+    def _story_extract_volume_block(cls, framework_content: str, target_volume_index: int) -> str:
         if not framework_content or target_volume_index <= 0:
             return ""
 
-        pattern = re.compile(
-            rf"(?ms)^【第\s*{target_volume_index}\s*卷】.*?(?=^【第\s*\d+\s*卷】|^##\s*(?:[六七八九十0-9]+[、.]|关键伏笔|核心人物)|\Z)"
-        )
-        match = pattern.search(framework_content)
-        return match.group(0).strip() if match else ""
+        lines = str(framework_content or "").splitlines()
+        if not lines:
+            return ""
+
+        start_index: Optional[int] = None
+        end_index = len(lines)
+
+        for line_index, line in enumerate(lines):
+            volume_index = cls._story_match_volume_heading(line)
+            if volume_index == target_volume_index:
+                start_index = line_index
+                continue
+            if start_index is None:
+                continue
+            if volume_index is not None or cls._story_is_global_footer_heading(line):
+                end_index = line_index
+                break
+
+        if start_index is None:
+            return ""
+
+        return "\n".join(lines[start_index:end_index]).strip()
 
     @staticmethod
     def _story_has_parseable_volume_sections(framework_content: str) -> bool:
@@ -2390,17 +2485,13 @@ Please输出完整的、重新整合后的网文大纲：
             return False
         if "待补充分卷规划" in framework_content:
             return False
-        return bool(re.search(r"(?m)^【第\s*\d+\s*卷】", framework_content))
+        return bool(OutlineExpander._story_list_volume_heading_positions(framework_content))
 
-    @staticmethod
-    def _story_list_parseable_volume_indexes(framework_content: str) -> List[int]:
+    @classmethod
+    def _story_list_parseable_volume_indexes(cls, framework_content: str) -> List[int]:
         indexes: List[int] = []
         seen: set[int] = set()
-        for match in re.finditer(r"(?m)^【第\s*(\d+)\s*卷】", framework_content or ""):
-            try:
-                volume_index = int(match.group(1))
-            except (TypeError, ValueError):
-                continue
+        for volume_index, _line_index in cls._story_list_volume_heading_positions(framework_content):
             if volume_index in seen:
                 continue
             seen.add(volume_index)

@@ -316,7 +316,7 @@ export function createStoryExpansionDialogView(
   const isVolumeDetailMode = input.expansionMode === 'volume_detail'
   const hasFramework = !!input.frameworkMetadata?.has_framework
   const isEpicFrameworkRecommended = input.recommendedMode === 'epic_framework'
-  const isLockedToVolumeDetail = hasFramework && isVolumeDetailMode
+  const isLockedToVolumeDetail = false
   const effectiveAnalysisTargetChapterCount = (
     typeof analysis?.effective_target_chapter_count === 'number'
     && analysis.effective_target_chapter_count > input.currentChapterCount
@@ -727,6 +727,18 @@ export function createStoryExpansionDialogView(
         text: '长篇框架协同会先规划故事总纲、阶段路线图、分卷框架和滚动细化策略，不会一次性直接铺满上千章细纲。',
       },
     })
+    if (hasFramework) {
+      configBlocks.push({
+        kind: 'alert',
+        key: 'epic-framework-regenerate-warning',
+        alert: {
+          key: 'epic-framework-regenerate-warning',
+          severity: 'warning',
+          variant: 'outlined',
+          text: '当前项目已存在长篇框架。重新生成成功后会覆盖现有框架，并清空已展开卷的细纲，后续需要按新框架重新做单卷细化。',
+        },
+      })
+    }
     configBlocks.push({
       kind: 'fields',
       key: 'epic-framework-fields',
@@ -952,8 +964,8 @@ export function createStoryExpansionDialogView(
     volumeCharacterPlanText,
     modelPlanLines: [],
     validationMessage,
-    expansionModeHelperText: isLockedToVolumeDetail ? '当前项目已有长篇框架，已锁定为单卷细化协同。' : '',
-    lockedModeAlertText: isLockedToVolumeDetail ? '系统检测到当前项目已有长篇框架，已自动切换到单卷细化协同模式。' : '',
+    expansionModeHelperText: hasFramework ? '当前项目已有长篇框架，可继续单卷细化，也可以切回长篇框架协同重新生成。' : '',
+    lockedModeAlertText: '',
     writtenModeInfoAlertText: isVolumeDetailMode
       ? '单卷细化协同会直接继承现有长篇框架和正文上下文，本轮不再单独配置"已写章节处理"模式。'
       : '',

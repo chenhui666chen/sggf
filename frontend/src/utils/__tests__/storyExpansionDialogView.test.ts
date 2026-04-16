@@ -133,7 +133,7 @@ describe('storyExpansionDialogView', () => {
     expect(view.autoSupplementText).toBe('')
   })
 
-  it('单卷细化协同会锁定到框架并显示卷级提示', () => {
+  it('单卷细化协同在已有框架时会保留可切换能力并显示卷级提示', () => {
     expect(
       createStoryExpansionDialogView({
         currentChapterCount: 120,
@@ -169,7 +169,7 @@ describe('storyExpansionDialogView', () => {
       }),
     ).toMatchObject({
       isVolumeDetailMode: true,
-      isLockedToVolumeDetail: true,
+      isLockedToVolumeDetail: false,
       displayedTargetCharacterCount: 22,
       chapterDeltaLabel: '30-40',
       chapterDeltaChipLabel: '本卷细化章节',
@@ -636,7 +636,7 @@ describe('storyExpansionDialogView', () => {
     })
   })
 
-  it('为单卷细化协同生成锁定提示与配置块', () => {
+  it('为单卷细化协同生成可重选模式提示与配置块', () => {
     expect(
       createStoryExpansionDialogView({
         currentChapterCount: 120,
@@ -666,8 +666,8 @@ describe('storyExpansionDialogView', () => {
         },
       }),
     ).toMatchObject({
-      expansionModeHelperText: '当前项目已有长篇框架，已锁定为单卷细化协同。',
-      lockedModeAlertText: '系统检测到当前项目已有长篇框架，已自动切换到单卷细化协同模式。',
+      expansionModeHelperText: '当前项目已有长篇框架，可继续单卷细化，也可以切回长篇框架协同重新生成。',
+      lockedModeAlertText: '',
       writtenModeInfoAlertText: '单卷细化协同会直接继承现有长篇框架和正文上下文，本轮不再单独配置"已写章节处理"模式。',
       autoSupplementLabel: '允许系统自动补足本卷承接人物或桥接章节',
       configBlocks: [
@@ -709,6 +709,57 @@ describe('storyExpansionDialogView', () => {
         },
       ],
     })
+  })
+
+  it('已有框架时切回长篇框架协同会显示重生成清理提示', () => {
+    const view = createStoryExpansionDialogView({
+      currentChapterCount: 120,
+      currentCharacterCount: 18,
+      targetChapterCount: null,
+      targetCharacterCount: null,
+      expansionMode: 'epic_framework',
+      totalVolumes: 10,
+      totalChaptersMin: 600,
+      totalChaptersMax: 900,
+      frameworkMetadata: {
+        has_framework: true,
+        metadata: {
+          total_volumes: 6,
+          expanded_volumes: [1, 2],
+        },
+      },
+      targetVolumeIndex: 3,
+      volumeChaptersMin: 30,
+      volumeChaptersMax: 40,
+      volumeCharacterIncrement: null,
+      analysis: null,
+    })
+
+    expect(view).toMatchObject({
+      expansionModeHelperText: '当前项目已有长篇框架，可继续单卷细化，也可以切回长篇框架协同重新生成。',
+      lockedModeAlertText: '',
+    })
+    expect(view.configBlocks).toEqual(expect.arrayContaining([
+      {
+        kind: 'alert',
+        key: 'epic-framework-info',
+        alert: {
+          key: 'epic-framework-info',
+          severity: 'info',
+          text: '长篇框架协同会先规划故事总纲、阶段路线图、分卷框架和滚动细化策略，不会一次性直接铺满上千章细纲。',
+        },
+      },
+      {
+        kind: 'alert',
+        key: 'epic-framework-regenerate-warning',
+        alert: {
+          key: 'epic-framework-regenerate-warning',
+          severity: 'warning',
+          variant: 'outlined',
+          text: '当前项目已存在长篇框架。重新生成成功后会覆盖现有框架，并清空已展开卷的细纲，后续需要按新框架重新做单卷细化。',
+        },
+      },
+    ]))
   })
 
   it('为不同扩展模式给出稳定的不可执行提示', () => {

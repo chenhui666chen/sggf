@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import type { StoryExpansionDialogFormState } from '@/types/storyExpansionDialog'
 import {
   confirmStoryExpansionSubmitPreflight,
+  getStoryExpansionFrameworkRegenerateConfirmDialog,
+  getStoryExpansionFrameworkRegenerateConfirmMessage,
   createStoryExpansionSubmitPayload,
   createStoryExpansionSubmitPreflight,
   getStoryExpansionFrameworkResetConfirmDialog,
@@ -68,6 +70,17 @@ describe('storyExpansionSubmission', () => {
     })
   })
 
+  it('builds structured framework regenerate dialog copy for epic regeneration', () => {
+    expect(getStoryExpansionFrameworkRegenerateConfirmDialog()).toMatchObject({
+      title: '重新生成长篇框架',
+      description: '当前项目已存在长篇框架与卷细纲。继续重新生成会覆盖现有框架，并清空已展开卷的细纲。',
+      detail: '成功后将以新的分卷框架为准，原有单卷细化内容需要按新框架重新生成。',
+      confirmLabel: '继续重生成',
+      cancelLabel: '取消',
+      message: getStoryExpansionFrameworkRegenerateConfirmMessage(),
+    })
+  })
+
   it('requests overwrite confirmation for regenerating an expanded volume', () => {
     expect(
       createStoryExpansionSubmitPreflight({
@@ -127,12 +140,46 @@ describe('storyExpansionSubmission', () => {
     })
   })
 
+  it('requests framework regenerate confirmation for epic framework regeneration', () => {
+    expect(
+      createStoryExpansionSubmitPreflight({
+        content: {
+          worldSetting: 'world',
+          plotOutline: 'outline',
+          characters: 'characters',
+        },
+        currentChapterCount: 120,
+        currentCharacterCount: 18,
+        form: createBaseForm({
+          expansionMode: 'epic_framework',
+          frameworkMetadata: {
+            has_framework: true,
+            metadata: {
+              total_volumes: 6,
+              expanded_volumes: [1, 2],
+            },
+          },
+          targetChapterCount: null,
+          targetCharacterCount: null,
+          totalVolumes: 10,
+          totalChaptersMin: 600,
+          totalChaptersMax: 900,
+        }),
+      }),
+    ).toMatchObject({
+      validationError: null,
+      confirmDialogs: [
+        getStoryExpansionFrameworkRegenerateConfirmDialog(),
+      ],
+    })
+  })
+
   it('runs confirmations in order', async () => {
     const confirmMessages: string[] = []
     const result = await confirmStoryExpansionSubmitPreflight({
       confirmDialogs: [
         getStoryExpansionVolumeOverwriteConfirmDialog(2),
-        getStoryExpansionFrameworkResetConfirmDialog(),
+        getStoryExpansionFrameworkRegenerateConfirmDialog(),
       ],
     }, (confirmDialog) => {
       confirmMessages.push(confirmDialog.message)
@@ -142,7 +189,7 @@ describe('storyExpansionSubmission', () => {
     expect(result).toBe(true)
     expect(confirmMessages).toEqual([
       getStoryExpansionVolumeOverwriteConfirmMessage(2),
-      getStoryExpansionFrameworkResetConfirmMessage(),
+      getStoryExpansionFrameworkRegenerateConfirmMessage(),
     ])
   })
 
@@ -151,7 +198,7 @@ describe('storyExpansionSubmission', () => {
     const result = await confirmStoryExpansionSubmitPreflight({
       confirmDialogs: [
         getStoryExpansionVolumeOverwriteConfirmDialog(3),
-        getStoryExpansionFrameworkResetConfirmDialog(),
+        getStoryExpansionFrameworkRegenerateConfirmDialog(),
       ],
     }, (confirmDialog) => {
       confirmMessages.push(confirmDialog.message)

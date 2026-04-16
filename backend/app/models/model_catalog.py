@@ -27,8 +27,8 @@ class ModelCatalogEntry(Base):
 
     __tablename__ = "model_catalog_entries"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    model_key: Mapped[str] = mapped_column(String(120), unique=True, index=True, nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    model_key: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     provider: Mapped[str] = mapped_column(String(80), index=True, nullable=False)
     category: Mapped[str] = mapped_column(String(50), index=True, nullable=False, comment="一级分类")
@@ -94,7 +94,7 @@ class ModelCatalogSource(Base):
         UniqueConstraint("entry_id", "url", name="uq_model_catalog_sources_entry_url"),
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     entry_id: Mapped[int] = mapped_column(
         ForeignKey("model_catalog_entries.id", ondelete="CASCADE"),
         index=True,

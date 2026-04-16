@@ -16,6 +16,56 @@ from app.services.agents.outline_expander import OutlineExpander
 from app.services.story_expansion_coordinator import parse_outline_blocks
 
 
+def test_story_extract_volume_block_supports_markdown_wrapped_bracket_headings() -> None:
+    framework_content = """
+## 故事总览
+
+### 【第1卷】灰烬启程
+- 第一卷摘要
+
+### 【第2卷】迷城深潜
+- 第二卷摘要
+- 第二卷继续展开
+
+## 六、关键伏笔布局
+- 尾部约束
+""".strip()
+
+    extracted = OutlineExpander._story_extract_volume_block(framework_content, 2)
+
+    assert "【第2卷】迷城深潜" in extracted
+    assert "第二卷继续展开" in extracted
+    assert "【第1卷】灰烬启程" not in extracted
+    assert "关键伏笔布局" not in extracted
+
+
+def test_story_extract_volume_block_supports_plain_volume_headings_and_parseable_indexes() -> None:
+    framework_content = """
+## 世界观
+- 统一约束
+
+## 第1卷：霜桥初醒
+- 第一卷摘要
+
+## 第2卷：镜城暗潮
+- 第二卷摘要
+
+第3卷 终夜回廊
+- 第三卷摘要
+
+## 七、核心人物生命周期
+- 尾部约束
+""".strip()
+
+    extracted = OutlineExpander._story_extract_volume_block(framework_content, 2)
+    indexes = OutlineExpander._story_list_parseable_volume_indexes(framework_content)
+
+    assert "第2卷：镜城暗潮" in extracted
+    assert "第二卷摘要" in extracted
+    assert "第3卷 终夜回廊" not in extracted
+    assert indexes == [1, 2, 3]
+
+
 def test_story_render_outline_overview_supports_nested_novel_plan_chapters() -> None:
     payload = {
         "novel_plan": {

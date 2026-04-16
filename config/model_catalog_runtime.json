@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-04-15T02:37:49.992407+00:00",
+  "generated_at": "2026-04-16T07:55:21.111103+00:00",
   "entry_count": 1,
   "entries": {
     "demo-model": {
@@ -15,8 +15,8 @@
       "total_source_count": 1,
       "reachable_source_count": 1,
       "verified_source_count": 1,
-      "last_verified_at": "2026-04-15T02:37:49.992407",
-      "last_synced_at": "2026-04-15T02:37:49.992407",
+      "last_verified_at": "2026-04-16T07:55:21.111103",
+      "last_synced_at": "2026-04-16T07:55:21.111103",
       "capability_hints": {
         "supports_reference_images": false,
         "max_reference_images": null,
