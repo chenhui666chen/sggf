@@ -648,18 +648,50 @@ export default function AssetStudioVisionReviewPanel({
             }}
           >
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} flexWrap="wrap" useFlexGap>
-              <Chip size="small" label={`当前模型：${VISION_REVIEW_MODEL_ID}`} sx={{ color: 'white' }} variant="outlined" />
               <Chip size="small" label="图片识别 / 视频检查" sx={{ color: 'white' }} variant="outlined" />
               <Chip size="small" label="仅分析不生成" sx={{ color: 'white' }} variant="outlined" />
               <Chip size="small" label="评价 + 改词 + 修改后提示词" sx={{ color: 'white' }} variant="outlined" />
             </Stack>
             <Typography sx={{ mt: 1.25, color: 'rgba(255,255,255,0.68)', fontSize: '0.84rem', lineHeight: 1.8 }}>
-              根据模型中心当前能力，这个入口固定使用具备图像理解与视频理解能力的
-              {' '}
-              {VISION_REVIEW_MODEL_ID}
-              {' '}
-              ，避免出现“可见但不可用”的模型选项。
+              可选择使用不同的大模型进行视觉识别，每个模型在理解能力和识别效果上可能有所不同。
             </Typography>
+            
+            <FormControl fullWidth sx={{ mt: 1.5 }}>
+              <InputLabel id="vision-model-select-label" sx={{ color: 'rgba(255,255,255,0.62)' }}>
+                视觉识别模型
+              </InputLabel>
+              <Select
+                labelId="vision-model-select-label"
+                value={selectedModel}
+                label="视觉识别模型"
+                onChange={(event) => setSelectedModel(event.target.value)}
+                sx={{
+                  color: 'white',
+                  '& .MuiOutlinedInput-notchedOutline': {
+                    borderColor: 'rgba(255,255,255,0.18)',
+                  },
+                  '&:hover .MuiOutlinedInput-notchedOutline': {
+                    borderColor: 'rgba(241,183,74,0.42)',
+                  },
+                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                    borderColor: 'rgba(241,183,74,0.52)',
+                  },
+                }}
+              >
+                {VISION_MODELS.map((model) => (
+                  <MenuItem key={model.id} value={model.id} sx={{ color: 'white' }}>
+                    <Stack spacing={0.5}>
+                      <Typography sx={{ fontSize: '0.92rem', fontWeight: 600 }}>
+                        {model.name}
+                      </Typography>
+                      <Typography sx={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.58)' }}>
+                        {model.description}
+                      </Typography>
+                    </Stack>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
           </Box>
 
           <UploadPanel file={assetFile} onChange={handleFileChange} />
