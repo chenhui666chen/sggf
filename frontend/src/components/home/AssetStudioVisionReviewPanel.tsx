@@ -30,6 +30,7 @@ import type {
   AssetStudioVisionCriterionScore,
   AssetStudioVisionReviewResponse,
 } from '@/services/api'
+import type { SxProps, Theme } from '@mui/material'
 
 // 视觉理解模型列表
 const VISION_MODELS = [
@@ -38,6 +39,59 @@ const VISION_MODELS = [
 ]
 
 const DEFAULT_VISION_MODEL_ID = 'qwen3-vl-plus'
+
+// 模型选择器样式
+const VISION_SELECT_SX: SxProps<Theme> = {
+  color: 'white',
+  '& .MuiOutlinedInput-notchedOutline': {
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  '&:hover .MuiOutlinedInput-notchedOutline': {
+    borderColor: 'rgba(139,161,255,0.68)',
+  },
+  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+    borderColor: 'rgba(139,161,255,0.88)',
+  },
+  '& .MuiSvgIcon-root': {
+    color: 'rgba(255,255,255,0.76)',
+  },
+}
+
+const VISION_MENU_PAPER_SX: SxProps<Theme> = {
+  mt: 1,
+  color: 'white',
+  borderRadius: 2.5,
+  border: '1px solid rgba(255,255,255,0.12)',
+  background: 'linear-gradient(180deg, rgba(53,58,92,0.94) 0%, rgba(18,21,33,0.96) 100%)',
+  boxShadow: '0 20px 40px rgba(8,10,18,0.42)',
+  backdropFilter: 'blur(18px)',
+  '& .MuiMenuItem-root': {
+    minHeight: 48,
+    color: 'rgba(255,255,255,0.92)',
+    transition: 'background-color 0.18s ease, color 0.18s ease',
+  },
+  '& .MuiMenuItem-root:hover': {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  '& .MuiMenuItem-root.Mui-selected': {
+    backgroundColor: 'rgba(126,146,255,0.22)',
+  },
+  '& .MuiMenuItem-root.Mui-selected:hover': {
+    backgroundColor: 'rgba(126,146,255,0.28)',
+  },
+}
+
+const VISION_MENU_PROPS = {
+  PaperProps: {
+    elevation: 0,
+    sx: VISION_MENU_PAPER_SX,
+  },
+  MenuListProps: {
+    sx: {
+      py: 0.5,
+    },
+  },
+}
 
 export interface AssetStudioVisionReusePayload {
   target: 'image' | 'video'
@@ -665,26 +719,16 @@ export default function AssetStudioVisionReviewPanel({
                 value={selectedModel}
                 label="视觉识别模型"
                 onChange={(event) => setSelectedModel(event.target.value)}
-                sx={{
-                  color: 'white',
-                  '& .MuiOutlinedInput-notchedOutline': {
-                    borderColor: 'rgba(255,255,255,0.18)',
-                  },
-                  '&:hover .MuiOutlinedInput-notchedOutline': {
-                    borderColor: 'rgba(241,183,74,0.42)',
-                  },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                    borderColor: 'rgba(241,183,74,0.52)',
-                  },
-                }}
+                sx={VISION_SELECT_SX}
+                MenuProps={VISION_MENU_PROPS}
               >
                 {VISION_MODELS.map((model) => (
-                  <MenuItem key={model.id} value={model.id} sx={{ color: 'white' }}>
+                  <MenuItem key={model.id} value={model.id}>
                     <Stack spacing={0.5}>
-                      <Typography sx={{ fontSize: '0.92rem', fontWeight: 600 }}>
+                      <Typography sx={{ fontSize: '0.95rem', fontWeight: 600 }}>
                         {model.name}
                       </Typography>
-                      <Typography sx={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.58)' }}>
+                      <Typography sx={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.62)', lineHeight: 1.4 }}>
                         {model.description}
                       </Typography>
                     </Stack>
