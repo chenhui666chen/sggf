@@ -132,6 +132,32 @@ import type {
   TaskStatus,
   VideoDiagnostics,
 } from '@/types/dreamweaver'
+import {
+  resolvePendingPromptReviewShotState,
+  resolvePendingPromptReviewState,
+  resolvePendingRunningState,
+  resolvePendingScriptApprovalState,
+  resolvePendingVideoConfirmationJobState,
+  resolvePendingVideoConfirmationState,
+  resolvePendingViewMode,
+} from './dreamweaver-run/pendingViewState'
+import { PendingPromptReviewShotItem, PendingVideoConfirmationJobItem } from './dreamweaver-run/pendingListItems'
+import {
+  PendingEmptyState,
+  PendingLibraryNotice,
+  PendingLibraryReadyShell,
+  PendingLibraryReviewShell,
+  PendingPromptReviewView,
+  PendingRunningShell,
+  PendingScriptApprovalShell,
+  PendingVideoConfirmationView,
+} from './dreamweaver-run/pendingViews'
+import {
+  RunSnapshotAssetPreviewSection,
+  RunSnapshotMergedVideoSection,
+  RunSnapshotPreviewPane,
+  RunSnapshotShotList,
+} from './dreamweaver-run/runSnapshotPreviewPane'
 const DREAMWEAVER_PREVIEW_STEPS = ['剧本', '分镜', '素材', '镜头', '合成'] as const
 type LibraryGroupSummary = {
   total: number
@@ -4869,104 +4895,59 @@ export default function DreamWeaverRunPage() {
     )
   }
 
-  const renderSnapshotShotList = (emptyText: string) => {
-    if (previewStep !== 1 || runSnapshotLoading) return null
-    return (
-      <Box sx={{ mb: 1 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-          镜头列表
-        </Typography>
-        {snapshotShots.length ? (
-          <List dense sx={{ bgcolor: '#fff', border: '1px solid #eee', borderRadius: 2 }}>
-            {renderShotPromptSnapshotItems()}
-          </List>
-        ) : (
-          <Typography variant="body2" color="text.secondary">
-            {emptyText}
-          </Typography>
-        )}
-      </Box>
-    )
-  }
-
-  const renderSnapshotAssetPreviewSummaryChips = () => (
-    <Stack direction="row" spacing={1} flexWrap="wrap" mb={0.5}>
-      <Chip size="small" label={`镜头: ${snapshotShots.length}`} />
-      <Chip size="small" label={`资产: ${snapshotAssetCount}`} />
-      <Chip size="small" label={`KF: ${snapshotAssetSummary.keyframes.length}`} />
-      <Chip size="small" label={`MF: ${snapshotAssetSummary.midframes.length}`} />
-      <Chip size="small" label={`VC: ${snapshotAssetSummary.videoClips.length}`} />
-    </Stack>
-  )
-
-  const renderSnapshotAssetPreviewPaths = (tailVideoClipPaths: string[]) => {
+  const buildSnapshotAssetPreviewPathSummary = (tailVideoClipPaths: string[]) => {
     const keyframePaths = formatPaths(snapshotAssetSummary.keyframes.slice(-3))
     const midframePaths = formatPaths(snapshotAssetSummary.midframes.slice(-3))
     const videoClipPaths = formatPaths(tailVideoClipPaths)
 
     if (!keyframePaths && !midframePaths && !videoClipPaths) return null
 
+    return `快照路径：${keyframePaths ? `KF ${keyframePaths}` : ''}${midframePaths ? `  MF ${midframePaths}` : ''}${
+      videoClipPaths ? `  VC ${videoClipPaths}` : ''
+    }`
+  }
+
+  const renderSnapshotShotList = (emptyText: string) => {
     return (
-      <Typography variant="caption" color="text.secondary" display="block">
-        快照路径：
-        {keyframePaths ? `KF ${keyframePaths}` : ''}
-        {midframePaths ? `  MF ${midframePaths}` : ''}
-        {videoClipPaths ? `  VC ${videoClipPaths}` : ''}
-      </Typography>
+      <RunSnapshotShotList
+        visible={previewStep === 1 && !runSnapshotLoading}
+        title="镜头列表"
+        emptyText={emptyText}
+        hasShots={snapshotShots.length > 0}
+        shotItems={<List dense sx={{ bgcolor: '#fff', border: '1px solid #eee', borderRadius: 2 }}>{renderShotPromptSnapshotItems()}</List>}
+      />
     )
   }
 
   const renderSnapshotAssetPreviewSection = () => {
-    if (previewStep !== 3 || runSnapshotLoading || snapshotShots.length === 0) return null
     const tailVideoClipPaths = snapshotAssetSummary.videoClips.slice(-3).map((v) => v.path)
+
     return (
-      <Box sx={{ mb: 1 }}>
-        {renderSnapshotAssetPreviewSummaryChips()}
-        {renderSnapshotAssetPreviewPaths(tailVideoClipPaths)}
-        {renderRunAssetPreviewGrid('关键帧（快照）', snapshotAssetSummary.keyframes.slice(-6), 'image')}
-        {renderRunAssetPreviewGrid('中间帧（快照）', snapshotAssetSummary.midframes.slice(-6), 'image')}
-        {renderRunAssetPreviewGrid('镜头片段（快照）', tailVideoClipPaths, 'video')}
-      </Box>
+      <RunSnapshotAssetPreviewSection
+        visible={previewStep === 3 && !runSnapshotLoading && snapshotShots.length > 0}
+        shotCount={snapshotShots.length}
+        assetCount={snapshotAssetCount}
+        keyframeCount={snapshotAssetSummary.keyframes.length}
+        midframeCount={snapshotAssetSummary.midframes.length}
+        videoClipCount={snapshotAssetSummary.videoClips.length}
+        pathSummary={buildSnapshotAssetPreviewPathSummary(tailVideoClipPaths)}
+        keyframeGrid={renderRunAssetPreviewGrid('关键帧（快照）', snapshotAssetSummary.keyframes.slice(-6), 'image')}
+        midframeGrid={renderRunAssetPreviewGrid('中间帧（快照）', snapshotAssetSummary.midframes.slice(-6), 'image')}
+        videoClipGrid={renderRunAssetPreviewGrid('镜头片段（快照）', tailVideoClipPaths, 'video')}
+      />
     )
   }
 
   const renderSnapshotMergedVideoSection = () => {
-    if (previewStep !== 4 || runSnapshotLoading) return null
     return (
-      <Box sx={{ mb: 1 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-          合成视频（快照）
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          {snapshotMergedVideo ? `合成视频：${snapshotMergedVideo}` : '暂无合成视频快照'}
-        </Typography>
-        {snapshotMergedVideo && renderMergedVideoPanel()}
-      </Box>
+      <RunSnapshotMergedVideoSection
+        visible={previewStep === 4 && !runSnapshotLoading}
+        title="合成视频（快照）"
+        description={snapshotMergedVideo ? `合成视频：${snapshotMergedVideo}` : '暂无合成视频快照'}
+        panel={snapshotMergedVideo ? renderMergedVideoPanel() : null}
+      />
     )
   }
-
-  const renderRunSnapshotPreviewAlerts = (includeWsError: boolean) => (
-    <>
-      {renderRunSnapshotErrorAlert('mb', 1)}
-      {includeWsError && wsError && (
-        <Alert severity="warning" sx={{ mb: 1 }} onClose={() => setWsError(null)}>
-          {wsError}
-        </Alert>
-      )}
-      {renderRunSnapshotLoadingBar('mb', 1)}
-    </>
-  )
-
-  const renderRunSnapshotPreviewSections = (shotEmptyText: string, includeStreamingPreview: boolean) => (
-    <>
-      {renderSafetyBlockedAlert()}
-      {includeStreamingPreview && renderStreamingPreview(previewStep)}
-      {previewStep === 0 && !runSnapshotLoading && renderScriptStageSnapshot()}
-      {renderSnapshotShotList(shotEmptyText)}
-      {renderSnapshotAssetPreviewSection()}
-      {renderSnapshotMergedVideoSection()}
-    </>
-  )
 
   const renderRunSnapshotPreviewPane = ({
     refreshLabel = '刷新运行快照',
@@ -4979,11 +4960,24 @@ export default function DreamWeaverRunPage() {
     includeStreamingPreview?: boolean
     includeWsError?: boolean
   }) => (
-    <>
-      {renderRunSnapshotRefreshControls(refreshLabel)}
-      {renderRunSnapshotPreviewAlerts(includeWsError)}
-      {renderRunSnapshotPreviewSections(shotEmptyText, includeStreamingPreview)}
-    </>
+    <RunSnapshotPreviewPane
+      refreshControls={renderRunSnapshotRefreshControls(refreshLabel)}
+      errorAlert={renderRunSnapshotErrorAlert('mb', 1)}
+      wsWarning={
+        includeWsError && wsError ? (
+          <Alert severity="warning" sx={{ mb: 1 }} onClose={() => setWsError(null)}>
+            {wsError}
+          </Alert>
+        ) : null
+      }
+      loadingBar={renderRunSnapshotLoadingBar('mb', 1)}
+      safetyBlockedAlert={renderSafetyBlockedAlert()}
+      streamingPreview={includeStreamingPreview ? renderStreamingPreview(previewStep) : null}
+      scriptStageSnapshot={previewStep === 0 && !runSnapshotLoading ? renderScriptStageSnapshot() : null}
+      shotList={renderSnapshotShotList(shotEmptyText)}
+      assetPreview={renderSnapshotAssetPreviewSection()}
+      mergedVideo={renderSnapshotMergedVideoSection()}
+    />
   )
 
   const renderRunSnapshotRefreshButton = (label = '刷新运行快照') => (
@@ -6095,139 +6089,31 @@ export default function DreamWeaverRunPage() {
     </>
   )
 
-  const renderPendingRunningView = () => (
-    <Box>
-      {taskStatus === 'queued' && (
-        <Alert severity="info" sx={{ mb: 1 }}>
-          任务已入队排队中{taskQueue ? `（队列：${taskQueue}）` : ''}。若长期无进度，请确认 Celery worker 正在运行并监听该队列。
-        </Alert>
-      )}
-      {renderPendingRunningStageHint()}
-
-      {renderRunSnapshotPreviewPane({
-        shotEmptyText: '尚无可用分镜快照（可能仍在生成，或尚未落库）。',
-        includeStreamingPreview: true,
-        includeWsError: true,
-      })}
-      {renderPendingRunningArtifactsSummary()}
-      {renderPendingRunningArtifactDetails()}
-      <Typography variant="body2" color="text.secondary">
-        任务执行中，完成后将自动展示分镜/首尾帧/视频产物。
-      </Typography>
-      {renderDebugAccordion({
-        title: '调试面板（Artifacts）',
-        value: taskArtifacts,
-        marginTop: 1,
-      })}
-    </Box>
-  )
-
-  const renderPendingScriptApprovalStatusChips = () => (
-    <Stack direction="row" spacing={1} flexWrap="wrap" mb={1} alignItems="center">
-      {scriptGenerationLabel && <Chip label={`剧本生成: ${scriptGenerationLabel}`} size="small" />}
-      {scriptDirty && <Chip label="未保存" size="small" color="warning" />}
-    </Stack>
-  )
-
-  const renderPendingScriptApprovalPrimaryAlert = () => {
-    if (scriptRequiresReview) {
-      return scriptApproved ? (
-        <Alert severity="success" sx={{ mb: 1 }}>
-          剧本已通过：现在可以点击“继续生成”进入分镜与素材库阶段。
-        </Alert>
-      ) : (
-        <Alert severity="warning" sx={{ mb: 1 }}>
-          剧本待审核：请先加载/编辑剧本并点击“通过”，通过后再继续生成分镜与素材库。
-        </Alert>
-      )
-    }
+  const renderPendingRunningView = () => {
+    const state = resolvePendingRunningState({
+      taskStatus,
+      taskQueue,
+    })
 
     return (
-      <Alert severity="info" sx={{ mb: 1 }}>
-        当前配置无需剧本审核：可直接点击“继续生成”进入分镜与素材库阶段。
-      </Alert>
+      <PendingRunningShell
+        state={state}
+        stageHint={renderPendingRunningStageHint()}
+        snapshotPreview={renderRunSnapshotPreviewPane({
+          shotEmptyText: state.snapshotShotEmptyText,
+          includeStreamingPreview: true,
+          includeWsError: true,
+        })}
+        artifactsSummary={renderPendingRunningArtifactsSummary()}
+        artifactDetails={renderPendingRunningArtifactDetails()}
+        debugPanel={renderDebugAccordion({
+          title: '调试面板（Artifacts）',
+          value: taskArtifacts,
+          marginTop: 1,
+        })}
+      />
     )
   }
-
-  const renderPendingScriptApprovalDirtyAlert = () => {
-    if (!scriptDirty) return null
-
-    return (
-      <Alert severity="info" sx={{ mb: 1 }}>
-        剧本已修改但未保存：请先点击“保存”，再点击“通过”。
-      </Alert>
-    )
-  }
-
-  const renderPendingScriptApprovalFallbackAlert = () => {
-    if (scriptGeneration?.mode !== 'rule_fallback' || !scriptGeneration?.error) return null
-
-    return (
-      <Alert severity="info" sx={{ mb: 1 }}>
-        LLM 调用失败，已回退为规则剧本：{scriptGeneration.error}
-        <br />
-        建议检查 `.env` 的 `DASHSCOPE_API_KEY` / `DASHSCOPE_API_BASE` 以及 `DREAMWEAVER_*_MODEL`（如 `qwen-plus`），并重启后端与 Celery worker。
-      </Alert>
-    )
-  }
-
-  const renderPendingScriptApprovalAlerts = () => (
-    <>
-      {renderPendingScriptApprovalPrimaryAlert()}
-      {renderPendingScriptApprovalDirtyAlert()}
-      {renderPendingScriptApprovalFallbackAlert()}
-    </>
-  )
-
-  const renderPendingScriptApprovalActions = () => (
-    <Stack direction="row" spacing={1} flexWrap="wrap" mb={1}>
-      <Button size="small" variant="contained" onClick={loadScript} disabled={!currentRunId || scriptLoading}>
-        加载剧本
-      </Button>
-      <Button
-        size="small"
-        variant="outlined"
-        onClick={saveScript}
-        disabled={!currentRunId || scriptLoading || !scriptDirty || !scriptText.trim()}
-      >
-        保存
-      </Button>
-      <Button
-        size="small"
-        variant="contained"
-        color="success"
-        onClick={() => approveScript(true)}
-        disabled={!currentRunId || scriptLoading || scriptDirty || !scriptText.trim()}
-      >
-        通过
-      </Button>
-      <Button
-        size="small"
-        variant="text"
-        onClick={() => approveScript(false)}
-        disabled={!currentRunId || scriptLoading || !scriptApproved}
-      >
-        撤销通过
-      </Button>
-      <Button
-        size="small"
-        variant="contained"
-        color="success"
-        onClick={resumeGeneration}
-        disabled={!canResumeFromScript}
-      >
-        {resumeLoading ? '继续生成中…' : '继续生成'}
-      </Button>
-    </Stack>
-  )
-
-  const renderPendingScriptApprovalSummary = () => (
-    <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-      审核状态：{scriptRequiresReview ? (scriptApproved ? '已通过' : '待审核') : '无需审核'}
-      {scriptGenerationLabel ? `  生成：${scriptGenerationLabel}` : ''}
-      {scriptEntities ? `  实体：${summarizeScriptEntities(scriptEntities)}` : ''}
-    </Typography>
-  )
 
   const renderPendingScriptApprovalEditor = () => (
     <TextField
@@ -6243,283 +6129,141 @@ export default function DreamWeaverRunPage() {
     />
   )
 
-  const renderPendingScriptApprovalRuntimeStatus = () => (
-    <>
-      {scriptError && (
-        <Alert severity="error" sx={{ mb: 1 }}>
-          {scriptError}
-        </Alert>
-      )}
-      {scriptLoading && <LinearProgress sx={{ mb: 1 }} />}
-    </>
-  )
+  const renderPendingScriptApprovalView = () => {
+    const state = resolvePendingScriptApprovalState({
+      scriptText,
+      scriptGenerationLabel: scriptGenerationLabel || '',
+      scriptGenerationMode: scriptGeneration?.mode,
+      scriptGenerationError: scriptGeneration?.error,
+      scriptRequiresReview,
+      scriptApproved,
+      scriptDirty,
+      currentRunId,
+      scriptLoading,
+      canResumeFromScript,
+      resumeLoading,
+      scriptError,
+      entitySummary: scriptEntities ? summarizeScriptEntities(scriptEntities) : '',
+    })
 
-  const renderPendingScriptApprovalView = () => (
-    <Box>
-      {renderPendingScriptApprovalStatusChips()}
-      {renderPendingScriptApprovalAlerts()}
-      {renderPendingScriptApprovalActions()}
-      {renderPendingScriptApprovalRuntimeStatus()}
-      {renderPendingScriptApprovalSummary()}
-      {renderPendingScriptApprovalEditor()}
-
-      {renderDebugAccordion({
-        title: '调试面板（Artifacts）',
-        value: taskArtifacts,
-        marginTop: 1,
-      })}
-    </Box>
-  )
-
-  const truncatePendingPromptText = (value: string, ellipsis = '...') =>
-    value.length > 120 ? `${value.slice(0, 120)}${ellipsis}` : value
+    return (
+      <PendingScriptApprovalShell
+        state={state}
+        onLoadScript={loadScript}
+        onSaveScript={saveScript}
+        onApproveScript={() => approveScript(true)}
+        onRevokeScript={() => approveScript(false)}
+        onResume={resumeGeneration}
+        editor={renderPendingScriptApprovalEditor()}
+        debugPanel={renderDebugAccordion({
+          title: '调试面板（Artifacts）',
+          value: taskArtifacts,
+          marginTop: 1,
+        })}
+      />
+    )
+  }
 
   const renderPendingVideoConfirmationJobItem = (job: DreamweaverVideoClipJob, idx: number) => {
     const sid = String(job.shot_id || '').trim()
     const desc = String(job.desc || '').trim()
-    const status = String(job.status || '').trim().toLowerCase()
-    const confirmed = Boolean(job.confirmed)
-    const requiresBridge = Boolean(job.requires_bridge)
     const dep = String(job.depends_on_shot_id || '').trim()
-    const shot = sid ? snapshotShotById.get(sid) : null
+    const shot = sid ? snapshotShotById.get(sid) ?? null : null
     const headPrompt = getShotFramePrompt(shot?.head_frame)
     const tailPrompt = getShotFramePrompt(shot?.tail_frame)
     const overridePrompt = getShotVideoPromptOverride(shot)
-    const hasPrompt = Boolean(headPrompt || tailPrompt || overridePrompt)
-    const statusLabel =
-      status === 'done' ? '已生成' : status === 'blocked' ? '依赖未就绪' : status === 'confirmed' ? '已确认' : '待确认'
-    const confirming = videoJobConfirmingShotId === sid
-    const disabled = !sid || running || confirming || status === 'done'
-    const actionLabel = status === 'done'
-      ? '已生成'
-      : confirming
-        ? '处理中…'
-        : confirmed
-          ? '开始生成'
-          : requiresBridge
-            ? '确认（桥接）'
-            : '确认生成'
+    const state = resolvePendingVideoConfirmationJobState({
+      shotId: sid,
+      desc,
+      status: String(job.status || '').trim(),
+      confirmed: Boolean(job.confirmed),
+      requiresBridge: Boolean(job.requires_bridge),
+      bridgeDependency: dep,
+      hasPrompt: Boolean(headPrompt || tailPrompt || overridePrompt),
+      headPrompt,
+      tailPrompt,
+      overridePrompt,
+      running,
+      videoJobConfirmingShotId,
+      hasShot: Boolean(shot),
+    })
 
     return (
-      <ListItem
-        key={sid || String(idx)}
-        disableGutters
-        sx={{ px: 1, py: 0.75, borderBottom: '1px solid #f0f0f0', alignItems: 'flex-start' }}
-      >
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
-            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-              {sid || '(unknown)'}
-            </Typography>
-            <Chip size="small" label={statusLabel} color={status === 'done' ? 'success' : status === 'blocked' ? 'warning' : 'default'} />
-            {confirmed && status !== 'done' && <Chip size="small" label="已确认" color="primary" />}
-            {requiresBridge && <Chip size="small" label={`桥接依赖: ${dep || '-'}`} />}
-          </Stack>
-          {desc && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
-              {desc}
-            </Typography>
-          )}
-          {hasPrompt ? (
-            <Box sx={{ mt: 0.5 }}>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ whiteSpace: 'pre-wrap' }}>
-                首帧: {headPrompt ? truncatePendingPromptText(headPrompt, '…') : '-'}
-              </Typography>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ whiteSpace: 'pre-wrap' }}>
-                尾帧: {tailPrompt ? truncatePendingPromptText(tailPrompt, '…') : '-'}
-              </Typography>
-              {overridePrompt && (
-                <Typography variant="caption" color="text.secondary" display="block" sx={{ whiteSpace: 'pre-wrap' }}>
-                  视频覆盖: {truncatePendingPromptText(overridePrompt, '…')}
-                </Typography>
-              )}
-            </Box>
-          ) : (
-            <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
-              暂无提示词快照
-            </Typography>
-          )}
-        </Box>
-
-        <Box sx={{ pl: 1 }}>
-          <Stack spacing={0.5} alignItems="flex-end">
-            <Button size="small" variant="contained" onClick={() => confirmVideoJob(sid)} disabled={disabled}>
-              {actionLabel}
-            </Button>
-            <Button size="small" variant="outlined" onClick={() => shot && openPromptEditDialog(shot)} disabled={!shot}>
-              查看提示词
-            </Button>
-          </Stack>
-        </Box>
-      </ListItem>
+      <PendingVideoConfirmationJobItem
+        itemKey={sid || String(idx)}
+        shot={shot}
+        state={state}
+        onConfirm={confirmVideoJob}
+        onEditPrompt={openPromptEditDialog}
+      />
     )
   }
 
   const renderPendingPromptReviewShotItem = (shot: DreamweaverShotSnapshot, idx: number) => {
     const shotId = getShotId(shot)
-    const headPrompt = getShotFramePrompt(shot.head_frame)
-    const tailPrompt = getShotFramePrompt(shot.tail_frame)
-    const overridePrompt = getShotVideoPromptOverride(shot)
-    const title = getShotDesc(shot)
+    const state = resolvePendingPromptReviewShotState({
+      shotId,
+      title: getShotDesc(shot),
+      shotIndex: shot.shot_index ?? idx + 1,
+      headPrompt: getShotFramePrompt(shot.head_frame),
+      tailPrompt: getShotFramePrompt(shot.tail_frame),
+      overridePrompt: getShotVideoPromptOverride(shot),
+    })
 
     return (
-      <ListItem
-        key={shotId || String(idx)}
-        disableGutters
-        sx={{ px: 1, py: 0.75, borderBottom: '1px solid #f0f0f0', alignItems: 'flex-start' }}
-      >
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
-            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-              #{shot.shot_index ?? idx + 1} {title}
-            </Typography>
-            {shotId && <Chip size="small" label={shotId} variant="outlined" />}
-            {overridePrompt && <Chip size="small" label="视频已覆盖" color="info" />}
-          </Stack>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
-            首帧: {headPrompt ? truncatePendingPromptText(headPrompt) : '-'}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, whiteSpace: 'pre-wrap' }}>
-            尾帧: {tailPrompt ? truncatePendingPromptText(tailPrompt) : '-'}
-          </Typography>
-        </Box>
-        <Box sx={{ pl: 1 }}>
-          <Button size="small" variant="outlined" onClick={() => openPromptEditDialog(shot)}>
-            编辑提示词
-          </Button>
-        </Box>
-      </ListItem>
+      <PendingPromptReviewShotItem
+        itemKey={shotId || String(idx)}
+        shot={shot}
+        state={state}
+        onEditPrompt={openPromptEditDialog}
+      />
     )
   }
 
-  const renderPendingVideoConfirmationView = () => (
-    <Box>
-      {renderPendingVideoConfirmationIntroAlert()}
-      {renderPendingVideoConfirmationRuntimeStatus()}
-      {renderPendingVideoConfirmationActions()}
-      {renderPendingVideoConfirmationList()}
-    </Box>
-  )
-
-  const renderPendingVideoConfirmationIntroAlert = () => (
-    <Alert severity="info" sx={{ mb: 1 }}>
-      当前阶段启用“逐镜头确认生成”：点击卡片右侧按钮确认/触发生成；若镜头需要“上一镜头尾帧→本镜头首帧”桥接，依赖未就绪时会保持阻塞。
-    </Alert>
-  )
-
-  const renderPendingVideoConfirmationRuntimeStatus = () => {
-    if (!videoJobActionError) return null
+  const renderPendingVideoConfirmationView = () => {
+    const state = resolvePendingVideoConfirmationState({
+      videoJobActionError,
+      persistedRunId,
+      runSnapshotLoading,
+      videoClipJobCount: videoClipJobs.length,
+    })
 
     return (
-      <Alert severity="error" sx={{ mb: 1 }}>
-        {videoJobActionError}
-      </Alert>
+      <PendingVideoConfirmationView
+        state={state}
+        jobItems={videoClipJobs.map(renderPendingVideoConfirmationJobItem)}
+        onRefresh={rebuildVideoJobs}
+      />
     )
   }
 
-  const renderPendingVideoConfirmationActions = () => (
-    <Stack direction="row" spacing={1} flexWrap="wrap" mb={1}>
-      <Button size="small" variant="outlined" onClick={rebuildVideoJobs} disabled={!persistedRunId || runSnapshotLoading}>
-        {runSnapshotLoading ? '刷新中…' : '刷新任务卡'}
-      </Button>
-    </Stack>
-  )
-
-  const renderPendingVideoConfirmationList = () => {
-    if (!videoClipJobs.length) {
-      return <Alert severity="warning">未找到视频任务卡（video_clip_jobs）。可点击“刷新任务卡”或重试生成到 VIDEO 阶段。</Alert>
-    }
-
-    return (
-      <List dense sx={{ bgcolor: '#fff', border: '1px solid #eee', borderRadius: 2 }}>
-        {videoClipJobs.map(renderPendingVideoConfirmationJobItem)}
-      </List>
-    )
-  }
-
-  const renderPendingPromptReviewView = () => (
-    <Box>
-      {renderPendingPromptReviewStatusAlert()}
-      {renderPendingPromptReviewActions()}
-      {renderPendingPromptReviewRuntimeStatus()}
-      {renderPendingPromptReviewList()}
-      {renderPendingPromptReviewListToggle()}
-    </Box>
-  )
-
-  const renderPendingPromptReviewStatusAlert = () => (
-    <Alert severity={promptReviewApproved ? 'success' : 'warning'} sx={{ mb: 1 }}>
-      {promptReviewApproved
-        ? libraryApproved
-          ? '提示词已确认、素材库已通过：可继续生成进入镜头阶段。'
-          : '提示词已确认，但素材库仍待审核。'
-        : '提示词待确认：请逐镜检查并修改，确认后再继续生成。'}
-    </Alert>
-  )
-
-  const renderPendingPromptReviewActions = () => (
-    <Stack direction="row" spacing={1} flexWrap="wrap" mb={1} alignItems="center">
-      <Button size="small" variant="outlined" onClick={loadRunSnapshot} disabled={!persistedRunId || runSnapshotLoading}>
-        {runSnapshotLoading ? '刷新中…' : '刷新快照'}
-      </Button>
-      <Button
-        size="small"
-        variant="contained"
-        color="success"
-        onClick={() => approvePromptReview(true)}
-        disabled={!currentRunId || promptReviewLoading}
-      >
-        {promptReviewLoading ? '确认中…' : '确认提示词'}
-      </Button>
-      <Button
-        size="small"
-        variant="text"
-        onClick={() => approvePromptReview(false)}
-        disabled={!currentRunId || promptReviewLoading || !promptReviewApproved}
-      >
-        撤销确认
-      </Button>
-      <Button size="small" variant="contained" color="success" onClick={resumeGeneration} disabled={!canResumeFromLibrary}>
-        {resumeLoading ? '继续生成中…' : '继续生成'}
-      </Button>
-    </Stack>
-  )
-
-  const renderPendingPromptReviewRuntimeStatus = () => {
-    if (!promptReviewError) return null
+  const renderPendingPromptReviewView = () => {
+    const state = resolvePendingPromptReviewState({
+      promptReviewApproved,
+      libraryApproved,
+      persistedRunId,
+      runSnapshotLoading,
+      currentRunId,
+      promptReviewLoading,
+      canResumeFromLibrary,
+      resumeLoading,
+      promptReviewError,
+      promptReviewShotCount: promptReviewShots.length,
+      snapshotShotCount: snapshotShots.length,
+      promptReviewShowAll,
+    })
 
     return (
-      <Alert severity="error" sx={{ mb: 1 }}>
-        {promptReviewError}
-      </Alert>
-    )
-  }
-
-  const renderPendingPromptReviewList = () => {
-    if (!promptReviewShots.length) {
-      return (
-        <Typography variant="body2" color="text.secondary">
-          暂无可用镜头提示词快照（可能仍在生成或尚未落库）。
-        </Typography>
-      )
-    }
-
-    return (
-      <List dense sx={{ bgcolor: '#fff', border: '1px solid #eee', borderRadius: 2 }}>
-        {promptReviewShots.map(renderPendingPromptReviewShotItem)}
-      </List>
-    )
-  }
-
-  const renderPendingPromptReviewListToggle = () => {
-    if (snapshotShots.length <= 12) return null
-
-    return (
-      <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mt: 1 }}>
-        <Button size="small" variant="text" onClick={() => setPromptReviewShowAll((prev) => !prev)}>
-          {promptReviewShowAll ? '收起列表' : `显示全部(${snapshotShots.length})`}
-        </Button>
-      </Stack>
+      <PendingPromptReviewView
+        state={state}
+        shotItems={promptReviewShots.map(renderPendingPromptReviewShotItem)}
+        revokeLabel="撤销确认"
+        onRefresh={loadRunSnapshot}
+        onApprove={() => approvePromptReview(true)}
+        onRevoke={() => approvePromptReview(false)}
+        onResume={resumeGeneration}
+        onToggleShowAll={() => setPromptReviewShowAll((prev) => !prev)}
+      />
     )
   }
 
@@ -6698,66 +6442,80 @@ export default function DreamWeaverRunPage() {
   }
 
   const renderPendingLibraryReviewView = () => (
-    <Box>
-      <Alert severity={libraryApproved && promptReviewReady ? 'success' : 'warning'} sx={{ mb: 1 }}>
-        {libraryPromptReviewMessage}
-      </Alert>
-
-      {renderPendingLibraryControls()}
-
-      {libraryError && (
-        <Alert severity="error" sx={{ mb: 1 }}>
-          {libraryError}
-        </Alert>
-      )}
-
-      {libraryLoading && <LinearProgress sx={{ mb: 1 }} />}
-
-      {renderPendingLibraryReviewStatus()}
-      {renderPendingLibrarySummarySection()}
-
-      {renderDebugAccordion({
+    <PendingLibraryReviewShell
+      notice={
+        <PendingLibraryNotice
+          severity={libraryApproved && promptReviewReady ? 'success' : 'warning'}
+          message={libraryPromptReviewMessage}
+        />
+      }
+      controls={renderPendingLibraryControls()}
+      runtimeStatus={
+        <>
+          {libraryError && (
+            <Alert severity="error" sx={{ mb: 1 }}>
+              {libraryError}
+            </Alert>
+          )}
+          {libraryLoading && <LinearProgress sx={{ mb: 1 }} />}
+          {renderPendingLibraryReviewStatus()}
+        </>
+      }
+      summarySection={renderPendingLibrarySummarySection()}
+      debugPanel={renderDebugAccordion({
         title: '调试面板（Artifacts）',
         value: taskArtifacts,
         marginTop: 1,
       })}
-    </Box>
+    />
   )
 
   const renderPendingLibraryReadyView = () => (
-    <Box>
-      <Alert
-        severity={libraryApproved && promptReviewReady ? 'success' : 'info'}
-        sx={{ mb: 1 }}
-        action={renderPendingLibraryReadyActions()}
-      >
-        {libraryPromptReviewMessage}
-      </Alert>
-
-      {renderRunSnapshotPreviewPane({
+    <PendingLibraryReadyShell
+      notice={
+        <PendingLibraryNotice
+          severity={libraryApproved && promptReviewReady ? 'success' : 'info'}
+          message={libraryPromptReviewMessage}
+          action={renderPendingLibraryReadyActions()}
+        />
+      }
+      snapshotPreview={renderRunSnapshotPreviewPane({
         shotEmptyText: '尚无可用分镜快照（可能尚未落库）。',
       })}
-    </Box>
+    />
   )
 
   const renderPendingEmptyState = () => (
-    <Typography variant="body2" color="text.secondary">
-      点击“开始生成”后，这里会展示「{DREAMWEAVER_PREVIEW_STEPS[previewStep]}」相关产物与进度。
-    </Typography>
+    <PendingEmptyState description={`点击“开始生成”后，这里会展示「${DREAMWEAVER_PREVIEW_STEPS[previewStep]}」相关产物与进度。`} />
   )
 
   const renderPendingView = () => {
-    if (running) return renderPendingRunningView()
-    if (waitingScriptApproval && previewStep === 0) return renderPendingScriptApprovalView()
-    if (waitingVideoConfirmation && previewStep === 3) return renderPendingVideoConfirmationView()
-    if (promptReviewRequiredSnapshot && previewStep === 1) return renderPendingPromptReviewView()
+    const mode = resolvePendingViewMode({
+      running,
+      waitingScriptApproval,
+      waitingVideoConfirmation,
+      promptReviewRequiredSnapshot,
+      previewStep,
+      currentRunId,
+    })
 
-    if (currentRunId) {
-      if (previewStep === 2) return renderPendingLibraryReviewView()
-      return renderPendingLibraryReadyView()
+    switch (mode) {
+      case 'running':
+        return renderPendingRunningView()
+      case 'script_approval':
+        return renderPendingScriptApprovalView()
+      case 'video_confirmation':
+        return renderPendingVideoConfirmationView()
+      case 'prompt_review':
+        return renderPendingPromptReviewView()
+      case 'library_review':
+        return renderPendingLibraryReviewView()
+      case 'library_ready':
+        return renderPendingLibraryReadyView()
+      case 'empty':
+      default:
+        return renderPendingEmptyState()
     }
-
-    return renderPendingEmptyState()
   }
 
   const closeDiagnosticDialog = () => {
