@@ -7,30 +7,23 @@ import {
   AccordionSummary,
   Box,
   Button,
-  Card,
-  CardContent,
   Chip,
-  Container,
   Divider,
-  Grid,
   ImageList,
   LinearProgress,
   List,
   ListItem,
   ListItemText,
-  MenuItem,
   Stack,
   Typography,
   useMediaQuery,
 } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import HistoryIcon from '@mui/icons-material/History'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import BugReportIcon from '@mui/icons-material/BugReport'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import {
   apiClient,
   describeTaskPointsPrecheckErrorDetail,
@@ -39,7 +32,6 @@ import {
   type TaskPointsPrecheckErrorDetail,
 } from '@/services/api'
 import { workflowWebSocket } from '@/services/websocket'
-import FormattedContent from '@/components/common/FormattedContent'
 import TaskPointsPrecheckAlert from '@/components/common/TaskPointsPrecheckAlert'
 import {
   CHARACTER_VIEW_ORDER,
@@ -58,6 +50,10 @@ import {
   IMAGE_RATIOS_LABELS,
   IMAGE_RESOLUTIONS,
   IMAGE_RESOLUTIONS_LABELS,
+  IMAGE_MODEL_OPTIONS,
+  VIDEO_MODEL_OPTIONS,
+  VIDEO_EDIT_MODEL_OPTIONS,
+  VISION_MODEL_OPTIONS,
 } from '@/constants/dreamweaver'
 import { TaskHeader } from '@/components/dreamweaver/TaskHeader'
 import { useDreamweaverDiagnostics } from '@/hooks/useDreamweaverDiagnostics'
@@ -137,37 +133,14 @@ import {
   PendingVideoConfirmationView,
 } from './dreamweaver-run/pendingViews'
 import {
-  DreamweaverConfigDialogActions,
-  DreamweaverConfigDialogChapterItem,
-  DreamweaverConfigDialogChapterList,
-  DreamweaverConfigDialogChapterSelectionCard,
-  DreamweaverConfigDialogContent,
-  DreamweaverConfigDialogExperimentField,
-  DreamweaverConfigDialogMainGrid,
-  DreamweaverConfigDialogProjectAlertAction,
-  DreamweaverConfigDialogProjectSection,
-  DreamweaverConfigDialogChapterToolbar,
-  DreamweaverConfigDialogSelectField,
-  DreamweaverConfigDialogShell,
-  DreamweaverConfigDialogStrategyCard,
-  DreamweaverConfigDialogStrategyToggleField,
-  DreamweaverConfigDialogTitle,
-  DreamweaverConfigDialogVisualSettingsCard,
+  DreamweaverRunConfigDialog,
 } from './dreamweaver-run/configDialog'
 import {
-  DreamweaverBulkDeleteDialogActions,
-  DreamweaverBulkDeleteDialogContent,
-  DreamweaverBulkDeleteDialogShell,
-  DreamweaverDeleteRunDialogActions,
-  DreamweaverDeleteRunDialogContent,
-  DreamweaverDeleteRunDialogShell,
+  DreamweaverBulkDeleteDialog,
+  DreamweaverDeleteRunDialog,
 } from './dreamweaver-run/deleteDialogs'
 import {
-  DreamweaverDiagnosticDialogEmptyState,
-  DreamweaverDiagnosticDialogHeader,
-  DreamweaverDiagnosticDialogShell,
-  DreamweaverDiagnosticDialogStatusSection,
-  DreamweaverDiagnosticDialogToolbar,
+  DreamweaverRunDiagnosticDialog,
 } from './dreamweaver-run/diagnosticDialog'
 import {
   DreamweaverDiagnosticCameraDiagnosticsSection,
@@ -183,16 +156,7 @@ import {
   DreamweaverDiagnosticShotSummary,
 } from './dreamweaver-run/diagnosticShotViews'
 import {
-  DreamweaverHistoryDialogContent,
-  DreamweaverHistoryEmptyState,
-  DreamweaverHistoryDialogShell,
-  DreamweaverHistoryDialogTitle,
-  DreamweaverHistoryDialogToolbar,
-  DreamweaverHistoryRunItemActions,
-  DreamweaverHistoryRunItem,
-  DreamweaverHistoryRunItemSummary,
-  DreamweaverHistoryStatusFilterChip,
-  DreamweaverHistoryToolbarActions,
+  DreamweaverHistoryDialog,
 } from './dreamweaver-run/historyDialog'
 import {
   DreamweaverCharacterLibraryBucketSection,
@@ -205,39 +169,43 @@ import {
   DreamweaverRegenerateDialog,
 } from './dreamweaver-run/promptDialogs'
 import {
+  DreamweaverAssetPlanGrid,
+  DreamweaverRunAssetPreviewGrid,
+  DreamweaverScriptStageSnapshotView,
+  DreamweaverStreamingPreview,
+} from './dreamweaver-run/previewSections'
+import {
   DreamweaverResultLibraryHint,
-  DreamweaverResultStageContent,
   DreamweaverResultStoryboardStageView,
-  DreamweaverResultSummaryChips,
+  DreamweaverRunResultView,
   DreamweaverResultSyncActionsBar,
-  DreamweaverResultSyncSection,
   DreamweaverResultSyncStatusPanel,
   DreamweaverResultTextStageSection,
   DreamweaverResultVideoClipPathSummary,
   DreamweaverResultVideoFallbackAlert,
   DreamweaverResultVideoStageView,
   DreamweaverResultVideoSummarySection,
-  DreamweaverResultViewShell,
 } from './dreamweaver-run/resultView'
 import {
   RunSnapshotAssetPreviewSection,
+  RunSnapshotErrorAlert,
+  RunSnapshotLoadedChip,
+  RunSnapshotLoadingBar,
   RunSnapshotMergedVideoSection,
   RunSnapshotPreviewPane,
+  RunSnapshotRefreshButton,
+  RunSnapshotRefreshControls,
+  RunSnapshotSectionStatus,
   RunSnapshotShotList,
 } from './dreamweaver-run/runSnapshotPreviewPane'
 import {
-  DreamweaverWorkbenchCardHeader,
-  DreamweaverWorkbenchCardShell,
-  DreamweaverWorkbenchRestartAction,
-  DreamweaverWorkbenchRestartMenu,
-  DreamweaverWorkbenchSection,
-  DreamweaverWorkbenchStatusActionButton,
-  DreamweaverWorkbenchStatusChipRow,
-  DreamweaverWorkbenchStatusPanel,
-  DreamweaverWorkbenchStatusPrimarySection,
-  DreamweaverWorkbenchStatusRightActions,
-  DreamweaverWorkbenchStepper,
+  DreamweaverWorkbenchCard,
+  DreamweaverWorkbenchStatusScaffold,
 } from './dreamweaver-run/workbenchStatusPanel'
+import {
+  DreamweaverRunPageAlerts,
+  DreamweaverRunPageScaffold,
+} from './dreamweaver-run/runPageShell'
 const DREAMWEAVER_PREVIEW_STEPS = ['剧本', '分镜', '素材', '镜头', '合成'] as const
 type LibraryGroupSummary = {
   total: number
@@ -496,6 +464,12 @@ export default function DreamWeaverRunPage() {
   const [stylePreset, setStylePreset] = useState<string>(STYLE_PRESETS.CINEMATIC_REALISTIC)
   const [imageRatio, setImageRatio] = useState<string>(IMAGE_RATIOS.LANDSCAPE_16_9)
   const [imageResolution, setImageResolution] = useState<string>(IMAGE_RESOLUTIONS.HD_720P)
+  const [imageModel, setImageModel] = useState<string>('qwen-image-2.0-pro')
+  const [videoModel, setVideoModel] = useState<string>('wan2.7-t2v')
+  const [videoEditModel, setVideoEditModel] = useState<string>('wan2.7-videoedit')
+  const [visionModel, setVisionModel] = useState<string>('qwen3-vl-plus')
+  const [enableVideoEdit, setEnableVideoEdit] = useState(true)
+  const [enableVisionReview, setEnableVisionReview] = useState(true)
   const [loadingChapters, setLoadingChapters] = useState(false)
   const [running, setRunning] = useState(false)
   const [taskId, setTaskId] = useState<string | null>(null)
@@ -955,185 +929,34 @@ export default function DreamWeaverRunPage() {
     return formatted.length ? formatted.join('  ') : null
   }
 
-  const renderRunAssetPreviewCardMedia = (previewUrl: string, kind: 'image' | 'video') => {
-    if (!previewUrl) {
-      return (
-        <Box sx={{ mt: 0.75, bgcolor: '#fafafa', border: '1px dashed #ddd', borderRadius: 1, p: 1, textAlign: 'center' }}>
-          <Typography variant="caption" color="text.secondary">
-            未加载预览
-          </Typography>
-        </Box>
-      )
-    }
-
-    if (kind === 'image') {
-      return (
-        <Box
-          sx={{
-            mt: 0.75,
-            bgcolor: '#000',
-            borderRadius: 1,
-            overflow: 'hidden',
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            p: 0.5,
-          }}
-        >
-          <Box component="img" src={previewUrl} sx={{ maxWidth: '100%', maxHeight: 220, display: 'block', objectFit: 'contain' }} />
-        </Box>
-      )
-    }
-
-    return (
-      <Box sx={{ mt: 0.75, bgcolor: '#000', borderRadius: 1, overflow: 'hidden' }}>
-        <Box component="video" src={previewUrl} controls sx={{ width: '100%', maxHeight: 240, display: 'block' }} />
-      </Box>
-    )
-  }
-
-  const renderRunAssetPreviewCardActions = ({
-    uri,
-    previewUrl,
-    loading,
-  }: {
-    uri: string
-    previewUrl: string
-    loading: boolean
-  }) => (
-    <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mt: 1 }}>
-      <Button size="small" variant="outlined" onClick={() => loadRunAssetPreview(uri)} disabled={!currentRunId || loading}>
-        {loading ? '加载中…' : previewUrl ? '重新加载' : '加载预览'}
-      </Button>
-      <Button size="small" variant="text" onClick={() => downloadRunAsset(uri)} disabled={!currentRunId || loading}>
-        下载
-      </Button>
-      {formatPath(uri) && <Chip size="small" label={formatPath(uri)} variant="outlined" />}
-    </Stack>
+  const renderRunAssetPreviewGrid = (title: string, uris: string[], kind: 'image' | 'video') => (
+    <DreamweaverRunAssetPreviewGrid
+      title={title}
+      uris={uris}
+      kind={kind}
+      previewsByUri={runAssetPreviews}
+      loadingByUri={runAssetPreviewLoading}
+      errorsByUri={runAssetPreviewErrors}
+      canInteract={Boolean(currentRunId)}
+      onLoadPreview={loadRunAssetPreview}
+      onDownload={downloadRunAsset}
+      formatPath={formatPath}
+    />
   )
 
-  const renderRunAssetPreviewCard = ({
-    title,
-    uri,
-    kind,
-  }: {
-    title: string
-    uri: string
-    kind: 'image' | 'video'
-  }) => {
-    const previewUrl = runAssetPreviews[uri]
-    const loading = Boolean(runAssetPreviewLoading[uri])
-    const err = runAssetPreviewErrors[uri]
-    const filename = uri.split(/[\\/]+/).pop() || uri
-
-    return (
-      <Grid item xs={12} sm={6} md={4} key={`${title}:${uri}`}>
-        <Card variant="outlined">
-          <CardContent sx={{ p: 1.25 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
-              {filename}
-            </Typography>
-            {renderRunAssetPreviewCardMedia(previewUrl, kind)}
-            {renderRunAssetPreviewCardActions({ uri, previewUrl, loading })}
-
-            {err && (
-              <Typography variant="caption" color="error" display="block" sx={{ mt: 0.5, wordBreak: 'break-all' }}>
-                {err}
-              </Typography>
-            )}
-          </CardContent>
-        </Card>
-      </Grid>
-    )
-  }
-
-  const renderRunAssetPreviewGrid = (title: string, uris: string[], kind: 'image' | 'video') => {
-    const items = Array.from(new Set((uris || []).map((u) => String(u || '').trim()).filter(Boolean)))
-    if (items.length === 0) return null
-    return (
-      <Box sx={{ mt: 1 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-          {title}
-        </Typography>
-        <Grid container spacing={1}>
-          {items.map((uri) => renderRunAssetPreviewCard({ title, uri, kind }))}
-        </Grid>
-      </Box>
-    )
-  }
-
-  const renderAssetPlanCardPlaceholder = (uri: string) => (
-    <Box sx={{ mt: 0.75, bgcolor: '#fafafa', border: '1px dashed #ddd', borderRadius: 1, p: 1, textAlign: 'center' }}>
-      <Typography variant="caption" color="text.secondary">
-        {uri ? '已生成，待加载预览' : '生成中，等待素材'}
-      </Typography>
-    </Box>
+  const renderAssetPlanGrid = (title: string, items: DreamweaverAssetPlanItem[]) => (
+    <DreamweaverAssetPlanGrid
+      title={title}
+      items={items}
+      previewsByUri={runAssetPreviews}
+      loadingByUri={runAssetPreviewLoading}
+      errorsByUri={runAssetPreviewErrors}
+      canInteract={Boolean(currentRunId)}
+      onLoadPreview={loadRunAssetPreview}
+      onDownload={downloadRunAsset}
+      formatPath={formatPath}
+    />
   )
-
-  const renderAssetPlanCardLocation = (item: DreamweaverAssetPlanItem) => {
-    if (!item.shot_id && !item.scene_id) return null
-
-    return (
-      <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
-        {item.shot_id ? `Shot: ${item.shot_id}` : ''}
-        {item.scene_id ? `  Scene: ${item.scene_id}` : ''}
-      </Typography>
-    )
-  }
-
-  const renderAssetPlanCard = (item: DreamweaverAssetPlanItem) => {
-    const uri = item.uri ? String(item.uri).trim() : ''
-    const previewUrl = uri ? runAssetPreviews[uri] : ''
-    const loading = uri ? Boolean(runAssetPreviewLoading[uri]) : false
-    const err = uri ? runAssetPreviewErrors[uri] : null
-    const status = item.status === 'done' || uri ? 'done' : item.status === 'processing' ? 'processing' : 'planned'
-    const statusLabel = status === 'done' ? '已生成' : status === 'processing' ? '生成中' : '待生成'
-    const statusColor: 'default' | 'success' | 'info' = status === 'done' ? 'success' : status === 'processing' ? 'info' : 'default'
-    const label = String(item.label || item.id || '').trim() || item.id
-    const kind = item.kind === 'video' ? 'video' : 'image'
-
-    return (
-      <Grid item xs={12} sm={6} md={4} key={`plan:${item.id}`}>
-        <Card variant="outlined">
-          <CardContent sx={{ p: 1.25 }}>
-            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                {label}
-              </Typography>
-              <Chip size="small" label={statusLabel} color={statusColor} />
-              {item.optional && <Chip size="small" label="可选" variant="outlined" />}
-            </Stack>
-
-            {previewUrl ? renderRunAssetPreviewCardMedia(previewUrl, kind) : renderAssetPlanCardPlaceholder(uri)}
-
-            {uri && renderRunAssetPreviewCardActions({ uri, previewUrl, loading })}
-            {renderAssetPlanCardLocation(item)}
-
-            {err && (
-              <Typography variant="caption" color="error" display="block" sx={{ mt: 0.5, wordBreak: 'break-all' }}>
-                {err}
-              </Typography>
-            )}
-          </CardContent>
-        </Card>
-      </Grid>
-    )
-  }
-
-  const renderAssetPlanGrid = (title: string, items: DreamweaverAssetPlanItem[]) => {
-    const list = Array.isArray(items) ? items : []
-    if (!list.length) return null
-    return (
-      <Box sx={{ mt: 1 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-          {title}
-        </Typography>
-        <Grid container spacing={1}>
-          {list.map(renderAssetPlanCard)}
-        </Grid>
-      </Box>
-    )
-  }
 
   const resolveLibraryDisplayCardState = (item: LibraryDisplayItem) => {
     const asset = item.asset
@@ -1263,276 +1086,6 @@ export default function DreamWeaverRunPage() {
     )
   }
 
-  const renderStreamingTextBlock = (
-    title: string,
-    text: string,
-    options?: { maxHeight?: number; monospace?: boolean; streaming?: boolean },
-  ) => {
-    if (!text) return null
-    const maxHeight = typeof options?.maxHeight === 'number' ? options?.maxHeight : 220
-    const isStreaming = options?.streaming ?? false
-    const fontFamily = options?.monospace
-      ? 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
-      : undefined
-
-    return (
-      <Box sx={{ mb: 1 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-          {title}
-          {isStreaming && (
-            <Box
-              component="span"
-              sx={{
-                display: 'inline-block',
-                width: 6,
-                height: 14,
-                bgcolor: 'primary.main',
-                animation: 'blink 1s step-end infinite',
-                verticalAlign: 'middle',
-                ml: 0.5,
-                borderRadius: 0.5,
-                '@keyframes blink': {
-                  '50%': { opacity: 0 },
-                },
-              }}
-            />
-          )}
-        </Typography>
-        <Box sx={{ maxHeight, overflow: 'auto', bgcolor: '#fafafa', border: '1px solid #eee', borderRadius: 1, p: 1.5 }}>
-          {options?.monospace ? (
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{ whiteSpace: 'pre-wrap', fontFamily, fontSize: '0.85rem', lineHeight: 1.6 }}
-            >
-              {text}
-            </Typography>
-          ) : (
-            <FormattedContent
-              content={text}
-              sx={{
-                fontSize: '0.9rem',
-                lineHeight: 1.7,
-                '& p': { margin: '8px 0' },
-                '& h1, & h2, & h3': { marginTop: '12px', marginBottom: '8px' },
-              }}
-            />
-          )}
-        </Box>
-      </Box>
-    )
-  }
-
-  const renderStreamingPreviewHeader = () => (
-    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 0.5 }}>
-      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-        流式预览
-      </Typography>
-      {activeStreamKeys.length > 0 && <Chip size="small" label={`实时输出: ${activeStreamKeys.join(', ')}`} />}
-    </Stack>
-  )
-
-  const renderStreamingPreviewStepZero = (planText: string, scriptText: string, profileText: string, audioText: string) => {
-    if (!planText && !scriptText && !profileText && !audioText) return null
-    return (
-      <Box sx={{ mb: 1 }}>
-        {renderStreamingPreviewHeader()}
-        {renderStreamingTextBlock('计划/脚本提要（流式）', planText, { maxHeight: 200 })}
-        {renderStreamingTextBlock('剧本（流式）', scriptText, { maxHeight: 400 })}
-        {renderStreamingTextBlock('角色小传（流式）', profileText, { maxHeight: 200 })}
-        {renderStreamingTextBlock('音频标记（流式）', audioText, { maxHeight: 200, monospace: true })}
-      </Box>
-    )
-  }
-
-  const renderStreamingPreviewStepOne = (storyboardText: string, cameraTreeText: string) => {
-    if (!storyboardText && !cameraTreeText) return null
-    return (
-      <Box sx={{ mb: 1 }}>
-        {renderStreamingPreviewHeader()}
-        {renderStreamingTextBlock('分镜（流式）', storyboardText, { maxHeight: 400 })}
-        {renderStreamingTextBlock('镜头树（流式）', cameraTreeText, { maxHeight: 260 })}
-      </Box>
-    )
-  }
-
-  const renderStreamingLibraryPlanCardMedia = (item: DreamweaverLibraryPlanItem) => {
-    if (item.status === 'processing') {
-      return (
-        <Box
-          sx={{
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            textAlign: 'center',
-          }}
-        >
-          <Box
-            sx={{
-              width: 24,
-              height: 24,
-              border: '2px solid',
-              borderColor: 'primary.main',
-              borderTopColor: 'transparent',
-              borderRadius: '50%',
-              animation: 'spin 1s linear infinite',
-              '@keyframes spin': {
-                '0%': { transform: 'rotate(0deg)' },
-                '100%': { transform: 'rotate(360deg)' },
-              },
-            }}
-          />
-        </Box>
-      )
-    }
-
-    return (
-      <Box
-        sx={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          textAlign: 'center',
-        }}
-      >
-        <PhotoCameraIcon sx={{ fontSize: 32, color: 'grey.400' }} />
-      </Box>
-    )
-  }
-
-  const renderStreamingLibraryPlanCardStatusBadge = (item: DreamweaverLibraryPlanItem) => {
-    if (item.status !== 'processing' && item.status !== 'done') return null
-
-    const label = item.status === 'processing' ? '生成中' : '完成'
-    const backgroundColor = item.status === 'processing' ? 'warning.main' : 'success.main'
-
-    return (
-      <Box
-        sx={{
-          position: 'absolute',
-          top: 4,
-          right: 4,
-          bgcolor: backgroundColor,
-          color: 'white',
-          fontSize: '0.65rem',
-          px: 0.5,
-          py: 0.25,
-          borderRadius: 0.5,
-        }}
-      >
-        {label}
-      </Box>
-    )
-  }
-
-  const renderStreamingLibraryPlanCard = (item: DreamweaverLibraryPlanItem) => {
-    const statusLabel = item.status === 'done' ? '已生成' : item.status === 'processing' ? '生成中...' : '待生成'
-    const label = item.label || item.entity_name || item.role
-
-    return (
-      <Grid item key={item.id} xs={6} sm={4} md={3} lg={2}>
-        <Card
-          sx={{
-            height: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            border: item.status === 'processing' ? '2px solid' : '1px solid',
-            borderColor: item.status === 'processing' ? 'warning.main' : 'divider',
-            opacity: item.status === 'planned' ? 0.7 : 1,
-          }}
-        >
-          <Box
-            sx={{
-              position: 'relative',
-              paddingTop: '100%',
-              bgcolor: 'grey.100',
-              overflow: 'hidden',
-            }}
-          >
-            {renderStreamingLibraryPlanCardMedia(item)}
-            {renderStreamingLibraryPlanCardStatusBadge(item)}
-          </Box>
-          <CardContent sx={{ p: 1, '&:last-child': { pb: 1 } }}>
-            <Typography variant="caption" sx={{ fontWeight: 500, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {label}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
-              {statusLabel}
-            </Typography>
-          </CardContent>
-        </Card>
-      </Grid>
-    )
-  }
-
-  const renderStreamingPreviewStepTwo = () => {
-    if (!libraryPlanItems.length) return null
-
-    const plannedCount = libraryPlanItems.filter((item) => item.status === 'planned').length
-    const doneCount = libraryPlanItems.filter((item) => item.status === 'done').length
-    const processingCount = libraryPlanItems.filter((item) => item.status === 'processing').length
-
-    return (
-      <Box sx={{ mb: 1 }}>
-        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 0.5 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-            素材库生成
-          </Typography>
-          <Chip size="small" label={`总计: ${libraryPlanItems.length}`} />
-          <Chip size="small" label={`已生成: ${doneCount}`} color={doneCount > 0 ? 'success' : 'default'} />
-          <Chip size="small" label={`生成中: ${processingCount}`} color={processingCount > 0 ? 'warning' : 'default'} />
-          <Chip size="small" label={`待生成: ${plannedCount}`} />
-        </Stack>
-        <Grid container spacing={1.5}>
-          {libraryPlanItems.slice(0, 12).map(renderStreamingLibraryPlanCard)}
-          {libraryPlanItems.length > 12 && (
-            <Grid item xs={12}>
-              <Typography variant="caption" color="text.secondary">
-                还有 {libraryPlanItems.length - 12} 个素材...
-              </Typography>
-            </Grid>
-          )}
-        </Grid>
-      </Box>
-    )
-  }
-
-  const renderStreamingPreviewStepThree = () => {
-    const assets = assetPlanItems.filter((item) => item.id !== 'merged_video')
-    if (!assets.length) return null
-
-    return (
-      <Box sx={{ mb: 1 }}>
-        <Stack direction="row" spacing={1} flexWrap="wrap" mb={0.5}>
-          <Chip size="small" label={`占位: ${assetPlanSummary.total}`} />
-          <Chip size="small" label={`已生成: ${assetPlanSummary.done}`} color={assetPlanSummary.done > 0 ? 'success' : 'default'} />
-          <Chip size="small" label={`待生成: ${assetPlanSummary.planned}`} />
-          <Chip size="small" label={`图像: ${assetPlanSummary.images}`} />
-          <Chip size="small" label={`视频: ${assetPlanSummary.videos}`} />
-        </Stack>
-        {renderAssetPlanGrid('素材占位卡', assets)}
-      </Box>
-    )
-  }
-
-  const renderStreamingPreviewStepFour = () => {
-    if (!mergedVideoPlan) return null
-
-    return (
-      <Box sx={{ mb: 1 }}>
-        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 0.5 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-            流式预览
-          </Typography>
-          <Chip size="small" label={mergedVideoPlan.uri ? '已生成' : '待生成'} color={mergedVideoPlan.uri ? 'success' : 'default'} />
-        </Stack>
-        {renderAssetPlanGrid('合成视频占位', [mergedVideoPlan])}
-      </Box>
-    )
-  }
-
   const renderStreamingPreview = (step: number) => {
     const planText = String(streamSnapshots.plan || '').trim()
     const scriptText = String(streamSnapshots.script || streamSnapshots.scriptEnhance || '').trim()
@@ -1540,178 +1093,40 @@ export default function DreamWeaverRunPage() {
     const audioText = String(streamSnapshots.audioMarkers || '').trim()
     const storyboardText = String(streamSnapshots.storyboard || '').trim()
     const cameraTreeText = String(streamSnapshots.cameraTree || '').trim()
-
-    if (step === 0) {
-      return renderStreamingPreviewStepZero(planText, scriptText, profileText, audioText)
-    }
-
-    if (step === 1) {
-      return renderStreamingPreviewStepOne(storyboardText, cameraTreeText)
-    }
-
-    if (step === 2) {
-      return renderStreamingPreviewStepTwo()
-    }
-
-    if (step === 3) {
-      return renderStreamingPreviewStepThree()
-    }
-
-    if (step === 4) {
-      return renderStreamingPreviewStepFour()
-    }
-
-    return null
-  }
-
-  const renderScriptStageSnapshot = () => {
-    const planText = snapshotPlanText.trim()
-    const scriptText = snapshotScriptText.trim()
-    const profilesCount = snapshotCharacterProfiles.length
-    const markersCount = snapshotAudioMarkers.length
-    const entitySummary = summarizeScriptEntities(snapshotScriptEntities)
-    const hasGeneration = Boolean(snapshotScriptGeneration && Object.keys(snapshotScriptGeneration).length > 0)
-
-    const renderSnapshotMonospaceBox = (content: string, maxHeight = 240) => (
-      <Box
-        sx={{
-          whiteSpace: 'pre-wrap',
-          fontFamily: 'monospace',
-          fontSize: 12,
-          bgcolor: '#fafafa',
-          border: '1px solid #eee',
-          borderRadius: 2,
-          p: 1.5,
-          maxHeight,
-          overflow: 'auto',
-        }}
-      >
-        {content}
-      </Box>
-    )
-
-    const renderJsonBlock = (value: unknown, emptyText: string, maxHeight = 240) => {
-      const isEmpty =
-        value == null ||
-        (Array.isArray(value) ? value.length === 0 : typeof value === 'object' && Object.keys(value).length === 0)
-      if (isEmpty) {
-        return (
-          <Typography variant="body2" color="text.secondary">
-            {emptyText}
-          </Typography>
-        )
-      }
-      return renderSnapshotMonospaceBox(JSON.stringify(value, null, 2), maxHeight)
-    }
-
-    const renderSnapshotAccordionHeader = (title: string, extra?: JSX.Element | null) => (
-      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-          {title}
-        </Typography>
-        {extra}
-      </Stack>
-    )
-
-    const renderSnapshotJsonAccordion = (
-      title: string,
-      value: unknown,
-      emptyText: string,
-      extra?: JSX.Element | null,
-    ) => (
-      <Accordion>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>{renderSnapshotAccordionHeader(title, extra)}</AccordionSummary>
-        <AccordionDetails>{renderJsonBlock(value, emptyText)}</AccordionDetails>
-      </Accordion>
-    )
-
-    const renderSnapshotTextAccordion = ({
-      title,
-      text,
-      emptyText,
-      defaultExpanded = false,
-      extra,
-    }: {
-      title: string
-      text: string
-      emptyText: string
-      defaultExpanded?: boolean
-      extra?: JSX.Element | null
-    }) => (
-      <Accordion defaultExpanded={defaultExpanded}>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>{renderSnapshotAccordionHeader(title, extra)}</AccordionSummary>
-        <AccordionDetails>
-          <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-wrap' }}>
-            {text || emptyText}
-          </Typography>
-        </AccordionDetails>
-      </Accordion>
-    )
-
-    const renderSnapshotScriptAccordion = () => (
-      <Accordion defaultExpanded>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          {renderSnapshotAccordionHeader(
-            '剧本（快照）',
-            <>
-              <Chip size="small" label={snapshotScriptApproved ? '已通过' : '未通过'} color={snapshotScriptApproved ? 'success' : 'default'} />
-              <Chip size="small" label={`长度: ${scriptText.length}`} />
-            </>,
-          )}
-        </AccordionSummary>
-        <AccordionDetails>
-          {scriptText ? (
-            renderSnapshotMonospaceBox(scriptText.length > 6000 ? `${scriptText.slice(0, 6000)}\n…` : scriptText, 320)
-          ) : (
-            <Typography variant="body2" color="text.secondary">
-              尚无可用剧本快照（可能仍在生成或尚未落库）。
-            </Typography>
-          )}
-        </AccordionDetails>
-      </Accordion>
-    )
+    const assets = assetPlanItems.filter((item) => item.id !== 'merged_video')
 
     return (
-      <Box sx={{ mb: 1 }}>
-        {renderSnapshotTextAccordion({
-          title: '计划 / 剧本提要（快照）',
-          text: planText,
-          emptyText: '暂无计划/提要快照（可能仍在生成或尚未落库）。',
-          defaultExpanded: true,
-        })}
-
-        {renderSnapshotScriptAccordion()}
-
-        {renderSnapshotJsonAccordion(
-          '角色小传（快照）',
-          snapshotCharacterProfiles,
-          '暂无角色小传（可能尚未生成或未落库）。',
-          profilesCount > 0 ? <Chip size="small" label={`${profilesCount} 条`} /> : null,
-        )}
-
-        {renderSnapshotJsonAccordion(
-          '音频标记（快照）',
-          snapshotAudioMarkers,
-          '暂无音频标记（可能尚未生成或未落库）。',
-          markersCount > 0 ? <Chip size="small" label={`${markersCount} 条`} /> : null,
-        )}
-
-        {renderSnapshotJsonAccordion(
-          '实体抽取（快照）',
-          snapshotScriptEntities,
-          '暂无实体抽取数据（可能尚未生成或未落库）。',
-          entitySummary ? <Chip size="small" label={entitySummary} /> : null,
-        )}
-
-        {renderSnapshotJsonAccordion(
-          '剧本生成信息（快照）',
-          snapshotScriptGeneration,
-          '暂无剧本生成信息（可能尚未生成或未落库）。',
-          hasGeneration ? <Chip size="small" label="已记录" /> : null,
-        )}
-      </Box>
+      <DreamweaverStreamingPreview
+        step={step}
+        activeStreamKeys={activeStreamKeys}
+        planText={planText}
+        scriptText={scriptText}
+        profileText={profileText}
+        audioText={audioText}
+        storyboardText={storyboardText}
+        cameraTreeText={cameraTreeText}
+        libraryPlanItems={libraryPlanItems}
+        assetPlanItems={assetPlanItems}
+        assetPlanSummary={assetPlanSummary}
+        mergedVideoPlan={mergedVideoPlan || null}
+        assetPlanGrid={assets.length > 0 ? renderAssetPlanGrid('素材占位卡', assets) : null}
+        mergedVideoPlanGrid={mergedVideoPlan ? renderAssetPlanGrid('合成视频占位', [mergedVideoPlan]) : null}
+      />
     )
   }
+
+  const renderScriptStageSnapshot = () => (
+    <DreamweaverScriptStageSnapshotView
+      planText={snapshotPlanText.trim()}
+      scriptText={snapshotScriptText.trim()}
+      scriptApproved={snapshotScriptApproved}
+      characterProfiles={snapshotCharacterProfiles}
+      audioMarkers={snapshotAudioMarkers}
+      scriptEntities={snapshotScriptEntities}
+      scriptGeneration={snapshotScriptGeneration}
+      entitySummary={summarizeScriptEntities(snapshotScriptEntities)}
+    />
+  )
 
   const renderSafetyBlockedAlert = () => {
     if (!safetyBlockedShots.length) return null
@@ -4871,16 +4286,6 @@ export default function DreamWeaverRunPage() {
       )
     })
 
-  const renderRunSnapshotRefreshControls = (label = '刷新运行快照') => {
-    if (!persistedRunId) return null
-    return (
-      <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" mb={1}>
-        {renderRunSnapshotRefreshButton(label)}
-        {renderRunSnapshotLoadedChip()}
-      </Stack>
-    )
-  }
-
   const buildSnapshotAssetPreviewPathSummary = (tailVideoClipPaths: string[]) => {
     const keyframePaths = formatPaths(snapshotAssetSummary.keyframes.slice(-3))
     const midframePaths = formatPaths(snapshotAssetSummary.midframes.slice(-3))
@@ -4947,8 +4352,17 @@ export default function DreamWeaverRunPage() {
     includeWsError?: boolean
   }) => (
     <RunSnapshotPreviewPane
-      refreshControls={renderRunSnapshotRefreshControls(refreshLabel)}
-      errorAlert={renderRunSnapshotErrorAlert('mb', 1)}
+      refreshControls={
+        <RunSnapshotRefreshControls
+          visible={Boolean(persistedRunId)}
+          label={refreshLabel}
+          onRefresh={loadRunSnapshot}
+          refreshDisabled={!persistedRunId || runSnapshotLoading}
+          refreshLoading={runSnapshotLoading}
+          loaded={Boolean(runSnapshot && runSnapshot.run_id === persistedRunId)}
+        />
+      }
+      errorAlert={<RunSnapshotErrorAlert message={runSnapshotError} spacingKey="mb" spacingValue={1} />}
       wsWarning={
         includeWsError && wsError ? (
           <Alert severity="warning" sx={{ mb: 1 }} onClose={() => setWsError(null)}>
@@ -4956,7 +4370,7 @@ export default function DreamWeaverRunPage() {
           </Alert>
         ) : null
       }
-      loadingBar={renderRunSnapshotLoadingBar('mb', 1)}
+      loadingBar={<RunSnapshotLoadingBar visible={runSnapshotLoading} spacingKey="mb" spacingValue={1} />}
       safetyBlockedAlert={renderSafetyBlockedAlert()}
       streamingPreview={includeStreamingPreview ? renderStreamingPreview(previewStep) : null}
       scriptStageSnapshot={previewStep === 0 && !runSnapshotLoading ? renderScriptStageSnapshot() : null}
@@ -4964,59 +4378,6 @@ export default function DreamWeaverRunPage() {
       assetPreview={renderSnapshotAssetPreviewSection()}
       mergedVideo={renderSnapshotMergedVideoSection()}
     />
-  )
-
-  const renderRunSnapshotRefreshButton = (label = '刷新运行快照') => (
-    <Button
-      size="small"
-      variant="outlined"
-      onClick={loadRunSnapshot}
-      disabled={!persistedRunId || runSnapshotLoading}
-    >
-      {runSnapshotLoading ? '加载中…' : label}
-    </Button>
-  )
-
-  const renderRunSnapshotLoadedChip = () => {
-    if (!runSnapshot || runSnapshot.run_id !== persistedRunId) return null
-    return <Chip size="small" label="快照已加载" color="success" />
-  }
-
-  const renderRunSnapshotErrorAlert = (spacingKey: 'mb' | 'mt', spacingValue = 1) => {
-    if (!runSnapshotError) return null
-
-    return (
-      <Alert severity="error" sx={{ [spacingKey]: spacingValue }}>
-        {runSnapshotError}
-      </Alert>
-    )
-  }
-
-  const renderRunSnapshotLoadingBar = (spacingKey: 'mb' | 'mt', spacingValue = 1) => {
-    if (!runSnapshotLoading) return null
-    return <LinearProgress sx={{ [spacingKey]: spacingValue }} />
-  }
-
-  const renderRunSnapshotSectionStatus = ({
-    label = '加载运行快照',
-    marginTop = 1,
-    chips = [],
-  }: {
-    label?: string
-    marginTop?: number
-    chips?: Array<{ key: string; label: string }>
-  }) => (
-    <>
-      <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mt: marginTop }}>
-        {renderRunSnapshotRefreshButton(label)}
-        {renderRunSnapshotLoadedChip()}
-        {chips.map((chip) => (
-          <Chip key={chip.key} size="small" label={chip.label} />
-        ))}
-      </Stack>
-      {renderRunSnapshotErrorAlert('mt', marginTop)}
-      {renderRunSnapshotLoadingBar('mt', marginTop)}
-    </>
   )
 
   const renderDebugAccordion = ({
@@ -5060,7 +4421,15 @@ export default function DreamWeaverRunPage() {
 
     return (
       <>
-        {renderRunSnapshotSectionStatus({ label: '加载运行快照' })}
+        <RunSnapshotSectionStatus
+          label="加载运行快照"
+          onRefresh={loadRunSnapshot}
+          refreshDisabled={!persistedRunId || runSnapshotLoading}
+          refreshLoading={runSnapshotLoading}
+          loaded={Boolean(runSnapshot && runSnapshot.run_id === persistedRunId)}
+          loading={runSnapshotLoading}
+          errorMessage={runSnapshotError}
+        />
         {!runSnapshotLoading && snapshotShots.length > 0 && (
           <List dense sx={{ mt: 1, bgcolor: '#fff', border: '1px solid #eee', borderRadius: 2 }}>
             {renderShotPromptSnapshotItems()}
@@ -5075,13 +4444,21 @@ export default function DreamWeaverRunPage() {
 
     const snapshotStatus =
       previewStep === 3
-        ? renderRunSnapshotSectionStatus({
-            label: '加载运行快照',
-            chips: [
-              ...(snapshotShots.length > 0 ? [{ key: 'shots', label: `镜头: ${snapshotShots.length}` }] : []),
-              ...(snapshotAssetCount > 0 ? [{ key: 'assets', label: `资产: ${snapshotAssetCount}` }] : []),
-            ],
-          })
+        ? (
+            <RunSnapshotSectionStatus
+              label="加载运行快照"
+              onRefresh={loadRunSnapshot}
+              refreshDisabled={!persistedRunId || runSnapshotLoading}
+              refreshLoading={runSnapshotLoading}
+              loaded={Boolean(runSnapshot && runSnapshot.run_id === persistedRunId)}
+              loading={runSnapshotLoading}
+              errorMessage={runSnapshotError}
+              chips={[
+                ...(snapshotShots.length > 0 ? [{ key: 'shots', label: `镜头: ${snapshotShots.length}` }] : []),
+                ...(snapshotAssetCount > 0 ? [{ key: 'assets', label: `资产: ${snapshotAssetCount}` }] : []),
+              ]}
+            />
+          )
         : null
 
     return (
@@ -5140,15 +4517,11 @@ export default function DreamWeaverRunPage() {
     if (!result) return null
 
     return (
-      <DreamweaverResultViewShell
-        summaryChips={
-          <DreamweaverResultSummaryChips
-            chapterCount={result.source_chapter_count}
-            keyframeCount={Array.isArray(result.keyframes) ? result.keyframes.length : 0}
-            midframeCount={Array.isArray(result.midframes) ? result.midframes.length : 0}
-            videoClipCount={Array.isArray(result.video_clips) ? result.video_clips.length : null}
-          />
-        }
+      <DreamweaverRunResultView
+        chapterCount={result.source_chapter_count}
+        keyframeCount={Array.isArray(result.keyframes) ? result.keyframes.length : 0}
+        midframeCount={Array.isArray(result.midframes) ? result.midframes.length : 0}
+        videoClipCount={Array.isArray(result.video_clips) ? result.video_clips.length : null}
         debugPanel={
           <>
             {renderDebugAccordion({
@@ -5159,37 +4532,36 @@ export default function DreamWeaverRunPage() {
             <Divider sx={{ my: 1.5 }} />
           </>
         }
-        syncSection={
-          <DreamweaverResultSyncSection
-            actions={
-              <DreamweaverResultSyncActionsBar
-                refreshButton={renderRunSnapshotRefreshButton('刷新运行快照')}
-                onSync={currentRunId ? () => syncDreamweaverEvents(currentRunId) : null}
-                syncInProgress={eventSyncing}
-                syncDisabled={!currentRunId || eventSyncing}
-                loadedChip={renderRunSnapshotLoadedChip()}
-                eventCursor={eventCursor}
+        syncActions={
+          <DreamweaverResultSyncActionsBar
+            refreshButton={
+              <RunSnapshotRefreshButton
+                label="刷新运行快照"
+                onClick={loadRunSnapshot}
+                disabled={!persistedRunId || runSnapshotLoading}
+                loading={runSnapshotLoading}
               />
             }
-            status={
-              <DreamweaverResultSyncStatusPanel
-                snapshotErrorAlert={renderRunSnapshotErrorAlert('mb', 1)}
-                eventSyncError={eventSyncError}
-                snapshotLoadingBar={renderRunSnapshotLoadingBar('mb', 1)}
-              />
-            }
+            onSync={currentRunId ? () => syncDreamweaverEvents(currentRunId) : null}
+            syncInProgress={eventSyncing}
+            syncDisabled={!currentRunId || eventSyncing}
+            loadedChip={<RunSnapshotLoadedChip visible={Boolean(runSnapshot && runSnapshot.run_id === persistedRunId)} />}
+            eventCursor={eventCursor}
+          />
+        }
+        syncStatus={
+          <DreamweaverResultSyncStatusPanel
+            snapshotErrorAlert={<RunSnapshotErrorAlert message={runSnapshotError} spacingKey="mb" spacingValue={1} />}
+            eventSyncError={eventSyncError}
+            snapshotLoadingBar={<RunSnapshotLoadingBar visible={runSnapshotLoading} spacingKey="mb" spacingValue={1} />}
           />
         }
         streamingPreview={renderStreamingPreview(previewStep)}
-        stageContent={
-          <DreamweaverResultStageContent
-            planStage={previewStep === 0 || previewStep === 4 ? renderResultPlanStageView() : null}
-            storyboardStage={previewStep === 1 || previewStep === 4 ? renderResultStoryboardStageView() : null}
-            libraryStage={previewStep === 2 ? renderResultLibraryHintView() : null}
-            videoStage={previewStep === 3 || previewStep === 4 ? renderResultVideoStageView() : null}
-            auditStage={previewStep === 4 ? renderResultAuditStageView() : null}
-          />
-        }
+        planStage={previewStep === 0 || previewStep === 4 ? renderResultPlanStageView() : null}
+        storyboardStage={previewStep === 1 || previewStep === 4 ? renderResultStoryboardStageView() : null}
+        libraryStage={previewStep === 2 ? renderResultLibraryHintView() : null}
+        videoStage={previewStep === 3 || previewStep === 4 ? renderResultVideoStageView() : null}
+        auditStage={previewStep === 4 ? renderResultAuditStageView() : null}
       />
     )
   }
@@ -5982,38 +5354,25 @@ export default function DreamWeaverRunPage() {
   })
 
   const renderDiagnosticDialog = () => (
-    <DreamweaverDiagnosticDialogShell
+    <DreamweaverRunDiagnosticDialog
       open={diagnosticOpen}
       onClose={closeDiagnosticDialog}
-      header={
-        <DreamweaverDiagnosticDialogHeader
-          runId={currentRunId}
-          state={diagnosticResult?.state}
-          stage={diagnosticResult?.stage}
-          onClose={closeDiagnosticDialog}
-        />
-      }
-      statusSection={
-        <DreamweaverDiagnosticDialogStatusSection
-          hasRunId={Boolean(currentRunId)}
-          hasDiagnosticResult={Boolean(diagnosticResult)}
-          error={diagnosticActionError}
-          loading={diagnosticActionLoading}
-        />
-      }
-      toolbar={
-        <DreamweaverDiagnosticDialogToolbar
-          shotCount={diagnosticShots.length}
-          keyframeCount={Array.isArray(diagnosticResult?.keyframes) ? diagnosticResult.keyframes.length : null}
-          midframeCount={Array.isArray(diagnosticResult?.midframes) ? diagnosticResult.midframes.length : null}
-          videoClipCount={Array.isArray(diagnosticResult?.video_clips) ? diagnosticResult.video_clips.length : null}
-          refreshLabel={runSnapshotLoading ? '刷新中...' : '刷新运行快照'}
-          refreshDisabled={!persistedRunId || runSnapshotLoading}
-          copyDisabled={!(diagnosticResult || diagnosticPreflight || diagnosticProviderTrace)}
-          onRefresh={loadRunSnapshot}
-          onCopy={() => copyText(safeJsonStringify(buildRunDiagnosticPayload()))}
-        />
-      }
+      runId={currentRunId}
+      state={diagnosticResult?.state}
+      stage={diagnosticResult?.stage}
+      hasRunId={Boolean(currentRunId)}
+      hasDiagnosticResult={Boolean(diagnosticResult)}
+      error={diagnosticActionError}
+      loading={diagnosticActionLoading}
+      shotCount={diagnosticShots.length}
+      keyframeCount={Array.isArray(diagnosticResult?.keyframes) ? diagnosticResult.keyframes.length : null}
+      midframeCount={Array.isArray(diagnosticResult?.midframes) ? diagnosticResult.midframes.length : null}
+      videoClipCount={Array.isArray(diagnosticResult?.video_clips) ? diagnosticResult.video_clips.length : null}
+      refreshLabel={runSnapshotLoading ? '刷新中...' : '刷新运行快照'}
+      refreshDisabled={!persistedRunId || runSnapshotLoading}
+      copyDisabled={!(diagnosticResult || diagnosticPreflight || diagnosticProviderTrace)}
+      onRefresh={loadRunSnapshot}
+      onCopy={() => copyText(safeJsonStringify(buildRunDiagnosticPayload()))}
       sections={
         <>
           {renderDiagnosticPreflightSection()}
@@ -6021,12 +5380,6 @@ export default function DreamWeaverRunPage() {
           {renderDiagnosticTelemetrySection()}
           {renderDiagnosticCameraDiagnosticsSection()}
         </>
-      }
-      emptyState={
-        <DreamweaverDiagnosticDialogEmptyState
-          hasDiagnosticResult={Boolean(diagnosticResult)}
-          shotCount={diagnosticShots.length}
-        />
       }
       shotAccordions={diagnosticResult && diagnosticShots.length > 0 ? diagnosticShots.map(renderShotDiagnosticAccordion) : null}
     />
@@ -6105,184 +5458,95 @@ export default function DreamWeaverRunPage() {
 
   const HISTORY_FILTER_STATUSES = ['running', 'queued', 'waiting', 'failed', 'timeout', 'completed'] as const
 
-  const renderHistoryDialogTitle = () => <DreamweaverHistoryDialogTitle projectTitle={selectedProject?.title} />
-
   const toggleHistoryStatusFilter = (status: string) => {
     setHistoryStatusFilters((prev) =>
       prev.includes(status) ? prev.filter((item) => item !== status) : [...prev, status],
     )
   }
 
-  const renderHistoryAllFilterChip = () => (
-    <DreamweaverHistoryStatusFilterChip
-      label="全部"
-      count={historyRuns.length}
-      color="default"
-      selected={historyStatusFilters.length === 0}
-      onClick={() => setHistoryStatusFilters([])}
-    />
-  )
-
-  const renderHistoryStatusFilterChip = (status: string) => {
-    const enabled = historyStatusFilters.includes(status)
-    const count = historyStatusCounts[status] || 0
-    const { label, color } = getHistoryStatusMeta(status)
-
-    return (
-      <DreamweaverHistoryStatusFilterChip
-        key={status}
-        label={label}
-        count={count}
-        color={color}
-        selected={enabled}
-        onClick={() => toggleHistoryStatusFilter(status)}
-      />
-    )
-  }
-
-  const renderHistoryFilterChips = () => (
-    <>
-      {renderHistoryAllFilterChip()}
-      {HISTORY_FILTER_STATUSES.map(renderHistoryStatusFilterChip)}
-    </>
-  )
-
-  const renderHistoryDialogToolbarActions = () => (
-    <DreamweaverHistoryToolbarActions
+  const renderHistoryDialog = () => (
+    <DreamweaverHistoryDialog
+      open={historyOpen}
+      onClose={closeHistoryDialog}
+      projectTitle={selectedProject?.title}
+      error={historyError}
+      loading={historyLoading}
+      filterItems={[
+        {
+          key: 'all',
+          label: '全部',
+          count: historyRuns.length,
+          color: 'default',
+          selected: historyStatusFilters.length === 0,
+          onClick: () => setHistoryStatusFilters([]),
+        },
+        ...HISTORY_FILTER_STATUSES.map((status) => {
+          const enabled = historyStatusFilters.includes(status)
+          const count = historyStatusCounts[status] || 0
+          const { label, color } = getHistoryStatusMeta(status)
+          return {
+            key: status,
+            label,
+            count,
+            color,
+            selected: enabled,
+            onClick: () => toggleHistoryStatusFilter(status),
+          }
+        }),
+      ]}
       onRefresh={() => selectedProjectId && fetchRunHistory(selectedProjectId)}
       refreshDisabled={historyLoading || !selectedProjectId}
       onBulkDelete={openBulkDeleteDialog}
       bulkDeleteDisabled={historyLoading || bulkDeleteTargets.length === 0}
       bulkDeleteLabel={`批量删除筛选结果 (${bulkDeleteTargets.length})`}
+      runs={filteredHistoryRuns.map((run) => {
+        const progressValue =
+          typeof run.progress === 'number' ? Math.max(0, Math.min(100, Math.round(run.progress))) : null
+        const statusRaw = String(run.status || '').trim().toLowerCase()
+        const { label: statusLabel, color: statusColor } = getHistoryStatusMeta(statusRaw)
+        return {
+          runId: run.run_id,
+          statusLabel,
+          statusColor,
+          progressValue,
+          stage: run.stage,
+          cameraTreeMode: run.camera_tree_mode,
+          cameraCount: run.camera_count,
+          cameraStatesCount: run.camera_states_count,
+          cameraScenesCount: run.camera_scenes_count,
+          timeText: formatDateTime(run.updated_at || run.created_at),
+          errorMessage: run.error_message,
+          onView: () => handleViewHistoryRun(run.run_id),
+          onDelete: () => openDeleteRunDialog(run.run_id),
+        }
+      })}
+      showEmptyHistory={!historyLoading && !historyError && historyRuns.length === 0}
+      showEmptyFilter={!historyLoading && !historyError && historyRuns.length > 0 && filteredHistoryRuns.length === 0}
     />
   )
 
-  const renderHistoryDialogToolbar = () => (
-    <DreamweaverHistoryDialogToolbar
-      filters={renderHistoryFilterChips()}
-      actions={renderHistoryDialogToolbarActions()}
-    />
-  )
-
-  const renderHistoryRunItemSummaryChips = (run: DreamweaverRunSummary, progressValue: number | null) => {
-    const statusRaw = String(run.status || '').trim().toLowerCase()
-    const { label: statusLabel, color: statusColor } = getHistoryStatusMeta(statusRaw)
-
-    return (
-      <DreamweaverHistoryRunItemSummary
-        statusLabel={statusLabel}
-        statusColor={statusColor}
-        runId={run.run_id}
-        progressValue={progressValue}
-        stage={run.stage}
-        cameraTreeMode={run.camera_tree_mode}
-        cameraCount={run.camera_count}
-        cameraStatesCount={run.camera_states_count}
-        cameraScenesCount={run.camera_scenes_count}
-      />
-    )
-  }
-
-  const renderHistoryRunItemActions = (runId: string) => (
-    <DreamweaverHistoryRunItemActions
-      onView={() => handleViewHistoryRun(runId)}
-      onDelete={() => openDeleteRunDialog(runId)}
-    />
-  )
-
-  const renderHistoryRunItem = (run: DreamweaverRunSummary) => {
-    const timeText = formatDateTime(run.updated_at || run.created_at)
-    const progressValue =
-      typeof run.progress === 'number' ? Math.max(0, Math.min(100, Math.round(run.progress))) : null
-
-    return (
-      <DreamweaverHistoryRunItem
-        key={run.run_id}
-        summary={renderHistoryRunItemSummaryChips(run, progressValue)}
-        timeText={timeText}
-        errorMessage={run.error_message}
-        actions={renderHistoryRunItemActions(run.run_id)}
-      />
-    )
-  }
-
-  const renderHistoryDialogContent = () => (
-    <DreamweaverHistoryDialogContent
-      error={historyError}
-      loading={historyLoading}
-      toolbar={renderHistoryDialogToolbar()}
-      emptyState={
-        <>
-          {!historyLoading && !historyError && historyRuns.length === 0 && (
-            <DreamweaverHistoryEmptyState message="暂无历史任务" />
-          )}
-
-          {!historyLoading && !historyError && historyRuns.length > 0 && filteredHistoryRuns.length === 0 && (
-            <DreamweaverHistoryEmptyState message="筛选结果为空" />
-          )}
-        </>
-      }
-      runList={!historyLoading && filteredHistoryRuns.length > 0 ? <List>{filteredHistoryRuns.map(renderHistoryRunItem)}</List> : null}
-    />
-  )
-
-  const renderHistoryDialog = () => (
-    <DreamweaverHistoryDialogShell
-      open={historyOpen}
-      onClose={closeHistoryDialog}
-      title={renderHistoryDialogTitle()}
-      content={renderHistoryDialogContent()}
-    />
-  )
-
-  const renderBulkDeleteDialogContent = () => (
-    <DreamweaverBulkDeleteDialogContent
+  const renderBulkDeleteDialog = () => (
+    <DreamweaverBulkDeleteDialog
+      open={bulkDeleteDialogOpen}
+      onClose={closeBulkDeleteDialog}
       targetCount={bulkDeleteTargets.length}
       skippedCount={bulkDeleteSkippedCount}
       progress={bulkDeleteProgress}
       error={bulkDeleteError}
       result={bulkDeleteResult}
-    />
-  )
-
-  const renderBulkDeleteDialogActions = () => (
-    <DreamweaverBulkDeleteDialogActions
       submitting={bulkDeleteSubmitting}
-      hasResult={Boolean(bulkDeleteResult)}
-      hasTargets={bulkDeleteTargets.length > 0}
-      onClose={closeBulkDeleteDialog}
       onConfirm={confirmBulkDeleteRuns}
     />
   )
 
-  const renderBulkDeleteDialog = () => (
-    <DreamweaverBulkDeleteDialogShell
-      open={bulkDeleteDialogOpen}
-      onClose={closeBulkDeleteDialog}
-      content={renderBulkDeleteDialogContent()}
-      actions={renderBulkDeleteDialogActions()}
-    />
-  )
-
-  const renderDeleteRunDialogContent = () => (
-    <DreamweaverDeleteRunDialogContent runId={deleteRunId} error={deleteDialogError} />
-  )
-
-  const renderDeleteRunDialogActions = () => (
-    <DreamweaverDeleteRunDialogActions
-      submitting={deleteSubmitting}
-      hasRunId={Boolean(deleteRunId)}
-      onClose={closeDeleteRunDialog}
-      onConfirm={confirmDeleteRun}
-    />
-  )
-
   const renderDeleteRunDialog = () => (
-    <DreamweaverDeleteRunDialogShell
+    <DreamweaverDeleteRunDialog
       open={deleteDialogOpen}
       onClose={closeDeleteRunDialog}
-      content={renderDeleteRunDialogContent()}
-      actions={renderDeleteRunDialogActions()}
+      runId={deleteRunId}
+      error={deleteDialogError}
+      submitting={deleteSubmitting}
+      onConfirm={confirmDeleteRun}
     />
   )
 
@@ -6292,17 +5556,6 @@ export default function DreamWeaverRunPage() {
     setTaskPointsPrecheckError(null)
     setError(null)
   }
-
-  const renderConfigDialogTitle = () => (
-    <DreamweaverConfigDialogTitle
-      title="生成配置"
-      subtitle={
-        (selectedProject?.title || (selectedProjectId ? `项目 #${selectedProjectId}` : '请选择项目')) +
-        (chapters.length ? ` · 已选 ${selectedChapterIds.length}/${chapters.length} 章` : '')
-      }
-      onClose={closeConfigDialog}
-    />
-  )
 
   const renderConfigDialogErrorNotice = () => {
     if (taskPointsPrecheckError) {
@@ -6326,238 +5579,126 @@ export default function DreamWeaverRunPage() {
     return null
   }
 
-  const renderConfigDialogProjectSection = () => (
-    <DreamweaverConfigDialogProjectSection
-      lockedProjectId={lockedProjectId}
-      projectTitle={selectedProject?.title}
-      action={
-        <DreamweaverConfigDialogProjectAlertAction
-          onClick={() => {
-            closeConfigDialog()
-            navigate('/drama')
-          }}
-        />
-      }
-    />
-  )
-
-  const renderConfigDialogChapterSelectionCard = () => (
-    <DreamweaverConfigDialogChapterSelectionCard
-      toolbarActions={
-        <DreamweaverConfigDialogChapterToolbar
-          toggleAllLabel={selectedChapterIds.length === chapters.length ? '清空' : '全选'}
-          onToggleAll={handleSelectAll}
-          toggleAllDisabled={loadingChapters || !chapters.length || running}
-          refreshStartIcon={<RefreshIcon fontSize="small" />}
-          onRefresh={() => {
-            if (selectedProjectId) void handleSelectProject(selectedProjectId)
-          }}
-          refreshDisabled={loadingChapters || !selectedProjectId || running}
-        />
-      }
-      listContent={
-        <DreamweaverConfigDialogChapterList loading={loadingChapters}>
-          {chapters.map((chapter) => {
-            const raw = String(chapter.content || '').replace(/\s+/g, ' ').trim()
-            const snippet = raw ? (raw.length > 64 ? raw.slice(0, 64) + '…' : raw) : '（无正文）'
-
-            return (
-              <DreamweaverConfigDialogChapterItem
-                key={chapter.id}
-                chapterId={chapter.id}
-                title={`${chapter.chapter_number}. ${chapter.title || '未命名章节'}`}
-                snippet={snippet}
-                checked={selectedChapterIds.includes(chapter.id)}
-                disabled={running}
-                onToggle={handleToggleChapter}
-              />
-            )
-          })}
-        </DreamweaverConfigDialogChapterList>
-      }
-      helperText="至少选择 1 个章节；默认全选可直接开始生成。"
-      maxHeight={configDialogFullScreen ? '55vh' : 360}
-    />
-  )
-
-  const renderConfigDialogStrategyFields = () => {
-    const fields = [
-      {
-        key: 'quality-mode',
-        title: '成本 / 质量',
-        checked: highQuality,
-        onChange: setHighQuality,
-        enabledLabel: '最高质量',
-        disabledLabel: '低成本',
-        description: highQuality ? '多候选 + 语义评选 + 图片编辑 + 语义质检' : '单候选 + 关闭编辑/语义质检',
-      },
-      {
-        key: 'smart-tuning',
-        title: '智能调参',
-        checked: smartTuning,
-        onChange: setSmartTuning,
-        enabledLabel: '智能调参',
-        disabledLabel: '手动调参',
-        description: '质量优先：按镜头规模自动调候选数与语义质检预算。',
-      },
-      {
-        key: 'video-confirmation',
-        title: '视频逐段确认',
-        checked: videoRequireConfirmation,
-        onChange: setVideoRequireConfirmation,
-        enabledLabel: '逐段确认',
-        disabledLabel: '自动生成',
-        description: 'VIDEO 阶段先生成任务卡，确认后按镜头生成视频；桥接依赖会自动阻塞提示。',
-      },
-      {
-        key: 'prompt-review',
-        title: '提示词审核',
-        checked: promptReviewRequired,
-        onChange: setPromptReviewRequired,
-        enabledLabel: '先审提示词',
-        disabledLabel: '直接生成',
-        description: '生成关键帧/视频前先停在提示词审核，可修改后再提交生成任务。',
-      },
-      {
-        key: 'qc-allow-fail',
-        title: '质检失败处理',
-        checked: qcAllowFail,
-        onChange: setQcAllowFail,
-        enabledLabel: '仅警告',
-        disabledLabel: '严格拦截',
-        description: 'AutoQC 失败可仅警告放行；文件校验（audit）仍会拦截。',
-      },
-    ]
-
-    return fields.map((field) => (
-      <DreamweaverConfigDialogStrategyToggleField
-        key={field.key}
-        title={field.title}
-        checked={field.checked}
-        onChange={field.onChange}
-        enabledLabel={field.enabledLabel}
-        disabledLabel={field.disabledLabel}
-        description={field.description}
-        disabled={running}
-      />
-    ))
-  }
-
-  const renderConfigDialogStrategyCard = () => (
-    <DreamweaverConfigDialogStrategyCard
-      content={
-        <>
-          {renderConfigDialogStrategyFields()}
-          <DreamweaverConfigDialogExperimentField value={abVariant} onChange={setAbVariant} disabled={running} />
-        </>
-      }
-      helperText="性能提示：关键帧镜头级并发由后端环境变量 `DREAMWEAVER_KEYFRAMES_PARALLELISM` 控制，建议先从 `2` 开始，避免把上游 QPS 打满。"
-    />
-  )
-
-  const renderConfigDialogVisualSettingsCard = () => (
-    <DreamweaverConfigDialogVisualSettingsCard
-      notices={
-        <>
-          {lockedGenerationConfigError && (
-            <Alert severity="warning" sx={{ mb: 1 }}>
-              {lockedGenerationConfigError}
-            </Alert>
-          )}
-          {generationConfigLocked && (
-            <Alert severity="info" sx={{ mb: 1 }}>
-              当前项目的风格/比例/分辨率已锁定，生成过程中不允许切换；如需变更请新建项目或先清理该项目的 DreamWeaver runs。
-              {lockedGenerationConfig?.source_run_id ? `（锁定来源：${lockedGenerationConfig.source_run_id}）` : ''}
-            </Alert>
-          )}
-        </>
-      }
-      fields={
-        <Grid container spacing={1.5}>
-          <Grid item xs={12}>
-            <DreamweaverConfigDialogSelectField
-              labelId="style-preset-label"
-              label="风格预设"
-              value={stylePreset}
-              onChange={setStylePreset}
-              disabled={running || lockedGenerationConfigLoading || generationConfigLocked}
-              options={Object.values(STYLE_PRESETS).map((optionValue) => ({
-                value: optionValue,
-                label: STYLE_PRESET_LABELS[optionValue] || optionValue,
-              }))}
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <DreamweaverConfigDialogSelectField
-              labelId="image-ratio-label"
-              label="画面比例"
-              value={imageRatio}
-              onChange={setImageRatio}
-              disabled={running || lockedGenerationConfigLoading || generationConfigLocked}
-              options={Object.values(IMAGE_RATIOS).map((optionValue) => ({
-                value: optionValue,
-                label: IMAGE_RATIOS_LABELS[optionValue] || optionValue,
-              }))}
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <DreamweaverConfigDialogSelectField
-              labelId="image-resolution-label"
-              label="分辨率"
-              value={imageResolution}
-              onChange={setImageResolution}
-              disabled={running || lockedGenerationConfigLoading || generationConfigLocked}
-              options={Object.values(IMAGE_RESOLUTIONS).map((optionValue) => ({
-                value: optionValue,
-                label: IMAGE_RESOLUTIONS_LABELS[optionValue] || optionValue,
-              }))}
-            />
-          </Grid>
-        </Grid>
-      }
-      helperText="比例决定横/竖屏；分辨率影响素材库、关键帧与合成视频输出尺寸。"
-    />
-  )
-
   const runFromConfigDialog = async () => {
     const ok = await handleRun()
     if (ok) closeConfigDialog()
   }
 
-  const renderConfigDialogContent = () => (
-    <DreamweaverConfigDialogContent
-      errorNotice={renderConfigDialogErrorNotice()}
-      projectSection={renderConfigDialogProjectSection()}
-      mainGrid={
-        <DreamweaverConfigDialogMainGrid
-          chapterSelection={renderConfigDialogChapterSelectionCard()}
-          sidePanel={
-            <>
-              {renderConfigDialogStrategyCard()}
-              {renderConfigDialogVisualSettingsCard()}
-            </>
-          }
-        />
-      }
-    />
-  )
-
-  const renderConfigDialogActions = () => (
-    <DreamweaverConfigDialogActions
-      onClose={closeConfigDialog}
-      onRun={runFromConfigDialog}
-      runDisabled={running || lockedGenerationConfigLoading || !selectedProjectId || selectedChapterIds.length === 0}
-    />
-  )
-
   const renderConfigDialog = () => (
-    <DreamweaverConfigDialogShell
+    <DreamweaverRunConfigDialog
       open={configDialogOpen}
       onClose={closeConfigDialog}
       fullScreen={configDialogFullScreen}
-      title={renderConfigDialogTitle()}
-      content={renderConfigDialogContent()}
-      actions={renderConfigDialogActions()}
+      subtitle={
+        (selectedProject?.title || (selectedProjectId ? `项目 #${selectedProjectId}` : '请选择项目')) +
+        (chapters.length ? ` · 已选 ${selectedChapterIds.length}/${chapters.length} 章` : '')
+      }
+      errorNotice={renderConfigDialogErrorNotice()}
+      lockedProjectId={lockedProjectId}
+      projectTitle={selectedProject?.title}
+      onOpenProjectList={() => {
+        closeConfigDialog()
+        navigate('/drama')
+      }}
+      selectedChapterIds={selectedChapterIds}
+      chapters={chapters}
+      loadingChapters={loadingChapters}
+      running={running}
+      onToggleAll={handleSelectAll}
+      onRefreshChapters={() => {
+        if (selectedProjectId) void handleSelectProject(selectedProjectId)
+      }}
+      refreshDisabled={loadingChapters || !selectedProjectId || running}
+      onToggleChapter={handleToggleChapter}
+      strategyFields={[
+        {
+          key: 'quality-mode',
+          title: '成本 / 质量',
+          checked: highQuality,
+          onChange: setHighQuality,
+          enabledLabel: '最高质量',
+          disabledLabel: '低成本',
+          description: highQuality ? '多候选 + 语义评选 + 图片编辑 + 语义质检' : '单候选 + 关闭编辑/语义质检',
+        },
+        {
+          key: 'smart-tuning',
+          title: '智能调参',
+          checked: smartTuning,
+          onChange: setSmartTuning,
+          enabledLabel: '智能调参',
+          disabledLabel: '手动调参',
+          description: '质量优先：按镜头规模自动调候选数与语义质检预算。',
+        },
+        {
+          key: 'video-confirmation',
+          title: '视频逐段确认',
+          checked: videoRequireConfirmation,
+          onChange: setVideoRequireConfirmation,
+          enabledLabel: '逐段确认',
+          disabledLabel: '自动生成',
+          description: 'VIDEO 阶段先生成任务卡，确认后按镜头生成视频；桥接依赖会自动阻塞提示。',
+        },
+        {
+          key: 'prompt-review',
+          title: '提示词审核',
+          checked: promptReviewRequired,
+          onChange: setPromptReviewRequired,
+          enabledLabel: '先审提示词',
+          disabledLabel: '直接生成',
+          description: '生成关键帧/视频前先停在提示词审核，可修改后再提交生成任务。',
+        },
+        {
+          key: 'qc-allow-fail',
+          title: '质检失败处理',
+          checked: qcAllowFail,
+          onChange: setQcAllowFail,
+          enabledLabel: '仅警告',
+          disabledLabel: '严格拦截',
+          description: 'AutoQC 失败可仅警告放行；文件校验（audit）仍会拦截。',
+        },
+      ]}
+      abVariant={abVariant}
+      onChangeAbVariant={setAbVariant}
+      lockedGenerationConfigError={lockedGenerationConfigError}
+      generationConfigLocked={generationConfigLocked}
+      lockedGenerationConfigSourceRunId={lockedGenerationConfig?.source_run_id}
+      stylePresetValue={stylePreset}
+      onStylePresetChange={setStylePreset}
+      stylePresetOptions={Object.values(STYLE_PRESETS).map((optionValue) => ({
+        value: optionValue,
+        label: STYLE_PRESET_LABELS[optionValue] || optionValue,
+      }))}
+      imageRatioValue={imageRatio}
+      onImageRatioChange={setImageRatio}
+      imageRatioOptions={Object.values(IMAGE_RATIOS).map((optionValue) => ({
+        value: optionValue,
+        label: IMAGE_RATIOS_LABELS[optionValue] || optionValue,
+      }))}
+      imageResolutionValue={imageResolution}
+      onImageResolutionChange={setImageResolution}
+      imageResolutionOptions={Object.values(IMAGE_RESOLUTIONS).map((optionValue) => ({
+        value: optionValue,
+        label: IMAGE_RESOLUTIONS_LABELS[optionValue] || optionValue,
+      }))}
+      visualFieldsDisabled={running || lockedGenerationConfigLoading || generationConfigLocked}
+      imageModelValue={imageModel}
+      onImageModelChange={setImageModel}
+      imageModelOptions={IMAGE_MODEL_OPTIONS}
+      videoModelValue={videoModel}
+      onVideoModelChange={setVideoModel}
+      videoModelOptions={VIDEO_MODEL_OPTIONS}
+      videoEditModelValue={videoEditModel}
+      onVideoEditModelChange={setVideoEditModel}
+      videoEditModelOptions={VIDEO_EDIT_MODEL_OPTIONS}
+      visionModelValue={visionModel}
+      onVisionModelChange={setVisionModel}
+      visionModelOptions={VISION_MODEL_OPTIONS}
+      enableVideoEdit={enableVideoEdit}
+      onEnableVideoEditChange={setEnableVideoEdit}
+      enableVisionReview={enableVisionReview}
+      onEnableVisionReviewChange={setEnableVisionReview}
+      onRun={runFromConfigDialog}
+      runDisabled={running || lockedGenerationConfigLoading || !selectedProjectId || selectedChapterIds.length === 0}
     />
   )
 
@@ -6604,36 +5745,8 @@ export default function DreamWeaverRunPage() {
     void restartGeneration('KEYFRAMES', undefined, unique)
   }
 
-  const renderWorkbenchRestartMenuItem = ({
-    itemKey,
-    label,
-    onClick,
-  }: {
-    itemKey: string
-    label: string
-    onClick: () => void
-  }) => (
-    <MenuItem key={itemKey} onClick={onClick} disabled={!currentRunId || running || restartLoading}>
-      {label}
-    </MenuItem>
-  )
-
-  const renderWorkbenchRestartMenuItems = () => {
-    const items = [
-      { itemKey: 'edit', label: '重新合成（EDIT）', onClick: () => triggerRestartFromStage('EDIT') },
-      { itemKey: 'video', label: '从镜头视频（VIDEO）重跑', onClick: () => triggerRestartFromStage('VIDEO') },
-      { itemKey: 'video-shots', label: '重跑指定镜头视频（VIDEO）…', onClick: requestRestartVideoShots },
-      { itemKey: 'keyframes', label: '从关键帧（KEYFRAMES）重跑', onClick: () => triggerRestartFromStage('KEYFRAMES') },
-      { itemKey: 'keyframe-cameras', label: '重跑指定相机关键帧（KEYFRAMES）…', onClick: requestRestartKeyframeCameras },
-      { itemKey: 'storyboard', label: '从分镜（STORYBOARD）重跑', onClick: () => triggerRestartFromStage('STORYBOARD') },
-      { itemKey: 'script', label: '从剧本（SCRIPT）重跑', onClick: () => triggerRestartFromStage('SCRIPT') },
-    ]
-
-    return items.map(renderWorkbenchRestartMenuItem)
-  }
-
-  const renderWorkbenchStatusChips = () => (
-    <DreamweaverWorkbenchStatusChipRow
+  const renderWorkbenchStatusPanel = () => (
+    <DreamweaverWorkbenchStatusScaffold
       runId={runId}
       progressLabel={progressLabel}
       stateLabel={stateLabel}
@@ -6641,93 +5754,90 @@ export default function DreamWeaverRunPage() {
       taskStatusLabel={taskStatusLabel}
       taskQueue={taskQueue}
       taskStatusColor={taskStatusColor}
-    />
-  )
-
-  const renderWorkbenchStatusPrimaryActions = () => {
-    const items = [
-      {
-        label: '复制调试信息',
-        onClick: copyDebugInfo,
-        startIcon: <ContentCopyIcon fontSize="small" />,
-      },
-      {
-        label: '诊断面板',
-        onClick: openDiagnosticDialog,
-        disabled: !currentRunId,
-        startIcon: <BugReportIcon fontSize="small" />,
-      },
-      {
-        label: '历史记录',
-        onClick: openHistoryDialog,
-        disabled: !selectedProjectId,
-        startIcon: <HistoryIcon fontSize="small" />,
-      },
-      {
-        label: '配置',
-        onClick: openConfigDialog,
-      },
-    ]
-
-    return items.map((item) => (
-      <DreamweaverWorkbenchStatusActionButton
-        key={item.label}
-        label={item.label}
-        onClick={item.onClick}
-        disabled={item.disabled}
-        startIcon={item.startIcon}
-      />
-    ))
-  }
-
-  const renderWorkbenchStatusRestartAction = () => (
-    <DreamweaverWorkbenchRestartAction
-      label={restartLoading ? '重跑中…' : '重跑'}
-      startIcon={<RefreshIcon fontSize="small" />}
-      onClick={(e) => setRestartAnchorEl(e.currentTarget)}
-      disabled={!currentRunId || running || restartLoading}
-    />
-  )
-
-  const renderWorkbenchRestartMenu = () => (
-    <DreamweaverWorkbenchRestartMenu
-      anchorEl={restartAnchorEl}
-      open={Boolean(restartAnchorEl)}
-      onClose={closeRestartMenu}
-      items={renderWorkbenchRestartMenuItems()}
-    />
-  )
-
-  const renderWorkbenchStatusRightActions = () => (
-    <DreamweaverWorkbenchStatusRightActions
+      actionItems={[
+        {
+          key: 'copy-debug',
+          label: '复制调试信息',
+          onClick: copyDebugInfo,
+          startIcon: <ContentCopyIcon fontSize="small" />,
+        },
+        {
+          key: 'diagnostics',
+          label: '诊断面板',
+          onClick: openDiagnosticDialog,
+          disabled: !currentRunId,
+          startIcon: <BugReportIcon fontSize="small" />,
+        },
+        {
+          key: 'history',
+          label: '历史记录',
+          onClick: openHistoryDialog,
+          disabled: !selectedProjectId,
+          startIcon: <HistoryIcon fontSize="small" />,
+        },
+        {
+          key: 'config',
+          label: '配置',
+          onClick: openConfigDialog,
+        },
+      ]}
+      restartActionLabel={restartLoading ? '重跑中…' : '重跑'}
+      restartActionDisabled={!currentRunId || running || restartLoading}
+      restartActionStartIcon={<RefreshIcon fontSize="small" />}
+      onOpenRestartMenu={(e) => setRestartAnchorEl(e.currentTarget)}
+      restartAnchorEl={restartAnchorEl}
+      restartOpen={Boolean(restartAnchorEl)}
+      onCloseRestartMenu={closeRestartMenu}
+      restartMenuItems={[
+        {
+          key: 'edit',
+          label: '重新合成（EDIT）',
+          onClick: () => triggerRestartFromStage('EDIT'),
+          disabled: !currentRunId || running || restartLoading,
+        },
+        {
+          key: 'video',
+          label: '从镜头视频（VIDEO）重跑',
+          onClick: () => triggerRestartFromStage('VIDEO'),
+          disabled: !currentRunId || running || restartLoading,
+        },
+        {
+          key: 'video-shots',
+          label: '重跑指定镜头视频（VIDEO）…',
+          onClick: requestRestartVideoShots,
+          disabled: !currentRunId || running || restartLoading,
+        },
+        {
+          key: 'keyframes',
+          label: '从关键帧（KEYFRAMES）重跑',
+          onClick: () => triggerRestartFromStage('KEYFRAMES'),
+          disabled: !currentRunId || running || restartLoading,
+        },
+        {
+          key: 'keyframe-cameras',
+          label: '重跑指定相机关键帧（KEYFRAMES）…',
+          onClick: requestRestartKeyframeCameras,
+          disabled: !currentRunId || running || restartLoading,
+        },
+        {
+          key: 'storyboard',
+          label: '从分镜（STORYBOARD）重跑',
+          onClick: () => triggerRestartFromStage('STORYBOARD'),
+          disabled: !currentRunId || running || restartLoading,
+        },
+        {
+          key: 'script',
+          label: '从剧本（SCRIPT）重跑',
+          onClick: () => triggerRestartFromStage('SCRIPT'),
+          disabled: !currentRunId || running || restartLoading,
+        },
+      ]}
       followVisible={manualPreviewStep && previewStep !== progressStep}
       onFollow={followProgressStep}
-    />
-  )
-
-  const renderWorkbenchStepper = () => (
-    <DreamweaverWorkbenchStepper
-      labels={DREAMWEAVER_PREVIEW_STEPS}
+      stepLabels={DREAMWEAVER_PREVIEW_STEPS}
       activeStep={previewStep}
       progressStep={progressStep}
       onStepClick={handleClickStep}
-    />
-  )
-
-  const renderWorkbenchStatusPanelPrimarySection = () => (
-    <DreamweaverWorkbenchStatusPrimarySection
-      chips={renderWorkbenchStatusChips()}
-      actions={renderWorkbenchStatusPrimaryActions()}
-      restartAction={renderWorkbenchStatusRestartAction()}
-      restartMenu={renderWorkbenchRestartMenu()}
-    />
-  )
-
-  const renderWorkbenchStatusPanel = () => (
-    <DreamweaverWorkbenchStatusPanel
-      primarySection={renderWorkbenchStatusPanelPrimarySection()}
-      rightActions={renderWorkbenchStatusRightActions()}
-      stepper={renderWorkbenchStepper()}
     />
   )
 
@@ -6783,32 +5893,12 @@ export default function DreamWeaverRunPage() {
     )
   }
 
-  const renderRunPageHero = () => (
-    <>
-      <Button
-        variant="text"
-        startIcon={<ArrowBackIcon />}
-        sx={{ color: 'white', mb: 2 }}
-        onClick={() => navigate('/drama')}
-      >
-        返回项目列表
-      </Button>
-
-      <Typography variant="h4" sx={{ color: 'white', fontWeight: 700, mb: 0.5 }}>
-        织梦映心 · 生成流程
-      </Typography>
-      <Typography variant="body1" sx={{ color: 'rgba(255,255,255,0.85)', mb: 3 }}>
-        读取项目章节内容，生成分镜、首尾帧、分镜片段并合成成片；支持进度轮询与产物预览。
-      </Typography>
-    </>
-  )
-
   const renderRunPageAlerts = () => (
-    <>
-      {renderRunPageErrorAlert()}
-      {renderRunPageQcWarningAlert()}
-      {renderRunPagePreflightAlert()}
-    </>
+    <DreamweaverRunPageAlerts
+      errorAlert={renderRunPageErrorAlert()}
+      qcWarningAlert={renderRunPageQcWarningAlert()}
+      preflightAlert={renderRunPagePreflightAlert()}
+    />
   )
 
   const renderWorkbenchTaskHeader = () => (
@@ -6821,8 +5911,6 @@ export default function DreamWeaverRunPage() {
       waitingApproval={waitingApproval}
     />
   )
-
-  const renderWorkbenchCardHeader = () => <DreamweaverWorkbenchCardHeader running={running} taskProgress={taskProgress} />
 
   const renderWorkbenchMainContent = () => (!result ? renderPendingView() : renderResultView())
 
@@ -6838,8 +5926,9 @@ export default function DreamWeaverRunPage() {
   )
 
   const renderWorkbenchCard = () => (
-    <DreamweaverWorkbenchCardShell
-      header={renderWorkbenchCardHeader()}
+    <DreamweaverWorkbenchCard
+      running={running}
+      taskProgress={taskProgress}
       statusPanel={renderWorkbenchStatusPanel()}
       taskHeader={renderWorkbenchTaskHeader()}
       mainContent={renderWorkbenchMainContent()}
@@ -6847,23 +5936,14 @@ export default function DreamWeaverRunPage() {
     />
   )
 
-  const renderRunWorkbenchSection = () => (
-    <DreamweaverWorkbenchSection alerts={renderRunPageAlerts()} card={renderWorkbenchCard()} />
-  )
-
-  const renderRunPageContent = () => (
-    <>
-      {renderConfigDialog()}
-      {renderRunWorkbenchSection()}
-    </>
-  )
-
   return (
-    <Box sx={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', py: 4 }}>
-      <Container maxWidth="lg">
-        {renderRunPageHero()}
-        {renderRunPageContent()}
-      </Container>
-    </Box>
+    <DreamweaverRunPageScaffold
+      onBack={() => navigate('/drama')}
+      heroTitle="织梦映心 · 生成流程"
+      heroDescription="读取项目章节内容，生成分镜、首尾帧、分镜片段并合成成片；支持进度轮询与产物预览。"
+      configDialog={renderConfigDialog()}
+      alerts={renderRunPageAlerts()}
+      workbenchCard={renderWorkbenchCard()}
+    />
   )
 }

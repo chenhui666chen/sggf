@@ -1478,6 +1478,13 @@ class ApiClient {
     })
   }
 
+  generateAssetStudioVideoEdit(payload: FormData) {
+    return this.client.post<AssetStudioGenerateResponse>('/api/v1/asset-studio/video-edit', payload, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 600000,
+    })
+  }
+
   reviewAssetStudioVision(payload: FormData) {
     return this.client.post<AssetStudioVisionReviewResponse>('/api/v1/asset-studio/vision-review', payload, {
       headers: { 'Content-Type': 'multipart/form-data' },

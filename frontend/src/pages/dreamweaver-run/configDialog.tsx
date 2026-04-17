@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import CloseIcon from '@mui/icons-material/Close'
+import RefreshIcon from '@mui/icons-material/Refresh'
 import {
   Alert,
   Box,
@@ -245,6 +246,46 @@ export function DreamweaverConfigDialogChapterList({
   return <List dense disablePadding>{children}</List>
 }
 
+type DreamweaverConfigDialogChapterListItemsProps = {
+  chapters: Array<{
+    id: number
+    chapter_number: number | string
+    title?: string | null
+    content?: string | null
+  }>
+  selectedChapterIds: number[]
+  disabled: boolean
+  onToggle: (chapterId: number) => void
+}
+
+export function DreamweaverConfigDialogChapterListItems({
+  chapters,
+  selectedChapterIds,
+  disabled,
+  onToggle,
+}: DreamweaverConfigDialogChapterListItemsProps) {
+  return (
+    <>
+      {chapters.map((chapter) => {
+        const raw = String(chapter.content || '').replace(/\s+/g, ' ').trim()
+        const snippet = raw ? (raw.length > 64 ? raw.slice(0, 64) + '…' : raw) : '（无正文）'
+
+        return (
+          <DreamweaverConfigDialogChapterItem
+            key={chapter.id}
+            chapterId={chapter.id}
+            title={`${chapter.chapter_number}. ${chapter.title || '未命名章节'}`}
+            snippet={snippet}
+            checked={selectedChapterIds.includes(chapter.id)}
+            disabled={disabled}
+            onToggle={onToggle}
+          />
+        )
+      })}
+    </>
+  )
+}
+
 type DreamweaverConfigDialogStrategyCardProps = {
   content: ReactNode
   helperText: string
@@ -303,6 +344,46 @@ export function DreamweaverConfigDialogStrategyToggleField({
         {description}
       </Typography>
     </Stack>
+  )
+}
+
+type DreamweaverConfigDialogStrategyFieldsProps = {
+  fields: Array<{
+    key: string
+    title: string
+    checked: boolean
+    onChange: (checked: boolean) => void
+    enabledLabel: string
+    disabledLabel: string
+    description: string
+  }>
+  abVariant: string
+  onChangeAbVariant: (value: string) => void
+  disabled?: boolean
+}
+
+export function DreamweaverConfigDialogStrategyFields({
+  fields,
+  abVariant,
+  onChangeAbVariant,
+  disabled = false,
+}: DreamweaverConfigDialogStrategyFieldsProps) {
+  return (
+    <>
+      {fields.map((field) => (
+        <DreamweaverConfigDialogStrategyToggleField
+          key={field.key}
+          title={field.title}
+          checked={field.checked}
+          onChange={field.onChange}
+          enabledLabel={field.enabledLabel}
+          disabledLabel={field.disabledLabel}
+          description={field.description}
+          disabled={disabled}
+        />
+      ))}
+      <DreamweaverConfigDialogExperimentField value={abVariant} onChange={onChangeAbVariant} disabled={disabled} />
+    </>
   )
 }
 
@@ -395,6 +476,176 @@ export function DreamweaverConfigDialogVisualSettingsCard({
   )
 }
 
+type DreamweaverConfigDialogVisualFieldGridProps = {
+  stylePresetValue: string
+  onStylePresetChange: (value: string) => void
+  stylePresetOptions: Array<{ value: string; label: string }>
+  imageRatioValue: string
+  onImageRatioChange: (value: string) => void
+  imageRatioOptions: Array<{ value: string; label: string }>
+  imageResolutionValue: string
+  onImageResolutionChange: (value: string) => void
+  imageResolutionOptions: Array<{ value: string; label: string }>
+  disabled?: boolean
+}
+
+export function DreamweaverConfigDialogVisualFieldGrid({
+  stylePresetValue,
+  onStylePresetChange,
+  stylePresetOptions,
+  imageRatioValue,
+  onImageRatioChange,
+  imageRatioOptions,
+  imageResolutionValue,
+  onImageResolutionChange,
+  imageResolutionOptions,
+  disabled = false,
+}: DreamweaverConfigDialogVisualFieldGridProps) {
+  return (
+    <Grid container spacing={1.5}>
+      <Grid item xs={12}>
+        <DreamweaverConfigDialogSelectField
+          labelId="style-preset-label"
+          label="风格预设"
+          value={stylePresetValue}
+          onChange={onStylePresetChange}
+          disabled={disabled}
+          options={stylePresetOptions}
+        />
+      </Grid>
+      <Grid item xs={12} sm={6}>
+        <DreamweaverConfigDialogSelectField
+          labelId="image-ratio-label"
+          label="画面比例"
+          value={imageRatioValue}
+          onChange={onImageRatioChange}
+          disabled={disabled}
+          options={imageRatioOptions}
+        />
+      </Grid>
+      <Grid item xs={12} sm={6}>
+        <DreamweaverConfigDialogSelectField
+          labelId="image-resolution-label"
+          label="分辨率"
+          value={imageResolutionValue}
+          onChange={onImageResolutionChange}
+          disabled={disabled}
+          options={imageResolutionOptions}
+        />
+      </Grid>
+    </Grid>
+  )
+}
+
+type DreamweaverConfigDialogModelFieldGridProps = {
+  imageModelValue: string
+  onImageModelChange: (value: string) => void
+  imageModelOptions: Array<{ value: string; label: string }>
+  videoModelValue: string
+  onVideoModelChange: (value: string) => void
+  videoModelOptions: Array<{ value: string; label: string }>
+  videoEditModelValue: string
+  onVideoEditModelChange: (value: string) => void
+  videoEditModelOptions: Array<{ value: string; label: string }>
+  visionModelValue: string
+  onVisionModelChange: (value: string) => void
+  visionModelOptions: Array<{ value: string; label: string }>
+  enableVideoEdit: boolean
+  onEnableVideoEditChange: (value: boolean) => void
+  enableVisionReview: boolean
+  onEnableVisionReviewChange: (value: boolean) => void
+  disabled?: boolean
+}
+
+export function DreamweaverConfigDialogModelFieldGrid({
+  imageModelValue,
+  onImageModelChange,
+  imageModelOptions,
+  videoModelValue,
+  onVideoModelChange,
+  videoModelOptions,
+  videoEditModelValue,
+  onVideoEditModelChange,
+  videoEditModelOptions,
+  visionModelValue,
+  onVisionModelChange,
+  visionModelOptions,
+  enableVideoEdit,
+  onEnableVideoEditChange,
+  enableVisionReview,
+  onEnableVisionReviewChange,
+  disabled = false,
+}: DreamweaverConfigDialogModelFieldGridProps) {
+  return (
+    <Grid container spacing={1.5}>
+      <Grid item xs={12} sm={6}>
+        <DreamweaverConfigDialogSelectField
+          labelId="image-model-label"
+          label="图像生成模型"
+          value={imageModelValue}
+          onChange={onImageModelChange}
+          disabled={disabled}
+          options={imageModelOptions}
+        />
+      </Grid>
+      <Grid item xs={12} sm={6}>
+        <DreamweaverConfigDialogSelectField
+          labelId="video-model-label"
+          label="视频生成模型"
+          value={videoModelValue}
+          onChange={onVideoModelChange}
+          disabled={disabled}
+          options={videoModelOptions}
+        />
+      </Grid>
+      <Grid item xs={12}>
+        <DreamweaverConfigDialogStrategyToggleField
+          title="视频编辑功能"
+          checked={enableVideoEdit}
+          onChange={onEnableVideoEditChange}
+          enabledLabel="已启用"
+          disabledLabel="未启用"
+          description="启用后可使用视频编辑模型进行分镜精剪、风格迁移和多片段融合。"
+        />
+      </Grid>
+      {enableVideoEdit && (
+        <Grid item xs={12} sm={6}>
+          <DreamweaverConfigDialogSelectField
+            labelId="video-edit-model-label"
+            label="视频编辑模型"
+            value={videoEditModelValue}
+            onChange={onVideoEditModelChange}
+            disabled={disabled}
+            options={videoEditModelOptions}
+          />
+        </Grid>
+      )}
+      <Grid item xs={12}>
+        <DreamweaverConfigDialogStrategyToggleField
+          title="视觉理解审查"
+          checked={enableVisionReview}
+          onChange={onEnableVisionReviewChange}
+          enabledLabel="已启用"
+          disabledLabel="未启用"
+          description="启用后在生成过程中自动使用视觉模型评估图像/视频质量，并给出改进建议。"
+        />
+      </Grid>
+      {enableVisionReview && (
+        <Grid item xs={12} sm={6}>
+          <DreamweaverConfigDialogSelectField
+            labelId="vision-model-label"
+            label="视觉理解模型"
+            value={visionModelValue}
+            onChange={onVisionModelChange}
+            disabled={disabled}
+            options={visionModelOptions}
+          />
+        </Grid>
+      )}
+    </Grid>
+  )
+}
+
 type DreamweaverConfigDialogMainGridProps = {
   chapterSelection: ReactNode
   sidePanel: ReactNode
@@ -483,5 +734,313 @@ export function DreamweaverConfigDialogShell({
       {content}
       {actions}
     </Dialog>
+  )
+}
+
+type DreamweaverConfigDialogProps = {
+  open: boolean
+  onClose: () => void
+  fullScreen: boolean
+  title: string
+  subtitle: string
+  errorNotice?: ReactNode
+  lockedProjectId?: number | null
+  projectTitle?: string | null
+  onOpenProjectList: () => void
+  chapterToolbar: ReactNode
+  chapterList: ReactNode
+  chapterHelperText: string
+  chapterMaxHeight: string | number
+  strategyContent: ReactNode
+  strategyHelperText: string
+  visualNotices?: ReactNode
+  visualFields: ReactNode
+  visualHelperText: string
+  onRun: () => void
+  runDisabled: boolean
+}
+
+export function DreamweaverConfigDialog({
+  open,
+  onClose,
+  fullScreen,
+  title,
+  subtitle,
+  errorNotice,
+  lockedProjectId,
+  projectTitle,
+  onOpenProjectList,
+  chapterToolbar,
+  chapterList,
+  chapterHelperText,
+  chapterMaxHeight,
+  strategyContent,
+  strategyHelperText,
+  visualNotices,
+  visualFields,
+  visualHelperText,
+  onRun,
+  runDisabled,
+}: DreamweaverConfigDialogProps) {
+  return (
+    <DreamweaverConfigDialogShell
+      open={open}
+      onClose={onClose}
+      fullScreen={fullScreen}
+      title={<DreamweaverConfigDialogTitle title={title} subtitle={subtitle} onClose={onClose} />}
+      content={
+        <DreamweaverConfigDialogContent
+          errorNotice={errorNotice}
+          projectSection={
+            <DreamweaverConfigDialogProjectSection
+              lockedProjectId={lockedProjectId}
+              projectTitle={projectTitle}
+              action={<DreamweaverConfigDialogProjectAlertAction onClick={onOpenProjectList} />}
+            />
+          }
+          mainGrid={
+            <DreamweaverConfigDialogMainGrid
+              chapterSelection={
+                <DreamweaverConfigDialogChapterSelectionCard
+                  toolbarActions={chapterToolbar}
+                  listContent={chapterList}
+                  helperText={chapterHelperText}
+                  maxHeight={chapterMaxHeight}
+                />
+              }
+              sidePanel={
+                <>
+                  <DreamweaverConfigDialogStrategyCard content={strategyContent} helperText={strategyHelperText} />
+                  <DreamweaverConfigDialogVisualSettingsCard
+                    notices={visualNotices}
+                    fields={visualFields}
+                    helperText={visualHelperText}
+                  />
+                </>
+              }
+            />
+          }
+        />
+      }
+      actions={<DreamweaverConfigDialogActions onClose={onClose} onRun={onRun} runDisabled={runDisabled} />}
+    />
+  )
+}
+
+type DreamweaverRunConfigDialogProps = {
+  open: boolean
+  onClose: () => void
+  fullScreen: boolean
+  subtitle: string
+  errorNotice?: ReactNode
+  lockedProjectId?: number | null
+  projectTitle?: string | null
+  onOpenProjectList: () => void
+  selectedChapterIds: number[]
+  chapters: Array<{
+    id: number
+    chapter_number: number | string
+    title?: string | null
+    content?: string | null
+  }>
+  loadingChapters: boolean
+  running: boolean
+  onToggleAll: () => void
+  onRefreshChapters: () => void
+  refreshDisabled: boolean
+  onToggleChapter: (chapterId: number) => void
+  strategyFields: Array<{
+    key: string
+    title: string
+    checked: boolean
+    onChange: (checked: boolean) => void
+    enabledLabel: string
+    disabledLabel: string
+    description: string
+  }>
+  abVariant: string
+  onChangeAbVariant: (value: string) => void
+  lockedGenerationConfigError?: string | null
+  generationConfigLocked: boolean
+  lockedGenerationConfigSourceRunId?: string | null
+  stylePresetValue: string
+  onStylePresetChange: (value: string) => void
+  stylePresetOptions: Array<{ value: string; label: string }>
+  imageRatioValue: string
+  onImageRatioChange: (value: string) => void
+  imageRatioOptions: Array<{ value: string; label: string }>
+  imageResolutionValue: string
+  onImageResolutionChange: (value: string) => void
+  imageResolutionOptions: Array<{ value: string; label: string }>
+  visualFieldsDisabled: boolean
+  imageModelValue: string
+  onImageModelChange: (value: string) => void
+  imageModelOptions: Array<{ value: string; label: string }>
+  videoModelValue: string
+  onVideoModelChange: (value: string) => void
+  videoModelOptions: Array<{ value: string; label: string }>
+  videoEditModelValue: string
+  onVideoEditModelChange: (value: string) => void
+  videoEditModelOptions: Array<{ value: string; label: string }>
+  visionModelValue: string
+  onVisionModelChange: (value: string) => void
+  visionModelOptions: Array<{ value: string; label: string }>
+  enableVideoEdit: boolean
+  onEnableVideoEditChange: (value: boolean) => void
+  enableVisionReview: boolean
+  onEnableVisionReviewChange: (value: boolean) => void
+  onRun: () => void
+  runDisabled: boolean
+}
+
+export function DreamweaverRunConfigDialog({
+  open,
+  onClose,
+  fullScreen,
+  subtitle,
+  errorNotice,
+  lockedProjectId,
+  projectTitle,
+  onOpenProjectList,
+  selectedChapterIds,
+  chapters,
+  loadingChapters,
+  running,
+  onToggleAll,
+  onRefreshChapters,
+  refreshDisabled,
+  onToggleChapter,
+  strategyFields,
+  abVariant,
+  onChangeAbVariant,
+  lockedGenerationConfigError,
+  generationConfigLocked,
+  lockedGenerationConfigSourceRunId,
+  stylePresetValue,
+  onStylePresetChange,
+  stylePresetOptions,
+  imageRatioValue,
+  onImageRatioChange,
+  imageRatioOptions,
+  imageResolutionValue,
+  onImageResolutionChange,
+  imageResolutionOptions,
+  visualFieldsDisabled,
+  imageModelValue,
+  onImageModelChange,
+  imageModelOptions,
+  videoModelValue,
+  onVideoModelChange,
+  videoModelOptions,
+  videoEditModelValue,
+  onVideoEditModelChange,
+  videoEditModelOptions,
+  visionModelValue,
+  onVisionModelChange,
+  visionModelOptions,
+  enableVideoEdit,
+  onEnableVideoEditChange,
+  enableVisionReview,
+  onEnableVisionReviewChange,
+  onRun,
+  runDisabled,
+}: DreamweaverRunConfigDialogProps) {
+  return (
+    <DreamweaverConfigDialog
+      open={open}
+      onClose={onClose}
+      fullScreen={fullScreen}
+      title="生成配置"
+      subtitle={subtitle}
+      errorNotice={errorNotice}
+      lockedProjectId={lockedProjectId}
+      projectTitle={projectTitle}
+      onOpenProjectList={onOpenProjectList}
+      chapterToolbar={
+        <DreamweaverConfigDialogChapterToolbar
+          toggleAllLabel={selectedChapterIds.length === chapters.length ? '清空' : '全选'}
+          onToggleAll={onToggleAll}
+          toggleAllDisabled={loadingChapters || !chapters.length || running}
+          refreshStartIcon={<RefreshIcon fontSize="small" />}
+          onRefresh={onRefreshChapters}
+          refreshDisabled={refreshDisabled}
+        />
+      }
+      chapterList={
+        <DreamweaverConfigDialogChapterList loading={loadingChapters}>
+          <DreamweaverConfigDialogChapterListItems
+            chapters={chapters}
+            selectedChapterIds={selectedChapterIds}
+            disabled={running}
+            onToggle={onToggleChapter}
+          />
+        </DreamweaverConfigDialogChapterList>
+      }
+      chapterHelperText="至少选择 1 个章节；默认全选可直接开始生成。"
+      chapterMaxHeight={fullScreen ? '55vh' : 360}
+      strategyContent={
+        <DreamweaverConfigDialogStrategyFields
+          fields={strategyFields}
+          abVariant={abVariant}
+          onChangeAbVariant={onChangeAbVariant}
+          disabled={running}
+        />
+      }
+      strategyHelperText="性能提示：关键帧镜头级并发由后端环境变量 `DREAMWEAVER_KEYFRAMES_PARALLELISM` 控制，建议先从 `2` 开始，避免把上游 QPS 打满。"
+      visualNotices={
+        <>
+          {lockedGenerationConfigError && (
+            <Alert severity="warning" sx={{ mb: 1 }}>
+              {lockedGenerationConfigError}
+            </Alert>
+          )}
+          {generationConfigLocked && (
+            <Alert severity="info" sx={{ mb: 1 }}>
+              当前项目的风格/比例/分辨率已锁定，生成过程中不允许切换；如需变更请新建项目或先清理该项目的 DreamWeaver runs。
+              {lockedGenerationConfigSourceRunId ? `（锁定来源：${lockedGenerationConfigSourceRunId}）` : ''}
+            </Alert>
+          )}
+        </>
+      }
+      visualFields={
+        <>
+          <DreamweaverConfigDialogVisualFieldGrid
+            stylePresetValue={stylePresetValue}
+            onStylePresetChange={onStylePresetChange}
+            stylePresetOptions={stylePresetOptions}
+            imageRatioValue={imageRatioValue}
+            onImageRatioChange={onImageRatioChange}
+            imageRatioOptions={imageRatioOptions}
+            imageResolutionValue={imageResolutionValue}
+            onImageResolutionChange={onImageResolutionChange}
+            imageResolutionOptions={imageResolutionOptions}
+            disabled={visualFieldsDisabled}
+          />
+          <Box sx={{ mt: 2 }} />
+          <DreamweaverConfigDialogModelFieldGrid
+            imageModelValue={imageModelValue}
+            onImageModelChange={onImageModelChange}
+            imageModelOptions={imageModelOptions}
+            videoModelValue={videoModelValue}
+            onVideoModelChange={onVideoModelChange}
+            videoModelOptions={videoModelOptions}
+            videoEditModelValue={videoEditModelValue}
+            onVideoEditModelChange={onVideoEditModelChange}
+            videoEditModelOptions={videoEditModelOptions}
+            visionModelValue={visionModelValue}
+            onVisionModelChange={onVisionModelChange}
+            visionModelOptions={visionModelOptions}
+            enableVideoEdit={enableVideoEdit}
+            onEnableVideoEditChange={onEnableVideoEditChange}
+            enableVisionReview={enableVisionReview}
+            onEnableVisionReviewChange={onEnableVisionReviewChange}
+            disabled={visualFieldsDisabled}
+          />
+        </>
+      }
+      visualHelperText="比例决定横/竖屏；分辨率影响素材库、关键帧与合成视频输出尺寸。"
+      onRun={onRun}
+      runDisabled={runDisabled}
+    />
   )
 }

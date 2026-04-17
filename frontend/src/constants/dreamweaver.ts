@@ -71,6 +71,44 @@ export const IMAGE_RESOLUTIONS_LABELS: Record<string, string> = {
   [IMAGE_RESOLUTIONS.FHD_1080P]: '1080p (全高清)',
 }
 
+export const IMAGE_MODEL_OPTIONS = [
+  { value: 'wan2.6-t2i', label: 'Wan 2.6 T2I（主力文生图）' },
+  { value: 'qwen-image-2.0', label: 'Qwen Image 2.0' },
+  { value: 'qwen-image-2.0-pro', label: 'Qwen Image 2.0 Pro（旗舰）' },
+  { value: 'wan2.7-image', label: 'Wan 2.7 Image' },
+  { value: 'doubao-seedream-4-5', label: 'Doubao Seedream 4.5' },
+  { value: 'doubao-seedream-5-0', label: 'Doubao Seedream 5.0（最新）' },
+  { value: 'kling-v3-image-generation', label: 'Kling V3 图像生成' },
+  { value: 'kling-v3-omni-image-generation', label: 'Kling V3 Omni 图像生成' },
+  { value: 'qwen-image-edit-plus', label: 'Qwen Image Edit Plus（编辑）' },
+]
+
+export const VIDEO_MODEL_OPTIONS = [
+  { value: 'wan2.7-t2v', label: 'Wan 2.7 T2V（主力视频）' },
+  { value: 'wan2.6-t2v-fast', label: 'Wan 2.6 T2V Fast（快速预览）' },
+  { value: 'wan2.7-i2v', label: 'Wan 2.7 I2V（首帧驱动）' },
+  { value: 'doubao-seedance-2-0', label: 'Doubao Seedance 2.0（SOTA）' },
+  { value: 'doubao-seedance-2-0-fast', label: 'Doubao Seedance 2.0 Fast' },
+  { value: 'doubao-seedance-1-5-pro', label: 'Doubao Seedance 1.5 Pro' },
+  { value: 'kling-v3-video-generation', label: 'Kling V3（可灵）' },
+  { value: 'kling-v3-omni-video-generation', label: 'Kling V3 Omni（全能）' },
+  { value: 'pixverse-v6-t2v', label: 'PixVerse V6' },
+  { value: 'vidu-q3-pro-text2video', label: 'Vidu Q3 Pro 文生视频' },
+  { value: 'vidu-q3-pro-img2video', label: 'Vidu Q3 Pro 图生视频' },
+  { value: 'vidu-q3-pro-start-end2video', label: 'Vidu Q3 Pro 首尾帧' },
+]
+
+export const VIDEO_EDIT_MODEL_OPTIONS = [
+  { value: 'wan2.7-videoedit', label: 'Wan 2.7 VideoEdit（万相编辑）' },
+  { value: 'doubao-seedance-2-0', label: 'Doubao Seedance 2.0' },
+  { value: 'kling-v3-video-generation', label: 'Kling V3' },
+]
+
+export const VISION_MODEL_OPTIONS = [
+  { value: 'qwen3-vl-plus', label: 'Qwen3-VL-Plus（视觉理解）' },
+  { value: 'qwen3.5-omni-plus', label: 'Qwen3.5 Omni Plus（全能）' },
+]
+
 export const CHARACTER_VIEWS = {
   FRONT: 'front',
   SIDE: 'side',

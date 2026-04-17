@@ -51,6 +51,18 @@ interface ConfigPanelProps {
   onImageRatioChange: (v: string) => void
   imageResolution: string
   onImageResolutionChange: (v: string) => void
+  imageModel: string
+  onImageModelChange: (v: string) => void
+  videoModel: string
+  onVideoModelChange: (v: string) => void
+  videoEditModel: string
+  onVideoEditModelChange: (v: string) => void
+  visionModel: string
+  onVisionModelChange: (v: string) => void
+  enableVideoEdit: boolean
+  onEnableVideoEditChange: (v: boolean) => void
+  enableVisionReview: boolean
+  onEnableVisionReviewChange: (v: boolean) => void
   lockedConfig: DreamweaverProjectLockedGenerationConfig | null
   lockedConfigError: string | null
 }
@@ -70,6 +82,44 @@ const IMAGE_RATIO_OPTIONS = [
 const IMAGE_RESOLUTION_OPTIONS = [
   { value: '720p', label: '高清 720p' },
   { value: '1080p', label: '全高清 1080p' },
+]
+
+const IMAGE_MODEL_OPTIONS = [
+  { value: 'wan2.6-t2i', label: 'Wan 2.6 T2I（主力文生图）' },
+  { value: 'qwen-image-2.0', label: 'Qwen Image 2.0' },
+  { value: 'qwen-image-2.0-pro', label: 'Qwen Image 2.0 Pro（旗舰）' },
+  { value: 'wan2.7-image', label: 'Wan 2.7 Image' },
+  { value: 'doubao-seedream-4-5', label: 'Doubao Seedream 4.5' },
+  { value: 'doubao-seedream-5-0', label: 'Doubao Seedream 5.0（最新）' },
+  { value: 'kling-v3-image-generation', label: 'Kling V3 图像生成' },
+  { value: 'kling-v3-omni-image-generation', label: 'Kling V3 Omni 图像生成' },
+  { value: 'qwen-image-edit-plus', label: 'Qwen Image Edit Plus（编辑）' },
+]
+
+const VIDEO_MODEL_OPTIONS = [
+  { value: 'wan2.7-t2v', label: 'Wan 2.7 T2V（主力视频）' },
+  { value: 'wan2.6-t2v-fast', label: 'Wan 2.6 T2V Fast（快速预览）' },
+  { value: 'wan2.7-i2v', label: 'Wan 2.7 I2V（首帧驱动）' },
+  { value: 'doubao-seedance-2-0', label: 'Doubao Seedance 2.0（SOTA）' },
+  { value: 'doubao-seedance-2-0-fast', label: 'Doubao Seedance 2.0 Fast' },
+  { value: 'doubao-seedance-1-5-pro', label: 'Doubao Seedance 1.5 Pro' },
+  { value: 'kling-v3-video-generation', label: 'Kling V3（可灵）' },
+  { value: 'kling-v3-omni-video-generation', label: 'Kling V3 Omni（全能）' },
+  { value: 'pixverse-v6-t2v', label: 'PixVerse V6' },
+  { value: 'vidu-q3-pro-text2video', label: 'Vidu Q3 Pro 文生视频' },
+  { value: 'vidu-q3-pro-img2video', label: 'Vidu Q3 Pro 图生视频' },
+  { value: 'vidu-q3-pro-start-end2video', label: 'Vidu Q3 Pro 首尾帧' },
+]
+
+const VIDEO_EDIT_MODEL_OPTIONS = [
+  { value: 'wan2.7-videoedit', label: 'Wan 2.7 VideoEdit（万相编辑）' },
+  { value: 'doubao-seedance-2-0', label: 'Doubao Seedance 2.0' },
+  { value: 'kling-v3-video-generation', label: 'Kling V3' },
+]
+
+const VISION_MODEL_OPTIONS = [
+  { value: 'qwen3-vl-plus', label: 'Qwen3-VL-Plus（视觉理解）' },
+  { value: 'qwen3.5-omni-plus', label: 'Qwen3.5 Omni Plus（全能）' },
 ]
 
 export function ConfigPanel({
@@ -245,6 +295,113 @@ export function ConfigPanel({
                       ))}
                     </Select>
                   </FormControl>
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>图像模型</InputLabel>
+                    <Select
+                      value={imageModel}
+                      label="图像模型"
+                      onChange={(e) => onImageModelChange(e.target.value)}
+                      disabled={isLocked && lockedConfig?.image_model != null}
+                    >
+                      {IMAGE_MODEL_OPTIONS.map((model) => (
+                        <MenuItem key={model.value} value={model.value}>
+                          {model.label}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>视频模型</InputLabel>
+                    <Select
+                      value={videoModel}
+                      label="视频模型"
+                      onChange={(e) => onVideoModelChange(e.target.value)}
+                      disabled={isLocked && lockedConfig?.video_model != null}
+                    >
+                      {VIDEO_MODEL_OPTIONS.map((model) => (
+                        <MenuItem key={model.value} value={model.value}>
+                          {model.label}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+              </Grid>
+            </Paper>
+          </Box>
+
+          <Box>
+            <Typography variant="subtitle2" gutterBottom>
+              模型配置与联动
+            </Typography>
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={6}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={enableVisionReview}
+                        onChange={(e) => onEnableVisionReviewChange(e.target.checked)}
+                        disabled={isLocked && lockedConfig?.enable_vision_review != null}
+                      />
+                    }
+                    label="启用视觉理解审查"
+                  />
+                  {enableVisionReview && (
+                    <FormControl fullWidth size="small" sx={{ mt: 1 }}>
+                      <InputLabel>视觉理解模型</InputLabel>
+                      <Select
+                        value={visionModel}
+                        label="视觉理解模型"
+                        onChange={(e) => onVisionModelChange(e.target.value)}
+                        disabled={isLocked && lockedConfig?.vision_model != null}
+                      >
+                        {VISION_MODEL_OPTIONS.map((model) => (
+                          <MenuItem key={model.value} value={model.value}>
+                            {model.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={enableVideoEdit}
+                        onChange={(e) => onEnableVideoEditChange(e.target.checked)}
+                        disabled={isLocked && lockedConfig?.enable_video_edit != null}
+                      />
+                    }
+                    label="启用视频编辑"
+                  />
+                  {enableVideoEdit && (
+                    <FormControl fullWidth size="small" sx={{ mt: 1 }}>
+                      <InputLabel>视频编辑模型</InputLabel>
+                      <Select
+                        value={videoEditModel}
+                        label="视频编辑模型"
+                        onChange={(e) => onVideoEditModelChange(e.target.value)}
+                        disabled={isLocked && lockedConfig?.video_edit_model != null}
+                      >
+                        {VIDEO_EDIT_MODEL_OPTIONS.map((model) => (
+                          <MenuItem key={model.value} value={model.value}>
+                            {model.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
+                </Grid>
+                <Grid item xs={12}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                    视觉理解模型用于生成过程中自动评估图像/视频质量，视频编辑模型用于分镜素材的精剪和风格迁移。
+                  </Typography>
                 </Grid>
               </Grid>
             </Paper>

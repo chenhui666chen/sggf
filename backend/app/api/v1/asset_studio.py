@@ -28,10 +28,18 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 ASSET_STUDIO_UPLOAD_DIR = PROJECT_ROOT / "backend" / "data" / "asset_studio_uploads"
 ASSET_STUDIO_OUTPUT_DIR = PROJECT_ROOT / "backend" / "data" / "asset_studio_outputs"
 
-IMAGE_GENERATION_MODELS = {"wan2.6-t2i"}
+IMAGE_GENERATION_MODELS = {"wan2.6-t2i", "qwen-image-2.0", "qwen-image-2.0-pro", "wan2.7-image", "doubao-seedream-4-5", "doubao-seedream-5-0", "kling-v3-image-generation", "kling-v3-omni-image-generation"}
 IMAGE_EDIT_MODELS = {"qwen-image-edit-plus", "qwen-image-edit-max"}
-VIDEO_MODELS = {"wan2.7-t2v", "wan2.6-t2v-fast", "wan2.7-i2v", "wan2.7-r2v", "wan2.7-videoedit"}
-VISION_REVIEW_MODELS = {"qwen3-vl-plus"}
+VIDEO_MODELS = {
+    "wan2.7-t2v", "wan2.6-t2v-fast", "wan2.7-i2v", "wan2.7-r2v", "wan2.7-videoedit",
+    "doubao-seedance-2-0", "doubao-seedance-2-0-fast", "doubao-seedance-1-5-pro",
+    "kling-v3-video-generation", "kling-v3-omni-video-generation",
+    "pixverse-v6-t2v",
+    "vidu-q3-pro-img2video", "vidu-q3-pro-text2video", "vidu-q3-pro-start-end2video",
+}
+VIDEO_EDIT_MODELS = {"wan2.7-videoedit", "doubao-seedance-2-0", "kling-v3-video-generation"}
+VIDEO_EDIT_FEATURES = {"style-transfer", "video-extend", "video-remix"}
+VISION_REVIEW_MODELS = {"qwen3-vl-plus", "qwen3.5-omni-plus"}
 AUDIO_MODELS = {"mureka-o1-instrumental", "vidu-timing2audio"}
 VIDEO_DURATION_OPTIONS: dict[str, tuple[float, ...]] = {
     "wan2.7-t2v": (3.0, 5.0, 10.0, 15.0),
@@ -39,6 +47,15 @@ VIDEO_DURATION_OPTIONS: dict[str, tuple[float, ...]] = {
     "wan2.7-i2v": (3.0, 5.0, 10.0),
     "wan2.7-r2v": (3.0, 5.0, 10.0, 15.0),
     "wan2.7-videoedit": (3.0, 5.0, 10.0),
+    "doubao-seedance-2-0": (3.0, 5.0, 10.0),
+    "doubao-seedance-2-0-fast": (3.0, 5.0, 10.0),
+    "doubao-seedance-1-5-pro": (3.0, 5.0, 10.0),
+    "kling-v3-video-generation": (3.0, 5.0, 10.0),
+    "kling-v3-omni-video-generation": (3.0, 5.0, 10.0),
+    "pixverse-v6-t2v": (3.0, 5.0, 10.0),
+    "vidu-q3-pro-text2video": (3.0, 5.0, 10.0),
+    "vidu-q3-pro-img2video": (3.0, 5.0, 10.0),
+    "vidu-q3-pro-start-end2video": (3.0, 5.0, 10.0),
 }
 AUDIO_DURATION_OPTIONS: dict[str, tuple[int, ...]] = {
     "music": (15, 30, 45, 60),
@@ -1392,4 +1409,82 @@ def review_vision_asset(
         upload=asset_file,
         result=result,
         criteria=criteria,
+    )
+
+
+@router.post("/video-edit", response_model=AssetStudioGenerateResponse)
+async def generate_video_edit_asset(
+    prompt: str = Form(...),
+    model_id: str = Form(default="wan2.7-videoedit"),
+    width: int = Form(default=1280),
+    height: int = Form(default=720),
+    duration: float = Form(default=5.0),
+    edit_feature: str = Form(default="style-transfer"),
+    reference_video: UploadFile | None = File(default=None),
+    reference_images: list[UploadFile] | None = File(default=None),
+    current_user: User = Depends(get_current_user),
+):
+    """视频编辑接口，支持风格迁移、视频续接和多片段融合。"""
+    del current_user
+
+    cleaned_prompt = prompt.strip()
+    if not cleaned_prompt:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="编辑描述不能为空")
+
+    if not reference_video or not reference_video.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="视频编辑需要上传参考视频")
+
+    normalized_edit_feature = (edit_feature or "").strip().lower()
+    if normalized_edit_feature not in VIDEO_EDIT_FEATURES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"不支持的编辑功能：{edit_feature}，可选值为 {', '.join(VIDEO_EDIT_FEATURES)}",
+        )
+
+    resolved_model_id = model_id if model_id in VIDEO_EDIT_MODELS else "wan2.7-videoedit"
+    reference_video_path = _save_upload_file(reference_video, subdir="video_edit")
+
+    saved_reference_image_paths = [
+        _save_upload_file(upload, subdir="video_edit")
+        for upload in (reference_images or [])
+        if upload and upload.filename
+    ]
+
+    resolved_width, resolved_height = _validate_dimensions_for_models(
+        VIDEO_EDIT_MODELS,
+        width,
+        height,
+        request_label="视频",
+    )
+    resolved_duration = _validate_video_duration(resolved_model_id, max(1.0, min(float(duration), 15.0)))
+
+    result = media_runtime.edit_video(
+        prompt=cleaned_prompt,
+        duration=resolved_duration,
+        width=resolved_width,
+        height=resolved_height,
+        video_path=str(reference_video_path),
+        reference_images=[str(path) for path in saved_reference_image_paths] or None,
+        edit_feature=normalized_edit_feature,
+        model_id=resolved_model_id,
+        use_fallback=False,
+    )
+    _raise_for_failed_result(result, fallback_message="视频编辑失败")
+
+    feature_label_map = {
+        "style-transfer": "风格迁移",
+        "video-extend": "视频续接",
+        "video-remix": "多片段融合",
+    }
+
+    return _build_response(
+        kind="video_edit",
+        mode=normalized_edit_feature,
+        result=result,
+        metadata={
+            "edit_feature": normalized_edit_feature,
+            "edit_feature_label": feature_label_map.get(normalized_edit_feature, normalized_edit_feature),
+            "reference_video_name": reference_video.filename,
+            "reference_image_count": len(saved_reference_image_paths),
+        },
     )

@@ -217,65 +217,177 @@ function Select<T extends string = string>(props: SelectProps<T>) {
 const IMAGE_GENERATION_MODEL_OPTIONS: ModelOption[] = [
   {
     value: 'wan2.6-t2i',
-    label: 'wan2.6-t2i',
-    helper: '统一到实际调用名的主力文生图模型，适合正式出图、封面草图和角色概念图。',
+    label: 'Wan 2.6 T2I',
+    helper: '主力文生图模型，适合正式出图、封面草图和角色概念图。',
+  },
+  {
+    value: 'qwen-image-2.0',
+    label: 'Qwen Image 2.0',
+    helper: '通义千问高质量文生图，适合日常图像创作。',
+  },
+  {
+    value: 'qwen-image-2.0-pro',
+    label: 'Qwen Image 2.0 Pro',
+    helper: '通义千问旗舰级文生图，画质更精细，适合商业级图像。',
+  },
+  {
+    value: 'wan2.7-image',
+    label: 'Wan 2.7 Image',
+    helper: '万相最新图像生成模型，支持多种创作功能。',
+  },
+  {
+    value: 'doubao-seedream-4-5',
+    label: 'Doubao Seedream 4.5',
+    helper: '豆包高质量文生图，适合插画和概念设计。',
+  },
+  {
+    value: 'doubao-seedream-5-0',
+    label: 'Doubao Seedream 5.0',
+    helper: '豆包最新版本，支持超高分辨率和多种图像创作功能。',
+  },
+  {
+    value: 'kling-v3-image-generation',
+    label: 'Kling V3 图像生成',
+    helper: '快手可灵 V3 图像生成，高质量人物和场景。',
+  },
+  {
+    value: 'kling-v3-omni-image-generation',
+    label: 'Kling V3 Omni 图像生成',
+    helper: '可灵全能版图像生成，支持图生图和风格迁移。',
   },
 ]
 
 const IMAGE_EDIT_MODEL_OPTIONS: ModelOption[] = [
   {
     value: 'qwen-image-edit-plus',
-    label: 'qwen-image-edit-plus',
+    label: 'Qwen Image Edit Plus',
     helper: '参考图编辑主力，适合根据指令做稳定修改。',
   },
   {
     value: 'qwen-image-edit-max',
-    label: 'qwen-image-edit-max',
+    label: 'Qwen Image Edit Max',
     helper: '质量更高，适合精修、复杂改图和最终素材处理。',
   },
 ]
 
-const VIDEO_TEXT_MODEL_OPTIONS: ModelOption[] = [
+const ALL_IMAGE_MODEL_OPTIONS: (ModelOption | { value: '---divider---'; label: string })[] = [
+  ...IMAGE_GENERATION_MODEL_OPTIONS,
+  { value: '---divider---', label: '── 图像编辑 ──' },
+  ...IMAGE_EDIT_MODEL_OPTIONS,
+]
+
+const VIDEO_GENERATION_MODEL_OPTIONS: ModelOption[] = [
   {
     value: 'wan2.7-t2v',
-    label: 'wan2.7-t2v',
+    label: 'Wan 2.7 T2V',
     helper: '质量优先的视频主力模型，支持镜头控制，适合正式生成。',
   },
   {
     value: 'wan2.6-t2v-fast',
-    label: 'wan2.6-t2v-fast',
+    label: 'Wan 2.6 T2V Fast',
     helper: '快速预览模型，适合 3 秒或 5 秒的早期验证。',
   },
-]
-
-const VIDEO_IMAGE_MODEL_OPTIONS: ModelOption[] = [
   {
     value: 'wan2.7-i2v',
-    label: 'wan2.7-i2v',
+    label: 'Wan 2.7 I2V',
     helper: '首帧驱动模型，适合基于参考图生成更稳定的人物或场景视频。',
   },
   {
-    value: 'wan2.7-r2v',
-    label: 'wan2.7-r2v',
-    helper: '参考视频+多图驱动，支持首帧/尾帧控制，适合风格一致的镜头续接。',
+    value: 'doubao-seedance-2-0',
+    label: 'Doubao Seedance 2.0',
+    helper: '支持最多9张参考图+3个参考视频+首尾帧，多模态控制最强。',
   },
+  {
+    value: 'doubao-seedance-2-0-fast',
+    label: 'Doubao Seedance 2.0 Fast',
+    helper: '豆包快速版本，适合原型验证和快速迭代。',
+  },
+  {
+    value: 'doubao-seedance-1-5-pro',
+    label: 'Doubao Seedance 1.5 Pro',
+    helper: '豆包上一代专业版本，稳定可靠。',
+  },
+  {
+    value: 'kling-v3-video-generation',
+    label: 'Kling V3 视频生成',
+    helper: '快手可灵 V3，支持最多7张参考图+首尾帧+多镜头。',
+  },
+  {
+    value: 'kling-v3-omni-video-generation',
+    label: 'Kling V3 Omni 视频生成',
+    helper: '快手可灵全能版本，支持多模态输入与复杂场景控制。',
+  },
+  {
+    value: 'pixverse-v6-t2v',
+    label: 'PixVerse V6',
+    helper: 'PixVerse V6 文生视频，支持首尾帧+多镜头+特效模板。',
+  },
+  {
+    value: 'vidu-q3-pro-text2video',
+    label: 'Vidu Q3 Pro 文生视频',
+    helper: 'Vidu Q3 Pro 文生视频链路，适合高质量视频创作。',
+  },
+  {
+    value: 'vidu-q3-pro-img2video',
+    label: 'Vidu Q3 Pro 图生视频',
+    helper: 'Vidu Q3 Pro 图生视频链路，支持参考图驱动视频生成。',
+  },
+  {
+    value: 'vidu-q3-pro-start-end2video',
+    label: 'Vidu Q3 Pro 首尾帧',
+    helper: 'Vidu Q3 Pro 首尾帧控制，适合精确控制视频起始和结束画面。',
+  },
+]
+
+const VIDEO_EDIT_MODEL_OPTIONS: ModelOption[] = [
+  {
+    value: 'wan2.7-videoedit',
+    label: 'Wan 2.7 VideoEdit',
+    helper: '万相视频编辑模型，支持参考视频输入、多片段融合与风格迁移。',
+  },
+  {
+    value: 'doubao-seedance-2-0',
+    label: 'Doubao Seedance 2.0（编辑）',
+    helper: '支持视频编辑与延长，电影级质量。',
+  },
+  {
+    value: 'kling-v3-video-generation',
+    label: 'Kling V3（编辑）',
+    helper: '可灵视频编辑与融合，适合高质量视频创作。',
+  },
+]
+
+const ALL_VIDEO_MODEL_OPTIONS: (ModelOption | { value: '---divider---'; label: string })[] = [
+  ...VIDEO_GENERATION_MODEL_OPTIONS,
+  { value: '---divider---', label: '── 视频编辑 ──' },
+  ...VIDEO_EDIT_MODEL_OPTIONS,
 ]
 
 const MOTION_MODEL_OPTIONS: ModelOption[] = [
   {
     value: 'wan2.7-r2v',
-    label: 'wan2.7-r2v',
-    helper: '动作控制首选，支持参考视频+多图（最多5张），首尾帧控制，主体一致性最强。',
+    label: 'Wan 2.7 R2V',
+    helper: '支持最多5个视频参考+多图+首尾帧，动作控制、主体一致性最强。',
   },
   {
-    value: 'wan2.7-i2v',
-    label: 'wan2.7-i2v',
-    helper: '单图驱动动画化，适合从静态图生成运动画面。',
+    value: 'doubao-seedance-2-0',
+    label: 'Doubao Seedance 2.0',
+    helper: '支持最多9张参考图+3个参考视频+首尾帧，多模态控制最强。',
   },
   {
-    value: 'wan2.7-t2v',
-    label: 'wan2.7-t2v',
-    helper: '纯提示词驱动，镜头语言更强的运动片段。',
+    value: 'kling-v3-video-generation',
+    label: 'Kling V3',
+    helper: '支持最多7张参考图+首尾帧+多镜头生成。',
+  },
+  {
+    value: 'kling-v3-omni-video-generation',
+    label: 'Kling V3 Omni',
+    helper: '可灵全能版，支持多模态输入+首尾帧+多镜头。',
+  },
+  {
+    value: 'pixverse-v6-t2v',
+    label: 'PixVerse V6',
+    helper: '支持首尾帧+多镜头+特效模板，创意视频首选。',
   },
 ]
 
@@ -303,6 +415,19 @@ const VIDEO_DURATION_OPTIONS_BY_MODEL: Record<string, DurationOption[]> = {
   ],
   'wan2.7-videoedit': [
     { value: '3', label: '3 秒' },
+    { value: '5', label: '5 秒' },
+    { value: '10', label: '10 秒' },
+  ],
+  'doubao-seedance-2-0': [
+    { value: '5', label: '5 秒' },
+    { value: '10', label: '10 秒' },
+    { value: '30', label: '30 秒' },
+  ],
+  'doubao-seedance-2-0-fast': [
+    { value: '5', label: '5 秒' },
+    { value: '10', label: '10 秒' },
+  ],
+  'doubao-seedance-1-5-pro': [
     { value: '5', label: '5 秒' },
     { value: '10', label: '10 秒' },
   ],
@@ -421,7 +546,7 @@ const AUDIO_TEMPO_OPTIONS = [
   { value: 'fast', label: '快速' },
 ]
 
-function getFallbackDurationOptions(modelId: string): DurationOption[] {
+const getFallbackDurationOptions = function(modelId: string): DurationOption[] {
   return VIDEO_DURATION_OPTIONS_BY_MODEL[modelId] || VIDEO_DURATION_OPTIONS_BY_MODEL['wan2.7-t2v']
 }
 
@@ -1113,6 +1238,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const [audioLoading, setAudioLoading] = useState(false)
   const [audioError, setAudioError] = useState<string | null>(null)
   const [audioResult, setAudioResult] = useState<AssetStudioGenerateResponse | null>(null)
+
   const [collectStates, setCollectStates] = useState<Record<AssetCollectKey, CollectState>>({
     image: { loading: false, feedback: null },
     video: { loading: false, feedback: null },
@@ -1121,9 +1247,10 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   })
 
   const imageUsesReferenceMode = imageReferenceFiles.length > 0
-  const imageModelOptions = imageUsesReferenceMode ? IMAGE_EDIT_MODEL_OPTIONS : IMAGE_GENERATION_MODEL_OPTIONS
-  const sortedImageModelOptions = sortModelOptionsByRoutingSignal(imageModelOptions, catalogRuntimeEntries)
-  const recommendedImageModel = sortedImageModelOptions[0] || imageModelOptions[0] || null
+  const imageModelOptions = imageUsesReferenceMode ? ALL_IMAGE_MODEL_OPTIONS : ALL_IMAGE_MODEL_OPTIONS
+  const imageRealModelOptions = imageModelOptions.filter((opt): opt is ModelOption => opt.value !== '---divider---')
+  const sortedImageModelOptions = sortModelOptionsByRoutingSignal(imageRealModelOptions, catalogRuntimeEntries)
+  const recommendedImageModel = sortedImageModelOptions[0] || imageRealModelOptions[0] || null
   const selectedImageCatalogEntry = catalogRuntimeEntries[imageModelId]
   const selectedImageRoutingSignal = selectedImageCatalogEntry?.runtime_routing_signal
   const imageSizeOptions = filterSizeOptions(IMAGE_SIZE_OPTIONS, selectedImageCatalogEntry?.runtime_task_constraints)
@@ -1131,9 +1258,10 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const selectedImageModel = sortedImageModelOptions.find((option) => option.value === imageModelId) || sortedImageModelOptions[0]
 
   const videoUsesReferenceMode = Boolean(videoReferenceFile)
-  const videoModelOptions = videoUsesReferenceMode ? VIDEO_IMAGE_MODEL_OPTIONS : VIDEO_TEXT_MODEL_OPTIONS
-  const sortedVideoModelOptions = sortModelOptionsByRoutingSignal(videoModelOptions, catalogRuntimeEntries)
-  const recommendedVideoModel = sortedVideoModelOptions[0] || videoModelOptions[0] || null
+  const videoModelOptions = videoUsesReferenceMode ? ALL_VIDEO_MODEL_OPTIONS : ALL_VIDEO_MODEL_OPTIONS
+  const videoRealModelOptions = videoModelOptions.filter((opt): opt is ModelOption => opt.value !== '---divider---')
+  const sortedVideoModelOptions = sortModelOptionsByRoutingSignal(videoRealModelOptions, catalogRuntimeEntries)
+  const recommendedVideoModel = sortedVideoModelOptions[0] || videoRealModelOptions[0] || null
   const selectedVideoCatalogEntry = catalogRuntimeEntries[videoModelId]
   const selectedVideoRoutingSignal = selectedVideoCatalogEntry?.runtime_routing_signal
   const selectedVideoModel = sortedVideoModelOptions.find((option) => option.value === videoModelId) || sortedVideoModelOptions[0]
@@ -1555,7 +1683,15 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 <FormControl fullWidth size="small">
                   <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>图片模型</InputLabel>
                   <Select value={imageModelId} label="图片模型" onChange={(event) => setImageModelId(event.target.value)} sx={{ color: 'white' }}>
-                    {sortedImageModelOptions.map((option) => renderModelOptionMenuItem(option, catalogRuntimeEntries[option.value]?.runtime_routing_signal))}
+                    {imageModelOptions.map((option) =>
+                      option.value === '---divider---' ? (
+                        <MenuItem key={option.value} value={option.value} disabled sx={{ color: 'rgba(255,255,255,0.3)', fontWeight: 600, textAlign: 'center' }}>
+                          {option.label}
+                        </MenuItem>
+                      ) : (
+                        renderModelOptionMenuItem(option as ModelOption, catalogRuntimeEntries[option.value]?.runtime_routing_signal)
+                      )
+                    )}
                   </Select>
                   <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
                     {selectedImageModel?.helper}
@@ -1663,7 +1799,15 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 <FormControl fullWidth size="small">
                   <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>视频模型</InputLabel>
                   <Select value={videoModelId} label="视频模型" onChange={(event) => setVideoModelId(event.target.value)} sx={{ color: 'white' }}>
-                    {sortedVideoModelOptions.map((option) => renderModelOptionMenuItem(option, catalogRuntimeEntries[option.value]?.runtime_routing_signal))}
+                    {videoModelOptions.map((option) =>
+                      option.value === '---divider---' ? (
+                        <MenuItem key={option.value} value={option.value} disabled sx={{ color: 'rgba(255,255,255,0.3)', fontWeight: 600, textAlign: 'center' }}>
+                          {option.label}
+                        </MenuItem>
+                      ) : (
+                        renderModelOptionMenuItem(option as ModelOption, catalogRuntimeEntries[option.value]?.runtime_routing_signal)
+                      )
+                    )}
                   </Select>
                   <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
                     {selectedVideoModel?.helper}

@@ -20,12 +20,14 @@ _OPERATION_MODEL_IDS: Dict[str, set[str]] = {
         "kling-v3-image-generation", "kling-v3-omni-image-generation",  # Kling V3 图像生成
         "qwen-image-2.0", "qwen-image-2.0-pro",  # Qwen Image 2.0 系列
         "wan2.7-image",  # Wan 2.7 图像生成与编辑
+        "doubao-seedream-4-5", "doubao-seedream-5-0",  # Doubao Seedream 图像生成
     },
     "generate_video": {
         "wan2.7-t2v", "wan2.6-t2v-fast", "wan2.7-i2v", "wan2.7-r2v", "wan2.7-videoedit",
         "pixverse-c1-r2v", "pixverse-v6-t2v",  # Pixverse 视频生成
         "vidu-q3-pro-img2video", "vidu-q3-pro-text2video", "vidu-q3-pro-start-end2video",  # Vidu 视频生成
         "kling-v3-video-generation", "kling-v3-omni-video-generation",  # Kling V3 视频生成
+        "doubao-seedance-2-0", "doubao-seedance-2-0-fast", "doubao-seedance-1-5-pro",  # Doubao Seedance 视频生成
     },
     "edit_image": {"qwen-image-edit-plus", "qwen-image-edit-max"},
     "analyze_image": {"qwen3-vl-plus", "qwen3.5-omni-plus"},  # 视觉理解模型
@@ -382,6 +384,51 @@ class UnifiedMediaRuntime:
             video_path=video_path,
             analysis_type=analysis_type,
             criteria=criteria,
+        )
+
+    def edit_video(
+        self,
+        *,
+        prompt: str,
+        duration: float,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        video_path: str,
+        reference_images: Optional[List[str]] = None,
+        edit_feature: str = "style-transfer",
+        negative_prompt: Optional[str] = None,
+        seed: Optional[int] = None,
+        model_id: Optional[str] = None,
+        strategy: str = "balanced",
+        use_fallback: bool = True,
+        **kwargs: Any,
+    ) -> UnifiedMediaResult:
+        task_modality = "video_edit"
+        builder = (
+            TaskSpecBuilder()
+            .with_modality(task_modality)
+            .with_prompt(prompt)
+            .with_dimensions(width, height)
+            .with_duration(duration)
+            .with_references(videos=[video_path])
+        )
+        if negative_prompt:
+            builder.with_negative_prompt(negative_prompt)
+        if seed is not None:
+            builder.with_seed(seed)
+        if reference_images:
+            builder.with_references(images=reference_images)
+        builder.with_extra("edit_feature", edit_feature)
+        for key, value in kwargs.items():
+            builder.with_extra(key, value)
+
+        return self._execute_registry_operation(
+            operation="edit_video",
+            modality=task_modality,
+            task=builder.build(),
+            preferred_model=model_id,
+            strategy=strategy,
+            use_fallback=use_fallback,
         )
 
     def create_tts_engine(
