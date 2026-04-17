@@ -13,10 +13,6 @@ import {
   Chip,
   Container,
   Divider,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   FormControl,
   FormControlLabel,
   Grid,
@@ -28,9 +24,7 @@ import {
   ListItem,
   ListItemButton,
   ListItemText,
-  Menu,
   MenuItem,
-  Paper,
   Select,
   Stack,
   Switch,
@@ -6643,84 +6637,37 @@ export default function DreamWeaverRunPage() {
     setPromptEditOpen(false)
   }
 
-  const renderPromptEditDialogTitle = () => (
-    <DialogTitle>
-      {'\u63d0\u793a\u8bcd\u5ba1\u6838\uff1a'}
-      {getShotId(promptEditShot) || '\u672a\u9009\u4e2d'}
-    </DialogTitle>
-  )
-
   const renderPromptEditDialogContent = () => (
-    <DialogContent dividers>
-      {promptEditShot && (
-        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-          {'\u955c\u5934\u63cf\u8ff0\uff1a'}
-          {getShotDesc(promptEditShot) || '-'}
-        </Typography>
-      )}
-      <Stack spacing={1.5}>
-        <TextField
-          label={'\u9996\u5e27\u63d0\u793a\u8bcd'}
-          fullWidth
-          multiline
-          minRows={3}
-          value={promptEditHead}
-          onChange={(e) => setPromptEditHead(e.target.value)}
-          disabled={promptEditSaving}
-        />
-        <TextField
-          label={'\u5c3e\u5e27\u63d0\u793a\u8bcd'}
-          fullWidth
-          multiline
-          minRows={3}
-          value={promptEditTail}
-          onChange={(e) => setPromptEditTail(e.target.value)}
-          disabled={promptEditSaving}
-        />
-        <TextField
-          label={'\u89c6\u9891\u63d0\u793a\u8bcd\uff08\u81ea\u52a8\uff09'}
-          fullWidth
-          multiline
-          minRows={3}
-          value={promptEditGenerated || '\u6682\u65e0\u81ea\u52a8\u63d0\u793a\u8bcd\uff08\u53ef\u80fd\u5c1a\u672a\u751f\u6210\u6216\u672a\u843d\u5e93\uff09'}
-          InputProps={{ readOnly: true }}
-        />
-        <TextField
-          label={'\u89c6\u9891\u63d0\u793a\u8bcd\u8986\u76d6\uff08\u53ef\u9009\uff09'}
-          fullWidth
-          multiline
-          minRows={3}
-          value={promptEditVideo}
-          onChange={(e) => setPromptEditVideo(e.target.value)}
-          disabled={promptEditSaving}
-          placeholder={'\u7559\u7a7a\u5219\u4f7f\u7528\u7cfb\u7edf\u62fc\u63a5\u7684\u9ed8\u8ba4\u89c6\u9891\u63d0\u793a\u8bcd'}
-        />
-      </Stack>
-      {promptEditError && (
-        <Alert severity="error" sx={{ mt: 1 }}>
-          {promptEditError}
-        </Alert>
-      )}
-    </DialogContent>
+    <DreamweaverPromptEditDialogContent
+      shotDescription={promptEditShot ? getShotDesc(promptEditShot) : null}
+      headPrompt={promptEditHead}
+      tailPrompt={promptEditTail}
+      generatedPrompt={promptEditGenerated || '暂无自动提示词（可能尚未生成或未落库）'}
+      videoPrompt={promptEditVideo}
+      saving={promptEditSaving}
+      error={promptEditError}
+      onChangeHead={setPromptEditHead}
+      onChangeTail={setPromptEditTail}
+      onChangeVideo={setPromptEditVideo}
+    />
   )
 
   const renderPromptEditDialogActions = () => (
-    <DialogActions>
-      <Button onClick={closePromptEditDialog} disabled={promptEditSaving}>
-        {'\u53d6\u6d88'}
-      </Button>
-      <Button variant="contained" onClick={savePromptEdit} disabled={promptEditSaving}>
-        {promptEditSaving ? '\u4fdd\u5b58\u4e2d...' : '\u4fdd\u5b58'}
-      </Button>
-    </DialogActions>
+    <DreamweaverPromptEditDialogActions
+      saving={promptEditSaving}
+      onClose={closePromptEditDialog}
+      onSave={savePromptEdit}
+    />
   )
 
   const renderPromptEditDialog = () => (
-    <Dialog open={promptEditOpen} onClose={closePromptEditDialog} fullWidth maxWidth="md">
-      {renderPromptEditDialogTitle()}
-      {renderPromptEditDialogContent()}
-      {renderPromptEditDialogActions()}
-    </Dialog>
+    <DreamweaverPromptEditDialogShell
+      open={promptEditOpen}
+      onClose={closePromptEditDialog}
+      title={`提示词审核：${getShotId(promptEditShot) || '未选中'}`}
+      content={renderPromptEditDialogContent()}
+      actions={renderPromptEditDialogActions()}
+    />
   )
 
   const closeRegenerateDialog = () => {
@@ -6728,35 +6675,17 @@ export default function DreamWeaverRunPage() {
     setRegenOpen(false)
   }
 
-  const renderRegenerateDialogTitle = () => (
-    <DialogTitle>重生成素材：{regenTitle || regenRole}</DialogTitle>
-  )
-
   const renderRegenerateDialogModeControls = () => (
-    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }} flexWrap="wrap">
-      <Button
-        size="small"
-        variant="outlined"
-        onClick={() => requestSmartRegeneratePrompt({ source: 'manual' })}
-        disabled={regenSubmitting || regenSuggesting || !regenRole}
-      >
-        {regenSuggesting ? '提示词生成中...' : '智能生成提示词'}
-      </Button>
-      {regenForceImageEdit ? (
-        <Chip size="small" color="secondary" variant="outlined" label="图像编辑：强制" />
-      ) : (
-        <Button
-          size="small"
-          variant={regenImageEditActive ? 'contained' : 'outlined'}
-          color={regenImageEditActive ? 'secondary' : 'primary'}
-          aria-pressed={regenImageEditActive}
-          onClick={toggleRegenImageEditPreference}
-          disabled={regenSubmitting || regenSuggesting || !regenHasImageBase}
-        >
-          {regenImageEditActive ? '图像编辑：开启' : '使用图像编辑'}
-        </Button>
-      )}
-    </Stack>
+    <DreamweaverRegenerateDialogModeControls
+      suggesting={regenSuggesting}
+      submitting={regenSubmitting}
+      hasRole={Boolean(regenRole)}
+      forceImageEdit={regenForceImageEdit}
+      imageEditActive={regenImageEditActive}
+      hasImageBase={regenHasImageBase}
+      onSmartGenerate={() => requestSmartRegeneratePrompt({ source: 'manual' })}
+      onToggleImageEdit={toggleRegenImageEditPreference}
+    />
   )
 
   const renderRegenerateDialogStatusHints = () => (
@@ -6796,69 +6725,50 @@ export default function DreamWeaverRunPage() {
     </>
   )
 
-  const renderRegenerateDialogModeHint = () => (
-    <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-      {regenImageEditActive
-        ? '图像编辑模式：将基于参考图生成，提交后状态变为“待审核”。'
-        : '可在下方编辑提示词并重生成素材，生成后将变为待审核状态。'}
-    </Typography>
-  )
-
-  const renderRegenerateDialogPromptField = () => (
-    <TextField
-      label={regenPromptInputLabel}
-      fullWidth
-      multiline
-      minRows={8}
-      value={regenPrompt}
-      placeholder={
+  const renderRegenerateDialogContent = () => (
+    <DreamweaverRegenerateDialogContent
+      modeHint={
+        regenImageEditActive
+          ? '图像编辑模式：将基于参考图生成，提交后状态变为“待审核”。'
+          : '可在下方编辑提示词并重生成素材，生成后将变为待审核状态。'
+      }
+      modeControls={renderRegenerateDialogModeControls()}
+      statusHints={renderRegenerateDialogStatusHints()}
+      promptInputLabel={regenPromptInputLabel}
+      prompt={regenPrompt}
+      promptPlaceholder={
         regenImageEditActive && regenImageEditAutoCleared
           ? '示例：保持角色身份锚点不变，改为侧面全身，左肩数据接口更亮，背景保持纯灰色。'
           : undefined
       }
-      onChange={(e) => {
-        setRegenPrompt(e.target.value)
-        setRegenPromptDirty(e.target.value.trim() !== regenPromptInitial.trim())
+      submitting={regenSubmitting}
+      suggesting={regenSuggesting}
+      error={regenError}
+      onChangePrompt={(value) => {
+        setRegenPrompt(value)
+        setRegenPromptDirty(value.trim() !== regenPromptInitial.trim())
       }}
-      disabled={regenSubmitting || regenSuggesting}
     />
   )
 
-  const renderRegenerateDialogContent = () => (
-    <DialogContent dividers>
-      {renderRegenerateDialogModeHint()}
-      {renderRegenerateDialogModeControls()}
-      {renderRegenerateDialogStatusHints()}
-      {renderRegenerateDialogPromptField()}
-      {regenError && (
-        <Alert severity="error" sx={{ mt: 1 }}>
-          {regenError}
-        </Alert>
-      )}
-    </DialogContent>
-  )
-
   const renderRegenerateDialogActions = () => (
-    <DialogActions>
-      <Button onClick={closeRegenerateDialog} disabled={regenSubmitting}>
-        取消
-      </Button>
-      <Button
-        variant="contained"
-        onClick={submitRegenerateDialog}
-        disabled={regenSubmitting || regenSuggesting || !regenRole || (regenForceImageEdit && !regenHasImageBase)}
-      >
-        {regenSubmitting ? '生成中...' : regenImageEditActive ? '开始生成（图像编辑）' : '开始生成（提示词）'}
-      </Button>
-    </DialogActions>
+    <DreamweaverRegenerateDialogActions
+      submitting={regenSubmitting}
+      submitLabel={regenSubmitting ? '生成中...' : regenImageEditActive ? '开始生成（图像编辑）' : '开始生成（提示词）'}
+      submitDisabled={regenSubmitting || regenSuggesting || !regenRole || (regenForceImageEdit && !regenHasImageBase)}
+      onClose={closeRegenerateDialog}
+      onSubmit={submitRegenerateDialog}
+    />
   )
 
   const renderRegenerateDialog = () => (
-    <Dialog open={regenOpen} onClose={closeRegenerateDialog} fullWidth maxWidth="md">
-      {renderRegenerateDialogTitle()}
-      {renderRegenerateDialogContent()}
-      {renderRegenerateDialogActions()}
-    </Dialog>
+    <DreamweaverRegenerateDialogShell
+      open={regenOpen}
+      onClose={closeRegenerateDialog}
+      title={`重生成素材：${regenTitle || regenRole}`}
+      content={renderRegenerateDialogContent()}
+      actions={renderRegenerateDialogActions()}
+    />
   )
 
   const HISTORY_FILTER_STATUSES = ['running', 'queued', 'waiting', 'failed', 'timeout', 'completed'] as const
@@ -7538,54 +7448,44 @@ export default function DreamWeaverRunPage() {
   )
 
   const renderWorkbenchStatusActionButton = ({
-    actionKey,
     label,
     onClick,
     disabled,
     startIcon,
   }: {
-    actionKey: string
     label: string
     onClick: () => void
     disabled?: boolean
     startIcon?: JSX.Element
   }) => (
-    <Button
-      key={actionKey}
-      size="small"
-      variant="text"
-      startIcon={startIcon}
+    <DreamweaverWorkbenchStatusActionButton
+      label={label}
       onClick={onClick}
       disabled={disabled}
-    >
-      {label}
-    </Button>
+      startIcon={startIcon}
+    />
   )
 
   const renderWorkbenchStatusPrimaryActions = () => {
     const items = [
       {
-        actionKey: 'copy-debug',
         label: '复制调试信息',
         onClick: copyDebugInfo,
         startIcon: <ContentCopyIcon fontSize="small" />,
       },
       {
-        actionKey: 'diagnostic',
         label: '诊断面板',
         onClick: openDiagnosticDialog,
         disabled: !currentRunId,
         startIcon: <BugReportIcon fontSize="small" />,
       },
       {
-        actionKey: 'history',
         label: '历史记录',
         onClick: openHistoryDialog,
         disabled: !selectedProjectId,
         startIcon: <HistoryIcon fontSize="small" />,
       },
       {
-        actionKey: 'config',
         label: '配置',
         onClick: openConfigDialog,
       },
@@ -7595,15 +7495,12 @@ export default function DreamWeaverRunPage() {
   }
 
   const renderWorkbenchStatusRestartAction = () => (
-    <Button
-      size="small"
-      variant="text"
+    <DreamweaverWorkbenchRestartAction
+      label={restartLoading ? '重跑中…' : '重跑'}
       startIcon={<RefreshIcon fontSize="small" />}
       onClick={(e) => setRestartAnchorEl(e.currentTarget)}
       disabled={!currentRunId || running || restartLoading}
-    >
-      {restartLoading ? '重跑中…' : '重跑'}
-    </Button>
+    />
   )
 
   const renderWorkbenchStatusActions = () => (
@@ -7614,51 +7511,28 @@ export default function DreamWeaverRunPage() {
   )
 
   const renderWorkbenchRestartMenu = () => (
-    <Menu
+    <DreamweaverWorkbenchRestartMenu
       anchorEl={restartAnchorEl}
       open={Boolean(restartAnchorEl)}
       onClose={closeRestartMenu}
-      anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-      transformOrigin={{ vertical: 'top', horizontal: 'left' }}
-    >
-      {renderWorkbenchRestartMenuItems()}
-    </Menu>
+      items={renderWorkbenchRestartMenuItems()}
+    />
   )
 
   const renderWorkbenchStatusRightActions = () => (
-    <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" justifyContent="flex-end">
-      {manualPreviewStep && previewStep !== progressStep && (
-        <Button size="small" variant="text" onClick={followProgressStep}>
-          跟随进度
-        </Button>
-      )}
-    </Stack>
-  )
-
-  const renderWorkbenchStepperItem = (label: string, idx: number) => (
-    <Step key={label} completed={idx < progressStep} sx={{ cursor: 'pointer', px: 0.5 }} onClick={() => handleClickStep(idx)}>
-      <StepLabel
-        sx={{
-          '& .MuiStepLabel-label': {
-            cursor: 'pointer',
-            fontSize: '0.9rem',
-            transition: 'color 0.2s, transform 0.2s',
-            '&:hover': {
-              color: 'primary.main',
-              transform: 'scale(1.03)',
-            },
-          },
-        }}
-      >
-        {label}
-      </StepLabel>
-    </Step>
+    <DreamweaverWorkbenchStatusRightActions
+      followVisible={manualPreviewStep && previewStep !== progressStep}
+      onFollow={followProgressStep}
+    />
   )
 
   const renderWorkbenchStepper = () => (
-    <Stepper activeStep={previewStep}>
-      {DREAMWEAVER_PREVIEW_STEPS.map(renderWorkbenchStepperItem)}
-    </Stepper>
+    <DreamweaverWorkbenchStepper
+      labels={DREAMWEAVER_PREVIEW_STEPS}
+      activeStep={previewStep}
+      progressStep={progressStep}
+      onStepClick={handleClickStep}
+    />
   )
 
   const renderWorkbenchStatusPanelPrimarySection = () => (
@@ -7669,18 +7543,12 @@ export default function DreamWeaverRunPage() {
     </Stack>
   )
 
-  const renderWorkbenchStatusPanelHeader = () => (
-    <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" justifyContent="space-between" mb={1}>
-      {renderWorkbenchStatusPanelPrimarySection()}
-      {renderWorkbenchStatusRightActions()}
-    </Stack>
-  )
-
   const renderWorkbenchStatusPanel = () => (
-    <Paper sx={{ p: 2, borderRadius: 2, bgcolor: 'rgba(255,255,255,0.95)', mb: 2 }}>
-      {renderWorkbenchStatusPanelHeader()}
-      {renderWorkbenchStepper()}
-    </Paper>
+    <DreamweaverWorkbenchStatusPanel
+      primarySection={renderWorkbenchStatusPanelPrimarySection()}
+      rightActions={renderWorkbenchStatusRightActions()}
+      stepper={renderWorkbenchStepper()}
+    />
   )
 
   const renderRunPageErrorAlert = () => {
