@@ -1,10 +1,13 @@
 import type { ReactNode } from 'react'
 
+import DeleteIcon from '@mui/icons-material/Delete'
 import HistoryIcon from '@mui/icons-material/History'
+import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import {
   Alert,
   Box,
   Button,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -50,6 +53,133 @@ export function DreamweaverHistoryDialogToolbar({
       <Box sx={{ flex: 1 }} />
       {actions}
     </Stack>
+  )
+}
+
+type DreamweaverHistoryStatusFilterChipProps = {
+  label: string
+  count: number
+  color: 'default' | 'primary' | 'success' | 'error' | 'warning' | 'info'
+  selected: boolean
+  onClick: () => void
+}
+
+export function DreamweaverHistoryStatusFilterChip({
+  label,
+  count,
+  color,
+  selected,
+  onClick,
+}: DreamweaverHistoryStatusFilterChipProps) {
+  return (
+    <Chip
+      size="small"
+      label={`${label} (${count})`}
+      color={color}
+      variant={selected ? 'filled' : 'outlined'}
+      onClick={onClick}
+    />
+  )
+}
+
+type DreamweaverHistoryToolbarActionsProps = {
+  onRefresh: () => void
+  refreshDisabled: boolean
+  onBulkDelete: () => void
+  bulkDeleteDisabled: boolean
+  bulkDeleteLabel: string
+}
+
+export function DreamweaverHistoryToolbarActions({
+  onRefresh,
+  refreshDisabled,
+  onBulkDelete,
+  bulkDeleteDisabled,
+  bulkDeleteLabel,
+}: DreamweaverHistoryToolbarActionsProps) {
+  return (
+    <>
+      <Button size="small" variant="outlined" disabled={refreshDisabled} onClick={onRefresh}>
+        刷新
+      </Button>
+      <Button size="small" variant="contained" color="error" disabled={bulkDeleteDisabled} onClick={onBulkDelete}>
+        {bulkDeleteLabel}
+      </Button>
+    </>
+  )
+}
+
+type DreamweaverHistoryRunItemSummaryProps = {
+  statusLabel: string
+  statusColor: 'default' | 'primary' | 'success' | 'error' | 'warning' | 'info'
+  runId: string
+  progressValue?: number | null
+  stage?: string | null
+  cameraTreeMode?: string | null
+  cameraCount?: number | null
+  cameraStatesCount?: number | null
+  cameraScenesCount?: number | null
+}
+
+export function DreamweaverHistoryRunItemSummary({
+  statusLabel,
+  statusColor,
+  runId,
+  progressValue,
+  stage,
+  cameraTreeMode,
+  cameraCount,
+  cameraStatesCount,
+  cameraScenesCount,
+}: DreamweaverHistoryRunItemSummaryProps) {
+  return (
+    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+      <Chip size="small" label={statusLabel} color={statusColor} />
+      <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+        {runId}
+      </Typography>
+      {typeof progressValue === 'number' && <Chip size="small" label={`进度: ${progressValue}%`} />}
+      {stage && <Chip size="small" label={`阶段: ${stage}`} />}
+      {cameraTreeMode && <Chip size="small" label={`CamTree: ${cameraTreeMode}`} variant="outlined" />}
+      {typeof cameraCount === 'number' && <Chip size="small" label={`Cam: ${cameraCount}`} />}
+      {typeof cameraStatesCount === 'number' && <Chip size="small" label={`CamState: ${cameraStatesCount}`} />}
+      {typeof cameraScenesCount === 'number' && <Chip size="small" label={`CamScene: ${cameraScenesCount}`} />}
+    </Stack>
+  )
+}
+
+type DreamweaverHistoryRunItemActionsProps = {
+  onView: () => void
+  onDelete: () => void
+}
+
+export function DreamweaverHistoryRunItemActions({
+  onView,
+  onDelete,
+}: DreamweaverHistoryRunItemActionsProps) {
+  return (
+    <Stack direction="row" spacing={1} alignItems="center">
+      <Button size="small" variant="text" startIcon={<PlayArrowIcon fontSize="small" />} onClick={onView}>
+        查看
+      </Button>
+      <Button size="small" variant="text" color="error" startIcon={<DeleteIcon fontSize="small" />} onClick={onDelete}>
+        删除
+      </Button>
+    </Stack>
+  )
+}
+
+type DreamweaverHistoryEmptyStateProps = {
+  message: string
+}
+
+export function DreamweaverHistoryEmptyState({
+  message,
+}: DreamweaverHistoryEmptyStateProps) {
+  return (
+    <Typography variant="body2" color="text.secondary">
+      {message}
+    </Typography>
   )
 }
 

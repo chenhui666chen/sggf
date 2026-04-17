@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 
-import { Alert, Box, Button, Chip, LinearProgress, List, Stack, Typography } from '@mui/material'
+import BugReportIcon from '@mui/icons-material/BugReport'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import { Alert, Box, Button, Chip, LinearProgress, List, Stack, TextField, Typography } from '@mui/material'
 
 import type {
   PendingPromptReviewState,
@@ -82,6 +84,79 @@ export function PendingRunningShell({
       </Typography>
       {debugPanel ?? null}
     </Box>
+  )
+}
+
+type PendingRunningStageHintProps = {
+  message: string
+}
+
+export function PendingRunningStageHint({
+  message,
+}: PendingRunningStageHintProps) {
+  return (
+    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+      {message}
+    </Typography>
+  )
+}
+
+type PendingRunningArtifactsSummaryProps = {
+  chips: Array<{
+    key: string
+    label: string
+    value: string | number
+    variant?: 'filled' | 'outlined'
+  }>
+  onCopyDebug: () => void
+  onOpenDiagnostic: () => void
+  diagnosticDisabled: boolean
+}
+
+export function PendingRunningArtifactsSummary({
+  chips,
+  onCopyDebug,
+  onOpenDiagnostic,
+  diagnosticDisabled,
+}: PendingRunningArtifactsSummaryProps) {
+  return (
+    <Stack direction="row" spacing={1} flexWrap="wrap" mb={1} alignItems="center">
+      {chips.map((item) => (
+        <Chip key={item.key} label={`${item.label}: ${item.value}`} size="small" variant={item.variant ?? 'filled'} />
+      ))}
+      <Button size="small" variant="text" startIcon={<ContentCopyIcon fontSize="small" />} onClick={onCopyDebug}>
+        复制调试信息
+      </Button>
+      <Button
+        size="small"
+        variant="text"
+        startIcon={<BugReportIcon fontSize="small" />}
+        onClick={onOpenDiagnostic}
+        disabled={diagnosticDisabled}
+      >
+        诊断面板
+      </Button>
+    </Stack>
+  )
+}
+
+type PendingArtifactDetailsProps = {
+  lines: Array<{
+    key: string
+    label?: string | null
+    content: string
+  }>
+}
+
+export function PendingArtifactDetails({ lines }: PendingArtifactDetailsProps) {
+  return (
+    <>
+      {lines.map((line) => (
+        <Typography key={line.key} variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
+          {line.label ? `${line.label}: ${line.content}` : line.content}
+        </Typography>
+      ))}
+    </>
   )
 }
 
@@ -167,6 +242,32 @@ export function PendingScriptApprovalShell({
       {editor}
       {debugPanel ?? null}
     </Box>
+  )
+}
+
+type PendingScriptApprovalEditorProps = {
+  value: string
+  onChange: (value: string) => void
+  disabled: boolean
+}
+
+export function PendingScriptApprovalEditor({
+  value,
+  onChange,
+  disabled,
+}: PendingScriptApprovalEditorProps) {
+  return (
+    <TextField
+      label="剧本（可编辑）"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      fullWidth
+      multiline
+      minRows={10}
+      maxRows={22}
+      disabled={disabled}
+      sx={{ bgcolor: '#fff' }}
+    />
   )
 }
 
@@ -289,6 +390,117 @@ export function PendingLibraryReadyShell({ notice, snapshotPreview }: PendingLib
     <Box>
       {notice}
       {snapshotPreview}
+    </Box>
+  )
+}
+
+type PendingLibraryControlsProps = {
+  onLoadLibrary: () => void
+  loadDisabled: boolean
+  onApproveAll: () => void
+  approveDisabled: boolean
+  onResume: () => void
+  resumeDisabled: boolean
+  resumeLoading: boolean
+}
+
+export function PendingLibraryControls({
+  onLoadLibrary,
+  loadDisabled,
+  onApproveAll,
+  approveDisabled,
+  onResume,
+  resumeDisabled,
+  resumeLoading,
+}: PendingLibraryControlsProps) {
+  return (
+    <Stack direction="row" spacing={1} flexWrap="wrap" mb={1}>
+      <Button size="small" variant="contained" onClick={onLoadLibrary} disabled={loadDisabled}>
+        加载素材库
+      </Button>
+      <Button size="small" variant="outlined" onClick={onApproveAll} disabled={approveDisabled}>
+        全部通过
+      </Button>
+      <Button size="small" variant="contained" color="success" onClick={onResume} disabled={resumeDisabled}>
+        {resumeLoading ? '继续生成中…' : '继续生成'}
+      </Button>
+    </Stack>
+  )
+}
+
+type PendingLibraryReviewStatusProps = {
+  missingCount: number
+  unapprovedCount: number
+}
+
+export function PendingLibraryReviewStatus({
+  missingCount,
+  unapprovedCount,
+}: PendingLibraryReviewStatusProps) {
+  return (
+    <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+      审核状态：缺失 {missingCount}，未通过 {unapprovedCount}
+    </Typography>
+  )
+}
+
+type PendingLibraryReadyActionsProps = {
+  onViewLibrary: () => void
+  showPromptReviewAction: boolean
+  onViewPromptReview: () => void
+  onResume: () => void
+  resumeDisabled: boolean
+  resumeLoading: boolean
+}
+
+export function PendingLibraryReadyActions({
+  onViewLibrary,
+  showPromptReviewAction,
+  onViewPromptReview,
+  onResume,
+  resumeDisabled,
+  resumeLoading,
+}: PendingLibraryReadyActionsProps) {
+  return (
+    <Stack direction="row" spacing={1} alignItems="center">
+      <Button size="small" variant="text" onClick={onViewLibrary}>
+        查看素材库
+      </Button>
+      {showPromptReviewAction && (
+        <Button size="small" variant="text" onClick={onViewPromptReview}>
+          查看提示词
+        </Button>
+      )}
+      <Button size="small" variant="contained" color="success" onClick={onResume} disabled={resumeDisabled}>
+        {resumeLoading ? '继续生成中…' : '继续生成'}
+      </Button>
+    </Stack>
+  )
+}
+
+type PendingLibrarySummarySectionProps = {
+  emptyText: string
+  summaryChips?: ReactNode
+  groups?: ReactNode
+}
+
+export function PendingLibrarySummarySection({
+  emptyText,
+  summaryChips,
+  groups,
+}: PendingLibrarySummarySectionProps) {
+  if (!groups) {
+    return (
+      <Typography variant="body2" color="text.secondary">
+        {emptyText}
+      </Typography>
+    )
+  }
+
+  return (
+    <Box>
+      {summaryChips ?? null}
+      {groups}
     </Box>
   )
 }

@@ -1,6 +1,6 @@
 import type { MouseEventHandler, ReactNode } from 'react'
 
-import { Button, Menu, Paper, Stack, Step, StepLabel, Stepper } from '@mui/material'
+import { Button, Card, CardContent, Chip, Grid, LinearProgress, Menu, Paper, Stack, Step, StepLabel, Stepper, Typography } from '@mui/material'
 
 type DreamweaverWorkbenchStatusActionButtonProps = {
   label: string
@@ -19,6 +19,42 @@ export function DreamweaverWorkbenchStatusActionButton({
     <Button size="small" variant="text" startIcon={startIcon} onClick={onClick} disabled={disabled}>
       {label}
     </Button>
+  )
+}
+
+type DreamweaverWorkbenchStatusChipRowProps = {
+  runId?: string | null
+  progressLabel: number
+  stateLabel?: string | null
+  stageLabel?: string | null
+  taskStatusLabel?: string | null
+  taskQueue?: string | null
+  taskStatusColor?: 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning'
+}
+
+export function DreamweaverWorkbenchStatusChipRow({
+  runId,
+  progressLabel,
+  stateLabel,
+  stageLabel,
+  taskStatusLabel,
+  taskQueue,
+  taskStatusColor = 'default',
+}: DreamweaverWorkbenchStatusChipRowProps) {
+  return (
+    <>
+      {runId && <Chip label={`RunID: ${runId}`} size="small" />}
+      <Chip label={`进度: ${progressLabel}%`} size="small" color="primary" />
+      {stateLabel && <Chip label={`状态: ${stateLabel}`} size="small" />}
+      {stageLabel && <Chip label={`阶段: ${stageLabel}`} size="small" />}
+      {taskStatusLabel && (
+        <Chip
+          label={`任务: ${taskStatusLabel}${taskQueue ? `（${taskQueue}）` : ''}`}
+          size="small"
+          color={taskStatusColor}
+        />
+      )}
+    </>
   )
 }
 
@@ -150,5 +186,94 @@ export function DreamweaverWorkbenchStatusPanel({
       </Stack>
       {stepper}
     </Paper>
+  )
+}
+
+type DreamweaverWorkbenchStatusPrimarySectionProps = {
+  chips: ReactNode
+  actions: ReactNode
+  restartAction?: ReactNode
+  restartMenu?: ReactNode
+}
+
+export function DreamweaverWorkbenchStatusPrimarySection({
+  chips,
+  actions,
+  restartAction,
+  restartMenu,
+}: DreamweaverWorkbenchStatusPrimarySectionProps) {
+  return (
+    <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
+      {chips}
+      {actions}
+      {restartAction ?? null}
+      {restartMenu ?? null}
+    </Stack>
+  )
+}
+
+type DreamweaverWorkbenchCardHeaderProps = {
+  running: boolean
+  taskProgress: number
+}
+
+export function DreamweaverWorkbenchCardHeader({
+  running,
+  taskProgress,
+}: DreamweaverWorkbenchCardHeaderProps) {
+  return (
+    <Stack direction="row" spacing={1} alignItems="center" mb={1}>
+      <Typography variant="h6" sx={{ fontWeight: 700 }}>
+        短剧工作台
+      </Typography>
+      {running && <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, taskProgress))} sx={{ flex: 1 }} />}
+    </Stack>
+  )
+}
+
+type DreamweaverWorkbenchCardShellProps = {
+  header: ReactNode
+  statusPanel: ReactNode
+  taskHeader: ReactNode
+  mainContent: ReactNode
+  dialogs?: ReactNode
+}
+
+export function DreamweaverWorkbenchCardShell({
+  header,
+  statusPanel,
+  taskHeader,
+  mainContent,
+  dialogs,
+}: DreamweaverWorkbenchCardShellProps) {
+  return (
+    <Card sx={{ borderRadius: 3 }}>
+      <CardContent>
+        {header}
+        {statusPanel}
+        {taskHeader}
+        {mainContent}
+        {dialogs ?? null}
+      </CardContent>
+    </Card>
+  )
+}
+
+type DreamweaverWorkbenchSectionProps = {
+  alerts?: ReactNode
+  card: ReactNode
+}
+
+export function DreamweaverWorkbenchSection({
+  alerts,
+  card,
+}: DreamweaverWorkbenchSectionProps) {
+  return (
+    <Grid container spacing={2.5}>
+      <Grid item xs={12} md={12}>
+        {alerts ?? null}
+        {card}
+      </Grid>
+    </Grid>
   )
 }

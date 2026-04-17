@@ -5,13 +5,27 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControl,
+  FormControlLabel,
+  Grid,
   IconButton,
+  InputLabel,
+  LinearProgress,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemText,
+  MenuItem,
   Paper,
+  Select,
   Stack,
+  Switch,
+  TextField,
   Typography,
 } from '@mui/material'
 
@@ -83,6 +97,20 @@ export function DreamweaverConfigDialogProjectSection({
   )
 }
 
+type DreamweaverConfigDialogProjectAlertActionProps = {
+  onClick: () => void
+}
+
+export function DreamweaverConfigDialogProjectAlertAction({
+  onClick,
+}: DreamweaverConfigDialogProjectAlertActionProps) {
+  return (
+    <Button size="small" variant="outlined" onClick={onClick}>
+      去项目列表
+    </Button>
+  )
+}
+
 type DreamweaverConfigDialogCardProps = {
   title: string
   children: ReactNode
@@ -141,6 +169,82 @@ export function DreamweaverConfigDialogChapterSelectionCard({
   )
 }
 
+type DreamweaverConfigDialogChapterToolbarProps = {
+  toggleAllLabel: string
+  onToggleAll: () => void
+  toggleAllDisabled: boolean
+  onRefresh: () => void
+  refreshDisabled: boolean
+  refreshStartIcon?: ReactNode
+}
+
+export function DreamweaverConfigDialogChapterToolbar({
+  toggleAllLabel,
+  onToggleAll,
+  toggleAllDisabled,
+  onRefresh,
+  refreshDisabled,
+  refreshStartIcon,
+}: DreamweaverConfigDialogChapterToolbarProps) {
+  return (
+    <>
+      <Button size="small" onClick={onToggleAll} disabled={toggleAllDisabled}>
+        {toggleAllLabel}
+      </Button>
+      <Button size="small" startIcon={refreshStartIcon ?? undefined} onClick={onRefresh} disabled={refreshDisabled}>
+        刷新
+      </Button>
+    </>
+  )
+}
+
+type DreamweaverConfigDialogChapterItemProps = {
+  chapterId: number
+  title: string
+  snippet: string
+  checked: boolean
+  disabled: boolean
+  onToggle: (chapterId: number) => void
+}
+
+export function DreamweaverConfigDialogChapterItem({
+  chapterId,
+  title,
+  snippet,
+  checked,
+  disabled,
+  onToggle,
+}: DreamweaverConfigDialogChapterItemProps) {
+  return (
+    <ListItem
+      disablePadding
+      secondaryAction={
+        <Checkbox edge="end" size="small" disabled={disabled} checked={checked} onChange={() => onToggle(chapterId)} />
+      }
+    >
+      <ListItemButton onClick={() => onToggle(chapterId)} disabled={disabled} sx={{ pr: 6 }}>
+        <ListItemText primary={title} secondary={snippet} />
+      </ListItemButton>
+    </ListItem>
+  )
+}
+
+type DreamweaverConfigDialogChapterListProps = {
+  loading: boolean
+  children: ReactNode
+}
+
+export function DreamweaverConfigDialogChapterList({
+  loading,
+  children,
+}: DreamweaverConfigDialogChapterListProps) {
+  if (loading) {
+    return <LinearProgress />
+  }
+
+  return <List dense disablePadding>{children}</List>
+}
+
 type DreamweaverConfigDialogStrategyCardProps = {
   content: ReactNode
   helperText: string
@@ -161,6 +265,107 @@ export function DreamweaverConfigDialogStrategyCard({
     >
       <Stack spacing={1.5}>{content}</Stack>
     </DreamweaverConfigDialogCard>
+  )
+}
+
+type DreamweaverConfigDialogStrategyToggleFieldProps = {
+  title: string
+  checked: boolean
+  onChange: (checked: boolean) => void
+  enabledLabel: string
+  disabledLabel: string
+  description: string
+  disabled?: boolean
+}
+
+export function DreamweaverConfigDialogStrategyToggleField({
+  title,
+  checked,
+  onChange,
+  enabledLabel,
+  disabledLabel,
+  description,
+  disabled = false,
+}: DreamweaverConfigDialogStrategyToggleFieldProps) {
+  return (
+    <Stack spacing={0.5}>
+      <Stack direction="row" alignItems="center" justifyContent="space-between">
+        <Typography variant="body2" sx={{ fontWeight: 700 }}>
+          {title}
+        </Typography>
+        <FormControlLabel
+          sx={{ mr: 0 }}
+          control={<Switch checked={checked} onChange={(e) => onChange(e.target.checked)} disabled={disabled} />}
+          label={checked ? enabledLabel : disabledLabel}
+        />
+      </Stack>
+      <Typography variant="caption" color="text.secondary">
+        {description}
+      </Typography>
+    </Stack>
+  )
+}
+
+type DreamweaverConfigDialogExperimentFieldProps = {
+  value: string
+  onChange: (value: string) => void
+  disabled?: boolean
+}
+
+export function DreamweaverConfigDialogExperimentField({
+  value,
+  onChange,
+  disabled = false,
+}: DreamweaverConfigDialogExperimentFieldProps) {
+  return (
+    <Stack spacing={0.5}>
+      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+        实验标签（可选）
+      </Typography>
+      <TextField
+        size="small"
+        fullWidth
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        placeholder="例如 A / B / control / treatment"
+        inputProps={{ maxLength: 32 }}
+      />
+      <Typography variant="caption" color="text.secondary">
+        仅用于标记并对比不同策略效果，不会自动改变生成逻辑。
+      </Typography>
+    </Stack>
+  )
+}
+
+type DreamweaverConfigDialogSelectFieldProps = {
+  labelId: string
+  label: string
+  value: string
+  onChange: (value: string) => void
+  options: Array<{ value: string; label: string }>
+  disabled?: boolean
+}
+
+export function DreamweaverConfigDialogSelectField({
+  labelId,
+  label,
+  value,
+  onChange,
+  options,
+  disabled = false,
+}: DreamweaverConfigDialogSelectFieldProps) {
+  return (
+    <FormControl fullWidth size="small" disabled={disabled}>
+      <InputLabel id={labelId}>{label}</InputLabel>
+      <Select labelId={labelId} value={value} label={label} onChange={(e) => onChange(String(e.target.value))}>
+        {options.map((option) => (
+          <MenuItem key={option.value} value={option.value}>
+            {option.label}
+          </MenuItem>
+        ))}
+      </Select>
+    </FormControl>
   )
 }
 
@@ -187,6 +392,28 @@ export function DreamweaverConfigDialogVisualSettingsCard({
       {notices ?? null}
       {fields}
     </DreamweaverConfigDialogCard>
+  )
+}
+
+type DreamweaverConfigDialogMainGridProps = {
+  chapterSelection: ReactNode
+  sidePanel: ReactNode
+}
+
+export function DreamweaverConfigDialogMainGrid({
+  chapterSelection,
+  sidePanel,
+}: DreamweaverConfigDialogMainGridProps) {
+  return (
+    <Grid container spacing={2}>
+      <Grid item xs={12} md={7}>
+        {chapterSelection}
+      </Grid>
+
+      <Grid item xs={12} md={5}>
+        <Stack spacing={2}>{sidePanel}</Stack>
+      </Grid>
+    </Grid>
   )
 }
 
