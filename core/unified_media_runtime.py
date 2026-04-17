@@ -15,12 +15,27 @@ if TYPE_CHECKING:
 
 
 _OPERATION_MODEL_IDS: Dict[str, set[str]] = {
-    "generate_image": {"wan2.6-t2i"},
-    "generate_video": {"wan2.7-t2v", "wan2.6-t2v-fast", "wan2.7-i2v", "wan2.7-r2v", "wan2.7-videoedit"},
+    "generate_image": {
+        "wan2.6-t2i",
+        "kling-v3-image-generation", "kling-v3-omni-image-generation",  # Kling V3 图像生成
+        "qwen-image-2.0", "qwen-image-2.0-pro",  # Qwen Image 2.0 系列
+        "wan2.7-image",  # Wan 2.7 图像生成与编辑
+    },
+    "generate_video": {
+        "wan2.7-t2v", "wan2.6-t2v-fast", "wan2.7-i2v", "wan2.7-r2v", "wan2.7-videoedit",
+        "pixverse-c1-r2v", "pixverse-v6-t2v",  # Pixverse 视频生成
+        "vidu-q3-pro-img2video", "vidu-q3-pro-text2video", "vidu-q3-pro-start-end2video",  # Vidu 视频生成
+        "kling-v3-video-generation", "kling-v3-omni-video-generation",  # Kling V3 视频生成
+    },
     "edit_image": {"qwen-image-edit-plus", "qwen-image-edit-max"},
-    "analyze_image": {"qwen3-vl-plus"},
-    "analyze_video": {"qwen3-vl-plus"},
-    "synthesize_speech": {"qwen3-tts-flash", "cosyvoice-v3-plus"},
+    "analyze_image": {"qwen3-vl-plus", "qwen3.5-omni-plus"},  # 视觉理解模型
+    "analyze_video": {"qwen3-vl-plus", "qwen3.5-omni-plus"},  # 视觉理解模型
+    "synthesize_speech": {
+        "qwen3-tts-flash",
+        "cosyvoice-v3-plus",
+        "minimax-speech-2.8-turbo",  # MiniMax 高质量语音合成
+        "minimax-speech-2.8-hd",     # MiniMax 旗舰级语音合成
+    },
 }
 
 _STRATEGY_WEIGHTS: Dict[str, Dict[str, float]] = {

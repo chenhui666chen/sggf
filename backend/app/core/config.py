@@ -120,12 +120,11 @@ class Settings(BaseSettings):
     MUREKA_API_KEY: str = ""
     MUREKA_API_URL: str = "https://api.mureka.ai"
 
-    # 可灵AI声效服务配置（用于环境音 / 音效生成）
-    KLINGAI_ACCESS_KEY: str = ""
-    KLINGAI_SECRET_KEY: str = ""
-    KLINGAI_API_URL: str = "https://api.klingai.com/v1/audio/text-to-audio"
+    # Vidu 音效服务配置（用于可控时序音效生成）
+    VIDU_API_KEY: str = ""
+    VIDU_API_URL: str = "https://api.vidu.cn/ent/v2"
 
-    # Embedding模型配置
+    # Embedding 模型配置
     EMBEDDING_MODEL: str = "text-embedding-v4"
     EMBEDDING_API_KEY: str = ""
     EMBEDDING_API_BASE: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"

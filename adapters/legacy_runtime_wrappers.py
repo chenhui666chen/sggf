@@ -396,6 +396,164 @@ class Qwen3TTSRuntimeWrapper(_BaseLegacyRuntimeWrapper):
         )
 
 
+class MiniMaxSpeech28TurboRuntimeWrapper(_BaseLegacyRuntimeWrapper):
+    """MiniMax Speech 2.8 Turbo 运行时包装器。
+    
+    使用阿里云百炼平台 API 调用 MiniMax 语音合成服务。
+    API 文档：https://help.aliyun.com/zh/model-studio/minimax-synchronous-speech-synthesis-api
+    """
+    
+    TARGET_MODEL_ID = "minimax-speech-2.8-turbo"
+    BASE_URL = "https://dashscope.aliyuncs.com/api/v1"
+    ENDPOINT = "/api/v1/services/aigc/multimodal-generation/generation"
+    
+    def generate(
+        self,
+        text: str,
+        voice_id: Optional[str] = None,
+        speed: float = 1.0,
+        pitch: float = 1.0,
+        volume: float = 1.0,
+        emotion: Optional[str] = None,
+        **kwargs,
+    ) -> LegacyCompatResult:
+        """
+        生成语音：MiniMax Speech 2.8 Turbo.
+        使用阿里云百炼平台的 DashScope API.
+        
+        Args:
+            text: 要转换的文本
+            voice_id: 音色 ID（如 female-shuangkuai, male-chenzhuo）
+            speed: 语速，0.5-2.0
+            pitch: 音调，0.5-2.0
+            volume: 音量，0.0-1.0
+            emotion: 情绪，happy/sad/angry/fearful 等
+        """
+        from adapters.adapter_helpers import synthesize_speech_sync
+        
+        if not text or not text.strip():
+            return LegacyCompatResult(
+                success=False,
+                data=None,
+                error="Text is required for MiniMax TTS"
+            )
+        
+        try:
+            # 构建语音参数
+            voice_params = {}
+            if voice_id:
+                voice_params["voice_id"] = voice_id
+            if speed:
+                voice_params["speed"] = speed
+            if pitch:
+                voice_params["pitch"] = pitch
+            if volume:
+                voice_params["volume"] = volume
+            
+            # 使用阿里云百炼 API 调用
+            result = synthesize_speech_sync(
+                text=text.strip(),
+                voice_params=voice_params,
+                emotion=emotion,
+                model_id=self.TARGET_MODEL_ID,
+                base_url=self.BASE_URL,
+            )
+            
+            return LegacyCompatResult(
+                success=bool(getattr(result, "success", False)),
+                data=dict(getattr(result, "data", {}) or {}),
+                error=getattr(result, "error", None),
+                metadata=dict(getattr(result, "metadata", {}) or {}),
+                cost=float(getattr(result, "cost", 0.0) or 0.0),
+            )
+        
+        except Exception as e:
+            return LegacyCompatResult(
+                success=False,
+                data=None,
+                error=str(e)
+            )
+
+
+class MiniMaxSpeech28HDRuntimeWrapper(_BaseLegacyRuntimeWrapper):
+    """MiniMax Speech 2.8 HD 运行时包装器 - 旗舰级语音合成。
+    
+    使用阿里云百炼平台 API 调用 MiniMax HD 语音合成服务。
+    API 文档：https://help.aliyun.com/zh/model-studio/minimax-synchronous-speech-synthesis-api
+    """
+    
+    TARGET_MODEL_ID = "minimax-speech-2.8-hd"
+    BASE_URL = "https://dashscope.aliyuncs.com/api/v1"
+    ENDPOINT = "/api/v1/services/aigc/multimodal-generation/generation"
+    
+    def generate(
+        self,
+        text: str,
+        voice_id: Optional[str] = None,
+        speed: float = 1.0,
+        pitch: float = 1.0,
+        volume: float = 1.0,
+        emotion: Optional[str] = None,
+        **kwargs,
+    ) -> LegacyCompatResult:
+        """
+        生成语音：MiniMax Speech 2.8 HD.
+        使用阿里云百炼平台的 DashScope API.
+        
+        Args:
+            text: 要转换的文本
+            voice_id: 音色 ID（如 hd-female-qingcheng, hd-male-dihou）
+            speed: 语速，0.5-2.0
+            pitch: 音调，0.5-2.0
+            volume: 音量，0.0-1.0
+            emotion: 情绪，happy/sad/angry/fearful 等
+        """
+        from adapters.adapter_helpers import synthesize_speech_sync
+        
+        if not text or not text.strip():
+            return LegacyCompatResult(
+                success=False,
+                data=None,
+                error="Text is required for MiniMax HD TTS"
+            )
+        
+        try:
+            # 构建语音参数
+            voice_params = {}
+            if voice_id:
+                voice_params["voice_id"] = voice_id
+            if speed:
+                voice_params["speed"] = speed
+            if pitch:
+                voice_params["pitch"] = pitch
+            if volume:
+                voice_params["volume"] = volume
+            
+            # 使用阿里云百炼 API 调用
+            result = synthesize_speech_sync(
+                text=text.strip(),
+                voice_params=voice_params,
+                emotion=emotion,
+                model_id=self.TARGET_MODEL_ID,
+                base_url=self.BASE_URL,
+            )
+            
+            return LegacyCompatResult(
+                success=bool(getattr(result, "success", False)),
+                data=dict(getattr(result, "data", {}) or {}),
+                error=getattr(result, "error", None),
+                metadata=dict(getattr(result, "metadata", {}) or {}),
+                cost=float(getattr(result, "cost", 0.0) or 0.0),
+            )
+        
+        except Exception as e:
+            return LegacyCompatResult(
+                success=False,
+                data=None,
+                error=str(e)
+            )
+
+
 _RUNTIME_WRAPPER_CLASSES: Dict[str, Type[_BaseLegacyRuntimeWrapper]] = {
     "wan2.6-t2i": Wan26T2IRuntimeWrapper,
     "wan2.7-t2v": Wan27T2VRuntimeWrapper,
@@ -407,6 +565,8 @@ _RUNTIME_WRAPPER_CLASSES: Dict[str, Type[_BaseLegacyRuntimeWrapper]] = {
     "qwen_multiperson_fusion": QwenMultiPersonFusionRuntimeWrapper,
     "wan2.7-i2v": Wan27I2VRuntimeWrapper,
     "wan2.7-r2v": Wan27R2VRuntimeWrapper,
+    "minimax-speech-2.8-turbo": MiniMaxSpeech28TurboRuntimeWrapper,
+    "minimax-speech-2.8-hd": MiniMaxSpeech28HDRuntimeWrapper,
 }
 
 _RUNTIME_WRAPPER_ALIASES: Dict[str, str] = {

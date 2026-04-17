@@ -18,7 +18,6 @@ from pydantic import BaseModel, Field
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.audiobook.ai_music import MusicGenerationRequest, MusicStyle, create_music_generator
-from app.services.audiobook.klingai_effect_generator import create_klingai_generator
 from core.model_catalog_runtime import get_model_catalog_runtime_index
 from core.model_resolution import normalize_model_id
 from core.unified_media_runtime import UnifiedMediaResult, media_runtime
@@ -33,7 +32,7 @@ IMAGE_GENERATION_MODELS = {"wan2.6-t2i"}
 IMAGE_EDIT_MODELS = {"qwen-image-edit-plus", "qwen-image-edit-max"}
 VIDEO_MODELS = {"wan2.7-t2v", "wan2.6-t2v-fast", "wan2.7-i2v", "wan2.7-r2v", "wan2.7-videoedit"}
 VISION_REVIEW_MODELS = {"qwen3-vl-plus"}
-AUDIO_MODELS = {"mureka-o1-instrumental", "kling-v1-text-to-audio"}
+AUDIO_MODELS = {"mureka-o1-instrumental", "vidu-timing2audio"}
 VIDEO_DURATION_OPTIONS: dict[str, tuple[float, ...]] = {
     "wan2.7-t2v": (3.0, 5.0, 10.0, 15.0),
     "wan2.6-t2v-fast": (3.0, 5.0),
@@ -991,7 +990,7 @@ async def generate_audio_asset(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的音频生成类型")
 
     requested_model_id = (model_id or "").strip() or (
-        "mureka-o1-instrumental" if normalized_generation_type == "music" else "kling-v1-text-to-audio"
+        "mureka-o1-instrumental" if normalized_generation_type == "music" else "vidu-timing2audio"
     )
     normalized_mood = str(mood or "").strip() or "calm"
     normalized_tempo = str(tempo or "").strip() or "medium"
@@ -1048,39 +1047,49 @@ async def generate_audio_asset(
         )
 
     resolved_duration = _validate_audio_duration("sound-effect", duration)
-    fallback_reason = ""
-    requested_kling = requested_model_id == "kling-v1-text-to-audio"
-    kling_generator = create_klingai_generator() if requested_kling else None
-    kling_available = bool(kling_generator and kling_generator.access_key and kling_generator.secret_key)
+    from app.services.audiobook.vidu_timing2audio_generator import ViduTiming2AudioGenerator
+    
+    requested_vidu = requested_model_id == "vidu-timing2audio"
+    vidu_generator = ViduTiming2AudioGenerator() if requested_vidu else None
+    vidu_available = bool(vidu_generator and vidu_generator.api_key)
 
-    if requested_kling and kling_available:
-        kling_output_path = _allocate_output_path(subdir="audio/sound-effects", suffix=".mp3")
-        kling_result = await asyncio.to_thread(
-            kling_generator.generate_and_download,
-            cleaned_prompt,
-            kling_output_path,
+    if requested_vidu and vidu_available:
+        vidu_output_path = _allocate_output_path(subdir="audio/sound-effects", suffix=".mp3")
+        timing_prompts = [
+            {
+                "from": 0.0,
+                "to": float(resolved_duration),
+                "prompt": cleaned_prompt
+            }
+        ]
+        vidu_result = await asyncio.to_thread(
+            vidu_generator.generate_and_download,
+            timing_prompts,
+            vidu_output_path,
             float(resolved_duration),
             "mp3",
-            90,
+            120,
         )
-        if kling_result.success and kling_result.local_file_path:
-            output_path = Path(kling_result.local_file_path)
+        if vidu_result.success and vidu_result.local_file_path:
+            output_path = Path(vidu_result.local_file_path)
             return _build_audio_response(
                 mode="text_to_sound_effect",
-                model_id="kling-v1-text-to-audio",
+                model_id="vidu-timing2audio",
                 output_path=output_path,
                 metadata={
                     "requested_model_id": requested_model_id,
-                    "resolved_model_id": "kling-v1-text-to-audio",
+                    "resolved_model_id": "vidu-timing2audio",
                     "generation_type": normalized_generation_type,
                     "duration_seconds": resolved_duration,
                     "fallback_used": False,
                 },
             )
 
-        fallback_reason = kling_result.error or "可灵音效生成失败，已回退到 Mureka 环境音链路。"
-    elif requested_kling:
-        fallback_reason = "当前未配置可灵音效密钥，已回退到 Mureka 环境音链路。"
+        fallback_reason = vidu_result.error or "Vidu 音效生成失败，已回退到 Mureka 环境音链路。"
+    elif requested_vidu:
+        fallback_reason = "当前未配置 Vidu API Key，已回退到 Mureka 环境音链路。"
+    else:
+        fallback_reason = "音效生成失败"
 
     music_generator = create_music_generator(enable_cache=True)
     fallback_prompt = f"短音效或环境音，干净利落，无人声，不过度旋律化：{cleaned_prompt}"

@@ -1091,21 +1091,17 @@ class TestYAMLConfiguration:
         assert music_spec.model_type == ModelType.AUDIO
         assert "asset_music" in music_spec.routing.task_types
 
-        sfx_spec = registry.get_spec("kling-v1-text-to-audio")
+        sfx_spec = registry.get_spec("vidu-timing2audio")
         assert sfx_spec is not None
         assert sfx_spec.model_type == ModelType.AUDIO
         assert sfx_spec.get_fallback_model() == "mureka-o1-instrumental"
 
-        video_audio_spec = registry.get_spec("kling-v1-video-to-audio")
-        assert video_audio_spec is not None
-        assert video_audio_spec.model_type == ModelType.AUDIO
-
         audio_specs = registry.get_specs_by_type("audio")
         audio_ids = {spec.id for spec in audio_specs}
-        assert {"mureka-o1-instrumental", "kling-v1-text-to-audio", "kling-v1-video-to-audio"} <= audio_ids
+        assert {"mureka-o1-instrumental", "vidu-timing2audio"} <= audio_ids
 
         assert registry.select_best_model("asset_music").id == "mureka-o1-instrumental"
-        assert registry.select_best_model("asset_sfx").id == "kling-v1-text-to-audio"
+        assert registry.select_best_model("asset_sfx").id == "vidu-timing2audio"
 
     def test_yaml_task_type_mapping(self):
         """测试 YAML 任务类型映射"""

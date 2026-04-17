@@ -20,7 +20,6 @@ import {
   FormControl,
   FormControlLabel,
   Grid,
-  IconButton,
   ImageList,
   ImageListItem,
   InputLabel,
@@ -34,9 +33,6 @@ import {
   Paper,
   Select,
   Stack,
-  Step,
-  StepLabel,
-  Stepper,
   Switch,
   TextField,
   Typography,
@@ -44,7 +40,6 @@ import {
 } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
-import CloseIcon from '@mui/icons-material/Close'
 import DeleteIcon from '@mui/icons-material/Delete'
 import HistoryIcon from '@mui/icons-material/History'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
@@ -153,11 +148,60 @@ import {
   PendingVideoConfirmationView,
 } from './dreamweaver-run/pendingViews'
 import {
+  DreamweaverConfigDialogActions,
+  DreamweaverConfigDialogChapterSelectionCard,
+  DreamweaverConfigDialogContent,
+  DreamweaverConfigDialogProjectSection,
+  DreamweaverConfigDialogShell,
+  DreamweaverConfigDialogStrategyCard,
+  DreamweaverConfigDialogTitle,
+  DreamweaverConfigDialogVisualSettingsCard,
+} from './dreamweaver-run/configDialog'
+import {
+  DreamweaverBulkDeleteDialogActions,
+  DreamweaverBulkDeleteDialogContent,
+  DreamweaverBulkDeleteDialogShell,
+  DreamweaverDeleteRunDialogActions,
+  DreamweaverDeleteRunDialogContent,
+  DreamweaverDeleteRunDialogShell,
+} from './dreamweaver-run/deleteDialogs'
+import {
+  DreamweaverDiagnosticDialogEmptyState,
+  DreamweaverDiagnosticDialogHeader,
+  DreamweaverDiagnosticDialogShell,
+  DreamweaverDiagnosticDialogStatusSection,
+  DreamweaverDiagnosticDialogToolbar,
+} from './dreamweaver-run/diagnosticDialog'
+import {
+  DreamweaverHistoryDialogContent,
+  DreamweaverHistoryDialogShell,
+  DreamweaverHistoryDialogTitle,
+  DreamweaverHistoryDialogToolbar,
+  DreamweaverHistoryRunItem,
+} from './dreamweaver-run/historyDialog'
+import {
+  DreamweaverPromptEditDialogActions,
+  DreamweaverPromptEditDialogContent,
+  DreamweaverPromptEditDialogShell,
+  DreamweaverRegenerateDialogActions,
+  DreamweaverRegenerateDialogContent,
+  DreamweaverRegenerateDialogModeControls,
+  DreamweaverRegenerateDialogShell,
+} from './dreamweaver-run/promptDialogs'
+import {
   RunSnapshotAssetPreviewSection,
   RunSnapshotMergedVideoSection,
   RunSnapshotPreviewPane,
   RunSnapshotShotList,
 } from './dreamweaver-run/runSnapshotPreviewPane'
+import {
+  DreamweaverWorkbenchRestartAction,
+  DreamweaverWorkbenchRestartMenu,
+  DreamweaverWorkbenchStatusActionButton,
+  DreamweaverWorkbenchStatusPanel,
+  DreamweaverWorkbenchStatusRightActions,
+  DreamweaverWorkbenchStepper,
+} from './dreamweaver-run/workbenchStatusPanel'
 const DREAMWEAVER_PREVIEW_STEPS = ['剧本', '分镜', '素材', '镜头', '合成'] as const
 type LibraryGroupSummary = {
   total: number
@@ -6543,112 +6587,55 @@ export default function DreamWeaverRunPage() {
     merged_video: diagnosticResult?.merged_video || null,
   })
 
-  const renderDiagnosticDialogHeader = () => (
-    <DialogTitle>
-      <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
-        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-          <BugReportIcon color="primary" />
-          <Typography variant="h6">{'\u8bca\u65ad\u9762\u677f'}</Typography>
-          {currentRunId && (
-            <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-              {currentRunId}
-            </Typography>
-          )}
-          {diagnosticResult?.state && <Chip size="small" label={`state: ${diagnosticResult?.state}`} />}
-          {diagnosticResult?.stage && <Chip size="small" label={`stage: ${diagnosticResult?.stage}`} />}
-        </Stack>
-        <IconButton onClick={closeDiagnosticDialog}>
-          <CloseIcon />
-        </IconButton>
-      </Stack>
-    </DialogTitle>
-  )
-
-  const renderDiagnosticDialogStatusSection = () => (
-    <>
-      {!currentRunId && (
-        <Alert severity="info" sx={{ mb: 1 }}>
-          {'\u6682\u65e0 run_id\uff0c\u65e0\u6cd5\u52a0\u8f7d\u4ea7\u7269\u9884\u89c8\u4e0e\u8bca\u65ad\u4fe1\u606f\u3002'}
-        </Alert>
-      )}
-      {currentRunId && !diagnosticResult && (
-        <Alert severity="info" sx={{ mb: 1 }}>
-          {'\u6682\u65e0\u53ef\u7528\u7684\u5957\u8def\u5feb\u7167/\u955c\u5934\u4fe1\u606f\u3002\u53ef\u5c1d\u8bd5\u70b9\u51fb\u201c\u5237\u65b0\u8fd0\u884c\u5feb\u7167\u201d\uff0c\u6216\u7b49\u5f85\u4efb\u52a1\u843d\u5e93\u540e\u518d\u67e5\u770b\u3002'}
-        </Alert>
-      )}
-      {diagnosticActionError && (
-        <Alert severity="error" sx={{ mb: 1 }}>
-          {diagnosticActionError}
-        </Alert>
-      )}
-      {diagnosticActionLoading && <LinearProgress sx={{ mb: 1 }} />}
-    </>
-  )
-
-  const renderDiagnosticDialogToolbar = () => (
-    <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
-      <Chip size="small" label={`\u955c\u5934: ${diagnosticShots.length}`} />
-      {Array.isArray(diagnosticResult?.keyframes) && <Chip size="small" label={`KF: ${diagnosticResult?.keyframes?.length || 0}`} />}
-      {Array.isArray(diagnosticResult?.midframes) && <Chip size="small" label={`MF: ${diagnosticResult?.midframes?.length || 0}`} />}
-      {Array.isArray(diagnosticResult?.video_clips) && <Chip size="small" label={`VC: ${diagnosticResult?.video_clips?.length || 0}`} />}
-      <Button
-        size="small"
-        variant="outlined"
-        startIcon={<RefreshIcon fontSize="small" />}
-        onClick={loadRunSnapshot}
-        disabled={!persistedRunId || runSnapshotLoading}
-      >
-        {runSnapshotLoading ? '\u5237\u65b0\u4e2d...' : '\u5237\u65b0\u8fd0\u884c\u5feb\u7167'}
-      </Button>
-      <Button
-        size="small"
-        variant="outlined"
-        startIcon={<ContentCopyIcon fontSize="small" />}
-        onClick={() => copyText(safeJsonStringify(buildRunDiagnosticPayload()))}
-        disabled={!(diagnosticResult || diagnosticPreflight || diagnosticProviderTrace)}
-      >
-        {'\u590d\u5236 Run \u8bca\u65ad'}
-      </Button>
-    </Stack>
-  )
-
-  const renderDiagnosticDialogEmptyState = () => (
-    <>
-      {!diagnosticResult && (
-        <Typography variant="body2" color="text.secondary">
-          {'\u65e0\u53ef\u5c55\u793a\u5185\u5bb9'}
-        </Typography>
-      )}
-
-      {diagnosticResult && diagnosticShots.length === 0 && (
-        <Typography variant="body2" color="text.secondary">
-          {'\u6682\u65e0\u955c\u5934\u6570\u636e\uff08storyboard \u672a\u843d\u5e93\u6216\u5c1a\u672a\u751f\u6210\uff09\u3002'}
-        </Typography>
-      )}
-    </>
-  )
-
   const renderDiagnosticDialog = () => (
-    <Dialog open={diagnosticOpen} onClose={closeDiagnosticDialog} maxWidth="lg" fullWidth>
-      {renderDiagnosticDialogHeader()}
-      <DialogContent dividers>
-        {renderDiagnosticDialogStatusSection()}
-        {renderDiagnosticDialogToolbar()}
-
-        <Divider sx={{ mb: 1 }} />
-
-        {renderDiagnosticPreflightSection()}
-        {renderDiagnosticProviderTraceSection()}
-        {renderDiagnosticTelemetrySection()}
-        {renderDiagnosticCameraDiagnosticsSection()}
-        {renderDiagnosticDialogEmptyState()}
-
-        {diagnosticResult && diagnosticShots.length > 0 && diagnosticShots.map(renderShotDiagnosticAccordion)}
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={closeDiagnosticDialog}>{'\u5173\u95ed'}</Button>
-      </DialogActions>
-    </Dialog>
+    <DreamweaverDiagnosticDialogShell
+      open={diagnosticOpen}
+      onClose={closeDiagnosticDialog}
+      header={
+        <DreamweaverDiagnosticDialogHeader
+          runId={currentRunId}
+          state={diagnosticResult?.state}
+          stage={diagnosticResult?.stage}
+          onClose={closeDiagnosticDialog}
+        />
+      }
+      statusSection={
+        <DreamweaverDiagnosticDialogStatusSection
+          hasRunId={Boolean(currentRunId)}
+          hasDiagnosticResult={Boolean(diagnosticResult)}
+          error={diagnosticActionError}
+          loading={diagnosticActionLoading}
+        />
+      }
+      toolbar={
+        <DreamweaverDiagnosticDialogToolbar
+          shotCount={diagnosticShots.length}
+          keyframeCount={Array.isArray(diagnosticResult?.keyframes) ? diagnosticResult.keyframes.length : null}
+          midframeCount={Array.isArray(diagnosticResult?.midframes) ? diagnosticResult.midframes.length : null}
+          videoClipCount={Array.isArray(diagnosticResult?.video_clips) ? diagnosticResult.video_clips.length : null}
+          refreshLabel={runSnapshotLoading ? '刷新中...' : '刷新运行快照'}
+          refreshDisabled={!persistedRunId || runSnapshotLoading}
+          copyDisabled={!(diagnosticResult || diagnosticPreflight || diagnosticProviderTrace)}
+          onRefresh={loadRunSnapshot}
+          onCopy={() => copyText(safeJsonStringify(buildRunDiagnosticPayload()))}
+        />
+      }
+      sections={
+        <>
+          {renderDiagnosticPreflightSection()}
+          {renderDiagnosticProviderTraceSection()}
+          {renderDiagnosticTelemetrySection()}
+          {renderDiagnosticCameraDiagnosticsSection()}
+        </>
+      }
+      emptyState={
+        <DreamweaverDiagnosticDialogEmptyState
+          hasDiagnosticResult={Boolean(diagnosticResult)}
+          shotCount={diagnosticShots.length}
+        />
+      }
+      shotAccordions={diagnosticResult && diagnosticShots.length > 0 ? diagnosticShots.map(renderShotDiagnosticAccordion) : null}
+    />
   )
 
   const closePromptEditDialog = () => {
@@ -6876,19 +6863,7 @@ export default function DreamWeaverRunPage() {
 
   const HISTORY_FILTER_STATUSES = ['running', 'queued', 'waiting', 'failed', 'timeout', 'completed'] as const
 
-  const renderHistoryDialogTitle = () => (
-    <DialogTitle>
-      <Stack direction="row" spacing={1} alignItems="center">
-        <HistoryIcon color="primary" />
-        <Typography variant="h6">历史记录</Typography>
-        {selectedProject?.title && (
-          <Typography variant="body2" color="text.secondary">
-            {selectedProject?.title}
-          </Typography>
-        )}
-      </Stack>
-    </DialogTitle>
-  )
+  const renderHistoryDialogTitle = () => <DreamweaverHistoryDialogTitle projectTitle={selectedProject?.title} />
 
   const toggleHistoryStatusFilter = (status: string) => {
     setHistoryStatusFilters((prev) =>
@@ -6953,13 +6928,10 @@ export default function DreamWeaverRunPage() {
   )
 
   const renderHistoryDialogToolbar = () => (
-    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 1 }}>
-      {renderHistoryFilterChips()}
-
-      <Box sx={{ flex: 1 }} />
-
-      {renderHistoryDialogToolbarActions()}
-    </Stack>
+    <DreamweaverHistoryDialogToolbar
+      filters={renderHistoryFilterChips()}
+      actions={renderHistoryDialogToolbarActions()}
+    />
   )
 
   const renderHistoryRunItemSummaryChips = (run: DreamweaverRunSummary, progressValue: number | null) => {
@@ -7010,234 +6982,98 @@ export default function DreamWeaverRunPage() {
       typeof run.progress === 'number' ? Math.max(0, Math.min(100, Math.round(run.progress))) : null
 
     return (
-      <ListItem key={run.run_id} sx={{ border: '1px solid #eee', borderRadius: 2, mb: 1 }}>
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          {renderHistoryRunItemSummaryChips(run, progressValue)}
-          {timeText && (
-            <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
-              {timeText}
-            </Typography>
-          )}
-          {run.error_message && (
-            <Typography variant="caption" color="error" display="block" sx={{ mt: 0.5 }}>
-              {run.error_message}
-            </Typography>
-          )}
-        </Box>
-        {renderHistoryRunItemActions(run.run_id)}
-      </ListItem>
+      <DreamweaverHistoryRunItem
+        key={run.run_id}
+        summary={renderHistoryRunItemSummaryChips(run, progressValue)}
+        timeText={timeText}
+        errorMessage={run.error_message}
+        actions={renderHistoryRunItemActions(run.run_id)}
+      />
     )
   }
 
   const renderHistoryDialogContent = () => (
-    <DialogContent dividers>
-      {historyError && (
-        <Alert severity="error" sx={{ mb: 1 }}>
-          {historyError}
-        </Alert>
-      )}
-      {historyLoading && <LinearProgress sx={{ mb: 1 }} />}
+    <DreamweaverHistoryDialogContent
+      error={historyError}
+      loading={historyLoading}
+      toolbar={renderHistoryDialogToolbar()}
+      emptyState={
+        <>
+          {!historyLoading && !historyError && historyRuns.length === 0 && (
+            <Typography variant="body2" color="text.secondary">
+              暂无历史任务
+            </Typography>
+          )}
 
-      {renderHistoryDialogToolbar()}
-
-      {!historyLoading && !historyError && historyRuns.length === 0 && (
-        <Typography variant="body2" color="text.secondary">
-          暂无历史任务
-        </Typography>
-      )}
-
-      {!historyLoading && !historyError && historyRuns.length > 0 && filteredHistoryRuns.length === 0 && (
-        <Typography variant="body2" color="text.secondary">
-          筛选结果为空
-        </Typography>
-      )}
-
-      {!historyLoading && filteredHistoryRuns.length > 0 && (
-        <List>{filteredHistoryRuns.map(renderHistoryRunItem)}</List>
-      )}
-    </DialogContent>
-  )
-
-  const renderHistoryDialogActions = () => (
-    <DialogActions>
-      <Button onClick={closeHistoryDialog}>关闭</Button>
-    </DialogActions>
+          {!historyLoading && !historyError && historyRuns.length > 0 && filteredHistoryRuns.length === 0 && (
+            <Typography variant="body2" color="text.secondary">
+              筛选结果为空
+            </Typography>
+          )}
+        </>
+      }
+      runList={!historyLoading && filteredHistoryRuns.length > 0 ? <List>{filteredHistoryRuns.map(renderHistoryRunItem)}</List> : null}
+    />
   )
 
   const renderHistoryDialog = () => (
-    <Dialog open={historyOpen} onClose={closeHistoryDialog} maxWidth="md" fullWidth>
-      {renderHistoryDialogTitle()}
-      {renderHistoryDialogContent()}
-      {renderHistoryDialogActions()}
-    </Dialog>
+    <DreamweaverHistoryDialogShell
+      open={historyOpen}
+      onClose={closeHistoryDialog}
+      title={renderHistoryDialogTitle()}
+      content={renderHistoryDialogContent()}
+    />
   )
-
-  const renderBulkDeleteDialogTitle = () => (
-    <DialogTitle>
-      <Stack direction="row" spacing={1} alignItems="center">
-        <WarningIcon sx={{ color: '#f44336' }} />
-        <Typography variant="h6">确认批量删除</Typography>
-      </Stack>
-    </DialogTitle>
-  )
-
-  const renderBulkDeleteProgressSection = () => {
-    if (!bulkDeleteProgress) return null
-
-    const progressValue =
-      bulkDeleteProgress.total > 0
-        ? Math.round((bulkDeleteProgress.current / bulkDeleteProgress.total) * 100)
-        : undefined
-
-    return (
-      <Stack spacing={1} sx={{ mb: 1 }}>
-        <LinearProgress
-          variant={bulkDeleteProgress.total > 0 ? 'determinate' : 'indeterminate'}
-          value={progressValue}
-        />
-        <Typography variant="caption" color="text.secondary">
-          进度：{bulkDeleteProgress.current}/{bulkDeleteProgress.total}
-        </Typography>
-      </Stack>
-    )
-  }
-
-  const renderBulkDeleteErrorAlert = () => {
-    if (!bulkDeleteError) return null
-
-    return (
-      <Alert severity="error" sx={{ mt: 1 }}>
-        {bulkDeleteError}
-      </Alert>
-    )
-  }
-
-  const renderBulkDeleteResultAlert = () => {
-    if (!bulkDeleteResult) return null
-
-    return (
-      <Alert severity={bulkDeleteResult.failed ? 'warning' : 'success'} sx={{ mt: 1 }}>
-        已删除：{bulkDeleteResult.deleted}；跳过：{bulkDeleteResult.skipped}；失败：{bulkDeleteResult.failed}
-        {bulkDeleteResult.errors.length > 0 && (
-          <Box sx={{ mt: 1 }}>
-            {bulkDeleteResult.errors.slice(0, 6).map((msg) => (
-              <Typography key={msg} variant="caption" display="block" sx={{ fontFamily: 'monospace' }}>
-                {msg}
-              </Typography>
-            ))}
-            {bulkDeleteResult.errors.length > 6 && (
-              <Typography variant="caption" display="block" color="text.secondary">
-                …还有 {bulkDeleteResult.errors.length - 6} 条错误
-              </Typography>
-            )}
-          </Box>
-        )}
-      </Alert>
-    )
-  }
 
   const renderBulkDeleteDialogContent = () => (
-    <DialogContent dividers>
-      <Alert severity="warning" sx={{ mb: 2 }}>
-        此操作将级联删除筛选出的 runs 的数据库记录与 runs/{'{run_id}'} 产物文件（不可恢复）；不会删除项目公共素材库（可复用）。运行中/排队中的 run 将自动跳过。
-      </Alert>
-      <Typography variant="body2" sx={{ mb: 1 }}>
-        本次将删除：{bulkDeleteTargets.length} 个 run；跳过：{bulkDeleteSkippedCount} 个（运行中/排队中）。
-      </Typography>
-
-      {renderBulkDeleteProgressSection()}
-      {renderBulkDeleteErrorAlert()}
-      {renderBulkDeleteResultAlert()}
-    </DialogContent>
+    <DreamweaverBulkDeleteDialogContent
+      targetCount={bulkDeleteTargets.length}
+      skippedCount={bulkDeleteSkippedCount}
+      progress={bulkDeleteProgress}
+      error={bulkDeleteError}
+      result={bulkDeleteResult}
+    />
   )
 
   const renderBulkDeleteDialogActions = () => (
-    <DialogActions>
-      <Button onClick={closeBulkDeleteDialog} disabled={bulkDeleteSubmitting}>
-        {bulkDeleteResult ? '关闭' : '取消'}
-      </Button>
-      {!bulkDeleteResult && (
-        <Button
-          variant="contained"
-          color="error"
-          onClick={confirmBulkDeleteRuns}
-          disabled={bulkDeleteSubmitting || bulkDeleteTargets.length === 0}
-        >
-          {bulkDeleteSubmitting ? '删除中…' : '确认批量删除'}
-        </Button>
-      )}
-    </DialogActions>
+    <DreamweaverBulkDeleteDialogActions
+      submitting={bulkDeleteSubmitting}
+      hasResult={Boolean(bulkDeleteResult)}
+      hasTargets={bulkDeleteTargets.length > 0}
+      onClose={closeBulkDeleteDialog}
+      onConfirm={confirmBulkDeleteRuns}
+    />
   )
 
   const renderBulkDeleteDialog = () => (
-    <Dialog open={bulkDeleteDialogOpen} onClose={closeBulkDeleteDialog} fullWidth maxWidth="sm">
-      {renderBulkDeleteDialogTitle()}
-      {renderBulkDeleteDialogContent()}
-      {renderBulkDeleteDialogActions()}
-    </Dialog>
+    <DreamweaverBulkDeleteDialogShell
+      open={bulkDeleteDialogOpen}
+      onClose={closeBulkDeleteDialog}
+      content={renderBulkDeleteDialogContent()}
+      actions={renderBulkDeleteDialogActions()}
+    />
   )
-
-  const renderDeleteRunDialogTitle = () => (
-    <DialogTitle>
-      <Stack direction="row" spacing={1} alignItems="center">
-        <WarningIcon sx={{ color: '#f44336' }} />
-        <Typography variant="h6">确认删除</Typography>
-      </Stack>
-    </DialogTitle>
-  )
-
-  const renderDeleteRunDialogWarningNotice = () => (
-    <Alert severity="warning" sx={{ mb: 2 }}>
-      此操作将级联删除该次 run 的数据库记录与 runs/{'{run_id}'} 产物文件（不可恢复）；不会删除项目公共素材库（可复用）。
-    </Alert>
-  )
-
-  const renderDeleteRunDialogRunId = () => (
-    <Typography variant="body2" sx={{ fontFamily: 'monospace', mb: 1 }}>
-      RunID: {deleteRunId || '-'}
-    </Typography>
-  )
-
-  const renderDeleteRunDialogErrorAlert = () => {
-    if (!deleteDialogError) return null
-
-    return (
-      <Alert severity="error" sx={{ mt: 1 }}>
-        {deleteDialogError}
-      </Alert>
-    )
-  }
 
   const renderDeleteRunDialogContent = () => (
-    <DialogContent dividers>
-      {renderDeleteRunDialogWarningNotice()}
-      {renderDeleteRunDialogRunId()}
-      {renderDeleteRunDialogErrorAlert()}
-    </DialogContent>
+    <DreamweaverDeleteRunDialogContent runId={deleteRunId} error={deleteDialogError} />
   )
 
   const renderDeleteRunDialogActions = () => (
-    <DialogActions>
-      <Button onClick={closeDeleteRunDialog} disabled={deleteSubmitting}>
-        取消
-      </Button>
-      <Button
-        variant="contained"
-        color="error"
-        onClick={confirmDeleteRun}
-        disabled={deleteSubmitting || !deleteRunId}
-      >
-        {deleteSubmitting ? '删除中…' : '确认删除'}
-      </Button>
-    </DialogActions>
+    <DreamweaverDeleteRunDialogActions
+      submitting={deleteSubmitting}
+      hasRunId={Boolean(deleteRunId)}
+      onClose={closeDeleteRunDialog}
+      onConfirm={confirmDeleteRun}
+    />
   )
 
   const renderDeleteRunDialog = () => (
-    <Dialog open={deleteDialogOpen} onClose={closeDeleteRunDialog} fullWidth maxWidth="sm">
-      {renderDeleteRunDialogTitle()}
-      {renderDeleteRunDialogContent()}
-      {renderDeleteRunDialogActions()}
-    </Dialog>
+    <DreamweaverDeleteRunDialogShell
+      open={deleteDialogOpen}
+      onClose={closeDeleteRunDialog}
+      content={renderDeleteRunDialogContent()}
+      actions={renderDeleteRunDialogActions()}
+    />
   )
 
   const closeConfigDialog = () => setConfigDialogOpen(false)
@@ -7248,22 +7084,14 @@ export default function DreamWeaverRunPage() {
   }
 
   const renderConfigDialogTitle = () => (
-    <DialogTitle sx={{ pb: 1 }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-        <Box sx={{ minWidth: 0 }}>
-          <Typography variant="h6" sx={{ fontWeight: 800 }}>
-            生成配置
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            {(selectedProject?.title || (selectedProjectId ? `项目 #${selectedProjectId}` : '请选择项目')) +
-              (chapters.length ? ` · 已选 ${selectedChapterIds.length}/${chapters.length} 章` : '')}
-          </Typography>
-        </Box>
-        <IconButton onClick={closeConfigDialog} size="small" aria-label="关闭">
-          <CloseIcon fontSize="small" />
-        </IconButton>
-      </Stack>
-    </DialogTitle>
+    <DreamweaverConfigDialogTitle
+      title="生成配置"
+      subtitle={
+        (selectedProject?.title || (selectedProjectId ? `项目 #${selectedProjectId}` : '请选择项目')) +
+        (chapters.length ? ` · 已选 ${selectedChapterIds.length}/${chapters.length} 章` : '')
+      }
+      onClose={closeConfigDialog}
+    />
   )
 
   const renderConfigDialogErrorNotice = () => {
@@ -7289,29 +7117,11 @@ export default function DreamWeaverRunPage() {
   }
 
   const renderConfigDialogProjectSection = () => (
-    <>
-      {lockedProjectId ? (
-        <Box
-          sx={{
-            p: 1.5,
-            borderRadius: 2,
-            border: '1px solid rgba(0,0,0,0.08)',
-            bgcolor: 'rgba(0,0,0,0.04)',
-          }}
-        >
-          <Typography variant="caption" color="text.secondary" display="block">
-            当前项目
-          </Typography>
-          <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-            {selectedProject?.title || `项目 #${lockedProjectId}`}
-          </Typography>
-        </Box>
-      ) : (
-        <Alert severity="info" action={renderConfigDialogProjectAlertAction()}>
-          请先在项目列表选择一个项目，再进入生成配置。
-        </Alert>
-      )}
-    </>
+    <DreamweaverConfigDialogProjectSection
+      lockedProjectId={lockedProjectId}
+      projectTitle={selectedProject?.title}
+      action={renderConfigDialogProjectAlertAction()}
+    />
   )
 
   const renderConfigDialogProjectAlertAction = () => (
@@ -7360,12 +7170,9 @@ export default function DreamWeaverRunPage() {
   }
 
   const renderConfigDialogChapterSelectionCard = () => (
-    <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-          章节选择
-        </Typography>
-        <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
+    <DreamweaverConfigDialogChapterSelectionCard
+      toolbarActions={
+        <>
           <Button size="small" onClick={handleSelectAll} disabled={loadingChapters || !chapters.length || running}>
             {selectedChapterIds.length === chapters.length ? '清空' : '全选'}
           </Button>
@@ -7379,27 +7186,12 @@ export default function DreamWeaverRunPage() {
           >
             刷新
           </Button>
-        </Stack>
-      </Stack>
-
-      <Box
-        sx={{
-          maxHeight: configDialogFullScreen ? '55vh' : 360,
-          overflow: 'auto',
-          border: '1px solid rgba(0,0,0,0.08)',
-          borderRadius: 2,
-        }}
-      >
-        {loadingChapters ? (
-          <LinearProgress />
-        ) : (
-          <List dense disablePadding>{chapters.map(renderConfigDialogChapterItem)}</List>
-        )}
-      </Box>
-      <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-        至少选择 1 个章节；默认全选可直接开始生成。
-      </Typography>
-    </Paper>
+        </>
+      }
+      listContent={loadingChapters ? <LinearProgress /> : <List dense disablePadding>{chapters.map(renderConfigDialogChapterItem)}</List>}
+      helperText="至少选择 1 个章节；默认全选可直接开始生成。"
+      maxHeight={configDialogFullScreen ? '55vh' : 360}
+    />
   )
 
   const renderConfigStrategyToggleField = ({
@@ -7539,79 +7331,76 @@ export default function DreamWeaverRunPage() {
   )
 
   const renderConfigDialogStrategyCard = () => (
-    <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-      <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>
-        生成策略
-      </Typography>
-
-      <Stack spacing={1.5}>
-        {renderConfigDialogStrategyFields()}
-        {renderConfigDialogExperimentField()}
-      </Stack>
-      <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
-        性能提示：关键帧镜头级并发由后端环境变量 `DREAMWEAVER_KEYFRAMES_PARALLELISM` 控制，建议先从 `2` 开始，避免把上游 QPS 打满。
-      </Typography>
-    </Paper>
+    <DreamweaverConfigDialogStrategyCard
+      content={
+        <>
+          {renderConfigDialogStrategyFields()}
+          {renderConfigDialogExperimentField()}
+        </>
+      }
+      helperText="性能提示：关键帧镜头级并发由后端环境变量 `DREAMWEAVER_KEYFRAMES_PARALLELISM` 控制，建议先从 `2` 开始，避免把上游 QPS 打满。"
+    />
   )
 
   const renderConfigDialogVisualSettingsCard = () => (
-    <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-      <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>
-        画面设置
-      </Typography>
-      {lockedGenerationConfigError && (
-        <Alert severity="warning" sx={{ mb: 1 }}>
-          {lockedGenerationConfigError}
-        </Alert>
-      )}
-      {generationConfigLocked && (
-        <Alert severity="info" sx={{ mb: 1 }}>
-          当前项目的风格/比例/分辨率已锁定，生成过程中不允许切换；如需变更请新建项目或先清理该项目的 DreamWeaver runs。
-          {lockedGenerationConfig?.source_run_id ? `（锁定来源：${lockedGenerationConfig.source_run_id}）` : ''}
-        </Alert>
-      )}
-      <Grid container spacing={1.5}>
-        <Grid item xs={12}>
-          {renderConfigDialogSelectField({
-            labelId: 'style-preset-label',
-            label: '风格预设',
-            value: stylePreset,
-            onChange: setStylePreset,
-            options: Object.values(STYLE_PRESETS).map((optionValue) => ({
-              value: optionValue,
-              label: STYLE_PRESET_LABELS[optionValue] || optionValue,
-            })),
-          })}
+    <DreamweaverConfigDialogVisualSettingsCard
+      notices={
+        <>
+          {lockedGenerationConfigError && (
+            <Alert severity="warning" sx={{ mb: 1 }}>
+              {lockedGenerationConfigError}
+            </Alert>
+          )}
+          {generationConfigLocked && (
+            <Alert severity="info" sx={{ mb: 1 }}>
+              当前项目的风格/比例/分辨率已锁定，生成过程中不允许切换；如需变更请新建项目或先清理该项目的 DreamWeaver runs。
+              {lockedGenerationConfig?.source_run_id ? `（锁定来源：${lockedGenerationConfig.source_run_id}）` : ''}
+            </Alert>
+          )}
+        </>
+      }
+      fields={
+        <Grid container spacing={1.5}>
+          <Grid item xs={12}>
+            {renderConfigDialogSelectField({
+              labelId: 'style-preset-label',
+              label: '风格预设',
+              value: stylePreset,
+              onChange: setStylePreset,
+              options: Object.values(STYLE_PRESETS).map((optionValue) => ({
+                value: optionValue,
+                label: STYLE_PRESET_LABELS[optionValue] || optionValue,
+              })),
+            })}
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            {renderConfigDialogSelectField({
+              labelId: 'image-ratio-label',
+              label: '画面比例',
+              value: imageRatio,
+              onChange: setImageRatio,
+              options: Object.values(IMAGE_RATIOS).map((optionValue) => ({
+                value: optionValue,
+                label: IMAGE_RATIOS_LABELS[optionValue] || optionValue,
+              })),
+            })}
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            {renderConfigDialogSelectField({
+              labelId: 'image-resolution-label',
+              label: '分辨率',
+              value: imageResolution,
+              onChange: setImageResolution,
+              options: Object.values(IMAGE_RESOLUTIONS).map((optionValue) => ({
+                value: optionValue,
+                label: IMAGE_RESOLUTIONS_LABELS[optionValue] || optionValue,
+              })),
+            })}
+          </Grid>
         </Grid>
-        <Grid item xs={12} sm={6}>
-          {renderConfigDialogSelectField({
-            labelId: 'image-ratio-label',
-            label: '画面比例',
-            value: imageRatio,
-            onChange: setImageRatio,
-            options: Object.values(IMAGE_RATIOS).map((optionValue) => ({
-              value: optionValue,
-              label: IMAGE_RATIOS_LABELS[optionValue] || optionValue,
-            })),
-          })}
-        </Grid>
-        <Grid item xs={12} sm={6}>
-          {renderConfigDialogSelectField({
-            labelId: 'image-resolution-label',
-            label: '分辨率',
-            value: imageResolution,
-            onChange: setImageResolution,
-            options: Object.values(IMAGE_RESOLUTIONS).map((optionValue) => ({
-              value: optionValue,
-              label: IMAGE_RESOLUTIONS_LABELS[optionValue] || optionValue,
-            })),
-          })}
-        </Grid>
-      </Grid>
-      <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-        比例决定横/竖屏；分辨率影响素材库、关键帧与合成视频输出尺寸。
-      </Typography>
-    </Paper>
+      }
+      helperText="比例决定横/竖屏；分辨率影响素材库、关键帧与合成视频输出尺寸。"
+    />
   )
 
   const runFromConfigDialog = async () => {
@@ -7635,42 +7424,30 @@ export default function DreamWeaverRunPage() {
   )
 
   const renderConfigDialogContent = () => (
-    <DialogContent dividers sx={{ pt: 2 }}>
-      {renderConfigDialogErrorNotice()}
-
-      <Stack spacing={2}>
-        {renderConfigDialogProjectSection()}
-        {renderConfigDialogMainGrid()}
-      </Stack>
-    </DialogContent>
+    <DreamweaverConfigDialogContent
+      errorNotice={renderConfigDialogErrorNotice()}
+      projectSection={renderConfigDialogProjectSection()}
+      mainGrid={renderConfigDialogMainGrid()}
+    />
   )
 
   const renderConfigDialogActions = () => (
-    <DialogActions>
-      <Button onClick={closeConfigDialog}>关闭</Button>
-      <Button
-        variant="contained"
-        startIcon={<PlayArrowIcon />}
-        onClick={runFromConfigDialog}
-        disabled={running || lockedGenerationConfigLoading || !selectedProjectId || selectedChapterIds.length === 0}
-      >
-        开始生成
-      </Button>
-    </DialogActions>
+    <DreamweaverConfigDialogActions
+      onClose={closeConfigDialog}
+      onRun={runFromConfigDialog}
+      runDisabled={running || lockedGenerationConfigLoading || !selectedProjectId || selectedChapterIds.length === 0}
+    />
   )
 
   const renderConfigDialog = () => (
-    <Dialog
+    <DreamweaverConfigDialogShell
       open={configDialogOpen}
       onClose={closeConfigDialog}
       fullScreen={configDialogFullScreen}
-      maxWidth="md"
-      fullWidth
-    >
-      {renderConfigDialogTitle()}
-      {renderConfigDialogContent()}
-      {renderConfigDialogActions()}
-    </Dialog>
+      title={renderConfigDialogTitle()}
+      content={renderConfigDialogContent()}
+      actions={renderConfigDialogActions()}
+    />
   )
 
   const openConfigDialog = () => setConfigDialogOpen(true)

@@ -370,14 +370,14 @@ const AUDIO_MODEL_OPTIONS_BY_TYPE: Record<AudioGenerationType, ModelOption[]> = 
   ],
   'sound-effect': [
     {
-      value: 'kling-v1-text-to-audio',
-      label: 'kling-v1-text-to-audio',
-      helper: '优先用于短音效和环境音生成；若未配置密钥，后端会自动回退。',
+      value: 'vidu-timing2audio',
+      label: 'Vidu Timing2Audio',
+      helper: '可控文生音效，支持通过时间轴控制多个音效事件，适合视频音效和有声小说音效。',
     },
     {
       value: 'mureka-o1-instrumental',
       label: 'mureka-o1-instrumental',
-      helper: '作为环境音和轻配乐回退链路，可在无可灵密钥时继续出结果。',
+      helper: '作为环境音和轻配乐回退链路，可在未配置 Vidu API Key 时继续出结果。',
     },
   ],
 }
@@ -1960,8 +1960,8 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
 
               {audioGenerationType === 'sound-effect' ? (
                 <Alert severity="info" sx={{ borderRadius: 3 }}>
-                  当前音效链路优先使用 `kling-v1-text-to-audio`。若本地未配置可灵密钥，后端会自动回退到
-                  `mureka-o1-instrumental` 生成环境音草案。
+                  当前音效链路使用 `Vidu Timing2Audio` 可控文生音效，支持通过时间轴控制多个音效事件。
+                  若未配置 Vidu API Key，后端会自动回退到 `mureka-o1-instrumental` 生成环境音草案。
                 </Alert>
               ) : null}
 

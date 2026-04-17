@@ -858,15 +858,15 @@ class Qwen3TTSAdapter(BaseModelAdapter):
         生成语音：文本转语音。
         Args:
             text: 要转换的文本
-            voice_style: 语音风格，natural/emotional/humorous等；
-            character_id: 角色ID，用于语音克隆；
-            voice_id: 语音ID，优先使用；
+            voice_style: 语音风格，natural/emotional/humorous 等；
+            character_id: 角色 ID，用于语音克隆；
+            voice_id: 语音 ID，优先使用；
             speed: 语速，0.5-2.0；
             pitch: 音调，0.5-2.0；
             volume: 音量，0.0-1.0；
         
         Returns:
-            GenerationResult: 包含生成的语音数据，base64编码；
+            GenerationResult: 包含生成的语音数据，base64 编码；
         """
         if not text or not text.strip():
             return GenerationResult(
@@ -927,6 +927,98 @@ class Qwen3TTSAdapter(BaseModelAdapter):
                 data=None,
                 error=str(e)
             )
+
+
+class MiniMaxSpeech28TurboAdapter(BaseModelAdapter):
+    """MiniMax Speech 2.8 Turbo 适配器 - 高质量文本转语音。"""
+    
+    RUNTIME_WRAPPER_NAME = "minimax-speech-2.8-turbo"
+    
+    def generate(
+        self,
+        text: str,
+        voice_id: Optional[str] = None,
+        speed: float = 1.0,
+        pitch: float = 1.0,
+        volume: float = 1.0,
+        emotion: Optional[str] = None,
+        **kwargs,
+    ) -> GenerationResult:
+        """
+        生成语音：MiniMax Speech 2.8 Turbo.
+        Args:
+            text: 要转换的文本
+            voice_id: 音色 ID（如 female-shuangkuai, male-chenzhuo）
+            speed: 语速，0.5-2.0
+            pitch: 音调，0.5-2.0
+            volume: 音量，0.0-1.0
+            emotion: 情绪，happy/sad/angry/fearful 等
+        Returns:
+            GenerationResult: 包含生成的语音数据
+        """
+        if not text or not text.strip():
+            return GenerationResult(
+                success=False,
+                data=None,
+                error="Text is required for MiniMax TTS"
+            )
+        
+        return self._delegate_runtime(
+            "generate",
+            text=text.strip(),
+            voice_id=voice_id,
+            speed=speed,
+            pitch=pitch,
+            volume=volume,
+            emotion=emotion,
+            **kwargs,
+        )
+
+
+class MiniMaxSpeech28HDAdapter(BaseModelAdapter):
+    """MiniMax Speech 2.8 HD 适配器 - 旗舰级文本转语音。"""
+    
+    RUNTIME_WRAPPER_NAME = "minimax-speech-2.8-hd"
+    
+    def generate(
+        self,
+        text: str,
+        voice_id: Optional[str] = None,
+        speed: float = 1.0,
+        pitch: float = 1.0,
+        volume: float = 1.0,
+        emotion: Optional[str] = None,
+        **kwargs,
+    ) -> GenerationResult:
+        """
+        生成语音：MiniMax Speech 2.8 HD.
+        Args:
+            text: 要转换的文本
+            voice_id: 音色 ID（如 hd-female-qingcheng, hd-male-dihou）
+            speed: 语速，0.5-2.0
+            pitch: 音调，0.5-2.0
+            volume: 音量，0.0-1.0
+            emotion: 情绪，happy/sad/angry/fearful 等
+        Returns:
+            GenerationResult: 包含生成的语音数据
+        """
+        if not text or not text.strip():
+            return GenerationResult(
+                success=False,
+                data=None,
+                error="Text is required for MiniMax HD TTS"
+            )
+        
+        return self._delegate_runtime(
+            "generate",
+            text=text.strip(),
+            voice_id=voice_id,
+            speed=speed,
+            pitch=pitch,
+            volume=volume,
+            emotion=emotion,
+            **kwargs,
+        )
 
 
 class JianyingAPIAdapter(BaseModelAdapter):

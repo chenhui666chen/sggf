@@ -86,8 +86,7 @@ def test_model_catalog_loads_all_seed_models():
     assert seed_map["qwen3-vl-plus"].category == "multimodal"
     assert seed_map["wan2.6-t2i"].category == "image"
     assert seed_map["mureka-o1-instrumental"].category == "audio"
-    assert seed_map["kling-v1-text-to-audio"].subcategory == "文生音频"
-    assert seed_map["kling-v1-video-to-audio"].subcategory == "视频转音频"
+    assert seed_map["vidu-timing2audio"].subcategory == "可控时序音效"
     assert len(seed_map["kling-v1"].source_urls) >= 2
     assert seed_map["qwen3-max"].raw_config["catalog_profile"]["system_role"].startswith("你是中文长篇小说创作")
     assert "创作主力" in seed_map["qwen3-max"].raw_config["catalog_profile"]["tooling_badges"]
@@ -420,27 +419,27 @@ def test_model_catalog_verification_accepts_wan26_canonical_keywords():
     assert "alias:wan2.6-t2i" in verification.matched_keywords
 
 
-def test_model_catalog_verification_uses_kling_url_hint_when_page_lacks_alias():
+def test_model_catalog_verification_uses_vidu_url_hint_when_page_lacks_alias():
     service = ModelCatalogSyncService(config_dir=ROOT_DIR.parent / "config")
     seed = build_seed(
-        model_key="kling-v1-text-to-audio",
-        name="Kling v1 Text-to-Audio",
-        provider="kuaishou",
+        model_key="vidu-timing2audio",
+        name="Vidu Timing2Audio",
+        provider="vidu",
         category="audio",
-        subcategory="文生音频",
-        model_family="Kling v1",
-        documentation_url="https://app.klingai.com/cn/dev/document-api/apiReference/model/textToAudio",
-        source_urls=["https://app.klingai.com/cn/dev/document-api/apiReference/model/textToAudio"],
-        modalities=["text_to_audio"],
-        tags=["kling", "audio"],
+        subcategory="可控时序音效",
+        model_family="Vidu Audio",
+        documentation_url="https://www.vidu.cn/",
+        source_urls=["https://www.vidu.cn/"],
+        modalities=["text_to_audio", "timing_audio"],
+        tags=["vidu", "audio", "timing-control"],
     )
     response = httpx.Response(
         200,
-        request=httpx.Request("GET", "https://app.klingai.com/cn/dev/document-api/apiReference/model/textToAudio"),
+        request=httpx.Request("GET", "https://www.vidu.cn/"),
         text="""
         <html>
-          <head><title>Kling API Reference</title></head>
-          <body>Generate audio from text with Kling developer APIs.</body>
+          <head><title>Vidu Platform</title></head>
+          <body>Generate timing-controlled audio with Vidu APIs.</body>
         </html>
         """,
         headers={"content-type": "text/html"},
@@ -449,12 +448,12 @@ def test_model_catalog_verification_uses_kling_url_hint_when_page_lacks_alias():
     verification = service._verify_single_source(
         StubClient(response),
         seed,
-        ("documentation", "https://app.klingai.com/cn/dev/document-api/apiReference/model/textToAudio"),
+        ("documentation", "https://www.vidu.cn/"),
     )
 
     assert verification.reachable is True
     assert verification.verified is True
-    assert "alias:kling-v1-text-to-audio" in verification.matched_keywords
+    assert "alias:vidu-timing2audio" in verification.matched_keywords
     assert "modality:text to audio" in verification.matched_keywords
 
 

@@ -177,6 +177,145 @@ class FeedbackLoopService:
             "avg_latency": _avg(latencies),
             "avg_cost": _avg(costs),
         }
+    
+    def get_scene_recommendation_stats(
+        self,
+        db: Session,
+        scene_keywords: List[str],
+        field: str = "lighting_time",
+        days: int = 30,
+        min_samples: int = 3,
+    ) -> List[Dict[str, Any]]:
+        """Get statistical recommendations for scene based on historical feedback.
+        
+        Args:
+            db: Database session
+            scene_keywords: Keywords to match in prompt_text
+            field: Field to analyze (lighting_time, camera_movement, shot_type, etc.)
+            days: Days of feedback to consider
+            min_samples: Minimum samples required
+        
+        Returns:
+            List of recommendations sorted by weighted score
+        """
+        from datetime import timedelta
+        from sqlalchemy import func as sql_func
+        
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        
+        query = db.query(
+            sql_func.json_extract_text(GenerationFeedback.qc_details, f"$.{field}").label(field),
+            sql_func.avg(GenerationFeedback.user_rating).label("avg_rating"),
+            sql_func.avg(GenerationFeedback.qc_score).label("avg_qc"),
+            sql_func.count(GenerationFeedback.id).label("count"),
+            sql_func.avg(GenerationFeedback.visual_quality_score).label("avg_visual"),
+        ).filter(
+            GenerationFeedback.created_at >= cutoff,
+        )
+        
+        for keyword in scene_keywords:
+            query = query.filter(GenerationFeedback.prompt_text.ilike(f"%{keyword}%"))
+        
+        query = query.group_by(field)
+        
+        results = []
+        for row in query.all():
+            value = getattr(row, field)
+            if value is None:
+                continue
+            
+            count = row.count
+            if count < min_samples:
+                continue
+            
+            avg_rating = row.avg_rating or 0.0
+            avg_qc = row.avg_qc or 0.0
+            avg_visual = row.avg_visual or 0.0
+            
+            weighted_score = (avg_rating * 0.4 + avg_qc * 0.4 + avg_visual * 0.2) * (1 + 0.1 * count)
+            
+            results.append({
+                "value": value,
+                "avg_rating": round(avg_rating, 2),
+                "avg_qc": round(avg_qc, 2),
+                "avg_visual": round(avg_visual, 2),
+                "count": count,
+                "weighted_score": round(weighted_score, 3),
+            })
+        
+        results.sort(key=lambda x: x["weighted_score"], reverse=True)
+        return results[:5]
+    
+    def get_image_edit_stats(
+        self,
+        db: Session,
+        scene_keywords: List[str],
+        field: str = "edit_strength",
+        days: int = 30,
+        min_samples: int = 3,
+    ) -> List[Dict[str, Any]]:
+        """Get statistical recommendations for image editing based on historical feedback.
+        
+        Args:
+            db: Database session
+            scene_keywords: Keywords to match in prompt_text
+            field: Field to analyze (edit_strength, skin_smoothing, saturation_boost, etc.)
+            days: Days of feedback to consider
+            min_samples: Minimum samples required
+        
+        Returns:
+            List of recommendations sorted by weighted score
+        """
+        from datetime import timedelta
+        from sqlalchemy import func as sql_func
+        
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        
+        query = db.query(
+            sql_func.json_extract_text(GenerationFeedback.qc_details, f"$.qc_scores.overall").label("qc_overall"),
+            sql_func.avg(GenerationFeedback.user_rating).label("avg_rating"),
+            sql_func.avg(GenerationFeedback.qc_score).label("avg_qc"),
+            sql_func.count(GenerationFeedback.id).label("count"),
+            sql_func.avg(GenerationFeedback.visual_quality_score).label("avg_visual"),
+        ).filter(
+            GenerationFeedback.created_at >= cutoff,
+        )
+        
+        for keyword in scene_keywords:
+            query = query.filter(GenerationFeedback.prompt_text.ilike(f"%{keyword}%"))
+        
+        # Group by the field value from qc_details
+        query = query.group_by(
+            sql_func.json_extract_text(GenerationFeedback.qc_details, f"$.qc_scores.overall")
+        )
+        
+        results = []
+        for row in query.all():
+            qc_overall = getattr(row, "qc_overall")
+            if qc_overall is None:
+                continue
+            
+            count = row.count
+            if count < min_samples:
+                continue
+            
+            avg_rating = row.avg_rating or 0.0
+            avg_qc = float(qc_overall) if isinstance(qc_overall, (int, float)) else 0.0
+            avg_visual = row.avg_visual or 0.0
+            
+            weighted_score = (avg_rating * 0.4 + avg_qc * 0.4 + avg_visual * 0.2) * (1 + 0.1 * count)
+            
+            results.append({
+                "field_value": field,  # The field name itself
+                "avg_rating": round(avg_rating, 2),
+                "avg_qc": round(avg_qc, 2),
+                "avg_visual": round(avg_visual, 2),
+                "count": count,
+                "weighted_score": round(weighted_score, 3),
+            })
+        
+        results.sort(key=lambda x: x["weighted_score"], reverse=True)
+        return results[:5]
 
     def apply_feedback_to_model_profiles(
         self,

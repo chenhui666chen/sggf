@@ -1,0 +1,546 @@
+# Intent Parser Domain Knowledge Configuration
+# This file contains model-specific knowledge for intent parsing.
+# Each domain represents a different model family (Wan, Runway, Kling, etc.)
+
+domains:
+  # ==================== WAN (万相) Domain ====================
+  wan:
+    name: "万相 (Wan)"
+    provider: "Alibaba"
+    description: "阿里云万相系列模型，支持文生图、文生视频、图生视频等多种创作模式"
+    
+    # 基础模态（通用）
+    modalities:
+      text_to_image: "文生图"
+      image_to_image: "图生图"
+      text_to_video: "文生视频"
+      image_to_video: "图生视频"
+      video_to_video: "视频转视频"
+      image_to_image_edit: "图像编辑"
+    
+    # 万相特有创作模式
+    creative_modes:
+      text_to_video_direct: "纯文生视频，无参考素材"
+      image_to_video_direct: "图片动画化，有首帧图"
+      video_edit_behavior: "修改视频中角色的行为/动作"
+      video_edit_dialogue: "修改视频中角色的台词/语音"
+      video_edit_camera: "修改视频的拍摄方式/运镜"
+      action_replicate: "动作复刻（参考视频中人物动作）"
+      camera_replicate: "运镜/特效复刻"
+      video_continuation: "视频续写（含/不含尾帧控制）"
+      storyboard_control: "故事板控制（多宫格参考图）"
+      subject_reference: "主体参考 + 音色定制"
+    
+    # 风格标签
+    styles:
+      # 基础风格（通用）
+      realistic: ["写实", "照片级", "真实感", "photorealistic"]
+      anime: ["二次元", "动漫", "日漫", "anime", "卡通"]
+      chinese_ink: ["国风", "水墨", "国画", "chinese ink"]
+      oil_painting: ["油画", "oil painting", "古典油画"]
+      watercolor: ["水彩", "watercolor", "淡彩"]
+      cyberpunk: ["赛博朋克", "赛博", "cyberpunk", "霓虹"]
+      fantasy: ["奇幻", "魔幻", "fantasy"]
+      3d_render: ["3D", "三维", "3d render", "渲染"]
+      pixel_art: ["像素", "pixel art", "8bit"]
+      comic: ["漫画", "美漫", "comic"]
+      sketch: ["素描", "线稿", "sketch"]
+      ukiyo_e: ["浮世绘", "日式版画"]
+      minimalist: ["极简", "简约", "minimalist"]
+      steampunk: ["蒸汽朋克", "steampunk"]
+      gothic: ["哥特", "暗黑", "gothic"]
+      retro: ["复古", "怀旧", "retro"]
+      neon: ["霓虹", "荧光", "neon"]
+      pop_art: ["波普", "pop art"]
+      cinematic: ["电影感", "影视", "cinematic"]
+      documentary: ["纪录片", "纪实", "documentary"]
+      
+      # 万相特有风格
+      felt_art: ["毛毡", "毛毡风格", "felt", "羊毛毡"]
+      clay_art: ["黏土", "粘土", "clay", "黏土风格"]
+      puppet_animation: ["木偶", "木偶动画", "puppet", "定格动画"]
+      3d_cartoon: ["3D 卡通", "3d cartoon", "三维卡通", "Q 版 3D"]
+      2d_cartoon: ["2D 卡通", "2d cartoon", "二维卡通"]
+      3d_game: ["3D 游戏", "3d game", "游戏画面"]
+      black_white_animation: ["黑白动画", "黑白", "black white"]
+      impressionist: ["印象派", "impressionist", "水彩质感"]
+      tilt_shift: ["移轴", "移轴摄影", "tilt shift"]
+      time_lapse: ["延时", "延时拍摄", "time lapse"]
+      han_comic: ["韩漫", "韩式漫画", "korean comic"]
+    
+    # 运镜标签
+    camera_movements:
+      # 基础运镜
+      push_in: "推进"
+      pull_out: "拉远"
+      pan_left: "左移"
+      pan_right: "右移"
+      tilt_up: "上摇"
+      tilt_down: "下摇"
+      # 高级运镜
+      handheld: "手持"
+      tracking: "跟随"
+      orbit: "环绕"
+      dolly_zoom: "希区柯克"
+      crane_up: "上升揭示"
+      push_rotate: "推进旋转"
+      composite: "复合运镜"
+    
+    # 景别标签
+    shot_types:
+      close_up: "特写"
+      medium_close_up: "近景"
+      medium: "中景"
+      medium_full: "中全景"
+      full: "全景"
+      wide: "广角"
+      extreme_wide: "极端全景"
+    
+    # 构图标签
+    compositions:
+      center: "中心构图"
+      balanced: "平衡构图"
+      left_weighted: "左侧重"
+      right_weighted: "右侧重"
+      symmetric: "对称构图"
+      short_edge: "短边构图"
+    
+    # 光线时段标签
+    lighting_times:
+      daylight: "白天"
+      night: "夜晚"
+      dusk: "黄昏"
+      sunset: "日落"
+      dawn: "黎明"
+      sunrise: "日出"
+      golden_hour: "黄金时刻"
+    
+    # 情绪标签
+    emotions:
+      anger: "愤怒"
+      fear: "恐惧"
+      joy: "高兴"
+      sadness: "悲伤"
+      surprise: "惊讶"
+      shyness: "羞涩"
+      dissatisfaction: "不满"
+      horror: "惊恐"
+      despair: "绝望"
+      relief: "释放"
+      comfort: "安慰"
+    
+    # 提示词范式
+    prompt_template: "[风格] [光线/时段] [构图] [景别] [镜头] [运镜]，[主体描述]，[动作/台词]"
+    
+    # 提示词示例
+    prompt_examples:
+      - "印象派风格，黄昏，柔光，侧光，低饱和度，冷色调，中心构图，中景，跟随镜头，一只水彩质感的狐狸在森林中缓缓穿行"
+      - "3D 卡通风格，黄金时刻阳光，暖色调，中广角，低角度透视，毛毡地精在青苔轨道上驾驶微型木制火车"
+      - "写实风格，黄昏，边缘光，中景，环绕运镜，镜头跟随人物背面运镜至正面，一位粗犷的牛仔紧握枪套"
+    
+    # 解析规则
+    parsing_rules:
+      - "如果用户提到'视频'/'动画'/'动起来'等词，模态应为 text_to_video 或 image_to_video"
+      - "如果用户提到'图片'/'画'/'图'等词且无视频意图，模态应为 text_to_image"
+      - "如果用户提供了参考图/素材图，且要求修改，模态应为 image_to_image 或 image_to_image_edit"
+      - "如果用户提到'让这张图动起来'/'图片转视频'，模态应为 image_to_video"
+      - "如果用户要求修改已有视频中的行为/台词/拍摄，creative_mode 应为对应的 video_edit_* 模式"
+      - "如果用户要求'复刻'/'模仿'某视频的动作/运镜，creative_mode 应为 action_replicate 或 camera_replicate"
+      - "如果用户要求'续写'/'继续'，creative_mode 应为 video_continuation"
+      - "如果用户提供了多宫格/分镜图，creative_mode 应为 storyboard_control"
+      - "时长默认 5 秒（万相支持 2-15 秒），除非用户明确指定"
+      - "分辨率默认 1080p，除非用户明确指定"
+      - "如果用户没有指定优先级，默认为 balanced"
+      - "风格需要从用户的描述中推断，如'国风'→chinese_ink，'二次元'→anime，'写实'→realistic，'毛毡'→felt_art"
+      - "extracted_prompt 应按万相提示词范式优化，将用户模糊描述展开为结构化提示词"
+    
+    # 参数约束
+    constraints:
+      duration_min: 2
+      duration_max: 15
+      duration_default: 5
+      resolution_default: "1080p"
+      num_outputs_min: 1
+      num_outputs_max: 10
+    
+    # ==================== 场景规则（智能推荐）====================
+    # 格式：场景名称 → 关键词 → 推荐的运镜/光线/景别/构图
+    scene_rules:
+      # 情感类场景
+      - name: "浪漫爱情"
+        keywords: ["浪漫", "爱情", "情侣", "婚礼", "求婚", "牵手", "拥抱", "亲吻"]
+        recommended:
+          lighting_time: "golden_hour"
+          camera_movement: "orbit"
+          shot_type: "medium_close_up"
+          composition: "center"
+          emotion: "joy"
+        reason: "黄金时刻的柔光营造浪漫氛围，环绕运镜增强情感表达，近景突出人物表情"
+      
+      - name: "恐怖惊悚"
+        keywords: ["恐怖", "惊悚", "鬼", "黑暗", "吓人", "悬疑", "诡异"]
+        recommended:
+          lighting_time: "night"
+          camera_movement: "push_in"
+          shot_type: "close_up"
+          composition: "left_weighted"
+          emotion: "fear"
+        reason: "夜晚低照度营造恐怖氛围，推进运镜增强紧张感，特写放大恐惧表情"
+      
+      - name: "悲伤离别"
+        keywords: ["悲伤", "离别", "分手", "哭泣", "眼泪", "失落", "孤独"]
+        recommended:
+          lighting_time: "dusk"
+          camera_movement: "pull_out"
+          shot_type: "medium"
+          composition: "right_weighted"
+          emotion: "sadness"
+        reason: "黄昏的冷色调烘托悲伤情绪，拉远运镜表现孤独感"
+      
+      - name: "欢乐庆祝"
+        keywords: ["欢乐", "庆祝", "派对", "开心", "大笑", "节日", "烟花"]
+        recommended:
+          lighting_time: "night"
+          camera_movement: "handheld"
+          shot_type: "medium"
+          composition: "balanced"
+          emotion: "joy"
+        reason: "夜晚灯光营造派对氛围，手持运镜增强现场感和活力"
+      
+      - name: "温馨家庭"
+        keywords: ["温馨", "家庭", "亲子", "团聚", "温暖", "和谐"]
+        recommended:
+          lighting_time: "daylight"
+          camera_movement: "tracking"
+          shot_type: "medium"
+          composition: "center"
+          emotion: "comfort"
+        reason: "日光的暖色调表现温馨氛围，跟随运镜记录日常生活"
+      
+      # 风格类场景
+      - name: "赛博朋克"
+        keywords: ["赛博朋克", "赛博", "霓虹", "未来都市", "高科技", "机械", "义体"]
+        recommended:
+          lighting_time: "night"
+          camera_movement: "tracking"
+          shot_type: "wide"
+          composition: "symmetric"
+          emotion: "surprise"
+        reason: "夜晚霓虹灯营造赛博氛围，广角镜头展现未来城市全景"
+      
+      - name: "奇幻魔法"
+        keywords: ["奇幻", "魔法", "精灵", "龙", "魔法世界", "中世纪"]
+        recommended:
+          lighting_time: "golden_hour"
+          camera_movement: "crane_up"
+          shot_type: "extreme_wide"
+          composition: "balanced"
+          emotion: "surprise"
+        reason: "黄金时刻的魔幻光线，上升揭示运镜展现宏大奇幻世界"
+      
+      - name: "武侠功夫"
+        keywords: ["武侠", "功夫", "打斗", "江湖", "侠客", "武打", "招式"]
+        recommended:
+          lighting_time: "daylight"
+          camera_movement: "handheld"
+          shot_type: "medium"
+          composition: "balanced"
+          emotion: "anger"
+        reason: "日光下高对比度突出力量感，手持运镜增强动作真实感"
+      
+      - name: "古风仙侠"
+        keywords: ["古风", "仙侠", "修仙", "古代", "汉服", "御剑", "飞升"]
+        recommended:
+          lighting_time: "sunrise"
+          camera_movement: "orbit"
+          shot_type: "full"
+          composition: "center"
+          emotion: "joy"
+        reason: "日出的仙气缭绕，环绕运镜展现飘逸身姿"
+      
+      - name: "末日废土"
+        keywords: ["末日", "废土", "荒凉", "废墟", "生存", "丧尸", "核爆"]
+        recommended:
+          lighting_time: "dusk"
+          camera_movement: "handheld"
+          shot_type: "wide"
+          composition: "left_weighted"
+          emotion: "despair"
+        reason: "黄昏的萧瑟感，手持运镜增强不安定感"
+      
+      # 主体类场景
+      - name: "人物特写"
+        keywords: ["人物特写", "肖像", "面部", "眼神", "表情"]
+        recommended:
+          lighting_time: "golden_hour"
+          camera_movement: "push_in"
+          shot_type: "close_up"
+          composition: "center"
+          emotion: "joy"
+        reason: "黄金时刻的柔光美化皮肤，推进运镜聚焦表情细节"
+      
+      - name: "儿童宠物"
+        keywords: ["儿童", "小孩", "宠物", "猫", "狗", "可爱", "萌宠"]
+        recommended:
+          lighting_time: "daylight"
+          camera_movement: "tracking"
+          shot_type: "medium_close_up"
+          composition: "center"
+          emotion: "joy"
+        reason: "日光下的活泼氛围，跟随运镜捕捉动态瞬间"
+      
+      - name: "风景航拍"
+        keywords: ["风景", "航拍", "鸟瞰", "全景", "山河", "大自然"]
+        recommended:
+          lighting_time: "sunrise"
+          camera_movement: "crane_up"
+          shot_type: "extreme_wide"
+          composition: "balanced"
+          emotion: "surprise"
+        reason: "日出的壮丽景色，上升揭示运镜展现宏大场景"
+      
+      - name: "美食特写"
+        keywords: ["美食", "食物", "烹饪", "餐厅", "美味", "菜品"]
+        recommended:
+          lighting_time: "daylight"
+          camera_movement: "push_in"
+          shot_type: "close_up"
+          composition: "center"
+          emotion: "joy"
+        reason: "日光下的真实色彩，推进运镜突出食物质感"
+      
+      - name: "产品展示"
+        keywords: ["产品", "商品", "展示", "广告", "品牌", "商业"]
+        recommended:
+          lighting_time: "daylight"
+          camera_movement: "orbit"
+          shot_type: "medium"
+          composition: "center"
+          emotion: "surprise"
+        reason: "日光下的清晰细节，环绕运镜全方位展示产品"
+      
+      # 特殊风格场景
+      - name: "毛毡黏土"
+        keywords: ["毛毡", "黏土", "粘土", "木偶", "定格", "羊毛毡"]
+        recommended:
+          lighting_time: "golden_hour"
+          camera_movement: "tracking"
+          shot_type: "medium"
+          composition: "center"
+          emotion: "joy"
+        reason: "黄金时刻的柔光突出材质质感，跟随运镜展现可爱动态"
+      
+      - name: "3D 卡通"
+        keywords: ["3D 卡通", "三维卡通", "Q 版", "动画电影", "皮克斯"]
+        recommended:
+          lighting_time: "daylight"
+          camera_movement: "push_rotate"
+          shot_type: "medium"
+          composition: "center"
+          emotion: "joy"
+        reason: "日光下的鲜艳色彩，推进旋转运镜增强动画感"
+      
+      - name: "水墨国风"
+        keywords: ["水墨", "国风", "国画", "山水", "写意", "工笔"]
+        recommended:
+          lighting_time: "dawn"
+          camera_movement: "pan_left"
+          shot_type: "wide"
+          composition: "symmetric"
+          emotion: "comfort"
+        reason: "黎明的朦胧感，左移运镜模仿画卷展开"
+      
+      - name: "极简主义"
+        keywords: ["极简", "简约", "留白", "性冷淡风", "ins 风"]
+        recommended:
+          lighting_time: "daylight"
+          camera_movement: "pull_out"
+          shot_type: "medium"
+          composition: "symmetric"
+          emotion: "comfort"
+        reason: "日光下的纯净感，拉远运镜展现留白美学"
+      
+      - name: "复古怀旧"
+        keywords: ["复古", "怀旧", "老照片", "年代感", "港风"]
+        recommended:
+          lighting_time: "dusk"
+          camera_movement: "handheld"
+          shot_type: "medium"
+          composition: "right_weighted"
+          emotion: "sadness"
+        reason: "黄昏的怀旧色调，手持运镜模拟老电影质感"
+      
+      # 图片编辑类场景
+      - name: "人像美颜"
+        keywords: ["美颜", "美肤", "磨皮", "美白", "祛痘", "祛斑", "瘦脸", "大眼"]
+        recommended:
+          edit_strength: 0.6
+          skin_smoothing: 0.7
+          brightness_adjust: 0.1
+        reason: "中等强度美颜，保持自然肤质，适度提亮肤色"
+      
+      - name: "风景增强"
+        keywords: ["风景", "风光", "自然", "山水", "增强", "调色", "饱和度"]
+        recommended:
+          edit_strength: 0.8
+          saturation_boost: 0.2
+          contrast_adjust: 0.15
+        reason: "增强色彩饱和度和对比度，突出风景层次感"
+      
+      - name: "老照片修复"
+        keywords: ["老照片", "修复", "翻新", "去划痕", "补色", "黑白上色"]
+        recommended:
+          edit_strength: 0.9
+          color_restoration: 0.8
+          damage_removal: 0.9
+        reason: "高强度修复，去除划痕和损伤，恢复原有色彩"
+      
+      - name: "风格迁移"
+        keywords: ["风格迁移", "艺术化", "油画", "水彩", "素描", "转绘"]
+        recommended:
+          edit_strength: 0.85
+          style_transfer: "artistic"
+          content_preservation: 0.6
+        reason: "保持内容结构的同时，完全转换艺术风格"
+      
+      - name: "背景替换"
+        keywords: ["背景替换", "抠图", "换背景", "绿幕", "透明背景"]
+        recommended:
+          edit_strength: 1.0
+          background_removal: 0.95
+          edge_refinement: 0.8
+        reason: "完全移除原背景，精细处理边缘过渡"
+      
+      - name: "物体移除"
+        keywords: ["移除物体", "去水印", "P 图", "消除笔", "路人消除"]
+        recommended:
+          edit_strength: 0.9
+          inpainting_quality: 0.85
+          context_aware: 0.9
+        reason: "智能填充移除区域，保持背景连贯性"
+      
+      - name: "画质提升"
+        keywords: ["画质提升", "超分", "放大", "清晰度", "去模糊", "降噪"]
+        recommended:
+          edit_strength: 0.7
+          super_resolution: 2.0
+          denoise_level: 0.6
+        reason: "提升分辨率的同时适度降噪，保持细节清晰"
+      
+      - name: "光影调整"
+        keywords: ["光影", "明暗", "曝光", "高光", "阴影", "光线调整"]
+        recommended:
+          edit_strength: 0.75
+          exposure_adjust: 0.2
+          shadow_enhance: 0.3
+        reason: "平衡明暗对比，增强阴影细节"
+      
+      - name: "色彩校正"
+        keywords: ["色彩校正", "白平衡", "色温", "偏色", "调色"]
+        recommended:
+          edit_strength: 0.65
+          white_balance: "auto"
+          color_grading: 0.5
+        reason: "自动校正白平衡，微调色彩风格"
+      
+      - name: "创意合成"
+        keywords: ["合成", "叠加", "多重曝光", "创意", "拼贴"]
+        recommended:
+          edit_strength: 0.9
+          blend_mode: "creative"
+          layer_count: 3
+        reason: "多层创意合成，实现艺术化效果"
+  
+  # ==================== RUNWAY Domain (预留) ====================
+  runway:
+    name: "Runway"
+    provider: "Runway ML"
+    description: "Runway Gen-3/Gen-2 系列模型，支持文生视频、图生视频、运动笔刷等"
+    
+    modalities:
+      text_to_video: "文生视频"
+      image_to_video: "图生视频"
+      video_to_video: "视频转视频"
+    
+    creative_modes:
+      text_to_video_direct: "纯文生视频"
+      image_to_video_direct: "图片动画化"
+      motion_brush: "运动笔刷（指定区域运动）"
+      camera_control: "相机控制（推拉摇移）"
+      lip_sync: "唇形同步"
+    
+    styles:
+      realistic: ["写实", "照片级", "realistic"]
+      cinematic: ["电影感", "cinematic"]
+      anime: ["动漫", "anime"]
+      # ... 可扩展
+    
+    camera_movements:
+      zoom_in: "推进"
+      zoom_out: "拉远"
+      pan_left: "左移"
+      pan_right: "右移"
+      tilt_up: "上摇"
+      tilt_down: "下摇"
+    
+    prompt_template: "[风格] [镜头运动]，[主体描述]，[动作/场景]"
+    
+    constraints:
+      duration_min: 4
+      duration_max: 10
+      duration_default: 5
+  
+  # ==================== KLING Domain (预留) ====================
+  kling:
+    name: "Kling (可灵)"
+    provider: "Kuaishou"
+    description: "快手可灵系列模型，支持文生视频、图生视频、视频转音频等"
+    
+    modalities:
+      text_to_video: "文生视频"
+      image_to_video: "图生视频"
+      video_to_audio: "视频转音频"
+    
+    creative_modes:
+      text_to_video_direct: "纯文生视频"
+      image_to_video_direct: "图片动画化"
+    
+    styles:
+      realistic: ["写实", "照片级", "realistic"]
+      cinematic: ["电影感", "cinematic"]
+    
+    prompt_template: "[风格]，[主体描述]，[动作/场景]"
+    
+    constraints:
+      duration_min: 5
+      duration_max: 10
+      duration_default: 5
+
+# ==================== 通用配置 ====================
+common:
+  # 通用风格（所有模型都支持）
+  common_styles:
+    - realistic
+    - anime
+    - cinematic
+    - fantasy
+  
+  # 分辨率映射
+  resolution_map:
+    "720p": [1280, 720]
+    "1080p": [1920, 1080]
+    "2k": [2560, 1440]
+    "4k": [3840, 2160]
+  
+  # 优先级策略
+  priorities:
+    quality: "追求最高画质，不计成本和速度"
+    cost: "追求最低成本，可牺牲画质和速度"
+    speed: "追求最快速度，可牺牲画质和增加成本"
+    balanced: "平衡画质、成本和速度"
+  
+  # 质量等级
+  quality_levels:
+    - standard
+    - hd
+    - ultra

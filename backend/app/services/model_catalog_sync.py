@@ -38,6 +38,15 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# 价格验证配置
+PRICING_VERIFICATION_CONFIG = {
+    "alibaba_cloud_dashscope": {
+        "pricing_url": "https://help.aliyun.com/zh/model-studio/pricing",
+        "cache_hours": 24,  # 价格缓存时间（小时）
+        "timeout_seconds": 30,
+    }
+}
+
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 _META_RE = re.compile(
     r'<meta[^>]+(?:name|property)=["\'](?:description|og:description)["\'][^>]+content=["\'](.*?)["\']',
@@ -286,13 +295,9 @@ _MODEL_FALLBACK_SOURCES: dict[str, list[str]] = {
         "https://platform.mureka.cn/docs/",
         "https://platform.mureka.cn/docs/api/operations/post-v1-instrumental-generate.html",
     ],
-    "kling-v1-text-to-audio": [
-        "https://app.klingai.com/cn/dev/document-api/apiReference/model/textToAudio",
-        "https://klingai.com/cn/",
-    ],
-    "kling-v1-video-to-audio": [
-        "https://app.klingai.com/cn/dev/document-api/apiReference/model/videoToAudio",
-        "https://klingai.com/cn/",
+    "vidu-timing2audio": [
+        "https://www.vidu.cn/",
+        "https://docs.platform.vidu.cn/",
     ],
 }
 
@@ -637,6 +642,119 @@ class ModelCatalogSyncService:
             verified_at = verified_at.replace(tzinfo=timezone.utc)
         age_seconds = (now - verified_at).total_seconds()
         return age_seconds < threshold_hours * 3600
+    
+    async def _verify_pricing_from_provider(
+        self,
+        seed: dict[str, Any],
+        model_key: str,
+    ) -> Optional[dict[str, Any]]:
+        """
+        Verify pricing information from cloud provider.
+        
+        Args:
+            seed: Model seed data from models.yaml
+            model_key: Model identifier
+        
+        Returns:
+            Pricing information dict or None if verification failed
+        """
+        api_config = seed.get("api_config", {})
+        auth_type = api_config.get("auth_type", "")
+        
+        # Only verify pricing for Alibaba Cloud DashScope
+        if auth_type != "alibaba_cloud_dashscope":
+            return None
+        
+        pricing_config = PRICING_VERIFICATION_CONFIG.get(auth_type)
+        if not pricing_config:
+            return None
+        
+        pricing_url = pricing_config["pricing_url"]
+        timeout = pricing_config["timeout_seconds"]
+        
+        try:
+            # Fetch pricing page
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.get(pricing_url)
+                response.raise_for_status()
+                html_content = response.text
+            
+            # Extract pricing information from HTML
+            pricing_info = self._extract_pricing_from_html(html_content, model_key)
+            
+            if pricing_info:
+                logger.info(
+                    "Verified pricing for %s: %s",
+                    model_key,
+                    pricing_info.get("price", "N/A")
+                )
+                return {
+                    "success": True,
+                    "pricing": pricing_info,
+                    "source_url": pricing_url,
+                    "verified_at": datetime.now(timezone.utc).isoformat(),
+                }
+            else:
+                logger.warning("Could not extract pricing for %s from %s", model_key, pricing_url)
+                return None
+        
+        except httpx.TimeoutException as e:
+            logger.warning("Timeout fetching pricing for %s: %s", model_key, e)
+            return {"success": False, "error": f"Timeout: {str(e)}"}
+        except httpx.RequestError as e:
+            logger.warning("Request error fetching pricing for %s: %s", model_key, e)
+            return {"success": False, "error": f"Request error: {str(e)}"}
+        except Exception as e:
+            logger.warning("Error verifying pricing for %s: %s", model_key, e)
+            return {"success": False, "error": f"Error: {str(e)}"}
+    
+    def _extract_pricing_from_html(
+        self,
+        html_content: str,
+        model_key: str,
+    ) -> Optional[dict[str, Any]]:
+        """
+        Extract pricing information from HTML content.
+        
+        Args:
+            html_content: HTML content from pricing page
+            model_key: Model identifier to search for
+        
+        Returns:
+            Pricing information dict or None
+        """
+        # Clean HTML content
+        text = _SCRIPT_STYLE_RE.sub("", html_content)
+        text = _TAG_RE.sub(" ", text)
+        text = unescape(text)
+        text = _SPACE_RE.sub(" ", text).strip()
+        
+        # Search for model-specific pricing
+        # Example: "MiniMax/speech-2.8-hd 3.5 元"
+        model_name = model_key.replace("-", "/")  # Convert model ID to official name
+        
+        # Try to find pricing pattern
+        pricing_patterns = [
+            rf"{re.escape(model_name)}.*?(\d+\.?\d*)\s*元",
+            rf"(\d+\.?\d*)\s*元.*?{re.escape(model_name)}",
+        ]
+        
+        for pattern in pricing_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                price = float(match.group(1))
+                return {
+                    "price": price,
+                    "currency": "CNY",
+                    "unit": "元/万字符",
+                    "model": model_name,
+                }
+        
+        # If specific price not found, return general pricing info
+        return {
+            "note": "价格请以阿里云百炼平台实时价格为准",
+            "pricing_url": "https://help.aliyun.com/zh/model-studio/pricing",
+        }
 
     def _apply_seed_to_entry(self, entry: ModelCatalogEntry, seed: CatalogSeed) -> None:
         entry.name = seed.name
@@ -1345,14 +1463,10 @@ class ModelCatalogSyncService:
             if len(compact_keyword) >= 8 and compact_keyword in compact_url:
                 _push("alias", keyword)
 
-        if seed.provider == "kuaishou" and "klingai.com" in lowered_url:
-            if "text_to_audio" in (seed.modalities or []) and "texttoaudio" in compact_url:
-                _push("modality", "text to audio")
-                if seed.model_key == "kling-v1-text-to-audio":
-                    _push("alias", seed.model_key)
-            if "video_to_audio" in (seed.modalities or []) and "videotoaudio" in compact_url:
-                _push("modality", "video to audio")
-                if seed.model_key == "kling-v1-video-to-audio":
+        if seed.provider == "vidu" and "vidu.cn" in lowered_url:
+            if "timing" in (seed.modalities or []) and "timing" in compact_url:
+                _push("modality", "timing audio")
+                if seed.model_key == "vidu-timing2audio":
                     _push("alias", seed.model_key)
 
         return matched
@@ -2168,10 +2282,9 @@ def _derive_env_bindings(entry: ModelCatalogEntry) -> list[dict[str, Any]]:
         _push("API Key", "MUREKA_API_KEY")
         _push("Base URL", "MUREKA_API_URL")
         _push("模型名 / Deployment", entry.model_key, required=False)
-    elif entry.model_key in {"kling-v1-text-to-audio", "kling-v1-video-to-audio"}:
-        _push("Access Key", "KLINGAI_ACCESS_KEY")
-        _push("Secret Key", "KLINGAI_SECRET_KEY")
-        _push("Base URL", "KLINGAI_API_URL", required=False)
+    elif entry.model_key == "vidu-timing2audio":
+        _push("API Key", "VIDU_API_KEY")
+        _push("Base URL", "VIDU_API_URL", required=False)
         _push("模型名 / Endpoint", entry.model_key, required=False)
     elif entry.model_key in {"qwen3-tts-flash", "cosyvoice-v3-plus"}:
         _push("API Key", "DASHSCOPE_API_KEY")

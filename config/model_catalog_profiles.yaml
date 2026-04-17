@@ -343,50 +343,43 @@ profiles:
         value: app.services.audiobook.ai_music.create_music_generator()
     local_deployment_note: 当前项目通过 Mureka 官方托管接口生成纯音乐，并在后端落盘到资产输出目录；如果未来要做统一运行时封装，建议抽出独立的 generate_audio 能力，而不是继续塞进 TTS 入口。
 
-  kling-v1-text-to-audio:
-    role_summary: 当前模型用于资产工作台的短音效与环境音生成，适合快速产出动作音、情绪音和短环境声。
-    system_role: 你是音效提示词设计助手，负责把动作、环境和质感描述收束成适合短音效生成的精简提示词。
+
+  vidu-timing2audio:
+    role_summary: 可控文生音效模型，支持通过时间轴控制多个音效事件，适合视频音效和有声小说音效生成。
+    system_role: 你是音效时序设计助手，负责根据场景需求规划多个音效事件的时间轴和提示词。
     prompt_patterns:
-      - title: 动作音模板
+      - title: 单事件音效模板
         template: |
-          动作主体 + 材质 + 强度 + 持续时间 + 不要旋律化
-      - title: 环境音模板
+          时间区间：[from, to]
+          事件描述：{音效类型}+{场景环境}+{细节特征}
+      - title: 多事件合成模板
         template: |
-          场景环境 + 远近层次 + 情绪氛围 + 时长 + 是否需要循环感
+          事件 1: [0.0-3.0 秒] {第一个音效事件}
+          事件 2: [3.0-6.0 秒] {第二个音效事件}
+          事件 3: [5.0-9.5 秒] {第三个音效事件，可与事件 2 重叠}
     router_rules:
-      - when: 检测到资产工作台的短音效、环境音或动作音任务
-        action: 优先路由到 kling-v1-text-to-audio
-        reason: 它是当前仓库接入的短音效优先链路。
+      - when: 检测到资产工作台的音效生成任务（generation_type=sound-effect）
+        action: 优先路由到 vidu-timing2audio
+        reason: 它支持时序控制，适合视频音效和有声小说音效。
+      - when: 检测到需要多个音效事件合成
+        action: 使用 vidu-timing2audio 的 timing_prompts 功能
+        reason: 支持多个事件重叠，可以创造丰富的音效层次。
     best_practice_tips:
-      - 提示词应尽量短而明确，强调材质、动作和环境，不要写成长段剧情。
-      - 如果未配置可灵密钥，当前实现会自动回退到 Mureka 环境音链路。
+      - 每个事件的时间区间要清晰，from 和 to 必须在 [0, duration] 范围内。
+      - 支持事件重叠，可以创建复杂的音效层次。
+      - 提示词要具体描述音效特征和空间位置。
+      - 时长建议 10 秒左右，适合大多数音效场景。
+      - 不支持背景音乐 BGM，请使用 Mureka 生成 BGM。
     tooling_badges:
       - 资产音效
       - 文生音频
+      - 时序控制
+      - 多事件合成
     project_entrypoints:
       - label: 资产工作台音效入口
-        value: POST /api/v1/asset-studio/audio (generation_type=sound-effect, model_id="kling-v1-text-to-audio")
+        value: POST /api/v1/asset-studio/audio (generation_type=sound-effect, model_id="vidu-timing2audio")
       - label: 后端服务入口
-        value: app.services.audiobook.klingai_effect_generator.create_klingai_generator()
-    local_deployment_note: 当前项目通过可灵官方文生音频接口生成短音效；如果需要统一代理，建议保留 JWT 鉴权签名逻辑在服务端，不要前端直连。
+        value: app.services.audiobook.vidu_timing2audio_generator.ViduTiming2AudioGenerator()
+    local_deployment_note: 当前项目通过 Vidu 官方托管接口生成可控时序音效，支持多个音效事件合成；如果未来需要统一运行时封装，建议抽出独立的 generate_audio 能力。
 
-  kling-v1-video-to-audio:
-    role_summary: 当前模型是已归档的视频转音频能力条目，用于后续给现有视频镜头补声音草稿；当前仓库还没有把它直接接到工作台。
-    system_role: 你是视频补声音策略助手，负责根据镜头内容规划环境音、节奏音和氛围声的生成策略。
-    prompt_patterns:
-      - title: 视频转音频模板
-        template: |
-          输入视频 + 关注的声音层（环境 / 动作 / 氛围） + 希望保留或避免的声音元素
-    router_rules:
-      - when: 检测到基于已有视频补声音、视频转音频或镜头音频预研任务
-        action: 记录为 kling-v1-video-to-audio 候选链路
-        reason: 该能力已纳入统一档案，但当前项目尚未直接接入。
-    best_practice_tips:
-      - 现阶段更适合作为能力档案和后续路线参考，而不是直接生产入口。
-    tooling_badges:
-      - 视频转音频
-      - 预研能力
-    project_entrypoints:
-      - label: 当前状态
-        value: 已纳入模型档案中心，暂未暴露前端直连入口
-    local_deployment_note: 若后续接入，建议复用资产工作台音频模块的上传、轮询与结果展示逻辑，而不是新开一套独立页面。
+

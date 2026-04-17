@@ -2339,142 +2339,147 @@ models:
             - "风格和乐器要匹配"
             - "时长建议 30 秒左右，适合大多数场景"
 
-  - id: kling-v1-text-to-audio
-    name: Kling v1 Text to Audio
-    provider: kuaishou
-    version: v1
-    status: testing
 
+  - id: vidu-timing2audio
+    name: Vidu Timing2Audio
+    provider: vidu
+    version: audio1.0
+    status: active
+    
     modality:
       - text_to_audio
-
+      - timing_audio
+    
     capabilities:
+      - name: timing_control
+        support_level: native
+        description: 基于时间轴的音效事件控制
       - name: sfx_audio
         support_level: native
         score: 0.9
         description: 短音效生成
-      - name: background_music
-        support_level: native
-        score: 0.75
-        description: 背景音乐生成
-      - name: style_control
-        support_level: native
-        score: 0.8
-        description: 风格控制
       - name: environment_audio
         support_level: native
         score: 0.85
         description: 环境音生成
-
+      - name: overlapping_events
+        support_level: native
+        description: 支持多个音效事件重叠
+    
     constraints:
-      min_duration_seconds: 3
+      min_duration_seconds: 2
       max_duration_seconds: 10
-      max_prompt_length: 200
-
+      max_prompt_length: 1500
+      max_timing_events: 10
+    
     quality_metrics:
-      overall_score: 7.9
-      style_accuracy: 0.8
-
-    avg_latency_seconds: 18.0
-    summary: 项目当前用于短音效与环境音生成的优先模型档案。可灵官方 textToAudio 文档对应文生音频能力，适合生成动作音、情绪音和短环境音草稿。
+      overall_score: 8.5
+      timing_accuracy: 0.9
+      style_accuracy: 0.85
+    
+    avg_latency_seconds: 20.0
+    summary: Vidu 可控文生音效模型，支持通过时间轴控制多个音效事件，适合视频音效和有声小说音效生成。
     recommended_scenarios:
-      - 资产工作台的短音效生成
-      - 环境音与动作音快速试听
-      - 音效草稿与素材预研
+      - 视频音效制作
+      - 有声小说音效
+      - 多事件音效合成
+      - 时序控制音效
     limitations:
-      - 当前仓库主要按音效 / 环境音使用，不承担长篇配乐生成
-      - 需要单独配置可灵 Access Key / Secret Key
+      - 不支持输出背景音乐 BGM
+      - 需要明确指定每个音效事件的时间区间
+      - 单个事件提示词不超过 1500 字符
     integration_notes:
-      - 资产工作台音效入口优先使用该模型
-      - 若未配置可灵密钥，当前实现会回退到 Mureka 环境音链路
-      - 当前通过 app.services.audiobook.klingai_effect_generator 适配器接入
-    documentation_url: https://app.klingai.com/cn/dev/document-api/apiReference/model/textToAudio
+      - 通过 Vidu API 调用
+      - 使用 Vidu API Key
+      - 需要配置 timing_prompts 参数
+      - 支持多个音效事件重叠
+    documentation_url: https://www.vidu.cn/
     source_urls:
-      - https://app.klingai.com/cn/dev/document-api/apiReference/model/textToAudio
-      - https://klingai.com/cn/
-
+      - https://www.vidu.cn/
+    
     tags:
       - audio
       - sfx
-      - kling
-      - kuaishou
+      - vidu
+      - timing-control
       - asset-studio
       - film
-
+      - audiobook
+    
     task_types:
       - asset_sfx
-
+      - audiobook_sfx
+    
     detailed_specs:
       audio_generation:
         core_function:
-          description: "短音效与环境音生成，时长 3-10 秒"
+          description: "可控时序音效生成，时长 2-10 秒，支持多个音效事件"
           key_features:
-            - "动作音效"
-            - "环境音"
-            - "情绪音"
-            - "风格控制"
+            - "时间轴控制"
+            - "多事件合成"
+            - "事件重叠"
+            - "精确时序"
         
-        audio_types:
-          - type: "动作音效"
-            description: "与动作相关的短音效"
-            examples:
-              - "脚步声"
-              - "开门声"
-              - "打斗声"
-              - "碰撞声"
-              - "武器声"
-            prompt_format: "{动作}的{音效类型}声"
-            example: "沉重的脚步声，踩在木地板上"
-          
-          - type: "环境音"
-            description: "背景环境声音"
-            examples:
-              - "雨声"
-              - "风声"
-              - "城市噪音"
-              - "森林鸟鸣"
-              - "海浪声"
-            prompt_format: "{场景}的{环境音}声"
-            example: "夜晚森林中的虫鸣和风声"
-          
-          - type: "情绪音"
-            description: "表达情绪的音效"
-            examples:
-              - "心跳声"
-              - "紧张氛围"
-              - "恐怖音效"
-              - "欢快音效"
-            prompt_format: "{情绪}氛围的音效"
-            example: "紧张的悬疑氛围音效"
-        
-        duration_control:
-          min_seconds: 3
+        timing_control:
+          min_seconds: 2
           max_seconds: 10
-          recommended: 5
-          note: "适合短音效，不适合长配乐"
+          recommended: 10
+          precision: 0.1  # 秒，支持 0.1 秒精度
+          max_events: 10
+          overlapping_supported: true
         
-        prompt_best_practices:
+        prompt_specification:
+          max_length_per_event: 1500
           structure:
-            - component: "音效类型"
-              description: "要生成的音效类型"
-              example: "脚步声"
-              weight: 40
-            - component: "场景环境"
-              description: "音效发生的环境"
-              example: "木地板上"
+            - component: "事件描述"
+              description: "音效事件的具体描述"
+              example: "清晨的鸟叫声"
+              weight: 50
+            - component: "时间区间"
+              description: "from 和 to 定义事件时间范围"
+              example: "0.0-3.0 秒"
               weight: 30
-            - component: "细节特征"
-              description: "音效的具体特征"
-              example: "沉重、缓慢"
-              weight: 30
+            - component: "空间位置"
+              description: "音效的空间特征"
+              example: "远处、近处、左边"
+              weight: 20
           
           examples:
-            - name: "脚步声"
-              prompt: "沉重的脚步声，踩在老旧的木地板上，发出吱呀声"
-            - name: "环境音"
-              prompt: "夜晚森林中的虫鸣声，偶尔有风吹过树叶的沙沙声"
-            - name: "动作音"
-              prompt: "刀剑相撞的金属碰撞声，清脆响亮"
+            - name: "自然环境"
+              timing_prompts:
+                - from: 0.0
+                  to: 3.0
+                  prompt: "清晨的鸟叫声"
+                - from: 3.0
+                  to: 6.0
+                  prompt: "远处传来火车驶过的声音"
+                - from: 5.0
+                  to: 9.5
+                  prompt: "海浪轻轻拍打沙滩"
+            
+            - name: "城市场景"
+              timing_prompts:
+                - from: 0.0
+                  to: 2.0
+                  prompt: "汽车驶过的声音"
+                - from: 2.5
+                  to: 5.0
+                  prompt: "行人脚步声"
+                - from: 5.5
+                  to: 8.0
+                  prompt: "远处警笛声"
+            
+            - name: "紧张氛围"
+              timing_prompts:
+                - from: 0.0
+                  to: 3.0
+                  prompt: "心跳声，缓慢而沉重"
+                - from: 3.0
+                  to: 6.0
+                  prompt: "时钟滴答声"
+                - from: 6.0
+                  to: 10.0
+                  prompt: "紧张的悬疑氛围音效"
         
         usage_examples:
           python:
@@ -2483,77 +2488,74 @@ models:
                 from core.unified_media_runtime import media_runtime
                 
                 result = media_runtime.generate_audio(
-                    model_id="kling-v1-text-to-audio",
-                    prompt="沉重的脚步声，踩在木地板上",
-                    duration=5
+                    model_id="vidu-timing2audio",
+                    timing_prompts=[
+                        {"from": 0.0, "to": 3.0, "prompt": "清晨的鸟叫声"},
+                        {"from": 3.0, "to": 6.0, "prompt": "远处火车声"},
+                        {"from": 5.0, "to": 9.5, "prompt": "海浪拍打沙滩"}
+                    ],
+                    duration=10
                 )
             
-            - name: "环境音生成"
+            - name: "重叠事件"
               code: |
                 result = media_runtime.generate_audio(
-                    model_id="kling-v1-text-to-audio",
-                    prompt="夜晚森林中的虫鸣和风声",
-                    duration=8
+                    model_id="vidu-timing2audio",
+                    timing_prompts=[
+                        {"from": 0.0, "to": 5.0, "prompt": "背景音乐：轻柔的钢琴"},
+                        {"from": 2.0, "to": 7.0, "prompt": "鸟叫声"},
+                        {"from": 5.0, "to": 10.0, "prompt": "风声"}
+                    ],
+                    duration=10
                 )
         
         best_practices:
           tips:
-            - "提示词要具体描述音效特征"
-            - "包含场景信息有助于生成更准确的环境音"
-            - "时长建议 5 秒左右，适合大多数音效"
-            - "不适合生成长配乐，请使用 Mureka"
-
-  - id: kling-v1-video-to-audio
-    name: Kling v1 Video to Audio
-    provider: kuaishou
-    version: v1
-    status: testing
-
-    modality:
-      - video_to_audio
-
-    capabilities:
-      - name: reference_videos
-        support_level: native
-      - name: sfx_audio
-        support_level: native
-      - name: background_music
-        support_level: native
-
-    constraints:
-      max_prompt_length: 200
-      requires_video_input: true
-
-    quality_metrics:
-      overall_score: 7.6
-
-    avg_latency_seconds: 24.0
-    summary: 已纳入统一模型档案管理的视频转音频能力条目，可用于后续为现有视频片段补充环境音、氛围音或声音草稿；当前仓库尚未直接接入工作台。
-    recommended_scenarios:
-      - 为视频片段补环境音或氛围音
-      - 给现有镜头探索音频草稿
-      - 视频转音频能力预研
-    limitations:
-      - 当前仓库尚未把该接口接入资产工作台或短剧工作流
-      - 实际配额、支持格式与时长仍需结合官方权限进一步验证
-    integration_notes:
-      - 已纳入统一模型档案中心，但暂未暴露前端直连入口
-      - 后续若接入，可复用资产工作台音频模块的上传与结果面板
-    documentation_url: https://app.klingai.com/cn/dev/document-api/apiReference/model/videoToAudio
-    source_urls:
-      - https://app.klingai.com/cn/dev/document-api/apiReference/model/videoToAudio
-      - https://klingai.com/cn/
-
+            - "每个事件的时间区间要清晰，from 和 to 必须在 [0, duration] 范围内"
+            - "支持事件重叠，可以创建复杂的音效层次"
+            - "提示词要具体描述音效特征和空间位置"
+            - "时长建议 10 秒左右，适合大多数音效场景"
+            - "不支持背景音乐 BGM，请使用 Mureka 生成 BGM"
+            - "多个事件可以重叠，创造丰富的音效层次"
+    
+    pricing_info:
+      unit: "每次生成"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "Vidu 官方价格文档"
+      pricing_url: "https://www.vidu.cn/pricing"
+      note: "⚠️ 重要：价格可能调整，请以 Vidu 平台实时价格为准。"
+      verification_required: true
+      verification_source: "https://www.vidu.cn/pricing"
+    
+    api_config:
+      base_url: https://api.vidu.cn/ent/v2
+      endpoint: /ent/v2/timing2audio
+      auth_type: vidu_token
+      api_key_env: VIDU_API_KEY
+      request_format:
+        model: audio1.0
+        duration: float
+        timing_prompts: array
+        seed: int (optional)
+      response_format:
+        task_id: string
+        state: string
+        model: string
+        duration: float
+        timing_prompts: array
+        seed: int
+        credits: int
+        created_at: string
+    
     tags:
-      - audio
-      - video-to-audio
-      - kling
-      - kuaishou
-      - research
-      - film
+      - audio_generation
+      - text_to_audio
+      - timing_control
+      - vidu
+      - sfx
+      - sound_design
 
-    task_types:
-      - asset_audio
 
   - id: kling-v1
     name: Kling v1
@@ -2600,6 +2602,1381 @@ models:
       - realistic
       - cinematic
       - short_video
+
+
+
+  # ==================== Pixverse 视频生成模型 ====================
+  - id: pixverse-c1-r2v
+    name: Pixverse C1 R2V
+    provider: alibaba
+    version: C1
+    status: active
+    
+    modality:
+      - image_to_video
+      - reference_to_video
+    
+    capabilities:
+      - name: reference_images
+        support_level: native
+        description: 支持参考图输入，用于风格迁移与主体约束
+      - name: style_control
+        support_level: native
+        description: 支持多种视觉风格与提示词级风格控制
+      - name: negative_prompt
+        support_level: native
+        description: 支持负向提示词
+      - name: seed_control
+        support_level: native
+        description: 支持通过种子控制结果复现
+      - name: batch_generation
+        support_level: emulated
+        description: 批量生成功能通过多次请求模拟实现
+    
+    constraints:
+      duration: []
+      ratios:
+        - "1:1"
+        - "16:9"
+        - "9:16"
+        - "4:3"
+        - "3:4"
+      min_width: 256
+      max_width: 2048
+      min_height: 256
+      max_height: 2048
+      max_batch_size: 4
+      max_prompt_length: 1000
+    
+    quality_metrics:
+      overall_score: 8.5
+      style_consistency: 0.85
+      visual_quality: 0.88
+      prompt_adherence: 0.82
+      motion_fluency: 0.8
+    
+    avg_latency_seconds: 15.0
+    summary: Pixverse C1 参考生视频模型，通过参考图生成风格一致的视频内容，适合需要风格迁移与主体约束的场景。
+    recommended_scenarios:
+      - 风格迁移
+      - 主体约束生成
+      - 参考图生视频
+      - 创意视频生成
+    limitations:
+      - 需要提供参考图片
+      - 对参考图质量要求较高
+      - 生成时间较长
+    integration_notes:
+      - 通过阿里云百炼平台 API 调用
+      - 使用阿里云百炼 API Key
+      - 支持运镜和运动控制
+      - 计费通过阿里云百炼平台
+      - 价格以百炼平台实时价格为准
+    documentation_url: https://help.aliyun.com/zh/model-studio/pixverse-reference-to-video-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/pixverse-reference-to-video-api-reference
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/pricing
+    
+    pricing_info:
+      unit: "每次生成"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "阿里云百炼官方价格文档"
+      pricing_url: "https://help.aliyun.com/zh/model-studio/pricing"
+      note: "⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。"
+      verification_required: true
+      verification_source: "https://help.aliyun.com/zh/model-studio/pricing"
+    
+    api_config:
+      base_url: https://dashscope.aliyuncs.com/api/v1
+      endpoint: /api/v1/services/aigc/multimodal-generation/generation
+      auth_type: alibaba_cloud_dashscope
+      api_key_env: DASHSCOPE_API_KEY
+      pricing_endpoint: "https://help.aliyun.com/zh/model-studio/pricing"
+      pricing_verification:
+        enabled: true
+        source_type: "official_website"
+        cache_hours: 24
+    
+    tags:
+      - video_generation
+      - image_to_video
+      - reference_to_video
+      - pixverse
+      - alibaba
+      - style_transfer
+      - creative
+  
+  - id: pixverse-v6-t2v
+    name: Pixverse V6 T2V
+    provider: alibaba
+    version: V6
+    status: active
+    
+    modality:
+      - text_to_video
+    
+    capabilities:
+      - name: text_to_video
+        support_level: native
+        description: 高质量文生视频
+      - name: motion_control
+        support_level: native
+        description: 运动控制
+      - name: camera_control
+        support_level: native
+        description: 运镜控制
+      - name: prompt_adherence
+        support_level: native
+        description: 提示词遵循度
+      - name: batch_generation
+        support_level: emulated
+        description: 批量生成功能通过多次请求模拟实现
+    
+    constraints:
+      duration: []
+      ratios:
+        - "16:9"
+        - "9:16"
+        - "1:1"
+      min_width: 256
+      max_width: 2048
+      min_height: 256
+      max_height: 2048
+      max_batch_size: 4
+      max_prompt_length: 1000
+    
+    quality_metrics:
+      overall_score: 8.6
+      visual_quality: 0.87
+      prompt_adherence: 0.85
+      motion_fluency: 0.84
+      creativity: 0.86
+    
+    avg_latency_seconds: 15.0
+    summary: Pixverse V6 文生视频模型，通过文本描述生成高质量视频内容，适合创意视频生成与快速原型制作。
+    recommended_scenarios:
+      - 创意视频生成
+      - 快速原型制作
+      - 社交媒体内容
+      - 营销视频
+    limitations:
+      - 需要提供详细的文本描述
+      - 生成时间较长
+      - 对复杂场景控制有限
+    integration_notes:
+      - 通过阿里云百炼平台 API 调用
+      - 使用阿里云百炼 API Key
+      - 支持运镜和运动控制
+      - 计费通过阿里云百炼平台
+      - 价格以百炼平台实时价格为准
+    documentation_url: https://help.aliyun.com/zh/model-studio/pixverse-text-to-video-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/pixverse-text-to-video-api-reference
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/pricing
+    
+    pricing_info:
+      unit: "每次生成"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "阿里云百炼官方价格文档"
+      pricing_url: "https://help.aliyun.com/zh/model-studio/pricing"
+      note: "⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。"
+      verification_required: true
+      verification_source: "https://help.aliyun.com/zh/model-studio/pricing"
+    
+    api_config:
+      base_url: https://dashscope.aliyuncs.com/api/v1
+      endpoint: /api/v1/services/aigc/multimodal-generation/generation
+      auth_type: alibaba_cloud_dashscope
+      api_key_env: DASHSCOPE_API_KEY
+      pricing_endpoint: "https://help.aliyun.com/zh/model-studio/pricing"
+      pricing_verification:
+        enabled: true
+        source_type: "official_website"
+        cache_hours: 24
+    
+    tags:
+      - video_generation
+      - text_to_video
+      - pixverse
+      - alibaba
+      - high_quality
+      - creative
+
+
+  # ==================== Vidu 视频生成模型 ====================
+  - id: vidu-q3-pro-img2video
+    name: Vidu Q3 Pro Image-to-Video
+    provider: alibaba
+    version: Q3 Pro
+    status: active
+    
+    modality:
+      - image_to_video
+    
+    capabilities:
+      - name: image_to_video
+        support_level: native
+        description: 高质量图生视频
+      - name: character_consistency
+        support_level: native
+        description: 角色一致性保持
+      - name: motion_control
+        support_level: native
+        description: 运动控制
+      - name: camera_control
+        support_level: native
+        description: 运镜控制
+    
+    constraints:
+      max_prompt_length: 500
+      duration:
+        min: 5.0
+        max: 10.0
+        default: 5.0
+      fps:
+        min: 12
+        max: 24
+        default: 24
+      ratios:
+        - "16:9"
+        - "9:16"
+        - "1:1"
+    
+    quality_metrics:
+      overall_score: 8.7
+      character_consistency: 0.88
+      visual_quality: 0.89
+      motion_fluency: 0.86
+      prompt_adherence: 0.85
+    
+    avg_latency_seconds: 30.0
+    summary: Vidu Q3 Pro 图生视频模型，高质量图像到视频转换，适合需要角色一致性的场景。
+    recommended_scenarios:
+      - 角色动画
+      - 场景动态化
+      - 创意视频生成
+      - 营销视频制作
+    limitations:
+      - 需要提供输入图片
+      - 成本较高
+      - 生成时间较长
+    integration_notes:
+      - 通过阿里云百炼平台 API 调用
+      - 使用阿里云百炼 API Key
+      - 支持角色一致性保持
+      - 计费通过阿里云百炼平台
+      - 价格以百炼平台实时价格为准
+    documentation_url: https://help.aliyun.com/zh/model-studio/vidu-img2video-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/vidu-img2video-api-reference
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/pricing
+    
+    pricing_info:
+      unit: "每次生成"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "阿里云百炼官方价格文档"
+      pricing_url: "https://help.aliyun.com/zh/model-studio/pricing"
+      note: "⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。"
+      verification_required: true
+      verification_source: "https://help.aliyun.com/zh/model-studio/pricing"
+    
+    api_config:
+      base_url: https://dashscope.aliyuncs.com/api/v1
+      endpoint: /api/v1/services/aigc/multimodal-generation/generation
+      auth_type: alibaba_cloud_dashscope
+      api_key_env: DASHSCOPE_API_KEY
+      pricing_endpoint: "https://help.aliyun.com/zh/model-studio/pricing"
+      pricing_verification:
+        enabled: true
+        source_type: "official_website"
+        cache_hours: 24
+    
+    tags:
+      - video_generation
+      - image_to_video
+      - vidu
+      - alibaba
+      - high_quality
+      - character_consistency
+  
+  - id: vidu-q3-pro-text2video
+    name: Vidu Q3 Pro Text-to-Video
+    provider: alibaba
+    version: Q3 Pro
+    status: active
+    
+    modality:
+      - text_to_video
+    
+    capabilities:
+      - name: text_to_video
+        support_level: native
+        description: 高质量文生视频
+      - name: motion_control
+        support_level: native
+        description: 运动控制
+      - name: camera_control
+        support_level: native
+        description: 运镜控制
+      - name: prompt_adherence
+        support_level: native
+        description: 提示词遵循度
+    
+    constraints:
+      max_prompt_length: 500
+      duration:
+        min: 5.0
+        max: 10.0
+        default: 5.0
+      fps:
+        min: 12
+        max: 24
+        default: 24
+      ratios:
+        - "16:9"
+        - "9:16"
+        - "1:1"
+    
+    quality_metrics:
+      overall_score: 8.8
+      visual_quality: 0.9
+      prompt_adherence: 0.88
+      motion_fluency: 0.87
+      creativity: 0.86
+    
+    avg_latency_seconds: 30.0
+    summary: Vidu Q3 Pro 文生视频模型，高质量文本到视频转换，适合创意视频生成。
+    recommended_scenarios:
+      - 创意视频生成
+      - 故事可视化
+      - 营销视频制作
+      - 教育内容创作
+    limitations:
+      - 需要提供详细的文本描述
+      - 成本较高
+      - 生成时间较长
+    integration_notes:
+      - 通过阿里云百炼平台 API 调用
+      - 使用阿里云百炼 API Key
+      - 支持高质量文生视频
+      - 计费通过阿里云百炼平台
+      - 价格以百炼平台实时价格为准
+    documentation_url: https://help.aliyun.com/zh/model-studio/vidu-text2video-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/vidu-text2video-api-reference
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/pricing
+    
+    pricing_info:
+      unit: "每次生成"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "阿里云百炼官方价格文档"
+      pricing_url: "https://help.aliyun.com/zh/model-studio/pricing"
+      note: "⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。"
+      verification_required: true
+      verification_source: "https://help.aliyun.com/zh/model-studio/pricing"
+    
+    api_config:
+      base_url: https://dashscope.aliyuncs.com/api/v1
+      endpoint: /api/v1/services/aigc/multimodal-generation/generation
+      auth_type: alibaba_cloud_dashscope
+      api_key_env: DASHSCOPE_API_KEY
+      pricing_endpoint: "https://help.aliyun.com/zh/model-studio/pricing"
+      pricing_verification:
+        enabled: true
+        source_type: "official_website"
+        cache_hours: 24
+    
+    tags:
+      - video_generation
+      - text_to_video
+      - vidu
+      - alibaba
+      - high_quality
+      - creative
+  
+  - id: vidu-q3-pro-start-end2video
+    name: Vidu Q3 Pro Start-End-to-Video
+    provider: alibaba
+    version: Q3 Pro
+    status: active
+    
+    modality:
+      - image_to_video
+      - start_end_to_video
+    
+    capabilities:
+      - name: start_end_frames
+        support_level: native
+        description: 首尾帧控制
+      - name: character_consistency
+        support_level: native
+        description: 角色一致性保持
+      - name: motion_control
+        support_level: native
+        description: 运动控制
+      - name: transition_control
+        support_level: native
+        description: 转场控制
+    
+    constraints:
+      max_prompt_length: 500
+      duration:
+        min: 5.0
+        max: 10.0
+        default: 5.0
+      fps:
+        min: 12
+        max: 24
+        default: 24
+      ratios:
+        - "16:9"
+        - "9:16"
+        - "1:1"
+    
+    quality_metrics:
+      overall_score: 9.0
+      character_consistency: 0.9
+      visual_quality: 0.91
+      prompt_adherence: 0.87
+      motion_fluency: 0.9
+    
+    avg_latency_seconds: 30.0
+    summary: Vidu Q3 Pro 首尾帧生视频模型，通过首尾帧控制生成流畅的转场视频，适合需要精确控制起始和结束画面的场景。
+    recommended_scenarios:
+      - 转场视频生成
+      - 动作连续性生成
+      - 角色变形动画
+      - 场景过渡
+      - 精确控制的视频
+    limitations:
+      - 需要提供首尾帧图片
+      - 成本最高
+      - 生成时间最长
+    integration_notes:
+      - 通过阿里云百炼平台 API 调用
+      - 使用阿里云百炼 API Key
+      - 支持首尾帧精确控制
+      - 计费通过阿里云百炼平台
+      - 价格以百炼平台实时价格为准
+    documentation_url: https://help.aliyun.com/zh/model-studio/vidu-start-end2video-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/vidu-start-end2video-api-reference
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/pricing
+    
+    pricing_info:
+      unit: "每次生成"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "阿里云百炼官方价格文档"
+      pricing_url: "https://help.aliyun.com/zh/model-studio/pricing"
+      note: "⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。"
+      verification_required: true
+      verification_source: "https://help.aliyun.com/zh/model-studio/pricing"
+    
+    api_config:
+      base_url: https://dashscope.aliyuncs.com/api/v1
+      endpoint: /api/v1/services/aigc/multimodal-generation/generation
+      auth_type: alibaba_cloud_dashscope
+      api_key_env: DASHSCOPE_API_KEY
+      pricing_endpoint: "https://help.aliyun.com/zh/model-studio/pricing"
+      pricing_verification:
+        enabled: true
+        source_type: "official_website"
+        cache_hours: 24
+    
+    tags:
+      - video_generation
+      - image_to_video
+      - start_end_to_video
+      - vidu
+      - alibaba
+      - premium
+      - high_control
+
+
+
+  # ==================== Kling 可灵 V3 模型 ====================
+  - id: kling-v3-video-generation
+    name: Kling V3 Video Generation
+    provider: alibaba
+    version: V3
+    status: active
+    
+    modality:
+      - text_to_video
+    
+    capabilities:
+      - name: text_to_video
+        support_level: native
+        description: 高质量文生视频
+      - name: motion_control
+        support_level: native
+        description: 运动控制
+      - name: camera_control
+        support_level: native
+        description: 运镜控制
+      - name: prompt_adherence
+        support_level: native
+        description: 提示词遵循度
+      - name: batch_generation
+        support_level: emulated
+        description: 批量生成功能通过多次请求模拟实现
+    
+    constraints:
+      max_prompt_length: 500
+      duration:
+        min: 5.0
+        max: 10.0
+        default: 5.0
+      fps:
+        min: 24
+        max: 30
+        default: 24
+      ratios:
+        - "16:9"
+        - "9:16"
+        - "1:1"
+    
+    quality_metrics:
+      overall_score: 9.2
+      visual_quality: 0.93
+      prompt_adherence: 0.91
+      motion_fluency: 0.92
+      creativity: 0.9
+    
+    avg_latency_seconds: 30.0
+    summary: Kling V3 文生视频模型，可灵最新一代视频生成模型，高质量文本到视频转换，适合专业级视频创作。
+    recommended_scenarios:
+      - 专业视频创作
+      - 电影级镜头生成
+      - 广告视频制作
+      - 高质量内容创作
+    limitations:
+      - 需要提供详细的文本描述
+      - 成本较高
+      - 生成时间较长
+    integration_notes:
+      - 通过阿里云百炼平台 API 调用
+      - 使用阿里云百炼 API Key
+      - 支持高质量文生视频
+      - 计费通过阿里云百炼平台
+      - 价格以百炼平台实时价格为准
+    documentation_url: https://help.aliyun.com/zh/model-studio/kling-v3-video-generation-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/kling-v3-video-generation-api-reference
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/pricing
+    
+    pricing_info:
+      unit: "每次生成"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "阿里云百炼官方价格文档"
+      pricing_url: "https://help.aliyun.com/zh/model-studio/pricing"
+      note: "⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。"
+      verification_required: true
+      verification_source: "https://help.aliyun.com/zh/model-studio/pricing"
+    
+    api_config:
+      base_url: https://dashscope.aliyuncs.com/api/v1
+      endpoint: /api/v1/services/aigc/multimodal-generation/generation
+      auth_type: alibaba_cloud_dashscope
+      api_key_env: DASHSCOPE_API_KEY
+      pricing_endpoint: "https://help.aliyun.com/zh/model-studio/pricing"
+      pricing_verification:
+        enabled: true
+        source_type: "official_website"
+        cache_hours: 24
+    
+    tags:
+      - video_generation
+      - text_to_video
+      - kling
+      - alibaba
+      - premium
+      - professional
+  
+  - id: kling-v3-omni-video-generation
+    name: Kling V3 Omni Video Generation
+    provider: alibaba
+    version: V3 Omni
+    status: active
+    
+    modality:
+      - text_to_video
+      - image_to_video
+    
+    capabilities:
+      - name: text_to_video
+        support_level: native
+        description: 高质量文生视频
+      - name: image_to_video
+        support_level: native
+        description: 高质量图生视频
+      - name: motion_control
+        support_level: native
+        description: 运动控制
+      - name: camera_control
+        support_level: native
+        description: 运镜控制
+      - name: prompt_adherence
+        support_level: native
+        description: 提示词遵循度
+    
+    constraints:
+      max_prompt_length: 500
+      duration:
+        min: 5.0
+        max: 10.0
+        default: 5.0
+      fps:
+        min: 24
+        max: 30
+        default: 24
+      ratios:
+        - "16:9"
+        - "9:16"
+        - "1:1"
+    
+    quality_metrics:
+      overall_score: 9.3
+      visual_quality: 0.94
+      prompt_adherence: 0.92
+      motion_fluency: 0.93
+      creativity: 0.91
+    
+    avg_latency_seconds: 30.0
+    summary: Kling V3 Omni 全能视频生成模型，支持文生视频和图生视频，可灵旗舰级视频生成模型。
+    recommended_scenarios:
+      - 专业视频创作
+      - 多模态视频生成
+      - 高质量内容创作
+      - 商业级视频制作
+    limitations:
+      - 成本最高
+      - 生成时间较长
+      - 需要详细的输入描述
+    integration_notes:
+      - 通过阿里云百炼平台 API 调用
+      - 使用阿里云百炼 API Key
+      - 支持多模态输入
+      - 计费通过阿里云百炼平台
+      - 价格以百炼平台实时价格为准
+    documentation_url: https://help.aliyun.com/zh/model-studio/kling-v3-omni-video-generation-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/kling-v3-omni-video-generation-api-reference
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/pricing
+    
+    pricing_info:
+      unit: "每次生成"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "阿里云百炼官方价格文档"
+      pricing_url: "https://help.aliyun.com/zh/model-studio/pricing"
+      note: "⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。"
+      verification_required: true
+      verification_source: "https://help.aliyun.com/zh/model-studio/pricing"
+    
+    api_config:
+      base_url: https://dashscope.aliyuncs.com/api/v1
+      endpoint: /api/v1/services/aigc/multimodal-generation/generation
+      auth_type: alibaba_cloud_dashscope
+      api_key_env: DASHSCOPE_API_KEY
+      pricing_endpoint: "https://help.aliyun.com/zh/model-studio/pricing"
+      pricing_verification:
+        enabled: true
+        source_type: "official_website"
+        cache_hours: 24
+    
+    tags:
+      - video_generation
+      - text_to_video
+      - image_to_video
+      - kling
+      - alibaba
+      - flagship
+      - omni
+  
+  - id: kling-v3-image-generation
+    name: Kling V3 Image Generation
+    provider: alibaba
+    version: V3
+    status: active
+    
+    modality:
+      - text_to_image
+    
+    capabilities:
+      - name: text_to_image
+        support_level: native
+        description: 高质量文生图
+      - name: style_control
+        support_level: native
+        description: 风格控制
+      - name: composition_control
+        support_level: native
+        description: 构图控制
+      - name: prompt_adherence
+        support_level: native
+        description: 提示词遵循度
+      - name: batch_generation
+        support_level: emulated
+        description: 批量生成功能通过多次请求模拟实现
+    
+    constraints:
+      max_prompt_length: 500
+      ratios:
+        - "16:9"
+        - "9:16"
+        - "1:1"
+        - "4:3"
+        - "3:4"
+      min_width: 512
+      max_width: 2048
+      min_height: 512
+      max_height: 2048
+      max_batch_size: 4
+    
+    quality_metrics:
+      overall_score: 9.1
+      visual_quality: 0.92
+      prompt_adherence: 0.9
+      creativity: 0.89
+      style_accuracy: 0.9
+    
+    avg_latency_seconds: 10.0
+    summary: Kling V3 文生图模型，可灵最新一代图像生成模型，高质量文本到图像转换。
+    recommended_scenarios:
+      - 专业图像创作
+      - 概念设计
+      - 营销素材制作
+      - 高质量内容创作
+    limitations:
+      - 需要提供详细的文本描述
+      - 成本较高
+      - 对复杂场景控制有限
+    integration_notes:
+      - 通过阿里云百炼平台 API 调用
+      - 使用阿里云百炼 API Key
+      - 支持高质量文生图
+      - 计费通过阿里云百炼平台
+      - 价格以百炼平台实时价格为准
+    documentation_url: https://help.aliyun.com/zh/model-studio/kling-v3-image-generation-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/kling-v3-image-generation-api-reference
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/pricing
+    
+    pricing_info:
+      unit: "每次生成"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "阿里云百炼官方价格文档"
+      pricing_url: "https://help.aliyun.com/zh/model-studio/pricing"
+      note: "⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。"
+      verification_required: true
+      verification_source: "https://help.aliyun.com/zh/model-studio/pricing"
+    
+    api_config:
+      base_url: https://dashscope.aliyuncs.com/api/v1
+      endpoint: /api/v1/services/aigc/image-generation/generation
+      auth_type: alibaba_cloud_dashscope
+      api_key_env: DASHSCOPE_API_KEY
+      pricing_endpoint: "https://help.aliyun.com/zh/model-studio/pricing"
+      pricing_verification:
+        enabled: true
+        source_type: "official_website"
+        cache_hours: 24
+    
+    tags:
+      - image_generation
+      - text_to_image
+      - kling
+      - alibaba
+      - premium
+      - professional
+  
+  - id: kling-v3-omni-image-generation
+    name: Kling V3 Omni Image Generation
+    provider: alibaba
+    version: V3 Omni
+    status: active
+    
+    modality:
+      - text_to_image
+      - image_to_image
+    
+    capabilities:
+      - name: text_to_image
+        support_level: native
+        description: 高质量文生图
+      - name: image_to_image
+        support_level: native
+        description: 高质量图生图
+      - name: style_transfer
+        support_level: native
+        description: 风格迁移
+      - name: composition_control
+        support_level: native
+        description: 构图控制
+      - name: prompt_adherence
+        support_level: native
+        description: 提示词遵循度
+    
+    constraints:
+      max_prompt_length: 500
+      ratios:
+        - "16:9"
+        - "9:16"
+        - "1:1"
+        - "4:3"
+        - "3:4"
+      min_width: 512
+      max_width: 2048
+      min_height: 512
+      max_height: 2048
+      max_batch_size: 4
+    
+    quality_metrics:
+      overall_score: 9.2
+      visual_quality: 0.93
+      prompt_adherence: 0.91
+      creativity: 0.9
+      style_accuracy: 0.91
+    
+    avg_latency_seconds: 10.0
+    summary: Kling V3 Omni 全能图像生成模型，支持文生图和图生图，可灵旗舰级图像生成模型。
+    recommended_scenarios:
+      - 专业图像创作
+      - 多模态图像生成
+      - 风格迁移
+      - 商业级图像制作
+    limitations:
+      - 成本最高
+      - 对输入质量要求高
+      - 需要详细的输入描述
+    integration_notes:
+      - 通过阿里云百炼平台 API 调用
+      - 使用阿里云百炼 API Key
+      - 支持多模态输入
+      - 计费通过阿里云百炼平台
+      - 价格以百炼平台实时价格为准
+    documentation_url: https://help.aliyun.com/zh/model-studio/kling-v3-omni-image-generation-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/kling-v3-omni-image-generation-api-reference
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/pricing
+    
+    pricing_info:
+      unit: "每次生成"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "阿里云百炼官方价格文档"
+      pricing_url: "https://help.aliyun.com/zh/model-studio/pricing"
+      note: "⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。"
+      verification_required: true
+      verification_source: "https://help.aliyun.com/zh/model-studio/pricing"
+    
+    api_config:
+      base_url: https://dashscope.aliyuncs.com/api/v1
+      endpoint: /api/v1/services/aigc/image-generation/generation
+      auth_type: alibaba_cloud_dashscope
+      api_key_env: DASHSCOPE_API_KEY
+      pricing_endpoint: "https://help.aliyun.com/zh/model-studio/pricing"
+      pricing_verification:
+        enabled: true
+        source_type: "official_website"
+        cache_hours: 24
+    
+    tags:
+      - image_generation
+      - text_to_image
+      - image_to_image
+      - kling
+      - alibaba
+      - flagship
+      - omni
+
+
+
+  # ==================== Qwen 图像与多模态模型 ====================
+  - id: qwen-image-2.0
+    name: Qwen Image 2.0
+    provider: alibaba
+    version: 2.0
+    status: active
+    
+    modality:
+      - text_to_image
+    
+    capabilities:
+      - name: text_to_image
+        support_level: native
+        description: 高质量文生图
+      - name: style_control
+        support_level: native
+        description: 风格控制
+      - name: composition_control
+        support_level: native
+        description: 构图控制
+      - name: prompt_adherence
+        support_level: native
+        description: 提示词遵循度
+    
+    constraints:
+      max_prompt_length: 500
+      ratios:
+        - "1:1"
+        - "16:9"
+        - "9:16"
+        - "4:3"
+        - "3:4"
+      min_width: 512
+      max_width: 2048
+      min_height: 512
+      max_height: 2048
+    
+    quality_metrics:
+      overall_score: 8.8
+      visual_quality: 0.89
+      prompt_adherence: 0.87
+      creativity: 0.86
+      style_accuracy: 0.88
+    
+    avg_latency_seconds: 8.0
+    summary: Qwen Image 2.0 文生图模型，通义千问系列图像生成模型，适合通用图像创作。
+    recommended_scenarios:
+      - 通用图像创作
+      - 概念设计
+      - 营销素材
+      - 社交媒体内容
+    limitations:
+      - 需要提供详细的文本描述
+      - 对复杂场景控制有限
+    integration_notes:
+      - 通过阿里云百炼平台 API 调用
+      - 使用阿里云百炼 API Key
+      - 计费通过阿里云百炼平台
+      - 价格以百炼平台实时价格为准
+    documentation_url: https://help.aliyun.com/zh/model-studio/qwen-image-2.0-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/qwen-image-2.0-api-reference
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/pricing
+    
+    pricing_info:
+      unit: "每次生成"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "阿里云百炼官方价格文档"
+      pricing_url: "https://help.aliyun.com/zh/model-studio/pricing"
+      note: "⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。"
+      verification_required: true
+      verification_source: "https://help.aliyun.com/zh/model-studio/pricing"
+    
+    api_config:
+      base_url: https://dashscope.aliyuncs.com/api/v1
+      endpoint: /api/v1/services/aigc/image-generation/generation
+      auth_type: alibaba_cloud_dashscope
+      api_key_env: DASHSCOPE_API_KEY
+      pricing_endpoint: "https://help.aliyun.com/zh/model-studio/pricing"
+      pricing_verification:
+        enabled: true
+        source_type: "official_website"
+        cache_hours: 24
+    
+    tags:
+      - image_generation
+      - text_to_image
+      - qwen
+      - alibaba
+      - general_purpose
+  
+  - id: qwen-image-2.0-pro
+    name: Qwen Image 2.0 Pro
+    provider: alibaba
+    version: 2.0 Pro
+    status: active
+    
+    modality:
+      - text_to_image
+    
+    capabilities:
+      - name: text_to_image
+        support_level: native
+        description: 超高质量文生图
+      - name: style_control
+        support_level: native
+        description: 精细风格控制
+      - name: composition_control
+        support_level: native
+        description: 精确构图控制
+      - name: prompt_adherence
+        support_level: native
+        description: 高提示词遵循度
+      - name: detail_enhancement
+        support_level: native
+        description: 细节增强
+    
+    constraints:
+      max_prompt_length: 1000
+      ratios:
+        - "1:1"
+        - "16:9"
+        - "9:16"
+        - "4:3"
+        - "3:4"
+      min_width: 1024
+      max_width: 4096
+      min_height: 1024
+      max_height: 4096
+    
+    quality_metrics:
+      overall_score: 9.3
+      visual_quality: 0.94
+      prompt_adherence: 0.92
+      creativity: 0.91
+      style_accuracy: 0.93
+    
+    avg_latency_seconds: 12.0
+    summary: Qwen Image 2.0 Pro 专业版文生图模型，通义千问旗舰级图像生成模型，适合专业级图像创作。
+    recommended_scenarios:
+      - 专业图像创作
+      - 商业设计
+      - 高质量营销素材
+      - 精细概念设计
+    limitations:
+      - 成本较高
+      - 生成时间较长
+      - 需要详细的文本描述
+    integration_notes:
+      - 通过阿里云百炼平台 API 调用
+      - 使用阿里云百炼 API Key
+      - 支持高分辨率输出
+      - 计费通过阿里云百炼平台
+      - 价格以百炼平台实时价格为准
+    documentation_url: https://help.aliyun.com/zh/model-studio/qwen-image-2.0-pro-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/qwen-image-2.0-pro-api-reference
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/pricing
+    
+    pricing_info:
+      unit: "每次生成"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "阿里云百炼官方价格文档"
+      pricing_url: "https://help.aliyun.com/zh/model-studio/pricing"
+      note: "⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。"
+      verification_required: true
+      verification_source: "https://help.aliyun.com/zh/model-studio/pricing"
+    
+    api_config:
+      base_url: https://dashscope.aliyuncs.com/api/v1
+      endpoint: /api/v1/services/aigc/image-generation/generation
+      auth_type: alibaba_cloud_dashscope
+      api_key_env: DASHSCOPE_API_KEY
+      pricing_endpoint: "https://help.aliyun.com/zh/model-studio/pricing"
+      pricing_verification:
+        enabled: true
+        source_type: "official_website"
+        cache_hours: 24
+    
+    tags:
+      - image_generation
+      - text_to_image
+      - qwen
+      - alibaba
+      - professional
+      - high_quality
+  
+  - id: qwen3.5-omni-plus
+    name: Qwen3.5 Omni Plus
+    provider: alibaba
+    version: 3.5 Omni Plus
+    status: active
+    
+    modality:
+      - text_to_text
+      - text_to_image
+      - image_to_text
+      - video_to_text
+    
+    capabilities:
+      - name: text_understanding
+        support_level: native
+        description: 深度文本理解
+      - name: image_analysis
+        support_level: native
+        description: 图像分析
+      - name: video_analysis
+        support_level: native
+        description: 视频分析
+      - name: multi_modal_reasoning
+        support_level: native
+        description: 多模态推理
+      - name: text_generation
+        support_level: native
+        description: 文本生成
+    
+    constraints:
+      max_prompt_length: 32000
+      max_output_length: 8000
+      context_window: 32000
+    
+    quality_metrics:
+      overall_score: 9.4
+      reasoning: 0.94
+      understanding: 0.95
+      generation: 0.93
+      multi_modal: 0.94
+    
+    avg_latency_seconds: 5.0
+    summary: Qwen3.5 Omni Plus 多模态大模型，通义千问旗舰级多模态理解与生成模型，适合复杂的多模态任务。
+    recommended_scenarios:
+      - 多模态内容分析
+      - 复杂推理任务
+      - 图像视频理解
+      - 智能助手
+    limitations:
+      - 成本较高
+      - 需要清晰的输入
+    integration_notes:
+      - 通过阿里云百炼平台 API 调用
+      - 使用阿里云百炼 API Key
+      - 支持多模态输入输出
+      - 计费通过阿里云百炼平台
+      - 价格以百炼平台实时价格为准
+    documentation_url: https://help.aliyun.com/zh/model-studio/qwen3.5-omni-plus-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/qwen3.5-omni-plus-api-reference
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/pricing
+    
+    pricing_info:
+      unit: "每千 tokens"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "阿里云百炼官方价格文档"
+      pricing_url: "https://help.aliyun.com/zh/model-studio/pricing"
+      note: "⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。"
+      verification_required: true
+      verification_source: "https://help.aliyun.com/zh/model-studio/pricing"
+    
+    api_config:
+      base_url: https://dashscope.aliyuncs.com/api/v1
+      endpoint: /api/v1/services/aigc/multimodal-generation/generation
+      auth_type: alibaba_cloud_dashscope
+      api_key_env: DASHSCOPE_API_KEY
+      pricing_endpoint: "https://help.aliyun.com/zh/model-studio/pricing"
+      pricing_verification:
+        enabled: true
+        source_type: "official_website"
+        cache_hours: 24
+    
+    tags:
+      - multi_modal
+      - text_to_text
+      - image_to_text
+      - video_to_text
+      - qwen
+      - alibaba
+      - flagship
+  
+  - id: qwen3.6-plus
+    name: Qwen3.6 Plus
+    provider: alibaba
+    version: 3.6 Plus
+    status: active
+    
+    modality:
+      - text_to_text
+    
+    capabilities:
+      - name: text_understanding
+        support_level: native
+        description: 深度文本理解
+      - name: text_generation
+        support_level: native
+        description: 高质量文本生成
+      - name: reasoning
+        support_level: native
+        description: 逻辑推理
+      - name: coding
+        support_level: native
+        description: 代码生成与理解
+      - name: multi_language
+        support_level: native
+        description: 多语言支持
+    
+    constraints:
+      max_prompt_length: 256000
+      max_output_length: 8000
+      context_window: 256000
+    
+    quality_metrics:
+      overall_score: 9.5
+      reasoning: 0.95
+      understanding: 0.96
+      generation: 0.95
+      coding: 0.94
+    
+    avg_latency_seconds: 3.0
+    summary: Qwen3.6 Plus 超大规模语言模型，通义千问最新一代旗舰级文本模型，支持超长上下文。
+    recommended_scenarios:
+      - 长文档理解
+      - 复杂推理
+      - 代码生成
+      - 专业写作
+      - 多语言翻译
+    limitations:
+      - 成本较高
+      - 需要清晰的输入
+    integration_notes:
+      - 通过阿里云百炼平台 API 调用
+      - 使用阿里云百炼 API Key
+      - 支持超长上下文
+      - 计费通过阿里云百炼平台
+      - 价格以百炼平台实时价格为准
+    documentation_url: https://help.aliyun.com/zh/model-studio/qwen3.6-plus-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/qwen3.6-plus-api-reference
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/pricing
+    
+    pricing_info:
+      unit: "每千 tokens"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "阿里云百炼官方价格文档"
+      pricing_url: "https://help.aliyun.com/zh/model-studio/pricing"
+      note: "⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。"
+      verification_required: true
+      verification_source: "https://help.aliyun.com/zh/model-studio/pricing"
+    
+    api_config:
+      base_url: https://dashscope.aliyuncs.com/api/v1
+      endpoint: /api/v1/services/aigc/text-generation/generation
+      auth_type: alibaba_cloud_dashscope
+      api_key_env: DASHSCOPE_API_KEY
+      pricing_endpoint: "https://help.aliyun.com/zh/model-studio/pricing"
+      pricing_verification:
+        enabled: true
+        source_type: "official_website"
+        cache_hours: 24
+    
+    tags:
+      - text_to_text
+      - llm
+      - qwen
+      - alibaba
+      - flagship
+      - long_context
+  
+  - id: wan2.7-image
+    name: Wan 2.7 Image
+    provider: alibaba
+    version: 2.7
+    status: active
+    
+    modality:
+      - text_to_image
+      - image_to_image
+    
+    capabilities:
+      - name: text_to_image
+        support_level: native
+        description: 高质量文生图
+      - name: image_to_image
+        support_level: native
+        description: 图生图
+      - name: style_transfer
+        support_level: native
+        description: 风格迁移
+      - name: image_editing
+        support_level: native
+        description: 图像编辑
+    
+    constraints:
+      max_prompt_length: 500
+      ratios:
+        - "1:1"
+        - "16:9"
+        - "9:16"
+        - "4:3"
+        - "3:4"
+      min_width: 512
+      max_width: 2048
+      min_height: 512
+      max_height: 2048
+    
+    quality_metrics:
+      overall_score: 9.0
+      visual_quality: 0.91
+      prompt_adherence: 0.89
+      creativity: 0.88
+      style_accuracy: 0.9
+    
+    avg_latency_seconds: 10.0
+    summary: Wan 2.7 图像生成模型，万相系列最新图像生成与编辑模型，支持多种图像创作功能。
+    recommended_scenarios:
+      - 图像创作
+      - 图像编辑
+      - 风格迁移
+      - 营销素材制作
+    limitations:
+      - 需要提供详细的文本描述
+      - 生成时间较长
+    integration_notes:
+      - 通过阿里云百炼平台 API 调用
+      - 使用阿里云百炼 API Key
+      - 支持图像编辑功能
+      - 计费通过阿里云百炼平台
+      - 价格以百炼平台实时价格为准
+    documentation_url: https://help.aliyun.com/zh/model-studio/wan2.7-image-api-reference
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/wan2.7-image-api-reference
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/pricing
+    
+    pricing_info:
+      unit: "每次生成"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "阿里云百炼官方价格文档"
+      pricing_url: "https://help.aliyun.com/zh/model-studio/pricing"
+      note: "⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。"
+      verification_required: true
+      verification_source: "https://help.aliyun.com/zh/model-studio/pricing"
+    
+    api_config:
+      base_url: https://dashscope.aliyuncs.com/api/v1
+      endpoint: /api/v1/services/aigc/image-generation/generation
+      auth_type: alibaba_cloud_dashscope
+      api_key_env: DASHSCOPE_API_KEY
+      pricing_endpoint: "https://help.aliyun.com/zh/model-studio/pricing"
+      pricing_verification:
+        enabled: true
+        source_type: "official_website"
+        cache_hours: 24
+    
+    tags:
+      - image_generation
+      - text_to_image
+      - image_to_image
+      - wan
+      - alibaba
+      - image_editing
 
 routing:
   default_strategy: balanced

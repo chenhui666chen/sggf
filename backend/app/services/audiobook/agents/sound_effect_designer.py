@@ -1,4 +1,4 @@
-﻿"""
+"""
 SoundEffectDesigner - 音效设计师Agent
 
 核心职责：
@@ -24,7 +24,7 @@ import requests
 from app.core.config import settings
 from core.model_resolution import TaskType
 from app.services.audiobook.ai_music import AIMusicGenerator, MusicGenerationResult, create_music_generator
-from app.services.audiobook.klingai_effect_generator import KlingAIEffectGenerator, create_klingai_generator
+from app.services.audiobook.vidu_timing2audio_generator import ViduTiming2AudioGenerator, create_vidu_timing2audio_generator
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ class SoundEffectDesigner:
         """
         self.llm_client = llm_client
         self._music_generator: Optional[AIMusicGenerator] = None
-        self._klingai_generator: Optional[KlingAIEffectGenerator] = None
+        self._vidu_generator: Optional[ViduTiming2AudioGenerator] = None
 
         # 内置占位音效库
         self.sound_library = self._init_sound_library()
@@ -512,22 +512,22 @@ class SoundEffectDesigner:
             mix_mode="background",
         )
 
-    async def ensure_klingai_ambient_sound(
+    async def ensure_vidu_ambient_sound(
         self,
         scene_description: str,
         duration: float,
         mood: Optional[str] = None,
     ) -> SoundEffectCue:
-        """使用可灵AI生成环境音（本地 + 可灵AI兜底）"""
-        logger.info(f"🌆 [可灵AI] 设计环境音: {scene_description}")
+        """使用ViduAI生成环境音（本地 + ViduAI兜底）"""
+        logger.info(f"🌆 [ViduAI] 设计环境音: {scene_description}")
 
-        # 初始化可灵AI生成器
-        if self._klingai_generator is None:
-            klingai_key = getattr(settings, "KLINGAI_API_KEY", "") or os.getenv("KLINGAI_API_KEY", "")
-            if not klingai_key:
-                logger.warning("⚠️ 未配置可灵AI API密钥(KLINGAI_API_KEY)，回退到 Mureka 环境音逻辑")
+        # 初始化ViduAI生成器
+        if self._vidu_generator is None:
+            vidu_key = getattr(settings, "VIDU_API_KEY", "") or os.getenv("VIDU_API_KEY", "")
+            if not vidu_key:
+                logger.warning("⚠️ 未配置ViduAI API密钥(VIDU_API_KEY)，回退到 Mureka 环境音逻辑")
                 return await self.ensure_mureka_ambient_sound(scene_description, duration, mood)
-            self._klingai_generator = create_klingai_generator(api_key=klingai_key)
+            self._vidu_generator = create_vidu_generator(api_key=vidu_key)
 
         # 1. 先尝试使用本地已生成的环境音
         local_cue = self._match_effect(
@@ -544,35 +544,35 @@ class SoundEffectDesigner:
             local_cue.fade_in = 3.0
             local_cue.fade_out = 3.0
             local_cue.mix_mode = "background"
-            logger.info("✅ 使用本地环境音，无需调用可灵AI")
+            logger.info("✅ 使用本地环境音，无需调用ViduAI")
             return local_cue
 
-        # 2. 调用可灵AI生成新的环境音
+        # 2. 调用ViduAI生成新的环境音
         duration_sec = max(3.0, min(10.0, duration))
         
-        # 将音效描述转换为简洁的中文 prompt（适合可灵AI）
+        # 将音效描述转换为简洁的中文 prompt（适合ViduAI）
         ambient_prompt = scene_description
-        logger.info(f"🎧 [可灵AI] 环境音 prompt: {ambient_prompt} (时长: {duration_sec}s)")
+        logger.info(f"🎧 [ViduAI] 环境音 prompt: {ambient_prompt} (时长: {duration_sec}s)")
 
         try:
-            result = await self._klingai_generator.generate_effect_async(
+            result = await self._vidu_generator.generate_effect_async(
                 prompt=ambient_prompt,
                 duration=duration_sec,
                 max_wait=60
             )
             
             if not result.success:
-                logger.warning(f"⚠️ 可灵AI环境音生成失败: {result.error}，回退到 Mureka/内置环境音")
+                logger.warning(f"⚠️ ViduAI环境音生成失败: {result.error}，回退到 Mureka/内置环境音")
                 return await self.ensure_mureka_ambient_sound(scene_description, duration, mood)
             
-            audio_url = result.audio_url_mp3 or result.audio_url_wav
+            audio_url = result.audio_url
             if not audio_url:
-                logger.warning("⚠️ 可灵AI返回结果中缺少音频URL，回退到 Mureka/内置环境音")
+                logger.warning("⚠️ ViduAI返回结果中缺少音频URL，回退到 Mureka/内置环境音")
                 return await self.ensure_mureka_ambient_sound(scene_description, duration, mood)
 
-            # 3. 下载可灵AI返回的音频并写入本地 sound_effects 仓库 + 索引
+            # 3. 下载ViduAI返回的音频并写入本地 sound_effects 仓库 + 索引
             mood_value = mood or self._infer_mood_from_scene(scene_description)
-            meta = self._build_ambient_effect_metadata(scene_description, mood_value, provider="KlingAI")
+            meta = self._build_ambient_effect_metadata(scene_description, mood_value, provider="Vidu")
             effect_id = meta["effect_id"]
             subdir = meta["subdir"]
             tags = meta["tags"]
@@ -585,13 +585,13 @@ class SoundEffectDesigner:
                 category=category,
                 description=name,
                 tags=tags,
-                source="klingai",
+                source="vidu",
             )
             if not record:
-                logger.warning("⚠️ 可灵AI环境音下载或注册失败，回退到 Mureka/内置环境音")
+                logger.warning("⚠️ ViduAI环境音下载或注册失败，回退到 Mureka/内置环境音")
                 return await self.ensure_mureka_ambient_sound(scene_description, duration, mood)
 
-            logger.info(f"🎧 已生成并注册可灵AI环境音: {effect_id}")
+            logger.info(f"🎧 已生成并注册ViduAI环境音: {effect_id}")
 
             return SoundEffectCue(
                 scene_id="ambient",
@@ -608,14 +608,14 @@ class SoundEffectDesigner:
             )
             
         except Exception as e:
-            logger.warning(f"⚠️ 调用可灵AI生成环境音失败: {e}，回退到 Mureka/内置环境音")
+            logger.warning(f"⚠️ 调用ViduAI生成环境音失败: {e}，回退到 Mureka/内置环境音")
             return await self.ensure_mureka_ambient_sound(scene_description, duration, mood)
 
-    async def enhance_effects_with_klingai(
+    async def enhance_effects_with_vidu(
         self,
-        max_klingai_effects: int = 5,
+        max_vidu_effects: int = 5,
     ) -> None:
-        """使用可灵AI为占位音效生成真实音效（仅 ACTION/EMOTION 类型）
+        """使用ViduAI为占位音效生成真实音效（仅 ACTION/EMOTION 类型）
 
         设计原则：
         1. 只处理当前时间线中 audio_file 为空或 placeholder.mp3 的提示；
@@ -625,15 +625,15 @@ class SoundEffectDesigner:
         if not self.effect_cues:
             return
 
-        # 初始化可灵AI生成器
-        if self._klingai_generator is None:
-            klingai_key = getattr(settings, "KLINGAI_API_KEY", "") or os.getenv("KLINGAI_API_KEY", "")
-            if not klingai_key:
-                logger.info("⚠️ 未配置可灵AI API密钥(KLINGAI_API_KEY)，跳过占位音效增强")
+        # 初始化ViduAI生成器
+        if self._vidu_generator is None:
+            vidu_key = getattr(settings, "VIDU_API_KEY", "") or os.getenv("VIDU_API_KEY", "")
+            if not vidu_key:
+                logger.info("⚠️ 未配置ViduAI API密钥(VIDU_API_KEY)，跳过占位音效增强")
                 return
-            self._klingai_generator = create_klingai_generator(api_key=klingai_key)
+            self._vidu_generator = create_vidu_generator(api_key=vidu_key)
 
-        remaining = max(0, int(max_klingai_effects)) or 0
+        remaining = max(0, int(max_vidu_effects)) or 0
         if remaining <= 0:
             return
 
@@ -651,53 +651,53 @@ class SoundEffectDesigner:
                     continue
 
                 try:
-                    record = await self._generate_klingai_effect_for_cue(cue)
+                    record = await self._generate_vidu_effect_for_cue(cue)
                     if record and record.get("file_path"):
                         cue.audio_file = record["file_path"]
                         remaining -= 1
                 except Exception as e:
-                    logger.warning(f"⚠️ 使用可灵AI生成音效失败（忽略并继续）: {e}")
+                    logger.warning(f"⚠️ 使用ViduAI生成音效失败（忽略并继续）: {e}")
                     continue
         except Exception as e:
-            logger.warning(f"⚠️ 占位音效可灵AI增强流程失败: {e}")
+            logger.warning(f"⚠️ 占位音效ViduAI增强流程失败: {e}")
 
-    async def _generate_klingai_effect_for_cue(
+    async def _generate_vidu_effect_for_cue(
         self,
         cue: SoundEffectCue,
     ) -> Optional[Dict[str, Any]]:
-        """针对单个占位音效，调用可灵AI生成短音效并入库。"""
+        """针对单个占位音效，调用ViduAI生成短音效并入库。"""
         # 动作音一般更短，情绪音稍长一些
         base_duration = 3 if cue.effect_type == EffectType.ACTION else 5
         duration_sec = max(3.0, min(base_duration, 10.0))
 
-        logger.info(f"🎧 [可灵AI] 为占位音效生成短音效: {cue.description} ({cue.effect_type.value})")
+        logger.info(f"🎧 [ViduAI] 为占位音效生成短音效: {cue.description} ({cue.effect_type.value})")
 
         # 将音效描述转换为简洁的中文 prompt
         effect_prompt = cue.description
-        logger.info(f"🎧 [可灵AI] 短音效 prompt: {effect_prompt} (时长: {duration_sec}s)")
+        logger.info(f"🎧 [ViduAI] 短音效 prompt: {effect_prompt} (时长: {duration_sec}s)")
 
         try:
-            result = await self._klingai_generator.generate_effect_async(
+            result = await self._vidu_generator.generate_effect_async(
                 prompt=effect_prompt,
                 duration=duration_sec,
                 max_wait=60
             )
             
             if not result.success:
-                logger.warning(f"⚠️ 可灵AI短音效生成失败: {result.error}")
+                logger.warning(f"⚠️ ViduAI短音效生成失败: {result.error}")
                 return None
             
-            audio_url = result.audio_url_mp3 or result.audio_url_wav
+            audio_url = result.audio_url
             if not audio_url:
-                logger.warning("⚠️ 可灵AI短音效结果中缺少音频URL")
+                logger.warning("⚠️ ViduAI短音效结果中缺少音频URL")
                 return None
 
             # 构造元数据并入库
-            raw = f"{cue.description}|{cue.effect_type.value}|KlingAI"
+            raw = f"{cue.description}|{cue.effect_type.value}|Vidu"
             short_hash = hashlib.md5(raw.encode("utf-8")).hexdigest()[:6]
             effect_id = f"sfx_{cue.effect_type.value}_{short_hash}"
             category = f"effects/{cue.effect_type.value}"
-            tags = [cue.effect_type.value, "KlingAI"]
+            tags = [cue.effect_type.value, "Vidu"]
             description = cue.description or f"{cue.effect_type.value} effect"
 
             record = self.download_and_register_effect(
@@ -706,17 +706,17 @@ class SoundEffectDesigner:
                 category=category,
                 description=description,
                 tags=tags,
-                source="klingai",
+                source="vidu",
             )
             if not record:
-                logger.warning("⚠️ 可灵AI短音效下载或注册失败")
+                logger.warning("⚠️ ViduAI短音效下载或注册失败")
                 return None
 
-            logger.info(f"🎧 已生成并注册可灵AI短音效: {effect_id}")
+            logger.info(f"🎧 已生成并注册ViduAI短音效: {effect_id}")
             return record
             
         except Exception as e:
-            logger.warning(f"⚠️ 可灵AI短音效生成异常: {e}")
+            logger.warning(f"⚠️ ViduAI短音效生成异常: {e}")
             return None
 
     def optimize_effect_density(

@@ -44,6 +44,17 @@ STYLE_VOCABULARY = {
     "retro": ["复古", "怀旧", "retro", "vintage", "老照片"],
     "neon": ["霓虹", "荧光", "neon", "发光"],
     "pop_art": ["波普", "pop art", "安迪沃霍尔"],
+    "felt_art": ["毛毡", "毛毡风格", "felt", "羊毛毡", "毡绒"],
+    "clay_art": ["黏土", "粘土", "clay", "黏土风格", "粘土动画"],
+    "puppet_animation": ["木偶", "木偶动画", "puppet", "定格动画", "阿德曼"],
+    "3d_cartoon": ["3D卡通", "3d cartoon", "三维卡通", "Q版3D", "卡通3D"],
+    "2d_cartoon": ["2D卡通", "2d cartoon", "二维卡通", "复古卡通", "法国动画"],
+    "3d_game": ["3D游戏", "3d game", "游戏画面", "游戏风格", "游戏CG"],
+    "black_white_animation": ["黑白动画", "黑白", "black white animation", "复古黑白"],
+    "impressionist": ["印象派", "impressionist", "水彩质感", "笔触", "莫奈"],
+    "tilt_shift": ["移轴", "移轴摄影", "tilt shift", "微缩", "模型感"],
+    "time_lapse": ["延时", "延时拍摄", "time lapse", "快进", "时间流逝"],
+    "han_comic": ["韩漫", "韩式漫画", "korean comic", "webtoon"],
 }
 
 SCENARIO_VOCABULARY = {
@@ -59,6 +70,10 @@ SCENARIO_VOCABULARY = {
     "storyboard": ["分镜", "故事板", "storyboard"],
     "book_cover": ["封面", "书封", "book cover", "小说封面"],
     "social_media": ["社交媒体", "朋友圈", "小红书", "ins风"],
+    "video_edit": ["视频编辑", "修改视频", "视频修改", "改视频", "换台词"],
+    "action_replicate": ["动作复刻", "模仿动作", "复刻动作", "动作参考"],
+    "video_continuation": ["续写", "视频续写", "继续", "延续", "后续"],
+    "storyboard": ["分镜", "故事板", "storyboard", "多宫格", "分镜图"],
 }
 
 

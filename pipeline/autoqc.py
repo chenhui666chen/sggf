@@ -709,6 +709,50 @@ class AutoQCReport:
     config: Dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class ImageQCScores:
+    """Image quality control scores."""
+    sharpness: float = 0.0  # 清晰度 (0-1)
+    exposure: float = 0.0  # 曝光 (0-1)
+    color_balance: float = 0.0  # 色彩平衡 (0-1)
+    composition: float = 0.0  # 构图 (0-1)
+    style_consistency: float = 0.0  # 风格一致性 (0-1)
+    prompt_adherence: float = 0.0  # 提示词遵循度 (0-1)
+    overall: float = 0.0  # 综合评分 (0-1)
+    
+    def to_dict(self) -> Dict[str, float]:
+        return {
+            "sharpness": self.sharpness,
+            "exposure": self.exposure,
+            "color_balance": self.color_balance,
+            "composition": self.composition,
+            "style_consistency": self.style_consistency,
+            "prompt_adherence": self.prompt_adherence,
+            "overall": self.overall,
+        }
+
+
+@dataclass
+class ImageQCReport:
+    """Image quality control report."""
+    success: bool
+    image_path: str
+    scores: ImageQCScores
+    issues: List[str] = field(default_factory=list)
+    recommendations: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "success": self.success,
+            "image_path": self.image_path,
+            "scores": self.scores.to_dict(),
+            "issues": self.issues,
+            "recommendations": self.recommendations,
+            "metadata": self.metadata,
+        }
+
+
 def _weighted_overall(identity: float, structure: float, style: float, weights: Dict[str, float]) -> float:
     total = float(sum(weights.values())) or 1.0
     return float(
@@ -1732,5 +1776,132 @@ def run(payload: Dict[str, Any]) -> Dict[str, Any]:
         shot["pass"] = shot.pop("pass_")
 
     _submit_qc_feedback(report, payload)
-
     return result
+
+
+def check_image_quality(
+    image_path: str,
+    prompt: Optional[str] = None,
+    edit_prompt: Optional[str] = None,
+    vlm_adapter: str = "qwen3_vl_plus",
+) -> ImageQCReport:
+    """
+    Check image quality using VLM-based analysis.
+    
+    Args:
+        image_path: Path to the image file
+        prompt: Original generation prompt (optional)
+        edit_prompt: Edit instruction for image editing (optional)
+        vlm_adapter: VLM adapter name for analysis
+    
+    Returns:
+        ImageQCReport with scores and recommendations
+    """
+    from pathlib import Path
+    
+    image_file = Path(image_path)
+    if not image_file.exists():
+        return ImageQCReport(
+            success=False,
+            image_path=image_path,
+            scores=ImageQCScores(),
+            issues=["Image file not found"],
+            metadata={"error": "file_not_found"},
+        )
+    
+    try:
+        # Build analysis prompt
+        analysis_prompt = "请评估这张图片的质量，从以下几个维度打分 (0-1)：\n"
+        analysis_prompt += "1. 清晰度 (sharpness)：图像是否清晰，细节是否丰富\n"
+        analysis_prompt += "2. 曝光 (exposure)：明暗是否适中，不过曝或欠曝\n"
+        analysis_prompt += "3. 色彩平衡 (color_balance)：色彩是否自然，白平衡是否准确\n"
+        analysis_prompt += "4. 构图 (composition)：构图是否美观，主体是否突出\n"
+        
+        if prompt:
+            analysis_prompt += f"\n5. 提示词遵循度 (prompt_adherence)：是否准确体现了提示词'{prompt[:100]}'的要求\n"
+        
+        if edit_prompt:
+            analysis_prompt += f"\n6. 编辑效果 (edit_quality)：是否准确实现了编辑指令'{edit_prompt[:100]}'\n"
+        
+        analysis_prompt += "\n请以 JSON 格式返回评分，格式如下：\n"
+        analysis_prompt += "{\n"
+        analysis_prompt += '  "sharpness": 0.85,\n'
+        analysis_prompt += '  "exposure": 0.90,\n'
+        analysis_prompt += '  "color_balance": 0.88,\n'
+        analysis_prompt += '  "composition": 0.82,\n'
+        analysis_prompt += '  "prompt_adherence": 0.90,\n'
+        analysis_prompt += '  "overall": 0.87,\n'
+        analysis_prompt += '  "issues": ["问题 1", "问题 2"],\n'
+        analysis_prompt += '  "recommendations": ["建议 1", "建议 2"]\n'
+        analysis_prompt += "}"
+        
+        # Call VLM for analysis
+        from adapters.adapter_helpers import analyze_image
+        result = analyze_image(
+            image_path=str(image_path),
+            analysis_type="quality",
+            criteria=[analysis_prompt],
+            model_id=vlm_adapter,
+        )
+        
+        if not result.success:
+            return ImageQCReport(
+                success=False,
+                image_path=image_path,
+                scores=ImageQCScores(),
+                issues=[f"VLM analysis failed: {result.error}"],
+                metadata={"vlm_error": result.error},
+            )
+        
+        # Parse VLM response
+        try:
+            vlm_response = json.loads(result.data.get("content", "{}"))
+        except Exception:
+            vlm_response = {}
+        
+        scores = ImageQCScores(
+            sharpness=float(vlm_response.get("sharpness", 0.5)),
+            exposure=float(vlm_response.get("exposure", 0.5)),
+            color_balance=float(vlm_response.get("color_balance", 0.5)),
+            composition=float(vlm_response.get("composition", 0.5)),
+            style_consistency=float(vlm_response.get("style_consistency", 0.5)),
+            prompt_adherence=float(vlm_response.get("prompt_adherence", 0.5)),
+            overall=float(vlm_response.get("overall", 0.5)),
+        )
+        
+        issues = vlm_response.get("issues", [])
+        recommendations = vlm_response.get("recommendations", [])
+        
+        # Auto-generate recommendations based on scores
+        if scores.sharpness < 0.6:
+            recommendations.append("考虑使用超分辨率或锐化工具提升清晰度")
+        if scores.exposure < 0.6:
+            recommendations.append("调整曝光补偿，避免过曝或欠曝")
+        if scores.color_balance < 0.6:
+            recommendations.append("校正白平衡，使色彩更自然")
+        if scores.composition < 0.6:
+            recommendations.append("尝试裁剪或重新构图，突出主体")
+        if scores.prompt_adherence < 0.6 and prompt:
+            recommendations.append("优化提示词，更准确地描述所需内容")
+        
+        return ImageQCReport(
+            success=True,
+            image_path=image_path,
+            scores=scores,
+            issues=issues,
+            recommendations=recommendations,
+            metadata={
+                "vlm_adapter": vlm_adapter,
+                "prompt": prompt,
+                "edit_prompt": edit_prompt,
+            },
+        )
+        
+    except Exception as e:
+        return ImageQCReport(
+            success=False,
+            image_path=image_path,
+            scores=ImageQCScores(),
+            issues=[f"Analysis error: {str(e)}"],
+            metadata={"error": str(e)},
+        )
