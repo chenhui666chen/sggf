@@ -12,6 +12,10 @@ import {
   Button,
   Chip,
   CircularProgress,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
   Stack,
   TextField,
   Typography,
@@ -27,7 +31,13 @@ import type {
   AssetStudioVisionReviewResponse,
 } from '@/services/api'
 
-const VISION_REVIEW_MODEL_ID = 'qwen3-vl-plus'
+// 视觉理解模型列表
+const VISION_MODELS = [
+  { id: 'qwen3-vl-plus', name: 'Qwen3-VL-Plus', description: '专用视觉理解模型' },
+  { id: 'qwen3.5-omni-plus', name: 'Qwen3.5 Omni Plus', description: '多模态大模型' },
+]
+
+const DEFAULT_VISION_MODEL_ID = 'qwen3-vl-plus'
 
 export interface AssetStudioVisionReusePayload {
   target: 'image' | 'video'
@@ -557,6 +567,7 @@ export default function AssetStudioVisionReviewPanel({
   const [assetFile, setAssetFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [originalPrompt, setOriginalPrompt] = useState('')
+  const [selectedModel, setSelectedModel] = useState<string>(DEFAULT_VISION_MODEL_ID)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<AssetStudioVisionReviewResponse | null>(null)
@@ -610,7 +621,7 @@ export default function AssetStudioVisionReviewPanel({
     try {
       const formData = new FormData()
       formData.append('asset_file', assetFile)
-      formData.append('model_id', VISION_REVIEW_MODEL_ID)
+      formData.append('model_id', selectedModel)
       if (originalPrompt.trim()) {
         formData.append('original_prompt', originalPrompt.trim())
       }
