@@ -768,7 +768,7 @@ def test_model_catalog_serializer_exposes_runtime_routing_signal(monkeypatch, tm
 
 def test_model_catalog_serializer_exposes_runtime_constraints_and_hints(monkeypatch, tmp_path):
     service = ModelCatalogSyncService(config_dir=ROOT_DIR.parent / "config")
-    seed = next(item for item in service.load_catalog_seeds() if item.model_key == "wan2.6-t2v")
+    seed = next(item for item in service.load_catalog_seeds() if item.model_key == "wan2.7-t2v")
 
     snapshot_path = tmp_path / "model_catalog_runtime.json"
     snapshot_path.write_text(
@@ -776,7 +776,7 @@ def test_model_catalog_serializer_exposes_runtime_constraints_and_hints(monkeypa
             {
                 "version": 1,
                 "entries": {
-                    "wan2.6-t2v": {
+                    "wan2.7-t2v": {
                         "verification_status": "verified",
                         "last_verified_at": datetime.now(timezone.utc).isoformat(),
                         "capability_hints": {

@@ -5,6 +5,8 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 
+from pipeline.media_presets import normalize_dreamweaver_video_engine
+
 from app.services.points_pricing_policy import PointsPricingPolicyConfig, PointsPricingPolicySnapshot
 from app.services.user_center_points import COMPLETED_STATUSES, RUNNING_STATUSES
 from app.utils.datetime_utils import ensure_utc_datetime
@@ -238,7 +240,7 @@ def _extract_dreamweaver_quality_mode(contract_json: object | None) -> str | Non
 def _resolve_dreamweaver_video_engine(runtime_config: dict[str, object], quality_mode: str | None) -> str:
     video_config = runtime_config.get("video_config")
     if isinstance(video_config, dict):
-        engine = str(video_config.get("engine") or "").strip().lower()
+        engine = normalize_dreamweaver_video_engine(video_config.get("engine"))
         if engine:
             return engine
 
@@ -312,9 +314,8 @@ def _estimate_running_dreamweaver_yuan(contract_json: object | None) -> tuple[fl
     video_engine = _resolve_dreamweaver_video_engine(runtime_config, quality_mode)
     video_unit_price = {
         "wan_auto": _env_float("USER_CENTER_DREAMWEAVER_VIDEO_UNIT_PRICE_WAN_AUTO", 0.15),
-        "wan_i2v": _env_float("USER_CENTER_DREAMWEAVER_VIDEO_UNIT_PRICE_WAN_I2V", 0.18),
-        "i2v": _env_float("USER_CENTER_DREAMWEAVER_VIDEO_UNIT_PRICE_I2V", 0.18),
-        "auto": _env_float("USER_CENTER_DREAMWEAVER_VIDEO_UNIT_PRICE_AUTO", 0.15),
+        "wan2.7-i2v": _env_float("USER_CENTER_DREAMWEAVER_VIDEO_UNIT_PRICE_WAN_I2V", 0.18),
+        "wan2.7-t2v": _env_float("USER_CENTER_DREAMWEAVER_VIDEO_UNIT_PRICE_WAN_T2V", 0.15),
         "ffmpeg_slideshow": _env_float("USER_CENTER_DREAMWEAVER_VIDEO_UNIT_PRICE_FFMPEG", 0.0),
     }.get(video_engine, _env_float("USER_CENTER_DREAMWEAVER_VIDEO_UNIT_PRICE_DEFAULT", 0.08))
 

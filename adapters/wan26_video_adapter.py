@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Wan2.6 Video Adapter - Alibaba Cloud Wan2.6 video generation model.
+Wan2.7 Video Adapter - Alibaba Cloud Wan2.7 video generation model.
 Implements the new ModelSpec-based adapter pattern.
 """
 
@@ -118,13 +118,13 @@ def _pick_resolution_label(width: int, height: int, options: List[str]) -> str:
     return sorted_options[-1]
 
 
-@register_model("wan2.6-t2v")
-class Wan26VideoAdapter(BaseVideoAdapter):
-    """Alibaba Cloud Wan2.6 text-to-video adapter."""
+@register_model("wan2.7-t2v")
+class Wan27VideoAdapter(BaseVideoAdapter):
+    """Alibaba Cloud Wan2.7 text-to-video adapter."""
     
     def __init__(self, spec: ModelSpec, config: Optional[AdapterConfig] = None):
         if config is None:
-            config = _build_wan_config("WAN_T2V", "wan2.6-t2v")
+            config = _build_wan_config("WAN_T2V", "wan2.7-t2v")
         super().__init__(spec, config)
         self._session = requests.Session()
         self._session.headers.update({
@@ -185,12 +185,12 @@ class Wan26VideoAdapter(BaseVideoAdapter):
     
     @classmethod
     def get_model_spec(cls) -> ModelSpec:
-        """Return the ModelSpec for Wan2.6 video model."""
+        """Return the ModelSpec for Wan2.7 video model."""
         return ModelSpec(
-            id="wan2.6-t2v",
-            name="Wan 2.6 Text-to-Video",
+            id="wan2.7-t2v",
+            name="Wan 2.7 Text-to-Video",
             provider="alibaba",
-            version="v2.6",
+            version="v2.7",
             status=ModelStatus.ACTIVE,
             
             modality=["text_to_video", "image_to_video"],
@@ -300,7 +300,7 @@ class Wan26VideoAdapter(BaseVideoAdapter):
             fallback_strategies=[
                 FallbackStrategy(
                     trigger_condition="content_safety",
-                    fallback_model_id="wan2.6-t2v-safe",
+                    fallback_model_id="wan2.7-t2v-safe",
                     param_adjustments={},
                     description="Fallback to safe mode",
                     priority=1,
@@ -324,7 +324,7 @@ class Wan26VideoAdapter(BaseVideoAdapter):
         )
     
     def _map_task_to_request(self, task: TaskSpec) -> Dict[str, Any]:
-        """Map TaskSpec to Wan2.6 API request."""
+        """Map TaskSpec to Wan2.7 API request."""
         resolution_label = _pick_resolution_label(
             task.width,
             task.height,
@@ -363,7 +363,7 @@ class Wan26VideoAdapter(BaseVideoAdapter):
         return payload
     
     def _call_api(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Call Wan2.6 API."""
+        """Call Wan2.7 API."""
         url = _normalize_request_url(self.config.base_url or "", self.spec.endpoint)
         base_url = (url.rsplit("/api/v1/", 1)[0] if "/api/v1/" in url else url.rsplit("/", 1)[0]).rstrip("/")
         poll_url_template = f"{base_url}/api/v1/tasks/{{task_id}}"
@@ -438,7 +438,7 @@ class Wan26VideoAdapter(BaseVideoAdapter):
         response: Dict[str, Any],
         task: TaskSpec,
     ) -> GenerationResult:
-        """Parse Wan2.6 API response."""
+        """Parse Wan2.7 API response."""
         outputs = []
         
         output = response.get("output", {})
@@ -493,7 +493,7 @@ class Wan26VideoAdapter(BaseVideoAdapter):
 
 
 @register_model("wan2.6-t2v-fast")
-class Wan26FastVideoAdapter(Wan26VideoAdapter):
+class Wan26FastVideoAdapter(Wan27VideoAdapter):
     """Wan2.6 Fast - faster but lower quality."""
 
     def __init__(self, spec: ModelSpec, config: Optional[AdapterConfig] = None):
@@ -516,18 +516,43 @@ class Wan26FastVideoAdapter(Wan26VideoAdapter):
         return request
 
 
-@register_model("wan2.6-i2v")
-class Wan26ImageToVideoAdapter(Wan26VideoAdapter):
-    """Wan2.6 image-to-video adapter."""
+@register_model("wan2.7-videoedit")
+class Wan27VideoEditAdapter(Wan27VideoAdapter):
+    """Wan2.7 video editing adapter."""
 
     def __init__(self, spec: ModelSpec, config: Optional[AdapterConfig] = None):
-        super().__init__(spec, config or _build_wan_config("WAN_I2V", "wan2.6-i2v"))
+        super().__init__(spec, config or _build_wan_config("WAN_VIDEOEDIT", "wan2.7-videoedit"))
 
     @classmethod
     def get_model_spec(cls) -> ModelSpec:
         spec = super().get_model_spec()
-        spec.id = "wan2.6-i2v"
-        spec.name = "Wan 2.6 Image-to-Video"
+        spec.id = "wan2.7-videoedit"
+        spec.name = "Wan 2.7 Video Edit"
+        spec.modality = ["video_to_video", "video_edit"]
+        spec.tags = ["video", "video-edit", "alibaba"]
+        spec.constraints.duration = [3.0, 5.0, 10.0]
+        spec.quality_metrics.overall_score = 8.3
+        spec.avg_latency_seconds = 50.0
+        return spec
+
+    def _map_task_to_request(self, task: TaskSpec) -> Dict[str, Any]:
+        request = super()._map_task_to_request(task)
+        request["model"] = self.model_name
+        return request
+
+
+@register_model("wan2.7-i2v")
+class Wan27ImageToVideoAdapter(Wan27VideoAdapter):
+    """Wan2.7 image-to-video adapter."""
+
+    def __init__(self, spec: ModelSpec, config: Optional[AdapterConfig] = None):
+        super().__init__(spec, config or _build_wan_config("WAN_I2V", "wan2.7-i2v"))
+
+    @classmethod
+    def get_model_spec(cls) -> ModelSpec:
+        spec = super().get_model_spec()
+        spec.id = "wan2.7-i2v"
+        spec.name = "Wan 2.7 Image-to-Video"
         spec.modality = ["image_to_video"]
         spec.tags = ["video", "image-to-video", "alibaba"]
         return spec
@@ -538,18 +563,18 @@ class Wan26ImageToVideoAdapter(Wan26VideoAdapter):
         return request
 
 
-@register_model("wan2.6-r2v")
-class Wan26ReferenceVideoAdapter(Wan26VideoAdapter):
-    """Wan2.6 reference-video adapter."""
+@register_model("wan2.7-r2v")
+class Wan27ReferenceVideoAdapter(Wan27VideoAdapter):
+    """Wan2.7 reference-video adapter."""
 
     def __init__(self, spec: ModelSpec, config: Optional[AdapterConfig] = None):
-        super().__init__(spec, config or _build_wan_config("WAN_R2V", "wan2.6-r2v"))
+        super().__init__(spec, config or _build_wan_config("WAN_R2V", "wan2.7-r2v"))
 
     @classmethod
     def get_model_spec(cls) -> ModelSpec:
         spec = super().get_model_spec()
-        spec.id = "wan2.6-r2v"
-        spec.name = "Wan 2.6 Reference-to-Video"
+        spec.id = "wan2.7-r2v"
+        spec.name = "Wan 2.7 Reference-to-Video"
         spec.modality = ["video_to_video"]
         spec.tags = ["video", "reference-to-video", "alibaba"]
         return spec

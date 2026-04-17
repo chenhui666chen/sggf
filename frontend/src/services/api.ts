@@ -17,6 +17,12 @@ import type {
   StoryExpansionRequestPayload,
   StoryExpansionStartResponse,
 } from '@/types/storyExpansion'
+import type {
+  DreamweaverRunAsyncResponse,
+  DreamweaverRunSnapshot,
+  RunResult,
+  TaskStatus,
+} from '@/types/dreamweaver'
 
 // 在开发环境中直接连接到后端，不使用Vite代理
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
@@ -1498,7 +1504,7 @@ class ApiClient {
 
   // 织梦映心流程（短剧生成）
   runDreamweaver(projectId: number, chapterIds: number[], options?: DreamweaverRunOptions) {
-    return this.client.post('/api/v1/dreamweaver/run', {
+    return this.client.post<RunResult>('/api/v1/dreamweaver/run', {
       project_id: projectId,
       chapter_ids: chapterIds,
       schema_version: DREAMWEAVER_SCHEMA_VERSION,
@@ -1519,7 +1525,7 @@ class ApiClient {
   }
 
   runDreamweaverAsync(projectId: number, chapterIds: number[], options?: DreamweaverRunOptions) {
-    return this.client.post('/api/v1/dreamweaver/run-async', {
+    return this.client.post<DreamweaverRunAsyncResponse>('/api/v1/dreamweaver/run-async', {
       project_id: projectId,
       chapter_ids: chapterIds,
       schema_version: DREAMWEAVER_SCHEMA_VERSION,
@@ -1540,7 +1546,7 @@ class ApiClient {
   }
 
   getDreamweaverTask(taskId: string) {
-    return this.client.get(`/api/v1/dreamweaver/task/${taskId}`, {
+    return this.client.get<TaskStatus>(`/api/v1/dreamweaver/task/${taskId}`, {
       timeout: 15000,
     })
   }
@@ -1680,7 +1686,7 @@ class ApiClient {
   }
 
   getDreamweaverRun(runId: string) {
-    return this.client.get(`/api/v1/dreamweaver/runs/${runId}`, {
+    return this.client.get<DreamweaverRunSnapshot>(`/api/v1/dreamweaver/runs/${runId}`, {
       timeout: 15000,
     })
   }

@@ -56,14 +56,6 @@ MODEL_ALIASES = {
     "qwen_image_edit_plus": "qwen-image-edit-plus",
     "qwen_image_edit_max": "qwen-image-edit-max",
     "qwen_multiperson_fusion": "qwen-image-edit-plus",
-    "wan_t2i": "wan2.6-t2i",
-    "wan26_t2i": "wan2.6-t2i",
-    "wan_t2v": "wan2.6-t2v",
-    "wan26_t2v": "wan2.6-t2v",
-    "wan_i2v": "wan2.6-i2v",
-    "wan26_i2v": "wan2.6-i2v",
-    "wan_r2v": "wan2.6-r2v",
-    "wan26_r2v": "wan2.6-r2v",
     "wan_image_edit": "qwen-image-edit-plus",
 }
 

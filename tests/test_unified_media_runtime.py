@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import pytest
@@ -72,7 +72,7 @@ def test_media_runtime_select_model_reroutes_incompatible_preferred_video_model(
             {
                 "version": 1,
                 "entries": {
-                    "wan2.6-t2v": {
+                    "wan2.7-t2v": {
                         "verification_status": "verified",
                         "last_verified_at": "2026-03-22T00:00:00+00:00",
                     },
@@ -107,7 +107,7 @@ def test_media_runtime_select_model_reroutes_incompatible_preferred_video_model(
         task=task,
     )
 
-    assert spec.id == "wan2.6-t2v"
+    assert spec.id == "wan2.7-t2v"
 
 
 def test_media_runtime_select_model_keeps_canonical_wan_image_model(
@@ -222,7 +222,7 @@ def test_media_runtime_image_to_video_with_last_frame_prefers_frame_control_mode
             {
                 "version": 1,
                 "entries": {
-                    "wan2.6-t2v": {
+                    "wan2.7-t2v": {
                         "verification_status": "verified",
                         "last_verified_at": "2026-03-22T00:00:00+00:00",
                         "capability_hints": {
@@ -230,7 +230,7 @@ def test_media_runtime_image_to_video_with_last_frame_prefers_frame_control_mode
                             "supports_last_frame": False,
                         },
                     },
-                    "wan2.6-i2v": {
+                    "wan2.7-i2v": {
                         "verification_status": "verified",
                         "last_verified_at": "2026-03-22T00:00:00+00:00",
                         "capability_hints": {
@@ -238,7 +238,7 @@ def test_media_runtime_image_to_video_with_last_frame_prefers_frame_control_mode
                             "supports_last_frame": False,
                         },
                     },
-                    "wan2.6-r2v": {
+                    "wan2.7-r2v": {
                         "verification_status": "verified",
                         "last_verified_at": "2026-03-22T00:00:00+00:00",
                         "capability_hints": {
@@ -276,7 +276,7 @@ def test_media_runtime_image_to_video_with_last_frame_prefers_frame_control_mode
     )
 
     assert result.success is True
-    assert captured["model_id"] == "wan2.6-r2v"
+    assert captured["model_id"] == "wan2.7-r2v"
 
 
 def test_media_runtime_image_to_video_reroutes_incompatible_duration_preferred_model(
@@ -291,7 +291,7 @@ def test_media_runtime_image_to_video_reroutes_incompatible_duration_preferred_m
             {
                 "version": 1,
                 "entries": {
-                    "wan2.6-t2v": {
+                    "wan2.7-t2v": {
                         "verification_status": "verified",
                         "last_verified_at": "2026-03-22T00:00:00+00:00",
                         "capability_hints": {
@@ -299,7 +299,7 @@ def test_media_runtime_image_to_video_reroutes_incompatible_duration_preferred_m
                             "max_reference_images": 1,
                         },
                     },
-                    "wan2.6-i2v": {
+                    "wan2.7-i2v": {
                         "verification_status": "verified",
                         "last_verified_at": "2026-03-22T00:00:00+00:00",
                         "capability_hints": {
@@ -334,13 +334,13 @@ def test_media_runtime_image_to_video_reroutes_incompatible_duration_preferred_m
         prompt="让角色保持主体一致并向前推进",
         image_path="start.png",
         duration=15.0,
-        model_id="wan2.6-i2v",
+        model_id="wan2.7-i2v",
         strategy="balanced",
         use_fallback=False,
     )
 
     assert result.success is True
-    assert captured["model_id"] == "wan2.6-t2v"
+    assert captured["model_id"] == "wan2.7-t2v"
 
 
 def test_media_runtime_image_to_video_uses_runtime_snapshot_task_constraints(
@@ -355,7 +355,7 @@ def test_media_runtime_image_to_video_uses_runtime_snapshot_task_constraints(
             {
                 "version": 1,
                 "entries": {
-                    "wan2.6-i2v": {
+                    "wan2.7-i2v": {
                         "verification_status": "verified",
                         "last_verified_at": "2026-03-22T00:00:00+00:00",
                         "capability_hints": {
@@ -371,7 +371,7 @@ def test_media_runtime_image_to_video_uses_runtime_snapshot_task_constraints(
                             "max_height": 1080,
                         },
                     },
-                    "wan2.6-t2v": {
+                    "wan2.7-t2v": {
                         "verification_status": "verified",
                         "last_verified_at": "2026-03-22T00:00:00+00:00",
                         "capability_hints": {
@@ -405,13 +405,13 @@ def test_media_runtime_image_to_video_uses_runtime_snapshot_task_constraints(
         prompt="让角色保持主体一致并完成长镜头推进",
         image_path="start.png",
         duration=15.0,
-        model_id="wan2.6-i2v",
+        model_id="wan2.7-i2v",
         strategy="balanced",
         use_fallback=False,
     )
 
     assert result.success is True
-    assert captured["model_id"] == "wan2.6-i2v"
+    assert captured["model_id"] == "wan2.7-i2v"
 
 
 def test_media_runtime_get_model_info_exposes_catalog_routing_signal(
@@ -541,8 +541,8 @@ def test_multimodal_registry_auto_loads_new_adapters() -> None:
     assert registry.get_adapter("qwen3-vl-plus") is not None
     assert registry.get_adapter("qwen-image-edit-plus") is not None
     assert registry.get_adapter("qwen-image-edit-max") is not None
-    assert registry.get_adapter("wan2.6-i2v") is not None
-    assert registry.get_adapter("wan2.6-r2v") is not None
+    assert registry.get_adapter("wan2.7-i2v") is not None
+    assert registry.get_adapter("wan2.7-r2v") is not None
 
 
 def test_create_tts_engine_accepts_legacy_model_keyword(monkeypatch: pytest.MonkeyPatch) -> None:

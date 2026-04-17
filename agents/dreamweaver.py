@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -19,15 +20,42 @@ from agents.prompt_fragments import (
     match_library_assets_for_shot as _match_library_assets_for_shot,
 )
 from pipeline.media_presets import (
-    WAN_I2V_OUTPUT_FPS,
+    DREAMWEAVER_I2V_ENGINE,
+    DREAMWEAVER_I2V_OUTPUT_FPS,
+    DREAMWEAVER_T2V_ENGINE,
     ensure_media_payload,
+    is_dreamweaver_generated_video_engine,
+    is_dreamweaver_auto_engine,
+    is_dreamweaver_i2v_engine,
+    is_dreamweaver_t2v_engine,
+    normalize_dreamweaver_video_duration_s,
+    normalize_dreamweaver_video_engine,
     normalize_video_fps,
-    normalize_wan_i2v_duration_s,
     resolve_frame_size,
 )
 from pipeline.artifacts_io import download_url_to_path as _download_url_to_path
 from pipeline.ffmpeg_runner import run_ffmpeg as _run_ffmpeg
 from pipeline.style_presets import style_negative_prompt_for_preset, style_prompt_for_preset
+
+try:
+    from app.services.dreamweaver.video_generation import (
+        apply_kling_omni_hints_to_job,
+        build_video_provider_trace,
+        ensure_subject_refs_for_character_assets,
+        resolve_video_generation_controls,
+    )
+    from app.services.providers.kling import KlingVideoAPI, build_kling_video_request
+except Exception:
+    backend_root = Path(__file__).resolve().parents[1] / "backend"
+    if backend_root.exists() and str(backend_root) not in sys.path:
+        sys.path.insert(0, str(backend_root))
+    from app.services.dreamweaver.video_generation import (
+        apply_kling_omni_hints_to_job,
+        build_video_provider_trace,
+        ensure_subject_refs_for_character_assets,
+        resolve_video_generation_controls,
+    )
+    from app.services.providers.kling import KlingVideoAPI, build_kling_video_request
 
 
 def _normalize_regenerate_shot_ids(value: Any) -> set[str]:
@@ -78,6 +106,71 @@ def _index_camera_states_by_shot_id(camera_states: Any) -> Dict[str, Dict[str, A
                 continue
             out[shot_id] = state
     return out
+
+
+def _project_asset_identity_keys(asset: Any) -> List[str]:
+    if not isinstance(asset, dict):
+        return []
+    keys: List[str] = []
+
+    raw_asset_id = asset.get("id")
+    if raw_asset_id is None:
+        raw_asset_id = asset.get("asset_id")
+    try:
+        asset_id = int(raw_asset_id) if raw_asset_id is not None else None
+    except Exception:  # noqa: BLE001
+        asset_id = None
+    if asset_id is not None:
+        keys.append(f"id:{asset_id}")
+
+    role = str(asset.get("role") or "").strip()
+    if role:
+        keys.append(f"role:{role}")
+
+    uri = str(asset.get("uri") or "").strip()
+    if uri:
+        keys.append(f"uri:{uri}")
+    return keys
+
+
+def _apply_library_asset_updates_to_payload(project_assets: Any, library_assets: Any) -> None:
+    if not isinstance(project_assets, list) or not isinstance(library_assets, list):
+        return
+
+    payload_items_by_key: Dict[str, Dict[str, Any]] = {}
+    for item in project_assets:
+        if not isinstance(item, dict):
+            continue
+        for key in _project_asset_identity_keys(item):
+            payload_items_by_key.setdefault(key, item)
+
+    for asset in library_assets:
+        if not isinstance(asset, dict):
+            continue
+        target: Optional[Dict[str, Any]] = None
+        for key in _project_asset_identity_keys(asset):
+            target = payload_items_by_key.get(key)
+            if isinstance(target, dict):
+                break
+        if not isinstance(target, dict):
+            continue
+
+        meta = target.get("meta")
+        if not isinstance(meta, dict):
+            meta = {}
+            target["meta"] = meta
+
+        provider_refs = asset.get("provider_refs") if isinstance(asset.get("provider_refs"), dict) else {}
+        if provider_refs:
+            meta["provider_refs"] = dict(provider_refs)
+        else:
+            meta.pop("provider_refs", None)
+
+        sync_error = str(asset.get("provider_ref_sync_error") or "").strip()
+        if sync_error:
+            target["provider_ref_sync_error"] = sync_error
+        else:
+            target.pop("provider_ref_sync_error", None)
 
 
 def _collect_dialogues_for_shot(shot: Dict[str, Any], audio_manager: AudioSyncManager) -> List[Dict[str, Any]]:
@@ -459,12 +552,12 @@ def _build_audio_policy_hint() -> str:
     return "音频要求：不生成对白音频与背景音乐"
 
 
-def _build_wan_i2v_prompt(*, shot: Dict[str, Any], style_preset: str, frame_ratio: str, prompt_fragment: str = "", engine: str = "wan_i2v") -> str:
+def _build_wan_video_prompt(*, shot: Dict[str, Any], style_preset: str, frame_ratio: str, prompt_fragment: str = "", engine: str = DREAMWEAVER_I2V_ENGINE) -> str:
     """构建 Wan I2V/T2V 的视频提示词，优先吸收 storyboard 的结构化字段。"""
     style_prompt = style_prompt_for_preset(style_preset)
     soft_negative = _i2v_soft_negative_hint(style_negative_prompt_for_preset(style_preset))
-    engine_value = str(engine or "wan_i2v").strip().lower()
-    is_t2v = engine_value in {"wan_t2v", "wan26_t2v", "t2v"}
+    engine_value = normalize_dreamweaver_video_engine(engine, default=DREAMWEAVER_I2V_ENGINE)
+    is_t2v = is_dreamweaver_t2v_engine(engine_value)
     consistency_line = (
         "连续性约束：首帧参考图是角色与场景基准，保持人物身份、服装、发型、场景布局与光线逻辑一致，禁止突变。"
         if not is_t2v
@@ -609,7 +702,7 @@ def _build_wan_i2v_prompt(*, shot: Dict[str, Any], style_preset: str, frame_rati
             override = override[:max_chars].rstrip("，； ")
         return override
 
-    duration_s = normalize_wan_i2v_duration_s(shot.get("duration_s"), default=15.0)
+    duration_s = normalize_dreamweaver_video_duration_s(shot.get("duration_s"), default=15.0)
 
     prompt = ""
     if is_multishot:
@@ -878,9 +971,12 @@ def ensure_storyboard_video_prompts(payload: Dict[str, Any], *, force: bool = Fa
 
     style_preset = str(payload.get("style_preset") or "").strip()
     frame_ratio = str(image_cfg.get("ratio") or "").strip() or "16:9"
-    engine = str(video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "wan_i2v").strip().lower()
-    if engine not in {"wan_i2v", "i2v", "wan_t2v", "wan26_t2v", "t2v", "wan_auto", "auto"}:
-        engine = "wan_i2v"
+    engine = normalize_dreamweaver_video_engine(
+        video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or DREAMWEAVER_I2V_ENGINE,
+        default=DREAMWEAVER_I2V_ENGINE,
+    )
+    if not is_dreamweaver_generated_video_engine(engine):
+        engine = DREAMWEAVER_I2V_ENGINE
 
     lib_assets = _library_assets_from_payload(payload)
     updated = 0
@@ -905,7 +1001,7 @@ def ensure_storyboard_video_prompts(payload: Dict[str, Any], *, force: bool = Fa
 
         asset_match = _match_library_assets_for_shot(shot=item, library_assets=lib_assets, max_character_refs=3)
         prompt_fragment = str(asset_match.get("prompt_fragment") or "").strip()
-        generated = _build_wan_i2v_prompt(
+        generated = _build_wan_video_prompt(
             shot=item,
             style_preset=style_preset,
             frame_ratio=frame_ratio,
@@ -1139,7 +1235,7 @@ def _render_slideshow_clip(
     _run_ffmpeg(cmd, log_dir=out.parent, log_prefix=f"ffmpeg_slideshow_{out.stem}")
 
 
-def _run_wan_i2v(
+def _run_i2v_video_generation(
     ctx: Any,
     *,
     run_dir: Path,
@@ -1150,10 +1246,10 @@ def _run_wan_i2v(
     allowed_shot_ids: Optional[set[str]] = None,
     character_manager: Optional[CharacterManager] = None,
 ) -> None:
-    adapter_name = str(video_cfg.get("adapter") or "wan_i2v").strip() or "wan_i2v"
+    adapter_name = str(video_cfg.get("adapter") or DREAMWEAVER_I2V_ENGINE).strip() or DREAMWEAVER_I2V_ENGINE
 
     ffmpeg = os.getenv("FFMPEG_PATH", "ffmpeg")
-    fps = WAN_I2V_OUTPUT_FPS
+    fps = DREAMWEAVER_I2V_OUTPUT_FPS
     motion_bucket_id = int(video_cfg.get("motion_bucket_id") or 127)
     slideshow_effect = _resolve_slideshow_effect(video_cfg.get("slideshow_effect"))
 
@@ -1220,7 +1316,7 @@ def _run_wan_i2v(
         tail = run_dir / f"{shot_id}_tail.png"
         mid = run_dir / f"{shot_id}_mid.png"
         out = run_dir / f"{shot_id}.mp4"
-        duration_s = normalize_wan_i2v_duration_s(item.get("duration_s"), default=5.0)
+        duration_s = normalize_dreamweaver_video_duration_s(item.get("duration_s"), default=5.0)
 
         if not head.exists():
             raise RuntimeError(f"missing head frame for i2v: {head}")
@@ -1250,7 +1346,7 @@ def _run_wan_i2v(
             except Exception as e:
                 print(f"获取角色引用失败 ({shot_id}): {e}")
         
-        motion_prompt = _build_wan_i2v_prompt(
+        motion_prompt = _build_wan_video_prompt(
             shot=item,
             style_preset=style_preset,
             frame_ratio=frame_ratio,
@@ -1258,8 +1354,8 @@ def _run_wan_i2v(
         )
         _store_video_prompt_generated(item, motion_prompt)
 
-        via = "wan_i2v"
-        meta: Dict[str, Any] = {"engine": "wan_i2v", "adapter": adapter_name, "fps": fps, "motion_bucket_id": motion_bucket_id}
+        via = DREAMWEAVER_I2V_ENGINE
+        meta: Dict[str, Any] = {"engine": DREAMWEAVER_I2V_ENGINE, "adapter": adapter_name, "fps": fps, "motion_bucket_id": motion_bucket_id}
         seed = _stable_seed(str(getattr(ctx, "run_id", "")), shot_id, "clip")
 
         default_input_meta = {"mode": "head_keyframe", "reason": "default", "head_path": str(head)}
@@ -1321,7 +1417,7 @@ def _run_wan_i2v(
                     continue
 
             if result is None or chosen_input_meta is None:
-                raise RuntimeError(last_error or "wan_i2v generate failed")
+                raise RuntimeError(last_error or f"{DREAMWEAVER_I2V_ENGINE} generate failed")
 
             if isinstance(result.data, dict) and isinstance(result.data.get("video_url"), str):
                 meta["remote_url"] = result.data["video_url"]
@@ -1590,7 +1686,7 @@ def _run_wan_i2v(
     ctx.payload["video_clips"] = merged
 
 
-def _run_wan_t2v(
+def _run_t2v_video_generation(
     ctx: Any,
     *,
     run_dir: Path,
@@ -1601,7 +1697,7 @@ def _run_wan_t2v(
     regenerate_shot_ids: Optional[set[str]] = None,
     allowed_shot_ids: Optional[set[str]] = None,
 ) -> None:
-    adapter_name = str(video_cfg.get("adapter") or "wan_t2v").strip() or "wan_t2v"
+    adapter_name = str(video_cfg.get("adapter") or DREAMWEAVER_T2V_ENGINE).strip() or DREAMWEAVER_T2V_ENGINE
 
     regen_set = regenerate_shot_ids or set()
     existing_clips_by_shot = _index_video_clips_by_shot(ctx.payload.get("video_clips"))
@@ -1632,22 +1728,22 @@ def _run_wan_t2v(
     def _render_one(item: dict) -> dict:
         shot_id = str(item.get("shot_id") or "").strip()
         out = run_dir / f"{shot_id}.mp4"
-        duration_s = normalize_wan_i2v_duration_s(item.get("duration_s"), default=5.0)
+        duration_s = normalize_dreamweaver_video_duration_s(item.get("duration_s"), default=5.0)
 
         asset_match = _match_library_assets_for_shot(shot=item, library_assets=lib_assets, max_character_refs=3)
         prompt_fragment = str(asset_match.get("prompt_fragment") or "").strip()
 
-        prompt = _build_wan_i2v_prompt(
+        prompt = _build_wan_video_prompt(
             shot=item,
             style_preset=style_preset,
             frame_ratio=frame_ratio,
             prompt_fragment=prompt_fragment,
-            engine="wan_t2v",
+            engine=DREAMWEAVER_T2V_ENGINE,
         )
         _store_video_prompt_generated(item, prompt)
 
         seed = _stable_seed(str(getattr(ctx, "run_id", "")), shot_id, "t2v_clip")
-        meta: Dict[str, Any] = {"engine": "wan_t2v", "adapter": adapter_name, "fps": fps, "width": width, "height": height, "seed": seed}
+        meta: Dict[str, Any] = {"engine": DREAMWEAVER_T2V_ENGINE, "adapter": adapter_name, "fps": fps, "width": width, "height": height, "seed": seed}
 
         kwargs: Dict[str, Any] = {
             "prompt": prompt,
@@ -1672,7 +1768,7 @@ def _run_wan_t2v(
         if isinstance(result.data, dict) and isinstance(result.data.get("video_url"), str):
             meta["remote_url"] = result.data["video_url"]
 
-        return {"path": str(out), "duration": float(duration_s), "meta": {**meta, "via": "wan_t2v", "prompt": prompt[:240]}}
+        return {"path": str(out), "duration": float(duration_s), "meta": {**meta, "via": DREAMWEAVER_T2V_ENGINE, "prompt": prompt[:240]}}
 
     generated_by_shot: Dict[str, Dict[str, Any]] = {}
     if video_parallelism <= 1 or len(jobs) <= 1:
@@ -1712,14 +1808,157 @@ def _run_wan_t2v(
 
         out = run_dir / f"{shot_id}.mp4"
         if out.exists():
-            duration_s = normalize_wan_i2v_duration_s(item.get("duration_s"), default=5.0)
+            duration_s = normalize_dreamweaver_video_duration_s(item.get("duration_s"), default=5.0)
             merged.append(
                 {
                     "path": str(out),
                     "duration": float(duration_s),
-                    "meta": {"engine": "wan_t2v", "via": "wan_t2v", "fps": fps, "width": width, "height": height},
+                    "meta": {"engine": DREAMWEAVER_T2V_ENGINE, "via": DREAMWEAVER_T2V_ENGINE, "fps": fps, "width": width, "height": height},
                 }
             )
+
+    ctx.payload["video_clips"] = merged
+
+
+def _run_kling_omni(
+    ctx: Any,
+    *,
+    run_dir: Path,
+    video_cfg: Dict[str, Any],
+    regenerate_shot_ids: Optional[set[str]] = None,
+    allowed_shot_ids: Optional[set[str]] = None,
+) -> None:
+    regen_set = regenerate_shot_ids or set()
+    existing_clips_by_shot = _index_video_clips_by_shot(ctx.payload.get("video_clips"))
+
+    storyboard = ctx.payload.get("storyboard", [])
+    if not isinstance(storyboard, list) or not storyboard:
+        ctx.payload["video_clips"] = []
+        return
+
+    style_preset = str(ctx.payload.get("style_preset") or "").strip()
+    image_cfg = ctx.payload.get("image_config") if isinstance(ctx.payload.get("image_config"), dict) else {}
+    frame_ratio = str(image_cfg.get("ratio") or "").strip() or "16:9"
+    model_name = str(video_cfg.get("provider_model") or video_cfg.get("kling_model") or "kling-v3-omni").strip() or "kling-v3-omni"
+    timeout_s = float(video_cfg.get("provider_timeout_s") or os.getenv("DREAMWEAVER_KLING_VIDEO_TIMEOUT_S") or 300.0)
+    poll_interval_s = float(video_cfg.get("provider_poll_interval_s") or os.getenv("DREAMWEAVER_KLING_VIDEO_POLL_INTERVAL_S") or 3.0)
+    negative_prompt = str(video_cfg.get("negative_prompt") or "").strip()
+
+    planned_jobs = _build_video_clip_jobs(
+        storyboard=storyboard,
+        run_dir=run_dir,
+        existing_jobs_by_shot=_index_video_clip_jobs_by_shot(ctx.payload.get("video_clip_jobs")),
+        existing_clips_by_shot=existing_clips_by_shot,
+        requested_shot_ids=set(allowed_shot_ids or regen_set),
+        bridge_enabled=True,
+        camera_states=ctx.payload.get("camera_states"),
+    )
+    jobs_by_shot = _index_video_clip_jobs_by_shot(planned_jobs)
+    lib_assets = _library_assets_from_payload(ctx.payload)
+    api = KlingVideoAPI()
+
+    generated_by_shot: Dict[str, Dict[str, Any]] = {}
+    for item in storyboard:
+        if not isinstance(item, dict):
+            continue
+        shot_id = str(item.get("shot_id") or "").strip()
+        if not shot_id:
+            continue
+
+        out = run_dir / f"{shot_id}.mp4"
+        existing = existing_clips_by_shot.get(shot_id)
+        if allowed_shot_ids is not None and shot_id not in allowed_shot_ids:
+            if isinstance(existing, dict):
+                generated_by_shot[shot_id] = existing
+            continue
+        if out.exists() and shot_id not in regen_set:
+            if isinstance(existing, dict):
+                generated_by_shot[shot_id] = existing
+            else:
+                generated_by_shot[shot_id] = {
+                    "path": str(out),
+                    "duration": normalize_dreamweaver_video_duration_s(item.get("duration_s"), default=5.0),
+                    "meta": {"engine": "kling_omni", "via": "kling_omni", "model": model_name},
+                }
+            continue
+
+        asset_match = _match_library_assets_for_shot(shot=item, library_assets=lib_assets, max_character_refs=3)
+        prompt_fragment = str(asset_match.get("prompt_fragment") or "").strip()
+        prompt = _build_wan_video_prompt(
+            shot=item,
+            style_preset=style_preset,
+            frame_ratio=frame_ratio,
+            prompt_fragment=prompt_fragment,
+            engine=DREAMWEAVER_I2V_ENGINE,
+        )
+        _store_video_prompt_generated(item, prompt)
+
+        job_payload = dict(jobs_by_shot.get(shot_id) or {})
+        job_payload.setdefault("shot_id", shot_id)
+        if "inputs" not in job_payload:
+            job_payload["inputs"] = {
+                "head": str(run_dir / f"{shot_id}_head.png"),
+                "mid": str(run_dir / f"{shot_id}_mid.png"),
+                "tail": str(run_dir / f"{shot_id}_tail.png"),
+            }
+        apply_kling_omni_hints_to_job(job_payload, shot=item, model=model_name)
+
+        plan_preview = job_payload.get("kling_omni_plan") if isinstance(job_payload.get("kling_omni_plan"), dict) else {}
+        reference_frames = job_payload.get("omni_reference_frames") if isinstance(job_payload.get("omni_reference_frames"), list) else []
+        element_ids = plan_preview.get("element_ids") if isinstance(plan_preview.get("element_ids"), list) else []
+        request_mode = "image_to_video" if reference_frames else "text_to_video"
+        duration_s = normalize_dreamweaver_video_duration_s(item.get("duration_s"), default=5.0)
+
+        request = build_kling_video_request(
+            prompt=str(plan_preview.get("prompt") or prompt).strip() or prompt,
+            model=model_name,
+            mode=request_mode,
+            duration=float(duration_s),
+            aspect_ratio=frame_ratio,
+            negative_prompt=negative_prompt,
+            reference_frames=reference_frames,
+            element_ids=element_ids,
+            seed=_stable_seed(str(getattr(ctx, "run_id", "")), shot_id, "kling_omni"),
+        )
+        result = api.create_and_wait(
+            request,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+        )
+        _download_url_to_path(result.video_url, out, timeout_s=max(timeout_s, 60.0), max_retries=2)
+
+        inputs = job_payload.get("inputs") if isinstance(job_payload.get("inputs"), dict) else {}
+        generated_by_shot[shot_id] = {
+            "path": str(out),
+            "duration": float(duration_s),
+            "head": str(inputs.get("head") or ""),
+            "mid": str(inputs.get("mid") or "") or None,
+            "tail": str(inputs.get("tail") or "") or None,
+            "meta": {
+                "engine": "kling_omni",
+                "via": "kling_omni",
+                "provider": "kling",
+                "model": model_name,
+                "task_id": result.task_id,
+                "task_status": result.task_status,
+                "remote_url": result.video_url,
+                "request_mode": request_mode,
+                "reference_count": len(reference_frames),
+                "subject_ref_count": len(element_ids),
+                "prompt": request.prompt[:240],
+            },
+        }
+
+    merged: List[dict] = []
+    for item in storyboard:
+        if not isinstance(item, dict):
+            continue
+        shot_id = str(item.get("shot_id") or "").strip()
+        if not shot_id:
+            continue
+        clip = generated_by_shot.get(shot_id)
+        if isinstance(clip, dict):
+            merged.append(clip)
 
     ctx.payload["video_clips"] = merged
 
@@ -1874,26 +2113,26 @@ def _build_video_clip_jobs(
             else:
                 status = "confirmed"
 
-        jobs.append(
-            {
-                "shot_id": shot_id,
-                "confirmed": confirmed,
-                "status": status,
-                "desc": str(item.get("desc") or "").strip(),
-                "duration_s": item.get("duration_s"),
-                "cam_idx": item.get("cam_idx"),
-                "motion_desc": str(item.get("motion_desc") or "").strip(),
-                "requires_bridge": requires_bridge,
-                "depends_on_shot_id": dep_shot_id if dep_shot_id else None,
-                "i2v_head_source": inferred,
-                "inputs": {
-                    "head": str(run_dir / f"{shot_id}_head.png"),
-                    "mid": str(run_dir / f"{shot_id}_mid.png"),
-                    "tail": str(run_dir / f"{shot_id}_tail.png"),
-                },
-                "outputs": {"clip": str(out)},
-            }
-        )
+        job_payload = {
+            "shot_id": shot_id,
+            "confirmed": confirmed,
+            "status": status,
+            "desc": str(item.get("desc") or "").strip(),
+            "duration_s": item.get("duration_s"),
+            "cam_idx": item.get("cam_idx"),
+            "motion_desc": str(item.get("motion_desc") or "").strip(),
+            "requires_bridge": requires_bridge,
+            "depends_on_shot_id": dep_shot_id if dep_shot_id else None,
+            "i2v_head_source": inferred,
+            "inputs": {
+                "head": str(run_dir / f"{shot_id}_head.png"),
+                "mid": str(run_dir / f"{shot_id}_mid.png"),
+                "tail": str(run_dir / f"{shot_id}_tail.png"),
+            },
+            "outputs": {"clip": str(out)},
+        }
+        apply_kling_omni_hints_to_job(job_payload, shot=item)
+        jobs.append(job_payload)
 
         prev_item = item
         prev_shot_id = shot_id
@@ -1901,7 +2140,7 @@ def _build_video_clip_jobs(
     return jobs
 
 
-def _split_wan_auto_shots(
+def _split_auto_video_shots(
     *,
     storyboard: Any,
     jobs_by_shot: Dict[str, Dict[str, Any]],
@@ -1947,14 +2186,23 @@ def run_video(ctx: Any) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
 
     video_cfg = ctx.payload.get("video_config") if isinstance(ctx.payload.get("video_config"), dict) else {}
+    video_cfg = resolve_video_generation_controls(video_cfg)
+    ctx.payload["video_config"] = video_cfg
     image_cfg = ctx.payload.get("image_config") if isinstance(ctx.payload.get("image_config"), dict) else {}
     width, height, _ratio = resolve_frame_size(image_cfg)
     fps = normalize_video_fps(video_cfg.get("fps"), default=24)
-    engine = str(video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "ffmpeg_slideshow").strip().lower()
-    is_wan_i2v_engine = engine in {"wan_i2v", "i2v"}
-    is_wan_t2v_engine = engine in {"wan_t2v", "wan26_t2v", "t2v"}
-    is_wan_auto_engine = engine in {"wan_auto", "auto"}
-    bridge_enabled = bool(is_wan_i2v_engine or is_wan_auto_engine)
+    engine = normalize_dreamweaver_video_engine(
+        video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "ffmpeg_slideshow"
+    )
+    uses_i2v_engine = is_dreamweaver_i2v_engine(engine)
+    uses_t2v_engine = is_dreamweaver_t2v_engine(engine)
+    uses_auto_engine = is_dreamweaver_auto_engine(engine)
+    explicit_kling_omni = bool(
+        str(video_cfg.get("provider_mode") or "").strip().lower() == "kling_omni"
+        and bool(video_cfg.get("allow_kling_omni"))
+        and bool(video_cfg.get("enable_kling_video_provider"))
+    )
+    bridge_enabled = bool(explicit_kling_omni or uses_i2v_engine or uses_auto_engine)
     regen_set = _normalize_regenerate_shot_ids(ctx.payload.get("regenerate_shot_ids"))
     batch_id = _resolve_audio_batch_id(ctx.payload)
     if batch_id and not str(ctx.payload.get("batch_id") or "").strip():
@@ -1974,6 +2222,29 @@ def run_video(ctx: Any) -> None:
     )
 
     storyboard = ctx.payload.get("storyboard", [])
+    lib_assets = _library_assets_from_payload(ctx.payload) if isinstance(storyboard, list) and bool(video_cfg.get("allow_subject_bridge")) else []
+    if lib_assets:
+        auto_sync_subject_refs = bool(video_cfg.get("allow_subject_bridge_auto_sync"))
+        try:
+            for item in storyboard:
+                if not isinstance(item, dict):
+                    continue
+                asset_match = _match_library_assets_for_shot(shot=item, library_assets=lib_assets, max_character_refs=3)
+                character_assets = asset_match.get("character_assets") if isinstance(asset_match.get("character_assets"), list) else []
+                subject_refs = ensure_subject_refs_for_character_assets(
+                    character_assets,
+                    provider="kling",
+                    max_subject_refs=3,
+                    auto_sync=auto_sync_subject_refs,
+                )
+                if subject_refs:
+                    item["provider_subject_refs"] = subject_refs
+                elif isinstance(item.get("provider_subject_refs"), list):
+                    item.pop("provider_subject_refs", None)
+        except Exception as exc:  # noqa: BLE001
+            print(f"主体桥接预处理失败，已降级忽略: {exc}")
+        if auto_sync_subject_refs:
+            _apply_library_asset_updates_to_payload(ctx.payload.get("project_assets"), lib_assets)
     existing_clips_by_shot = _index_video_clips_by_shot(ctx.payload.get("video_clips"))
     existing_jobs_by_shot = _index_video_clip_jobs_by_shot(ctx.payload.get("video_clip_jobs"))
     requested_shots = set(regen_set)
@@ -2015,8 +2286,8 @@ def run_video(ctx: Any) -> None:
             if not dialogues:
                 continue
 
-            if is_wan_i2v_engine or is_wan_t2v_engine or is_wan_auto_engine:
-                target_duration_s = normalize_wan_i2v_duration_s(shot.get("duration_s"), default=5.0)
+            if uses_i2v_engine or uses_t2v_engine or uses_auto_engine:
+                target_duration_s = normalize_dreamweaver_video_duration_s(shot.get("duration_s"), default=5.0)
             else:
                 try:
                     target_duration_s = float(shot.get("duration_s") or 0.0)
@@ -2074,11 +2345,26 @@ def run_video(ctx: Any) -> None:
         bridge_enabled=bridge_enabled,
         camera_states=ctx.payload.get("camera_states"),
     )
-    video_jobs_by_shot = _index_video_clip_jobs_by_shot(ctx.payload.get("video_clip_jobs"))
-    auto_i2v_shots: set[str] = set()
-    auto_t2v_shots: set[str] = set()
-    if is_wan_auto_engine:
-        auto_i2v_shots, auto_t2v_shots = _split_wan_auto_shots(
+    trace_job_list = _build_video_clip_jobs(
+        storyboard=storyboard,
+        run_dir=run_dir,
+        existing_jobs_by_shot=_index_video_clip_jobs_by_shot(ctx.payload.get("video_clip_jobs")),
+        existing_clips_by_shot=_index_video_clips_by_shot(ctx.payload.get("video_clips")),
+        requested_shot_ids=requested_shots,
+        bridge_enabled=bridge_enabled,
+        camera_states=ctx.payload.get("camera_states"),
+    )
+    video_jobs_by_shot = _index_video_clip_jobs_by_shot(trace_job_list)
+    ctx.payload["video_provider_trace"] = build_video_provider_trace(
+        storyboard=storyboard,
+        jobs_by_shot=video_jobs_by_shot,
+        video_config=video_cfg,
+        requested_shot_ids=requested_shots or None,
+    )
+    auto_routed_i2v_shots: set[str] = set()
+    auto_routed_t2v_shots: set[str] = set()
+    if uses_auto_engine:
+        auto_routed_i2v_shots, auto_routed_t2v_shots = _split_auto_video_shots(
             storyboard=storyboard,
             jobs_by_shot=video_jobs_by_shot,
             run_dir=run_dir,
@@ -2088,8 +2374,16 @@ def run_video(ctx: Any) -> None:
 
     if require_confirmation and not _all_storyboard_shots_have_video(storyboard=storyboard, run_dir=run_dir):
         if requested_shots:
-            if is_wan_i2v_engine:
-                _run_wan_i2v(
+            if explicit_kling_omni:
+                _run_kling_omni(
+                    ctx,
+                    run_dir=run_dir,
+                    video_cfg=video_cfg,
+                    regenerate_shot_ids=regen_set,
+                    allowed_shot_ids=requested_shots,
+                )
+            elif uses_i2v_engine:
+                _run_i2v_video_generation(
                     ctx,
                     run_dir=run_dir,
                     video_cfg=video_cfg,
@@ -2099,8 +2393,8 @@ def run_video(ctx: Any) -> None:
                     allowed_shot_ids=requested_shots,
                     character_manager=character_manager,
                 )
-            elif is_wan_t2v_engine:
-                _run_wan_t2v(
+            elif uses_t2v_engine:
+                _run_t2v_video_generation(
                     ctx,
                     run_dir=run_dir,
                     video_cfg=video_cfg,
@@ -2110,9 +2404,9 @@ def run_video(ctx: Any) -> None:
                     regenerate_shot_ids=regen_set,
                     allowed_shot_ids=requested_shots,
                 )
-            elif is_wan_auto_engine:
-                if auto_t2v_shots:
-                    _run_wan_t2v(
+            elif uses_auto_engine:
+                if auto_routed_t2v_shots:
+                    _run_t2v_video_generation(
                         ctx,
                         run_dir=run_dir,
                         video_cfg=video_cfg,
@@ -2120,17 +2414,17 @@ def run_video(ctx: Any) -> None:
                         height=height,
                         fps=fps,
                         regenerate_shot_ids=regen_set,
-                        allowed_shot_ids=auto_t2v_shots,
+                        allowed_shot_ids=auto_routed_t2v_shots,
                     )
-                if auto_i2v_shots:
-                    _run_wan_i2v(
+                if auto_routed_i2v_shots:
+                    _run_i2v_video_generation(
                         ctx,
                         run_dir=run_dir,
                         video_cfg=video_cfg,
                         width=width,
                         height=height,
                         regenerate_shot_ids=regen_set,
-                        allowed_shot_ids=auto_i2v_shots,
+                        allowed_shot_ids=auto_routed_i2v_shots,
                         character_manager=character_manager,
                     )
             else:
@@ -2224,8 +2518,29 @@ def run_video(ctx: Any) -> None:
         ctx.payload["video_done"] = _all_storyboard_shots_have_video(storyboard=storyboard, run_dir=run_dir)
         return
 
-    if is_wan_i2v_engine:
-        _run_wan_i2v(
+    if explicit_kling_omni:
+        _run_kling_omni(
+            ctx,
+            run_dir=run_dir,
+            video_cfg=video_cfg,
+            regenerate_shot_ids=regen_set,
+            allowed_shot_ids=requested_shots or None,
+        )
+        _apply_sfx_to_clips(ctx=ctx, run_dir=run_dir, storyboard=storyboard)
+        ctx.payload["video_clip_jobs"] = _build_video_clip_jobs(
+            storyboard=storyboard,
+            run_dir=run_dir,
+            existing_jobs_by_shot=_index_video_clip_jobs_by_shot(ctx.payload.get("video_clip_jobs")),
+            existing_clips_by_shot=_index_video_clips_by_shot(ctx.payload.get("video_clips")),
+            requested_shot_ids=requested_shots,
+            bridge_enabled=True,
+            camera_states=ctx.payload.get("camera_states"),
+        )
+        ctx.payload["video_done"] = True
+        return
+
+    if uses_i2v_engine:
+        _run_i2v_video_generation(
             ctx,
             run_dir=run_dir,
             video_cfg=video_cfg,
@@ -2247,8 +2562,8 @@ def run_video(ctx: Any) -> None:
         ctx.payload["video_done"] = True
         return
 
-    if is_wan_t2v_engine:
-        _run_wan_t2v(
+    if uses_t2v_engine:
+        _run_t2v_video_generation(
             ctx,
             run_dir=run_dir,
             video_cfg=video_cfg,
@@ -2270,9 +2585,9 @@ def run_video(ctx: Any) -> None:
         ctx.payload["video_done"] = True
         return
 
-    if is_wan_auto_engine:
-        if auto_t2v_shots:
-            _run_wan_t2v(
+    if uses_auto_engine:
+        if auto_routed_t2v_shots:
+            _run_t2v_video_generation(
                 ctx,
                 run_dir=run_dir,
                 video_cfg=video_cfg,
@@ -2280,17 +2595,17 @@ def run_video(ctx: Any) -> None:
                 height=height,
                 fps=fps,
                 regenerate_shot_ids=regen_set,
-                allowed_shot_ids=auto_t2v_shots,
+                allowed_shot_ids=auto_routed_t2v_shots,
             )
-        if auto_i2v_shots:
-            _run_wan_i2v(
+        if auto_routed_i2v_shots:
+            _run_i2v_video_generation(
                 ctx,
                 run_dir=run_dir,
                 video_cfg=video_cfg,
                 width=width,
                 height=height,
                 regenerate_shot_ids=regen_set,
-                allowed_shot_ids=auto_i2v_shots,
+                allowed_shot_ids=auto_routed_i2v_shots,
                 character_manager=character_manager,
             )
         _apply_sfx_to_clips(ctx=ctx, run_dir=run_dir, storyboard=storyboard)

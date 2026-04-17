@@ -8,3 +8,5 @@ from .audiobook_tasks import (  # noqa: F401
 )
 
 from .dreamweaver_tasks import run_dreamweaver_task  # noqa: F401
+
+from .feedback_tasks import apply_feedback_to_profiles_task, collect_qc_feedback_task  # noqa: F401

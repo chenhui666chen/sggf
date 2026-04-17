@@ -103,7 +103,7 @@ def test_legacy_factory_qwen_image_edit_plus_generate_routes_to_registry_task(
     assert result.metadata == {"source": "registry"}
 
 
-def test_legacy_factory_wan_t2i_uses_registry_image_generation_path(
+def test_factory_wan2_6_t2i_uses_registry_image_generation_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from adapters import legacy_runtime_wrappers
@@ -130,7 +130,7 @@ def test_legacy_factory_wan_t2i_uses_registry_image_generation_path(
 
     monkeypatch.setattr(registry, "get_adapter", fake_get_adapter)
 
-    adapter = ModelAdapterFactory().get_adapter("wan_t2i")
+    adapter = ModelAdapterFactory().get_adapter("wan2.6-t2i")
     result = adapter.generate(
         prompt="hero portrait",
         negative_prompt="blurry",
@@ -196,7 +196,7 @@ def test_legacy_factory_wan_image_edit_preserves_old_adapter_shape(
     assert result.data["image_url"] == "https://example.com/wan-edit.png"
 
 
-def test_legacy_factory_wan_i2v_routes_to_unified_generate_video_helper(
+def test_factory_wan2_7_i2v_routes_to_unified_generate_video_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from adapters import adapter_helpers
@@ -220,7 +220,7 @@ def test_legacy_factory_wan_i2v_routes_to_unified_generate_video_helper(
 
     monkeypatch.setattr(adapter_helpers, "generate_video", fake_generate_video)
 
-    adapter = ModelAdapterFactory().get_adapter("wan_i2v")
+    adapter = ModelAdapterFactory().get_adapter("wan2.7-i2v")
     result = adapter.generate(
         image_path="head.png",
         prompt="animate the portrait",
@@ -235,7 +235,7 @@ def test_legacy_factory_wan_i2v_routes_to_unified_generate_video_helper(
         "prompt": "animate the portrait",
         "duration": 5.0,
         "image_path": "head.png",
-        "model_id": "wan2.6-i2v",
+        "model_id": "wan2.7-i2v",
         "use_fallback": False,
         "fps": 24,
         "motion_bucket_id": 96,
@@ -247,7 +247,7 @@ def test_legacy_factory_wan_i2v_routes_to_unified_generate_video_helper(
     assert result.metadata == {"source": "runtime"}
 
 
-def test_legacy_factory_wan_t2v_uses_registry_video_generation_path(
+def test_factory_wan2_7_t2v_uses_registry_video_generation_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from adapters import legacy_runtime_wrappers
@@ -262,7 +262,7 @@ def test_legacy_factory_wan_t2v_uses_registry_video_generation_path(
             return RegistryGenerationResult(
                 success=True,
                 task_id=task.task_id,
-                model_id="wan2.6-t2v",
+                model_id="wan2.7-t2v",
                 outputs=["https://example.com/generated.mp4"],
                 metadata={"source": "registry"},
             )
@@ -274,7 +274,7 @@ def test_legacy_factory_wan_t2v_uses_registry_video_generation_path(
 
     monkeypatch.setattr(registry, "get_adapter", fake_get_adapter)
 
-    adapter = ModelAdapterFactory().get_adapter("wan_t2v")
+    adapter = ModelAdapterFactory().get_adapter("wan2.7-t2v")
     result = adapter.generate(
         prompt="storm over the sea",
         negative_prompt="low quality",
@@ -288,7 +288,7 @@ def test_legacy_factory_wan_t2v_uses_registry_video_generation_path(
     )
 
     task = captured["task"]
-    assert captured["model_id"] == "wan2.6-t2v"
+    assert captured["model_id"] == "wan2.7-t2v"
     assert task.modality.value == "text_to_video"
     assert task.prompt == "storm over the sea"
     assert task.negative_prompt == "low quality"
@@ -345,7 +345,7 @@ def test_legacy_factory_qwen_multiperson_fusion_match_scene_uses_registry_edit_p
     assert result.data["image_url"] == "https://example.com/fused.png"
 
 
-def test_legacy_factory_wan_r2v_routes_to_unified_generate_video_helper(
+def test_factory_wan2_7_r2v_routes_to_unified_generate_video_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from adapters import adapter_helpers
@@ -369,7 +369,7 @@ def test_legacy_factory_wan_r2v_routes_to_unified_generate_video_helper(
 
     monkeypatch.setattr(adapter_helpers, "generate_video", fake_generate_video)
 
-    adapter = ModelAdapterFactory().get_adapter("wan_r2v")
+    adapter = ModelAdapterFactory().get_adapter("wan2.7-r2v")
     result = adapter.generate(
         reference_video_path="scene.mp4",
         prompt="keep the motion style",
@@ -382,7 +382,7 @@ def test_legacy_factory_wan_r2v_routes_to_unified_generate_video_helper(
         "prompt": "keep the motion style",
         "duration": 4.0,
         "video_path": "scene.mp4",
-        "model_id": "wan2.6-r2v",
+        "model_id": "wan2.7-r2v",
         "use_fallback": False,
         "fps": 24,
         "seed": 9,
@@ -492,17 +492,17 @@ def test_qwen3_tts_runtime_wrapper_normalizes_legacy_tts_parameters(
     assert captured["voice_params"]["volume"] == 40
 
 
-def test_normalize_model_id_supports_legacy_multimodal_aliases() -> None:
+def test_normalize_model_id_returns_current_multimodal_ids() -> None:
     from core.model_resolution import normalize_model_id
 
     from adapters.legacy_runtime_wrappers import has_runtime_wrapper
 
     assert normalize_model_id("qwen3_vl_plus") == "qwen3-vl-plus"
     assert normalize_model_id("qwen3_tts") == "qwen3-tts-flash"
-    assert normalize_model_id("wan_t2i") == "wan2.6-t2i"
-    assert normalize_model_id("wan_t2v") == "wan2.6-t2v"
-    assert normalize_model_id("wan_i2v") == "wan2.6-i2v"
+    assert normalize_model_id("wan2.6-t2i") == "wan2.6-t2i"
+    assert normalize_model_id("wan2.7-t2v") == "wan2.7-t2v"
+    assert normalize_model_id("wan2.7-i2v") == "wan2.7-i2v"
     assert normalize_model_id("qwen_multiperson_fusion") == "qwen-image-edit-plus"
     assert normalize_model_id("wan_image_edit") == "qwen-image-edit-plus"
-    assert has_runtime_wrapper("wan_t2i") is True
-    assert has_runtime_wrapper("wan_t2v") is True
+    assert has_runtime_wrapper("wan2.6-t2i") is True
+    assert has_runtime_wrapper("wan2.7-t2v") is True

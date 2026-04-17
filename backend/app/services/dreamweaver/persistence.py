@@ -663,6 +663,10 @@ def build_contract_from_payload(
         runtime_config["qc_config"] = payload["qc_config"]
     if isinstance(payload.get("video_config"), dict):
         runtime_config["video_config"] = payload["video_config"]
+    if isinstance(payload.get("preflight"), dict):
+        runtime_config["preflight"] = payload.get("preflight")
+    if isinstance(payload.get("video_provider_trace"), dict):
+        runtime_config["video_provider_trace"] = payload.get("video_provider_trace")
     if isinstance(payload.get("video_clip_jobs"), list):
         runtime_config["video_clip_jobs"] = payload.get("video_clip_jobs")
     if isinstance(payload.get("asset_library_config"), dict):

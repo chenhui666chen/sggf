@@ -43,10 +43,10 @@ from agents.image_edit_utils import (
     resolve_image_edit_ref_max_images,
 )
 from pipeline.media_presets import (
-    WAN_I2V_OUTPUT_FPS,
+    is_dreamweaver_generated_video_engine,
+    normalize_dreamweaver_video_engine,
     ensure_media_payload,
     normalize_frame_ratio,
-    normalize_wan_i2v_duration_s,
     resolve_frame_size,
 )
 from pipeline.artifacts_io import download_url_to_path as _download_url_to_path
@@ -1997,7 +1997,7 @@ def run_keyframes(ctx: Any) -> None:
     ensure_style_payload(ctx.payload)
     ensure_media_payload(ctx.payload)
 
-    adapter = "wan_t2i"
+    adapter = "wan2.6-t2i"
     run_dir = _ensure_run_dir(ctx)
 
     image_cfg = ctx.payload.get("image_config") if isinstance(ctx.payload.get("image_config"), dict) else {}
@@ -2595,7 +2595,7 @@ def run_keyframes(ctx: Any) -> None:
             if isinstance(anchor_shot_id, str) and anchor_shot_id.strip():
                 head_base_path = run_dir / f"{anchor_shot_id}_tail.png"
 
-            local_t2i = "wan_t2i"
+            local_t2i = "wan2.6-t2i"
 
             local_image_edit_adapters: Dict[str, Any] = {}
             if use_head_image_edit:
@@ -3340,13 +3340,13 @@ def run_midframes(ctx: Any) -> None:
     ensure_style_payload(ctx.payload)
     ensure_media_payload(ctx.payload)
 
-    adapter = "wan_t2i"
+    adapter = "wan2.6-t2i"
     run_dir = _ensure_run_dir(ctx)
 
     video_cfg = ctx.payload.get("video_config") if isinstance(ctx.payload.get("video_config"), dict) else {}
-    video_engine = str(video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "").strip().lower()
-    if video_engine in {"wan_i2v", "i2v", "wan_t2v", "wan26_t2v", "t2v", "wan_auto", "auto"}:
-        # Wan2.6 视频生成（I2V/T2V）不会用到 midframes；跳过以减少成本与耗时。
+    video_engine = normalize_dreamweaver_video_engine(video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "")
+    if is_dreamweaver_generated_video_engine(video_engine):
+        # Wan2.7 视频生成（I2V/T2V）不会用到 midframes；跳过以减少成本与耗时。
         ctx.payload["midframes"] = []
         return
 

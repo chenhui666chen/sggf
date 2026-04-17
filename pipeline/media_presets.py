@@ -23,13 +23,65 @@ SUPPORTED_FRAME_SIZES: Dict[str, Dict[str, Tuple[int, int]]] = {
 }
 
 DEFAULT_VIDEO_FPS = 24
+DREAMWEAVER_I2V_ENGINE = "wan2.7-i2v"
+DREAMWEAVER_T2V_ENGINE = "wan2.7-t2v"
+DREAMWEAVER_AUTO_ENGINE = "wan_auto"
+DREAMWEAVER_SLIDESHOW_ENGINE = "ffmpeg_slideshow"
 
-# Wan 2.6 I2V（图生视频）常见输出规格：
+# Wan 2.7 I2V（图生视频）常见输出规格：
 # - 分辨率：720P / 1080P（由输入首帧与服务侧约束共同决定）
 # - 时长：5s / 10s / 15s
 # - 输出：固定 30fps，MP4(H.264)
-WAN_I2V_SUPPORTED_DURATIONS_S = (5.0, 10.0, 15.0)
-WAN_I2V_OUTPUT_FPS = 30
+DREAMWEAVER_VIDEO_SUPPORTED_DURATIONS_S = (5.0, 10.0, 15.0)
+DREAMWEAVER_I2V_OUTPUT_FPS = 30
+
+
+def normalize_dreamweaver_video_engine(value: Any, *, default: str = "") -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        raw = str(default or "").strip().lower()
+    if not raw:
+        return ""
+
+    aliases = {
+        "wan_i2v": DREAMWEAVER_I2V_ENGINE,
+        "wan26_i2v": DREAMWEAVER_I2V_ENGINE,
+        "wan27_i2v": DREAMWEAVER_I2V_ENGINE,
+        "i2v": DREAMWEAVER_I2V_ENGINE,
+        DREAMWEAVER_I2V_ENGINE: DREAMWEAVER_I2V_ENGINE,
+        "wan_t2v": DREAMWEAVER_T2V_ENGINE,
+        "wan26_t2v": DREAMWEAVER_T2V_ENGINE,
+        "wan27_t2v": DREAMWEAVER_T2V_ENGINE,
+        "t2v": DREAMWEAVER_T2V_ENGINE,
+        DREAMWEAVER_T2V_ENGINE: DREAMWEAVER_T2V_ENGINE,
+        "wan_auto": DREAMWEAVER_AUTO_ENGINE,
+        "auto": DREAMWEAVER_AUTO_ENGINE,
+        DREAMWEAVER_AUTO_ENGINE: DREAMWEAVER_AUTO_ENGINE,
+        "slideshow": DREAMWEAVER_SLIDESHOW_ENGINE,
+        DREAMWEAVER_SLIDESHOW_ENGINE: DREAMWEAVER_SLIDESHOW_ENGINE,
+    }
+    return aliases.get(raw, raw)
+
+
+def is_dreamweaver_i2v_engine(value: Any) -> bool:
+    return normalize_dreamweaver_video_engine(value) == DREAMWEAVER_I2V_ENGINE
+
+
+def is_dreamweaver_t2v_engine(value: Any) -> bool:
+    return normalize_dreamweaver_video_engine(value) == DREAMWEAVER_T2V_ENGINE
+
+
+def is_dreamweaver_auto_engine(value: Any) -> bool:
+    return normalize_dreamweaver_video_engine(value) == DREAMWEAVER_AUTO_ENGINE
+
+
+def is_dreamweaver_generated_video_engine(value: Any) -> bool:
+    normalized = normalize_dreamweaver_video_engine(value)
+    return normalized in {
+        DREAMWEAVER_I2V_ENGINE,
+        DREAMWEAVER_T2V_ENGINE,
+        DREAMWEAVER_AUTO_ENGINE,
+    }
 
 
 def normalize_frame_ratio(ratio: Optional[str], *, default: str = DEFAULT_FRAME_RATIO) -> str:
@@ -80,7 +132,7 @@ def normalize_video_fps(value: Any, *, default: int = DEFAULT_VIDEO_FPS) -> int:
     return int(fps)
 
 
-def normalize_wan_i2v_duration_s(value: Any, *, default: float = 5.0) -> float:
+def normalize_dreamweaver_video_duration_s(value: Any, *, default: float = 5.0) -> float:
     """
     将任意输入时长归一化为 Wan I2V 支持的离散集合（5/10/15 秒）。
     """
@@ -92,7 +144,7 @@ def normalize_wan_i2v_duration_s(value: Any, *, default: float = 5.0) -> float:
     if duration <= 0:
         duration = float(default)
 
-    candidates = WAN_I2V_SUPPORTED_DURATIONS_S
+    candidates = DREAMWEAVER_VIDEO_SUPPORTED_DURATIONS_S
     picked = min(candidates, key=lambda x: abs(x - duration))
     return float(picked)
 
@@ -148,6 +200,9 @@ def ensure_media_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     video_cfg = payload.get("video_config") if isinstance(payload.get("video_config"), dict) else {}
     video_cfg["fps"] = normalize_video_fps(video_cfg.get("fps"), default=DEFAULT_VIDEO_FPS)
+    normalized_engine = normalize_dreamweaver_video_engine(video_cfg.get("engine"))
+    if normalized_engine:
+        video_cfg["engine"] = normalized_engine
     payload["video_config"] = video_cfg
 
     return payload

@@ -6,11 +6,14 @@ Smart Router - Intelligent model selection and routing.
 from __future__ import annotations
 
 import copy
+import logging
 import random
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from core.config import config
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from schemas.task_spec import TaskSpec
@@ -24,6 +27,8 @@ class RoutingResult:
     selected_model: "ModelSpec"
     fallback_models: List["ModelSpec"]
     score: float
+    base_score: float = 0.0
+    semantic_boost: float = 0.0
     reasons: List[str] = field(default_factory=list)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -31,6 +36,8 @@ class RoutingResult:
             "selected_model": self.selected_model.id,
             "fallback_models": [m.id for m in self.fallback_models],
             "score": self.score,
+            "base_score": self.base_score,
+            "semantic_boost": self.semantic_boost,
             "reasons": self.reasons,
         }
 
@@ -241,12 +248,24 @@ class LoadBalancer:
 class SmartRouter:
     """Smart router for model selection."""
     
-    def __init__(self, registry: "ModelRegistry" = None):
+    def __init__(self, registry: "ModelRegistry" = None, enable_semantic: bool = True):
         from adapters.registry import registry as default_registry
         self._registry = registry or default_registry
         self._filter = CapabilityFilter()
         self._scorer = ModelScorer()
         self._balancer = LoadBalancer()
+        self._enable_semantic = enable_semantic
+        self._semantic_matcher = None
+    
+    def _get_semantic_matcher(self):
+        if self._semantic_matcher is None and self._enable_semantic:
+            try:
+                from core.semantic_matcher import get_semantic_matcher
+                self._semantic_matcher = get_semantic_matcher()
+            except Exception as e:
+                logger.warning("Semantic matcher unavailable, disabling semantic boost: %s", e)
+                self._enable_semantic = False
+        return self._semantic_matcher
     
     def route(
         self,
@@ -272,8 +291,12 @@ class SmartRouter:
         perf_stats = self._registry.get_all_performance_stats()
         self._scorer = ModelScorer(perf_stats)
         
+        semantic_boost = self._compute_semantic_boost(task, candidates)
+        
+        base_scores = {model.id: self._scorer.score(task, model) for model in candidates}
+        
         scored = [
-            (model, self._scorer.score(task, model))
+            (model, base_scores[model.id] + semantic_boost.get(model.id, 0.0))
             for model in candidates
         ]
         scored.sort(key=lambda x: x[1], reverse=True)
@@ -289,13 +312,64 @@ class SmartRouter:
         
         self._balancer.record_usage(selected[0].id)
         selected_score = float(score_by_id.get(selected[0].id, 0.0))
+        selected_base = float(base_scores.get(selected[0].id, 0.0))
+        selected_boost = float(semantic_boost.get(selected[0].id, 0.0))
+        
+        reasons = [f"Selected based on quality/cost/latency balance"]
+        if semantic_boost:
+            reasons.append(f"Semantic boost applied to {len(semantic_boost)} models")
         
         return RoutingResult(
             selected_model=selected[0],
             fallback_models=selected[1:max_fallbacks + 1],
             score=selected_score,
-            reasons=[f"Selected based on quality/cost/latency balance"],
+            base_score=selected_base,
+            semantic_boost=selected_boost,
+            reasons=reasons,
         )
+    
+    def _compute_semantic_boost(
+        self,
+        task: "TaskSpec",
+        candidates: List["ModelSpec"],
+    ) -> Dict[str, float]:
+        if not self._enable_semantic:
+            return {}
+        
+        matcher = self._get_semantic_matcher()
+        if matcher is None:
+            return {}
+        
+        query_text = task.prompt or ""
+        if task.style:
+            query_text += " " + task.style
+        
+        if len(query_text.strip()) < 2:
+            return {}
+        
+        try:
+            semantic_results = matcher.match(
+                query_text,
+                style_hint=task.style,
+                top_k=len(candidates),
+            )
+        except Exception:
+            return {}
+        
+        if not semantic_results:
+            return {}
+        
+        max_score = max(r.combined_score for r in semantic_results)
+        if max_score <= 0:
+            return {}
+        
+        boost_map = {}
+        max_boost = getattr(config.router, 'SEMANTIC_MAX_BOOST', 0.15)
+        for result in semantic_results:
+            normalized = result.combined_score / max_score
+            boost_map[result.model_id] = normalized * max_boost
+        
+        return {mid: boost for mid, boost in boost_map.items() if mid in {m.id for m in candidates}}
     
     def route_by_strategy(
         self,

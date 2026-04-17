@@ -265,8 +265,8 @@ class QwenMultiPersonFusionRuntimeWrapper(_BaseImageEditRuntimeWrapper):
         )
 
 
-class Wan26T2VRuntimeWrapper(_BaseLegacyRuntimeWrapper):
-    TARGET_MODEL_ID = "wan2.6-t2v"
+class Wan27T2VRuntimeWrapper(_BaseLegacyRuntimeWrapper):
+    TARGET_MODEL_ID = "wan2.7-t2v"
 
     def generate(
         self,
@@ -302,8 +302,8 @@ class Wan26T2VRuntimeWrapper(_BaseLegacyRuntimeWrapper):
         return self._legacy_simple_result(result)
 
 
-class Wan26I2VRuntimeWrapper(_BaseLegacyRuntimeWrapper):
-    TARGET_MODEL_ID = "wan2.6-i2v"
+class Wan27I2VRuntimeWrapper(_BaseLegacyRuntimeWrapper):
+    TARGET_MODEL_ID = "wan2.7-i2v"
 
     def generate(
         self,
@@ -331,8 +331,8 @@ class Wan26I2VRuntimeWrapper(_BaseLegacyRuntimeWrapper):
         return self._legacy_simple_result(result)
 
 
-class Wan26R2VRuntimeWrapper(_BaseLegacyRuntimeWrapper):
-    TARGET_MODEL_ID = "wan2.6-r2v"
+class Wan27R2VRuntimeWrapper(_BaseLegacyRuntimeWrapper):
+    TARGET_MODEL_ID = "wan2.7-r2v"
 
     def generate(
         self,
@@ -397,28 +397,19 @@ class Qwen3TTSRuntimeWrapper(_BaseLegacyRuntimeWrapper):
 
 
 _RUNTIME_WRAPPER_CLASSES: Dict[str, Type[_BaseLegacyRuntimeWrapper]] = {
-    "wan26_t2i": Wan26T2IRuntimeWrapper,
-    "wan26_t2v": Wan26T2VRuntimeWrapper,
+    "wan2.6-t2i": Wan26T2IRuntimeWrapper,
+    "wan2.7-t2v": Wan27T2VRuntimeWrapper,
     "qwen3_vl_plus": Qwen3VLPlusRuntimeWrapper,
     "qwen3_tts": Qwen3TTSRuntimeWrapper,
     "qwen_image_edit_plus": QwenImageEditPlusRuntimeWrapper,
     "qwen_image_edit_max": QwenImageEditMaxRuntimeWrapper,
     "wan_image_edit": WanImageEditRuntimeWrapper,
     "qwen_multiperson_fusion": QwenMultiPersonFusionRuntimeWrapper,
-    "wan26_i2v": Wan26I2VRuntimeWrapper,
-    "wan26_r2v": Wan26R2VRuntimeWrapper,
+    "wan2.7-i2v": Wan27I2VRuntimeWrapper,
+    "wan2.7-r2v": Wan27R2VRuntimeWrapper,
 }
 
 _RUNTIME_WRAPPER_ALIASES: Dict[str, str] = {
-    "wan_t2i": "wan26_t2i",
-    "wan-t2i": "wan26_t2i",
-    "wan2.6-t2i": "wan26_t2i",
-    "wan_t2v": "wan26_t2v",
-    "wan-t2v": "wan26_t2v",
-    "wan_i2v": "wan26_i2v",
-    "wan-i2v": "wan26_i2v",
-    "wan_r2v": "wan26_r2v",
-    "wan-r2v": "wan26_r2v",
 }
 
 

@@ -183,7 +183,7 @@ profiles:
       - label: 图像生成入口
         value: media_runtime.generate_image(model_id="wan2.6-t2i", ...)
 
-  wan2.6-t2v:
+  wan2.7-t2v:
     role_summary: 当前模型是主力视频生成入口，适合短片段镜头、预告视频和受控叙事镜头生成。
     prompt_patterns:
       - title: 镜头脚本模板
@@ -191,7 +191,7 @@ profiles:
           主体 + 动作 + 镜头运动 + 场景 + 时长 + 画面风格 + 禁止项
     router_rules:
       - when: 检测到高质量短视频生成、镜头生成或叙事短片任务
-        action: 优先路由到 wan2.6-t2v
+        action: 优先路由到 wan2.7-t2v
         reason: 它是项目当前的视频主力模型。
       - when: 主链路超时或只需要快速预览
         action: 回退到 wan2.6-t2v-fast
@@ -204,7 +204,76 @@ profiles:
       - 镜头生成
     project_entrypoints:
       - label: 视频生成入口
-        value: media_runtime.generate_video(model_id="wan2.6-t2v", duration=5.0, ...)
+        value: media_runtime.generate_video(model_id="wan2.7-t2v", duration=5.0, ...)
+
+  wan2.7-i2v:
+    role_summary: 当前模型是图生视频主力入口，适合基于参考图生成角色动作、场景过渡和主体一致性视频。
+    prompt_patterns:
+      - title: 图生视频模板
+        template: |
+          参考图 + 主体动作 + 镜头运动 + 场景延续 + 时长 + 画面风格 + 禁止项
+      - title: 角色动作模板
+        template: |
+          角色参考图 + 动作描述 + 表情变化 + 镜头景别 + 连续性约束
+    router_rules:
+      - when: 检测到基于参考图的视频生成、角色动作视频或场景过渡任务
+        action: 优先路由到 wan2.7-i2v
+        reason: 它是项目当前的图生视频主力模型，首帧一致性最高。
+    best_practice_tips:
+      - 首帧参考图是角色与场景基准，保持人物身份、服装、发型一致。
+      - 生产环境建议默认 5 秒片段，稳定性更高。
+    tooling_badges:
+      - 图生视频
+      - 角色动作
+      - 首帧一致
+    project_entrypoints:
+      - label: 图生视频入口
+        value: media_runtime.generate_video(model_id="wan2.7-i2v", duration=5.0, ...)
+
+  wan2.7-r2v:
+    role_summary: 当前模型是参考图视频生成入口，适合基于多参考图生成风格一致的视频片段。
+    prompt_patterns:
+      - title: 参考图视频模板
+        template: |
+          参考图组 + 风格约束 + 主体描述 + 镜头运动 + 时长 + 禁止项
+    router_rules:
+      - when: 检测到多参考图视频生成、风格迁移视频或参考一致性视频任务
+        action: 优先路由到 wan2.7-r2v
+        reason: 它是项目当前的参考图视频模型，支持多参考图输入。
+    best_practice_tips:
+      - 建议提供 1-4 张参考图以增强风格和主体一致性。
+      - 生产环境建议默认 5 秒片段，稳定性更高。
+    tooling_badges:
+      - 参考图视频
+      - 风格迁移
+      - 多参考图
+    project_entrypoints:
+      - label: 参考图视频入口
+        value: media_runtime.generate_video(model_id="wan2.7-r2v", duration=5.0, ...)
+
+  wan2.7-videoedit:
+    role_summary: 当前模型是视频编辑入口，适合对已有视频进行风格修改、内容调整和局部重绘。
+    prompt_patterns:
+      - title: 视频编辑模板
+        template: |
+          源视频 + 编辑指令 + 目标风格 + 保留区域 + 修改区域 + 禁止项
+      - title: 风格修改模板
+        template: |
+          源视频 + 目标风格描述 + 风格强度 + 主体保留约束
+    router_rules:
+      - when: 检测到视频风格修改、内容调整或局部重绘任务
+        action: 优先路由到 wan2.7-videoedit
+        reason: 它是项目当前的视频编辑模型，支持视频到视频的编辑操作。
+    best_practice_tips:
+      - 编辑指令需要明确具体，避免模糊描述导致不可控修改。
+      - 建议指定保留区域以保护不需要修改的内容。
+    tooling_badges:
+      - 视频编辑
+      - 风格修改
+      - 局部重绘
+    project_entrypoints:
+      - label: 视频编辑入口
+        value: media_runtime.generate_video(model_id="wan2.7-videoedit", duration=5.0, ...)
 
   qwen3-tts-flash:
     role_summary: 当前模型是项目默认 TTS，适合大规模章节朗读、标准旁白和低成本批量语音合成。

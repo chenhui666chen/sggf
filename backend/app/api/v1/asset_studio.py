@@ -31,14 +31,15 @@ ASSET_STUDIO_OUTPUT_DIR = PROJECT_ROOT / "backend" / "data" / "asset_studio_outp
 
 IMAGE_GENERATION_MODELS = {"wan2.6-t2i"}
 IMAGE_EDIT_MODELS = {"qwen-image-edit-plus", "qwen-image-edit-max"}
-VIDEO_MODELS = {"wan2.6-t2v", "wan2.6-t2v-fast", "wan2.6-i2v", "wan2.6-r2v"}
+VIDEO_MODELS = {"wan2.7-t2v", "wan2.6-t2v-fast", "wan2.7-i2v", "wan2.7-r2v", "wan2.7-videoedit"}
 VISION_REVIEW_MODELS = {"qwen3-vl-plus"}
 AUDIO_MODELS = {"mureka-o1-instrumental", "kling-v1-text-to-audio"}
 VIDEO_DURATION_OPTIONS: dict[str, tuple[float, ...]] = {
-    "wan2.6-t2v": (3.0, 5.0, 10.0, 15.0),
+    "wan2.7-t2v": (3.0, 5.0, 10.0, 15.0),
     "wan2.6-t2v-fast": (3.0, 5.0),
-    "wan2.6-i2v": (3.0, 5.0, 10.0),
-    "wan2.6-r2v": (3.0, 5.0, 10.0, 15.0),
+    "wan2.7-i2v": (3.0, 5.0, 10.0),
+    "wan2.7-r2v": (3.0, 5.0, 10.0, 15.0),
+    "wan2.7-videoedit": (3.0, 5.0, 10.0),
 }
 AUDIO_DURATION_OPTIONS: dict[str, tuple[int, ...]] = {
     "music": (15, 30, 45, 60),
@@ -1225,7 +1226,7 @@ def generate_image_asset(
 def generate_video_asset(
     prompt: str = Form(...),
     negative_prompt: str = Form(default=""),
-    model_id: str = Form(default="wan2.6-t2v"),
+    model_id: str = Form(default="wan2.7-t2v"),
     width: int = Form(default=1280),
     height: int = Form(default=720),
     duration: float = Form(default=5.0),
@@ -1246,13 +1247,13 @@ def generate_video_asset(
         if reference_image and reference_image.filename
         else None
     )
-    resolved_model_id = model_id if model_id in VIDEO_MODELS else "wan2.6-t2v"
-    if reference_path and resolved_model_id not in {"wan2.6-i2v"}:
-        resolved_model_id = "wan2.6-i2v"
-    if resolved_model_id == "wan2.6-i2v" and not reference_path:
+    resolved_model_id = model_id if model_id in VIDEO_MODELS else "wan2.7-t2v"
+    if reference_path and resolved_model_id not in {"wan2.7-i2v"}:
+        resolved_model_id = "wan2.7-i2v"
+    if resolved_model_id == "wan2.7-i2v" and not reference_path:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="wan2.6-i2v 需要上传首帧参考图",
+            detail="wan2.7-i2v 需要上传首帧参考图",
         )
     resolved_width, resolved_height = _validate_dimensions_for_models(
         VIDEO_MODELS,
@@ -1286,7 +1287,7 @@ def generate_video_asset(
 @router.post("/motion", response_model=AssetStudioGenerateResponse)
 def generate_motion_asset(
     prompt: str = Form(...),
-    model_id: str = Form(default="wan2.6-i2v"),
+    model_id: str = Form(default="wan2.7-i2v"),
     width: int = Form(default=1280),
     height: int = Form(default=720),
     duration: float = Form(default=5.0),
@@ -1307,7 +1308,7 @@ def generate_motion_asset(
 
     seed_value = _parse_optional_int(seed)
     reference_path = _save_upload_file(reference_image, subdir="motion")
-    resolved_model_id = model_id if model_id in VIDEO_MODELS else "wan2.6-i2v"
+    resolved_model_id = model_id if model_id in VIDEO_MODELS else "wan2.7-i2v"
     resolved_width, resolved_height = _validate_dimensions_for_models(
         VIDEO_MODELS,
         width,

@@ -24,12 +24,12 @@ def test_asset_studio_video_duration_uses_runtime_union(monkeypatch, tmp_path) -
             {
                 "version": 1,
                 "entries": {
-                    "wan2.6-t2v": {
+                    "wan2.7-t2v": {
                         "task_constraints": {
                             "duration_values": [3.0, 5.0, 10.0, 15.0],
                         },
                     },
-                    "wan2.6-i2v": {
+                    "wan2.7-i2v": {
                         "task_constraints": {
                             "duration_values": [3.0, 5.0, 10.0],
                         },
@@ -43,7 +43,7 @@ def test_asset_studio_video_duration_uses_runtime_union(monkeypatch, tmp_path) -
     )
     monkeypatch.setenv("MODEL_CATALOG_RUNTIME_SNAPSHOT_PATH", str(snapshot_path))
 
-    assert _validate_video_duration("wan2.6-i2v", 15.0) == 15.0
+    assert _validate_video_duration("wan2.7-i2v", 15.0) == 15.0
 
 
 def test_asset_studio_video_duration_rejects_unsupported_value(monkeypatch, tmp_path) -> None:
@@ -53,7 +53,7 @@ def test_asset_studio_video_duration_rejects_unsupported_value(monkeypatch, tmp_
             {
                 "version": 1,
                 "entries": {
-                    "wan2.6-t2v": {
+                    "wan2.7-t2v": {
                         "task_constraints": {
                             "duration_values": [3.0, 5.0, 10.0, 15.0],
                         },
@@ -68,7 +68,7 @@ def test_asset_studio_video_duration_rejects_unsupported_value(monkeypatch, tmp_
     monkeypatch.setenv("MODEL_CATALOG_RUNTIME_SNAPSHOT_PATH", str(snapshot_path))
 
     with pytest.raises(HTTPException) as exc_info:
-        _validate_video_duration("wan2.6-t2v", 8.0)
+        _validate_video_duration("wan2.7-t2v", 8.0)
 
     assert exc_info.value.status_code == 400
     assert "3 秒 / 5 秒 / 10 秒 / 15 秒" in str(exc_info.value.detail)
@@ -81,7 +81,7 @@ def test_asset_studio_dimensions_use_runtime_union(monkeypatch, tmp_path) -> Non
             {
                 "version": 1,
                 "entries": {
-                    "wan2.6-t2v": {
+                    "wan2.7-t2v": {
                         "task_constraints": {
                             "ratio_values": ["16:9", "9:16", "1:1"],
                             "min_width": 480,
@@ -90,7 +90,7 @@ def test_asset_studio_dimensions_use_runtime_union(monkeypatch, tmp_path) -> Non
                             "max_height": 1920,
                         },
                     },
-                    "wan2.6-i2v": {
+                    "wan2.7-i2v": {
                         "task_constraints": {
                             "ratio_values": ["16:9"],
                             "min_width": 480,
@@ -108,7 +108,7 @@ def test_asset_studio_dimensions_use_runtime_union(monkeypatch, tmp_path) -> Non
     )
     monkeypatch.setenv("MODEL_CATALOG_RUNTIME_SNAPSHOT_PATH", str(snapshot_path))
 
-    assert _validate_dimensions_for_models({"wan2.6-t2v", "wan2.6-i2v"}, 1080, 1920, request_label="视频") == (1080, 1920)
+    assert _validate_dimensions_for_models({"wan2.7-t2v", "wan2.7-i2v"}, 1080, 1920, request_label="视频") == (1080, 1920)
 
 
 def test_asset_studio_dimensions_reject_unsupported_ratio(monkeypatch, tmp_path) -> None:
@@ -118,7 +118,7 @@ def test_asset_studio_dimensions_reject_unsupported_ratio(monkeypatch, tmp_path)
             {
                 "version": 1,
                 "entries": {
-                    "wan2.6-t2v": {
+                    "wan2.7-t2v": {
                         "task_constraints": {
                             "ratio_values": ["16:9", "9:16", "1:1"],
                             "min_width": 480,
@@ -137,7 +137,7 @@ def test_asset_studio_dimensions_reject_unsupported_ratio(monkeypatch, tmp_path)
     monkeypatch.setenv("MODEL_CATALOG_RUNTIME_SNAPSHOT_PATH", str(snapshot_path))
 
     with pytest.raises(HTTPException) as exc_info:
-        _validate_dimensions_for_models({"wan2.6-t2v"}, 1536, 2048, request_label="视频")
+        _validate_dimensions_for_models({"wan2.7-t2v"}, 1536, 2048, request_label="视频")
 
     assert exc_info.value.status_code == 400
     assert "1536x2048（3:4）" in str(exc_info.value.detail)

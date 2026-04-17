@@ -114,8 +114,24 @@ models:
       - text-to-image
       - alibaba
       - chinese
+      - realistic
+      - anime
+      - chinese_ink
+      - oil_painting
+      - watercolor
+      - cyberpunk
+      - fantasy
+      - 3d_render
+      - comic
+      - sketch
+      - cinematic
+      - concept_art
+      - portrait
+      - landscape
+      - book_cover
+      - storyboard
 
-  - id: wan2.6-t2v
+  - id: wan2.7-t2v
     name: Wan 2.6 Text-to-Video
     provider: alibaba
     version: v2.6
@@ -210,7 +226,7 @@ models:
 
     fallback_strategies:
       - trigger_condition: content_safety
-        fallback_model_id: wan2.6-t2v-safe
+        fallback_model_id: wan2.7-t2v-safe
         priority: 1
       - trigger_condition: timeout
         fallback_model_id: wan2.6-t2v-fast
@@ -244,6 +260,15 @@ models:
       - text-to-video
       - alibaba
       - chinese
+      - realistic
+      - cinematic
+      - anime
+      - cyberpunk
+      - fantasy
+      - 3d_render
+      - short_video
+      - film
+      - animation
 
     detailed_specs:
       video_generation:
@@ -251,7 +276,7 @@ models:
           description: "万相文生视频模型，支持多模态输入（文本/图像/音频），可生成最长15秒、1080P视频"
           key_features:
             - "多模态输入（文本/图像/音频）"
-            - "多镜头叙事（wan2.6专属）"
+            - "多镜头叙事（wan2.7专属）"
             - "声画同步（wan2.5+支持）"
             - "智能改写prompt"
             - "水印添加"
@@ -306,7 +331,7 @@ models:
           - id: "multi_shot"
             name: "多镜头叙事"
             description: "支持生成包含多个镜头的视频，在镜头切换的同时保持主体一致"
-            version_support: "wan2.6+"
+            version_support: "wan2.7+"
             usage: "在提示词中按时间分段描述每个镜头"
           - id: "audio_sync"
             name: "声画同步"
@@ -501,7 +526,7 @@ models:
                 from core.unified_media_runtime import media_runtime
                 
                 result = media_runtime.generate_video(
-                    model_id="wan2.6-t2v",
+                    model_id="wan2.7-t2v",
                     prompt="一位少女在森林中奔跑，镜头跟随",
                     duration=5,
                     resolution="1080P"
@@ -510,7 +535,7 @@ models:
             - name: "多镜头叙事视频"
               code: |
                 result = media_runtime.generate_video(
-                    model_id="wan2.6-t2v",
+                    model_id="wan2.7-t2v",
                     prompt="""
                     一段紧张刺激的侦探追查故事。
                     第 1 个镜头 [0-3 秒] 全景：雨夜的纽约街头，侦探快步行走。
@@ -524,7 +549,7 @@ models:
             - name: "带参考图的视频生成"
               code: |
                 result = media_runtime.generate_video(
-                    model_id="wan2.6-t2v",
+                    model_id="wan2.7-t2v",
                     prompt="角色在城市场景中行走，镜头缓慢推进",
                     reference_image="character.png",
                     duration=5,
@@ -534,7 +559,7 @@ models:
             - name: "带音频的声画同步视频"
               code: |
                 result = media_runtime.generate_video(
-                    model_id="wan2.6-t2v",
+                    model_id="wan2.7-t2v",
                     prompt="角色在森林中奔跑，脚步声与背景音乐同步",
                     audio="background_music.mp3",
                     duration=10
@@ -567,7 +592,7 @@ models:
       - 快速预览片段
       - 早期分镜验证
     limitations:
-      - 画面质量低于 wan2.6-t2v
+      - 画面质量低于 wan2.7-t2v
       - 更适合较短时长的视频片段
     integration_notes:
       - 更适合作为降级目标，而不是首选视频生成模型
@@ -581,8 +606,10 @@ models:
       - text-to-video
       - alibaba
       - fast
+      - short_video
+      - storyboard
 
-  - id: wan2.6-i2v
+  - id: wan2.7-i2v
     name: Wan 2.6 Image-to-Video
     provider: alibaba
     version: v2.6
@@ -669,10 +696,10 @@ models:
 
     fallback_strategies:
       - trigger_condition: content_safety
-        fallback_model_id: wan2.6-i2v-safe
+        fallback_model_id: wan2.7-i2v-safe
         priority: 1
       - trigger_condition: timeout
-        fallback_model_id: wan2.6-i2v-fast
+        fallback_model_id: wan2.7-i2v-fast
         param_adjustments:
           duration: 3.0
         priority: 2
@@ -703,6 +730,11 @@ models:
       - image-to-video
       - alibaba
       - chinese
+      - realistic
+      - cinematic
+      - anime
+      - short_video
+      - animation
 
     detailed_specs:
       video_generation:
@@ -711,7 +743,7 @@ models:
           input_required: "reference_image"
           key_features:
             - "静态图动画化"
-            - "多镜头叙事（wan2.6专属）"
+            - "多镜头叙事（wan2.7专属）"
             - "声画同步（wan2.5+支持）"
             - "保持原图风格和主体"
         
@@ -788,7 +820,7 @@ models:
           - id: "multi_shot"
             name: "多镜头叙事"
             description: "支持生成包含多个镜头的视频，保持主体一致"
-            version_support: "wan2.6+"
+            version_support: "wan2.7+"
           - id: "audio_sync"
             name: "声画同步"
             description: "支持自动配音或传入自定义音频"
@@ -873,7 +905,7 @@ models:
                 from core.unified_media_runtime import media_runtime
                 
                 result = media_runtime.generate_video(
-                    model_id="wan2.6-i2v",
+                    model_id="wan2.7-i2v",
                     prompt="角色开始微笑，轻微点头，头发随风飘动",
                     reference_image="character.png",
                     duration=5,
@@ -883,7 +915,7 @@ models:
             - name: "带镜头运动的图生视频"
               code: |
                 result = media_runtime.generate_video(
-                    model_id="wan2.6-i2v",
+                    model_id="wan2.7-i2v",
                     prompt="镜头缓慢推进，角色保持微笑，背景中的树叶轻轻摇动",
                     reference_image="scene.png",
                     duration=5,
@@ -894,13 +926,13 @@ models:
             - name: "场景动画化"
               code: |
                 result = media_runtime.generate_video(
-                    model_id="wan2.6-i2v",
+                    model_id="wan2.7-i2v",
                     prompt="水面泛起涟漪，云朵缓慢移动，光线变化",
                     reference_image="landscape.png",
                     duration=8
                 )
 
-  - id: wan2.6-r2v
+  - id: wan2.7-r2v
     name: Wan 2.6 Reference-to-Video
     provider: alibaba
     version: v2.6
@@ -1006,7 +1038,7 @@ models:
 
     fallback_strategies:
       - trigger_condition: content_safety
-        fallback_model_id: wan2.6-r2v-safe
+        fallback_model_id: wan2.7-r2v-safe
         priority: 1
       - trigger_condition: timeout
         fallback_model_id: wan2.6-t2v-fast
@@ -1041,6 +1073,10 @@ models:
       - alibaba
       - chinese
       - premium
+      - realistic
+      - cinematic
+      - short_video
+      - film
 
     detailed_specs:
       video_generation:
@@ -1252,7 +1288,7 @@ models:
                 from core.unified_media_runtime import media_runtime
                 
                 result = media_runtime.generate_video(
-                    model_id="wan2.6-r2v",
+                    model_id="wan2.7-r2v",
                     prompt="角色在森林中奔跑，镜头跟随",
                     reference_images=[
                         {"url": "character.png", "weight": 0.9},
@@ -1265,7 +1301,7 @@ models:
             - name: "首尾帧动画"
               code: |
                 result = media_runtime.generate_video(
-                    model_id="wan2.6-r2v",
+                    model_id="wan2.7-r2v",
                     prompt="角色从站立姿势平滑过渡到坐下姿势",
                     first_frame="standing_pose.jpg",
                     last_frame="sitting_pose.jpg",
@@ -1275,7 +1311,7 @@ models:
             - name: "多参考输入"
               code: |
                 result = media_runtime.generate_video(
-                    model_id="wan2.6-r2v",
+                    model_id="wan2.7-r2v",
                     prompt="使用参考风格，生成角色在城市场景中行走的镜头",
                     reference_images=[
                         {"url": "character.png", "weight": 0.9, "type": "character_reference"},
@@ -1304,6 +1340,74 @@ models:
               - "首尾帧的主体应相同"
               - "首尾帧的光线条件应相似"
               - "提示词应描述过渡动作"
+
+  - id: wan2.7-videoedit
+    name: Wan 2.7 Video Edit
+    provider: alibaba
+    version: v2.7
+    status: active
+
+    modality:
+      - video_to_video
+      - video_edit
+
+    capabilities:
+      - name: reference_videos
+        support_level: native
+        score: 0.9
+        description: 支持参考视频输入进行编辑
+      - name: reference_images
+        support_level: native
+        score: 0.85
+        description: 支持参考图输入辅助编辑
+      - name: camera_control
+        support_level: native
+        score: 0.8
+        description: 支持镜头运动控制
+      - name: motion_control
+        support_level: native
+        score: 0.8
+        description: 支持运动幅度控制
+      - name: negative_prompt
+        support_level: native
+        description: 支持负向提示词
+      - name: seed_control
+        support_level: native
+        description: 支持通过种子控制结果复现
+
+    constraints:
+      duration:
+        - 3.0
+        - 5.0
+        - 10.0
+      ratios:
+        - "16:9"
+        - "9:16"
+        - "1:1"
+      min_width: 480
+      max_width: 1920
+      min_height: 480
+      max_height: 1920
+
+    quality_metrics:
+      overall_score: 8.3
+
+    avg_latency_seconds: 50.0
+    summary: Wan 2.7 视频编辑模型，支持基于参考视频和图像的视频编辑与风格迁移，适合视频后期处理和风格调整。
+    recommended_scenarios:
+      - 视频风格迁移
+      - 视频后期编辑
+      - 镜头风格调整
+      - 视频内容修改
+    limitations:
+      - 编辑效果受原始视频质量影响
+      - 复杂场景编辑可能产生伪影
+    tags:
+      - video
+      - video-edit
+      - alibaba
+      - film
+      - short_video
 
   - id: qwen3-vl-plus
     name: Qwen3-VL-Plus
@@ -1357,6 +1461,9 @@ models:
       - vision
       - multimodal
       - alibaba
+      - concept_art
+      - portrait
+      - product
 
   - id: qwen-image-edit-plus
     name: Qwen-Image-Edit-Plus
@@ -1420,6 +1527,10 @@ models:
       - image
       - edit
       - alibaba
+      - realistic
+      - portrait
+      - product
+      - social_media
 
     detailed_specs:
       image_editing:
@@ -1608,6 +1719,9 @@ models:
       - edit
       - alibaba
       - quality
+      - realistic
+      - portrait
+      - product
 
   - id: qwen3-tts-flash
     name: Qwen3-TTS-Flash
@@ -1667,6 +1781,8 @@ models:
       - tts
       - alibaba
       - audiobook
+      - film
+      - short_video
 
     detailed_specs:
       voice_synthesis:
@@ -1837,6 +1953,8 @@ models:
       - voice-clone
       - alibaba
       - premium
+      - audiobook
+      - film
 
     detailed_specs:
       voice_synthesis:
@@ -2052,6 +2170,8 @@ models:
       - instrumental
       - asset-studio
       - kunlun
+      - film
+      - short_video
 
     task_types:
       - asset_music
@@ -2279,6 +2399,7 @@ models:
       - kling
       - kuaishou
       - asset-studio
+      - film
 
     task_types:
       - asset_sfx
@@ -2429,6 +2550,7 @@ models:
       - kling
       - kuaishou
       - research
+      - film
 
     task_types:
       - asset_audio
@@ -2475,6 +2597,9 @@ models:
       - text-to-video
       - kuaishou
       - chinese
+      - realistic
+      - cinematic
+      - short_video
 
 routing:
   default_strategy: balanced

@@ -191,12 +191,15 @@ def library_assets_from_payload(payload: Any) -> List[Dict[str, Any]]:
 
         assets.append(
             {
+                "asset_id": item.get("id"),
                 "role": role,
                 "entity_type": entity_type,
                 "entity_id": entity_id,
                 "entity_name": name or role,
                 "descriptor": descriptor,
                 "view": view,
+                "uri": uri,
+                "provider_refs": dict(meta.get("provider_refs")) if isinstance(meta.get("provider_refs"), dict) else {},
                 "path": path,
                 "desc": label,
             }

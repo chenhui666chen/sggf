@@ -16,6 +16,7 @@ from .audiobook_task import AudiobookTask
 from .dreamweaver import DreamweaverProject, DreamweaverEpisode, DreamweaverShot, DreamweaverAsset, DreamweaverRunEvent
 from .model_catalog import ModelCatalogEntry, ModelCatalogSource
 from .user_asset_record import UserAssetRecord
+from .generation_feedback import GenerationFeedback
 
 __all__ = [
     "User",
@@ -51,4 +52,5 @@ __all__ = [
     "ModelCatalogEntry",
     "ModelCatalogSource",
     "UserAssetRecord",
+    "GenerationFeedback",
 ]

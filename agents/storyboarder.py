@@ -9,7 +9,18 @@ from typing import Any, Dict, List, Optional, Tuple
 from agents.camera_states import build_camera_states
 from agents.camera_tree import build_camera_tree, build_camera_tree_llm
 from agents.llm_client import chat_completions, env_flag, extract_json_object, pick_model, llm_stream_context
-from pipeline.media_presets import ensure_media_payload, normalize_frame_ratio, normalize_wan_i2v_duration_s
+from pipeline.media_presets import (
+    DREAMWEAVER_AUTO_ENGINE,
+    DREAMWEAVER_I2V_ENGINE,
+    DREAMWEAVER_T2V_ENGINE,
+    ensure_media_payload,
+    is_dreamweaver_auto_engine,
+    is_dreamweaver_i2v_engine,
+    is_dreamweaver_t2v_engine,
+    normalize_dreamweaver_video_duration_s,
+    normalize_dreamweaver_video_engine,
+    normalize_frame_ratio,
+)
 from pipeline.style_presets import ensure_style_payload
 
 
@@ -1360,7 +1371,7 @@ def _auto_storyboard_targets(
     *,
     source_text: str,
     quality_mode: str,
-    is_wan_i2v: bool,
+    uses_video_containers: bool,
     engine_label: str,
     min_shot_s: float,
     max_shot_s: float,
@@ -1379,13 +1390,13 @@ def _auto_storyboard_targets(
 
     target_total_s = _auto_target_total_s(source_text=source_text, quality_mode=quality_mode)
     preferred_shot_s = 4.0
-    if is_wan_i2v:
+    if uses_video_containers:
         # 一致性优先：尽量使用更长的单段视频容器（5/10/15秒离散），减少跨片段漂移。
         prefer = _env_float(
             "DREAMWEAVER_WAN_VIDEO_PREFERRED_CONTAINER_S",
             _env_float("DREAMWEAVER_WAN_I2V_PREFERRED_CONTAINER_S", 15.0),
         )
-        preferred_shot_s = normalize_wan_i2v_duration_s(prefer, default=15.0)
+        preferred_shot_s = normalize_dreamweaver_video_duration_s(prefer, default=15.0)
     else:
         preferred_shot_s = 4.0
     if preferred_shot_s <= 0.0:
@@ -1412,7 +1423,7 @@ def _auto_storyboard_targets(
         "shot_cap": int(max(1, shot_cap)),
         "min_shot_s": float(min_shot_s),
         "max_shot_s": float(max_shot_s),
-        "engine": str(engine_label or ("wan_i2v" if is_wan_i2v else "slideshow")).strip().lower() or "slideshow",
+        "engine": str(engine_label or (DREAMWEAVER_I2V_ENGINE if uses_video_containers else "slideshow")).strip().lower() or "slideshow",
     }
 
 
@@ -1438,7 +1449,7 @@ def _rebalance_storyboard_total_duration(
     target_total_s: Optional[float],
     min_s: float,
     max_s: float,
-    is_wan_i2v: bool,
+    uses_video_containers: bool,
     engine_label: str,
     tolerance: float = 0.15,
 ) -> Dict[str, Any]:
@@ -1466,7 +1477,7 @@ def _rebalance_storyboard_total_duration(
 
     if before < low:
         delta = target - before
-        if is_wan_i2v:
+        if uses_video_containers:
             steps = [5.0, 10.0, 15.0]
             idxs = sorted(range(len(storyboard)), key=lambda i: _weight(storyboard[i]) if isinstance(storyboard[i], dict) else 0, reverse=True)
             for i in idxs:
@@ -1482,7 +1493,7 @@ def _rebalance_storyboard_total_duration(
                 if cur <= 0.0:
                     cur = 5.0
                 if cur not in steps:
-                    cur = normalize_wan_i2v_duration_s(cur, default=5.0)
+                    cur = normalize_dreamweaver_video_duration_s(cur, default=5.0)
                 pos = steps.index(cur) if cur in steps else 0
                 if pos >= len(steps) - 1:
                     continue
@@ -1517,7 +1528,7 @@ def _rebalance_storyboard_total_duration(
 
     if before > high:
         delta = before - target
-        if is_wan_i2v:
+        if uses_video_containers:
             # 一致性优先：默认不做“缩短总时长”的回压，避免把 15s 容器又压回 10/5。
             # 若需要成本控制，可显式开启该开关。
             if not env_flag("DREAMWEAVER_WAN_I2V_REBALANCE_ALLOW_SHRINK", default=False):
@@ -1531,7 +1542,7 @@ def _rebalance_storyboard_total_duration(
                     "before_total_s": before,
                     "after_total_s": after,
                     "tolerance": tol,
-                    "mode": str(engine_label or "wan_i2v"),
+                    "mode": str(engine_label or DREAMWEAVER_I2V_ENGINE),
                     "note": "skip_shrink",
                 }
             steps = [5.0, 10.0, 15.0]
@@ -1549,7 +1560,7 @@ def _rebalance_storyboard_total_duration(
                 if cur <= 0.0:
                     cur = 5.0
                 if cur not in steps:
-                    cur = normalize_wan_i2v_duration_s(cur, default=5.0)
+                    cur = normalize_dreamweaver_video_duration_s(cur, default=5.0)
                 pos = steps.index(cur) if cur in steps else 0
                 if pos <= 0:
                     continue
@@ -1590,7 +1601,7 @@ def _rebalance_storyboard_total_duration(
         "before_total_s": before,
         "after_total_s": after,
         "tolerance": tol,
-        "mode": str(engine_label or ("wan_i2v" if is_wan_i2v else "continuous")),
+        "mode": str(engine_label or (DREAMWEAVER_I2V_ENGINE if uses_video_containers else "continuous")),
     }
 
 
@@ -1753,7 +1764,7 @@ def _safe_float(value: Any) -> Optional[float]:
         return None
 
 
-def _normalize_wan_i2v_subshots(subshots: Any, *, duration_s: float) -> List[Dict[str, Any]]:
+def _normalize_video_subshots(subshots: Any, *, duration_s: float) -> List[Dict[str, Any]]:
     """
     归一化 Wan I2V 的容器内子分镜时间轴。
 
@@ -1856,11 +1867,11 @@ def _normalize_wan_i2v_subshots(subshots: Any, *, duration_s: float) -> List[Dic
     return normalized
 
 
-def _fallback_wan_i2v_subshots(*, duration_s: float, ff_desc: str, lf_desc: str, visual_desc: str) -> List[Dict[str, Any]]:
+def _fallback_video_subshots(*, duration_s: float, ff_desc: str, lf_desc: str, visual_desc: str) -> List[Dict[str, Any]]:
     """
     LLM 未输出 subshots 时的保底分解策略：保证时间戳可用，但不替代 LLM 的真实分镜设计。
     """
-    duration = normalize_wan_i2v_duration_s(duration_s, default=15.0)
+    duration = normalize_dreamweaver_video_duration_s(duration_s, default=15.0)
     if duration == 5.0:
         bins = [(0.0, 3.0), (3.0, 5.0)]
         types = ["wide_shot", "close_up"]
@@ -1896,17 +1907,17 @@ def _fallback_wan_i2v_subshots(*, duration_s: float, ff_desc: str, lf_desc: str,
     return out
 
 
-def _ensure_wan_i2v_subshots_for_storyboard(storyboard: Any) -> None:
+def _ensure_video_subshots_for_storyboard(storyboard: Any) -> None:
     if not isinstance(storyboard, list):
         return
     for item in storyboard:
         if not isinstance(item, dict):
             continue
-        duration = normalize_wan_i2v_duration_s(item.get("duration_s"), default=15.0)
+        duration = normalize_dreamweaver_video_duration_s(item.get("duration_s"), default=15.0)
         item["duration_s"] = float(duration)
-        subshots = _normalize_wan_i2v_subshots(item.get("subshots"), duration_s=float(duration))
+        subshots = _normalize_video_subshots(item.get("subshots"), duration_s=float(duration))
         if not subshots:
-            subshots = _fallback_wan_i2v_subshots(
+            subshots = _fallback_video_subshots(
                 duration_s=float(duration),
                 ff_desc=str(item.get("ff_desc") or ""),
                 lf_desc=str(item.get("lf_desc") or ""),
@@ -1993,7 +2004,7 @@ def _normalize_beats_count(beats: List[str], *, min_n: int, max_n: int) -> List[
     return items
 
 
-def _estimate_wan_i2v_subshot_weight(text: str) -> float:
+def _estimate_video_subshot_weight(text: str) -> float:
     s = str(text or "").strip()
     if not s:
         return 1.0
@@ -2069,8 +2080,8 @@ def _infer_subshot_movement(text: str, *, index: int, total: int) -> str:
     return "static"
 
 
-def _plan_wan_i2v_subshots_from_beats(*, duration_s: float, beats: List[str]) -> List[Dict[str, Any]]:
-    duration = int(normalize_wan_i2v_duration_s(duration_s, default=15.0))
+def _plan_video_subshots_from_beats(*, duration_s: float, beats: List[str]) -> List[Dict[str, Any]]:
+    duration = int(normalize_dreamweaver_video_duration_s(duration_s, default=15.0))
     if duration not in {5, 10, 15}:
         duration = 15
 
@@ -2093,7 +2104,7 @@ def _plan_wan_i2v_subshots_from_beats(*, duration_s: float, beats: List[str]) ->
         return []
 
     n = len(normalized_beats)
-    weights = [_estimate_wan_i2v_subshot_weight(b) for b in normalized_beats]
+    weights = [_estimate_video_subshot_weight(b) for b in normalized_beats]
     min_per = 2
     max_per = 5 if duration != 5 else 3
     # 若段数较少，允许更长停留以减少“空洞时间”
@@ -2138,7 +2149,7 @@ def _plan_wan_i2v_subshots_from_beats(*, duration_s: float, beats: List[str]) ->
     return subshots
 
 
-def _pack_wan_i2v_containers_from_segments(
+def _pack_video_containers_from_segments(
     segments: List[str],
     *,
     entities: Any,
@@ -2149,7 +2160,7 @@ def _pack_wan_i2v_containers_from_segments(
     将“节拍级 segments”打包成更少的 Wan I2V 容器（偏向 15s），并为每个容器规划 subshots。
     """
     cap = int(max(1, max_containers))
-    prefer = normalize_wan_i2v_duration_s(prefer_container_s, default=15.0)
+    prefer = normalize_dreamweaver_video_duration_s(prefer_container_s, default=15.0)
     prefer_int = int(prefer)
 
     important_chars: set[str] = set()
@@ -2229,9 +2240,9 @@ def _pack_wan_i2v_containers_from_segments(
         if prefer_int in {5, 10}:
             duration = min(int(duration), prefer_int)
 
-        subshots = _plan_wan_i2v_subshots_from_beats(duration_s=float(duration), beats=current_beats)
+        subshots = _plan_video_subshots_from_beats(duration_s=float(duration), beats=current_beats)
         if not subshots:
-            subshots = _fallback_wan_i2v_subshots(
+            subshots = _fallback_video_subshots(
                 duration_s=float(duration),
                 ff_desc="",
                 lf_desc="",
@@ -2298,7 +2309,7 @@ def _pack_wan_i2v_containers_from_segments(
             merged_beats.extend([b for b in (c.get("beats") or []) if isinstance(b, str)])
         last["beats"] = merged_beats
         last["merged_text"] = "\n".join(merged_beats).strip()
-        last["subshots"] = _plan_wan_i2v_subshots_from_beats(duration_s=float(last.get("duration_s") or 15.0), beats=merged_beats)
+        last["subshots"] = _plan_video_subshots_from_beats(duration_s=float(last.get("duration_s") or 15.0), beats=merged_beats)
         containers = tail + [last]
 
     return containers
@@ -2519,7 +2530,7 @@ def _build_rule_storyboard(
     entities: Any,
     max_segments: int,
     min_segments: int = 0,
-    is_wan_i2v: bool = False,
+    uses_video_containers: bool = False,
 ) -> List[Dict[str, Any]]:
     raw_segments = _split_into_segments(source_text, max_segments=max_segments, min_segments=min_segments)
     if not raw_segments:
@@ -2532,7 +2543,7 @@ def _build_rule_storyboard(
     storyboard: List[Dict[str, Any]] = []
 
     segments: List[Dict[str, Any]] = []
-    if is_wan_i2v and _looks_like_script(source_text):
+    if uses_video_containers and _looks_like_script(source_text):
         container_cap = int(max(1, int(max_segments)))
         max_beats = min(240, max(12, container_cap * 6))
         min_beats = 0
@@ -2545,7 +2556,7 @@ def _build_rule_storyboard(
             "DREAMWEAVER_WAN_VIDEO_PREFERRED_CONTAINER_S",
             _env_float("DREAMWEAVER_WAN_I2V_PREFERRED_CONTAINER_S", 15.0),
         )
-        packed = _pack_wan_i2v_containers_from_segments(
+        packed = _pack_video_containers_from_segments(
             beats,
             entities=entities,
             max_containers=container_cap,
@@ -2693,7 +2704,7 @@ def _llm_storyboard(
     min_shots_hint: int,
     hint_max_shots: int,
     target_total_s: Optional[float],
-    is_wan_i2v: bool,
+    uses_video_containers: bool,
     min_shot_s: float,
     max_shot_s: float,
     retry_reason: Optional[str],
@@ -2716,9 +2727,9 @@ def _llm_storyboard(
     if target_total_s is not None and float(target_total_s) > 0.0:
         total_line = f"- 所有镜头 duration_s 之和约 {float(target_total_s):.1f} 秒（允许±20%）\n"
     duration_line = f"- duration_s 建议在 {float(min_shot_s):.1f}~{float(max_shot_s):.1f} 秒之间（可小数）\n"
-    if is_wan_i2v:
+    if uses_video_containers:
         duration_line = (
-            "- duration_s 必须是 5/10/15 之一（对应 Wan2.6 单次视频生成容器时长），并且优先使用 15 秒以增强一致性。\n"
+            "- duration_s 必须是 5/10/15 之一（对应 Wan2.7 单次视频生成容器时长），并且优先使用 15 秒以增强一致性。\n"
             "- 只有在以下情况才降级使用 10/5 秒：\n"
             "  - 需要引入新固定角色/新造型/新关键道具（需要先锁定外观）\n"
             "  - 明显场景/时间/光源逻辑切换（室内→室外、白天→夜晚等）\n"
@@ -2777,7 +2788,7 @@ def _llm_storyboard(
 
     subshots_schema_hint = ""
     multishot_requirements = ""
-    if is_wan_i2v:
+    if uses_video_containers:
         subshots_schema_hint = (
             '      "subshots": [\n'
             "        {\n"
@@ -2793,7 +2804,7 @@ def _llm_storyboard(
             "      ],\n"
         )
         multishot_requirements = (
-            "- Wan2.6 多镜头叙事（单 prompt 多分镜）要求：\n"
+            "- Wan2.7 多镜头叙事（单 prompt 多分镜）要求：\n"
             "  - 每个 storyboard 镜头是一个“视频容器”（duration_s=5/10/15），容器内部用 subshots 表达多个分镜。\n"
             "  - subshots 时间轴必须覆盖 [0, duration_s]，无重叠、无空洞，最后一个 end_s 必须等于 duration_s。\n"
             "  - 子分镜数量建议：5秒=2个，10秒=3个，15秒=4~6个；单个子分镜建议 2~5 秒。\n"
@@ -2862,7 +2873,7 @@ def _llm_storyboard(
         "- emotion：镜头情感氛围（neutral/happy/sad/tense/romantic等）\n"
         "- audio_sync：音频同步标记（用于声画同步，可选）\n"
         "- character_ids：本镜头涉及的角色ID列表（用于角色一致性，可选）\n"
-        + ("- subshots：容器内子分镜数组（Wan2.6 视频场景），用于单提示词内时间戳分镜控制\n" if is_wan_i2v else "")
+        + ("- subshots：容器内子分镜数组（Wan2.7 视频场景），用于单提示词内时间戳分镜控制\n" if uses_video_containers else "")
         + '要求：state_before/state_after 尽量用"键=值；键=值"格式，长度控制在 80 字以内；若无明显变化可与上一镜头保持一致。\n'
     )
 
@@ -3025,7 +3036,7 @@ def _llm_storyboard(
         character_ids = raw.get("character_ids")
         if not isinstance(character_ids, list):
             character_ids = []
-        subshots = _normalize_wan_i2v_subshots(raw.get("subshots"), duration_s=duration) if is_wan_i2v else []
+        subshots = _normalize_video_subshots(raw.get("subshots"), duration_s=duration) if uses_video_containers else []
 
         normalized.append(
             {
@@ -3073,16 +3084,16 @@ def run(ctx: Any) -> None:
     ratio = str(image_cfg.get("ratio") or "")
     quality_mode = str(ctx.payload.get("quality_mode") or "").strip().lower()
     video_cfg = ctx.payload.get("video_config") if isinstance(ctx.payload.get("video_config"), dict) else {}
-    video_engine = str(video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "").strip().lower()
-    is_wan_i2v_engine = video_engine in {"wan_i2v", "i2v"}
-    is_wan_t2v_engine = video_engine in {"wan_t2v", "wan26_t2v", "t2v"}
-    is_wan_auto_engine = video_engine in {"wan_auto", "auto"}
-    # Wan2.6 视频（I2V/T2V）通常需要将“镜头”量化为 5/10/15s 容器，并在单个 prompt 内用 subshots 表达多分镜。
-    is_wan_i2v = bool(is_wan_i2v_engine or is_wan_t2v_engine)
-    engine_label = "wan_i2v" if is_wan_i2v_engine else ("wan_t2v" if is_wan_t2v_engine else "slideshow")
-    if is_wan_auto_engine:
-        is_wan_i2v = True
-        engine_label = "wan_auto"
+    video_engine = normalize_dreamweaver_video_engine(video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "")
+    uses_i2v_engine = is_dreamweaver_i2v_engine(video_engine)
+    uses_t2v_engine = is_dreamweaver_t2v_engine(video_engine)
+    uses_auto_engine = is_dreamweaver_auto_engine(video_engine)
+    # Wan2.7 视频（I2V/T2V）通常需要将“镜头”量化为 5/10/15s 容器，并在单个 prompt 内用 subshots 表达多分镜。
+    uses_video_containers = bool(uses_i2v_engine or uses_t2v_engine)
+    engine_label = DREAMWEAVER_I2V_ENGINE if uses_i2v_engine else (DREAMWEAVER_T2V_ENGINE if uses_t2v_engine else "slideshow")
+    if uses_auto_engine:
+        uses_video_containers = True
+        engine_label = DREAMWEAVER_AUTO_ENGINE
 
     enable_llm = env_flag("DREAMWEAVER_STORYBOARD_ENABLE_LLM", default=True)
     require_llm = env_flag("DREAMWEAVER_LLM_ONLY", default=False) or env_flag("DREAMWEAVER_STORYBOARD_REQUIRE_LLM", default=False)
@@ -3108,16 +3119,16 @@ def run(ctx: Any) -> None:
     if require_llm and not can_llm:
         raise RuntimeError("storyboard require LLM but DASHSCOPE_API_KEY/DASHSCOPE_API_BASE missing")
 
-    min_shot_s = _env_float("DREAMWEAVER_STORYBOARD_MIN_SHOT_S", 5.0 if is_wan_i2v else 3.0)
-    max_shot_s = _env_float("DREAMWEAVER_STORYBOARD_MAX_SHOT_S", 15.0 if is_wan_i2v else 10.0)
-    if is_wan_i2v:
+    min_shot_s = _env_float("DREAMWEAVER_STORYBOARD_MIN_SHOT_S", 5.0 if uses_video_containers else 3.0)
+    max_shot_s = _env_float("DREAMWEAVER_STORYBOARD_MAX_SHOT_S", 15.0 if uses_video_containers else 10.0)
+    if uses_video_containers:
         min_shot_s = max(5.0, float(min_shot_s))
         max_shot_s = min(15.0, float(max_shot_s))
         if max_shot_s < min_shot_s:
             max_shot_s = min_shot_s
-        # Wan2.6 视频通常只支持离散时长（5/10/15s），min/max 也需要归一化，避免出现 7s 这类无法落地的配置。
-        min_shot_s = normalize_wan_i2v_duration_s(min_shot_s, default=5.0)
-        max_shot_s = normalize_wan_i2v_duration_s(max_shot_s, default=15.0)
+        # Wan2.7 视频通常只支持离散时长（5/10/15s），min/max 也需要归一化，避免出现 7s 这类无法落地的配置。
+        min_shot_s = normalize_dreamweaver_video_duration_s(min_shot_s, default=5.0)
+        max_shot_s = normalize_dreamweaver_video_duration_s(max_shot_s, default=15.0)
         if max_shot_s < min_shot_s:
             max_shot_s = min_shot_s
 
@@ -3128,7 +3139,7 @@ def run(ctx: Any) -> None:
     targets = _auto_storyboard_targets(
         source_text=source_text,
         quality_mode=quality_mode,
-        is_wan_i2v=is_wan_i2v,
+        uses_video_containers=uses_video_containers,
         engine_label=engine_label,
         min_shot_s=float(min_shot_s),
         max_shot_s=float(max_shot_s),
@@ -3143,22 +3154,22 @@ def run(ctx: Any) -> None:
 
     def _postprocess(sb: List[Dict[str, Any]]) -> Dict[str, Any]:
         _auto_adjust_storyboard_durations(sb, min_s=min_shot_s, max_s=max_shot_s, base_s=base_s, cps=cps)
-        if is_wan_i2v:
+        if uses_video_containers:
             for item in sb:
                 if not isinstance(item, dict):
                     continue
-                item["duration_s"] = normalize_wan_i2v_duration_s(item.get("duration_s"), default=float(min_shot_s))
+                item["duration_s"] = normalize_dreamweaver_video_duration_s(item.get("duration_s"), default=float(min_shot_s))
         rebalance = _rebalance_storyboard_total_duration(
             sb,
             target_total_s=targets.get("target_total_s") if targets.get("enabled") else None,
             min_s=min_shot_s,
             max_s=max_shot_s,
-            is_wan_i2v=is_wan_i2v,
+            uses_video_containers=uses_video_containers,
             engine_label=engine_label,
             tolerance=0.15,
         )
-        if is_wan_i2v:
-            _ensure_wan_i2v_subshots_for_storyboard(sb)
+        if uses_video_containers:
+            _ensure_video_subshots_for_storyboard(sb)
         return rebalance
 
     too_short = ""
@@ -3182,7 +3193,7 @@ def run(ctx: Any) -> None:
                     min_shots_hint=int(targets.get("min_shots_hint") or 0),
                     hint_max_shots=int(targets.get("hint_max_shots") or 0),
                     target_total_s=targets.get("target_total_s"),
-                    is_wan_i2v=is_wan_i2v,
+                    uses_video_containers=uses_video_containers,
                     min_shot_s=float(min_shot_s),
                     max_shot_s=float(max_shot_s),
                     retry_reason=retry_reason,
@@ -3225,7 +3236,7 @@ def run(ctx: Any) -> None:
                 entities=ctx.payload.get("script_entities"),
                 max_segments=shot_cap,
                 min_segments=int(targets.get("min_shots_hint") or 0),
-                is_wan_i2v=is_wan_i2v,
+                uses_video_containers=uses_video_containers,
             )
             mode = "llm_fallback" if mode == "llm" else "rule_fallback"
             rebalance = _postprocess(storyboard)
@@ -3238,7 +3249,7 @@ def run(ctx: Any) -> None:
             entities=ctx.payload.get("script_entities"),
             max_segments=shot_cap,
             min_segments=int(targets.get("min_shots_hint") or 0),
-            is_wan_i2v=is_wan_i2v,
+            uses_video_containers=uses_video_containers,
         )
         mode = "rule"
         rebalance = _postprocess(storyboard)

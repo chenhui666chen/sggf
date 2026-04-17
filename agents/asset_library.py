@@ -603,7 +603,7 @@ def run(ctx: Any) -> None:
         ctx.payload["asset_library_requires_review"] = bool(pending_count > 0 or unapproved_roles)
         return
 
-    t2i = create_runtime_client("wan_t2i")
+    t2i = create_runtime_client("wan2.6-t2i")
     image_edit_adapter_name = resolve_image_edit_adapter_name(
         image_cfg,
         purpose="library_character_view",
@@ -831,7 +831,7 @@ def run(ctx: Any) -> None:
         local_vlm = vlm_adapter
         local_image_edit = image_edit_adapter
         if asset_parallelism > 1:
-            local_t2i = create_runtime_client("wan_t2i")
+            local_t2i = create_runtime_client("wan2.6-t2i")
             if selector in {"vlm", "semantic"}:
                 try:
                     local_vlm = create_runtime_client(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus"))

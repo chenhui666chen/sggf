@@ -304,6 +304,23 @@ _MODEL_ALIAS_KEYWORDS: dict[str, list[str]] = {
         "wan 2.6 text-to-image",
         "wan2.6 text-to-image",
     ],
+    "wan2.7-t2v": [
+        "wan 2.7 text-to-video",
+        "wan2.7 text-to-video",
+    ],
+    "wan2.7-i2v": [
+        "wan 2.7 image-to-video",
+        "wan2.7 image-to-video",
+    ],
+    "wan2.7-r2v": [
+        "wan 2.7 reference-to-video",
+        "wan2.7 reference-to-video",
+    ],
+    "wan2.7-videoedit": [
+        "wan 2.7 video edit",
+        "wan2.7 video edit",
+        "wan 2.7 video-edit",
+    ],
 }
 
 _ERROR_PAGE_KEYWORDS = [
@@ -2126,7 +2143,7 @@ def _derive_env_bindings(entry: ModelCatalogEntry) -> list[dict[str, Any]]:
         _push("API Key", "WAN_T2I_API_KEY")
         _push("Base URL", "WAN_T2I_BASE_URL")
         _push("模型名 / Deployment", "WAN_T2I_MODEL_NAME / WAN_T2I_MODEL_ID / wan2.6-t2i", required=False)
-    elif entry.model_key.startswith("wan2.6-"):
+    elif entry.model_key.startswith("wan2.7-"):
         upper_model = entry.model_key.upper().replace(".", "_").replace("-", "_")
         _push("API Key", "DASHSCOPE_API_KEY")
         _push("Base URL", "DASHSCOPE_BASE_URL")

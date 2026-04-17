@@ -274,7 +274,7 @@ class AudioSyncManager:
         max_lines: int = 6,
         max_chars: int = 360,
     ) -> str:
-        """格式化声画同步提示，用于Wan2.6上层prompt。"""
+        """格式化声画同步提示，用于 Wan2.7 上层 prompt。"""
         if not tracks:
             return ""
 

@@ -59,6 +59,16 @@ from app.services.dreamweaver.library import (
     resolve_asset_path,
     strip_crowd_characters_from_spec,
 )
+from app.services.dreamweaver.video_generation import (
+    DreamweaverRunPreflight,
+    build_dreamweaver_run_preflight,
+    resolve_video_generation_controls,
+    sync_subject_ref_for_asset as sync_subject_ref_for_asset_service,
+)
+from app.services.providers.kling import (
+    KlingAPIError,
+    KlingConfigurationError,
+)
 from app.services.dreamweaver.config_lock import (
     DreamweaverProjectConfigLockedError,
     apply_locked_generation_config,
@@ -73,7 +83,13 @@ from app.services.points_task_precheck import (
 from app.services.chapter_adaptation_assets import build_drama_source_text
 
 from pipeline.state_machine import RunContext, State, progress_percent, run_until_done, stage_label
-from pipeline.media_presets import resolve_frame_size
+from pipeline.media_presets import (
+    DREAMWEAVER_I2V_ENGINE,
+    is_dreamweaver_auto_engine,
+    is_dreamweaver_i2v_engine,
+    normalize_dreamweaver_video_engine,
+    resolve_frame_size,
+)
 from pipeline.library_regenerate_roles import (
     build_missing_character_view_regenerate_roles,
     build_missing_character_view_summary,
@@ -100,6 +116,68 @@ def _ensure_dreamweaver_points_precheck_passed(precheck: object) -> None:
         default_message="短剧积分预检未通过",
     )
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+def _ensure_dreamweaver_request_preflight_passed(preflight: DreamweaverRunPreflight) -> None:
+    if preflight.allowed:
+        return
+    detail = preflight.to_dict()
+    detail.setdefault("message", "短剧运行提交预检未通过")
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+def _build_library_asset_provider_sync_payload(
+    *,
+    asset_id: int,
+    asset_type: str,
+    role: str,
+    uri: str,
+    meta: Dict[str, Any],
+) -> Dict[str, Any]:
+    provider_refs = dict(meta.get("provider_refs")) if isinstance(meta.get("provider_refs"), dict) else {}
+    return {
+        "id": int(asset_id),
+        "asset_id": int(asset_id),
+        "asset_type": str(asset_type or ""),
+        "role": str(role or ""),
+        "uri": str(uri or ""),
+        "meta": dict(meta),
+        "entity_type": str(meta.get("entity_type") or "").strip().lower(),
+        "entity_id": meta.get("entity_id"),
+        "entity_name": str(meta.get("entity_name") or meta.get("name") or role).strip() or str(role or ""),
+        "descriptor": str(meta.get("descriptor") or "").strip(),
+        "view": str(meta.get("view") or "").strip(),
+        "provider_refs": provider_refs,
+        "path": _ensure_path_under_runs(resolve_asset_path(str(uri or ""))),
+    }
+
+
+def _persist_library_asset_provider_refs(
+    *,
+    db: Session,
+    rows_by_id: Dict[int, DreamweaverAssetModel],
+    payloads_by_id: Dict[int, Dict[str, Any]],
+) -> None:
+    updated = False
+    for asset_id, payload in payloads_by_id.items():
+        row = rows_by_id.get(int(asset_id))
+        if row is None:
+            continue
+        meta = dict(row.meta_json) if isinstance(row.meta_json, dict) else {}
+        provider_refs = payload.get("provider_refs") if isinstance(payload.get("provider_refs"), dict) else {}
+        current_provider_refs = dict(meta.get("provider_refs")) if isinstance(meta.get("provider_refs"), dict) else {}
+        if current_provider_refs == provider_refs:
+            continue
+        if provider_refs:
+            meta["provider_refs"] = dict(provider_refs)
+        else:
+            meta.pop("provider_refs", None)
+        row.meta_json = meta
+        db.add(row)
+        updated = True
+
+    if updated:
+        db.commit()
 
 
 class RunRequest(BaseModel):
@@ -147,12 +225,15 @@ class RunResponse(BaseModel):
     audit: Optional[dict] = None
     autoqc: Optional[dict] = None
     qc_warning: Optional[dict] = None
+    preflight: Optional[dict] = None
+    video_provider_trace: Optional[dict] = None
 
 
 class RunAsyncResponse(BaseModel):
     task_id: str
     run_id: str
     status: str
+    preflight: Optional[dict] = None
 
 
 class TaskStatusResponse(BaseModel):
@@ -214,6 +295,19 @@ class LibraryApproveRequest(BaseModel):
     approve_all: bool = Field(default=False)
     roles: List[str] = Field(default_factory=list)
     approved: bool = Field(default=True)
+
+
+class LibraryAssetProviderRefUpdateRequest(BaseModel):
+    provider: Literal["kling"] = Field(default="kling")
+    subject_id: Optional[str] = Field(default=None, max_length=128)
+    source_asset_uri: Optional[str] = Field(default=None, max_length=2000)
+
+
+class LibraryAssetProviderRefSyncRequest(BaseModel):
+    provider: Literal["kling"] = Field(default="kling")
+    include_related_views: bool = Field(default=True)
+    timeout_s: float = Field(default=90.0, ge=5.0, le=300.0)
+    poll_interval_s: float = Field(default=2.0, ge=0.2, le=10.0)
 
 
 class ResumeAsyncResponse(BaseModel):
@@ -1105,6 +1199,27 @@ def _build_dreamweaver_runtime_config_from_request(request: RunRequest) -> Dict[
     if prompt_review_required:
         runtime_config["prompt_review"] = {"approved": False}
 
+    video_cfg = runtime_config.get("video_config") if isinstance(runtime_config.get("video_config"), dict) else {}
+    if not isinstance(video_cfg.get("provider_mode"), str) or not str(video_cfg.get("provider_mode") or "").strip():
+        video_cfg["provider_mode"] = str(os.getenv("DREAMWEAVER_VIDEO_PROVIDER_MODE") or "wan_only").strip().lower() or "wan_only"
+    if not isinstance(video_cfg.get("selector_mode"), str) or not str(video_cfg.get("selector_mode") or "").strip():
+        video_cfg["selector_mode"] = str(os.getenv("DREAMWEAVER_VIDEO_SELECTOR_MODE") or "off").strip().lower() or "off"
+    if "allow_kling_omni" not in video_cfg:
+        video_cfg["allow_kling_omni"] = _env_flag("DREAMWEAVER_ALLOW_KLING_OMNI", default=False)
+    if "enable_kling_video_provider" not in video_cfg:
+        video_cfg["enable_kling_video_provider"] = _env_flag(
+            "DREAMWEAVER_ENABLE_KLING_VIDEO_PROVIDER",
+            default=False,
+        )
+    if "allow_subject_bridge" not in video_cfg:
+        video_cfg["allow_subject_bridge"] = _env_flag("DREAMWEAVER_ALLOW_SUBJECT_BRIDGE", default=False)
+    if "allow_subject_bridge_auto_sync" not in video_cfg:
+        video_cfg["allow_subject_bridge_auto_sync"] = _env_flag(
+            "DREAMWEAVER_ALLOW_SUBJECT_BRIDGE_AUTO_SYNC",
+            default=False,
+        )
+    runtime_config["video_config"] = resolve_video_generation_controls(video_cfg)
+
     return runtime_config
 
 
@@ -1167,6 +1282,18 @@ def run_pipeline(
         _build_dreamweaver_runtime_config_from_request(request),
         locked_cfg,
     )
+    request_preflight = build_dreamweaver_run_preflight(
+        quality_mode=request.quality_mode,
+        smart_tuning=request.smart_tuning,
+        qc_allow_fail=request.qc_allow_fail,
+        video_require_confirmation=request.video_require_confirmation,
+        runtime_config=runtime_config,
+    )
+    _ensure_dreamweaver_request_preflight_passed(request_preflight)
+    video_cfg = runtime_config.get("video_config") if isinstance(runtime_config.get("video_config"), dict) else {}
+    video_cfg.update(copy.deepcopy(request_preflight.resolved_video_config))
+    runtime_config["video_config"] = video_cfg
+    runtime_config["preflight"] = request_preflight.to_dict()
     precheck = build_dreamweaver_task_points_precheck(
         db=db,
         user_id=current_user.id,
@@ -1247,6 +1374,8 @@ def run_pipeline(
         audit=ctx.payload.get("audit"),
         autoqc=ctx.payload.get("autoqc"),
         qc_warning=ctx.payload.get("qc_warning"),
+        preflight=ctx.payload.get("preflight"),
+        video_provider_trace=ctx.payload.get("video_provider_trace"),
     )
 
 
@@ -1308,6 +1437,18 @@ def run_pipeline_async(
         _build_dreamweaver_runtime_config_from_request(request),
         locked_cfg,
     )
+    request_preflight = build_dreamweaver_run_preflight(
+        quality_mode=request.quality_mode,
+        smart_tuning=request.smart_tuning,
+        qc_allow_fail=request.qc_allow_fail,
+        video_require_confirmation=request.video_require_confirmation,
+        runtime_config=runtime_config,
+    )
+    _ensure_dreamweaver_request_preflight_passed(request_preflight)
+    video_cfg = runtime_config.get("video_config") if isinstance(runtime_config.get("video_config"), dict) else {}
+    video_cfg.update(copy.deepcopy(request_preflight.resolved_video_config))
+    runtime_config["video_config"] = video_cfg
+    runtime_config["preflight"] = request_preflight.to_dict()
     precheck = build_dreamweaver_task_points_precheck(
         db=db,
         user_id=current_user.id,
@@ -1372,7 +1513,12 @@ def run_pipeline_async(
 
     run_dreamweaver_task.apply_async(args=task_args, queue=_dreamweaver_celery_queue(), task_id=task_id)
 
-    return RunAsyncResponse(task_id=task_id, run_id=run_id, status="queued")
+    return RunAsyncResponse(
+        task_id=task_id,
+        run_id=run_id,
+        status="queued",
+        preflight=request_preflight.to_dict(),
+    )
 
 
 @router.get("/task/{task_id}", response_model=TaskStatusResponse)
@@ -2585,6 +2731,185 @@ def upload_library_asset_file(
     }
 
 
+@router.post("/library/assets/{asset_id}/provider-ref", response_model=dict)
+def update_library_asset_provider_ref(
+    asset_id: int,
+    request: LibraryAssetProviderRefUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    row = (
+        db.query(DreamweaverAssetModel, DreamweaverProjectModel)
+        .join(DreamweaverProjectModel, DreamweaverAssetModel.dreamweaver_project_id == DreamweaverProjectModel.id)
+        .filter(DreamweaverAssetModel.id == asset_id, DreamweaverProjectModel.user_id == current_user.id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="素材不存在或无权限访问")
+
+    asset, project = row
+    role = str(getattr(asset, "role", "") or "").strip()
+    if not role.startswith("lib_"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持绑定素材库资产（lib_*）")
+    if str(getattr(asset, "asset_type", "") or "").strip() != "image":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持 image 类型素材")
+
+    provider = str(request.provider or "kling").strip().lower() or "kling"
+    subject_id = str(request.subject_id or "").strip()
+
+    meta = dict(asset.meta_json) if isinstance(asset.meta_json, dict) else {}
+    provider_refs = dict(meta.get("provider_refs")) if isinstance(meta.get("provider_refs"), dict) else {}
+    if subject_id:
+        provider_refs[provider] = {
+            "subject_id": subject_id,
+            "element_id": subject_id,
+            "source_asset_uri": str(request.source_asset_uri or asset.uri or "").strip() or str(asset.uri),
+            "synced_at": utc_now().isoformat(),
+            "source": "manual_bind",
+        }
+    else:
+        provider_refs.pop(provider, None)
+
+    if provider_refs:
+        meta["provider_refs"] = provider_refs
+    else:
+        meta.pop("provider_refs", None)
+
+    asset.meta_json = meta
+    db.add(asset)
+    db.commit()
+
+    return {
+        "project_id": int(getattr(project, "source_project_id", 0) or 0),
+        "asset_id": int(asset.id),
+        "role": role,
+        "provider": provider,
+        "subject_id": subject_id or None,
+        "provider_refs": provider_refs,
+    }
+
+
+@router.post("/library/assets/{asset_id}/provider-ref/sync", response_model=dict)
+def sync_library_asset_provider_ref(
+    asset_id: int,
+    request: LibraryAssetProviderRefSyncRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    row = (
+        db.query(DreamweaverAssetModel, DreamweaverProjectModel)
+        .join(DreamweaverProjectModel, DreamweaverAssetModel.dreamweaver_project_id == DreamweaverProjectModel.id)
+        .filter(DreamweaverAssetModel.id == asset_id, DreamweaverProjectModel.user_id == current_user.id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="素材不存在或无权限访问")
+
+    asset, project = row
+    role = str(getattr(asset, "role", "") or "").strip()
+    if not role.startswith("lib_"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持同步素材库资产（lib_*）")
+    if str(getattr(asset, "asset_type", "") or "").strip() != "image":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持 image 类型素材")
+
+    provider = str(request.provider or "kling").strip().lower() or "kling"
+    meta = dict(asset.meta_json) if isinstance(asset.meta_json, dict) else {}
+    sync_payload = _build_library_asset_provider_sync_payload(
+        asset_id=int(asset.id),
+        asset_type=str(getattr(asset, "asset_type", "") or ""),
+        role=role,
+        uri=str(getattr(asset, "uri", "") or ""),
+        meta=meta,
+    )
+    asset_path = sync_payload.get("path")
+    if not isinstance(asset_path, Path) or not asset_path.exists():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="素材文件不存在，无法同步到 provider")
+
+    related_payloads: List[Dict[str, Any]] = []
+    tracked_payloads_by_id: Dict[int, Dict[str, Any]] = {int(asset.id): sync_payload}
+    original_provider_refs_by_id: Dict[int, Dict[str, Any]] = {
+        int(asset.id): copy.deepcopy(sync_payload.get("provider_refs") or {})
+    }
+    if bool(request.include_related_views):
+        assets_by_role = load_latest_library_assets(
+            db,
+            project_id=int(getattr(project, "source_project_id", 0) or 0),
+            user_id=current_user.id,
+        )
+        for other_role, other_asset in assets_by_role.items():
+            if other_role == role or not isinstance(other_asset, dict):
+                continue
+            other_meta = other_asset.get("meta") if isinstance(other_asset.get("meta"), dict) else {}
+            try:
+                other_asset_id = int(other_asset.get("id"))
+            except Exception:  # noqa: BLE001
+                continue
+            try:
+                other_payload = _build_library_asset_provider_sync_payload(
+                    asset_id=other_asset_id,
+                    asset_type=str(other_asset.get("asset_type") or ""),
+                    role=str(other_asset.get("role") or other_role),
+                    uri=str(other_asset.get("uri") or ""),
+                    meta=other_meta,
+                )
+            except Exception:  # noqa: BLE001
+                continue
+            related_payloads.append(other_payload)
+            tracked_payloads_by_id[other_asset_id] = other_payload
+            original_provider_refs_by_id[other_asset_id] = copy.deepcopy(other_payload.get("provider_refs") or {})
+
+    try:
+        provider_ref = sync_subject_ref_for_asset_service(
+            sync_payload,
+            provider=provider,
+            related_assets=related_payloads,
+            include_related_views=bool(request.include_related_views),
+            timeout_s=float(request.timeout_s),
+            poll_interval_s=float(request.poll_interval_s),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except KlingConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except KlingAPIError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Kling element 同步失败: {exc}") from exc
+
+    updated_payloads_by_id: Dict[int, Dict[str, Any]] = {}
+    for tracked_asset_id, payload in tracked_payloads_by_id.items():
+        current_provider_refs = payload.get("provider_refs") if isinstance(payload.get("provider_refs"), dict) else {}
+        if original_provider_refs_by_id.get(tracked_asset_id) == current_provider_refs:
+            continue
+        updated_payloads_by_id[tracked_asset_id] = payload
+
+    if updated_payloads_by_id:
+        updated_rows = (
+            db.query(DreamweaverAssetModel, DreamweaverProjectModel)
+            .join(DreamweaverProjectModel, DreamweaverAssetModel.dreamweaver_project_id == DreamweaverProjectModel.id)
+            .filter(DreamweaverAssetModel.id.in_(list(updated_payloads_by_id.keys())), DreamweaverProjectModel.user_id == current_user.id)
+            .all()
+        )
+        rows_by_id = {int(row_asset.id): row_asset for row_asset, _row_project in updated_rows}
+        _persist_library_asset_provider_refs(
+            db=db,
+            rows_by_id=rows_by_id,
+            payloads_by_id=updated_payloads_by_id,
+        )
+
+    provider_refs = sync_payload.get("provider_refs") if isinstance(sync_payload.get("provider_refs"), dict) else {}
+    subject_id = str(provider_ref.get("subject_id") or provider_ref.get("element_id") or "").strip()
+
+    return {
+        "project_id": int(getattr(project, "source_project_id", 0) or 0),
+        "asset_id": int(asset.id),
+        "role": role,
+        "provider": provider,
+        "subject_id": subject_id or None,
+        "provider_refs": provider_refs,
+    }
+
+
 @router.get("/projects/{project_id}/locked-config", response_model=ProjectLockedGenerationConfigResponse)
 def get_project_locked_generation_config_api(
     project_id: int,
@@ -3313,8 +3638,10 @@ def rebuild_video_jobs(
 
     runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
     video_cfg = runtime_cfg.get("video_config") if isinstance(runtime_cfg.get("video_config"), dict) else {}
-    engine = str(video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "ffmpeg_slideshow").strip().lower()
-    bridge_enabled = engine in {"wan_i2v", "i2v", "wan_auto", "auto"}
+    engine = normalize_dreamweaver_video_engine(
+        video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "ffmpeg_slideshow"
+    )
+    bridge_enabled = is_dreamweaver_i2v_engine(engine) or is_dreamweaver_auto_engine(engine)
 
     existing_jobs_list = runtime_cfg.get("video_clip_jobs") if isinstance(runtime_cfg.get("video_clip_jobs"), list) else []
     existing_jobs_by_shot: Dict[str, Dict[str, Any]] = {}
@@ -3751,7 +4078,10 @@ def get_persisted_run_contract(
             image_cfg = runtime_cfg.get("image_config") if isinstance(runtime_cfg.get("image_config"), dict) else {}
             style_preset = str(runtime_cfg.get("style_preset") or contract_out.get("style_preset") or "").strip()
             frame_ratio = str(image_cfg.get("ratio") or "").strip() or "16:9"
-            engine = str(video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "wan_i2v").strip().lower()
+            engine = normalize_dreamweaver_video_engine(
+                video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or DREAMWEAVER_I2V_ENGINE,
+                default=DREAMWEAVER_I2V_ENGINE,
+            )
 
             episodes = contract_out.get("episodes")
             if isinstance(episodes, list):
@@ -3826,7 +4156,7 @@ def get_persisted_run_contract(
                         if generated and not dreamweaver_mod._is_legacy_video_prompt(generated, shot=shot_item):
                             continue
 
-                        generated = dreamweaver_mod._build_wan_i2v_prompt(
+                        generated = dreamweaver_mod._build_wan_video_prompt(
                             shot=shot_item,
                             style_preset=style_preset,
                             frame_ratio=frame_ratio,
@@ -4145,7 +4475,10 @@ def update_run_shot_frame_prompt(
 
         style_preset = str(runtime_cfg_for_prompt.get("style_preset") or contract.get("style_preset") or "").strip()
         frame_ratio = str(image_cfg_for_prompt.get("ratio") or "").strip() or "16:9"
-        engine = str(video_cfg_for_prompt.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "wan_i2v").strip().lower()
+        engine = normalize_dreamweaver_video_engine(
+            video_cfg_for_prompt.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or DREAMWEAVER_I2V_ENGINE,
+            default=DREAMWEAVER_I2V_ENGINE,
+        )
 
         meta_for_prompt = shot_schema_v2.get("meta") if isinstance(shot_schema_v2.get("meta"), dict) else {}
         prompt_shot: Dict[str, Any] = {
@@ -4199,7 +4532,7 @@ def update_run_shot_frame_prompt(
         ):
             _merge_schema_prompt_field(field)
 
-        generated = dreamweaver_mod._build_wan_i2v_prompt(
+        generated = dreamweaver_mod._build_wan_video_prompt(
             shot=prompt_shot,
             style_preset=style_preset,
             frame_ratio=frame_ratio,

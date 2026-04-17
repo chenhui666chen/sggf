@@ -1,3 +1,6 @@
+import type { LibraryAssetImageState } from '../utils/dreamweaverLibraryAssetState'
+import type { CharacterView } from '../utils/dreamweaverLibraryRole'
+
 export type QualityMode = 'quality' | 'cost'
 export type TaskStatusType = 'queued' | 'running' | 'completed' | 'failed' | 'waiting'
 export type AssetPlanStatus = 'planned' | 'done' | 'processing'
@@ -41,7 +44,7 @@ export interface RunResult {
   state: string
   stage?: string | null
   progress?: number | null
-  artifacts?: Record<string, unknown> | null
+  artifacts?: DreamweaverTaskArtifacts | null
   source_chapter_count: number
   plan?: Record<string, unknown>
   storyboard?: unknown[]
@@ -56,6 +59,8 @@ export interface RunResult {
   audit?: Record<string, unknown>
   autoqc?: Record<string, unknown>
   qc_warning?: Record<string, unknown>
+  preflight?: DreamweaverRunPreflight | null
+  video_provider_trace?: DreamweaverVideoProviderTrace | null
 }
 
 export interface TaskStatus {
@@ -66,10 +71,64 @@ export interface TaskStatus {
   queue?: string | null
   state?: string | null
   stage?: string | null
-  artifacts?: Record<string, unknown> | null
+  artifacts?: DreamweaverTaskArtifacts | null
   error_type?: string | null
   result?: RunResult | null
   error?: string | null
+}
+
+export interface DreamweaverPreflightIssue {
+  level: string
+  code: string
+  message: string
+}
+
+export interface DreamweaverRunPreflight {
+  allowed: boolean
+  errors: DreamweaverPreflightIssue[]
+  warnings: DreamweaverPreflightIssue[]
+  resolved_video_config?: Record<string, unknown>
+}
+
+export interface DreamweaverVideoProviderShotTrace {
+  shot_id: string
+  requested_provider_mode?: string
+  selector_mode?: string
+  recommended_provider?: string
+  applied_provider?: string
+  route?: string
+  reason?: string
+  shadowed?: boolean
+  metadata?: Record<string, unknown>
+}
+
+export interface DreamweaverVideoProviderTrace {
+  provider_mode?: string
+  selector_mode?: string
+  allow_kling_omni?: boolean
+  enable_kling_video_provider?: boolean
+  allow_subject_bridge?: boolean
+  shots: DreamweaverVideoProviderShotTrace[]
+}
+
+export interface DreamweaverRunAsyncResponse {
+  task_id: string
+  run_id: string
+  status: TaskStatusType
+  preflight?: DreamweaverRunPreflight | null
+}
+
+export interface DreamweaverRunSnapshot {
+  dreamweaver_project_id: number
+  run_id: string
+  status: string
+  state?: string | null
+  stage?: string | null
+  progress?: number | null
+  schema_version?: string | null
+  error_type?: string | null
+  error_message?: string | null
+  contract?: Record<string, unknown> | null
 }
 
 export interface LibraryAsset {
@@ -138,13 +197,13 @@ export interface LibraryDisplayItem {
   approved: boolean
   status: AssetPlanStatus
   group: LibraryEntityGroup
-  view?: string | null
+  view?: CharacterView | null
   viewRank: number
   asset?: LibraryAsset
   missing?: boolean
   placeholder?: boolean
   hasRenderableImage?: boolean
-  imageState?: string | null
+  imageState?: LibraryAssetImageState | null
   safety_blocked?: boolean
   safety_error?: string | null
 }
@@ -179,7 +238,95 @@ export interface DreamweaverProjectLockedGenerationConfig {
   source_run_id?: string | null
 }
 
-export type CharacterView = 'front' | 'side' | 'back' | 'half_front' | 'half_3_4' | 'half_side'
+export interface DreamweaverScriptEntityItem extends Record<string, unknown> {
+  name?: string | null
+  descriptor?: string | null
+  importance?: string | null
+}
+
+export interface DreamweaverScriptEntities {
+  characters: DreamweaverScriptEntityItem[]
+  scenes: DreamweaverScriptEntityItem[]
+  props: DreamweaverScriptEntityItem[]
+}
+
+export interface DreamweaverTaskStageArtifacts extends Record<string, unknown> {
+  camera_tree_mode?: string | null
+  camera_count?: number | null
+  camera_states_count?: number | null
+  camera_scenes_count?: number | null
+}
+
+export interface DreamweaverTaskArtifacts extends Record<string, unknown> {
+  storyboard_count?: number | null
+  keyframes_count?: number | null
+  midframes_count?: number | null
+  video_clips_count?: number | null
+  last_keyframe_path?: string | null
+  last_midframe_path?: string | null
+  last_video_clip_path?: string | null
+  keyframes_tail_paths?: string[] | null
+  midframes_tail_paths?: string[] | null
+  video_clips_tail_paths?: string[] | null
+  rework_reason?: Record<string, unknown> | null
+  stage_artifacts?: DreamweaverTaskStageArtifacts | null
+}
+
+export interface DreamweaverShotAsset extends Record<string, unknown> {
+  role?: string | null
+  uri?: string | null
+  meta?: Record<string, unknown> | null
+}
+
+export interface DreamweaverShotFrame extends Record<string, unknown> {
+  path?: string | null
+  prompt?: string | null
+  meta?: Record<string, unknown> | null
+}
+
+export interface DreamweaverShotSchemaMeta extends Record<string, unknown> {
+  video_prompt_generated?: string | null
+  video_prompt_override?: string | null
+}
+
+export interface DreamweaverShotSchema extends Record<string, unknown> {
+  meta?: DreamweaverShotSchemaMeta | null
+}
+
+export interface DreamweaverShotSnapshot extends Record<string, unknown> {
+  shot_key?: string | null
+  shot_id?: string | null
+  shot_index?: number | null
+  scene_id?: string | number | null
+  duration_s?: number | null
+  desc?: string | null
+  head_frame?: DreamweaverShotFrame | null
+  tail_frame?: DreamweaverShotFrame | null
+  shot_schema_v2?: DreamweaverShotSchema | null
+  assets?: DreamweaverShotAsset[] | null
+}
+
+export interface DreamweaverVideoClipJob extends Record<string, unknown> {
+  shot_id?: string | null
+  desc?: string | null
+  status?: string | null
+  confirmed?: boolean | null
+  requires_bridge?: boolean | null
+  depends_on_shot_id?: string | null
+}
+
+export interface DreamweaverDiagnosticShotFrames {
+  head?: Record<string, unknown> | null
+  tail?: Record<string, unknown> | null
+  mid?: Record<string, unknown> | null
+}
+
+export interface DreamweaverDiagnosticShot {
+  shot_id: string
+  storyboard?: Record<string, unknown> | null
+  frames?: DreamweaverDiagnosticShotFrames | null
+  video_clip?: Record<string, unknown> | null
+}
 
 export interface ParsedLibraryRole {
   entityType: 'character' | 'scene' | 'prop' | 'unknown'

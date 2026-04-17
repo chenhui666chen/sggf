@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-忙篓隆氓??茅??茅??氓?篓氓卤? - 忙?炉忙??氓陇?莽搂? AI 忙篓隆氓??莽??莽禄?盲赂?忙?楼氓?拢茫??
-盲赂?盲戮?猫碌?ComfyUI/LoRA茂录?忙??芒??猫?陆氓??盲戮?氓潞?氓??芒??忙?陆猫卤隆茅??茅??茫??"""
+模型适配器层 - 支持多种 AI 模型的统一接口。
+不依赖 ComfyUI/LoRA，按"能力/供应商"抽象适配。
+"""
 
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ from adapters.rate_limiter import get_rate_limiter
 
 @dataclass
 class ModelConfig:
-    """忙篓隆氓??茅??莽陆庐"""
+    """模型配置"""
     api_key: str
     base_url: str
     model_name: str
@@ -37,7 +38,7 @@ class ModelConfig:
 
 @dataclass
 class GenerationResult:
-    """莽??忙??莽禄?忙??"""
+    """生成结果"""
     success: bool
     data: Any
     error: Optional[str] = None
@@ -153,7 +154,8 @@ class BaseModelAdapter(ABC):
 
     def _base_host(self) -> str:
         """
-        盲禄?base_url 忙??氓?? scheme://netloc茂录?莽?篓盲潞?忙??盲潞?氓??氓??忙??盲赂?氓??猫?陆氓??忙??氓?篓盲赂?氓?? path 盲赂?莽??氓?潞忙?炉茂录?茫??        盲戮?氓娄?茂录?https://dashscope.aliyuncs.com/compatible-mode/v1 -> https://dashscope.aliyuncs.com
+        从 base_url 提取 scheme://netloc，用于后续拼接路径时去掉多余的 path 部分。
+        例如：https://dashscope.aliyuncs.com/compatible-mode/v1 -> https://dashscope.aliyuncs.com
         """
         raw = (self.config.base_url or "").strip()
         if not raw:
@@ -172,7 +174,8 @@ class BaseModelAdapter(ABC):
 
     def _retry_delay_s(self, attempt: int, *, response: Optional[requests.Response] = None) -> float:
         """
-        猫庐隆莽庐?茅??猫炉?莽颅?氓戮?忙?露茅?麓茂录?忙??忙?掳茅??茅??+ 忙??氓?篓茂录?茂录?猫?楼氓??氓潞?氓??氓??Retry-After茂录?莽搂?茂录?茂录?氓??盲录?氓??盲陆驴莽?篓猫炉楼氓?录茫??        """
+        计算重试等待时间，指数退避+抖动，优先使用响应的Retry-After秒数，否则使用默认值。
+        """
         base = float(2 ** max(int(attempt), 0))
         retry_after: Optional[float] = None
         if isinstance(response, requests.Response):
@@ -192,7 +195,9 @@ class BaseModelAdapter(ABC):
 
     def _http_error_with_detail(self, exc: requests.exceptions.HTTPError) -> requests.exceptions.HTTPError:
         """
-        requests 莽??HTTPError 茅禄?猫庐陇盲赂?氓??氓?芦氓??氓潞?盲陆?莽禄?猫??茂录?猫驴?茅??氓掳?猫炉?忙??氓??氓赂赂猫搂?茅??猫炉炉氓颅?忙庐碌氓鹿露忙?录氓?掳 message 茅??茂录?盲戮驴盲潞?忙??茅??茫??        忙鲁篓忙??茂录?盲禄?盲驴?忙??氓录?氓赂赂莽卤禄氓??盲赂?HTTPError茂录?茅?驴氓??莽聽麓氓??盲赂?氓卤?氓炉鹿 status_code 莽??氓??忙?炉茅?禄猫戮?茂录?氓娄? 404 氓??茅??茂录?茫??        """
+        requests 的HTTPError 补充更多状态信息，将响应体中的常见错误字段追加到 message 里，便于排查。
+        注意：仅当异常类型是HTTPError时才会破坏性地修改其 status_code 的描述，如 404 等。
+        """
         resp = getattr(exc, "response", None)
         if not isinstance(resp, requests.Response):
             return exc
@@ -449,7 +454,7 @@ class BaseModelAdapter(ABC):
         payload: Dict[str, Any],
         method: str = "POST"
     ) -> Dict[str, Any]:
-        """氓??茅??API猫炉路忙卤?"""
+        """发起API请求"""
         base_url = (self.config.base_url or "").rstrip("/")
         ep = (endpoint or "").lstrip("/")
         if base_url.endswith("/v1") and ep.startswith("v1/"):
@@ -459,12 +464,12 @@ class BaseModelAdapter(ABC):
 
     @abstractmethod
     def generate(self, **kwargs) -> GenerationResult:
-        """莽??忙??氓??氓庐鹿"""
+        """生成内容"""
         pass
 
 
 class Wan26T2IAdapter(BaseModelAdapter):
-    RUNTIME_WRAPPER_NAME = "wan26_t2i"
+    RUNTIME_WRAPPER_NAME = "wan2.6-t2i"
     """Legacy-compatible WAN T2I adapter."""
 
     def generate(
@@ -489,8 +494,8 @@ class Wan26T2IAdapter(BaseModelAdapter):
         )
 
 
-class Wan26I2VAdapter(BaseModelAdapter):
-    RUNTIME_WRAPPER_NAME = "wan26_i2v"
+class Wan27I2VAdapter(BaseModelAdapter):
+    RUNTIME_WRAPPER_NAME = "wan2.7-i2v"
     """Legacy-compatible WAN I2V adapter."""
 
     def generate(
@@ -515,8 +520,8 @@ class Wan26I2VAdapter(BaseModelAdapter):
         )
 
 
-class Wan26T2VAdapter(BaseModelAdapter):
-    RUNTIME_WRAPPER_NAME = "wan26_t2v"
+class Wan27T2VAdapter(BaseModelAdapter):
+    RUNTIME_WRAPPER_NAME = "wan2.7-t2v"
     """Legacy-compatible WAN T2V adapter."""
 
     def generate(
@@ -545,8 +550,8 @@ class Wan26T2VAdapter(BaseModelAdapter):
         )
 
 
-class Wan26R2VAdapter(BaseModelAdapter):
-    RUNTIME_WRAPPER_NAME = "wan26_r2v"
+class Wan27R2VAdapter(BaseModelAdapter):
+    RUNTIME_WRAPPER_NAME = "wan2.7-r2v"
     """Legacy-compatible WAN R2V adapter."""
 
     def generate(
@@ -596,7 +601,7 @@ class QwenImageEditPlusAdapter(BaseModelAdapter):
 
 class WanImageEditAdapter(QwenImageEditPlusAdapter):
     RUNTIME_WRAPPER_NAME = "wan_image_edit"
-    """Wan Image Edit 脙漏芒?卢芒??脙垄芒?卢脗娄脙楼芒?? 脙楼芒?潞脗戮脙楼脝?脗隆脙搂脗录芒??脙篓脗戮芒??"""
+    """Wan Image Edit 适配器 - 图像编辑"""
     supports_multi_image = False
 
 
@@ -837,7 +842,7 @@ class Qwen3VLPlusAdapter(BaseModelAdapter):
 
 
 class Qwen3TTSAdapter(BaseModelAdapter):
-    """Qwen3-TTS 茅??茅??氓??- 忙??忙?卢猫陆卢猫炉颅茅?鲁茂录?莽?篓盲潞?氓拢掳莽?禄氓??忙颅楼茂录?"""
+    """Qwen3-TTS 适配器 - 文本转语音，用于声音合成。"""
 
     def generate(
         self,
@@ -850,15 +855,19 @@ class Qwen3TTSAdapter(BaseModelAdapter):
         volume: float = 1.0
     ) -> GenerationResult:
         """
-        莽??忙??猫炉颅茅?鲁茂录?忙??忙?卢猫陆卢猫炉颅茅?鲁茂录?        
+        生成语音：文本转语音。
         Args:
-            text: 猫娄?猫陆卢忙?垄莽??忙??忙?卢
-            voice_style: 猫炉颅茅?鲁茅拢?忙聽录茂录?natural/emotional/humorous莽颅?茂录?
-            character_id: 猫搂?猫?虏ID茂录?莽?篓盲潞?茅?鲁猫?虏氓?鹿茅??茂录?
-            voice_id: 茅?鲁猫?虏ID茂录?盲录?氓??盲陆驴莽?篓茂录?
-            speed: 猫炉颅茅??茂录?0.5-2.0茂录?            pitch: 茅?鲁猫掳?茂录?.5-2.0茂录?            volume: 茅?鲁茅??茂录?.0-1.0茂录?        
+            text: 要转换的文本
+            voice_style: 语音风格，natural/emotional/humorous等；
+            character_id: 角色ID，用于语音克隆；
+            voice_id: 语音ID，优先使用；
+            speed: 语速，0.5-2.0；
+            pitch: 音调，0.5-2.0；
+            volume: 音量，0.0-1.0；
+        
         Returns:
-            GenerationResult: 氓??氓?芦莽??忙??莽??茅?鲁茅垄?忙?掳忙?庐茂录?base64莽录?莽聽?茂录?        """
+            GenerationResult: 包含生成的语音数据，base64编码；
+        """
         if not text or not text.strip():
             return GenerationResult(
                 success=False,
@@ -921,7 +930,7 @@ class Qwen3TTSAdapter(BaseModelAdapter):
 
 
 class JianyingAPIAdapter(BaseModelAdapter):
-    """氓?陋氓陆卤API茅??茅??氓??- 猫搂?茅垄?莽录?猫戮?"""
+    """剪影API适配器 - 视频编辑"""
 
     def generate(
         self,
@@ -932,8 +941,8 @@ class JianyingAPIAdapter(BaseModelAdapter):
         subtitles: Optional[List[Dict[str, Any]]] = None,
         effects: Optional[List[Dict[str, Any]]] = None
     ) -> GenerationResult:
-        """莽录?猫戮?猫搂?茅垄?"""
-        # 猫炉禄氓??忙??忙??猫搂?茅垄?忙??盲禄?        videos_data = []
+        """编辑视频"""
+        # 获取所有视频数据
         for video_path in video_paths:
             with open(video_path, "rb") as f:
                 import base64
@@ -956,10 +965,10 @@ class JianyingAPIAdapter(BaseModelAdapter):
             result = self._make_request("v1/videos/edit", payload)
             
             if "data" in result:
-                # 盲驴?氓颅?莽录?猫戮?氓??莽??猫搂?茅垄?
+                # 处理编辑后的视频
                 video_url = result["data"].get("video_url")
                 if video_url:
-                    # 盲赂?猫陆陆猫搂?茅垄?氓?掳忙??氓庐?猫路炉氓戮?                    response = requests.get(video_url, timeout=60)
+                    # 下载视频到本地路径
                     response.raise_for_status()
                     
                     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -994,27 +1003,15 @@ class ModelAdapterFactory:
     """统一模型适配器入口（兼容旧调用签名）。"""
 
     _KEY_ALIAS_MAP = {
-        "wan_t2i": "wan26_t2i",
-        "wan2.6-t2i": "wan26_t2i",
-        "wan_i2v": "wan26_i2v",
-        "wan_t2v": "wan26_t2v",
-        "wan_r2v": "wan26_r2v",
-        "wan-t2i": "wan26_t2i",
-        "wan-i2v": "wan26_i2v",
-        "wan-t2v": "wan26_t2v",
-        "wan-r2v": "wan26_r2v",
     }
     _BRIDGE_MODEL_MAP = {
-        "wan26_t2i": "wan2.6-t2i",
-        "wan26_i2v": "wan2.6-i2v",
-        "wan26_t2v": "wan2.6-t2v",
-        "wan26_r2v": "wan2.6-r2v",
     }
     _ENV_PREFIX_MAP = {
-        "wan26_t2i": "WAN_T2I",
-        "wan26_i2v": "WAN_I2V",
-        "wan26_t2v": "WAN_T2V",
-        "wan26_r2v": "WAN_R2V",
+        "wan2.6-t2i": "WAN_T2I",
+        "wan2.7-i2v": "WAN_I2V",
+        "wan2.7-t2v": "WAN_T2V",
+        "wan2.7-r2v": "WAN_R2V",
+        "wan2.7-videoedit": "WAN_VIDEOEDIT",
         "wan_image_edit": "WAN_IMAGE_EDIT",
         "qwen_image_edit_plus": "QWEN_IMAGE_EDIT",
         "qwen_image_edit_max": "QWEN_IMAGE_EDIT_MAX",
@@ -1078,7 +1075,7 @@ class ModelAdapterFactory:
             if not base_url:
                 base_url = fallback_base
 
-        timeout_default = 600 if env_prefix in {"WAN_I2V", "WAN_T2V", "WAN_R2V"} else 60
+        timeout_default = 600 if env_prefix in {"WAN_I2V", "WAN_T2V", "WAN_R2V", "WAN_VIDEOEDIT"} else 60
         timeout = self._safe_int_env(f"{env_prefix}_TIMEOUT")
         max_retries = self._safe_int_env(f"{env_prefix}_MAX_RETRIES")
 

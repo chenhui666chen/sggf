@@ -948,6 +948,8 @@ def run_dreamweaver_task(
                 payload["qc_config"] = runtime_config["qc_config"]
             if isinstance(runtime_config.get("video_config"), dict):
                 payload["video_config"] = runtime_config["video_config"]
+            if isinstance(runtime_config.get("preflight"), dict):
+                payload["preflight"] = runtime_config.get("preflight")
             if isinstance(runtime_config.get("quality_mode"), str) and runtime_config["quality_mode"].strip():
                 payload["quality_mode"] = runtime_config["quality_mode"].strip().lower()
             if isinstance(runtime_config.get("smart_tuning"), bool):
@@ -1264,6 +1266,8 @@ def run_dreamweaver_task(
             "audit": ctx.payload.get("audit"),
             "autoqc": ctx.payload.get("autoqc"),
             "qc_warning": ctx.payload.get("qc_warning"),
+            "preflight": ctx.payload.get("preflight"),
+            "video_provider_trace": ctx.payload.get("video_provider_trace"),
         }
 
         if ctx.state == State.DONE:

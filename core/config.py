@@ -13,6 +13,7 @@ class RouterConfig:
     MAX_REASONABLE_COST: float = 1.0
     MAX_REASONABLE_LATENCY: float = 120.0
     DEFAULT_MAX_FALLBACKS: int = 2
+    SEMANTIC_MAX_BOOST: float = 0.15
     
     QUALITY_WEIGHT: float = 0.35
     COST_WEIGHT: float = 0.25
@@ -92,6 +93,7 @@ class ModelAdapterConfig:
                 "max_reasonable_cost": self.router.MAX_REASONABLE_COST,
                 "max_reasonable_latency": self.router.MAX_REASONABLE_LATENCY,
                 "default_max_fallbacks": self.router.DEFAULT_MAX_FALLBACKS,
+                "semantic_max_boost": self.router.SEMANTIC_MAX_BOOST,
             },
             "fallback": {
                 "max_attempts": self.fallback.MAX_ATTEMPTS,

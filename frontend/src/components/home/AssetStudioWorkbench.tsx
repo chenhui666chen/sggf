@@ -237,8 +237,8 @@ const IMAGE_EDIT_MODEL_OPTIONS: ModelOption[] = [
 
 const VIDEO_TEXT_MODEL_OPTIONS: ModelOption[] = [
   {
-    value: 'wan2.6-t2v',
-    label: 'wan2.6-t2v',
+    value: 'wan2.7-t2v',
+    label: 'wan2.7-t2v',
     helper: '质量优先的视频主力模型，支持镜头控制，适合正式生成。',
   },
   {
@@ -250,37 +250,37 @@ const VIDEO_TEXT_MODEL_OPTIONS: ModelOption[] = [
 
 const VIDEO_IMAGE_MODEL_OPTIONS: ModelOption[] = [
   {
-    value: 'wan2.6-i2v',
-    label: 'wan2.6-i2v',
+    value: 'wan2.7-i2v',
+    label: 'wan2.7-i2v',
     helper: '首帧驱动模型，适合基于参考图生成更稳定的人物或场景视频。',
   },
   {
-    value: 'wan2.6-r2v',
-    label: 'wan2.6-r2v',
+    value: 'wan2.7-r2v',
+    label: 'wan2.7-r2v',
     helper: '参考视频+多图驱动，支持首帧/尾帧控制，适合风格一致的镜头续接。',
   },
 ]
 
 const MOTION_MODEL_OPTIONS: ModelOption[] = [
   {
-    value: 'wan2.6-r2v',
-    label: 'wan2.6-r2v',
+    value: 'wan2.7-r2v',
+    label: 'wan2.7-r2v',
     helper: '动作控制首选，支持参考视频+多图（最多5张），首尾帧控制，主体一致性最强。',
   },
   {
-    value: 'wan2.6-i2v',
-    label: 'wan2.6-i2v',
+    value: 'wan2.7-i2v',
+    label: 'wan2.7-i2v',
     helper: '单图驱动动画化，适合从静态图生成运动画面。',
   },
   {
-    value: 'wan2.6-t2v',
-    label: 'wan2.6-t2v',
+    value: 'wan2.7-t2v',
+    label: 'wan2.7-t2v',
     helper: '纯提示词驱动，镜头语言更强的运动片段。',
   },
 ]
 
 const VIDEO_DURATION_OPTIONS_BY_MODEL: Record<string, DurationOption[]> = {
-  'wan2.6-t2v': [
+  'wan2.7-t2v': [
     { value: '3', label: '3 秒' },
     { value: '5', label: '5 秒' },
     { value: '10', label: '10 秒' },
@@ -290,16 +290,21 @@ const VIDEO_DURATION_OPTIONS_BY_MODEL: Record<string, DurationOption[]> = {
     { value: '3', label: '3 秒' },
     { value: '5', label: '5 秒' },
   ],
-  'wan2.6-i2v': [
+  'wan2.7-i2v': [
     { value: '3', label: '3 秒' },
     { value: '5', label: '5 秒' },
     { value: '10', label: '10 秒' },
   ],
-  'wan2.6-r2v': [
+  'wan2.7-r2v': [
     { value: '3', label: '3 秒' },
     { value: '5', label: '5 秒' },
     { value: '10', label: '10 秒' },
     { value: '15', label: '15 秒' },
+  ],
+  'wan2.7-videoedit': [
+    { value: '3', label: '3 秒' },
+    { value: '5', label: '5 秒' },
+    { value: '10', label: '10 秒' },
   ],
 }
 
@@ -417,7 +422,7 @@ const AUDIO_TEMPO_OPTIONS = [
 ]
 
 function getFallbackDurationOptions(modelId: string): DurationOption[] {
-  return VIDEO_DURATION_OPTIONS_BY_MODEL[modelId] || VIDEO_DURATION_OPTIONS_BY_MODEL['wan2.6-t2v']
+  return VIDEO_DURATION_OPTIONS_BY_MODEL[modelId] || VIDEO_DURATION_OPTIONS_BY_MODEL['wan2.7-t2v']
 }
 
 function getRecommendedDuration(options: DurationOption[]): string {
@@ -503,7 +508,7 @@ function getSupportsCameraControl(
   if (typeof runtimeCapabilityHints?.supports_camera_control === 'boolean') {
     return runtimeCapabilityHints.supports_camera_control
   }
-  return modelId === 'wan2.6-t2v'
+  return modelId === 'wan2.7-t2v'
 }
 
 function getMaxReferenceImages(
@@ -1078,7 +1083,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const [imageResult, setImageResult] = useState<AssetStudioGenerateResponse | null>(null)
 
   const [videoPrompt, setVideoPrompt] = useState('')
-  const [videoModelId, setVideoModelId] = useState('wan2.6-t2v')
+  const [videoModelId, setVideoModelId] = useState('wan2.7-t2v')
   const [videoDuration, setVideoDuration] = useState('5')
   const [videoSize, setVideoSize] = useState(VIDEO_SIZE_OPTIONS[1].value)
   const [videoCameraControl, setVideoCameraControl] = useState('')
@@ -1088,7 +1093,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const [videoResult, setVideoResult] = useState<AssetStudioGenerateResponse | null>(null)
 
   const [motionPrompt, setMotionPrompt] = useState('')
-  const [motionModelId, setMotionModelId] = useState('wan2.6-i2v')
+  const [motionModelId, setMotionModelId] = useState('wan2.7-i2v')
   const [motionDuration, setMotionDuration] = useState('5')
   const [motionSize, setMotionSize] = useState(VIDEO_SIZE_OPTIONS[1].value)
   const [motionLevel, setMotionLevel] = useState('medium')
@@ -1283,12 +1288,12 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
 
   useEffect(() => {
     if (activeTabId !== 'video') return
-    if (videoUsesReferenceMode && videoModelId !== 'wan2.6-i2v') {
-      setVideoModelId(recommendedVideoModel?.value || 'wan2.6-i2v')
+    if (videoUsesReferenceMode && videoModelId !== 'wan2.7-i2v') {
+      setVideoModelId(recommendedVideoModel?.value || 'wan2.7-i2v')
       return
     }
-    if (!videoUsesReferenceMode && videoModelId === 'wan2.6-i2v') {
-      setVideoModelId(recommendedVideoModel?.value || 'wan2.6-t2v')
+    if (!videoUsesReferenceMode && videoModelId === 'wan2.7-i2v') {
+      setVideoModelId(recommendedVideoModel?.value || 'wan2.7-t2v')
     }
   }, [activeTabId, recommendedVideoModel, videoModelId, videoUsesReferenceMode])
 
@@ -1674,7 +1679,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                   <Chip size="small" label={videoUsesReferenceMode ? '首帧驱动模式' : '纯文本视频模式'} variant="outlined" sx={{ color: 'white' }} />
                   <Chip
                     size="small"
-                    label={videoModelId === 'wan2.6-t2v-fast' ? '快速预览' : videoModelId === 'wan2.6-i2v' ? '稳定主体' : '正式生成'}
+                    label={videoModelId === 'wan2.6-t2v-fast' ? '快速预览' : videoModelId === 'wan2.7-i2v' ? '稳定主体' : '正式生成'}
                     variant="outlined"
                     sx={{ color: 'white' }}
                   />
@@ -1797,7 +1802,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                     variant="outlined"
                     sx={getRoutingStatusChipSx(selectedMotionRoutingSignal)}
                   />
-                  <Chip size="small" label={motionModelId === 'wan2.6-i2v' ? '参考图驱动' : '镜头语言增强'} variant="outlined" sx={{ color: 'white' }} />
+                  <Chip size="small" label={motionModelId === 'wan2.7-i2v' ? '参考图驱动' : '镜头语言增强'} variant="outlined" sx={{ color: 'white' }} />
                   <Chip size="small" label="动作控制" variant="outlined" sx={{ color: 'white' }} />
                 </Stack>
                 {renderRoutingStatusMeta(selectedMotionRoutingSignal)}

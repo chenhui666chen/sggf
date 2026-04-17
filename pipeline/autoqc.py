@@ -10,6 +10,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from adapters.adapter_helpers import chat_messages, get_model_info
 from agents.vlm_utils import clamp_text_list
+from pipeline.media_presets import (
+    DREAMWEAVER_I2V_ENGINE,
+    is_dreamweaver_auto_engine,
+    is_dreamweaver_t2v_engine,
+    normalize_dreamweaver_video_engine,
+)
 
 
 DEFAULT_SIMILARITY_THRESHOLD = 0.9
@@ -76,7 +82,7 @@ def _safe_float(value: Any) -> Optional[float]:
         return None
 
 
-def _is_wan_i2v_configured() -> bool:
+def _is_dreamweaver_i2v_configured() -> bool:
     api_key = str(os.getenv("WAN_I2V_API_KEY") or "").strip()
     base_url = str(os.getenv("WAN_I2V_BASE_URL") or "").strip()
     model = (
@@ -971,15 +977,15 @@ def _route_from_failures(*, failures: List[AutoQCFailure], payload: Dict[str, An
 
     if any(t in {"missing_video_clips", "video_engine_not_i2v", "i2v_fallback"} for t in types):
         patch: Dict[str, Any] = {}
-        if _is_wan_i2v_configured():
-            patch["video_config"] = {"engine": "wan_i2v"}
+        if _is_dreamweaver_i2v_configured():
+            patch["video_config"] = {"engine": DREAMWEAVER_I2V_ENGINE}
             if any(t == "i2v_fallback" for t in types):
                 if not (isinstance(video_cfg.get("parallelism"), int) and int(video_cfg.get("parallelism")) <= 1):
                     patch["video_config"]["parallelism"] = 1
         patch = _maybe_with_regen_shots(patch=patch, target_state="VIDEO")
         return AutoQCRoute(
             target_state="VIDEO",
-            action="switch_to_i2v" if _is_wan_i2v_configured() else "rerun_video",
+            action="switch_to_i2v" if _is_dreamweaver_i2v_configured() else "rerun_video",
             reason="video quality route mismatch",
             failure_types=types,
             patch=patch,
@@ -1094,6 +1100,56 @@ def _route_from_failures(*, failures: List[AutoQCFailure], payload: Dict[str, An
         failure_types=types,
         patch=_maybe_with_regen_shots(patch=None, target_state="KEYFRAMES"),
     )
+
+
+def _submit_qc_feedback(report: AutoQCReport, payload: Dict[str, Any]) -> None:
+    try:
+        from app.tasks.feedback_tasks import collect_qc_feedback_task
+
+        model_id = str(payload.get("model_id") or payload.get("video_model_id") or "")
+        if not model_id:
+            return
+
+        task_type = str(payload.get("modality") or "text_to_video")
+
+        style_scores = [r.scores.style for r in report.shots.values() if r.scores.style is not None]
+        identity_scores = [r.scores.identity for r in report.shots.values() if r.scores.identity is not None]
+        structure_scores = [r.scores.structure for r in report.shots.values() if r.scores.structure is not None]
+
+        avg_style = sum(style_scores) / len(style_scores) if style_scores else None
+        avg_identity = sum(identity_scores) / len(identity_scores) if identity_scores else None
+        avg_structure = sum(structure_scores) / len(structure_scores) if structure_scores else None
+
+        semantic_failures = [f for f in report.failures if f.failure_type == "semantic_mismatch"]
+        state_failures = [f for f in report.failures if f.failure_type == "state_continuity_break"]
+
+        prompt_adherence = None
+        if semantic_failures:
+            scores = [float(f.meta.get("match_score", 0.0)) for f in semantic_failures if isinstance(f.meta, dict)]
+            prompt_adherence = sum(scores) / len(scores) if scores else None
+
+        character_consistency = None
+        if state_failures:
+            scores = [float(f.meta.get("match_score", 0.0)) for f in state_failures if isinstance(f.meta, dict)]
+            character_consistency = sum(scores) / len(scores) if scores else None
+
+        collect_qc_feedback_task.delay(
+            model_id=model_id,
+            task_type=task_type,
+            qc_passed=report.pass_,
+            qc_score=report.overall_score,
+            qc_details={
+                "shot_count": len(report.shots),
+                "hard_failure_count": sum(1 for f in report.failures if f.severity == "hard"),
+                "failure_types": list({f.failure_type for f in report.failures}),
+            },
+            style_match_score=avg_style,
+            prompt_adherence_score=prompt_adherence,
+            visual_quality_score=avg_structure,
+            character_consistency_score=character_consistency,
+        )
+    except Exception:
+        pass
 
 
 def run(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1216,16 +1272,16 @@ def run(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     quality_mode = str(payload.get("quality_mode") or "").strip().lower()
     video_cfg = payload.get("video_config") if isinstance(payload.get("video_config"), dict) else {}
-    video_engine = str(video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "").strip().lower()
-    is_t2v_engine = video_engine in {"wan_t2v", "wan26_t2v", "t2v"}
-    is_auto_engine = video_engine in {"wan_auto", "auto"}
+    video_engine = normalize_dreamweaver_video_engine(video_cfg.get("engine") or os.getenv("DREAMWEAVER_VIDEO_ENGINE") or "")
+    is_t2v_engine = is_dreamweaver_t2v_engine(video_engine)
+    is_auto_engine = is_dreamweaver_auto_engine(video_engine)
     require_i2v_cfg = cfg.get("require_i2v", DEFAULT_REQUIRE_I2V)
     if isinstance(require_i2v_cfg, bool):
         require_i2v = bool(require_i2v_cfg)
     else:
         # 默认策略：quality_mode=quality 且配置了 I2V 才会强制 require_i2v；
         # 当用户显式选择 T2V 或 wan_auto 时不强制（可手动 override）。
-        require_i2v = (quality_mode == "quality" and _is_wan_i2v_configured()) and (not is_t2v_engine) and (not is_auto_engine)
+        require_i2v = (quality_mode == "quality" and _is_dreamweaver_i2v_configured()) and (not is_t2v_engine) and (not is_auto_engine)
 
     cfg_effective = {
         "similarity_threshold": cfg.get("similarity_threshold", DEFAULT_SIMILARITY_THRESHOLD),
@@ -1634,12 +1690,12 @@ def run(payload: Dict[str, Any]) -> Dict[str, Any]:
                     shot_key, _role = _parse_role_from_path(str(clip.get("path") or ""))
                     fallback_shots.append(shot_key or "")
 
-            if clip_engines and any(e != "wan_i2v" for e in clip_engines):
+            if clip_engines and any(e != DREAMWEAVER_I2V_ENGINE for e in clip_engines):
                 all_failures.append(
                     AutoQCFailure(
                         failure_type="video_engine_not_i2v",
                         severity="hard",
-                        message="video engine is not wan_i2v",
+                        message=f"video engine is not {DREAMWEAVER_I2V_ENGINE}",
                         meta={"engines": clip_engines[:8]},
                     )
                 )
@@ -1648,7 +1704,7 @@ def run(payload: Dict[str, Any]) -> Dict[str, Any]:
                     AutoQCFailure(
                         failure_type="i2v_fallback",
                         severity="hard",
-                        message="wan_i2v clip fell back to slideshow",
+                        message=f"{DREAMWEAVER_I2V_ENGINE} clip fell back to slideshow",
                         meta={"shot_keys": [s for s in fallback_shots if s][:8]},
                     )
                 )
@@ -1674,4 +1730,7 @@ def run(payload: Dict[str, Any]) -> Dict[str, Any]:
     result["pass"] = result.pop("pass_")
     for shot in result.get("shots", {}).values():
         shot["pass"] = shot.pop("pass_")
+
+    _submit_qc_feedback(report, payload)
+
     return result

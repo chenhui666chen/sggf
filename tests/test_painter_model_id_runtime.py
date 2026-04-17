@@ -39,7 +39,7 @@ def test_generate_t2i_with_candidates_accepts_model_id_string(
     output_path = tmp_path / "out.png"
 
     result = painter._generate_t2i_with_candidates(
-        adapter="wan_t2i",
+        adapter="wan2.6-t2i",
         prompt="hero portrait",
         negative_prompt="blurry",
         width=768,
@@ -66,7 +66,7 @@ def test_generate_t2i_with_candidates_accepts_model_id_string(
         "width": 768,
         "height": 1024,
         "seed": 11,
-        "model_id": "wan_t2i",
+        "model_id": "wan2.6-t2i",
     }
 
 
@@ -103,7 +103,7 @@ def test_generate_t2i_with_parallel_candidates_keeps_model_id_string_path(
     output_path = tmp_path / "parallel.png"
 
     result = painter._generate_t2i_with_candidates(
-        adapter="wan_t2i",
+        adapter="wan2.6-t2i",
         prompt="hero portrait",
         negative_prompt="blurry",
         width=768,
@@ -124,7 +124,7 @@ def test_generate_t2i_with_parallel_candidates_keeps_model_id_string_path(
 
     assert hasattr(painter, "create_runtime_client") is False
     assert len(calls) == 2
-    assert [call["model_id"] for call in calls] == ["wan_t2i", "wan_t2i"]
+    assert [call["model_id"] for call in calls] == ["wan2.6-t2i", "wan2.6-t2i"]
     assert sorted(int(call["seed"]) for call in calls) == [21, 22]
     assert output_path.exists() is True
     assert result["candidate_count"] == 2

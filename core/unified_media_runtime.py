@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 _OPERATION_MODEL_IDS: Dict[str, set[str]] = {
     "generate_image": {"wan2.6-t2i"},
-    "generate_video": {"wan2.6-t2v", "wan2.6-t2v-fast", "wan2.6-i2v", "wan2.6-r2v"},
+    "generate_video": {"wan2.7-t2v", "wan2.6-t2v-fast", "wan2.7-i2v", "wan2.7-r2v", "wan2.7-videoedit"},
     "edit_image": {"qwen-image-edit-plus", "qwen-image-edit-max"},
     "analyze_image": {"qwen3-vl-plus"},
     "analyze_video": {"qwen3-vl-plus"},

@@ -1,21 +1,39 @@
+import { stageToPreviewStep as stageToPreviewStepConstant } from '../constants/dreamweaver'
 import type {
+  DreamweaverLibraryPlanItem,
+  DreamweaverRunPreflight,
+  DreamweaverVideoProviderShotTrace,
+  DreamweaverVideoProviderTrace,
+  LibraryAsset,
+  LibraryPayload,
   PersistedDreamWeaverRun,
   RunResult,
-  LibraryPayload,
-  LibraryAsset,
-  DreamweaverLibraryPlanItem,
-  CharacterView,
 } from '../types/dreamweaver'
+import { characterViewLabel, parseLibraryRole } from './dreamweaverLibraryRole'
 
-export const DREAMWEAVER_RUN_STORAGE_PREFIX = 'dreamweaver_run_'
+export const DREAMWEAVER_RUN_STORAGE_PREFIX = 'dreamweaver:lastRun:'
+export const DREAMWEAVER_LEGACY_RUN_STORAGE_PREFIX = 'dreamweaver_run_'
 
-export function dreamweaverRunStorageKey(projectId: number): string {
-  return `${DREAMWEAVER_RUN_STORAGE_PREFIX}${projectId}`
+function legacyDreamweaverRunStorageKey(projectId: number): string {
+  return `${DREAMWEAVER_LEGACY_RUN_STORAGE_PREFIX}${projectId}`
 }
 
-export function readPersistedDreamWeaverRun(projectId: number): PersistedDreamWeaverRun | null {
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function toDreamweaverRunPreflight(value: unknown): DreamweaverRunPreflight | null {
+  return asRecord(value) ? (value as DreamweaverRunPreflight) : null
+}
+
+function toDreamweaverVideoProviderTrace(value: unknown): DreamweaverVideoProviderTrace | null {
+  return asRecord(value) ? (value as DreamweaverVideoProviderTrace) : null
+}
+
+function readPersistedDreamWeaverRunByKey(key: string): PersistedDreamWeaverRun | null {
   try {
-    const raw = localStorage.getItem(dreamweaverRunStorageKey(projectId))
+    const raw = localStorage.getItem(key)
     if (!raw) return null
     const obj = JSON.parse(raw) as PersistedDreamWeaverRun
     if (!obj || typeof obj !== 'object') return null
@@ -24,6 +42,17 @@ export function readPersistedDreamWeaverRun(projectId: number): PersistedDreamWe
   } catch {
     return null
   }
+}
+
+export function dreamweaverRunStorageKey(projectId: number): string {
+  return `${DREAMWEAVER_RUN_STORAGE_PREFIX}${projectId}`
+}
+
+export function readPersistedDreamWeaverRun(projectId: number): PersistedDreamWeaverRun | null {
+  return (
+    readPersistedDreamWeaverRunByKey(dreamweaverRunStorageKey(projectId)) ||
+    readPersistedDreamWeaverRunByKey(legacyDreamweaverRunStorageKey(projectId))
+  )
 }
 
 export function writePersistedDreamWeaverRun(projectId: number, patch: Partial<PersistedDreamWeaverRun>): void {
@@ -48,6 +77,7 @@ export function writePersistedDreamWeaverRun(projectId: number, patch: Partial<P
     }
     if (!next.run_id) return
     localStorage.setItem(dreamweaverRunStorageKey(projectId), JSON.stringify(next))
+    localStorage.removeItem(legacyDreamweaverRunStorageKey(projectId))
   } catch {
     // ignore
   }
@@ -56,20 +86,14 @@ export function writePersistedDreamWeaverRun(projectId: number, patch: Partial<P
 export function clearPersistedDreamWeaverRun(projectId: number): void {
   try {
     localStorage.removeItem(dreamweaverRunStorageKey(projectId))
+    localStorage.removeItem(legacyDreamweaverRunStorageKey(projectId))
   } catch {
     // ignore
   }
 }
 
 export function stageToPreviewStep(stage: string | null | undefined): number {
-  const value = (stage || '').trim().toLowerCase()
-  if (!value) return 0
-  if (value === 'init' || value === 'script' || value === 'waiting_script_approval') return 0
-  if (value === 'storyboard') return 1
-  if (value === 'asset_library' || value === 'waiting_approval') return 2
-  if (value === 'keyframes' || value === 'midframes' || value === 'video' || value === 'waiting_video_confirmation') return 3
-  if (value === 'edit' || value === 'review' || value === 'done' || value === 'rework' || value === 'failed') return 4
-  return 0
+  return stageToPreviewStepConstant(stage)
 }
 
 export function ratioToCssAspectRatio(value: string | null | undefined, fallback = '16 / 9'): string {
@@ -109,51 +133,6 @@ export function buildProtectedMergedVideoUrl(runId: string): string {
   return `protected://dreamweaver-run-merged/${encodeURIComponent(runId)}`
 }
 
-export function characterViewLabel(view: CharacterView): string {
-  const labels: Record<CharacterView, string> = {
-    front: '正面',
-    side: '侧面',
-    back: '背面',
-    half_front: '半身正面',
-    half_3_4: '半身3-4',
-    half_side: '半身侧面',
-  }
-  return labels[view] || view
-}
-
-export function parseLibraryRole(role: string): { entityType: 'character' | 'scene' | 'prop' | 'unknown'; entityId: number | null; view: CharacterView | null } {
-  const raw = String(role || '').trim()
-  if (!raw) return { entityType: 'unknown', entityId: null, view: null }
-
-  if (raw.startsWith('lib_character_portrait_')) {
-    const viewMap: Record<string, CharacterView> = {
-      front: 'front',
-      side: 'side',
-      back: 'back',
-      half_front: 'half_front',
-      half_3_4: 'half_3_4',
-      half_side: 'half_side',
-    }
-    const viewKey = raw.replace('lib_character_portrait_', '').toLowerCase()
-    const view = viewMap[viewKey] || null
-    return { entityType: 'character', entityId: null, view }
-  }
-
-  const sceneMatch = raw.match(/^lib_scene_card:(\d+)$/)
-  if (sceneMatch) {
-    const entityId = Number.parseInt(sceneMatch[1], 10)
-    return { entityType: 'scene', entityId: Number.isFinite(entityId) && entityId > 0 ? entityId : null, view: null }
-  }
-
-  const propMatch = raw.match(/^lib_prop_card:(\d+)$/)
-  if (propMatch) {
-    const entityId = Number.parseInt(propMatch[1], 10)
-    return { entityType: 'prop', entityId: Number.isFinite(entityId) && entityId > 0 ? entityId : null, view: null }
-  }
-
-  return { entityType: 'unknown', entityId: null, view: null }
-}
-
 export function buildLibraryPlanItemsFromPayload(data: LibraryPayload | null | undefined): DreamweaverLibraryPlanItem[] {
   if (!data || typeof data !== 'object') return []
 
@@ -166,27 +145,27 @@ export function buildLibraryPlanItemsFromPayload(data: LibraryPayload | null | u
   }
 
   const entityNameByKey = new Map<string, string>()
-  const spec = data.spec && typeof data.spec === 'object' ? data.spec : {}
+  const spec = asRecord(data.spec) || {}
   const sections: Array<{ key: string; entityType: 'character' | 'scene' | 'prop' }> = [
     { key: 'characters', entityType: 'character' },
     { key: 'scenes', entityType: 'scene' },
     { key: 'props', entityType: 'prop' },
   ]
   for (const section of sections) {
-    const items = Array.isArray((spec as Record<string, unknown>)?.[section.key]) ? ((spec as Record<string, unknown>)[section.key] as unknown[]) : []
+    const items = Array.isArray(spec[section.key]) ? (spec[section.key] as unknown[]) : []
     for (const item of items) {
-      if (!item || typeof item !== 'object') continue
-      const entityId = Number.parseInt(String((item as Record<string, unknown>).entity_id ?? ''), 10)
+      const itemRecord = asRecord(item)
+      if (!itemRecord) continue
+      const entityId = Number.parseInt(String(itemRecord.entity_id ?? ''), 10)
       if (!Number.isFinite(entityId) || entityId <= 0) continue
-      const name = String((item as Record<string, unknown>).name || '').trim()
+      const name = String(itemRecord.name || '').trim()
       if (!name) continue
       entityNameByKey.set(`${section.entityType}:${entityId}`, name)
     }
   }
 
-  const requiredRolesRaw = Array.isArray((data.review as Record<string, unknown>)?.required_roles)
-    ? (((data.review as Record<string, unknown>).required_roles as unknown[]) ?? [])
-    : []
+  const review = asRecord(data.review) || {}
+  const requiredRolesRaw = Array.isArray(review.required_roles) ? (review.required_roles as unknown[]) : []
   const requiredRoles = requiredRolesRaw
     .map((raw) => String(raw || '').trim())
     .filter((role) => role)
@@ -209,7 +188,7 @@ export function buildLibraryPlanItemsFromPayload(data: LibraryPayload | null | u
     const entityName = nameFromSpec || (!isPlaceholderEntityName(nameFromAsset) ? nameFromAsset : '') || null
     const hasUri = Boolean(asset && String(asset.uri || '').trim())
     const status: DreamweaverLibraryPlanItem['status'] = hasUri ? 'done' : 'planned'
-    const viewLabel = parsed.entityType === 'character' && parsed.view ? characterViewLabel(parsed.view) : ''
+    const viewLabel = parsed.entityType === 'character' && parsed.view ? characterViewLabel(parsed.view, 'short') : ''
     const baseLabel = entityName || role
     const label = viewLabel && !baseLabel.includes(viewLabel) ? `${baseLabel} ${viewLabel}` : baseLabel
 
@@ -220,58 +199,64 @@ export function buildLibraryPlanItemsFromPayload(data: LibraryPayload | null | u
       entity_id: entityId,
       entity_name: entityName,
       label,
-      view: parsed.entityType === 'character' && parsed.view ? parsed.view : null,
+      view: parsed.entityType === 'character' ? parsed.view || null : null,
       status,
       kind: 'image',
       uri: hasUri ? String(asset!.uri || '').trim() : null,
       asset_id: asset?.id ?? null,
-      approved: typeof asset?.meta?.approved === 'boolean' ? Boolean(asset?.meta?.approved) : null,
+      approved: typeof asset?.meta?.approved === 'boolean' ? Boolean(asset.meta?.approved) : null,
     })
   }
   return items
 }
 
 export function extractMergedVideoFromContract(contract: unknown): string | null {
-  const anchorSets = (contract as Record<string, unknown>)?.anchor_sets_ref
-  const mergedFromAnchor = (anchorSets as Record<string, unknown>)?.merged_video as Record<string, unknown> | undefined
+  const contractRecord = asRecord(contract)
+  if (!contractRecord) return null
+
+  const anchorSets = asRecord(contractRecord.anchor_sets_ref)
+  const mergedFromAnchor = asRecord(anchorSets?.merged_video)
   const uriFromAnchor = mergedFromAnchor?.uri
   if (typeof uriFromAnchor === 'string' && uriFromAnchor.trim()) return uriFromAnchor.trim()
 
-  const assets = Array.isArray((contract as Record<string, unknown>)?.assets) ? (contract as Record<string, unknown>).assets as unknown[] : []
+  const assets = Array.isArray(contractRecord.assets) ? (contractRecord.assets as unknown[]) : []
   for (const item of assets) {
-    const role = item && typeof item === 'object' ? String((item as Record<string, unknown>).role || '') : ''
+    const itemRecord = asRecord(item)
+    if (!itemRecord) continue
+    const role = String(itemRecord.role || '').trim()
     if (role !== 'merged_video') continue
-    const uri = item && typeof item === 'object' ? (item as Record<string, unknown>).uri as unknown : null
+    const uri = itemRecord.uri
     if (typeof uri === 'string' && uri.trim()) return uri.trim()
   }
   return null
 }
 
 export function buildResultFromRunSnapshot(data: unknown, fallbackRunId: string): RunResult | null {
-  const contract = (data as Record<string, unknown>)?.contract && typeof (data as Record<string, unknown>).contract === 'object' ? (data as Record<string, unknown>).contract as Record<string, unknown> : null
+  const dataRecord = asRecord(data)
+  const contract = asRecord(dataRecord?.contract)
   if (!contract) return null
 
-  const runtimeCfg = contract.runtime_config && typeof contract.runtime_config === 'object' ? contract.runtime_config as Record<string, unknown> : {}
-  const chapterIds = Array.isArray(runtimeCfg.chapter_ids) ? runtimeCfg.chapter_ids as number[] : []
+  const runtimeCfg = asRecord(contract.runtime_config) || {}
+  const chapterIds = Array.isArray(runtimeCfg.chapter_ids) ? (runtimeCfg.chapter_ids as unknown[]) : []
   let plan: Record<string, unknown> | undefined =
-    runtimeCfg.plan && typeof runtimeCfg.plan === 'object'
-      ? runtimeCfg.plan as Record<string, unknown>
-      : typeof runtimeCfg.plan_text === 'string' && (runtimeCfg.plan_text as string).trim()
-        ? { text: (runtimeCfg.plan_text as string).trim() }
-        : undefined
+    asRecord(runtimeCfg.plan) ||
+    (typeof runtimeCfg.plan_text === 'string' && runtimeCfg.plan_text.trim()
+      ? { text: runtimeCfg.plan_text.trim() }
+      : undefined)
+
   if (!plan) {
-    const scriptText = typeof runtimeCfg.script_text === 'string' ? runtimeCfg.script_text as string : ''
+    const scriptText = typeof runtimeCfg.script_text === 'string' ? runtimeCfg.script_text : ''
     if (scriptText.trim()) {
       const lines = scriptText.split(/\r?\n/)
-      const start = lines.findIndex((ln: string) => ln.trim() === '## 概要')
+      const start = lines.findIndex((line) => line.trim() === '## 概要')
       if (start >= 0) {
         const picked: string[] = []
-        for (const ln of lines.slice(start + 1)) {
-          const s = ln.trim()
-          if (!s) continue
-          if (s.startsWith('## ')) break
-          if (s.startsWith('-')) {
-            picked.push(s)
+        for (const line of lines.slice(start + 1)) {
+          const value = line.trim()
+          if (!value) continue
+          if (value.startsWith('## ')) break
+          if (value.startsWith('-')) {
+            picked.push(value)
             if (picked.length >= 6) break
           }
         }
@@ -286,34 +271,39 @@ export function buildResultFromRunSnapshot(data: unknown, fallbackRunId: string)
   const midframes: unknown[] = []
   const videoClips: unknown[] = []
 
-  const episodes = Array.isArray(contract.episodes) ? contract.episodes as unknown[] : []
-  for (const ep of episodes) {
-    const shots = ep && typeof ep === 'object' && Array.isArray((ep as Record<string, unknown>).shots) ? (ep as Record<string, unknown>).shots as unknown[] : []
+  const episodes = Array.isArray(contract.episodes) ? (contract.episodes as unknown[]) : []
+  for (const episode of episodes) {
+    const episodeRecord = asRecord(episode)
+    const shots = Array.isArray(episodeRecord?.shots) ? (episodeRecord.shots as unknown[]) : []
     for (const shot of shots) {
-      const shotSchemaV2 = (shot as Record<string, unknown>)?.shot_schema_v2 && typeof (shot as Record<string, unknown>).shot_schema_v2 === 'object' ? (shot as Record<string, unknown>).shot_schema_v2 as Record<string, unknown> : {}
+      const shotRecord = asRecord(shot)
+      if (!shotRecord) continue
+      const shotSchemaV2 = asRecord(shotRecord.shot_schema_v2) || {}
       storyboard.push({
-        scene_id: (shot as Record<string, unknown>)?.scene_id,
-        shot_id: (shot as Record<string, unknown>)?.shot_key,
-        desc: (shot as Record<string, unknown>)?.desc,
-        duration_s: (shot as Record<string, unknown>)?.duration_s,
-        cam_idx: shotSchemaV2?.cam_idx,
-        visual_desc: shotSchemaV2?.visual_desc,
-        ff_desc: shotSchemaV2?.ff_desc,
-        lf_desc: shotSchemaV2?.lf_desc,
-        motion_desc: shotSchemaV2?.motion_desc,
-        audio_desc: shotSchemaV2?.audio_desc,
-        ff_vis_char_ids: shotSchemaV2?.ff_vis_char_ids,
-        lf_vis_char_ids: shotSchemaV2?.lf_vis_char_ids,
-        head_frame: (shot as Record<string, unknown>)?.head_frame,
-        tail_frame: (shot as Record<string, unknown>)?.tail_frame,
+        scene_id: shotRecord.scene_id,
+        shot_id: shotRecord.shot_key,
+        desc: shotRecord.desc,
+        duration_s: shotRecord.duration_s,
+        cam_idx: shotSchemaV2.cam_idx,
+        visual_desc: shotSchemaV2.visual_desc,
+        ff_desc: shotSchemaV2.ff_desc,
+        lf_desc: shotSchemaV2.lf_desc,
+        motion_desc: shotSchemaV2.motion_desc,
+        audio_desc: shotSchemaV2.audio_desc,
+        ff_vis_char_ids: shotSchemaV2.ff_vis_char_ids,
+        lf_vis_char_ids: shotSchemaV2.lf_vis_char_ids,
+        head_frame: shotRecord.head_frame,
+        tail_frame: shotRecord.tail_frame,
       })
 
-      const assets = Array.isArray((shot as Record<string, unknown>)?.assets) ? (shot as Record<string, unknown>).assets as unknown[] : []
+      const assets = Array.isArray(shotRecord.assets) ? (shotRecord.assets as unknown[]) : []
       for (const asset of assets) {
-        const role = asset && typeof asset === 'object' ? String((asset as Record<string, unknown>).role || '') : ''
-        const uri = asset && typeof asset === 'object' ? (asset as Record<string, unknown>).uri as unknown : null
+        const assetRecord = asRecord(asset)
+        if (!assetRecord) continue
+        const role = String(assetRecord.role || '').trim()
+        const uri = assetRecord.uri
         if (typeof uri !== 'string' || !uri.trim()) continue
-        const meta = asset && typeof asset === 'object' && (asset as Record<string, unknown>).meta && typeof (asset as Record<string, unknown>).meta === 'object' ? (asset as Record<string, unknown>).meta as Record<string, unknown> : {}
+        const meta = asRecord(assetRecord.meta) || {}
 
         if (role === 'head_frame' || role === 'tail_frame') {
           keyframes.push({ path: uri, ratio: meta.ratio, spec: meta.spec, meta })
@@ -326,21 +316,15 @@ export function buildResultFromRunSnapshot(data: unknown, fallbackRunId: string)
     }
   }
 
-  const mergedVideo = extractMergedVideoFromContract(contract)
-  const autoqc = contract.autoqc && typeof contract.autoqc === 'object' ? contract.autoqc as Record<string, unknown> : undefined
-
-  const cameraTreeGeneration =
-    runtimeCfg.camera_tree_generation && typeof runtimeCfg.camera_tree_generation === 'object'
-      ? (runtimeCfg.camera_tree_generation as Record<string, unknown>)
-      : undefined
-  const cameraTree = Array.isArray(runtimeCfg.camera_tree) ? (runtimeCfg.camera_tree as unknown[]) : undefined
-  const cameraStates = Array.isArray(runtimeCfg.camera_states) ? (runtimeCfg.camera_states as unknown[]) : undefined
-  const cameraScenes = Array.isArray(runtimeCfg.camera_scenes) ? (runtimeCfg.camera_scenes as unknown[]) : undefined
-
-  const runId = typeof (data as Record<string, unknown>)?.run_id === 'string' && ((data as Record<string, unknown>).run_id as string).trim() ? ((data as Record<string, unknown>).run_id as string).trim() : fallbackRunId
-  const state = typeof (data as Record<string, unknown>)?.state === 'string' && ((data as Record<string, unknown>).state as string).trim() ? ((data as Record<string, unknown>).state as string).trim() : 'DONE'
-  const stage = (data as Record<string, unknown>)?.stage != null ? String((data as Record<string, unknown>).stage) : null
-  const progress = typeof (data as Record<string, unknown>)?.progress === 'number' ? (data as Record<string, unknown>).progress as number : null
+  const runId =
+    typeof dataRecord?.run_id === 'string' && dataRecord.run_id.trim() ? dataRecord.run_id.trim() : fallbackRunId
+  const state = typeof dataRecord?.state === 'string' && dataRecord.state.trim() ? dataRecord.state.trim() : 'DONE'
+  const stage = dataRecord?.stage != null ? String(dataRecord.stage) : null
+  const progress = typeof dataRecord?.progress === 'number' ? dataRecord.progress : null
+  const preflight = toDreamweaverRunPreflight(dataRecord?.preflight) || toDreamweaverRunPreflight(runtimeCfg.preflight)
+  const videoProviderTrace =
+    toDreamweaverVideoProviderTrace(dataRecord?.video_provider_trace) ||
+    toDreamweaverVideoProviderTrace(runtimeCfg.video_provider_trace)
 
   return {
     run_id: runId,
@@ -351,15 +335,17 @@ export function buildResultFromRunSnapshot(data: unknown, fallbackRunId: string)
     source_chapter_count: chapterIds.length,
     plan,
     storyboard: storyboard.length ? storyboard : undefined,
-    camera_tree_generation: cameraTreeGeneration ?? null,
-    camera_tree: cameraTree ?? null,
-    camera_states: cameraStates ?? null,
-    camera_scenes: cameraScenes ?? null,
+    camera_tree_generation: asRecord(runtimeCfg.camera_tree_generation) ?? null,
+    camera_tree: Array.isArray(runtimeCfg.camera_tree) ? (runtimeCfg.camera_tree as unknown[]) : null,
+    camera_states: Array.isArray(runtimeCfg.camera_states) ? (runtimeCfg.camera_states as unknown[]) : null,
+    camera_scenes: Array.isArray(runtimeCfg.camera_scenes) ? (runtimeCfg.camera_scenes as unknown[]) : null,
     keyframes: keyframes.length ? keyframes : undefined,
     midframes: midframes.length ? midframes : undefined,
     video_clips: videoClips.length ? videoClips : undefined,
-    merged_video: mergedVideo,
-    autoqc,
+    merged_video: extractMergedVideoFromContract(contract),
+    autoqc: asRecord(contract.autoqc) ?? undefined,
+    preflight,
+    video_provider_trace: videoProviderTrace,
   }
 }
 
@@ -382,6 +368,79 @@ export function mergeRunResult(prev: RunResult | null, next: RunResult | null): 
     audit: next.audit ?? prev.audit,
     autoqc: next.autoqc ?? prev.autoqc,
     qc_warning: next.qc_warning ?? prev.qc_warning,
+    preflight: next.preflight ?? prev.preflight,
+    video_provider_trace: next.video_provider_trace ?? prev.video_provider_trace,
+  }
+}
+
+export function resolveDreamweaverDiagnosticPreflight(
+  result: Pick<RunResult, 'preflight'> | null | undefined,
+  snapshotRuntimeConfig: unknown,
+  runPreflight: DreamweaverRunPreflight | null | undefined,
+): DreamweaverRunPreflight | null {
+  return (
+    toDreamweaverRunPreflight(result?.preflight) ||
+    toDreamweaverRunPreflight(asRecord(snapshotRuntimeConfig)?.preflight) ||
+    toDreamweaverRunPreflight(runPreflight)
+  )
+}
+
+export function resolveDreamweaverDiagnosticProviderTrace(
+  result: Pick<RunResult, 'video_provider_trace'> | null | undefined,
+  snapshotRuntimeConfig: unknown,
+): DreamweaverVideoProviderTrace | null {
+  return (
+    toDreamweaverVideoProviderTrace(result?.video_provider_trace) ||
+    toDreamweaverVideoProviderTrace(asRecord(snapshotRuntimeConfig)?.video_provider_trace)
+  )
+}
+
+export function indexDreamweaverProviderTraceByShotId(
+  trace: DreamweaverVideoProviderTrace | null | undefined,
+): Map<string, DreamweaverVideoProviderShotTrace> {
+  const map = new Map<string, DreamweaverVideoProviderShotTrace>()
+  const shots = Array.isArray(trace?.shots) ? trace.shots : []
+  for (const item of shots) {
+    const shotId = String(item?.shot_id || '').trim()
+    if (!shotId) continue
+    map.set(shotId, item)
+  }
+  return map
+}
+
+export interface DreamweaverProviderTraceSummary {
+  totalShots: number
+  recommendedKling: number
+  appliedKling: number
+  shadowed: number
+}
+
+export function summarizeDreamweaverProviderTrace(
+  trace: DreamweaverVideoProviderTrace | null | undefined,
+): DreamweaverProviderTraceSummary | null {
+  if (!trace) return null
+  const shots = Array.isArray(trace.shots) ? trace.shots : []
+  let recommendedKling = 0
+  let appliedKling = 0
+  let shadowed = 0
+
+  for (const item of shots) {
+    if (String(item?.recommended_provider || '').trim().toLowerCase() === 'kling') {
+      recommendedKling += 1
+    }
+    if (String(item?.applied_provider || '').trim().toLowerCase() === 'kling') {
+      appliedKling += 1
+    }
+    if (item?.shadowed) {
+      shadowed += 1
+    }
+  }
+
+  return {
+    totalShots: shots.length,
+    recommendedKling,
+    appliedKling,
+    shadowed,
   }
 }
 

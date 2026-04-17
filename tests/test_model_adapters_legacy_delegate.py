@@ -45,7 +45,7 @@ def _install_fake_wrapper(
     return captured
 
 
-def test_wan26_t2i_adapter_generate_delegates_to_runtime_wrapper(
+def test_wan2_6_t2i_adapter_generate_delegates_to_runtime_wrapper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from adapters.model_adapters import ModelConfig, Wan26T2IAdapter
@@ -68,7 +68,7 @@ def test_wan26_t2i_adapter_generate_delegates_to_runtime_wrapper(
         seed=11,
     )
 
-    assert captured["name"] == "wan26_t2i"
+    assert captured["name"] == "wan2.6-t2i"
     assert captured["method"] == "generate"
     assert captured["kwargs"] == {
         "prompt": "hero portrait",
@@ -89,8 +89,8 @@ def test_wan26_t2i_adapter_generate_delegates_to_runtime_wrapper(
     ("adapter_class_name", "wrapper_name", "call_kwargs", "expected_data"),
     [
         (
-            "Wan26I2VAdapter",
-            "wan26_i2v",
+            "Wan27I2VAdapter",
+            "wan2.7-i2v",
             {
                 "image_path": "person.png",
                 "prompt": "animate the portrait",
@@ -103,8 +103,8 @@ def test_wan26_t2i_adapter_generate_delegates_to_runtime_wrapper(
             {"video_url": "https://example.com/i2v.mp4"},
         ),
         (
-            "Wan26T2VAdapter",
-            "wan26_t2v",
+            "Wan27T2VAdapter",
+            "wan2.7-t2v",
             {
                 "prompt": "storm over the sea",
                 "negative_prompt": "low quality",
@@ -119,8 +119,8 @@ def test_wan26_t2i_adapter_generate_delegates_to_runtime_wrapper(
             {"video_url": "https://example.com/t2v.mp4"},
         ),
         (
-            "Wan26R2VAdapter",
-            "wan26_r2v",
+            "Wan27R2VAdapter",
+            "wan2.7-r2v",
             {
                 "reference_video_path": "scene.mp4",
                 "prompt": "keep the motion style",
