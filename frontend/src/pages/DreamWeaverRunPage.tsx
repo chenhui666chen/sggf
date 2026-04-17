@@ -183,6 +183,13 @@ import {
   DreamweaverRegenerateDialogShell,
 } from './dreamweaver-run/promptDialogs'
 import {
+  DreamweaverResultLibraryHint,
+  DreamweaverResultSummaryChipsRow,
+  DreamweaverResultSyncSection,
+  DreamweaverResultTextStageSection,
+  DreamweaverResultViewShell,
+} from './dreamweaver-run/resultView'
+import {
   RunSnapshotAssetPreviewSection,
   RunSnapshotMergedVideoSection,
   RunSnapshotPreviewPane,
@@ -5149,29 +5156,6 @@ export default function DreamWeaverRunPage() {
     })
   }
 
-  const renderResultTextStageSection = ({
-    title,
-    text,
-    emptyText,
-    marginTop = 0,
-    marginBottom = 1,
-  }: {
-    title: string
-    text?: string | null
-    emptyText: string
-    marginTop?: number
-    marginBottom?: number
-  }) => (
-    <>
-      <Typography variant="subtitle2" sx={{ fontWeight: 600, ...(marginTop > 0 ? { mt: marginTop } : {}), mb: 0.5 }}>
-        {title}
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={marginBottom > 0 ? { mb: marginBottom } : undefined}>
-        {text || emptyText}
-      </Typography>
-    </>
-  )
-
   const renderResultVideoAssetPreviewSections = () => (
     <>
       {renderRunAssetPreviewGrid('关键帧', resultKeyframePaths.slice(-6), 'image')}
@@ -5209,55 +5193,57 @@ export default function DreamWeaverRunPage() {
   )
 
   const renderResultPlanStageView = () => (
-    renderResultTextStageSection({
-      title: '计划 / 剧本提要',
-      text: resultPlanText,
-      emptyText: '未返回文本',
-    })
+    <DreamweaverResultTextStageSection
+      title="计划 / 剧本提要"
+      text={resultPlanText}
+      emptyText="未返回文本"
+    />
   )
 
   const renderResultStoryboardStageView = () => (
     <>
-      {renderResultTextStageSection({
-        title: '分镜（storyboard）',
-        text: result?.storyboard ? `${result.storyboard.length} 个镜头` : '暂无',
-        emptyText: '暂无',
-        marginBottom: 0,
-      })}
+      <DreamweaverResultTextStageSection
+        title="分镜（storyboard）"
+        text={result?.storyboard ? `${result.storyboard.length} 个镜头` : '暂无'}
+        emptyText="暂无"
+        marginBottom={0}
+      />
       {renderResultStoryboardSnapshotSection()}
     </>
   )
 
   const renderResultLibraryHintView = () => (
-    <Alert severity="info" sx={{ mb: 1 }}>
-      素材库为项目维度产物，可切换到“素材”并点击“加载素材库”查看/审核。
-    </Alert>
+    <DreamweaverResultLibraryHint message="素材库为项目维度产物，可切换到“素材”并点击“加载素材库”查看/审核。" />
   )
 
   const renderResultAuditStageView = () => (
-    renderResultTextStageSection({
-      title: '质检',
-      text: result?.audit ? JSON.stringify(result.audit) : '',
-      emptyText: '未返回审核信息',
-      marginTop: 1,
-      marginBottom: 0,
-    })
+    <DreamweaverResultTextStageSection
+      title="质检"
+      text={result?.audit ? JSON.stringify(result.audit) : ''}
+      emptyText="未返回审核信息"
+      marginTop={1}
+      marginBottom={0}
+    />
   )
 
   const renderResultSummaryChips = () => {
     if (!result) return null
 
     return (
-      <Stack direction="row" spacing={1} flexWrap="wrap" mb={1.5} alignItems="center">
-        <Chip label={`章节: ${result.source_chapter_count}`} size="small" />
-        {Array.isArray(result.keyframes) && result.keyframes.length > 0 && (
-          <Chip label={`关键帧: ${result.keyframes.length}`} size="small" />
-        )}
-        {Array.isArray(result.midframes) && result.midframes.length > 0 && (
-          <Chip label={`中间帧: ${result.midframes.length}`} size="small" />
-        )}
-        {result.video_clips && <Chip label={`片段: ${result.video_clips.length}`} size="small" color="primary" />}
-      </Stack>
+      <DreamweaverResultSummaryChipsRow
+        chips={
+          <>
+            <Chip label={`章节: ${result.source_chapter_count}`} size="small" />
+            {Array.isArray(result.keyframes) && result.keyframes.length > 0 && (
+              <Chip label={`关键帧: ${result.keyframes.length}`} size="small" />
+            )}
+            {Array.isArray(result.midframes) && result.midframes.length > 0 && (
+              <Chip label={`中间帧: ${result.midframes.length}`} size="small" />
+            )}
+            {result.video_clips && <Chip label={`片段: ${result.video_clips.length}`} size="small" color="primary" />}
+          </>
+        }
+      />
     )
   }
 
@@ -5290,10 +5276,10 @@ export default function DreamWeaverRunPage() {
   )
 
   const renderResultSyncSection = () => (
-    <>
-      {renderResultSyncActions()}
-      {renderResultSyncStatus()}
-    </>
+    <DreamweaverResultSyncSection
+      actions={renderResultSyncActions()}
+      status={renderResultSyncStatus()}
+    />
   )
 
   const renderResultStageContent = () => (
@@ -5310,22 +5296,22 @@ export default function DreamWeaverRunPage() {
     if (!result) return null
 
     return (
-      <Box>
-        {renderResultSummaryChips()}
-
-        {renderDebugAccordion({
-          title: '调试面板（Result）',
-          value: result,
-          marginBottom: 1.5,
-        })}
-
-        <Divider sx={{ my: 1.5 }} />
-
-        {renderResultSyncSection()}
-
-        {renderStreamingPreview(previewStep)}
-        {renderResultStageContent()}
-      </Box>
+      <DreamweaverResultViewShell
+        summaryChips={renderResultSummaryChips()}
+        debugPanel={
+          <>
+            {renderDebugAccordion({
+              title: '调试面板（Result）',
+              value: result,
+              marginBottom: 1.5,
+            })}
+            <Divider sx={{ my: 1.5 }} />
+          </>
+        }
+        syncSection={renderResultSyncSection()}
+        streamingPreview={renderStreamingPreview(previewStep)}
+        stageContent={renderResultStageContent()}
+      />
     )
   }
 
