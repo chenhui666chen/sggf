@@ -84,7 +84,6 @@ import type {
   CollectFeedback,
   DreamweaverAssetPlanItem,
   DreamweaverEventRecord,
-  DreamweaverDiagnosticShotFrames,
   DreamweaverLibraryPlanItem,
   DreamweaverProjectLockedGenerationConfig,
   DreamweaverRunAsyncResponse,
@@ -176,6 +175,13 @@ import {
   DreamweaverDiagnosticProviderTraceSection,
   DreamweaverDiagnosticTelemetrySection,
 } from './dreamweaver-run/diagnosticSections'
+import {
+  DreamweaverDiagnosticShotAccordion,
+  DreamweaverDiagnosticShotActions,
+  DreamweaverDiagnosticShotDetails,
+  DreamweaverDiagnosticShotProviderTraceSection,
+  DreamweaverDiagnosticShotSummary,
+} from './dreamweaver-run/diagnosticShotViews'
 import {
   DreamweaverHistoryDialogContent,
   DreamweaverHistoryEmptyState,
@@ -5188,52 +5194,6 @@ export default function DreamWeaverRunPage() {
     )
   }
 
-  const renderShotDiagnosticSummary = ({
-    shotId,
-    desc,
-    duration,
-    frames,
-    hasVideoClip,
-    shotProviderTrace,
-    shotAutoQCPass,
-    shotAutoQCScore,
-  }: {
-    shotId: string
-    desc: string
-    duration: number | null
-    frames: DreamweaverDiagnosticShotFrames
-    hasVideoClip: boolean
-    shotProviderTrace: DreamweaverVideoProviderShotTrace | null
-    shotAutoQCPass: boolean | null
-    shotAutoQCScore: number | null
-  }) => (
-    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ width: '100%' }}>
-      <Typography variant="subtitle2" sx={{ fontWeight: 700, fontFamily: 'monospace' }}>
-        {shotId || '-'}
-      </Typography>
-      {desc && (
-        <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 520, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {desc}
-        </Typography>
-      )}
-      {typeof duration === 'number' && Number.isFinite(duration) && <Chip size="small" label={`${duration.toFixed(1)}s`} />}
-      {frames.head && <Chip size="small" label="head" color="success" variant="outlined" />}
-      {frames.tail && <Chip size="small" label="tail" color="success" variant="outlined" />}
-      {frames.mid && <Chip size="small" label="mid" color="success" variant="outlined" />}
-      {hasVideoClip && <Chip size="small" label="clip" color="info" variant="outlined" />}
-      {shotProviderTrace?.route && <Chip size="small" variant="outlined" color="info" label={`route: ${shotProviderTrace.route}`} />}
-      {shotProviderTrace?.applied_provider && <Chip size="small" variant="outlined" label={`applied: ${shotProviderTrace.applied_provider}`} />}
-      {shotProviderTrace?.shadowed && <Chip size="small" color="warning" label="shadow" />}
-      {shotAutoQCPass != null && (
-        <Chip
-          size="small"
-          label={`AutoQC: ${shotAutoQCPass ? 'pass' : 'fail'}${typeof shotAutoQCScore === 'number' ? ` (${shotAutoQCScore.toFixed(2)})` : ''}`}
-          color={shotAutoQCPass ? 'success' : 'warning'}
-        />
-      )}
-    </Stack>
-  )
-
   const resolveShotDiagnosticAccordionState = (shot: DreamweaverDiagnosticShot) => {
     const shotId = String(shot.shot_id || '').trim()
     const frames = shot.frames || {}
@@ -5333,132 +5293,21 @@ export default function DreamWeaverRunPage() {
     )
   }
 
-  const renderShotDiagnosticActions = ({
-    shotId,
-    sb,
-    frames,
-    videoClip,
-    shotProviderTrace,
-    shotAutoQC,
-  }: {
-    shotId: string
-    sb: Record<string, unknown> | null
-    frames: DreamweaverDiagnosticShotFrames
-    videoClip: Record<string, unknown> | null | undefined
-    shotProviderTrace: DreamweaverVideoProviderShotTrace | null
-    shotAutoQC: Record<string, unknown> | null
-  }) => (
-    <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
-      <Button
-        size="small"
-        variant="outlined"
-        startIcon={<ContentCopyIcon fontSize="small" />}
-        onClick={() =>
-          copyText(
-            safeJsonStringify({
-              shot_id: shotId,
-              storyboard: sb,
-              frames: frames,
-              video_clip: videoClip || null,
-              provider_trace: shotProviderTrace,
-              autoqc: shotAutoQC,
-            }),
-          )
-        }
-      >
-        复制镜头诊断
-      </Button>
-      {sb && (
-        <Button size="small" variant="text" onClick={() => copyText(safeJsonStringify(sb))}>
-          复制分镜
-        </Button>
-      )}
-      {renderShotDiagnosticUploadActions(shotId)}
-      {renderShotDiagnosticPromptRegenerateActions(shotId, sb)}
-      {shotId && (
-        <Button
-          size="small"
-          variant="contained"
-          startIcon={<RefreshIcon fontSize="small" />}
-          onClick={() => void restartGeneration('VIDEO', [shotId])}
-          disabled={!currentRunId || running || restartLoading}
-        >
-          重跑该镜头视频
-        </Button>
-      )}
-    </Stack>
-  )
-
   const renderShotProviderTraceSection = (shotProviderTrace: DreamweaverVideoProviderShotTrace | null) => {
     if (!shotProviderTrace) return null
 
     return (
-      <Accordion sx={{ mt: 1 }}>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-              Provider 路由
-            </Typography>
-            {shotProviderTrace.reason && <Chip size="small" variant="outlined" label={`reason: ${shotProviderTrace.reason}`} />}
-          </Stack>
-        </AccordionSummary>
-        <AccordionDetails>
-          <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
-            {shotProviderTrace.requested_provider_mode && (
-              <Chip size="small" variant="outlined" label={`requested: ${shotProviderTrace.requested_provider_mode}`} />
-            )}
-            {shotProviderTrace.recommended_provider && (
-              <Chip size="small" variant="outlined" label={`recommended: ${shotProviderTrace.recommended_provider}`} />
-            )}
-            {shotProviderTrace.applied_provider && (
-              <Chip size="small" variant="outlined" label={`applied: ${shotProviderTrace.applied_provider}`} />
-            )}
-            {shotProviderTrace.selector_mode && <Chip size="small" variant="outlined" label={`selector: ${shotProviderTrace.selector_mode}`} />}
-          </Stack>
-          {shotProviderTrace.metadata && (
-            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-              metadata: {safeJsonStringify(shotProviderTrace.metadata)}
-            </Typography>
-          )}
-          {renderDiagnosticJson(shotProviderTrace)}
-        </AccordionDetails>
-      </Accordion>
+      <DreamweaverDiagnosticShotProviderTraceSection
+        reason={shotProviderTrace.reason}
+        requestedProviderMode={shotProviderTrace.requested_provider_mode}
+        recommendedProvider={shotProviderTrace.recommended_provider}
+        appliedProvider={shotProviderTrace.applied_provider}
+        selectorMode={shotProviderTrace.selector_mode}
+        metadataText={shotProviderTrace.metadata ? safeJsonStringify(shotProviderTrace.metadata) : null}
+        jsonContent={renderDiagnosticJson(shotProviderTrace)}
+      />
     )
   }
-
-  const renderShotDiagnosticDetails = ({
-    sb,
-    shotProviderTrace,
-    shotAutoQC,
-    frames,
-    videoClip,
-  }: {
-    sb: Record<string, unknown> | null
-    shotProviderTrace: DreamweaverVideoProviderShotTrace | null
-    shotAutoQC: Record<string, unknown> | null
-    frames: DreamweaverDiagnosticShotFrames
-    videoClip: Record<string, unknown> | null | undefined
-  }) => (
-    <>
-      {renderTitledDiagnosticJsonAccordion({
-        title: '分镜（storyboard）',
-        value: sb,
-        marginTop: 0,
-      })}
-
-      {renderShotProviderTraceSection(shotProviderTrace)}
-
-      {renderTitledDiagnosticJsonAccordion({
-        title: 'AutoQC',
-        value: shotAutoQC,
-      })}
-
-      {renderDiagnosticFrame('首帧（head）', frames.head, 'image')}
-      {renderDiagnosticFrame('尾帧（tail）', frames.tail, 'image')}
-      {renderDiagnosticFrame('中间帧（mid）', frames.mid, 'image')}
-      {renderDiagnosticFrame('镜头片段（video_clip）', videoClip, 'video')}
-    </>
-  )
 
   const renderShotDiagnosticAccordion = (shot: DreamweaverDiagnosticShot) => {
     const {
@@ -5476,38 +5325,64 @@ export default function DreamWeaverRunPage() {
     } = resolveShotDiagnosticAccordionState(shot)
 
     return (
-      <Accordion key={`diag:${shotId}`} sx={{ mb: 1 }}>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          {renderShotDiagnosticSummary({
-            shotId,
-            desc,
-            duration,
-            frames,
-            hasVideoClip,
-            shotProviderTrace,
-            shotAutoQCPass,
-            shotAutoQCScore,
-          })}
-        </AccordionSummary>
-        <AccordionDetails>
-          {renderShotDiagnosticActions({
-            shotId,
-            sb,
-            frames,
-            videoClip,
-            shotProviderTrace,
-            shotAutoQC,
-          })}
-
-          {renderShotDiagnosticDetails({
-            sb,
-            shotProviderTrace,
-            shotAutoQC,
-            frames,
-            videoClip,
-          })}
-        </AccordionDetails>
-      </Accordion>
+      <DreamweaverDiagnosticShotAccordion
+        accordionKey={`diag:${shotId}`}
+        summary={
+          <DreamweaverDiagnosticShotSummary
+            shotId={shotId}
+            desc={desc}
+            duration={duration}
+            hasHeadFrame={Boolean(frames.head)}
+            hasTailFrame={Boolean(frames.tail)}
+            hasMidFrame={Boolean(frames.mid)}
+            hasVideoClip={hasVideoClip}
+            route={shotProviderTrace?.route}
+            appliedProvider={shotProviderTrace?.applied_provider}
+            shadowed={Boolean(shotProviderTrace?.shadowed)}
+            autoQCPass={shotAutoQCPass}
+            autoQCScore={shotAutoQCScore}
+          />
+        }
+        actions={
+          <DreamweaverDiagnosticShotActions
+            onCopy={() =>
+              copyText(
+                safeJsonStringify({
+                  shot_id: shotId,
+                  storyboard: sb,
+                  frames,
+                  video_clip: videoClip || null,
+                  provider_trace: shotProviderTrace,
+                  autoqc: shotAutoQC,
+                }),
+              )
+            }
+            onCopyStoryboard={sb ? () => copyText(safeJsonStringify(sb)) : null}
+            uploadActions={renderShotDiagnosticUploadActions(shotId)}
+            promptRegenerateActions={renderShotDiagnosticPromptRegenerateActions(shotId, sb)}
+            onRestartVideo={shotId ? () => void restartGeneration('VIDEO', [shotId]) : null}
+            restartDisabled={!currentRunId || running || restartLoading}
+          />
+        }
+        details={
+          <DreamweaverDiagnosticShotDetails
+            storyboardAccordion={renderTitledDiagnosticJsonAccordion({
+              title: '分镜（storyboard）',
+              value: sb,
+              marginTop: 0,
+            })}
+            providerTraceSection={renderShotProviderTraceSection(shotProviderTrace)}
+            autoqcAccordion={renderTitledDiagnosticJsonAccordion({
+              title: 'AutoQC',
+              value: shotAutoQC,
+            })}
+            headFrame={renderDiagnosticFrame('首帧（head）', frames.head, 'image')}
+            tailFrame={renderDiagnosticFrame('尾帧（tail）', frames.tail, 'image')}
+            midFrame={renderDiagnosticFrame('中间帧（mid）', frames.mid, 'image')}
+            videoFrame={renderDiagnosticFrame('镜头片段（video_clip）', videoClip, 'video')}
+          />
+        }
+      />
     )
   }
 
