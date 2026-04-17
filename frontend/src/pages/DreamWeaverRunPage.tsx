@@ -14,7 +14,6 @@ import {
   Divider,
   Grid,
   ImageList,
-  ImageListItem,
   LinearProgress,
   List,
   ListItem,
@@ -196,13 +195,8 @@ import {
   DreamweaverLibrarySummaryChips,
 } from './dreamweaver-run/libraryViews'
 import {
-  DreamweaverPromptEditDialogActions,
-  DreamweaverPromptEditDialogContent,
-  DreamweaverPromptEditDialogShell,
-  DreamweaverRegenerateDialogActions,
-  DreamweaverRegenerateDialogContent,
-  DreamweaverRegenerateDialogModeControls,
-  DreamweaverRegenerateDialogShell,
+  DreamweaverPromptEditDialog,
+  DreamweaverRegenerateDialog,
 } from './dreamweaver-run/promptDialogs'
 import {
   DreamweaverResultLibraryHint,
@@ -1221,8 +1215,6 @@ export default function DreamWeaverRunPage() {
       placeholderBackgroundImage,
     }
   }
-
-  type LibraryDisplayCardState = ReturnType<typeof resolveLibraryDisplayCardState>
 
   const renderLibraryDisplayCard = (item: LibraryDisplayItem) => {
     const state = resolveLibraryDisplayCardState(item)
@@ -6170,8 +6162,11 @@ export default function DreamWeaverRunPage() {
     setPromptEditOpen(false)
   }
 
-  const renderPromptEditDialogContent = () => (
-    <DreamweaverPromptEditDialogContent
+  const renderPromptEditDialog = () => (
+    <DreamweaverPromptEditDialog
+      open={promptEditOpen}
+      onClose={closePromptEditDialog}
+      shotTitle={getShotId(promptEditShot) || '未选中'}
       shotDescription={promptEditShot ? getShotDesc(promptEditShot) : null}
       headPrompt={promptEditHead}
       tailPrompt={promptEditTail}
@@ -6182,24 +6177,7 @@ export default function DreamWeaverRunPage() {
       onChangeHead={setPromptEditHead}
       onChangeTail={setPromptEditTail}
       onChangeVideo={setPromptEditVideo}
-    />
-  )
-
-  const renderPromptEditDialogActions = () => (
-    <DreamweaverPromptEditDialogActions
-      saving={promptEditSaving}
-      onClose={closePromptEditDialog}
       onSave={savePromptEdit}
-    />
-  )
-
-  const renderPromptEditDialog = () => (
-    <DreamweaverPromptEditDialogShell
-      open={promptEditOpen}
-      onClose={closePromptEditDialog}
-      title={`提示词审核：${getShotId(promptEditShot) || '未选中'}`}
-      content={renderPromptEditDialogContent()}
-      actions={renderPromptEditDialogActions()}
     />
   )
 
@@ -6208,65 +6186,28 @@ export default function DreamWeaverRunPage() {
     setRegenOpen(false)
   }
 
-  const renderRegenerateDialogModeControls = () => (
-    <DreamweaverRegenerateDialogModeControls
+  const renderRegenerateDialog = () => (
+    <DreamweaverRegenerateDialog
+      open={regenOpen}
+      onClose={closeRegenerateDialog}
+      title={`重生成素材：${regenTitle || regenRole}`}
+      modeHint={
+        regenImageEditActive
+          ? '图像编辑模式：将基于参考图生成，提交后状态变为“待审核”。'
+          : '可在下方编辑提示词并重生成素材，生成后将变为待审核状态。'
+      }
       suggesting={regenSuggesting}
       submitting={regenSubmitting}
       hasRole={Boolean(regenRole)}
       forceImageEdit={regenForceImageEdit}
       imageEditActive={regenImageEditActive}
       hasImageBase={regenHasImageBase}
-      onSmartGenerate={() => requestSmartRegeneratePrompt({ source: 'manual' })}
-      onToggleImageEdit={toggleRegenImageEditPreference}
-    />
-  )
-
-  const renderRegenerateDialogStatusHints = () => (
-    <>
-      {regenForceImageEdit && (
-        <Alert severity={regenHasImageBase ? 'info' : 'error'} sx={{ mb: 1 }}>
-          <Typography variant="body2">
-            {regenHasImageBase
-              ? `参考基底：${regenAlertBaseLabel}。${
-                  regenAlertReadyReferenceLabel
-                    ? `参考图已就绪：${regenAlertReadyReferenceLabel}${
-                        regenAlertReadyReferenceCount > 1
-                          ? '（生成时将自动上传；额外参考图在模型支持多参考时生效）。'
-                          : '（生成时将自动上传）。'
-                      }`
-                    : '参考图已就绪。'
-                }`
-              : `缺少参考图：${regenAlertMissingReferenceLabel || '前序视角'}。请先生成前序视角。`}
-          </Typography>
-        </Alert>
-      )}
-      {!regenForceImageEdit && !regenHasImageBase && (
-        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-          当前素材没有可编辑底图，将回退到文生图模式。
-        </Typography>
-      )}
-      {regenSuggestError && (
-        <Alert severity="error" sx={{ mb: 1 }}>
-          {regenSuggestError}
-        </Alert>
-      )}
-      {regenImageEditActive && regenImageEditAutoCleared && (
-        <Typography variant="caption" color="text.disabled" display="block" sx={{ mb: 1 }}>
-          已清空原提示词，请填写本次需要修改的内容。
-        </Typography>
-      )}
-    </>
-  )
-
-  const renderRegenerateDialogContent = () => (
-    <DreamweaverRegenerateDialogContent
-      modeHint={
-        regenImageEditActive
-          ? '图像编辑模式：将基于参考图生成，提交后状态变为“待审核”。'
-          : '可在下方编辑提示词并重生成素材，生成后将变为待审核状态。'
-      }
-      modeControls={renderRegenerateDialogModeControls()}
-      statusHints={renderRegenerateDialogStatusHints()}
+      alertBaseLabel={regenAlertBaseLabel}
+      alertReadyReferenceLabel={regenAlertReadyReferenceLabel}
+      alertReadyReferenceCount={regenAlertReadyReferenceCount}
+      alertMissingReferenceLabel={regenAlertMissingReferenceLabel || ''}
+      suggestError={regenSuggestError}
+      imageEditAutoCleared={regenImageEditAutoCleared}
       promptInputLabel={regenPromptInputLabel}
       prompt={regenPrompt}
       promptPlaceholder={
@@ -6274,33 +6215,16 @@ export default function DreamWeaverRunPage() {
           ? '示例：保持角色身份锚点不变，改为侧面全身，左肩数据接口更亮，背景保持纯灰色。'
           : undefined
       }
-      submitting={regenSubmitting}
-      suggesting={regenSuggesting}
       error={regenError}
+      submitLabel={regenSubmitting ? '生成中...' : regenImageEditActive ? '开始生成（图像编辑）' : '开始生成（提示词）'}
+      submitDisabled={regenSubmitting || regenSuggesting || !regenRole || (regenForceImageEdit && !regenHasImageBase)}
+      onSmartGenerate={() => requestSmartRegeneratePrompt({ source: 'manual' })}
+      onToggleImageEdit={toggleRegenImageEditPreference}
       onChangePrompt={(value) => {
         setRegenPrompt(value)
         setRegenPromptDirty(value.trim() !== regenPromptInitial.trim())
       }}
-    />
-  )
-
-  const renderRegenerateDialogActions = () => (
-    <DreamweaverRegenerateDialogActions
-      submitting={regenSubmitting}
-      submitLabel={regenSubmitting ? '生成中...' : regenImageEditActive ? '开始生成（图像编辑）' : '开始生成（提示词）'}
-      submitDisabled={regenSubmitting || regenSuggesting || !regenRole || (regenForceImageEdit && !regenHasImageBase)}
-      onClose={closeRegenerateDialog}
       onSubmit={submitRegenerateDialog}
-    />
-  )
-
-  const renderRegenerateDialog = () => (
-    <DreamweaverRegenerateDialogShell
-      open={regenOpen}
-      onClose={closeRegenerateDialog}
-      title={`重生成素材：${regenTitle || regenRole}`}
-      content={renderRegenerateDialogContent()}
-      actions={renderRegenerateDialogActions()}
     />
   )
 
