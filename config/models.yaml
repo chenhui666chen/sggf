@@ -3978,6 +3978,582 @@ models:
       - alibaba
       - image_editing
 
+  # ==================== 火山引擎 Doubao 语言模型 ====================
+  - id: doubao-seed-2-0-pro
+    name: Doubao Seed 2.0 Pro
+    provider: volcengine
+    version: 2.0
+    status: active
+    
+    modality:
+      - text_generation
+      - chat
+    
+    capabilities:
+      - name: chat_completion
+        support_level: native
+        description: 高质量对话生成
+      - name: long_context
+        support_level: native
+        description: 支持 256K 超长上下文
+      - name: complex_reasoning
+        support_level: native
+        description: 复杂推理任务
+      - name: code_generation
+        support_level: native
+        description: 代码生成与理解
+    
+    constraints:
+      max_tokens: 128000
+      context_window: 256000
+    
+    quality_metrics:
+      overall_score: 9.2
+      reasoning_ability: 0.93
+      code_quality: 0.91
+      language_understanding: 0.92
+    
+    avg_latency_seconds: 3.0
+    summary: 豆包 Seed 2.0 Pro 模型，适合复杂推理、代码生成和长文本理解任务。
+    recommended_scenarios:
+      - 复杂对话
+      - 代码生成
+      - 长文本分析
+      - 逻辑推理
+    limitations:
+      - 需要火山引擎 API Key
+      - 按 token 计费
+    integration_notes:
+      - 通过火山引擎方舟平台 API 调用
+      - 使用 OpenAI 兼容接口格式
+      - 需要配置 DOUBAO_API_KEY
+    documentation_url: https://www.volcengine.com/docs/82379
+    source_urls:
+      - https://www.volcengine.com/docs/82379
+      - https://console.volcengine.com/ark
+    
+    pricing_info:
+      unit: "per 1K tokens"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "火山引擎官方价格"
+      pricing_url: "https://www.volcengine.com/pricing"
+      note: "⚠️ 重要：价格可能调整，请以火山引擎平台实时价格为准。"
+      verification_required: true
+    
+    api_config:
+      base_url: https://ark.cn-beijing.volces.com/api/v3
+      endpoint: /chat/completions
+      auth_type: bearer_token
+      api_key_env: DOUBAO_API_KEY
+      request_format:
+        model: doubao-seed-2-0-pro-260215
+        messages: array
+        max_tokens: integer
+        temperature: float
+      response_format:
+        choices: array
+        usage: object
+    
+    tags:
+      - llm
+      - chat
+      - volcengine
+      - doubao
+      - seed-2-0
+      - pro
+
+  - id: doubao-seed-2-0-lite
+    name: Doubao Seed 2.0 Lite
+    provider: volcengine
+    version: 2.0
+    status: active
+    
+    modality:
+      - text_generation
+      - chat
+    
+    capabilities:
+      - name: chat_completion
+        support_level: native
+        description: 快速对话生成
+      - name: long_context
+        support_level: native
+        description: 支持 256K 超长上下文
+      - name: fast_response
+        support_level: native
+        description: 低延迟响应
+    
+    constraints:
+      max_tokens: 128000
+      context_window: 256000
+    
+    quality_metrics:
+      overall_score: 8.5
+      reasoning_ability: 0.85
+      code_quality: 0.83
+      language_understanding: 0.86
+    
+    avg_latency_seconds: 1.5
+    summary: 豆包 Seed 2.0 Lite 模型，轻量快速版本，适合实时对话和简单任务。
+    recommended_scenarios:
+      - 实时对话
+      - 简单问答
+      - 快速原型
+    limitations:
+      - 复杂推理能力较弱
+      - 需要火山引擎 API Key
+    integration_notes:
+      - 通过火山引擎方舟平台 API 调用
+      - 使用 OpenAI 兼容接口格式
+    documentation_url: https://www.volcengine.com/docs/82379
+    source_urls:
+      - https://www.volcengine.com/docs/82379
+    
+    pricing_info:
+      unit: "per 1K tokens"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "火山引擎官方价格"
+      pricing_url: "https://www.volcengine.com/pricing"
+      note: "⚠️ 重要：价格可能调整，请以火山引擎平台实时价格为准。"
+      verification_required: true
+    
+    api_config:
+      base_url: https://ark.cn-beijing.volces.com/api/v3
+      endpoint: /chat/completions
+      auth_type: bearer_token
+      api_key_env: DOUBAO_API_KEY
+      request_format:
+        model: doubao-seed-2-0-lite-260215
+        messages: array
+        max_tokens: integer
+        temperature: float
+    
+    tags:
+      - llm
+      - chat
+      - volcengine
+      - doubao
+      - seed-2-0
+      - lite
+
+  # ==================== 火山引擎 Doubao 视频生成模型 ====================
+  - id: doubao-seedance-2-0
+    name: Doubao Seedance 2.0
+    provider: volcengine
+    version: 2.0
+    status: active
+    
+    modality:
+      - text_to_video
+      - image_to_video
+      - audio_to_video
+      - video_to_video
+    
+    capabilities:
+      - name: text_to_video
+        support_level: native
+        description: 文生视频
+      - name: image_to_video
+        support_level: native
+        description: 图生视频
+      - name: audio_to_video
+        support_level: native
+        description: 音频驱动视频
+      - name: video_editing
+        support_level: native
+        description: 视频编辑与转换
+      - name: multi_modal_input
+        support_level: native
+        description: 支持文本、图片、音频、视频多模态输入
+    
+    constraints:
+      duration:
+        - 5
+        - 10
+        - 30
+      max_prompt_length: 2000
+      max_reference_images: 15
+    
+    quality_metrics:
+      overall_score: 9.5
+      motion_quality: 0.94
+      temporal_consistency: 0.93
+      visual_quality: 0.95
+      prompt_adherence: 0.92
+    
+    avg_latency_seconds: 120.0
+    summary: 豆包 Seedance 2.0 视频生成模型，全球 SOTA 水平，支持多模态输入和专业级视频生成。
+    recommended_scenarios:
+      - 电影级视频生成
+      - 广告制作
+      - 短视频创作
+      - 动画制作
+    limitations:
+      - 生成时间较长
+      - 需要火山引擎 API Key
+      - 按视频时长计费
+    integration_notes:
+      - 通过火山引擎方舟平台 API 调用
+      - 支持多种输入模态
+      - 需要申请 API 接入权限
+    documentation_url: https://www.volcengine.com/docs/86081
+    source_urls:
+      - https://www.volcengine.com/docs/86081
+      - https://console.volcengine.com/ark
+    
+    pricing_info:
+      unit: "per second"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "火山引擎官方价格"
+      pricing_url: "https://www.volcengine.com/pricing"
+      note: "⚠️ 重要：价格可能调整，请以火山引擎平台实时价格为准。"
+      verification_required: true
+    
+    api_config:
+      base_url: https://visual.volcengineapi.com
+      endpoint: /api/v3/videos/generations
+      auth_type: bearer_token
+      api_key_env: DOUBAO_API_KEY
+      request_format:
+        model: doubao-seedance-2-0-260128
+        prompt: string
+        duration: integer
+        reference_images: array
+    
+    tags:
+      - video_generation
+      - text_to_video
+      - volcengine
+      - doubao
+      - seedance
+      - sota
+
+  - id: doubao-seedance-2-0-fast
+    name: Doubao Seedance 2.0 Fast
+    provider: volcengine
+    version: 2.0
+    status: active
+    
+    modality:
+      - text_to_video
+      - image_to_video
+    
+    capabilities:
+      - name: fast_generation
+        support_level: native
+        description: 快速视频生成
+      - name: text_to_video
+        support_level: native
+        description: 文生视频
+      - name: image_to_video
+        support_level: native
+        description: 图生视频
+    
+    constraints:
+      duration:
+        - 5
+        - 10
+      max_prompt_length: 1500
+    
+    quality_metrics:
+      overall_score: 8.8
+      motion_quality: 0.87
+      temporal_consistency: 0.86
+      visual_quality: 0.89
+      prompt_adherence: 0.88
+    
+    avg_latency_seconds: 60.0
+    summary: 豆包 Seedance 2.0 Fast 视频生成模型，快速版本适合快速预览和原型验证。
+    recommended_scenarios:
+      - 快速原型
+      - 视频预览
+      - 早期验证
+    limitations:
+      - 质量略低于 Pro 版本
+      - 时长限制较短
+    integration_notes:
+      - 通过火山引擎方舟平台 API 调用
+      - 适合快速迭代
+    documentation_url: https://www.volcengine.com/docs/86081
+    source_urls:
+      - https://www.volcengine.com/docs/86081
+    
+    pricing_info:
+      unit: "per second"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "火山引擎官方价格"
+      pricing_url: "https://www.volcengine.com/pricing"
+      note: "⚠️ 重要：价格可能调整，请以火山引擎平台实时价格为准。"
+      verification_required: true
+    
+    api_config:
+      base_url: https://visual.volcengineapi.com
+      endpoint: /api/v3/videos/generations
+      auth_type: bearer_token
+      api_key_env: DOUBAO_API_KEY
+      request_format:
+        model: doubao-seedance-2-0-fast-260128
+        prompt: string
+        duration: integer
+    
+    tags:
+      - video_generation
+      - text_to_video
+      - volcengine
+      - doubao
+      - seedance
+      - fast
+
+  - id: doubao-seedance-1-5-pro
+    name: Doubao Seedance 1.5 Pro
+    provider: volcengine
+    version: 1.5
+    status: active
+    
+    modality:
+      - text_to_video
+      - image_to_video
+    
+    capabilities:
+      - name: text_to_video
+        support_level: native
+        description: 文生视频
+      - name: image_to_video
+        support_level: native
+        description: 图生视频
+    
+    constraints:
+      duration:
+        - 5
+        - 10
+      max_prompt_length: 1500
+    
+    quality_metrics:
+      overall_score: 8.5
+      motion_quality: 0.84
+      temporal_consistency: 0.83
+      visual_quality: 0.86
+      prompt_adherence: 0.85
+    
+    avg_latency_seconds: 90.0
+    summary: 豆包 Seedance 1.5 Pro 视频生成模型，上一代专业版本，稳定可靠。
+    recommended_scenarios:
+      - 常规视频生成
+      - 短视频制作
+    limitations:
+      - 性能略低于 2.0 版本
+    integration_notes:
+      - 通过火山引擎方舟平台 API 调用
+    documentation_url: https://www.volcengine.com/docs/86081
+    source_urls:
+      - https://www.volcengine.com/docs/86081
+    
+    pricing_info:
+      unit: "per second"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "火山引擎官方价格"
+      pricing_url: "https://www.volcengine.com/pricing"
+      note: "⚠️ 重要：价格可能调整，请以火山引擎平台实时价格为准。"
+      verification_required: true
+    
+    api_config:
+      base_url: https://visual.volcengineapi.com
+      endpoint: /api/v3/videos/generations
+      auth_type: bearer_token
+      api_key_env: DOUBAO_API_KEY
+      request_format:
+        model: doubao-seedance-1-5-pro-251215
+        prompt: string
+        duration: integer
+    
+    tags:
+      - video_generation
+      - text_to_video
+      - volcengine
+      - doubao
+      - seedance
+      - pro
+
+  # ==================== 火山引擎 Doubao 图像生成模型 ====================
+  - id: doubao-seedream-4-5
+    name: Doubao Seedream 4.5
+    provider: volcengine
+    version: 4.5
+    status: active
+    
+    modality:
+      - text_to_image
+      - image_to_image
+    
+    capabilities:
+      - name: text_to_image
+        support_level: native
+        description: 高质量文生图
+      - name: image_to_image
+        support_level: native
+        description: 图生图
+      - name: style_transfer
+        support_level: native
+        description: 风格迁移
+    
+    constraints:
+      ratios:
+        - "1:1"
+        - "16:9"
+        - "9:16"
+        - "4:3"
+        - "3:4"
+      min_width: 512
+      max_width: 2048
+      min_height: 512
+      max_height: 2048
+      max_prompt_length: 1000
+    
+    quality_metrics:
+      overall_score: 8.8
+      visual_quality: 0.89
+      prompt_adherence: 0.87
+      creativity: 0.86
+      style_accuracy: 0.88
+    
+    avg_latency_seconds: 8.0
+    summary: 豆包 Seedream 4.5 图像生成模型，高质量文生图和图生图能力。
+    recommended_scenarios:
+      - 图像创作
+      - 插画生成
+      - 概念图设计
+    limitations:
+      - 需要火山引擎 API Key
+    integration_notes:
+      - 通过火山引擎方舟平台 API 调用
+      - 使用图像生成 API 接口
+    documentation_url: https://www.volcengine.com/docs/82379/1541523
+    source_urls:
+      - https://www.volcengine.com/docs/82379/1541523
+    
+    pricing_info:
+      unit: "per image"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "火山引擎官方价格"
+      pricing_url: "https://www.volcengine.com/pricing"
+      note: "⚠️ 重要：价格可能调整，请以火山引擎平台实时价格为准。"
+      verification_required: true
+    
+    api_config:
+      base_url: https://visual.volcengineapi.com
+      endpoint: /api/v3/images/generations
+      auth_type: bearer_token
+      api_key_env: DOUBAO_API_KEY
+      request_format:
+        model: doubao-seedream-4-5-251128
+        prompt: string
+        size: string
+        n: integer
+    
+    tags:
+      - image_generation
+      - text_to_image
+      - volcengine
+      - doubao
+      - seedream
+
+  - id: doubao-seedream-5-0
+    name: Doubao Seedream 5.0
+    provider: volcengine
+    version: 5.0
+    status: active
+    
+    modality:
+      - text_to_image
+      - image_to_image
+    
+    capabilities:
+      - name: text_to_image
+        support_level: native
+        description: 超高质量文生图
+      - name: image_to_image
+        support_level: native
+        description: 高质量图生图
+      - name: style_transfer
+        support_level: native
+        description: 风格迁移
+      - name: image_editing
+        support_level: native
+        description: 图像编辑
+    
+    constraints:
+      ratios:
+        - "1:1"
+        - "16:9"
+        - "9:16"
+        - "4:3"
+        - "3:4"
+      min_width: 512
+      max_width: 4096
+      min_height: 512
+      max_height: 4096
+      max_prompt_length: 1500
+    
+    quality_metrics:
+      overall_score: 9.3
+      visual_quality: 0.94
+      prompt_adherence: 0.92
+      creativity: 0.91
+      style_accuracy: 0.93
+    
+    avg_latency_seconds: 10.0
+    summary: 豆包 Seedream 5.0 图像生成模型，最新版本，支持超高分辨率和多种图像创作功能。
+    recommended_scenarios:
+      - 专业图像创作
+      - 商业插画
+      - 概念设计
+      - 营销素材
+    limitations:
+      - 需要火山引擎 API Key
+      - 按分辨率计费
+    integration_notes:
+      - 通过火山引擎方舟平台 API 调用
+      - 使用图像生成 API 接口
+      - 支持多种分辨率
+    documentation_url: https://www.volcengine.com/docs/82379/1541523
+    source_urls:
+      - https://www.volcengine.com/docs/82379/1541523
+    
+    pricing_info:
+      unit: "per image"
+      currency: "CNY"
+      last_updated: "2025-04"
+      source: "火山引擎官方价格"
+      pricing_url: "https://www.volcengine.com/pricing"
+      note: "⚠️ 重要：价格可能调整，请以火山引擎平台实时价格为准。"
+      verification_required: true
+    
+    api_config:
+      base_url: https://visual.volcengineapi.com
+      endpoint: /api/v3/images/generations
+      auth_type: bearer_token
+      api_key_env: DOUBAO_API_KEY
+      request_format:
+        model: doubao-seedream-5-0-260128
+        prompt: string
+        size: string
+        n: integer
+    
+    tags:
+      - image_generation
+      - text_to_image
+      - volcengine
+      - doubao
+      - seedream
+      - latest
+
+
 routing:
   default_strategy: balanced
 

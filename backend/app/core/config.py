@@ -124,6 +124,10 @@ class Settings(BaseSettings):
     VIDU_API_KEY: str = ""
     VIDU_API_URL: str = "https://api.vidu.cn/ent/v2"
 
+    # 火山引擎 Doubao 服务配置
+    DOUBAO_API_KEY: str = ""
+    DOUBAO_API_BASE: str = "https://ark.cn-beijing.volces.com/api/v3"
+
     # Embedding 模型配置
     EMBEDDING_MODEL: str = "text-embedding-v4"
     EMBEDDING_API_KEY: str = ""

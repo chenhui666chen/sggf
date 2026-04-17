@@ -190,6 +190,12 @@ import {
   DreamweaverHistoryToolbarActions,
 } from './dreamweaver-run/historyDialog'
 import {
+  DreamweaverCharacterLibraryBucketSection,
+  DreamweaverLibraryDisplayCard,
+  DreamweaverLibraryGroupSection,
+  DreamweaverLibrarySummaryChips,
+} from './dreamweaver-run/libraryViews'
+import {
   DreamweaverPromptEditDialogActions,
   DreamweaverPromptEditDialogContent,
   DreamweaverPromptEditDialogShell,
@@ -1218,136 +1224,44 @@ export default function DreamWeaverRunPage() {
 
   type LibraryDisplayCardState = ReturnType<typeof resolveLibraryDisplayCardState>
 
-  const renderLibraryDisplayCardPreviewArea = (item: LibraryDisplayItem, state: LibraryDisplayCardState) => (
-    <Box
-      sx={{
-        width: '100%',
-        aspectRatio: item.aspectRatio,
-        bgcolor: state.backgroundColor,
-        position: 'relative',
-        overflow: 'hidden',
-      }}
-    >
-      {state.preview && !state.safetyBlocked ? (
-        <Box
-          component="img"
-          src={state.preview}
-          alt={item.title}
-          loading="lazy"
-          sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-        />
-      ) : (
-        <Box
-          sx={{
-            position: 'absolute',
-            inset: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: state.placeholderColor,
-            fontSize: 12,
-            backgroundImage: state.placeholderBackgroundImage,
-          }}
-        >
-          {state.safetyBlocked && <Box sx={{ fontSize: 24, mb: 0.5 }}>⛔️</Box>}
-          <Box>{state.placeholderText}</Box>
-          {state.safetyBlocked && (
-            <Box sx={{ fontSize: 10, mt: 0.5, px: 1, textAlign: 'center', opacity: 0.8 }}>
-              点击重新生成
-            </Box>
-          )}
-        </Box>
-      )}
-      <Box sx={{ position: 'absolute', top: 8, left: 8 }}>
-        <Chip size="small" label={state.statusLabel} color={state.statusColor} />
-      </Box>
-      {state.placeholder && (
-        <Box sx={{ position: 'absolute', top: 8, right: 8 }}>
-          <Chip size="small" label="占位" variant="outlined" color="warning" />
-        </Box>
-      )}
-    </Box>
-  )
-
-  const renderLibraryDisplayCardErrors = (state: LibraryDisplayCardState) => (
-    <>
-      {state.safetyError && (
-        <Typography variant="caption" color="error" display="block" sx={{ mb: 0.5, fontSize: '0.7rem', wordBreak: 'break-all' }}>
-          {state.safetyError.slice(0, 100)}{state.safetyError.length > 100 ? '...' : ''}
-        </Typography>
-      )}
-      {state.previewError && (
-        <Typography variant="caption" color="error" display="block" sx={{ mb: 0.5, fontSize: '0.7rem', wordBreak: 'break-all' }}>
-          {state.previewError.slice(0, 100)}{state.previewError.length > 100 ? '...' : ''}
-        </Typography>
-      )}
-    </>
-  )
-
-  const renderLibraryDisplayCardActions = (item: LibraryDisplayItem, state: LibraryDisplayCardState) => (
-    <Stack direction="row" spacing={1} alignItems="center" mt={0.5} flexWrap="wrap">
-      {state.asset ? (
-        <>
-          {!state.safetyBlocked && state.hasRenderableImage && (
-            <Button
-              size="small"
-              variant="text"
-              onClick={() => approveLibrary({ roles: [state.asset!.role], approved: !state.approved })}
-              disabled={libraryLoading}
-            >
-              {state.approved ? '撤销' : '通过'}
-            </Button>
-          )}
-          {!state.safetyBlocked && state.hasRenderableImage && (!state.preview || state.previewError) && (
-            <Button
-              size="small"
-              variant="text"
-              onClick={() => loadLibraryPreview(state.asset!, { force: true })}
-              disabled={libraryLoading || state.previewLoading}
-            >
-              {state.previewLoading ? '加载中…' : state.preview ? '重新加载预览' : '加载预览'}
-            </Button>
-          )}
-          <Button
-            size="small"
-            variant={state.safetyBlocked ? 'contained' : 'text'}
-            color={state.safetyBlocked ? 'warning' : 'primary'}
-            onClick={() => openRegenerateDialog(state.asset!)}
-            disabled={libraryLoading}
-          >
-            {state.hasRenderableImage ? '重新生成' : '生成素材'}
-          </Button>
-        </>
-      ) : state.canGenerate ? (
-        <Button size="small" variant="text" onClick={() => openRegenerateDialogForRole(item.role, item.title)} disabled={libraryLoading}>
-          生成素材
-        </Button>
-      ) : (
-        <Chip size="small" label="等待生成" variant="outlined" />
-      )}
-    </Stack>
-  )
-
   const renderLibraryDisplayCard = (item: LibraryDisplayItem) => {
     const state = resolveLibraryDisplayCardState(item)
 
     return (
-      <ImageListItem key={item.key} sx={{ border: '1px solid #eee', borderRadius: 2, overflow: 'hidden' }}>
-        {renderLibraryDisplayCardPreviewArea(item, state)}
-        <Box sx={{ p: 1 }}>
-          <Typography variant="caption" sx={{ fontWeight: 600 }} display="block">
-            {item.title}
-          </Typography>
-          {state.roleLabel && (
-            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
-              {state.roleLabel}
-            </Typography>
-          )}
-          {renderLibraryDisplayCardErrors(state)}
-          {renderLibraryDisplayCardActions(item, state)}
-        </Box>
-      </ImageListItem>
+      <DreamweaverLibraryDisplayCard
+        itemKey={item.key}
+        title={item.title}
+        aspectRatio={String(item.aspectRatio)}
+        state={{
+          preview: state.preview,
+          safetyBlocked: state.safetyBlocked,
+          placeholder: state.placeholder,
+          placeholderText: state.placeholderText,
+          placeholderColor: state.placeholderColor,
+          placeholderBackgroundImage: state.placeholderBackgroundImage,
+          backgroundColor: state.backgroundColor,
+          statusLabel: state.statusLabel,
+          statusColor: state.statusColor,
+          hasRenderableImage: state.hasRenderableImage,
+          approved: state.approved,
+          previewError: state.previewError,
+          previewLoading: state.previewLoading,
+          safetyError: state.safetyError,
+          roleLabel: state.roleLabel,
+          canGenerate: state.canGenerate,
+          hasAsset: Boolean(state.asset),
+        }}
+        libraryLoading={libraryLoading}
+        onToggleApprove={
+          state.asset ? () => approveLibrary({ roles: [state.asset!.role], approved: !state.approved }) : undefined
+        }
+        onLoadPreview={
+          state.asset ? () => loadLibraryPreview(state.asset!, { force: true }) : undefined
+        }
+        onOpenRegenerate={
+          state.asset ? () => openRegenerateDialog(state.asset!) : () => openRegenerateDialogForRole(item.role, item.title)
+        }
+      />
     )
   }
 
@@ -5979,30 +5893,22 @@ export default function DreamWeaverRunPage() {
     const generatedCount = bucket.items.filter((item) => item.hasRenderableImage).length
 
     return (
-      <Box key={bucket.bucketKey} sx={{ border: '1px solid #eee', borderRadius: 2, p: 1, bgcolor: '#fcfcfc' }}>
-        <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 0.5 }}>
-          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            {bucket.name}
-          </Typography>
-          <Chip size="small" label={`视角 ${bucket.items.length}`} variant="outlined" />
-          <Chip size="small" label={`已生成 ${generatedCount}`} color={generatedCount ? 'success' : 'default'} />
-        </Stack>
-        <ImageList cols={libraryGridCols} gap={8} sx={{ m: 0 }}>
-          {bucket.items.map(renderLibraryDisplayCard)}
-        </ImageList>
-      </Box>
+      <DreamweaverCharacterLibraryBucketSection
+        bucketKey={bucket.bucketKey}
+        name={bucket.name}
+        viewCount={bucket.items.length}
+        generatedCount={generatedCount}
+        content={
+          <ImageList cols={libraryGridCols} gap={8} sx={{ m: 0 }}>
+            {bucket.items.map(renderLibraryDisplayCard)}
+          </ImageList>
+        }
+      />
     )
   }
 
   const renderLibrarySummaryChips = (summary: LibraryGroupSummary, totalLabel: string) => (
-    <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
-      <Chip size="small" label={`${totalLabel} ${summary.total}`} />
-      <Chip size="small" label={`已生成 ${summary.generated}`} color={summary.generated ? 'success' : 'default'} />
-      <Chip size="small" label={`生成中 ${summary.processing}`} color={summary.processing ? 'info' : 'default'} />
-      <Chip size="small" label={`待生成 ${summary.planned}`} />
-      {summary.approved > 0 && <Chip size="small" label={`已通过 ${summary.approved}`} color="success" />}
-      {summary.pendingReview > 0 && <Chip size="small" label={`待审核 ${summary.pendingReview}`} color="warning" />}
-    </Stack>
+    <DreamweaverLibrarySummaryChips totalLabel={totalLabel} summary={summary} />
   )
 
   const renderCharacterLibraryGroupGrid = (items: LibraryDisplayItem[]) => {
@@ -6066,15 +5972,12 @@ export default function DreamWeaverRunPage() {
   }
 
   const renderLibraryGroupSection = (group: LibraryDisplayGroup) => (
-    <Box key={group.key} sx={{ mb: 2 }}>
-      <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
-        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-          {group.label}
-        </Typography>
-      </Stack>
-      {renderLibrarySummaryChips(group.summary, '总计')}
-      {renderLibraryGroupGrid(group)}
-    </Box>
+    <DreamweaverLibraryGroupSection
+      groupKey={group.key}
+      label={group.label}
+      summaryChips={renderLibrarySummaryChips(group.summary, '总计')}
+      content={renderLibraryGroupGrid(group)}
+    />
   )
 
   const renderPendingLibrarySummaryChips = () => renderLibrarySummaryChips(librarySummary, '占位')
