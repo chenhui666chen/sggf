@@ -71,6 +71,14 @@ export function writePersistedDreamWeaverRun(projectId: number, patch: Partial<P
       style_preset: patch.style_preset ?? prev?.style_preset,
       image_ratio: patch.image_ratio ?? prev?.image_ratio,
       image_resolution: patch.image_resolution ?? prev?.image_resolution,
+      image_model: patch.image_model ?? prev?.image_model,
+      video_model: patch.video_model ?? prev?.video_model,
+      video_edit_model: patch.video_edit_model ?? prev?.video_edit_model,
+      vision_model: patch.vision_model ?? prev?.vision_model,
+      enable_video_edit: patch.enable_video_edit ?? prev?.enable_video_edit,
+      enable_vision_review: patch.enable_vision_review ?? prev?.enable_vision_review,
+      enable_safety_audit: patch.enable_safety_audit ?? prev?.enable_safety_audit,
+      safety_fail_policy: patch.safety_fail_policy ?? prev?.safety_fail_policy,
       video_fps: patch.video_fps ?? prev?.video_fps,
       selected_chapter_ids: patch.selected_chapter_ids ?? prev?.selected_chapter_ids,
       updated_at: Date.now(),
@@ -325,6 +333,9 @@ export function buildResultFromRunSnapshot(data: unknown, fallbackRunId: string)
   const videoProviderTrace =
     toDreamweaverVideoProviderTrace(dataRecord?.video_provider_trace) ||
     toDreamweaverVideoProviderTrace(runtimeCfg.video_provider_trace)
+  const audit = asRecord(dataRecord?.audit) || asRecord(runtimeCfg.audit)
+  const qcWarning = asRecord(dataRecord?.qc_warning) || asRecord(runtimeCfg.qc_warning)
+  const autoqc = asRecord(contract.autoqc) || asRecord(dataRecord?.autoqc) || asRecord(runtimeCfg.autoqc)
 
   return {
     run_id: runId,
@@ -343,7 +354,9 @@ export function buildResultFromRunSnapshot(data: unknown, fallbackRunId: string)
     midframes: midframes.length ? midframes : undefined,
     video_clips: videoClips.length ? videoClips : undefined,
     merged_video: extractMergedVideoFromContract(contract),
-    autoqc: asRecord(contract.autoqc) ?? undefined,
+    audit: audit ?? undefined,
+    autoqc: autoqc ?? undefined,
+    qc_warning: qcWarning ?? undefined,
     preflight,
     video_provider_trace: videoProviderTrace,
   }

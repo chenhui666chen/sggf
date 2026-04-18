@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from schemas.model_spec import ModelSpec
     from adapters.base import GenerationResult
     from adapters.registry import ModelRegistry
-    from core.router import SmartRouter
+    from core.router import RoutingResult, SmartRouter
     from core.fallback_manager import FallbackChain
 
 _logger = logging.getLogger("model_adapter.engine")
@@ -123,6 +123,7 @@ class ExecutionEngine:
         use_fallback: bool = True,
         max_attempts: int = 5,
         timeout: float = None,
+        routing_result: Optional["RoutingResult"] = None,
     ) -> ExecutionResult:
         """Execute a generation task with optional timeout."""
         start_time = time.time()
@@ -132,8 +133,8 @@ class ExecutionEngine:
         
         def _do_execute():
             if use_fallback:
-                return self._execute_with_fallback(task, max_attempts)
-            return self._execute_single(task, strategy)
+                return self._execute_with_fallback(task, max_attempts, strategy, routing_result)
+            return self._execute_single(task, strategy, routing_result)
         
         try:
             future = self._executor.submit(_do_execute)
@@ -165,12 +166,15 @@ class ExecutionEngine:
         self,
         task: "TaskSpec",
         strategy: str,
+        routing_result: Optional["RoutingResult"] = None,
     ) -> ExecutionResult:
         """Execute with a single model (no fallback)."""
         start_time = time.time()
         
         try:
-            if strategy == "quality":
+            if routing_result is not None:
+                model = routing_result.selected_model
+            elif strategy == "quality":
                 model = self._router.route_by_strategy(task, "quality")
             elif strategy == "cost":
                 model = self._router.route_by_strategy(task, "cost")
@@ -227,6 +231,8 @@ class ExecutionEngine:
         self,
         task: "TaskSpec",
         max_attempts: int,
+        strategy: str,
+        routing_result: Optional["RoutingResult"] = None,
     ) -> ExecutionResult:
         """Execute with automatic fallback."""
         from core.fallback_manager import fallback_manager
@@ -238,6 +244,8 @@ class ExecutionEngine:
             task=task,
             adapter_factory=get_adapter,
             max_attempts=max_attempts,
+            strategy=strategy,
+            initial_routing_result=routing_result,
         )
         
         if success and result:

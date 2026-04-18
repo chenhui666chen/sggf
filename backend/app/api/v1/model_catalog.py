@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import uuid
 from collections import Counter
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -24,12 +26,8 @@ router = APIRouter(prefix="/api/v1/model-catalog", tags=["model-catalog"])
 class ModelCatalogSyncRequest(BaseModel):
     """同步请求。"""
 
-    force_refresh: bool = Field(default=True, description="是否强制重新联网校验")
-    model_keys: list[str] | None = Field(default=None, description="仅同步指定模型")
-    max_verification_age_hours: float | None = Field(
-        default=None,
-        description="仅刷新超过该时效阈值的模型校验结果",
-    )
+    force_refresh: bool = Field(default=False, description="是否强制重新校验（忽略更新检测）")
+    model_keys: list[str] | None = Field(default=None, description="仅校验指定模型，空则校验所有")
 
 
 def _build_overview(entries: list[ModelCatalogEntry]) -> dict[str, Any]:
@@ -138,21 +136,85 @@ async def get_model_catalog_entry(
     return serialize_model_catalog_entry(entry, include_sources=True, include_archives=True)
 
 
+# 全局任务状态存储（生产环境应使用 Redis/Celery）
+_sync_tasks: dict[str, dict[str, Any]] = {}
+
+
 @router.post("/sync")
 async def sync_model_catalog(
     payload: ModelCatalogSyncRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """执行联网校验并将模型档案写入数据库。"""
-
+    """执行联网校验并将模型档案写入数据库（异步后台任务）。"""
     del current_user
 
+    task_id = str(uuid.uuid4())
+    _sync_tasks[task_id] = {
+        "status": "pending",
+        "created_at": asyncio.get_event_loop().time(),
+        "force_refresh": payload.force_refresh,
+        "model_keys": payload.model_keys,
+        "result": None,
+    }
+
+    def run_sync():
+        from app.db.base import SessionLocal
+        db_session = SessionLocal()
+        try:
+            _sync_tasks[task_id]["status"] = "running"
+            service = get_model_catalog_sync_service()
+            result = service.sync_catalog(
+                db_session,
+                force_refresh=payload.force_refresh,
+                model_keys=payload.model_keys,
+            )
+            _sync_tasks[task_id]["status"] = "completed"
+            _sync_tasks[task_id]["result"] = result
+        except Exception as e:
+            _sync_tasks[task_id]["status"] = "failed"
+            _sync_tasks[task_id]["result"] = {"error": str(e)}
+        finally:
+            db_session.close()
+
+    background_tasks.add_task(run_sync)
+
+    return {
+        "status": "accepted",
+        "task_id": task_id,
+        "message": "校验任务已提交，请使用 task_id 查询进度。"
+    }
+
+
+@router.get("/sync/{task_id}")
+async def get_sync_task_status(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """查询校验任务状态。"""
+    del current_user
+    task = _sync_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return task
+
+
+class ValidateConfigRequest(BaseModel):
+    """校验配置请求。"""
+
+    model_keys: list[str] | None = Field(default=None, description="仅校验指定模型")
+
+
+@router.post("/validate-config")
+async def trigger_config_validation(
+    payload: ValidateConfigRequest | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """触发三层配置一致性校验。"""
+    del current_user
     service = get_model_catalog_sync_service()
-    result = service.sync_catalog(
-        db,
-        force_refresh=payload.force_refresh,
-        model_keys=payload.model_keys,
-        max_verification_age_hours=payload.max_verification_age_hours,
-    )
-    return result
+    model_keys = payload.model_keys if payload else None
+    result = service._run_three_layer_consistency_check(model_keys)
+    return {"status": "ok", "result": result}

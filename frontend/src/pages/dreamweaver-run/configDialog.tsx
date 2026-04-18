@@ -554,6 +554,11 @@ type DreamweaverConfigDialogModelFieldGridProps = {
   onEnableVideoEditChange: (value: boolean) => void
   enableVisionReview: boolean
   onEnableVisionReviewChange: (value: boolean) => void
+  enableSafetyAudit: boolean
+  onEnableSafetyAuditChange: (value: boolean) => void
+  safetyFailPolicyValue: string
+  onSafetyFailPolicyChange: (value: string) => void
+  safetyFailPolicyOptions: Array<{ value: string; label: string }>
   disabled?: boolean
 }
 
@@ -574,6 +579,11 @@ export function DreamweaverConfigDialogModelFieldGrid({
   onEnableVideoEditChange,
   enableVisionReview,
   onEnableVisionReviewChange,
+  enableSafetyAudit,
+  onEnableSafetyAuditChange,
+  safetyFailPolicyValue,
+  onSafetyFailPolicyChange,
+  safetyFailPolicyOptions,
   disabled = false,
 }: DreamweaverConfigDialogModelFieldGridProps) {
   return (
@@ -630,15 +640,37 @@ export function DreamweaverConfigDialogModelFieldGrid({
           description="启用后在生成过程中自动使用视觉模型评估图像/视频质量，并给出改进建议。"
         />
       </Grid>
-      {enableVisionReview && (
+      <Grid item xs={12}>
+        <DreamweaverConfigDialogStrategyToggleField
+          title="成片安全审核"
+          checked={enableSafetyAudit}
+          onChange={onEnableSafetyAuditChange}
+          enabledLabel="已启用"
+          disabledLabel="未启用"
+          description="在 REVIEW 阶段对合成视频做独立视觉安全审核，用于识别暴力、色情、仇恨等高风险内容；它与 AutoQC 画质返工分开决策。"
+        />
+      </Grid>
+      {(enableVisionReview || enableSafetyAudit) && (
         <Grid item xs={12} sm={6}>
           <DreamweaverConfigDialogSelectField
             labelId="vision-model-label"
-            label="视觉理解模型"
+            label={enableVisionReview && enableSafetyAudit ? '视觉审核模型' : enableSafetyAudit ? '安全审核模型' : '视觉理解模型'}
             value={visionModelValue}
             onChange={onVisionModelChange}
             disabled={disabled}
             options={visionModelOptions}
+          />
+        </Grid>
+      )}
+      {enableSafetyAudit && (
+        <Grid item xs={12} sm={6}>
+          <DreamweaverConfigDialogSelectField
+            labelId="safety-fail-policy-label"
+            label="安全审核处置"
+            value={safetyFailPolicyValue}
+            onChange={onSafetyFailPolicyChange}
+            disabled={disabled}
+            options={safetyFailPolicyOptions}
           />
         </Grid>
       )}
@@ -889,6 +921,11 @@ type DreamweaverRunConfigDialogProps = {
   onEnableVideoEditChange: (value: boolean) => void
   enableVisionReview: boolean
   onEnableVisionReviewChange: (value: boolean) => void
+  enableSafetyAudit: boolean
+  onEnableSafetyAuditChange: (value: boolean) => void
+  safetyFailPolicyValue: string
+  onSafetyFailPolicyChange: (value: string) => void
+  safetyFailPolicyOptions: Array<{ value: string; label: string }>
   onRun: () => void
   runDisabled: boolean
 }
@@ -942,6 +979,11 @@ export function DreamweaverRunConfigDialog({
   onEnableVideoEditChange,
   enableVisionReview,
   onEnableVisionReviewChange,
+  enableSafetyAudit,
+  onEnableSafetyAuditChange,
+  safetyFailPolicyValue,
+  onSafetyFailPolicyChange,
+  safetyFailPolicyOptions,
   onRun,
   runDisabled,
 }: DreamweaverRunConfigDialogProps) {
@@ -996,7 +1038,7 @@ export function DreamweaverRunConfigDialog({
           )}
           {generationConfigLocked && (
             <Alert severity="info" sx={{ mb: 1 }}>
-              当前项目的风格/比例/分辨率已锁定，生成过程中不允许切换；如需变更请新建项目或先清理该项目的 DreamWeaver runs。
+              当前项目的生成配置已锁定，包含风格、画幅以及模型选择；生成过程中不允许切换，如需变更请新建项目或先清理该项目的 DreamWeaver runs。
               {lockedGenerationConfigSourceRunId ? `（锁定来源：${lockedGenerationConfigSourceRunId}）` : ''}
             </Alert>
           )}
@@ -1034,11 +1076,16 @@ export function DreamweaverRunConfigDialog({
             onEnableVideoEditChange={onEnableVideoEditChange}
             enableVisionReview={enableVisionReview}
             onEnableVisionReviewChange={onEnableVisionReviewChange}
+            enableSafetyAudit={enableSafetyAudit}
+            onEnableSafetyAuditChange={onEnableSafetyAuditChange}
+            safetyFailPolicyValue={safetyFailPolicyValue}
+            onSafetyFailPolicyChange={onSafetyFailPolicyChange}
+            safetyFailPolicyOptions={safetyFailPolicyOptions}
             disabled={visualFieldsDisabled}
           />
         </>
       }
-      visualHelperText="比例决定横/竖屏；分辨率影响素材库、关键帧与合成视频输出尺寸。"
+      visualHelperText="比例决定横/竖屏；分辨率影响素材库、关键帧与合成视频输出尺寸。视觉质检负责画质返工，安全审核负责合规拦截，两者现在已拆分。"
       onRun={onRun}
       runDisabled={runDisabled}
     />

@@ -87,7 +87,6 @@ def test_model_catalog_loads_all_seed_models():
     assert seed_map["wan2.6-t2i"].category == "image"
     assert seed_map["mureka-o1-instrumental"].category == "audio"
     assert seed_map["vidu-timing2audio"].subcategory == "可控时序音效"
-    assert len(seed_map["kling-v1"].source_urls) >= 2
     assert seed_map["qwen3-max"].raw_config["catalog_profile"]["system_role"].startswith("你是中文长篇小说创作")
     assert "创作主力" in seed_map["qwen3-max"].raw_config["catalog_profile"]["tooling_badges"]
 

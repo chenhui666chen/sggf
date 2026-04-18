@@ -43,6 +43,104 @@ def test_runtime_config_includes_video_generation_selector_defaults(monkeypatch)
     assert runtime_config["video_config"]["allow_subject_bridge_auto_sync"] is False
 
 
+def test_runtime_config_maps_selected_models_into_runtime_blocks() -> None:
+    dreamweaver = load_dreamweaver_module()
+
+    request = dreamweaver.RunRequest(
+        project_id=1,
+        chapter_ids=[1],
+        image_model="qwen-image-2.0-pro",
+        video_model="wan2.7-i2v",
+        video_edit_model="wan2.7-videoedit",
+        vision_model="qwen3-vl-plus",
+        enable_video_edit=True,
+        enable_vision_review=False,
+    )
+    runtime_config = dreamweaver._build_dreamweaver_runtime_config_from_request(request)
+
+    assert runtime_config["image_config"]["adapter"] == "qwen-image-2.0-pro"
+    assert runtime_config["image_config"]["vlm_adapter"] == "qwen3-vl-plus"
+    assert runtime_config["qc_config"]["semantic_vlm_adapter"] == "qwen3-vl-plus"
+    assert runtime_config["qc_config"]["state_vlm_adapter"] == "qwen3-vl-plus"
+    assert runtime_config["qc_config"]["video_clip_vlm_adapter"] == "qwen3-vl-plus"
+    assert runtime_config["qc_config"]["enable_vision_review"] is False
+    assert runtime_config["qc_config"]["enable_semantic_qc"] is False
+    assert runtime_config["qc_config"]["enable_state_qc"] is False
+    assert runtime_config["qc_config"]["enable_camera_continuity_qc"] is False
+    assert runtime_config["qc_config"]["enable_video_clip_qc"] is False
+    assert runtime_config["video_config"]["adapter"] == "wan2.7-i2v"
+    assert runtime_config["video_config"]["engine"] == "wan2.7-i2v"
+    assert runtime_config["video_edit_config"]["adapter"] == "wan2.7-videoedit"
+    assert runtime_config["video_edit_config"]["enabled"] is True
+
+
+def test_runtime_config_maps_safety_audit_settings_into_qc_config() -> None:
+    dreamweaver = load_dreamweaver_module()
+
+    request = dreamweaver.RunRequest(
+        project_id=1,
+        chapter_ids=[1],
+        vision_model="qwen3-vl-plus",
+        enable_safety_audit=True,
+        safety_fail_policy="block",
+    )
+    runtime_config = dreamweaver._build_dreamweaver_runtime_config_from_request(request)
+
+    assert runtime_config["image_config"]["vlm_adapter"] == "qwen3-vl-plus"
+    assert runtime_config["qc_config"]["enable_safety_audit"] is True
+    assert runtime_config["qc_config"]["safety_fail_policy"] == "block"
+
+
+def test_runtime_config_infers_t2v_engine_for_non_i2v_video_models() -> None:
+    dreamweaver = load_dreamweaver_module()
+
+    request = dreamweaver.RunRequest(
+        project_id=1,
+        chapter_ids=[1],
+        video_model="doubao-seedance-2-0",
+    )
+    runtime_config = dreamweaver._build_dreamweaver_runtime_config_from_request(request)
+
+    assert runtime_config["video_config"]["adapter"] == "doubao-seedance-2-0"
+    assert runtime_config["video_config"]["engine"] == "wan2.7-t2v"
+
+
+def test_resolve_registered_dreamweaver_model_id_prefers_first_registered(monkeypatch) -> None:
+    dreamweaver = load_dreamweaver_module()
+
+    monkeypatch.setattr(
+        dreamweaver,
+        "get_model_info",
+        lambda model_id: {"id": model_id} if model_id in {"qwen-image-2.0-pro", "wan2.6-t2i"} else None,
+    )
+
+    resolved = dreamweaver._resolve_registered_dreamweaver_model_id(
+        "missing-model",
+        "qwen-image-2.0-pro",
+        fallback="wan2.6-t2i",
+    )
+
+    assert resolved == "qwen-image-2.0-pro"
+
+
+def test_resolve_registered_dreamweaver_model_id_falls_back_to_default(monkeypatch) -> None:
+    dreamweaver = load_dreamweaver_module()
+
+    monkeypatch.setattr(
+        dreamweaver,
+        "get_model_info",
+        lambda model_id: {"id": model_id} if model_id == "wan2.6-t2i" else None,
+    )
+
+    resolved = dreamweaver._resolve_registered_dreamweaver_model_id(
+        "missing-model",
+        "",
+        fallback="wan2.6-t2i",
+    )
+
+    assert resolved == "wan2.6-t2i"
+
+
 def test_resolve_video_generation_controls_normalizes_legacy_engine_aliases() -> None:
     from app.services.dreamweaver.video_generation import resolve_video_generation_controls
 

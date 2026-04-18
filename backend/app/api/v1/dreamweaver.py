@@ -24,6 +24,7 @@ import uuid
 from adapters.adapter_helpers import (
     edit_image as unified_edit_image,
     generate_image as unified_generate_image,
+    get_model_info,
     model_supports_capability,
 )
 from app.core.security import get_current_user
@@ -72,8 +73,10 @@ from app.services.providers.kling import (
 from app.services.dreamweaver.config_lock import (
     DreamweaverProjectConfigLockedError,
     apply_locked_generation_config,
+    apply_vision_review_qc_config,
     enforce_locked_generation_config_compatible,
     get_project_locked_generation_config,
+    serialize_locked_generation_config,
 )
 from app.services.dreamweaver.library_prompt import suggest_library_prompt
 from app.services.points_task_precheck import (
@@ -85,6 +88,8 @@ from app.services.chapter_adaptation_assets import build_drama_source_text
 from pipeline.state_machine import RunContext, State, progress_percent, run_until_done, stage_label
 from pipeline.media_presets import (
     DREAMWEAVER_I2V_ENGINE,
+    DREAMWEAVER_T2V_ENGINE,
+    infer_dreamweaver_video_engine_from_model_id,
     is_dreamweaver_auto_engine,
     is_dreamweaver_i2v_engine,
     normalize_dreamweaver_video_engine,
@@ -124,6 +129,18 @@ def _ensure_dreamweaver_request_preflight_passed(preflight: DreamweaverRunPrefli
     detail = preflight.to_dict()
     detail.setdefault("message", "短剧运行提交预检未通过")
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+def _locked_generation_config_error_detail(
+    message: str,
+    exc: DreamweaverProjectConfigLockedError,
+) -> Dict[str, Any]:
+    return {
+        "message": message,
+        "locked": serialize_locked_generation_config(exc.locked),
+        "requested": exc.requested,
+        "mismatches": exc.mismatches,
+    }
 
 
 def _build_library_asset_provider_sync_payload(
@@ -197,6 +214,14 @@ class RunRequest(BaseModel):
     image_ratio: Optional[str] = Field(default=None)
     # 图片分辨率：720p / 1080p 等，最终转换为 width/height
     image_resolution: Optional[str] = Field(default=None)
+    image_model: Optional[str] = Field(default=None)
+    video_model: Optional[str] = Field(default=None)
+    video_edit_model: Optional[str] = Field(default=None)
+    vision_model: Optional[str] = Field(default=None)
+    enable_video_edit: Optional[bool] = Field(default=None)
+    enable_vision_review: Optional[bool] = Field(default=None)
+    enable_safety_audit: Optional[bool] = Field(default=None)
+    safety_fail_policy: Optional[Literal["warn", "block"]] = Field(default=None)
     # 视频帧率：I2V/FFmpeg 视频生成时使用，范围 1~60
     video_fps: Optional[int] = Field(default=None, ge=1, le=60)
     # 视频生成是否需要确认：默认 VIDEO 模式下自动生成 video_clip_jobs 并等待确认
@@ -386,6 +411,14 @@ class ProjectLockedGenerationConfigResponse(BaseModel):
     style_preset: str
     image_ratio: str
     image_resolution: str
+    image_model: Optional[str] = None
+    video_model: Optional[str] = None
+    vision_model: Optional[str] = None
+    video_edit_model: Optional[str] = None
+    enable_video_edit: Optional[bool] = None
+    enable_vision_review: Optional[bool] = None
+    enable_safety_audit: Optional[bool] = None
+    safety_fail_policy: Optional[str] = None
     source_run_id: Optional[str] = None
 
 
@@ -399,6 +432,14 @@ class ScriptApproveRequest(BaseModel):
 
 class PromptReviewApproveRequest(BaseModel):
     approved: bool = Field(default=True)
+
+
+class SafetyAuditApproveResponse(BaseModel):
+    run_id: str
+    status: str
+    state: Optional[str] = None
+    stage: Optional[str] = None
+    manual_override: bool = Field(default=True)
 
 
 class ShotVideoPromptUpdateRequest(BaseModel):
@@ -525,6 +566,89 @@ def _ensure_run_not_running(row: DreamweaverProjectModel, *, action: str) -> Non
     status_lower = str(getattr(row, "status", "") or "").strip().lower()
     if status_lower == "running":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"run 正在执行，无法执行{action}")
+
+
+def _find_latest_generation_history_for_run(db: Session, *, user_id: int, run_id: str):
+    query = text(
+        """
+        SELECT gh.id, gh.task_id, gh.status, gh.result, gh.error, gh.created_at, gh.completed_at
+        FROM generation_history gh
+        INNER JOIN projects p ON gh.project_id = p.id
+        WHERE p.user_id = :user_id
+          AND gh.task_type = 'dreamweaver'
+          AND gh.result LIKE :needle
+        ORDER BY gh.created_at DESC, gh.id DESC
+        LIMIT 1
+        """
+    )
+    needle = f'%\"run_id\": \"{run_id}\"%'
+    return db.execute(query, {"user_id": user_id, "needle": needle}).mappings().first()
+
+
+def _parse_generation_history_result_payload(row: Any) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    result_raw = row.get("result") if hasattr(row, "get") else None
+    if not isinstance(result_raw, str) or not result_raw.strip():
+        return None
+    try:
+        payload = json.loads(result_raw)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("Failed to parse generation_history payload: %s", e)
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _extract_generation_history_rework_reason(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return None
+    artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
+    rework_reason = artifacts.get("rework_reason")
+    return rework_reason if isinstance(rework_reason, dict) else None
+
+
+def _extract_safety_audit_override_context(
+    *,
+    row: DreamweaverProjectModel,
+    contract: Dict[str, Any],
+    history_payload: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Dict[str, Any]]]:
+    runtime_cfg = contract.get("runtime_config") if isinstance(contract.get("runtime_config"), dict) else {}
+    history_audit = (
+        history_payload.get("audit")
+        if isinstance(history_payload, dict) and isinstance(history_payload.get("audit"), dict)
+        else {}
+    )
+    runtime_audit = runtime_cfg.get("audit") if isinstance(runtime_cfg.get("audit"), dict) else {}
+    audit = history_audit or runtime_audit
+
+    history_rework_reason = _extract_generation_history_rework_reason(history_payload) or {}
+    runtime_rework_reason = runtime_cfg.get("rework_reason") if isinstance(runtime_cfg.get("rework_reason"), dict) else {}
+    rework_reason = history_rework_reason or runtime_rework_reason
+
+    safety_audit = audit.get("safety_audit") if isinstance(audit.get("safety_audit"), dict) else {}
+    rework_type = str(rework_reason.get("type") or "").strip().lower()
+
+    error_candidates = [
+        getattr(row, "error_type", None),
+        history_payload.get("error_type") if isinstance(history_payload, dict) else None,
+        runtime_cfg.get("error_type"),
+    ]
+    has_safety_error_type = any(str(item or "").strip() == "SafetyAuditFailed" for item in error_candidates)
+    has_safety_rework_reason = rework_type == "safety_audit_failed"
+    has_safety_block_flag = bool(safety_audit.get("blocked")) or str(safety_audit.get("fail_policy") or "").strip().lower() == "block"
+
+    if not any((has_safety_error_type, has_safety_rework_reason, has_safety_block_flag)):
+        return None
+
+    if not rework_reason:
+        rework_reason = {"type": "safety_audit_failed"}
+
+    return {
+        "audit": copy.deepcopy(audit) if isinstance(audit, dict) else {},
+        "rework_reason": copy.deepcopy(rework_reason) if isinstance(rework_reason, dict) else {},
+        "safety_audit": copy.deepcopy(safety_audit) if isinstance(safety_audit, dict) else {},
+    }
 
 
 def _find_contract_shot(contract: Dict[str, Any], *, shot_id: str) -> Dict[str, Any]:
@@ -1152,6 +1276,23 @@ def _quality_mode_to_runtime_config(quality_mode: Optional[str]) -> Tuple[Dict[s
     return {}, {}, {}
 
 
+def _infer_video_engine_from_model_id(model_id: Any) -> str:
+    return infer_dreamweaver_video_engine_from_model_id(model_id)
+
+
+def _resolve_registered_dreamweaver_model_id(*candidates: Any, fallback: str) -> str:
+    normalized_fallback = str(fallback or "").strip()
+    seen: set[str] = set()
+    for raw_candidate in [*candidates, normalized_fallback]:
+        candidate = str(raw_candidate or "").strip()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if isinstance(get_model_info(candidate), dict):
+            return candidate
+    return normalized_fallback
+
+
 def _build_dreamweaver_runtime_config_from_request(request: RunRequest) -> Dict[str, Any]:
     runtime_config: Dict[str, Any] = {}
 
@@ -1183,10 +1324,59 @@ def _build_dreamweaver_runtime_config_from_request(request: RunRequest) -> Dict[
         image_cfg = runtime_config.get("image_config") if isinstance(runtime_config.get("image_config"), dict) else {}
         image_cfg["resolution"] = request.image_resolution.strip()
         runtime_config["image_config"] = image_cfg
+    if isinstance(request.image_model, str) and request.image_model.strip():
+        image_cfg = runtime_config.get("image_config") if isinstance(runtime_config.get("image_config"), dict) else {}
+        image_cfg["adapter"] = request.image_model.strip()
+        runtime_config["image_config"] = image_cfg
+    if isinstance(request.vision_model, str) and request.vision_model.strip():
+        vision_model = request.vision_model.strip()
+        image_cfg = runtime_config.get("image_config") if isinstance(runtime_config.get("image_config"), dict) else {}
+        image_cfg["vlm_adapter"] = vision_model
+        runtime_config["image_config"] = image_cfg
+
+        qc_cfg = runtime_config.get("qc_config") if isinstance(runtime_config.get("qc_config"), dict) else {}
+        qc_cfg = apply_vision_review_qc_config(qc_cfg, enabled=None, vision_model=vision_model)
+        runtime_config["qc_config"] = qc_cfg
+    if request.enable_vision_review is not None:
+        qc_cfg = runtime_config.get("qc_config") if isinstance(runtime_config.get("qc_config"), dict) else {}
+        qc_cfg = apply_vision_review_qc_config(
+            qc_cfg,
+            enabled=bool(request.enable_vision_review),
+            vision_model=request.vision_model,
+        )
+        runtime_config["qc_config"] = qc_cfg
+    if request.enable_safety_audit is not None:
+        qc_cfg = runtime_config.get("qc_config") if isinstance(runtime_config.get("qc_config"), dict) else {}
+        qc_cfg["enable_safety_audit"] = bool(request.enable_safety_audit)
+        runtime_config["qc_config"] = qc_cfg
+    if isinstance(request.safety_fail_policy, str) and request.safety_fail_policy.strip():
+        qc_cfg = runtime_config.get("qc_config") if isinstance(runtime_config.get("qc_config"), dict) else {}
+        qc_cfg["safety_fail_policy"] = request.safety_fail_policy.strip().lower()
+        runtime_config["qc_config"] = qc_cfg
     if request.video_fps is not None:
         video_cfg = runtime_config.get("video_config") if isinstance(runtime_config.get("video_config"), dict) else {}
         video_cfg["fps"] = int(request.video_fps)
         runtime_config["video_config"] = video_cfg
+    if isinstance(request.video_model, str) and request.video_model.strip():
+        video_model = request.video_model.strip()
+        video_cfg = runtime_config.get("video_config") if isinstance(runtime_config.get("video_config"), dict) else {}
+        video_cfg["adapter"] = video_model
+        inferred_engine = _infer_video_engine_from_model_id(video_model)
+        if inferred_engine:
+            video_cfg["engine"] = inferred_engine
+        runtime_config["video_config"] = video_cfg
+    if isinstance(request.video_edit_model, str) and request.video_edit_model.strip():
+        video_edit_cfg = (
+            runtime_config.get("video_edit_config") if isinstance(runtime_config.get("video_edit_config"), dict) else {}
+        )
+        video_edit_cfg["adapter"] = request.video_edit_model.strip()
+        runtime_config["video_edit_config"] = video_edit_cfg
+    if request.enable_video_edit is not None:
+        video_edit_cfg = (
+            runtime_config.get("video_edit_config") if isinstance(runtime_config.get("video_edit_config"), dict) else {}
+        )
+        video_edit_cfg["enabled"] = bool(request.enable_video_edit)
+        runtime_config["video_edit_config"] = video_edit_cfg
     if request.video_require_confirmation is not None:
         video_cfg = runtime_config.get("video_config") if isinstance(runtime_config.get("video_config"), dict) else {}
         video_cfg["require_confirmation"] = bool(request.video_require_confirmation)
@@ -1261,21 +1451,22 @@ def run_pipeline(
             style_preset=request.style_preset,
             image_ratio=request.image_ratio,
             image_resolution=request.image_resolution,
+            image_model=request.image_model,
+            video_model=request.video_model,
+            vision_model=request.vision_model,
+            video_edit_model=request.video_edit_model,
+            enable_video_edit=request.enable_video_edit,
+            enable_vision_review=request.enable_vision_review,
+            enable_safety_audit=request.enable_safety_audit,
+            safety_fail_policy=request.safety_fail_policy,
         )
     except DreamweaverProjectConfigLockedError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "message": "当前项目的风格和画幅配置已锁定，新建运行必须与锁定配置一致。请先解锁配置或切换到对应的 DreamWeaver run。",
-                "locked": {
-                    "style_preset": exc.locked.style_preset,
-                    "image_ratio": exc.locked.image_ratio,
-                    "image_resolution": exc.locked.image_resolution,
-                    "source_run_id": exc.locked.source_run_id,
-                },
-                "requested": exc.requested,
-                "mismatches": exc.mismatches,
-            },
+            detail=_locked_generation_config_error_detail(
+                "当前项目的生成配置已锁定，新建 DreamWeaver 运行必须与锁定配置保持一致。",
+                exc,
+            ),
         ) from exc
 
     runtime_config = apply_locked_generation_config(
@@ -1413,21 +1604,22 @@ def run_pipeline_async(
             style_preset=request.style_preset,
             image_ratio=request.image_ratio,
             image_resolution=request.image_resolution,
+            image_model=request.image_model,
+            video_model=request.video_model,
+            vision_model=request.vision_model,
+            video_edit_model=request.video_edit_model,
+            enable_video_edit=request.enable_video_edit,
+            enable_vision_review=request.enable_vision_review,
+            enable_safety_audit=request.enable_safety_audit,
+            safety_fail_policy=request.safety_fail_policy,
         )
     except DreamweaverProjectConfigLockedError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "message": "当前项目的风格和画幅配置已锁定，新建运行必须与锁定配置一致。请先解锁配置或切换到对应的 DreamWeaver run。",
-                "locked": {
-                    "style_preset": exc.locked.style_preset,
-                    "image_ratio": exc.locked.image_ratio,
-                    "image_resolution": exc.locked.image_resolution,
-                    "source_run_id": exc.locked.source_run_id,
-                },
-                "requested": exc.requested,
-                "mismatches": exc.mismatches,
-            },
+            detail=_locked_generation_config_error_detail(
+                "当前项目的生成配置已锁定，新建 DreamWeaver 运行必须与锁定配置保持一致。",
+                exc,
+            ),
         ) from exc
 
     source_text = _build_source_text(chapters)
@@ -1891,17 +2083,10 @@ def suggest_asset_library_prompt(
     except DreamweaverProjectConfigLockedError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "message": "当前项目的风格和画幅配置已锁定，重生素材必须与锁定配置一致。请先解锁配置或切换到对应的 DreamWeaver run。",
-                "locked": {
-                    "style_preset": exc.locked.style_preset,
-                    "image_ratio": exc.locked.image_ratio,
-                    "image_resolution": exc.locked.image_resolution,
-                    "source_run_id": exc.locked.source_run_id,
-                },
-                "requested": exc.requested,
-                "mismatches": exc.mismatches,
-            },
+            detail=_locked_generation_config_error_detail(
+                "当前项目的生成配置已锁定，素材库提示词建议必须与锁定配置保持一致。",
+                exc,
+            ),
         ) from exc
 
     spec = allowed_spec
@@ -2060,17 +2245,10 @@ def regenerate_asset_library(
     except DreamweaverProjectConfigLockedError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "message": "当前项目的风格和画幅配置已锁定，重生素材必须与锁定配置一致。请先解锁配置或切换到对应的 DreamWeaver run。",
-                "locked": {
-                    "style_preset": exc.locked.style_preset,
-                    "image_ratio": exc.locked.image_ratio,
-                    "image_resolution": exc.locked.image_resolution,
-                    "source_run_id": exc.locked.source_run_id,
-                },
-                "requested": exc.requested,
-                "mismatches": exc.mismatches,
-            },
+            detail=_locked_generation_config_error_detail(
+                "当前项目的生成配置已锁定，素材库重生必须与锁定配置保持一致。",
+                exc,
+            ),
         ) from exc
 
     assets_by_role = load_latest_library_assets(db, project_id=project_id, user_id=current_user.id)
@@ -2093,19 +2271,23 @@ def regenerate_asset_library(
     style_preset = normalize_style_preset(None)
     image_cfg: Dict[str, Any] = {}
     try:
-        latest = (
-            db.query(DreamweaverProjectModel)
-            .filter(
-                DreamweaverProjectModel.source_project_id == project_id,
-                DreamweaverProjectModel.user_id == current_user.id,
-            )
-            .order_by(DreamweaverProjectModel.updated_at.desc())
-            .first()
+        config_source = None
+        base_query = db.query(DreamweaverProjectModel).filter(
+            DreamweaverProjectModel.source_project_id == project_id,
+            DreamweaverProjectModel.user_id == current_user.id,
         )
-        if latest and isinstance(latest.contract_json, dict):
+        if safe_run_id:
+            config_source = (
+                base_query.filter(DreamweaverProjectModel.run_id == safe_run_id)
+                .order_by(DreamweaverProjectModel.updated_at.desc())
+                .first()
+            )
+        if config_source is None:
+            config_source = base_query.order_by(DreamweaverProjectModel.updated_at.desc()).first()
+        if config_source and isinstance(config_source.contract_json, dict):
             runtime_cfg = (
-                latest.contract_json.get("runtime_config")
-                if isinstance(latest.contract_json.get("runtime_config"), dict)
+                config_source.contract_json.get("runtime_config")
+                if isinstance(config_source.contract_json.get("runtime_config"), dict)
                 else {}
             )
             if isinstance(runtime_cfg.get("style_preset"), str) and runtime_cfg.get("style_preset").strip():
@@ -2117,7 +2299,7 @@ def regenerate_asset_library(
             if isinstance(runtime_cfg.get("image_config"), dict):
                 image_cfg = runtime_cfg.get("image_config") or {}
     except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to read style config from latest run for project %s: %s", project_id, e)
+        logger.warning("Failed to read style config from dreamweaver run for project %s: %s", project_id, e)
 
     if locked_cfg.locked:
         style_preset = locked_cfg.style_preset
@@ -2139,6 +2321,8 @@ def regenerate_asset_library(
     if locked_cfg.locked:
         image_cfg["ratio"] = locked_cfg.image_ratio
         image_cfg["resolution"] = locked_cfg.image_resolution
+        if locked_cfg.image_model:
+            image_cfg["adapter"] = locked_cfg.image_model
     else:
         if isinstance(request.image_ratio, str) and request.image_ratio.strip():
             image_cfg["ratio"] = request.image_ratio.strip()
@@ -2149,6 +2333,14 @@ def regenerate_asset_library(
             image_cfg["resolution"] = request.image_resolution.strip()
         elif isinstance(current_meta.get("resolution"), str) and str(current_meta.get("resolution") or "").strip():
             image_cfg["resolution"] = str(current_meta.get("resolution") or "").strip()
+
+    resolved_image_model = _resolve_registered_dreamweaver_model_id(
+        image_cfg.get("adapter"),
+        current_meta.get("image_model"),
+        current_meta.get("t2i_fallback_model"),
+        fallback="wan2.6-t2i",
+    )
+    image_cfg["adapter"] = resolved_image_model
 
     width, height, ratio = resolve_frame_size(image_cfg)
 
@@ -2503,7 +2695,7 @@ def regenerate_asset_library(
                 negative_prompt=negative_prompt,
                 width=width,
                 height=height,
-                model_id="wan2.6-t2i",
+                model_id=resolved_image_model,
                 use_fallback=False,
             )
     else:
@@ -2512,7 +2704,7 @@ def regenerate_asset_library(
             negative_prompt=negative_prompt,
             width=width,
             height=height,
-            model_id="wan2.6-t2i",
+            model_id=resolved_image_model,
             use_fallback=False,
         )
 
@@ -2560,6 +2752,8 @@ def regenerate_asset_library(
             },
         ) from exc
 
+    applied_image_model = image_edit_adapter_name if via == "image_edit" else resolved_image_model
+
     meta = dict(current_meta)
     meta["entity_type"] = entity_type
     meta["entity_id"] = int(entity_id)
@@ -2569,6 +2763,7 @@ def regenerate_asset_library(
     meta["approved"] = False
     meta["style_preset"] = style_preset
     meta["style_prompt"] = style_prompt
+    meta["image_model"] = applied_image_model
     if isinstance(prompt_meta, dict):
         _attach_view_chain_prompt_meta(prompt_meta, seed_info=seed_info, manual_override=manual_prompt_override)
     meta.setdefault("prompt_meta", {})
@@ -2601,6 +2796,8 @@ def regenerate_asset_library(
     meta["regen"] = {
         "via": via,
         "decision": decision,
+        "image_model": applied_image_model,
+        "t2i_model": resolved_image_model,
         "image_edit_adapter": image_edit_adapter_name,
         "edit_base_role": edit_base_role,
         "edit_reference_roles": list(edit_reference_roles),
@@ -2923,10 +3120,7 @@ def get_project_locked_generation_config_api(
     locked_cfg = get_project_locked_generation_config(db, project_id=project_id, user_id=current_user.id)
     return ProjectLockedGenerationConfigResponse(
         locked=locked_cfg.locked,
-        style_preset=locked_cfg.style_preset,
-        image_ratio=locked_cfg.image_ratio,
-        image_resolution=locked_cfg.image_resolution,
-        source_run_id=locked_cfg.source_run_id,
+        **serialize_locked_generation_config(locked_cfg),
     )
 
 
@@ -3298,6 +3492,140 @@ def approve_prompt_review(
     db.commit()
 
     return {"run_id": row.run_id, "approved": approved}
+
+
+@router.post("/runs/{run_id}/safety-audit/approve", response_model=SafetyAuditApproveResponse)
+def approve_safety_audit_failure(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    safe_run_id = _normalize_run_id(run_id)
+    row = (
+        db.query(DreamweaverProjectModel)
+        .filter(DreamweaverProjectModel.run_id == safe_run_id, DreamweaverProjectModel.user_id == current_user.id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run_id 涓嶅瓨鍦ㄦ垨鏃犳潈闄愯闂?")
+
+    _ensure_run_not_running(row, action="瀹夊叏瀹℃牳浜哄伐鏀捐")
+
+    if str(row.status or "").strip().lower() != "failed":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="鍙湁澶辫触鐨?run 鎵嶈兘鎵ц浜哄伐鏀捐")
+
+    contract = copy.deepcopy(row.contract_json) if isinstance(row.contract_json, dict) else {}
+    runtime_cfg = copy.deepcopy(contract.get("runtime_config")) if isinstance(contract.get("runtime_config"), dict) else {}
+
+    history_row = _find_latest_generation_history_for_run(db, user_id=int(current_user.id), run_id=safe_run_id)
+    history_payload = _parse_generation_history_result_payload(history_row)
+    safety_context = _extract_safety_audit_override_context(
+        row=row,
+        contract=contract,
+        history_payload=history_payload,
+    )
+    if safety_context is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="褰撳墠 run 涓嶆槸鍙互浜哄伐鏀捐鐨勫畨鍏ㄥ鏍搁樆鏂换鍔?")
+
+    audit = safety_context["audit"]
+    rework_reason = safety_context["rework_reason"]
+    safety_audit = safety_context["safety_audit"]
+
+    override_at = utc_now().isoformat()
+    override_by = str(getattr(current_user, "username", None) or f"user:{current_user.id}")
+
+    original_error_type = str(runtime_cfg.get("error_type") or row.error_type or "").strip()
+    original_error_message = str(runtime_cfg.get("error_message") or row.error_message or "").strip()
+    if not original_error_type and isinstance(history_payload, dict) and isinstance(history_payload.get("error_type"), str):
+        original_error_type = str(history_payload.get("error_type") or "").strip()
+    if not original_error_message:
+        if isinstance(history_payload, dict) and isinstance(history_payload.get("error_message"), str):
+            original_error_message = str(history_payload.get("error_message") or "").strip()
+        elif hasattr(history_row, "get") and isinstance(history_row.get("error"), str):
+            original_error_message = str(history_row.get("error") or "").strip()
+
+    if original_error_type and not str(safety_audit.get("original_error_type") or "").strip():
+        safety_audit["original_error_type"] = original_error_type
+    if original_error_message and not str(safety_audit.get("original_error_message") or "").strip():
+        safety_audit["original_error_message"] = original_error_message
+    if original_error_message and not str(safety_audit.get("summary") or "").strip():
+        safety_audit["summary"] = original_error_message
+
+    safety_audit["manual_override"] = True
+    safety_audit["manual_override_at"] = override_at
+    safety_audit["manual_override_by"] = override_by
+    safety_audit["manual_override_user_id"] = int(current_user.id)
+    safety_audit["effective_pass"] = True
+    safety_audit["effective_blocked"] = False
+
+    audit["safety_audit"] = safety_audit
+
+    rework_reason["type"] = "safety_audit_failed"
+    rework_reason["manual_override"] = True
+    rework_reason["manual_override_at"] = override_at
+    rework_reason["manual_override_by"] = override_by
+    rework_reason["manual_override_user_id"] = int(current_user.id)
+    rework_reason["safety_audit"] = safety_audit
+
+    runtime_cfg["audit"] = audit
+    runtime_cfg["rework_reason"] = rework_reason
+    runtime_cfg.pop("error_type", None)
+    runtime_cfg.pop("error_message", None)
+    runtime_cfg.pop("failed_from_state", None)
+    contract["runtime_config"] = runtime_cfg
+
+    row.contract_json = contract
+    row.status = "completed"
+    row.state = "DONE"
+    row.stage = "done"
+    row.progress = 100
+    row.error_type = None
+    row.error_message = None
+    flag_modified(row, "contract_json")
+
+    if history_row and history_row.get("id") is not None:
+        updated_payload = copy.deepcopy(history_payload) if isinstance(history_payload, dict) else {"run_id": safe_run_id}
+        updated_payload["state"] = "DONE"
+        updated_payload["stage"] = "done"
+        updated_payload["progress"] = 100
+        updated_payload["audit"] = audit
+        artifacts = updated_payload.get("artifacts") if isinstance(updated_payload.get("artifacts"), dict) else {}
+        artifacts["rework_reason"] = rework_reason
+        updated_payload["artifacts"] = artifacts
+        updated_payload.pop("error_type", None)
+        updated_payload.pop("error_message", None)
+        updated_payload.pop("failed_state", None)
+        updated_payload.pop("failed_from_state", None)
+
+        db.execute(
+            text(
+                """
+                UPDATE generation_history
+                SET status = :status,
+                    result = :result,
+                    error = :error,
+                    completed_at = :completed_at
+                WHERE id = :id
+                """
+            ),
+            {
+                "id": int(history_row["id"]),
+                "status": "completed",
+                "result": json.dumps(updated_payload, ensure_ascii=False),
+                "error": None,
+                "completed_at": override_at,
+            },
+        )
+
+    db.commit()
+
+    return SafetyAuditApproveResponse(
+        run_id=row.run_id,
+        status=row.status,
+        state=row.state,
+        stage=row.stage,
+        manual_override=True,
+    )
 
 
 @router.post("/runs/{run_id}/resume-async", response_model=ResumeAsyncResponse)

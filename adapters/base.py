@@ -135,7 +135,27 @@ class BaseAdapter(ABC):
         """Pre-process task before mapping (e.g., apply best practices)."""
         if self.spec.best_practice.prompt_template:
             task.prompt = self.spec.best_practice.apply_prompt_template(task.prompt)
+        
+        # Apply model-specific prompt optimization
+        task.prompt = self._optimize_prompt(task)
+        
         return task
+    
+    def _optimize_prompt(self, task: "TaskSpec") -> str:
+        """Apply prompt optimizer for this specific model."""
+        try:
+            from adapters.prompt_optimizer import get_prompt_optimizer
+            optimizer = get_prompt_optimizer()
+            return optimizer.optimize(
+                prompt=task.prompt,
+                model_id=self.spec.id,
+                modality=task.modality.value,
+                style=task.style,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Prompt optimization failed: %s", e)
+            return task.prompt
     
     def _post_process_result(
         self, 

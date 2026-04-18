@@ -137,6 +137,7 @@ class ModelRegistry:
                 "adapters.wanx_adapter",
                 "adapters.wan26_video_adapter",
                 "adapters.qwen_multimodal_adapter",
+                "adapters.new_models_adapters",
             ]
             # Keep imports explicit and minimal to avoid implicit side effects.
             for module_name in module_names:

@@ -707,12 +707,24 @@ def build_contract_from_payload(
         runtime_config["camera_states"] = payload.get("camera_states")
     if isinstance(payload.get("camera_scenes"), list):
         runtime_config["camera_scenes"] = payload.get("camera_scenes")
+    if isinstance(payload.get("audit"), dict):
+        runtime_config["audit"] = payload.get("audit")
+    if isinstance(payload.get("qc_warning"), dict):
+        runtime_config["qc_warning"] = payload.get("qc_warning")
+    if isinstance(payload.get("rework_reason"), dict):
+        runtime_config["rework_reason"] = payload.get("rework_reason")
     if isinstance(payload.get("telemetry"), dict):
         runtime_config["telemetry"] = payload.get("telemetry")
     if isinstance(payload.get("experiment"), dict):
         runtime_config["experiment"] = payload.get("experiment")
     if isinstance(payload.get("ab_variant"), str) and payload.get("ab_variant").strip():
         runtime_config["ab_variant"] = payload.get("ab_variant").strip()
+    if isinstance(payload.get("error_type"), str) and str(payload.get("error_type") or "").strip():
+        runtime_config["error_type"] = str(payload.get("error_type") or "").strip()
+    if isinstance(payload.get("error"), str) and str(payload.get("error") or "").strip():
+        runtime_config["error_message"] = str(payload.get("error") or "").strip()
+    if isinstance(payload.get("failed_from_state"), str) and str(payload.get("failed_from_state") or "").strip():
+        runtime_config["failed_from_state"] = str(payload.get("failed_from_state") or "").strip()
 
     # 绑定资产到 Shot
     shot_by_key = {s.shot_key: s for s in shots}

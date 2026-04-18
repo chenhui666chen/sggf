@@ -131,6 +131,50 @@ def test_generate_t2i_with_parallel_candidates_keeps_model_id_string_path(
     assert result["candidate_seeds"] == [21, 22]
 
 
+def test_resolve_runtime_model_id_prefers_runtime_config_over_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agents import painter
+
+    monkeypatch.setenv("DREAMWEAVER_T2I_MODEL", "env-image-model")
+
+    resolved = painter._resolve_runtime_model_id(
+        {"adapter": "runtime-image-model"},
+        key="adapter",
+        env_name="DREAMWEAVER_T2I_MODEL",
+        default="wan2.6-t2i",
+    )
+
+    assert resolved == "runtime-image-model"
+
+
+def test_resolve_runtime_model_id_requires_available_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agents import painter
+
+    monkeypatch.setenv("DREAMWEAVER_VLM_ADAPTER", "env-vlm-model")
+    monkeypatch.setattr(painter, "_model_client_available", lambda model_id: model_id == "runtime-vlm-model")
+
+    resolved = painter._resolve_runtime_model_id(
+        {"vlm_adapter": "runtime-vlm-model"},
+        key="vlm_adapter",
+        env_name="DREAMWEAVER_VLM_ADAPTER",
+        default="qwen3_vl_plus",
+        require_available=True,
+    )
+    missing = painter._resolve_runtime_model_id(
+        {"vlm_adapter": "missing-vlm-model"},
+        key="vlm_adapter",
+        env_name="DREAMWEAVER_VLM_ADAPTER",
+        default="qwen3_vl_plus",
+        require_available=True,
+    )
+
+    assert resolved == "runtime-vlm-model"
+    assert missing is None
+
+
 def test_generate_edit_with_candidates_accepts_model_id_string_and_multi_ref(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

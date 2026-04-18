@@ -17,6 +17,8 @@
 - [多 Agent 完整指南](MULTI_AGENT_GUIDE.md)
 - [部署指南](DEPLOY_GUIDE.md)
 - [数据库迁移说明](DATABASE_MIGRATION_GUIDE.md)
+- [模型接入参考文档](docs/MODEL_INTEGRATION_REFERENCE.md)
+- [模型路由架构优化方案](docs/MODEL_ROUTING_OPTIMIZATION_PLAN_20260417.md)
 - [PostgreSQL 部署说明](docs/POSTGRESQL_DEPLOYMENT.md)
 - [有声书任务队列说明](docs/AUDIOBOOK_TASK_QUEUE.md)
 
@@ -335,6 +337,7 @@ NGINX_SSL_KEY_PATH=/etc/letsencrypt/live/sggf.net/privkey.pem
 - 多模态调用：`from core.unified_media_runtime import media_runtime, create_tts_engine, synthesize_speech`
 - LangChain 兼容调用：`from core.langchain_bridge import create_task_llm, create_model_llm`
 - 任务枚举与归一化：`from core.model_resolution import TaskType, normalize_task_type, normalize_model_id`
+- 模型接入自检：`python scripts/check_model_integration.py --chain llm|media|all --model-id your-model-id`
 
 历史别名说明：
 

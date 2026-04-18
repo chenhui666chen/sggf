@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { Box, Chip, Stack, Typography } from '@mui/material'
+import { Alert, Box, Button, Chip, LinearProgress, Stack, Typography } from '@mui/material'
 
 type RunSnapshotPreviewPaneProps = {
   refreshControls?: ReactNode
@@ -39,6 +39,151 @@ export function RunSnapshotPreviewPane({
       {shotList ?? null}
       {assetPreview ?? null}
       {mergedVideo ?? null}
+    </>
+  )
+}
+
+type RunSnapshotRefreshButtonProps = {
+  label: string
+  onClick: () => void
+  disabled?: boolean
+  loading?: boolean
+}
+
+export function RunSnapshotRefreshButton({
+  label,
+  onClick,
+  disabled = false,
+  loading = false,
+}: RunSnapshotRefreshButtonProps) {
+  return (
+    <Button size="small" variant="outlined" onClick={onClick} disabled={disabled}>
+      {loading ? '加载中…' : label}
+    </Button>
+  )
+}
+
+type RunSnapshotLoadedChipProps = {
+  visible: boolean
+  label?: string
+}
+
+export function RunSnapshotLoadedChip({
+  visible,
+  label = '快照已加载',
+}: RunSnapshotLoadedChipProps) {
+  if (!visible) return null
+
+  return <Chip size="small" label={label} color="success" />
+}
+
+type RunSnapshotErrorAlertProps = {
+  message?: string | null
+  spacingKey?: 'mb' | 'mt'
+  spacingValue?: number
+}
+
+export function RunSnapshotErrorAlert({
+  message,
+  spacingKey = 'mb',
+  spacingValue = 1,
+}: RunSnapshotErrorAlertProps) {
+  if (!message) return null
+
+  return (
+    <Alert severity="error" sx={{ [spacingKey]: spacingValue }}>
+      {message}
+    </Alert>
+  )
+}
+
+type RunSnapshotLoadingBarProps = {
+  visible: boolean
+  spacingKey?: 'mb' | 'mt'
+  spacingValue?: number
+}
+
+export function RunSnapshotLoadingBar({
+  visible,
+  spacingKey = 'mb',
+  spacingValue = 1,
+}: RunSnapshotLoadingBarProps) {
+  if (!visible) return null
+
+  return <LinearProgress sx={{ [spacingKey]: spacingValue }} />
+}
+
+type RunSnapshotRefreshControlsProps = {
+  visible: boolean
+  label: string
+  onRefresh: () => void
+  refreshDisabled?: boolean
+  refreshLoading?: boolean
+  loaded: boolean
+}
+
+export function RunSnapshotRefreshControls({
+  visible,
+  label,
+  onRefresh,
+  refreshDisabled = false,
+  refreshLoading = false,
+  loaded,
+}: RunSnapshotRefreshControlsProps) {
+  if (!visible) return null
+
+  return (
+    <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" mb={1}>
+      <RunSnapshotRefreshButton
+        label={label}
+        onClick={onRefresh}
+        disabled={refreshDisabled}
+        loading={refreshLoading}
+      />
+      <RunSnapshotLoadedChip visible={loaded} />
+    </Stack>
+  )
+}
+
+type RunSnapshotSectionStatusProps = {
+  label: string
+  onRefresh: () => void
+  refreshDisabled?: boolean
+  refreshLoading?: boolean
+  loaded: boolean
+  loading: boolean
+  errorMessage?: string | null
+  chips?: Array<{ key: string; label: string }>
+  marginTop?: number
+}
+
+export function RunSnapshotSectionStatus({
+  label,
+  onRefresh,
+  refreshDisabled = false,
+  refreshLoading = false,
+  loaded,
+  loading,
+  errorMessage,
+  chips = [],
+  marginTop = 1,
+}: RunSnapshotSectionStatusProps) {
+  return (
+    <>
+      <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mt: marginTop }}>
+        <RunSnapshotRefreshButton
+          label={label}
+          onClick={onRefresh}
+          disabled={refreshDisabled}
+          loading={refreshLoading}
+        />
+        <RunSnapshotLoadedChip visible={loaded} />
+        {chips.map((chip) => (
+          <Chip key={chip.key} size="small" label={chip.label} />
+        ))}
+      </Stack>
+      <RunSnapshotErrorAlert message={errorMessage} spacingKey="mt" spacingValue={marginTop} />
+      <RunSnapshotLoadingBar visible={loading} spacingKey="mt" spacingValue={marginTop} />
     </>
   )
 }

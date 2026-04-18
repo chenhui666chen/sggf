@@ -185,5 +185,4 @@ print("api_import_ok", audiobook.router.prefix)
 ## 7. 剩余边界
 
 - 仍有部分历史 Agent 代码直接依赖 `adapters/model_adapters.py` 的 `ModelAdapterFactory`，但高频多模态旧 key 已由 runtime wrapper 接管
-- 占位模型如 `kling-v1` 仍只保留档案，不参与生产路由
 - `python-jose` 的 `datetime.utcnow()` 弃用告警依旧存在，但不是本次改造引入

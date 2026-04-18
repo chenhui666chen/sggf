@@ -49,13 +49,23 @@ interface CatalogSyncResult {
   partial: number
   failed: number
   skipped: number
-  skipped_recent?: number
+  skipped_up_to_date?: number
   cache_hits?: number
   network_requests?: number
   cached_response_count?: number
-  max_verification_age_hours?: number | null
   updated_at?: string
   model_keys?: string[]
+  config_validation?: ConfigValidationResult
+}
+
+interface ConfigValidationResult {
+  check_status: string
+  errors: string[]
+  warnings: string[]
+  fixes: string[]
+  is_consistent: boolean
+  error_count: number
+  warning_count: number
 }
 
 interface CatalogSource {
@@ -199,6 +209,57 @@ interface CatalogEntry {
   resource_navigation?: ResourceNavigation
   sources?: CatalogSource[]
   detailed_specs?: DetailedSpecs
+  pricing_verification?: PricingVerification
+  constraints_summary?: ConstraintsSummary
+  capability_provenance?: CapabilityProvenance[]
+  error_handlers_summary?: ErrorHandlerSummary
+  usage_guide?: UsageGuide
+}
+
+interface UsageGuide {
+  title: string
+  sections: Array<{
+    title: string
+    content: string
+    tips?: string[]
+  }>
+}
+
+interface PricingVerification {
+  pricing_status: 'verified' | 'unverified'
+  price?: number
+  unit?: string
+  currency?: string
+  pricing_verified?: boolean
+  source?: string
+  confidence?: string
+  last_verified_at?: string
+}
+
+interface ConstraintsSummary {
+  duration?: { min_seconds: number; max_seconds: number; available_options: number[] }
+  resolution?: { min_width?: number; max_width?: number; min_height?: number; max_height?: number }
+  aspect_ratios?: string[]
+  max_batch_size?: number
+  max_prompt_length?: number
+  pricing?: { price: number; unit: string; currency: string; pricing_verified: boolean }
+}
+
+interface CapabilityProvenance {
+  capability_name: string
+  capability_label: string
+  support_level: string
+  description: string
+  score?: number
+  source: string
+  verified_at?: string
+  confidence: 'high' | 'medium' | 'low'
+}
+
+interface ErrorHandlerSummary {
+  content_safety?: { action: string; retry: boolean }
+  rate_limit?: { action: string; wait_seconds: number }
+  timeout?: { action: string; fallback_model: string }
 }
 
 interface DetailedSpecs {
@@ -397,8 +458,6 @@ interface DetailedSpecs {
   }
 }
 
-const STALE_SYNC_HOURS = 24
-
 const STATUS_META: Record<
   VerificationStatus,
   { label: string; color: 'success' | 'warning' | 'error' | 'default' }
@@ -464,16 +523,11 @@ function formatDateTime(value?: string | null): string {
 function formatSyncSummary(result: CatalogSyncResult): string {
   const segments = [
     `本次处理 ${result.processed} 个模型`,
-    `跳过 ${result.skipped} 个无需重复校验的模型`,
+    `跳过 ${result.skipped} 个配置未变化的模型`,
   ]
 
-  if ((result.skipped_recent || 0) > 0) {
-    const ttlHours = result.max_verification_age_hours
-    segments.push(
-      ttlHours
-        ? `其中 ${result.skipped_recent} 个仍在 ${ttlHours} 小时校验有效期内`
-        : `其中 ${result.skipped_recent} 个直接复用了最近校验结果`,
-    )
+  if ((result.skipped_up_to_date || 0) > 0) {
+    segments.push(`其中 ${result.skipped_up_to_date} 个已校验且未更新`)
   }
 
   if (typeof result.network_requests === 'number') {
@@ -680,6 +734,61 @@ function ResourceLinkSection({ title, items }: { title: string; items: ResourceL
   )
 }
 
+function UsageGuideSection({ title, sections }: { title: string; sections: Array<{ title: string; content: string; tips?: string[] }> }) {
+  if (!sections || sections.length === 0) return null
+
+  return (
+    <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 3 }}>
+      <Typography variant="h6" sx={{ fontWeight: 800, mb: 2 }}>
+        {title}
+      </Typography>
+      <Stack spacing={2}>
+        {sections.map((section, idx) => (
+          <Box key={idx}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1, color: 'primary.main' }}>
+              {section.title}
+            </Typography>
+            <Typography
+              variant="body2"
+              sx={{
+                lineHeight: 1.8,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                fontFamily: 'inherit',
+              }}
+            >
+              {section.content}
+            </Typography>
+            {section.tips && section.tips.length > 0 && (
+              <Paper
+                variant="outlined"
+                sx={{
+                  mt: 1.5,
+                  p: 1.5,
+                  borderRadius: 2,
+                  backgroundColor: 'rgba(236,253,245,0.7)',
+                  borderColor: 'rgba(34,197,94,0.26)',
+                }}
+              >
+                <Typography variant="caption" sx={{ fontWeight: 700, color: 'success.main', mb: 0.75, display: 'block' }}>
+                  💡 使用技巧
+                </Typography>
+                <Stack spacing={0.5}>
+                  {section.tips.map((tip, tipIdx) => (
+                    <Typography key={tipIdx} variant="body2" color="text.secondary">
+                      • {tip}
+                    </Typography>
+                  ))}
+                </Stack>
+              </Paper>
+            )}
+          </Box>
+        ))}
+      </Stack>
+    </Paper>
+  )
+}
+
 export default function ModelCatalogPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -758,11 +867,9 @@ export default function ModelCatalogPage() {
   const performSync = async ({
     manual = true,
     forceRefresh = false,
-    maxVerificationAgeHours = forceRefresh ? undefined : STALE_SYNC_HOURS,
   }: {
     manual?: boolean
     forceRefresh?: boolean
-    maxVerificationAgeHours?: number
   } = {}) => {
     setSyncing(true)
     setSyncSummary(null)
@@ -771,12 +878,38 @@ export default function ModelCatalogPage() {
     }
 
     try {
+      // Step 1: Submit sync task (returns immediately with task_id)
       const response = await apiClient.syncModelCatalog({
         force_refresh: forceRefresh,
-        max_verification_age_hours: maxVerificationAgeHours,
       })
-      setSyncSummary(formatSyncSummary(response.data as CatalogSyncResult))
-      await fetchCatalog(false)
+      const { task_id, message } = response.data
+      console.log(`Sync task submitted: ${task_id}, ${message}`)
+
+      // Step 2: Poll for completion
+      let pollCount = 0
+      const maxPolls = 300 // 5 minutes max (5000ms * 300)
+      const pollInterval = 5000 // 5 seconds
+
+      while (pollCount < maxPolls) {
+        await new Promise((resolve) => setTimeout(resolve, pollInterval))
+        const statusResponse = await apiClient.getSyncTaskStatus(task_id)
+        const { status, result } = statusResponse.data
+
+        if (status === 'completed' && result) {
+          setSyncSummary(formatSyncSummary(result as CatalogSyncResult))
+          await fetchCatalog(false)
+          break
+        } else if (status === 'failed') {
+          setError(`校验失败: ${result?.error || '未知错误'}`)
+          break
+        }
+        // status === 'running' or 'pending', continue polling
+        pollCount++
+      }
+
+      if (pollCount >= maxPolls) {
+        setError('校验任务超时，请稍后刷新页面查看结果。')
+      }
     } catch (syncError) {
       setError(await extractApiErrorMessage(syncError, '联网同步模型档案失败'))
     } finally {
@@ -889,46 +1022,26 @@ export default function ModelCatalogPage() {
                   统一整理项目已接入模型，并按“核心档案、接口配置、Prompt 路由、部署接入”四层知识结构展示。
                 </Typography>
                 <Typography variant="body2" sx={{ mt: 1.25, color: 'rgba(255,255,255,0.72)' }}>
-                  首次空库进入页面会自动全量同步；后续默认只刷新超过 {STALE_SYNC_HOURS} 小时的校验结果，需要时再手动执行全量重校验。
+                  默认按模型配置变化智能校验：已校验且未更新的模型自动跳过，需要时可手动强制刷新。
                 </Typography>
               </Box>
             </Box>
 
-            <Stack
-              direction={{ xs: 'column', sm: 'row' }}
-              spacing={1.25}
-              sx={{ width: { xs: '100%', md: 'auto' }, alignSelf: { xs: 'stretch', md: 'auto' } }}
-            >
-              <Button
+            <Button
                 variant="contained"
-                onClick={() => void performSync()}
+                onClick={() => void performSync({ forceRefresh: true })}
                 startIcon={syncing ? <CircularProgress color="inherit" size={16} /> : <SyncIcon />}
                 disabled={syncing}
                 sx={{
-                  minWidth: 188,
+                  minWidth: 140,
                   backgroundColor: '#f7c873',
                   color: '#1c2430',
                   fontWeight: 700,
                   '&:hover': { backgroundColor: '#f2bc57' },
                 }}
               >
-                {syncing ? '同步中...' : `刷新过期校验 (${STALE_SYNC_HOURS}h)`}
+                {syncing ? '校验中...' : '全量校验'}
               </Button>
-              <Button
-                variant="outlined"
-                onClick={() => void performSync({ forceRefresh: true })}
-                disabled={syncing}
-                sx={{
-                  minWidth: 170,
-                  color: 'white',
-                  borderColor: 'rgba(255,255,255,0.35)',
-                  fontWeight: 700,
-                  '&:hover': { borderColor: 'rgba(255,255,255,0.6)', backgroundColor: 'rgba(255,255,255,0.08)' },
-                }}
-              >
-                全量重校验
-              </Button>
-            </Stack>
           </Box>
         </Paper>
 
@@ -1131,8 +1244,8 @@ export default function ModelCatalogPage() {
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1.25 }}>
               可以放宽筛选条件，或重新执行一次联网校验同步。
             </Typography>
-            <Button sx={{ mt: 2 }} variant="outlined" onClick={() => void performSync()}>
-              重新联网校验
+            <Button sx={{ mt: 2 }} variant="outlined" onClick={() => void performSync({ forceRefresh: true })}>
+              全量校验
             </Button>
           </Paper>
         ) : (
@@ -2184,6 +2297,13 @@ export default function ModelCatalogPage() {
                       )}
                     </Stack>
                   </Paper>
+                )}
+
+                {selectedEntry.usage_guide && selectedEntry.usage_guide.sections && selectedEntry.usage_guide.sections.length > 0 && (
+                  <UsageGuideSection
+                    title={selectedEntry.usage_guide.title || '使用指南'}
+                    sections={selectedEntry.usage_guide.sections}
+                  />
                 )}
 
                 <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 3 }}>

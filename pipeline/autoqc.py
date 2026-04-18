@@ -4,11 +4,12 @@ import base64
 import json
 import os
 import hashlib
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from adapters.adapter_helpers import chat_messages, get_model_info
+from adapters.adapter_helpers import analyze_video, chat_messages, get_model_info
 from agents.vlm_utils import clamp_text_list
 from pipeline.media_presets import (
     DREAMWEAVER_I2V_ENGINE,
@@ -32,6 +33,12 @@ DEFAULT_STATE_QC_VLM_ADAPTER = DEFAULT_SEMANTIC_VLM_ADAPTER
 DEFAULT_STATE_QC_SAMPLE_RATE = 1.0
 DEFAULT_STATE_QC_MAX_CHECKS = 0  # 0 表示不设上限（与 semantic_max_checks 一致语义）
 DEFAULT_STATE_QC_STRATEGY = "priority"  # priority|sample|all
+DEFAULT_VIDEO_CLIP_QC_THRESHOLD = 6.5
+DEFAULT_VIDEO_CLIP_QC_VLM_ADAPTER = DEFAULT_SEMANTIC_VLM_ADAPTER
+DEFAULT_VIDEO_CLIP_QC_SAMPLE_RATE = 1.0
+DEFAULT_VIDEO_CLIP_QC_MAX_CHECKS = 0  # 0 琛ㄧず涓嶈涓婇檺锛屽彲閫氳繃 qc_config/ENV 鏀剁揣
+DEFAULT_VIDEO_CLIP_QC_CRITERIA = ["clarity", "smoothness", "consistency", "lighting", "color"]
+VIDEO_EDIT_FEATURES = {"style-transfer", "video-extend", "video-remix"}
 DEFAULT_REQUIRE_I2V = None  # None=auto; True/False=force
 
 
@@ -180,6 +187,207 @@ def _try_parse_json_object(text: str) -> Optional[Dict[str, Any]]:
         return obj if isinstance(obj, dict) else None
     except Exception:  # noqa: BLE001
         return None
+
+
+def _text_from_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if float(value).is_integer():
+            return str(int(float(value)))
+        return f"{float(value):.1f}"
+    if isinstance(value, dict):
+        for key in (
+            "text",
+            "content",
+            "summary",
+            "description",
+            "comment",
+            "message",
+            "analysis",
+            "reason",
+            "evaluation",
+            "conclusion",
+        ):
+            inner = value.get(key)
+            if isinstance(inner, str) and inner.strip():
+                return inner.strip()
+    return ""
+
+
+def _extract_first_text(payload: Dict[str, Any], keys: Tuple[str, ...]) -> str:
+    for key in keys:
+        text = _text_from_value(payload.get(key))
+        if text:
+            return text
+    return ""
+
+
+def _text_list_from_value(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        parts = re.split(r"[\r\n;；]+", value)
+        return [part.strip(" -•*") for part in parts if part.strip(" -•*")]
+    if isinstance(value, list):
+        items: List[str] = []
+        for entry in value:
+            items.extend(_text_list_from_value(entry))
+        return items
+    if isinstance(value, dict):
+        items: List[str] = []
+        for inner in value.values():
+            items.extend(_text_list_from_value(inner))
+        return items
+    text = _text_from_value(value)
+    return [text] if text else []
+
+
+def _collect_text_list(payload: Dict[str, Any], keys: Tuple[str, ...], *, max_items: int = 6) -> List[str]:
+    items: List[str] = []
+    for key in keys:
+        items.extend(_text_list_from_value(payload.get(key)))
+    return clamp_text_list(items, max_items=max_items, max_chars=120)
+
+
+def _normalize_review_score(value: Any) -> Optional[float]:
+    candidate: Optional[float] = None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        candidate = float(value)
+    elif isinstance(value, str):
+        match = re.search(r"-?\d+(?:\.\d+)?", value)
+        if match:
+            candidate = float(match.group(0))
+
+    if candidate is None:
+        return None
+    if candidate <= 1.0:
+        candidate *= 10.0
+    elif 10.0 < candidate <= 100.0:
+        candidate /= 10.0
+    return round(max(0.0, min(candidate, 10.0)), 1)
+
+
+def _extract_first_score(payload: Dict[str, Any], keys: Tuple[str, ...]) -> Optional[float]:
+    for key in keys:
+        score = _normalize_review_score(payload.get(key))
+        if score is not None:
+            return score
+    return None
+
+
+def _is_non_score_key(key: str) -> bool:
+    return key in {
+        "summary",
+        "overview",
+        "description",
+        "evaluation",
+        "conclusion",
+        "strengths",
+        "highlights",
+        "advantages",
+        "issues",
+        "weaknesses",
+        "problems",
+        "suggestions",
+        "recommendations",
+        "prompt_suggestions",
+        "revised_prompt",
+        "analysis_type",
+        "content",
+        "raw",
+        "metadata",
+        "message",
+        "error",
+        "result",
+    }
+
+
+def _extract_criteria_review_scores(payload: Dict[str, Any]) -> List[float]:
+    scores: List[float] = []
+    candidate_keys = (
+        "criteria_scores",
+        "scores",
+        "criteria",
+        "dimensions",
+        "dimension_scores",
+        "metrics",
+        "aspect_scores",
+    )
+    containers = [payload.get(key) for key in candidate_keys if payload.get(key)]
+    if not containers:
+        containers = [payload]
+
+    for container in containers:
+        if isinstance(container, dict):
+            for key, value in container.items():
+                if _is_non_score_key(str(key)):
+                    continue
+                if isinstance(value, dict):
+                    score = _extract_first_score(value, ("score", "value", "rating", "overall_score"))
+                else:
+                    score = _normalize_review_score(value)
+                if score is not None:
+                    scores.append(score)
+        elif isinstance(container, list):
+            for item in container:
+                if not isinstance(item, dict):
+                    continue
+                score = _extract_first_score(item, ("score", "value", "rating", "overall_score"))
+                if score is not None:
+                    scores.append(score)
+    return scores
+
+
+def _coerce_video_review_payload(result: Any) -> Dict[str, Any]:
+    raw_data = getattr(result, "data", None)
+    if isinstance(raw_data, dict):
+        payload = dict(raw_data)
+    else:
+        payload = {}
+
+    if isinstance(payload.get("result"), str):
+        parsed = _try_parse_json_object(str(payload.get("result") or ""))
+        if parsed:
+            payload = {**payload, **parsed}
+
+    if not payload:
+        text = _text_from_value(raw_data)
+        parsed = _try_parse_json_object(text) if text else None
+        if parsed:
+            payload = parsed
+        elif text:
+            payload = {"content": text}
+
+    return payload
+
+
+def _extract_video_review_result(result: Any) -> Dict[str, Any]:
+    payload = _coerce_video_review_payload(result)
+    overall_score = _extract_first_score(
+        payload,
+        ("overall_score", "score", "quality_score", "total_score", "final_score"),
+    )
+    criteria_scores = _extract_criteria_review_scores(payload)
+    if overall_score is None and criteria_scores:
+        overall_score = round(sum(criteria_scores) / len(criteria_scores), 1)
+
+    issues = _collect_text_list(
+        payload,
+        ("issues", "weaknesses", "problems", "suggestions", "recommendations"),
+        max_items=6,
+    )
+    summary = _extract_first_text(
+        payload,
+        ("summary", "overview", "evaluation", "analysis", "description", "conclusion", "content"),
+    )
+    return {
+        "score": overall_score,
+        "criteria_scores": criteria_scores,
+        "issues": issues,
+        "summary": summary,
+        "payload": payload,
+    }
 
 
 def _semantic_frames_list(semantic_frames: str) -> List[str]:
@@ -644,6 +852,60 @@ def _state_continuity_match(
         return None
 
 
+def _plan_video_clip_checks(
+    *,
+    run_id: str,
+    candidate_clips: List[Dict[str, Any]],
+    sample_rate: float,
+    max_checks: int,
+    always_first: bool,
+    always_last: bool,
+) -> Tuple[List[Dict[str, Any]], int]:
+    if not candidate_clips:
+        return [], 0
+
+    budget = int(max_checks) if max_checks and int(max_checks) > 0 else 1_000_000
+    if budget <= 0:
+        return [], 0
+
+    planned: List[Dict[str, Any]] = []
+    planned_keys: set[tuple[str, str]] = set()
+
+    def _append(item: Dict[str, Any]) -> None:
+        if len(planned) >= budget:
+            return
+        shot_key = str(item.get("shot_key") or "").strip()
+        clip_path = str(item.get("path") or "").strip()
+        if not clip_path:
+            return
+        dedupe_key = (shot_key, clip_path)
+        if dedupe_key in planned_keys:
+            return
+        planned.append(item)
+        planned_keys.add(dedupe_key)
+
+    if always_first and candidate_clips:
+        _append(candidate_clips[0])
+    if always_last and candidate_clips:
+        _append(candidate_clips[-1])
+
+    rate = min(max(float(sample_rate), 0.0), 1.0)
+    if rate <= 0.0 and planned:
+        return planned, len(planned)
+
+    for index, item in enumerate(candidate_clips):
+        if len(planned) >= budget:
+            break
+        shot_key = str(item.get("shot_key") or "").strip()
+        clip_path = str(item.get("path") or "").strip()
+        if not clip_path:
+            continue
+        if rate >= 1.0 or _stable_hash01(run_id, shot_key, clip_path, str(index), "video_clip_qc") <= rate:
+            _append(item)
+
+    return planned, len(planned)
+
+
 def _subject_pos(spec: Any) -> Optional[Tuple[float, float]]:
     if not isinstance(spec, dict):
         return None
@@ -1035,6 +1297,101 @@ def _route_from_failures(*, failures: List[AutoQCFailure], payload: Dict[str, An
             patch=patch,
         )
 
+    if any(t in {"video_clip_quality_below_threshold"} for t in types):
+        video_edit_model = _resolve_video_edit_model_from_payload(payload)
+        attempted_edit_shots = set(_normalize_shot_keys(payload.get("video_edit_attempted_shot_ids")))
+        storyboard_by_key: Dict[str, Dict[str, Any]] = {}
+        for item in payload.get("storyboard") or []:
+            if not isinstance(item, dict):
+                continue
+            shot_id = str(item.get("shot_id") or "").strip()
+            if shot_id and shot_id not in storyboard_by_key:
+                storyboard_by_key[shot_id] = item
+
+        edit_plan_items: List[Dict[str, Any]] = []
+        target_shots: List[str] = []
+        for failure in failures:
+            if failure.severity != "hard" or str(failure.failure_type or "").strip() != "video_clip_quality_below_threshold":
+                continue
+            meta = failure.meta if isinstance(failure.meta, dict) else {}
+            shot_ids: List[str] = []
+            shot_key = str(failure.shot_key or "").strip()
+            if shot_key:
+                shot_ids.append(shot_key)
+            for sid in _normalize_shot_keys(meta.get("shot_keys")):
+                if sid not in shot_ids:
+                    shot_ids.append(sid)
+            if not shot_ids:
+                path = str(meta.get("path") or "").strip()
+                inferred_shot_key, _role = _parse_role_from_path(path)
+                if inferred_shot_key:
+                    shot_ids.append(inferred_shot_key)
+            primary_shot_id = shot_ids[0] if shot_ids else ""
+            if primary_shot_id and primary_shot_id not in target_shots:
+                target_shots.append(primary_shot_id)
+
+            storyboard_item = storyboard_by_key.get(primary_shot_id) if primary_shot_id else None
+            issues_raw = meta.get("issues") if isinstance(meta.get("issues"), list) else []
+            normalized_issues = clamp_text_list(issues_raw, max_items=6, max_chars=120)
+            summary = str(meta.get("summary") or "").strip()
+            shot_desc = str((storyboard_item or {}).get("desc") or "").strip()
+            edit_feature, edit_feature_reason = _infer_video_edit_feature(
+                issues=normalized_issues,
+                summary=summary,
+                shot_desc=shot_desc,
+            )
+            edit_plan_items.append(
+                {
+                    "shot_id": primary_shot_id,
+                    "shot_ids": shot_ids,
+                    "path": str(meta.get("path") or "").strip(),
+                    "review_score": _normalize_review_score(meta.get("review_score")),
+                    "threshold": _normalize_review_score(meta.get("threshold")),
+                    "issues": normalized_issues,
+                    "summary": summary,
+                    "source_model_id": str(meta.get("model_id") or "").strip(),
+                    "shot_desc": shot_desc,
+                    "motion_prompt": str(meta.get("motion_prompt") or "").strip(),
+                    "edit_feature": edit_feature,
+                    "edit_feature_reason": edit_feature_reason,
+                }
+            )
+
+        can_route_to_edit = (
+            bool(video_edit_model)
+            and set(types).issubset({"video_clip_quality_below_threshold"})
+            and not any(shot_id in attempted_edit_shots for shot_id in target_shots)
+            and bool(edit_plan_items)
+        )
+        if can_route_to_edit:
+            return AutoQCRoute(
+                target_state="EDIT",
+                action="repair_video_clips",
+                reason="video clip quality can be repaired by video edit",
+                failure_types=types,
+                patch={
+                    "video_edit_config": {
+                        "enabled": True,
+                        "adapter": str(video_edit_model or "").strip(),
+                    },
+                    "video_edit_plan": {
+                        "source": "autoqc",
+                        "reason": "video_clip_quality_below_threshold",
+                        "edit_feature": _resolve_video_edit_plan_feature(edit_plan_items),
+                        "target_shot_ids": target_shots,
+                        "items": edit_plan_items,
+                    },
+                },
+            )
+
+        return AutoQCRoute(
+            target_state="VIDEO",
+            action="rerun_video",
+            reason="video clip vision review below threshold",
+            failure_types=types,
+            patch=_maybe_with_regen_shots(patch=None, target_state="VIDEO"),
+        )
+
     if any(t in {"shot_continuity_break", "cross_shot_continuity_break", "camera_continuity_break"} for t in types):
         if not image_edit_enabled:
             return AutoQCRoute(
@@ -1146,11 +1503,124 @@ def _route_from_failures(*, failures: List[AutoQCFailure], payload: Dict[str, An
     )
 
 
+def _resolve_video_edit_model_from_payload(payload: Dict[str, Any]) -> Optional[str]:
+    video_edit_cfg = payload.get("video_edit_config") if isinstance(payload.get("video_edit_config"), dict) else {}
+    enabled = video_edit_cfg.get("enabled")
+    if not isinstance(enabled, bool) or not enabled:
+        return None
+
+    adapter = str(video_edit_cfg.get("adapter") or "").strip() or "wan2.7-videoedit"
+    try:
+        if get_model_info(adapter) is None:
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+    return adapter
+
+
+def _infer_video_edit_feature(
+    *,
+    issues: List[str],
+    summary: str,
+    shot_desc: str,
+) -> Tuple[str, str]:
+    texts = [str(summary or "").strip(), str(shot_desc or "").strip(), *[str(item or "").strip() for item in issues]]
+    haystack = " ".join([item for item in texts if item]).lower()
+
+    extend_keywords = (
+        "续接",
+        "延展",
+        "延长",
+        "补帧",
+        "收尾",
+        "结尾",
+        "开头",
+        "首尾",
+        "衔接",
+        "截断",
+        "断裂",
+        "过渡缺失",
+        "transition",
+        "truncated",
+        "ending",
+        "opening",
+        "extend",
+    )
+    remix_keywords = (
+        "抖动",
+        "卡顿",
+        "跳帧",
+        "跳变",
+        "闪烁",
+        "闪屏",
+        "时序",
+        "主体一致",
+        "角色一致",
+        "动作连贯",
+        "镜头不稳",
+        "运动不流畅",
+        "连续性",
+        "continuity",
+        "consistency",
+        "smooth",
+        "smoothness",
+        "flicker",
+        "jitter",
+        "motion",
+        "temporal",
+        "remix",
+    )
+
+    if any(keyword in haystack for keyword in extend_keywords):
+        return "video-extend", "continuation_repair"
+    if any(keyword in haystack for keyword in remix_keywords):
+        return "video-remix", "temporal_consistency_repair"
+    return "style-transfer", "visual_polish"
+
+
+def _resolve_video_edit_plan_feature(plan_items: List[Dict[str, Any]]) -> str:
+    features: List[str] = []
+    for item in plan_items:
+        feature = str(item.get("edit_feature") or "").strip().lower()
+        if feature not in VIDEO_EDIT_FEATURES:
+            continue
+        if feature not in features:
+            features.append(feature)
+    if len(features) == 1:
+        return features[0]
+    return "auto"
+
+
+def _infer_qc_feedback_model_id(payload: Dict[str, Any]) -> str:
+    for key in ("model_id", "video_model_id"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+
+    video_cfg = payload.get("video_config") if isinstance(payload.get("video_config"), dict) else {}
+    for key in ("adapter", "model_id"):
+        value = str(video_cfg.get(key) or "").strip()
+        if value:
+            return value
+
+    for clip in payload.get("video_clips") or []:
+        if not isinstance(clip, dict):
+            continue
+        meta = clip.get("meta") if isinstance(clip.get("meta"), dict) else {}
+        value = str(meta.get("adapter") or meta.get("model_id") or "").strip()
+        if value:
+            return value
+
+    image_cfg = payload.get("image_config") if isinstance(payload.get("image_config"), dict) else {}
+    value = str(image_cfg.get("adapter") or "").strip()
+    return value
+
+
 def _submit_qc_feedback(report: AutoQCReport, payload: Dict[str, Any]) -> None:
     try:
         from app.tasks.feedback_tasks import collect_qc_feedback_task
 
-        model_id = str(payload.get("model_id") or payload.get("video_model_id") or "")
+        model_id = _infer_qc_feedback_model_id(payload)
         if not model_id:
             return
 
@@ -1165,7 +1635,11 @@ def _submit_qc_feedback(report: AutoQCReport, payload: Dict[str, Any]) -> None:
         avg_structure = sum(structure_scores) / len(structure_scores) if structure_scores else None
 
         semantic_failures = [f for f in report.failures if f.failure_type == "semantic_mismatch"]
-        state_failures = [f for f in report.failures if f.failure_type == "state_continuity_break"]
+        state_failures = [
+            f
+            for f in report.failures
+            if f.failure_type in {"state_continuity_break", "state_continuity_mismatch"}
+        ]
 
         prompt_adherence = None
         if semantic_failures:
@@ -1199,12 +1673,22 @@ def _submit_qc_feedback(report: AutoQCReport, payload: Dict[str, Any]) -> None:
 def run(payload: Dict[str, Any]) -> Dict[str, Any]:
     cfg = payload.get("qc_config") if isinstance(payload.get("qc_config"), dict) else {}
 
-    enable_semantic_qc_cfg = cfg.get("enable_semantic_qc")
-    enable_semantic_qc = (
-        bool(enable_semantic_qc_cfg)
-        if isinstance(enable_semantic_qc_cfg, bool)
-        else _env_flag("DREAMWEAVER_ENABLE_SEMANTIC_QC", False)
+    enable_vision_review_cfg = cfg.get("enable_vision_review")
+    enable_vision_review = (
+        bool(enable_vision_review_cfg)
+        if isinstance(enable_vision_review_cfg, bool)
+        else None
     )
+
+    enable_semantic_qc_cfg = cfg.get("enable_semantic_qc")
+    if enable_vision_review is False:
+        enable_semantic_qc = False
+    elif isinstance(enable_semantic_qc_cfg, bool):
+        enable_semantic_qc = bool(enable_semantic_qc_cfg)
+    elif enable_vision_review is True:
+        enable_semantic_qc = True
+    else:
+        enable_semantic_qc = _env_flag("DREAMWEAVER_ENABLE_SEMANTIC_QC", False)
     semantic_threshold = float(cfg.get("semantic_threshold") or os.getenv("DREAMWEAVER_SEMANTIC_THRESHOLD") or DEFAULT_SEMANTIC_THRESHOLD)
     semantic_vlm_adapter = str(cfg.get("semantic_vlm_adapter") or os.getenv("DREAMWEAVER_SEMANTIC_VLM_ADAPTER") or DEFAULT_SEMANTIC_VLM_ADAPTER)
 
@@ -1260,7 +1744,14 @@ def run(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     enable_state_qc_cfg = cfg.get("enable_state_qc")
-    enable_state_qc = bool(enable_state_qc_cfg) if isinstance(enable_state_qc_cfg, bool) else _env_flag("DREAMWEAVER_ENABLE_STATE_QC", False)
+    if enable_vision_review is False:
+        enable_state_qc = False
+    elif isinstance(enable_state_qc_cfg, bool):
+        enable_state_qc = bool(enable_state_qc_cfg)
+    elif enable_vision_review is True:
+        enable_state_qc = True
+    else:
+        enable_state_qc = _env_flag("DREAMWEAVER_ENABLE_STATE_QC", False)
     state_threshold = float(cfg.get("state_threshold") or os.getenv("DREAMWEAVER_STATE_QC_THRESHOLD") or DEFAULT_STATE_QC_THRESHOLD)
     state_vlm_adapter = str(cfg.get("state_vlm_adapter") or os.getenv("DREAMWEAVER_STATE_QC_VLM_ADAPTER") or DEFAULT_STATE_QC_VLM_ADAPTER)
 
@@ -1308,10 +1799,71 @@ def run(payload: Dict[str, Any]) -> Dict[str, Any]:
         else _env_flag("DREAMWEAVER_STATE_QC_INCLUDE_CAMERA_EDGES", True)
     )
     enable_camera_continuity_qc_cfg = cfg.get("enable_camera_continuity_qc")
-    enable_camera_continuity_qc = (
-        bool(enable_camera_continuity_qc_cfg)
-        if isinstance(enable_camera_continuity_qc_cfg, bool)
-        else _env_flag("DREAMWEAVER_ENABLE_CAMERA_CONTINUITY_QC", False)
+    if enable_vision_review is False:
+        enable_camera_continuity_qc = False
+    elif isinstance(enable_camera_continuity_qc_cfg, bool):
+        enable_camera_continuity_qc = bool(enable_camera_continuity_qc_cfg)
+    elif enable_vision_review is True:
+        enable_camera_continuity_qc = True
+    else:
+        enable_camera_continuity_qc = _env_flag("DREAMWEAVER_ENABLE_CAMERA_CONTINUITY_QC", False)
+
+    enable_video_clip_qc_cfg = cfg.get("enable_video_clip_qc")
+    if enable_vision_review is False:
+        enable_video_clip_qc = False
+    elif isinstance(enable_video_clip_qc_cfg, bool):
+        enable_video_clip_qc = bool(enable_video_clip_qc_cfg)
+    elif enable_vision_review is True:
+        enable_video_clip_qc = True
+    else:
+        enable_video_clip_qc = _env_flag("DREAMWEAVER_ENABLE_VIDEO_CLIP_QC", False)
+    video_clip_threshold = _normalize_review_score(
+        cfg.get("video_clip_threshold")
+        or os.getenv("DREAMWEAVER_VIDEO_CLIP_QC_THRESHOLD")
+        or DEFAULT_VIDEO_CLIP_QC_THRESHOLD
+    )
+    if video_clip_threshold is None:
+        video_clip_threshold = DEFAULT_VIDEO_CLIP_QC_THRESHOLD
+    video_clip_vlm_adapter = str(
+        cfg.get("video_clip_vlm_adapter")
+        or cfg.get("semantic_vlm_adapter")
+        or os.getenv("DREAMWEAVER_VIDEO_CLIP_QC_VLM_ADAPTER")
+        or semantic_vlm_adapter
+        or DEFAULT_VIDEO_CLIP_QC_VLM_ADAPTER
+    )
+    video_clip_sample_rate = float(
+        cfg.get("video_clip_sample_rate")
+        if isinstance(cfg.get("video_clip_sample_rate"), (int, float))
+        else _env_float("DREAMWEAVER_VIDEO_CLIP_QC_SAMPLE_RATE", DEFAULT_VIDEO_CLIP_QC_SAMPLE_RATE)
+    )
+    if video_clip_sample_rate < 0.0:
+        video_clip_sample_rate = 0.0
+    if video_clip_sample_rate > 1.0:
+        video_clip_sample_rate = 1.0
+
+    video_clip_max_checks_explicit = False
+    if isinstance(cfg.get("video_clip_max_checks"), (int, float, str)) and str(cfg.get("video_clip_max_checks")).strip():
+        video_clip_max_checks_explicit = True
+    elif os.getenv("DREAMWEAVER_VIDEO_CLIP_QC_MAX_CHECKS") is not None and str(os.getenv("DREAMWEAVER_VIDEO_CLIP_QC_MAX_CHECKS") or "").strip():
+        video_clip_max_checks_explicit = True
+
+    video_clip_max_checks = (
+        int(cfg.get("video_clip_max_checks"))
+        if video_clip_max_checks_explicit and "video_clip_max_checks" in cfg
+        else _env_int("DREAMWEAVER_VIDEO_CLIP_QC_MAX_CHECKS", DEFAULT_VIDEO_CLIP_QC_MAX_CHECKS)
+    )
+    if video_clip_max_checks < 0:
+        video_clip_max_checks = 0
+
+    video_clip_always_first = (
+        bool(cfg.get("video_clip_always_first"))
+        if isinstance(cfg.get("video_clip_always_first"), bool)
+        else _env_flag("DREAMWEAVER_VIDEO_CLIP_QC_ALWAYS_FIRST", True)
+    )
+    video_clip_always_last = (
+        bool(cfg.get("video_clip_always_last"))
+        if isinstance(cfg.get("video_clip_always_last"), bool)
+        else _env_flag("DREAMWEAVER_VIDEO_CLIP_QC_ALWAYS_LAST", True)
     )
 
     quality_mode = str(payload.get("quality_mode") or "").strip().lower()
@@ -1331,6 +1883,7 @@ def run(payload: Dict[str, Any]) -> Dict[str, Any]:
         "similarity_threshold": cfg.get("similarity_threshold", DEFAULT_SIMILARITY_THRESHOLD),
         "max_subject_pos_delta": cfg.get("max_subject_pos_delta", DEFAULT_MAX_SUBJECT_POS_DELTA),
         "weights": cfg.get("weights", DEFAULT_WEIGHTS),
+        "enable_vision_review": enable_vision_review,
         "enable_semantic_qc": enable_semantic_qc,
         "semantic_threshold": semantic_threshold,
         "semantic_vlm_adapter": semantic_vlm_adapter,
@@ -1350,12 +1903,20 @@ def run(payload: Dict[str, Any]) -> Dict[str, Any]:
         "state_always_last": state_always_last,
         "state_include_camera_edges": state_include_camera_edges,
         "enable_camera_continuity_qc": enable_camera_continuity_qc,
+        "enable_video_clip_qc": enable_video_clip_qc,
+        "video_clip_threshold": video_clip_threshold,
+        "video_clip_vlm_adapter": video_clip_vlm_adapter,
+        "video_clip_sample_rate": video_clip_sample_rate,
+        "video_clip_max_checks": video_clip_max_checks,
+        "video_clip_always_first": video_clip_always_first,
+        "video_clip_always_last": video_clip_always_last,
         "require_i2v": require_i2v,
     }
 
     semantic_vlm = None
     state_vlm = None
-    if enable_semantic_qc or enable_state_qc:
+    video_clip_vlm = None
+    if enable_semantic_qc or enable_state_qc or enable_video_clip_qc:
         try:
             if enable_semantic_qc:
                 if get_model_info(semantic_vlm_adapter) is not None:
@@ -1372,11 +1933,24 @@ def run(payload: Dict[str, Any]) -> Dict[str, Any]:
                 else:
                     state_vlm = None
                     cfg_effective["enable_state_qc"] = False
+
+            if enable_video_clip_qc:
+                if semantic_vlm is not None and str(semantic_vlm_adapter) == str(video_clip_vlm_adapter):
+                    video_clip_vlm = semantic_vlm
+                elif state_vlm is not None and str(state_vlm_adapter) == str(video_clip_vlm_adapter):
+                    video_clip_vlm = state_vlm
+                elif get_model_info(video_clip_vlm_adapter) is not None:
+                    video_clip_vlm = video_clip_vlm_adapter
+                else:
+                    video_clip_vlm = None
+                    cfg_effective["enable_video_clip_qc"] = False
         except Exception:  # noqa: BLE001
             semantic_vlm = None
             state_vlm = None
+            video_clip_vlm = None
             cfg_effective["enable_semantic_qc"] = False
             cfg_effective["enable_state_qc"] = False
+            cfg_effective["enable_video_clip_qc"] = False
 
     assets_index = _index_assets(payload)
     storyboard = payload.get("storyboard") or []
@@ -1412,6 +1986,13 @@ def run(payload: Dict[str, Any]) -> Dict[str, Any]:
         cfg_effective["state_max_checks"] = int(state_max_checks)
 
     # first pass：先算“非语义”的 base 分数，用于 priority 分层
+    if enable_video_clip_qc and video_clip_vlm is not None and (not video_clip_max_checks_explicit) and int(video_clip_max_checks) <= 0:
+        valid_clip_count = sum(1 for clip in (payload.get("video_clips") or []) if isinstance(clip, dict))
+        default_budget = 6 if quality_mode == "quality" else 4
+        min_budget = 2 if valid_clip_count >= 2 else (1 if valid_clip_count >= 1 else 0)
+        video_clip_max_checks = max(int(min_budget), int(default_budget))
+        cfg_effective["video_clip_max_checks"] = int(video_clip_max_checks)
+
     base_shots: Dict[str, AutoQCShotReport] = {}
     base_prev_tail: Dict[str, Optional[Dict[str, Any]]] = {}
     prev_tail_spec = None
@@ -1753,9 +2334,89 @@ def run(payload: Dict[str, Any]) -> Dict[str, Any]:
                     )
                 )
 
+    video_clip_checks_done = 0
+    video_clip_review_errors = 0
+    if enable_video_clip_qc and video_clip_vlm is not None:
+        candidate_video_clips: List[Dict[str, Any]] = []
+        for index, clip in enumerate(payload.get("video_clips") or []):
+            if not isinstance(clip, dict):
+                continue
+            clip_path = str(clip.get("path") or "").strip()
+            if not clip_path or not _file_exists(clip_path):
+                continue
+            shot_key, _role = _parse_role_from_path(clip_path)
+            meta = clip.get("meta") if isinstance(clip.get("meta"), dict) else {}
+            candidate_video_clips.append(
+                {
+                    "index": index,
+                    "path": clip_path,
+                    "shot_key": shot_key or str(meta.get("shot_id") or "").strip(),
+                    "meta": meta,
+                }
+            )
+
+        clip_plan, video_clip_checks_done = _plan_video_clip_checks(
+            run_id=run_id,
+            candidate_clips=candidate_video_clips,
+            sample_rate=video_clip_sample_rate,
+            max_checks=int(video_clip_max_checks),
+            always_first=video_clip_always_first,
+            always_last=video_clip_always_last,
+        )
+        for planned in clip_plan:
+            clip_path = str(planned.get("path") or "").strip()
+            if not clip_path:
+                continue
+            result = analyze_video(
+                video_path=clip_path,
+                analysis_type="quality",
+                criteria=list(DEFAULT_VIDEO_CLIP_QC_CRITERIA),
+                model_id=video_clip_vlm,
+            )
+            if not getattr(result, "success", False):
+                video_clip_review_errors += 1
+                continue
+
+            review = _extract_video_review_result(result)
+            score = review.get("score")
+            if not isinstance(score, (int, float)):
+                video_clip_review_errors += 1
+                continue
+            if float(score) >= float(video_clip_threshold):
+                continue
+
+            shot_key = str(planned.get("shot_key") or "").strip() or None
+            meta = planned.get("meta") if isinstance(planned.get("meta"), dict) else {}
+            failure = AutoQCFailure(
+                failure_type="video_clip_quality_below_threshold",
+                severity="hard",
+                message="video clip vision review below threshold",
+                shot_key=shot_key,
+                meta={
+                    "path": clip_path,
+                    "review_score": float(score),
+                    "threshold": float(video_clip_threshold),
+                    "issues": review.get("issues") or [],
+                    "summary": review.get("summary") or "",
+                    "criteria_scores": review.get("criteria_scores") or [],
+                    "model_id": str(getattr(result, "model_id", "") or video_clip_vlm),
+                    "engine": str(meta.get("engine") or ""),
+                    "adapter": str(meta.get("adapter") or ""),
+                    "motion_prompt": str(meta.get("motion_prompt") or meta.get("prompt") or ""),
+                    "shot_keys": [shot_key] if shot_key else [],
+                },
+            )
+            report = shots.get(shot_key) if shot_key else None
+            if report is not None:
+                report.failures.append(failure)
+                report.pass_ = False
+            all_failures.append(failure)
+
     cfg_effective["semantic_checks_done"] = semantic_checks_done
     cfg_effective["state_checks_done"] = state_checks_done
     cfg_effective["camera_continuity_checks_done"] = camera_continuity_checks_done
+    cfg_effective["video_clip_checks_done"] = video_clip_checks_done
+    cfg_effective["video_clip_review_errors"] = video_clip_review_errors
 
     overall_score = float(sum(r.scores.overall for r in shots.values()) / (len(shots) or 1))
     pass_ = not any(f.severity == "hard" for f in all_failures)

@@ -83,6 +83,43 @@ describe('dreamweaver diagnostics utils', () => {
     expect(result?.video_provider_trace?.shots).toHaveLength(1)
   })
 
+  it('buildResultFromRunSnapshot 会保留审核与质检快照', () => {
+    const result = buildResultFromRunSnapshot(
+      {
+        run_id: 'run-audit',
+        state: 'DONE',
+        contract: {
+          runtime_config: {
+            chapter_ids: [1],
+            audit: {
+              safety_audit: {
+                blocked: true,
+                manual_override: true,
+              },
+            },
+            qc_warning: {
+              policy: 'warn_only',
+            },
+          },
+          episodes: [],
+        },
+      },
+      'fallback-run',
+    )
+
+    expect(result).toMatchObject({
+      audit: {
+        safety_audit: {
+          blocked: true,
+          manual_override: true,
+        },
+      },
+      qc_warning: {
+        policy: 'warn_only',
+      },
+    })
+  })
+
   it('mergeRunResult 保留并合并诊断字段', () => {
     const prev = {
       run_id: 'run-1',
@@ -278,6 +315,8 @@ describe('dreamweaver diagnostics utils', () => {
       run_id: 'current-run',
       task_id: 'task-9',
       status: 'running',
+      enable_safety_audit: true,
+      safety_fail_policy: 'block',
     })
 
     expect(globalThis.localStorage.getItem('dreamweaver_run_9')).toBeNull()
@@ -285,6 +324,8 @@ describe('dreamweaver diagnostics utils', () => {
       run_id: 'current-run',
       task_id: 'task-9',
       status: 'running',
+      enable_safety_audit: true,
+      safety_fail_policy: 'block',
     })
     expect(globalThis.localStorage.getItem(dreamweaverRunStorageKey(9))).toContain('current-run')
   })

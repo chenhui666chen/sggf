@@ -312,3 +312,65 @@ export function DreamweaverResultSummaryChipsRow({
     </Stack>
   )
 }
+
+type DreamweaverRunResultViewProps = {
+  chapterCount: number
+  keyframeCount: number
+  midframeCount: number
+  videoClipCount?: number | null
+  debugPanel?: ReactNode
+  syncActions?: ReactNode
+  syncStatus?: ReactNode
+  streamingPreview?: ReactNode
+  planStage?: ReactNode
+  storyboardStage?: ReactNode
+  libraryStage?: ReactNode
+  videoStage?: ReactNode
+  auditStage?: ReactNode
+}
+
+export function DreamweaverRunResultView({
+  chapterCount,
+  keyframeCount,
+  midframeCount,
+  videoClipCount,
+  debugPanel,
+  syncActions,
+  syncStatus,
+  streamingPreview,
+  planStage,
+  storyboardStage,
+  libraryStage,
+  videoStage,
+  auditStage,
+}: DreamweaverRunResultViewProps) {
+  return (
+    <DreamweaverResultViewShell
+      summaryChips={
+        <DreamweaverResultSummaryChips
+          chapterCount={chapterCount}
+          keyframeCount={keyframeCount}
+          midframeCount={midframeCount}
+          videoClipCount={videoClipCount}
+        />
+      }
+      debugPanel={debugPanel}
+      syncSection={
+        <DreamweaverResultSyncSection
+          actions={syncActions ?? null}
+          status={syncStatus ?? null}
+        />
+      }
+      streamingPreview={streamingPreview}
+      stageContent={
+        <DreamweaverResultStageContent
+          planStage={planStage}
+          storyboardStage={storyboardStage}
+          libraryStage={libraryStage}
+          videoStage={videoStage}
+          auditStage={auditStage}
+        />
+      }
+    />
+  )
+}

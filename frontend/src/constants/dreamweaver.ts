@@ -109,6 +109,11 @@ export const VISION_MODEL_OPTIONS = [
   { value: 'qwen3.5-omni-plus', label: 'Qwen3.5 Omni Plus（全能）' },
 ]
 
+export const SAFETY_FAIL_POLICY_OPTIONS = [
+  { value: 'warn', label: '告警放行' },
+  { value: 'block', label: '严格拦截' },
+]
+
 export const CHARACTER_VIEWS = {
   FRONT: 'front',
   SIDE: 'side',

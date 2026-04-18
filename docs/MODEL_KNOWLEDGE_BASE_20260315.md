@@ -212,5 +212,4 @@
 
 - 仍有部分历史 Agent 代码直接使用 `adapters/model_adapters.py` 里的 `ModelAdapterFactory`，这些调用点尚未全部迁到新的 registry/runtime facade
 - `legacy_bridge` 目前仅保留少量非统一媒体路径的旧式兜底，媒体模型侧的旧 fallback 已基本清空
-- 占位模型如 `kling-v1` 目前仍只有档案记录，不参与生产路由
 - 如果后续继续推进，建议继续把各个 Agent 内部直接 new / get 旧式 `ModelAdapterFactory` 的位置逐步改成调用统一多模态运行时

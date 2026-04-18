@@ -71,6 +71,22 @@ def test_qwen35_plus_has_adapter_and_outline_expand_routes_to_plus() -> None:
     assert resolve_model_for_task("review", None) == "deepseek-reasoner"
 
 
+def test_qwen36_plus_has_adapter_for_verification_workflow() -> None:
+    from core.model_hub import model_hub
+
+    config_path = Path(__file__).parent.parent / "config" / "llm_models.yaml"
+    if not config_path.exists():
+        pytest.skip("YAML 配置文件不存在")
+
+    spec = model_hub.registry.get_spec("qwen3.6-plus")
+    adapter = model_hub.registry.get_adapter("qwen3.6-plus")
+
+    assert spec is not None
+    assert adapter is not None
+    assert type(adapter).__name__ == "Qwen36PlusAdapter"
+    assert "verification" in spec.routing.task_types
+
+
 def test_story_expansion_routes_only_to_deepseek_and_qwen35_plus() -> None:
     from core.model_runtime import resolve_model_for_task
     from core.model_hub import model_hub

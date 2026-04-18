@@ -20,6 +20,14 @@ export interface PersistedDreamWeaverRun {
   style_preset?: string
   image_ratio?: string
   image_resolution?: string
+  image_model?: string
+  video_model?: string
+  video_edit_model?: string
+  vision_model?: string
+  enable_video_edit?: boolean
+  enable_vision_review?: boolean
+  enable_safety_audit?: boolean
+  safety_fail_policy?: 'warn' | 'block'
   video_fps?: number
   selected_chapter_ids?: number[]
   updated_at: number
@@ -230,6 +238,14 @@ export interface DreamweaverProjectLockedGenerationConfig {
   style_preset?: string | null
   image_ratio?: string | null
   image_resolution?: string | null
+  image_model?: string | null
+  video_model?: string | null
+  video_edit_model?: string | null
+  vision_model?: string | null
+  enable_video_edit?: boolean | null
+  enable_vision_review?: boolean | null
+  enable_safety_audit?: boolean | null
+  safety_fail_policy?: 'warn' | 'block' | string | null
   video_fps?: number | null
   quality_mode?: QualityMode | null
   smart_tuning?: boolean | null

@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from adapters.adapter_helpers import create_runtime_client
+from adapters.adapter_helpers import create_runtime_client, get_model_info
 
 from agents.image_edit_utils import (
     resolve_image_edit_adapter_name,
@@ -177,6 +177,37 @@ def _env_flag(name: str, default: bool) -> bool:
     if raw is None or not str(raw).strip():
         return bool(default)
     return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _resolve_registered_runtime_model_id(
+    cfg: Dict[str, Any],
+    *,
+    key: str,
+    env_name: str,
+    default: str,
+) -> Optional[str]:
+    candidates: List[str] = []
+    if isinstance(cfg, dict):
+        raw_cfg = str(cfg.get(key) or "").strip()
+        if raw_cfg:
+            candidates.append(raw_cfg)
+
+    raw_env = str(os.getenv(env_name) or "").strip()
+    if raw_env:
+        candidates.append(raw_env)
+
+    raw_default = str(default or "").strip()
+    if raw_default:
+        candidates.append(raw_default)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if isinstance(get_model_info(candidate), dict):
+            return candidate
+    return raw_default or None
 
 
 def _parse_character_views_env() -> List[str]:
@@ -603,7 +634,13 @@ def run(ctx: Any) -> None:
         ctx.payload["asset_library_requires_review"] = bool(pending_count > 0 or unapproved_roles)
         return
 
-    t2i = create_runtime_client("wan2.6-t2i")
+    t2i_model_id = _resolve_registered_runtime_model_id(
+        image_cfg,
+        key="adapter",
+        env_name="DREAMWEAVER_T2I_MODEL",
+        default="wan2.6-t2i",
+    ) or "wan2.6-t2i"
+    t2i = create_runtime_client(t2i_model_id)
     image_edit_adapter_name = resolve_image_edit_adapter_name(
         image_cfg,
         purpose="library_character_view",
@@ -624,12 +661,20 @@ def run(ctx: Any) -> None:
     except Exception:  # noqa: BLE001
         image_edit_adapter = None
 
+    vlm_model_id = None
     vlm_adapter = None
     if selector in {"vlm", "semantic"}:
-        try:
-            vlm_adapter = create_runtime_client(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus"))
-        except Exception:  # noqa: BLE001
-            vlm_adapter = None
+        vlm_model_id = _resolve_registered_runtime_model_id(
+            image_cfg,
+            key="vlm_adapter",
+            env_name="DREAMWEAVER_VLM_ADAPTER",
+            default="qwen3_vl_plus",
+        )
+        if vlm_model_id:
+            try:
+                vlm_adapter = create_runtime_client(vlm_model_id)
+            except Exception:  # noqa: BLE001
+                vlm_adapter = None
     vlm_criteria = [
         s.strip()
         for s in os.getenv("DREAMWEAVER_VLM_CRITERIA", "clarity,composition,lighting,color,style").split(",")
@@ -831,10 +876,10 @@ def run(ctx: Any) -> None:
         local_vlm = vlm_adapter
         local_image_edit = image_edit_adapter
         if asset_parallelism > 1:
-            local_t2i = create_runtime_client("wan2.6-t2i")
-            if selector in {"vlm", "semantic"}:
+            local_t2i = create_runtime_client(t2i_model_id)
+            if selector in {"vlm", "semantic"} and vlm_model_id:
                 try:
-                    local_vlm = create_runtime_client(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus"))
+                    local_vlm = create_runtime_client(vlm_model_id)
                 except Exception:  # noqa: BLE001
                     local_vlm = None
             try:
@@ -969,9 +1014,14 @@ def run(ctx: Any) -> None:
             "resolution": frame_resolution,
             "width": int(frame_width),
             "height": int(frame_height),
+            "image_model": image_edit_adapter_name if via == "image_edit" else t2i_model_id,
             "negative_prompt": style_negative_prompt,
             "approved": False,
         }
+        if vlm_model_id:
+            meta["vision_model"] = vlm_model_id
+        if via == "image_edit":
+            meta["t2i_fallback_model"] = t2i_model_id
         if via == "image_edit" and edit_base is not None:
             meta["edit_base"] = {"role": edit_base_role, "uri": str(edit_base)}
             meta["image_edit"] = {

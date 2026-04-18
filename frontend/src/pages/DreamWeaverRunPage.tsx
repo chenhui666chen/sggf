@@ -51,6 +51,7 @@ import {
   IMAGE_RESOLUTIONS,
   IMAGE_RESOLUTIONS_LABELS,
   IMAGE_MODEL_OPTIONS,
+  SAFETY_FAIL_POLICY_OPTIONS,
   VIDEO_MODEL_OPTIONS,
   VIDEO_EDIT_MODEL_OPTIONS,
   VISION_MODEL_OPTIONS,
@@ -443,6 +444,14 @@ function isNetworkErrorLike(error: unknown): boolean {
   return !getThrownErrorResponse(error)
 }
 
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
 export default function DreamWeaverRunPage() {
   const navigate = useNavigate()
   const { projectId: projectIdParam } = useParams()
@@ -470,6 +479,8 @@ export default function DreamWeaverRunPage() {
   const [visionModel, setVisionModel] = useState<string>('qwen3-vl-plus')
   const [enableVideoEdit, setEnableVideoEdit] = useState(true)
   const [enableVisionReview, setEnableVisionReview] = useState(true)
+  const [enableSafetyAudit, setEnableSafetyAudit] = useState(false)
+  const [safetyFailPolicy, setSafetyFailPolicy] = useState<'warn' | 'block'>('warn')
   const [loadingChapters, setLoadingChapters] = useState(false)
   const [running, setRunning] = useState(false)
   const [taskId, setTaskId] = useState<string | null>(null)
@@ -496,6 +507,8 @@ export default function DreamWeaverRunPage() {
   const [scriptGeneration, setScriptGeneration] = useState<ScriptGeneration | null>(null)
   const [promptReviewLoading, setPromptReviewLoading] = useState(false)
   const [promptReviewError, setPromptReviewError] = useState<string | null>(null)
+  const [safetyAuditApproveLoading, setSafetyAuditApproveLoading] = useState(false)
+  const [safetyAuditApproveError, setSafetyAuditApproveError] = useState<string | null>(null)
   const [promptReviewShowAll, setPromptReviewShowAll] = useState(false)
   const [shotPromptExpanded, setShotPromptExpanded] = useState<Record<string, boolean>>({})
   const [promptEditOpen, setPromptEditOpen] = useState(false)
@@ -1775,6 +1788,16 @@ export default function DreamWeaverRunPage() {
       setPromptReviewRequired(persisted.prompt_review_required)
     if (persisted.image_ratio) setImageRatio(persisted.image_ratio)
     if (persisted.image_resolution) setImageResolution(persisted.image_resolution)
+    if (persisted.image_model) setImageModel(persisted.image_model)
+    if (persisted.video_model) setVideoModel(persisted.video_model)
+    if (persisted.video_edit_model) setVideoEditModel(persisted.video_edit_model)
+    if (persisted.vision_model) setVisionModel(persisted.vision_model)
+    if (typeof persisted.enable_video_edit === 'boolean') setEnableVideoEdit(persisted.enable_video_edit)
+    if (typeof persisted.enable_vision_review === 'boolean') setEnableVisionReview(persisted.enable_vision_review)
+    if (typeof persisted.enable_safety_audit === 'boolean') setEnableSafetyAudit(persisted.enable_safety_audit)
+    if (persisted.safety_fail_policy === 'warn' || persisted.safety_fail_policy === 'block') {
+      setSafetyFailPolicy(persisted.safety_fail_policy)
+    }
 
     void hydrateFromPersistedRun(selectedProjectId, persisted.run_id, persisted.task_id ?? null, persisted.status ?? null)
   }, [selectedProjectId])
@@ -1785,6 +1808,22 @@ export default function DreamWeaverRunPage() {
     if (lockedGenerationConfig.style_preset) setStylePreset(lockedGenerationConfig.style_preset)
     if (lockedGenerationConfig.image_ratio) setImageRatio(lockedGenerationConfig.image_ratio)
     if (lockedGenerationConfig.image_resolution) setImageResolution(lockedGenerationConfig.image_resolution)
+    if (lockedGenerationConfig.image_model) setImageModel(lockedGenerationConfig.image_model)
+    if (lockedGenerationConfig.video_model) setVideoModel(lockedGenerationConfig.video_model)
+    if (lockedGenerationConfig.video_edit_model) setVideoEditModel(lockedGenerationConfig.video_edit_model)
+    if (lockedGenerationConfig.vision_model) setVisionModel(lockedGenerationConfig.vision_model)
+    if (typeof lockedGenerationConfig.enable_video_edit === 'boolean') {
+      setEnableVideoEdit(lockedGenerationConfig.enable_video_edit)
+    }
+    if (typeof lockedGenerationConfig.enable_vision_review === 'boolean') {
+      setEnableVisionReview(lockedGenerationConfig.enable_vision_review)
+    }
+    if (typeof lockedGenerationConfig.enable_safety_audit === 'boolean') {
+      setEnableSafetyAudit(lockedGenerationConfig.enable_safety_audit)
+    }
+    if (lockedGenerationConfig.safety_fail_policy === 'warn' || lockedGenerationConfig.safety_fail_policy === 'block') {
+      setSafetyFailPolicy(lockedGenerationConfig.safety_fail_policy)
+    }
   }, [lockedGenerationConfig, selectedProjectId])
 
   useEffect(() => {
@@ -1859,11 +1898,19 @@ export default function DreamWeaverRunPage() {
         setWaitingApproval(false)
 
         if (data.status === 'completed') {
+          setTaskStatus('completed')
+          setTaskProgress(typeof data.progress === 'number' ? data.progress : 100)
+          setTaskState(data.state || null)
+          setTaskStage(data.stage || null)
           setResult((prev) => mergeRunResult(prev, data.result || null))
           if (data.result?.preflight) {
             setRunPreflight(data.result.preflight)
           }
         } else {
+          setTaskStatus('failed')
+          setTaskProgress(typeof data.progress === 'number' ? data.progress : 100)
+          setTaskState(data.state || 'FAILED')
+          setTaskStage(data.stage || 'failed')
           setError(data.error || '任务执行失败')
         }
       } catch (e: unknown) {
@@ -1936,6 +1983,7 @@ export default function DreamWeaverRunPage() {
     setTaskArtifacts(null)
     setRunSnapshot(null)
     setRunSnapshotError(null)
+    setSafetyAuditApproveError(null)
     autoLoadedRunSnapshotRunIdRef.current = null
     setPreviewStep(0)
     setManualPreviewStep(false)
@@ -2022,6 +2070,7 @@ export default function DreamWeaverRunPage() {
     setScriptEntities(null)
     setScriptGeneration(null)
     setPromptReviewError(null)
+    setSafetyAuditApproveError(null)
     setPromptReviewShowAll(false)
     setPromptEditOpen(false)
     setPromptEditShot(null)
@@ -2062,6 +2111,14 @@ export default function DreamWeaverRunPage() {
         style_preset: stylePreset,
         image_ratio: imageRatio,
         image_resolution: imageResolution,
+        image_model: imageModel,
+        video_model: videoModel,
+        video_edit_model: videoEditModel,
+        vision_model: visionModel,
+        enable_video_edit: enableVideoEdit,
+        enable_vision_review: enableVisionReview,
+        enable_safety_audit: enableSafetyAudit,
+        safety_fail_policy: safetyFailPolicy,
       })
       const data = toDreamweaverRunAsyncResponse(res.data)
       if (!data) {
@@ -2396,6 +2453,14 @@ export default function DreamWeaverRunPage() {
     stylePreset,
     imageRatio,
     imageResolution,
+    imageModel,
+    videoModel,
+    videoEditModel,
+    visionModel,
+    enableVideoEdit,
+    enableVisionReview,
+    enableSafetyAudit,
+    safetyFailPolicy,
     selectedChapterIds,
   })
   const {
@@ -2417,6 +2482,9 @@ export default function DreamWeaverRunPage() {
   useEffect(() => {
     autoLoadedLibraryRef.current = false
   }, [currentRunId])
+  useEffect(() => {
+    setSafetyAuditApproveError(null)
+  }, [currentRunId])
   const videoClipJobs = useMemo(() => {
     return toDreamweaverVideoClipJobs(snapshotRuntimeConfig.video_clip_jobs)
   }, [snapshotRuntimeConfig.video_clip_jobs])
@@ -2425,6 +2493,37 @@ export default function DreamWeaverRunPage() {
     (snapshotRuntimeConfig.prompt_review as Record<string, unknown> | null | undefined)?.approved,
   )
   const promptReviewReady = !promptReviewRequiredSnapshot || promptReviewApproved
+  const safetyAuditAlertState = useMemo(() => {
+    const resultAudit = asObject(result?.audit)
+    const snapshotAudit = asObject(snapshotRuntimeConfig.audit)
+    const audit = resultAudit || snapshotAudit
+    const safetyAudit = asObject(audit?.safety_audit)
+    const snapshotReworkReason = asObject(snapshotRuntimeConfig.rework_reason)
+    const reworkReason = snapshotReworkReason
+    const reworkType = String(reworkReason?.type || '').trim().toLowerCase()
+    const snapshotStatus = String(runSnapshot?.status || taskStatus || '').trim().toLowerCase()
+    const errorTypeCandidates = [runSnapshot?.error_type, snapshotRuntimeConfig.error_type]
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+    const manualOverride = Boolean(safetyAudit?.manual_override)
+    const blocked = Boolean(safetyAudit?.blocked)
+    const safetyBlocked =
+      (!manualOverride && blocked) ||
+      (!manualOverride && reworkType === 'safety_audit_failed') ||
+      (!manualOverride && errorTypeCandidates.includes('SafetyAuditFailed'))
+    const summary =
+      String(safetyAudit?.summary || '').trim() ||
+      String(runSnapshot?.error_message || '').trim() ||
+      String(error || '').trim() ||
+      '成片命中安全审核阻断，当前 run 已停止。'
+    const categories = toStringArray(safetyAudit?.categories)
+    return {
+      show: safetyBlocked,
+      canApprove: Boolean(currentRunId) && snapshotStatus === 'failed' && safetyBlocked && !running,
+      summary,
+      categories,
+    }
+  }, [currentRunId, error, result?.audit, runSnapshot?.error_message, runSnapshot?.error_type, runSnapshot?.status, running, snapshotRuntimeConfig.audit, snapshotRuntimeConfig.error_type, snapshotRuntimeConfig.rework_reason, taskStatus])
   const canResumeFromScript =
     Boolean(currentRunId) && !scriptLoading && !resumeLoading && !scriptDirty && (!scriptRequiresReview || scriptApproved)
   const canResumeFromLibrary =
@@ -2512,6 +2611,12 @@ export default function DreamWeaverRunPage() {
       setRunSnapshotLoading(false)
     }
   }, [persistedRunId, resetMissingRunState, selectedProjectId, shouldTreatRunNotFoundAsPending, taskId, taskStatus])
+
+  useEffect(() => {
+    if (!persistedRunId) return
+    if (taskStatus !== 'failed') return
+    void loadRunSnapshot()
+  }, [loadRunSnapshot, persistedRunId, taskStatus])
 
   const rebuildVideoJobs = useCallback(async () => {
     if (!persistedRunId) return
@@ -2889,6 +2994,25 @@ export default function DreamWeaverRunPage() {
       setPromptReviewError(await extractApiErrorMessage(e, '更新提示词审核状态失败'))
     } finally {
       setPromptReviewLoading(false)
+    }
+  }
+
+  const approveSafetyAudit = async () => {
+    if (!currentRunId || !selectedProjectId) return
+    setSafetyAuditApproveLoading(true)
+    setSafetyAuditApproveError(null)
+    try {
+      await apiClient.approveDreamweaverSafetyAudit(currentRunId)
+      setError(null)
+      setTaskId(null)
+      setRunning(false)
+      setWaitingApproval(false)
+      setTaskQueue(null)
+      await hydrateFromPersistedRun(selectedProjectId, currentRunId, null, 'completed')
+    } catch (e: unknown) {
+      setSafetyAuditApproveError(await extractApiErrorMessage(e, '人工放行安全审核失败'))
+    } finally {
+      setSafetyAuditApproveLoading(false)
     }
   }
 
@@ -5697,6 +5821,11 @@ export default function DreamWeaverRunPage() {
       onEnableVideoEditChange={setEnableVideoEdit}
       enableVisionReview={enableVisionReview}
       onEnableVisionReviewChange={setEnableVisionReview}
+      enableSafetyAudit={enableSafetyAudit}
+      onEnableSafetyAuditChange={setEnableSafetyAudit}
+      safetyFailPolicyValue={safetyFailPolicy}
+      onSafetyFailPolicyChange={(value) => setSafetyFailPolicy(value === 'block' ? 'block' : 'warn')}
+      safetyFailPolicyOptions={SAFETY_FAIL_POLICY_OPTIONS}
       onRun={runFromConfigDialog}
       runDisabled={running || lockedGenerationConfigLoading || !selectedProjectId || selectedChapterIds.length === 0}
     />
@@ -5849,6 +5978,43 @@ export default function DreamWeaverRunPage() {
           onClose={clearTaskPointsPrecheckError}
           sx={{ mb: 2 }}
         />
+      )
+    }
+
+    if (safetyAuditAlertState.show) {
+      return (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={
+            safetyAuditAlertState.canApprove ? (
+              <Button
+                color="inherit"
+                size="small"
+                onClick={() => void approveSafetyAudit()}
+                disabled={safetyAuditApproveLoading}
+              >
+                {safetyAuditApproveLoading ? '放行中...' : '人工放行并完成本次 run'}
+              </Button>
+            ) : undefined
+          }
+        >
+          <Stack spacing={0.5}>
+            <Typography variant="body2">
+              {safetyAuditAlertState.summary}
+            </Typography>
+            {safetyAuditAlertState.categories.length > 0 && (
+              <Typography variant="body2" color="text.secondary">
+                风险分类：{safetyAuditAlertState.categories.join('、')}
+              </Typography>
+            )}
+            {safetyAuditApproveError && (
+              <Typography variant="body2" color="inherit">
+                {safetyAuditApproveError}
+              </Typography>
+            )}
+          </Stack>
+        </Alert>
       )
     }
 

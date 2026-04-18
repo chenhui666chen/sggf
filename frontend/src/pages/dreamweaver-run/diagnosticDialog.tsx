@@ -194,3 +194,93 @@ export function DreamweaverDiagnosticDialogShell({
     </Dialog>
   )
 }
+
+type DreamweaverRunDiagnosticDialogProps = {
+  open: boolean
+  onClose: () => void
+  runId?: string | null
+  state?: string | null
+  stage?: string | null
+  hasRunId: boolean
+  hasDiagnosticResult: boolean
+  error?: string | null
+  loading: boolean
+  shotCount: number
+  keyframeCount?: number | null
+  midframeCount?: number | null
+  videoClipCount?: number | null
+  refreshLabel: string
+  refreshDisabled: boolean
+  copyDisabled: boolean
+  onRefresh: () => void
+  onCopy: () => void
+  sections?: ReactNode
+  shotAccordions?: ReactNode
+}
+
+export function DreamweaverRunDiagnosticDialog({
+  open,
+  onClose,
+  runId,
+  state,
+  stage,
+  hasRunId,
+  hasDiagnosticResult,
+  error,
+  loading,
+  shotCount,
+  keyframeCount,
+  midframeCount,
+  videoClipCount,
+  refreshLabel,
+  refreshDisabled,
+  copyDisabled,
+  onRefresh,
+  onCopy,
+  sections,
+  shotAccordions,
+}: DreamweaverRunDiagnosticDialogProps) {
+  return (
+    <DreamweaverDiagnosticDialogShell
+      open={open}
+      onClose={onClose}
+      header={
+        <DreamweaverDiagnosticDialogHeader
+          runId={runId}
+          state={state}
+          stage={stage}
+          onClose={onClose}
+        />
+      }
+      statusSection={
+        <DreamweaverDiagnosticDialogStatusSection
+          hasRunId={hasRunId}
+          hasDiagnosticResult={hasDiagnosticResult}
+          error={error}
+          loading={loading}
+        />
+      }
+      toolbar={
+        <DreamweaverDiagnosticDialogToolbar
+          shotCount={shotCount}
+          keyframeCount={keyframeCount}
+          midframeCount={midframeCount}
+          videoClipCount={videoClipCount}
+          refreshLabel={refreshLabel}
+          refreshDisabled={refreshDisabled}
+          copyDisabled={copyDisabled}
+          onRefresh={onRefresh}
+          onCopy={onCopy}
+        />
+      }
+      sections={sections}
+      emptyState={
+        <DreamweaverDiagnosticDialogEmptyState
+          hasDiagnosticResult={hasDiagnosticResult}
+          shotCount={shotCount}
+        />
+      }
+      shotAccordions={shotAccordions}
+    />
+  )
+}

@@ -50,6 +50,7 @@ class SmartDispatchResponse(BaseModel):
 class ModelRecommendRequest(BaseModel):
     user_input: str = Field(..., min_length=1, max_length=5000, description="用户自然语言请求")
     context: Optional[Dict[str, Any]] = Field(default=None, description="附加上下文")
+    strategy: str = Field(default="balanced", description="调度策略: quality/cost/speed/balanced")
 
 
 class ModelRecommendResponse(BaseModel):
@@ -83,12 +84,13 @@ class StyleVocabularyResponse(BaseModel):
 @router.post("/parse-intent", response_model=IntentParseResponse)
 async def parse_intent(
     request: IntentParseRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     from core.intent_parser import get_intent_parser
 
     parser = get_intent_parser()
-    result = await parser.parse(request.user_input, request.context)
+    result = await parser.parse(request.user_input, request.context, db_session=db)
 
     return IntentParseResponse(
         success=True,
@@ -102,14 +104,14 @@ async def parse_intent(
 @router.post("/dispatch", response_model=SmartDispatchResponse)
 async def smart_dispatch(
     request: SmartDispatchRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     from core.intent_parser import get_intent_parser
-    from core.router import SmartRouter
-    from adapters.registry import registry
+    from core.router import router as smart_router
 
     parser = get_intent_parser()
-    intent_result = await parser.parse(request.user_input, request.context)
+    intent_result = await parser.parse(request.user_input, request.context, db_session=db)
 
     if intent_result.confidence < 0.3 and intent_result.parse_errors:
         return SmartDispatchResponse(
@@ -121,8 +123,10 @@ async def smart_dispatch(
     task = intent_result.task_spec
 
     try:
-        router_instance = SmartRouter(registry)
-        routing_result = router_instance.route_with_fallback(task)
+        routing_result = smart_router.route_with_fallback_by_strategy(
+            task,
+            request.strategy,
+        )
     except ValueError as e:
         return SmartDispatchResponse(
             success=False,
@@ -145,6 +149,7 @@ async def smart_dispatch(
         task=task,
         strategy=request.strategy,
         use_fallback=request.use_fallback,
+        routing_result=routing_result,
     )
 
     execution_info = exec_result.to_dict()
@@ -161,20 +166,23 @@ async def smart_dispatch(
 @router.post("/recommend-models", response_model=ModelRecommendResponse)
 async def recommend_models(
     request: ModelRecommendRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     from core.intent_parser import get_intent_parser
-    from core.router import SmartRouter
-    from adapters.registry import registry
+    from core.router import router as smart_router
 
     parser = get_intent_parser()
-    intent_result = await parser.parse(request.user_input, request.context)
+    intent_result = await parser.parse(request.user_input, request.context, db_session=db)
 
     task = intent_result.task_spec
 
     try:
-        router_instance = SmartRouter(registry)
-        routing_result = router_instance.route_with_fallback(task, max_fallbacks=3)
+        routing_result = smart_router.route_with_fallback_by_strategy(
+            task,
+            request.strategy,
+            max_fallbacks=3,
+        )
     except ValueError as e:
         return ModelRecommendResponse(
             success=False,

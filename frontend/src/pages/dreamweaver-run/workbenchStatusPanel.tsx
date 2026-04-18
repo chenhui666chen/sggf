@@ -1,6 +1,6 @@
 import type { MouseEventHandler, ReactNode } from 'react'
 
-import { Button, Card, CardContent, Chip, Grid, LinearProgress, Menu, Paper, Stack, Step, StepLabel, Stepper, Typography } from '@mui/material'
+import { Button, Card, CardContent, Chip, Grid, LinearProgress, Menu, MenuItem, Paper, Stack, Step, StepLabel, Stepper, Typography } from '@mui/material'
 
 type DreamweaverWorkbenchStatusActionButtonProps = {
   label: string
@@ -19,6 +19,34 @@ export function DreamweaverWorkbenchStatusActionButton({
     <Button size="small" variant="text" startIcon={startIcon} onClick={onClick} disabled={disabled}>
       {label}
     </Button>
+  )
+}
+
+type DreamweaverWorkbenchStatusActionGroupProps = {
+  items: Array<{
+    key: string
+    label: string
+    onClick: () => void
+    disabled?: boolean
+    startIcon?: ReactNode
+  }>
+}
+
+export function DreamweaverWorkbenchStatusActionGroup({
+  items,
+}: DreamweaverWorkbenchStatusActionGroupProps) {
+  return (
+    <>
+      {items.map((item) => (
+        <DreamweaverWorkbenchStatusActionButton
+          key={item.key}
+          label={item.label}
+          onClick={item.onClick}
+          disabled={item.disabled}
+          startIcon={item.startIcon}
+        />
+      ))}
+    </>
   )
 }
 
@@ -101,6 +129,29 @@ export function DreamweaverWorkbenchRestartMenu({
     >
       {items}
     </Menu>
+  )
+}
+
+type DreamweaverWorkbenchRestartMenuItemsProps = {
+  items: Array<{
+    key: string
+    label: string
+    onClick: () => void
+    disabled?: boolean
+  }>
+}
+
+export function DreamweaverWorkbenchRestartMenuItems({
+  items,
+}: DreamweaverWorkbenchRestartMenuItemsProps) {
+  return (
+    <>
+      {items.map((item) => (
+        <MenuItem key={item.key} onClick={item.onClick} disabled={item.disabled}>
+          {item.label}
+        </MenuItem>
+      ))}
+    </>
   )
 }
 
@@ -259,6 +310,34 @@ export function DreamweaverWorkbenchCardShell({
   )
 }
 
+type DreamweaverWorkbenchCardProps = {
+  running: boolean
+  taskProgress: number
+  statusPanel: ReactNode
+  taskHeader: ReactNode
+  mainContent: ReactNode
+  dialogs?: ReactNode
+}
+
+export function DreamweaverWorkbenchCard({
+  running,
+  taskProgress,
+  statusPanel,
+  taskHeader,
+  mainContent,
+  dialogs,
+}: DreamweaverWorkbenchCardProps) {
+  return (
+    <DreamweaverWorkbenchCardShell
+      header={<DreamweaverWorkbenchCardHeader running={running} taskProgress={taskProgress} />}
+      statusPanel={statusPanel}
+      taskHeader={taskHeader}
+      mainContent={mainContent}
+      dialogs={dialogs}
+    />
+  )
+}
+
 type DreamweaverWorkbenchSectionProps = {
   alerts?: ReactNode
   card: ReactNode
@@ -275,5 +354,117 @@ export function DreamweaverWorkbenchSection({
         {card}
       </Grid>
     </Grid>
+  )
+}
+
+type DreamweaverWorkbenchStatusScaffoldProps = {
+  runId?: string | null
+  progressLabel: number
+  stateLabel?: string | null
+  stageLabel?: string | null
+  taskStatusLabel?: string | null
+  taskQueue?: string | null
+  taskStatusColor?: 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning'
+  actionItems: Array<{
+    key: string
+    label: string
+    onClick: () => void
+    disabled?: boolean
+    startIcon?: ReactNode
+  }>
+  restartActionLabel: string
+  restartActionDisabled?: boolean
+  restartActionStartIcon?: ReactNode
+  onOpenRestartMenu: MouseEventHandler<HTMLButtonElement>
+  restartAnchorEl: HTMLElement | null
+  restartOpen: boolean
+  onCloseRestartMenu: () => void
+  restartMenuItems: Array<{
+    key: string
+    label: string
+    onClick: () => void
+    disabled?: boolean
+  }>
+  followVisible: boolean
+  onFollow: () => void
+  stepLabels: readonly string[]
+  activeStep: number
+  progressStep: number
+  onStepClick: (idx: number) => void
+}
+
+export function DreamweaverWorkbenchStatusScaffold({
+  runId,
+  progressLabel,
+  stateLabel,
+  stageLabel,
+  taskStatusLabel,
+  taskQueue,
+  taskStatusColor = 'default',
+  actionItems,
+  restartActionLabel,
+  restartActionDisabled = false,
+  restartActionStartIcon,
+  onOpenRestartMenu,
+  restartAnchorEl,
+  restartOpen,
+  onCloseRestartMenu,
+  restartMenuItems,
+  followVisible,
+  onFollow,
+  stepLabels,
+  activeStep,
+  progressStep,
+  onStepClick,
+}: DreamweaverWorkbenchStatusScaffoldProps) {
+  return (
+    <DreamweaverWorkbenchStatusPanel
+      primarySection={
+        <DreamweaverWorkbenchStatusPrimarySection
+          chips={
+            <DreamweaverWorkbenchStatusChipRow
+              runId={runId}
+              progressLabel={progressLabel}
+              stateLabel={stateLabel}
+              stageLabel={stageLabel}
+              taskStatusLabel={taskStatusLabel}
+              taskQueue={taskQueue}
+              taskStatusColor={taskStatusColor}
+            />
+          }
+          actions={<DreamweaverWorkbenchStatusActionGroup items={actionItems} />}
+          restartAction={
+            <DreamweaverWorkbenchRestartAction
+              label={restartActionLabel}
+              disabled={restartActionDisabled}
+              startIcon={restartActionStartIcon}
+              onClick={onOpenRestartMenu}
+            />
+          }
+          restartMenu={
+            <DreamweaverWorkbenchRestartMenu
+              anchorEl={restartAnchorEl}
+              open={restartOpen}
+              onClose={onCloseRestartMenu}
+              items={<DreamweaverWorkbenchRestartMenuItems items={restartMenuItems} />}
+            />
+          }
+        />
+      }
+      rightActions={
+        <DreamweaverWorkbenchStatusRightActions
+          followVisible={followVisible}
+          onFollow={onFollow}
+        />
+      }
+      stepper={
+        <DreamweaverWorkbenchStepper
+          labels={stepLabels}
+          activeStep={activeStep}
+          progressStep={progressStep}
+          onStepClick={onStepClick}
+        />
+      }
+    />
   )
 }

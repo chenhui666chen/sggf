@@ -400,6 +400,22 @@ def _model_client_available(model_id: Any) -> bool:
     return isinstance(get_model_info(model_id), dict)
 
 
+def _resolve_runtime_model_id(
+    cfg: Dict[str, Any],
+    *,
+    key: str,
+    env_name: str,
+    default: str,
+    require_available: bool = False,
+) -> Optional[str]:
+    candidate = _cfg_str(cfg, key, env_name=env_name, default=default).strip()
+    if not candidate:
+        return None
+    if require_available and not _model_client_available(candidate):
+        return None
+    return candidate
+
+
 def _supports_multi_image_client(adapter: Any) -> bool:
     if adapter is None:
         return False
@@ -1997,10 +2013,14 @@ def run_keyframes(ctx: Any) -> None:
     ensure_style_payload(ctx.payload)
     ensure_media_payload(ctx.payload)
 
-    adapter = "wan2.6-t2i"
-    run_dir = _ensure_run_dir(ctx)
-
     image_cfg = ctx.payload.get("image_config") if isinstance(ctx.payload.get("image_config"), dict) else {}
+    adapter = _resolve_runtime_model_id(
+        image_cfg,
+        key="adapter",
+        env_name="DREAMWEAVER_T2I_MODEL",
+        default="wan2.6-t2i",
+    ) or "wan2.6-t2i"
+    run_dir = _ensure_run_dir(ctx)
     frame_width, frame_height, frame_ratio = resolve_frame_size(image_cfg)
 
     candidate_count = _cfg_int(image_cfg, "t2i_candidates", env_name="DREAMWEAVER_T2I_CANDIDATES", default=1)
@@ -2113,8 +2133,13 @@ def run_keyframes(ctx: Any) -> None:
 
     vlm_adapter = None
     if selector in {"vlm", "semantic"} or ref_selector == "vlm":
-        candidate_vlm = str(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus") or "").strip() or "qwen3_vl_plus"
-        vlm_adapter = candidate_vlm if _model_client_available(candidate_vlm) else None
+        vlm_adapter = _resolve_runtime_model_id(
+            image_cfg,
+            key="vlm_adapter",
+            env_name="DREAMWEAVER_VLM_ADAPTER",
+            default="qwen3_vl_plus",
+            require_available=True,
+        )
     vlm_criteria = [
         s.strip()
         for s in os.getenv("DREAMWEAVER_VLM_CRITERIA", "clarity,composition,lighting,color,style").split(",")
@@ -2595,7 +2620,7 @@ def run_keyframes(ctx: Any) -> None:
             if isinstance(anchor_shot_id, str) and anchor_shot_id.strip():
                 head_base_path = run_dir / f"{anchor_shot_id}_tail.png"
 
-            local_t2i = "wan2.6-t2i"
+            local_t2i = adapter
 
             local_image_edit_adapters: Dict[str, Any] = {}
             if use_head_image_edit:
@@ -2609,8 +2634,7 @@ def run_keyframes(ctx: Any) -> None:
 
             local_vlm_adapter = None
             if selector in {"vlm", "semantic"} or ref_selector == "vlm":
-                candidate_vlm = str(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus") or "").strip() or "qwen3_vl_plus"
-                local_vlm_adapter = candidate_vlm if _model_client_available(candidate_vlm) else None
+                local_vlm_adapter = vlm_adapter
 
             def _normalize_ref_list(raw: Any) -> List[Dict[str, Any]]:
                 out: List[Dict[str, Any]] = []
@@ -3340,7 +3364,6 @@ def run_midframes(ctx: Any) -> None:
     ensure_style_payload(ctx.payload)
     ensure_media_payload(ctx.payload)
 
-    adapter = "wan2.6-t2i"
     run_dir = _ensure_run_dir(ctx)
 
     video_cfg = ctx.payload.get("video_config") if isinstance(ctx.payload.get("video_config"), dict) else {}
@@ -3351,6 +3374,12 @@ def run_midframes(ctx: Any) -> None:
         return
 
     image_cfg = ctx.payload.get("image_config") if isinstance(ctx.payload.get("image_config"), dict) else {}
+    adapter = _resolve_runtime_model_id(
+        image_cfg,
+        key="adapter",
+        env_name="DREAMWEAVER_T2I_MODEL",
+        default="wan2.6-t2i",
+    ) or "wan2.6-t2i"
     frame_width, frame_height, frame_ratio = resolve_frame_size(image_cfg)
 
     t2i_candidates = _cfg_int(image_cfg, "t2i_candidates", env_name="DREAMWEAVER_T2I_CANDIDATES", default=1)
@@ -3417,8 +3446,13 @@ def run_midframes(ctx: Any) -> None:
 
     vlm_adapter = None
     if selector in {"vlm", "semantic"} or ref_selector == "vlm":
-        candidate_vlm = str(os.getenv("DREAMWEAVER_VLM_ADAPTER", "qwen3_vl_plus") or "").strip() or "qwen3_vl_plus"
-        vlm_adapter = candidate_vlm if _model_client_available(candidate_vlm) else None
+        vlm_adapter = _resolve_runtime_model_id(
+            image_cfg,
+            key="vlm_adapter",
+            env_name="DREAMWEAVER_VLM_ADAPTER",
+            default="qwen3_vl_plus",
+            require_available=True,
+        )
     vlm_criteria = [
         s.strip()
         for s in os.getenv("DREAMWEAVER_VLM_CRITERIA", "clarity,composition,lighting,color,style").split(",")

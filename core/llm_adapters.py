@@ -585,6 +585,34 @@ class Qwen35PlusAdapter(OpenAICompatibleAdapter):
 
 
 @register_llm_model(
+    model_id="qwen3.6-plus",
+    name="Qwen3.6 Plus",
+    provider="alibaba",
+    capabilities=["creative", "reasoning", "long_context", "multimodal", "web_search", "writing"],
+    task_types=["concept", "outline_expand", "volume_outline", "chapter_batch", "long_writing", "multimodal_analysis", "verification"],
+    max_context_tokens=1000000,
+    max_output_tokens=65536,
+    quality_score=9.0,
+    avg_latency_seconds=1.8,
+    cost_per_1k_input_tokens=0.002,
+    cost_per_1k_output_tokens=0.012,
+    api_key_env="DASHSCOPE_API_KEY",
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    default_timeout=180,
+    supports_function_call=True,
+    supports_vision=True,
+    priority=1,
+    fallback_models=["qwen3.5-plus"],
+    default_params={"temperature": 0.7, "max_tokens": 32768, "enable_thinking": False},
+    tags=["creative", "reasoning", "long_context", "multimodal", "web_search", "chinese", "alibaba"],
+)
+class Qwen36PlusAdapter(OpenAICompatibleAdapter):
+    """阿里云 Qwen3.6 Plus 适配器。"""
+
+    pass
+
+
+@register_llm_model(
     model_id="qwen-turbo",
     name="Qwen Turbo",
     provider="alibaba",

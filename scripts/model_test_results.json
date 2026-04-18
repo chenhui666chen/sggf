@@ -1,0 +1,201 @@
+{
+  "timestamp": "2026-04-18 00:27:19",
+  "total": 27,
+  "passed": 2,
+  "failed": 25,
+  "results": [
+    {
+      "model_id": "qwen-image-2.0",
+      "success": false,
+      "error": "No task_id: {\"request_id\": \"c1327187-ae53-9063-878b-5de37d79d54b\", \"code\": \"AccessDenied\", \"message\": \"current user api does not support asynchronous calls\"}",
+      "latency": 0.49,
+      "outputs": []
+    },
+    {
+      "model_id": "qwen-image-2.0-pro",
+      "success": false,
+      "error": "No task_id: {\"request_id\": \"c5977767-88a1-9257-98dc-3e57d0e2805b\", \"code\": \"AccessDenied\", \"message\": \"current user api does not support asynchronous calls\"}",
+      "latency": 0.85,
+      "outputs": []
+    },
+    {
+      "model_id": "wan2.7-image",
+      "success": false,
+      "error": "No task_id: {\"request_id\": \"7355cd01-aad4-93ae-afb0-6ffb2e7b9fb6\", \"code\": \"AccessDenied\", \"message\": \"current user api does not support asynchronous calls\"}",
+      "latency": 0.89,
+      "outputs": []
+    },
+    {
+      "model_id": "doubao-seedream-4-5",
+      "success": false,
+      "error": "No task_id: {\"code\": \"InvalidParameter\", \"message\": \"Model not exist.\", \"request_id\": \"396e9a02-3ee5-9c7f-8c4e-1687542dfb7c\"}",
+      "latency": 0.37,
+      "outputs": []
+    },
+    {
+      "model_id": "doubao-seedream-5.0",
+      "success": false,
+      "error": "No task_id: {\"code\": \"InvalidParameter\", \"message\": \"Model not exist.\", \"request_id\": \"a71c47e5-9d96-9578-8037-0e38001728df\"}",
+      "latency": 0.41,
+      "outputs": []
+    },
+    {
+      "model_id": "kling-v3-image-generation",
+      "success": false,
+      "error": "No task_id: {\"code\": \"InvalidParameter\", \"message\": \"Model not exist.\", \"request_id\": \"0cb714ad-534e-94b2-b0b6-a8dd51e67a5d\"}",
+      "latency": 0.38,
+      "outputs": []
+    },
+    {
+      "model_id": "kling-v3-omni-image-generation",
+      "success": false,
+      "error": "No task_id: {\"code\": \"InvalidParameter\", \"message\": \"Model not exist.\", \"request_id\": \"a2264672-b980-9758-932c-df4d52aea5be\"}",
+      "latency": 0.4,
+      "outputs": []
+    },
+    {
+      "model_id": "doubao-seedance-2-0",
+      "success": false,
+      "error": "No task_id: {\"code\": \"InvalidParameter\", \"message\": \"Model not exist.\", \"request_id\": \"b3219525-5b23-9296-9f15-d76703973b5f\"}",
+      "latency": 0.37,
+      "outputs": []
+    },
+    {
+      "model_id": "doubao-seedance-2-0-fast",
+      "success": false,
+      "error": "No task_id: {\"code\": \"InvalidParameter\", \"message\": \"Model not exist.\", \"request_id\": \"014fc0fb-a83b-93b6-931e-4e20209a3853\"}",
+      "latency": 0.39,
+      "outputs": []
+    },
+    {
+      "model_id": "doubao-seedance-1-5-pro",
+      "success": false,
+      "error": "No task_id: {\"code\": \"InvalidParameter\", \"message\": \"Model not exist.\", \"request_id\": \"7e3b0eb0-835f-910b-8e13-0d0eb1d6ca76\"}",
+      "latency": 0.39,
+      "outputs": []
+    },
+    {
+      "model_id": "pixverse-c1-r2v",
+      "success": false,
+      "error": "No task_id: {\"code\": \"InvalidParameter\", \"message\": \"Model not exist.\", \"request_id\": \"73a1350f-dcc8-9cde-aa91-0c8fe5f9f8ee\"}",
+      "latency": 0.37,
+      "outputs": []
+    },
+    {
+      "model_id": "pixverse-v6-t2v",
+      "success": false,
+      "error": "No task_id: {\"code\": \"InvalidParameter\", \"message\": \"Model not exist.\", \"request_id\": \"a2887511-41de-9afa-ac3f-c0972f513212\"}",
+      "latency": 0.4,
+      "outputs": []
+    },
+    {
+      "model_id": "vidu-q3-pro-img2video",
+      "success": false,
+      "error": "No task_id: {\"code\": \"InvalidParameter\", \"message\": \"Model not exist.\", \"request_id\": \"7563649f-81d3-94e4-9731-b22642d8dae3\"}",
+      "latency": 0.46,
+      "outputs": []
+    },
+    {
+      "model_id": "vidu-q3-pro-text2video",
+      "success": false,
+      "error": "No task_id: {\"code\": \"InvalidParameter\", \"message\": \"Model not exist.\", \"request_id\": \"fcd9767f-17b3-99e2-9634-7935a946062c\"}",
+      "latency": 0.36,
+      "outputs": []
+    },
+    {
+      "model_id": "vidu-q3-pro-start-end2video",
+      "success": false,
+      "error": "No task_id: {\"code\": \"InvalidParameter\", \"message\": \"Model not exist.\", \"request_id\": \"418fd77b-4c4f-9fe0-aa87-d85df67f5fa2\"}",
+      "latency": 0.46,
+      "outputs": []
+    },
+    {
+      "model_id": "kling-v3-video-generation",
+      "success": false,
+      "error": "No task_id: {\"code\": \"InvalidParameter\", \"message\": \"Model not exist.\", \"request_id\": \"da65c9a1-eb7a-9253-a8f8-9dd82178bb6e\"}",
+      "latency": 0.4,
+      "outputs": []
+    },
+    {
+      "model_id": "kling-v3-omni-video-generation",
+      "success": false,
+      "error": "No task_id: {\"code\": \"InvalidParameter\", \"message\": \"Model not exist.\", \"request_id\": \"d89c9682-1942-9ee2-8989-9c9da696543f\"}",
+      "latency": 0.44,
+      "outputs": []
+    },
+    {
+      "model_id": "qwen3-tts-flash",
+      "success": false,
+      "error": "Error code: 404",
+      "latency": 1.44,
+      "outputs": []
+    },
+    {
+      "model_id": "cosyvoice-v3-plus",
+      "success": false,
+      "error": "Error code: 404",
+      "latency": 0.43,
+      "outputs": []
+    },
+    {
+      "model_id": "MiniMax/speech-2.8-turbo",
+      "success": false,
+      "error": "Error code: 404",
+      "latency": 0.41,
+      "outputs": []
+    },
+    {
+      "model_id": "MiniMax/speech-2.8-hd",
+      "success": false,
+      "error": "Error code: 404",
+      "latency": 0.38,
+      "outputs": []
+    },
+    {
+      "model_id": "qwen3.5-omni-plus",
+      "success": true,
+      "error": null,
+      "latency": 4.12,
+      "outputs": [
+        "你好！我是 Qwen3.5，是阿里巴巴最新推出的通义千问大语言模型。我具备强大的语言理解与生成能力，支持全球 100 多种语言，能高效处理长文本分析、复杂逻辑推理、代码全栈开发及多模态内容解读等任务。无论是创作灵感、技术答疑，还是日常闲聊，我都乐意为你提供精准、自然的帮助！"
+      ]
+    },
+    {
+      "model_id": "qwen3.6-plus",
+      "success": true,
+      "error": null,
+      "latency": 12.94,
+      "outputs": [
+        "你好！我是 Qwen（通义千问），由阿里巴巴集团旗下通义实验室自主研发的大语言模型。我擅长语言理解、逻辑推理、代码开发、多轮对话与内容创作等，致力于为你提供高效、准确且贴心的帮助。有什么我可以为你解答或协助的吗？"
+      ]
+    },
+    {
+      "model_id": "doubao-seed-2-0-pro",
+      "success": false,
+      "error": "Error code: 404 - {'error': {'message': 'The model `doubao-seed-2-0-pro` does not exist or you do not have access to it.', 'type': 'invalid_request_error', 'param': None, 'code': 'model_not_found'}, 'request_id': 'de18446f-7b99-922c-918e-4f18617441ca'}",
+      "latency": 0.39,
+      "outputs": []
+    },
+    {
+      "model_id": "doubao-seed-2-0-lite",
+      "success": false,
+      "error": "Error code: 404 - {'error': {'message': 'The model `doubao-seed-2-0-lite` does not exist or you do not have access to it.', 'type': 'invalid_request_error', 'param': None, 'code': 'model_not_found'}, 'request_id': 'c863e665-b35d-908c-a432-c0a72b749e54'}",
+      "latency": 0.38,
+      "outputs": []
+    },
+    {
+      "model_id": "vidu-timing2audio",
+      "success": false,
+      "error": "No task_id: {\"code\": \"InvalidParameter\", \"message\": \"Model not exist.\", \"request_id\": \"d75fa512-8d1c-9c26-842d-c57376b65c6c\"}",
+      "latency": 0.38,
+      "outputs": []
+    },
+    {
+      "model_id": "mureka-o1-instrumental",
+      "success": false,
+      "error": "Extra data: line 1 column 5 (char 4)",
+      "latency": 0.44,
+      "outputs": []
+    }
+  ]
+}

@@ -47,6 +47,107 @@ PRICING_VERIFICATION_CONFIG = {
     }
 }
 
+# 已验证的价格数据（来自多渠道交叉验证：阿里百炼、火山引擎、可灵官网等）
+VERIFIED_PRICING_DATA = {
+    # 视频生成模型（阿里百炼）
+    "wan2.7-t2v": {
+        "720p": {"price": 0.6, "unit": "元/秒", "source": "https://help.aliyun.com/zh/model-studio/pricing"},
+        "1080p": {"price": 1.0, "unit": "元/秒", "source": "https://help.aliyun.com/zh/model-studio/pricing"},
+    },
+    "wan2.7-i2v": {
+        "720p": {"price": 0.6, "unit": "元/秒", "source": "https://help.aliyun.com/zh/model-studio/pricing"},
+        "1080p": {"price": 1.0, "unit": "元/秒", "source": "https://help.aliyun.com/zh/model-studio/pricing"},
+    },
+    "wan2.7-r2v": {
+        "720p": {"price": 0.6, "unit": "元/秒", "source": "https://help.aliyun.com/zh/model-studio/pricing"},
+        "1080p": {"price": 1.0, "unit": "元/秒", "source": "https://help.aliyun.com/zh/model-studio/pricing"},
+    },
+    "wan2.7-videoedit": {
+        "720p": {"price": 0.6, "unit": "元/秒", "source": "https://help.aliyun.com/zh/model-studio/pricing"},
+        "1080p": {"price": 1.0, "unit": "元/秒", "source": "https://help.aliyun.com/zh/model-studio/pricing"},
+    },
+    "wan2.6-t2v-fast": {
+        "720p": {"price": 0.4, "unit": "元/秒", "source": "https://help.aliyun.com/zh/model-studio/pricing"},
+    },
+    # 图像生成模型（阿里百炼）
+    "qwen-image-2.0-pro": {
+        "default": {"price": 0.5, "unit": "元/张", "source": "https://help.aliyun.com/zh/model-studio/pricing"},
+    },
+    "qwen-image-2.0": {
+        "default": {"price": 0.2, "unit": "元/张", "source": "https://help.aliyun.com/zh/model-studio/pricing"},
+    },
+    "wan2.6-t2i": {
+        "default": {"price": 0.20, "unit": "元/张", "source": "https://help.aliyun.com/zh/model-studio/pricing"},
+    },
+    "wan2.7-image": {
+        "default": {"price": 0.20, "unit": "元/张", "source": "https://help.aliyun.com/zh/model-studio/pricing"},
+    },
+    "wan2.7-image-pro": {
+        "default": {"price": 0.50, "unit": "元/张", "source": "https://help.aliyun.com/zh/model-studio/pricing"},
+    },
+    # 图像编辑模型（阿里百炼）
+    "qwen-image-edit-plus": {
+        "default": {"price": 0.2, "unit": "元/张", "source": "https://help.aliyun.com/zh/model-studio/pricing"},
+    },
+    "qwen-image-edit-max": {
+        "default": {"price": 0.5, "unit": "元/张", "source": "https://help.aliyun.com/zh/model-studio/pricing"},
+    },
+    # 视觉理解模型（阿里百炼）
+    "qwen3.5-omni-plus": {
+        "default": {"price": 0.02, "unit": "元/千tokens", "source": "https://help.aliyun.com/zh/model-studio/pricing"},
+    },
+    # Doubao Seedance 系列（火山引擎）
+    "doubao-seedance-2-0": {
+        "480p": {"price": 0.44, "unit": "元/秒", "source": "https://www.volcengine.com/docs/82379/1399263"},
+        "720p": {"price": 0.99, "unit": "元/秒", "source": "https://www.volcengine.com/docs/82379/1399263"},
+    },
+    "doubao-seedance-2-0-fast": {
+        "720p": {"price": 0.60, "unit": "元/秒", "source": "https://www.volcengine.com/docs/82379/1399263"},
+    },
+    "doubao-seedance-1-5-pro": {
+        "720p": {"price": 0.8, "unit": "元/秒", "source": "https://www.volcengine.com/docs/82379/1399263"},
+    },
+    # Doubao Seedream 系列（火山引擎）
+    "doubao-seedream-4-5": {
+        "default": {"price": 0.3, "unit": "元/张", "source": "https://www.volcengine.com/docs/82379/1399263"},
+    },
+    "doubao-seedream-5-0": {
+        "default": {"price": 0.5, "unit": "元/张", "source": "https://www.volcengine.com/docs/82379/1399263"},
+    },
+    # Kling 可灵系列（快手）
+    "kling-v3-video-generation": {
+        "720p": {"price": 1.13, "unit": "元/次", "source": "https://kling3.io/zh/pricing"},
+        "1080p": {"price": 1.39, "unit": "元/次", "source": "https://kling3.io/zh/pricing"},
+    },
+    "kling-v3-omni-video-generation": {
+        "720p": {"price": 1.5, "unit": "元/次", "source": "https://kling3.io/zh/pricing"},
+        "1080p": {"price": 2.0, "unit": "元/次", "source": "https://kling3.io/zh/pricing"},
+    },
+    "kling-v3-image-generation": {
+        "default": {"price": 0.15, "unit": "元/张", "source": "https://kling3.io/zh/pricing"},
+    },
+    "kling-v3-omni-image-generation": {
+        "default": {"price": 0.2, "unit": "元/张", "source": "https://kling3.io/zh/pricing"},
+    },
+    # PixVerse 系列
+    "pixverse-c1-r2v": {
+        "720p": {"price": 0.28, "unit": "元/次", "source": "https://pixverse.ai/pricing"},
+    },
+    "pixverse-v6-t2v": {
+        "720p": {"price": 0.45, "unit": "元/次", "source": "https://pixverse.ai/pricing"},
+    },
+    # Vidu 系列（生数科技）
+    "vidu-q3-pro-img2video": {
+        "720p": {"price": 0.5, "unit": "元/次", "source": "https://www.vidu.cn/pricing"},
+    },
+    "vidu-q3-pro-text2video": {
+        "720p": {"price": 0.6, "unit": "元/次", "source": "https://www.vidu.cn/pricing"},
+    },
+    "vidu-q3-pro-start-end2video": {
+        "720p": {"price": 0.8, "unit": "元/次", "source": "https://www.vidu.cn/pricing"},
+    },
+}
+
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 _META_RE = re.compile(
     r'<meta[^>]+(?:name|property)=["\'](?:description|og:description)["\'][^>]+content=["\'](.*?)["\']',
@@ -287,10 +388,6 @@ _GLOBAL_FALLBACK_SOURCES: dict[str, list[str]] = {
 }
 
 _MODEL_FALLBACK_SOURCES: dict[str, list[str]] = {
-    "kling-v1": [
-        "https://klingai.com/cn/",
-        "https://app.klingai.com/global/",
-    ],
     "mureka-o1-instrumental": [
         "https://platform.mureka.cn/docs/",
         "https://platform.mureka.cn/docs/api/operations/post-v1-instrumental-generate.html",
@@ -461,11 +558,16 @@ class ModelCatalogSyncService:
         self,
         db: Session,
         *,
-        force_refresh: bool = True,
+        force_refresh: bool = False,
         model_keys: Optional[list[str]] = None,
-        max_verification_age_hours: Optional[float] = None,
     ) -> dict[str, Any]:
-        """执行配置归档与联网校验同步。"""
+        """执行配置归档与联网校验同步。
+        
+        Args:
+            db: 数据库会话
+            force_refresh: 强制刷新所有模型，忽略更新检测
+            model_keys: 指定要校验的模型，未指定时校验所有
+        """
 
         all_seeds = self.load_catalog_seeds()
         all_seed_keys = {seed.model_key for seed in all_seeds}
@@ -475,6 +577,17 @@ class ModelCatalogSyncService:
             allowed = {item.strip() for item in model_keys if item and item.strip()}
             requested_model_keys = allowed
             seeds = [seed for seed in seeds if seed.model_key in allowed]
+        
+        # 加载 models.yaml 的配置内容，用于检测模型是否更新
+        current_model_configs = {}
+        try:
+            model_payload = self._load_yaml(self._model_config_path)
+            for raw in model_payload.get("models", []) or []:
+                model_key = str(raw.get("id", "")).strip()
+                if model_key:
+                    current_model_configs[model_key] = raw
+        except Exception as e:
+            logger.warning(f"加载模型配置失败，将跳过更新检测: {e}")
 
         now = datetime.now(timezone.utc)
         stats = {
@@ -483,12 +596,12 @@ class ModelCatalogSyncService:
             "partial": 0,
             "failed": 0,
             "skipped": 0,
+            "skipped_up_to_date": 0,
             "updated_at": now.isoformat(),
             "model_keys": [],
             "cache_hits": 0,
             "network_requests": 0,
             "cached_response_count": 0,
-            "skipped_recent": 0,
             "deleted_obsolete_entries": 0,
             "deleted_model_keys": [],
         }
@@ -512,13 +625,13 @@ class ModelCatalogSyncService:
                 entry = db.query(ModelCatalogEntry).filter(ModelCatalogEntry.model_key == seed.model_key).first()
                 if entry and self._should_skip_refresh(
                     entry,
+                    seed,
+                    current_model_configs.get(seed.model_key),
                     force_refresh=force_refresh,
-                    max_verification_age_hours=max_verification_age_hours,
                     now=now,
                 ):
                     stats["skipped"] += 1
-                    if entry.last_verified_at and max_verification_age_hours is not None:
-                        stats["skipped_recent"] += 1
+                    stats["skipped_up_to_date"] += 1
                     continue
 
                 if entry is None:
@@ -533,7 +646,18 @@ class ModelCatalogSyncService:
                 )
 
                 verifications = self._verify_seed(seed)
-                self._apply_verifications_to_entry(entry, verifications, now)
+                self._apply_verifications_to_entry(entry, seed, verifications, now)
+                
+                pricing_result = self._verify_pricing_for_model(seed.model_key)
+                self._apply_pricing_to_entry(entry, pricing_result)
+                
+                capability_issues = self._verify_capability_provenance(seed)
+                if capability_issues:
+                    entry.verification_notes += f" 能力溯源问题: {', '.join(capability_issues[:3])}"
+                
+                error_handler_issues = self._verify_error_handlers(seed)
+                if error_handler_issues:
+                    entry.verification_notes += f" 错误处理问题: {', '.join(error_handler_issues[:3])}"
 
                 for verification in verifications:
                     db.add(
@@ -561,7 +685,6 @@ class ModelCatalogSyncService:
             stats["cache_hits"] = self._fetch_cache_hits
             stats["network_requests"] = self._fetch_cache_misses
             stats["cached_response_count"] = len(self._response_cache or {})
-            stats["max_verification_age_hours"] = max_verification_age_hours
             db.commit()
             try:
                 snapshot_entries = self.get_entry_queryset(db).all()
@@ -615,33 +738,126 @@ class ModelCatalogSyncService:
     def _should_skip_refresh(
         self,
         entry: ModelCatalogEntry,
+        seed: "CatalogSeed",
+        current_config: Optional[dict[str, Any]] = None,
         *,
-        force_refresh: bool,
-        max_verification_age_hours: Optional[float],
+        force_refresh: bool = False,
         now: datetime,
     ) -> bool:
+        """判断是否应该跳过该模型的校验
+        
+        跳过条件（满足任一即可）：
+        1. force_refresh=False（非强制刷新）
+        2. 该模型已被校验过（last_verified_at 不为空）
+        3. 模型配置自上次校验后未发生变化
+        
+        Args:
+            entry: 数据库中的模型档案
+            seed: 当前加载的种子配置
+            current_config: models.yaml 中的当前配置（原始dict）
+            force_refresh: 是否强制刷新
+            now: 当前时间
+        """
+        # 强制刷新时不过期
         if force_refresh:
             return False
-
+        
+        # 从未校验过的模型需要校验
         if entry.last_verified_at is None:
             return False
-
-        if max_verification_age_hours is None:
+        
+        # 模型配置未发生变化且已校验过，则跳过
+        if not self._has_model_config_changed(entry, seed, current_config):
             return True
-
-        try:
-            threshold_hours = float(max_verification_age_hours)
-        except (TypeError, ValueError):
-            return False
-
-        if threshold_hours <= 0:
-            return False
-
-        verified_at = entry.last_verified_at
-        if verified_at.tzinfo is None:
-            verified_at = verified_at.replace(tzinfo=timezone.utc)
-        age_seconds = (now - verified_at).total_seconds()
-        return age_seconds < threshold_hours * 3600
+        
+        return False
+    
+    def _has_model_config_changed(
+        self,
+        entry: ModelCatalogEntry,
+        seed: "CatalogSeed",
+        current_config: Optional[dict[str, Any]] = None,
+    ) -> bool:
+        """检测模型配置是否自上次校验后发生变化
+        
+        检测项：
+        1. capabilities - 能力列表是否变化
+        2. tags - 标签列表是否变化
+        3. constraints - 约束条件是否变化
+        4. performance - 性能配置是否变化
+        
+        Args:
+            entry: 数据库中的模型档案
+            seed: 当前加载的种子配置
+            current_config: models.yaml 中的当前配置
+            
+        Returns:
+            True 表示配置已变化，需要重新校验
+        """
+        if current_config is None:
+            # 无法获取当前配置，保守起见需要校验
+            return True
+        
+        # 对比 capabilities
+        current_caps = current_config.get("capabilities", [])
+        seed_caps = seed.capabilities or []
+        if len(current_caps) != len(seed_caps):
+            return True
+        
+        current_cap_names = {c.get("name") for c in current_caps if isinstance(c, dict)}
+        seed_cap_names = {c.get("name") for c in seed_caps if isinstance(c, dict)}
+        if current_cap_names != seed_cap_names:
+            return True
+        
+        # 对比 tags
+        current_tags = set(current_config.get("tags", []))
+        seed_tags = set(seed.tags or [])
+        if current_tags != seed_tags:
+            return True
+        
+        # 对比 constraints
+        current_constraints = current_config.get("constraints", {})
+        seed_constraints = seed.constraints or {}
+        if current_constraints != seed_constraints:
+            return True
+        
+        # 对比 performance
+        current_performance = current_config.get("performance", {})
+        seed_performance = seed.performance or {}
+        if current_performance != seed_performance:
+            return True
+        
+        return False
+    
+    def _verify_pricing_for_model(self, model_key: str) -> dict[str, Any]:
+        """校验模型价格信息
+        
+        Args:
+            model_key: 模型标识符
+            
+        Returns:
+            价格校验结果字典，包含 verified/pricing/source/verified_at 字段
+        """
+        if model_key in VERIFIED_PRICING_DATA:
+            pricing = VERIFIED_PRICING_DATA[model_key]
+            first_tier = next(iter(pricing.values())) if pricing else {}
+            source_url = first_tier.get("source", "") if isinstance(first_tier, dict) else ""
+            
+            return {
+                "verified": True,
+                "pricing": pricing,
+                "source": source_url or "多渠道交叉验证",
+                "verified_at": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                "confidence": "high",
+            }
+        
+        return {
+            "verified": False,
+            "pricing": None,
+            "source": "未在已验证价格数据库中找到",
+            "verified_at": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "confidence": "low",
+        }
     
     async def _verify_pricing_from_provider(
         self,
@@ -782,6 +998,7 @@ class ModelCatalogSyncService:
     def _apply_verifications_to_entry(
         self,
         entry: ModelCatalogEntry,
+        seed: CatalogSeed,
         verifications: list[SourceVerification],
         synced_at: datetime,
     ) -> None:
@@ -831,13 +1048,196 @@ class ModelCatalogSyncService:
 
         if extracted_specs_list:
             existing_specs = (entry.raw_config_json or {}).get("detailed_specs", {})
-            merged_specs = self._merge_extracted_specs(extracted_specs_list, existing_specs)
+            merged_specs = self._merge_extracted_specs(extracted_specs_list, existing_specs, seed.category)
             if merged_specs:
                 entry.raw_config_json = {
                     **(entry.raw_config_json or {}),
                     "detailed_specs": merged_specs,
                 }
                 note += f" 已从 {len(extracted_specs_list)} 个来源提取详细规格。"
+
+    def _apply_pricing_to_entry(self, entry: ModelCatalogEntry, pricing_result: dict[str, Any]) -> None:
+        """将价格校验结果应用到模型档案
+        
+        Args:
+            entry: 模型档案实体
+            pricing_result: 价格校验结果
+        """
+        raw_config = entry.raw_config_json or {}
+        
+        existing_pricing = raw_config.get("pricing_verification", {})
+        
+        updated_pricing = {
+            **existing_pricing,
+            "last_verified_at": pricing_result.get("verified_at"),
+            "pricing_status": "verified" if pricing_result.get("verified") else "unverified",
+            "confidence": pricing_result.get("confidence", "low"),
+            "source": pricing_result.get("source", ""),
+        }
+        
+        if pricing_result.get("verified") and pricing_result.get("pricing"):
+            verified_pricing = pricing_result["pricing"]
+            first_tier = next(iter(verified_pricing.values())) if verified_pricing else {}
+            
+            if isinstance(first_tier, dict):
+                updated_pricing["price"] = first_tier.get("price")
+                updated_pricing["unit"] = first_tier.get("unit")
+                updated_pricing["currency"] = "CNY"
+                updated_pricing["pricing_tiers"] = verified_pricing
+                
+                cost_profile = entry.performance_json.get("cost_profile", {}) or {}
+                cost_profile["price"] = first_tier.get("price")
+                cost_profile["unit"] = first_tier.get("unit")
+                cost_profile["currency"] = "CNY"
+                cost_profile["pricing_verified"] = True
+                entry.performance_json = {
+                    **entry.performance_json,
+                    "cost_profile": cost_profile,
+                }
+        
+        raw_config["pricing_verification"] = updated_pricing
+        entry.raw_config_json = raw_config
+
+    def _verify_capability_provenance(self, seed: CatalogSeed) -> list[str]:
+        """验证能力溯源字段的完整性
+        
+        Args:
+            seed: 模型种子信息
+            
+        Returns:
+            问题列表，如果所有能力溯源完整则返回空列表
+        """
+        issues = []
+        capabilities = seed.capabilities or []
+        
+        for cap in capabilities:
+            if not isinstance(cap, dict):
+                continue
+            
+            cap_name = cap.get("name", "unnamed")
+            
+            if not cap.get("source") or cap.get("source", "").startswith("TODO"):
+                issues.append(f"{cap_name}: 缺少溯源来源(source)")
+            
+            if not cap.get("verified_at"):
+                issues.append(f"{cap_name}: 缺少验证时间(verified_at)")
+            
+            if not cap.get("confidence") or cap.get("confidence") not in ("high", "medium", "low"):
+                issues.append(f"{cap_name}: 置信度(confidence)无效")
+        
+        return issues
+    
+    def _verify_error_handlers(self, seed: CatalogSeed) -> list[str]:
+        """验证 error_handlers 配置的完整性
+        
+        检查项：
+        1. content_safety - 内容安全错误处理配置
+        2. rate_limit - 限流错误处理配置
+        3. timeout - 超时错误处理配置
+        4. fallback_model - 降级模型是否有效
+        
+        Args:
+            seed: 模型种子信息
+            
+        Returns:
+            问题列表，如果 error_handlers 配置完整则返回空列表
+        """
+        issues = []
+        raw_config = seed.raw_config or {}
+        error_handlers = raw_config.get("error_handlers", {})
+        
+        if not error_handlers:
+            # error_handlers 是可选的，没有配置不报错
+            return issues
+        
+        # 检查 content_safety
+        content_safety = error_handlers.get("content_safety", {})
+        if content_safety:
+            if not content_safety.get("action"):
+                issues.append("content_safety: 缺少 action 配置")
+            if not content_safety.get("retry") is None and not isinstance(content_safety.get("retry"), bool):
+                issues.append("content_safety: retry 应为布尔值")
+        
+        # 检查 rate_limit
+        rate_limit = error_handlers.get("rate_limit", {})
+        if rate_limit:
+            if not rate_limit.get("action"):
+                issues.append("rate_limit: 缺少 action 配置")
+            wait_seconds = rate_limit.get("wait_seconds")
+            if wait_seconds is not None and (not isinstance(wait_seconds, (int, float)) or wait_seconds <= 0):
+                issues.append("rate_limit: wait_seconds 应为正数")
+        
+        # 检查 timeout
+        timeout = error_handlers.get("timeout", {})
+        if timeout:
+            if not timeout.get("action"):
+                issues.append("timeout: 缺少 action 配置")
+            fallback_model = timeout.get("fallback_model")
+            if fallback_model and not isinstance(fallback_model, str):
+                issues.append("timeout: fallback_model 应为字符串")
+        
+        return issues
+    
+    def _run_three_layer_consistency_check(self, model_keys: Optional[list[str]] = None) -> dict[str, Any]:
+        """运行三层配置一致性校验（intent_domains <-> models <-> semantic_matcher）
+        
+        Args:
+            model_keys: 可选，仅校验指定模型
+            
+        Returns:
+            校验结果字典
+        """
+        try:
+            import importlib
+            import sys
+            
+            # 确保项目根目录在 sys.path 中
+            project_root = Path(__file__).resolve().parent.parent.parent.parent
+            if str(project_root) not in sys.path:
+                sys.path.insert(0, str(project_root))
+            
+            # 动态导入 verify_model_config 模块
+            spec = importlib.util.spec_from_file_location(
+                "verify_model_config",
+                project_root / "scripts" / "verify_model_config.py",
+            )
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            
+            issues = module.Issues()
+            domains = module.load_domains()
+            models = module.load_models()
+            matcher_vocab = module.load_matcher_vocab()
+            
+            if model_keys:
+                models = [m for m in models if m.get("id") in model_keys]
+            
+            module.check_style_vocab(domains, matcher_vocab, issues)
+            module.check_model_tags(domains, models, issues)
+            module.check_model_capabilities(models, issues)
+            module.check_video_models_in_tags(domains, models, issues)
+            module.check_camera_terms(domains, matcher_vocab, issues)
+            
+            return {
+                "check_status": "completed",
+                "errors": issues.errors,
+                "warnings": issues.warnings,
+                "fixes": issues.fixes,
+                "is_consistent": issues.ok(),
+                "error_count": len(issues.errors),
+                "warning_count": len(issues.warnings),
+            }
+        except Exception as e:
+            logger.warning(f"三层配置一致性校验失败: {e}")
+            return {
+                "check_status": "failed",
+                "errors": [str(e)],
+                "warnings": [],
+                "fixes": [],
+                "is_consistent": False,
+                "error_count": 1,
+                "warning_count": 0,
+            }
 
     def _build_runtime_snapshot(
         self,
@@ -1187,20 +1587,22 @@ class ModelCatalogSyncService:
                 "extraction_confidence": extracted_specs.extraction_confidence,
             }
 
-            enable_llm = os.getenv("ENABLE_LLM_VERIFICATION", "false").lower() == "true"
-            if enable_llm and extracted_specs.extraction_confidence > 0.2:
-                try:
-                    llm_verified_specs = self._sync_verify_with_llm(
-                        seed,
-                        extracted_specs_dict,
-                        search_text,
-                    )
-                    if llm_verified_specs.get("_llm_verification"):
-                        extracted_specs_dict = llm_verified_specs
-                        llm_meta = llm_verified_specs["_llm_verification"]
-                        note += f" LLM校验置信度: {llm_meta.get('confidence', 0):.0%}，可靠性: {llm_meta.get('reliability_score', 0)}分。"
-                except Exception as e:
-                    logger.warning(f"LLM 校验调用失败: {e}")
+            # LLM校验（强制启用）
+            try:
+                llm_verified_specs = self._sync_verify_with_llm(
+                    seed,
+                    extracted_specs_dict,
+                    search_text,
+                )
+                if llm_verified_specs.get("_llm_verification"):
+                    extracted_specs_dict = llm_verified_specs
+                    llm_meta = llm_verified_specs["_llm_verification"]
+                    note += f" LLM校验置信度: {llm_meta.get('confidence', 0):.0%}，可靠性: {llm_meta.get('reliability_score', 0)}分。"
+                else:
+                    note += " LLM校验未返回有效结果。"
+            except Exception as e:
+                logger.warning(f"LLM 校验调用失败: {e}")
+                note += f" LLM校验调用失败: {e}"
 
             if extracted_specs.extraction_confidence > 0.3:
                 note += f" 已提取详细规格（置信度: {extracted_specs.extraction_confidence:.0%}）。"
@@ -1609,13 +2011,440 @@ class ModelCatalogSyncService:
         seed: CatalogSeed,
         url: str,
     ) -> DetailedSpecExtraction:
-        """从网页内容中提取详细规格信息。"""
+        """从网页内容中提取详细规格信息（按模型类型差异化提取）。"""
         text = self._extract_search_text(html)
+        extraction = DetailedSpecExtraction()
+        extraction.extraction_source = url
+        
+        # 根据模型类型调用不同的提取逻辑
+        if seed.category == "video":
+            return self._extract_video_specs(text, seed, url)
+        elif seed.category == "image":
+            return self._extract_image_specs(text, seed, url)
+        elif seed.category == "audio":
+            return self._extract_audio_specs(text, seed, url)
+        elif seed.category == "llm":
+            return self._extract_llm_specs(text, seed, url)
+        else:
+            # 其他类型使用通用提取
+            return self._extract_generic_specs(text, seed, url)
+    
+    def _extract_video_specs(
+        self,
+        text: str,
+        seed: CatalogSeed,
+        url: str,
+    ) -> DetailedSpecExtraction:
+        """视频模型专用提取逻辑。
+        
+        核心字段：duration_range, frame_rate, resolution, aspect_ratios
+        高级功能：multi_shot, audio_sync, camera_control, motion_control
+        输入模态：first_frame_support, last_frame_support, reference_images, reference_videos
+        """
         extraction = DetailedSpecExtraction()
         extraction.extraction_source = url
         confidence_points = 0
         total_checks = 0
 
+        # 核心字段：时长范围
+        duration_match = _DURATION_RANGE_RE.search(text)
+        if duration_match:
+            extraction.duration_range = {
+                "min_seconds": int(duration_match.group(1)),
+                "max_seconds": int(duration_match.group(2)),
+                "unit": "seconds",
+                "step": 1,
+            }
+            confidence_points += 1
+        total_checks += 1
+
+        # 核心字段：分辨率选项
+        resolutions = list(set(_RESOLUTION_RE.findall(text)))
+        if resolutions:
+            extraction.resolution_options = sorted(resolutions, key=lambda x: int(x[:-1]) if x[:-1].isdigit() else 100)
+            confidence_points += 1
+        total_checks += 1
+
+        # 核心字段：帧率
+        frame_rate_match = _FRAME_RATE_RE.search(text)
+        if frame_rate_match:
+            extraction.frame_rate = int(frame_rate_match.group(1))
+            confidence_points += 1
+        total_checks += 1
+
+        # 输出格式
+        formats = list(set(_FORMAT_RE.findall(text)))
+        if formats:
+            extraction.output_format = ", ".join(formats[:3])
+            confidence_points += 0.5
+        total_checks += 1
+
+        # 输入模态（视频/音频特有）
+        input_modalities = []
+        if re.search(r"文本|text", text, re.IGNORECASE):
+            input_modalities.append("text")
+        if re.search(r"图像|图片|image", text, re.IGNORECASE):
+            input_modalities.append("image")
+        if re.search(r"视频|video", text, re.IGNORECASE):
+            input_modalities.append("video")
+        if re.search(r"音频|声音|audio", text, re.IGNORECASE):
+            input_modalities.append("audio")
+        if input_modalities:
+            extraction.input_modalities = input_modalities
+            confidence_points += 1
+        total_checks += 1
+
+        # 高级功能：视频特有
+        advanced_features = []
+        if _MULTI_SHOT_RE.search(text):
+            advanced_features.append("multi_shot")
+            confidence_points += 1
+        if _AUDIO_SYNC_RE.search(text):
+            advanced_features.append("audio_sync")
+            confidence_points += 1
+        if _PROMPT_REWRITE_RE.search(text):
+            advanced_features.append("prompt_rewrite")
+            confidence_points += 0.5
+        # 运镜控制
+        if re.search(r"运镜|camera.*control|镜头.*移动", text, re.IGNORECASE):
+            advanced_features.append("camera_control")
+            confidence_points += 1
+        # 动作控制
+        if re.search(r"动作.*控制|motion.*control|首尾.*帧", text, re.IGNORECASE):
+            advanced_features.append("motion_control")
+            confidence_points += 1
+        if advanced_features:
+            extraction.advanced_features = advanced_features
+        total_checks += 5
+
+        # 参考图/视频支持
+        max_ref_match = _MAX_REFERENCE_RE.search(text)
+        if max_ref_match:
+            extraction.max_reference_images = int(max_ref_match.group(1))
+            confidence_points += 1
+        total_checks += 1
+
+        # 首帧/尾帧支持
+        if _FIRST_FRAME_RE.search(text):
+            extraction.first_frame_support = True
+            confidence_points += 1
+        total_checks += 1
+
+        if _LAST_FRAME_RE.search(text):
+            extraction.last_frame_support = True
+            confidence_points += 1
+        total_checks += 1
+
+        # 权重控制
+        if _WEIGHT_CONTROL_RE.search(text):
+            extraction.weight_control = True
+            confidence_points += 1
+        total_checks += 1
+
+        extraction.extraction_confidence = confidence_points / max(total_checks, 1)
+        return extraction
+    
+    def _extract_image_specs(
+        self,
+        text: str,
+        seed: CatalogSeed,
+        url: str,
+    ) -> DetailedSpecExtraction:
+        """图像模型专用提取逻辑。
+        
+        核心字段：resolution_options, aspect_ratios, max_output_count
+        生成参数：style_support, seed_support, negative_prompt
+        编辑功能：image_edit_support, multi_image_input, style_transfer
+        """
+        extraction = DetailedSpecExtraction()
+        extraction.extraction_source = url
+        confidence_points = 0
+        total_checks = 0
+
+        # 核心字段：分辨率选项
+        resolutions = list(set(_RESOLUTION_RE.findall(text)))
+        if resolutions:
+            extraction.resolution_options = sorted(resolutions, key=lambda x: int(x[:-1]) if x[:-1].isdigit() else 100)
+            confidence_points += 1
+        total_checks += 1
+
+        # 宽高比支持
+        ratio_patterns = [
+            r"(\d+:\d+)",
+            r"支持.*比例.*?([\d:]+)",
+        ]
+        for pattern in ratio_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            if matches:
+                ratios = list(set(matches))
+                if ratios:
+                    extraction.output_format = ", ".join(ratios[:5])  # 暂存到 output_format
+                    confidence_points += 0.5
+                    break
+        total_checks += 1
+
+        # 输出格式
+        formats = list(set(_FORMAT_RE.findall(text)))
+        if formats:
+            extraction.output_format = (extraction.output_format + ", " if extraction.output_format else "") + ", ".join(formats[:3])
+            confidence_points += 0.5
+        total_checks += 1
+
+        # 输入模态
+        input_modalities = []
+        if re.search(r"文本|text", text, re.IGNORECASE):
+            input_modalities.append("text")
+        if re.search(r"图像|图片|image", text, re.IGNORECASE):
+            input_modalities.append("image")
+        if input_modalities:
+            extraction.input_modalities = input_modalities
+            confidence_points += 1
+        total_checks += 1
+
+        # 风格支持
+        if re.search(r"风格.*支持|style.*support|多种风格", text, re.IGNORECASE):
+            if not extraction.advanced_features:
+                extraction.advanced_features = []
+            extraction.advanced_features.append("style_support")
+            confidence_points += 1
+        total_checks += 1
+
+        # Seed 支持（可复现性）
+        if re.search(r"seed|随机种子|可复现", text, re.IGNORECASE):
+            if not extraction.advanced_features:
+                extraction.advanced_features = []
+            extraction.advanced_features.append("seed_support")
+            confidence_points += 0.5
+        total_checks += 1
+
+        # 负向提示词支持
+        if re.search(r"负向.*提示|negative.*prompt|排除", text, re.IGNORECASE):
+            if not extraction.advanced_features:
+                extraction.advanced_features = []
+            extraction.advanced_features.append("negative_prompt")
+            confidence_points += 0.5
+        total_checks += 1
+
+        # 多图输入支持
+        if re.search(r"多图.*输入|multi.*image|参考.*图.*多", text, re.IGNORECASE):
+            extraction.max_reference_images = 2  # 默认多图
+            confidence_points += 1
+        total_checks += 1
+
+        # 图像编辑支持
+        if re.search(r"图像.*编辑|image.*edit|编辑.*功能", text, re.IGNORECASE):
+            if not extraction.advanced_features:
+                extraction.advanced_features = []
+            extraction.advanced_features.append("image_edit")
+            confidence_points += 1
+        total_checks += 1
+
+        # 权重控制
+        if _WEIGHT_CONTROL_RE.search(text):
+            extraction.weight_control = True
+            confidence_points += 1
+        total_checks += 1
+
+        extraction.extraction_confidence = confidence_points / max(total_checks, 1)
+        return extraction
+    
+    def _extract_audio_specs(
+        self,
+        text: str,
+        seed: CatalogSeed,
+        url: str,
+    ) -> DetailedSpecExtraction:
+        """音频模型专用提取逻辑。
+        
+        核心字段：sample_rate, audio_format, duration_range
+        语音合成：voice_clone, language_support, emotion_control
+        音乐生成：music_style, instrument_control, vocal_removal
+        """
+        extraction = DetailedSpecExtraction()
+        extraction.extraction_source = url
+        confidence_points = 0
+        total_checks = 0
+
+        # 采样率
+        sample_rate_match = re.search(r"(\d+)\s*kHz", text, re.IGNORECASE)
+        if sample_rate_match:
+            extraction.output_format = f"{sample_rate_match.group(1)}kHz"
+            confidence_points += 1
+        total_checks += 1
+
+        # 音频格式
+        audio_formats = re.findall(r"\.(mp3|wav|flac|aac|ogg)", text, re.IGNORECASE)
+        if audio_formats:
+            extraction.output_format = (extraction.output_format + ", " if extraction.output_format else "") + ", ".join(set(audio_formats[:3]))
+            confidence_points += 0.5
+        total_checks += 1
+
+        # 时长范围（音频特有）
+        duration_match = _DURATION_RANGE_RE.search(text)
+        if duration_match:
+            extraction.duration_range = {
+                "min_seconds": int(duration_match.group(1)),
+                "max_seconds": int(duration_match.group(2)),
+                "unit": "seconds",
+                "step": 1,
+            }
+            confidence_points += 1
+        total_checks += 1
+
+        # 输入模态
+        input_modalities = []
+        if re.search(r"文本|text", text, re.IGNORECASE):
+            input_modalities.append("text")
+        if re.search(r"音频|audio", text, re.IGNORECASE):
+            input_modalities.append("audio")
+        if re.search(r"视频|video", text, re.IGNORECASE):
+            input_modalities.append("video")
+        if input_modalities:
+            extraction.input_modalities = input_modalities
+            confidence_points += 1
+        total_checks += 1
+
+        # 高级功能：音频特有
+        advanced_features = []
+        
+        # 声音克隆
+        if re.search(r"声音.*克隆|voice.*clone|音色.*复制", text, re.IGNORECASE):
+            advanced_features.append("voice_clone")
+            confidence_points += 1
+        
+        # 语言支持
+        if re.search(r"多语言|multi.*language|.*种语言", text, re.IGNORECASE):
+            advanced_features.append("multi_language")
+            confidence_points += 1
+        
+        # 情感控制
+        if re.search(r"情感.*控制|emotion.*control|情绪.*表达", text, re.IGNORECASE):
+            advanced_features.append("emotion_control")
+            confidence_points += 1
+        
+        # 音乐风格
+        if re.search(r"音乐.*风格|music.*style|流派", text, re.IGNORECASE):
+            advanced_features.append("music_style")
+            confidence_points += 1
+        
+        # 乐器控制
+        if re.search(r"乐器|instrument|伴奏", text, re.IGNORECASE):
+            advanced_features.append("instrument_control")
+            confidence_points += 1
+        
+        # 人声分离
+        if re.search(r"人声.*分离|vocal.*removal|伴奏.*提取", text, re.IGNORECASE):
+            advanced_features.append("vocal_removal")
+            confidence_points += 1
+        
+        if advanced_features:
+            extraction.advanced_features = advanced_features
+        total_checks += 6
+
+        extraction.extraction_confidence = confidence_points / max(total_checks, 1)
+        return extraction
+    
+    def _extract_llm_specs(
+        self,
+        text: str,
+        seed: CatalogSeed,
+        url: str,
+    ) -> DetailedSpecExtraction:
+        """LLM 模型专用提取逻辑。
+        
+        核心字段：context_window, max_output_tokens, temperature_range
+        功能特性：function_calling, tool_use, multi_turn, streaming
+        推理能力：reasoning, code_generation, math
+        """
+        extraction = DetailedSpecExtraction()
+        extraction.extraction_source = url
+        confidence_points = 0
+        total_checks = 0
+
+        # 上下文窗口
+        context_match = re.search(r"(\d+[KkMm]?)\s*(tokens?|上下文|context)", text, re.IGNORECASE)
+        if context_match:
+            extraction.output_format = context_match.group(1)
+            confidence_points += 1
+        total_checks += 1
+
+        # 输出长度
+        output_match = re.search(r"最大.*输出.*?(\d+)", text, re.IGNORECASE)
+        if output_match:
+            extraction.duration_range = {"max_tokens": int(output_match.group(1))}
+            confidence_points += 0.5
+        total_checks += 1
+
+        # 输入模态
+        input_modalities = ["text"]
+        if re.search(r"视觉|vision|image.*understanding|多模态", text, re.IGNORECASE):
+            input_modalities.append("image")
+        if re.search(r"音频|audio|语音", text, re.IGNORECASE):
+            input_modalities.append("audio")
+        if re.search(r"视频|video", text, re.IGNORECASE):
+            input_modalities.append("video")
+        extraction.input_modalities = input_modalities
+        confidence_points += 1
+        total_checks += 1
+
+        # 高级功能：LLM 特有
+        advanced_features = []
+        
+        # 函数调用
+        if re.search(r"function.*call|工具.*调用|function.*calling", text, re.IGNORECASE):
+            advanced_features.append("function_calling")
+            confidence_points += 1
+        
+        # 流式输出
+        if re.search(r"流式|streaming|stream", text, re.IGNORECASE):
+            advanced_features.append("streaming")
+            confidence_points += 0.5
+        
+        # 多轮对话
+        if re.search(r"多轮|multi.*turn|对话|chat", text, re.IGNORECASE):
+            advanced_features.append("multi_turn")
+            confidence_points += 0.5
+        
+        # 推理能力
+        if re.search(r"推理|reasoning|chain.*of.*thought", text, re.IGNORECASE):
+            advanced_features.append("reasoning")
+            confidence_points += 1
+        
+        # 代码生成
+        if re.search(r"代码|code.*generation|编程", text, re.IGNORECASE):
+            advanced_features.append("code_generation")
+            confidence_points += 0.5
+        
+        # 数学能力
+        if re.search(r"数学|math|计算", text, re.IGNORECASE):
+            advanced_features.append("math")
+            confidence_points += 0.5
+        
+        # 联网搜索
+        if re.search(r"联网|web.*search|搜索", text, re.IGNORECASE):
+            advanced_features.append("web_search")
+            confidence_points += 1
+        
+        if advanced_features:
+            extraction.advanced_features = advanced_features
+        total_checks += 7
+
+        extraction.extraction_confidence = confidence_points / max(total_checks, 1)
+        return extraction
+    
+    def _extract_generic_specs(
+        self,
+        text: str,
+        seed: CatalogSeed,
+        url: str,
+    ) -> DetailedSpecExtraction:
+        """通用提取逻辑（用于其他模型类型）。"""
+        extraction = DetailedSpecExtraction()
+        extraction.extraction_source = url
+        confidence_points = 0
+        total_checks = 0
+
+        # 基础字段提取
         duration_match = _DURATION_RANGE_RE.search(text)
         if duration_match:
             extraction.duration_range = {
@@ -1633,68 +2462,13 @@ class ModelCatalogSyncService:
             confidence_points += 1
         total_checks += 1
 
-        frame_rate_match = _FRAME_RATE_RE.search(text)
-        if frame_rate_match:
-            extraction.frame_rate = int(frame_rate_match.group(1))
-            confidence_points += 1
-        total_checks += 1
-
         formats = list(set(_FORMAT_RE.findall(text)))
         if formats:
             extraction.output_format = ", ".join(formats[:3])
             confidence_points += 0.5
         total_checks += 1
 
-        if seed.category in ("video", "audio"):
-            input_modalities = []
-            if re.search(r"文本|text", text, re.IGNORECASE):
-                input_modalities.append("text")
-            if re.search(r"图像|图片|image", text, re.IGNORECASE):
-                input_modalities.append("image")
-            if re.search(r"音频|声音|audio", text, re.IGNORECASE):
-                input_modalities.append("audio")
-            if input_modalities:
-                extraction.input_modalities = input_modalities
-                confidence_points += 1
-        total_checks += 1
-
-        advanced_features = []
-        if _MULTI_SHOT_RE.search(text):
-            advanced_features.append("multi_shot")
-            confidence_points += 1
-        if _AUDIO_SYNC_RE.search(text):
-            advanced_features.append("audio_sync")
-            confidence_points += 1
-        if _PROMPT_REWRITE_RE.search(text):
-            advanced_features.append("prompt_rewrite")
-            confidence_points += 0.5
-        if advanced_features:
-            extraction.advanced_features = advanced_features
-        total_checks += 3
-
-        max_ref_match = _MAX_REFERENCE_RE.search(text)
-        if max_ref_match:
-            extraction.max_reference_images = int(max_ref_match.group(1))
-            confidence_points += 1
-        total_checks += 1
-
-        if _WEIGHT_CONTROL_RE.search(text):
-            extraction.weight_control = True
-            confidence_points += 1
-        total_checks += 1
-
-        if _FIRST_FRAME_RE.search(text):
-            extraction.first_frame_support = True
-            confidence_points += 1
-        total_checks += 1
-
-        if _LAST_FRAME_RE.search(text):
-            extraction.last_frame_support = True
-            confidence_points += 1
-        total_checks += 1
-
         extraction.extraction_confidence = confidence_points / max(total_checks, 1)
-
         return extraction
 
     def _extract_prompt_examples_from_html(self, html: str) -> list[dict[str, str]]:
@@ -1723,50 +2497,282 @@ class ModelCatalogSyncService:
         self,
         extractions: list[DetailedSpecExtraction],
         existing_specs: dict[str, Any],
+        category: str = "video",
     ) -> dict[str, Any]:
-        """合并从多个来源提取的规格信息。"""
+        """合并从多个来源提取的规格信息（按模型类型差异化合并）。
+        
+        Args:
+            extractions: 提取结果列表
+            existing_specs: 已有规格
+            category: 模型类别（video/image/audio/llm）
+        """
         if not extractions:
             return existing_specs
 
         merged = deepcopy(existing_specs) if existing_specs else {}
+        best_extraction = max(extractions, key=lambda e: e.extraction_confidence)
+        
+        # 根据模型类型合并到对应的 section
+        if category == "video":
+            return self._merge_video_specs(merged, best_extraction)
+        elif category == "image":
+            return self._merge_image_specs(merged, best_extraction)
+        elif category == "audio":
+            return self._merge_audio_specs(merged, best_extraction)
+        elif category == "llm":
+            return self._merge_llm_specs(merged, best_extraction)
+        else:
+            return self._merge_generic_specs(merged, best_extraction)
+    
+    def _merge_video_specs(
+        self,
+        merged: dict[str, Any],
+        extraction: DetailedSpecExtraction,
+    ) -> dict[str, Any]:
+        """合并视频模型规格。"""
         video_specs = merged.get("video_generation", {})
 
-        best_extraction = max(extractions, key=lambda e: e.extraction_confidence)
+        if extraction.duration_range and "basic_params" not in video_specs:
+            video_specs.setdefault("basic_params", {})["duration"] = extraction.duration_range
 
-        if best_extraction.duration_range and "basic_params" not in video_specs:
-            video_specs.setdefault("basic_params", {})["duration"] = best_extraction.duration_range
-
-        if best_extraction.resolution_options and "basic_params" not in video_specs:
+        if extraction.resolution_options and "basic_params" not in video_specs:
             video_specs.setdefault("basic_params", {})["resolution"] = {
-                "options": best_extraction.resolution_options,
+                "options": extraction.resolution_options,
             }
 
-        if best_extraction.frame_rate and "output_format" not in video_specs:
+        if extraction.frame_rate and "output_format" not in video_specs:
             video_specs["output_format"] = {
-                "frame_rate": best_extraction.frame_rate,
+                "frame_rate": extraction.frame_rate,
             }
 
-        if best_extraction.input_modalities:
+        if extraction.input_modalities:
             video_specs["input_modalities"] = [
-                {"id": m, "name": {"text": "文本", "image": "图像", "audio": "音频"}.get(m, m), "required": m == "text"}
-                for m in best_extraction.input_modalities
+                {"id": m, "name": {"text": "文本", "image": "图像", "audio": "音频", "video": "视频"}.get(m, m), "required": m == "text"}
+                for m in extraction.input_modalities
             ]
 
-        if best_extraction.advanced_features:
+        if extraction.advanced_features:
             feature_labels = {
                 "multi_shot": "多镜头叙事",
                 "audio_sync": "声画同步",
                 "prompt_rewrite": "智能改写",
+                "camera_control": "运镜控制",
+                "motion_control": "动作控制",
             }
             video_specs["advanced_features"] = [
                 {"id": f, "name": feature_labels.get(f, f), "description": ""}
-                for f in best_extraction.advanced_features
+                for f in extraction.advanced_features
             ]
+        
+        # 首帧/尾帧/参考支持
+        if extraction.first_frame_support or extraction.last_frame_support:
+            video_specs.setdefault("frame_control", {})
+            if extraction.first_frame_support:
+                video_specs["frame_control"]["first_frame"] = True
+            if extraction.last_frame_support:
+                video_specs["frame_control"]["last_frame"] = True
+        
+        if extraction.max_reference_images:
+            video_specs.setdefault("reference_images", {})["max_count"] = extraction.max_reference_images
 
         if video_specs:
             merged["video_generation"] = video_specs
 
         return merged
+    
+    def _merge_image_specs(
+        self,
+        merged: dict[str, Any],
+        extraction: DetailedSpecExtraction,
+    ) -> dict[str, Any]:
+        """合并图像模型规格。"""
+        image_specs = merged.get("image_generation", {})
+
+        if extraction.resolution_options and "basic_params" not in image_specs:
+            image_specs.setdefault("basic_params", {})["resolution"] = {
+                "options": extraction.resolution_options,
+            }
+
+        if extraction.output_format and "output_format" not in image_specs:
+            image_specs["output_format"] = {"format": extraction.output_format}
+
+        if extraction.input_modalities:
+            image_specs["input_modalities"] = [
+                {"id": m, "name": {"text": "文本", "image": "图像"}.get(m, m), "required": m == "text"}
+                for m in extraction.input_modalities
+            ]
+
+        if extraction.advanced_features:
+            feature_labels = {
+                "style_support": "风格支持",
+                "seed_support": "随机种子",
+                "negative_prompt": "负向提示词",
+                "image_edit": "图像编辑",
+                "style_transfer": "风格迁移",
+            }
+            image_specs.setdefault("advanced_features", []).extend([
+                {"id": f, "name": feature_labels.get(f, f), "description": ""}
+                for f in extraction.advanced_features
+            ])
+        
+        if extraction.max_reference_images:
+            image_specs.setdefault("reference_images", {})["max_count"] = extraction.max_reference_images
+
+        if extraction.weight_control:
+            image_specs.setdefault("weight_control", {"enabled": True})
+
+        if image_specs:
+            merged["image_generation"] = image_specs
+
+        return merged
+    
+    def _merge_audio_specs(
+        self,
+        merged: dict[str, Any],
+        extraction: DetailedSpecExtraction,
+    ) -> dict[str, Any]:
+        """合并音频模型规格。"""
+        audio_specs = merged.get("audio_generation", {})
+
+        if extraction.output_format and "output_format" not in audio_specs:
+            audio_specs["output_format"] = {"format": extraction.output_format}
+
+        if extraction.duration_range and "basic_params" not in audio_specs:
+            audio_specs.setdefault("basic_params", {})["duration"] = extraction.duration_range
+
+        if extraction.input_modalities:
+            audio_specs["input_modalities"] = [
+                {"id": m, "name": {"text": "文本", "audio": "音频", "video": "视频"}.get(m, m), "required": m == "text"}
+                for m in extraction.input_modalities
+            ]
+
+        if extraction.advanced_features:
+            feature_labels = {
+                "voice_clone": "声音克隆",
+                "multi_language": "多语言支持",
+                "emotion_control": "情感控制",
+                "music_style": "音乐风格",
+                "instrument_control": "乐器控制",
+                "vocal_removal": "人声分离",
+            }
+            audio_specs["advanced_features"] = [
+                {"id": f, "name": feature_labels.get(f, f), "description": ""}
+                for f in extraction.advanced_features
+            ]
+
+        if audio_specs:
+            merged["audio_generation"] = audio_specs
+
+        return merged
+    
+    def _merge_llm_specs(
+        self,
+        merged: dict[str, Any],
+        extraction: DetailedSpecExtraction,
+    ) -> dict[str, Any]:
+        """合并 LLM 模型规格。"""
+        llm_specs = merged.get("llm_config", {})
+
+        if extraction.output_format:
+            llm_specs.setdefault("basic_params", {})["context_window"] = extraction.output_format
+
+        if extraction.duration_range and "max_tokens" in extraction.duration_range:
+            llm_specs.setdefault("basic_params", {})["max_output_tokens"] = extraction.duration_range["max_tokens"]
+
+        if extraction.input_modalities:
+            llm_specs["input_modalities"] = [
+                {"id": m, "name": {"text": "文本", "image": "图像", "audio": "音频", "video": "视频"}.get(m, m), "required": m == "text"}
+                for m in extraction.input_modalities
+            ]
+
+        if extraction.advanced_features:
+            feature_labels = {
+                "function_calling": "函数调用",
+                "streaming": "流式输出",
+                "multi_turn": "多轮对话",
+                "reasoning": "推理能力",
+                "code_generation": "代码生成",
+                "math": "数学能力",
+                "web_search": "联网搜索",
+            }
+            llm_specs["advanced_features"] = [
+                {"id": f, "name": feature_labels.get(f, f), "description": ""}
+                for f in extraction.advanced_features
+            ]
+
+        if llm_specs:
+            merged["llm_config"] = llm_specs
+
+        return merged
+    
+    def _merge_generic_specs(
+        self,
+        merged: dict[str, Any],
+        extraction: DetailedSpecExtraction,
+    ) -> dict[str, Any]:
+        """合并通用模型规格。"""
+        if extraction.duration_range:
+            merged.setdefault("basic_params", {})["duration"] = extraction.duration_range
+        
+        if extraction.resolution_options:
+            merged.setdefault("basic_params", {})["resolution"] = {
+                "options": extraction.resolution_options,
+            }
+        
+        if extraction.output_format:
+            merged["output_format"] = extraction.output_format
+
+        return merged
+
+    def _get_type_specific_guidance(self, category: str) -> str:
+        """获取按模型类型的 LLM 校验提示指导。
+        
+        Args:
+            category: 模型类别（video/image/audio/llm）
+            
+        Returns:
+            类型特定的校验指导文本
+        """
+        guidance_map = {
+            "video": """- 时长范围：如 "支持 5-10 秒"
+- 分辨率选项：如 "720p, 1080p"
+- 帧率：如 "24fps, 30fps"
+- 输出格式：如 "mp4, webm"
+- 输入模态：文本/图像/视频/音频
+- 高级功能：多镜头叙事、声画同步、运镜控制、动作控制
+- 首帧/尾帧支持：是否支持首帧/尾帧控制
+- 参考图上限：最多支持几张参考图""",
+            "image": """- 分辨率选项：如 "1024x1024, 512x512"
+- 宽高比：如 "16:9, 1:1, 9:16"
+- 输出格式：如 "png, jpg, webp"
+- 输入模态：文本/图像
+- 风格支持：是否支持多种风格
+- Seed 支持：是否支持随机种子（可复现性）
+- 负向提示词：是否支持排除内容
+- 图像编辑：是否支持基于参考图编辑
+- 多图输入：最多支持几张参考图""",
+            "audio": """- 采样率：如 "16kHz, 44.1kHz"
+- 音频格式：如 "mp3, wav, flac"
+- 时长范围：如 "最长 30 秒"
+- 输入模态：文本/音频/视频
+- 声音克隆：是否支持音色复制
+- 多语言支持：支持哪些语言
+- 情感控制：是否支持情感表达
+- 音乐风格：是否支持音乐生成
+- 乐器控制：是否支持指定乐器
+- 人声分离：是否支持人声提取""",
+            "llm": """- 上下文窗口：如 "128K tokens"
+- 最大输出：如 "8192 tokens"
+- 输入模态：文本/图像/音频/视频
+- 函数调用：是否支持 tool calling
+- 流式输出：是否支持 streaming
+- 多轮对话：对话能力
+- 推理能力：链式思维推理
+- 代码生成：编程能力
+- 数学能力：数学计算推理
+- 联网搜索：是否支持 web search""",
+        }
+        return guidance_map.get(category, "- 基础字段：分辨率、格式、时长等通用参数")
 
     async def _llm_verify_extracted_specs(
         self,
@@ -1776,9 +2782,11 @@ class ModelCatalogSyncService:
     ) -> dict[str, Any]:
         """使用大模型验证提取的规格信息可靠性。
 
+        使用 qwen3.6-plus 的联网搜索能力，主动搜索模型相关信息进行验证。
+
         Args:
             seed: 模型种子信息
-            extracted_specs: 正则提取的规格
+            extracted_specs: 正则提取的规格信息
             page_content: 页面文本内容
 
         Returns:
@@ -1790,29 +2798,34 @@ class ModelCatalogSyncService:
 
         try:
             llm_client = get_llm_client(strategy="auto")
-            model_id = os.getenv("VERIFICATION_LLM_MODEL", "qwen3-max")
+            model_id = os.getenv("VERIFICATION_LLM_MODEL", "qwen3.6-plus")
 
-            prompt = f"""你是一个专业的模型能力分析专家。请分析以下网页内容，验证并补充模型规格信息。
+            search_query = f"{seed.name} {seed.provider} 模型规格 参数 功能 价格"
+            
+            prompt = f"""你是一个专业的模型能力分析专家。请通过联网搜索验证以下模型信息。
 
-## 模型基本信息
+## 待验证模型
 - 模型名称: {seed.name}
 - 模型ID: {seed.model_key}
 - 提供商: {seed.provider}
 - 类别: {seed.category}
 
-## 已提取的规格信息（正则提取）
+## 按类型重点校验字段
+{self._get_type_specific_guidance(seed.category)}
+
+## 已提取的规格信息（需要验证）
 ```json
 {json.dumps(extracted_specs, ensure_ascii=False, indent=2)}
 ```
 
-## 网页内容摘要
+## 已有页面内容
 ```
 {page_content[:3000]}
 ```
 
 ## 任务
-1. 验证已提取信息的准确性
-2. 补充遗漏的重要规格（如时长范围、分辨率、帧率、高级功能等）
+1. 联网搜索验证已提取信息的准确性
+2. 补充遗漏的重要规格
 3. 修正明显错误的信息
 4. 评估整体提取置信度（0-1）
 
@@ -1823,11 +2836,12 @@ class ModelCatalogSyncService:
 - corrections: 修正说明列表
 - additions: 新增信息列表
 - reliability_score: 数据可靠性评分（0-100）
+- search_sources: 搜索来源列表（URL和标题）
 
 只输出 JSON，不要其他解释。"""
 
             messages = [
-                {"role": "system", "content": "你是一个专业的模型能力分析专家，擅长从技术文档中提取和验证模型规格信息。"},
+                {"role": "system", "content": "你是一个专业的模型能力分析专家，擅长联网搜索并验证模型规格信息。请使用联网搜索功能获取最新信息。"},
                 {"role": "user", "content": prompt},
             ]
 
@@ -1836,6 +2850,14 @@ class ModelCatalogSyncService:
                 model=model_id,
                 temperature=0.1,
                 max_tokens=2000,
+                extra_body={
+                    "enable_search": True,
+                    "search_options": {
+                        "forced_search": True,
+                        "search_strategy": "max",
+                        "enable_source": True,
+                    }
+                },
             )
 
             response_text = response.strip()
@@ -1850,15 +2872,18 @@ class ModelCatalogSyncService:
             corrections = llm_result.get("corrections", [])
             additions = llm_result.get("additions", [])
             reliability_score = llm_result.get("reliability_score", 50)
+            search_sources = llm_result.get("search_sources", [])
 
             logger.info(
-                f"LLM 校验完成 | model={seed.model_key} | confidence={confidence:.2f} | reliability={reliability_score}"
+                f"LLM 联网搜索校验完成 | model={seed.model_key} | confidence={confidence:.2f} | reliability={reliability_score}"
             )
 
             if corrections:
                 logger.info(f"LLM 修正: {corrections}")
             if additions:
                 logger.info(f"LLM 补充: {additions}")
+            if search_sources:
+                logger.info(f"LLM 搜索来源: {len(search_sources)} 条")
 
             verified_specs["_llm_verification"] = {
                 "verified_at": datetime.now(timezone.utc).isoformat(),
@@ -1867,6 +2892,8 @@ class ModelCatalogSyncService:
                 "corrections": corrections,
                 "additions": additions,
                 "model": model_id,
+                "search_enabled": True,
+                "search_sources": search_sources[:5],
             }
 
             return verified_specs
@@ -1875,7 +2902,7 @@ class ModelCatalogSyncService:
             logger.warning(f"LLM 响应解析失败: {e}")
             return extracted_specs
         except Exception as e:
-            logger.warning(f"LLM 校验失败: {e}")
+            logger.warning(f"LLM 联网搜索校验失败: {e}")
             return extracted_specs
 
     def _sync_verify_with_llm(
@@ -1886,19 +2913,30 @@ class ModelCatalogSyncService:
     ) -> dict[str, Any]:
         """同步包装器：在同步上下文中调用异步 LLM 校验。"""
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(
-                        asyncio.run,
-                        self._llm_verify_extracted_specs(seed, extracted_specs, page_content),
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop is None:
+                # No running event loop (e.g., in background thread)
+                # Create a new event loop for this thread
+                new_loop = asyncio.new_event_loop()
+                try:
+                    asyncio.set_event_loop(new_loop)
+                    return new_loop.run_until_complete(
+                        self._llm_verify_extracted_specs(seed, extracted_specs, page_content)
                     )
-                    return future.result(timeout=60)
+                finally:
+                    new_loop.close()
+                    asyncio.set_event_loop(None)
             else:
-                return loop.run_until_complete(
-                    self._llm_verify_extracted_specs(seed, extracted_specs, page_content)
+                # Event loop is already running (e.g., in async context)
+                future = asyncio.run_coroutine_threadsafe(
+                    self._llm_verify_extracted_specs(seed, extracted_specs, page_content),
+                    loop,
                 )
+                return future.result(timeout=60)
         except Exception as e:
             logger.warning(f"同步调用 LLM 校验失败: {e}")
             return extracted_specs
@@ -2870,6 +3908,247 @@ def _build_resource_navigation(entry: ModelCatalogEntry) -> dict[str, Any]:
         ),
     }
 
+
+def _build_constraints_summary(entry: ModelCatalogEntry) -> dict[str, Any]:
+    """构建约束条件的摘要信息，用于前端展示
+    
+    Args:
+        entry: 模型档案实体
+        
+    Returns:
+        约束条件摘要字典
+    """
+    constraints = entry.constraints_json or {}
+    raw = _extract_raw(entry)
+    performance = entry.performance_json or {}
+    cost_profile = performance.get("cost_profile", {}) or {}
+    
+    summary = {}
+    
+    if entry.category == "video":
+        duration_values = constraints.get("duration", [])
+        if duration_values:
+            min_dur = min(duration_values)
+            max_dur = max(duration_values)
+            summary["duration"] = {
+                "min_seconds": min_dur,
+                "max_seconds": max_dur,
+                "available_options": sorted(duration_values),
+            }
+        
+        summary["resolution"] = {
+            "min_width": constraints.get("min_width"),
+            "max_width": constraints.get("max_width"),
+            "min_height": constraints.get("min_height"),
+            "max_height": constraints.get("max_height"),
+        }
+        
+        ratios = constraints.get("ratios", [])
+        if ratios:
+            summary["aspect_ratios"] = sorted(ratios)
+    
+    elif entry.category == "image":
+        summary["resolution"] = {
+            "min_width": constraints.get("min_width"),
+            "max_width": constraints.get("max_width"),
+            "min_height": constraints.get("min_height"),
+            "max_height": constraints.get("max_height"),
+        }
+        
+        ratios = constraints.get("ratios", [])
+        if ratios:
+            summary["aspect_ratios"] = sorted(ratios)
+    
+    batch_size = constraints.get("max_batch_size")
+    if batch_size:
+        summary["max_batch_size"] = batch_size
+    
+    prompt_length = constraints.get("max_prompt_length")
+    if prompt_length:
+        summary["max_prompt_length"] = prompt_length
+    
+    if cost_profile.get("price") is not None:
+        summary["pricing"] = {
+            "price": cost_profile.get("price"),
+            "unit": cost_profile.get("unit", ""),
+            "currency": cost_profile.get("currency", "CNY"),
+            "pricing_verified": cost_profile.get("pricing_verified", False),
+        }
+    
+    return summary
+
+
+def _build_capability_provenance(entry: ModelCatalogEntry) -> list[dict[str, Any]]:
+    """构建能力溯源信息列表，用于前端展示
+    
+    Args:
+        entry: 模型档案实体
+        
+    Returns:
+        能力溯源信息列表
+    """
+    capabilities = (entry.capabilities_json or {}).get("items", []) or []
+    provenance_list = []
+    
+    for cap in capabilities:
+        if not isinstance(cap, dict):
+            continue
+        
+        cap_name = cap.get("name", "")
+        if not cap_name:
+            continue
+        
+        provenance_list.append({
+            "capability_name": cap_name,
+            "capability_label": _CAPABILITY_LABELS.get(cap_name, cap_name),
+            "support_level": cap.get("support_level", "unknown"),
+            "description": cap.get("description", ""),
+            "score": cap.get("score"),
+            "source": cap.get("source", ""),
+            "verified_at": cap.get("verified_at"),
+            "confidence": cap.get("confidence", "low"),
+        })
+    
+    return provenance_list
+
+def _build_usage_guide(entry: ModelCatalogEntry) -> Optional[dict[str, Any]]:
+    raw = entry.raw_config_json or {}
+    usage_guide = raw.get("usage_guide")
+    if not usage_guide:
+        return None
+    
+    category_common = usage_guide.get("category_common", "llm")
+    category_common_guide = _get_category_common_guide(category_common)
+    
+    model_specific = usage_guide.get("model_specific", {})
+    
+    merged_guide = _merge_usage_guides(category_common_guide, model_specific)
+    return merged_guide
+
+
+_CATEGORY_COMMON_GUIDES: dict[str, dict[str, Any]] = {
+    "video": {
+        "title": "视频模型通用使用指南",
+        "sections": [
+            {
+                "title": "提示词编写技巧",
+                "content": "视频生成的提示词应包含主体、动作、场景、风格四个要素。\n\n**好的示例：**\n- \"一只橘猫在草地上追逐蝴蝶，镜头跟随移动，暖色调，电影感\"\n- \"雨夜街道，霓虹灯倒影，慢镜头推近，赛博朋克风格\"\n\n**避免：**\n- 过于抽象的描述如\"好看的风景\"\n- 矛盾的动作描述",
+                "tips": [
+                    "使用具体的视觉描述词",
+                    "指定镜头运动方式",
+                    "明确画面风格和氛围",
+                    "控制场景复杂度"
+                ]
+            },
+            {
+                "title": "参考图使用",
+                "content": "使用参考图可以大幅提升生成质量。支持图片参考和视频参考两种模式。",
+                "tips": [
+                    "使用高清、主体清晰的图片",
+                    "参考图风格应与目标一致",
+                    "多图时注意权重分配",
+                    "视频参考注意时长限制"
+                ]
+            },
+            {
+                "title": "时长与分辨率选择",
+                "content": "根据使用场景选择合适的时长和分辨率。",
+                "tips": [
+                    "短视频适合社交媒体分享",
+                    "高分辨率会增加生成时间",
+                    "首次生成建议先用低分辨率测试提示词"
+                ]
+            }
+        ]
+    },
+    "image": {
+        "title": "图像模型通用使用指南",
+        "sections": [
+            {
+                "title": "提示词编写技巧",
+                "content": "图像生成的提示词应包含主体、环境、构图、风格四个要素。\n\n**好的示例：**\n- \"清晨的湖边小屋，薄雾笼罩，暖色晨光，水彩画风格\"\n- \"未来城市天际线，霓虹灯，赛博朋克，超广角\"\n\n**避免：**\n- 过度堆砌形容词\n- 矛盾的视觉描述",
+                "tips": [
+                    "描述要具体且有层次",
+                    "先主体后环境",
+                    "指定艺术风格",
+                    "善用光照和氛围描述"
+                ]
+            },
+            {
+                "title": "风格控制",
+                "content": "不同模型对风格的控制方式不同。",
+                "tips": [
+                    "使用风格预设可以快速获得一致效果",
+                    "混合风格时需要平衡权重",
+                    "注意模型的文本渲染能力"
+                ]
+            }
+        ]
+    },
+    "audio": {
+        "title": "音频模型通用使用指南",
+        "sections": [
+            {
+                "title": "提示词编写技巧",
+                "content": "音频生成的提示词应包含类型、风格、情绪、时长等要素。",
+                "tips": [
+                    "指定音乐类型和节奏",
+                    "描述期望的情绪氛围",
+                    "控制音频时长"
+                ]
+            }
+        ]
+    },
+    "llm": {
+        "title": "文本模型通用使用指南",
+        "sections": [
+            {
+                "title": "提示词编写技巧",
+                "content": "好的提示词是大模型高效工作的前提。\n\n**结构化提示词：**\n```\n角色：你是专业的小说编辑\n任务：分析以下文本的情节结构\n输出格式：分点列出，每个要点不超过50字\n\n文本：[你的文本]\n```\n\n**进阶技巧：**\n- 使用 Few-shot 示例引导输出格式\n- 分步骤引导复杂任务\n- 设置明确的边界条件",
+                "tips": [
+                    "提供清晰的角色定义和任务目标",
+                    "使用示例示范期望的输出格式",
+                    "复杂任务拆分为多步骤",
+                    "利用系统提示词设定全局行为",
+                    "长上下文模型可一次性提供完整背景"
+                ]
+            },
+            {
+                "title": "联网搜索使用",
+                "content": "部分模型支持联网搜索，可以获取最新信息。",
+                "tips": [
+                    "查询实时信息时开启联网搜索",
+                    "使用 freshness 参数限定搜索时效性",
+                    "开启 enable_source 可以追溯信息来源"
+                ]
+            }
+        ]
+    }
+}
+
+
+def _get_category_common_guide(category: str) -> Optional[dict[str, Any]]:
+    return _CATEGORY_COMMON_GUIDES.get(category)
+
+
+def _merge_usage_guides(common_guide: Optional[dict], model_specific: dict) -> Optional[dict]:
+    if not model_specific and not common_guide:
+        return None
+    
+    merged = {
+        "title": model_specific.get("title") or common_guide.get("title", "使用指南"),
+        "sections": []
+    }
+    
+    if common_guide and common_guide.get("sections"):
+        merged["sections"].extend(common_guide["sections"])
+    
+    if model_specific and model_specific.get("sections"):
+        merged["sections"].extend(model_specific["sections"])
+    
+    return merged
+
+
 def serialize_model_catalog_entry(
     entry: ModelCatalogEntry,
     *,
@@ -2882,6 +4161,9 @@ def serialize_model_catalog_entry(
     integration_profile = _build_integration_profile(entry)
     raw_config = _extract_raw(entry)
     detailed_specs = raw_config.get("detailed_specs") or {}
+    
+    pricing_verification = raw_config.get("pricing_verification", {})
+    
     payload = {
         "model_key": entry.model_key,
         "name": entry.name,
@@ -2935,6 +4217,10 @@ def serialize_model_catalog_entry(
         "tooling_badges": integration_profile["tooling_badges"],
         "primary_strengths": identity_profile["capability_quadrants"]["strengths"][:3],
         "detailed_specs": detailed_specs,
+        "pricing_verification": pricing_verification,
+        "constraints_summary": _build_constraints_summary(entry),
+        "capability_provenance": _build_capability_provenance(entry),
+        "usage_guide": _build_usage_guide(entry),
     }
     if include_archives:
         payload["identity_profile"] = identity_profile

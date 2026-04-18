@@ -309,6 +309,127 @@ llm_models:
       - chinese
       - alibaba
 
+  - id: qwen3.6-plus
+    name: Qwen3.6 Plus
+    provider: alibaba
+    model_type: llm
+    version: v1
+    status: active
+
+    capabilities:
+      - name: creative
+        level: native
+        score: 0.94
+        description: 纯文本表现媲美Qwen3-Max，速度更快、成本更低
+      - name: reasoning
+        level: native
+        score: 0.90
+        description: 支持思考模式，复杂推理能力强
+      - name: long_context
+        level: native
+        score: 0.95
+        description: 支持100万tokens上下文
+      - name: multimodal
+        level: native
+        score: 0.92
+        description: 原生支持文本、图像、视频输入
+      - name: web_search
+        level: native
+        score: 0.97
+        description: 联网搜索能力，可主动检索互联网信息并生成回答
+      - name: writing
+        level: native
+        score: 0.94
+        description: 适合大纲扩展、章节生成和复杂创作
+      - name: chinese
+        level: native
+        score: 0.96
+        description: 中文理解与表达能力优秀
+
+    constraints:
+      max_context_tokens: 1000000
+      max_output_tokens: 65536
+      max_thinking_tokens: 81920
+      supports_streaming: true
+      supports_function_call: true
+      supports_vision: true
+      supports_json_mode: true
+      supports_timeout_param: true
+      supports_max_retries: true
+      supports_temperature: true
+      supports_system_prompt: true
+      supports_multi_turn: true
+      supports_thinking_mode: true
+
+    api_config:
+      api_key_env: DASHSCOPE_API_KEY
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      default_timeout: 180
+      default_max_retries: 3
+
+    performance:
+      quality_score: 9.0
+      avg_latency_seconds: 1.8
+      p95_latency_seconds: 3.5
+      tokens_per_second: 110
+      cost_per_1k_input_tokens: 0.002
+      cost_per_1k_output_tokens: 0.012
+      currency: CNY
+
+    routing:
+      task_types:
+        - concept
+        - outline_expand
+        - volume_outline
+        - chapter_batch
+        - long_writing
+        - multimodal_analysis
+        - verification
+      priority: 1
+      fallback_models:
+        - qwen3.5-plus
+      weight: 1.0
+      enabled: true
+
+    default_params:
+      temperature: 0.7
+      max_tokens: 32768
+      enable_thinking: false
+
+    summary: 阿里云2026年4月发布的旗舰模型，支持文本、图像和视频输入，纯文本表现媲美Qwen3-Max，速度更快、成本更低；多模态能力显著优于Qwen3-VL系列。支持联网搜索、深度思考，是校验和分析的理想选择。
+    recommended_scenarios:
+      - 模型校验与信息验证（联网搜索）
+      - 长篇大纲扩展与章节生成
+      - 复杂推理任务（开启思考模式）
+      - 多模态内容分析（文本+图像+视频）
+      - 需要最新信息的实时查询
+    limitations:
+      - 输入上下文限制100万tokens
+      - 思考模式会消耗额外tokens
+      - 联网搜索会增加响应时间
+    integration_notes:
+      - 用于模型校验时启用 enable_search 和 forced_search
+      - 支持 Responses API 的 web_search 工具
+      - 通过 DashScope OpenAI 兼容接口接入
+    best_practice_tips:
+      - 联网搜索使用 search_strategy: max 获得更全面结果
+      - 复杂任务开启 enable_thinking
+      - 使用 extra_body 传递 enable_search 参数
+    documentation_url: https://help.aliyun.com/zh/model-studio/models
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/models
+      - https://help.aliyun.com/zh/model-studio/web-search
+
+    tags:
+      - creative
+      - reasoning
+      - long_context
+      - multimodal
+      - web_search
+      - chinese
+      - alibaba
+      - verification
+
   - id: qwen-turbo
     name: Qwen Turbo
     provider: alibaba

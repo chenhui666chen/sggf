@@ -44,6 +44,14 @@ interface DreamweaverRunOptions {
   style_preset?: string
   image_ratio?: string
   image_resolution?: string
+  image_model?: string
+  video_model?: string
+  video_edit_model?: string
+  vision_model?: string
+  enable_video_edit?: boolean
+  enable_vision_review?: boolean
+  enable_safety_audit?: boolean
+  safety_fail_policy?: 'warn' | 'block'
 }
 
 interface DreamweaverProjectLockedGenerationConfig {
@@ -51,6 +59,14 @@ interface DreamweaverProjectLockedGenerationConfig {
   style_preset: string
   image_ratio: string
   image_resolution: string
+  image_model?: string | null
+  video_model?: string | null
+  video_edit_model?: string | null
+  vision_model?: string | null
+  enable_video_edit?: boolean | null
+  enable_vision_review?: boolean | null
+  enable_safety_audit?: boolean | null
+  safety_fail_policy?: 'warn' | 'block' | string | null
   source_run_id?: string | null
 }
 
@@ -58,6 +74,14 @@ interface DreamweaverLibraryApproveRequest {
   approve_all?: boolean
   roles?: string[]
   approved?: boolean
+}
+
+interface DreamweaverSafetyAuditApproveResponse {
+  run_id: string
+  status: string
+  state?: string | null
+  stage?: string | null
+  manual_override: boolean
 }
 
 interface DreamweaverLibraryRegenerateRequest {
@@ -995,9 +1019,18 @@ class ApiClient {
   syncModelCatalog(payload?: {
     force_refresh?: boolean
     model_keys?: string[]
-    max_verification_age_hours?: number
   }) {
-    return this.client.post('/api/v1/model-catalog/sync', payload ?? { force_refresh: true })
+    return this.client.post<{ status: string; task_id: string; message: string }>('/api/v1/model-catalog/sync', payload ?? {})
+  }
+
+  getSyncTaskStatus(taskId: string) {
+    return this.client.get<{ status: string; result?: any; error?: string }>(`/api/v1/model-catalog/sync/${taskId}`)
+  }
+
+  validateModelConfig(payload?: {
+    model_keys?: string[]
+  }) {
+    return this.client.post('/api/v1/model-catalog/validate-config', payload ?? {})
   }
 
   updateProject(projectId: number, data: ProjectUpdatePayload) {
@@ -1528,6 +1561,20 @@ class ApiClient {
       ...(options?.style_preset ? { style_preset: options.style_preset } : {}),
       ...(options?.image_ratio ? { image_ratio: options.image_ratio } : {}),
       ...(options?.image_resolution ? { image_resolution: options.image_resolution } : {}),
+      ...(options?.image_model ? { image_model: options.image_model } : {}),
+      ...(options?.video_model ? { video_model: options.video_model } : {}),
+      ...(options?.video_edit_model ? { video_edit_model: options.video_edit_model } : {}),
+      ...(options?.vision_model ? { vision_model: options.vision_model } : {}),
+      ...(typeof options?.enable_video_edit === 'boolean'
+        ? { enable_video_edit: options.enable_video_edit }
+        : {}),
+      ...(typeof options?.enable_vision_review === 'boolean'
+        ? { enable_vision_review: options.enable_vision_review }
+        : {}),
+      ...(typeof options?.enable_safety_audit === 'boolean'
+        ? { enable_safety_audit: options.enable_safety_audit }
+        : {}),
+      ...(options?.safety_fail_policy ? { safety_fail_policy: options.safety_fail_policy } : {}),
     })
   }
 
@@ -1549,6 +1596,20 @@ class ApiClient {
       ...(options?.style_preset ? { style_preset: options.style_preset } : {}),
       ...(options?.image_ratio ? { image_ratio: options.image_ratio } : {}),
       ...(options?.image_resolution ? { image_resolution: options.image_resolution } : {}),
+      ...(options?.image_model ? { image_model: options.image_model } : {}),
+      ...(options?.video_model ? { video_model: options.video_model } : {}),
+      ...(options?.video_edit_model ? { video_edit_model: options.video_edit_model } : {}),
+      ...(options?.vision_model ? { vision_model: options.vision_model } : {}),
+      ...(typeof options?.enable_video_edit === 'boolean'
+        ? { enable_video_edit: options.enable_video_edit }
+        : {}),
+      ...(typeof options?.enable_vision_review === 'boolean'
+        ? { enable_vision_review: options.enable_vision_review }
+        : {}),
+      ...(typeof options?.enable_safety_audit === 'boolean'
+        ? { enable_safety_audit: options.enable_safety_audit }
+        : {}),
+      ...(options?.safety_fail_policy ? { safety_fail_policy: options.safety_fail_policy } : {}),
     })
   }
 
@@ -1688,6 +1749,12 @@ class ApiClient {
 
   approveDreamweaverPromptReview(runId: string, payload: DreamweaverPromptReviewApproveRequest) {
     return this.client.post(`/api/v1/dreamweaver/runs/${runId}/prompt-review/approve`, payload, {
+      timeout: 15000,
+    })
+  }
+
+  approveDreamweaverSafetyAudit(runId: string) {
+    return this.client.post<DreamweaverSafetyAuditApproveResponse>(`/api/v1/dreamweaver/runs/${runId}/safety-audit/approve`, null, {
       timeout: 15000,
     })
   }

@@ -63,6 +63,19 @@ def normalize_dreamweaver_video_engine(value: Any, *, default: str = "") -> str:
     return aliases.get(raw, raw)
 
 
+def infer_dreamweaver_video_engine_from_model_id(model_id: Any) -> str:
+    normalized = normalize_dreamweaver_video_engine(model_id)
+    if normalized in {DREAMWEAVER_I2V_ENGINE, DREAMWEAVER_T2V_ENGINE}:
+        return normalized
+
+    raw = str(model_id or "").strip().lower()
+    if not raw:
+        return ""
+    if any(token in raw for token in ("i2v", "img2video", "image2video", "start-end2video", "start_end2video")):
+        return DREAMWEAVER_I2V_ENGINE
+    return DREAMWEAVER_T2V_ENGINE
+
+
 def is_dreamweaver_i2v_engine(value: Any) -> bool:
     return normalize_dreamweaver_video_engine(value) == DREAMWEAVER_I2V_ENGINE
 

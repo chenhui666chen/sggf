@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from schemas.task_spec import TaskSpec
     from schemas.model_spec import ModelSpec, FallbackStrategy
     from adapters.base import BaseAdapter, GenerationResult
-    from core.router import SmartRouter
+    from core.router import RoutingResult, SmartRouter
 
 
 @dataclass
@@ -245,12 +245,53 @@ class FallbackManager:
         if isinstance(adapter_classes, dict):
             return model_key in adapter_classes
         return False
+
+    @staticmethod
+    def _candidate_ids_from_routing_result(
+        routing_result: Optional["RoutingResult"],
+        attempted_models: set[str],
+    ) -> List[str]:
+        if routing_result is None:
+            return []
+
+        candidates: List[str] = []
+        ordered_models = [routing_result.selected_model] + list(routing_result.fallback_models)
+        for model in ordered_models:
+            model_id = str(getattr(model, "id", "") or "").strip()
+            if not model_id or model_id in attempted_models or model_id in candidates:
+                continue
+            candidates.append(model_id)
+        return candidates
+
+    @staticmethod
+    def _pop_next_candidate_id(
+        pending_model_ids: List[str],
+        attempted_models: set[str],
+    ) -> str:
+        while pending_model_ids:
+            candidate = str(pending_model_ids.pop(0) or "").strip()
+            if candidate and candidate not in attempted_models:
+                return candidate
+        return ""
+
+    def _route_task(
+        self,
+        task: "TaskSpec",
+        strategy: str,
+        max_fallbacks: int,
+    ) -> "RoutingResult":
+        route_with_strategy = getattr(self._router, "route_with_fallback_by_strategy", None)
+        if callable(route_with_strategy):
+            return route_with_strategy(task, strategy=strategy, max_fallbacks=max_fallbacks)
+        return self._router.route_with_fallback(task, max_fallbacks=max_fallbacks)
     
     def execute_with_fallback(
         self,
         task: "TaskSpec",
         adapter_factory: Callable[[str], "BaseAdapter"],
         max_attempts: int = 5,
+        strategy: str = "balanced",
+        initial_routing_result: Optional["RoutingResult"] = None,
     ) -> tuple:
         """Execute task with automatic fallback on failure."""
         chain = FallbackChain(
@@ -261,53 +302,70 @@ class FallbackManager:
         current_task = task
         degradation_level = 0
         forced_model_id: Optional[str] = None
+        attempted_models: set[str] = set()
+        pending_model_ids = self._candidate_ids_from_routing_result(
+            initial_routing_result,
+            attempted_models,
+        )
         
         while not chain.is_exhausted(max_attempts):
-            adapter = None
             model_id = ""
             if forced_model_id:
                 model_id = str(forced_model_id).strip()
                 forced_model_id = None
-                adapter = adapter_factory(model_id)
-                if not adapter:
-                    chain.add_attempt(
-                        model_id=model_id,
-                        modified_task=current_task,
-                        error="Adapter not found for forced fallback model",
-                        error_code="adapter_missing",
-                        success=False,
-                    )
-                    degradation_level += 1
-                    current_task = TaskDegradationStrategy.degrade(task, degradation_level)
-                    continue
             else:
-                try:
-                    routing_result = self._router.route_with_fallback(
-                        current_task,
-                        max_fallbacks=2
-                    )
-                    model = routing_result.selected_model
-                    model_id = str(model.id)
-                except ValueError as e:
-                    chain.add_attempt(
-                        model_id="none",
-                        modified_task=current_task,
-                        error=str(e),
-                        error_code="no_model_available",
-                        success=False,
-                    )
-                    break
+                model_id = self._pop_next_candidate_id(pending_model_ids, attempted_models)
+                if not model_id:
+                    try:
+                        routing_result = self._route_task(
+                            current_task,
+                            strategy=strategy,
+                            max_fallbacks=2,
+                        )
+                    except ValueError as e:
+                        chain.add_attempt(
+                            model_id="none",
+                            modified_task=current_task,
+                            error=str(e),
+                            error_code="no_model_available",
+                            success=False,
+                        )
+                        break
 
-                adapter = adapter_factory(model_id)
-                if not adapter:
-                    chain.add_attempt(
-                        model_id=model_id,
-                        modified_task=current_task,
-                        error="Adapter not found",
-                        error_code="adapter_missing",
-                        success=False,
+                    pending_model_ids = self._candidate_ids_from_routing_result(
+                        routing_result,
+                        attempted_models,
                     )
+                    model_id = self._pop_next_candidate_id(pending_model_ids, attempted_models)
+                    if not model_id:
+                        chain.add_attempt(
+                            model_id="none",
+                            modified_task=current_task,
+                            error="No unattempted routed model available",
+                            error_code="no_model_available",
+                            success=False,
+                        )
+                        break
+
+            attempted_models.add(model_id)
+            adapter = adapter_factory(model_id)
+            if not adapter:
+                chain.add_attempt(
+                    model_id=model_id,
+                    modified_task=current_task,
+                    error="Adapter not found",
+                    error_code="adapter_missing",
+                    success=False,
+                )
+                if pending_model_ids:
                     continue
+                degradation_level += 1
+                degraded_task = TaskDegradationStrategy.degrade(task, degradation_level)
+                if degraded_task == current_task:
+                    break
+                current_task = degraded_task
+                pending_model_ids = []
+                continue
             
             result = adapter.generate(current_task)
             
@@ -348,20 +406,24 @@ class FallbackManager:
                     current_task,
                     fallback_strategy
                 )
+                pending_model_ids = []
                 candidate_model_id = str(getattr(fallback_strategy, "fallback_model_id", "") or "").strip()
-                attempted_models = {str(a.model_id).strip() for a in chain.attempts if isinstance(a.model_id, str)}
                 if candidate_model_id and candidate_model_id not in attempted_models:
                     if self._is_registered_model_available(candidate_model_id):
                         forced_model_id = candidate_model_id
                     elif adapter_factory(candidate_model_id):
                         forced_model_id = candidate_model_id
                 continue
-            
+
+            if pending_model_ids:
+                continue
+
             degradation_level += 1
-            current_task = TaskDegradationStrategy.degrade(task, degradation_level)
-            
-            if current_task == chain.get_last_attempt().modified_task:
+            degraded_task = TaskDegradationStrategy.degrade(task, degradation_level)
+            if degraded_task == current_task:
                 break
+            current_task = degraded_task
+            pending_model_ids = []
         self.save_chain(chain)
         return False, None, chain
     

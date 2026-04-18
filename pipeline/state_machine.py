@@ -208,7 +208,21 @@ def step(ctx: RunContext) -> RunContext:
         elif ctx.state == State.REVIEW:
             with _stage_timer(ctx.payload, stage=stage_label(ctx.state)):
                 audit_result = auditor.run(ctx)
-                qc_result = autoqc.run(ctx.payload)
+                audit_failure_type = str(audit_result.get("failure_type") or "").strip().lower()
+                safety_audit_blocked = audit_failure_type == "safety_audit_failed"
+
+                if safety_audit_blocked:
+                    qc_result = {
+                        "pass": True,
+                        "skipped": True,
+                        "reason": "safety_audit_failed",
+                        "failures": [],
+                        "route": None,
+                        "config": {},
+                        "shots": {},
+                    }
+                else:
+                    qc_result = autoqc.run(ctx.payload)
                 ctx.payload["autoqc"] = qc_result
 
                 qc_cfg = ctx.payload.get("qc_config") if isinstance(ctx.payload.get("qc_config"), dict) else {}
@@ -232,7 +246,25 @@ def step(ctx: RunContext) -> RunContext:
                         }
                         ctx.state = State.DONE
                     else:
-                        if not qc_pass:
+                        if safety_audit_blocked:
+                            safety_audit = (
+                                audit_result.get("safety_audit")
+                                if isinstance(audit_result.get("safety_audit"), dict)
+                                else {}
+                            )
+                            ctx.payload["rework_reason"] = {
+                                "type": "safety_audit_failed",
+                                "issues": audit_result.get("issues", []),
+                                "safety_audit": safety_audit,
+                            }
+                            ctx.payload["failed_from_state"] = State.REVIEW.name
+                            ctx.payload["error"] = (
+                                str(safety_audit.get("summary") or "").strip()
+                                or "safety audit failed"
+                            )
+                            ctx.payload["error_type"] = "SafetyAuditFailed"
+                            ctx.state = State.FAILED
+                        elif not qc_pass:
                             ctx.payload["rework_reason"] = {
                                 "type": "autoqc_failed",
                                 "failures": qc_result.get("failures", []),
@@ -240,18 +272,20 @@ def step(ctx: RunContext) -> RunContext:
                             }
                             if isinstance(qc_result.get("route"), dict):
                                 ctx.payload["rework_route"] = qc_result["route"]
+                            ctx.state = State.REWORK
+                            _record_rework(ctx.payload)
                         else:
                             ctx.payload["rework_reason"] = {
                                 "type": "audit_failed",
                                 "issues": audit_result.get("issues", []),
-                        }
-                        ctx.payload["rework_route"] = {
-                            "target_state": "SCRIPT",
-                            "action": "review_fix",
-                            "reason": "audit_failed",
-                        }
-                        ctx.state = State.REWORK
-                        _record_rework(ctx.payload)
+                            }
+                            ctx.payload["rework_route"] = {
+                                "target_state": "SCRIPT",
+                                "action": "review_fix",
+                                "reason": "audit_failed",
+                            }
+                            ctx.state = State.REWORK
+                            _record_rework(ctx.payload)
         elif ctx.state == State.REWORK:
             if ctx.bump_retry(State.REWORK):
                 route = ctx.payload.get("rework_route")

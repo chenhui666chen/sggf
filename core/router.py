@@ -266,6 +266,29 @@ class SmartRouter:
                 logger.warning("Semantic matcher unavailable, disabling semantic boost: %s", e)
                 self._enable_semantic = False
         return self._semantic_matcher
+
+    def _build_task_for_strategy(
+        self,
+        task: "TaskSpec",
+        strategy: str,
+    ) -> "TaskSpec":
+        normalized = str(strategy or "balanced").strip().lower()
+        routed_task = copy.deepcopy(task)
+
+        if normalized == "quality":
+            routed_task.priority_profile.quality = 0.7
+            routed_task.priority_profile.cost = 0.2
+            routed_task.priority_profile.latency = 0.1
+        elif normalized == "cost":
+            routed_task.priority_profile.quality = 0.2
+            routed_task.priority_profile.cost = 0.7
+            routed_task.priority_profile.latency = 0.1
+        elif normalized == "speed":
+            routed_task.priority_profile.quality = 0.2
+            routed_task.priority_profile.cost = 0.1
+            routed_task.priority_profile.latency = 0.7
+
+        return routed_task
     
     def route(
         self,
@@ -327,6 +350,18 @@ class SmartRouter:
             semantic_boost=selected_boost,
             reasons=reasons,
         )
+
+    def route_with_fallback_by_strategy(
+        self,
+        task: "TaskSpec",
+        strategy: str,
+        max_fallbacks: int = 2,
+    ) -> RoutingResult:
+        """Route with fallback using a strategy-adjusted task profile."""
+        return self.route_with_fallback(
+            self._build_task_for_strategy(task, strategy),
+            max_fallbacks=max_fallbacks,
+        )
     
     def _compute_semantic_boost(
         self,
@@ -377,21 +412,11 @@ class SmartRouter:
         strategy: str,
     ) -> "ModelSpec":
         """Route by specific strategy."""
-        routed_task = copy.deepcopy(task)
-        if strategy == "quality":
-            routed_task.priority_profile.quality = 0.7
-            routed_task.priority_profile.cost = 0.2
-            routed_task.priority_profile.latency = 0.1
-        elif strategy == "cost":
-            routed_task.priority_profile.quality = 0.2
-            routed_task.priority_profile.cost = 0.7
-            routed_task.priority_profile.latency = 0.1
-        elif strategy == "speed":
-            routed_task.priority_profile.quality = 0.2
-            routed_task.priority_profile.cost = 0.1
-            routed_task.priority_profile.latency = 0.7
-        
-        return self.route(routed_task)
+        return self.route_with_fallback_by_strategy(
+            task,
+            strategy,
+            max_fallbacks=0,
+        ).selected_model
     
     def record_success(
         self,

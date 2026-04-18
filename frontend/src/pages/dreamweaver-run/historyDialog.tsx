@@ -270,3 +270,136 @@ export function DreamweaverHistoryDialogShell({
     </Dialog>
   )
 }
+
+type DreamweaverHistoryFilterItem = {
+  key: string
+  label: string
+  count: number
+  color: 'default' | 'primary' | 'success' | 'error' | 'warning' | 'info'
+  selected: boolean
+  onClick: () => void
+}
+
+type DreamweaverHistoryRunListItem = {
+  runId: string
+  statusLabel: string
+  statusColor: 'default' | 'primary' | 'success' | 'error' | 'warning' | 'info'
+  progressValue?: number | null
+  stage?: string | null
+  cameraTreeMode?: string | null
+  cameraCount?: number | null
+  cameraStatesCount?: number | null
+  cameraScenesCount?: number | null
+  timeText?: string | null
+  errorMessage?: string | null
+  onView: () => void
+  onDelete: () => void
+}
+
+type DreamweaverHistoryDialogProps = {
+  open: boolean
+  onClose: () => void
+  projectTitle?: string | null
+  error?: string | null
+  loading: boolean
+  filterItems: DreamweaverHistoryFilterItem[]
+  onRefresh: () => void
+  refreshDisabled: boolean
+  onBulkDelete: () => void
+  bulkDeleteDisabled: boolean
+  bulkDeleteLabel: string
+  runs: DreamweaverHistoryRunListItem[]
+  showEmptyHistory: boolean
+  showEmptyFilter: boolean
+}
+
+export function DreamweaverHistoryDialog({
+  open,
+  onClose,
+  projectTitle,
+  error,
+  loading,
+  filterItems,
+  onRefresh,
+  refreshDisabled,
+  onBulkDelete,
+  bulkDeleteDisabled,
+  bulkDeleteLabel,
+  runs,
+  showEmptyHistory,
+  showEmptyFilter,
+}: DreamweaverHistoryDialogProps) {
+  return (
+    <DreamweaverHistoryDialogShell
+      open={open}
+      onClose={onClose}
+      title={<DreamweaverHistoryDialogTitle projectTitle={projectTitle} />}
+      content={
+        <DreamweaverHistoryDialogContent
+          error={error}
+          loading={loading}
+          toolbar={
+            <DreamweaverHistoryDialogToolbar
+              filters={
+                <>
+                  {filterItems.map((item) => (
+                    <DreamweaverHistoryStatusFilterChip
+                      key={item.key}
+                      label={item.label}
+                      count={item.count}
+                      color={item.color}
+                      selected={item.selected}
+                      onClick={item.onClick}
+                    />
+                  ))}
+                </>
+              }
+              actions={
+                <DreamweaverHistoryToolbarActions
+                  onRefresh={onRefresh}
+                  refreshDisabled={refreshDisabled}
+                  onBulkDelete={onBulkDelete}
+                  bulkDeleteDisabled={bulkDeleteDisabled}
+                  bulkDeleteLabel={bulkDeleteLabel}
+                />
+              }
+            />
+          }
+          emptyState={
+            <>
+              {showEmptyHistory && <DreamweaverHistoryEmptyState message="暂无历史任务" />}
+              {showEmptyFilter && <DreamweaverHistoryEmptyState message="筛选结果为空" />}
+            </>
+          }
+          runList={
+            !loading && runs.length > 0 ? (
+              <Box component="div">
+                {runs.map((run) => (
+                  <DreamweaverHistoryRunItem
+                    key={run.runId}
+                    summary={
+                      <DreamweaverHistoryRunItemSummary
+                        statusLabel={run.statusLabel}
+                        statusColor={run.statusColor}
+                        runId={run.runId}
+                        progressValue={run.progressValue}
+                        stage={run.stage}
+                        cameraTreeMode={run.cameraTreeMode}
+                        cameraCount={run.cameraCount}
+                        cameraStatesCount={run.cameraStatesCount}
+                        cameraScenesCount={run.cameraScenesCount}
+                      />
+                    }
+                    timeText={run.timeText}
+                    errorMessage={run.errorMessage}
+                    actions={<DreamweaverHistoryRunItemActions onView={run.onView} onDelete={run.onDelete} />}
+                  />
+                ))}
+              </Box>
+            ) : null
+          }
+        />
+      }
+    />
+  )
+}

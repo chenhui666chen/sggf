@@ -17,6 +17,14 @@ export interface UseDreamweaverRunPersistenceParams {
   stylePreset: string
   imageRatio: string
   imageResolution: string
+  imageModel: string
+  videoModel: string
+  videoEditModel: string
+  visionModel: string
+  enableVideoEdit: boolean
+  enableVisionReview: boolean
+  enableSafetyAudit: boolean
+  safetyFailPolicy: 'warn' | 'block'
   selectedChapterIds: number[]
 }
 
@@ -39,6 +47,14 @@ export function useDreamweaverRunPersistence({
   stylePreset,
   imageRatio,
   imageResolution,
+  imageModel,
+  videoModel,
+  videoEditModel,
+  visionModel,
+  enableVideoEdit,
+  enableVisionReview,
+  enableSafetyAudit,
+  safetyFailPolicy,
   selectedChapterIds,
 }: UseDreamweaverRunPersistenceParams): UseDreamweaverRunPersistenceReturn {
   const persistedRunId = useMemo(() => {
@@ -62,10 +78,22 @@ export function useDreamweaverRunPersistence({
       style_preset: stylePreset,
       image_ratio: imageRatio,
       image_resolution: imageResolution,
+      image_model: imageModel,
+      video_model: videoModel,
+      video_edit_model: videoEditModel,
+      vision_model: visionModel,
+      enable_video_edit: enableVideoEdit,
+      enable_vision_review: enableVisionReview,
+      enable_safety_audit: enableSafetyAudit,
+      safety_fail_policy: safetyFailPolicy,
       selected_chapter_ids: selectedChapterIds,
     })
   }, [
     currentRunId,
+    enableVideoEdit,
+    enableVisionReview,
+    enableSafetyAudit,
+    imageModel,
     imageRatio,
     imageResolution,
     promptReviewRequired,
@@ -75,9 +103,13 @@ export function useDreamweaverRunPersistence({
     selectedProjectId,
     smartTuning,
     stylePreset,
+    safetyFailPolicy,
     taskId,
     taskStatus,
+    videoEditModel,
+    videoModel,
     videoRequireConfirmation,
+    visionModel,
   ])
 
   return {

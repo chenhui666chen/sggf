@@ -277,6 +277,20 @@ def apply_restart_reset(payload: Dict[str, Any], *, start_state: str, reset_poli
             kept.append(it)
         return kept
 
+    def _drop_shot_ids_from_payload_list(key: str) -> None:
+        current = _as_str_list(payload.get(key))
+        if not current:
+            payload.pop(key, None)
+            return
+        if not regen_shot_set:
+            payload.pop(key, None)
+            return
+        kept = [sid for sid in current if sid not in regen_shot_set]
+        if kept:
+            payload[key] = kept
+        else:
+            payload.pop(key, None)
+
     # 始终清理：失败/审计/质检/返工信息，避免“带病重跑”
     for k in (
         "error",
@@ -285,6 +299,7 @@ def apply_restart_reset(payload: Dict[str, Any], *, start_state: str, reset_poli
         "rework_reason",
         "rework_route",
         "qc_warning",
+        "video_edit_result",
         "script_generation",
         "script_entities_synced",
         "script_entities_sync",
@@ -311,11 +326,13 @@ def apply_restart_reset(payload: Dict[str, Any], *, start_state: str, reset_poli
                 "midframes",
                 "video_clips",
                 "merged_video",
+                "video_edit_attempted_shot_ids",
+                "video_edit_failed_shot_ids",
             ]
         )
         return
     if state == "STORYBOARD":
-        _drop(["storyboard", "keyframes", "midframes", "video_clips", "merged_video"])
+        _drop(["storyboard", "keyframes", "midframes", "video_clips", "merged_video", "video_edit_attempted_shot_ids", "video_edit_failed_shot_ids"])
         return
     if state == "ASSET_LIBRARY":
         regen_roles = payload.get("asset_library_regenerate_roles")
@@ -333,6 +350,8 @@ def apply_restart_reset(payload: Dict[str, Any], *, start_state: str, reset_poli
                 "midframes",
                 "video_clips",
                 "merged_video",
+                "video_edit_attempted_shot_ids",
+                "video_edit_failed_shot_ids",
             ]
         )
         return
@@ -342,23 +361,29 @@ def apply_restart_reset(payload: Dict[str, Any], *, start_state: str, reset_poli
             payload["midframes"] = _drop_assets_for_shots(payload.get("midframes"))
             payload["video_clips"] = _drop_assets_for_shots(payload.get("video_clips"))
             payload.pop("merged_video", None)
+            _drop_shot_ids_from_payload_list("video_edit_attempted_shot_ids")
+            _drop_shot_ids_from_payload_list("video_edit_failed_shot_ids")
         else:
-            _drop(["keyframes", "midframes", "video_clips", "merged_video"])
+            _drop(["keyframes", "midframes", "video_clips", "merged_video", "video_edit_attempted_shot_ids", "video_edit_failed_shot_ids"])
         return
     if state == "MIDFRAMES":
         if regen_shot_set:
             payload["midframes"] = _drop_assets_for_shots(payload.get("midframes"))
             payload["video_clips"] = _drop_assets_for_shots(payload.get("video_clips"))
             payload.pop("merged_video", None)
+            _drop_shot_ids_from_payload_list("video_edit_attempted_shot_ids")
+            _drop_shot_ids_from_payload_list("video_edit_failed_shot_ids")
         else:
-            _drop(["midframes", "video_clips", "merged_video"])
+            _drop(["midframes", "video_clips", "merged_video", "video_edit_attempted_shot_ids", "video_edit_failed_shot_ids"])
         return
     if state == "VIDEO":
         if regen_shot_set:
             payload["video_clips"] = _drop_assets_for_shots(payload.get("video_clips"))
             payload.pop("merged_video", None)
+            _drop_shot_ids_from_payload_list("video_edit_attempted_shot_ids")
+            _drop_shot_ids_from_payload_list("video_edit_failed_shot_ids")
         else:
-            _drop(["video_clips", "merged_video"])
+            _drop(["video_clips", "merged_video", "video_edit_attempted_shot_ids", "video_edit_failed_shot_ids"])
         return
     if state == "EDIT":
         _drop(["merged_video"])

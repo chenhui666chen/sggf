@@ -246,3 +246,86 @@ export function DreamweaverDeleteRunDialogShell({
     </Dialog>
   )
 }
+
+type DreamweaverBulkDeleteDialogProps = {
+  open: boolean
+  onClose: () => void
+  targetCount: number
+  skippedCount: number
+  progress?: BulkDeleteProgress | null
+  error?: string | null
+  result?: BulkDeleteResult | null
+  submitting: boolean
+  onConfirm: () => void
+}
+
+export function DreamweaverBulkDeleteDialog({
+  open,
+  onClose,
+  targetCount,
+  skippedCount,
+  progress,
+  error,
+  result,
+  submitting,
+  onConfirm,
+}: DreamweaverBulkDeleteDialogProps) {
+  return (
+    <DreamweaverBulkDeleteDialogShell
+      open={open}
+      onClose={onClose}
+      content={
+        <DreamweaverBulkDeleteDialogContent
+          targetCount={targetCount}
+          skippedCount={skippedCount}
+          progress={progress}
+          error={error}
+          result={result}
+        />
+      }
+      actions={
+        <DreamweaverBulkDeleteDialogActions
+          submitting={submitting}
+          hasResult={Boolean(result)}
+          hasTargets={targetCount > 0}
+          onClose={onClose}
+          onConfirm={onConfirm}
+        />
+      }
+    />
+  )
+}
+
+type DreamweaverDeleteRunDialogProps = {
+  open: boolean
+  onClose: () => void
+  runId?: string | null
+  error?: string | null
+  submitting: boolean
+  onConfirm: () => void
+}
+
+export function DreamweaverDeleteRunDialog({
+  open,
+  onClose,
+  runId,
+  error,
+  submitting,
+  onConfirm,
+}: DreamweaverDeleteRunDialogProps) {
+  return (
+    <DreamweaverDeleteRunDialogShell
+      open={open}
+      onClose={onClose}
+      content={<DreamweaverDeleteRunDialogContent runId={runId} error={error} />}
+      actions={
+        <DreamweaverDeleteRunDialogActions
+          submitting={submitting}
+          hasRunId={Boolean(runId)}
+          onClose={onClose}
+          onConfirm={onConfirm}
+        />
+      }
+    />
+  )
+}

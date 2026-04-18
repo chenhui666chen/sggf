@@ -1,0 +1,187 @@
+{
+  "results": [
+    {
+      "id": "qwen-image-2.0",
+      "success": true,
+      "outputs": [
+        "https://dashscope-7c2c.oss-accelerate.aliyuncs.com/7d/05/20260418/76483b06/610574f1-aabb-4b4a-9f74-a79563a88be4.png?Expires=1777049224&OSSAccessKeyId=LTAI5tPxpiCM2hjmWrFXrym1&Signature=ylV2o376OSs1Ke1u793ahC3UN9s%3D"
+      ],
+      "latency": 4.67,
+      "error": null
+    },
+    {
+      "id": "qwen-image-2.0-pro",
+      "success": true,
+      "outputs": [
+        "https://dashscope-7c2c.oss-accelerate.aliyuncs.com/7d/d3/20260418/c91e3fa4/1c6a4b2f-af85-457a-ae5c-477b86c458b2.png?Expires=1777049232&OSSAccessKeyId=LTAI5tPxpiCM2hjmWrFXrym1&Signature=UDv0KhbCxEJNNkIuCtWrsW96eas%3D"
+      ],
+      "latency": 8.46,
+      "error": null
+    },
+    {
+      "id": "wan2.7-image",
+      "success": true,
+      "outputs": [
+        "https://dashscope-7c2c.oss-accelerate.aliyuncs.com/1d/e8/20260418/6e8aa136/a95c4084-3e89-488d-b9e0-796cd10a84e3_0.png?Expires=1776529851&OSSAccessKeyId=LTAI5tPxpiCM2hjmWrFXrym1&Signature=iXJlpH2gqfHiiVzR6EfL37EXYQo%3D"
+      ],
+      "latency": 20.28,
+      "error": null
+    },
+    {
+      "id": "doubao-seedream-4-5",
+      "success": false,
+      "error": "External provider: volcengine",
+      "latency": 0
+    },
+    {
+      "id": "doubao-seedream-5-0",
+      "success": false,
+      "error": "External provider: volcengine",
+      "latency": 0
+    },
+    {
+      "id": "kling-v3-image-generation",
+      "success": false,
+      "error": "External provider: kling",
+      "latency": 0
+    },
+    {
+      "id": "kling-v3-omni-image-generation",
+      "success": false,
+      "error": "External provider: kling",
+      "latency": 0
+    },
+    {
+      "id": "doubao-seedance-2-0",
+      "success": false,
+      "error": "External provider: volcengine",
+      "latency": 0
+    },
+    {
+      "id": "doubao-seedance-2-0-fast",
+      "success": false,
+      "error": "External provider: volcengine",
+      "latency": 0
+    },
+    {
+      "id": "doubao-seedance-1-5-pro",
+      "success": false,
+      "error": "External provider: volcengine",
+      "latency": 0
+    },
+    {
+      "id": "pixverse-c1-r2v",
+      "success": false,
+      "error": "External provider: pixverse",
+      "latency": 0
+    },
+    {
+      "id": "pixverse-v6-t2v",
+      "success": false,
+      "error": "External provider: pixverse",
+      "latency": 0
+    },
+    {
+      "id": "vidu-q3-pro-img2video",
+      "success": false,
+      "error": "External provider: vidu",
+      "latency": 0
+    },
+    {
+      "id": "vidu-q3-pro-text2video",
+      "success": false,
+      "error": "External provider: vidu",
+      "latency": 0
+    },
+    {
+      "id": "vidu-q3-pro-start-end2video",
+      "success": false,
+      "error": "External provider: vidu",
+      "latency": 0
+    },
+    {
+      "id": "kling-v3-video-generation",
+      "success": false,
+      "error": "External provider: kling",
+      "latency": 0
+    },
+    {
+      "id": "kling-v3-omni-video-generation",
+      "success": false,
+      "error": "External provider: kling",
+      "latency": 0
+    },
+    {
+      "id": "qwen3-tts-flash",
+      "success": false,
+      "latency": 0.73,
+      "error": "Error code: 404"
+    },
+    {
+      "id": "cosyvoice-v3-plus",
+      "success": false,
+      "latency": 0.36,
+      "error": "Error code: 404"
+    },
+    {
+      "id": "MiniMax/speech-2.8-turbo",
+      "success": false,
+      "latency": 0.42,
+      "error": "Error code: 404"
+    },
+    {
+      "id": "MiniMax/speech-2.8-hd",
+      "success": false,
+      "latency": 0.37,
+      "error": "Error code: 404"
+    },
+    {
+      "id": "qwen3.5-omni-plus",
+      "success": true,
+      "outputs": [
+        "你好！我是 Qwen3.5，是阿里巴巴最新推出的通义千问大语言模型。我具备强大的语言理解与生成能力，支持全球 100 多种语言，能高效处理长文本分析、复杂逻辑推理、代码全栈开发及多模态内容解读等任务。"
+      ],
+      "latency": 3.42,
+      "error": null
+    },
+    {
+      "id": "qwen3.6-plus",
+      "success": true,
+      "outputs": [
+        "你好！我是 Qwen（通义千问），由阿里巴巴集团旗下通义实验室自主研发的大语言模型。我致力于为你提供准确、高效且贴心的帮助，无论是日常交流、解答疑问、内容创作，还是处理复杂的逻辑推理与代码任务，我都能"
+      ],
+      "latency": 13.82,
+      "error": null
+    },
+    {
+      "id": "doubao-seed-2-0-pro",
+      "success": false,
+      "error": "External provider: volcengine",
+      "latency": 0
+    },
+    {
+      "id": "doubao-seed-2-0-lite",
+      "success": false,
+      "error": "External provider: volcengine",
+      "latency": 0
+    },
+    {
+      "id": "vidu-timing2audio",
+      "success": false,
+      "error": "External provider: vidu",
+      "latency": 0
+    },
+    {
+      "id": "mureka-o1-instrumental",
+      "success": false,
+      "latency": 0.45,
+      "error": "Extra data: line 1 column 5 (char 4)"
+    }
+  ],
+  "summary": {
+    "total": 27,
+    "passed": 5,
+    "failed_api": 5,
+    "external": 17
+  }
+}
