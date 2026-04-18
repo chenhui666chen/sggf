@@ -1505,6 +1505,19 @@ class ApiClient {
     )
   }
 
+  // 智能分块预览 API
+  previewSmartChunking(segments: any[], maxTokens: number = 1800, minTokens: number = 50) {
+    return this.client.post(
+      `/api/v1/audiobook/smart-chunk/preview?max_tokens=${maxTokens}&min_tokens=${minTokens}`,
+      segments
+    )
+  }
+
+  // 估算文本 token 数量 API
+  estimateTextTokens(text: string) {
+    return this.client.post('/api/v1/audiobook/smart-chunk/estimate', { text })
+  }
+
   // 章节逻辑检查API
   checkChapterLogic(chapterId: number, projectId: number) {
     return this.client.post('/api/v1/ai/check-chapter-logic', {

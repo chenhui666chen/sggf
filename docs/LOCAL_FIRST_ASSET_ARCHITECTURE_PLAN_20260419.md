@@ -331,12 +331,290 @@ interface AssetStudioGenerateResponse {
 
 ### 10.1 Audiobook 主链路
 
-暂未把 Audiobook 成品音频统一接入本地优先资产抽象。
+Audiobook 不适合直接照搬 Asset Studio 的“生成完成 -> 前端下载 -> 本地收录”最简链路。
 
-原因：
+原因不是音频成品本身，而是 Audiobook 除了“最终音频文件”，还天然包含：
 
-- 涉及异步任务、状态恢复、计费与运行期持久化
-- 改造风险高于本轮目标
+- 异步任务调度
+- 阶段进度追踪
+- 章节级脚本与评审
+- 断点续传
+- 运行期中间片段缓存
+- 计费与风控
+
+这意味着 Audiobook 需要单独定义一套 **运行态数据分层**，不能把“断点数据”“缓存数据”“最终资产”混在一起。
+
+#### 10.1.1 数据分层原则
+
+Audiobook 相关数据应拆成四层：
+
+1. **浏览器本地层**
+   - 只负责页面恢复态、最近一次任务入口、最终成品的本地镜像
+   - 不负责保存断点真相
+2. **服务端数据库层**
+   - 负责任务状态、章节脚本、章节评审、断点元数据、恢复校验信息
+   - 这是断点续传的权威来源
+3. **服务端临时对象层**
+   - 负责存放已生成但尚未合并/尚未交付的片段音频
+   - 必须带 TTL 与清理策略
+4. **用户本地资产层**
+   - 负责保存用户最终收录的章节音频、试听音频或导出成品
+   - 这部分进入 local-first 资产体系
+
+结论很明确：
+
+- **页面恢复态可以本地化**
+- **断点续传真相必须服务端化**
+- **中间片段缓存必须服务端临时化**
+- **最终成品可以 local-first 化**
+
+#### 10.1.2 当前实现的真实问题
+
+当前代码已经有一套“断点续传/缓存系统”的雏形，但还没有形成真正闭环：
+
+- 前端已有 `localStorage` 会话恢复，只能恢复 `projectId / audiobookProjectId / taskId / activeStep / generating / ttsModel`
+- 后端已有 `AudiobookTask` 持久化任务状态
+- 后端已有 `ChapterAudio.generation_progress_json`
+- 后端已有 `/checkpoint` 与 `/resume-generation` 接口
+
+但目前仍存在以下问题：
+
+1. `ChapterAudio.task_id` 只有一个值，不适合表达多次生成尝试。
+2. `generation_progress_json` 放在 `ChapterAudio` 上，语义过重，容易和最终章节记录耦合。
+3. `resume_from_checkpoint` 只存在于 schema，尚未真正接入执行链路。
+4. TTS `enable_cache` 开关存在，但当前缓存实现实际上被禁用。
+5. 前端虽然声明了 `checkpointInfo` 状态，但尚未形成完整的“查询断点 -> 用户确认 -> 恢复任务”交互。
+
+也就是说：
+
+- **当前已有字段和接口可以作为过渡基础**
+- **但当前结构并不是最终最优结构**
+
+#### 10.1.3 推荐数据库结构（开发阶段可直接重构）
+
+开发阶段没有历史用户数据，建议不再把运行态字段继续堆在 `chapter_audios` 上，而是直接拆分职责：
+
+1. **`chapter_audios` 仅保留章节最终结果与章节级内容**
+   - 最终章节音频元信息
+   - 剧本 `script_json`
+   - 剧本评审 `script_review_json`
+   - 片段评审 `segment_reviews_json`
+   - 最终音频评审 `final_audio_review_json`
+   - 最终时长、大小、成本、字幕等
+2. **新增 `chapter_audio_runs`（推荐）**
+   - 用于记录每一次生成尝试的运行态与断点状态
+
+推荐字段如下：
+
+```text
+chapter_audio_runs
+- id
+- audiobook_project_id
+- chapter_id
+- run_type                  # full | script_only | audio_from_scripts
+- celery_task_id
+- status                    # pending | running | paused | completed | failed | expired
+- current_stage
+- progress
+- completed_segment_count
+- total_segment_count
+- tts_model
+- output_format
+- narration_style
+- narration_style_prompt
+- voice_config_hash
+- audio_fx_hash
+- script_hash
+- resumable                 # bool
+- checkpoint_json           # 断点元数据
+- temp_asset_prefix         # 临时对象目录/前缀
+- expires_at
+- error_message
+- started_at
+- updated_at
+- finished_at
+```
+
+如果采用该方案，建议：
+
+- `ChapterAudio.task_id` 直接移除
+- `ChapterAudio.generation_progress_json` 直接移除
+- 运行态全部迁移到 `chapter_audio_runs`
+
+这是因为：
+
+- `ChapterAudio` 是“章节结果”
+- `chapter_audio_runs` 是“某一轮生成过程”
+
+两者职责不同，混在一个表里后续会越来越难维护。
+
+#### 10.1.4 checkpoint_json 推荐结构
+
+不建议再只保存：
+
+- `completed_segment_indices`
+- `cached_audio_paths`
+
+建议至少升级为版本化 checkpoint 文档：
+
+```json
+{
+  "schema_version": 1,
+  "run_id": "uuid",
+  "status": "running",
+  "current_stage": "tts_synthesis",
+  "tts_model": "qwen3-tts-flash",
+  "output_format": "mp3",
+  "script_hash": "sha256",
+  "voice_config_hash": "sha256",
+  "audio_fx_hash": "sha256",
+  "total_segments": 48,
+  "completed_segment_indices": [0, 1, 2, 3],
+  "failed_segment_indices": [],
+  "segments": {
+    "0": {
+      "status": "completed",
+      "temp_object_key": "tmp/audiobook/run_xxx/segment_000.mp3",
+      "duration": 2.31,
+      "file_size": 18234,
+      "checksum": "sha256",
+      "updated_at": "2026-04-19T12:00:00Z"
+    }
+  },
+  "last_error": null,
+  "checkpoint_updated_at": "2026-04-19T12:03:00Z",
+  "expires_at": "2026-04-22T12:03:00Z"
+}
+```
+
+这些字段的作用如下：
+
+- `script_hash`
+  - 用于判断用户是否修改了剧本，避免错误复用旧断点
+- `voice_config_hash / audio_fx_hash`
+  - 用于判断音色和音频配置是否发生变化
+- `segments.*.temp_object_key`
+  - 指向服务端临时片段，不进入用户资产系统
+- `expires_at`
+  - 用于后续清理过期中间缓存
+
+#### 10.1.5 本地数据与服务端数据的边界
+
+Audiobook 相关数据推荐按下表处理：
+
+| 数据类型 | 存储位置 | 说明 |
+| --- | --- | --- |
+| 页面恢复态 | 浏览器 `localStorage` / IndexedDB | 仅用于 UI 恢复 |
+| 任务状态 | 服务端数据库 | 以 `AudiobookTask` 或 `chapter_audio_runs` 为权威 |
+| 章节剧本/评审 | 服务端数据库 | 业务真相，不下放浏览器 |
+| 断点元数据 | 服务端数据库 | 必须跨设备、跨刷新、跨 worker 恢复 |
+| 中间片段音频 | 服务端临时对象层 | 仅用于恢复，不属于正式资产 |
+| 最终章节音频 | 用户本地资产库 + 服务端短时兜底 | 进入 local-first 资产链路 |
+
+不建议做的事情：
+
+- 不要把中间片段 base64 塞进数据库
+- 不要把断点真相只放在浏览器
+- 不要把中间片段收录为 `user_asset_records`
+- 不要把 `detail_json` 演化成超大 JSON 垃圾桶
+
+#### 10.1.6 服务端临时对象层建议
+
+为了让断点续传真正可用，服务端必须持有可恢复的中间片段。
+
+开发阶段建议先采用最简单但边界清晰的方式：
+
+```text
+backend/data/tmp/audiobook_runs/{run_id}/segment_000.mp3
+backend/data/tmp/audiobook_runs/{run_id}/segment_001.mp3
+backend/data/tmp/audiobook_runs/{run_id}/segment_002.mp3
+```
+
+数据库只保存相对 key，例如：
+
+- `tmp/audiobook_runs/{run_id}/segment_000.mp3`
+
+后续如果切换为对象存储，也只需要替换底层实现，不需要改业务模型。
+
+推荐清理策略：
+
+- `running`：保留
+- `failed` / `paused`：保留 24-72 小时
+- `completed`：在最终章节音频合成并确认落地后尽快清理
+- `expired`：由后台清理任务定时删除
+
+#### 10.1.7 恢复判定规则
+
+以下情况应判定为 **不可恢复，必须重新生成**：
+
+- `script_hash` 不一致
+- `voice_config_hash` 不一致
+- `audio_fx_hash` 不一致
+- `tts_model` 不一致
+- `output_format` 不一致
+- 任意已记录的临时片段文件不存在
+- checkpoint 已过期
+- checkpoint schema 版本不匹配
+
+恢复逻辑不应只看“有没有 `completed_segment_indices`”，而应同时校验：
+
+- 输入是否一致
+- 临时片段是否仍然存在
+- 该 run 是否仍处于可恢复窗口内
+
+#### 10.1.8 前端推荐交互
+
+前端只保留轻量会话恢复，不保留断点真相。
+
+推荐交互如下：
+
+1. 页面恢复时，根据本地保存的 `taskId / audiobookProjectId` 拉取服务端任务状态
+2. 若发现存在失败但可恢复的 `chapter_audio_run`，显示“继续生成”提示
+3. 用户确认后调用恢复接口
+4. 恢复任务启动后，继续沿用统一的任务状态轮询
+5. 任务完成后，前端再按 local-first 资产链路收录最终章节音频
+
+也就是说：
+
+- **前端负责发现与触发恢复**
+- **服务端负责判断是否真的能恢复**
+
+#### 10.1.9 与 local-first 资产体系的衔接
+
+Audiobook 真正接入本地优先资产抽象时，建议只把 **最终章节音频** 纳入资产收录。
+
+推荐链路：
+
+1. 后端完成章节音频生成
+2. 前端通过受控下载接口获取最终音频 blob
+3. 前端写入本地资产库（IndexedDB，后续可演进到 OPFS）
+4. 前端调用 `/api/v1/user-assets` 登记轻量元数据
+5. 用户中心优先显示本地副本
+
+而以下内容 **不要进入用户资产系统**：
+
+- 中间 segment 片段
+- 恢复用 checkpoint
+- 临时调试音频
+- 运行态任务 detail
+
+#### 10.1.10 推荐落地顺序
+
+Audiobook 建议按以下顺序改造，而不是一次性大拆：
+
+1. 先明确运行态与最终资产的边界
+   - `ChapterAudio` 只保最终结果
+   - 新增 `chapter_audio_runs`
+2. 再补 checkpoint 实际写入
+   - 每完成一批 segment 就写 checkpoint
+3. 再补 resume 真正续跑
+   - 恢复时跳过已完成片段，只补剩余片段
+4. 最后接前端恢复交互与 local-first 收录
+   - 保证用户完成后能把最终音频拿回本地
+
+如果只做一件事，优先级最高的是：
+
+**先把“断点真相”从 `ChapterAudio` 杂糅状态中拆出来，建立独立的运行态模型。**
 
 ### 10.2 PWA / OPFS
 

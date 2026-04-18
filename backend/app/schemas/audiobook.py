@@ -179,3 +179,29 @@ class GenerationCheckpointResponse(BaseModel):
     cached_audio_paths: Dict[int, str] = {}  # segment_index -> audio_path
     can_resume: bool = True
     estimated_remaining_time: Optional[float] = None  # 预估剩余时间（秒）
+
+
+class SmartChunkConfig(BaseModel):
+    """智能分块配置"""
+    enable_smart_chunk: bool = True  # 是否启用智能分块
+    max_tokens: int = 1800  # 单个分块最大 token 数
+    min_tokens: int = 50  # 最小分块 token 数
+    chunking_strategy: str = "semantic"  # semantic/paragraph/sentence
+
+
+class ChunkStats(BaseModel):
+    """分块统计信息"""
+    total_chunks: int
+    total_tokens: int
+    avg_tokens_per_chunk: float
+    max_tokens_in_chunk: int
+    min_tokens_in_chunk: int
+
+
+class ChunkPreviewResponse(BaseModel):
+    """分块预览响应"""
+    original_segments: int
+    chunked_segments: int
+    total_tokens: int
+    chunks: List[dict]  # 分块后的片段列表
+    stats: ChunkStats
