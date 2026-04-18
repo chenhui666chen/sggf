@@ -1,11 +1,11 @@
-"""
-耳畔星河 - 有声书生成API
+﻿"""
+鑰崇晹鏄熸渤 - 鏈夊０涔︾敓鎴怉PI
 
-功能：
-1. 创建有声书项目
-2. 生成章节音频
-3. 查询生成进度
-4. 下载音频文件
+鍔熻兘锛?
+1. 鍒涘缓鏈夊０涔﹂」鐩?
+2. 鐢熸垚绔犺妭闊抽
+3. 鏌ヨ鐢熸垚杩涘害
+4. 涓嬭浇闊抽鏂囦欢
 """
 import asyncio
 import logging
@@ -116,14 +116,14 @@ def _ensure_audiobook_points_precheck_passed(precheck: object) -> None:
     detail = build_task_points_precheck_error_detail(
         precheck=precheck,
         module_key="audiobook",
-        module_label="有声书",
-        default_message="有声书积分预检未通过",
+        module_label="鏈夊０涔?,
+        default_message="鏈夊０涔︾Н鍒嗛妫€鏈€氳繃",
     )
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
 
 def serialize_dataclass_to_dict(obj):
-    """递归将dataclass对象转换为字典，用于JSON序列化"""
+    """閫掑綊灏哾ataclass瀵硅薄杞崲涓哄瓧鍏革紝鐢ㄤ簬JSON搴忓垪鍖?""
     if is_dataclass(obj):
         return asdict(obj)
     elif isinstance(obj, list):
@@ -156,14 +156,14 @@ def build_task_status_response(task: AudiobookTask) -> AudiobookTaskStatus:
 
 
 def _tracker_update(tracker, stage: str, completed: int, total: int, message: Optional[str] = None, detail: Optional[dict] = None):
-    """简单包装，避免在任务函数中重复判空。"""
+    """绠€鍗曞寘瑁咃紝閬垮厤鍦ㄤ换鍔″嚱鏁颁腑閲嶅鍒ょ┖銆?""
     if tracker is None:
         return
     tracker.update_stage(stage, completed, total, message, detail)
 
 
 def _build_progress_handler(tracker, chapter_ids: List[int]):
-    """将 AudiobookEngine 的章节级任务进度映射到 Celery 任务追踪。"""
+    """灏?AudiobookEngine 鐨勭珷鑺傜骇浠诲姟杩涘害鏄犲皠鍒?Celery 浠诲姟杩借釜銆?""
     if tracker is None:
         return None
 
@@ -191,7 +191,7 @@ def _build_progress_handler(tracker, chapter_ids: List[int]):
             "chapter_total": total,
         }
         stage_name = stage if isinstance(stage, str) else str(stage)
-        message = f"章节 {chapter_positions.get(chapter_id, '?')}/{total} · {stage_name}"
+        message = f"绔犺妭 {chapter_positions.get(chapter_id, '?')}/{total} 路 {stage_name}"
         _tracker_update(tracker, stage_name, completed_units, total, message, detail_payload)
 
     return handle_progress
@@ -373,7 +373,7 @@ router = APIRouter(prefix="/api/v1/audiobook", tags=["audiobook"])
 
 
 # ==================== Pydantic Schemas ====================
-# 说明：有声书相关的请求/响应模型已迁移至 app.schemas.audiobook 模块。
+# 璇存槑锛氭湁澹颁功鐩稿叧鐨勮姹?鍝嶅簲妯″瀷宸茶縼绉昏嚦 app.schemas.audiobook 妯″潡銆?
 
 
 @router.post("/tts/preview")
@@ -381,24 +381,24 @@ async def tts_preview(
     request: TTSPreviewRequest,
     current_user: User = Depends(get_current_user),
 ):
-    """合成一小段音频用于前端试听"""
-    # 简单防护：限制文本长度
+    """鍚堟垚涓€灏忔闊抽鐢ㄤ簬鍓嶇璇曞惉"""
+    # 绠€鍗曢槻鎶わ細闄愬埗鏂囨湰闀垮害
     text = (request.text or "").strip()
     if not text:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文本不能为空")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="鏂囨湰涓嶈兘涓虹┖")
     if len(text) > 200:
         text = text[:200]
 
-    # 选择模型：默认使用 qwen3-tts-flash，可切换为 cosyvoice-v3-plus
+    # 閫夋嫨妯″瀷锛氶粯璁や娇鐢?qwen3-tts-flash锛屽彲鍒囨崲涓?cosyvoice-v3-plus
     model_name = (request.model or "qwen3-tts-flash").strip()
     if model_name not in {"qwen3-tts-flash", "cosyvoice-v3-plus"}:
         model_name = "qwen3-tts-flash"
 
-    # 试听场景优先“快速恢复”而非长时间等待：
-    # - 额外多 1 次重试（应对偶发断连）
-    # - 基础退避更小，避免前端等待过久
+    # 璇曞惉鍦烘櫙浼樺厛鈥滃揩閫熸仮澶嶁€濊€岄潪闀挎椂闂寸瓑寰咃細
+    # - 棰濆澶?1 娆￠噸璇曪紙搴斿鍋跺彂鏂繛锛?
+    # - 鍩虹閫€閬挎洿灏忥紝閬垮厤鍓嶇绛夊緟杩囦箙
     preview_retry = RetryConfig(max_retries=4, base_delay=1.0, max_delay=8.0, exponential_base=2.0, jitter=True)
-    # 将前端的 voice_id（如 'male_young_energetic'）映射为真实的 TTS 音色ID
+    # 灏嗗墠绔殑 voice_id锛堝 'male_young_energetic'锛夋槧灏勪负鐪熷疄鐨?TTS 闊宠壊ID
     if model_name == "qwen3-tts-flash":
         preset = VoiceManager.PRESET_VOICES.get(request.voice_id)
         speaker_id = preset["tts_speaker_id"] if preset else request.voice_id
@@ -426,15 +426,15 @@ async def tts_preview(
             retry_config=preview_retry,
         )
     except Exception as exc:
-        logger.warning("TTS试听失败: %s", exc)
+        logger.warning("TTS璇曞惉澶辫触: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"message": "TTS服务暂时不可用，请稍后重试", "retryable": True},
+            detail={"message": "TTS鏈嶅姟鏆傛椂涓嶅彲鐢紝璇风◢鍚庨噸璇?, "retryable": True},
         ) from exc
     if not audio_bytes:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"message": "TTS服务暂时不可用，请稍后重试", "retryable": True},
+            detail={"message": "TTS鏈嶅姟鏆傛椂涓嶅彲鐢紝璇风◢鍚庨噸璇?, "retryable": True},
         )
 
     media_type = "audio/wav" if audio_bytes.startswith(b"RIFF") else "audio/mpeg"
@@ -445,7 +445,7 @@ async def tts_preview(
 async def list_tts_models(
     current_user: User = Depends(get_current_user),
 ):
-    """列出所有支持的 TTS 模型及其基本信息"""
+    """鍒楀嚭鎵€鏈夋敮鎸佺殑 TTS 妯″瀷鍙婂叾鍩烘湰淇℃伅"""
     from app.services.audiobook.voice_manager_factory import list_all_models, MODEL_VOICE_MAPPING
     from app.services.audiobook.voice_catalog import load_voice_catalog_for_model
     
@@ -482,11 +482,11 @@ def _get_model_display_name(model: str) -> str:
 
 def _get_model_description(model: str) -> str:
     descriptions = {
-        "qwen3-tts-flash": "高性价比，49音色，适合批量生成",
-        "qwen3-tts-plus": "高质量，支持SSML",
-        "cosyvoice-v3-plus": "顶级音质，情绪控制，Instruct模式",
-        "minimax-speech-2.8-hd": "最高音质，语气词标签，100+音色",
-        "minimax-speech-2.8-turbo": "优秀音质，高性价比，高并发",
+        "qwen3-tts-flash": "楂樻€т环姣旓紝49闊宠壊锛岄€傚悎鎵归噺鐢熸垚",
+        "qwen3-tts-plus": "楂樿川閲忥紝鏀寔SSML",
+        "cosyvoice-v3-plus": "椤剁骇闊宠川锛屾儏缁帶鍒讹紝Instruct妯″紡",
+        "minimax-speech-2.8-hd": "鏈€楂橀煶璐紝璇皵璇嶆爣绛撅紝100+闊宠壊",
+        "minimax-speech-2.8-turbo": "浼樼闊宠川锛岄珮鎬т环姣旓紝楂樺苟鍙?,
     }
     return descriptions.get(model, "")
 
@@ -504,11 +504,11 @@ def _get_model_price(model: str) -> float:
 
 def _get_model_features(model: str) -> list:
     features_map = {
-        "qwen3-tts-flash": ["高性价比", "49音色", "批量合成"],
-        "qwen3-tts-plus": ["高质量", "SSML支持"],
-        "cosyvoice-v3-plus": ["顶级音质", "情绪控制", "Instruct模式"],
-        "minimax-speech-2.8-hd": ["最高音质", "语气词标签", "100+音色", "混合音色"],
-        "minimax-speech-2.8-turbo": ["优秀音质", "高性价比", "高并发"],
+        "qwen3-tts-flash": ["楂樻€т环姣?, "49闊宠壊", "鎵归噺鍚堟垚"],
+        "qwen3-tts-plus": ["楂樿川閲?, "SSML鏀寔"],
+        "cosyvoice-v3-plus": ["椤剁骇闊宠川", "鎯呯华鎺у埗", "Instruct妯″紡"],
+        "minimax-speech-2.8-hd": ["鏈€楂橀煶璐?, "璇皵璇嶆爣绛?, "100+闊宠壊", "娣峰悎闊宠壊"],
+        "minimax-speech-2.8-turbo": ["浼樼闊宠川", "楂樻€т环姣?, "楂樺苟鍙?],
     }
     return features_map.get(model, [])
 
@@ -531,13 +531,13 @@ async def list_tts_voices(
     meta = catalog.get("meta") or {}
     voices = list(catalog.get("voices") or [])
 
-    # cosyvoice-v3-plus：合并“官方内置音色”与“复刻音色”（DashScope VoiceEnrollmentService）
+    # cosyvoice-v3-plus锛氬悎骞垛€滃畼鏂瑰唴缃煶鑹测€濅笌鈥滃鍒婚煶鑹测€濓紙DashScope VoiceEnrollmentService锛?
     if model == "cosyvoice-v3-plus":
         try:
             clones, _clone_meta = list_cosyvoice_v3_plus_clones()
             voices.extend([c.to_voice_preset(get_clone_display_name(c.voice_id)) for c in clones])
         except CosyVoiceCloneError:
-            # 未配置 API Key 等情况下，不阻塞页面使用内置音色
+            # 鏈厤缃?API Key 绛夋儏鍐典笅锛屼笉闃诲椤甸潰浣跨敤鍐呯疆闊宠壊
             pass
     return {
         "model": meta.get("model", "qwen3-tts-flash"),
@@ -553,9 +553,9 @@ async def create_cosyvoice_v3_plus_voice_clone(
     request: CosyVoiceCloneCreateRequest,
     current_user: User = Depends(get_current_user),
 ):
-    """创建 cosyvoice-v3-plus 复刻音色。
+    """鍒涘缓 cosyvoice-v3-plus 澶嶅埢闊宠壊銆?
 
-    说明：DashScope 克隆接口要求 input.url 为公网可访问地址或 oss:// 临时 URL。
+    璇存槑锛欴ashScope 鍏嬮殕鎺ュ彛瑕佹眰 input.url 涓哄叕缃戝彲璁块棶鍦板潃鎴?oss:// 涓存椂 URL銆?
     """
     try:
         import hashlib
@@ -564,18 +564,18 @@ async def create_cosyvoice_v3_plus_voice_clone(
 
         display_name = (request.name or "").strip()
         if not display_name:
-            raise CosyVoiceCloneError("name 不能为空")
+            raise CosyVoiceCloneError("name 涓嶈兘涓虹┖")
 
         prefix = (request.prefix or "").strip()
         if not prefix:
-            # 生成策略：
-            # - 允许 name 任意字符（含中文），但 prefix 必须满足 SDK 要求：字母/数字/下划线，1~32
-            # - 注意：cosyvoice clone 要求 prefix 最长 10 个字符
-            # - 尽量从 name 提取可读片段，否则退化为 v，再拼接 hash 提升唯一性
+            # 鐢熸垚绛栫暐锛?
+            # - 鍏佽 name 浠绘剰瀛楃锛堝惈涓枃锛夛紝浣?prefix 蹇呴』婊¤冻 SDK 瑕佹眰锛氬瓧姣?鏁板瓧/涓嬪垝绾匡紝1~32
+            # - 娉ㄦ剰锛歝osyvoice clone 瑕佹眰 prefix 鏈€闀?10 涓瓧绗?
+            # - 灏介噺浠?name 鎻愬彇鍙鐗囨锛屽惁鍒欓€€鍖栦负 v锛屽啀鎷兼帴 hash 鎻愬崌鍞竴鎬?
             slug = re.sub(r"[^A-Za-z0-9_]+", "_", display_name).strip("_").lower()
             base = (slug[:4] if slug else "v").strip("_") or "v"
             uid = str(getattr(current_user, "id", "0"))
-            # 防碰撞：加一个稳定 hash 片段（避免同名同用户频繁生成完全一致）
+            # 闃茬鎾烇細鍔犱竴涓ǔ瀹?hash 鐗囨锛堥伩鍏嶅悓鍚嶅悓鐢ㄦ埛棰戠箒鐢熸垚瀹屽叏涓€鑷达級
             h = hashlib.sha1(f"{uid}:{display_name}".encode("utf-8")).hexdigest()[:6]  # noqa: S324
             rand = secrets.token_hex(1)  # 2 hex chars
             prefix = f"{base}{h}{rand}"[:10]
@@ -593,11 +593,11 @@ async def upload_cosyvoice_v3_plus_clone_audio(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):
-    """上传本地音频，生成临时 oss:// URL。"""
+    """涓婁紶鏈湴闊抽锛岀敓鎴愪复鏃?oss:// URL銆?""
     try:
         content = await file.read()
         if not content:
-            raise CosyVoiceCloneError("file 不能为空")
+            raise CosyVoiceCloneError("file 涓嶈兘涓虹┖")
         return upload_cosyvoice_v3_plus_clone_sample(
             filename=file.filename or "audio",
             content=content,
@@ -617,7 +617,7 @@ async def list_cosyvoice_v3_plus_voice_clones(
     prefix: Optional[str] = None,
     current_user: User = Depends(get_current_user),
 ):
-    """列出 cosyvoice-v3-plus 的复刻音色（当前 API Key 维度）。"""
+    """鍒楀嚭 cosyvoice-v3-plus 鐨勫鍒婚煶鑹诧紙褰撳墠 API Key 缁村害锛夈€?""
     try:
         clones, meta = list_cosyvoice_v3_plus_clones(prefix=prefix)
         return {
@@ -641,7 +641,7 @@ async def delete_cosyvoice_v3_plus_voice_clone(
     voice_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """删除 cosyvoice-v3-plus 复刻音色。"""
+    """鍒犻櫎 cosyvoice-v3-plus 澶嶅埢闊宠壊銆?""
     try:
         return delete_cosyvoice_clone(voice_id=voice_id)
     except CosyVoiceCloneError as exc:
@@ -657,15 +657,13 @@ async def create_audiobook_project(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """创建有声书项目并启动生成任务。
+    """鍒涘缓鏈夊０涔﹂」鐩苟鍚姩鐢熸垚浠诲姟銆?
 
-    工作流：
-    1. 通过应用服务校验项目与章节，并创建有声书项目记录
-    2. 根据 generation_mode 启动对应的后台生成任务
-    """
+    宸ヤ綔娴侊細
+    1. 閫氳繃搴旂敤鏈嶅姟鏍￠獙椤圭洰涓庣珷鑺傦紝骞跺垱寤烘湁澹颁功椤圭洰璁板綍
+    2. 鏍规嵁 generation_mode 鍚姩瀵瑰簲鐨勫悗鍙扮敓鎴愪换鍔?    """
     service = AudiobookAppService(db=db, current_user=current_user)
-    # 4. 后台启动生成任务（通过 Celery 队列）
-    job_type = "script_only" if getattr(request, "generation_mode", "full") == "script_only" else "full"
+    # 4. 鍚庡彴鍚姩鐢熸垚浠诲姟锛堥€氳繃 Celery 闃熷垪锛?    job_type = "script_only" if getattr(request, "generation_mode", "full") == "script_only" else "full"
     prepared_request = service.prepare_audiobook_project_creation(request)
     if job_type != "script_only":
         precheck = build_audiobook_task_points_precheck(
@@ -733,14 +731,14 @@ async def create_audiobook_project(
                 request_context=raw_request,
             )
         except Exception as exc:
-            logger.warning("记录有声书积分冻结失败 audiobook_project_id=%s: %s", audiobook_project.id, exc)
+            logger.warning("璁板綍鏈夊０涔︾Н鍒嗗喕缁撳け璐?audiobook_project_id=%s: %s", audiobook_project.id, exc)
 
     return {
         "success": True,
         "audiobook_project_id": audiobook_project.id,
         "job_id": async_result.id,
         "task_type": job_type,
-        "message": "有声书生成任务已进入队列",
+        "message": "鏈夊０涔︾敓鎴愪换鍔″凡杩涘叆闃熷垪",
         "total_chapters": len(request.chapter_ids),
     }
 
@@ -751,32 +749,32 @@ async def get_audiobook_project(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取有声书项目详情"""
+    """鑾峰彇鏈夊０涔﹂」鐩鎯?""
     audiobook_project = AudiobookProjectRepository.get_by_id(db, audiobook_project_id)
 
     if not audiobook_project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="有声书项目不存在",
+            detail="鏈夊０涔﹂」鐩笉瀛樺湪",
         )
 
-    # 验证权限
+    # 楠岃瘉鏉冮檺
     project = ProjectRepository.get_user_project(db, current_user.id, audiobook_project.project_id)
 
     if not project:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权限访问",
+            detail="鏃犳潈闄愯闂?,
         )
 
-    # 获取章节音频列表
+    # 鑾峰彇绔犺妭闊抽鍒楄〃
     chapter_audios = ChapterAudioRepository.list_by_audiobook_project(db, audiobook_project_id)
 
-    # 取章节编号，用于前端“按章节编号跨记录合并音频”
+    # 鍙栫珷鑺傜紪鍙凤紝鐢ㄤ簬鍓嶇鈥滄寜绔犺妭缂栧彿璺ㄨ褰曞悎骞堕煶棰戔€?
     chapter_ids = [ca.chapter_id for ca in chapter_audios]
     chapter_number_by_id = {}
     if chapter_ids:
-        from app.models.project import Chapter  # 避免顶层循环依赖
+        from app.models.project import Chapter  # 閬垮厤椤跺眰寰幆渚濊禆
 
         rows = (
             db.query(Chapter.id, Chapter.chapter_number)
@@ -800,7 +798,7 @@ async def get_audiobook_project(
 	                "id": ca.id,
 	                "chapter_id": ca.chapter_id,
 	                "chapter_number": chapter_number_by_id.get(ca.chapter_id),
-	                "task_id": ca.task_id,  # 新增：返回task_id
+	                "task_id": ca.task_id,  # 鏂板锛氳繑鍥瀟ask_id
 	                "audio_path": ca.audio_path,
 	                "duration": ca.duration,
 	                "file_size": ca.file_size,
@@ -816,18 +814,18 @@ async def get_audiobook_project(
 @router.get("/projects/by-project/{project_id:int}")
 async def list_audiobook_projects(
     project_id: int,
-    include_chapter_audios: bool = Query(False, description="是否包含章节音频列表"),
+    include_chapter_audios: bool = Query(False, description="鏄惁鍖呭惈绔犺妭闊抽鍒楄〃"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取项目的所有有声书项目"""
-    # 验证权限
+    """鑾峰彇椤圭洰鐨勬墍鏈夋湁澹颁功椤圭洰"""
+    # 楠岃瘉鏉冮檺
     project = ProjectRepository.get_user_project(db, current_user.id, project_id)
 
     if not project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="项目不存在或无权限",
+            detail="椤圭洰涓嶅瓨鍦ㄦ垨鏃犳潈闄?,
         )
 
     audiobook_projects = AudiobookProjectRepository.list_by_project(db, project_id)
@@ -911,10 +909,10 @@ async def list_user_audiobook_projects(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取用户的所有有声书项目（用于有声小说仪表盘）"""
+    """鑾峰彇鐢ㄦ埛鐨勬墍鏈夋湁澹颁功椤圭洰锛堢敤浜庢湁澹板皬璇翠华琛ㄧ洏锛?""
     audiobook_projects = AudiobookProjectRepository.list_by_user(db, current_user.id)
     
-    # 获取项目详细信息
+    # 鑾峰彇椤圭洰璇︾粏淇℃伅
     result = []
     for ap in audiobook_projects:
         project = ProjectRepository.get_user_project(db, current_user.id, ap.project_id)
@@ -945,12 +943,11 @@ async def trigger_generate_audio_from_scripts(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """触发基于已生成剧本的章节音频生成（两阶段流程第2阶段）。
+    """瑙﹀彂鍩轰簬宸茬敓鎴愬墽鏈殑绔犺妭闊抽鐢熸垚锛堜袱闃舵娴佺▼绗?闃舵锛夈€?
 
-    - 如果未显式指定 chapter_ids，则默认选择该有声书项目下 script_status == "approved" 且已存在 script_json 的章节。
-    - 如果显式指定 chapter_ids，则请求阶段仅要求对应章节存在 script_json；执行阶段仍会过滤未通过评审的章节。
-    """
-    # 1. 验证有声书项目是否存在
+    - 濡傛灉鏈樉寮忔寚瀹?chapter_ids锛屽垯榛樿閫夋嫨璇ユ湁澹颁功椤圭洰涓?script_status == "approved" 涓斿凡瀛樺湪 script_json 鐨勭珷鑺傘€?
+    - 濡傛灉鏄惧紡鎸囧畾 chapter_ids锛屽垯璇锋眰闃舵浠呰姹傚搴旂珷鑺傚瓨鍦?script_json锛涙墽琛岄樁娈典粛浼氳繃婊ゆ湭閫氳繃璇勫鐨勭珷鑺傘€?    """
+    # 1. 楠岃瘉鏈夊０涔﹂」鐩槸鍚﹀瓨鍦?
     audiobook_project = db.query(AudiobookProject).filter(
         AudiobookProject.id == audiobook_project_id
     ).first()
@@ -958,10 +955,10 @@ async def trigger_generate_audio_from_scripts(
     if not audiobook_project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="有声书项目不存在",
+            detail="鏈夊０涔﹂」鐩笉瀛樺湪",
         )
 
-    # 2. 验证原始项目权限
+    # 2. 楠岃瘉鍘熷椤圭洰鏉冮檺
     project = db.query(Project).filter(
         Project.id == audiobook_project.project_id,
         Project.user_id == current_user.id,
@@ -970,19 +967,19 @@ async def trigger_generate_audio_from_scripts(
     if not project:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权限访问",
+            detail="鏃犳潈闄愯闂?,
         )
 
-    # 3. 选取需要生成音频的章节
+    # 3. 閫夊彇闇€瑕佺敓鎴愰煶棰戠殑绔犺妭
     if request.chapter_ids:
-        # 显式指定章节：只过滤有剧本的章节
+        # 鏄惧紡鎸囧畾绔犺妭锛氬彧杩囨护鏈夊墽鏈殑绔犺妭
         chapter_audios = db.query(ChapterAudio).filter(
             ChapterAudio.audiobook_project_id == audiobook_project_id,
             ChapterAudio.chapter_id.in_(request.chapter_ids),
             ChapterAudio.script_json.isnot(None),
         ).all()
     else:
-        # 未指定章节：默认选择 script_status == "approved" 的章节
+        # 鏈寚瀹氱珷鑺傦細榛樿閫夋嫨 script_status == "approved" 鐨勭珷鑺?
         chapter_audios = db.query(ChapterAudio).filter(
             ChapterAudio.audiobook_project_id == audiobook_project_id,
             ChapterAudio.script_json.isnot(None),
@@ -992,7 +989,7 @@ async def trigger_generate_audio_from_scripts(
     if not chapter_audios:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="没有可生成音频的章节，请先完成剧本生成与审核",
+            detail="娌℃湁鍙敓鎴愰煶棰戠殑绔犺妭锛岃鍏堝畬鎴愬墽鏈敓鎴愪笌瀹℃牳",
         )
 
     target_chapter_ids = [ca.chapter_id for ca in chapter_audios]
@@ -1007,7 +1004,7 @@ async def trigger_generate_audio_from_scripts(
     )
     _ensure_audiobook_points_precheck_passed(precheck)
 
-    # 4. 启动后台任务
+    # 4. 鍚姩鍚庡彴浠诲姟
     task_record = AudiobookTaskRepository.create_task(
         db,
         audiobook_project_id=audiobook_project_id,
@@ -1049,14 +1046,14 @@ async def trigger_generate_audio_from_scripts(
             request_context=raw_request,
         )
     except Exception as exc:
-        logger.warning("记录二阶段有声书积分冻结失败 audiobook_project_id=%s: %s", audiobook_project_id, exc)
+        logger.warning("璁板綍浜岄樁娈垫湁澹颁功绉垎鍐荤粨澶辫触 audiobook_project_id=%s: %s", audiobook_project_id, exc)
 
     return {
         "success": True,
         "audiobook_project_id": audiobook_project_id,
         "chapter_ids": target_chapter_ids,
         "job_id": async_result.id,
-        "message": "已启动基于剧本的音频生成任务",
+        "message": "宸插惎鍔ㄥ熀浜庡墽鏈殑闊抽鐢熸垚浠诲姟",
     }
 
 
@@ -1071,14 +1068,14 @@ async def delete_audiobook_project(
     db: Session = Depends(get_db)
 ):
     """
-    删除有声书项目（支持软删除和硬删除）
+    鍒犻櫎鏈夊０涔﹂」鐩紙鏀寔杞垹闄ゅ拰纭垹闄わ級
     
-    工作流：
-    1. 验证权限
-    2. 执行软删除并记录审计日志
-    3. 可选：删除物理文件（delete_files=true时）
+    宸ヤ綔娴侊細
+    1. 楠岃瘉鏉冮檺
+    2. 鎵ц杞垹闄ゅ苟璁板綍瀹¤鏃ュ織
+    3. 鍙€夛細鍒犻櫎鐗╃悊鏂囦欢锛坉elete_files=true鏃讹級
     """
-    logger.info(f"🗑️ 用户 {current_user.id} 请求删除有声书项目: audiobook_project_id={audiobook_project_id}, delete_files={delete_files}")
+    logger.info(f"馃棏锔?鐢ㄦ埛 {current_user.id} 璇锋眰鍒犻櫎鏈夊０涔﹂」鐩? audiobook_project_id={audiobook_project_id}, delete_files={delete_files}")
     
     if isinstance(payload, dict):
         if payload.get("delete_reason") is not None:
@@ -1087,16 +1084,16 @@ async def delete_audiobook_project(
         if payload.get("delete_files") is not None:
             delete_files = bool(payload.get("delete_files"))
 
-    # 1. 验证有声书项目权限
+    # 1. 楠岃瘉鏈夊０涔﹂」鐩潈闄?
     audiobook_project = db.query(AudiobookProject).filter(AudiobookProject.id == audiobook_project_id).first()
     
     if not audiobook_project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="有声书项目不存在"
+            detail="鏈夊０涔﹂」鐩笉瀛樺湪"
         )
     
-    # 验证原始项目权限
+    # 楠岃瘉鍘熷椤圭洰鏉冮檺
     project = db.query(Project).filter(
         Project.id == audiobook_project.project_id,
         Project.user_id == current_user.id
@@ -1105,10 +1102,10 @@ async def delete_audiobook_project(
     if not project:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权限删除此项目"
+            detail="鏃犳潈闄愬垹闄ゆ椤圭洰"
         )
     
-    # 2. 执行软删除并记录审计日志
+    # 2. 鎵ц杞垹闄ゅ苟璁板綍瀹¤鏃ュ織
     audit_log = AudiobookProjectRepository.soft_delete(
         db=db,
         audiobook_project_id=audiobook_project_id,
@@ -1120,15 +1117,15 @@ async def delete_audiobook_project(
     if not audit_log:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="有声书项目不存在或已被删除"
+            detail="鏈夊０涔﹂」鐩笉瀛樺湪鎴栧凡琚垹闄?
         )
     
-    # 3. 可选：删除物理文件
+    # 3. 鍙€夛細鍒犻櫎鐗╃悊鏂囦欢
     deleted_files = 0
     failed_files = []
     
     if delete_files:
-        # 获取所有章节音频并删除文件
+        # 鑾峰彇鎵€鏈夌珷鑺傞煶棰戝苟鍒犻櫎鏂囦欢
         chapter_audios = db.query(ChapterAudio).filter(
             ChapterAudio.audiobook_project_id == audiobook_project_id
         ).all()
@@ -1138,16 +1135,16 @@ async def delete_audiobook_project(
                 try:
                     os.remove(chapter_audio.audio_path)
                     deleted_files += 1
-                    logger.info(f"✅ 删除文件: {chapter_audio.audio_path}")
+                    logger.info(f"鉁?鍒犻櫎鏂囦欢: {chapter_audio.audio_path}")
                 except Exception as e:
-                    logger.error(f"❌ 删除文件失败: {chapter_audio.audio_path}, 错误: {e}")
+                    logger.error(f"鉂?鍒犻櫎鏂囦欢澶辫触: {chapter_audio.audio_path}, 閿欒: {e}")
                     failed_files.append(chapter_audio.audio_path)
     
-    logger.info(f"✅ 有声书项目软删除成功: audiobook_project_id={audiobook_project_id}, audit_id={audit_log.id}")
+    logger.info(f"鉁?鏈夊０涔﹂」鐩蒋鍒犻櫎鎴愬姛: audiobook_project_id={audiobook_project_id}, audit_id={audit_log.id}")
     
     return {
         "success": True,
-        "message": "有声书项目已删除",
+        "message": "鏈夊０涔﹂」鐩凡鍒犻櫎",
         "audit_id": audit_log.id,
         "deleted_files": deleted_files,
         "failed_files": failed_files,
@@ -1167,14 +1164,14 @@ async def delete_chapter_audio(
     db: Session = Depends(get_db)
 ):
     """
-    删除章节音频（支持软删除和硬删除）
+    鍒犻櫎绔犺妭闊抽锛堟敮鎸佽蒋鍒犻櫎鍜岀‖鍒犻櫎锛?
     
-    工作流：
-    1. 验证权限
-    2. 执行软删除并记录审计日志
-    3. 可选：删除物理文件（delete_file=true时）
+    宸ヤ綔娴侊細
+    1. 楠岃瘉鏉冮檺
+    2. 鎵ц杞垹闄ゅ苟璁板綍瀹¤鏃ュ織
+    3. 鍙€夛細鍒犻櫎鐗╃悊鏂囦欢锛坉elete_file=true鏃讹級
     """
-    logger.info(f"🗑️ 用户 {current_user.id} 请求删除章节音频: chapter_audio_id={chapter_audio_id}, delete_file={delete_file}")
+    logger.info(f"馃棏锔?鐢ㄦ埛 {current_user.id} 璇锋眰鍒犻櫎绔犺妭闊抽: chapter_audio_id={chapter_audio_id}, delete_file={delete_file}")
     
     if isinstance(payload, dict):
         if payload.get("delete_reason") is not None:
@@ -1187,16 +1184,16 @@ async def delete_chapter_audio(
         if raw_delete_file is not None:
             delete_file = bool(raw_delete_file)
 
-    # 1. 获取章节音频
+    # 1. 鑾峰彇绔犺妭闊抽
     chapter_audio = ChapterAudioRepository.get_by_id(db, chapter_audio_id)
     
     if not chapter_audio:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="章节音频不存在"
+            detail="绔犺妭闊抽涓嶅瓨鍦?
         )
     
-    # 2. 验证权限
+    # 2. 楠岃瘉鏉冮檺
     audiobook_project = db.query(AudiobookProject).filter(
         AudiobookProject.id == chapter_audio.audiobook_project_id
     ).first()
@@ -1204,7 +1201,7 @@ async def delete_chapter_audio(
     if not audiobook_project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="有声书项目不存在"
+            detail="鏈夊０涔﹂」鐩笉瀛樺湪"
         )
     
     project = db.query(Project).filter(
@@ -1215,10 +1212,10 @@ async def delete_chapter_audio(
     if not project:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权限删除此章节音频"
+            detail="鏃犳潈闄愬垹闄ゆ绔犺妭闊抽"
         )
     
-    # 3. 执行软删除并记录审计日志
+    # 3. 鎵ц杞垹闄ゅ苟璁板綍瀹¤鏃ュ織
     audit_log = ChapterAudioRepository.soft_delete(
         db=db,
         chapter_audio_id=chapter_audio_id,
@@ -1230,10 +1227,10 @@ async def delete_chapter_audio(
     if not audit_log:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="章节音频不存在或已被删除"
+            detail="绔犺妭闊抽涓嶅瓨鍦ㄦ垨宸茶鍒犻櫎"
         )
     
-    # 4. 可选：删除物理文件
+    # 4. 鍙€夛細鍒犻櫎鐗╃悊鏂囦欢
     deleted_file = False
     failed_file = None
     
@@ -1242,16 +1239,16 @@ async def delete_chapter_audio(
             try:
                 os.remove(chapter_audio.audio_path)
                 deleted_file = True
-                logger.info(f"✅ 删除文件: {chapter_audio.audio_path}")
+                logger.info(f"鉁?鍒犻櫎鏂囦欢: {chapter_audio.audio_path}")
             except Exception as e:
-                logger.error(f"❌ 删除文件失败: {chapter_audio.audio_path}, 错误: {e}")
+                logger.error(f"鉂?鍒犻櫎鏂囦欢澶辫触: {chapter_audio.audio_path}, 閿欒: {e}")
                 failed_file = chapter_audio.audio_path
     
-    logger.info(f"✅ 章节音频软删除成功: chapter_audio_id={chapter_audio_id}, audit_id={audit_log.id}")
+    logger.info(f"鉁?绔犺妭闊抽杞垹闄ゆ垚鍔? chapter_audio_id={chapter_audio_id}, audit_id={audit_log.id}")
     
     return {
         "success": True,
-        "message": "章节音频已删除",
+        "message": "绔犺妭闊抽宸插垹闄?,
         "audit_id": audit_log.id,
         "deleted_file": deleted_file,
         "failed_file": failed_file,
@@ -1267,32 +1264,32 @@ async def restore_audiobook_project(
     db: Session = Depends(get_db)
 ):
     """
-    恢复已删除的有声书项目
+    鎭㈠宸插垹闄ょ殑鏈夊０涔﹂」鐩?
     
-    工作流：
-    1. 验证权限
-    2. 恢复项目及关联的章节音频
-    3. 更新审计日志
+    宸ヤ綔娴侊細
+    1. 楠岃瘉鏉冮檺
+    2. 鎭㈠椤圭洰鍙婂叧鑱旂殑绔犺妭闊抽
+    3. 鏇存柊瀹¤鏃ュ織
     """
-    logger.info(f"♻️ 用户 {current_user.id} 请求恢复有声书项目: audiobook_project_id={audiobook_project_id}")
+    logger.info(f"鈾伙笍 鐢ㄦ埛 {current_user.id} 璇锋眰鎭㈠鏈夊０涔﹂」鐩? audiobook_project_id={audiobook_project_id}")
     
-    # 1. 验证有声书项目是否存在
+    # 1. 楠岃瘉鏈夊０涔﹂」鐩槸鍚﹀瓨鍦?
     audiobook_project = AudiobookProjectRepository.get_by_id(db, audiobook_project_id)
     if not audiobook_project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="有声书项目不存在"
+            detail="鏈夊０涔﹂」鐩笉瀛樺湪"
         )
 
-    # 2. 验证原始项目权限
+    # 2. 楠岃瘉鍘熷椤圭洰鏉冮檺
     project = ProjectRepository.get_user_project(db, current_user.id, audiobook_project.project_id)
     if not project:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权限恢复此项目"
+            detail="鏃犳潈闄愭仮澶嶆椤圭洰"
         )
 
-    # 3. 恢复项目
+    # 3. 鎭㈠椤圭洰
     restored_project = AudiobookProjectRepository.restore(
         db=db,
         audiobook_project_id=audiobook_project_id,
@@ -1302,14 +1299,14 @@ async def restore_audiobook_project(
     if not restored_project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="项目不存在或未被删除"
+            detail="椤圭洰涓嶅瓨鍦ㄦ垨鏈鍒犻櫎"
         )
     
-    logger.info(f"✅ 有声书项目恢复成功: audiobook_project_id={audiobook_project_id}")
+    logger.info(f"鉁?鏈夊０涔﹂」鐩仮澶嶆垚鍔? audiobook_project_id={audiobook_project_id}")
     
     return {
         "success": True,
-        "message": "有声书项目已恢复",
+        "message": "鏈夊０涔﹂」鐩凡鎭㈠",
         "project_id": restored_project.id,
         "restored_at": utc_now().isoformat()
     }
@@ -1322,16 +1319,16 @@ async def restore_chapter_audio(
     db: Session = Depends(get_db)
 ):
     """
-    恢复已删除的章节音频
+    鎭㈠宸插垹闄ょ殑绔犺妭闊抽
     
-    工作流：
-    1. 验证权限
-    2. 恢复章节音频
-    3. 更新审计日志
+    宸ヤ綔娴侊細
+    1. 楠岃瘉鏉冮檺
+    2. 鎭㈠绔犺妭闊抽
+    3. 鏇存柊瀹¤鏃ュ織
     """
-    logger.info(f"♻️ 用户 {current_user.id} 请求恢复章节音频: chapter_audio_id={chapter_audio_id}")
+    logger.info(f"鈾伙笍 鐢ㄦ埛 {current_user.id} 璇锋眰鎭㈠绔犺妭闊抽: chapter_audio_id={chapter_audio_id}")
     
-    # 1. 获取章节音频
+    # 1. 鑾峰彇绔犺妭闊抽
     chapter_audio = db.query(ChapterAudio).filter(
         ChapterAudio.id == chapter_audio_id
     ).first()
@@ -1339,10 +1336,10 @@ async def restore_chapter_audio(
     if not chapter_audio:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="章节音频不存在"
+            detail="绔犺妭闊抽涓嶅瓨鍦?
         )
     
-    # 2. 验证权限
+    # 2. 楠岃瘉鏉冮檺
     audiobook_project = db.query(AudiobookProject).filter(
         AudiobookProject.id == chapter_audio.audiobook_project_id
     ).first()
@@ -1350,7 +1347,7 @@ async def restore_chapter_audio(
     if not audiobook_project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="有声书项目不存在"
+            detail="鏈夊０涔﹂」鐩笉瀛樺湪"
         )
     
     project = db.query(Project).filter(
@@ -1361,10 +1358,10 @@ async def restore_chapter_audio(
     if not project:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权限恢复此章节音频"
+            detail="鏃犳潈闄愭仮澶嶆绔犺妭闊抽"
         )
     
-    # 3. 恢复章节音频
+    # 3. 鎭㈠绔犺妭闊抽
     restored_audio = ChapterAudioRepository.restore(
         db=db,
         chapter_audio_id=chapter_audio_id,
@@ -1374,14 +1371,14 @@ async def restore_chapter_audio(
     if not restored_audio:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="章节音频不存在或未被删除"
+            detail="绔犺妭闊抽涓嶅瓨鍦ㄦ垨鏈鍒犻櫎"
         )
     
-    logger.info(f"✅ 章节音频恢复成功: chapter_audio_id={chapter_audio_id}")
+    logger.info(f"鉁?绔犺妭闊抽鎭㈠鎴愬姛: chapter_audio_id={chapter_audio_id}")
     
     return {
         "success": True,
-        "message": "章节音频已恢复",
+        "message": "绔犺妭闊抽宸叉仮澶?,
         "chapter_audio_id": restored_audio.id,
         "restored_at": utc_now().isoformat()
     }
@@ -1394,30 +1391,30 @@ async def list_deleted_projects(
     limit: int = 50
 ):
     """
-    获取用户已删除的有声书项目列表（回收站）
+    鑾峰彇鐢ㄦ埛宸插垹闄ょ殑鏈夊０涔﹂」鐩垪琛紙鍥炴敹绔欙級
     
-    返回：已删除的项目列表，包含审计信息
+    杩斿洖锛氬凡鍒犻櫎鐨勯」鐩垪琛紝鍖呭惈瀹¤淇℃伅
     """
-    logger.info(f"📋 用户 {current_user.id} 查询已删除项目列表")
+    logger.info(f"馃搵 鐢ㄦ埛 {current_user.id} 鏌ヨ宸插垹闄ら」鐩垪琛?)
     
-    # 获取已删除的项目
+    # 鑾峰彇宸插垹闄ょ殑椤圭洰
     deleted_projects = AudiobookProjectRepository.list_deleted(
         db=db,
         user_id=current_user.id,
         limit=limit
     )
     
-    # 获取审计日志
+    # 鑾峰彇瀹¤鏃ュ織
     project_ids = [p.id for p in deleted_projects]
     audit_logs = db.query(AudiobookDeleteAudit).filter(
         AudiobookDeleteAudit.target_id.in_(project_ids),
         AudiobookDeleteAudit.delete_type == 'project'
     ).all()
     
-    # 构建审计日志映射
+    # 鏋勫缓瀹¤鏃ュ織鏄犲皠
     audit_map = {log.target_id: log for log in audit_logs}
     
-    # 构建响应
+    # 鏋勫缓鍝嶅簲
     result = []
     source_project_ids = list({p.project_id for p in deleted_projects})
     source_title_by_id: Dict[int, str] = {}
@@ -1449,7 +1446,7 @@ async def list_deleted_projects(
             "restored_at": audit.restored_at.isoformat() if audit and audit.restored_at else None,
         })
     
-    logger.info(f"✅ 查询到 {len(result)} 个已删除项目")
+    logger.info(f"鉁?鏌ヨ鍒?{len(result)} 涓凡鍒犻櫎椤圭洰")
     
     return {
         "success": True,
@@ -1464,12 +1461,12 @@ async def get_task_status(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """查询指定任务的持久化队列状态。"""
+    """鏌ヨ鎸囧畾浠诲姟鐨勬寔涔呭寲闃熷垪鐘舵€併€?""
     task = AudiobookTaskRepository.get_task_for_user(db, task_id, current_user.id)
     if not task:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"任务不存在: {task_id}",
+            detail=f"浠诲姟涓嶅瓨鍦? {task_id}",
         )
     return build_task_status_response(task)
 
@@ -1479,7 +1476,7 @@ async def list_all_tasks(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """列出当前用户最近的有声书后台任务。"""
+    """鍒楀嚭褰撳墠鐢ㄦ埛鏈€杩戠殑鏈夊０涔﹀悗鍙颁换鍔°€?""
     tasks = AudiobookTaskRepository.list_tasks_for_user(db, current_user.id)
     return [build_task_status_response(task) for task in tasks]
 
@@ -1492,13 +1489,13 @@ async def download_chapter_audio(
     db: Session = Depends(get_db)
 ):
     """
-    下载章节音频文件
+    涓嬭浇绔犺妭闊抽鏂囦欢
     
-    返回：MP3音频文件流
+    杩斿洖锛歁P3闊抽鏂囦欢娴?
     """
-    logger.info(f"🎧 用户 {current_user.id} 下载音频: audiobook_project_id={audiobook_project_id}, chapter_id={chapter_id}")
+    logger.info(f"馃帶 鐢ㄦ埛 {current_user.id} 涓嬭浇闊抽: audiobook_project_id={audiobook_project_id}, chapter_id={chapter_id}")
     
-    # 1. 验证有声书项目权限
+    # 1. 楠岃瘉鏈夊０涔﹂」鐩潈闄?
     audiobook_project = db.query(AudiobookProject).filter(
         AudiobookProject.id == audiobook_project_id
     ).first()
@@ -1506,10 +1503,10 @@ async def download_chapter_audio(
     if not audiobook_project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="有声书项目不存在"
+            detail="鏈夊０涔﹂」鐩笉瀛樺湪"
         )
     
-    # 验证原始项目权限
+    # 楠岃瘉鍘熷椤圭洰鏉冮檺
     project = db.query(Project).filter(
         Project.id == audiobook_project.project_id,
         Project.user_id == current_user.id
@@ -1518,10 +1515,10 @@ async def download_chapter_audio(
     if not project:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权限访问"
+            detail="鏃犳潈闄愯闂?
         )
     
-    # 2. 获取章节音频记录
+    # 2. 鑾峰彇绔犺妭闊抽璁板綍
     chapter_audio = db.query(ChapterAudio).filter(
         ChapterAudio.audiobook_project_id == audiobook_project_id,
         ChapterAudio.chapter_id == chapter_id
@@ -1530,37 +1527,37 @@ async def download_chapter_audio(
     if not chapter_audio:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="章节音频不存在"
+            detail="绔犺妭闊抽涓嶅瓨鍦?
         )
     
-    # 3. 检查文件是否存在
+    # 3. 妫€鏌ユ枃浠舵槸鍚﹀瓨鍦?
     if not chapter_audio.audio_path:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="音频文件路径不存在"
+            detail="闊抽鏂囦欢璺緞涓嶅瓨鍦?
         )
     
     file_path = chapter_audio.audio_path
     if not os.path.exists(file_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"音频文件不存在: {file_path}"
+            detail=f"闊抽鏂囦欢涓嶅瓨鍦? {file_path}"
         )
     
-    # 4. 获取章节标题作为文件名
+    # 4. 鑾峰彇绔犺妭鏍囬浣滀负鏂囦欢鍚?
     chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
-    filename = f"第{chapter.chapter_number}章-{chapter.title}.mp3" if chapter else f"chapter_{chapter_id}.mp3"
+    filename = f"绗瑊chapter.chapter_number}绔?{chapter.title}.mp3" if chapter else f"chapter_{chapter_id}.mp3"
     
-    # URL编码文件名（支持中文）
+    # URL缂栫爜鏂囦欢鍚嶏紙鏀寔涓枃锛?
     encoded_filename = quote(filename)
     
-    logger.info(f"✅ 返回音频文件: {file_path}")
+    logger.info(f"鉁?杩斿洖闊抽鏂囦欢: {file_path}")
     
-    # 5. 返回文件
+    # 5. 杩斿洖鏂囦欢
     return FileResponse(
         path=file_path,
         media_type="audio/mpeg",
-        filename=filename,  # 保留原始文件名（供浏览器显示）
+        filename=filename,  # 淇濈暀鍘熷鏂囦欢鍚嶏紙渚涙祻瑙堝櫒鏄剧ず锛?
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
             "Access-Control-Expose-Headers": "Content-Disposition"
@@ -1576,13 +1573,13 @@ async def stream_chapter_audio(
     db: Session = Depends(get_db)
 ):
     """
-    流式播放章节音频（用于在线播放）
+    娴佸紡鎾斁绔犺妭闊抽锛堢敤浜庡湪绾挎挱鏀撅級
     
-    返回：音频文件流（支持Range请求）
+    杩斿洖锛氶煶棰戞枃浠舵祦锛堟敮鎸丷ange璇锋眰锛?
     """
-    logger.info(f"🎵 用户 {current_user.id} 在线播放: audiobook_project_id={audiobook_project_id}, chapter_id={chapter_id}")
+    logger.info(f"馃幍 鐢ㄦ埛 {current_user.id} 鍦ㄧ嚎鎾斁: audiobook_project_id={audiobook_project_id}, chapter_id={chapter_id}")
     
-    # 1. 验证权限（同下载接口）
+    # 1. 楠岃瘉鏉冮檺锛堝悓涓嬭浇鎺ュ彛锛?
     audiobook_project = db.query(AudiobookProject).filter(
         AudiobookProject.id == audiobook_project_id
     ).first()
@@ -1590,7 +1587,7 @@ async def stream_chapter_audio(
     if not audiobook_project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="有声书项目不存在"
+            detail="鏈夊０涔﹂」鐩笉瀛樺湪"
         )
     
     project = db.query(Project).filter(
@@ -1601,10 +1598,10 @@ async def stream_chapter_audio(
     if not project:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权限访问"
+            detail="鏃犳潈闄愯闂?
         )
     
-    # 2. 获取音频文件路径
+    # 2. 鑾峰彇闊抽鏂囦欢璺緞
     chapter_audio = db.query(ChapterAudio).filter(
         ChapterAudio.audiobook_project_id == audiobook_project_id,
         ChapterAudio.chapter_id == chapter_id
@@ -1613,19 +1610,19 @@ async def stream_chapter_audio(
     if not chapter_audio or not chapter_audio.audio_path:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="章节音频不存在"
+            detail="绔犺妭闊抽涓嶅瓨鍦?
         )
     
     file_path = chapter_audio.audio_path
     if not os.path.exists(file_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"音频文件不存在: {file_path}"
+            detail=f"闊抽鏂囦欢涓嶅瓨鍦? {file_path}"
         )
     
-    logger.info(f"✅ 流式播放文件: {file_path}")
+    logger.info(f"鉁?娴佸紡鎾斁鏂囦欢: {file_path}")
     
-    # 3. 返回文件流（inline模式，浏览器直接播放）
+    # 3. 杩斿洖鏂囦欢娴侊紙inline妯″紡锛屾祻瑙堝櫒鐩存帴鎾斁锛?
     return FileResponse(
         path=file_path,
         media_type="audio/mpeg",
@@ -1637,7 +1634,7 @@ async def stream_chapter_audio(
     )
 
 
-# ==================== 剧本编辑与音频生成（两阶段相关） ====================
+# ==================== 鍓ф湰缂栬緫涓庨煶棰戠敓鎴愶紙涓ら樁娈电浉鍏筹級 ====================
 
 @router.get("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/script", response_model=dict)
 async def get_chapter_script(
@@ -1646,11 +1643,11 @@ async def get_chapter_script(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """获取指定章节的有声剧本与评审结果。
+    """鑾峰彇鎸囧畾绔犺妭鐨勬湁澹板墽鏈笌璇勫缁撴灉銆?
 
-    仅返回最近一次生成/保存的剧本快照，不做版本历史。
+    浠呰繑鍥炴渶杩戜竴娆＄敓鎴?淇濆瓨鐨勫墽鏈揩鐓э紝涓嶅仛鐗堟湰鍘嗗彶銆?
     """
-    # 验证有声书项目
+    # 楠岃瘉鏈夊０涔﹂」鐩?
     audiobook_project = db.query(AudiobookProject).filter(
         AudiobookProject.id == audiobook_project_id
     ).first()
@@ -1658,10 +1655,10 @@ async def get_chapter_script(
     if not audiobook_project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="有声书项目不存在",
+            detail="鏈夊０涔﹂」鐩笉瀛樺湪",
         )
 
-    # 验证原始项目权限
+    # 楠岃瘉鍘熷椤圭洰鏉冮檺
     project = db.query(Project).filter(
         Project.id == audiobook_project.project_id,
         Project.user_id == current_user.id,
@@ -1670,10 +1667,10 @@ async def get_chapter_script(
     if not project:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权限访问",
+            detail="鏃犳潈闄愯闂?,
         )
 
-    # 获取章节剧本记录
+    # 鑾峰彇绔犺妭鍓ф湰璁板綍
     chapter_audio = db.query(ChapterAudio).filter(
         ChapterAudio.audiobook_project_id == audiobook_project_id,
         ChapterAudio.chapter_id == chapter_id,
@@ -1709,23 +1706,23 @@ async def get_chapter_script(
             chapter_audio.character_count = fallback.character_count
             db.commit()
             logger.info(
-                "♻️ 章节 %s 复用历史剧本供 audiobook_project_id=%s 使用",
+                "鈾伙笍 绔犺妭 %s 澶嶇敤鍘嗗彶鍓ф湰渚?audiobook_project_id=%s 浣跨敤",
                 chapter_id,
                 audiobook_project_id,
             )
         else:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="章节剧本不存在，请先生成剧本",
+                detail="绔犺妭鍓ф湰涓嶅瓨鍦紝璇峰厛鐢熸垚鍓ф湰",
             )
 
     try:
         script_segments = json.loads(chapter_audio.script_json)
     except Exception as e:
-        logger.error(f"❌ 解析章节剧本JSON失败 chapter_id={chapter_id}: {e}")
+        logger.error(f"鉂?瑙ｆ瀽绔犺妭鍓ф湰JSON澶辫触 chapter_id={chapter_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="章节剧本数据损坏，请尝试重新生成",
+            detail="绔犺妭鍓ф湰鏁版嵁鎹熷潖锛岃灏濊瘯閲嶆柊鐢熸垚",
         )
 
     script_review = None
@@ -1733,7 +1730,7 @@ async def get_chapter_script(
         try:
             script_review = json.loads(chapter_audio.script_review_json)
         except Exception as e:
-            logger.warning(f"⚠️ 解析章节剧本评审JSON失败 chapter_id={chapter_id}: {e}")
+            logger.warning(f"鈿狅笍 瑙ｆ瀽绔犺妭鍓ф湰璇勫JSON澶辫触 chapter_id={chapter_id}: {e}")
 
     return {
         "chapter_id": chapter_id,
@@ -1751,12 +1748,12 @@ async def update_chapter_script(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """更新指定章节的有声剧本。
+    """鏇存柊鎸囧畾绔犺妭鐨勬湁澹板墽鏈€?
 
-    - script_segments：覆盖写入最近一次剧本快照
-    - script_status：可选，pending/reviewed/approved
+    - script_segments锛氳鐩栧啓鍏ユ渶杩戜竴娆″墽鏈揩鐓?
+    - script_status锛氬彲閫夛紝pending/reviewed/approved
     """
-    # 验证有声书项目
+    # 楠岃瘉鏈夊０涔﹂」鐩?
     audiobook_project = db.query(AudiobookProject).filter(
         AudiobookProject.id == audiobook_project_id
     ).first()
@@ -1764,10 +1761,10 @@ async def update_chapter_script(
     if not audiobook_project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="有声书项目不存在",
+            detail="鏈夊０涔﹂」鐩笉瀛樺湪",
         )
 
-    # 验证原始项目权限
+    # 楠岃瘉鍘熷椤圭洰鏉冮檺
     project = db.query(Project).filter(
         Project.id == audiobook_project.project_id,
         Project.user_id == current_user.id,
@@ -1776,10 +1773,10 @@ async def update_chapter_script(
     if not project:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权限访问",
+            detail="鏃犳潈闄愯闂?,
         )
 
-    # 验证章节是否属于该项目
+    # 楠岃瘉绔犺妭鏄惁灞炰簬璇ラ」鐩?
     chapter = db.query(Chapter).filter(
         Chapter.id == chapter_id,
         Chapter.project_id == project.id,
@@ -1788,10 +1785,10 @@ async def update_chapter_script(
     if not chapter:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="章节不存在或不属于该项目",
+            detail="绔犺妭涓嶅瓨鍦ㄦ垨涓嶅睘浜庤椤圭洰",
         )
 
-    # 获取或创建章节音频记录
+    # 鑾峰彇鎴栧垱寤虹珷鑺傞煶棰戣褰?
     chapter_audio = db.query(ChapterAudio).filter(
         ChapterAudio.audiobook_project_id == audiobook_project_id,
         ChapterAudio.chapter_id == chapter_id,
@@ -1804,28 +1801,28 @@ async def update_chapter_script(
         )
         db.add(chapter_audio)
 
-    # 覆盖写入剧本
+    # 瑕嗙洊鍐欏叆鍓ф湰
     try:
         chapter_audio.script_json = json.dumps(
             request.script_segments or [], ensure_ascii=False
         )
     except Exception as e:
-        logger.error(f"❌ 序列化章节剧本失败 chapter_id={chapter_id}: {e}")
+        logger.error(f"鉂?搴忓垪鍖栫珷鑺傚墽鏈け璐?chapter_id={chapter_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="剧本数据格式不合法",
+            detail="鍓ф湰鏁版嵁鏍煎紡涓嶅悎娉?,
         )
 
-    # 更新脚本状态（如有）
+    # 鏇存柊鑴氭湰鐘舵€侊紙濡傛湁锛?
     if request.script_status:
         if request.script_status not in {"pending", "reviewed", "approved"}:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="无效的script_status，必须为 pending/reviewed/approved",
+                detail="鏃犳晥鐨剆cript_status锛屽繀椤讳负 pending/reviewed/approved",
             )
         chapter_audio.script_status = request.script_status
 
-    # 剧本变化后，清空最终音频评审，防止混淆
+    # 鍓ф湰鍙樺寲鍚庯紝娓呯┖鏈€缁堥煶棰戣瘎瀹★紝闃叉娣锋穯
     chapter_audio.final_audio_review_json = None
 
     db.commit()
@@ -1846,14 +1843,14 @@ async def preview_script_segment_audio(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """单段剧本片段音频试听（不落库）"""
+    """鍗曟鍓ф湰鐗囨闊抽璇曞惉锛堜笉钀藉簱锛?""
     audiobook_project = db.query(AudiobookProject).filter(
         AudiobookProject.id == audiobook_project_id
     ).first()
     if not audiobook_project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="有声书项目不存在",
+            detail="鏈夊０涔﹂」鐩笉瀛樺湪",
         )
 
     project = db.query(Project).filter(
@@ -1863,7 +1860,7 @@ async def preview_script_segment_audio(
     if not project:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="无权限访问",
+            detail="鏃犳潈闄愯闂?,
         )
 
     chapter = db.query(Chapter).filter(
@@ -1873,21 +1870,21 @@ async def preview_script_segment_audio(
     if not chapter:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="章节不存在或不属于该项目",
+            detail="绔犺妭涓嶅瓨鍦ㄦ垨涓嶅睘浜庤椤圭洰",
         )
 
     segment = request.segment or {}
     if not isinstance(segment, dict):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="segment 数据格式不正确",
+            detail="segment 鏁版嵁鏍煎紡涓嶆纭?,
         )
 
     text = str(segment.get("text") or "").strip()
     if not text:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="台词不能为空",
+            detail="鍙拌瘝涓嶈兘涓虹┖",
         )
 
     tts_model = (request.tts_model or "qwen3-tts-flash").strip()
@@ -1925,10 +1922,10 @@ async def preview_script_segment_audio(
         try:
             voice_manager.apply_project_voice_mapping(effective_voice_mapping)
         except Exception as exc:
-            logger.warning("单段音色映射失败: %s", exc)
+            logger.warning("鍗曟闊宠壊鏄犲皠澶辫触: %s", exc)
 
-    speaker = str(segment.get("speaker") or "旁白").strip() or "旁白"
-    if speaker in {"旁白", "narrator", "Narrator"}:
+    speaker = str(segment.get("speaker") or "鏃佺櫧").strip() or "鏃佺櫧"
+    if speaker in {"鏃佺櫧", "narrator", "Narrator"}:
         voice_profile = voice_manager.get_narrator_voice()
     else:
         voice_profile = voice_manager.get_voice(speaker)
@@ -2097,7 +2094,7 @@ async def preview_script_segment_audio(
                 str(file_ref or ""), str(item.get("description") or ""), base_dir
             )
             if not effect_path or not effect_path.exists():
-                logger.warning("?? 试听音效文件不存在: %s", effect_path or file_ref)
+                logger.warning("?? 璇曞惉闊虫晥鏂囦欢涓嶅瓨鍦? %s", effect_path or file_ref)
                 continue
 
             effect_type_str = item.get("type", "action")
@@ -2149,7 +2146,7 @@ async def preview_script_segment_audio(
                     ducking_chunk_ms=int(ducking_chunk_ms),
                 )
             except Exception as exc:
-                logger.warning("?? 叠加试听音效失败 %s: %s", effect_path, exc)
+                logger.warning("?? 鍙犲姞璇曞惉闊虫晥澶辫触 %s: %s", effect_path, exc)
         return mixed_audio
 
     def normalize_music_cue(segment_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -2200,17 +2197,17 @@ async def preview_script_segment_audio(
 
     def infer_music_mood(emotion_value: str) -> str:
         raw = (emotion_value or "").lower()
-        if any(key in raw for key in ["sad", "悲", "伤"]):
+        if any(key in raw for key in ["sad", "鎮?, "浼?]):
             return "sad"
-        if any(key in raw for key in ["happy", "joy", "欢", "乐"]):
+        if any(key in raw for key in ["happy", "joy", "娆?, "涔?]):
             return "joyful"
-        if any(key in raw for key in ["tense", "angry", "fear", "紧张", "恐惧", "愤怒"]):
+        if any(key in raw for key in ["tense", "angry", "fear", "绱у紶", "鎭愭儳", "鎰ゆ€?]):
             return "tense"
-        if any(key in raw for key in ["romantic", "love", "浪漫"]):
+        if any(key in raw for key in ["romantic", "love", "娴极"]):
             return "romantic"
-        if any(key in raw for key in ["mysterious", "神秘"]):
+        if any(key in raw for key in ["mysterious", "绁炵"]):
             return "mysterious"
-        if any(key in raw for key in ["epic", "史诗", "宏大"]):
+        if any(key in raw for key in ["epic", "鍙茶瘲", "瀹忓ぇ"]):
             return "epic"
         return "peaceful"
 
@@ -2223,7 +2220,7 @@ async def preview_script_segment_audio(
             data = json.loads(raw)
             return data if isinstance(data, list) else []
         except Exception as exc:
-            logger.warning("?? 读取音乐索引失败: %s", exc)
+            logger.warning("?? 璇诲彇闊充箰绱㈠紩澶辫触: %s", exc)
             return []
 
     def resolve_music_path(
@@ -2290,7 +2287,7 @@ async def preview_script_segment_audio(
             music_index,
         )
         if not music_path or not music_path.exists():
-            logger.warning("?? 试听配乐文件不存在: %s", music_path)
+            logger.warning("?? 璇曞惉閰嶄箰鏂囦欢涓嶅瓨鍦? %s", music_path)
             return base_audio
 
         base_bgm_volume_db = audio_fx.get("base_bgm_volume", -36)
@@ -2341,7 +2338,7 @@ async def preview_script_segment_audio(
                 dialogue_volume_reduction=float(cue.get("dialogue_volume_reduction") or 0.0),
             )
         except Exception as exc:
-            logger.warning("?? 叠加试听配乐失败 %s: %s", music_path, exc)
+            logger.warning("?? 鍙犲姞璇曞惉閰嶄箰澶辫触 %s: %s", music_path, exc)
             return base_audio
 
     voice_audio: Optional[bytes] = None
@@ -2365,16 +2362,16 @@ async def preview_script_segment_audio(
                 retry_config=preview_retry,
             )
         except Exception as exc:
-            logger.warning("单段TTS试听失败: %s", exc)
+            logger.warning("鍗曟TTS璇曞惉澶辫触: %s", exc)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"message": "TTS服务暂时不可用，请稍后重试", "retryable": True},
+                detail={"message": "TTS鏈嶅姟鏆傛椂涓嶅彲鐢紝璇风◢鍚庨噸璇?, "retryable": True},
             ) from exc
 
         if not voice_audio:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"message": "TTS服务暂时不可用，请稍后重试", "retryable": True},
+                detail={"message": "TTS鏈嶅姟鏆傛椂涓嶅彲鐢紝璇风◢鍚庨噸璇?, "retryable": True},
             )
 
         if preview_type == "voice":
@@ -2392,7 +2389,7 @@ async def preview_script_segment_audio(
         if preview_type == "sfx" and not effect_timeline:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="该片段未配置音效，无法试听音效",
+                detail="璇ョ墖娈垫湭閰嶇疆闊虫晥锛屾棤娉曡瘯鍚煶鏁?,
             )
 
     music_cue = None
@@ -2401,7 +2398,7 @@ async def preview_script_segment_audio(
         if preview_type == "bgm" and not music_cue:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="该片段未配置配乐，无法试听配乐",
+                detail="璇ョ墖娈垫湭閰嶇疆閰嶄箰锛屾棤娉曡瘯鍚厤涔?,
             )
 
     base_duration = estimated_duration
@@ -2440,7 +2437,7 @@ async def preview_script_segment_audio(
         if not base_audio:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="音频混音组件不可用，无法生成试听音频",
+                detail="闊抽娣烽煶缁勪欢涓嶅彲鐢紝鏃犳硶鐢熸垚璇曞惉闊抽",
             )
     else:
         base_audio = voice_audio or b""
@@ -2465,7 +2462,7 @@ async def preview_script_segment_audio(
     if not mixed_audio:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="试听音频生成失败，请稍后重试",
+            detail="璇曞惉闊抽鐢熸垚澶辫触锛岃绋嶅悗閲嶈瘯",
         )
 
     return Response(content=mixed_audio, media_type="audio/mpeg")
@@ -2480,25 +2477,22 @@ async def regenerate_segment(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """单个片段重新生成
+    """鍗曚釜鐗囨閲嶆柊鐢熸垚
     
-    功能：
-    1. 重新调用 TTS API 生成该片段的新音频
-    2. 替换原有的片段音频
-    3. 可选：使用不同的 TTS 模型/音色/情感
+    鍔熻兘锛?    1. 閲嶆柊璋冪敤 TTS API 鐢熸垚璇ョ墖娈电殑鏂伴煶棰?    2. 鏇挎崲鍘熸湁鐨勭墖娈甸煶棰?    3. 鍙€夛細浣跨敤涓嶅悓鐨?TTS 妯″瀷/闊宠壊/鎯呮劅
     """
     audiobook_project = db.query(AudiobookProject).filter(
         AudiobookProject.id == audiobook_project_id
     ).first()
     if not audiobook_project:
-        raise HTTPException(status_code=404, detail="有声书项目不存在")
+        raise HTTPException(status_code=404, detail="鏈夊０涔﹂」鐩笉瀛樺湪")
     
     project = db.query(Project).filter(
         Project.id == audiobook_project.project_id,
         Project.user_id == current_user.id,
     ).first()
     if not project:
-        raise HTTPException(status_code=403, detail="无权限访问")
+        raise HTTPException(status_code=403, detail="鏃犳潈闄愯闂?)
     
     chapter_audio = db.query(ChapterAudio).filter(
         ChapterAudio.audiobook_project_id == audiobook_project_id,
@@ -2512,25 +2506,25 @@ async def regenerate_segment(
         audiobook_project_id=audiobook_project_id,
     )
     if not chapter_audio:
-        raise HTTPException(status_code=404, detail="章节音频记录不存在")
+        raise HTTPException(status_code=404, detail="绔犺妭闊抽璁板綍涓嶅瓨鍦?)
     
-    # 加载剧本片段
+    # 鍔犺浇鍓ф湰鐗囨
     try:
         segments = json.loads(chapter_audio.script_json)
     except:
-        raise HTTPException(status_code=500, detail="章节剧本数据损坏")
+        raise HTTPException(status_code=500, detail="绔犺妭鍓ф湰鏁版嵁鎹熷潖")
     
     if segment_index < 0 or segment_index >= len(segments):
-        raise HTTPException(status_code=404, detail="片段索引无效")
+        raise HTTPException(status_code=404, detail="鐗囨绱㈠紩鏃犳晥")
     
     segment = segments[segment_index]
     
-    # 构建 TTS 请求参数
+    # 鏋勫缓 TTS 璇锋眰鍙傛暟
     tts_model = request.tts_model or (chapter_audio.tts_model or "qwen3-tts-flash")
     voice_id = request.voice_id or segment.get("voice_id", "longxiaochun")
     emotion = request.emotion or segment.get("emotion", "neutral")
     
-    # 创建 TTS 引擎
+    # 鍒涘缓 TTS 寮曟搸
     engine = create_tts_engine(
         model=tts_model,
         retry_config=RetryConfig(max_retries=3, base_delay=1.0),
@@ -2541,14 +2535,14 @@ async def regenerate_segment(
         "emotion": emotion,
     }
     
-    # 调用 TTS
+    # 璋冪敤 TTS
     text = segment.get("text", "")
     audio_bytes = await engine.synthesize(text, voice_params=voice_params)
     
     if not audio_bytes:
-        raise HTTPException(status_code=500, detail="TTS 生成失败")
+        raise HTTPException(status_code=500, detail="TTS 鐢熸垚澶辫触")
     
-    # 保存新音频（覆盖原音频）
+    # 淇濆瓨鏂伴煶棰戯紙瑕嗙洊鍘熼煶棰戯級
     try:
         output_dir = chapter_audio.get_audio_dir()
         os.makedirs(output_dir, exist_ok=True)
@@ -2559,19 +2553,19 @@ async def regenerate_segment(
         with open(audio_path, "wb") as f:
             f.write(audio_bytes)
         
-        # 更新 segment 中的音频路径
+        # 鏇存柊 segment 涓殑闊抽璺緞
         segment["audio_path"] = audio_path
         segment["regenerated"] = True
         segment["regenerated_at"] = datetime.utcnow().isoformat()
         if request.reason:
             segment["regenerate_reason"] = request.reason
         
-        # 保存更新后的剧本
+        # 淇濆瓨鏇存柊鍚庣殑鍓ф湰
         chapter_audio.script_json = json.dumps(segments, ensure_ascii=False)
         db.commit()
         
         logger.info(
-            f"✅ 片段重新生成成功: chapter_id={chapter_id}, "
+            f"鉁?鐗囨閲嶆柊鐢熸垚鎴愬姛: chapter_id={chapter_id}, "
             f"segment_index={segment_index}, model={tts_model}"
         )
         
@@ -2584,8 +2578,8 @@ async def regenerate_segment(
         }
     
     except Exception as e:
-        logger.error(f"❌ 保存重新生成的音频失败: {e}")
-        raise HTTPException(status_code=500, detail=f"保存音频失败: {str(e)}")
+        logger.error(f"鉂?淇濆瓨閲嶆柊鐢熸垚鐨勯煶棰戝け璐? {e}")
+        raise HTTPException(status_code=500, detail=f"淇濆瓨闊抽澶辫触: {str(e)}")
 
 
 @router.post("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/segments/{segment_index:int}/review")
@@ -2597,34 +2591,32 @@ async def review_segment(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """片段审查/评分
+    """鐗囨瀹℃煡/璇勫垎
     
-    功能：
-    1. 记录片段的质量评分和备注
-    2. 标记需要重新生成的片段
-    3. 更新章节整体审查状态
-    """
+    鍔熻兘锛?    1. 璁板綍鐗囨鐨勮川閲忚瘎鍒嗗拰澶囨敞
+    2. 鏍囪闇€瑕侀噸鏂扮敓鎴愮殑鐗囨
+    3. 鏇存柊绔犺妭鏁翠綋瀹℃煡鐘舵€?    """
     audiobook_project = db.query(AudiobookProject).filter(
         AudiobookProject.id == audiobook_project_id
     ).first()
     if not audiobook_project:
-        raise HTTPException(status_code=404, detail="有声书项目不存在")
+        raise HTTPException(status_code=404, detail="鏈夊０涔﹂」鐩笉瀛樺湪")
     
     project = db.query(Project).filter(
         Project.id == audiobook_project.project_id,
         Project.user_id == current_user.id,
     ).first()
     if not project:
-        raise HTTPException(status_code=403, detail="无权限访问")
+        raise HTTPException(status_code=403, detail="鏃犳潈闄愯闂?)
     
     chapter_audio = db.query(ChapterAudio).filter(
         ChapterAudio.audiobook_project_id == audiobook_project_id,
         ChapterAudio.chapter_id == chapter_id,
     ).first()
     if not chapter_audio:
-        raise HTTPException(status_code=404, detail="章节音频记录不存在")
+        raise HTTPException(status_code=404, detail="绔犺妭闊抽璁板綍涓嶅瓨鍦?)
     
-    # 加载审查记录
+    # 鍔犺浇瀹℃煡璁板綍
     review_data = {}
     if chapter_audio.segment_reviews_json:
         try:
@@ -2632,7 +2624,7 @@ async def review_segment(
         except:
             pass
     
-    # 记录审查结果
+    # 璁板綍瀹℃煡缁撴灉
     review_key = str(segment_index)
     review_data[review_key] = {
         "quality_score": request.quality_score,
@@ -2659,36 +2651,33 @@ async def get_chapter_review_status(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """获取章节整体审查状态
-    
-    返回：
-    - 总片段数
-    - 已审查片段数
-    - 平均质量评分
-    - 标记需要重新生成的片段索引
+    """鑾峰彇绔犺妭鏁翠綋瀹℃煡鐘舵€?    
+    杩斿洖锛?    - 鎬荤墖娈垫暟
+    - 宸插鏌ョ墖娈垫暟
+    - 骞冲潎璐ㄩ噺璇勫垎
+    - 鏍囪闇€瑕侀噸鏂扮敓鎴愮殑鐗囨绱㈠紩
     """
     audiobook_project = db.query(AudiobookProject).filter(
         AudiobookProject.id == audiobook_project_id
     ).first()
     if not audiobook_project:
-        raise HTTPException(status_code=404, detail="有声书项目不存在")
+        raise HTTPException(status_code=404, detail="鏈夊０涔﹂」鐩笉瀛樺湪")
     
     project = db.query(Project).filter(
         Project.id == audiobook_project.project_id,
         Project.user_id == current_user.id,
     ).first()
     if not project:
-        raise HTTPException(status_code=403, detail="无权限访问")
+        raise HTTPException(status_code=403, detail="鏃犳潈闄愯闂?)
     
     chapter_audio = db.query(ChapterAudio).filter(
         ChapterAudio.audiobook_project_id == audiobook_project_id,
         ChapterAudio.chapter_id == chapter_id,
     ).first()
     if not chapter_audio:
-        raise HTTPException(status_code=404, detail="章节音频记录不存在")
+        raise HTTPException(status_code=404, detail="绔犺妭闊抽璁板綍涓嶅瓨鍦?)
     
-    # 加载剧本和审查记录
-    try:
+    # 鍔犺浇鍓ф湰鍜屽鏌ヨ褰?    try:
         segments = json.loads(chapter_audio.script_json)
     except:
         segments = []
@@ -2703,7 +2692,7 @@ async def get_chapter_review_status(
     total_segments = len(segments)
     reviewed_segments = len(review_data)
     
-    # 计算平均质量评分
+    # 璁＄畻骞冲潎璐ㄩ噺璇勫垎
     scores = []
     flagged = []
     for idx, review in review_data.items():
@@ -2727,7 +2716,7 @@ async def get_chapter_review_status(
 async def list_narration_styles(
     current_user: User = Depends(get_current_user),
 ):
-    """获取所有叙事风格预设列表"""
+    """鑾峰彇鎵€鏈夊彊浜嬮鏍奸璁惧垪琛?""
     return get_all_narration_styles()
 
 
@@ -2736,10 +2725,10 @@ async def get_narration_style(
     style_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """获取指定叙事风格预设详情"""
+    """鑾峰彇鎸囧畾鍙欎簨椋庢牸棰勮璇︽儏"""
     preset = get_narration_style_preset(style_id)
     if not preset:
-        raise HTTPException(status_code=404, detail="叙事风格预设不存在")
+        raise HTTPException(status_code=404, detail="鍙欎簨椋庢牸棰勮涓嶅瓨鍦?)
     return preset
 
 
@@ -2751,29 +2740,29 @@ async def get_chapter_subtitle(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """获取章节字幕文件"""
+    """鑾峰彇绔犺妭瀛楀箷鏂囦欢"""
     audiobook_project = db.query(AudiobookProject).filter(
         AudiobookProject.id == audiobook_project_id
     ).first()
     if not audiobook_project:
-        raise HTTPException(status_code=404, detail="有声书项目不存在")
+        raise HTTPException(status_code=404, detail="鏈夊０涔﹂」鐩笉瀛樺湪")
     
     project = db.query(Project).filter(
         Project.id == audiobook_project.project_id,
         Project.user_id == current_user.id,
     ).first()
     if not project:
-        raise HTTPException(status_code=403, detail="无权限访问")
+        raise HTTPException(status_code=403, detail="鏃犳潈闄愯闂?)
     
     chapter_audio = db.query(ChapterAudio).filter(
         ChapterAudio.audiobook_project_id == audiobook_project_id,
         ChapterAudio.chapter_id == chapter_id,
     ).first()
     if not chapter_audio:
-        raise HTTPException(status_code=404, detail="章节音频记录不存在")
+        raise HTTPException(status_code=404, detail="绔犺妭闊抽璁板綍涓嶅瓨鍦?)
     
     if not chapter_audio.subtitle_path:
-        raise HTTPException(status_code=404, detail="字幕文件不存在")
+        raise HTTPException(status_code=404, detail="瀛楀箷鏂囦欢涓嶅瓨鍦?)
     
     subtitle_file = chapter_audio.subtitle_path
     if format == "vtt":
@@ -2782,7 +2771,7 @@ async def get_chapter_subtitle(
         subtitle_file = subtitle_file.replace(".srt", ".ass")
     
     if not os.path.exists(subtitle_file):
-        raise HTTPException(status_code=404, detail="字幕文件不存在")
+        raise HTTPException(status_code=404, detail="瀛楀箷鏂囦欢涓嶅瓨鍦?)
     
     return FileResponse(
         subtitle_file,
@@ -2801,19 +2790,19 @@ async def get_generation_checkpoint(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """获取生成断点信息（用于断点续传）"""
+    """鑾峰彇鐢熸垚鏂偣淇℃伅锛堢敤浜庢柇鐐圭画浼狅級"""
     audiobook_project = db.query(AudiobookProject).filter(
         AudiobookProject.id == audiobook_project_id
     ).first()
     if not audiobook_project:
-        raise HTTPException(status_code=404, detail="有声书项目不存在")
+        raise HTTPException(status_code=404, detail="鏈夊０涔﹂」鐩笉瀛樺湪")
     
     project = db.query(Project).filter(
         Project.id == audiobook_project.project_id,
         Project.user_id == current_user.id,
     ).first()
     if not project:
-        raise HTTPException(status_code=403, detail="无权限访问")
+        raise HTTPException(status_code=403, detail="鏃犳潈闄愯闂?)
     
     chapter_audio = db.query(ChapterAudio).filter(
         ChapterAudio.audiobook_project_id == audiobook_project_id,
@@ -2835,26 +2824,26 @@ async def resume_chapter_generation(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """从断点继续生成章节音频"""
+    """浠庢柇鐐圭户缁敓鎴愮珷鑺傞煶棰?""
     audiobook_project = db.query(AudiobookProject).filter(
         AudiobookProject.id == audiobook_project_id
     ).first()
     if not audiobook_project:
-        raise HTTPException(status_code=404, detail="有声书项目不存在")
+        raise HTTPException(status_code=404, detail="鏈夊０涔﹂」鐩笉瀛樺湪")
     
     project = db.query(Project).filter(
         Project.id == audiobook_project.project_id,
         Project.user_id == current_user.id,
     ).first()
     if not project:
-        raise HTTPException(status_code=403, detail="无权限访问")
+        raise HTTPException(status_code=403, detail="鏃犳潈闄愯闂?)
     
     chapter_audio = db.query(ChapterAudio).filter(
         ChapterAudio.audiobook_project_id == audiobook_project_id,
         ChapterAudio.chapter_id == chapter_id,
     ).first()
     if not chapter_audio:
-        raise HTTPException(status_code=404, detail="章节音频记录不存在")
+        raise HTTPException(status_code=404, detail="绔犺妭闊抽璁板綍涓嶅瓨鍦?)
     
     checkpoint_payload = _build_generation_checkpoint_payload(
         chapter_id=chapter_id,
@@ -2864,7 +2853,7 @@ async def resume_chapter_generation(
         audiobook_project_id=audiobook_project_id,
     )
     if not checkpoint_payload["can_resume"]:
-        raise HTTPException(status_code=400, detail="娌℃湁鍙仮澶嶇殑鐢熸垚杩涘害")
+        raise HTTPException(status_code=400, detail="濞屸剝婀侀崣顖涗划婢跺秶娈戦悽鐔稿灇鏉╂稑瀹?)
 
     logger.info(
         "Resume requested for audiobook_project_id=%s chapter_id=%s run_id=%s completed=%s/%s",
@@ -2876,7 +2865,7 @@ async def resume_chapter_generation(
     )
 
     return {
-        "message": "宸茶幏鍙栨渶鏂版柇鐐逛俊鎭紝鍙敤浜庣户缁敓鎴?,
+        "message": "Latest checkpoint metadata loaded.",
         "run_id": checkpoint_payload.get("run_id"),
         "run_status": checkpoint_payload.get("run_status"),
         "current_stage": checkpoint_payload.get("current_stage"),
@@ -2888,16 +2877,16 @@ async def resume_chapter_generation(
     }
 
     if not chapter_audio.generation_progress_json:
-        raise HTTPException(status_code=400, detail="没有可恢复的生成进度")
+        raise HTTPException(status_code=400, detail="娌℃湁鍙仮澶嶇殑鐢熸垚杩涘害")
     
     progress_data = json.loads(chapter_audio.generation_progress_json)
     completed_indices = progress_data.get("completed_segment_indices", [])
     cached_paths = progress_data.get("cached_audio_paths", {})
     
-    logger.info(f"🔄 恢复章节 {chapter_id} 生成: 已完成 {len(completed_indices)} 个片段")
+    logger.info(f"馃攧 鎭㈠绔犺妭 {chapter_id} 鐢熸垚: 宸插畬鎴?{len(completed_indices)} 涓墖娈?)
     
     return {
-        "message": "已恢复生成进度",
+        "message": "宸叉仮澶嶇敓鎴愯繘搴?,
         "completed_segments": len(completed_indices),
         "cached_audio_paths": cached_paths,
     }
@@ -2909,19 +2898,19 @@ async def get_browser_player_data(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """获取浏览器播放器所需数据（章节列表、音频URL、字幕URL）"""
+    """鑾峰彇娴忚鍣ㄦ挱鏀惧櫒鎵€闇€鏁版嵁锛堢珷鑺傚垪琛ㄣ€侀煶棰慤RL銆佸瓧骞昒RL锛?""
     audiobook_project = db.query(AudiobookProject).filter(
         AudiobookProject.id == audiobook_project_id
     ).first()
     if not audiobook_project:
-        raise HTTPException(status_code=404, detail="有声书项目不存在")
+        raise HTTPException(status_code=404, detail="鏈夊０涔﹂」鐩笉瀛樺湪")
     
     project = db.query(Project).filter(
         Project.id == audiobook_project.project_id,
         Project.user_id == current_user.id,
     ).first()
     if not project:
-        raise HTTPException(status_code=403, detail="无权限访问")
+        raise HTTPException(status_code=403, detail="鏃犳潈闄愯闂?)
     
     chapters_data = []
     for chapter_audio in audiobook_project.chapter_audios:
@@ -2962,19 +2951,15 @@ async def preview_smart_chunking(
     min_tokens: int = 50,
     current_user: User = Depends(get_current_user),
 ):
-    """预览智能分块结果（不实际执行）
-
+    """棰勮鏅鸿兘鍒嗗潡缁撴灉锛堜笉瀹為檯鎵ц锛?
     Args:
-        segments: 原始剧本片段列表
-        max_tokens: 单个分块最大 token 数
-        min_tokens: 最小分块 token 数
-    """
+        segments: 鍘熷鍓ф湰鐗囨鍒楄〃
+        max_tokens: 鍗曚釜鍒嗗潡鏈€澶?token 鏁?        min_tokens: 鏈€灏忓垎鍧?token 鏁?    """
     chunker = SmartChunker(max_tokens=max_tokens, min_tokens=min_tokens)
 
-    # 对片段列表进行分块
-    chunked_segments = chunker.chunk_segments(segments)
+    # 瀵圭墖娈靛垪琛ㄨ繘琛屽垎鍧?    chunked_segments = chunker.chunk_segments(segments)
 
-    # 计算统计信息
+    # 璁＄畻缁熻淇℃伅
     total_tokens = sum(chunker.estimate_tokens(s.get("text", "")) for s in chunked_segments)
     token_list = [chunker.estimate_tokens(s.get("text", "")) for s in chunked_segments]
 
@@ -3000,7 +2985,7 @@ async def estimate_text_tokens(
     text: str = Body(..., embed=True),
     current_user: User = Depends(get_current_user),
 ):
-    """估算文本的 token 数量"""
+    """浼扮畻鏂囨湰鐨?token 鏁伴噺"""
     chunker = SmartChunker()
     estimated = chunker.estimate_tokens(text)
     needs_chunking = chunker.needs_chunking(text)
@@ -3017,7 +3002,7 @@ async def estimate_text_tokens(
 async def list_voice_types(
     current_user: User = Depends(get_current_user),
 ):
-    """获取所有声音类型预设列表"""
+    """鑾峰彇鎵€鏈夊０闊崇被鍨嬮璁惧垪琛?""
     return get_all_voice_types()
 
 
@@ -3026,10 +3011,10 @@ async def get_voice_type_detail(
     voice_type: str,
     current_user: User = Depends(get_current_user),
 ):
-    """获取指定声音类型详情"""
+    """鑾峰彇鎸囧畾澹伴煶绫诲瀷璇︽儏"""
     preset = get_voice_type_preset(voice_type)
     if not preset:
-        raise HTTPException(status_code=404, detail="声音类型不存在")
+        raise HTTPException(status_code=404, detail="澹伴煶绫诲瀷涓嶅瓨鍦?)
     return {
         "voice_type": preset.voice_type,
         "name": preset.name,
@@ -3052,7 +3037,7 @@ async def recommend_voice_types(
     request: VoiceTypeRecommendationRequest,
     current_user: User = Depends(get_current_user),
 ):
-    """根据角色属性推荐声音类型"""
+    """鏍规嵁瑙掕壊灞炴€ф帹鑽愬０闊崇被鍨?""
     recommended = recommend_voice_type(
         personality=request.personality,
         gender=request.gender,
@@ -3069,10 +3054,8 @@ async def stream_task_progress(
     task_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """SSE 实时进度推送端点
-
-    客户端连接后将持续接收任务进度事件
-    """
+    """SSE 瀹炴椂杩涘害鎺ㄩ€佺鐐?
+    瀹㈡埛绔繛鎺ュ悗灏嗘寔缁帴鏀朵换鍔¤繘搴︿簨浠?    """
     from fastapi.responses import StreamingResponse
 
     async def event_generator():
@@ -3099,17 +3082,16 @@ async def generate_preview(
     speed: Optional[float] = Body(None, embed=True),
     current_user: User = Depends(get_current_user),
 ):
-    """快速生成试听片段（前 2 句）
+    """蹇€熺敓鎴愯瘯鍚墖娈碉紙鍓?2 鍙ワ級
 
     Args:
-        text: 完整文本
-        voice_id: 音色 ID
-        tts_model: TTS 模型
-        emotion: 情感参数
-        speed: 语速参数
-    """
+        text: 瀹屾暣鏂囨湰
+        voice_id: 闊宠壊 ID
+        tts_model: TTS 妯″瀷
+        emotion: 鎯呮劅鍙傛暟
+        speed: 璇€熷弬鏁?    """
     try:
-        # 初始化 TTS 引擎
+        # 鍒濆鍖?TTS 寮曟搸
         from app.services.audiobook import get_engine_instance, set_engine_instance
         from core.unified_llm_client import get_llm_client
 
@@ -3121,7 +3103,7 @@ async def generate_preview(
             tts_model=tts_model,
         )
 
-        # 生成预览
+        # 鐢熸垚棰勮
         preview = default_preview_generator.generate_preview(
             text=text,
             voice_id=voice_id,
@@ -3136,8 +3118,8 @@ async def generate_preview(
         }
 
     except Exception as e:
-        logger.error(f"❌ 预览生成失败: {e}")
-        raise HTTPException(status_code=500, detail=f"预览生成失败: {str(e)}")
+        logger.error(f"鉂?棰勮鐢熸垚澶辫触: {e}")
+        raise HTTPException(status_code=500, detail=f"棰勮鐢熸垚澶辫触: {str(e)}")
 
 
 @router.post("/retries/config")
@@ -3148,13 +3130,10 @@ async def configure_retry(
     enable_degraded: bool = Body(True, embed=True),
     current_user: User = Depends(get_current_user),
 ):
-    """配置重试策略
+    """閰嶇疆閲嶈瘯绛栫暐
 
     Args:
-        max_retries: 最大重试次数
-        initial_delay: 初始延迟（秒）
-        backoff_factor: 退避因子
-        enable_degraded: 是否启用降级
+        max_retries: 鏈€澶ч噸璇曟鏁?        initial_delay: 鍒濆寤惰繜锛堢锛?        backoff_factor: 閫€閬垮洜瀛?        enable_degraded: 鏄惁鍚敤闄嶇骇
     """
     config = RetryConfig(
         max_retries=max_retries,
@@ -3163,7 +3142,7 @@ async def configure_retry(
         enable_degraded=enable_degraded,
     )
     return {
-        "message": "重试配置已更新",
+        "message": "閲嶈瘯閰嶇疆宸叉洿鏂?,
         "config": {
             "max_retries": config.max_retries,
             "initial_delay": config.initial_delay,
@@ -3179,34 +3158,34 @@ async def generate_audiobook_scripts_background(
     audiobook_project_id: int,
     chapter_ids: List[int],
     tts_model: str = "qwen3-tts-flash",
-    force_regenerate: bool = False,  # 🆕 新增参数：是否强制重新生成剧本
+    force_regenerate: bool = False,  # 馃啎 鏂板鍙傛暟锛氭槸鍚﹀己鍒堕噸鏂扮敓鎴愬墽鏈?
     tracker=None,
 ):
-    """后台生成有声书【剧本+评审】任务（不执行TTS和混音）。
+    """鍚庡彴鐢熸垚鏈夊０涔︺€愬墽鏈?璇勫銆戜换鍔★紙涓嶆墽琛孴TS鍜屾贩闊筹級銆?
 
-    流程：
-    1. 初始化AudiobookEngine
-    2. 逐章生成剧本与质量评审
-    3. 将结果覆盖写入 ChapterAudio.script_json/script_review_json
+    娴佺▼锛?
+    1. 鍒濆鍖朅udiobookEngine
+    2. 閫愮珷鐢熸垚鍓ф湰涓庤川閲忚瘎瀹?
+    3. 灏嗙粨鏋滆鐩栧啓鍏?ChapterAudio.script_json/script_review_json
     """
     from app.db.base import SessionLocal
     db = SessionLocal()
 
     try:
-        logger.info(f"📝 开始后台生成有声书剧本: audiobook_project_id={audiobook_project_id}")
+        logger.info(f"馃摑 寮€濮嬪悗鍙扮敓鎴愭湁澹颁功鍓ф湰: audiobook_project_id={audiobook_project_id}")
 
         audiobook_project = db.query(AudiobookProject).filter(
             AudiobookProject.id == audiobook_project_id
         ).first()
 
         if not audiobook_project:
-            logger.error(f"❌ 有声书项目不存在: {audiobook_project_id}")
+            logger.error(f"鉂?鏈夊０涔﹂」鐩笉瀛樺湪: {audiobook_project_id}")
             return
 
         audiobook_project.status = "processing"
         db.commit()
 
-        # 初始化引擎
+        # 鍒濆鍖栧紩鎿?
         from app.services.audiobook import get_engine_instance, set_engine_instance
         from core.unified_llm_client import get_llm_client
 
@@ -3223,7 +3202,7 @@ async def generate_audiobook_scripts_background(
         )
         set_engine_instance(engine)
 
-        # 应用项目级音频配置（角色音色 + 音效/BGM）
+        # 搴旂敤椤圭洰绾ч煶棰戦厤缃紙瑙掕壊闊宠壊 + 闊虫晥/BGM锛?
         try:
             project = db.query(Project).filter(Project.id == audiobook_project.project_id).first()
             if project and project.audio_config:
@@ -3231,10 +3210,10 @@ async def generate_audiobook_scripts_background(
                     from app.services.audiobook.project_audio_config import parse_project_audio_config
                     config_data = parse_project_audio_config(project.audio_config or "")
                 except Exception as parse_err:
-                    logger.warning(f"⚠️ 解析项目级音频配置失败: {parse_err}")
+                    logger.warning(f"鈿狅笍 瑙ｆ瀽椤圭洰绾ч煶棰戦厤缃け璐? {parse_err}")
                     config_data = {}
                 
-                # 1. 应用角色音色配置（先加载，确保剧本阶段也能使用正确的音色）
+                # 1. 搴旂敤瑙掕壊闊宠壊閰嶇疆锛堝厛鍔犺浇锛岀‘淇濆墽鏈樁娈典篃鑳戒娇鐢ㄦ纭殑闊宠壊锛?
                 effective_voice_mapping = dict(audiobook_project.voice_mapping or {})
                 from app.services.audiobook.project_audio_config import get_characters_for_model, get_audio_fx
                 for item in get_characters_for_model(config_data, tts_model):
@@ -3247,43 +3226,43 @@ async def generate_audiobook_scripts_background(
                         "speed": item.get("speed"),
                         "pitch": item.get("pitch"),
                     }
-                    logger.info(f"✅ [剧本阶段] 加载角色音配置: {name} -> {item.get('voice_id')}")
+                    logger.info(f"鉁?[鍓ф湰闃舵] 鍔犺浇瑙掕壊闊抽厤缃? {name} -> {item.get('voice_id')}")
                 
                 if effective_voice_mapping:
                     try:
                         engine.voice_manager.apply_project_voice_mapping(effective_voice_mapping)
-                        logger.info(f"🎛 [剧本阶段] 已加载角色音配置: {len(effective_voice_mapping)} 个角色")
+                        logger.info(f"馃帥 [鍓ф湰闃舵] 宸插姞杞借鑹查煶閰嶇疆: {len(effective_voice_mapping)} 涓鑹?)
                     except Exception as e:
-                        logger.warning(f"⚠️ [剧本阶段] 应用角色音配置失败: {e}")
+                        logger.warning(f"鈿狅笍 [鍓ф湰闃舵] 搴旂敤瑙掕壊闊抽厤缃け璐? {e}")
                 
-                # 2. 应用音效/BGM配置
+                # 2. 搴旂敤闊虫晥/BGM閰嶇疆
                 audio_fx = get_audio_fx(config_data)
                 if audio_fx:
                     try:
                         engine.apply_audio_fx_config(audio_fx)
-                        logger.info("🎚 [剧本阶段] 已加载项目级音效/BGM 配置")
+                        logger.info("馃帤 [鍓ф湰闃舵] 宸插姞杞介」鐩骇闊虫晥/BGM 閰嶇疆")
                     except Exception as e:
-                        logger.warning(f"⚠️ [剧本阶段] 应用项目级音效/BGM 配置失败: {e}")
+                        logger.warning(f"鈿狅笍 [鍓ф湰闃舵] 搴旂敤椤圭洰绾ч煶鏁?BGM 閰嶇疆澶辫触: {e}")
         except Exception as e:
-            logger.warning(f"⚠️ [剧本阶段] 加载项目级音频配置失败: {e}")
+            logger.warning(f"鈿狅笍 [鍓ф湰闃舵] 鍔犺浇椤圭洰绾ч煶棰戦厤缃け璐? {e}")
 
-        # 获取项目角色列表
+        # 鑾峰彇椤圭洰瑙掕壊鍒楄〃
         from app.models.character import Character
         characters = db.query(Character).filter(
             Character.project_id == audiobook_project.project_id
         ).all()
         character_list = [c.name for c in characters if c.name]
 
-        logger.info(f"📝 剧本阶段角色列表: {character_list}")
+        logger.info(f"馃摑 鍓ф湰闃舵瑙掕壊鍒楄〃: {character_list}")
 
-        # 逐章生成剧本与评审
+        # 閫愮珷鐢熸垚鍓ф湰涓庤瘎瀹?
         for i, chapter_id in enumerate(chapter_ids, 1):
             try:
-                logger.info(f"📖 [脚本阶段] 处理章节 {i}/{len(chapter_ids)}: chapter_id={chapter_id}")
+                logger.info(f"馃摉 [鑴氭湰闃舵] 澶勭悊绔犺妭 {i}/{len(chapter_ids)}: chapter_id={chapter_id}")
 
                 chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
                 if not chapter:
-                    logger.warning(f"⚠️ 章节不存在: {chapter_id}")
+                    logger.warning(f"鈿狅笍 绔犺妭涓嶅瓨鍦? {chapter_id}")
                     audiobook_project.failed_chapters += 1
                     _update_chapter_run_state(
                         db,
@@ -3297,16 +3276,16 @@ async def generate_audiobook_scripts_background(
                     )
                     continue
 
-                # 🆕 持久化优化：检查是否已有剧本
+                # 馃啎 鎸佷箙鍖栦紭鍖栵細妫€鏌ユ槸鍚﹀凡鏈夊墽鏈?
                 chapter_audio = db.query(ChapterAudio).filter(
                     ChapterAudio.audiobook_project_id == audiobook_project_id,
                     ChapterAudio.chapter_id == chapter_id,
                 ).first()
 
-                # 如果章节已有剧本且未强制重生成，则根据剧本状态决定是否跳过
+                # 濡傛灉绔犺妭宸叉湁鍓ф湰涓旀湭寮哄埗閲嶇敓鎴愶紝鍒欐牴鎹墽鏈姸鎬佸喅瀹氭槸鍚﹁烦杩?
                 if chapter_audio and chapter_audio.script_json and not force_regenerate:
                     if chapter_audio.script_status in ["reviewed", "approved"]:
-                        logger.info(f"✅ [跳过] 章节 {chapter_id} 已有{chapter_audio.script_status}剧本，保持不变")
+                        logger.info(f"鉁?[璺宠繃] 绔犺妭 {chapter_id} 宸叉湁{chapter_audio.script_status}鍓ф湰锛屼繚鎸佷笉鍙?)
                         audiobook_project.completed_chapters += 1
                         _update_chapter_run_state(
                             db,
@@ -3326,9 +3305,9 @@ async def generate_audiobook_scripts_background(
                         db.commit()
                         continue
                     else:
-                        logger.info(f"🔄 [覆盖] 章节 {chapter_id} 剧本状态为{chapter_audio.script_status}，将重新生成")
+                        logger.info(f"馃攧 [瑕嗙洊] 绔犺妭 {chapter_id} 鍓ф湰鐘舵€佷负{chapter_audio.script_status}锛屽皢閲嶆柊鐢熸垚")
                 elif force_regenerate and chapter_audio and chapter_audio.script_json:
-                    logger.info(f"🔄 [强制重生成] 章节 {chapter_id} 将覆盖现有剧本")
+                    logger.info(f"馃攧 [寮哄埗閲嶇敓鎴怾 绔犺妭 {chapter_id} 灏嗚鐩栫幇鏈夊墽鏈?)
 
                 result = await engine.prepare_chapter_script(
                     chapter_content=chapter.content or "",
@@ -3357,9 +3336,9 @@ async def generate_audiobook_scripts_background(
                 chapter_audio.narration_count = parse_stats.get("narration_count", 0)
                 chapter_audio.character_count = stats.get("characters", 0)
 
-                gen_time_str = stats.get("generation_time", "0秒")
+                gen_time_str = stats.get("generation_time", "0绉?)
                 try:
-                    chapter_audio.generation_time = float(str(gen_time_str).replace("秒", ""))
+                    chapter_audio.generation_time = float(str(gen_time_str).replace("绉?, ""))
                 except Exception:
                     pass
 
@@ -3371,12 +3350,11 @@ async def generate_audiobook_scripts_background(
                     serialize_dataclass_to_dict(result.get("quality_report") or {}),
                     ensure_ascii=False
                 )
-                # 🔧 修复：只在首次生成或强制重生成时设置为pending，避免覆盖用户手动设置的状态
+                # 馃敡 淇锛氬彧鍦ㄩ娆＄敓鎴愭垨寮哄埗閲嶇敓鎴愭椂璁剧疆涓簆ending锛岄伩鍏嶈鐩栫敤鎴锋墜鍔ㄨ缃殑鐘舵€?
                 if not chapter_audio.script_status or force_regenerate:
                     chapter_audio.script_status = "pending"
                 else:
-                    # 保留原有状态（approved/reviewed）
-                    logger.info(f"   ✅ 保留章节 {chapter_id} 剧本状态: {chapter_audio.script_status}")
+                    # 淇濈暀鍘熸湁鐘舵€侊紙approved/reviewed锛?                    logger.info(f"   鉁?淇濈暀绔犺妭 {chapter_id} 鍓ф湰鐘舵€? {chapter_audio.script_status}")
 
                 _update_chapter_run_state(
                     db,
@@ -3397,7 +3375,7 @@ async def generate_audiobook_scripts_background(
                 db.commit()
 
             except Exception as e:
-                logger.error(f"❌ [脚本阶段] 章节 {chapter_id} 处理异常: {e}")
+                logger.error(f"鉂?[鑴氭湰闃舵] 绔犺妭 {chapter_id} 澶勭悊寮傚父: {e}")
                 audiobook_project.failed_chapters += 1
                 _update_chapter_run_state(
                     db,
@@ -3416,9 +3394,9 @@ async def generate_audiobook_scripts_background(
         audiobook_project.status = "completed"
         db.commit()
 
-        logger.info("🎉 有声书剧本生成完成!")
+        logger.info("馃帀 鏈夊０涔﹀墽鏈敓鎴愬畬鎴?")
         logger.info(
-            f"   - 成功: {audiobook_project.completed_chapters}/{audiobook_project.total_chapters}"
+            f"   - 鎴愬姛: {audiobook_project.completed_chapters}/{audiobook_project.total_chapters}"
         )
 
     finally:
@@ -3431,31 +3409,31 @@ async def generate_audiobook_audio_from_scripts_background(
     tts_model: str = "qwen3-tts-flash",
     tracker=None,
 ):
-    """后台生成有声书音频任务（基于已生成/人工审核后的剧本）。
+    """鍚庡彴鐢熸垚鏈夊０涔﹂煶棰戜换鍔★紙鍩轰簬宸茬敓鎴?浜哄伐瀹℃牳鍚庣殑鍓ф湰锛夈€?
 
-    用于两阶段流程的第2阶段：
-    1. 读取 ChapterAudio.script_json 作为有声剧本
-    2. 调用 AudiobookEngine.generate_chapter_audio_from_script 生成音频
-    3. 更新 ChapterAudio.audio_path/duration/file_size/final_audio_review_json 等字段
+    鐢ㄤ簬涓ら樁娈垫祦绋嬬殑绗?闃舵锛?
+    1. 璇诲彇 ChapterAudio.script_json 浣滀负鏈夊０鍓ф湰
+    2. 璋冪敤 AudiobookEngine.generate_chapter_audio_from_script 鐢熸垚闊抽
+    3. 鏇存柊 ChapterAudio.audio_path/duration/file_size/final_audio_review_json 绛夊瓧娈?
     """
     from app.db.base import SessionLocal
     db = SessionLocal()
 
     try:
         logger.info(
-            f"🎙️ 开始基于剧本的有声书音频生成: audiobook_project_id={audiobook_project_id}, chapters={chapter_ids}"
+            f"馃帣锔?寮€濮嬪熀浜庡墽鏈殑鏈夊０涔﹂煶棰戠敓鎴? audiobook_project_id={audiobook_project_id}, chapters={chapter_ids}"
         )
 
-        # 1. 获取有声书项目
+        # 1. 鑾峰彇鏈夊０涔﹂」鐩?
         audiobook_project = db.query(AudiobookProject).filter(
             AudiobookProject.id == audiobook_project_id
         ).first()
 
         if not audiobook_project:
-            logger.error(f"❌ 有声书项目不存在: {audiobook_project_id}")
+            logger.error(f"鉂?鏈夊０涔﹂」鐩笉瀛樺湪: {audiobook_project_id}")
             return
 
-        # 2. 重置并标记状态
+        # 2. 閲嶇疆骞舵爣璁扮姸鎬?
         audiobook_project.status = "processing"
         audiobook_project.completed_chapters = 0
         audiobook_project.failed_chapters = 0
@@ -3463,7 +3441,7 @@ async def generate_audiobook_audio_from_scripts_background(
         audiobook_project.total_cost = 0.0
         db.commit()
 
-        # 3. 初始化引擎
+        # 3. 鍒濆鍖栧紩鎿?
         from app.services.audiobook import get_engine_instance, set_engine_instance
         from core.unified_llm_client import get_llm_client
 
@@ -3480,14 +3458,14 @@ async def generate_audiobook_audio_from_scripts_background(
         )
         set_engine_instance(engine)
 
-        # 获取项目与章节信息（用于文件路径和题材）
+        # 鑾峰彇椤圭洰涓庣珷鑺備俊鎭紙鐢ㄤ簬鏂囦欢璺緞鍜岄鏉愶級
         project = db.query(Project).filter(Project.id == audiobook_project.project_id).first()
-        novel_genre = (project.genre or "科幻") if project else "科幻"
-        novel_theme = (project.sub_genre or "未知主题") if project else "未知主题"
+        novel_genre = (project.genre or "绉戝够") if project else "绉戝够"
+        novel_theme = (project.sub_genre or "鏈煡涓婚") if project else "鏈煡涓婚"
 
-        # 计算本次生成应当使用的角色音配置：
-        # 以已有的 audiobook_project.voice_mapping 为基础，叠加最新的 Project.audio_config.characters（如有），
-        # 后者优先级更高，确保二阶段生成也能应用最新的前端配置（例如苏娜女声）。
+        # 璁＄畻鏈鐢熸垚搴斿綋浣跨敤鐨勮鑹查煶閰嶇疆锛?
+        # 浠ュ凡鏈夌殑 audiobook_project.voice_mapping 涓哄熀纭€锛屽彔鍔犳渶鏂扮殑 Project.audio_config.characters锛堝鏈夛級锛?
+        # 鍚庤€呬紭鍏堢骇鏇撮珮锛岀‘淇濅簩闃舵鐢熸垚涔熻兘搴旂敤鏈€鏂扮殑鍓嶇閰嶇疆锛堜緥濡傝嫃濞滃コ澹帮級銆?
         effective_voice_mapping = dict(audiobook_project.voice_mapping or {})
         from app.services.audiobook.project_audio_config import get_audio_fx, get_characters_for_model
         if project and project.audio_config:
@@ -3498,7 +3476,7 @@ async def generate_audiobook_audio_from_scripts_background(
                 for item in characters:
                     name = item.get("name")
                     if not name:
-                        logger.warning("⚠️ 跳过无名称的角色音配置项")
+                        logger.warning("鈿狅笍 璺宠繃鏃犲悕绉扮殑瑙掕壊闊抽厤缃」")
                         continue
                     effective_voice_mapping[name] = {
                         "voice_id": item.get("voice_id"),
@@ -3507,19 +3485,19 @@ async def generate_audiobook_audio_from_scripts_background(
                         "pitch": item.get("pitch"),
                     }
             except Exception as e:
-                logger.warning(f"⚠️ 合并项目级角色音配置失败，将继续使用已有 voice_mapping: {e}")
+                logger.warning(f"鈿狅笍 鍚堝苟椤圭洰绾ц鑹查煶閰嶇疆澶辫触锛屽皢缁х画浣跨敤宸叉湁 voice_mapping: {e}")
 
-        # 应用角色音配置到引擎（如有）
+        # 搴旂敤瑙掕壊闊抽厤缃埌寮曟搸锛堝鏈夛級
         if effective_voice_mapping:
             try:
                 engine.voice_manager.apply_project_voice_mapping(effective_voice_mapping)
                 logger.info(
-                    f"🎛 已加载角色音配置: {len(effective_voice_mapping)} 个角色"
+                    f"馃帥 宸插姞杞借鑹查煶閰嶇疆: {len(effective_voice_mapping)} 涓鑹?
                 )
             except Exception as e:
-                logger.warning(f"⚠️ 应用角色音配置失败: {e}")
+                logger.warning(f"鈿狅笍 搴旂敤瑙掕壊闊抽厤缃け璐? {e}")
 
-        # 应用项目级音效/BGM 配置（如有）
+        # 搴旂敤椤圭洰绾ч煶鏁?BGM 閰嶇疆锛堝鏈夛級
         audio_fx = None
         if project and project.audio_config:
             try:
@@ -3527,14 +3505,14 @@ async def generate_audiobook_audio_from_scripts_background(
                 config_data = parse_project_audio_config(project.audio_config or "")
                 audio_fx = get_audio_fx(config_data)
             except Exception as parse_err:
-                logger.warning(f"⚠️ 解析项目级音频配置失败: {parse_err}")
+                logger.warning(f"鈿狅笍 瑙ｆ瀽椤圭洰绾ч煶棰戦厤缃け璐? {parse_err}")
 
         if audio_fx:
             try:
                 engine.apply_audio_fx_config(audio_fx)
-                logger.info("🎚 已加载项目级音效/BGM 配置")
+                logger.info("馃帤 宸插姞杞介」鐩骇闊虫晥/BGM 閰嶇疆")
             except Exception as e:
-                logger.warning(f"⚠️ 应用项目级音效/BGM 配置失败: {e}")
+                logger.warning(f"鈿狅笍 搴旂敤椤圭洰绾ч煶鏁?BGM 閰嶇疆澶辫触: {e}")
 
         total_duration = 0.0
         total_cost = 0.0
@@ -3542,10 +3520,10 @@ async def generate_audiobook_audio_from_scripts_background(
         for i, chapter_id in enumerate(chapter_ids, 1):
             try:
                 logger.info(
-                    f"📖 [音频阶段] 处理章节 {i}/{len(chapter_ids)}: chapter_id={chapter_id}"
+                    f"馃摉 [闊抽闃舵] 澶勭悊绔犺妭 {i}/{len(chapter_ids)}: chapter_id={chapter_id}"
                 )
 
-                # 读取章节与脚本
+                # 璇诲彇绔犺妭涓庤剼鏈?
                 chapter_audio = db.query(ChapterAudio).filter(
                     ChapterAudio.audiobook_project_id == audiobook_project_id,
                     ChapterAudio.chapter_id == chapter_id,
@@ -3553,7 +3531,7 @@ async def generate_audiobook_audio_from_scripts_background(
 
                 if not chapter_audio or not chapter_audio.script_json:
                     logger.warning(
-                        f"⚠️ 章节 {chapter_id} 缺少剧本数据(script_json为空)，跳过该章节"
+                        f"鈿狅笍 绔犺妭 {chapter_id} 缂哄皯鍓ф湰鏁版嵁(script_json涓虹┖)锛岃烦杩囪绔犺妭"
                     )
                     audiobook_project.failed_chapters += 1
                     _update_chapter_run_state(
@@ -3572,7 +3550,7 @@ async def generate_audiobook_audio_from_scripts_background(
                 script_status = (chapter_audio.script_status or "").lower()
                 if script_status != "approved":
                     logger.warning(
-                        f"⚠️ 章节 {chapter_id} 剧本尚未通过评审(script_status={chapter_audio.script_status})，跳过音频生成"
+                        f"鈿狅笍 绔犺妭 {chapter_id} 鍓ф湰灏氭湭閫氳繃璇勫(script_status={chapter_audio.script_status})锛岃烦杩囬煶棰戠敓鎴?
                     )
                     audiobook_project.failed_chapters += 1
                     _update_chapter_run_state(
@@ -3590,7 +3568,7 @@ async def generate_audiobook_audio_from_scripts_background(
 
                 chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
                 if not chapter:
-                    logger.warning(f"⚠️ 章节不存在: {chapter_id}")
+                    logger.warning(f"鈿狅笍 绔犺妭涓嶅瓨鍦? {chapter_id}")
                     audiobook_project.failed_chapters += 1
                     _update_chapter_run_state(
                         db,
@@ -3608,7 +3586,7 @@ async def generate_audiobook_audio_from_scripts_background(
                 try:
                     script_segments_data = json.loads(chapter_audio.script_json)
                 except Exception as parse_err:
-                    logger.error(f"❌ 解析章节剧本JSON失败 chapter_id={chapter_id}: {parse_err}")
+                    logger.error(f"鉂?瑙ｆ瀽绔犺妭鍓ф湰JSON澶辫触 chapter_id={chapter_id}: {parse_err}")
                     audiobook_project.failed_chapters += 1
                     _update_chapter_run_state(
                         db,
@@ -3625,7 +3603,7 @@ async def generate_audiobook_audio_from_scripts_background(
 
                 if not isinstance(script_segments_data, list):
                     logger.warning(
-                        f"⚠️ 章节 {chapter_id} 剧本数据格式异常，期望为列表，实际为 {type(script_segments_data)}"
+                        f"鈿狅笍 绔犺妭 {chapter_id} 鍓ф湰鏁版嵁鏍煎紡寮傚父锛屾湡鏈涗负鍒楄〃锛屽疄闄呬负 {type(script_segments_data)}"
                     )
                     audiobook_project.failed_chapters += 1
                     _update_chapter_run_state(
@@ -3641,10 +3619,10 @@ async def generate_audiobook_audio_from_scripts_background(
                     db.commit()
                     continue
 
-                # 生成输出路径
+                # 鐢熸垚杈撳嚭璺緞
                 output_path = f"audiobooks/project_{audiobook_project.project_id}/chapter_{chapter.chapter_number:03d}.mp3"
 
-                # 调用引擎生成音频
+                # 璋冪敤寮曟搸鐢熸垚闊抽
                 result = await engine.generate_chapter_audio_from_script(
                     script_segments_data=script_segments_data,
                     chapter_id=chapter_id,
@@ -3656,14 +3634,14 @@ async def generate_audiobook_audio_from_scripts_background(
                 )
 
                 task_id = result.get("task_id")
-                logger.info(f"🎯 [音频阶段] Chapter {chapter_id} TaskID: {task_id}")
+                logger.info(f"馃幆 [闊抽闃舵] Chapter {chapter_id} TaskID: {task_id}")
 
                 if result.get("success"):
                     stats = result.get("stats") or {}
                     parse_stats = stats.get("parse_stats") or {}
                     tts_stats = stats.get("tts_stats") or {}
 
-                    # 更新章节音频记录（覆盖写入）
+                    # 鏇存柊绔犺妭闊抽璁板綍锛堣鐩栧啓鍏ワ級
                     chapter_audio.task_id = task_id
                     chapter_audio.audio_path = output_path
                     chapter_audio.duration = result.get("duration") or 0.0
@@ -3678,18 +3656,18 @@ async def generate_audiobook_audio_from_scripts_background(
                         "narration_count", chapter_audio.narration_count
                     )
 
-                    gen_time_str = stats.get("generation_time", "0秒")
+                    gen_time_str = stats.get("generation_time", "0绉?)
                     try:
                         chapter_audio.generation_time = float(
-                            str(gen_time_str).replace("秒", "")
+                            str(gen_time_str).replace("绉?, "")
                         )
                     except Exception:
                         pass
 
-                    cost_str = tts_stats.get("estimated_cost", "¥0.00")
+                    cost_str = tts_stats.get("estimated_cost", "楼0.00")
                     try:
                         chapter_audio.tts_cost = float(
-                            str(cost_str).replace("¥", "").replace("$", "")
+                            str(cost_str).replace("楼", "").replace("$", "")
                         )
                     except Exception:
                         pass
@@ -3702,14 +3680,14 @@ async def generate_audiobook_audio_from_scripts_background(
                             )
                         except Exception as dump_err:
                             logger.warning(
-                                f"⚠️ 序列化最终音频评审结果失败 chapter_id={chapter_id}: {dump_err}"
+                                f"鈿狅笍 搴忓垪鍖栨渶缁堥煶棰戣瘎瀹＄粨鏋滃け璐?chapter_id={chapter_id}: {dump_err}"
                             )
 
                     audiobook_project.completed_chapters += 1
                     total_duration += result.get("duration") or 0.0
                     try:
                         total_cost += float(
-                            str(cost_str).replace("¥", "").replace("$", "")
+                            str(cost_str).replace("楼", "").replace("$", "")
                         )
                     except Exception:
                         pass
@@ -3730,11 +3708,11 @@ async def generate_audiobook_audio_from_scripts_background(
                         },
                     )
 
-                    logger.info(f"✅ 章节 {chapter_id} 音频生成成功")
+                    logger.info(f"鉁?绔犺妭 {chapter_id} 闊抽鐢熸垚鎴愬姛")
                 else:
                     audiobook_project.failed_chapters += 1
                     logger.error(
-                        f"❌ 章节 {chapter_id} 音频生成失败: {result.get('error')}"
+                        f"鉂?绔犺妭 {chapter_id} 闊抽鐢熸垚澶辫触: {result.get('error')}"
                     )
                     _update_chapter_run_state(
                         db,
@@ -3752,7 +3730,7 @@ async def generate_audiobook_audio_from_scripts_background(
                 db.commit()
 
             except Exception as e:
-                logger.error(f"❌ 章节 {chapter_id} 音频阶段处理异常: {e}")
+                logger.error(f"鉂?绔犺妭 {chapter_id} 闊抽闃舵澶勭悊寮傚父: {e}")
                 audiobook_project.failed_chapters += 1
                 _update_chapter_run_state(
                     db,
@@ -3776,17 +3754,17 @@ async def generate_audiobook_audio_from_scripts_background(
         try:
             record_audiobook_billing_settle(db=db, audiobook_project_id=audiobook_project_id)
         except Exception as exc:
-            logger.warning("记录有声书积分结算失败 audiobook_project_id=%s: %s", audiobook_project_id, exc)
+            logger.warning("璁板綍鏈夊０涔︾Н鍒嗙粨绠楀け璐?audiobook_project_id=%s: %s", audiobook_project_id, exc)
 
-        logger.info("🎉 基于剧本的有声书音频生成完成!")
+        logger.info("馃帀 鍩轰簬鍓ф湰鐨勬湁澹颁功闊抽鐢熸垚瀹屾垚!")
         logger.info(
-            f"   - 成功: {audiobook_project.completed_chapters}/{audiobook_project.total_chapters}"
+            f"   - 鎴愬姛: {audiobook_project.completed_chapters}/{audiobook_project.total_chapters}"
         )
-        logger.info(f"   - 总时长: {total_duration:.1f}秒")
-        logger.info(f"   - 总成本: ¥{total_cost:.2f}")
+        logger.info(f"   - 鎬绘椂闀? {total_duration:.1f}绉?)
+        logger.info(f"   - 鎬绘垚鏈? 楼{total_cost:.2f}")
 
     except Exception as e:
-        logger.error(f"❌ 基于剧本的后台生成任务失败: {e}")
+        logger.error(f"鉂?鍩轰簬鍓ф湰鐨勫悗鍙扮敓鎴愪换鍔″け璐? {e}")
         import traceback
         traceback.print_exc()
 
@@ -3797,10 +3775,10 @@ async def generate_audiobook_audio_from_scripts_background(
                 record_audiobook_billing_release(
                     db=db,
                     audiobook_project_id=audiobook_project_id,
-                    reason="有声书音频生成失败，已释放冻结积分。",
+                    reason="鏈夊０涔﹂煶棰戠敓鎴愬け璐ワ紝宸查噴鏀惧喕缁撶Н鍒嗐€?,
                 )
             except Exception as release_exc:
-                logger.warning("释放有声书冻结积分失败 audiobook_project_id=%s: %s", audiobook_project_id, release_exc)
+                logger.warning("閲婃斁鏈夊０涔﹀喕缁撶Н鍒嗗け璐?audiobook_project_id=%s: %s", audiobook_project_id, release_exc)
 
     finally:
         db.close()
@@ -3813,52 +3791,52 @@ async def generate_audiobook_background(
     tracker=None,
 ):
     """
-    后台生成有声书任务
+    鍚庡彴鐢熸垚鏈夊０涔︿换鍔?
     
-    流程：
-    1. 初始化AudiobookEngine
-    2. 逐章生成音频
-    3. 更新进度和状态
-    4. 保存音频文件
+    娴佺▼锛?
+    1. 鍒濆鍖朅udiobookEngine
+    2. 閫愮珷鐢熸垚闊抽
+    3. 鏇存柊杩涘害鍜岀姸鎬?
+    4. 淇濆瓨闊抽鏂囦欢
     """
     from app.db.base import SessionLocal
     db = SessionLocal()
     
     try:
-        logger.info(f"🎙️ 开始后台生成有声书: audiobook_project_id={audiobook_project_id}")
+        logger.info(f"馃帣锔?寮€濮嬪悗鍙扮敓鎴愭湁澹颁功: audiobook_project_id={audiobook_project_id}")
         
-        # 更新状态为处理中
+        # 鏇存柊鐘舵€佷负澶勭悊涓?
         audiobook_project = db.query(AudiobookProject).filter(
             AudiobookProject.id == audiobook_project_id
         ).first()
         
         if not audiobook_project:
-            logger.error(f"❌ 有声书项目不存在: {audiobook_project_id}")
+            logger.error(f"鉂?鏈夊０涔﹂」鐩笉瀛樺湪: {audiobook_project_id}")
             return
         
         audiobook_project.status = "processing"
         db.commit()
         
-        # 初始化引擎（使用全局实例）
+        # 鍒濆鍖栧紩鎿庯紙浣跨敤鍏ㄥ眬瀹炰緥锛?
         from app.services.audiobook import get_engine_instance, set_engine_instance
         from core.unified_llm_client import get_llm_client
         
-        # 创建LLM客户端（必需）
+        # 鍒涘缓LLM瀹㈡埛绔紙蹇呴渶锛?
         llm_client = get_llm_client(strategy="conservative")
         
         progress_handler = _build_progress_handler(tracker, chapter_ids)
 
         engine = AudiobookEngine(
             enable_cache=audiobook_project.enable_cache,
-            max_concurrent=1,  # 降低并发避免限流
-            llm_client=llm_client,  # 必须传入LLM客户端
+            max_concurrent=1,  # 闄嶄綆骞跺彂閬垮厤闄愭祦
+            llm_client=llm_client,  # 蹇呴』浼犲叆LLM瀹㈡埛绔?
             tts_model=tts_model,
             progress_handler=progress_handler,
         )
-        # 设置为全局实例，供状态查询使用
+        # 璁剧疆涓哄叏灞€瀹炰緥锛屼緵鐘舵€佹煡璇娇鐢?
         set_engine_instance(engine)
 
-        # 应用项目级音效/BGM 配置（如有）
+        # 搴旂敤椤圭洰绾ч煶鏁?BGM 閰嶇疆锛堝鏈夛級
         try:
             project = db.query(Project).filter(Project.id == audiobook_project.project_id).first()
             if project and project.audio_config:
@@ -3866,48 +3844,48 @@ async def generate_audiobook_background(
                     from app.services.audiobook.project_audio_config import parse_project_audio_config
                     config_data = parse_project_audio_config(project.audio_config or "")
                 except Exception as parse_err:
-                    logger.warning(f"⚠️ 解析项目级音频配置失败: {parse_err}")
+                    logger.warning(f"鈿狅笍 瑙ｆ瀽椤圭洰绾ч煶棰戦厤缃け璐? {parse_err}")
                     config_data = {}
                 from app.services.audiobook.project_audio_config import get_audio_fx
                 audio_fx = get_audio_fx(config_data)
                 if audio_fx:
                     try:
                         engine.apply_audio_fx_config(audio_fx)
-                        logger.info("🎚 已加载项目级音效/BGM 配置")
+                        logger.info("馃帤 宸插姞杞介」鐩骇闊虫晥/BGM 閰嶇疆")
                     except Exception as e:
-                        logger.warning(f"⚠️ 应用项目级音效/BGM 配置失败: {e}")
+                        logger.warning(f"鈿狅笍 搴旂敤椤圭洰绾ч煶鏁?BGM 閰嶇疆澶辫触: {e}")
         except Exception as e:
-            logger.warning(f"⚠️ 加载项目级音频配置失败: {e}")
+            logger.warning(f"鈿狅笍 鍔犺浇椤圭洰绾ч煶棰戦厤缃け璐? {e}")
         
-        # 应用项目级角色音配置（如有）
+        # 搴旂敤椤圭洰绾ц鑹查煶閰嶇疆锛堝鏈夛級
         if audiobook_project.voice_mapping:
             try:
                 engine.voice_manager.apply_project_voice_mapping(audiobook_project.voice_mapping)
-                logger.info(f"🎛 已加载项目级角色音配置: {len(audiobook_project.voice_mapping)} 个角色")
+                logger.info(f"馃帥 宸插姞杞介」鐩骇瑙掕壊闊抽厤缃? {len(audiobook_project.voice_mapping)} 涓鑹?)
             except Exception as e:
-                logger.warning(f"⚠️ 应用项目级角色音配置失败: {e}")
+                logger.warning(f"鈿狅笍 搴旂敤椤圭洰绾ц鑹查煶閰嶇疆澶辫触: {e}")
         
-        # 获取项目角色列表
+        # 鑾峰彇椤圭洰瑙掕壊鍒楄〃
         from app.models.character import Character
         characters = db.query(Character).filter(
             Character.project_id == audiobook_project.project_id
         ).all()
         character_list = [c.name for c in characters if c.name]
         
-        logger.info(f"📝 角色列表: {character_list}")
+        logger.info(f"馃摑 瑙掕壊鍒楄〃: {character_list}")
         
-        # 逐章生成
+        # 閫愮珷鐢熸垚
         total_duration = 0.0
         total_cost = 0.0
         
         for i, chapter_id in enumerate(chapter_ids, 1):
             try:
-                logger.info(f"📖 处理章节 {i}/{len(chapter_ids)}: chapter_id={chapter_id}")
+                logger.info(f"馃摉 澶勭悊绔犺妭 {i}/{len(chapter_ids)}: chapter_id={chapter_id}")
                 
-                # 获取章节内容
+                # 鑾峰彇绔犺妭鍐呭
                 chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
                 if not chapter:
-                    logger.warning(f"⚠️ 章节不存在: {chapter_id}")
+                    logger.warning(f"鈿狅笍 绔犺妭涓嶅瓨鍦? {chapter_id}")
                     audiobook_project.failed_chapters += 1
                     _update_chapter_run_state(
                         db,
@@ -3921,7 +3899,7 @@ async def generate_audiobook_background(
                     )
                     continue
                 
-                # 生成音频
+                # 鐢熸垚闊抽
                 result = await engine.generate_chapter_audio(
                     chapter_content=chapter.content or "",
                     chapter_id=chapter_id,
@@ -3932,32 +3910,32 @@ async def generate_audiobook_background(
                     summary_data=chapter.summary_data,
                 )
                 
-                # 记录task_id到数据库（可选）
+                # 璁板綍task_id鍒版暟鎹簱锛堝彲閫夛級
                 task_id = result.get('task_id')
-                logger.info(f"🎯 TaskID: {task_id}")
+                logger.info(f"馃幆 TaskID: {task_id}")
                 
                 if result["success"]:
-                    # 🆕 获取或创建章节音频记录（避免覆盖已有剧本）
+                    # 馃啎 鑾峰彇鎴栧垱寤虹珷鑺傞煶棰戣褰曪紙閬垮厤瑕嗙洊宸叉湁鍓ф湰锛?
                     chapter_audio = db.query(ChapterAudio).filter(
                         ChapterAudio.audiobook_project_id == audiobook_project_id,
                         ChapterAudio.chapter_id == chapter_id,
                     ).first()
                     
                     if not chapter_audio:
-                        # 首次生成：创建新记录
+                        # 棣栨鐢熸垚锛氬垱寤烘柊璁板綍
                         chapter_audio = ChapterAudio(
                             audiobook_project_id=audiobook_project_id,
                             chapter_id=chapter_id,
                         )
                         db.add(chapter_audio)
-                        logger.info(f"🆕 创建新的章节音频记录: chapter_id={chapter_id}")
+                        logger.info(f"馃啎 鍒涘缓鏂扮殑绔犺妭闊抽璁板綍: chapter_id={chapter_id}")
                     else:
-                        # 🔥 重要：保留已有的剧本数据
-                        logger.info(f"♻️ 更新已有章节音频记录: chapter_id={chapter_id}")
+                        # 馃敟 閲嶈锛氫繚鐣欏凡鏈夌殑鍓ф湰鏁版嵁
+                        logger.info(f"鈾伙笍 鏇存柊宸叉湁绔犺妭闊抽璁板綍: chapter_id={chapter_id}")
                         if chapter_audio.script_json:
-                            logger.info(f"   ✅ 保留已有剧本（status={chapter_audio.script_status}）")
+                            logger.info(f"   鉁?淇濈暀宸叉湁鍓ф湰锛坰tatus={chapter_audio.script_status}锛?)
                     
-                    # 更新音频相关字段（不覆盖剧本）
+                    # 鏇存柊闊抽鐩稿叧瀛楁锛堜笉瑕嗙洊鍓ф湰锛?
                     chapter_audio.task_id = task_id
                     chapter_audio.audio_path = f"audiobooks/project_{audiobook_project.project_id}/chapter_{chapter.chapter_number:03d}.mp3"
                     chapter_audio.duration = result["duration"]
@@ -3983,23 +3961,23 @@ async def generate_audiobook_background(
                     chapter_audio.dialogue_count = parse_stats.get("dialogue_count", 0)
                     chapter_audio.narration_count = parse_stats.get("narration_count", 0)
                     
-                    gen_time_str = stats.get("generation_time", "0秒")
+                    gen_time_str = stats.get("generation_time", "0绉?)
                     try:
-                        chapter_audio.generation_time = float(str(gen_time_str).replace("秒", ""))
+                        chapter_audio.generation_time = float(str(gen_time_str).replace("绉?, ""))
                     except Exception:
                         pass
                     
-                    cost_str = tts_stats.get("estimated_cost", "¥0.00")
+                    cost_str = tts_stats.get("estimated_cost", "楼0.00")
                     try:
                         chapter_audio.tts_cost = float(
-                            str(cost_str).replace("¥", "").replace("$", "")
+                            str(cost_str).replace("楼", "").replace("$", "")
                         )
                     except Exception:
                         pass
                     
                     total_duration += result["duration"]
                     try:
-                        total_cost += float(str(cost_str).replace("¥", "").replace("$", ""))
+                        total_cost += float(str(cost_str).replace("楼", "").replace("$", ""))
                     except Exception:
                         pass
                     
@@ -4019,10 +3997,10 @@ async def generate_audiobook_background(
                             "output_path": f"audiobooks/project_{audiobook_project.project_id}/chapter_{chapter.chapter_number:03d}.mp3",
                         },
                     )
-                    logger.info(f"✅ 章节 {chapter_id} 生成成功")
+                    logger.info(f"鉁?绔犺妭 {chapter_id} 鐢熸垚鎴愬姛")
                 else:
                     audiobook_project.failed_chapters += 1
-                    logger.error(f"❌ 章节 {chapter_id} 生成失败: {result.get('error')}")
+                    logger.error(f"鉂?绔犺妭 {chapter_id} 鐢熸垚澶辫触: {result.get('error')}")
                     _update_chapter_run_state(
                         db,
                         audiobook_project_id=audiobook_project_id,
@@ -4034,13 +4012,13 @@ async def generate_audiobook_background(
                         error_message=str(result.get("error") or "full_generation_failed"),
                     )
                 
-                # 更新进度
+                # 鏇存柊杩涘害
                 audiobook_project.total_duration = total_duration
                 audiobook_project.total_cost = total_cost
                 db.commit()
                 
             except Exception as e:
-                logger.error(f"❌ 章节 {chapter_id} 处理异常: {e}")
+                logger.error(f"鉂?绔犺妭 {chapter_id} 澶勭悊寮傚父: {e}")
                 audiobook_project.failed_chapters += 1
                 _update_chapter_run_state(
                     db,
@@ -4056,7 +4034,7 @@ async def generate_audiobook_background(
                 import traceback
                 traceback.print_exc()
         
-        # 更新最终状态
+        # 鏇存柊鏈€缁堢姸鎬?
         audiobook_project.status = "completed"
         audiobook_project.total_duration = total_duration
         audiobook_project.total_cost = total_cost
@@ -4065,19 +4043,19 @@ async def generate_audiobook_background(
         try:
             record_audiobook_billing_settle(db=db, audiobook_project_id=audiobook_project_id)
         except Exception as exc:
-            logger.warning("记录有声书积分结算失败 audiobook_project_id=%s: %s", audiobook_project_id, exc)
+            logger.warning("璁板綍鏈夊０涔︾Н鍒嗙粨绠楀け璐?audiobook_project_id=%s: %s", audiobook_project_id, exc)
 
-        logger.info(f"🎉 有声书生成完成!")
-        logger.info(f"   - 成功: {audiobook_project.completed_chapters}/{audiobook_project.total_chapters}")
-        logger.info(f"   - 总时长: {total_duration:.1f}秒")
-        logger.info(f"   - 总成本: ¥{total_cost:.2f}")
+        logger.info(f"馃帀 鏈夊０涔︾敓鎴愬畬鎴?")
+        logger.info(f"   - 鎴愬姛: {audiobook_project.completed_chapters}/{audiobook_project.total_chapters}")
+        logger.info(f"   - 鎬绘椂闀? {total_duration:.1f}绉?)
+        logger.info(f"   - 鎬绘垚鏈? 楼{total_cost:.2f}")
         
     except Exception as e:
-        logger.error(f"❌ 后台生成任务失败: {e}")
+        logger.error(f"鉂?鍚庡彴鐢熸垚浠诲姟澶辫触: {e}")
         import traceback
         traceback.print_exc()
         
-        # 更新状态为失败
+        # 鏇存柊鐘舵€佷负澶辫触
         if audiobook_project:
             audiobook_project.status = "failed"
             db.commit()
@@ -4085,10 +4063,10 @@ async def generate_audiobook_background(
                 record_audiobook_billing_release(
                     db=db,
                     audiobook_project_id=audiobook_project_id,
-                    reason="有声书生成失败，已释放冻结积分。",
+                    reason="鏈夊０涔︾敓鎴愬け璐ワ紝宸查噴鏀惧喕缁撶Н鍒嗐€?,
                 )
             except Exception as release_exc:
-                logger.warning("释放有声书冻结积分失败 audiobook_project_id=%s: %s", audiobook_project_id, release_exc)
+                logger.warning("閲婃斁鏈夊０涔﹀喕缁撶Н鍒嗗け璐?audiobook_project_id=%s: %s", audiobook_project_id, release_exc)
     
     finally:
         db.close()
