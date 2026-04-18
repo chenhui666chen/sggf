@@ -60,6 +60,17 @@ class ChapterAudio(Base):
     # 新增：任务状态追踪
     task_id = Column(String(100), nullable=True, index=True)  # 任务ID，用于查询实时状态
     
+    # 生成进度缓存（断点续传）
+    generation_progress_json = Column(Text, nullable=True)  # 存储已完成的片段索引列表和缓存信息
+    
+    # 叙事风格预设
+    narration_style = Column(String(50), default="professional")  # professional/dramatic/relaxing/expressive/custom
+    narration_style_prompt = Column(Text, nullable=True)  # 自定义叙事风格prompt
+    
+    # 字幕同步
+    subtitle_path = Column(String(500), nullable=True)  # SRT字幕文件路径
+    subtitle_format = Column(String(20), default="srt")  # srt/ass/vtt
+    
     # 音频信息
     audio_path = Column(String(500))  # 相对路径或URL
     duration = Column(Float, default=0.0)  # 秒

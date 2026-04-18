@@ -102,6 +102,11 @@ type UserAssetSourceInfo = {
   backLabel?: string | null
 }
 
+type ProtectedAssetRef =
+  | { kind: 'dreamweaver_library'; libraryAssetId: number }
+  | { kind: 'dreamweaver_run'; runId: string }
+  | { kind: 'audiobook'; audiobookProjectId: number; chapterId: number }
+
 type ProjectAggregate = ProjectRecord & {
   audiobookCount: number
   dramaRunCount: number
@@ -217,8 +222,12 @@ function getProjectTimestamp(project: ProjectRecord) {
   return new Date(project.updated_at || project.created_at || 0).getTime()
 }
 
+function getUserAssetSourceModule(asset: UserAssetRecord): string {
+  return String(asset.source_module || '').trim().toLowerCase()
+}
+
 function extractDreamweaverLibraryAssetId(asset: UserAssetRecord): number | null {
-  if (asset.source_module !== 'dreamweaver_library') return null
+  if (getUserAssetSourceModule(asset) !== 'dreamweaver_library') return null
 
   const payloadAssetId = Number.parseInt(String(asset.source_payload_json?.asset_id || ''), 10)
   if (Number.isFinite(payloadAssetId) && payloadAssetId > 0) {
@@ -234,13 +243,50 @@ function extractDreamweaverLibraryAssetId(asset: UserAssetRecord): number | null
 }
 
 function extractDreamweaverMergedRunId(asset: UserAssetRecord): string | null {
-  if (asset.source_module !== 'dreamweaver_run') return null
+  if (getUserAssetSourceModule(asset) !== 'dreamweaver_run') return null
 
   const payloadRunId = String(asset.source_payload_json?.run_id || '').trim()
   if (payloadRunId) return payloadRunId
 
   const metadataRunId = String(asset.metadata_json?.run_id || '').trim()
   return metadataRunId || null
+}
+
+function extractAudiobookChapterAssetRef(
+  asset: UserAssetRecord,
+): { audiobookProjectId: number; chapterId: number } | null {
+  if (getUserAssetSourceModule(asset) !== 'audiobook') return null
+
+  const audiobookProjectId = Number.parseInt(
+    String(asset.source_payload_json?.audiobook_project_id || asset.metadata_json?.audiobook_project_id || ''),
+    10,
+  )
+  const chapterId = Number.parseInt(
+    String(asset.source_payload_json?.chapter_id || asset.metadata_json?.chapter_id || ''),
+    10,
+  )
+
+  if (!Number.isFinite(audiobookProjectId) || audiobookProjectId <= 0) return null
+  if (!Number.isFinite(chapterId) || chapterId <= 0) return null
+
+  return { audiobookProjectId, chapterId }
+}
+
+function getProtectedAssetRef(asset: UserAssetRecord): ProtectedAssetRef | null {
+  const libraryAssetId = extractDreamweaverLibraryAssetId(asset)
+  if (libraryAssetId) return { kind: 'dreamweaver_library', libraryAssetId }
+
+  const runId = extractDreamweaverMergedRunId(asset)
+  if (runId) return { kind: 'dreamweaver_run', runId }
+
+  const audiobookRef = extractAudiobookChapterAssetRef(asset)
+  if (audiobookRef) return { kind: 'audiobook', ...audiobookRef }
+
+  return null
+}
+
+function isProtectedUserAsset(asset: UserAssetRecord): boolean {
+  return getProtectedAssetRef(asset) !== null
 }
 
 function formatDreamweaverViewLabel(view: string | null | undefined): string | null {
@@ -313,6 +359,7 @@ export default function UserCenterPage() {
   const [assetListLoading, setAssetListLoading] = useState(false)
   const [userAssets, setUserAssets] = useState<UserAssetRecord[]>([])
   const [localAssetUrls, setLocalAssetUrls] = useState<Record<number, string>>({})
+  const [localAssetUrlsReady, setLocalAssetUrlsReady] = useState(false)
   const [protectedAssetUrls, setProtectedAssetUrls] = useState<Record<number, string>>({})
   const [feedback, setFeedback] = useState<FeedbackState | null>(null)
   const [restoringKey, setRestoringKey] = useState<string | null>(null)
@@ -640,7 +687,7 @@ export default function UserCenterPage() {
 
   const getUserAssetSourceInfo = useCallback(
     (asset: UserAssetRecord): UserAssetSourceInfo => {
-      const sourceModule = String(asset.source_module || '').trim().toLowerCase()
+      const sourceModule = getUserAssetSourceModule(asset)
       const projectId = resolveUserAssetProjectId(asset)
       const projectLabel = projectId ? projectTitleMap.get(projectId) || `项目 #${projectId}` : null
 
@@ -682,6 +729,32 @@ export default function UserCenterPage() {
           projectLabel,
           backPath: projectId ? `/drama/${projectId}` : '/drama',
           backLabel: projectId ? '回到短剧项目' : '前往短剧模块',
+        }
+      }
+
+      if (sourceModule === 'audiobook') {
+        const chapterId = Number.parseInt(
+          String(asset.source_payload_json?.chapter_id || asset.metadata_json?.chapter_id || ''),
+          10,
+        )
+        const chapterNumber = Number.parseInt(
+          String(asset.source_payload_json?.chapter_number || asset.metadata_json?.chapter_number || ''),
+          10,
+        )
+        const chapterTitle = String(
+          asset.source_payload_json?.chapter_title || asset.metadata_json?.chapter_title || '',
+        ).trim()
+        const traceLabel = chapterNumber
+          ? `第${chapterNumber}章${chapterTitle ? ` · ${chapterTitle}` : ''}`
+          : chapterTitle || (Number.isFinite(chapterId) && chapterId > 0 ? `章节 #${chapterId}` : '章节音频')
+
+        return {
+          label: '有声书音频',
+          summary: projectLabel ? `来自有声书章节成品，关联项目：${projectLabel}。` : '来自有声书章节成品。',
+          traceLabel,
+          projectLabel,
+          backPath: projectId ? `/audiobook/${projectId}` : '/audiobook-dashboard',
+          backLabel: projectId ? '回到有声书项目' : '前往有声书模块',
         }
       }
 
@@ -734,6 +807,7 @@ export default function UserCenterPage() {
     const objectUrls: string[] = []
 
     const loadLocalAssetUrls = async () => {
+      setLocalAssetUrlsReady(false)
       const localAssets = userAssets
         .map((asset) => {
           const assetUuid = String(asset.asset_uuid || '').trim()
@@ -744,6 +818,7 @@ export default function UserCenterPage() {
 
       if (!localAssets.length) {
         setLocalAssetUrls({})
+        setLocalAssetUrlsReady(true)
         return
       }
 
@@ -767,6 +842,7 @@ export default function UserCenterPage() {
         if (url) nextUrls[assetId] = url
       })
       setLocalAssetUrls(nextUrls)
+      setLocalAssetUrlsReady(true)
     }
 
     void loadLocalAssetUrls()
@@ -788,18 +864,19 @@ export default function UserCenterPage() {
     const objectUrls: string[] = []
 
     const loadProtectedAssetUrls = async () => {
+      if (!localAssetUrlsReady) {
+        setProtectedAssetUrls({})
+        return
+      }
+
       const protectedAssets = userAssets
         .map((asset) => {
-          const libraryAssetId = extractDreamweaverLibraryAssetId(asset)
-          if (libraryAssetId) return { assetId: asset.id, kind: 'dreamweaver_library' as const, libraryAssetId }
-          const runId = extractDreamweaverMergedRunId(asset)
-          if (runId) return { assetId: asset.id, kind: 'dreamweaver_run' as const, runId }
-          return null
+          const protectedRef = getProtectedAssetRef(asset)
+          if (!protectedRef) return null
+          if (localAssetUrls[asset.id]) return null
+          return { assetId: asset.id, ...protectedRef }
         })
-        .filter(Boolean) as Array<
-          | { assetId: number; kind: 'dreamweaver_library'; libraryAssetId: number }
-          | { assetId: number; kind: 'dreamweaver_run'; runId: string }
-        >
+        .filter(Boolean) as Array<{ assetId: number } & ProtectedAssetRef>
 
       if (!protectedAssets.length) {
         setProtectedAssetUrls({})
@@ -812,7 +889,9 @@ export default function UserCenterPage() {
             const response =
               item.kind === 'dreamweaver_library'
                 ? await apiClient.getDreamweaverLibraryAssetFile(item.libraryAssetId)
-                : await apiClient.getDreamweaverMergedVideoFile(item.runId)
+                : item.kind === 'dreamweaver_run'
+                  ? await apiClient.getDreamweaverMergedVideoFile(item.runId)
+                  : await apiClient.getAudiobookChapterAudioFile(item.audiobookProjectId, item.chapterId)
             const objectUrl = URL.createObjectURL(response.data)
             objectUrls.push(objectUrl)
             return [item.assetId, objectUrl] as const
@@ -842,7 +921,7 @@ export default function UserCenterPage() {
         }
       })
     }
-  }, [userAssets])
+  }, [localAssetUrls, localAssetUrlsReady, userAssets])
 
   useEffect(() => {
     const visibleAssetIds = new Set(filteredUserAssets.map((asset) => asset.id))
@@ -853,13 +932,17 @@ export default function UserCenterPage() {
   }, [filteredUserAssets])
 
   const resolveUserAssetMediaUrl = useCallback(
-    (asset: UserAssetRecord) =>
-      localAssetUrls[asset.id] ||
-      protectedAssetUrls[asset.id] ||
-      asset.preview_uri ||
-      asset.source_uri ||
-      asset.download_uri ||
-      '',
+    (asset: UserAssetRecord) => {
+      const localUrl = localAssetUrls[asset.id]
+      if (localUrl) return localUrl
+
+      const protectedUrl = protectedAssetUrls[asset.id]
+      if (protectedUrl) return protectedUrl
+
+      if (isProtectedUserAsset(asset)) return ''
+
+      return asset.preview_uri || asset.source_uri || asset.download_uri || ''
+    },
     [localAssetUrls, protectedAssetUrls],
   )
 
@@ -1033,7 +1116,7 @@ export default function UserCenterPage() {
 
   const renderUserAssetPreview = (asset: UserAssetRecord) => {
     const previewUrl = resolveUserAssetMediaUrl(asset)
-    const isProtectedAssetPending = asset.source_module === 'dreamweaver_library' && !previewUrl
+    const isProtectedAssetPending = isProtectedUserAsset(asset) && !previewUrl
 
     if (!previewUrl) {
       return (

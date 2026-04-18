@@ -16,12 +16,21 @@ class AudiobookProjectCreate(BaseModel):
     tts_model: Optional[str] = "qwen3-tts-flash"  # TTS 模型（qwen3-tts-flash / cosyvoice-v3-plus）
     generation_mode: str = "full"  # full: 直接生成音频; script_only: 仅生成剧本+评审
     force_regenerate_script: bool = False  # 🆕 是否强制重新生成剧本（覆盖已有剧本）
+    narration_style: Optional[str] = "professional"  # 叙事风格: professional/dramatic/relaxing/expressive/custom
+    narration_style_prompt: Optional[str] = None  # 自定义叙事风格prompt
+    output_format: Optional[str] = "mp3"  # mp3/wav/m4b
+    generate_subtitle: Optional[bool] = True  # 是否生成字幕文件
 
 
 class GenerateAudioFromScriptsRequest(BaseModel):
     """基于已生成剧本的音频生成请求（两阶段流程第2阶段）"""
     chapter_ids: Optional[List[int]] = None
     tts_model: Optional[str] = "qwen3-tts-flash"  # TTS 模型（qwen3-tts-flash / cosyvoice-v3-plus）
+    narration_style: Optional[str] = "professional"  # 叙事风格
+    narration_style_prompt: Optional[str] = None  # 自定义叙事风格prompt
+    output_format: Optional[str] = "mp3"  # mp3/wav/m4b
+    generate_subtitle: Optional[bool] = True  # 是否生成字幕文件
+    resume_from_checkpoint: Optional[bool] = True  # 是否从断点续传
 
 
 class ChapterScriptUpdateRequest(BaseModel):
@@ -139,3 +148,34 @@ class AudiobookTaskStatus(BaseModel):
     finished_at: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class NarrationStylePreset(BaseModel):
+    """叙事风格预设"""
+    id: str
+    name: str
+    description: str
+    emotion_profile: dict  # 情感参数配置
+    speed_range: dict  # 语速范围
+    pitch_range: dict  # 音调范围
+    pause_multiplier: float  # 停顿倍数
+    supported_models: List[str]  # 支持的模型列表
+
+
+class SubtitleDownloadResponse(BaseModel):
+    """字幕下载响应"""
+    chapter_id: int
+    subtitle_format: str
+    subtitle_url: str
+    subtitle_content: Optional[str] = None  # 直接返回字幕内容（用于预览）
+
+
+class GenerationCheckpointResponse(BaseModel):
+    """生成断点信息"""
+    chapter_id: int
+    total_segments: int
+    completed_segments: int
+    completed_segment_indices: List[int] = []
+    cached_audio_paths: Dict[int, str] = {}  # segment_index -> audio_path
+    can_resume: bool = True
+    estimated_remaining_time: Optional[float] = None  # 预估剩余时间（秒）

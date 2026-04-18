@@ -1373,6 +1373,15 @@ class ApiClient {
     return this.client.get(`/api/v1/audiobook/projects/${audiobookProjectId}`)
   }
 
+  getAudiobookChapterAudioFile(audiobookProjectId: number, chapterId: number) {
+    return this.client.get(`/api/v1/audiobook/download/${audiobookProjectId}/${chapterId}`, {
+      responseType: 'blob',
+      timeout: 60000,
+      params: { _ts: Date.now() },
+      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+    })
+  }
+
   deleteAudiobookProject(audiobookProjectId: number, data?: { delete_reason?: string; delete_files?: boolean }) {
     return this.client.delete(`/api/v1/audiobook/projects/${audiobookProjectId}`, { data })
   }
@@ -1455,6 +1464,44 @@ class ApiClient {
   getChapterReviewStatus(audiobookProjectId: number, chapterId: number) {
     return this.client.get(
       `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/review-status`
+    )
+  }
+
+  // 获取叙事风格预设列表 API
+  getNarrationStyles() {
+    return this.client.get('/api/v1/audiobook/narration-styles')
+  }
+
+  // 获取叙事风格预设详情 API
+  getNarrationStyle(styleId: string) {
+    return this.client.get(`/api/v1/audiobook/narration-styles/${styleId}`)
+  }
+
+  // 获取生成断点信息 API
+  getGenerationCheckpoint(audiobookProjectId: number, chapterId: number) {
+    return this.client.get(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/checkpoint`
+    )
+  }
+
+  // 从断点继续生成 API
+  resumeChapterGeneration(audiobookProjectId: number, chapterId: number) {
+    return this.client.post(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/resume-generation`
+    )
+  }
+
+  // 获取章节字幕文件 API
+  getChapterSubtitle(audiobookProjectId: number, chapterId: number, format: string = 'srt') {
+    return this.client.get(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/subtitle?format=${format}`
+    )
+  }
+
+  // 获取浏览器播放器数据 API
+  getBrowserPlayerData(audiobookProjectId: number) {
+    return this.client.get(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/browser-player`
     )
   }
 

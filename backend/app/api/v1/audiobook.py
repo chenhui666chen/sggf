@@ -40,6 +40,10 @@ from app.schemas.audiobook import (
     SegmentReviewRequest,
     AudiobookTaskStatus,
     CosyVoiceCloneCreateRequest,
+    ChapterReviewStatus,
+    NarrationStylePreset,
+    SubtitleDownloadResponse,
+    GenerationCheckpointResponse,
 )
 from app.celery_app import celery_app
 from app.services.audiobook import AudiobookEngine
@@ -63,6 +67,8 @@ from app.services.audiobook.cosyvoice_clone_client import (
     save_clone_display_name,
     upload_cosyvoice_v3_plus_clone_sample,
 )
+from app.services.audiobook.narration_styles import get_all_narration_styles, get_narration_style_preset, apply_narration_style_to_tts_params
+from app.services.audiobook.subtitle_generator import SubtitleGenerator, SubtitleEntry
 from app.services.audiobook.app_service import AudiobookAppService
 from app.services.audiobook.repository import (
     AudiobookProjectRepository,
@@ -2494,6 +2500,236 @@ async def get_chapter_review_status(
         "reviewed_segments": reviewed_segments,
         "avg_quality_score": avg_score,
         "flagged_segments": flagged,
+    }
+
+
+@router.get("/narration-styles")
+async def list_narration_styles(
+    current_user: User = Depends(get_current_user),
+):
+    """获取所有叙事风格预设列表"""
+    return get_all_narration_styles()
+
+
+@router.get("/narration-styles/{style_id}")
+async def get_narration_style(
+    style_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """获取指定叙事风格预设详情"""
+    preset = get_narration_style_preset(style_id)
+    if not preset:
+        raise HTTPException(status_code=404, detail="叙事风格预设不存在")
+    return preset
+
+
+@router.get("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/subtitle")
+async def get_chapter_subtitle(
+    audiobook_project_id: int,
+    chapter_id: int,
+    format: str = Query("srt", regex="^(srt|vtt|ass)$"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取章节字幕文件"""
+    audiobook_project = db.query(AudiobookProject).filter(
+        AudiobookProject.id == audiobook_project_id
+    ).first()
+    if not audiobook_project:
+        raise HTTPException(status_code=404, detail="有声书项目不存在")
+    
+    project = db.query(Project).filter(
+        Project.id == audiobook_project.project_id,
+        Project.user_id == current_user.id,
+    ).first()
+    if not project:
+        raise HTTPException(status_code=403, detail="无权限访问")
+    
+    chapter_audio = db.query(ChapterAudio).filter(
+        ChapterAudio.audiobook_project_id == audiobook_project_id,
+        ChapterAudio.chapter_id == chapter_id,
+    ).first()
+    if not chapter_audio:
+        raise HTTPException(status_code=404, detail="章节音频记录不存在")
+    
+    if not chapter_audio.subtitle_path:
+        raise HTTPException(status_code=404, detail="字幕文件不存在")
+    
+    subtitle_file = chapter_audio.subtitle_path
+    if format == "vtt":
+        subtitle_file = subtitle_file.replace(".srt", ".vtt")
+    elif format == "ass":
+        subtitle_file = subtitle_file.replace(".srt", ".ass")
+    
+    if not os.path.exists(subtitle_file):
+        raise HTTPException(status_code=404, detail="字幕文件不存在")
+    
+    return FileResponse(
+        subtitle_file,
+        media_type="text/plain",
+        filename=f"chapter_{chapter_id}.{format}",
+    )
+
+
+@router.get("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/checkpoint")
+async def get_generation_checkpoint(
+    audiobook_project_id: int,
+    chapter_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取生成断点信息（用于断点续传）"""
+    audiobook_project = db.query(AudiobookProject).filter(
+        AudiobookProject.id == audiobook_project_id
+    ).first()
+    if not audiobook_project:
+        raise HTTPException(status_code=404, detail="有声书项目不存在")
+    
+    project = db.query(Project).filter(
+        Project.id == audiobook_project.project_id,
+        Project.user_id == current_user.id,
+    ).first()
+    if not project:
+        raise HTTPException(status_code=403, detail="无权限访问")
+    
+    chapter_audio = db.query(ChapterAudio).filter(
+        ChapterAudio.audiobook_project_id == audiobook_project_id,
+        ChapterAudio.chapter_id == chapter_id,
+    ).first()
+    if not chapter_audio:
+        return {
+            "chapter_id": chapter_id,
+            "total_segments": 0,
+            "completed_segments": 0,
+            "completed_segment_indices": [],
+            "cached_audio_paths": {},
+            "can_resume": False,
+            "estimated_remaining_time": None,
+        }
+    
+    progress_data = {}
+    if chapter_audio.generation_progress_json:
+        try:
+            progress_data = json.loads(chapter_audio.generation_progress_json)
+        except:
+            pass
+    
+    completed_indices = progress_data.get("completed_segment_indices", [])
+    cached_paths = progress_data.get("cached_audio_paths", {})
+    
+    total_segments = chapter_audio.segment_count or 0
+    completed_count = len(completed_indices)
+    
+    estimated_remaining = None
+    if chapter_audio.generation_time and total_segments > 0:
+        avg_time_per_segment = chapter_audio.generation_time / total_segments
+        remaining_segments = total_segments - completed_count
+        estimated_remaining = avg_time_per_segment * remaining_segments
+    
+    return {
+        "chapter_id": chapter_id,
+        "total_segments": total_segments,
+        "completed_segments": completed_count,
+        "completed_segment_indices": completed_indices,
+        "cached_audio_paths": cached_paths,
+        "can_resume": completed_count > 0 and completed_count < total_segments,
+        "estimated_remaining_time": estimated_remaining,
+    }
+
+
+@router.post("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/resume-generation")
+async def resume_chapter_generation(
+    audiobook_project_id: int,
+    chapter_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """从断点继续生成章节音频"""
+    audiobook_project = db.query(AudiobookProject).filter(
+        AudiobookProject.id == audiobook_project_id
+    ).first()
+    if not audiobook_project:
+        raise HTTPException(status_code=404, detail="有声书项目不存在")
+    
+    project = db.query(Project).filter(
+        Project.id == audiobook_project.project_id,
+        Project.user_id == current_user.id,
+    ).first()
+    if not project:
+        raise HTTPException(status_code=403, detail="无权限访问")
+    
+    chapter_audio = db.query(ChapterAudio).filter(
+        ChapterAudio.audiobook_project_id == audiobook_project_id,
+        ChapterAudio.chapter_id == chapter_id,
+    ).first()
+    if not chapter_audio:
+        raise HTTPException(status_code=404, detail="章节音频记录不存在")
+    
+    if not chapter_audio.generation_progress_json:
+        raise HTTPException(status_code=400, detail="没有可恢复的生成进度")
+    
+    progress_data = json.loads(chapter_audio.generation_progress_json)
+    completed_indices = progress_data.get("completed_segment_indices", [])
+    cached_paths = progress_data.get("cached_audio_paths", {})
+    
+    logger.info(f"🔄 恢复章节 {chapter_id} 生成: 已完成 {len(completed_indices)} 个片段")
+    
+    return {
+        "message": "已恢复生成进度",
+        "completed_segments": len(completed_indices),
+        "cached_audio_paths": cached_paths,
+    }
+
+
+@router.get("/projects/{audiobook_project_id:int}/browser-player")
+async def get_browser_player_data(
+    audiobook_project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取浏览器播放器所需数据（章节列表、音频URL、字幕URL）"""
+    audiobook_project = db.query(AudiobookProject).filter(
+        AudiobookProject.id == audiobook_project_id
+    ).first()
+    if not audiobook_project:
+        raise HTTPException(status_code=404, detail="有声书项目不存在")
+    
+    project = db.query(Project).filter(
+        Project.id == audiobook_project.project_id,
+        Project.user_id == current_user.id,
+    ).first()
+    if not project:
+        raise HTTPException(status_code=403, detail="无权限访问")
+    
+    chapters_data = []
+    for chapter_audio in audiobook_project.chapter_audios:
+        chapter = db.query(Chapter).filter(Chapter.id == chapter_audio.chapter_id).first()
+        if not chapter:
+            continue
+        
+        chapter_info = {
+            "chapter_id": chapter_audio.chapter_id,
+            "chapter_number": chapter.chapter_number,
+            "chapter_title": chapter.title,
+            "audio_url": f"/api/v1/audiobook/download/{audiobook_project_id}/{chapter_audio.chapter_id}",
+            "duration": chapter_audio.duration,
+            "has_subtitle": bool(chapter_audio.subtitle_path and os.path.exists(chapter_audio.subtitle_path)),
+            "subtitle_url": f"/api/v1/audiobook/projects/{audiobook_project_id}/chapters/{chapter_audio.chapter_id}/subtitle" if chapter_audio.subtitle_path else None,
+        }
+        
+        if chapter_audio.script_json:
+            try:
+                chapter_info["segments"] = json.loads(chapter_audio.script_json)
+            except:
+                chapter_info["segments"] = []
+        
+        chapters_data.append(chapter_info)
+    
+    return {
+        "project_id": audiobook_project_id,
+        "project_title": project.title,
+        "chapters": chapters_data,
+        "total_duration": audiobook_project.total_duration,
     }
 
 

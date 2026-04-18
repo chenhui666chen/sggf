@@ -19,6 +19,7 @@ import {
 } from '../services/api'
 import * as bookParserApi from '../services/bookParserApi'
 import TaskPointsPrecheckAlert from '../components/common/TaskPointsPrecheckAlert'
+import { saveLocalAsset } from '../utils/localAssetVault'
 import {
   Box,
   Container,
@@ -28,6 +29,7 @@ import {
   IconButton,
   Chip,
   LinearProgress,
+  Rating,
   List,
   ListItem,
   ListItemText,
@@ -156,12 +158,18 @@ interface ScriptEditorDialogProps {
   onChangeSegmentText: (index: number, value: string) => void
   onSaveScript: (options: { nextStatus?: 'reviewed' | 'approved'; generateAudio?: boolean }) => void
   onPreviewSegmentAudio: (index: number, segment: any, previewType: PreviewType) => void
+  onRegenerateSegment: (index: number, segment: any) => void
+  onReviewSegment: (index: number, score: number) => void
+  segmentReviews: Record<number, { quality_score?: number; needs_regenerate?: boolean }>
   segmentPreviewingIndex: number | null
   segmentPreviewingType: PreviewType | null
   segmentAudioUrls: Record<number, string>
   segmentDetailsOpen: Record<number, boolean>
   onToggleSegmentDetails: (index: number) => void
   onUpdateSegment: (index: number, patch: Record<string, any>) => void
+  reviewMode: boolean
+  onToggleReviewMode: () => void
+  regeneratingSegments: Set<number>
 }
 
 interface HistoryDialogProps {
@@ -172,6 +180,31 @@ interface HistoryDialogProps {
   onCloseHistory: () => void
   onViewHistory: (audiobookProjectId: number) => Promise<void>
   onDeleteHistory: (audiobookProjectId: number) => Promise<void>
+}
+
+function buildAudiobookChapterDownloadUrl(audiobookProjectId: number, chapterId: number): string {
+  return `/api/v1/audiobook/download/${audiobookProjectId}/${chapterId}`
+}
+
+function buildAudiobookChapterAssetUuid(audiobookProjectId: number, chapterId: number): string {
+  return `audiobook-${audiobookProjectId}-${chapterId}`
+}
+
+function extractDownloadFilename(contentDisposition: string | null | undefined, fallback: string): string {
+  const header = String(contentDisposition || '').trim()
+  if (!header) return fallback
+
+  const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1])
+    } catch {
+      return utf8Match[1]
+    }
+  }
+
+  const asciiMatch = header.match(/filename=\"?([^\";]+)\"?/i)
+  return asciiMatch?.[1]?.trim() || fallback
 }
 
 interface VoiceDefaultParams {
@@ -712,12 +745,18 @@ function ScriptEditorDialog({
   onChangeSegmentText,
   onSaveScript,
   onPreviewSegmentAudio,
+  onRegenerateSegment,
+  onReviewSegment,
+  segmentReviews,
   segmentPreviewingIndex,
   segmentPreviewingType,
   segmentAudioUrls,
   segmentDetailsOpen,
   onToggleSegmentDetails,
   onUpdateSegment,
+  reviewMode,
+  onToggleReviewMode,
+  regeneratingSegments,
 }: ScriptEditorDialogProps) {
   const parseFloatValue = (value: string) => {
     const parsed = Number(value)
@@ -760,6 +799,38 @@ function ScriptEditorDialog({
               <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
                 剧本片段（支持文本与音频提示词调整）
               </Typography>
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1, gap: 1, alignItems: 'center' }}>
+                {reviewMode && (
+                  <Box sx={{ flex: 1, mr: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                      <Typography variant="caption" color="text.secondary">
+                        审查进度
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {Object.keys(segmentReviews).length} / {data?.scriptSegments?.length || 0}
+                      </Typography>
+                    </Box>
+                    <LinearProgress 
+                      variant="determinate" 
+                      value={data?.scriptSegments?.length ? (Object.keys(segmentReviews).length / data.scriptSegments.length) * 100 : 0} 
+                      sx={{ height: 6, borderRadius: 1 }}
+                    />
+                  </Box>
+                )}
+                <Button
+                  size="small"
+                  variant={reviewMode ? 'contained' : 'outlined'}
+                  color={reviewMode ? 'primary' : 'inherit'}
+                  onClick={onToggleReviewMode}
+                  startIcon={
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                    </svg>
+                  }
+                >
+                  {reviewMode ? '退出审查模式' : '进入审查模式'}
+                </Button>
+              </Box>
               <Paper
                 variant="outlined"
                 sx={{ maxHeight: 520, overflow: 'auto', p: 1 }}
@@ -855,6 +926,30 @@ function ScriptEditorDialog({
                             >
                               {isPreviewing('mix') ? '生成中...' : '融合试听'}
                             </Button>
+                            {reviewMode && (
+                              <>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 1 }}>
+                                  <Typography variant="caption" color="text.secondary">评分：</Typography>
+                                  <Rating
+                                    size="small"
+                                    value={segmentReviews[idx]?.quality_score || 0}
+                                    onChange={(_, newValue) => {
+                                      if (newValue) onReviewSegment(idx, newValue)
+                                    }}
+                                  />
+                                </Box>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  color="warning"
+                                  onClick={() => onRegenerateSegment(idx, seg)}
+                                  disabled={regeneratingSegments.has(idx) || !seg.text?.trim()}
+                                  startIcon={regeneratingSegments.has(idx) ? <CircularProgress size={14} /> : undefined}
+                                >
+                                  {regeneratingSegments.has(idx) ? '重新生成中...' : '重新生成'}
+                                </Button>
+                              </>
+                            )}
                           </Box>
                           {segmentDetailsOpen[idx] && (
                             <Paper
@@ -1290,9 +1385,13 @@ const AudiobookPage = () => {
   const [segmentPreviewingType, setSegmentPreviewingType] = useState<PreviewType | null>(null)
   const [segmentAudioUrls, setSegmentAudioUrls] = useState<Record<number, string>>({})
   const [segmentDetailsOpen, setSegmentDetailsOpen] = useState<Record<number, boolean>>({})
+  const [reviewMode, setReviewMode] = useState(false)
+  const [segmentReviews, setSegmentReviews] = useState<Record<number, { quality_score?: number; needs_regenerate?: boolean }>>({})
+  const [regeneratingSegments, setRegeneratingSegments] = useState<Set<number>>(new Set())
   const [scriptOnlyMode, setScriptOnlyMode] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [playingChapter, setPlayingChapter] = useState<number | null>(null)
+  const [collectingChapterId, setCollectingChapterId] = useState<number | null>(null)
   const [previewingCharacterId, setPreviewingCharacterId] = useState<number | null>(null)
   const [taskStatuses, setTaskStatuses] = useState<Record<string, TaskStatus>>({})
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
@@ -1334,6 +1433,11 @@ const AudiobookPage = () => {
   const [voicesForModel, setVoicesForModel] = useState<any[]>([])
   const supportsTtsTuning = ttsModel === 'cosyvoice-v3-plus'
   const [voiceDraftsByModel, setVoiceDraftsByModel] = useState<Record<string, CharacterVoiceSetting[]>>({})
+  const [narrationStyles, setNarrationStyles] = useState<any[]>([])
+  const [narrationStyle, setNarrationStyle] = useState<string>('professional')
+  const [customNarrationPrompt, setCustomNarrationPrompt] = useState<string>('')
+  const [generateSubtitle, setGenerateSubtitle] = useState<boolean>(true)
+  const [checkpointInfo, setCheckpointInfo] = useState<any | null>(null)
   const [chapterMenuAnchor, setChapterMenuAnchor] = useState<null | HTMLElement>(null)
   const [selectedChapterForMenu, setSelectedChapterForMenu] = useState<Chapter | null>(null)
   const [deleteChapterDialogOpen, setDeleteChapterDialogOpen] = useState(false)
@@ -1348,6 +1452,27 @@ const AudiobookPage = () => {
   const cloneChunksRef = useRef<Blob[]>([])
   const navigationTypeRef = useRef<NavigationType>(typeof window === 'undefined' ? null : detectNavigationType())
   const selectedProjectId = selectedProject?.id ?? null
+  const fetchChapterAudioFile = useCallback(
+    async (chapterId: number) => {
+      if (!audiobookProject) {
+        throw new Error('缺少有声书项目')
+      }
+
+      const response = await apiClient.getAudiobookChapterAudioFile(audiobookProject.id, chapterId)
+      const blob = response.data as Blob
+      const filename = extractDownloadFilename(
+        response.headers?.['content-disposition'],
+        `chapter_${chapterId}.${outputFormat}`,
+      )
+
+      return {
+        blob,
+        filename,
+        downloadUrl: buildAudiobookChapterDownloadUrl(audiobookProject.id, chapterId),
+      }
+    },
+    [audiobookProject, outputFormat],
+  )
   const activeTaskStatus = useMemo(() => {
     if (currentTaskId && taskStatuses[currentTaskId]) {
       return taskStatuses[currentTaskId]
@@ -1777,6 +1902,17 @@ const AudiobookPage = () => {
       }
     } catch {
       setTtsModelsList([])
+    }
+  }
+
+  const loadNarrationStyles = async () => {
+    try {
+      const res = await apiClient.getNarrationStyles()
+      if (res.data) {
+        setNarrationStyles(res.data)
+      }
+    } catch {
+      setNarrationStyles([])
     }
   }
 
@@ -2337,44 +2473,109 @@ const AudiobookPage = () => {
     if (!audiobookProject) return
     
     try {
-      const token = localStorage.getItem('access_token')
-      const response = await fetch(
-        `/api/v1/audiobook/download/${audiobookProject.id}/${chapterId}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        }
-      )
+      const { blob, filename } = await fetchChapterAudioFile(chapterId)
       
-      if (response.ok) {
-        const blob = await response.blob()
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        
-        // 从 Content-Disposition 获取文件名
-        const contentDisposition = response.headers.get('Content-Disposition')
-        let filename = `chapter_${chapterId}.mp3`
-        if (contentDisposition) {
-          const match = contentDisposition.match(/filename\*=UTF-8''(.+)/)
-          if (match) {
-            filename = decodeURIComponent(match[1])
-          }
-        }
-        
-        a.download = filename
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        window.URL.revokeObjectURL(url)
-        
-        setSnackbar({ open: true, message: '音频下载成功', severity: 'success' })
-      } else {
-        throw new Error('下载失败')
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+
+      setSnackbar({ open: true, message: '音频下载成功', severity: 'success' })
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: await extractApiErrorMessage(error, '下载失败，请重试'),
+        severity: 'error',
+      })
+    }
+  }
+
+  const handleCollectChapterAudio = async (chapterAudio: {
+    id: number
+    chapter_id: number
+    chapter_number?: number | null
+    audio_path?: string | null
+  }) => {
+    if (!audiobookProject) return
+
+    setCollectingChapterId(chapterAudio.chapter_id)
+
+    try {
+      const { blob, filename, downloadUrl } = await fetchChapterAudioFile(chapterAudio.chapter_id)
+      const chapter = chapters.find((item) => item.id === chapterAudio.chapter_id)
+      const rawProjectId = selectedProject?.id ?? audiobookProject.project_id ?? routeProjectId
+      const projectId = Number(rawProjectId)
+      const normalizedProjectId = Number.isFinite(projectId) && projectId > 0 ? projectId : null
+      const chapterNumber = chapter?.chapter_number ?? chapterAudio.chapter_number ?? null
+      const chapterTitle = chapter?.title?.trim() || null
+      const projectTitle = selectedProject?.title?.trim() || null
+      const assetUuid = buildAudiobookChapterAssetUuid(audiobookProject.id, chapterAudio.chapter_id)
+      const title = chapterNumber
+        ? `第${chapterNumber}章${chapterTitle ? ` - ${chapterTitle}` : ''} 有声书音频`
+        : `${chapterTitle || `章节 ${chapterAudio.chapter_id}`} 有声书音频`
+      const mimeType = blob.type || 'audio/mpeg'
+      const assetMetadata = {
+        audiobook_project_id: audiobookProject.id,
+        chapter_id: chapterAudio.chapter_id,
+        chapter_audio_id: chapterAudio.id,
+        project_id: normalizedProjectId,
+        project_title: projectTitle,
+        chapter_title: chapterTitle,
+        chapter_number: chapterNumber,
+        filename,
+        audio_path: chapterAudio.audio_path || null,
       }
-    } catch {
-      setSnackbar({ open: true, message: '下载失败，请重试', severity: 'error' })
+
+      await saveLocalAsset({
+        assetUuid,
+        mediaKind: 'audio',
+        blob,
+        mimeType,
+        fileSize: blob.size,
+        sourceModule: 'audiobook',
+        title,
+        sourceUri: downloadUrl,
+        previewUri: downloadUrl,
+        downloadUri: downloadUrl,
+        metadata: assetMetadata,
+      })
+
+      await apiClient.createUserAsset({
+        project_id: normalizedProjectId,
+        source_module: 'audiobook',
+        asset_kind: 'audio',
+        asset_class: 'deliverable',
+        asset_uuid: assetUuid,
+        storage_mode: 'local_mirror',
+        title,
+        description: 'Audiobook 章节成品音频',
+        source_uri: downloadUrl,
+        preview_uri: downloadUrl,
+        download_uri: downloadUrl,
+        mime_type: mimeType,
+        file_size: blob.size,
+        generation_mode: 'chapter_audio',
+        tags: ['audiobook', 'deliverable', 'chapter-audio'],
+        metadata_json: assetMetadata,
+        source_payload_json: {
+          ...assetMetadata,
+          type: 'chapter_audio',
+        },
+      })
+
+      setSnackbar({ open: true, message: '章节音频已收录到用户资产', severity: 'success' })
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: await extractApiErrorMessage(error, '收录章节音频失败，请稍后重试'),
+        severity: 'error',
+      })
+    } finally {
+      setCollectingChapterId(null)
     }
   }
   
@@ -2548,6 +2749,40 @@ const AudiobookPage = () => {
     } finally {
       setSegmentPreviewingIndex(null)
       setSegmentPreviewingType(null)
+    }
+  }
+
+  const handleToggleReviewMode = () => {
+    setReviewMode(prev => !prev)
+  }
+
+  const handleReviewSegment = async (index: number, score: number) => {
+    if (!audiobookProject || !scriptEditorChapter) return
+    try {
+      await apiClient.reviewSegment(audiobookProject.id, scriptEditorChapter.chapterId, index, { quality_score: score })
+      setSegmentReviews(prev => ({ ...prev, [index]: { quality_score: score } }))
+    } catch (error: any) {
+      setSnackbar({ open: true, message: '保存评分失败', severity: 'error' })
+    }
+  }
+
+  const handleRegenerateSegment = async (index: number, segment: any) => {
+    if (!audiobookProject || !scriptEditorChapter) return
+    setRegeneratingSegments(prev => new Set([...prev, index]))
+    try {
+      const voiceParams = segment.voice_params || {}
+      await apiClient.regenerateSegment(audiobookProject.id, scriptEditorChapter.chapterId, index, {
+        reason: '质量不满意',
+        tts_model: ttsModel,
+        voice_id: voiceParams.speaker,
+        emotion: voiceParams.emotion,
+      })
+      setSnackbar({ open: true, message: `片段 #${index + 1} 重新生成成功`, severity: 'success' })
+    } catch (error: any) {
+      const msg = await extractApiErrorMessage(error)
+      setSnackbar({ open: true, message: `重新生成失败: ${msg}`, severity: 'error' })
+    } finally {
+      setRegeneratingSegments(prev => { const next = new Set(prev); next.delete(index); return next })
     }
   }
 
@@ -3933,6 +4168,7 @@ const AudiobookPage = () => {
                   {audiobookProject.chapter_audios.map((chapterAudio: any) => {
                     const chapter = chapters.find(c => c.id === chapterAudio.chapter_id)
                     const isPlaying = playingChapter === chapterAudio.chapter_id
+                    const isCollecting = collectingChapterId === chapterAudio.chapter_id
                     
                     return (
                       <Box key={chapterAudio.id} sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
@@ -3971,6 +4207,27 @@ const AudiobookPage = () => {
                             >
                               <DownloadIcon fontSize="small" />
                             </IconButton>
+                          </Tooltip>
+
+                          <Tooltip title="收录到用户资产">
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => handleCollectChapterAudio(chapterAudio)}
+                              disabled={collectingChapterId !== null}
+                              startIcon={isCollecting ? <CircularProgress size={14} color="inherit" /> : undefined}
+                              sx={{
+                                borderColor: '#00897b',
+                                color: '#00897b',
+                                minWidth: 96,
+                                '&:hover': {
+                                  borderColor: '#00695c',
+                                  backgroundColor: 'rgba(0, 137, 123, 0.08)',
+                                },
+                              }}
+                            >
+                              {isCollecting ? '收录中' : '收录资产'}
+                            </Button>
                           </Tooltip>
   
                           {/* 编辑剧本按钮（如果有脚本可用，用户可以直接尝试打开） */}
@@ -4302,12 +4559,18 @@ const AudiobookPage = () => {
         onChangeSegmentText={handleChangeScriptSegmentText}
         onSaveScript={handleSaveScript}
         onPreviewSegmentAudio={handlePreviewScriptSegmentAudio}
+        onRegenerateSegment={handleRegenerateSegment}
+        onReviewSegment={handleReviewSegment}
+        segmentReviews={segmentReviews}
         segmentPreviewingIndex={segmentPreviewingIndex}
         segmentPreviewingType={segmentPreviewingType}
         segmentAudioUrls={segmentAudioUrls}
         segmentDetailsOpen={segmentDetailsOpen}
         onToggleSegmentDetails={handleToggleSegmentDetails}
         onUpdateSegment={handleUpdateScriptSegment}
+        reviewMode={reviewMode}
+        onToggleReviewMode={handleToggleReviewMode}
+        regeneratingSegments={regeneratingSegments}
       />
       
       {/* 新增：历史记录对话框 */}
