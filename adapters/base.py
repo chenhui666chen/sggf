@@ -30,6 +30,7 @@ class GenerationResult:
     latency: float = 0.0
     retry_after: Optional[int] = None
     raw_response: Optional[Dict[str, Any]] = None
+    trace: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -43,6 +44,7 @@ class GenerationResult:
             "cost": self.cost,
             "latency": self.latency,
             "retry_after": self.retry_after,
+            "trace": self.trace,
         }
 
 
@@ -156,6 +158,30 @@ class BaseAdapter(ABC):
             import logging
             logging.getLogger(__name__).warning("Prompt optimization failed: %s", e)
             return task.prompt
+
+    def _build_prompt_trace(
+        self,
+        original_task: "TaskSpec",
+        processed_task: "TaskSpec",
+    ) -> Dict[str, Any]:
+        """Build prompt trace for observability."""
+        prompt_before = str(getattr(original_task, "prompt", "") or "")
+        prompt_after = str(getattr(processed_task, "prompt", "") or "")
+        return {
+            "stage": "adapter_pre_process",
+            "model_id": self.spec.id,
+            "prompt_before": prompt_before,
+            "prompt_after": prompt_after,
+            "prompt_changed": prompt_before != prompt_after,
+            "template_applied": bool(getattr(getattr(self.spec, "best_practice", None), "prompt_template", "")),
+            "optimizer_version": "default",
+        }
+
+    @staticmethod
+    def _merge_trace(existing: Optional[Dict[str, Any]], prompt_trace: Dict[str, Any]) -> Dict[str, Any]:
+        merged = dict(existing or {})
+        merged["prompt"] = prompt_trace
+        return merged
     
     def _post_process_result(
         self, 
@@ -228,6 +254,7 @@ class BaseAdapter(ABC):
     def generate(self, task: "TaskSpec") -> GenerationResult:
         """Main generation interface."""
         start_time = time.time()
+        prompt_trace = self._build_prompt_trace(task, task)
         
         can_handle, reasons = self.can_handle(task)
         if not can_handle:
@@ -237,10 +264,12 @@ class BaseAdapter(ABC):
                 model_id=self.spec.id,
                 error=f"Cannot handle task: {', '.join(reasons)}",
                 error_code="unsupported_task",
+                trace={"prompt": prompt_trace},
             )
         
         try:
             processed_task = self._pre_process_task(copy.deepcopy(task))
+            prompt_trace = self._build_prompt_trace(task, processed_task)
             request = self._map_task_to_request(processed_task)
             response = self._call_api(request)
             result = self._parse_response(response, processed_task)
@@ -251,6 +280,7 @@ class BaseAdapter(ABC):
         
         result.latency = time.time() - start_time
         result.cost = self.spec.estimate_cost(task)
+        result.trace = self._merge_trace(getattr(result, "trace", None), prompt_trace)
         
         return result
     

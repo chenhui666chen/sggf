@@ -41,6 +41,18 @@ def _get_owned_asset_or_404(db: Session, *, user_id: int, asset_id: int) -> User
     return asset
 
 
+def _resolve_preview_uri(payload: UserAssetRecordCreate) -> str | None:
+    return payload.preview_uri or payload.source_uri or payload.download_uri
+
+
+def _resolve_download_uri(payload: UserAssetRecordCreate) -> str | None:
+    return payload.download_uri or payload.source_uri or payload.preview_uri
+
+
+def _resolve_source_uri(payload: UserAssetRecordCreate) -> str | None:
+    return payload.source_uri or payload.download_uri or payload.preview_uri
+
+
 def _apply_user_asset_updates(asset: UserAssetRecord, update_data: dict) -> None:
     if "title" in update_data:
         asset.title = update_data["title"]
@@ -66,7 +78,7 @@ async def list_user_assets(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """获取当前用户的资产记录列表"""
+    """获取当前用户的资产记录列表。"""
 
     query = db.query(UserAssetRecord).filter(UserAssetRecord.user_id == current_user.id)
 
@@ -92,7 +104,7 @@ async def create_user_asset(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """收录一条用户资产记录"""
+    """收录一条用户资产记录。"""
 
     if payload.project_id is not None:
         _get_owned_project_or_404(db, user_id=current_user.id, project_id=payload.project_id)
@@ -103,17 +115,25 @@ async def create_user_asset(
             UserAssetRecord.user_id == current_user.id,
             UserAssetRecord.source_module == payload.source_module,
             UserAssetRecord.asset_kind == payload.asset_kind,
-            UserAssetRecord.file_url == payload.file_url,
+            UserAssetRecord.asset_uuid == payload.asset_uuid,
             UserAssetRecord.archived_at.is_(None),
         )
         .first()
     )
     if existing is not None:
-        existing.project_id = payload.project_id
+        if payload.project_id is not None or existing.project_id is None:
+            existing.project_id = payload.project_id
         existing.asset_class = payload.asset_class
+        existing.storage_mode = payload.storage_mode
         existing.title = payload.title
         existing.description = payload.description
-        existing.preview_url = payload.preview_url or payload.file_url
+        existing.source_uri = _resolve_source_uri(payload)
+        existing.preview_uri = _resolve_preview_uri(payload)
+        existing.download_uri = _resolve_download_uri(payload)
+        existing.mime_type = payload.mime_type
+        existing.file_size = payload.file_size
+        existing.checksum = payload.checksum
+        existing.expires_at = payload.expires_at
         existing.model_id = payload.model_id
         existing.generation_mode = payload.generation_mode
         existing.tags = payload.tags
@@ -131,10 +151,17 @@ async def create_user_asset(
         source_module=payload.source_module,
         asset_kind=payload.asset_kind,
         asset_class=payload.asset_class,
+        asset_uuid=payload.asset_uuid,
+        storage_mode=payload.storage_mode,
         title=payload.title,
         description=payload.description,
-        file_url=payload.file_url,
-        preview_url=payload.preview_url or payload.file_url,
+        source_uri=_resolve_source_uri(payload),
+        preview_uri=_resolve_preview_uri(payload),
+        download_uri=_resolve_download_uri(payload),
+        mime_type=payload.mime_type,
+        file_size=payload.file_size,
+        checksum=payload.checksum,
+        expires_at=payload.expires_at,
         model_id=payload.model_id,
         generation_mode=payload.generation_mode,
         tags=payload.tags,
@@ -154,7 +181,7 @@ async def batch_update_user_assets(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """批量更新当前用户的资产记录"""
+    """批量更新当前用户的资产记录。"""
 
     update_data = payload.updates.model_dump(exclude_unset=True)
     if not update_data:
@@ -194,7 +221,7 @@ async def update_user_asset(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """更新用户资产记录"""
+    """更新用户资产记录。"""
 
     asset = _get_owned_asset_or_404(db, user_id=current_user.id, asset_id=asset_id)
     update_data = payload.model_dump(exclude_unset=True)

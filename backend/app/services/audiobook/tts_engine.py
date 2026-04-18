@@ -82,6 +82,7 @@ class TTSProvider(str, Enum):
     TTS 提供商枚举
     """
     ALIYUN = "aliyun"      # 阿里云 CosyVoice
+    MINIMAX = "minimax"    # MiniMax Speech 2.8
     # 未来可扩展：
     # AZURE = "azure"      # 微软 Azure TTS
     # GOOGLE = "google"    # Google Cloud TTS
@@ -93,6 +94,26 @@ ALIYUN_MODEL_ALIASES: Dict[str, str] = {
     "qwen3-tts-flash": QWEN3_TTS_FLASH_MODEL_ID,
     # 预留高阶版本；若未来官方启用真正的 qwen3-tts-plus，可在此更新
     "qwen3-tts-plus": "qwen3-tts-plus",
+}
+
+# MiniMax Speech 2.8 模型映射
+MINIMAX_MODEL_ALIASES: Dict[str, str] = {
+    "minimax-speech-2.8-hd": "speech-2.8-hd",
+    "minimax-speech-2.8-turbo": "speech-2.8-turbo",
+    "minimax-speech-2.8": "speech-2.8-hd",  # 默认使用 HD
+}
+
+# MiniMax 支持的情感
+MINIMAX_EMOTIONS = {
+    "happy", "sad", "angry", "fearful", "disgusted", "surprised", "calm"
+}
+
+# MiniMax 语气词标签
+MINIMAX_INTERJECTIONS = {
+    "(laughs)", "(chuckles)", "(giggles)", "(sighs)", "(gasps)",
+    "(coughs)", "(clear-throat)", "(breath)", "(sniffs)", "(sneezes)",
+    "(exhales)", "(inhales)", "(smacks)", "(hmm)", "(uh)", "(ah)",
+    "(oh)", "(wow)", "(oops)"
 }
 
 
@@ -190,9 +211,13 @@ class TTSEngine:
         self.model = model  # TTS模型版本
         self._last_synthesis_metadata: Dict[str, Any] = {}
 
-        # 根据模型设置单价：v3-plus 成本更高
+        # 根据模型设置单价：不同模型价格不同
         if "plus" in model:
-            self.price_per_10k = 2.0  # ¥2/万字符
+            self.price_per_10k = 2.0  # ¥2/万字符（cosyvoice-v3-plus）
+        elif "minimax" in model and "hd" in model:
+            self.price_per_10k = 6.0  # ¥6/万字符（minimax speech-2.8-hd: 600积分/万字符）
+        elif "minimax" in model:
+            self.price_per_10k = 3.0  # ¥3/万字符（minimax speech-2.8-turbo: 300积分/万字符）
         else:
             self.price_per_10k = 1.0  # ¥1/万字符（默认 flash 模型）
         
@@ -272,6 +297,11 @@ class TTSEngine:
         
         # 预处理文本：保留钩子（当前不向文本注入额外指令）
         effective_text = self._build_instruct_text(text, voice_params, emotion)
+        
+        # MiniMax 语气词注入（从 performance_notes 提取）
+        if self._is_minimax_model():
+            performance_notes = voice_params.get("performance_notes", "")
+            effective_text = self._apply_interjections(effective_text, performance_notes, emotion)
         
         # 调试：输出接收到的 voice_params
         logger.info("TTS引擎接收参数: %s", voice_params)
@@ -563,11 +593,34 @@ class TTSEngine:
         """
         if provider == TTSProvider.ALIYUN:
             return await self._call_aliyun_tts_with_retry(text, voice_params)
+        elif provider == TTSProvider.MINIMAX:
+            return await self._call_minimax_tts_with_retry(text, voice_params)
         # 未来可扩展其他提供商
         # elif provider == TTSProvider.AZURE:
         #     return await self._call_azure_tts_with_retry(text, voice_params)
         else:
             raise ValueError(f"不支持的提供商: {provider}")
+    
+    def _is_minimax_model(self) -> bool:
+        """判断当前引擎是否为 MiniMax 系列模型"""
+        return str(self.model).startswith("minimax-speech")
+    
+    def _normalize_emotion_minimax(self, emotion: str) -> str:
+        """MiniMax 情感归一化"""
+        value = str(emotion or "").strip().lower()
+        if not value:
+            return "calm"
+        # MiniMax 支持的情感
+        if value in MINIMAX_EMOTIONS:
+            return value
+        # 别名映射
+        alias_map = {
+            "excited": "happy",
+            "tense": "fearful",
+            "neutral": "calm",
+            "scared": "fearful",
+        }
+        return alias_map.get(value, "calm")
     
     async def _call_aliyun_tts_with_retry(
         self,
@@ -1226,6 +1279,271 @@ class TTSEngine:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _sync_call)
 
+    def _apply_interjections(
+        self,
+        text: str,
+        performance_notes: str,
+        emotion: str
+    ) -> str:
+        """
+        应用语气词（MiniMax 特有）
+        
+        从 performance_notes 提取语气词并注入文本
+        """
+        if not performance_notes:
+            return text
+        
+        try:
+            from .interjection_parser import InterjectionParser
+            parser = InterjectionParser(model=self.model)
+            return parser.inject_interjections(text, performance_notes, emotion)
+        except ImportError:
+            logger.warning("interjection_parser 模块未安装，跳过语气词注入")
+            return text
+        except Exception as e:
+            logger.warning(f"语气词注入失败: {e}")
+            return text
+    
+    async def _call_minimax_tts_with_retry(
+        self,
+        text: str,
+        voice_params: Dict[str, Any]
+    ) -> bytes:
+        """调用 MiniMax TTS（带智能重试）"""
+        for attempt in range(self.retry_config.max_retries):
+            try:
+                audio = await self._call_minimax_tts(text, voice_params)
+                if audio and len(audio) > 0:
+                    if attempt > 0:
+                        logger.info(
+                            "MiniMax重试成功 (attempt %s/%s)",
+                            attempt + 1,
+                            self.retry_config.max_retries,
+                        )
+                    return audio
+                else:
+                    if attempt < self.retry_config.max_retries - 1:
+                        delay = self.retry_config.calculate_delay(attempt)
+                        logger.warning(
+                            "MiniMax返回空音频，等待 %.1f秒后重试 (attempt %s/%s)",
+                            delay,
+                            attempt + 1,
+                            self.retry_config.max_retries,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    return b""
+            except Exception as e:
+                error_str = str(e)
+                errno_value = getattr(e, "errno", None)
+                lower = error_str.lower()
+                is_retryable = bool(
+                    "Throttling" in error_str
+                    or "rate limit" in lower
+                    or "429" in error_str
+                    or "timeout" in lower
+                    or "connection" in lower
+                    or (errno_value in _RETRYABLE_NETWORK_ERRNOS)
+                    or isinstance(e, (TimeoutError, ConnectionError, ConnectionResetError, ConnectionAbortedError, BrokenPipeError))
+                )
+                
+                if is_retryable and attempt < self.retry_config.max_retries - 1:
+                    delay = self.retry_config.calculate_delay(attempt)
+                    logger.warning(
+                        "MiniMax %s: %s, 等待 %.1f秒后重试 (attempt %s/%s)",
+                        type(e).__name__,
+                        error_str[:100],
+                        delay,
+                        attempt + 1,
+                        self.retry_config.max_retries,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    logger.error("MiniMax TTS 失败: %s", e)
+                    raise
+        
+        return b""
+    
+    async def _call_minimax_tts(
+        self,
+        text: str,
+        voice_params: Dict[str, Any]
+    ) -> bytes:
+        """
+        调用 MiniMax Speech 2.8 TTS API（通过阿里云百炼）
+        
+        支持特性：
+        - 7种情感控制
+        - 语气词标签
+        - 自定义停顿 <#5#>
+        - 混合音色
+        """
+        if not text or not text.strip():
+            logger.warning("MiniMax文本为空，跳过TTS")
+            return b""
+        
+        import dashscope
+        import os
+        
+        api_key = os.getenv("DASHSCOPE_API_KEY")
+        if not api_key:
+            logger.error("MiniMax TTS: 未配置 DASHSCOPE_API_KEY")
+            return b""
+        
+        dashscope.api_key = api_key
+        
+        # 处理文本：清理和准备
+        original_text = text
+        text = text.strip()
+        
+        # MiniMax 文本处理（支持语气词标签，不需要特殊清理）
+        import unicodedata
+        cleaned_text = ''.join(
+            char for char in text
+            if unicodedata.category(char)[0] not in ['C']
+        )
+        text = cleaned_text.strip()
+        
+        if not text:
+            logger.warning("MiniMax清理后文本为空")
+            return b""
+        
+        if len(text) > 2000:
+            logger.warning("MiniMax文本过长(%s字符)，截断到2000字符", len(text))
+            text = text[:2000]
+        
+        # 模型ID映射
+        provider_model = MINIMAX_MODEL_ALIASES.get(self.model, self.model)
+        if provider_model != self.model:
+            logger.debug("MiniMax模型别名映射: %s -> %s", self.model, provider_model)
+        
+        # 音色ID
+        speaker_id = voice_params.get("speaker", "male-qingnian")
+        
+        # 情感归一化
+        emotion = self._normalize_emotion_minimax(voice_params.get("emotion", "calm"))
+        
+        logger.info(
+            f"MiniMax TTS请求: model={provider_model}, voice={speaker_id}, "
+            f"emotion={emotion}, text_len={len(text)}"
+        )
+        
+        # 调用百炼 API（MultiModalConversation 接口）
+        loop = asyncio.get_event_loop()
+        
+        def _sync_call() -> bytes:
+            max_retries = 3
+            retry_count = 0
+            response = None
+            
+            while retry_count <= max_retries:
+                try:
+                    # MiniMax 通过百炼使用 MultiModalConversation 接口
+                    response = dashscope.MultiModalConversation.call(
+                        model=provider_model,
+                        api_key=api_key,
+                        text=text,
+                        voice=speaker_id,
+                        emotion=emotion,
+                        stream=False,
+                    )
+                    break
+                except Exception as exc:
+                    error_str = str(exc)
+                    if "429" in error_str or "Throttling" in error_str or "RateQuota" in error_str:
+                        if retry_count < max_retries:
+                            retry_count += 1
+                            wait_time = min(5 * (retry_count ** 1.5), 120)
+                            logger.warning(
+                                "MiniMax rate limit (429), retry %s/%s, waiting %.1fs...",
+                                retry_count,
+                                max_retries,
+                                wait_time,
+                            )
+                            import time
+                            time.sleep(wait_time)
+                            continue
+                        else:
+                            logger.error(
+                                "MiniMax rate limit exceeded after %s retries: %s",
+                                max_retries,
+                                error_str,
+                            )
+                            return b""
+                    else:
+                        logger.error("MiniMax TTS call failed: %s", exc)
+                        return b""
+            
+            if not response:
+                logger.error("MiniMax no response after retries")
+                return b""
+            
+            status_code = getattr(response, "status_code", None)
+            if status_code is not None and int(status_code) != 200:
+                code = getattr(response, "code", None)
+                message = getattr(response, "message", None)
+                raise RuntimeError(
+                    f"MiniMax TTS failed: status_code={status_code} code={code} message={message}"
+                )
+            
+            # 提取音频
+            audio_bytes = self._extract_audio_from_response(response)
+            if audio_bytes:
+                logger.debug("MiniMax TTS成功: %s字符 -> %s字节", len(text), len(audio_bytes))
+                return audio_bytes
+            
+            logger.error("MiniMax 响应中未找到音频")
+            return b""
+        
+        return await loop.run_in_executor(None, _sync_call)
+    
+    def _extract_audio_from_response(self, response) -> Optional[bytes]:
+        """从响应中提取音频字节（兼容多种返回格式）"""
+        import base64
+        
+        # 尝试从 output.audio.data 提取
+        output = getattr(response, "output", None)
+        if isinstance(output, dict):
+            audio_dict = output.get("audio", {})
+            if isinstance(audio_dict, dict):
+                data_b64 = audio_dict.get("data")
+                if data_b64:
+                    try:
+                        return base64.b64decode(data_b64)
+                    except Exception:
+                        pass
+                
+                url = audio_dict.get("url")
+                if url:
+                    import urllib.request
+                    try:
+                        req = urllib.request.Request(url, headers={"User-Agent": "novel-writing-agent"})
+                        with urllib.request.urlopen(req, timeout=60) as f:
+                            return f.read()
+                    except Exception as e:
+                        logger.error("MiniMax音频URL下载失败: %s", e)
+                        return b""
+        
+        # 尝试从 choices[0].message.audios[0].data 提取
+        try:
+            as_dict = response.to_dict()
+            if isinstance(as_dict, dict):
+                output_dict = as_dict.get("output", {})
+                choices = output_dict.get("choices", [])
+                if choices:
+                    message = choices[0].get("message", {})
+                    audios = message.get("audios", [])
+                    if audios:
+                        first = audios[0]
+                        data_b64 = first.get("data")
+                        if data_b64:
+                            return base64.b64decode(data_b64)
+        except Exception:
+            pass
+        
+        return None
+    
     def _is_qwen_model(self) -> bool:
         """判断当前引擎是否为 Qwen3-TTS 系列模型。"""
         return str(self.model).startswith("qwen3-tts")

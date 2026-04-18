@@ -19,7 +19,13 @@ import {
 import type { InputLabelProps, SelectProps, SxProps, Theme } from '@mui/material'
 import type { SystemStyleObject } from '@mui/system'
 
-import { apiClient, extractApiErrorMessage } from '@/services/api'
+import {
+  apiClient,
+  extractApiErrorMessage,
+  type AssetStudioGenerateResponse,
+  type AssetStudioMediaAsset,
+} from '@/services/api'
+import { saveLocalAsset } from '@/utils/localAssetVault'
 
 import AssetStudioVisionReviewPanel from './AssetStudioVisionReviewPanel'
 import type { AssetStudioVisionReusePayload } from './AssetStudioVisionReviewPanel'
@@ -29,15 +35,6 @@ interface AssetStudioWorkbenchProps {
   activeTabId: AssetStudioTabId
   entries: ModelUseEntry[]
   onRequestTabChange?: (tabId: AssetStudioTabId) => void
-}
-
-interface AssetStudioGenerateResponse {
-  kind: string
-  mode: string
-  model_id: string
-  outputs: string[]
-  primary_output?: string | null
-  metadata?: Record<string, any>
 }
 
 const IMAGE_SIZE_OPTIONS: SizeOption[] = [
@@ -90,6 +87,15 @@ interface CollectFeedback {
 interface CollectState {
   loading: boolean
   feedback: CollectFeedback | null
+}
+
+function getPrimaryResultAsset(result: AssetStudioGenerateResponse | null | undefined): AssetStudioMediaAsset | null {
+  if (!result) return null
+  return result.primary_asset || result.assets?.[0] || null
+}
+
+function resolveResultAssetUrl(asset: AssetStudioMediaAsset | null | undefined): string {
+  return asset?.preview_uri || asset?.source_uri || asset?.download_uri || ''
 }
 
 interface RuntimeCapabilityHints {
@@ -1058,7 +1064,7 @@ function ResultCard({
   collecting?: boolean
   collectFeedback?: CollectFeedback | null
 }) {
-  const primaryOutput = result?.primary_output || result?.outputs?.[0] || ''
+  const primaryOutput = resolveResultAssetUrl(getPrimaryResultAsset(result))
 
   return (
     <Box
@@ -1362,20 +1368,54 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
       tags?: string[]
     },
   ) => {
-    const primaryOutput = options.result?.primary_output || options.result?.outputs?.[0] || ''
-    if (!options.result || !primaryOutput) return
+    const primaryAsset = getPrimaryResultAsset(options.result)
+    const primaryOutput = resolveResultAssetUrl(primaryAsset)
+    if (!options.result || !primaryAsset || !primaryOutput) return
 
     updateCollectState(key, { loading: true, feedback: null })
 
+    let localSaved = false
     try {
+      const assetResponse = await apiClient.get(primaryOutput, { responseType: 'blob' })
+      const assetBlob = assetResponse.data as Blob
+      const resolvedMimeType = primaryAsset.mime_type || assetBlob.type || null
+      const resolvedFileSize = primaryAsset.file_size ?? assetBlob.size ?? null
+      const assetTitle = buildAssetTitle(options.prompt, options.fallbackTitle)
+
+      await saveLocalAsset({
+        assetUuid: primaryAsset.asset_uuid,
+        mediaKind: primaryAsset.media_kind,
+        blob: assetBlob,
+        mimeType: resolvedMimeType,
+        fileSize: resolvedFileSize,
+        sourceModule: 'asset_studio',
+        title: assetTitle,
+        sourceUri: primaryAsset.source_uri,
+        previewUri: primaryAsset.preview_uri,
+        downloadUri: primaryAsset.download_uri,
+        metadata: {
+          kind: options.result.kind,
+          mode: options.result.mode,
+          model_id: options.result.model_id,
+          metadata: options.result.metadata || {},
+        },
+      })
+      localSaved = true
+
       await apiClient.createUserAsset({
         source_module: 'asset_studio',
         asset_kind: options.assetKind,
         asset_class: 'reusable',
-        title: buildAssetTitle(options.prompt, options.fallbackTitle),
+        asset_uuid: primaryAsset.asset_uuid,
+        storage_mode: 'local_mirror',
+        title: assetTitle,
         description: options.prompt.trim() || null,
-        file_url: primaryOutput,
-        preview_url: primaryOutput,
+        source_uri: primaryAsset.source_uri || primaryOutput,
+        preview_uri: primaryAsset.preview_uri || primaryOutput,
+        download_uri: primaryAsset.download_uri || primaryOutput,
+        mime_type: resolvedMimeType,
+        file_size: resolvedFileSize,
+        expires_at: primaryAsset.expires_at || null,
         model_id: options.result.model_id || null,
         generation_mode: options.result.mode || null,
         tags: options.tags || [],
@@ -1384,20 +1424,24 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
           kind: options.result.kind,
           mode: options.result.mode,
           model_id: options.result.model_id,
-          outputs: options.result.outputs || [],
+          assets: options.result.assets || [],
+          primary_asset: options.result.primary_asset || null,
           metadata: options.result.metadata || {},
         },
       })
       updateCollectState(key, {
         loading: false,
-        feedback: { type: 'success', text: '已收录到用户资产' },
+        feedback: { type: 'success', text: '已保存到本地并收录到用户资产' },
       })
     } catch (error) {
       updateCollectState(key, {
         loading: false,
         feedback: {
           type: 'error',
-          text: await extractApiErrorMessage(error, '收录到用户资产失败'),
+          text: await extractApiErrorMessage(
+            error,
+            localSaved ? '本地保存成功，但收录到用户资产失败' : '保存到本地资产库失败',
+          ),
         },
       })
     }

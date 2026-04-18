@@ -173,3 +173,184 @@ def test_state_machine_review_keeps_pipeline_done_when_safety_audit_is_warn_only
     assert result.state == state_machine.State.DONE
     assert len(autoqc_calls) == 1
     assert result.payload["autoqc"]["pass"] is True
+
+
+def test_state_machine_review_routes_output_audit_failure_to_video_rework(monkeypatch) -> None:
+    from pipeline import state_machine
+
+    autoqc_calls: list[dict] = []
+
+    monkeypatch.setattr(
+        state_machine.auditor,
+        "run",
+        lambda ctx: {
+            "pass": False,
+            "issues": [{"category": "output", "message": "merged_video missing"}],
+            "failure_type": "output_audit_failed",
+            "safety_audit": {"enabled": False, "executed": False},
+        },
+    )
+    monkeypatch.setattr(
+        state_machine.autoqc,
+        "run",
+        lambda payload: autoqc_calls.append(dict(payload)) or {"pass": True, "failures": [], "route": None},
+    )
+
+    ctx = state_machine.RunContext(run_id="dw_output_audit_001", state=state_machine.State.REVIEW, payload={})
+    result = state_machine.step(ctx)
+
+    assert result.state == state_machine.State.REWORK
+    assert len(autoqc_calls) == 1
+    assert result.payload["rework_reason"]["type"] == "output_audit_failed"
+    assert result.payload["rework_route"]["target_state"] == "VIDEO"
+    assert result.payload["rework_route"]["action"] == "rerun_video"
+    assert result.payload["rework_route"]["reason"] == "output_audit_failed"
+
+
+def test_state_machine_review_routes_output_audit_failure_to_edit_remerge_when_clips_are_complete(monkeypatch) -> None:
+    from pipeline import state_machine
+
+    monkeypatch.setattr(
+        state_machine.auditor,
+        "run",
+        lambda ctx: {
+            "pass": False,
+            "issues": [{"category": "output", "message": "merged_video too small"}],
+            "failure_type": "output_audit_failed",
+            "safety_audit": {"enabled": False, "executed": False},
+        },
+    )
+    monkeypatch.setattr(
+        state_machine.autoqc,
+        "run",
+        lambda payload: {"pass": True, "failures": [], "route": None},
+    )
+
+    ctx = state_machine.RunContext(
+        run_id="dw_output_audit_edit_001",
+        state=state_machine.State.REVIEW,
+        payload={
+            "storyboard": [
+                {"shot_id": "shot_001"},
+                {"shot_id": "shot_002"},
+            ],
+            "video_clips": [
+                {"path": "runs/demo/shot_001.mp4"},
+                {"path": "runs/demo/shot_002.mp4"},
+            ],
+            "merged_video": "runs/demo/merged.mp4",
+        },
+    )
+
+    result = state_machine.step(ctx)
+
+    assert result.state == state_machine.State.REWORK
+    assert result.payload["rework_reason"]["type"] == "output_audit_failed"
+    assert result.payload["rework_route"]["target_state"] == "EDIT"
+    assert result.payload["rework_route"]["action"] == "rebuild_merged_video"
+    assert result.payload["rework_route"]["reason"] == "output_audit_failed"
+    assert "patch" not in result.payload["rework_route"]
+
+
+def test_state_machine_rework_applies_output_audit_edit_route_without_dropping_clips(monkeypatch) -> None:
+    from pipeline import state_machine
+
+    monkeypatch.setattr(
+        state_machine.auditor,
+        "run",
+        lambda ctx: {
+            "pass": False,
+            "issues": [{"category": "output", "message": "merged_video file missing"}],
+            "failure_type": "output_audit_failed",
+            "safety_audit": {"enabled": False, "executed": False},
+        },
+    )
+    monkeypatch.setattr(
+        state_machine.autoqc,
+        "run",
+        lambda payload: {"pass": True, "failures": [], "route": None},
+    )
+
+    payload = {
+        "storyboard": [
+            {"shot_id": "shot_001"},
+            {"shot_id": "shot_002"},
+        ],
+        "video_clips": [
+            {"path": "runs/demo/shot_001.mp4"},
+            {"path": "runs/demo/shot_002.mp4"},
+        ],
+        "merged_video": "runs/demo/merged.mp4",
+        "video_edit_attempted_shot_ids": ["shot_001"],
+    }
+    ctx = state_machine.RunContext(
+        run_id="dw_output_audit_edit_002",
+        state=state_machine.State.REVIEW,
+        payload=payload,
+    )
+
+    review_result = state_machine.step(ctx)
+
+    assert review_result.state == state_machine.State.REWORK
+    assert review_result.payload["rework_route"]["target_state"] == "EDIT"
+
+    rework_result = state_machine.step(review_result)
+
+    assert rework_result.state == state_machine.State.EDIT
+    assert "merged_video" not in rework_result.payload
+    assert rework_result.payload["video_clips"] == payload["video_clips"]
+    assert rework_result.payload["video_edit_attempted_shot_ids"] == ["shot_001"]
+    assert "regenerate_shot_ids" not in rework_result.payload
+
+
+def test_state_machine_rework_applies_output_audit_video_route_with_regen_shots_when_clips_incomplete(monkeypatch) -> None:
+    from pipeline import state_machine
+
+    monkeypatch.setattr(
+        state_machine.auditor,
+        "run",
+        lambda ctx: {
+            "pass": False,
+            "issues": [{"category": "output", "message": "merged_video missing"}],
+            "failure_type": "output_audit_failed",
+            "safety_audit": {"enabled": False, "executed": False},
+        },
+    )
+    monkeypatch.setattr(
+        state_machine.autoqc,
+        "run",
+        lambda payload: {"pass": True, "failures": [], "route": None},
+    )
+
+    ctx = state_machine.RunContext(
+        run_id="dw_output_audit_002",
+        state=state_machine.State.REVIEW,
+        payload={
+            "storyboard": [
+                {"shot_id": "shot_001"},
+                {"shot_id": "shot_002"},
+                {"shot_id": "shot_003"},
+            ],
+            "video_clips": [
+                {"path": "runs/demo/shot_001.mp4"},
+                {"path": "runs/demo/shot_002.mp4"},
+            ],
+            "merged_video": "runs/demo/merged.mp4",
+            "video_edit_attempted_shot_ids": ["shot_001", "shot_002"],
+            "video_edit_failed_shot_ids": ["shot_001"],
+        },
+    )
+
+    review_result = state_machine.step(ctx)
+
+    assert review_result.state == state_machine.State.REWORK
+    assert review_result.payload["rework_route"]["patch"]["regenerate_shot_ids"] == ["shot_001"]
+
+    rework_result = state_machine.step(review_result)
+
+    assert rework_result.state == state_machine.State.VIDEO
+    assert rework_result.payload["regenerate_shot_ids"] == ["shot_001"]
+    assert "merged_video" not in rework_result.payload
+    assert rework_result.payload["video_clips"] == [{"path": "runs/demo/shot_002.mp4"}]
+    assert rework_result.payload["video_edit_attempted_shot_ids"] == ["shot_002"]
+    assert "video_edit_failed_shot_ids" not in rework_result.payload

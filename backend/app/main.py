@@ -26,7 +26,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.db.base import Base, engine
 from app.db.schema_compat import ensure_runtime_schema_compatibility
-from app.api.v1 import auth, projects, chapters, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters, ai_detect, prompt_evolution, ai_trace, book_parser, audiobook, monitoring, script_review, dreamweaver, model_catalog, asset_studio, user_assets, user_center, smart_dispatch, feedback
+from app.api.v1 import auth, projects, chapters, reviews, workflow, settings as settings_api, knowledge, memories, ai_assist, statistics, characters, ai_detect, prompt_evolution, ai_trace, book_parser, audiobook, monitoring, script_review, dreamweaver, model_catalog, asset_studio, user_assets, user_center, smart_dispatch, feedback, agent_prompts
 from app.api.v1.admin import router as admin_router
 import socketio
 
@@ -175,6 +175,7 @@ app.include_router(characters.router)
 app.include_router(ai_detect.router)  # AI 生成检测 API
 app.include_router(ai_trace.router)  # 织文无迹 API
 app.include_router(prompt_evolution.router)  # 提示词进化优化 API（实验性）
+app.include_router(agent_prompts.router)  # Agent 提示词管理 API
 app.include_router(book_parser.router)  # 拆书工具 API
 app.include_router(audiobook.router)  # 耳畔星河 - 有声书生成 API
 app.include_router(monitoring.router)  # 监控与指标 API

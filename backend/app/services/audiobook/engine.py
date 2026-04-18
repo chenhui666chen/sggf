@@ -23,6 +23,15 @@ from .audio_mixer import AudioMixer
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
 from core.unified_media_runtime import create_tts_engine
 
+try:
+    from .agent_dispatch_client import client as tts_dispatch_client
+    from .agent_dispatch_client import TTSDispatchResult
+    TTS_DISPATCH_AVAILABLE = True
+except ImportError:
+    TTS_DISPATCH_AVAILABLE = False
+    tts_dispatch_client = None
+    TTSDispatchResult = None
+
 # 导入专业Agent
 from .agents import (
     AudioDirector,
@@ -108,6 +117,12 @@ class AudiobookEngine:
         from .intelligence import ClimaxDetector, EmotionCurveAnalyzer
         self.climax_detector = ClimaxDetector()
         self.emotion_analyzer = EmotionCurveAnalyzer()
+        
+        self._use_tts_dispatch = TTS_DISPATCH_AVAILABLE
+        if self._use_tts_dispatch:
+            logger.info("🚀 已启用 TTS 智能调度系统（4 个已注册模型）")
+        else:
+            logger.info("📝 TTS 智能调度系统不可用，使用传统 TTS 引擎")
         
         logger.info("🎶 有声书生成引擎初始化完成")
     
@@ -1060,6 +1075,113 @@ class AudiobookEngine:
         
         return audio_list
 
+    def get_tts_dispatch_models(self) -> List[Dict[str, Any]]:
+        """获取已注册的 TTS 智能调度模型列表"""
+        if TTS_DISPATCH_AVAILABLE and tts_dispatch_client:
+            return tts_dispatch_client.get_available_models()
+        return []
+
+    def synthesize_with_dispatch(
+        self,
+        text: str,
+        strategy: str = "balanced",
+        voice_id: Optional[str] = None,
+        **kwargs,
+    ) -> Optional[Any]:
+        """使用智能调度系统合成语音
+
+        Args:
+            text: 要合成的文本
+            strategy: 调度策略 (quality/fast/balanced/cost_saving)
+            voice_id: 指定音色 ID
+            **kwargs: 其他 TTS 参数
+
+        Returns:
+            TTSDispatchResult 或 None
+        """
+        if not self._use_tts_dispatch or not tts_dispatch_client:
+            logger.warning("TTS 智能调度系统未启用")
+            return None
+
+        return tts_dispatch_client.synthesize(
+            text=text,
+            strategy=strategy,
+            voice_id=voice_id,
+            **kwargs,
+        )
+
+    async def _synthesize_segments_with_dispatch(
+        self,
+        script_segments,
+        strategy: str = "balanced",
+        debug_save_segments: bool = False,
+        debug_output_dir: Optional[str] = None,
+    ) -> List[bytes]:
+        """使用智能调度系统批量合成剧本片段"""
+        if not self._use_tts_dispatch or not tts_dispatch_client:
+            logger.warning("TTS 智能调度系统未启用，回退到传统引擎")
+            return await self._synthesize_segments(
+                script_segments,
+                debug_save_segments=debug_save_segments,
+                debug_output_dir=debug_output_dir,
+            )
+
+        texts = [seg.text for seg in script_segments]
+        voice_ids = [
+            seg.voice_params.get("speaker") if hasattr(seg, "voice_params") else None
+            for seg in script_segments
+        ]
+
+        dispatch_results = tts_dispatch_client.synthesize_batch(
+            texts=texts,
+            strategy=strategy,
+            voice_ids=voice_ids,
+            max_concurrent=5,
+        )
+
+        audio_list: List[bytes] = []
+        for i, result in enumerate(dispatch_results):
+            if result and result.success and result.audio_data:
+                audio_list.append(result.audio_data)
+            else:
+                logger.error("TTS 智能调度片段 %s 失败: %s", i + 1, result.error if result else "未知错误")
+                audio_list.append(b"")
+
+        if debug_save_segments and audio_list:
+            from pathlib import Path
+            
+            if debug_output_dir:
+                debug_dir = Path(debug_output_dir)
+            else:
+                debug_dir = Path("backend/data/tts_dispatch_debug")
+            
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            logger.info("[调试模式] 保存 TTS 智能调度片段到: %s", debug_dir)
+            
+            for i, (seg, audio_bytes) in enumerate(zip(script_segments, audio_list), start=1):
+                try:
+                    audio_file = debug_dir / f"dispatch_segment_{i:03d}.mp3"
+                    if audio_bytes and len(audio_bytes) > 0:
+                        audio_file.write_bytes(audio_bytes)
+                        
+                        text_file = debug_dir / f"dispatch_segment_{i:03d}.txt"
+                        seg_text = seg.text if hasattr(seg, "text") else ""
+                        speaker = seg.voice_params.get("speaker", "unknown") if hasattr(seg, "voice_params") else "unknown"
+                        emotion = getattr(seg, "instruct_emotion", "") or getattr(seg, "emotion", "neutral")
+                        text_file.write_text(
+                            f"片段 {i}\n"
+                            f"长度: {len(seg_text)} 字符\n"
+                            f"音频大小: {len(audio_bytes)} 字节\n"
+                            f"音色: {speaker}\n"
+                            f"情感: {emotion}\n"
+                            f"\n文本内容:\n{seg_text}\n",
+                            encoding="utf-8"
+                        )
+                except Exception as e:
+                    logger.error("保存片段 %03d 失败: %s", i, e)
+
+        return audio_list
+
     @staticmethod
     def _parse_scene_index(scene_id: str) -> Optional[int]:
         if not scene_id:
@@ -1632,6 +1754,34 @@ class AudiobookEngine:
                 if seg.speaker != "旁白"
             ]))
             
+            # 🆕 章节分析：从剧本片段中提取角色特征
+            chapter_traits = {}
+            known_traits = {}
+            for char_name in characters_in_script:
+                existing_profile = self.voice_manager.get_voice(char_name)
+                if existing_profile:
+                    known_traits[char_name] = {
+                        "gender": existing_profile.gender,
+                        "age_group": existing_profile.age_group,
+                        "personality": existing_profile.personality,
+                    }
+
+            if characters_in_script and not known_traits:
+                chapter_traits = self.voice_manager.analyze_chapter_characters(
+                    script_segments, known_characters=known_traits
+                )
+                if chapter_traits:
+                    logger.info("📊 章节角色分析完成: %d 个角色", len(chapter_traits))
+                    for char_name, traits in chapter_traits.items():
+                        logger.info("   %s: gender=%s, age=%s, personality=%s (source=%s)",
+                                   char_name,
+                                   traits.get("gender", "unknown"),
+                                   traits.get("age_group", "unknown"),
+                                   traits.get("personality", "unknown"),
+                                   traits.get("source", "unknown"))
+                else:
+                    logger.info("📖 章节角色分析未提取到新特征")
+
             if characters_in_script:
                 # 🔥 重构：VoiceDesigner 不再设计音色，只检查配置完整性
                 if preserve_user_config:
@@ -1650,15 +1800,16 @@ class AudiobookEngine:
                     if characters_to_design:
                         logger.info(f"   🎭 使用VoiceManager自动分配: {len(characters_to_design)} 个角色 {characters_to_design}")
                         for char_name in characters_to_design:
-                            # 使用 VoiceManager 的智能分配逻辑
-                            self.voice_manager.assign_voice(char_name)
+                            char_traits = chapter_traits.get(char_name)
+                            self.voice_manager.assign_voice(char_name, character_info=char_traits)
                         
                     voice_profiles = {}  # 返回空字典，因为已由 VoiceManager 管理
                 else:
                     # 不保留用户配置时，也用 VoiceManager 重新分配
                     logger.info(f"   🎭 使用VoiceManager为 {len(characters_in_script)} 个角色分配音色")
                     for char_name in characters_in_script:
-                        self.voice_manager.assign_voice(char_name)
+                        char_traits = chapter_traits.get(char_name)
+                        self.voice_manager.assign_voice(char_name, character_info=char_traits)
                     voice_profiles = {}
                 
                 if skip_stage_tracking:

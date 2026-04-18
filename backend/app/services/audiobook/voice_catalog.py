@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 VOICE_FILENAMES_BY_MODEL = {
     "qwen3-tts-flash": "qwen3_tts_voices.json",
     "cosyvoice-v3-plus": "cosyvoice_v3_plus_voices.json",
+    "minimax-speech-2.8-hd": "minimax_speech_2_8_voices.json",
+    "minimax-speech-2.8-turbo": "minimax_speech_2_8_voices.json",
+    # 兼容别名
+    "minimax-speech-2.8": "minimax_speech_2_8_voices.json",
 }
 
 
@@ -31,6 +35,9 @@ def _filename_for_model(model: str) -> str:
     model = (model or "").strip()
     if model in VOICE_FILENAMES_BY_MODEL:
         return VOICE_FILENAMES_BY_MODEL[model]
+    # 兼容别名匹配
+    if model.startswith("minimax-speech"):
+        return VOICE_FILENAMES_BY_MODEL["minimax-speech-2.8-hd"]
     if model.startswith("qwen3-tts"):
         return VOICE_FILENAMES_BY_MODEL["qwen3-tts-flash"]
     return VOICE_FILENAMES_BY_MODEL["qwen3-tts-flash"]

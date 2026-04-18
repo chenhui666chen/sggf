@@ -221,3 +221,102 @@ def test_execution_engine_single_execution_uses_prefetched_routing_result() -> N
 
     assert result.success is True
     assert result.model_id == "prefetched-model"
+    assert result.trace["strategy"] == "quality"
+    assert result.trace["resolved_model"] == "prefetched-model"
+    assert result.trace["attempted_models"] == ["prefetched-model"]
+
+
+def test_execution_engine_fallback_trace_includes_attempted_models_and_chain() -> None:
+    from core.execution_engine import ExecutionEngine
+    from core.router import RoutingResult
+
+    task = _build_task()
+    routing_result = RoutingResult(
+        selected_model=_FakeModel("primary-model"),
+        fallback_models=[_FakeModel("secondary-model")],
+        score=1.0,
+        strategy="balanced",
+    )
+    registry = SimpleNamespace(
+        get_adapter=lambda model_id: {
+            "primary-model": _FakeAdapter("primary-model", success=False),
+            "secondary-model": _FakeAdapter("secondary-model", success=True),
+        }.get(model_id),
+        get_all_performance_stats=lambda: {},
+    )
+    router = _FakeRouter()
+    engine = ExecutionEngine(registry=registry, router=router)
+
+    result = engine._execute_with_fallback(
+        task=task,
+        max_attempts=3,
+        strategy="balanced",
+        routing_result=routing_result,
+    )
+
+    assert result.success is True
+    assert result.model_id == "secondary-model"
+    assert result.trace["attempted_models"] == ["primary-model", "secondary-model"]
+    assert result.trace["fallback_chain"]["total_attempts"] == 2
+    assert result.trace["fallback_chain"]["attempts"][0]["model_id"] == "primary-model"
+    assert result.trace["fallback_chain"]["attempts"][1]["model_id"] == "secondary-model"
+
+
+def test_base_adapter_records_prompt_trace() -> None:
+    from adapters.base import BaseAdapter, GenerationResult
+
+    class _BestPractice:
+        prompt_template = "hero::{prompt}"
+
+        @staticmethod
+        def apply_prompt_template(prompt: str) -> str:
+            return f"template::{prompt}"
+
+    class _Spec:
+        id = "trace-model"
+        best_practice = _BestPractice()
+
+        @staticmethod
+        def can_handle(_task):
+            return True, []
+
+        @staticmethod
+        def estimate_cost(_task):
+            return 0.3
+
+    class _TraceAdapter(BaseAdapter):
+        def _init_client(self) -> None:
+            pass
+
+        def _optimize_prompt(self, task) -> str:
+            return f"{task.prompt}::optimized"
+
+        def _map_task_to_request(self, task):
+            return {"prompt": task.prompt}
+
+        def _call_api(self, request):
+            return request
+
+        def _parse_response(self, response, task):
+            return GenerationResult(
+                success=True,
+                task_id=task.task_id,
+                model_id=self.spec.id,
+                outputs=[response["prompt"]],
+                metadata={},
+            )
+
+        @classmethod
+        def get_model_spec(cls):
+            return _Spec()
+
+    task = _build_task()
+    adapter = _TraceAdapter(_Spec())
+
+    result = adapter.generate(task)
+
+    assert result.success is True
+    assert result.trace["prompt"]["model_id"] == "trace-model"
+    assert result.trace["prompt"]["prompt_before"] == "hero portrait"
+    assert result.trace["prompt"]["prompt_after"] == "template::hero portrait::optimized"
+    assert result.trace["prompt"]["prompt_changed"] is True

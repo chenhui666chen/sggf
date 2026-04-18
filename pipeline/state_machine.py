@@ -18,6 +18,10 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from agents import asset_library, auditor, dreamweaver, editor, painter, planner, scripter, storyboarder
 from pipeline import autoqc
+from pipeline.dreamweaver_smart_dispatch_trace import (
+    initialize_dreamweaver_smart_dispatch_trace,
+    refresh_dreamweaver_smart_dispatch_trace,
+)
 from pipeline.smart_tuning import apply_smart_tuning
 from pipeline.restart_reset import apply_restart_reset as _apply_restart_reset_impl
 
@@ -111,6 +115,7 @@ class RunContext:
         # 让所有节点都能稳定取到 run_id（历史代码部分读取 ctx.payload["run_id"]）
         self.payload.setdefault("run_id", self.run_id)
         _ensure_telemetry(self.payload)
+        initialize_dreamweaver_smart_dispatch_trace(self.payload)
 
     def bump_retry(self, state: State, limit: int = 2) -> bool:
         self.retry[state] = self.retry.get(state, 0) + 1
@@ -124,6 +129,115 @@ def _deep_merge(dst: Dict[str, Any], patch: Dict[str, Any]) -> None:
             _deep_merge(existing, value)
         else:
             dst[key] = value
+
+
+def _normalize_text_list(raw: Any, *, limit: int = 200) -> list[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, (str, int)) and not isinstance(raw, bool):
+        text = str(raw).strip()
+        return [text] if text else []
+    if not isinstance(raw, list):
+        return []
+
+    out: list[str] = []
+    for item in raw:
+        if isinstance(item, bool) or not isinstance(item, (str, int)):
+            continue
+        text = str(item).strip()
+        if not text or text in out:
+            continue
+        out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _collect_output_issue_messages(audit_result: Dict[str, Any]) -> list[str]:
+    out: list[str] = []
+    for key in ("output_issues", "issues"):
+        issues = audit_result.get(key)
+        if not isinstance(issues, list):
+            continue
+        for item in issues:
+            if not isinstance(item, dict):
+                continue
+            if key == "issues":
+                category = str(item.get("category") or "").strip().lower()
+                if category and category != "output":
+                    continue
+            message = str(item.get("message") or "").strip().lower()
+            if not message or message in out:
+                continue
+            out.append(message)
+    return out
+
+
+def _has_mergeable_video_clips(payload: Dict[str, Any]) -> bool:
+    video_clips = payload.get("video_clips")
+    if not isinstance(video_clips, list):
+        return False
+
+    valid_clip_count = 0
+    for item in video_clips:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "").strip()
+        if path:
+            valid_clip_count += 1
+
+    if valid_clip_count <= 0:
+        return False
+
+    storyboard = payload.get("storyboard")
+    if isinstance(storyboard, list):
+        storyboard_count = sum(1 for item in storyboard if isinstance(item, dict))
+        if storyboard_count > 0 and valid_clip_count < storyboard_count:
+            return False
+
+    return True
+
+
+def _should_rebuild_merged_video_in_edit(payload: Dict[str, Any], audit_result: Dict[str, Any]) -> bool:
+    output_issue_messages = _collect_output_issue_messages(audit_result)
+    if not output_issue_messages:
+        return False
+    if not _has_mergeable_video_clips(payload):
+        return False
+    remergeable_messages = {
+        "merged_video missing",
+        "merged_video file missing",
+        "merged_video too small",
+    }
+    return all(message in remergeable_messages for message in output_issue_messages)
+
+
+def _build_review_audit_rework_route(payload: Dict[str, Any], audit_result: Dict[str, Any]) -> Dict[str, Any] | None:
+    audit_failure_type = str(audit_result.get("failure_type") or "").strip().lower()
+    if audit_failure_type != "output_audit_failed":
+        return None
+
+    if _should_rebuild_merged_video_in_edit(payload, audit_result):
+        return {
+            "target_state": "EDIT",
+            "action": "rebuild_merged_video",
+            "reason": "output_audit_failed",
+            "reset_policy": "downstream",
+        }
+
+    regenerate_shot_ids = _normalize_text_list(payload.get("video_edit_failed_shot_ids"))
+    if not regenerate_shot_ids:
+        regenerate_shot_ids = _normalize_text_list(payload.get("video_edit_attempted_shot_ids"))
+
+    route: Dict[str, Any] = {
+        "target_state": "VIDEO",
+        "action": "rerun_video",
+        "reason": "output_audit_failed",
+        "reset_policy": "downstream",
+    }
+    if regenerate_shot_ids:
+        route["patch"] = {"regenerate_shot_ids": regenerate_shot_ids}
+    return route
 
 
 def _apply_restart_reset(payload: Dict[str, Any], *, start_state: str, reset_policy: str) -> None:
@@ -187,14 +301,17 @@ def step(ctx: RunContext) -> RunContext:
         elif ctx.state == State.KEYFRAMES:
             with _stage_timer(ctx.payload, stage=stage_label(ctx.state)):
                 painter.run_keyframes(ctx)
+            refresh_dreamweaver_smart_dispatch_trace(ctx.payload, stage=stage_label(ctx.state))
             ctx.state = State.MIDFRAMES
         elif ctx.state == State.MIDFRAMES:
             with _stage_timer(ctx.payload, stage=stage_label(ctx.state)):
                 painter.run_midframes(ctx)
+            refresh_dreamweaver_smart_dispatch_trace(ctx.payload, stage=stage_label(ctx.state))
             ctx.state = State.VIDEO
         elif ctx.state == State.VIDEO:
             with _stage_timer(ctx.payload, stage=stage_label(ctx.state)):
                 dreamweaver.run_video(ctx)  # 织梦映心
+            refresh_dreamweaver_smart_dispatch_trace(ctx.payload, stage=stage_label(ctx.state))
             if ctx.payload.get("video_done") is False:
                 ctx.state = State.WAITING_VIDEO_CONFIRMATION
             else:
@@ -204,6 +321,7 @@ def step(ctx: RunContext) -> RunContext:
         elif ctx.state == State.EDIT:
             with _stage_timer(ctx.payload, stage=stage_label(ctx.state)):
                 editor.run(ctx)
+            refresh_dreamweaver_smart_dispatch_trace(ctx.payload, stage=stage_label(ctx.state))
             ctx.state = State.REVIEW
         elif ctx.state == State.REVIEW:
             with _stage_timer(ctx.payload, stage=stage_label(ctx.state)):
@@ -224,6 +342,7 @@ def step(ctx: RunContext) -> RunContext:
                 else:
                     qc_result = autoqc.run(ctx.payload)
                 ctx.payload["autoqc"] = qc_result
+                refresh_dreamweaver_smart_dispatch_trace(ctx.payload, stage=stage_label(ctx.state))
 
                 qc_cfg = ctx.payload.get("qc_config") if isinstance(ctx.payload.get("qc_config"), dict) else {}
                 qc_fail_policy = str(qc_cfg.get("fail_policy") or "").strip().lower()
@@ -275,15 +394,26 @@ def step(ctx: RunContext) -> RunContext:
                             ctx.state = State.REWORK
                             _record_rework(ctx.payload)
                         else:
-                            ctx.payload["rework_reason"] = {
-                                "type": "audit_failed",
-                                "issues": audit_result.get("issues", []),
-                            }
-                            ctx.payload["rework_route"] = {
-                                "target_state": "SCRIPT",
-                                "action": "review_fix",
-                                "reason": "audit_failed",
-                            }
+                            audit_rework_route = _build_review_audit_rework_route(ctx.payload, audit_result)
+                            if isinstance(audit_rework_route, dict):
+                                ctx.payload["rework_reason"] = {
+                                    "type": "output_audit_failed",
+                                    "issues": audit_result.get("issues", []),
+                                    "route": audit_rework_route,
+                                }
+                                ctx.payload["rework_route"] = audit_rework_route
+                            else:
+                                fallback_route = {
+                                    "target_state": "SCRIPT",
+                                    "action": "review_fix",
+                                    "reason": "audit_failed",
+                                }
+                                ctx.payload["rework_reason"] = {
+                                    "type": "audit_failed",
+                                    "issues": audit_result.get("issues", []),
+                                    "route": fallback_route,
+                                }
+                                ctx.payload["rework_route"] = fallback_route
                             ctx.state = State.REWORK
                             _record_rework(ctx.payload)
         elif ctx.state == State.REWORK:

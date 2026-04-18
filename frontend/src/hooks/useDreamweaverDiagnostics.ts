@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import type {
   DreamweaverRunPreflight,
   DreamweaverRunSnapshot,
+  DreamweaverSmartDispatchTrace,
   DreamweaverVideoProviderShotTrace,
   DreamweaverVideoProviderTrace,
   RunResult,
@@ -13,8 +14,11 @@ import {
   mergeRunResult,
   resolveDreamweaverDiagnosticPreflight,
   resolveDreamweaverDiagnosticProviderTrace,
+  resolveDreamweaverDiagnosticSmartDispatchTrace,
   summarizeDreamweaverProviderTrace,
+  summarizeDreamweaverSmartDispatchTrace,
   type DreamweaverProviderTraceSummary,
+  type DreamweaverSmartDispatchTraceSummary,
 } from '@/utils/dreamweaver'
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -35,8 +39,10 @@ export interface UseDreamweaverDiagnosticsReturn {
   diagnosticResult: RunResult | null
   diagnosticPreflight: DreamweaverRunPreflight | null
   diagnosticProviderTrace: DreamweaverVideoProviderTrace | null
+  diagnosticSmartDispatchTrace: DreamweaverSmartDispatchTrace | null
   diagnosticProviderTraceByShotId: Map<string, DreamweaverVideoProviderShotTrace>
   diagnosticProviderTraceSummary: DreamweaverProviderTraceSummary | null
+  diagnosticSmartDispatchTraceSummary: DreamweaverSmartDispatchTraceSummary | null
 }
 
 export function useDreamweaverDiagnostics({
@@ -68,6 +74,10 @@ export function useDreamweaverDiagnostics({
     return resolveDreamweaverDiagnosticProviderTrace(diagnosticResult, snapshotRuntimeConfig)
   }, [diagnosticResult, snapshotRuntimeConfig])
 
+  const diagnosticSmartDispatchTrace = useMemo(() => {
+    return resolveDreamweaverDiagnosticSmartDispatchTrace(diagnosticResult, snapshotRuntimeConfig)
+  }, [diagnosticResult, snapshotRuntimeConfig])
+
   const diagnosticProviderTraceByShotId = useMemo(() => {
     return indexDreamweaverProviderTraceByShotId(diagnosticProviderTrace)
   }, [diagnosticProviderTrace])
@@ -76,13 +86,19 @@ export function useDreamweaverDiagnostics({
     return summarizeDreamweaverProviderTrace(diagnosticProviderTrace)
   }, [diagnosticProviderTrace])
 
+  const diagnosticSmartDispatchTraceSummary = useMemo(() => {
+    return summarizeDreamweaverSmartDispatchTrace(diagnosticSmartDispatchTrace)
+  }, [diagnosticSmartDispatchTrace])
+
   return {
     snapshotContract,
     snapshotRuntimeConfig,
     diagnosticResult,
     diagnosticPreflight,
     diagnosticProviderTrace,
+    diagnosticSmartDispatchTrace,
     diagnosticProviderTraceByShotId,
     diagnosticProviderTraceSummary,
+    diagnosticSmartDispatchTraceSummary,
   }
 }

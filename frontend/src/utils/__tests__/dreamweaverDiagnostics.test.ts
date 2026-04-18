@@ -10,7 +10,9 @@ import {
   readPersistedDreamWeaverRun,
   resolveDreamweaverDiagnosticPreflight,
   resolveDreamweaverDiagnosticProviderTrace,
+  resolveDreamweaverDiagnosticSmartDispatchTrace,
   summarizeDreamweaverProviderTrace,
+  summarizeDreamweaverSmartDispatchTrace,
   writePersistedDreamWeaverRun,
 } from '../dreamweaver'
 
@@ -37,7 +39,7 @@ describe('dreamweaver diagnostics utils', () => {
   afterEach(() => {
     Reflect.deleteProperty(globalThis, 'localStorage')
   })
-  it('从 snapshot runtime_config 提取 preflight 和 provider trace', () => {
+  it('从 snapshot runtime_config 提取 preflight、provider trace 和 smart dispatch trace', () => {
     const result = buildResultFromRunSnapshot(
       {
         run_id: 'run-1',
@@ -62,6 +64,33 @@ describe('dreamweaver diagnostics utils', () => {
                 },
               ],
             },
+            smart_dispatch_trace: {
+              stage: 'executed',
+              strategy: 'quality',
+              phases: [
+                { stage: 'keyframes', strategy: 'quality' },
+                { stage: 'video', strategy: 'quality' },
+              ],
+              intent: {
+                modality: 'text_to_video',
+                confidence: 0.91,
+              },
+              routing: {
+                selected_model: 'wan2.7-t2v',
+                fallback_models: ['kling-omni-v1'],
+                candidate_scores: [
+                  { rank: 1, model_id: 'wan2.7-t2v', selected: true },
+                  { rank: 2, model_id: 'kling-omni-v1', is_fallback: true },
+                ],
+              },
+              execution: {
+                resolved_model: 'wan2.7-t2v',
+                attempted_models: ['wan2.7-t2v'],
+                prompt: {
+                  prompt_changed: true,
+                },
+              },
+            },
           },
           episodes: [],
         },
@@ -79,8 +108,14 @@ describe('dreamweaver diagnostics utils', () => {
         provider_mode: 'auto',
         selector_mode: 'smart',
       },
+      smart_dispatch_trace: {
+        stage: 'executed',
+        strategy: 'quality',
+      },
     })
     expect(result?.video_provider_trace?.shots).toHaveLength(1)
+    expect(result?.smart_dispatch_trace?.routing?.selected_model).toBe('wan2.7-t2v')
+    expect(result?.smart_dispatch_trace?.phases).toHaveLength(2)
   })
 
   it('buildResultFromRunSnapshot 会保留审核与质检快照', () => {
@@ -135,6 +170,12 @@ describe('dreamweaver diagnostics utils', () => {
         provider_mode: 'wan',
         shots: [{ shot_id: 'shot-1', applied_provider: 'wan' }],
       },
+      smart_dispatch_trace: {
+        stage: 'dry_run',
+        routing: {
+          selected_model: 'wan2.7-t2v',
+        },
+      },
     }
     const next = {
       run_id: 'run-1',
@@ -150,6 +191,12 @@ describe('dreamweaver diagnostics utils', () => {
         provider_mode: 'auto',
         shots: [{ shot_id: 'shot-1', applied_provider: 'kling' }],
       },
+      smart_dispatch_trace: {
+        stage: 'executed',
+        execution: {
+          resolved_model: 'kling-omni-v1',
+        },
+      },
     }
 
     expect(mergeRunResult(prev, next)).toMatchObject({
@@ -161,6 +208,12 @@ describe('dreamweaver diagnostics utils', () => {
       },
       video_provider_trace: {
         provider_mode: 'auto',
+      },
+      smart_dispatch_trace: {
+        stage: 'executed',
+        execution: {
+          resolved_model: 'kling-omni-v1',
+        },
       },
     })
   })
@@ -222,6 +275,34 @@ describe('dreamweaver diagnostics utils', () => {
     })
   })
 
+  it('resolveDreamweaverDiagnosticSmartDispatchTrace 按 result > snapshot 取值', () => {
+    const snapshotRuntimeConfig = {
+      smart_dispatch_trace: {
+        stage: 'dry_run',
+        routing: {
+          selected_model: 'wan2.7-t2v',
+        },
+      },
+    }
+    const result = {
+      smart_dispatch_trace: {
+        stage: 'executed',
+        execution: {
+          resolved_model: 'kling-omni-v1',
+        },
+      },
+    }
+
+    expect(resolveDreamweaverDiagnosticSmartDispatchTrace(result, snapshotRuntimeConfig)).toMatchObject({
+      stage: 'executed',
+      execution: { resolved_model: 'kling-omni-v1' },
+    })
+    expect(resolveDreamweaverDiagnosticSmartDispatchTrace(null, snapshotRuntimeConfig)).toMatchObject({
+      stage: 'dry_run',
+      routing: { selected_model: 'wan2.7-t2v' },
+    })
+  })
+
   it('indexDreamweaverProviderTraceByShotId 仅索引有效 shot_id', () => {
     const trace = {
       shots: [
@@ -250,6 +331,53 @@ describe('dreamweaver diagnostics utils', () => {
       recommendedKling: 2,
       appliedKling: 2,
       shadowed: 2,
+    })
+  })
+
+  it('summarizeDreamweaverSmartDispatchTrace 汇总调度关键指标', () => {
+    const trace = {
+      stage: 'executed',
+      strategy: 'quality',
+      phases: [{ stage: 'keyframes' }, { stage: 'video' }],
+      intent: {
+        modality: 'text_to_video',
+        confidence: 0.93,
+        parse_errors: ['minor_warning'],
+      },
+      routing: {
+        selected_model: 'wan2.7-t2v',
+        fallback_models: ['kling-omni-v1'],
+        candidate_scores: [
+          { rank: 1, model_id: 'wan2.7-t2v' },
+          { rank: 2, model_id: 'kling-omni-v1' },
+          { rank: 3, model_id: 'wan2.6-t2v' },
+        ],
+      },
+      execution: {
+        resolved_model: 'kling-omni-v1',
+        attempted_models: ['wan2.7-t2v', 'kling-omni-v1'],
+        timed_out: false,
+        prompt: {
+          prompt_changed: true,
+        },
+      },
+    }
+
+    expect(summarizeDreamweaverSmartDispatchTrace(trace)).toEqual({
+      stage: 'executed',
+      strategy: 'quality',
+      intentModality: 'text_to_video',
+      intentConfidence: 0.93,
+      parseErrorCount: 1,
+      selectedModel: 'wan2.7-t2v',
+      resolvedModel: 'kling-omni-v1',
+      fallbackCount: 1,
+      candidateCount: 3,
+      attemptedCount: 2,
+      phaseCount: 2,
+      phaseStages: ['keyframes', 'video'],
+      promptChanged: true,
+      timedOut: false,
     })
   })
 

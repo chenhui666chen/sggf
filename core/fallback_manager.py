@@ -32,6 +32,19 @@ class FallbackAttempt:
     success: bool = False
     latency: float = 0.0
     timestamp: datetime = field(default_factory=datetime.now)
+    trace: Dict[str, Any] = field(default_factory=dict)
+
+    def _task_snapshot(self) -> Dict[str, Any]:
+        modality = getattr(getattr(self.modified_task, "modality", None), "value", None)
+        return {
+            "task_id": getattr(self.modified_task, "task_id", ""),
+            "modality": modality,
+            "prompt": getattr(self.modified_task, "prompt", ""),
+            "quality": getattr(self.modified_task, "quality", None),
+            "duration": getattr(self.modified_task, "duration", None),
+            "width": getattr(self.modified_task, "width", None),
+            "height": getattr(self.modified_task, "height", None),
+        }
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -42,6 +55,8 @@ class FallbackAttempt:
             "success": self.success,
             "latency": self.latency,
             "timestamp": self.timestamp.isoformat(),
+            "task_snapshot": self._task_snapshot(),
+            "trace": self.trace,
         }
 
 
@@ -60,6 +75,7 @@ class FallbackChain:
         error_code: str = None,
         success: bool = False,
         latency: float = 0.0,
+        trace: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Add an attempt to the chain."""
         self.attempts.append(FallbackAttempt(
@@ -71,6 +87,7 @@ class FallbackChain:
             error_code=error_code,
             success=success,
             latency=latency,
+            trace=dict(trace or {}),
         ))
     
     def get_last_attempt(self) -> Optional[FallbackAttempt]:
@@ -329,6 +346,7 @@ class FallbackManager:
                             error=str(e),
                             error_code="no_model_available",
                             success=False,
+                            trace={"stage": "routing", "strategy": strategy},
                         )
                         break
 
@@ -344,6 +362,7 @@ class FallbackManager:
                             error="No unattempted routed model available",
                             error_code="no_model_available",
                             success=False,
+                            trace={"stage": "routing", "strategy": strategy},
                         )
                         break
 
@@ -356,6 +375,7 @@ class FallbackManager:
                     error="Adapter not found",
                     error_code="adapter_missing",
                     success=False,
+                    trace={"stage": "adapter_resolution", "strategy": strategy},
                 )
                 if pending_model_ids:
                     continue
@@ -375,6 +395,7 @@ class FallbackManager:
                     modified_task=current_task,
                     success=True,
                     latency=result.latency,
+                    trace=getattr(result, "trace", None),
                 )
                 
                 self._router.record_success(
@@ -392,6 +413,7 @@ class FallbackManager:
                 error_code=result.error_code,
                 success=False,
                 latency=result.latency,
+                trace=getattr(result, "trace", None),
             )
             
             self._router.record_failure(model_id, result.error_code or "unknown_error")

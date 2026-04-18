@@ -11,13 +11,27 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 ALLOWED_ASSET_KINDS = {"image", "video", "audio", "voice", "template", "document"}
 ALLOWED_ASSET_CLASSES = {"reusable", "deliverable"}
+ALLOWED_STORAGE_MODES = {"temp_cloud", "durable_cloud", "local_mirror", "local_only"}
 
 
-def _normalize_optional_text(value: str | None) -> str | None:
+def _normalize_optional_text(value: str | None, *, max_length: int | None = None) -> str | None:
     if value is None:
         return None
     normalized = str(value).strip()
-    return normalized or None
+    if not normalized:
+        return None
+    if max_length is not None:
+        return normalized[:max_length]
+    return normalized
+
+
+def _normalize_required_text(value: str, *, field_name: str, max_length: int | None = None) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        raise ValueError(f"{field_name} 不能为空")
+    if max_length is not None:
+        return normalized[:max_length]
+    return normalized
 
 
 def _normalize_tags(value: list[str] | None) -> list[str]:
@@ -38,15 +52,26 @@ def _normalize_tags(value: list[str] | None) -> list[str]:
     return result[:12]
 
 
+def _normalize_optional_uri(value: str | None) -> str | None:
+    return _normalize_optional_text(value, max_length=1000)
+
+
 class UserAssetRecordCreate(BaseModel):
     project_id: int | None = None
     source_module: str
     asset_kind: str
     asset_class: str = "reusable"
+    asset_uuid: str
+    storage_mode: str
     title: str
     description: str | None = None
-    file_url: str
-    preview_url: str | None = None
+    source_uri: str | None = None
+    preview_uri: str | None = None
+    download_uri: str | None = None
+    mime_type: str | None = None
+    file_size: int | None = Field(default=None, ge=0)
+    checksum: str | None = None
+    expires_at: datetime | None = None
     model_id: str | None = None
     generation_mode: str | None = None
     tags: list[str] = Field(default_factory=list)
@@ -78,26 +103,45 @@ class UserAssetRecordCreate(BaseModel):
             raise ValueError(f"asset_class 必须是 {sorted(ALLOWED_ASSET_CLASSES)} 之一")
         return normalized
 
+    @field_validator("asset_uuid")
+    @classmethod
+    def validate_asset_uuid(cls, value: str) -> str:
+        return _normalize_required_text(value, field_name="asset_uuid", max_length=120)
+
+    @field_validator("storage_mode")
+    @classmethod
+    def validate_storage_mode(cls, value: str) -> str:
+        normalized = str(value or "").strip().lower()
+        if normalized not in ALLOWED_STORAGE_MODES:
+            raise ValueError(f"storage_mode 必须是 {sorted(ALLOWED_STORAGE_MODES)} 之一")
+        return normalized
+
     @field_validator("title")
     @classmethod
     def validate_title(cls, value: str) -> str:
-        normalized = str(value or "").strip()
-        if not normalized:
-            raise ValueError("title 不能为空")
-        return normalized[:255]
+        return _normalize_required_text(value, field_name="title", max_length=255)
 
-    @field_validator("description", "preview_url", "model_id", "generation_mode")
+    @field_validator(
+        "description",
+        "source_uri",
+        "preview_uri",
+        "download_uri",
+        "mime_type",
+        "checksum",
+        "model_id",
+        "generation_mode",
+    )
     @classmethod
-    def validate_optional_text(cls, value: str | None) -> str | None:
-        return _normalize_optional_text(value)
-
-    @field_validator("file_url")
-    @classmethod
-    def validate_file_url(cls, value: str) -> str:
-        normalized = str(value or "").strip()
-        if not normalized:
-            raise ValueError("file_url 不能为空")
-        return normalized[:1000]
+    def validate_optional_text(cls, value: str | None, info) -> str | None:
+        if info.field_name in {"source_uri", "preview_uri", "download_uri"}:
+            return _normalize_optional_uri(value)
+        max_lengths = {
+            "mime_type": 120,
+            "checksum": 128,
+            "model_id": 120,
+            "generation_mode": 80,
+        }
+        return _normalize_optional_text(value, max_length=max_lengths.get(info.field_name))
 
     @field_validator("tags")
     @classmethod
@@ -118,10 +162,7 @@ class UserAssetRecordUpdate(BaseModel):
     def validate_title(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        normalized = str(value).strip()
-        if not normalized:
-            raise ValueError("title 不能为空")
-        return normalized[:255]
+        return _normalize_required_text(value, field_name="title", max_length=255)
 
     @field_validator("description")
     @classmethod
@@ -183,10 +224,17 @@ class UserAssetRecordResponse(BaseModel):
     source_module: str
     asset_kind: str
     asset_class: str
+    asset_uuid: str
+    storage_mode: str
     title: str
     description: str | None = None
-    file_url: str | None = None
-    preview_url: str | None = None
+    source_uri: str | None = None
+    preview_uri: str | None = None
+    download_uri: str | None = None
+    mime_type: str | None = None
+    file_size: int | None = None
+    checksum: str | None = None
+    expires_at: datetime | None = None
     model_id: str | None = None
     generation_mode: str | None = None
     tags: list[str] = Field(default_factory=list)

@@ -1,4 +1,4 @@
-﻿"""
+"""
 耳畔星河 - 有声书生成API
 
 功能：
@@ -36,6 +36,8 @@ from app.schemas.audiobook import (
     CharacterVoiceConfig,
     TTSPreviewRequest,
     ScriptSegmentPreviewRequest,
+    SegmentRegenerateRequest,
+    SegmentReviewRequest,
     AudiobookTaskStatus,
     CosyVoiceCloneCreateRequest,
 )
@@ -242,6 +244,78 @@ async def tts_preview(
     return Response(content=audio_bytes, media_type=media_type)
 
 
+@router.get("/tts/models")
+async def list_tts_models(
+    current_user: User = Depends(get_current_user),
+):
+    """列出所有支持的 TTS 模型及其基本信息"""
+    from app.services.audiobook.voice_manager_factory import list_all_models, MODEL_VOICE_MAPPING
+    from app.services.audiobook.voice_catalog import load_voice_catalog_for_model
+    
+    models = []
+    for model_name in list_all_models():
+        try:
+            catalog = load_voice_catalog_for_model(model_name)
+            voices = catalog.get("voices", [])
+            meta = catalog.get("meta", {})
+            models.append({
+                "id": model_name,
+                "name": _get_model_display_name(model_name),
+                "description": _get_model_description(model_name),
+                "voice_count": meta.get("voice_count", len(voices)),
+                "price_per_10k": _get_model_price(model_name),
+                "features": _get_model_features(model_name),
+            })
+        except Exception:
+            pass
+    
+    return {"models": models}
+
+
+def _get_model_display_name(model: str) -> str:
+    names = {
+        "qwen3-tts-flash": "Qwen3-TTS Flash",
+        "qwen3-tts-plus": "Qwen3-TTS Plus",
+        "cosyvoice-v3-plus": "CosyVoice v3 Plus",
+        "minimax-speech-2.8-hd": "MiniMax Speech 2.8 HD",
+        "minimax-speech-2.8-turbo": "MiniMax Speech 2.8 Turbo",
+    }
+    return names.get(model, model)
+
+
+def _get_model_description(model: str) -> str:
+    descriptions = {
+        "qwen3-tts-flash": "高性价比，49音色，适合批量生成",
+        "qwen3-tts-plus": "高质量，支持SSML",
+        "cosyvoice-v3-plus": "顶级音质，情绪控制，Instruct模式",
+        "minimax-speech-2.8-hd": "最高音质，语气词标签，100+音色",
+        "minimax-speech-2.8-turbo": "优秀音质，高性价比，高并发",
+    }
+    return descriptions.get(model, "")
+
+
+def _get_model_price(model: str) -> float:
+    prices = {
+        "qwen3-tts-flash": 1.0,
+        "qwen3-tts-plus": 2.0,
+        "cosyvoice-v3-plus": 2.0,
+        "minimax-speech-2.8-hd": 6.0,
+        "minimax-speech-2.8-turbo": 3.0,
+    }
+    return prices.get(model, 1.0)
+
+
+def _get_model_features(model: str) -> list:
+    features_map = {
+        "qwen3-tts-flash": ["高性价比", "49音色", "批量合成"],
+        "qwen3-tts-plus": ["高质量", "SSML支持"],
+        "cosyvoice-v3-plus": ["顶级音质", "情绪控制", "Instruct模式"],
+        "minimax-speech-2.8-hd": ["最高音质", "语气词标签", "100+音色", "混合音色"],
+        "minimax-speech-2.8-turbo": ["优秀音质", "高性价比", "高并发"],
+    }
+    return features_map.get(model, [])
+
+
 @router.get("/tts/voices")
 async def list_tts_voices(
     model: str = "qwen3-tts-flash",
@@ -249,8 +323,13 @@ async def list_tts_voices(
 ):
     """Expose the supported voices to the frontend (model-specific)."""
     model = (model or "qwen3-tts-flash").strip()
-    if model not in {"qwen3-tts-flash", "cosyvoice-v3-plus"}:
-        model = "qwen3-tts-flash"
+    if model not in {"qwen3-tts-flash", "cosyvoice-v3-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"}:
+        if model.startswith("minimax-speech"):
+            model = "minimax-speech-2.8-hd"
+        elif model.startswith("qwen3-tts"):
+            model = "qwen3-tts-flash"
+        else:
+            model = "qwen3-tts-flash"
     catalog = load_voice_catalog_for_model(model)
     meta = catalog.get("meta") or {}
     voices = list(catalog.get("voices") or [])
@@ -1593,8 +1672,13 @@ async def preview_script_segment_audio(
         )
 
     tts_model = (request.tts_model or "qwen3-tts-flash").strip()
-    if tts_model not in {"qwen3-tts-flash", "cosyvoice-v3-plus"}:
-        tts_model = "qwen3-tts-flash"
+    if tts_model not in {"qwen3-tts-flash", "cosyvoice-v3-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"}:
+        if tts_model.startswith("minimax-speech"):
+            tts_model = "minimax-speech-2.8-hd"
+        elif tts_model.startswith("qwen3-tts"):
+            tts_model = "qwen3-tts-flash"
+        else:
+            tts_model = "qwen3-tts-flash"
 
     preview_type = str(request.preview_type or "voice").strip().lower()
     if preview_type not in {"voice", "sfx", "bgm", "mix"}:
@@ -2166,6 +2250,251 @@ async def preview_script_segment_audio(
         )
 
     return Response(content=mixed_audio, media_type="audio/mpeg")
+
+
+@router.post("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/segments/{segment_index:int}/regenerate")
+async def regenerate_segment(
+    audiobook_project_id: int,
+    chapter_id: int,
+    segment_index: int,
+    request: SegmentRegenerateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """单个片段重新生成
+    
+    功能：
+    1. 重新调用 TTS API 生成该片段的新音频
+    2. 替换原有的片段音频
+    3. 可选：使用不同的 TTS 模型/音色/情感
+    """
+    audiobook_project = db.query(AudiobookProject).filter(
+        AudiobookProject.id == audiobook_project_id
+    ).first()
+    if not audiobook_project:
+        raise HTTPException(status_code=404, detail="有声书项目不存在")
+    
+    project = db.query(Project).filter(
+        Project.id == audiobook_project.project_id,
+        Project.user_id == current_user.id,
+    ).first()
+    if not project:
+        raise HTTPException(status_code=403, detail="无权限访问")
+    
+    chapter_audio = db.query(ChapterAudio).filter(
+        ChapterAudio.audiobook_project_id == audiobook_project_id,
+        ChapterAudio.chapter_id == chapter_id,
+    ).first()
+    if not chapter_audio:
+        raise HTTPException(status_code=404, detail="章节音频记录不存在")
+    
+    # 加载剧本片段
+    try:
+        segments = json.loads(chapter_audio.script_json)
+    except:
+        raise HTTPException(status_code=500, detail="章节剧本数据损坏")
+    
+    if segment_index < 0 or segment_index >= len(segments):
+        raise HTTPException(status_code=404, detail="片段索引无效")
+    
+    segment = segments[segment_index]
+    
+    # 构建 TTS 请求参数
+    tts_model = request.tts_model or (chapter_audio.tts_model or "qwen3-tts-flash")
+    voice_id = request.voice_id or segment.get("voice_id", "longxiaochun")
+    emotion = request.emotion or segment.get("emotion", "neutral")
+    
+    # 创建 TTS 引擎
+    engine = create_tts_engine(
+        model=tts_model,
+        retry_config=RetryConfig(max_retries=3, base_delay=1.0),
+    )
+    
+    voice_params = {
+        "speaker": voice_id,
+        "emotion": emotion,
+    }
+    
+    # 调用 TTS
+    text = segment.get("text", "")
+    audio_bytes = await engine.synthesize(text, voice_params=voice_params)
+    
+    if not audio_bytes:
+        raise HTTPException(status_code=500, detail="TTS 生成失败")
+    
+    # 保存新音频（覆盖原音频）
+    try:
+        output_dir = chapter_audio.get_audio_dir()
+        os.makedirs(output_dir, exist_ok=True)
+        
+        audio_filename = f"segment_{segment_index}_regenerated.mp3"
+        audio_path = os.path.join(output_dir, audio_filename)
+        
+        with open(audio_path, "wb") as f:
+            f.write(audio_bytes)
+        
+        # 更新 segment 中的音频路径
+        segment["audio_path"] = audio_path
+        segment["regenerated"] = True
+        segment["regenerated_at"] = datetime.utcnow().isoformat()
+        if request.reason:
+            segment["regenerate_reason"] = request.reason
+        
+        # 保存更新后的剧本
+        chapter_audio.script_json = json.dumps(segments, ensure_ascii=False)
+        db.commit()
+        
+        logger.info(
+            f"✅ 片段重新生成成功: chapter_id={chapter_id}, "
+            f"segment_index={segment_index}, model={tts_model}"
+        )
+        
+        return {
+            "success": True,
+            "segment_index": segment_index,
+            "audio_path": audio_path,
+            "audio_size": len(audio_bytes),
+            "model_used": tts_model,
+        }
+    
+    except Exception as e:
+        logger.error(f"❌ 保存重新生成的音频失败: {e}")
+        raise HTTPException(status_code=500, detail=f"保存音频失败: {str(e)}")
+
+
+@router.post("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/segments/{segment_index:int}/review")
+async def review_segment(
+    audiobook_project_id: int,
+    chapter_id: int,
+    segment_index: int,
+    request: SegmentReviewRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """片段审查/评分
+    
+    功能：
+    1. 记录片段的质量评分和备注
+    2. 标记需要重新生成的片段
+    3. 更新章节整体审查状态
+    """
+    audiobook_project = db.query(AudiobookProject).filter(
+        AudiobookProject.id == audiobook_project_id
+    ).first()
+    if not audiobook_project:
+        raise HTTPException(status_code=404, detail="有声书项目不存在")
+    
+    project = db.query(Project).filter(
+        Project.id == audiobook_project.project_id,
+        Project.user_id == current_user.id,
+    ).first()
+    if not project:
+        raise HTTPException(status_code=403, detail="无权限访问")
+    
+    chapter_audio = db.query(ChapterAudio).filter(
+        ChapterAudio.audiobook_project_id == audiobook_project_id,
+        ChapterAudio.chapter_id == chapter_id,
+    ).first()
+    if not chapter_audio:
+        raise HTTPException(status_code=404, detail="章节音频记录不存在")
+    
+    # 加载审查记录
+    review_data = {}
+    if chapter_audio.segment_reviews_json:
+        try:
+            review_data = json.loads(chapter_audio.segment_reviews_json)
+        except:
+            pass
+    
+    # 记录审查结果
+    review_key = str(segment_index)
+    review_data[review_key] = {
+        "quality_score": request.quality_score,
+        "notes": request.notes,
+        "needs_regenerate": request.needs_regenerate,
+        "reviewed_at": datetime.utcnow().isoformat(),
+        "reviewed_by": current_user.id,
+    }
+    
+    chapter_audio.segment_reviews_json = json.dumps(review_data, ensure_ascii=False)
+    db.commit()
+    
+    return {
+        "success": True,
+        "segment_index": segment_index,
+        "review_saved": True,
+    }
+
+
+@router.get("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/review-status")
+async def get_chapter_review_status(
+    audiobook_project_id: int,
+    chapter_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取章节整体审查状态
+    
+    返回：
+    - 总片段数
+    - 已审查片段数
+    - 平均质量评分
+    - 标记需要重新生成的片段索引
+    """
+    audiobook_project = db.query(AudiobookProject).filter(
+        AudiobookProject.id == audiobook_project_id
+    ).first()
+    if not audiobook_project:
+        raise HTTPException(status_code=404, detail="有声书项目不存在")
+    
+    project = db.query(Project).filter(
+        Project.id == audiobook_project.project_id,
+        Project.user_id == current_user.id,
+    ).first()
+    if not project:
+        raise HTTPException(status_code=403, detail="无权限访问")
+    
+    chapter_audio = db.query(ChapterAudio).filter(
+        ChapterAudio.audiobook_project_id == audiobook_project_id,
+        ChapterAudio.chapter_id == chapter_id,
+    ).first()
+    if not chapter_audio:
+        raise HTTPException(status_code=404, detail="章节音频记录不存在")
+    
+    # 加载剧本和审查记录
+    try:
+        segments = json.loads(chapter_audio.script_json)
+    except:
+        segments = []
+    
+    review_data = {}
+    if chapter_audio.segment_reviews_json:
+        try:
+            review_data = json.loads(chapter_audio.segment_reviews_json)
+        except:
+            pass
+    
+    total_segments = len(segments)
+    reviewed_segments = len(review_data)
+    
+    # 计算平均质量评分
+    scores = []
+    flagged = []
+    for idx, review in review_data.items():
+        if review.get("quality_score"):
+            scores.append(review["quality_score"])
+        if review.get("needs_regenerate"):
+            flagged.append(int(idx))
+    
+    avg_score = sum(scores) / len(scores) if scores else None
+    
+    return {
+        "chapter_id": chapter_id,
+        "total_segments": total_segments,
+        "reviewed_segments": reviewed_segments,
+        "avg_quality_score": avg_score,
+        "flagged_segments": flagged,
+    }
 
 
 # ==================== Background Tasks ====================

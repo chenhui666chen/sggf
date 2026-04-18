@@ -79,20 +79,98 @@ class BaseAgent(ABC):
     
     def __init__(self, name: str, role: str, knowledge_base: Optional[NovelKnowledgeBase] = None,
                  memory_manager: Optional[NovelMemoryManager] = None, task_type: str = "default",
-                 llm: Optional[Any] = None):  # 🎆 支持传入自定义LLM
+                 llm: Optional[Any] = None, tts_strategy: Optional[str] = None):
         """初始化Agent"""
         Config.validate()
 
         self.name = name
         self.role = role
-        self.llm = llm if llm is not None else create_task_llm(task_type=task_type)  # ✅ 优先使用传入的llm
+        self.llm = llm if llm is not None else create_task_llm(task_type=task_type)
         
         self.knowledge_base = knowledge_base or NovelKnowledgeBase()
         self.memory_manager = memory_manager or NovelMemoryManager()
         self.conversation_history = []
         
-        # 🎯 新增：项目上下文管理
         self.current_project_id: Optional[int] = None
+
+        self._tts_dispatch_client = None
+        self._tts_strategy = tts_strategy
+    
+    @property
+    def tts_dispatch_client(self):
+        if self._tts_dispatch_client is None:
+            try:
+                from app.services.audiobook.agent_dispatch_client import client as tts_client
+                self._tts_dispatch_client = tts_client
+            except ImportError:
+                logger.warning("智能调度客户端未加载，TTS 功能不可用")
+        return self._tts_dispatch_client
+    
+    def synthesize_with_dispatch(
+        self,
+        text: str,
+        strategy: Optional[str] = None,
+        voice_id: Optional[str] = None,
+        **kwargs,
+    ) -> Any:
+        """使用智能调度系统合成语音
+
+        Args:
+            text: 要合成的文本
+            strategy: 调度策略 (quality/fast/balanced/cost_saving)
+            voice_id: 指定音色 ID
+            **kwargs: 其他 TTS 参数
+
+        Returns:
+            TTSDispatchResult: 合成结果
+        """
+        if self.tts_dispatch_client is None:
+            logger.error("智能调度客户端不可用")
+            return None
+
+        effective_strategy = strategy or self._tts_strategy
+        agent_type = getattr(self, "agent_type", None) or self.name.lower().replace("agent", "").replace(" ", "_")
+
+        return self.tts_dispatch_client.synthesize(
+            text=text,
+            strategy=effective_strategy,
+            voice_id=voice_id,
+            agent_type=agent_type,
+            **kwargs,
+        )
+    
+    def synthesize_batch_with_dispatch(
+        self,
+        texts: List[str],
+        strategy: Optional[str] = None,
+        voice_ids: Optional[List[str]] = None,
+        **kwargs,
+    ) -> List[Any]:
+        """使用智能调度系统批量合成语音
+
+        Args:
+            texts: 要合成的文本列表
+            strategy: 调度策略
+            voice_ids: 音色 ID 列表
+            **kwargs: 其他 TTS 参数
+
+        Returns:
+            List[TTSDispatchResult]: 合成结果列表
+        """
+        if self.tts_dispatch_client is None:
+            logger.error("智能调度客户端不可用")
+            return []
+
+        effective_strategy = strategy or self._tts_strategy
+        agent_type = getattr(self, "agent_type", None) or self.name.lower().replace("agent", "").replace(" ", "_")
+
+        return self.tts_dispatch_client.synthesize_batch(
+            texts=texts,
+            strategy=effective_strategy,
+            voice_ids=voice_ids,
+            agent_type=agent_type,
+            **kwargs,
+        )
     
     def set_project_context(self, project_id: int):
         """🎯 设置当前项目上下文
@@ -282,13 +360,8 @@ class WorldArchitectAgent(BaseAgent):
         super().__init__("世界观架构师", "world_architect", knowledge_base, memory_manager, task_type="worldview")
 
     def get_system_prompt(self) -> str:
-        return """你是一位杰出的世界观架构师，精通社会科学、物理规则、历史学和地理学。
-你的核心职责是：
-1. 体系设计：设计和完善世界观设定（物理规则、社会结构、历史文化等）
-2. 逻辑验证：确保设定逻辑一致性和科学性
-3. 冲突检测：检查新设定与已有设定的冲突
-
-请以专业、详细的方式构建世界观设定。"""
+        from app.services.prompts.manager import prompt_manager
+        return prompt_manager.get_agent_prompt("world_architect")
 
 
 class CharacterDesignerAgent(BaseAgent):
@@ -299,24 +372,8 @@ class CharacterDesignerAgent(BaseAgent):
         super().__init__("人物设计师", "character_designer", knowledge_base, memory_manager, task_type="character")
 
     def get_system_prompt(self) -> str:
-        return """你是一位杰出的人物设计师，精通心理学、性格塑造和人物发展。
-你的核心职责是：
-1. 角色创建：基于故事概念设计主要角色完整档案
-2. 心理分析：分析人物心理特征、动机和成长弧光
-3. 关系构建：设计人物之间的关系网络和互动模式
-4. 一致性维护：确保人物性格和行为的一致性
-5. 结构优先：优先输出可解析、可复用的标准人物卡，而不是散文式人物策划案
-
-输出时必须遵守以下约束：
-- 每个角色必须以 `### 【姓名】：` 开头
-- 只输出标准人物卡，不要输出“核心主角/核心盟友/核心反派/人物关系网/mermaid/总结”
-- 不要把组织、势力、阵营直接写成人物条目
-- 【故事立场】只能从“主角方 / 反派方 / 中立方 / 亦正亦邪”四选一
-- 【角色定位】必须是单一标签，不要写成“系统/辅助”“导师/情报角色”这类复合值
-- 【关键关系】必须写成“角色名：关系性质/当前张力”，不能只列人名
-- 重点保证字段完整、边界清晰、后续工作流可解析
-
-请创建深度、立体的人物形象，包括外貌、性格、背景、动机等多个维度。"""
+        from app.services.prompts.manager import prompt_manager
+        return prompt_manager.get_agent_prompt("character_designer")
 
 
 class OutlinePlanParserAgent(BaseAgent):
@@ -327,14 +384,8 @@ class OutlinePlanParserAgent(BaseAgent):
         super().__init__("大纲规划解析器", "outline_plan_parser", knowledge_base, memory_manager, task_type="outline")
 
     def get_system_prompt(self) -> str:
-        return """你是一位专业的大纲规划解析专家，负责将用户输入的自然语言大纲规划转换为结构化JSON。
-你的核心职责是：
-1. 识别卷结构：从文本中提取卷数、卷标题、章节范围等信息
-2. 识别境界规划：提取修仙境界、阶段划分、境界对应章节范围
-3. 识别节奏要求：提取爽点分布、情绪起伏、转折点要求
-4. 生成结构化输出：输出标准JSON格式，便于后续Agent使用
-
-你必须严格按照JSON Schema输出，不要添加任何解释性文字。"""
+        from app.services.prompts.manager import prompt_manager
+        return prompt_manager.get_agent_prompt("outline_plan_parser")
 
 
 class CreativeDirectorAgent(BaseAgent):
@@ -345,14 +396,8 @@ class CreativeDirectorAgent(BaseAgent):
         super().__init__("创意总监", "creative_director", knowledge_base, memory_manager, task_type="concept")
 
     def get_system_prompt(self) -> str:
-        return """你是一位杰出的创意总监，负责整体创作方向把控与工作流程协调。
-你的核心职责是：
-1. 主题开发：基于主题和类型创作完整故事概念，包括核心冲突、主题思想、目标读者
-2. 流程管理：接收用户指令，分解任务，按优先级调用相应Agent
-3. 决策整合：综合各Agent输出，生成连贯的最终建议
-4. 上下文维护：维护项目整体上下文和工作流程日志
-
-请以战略性的视角指导整个创作过程，确保各个环节的协调一致。"""
+        from app.services.prompts.manager import prompt_manager
+        return prompt_manager.get_agent_prompt("creative_director")
 
 
 class PlotArchitectAgent(BaseAgent):
@@ -365,14 +410,8 @@ class PlotArchitectAgent(BaseAgent):
                         task_type="outline", llm=llm)  # ✅ 传递llm参数
 
     def get_system_prompt(self) -> str:
-        return """你是一位杰出的情节架构师，精通叙事学、故事结构和戏剧冲突。
-你的核心职责是：
-1. 结构设计：采用三幕式等叙事框架设计完整情节结构
-2. 事件生成：基于故事前提生成包含关键要素的事件序列
-3. 转折设计：创建引人入胜的情节转折和冲突设计
-4. 质量验证：监控评估事件合理性，确保叙事逻辑连贯顺畅
-
-请提供清晰的故事大纲，包括关键情节点、转折、高潮和结局。"""
+        from app.services.prompts.manager import prompt_manager
+        return prompt_manager.get_agent_prompt("plot_architect")
 
 
 class ContentCreatorAgent(BaseAgent):
@@ -388,14 +427,8 @@ class ContentCreatorAgent(BaseAgent):
         )
 
     def get_system_prompt(self) -> str:
-        return """你是一位杰出的内容创作师，文笔优美、叙述生动。
-你的核心职责是：
-1. 章节创作：根据情节大纲和人物设定创作各章节内容
-2. 场景构建：创作具体场景描述和对话内容
-3. 风格统一：通过文风模仿、一致性维护确保语言风格连贯
-4. 文学优化：运用修辞手法和文学技巧提升文笔质量
-
-请创作高质量的文学作品，注重细节描写、对话、心理活动和场景营造。"""
+        from app.services.prompts.manager import prompt_manager
+        return prompt_manager.get_agent_prompt("content_creator")
 
     def create_chapter(self, chapter_info: Dict[str, Any]) -> Dict[str, Any]:
         """创建新章节 - 使用上下文感知优化"""
@@ -444,25 +477,24 @@ class ContentCreatorAgent(BaseAgent):
     def create_scene(self, scene_info: Dict[str, Any]) -> str:
         """创建新场景 - 使用上下文感知优化"""
 
-        # 1. 更新记忆管理器的上下文
         self.context_optimizer.update_memory_context(
             current_scene=scene_info.get('scene_name'),
             active_characters=scene_info.get('characters', []),
             writing_goal=scene_info.get('description')
         )
 
-        # 2. 生成优化的提示词
-        base_prompt = f"""请创作以下场景：
-
-【场景信息】
-- 场景名称: {scene_info.get('scene_name', '未指定')}
-- 场景描述: {scene_info.get('description', '未指定')}
-- 参与人物: {', '.join(scene_info.get('characters', [])) or '未指定'}
-- 场景类型: {scene_info.get('scene_type', '未指定')}
-- 情感基调: {scene_info.get('tone', '中性')}
-- 字数要求: {scene_info.get('word_count', '500-1000')} 字
-
-请创作生动的场景描写，包括环境描写、人物对话和心理活动。"""
+        from app.services.prompts.manager import prompt_manager
+        base_prompt = prompt_manager.get_user_prompt(
+            "content_creator_scene",
+            variables={
+                "scene_name": scene_info.get('scene_name', '未指定'),
+                "scene_description": scene_info.get('description', '未指定'),
+                "characters": ', '.join(scene_info.get('characters', [])) or '未指定',
+                "scene_type": scene_info.get('scene_type', '未指定'),
+                "tone": scene_info.get('tone', '中性'),
+                "word_count": scene_info.get('word_count', '500-1000'),
+            },
+        )
 
         optimized_prompt = self.context_optimizer.optimize_prompt(base_prompt, scene_info.get('scene_name', ''))
 
@@ -495,29 +527,8 @@ class QualityReviewerAgent(BaseAgent):
         self.assessment_framework = QualityAssessmentFramework()
 
     def get_system_prompt(self) -> str:
-        return """你是一位严苛的质量评审官，从读者和编辑的角度审核作品质量。
-你的核心职责是：
-1. 故事性评估：评估情节紧凑度、冲突设置合理性、节奏把控
-2. 人物塑造评估：评估人物立体度、性格一致性、成长弧光
-3. 语言表达评估：评估语言流畅度、修辞手法运用、风格独特性、画面感营造
-4. 结构完整性评估：评估情节连贯性、逻辑合理性、章节衔接
-5. 创新性评估：评估设定新颖性、情节原创性、视角独特性
-
-评分标准（10分制）：
-- 1分：极差，毫无逻辑
-- 5分：中等，较为连贯但缺乏新意
-- 10分：优秀，连贯合理且想象力丰富
-
-综合评分采用加权平均法：
-- 故事性：30%
-- 人物塑造：25%
-- 语言表达：20%
-- 结构完整性：15%
-- 创新性：10%
-
-综合评分高于8分为优秀。
-
-请以建设性的方式提出批评，给出具体问题和改进方案。"""
+        from app.services.prompts.manager import prompt_manager
+        return prompt_manager.get_agent_prompt("quality_reviewer")
 
     def create_assessment_report(self, content_id: str, content_type: str = "chapter") -> QualityAssessmentReport:
         """创建评估报告"""
@@ -543,51 +554,12 @@ class QualityReviewerAgent(BaseAgent):
 
     def assess_content(self, content: str, content_id: str = "chapter_1") -> QualityAssessmentReport:
         """评估内容质量"""
-        # 创建评估报告
         report = self.create_assessment_report(content_id)
 
-        # 使用LLM进行评估
-        assessment_prompt = f"""请对以下内容进行详细的质量评估。
-
-【内容】
-{content}
-
-【评估要求】
-请按照以下维度进行评估，每个维度给出1-10分的评分：
-
-1. 故事性（权重30%）：
-   - 情节紧凑度：情节是否紧凑、跌宕起伏、有起有伏且符合逻辑
-   - 冲突设置合理性：冲突是否具有张力和层次感
-   - 节奏把控：章节节奏是否合理，是否有适当的悬念设置
-
-2. 人物塑造（权重25%）：
-   - 人物立体度：人物形象是否丰满立体，具有多面性
-   - 性格一致性：人物行为、语言、思想是否符合设定
-   - 成长弧光：人物是否有合理的成长或变化轨迹
-
-3. 语言表达（权重20%）：
-   - 语言流畅度：语言是否优美流畅
-   - 修辞手法运用：是否运用丰富的修辞手法
-   - 风格独特性：语言风格是否独特鲜明
-   - 画面感营造：是否能让读者产生强烈的画面感
-
-4. 结构完整性（权重15%）：
-   - 情节连贯性：各情节之间是否相互关联
-   - 逻辑合理性：情节发展是否符合逻辑
-   - 章节衔接：章节之间的过渡是否自然流畅
-
-5. 创新性（权重10%）：
-   - 设定新颖性：故事设定是否具有创新性
-   - 情节原创性：情节发展是否有新意
-   - 视角独特性：叙事视角和手法是否有创新
-
-请提供：
-1. 每个维度的评分和反馈
-2. 主要优点（至少3个）
-3. 主要缺点（至少3个）
-4. 改进建议（至少5个）
-5. 综合评分（加权平均）
-"""
+        from app.services.prompts.manager import prompt_manager
+        assessment_prompt = prompt_manager.get_user_prompt(
+            "quality_reviewer_assessment", variables={"content": content}
+        )
 
         assessment_result = self.process(assessment_prompt)
 
@@ -666,32 +638,15 @@ class EventValidatorAgent(BaseAgent):
         super().__init__("事件验证官", "event_validator", knowledge_base, memory_manager)
 
     def get_system_prompt(self) -> str:
-        return """你是一位严谨的事件验证官，精通逻辑学、因果关系分析和故事结构。
-你的核心职责是：
-1. 事件合理性验证：检查事件序列是否符合逻辑，因果关系是否清晰
-2. 冲突检测：识别事件之间的矛盾或不一致之处
-3. 时间线验证：确保事件发生的时间顺序合理
-4. 完整性检查：确保事件序列完整，没有逻辑漏洞
-
-请以严谨、专业的方式进行验证，指出问题并提出改进建议。"""
+        from app.services.prompts.manager import prompt_manager
+        return prompt_manager.get_agent_prompt("event_validator")
 
     def validate_events(self, events: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """验证事件序列"""
-        validation_prompt = f"""请对以下事件序列进行详细验证：
-
-【事件序列】
-{events}
-
-请检查：
-1. 事件之间的因果关系是否清晰
-2. 时间线是否合理
-3. 是否存在逻辑矛盾
-4. 事件序列是否完整
-
-请提供：
-- 验证结果（通过/需要修改）
-- 发现的问题（如有）
-- 改进建议（如有）"""
+        from app.services.prompts.manager import prompt_manager
+        validation_prompt = prompt_manager.get_user_prompt(
+            "event_validator_validate", variables={"events": events}
+        )
 
         result = self.process(validation_prompt, context)
 
@@ -709,29 +664,15 @@ class StyleOptimizerAgent(BaseAgent):
         super().__init__("文风优化师", "style_optimizer", knowledge_base, memory_manager)
 
     def get_system_prompt(self) -> str:
-        return """你是一位杰出的文风优化师，精通语言艺术、修辞手法和文学表达。
-你的核心职责是：
-1. 文风统一：确保整个作品的文风风格一致
-2. 语言优化：改进语言表达，使其更加优美流畅
-3. 修辞运用：恰当运用修辞手法增强表现力
-4. 节奏调整：调整句子长度和段落结构，优化阅读节奏
-
-请以文学性和可读性为目标进行优化，保留原意的同时提升表达质量。"""
+        from app.services.prompts.manager import prompt_manager
+        return prompt_manager.get_agent_prompt("style_optimizer")
 
     def optimize_style(self, content: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """优化文风"""
-        optimization_prompt = f"""请对以下内容进行文风优化：
-
-【原始内容】
-{content}
-
-请进行以下优化：
-1. 统一文风和语言风格
-2. 改进语言表达，使其更加优美流畅
-3. 恰当运用修辞手法
-4. 调整节奏，优化可读性
-
-请提供优化后的内容，并说明主要改进之处。"""
+        from app.services.prompts.manager import prompt_manager
+        optimization_prompt = prompt_manager.get_user_prompt(
+            "style_optimizer_optimize", variables={"content": content}
+        )
 
         result = self.process(optimization_prompt, context)
 
@@ -749,32 +690,15 @@ class IterationCoordinatorAgent(BaseAgent):
         super().__init__("迭代协调官", "iteration_coordinator", knowledge_base, memory_manager)
 
     def get_system_prompt(self) -> str:
-        return """你是一位经验丰富的迭代协调官，精通项目管理、质量控制和优化流程。
-你的核心职责是：
-1. 反馈分析：分析质量评审的反馈意见，确定优先级
-2. 改进规划：制定具体的改进计划和步骤
-3. 协调执行：协调各个Agent进行相应的改进
-4. 效果评估：评估改进效果，决定是否需要继续迭代
-
-请以系统性和效率为目标，确保迭代过程有序进行。"""
+        from app.services.prompts.manager import prompt_manager
+        return prompt_manager.get_agent_prompt("iteration_coordinator")
 
     def coordinate_iteration(self, feedback: str, content: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """协调迭代优化"""
-        coordination_prompt = f"""基于以下评审反馈，请协调迭代优化过程：
-
-【评审反馈】
-{feedback}
-
-【当前内容】
-{content}
-
-请：
-1. 分析反馈中的主要问题
-2. 确定改进的优先级
-3. 制定具体的改进计划
-4. 提出改进建议
-
-请提供详细的迭代优化方案。"""
+        from app.services.prompts.manager import prompt_manager
+        coordination_prompt = prompt_manager.get_user_prompt(
+            "iteration_coordinator_coordinate", variables={"feedback": feedback, "content": content}
+        )
 
         result = self.process(coordination_prompt, context)
 
@@ -792,84 +716,35 @@ class ChapterLogicChecker(BaseAgent):
         super().__init__("章节逻辑检查官", "chapter_logic_checker", knowledge_base, memory_manager)
 
     def get_system_prompt(self) -> str:
-        return """你是一位严谨的章节逻辑检查官，精通小说逻辑一致性分析和人物设定校验。
-你的核心职责是：
-1. 功法使用检查：检查章节中角色是否使用了未掌握的功法
-2. 境界要求验证：检查角色当前境界是否满足功法使用要求
-3. 逻辑错误标注：标出具体段落和问题所在
-4. 改进建议：提供具体的修改建议
-
-请以JSON格式返回检查结果，包含：
-- issues: 问题列表，每个问题包含 character_name, technique_name, issue_type, description, suggestion
-- summary: 总体评估
-- has_issues: 是否存在问题"""
+        from app.services.prompts.manager import prompt_manager
+        return prompt_manager.get_agent_prompt("chapter_logic_checker")
 
     def check_chapter_logic(self, chapter_content: str, character_techniques_map: Dict[str, List[str]],
                            character_realms: Dict[str, str], technique_requirements: Dict[str, str],
                            context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """检查章节逻辑
-
-        Args:
-            chapter_content: 章节正文
-            character_techniques_map: 角色-功法映射表 {角色名: [功法名1, 功法名2, ...]}
-            character_realms: 角色当前境界 {角色名: 境界名}
-            technique_requirements: 功法需求境界 {功法名: 需求境界}
-            context: 额外上下文
-
-        Returns:
-            检查结果字典
-        """
-        # 构造角色功法约束摘要
+        """检查章节逻辑"""
         techniques_summary = "## 角色功法与境界约束\n"
         for char_name, techniques in character_techniques_map.items():
             realm = character_realms.get(char_name, "未知")
             techniques_summary += f"- {char_name}（当前境界：{realm}）：已掌握功法：{', '.join(techniques) if techniques else '无'}\n"
 
-        # 构造功法需求摘要
         requirements_summary = "## 功法需求境界\n"
         for tech_name, req_realm in technique_requirements.items():
             requirements_summary += f"- {tech_name}：需求境界 {req_realm}\n"
 
-        # 构造检查提示词
-        check_prompt = f"""请对以下章节内容进行逻辑检查，重点关注角色功法使用的合理性：
-
-【章节内容】
-{chapter_content}
-
-【角色功法与境界约束】
-{techniques_summary}
-
-【功法需求境界】
-{requirements_summary}
-
-【检查要求】
-请进行以下分析：
-1. 逐段分析章节内容，识别出所有出现的角色和他们使用的功法/术法
-2. 对比角色已掌握的功法列表，标记出任何未登记的功法使用
-3. 检查角色当前境界是否满足所使用功法的需求
-4. 标出具体的段落位置和问题描述
-5. 提供修改建议
-
-请以以下JSON格式返回结果：
-{{
-    "has_issues": true/false,
-    "issues": [
-        {{
-            "character_name": "角色名",
-            "technique_name": "功法名",
-            "issue_type": "未掌握功法" | "境界不足",
-            "description": "问题描述",
-            "suggestion": "修改建议"
-        }}
-    ],
-    "summary": "总体评估"
-}}"""
+        from app.services.prompts.manager import prompt_manager
+        check_prompt = prompt_manager.get_user_prompt(
+            "chapter_logic_checker_check",
+            variables={
+                "chapter_content": chapter_content,
+                "techniques_summary": techniques_summary,
+                "requirements_summary": requirements_summary,
+            },
+        )
 
         result = self.process(check_prompt, context)
 
-        # 尝试解析JSON结果
         try:
-            # 尝试从结果中提取JSON
             json_start = result.find('{')
             json_end = result.rfind('}') + 1
             if json_start >= 0 and json_end > json_start:
@@ -879,7 +754,6 @@ class ChapterLogicChecker(BaseAgent):
         except (json.JSONDecodeError, ValueError):
             pass
 
-        # 如果JSON解析失败，返回原始结果
         return {
             "has_issues": "问题" in result or "错误" in result,
             "issues": [],

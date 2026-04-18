@@ -102,12 +102,36 @@ class AudioMixer:
         silence_duration: int = 500,  # 静音间隔（毫秒）
         normalize_audio: bool = False,  # 🔧 修复：禁用归一化（避免音频截断）
         enable_fallback: bool = True,   # 是否启用降级模式
-        force_pydub: bool = True        # 🔥 新增：强制使用pydub（忽略FFmpeg）
+        force_pydub: bool = True,        # 🔥 新增：强制使用pydub（忽略FFmpeg）
+        # 🆕 新增：静音修剪参数
+        enable_silence_trim: bool = True,
+        silence_trim_threshold: int = -40,  # dBFS，静音检测阈值
+        silence_trim_min_silence: int = 100,  # 最小静音长度（ms）
+        # 🆕 新增：响度标准化参数
+        enable_loudness_norm: bool = True,
+        target_loudness_lufs: float = -16.0,  # EBU R128 标准响度
+        # 🆕 新增：语义停顿参数
+        enable_semantic_pause: bool = True,
+        paragraph_pause_ms: int = 1500,  # 段落间停顿
+        sentence_pause_ms: int = 500,  # 句子间停顿（默认值，覆盖 silence_duration）
+        phrase_pause_ms: int = 250,  # 短语间停顿
     ):
         self.silence_duration = silence_duration
         self.normalize_audio = normalize_audio
         self.enable_fallback = enable_fallback
         self.force_pydub = force_pydub
+
+        self.enable_silence_trim = enable_silence_trim
+        self.silence_trim_threshold = silence_trim_threshold
+        self.silence_trim_min_silence = silence_trim_min_silence
+
+        self.enable_loudness_norm = enable_loudness_norm
+        self.target_loudness_lufs = target_loudness_lufs
+
+        self.enable_semantic_pause = enable_semantic_pause
+        self.paragraph_pause_ms = paragraph_pause_ms
+        self.sentence_pause_ms = sentence_pause_ms
+        self.phrase_pause_ms = phrase_pause_ms
         
         # 🔥 强制使用pydub模式（忽略FFmpeg）
         if force_pydub:
@@ -415,13 +439,112 @@ class AudioMixer:
                 "size_kb": len(audio_data) / 1024
             }
     
+    def _trim_silence(self, audio: AudioSegment) -> AudioSegment:
+        """
+        修剪音频首尾静音
+        
+        原理：检测音频中连续低于阈值的静音段，移除首尾的静音部分。
+        
+        Args:
+            audio: 原始音频片段
+        
+        Returns:
+            修剪后的音频片段
+        """
+        if not self.enable_silence_trim:
+            return audio
+
+        threshold = self.silence_trim_threshold
+        min_silence = self.silence_trim_min_silence
+
+        try:
+            # pydub没有detect_leading_silence方法，手动实现
+            # 检测开头静音
+            trimmed = 0
+            for i in range(0, len(audio), 10):  # 每10ms检查一次
+                chunk = audio[i:i+10]
+                if chunk.dBFS > threshold:
+                    trimmed = i
+                    break
+            
+            if trimmed > 0:
+                audio = audio[trimmed:]
+
+            # 检测结尾静音
+            trimmed_end = 0
+            for i in range(len(audio), 0, -10):
+                chunk = audio[max(0, i-10):i]
+                if chunk.dBFS > threshold:
+                    trimmed_end = len(audio) - i
+                    break
+            
+            if trimmed_end > 0:
+                audio = audio[:len(audio) - trimmed_end]
+
+            if len(audio) > 0:
+                logger.debug(
+                    f"✂️ 静音修剪完成: 原始{len(audio) + trimmed + trimmed_end}ms -> "
+                    f"修剪后{len(audio)}ms"
+                )
+            return audio
+        except Exception as e:
+            logger.warning(f"⚠️ 静音修剪失败: {e}，返回原始音频")
+            return audio
+
+    def _normalize_loudness(self, audio: AudioSegment) -> AudioSegment:
+        """
+        EBU R128 响度标准化
+        
+        将音频响度调整到目标 LUFS 值（默认 -16.0 LUFS，播客/有声书标准）。
+        使用 pydub 的 normalize 函数，但手动控制目标响度。
+        
+        Args:
+            audio: 原始音频片段
+        
+        Returns:
+            标准化后的音频片段
+        """
+        if not self.enable_loudness_norm:
+            return audio
+
+        try:
+            current_loudness = audio.dBFS
+            if current_loudness == float("-inf"):
+                return audio
+
+            target_loudness = self.target_loudness_lufs
+            adjustment = target_loudness - current_loudness
+
+            max_allowed = 0 - current_loudness
+            adjustment = min(adjustment, max_allowed)
+
+            normalized = audio + adjustment
+
+            logger.debug(
+                f"📊 响度标准化: {current_loudness:.1f}dBFS -> "
+                f"{normalized.dBFS:.1f}dBFS (目标: {target_loudness}LUFS)"
+            )
+            return normalized
+        except Exception as e:
+            logger.warning(f"⚠️ 响度标准化失败: {e}，返回原始音频")
+            return audio
+
     def _mix_with_pydub(
         self,
         audio_segments: List[bytes],
         output_format: str = "mp3",
-        bitrate: str = "128k"
+        bitrate: str = "128k",
+        segment_types: Optional[List[str]] = None
     ) -> bytes:
-        """使用pydub混音（主要方案）"""
+        """
+        使用pydub混音（主要方案）
+        
+        Args:
+            audio_segments: 音频片段列表
+            output_format: 输出格式
+            bitrate: 比特率
+            segment_types: 每个片段的类型（paragraph/sentence/phrase），用于语义停顿
+        """
         # 1. 加载所有音频片段
         segments = []
         for audio_bytes in audio_segments:
@@ -429,6 +552,10 @@ class AudioMixer:
                 continue
             try:
                 segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
+                
+                if self.enable_silence_trim:
+                    segment = self._trim_silence(segment)
+                
                 segments.append(segment)
             except Exception as e:
                 logger.warning(f"⚠️ 无法加载音频片段: {e}")
@@ -437,17 +564,34 @@ class AudioMixer:
             logger.warning("⚠️ 没有有效的音频片段")
             return b""
         
-        # 2. 拼接音频，添加静音间隔
-        silence = AudioSegment.silent(duration=self.silence_duration)
-        
+        # 2. 拼接音频，使用语义停顿或固定停顿
         combined = AudioSegment.empty()
         for i, segment in enumerate(segments):
             combined += segment
-            if i < len(segments) - 1:  # 不在最后一个片段后加静音
-                combined += silence
+            if i < len(segments) - 1:
+                if self.enable_semantic_pause and segment_types and i < len(segment_types):
+                    seg_type = segment_types[i].lower()
+                    if seg_type == "paragraph":
+                        pause = AudioSegment.silent(duration=self.paragraph_pause_ms)
+                    elif seg_type == "sentence":
+                        pause = AudioSegment.silent(duration=self.sentence_pause_ms)
+                    elif seg_type == "phrase":
+                        pause = AudioSegment.silent(duration=self.phrase_pause_ms)
+                    else:
+                        pause = AudioSegment.silent(duration=self.silence_duration)
+                    
+                    logger.debug(
+                        f"🔇 语义停顿: {seg_type} -> {pause.duration_seconds*1000:.0f}ms"
+                    )
+                else:
+                    pause = AudioSegment.silent(duration=self.silence_duration)
+                
+                combined += pause
         
-        # 3. 归一化音量
-        if self.normalize_audio:
+        # 3. 响度标准化
+        if self.enable_loudness_norm:
+            combined = self._normalize_loudness(combined)
+        elif self.normalize_audio:
             combined = normalize(combined)
             logger.debug("✅ 音量归一化完成")
         

@@ -1328,7 +1328,10 @@ const AudiobookPage = () => {
   const [creatingFromBook, setCreatingFromBook] = useState(false)
   const [lastGenerationMode, setLastGenerationMode] = useState<'full' | 'script_only'>('full')
   const [activeStep, setActiveStep] = useState(0)
-  const [ttsModel, setTtsModel] = useState<'qwen3-tts-flash' | 'cosyvoice-v3-plus'>('qwen3-tts-flash')
+  const [ttsModel, setTtsModel] = useState<'qwen3-tts-flash' | 'cosyvoice-v3-plus' | 'minimax-speech-2.8-hd' | 'minimax-speech-2.8-turbo'>('qwen3-tts-flash')
+  const [outputFormat, setOutputFormat] = useState<'mp3' | 'wav' | 'm4b'>('mp3')
+  const [ttsModelsList, setTtsModelsList] = useState<any[]>([])
+  const [voicesForModel, setVoicesForModel] = useState<any[]>([])
   const supportsTtsTuning = ttsModel === 'cosyvoice-v3-plus'
   const [voiceDraftsByModel, setVoiceDraftsByModel] = useState<Record<string, CharacterVoiceSetting[]>>({})
   const [chapterMenuAnchor, setChapterMenuAnchor] = useState<null | HTMLElement>(null)
@@ -1737,13 +1740,12 @@ const AudiobookPage = () => {
     }
   }
 
-  const handleTtsModelChange = async (nextModel: 'qwen3-tts-flash' | 'cosyvoice-v3-plus') => {
+  const handleTtsModelChange = async (nextModel: string) => {
     if (nextModel === ttsModel) return
 
-    // 保留当前模型的未保存草稿
     setVoiceDraftsByModel((prev) => ({ ...prev, [ttsModel]: characterVoices }))
-
-    setTtsModel(nextModel)
+    setTtsModel(nextModel as any)
+    loadVoicesForModel(nextModel)
 
     if (!selectedProject) return
 
@@ -1754,6 +1756,28 @@ const AudiobookPage = () => {
     }
 
     await loadProjectVoiceConfig(selectedProject.id, nextModel)
+  }
+
+  const loadVoicesForModel = async (model: string) => {
+    try {
+      const res = await apiClient.listTtsVoices(model)
+      if (res.data) {
+        setVoicesForModel(res.data.voices || [])
+      }
+    } catch {
+      setVoicesForModel([])
+    }
+  }
+
+  const loadTtsModels = async () => {
+    try {
+      const res = await apiClient.listTtsModels()
+      if (res.data && res.data.models) {
+        setTtsModelsList(res.data.models)
+      }
+    } catch {
+      setTtsModelsList([])
+    }
   }
 
   // 新增：获取历史记录
@@ -3152,8 +3176,8 @@ const AudiobookPage = () => {
                   label="TTS 模型"
                   value={ttsModel}
                   onChange={(e) =>
-                    handleTtsModelChange(e.target.value as 'qwen3-tts-flash' | 'cosyvoice-v3-plus')
-                  }
+                      handleTtsModelChange(e.target.value as string)
+                    }
                 >
                   <MenuItem value="qwen3-tts-flash">
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>

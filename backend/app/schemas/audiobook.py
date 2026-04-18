@@ -84,6 +84,32 @@ class ScriptSegmentPreviewRequest(BaseModel):
     preview_type: Optional[str] = "voice"  # voice/sfx/bgm/mix
 
 
+class SegmentRegenerateRequest(BaseModel):
+    """单个片段重新生成请求"""
+    segment_index: int  # 片段在章节中的索引
+    reason: Optional[str] = None  # 重新生成原因（可选，用于记录）
+    tts_model: Optional[str] = None  # 可选：指定使用不同的 TTS 模型
+    voice_id: Optional[str] = None  # 可选：使用不同的音色
+    emotion: Optional[str] = None  # 可选：调整情感
+
+
+class SegmentReviewRequest(BaseModel):
+    """片段审查/评分请求"""
+    segment_index: int
+    quality_score: Optional[float] = None  # 质量评分 1-5
+    notes: Optional[str] = None  # 审查备注
+    needs_regenerate: Optional[bool] = False  # 是否需要重新生成
+
+
+class ChapterReviewStatus(BaseModel):
+    """章节整体审查状态"""
+    chapter_id: int
+    total_segments: int
+    reviewed_segments: int
+    avg_quality_score: Optional[float] = None
+    flagged_segments: List[int] = []  # 标记需要重新生成的片段索引
+
+
 class CosyVoiceCloneCreateRequest(BaseModel):
     """CosyVoice v3-plus 声音复刻请求（支持 http/https 或 oss:// 临时 URL）。"""
 

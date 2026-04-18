@@ -252,6 +252,7 @@ class RunResponse(BaseModel):
     qc_warning: Optional[dict] = None
     preflight: Optional[dict] = None
     video_provider_trace: Optional[dict] = None
+    smart_dispatch_trace: Optional[dict] = None
 
 
 class RunAsyncResponse(BaseModel):
@@ -1567,6 +1568,7 @@ def run_pipeline(
         qc_warning=ctx.payload.get("qc_warning"),
         preflight=ctx.payload.get("preflight"),
         video_provider_trace=ctx.payload.get("video_provider_trace"),
+        smart_dispatch_trace=ctx.payload.get("smart_dispatch_trace"),
     )
 
 

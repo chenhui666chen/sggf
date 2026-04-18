@@ -1,0 +1,207 @@
+{
+  "model": "minimax-speech-2.8",
+  "updated_at": "2025-04-19",
+  "source": "minimax-official",
+  "voices": [
+    {
+      "id": "male-qn-qingse",
+      "speaker": "male-qn-qingse",
+      "label": "青涩男 (male-qn-qingse)",
+      "gender": "male",
+      "style": "young",
+      "category": "dialogue",
+      "languages": ["zh"],
+      "description": "年轻男性，声音清澈，适合青春角色"
+    },
+    {
+      "id": "male-qn-jingying",
+      "speaker": "male-qn-jingying",
+      "label": "精英男 (male-qn-jingying)",
+      "gender": "male",
+      "style": "mature",
+      "category": "narrator",
+      "languages": ["zh"],
+      "description": "成熟男性，声音稳重，适合商务/旁白"
+    },
+    {
+      "id": "male-qn-badao",
+      "speaker": "male-qn-badao",
+      "label": "霸道男 (male-qn-badao)",
+      "gender": "male",
+      "style": "powerful",
+      "category": "dialogue",
+      "languages": ["zh"],
+      "description": "磁性男声，气场强大，适合霸道总裁"
+    },
+    {
+      "id": "male-qn-qingnian",
+      "speaker": "male-qn-qingnian",
+      "label": "青年男 (male-qn-qingnian)",
+      "gender": "male",
+      "style": "energetic",
+      "category": "dialogue",
+      "languages": ["zh"],
+      "description": "青年男性，阳光活力"
+    },
+    {
+      "id": "male-qn-daye",
+      "speaker": "male-qn-daye",
+      "label": "大爷 (male-qn-daye)",
+      "gender": "male",
+      "style": "elderly",
+      "category": "dialogue",
+      "languages": ["zh"],
+      "description": "老年男性，沧桑厚重"
+    },
+    {
+      "id": "male-qn-jingqi",
+      "speaker": "male-qn-jingqi",
+      "label": "京剧男 (male-qn-jingqi)",
+      "gender": "male",
+      "style": "dramatic",
+      "category": "dialogue",
+      "languages": ["zh"],
+      "description": "京剧腔调，传统韵味"
+    },
+    {
+      "id": "female-qn-qingche",
+      "speaker": "female-qn-qingche",
+      "label": "清脆女 (female-qn-qingche)",
+      "gender": "female",
+      "style": "sweet",
+      "category": "dialogue",
+      "languages": ["zh"],
+      "description": "年轻女性，声音清脆甜美"
+    },
+    {
+      "id": "female-qn-yujie",
+      "speaker": "female-qn-yujie",
+      "label": "御姐 (female-qn-yujie)",
+      "gender": "female",
+      "style": "elegant",
+      "category": "dialogue",
+      "languages": ["zh"],
+      "description": "成熟女性，声音优雅知性"
+    },
+    {
+      "id": "female-qn-lolita",
+      "speaker": "female-qn-lolita",
+      "label": "萝莉 (female-qn-lolita)",
+      "gender": "female",
+      "style": "cute",
+      "category": "dialogue",
+      "languages": ["zh"],
+      "description": "少女音，可爱活泼"
+    },
+    {
+      "id": "female-qn-nvhuang",
+      "speaker": "female-qn-nvhuang",
+      "label": "女王 (female-qn-nvhuang)",
+      "gender": "female",
+      "style": "powerful",
+      "category": "dialogue",
+      "languages": ["zh"],
+      "description": "气场强大，威严高贵"
+    },
+    {
+      "id": "female-qn-dama",
+      "speaker": "female-qn-dama",
+      "label": "大妈 (female-qn-dama)",
+      "gender": "female",
+      "style": "casual",
+      "category": "dialogue",
+      "languages": ["zh"],
+      "description": "中年女性，亲切接地气"
+    },
+    {
+      "id": "female-qn-jiaren",
+      "speaker": "female-qn-jiaren",
+      "label": "佳人 (female-qn-jiaren)",
+      "gender": "female",
+      "style": "classical",
+      "category": "dialogue",
+      "languages": ["zh"],
+      "description": "古典女性，温婉如水"
+    },
+    {
+      "id": "male-tianwei",
+      "speaker": "male-tianwei",
+      "label": "甜薇男 (male-tianwei)",
+      "gender": "male",
+      "style": "gentle",
+      "category": "dialogue",
+      "languages": ["zh"],
+      "description": "温柔男声，适合暖男角色"
+    },
+    {
+      "id": "female-shaonv",
+      "speaker": "female-shaonv",
+      "label": "少女 (female-shaonv)",
+      "gender": "female",
+      "style": "youthful",
+      "category": "dialogue",
+      "languages": ["zh"],
+      "description": "青春少女，活力四射"
+    },
+    {
+      "id": "male-qingnian",
+      "speaker": "male-qingnian",
+      "label": "男青年 (male-qingnian)",
+      "gender": "male",
+      "style": "standard",
+      "category": "narrator",
+      "languages": ["zh"],
+      "description": "标准青年男声"
+    },
+    {
+      "id": "female-qingnian",
+      "speaker": "female-qingnian",
+      "label": "女青年 (female-qingnian)",
+      "gender": "female",
+      "style": "standard",
+      "category": "narrator",
+      "languages": ["zh"],
+      "description": "标准青年女声"
+    },
+    {
+      "id": "male-zhongnian",
+      "speaker": "male-zhongnian",
+      "label": "男中年 (male-zhongnian)",
+      "gender": "male",
+      "style": "mature",
+      "category": "narrator",
+      "languages": ["zh"],
+      "description": "标准中年男声，沉稳可靠"
+    },
+    {
+      "id": "female-zhongnian",
+      "speaker": "female-zhongnian",
+      "label": "女中年 (female-zhongnian)",
+      "gender": "female",
+      "style": "elegant",
+      "category": "narrator",
+      "languages": ["zh"],
+      "description": "标准中年女声，知性优雅"
+    },
+    {
+      "id": "male-laonian",
+      "speaker": "male-laonian",
+      "label": "男老年 (male-laonian)",
+      "gender": "male",
+      "style": "elderly",
+      "category": "narrator",
+      "languages": ["zh"],
+      "description": "标准老年男声，阅历丰富"
+    },
+    {
+      "id": "female-laonian",
+      "speaker": "female-laonian",
+      "label": "女老年 (female-laonian)",
+      "gender": "female",
+      "style": "elderly",
+      "category": "narrator",
+      "languages": ["zh"],
+      "description": "标准老年女声，慈祥温和"
+    }
+  ]
+}

@@ -81,6 +81,7 @@ class ChapterAudio(Base):
     script_review_json = Column(Text, nullable=True)  # 存储剧本质量评审报告（JSON字符串）
     script_status = Column(String(20), default="pending")  # pending/reviewed/approved
     final_audio_review_json = Column(Text, nullable=True)  # 最终音频评审结果（JSON字符串）
+    segment_reviews_json = Column(Text, nullable=True)  # 片段级审查记录（segment_index -> {quality_score, notes, needs_regenerate}）
     
     # 时间
     created_at = Column(DateTime(timezone=True), server_default=func.now())

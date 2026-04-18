@@ -28,6 +28,11 @@ from .builder import (
     PromptUsageRecord,
     PromptEvolutionTracker,
 )
+from .manager import (
+    PromptManager,
+    get_prompt_manager,
+    prompt_manager,
+)
 
 __all__ = [
     # 核心类
@@ -44,4 +49,8 @@ __all__ = [
     # 进化追踪
     'PromptUsageRecord',
     'PromptEvolutionTracker',
+    # JSON 提示词管理
+    'PromptManager',
+    'get_prompt_manager',
+    'prompt_manager',
 ]

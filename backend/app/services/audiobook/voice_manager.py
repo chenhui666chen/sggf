@@ -1,4 +1,4 @@
-﻿"""
+"""
 音色管理器 - 智能分配与管理角色音色
 
 核心功能：
@@ -268,12 +268,53 @@ class VoiceManager:
         Args:
             llm_client: LLM客户端（用于智能推断角色特征）
         """
-        # 统一管理角色音色档案
-        self.character_voices: Dict[str, VoiceProfile] = {}  # 角色名 -> 音色档案
-        # 向后兼容旧字段 voice_profiles（部分模块仍然引用）
+        self.character_voices: Dict[str, VoiceProfile] = {}
         self.voice_profiles: Dict[str, VoiceProfile] = self.character_voices
-        self.used_voice_ids = set()  # 已使用的音色ID
-        self.llm_client = llm_client  # 🆕 存储LLM客户端用于智能推断
+        self.used_voice_ids = set()
+        self.llm_client = llm_client
+        self._fuzzy_threshold = 0.80
+
+    def _fuzzy_match_character(self, character_name: str) -> Optional[str]:
+        """模糊匹配角色名，返回已存在的规范角色名
+
+        使用 difflib.SequenceMatcher 计算字符串相似度。
+        当相似度超过阈值（默认 0.80）时，视为同一角色。
+
+        处理场景：
+        - "张三" vs "张三丰" → 可能匹配
+        - "小明" vs "小明子" → 可能匹配
+        - "王五" vs "王 五" → 空格差异匹配
+        - 全角/半角混用 → 先归一化后匹配
+
+        Args:
+            character_name: 传入的角色名
+
+        Returns:
+            匹配到的已有角色名，或 None
+        """
+        import difflib
+
+        name = character_name.strip()
+        if not name or not self.character_voices:
+            return None
+
+        best_match = None
+        best_score = 0.0
+
+        for existing_name in self.character_voices:
+            ratio = difflib.SequenceMatcher(None, name, existing_name).ratio()
+            if ratio > best_score:
+                best_score = ratio
+                best_match = existing_name
+
+        if best_score >= self._fuzzy_threshold:
+            logger.info(
+                "🔗 模糊匹配: '%s' → '%s' (相似度: %.2f, 阈值: %.2f)",
+                name, best_match, best_score, self._fuzzy_threshold,
+            )
+            return best_match
+
+        return None
     
     def _resolve_voice_config(self, voice_id: Optional[str]) -> Optional[Tuple[str, Dict[str, Any]]]:
         """将 legacy voice_id（含 CosyVoice speaker）映射到 Qwen3 预设。"""
@@ -299,6 +340,7 @@ class VoiceManager:
         为角色分配音色（自适应智能推断）
         
         优先级策略：
+        0. 🔗 模糊匹配 → 字符名容错匹配（新增）
         1. ✅ 已配置角色 → 直接返回（用户配置优先）
         2. 🔒 指定音色 → 使用指定ID（手动覆盖）
         3. 🤖 LLM推断 → 智能匹配（自动启用）
@@ -312,6 +354,12 @@ class VoiceManager:
         Returns:
             音色档案
         """
+        # 优先级0：模糊匹配（新增）
+        fuzzy_match = self._fuzzy_match_character(character_name)
+        if fuzzy_match:
+            logger.info(f"🔗 模糊命中: '{character_name}' 使用已有角色 '{fuzzy_match}' 的音色")
+            return self.character_voices[fuzzy_match]
+
         # 优先级1：检查是否已分配（用户配置优先）
         if character_name in self.character_voices:
             logger.info(f"✅ 角色 '{character_name}' 已有音色档案（用户配置）")
@@ -691,6 +739,203 @@ class VoiceManager:
         # 默认返回空（由 _match_voice_by_traits 使用默认规则处理）
         logger.info(f"📊 [规则推断] '{name}' 无法判断，使用默认配置")
         return {}
+
+    def analyze_chapter_characters(
+        self,
+        script_segments,
+        known_characters: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """从章节剧本片段中分析提取角色特征（两阶段分析）
+
+        参考 Audible 项目的 chapter_analysis + character_extraction 流程：
+        阶段1：从剧本对话和旁白中提取所有出现的人物及其上下文
+        阶段2：使用 LLM 推断每个人的性别、年龄、性格等特征
+
+        Args:
+            script_segments: 剧本片段列表（ScriptSegment）
+            known_characters: 已知角色信息 {角色名: {gender, age_group, ...}}
+
+        Returns:
+            角色特征字典 {角色名: {gender, age_group, personality, context, dialogue_count}}
+        """
+        if not script_segments:
+            return {}
+
+        from collections import defaultdict
+
+        known_characters = known_characters or {}
+
+        # === 阶段1：从片段中提取角色及其上下文 ===
+        character_context: Dict[str, List[str]] = defaultdict(list)
+        character_dialogue_count: Dict[str, int] = defaultdict(int)
+
+        for seg in script_segments:
+            speaker = getattr(seg, "speaker", "")
+            if not speaker or speaker == "旁白":
+                continue
+
+            character_dialogue_count[speaker] += 1
+
+            # 收集该角色的对话片段（最多 5 条作为上下文）
+            text = getattr(seg, "text", "") or ""
+            if text and len(character_context[speaker]) < 5:
+                # 截取前 200 字
+                character_context[speaker].append(text[:200])
+
+        if not character_context:
+            return {}
+
+        # === 阶段2：LLM 批量推断角色特征 ===
+        if not self.llm_client:
+            logger.info("⚠️ 无 LLM 客户端，跳过章节角色分析，使用规则推断")
+            result = {}
+            for char_name in character_context:
+                if char_name in known_characters:
+                    result[char_name] = dict(known_characters[char_name])
+                else:
+                    rule_traits = self._rule_based_infer_traits(char_name)
+                    if rule_traits:
+                        result[char_name] = rule_traits
+            return result
+
+        # 构建 LLM 请求文本
+        context_parts = []
+        for char_name, snippets in character_context.items():
+            if char_name in known_characters:
+                continue
+            snippets_text = "\n".join(f"  - {s}" for s in snippets[:3])
+            context_parts.append(
+                f"角色: {char_name}\n"
+                f"  对话次数: {character_dialogue_count[char_name]}\n"
+                f"  对话片段:\n{snippets_text}\n"
+            )
+
+        if not context_parts:
+            logger.info("📖 所有角色已有特征信息，跳过 LLM 分析")
+            result = {}
+            for char_name in character_context:
+                if char_name in known_characters:
+                    result[char_name] = dict(known_characters[char_name])
+            return result
+
+        prompt = (
+            "你是一位专业的有声书角色分析专家。请根据以下角色的对话片段，"
+            "推断每个角色的性别、年龄段和性格特征。\n\n"
+            "请严格按照 JSON 格式输出，不要添加任何解释性文字：\n"
+            "{\n"
+            '  "角色名": {"gender": "male|female|unknown", "age_group": "child|young|adult|elder", "personality": "calm|energetic|gentle|serious", "confidence": 0.0~1.0},\n'
+            "  ...\n"
+            "}\n\n"
+            "判断依据：\n"
+            "- 性别：从称呼（哥/姐/叔/姨等）、语气、用词判断\n"
+            "- 年龄段：从自称（老夫/小子等）、语气成熟度、说话内容判断\n"
+            "- 性格：从对话风格、语气强弱、情绪表现判断\n"
+            "- confidence：置信度，0.0-1.0，基于对话片段的充分程度\n\n"
+            "以下是需要分析的角色：\n\n"
+        ) + "\n---\n".join(context_parts)
+
+        try:
+            import asyncio
+            from config import TaskType
+
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    future = asyncio.ensure_future(self.llm_client.chat(
+                        messages=[{"role": "user", "content": prompt}],
+                        task_type=TaskType.AUDIOBOOK_SCRIPT,
+                        max_tokens=1000,
+                        response_format={"type": "json_object"},
+                        use_cache=False,
+                    ))
+                    response = loop.run_until_complete(future)
+                else:
+                    response = asyncio.run(self.llm_client.chat(
+                        messages=[{"role": "user", "content": prompt}],
+                        task_type=TaskType.AUDIOBOOK_SCRIPT,
+                        max_tokens=1000,
+                        response_format={"type": "json_object"},
+                        use_cache=False,
+                    ))
+            except RuntimeError:
+                response = asyncio.run(self.llm_client.chat(
+                    messages=[{"role": "user", "content": prompt}],
+                    task_type=TaskType.AUDIOBOOK_SCRIPT,
+                    max_tokens=1000,
+                    response_format={"type": "json_object"},
+                    use_cache=False,
+                ))
+
+            result = json.loads(response.strip())
+            logger.info("🤖 章节角色分析完成，提取了 %d 个角色特征", len(result))
+
+            output = {}
+            for char_name, traits in result.items():
+                if char_name in known_characters:
+                    output[char_name] = dict(known_characters[char_name])
+                    continue
+
+                gender = str(traits.get("gender") or "").lower()
+                age_group = str(traits.get("age_group") or "").lower()
+                personality = str(traits.get("personality") or "").lower()
+                confidence = float(traits.get("confidence", 0.5))
+
+                if confidence < 0.6:
+                    logger.debug("⚠️ '%s' LLM 置信度低 (%.2f)，回退到规则推断", char_name, confidence)
+                    rule_traits = self._rule_based_infer_traits(char_name)
+                    if rule_traits:
+                        output[char_name] = rule_traits
+                    continue
+
+                valid_gender = gender if gender in ("male", "female", "unknown") else "unknown"
+                valid_age = age_group if age_group in ("child", "young", "adult", "elder") else "young"
+                valid_personality = personality if personality in ("calm", "energetic", "gentle", "serious") else "calm"
+
+                if valid_age in ("middle", "mid"):
+                    valid_age = "adult"
+                elif valid_age in ("teen", "teenager", "adolescent"):
+                    valid_age = "young"
+
+                output[char_name] = {
+                    "gender": valid_gender,
+                    "age_group": valid_age,
+                    "personality": valid_personality,
+                    "confidence": confidence,
+                    "dialogue_count": character_dialogue_count.get(char_name, 0),
+                    "source": "chapter_analysis",
+                }
+
+            # 补充已有角色
+            for char_name in character_context:
+                if char_name not in output and char_name in known_characters:
+                    output[char_name] = dict(known_characters[char_name])
+
+            return output
+
+        except json.JSONDecodeError as e:
+            logger.warning("⚠️ 章节角色分析 LLM 返回非 JSON: %s", e)
+            return self._fallback_rule_analysis(character_context, known_characters)
+        except Exception as e:
+            logger.warning("⚠️ 章节角色分析失败: %s，回退到规则推断", e)
+            return self._fallback_rule_analysis(character_context, known_characters)
+
+    def _fallback_rule_analysis(
+        self,
+        character_context: Dict[str, List[str]],
+        known_characters: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Dict[str, Any]]:
+        """LLM 失败时的规则推断兜底"""
+        output = {}
+        for char_name in character_context:
+            if char_name in known_characters:
+                output[char_name] = dict(known_characters[char_name])
+            else:
+                rule_traits = self._rule_based_infer_traits(char_name)
+                if rule_traits:
+                    rule_traits["source"] = "rule_fallback"
+                    output[char_name] = rule_traits
+
+        return output
     
     def _create_profile(
         self,

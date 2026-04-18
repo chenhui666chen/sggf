@@ -38,6 +38,14 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# 智能触发策略配置
+_LLM_VERIFICATION_TRIGGER = {
+    "max_verified_age_hours": int(os.getenv("LLM_VERIFICATION_MAX_AGE_HOURS", "72")),  # 已校验结果最大有效期（小时）
+    "force_verify_new_models": os.getenv("LLM_VERIFICATION_FORCE_NEW", "true").lower() == "true",  # 新模型首次必须联网
+    "force_verify_on_config_change": os.getenv("LLM_VERIFICATION_FORCE_ON_CHANGE", "true").lower() == "true",  # 配置变更时强制联网
+    "skip_llm_for_static_validation": os.getenv("LLM_VERIFICATION_SKIP_STATIC", "false").lower() == "true",  # 静态校验是否跳过LLM
+}
+
 # 价格验证配置
 PRICING_VERIFICATION_CONFIG = {
     "alibaba_cloud_dashscope": {
@@ -360,41 +368,185 @@ _REFERENCE_HUBS: dict[str, list[dict[str, str]]] = {
 }
 
 _PROVIDER_KEYWORDS: dict[str, list[str]] = {
-    "alibaba": ["alibaba", "aliyun", "通义", "百炼", "dashscope"],
+    "alibaba": ["alibaba", "aliyun", "通义", "百炼", "dashscope", "wanx", "万相"],
     "deepseek": ["deepseek"],
+    "volcengine": ["volcengine", "火山方舟", "火山引擎", "doubao", "豆包", "seedance", "seedream"],
     "kunlun": ["mureka", "昆仑万维", "kunlun"],
-    "stability": ["stability", "stable diffusion", "stable image"],
     "kuaishou": ["kling", "可灵", "kuaishou", "快手"],
+    "pixverse": ["pixverse", "pixverseai"],
+    "vidu": ["vidu", "生数科技"],
+    "minimax": ["minimax", "MiniMax"],
 }
 
 _PROVIDER_DOMAINS: dict[str, list[str]] = {
     "alibaba": ["aliyun.com", "aliyuncs.com"],
     "deepseek": ["deepseek.com"],
+    "volcengine": ["volcengine.com", "volces.com"],
     "kunlun": ["mureka.cn"],
     "kuaishou": ["klingai.com", "kuaishou.com"],
+    "pixverse": ["pixverseai.com", "pixverse.ai"],
+    "vidu": ["vidu.cn"],
+    "minimax": ["minimaxi.com"],
 }
 
 _GLOBAL_FALLBACK_SOURCES: dict[str, list[str]] = {
     "alibaba": [
         "https://help.aliyun.com/zh/model-studio/models",
+        "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
     ],
     "deepseek": [
         "https://help.aliyun.com/zh/model-studio/deepseek-api",
         "https://help.aliyun.com/zh/model-studio/models",
     ],
+    "volcengine": [
+        "https://www.volcengine.com/docs/82379/1520757",
+        "https://www.volcengine.com/docs/82379/1399132",
+    ],
     "kunlun": [
         "https://platform.mureka.cn/docs/",
     ],
+    "kuaishou": [
+        "https://help.aliyun.com/zh/model-studio/kling-video-generation-api-reference",
+    ],
+    "pixverse": [
+        "https://help.aliyun.com/zh/model-studio/pixverse-video-generation-api-reference",
+    ],
+    "vidu": [
+        "https://help.aliyun.com/zh/model-studio/vidu-img2video-api-reference",
+    ],
+    "minimax": [
+        "https://help.aliyun.com/zh/model-studio/minimax-tts-api-reference",
+    ],
 }
 
+# 全局通用搜索源（所有模型都会使用）
+_UNIVERSAL_FALLBACK_SOURCES: list[str] = [
+    "https://www.modelscope.cn/home",  # ModelScope 魔搭社区 - 国内最大模型开放平台
+    "https://artificialanalysis.ai/",  # Artificial Analysis - AI模型性能分析和基准测试
+    "https://waytoagi.feishu.cn/wiki/QPe5w5g7UisbEkkow8XcDmOpn8e",  # WayToAGI 飞书知识库 - AGI学习资源和模型信息汇总
+]
+
 _MODEL_FALLBACK_SOURCES: dict[str, list[str]] = {
+    "qwen3.5-omni-plus": [
+        "https://help.aliyun.com/zh/model-studio/qwen3-omni-plus-api-reference",
+        "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
+    ],
+    "qwen3.6-plus": [
+        "https://help.aliyun.com/zh/model-studio/qwen3-api-reference",
+        "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
+    ],
+    "qwen3-vl-plus": [
+        "https://help.aliyun.com/zh/model-studio/qwen-vl-plus-api-reference",
+        "https://help.aliyun.com/zh/model-studio/developer-reference/use-qwen-by-calling-api",
+    ],
+    "doubao-seed-2-0-pro": [
+        "https://www.volcengine.com/docs/82379/1520757",
+        "https://www.volcengine.com/docs/82379/1399132",
+    ],
+    "doubao-seed-2-0-lite": [
+        "https://www.volcengine.com/docs/82379/1520757",
+        "https://www.volcengine.com/docs/82379/1399132",
+    ],
+    "qwen-image-2.0": [
+        "https://help.aliyun.com/zh/model-studio/qwen-image-generation-api-reference",
+        "https://help.aliyun.com/zh/model-studio/wanx-image-generation-quick-start",
+    ],
+    "qwen-image-2.0-pro": [
+        "https://help.aliyun.com/zh/model-studio/qwen-image-generation-api-reference",
+    ],
+    "wan2.7-image": [
+        "https://help.aliyun.com/zh/model-studio/wan2-image-generation-api-reference",
+    ],
+    "wan2.6-t2i": [
+        "https://help.aliyun.com/zh/model-studio/wan2-image-generation-api-reference",
+    ],
+    "kling/kling-v3-image-generation": [
+        "https://help.aliyun.com/zh/model-studio/kling-image-generation-api-reference",
+    ],
+    "kling/kling-v3-omni-image-generation": [
+        "https://help.aliyun.com/zh/model-studio/kling-image-generation-api-reference",
+    ],
+    "doubao-seedream-4-5": [
+        "https://www.volcengine.com/docs/82379/1520757",
+        "https://www.volcengine.com/docs/82379/1399132",
+    ],
+    "doubao-seedream-5-0": [
+        "https://www.volcengine.com/docs/82379/1520757",
+        "https://www.volcengine.com/docs/82379/1399132",
+    ],
+    "qwen-image-edit-plus": [
+        "https://help.aliyun.com/zh/model-studio/qwen-image-edit-api-reference",
+    ],
+    "qwen-image-edit-max": [
+        "https://help.aliyun.com/zh/model-studio/qwen-image-edit-api-reference",
+    ],
+    "MiniMax/speech-2.8-turbo": [
+        "https://help.aliyun.com/zh/model-studio/minimax-tts-api-reference",
+    ],
+    "MiniMax/speech-2.8-hd": [
+        "https://help.aliyun.com/zh/model-studio/minimax-tts-api-reference",
+    ],
+    "qwen3-tts-flash": [
+        "https://help.aliyun.com/zh/model-studio/qwen-tts-api-reference",
+    ],
+    "cosyvoice-v3-plus": [
+        "https://help.aliyun.com/zh/model-studio/cosyvoice-api-reference",
+    ],
+    "wan2.7-t2v": [
+        "https://help.aliyun.com/zh/model-studio/wan-video-generation-api-reference",
+    ],
+    "wan2.6-t2v-fast": [
+        "https://help.aliyun.com/zh/model-studio/wan-video-generation-api-reference",
+    ],
+    "wan2.7-i2v": [
+        "https://help.aliyun.com/zh/model-studio/wan-video-generation-api-reference",
+    ],
+    "wan2.7-r2v": [
+        "https://help.aliyun.com/zh/model-studio/wan-video-generation-api-reference",
+    ],
+    "wan2.7-videoedit": [
+        "https://help.aliyun.com/zh/model-studio/wan-video-generation-api-reference",
+    ],
+    "pixverse-c1-r2v": [
+        "https://help.aliyun.com/zh/model-studio/pixverse-video-generation-api-reference",
+    ],
+    "pixverse-v6-t2v": [
+        "https://help.aliyun.com/zh/model-studio/pixverse-video-generation-api-reference",
+    ],
+    "vidu-q3-pro-text2video": [
+        "https://help.aliyun.com/zh/model-studio/vidu-text2video-api-reference",
+    ],
+    "vidu-q3-pro-img2video": [
+        "https://help.aliyun.com/zh/model-studio/vidu-img2video-api-reference",
+    ],
+    "vidu-q3-pro-start-end2video": [
+        "https://help.aliyun.com/zh/model-studio/vidu-keyframe-to-video-api-reference",
+    ],
+    "kling/kling-v3-video-generation": [
+        "https://help.aliyun.com/zh/model-studio/kling-video-generation-api-reference",
+    ],
+    "kling/kling-v3-omni-video-generation": [
+        "https://help.aliyun.com/zh/model-studio/kling-video-generation-api-reference",
+    ],
+    "doubao-seedance-2-0": [
+        "https://www.volcengine.com/docs/82379/1520757",
+        "https://www.volcengine.com/docs/82379/1399132",
+    ],
+    "doubao-seedance-2-0-fast": [
+        "https://www.volcengine.com/docs/82379/1520757",
+        "https://www.volcengine.com/docs/82379/1399132",
+    ],
+    "doubao-seedance-1-5-pro": [
+        "https://www.volcengine.com/docs/82379/1520757",
+        "https://www.volcengine.com/docs/82379/1399132",
+    ],
+    "vidu-timing2audio": [
+        "https://platform.vidu.cn/docs/timing-to-audio",
+        "https://docs.platform.vidu.cn/",
+    ],
     "mureka-o1-instrumental": [
         "https://platform.mureka.cn/docs/",
         "https://platform.mureka.cn/docs/api/operations/post-v1-instrumental-generate.html",
-    ],
-    "vidu-timing2audio": [
-        "https://www.vidu.cn/",
-        "https://docs.platform.vidu.cn/",
     ],
 }
 
@@ -597,6 +749,7 @@ class ModelCatalogSyncService:
             "failed": 0,
             "skipped": 0,
             "skipped_up_to_date": 0,
+            "skipped_llm_verification": 0,  # 智能触发跳过LLM联网搜索的模型数
             "updated_at": now.isoformat(),
             "model_keys": [],
             "cache_hits": 0,
@@ -645,7 +798,19 @@ class ModelCatalogSyncService:
                     synchronize_session=False
                 )
 
-                verifications = self._verify_seed(seed)
+                # 获取已有entry用于智能触发策略判断
+                is_new_entry = entry.id is None or not entry.last_verified_at
+                existing_entry_for_check = entry if not is_new_entry else None
+
+                verifications = self._verify_seed(seed, existing_entry=existing_entry_for_check)
+
+                # 统计跳过LLM联网搜索的模型
+                skipped_llm = any(
+                    "智能触发跳过LLM联网搜索" in v.verification_note
+                    for v in verifications
+                )
+                if skipped_llm:
+                    stats["skipped_llm_verification"] += 1
                 self._apply_verifications_to_entry(entry, seed, verifications, now)
                 
                 pricing_result = self._verify_pricing_for_model(seed.model_key)
@@ -1497,7 +1662,18 @@ class ModelCatalogSyncService:
             if value not in (None, [], {})
         }
 
-    def _verify_seed(self, seed: CatalogSeed) -> list[SourceVerification]:
+    def _verify_seed(
+        self,
+        seed: CatalogSeed,
+        *,
+        existing_entry: Optional["ModelCatalogEntry"] = None,
+    ) -> list[SourceVerification]:
+        """校验单个模型的来源。
+
+        Args:
+            seed: 模型种子信息
+            existing_entry: 数据库中已有的模型条目（用于智能触发策略）
+        """
         urls = self._build_source_candidates(seed)
         if not urls:
             return []
@@ -1511,7 +1687,10 @@ class ModelCatalogSyncService:
             timeout=httpx.Timeout(20.0, connect=8.0),
         ) as client:
             return self._deduplicate_verifications(
-                [self._verify_single_source(client, seed, candidate) for candidate in urls]
+                [
+                    self._verify_single_source(client, seed, candidate, existing_entry=existing_entry)
+                    for candidate in urls
+                ]
             )
 
     def _verify_single_source(
@@ -1519,6 +1698,8 @@ class ModelCatalogSyncService:
         client: httpx.Client,
         seed: CatalogSeed,
         candidate: tuple[str, str],
+        *,
+        existing_entry: Optional["ModelCatalogEntry"] = None,
     ) -> SourceVerification:
         source_type, url = candidate
         fetched_at = datetime.now(timezone.utc)
@@ -1587,22 +1768,29 @@ class ModelCatalogSyncService:
                 "extraction_confidence": extracted_specs.extraction_confidence,
             }
 
-            # LLM校验（强制启用）
-            try:
-                llm_verified_specs = self._sync_verify_with_llm(
-                    seed,
-                    extracted_specs_dict,
-                    search_text,
-                )
-                if llm_verified_specs.get("_llm_verification"):
-                    extracted_specs_dict = llm_verified_specs
-                    llm_meta = llm_verified_specs["_llm_verification"]
-                    note += f" LLM校验置信度: {llm_meta.get('confidence', 0):.0%}，可靠性: {llm_meta.get('reliability_score', 0)}分。"
-                else:
-                    note += " LLM校验未返回有效结果。"
-            except Exception as e:
-                logger.warning(f"LLM 校验调用失败: {e}")
-                note += f" LLM校验调用失败: {e}"
+            # LLM校验（智能触发）
+            should_trigger, trigger_reason = self._should_trigger_llm_verification(seed, existing_entry)
+            logger.info(
+                f"LLM联网搜索触发判断 | model={seed.model_key} | should_trigger={should_trigger} | reason={trigger_reason}"
+            )
+            if should_trigger:
+                try:
+                    llm_verified_specs = self._sync_verify_with_llm(
+                        seed,
+                        extracted_specs_dict,
+                        search_text,
+                    )
+                    if llm_verified_specs.get("_llm_verification"):
+                        extracted_specs_dict = llm_verified_specs
+                        llm_meta = llm_verified_specs["_llm_verification"]
+                        note += f" LLM校验置信度: {llm_meta.get('confidence', 0):.0%}，可靠性: {llm_meta.get('reliability_score', 0)}分。"
+                    else:
+                        note += " LLM校验未返回有效结果。"
+                except Exception as e:
+                    logger.warning(f"LLM 校验调用失败: {e}")
+                    note += f" LLM校验调用失败: {e}"
+            else:
+                note += f" 智能触发跳过LLM联网搜索: {trigger_reason}"
 
             if extracted_specs.extraction_confidence > 0.3:
                 note += f" 已提取详细规格（置信度: {extracted_specs.extraction_confidence:.0%}）。"
@@ -1664,6 +1852,9 @@ class ModelCatalogSyncService:
             _push("fallback", url)
         for url in _MODEL_FALLBACK_SOURCES.get(seed.model_key, []):
             _push("fallback", url)
+        # 全局通用搜索源（所有模型都会使用）
+        for url in _UNIVERSAL_FALLBACK_SOURCES:
+            _push("universal", url)
 
         return candidates
 
@@ -2724,6 +2915,54 @@ class ModelCatalogSyncService:
 
         return merged
 
+    def _build_search_query(self, seed: CatalogSeed) -> str:
+        """根据模型类型构建精准的搜索查询词。
+
+        Args:
+            seed: 模型种子信息
+
+        Returns:
+            优化后的搜索查询字符串
+        """
+        provider_map = {
+            "alibaba": "阿里云百炼",
+            "volcengine": "火山方舟",
+            "kuaishou": "可灵",
+            "pixverse": "PixVerse",
+            "vidu": "Vidu",
+            "kunlun": "Mureka",
+            "minimax": "MiniMax",
+            "deepseek": "DeepSeek",
+        }
+        provider_label = provider_map.get(seed.provider, seed.provider)
+
+        model_name = seed.name or seed.model_key
+
+        query_templates = {
+            "video": f"{model_name} {provider_label} API 视频生成 参数 duration resolution 输入格式",
+            "image": f"{model_name} {provider_label} API 图片生成 参数 prompt 分辨率 风格",
+            "audio": f"{model_name} {provider_label} API 语音合成 参数 音色 采样率",
+            "llm": f"{model_name} {provider_label} API 参数 上下文窗口 函数调用 联网搜索",
+        }
+
+        base_query = query_templates.get(seed.category, f"{model_name} {provider_label} API 参数 功能")
+
+        site_hints = {
+            "alibaba": "site:help.aliyun.com",
+            "volcengine": "site:volcengine.com",
+            "kuaishou": "site:help.aliyun.com",
+            "pixverse": "site:help.aliyun.com",
+            "vidu": "site:help.aliyun.com OR site:platform.vidu.cn",
+            "kunlun": "site:platform.mureka.cn",
+            "minimax": "site:help.aliyun.com",
+            "deepseek": "site:help.aliyun.com",
+        }
+        site_hint = site_hints.get(seed.provider, "")
+
+        if site_hint:
+            return f"{base_query} {site_hint}"
+        return base_query
+
     def _get_type_specific_guidance(self, category: str) -> str:
         """获取按模型类型的 LLM 校验提示指导。
         
@@ -2800,7 +3039,7 @@ class ModelCatalogSyncService:
             llm_client = get_llm_client(strategy="auto")
             model_id = os.getenv("VERIFICATION_LLM_MODEL", "qwen3.6-plus")
 
-            search_query = f"{seed.name} {seed.provider} 模型规格 参数 功能 价格"
+            search_query = self._build_search_query(seed)
             
             prompt = f"""你是一个专业的模型能力分析专家。请通过联网搜索验证以下模型信息。
 
@@ -2824,10 +3063,16 @@ class ModelCatalogSyncService:
 ```
 
 ## 任务
-1. 联网搜索验证已提取信息的准确性
-2. 补充遗漏的重要规格
-3. 修正明显错误的信息
-4. 评估整体提取置信度（0-1）
+1. 使用联网搜索功能，搜索该模型的官方文档和权威评测
+2. 验证已提取信息的准确性
+3. 补充遗漏的重要规格
+4. 修正明显错误的信息
+5. 评估整体提取置信度（0-1）
+
+## 重要要求
+- search_sources 中必须使用搜索功能实际返回的真实URL，禁止使用占位符（如xxx、...、doc-xxxxxx等）
+- 如果搜索未返回某个来源，不要编造URL，仅包含实际获取的URL
+- 每个search_source的url字段必须是完整有效的HTTP URL
 
 ## 输出格式
 请以 JSON 格式输出，包含以下字段：
@@ -2836,7 +3081,7 @@ class ModelCatalogSyncService:
 - corrections: 修正说明列表
 - additions: 新增信息列表
 - reliability_score: 数据可靠性评分（0-100）
-- search_sources: 搜索来源列表（URL和标题）
+- search_sources: 搜索来源列表（必须包含真实有效的URL和标题）
 
 只输出 JSON，不要其他解释。"""
 
@@ -2904,6 +3149,55 @@ class ModelCatalogSyncService:
         except Exception as e:
             logger.warning(f"LLM 联网搜索校验失败: {e}")
             return extracted_specs
+
+    def _should_trigger_llm_verification(
+        self,
+        seed: CatalogSeed,
+        existing_entry: Optional["ModelCatalogEntry"] = None,
+    ) -> tuple[bool, str]:
+        """判断是否应该触发LLM联网搜索验证。
+
+        智能触发策略：
+        1. 新模型首次校验 → 必须联网
+        2. 已有校验结果且未过期 → 跳过联网，使用缓存
+        3. 已有校验结果但已过期 → 重新联网
+        4. 配置发生变更 → 强制联网
+        5. 环境变量控制是否跳过静态校验的LLM
+
+        Args:
+            seed: 模型种子信息
+            existing_entry: 数据库中已有的模型条目（如果有）
+
+        Returns:
+            (should_trigger: bool, reason: str)
+        """
+        # 策略1：静态校验模式，跳过所有LLM
+        if _LLM_VERIFICATION_TRIGGER["skip_llm_for_static_validation"]:
+            return False, "静态校验模式，跳过LLM联网搜索"
+
+        # 策略2：新模型首次校验，必须联网
+        if existing_entry is None:
+            if _LLM_VERIFICATION_TRIGGER["force_verify_new_models"]:
+                return True, "新模型首次校验，强制联网搜索"
+            else:
+                return False, "新模型，但配置为不强制联网"
+
+        # 策略3：检查已有校验结果是否过期
+        last_verified_at = existing_entry.last_verified_at
+        if last_verified_at is not None:
+            now = datetime.now(timezone.utc)
+            age_hours = (now - last_verified_at).total_seconds() / 3600
+            max_age = _LLM_VERIFICATION_TRIGGER["max_verified_age_hours"]
+
+            if age_hours < max_age:
+                # 校验结果还在有效期内
+                return False, f"已有校验结果（{age_hours:.1f}小时前），在有效期内（{max_age}小时）"
+            else:
+                # 校验结果已过期
+                return True, f"校验结果已过期（{age_hours:.1f}小时 > {max_age}小时）"
+
+        # 策略4：没有校验时间记录，需要联网
+        return True, "缺少校验时间记录，需要联网验证"
 
     def _sync_verify_with_llm(
         self,
@@ -4014,16 +4308,237 @@ def _build_capability_provenance(entry: ModelCatalogEntry) -> list[dict[str, Any
 def _build_usage_guide(entry: ModelCatalogEntry) -> Optional[dict[str, Any]]:
     raw = entry.raw_config_json or {}
     usage_guide = raw.get("usage_guide")
-    if not usage_guide:
-        return None
-    
-    category_common = usage_guide.get("category_common", "llm")
-    category_common_guide = _get_category_common_guide(category_common)
-    
-    model_specific = usage_guide.get("model_specific", {})
-    
-    merged_guide = _merge_usage_guides(category_common_guide, model_specific)
+
+    category = entry.category or "llm"
+    category_common_guide = _get_category_common_guide(category)
+
+    if usage_guide:
+        category_common = usage_guide.get("category_common", category)
+        category_common_guide = _get_category_common_guide(category_common)
+        model_specific = usage_guide.get("model_specific", {})
+        merged_guide = _merge_usage_guides(category_common_guide, model_specific)
+    else:
+        model_specific = _build_auto_usage_guide(entry)
+        merged_guide = _merge_usage_guides(category_common_guide, model_specific)
+
+    if merged_guide:
+        merged_guide["model_key"] = entry.model_key
+        merged_guide["category"] = category
+
     return merged_guide
+
+
+def _build_auto_usage_guide(entry: ModelCatalogEntry) -> dict[str, Any]:
+    """根据模型校验数据自动生成使用指南的模型专有部分。"""
+    raw = entry.raw_config_json or {}
+    detailed_specs = raw.get("detailed_specs") or {}
+    sections = []
+
+    api_params_section = _build_api_params_section(detailed_specs, entry.category or "llm")
+    if api_params_section:
+        sections.append(api_params_section)
+
+    input_format_section = _build_input_format_section(detailed_specs, entry.category or "llm")
+    if input_format_section:
+        sections.append(input_format_section)
+
+    limitations_section = _build_limitations_section(entry)
+    if limitations_section:
+        sections.append(limitations_section)
+
+    tips_section = _build_best_practices_section(entry)
+    if tips_section:
+        sections.append(tips_section)
+
+    if not sections:
+        return {}
+
+    return {
+        "title": f"{entry.name or entry.model_key} 专属指南",
+        "sections": sections,
+    }
+
+
+def _build_api_params_section(detailed_specs: dict, category: str) -> Optional[dict[str, Any]]:
+    """构建 API 参数说明章节。"""
+    basic_params = detailed_specs.get("basic_params", {})
+    if not basic_params:
+        return None
+
+    content_parts = []
+    param_descriptions = {
+        "duration": "生成时长（秒）",
+        "resolution": "输出分辨率",
+        "size": "输出尺寸",
+        "aspect_ratio": "宽高比",
+        "mode": "生成模式",
+        "audio": "是否生成音频",
+        "watermark": "是否添加水印",
+        "seed": "随机种子（可复现）",
+        "temperature": "输出随机性（0=严谨, 1=发散）",
+        "max_tokens": "最大输出长度",
+        "top_p": "概率采样范围",
+    }
+
+    for key, value in basic_params.items():
+        desc = param_descriptions.get(key, key)
+        if isinstance(value, dict):
+            options = value.get("options") or value.get("range") or value.get("default")
+            if options:
+                content_parts.append(f"- **{desc}** (`{key}`): {options}")
+        else:
+            content_parts.append(f"- **{desc}** (`{key}`): {value}")
+
+    if not content_parts:
+        return None
+
+    return {
+        "title": "API 参数说明",
+        "content": "\n".join(content_parts),
+        "tips": [
+            "首次调用建议使用默认参数",
+            "调整参数时建议一次只改一个",
+        ],
+    }
+
+
+def _build_input_format_section(detailed_specs: dict, category: str) -> Optional[dict[str, Any]]:
+    """构建输入格式说明章节。"""
+    input_modalities = detailed_specs.get("input_modalities", [])
+    if not input_modalities:
+        return None
+
+    modality_labels = {
+        "text": "文本提示词",
+        "image": "图片",
+        "video": "视频",
+        "audio": "音频",
+    }
+
+    content_parts = ["本模型支持的输入类型："]
+    for m in input_modalities:
+        label = modality_labels.get(m, m)
+        content_parts.append(f"- {label}")
+
+    tips = []
+    if "image" in input_modalities:
+        tips.extend([
+            "图片建议使用高清、主体清晰的素材",
+            "支持的图片格式：JPG、PNG、WEBP",
+        ])
+    if "video" in input_modalities:
+        tips.extend([
+            "视频建议使用稳定的素材",
+            "支持的视频格式：MP4、MOV",
+        ])
+    if "audio" in input_modalities:
+        tips.extend([
+            "音频建议使用清晰的录音",
+            "支持的音频格式：MP3、WAV",
+        ])
+
+    return {
+        "title": "输入格式",
+        "content": "\n".join(content_parts),
+        "tips": tips,
+    }
+
+
+def _build_limitations_section(entry: ModelCatalogEntry) -> Optional[dict[str, Any]]:
+    """构建限制与注意事项章节。"""
+    limitations = entry.limitations or []
+    constraints = (entry.constraints_json or {})
+    if not limitations and not constraints:
+        return None
+
+    content_parts = []
+    if limitations:
+        content_parts.append("### 已知限制")
+        for lim in limitations[:5]:
+            content_parts.append(f"- {lim}")
+
+    max_tokens = constraints.get("max_tokens")
+    max_duration = constraints.get("max_duration")
+    if max_tokens:
+        content_parts.append(f"- 最大输出长度: {max_tokens} tokens")
+    if max_duration:
+        content_parts.append(f"- 最大生成时长: {max_duration}秒")
+
+    if not content_parts:
+        return None
+
+    return {
+        "title": "限制与注意事项",
+        "content": "\n".join(content_parts),
+        "tips": [
+            "生成前确认参数在允许范围内",
+            "内容审核可能拒绝某些提示词",
+        ],
+    }
+
+
+def _build_best_practices_section(entry: ModelCatalogEntry) -> Optional[dict[str, Any]]:
+    """构建最佳实践章节。"""
+    tips = _extract_best_practice_tips(entry)
+    if not tips:
+        return None
+
+    content_parts = ["### 推荐做法"]
+    for tip in tips[:8]:
+        content_parts.append(f"- {tip}")
+
+    return {
+        "title": "最佳实践",
+        "content": "\n".join(content_parts),
+    }
+
+
+_BEST_PRACTICE_TEMPLATES: dict[str, list[str]] = {
+    "video": [
+        "首次生成建议先用低分辨率+短时长测试提示词效果",
+        "提示词应包含主体、动作、场景、风格四个要素",
+        "图生视频时参考图质量直接影响输出质量",
+        "使用具体的运镜描述（推近、拉远、跟随）效果更好",
+        "避免过于抽象的描述，如'好看的风景'",
+        "内容审核可能拒绝某些提示词，注意措辞",
+    ],
+    "image": [
+        "提示词先描述主体，再描述环境和风格",
+        "善用光照和氛围描述词（晨光、暖色调、赛博朋克）",
+        "指定艺术风格可以大幅提升一致性",
+        "避免过度堆砌形容词，保持描述清晰",
+        "图生图时 similarity 参数控制与原图的相似度",
+    ],
+    "audio": [
+        "明确指定音乐类型和节奏",
+        "描述期望的情绪氛围",
+        "音效生成时描述要具体（如'雨滴打在铁皮屋顶'而非'下雨声'）",
+    ],
+    "llm": [
+        "使用 system prompt 设定角色和行为规则",
+        "复杂任务拆分为多步骤执行",
+        "利用 few-shot 示例引导输出格式",
+        "长上下文模型可一次性提供完整背景",
+        "temperature=0 适合事实性任务，temperature>0.7 适合创意任务",
+        "联网搜索可获取实时信息，但可能增加延迟",
+    ],
+}
+
+
+def _extract_best_practice_tips(entry: ModelCatalogEntry) -> list[str]:
+    """根据模型类别提取最佳实践提示。"""
+    category = entry.category or "llm"
+    tips = list(_BEST_PRACTICE_TEMPLATES.get(category, []))
+
+    capabilities = (entry.capabilities_json or {}).get("items", [])
+    if "image_to_video" in capabilities or "reference_to_video" in capabilities:
+        tips.append("图生视频模式需要提供清晰的参考图")
+    if "video_edit" in capabilities:
+        tips.append("视频编辑时描述要针对需要修改的部分")
+    if "web_search" in capabilities:
+        tips.append("开启联网搜索可获取实时信息，使用 enable_search 参数")
+
+    return tips
 
 
 _CATEGORY_COMMON_GUIDES: dict[str, dict[str, Any]] = {

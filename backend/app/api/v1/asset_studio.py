@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from math import gcd
 import mimetypes
 import re
@@ -10,6 +11,8 @@ import shutil
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
@@ -71,6 +74,20 @@ ALLOWED_OUTPUT_FILE_SUFFIXES = {
     ".flac",
     ".ogg",
     ".m4a",
+}
+DEFAULT_OUTPUT_SUFFIXES = {
+    "image": ".png",
+    "video": ".mp4",
+    "motion": ".mp4",
+    "video_edit": ".mp4",
+    "audio": ".mp3",
+}
+MEDIA_KIND_BY_RESULT_KIND = {
+    "image": "image",
+    "video": "video",
+    "motion": "video",
+    "video_edit": "video",
+    "audio": "audio",
 }
 MUSIC_STYLE_ALIASES: dict[str, MusicStyle] = {
     "流行": MusicStyle.POP,
@@ -167,12 +184,25 @@ VISION_ISSUE_KEYWORD_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
 )
 
 
+class AssetStudioMediaAsset(BaseModel):
+    asset_uuid: str
+    media_kind: str
+    storage_mode: str
+    source_uri: str
+    preview_uri: str
+    download_uri: str
+    file_name: str
+    mime_type: str | None = None
+    file_size: int | None = None
+    expires_at: datetime | None = None
+
+
 class AssetStudioGenerateResponse(BaseModel):
     kind: str
     mode: str
     model_id: str
-    outputs: list[str] = Field(default_factory=list)
-    primary_output: str | None = None
+    assets: list[AssetStudioMediaAsset] = Field(default_factory=list)
+    primary_asset: AssetStudioMediaAsset | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -693,6 +723,123 @@ def _build_output_url(target_path: Path) -> str:
     return f"/api/v1/asset-studio/files/{relative_path.as_posix()}"
 
 
+def _resolve_media_kind(kind: str) -> str:
+    return MEDIA_KIND_BY_RESULT_KIND.get(kind, kind)
+
+
+def _guess_output_suffix(*, source_ref: str, fallback_suffix: str, content_type: str | None = None) -> str:
+    parsed_path = urlparse(source_ref).path if "://" in source_ref else source_ref
+    suffix = Path(parsed_path).suffix.lower()
+    if suffix in ALLOWED_OUTPUT_FILE_SUFFIXES:
+        return suffix
+
+    normalized_content_type = str(content_type or "").split(";", 1)[0].strip().lower()
+    guessed_suffix = mimetypes.guess_extension(normalized_content_type) if normalized_content_type else None
+    if guessed_suffix:
+        guessed_suffix = guessed_suffix.lower()
+        if guessed_suffix in ALLOWED_OUTPUT_FILE_SUFFIXES:
+            return guessed_suffix
+
+    normalized_fallback = fallback_suffix.lower()
+    if normalized_fallback in ALLOWED_OUTPUT_FILE_SUFFIXES:
+        return normalized_fallback
+    return ".bin"
+
+
+def _download_remote_output(source_url: str, *, subdir: str, fallback_suffix: str) -> Path:
+    request = Request(source_url, headers={"User-Agent": "novel-writing-agent/1.0"})
+    try:
+        with urlopen(request, timeout=180) as response:
+            content_type = response.headers.get("Content-Type")
+            suffix = _guess_output_suffix(
+                source_ref=source_url,
+                fallback_suffix=fallback_suffix,
+                content_type=content_type,
+            )
+            target_path = _allocate_output_path(subdir=subdir, suffix=suffix)
+            with target_path.open("wb") as file_obj:
+                shutil.copyfileobj(response, file_obj)
+            return target_path
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"无法拉取远端生成结果: {exc}",
+        ) from exc
+
+
+def _materialize_output_reference(output_ref: str, *, kind: str, subdir: str) -> Path:
+    cleaned_output_ref = str(output_ref or "").strip()
+    if not cleaned_output_ref:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="生成结果为空")
+
+    fallback_suffix = DEFAULT_OUTPUT_SUFFIXES.get(kind, ".bin")
+    if cleaned_output_ref.startswith(("http://", "https://")):
+        return _download_remote_output(
+            cleaned_output_ref,
+            subdir=subdir,
+            fallback_suffix=fallback_suffix,
+        )
+
+    if cleaned_output_ref.startswith("/api/v1/asset-studio/files/"):
+        relative_path = cleaned_output_ref.removeprefix("/api/v1/asset-studio/files/")
+        return _copy_output_file(_resolve_output_file(relative_path), subdir=subdir)
+
+    candidate_path = Path(cleaned_output_ref)
+    if candidate_path.exists() and candidate_path.is_file():
+        return _copy_output_file(candidate_path, subdir=subdir)
+
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="无法解析生成结果文件",
+    )
+
+
+def _collect_result_output_refs(result: UnifiedMediaResult) -> list[str]:
+    result_refs: list[str] = []
+    seen: set[str] = set()
+
+    for raw_value in list(result.outputs or []):
+        cleaned = str(raw_value or "").strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        result_refs.append(cleaned)
+
+    if isinstance(result.data, dict):
+        for key in ("url", "image_url", "video_url", "audio_url"):
+            cleaned = str(result.data.get(key) or "").strip()
+            if not cleaned or cleaned in seen:
+                continue
+            seen.add(cleaned)
+            result_refs.append(cleaned)
+
+    return result_refs
+
+
+def _build_media_asset_from_file(*, kind: str, target_path: Path) -> AssetStudioMediaAsset:
+    asset_url = _build_output_url(target_path)
+    media_kind = _resolve_media_kind(kind)
+    mime_type, _ = mimetypes.guess_type(target_path.name)
+    fallback_mime_types = {
+        "image": "image/png",
+        "video": "video/mp4",
+        "audio": "audio/mpeg",
+    }
+
+    return AssetStudioMediaAsset(
+        asset_uuid=target_path.stem,
+        media_kind=media_kind,
+        storage_mode="temp_cloud",
+        source_uri=asset_url,
+        preview_uri=asset_url,
+        download_uri=asset_url,
+        file_name=target_path.name,
+        mime_type=mime_type or fallback_mime_types.get(media_kind),
+        file_size=target_path.stat().st_size,
+        expires_at=None,
+    )
+
+
 def _resolve_output_file(file_path: str) -> Path:
     if not file_path.strip():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在")
@@ -941,16 +1088,40 @@ def _build_response(
     result: UnifiedMediaResult,
     metadata: dict[str, Any] | None = None,
 ) -> AssetStudioGenerateResponse:
+    output_refs = _collect_result_output_refs(result)
     merged_metadata = dict(result.metadata or {})
+    if output_refs:
+        merged_metadata.setdefault("upstream_outputs", output_refs)
     if metadata:
         merged_metadata.update(metadata)
+
+    materialized_paths = [
+        _materialize_output_reference(output_ref, kind=kind, subdir=kind)
+        for output_ref in output_refs
+    ]
+    if not materialized_paths and result.binary is not None:
+        materialized_paths = [
+            _save_binary_output(
+                result.binary,
+                subdir=kind,
+                suffix=DEFAULT_OUTPUT_SUFFIXES.get(kind, ".bin"),
+            )
+        ]
+    if not materialized_paths:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="生成成功，但未返回可用的媒体结果",
+        )
+
+    assets = [_build_media_asset_from_file(kind=kind, target_path=path) for path in materialized_paths]
+    merged_metadata["materialized_asset_count"] = len(assets)
 
     return AssetStudioGenerateResponse(
         kind=kind,
         mode=mode,
         model_id=str(result.model_id or ""),
-        outputs=list(result.outputs or []),
-        primary_output=(result.outputs[0] if result.outputs else None),
+        assets=assets,
+        primary_asset=assets[0] if assets else None,
         metadata=merged_metadata,
     )
 
@@ -962,13 +1133,13 @@ def _build_audio_response(
     output_path: Path,
     metadata: dict[str, Any] | None = None,
 ) -> AssetStudioGenerateResponse:
-    primary_output = _build_output_url(output_path)
+    asset = _build_media_asset_from_file(kind="audio", target_path=output_path)
     return AssetStudioGenerateResponse(
         kind="audio",
         mode=mode,
         model_id=model_id,
-        outputs=[primary_output],
-        primary_output=primary_output,
+        assets=[asset],
+        primary_asset=asset,
         metadata=metadata or {},
     )
 

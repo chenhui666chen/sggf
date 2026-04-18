@@ -30,6 +30,8 @@ class RoutingResult:
     base_score: float = 0.0
     semantic_boost: float = 0.0
     reasons: List[str] = field(default_factory=list)
+    strategy: str = "balanced"
+    candidate_scores: List[Dict[str, Any]] = field(default_factory=list)
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -39,6 +41,8 @@ class RoutingResult:
             "base_score": self.base_score,
             "semantic_boost": self.semantic_boost,
             "reasons": self.reasons,
+            "strategy": self.strategy,
+            "candidate_scores": self.candidate_scores,
         }
 
 
@@ -337,6 +341,18 @@ class SmartRouter:
         selected_score = float(score_by_id.get(selected[0].id, 0.0))
         selected_base = float(base_scores.get(selected[0].id, 0.0))
         selected_boost = float(semantic_boost.get(selected[0].id, 0.0))
+        fallback_ids = {model.id for model in selected[1:max_fallbacks + 1]}
+        candidate_scores = []
+        for rank, (model, total_score) in enumerate(scored, start=1):
+            candidate_scores.append({
+                "rank": rank,
+                "model_id": model.id,
+                "total_score": float(total_score),
+                "base_score": float(base_scores.get(model.id, 0.0)),
+                "semantic_boost": float(semantic_boost.get(model.id, 0.0)),
+                "selected": model.id == selected[0].id,
+                "is_fallback": model.id in fallback_ids,
+            })
         
         reasons = [f"Selected based on quality/cost/latency balance"]
         if semantic_boost:
@@ -349,6 +365,8 @@ class SmartRouter:
             base_score=selected_base,
             semantic_boost=selected_boost,
             reasons=reasons,
+            strategy=task.priority_profile.to_strategy(),
+            candidate_scores=candidate_scores,
         )
 
     def route_with_fallback_by_strategy(
@@ -358,10 +376,12 @@ class SmartRouter:
         max_fallbacks: int = 2,
     ) -> RoutingResult:
         """Route with fallback using a strategy-adjusted task profile."""
-        return self.route_with_fallback(
+        result = self.route_with_fallback(
             self._build_task_for_strategy(task, strategy),
             max_fallbacks=max_fallbacks,
         )
+        result.strategy = str(strategy or "balanced").strip().lower() or "balanced"
+        return result
     
     def _compute_semantic_boost(
         self,

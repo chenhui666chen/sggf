@@ -69,6 +69,7 @@ export interface RunResult {
   qc_warning?: Record<string, unknown>
   preflight?: DreamweaverRunPreflight | null
   video_provider_trace?: DreamweaverVideoProviderTrace | null
+  smart_dispatch_trace?: DreamweaverSmartDispatchTrace | null
 }
 
 export interface TaskStatus {
@@ -117,6 +118,74 @@ export interface DreamweaverVideoProviderTrace {
   enable_kling_video_provider?: boolean
   allow_subject_bridge?: boolean
   shots: DreamweaverVideoProviderShotTrace[]
+}
+
+export interface DreamweaverSmartDispatchCandidateScore {
+  rank?: number | null
+  model_id: string
+  total_score?: number | null
+  base_score?: number | null
+  semantic_boost?: number | null
+  selected?: boolean | null
+  is_fallback?: boolean | null
+}
+
+export interface DreamweaverSmartDispatchIntentTrace {
+  task_id?: string | null
+  modality?: string | null
+  prompt?: string | null
+  confidence?: number | null
+  parse_errors?: string[]
+}
+
+export interface DreamweaverSmartDispatchPromptTrace {
+  stage?: string | null
+  model_id?: string | null
+  prompt_before?: string | null
+  prompt_after?: string | null
+  prompt_changed?: boolean | null
+  template_applied?: boolean | null
+  optimizer_version?: string | null
+}
+
+export interface DreamweaverSmartDispatchRoutingTrace {
+  selected_model?: string | null
+  fallback_models?: string[]
+  score?: number | null
+  base_score?: number | null
+  semantic_boost?: number | null
+  reasons?: string[]
+  strategy?: string | null
+  candidate_scores?: DreamweaverSmartDispatchCandidateScore[]
+}
+
+export interface DreamweaverSmartDispatchExecutionTrace {
+  strategy?: string | null
+  resolved_model?: string | null
+  attempted_models?: string[]
+  timed_out?: boolean | null
+  prompt?: DreamweaverSmartDispatchPromptTrace | null
+  adapter?: Record<string, unknown> | null
+  fallback_chain?: Record<string, unknown> | null
+  routing?: DreamweaverSmartDispatchRoutingTrace | null
+}
+
+export interface DreamweaverSmartDispatchPhaseTrace {
+  stage?: string | null
+  strategy?: string | null
+  intent?: DreamweaverSmartDispatchIntentTrace | null
+  routing?: DreamweaverSmartDispatchRoutingTrace | null
+  execution?: DreamweaverSmartDispatchExecutionTrace | null
+  source?: string | null
+}
+
+export interface DreamweaverSmartDispatchTrace {
+  stage?: string | null
+  strategy?: string | null
+  intent?: DreamweaverSmartDispatchIntentTrace | null
+  routing?: DreamweaverSmartDispatchRoutingTrace | null
+  execution?: DreamweaverSmartDispatchExecutionTrace | null
+  phases?: DreamweaverSmartDispatchPhaseTrace[]
 }
 
 export interface DreamweaverRunAsyncResponse {

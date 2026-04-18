@@ -136,6 +136,104 @@
 - 如果只看 API 层返回的 routing 结果，仍然看不到最终优化后的 prompt
 - 如果 fallback 过程中重新选择模型，也需要把每次 attempt 的 prompt 变化与失败原因一起记录下来
 
+### 4.6 调度 trace 可观测性落地
+
+本轮已进一步把“建议补 trace”落到了实现层，当前媒体智能调度链已经可以输出一套更完整的诊断信息。
+
+已落地内容：
+
+- `RoutingResult` 增加 `strategy` 和 `candidate_scores`
+- `ExecutionResult` 增加统一 `trace`，并透出 `fallback_chain`
+- `FallbackAttempt` 增加每次 attempt 的 `task_snapshot` 与 `trace`
+- `BaseAdapter.generate(...)` 增加 `prompt_before / prompt_after / prompt_changed / optimizer_version`
+- `/smart-dispatch/dispatch` 与 `/smart-dispatch/recommend-models` 现在都会返回顶层 `trace`
+
+当前 trace 已覆盖的关键信息：
+
+- `intent`: `task_id / modality / prompt / confidence / parse_errors`
+- `routing`: `selected_model / fallback_models / strategy / candidate_scores / semantic_boost`
+- `execution`: `resolved_model / attempted_models / timed_out`
+- `fallback`: 每次 attempt 的 `model_id / error / task_snapshot / trace`
+- `prompt`: adapter 预处理阶段的 `prompt_before / prompt_after`
+
+收益：
+
+- 路由结果、实际执行、fallback 行为终于可以在一次响应里串起来看
+- 排障时可以区分“是选错模型”还是“prompt 进入 adapter 前被改写”
+- 后续做前端调试面板、接入自检脚本、线上诊断日志会更顺滑
+
+### 4.7 DreamWeaver 诊断面板接入调度 trace
+
+在 4.6 的基础上，本轮继续把 `smart_dispatch_trace` 接到了 DreamWeaver 的运行诊断链路里。
+
+已落地内容：
+
+- DreamWeaver 后端 `RunResponse` 支持返回 `smart_dispatch_trace`
+- 持久化层会把 `payload.smart_dispatch_trace` 写入 `runtime_config`
+- 前端诊断 hook 会从 `result` 或 `snapshot.runtime_config` 中提取 `smart_dispatch_trace`
+- DreamWeaver 诊断弹窗新增“智能调度”面板，展示：
+  - `stage / strategy / modality / confidence`
+  - `selected_model / resolved_model / fallback_count / candidate_count / attempted_count`
+  - `prompt_changed / timed_out`
+  - 原始 `routing_trace / prompt_trace / smart_dispatch_trace` JSON
+
+这一步的意义是：
+
+- DreamWeaver 即使未来只是局部阶段接入智能调度，也不需要再重做诊断 UI
+- 媒体路由问题终于能在业务页面里直接观察，而不是只能看后端日志或单独调接口
+- 为后续“视频编辑优先、重生成兜底”的分流策略提供了可观测基础
+
+### 4.8 DreamWeaver 真实运行阶段 trace 汇总落地
+
+在 4.7 的基础上，本轮继续把 DreamWeaver 的 `smart_dispatch_trace` 从“字段透传”推进到了“真实运行阶段汇总”。
+
+本轮没有强行把 DreamWeaver 主链整体改造成直接走 `/smart-dispatch`，而是采用更稳妥的状态机阶段汇总方案：
+
+- `RunContext` 初始化时自动创建 `smart_dispatch_trace`
+- `KEYFRAMES / MIDFRAMES / VIDEO / EDIT / REVIEW` 阶段执行完成后，状态机刷新 trace
+- 汇总依据来自各阶段已经写入 `payload` 的真实运行事实，而不是只读静态配置
+
+当前已接入的真实事实来源：
+
+- `KEYFRAMES`：从 `keyframes[].meta` 汇总 `via / decision / ref.rewrite / safety_blocked`
+- `MIDFRAMES`：从 `midframes[].meta` 汇总 `image_edit / t2i` 的实际执行方式
+- `VIDEO`：从 `video_provider_trace` 与 `video_clips[].meta` 汇总 provider 分流、实际视频模型、engine 与 prompt
+- `EDIT`：从 `video_edit_result` 与 `video_clips[].meta` 汇总视频编辑模型、edit feature、目标 shot 与修复结果
+- `REVIEW`：从 `audit.safety_audit` 汇总视觉审核模型、执行状态、阻断结果与分析类型
+
+产出结构保持兼容现有前端诊断面板：
+
+- 顶层继续保留 `stage / strategy / intent / routing / execution`
+- 额外增加 `phases`，用于记录已完成的阶段轨迹
+
+本轮收益：
+
+- DreamWeaver 诊断面板中的 `smart_dispatch_trace` 不再只是预留字段，而是阶段完成后的真实汇总结果
+- 即使媒体链当前还没有完全统一到单一 `/smart-dispatch` 入口，前端也已经能看到真实模型选择、provider 分流和视觉审核模型
+- 后续如果继续推进“视频编辑优先、问题过大再重生成”的细分路由，可以直接复用这套阶段 trace
+
+### 4.9 DreamWeaver 审核失败返工路由校正
+
+在已有 `AutoQC` “视频编辑优先、必要时回视频重生成”的基础上，本轮继续把 `REVIEW` 阶段里 `auditor` 的失败分流语义补齐。
+
+本轮改动：
+
+- `safety_audit_failed` 继续保持快速失败，直接进入 `FAILED`
+- `output_audit_failed` 不再统一回退到 `SCRIPT`
+- `output_audit_failed` 现在会先判断是否只是 `merged_video` 成片产物异常
+- 若 `video_clips` 完整且问题仅限于 `merged_video missing / file missing / too small`，则进入 `REWORK -> EDIT` 做重合成
+- 若 `video_clips` 不完整，或问题超出“成片重合成”范围，则进入 `REWORK -> VIDEO`
+- 若 payload 中已有 `video_edit_failed_shot_ids`，会优先生成 `patch.regenerate_shot_ids`
+- 若没有失败 shot，但存在 `video_edit_attempted_shot_ids`，则复用这些 shot 做局部视频重生
+- 若两类 shot 信息都没有，则退化为整段视频全量重跑
+
+收益：
+
+- DreamWeaver 的返工链路终于和“视频编辑优先、问题过大再重生成”的业务预期一致
+- `auditor` 的产物级失败不再误伤上游脚本阶段，减少无意义返工
+- 单纯的成片封装/合成异常不再触发不必要的视频重生成，返工成本更低
+- 局部视频重生能够直接复用现有 `restart_reset` 的 shot 级清理能力
+
 ## 5. 代码落点
 
 本轮主要改动位置：
@@ -143,8 +241,23 @@
 - `core/router.py`
 - `core/fallback_manager.py`
 - `core/execution_engine.py`
+- `adapters/base.py`
 - `backend/app/api/v1/smart_dispatch.py`
+- `backend/app/api/v1/dreamweaver.py`
+- `backend/app/services/dreamweaver/persistence.py`
+- `pipeline/dreamweaver_smart_dispatch_trace.py`
+- `pipeline/state_machine.py`
 - `tests/test_smart_dispatch_routing_consistency.py`
+- `backend/tests/test_smart_dispatch_routes.py`
+- `backend/tests/test_dreamweaver_video_generation.py`
+- `backend/tests/test_dreamweaver_safety_audit.py`
+- `backend/tests/test_dreamweaver_smart_dispatch_trace.py`
+- `frontend/src/hooks/useDreamweaverDiagnostics.ts`
+- `frontend/src/pages/DreamWeaverRunPage.tsx`
+- `frontend/src/pages/dreamweaver-run/diagnosticSections.tsx`
+- `frontend/src/types/dreamweaver.ts`
+- `frontend/src/utils/dreamweaver.ts`
+- `frontend/src/utils/__tests__/dreamweaverDiagnostics.test.ts`
 
 ## 6. 后续建议
 

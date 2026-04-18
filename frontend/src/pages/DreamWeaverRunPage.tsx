@@ -147,6 +147,7 @@ import {
   DreamweaverDiagnosticCameraDiagnosticsSection,
   DreamweaverDiagnosticPreflightSection,
   DreamweaverDiagnosticProviderTraceSection,
+  DreamweaverDiagnosticSmartDispatchSection,
   DreamweaverDiagnosticTelemetrySection,
 } from './dreamweaver-run/diagnosticSections'
 import {
@@ -2469,8 +2470,10 @@ export default function DreamWeaverRunPage() {
     diagnosticResult,
     diagnosticPreflight,
     diagnosticProviderTrace,
+    diagnosticSmartDispatchTrace,
     diagnosticProviderTraceByShotId,
     diagnosticProviderTraceSummary,
+    diagnosticSmartDispatchTraceSummary,
   } = useDreamweaverDiagnostics({
     persistedRunId,
     result,
@@ -2716,10 +2719,14 @@ export default function DreamWeaverRunPage() {
         source_module: 'dreamweaver_run',
         asset_kind: 'video',
         asset_class: 'deliverable',
+        asset_uuid: currentRunId,
+        storage_mode: 'durable_cloud',
         title: `${selectedProject?.title || '短剧项目'} 合成视频`,
         description: 'DreamWeaver 最终合成成片归档',
-        file_url: buildProtectedMergedVideoUrl(currentRunId),
-        preview_url: buildProtectedMergedVideoUrl(currentRunId),
+        source_uri: buildProtectedMergedVideoUrl(currentRunId),
+        preview_uri: buildProtectedMergedVideoUrl(currentRunId),
+        download_uri: buildProtectedMergedVideoUrl(currentRunId),
+        mime_type: 'video/mp4',
         generation_mode: 'merged_video',
         tags: ['dreamweaver', 'deliverable', 'merged-video'],
         metadata_json: {
@@ -4937,6 +4944,60 @@ export default function DreamWeaverRunPage() {
     )
   }
 
+  const renderDiagnosticSmartDispatchSection = () => {
+    if (!diagnosticSmartDispatchTrace) return null
+
+    const routing = asObject(diagnosticSmartDispatchTrace.routing)
+    const execution = asObject(diagnosticSmartDispatchTrace.execution)
+    const prompt = asObject(execution?.prompt)
+    const attemptedModels = Array.isArray(execution?.attempted_models)
+      ? execution.attempted_models
+          .map((item) => String(item || '').trim())
+          .filter((item): item is string => Boolean(item))
+      : []
+
+    return (
+      <DreamweaverDiagnosticSmartDispatchSection
+        stage={diagnosticSmartDispatchTraceSummary?.stage ?? null}
+        strategy={diagnosticSmartDispatchTraceSummary?.strategy ?? null}
+        intentModality={diagnosticSmartDispatchTraceSummary?.intentModality ?? null}
+        intentConfidence={diagnosticSmartDispatchTraceSummary?.intentConfidence ?? null}
+        parseErrorCount={diagnosticSmartDispatchTraceSummary?.parseErrorCount ?? null}
+        selectedModel={diagnosticSmartDispatchTraceSummary?.selectedModel ?? null}
+        resolvedModel={diagnosticSmartDispatchTraceSummary?.resolvedModel ?? null}
+        fallbackCount={diagnosticSmartDispatchTraceSummary?.fallbackCount ?? null}
+        candidateCount={diagnosticSmartDispatchTraceSummary?.candidateCount ?? null}
+        attemptedCount={diagnosticSmartDispatchTraceSummary?.attemptedCount ?? null}
+        promptChanged={diagnosticSmartDispatchTraceSummary?.promptChanged ?? null}
+        timedOut={diagnosticSmartDispatchTraceSummary?.timedOut ?? null}
+        attemptedModels={attemptedModels}
+        phaseCount={diagnosticSmartDispatchTraceSummary?.phaseCount ?? null}
+        phaseStages={diagnosticSmartDispatchTraceSummary?.phaseStages ?? []}
+        onCopy={() => copyText(safeJsonStringify(diagnosticSmartDispatchTrace))}
+        promptAccordion={
+          prompt
+            ? renderTitledDiagnosticJsonAccordion({
+                title: 'prompt_trace',
+                value: prompt,
+              })
+            : null
+        }
+        routingAccordion={
+          routing
+            ? renderTitledDiagnosticJsonAccordion({
+                title: 'routing_trace',
+                value: routing,
+              })
+            : null
+        }
+        jsonAccordion={renderTitledDiagnosticJsonAccordion({
+          title: 'smart_dispatch_trace',
+          value: diagnosticSmartDispatchTrace,
+        })}
+      />
+    )
+  }
+
   const renderDiagnosticTelemetrySection = () => {
     if (!snapshotTelemetrySummary) return null
 
@@ -5464,6 +5525,7 @@ export default function DreamWeaverRunPage() {
     stage: taskStage,
     preflight: diagnosticPreflight,
     video_provider_trace: diagnosticProviderTrace,
+    smart_dispatch_trace: diagnosticSmartDispatchTrace,
     runtime_config: snapshotRuntimeConfig,
     camera_tree_generation: diagnosticCameraDiagnostics.generation || null,
     camera_tree: diagnosticCameraDiagnostics.cameraTree || null,
@@ -5494,13 +5556,14 @@ export default function DreamWeaverRunPage() {
       videoClipCount={Array.isArray(diagnosticResult?.video_clips) ? diagnosticResult.video_clips.length : null}
       refreshLabel={runSnapshotLoading ? '刷新中...' : '刷新运行快照'}
       refreshDisabled={!persistedRunId || runSnapshotLoading}
-      copyDisabled={!(diagnosticResult || diagnosticPreflight || diagnosticProviderTrace)}
+      copyDisabled={!(diagnosticResult || diagnosticPreflight || diagnosticProviderTrace || diagnosticSmartDispatchTrace)}
       onRefresh={loadRunSnapshot}
       onCopy={() => copyText(safeJsonStringify(buildRunDiagnosticPayload()))}
       sections={
         <>
           {renderDiagnosticPreflightSection()}
           {renderDiagnosticProviderTraceSection()}
+          {renderDiagnosticSmartDispatchSection()}
           {renderDiagnosticTelemetrySection()}
           {renderDiagnosticCameraDiagnosticsSection()}
         </>

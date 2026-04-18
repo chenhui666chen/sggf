@@ -162,12 +162,27 @@ interface FrontendEventPayload {
   success?: boolean
 }
 
+export type AssetStorageMode = 'temp_cloud' | 'durable_cloud' | 'local_mirror' | 'local_only'
+
+export interface AssetStudioMediaAsset {
+  asset_uuid: string
+  media_kind: 'image' | 'video' | 'audio' | string
+  storage_mode: AssetStorageMode
+  source_uri: string
+  preview_uri: string
+  download_uri: string
+  file_name: string
+  mime_type?: string | null
+  file_size?: number | null
+  expires_at?: string | null
+}
+
 export interface AssetStudioGenerateResponse {
   kind: string
   mode: string
   model_id: string
-  outputs: string[]
-  primary_output?: string | null
+  assets: AssetStudioMediaAsset[]
+  primary_asset?: AssetStudioMediaAsset | null
   metadata?: Record<string, any>
 }
 
@@ -200,10 +215,17 @@ export interface UserAssetRecord {
   source_module: string
   asset_kind: string
   asset_class: string
+  asset_uuid: string
+  storage_mode: AssetStorageMode
   title: string
   description?: string | null
-  file_url?: string | null
-  preview_url?: string | null
+  source_uri?: string | null
+  preview_uri?: string | null
+  download_uri?: string | null
+  mime_type?: string | null
+  file_size?: number | null
+  checksum?: string | null
+  expires_at?: string | null
   model_id?: string | null
   generation_mode?: string | null
   tags: string[]
@@ -220,10 +242,17 @@ export interface UserAssetRecordCreatePayload {
   source_module: string
   asset_kind: string
   asset_class?: string
+  asset_uuid: string
+  storage_mode: AssetStorageMode
   title: string
   description?: string | null
-  file_url: string
-  preview_url?: string | null
+  source_uri?: string | null
+  preview_uri?: string | null
+  download_uri?: string | null
+  mime_type?: string | null
+  file_size?: number | null
+  checksum?: string | null
+  expires_at?: string | null
   model_id?: string | null
   generation_mode?: string | null
   tags?: string[]
@@ -1393,6 +1422,39 @@ class ApiClient {
     return this.client.post(
       `/api/v1/audiobook/projects/${audiobookProjectId}/generate-audio-from-scripts`,
       payload
+    )
+  }
+
+  // 片段重新生成 API
+  regenerateSegment(
+    audiobookProjectId: number,
+    chapterId: number,
+    segmentIndex: number,
+    payload: { reason?: string; tts_model?: string; voice_id?: string; emotion?: string }
+  ) {
+    return this.client.post(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/segments/${segmentIndex}/regenerate`,
+      payload
+    )
+  }
+
+  // 片段审查/评分 API
+  reviewSegment(
+    audiobookProjectId: number,
+    chapterId: number,
+    segmentIndex: number,
+    payload: { quality_score?: number; notes?: string; needs_regenerate?: boolean }
+  ) {
+    return this.client.post(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/segments/${segmentIndex}/review`,
+      payload
+    )
+  }
+
+  // 获取章节审查状态 API
+  getChapterReviewStatus(audiobookProjectId: number, chapterId: number) {
+    return this.client.get(
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/review-status`
     )
   }
 

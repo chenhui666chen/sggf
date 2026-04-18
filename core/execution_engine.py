@@ -46,6 +46,7 @@ class ExecutionResult:
     attempts: int = 1
     fallback_chain: Optional["FallbackChain"] = None
     timed_out: bool = False
+    trace: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -60,6 +61,8 @@ class ExecutionResult:
             "latency": self.latency,
             "attempts": self.attempts,
             "timed_out": self.timed_out,
+            "fallback_chain": self.fallback_chain.to_dict() if self.fallback_chain else None,
+            "trace": self.trace,
         }
 
 
@@ -115,6 +118,51 @@ class ExecutionEngine:
             except Exception as e:
                 _logger.warning(f"Post-hook error: {e}")
         return result
+
+    @staticmethod
+    def _attempted_model_ids(chain: Optional["FallbackChain"]) -> List[str]:
+        if chain is None:
+            return []
+        attempted: List[str] = []
+        for attempt in chain.attempts:
+            model_id = str(getattr(attempt, "model_id", "") or "").strip()
+            if not model_id or model_id == "none" or model_id in attempted:
+                continue
+            attempted.append(model_id)
+        return attempted
+
+    @staticmethod
+    def _build_execution_trace(
+        *,
+        strategy: str,
+        routing_result: Optional["RoutingResult"] = None,
+        resolved_model: str = "",
+        attempted_models: Optional[List[str]] = None,
+        adapter_trace: Optional[Dict[str, Any]] = None,
+        fallback_chain: Optional["FallbackChain"] = None,
+        timed_out: bool = False,
+    ) -> Dict[str, Any]:
+        trace: Dict[str, Any] = {
+            "strategy": str(strategy or "balanced").strip().lower() or "balanced",
+            "resolved_model": resolved_model,
+            "attempted_models": list(attempted_models or []),
+            "timed_out": timed_out,
+        }
+        if routing_result is not None:
+            trace["routing"] = routing_result.to_dict()
+        prompt_trace = dict((adapter_trace or {}).get("prompt") or {})
+        if prompt_trace:
+            trace["prompt"] = prompt_trace
+        if adapter_trace:
+            trace["adapter"] = dict(adapter_trace)
+        if fallback_chain is not None:
+            if hasattr(fallback_chain, "to_dict"):
+                trace["fallback_chain"] = fallback_chain.to_dict()
+            else:
+                trace["fallback_chain"] = {
+                    "total_attempts": len(getattr(fallback_chain, "attempts", []) or []),
+                }
+        return trace
     
     def execute(
         self,
@@ -150,6 +198,11 @@ class ExecutionEngine:
                 error_code="timeout",
                 latency=latency,
                 timed_out=True,
+                trace=self._build_execution_trace(
+                    strategy=strategy,
+                    routing_result=routing_result,
+                    timed_out=True,
+                ),
             )
         except Exception as e:
             latency = time.time() - start_time
@@ -160,6 +213,10 @@ class ExecutionEngine:
                 error=str(e),
                 error_code="execution_error",
                 latency=latency,
+                trace=self._build_execution_trace(
+                    strategy=strategy,
+                    routing_result=routing_result,
+                ),
             )
     
     def _execute_single(
@@ -190,6 +247,10 @@ class ExecutionEngine:
                 error=str(e),
                 error_code="no_model_available",
                 latency=time.time() - start_time,
+                trace=self._build_execution_trace(
+                    strategy=strategy,
+                    routing_result=routing_result,
+                ),
             )
         
         adapter = self._registry.get_adapter(model.id)
@@ -201,9 +262,16 @@ class ExecutionEngine:
                 error=f"Adapter not found for model: {model.id}",
                 error_code="adapter_missing",
                 latency=time.time() - start_time,
+                trace=self._build_execution_trace(
+                    strategy=strategy,
+                    routing_result=routing_result,
+                    resolved_model=model.id,
+                    attempted_models=[model.id],
+                ),
             )
         
         result = adapter.generate(task)
+        adapter_trace = getattr(result, "trace", None)
         
         execution_result = ExecutionResult(
             success=result.success,
@@ -216,6 +284,13 @@ class ExecutionEngine:
             cost=result.cost,
             latency=time.time() - start_time,
             attempts=1,
+            trace=self._build_execution_trace(
+                strategy=strategy,
+                routing_result=routing_result,
+                resolved_model=result.model_id or model.id,
+                attempted_models=[model.id],
+                adapter_trace=adapter_trace,
+            ),
         )
         
         if result.success:
@@ -249,6 +324,7 @@ class ExecutionEngine:
         )
         
         if success and result:
+            adapter_trace = getattr(result, "trace", None)
             execution_result = ExecutionResult(
                 success=True,
                 task_id=task.task_id,
@@ -259,6 +335,14 @@ class ExecutionEngine:
                 latency=result.latency,
                 attempts=len(chain.attempts),
                 fallback_chain=chain,
+                trace=self._build_execution_trace(
+                    strategy=strategy,
+                    routing_result=routing_result,
+                    resolved_model=result.model_id,
+                    attempted_models=self._attempted_model_ids(chain),
+                    adapter_trace=adapter_trace,
+                    fallback_chain=chain,
+                ),
             )
         else:
             last_attempt = chain.get_last_attempt()
@@ -270,6 +354,14 @@ class ExecutionEngine:
                 error_code=last_attempt.error_code if last_attempt else "all_attempts_failed",
                 attempts=len(chain.attempts),
                 fallback_chain=chain,
+                trace=self._build_execution_trace(
+                    strategy=strategy,
+                    routing_result=routing_result,
+                    resolved_model=last_attempt.model_id if last_attempt else "",
+                    attempted_models=self._attempted_model_ids(chain),
+                    adapter_trace=getattr(last_attempt, "trace", None),
+                    fallback_chain=chain,
+                ),
             )
         
         execution_result = self._run_post_hooks(task, execution_result)

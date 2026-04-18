@@ -518,7 +518,7 @@ def test_video_provider_trace_uses_subject_refs_when_subject_bridge_enabled() ->
     assert shot_trace["reason"] == "subject_refs"
 
 
-def test_build_contract_from_payload_persists_preflight_and_provider_trace() -> None:
+def test_build_contract_from_payload_persists_preflight_provider_and_dispatch_trace() -> None:
     from app.services.dreamweaver.persistence import build_contract_from_payload
 
     contract = build_contract_from_payload(
@@ -569,6 +569,26 @@ def test_build_contract_from_payload_persists_preflight_and_provider_trace() -> 
                     }
                 ],
             },
+            "smart_dispatch_trace": {
+                "stage": "executed",
+                "strategy": "quality",
+                "intent": {
+                    "task_id": "task-smart-dispatch",
+                    "modality": "text_to_video",
+                    "prompt": "主角回头看向镜头",
+                    "confidence": 0.94,
+                },
+                "routing": {
+                    "selected_model": "wan2.7-t2v",
+                    "fallback_models": ["kling-omni-v1"],
+                    "strategy": "quality",
+                },
+                "execution": {
+                    "resolved_model": "wan2.7-t2v",
+                    "attempted_models": ["wan2.7-t2v"],
+                    "timed_out": False,
+                },
+            },
         },
     )
 
@@ -577,3 +597,5 @@ def test_build_contract_from_payload_persists_preflight_and_provider_trace() -> 
     assert runtime["preflight"]["warnings"][0]["code"] == "quality_mode_without_smart_tuning"
     assert runtime["video_provider_trace"]["provider_mode"] == "auto"
     assert runtime["video_provider_trace"]["shots"][0]["shot_id"] == "shot_001"
+    assert runtime["smart_dispatch_trace"]["strategy"] == "quality"
+    assert runtime["smart_dispatch_trace"]["routing"]["selected_model"] == "wan2.7-t2v"

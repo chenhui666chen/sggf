@@ -44,6 +44,7 @@ class SmartDispatchResponse(BaseModel):
     intent: Optional[Dict[str, Any]] = None
     routing: Optional[Dict[str, Any]] = None
     execution: Optional[Dict[str, Any]] = None
+    trace: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
 
@@ -59,6 +60,7 @@ class ModelRecommendResponse(BaseModel):
     candidates: List[Dict[str, Any]]
     recommended: Optional[Dict[str, Any]] = None
     reasons: List[str]
+    trace: Optional[Dict[str, Any]] = None
 
 
 class SemanticMatchRequest(BaseModel):
@@ -79,6 +81,46 @@ class StyleVocabularyResponse(BaseModel):
     success: bool
     styles: Dict[str, List[str]]
     scenarios: Dict[str, List[str]]
+
+
+def _build_intent_trace(intent_result: Any) -> Dict[str, Any]:
+    task = getattr(intent_result, "task_spec", None)
+    modality = getattr(getattr(task, "modality", None), "value", None)
+    return {
+        "task_id": getattr(task, "task_id", ""),
+        "modality": modality,
+        "prompt": getattr(task, "prompt", ""),
+        "confidence": getattr(intent_result, "confidence", 0.0),
+        "parse_errors": list(getattr(intent_result, "parse_errors", []) or []),
+    }
+
+
+def _build_dispatch_trace(
+    *,
+    stage: str,
+    strategy: str,
+    intent_result: Any,
+    routing_result: Any = None,
+    execution_result: Any = None,
+) -> Dict[str, Any]:
+    trace: Dict[str, Any] = {
+        "stage": stage,
+        "strategy": str(strategy or "balanced").strip().lower() or "balanced",
+        "intent": _build_intent_trace(intent_result),
+    }
+    if routing_result is not None:
+        trace["routing"] = routing_result.to_dict()
+    if execution_result is not None:
+        execution_trace = dict(getattr(execution_result, "trace", None) or {})
+        if not execution_trace:
+            model_id = str(getattr(execution_result, "model_id", "") or "").strip()
+            execution_trace = {
+                "resolved_model": model_id,
+                "attempted_models": [model_id] if model_id else [],
+                "timed_out": bool(getattr(execution_result, "timed_out", False)),
+            }
+        trace["execution"] = execution_trace
+    return trace
 
 
 @router.post("/parse-intent", response_model=IntentParseResponse)
@@ -117,6 +159,11 @@ async def smart_dispatch(
         return SmartDispatchResponse(
             success=False,
             intent=intent_result.to_dict(),
+            trace=_build_dispatch_trace(
+                stage="intent_rejected",
+                strategy=request.strategy,
+                intent_result=intent_result,
+            ),
             error=f"意图解析置信度过低({intent_result.confidence:.2f}): {'; '.join(intent_result.parse_errors)}",
         )
 
@@ -131,6 +178,11 @@ async def smart_dispatch(
         return SmartDispatchResponse(
             success=False,
             intent=intent_result.to_dict(),
+            trace=_build_dispatch_trace(
+                stage="routing_failed",
+                strategy=request.strategy,
+                intent_result=intent_result,
+            ),
             error=f"模型路由失败: {str(e)}",
         )
 
@@ -141,6 +193,12 @@ async def smart_dispatch(
             success=True,
             intent=intent_result.to_dict(),
             routing=routing_info,
+            trace=_build_dispatch_trace(
+                stage="dry_run",
+                strategy=request.strategy,
+                intent_result=intent_result,
+                routing_result=routing_result,
+            ),
         )
 
     from core.execution_engine import engine
@@ -159,6 +217,13 @@ async def smart_dispatch(
         intent=intent_result.to_dict(),
         routing=routing_info,
         execution=execution_info,
+        trace=_build_dispatch_trace(
+            stage="executed",
+            strategy=request.strategy,
+            intent_result=intent_result,
+            routing_result=routing_result,
+            execution_result=exec_result,
+        ),
         error=exec_result.error if not exec_result.success else None,
     )
 
@@ -216,6 +281,12 @@ async def recommend_models(
         candidates=candidates,
         recommended=recommended,
         reasons=routing_result.reasons,
+        trace=_build_dispatch_trace(
+            stage="recommend",
+            strategy=request.strategy,
+            intent_result=intent_result,
+            routing_result=routing_result,
+        ),
     )
 
 

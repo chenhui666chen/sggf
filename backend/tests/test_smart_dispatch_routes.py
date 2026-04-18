@@ -179,6 +179,7 @@ def test_dispatch_route_reuses_prefetched_routing_result_and_strategy(monkeypatc
         base_score=0.9,
         semantic_boost=0.06,
         reasons=["quality strategy matched"],
+        strategy="quality",
     )
     captured: dict[str, Any] = {}
 
@@ -226,8 +227,13 @@ def test_dispatch_route_reuses_prefetched_routing_result_and_strategy(monkeypatc
     assert data["routing"]["selected_model"] == "primary-image-model"
     assert data["routing"]["fallback_models"] == ["fallback-image-model"]
     assert data["routing"]["score"] == 0.96
+    assert data["routing"]["strategy"] == "quality"
     assert data["execution"]["model_id"] == "primary-image-model"
     assert data["execution"]["metadata"]["source"] == "stub-engine"
+    assert data["trace"]["stage"] == "executed"
+    assert data["trace"]["strategy"] == "quality"
+    assert data["trace"]["routing"]["selected_model"] == "primary-image-model"
+    assert data["trace"]["execution"]["resolved_model"] == "primary-image-model"
     assert parser.calls[0]["db_session"] is dummy_db
     assert captured["route_task"] is parse_result.task_spec
     assert captured["route_strategy"] == "quality"
@@ -270,6 +276,7 @@ def test_recommend_models_route_uses_strategy_and_returns_candidates_in_order(mo
         fallback_models=[fallback_model_1, fallback_model_2],
         score=0.83,
         reasons=["cost strategy matched", "fallback chain available"],
+        strategy="cost",
     )
     captured: dict[str, Any] = {}
 
@@ -303,6 +310,9 @@ def test_recommend_models_route_uses_strategy_and_returns_candidates_in_order(mo
     ]
     assert [candidate["score"] for candidate in data["candidates"]] == [0.83, 0.0, 0.0]
     assert data["reasons"] == ["cost strategy matched", "fallback chain available"]
+    assert data["trace"]["stage"] == "recommend"
+    assert data["trace"]["strategy"] == "cost"
+    assert data["trace"]["routing"]["selected_model"] == "cost-primary-model"
     assert parser.calls[0]["db_session"] is dummy_db
     assert captured["task"] is parse_result.task_spec
     assert captured["strategy"] == "cost"

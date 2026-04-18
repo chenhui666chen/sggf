@@ -45,6 +45,7 @@ import {
   type UserCenterPointsOverviewResponse,
 } from '@/services/api'
 import type { AudiobookProjectSummary, DeletedAudiobookProject } from '@/types/audiobook'
+import { getLocalAssetBlob } from '@/utils/localAssetVault'
 
 interface ProjectRecord {
   id: number
@@ -311,6 +312,7 @@ export default function UserCenterPage() {
   const [assetListError, setAssetListError] = useState<string | null>(null)
   const [assetListLoading, setAssetListLoading] = useState(false)
   const [userAssets, setUserAssets] = useState<UserAssetRecord[]>([])
+  const [localAssetUrls, setLocalAssetUrls] = useState<Record<number, string>>({})
   const [protectedAssetUrls, setProtectedAssetUrls] = useState<Record<number, string>>({})
   const [feedback, setFeedback] = useState<FeedbackState | null>(null)
   const [restoringKey, setRestoringKey] = useState<string | null>(null)
@@ -731,6 +733,60 @@ export default function UserCenterPage() {
     let revoked = false
     const objectUrls: string[] = []
 
+    const loadLocalAssetUrls = async () => {
+      const localAssets = userAssets
+        .map((asset) => {
+          const assetUuid = String(asset.asset_uuid || '').trim()
+          if (!assetUuid) return null
+          return { assetId: asset.id, assetUuid }
+        })
+        .filter(Boolean) as Array<{ assetId: number; assetUuid: string }>
+
+      if (!localAssets.length) {
+        setLocalAssetUrls({})
+        return
+      }
+
+      const entries = await Promise.all(
+        localAssets.map(async (item) => {
+          try {
+            const blob = await getLocalAssetBlob(item.assetUuid)
+            if (!blob) return [item.assetId, ''] as const
+            const objectUrl = URL.createObjectURL(blob)
+            objectUrls.push(objectUrl)
+            return [item.assetId, objectUrl] as const
+          } catch {
+            return [item.assetId, ''] as const
+          }
+        }),
+      )
+
+      if (revoked) return
+      const nextUrls: Record<number, string> = {}
+      entries.forEach(([assetId, url]) => {
+        if (url) nextUrls[assetId] = url
+      })
+      setLocalAssetUrls(nextUrls)
+    }
+
+    void loadLocalAssetUrls()
+
+    return () => {
+      revoked = true
+      objectUrls.forEach((url) => {
+        try {
+          URL.revokeObjectURL(url)
+        } catch {
+          // ignore
+        }
+      })
+    }
+  }, [userAssets])
+
+  useEffect(() => {
+    let revoked = false
+    const objectUrls: string[] = []
+
     const loadProtectedAssetUrls = async () => {
       const protectedAssets = userAssets
         .map((asset) => {
@@ -797,8 +853,14 @@ export default function UserCenterPage() {
   }, [filteredUserAssets])
 
   const resolveUserAssetMediaUrl = useCallback(
-    (asset: UserAssetRecord) => protectedAssetUrls[asset.id] || asset.preview_url || asset.file_url || '',
-    [protectedAssetUrls],
+    (asset: UserAssetRecord) =>
+      localAssetUrls[asset.id] ||
+      protectedAssetUrls[asset.id] ||
+      asset.preview_uri ||
+      asset.source_uri ||
+      asset.download_uri ||
+      '',
+    [localAssetUrls, protectedAssetUrls],
   )
 
   const handleUpdateUserAsset = async (assetId: number, payload: UserAssetUpdatePayload) => {

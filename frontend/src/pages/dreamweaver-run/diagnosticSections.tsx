@@ -189,6 +189,105 @@ export function DreamweaverDiagnosticProviderTraceSection({
   )
 }
 
+type DreamweaverDiagnosticSmartDispatchSectionProps = {
+  stage?: string | null
+  strategy?: string | null
+  intentModality?: string | null
+  intentConfidence?: number | null
+  parseErrorCount?: number | null
+  selectedModel?: string | null
+  resolvedModel?: string | null
+  fallbackCount?: number | null
+  candidateCount?: number | null
+  attemptedCount?: number | null
+  promptChanged?: boolean | null
+  timedOut?: boolean | null
+  attemptedModels?: string[]
+  phaseCount?: number | null
+  phaseStages?: string[]
+  onCopy: () => void
+  jsonAccordion?: ReactNode
+  promptAccordion?: ReactNode
+  routingAccordion?: ReactNode
+}
+
+export function DreamweaverDiagnosticSmartDispatchSection({
+  stage,
+  strategy,
+  intentModality,
+  intentConfidence,
+  parseErrorCount,
+  selectedModel,
+  resolvedModel,
+  fallbackCount,
+  candidateCount,
+  attemptedCount,
+  promptChanged,
+  timedOut,
+  attemptedModels,
+  phaseCount,
+  phaseStages,
+  onCopy,
+  jsonAccordion,
+  promptAccordion,
+  routingAccordion,
+}: DreamweaverDiagnosticSmartDispatchSectionProps) {
+  const attemptedChips = Array.isArray(attemptedModels)
+    ? attemptedModels
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+        .slice(0, 8)
+        .map((item) => ({ key: `attempt:${item}`, label: `attempt: ${item}` }))
+    : []
+  const phaseChips = Array.isArray(phaseStages)
+    ? phaseStages
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+        .slice(0, 8)
+        .map((item) => ({ key: `phase:${item}`, label: `phase: ${item}` }))
+    : []
+
+  return (
+    <Accordion defaultExpanded sx={{ mb: 1 }}>
+      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+          <BugReportIcon color="primary" fontSize="small" />
+          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+            智能调度
+          </Typography>
+          {stage && <Chip size="small" variant="outlined" label={`stage: ${stage}`} />}
+          {strategy && <Chip size="small" variant="outlined" label={`strategy: ${strategy}`} />}
+          {intentModality && <Chip size="small" variant="outlined" label={`modality: ${intentModality}`} />}
+          {typeof intentConfidence === 'number' && <Chip size="small" label={`confidence: ${intentConfidence.toFixed(2)}`} />}
+          {typeof parseErrorCount === 'number' && <Chip size="small" label={`parse_errors: ${parseErrorCount}`} color={parseErrorCount > 0 ? 'warning' : 'default'} />}
+          {selectedModel && <Chip size="small" label={`selected: ${selectedModel}`} />}
+          {resolvedModel && <Chip size="small" label={`resolved: ${resolvedModel}`} color="success" />}
+          {typeof fallbackCount === 'number' && <Chip size="small" label={`fallbacks: ${fallbackCount}`} />}
+          {typeof candidateCount === 'number' && <Chip size="small" label={`candidates: ${candidateCount}`} />}
+          {typeof attemptedCount === 'number' && <Chip size="small" label={`attempts: ${attemptedCount}`} />}
+          {typeof phaseCount === 'number' && phaseCount > 0 && <Chip size="small" label={`phases: ${phaseCount}`} />}
+          {typeof promptChanged === 'boolean' && (
+            <Chip size="small" color={promptChanged ? 'warning' : 'default'} label={`prompt: ${promptChanged ? 'changed' : 'same'}`} />
+          )}
+          {typeof timedOut === 'boolean' && timedOut && <Chip size="small" color="error" label="timed_out" />}
+        </Stack>
+      </AccordionSummary>
+      <AccordionDetails>
+        <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center" sx={{ mb: 1 }}>
+          <Button size="small" variant="outlined" startIcon={<ContentCopyIcon fontSize="small" />} onClick={onCopy}>
+            复制调度 Trace
+          </Button>
+        </Stack>
+        <DreamweaverDiagnosticOutlinedChipStack items={attemptedChips} />
+        <DreamweaverDiagnosticOutlinedChipStack items={phaseChips} marginTop={attemptedChips.length > 0 ? 1 : 0} />
+        {promptAccordion ?? null}
+        {routingAccordion ?? null}
+        {jsonAccordion ?? null}
+      </AccordionDetails>
+    </Accordion>
+  )
+}
+
 type DreamweaverDiagnosticTelemetrySectionProps = {
   totalSeconds?: number | null
   terminalState?: string | null

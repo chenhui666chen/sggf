@@ -667,6 +667,8 @@ def build_contract_from_payload(
         runtime_config["preflight"] = payload.get("preflight")
     if isinstance(payload.get("video_provider_trace"), dict):
         runtime_config["video_provider_trace"] = payload.get("video_provider_trace")
+    if isinstance(payload.get("smart_dispatch_trace"), dict):
+        runtime_config["smart_dispatch_trace"] = payload.get("smart_dispatch_trace")
     if isinstance(payload.get("video_clip_jobs"), list):
         runtime_config["video_clip_jobs"] = payload.get("video_clip_jobs")
     if isinstance(payload.get("asset_library_config"), dict):

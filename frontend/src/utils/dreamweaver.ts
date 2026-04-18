@@ -2,6 +2,7 @@ import { stageToPreviewStep as stageToPreviewStepConstant } from '../constants/d
 import type {
   DreamweaverLibraryPlanItem,
   DreamweaverRunPreflight,
+  DreamweaverSmartDispatchTrace,
   DreamweaverVideoProviderShotTrace,
   DreamweaverVideoProviderTrace,
   LibraryAsset,
@@ -29,6 +30,10 @@ function toDreamweaverRunPreflight(value: unknown): DreamweaverRunPreflight | nu
 
 function toDreamweaverVideoProviderTrace(value: unknown): DreamweaverVideoProviderTrace | null {
   return asRecord(value) ? (value as DreamweaverVideoProviderTrace) : null
+}
+
+function toDreamweaverSmartDispatchTrace(value: unknown): DreamweaverSmartDispatchTrace | null {
+  return asRecord(value) ? (value as DreamweaverSmartDispatchTrace) : null
 }
 
 function readPersistedDreamWeaverRunByKey(key: string): PersistedDreamWeaverRun | null {
@@ -333,6 +338,9 @@ export function buildResultFromRunSnapshot(data: unknown, fallbackRunId: string)
   const videoProviderTrace =
     toDreamweaverVideoProviderTrace(dataRecord?.video_provider_trace) ||
     toDreamweaverVideoProviderTrace(runtimeCfg.video_provider_trace)
+  const smartDispatchTrace =
+    toDreamweaverSmartDispatchTrace(dataRecord?.smart_dispatch_trace) ||
+    toDreamweaverSmartDispatchTrace(runtimeCfg.smart_dispatch_trace)
   const audit = asRecord(dataRecord?.audit) || asRecord(runtimeCfg.audit)
   const qcWarning = asRecord(dataRecord?.qc_warning) || asRecord(runtimeCfg.qc_warning)
   const autoqc = asRecord(contract.autoqc) || asRecord(dataRecord?.autoqc) || asRecord(runtimeCfg.autoqc)
@@ -359,6 +367,7 @@ export function buildResultFromRunSnapshot(data: unknown, fallbackRunId: string)
     qc_warning: qcWarning ?? undefined,
     preflight,
     video_provider_trace: videoProviderTrace,
+    smart_dispatch_trace: smartDispatchTrace,
   }
 }
 
@@ -383,6 +392,7 @@ export function mergeRunResult(prev: RunResult | null, next: RunResult | null): 
     qc_warning: next.qc_warning ?? prev.qc_warning,
     preflight: next.preflight ?? prev.preflight,
     video_provider_trace: next.video_provider_trace ?? prev.video_provider_trace,
+    smart_dispatch_trace: next.smart_dispatch_trace ?? prev.smart_dispatch_trace,
   }
 }
 
@@ -405,6 +415,16 @@ export function resolveDreamweaverDiagnosticProviderTrace(
   return (
     toDreamweaverVideoProviderTrace(result?.video_provider_trace) ||
     toDreamweaverVideoProviderTrace(asRecord(snapshotRuntimeConfig)?.video_provider_trace)
+  )
+}
+
+export function resolveDreamweaverDiagnosticSmartDispatchTrace(
+  result: Pick<RunResult, 'smart_dispatch_trace'> | null | undefined,
+  snapshotRuntimeConfig: unknown,
+): DreamweaverSmartDispatchTrace | null {
+  return (
+    toDreamweaverSmartDispatchTrace(result?.smart_dispatch_trace) ||
+    toDreamweaverSmartDispatchTrace(asRecord(snapshotRuntimeConfig)?.smart_dispatch_trace)
   )
 }
 
@@ -454,6 +474,75 @@ export function summarizeDreamweaverProviderTrace(
     recommendedKling,
     appliedKling,
     shadowed,
+  }
+}
+
+export interface DreamweaverSmartDispatchTraceSummary {
+  stage: string | null
+  strategy: string | null
+  intentModality: string | null
+  intentConfidence: number | null
+  parseErrorCount: number
+  selectedModel: string | null
+  resolvedModel: string | null
+  fallbackCount: number
+  candidateCount: number
+  attemptedCount: number
+  phaseCount: number
+  phaseStages: string[]
+  promptChanged: boolean | null
+  timedOut: boolean | null
+}
+
+export function summarizeDreamweaverSmartDispatchTrace(
+  trace: DreamweaverSmartDispatchTrace | null | undefined,
+): DreamweaverSmartDispatchTraceSummary | null {
+  if (!trace) return null
+
+  const routing = asRecord(trace.routing)
+  const execution = asRecord(trace.execution)
+  const intent = asRecord(trace.intent)
+  const fallbackModels = Array.isArray(routing?.fallback_models) ? (routing?.fallback_models as unknown[]) : []
+  const candidateScores = Array.isArray(routing?.candidate_scores) ? (routing?.candidate_scores as unknown[]) : []
+  const attemptedModels = Array.isArray(execution?.attempted_models) ? (execution?.attempted_models as unknown[]) : []
+  const parseErrors = Array.isArray(intent?.parse_errors) ? (intent?.parse_errors as unknown[]) : []
+  const phases = Array.isArray(trace.phases) ? (trace.phases as unknown[]) : []
+  const prompt = asRecord(execution?.prompt)
+  const phaseStages = phases
+    .map((item) => {
+      const phase = asRecord(item)
+      return typeof phase?.stage === 'string' && String(phase.stage).trim() ? String(phase.stage).trim() : ''
+    })
+    .filter((item): item is string => Boolean(item))
+
+  return {
+    stage: typeof trace.stage === 'string' && trace.stage.trim() ? trace.stage.trim() : null,
+    strategy:
+      typeof trace.strategy === 'string' && trace.strategy.trim()
+        ? trace.strategy.trim()
+        : typeof routing?.strategy === 'string' && String(routing.strategy).trim()
+          ? String(routing.strategy).trim()
+          : typeof execution?.strategy === 'string' && String(execution.strategy).trim()
+            ? String(execution.strategy).trim()
+            : null,
+    intentModality: typeof intent?.modality === 'string' && String(intent.modality).trim() ? String(intent.modality).trim() : null,
+    intentConfidence: typeof intent?.confidence === 'number' ? Number(intent.confidence) : null,
+    parseErrorCount: parseErrors.length,
+    selectedModel:
+      typeof routing?.selected_model === 'string' && String(routing.selected_model).trim()
+        ? String(routing.selected_model).trim()
+        : null,
+    resolvedModel:
+      typeof execution?.resolved_model === 'string' && String(execution.resolved_model).trim()
+        ? String(execution.resolved_model).trim()
+        : null,
+    fallbackCount: fallbackModels.filter((item) => typeof item === 'string' && String(item).trim()).length,
+    candidateCount: candidateScores.length,
+    attemptedCount: attemptedModels.filter((item) => typeof item === 'string' && String(item).trim()).length,
+    phaseCount: phaseStages.length,
+    phaseStages,
+    promptChanged: typeof prompt?.prompt_changed === 'boolean' ? Boolean(prompt.prompt_changed) : null,
+    timedOut: typeof execution?.timed_out === 'boolean' ? Boolean(execution.timed_out) : null,
   }
 }
 
