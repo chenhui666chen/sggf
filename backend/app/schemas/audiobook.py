@@ -3,7 +3,7 @@
 """
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AudiobookProjectCreate(BaseModel):
@@ -74,6 +74,9 @@ class CharacterVoiceConfig(BaseModel):
     volume: int = 50
     speed: Optional[float] = None
     pitch: Optional[int] = None
+    voice_type: Optional[str] = None  # 声音类型（majestic/gentle/lively 等）
+    personality: Optional[str] = None  # 性格类型
+    emotion_tendency: Optional[str] = None  # 情感倾向
 
 
 class TTSPreviewRequest(BaseModel):
@@ -150,6 +153,36 @@ class AudiobookTaskStatus(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ChapterAudioRunResponse(BaseModel):
+    """绔犺妭闊抽杩愯鎬佸搷搴斻€?"""
+
+    id: int
+    audiobook_project_id: int
+    chapter_id: int
+    run_type: str
+    celery_task_id: Optional[str] = None
+    status: str
+    current_stage: Optional[str] = None
+    progress: float = 0.0
+    completed_segment_count: int = 0
+    total_segment_count: int = 0
+    tts_model: Optional[str] = None
+    output_format: Optional[str] = None
+    narration_style: Optional[str] = None
+    narration_style_prompt: Optional[str] = None
+    resumable: bool = True
+    checkpoint_json: Dict[str, Any] = Field(default_factory=dict)
+    temp_asset_prefix: Optional[str] = None
+    expires_at: Optional[str] = None
+    error_message: Optional[str] = None
+    created_at: Optional[str] = None
+    started_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    finished_at: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class NarrationStylePreset(BaseModel):
     """叙事风格预设"""
     id: str
@@ -175,9 +208,14 @@ class GenerationCheckpointResponse(BaseModel):
     chapter_id: int
     total_segments: int
     completed_segments: int
-    completed_segment_indices: List[int] = []
-    cached_audio_paths: Dict[int, str] = {}  # segment_index -> audio_path
+    completed_segment_indices: List[int] = Field(default_factory=list)
+    cached_audio_paths: Dict[int, str] = Field(default_factory=dict)  # segment_index -> audio_path
     can_resume: bool = True
+    run_id: Optional[int] = None
+    run_status: Optional[str] = None
+    current_stage: Optional[str] = None
+    celery_task_id: Optional[str] = None
+    checkpoint_source: Optional[str] = None
     estimated_remaining_time: Optional[float] = None  # 预估剩余时间（秒）
 
 
@@ -205,3 +243,30 @@ class ChunkPreviewResponse(BaseModel):
     total_tokens: int
     chunks: List[dict]  # 分块后的片段列表
     stats: ChunkStats
+
+
+class VoiceTypePresetResponse(BaseModel):
+    """声音类型预设响应"""
+    voice_type: str
+    name: str
+    description: str
+    speed_modifier: float
+    pitch_modifier: int
+    volume_modifier: int
+    emotion_tendency: str
+    default_emotion: str
+    compatible_personalities: List[str] = []
+    suitable_scenarios: List[str] = []
+
+
+class VoiceTypeRecommendationRequest(BaseModel):
+    """声音类型推荐请求"""
+    personality: Optional[str] = None
+    gender: Optional[str] = None
+    age_range: Optional[str] = None
+
+
+class VoiceTypeRecommendationResponse(BaseModel):
+    """声音类型推荐响应"""
+    recommended_types: List[str]
+    character_name: Optional[str] = None

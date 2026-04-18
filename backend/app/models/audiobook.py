@@ -41,6 +41,12 @@ class AudiobookProject(Base):
     # 关系
     project = relationship("Project", back_populates="audiobook_projects")
     chapter_audios = relationship("ChapterAudio", back_populates="audiobook_project", cascade="all, delete-orphan")
+    runs = relationship(
+        "ChapterAudioRun",
+        back_populates="audiobook_project",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
     tasks = relationship(
         "AudiobookTask",
         back_populates="audiobook_project",
@@ -101,4 +107,59 @@ class ChapterAudio(Base):
     
     # 关系
     audiobook_project = relationship("AudiobookProject", back_populates="chapter_audios")
+    chapter = relationship("Chapter")
+
+
+class ChapterAudioRun(Base):
+    """章节音频生成运行态。"""
+
+    __tablename__ = "chapter_audio_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    audiobook_project_id = Column(
+        Integer,
+        ForeignKey("audiobook_projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    chapter_id = Column(
+        Integer,
+        ForeignKey("chapters.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    run_type = Column(String(32), nullable=False)
+    celery_task_id = Column(String(128), nullable=True, index=True)
+    status = Column(String(20), default="pending", nullable=False)
+    current_stage = Column(String(64), nullable=True)
+    progress = Column(Float, default=0.0)
+    completed_segment_count = Column(Integer, default=0)
+    total_segment_count = Column(Integer, default=0)
+
+    tts_model = Column(String(120), nullable=True)
+    output_format = Column(String(20), nullable=True)
+    narration_style = Column(String(50), nullable=True)
+    narration_style_prompt = Column(Text, nullable=True)
+    voice_config_hash = Column(String(128), nullable=True)
+    audio_fx_hash = Column(String(128), nullable=True)
+    script_hash = Column(String(128), nullable=True)
+
+    resumable = Column(Boolean, default=True, nullable=False)
+    checkpoint_json = Column(JSON, nullable=True)
+    temp_asset_prefix = Column(String(500), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    error_message = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    audiobook_project = relationship("AudiobookProject", back_populates="runs")
     chapter = relationship("Chapter")

@@ -10,7 +10,7 @@ from .graph import KnowledgeGraphEdge
 from .role import Role, Permission, user_roles, role_permissions
 from .admin_log import AdminOperationLog, AdminLoginLog
 from .book_parser import BookSource, BookChapter, BookAnalysis, SourceType, ParseStatus, AnalysisType
-from .audiobook import AudiobookProject, ChapterAudio
+from .audiobook import AudiobookProject, ChapterAudio, ChapterAudioRun
 from .audiobook_delete_audit import AudiobookDeleteAudit
 from .audiobook_task import AudiobookTask
 from .dreamweaver import DreamweaverProject, DreamweaverEpisode, DreamweaverShot, DreamweaverAsset, DreamweaverRunEvent
@@ -42,6 +42,7 @@ __all__ = [
     "AnalysisType",
     "AudiobookProject",
     "ChapterAudio",
+    "ChapterAudioRun",
     "AudiobookDeleteAudit",
     "AudiobookTask",
     "DreamweaverProject",
