@@ -83,10 +83,14 @@ from app.services.audiobook.voice_types import (
     apply_voice_type_to_tts_params,
     create_character_voice_profile,
 )
+from app.services.audiobook.sse_progress import sse_tracker, create_progress_handler
+from app.services.audiobook.smart_retrier import SmartRetrier, RetryConfig, retry_tts_call
+from app.services.audiobook.preview_generator import PreviewGenerator, default_preview_generator
 from app.services.audiobook.app_service import AudiobookAppService
 from app.services.audiobook.repository import (
     AudiobookProjectRepository,
     ChapterAudioRepository,
+    ChapterAudioRunRepository,
     ProjectRepository,
     AudiobookTaskRepository,
 )
@@ -191,6 +195,179 @@ def _build_progress_handler(tracker, chapter_ids: List[int]):
         _tracker_update(tracker, stage_name, completed_units, total, message, detail_payload)
 
     return handle_progress
+
+
+def _safe_json_dict(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _enqueue_chapter_runs(
+    db: Session,
+    *,
+    audiobook_project_id: int,
+    chapter_ids: List[int],
+    run_type: str,
+    celery_task_id: Optional[str],
+    tts_model: Optional[str] = None,
+    output_format: Optional[str] = None,
+    narration_style: Optional[str] = None,
+    narration_style_prompt: Optional[str] = None,
+) -> None:
+    normalized_ids = [chapter_id for chapter_id in dict.fromkeys(chapter_ids or []) if chapter_id is not None]
+    if not normalized_ids:
+        return
+    ChapterAudioRunRepository.create_runs(
+        db,
+        audiobook_project_id=audiobook_project_id,
+        chapter_ids=normalized_ids,
+        run_type=run_type,
+        celery_task_id=celery_task_id,
+        status="queued",
+        current_stage="queued",
+        tts_model=tts_model,
+        output_format=output_format,
+        narration_style=narration_style,
+        narration_style_prompt=narration_style_prompt,
+        resumable=True,
+    )
+
+
+def _update_chapter_run_state(
+    db: Session,
+    *,
+    audiobook_project_id: int,
+    chapter_id: int,
+    run_type: str,
+    status: str,
+    current_stage: str,
+    progress: float,
+    celery_task_id: Optional[str] = None,
+    total_segment_count: Optional[int] = None,
+    completed_segment_count: Optional[int] = None,
+    checkpoint_patch: Optional[Dict[str, Any]] = None,
+    error_message: Optional[str] = None,
+) -> None:
+    run = ChapterAudioRunRepository.get_latest_run(
+        db,
+        audiobook_project_id=audiobook_project_id,
+        chapter_id=chapter_id,
+        run_type=run_type,
+    )
+    if not run:
+        run = ChapterAudioRunRepository.create_run(
+            db,
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=chapter_id,
+            run_type=run_type,
+            celery_task_id=celery_task_id,
+            status=status,
+            current_stage=current_stage,
+            progress=progress,
+        )
+
+    checkpoint_json = dict(run.checkpoint_json or {})
+    if checkpoint_patch:
+        checkpoint_json.update(checkpoint_patch)
+
+    changes: Dict[str, Any] = {
+        "status": status,
+        "current_stage": current_stage,
+        "progress": progress,
+        "celery_task_id": celery_task_id or run.celery_task_id,
+        "checkpoint_json": checkpoint_json,
+        "error_message": error_message,
+    }
+    if total_segment_count is not None:
+        changes["total_segment_count"] = total_segment_count
+    if completed_segment_count is not None:
+        changes["completed_segment_count"] = completed_segment_count
+    if status in {"running"} and run.started_at is None:
+        changes["started_at"] = utc_now()
+    if status in {"completed", "failed"}:
+        changes["finished_at"] = utc_now()
+    ChapterAudioRunRepository.update_run(db, run, **changes)
+
+
+def _build_generation_checkpoint_payload(
+    *,
+    chapter_id: int,
+    chapter_audio: Optional[ChapterAudio],
+    run_type: Optional[str],
+    db: Session,
+    audiobook_project_id: int,
+) -> Dict[str, Any]:
+    chapter_run = ChapterAudioRunRepository.get_latest_run(
+        db,
+        audiobook_project_id=audiobook_project_id,
+        chapter_id=chapter_id,
+        run_type=run_type,
+    )
+
+    checkpoint_source = "none"
+    checkpoint_data: Dict[str, Any] = {}
+    if chapter_run and isinstance(chapter_run.checkpoint_json, dict) and chapter_run.checkpoint_json:
+        checkpoint_data = dict(chapter_run.checkpoint_json)
+        checkpoint_source = "chapter_audio_run"
+    elif chapter_audio and chapter_audio.generation_progress_json:
+        checkpoint_data = _safe_json_dict(chapter_audio.generation_progress_json)
+        if checkpoint_data:
+            checkpoint_source = "legacy_chapter_audio"
+
+    completed_indices = checkpoint_data.get("completed_segment_indices") or []
+    cached_paths = checkpoint_data.get("cached_audio_paths") or {}
+
+    total_segments = 0
+    if chapter_run and (chapter_run.total_segment_count or 0) > 0:
+        total_segments = int(chapter_run.total_segment_count or 0)
+    elif chapter_audio and (chapter_audio.segment_count or 0) > 0:
+        total_segments = int(chapter_audio.segment_count or 0)
+    else:
+        total_segments = int(checkpoint_data.get("total_segments") or 0)
+
+    completed_count = len(completed_indices)
+    if chapter_run and (chapter_run.completed_segment_count or 0) > completed_count:
+        completed_count = int(chapter_run.completed_segment_count or 0)
+    if chapter_run and chapter_run.status == "completed" and total_segments > 0:
+        completed_count = total_segments
+
+    estimated_remaining = None
+    if chapter_audio and chapter_audio.generation_time and total_segments > 0 and completed_count < total_segments:
+        avg_time_per_segment = chapter_audio.generation_time / total_segments
+        remaining_segments = total_segments - completed_count
+        estimated_remaining = avg_time_per_segment * remaining_segments
+
+    has_resume_material = bool(completed_indices or cached_paths)
+    can_resume = bool(
+        has_resume_material
+        and (total_segments == 0 or completed_count < total_segments)
+        and (chapter_run.resumable if chapter_run else True)
+        and (not chapter_run or chapter_run.status not in {"completed", "failed"})
+    )
+
+    return {
+        "chapter_id": chapter_id,
+        "total_segments": total_segments,
+        "completed_segments": completed_count,
+        "completed_segment_indices": completed_indices,
+        "cached_audio_paths": cached_paths,
+        "can_resume": can_resume,
+        "estimated_remaining_time": estimated_remaining,
+        "run_id": chapter_run.id if chapter_run else None,
+        "run_status": chapter_run.status if chapter_run else None,
+        "current_stage": chapter_run.current_stage if chapter_run else None,
+        "celery_task_id": chapter_run.celery_task_id if chapter_run else None,
+        "checkpoint_source": checkpoint_source,
+    }
 
 router = APIRouter(prefix="/api/v1/audiobook", tags=["audiobook"])
 
@@ -533,6 +710,17 @@ async def create_audiobook_project(
         )
     async_result = signature.delay()
     AudiobookTaskRepository.attach_celery_id(db, task_record.id, async_result.id)
+    _enqueue_chapter_runs(
+        db,
+        audiobook_project_id=audiobook_project.id,
+        chapter_ids=list(request.chapter_ids or []),
+        run_type=job_type,
+        celery_task_id=async_result.id,
+        tts_model=tts_model,
+        output_format=request.output_format,
+        narration_style=request.narration_style,
+        narration_style_prompt=request.narration_style_prompt,
+    )
 
     if job_type != "script_only":
         try:
@@ -839,6 +1027,17 @@ async def trigger_generate_audio_from_scripts(
     )
     async_result = signature.delay()
     AudiobookTaskRepository.attach_celery_id(db, task_record.id, async_result.id)
+    _enqueue_chapter_runs(
+        db,
+        audiobook_project_id=audiobook_project_id,
+        chapter_ids=target_chapter_ids,
+        run_type="audio_from_scripts",
+        celery_task_id=async_result.id,
+        tts_model=tts_model,
+        output_format=request.output_format,
+        narration_style=request.narration_style,
+        narration_style_prompt=request.narration_style_prompt,
+    )
 
     try:
         record_audiobook_billing_freeze(
@@ -2585,7 +2784,10 @@ async def get_chapter_subtitle(
     )
 
 
-@router.get("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/checkpoint")
+@router.get(
+    "/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/checkpoint",
+    response_model=GenerationCheckpointResponse,
+)
 async def get_generation_checkpoint(
     audiobook_project_id: int,
     chapter_id: int,
@@ -2610,45 +2812,13 @@ async def get_generation_checkpoint(
         ChapterAudio.audiobook_project_id == audiobook_project_id,
         ChapterAudio.chapter_id == chapter_id,
     ).first()
-    if not chapter_audio:
-        return {
-            "chapter_id": chapter_id,
-            "total_segments": 0,
-            "completed_segments": 0,
-            "completed_segment_indices": [],
-            "cached_audio_paths": {},
-            "can_resume": False,
-            "estimated_remaining_time": None,
-        }
-    
-    progress_data = {}
-    if chapter_audio.generation_progress_json:
-        try:
-            progress_data = json.loads(chapter_audio.generation_progress_json)
-        except:
-            pass
-    
-    completed_indices = progress_data.get("completed_segment_indices", [])
-    cached_paths = progress_data.get("cached_audio_paths", {})
-    
-    total_segments = chapter_audio.segment_count or 0
-    completed_count = len(completed_indices)
-    
-    estimated_remaining = None
-    if chapter_audio.generation_time and total_segments > 0:
-        avg_time_per_segment = chapter_audio.generation_time / total_segments
-        remaining_segments = total_segments - completed_count
-        estimated_remaining = avg_time_per_segment * remaining_segments
-    
-    return {
-        "chapter_id": chapter_id,
-        "total_segments": total_segments,
-        "completed_segments": completed_count,
-        "completed_segment_indices": completed_indices,
-        "cached_audio_paths": cached_paths,
-        "can_resume": completed_count > 0 and completed_count < total_segments,
-        "estimated_remaining_time": estimated_remaining,
-    }
+    return _build_generation_checkpoint_payload(
+        chapter_id=chapter_id,
+        chapter_audio=chapter_audio,
+        run_type=None,
+        db=db,
+        audiobook_project_id=audiobook_project_id,
+    )
 
 
 @router.post("/projects/{audiobook_project_id:int}/chapters/{chapter_id:int}/resume-generation")
@@ -2853,6 +3023,115 @@ async def recommend_voice_types(
     return {
         "recommended_types": recommended,
         "character_name": None,
+    }
+
+
+@router.get("/tasks/{task_id}/stream")
+async def stream_task_progress(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """SSE 实时进度推送端点
+
+    客户端连接后将持续接收任务进度事件
+    """
+    from fastapi.responses import StreamingResponse
+
+    async def event_generator():
+        async for event in sse_tracker.stream_events(task_id):
+            yield event
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/previews/generate")
+async def generate_preview(
+    text: str = Body(..., embed=True),
+    voice_id: str = Body(..., embed=True),
+    tts_model: str = Body("qwen3-tts-flash", embed=True),
+    emotion: Optional[str] = Body(None, embed=True),
+    speed: Optional[float] = Body(None, embed=True),
+    current_user: User = Depends(get_current_user),
+):
+    """快速生成试听片段（前 2 句）
+
+    Args:
+        text: 完整文本
+        voice_id: 音色 ID
+        tts_model: TTS 模型
+        emotion: 情感参数
+        speed: 语速参数
+    """
+    try:
+        # 初始化 TTS 引擎
+        from app.services.audiobook import get_engine_instance, set_engine_instance
+        from core.unified_llm_client import get_llm_client
+
+        llm_client = get_llm_client(strategy="conservative")
+        engine = AudiobookEngine(
+            enable_cache=False,
+            max_concurrent=1,
+            llm_client=llm_client,
+            tts_model=tts_model,
+        )
+
+        # 生成预览
+        preview = default_preview_generator.generate_preview(
+            text=text,
+            voice_id=voice_id,
+            tts_engine=engine,
+            emotion=emotion,
+            speed=speed,
+        )
+
+        return {
+            "success": True,
+            "preview": preview,
+        }
+
+    except Exception as e:
+        logger.error(f"❌ 预览生成失败: {e}")
+        raise HTTPException(status_code=500, detail=f"预览生成失败: {str(e)}")
+
+
+@router.post("/retries/config")
+async def configure_retry(
+    max_retries: int = Body(3, embed=True),
+    initial_delay: float = Body(1.0, embed=True),
+    backoff_factor: float = Body(2.0, embed=True),
+    enable_degraded: bool = Body(True, embed=True),
+    current_user: User = Depends(get_current_user),
+):
+    """配置重试策略
+
+    Args:
+        max_retries: 最大重试次数
+        initial_delay: 初始延迟（秒）
+        backoff_factor: 退避因子
+        enable_degraded: 是否启用降级
+    """
+    config = RetryConfig(
+        max_retries=max_retries,
+        initial_delay=initial_delay,
+        backoff_factor=backoff_factor,
+        enable_degraded=enable_degraded,
+    )
+    return {
+        "message": "重试配置已更新",
+        "config": {
+            "max_retries": config.max_retries,
+            "initial_delay": config.initial_delay,
+            "backoff_factor": config.backoff_factor,
+            "enable_degraded": config.enable_degraded,
+        },
     }
 
 

@@ -10,7 +10,7 @@ from typing import Iterable, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.audiobook import AudiobookProject, ChapterAudio
+from app.models.audiobook import AudiobookProject, ChapterAudio, ChapterAudioRun
 from app.models.audiobook_delete_audit import AudiobookDeleteAudit
 from app.models.audiobook_task import AudiobookTask
 from app.models.character import Character
@@ -489,6 +489,167 @@ class ChapterAudioRepository:
         db.refresh(chapter_audio)
         
         return chapter_audio
+
+
+class ChapterAudioRunRepository:
+    """ChapterAudioRun related queries and persistence helpers."""
+
+    @staticmethod
+    def create_run(
+        db: Session,
+        *,
+        audiobook_project_id: int,
+        chapter_id: int,
+        run_type: str,
+        celery_task_id: Optional[str] = None,
+        status: str = "pending",
+        current_stage: Optional[str] = None,
+        progress: float = 0.0,
+        completed_segment_count: int = 0,
+        total_segment_count: int = 0,
+        tts_model: Optional[str] = None,
+        output_format: Optional[str] = None,
+        narration_style: Optional[str] = None,
+        narration_style_prompt: Optional[str] = None,
+        voice_config_hash: Optional[str] = None,
+        audio_fx_hash: Optional[str] = None,
+        script_hash: Optional[str] = None,
+        resumable: bool = True,
+        checkpoint_json: Optional[dict] = None,
+        temp_asset_prefix: Optional[str] = None,
+        expires_at=None,
+        error_message: Optional[str] = None,
+        started_at=None,
+        finished_at=None,
+    ) -> ChapterAudioRun:
+        run = ChapterAudioRun(
+            audiobook_project_id=audiobook_project_id,
+            chapter_id=chapter_id,
+            run_type=run_type,
+            celery_task_id=celery_task_id,
+            status=status,
+            current_stage=current_stage,
+            progress=progress,
+            completed_segment_count=completed_segment_count,
+            total_segment_count=total_segment_count,
+            tts_model=tts_model,
+            output_format=output_format,
+            narration_style=narration_style,
+            narration_style_prompt=narration_style_prompt,
+            voice_config_hash=voice_config_hash,
+            audio_fx_hash=audio_fx_hash,
+            script_hash=script_hash,
+            resumable=resumable,
+            checkpoint_json=checkpoint_json,
+            temp_asset_prefix=temp_asset_prefix,
+            expires_at=expires_at,
+            error_message=error_message,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        return run
+
+    @staticmethod
+    def create_runs(
+        db: Session,
+        *,
+        audiobook_project_id: int,
+        chapter_ids: Iterable[int],
+        run_type: str,
+        celery_task_id: Optional[str] = None,
+        status: str = "pending",
+        current_stage: Optional[str] = None,
+        tts_model: Optional[str] = None,
+        output_format: Optional[str] = None,
+        narration_style: Optional[str] = None,
+        narration_style_prompt: Optional[str] = None,
+        resumable: bool = True,
+    ) -> List[ChapterAudioRun]:
+        runs = [
+            ChapterAudioRun(
+                audiobook_project_id=audiobook_project_id,
+                chapter_id=chapter_id,
+                run_type=run_type,
+                celery_task_id=celery_task_id,
+                status=status,
+                current_stage=current_stage,
+                progress=0.0,
+                completed_segment_count=0,
+                total_segment_count=0,
+                tts_model=tts_model,
+                output_format=output_format,
+                narration_style=narration_style,
+                narration_style_prompt=narration_style_prompt,
+                resumable=resumable,
+            )
+            for chapter_id in chapter_ids
+        ]
+        if not runs:
+            return []
+        db.add_all(runs)
+        db.commit()
+        return runs
+
+    @staticmethod
+    def get_latest_run(
+        db: Session,
+        *,
+        audiobook_project_id: int,
+        chapter_id: int,
+        run_type: Optional[str] = None,
+    ) -> Optional[ChapterAudioRun]:
+        query = db.query(ChapterAudioRun).filter(
+            ChapterAudioRun.audiobook_project_id == audiobook_project_id,
+            ChapterAudioRun.chapter_id == chapter_id,
+        )
+        if run_type:
+            query = query.filter(ChapterAudioRun.run_type == run_type)
+        return query.order_by(ChapterAudioRun.created_at.desc(), ChapterAudioRun.id.desc()).first()
+
+    @staticmethod
+    def list_runs_for_chapter(
+        db: Session,
+        *,
+        audiobook_project_id: int,
+        chapter_id: int,
+        limit: int = 20,
+    ) -> List[ChapterAudioRun]:
+        return (
+            db.query(ChapterAudioRun)
+            .filter(
+                ChapterAudioRun.audiobook_project_id == audiobook_project_id,
+                ChapterAudioRun.chapter_id == chapter_id,
+            )
+            .order_by(ChapterAudioRun.created_at.desc(), ChapterAudioRun.id.desc())
+            .limit(limit)
+            .all()
+        )
+
+    @staticmethod
+    def get_run_for_user(db: Session, run_id: int, user_id: int) -> Optional[ChapterAudioRun]:
+        return (
+            db.query(ChapterAudioRun)
+            .join(AudiobookProject, AudiobookProject.id == ChapterAudioRun.audiobook_project_id)
+            .join(Project, Project.id == AudiobookProject.project_id)
+            .filter(
+                ChapterAudioRun.id == run_id,
+                Project.user_id == user_id,
+            )
+            .first()
+        )
+
+    @staticmethod
+    def update_run(db: Session, run: ChapterAudioRun, **changes) -> ChapterAudioRun:
+        for key, value in changes.items():
+            setattr(run, key, value)
+        run.updated_at = utc_now()
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        return run
 
 
 class AudiobookTaskRepository:

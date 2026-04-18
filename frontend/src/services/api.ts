@@ -1518,6 +1518,52 @@ class ApiClient {
     return this.client.post('/api/v1/audiobook/smart-chunk/estimate', { text })
   }
 
+  // 获取声音类型预设列表 API
+  getVoiceTypes() {
+    return this.client.get('/api/v1/audiobook/voice-types')
+  }
+
+  // 获取声音类型详情 API
+  getVoiceType(voiceType: string) {
+    return this.client.get(`/api/v1/audiobook/voice-types/${voiceType}`)
+  }
+
+  // 推荐声音类型 API
+  recommendVoiceType(personality?: string, gender?: string, ageRange?: string) {
+    return this.client.post('/api/v1/audiobook/voice-types/recommend', {
+      personality,
+      gender,
+      age_range: ageRange,
+    })
+  }
+
+  // 生成预览音频 API
+  generatePreview(text: string, voiceId: string, ttsModel: string, emotion?: string, speed?: number) {
+    return this.client.post('/api/v1/audiobook/previews/generate', {
+      text,
+      voice_id: voiceId,
+      tts_model: ttsModel,
+      emotion,
+      speed,
+    })
+  }
+
+  // 配置重试策略 API
+  configureRetry(maxRetries: number, initialDelay: number, backoffFactor: number, enableDegraded: boolean) {
+    return this.client.post('/api/v1/audiobook/retries/config', {
+      max_retries: maxRetries,
+      initial_delay: initialDelay,
+      backoff_factor: backoffFactor,
+      enable_degraded: enableDegraded,
+    })
+  }
+
+  // 创建 SSE 连接 URL
+  getSSEStreamUrl(taskId: string): string {
+    const baseURL = this.client.getUri ? this.client.getUri() : ''
+    return `${baseURL}/api/v1/audiobook/tasks/${taskId}/stream`
+  }
+
   // 章节逻辑检查API
   checkChapterLogic(chapterId: number, projectId: number) {
     return this.client.post('/api/v1/ai/check-chapter-logic', {
