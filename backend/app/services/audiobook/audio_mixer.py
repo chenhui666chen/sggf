@@ -268,25 +268,35 @@ class AudioMixer:
                 if sync_with_dialogue and dialogue_volume_reduction and dialogue_volume_reduction > 0:
                     try:
                         voice_seg = voice[start_ms:end_ms]
-                        reduction_factor = max(0.0, min(1.0, 1.0 - float(dialogue_volume_reduction)))
-                        # 0.4 => -7.96dB
-                        reduction_db = 20 * math.log10(max(0.0001, reduction_factor))
-                        threshold_dbfs = -35.0
-                        chunk_ms = 300
-
-                        adjusted = AudioSegment.empty()
-                        for offset in range(0, len(bgm_seg), chunk_ms):
-                            bgm_chunk = bgm_seg[offset:offset + chunk_ms]
-                            voice_chunk = voice_seg[offset:offset + chunk_ms]
-
-                            voice_dbfs = voice_chunk.dBFS
-                            if voice_dbfs != float("-inf") and voice_dbfs > threshold_dbfs:
-                                bgm_chunk = bgm_chunk + reduction_db
-                            adjusted += bgm_chunk
-                        bgm_seg = adjusted
+                        bgm_seg = self.apply_sidechain_compression(
+                            bgm=bgm_seg,
+                            voice=voice_seg,
+                            threshold_dbfs=-35.0,
+                            ratio=4.0,
+                            attack_ms=10.0,
+                            release_ms=100.0,
+                            max_reduction_db=-float(dialogue_volume_reduction) * 2,
+                        )
                     except Exception:
-                        # ducking 失败不影响主流程
-                        pass
+                        # sidechain 失败，降级到原始 ducking
+                        try:
+                            reduction_factor = max(0.0, min(1.0, 1.0 - float(dialogue_volume_reduction)))
+                            reduction_db = 20 * math.log10(max(0.0001, reduction_factor))
+                            threshold_dbfs = -35.0
+                            chunk_ms = 300
+
+                            adjusted = AudioSegment.empty()
+                            for offset in range(0, len(bgm_seg), chunk_ms):
+                                bgm_chunk = bgm_seg[offset:offset + chunk_ms]
+                                voice_chunk = voice_seg[offset:offset + chunk_ms]
+
+                                voice_dbfs = voice_chunk.dBFS
+                                if voice_dbfs != float("-inf") and voice_dbfs > threshold_dbfs:
+                                    bgm_chunk = bgm_chunk + reduction_db
+                                adjusted += bgm_chunk
+                            bgm_seg = adjusted
+                        except Exception:
+                            pass
 
                 # 🔥 关键：使用 overlay 叠加混音（不会削弱人声）
                 mixed = voice.overlay(bgm_seg, position=start_ms)
@@ -626,6 +636,70 @@ class AudioMixer:
         except Exception as e:
             logger.warning(f"⚠️ 生成静音音频失败: {e}")
             return b""
+
+    def apply_sidechain_compression(
+        self,
+        bgm: AudioSegment,
+        voice: AudioSegment,
+        threshold_dbfs: float = -35.0,
+        ratio: float = 4.0,
+        attack_ms: float = 10.0,
+        release_ms: float = 100.0,
+        max_reduction_db: float = -12.0,
+    ) -> AudioSegment:
+        """应用侧链压缩（语音优先）
+
+        原理：当语音信号超过阈值时，自动降低 BGM 音量
+        优势：相比硬切换 ducking，侧链压缩提供平滑的音量过渡
+
+        Args:
+            bgm: 背景音乐音频
+            voice: 人声音频
+            threshold_dbfs: 触发压缩的语音响度阈值（dBFS）
+            ratio: 压缩比（4:1 表示语音超过阈值时，BGM 每增加 4dB 只允许 1dB）
+            attack_ms: 启动时间（BGM 开始衰减的速度）
+            release_ms: 释放时间（BGM 恢复的速度）
+            max_reduction_db: 最大衰减量（dB，负数）
+
+        Returns:
+            压缩后的 BGM 音频
+        """
+        if not self.pydub_available:
+            return bgm
+
+        try:
+            # 分析语音包络
+            chunk_ms = int(max(attack_ms, 50))  # 分析窗口，至少 50ms
+            envelope = []
+
+            for offset in range(0, len(voice), chunk_ms):
+                voice_chunk = voice[offset:offset + chunk_ms]
+                dbfs = voice_chunk.dBFS
+                envelope.append(dbfs)
+
+            # 应用平滑侧链压缩
+            compressed_bgm = AudioSegment.empty()
+
+            for i, offset in enumerate(range(0, len(bgm), chunk_ms)):
+                bgm_chunk = bgm[offset:offset + chunk_ms]
+                
+                if i < len(envelope):
+                    voice_dbfs = envelope[i]
+                    
+                    # 计算压缩量（使用压缩比）
+                    if voice_dbfs != float("-inf") and voice_dbfs > threshold_dbfs:
+                        # 超过阈值，应用压缩
+                        excess_db = voice_dbfs - threshold_dbfs
+                        reduction_db = max(max_reduction_db, -(excess_db * (ratio - 1) / ratio))
+                        bgm_chunk = bgm_chunk + reduction_db
+
+                compressed_bgm += bgm_chunk
+
+            return compressed_bgm
+
+        except Exception as e:
+            logger.warning(f"⚠️ 侧链压缩失败: {e}，降级到原始 BGM")
+            return bgm
     
     def add_sound_effect(
         self,

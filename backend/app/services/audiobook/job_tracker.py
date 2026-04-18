@@ -158,11 +158,19 @@ class AudiobookJobTracker:
             payload.setdefault("detail_json", detail or {})
             payload["detail_json"] = {**payload.get("detail_json", {}), "message": message}
         self._update(**payload)
+        run_status = "running"
+        run_finished = False
+        if isinstance(payload.get("detail_json"), dict):
+            detail_status = payload["detail_json"].get("status")
+            if isinstance(detail_status, str) and detail_status:
+                run_status = detail_status
+                run_finished = detail_status in {"completed", "failed"}
         self._update_chapter_run(
             stage=stage,
             progress=progress,
             detail=payload.get("detail_json"),
-            status="running",
+            status=run_status,
+            finished=run_finished,
         )
 
     def mark_completed(self, detail: Optional[Dict[str, Any]] = None) -> None:

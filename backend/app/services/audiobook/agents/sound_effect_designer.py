@@ -258,7 +258,7 @@ class SoundEffectDesigner:
         scene_description: str,
         duration: float
     ) -> SoundEffectCue:
-        """设计环境音（仅使用本地静态音效库）
+        """设计环境音（支持 LLM 智能场景分析 + 关键词映射混合模式）
 
         Args:
             scene_description: 场景描述，如"雨夜的城市街道"
@@ -268,20 +268,19 @@ class SoundEffectDesigner:
             环境音效提示
         """
         logger.info(f"🌆 设计环境音: {scene_description}")
-        # 保持向后兼容：使用简单关键词映射到内置环境音
-        ambient_map = {
-            "雨": "rain_light",
-            "大雨": "rain_heavy",
-            "风": "wind",
-            "城市": "city_ambient",
-            "森林": "forest_ambient",
-        }
 
-        effect_name = "city_ambient"  # 默认
-        for keyword, name in ambient_map.items():
-            if keyword in scene_description:
-                effect_name = name
-                break
+        # 1. 尝试使用 LLM 智能分析
+        if self.llm_client:
+            effect_name = self._llm_match_effect(scene_description)
+            if effect_name and effect_name in self.sound_library:
+                logger.info(f"✅ LLM 智能匹配到音效: {effect_name}")
+            else:
+                # LLM 未命中，降级到关键词映射
+                logger.info(f"⚠️ LLM 未匹配到音效，降级到关键词映射")
+                effect_name = self._keyword_match_effect(scene_description)
+        else:
+            # 无 LLM，直接使用关键词映射
+            effect_name = self._keyword_match_effect(scene_description)
 
         effect_info = self.sound_library.get(effect_name, {})
 
@@ -300,6 +299,69 @@ class SoundEffectDesigner:
         )
 
         return cue
+
+    def _llm_match_effect(self, scene_description: str) -> Optional[str]:
+        """使用 LLM 智能匹配音效
+        
+        Args:
+            scene_description: 场景描述
+            
+        Returns:
+            匹配的音效 ID，或 None 表示未匹配
+        """
+        try:
+            # 构建 prompt，让 LLM 分析场景氛围并推荐音效
+            available_effects = list(self.sound_library.keys())
+            prompt = f"""分析以下场景描述，从可用音效库中推荐1-2个最匹配的音效ID：
+
+场景：{scene_description}
+
+可用音效库：{available_effects}
+
+请直接返回 JSON 格式，如：{{"recommended": ["rain_heavy", "wind"]}}
+只返回 JSON，不要其他内容。"""
+
+            # 调用 LLM 分析
+            response = self.llm_client.generate(prompt, max_tokens=100)
+            
+            if not response:
+                return None
+
+            # 解析 LLM 返回结果
+            import json
+            result = json.loads(response)
+            recommended = result.get("recommended", [])
+            
+            if recommended:
+                return recommended[0]
+            
+            return None
+
+        except Exception as e:
+            logger.warning(f"⚠️ LLM 音效匹配失败: {e}")
+            return None
+
+    def _keyword_match_effect(self, scene_description: str) -> str:
+        """关键词映射匹配音效（降级方案）"""
+        ambient_map = {
+            "大雨": "rain_heavy",  # "大雨" 必须在 "雨" 之前
+            "暴雨": "rain_heavy",
+            "倾盆": "rain_heavy",
+            "雨": "rain_light",
+            "风": "wind",
+            "城市": "city_ambient",
+            "街道": "city_ambient",
+            "森林": "forest_ambient",
+            "林": "forest_ambient",
+        }
+
+        effect_name = "city_ambient"  # 默认
+        for keyword, name in ambient_map.items():
+            if keyword in scene_description:
+                effect_name = name
+                break
+
+        return effect_name
 
     def _infer_mood_from_scene(self, scene_description: str) -> str:
         """根据场景文本粗略推断情绪标签（用于Mureka环境音）"""
