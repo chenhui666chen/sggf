@@ -3438,6 +3438,14 @@ const AudiobookPage = () => {
                           sx={{ height: 18, fontSize: '0.65rem' }}
                         />
                       </Tooltip>
+                      <Tooltip title="支持音色克隆功能，可基于音频样本创建专属音色">
+                        <Chip
+                          label="音色克隆"
+                          size="small"
+                          color="success"
+                          sx={{ height: 18, fontSize: '0.65rem' }}
+                        />
+                      </Tooltip>
                     </Box>
                   </MenuItem>
                 </Select>
@@ -3559,14 +3567,24 @@ const AudiobookPage = () => {
                             <ListItem
                               key={preset.id}
                               secondaryAction={
-                                <Button
-                                  color="error"
-                                  size="small"
-                                  disabled={cloneDeletingId === preset.id || cloneLoading || cloneUploading}
-                                  onClick={() => handleDeleteCloneVoice(preset.id, preset.label)}
-                                >
-                                  {cloneDeletingId === preset.id ? '删除中...' : '删除'}
-                                </Button>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <Tooltip title="音色克隆：基于音频样本创建的专属音色">
+                                    <Chip
+                                      label="克隆"
+                                      size="small"
+                                      color="success"
+                                      sx={{ height: 18, fontSize: '0.65rem' }}
+                                    />
+                                  </Tooltip>
+                                  <Button
+                                    color="error"
+                                    size="small"
+                                    disabled={cloneDeletingId === preset.id || cloneLoading || cloneUploading}
+                                    onClick={() => handleDeleteCloneVoice(preset.id, preset.label)}
+                                  >
+                                    {cloneDeletingId === preset.id ? '删除中...' : '删除'}
+                                  </Button>
+                                </Box>
                               }
                             >
                               <ListItemText

@@ -1,4 +1,4 @@
-﻿"""
+"""
 有声剧本编剧Agent - 专业的小说到有声剧本改编
 
 核心功能：
@@ -262,6 +262,7 @@ class AudiobookScriptAgent:
         enable_chapter_structure: bool = True,  # 🆕 是否启用章节结构化
         adaptation_context: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[Callable[[float, Optional[Dict[str, Any]]], None]] = None,
+        character_profiles: Optional[List[Dict[str, Any]]] = None,
     ) -> List[ScriptSegment]:
         """
         将章节改编为有声剧本
@@ -273,6 +274,7 @@ class AudiobookScriptAgent:
             genre: 小说类型
             chapter_number: 章节序号
             enable_chapter_structure: 是否生成完整章节结构（片头/片尾）
+            character_profiles: 🆕 完整角色档案（包含性别、年龄、角色定位、关系网络等）
         
         Returns:
             如果enable_chapter_structure=False: 返回剧本片段列表
@@ -280,6 +282,8 @@ class AudiobookScriptAgent:
         """
         logger.info(f"🎬 开始改编章节: {chapter_title}")
         logger.info(f"   原文长度: {len(chapter_content)} 字符")
+        if character_profiles:
+            logger.info(f"   📋 角色档案数量: {len(character_profiles)}")
 
         audio_adaptation_brief = format_audio_adaptation_brief(adaptation_context)
         
@@ -298,6 +302,7 @@ class AudiobookScriptAgent:
             chapter_title,
             genre,
             audio_adaptation_brief=audio_adaptation_brief,
+            character_profiles=character_profiles,
         )
         report_progress(0.12, {"phase": "analysis_done"})
         logger.info(f"   ✅ 分析完成: {analysis.get('theme', 'N/A')}")
@@ -319,6 +324,7 @@ class AudiobookScriptAgent:
             analysis,
             audio_adaptation_brief=audio_adaptation_brief,
             progress_callback=on_transform_progress,
+            character_profiles=character_profiles,
         )
         report_progress(0.94, {"phase": "transform_done"})
         logger.info(f"   ✅ 转化完成: {len(script_segments)} 个片段")
@@ -347,9 +353,13 @@ class AudiobookScriptAgent:
         title: str,
         genre: str,
         audio_adaptation_brief: str = "",
+        character_profiles: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         前期分析：理解原著核心
+        
+        Args:
+            character_profiles: 🆕 完整角色档案（包含性别、年龄、角色定位、关系网络等）
         
         Returns:
             {
@@ -397,12 +407,38 @@ class AudiobookScriptAgent:
             if audio_adaptation_brief
             else ""
         )
+        
+        # 🆕 构建角色信息块（使用灵感方舟积累的角色档案）
+        character_block = ""
+        if character_profiles:
+            character_block = "\n**角色档案**（来自小说创作阶段的角色管理系统）：\n"
+            for char in character_profiles:
+                char_desc = f"- **{char['name']}**"
+                if char.get('gender'):
+                    char_desc += f"，{char['gender']}"
+                if char.get('age'):
+                    char_desc += f"，{char['age']}岁"
+                if char.get('role'):
+                    char_desc += f"，{char['role']}"
+                if char.get('role_position'):
+                    char_desc += f"，{char['role_position']}"
+                if char.get('importance_level'):
+                    char_desc += f"，{char['importance_level']}"
+                if char.get('faction'):
+                    char_desc += f"，{char['faction']}势力"
+                if char.get('relations'):
+                    char_desc += f"\n  关系：{char['relations']}"
+                if char.get('summary'):
+                    char_desc += f"\n  简介：{char['summary']}"
+                character_block += char_desc + "\n"
 
         prompt = f"""你是专业的有声书剧本改编师，负责将网络小说改编成适合音频化播放的有声剧本。
 
 {tts_block}
 
 {instruct_block}
+
+{character_block}
 
 **章节标题**: {title}
 **小说类型**: {genre}
@@ -411,7 +447,7 @@ class AudiobookScriptAgent:
 **章节内容节选**（智能采样：开头+中段+结尾，最多6000字）：
 {sample_content}
 
-**分析目标**：基于当前TTS模型能力，挖掘文本中的情感细节和节奏变化，为后续“6步听觉化重构”和参数控制提供依据。
+**分析目标**：基于当前TTS模型能力，挖掘文本中的情感细节和节奏变化，为后续"6步听觉化重构"和参数控制提供依据。
 
 请以**纯净的JSON格式**输出分析结果（不要包含注释）：
 ```json
@@ -475,6 +511,7 @@ class AudiobookScriptAgent:
         analysis: Dict[str, Any],
         audio_adaptation_brief: str = "",
         progress_callback: Optional[Callable[[int, int], None]] = None,
+        character_profiles: Optional[List[Dict[str, Any]]] = None,
     ) -> List[ScriptSegment]:
         """
         剧本转化：听觉化改写
@@ -523,6 +560,7 @@ class AudiobookScriptAgent:
                     character_list,
                     analysis,
                     audio_adaptation_brief=audio_adaptation_brief,
+                    character_profiles=character_profiles,
                 )
                 all_segments.extend(segments)
                 logger.info(f"   ✅ [{idx}/{total_paras}] 完成，生成 {len(segments)} 个片段")
@@ -551,8 +589,13 @@ class AudiobookScriptAgent:
         character_list: List[str],
         analysis: Dict[str, Any],
         audio_adaptation_brief: str = "",
+        character_profiles: Optional[List[Dict[str, Any]]] = None,
     ) -> List[ScriptSegment]:
-        """转化单个段落"""
+        """转化单个段落
+        
+        Args:
+            character_profiles: 🆕 完整角色档案（用于对话归属和角色身份识别）
+        """
         
         model_name = (getattr(self, "tts_model", None) or "qwen3-tts-flash").strip()
         if "plus" in model_name:
@@ -580,6 +623,17 @@ class AudiobookScriptAgent:
             if audio_adaptation_brief
             else ""
         )
+        
+        character_block = ""
+        if character_profiles:
+            character_block = "**角色参考**（用于对话归属和角色身份识别）：\n"
+            for char in character_profiles:
+                char_desc = f"- {char['name']}"
+                if char.get('role_position'):
+                    char_desc += f"（{char['role_position']}）"
+                if char.get('relations'):
+                    char_desc += f"，{char['relations']}"
+                character_block += char_desc + "\n"
 
         prompt = f"""你是专业的有声书剧本改编师，负责将网络小说改编成适合音频化播放的有声剧本。
 
@@ -597,17 +651,18 @@ class AudiobookScriptAgent:
    - 尽量让每个片段在语义上自洽：包含完整的动作/情绪/场景信息，而不是被机械拆成几字一段。
         
 2【短片段的合理场景】
-   - ✅ 简短而自然的对白/感叹（如“好。”“这不可能！”，“你说什么？”）可以作为独立片段存在；
+   - ✅ 简短而自然的对白/感叹（如"好。""这不可能！"，"你说什么？"）可以作为独立片段存在；
    - ✅ 强烈情绪的短句（惊讶/愤怒/紧张等）适合单独成段，用来制造节奏和冲击力；
-   - ❗ 建议避免：完全脱离上下文、让人不知所云的碎片（如单独出现的“就一晚。”而看不到前后铺垫）。
+   - ❗ 建议避免：完全脱离上下文、让人不知所云的碎片（如单独出现的"就一晚。"而看不到前后铺垫）。
         
 3【对话与旁白关系】
-   - 对话前后的旁白，可以适当合在一起，形成“动作/心理 + 台词”的完整单位；
-   - 对于本来就自然很短的应答（“行。”“好。”），可以放心保留为独立片段，不必强行合并。
+   - 对话前后的旁白，可以适当合在一起，形成"动作/心理 + 台词"的完整单位；
+   - 对于本来就自然很短的应答（"行。""好。"），可以放心保留为独立片段，不必强行合并。
         
 总之：**请优先保证片段本身听起来自然、有完整语气和意义，不必一味追求统一长度，也不需要强行合并所有短句。**
         
 **已知角色**: {', '.join(character_list) if character_list else '无'}
+{character_block}
 **情感基调**: {analysis.get('emotional_tone', 'neutral')}
 **建议情感**: {', '.join(analysis.get('recommended_emotions', ['natural']))}
 **节奏模式**: {analysis.get('rhythm_pattern', '中等')}

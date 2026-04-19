@@ -468,6 +468,7 @@ class AudiobookEngine:
             adapted_result = await self.script_adapter.adapt_chapter(
                 chapter_content=chapter_content,
                 character_list=character_list,
+                character_profiles=character_profiles,
                 chapter_title=chapter_title or f"Chapter {chapter_id}",
                 genre=novel_genre,
                 adaptation_context=audio_adaptation_context,
@@ -2181,10 +2182,14 @@ class AudiobookEngine:
         chapter_title: str = "",
         chapter_summary: str = "",
         summary_data: Any = None,
+        character_profiles: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """仅生成章节剧本与剧本质量评审，不执行TTS和混音。
 
         用于两阶段流程的第1阶段：先改编+评审，再人工审稿，最后进入TTS。
+        
+        Args:
+            character_profiles: 🆕 完整角色档案列表（包含性别、年龄、角色定位、关系网络等）
         """
         start_time = time.time()
 
@@ -2192,7 +2197,10 @@ class AudiobookEngine:
             chapter_id=chapter_id,
             novel_genre=novel_genre,
             novel_theme=novel_theme,
-            metadata={"character_list": character_list},
+            metadata={
+                "character_list": character_list,
+                "character_profiles_count": len(character_profiles) if character_profiles else 0,
+            },
         )
 
         logger.info(f"{'='*70}")

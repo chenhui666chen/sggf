@@ -145,7 +145,8 @@ class VoiceProfile:
     personality: str  # "calm" | "energetic" | "gentle" | "cold" | "warm"
     
     # TTS参数
-    tts_speaker_id: str  # TTS服务的音色ID
+    tts_model: str = "qwen3-tts-flash"  # 🆕 适用的TTS模型
+    tts_speaker_id: str = ""  # TTS服务的音色ID
     pitch_base: int = 50  # 基础音高 0-100
     speed_base: float = 1.0  # 基础语速 0.5-2.0
     volume_base: int = 50  # 基础音量 0-100
@@ -941,20 +942,26 @@ class VoiceManager:
         self,
         character_name: str,
         voice_id: str,
-        voice_config: Dict[str, Any]
+        voice_config: Dict[str, Any],
+        tts_model: Optional[str] = None,
     ) -> VoiceProfile:
-        """创建音色档案"""
+        """创建音色档案
+        
+        Args:
+            tts_model: 🆕 适用的TTS模型（可选，默认从voice_config获取或使用默认值）
+        """
         return VoiceProfile(
             voice_id=voice_id,
             character_name=character_name,
             gender=voice_config["gender"],
             age_group=voice_config["age_group"],
             personality=voice_config["personality"],
+            tts_model=tts_model or voice_config.get("tts_model", "qwen3-tts-flash"),
             tts_speaker_id=voice_config["tts_speaker_id"],
             pitch_base=voice_config["pitch_base"],
             speed_base=voice_config["speed_base"],
             volume_base=voice_config["volume_base"],
-            default_emotion=voice_config.get("default_emotion", "neutral")  # 🆕 支持反派音色默认情感
+            default_emotion=voice_config.get("default_emotion", "neutral")
         )
     
     def get_narrator_voice(self) -> VoiceProfile:
@@ -972,7 +979,11 @@ class VoiceManager:
         """获取角色音色"""
         return self.character_voices.get(character_name)
     
-    def apply_project_voice_mapping(self, voice_mapping: Dict[str, Any]):
+    def apply_project_voice_mapping(
+        self,
+        voice_mapping: Dict[str, Any],
+        character_profiles: Optional[List[Dict[str, Any]]] = None,
+    ):
         """应用项目级的角色音配置（用户配置优先）
 
         voice_mapping 结构示例:
@@ -982,9 +993,19 @@ class VoiceManager:
                 "volume": 60
             }
         }
+        
+        Args:
+            voice_mapping: 用户配置的音色映射
+            character_profiles: 🆕 完整角色档案（用于增强音色profile信息）
         """
         if not voice_mapping:
             return
+        
+        # 🆕 构建角色档案索引，方便快速查找
+        profile_index = {}
+        if character_profiles:
+            for cp in character_profiles:
+                profile_index[cp.get("name", "")] = cp
 
         for character_name, config in voice_mapping.items():
             if not isinstance(config, dict):
@@ -1032,6 +1053,25 @@ class VoiceManager:
                 voice_config["pitch_base"] = max(0, min(100, pitch_int))
 
             profile = self._create_profile(character_name, voice_id, voice_config)
+            
+            # 🆕 如果有角色档案，增强profile信息
+            char_profile = profile_index.get(character_name)
+            if char_profile:
+                if char_profile.get('gender'):
+                    profile.gender = char_profile['gender'].lower()
+                if char_profile.get('age'):
+                    age = char_profile['age']
+                    if age < 12:
+                        profile.age_group = "child"
+                    elif age < 18:
+                        profile.age_group = "teen"
+                    elif age < 35:
+                        profile.age_group = "young"
+                    elif age < 60:
+                        profile.age_group = "adult"
+                    else:
+                        profile.age_group = "elder"
+            
             self.character_voices[character_name] = profile
             self.used_voice_ids.add(voice_id)
             logger.info(
@@ -1048,6 +1088,75 @@ class VoiceManager:
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(mapping, f, ensure_ascii=False, indent=2)
         logger.info(f"💾 音色映射已保存: {filepath}")
+    
+    def load_from_db(self, voice_mapping: Dict[str, Any]):
+        """从数据库加载音色映射
+        
+        Args:
+            voice_mapping: 从数据库读取的voice_mapping字段（JSON格式）
+        """
+        if not voice_mapping:
+            return
+        
+        for character_name, config in voice_mapping.items():
+            if not isinstance(config, dict):
+                continue
+            
+            voice_id = config.get("voice_id")
+            if not voice_id:
+                continue
+            
+            resolved = self._resolve_voice_config(voice_id)
+            if not resolved:
+                continue
+            
+            resolved_voice_id, preset = resolved
+            voice_config = dict(preset)
+            
+            # 恢复音量、语速、音高
+            if config.get("volume") is not None:
+                voice_config["volume_base"] = config["volume"]
+            if config.get("speed") is not None:
+                voice_config["speed_base"] = config["speed"]
+            if config.get("pitch") is not None:
+                voice_config["pitch_base"] = config["pitch"]
+            
+            profile = self._create_profile(character_name, resolved_voice_id, voice_config)
+            
+            # 恢复角色档案信息
+            if config.get("gender"):
+                profile.gender = config["gender"]
+            if config.get("age_group"):
+                profile.age_group = config["age_group"]
+            if config.get("role_type"):
+                profile.role_type = config["role_type"]
+            if config.get("personality"):
+                profile.personality = config["personality"]
+            
+            self.character_voices[character_name] = profile
+            self.used_voice_ids.add(resolved_voice_id)
+        
+        logger.info(f"📂 从数据库加载音色映射: {len(self.character_voices)} 个角色")
+    
+    def export_to_db(self) -> Dict[str, Any]:
+        """导出当前音色分配到数据库格式
+        
+        Returns:
+            可用于保存到数据库的voice_mapping字典
+        """
+        mapping = {}
+        for character_name, profile in self.character_voices.items():
+            mapping[character_name] = {
+                "voice_id": profile.voice_id,
+                "volume": profile.volume_base,
+                "speed": profile.speed_base,
+                "pitch": profile.pitch_base,
+                "gender": profile.gender if profile.gender != "unknown" else None,
+                "age_group": profile.age_group if profile.age_group != "unknown" else None,
+                "role_type": getattr(profile, 'role_type', None),
+                "personality": profile.personality,
+            }
+        return mapping
     
     def load_mapping(self, filepath: str):
         """从文件加载音色映射"""
