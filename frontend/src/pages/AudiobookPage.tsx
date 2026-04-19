@@ -122,6 +122,9 @@ interface CharacterVoiceSetting {
   speed?: number
   pitch?: number
   ttsModel?: string  // 🆕 角色使用的TTS模型
+  voiceType?: string  // 🆕 声音类型（威严/温柔/活泼等）
+  personality?: string  // 🆕 性格类型（内向/外向等）
+  emotionTendency?: string  // 🆕 情感倾向（积极/消极/中性/多变）
 }
 
 interface AudioFxConfig {
@@ -139,6 +142,10 @@ interface ProjectAudioConfig {
     volume: number
     speed?: number | null
     pitch?: number | null
+    tts_model?: string | null  // 🆕 TTS模型
+    voice_type?: string | null  // 🆕 声音类型
+    personality?: string | null  // 🆕 性格类型
+    emotion_tendency?: string | null  // 🆕 情感倾向
   }[]
   audio_fx?: AudioFxConfig | null
 }
@@ -1837,6 +1844,9 @@ const AudiobookPage = () => {
           speed: saved?.speed ?? 1.0,
           pitch: saved?.pitch ?? 50,
           ttsModel: saved?.tts_model || model,  // 🆕 从保存的配置中获取tts_model
+          voiceType: saved?.voice_type || undefined,  // 🆕 从保存的配置中获取声音类型
+          personality: saved?.personality || undefined,  // 🆕 从保存的配置中获取性格类型
+          emotionTendency: saved?.emotion_tendency || undefined,  // 🆕 从保存的配置中获取情感倾向
         }
       })
 
@@ -2112,6 +2122,9 @@ const AudiobookPage = () => {
             speed: saved?.speed ?? 1.0,
             pitch: saved?.pitch ?? 50,
             ttsModel: saved?.tts_model || ttsModel,  // 🆕 从保存的配置中获取tts_model
+            voiceType: saved?.voice_type || undefined,  // 🆕 从保存的配置中获取声音类型
+            personality: saved?.personality || undefined,  // 🆕 从保存的配置中获取性格类型
+            emotionTendency: saved?.emotion_tendency || undefined,  // 🆕 从保存的配置中获取情感倾向
           }
         })
       
@@ -2365,6 +2378,30 @@ const AudiobookPage = () => {
   const handlePitchChange = (characterId: number, pitch: number) => {
     updateCharacterVoicesForCurrentModel((prev) =>
       prev.map((item) => (item.characterId === characterId ? { ...item, pitch } : item)),
+    )
+  }
+
+  const handleTtsModelChangeForCharacter = (characterId: number, ttsModel: string) => {
+    updateCharacterVoicesForCurrentModel((prev) =>
+      prev.map((item) => (item.characterId === characterId ? { ...item, ttsModel: ttsModel === (prev.find((p) => p.characterId === 0)?.ttsModel || ttsModel) ? undefined : ttsModel } : item)),
+    )
+  }
+
+  const handleVoiceTypeChange = (characterId: number, voiceType: string) => {
+    updateCharacterVoicesForCurrentModel((prev) =>
+      prev.map((item) => (item.characterId === characterId ? { ...item, voiceType: voiceType || undefined } : item)),
+    )
+  }
+
+  const handlePersonalityChange = (characterId: number, personality: string) => {
+    updateCharacterVoicesForCurrentModel((prev) =>
+      prev.map((item) => (item.characterId === characterId ? { ...item, personality: personality || undefined } : item)),
+    )
+  }
+
+  const handleEmotionTendencyChange = (characterId: number, emotionTendency: string) => {
+    updateCharacterVoicesForCurrentModel((prev) =>
+      prev.map((item) => (item.characterId === characterId ? { ...item, emotionTendency: emotionTendency || undefined } : item)),
     )
   }
 
@@ -2970,6 +3007,9 @@ const AudiobookPage = () => {
               speed: cv.speed,
               pitch: cv.pitch,
               tts_model: cv.ttsModel || ttsModel,  // 🆕 保存tts_model
+              voice_type: cv.voiceType || undefined,  // 🆕 保存声音类型
+              personality: cv.personality || undefined,  // 🆕 保存性格类型
+              emotion_tendency: cv.emotionTendency || undefined,  // 🆕 保存情感倾向
             })),
           audio_fx: audioFxConfig,
         }
@@ -3644,6 +3684,68 @@ const AudiobookPage = () => {
               )}
             </Box>
 
+            {/* 叙事风格选择 */}
+            <Paper
+              variant="outlined"
+              sx={{
+                mb: 2,
+                p: 2,
+                backgroundColor: 'rgba(156, 39, 176, 0.02)',
+              }}
+            >
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                叙事风格
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                选择旁白的朗读风格，影响AI的情感表达和语调
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                {[
+                  { id: 'professional', name: '专业播报', desc: '标准新闻播报风格，适合严肃题材', color: '#9c27b0' },
+                  { id: 'dramatic', name: '戏剧表演', desc: '富有表现力的戏剧化朗读，适合情感丰富的故事', color: '#f57c00' },
+                  { id: 'relaxed', name: '轻松舒缓', desc: '温柔舒缓的讲述方式，适合治愈系内容', color: '#4caf50' },
+                  { id: 'vivid', name: '生动表现', desc: '活泼生动的表达方式，适合儿童或轻喜剧', color: '#2196f3' },
+                ].map((style) => (
+                  <Tooltip key={style.id} title={style.desc} arrow>
+                    <Box
+                      onClick={() => setNarrationStyle(style.id)}
+                      sx={{
+                        flex: '1 1 140px',
+                        minWidth: 140,
+                        p: 1.5,
+                        borderRadius: 1,
+                        border: `1px solid ${narrationStyle === style.id ? style.color : 'divider'}`,
+                        borderWidth: narrationStyle === style.id ? 2 : 1,
+                        backgroundColor: narrationStyle === style.id ? style.color + '10' : 'transparent',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        '&:hover': {
+                          borderColor: style.color,
+                          backgroundColor: style.color + '10',
+                        },
+                      }}
+                    >
+                      <Typography variant="body2" sx={{ fontWeight: 600, color: narrationStyle === style.id ? style.color : 'text.primary' }}>
+                        {style.name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                        {style.desc}
+                      </Typography>
+                    </Box>
+                  </Tooltip>
+                ))}
+              </Box>
+              {narrationStyle !== 'professional' && (
+                <Chip
+                  label={`已选择: ${narrationStyle === 'dramatic' ? '戏剧表演' : narrationStyle === 'relaxed' ? '轻松舒缓' : '生动表现'}`}
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  sx={{ mt: 1 }}
+                />
+              )}
+            </Paper>
+
             {/* 项目级音效与配乐配置 */}
             <Paper
               variant="outlined"
@@ -3741,6 +3843,15 @@ const AudiobookPage = () => {
                   </FormControl>
                 </Grid>
               </Grid>
+              
+              {/* 🆕 LLM智能场景检测信息 */}
+              {audioFxConfig.enable_sound_effects && (
+                <Box sx={{ mt: 2, p: 1.5, backgroundColor: 'rgba(33, 150, 243, 0.05)', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    ℹ️ 音效将由AI根据章节内容智能匹配，支持大雨、街道、森林等场景识别
+                  </Typography>
+                </Box>
+              )}
             </Paper>
         
             <Grid container spacing={3}>
@@ -3869,14 +3980,24 @@ const AudiobookPage = () => {
                                   </Typography>
                                 )}
                               </Box>
-                              {cv.voiceId && (
-                                <Chip
-                                  label="已配置"
-                                  size="small"
-                                  color="success"
-                                  sx={{ height: 20 }}
-                                />
-                              )}
+                              <Box sx={{ display: 'flex', gap: 0.5 }}>
+                                {cv.ttsModel && cv.ttsModel !== ttsModel && (
+                                  <Chip
+                                    label={cv.ttsModel === 'cosyvoice-v3-plus' ? 'CosyVoice' : cv.ttsModel === 'minimax-speech-2.8-turbo' ? 'MiniMax' : cv.ttsModel}
+                                    size="small"
+                                    color={cv.ttsModel === 'cosyvoice-v3-plus' ? 'warning' : cv.ttsModel === 'minimax-speech-2.8-turbo' ? 'info' : 'default'}
+                                    sx={{ height: 18, fontSize: '0.65rem' }}
+                                  />
+                                )}
+                                {cv.voiceId && (
+                                  <Chip
+                                    label="已配置"
+                                    size="small"
+                                    color="success"
+                                    sx={{ height: 18 }}
+                                  />
+                                )}
+                              </Box>
                             </Box>
         
                             <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
@@ -3929,6 +4050,98 @@ const AudiobookPage = () => {
                                       )}
                                     </MenuItem>
                                   ))}
+                                </Select>
+                              </FormControl>
+                              
+                              <FormControl size="small" sx={{ minWidth: 120 }}>
+                                <InputLabel>模型</InputLabel>
+                                <Select
+                                  label="模型"
+                                  value={cv.ttsModel || ttsModel}
+                                  onChange={(e) => handleTtsModelChangeForCharacter(cv.characterId, e.target.value as string)}
+                                >
+                                  <MenuItem value={ttsModel}>
+                                    <em>跟随项目 ({ttsModel === 'qwen3-tts-flash' ? 'Qwen3-Flash' : 'CosyVoice v3-plus'})</em>
+                                  </MenuItem>
+                                  {ttsModel !== 'cosyvoice-v3-plus' && (
+                                    <MenuItem value="cosyvoice-v3-plus">
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                        <span>CosyVoice v3-plus</span>
+                                        <Chip label="高音质" size="small" color="warning" sx={{ height: 16, fontSize: '0.6rem' }} />
+                                      </Box>
+                                    </MenuItem>
+                                  )}
+                                  {ttsModel !== 'minimax-speech-2.8-turbo' && (
+                                    <MenuItem value="minimax-speech-2.8-turbo">
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                        <span>MiniMax Turbo</span>
+                                        <Chip label="低成本" size="small" color="success" sx={{ height: 16, fontSize: '0.6rem' }} />
+                                      </Box>
+                                    </MenuItem>
+                                  )}
+                                  {ttsModel !== 'qwen3-tts-plus' && (
+                                    <MenuItem value="qwen3-tts-plus">
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                        <span>Qwen3-Plus</span>
+                                        <Chip label="均衡" size="small" color="primary" sx={{ height: 16, fontSize: '0.6rem' }} />
+                                      </Box>
+                                    </MenuItem>
+                                  )}
+                                </Select>
+                              </FormControl>
+                            </Box>
+        
+                            {/* 🆕 声音类型选择 */}
+                            <Box sx={{ display: 'flex', gap: 1, mb: 1, flexWrap: 'wrap' }}>
+                              <FormControl size="small" sx={{ minWidth: 100 }}>
+                                <InputLabel>声音类型</InputLabel>
+                                <Select
+                                  label="声音类型"
+                                  value={cv.voiceType || ''}
+                                  onChange={(e) => handleVoiceTypeChange(cv.characterId, e.target.value as string)}
+                                >
+                                  <MenuItem value=""><em>自动</em></MenuItem>
+                                  <MenuItem value="gentle">温柔</MenuItem>
+                                  <MenuItem value="energetic">活泼</MenuItem>
+                                  <MenuItem value="calm">平静</MenuItem>
+                                  <MenuItem value="serious">严肃</MenuItem>
+                                  <MenuItem value="mysterious">神秘</MenuItem>
+                                  <MenuItem value="powerful">力量</MenuItem>
+                                  <MenuItem value="scholarly">书卷气</MenuItem>
+                                  <MenuItem value="playful">俏皮</MenuItem>
+                                  <MenuItem value="cold">清冷</MenuItem>
+                                </Select>
+                              </FormControl>
+                              <FormControl size="small" sx={{ minWidth: 100 }}>
+                                <InputLabel>性格</InputLabel>
+                                <Select
+                                  label="性格"
+                                  value={cv.personality || ''}
+                                  onChange={(e) => handlePersonalityChange(cv.characterId, e.target.value as string)}
+                                >
+                                  <MenuItem value=""><em>自动</em></MenuItem>
+                                  <MenuItem value="introvert">内向</MenuItem>
+                                  <MenuItem value="extrovert">外向</MenuItem>
+                                  <MenuItem value="ambitious">野心</MenuItem>
+                                  <MenuItem value="calm">冷静</MenuItem>
+                                  <MenuItem value="emotional">感性</MenuItem>
+                                  <MenuItem value="rational">理性</MenuItem>
+                                  <MenuItem value="rebellious">叛逆</MenuItem>
+                                  <MenuItem value="loyal">忠诚</MenuItem>
+                                </Select>
+                              </FormControl>
+                              <FormControl size="small" sx={{ minWidth: 100 }}>
+                                <InputLabel>情感倾向</InputLabel>
+                                <Select
+                                  label="情感倾向"
+                                  value={cv.emotionTendency || ''}
+                                  onChange={(e) => handleEmotionTendencyChange(cv.characterId, e.target.value as string)}
+                                >
+                                  <MenuItem value=""><em>自动</em></MenuItem>
+                                  <MenuItem value="positive">积极</MenuItem>
+                                  <MenuItem value="negative">消极</MenuItem>
+                                  <MenuItem value="neutral">中性</MenuItem>
+                                  <MenuItem value="variable">多变</MenuItem>
                                 </Select>
                               </FormControl>
                             </Box>
