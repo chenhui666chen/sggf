@@ -1807,7 +1807,8 @@ const AudiobookPage = () => {
 
   const loadProjectVoiceConfig = async (
     projectId: number,
-    model: 'qwen3-tts-flash' | 'cosyvoice-v3-plus',
+    model: 'qwen3-tts-flash' | 'cosyvoice-v3-plus' | 'minimax-speech-2.8-hd' | 'minimax-speech-2.8-turbo',
+    options?: { skipAudioFx?: boolean }
   ) => {
     const baseNarratorVoice: CharacterVoiceSetting = {
       characterId: 0,
@@ -1824,7 +1825,7 @@ const AudiobookPage = () => {
     try {
       const [charactersRes, audioConfigRes] = await Promise.all([
         apiClient.getCharacters(projectId),
-        apiClient.getProjectAudioConfig(projectId, model),
+        apiClient.getProjectAudioConfig(projectId, model).catch(() => ({ data: null })),
       ])
 
       const charactersData = charactersRes.data || []
@@ -1843,10 +1844,10 @@ const AudiobookPage = () => {
           volume: saved?.volume ?? 50,
           speed: saved?.speed ?? 1.0,
           pitch: saved?.pitch ?? 50,
-          ttsModel: saved?.tts_model || model,  // 🆕 从保存的配置中获取tts_model
-          voiceType: saved?.voice_type || undefined,  // 🆕 从保存的配置中获取声音类型
-          personality: saved?.personality || undefined,  // 🆕 从保存的配置中获取性格类型
-          emotionTendency: saved?.emotion_tendency || undefined,  // 🆕 从保存的配置中获取情感倾向
+          ttsModel: saved?.tts_model || model,
+          voiceType: saved?.voice_type || undefined,
+          personality: saved?.personality || undefined,
+          emotionTendency: saved?.emotion_tendency || undefined,
         }
       })
 
@@ -1862,7 +1863,7 @@ const AudiobookPage = () => {
       const initialVoices: CharacterVoiceSetting[] = [narratorVoice, ...characterVoicesFromApi]
       setCharacterVoicesForModel(model, initialVoices)
 
-      if (savedFx) {
+      if (!options?.skipAudioFx && savedFx) {
         setAudioFxConfig({
           enable_sound_effects: savedFx.enable_sound_effects ?? true,
           enable_music: savedFx.enable_music ?? true,
@@ -1897,12 +1898,15 @@ const AudiobookPage = () => {
 
   const loadVoicesForModel = async (model: string) => {
     try {
-      const res = await apiClient.listTtsVoices(model)
+      const res = await apiClient.getVoiceCatalog({ model })
       if (res.data) {
-        setVoicesForModel(res.data.voices || [])
+        setVoicePresets(res.data.items || [])
+        setVoiceCatalogMeta(res.data.meta || null)
+        setVoiceError(null)
       }
     } catch {
-      setVoicesForModel([])
+      setVoicePresets([])
+      setVoiceError('获取音色列表失败，请稍后重试')
     }
   }
 
@@ -2491,7 +2495,7 @@ const AudiobookPage = () => {
         volume: cv.volume,
         speed: cv.speed,
         pitch: cv.pitch,
-        model: ttsModel,
+        model: cv.ttsModel || ttsModel,
       })
 
       const blob = res.data as Blob
