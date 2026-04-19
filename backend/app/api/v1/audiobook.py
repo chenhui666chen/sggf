@@ -1907,16 +1907,17 @@ async def preview_script_segment_audio(
     config_data = {}
     if project.audio_config:
         config_data = parse_project_audio_config(project.audio_config or "")
-    audio_fx = get_audio_fx(config_data) or {}
-    for item in get_characters_for_model(config_data, tts_model):
-        name = item.get("name")
-        if not name:
-            continue
-        effective_voice_mapping[name] = {
-            "voice_id": item.get("voice_id"),
-            "volume": item.get("volume", 50),
-            "speed": item.get("speed"),
-            "pitch": item.get("pitch"),
+    audio_fx = get_audio_fx(config_data) or {}
+    for item in get_characters_for_model(config_data, tts_model):
+        name = item.get("name")
+        if not name:
+            continue
+        effective_voice_mapping[name] = {
+            "voice_id": item.get("voice_id"),
+            "volume": item.get("volume", 50),
+            "speed": item.get("speed"),
+            "pitch": item.get("pitch"),
+            "tts_model": item.get("tts_model", tts_model),
         }
 
     if effective_voice_mapping:
@@ -3240,6 +3241,7 @@ async def generate_audiobook_scripts_background(
                         "volume": item.get("volume", 50),
                         "speed": item.get("speed"),
                         "pitch": item.get("pitch"),
+                        "tts_model": item.get("tts_model", tts_model),
                     }
                     logger.info(f"鉁[鍓ф湰闃舵_] 鍔犺浇瑙掕壊闊抽厤缃 {name} -> {item.get('voice_id')}")
                 
@@ -3545,17 +3547,18 @@ async def generate_audiobook_audio_from_scripts_background(
             try:
                 from app.services.audiobook.project_audio_config import parse_project_audio_config
                 config_data = parse_project_audio_config(project.audio_config or "")
-                characters = get_characters_for_model(config_data, tts_model)
-                for item in characters:
-                    name = item.get("name")
-                    if not name:
-                        logger.warning("鈿狅笍 璺宠繃鏃犲悕绉扮殑瑙掕壊闊抽厤缃__")
-                        continue
-                    effective_voice_mapping[name] = {
-                        "voice_id": item.get("voice_id"),
-                        "volume": item.get("volume", 50),
-                        "speed": item.get("speed"),
-                        "pitch": item.get("pitch"),
+                characters = get_characters_for_model(config_data, tts_model)
+                for item in characters:
+                    name = item.get("name")
+                    if not name:
+                        logger.warning("鈿狅笍 璺宠繃鏃犲悕绉扮殑瑙掕壊闊抽厤缃__")
+                        continue
+                    effective_voice_mapping[name] = {
+                        "voice_id": item.get("voice_id"),
+                        "volume": item.get("volume", 50),
+                        "speed": item.get("speed"),
+                        "pitch": item.get("pitch"),
+                        "tts_model": item.get("tts_model", tts_model),
                     }
             except Exception as e:
                 logger.warning(f"鈿狅笍 鍚堝苟椤圭洰绾ц_鑹查煶閰嶇疆澶辫触锛屽皢缁х画浣跨敤宸叉湁 voice_mapping: {e}")

@@ -990,13 +990,14 @@ class VoiceManager:
         {
             "角色名": {
                 "voice_id": "male_young_energetic",
-                "volume": 60
+                "volume": 60,
+                "tts_model": "cosyvoice-v3-plus"  # 🆕 可选，指定TTS模型
             }
         }
         
         Args:
             voice_mapping: 用户配置的音色映射
-            character_profiles: 🆕 完整角色档案（用于增强音色profile信息）
+            character_profiles: 🆕 完整角色档案（用于增强音色profile信息和模型推荐）
         """
         if not voice_mapping:
             return
@@ -1006,6 +1007,12 @@ class VoiceManager:
         if character_profiles:
             for cp in character_profiles:
                 profile_index[cp.get("name", "")] = cp
+
+        # 🆕 导入模型推荐函数
+        try:
+            from .voice_manager_factory import suggest_model_for_character
+        except ImportError:
+            suggest_model_for_character = None
 
         for character_name, config in voice_mapping.items():
             if not isinstance(config, dict):
@@ -1052,7 +1059,20 @@ class VoiceManager:
                     pitch_int = preset.get("pitch_base", 50)
                 voice_config["pitch_base"] = max(0, min(100, pitch_int))
 
-            profile = self._create_profile(character_name, voice_id, voice_config)
+            # 🆕 确定TTS模型：用户配置 > 智能推荐 > 默认值
+            tts_model = config.get("tts_model")
+            if not tts_model and suggest_model_for_character:
+                char_profile = profile_index.get(character_name)
+                tts_model = suggest_model_for_character(
+                    character_profile=char_profile,
+                    cost_priority="balanced",
+                )
+            if not tts_model:
+                tts_model = "qwen3-tts-flash"
+            
+            voice_config["tts_model"] = tts_model
+
+            profile = self._create_profile(character_name, voice_id, voice_config, tts_model=tts_model)
             
             # 🆕 如果有角色档案，增强profile信息
             char_profile = profile_index.get(character_name)
@@ -1113,6 +1133,10 @@ class VoiceManager:
             resolved_voice_id, preset = resolved
             voice_config = dict(preset)
             
+            # 🆕 恢复TTS模型（如果数据库中有记录）
+            if config.get("tts_model"):
+                voice_config["tts_model"] = config["tts_model"]
+            
             # 恢复音量、语速、音高
             if config.get("volume") is not None:
                 voice_config["volume_base"] = config["volume"]
@@ -1121,7 +1145,12 @@ class VoiceManager:
             if config.get("pitch") is not None:
                 voice_config["pitch_base"] = config["pitch"]
             
-            profile = self._create_profile(character_name, resolved_voice_id, voice_config)
+            profile = self._create_profile(
+                character_name, 
+                resolved_voice_id, 
+                voice_config, 
+                tts_model=config.get("tts_model"),
+            )
             
             # 恢复角色档案信息
             if config.get("gender"):
@@ -1155,6 +1184,7 @@ class VoiceManager:
                 "age_group": profile.age_group if profile.age_group != "unknown" else None,
                 "role_type": getattr(profile, 'role_type', None),
                 "personality": profile.personality,
+                "tts_model": profile.tts_model if profile.tts_model != "qwen3-tts-flash" else None,  # 🆕 TTS模型
             }
         return mapping
     

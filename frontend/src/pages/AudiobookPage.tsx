@@ -121,6 +121,7 @@ interface CharacterVoiceSetting {
   volume: number
   speed?: number
   pitch?: number
+  ttsModel?: string  // 🆕 角色使用的TTS模型
 }
 
 interface AudioFxConfig {
@@ -1835,6 +1836,7 @@ const AudiobookPage = () => {
           volume: saved?.volume ?? 50,
           speed: saved?.speed ?? 1.0,
           pitch: saved?.pitch ?? 50,
+          ttsModel: saved?.tts_model || model,  // 🆕 从保存的配置中获取tts_model
         }
       })
 
@@ -2109,6 +2111,7 @@ const AudiobookPage = () => {
             volume: saved?.volume ?? 50,
             speed: saved?.speed ?? 1.0,
             pitch: saved?.pitch ?? 50,
+            ttsModel: saved?.tts_model || ttsModel,  // 🆕 从保存的配置中获取tts_model
           }
         })
       
@@ -2966,6 +2969,7 @@ const AudiobookPage = () => {
               volume: cv.volume,
               speed: cv.speed,
               pitch: cv.pitch,
+              tts_model: cv.ttsModel || ttsModel,  // 🆕 保存tts_model
             })),
           audio_fx: audioFxConfig,
         }
