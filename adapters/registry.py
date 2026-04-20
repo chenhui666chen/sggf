@@ -412,11 +412,19 @@ def register_model(model_id: str):
         spec = adapter_class.get_model_spec()
         spec.id = model_id
         
-        registry = ModelRegistry()
         registry.register(spec, adapter_class)
         
         return adapter_class
     return decorator
 
 
-registry = ModelRegistry()
+_registry = ModelRegistry()
+
+
+def default_registry() -> "ModelRegistry":
+    """Get the global singleton registry."""
+    _ensure_builtin_registration()
+    return _registry
+
+
+registry = _registry

@@ -2138,6 +2138,7 @@ models:
 - id: MiniMax/speech-2.8-turbo
   name: MiniMax Speech 2.8 Turbo
   provider: minimax
+  model_type: audio
   version: "2.8"
   status: active
   modality:
@@ -2196,6 +2197,7 @@ models:
 - id: MiniMax/speech-2.8-hd
   name: MiniMax Speech 2.8 HD
   provider: minimax
+  model_type: audio
   version: "2.8"
   status: active
   modality:

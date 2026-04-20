@@ -174,6 +174,7 @@ class UnifiedModelSpec:
     model_type: ModelType
     version: str = "v1"
     status: ModelStatus = ModelStatus.ACTIVE
+    modality: List[str] = field(default_factory=list)
 
     capabilities: List[LLMCapability] = field(default_factory=list)
     constraints: LLMConstraints = field(default_factory=LLMConstraints)
@@ -336,6 +337,7 @@ class UnifiedModelSpec:
             model_type=ModelType(data.get("model_type", "llm")),
             version=data.get("version", "v1"),
             status=ModelStatus(data.get("status", "active")),
+            modality=data.get("modality", []),
             capabilities=capabilities,
             constraints=constraints,
             api_config=api_config,

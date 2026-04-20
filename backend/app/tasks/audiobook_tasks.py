@@ -37,7 +37,7 @@ def run_full_audiobook_task(
         {"audiobook_project_id": audiobook_project_id},
     )
     try:
-        from app.api.v1.audiobook import generate_audiobook_background
+        from app.services.audiobook.background_jobs import generate_audiobook_background
 
         _run_async(
             generate_audiobook_background(
@@ -74,7 +74,9 @@ def run_script_generation_task(
         {"audiobook_project_id": audiobook_project_id},
     )
     try:
-        from app.api.v1.audiobook import generate_audiobook_scripts_background
+        from app.services.audiobook.background_jobs import (
+            generate_audiobook_scripts_background,
+        )
 
         _run_async(
             generate_audiobook_scripts_background(
@@ -111,7 +113,9 @@ def run_audio_from_scripts_task(
         {"audiobook_project_id": audiobook_project_id},
     )
     try:
-        from app.api.v1.audiobook import generate_audiobook_audio_from_scripts_background
+        from app.services.audiobook.background_jobs import (
+            generate_audiobook_audio_from_scripts_background,
+        )
 
         _run_async(
             generate_audiobook_audio_from_scripts_background(

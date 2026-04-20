@@ -300,34 +300,50 @@ interface AssetStudioGenerateResponse {
 
 ## 9. 当前已落地内容
 
-本轮已经完成的代码级改造如下：
+以下为**截至 `2026-04-20`** 已与代码对齐的实际落地状态。
 
 ### 9.1 后端
 
-- `user_asset_records` 模型升级为新资产字段结构
-- `user-assets` schema 与 API 升级为新 contract
-- 新增开发期迁移：
+- `user_asset_records` 模型已升级为新资产字段结构
+- `user-assets` schema 与 API 已升级为新 contract
+- 已新增开发期迁移：
   - 直接重建 `user_asset_records` 表
   - 不兼容旧结构
-- `Asset Studio` 返回结构升级为 `assets / primary_asset`
-- `Asset Studio` 对第三方远端结果先做内部物化，再对前端暴露平台内地址
+- `Asset Studio` 返回结构已升级为 `assets / primary_asset`
+- `Asset Studio` 已对第三方远端结果先做内部物化，再向前端暴露平台内地址
+- Audiobook 侧已新增 `chapter_audio_runs` 模型、仓储与 Alembic migration，说明“运行态与最终结果拆分”已经开始落地
+- Audiobook 后台任务已开始向 `chapter_audio_runs` 写入**部分**运行态 / checkpoint 信息
+- 已提供 `/checkpoint` 查询接口，作为后续恢复能力的基础
+- 但 `/resume-generation` 目前还不是“真正恢复执行”，当前更接近“返回 checkpoint 摘要”
 
 ### 9.2 前端
 
-- API 类型定义切到新 contract
-- 新增 `localAssetVault`，基于 IndexedDB 保存本地资产 blob
-- `Asset Studio` 收录流程改为：
+- API 类型定义已切到新 contract
+- 已新增 `localAssetVault`，基于 IndexedDB 保存本地资产 blob
+- `Asset Studio` 收录流程已改为：
   - 下载 blob
   - 写本地资产库
   - 再写服务端资产元数据
-- 用户中心预览改为：
+- 用户中心预览已改为：
   - 本地副本优先
   - 云端受控地址兜底
 - DreamWeaver 资产收录 payload 已同步新字段
+- Audiobook 页面已支持**手动收录章节成品音频**：
+  - 下载受控音频 blob
+  - 写入本地资产库
+  - 再登记 `user_asset_records`
+- Audiobook 页面已接入**有限的** `localStorage` 会话恢复：
+  - `projectId`
+  - `audiobookProjectId`
+  - `taskId`
+  - `activeStep`
+  - `generating`
+  - `ttsModel`
+- 但 Audiobook 页面与 `BrowserPlayer` 仍未把“本地资产回读”“播放器状态持久化”接完整
 
 ## 10. 当前未落地内容
 
-以下内容尚未纳入本轮：
+以下内容尚未纳入本轮，或仅处于**部分落地 / 过渡态**：
 
 ### 10.1 Audiobook 主链路
 
@@ -370,29 +386,40 @@ Audiobook 相关数据应拆成四层：
 
 #### 10.1.2 当前实现的真实问题
 
-当前代码已经有一套“断点续传/缓存系统”的雏形，但还没有形成真正闭环：
+当前代码已经有一套“断点续传 / 缓存系统”的雏形，但还没有形成真正闭环。
 
-- 前端已有 `localStorage` 会话恢复，只能恢复 `projectId / audiobookProjectId / taskId / activeStep / generating / ttsModel`
+当前已存在的基础包括：
+
+- 前端已有 `localStorage` 会话恢复，但只覆盖 `projectId / audiobookProjectId / taskId / activeStep / generating / ttsModel`
 - 后端已有 `AudiobookTask` 持久化任务状态
-- 后端已有 `ChapterAudio.generation_progress_json`
+- 后端保留了 `ChapterAudio.generation_progress_json`
+- 后端已新增 `chapter_audio_runs`
 - 后端已有 `/checkpoint` 与 `/resume-generation` 接口
+- 用户中心已经能优先读取已收录的本地资产副本
 
 但目前仍存在以下问题：
 
-1. `ChapterAudio.task_id` 只有一个值，不适合表达多次生成尝试。
-2. `generation_progress_json` 放在 `ChapterAudio` 上，语义过重，容易和最终章节记录耦合。
-3. `resume_from_checkpoint` 只存在于 schema，尚未真正接入执行链路。
-4. TTS `enable_cache` 开关存在，但当前缓存实现实际上被禁用。
-5. 前端虽然声明了 `checkpointInfo` 状态，但尚未形成完整的“查询断点 -> 用户确认 -> 恢复任务”交互。
+1. `chapter_audio_runs` 虽然已经建模，但恢复逻辑仍同时依赖 `ChapterAudio.generation_progress_json`，运行态真相尚未完全收口。
+2. `resume-generation` 当前只返回 checkpoint 摘要，并不会真正启动续跑任务。
+3. `checkpoint_json` 已开始写入，但当前主要是 `engine_task_id`、`output_path`、`tracker_detail` 等轻量信息，尚未达到 segment 级可恢复数据标准。
+4. `can_resume` 当前主要依赖 `completed_segment_indices / cached_audio_paths`，且把 `failed` run 排除在外，也没有按 `script_hash / voice_config_hash / audio_fx_hash / expires_at / 临时对象是否存在` 做完整校验。
+5. `ChapterAudio.task_id` 与 `ChapterAudio.generation_progress_json` 仍在使用，容易和最终章节结果耦合。
+6. 前端会话恢复仅覆盖极少数字段，不包含章节勾选、播放器进度、音量、弹窗状态、未保存编辑态等 UI 临时态。
+7. 当前 `AudiobookPage` 的恢复顺序存在竞争窗口：先恢复 `taskId / audiobookProjectId`，后续 `handleSelectProject` 又会清空它们，因此刷新恢复现在并不完全可靠。
+8. 最终章节音频目前只有在用户手动点击“收录”后才会进入 IndexedDB；未收录时，刷新后仍主要依赖服务端下载链路。
+9. `BrowserPlayer` 仍直接使用服务端 `audio_url`，没有接入 local-first 回读，也没有持久化 `currentChapterIndex / currentTime / volume / isPlaying`。
+10. TTS 的 `enable_cache` 不能等价视为“断点续传已经完成”。
 
 也就是说：
 
-- **当前已有字段和接口可以作为过渡基础**
-- **但当前结构并不是最终最优结构**
+- **当前已有字段、表和接口可以作为过渡基础**
+- **但当前实现仍是“部分恢复、非闭环”状态**
 
 #### 10.1.3 推荐数据库结构（开发阶段可直接重构）
 
-开发阶段没有历史用户数据，建议不再把运行态字段继续堆在 `chapter_audios` 上，而是直接拆分职责：
+`chapter_audio_runs` 这条路线已经被代码验证为正确方向，但当前仍处于“表已存在、语义未收口”的过渡态。
+
+建议继续拆分职责：
 
 1. **`chapter_audios` 仅保留章节最终结果与章节级内容**
    - 最终章节音频元信息
@@ -401,7 +428,7 @@ Audiobook 相关数据应拆成四层：
    - 片段评审 `segment_reviews_json`
    - 最终音频评审 `final_audio_review_json`
    - 最终时长、大小、成本、字幕等
-2. **新增 `chapter_audio_runs`（推荐）**
+2. **`chapter_audio_runs`（已建模，待收口）**
    - 用于记录每一次生成尝试的运行态与断点状态
 
 推荐字段如下：
@@ -437,9 +464,10 @@ chapter_audio_runs
 
 如果采用该方案，建议：
 
-- `ChapterAudio.task_id` 直接移除
-- `ChapterAudio.generation_progress_json` 直接移除
-- 运行态全部迁移到 `chapter_audio_runs`
+- 短期：以 `chapter_audio_runs` 作为恢复接口的首要来源，`generation_progress_json` 仅作 legacy fallback
+- 中期：移除 `ChapterAudio.task_id`
+- 中期：移除 `ChapterAudio.generation_progress_json`
+- 最终：运行态全部迁移到 `chapter_audio_runs`
 
 这是因为：
 
@@ -449,6 +477,12 @@ chapter_audio_runs
 两者职责不同，混在一个表里后续会越来越难维护。
 
 #### 10.1.4 checkpoint_json 推荐结构
+
+当前现状校准：
+
+- `checkpoint_json` 已有写入
+- 但当前内容主要是 `engine_task_id`、`output_path`、`tracker_detail`
+- 这足以做状态挂钩，不足以支撑真正的断点续跑
 
 不建议再只保存：
 
@@ -498,18 +532,21 @@ chapter_audio_runs
 - `expires_at`
   - 用于后续清理过期中间缓存
 
+另外，当前 `completed_segment_indices / cached_audio_paths` 仍只适合作为**过渡兼容字段**，不应继续作为唯一恢复依据。
+
 #### 10.1.5 本地数据与服务端数据的边界
 
 Audiobook 相关数据推荐按下表处理：
 
 | 数据类型 | 存储位置 | 说明 |
 | --- | --- | --- |
-| 页面恢复态 | 浏览器 `localStorage` / IndexedDB | 仅用于 UI 恢复 |
+| 页面恢复态 | 浏览器 `localStorage` / IndexedDB | 仅用于 UI 恢复，当前只部分实现 |
+| 播放器状态 | 浏览器本地 | 如需刷新后连续播放需单独持久化，当前未实现 |
 | 任务状态 | 服务端数据库 | 以 `AudiobookTask` 或 `chapter_audio_runs` 为权威 |
 | 章节剧本/评审 | 服务端数据库 | 业务真相，不下放浏览器 |
 | 断点元数据 | 服务端数据库 | 必须跨设备、跨刷新、跨 worker 恢复 |
 | 中间片段音频 | 服务端临时对象层 | 仅用于恢复，不属于正式资产 |
-| 最终章节音频 | 用户本地资产库 + 服务端短时兜底 | 进入 local-first 资产链路 |
+| 最终章节音频 | 用户本地资产库 + 服务端短时兜底 | 进入 local-first 资产链路；当前仅在“已手动收录”后进入本地资产库 |
 
 不建议做的事情：
 
@@ -545,6 +582,8 @@ backend/data/tmp/audiobook_runs/{run_id}/segment_002.mp3
 
 #### 10.1.7 恢复判定规则
 
+当前代码还未实现下面这套完整校验，以下为修正文档后的**目标规则**：
+
 以下情况应判定为 **不可恢复，必须重新生成**：
 
 - `script_hash` 不一致
@@ -566,13 +605,19 @@ backend/data/tmp/audiobook_runs/{run_id}/segment_002.mp3
 
 前端只保留轻量会话恢复，不保留断点真相。
 
+当前实现校准：
+
+- 现在只有有限的会话恢复与任务轮询
+- 还没有完整的“发现可恢复 run -> 用户确认 -> 真正续跑 -> 回到统一任务状态流”的交互闭环
+
 推荐交互如下：
 
 1. 页面恢复时，根据本地保存的 `taskId / audiobookProjectId` 拉取服务端任务状态
-2. 若发现存在失败但可恢复的 `chapter_audio_run`，显示“继续生成”提示
-3. 用户确认后调用恢复接口
-4. 恢复任务启动后，继续沿用统一的任务状态轮询
-5. 任务完成后，前端再按 local-first 资产链路收录最终章节音频
+2. 加载项目与章节数据时，不得覆盖已恢复的 `taskId / audiobookProjectId`
+3. 若发现存在失败或暂停且可恢复的 `chapter_audio_run`，显示“继续生成”提示
+4. 用户确认后调用**真正执行恢复**的接口，返回新的 `task_id / run_id`
+5. 恢复任务启动后，继续沿用统一的任务状态轮询
+6. 任务完成后，前端再按 local-first 资产链路收录最终章节音频
 
 也就是说：
 
@@ -580,6 +625,12 @@ backend/data/tmp/audiobook_runs/{run_id}/segment_002.mp3
 - **服务端负责判断是否真的能恢复**
 
 #### 10.1.9 与 local-first 资产体系的衔接
+
+当前状态校准：
+
+- Audiobook 只完成了“手动收录章节成品音频”的入口
+- 本地资产回读当前主要发生在用户中心
+- Audiobook 页面与 `BrowserPlayer` 还没有真正复用同一套本地优先读取逻辑
 
 Audiobook 真正接入本地优先资产抽象时，建议只把 **最终章节音频** 纳入资产收录。
 
@@ -590,6 +641,14 @@ Audiobook 真正接入本地优先资产抽象时，建议只把 **最终章节�
 3. 前端写入本地资产库（IndexedDB，后续可演进到 OPFS）
 4. 前端调用 `/api/v1/user-assets` 登记轻量元数据
 5. 用户中心优先显示本地副本
+
+补充建议：
+
+- 对于章节成品音频，优先提供“显式收录”或“可配置自动收录”，不建议在没有容量提示的情况下静默全量写入 IndexedDB
+- 如果后续引入自动收录，需要同时补齐：
+  - 存储空间提示
+  - 收录失败回退
+  - 本地资产缺失重建策略
 
 而以下内容 **不要进入用户资产系统**：
 
@@ -604,17 +663,62 @@ Audiobook 建议按以下顺序改造，而不是一次性大拆：
 
 1. 先明确运行态与最终资产的边界
    - `ChapterAudio` 只保最终结果
-   - 新增 `chapter_audio_runs`
+   - 继续把 `chapter_audio_runs` 收口为唯一运行态模型
 2. 再补 checkpoint 实际写入
    - 每完成一批 segment 就写 checkpoint
 3. 再补 resume 真正续跑
    - 恢复时跳过已完成片段，只补剩余片段
-4. 最后接前端恢复交互与 local-first 收录
+4. 再修前端刷新恢复链路
+   - 避免 `handleSelectProject` 覆盖已恢复的 `taskId / audiobookProjectId`
+   - 明确哪些 UI 状态需要持久化，哪些不需要
+5. 最后接前端恢复交互与 local-first 收录 / 回读
    - 保证用户完成后能把最终音频拿回本地
+   - 让 Audiobook 页面与播放器也能优先读本地副本
 
 如果只做一件事，优先级最高的是：
 
-**先把“断点真相”从 `ChapterAudio` 杂糅状态中拆出来，建立独立的运行态模型。**
+**先让“断点真相”真正收口到 `chapter_audio_runs`，并让 `resume-generation` 具备真实续跑能力。**
+
+#### 10.1.11 刷新浏览器后的数据保真判断
+
+这个问题需要区分“目标架构”与“当前实现”。
+
+**按目标架构完整实现后：**
+
+- 服务端权威数据不应因浏览器刷新丢失：
+  - 项目
+  - 章节
+  - 任务状态
+  - 断点元数据
+  - 章节剧本与评审
+- 已收录到本地资产库的最终章节音频，在**同一浏览器、同一站点存储未被清理**的前提下，刷新后不应丢失
+- 纯 UI 临时态是否保留，取决于是否显式持久化；这不是 local-first 资产架构自动解决的问题
+
+**按当前实现为准：**
+
+- 刷新后通常能恢复一部分会话入口：
+  - `projectId`
+  - `audiobookProjectId`
+  - `taskId`
+  - `activeStep`
+  - `generating`
+  - `ttsModel`
+- 但这套恢复当前并不完全可靠，因为存在恢复顺序上的竞争窗口
+- 已手动收录到 IndexedDB 的章节成品音频，在同一浏览器刷新后通常不会丢
+- 未手动收录的章节成品音频，并没有完成本地镜像，刷新后仍依赖服务端下载链路
+- 以下状态当前刷新后会丢，或至少不会被稳定恢复：
+  - 章节勾选状态
+  - `BrowserPlayer` 当前章节
+  - 播放进度
+  - 音量
+  - 播放中状态
+  - 弹窗开关
+  - 未保存的编辑态
+
+因此，修正文档后的准确表述应是：
+
+- **方案方向本身可以做到“刷新后核心数据不丢”**
+- **但以当前代码状态看，还做不到“刷新后无感续跑、无感续播”**
 
 ### 10.2 PWA / OPFS
 
@@ -684,12 +788,19 @@ Audiobook 建议按以下顺序改造，而不是一次性大拆：
 - 用户资产新模型
 - 用户中心本地优先预览
 - DreamWeaver 收录字段切换
+- Audiobook 运行态建模起步：
+  - `chapter_audio_runs` 已建表
+  - 章节成品音频已支持手动收录
+  - 前端已有轻量会话恢复
 
 ### 阶段 2：建议下一步
 
 1. 执行数据库迁移并完成联调
-2. 为 Asset Studio 增加更明确的资产生命周期管理
-3. 将 Audiobook 成品音频接入同一套资产抽象
+2. 让 `chapter_audio_runs + checkpoint_json` 成为恢复能力的主来源，`generation_progress_json` 仅保留过渡兼容
+3. 打通 `resume-generation` 的真实续跑能力与恢复校验规则
+4. 修复 Audiobook 页面刷新恢复链路中的状态清空竞争问题
+5. 将 Audiobook 页面 / 播放器接入同一套本地优先资产回读抽象
+6. 为 Asset Studio 增加更明确的资产生命周期管理
 
 ### 阶段 3：中期增强
 
@@ -710,4 +821,9 @@ Audiobook 建议按以下顺序改造，而不是一次性大拆：
 
 **让核心业务继续服务端权威，让媒体资产转向 local-first，并由后端承担受控代理与临时资产层。**
 
-这套方案既符合当前平台型产品的实际结构，也能以最小风险逐步逼近“用户持有数据、平台掌控密钥、整体成本更低”的目标。
+修正文档后需要明确两点：
+
+- 这套方案的**方向**仍然正确
+- 但以当前实现为准，浏览器刷新只能保证“核心业务数据与已收录本地资产尽量不丢”，还不能保证“播放器状态与断点续跑无感恢复”
+
+也就是说，目标架构没有问题，当前要补的是 **Audiobook 运行态闭环** 与 **前端刷新恢复闭环**。

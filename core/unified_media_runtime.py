@@ -35,8 +35,8 @@ _OPERATION_MODEL_IDS: Dict[str, set[str]] = {
     "synthesize_speech": {
         "qwen3-tts-flash",
         "cosyvoice-v3-plus",
-        "minimax-speech-2.8-turbo",  # MiniMax 高质量语音合成
-        "minimax-speech-2.8-hd",     # MiniMax 旗舰级语音合成
+        "MiniMax/speech-2.8-turbo",  # MiniMax 高质量语音合成
+        "MiniMax/speech-2.8-hd",     # MiniMax 旗舰级语音合成
     },
 }
 
@@ -628,8 +628,8 @@ class UnifiedMediaRuntime:
             preferred_spec = self._registry.get_spec(preferred_model)
             if preferred_spec is None:
                 raise ValueError(f"Model not registered: {preferred_model}")
-            if preferred_spec.id not in supported_ids or modality not in preferred_spec.modality:
-                raise ValueError(f"Model {preferred_model} does not support {operation}:{modality}")
+            if preferred_spec.id not in supported_ids or modality not in (preferred_spec.modality or []):
+                raise ValueError(f"Model {preferred_model} does not support {operation}:{modality} (spec.modality={preferred_spec.modality})")
             if any(spec.id == preferred_spec.id for spec in candidate_pool):
                 others = [spec for spec in candidate_pool if spec.id != preferred_spec.id]
                 ordered_others = self._sort_specs(
