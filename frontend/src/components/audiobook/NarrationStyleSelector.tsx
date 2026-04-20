@@ -6,10 +6,6 @@
 import {
   Box,
   Typography,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   TextField,
   Tooltip,
   Chip,

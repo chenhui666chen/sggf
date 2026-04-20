@@ -150,9 +150,10 @@ function PromptEditorInner({
 
   const handleReset = async (isUserPrompt = false, promptKey = '') => {
     setResetting(true)
+    let res: any = { data: { message: '' } }
     try {
       if (isUserPrompt) {
-        const res = await apiClient.post(`/api/v1/agent-prompts/reset-user-prompt/${promptKey}`)
+        res = await apiClient.post(`/api/v1/agent-prompts/reset-user-prompt/${promptKey}`)
         if (res.data.message) {
           setUserPrompts((prev) => {
             const up = { ...prev }
@@ -162,7 +163,7 @@ function PromptEditorInner({
         }
         await loadDetail()
       } else {
-        const res = await apiClient.post(`/api/v1/agent-prompts/reset/${agentKey}`)
+        res = await apiClient.post(`/api/v1/agent-prompts/reset/${agentKey}`)
         await loadDetail()
       }
       showSnackbar(res.data.message || '已恢复为默认提示词', 'success')

@@ -13,13 +13,10 @@ import {
   Slider,
   Tooltip,
   Chip,
-  Divider,
   List,
   ListItem,
   ListItemText,
   ListItemButton,
-  ListItemIcon,
-  Collapse,
   Button,
   Dialog,
   DialogTitle,
@@ -28,7 +25,6 @@ import {
   Select,
   MenuItem,
   FormControl,
-  InputLabel,
 } from '@mui/material'
 import {
   PlayArrow,
@@ -37,8 +33,6 @@ import {
   SkipPrevious,
   VolumeUp,
   Subtitles,
-  ExpandMore,
-  ExpandLess,
   Download,
 } from '@mui/icons-material'
 import { styled } from '@mui/material/styles'
@@ -71,7 +65,6 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
   const [volume, setVolume] = useState(1)
   const [subtitleFormat, setSubtitleFormat] = useState<'srt' | 'vtt' | 'ass'>('srt')
   const [showSubtitles, setShowSubtitles] = useState(true)
-  const [expandedChapters, setExpandedChapters] = useState<Set<number>>(new Set([0]))
   const [highlightedSegmentIndex, setHighlightedSegmentIndex] = useState<number | null>(null)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -186,18 +179,6 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
     }
   }
 
-  const toggleChapterExpand = (index: number) => {
-    setExpandedChapters((prev) => {
-      const next = new Set(prev)
-      if (next.has(index)) {
-        next.delete(index)
-      } else {
-        next.add(index)
-      }
-      return next
-    })
-  }
-
   const handleDownloadSubtitle = async () => {
     if (!currentChapter?.subtitle_url) return
 
@@ -270,9 +251,12 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
                     <ListItemText
                       primary={`第${chapter.chapter_number || index + 1}章`}
                       secondary={chapter.chapter_title || ''}
-                      slotProps={{
-                        primary: { variant: 'body2', fontWeight: currentChapterIndex === index ? 600 : 400 },
-                        secondary: { variant: 'caption' },
+                      primaryTypographyProps={{
+                        variant: 'body2',
+                        sx: { fontWeight: currentChapterIndex === index ? 600 : 400 },
+                      }}
+                      secondaryTypographyProps={{
+                        variant: 'caption',
                       }}
                     />
                     <Typography variant="caption" color="text.secondary">

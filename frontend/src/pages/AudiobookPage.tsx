@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 耳畔星河 - 有声小说生成页面
  * 
  * 功能：
@@ -87,6 +87,12 @@ interface Chapter {
 // 新增：任务状态类型
 type StageStatus = 'pending' | 'running' | 'completed' | 'failed'
 type PreviewType = 'voice' | 'sfx' | 'bgm' | 'mix'
+type TtsModel =
+  | 'qwen3-tts-flash'
+  | 'cosyvoice-v3-plus'
+  | 'minimax-speech-2.8-hd'
+  | 'minimax-speech-2.8-turbo'
+type AudioOutputFormat = 'mp3' | 'wav' | 'm4b'
 
 interface StageInfo {
   status: StageStatus
@@ -121,7 +127,7 @@ interface CharacterVoiceSetting {
   volume: number
   speed?: number
   pitch?: number
-  ttsModel?: string  // 🆕 角色使用的TTS模型
+  ttsModel?: TtsModel  // 🆕 角色使用的TTS模型
   voiceType?: string  // 🆕 声音类型（威严/温柔/活泼等）
   personality?: string  // 🆕 性格类型（内向/外向等）
   emotionTendency?: string  // 🆕 情感倾向（积极/消极/中性/多变）
@@ -142,7 +148,7 @@ interface ProjectAudioConfig {
     volume: number
     speed?: number | null
     pitch?: number | null
-    tts_model?: string | null  // 🆕 TTS模型
+    tts_model?: TtsModel | null  // 🆕 TTS模型
     voice_type?: string | null  // 🆕 声音类型
     personality?: string | null  // 🆕 性格类型
     emotion_tendency?: string | null  // 🆕 情感倾向
@@ -211,7 +217,7 @@ function extractDownloadFilename(contentDisposition: string | null | undefined, 
     }
   }
 
-  const asciiMatch = header.match(/filename=\"?([^\";]+)\"?/i)
+  const asciiMatch = header.match(/filename="?([^";]+)"?/i)
   return asciiMatch?.[1]?.trim() || fallback
 }
 
@@ -288,9 +294,26 @@ interface ScriptReviewDetail {
 const DEFAULT_NARRATOR_BY_MODEL = {
   'qwen3-tts-flash': 'Ryan',
   'cosyvoice-v3-plus': 'longanyang',
+  'minimax-speech-2.8-hd': 'male-qn-jingying',
+  'minimax-speech-2.8-turbo': 'male-qn-jingying',
 } as const
 
-const getDefaultNarratorId = (model: 'qwen3-tts-flash' | 'cosyvoice-v3-plus') =>
+const TTS_MODEL_LABELS: Record<TtsModel, string> = {
+  'qwen3-tts-flash': 'Qwen3-TTS Flash',
+  'cosyvoice-v3-plus': 'CosyVoice v3-plus',
+  'minimax-speech-2.8-hd': 'MiniMax HD',
+  'minimax-speech-2.8-turbo': 'MiniMax Turbo',
+}
+
+const isTtsModel = (value: unknown): value is TtsModel =>
+  value === 'qwen3-tts-flash'
+  || value === 'cosyvoice-v3-plus'
+  || value === 'minimax-speech-2.8-hd'
+  || value === 'minimax-speech-2.8-turbo'
+
+const getTtsModelLabel = (model: TtsModel) => TTS_MODEL_LABELS[model]
+
+const getDefaultNarratorId = (model: TtsModel) =>
   DEFAULT_NARRATOR_BY_MODEL[model] || 'Ryan'
 
 const LEGACY_VOICE_ALIASES: Record<string, string> = {
@@ -320,7 +343,7 @@ const LEGACY_VOICE_ALIASES: Record<string, string> = {
 }
 
 const normalizeVoiceId = (
-  model: 'qwen3-tts-flash' | 'cosyvoice-v3-plus',
+  model: TtsModel,
   voiceId?: string | null,
 ) => {
   if (!voiceId) return ''
@@ -1435,17 +1458,11 @@ const AudiobookPage = () => {
   const [creatingFromBook, setCreatingFromBook] = useState(false)
   const [lastGenerationMode, setLastGenerationMode] = useState<'full' | 'script_only'>('full')
   const [activeStep, setActiveStep] = useState(0)
-  const [ttsModel, setTtsModel] = useState<'qwen3-tts-flash' | 'cosyvoice-v3-plus' | 'minimax-speech-2.8-hd' | 'minimax-speech-2.8-turbo'>('qwen3-tts-flash')
-  const [outputFormat, setOutputFormat] = useState<'mp3' | 'wav' | 'm4b'>('mp3')
-  const [ttsModelsList, setTtsModelsList] = useState<any[]>([])
-  const [voicesForModel, setVoicesForModel] = useState<any[]>([])
+  const [ttsModel, setTtsModel] = useState<TtsModel>('qwen3-tts-flash')
+  const outputFormat: AudioOutputFormat = 'mp3'
   const supportsTtsTuning = ttsModel === 'cosyvoice-v3-plus'
   const [voiceDraftsByModel, setVoiceDraftsByModel] = useState<Record<string, CharacterVoiceSetting[]>>({})
-  const [narrationStyles, setNarrationStyles] = useState<any[]>([])
   const [narrationStyle, setNarrationStyle] = useState<string>('professional')
-  const [customNarrationPrompt, setCustomNarrationPrompt] = useState<string>('')
-  const [generateSubtitle, setGenerateSubtitle] = useState<boolean>(true)
-  const [checkpointInfo, setCheckpointInfo] = useState<any | null>(null)
   const [chapterMenuAnchor, setChapterMenuAnchor] = useState<null | HTMLElement>(null)
   const [selectedChapterForMenu, setSelectedChapterForMenu] = useState<Chapter | null>(null)
   const [deleteChapterDialogOpen, setDeleteChapterDialogOpen] = useState(false)
@@ -1490,7 +1507,7 @@ const AudiobookPage = () => {
   }, [currentTaskId, taskStatuses])
 
   const setCharacterVoicesForModel = (
-    model: 'qwen3-tts-flash' | 'cosyvoice-v3-plus',
+    model: TtsModel,
     next: CharacterVoiceSetting[],
   ) => {
     setCharacterVoices(next)
@@ -1564,7 +1581,7 @@ const AudiobookPage = () => {
               setCurrentTaskId(saved.taskId)
               setGenerating(saved.generating ?? true)
             }
-            if (saved.ttsModel) {
+            if (isTtsModel(saved.ttsModel)) {
               setTtsModel(saved.ttsModel)
             }
             // 恢复audiobookProject（如果存在）
@@ -1807,7 +1824,7 @@ const AudiobookPage = () => {
 
   const loadProjectVoiceConfig = async (
     projectId: number,
-    model: 'qwen3-tts-flash' | 'cosyvoice-v3-plus' | 'minimax-speech-2.8-hd' | 'minimax-speech-2.8-turbo',
+    model: TtsModel,
     options?: { skipAudioFx?: boolean }
   ) => {
     const baseNarratorVoice: CharacterVoiceSetting = {
@@ -1878,12 +1895,11 @@ const AudiobookPage = () => {
     }
   }
 
-  const handleTtsModelChange = async (nextModel: string) => {
+  const handleTtsModelChange = async (nextModel: TtsModel) => {
     if (nextModel === ttsModel) return
 
     setVoiceDraftsByModel((prev) => ({ ...prev, [ttsModel]: characterVoices }))
-    setTtsModel(nextModel as any)
-    loadVoicesForModel(nextModel)
+    setTtsModel(nextModel)
 
     if (!selectedProject) return
 
@@ -1894,42 +1910,6 @@ const AudiobookPage = () => {
     }
 
     await loadProjectVoiceConfig(selectedProject.id, nextModel)
-  }
-
-  const loadVoicesForModel = async (model: string) => {
-    try {
-      const res = await apiClient.getVoiceCatalog({ model })
-      if (res.data) {
-        setVoicePresets(res.data.items || [])
-        setVoiceCatalogMeta(res.data.meta || null)
-        setVoiceError(null)
-      }
-    } catch {
-      setVoicePresets([])
-      setVoiceError('获取音色列表失败，请稍后重试')
-    }
-  }
-
-  const loadTtsModels = async () => {
-    try {
-      const res = await apiClient.listTtsModels()
-      if (res.data && res.data.models) {
-        setTtsModelsList(res.data.models)
-      }
-    } catch {
-      setTtsModelsList([])
-    }
-  }
-
-  const loadNarrationStyles = async () => {
-    try {
-      const res = await apiClient.getNarrationStyles()
-      if (res.data) {
-        setNarrationStyles(res.data)
-      }
-    } catch {
-      setNarrationStyles([])
-    }
   }
 
   // 新增：获取历史记录
@@ -2283,7 +2263,7 @@ const AudiobookPage = () => {
       try {
         const saved = JSON.parse(raw)
 
-        if (saved.ttsModel && saved.ttsModel !== ttsModel) {
+        if (isTtsModel(saved.ttsModel) && saved.ttsModel !== ttsModel) {
           setTtsModel(saved.ttsModel)
         }
 
@@ -2385,9 +2365,13 @@ const AudiobookPage = () => {
     )
   }
 
-  const handleTtsModelChangeForCharacter = (characterId: number, ttsModel: string) => {
+  const handleTtsModelChangeForCharacter = (characterId: number, nextModel: TtsModel) => {
     updateCharacterVoicesForCurrentModel((prev) =>
-      prev.map((item) => (item.characterId === characterId ? { ...item, ttsModel: ttsModel === (prev.find((p) => p.characterId === 0)?.ttsModel || ttsModel) ? undefined : ttsModel } : item)),
+      prev.map((item) =>
+        item.characterId === characterId
+          ? { ...item, ttsModel: nextModel === ttsModel ? undefined : nextModel }
+          : item,
+      ),
     )
   }
 
@@ -3459,7 +3443,7 @@ const AudiobookPage = () => {
                   label="TTS 模型"
                   value={ttsModel}
                   onChange={(e) =>
-                      handleTtsModelChange(e.target.value as string)
+                      handleTtsModelChange(e.target.value as TtsModel)
                     }
                 >
                   <MenuItem value="qwen3-tts-flash">
@@ -3987,9 +3971,9 @@ const AudiobookPage = () => {
                               <Box sx={{ display: 'flex', gap: 0.5 }}>
                                 {cv.ttsModel && cv.ttsModel !== ttsModel && (
                                   <Chip
-                                    label={cv.ttsModel === 'cosyvoice-v3-plus' ? 'CosyVoice' : cv.ttsModel === 'minimax-speech-2.8-turbo' ? 'MiniMax' : cv.ttsModel}
+                                    label={getTtsModelLabel(cv.ttsModel)}
                                     size="small"
-                                    color={cv.ttsModel === 'cosyvoice-v3-plus' ? 'warning' : cv.ttsModel === 'minimax-speech-2.8-turbo' ? 'info' : 'default'}
+                                    color={cv.ttsModel === 'cosyvoice-v3-plus' ? 'warning' : cv.ttsModel.startsWith('minimax-') ? 'info' : 'default'}
                                     sx={{ height: 18, fontSize: '0.65rem' }}
                                   />
                                 )}
@@ -4062,10 +4046,10 @@ const AudiobookPage = () => {
                                 <Select
                                   label="模型"
                                   value={cv.ttsModel || ttsModel}
-                                  onChange={(e) => handleTtsModelChangeForCharacter(cv.characterId, e.target.value as string)}
+                                  onChange={(e) => handleTtsModelChangeForCharacter(cv.characterId, e.target.value as TtsModel)}
                                 >
                                   <MenuItem value={ttsModel}>
-                                    <em>跟随项目 ({ttsModel === 'qwen3-tts-flash' ? 'Qwen3-Flash' : 'CosyVoice v3-plus'})</em>
+                                    <em>跟随项目 ({getTtsModelLabel(ttsModel)})</em>
                                   </MenuItem>
                                   {ttsModel !== 'cosyvoice-v3-plus' && (
                                     <MenuItem value="cosyvoice-v3-plus">
@@ -4083,11 +4067,11 @@ const AudiobookPage = () => {
                                       </Box>
                                     </MenuItem>
                                   )}
-                                  {ttsModel !== 'qwen3-tts-plus' && (
-                                    <MenuItem value="qwen3-tts-plus">
+                                  {ttsModel !== 'minimax-speech-2.8-hd' && (
+                                    <MenuItem value="minimax-speech-2.8-hd">
                                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                        <span>Qwen3-Plus</span>
-                                        <Chip label="均衡" size="small" color="primary" sx={{ height: 16, fontSize: '0.6rem' }} />
+                                        <span>MiniMax HD</span>
+                                        <Chip label="HD" size="small" color="info" sx={{ height: 16, fontSize: '0.6rem' }} />
                                       </Box>
                                     </MenuItem>
                                   )}

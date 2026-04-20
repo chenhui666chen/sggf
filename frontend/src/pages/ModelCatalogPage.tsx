@@ -787,8 +787,7 @@ export default function ModelCatalogPage() {
       const response = await apiClient.syncModelCatalog({
         force_refresh: forceRefresh,
       })
-      const { task_id, message } = response.data
-      console.log(`Sync task submitted: ${task_id}, ${message}`)
+      const { task_id } = response.data
 
       let pollCount = 0
       const maxPolls = 300

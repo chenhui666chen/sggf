@@ -30,7 +30,7 @@ const relationDetailToType = (detail: string, fallbackType = ''): string => {
   if (!text) {
     return normalizeText(fallbackType)
   }
-  const match = text.split(/[\/／|｜]/, 1)[0]?.trim()
+  const match = text.split(/[/／|｜]/, 1)[0]?.trim()
   return match || normalizeText(fallbackType) || text
 }
 
