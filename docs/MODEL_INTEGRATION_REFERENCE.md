@@ -697,7 +697,225 @@ python scripts/test_image_input_models.py
 - 常见失败原因：内容审核（"Output data may contain inappropriate content"）、参数不合法
 - 必须轮询到 `SUCCEEDED` 状态才算真正成功
 
-## 11. 推荐提问方式
+## 11. TTS 模型接入经验总结（2026-04-20）
+
+本文档记录了 MiniMax TTS 和 Qwen TTS 接入百炼平台时的实际调试经验。
+
+### 11.1 百炼 TTS 模型公共特性
+
+| 特性 | 说明 |
+| --- | --- |
+| API 端点 | `https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation` |
+| 鉴权方式 | `Authorization: Bearer {API_KEY}` |
+| Content-Type | `application/json` |
+| 超时建议 | 60秒以上 |
+
+### 11.2 MiniMax TTS 接入要点
+
+#### 11.2.1 模型 ID 格式
+
+百炼平台的 MiniMax 模型 ID 必须带 `MiniMax/` 前缀：
+
+| 注册 ID | 实际 MODEL_ID |
+| --- | --- |
+| `MiniMax/speech-2.8-turbo` | `MiniMax/speech-2.8-turbo` |
+| `MiniMax/speech-2.8-hd` | `MiniMax/speech-2.8-hd` |
+
+**常见错误**：使用 `minimax-speech-2.8-turbo`（不带前缀）会导致 "Model not exist" 错误。
+
+#### 11.2.2 请求体格式
+
+MiniMax TTS 使用 `action: tts` 字段：
+
+```json
+{
+  "input": {
+    "action": "tts",
+    "text": "要合成的文本",
+    "stream": false,
+    "voice_setting": {
+      "voice_id": "male-qn-qingse",
+      "speed": 1.0,
+      "vol": 0.8,
+      "pitch": 0
+    },
+    "audio_setting": {
+      "sample_rate": 16000,
+      "format": "mp3",
+      "channel": 1
+    }
+  },
+  "model": "MiniMax/speech-2.8-turbo"
+}
+```
+
+#### 11.2.3 语音 ID 兼容性
+
+MiniMax 语音 ID 格式与阿里云官方音色列表不完全一致：
+
+- 百炼平台的 MiniMax 音色列表可能与官方 64 音色列表不同
+- 某些语音 ID（如 `male-qn-qingse`）可以正常工作
+- 建议在 `_call_dashscope_minimax_http` 中实现多种语音格式备选逻辑
+
+```python
+# 备选语音格式尝试逻辑示例
+voice_formats = [
+    original_voice,                    # 原始语音
+    voice.replace("female-qn-", "female-"),  # 去掉 qn- 前缀
+    voice.replace("male-qn-", "male-"),
+    voice.split("-")[-1],              # 只取最后一部分
+    "male-qn-qingse",                  # 已知可用的音色兜底
+]
+```
+
+#### 11.2.4 音频数据格式
+
+MiniMax TTS 返回的音频数据可能是：
+
+| 格式 | 判断方法 | 解码方式 |
+| --- | --- | --- |
+| 十六进制编码 | 以 `494433` 开头（MP3 文件头 "ID3"） | `bytes.fromhex(audio_data)` |
+| Base64 编码 | 其他情况 | `base64.b64decode(audio_data)` |
+
+**关键代码**：
+
+```python
+if audio_data.startswith("494433"):
+    logger.info("解析到十六进制编码 MP3 数据")
+    return bytes.fromhex(audio_data)
+else:
+    import base64
+    logger.info("解析到 base64 音频数据")
+    return base64.b64decode(audio_data)
+```
+
+### 11.3 Qwen TTS 接入要点
+
+#### 11.3.1 模型 ID
+
+Qwen TTS 使用百炼标准模型 ID：
+
+| 注册 ID | 实际 MODEL_ID |
+| --- | --- |
+| `qwen3-tts-flash` | `qwen3-tts-flash` 或 `qwen3-tts-flash-2025-11-27` |
+
+#### 11.3.2 请求体格式
+
+Qwen TTS 的请求体比 MiniMax 简单：
+
+```json
+{
+  "model": "qwen3-tts-flash",
+  "input": {
+    "text": "要合成的文本",
+    "voice": "Ryan",
+    "language_type": "Chinese"
+  }
+}
+```
+
+**注意**：不需要 `action: tts` 字段，也不需要 `audio_setting`。
+
+#### 11.3.3 响应格式（关键差异）
+
+Qwen TTS 响应中，音频数据直接在 `output.audio` 字段：
+
+```json
+{
+  "code": "Success",
+  "message": "",
+  "request_id": "...",
+  "output": {
+    "audio": "<base64 编码的音频数据>"
+  }
+}
+```
+
+**错误写法**（假设 audio 是对象）：
+
+```python
+# ❌ 错误：假设 audio 是 dict
+audio_url = data["output"]["audio"].get("url")
+audio_data = data["output"]["audio"].get("data")
+```
+
+**正确写法**：
+
+```python
+# ✅ 正确：先判断 audio 的类型
+audio_info = data["output"]["audio"]
+
+# 直接是 base64 字符串
+if isinstance(audio_info, str) and audio_info:
+    import base64
+    return base64.b64decode(audio_info)
+
+# 是 dict 对象的情况
+if isinstance(audio_info, dict):
+    audio_url = audio_info.get("url")
+    if audio_url:
+        # 下载音频
+        ...
+    audio_data = audio_info.get("data")
+    if audio_data:
+        import base64
+        return base64.b64decode(audio_data)
+```
+
+### 11.4 TTS 模型的 Voice ID 管理
+
+#### 11.4.1 VoiceManager 的作用
+
+`VoiceManager` 维护预设音色与 TTS 语音 ID 的映射关系：
+
+```python
+# voice_manager.py
+PRESET_VOICES = {
+    "Ryan": {"tts_speaker_id": "Ryan", ...},
+    "Serena": {"tts_speaker_id": "Serena", ...},
+    "male_narrator": {"tts_speaker_id": "Ryan", ...},  # 别名
+}
+```
+
+#### 11.4.2 语音 ID 规范化
+
+不同 TTS 模型可能使用不同的语音 ID 格式：
+
+| 模型 | 语音 ID 示例 |
+| --- | --- |
+| MiniMax | `male-qn-qingse`, `Chinese (Mandarin)_News_Anchor` |
+| Qwen | `Ryan`, `Serena`, `Cherry` |
+
+`_normalize_speaker_id` 方法应根据模型类型返回正确的语音 ID。
+
+### 11.5 TTS 预览功能调试清单
+
+当 TTS 预览失败时，按以下顺序排查：
+
+1. **检查模型 ID 格式**
+   - [ ] MiniMax 模型是否带 `MiniMax/` 前缀？
+   - [ ] Qwen 模型是否为 `qwen3-tts-flash` 或 `qwen3-tts-plus`？
+
+2. **检查语音 ID**
+   - [ ] 选择的语音是否在对应模型的可用列表中？
+   - [ ] 是否需要做语音 ID 格式转换？
+
+3. **检查请求体**
+   - [ ] MiniMax 是否包含 `action: tts` 字段？
+   - [ ] Qwen 是否有 `voice` 和 `language_type` 字段？
+
+4. **检查响应解析**
+   - [ ] MiniMax 音频数据是否为十六进制编码？
+   - [ ] Qwen 音频数据是否直接在 `output.audio` 字段？
+
+5. **检查 API 端点**
+   - [ ] 是否使用 `multimodal-generation/generation` 端点？
+   - [ ] 是否排除了旧的 `text2audio/text-to-audio` 端点？
+
+6. **检查环境变量**
+   - [ ] `DASHSCOPE_API_KEY` 或 `ALIYUN_API_KEY` 是否已设置？
+
+## 13. 推荐提问方式
 
 后续如果你想让我直接按这份文档帮你判断，可以直接使用类似提示：
 
@@ -715,10 +933,11 @@ python scripts/test_image_input_models.py
 请按 docs/MODEL_INTEGRATION_REFERENCE.md 分析 qwen-xxx / wan-xxx 的接入方案。
 ```
 
-## 12. 维护建议
+## 14. 维护建议
 
 - 新增模型后，优先同步更新本文档的"已验证模型清单"和"常见误区"
 - 如果新增的视频模型 API 格式与现有适配器不同，在"视频模型 API 格式差异"章节补充
 - 如果发现新的模型 ID 映射规则，在"模型 ID 映射规则"章节补充
 - 如果未来把文本与媒体注册中心真正统一，再重写本文档第 2 节和第 4 节
 - 如果 DreamWeaver 后续直接接入 `smart-dispatch`，记得同步更新第 8 节
+- 如果新增 TTS 模型接入，参考第 11 节"TTS 模型接入经验总结"
