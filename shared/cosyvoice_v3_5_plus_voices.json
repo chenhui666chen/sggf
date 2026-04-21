@@ -1,0 +1,6 @@
+{
+  "model": "cosyvoice-v3.5-plus",
+  "updated_at": "2026-04-21",
+  "source": "official-doc: cosyvoice-v3.5-plus has no built-in system voices; use clone/design voice_id",
+  "voices": []
+}

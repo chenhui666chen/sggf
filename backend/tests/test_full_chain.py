@@ -111,7 +111,7 @@ def test_voice_model_auto_match():
     print("="*60)
     
     qwen_catalog = load_voice_catalog("qwen3-tts-instruct-flash")
-    cosyvoice_catalog = load_voice_catalog("cosyvoice-v3-plus")
+    cosyvoice_catalog = load_voice_catalog("cosyvoice-v3.5-plus")
     minimax_catalog = load_voice_catalog("minimax-speech-2.8-hd")
     
     qwen_voices = qwen_catalog.get("voices", [])

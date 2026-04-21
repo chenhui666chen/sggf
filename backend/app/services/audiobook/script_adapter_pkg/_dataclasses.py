@@ -170,7 +170,7 @@ class ScriptSegment:
     # v3-plus音声参数控制
     voice_params: Optional[Dict[str, float]] = None  # {"rate": 1.0, "pitch": 1.0, "pause_before": 0.2, "pause_after": 0.3}
 
-    # cosyvoice-v3-plus Instruct 结构化字段（用于指令模板拼装）
+    # cosyvoice-v3.5-plus Instruct 结构化字段（用于指令模板拼装）
     instruct_emotion: str = ""  # neutral/fearful/angry/sad/surprised/happy/disgusted
     instruct_scene: str = ""  # 场景，如“闲聊互动”
     instruct_role: str = ""  # 角色，如“一个旁白”

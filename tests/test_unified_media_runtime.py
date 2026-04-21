@@ -566,7 +566,7 @@ def test_create_tts_engine_accepts_legacy_model_keyword(monkeypatch: pytest.Monk
         max_concurrent=1,
     )
 
-    assert engine.model == "cosyvoice-v3-plus"
+    assert engine.model == "cosyvoice-v3.5-plus"
     assert engine.kwargs["enable_cache"] is False
     assert engine.kwargs["max_concurrent"] == 1
 

@@ -57,7 +57,7 @@ def suggest_model_for_character(
         
         if importance in ["主角", "重要角色"] or role_position in ["主角", "女主角"]:
             if cost_priority != "low_cost":
-                return "cosyvoice-v3-plus"
+                return "cosyvoice-v3.5-plus"
         
         if importance in ["次要角色"]:
             if cost_priority == "high_quality":
@@ -68,7 +68,7 @@ def suggest_model_for_character(
             return "minimax-speech-2.8-turbo"
     
     if cost_priority == "high_quality":
-        return "cosyvoice-v3-plus"
+        return "cosyvoice-v3.5-plus"
     elif cost_priority == "low_cost":
         return "minimax-speech-2.8-turbo"
     
@@ -228,8 +228,8 @@ character_profiles = [
 ]
 vm1.apply_project_voice_mapping(voice_mapping, character_profiles)
 
-assert vm1.character_voices["林风"].tts_model == "cosyvoice-v3-plus", f"主角应该用 cosyvoice-v3-plus，实际: {vm1.character_voices['林风'].tts_model}"
-assert vm1.character_voices["苏娜"].tts_model == "cosyvoice-v3-plus", f"重要角色应该用 cosyvoice-v3-plus，实际: {vm1.character_voices['苏娜'].tts_model}"
+assert vm1.character_voices["林风"].tts_model == "cosyvoice-v3.5-plus", f"主角应该用 cosyvoice-v3.5-plus，实际: {vm1.character_voices['林风'].tts_model}"
+assert vm1.character_voices["苏娜"].tts_model == "cosyvoice-v3.5-plus", f"重要角色应该用 cosyvoice-v3.5-plus，实际: {vm1.character_voices['苏娜'].tts_model}"
 assert vm1.character_voices["路人甲"].tts_model == "minimax-speech-2.8-turbo", f"群众角色应该用 minimax，实际: {vm1.character_voices['路人甲'].tts_model}"
 print("✅ 测试1通过：模型推荐正确")
 
@@ -247,8 +247,8 @@ print("✅ 测试2通过：用户配置优先")
 print("\n测试3：导出到数据库包含tts_model...")
 exported = vm1.export_to_db()
 assert "tts_model" in exported["林风"], "导出应该包含tts_model"
-assert exported["林风"]["tts_model"] == "cosyvoice-v3-plus", f"导出的tts_model应该正确，实际: {exported['林风']['tts_model']}"
-assert exported["苏娜"]["tts_model"] == "cosyvoice-v3-plus", "重要角色的tts_model应该正确"
+assert exported["林风"]["tts_model"] == "cosyvoice-v3.5-plus", f"导出的tts_model应该正确，实际: {exported['林风']['tts_model']}"
+assert exported["苏娜"]["tts_model"] == "cosyvoice-v3.5-plus", "重要角色的tts_model应该正确"
 assert exported["路人甲"]["tts_model"] == "minimax-speech-2.8-turbo", "群众角色的tts_model应该正确"
 print("✅ 测试3通过：导出包含tts_model")
 
@@ -256,8 +256,8 @@ print("✅ 测试3通过：导出包含tts_model")
 print("\n测试4：从数据库加载恢复tts_model...")
 vm3 = MockVoiceManager()
 vm3.load_from_db(exported)
-assert vm3.character_voices["林风"].tts_model == "cosyvoice-v3-plus", f"林风的tts_model应该从数据库恢复，实际: {vm3.character_voices['林风'].tts_model}"
-assert vm3.character_voices["苏娜"].tts_model == "cosyvoice-v3-plus", f"苏娜的tts_model应该从数据库恢复，实际: {vm3.character_voices['苏娜'].tts_model}"
+assert vm3.character_voices["林风"].tts_model == "cosyvoice-v3.5-plus", f"林风的tts_model应该从数据库恢复，实际: {vm3.character_voices['林风'].tts_model}"
+assert vm3.character_voices["苏娜"].tts_model == "cosyvoice-v3.5-plus", f"苏娜的tts_model应该从数据库恢复，实际: {vm3.character_voices['苏娜'].tts_model}"
 assert vm3.character_voices["路人甲"].tts_model == "minimax-speech-2.8-turbo", f"路人甲的tts_model应该从数据库恢复，实际: {vm3.character_voices['路人甲'].tts_model}"
 print("✅ 测试4通过：从数据库加载恢复tts_model")
 
@@ -267,8 +267,8 @@ vm4 = MockVoiceManager()
 vm4.load_from_db(exported)
 # Simulate using the same mapping for another chapter
 vm4.apply_project_voice_mapping(voice_mapping, character_profiles)
-assert vm4.character_voices["林风"].tts_model == "cosyvoice-v3-plus", "跨章节后林风的模型应该保持一致"
-assert vm4.character_voices["苏娜"].tts_model == "cosyvoice-v3-plus", "跨章节后苏娜的模型应该保持一致"
+assert vm4.character_voices["林风"].tts_model == "cosyvoice-v3.5-plus", "跨章节后林风的模型应该保持一致"
+assert vm4.character_voices["苏娜"].tts_model == "cosyvoice-v3.5-plus", "跨章节后苏娜的模型应该保持一致"
 assert vm4.character_voices["路人甲"].tts_model == "minimax-speech-2.8-turbo", "跨章节后路人甲的模型应该保持一致"
 print("✅ 测试5通过：跨章节一致性")
 

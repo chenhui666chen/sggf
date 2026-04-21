@@ -160,7 +160,7 @@ async def preview_script_segment_audio(
         )
 
     tts_model = normalize_model_id(request.tts_model or "qwen3-tts-instruct-flash") or "qwen3-tts-instruct-flash"
-    if tts_model not in {"qwen3-tts-instruct-flash", "cosyvoice-v3-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"}:
+    if tts_model not in {"qwen3-tts-instruct-flash", "cosyvoice-v3.5-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"}:
         if tts_model.startswith("minimax-speech"):
             tts_model = "minimax-speech-2.8-hd"
         elif tts_model.startswith("qwen3-tts"):

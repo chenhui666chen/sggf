@@ -3,6 +3,13 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
+from core.model_resolution import normalize_model_id
+
+
+_LEGACY_MODEL_KEYS = {
+    "cosyvoice-v3.5-plus": ("cosyvoice-v3-plus",),
+}
+
 
 def parse_project_audio_config(raw: str) -> Dict[str, Any]:
     if not raw:
@@ -20,13 +27,15 @@ def get_audio_fx(config: Dict[str, Any]) -> Optional[dict]:
 
 
 def get_characters_for_model(config: Dict[str, Any], tts_model: str) -> List[dict]:
-    tts_model = (tts_model or "").strip() or "qwen3-tts-instruct-flash"
+    requested_model = (normalize_model_id(tts_model) or "").strip() or "qwen3-tts-instruct-flash"
     tts_models = config.get("tts_models")
     if isinstance(tts_models, dict):
-        model_cfg = tts_models.get(tts_model)
-        if isinstance(model_cfg, dict):
-            chars = model_cfg.get("characters") or []
-            return list(chars) if isinstance(chars, list) else []
+        candidate_keys = (requested_model, *_LEGACY_MODEL_KEYS.get(requested_model, ()))
+        for candidate_key in candidate_keys:
+            model_cfg = tts_models.get(candidate_key)
+            if isinstance(model_cfg, dict):
+                chars = model_cfg.get("characters") or []
+                return list(chars) if isinstance(chars, list) else []
 
     # legacy: single shared character config
     chars = config.get("characters") or []
@@ -34,7 +43,7 @@ def get_characters_for_model(config: Dict[str, Any], tts_model: str) -> List[dic
 
 
 def set_characters_for_model(config: Dict[str, Any], tts_model: str, characters: List[dict]) -> Dict[str, Any]:
-    tts_model = (tts_model or "").strip() or "qwen3-tts-instruct-flash"
+    tts_model = (normalize_model_id(tts_model) or "").strip() or "qwen3-tts-instruct-flash"
     tts_models = config.get("tts_models")
     if not isinstance(tts_models, dict):
         tts_models = {}

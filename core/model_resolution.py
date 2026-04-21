@@ -54,6 +54,8 @@ MODEL_ALIASES = {
     "qwen3_vl_plus": "qwen3-vl-plus",
     "qwen3_tts": "qwen3-tts-instruct-flash",
     "qwen3-tts-flash": "qwen3-tts-instruct-flash",
+    "cosyvoice-v3-plus": "cosyvoice-v3.5-plus",
+    "cosyvoice_v3_plus": "cosyvoice-v3.5-plus",
     "qwen_image_edit_plus": "qwen-image-edit-plus",
     "qwen_image_edit_max": "qwen-image-edit-max",
     "qwen_multiperson_fusion": "qwen-image-edit-plus",

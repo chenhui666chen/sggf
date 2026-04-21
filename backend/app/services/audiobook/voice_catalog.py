@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 VOICE_FILENAMES_BY_MODEL = {
     "qwen3-tts-instruct-flash": "qwen3_tts_voices.json",
     "qwen3-tts-flash": "qwen3_tts_voices.json",
-    "cosyvoice-v3-plus": "cosyvoice_v3_plus_voices.json",
+    "cosyvoice-v3.5-plus": "cosyvoice_v3_5_plus_voices.json",
+    "cosyvoice-v3-plus": "cosyvoice_v3_5_plus_voices.json",
     "minimax-speech-2.8-hd": "minimax_speech_2_8_voices.json",
     "minimax-speech-2.8-turbo": "minimax_speech_2_8_voices.json",
     # 兼容别名

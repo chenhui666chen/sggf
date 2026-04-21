@@ -40,7 +40,7 @@ VERIFIED_MODELS = {
     # TTS - 百炼
     "MiniMax/speech-2.8-turbo",
     "MiniMax/speech-2.8-hd",
-    "cosyvoice-v3-plus",
+    "cosyvoice-v3.5-plus",
     "qwen3-tts-instruct-flash",
     # 音效 - Vidu平台
     "vidu-timing2audio",

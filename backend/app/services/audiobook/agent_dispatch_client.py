@@ -10,7 +10,7 @@
 - MiniMax/speech-2.8-turbo（低延迟，DashScope API）
 - MiniMax/speech-2.8-hd（高质量，DashScope API）
 - qwen3-tts-instruct-flash（快速，可通过 instructions 精细控制，DashScope API）
-- cosyvoice-v3-plus（高质量，WebSocket API）
+- cosyvoice-v3.5-plus（高表现力，需先准备复刻/设计音色，WebSocket API）
 """
 from __future__ import annotations
 
@@ -60,8 +60,8 @@ class AgentSmartDispatchClient:
     使 Agent 能够使用智能路由和自动降级进行 TTS 生成。
 
     调度策略映射：
-    - quality: 优先选择高质量模型（MiniMax/speech-2.8-hd > cosyvoice-v3-plus）
-    - fast: 优先选择快速模型（qwen3-tts-instruct-flash ≈ cosyvoice-v3-plus）
+    - quality: 优先选择高质量模型（MiniMax/speech-2.8-hd > cosyvoice-v3.5-plus）
+    - fast: 优先选择快速模型（qwen3-tts-instruct-flash ≈ cosyvoice-v3.5-plus）
     - balanced: 平衡质量和速度（默认策略）
     - cost_saving: 优先选择低成本模型（qwen3-tts-instruct-flash > MiniMax/speech-2.8-turbo）
 
@@ -72,7 +72,7 @@ class AgentSmartDispatchClient:
         "MiniMax/speech-2.8-turbo",
         "MiniMax/speech-2.8-hd",
         "qwen3-tts-instruct-flash",
-        "cosyvoice-v3-plus",
+        "cosyvoice-v3.5-plus",
     ]
 
     STRATEGY_MAP = {

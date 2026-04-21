@@ -485,7 +485,7 @@ BaseAdapter
 | --- | --- | --- |
 | `MiniMax/speech-2.8-turbo` | 百炼 | 1.5s |
 | `MiniMax/speech-2.8-hd` | 百炼 | 1.3s |
-| `cosyvoice-v3-plus` | 百炼 | 0.6s |
+| `cosyvoice-v3.5-plus` | 百炼 | 0.6s |
 | `qwen3-tts-instruct-flash` | 百炼 | 0.7s |
 
 ### 视频生成 (15)

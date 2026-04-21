@@ -90,7 +90,7 @@ type StageStatus = 'pending' | 'running' | 'completed' | 'failed'
 type PreviewType = 'voice' | 'sfx' | 'bgm' | 'mix'
 type TtsModel =
   | 'qwen3-tts-instruct-flash'
-  | 'cosyvoice-v3-plus'
+  | 'cosyvoice-v3.5-plus'
   | 'minimax-speech-2.8-hd'
   | 'minimax-speech-2.8-turbo'
 type AudioOutputFormat = 'mp3' | 'wav' | 'm4b'
@@ -303,28 +303,45 @@ interface ScriptReviewDetail {
 
 const DEFAULT_NARRATOR_BY_MODEL = {
   'qwen3-tts-instruct-flash': 'Neil',
-  'cosyvoice-v3-plus': 'longanyang',
+  'cosyvoice-v3.5-plus': '',
   'minimax-speech-2.8-hd': 'male-qn-jingying',
   'minimax-speech-2.8-turbo': 'male-qn-jingying',
 } as const
 
 const TTS_MODEL_LABELS: Record<TtsModel, string> = {
   'qwen3-tts-instruct-flash': 'Qwen3-TTS Instruct Flash',
-  'cosyvoice-v3-plus': 'CosyVoice v3-plus',
+  'cosyvoice-v3.5-plus': 'CosyVoice v3.5-plus',
   'minimax-speech-2.8-hd': 'MiniMax HD',
   'minimax-speech-2.8-turbo': 'MiniMax Turbo',
 }
 
 const isTtsModel = (value: unknown): value is TtsModel =>
   value === 'qwen3-tts-instruct-flash'
-  || value === 'cosyvoice-v3-plus'
+  || value === 'cosyvoice-v3.5-plus'
   || value === 'minimax-speech-2.8-hd'
   || value === 'minimax-speech-2.8-turbo'
+
+const normalizeTtsModelValue = (value: unknown): TtsModel | null => {
+  if (value === 'cosyvoice-v3-plus') {
+    return 'cosyvoice-v3.5-plus'
+  }
+  return isTtsModel(value) ? value : null
+}
 
 const getTtsModelLabel = (model: TtsModel) => TTS_MODEL_LABELS[model]
 
 const getDefaultNarratorId = (model: TtsModel) =>
-  DEFAULT_NARRATOR_BY_MODEL[model] || 'Neil'
+  DEFAULT_NARRATOR_BY_MODEL[model] || (model === 'cosyvoice-v3.5-plus' ? '' : 'Neil')
+
+const getFallbackVoiceId = (
+  model: TtsModel,
+  presets: Array<{ id: string }> = [],
+) => {
+  if (model === 'cosyvoice-v3.5-plus') {
+    return presets.find((preset) => Boolean(preset.id))?.id || ''
+  }
+  return getDefaultNarratorId(model)
+}
 
 const QWEN_FLASH_ONLY_TO_INSTRUCT: Record<string, string> = {
   Aiden: 'Ethan',
@@ -396,7 +413,9 @@ const normalizeVoiceId = (
     longwanjun_v3: 'longanhuan',
     longanwen_v3: 'longanhuan',
   }
-  return cosyvoiceV3PlusLegacyAliases[voiceId] || voiceId
+  const normalizedVoiceId = cosyvoiceV3PlusLegacyAliases[voiceId] || voiceId
+  const legacyCosyvoiceSystemVoices = new Set(['longanyang', 'longanhuan'])
+  return legacyCosyvoiceSystemVoices.has(normalizedVoiceId) ? '' : normalizedVoiceId
 }
 
 const STAGE_CONFIG = [
@@ -1488,13 +1507,13 @@ const AudiobookPage = () => {
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const [voicePresetsByModel, setVoicePresetsByModel] = useState<Record<TtsModel, VoicePreset[]>>({
     'qwen3-tts-instruct-flash': [],
-    'cosyvoice-v3-plus': [],
+    'cosyvoice-v3.5-plus': [],
     'minimax-speech-2.8-hd': [],
     'minimax-speech-2.8-turbo': [],
   })
   const [voiceCatalogMetaByModel, setVoiceCatalogMetaByModel] = useState<Record<TtsModel, VoiceCatalogMeta | null>>({
     'qwen3-tts-instruct-flash': null,
-    'cosyvoice-v3-plus': null,
+    'cosyvoice-v3.5-plus': null,
     'minimax-speech-2.8-hd': null,
     'minimax-speech-2.8-turbo': null,
   })
@@ -1514,7 +1533,7 @@ const AudiobookPage = () => {
   const [activeStep, setActiveStep] = useState(0)
   const [ttsModel, setTtsModel] = useState<TtsModel>('qwen3-tts-instruct-flash')
   const outputFormat: AudioOutputFormat = 'mp3'
-  const supportsTtsTuning = ttsModel === 'cosyvoice-v3-plus'
+  const supportsTtsTuning = ttsModel === 'cosyvoice-v3.5-plus'
   const [narrationStyle, setNarrationStyle] = useState<string>('professional')
   const [chapterMenuAnchor, setChapterMenuAnchor] = useState<null | HTMLElement>(null)
   const [selectedChapterForMenu, setSelectedChapterForMenu] = useState<Chapter | null>(null)
@@ -1609,11 +1628,30 @@ const AudiobookPage = () => {
   }, [voicePresets, ttsModel])
 
   const cloneVoicePresets = useMemo(() => {
-    if (ttsModel !== 'cosyvoice-v3-plus') {
+    if (ttsModel !== 'cosyvoice-v3.5-plus') {
       return []
     }
     return currentVoicePresets.filter((preset) => preset.category === 'custom')
   }, [currentVoicePresets, ttsModel])
+
+  const cosyvoiceHasUsableVoice = useMemo(() => {
+    if (ttsModel !== 'cosyvoice-v3.5-plus') {
+      return true
+    }
+    return currentVoicePresets.length > 0 || characterVoices.some((item) => Boolean(item.voiceId))
+  }, [characterVoices, currentVoicePresets, ttsModel])
+
+  const ensureCurrentTtsModelReady = useCallback(() => {
+    if (ttsModel !== 'cosyvoice-v3.5-plus' || cosyvoiceHasUsableVoice) {
+      return true
+    }
+    setSnackbar({
+      open: true,
+      message: 'CosyVoice v3.5-plus 没有系统音色，请先创建至少一个复刻音色再生成。',
+      severity: 'error',
+    })
+    return false
+  }, [cosyvoiceHasUsableVoice, ttsModel])
 
   // 从 URL 参数加载项目，并在刷新/回退时按顺序恢复会话
   useEffect(() => {
@@ -1650,7 +1688,7 @@ const AudiobookPage = () => {
         localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
       }
 
-      const restoredTtsModel = isTtsModel(savedSession?.ttsModel) ? savedSession!.ttsModel : ttsModelRef.current
+      const restoredTtsModel = normalizeTtsModelValue(savedSession?.ttsModel) || ttsModelRef.current
       if (savedSession && restoredTtsModel !== ttsModelRef.current) {
         setTtsModel(restoredTtsModel)
       }
@@ -1712,7 +1750,7 @@ const AudiobookPage = () => {
 
   // 页面初始化时加载所有模型的音色目录（并行加载）
   useEffect(() => {
-    const models: TtsModel[] = ['qwen3-tts-instruct-flash', 'cosyvoice-v3-plus', 'minimax-speech-2.8-hd', 'minimax-speech-2.8-turbo']
+    const models: TtsModel[] = ['qwen3-tts-instruct-flash', 'cosyvoice-v3.5-plus', 'minimax-speech-2.8-hd', 'minimax-speech-2.8-turbo']
 
     const loadAllVoiceCatalogs = async () => {
       setVoiceLoading(true)
@@ -1737,13 +1775,13 @@ const AudiobookPage = () => {
 
         const newPresetsByModel: Record<TtsModel, VoicePreset[]> = {
           'qwen3-tts-instruct-flash': [],
-          'cosyvoice-v3-plus': [],
+          'cosyvoice-v3.5-plus': [],
           'minimax-speech-2.8-hd': [],
           'minimax-speech-2.8-turbo': [],
         }
         const newMetaByModel: Record<TtsModel, VoiceCatalogMeta | null> = {
           'qwen3-tts-instruct-flash': null,
-          'cosyvoice-v3-plus': null,
+          'cosyvoice-v3.5-plus': null,
           'minimax-speech-2.8-hd': null,
           'minimax-speech-2.8-turbo': null,
         }
@@ -1755,8 +1793,8 @@ const AudiobookPage = () => {
 
         setVoicePresetsByModel(newPresetsByModel)
         setVoiceCatalogMetaByModel(newMetaByModel)
-        setVoicePresets(newPresetsByModel['cosyvoice-v3-plus'] || [])
-        setVoiceCatalogMeta(newMetaByModel['cosyvoice-v3-plus'] || null)
+        setVoicePresets(newPresetsByModel['cosyvoice-v3.5-plus'] || [])
+        setVoiceCatalogMeta(newMetaByModel['cosyvoice-v3.5-plus'] || null)
         setVoiceError(null)
       } catch (error: any) {
         const message = await extractApiErrorMessage(error, '加载音色库失败')
@@ -1814,7 +1852,7 @@ const AudiobookPage = () => {
       setCloneSuccess(voiceId ? `已提交复刻任务：${voiceId}` : '已提交复刻任务')
       setCloneName('')
       setCloneUrl('')
-      await refreshVoiceCatalog('cosyvoice-v3-plus')
+      await refreshVoiceCatalog('cosyvoice-v3.5-plus')
     } catch (error: any) {
       const message = await extractApiErrorMessage(error, '创建复刻音色失败')
       setCloneError(message)
@@ -1838,7 +1876,7 @@ const AudiobookPage = () => {
         prev.map((item) => (item.voiceId === voiceId ? { ...item, voiceId: '' } : item)),
       )
       setCloneSuccess(`已删除复刻音色：${displayName}`)
-      await refreshVoiceCatalog('cosyvoice-v3-plus')
+      await refreshVoiceCatalog('cosyvoice-v3.5-plus')
     } catch (error: any) {
       const message = await extractApiErrorMessage(error, '删除复刻音色失败')
       setCloneError(message)
@@ -2131,7 +2169,7 @@ const AudiobookPage = () => {
       name: '旁白',
       gender: '中性',
       role: '旁白',
-      voiceId: getDefaultNarratorId(resolvedTtsModel),
+      voiceId: getFallbackVoiceId(resolvedTtsModel, voicePresetsByModel[resolvedTtsModel] || []),
       volume: 50,
       speed: 1.0,
       pitch: 50,
@@ -2174,7 +2212,7 @@ const AudiobookPage = () => {
             volume: saved?.volume ?? 50,
             speed: saved?.speed ?? 1.0,
             pitch: saved?.pitch ?? 50,
-            ttsModel: saved?.tts_model || resolvedTtsModel,  // 🆕 从保存的配置中获取tts_model
+            ttsModel: normalizeTtsModelValue(saved?.tts_model) || resolvedTtsModel,  // 🆕 从保存的配置中获取tts_model
             voiceType: saved?.voice_type || undefined,  // 🆕 从保存的配置中获取声音类型
             personality: saved?.personality || undefined,  // 🆕 从保存的配置中获取性格类型
             emotionTendency: saved?.emotion_tendency || undefined,  // 🆕 从保存的配置中获取情感倾向
@@ -2227,7 +2265,7 @@ const AudiobookPage = () => {
     } catch {
       setSnackbar({ open: true, message: '网络错误，请重试', severity: 'error' })
     }
-  }, [ttsModel, setCharacterVoicesForCurrentModel])
+  }, [setCharacterVoicesForCurrentModel, ttsModel, voicePresetsByModel])
 
   const handleOpenBrowserPlayer = useCallback(async () => {
     if (!audiobookProject?.id) {
@@ -2921,6 +2959,7 @@ const AudiobookPage = () => {
 
   const handleSaveScript = async (options: { nextStatus?: 'reviewed' | 'approved'; generateAudio?: boolean }) => {
     if (!audiobookProject || !scriptEditorChapter || !scriptEditorData) return
+    if (options.generateAudio && !ensureCurrentTtsModelReady()) return
 
     try {
       setTaskPointsPrecheckError(null)
@@ -2974,6 +3013,7 @@ const AudiobookPage = () => {
       setSnackbar({ open: true, message: '请先完成剧本生成', severity: 'error' })
       return
     }
+    if (!ensureCurrentTtsModelReady()) return
 
     try {
       setTaskPointsPrecheckError(null)
@@ -3007,6 +3047,7 @@ const AudiobookPage = () => {
   // 开始生成
   const handleGenerate = async () => {
     if (generating) return
+    if (!ensureCurrentTtsModelReady()) return
 
     if (selectedChapters.length === 0) {
       setSnackbar({ open: true, message: '请至少选择一个章节', severity: 'error' })
@@ -3035,7 +3076,7 @@ const AudiobookPage = () => {
             .map((cv) => ({
               character_id: cv.characterId,
               name: cv.name,
-              voice_id: cv.voiceId || getDefaultNarratorId(ttsModel),
+              voice_id: cv.voiceId || getFallbackVoiceId(ttsModel, currentVoicePresets),
               volume: cv.volume,
               speed: cv.speed,
               pitch: cv.pitch,
@@ -3059,7 +3100,7 @@ const AudiobookPage = () => {
           .filter((cv) => cv.voiceId || cv.name === '旁白')  // 修复：旁白即使 voiceId 为空也保留
           .map((cv) => ({
             character_name: cv.name,
-            voice_id: cv.voiceId || getDefaultNarratorId(ttsModel),
+            voice_id: cv.voiceId || getFallbackVoiceId(ttsModel, currentVoicePresets),
             volume: cv.volume,
             speed: cv.speed,
             pitch: cv.pitch,
@@ -3494,20 +3535,22 @@ const AudiobookPage = () => {
             <Box sx={{ flex: 1, minWidth: 260 }}>
               {voiceCatalogMeta && (
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  {(voiceCatalogMeta.model || 'Qwen3-TTS Instruct Flash')}：官方 {voiceCatalogMeta.voice_count ?? currentVoicePresets.length} 种音色，最近更新 {voiceCatalogMeta.updated_at || '—'}，覆盖普通话/多语种/方言。
+                  {ttsModel === 'cosyvoice-v3.5-plus'
+                    ? `${voiceCatalogMeta.model || 'CosyVoice v3.5-plus'}：官方无系统音色，当前展示 ${currentVoicePresets.length} 个可用复刻音色，最近同步 ${voiceCatalogMeta.updated_at || '—'}。`
+                    : `${voiceCatalogMeta.model || 'Qwen3-TTS Instruct Flash'}：官方 ${voiceCatalogMeta.voice_count ?? currentVoicePresets.length} 种音色，最近更新 ${voiceCatalogMeta.updated_at || '—'}，覆盖普通话/多语种/方言。`}
                 </Typography>
               )}
               <Alert severity="success" sx={{ mb: 1 }}>
-                Qwen3-TTS Instruct Flash 支持快速批量合成、自然语言指令控制（Ethan/Neil）与多语种音色，适合整本生成；CosyVoice 保留为精品章节备用。
+                Qwen3-TTS Instruct Flash 适合整本批量生成；CosyVoice v3.5-plus 适合精品章节，但需要先准备复刻音色。
               </Alert>
-              {ttsModel === 'cosyvoice-v3-plus' && (
+              {ttsModel === 'cosyvoice-v3.5-plus' && (
                 <>
                   <Paper variant="outlined" sx={{ mb: 1, p: 1.5 }}>
                     <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-                      声音复刻（CosyVoice v3-plus）
+                      声音复刻（CosyVoice v3.5-plus）
                     </Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                      支持 http/https 或 oss:// 临时 URL（有效期 48 小时）；系统会自动生成合规 prefix（最长 10 个字符），并用你的“命名”在列表里展示为 “复刻-命名”（状态 OK 后可用于合成）。
+                      CosyVoice v3.5-plus 不提供系统音色。支持 http/https 或 oss:// 临时 URL（有效期 48 小时）；系统会自动生成合规 prefix（最长 10 个字符），并用你的“命名”在列表里展示为“复刻-命名”（状态 OK 后可用于合成）。
                     </Typography>
                     <Grid container spacing={1}>
                       <Grid item xs={12} md={4}>
@@ -3964,7 +4007,7 @@ const AudiobookPage = () => {
                                   <Chip
                                     label={getTtsModelLabel(cv.ttsModel)}
                                     size="small"
-                                    color={cv.ttsModel === 'cosyvoice-v3-plus' ? 'warning' : cv.ttsModel.startsWith('minimax-') ? 'info' : 'default'}
+                                    color={cv.ttsModel === 'cosyvoice-v3.5-plus' ? 'warning' : cv.ttsModel.startsWith('minimax-') ? 'info' : 'default'}
                                     sx={{ height: 18, fontSize: '0.65rem' }}
                                   />
                                 )}
@@ -4000,7 +4043,9 @@ const AudiobookPage = () => {
                                     </MenuItem>
                                   )}
                                   {!voiceLoading && currentVoicePresets.length === 0 && (
-                                    <MenuItem disabled value="__empty">暂无官方音色，请稍后重试</MenuItem>
+                                    <MenuItem disabled value="__empty">
+                                      {ttsModel === 'cosyvoice-v3.5-plus' ? '暂无可用复刻音色，请先创建' : '暂无官方音色，请稍后重试'}
+                                    </MenuItem>
                                   )}
                                   {currentVoicePresets.map((preset) => (
                                     <MenuItem key={preset.id} value={preset.id}>
@@ -4017,8 +4062,8 @@ const AudiobookPage = () => {
                                           {(preset.languages?.join('/') || '中英')} · {preset.style || '通用'}
                                         </Typography>
                                       </Box>
-                                      {ttsModel === 'cosyvoice-v3-plus' && preset.supportsInstruct && (
-                                        <Tooltip title="该音色支持 Instruct/SSML（CosyVoice v3-plus）。情绪/语气可通过 Instruct 参数控制。">
+                                      {ttsModel === 'cosyvoice-v3.5-plus' && preset.supportsInstruct && (
+                                        <Tooltip title="该音色支持 instruction/SSML（CosyVoice v3.5-plus）。情绪/语气可通过 Instruct 参数控制。">
                                           <Chip
                                             label="Instruct"
                                             size="small"
@@ -4049,9 +4094,9 @@ const AudiobookPage = () => {
                                       <Chip label="低价" size="small" color="success" sx={{ height: 16, fontSize: '0.6rem' }} />
                                     </Box>
                                   </MenuItem>
-                                  <MenuItem value="cosyvoice-v3-plus">
+                                  <MenuItem value="cosyvoice-v3.5-plus">
                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                      <span>CosyVoice v3-plus</span>
+                                      <span>CosyVoice v3.5-plus</span>
                                       <Chip label="高音质" size="small" color="warning" sx={{ height: 16, fontSize: '0.6rem' }} />
                                     </Box>
                                   </MenuItem>

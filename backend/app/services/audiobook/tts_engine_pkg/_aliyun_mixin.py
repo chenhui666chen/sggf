@@ -210,9 +210,20 @@ class AliyunMixin:
         api_key: str,
         raw_speaker_id: str,
     ) -> Optional[bytes]:
-        """CosyVoice v3 Plus 合成，走 DashScope WebSocket。"""
+        """CosyVoice v3.5 Plus 合成，走 DashScope WebSocket。"""
+        from app.services.audiobook.cosyvoice_clone_client import (
+            COSYVOICE_V35_PLUS_MODEL_ID,
+            is_cosyvoice_v35_plus_voice_id,
+        )
+        from app.services.audiobook.voice_catalog import get_voice_entry
+
         speaker_id = self._normalize_speaker_id(raw_speaker_id, provider_model)
         voice_params["speaker"] = speaker_id
+
+        if self._is_cosyvoice_v35_model(provider_model):
+            entry = get_voice_entry(speaker_id, COSYVOICE_V35_PLUS_MODEL_ID)
+            if not speaker_id or (entry is None and not is_cosyvoice_v35_plus_voice_id(speaker_id)):
+                raise ValueError("cosyvoice-v3.5-plus 仅支持复刻/设计音色，请传入有效 voice_id")
 
         logger.info(
             "调用百炼 CosyVoice WebSocket TTS: model=%s, voice=%s",
@@ -247,6 +258,20 @@ class AliyunMixin:
             except (TypeError, ValueError):
                 return default
 
+        def _normalize_language_hints(raw_value: Any) -> List[str]:
+            if isinstance(raw_value, str):
+                candidates = [raw_value]
+            elif isinstance(raw_value, (list, tuple, set)):
+                candidates = list(raw_value)
+            else:
+                candidates = []
+            hints: List[str] = []
+            for item in candidates:
+                value = str(item or "").strip()
+                if value:
+                    hints.append(value)
+            return hints[:5]
+
         rate = _to_float(voice_params.get("rate", voice_params.get("speed", 1.0)), 1.0)
         rate = max(0.5, min(2.0, rate))
 
@@ -266,7 +291,7 @@ class AliyunMixin:
         if audio_format not in {"mp3", "wav", "pcm"}:
             audio_format = "mp3"
 
-        return {
+        parameters = {
             "text_type": "PlainText",
             "voice": voice,
             "format": audio_format,
@@ -276,6 +301,68 @@ class AliyunMixin:
             "pitch": pitch,
             "enable_ssml": self._is_ssml_text(text),
         }
+        instruction = self._build_cosyvoice_instruction_payload(voice_params)
+        if instruction:
+            parameters["instruction"] = instruction
+        language_hints = _normalize_language_hints(voice_params.get("language_hints"))
+        if language_hints:
+            parameters["language_hints"] = language_hints
+        seed = voice_params.get("seed")
+        if seed is not None:
+            try:
+                parameters["seed"] = int(seed)
+            except (TypeError, ValueError):
+                pass
+        return parameters
+
+    def _is_cosyvoice_v35_model(self, model: Optional[str] = None) -> bool:
+        return str(model or self.model).strip().lower().startswith("cosyvoice-v3.5-plus")
+
+    def _truncate_cosyvoice_instruction(self, value: str, max_units: int = 100) -> str:
+        result: List[str] = []
+        used_units = 0
+        for char in str(value or "").strip():
+            unit_cost = 2 if ord(char) > 127 else 1
+            if used_units + unit_cost > max_units:
+                break
+            result.append(char)
+            used_units += unit_cost
+        return "".join(result).strip()
+
+    def _build_cosyvoice_instruction_payload(self, voice_params: Dict[str, Any]) -> str:
+        explicit_instruction = str(
+            voice_params.get("instruction") or voice_params.get("instructions") or ""
+        ).strip()
+        if explicit_instruction:
+            return self._truncate_cosyvoice_instruction(explicit_instruction)
+
+        parts: List[str] = []
+        segment_speaker = str(voice_params.get("segment_speaker") or "").strip()
+        if segment_speaker and segment_speaker != "旁白":
+            parts.append(f"说话角色：{segment_speaker}")
+
+        instruct_role = str(voice_params.get("instruct_role") or "").strip()
+        instruct_identity = str(voice_params.get("instruct_identity") or "").strip()
+        instruct_scene = str(voice_params.get("instruct_scene") or "").strip()
+        instruct_emotion = str(
+            voice_params.get("instruct_emotion") or voice_params.get("emotion") or ""
+        ).strip()
+        performance_notes = str(voice_params.get("performance_notes") or "").strip()
+
+        if instruct_role:
+            parts.append(f"角色设定：{instruct_role}")
+        if instruct_identity:
+            parts.append(f"身份设定：{instruct_identity}")
+        if instruct_scene:
+            parts.append(f"场景氛围：{instruct_scene}")
+        if instruct_emotion and instruct_emotion != "neutral":
+            parts.append(f"情绪目标：{instruct_emotion}")
+        if performance_notes:
+            parts.append(f"演绎要求：{performance_notes}")
+
+        if not parts and not voice_params.get("use_instruct_mode"):
+            return ""
+        return self._truncate_cosyvoice_instruction("；".join(parts).strip("；"))
 
     async def _call_dashscope_cosyvoice_websocket(
         self,

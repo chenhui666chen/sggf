@@ -34,7 +34,7 @@ _OPERATION_MODEL_IDS: Dict[str, set[str]] = {
     "analyze_video": {"qwen3-vl-plus", "qwen3.5-omni-plus"},  # 视觉理解模型
     "synthesize_speech": {
         "qwen3-tts-instruct-flash",
-        "cosyvoice-v3-plus",
+        "cosyvoice-v3.5-plus",
         "MiniMax/speech-2.8-turbo",  # MiniMax 高质量语音合成
         "MiniMax/speech-2.8-hd",     # MiniMax 旗舰级语音合成
     },

@@ -60,10 +60,12 @@ from app.services.audiobook.project_audio_config import (
     get_audio_fx,
 )
 from app.services.audiobook.cosyvoice_clone_client import (
+    COSYVOICE_V35_PLUS_MODEL_ID,
     CosyVoiceCloneError,
     create_cosyvoice_v3_plus_clone,
     delete_cosyvoice_clone,
     get_clone_display_name,
+    is_cosyvoice_v35_plus_voice_id,
     list_cosyvoice_v3_plus_clones,
     save_clone_display_name,
     upload_cosyvoice_v3_plus_clone_sample,
@@ -111,10 +113,29 @@ logger = logging.getLogger(__name__)
 DEFAULT_TTS_MODEL = "qwen3-tts-instruct-flash"
 SUPPORTED_TTS_MODELS = {
     "qwen3-tts-instruct-flash",
-    "cosyvoice-v3-plus",
+    COSYVOICE_V35_PLUS_MODEL_ID,
     "minimax-speech-2.8-hd",
     "minimax-speech-2.8-turbo",
 }
+
+
+def _is_cosyvoice_v35_model(model: str) -> bool:
+    return (normalize_model_id(model) or "").strip() == COSYVOICE_V35_PLUS_MODEL_ID
+
+
+def _validate_cosyvoice_v35_voice_id(voice_id: str) -> str:
+    resolved = str(voice_id or "").strip()
+    if is_cosyvoice_v35_plus_voice_id(resolved):
+        return resolved
+
+    entry = get_voice_entry(resolved, model=COSYVOICE_V35_PLUS_MODEL_ID)
+    if entry:
+        return str(entry.get("speaker") or resolved)
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="cosyvoice-v3.5-plus 不提供系统音色，请先创建并选择复刻/设计音色",
+    )
 
 @router.post("/tts/preview")
 async def tts_preview(
@@ -145,6 +166,8 @@ async def tts_preview(
     else:
         entry = get_voice_entry(request.voice_id, model=model_name)
         speaker_id = entry.get("speaker") if entry else request.voice_id
+        if _is_cosyvoice_v35_model(model_name):
+            speaker_id = _validate_cosyvoice_v35_voice_id(speaker_id)
 
     voice_params: dict = {
         "speaker": speaker_id,
@@ -195,11 +218,18 @@ async def list_tts_models(
             catalog = load_voice_catalog_for_model(model_name)
             voices = catalog.get("voices", [])
             meta = catalog.get("meta", {})
+            voice_count = meta.get("voice_count", len(voices))
+            if model_name == COSYVOICE_V35_PLUS_MODEL_ID:
+                try:
+                    clones, _clone_meta = list_cosyvoice_v3_plus_clones()
+                    voice_count += len(clones)
+                except CosyVoiceCloneError:
+                    pass
             models.append({
                 "id": model_name,
                 "name": _get_model_display_name(model_name),
                 "description": _get_model_description(model_name),
-                "voice_count": meta.get("voice_count", len(voices)),
+                "voice_count": voice_count,
                 "price_per_10k": _get_model_price(model_name),
                 "features": _get_model_features(model_name),
             })
@@ -213,7 +243,7 @@ def _get_model_display_name(model: str) -> str:
     names = {
         "qwen3-tts-instruct-flash": "Qwen3-TTS Instruct Flash",
         "qwen3-tts-plus": "Qwen3-TTS Plus",
-        "cosyvoice-v3-plus": "CosyVoice v3 Plus",
+        COSYVOICE_V35_PLUS_MODEL_ID: "CosyVoice v3.5 Plus",
         "minimax-speech-2.8-hd": "MiniMax Speech 2.8 HD",
         "minimax-speech-2.8-turbo": "MiniMax Speech 2.8 Turbo",
     }
@@ -224,7 +254,7 @@ def _get_model_description(model: str) -> str:
     descriptions = {
         "qwen3-tts-instruct-flash": "默认模型，49音色，支持自然语言 instructions",
         "qwen3-tts-plus": "高质量，支持SSML",
-        "cosyvoice-v3-plus": "顶级音质，情绪控制，Instruct模式",
+        COSYVOICE_V35_PLUS_MODEL_ID: "高表现力模型，支持 instruction 与音色复刻/设计，但无系统音色",
         "minimax-speech-2.8-hd": "最高音质，语气词标签，100+音色",
         "minimax-speech-2.8-turbo": "优秀音质，高性价比，高并发",
     }
@@ -235,7 +265,7 @@ def _get_model_price(model: str) -> float:
     prices = {
         "qwen3-tts-instruct-flash": 1.0,
         "qwen3-tts-plus": 2.0,
-        "cosyvoice-v3-plus": 2.0,
+        COSYVOICE_V35_PLUS_MODEL_ID: 2.0,
         "minimax-speech-2.8-hd": 6.0,
         "minimax-speech-2.8-turbo": 3.0,
     }
@@ -246,7 +276,7 @@ def _get_model_features(model: str) -> list:
     features_map = {
         "qwen3-tts-instruct-flash": ["默认模型", "49音色", "自然语言指令"],
         "qwen3-tts-plus": ["高质量", "SSML支持"],
-        "cosyvoice-v3-plus": ["顶级音质", "情绪控制", "Instruct模式"],
+        COSYVOICE_V35_PLUS_MODEL_ID: ["高表现力", "instruction", "复刻/设计音色", "无系统音色"],
         "minimax-speech-2.8-hd": ["最高音质", "语气词标签", "100+音色", "混合音色"],
         "minimax-speech-2.8-turbo": ["优秀音质", "高性价比", "高并发"],
     }
@@ -257,7 +287,7 @@ def _get_model_description_legacy(model: str) -> str:
     descriptions = {
         "qwen3-tts-instruct-flash": "默认模型，24音色，支持自然语言 instructions",
         "qwen3-tts-plus": "高质量，支持SSML",
-        "cosyvoice-v3-plus": "顶级音质，情绪控制，Instruct模式",
+        COSYVOICE_V35_PLUS_MODEL_ID: "高表现力，支持 instruction，但需先创建复刻/设计音色",
         "minimax-speech-2.8-hd": "最高音质，语气词标签，100+音色",
         "minimax-speech-2.8-turbo": "优秀音质，高性价比，高并发",
     }
@@ -268,7 +298,7 @@ def _get_model_features_legacy(model: str) -> list:
     features_map = {
         "qwen3-tts-instruct-flash": ["默认模型", "24音色", "自然语言指令"],
         "qwen3-tts-plus": ["高质量", "SSML支持"],
-        "cosyvoice-v3-plus": ["顶级音质", "情绪控制", "Instruct模式"],
+        COSYVOICE_V35_PLUS_MODEL_ID: ["高表现力", "instruction", "复刻/设计音色", "无系统音色"],
         "minimax-speech-2.8-hd": ["最高音质", "语气词标签", "100+音色", "混合音色"],
         "minimax-speech-2.8-turbo": ["优秀音质", "高性价比", "高并发"],
     }
@@ -293,13 +323,13 @@ async def list_tts_voices(
     meta = catalog.get("meta") or {}
     voices = list(catalog.get("voices") or [])
 
-    # cosyvoice-v3-plus：合并“官方内置音色”与“复刻音色”（DashScope VoiceEnrollmentService）
-    if model == "cosyvoice-v3-plus":
+    # cosyvoice-v3.5-plus：官方静态目录为空，仅追加当前账号下的复刻/设计音色。
+    if model == COSYVOICE_V35_PLUS_MODEL_ID:
         try:
             clones, _clone_meta = list_cosyvoice_v3_plus_clones()
             voices.extend([c.to_voice_preset(get_clone_display_name(c.voice_id)) for c in clones])
         except CosyVoiceCloneError:
-            # 未配置 API Key 等情况下，不阻塞页面使用内置音色
+            # 未配置 API Key 等情况下，不阻塞页面继续使用其他模型
             pass
     return {
         "model": meta.get("model", DEFAULT_TTS_MODEL),
@@ -310,12 +340,13 @@ async def list_tts_voices(
     }
 
 
-@router.post("/tts/voices/cosyvoice-v3-plus/clones")
+@router.post("/tts/voices/cosyvoice-v3.5-plus/clones")
+@router.post("/tts/voices/cosyvoice-v3-plus/clones", include_in_schema=False)
 async def create_cosyvoice_v3_plus_voice_clone(
     request: CosyVoiceCloneCreateRequest,
     current_user: User = Depends(get_current_user),
 ):
-    """创建 cosyvoice-v3-plus 复刻音色。
+    """创建 cosyvoice-v3.5-plus 复刻音色。
 
     说明：DashScope 克隆接口要求 input.url 为公网可访问地址或 oss:// 临时 URL。
     """
@@ -350,7 +381,8 @@ async def create_cosyvoice_v3_plus_voice_clone(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
-@router.post("/tts/voices/cosyvoice-v3-plus/clones/upload")
+@router.post("/tts/voices/cosyvoice-v3.5-plus/clones/upload")
+@router.post("/tts/voices/cosyvoice-v3-plus/clones/upload", include_in_schema=False)
 async def upload_cosyvoice_v3_plus_clone_audio(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
@@ -374,12 +406,13 @@ async def upload_cosyvoice_v3_plus_clone_audio(
             pass
 
 
-@router.get("/tts/voices/cosyvoice-v3-plus/clones")
+@router.get("/tts/voices/cosyvoice-v3.5-plus/clones")
+@router.get("/tts/voices/cosyvoice-v3-plus/clones", include_in_schema=False)
 async def list_cosyvoice_v3_plus_voice_clones(
     prefix: Optional[str] = None,
     current_user: User = Depends(get_current_user),
 ):
-    """列出 cosyvoice-v3-plus 的复刻音色（当前 API Key 维度）。"""
+    """列出 cosyvoice-v3.5-plus 的复刻音色（当前 API Key 维度）。"""
     try:
         clones, meta = list_cosyvoice_v3_plus_clones(prefix=prefix)
         return {
@@ -398,12 +431,13 @@ async def list_cosyvoice_v3_plus_voice_clones(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
-@router.delete("/tts/voices/cosyvoice-v3-plus/clones/{voice_id}")
+@router.delete("/tts/voices/cosyvoice-v3.5-plus/clones/{voice_id}")
+@router.delete("/tts/voices/cosyvoice-v3-plus/clones/{voice_id}", include_in_schema=False)
 async def delete_cosyvoice_v3_plus_voice_clone(
     voice_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """删除 cosyvoice-v3-plus 复刻音色。"""
+    """删除 cosyvoice-v3.5-plus 复刻音色。"""
     try:
         return delete_cosyvoice_clone(voice_id=voice_id)
     except CosyVoiceCloneError as exc:

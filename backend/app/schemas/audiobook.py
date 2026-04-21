@@ -13,7 +13,7 @@ class AudiobookProjectCreate(BaseModel):
     tts_provider: str = "aliyun"
     enable_cache: bool = True
     voice_config: Optional[List["CharacterVoiceConfig"]] = None
-    tts_model: Optional[str] = "qwen3-tts-instruct-flash"  # TTS 模型（qwen3-tts-instruct-flash / cosyvoice-v3-plus）
+    tts_model: Optional[str] = "qwen3-tts-instruct-flash"  # TTS 模型（qwen3-tts-instruct-flash / cosyvoice-v3.5-plus）
     generation_mode: str = "full"  # full: 直接生成音频; script_only: 仅生成剧本+评审
     force_regenerate_script: bool = False  # 🆕 是否强制重新生成剧本（覆盖已有剧本）
     narration_style: Optional[str] = "professional"  # 叙事风格: professional/dramatic/relaxing/expressive/custom
@@ -25,7 +25,7 @@ class AudiobookProjectCreate(BaseModel):
 class GenerateAudioFromScriptsRequest(BaseModel):
     """基于已生成剧本的音频生成请求（两阶段流程第2阶段）"""
     chapter_ids: Optional[List[int]] = None
-    tts_model: Optional[str] = "qwen3-tts-instruct-flash"  # TTS 模型（qwen3-tts-instruct-flash / cosyvoice-v3-plus）
+    tts_model: Optional[str] = "qwen3-tts-instruct-flash"  # TTS 模型（qwen3-tts-instruct-flash / cosyvoice-v3.5-plus）
     narration_style: Optional[str] = "professional"  # 叙事风格
     narration_style_prompt: Optional[str] = None  # 自定义叙事风格prompt
     output_format: Optional[str] = "mp3"  # mp3/wav/m4b
@@ -123,7 +123,7 @@ class ChapterReviewStatus(BaseModel):
 
 
 class CosyVoiceCloneCreateRequest(BaseModel):
-    """CosyVoice v3-plus 声音复刻请求（支持 http/https 或 oss:// 临时 URL）。"""
+    """CosyVoice v3.5-plus 声音复刻请求（支持 http/https 或 oss:// 临时 URL）。"""
 
     # 用户希望显示的命名（可包含中文）。服务端会基于该名称自动生成合法 prefix。
     name: str

@@ -25,7 +25,7 @@ NARRATION_STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
             "default": 0,
         },
         "pause_multiplier": 1.0,  # 标准停顿
-        "supported_models": ["qwen3-tts-instruct-flash", "cosyvoice-v3-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"],
+        "supported_models": ["qwen3-tts-instruct-flash", "cosyvoice-v3.5-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"],
         "system_prompt_template": "请以专业、清晰、客观的语气朗读以下内容。语速适中，情感表达克制。",
     },
     "dramatic": {
@@ -48,7 +48,7 @@ NARRATION_STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
             "default": 0,
         },
         "pause_multiplier": 1.5,  # 增加停顿以增强戏剧效果
-        "supported_models": ["cosyvoice-v3-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"],
+        "supported_models": ["cosyvoice-v3.5-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"],
         "system_prompt_template": "请以富有戏剧性和情感张力的方式朗读以下内容。根据情节变化调整语气，对话要有角色感。",
     },
     "relaxing": {
@@ -71,7 +71,7 @@ NARRATION_STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
             "default": -1,
         },
         "pause_multiplier": 1.8,  # 更长停顿
-        "supported_models": ["qwen3-tts-instruct-flash", "cosyvoice-v3-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"],
+        "supported_models": ["qwen3-tts-instruct-flash", "cosyvoice-v3.5-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"],
         "system_prompt_template": "请以温和、舒缓、放松的语气朗读以下内容。语速较慢，语调轻柔。",
     },
     "expressive": {
@@ -94,7 +94,7 @@ NARRATION_STYLE_PRESETS: Dict[str, Dict[str, Any]] = {
             "default": 1,
         },
         "pause_multiplier": 1.2,
-        "supported_models": ["cosyvoice-v3-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"],
+        "supported_models": ["cosyvoice-v3.5-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"],
         "system_prompt_template": "请以生动、活泼、富有表现力的方式朗读以下内容。根据情节变化调整语气，适当夸张情感。",
     },
 }

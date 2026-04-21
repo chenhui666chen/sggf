@@ -1781,7 +1781,7 @@
   - 需要自然语言指令控制语气/场景的标准朗读
   limitations:
   - 当前链路重点支持 instructions，不建议输出 SSML
-  - 若需要更强的表现力控制，更适合使用 cosyvoice-v3-plus
+  - 若需要更强的表现力控制，可切换到 cosyvoice-v3.5-plus（需先准备复刻/设计音色）
   integration_notes:
   - 项目当前将 qwen3-tts-instruct-flash 作为默认有声书 TTS
   - 音色目录与说话人归一化逻辑已在 audiobook 服务中实现
@@ -1870,7 +1870,7 @@
         - 吞吐更高，适合批量合成
         - 支持通过自然语言 instructions 调整情绪、场景与身份
         disadvantage:
-        - 表现力仍弱于 cosyvoice-v3-plus
+        - 表现力仍弱于 cosyvoice-v3.5-plus
         - 不支持语音克隆
         - 不建议走 SSML 工作流
         recommended_use: 批量合成、标准朗读、成本敏感且需要 instructions 的场景
@@ -1896,10 +1896,10 @@
             \        model_id=\"qwen3-tts-instruct-flash\",\n        text=chapter,\n      \
             \  speaker=\"zhixiang\"\n    )\n    save_audio(f\"chapter_{i+1}.mp3\"\
             , audio)\n"
-- id: cosyvoice-v3-plus
-  name: CosyVoice v3 Plus
+- id: cosyvoice-v3.5-plus
+  name: CosyVoice v3.5 Plus
   provider: alibaba
-  version: v3
+  version: v3.5
   status: active
   modality:
   - text_to_speech
@@ -1926,10 +1926,10 @@
     source: 'TODO: verify from official docs'
     verified_at: '2026-04-17'
     confidence: medium
-  - name: preset_voices
+  - name: voice_design
     support_level: native
-    score: 0.9
-    description: 丰富的预设音色库
+    score: 0.82
+    description: 支持基于描述词设计音色
     source: 'TODO: verify from official docs'
     verified_at: '2026-04-17'
     confidence: medium
@@ -1940,28 +1940,33 @@
     overall_score: 8.8
     style_accuracy: 0.88
   avg_latency_seconds: 7.0
-  summary: 有声书子系统中使用的高表现力 TTS 与语音克隆选项。百炼语音合成与音色文档将 CosyVoice v3 Plus 描述为情绪表达更丰富、支持
-    instruct 控制的能力路径。
+  summary: 有声书子系统中使用的高表现力 TTS 与语音克隆/设计选项。CosyVoice v3.5 Plus 支持 instruction 控制，但不提供系统音色，
+    必须使用复刻或设计得到的 voice_id 才能进行合成。
   recommended_scenarios:
   - 高质量有声书渲染
   - 情绪浓度较高的场景
   - 语音克隆工作流
+  - 声音设计工作流
   - 角色化、表现力更强的旁白生成
   limitations:
+  - 不提供系统音色，接入前必须先准备复刻/设计音色
   - 成本更高、吞吐低于 qwen3-tts-instruct-flash
   - 由于需要处理音色管理与克隆生命周期，运维复杂度更高
   integration_notes:
-  - 项目已为该模型单独暴露克隆音色创建与管理接口
-  - audiobook 服务已选择性支持其 instruct 模式
+  - 项目已为该模型单独暴露复刻音色创建与管理接口
+  - audiobook 服务已切换为 cosyvoice-v3.5-plus，并校验 clone/design voice_id
+  - audiobook 服务已选择性支持其 instruction 模式
   - 更适合用于高质量或情绪密集型内容
-  documentation_url: https://help.aliyun.com/zh/model-studio/text-to-speech
+  documentation_url: https://help.aliyun.com/zh/model-studio/non-realtime-cosyvoice-api
   source_urls:
+  - https://help.aliyun.com/zh/model-studio/cosyvoice-websocket-api
+  - https://help.aliyun.com/zh/model-studio/non-realtime-cosyvoice-api
   - https://help.aliyun.com/zh/model-studio/cosyvoice-clone-design-api
-  - https://help.aliyun.com/zh/model-studio/models
   tags:
   - audio
   - tts
   - voice-clone
+  - voice-design
   - alibaba
   - premium
   - audiobook
@@ -1969,83 +1974,17 @@
   detailed_specs:
     voice_synthesis:
       voice_catalog:
-        categories:
-        - name: 标准音色
-          description: 适合日常旁白、新闻播报
-          voices:
-          - id: longxiaochun
-            name: 龙小淳
-            gender: female
-            description: 标准女声，清晰自然，适合旁白
-            emotion_tags:
-            - neutral
-            - happy
-            - serious
-            recommended_scenarios:
-            - 有声书旁白
-            - 新闻播报
-            - 教育内容
-          - id: longxiaobei
-            name: 龙小北
-            gender: male
-            description: 标准男声，稳重专业
-            emotion_tags:
-            - neutral
-            - serious
-            - calm
-            recommended_scenarios:
-            - 纪录片解说
-            - 企业宣传
-            - 教育内容
-          - id: yaoyao
-            name: 瑶瑶
-            gender: female
-            description: 甜美童声
-            emotion_tags:
-            - happy
-            - cute
-            - energetic
-            recommended_scenarios:
-            - 儿童故事
-            - 动画角色
-        - name: 情感音色
-          description: 适合情感丰富的内容
-          voices:
-          - id: wanwan
-            name: 婉婉
-            gender: female
-            description: 温柔女声，情感丰富
-            emotion_tags:
-            - love
-            - gentle
-            - sad
-            - tender
-            recommended_scenarios:
-            - 言情小说
-            - 情感故事
-            - 睡前故事
-          - id: chenchen
-            name: 沉沉
-            gender: male
-            description: 低沉男声，磁性魅力
-            emotion_tags:
-            - serious
-            - mysterious
-            - romantic
-            recommended_scenarios:
-            - 悬疑小说
-            - 言情男主
-            - 电影预告
-        total_count: 24
-        update_note: 音色库持续更新，以官方文档为准
+        categories: []
+        total_count: 0
+        update_note: 官方不提供系统音色；实际可用音色来自当前账号下的复刻/设计结果
       calling_method:
         param_name: speaker
         format: voice_id
         required: true
         example: "# Python 调用示例\nfrom core.unified_media_runtime import media_runtime\n\
           \naudio_bytes = await media_runtime.synthesize_speech(\n    model_id=\"\
-          cosyvoice-v3-plus\",\n    text=\"这是测试文本\",\n    speaker=\"longxiaochun\"\
-          ,\n    instruct=\"用开心的语气，语速稍快\"\n)\n"
+          cosyvoice-v3.5-plus\",\n    text=\"这是测试文本\",\n    speaker=\"cosyvoice-v3.5-plus-abc123\"\
+          ,\n    instructions=\"用开心的语气，语速稍快\"\n)\n"
       instruct_control:
         enabled: true
         param_name: instruct
@@ -2128,7 +2067,7 @@
         usage_example: "# 1. 创建克隆音色\nclone_response = await api_client.post(\"/api/v1/audiobook/voice-clones\"\
           , {\n  \"name\": \"我的角色音色\",\n  \"audio_file\": upload(audio),\n  \"description\"\
           : \"小说主角的音色\"\n})\nvoice_id = clone_response.id\n\n# 2. 使用克隆音色\naudio =\
-          \ await media_runtime.synthesize_speech(\n  model_id=\"cosyvoice-v3-plus\"\
+          \ await media_runtime.synthesize_speech(\n  model_id=\"cosyvoice-v3.5-plus\"\
           ,\n  text=\"这是用克隆音色合成的文本\",\n  speaker=voice_id\n)\n"
       timestamp_support:
         word_timestamps:

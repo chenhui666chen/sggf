@@ -163,7 +163,7 @@
   - https://help.aliyun.com/zh/model-studio/text-to-speech-syn
   - https://help.aliyun.com/zh/model-studio/getting-started/models
 
-### cosyvoice-v3-plus
+### cosyvoice-v3.5-plus
 
 - 定位：项目高表现力 TTS / 音色复刻模型
 - 适用：精品有声书、强情绪场景、角色差异化旁白、复刻音色

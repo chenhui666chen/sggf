@@ -981,7 +981,7 @@ class VoiceManager:
             "角色名": {
                 "voice_id": "male_young_energetic",
                 "volume": 60,
-                "tts_model": "cosyvoice-v3-plus"  # 🆕 可选，指定TTS模型
+                "tts_model": "cosyvoice-v3.5-plus"  # 🆕 可选，指定TTS模型
             }
         }
         

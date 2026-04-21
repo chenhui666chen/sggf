@@ -4,6 +4,12 @@ import logging
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional
 
+from .cosyvoice_clone_client import (
+    COSYVOICE_V35_PLUS_MODEL_ID,
+    get_clone_display_name,
+    is_legacy_cosyvoice_system_voice,
+    list_cosyvoice_v3_plus_clones,
+)
 from .voice_catalog import get_voice_entry, list_supported_voices
 
 logger = logging.getLogger(__name__)
@@ -21,7 +27,7 @@ class CosyVoiceV3PlusProfile:
 
     def get_tts_params(self, emotion: str = "neutral") -> Dict[str, Any]:
         emotion = (emotion or "").strip() or self.default_emotion or "neutral"
-        # cosyvoice-v3-plus 支持 instruct；这里仅按 emotion 控制是否开启 instruct 模式。
+        # cosyvoice-v3.5-plus 支持 instruction；这里仅按 emotion 控制是否开启 instruct 模式。
         return {
             "speaker": self.tts_speaker_id,
             "pitch": int(max(0, min(100, self.pitch_base))),
@@ -37,7 +43,7 @@ class CosyVoiceV3PlusProfile:
 
 class CosyVoiceV3PlusVoiceManager:
     """
-    CosyVoice v3-plus 专用 VoiceManager。
+    CosyVoice v3.5-plus 专用 VoiceManager。
 
     目标：
     - 声线 ID 空间与 qwen3-tts-instruct-flash 完全隔离（不做 legacy 映射）
@@ -45,7 +51,19 @@ class CosyVoiceV3PlusVoiceManager:
     """
 
     def __init__(self) -> None:
-        voices = list_supported_voices("cosyvoice-v3-plus")
+        voices = list_supported_voices(COSYVOICE_V35_PLUS_MODEL_ID)
+        try:
+            clones, _ = list_cosyvoice_v3_plus_clones()
+            voices.extend(
+                [
+                    c.to_voice_preset(get_clone_display_name(c.voice_id))
+                    for c in clones
+                    if str(c.status or "").strip().upper() == "OK"
+                ]
+            )
+        except Exception:
+            # 未配置 API Key 或当前环境无法访问时，保留本地静态目录（v3.5 为空表）
+            pass
         self._voices: List[Dict[str, Any]] = list(voices)
         self._voices_by_id: Dict[str, Dict[str, Any]] = {
             v.get("id"): v for v in self._voices if isinstance(v, dict) and v.get("id")
@@ -68,7 +86,7 @@ class CosyVoiceV3PlusVoiceManager:
         # fallback：取第一条
         if self._voices:
             return str(self._voices[0].get("id"))
-        return "longanyang"
+        return ""
 
     def _available_voice_ids(self, gender: str = "") -> List[str]:
         gender = (gender or "").strip().lower()
@@ -79,6 +97,8 @@ class CosyVoiceV3PlusVoiceManager:
         return list(self._voices_by_id.keys())
 
     def get_narrator_voice(self) -> CosyVoiceV3PlusProfile:
+        if not self._narrator_voice_id:
+            raise ValueError("cosyvoice-v3.5-plus 当前没有可用音色，请先创建复刻音色")
         return self._profiles_by_character.get("旁白") or self._create_profile(
             character_name="旁白",
             voice_id=self._narrator_voice_id,
@@ -101,7 +121,7 @@ class CosyVoiceV3PlusVoiceManager:
         gender = (traits.get("gender") or "").strip().lower()
         candidates = self._available_voice_ids(gender)
         if not candidates:
-            candidates = [self._narrator_voice_id]
+            raise ValueError("cosyvoice-v3.5-plus 当前没有可用音色，请先创建复刻音色")
 
         if gender == "female":
             voice_id = candidates[self._assign_cursor_female % len(candidates)]
@@ -137,7 +157,7 @@ class CosyVoiceV3PlusVoiceManager:
     ) -> CosyVoiceV3PlusProfile:
         voice_id = (voice_id or "").strip()
 
-        # 兼容旧占位音色 ID（历史项目配置可能写入这些值）
+        # cosyvoice-v3.5-plus 无系统音色，旧 v3-plus 内置音色需要用户重新选择复刻/设计音色。
         legacy_aliases = {
             "longanzhi_v3": "longanyang",
             "longanyun_v3": "longanyang",
@@ -146,10 +166,14 @@ class CosyVoiceV3PlusVoiceManager:
             "longanwen_v3": "longanhuan",
         }
         resolved_voice_id = legacy_aliases.get(voice_id, voice_id)
+        if is_legacy_cosyvoice_system_voice(resolved_voice_id):
+            raise ValueError(
+                "cosyvoice-v3.5-plus 不再支持旧版系统音色，请改用复刻/设计得到的 voice_id"
+            )
 
         entry = (
             self._voices_by_id.get(resolved_voice_id)
-            or get_voice_entry(resolved_voice_id, "cosyvoice-v3-plus")
+            or get_voice_entry(resolved_voice_id, COSYVOICE_V35_PLUS_MODEL_ID)
             or {}
         )
         # 允许用户输入“复刻音色 voice_id”等未收录于本地目录的声线。

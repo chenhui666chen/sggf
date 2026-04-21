@@ -2,9 +2,16 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from core.model_resolution import normalize_model_id
+
 from .voice_manager import VoiceManager
 from .voice_manager_cosyvoice_v3_plus import CosyVoiceV3PlusVoiceManager
 from .voice_manager_minimax import MiniMaxVoiceManager
+from .cosyvoice_clone_client import (
+    COSYVOICE_V35_PLUS_MODEL_ID,
+    COSYVOICE_V35_PLUS_VOICE_ID_PREFIX,
+    list_cosyvoice_v3_plus_clones,
+)
 
 
 # 模型 -> 音色目录文件的映射
@@ -12,7 +19,8 @@ MODEL_VOICE_MAPPING = {
     "qwen3-tts-instruct-flash": "qwen3-tts-instruct-flash",
     "qwen3-tts-flash": "qwen3-tts-instruct-flash",
     "qwen3-tts-plus": "qwen3-tts-instruct-flash",
-    "cosyvoice-v3-plus": "cosyvoice-v3-plus",
+    COSYVOICE_V35_PLUS_MODEL_ID: COSYVOICE_V35_PLUS_MODEL_ID,
+    "cosyvoice-v3-plus": COSYVOICE_V35_PLUS_MODEL_ID,
     "minimax-speech-2.8-hd": "minimax-speech-2.8",
     "minimax-speech-2.8-turbo": "minimax-speech-2.8",
     "minimax-speech-2.8": "minimax-speech-2.8",
@@ -35,10 +43,10 @@ MODEL_CONFIGS = {
         "quality_level": "high",
         "priority": 2,
     },
-    "cosyvoice-v3-plus": {
+    COSYVOICE_V35_PLUS_MODEL_ID: {
         "cost_level": "high",
         "quality_level": "premium",
-        "priority": 1,  # 高质量场景
+        "priority": 1,  # 高质量场景（需先创建复刻/设计音色）
     },
     "minimax-speech-2.8-hd": {
         "cost_level": "medium",
@@ -64,12 +72,24 @@ def get_model_for_voice(voice_id: str, preferred_model: str = None) -> str:
         适用的模型名称
     """
     from .voice_catalog import load_voice_catalog_for_model
-    
+
+    voice_id = str(voice_id or "").strip()
+    if voice_id.startswith(COSYVOICE_V35_PLUS_VOICE_ID_PREFIX):
+        return COSYVOICE_V35_PLUS_MODEL_ID
+
+    raw_preferred_model = str(preferred_model or "").strip() or None
+    preferred_model = normalize_model_id(preferred_model)
+
     # 先检查偏好模型是否支持该音色
-    if preferred_model:
-        catalog = load_voice_catalog_for_model(preferred_model)
+    for candidate_model in (raw_preferred_model, preferred_model):
+        if not candidate_model:
+            continue
+        try:
+            catalog = load_voice_catalog_for_model(candidate_model)
+        except Exception:
+            continue
         if voice_id in catalog.get("voices_by_id", {}):
-            return preferred_model
+            return normalize_model_id(candidate_model) or candidate_model
     
     # 遍历所有模型查找音色
     for model_key in MODEL_VOICE_MAPPING.values():
@@ -99,9 +119,16 @@ def suggest_model_for_character(
     Returns:
         推荐的模型名称
     """
+    def _has_cosyvoice_v35_clone_voice() -> bool:
+        try:
+            clones, _ = list_cosyvoice_v3_plus_clones(page_size=1, cache_ttl_seconds=5.0)
+        except Exception:
+            return False
+        return bool(clones)
+
     # 如果有用户偏好，优先使用
     if preferred_model:
-        return preferred_model
+        return normalize_model_id(preferred_model) or preferred_model
     
     # 根据角色重要性和成本优先级推荐模型
     if character_profile:
@@ -111,7 +138,9 @@ def suggest_model_for_character(
         # 主角/重要角色 → 高质量模型
         if importance in ["主角", "重要角色"] or role_position in ["主角", "女主角"]:
             if cost_priority != "low_cost":
-                return "cosyvoice-v3-plus"  # 高质量
+                if _has_cosyvoice_v35_clone_voice():
+                    return COSYVOICE_V35_PLUS_MODEL_ID
+                return "minimax-speech-2.8-hd"
         
         # 次要角色 → 平衡模型
         if importance in ["次要角色"]:
@@ -125,7 +154,9 @@ def suggest_model_for_character(
     
     # 默认根据成本优先级返回
     if cost_priority == "high_quality":
-        return "cosyvoice-v3-plus"
+        if _has_cosyvoice_v35_clone_voice():
+            return COSYVOICE_V35_PLUS_MODEL_ID
+        return "minimax-speech-2.8-hd"
     elif cost_priority == "low_cost":
         return "minimax-speech-2.8-turbo"
     else:
@@ -146,7 +177,7 @@ def list_supported_models() -> list:
     return [
         "qwen3-tts-instruct-flash",
         "qwen3-tts-plus",
-        "cosyvoice-v3-plus",
+        COSYVOICE_V35_PLUS_MODEL_ID,
         "minimax-speech-2.8-hd",
         "minimax-speech-2.8-turbo",
     ]
@@ -159,9 +190,9 @@ def list_all_models() -> list:
 
 def create_voice_manager(tts_model: str, llm_client: Any = None):
     """根据TTS模型创建对应的声音管理器"""
-    tts_model = (tts_model or "").strip() or "qwen3-tts-instruct-flash"
-    
-    if tts_model == "cosyvoice-v3-plus":
+    tts_model = (normalize_model_id(tts_model) or "").strip() or "qwen3-tts-instruct-flash"
+
+    if tts_model == COSYVOICE_V35_PLUS_MODEL_ID:
         return CosyVoiceV3PlusVoiceManager()
     elif tts_model.startswith("minimax-speech"):
         return MiniMaxVoiceManager()

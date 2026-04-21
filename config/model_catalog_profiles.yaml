@@ -287,13 +287,13 @@ profiles:
         reason: 它是项目当前默认有声书 TTS。
     best_practice_tips:
       - 适合批量合成、标准旁白以及用自然语言 instructions 描述情绪/场景的场景。
-      - 如需更强表现力，可升级到 cosyvoice-v3-plus。
+      - 如需更强表现力，可升级到 cosyvoice-v3.5-plus，但需要先创建复刻/设计音色。
     tooling_badges:
       - 默认 TTS
       - 批量合成
 
-  cosyvoice-v3-plus:
-    role_summary: 当前模型用于高表现力语音合成和音色克隆，适合角色化旁白与情绪浓度高的有声内容。
+  cosyvoice-v3.5-plus:
+    role_summary: 当前模型用于高表现力语音合成和音色克隆/设计，适合角色化旁白与情绪浓度高的有声内容，但没有系统音色。
     system_role: 你是有声剧表现力规划助手，负责情绪、语气、音色与 instruct 参数设计。
     prompt_patterns:
       - title: 表现力朗读模板
@@ -304,17 +304,17 @@ profiles:
           角色定位 + 声线目标 + 情绪变化 + 关键句强调方式
     router_rules:
       - when: 检测到高质量旁白、情绪化朗读、角色音色区分或音色克隆任务
-        action: 优先路由到 cosyvoice-v3-plus
+        action: 优先路由到 cosyvoice-v3.5-plus
         reason: 它是当前项目的高表现力音频模型。
     best_practice_tips:
       - 适合重点片段、情绪高潮和角色化演绎。
-      - 需要结合音色管理与 instruct 参数一起设计。
+      - 需要先准备复刻/设计音色，再结合 instruct 参数一起设计。
     tooling_badges:
       - 高表现力 TTS
       - 音色克隆
     project_entrypoints:
       - label: 高表现力语音入口
-        value: media_runtime.synthesize_speech(model_id="cosyvoice-v3-plus", ...)
+        value: media_runtime.synthesize_speech(model_id="cosyvoice-v3.5-plus", ...)
 
   mureka-o1-instrumental:
     role_summary: 当前模型用于资产工作台的纯音乐与氛围配乐生成，适合为镜头、预告片和有声内容快速出一版可试听配乐。

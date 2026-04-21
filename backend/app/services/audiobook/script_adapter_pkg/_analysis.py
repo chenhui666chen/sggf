@@ -39,10 +39,10 @@ class AnalysisMixin:
         
         model_name = (getattr(self, "tts_model", None) or "qwen3-tts-instruct-flash").strip()
         if "plus" in model_name:
-            tts_block = "**当前TTS模型：CosyVoice v3-plus（精品模式）**\n- 适合：精品章节 / 情绪层次丰富场景\n- 特性：精细情感控制、停顿/重音/语调变化能力极强，音质最佳\n- 成本：相对更高，适合高光章节与关键桥段\n"
+            tts_block = "**当前TTS模型：CosyVoice v3.5-plus（精品模式）**\n- 适合：精品章节 / 情绪层次丰富场景\n- 特性：精细情感控制、instruction 演绎能力强，但必须使用复刻/设计音色\n- 成本：相对更高，适合高光章节与关键桥段\n"
             instruct_block = (
                 "**Instruct 情绪提示（CosyVoice 专用）**\n"
-                "- cosyvoice-v3-plus 内置音色仅 2 种：longanyang（男）/ longanhuan（女），均支持 Instruct/SSML\n"
+                "- cosyvoice-v3.5-plus 无系统音色，请默认假设上游已经选定复刻/设计 voice_id\n"
                 "- 请在 performance_notes 中写清角色身份、场景张力、目标语气（如【愤怒/紧张/平静】），便于后续注入 instruction\n"
             )
         else:

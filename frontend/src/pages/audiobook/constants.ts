@@ -2,28 +2,28 @@ import type { StageConfig, StageKey, StageStatus, TtsModel } from './types'
 
 export const DEFAULT_NARRATOR_BY_MODEL: Record<TtsModel, string> = {
   'qwen3-tts-instruct-flash': 'Neil',
-  'cosyvoice-v3-plus': 'longanyang',
+  'cosyvoice-v3.5-plus': '',
   'minimax-speech-2.8-hd': 'male-qn-jingying',
   'minimax-speech-2.8-turbo': 'male-qn-jingying',
 }
 
 export const TTS_MODEL_LABELS: Record<TtsModel, string> = {
   'qwen3-tts-instruct-flash': 'Qwen3-TTS Instruct Flash',
-  'cosyvoice-v3-plus': 'CosyVoice v3-plus',
+  'cosyvoice-v3.5-plus': 'CosyVoice v3.5-plus',
   'minimax-speech-2.8-hd': 'MiniMax HD',
   'minimax-speech-2.8-turbo': 'MiniMax Turbo',
 }
 
 export const isTtsModel = (value: unknown): value is TtsModel =>
   value === 'qwen3-tts-instruct-flash'
-  || value === 'cosyvoice-v3-plus'
+  || value === 'cosyvoice-v3.5-plus'
   || value === 'minimax-speech-2.8-hd'
   || value === 'minimax-speech-2.8-turbo'
 
 export const getTtsModelLabel = (model: TtsModel) => TTS_MODEL_LABELS[model]
 
 export const getDefaultNarratorId = (model: TtsModel) =>
-  DEFAULT_NARRATOR_BY_MODEL[model] || 'Neil'
+  DEFAULT_NARRATOR_BY_MODEL[model] || (model === 'cosyvoice-v3.5-plus' ? '' : 'Neil')
 
 export const QWEN_FLASH_ONLY_TO_INSTRUCT: Record<string, string> = {
   Aiden: 'Ethan',
@@ -95,7 +95,9 @@ export const normalizeVoiceId = (
     longwanjun_v3: 'longanhuan',
     longanwen_v3: 'longanhuan',
   }
-  return cosyvoiceV3PlusLegacyAliases[voiceId] || voiceId
+  const normalizedVoiceId = cosyvoiceV3PlusLegacyAliases[voiceId] || voiceId
+  const legacyCosyvoiceSystemVoices = new Set(['longanyang', 'longanhuan'])
+  return legacyCosyvoiceSystemVoices.has(normalizedVoiceId) ? '' : normalizedVoiceId
 }
 
 export const STAGE_CONFIG: StageConfig[] = [

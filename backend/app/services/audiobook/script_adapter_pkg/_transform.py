@@ -111,18 +111,13 @@ class TransformMixin:
         
         model_name = (getattr(self, "tts_model", None) or "qwen3-tts-instruct-flash").strip()
         if "plus" in model_name:
-            tts_block = """**当前TTS模型：CosyVoice v3-plus（精品模式）**\n- 适合：精品章节 / 情绪层次丰富场景\n- 特性：精细情感控制、停顿/重音/语调变化能力极强，音质最佳\n"""
+            tts_block = """**当前TTS模型：CosyVoice v3.5-plus（精品模式）**\n- 适合：精品章节 / 情绪层次丰富场景\n- 特性：精细情感控制、instruction 演绎能力强，但必须使用复刻/设计音色\n"""
             instruct_block = (
-                "**Instruct 提示（cosyvoice-v3-plus）**\n"
-                "- 内置音色仅 2 种：longanyang（男）/ longanhuan（女），均支持 Instruct/SSML\n"
+                "**Instruct 提示（cosyvoice-v3.5-plus）**\n"
+                "- 无系统音色，请默认上游已选择复刻/设计 voice_id\n"
                 "- 请输出结构化指令字段：instruct_emotion / instruct_scene / instruct_role / instruct_identity\n"
                 "- instruct_emotion 取值：neutral、fearful、angry、sad、surprised、happy、disgusted\n"
-                "- instruct_scene（不适用留空）：\n"
-                "  - longanyang：闲聊互动、新闻播报、广告促销、比赛解说、一些儿童内容解说、语音导航、脱口秀表演\n"
-                "  - longanhuan：闲聊对话、比赛解说、深夜电台广播、诗歌朗诵、科普知识推广、产品推广、脱口秀表演\n"
-                "- instruct_role（不适用留空）：longanyang=一个旁白；longanhuan=温和客服\n"
-                "- instruct_identity（不适用留空）：longanyang=故事机；longanhuan 无\n"
-                "- scene/role/identity 三者最多选其一，其余留空\n"
+                "- 请优先输出通用自然语言约束，不要依赖固定内置音色枚举\n"
             )
         else:
             tts_block = """**当前TTS模型：Qwen3-TTS Instruct Flash（默认模式）**\n- 适合：长篇连载 / 日更章节 / 成本敏感但需要一定表现力的内容\n- 特性：49 音色、稳定性强、成本低，并支持通过自然语言 instructions 控制语气与演绎\n- 限制：当前链路重点是 instructions，不要输出 SSML 语法\n"""
@@ -263,8 +258,8 @@ class TransformMixin:
 - 只输出JSON数组，不要添加任何//注释或/*注释*/
 - 不要在JSON中添加解释性文字
 - emotion字段必须使用推荐情感之一，不要自行发明
-- instruct_emotion 可用于 qwen3-tts-instruct-flash / cosyvoice-v3-plus；CosyVoice 请使用 neutral、fearful、angry、sad、surprised、happy、disgusted
-- instruct_scene / instruct_role / instruct_identity 可用于 qwen3-tts-instruct-flash；若当前模型是 cosyvoice-v3-plus，请遵守官方可选项并尽量三者择一
+- instruct_emotion 可用于 qwen3-tts-instruct-flash / cosyvoice-v3.5-plus；CosyVoice 请使用 neutral、fearful、angry、sad、surprised、happy、disgusted
+- instruct_scene / instruct_role / instruct_identity 可用于 qwen3-tts-instruct-flash / cosyvoice-v3.5-plus；CosyVoice 请输出通用自然语言约束，不要依赖固定系统音色枚举
 - voice_params必须包含rate和pitch参数，根据情感调整
 - pause_before/after单位为秒，范围：0.1-2.0
 - 优先使用happy/sad/tense等有强烈情感的标签，避免过多使用neutral

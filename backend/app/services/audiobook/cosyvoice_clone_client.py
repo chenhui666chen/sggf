@@ -11,7 +11,18 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
 
-_COSYVOICE_V3_PLUS_VOICE_ID_PREFIX = "cosyvoice-v3-plus-"
+COSYVOICE_V35_PLUS_MODEL_ID = "cosyvoice-v3.5-plus"
+COSYVOICE_V35_PLUS_VOICE_ID_PREFIX = "cosyvoice-v3.5-plus-"
+_LEGACY_COSYVOICE_V3_PLUS_VOICE_ID_PREFIX = "cosyvoice-v3-plus-"
+_LEGACY_COSYVOICE_SYSTEM_VOICES = {
+    "longanyang",
+    "longanhuan",
+    "longanzhi_v3",
+    "longanyun_v3",
+    "longyichen_v3",
+    "longwanjun_v3",
+    "longanwen_v3",
+}
 _DEFAULT_CACHE_TTL_SECONDS = 30.0
 _PREFIX_MAX_LEN = 10
 
@@ -25,6 +36,14 @@ def _require_dashscope_api_key() -> str:
     if not api_key:
         raise CosyVoiceCloneError("未配置 DASHSCOPE_API_KEY")
     return api_key
+
+
+def is_cosyvoice_v35_plus_voice_id(voice_id: str) -> bool:
+    return str(voice_id or "").strip().startswith(COSYVOICE_V35_PLUS_VOICE_ID_PREFIX)
+
+
+def is_legacy_cosyvoice_system_voice(voice_id: str) -> bool:
+    return str(voice_id or "").strip() in _LEGACY_COSYVOICE_SYSTEM_VOICES
 
 
 def _build_safe_upload_filename(filename: str) -> str:
@@ -82,7 +101,7 @@ def _normalize_cosyvoice_audio_url(audio_url: str) -> str:
         key = url[len("oss://"):]
         if not key:
             raise CosyVoiceCloneError("oss:// 地址不能为空")
-        policy = _get_dashscope_upload_policy("cosyvoice-v3-plus")
+        policy = _get_dashscope_upload_policy(COSYVOICE_V35_PLUS_MODEL_ID)
         public_url = _build_public_oss_url(policy.get("upload_host"), key)
         if public_url:
             return public_url
@@ -149,10 +168,15 @@ def get_clone_display_name(voice_id: str) -> Optional[str]:
 
 def _extract_prefix_from_voice_id(voice_id: str) -> str:
     voice_id = (voice_id or "").strip()
-    if not voice_id.startswith(_COSYVOICE_V3_PLUS_VOICE_ID_PREFIX):
+    known_prefix = ""
+    if voice_id.startswith(COSYVOICE_V35_PLUS_VOICE_ID_PREFIX):
+        known_prefix = COSYVOICE_V35_PLUS_VOICE_ID_PREFIX
+    elif voice_id.startswith(_LEGACY_COSYVOICE_V3_PLUS_VOICE_ID_PREFIX):
+        known_prefix = _LEGACY_COSYVOICE_V3_PLUS_VOICE_ID_PREFIX
+    if not known_prefix:
         return ""
-    # cosyvoice-v3-plus-{prefix}-{random}
-    tail = voice_id[len(_COSYVOICE_V3_PLUS_VOICE_ID_PREFIX) :]
+    # cosyvoice-v3.5-plus-{prefix}-{random}
+    tail = voice_id[len(known_prefix) :]
     parts = tail.split("-")
     if len(parts) >= 2:
         return parts[0]
@@ -229,7 +253,7 @@ def upload_cosyvoice_v3_plus_clone_sample(
     if not content:
         raise CosyVoiceCloneError("音频文件为空")
 
-    policy = _get_dashscope_upload_policy("cosyvoice-v3-plus")
+    policy = _get_dashscope_upload_policy(COSYVOICE_V35_PLUS_MODEL_ID)
     required_fields = (
         "upload_host",
         "upload_dir",
@@ -292,7 +316,7 @@ def upload_cosyvoice_v3_plus_clone_sample(
 
 
 def create_cosyvoice_v3_plus_clone(*, prefix: str, audio_url: str) -> Dict[str, Any]:
-    """创建 cosyvoice-v3-plus 复刻音色。
+    """创建 cosyvoice-v3.5-plus 复刻音色。
 
     说明：
     - 使用 oss:// 临时 URL 时，需要通过 X-DashScope-OssResourceResolve 进行解析。
@@ -320,7 +344,7 @@ def create_cosyvoice_v3_plus_clone(*, prefix: str, audio_url: str) -> Dict[str, 
         service = VoiceEnrollmentService(api_key=api_key, headers=headers or {})
         return str(
             service.create_voice(
-                target_model="cosyvoice-v3-plus",
+                target_model=COSYVOICE_V35_PLUS_MODEL_ID,
                 prefix=prefix,
                 url=url,
             )
@@ -364,7 +388,7 @@ def list_cosyvoice_v3_plus_clones(
     page_size: int = 50,
     cache_ttl_seconds: float = _DEFAULT_CACHE_TTL_SECONDS,
 ) -> Tuple[List[CosyVoiceClone], Dict[str, Any]]:
-    """列出 cosyvoice-v3-plus 的复刻音色（按当前 API Key 下的 voice_id 过滤）。"""
+    """列出 cosyvoice-v3.5-plus 的复刻音色（按当前 API Key 下的 voice_id 过滤）。"""
     prefix = (prefix or "").strip() or None
 
     if prefix and not re.fullmatch(r"[A-Za-z0-9_]{1,10}", prefix):
@@ -397,7 +421,7 @@ def list_cosyvoice_v3_plus_clones(
         if not isinstance(item, dict):
             continue
         voice_id = (item.get("voice_id") or "").strip()
-        if not voice_id.startswith(_COSYVOICE_V3_PLUS_VOICE_ID_PREFIX):
+        if not voice_id.startswith(COSYVOICE_V35_PLUS_VOICE_ID_PREFIX):
             continue
         clones.append(
             CosyVoiceClone(
@@ -422,8 +446,8 @@ def list_cosyvoice_v3_plus_clones(
 
 def delete_cosyvoice_clone(*, voice_id: str) -> Dict[str, Any]:
     voice_id = (voice_id or "").strip()
-    if not voice_id.startswith(_COSYVOICE_V3_PLUS_VOICE_ID_PREFIX):
-        raise CosyVoiceCloneError("仅允许删除 cosyvoice-v3-plus 的复刻音色")
+    if not voice_id.startswith(COSYVOICE_V35_PLUS_VOICE_ID_PREFIX):
+        raise CosyVoiceCloneError("仅允许删除 cosyvoice-v3.5-plus 的复刻音色")
 
     api_key = _require_dashscope_api_key()
     try:

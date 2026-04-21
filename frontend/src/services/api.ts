@@ -1291,19 +1291,19 @@ class ApiClient {
   }
 
   createCosyVoiceV3PlusClone(payload: { name: string; url: string }) {
-    return this.client.post('/api/v1/audiobook/tts/voices/cosyvoice-v3-plus/clones', payload)
+    return this.client.post('/api/v1/audiobook/tts/voices/cosyvoice-v3.5-plus/clones', payload)
   }
 
   deleteCosyVoiceV3PlusClone(voiceId: string) {
     return this.client.delete(
-      `/api/v1/audiobook/tts/voices/cosyvoice-v3-plus/clones/${encodeURIComponent(voiceId)}`
+      `/api/v1/audiobook/tts/voices/cosyvoice-v3.5-plus/clones/${encodeURIComponent(voiceId)}`
     )
   }
 
   uploadCosyVoiceV3PlusCloneSample(file: File) {
     const form = new FormData()
     form.append('file', file)
-    return this.client.post('/api/v1/audiobook/tts/voices/cosyvoice-v3-plus/clones/upload', form, {
+    return this.client.post('/api/v1/audiobook/tts/voices/cosyvoice-v3.5-plus/clones/upload', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 60000,
     })

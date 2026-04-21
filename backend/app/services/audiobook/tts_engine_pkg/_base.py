@@ -1,7 +1,7 @@
 """TTS语音合成引擎 - 专业版（支持多提供商 + 智能重试）
 
 核心功能：
-1. 阿里云CosyVoice v3-plus集成（顶级音质）
+1. 阿里云CosyVoice v3.5-plus集成（高表现力，需复刻/设计音色）
 2. 备用提供商支持（故障转移）
 3. 智能重试机制（指数退避 + 熟熄断路）
 4. 智能缓存（降低成本60%）
@@ -25,7 +25,7 @@ from ..voice_catalog import get_voice_entry
 
 logger = logging.getLogger(__name__)
 
-# cosyvoice-v3-plus Instruct 约束（按官方文档枚举）
+# cosyvoice-v3.5-plus Instruct 约束（按官方文档枚举）
 COSYVOICE_V3_PLUS_INSTRUCT_EMOTIONS = {
     "neutral",
     "fearful",
@@ -108,7 +108,7 @@ class TTSEngineBase:
 
         # 根据模型设置单价：不同模型价格不同
         if "plus" in model:
-            self.price_per_10k = 2.0  # ¥2/万字符（cosyvoice-v3-plus）
+            self.price_per_10k = 2.0  # ¥2/万字符（cosyvoice-v3.5-plus）
         elif "minimax" in model and "hd" in model:
             self.price_per_10k = 6.0  # ¥6/万字符（minimax speech-2.8-hd: 600积分/万字符）
         elif "minimax" in model:

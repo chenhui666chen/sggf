@@ -363,8 +363,9 @@ class MinimaxMixin:
         return str(self.model).startswith("qwen3-tts")
 
     def _is_cosyvoice_v3_plus(self) -> bool:
-        """判断当前引擎是否为 cosyvoice-v3-plus 模型。"""
-        return str(self.model).startswith("cosyvoice-v3-plus")
+        """判断当前引擎是否为 CosyVoice 模型（兼容 v3-plus/v3.5-plus 别名）。"""
+        model = str(self.model).strip().lower()
+        return model.startswith("cosyvoice-v3.5-plus") or model.startswith("cosyvoice-v3-plus")
 
     def _normalize_emotion(self, emotion: str) -> str:
         """按模型能力归一化情感标签。"""
@@ -403,19 +404,23 @@ class MinimaxMixin:
         return str(text or "").lstrip().lower().startswith("<speak")
 
     def _supports_ssml(self, speaker_id: str) -> bool:
+        from app.services.audiobook.cosyvoice_clone_client import is_cosyvoice_v35_plus_voice_id
+
         if not self._is_cosyvoice_v3_plus():
             return False
-        entry = get_voice_entry(str(speaker_id or ""), "cosyvoice-v3-plus")
+        entry = get_voice_entry(str(speaker_id or ""), "cosyvoice-v3.5-plus")
         if entry is None:
-            return True
+            return is_cosyvoice_v35_plus_voice_id(speaker_id)
         return bool(entry.get("supportsSsml", False))
 
     def _supports_instruction(self, speaker_id: str) -> bool:
+        from app.services.audiobook.cosyvoice_clone_client import is_cosyvoice_v35_plus_voice_id
+
         if not self._is_cosyvoice_v3_plus():
             return speaker_id in INSTRUCT_SPEAKER_IDS
-        entry = get_voice_entry(str(speaker_id or ""), "cosyvoice-v3-plus")
+        entry = get_voice_entry(str(speaker_id or ""), "cosyvoice-v3.5-plus")
         if entry is None:
-            return False
+            return is_cosyvoice_v35_plus_voice_id(speaker_id)
         return bool(entry.get("supportsInstruct", False))
 
     def _escape_ssml_text(self, value: str) -> str:

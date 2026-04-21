@@ -163,10 +163,10 @@ class Qwen3TTSInstructFlashAdapter(BaseAdapter):
         )
 
 
-@register_model("cosyvoice-v3-plus")
-class CosyVoiceV3PlusAdapter(BaseAdapter):
-    MODEL_ID = "cosyvoice-v3-plus"
-    VOICE_ID = "longanyang"
+@register_model("cosyvoice-v3.5-plus")
+class CosyVoiceV35PlusAdapter(BaseAdapter):
+    MODEL_ID = "cosyvoice-v3.5-plus"
+    VOICE_ID = ""
 
     def _map_task_to_request(self, task):
         return {"text": task.prompt}
@@ -192,23 +192,36 @@ class CosyVoiceV3PlusAdapter(BaseAdapter):
                 "Authorization": f"bearer {DASHSCOPE_API_KEY}",
                 "X-DashScope-DataInspection": "enable",
             }
+            voice_id = str(kwargs.get("voice_id") or self.VOICE_ID).strip()
+            if not voice_id:
+                return GenerationResult(
+                    success=False,
+                    task_id="",
+                    model_id=self.spec.id,
+                    error="cosyvoice-v3.5-plus 需要传入复刻/设计 voice_id",
+                    latency=time.time() - start,
+                )
 
             def on_open(ws):
                 task_id = str(uuid.uuid4())
+                parameters = {
+                    "text_type": "PlainText",
+                    "voice": voice_id,
+                    "format": kwargs.get("format", "mp3"),
+                    "sample_rate": kwargs.get("sample_rate", 22050),
+                    "volume": kwargs.get("volume", 50),
+                    "rate": kwargs.get("rate", 1.0),
+                    "pitch": kwargs.get("pitch", 1.0),
+                }
+                instruction = str(kwargs.get("instruction") or kwargs.get("instructions") or "").strip()
+                if instruction:
+                    parameters["instruction"] = instruction
                 run_task_cmd = {
                     "header": {"action": "run-task", "task_id": task_id, "streaming": "duplex"},
                     "payload": {
                         "task_group": "audio", "task": "tts",
                         "function": "SpeechSynthesizer", "model": self.MODEL_ID,
-                        "parameters": {
-                            "text_type": "PlainText",
-                            "voice": kwargs.get("voice_id", self.VOICE_ID),
-                            "format": kwargs.get("format", "mp3"),
-                            "sample_rate": kwargs.get("sample_rate", 22050),
-                            "volume": kwargs.get("volume", 50),
-                            "rate": kwargs.get("rate", 1.0),
-                            "pitch": kwargs.get("pitch", 1.0),
-                        },
+                        "parameters": parameters,
                         "input": {},
                     },
                 }
@@ -279,7 +292,7 @@ class CosyVoiceV3PlusAdapter(BaseAdapter):
     @classmethod
     def get_model_spec(cls) -> ModelSpec:
         return ModelSpec(
-            id="cosyvoice-v3-plus", name="CosyVoice V3 Plus", provider="alibaba", version="v3",
+            id="cosyvoice-v3.5-plus", name="CosyVoice V3.5 Plus", provider="alibaba", version="v3.5",
             status=ModelStatus.ACTIVE, modality=["text_to_speech"], avg_latency_seconds=3.0,
         )
 

@@ -23,7 +23,7 @@ class AudiobookScriptAgentBase:
         """
         Args:
             llm_client: LLM客户端（必需，支持UnifiedLLMClient或自定义）
-            tts_model: 当前使用的TTS模型（如 qwen3-tts-instruct-flash / cosyvoice-v3-plus）
+            tts_model: 当前使用的TTS模型（如 qwen3-tts-instruct-flash / cosyvoice-v3.5-plus）
             strategy: AudioDirector的AdaptationStrategy（包含语义完整性约束）
         """
         if llm_client is None:

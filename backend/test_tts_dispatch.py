@@ -22,7 +22,7 @@ def test_model_registration():
         "MiniMax/speech-2.8-turbo",
         "MiniMax/speech-2.8-hd",
         "qwen3-tts-instruct-flash",
-        "cosyvoice-v3-plus",
+        "cosyvoice-v3.5-plus",
     ]
     
     for model_id in expected_models:

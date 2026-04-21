@@ -295,7 +295,7 @@ NGINX_SSL_KEY_PATH=/etc/letsencrypt/live/sggf.net/privkey.pem
 
 - 默认模型：`qwen3-tts-instruct-flash`
 - 凭证复用 `DASHSCOPE_API_KEY`
-- 可按项目切换到 `cosyvoice-v3-plus`
+- 可按项目切换到 `cosyvoice-v3.5-plus`（需先准备复刻/设计音色）
 - 历史别名 `qwen3_tts` 与旧值 `qwen3-tts-flash` 会统一归一化到 `qwen3-tts-instruct-flash`
 - 统一 TTS 返回同时兼容 `audio_bytes`、`audio_data(base64)`、`tts_timestamps`、`phoneme_timestamps`
 - 前端音色配置主要位于 `frontend/src/pages/AudiobookPage.tsx`
