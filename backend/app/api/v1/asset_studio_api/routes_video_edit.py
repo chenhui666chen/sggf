@@ -30,6 +30,13 @@ router = APIRouter(prefix="/api/v1/asset-studio", tags=["asset-studio"])
 from app.api.v1.asset_studio_api import router
 from app.api.v1.asset_studio_api._constants import *
 from app.api.v1.asset_studio_api._helpers import *
+from app.api.v1.asset_studio_api._helpers import (
+    _build_response,
+    _raise_for_failed_result,
+    _save_upload_file,
+    _validate_dimensions_for_models,
+    _validate_video_duration,
+)
 
 @router.post("/video-edit", response_model=AssetStudioGenerateResponse)
 async def generate_video_edit_asset(

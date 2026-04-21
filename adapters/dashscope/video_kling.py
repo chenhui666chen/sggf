@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 import json
+import requests
 from typing import Any, Dict, List, Optional
 
 from adapters.base import BaseAdapter, AdapterConfig, GenerationResult

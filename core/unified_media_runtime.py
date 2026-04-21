@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
@@ -748,7 +749,7 @@ class UnifiedMediaRuntime:
             )
 
         try:
-            result = adapter.generate(task)
+            result = self._invoke_adapter_generate(adapter, task)
         except Exception as exc:
             return UnifiedMediaResult.from_error(
                 model_id=model_id,
@@ -760,6 +761,93 @@ class UnifiedMediaRuntime:
         runtime_result = UnifiedMediaResult.from_adapter_result(result)
         runtime_result.latency = max(runtime_result.latency, time.perf_counter() - start_time)
         return runtime_result
+
+    def _invoke_adapter_generate(self, adapter: Any, task: TaskSpec) -> Any:
+        generate = getattr(adapter, "generate")
+        if self._adapter_generate_accepts_task(generate):
+            return generate(task)
+        return generate(**self._build_legacy_adapter_kwargs(task))
+
+    def _adapter_generate_accepts_task(self, generate: Any) -> bool:
+        try:
+            signature = inspect.signature(generate)
+        except (TypeError, ValueError):
+            return True
+
+        parameters = list(signature.parameters.values())
+        if not parameters:
+            return False
+        first = parameters[0]
+        return first.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ) and first.name == "task"
+
+    def _build_legacy_adapter_kwargs(self, task: TaskSpec) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "prompt": task.prompt,
+            "negative_prompt": task.negative_prompt or "",
+            "width": task.width,
+            "height": task.height,
+            "style": task.style,
+            "quality": task.quality,
+            "seed": task.seed,
+            "camera_control": task.camera_control,
+            "motion_control": task.motion_control,
+            "num_outputs": task.num_outputs,
+            "async_mode": task.async_mode,
+        }
+        if task.duration is not None:
+            payload["duration"] = task.duration
+        if task.width > 0 and task.height > 0:
+            payload["size"] = f"{task.width}*{task.height}"
+
+        if task.reference:
+            images = list(task.reference.images or [])
+            videos = list(task.reference.videos or [])
+            if images:
+                payload["image_path"] = images[0]
+                payload["image_paths"] = images
+                if len(images) > 1:
+                    payload["reference_images"] = images[1:]
+            if videos:
+                payload["video_path"] = videos[0]
+                if len(videos) > 1:
+                    payload["reference_videos"] = videos[1:]
+
+        for key, value in (task.extra or {}).items():
+            payload.setdefault(key, value)
+
+        modality_value = str(task.modality.value or "")
+        if "video" in modality_value:
+            parameters = dict(payload.get("parameters") or {})
+            if task.duration is not None:
+                duration_value = float(task.duration)
+                parameters.setdefault(
+                    "duration",
+                    int(duration_value) if duration_value.is_integer() else duration_value,
+                )
+            if task.width > 0 and task.height > 0:
+                parameters.setdefault("resolution", self._pick_legacy_resolution_label(task.width, task.height))
+                parameters.setdefault("size", f"{task.width}*{task.height}")
+            if task.ratio:
+                parameters.setdefault("aspect_ratio", task.ratio)
+            if task.camera_control:
+                parameters.setdefault("camera_movement", task.camera_control)
+            if task.motion_control:
+                parameters.setdefault("motion_intensity", task.motion_control)
+            if parameters:
+                payload["parameters"] = parameters
+
+        return payload
+
+    def _pick_legacy_resolution_label(self, width: int, height: int) -> str:
+        short_edge = min(int(width or 0), int(height or 0))
+        if short_edge <= 480:
+            return "480P"
+        if short_edge <= 720:
+            return "720P"
+        return "1080P"
 
     def _execute_custom_registry_method(
         self,
@@ -849,10 +937,19 @@ class UnifiedMediaRuntime:
         runtime_index = runtime_index or get_model_catalog_runtime_index()
         task_constraints = runtime_index.get_task_constraints(spec.id)
         capability_hints = runtime_index.get_capability_hints(spec.id)
+        spec_duration_constraints = self._extract_duration_constraints(spec.constraints.duration)
 
         effective_constraints = {
             "duration_values": self._coerce_float_list(task_constraints.get("duration_values"))
-            or [float(value) for value in spec.constraints.duration or []],
+            or spec_duration_constraints["values"],
+            "duration_min": self._coerce_float(
+                task_constraints.get("duration_min"),
+                spec_duration_constraints["min"],
+            ),
+            "duration_max": self._coerce_float(
+                task_constraints.get("duration_max"),
+                spec_duration_constraints["max"],
+            ),
             "ratio_values": self._coerce_str_list(task_constraints.get("ratio_values"))
             or [str(value) for value in spec.constraints.ratios or []],
             "min_width": self._coerce_int(task_constraints.get("min_width"), spec.constraints.min_width),
@@ -872,9 +969,18 @@ class UnifiedMediaRuntime:
             return False
 
         duration_values = effective_constraints["duration_values"]
-        if task.duration is not None and duration_values:
-            if not any(abs(value - float(task.duration)) < 0.1 for value in duration_values):
-                return False
+        if task.duration is not None:
+            task_duration = float(task.duration)
+            if duration_values:
+                if not any(abs(value - task_duration) < 0.1 for value in duration_values):
+                    return False
+            else:
+                duration_min = effective_constraints["duration_min"]
+                duration_max = effective_constraints["duration_max"]
+                if duration_min is not None and task_duration < duration_min - 0.1:
+                    return False
+                if duration_max is not None and task_duration > duration_max + 0.1:
+                    return False
 
         ratio_values = effective_constraints["ratio_values"]
         if task.ratio and ratio_values and task.ratio not in ratio_values:
@@ -920,6 +1026,14 @@ class UnifiedMediaRuntime:
 
         return True
 
+    def _coerce_float(self, value: Any, default: Optional[float] = None) -> Optional[float]:
+        try:
+            if value is None or value == "":
+                return float(default) if default is not None else None
+            return float(value)
+        except (TypeError, ValueError):
+            return float(default) if default is not None else None
+
     def _coerce_int(self, value: Any, default: Optional[int] = None) -> Optional[int]:
         try:
             if value is None or value == "":
@@ -927,6 +1041,41 @@ class UnifiedMediaRuntime:
             return int(value)
         except (TypeError, ValueError):
             return int(default) if default is not None else None
+
+    def _extract_duration_constraints(self, raw_duration: Any) -> Dict[str, Any]:
+        if isinstance(raw_duration, dict):
+            values = self._coerce_float_list(
+                raw_duration.get("supported_values")
+                or raw_duration.get("values")
+                or raw_duration.get("options")
+            )
+            duration_min = self._coerce_float(
+                raw_duration.get("min"),
+                self._coerce_float(raw_duration.get("min_seconds")),
+            )
+            duration_max = self._coerce_float(
+                raw_duration.get("max"),
+                self._coerce_float(raw_duration.get("max_seconds")),
+            )
+            if not values and duration_min is None and duration_max is None:
+                default_value = self._coerce_float(raw_duration.get("default"))
+                if default_value is not None:
+                    values = [default_value]
+            return {
+                "values": values,
+                "min": duration_min,
+                "max": duration_max,
+            }
+
+        values = self._coerce_float_list(raw_duration)
+        if values:
+            return {"values": values, "min": None, "max": None}
+
+        scalar = self._coerce_float(raw_duration)
+        if scalar is not None:
+            return {"values": [scalar], "min": None, "max": None}
+
+        return {"values": [], "min": None, "max": None}
 
     def _coerce_float_list(self, values: Any) -> List[float]:
         if not isinstance(values, list):

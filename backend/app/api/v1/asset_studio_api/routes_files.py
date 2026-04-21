@@ -30,6 +30,7 @@ router = APIRouter(prefix="/api/v1/asset-studio", tags=["asset-studio"])
 from app.api.v1.asset_studio_api import router
 from app.api.v1.asset_studio_api._constants import *
 from app.api.v1.asset_studio_api._helpers import *
+from app.api.v1.asset_studio_api._helpers import _resolve_output_file
 
 @router.get("/files/{file_path:path}")
 def get_asset_studio_output_file(file_path: str):

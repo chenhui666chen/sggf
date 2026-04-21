@@ -40,6 +40,20 @@ from app.api.v1.asset_studio_api._constants import (
     VIDEO_FILE_SUFFIXES,
     ASSET_STUDIO_UPLOAD_DIR,
     ASSET_STUDIO_OUTPUT_DIR,
+    ALLOWED_OUTPUT_FILE_SUFFIXES,
+    DEFAULT_OUTPUT_SUFFIXES,
+    MEDIA_KIND_BY_RESULT_KIND,
+    MUSIC_STYLE_ALIASES,
+    VISION_REVIEW_CRITERIA,
+    VISION_CRITERION_ALIASES,
+    VISION_CRITERION_LABELS,
+    VISION_CRITERION_PROMPT_HINTS,
+    VISION_CRITERION_NEGATIVE_HINTS,
+    VISION_ISSUE_KEYWORD_HINTS,
+    AssetStudioMediaAsset,
+    AssetStudioGenerateResponse,
+    AssetStudioVisionCriterionScore,
+    AssetStudioVisionReviewResponse,
 )
 
 def _normalize_criterion_name(value: str) -> str:
@@ -707,6 +721,28 @@ def _coerce_int(value: Any) -> int | None:
         return None
 
 
+def _coerce_float(value: Any) -> float | None:
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_float_list(values: Any) -> list[float]:
+    if not isinstance(values, list):
+        return []
+    result: list[float] = []
+    for item in values:
+        parsed = _coerce_float(item)
+        if parsed is None:
+            continue
+        if all(abs(existing - parsed) >= 0.001 for existing in result):
+            result.append(parsed)
+    return result
+
+
 def _coerce_str_list(values: Any) -> list[str]:
     if not isinstance(values, list):
         return []
@@ -716,6 +752,52 @@ def _coerce_str_list(values: Any) -> list[str]:
         if text and text not in result:
             result.append(text)
     return result
+
+
+def _extract_duration_constraints(raw_duration: Any) -> dict[str, Any]:
+    if isinstance(raw_duration, dict):
+        duration_values = _coerce_float_list(
+            raw_duration.get("supported_values")
+            or raw_duration.get("values")
+            or raw_duration.get("options")
+        )
+        duration_min = _coerce_float(raw_duration.get("min"))
+        if duration_min is None:
+            duration_min = _coerce_float(raw_duration.get("min_seconds"))
+        duration_max = _coerce_float(raw_duration.get("max"))
+        if duration_max is None:
+            duration_max = _coerce_float(raw_duration.get("max_seconds"))
+        if not duration_values and duration_min is None and duration_max is None:
+            default_value = _coerce_float(raw_duration.get("default"))
+            if default_value is not None:
+                duration_values = [default_value]
+        return {
+            "duration_values": duration_values,
+            "duration_min": duration_min,
+            "duration_max": duration_max,
+        }
+
+    duration_values = _coerce_float_list(raw_duration)
+    if duration_values:
+        return {
+            "duration_values": duration_values,
+            "duration_min": None,
+            "duration_max": None,
+        }
+
+    scalar = _coerce_float(raw_duration)
+    if scalar is not None:
+        return {
+            "duration_values": [scalar],
+            "duration_min": None,
+            "duration_max": None,
+        }
+
+    return {
+        "duration_values": [],
+        "duration_min": None,
+        "duration_max": None,
+    }
 
 
 def _get_effective_task_constraints(model_id: str) -> dict[str, Any]:
@@ -730,6 +812,7 @@ def _get_effective_task_constraints(model_id: str) -> dict[str, Any]:
         if isinstance(info.get("constraints"), dict)
         else {}
     )
+    static_duration_constraints = _extract_duration_constraints(static_constraints.get("duration"))
     return {
         "min_width": _coerce_int(runtime_constraints.get("min_width"))
         if _coerce_int(runtime_constraints.get("min_width")) is not None
@@ -745,6 +828,15 @@ def _get_effective_task_constraints(model_id: str) -> dict[str, Any]:
         else _coerce_int(static_constraints.get("max_height")),
         "ratio_values": _coerce_str_list(runtime_constraints.get("ratio_values"))
         or _coerce_str_list(static_constraints.get("ratios")),
+        "duration_values": _coerce_float_list(runtime_constraints.get("duration_values"))
+        or static_duration_constraints.get("duration_values")
+        or [],
+        "duration_min": _coerce_float(runtime_constraints.get("duration_min"))
+        if _coerce_float(runtime_constraints.get("duration_min")) is not None
+        else static_duration_constraints.get("duration_min"),
+        "duration_max": _coerce_float(runtime_constraints.get("duration_max"))
+        if _coerce_float(runtime_constraints.get("duration_max")) is not None
+        else static_duration_constraints.get("duration_max"),
     }
 
 
@@ -833,24 +925,37 @@ def _validate_dimensions_for_models(
 
 def _validate_video_duration(model_id: str, duration: float) -> float:
     normalized_duration = float(duration)
-    del model_id
+    effective_constraints = _get_effective_task_constraints(model_id)
+    allowed_durations = tuple(sorted(effective_constraints.get("duration_values") or ()))
+    duration_min = _coerce_float(effective_constraints.get("duration_min"))
+    duration_max = _coerce_float(effective_constraints.get("duration_max"))
 
-    allowed_durations = _get_runtime_duration_values(VIDEO_MODELS)
-    if not allowed_durations:
-        allowed_duration_values = {
-            float(value)
-            for values in VIDEO_DURATION_OPTIONS.values()
-            for value in values
-        }
-        allowed_durations = tuple(sorted(allowed_duration_values))
+    if not allowed_durations and duration_min is None and duration_max is None:
+        allowed_durations = tuple(sorted(float(value) for value in VIDEO_DURATION_OPTIONS.get(model_id, ())))
 
-    if not allowed_durations or normalized_duration in allowed_durations:
+    if allowed_durations and any(abs(value - normalized_duration) < 0.1 for value in allowed_durations):
         return normalized_duration
+    if not allowed_durations:
+        if duration_min is not None and normalized_duration < duration_min - 0.1:
+            pass
+        elif duration_max is not None and normalized_duration > duration_max + 0.1:
+            pass
+        else:
+            return normalized_duration
 
     allowed_text = " / ".join(f"{int(value)} 秒" for value in allowed_durations)
+    if not allowed_text:
+        if duration_min is not None and duration_max is not None:
+            allowed_text = f"{duration_min:g} - {duration_max:g} 秒"
+        elif duration_min is not None:
+            allowed_text = f"不少于 {duration_min:g} 秒"
+        elif duration_max is not None:
+            allowed_text = f"不超过 {duration_max:g} 秒"
+        else:
+            allowed_text = "当前模型允许的范围"
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail=f"当前资产工作台可用视频时长仅支持 {allowed_text}",
+        detail=f"模型 {model_id} 当前仅支持 {allowed_text} 的视频时长",
     )
 
 

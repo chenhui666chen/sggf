@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+import logging
 from math import gcd
 import mimetypes
 import re
@@ -26,10 +27,19 @@ from core.model_resolution import normalize_model_id
 from core.unified_media_runtime import UnifiedMediaResult, media_runtime
 
 router = APIRouter(prefix="/api/v1/asset-studio", tags=["asset-studio"])
+logger = logging.getLogger(__name__)
 
 from app.api.v1.asset_studio_api import router
 from app.api.v1.asset_studio_api._constants import *
 from app.api.v1.asset_studio_api._helpers import *
+from app.api.v1.asset_studio_api._helpers import (
+    _build_response,
+    _parse_optional_int,
+    _raise_for_failed_result,
+    _save_upload_file,
+    _validate_dimensions_for_models,
+    _validate_video_duration,
+)
 
 @router.post("/video", response_model=AssetStudioGenerateResponse)
 def generate_video_asset(
@@ -50,13 +60,14 @@ def generate_video_asset(
     if not cleaned_prompt:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="提示词不能为空")
 
+    requested_model_id = (model_id or "").strip() or "wan2.7-t2v"
     seed_value = _parse_optional_int(seed)
     reference_path = (
         _save_upload_file(reference_image, subdir="video")
         if reference_image and reference_image.filename
         else None
     )
-    resolved_model_id = model_id if model_id in VIDEO_MODELS else "wan2.7-t2v"
+    resolved_model_id = requested_model_id if requested_model_id in VIDEO_MODELS else "wan2.7-t2v"
     if reference_path and resolved_model_id not in {"wan2.7-i2v"}:
         resolved_model_id = "wan2.7-i2v"
     if resolved_model_id == "wan2.7-i2v" and not reference_path:
@@ -71,6 +82,14 @@ def generate_video_asset(
         request_label="视频",
     )
     resolved_duration = _validate_video_duration(resolved_model_id, max(1.0, min(float(duration), 15.0)))
+    logger.info(
+        "Asset Studio video request accepted | model_id=%s | size=%sx%s | duration=%s | has_reference_image=%s",
+        resolved_model_id,
+        resolved_width,
+        resolved_height,
+        resolved_duration,
+        bool(reference_path),
+    )
 
     result = media_runtime.generate_video(
         prompt=cleaned_prompt,
@@ -85,11 +104,27 @@ def generate_video_asset(
         use_fallback=False,
     )
     _raise_for_failed_result(result, fallback_message="视频生成失败")
+    logger.info(
+        "Asset Studio video request completed | model_id=%s | outputs=%s",
+        result.model_id,
+        len(result.outputs or []),
+    )
+    routing_message = None
+    if requested_model_id != resolved_model_id:
+        routing_message = "检测到参考图输入，已自动切换到图生视频模型。"
+    if str(result.model_id or "") and str(result.model_id or "") != resolved_model_id:
+        routing_message = f"当前请求参数与 {resolved_model_id} 的约束不兼容，已自动改用 {result.model_id}。"
     return _build_response(
         kind="video",
         mode="image_to_video" if reference_path else "text_to_video",
         result=result,
-        metadata={"has_reference_image": bool(reference_path)},
+        metadata={
+            "has_reference_image": bool(reference_path),
+            "requested_model_id": requested_model_id,
+            "resolved_model_id": resolved_model_id,
+            "executed_model_id": str(result.model_id or ""),
+            "routing_message": routing_message,
+        },
     )
 
 
@@ -115,9 +150,10 @@ def generate_motion_asset(
     if not cleaned_prompt:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="动作描述不能为空")
 
+    requested_model_id = (model_id or "").strip() or "wan2.7-i2v"
     seed_value = _parse_optional_int(seed)
     reference_path = _save_upload_file(reference_image, subdir="motion")
-    resolved_model_id = model_id if model_id in VIDEO_MODELS else "wan2.7-i2v"
+    resolved_model_id = requested_model_id if requested_model_id in VIDEO_MODELS else "wan2.7-i2v"
     resolved_width, resolved_height = _validate_dimensions_for_models(
         VIDEO_MODELS,
         width,
@@ -125,6 +161,13 @@ def generate_motion_asset(
         request_label="视频",
     )
     resolved_duration = _validate_video_duration(resolved_model_id, max(1.0, min(float(duration), 15.0)))
+    logger.info(
+        "Asset Studio motion request accepted | model_id=%s | size=%sx%s | duration=%s",
+        resolved_model_id,
+        resolved_width,
+        resolved_height,
+        resolved_duration,
+    )
 
     result = media_runtime.generate_video(
         prompt=cleaned_prompt,
@@ -139,11 +182,26 @@ def generate_motion_asset(
         use_fallback=False,
     )
     _raise_for_failed_result(result, fallback_message="动作控制生成失败")
+    logger.info(
+        "Asset Studio motion request completed | model_id=%s | outputs=%s",
+        result.model_id,
+        len(result.outputs or []),
+    )
     return _build_response(
         kind="motion",
         mode="image_to_video_motion",
         result=result,
-        metadata={"motion_control": motion_control},
+        metadata={
+            "motion_control": motion_control,
+            "requested_model_id": requested_model_id,
+            "resolved_model_id": resolved_model_id,
+            "executed_model_id": str(result.model_id or ""),
+            "routing_message": (
+                f"当前请求参数与 {resolved_model_id} 的约束不兼容，已自动改用 {result.model_id}。"
+                if str(result.model_id or "") and str(result.model_id or "") != resolved_model_id
+                else None
+            ),
+        },
     )
 
 

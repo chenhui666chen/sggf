@@ -30,6 +30,14 @@ router = APIRouter(prefix="/api/v1/asset-studio", tags=["asset-studio"])
 from app.api.v1.asset_studio_api import router
 from app.api.v1.asset_studio_api._constants import *
 from app.api.v1.asset_studio_api._helpers import *
+from app.api.v1.asset_studio_api._helpers import (
+    _allocate_output_path,
+    _build_audio_response,
+    _copy_output_file,
+    _resolve_music_style,
+    _save_binary_output,
+    _validate_audio_duration,
+)
 
 @router.post("/audio", response_model=AssetStudioGenerateResponse)
 async def generate_audio_asset(

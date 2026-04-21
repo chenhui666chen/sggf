@@ -56,9 +56,9 @@ VIDEO_DURATION_OPTIONS: dict[str, tuple[float, ...]] = {
     "kling-v3-video-generation": (3.0, 5.0, 10.0),
     "kling-v3-omni-video-generation": (3.0, 5.0, 10.0),
     "pixverse-v6-t2v": (3.0, 5.0, 10.0),
-    "vidu-q3-pro-text2video": (3.0, 5.0, 10.0),
-    "vidu-q3-pro-img2video": (3.0, 5.0, 10.0),
-    "vidu-q3-pro-start-end2video": (3.0, 5.0, 10.0),
+    "vidu-q3-pro-text2video": (5.0, 10.0),
+    "vidu-q3-pro-img2video": (5.0, 10.0),
+    "vidu-q3-pro-start-end2video": (5.0, 10.0),
 }
 AUDIO_DURATION_OPTIONS: dict[str, tuple[int, ...]] = {
     "music": (15, 30, 45, 60),

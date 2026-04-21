@@ -30,6 +30,13 @@ router = APIRouter(prefix="/api/v1/asset-studio", tags=["asset-studio"])
 from app.api.v1.asset_studio_api import router
 from app.api.v1.asset_studio_api._constants import *
 from app.api.v1.asset_studio_api._helpers import *
+from app.api.v1.asset_studio_api._helpers import (
+    _build_response,
+    _parse_optional_int,
+    _raise_for_failed_result,
+    _save_upload_file,
+    _validate_dimensions_for_models,
+)
 
 @router.post("/image", response_model=AssetStudioGenerateResponse)
 def generate_image_asset(

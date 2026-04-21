@@ -98,6 +98,36 @@ function resolveResultAssetUrl(asset: AssetStudioMediaAsset | null | undefined):
   return asset?.preview_uri || asset?.source_uri || asset?.download_uri || ''
 }
 
+function buildPendingGenerateResponse({
+  kind,
+  mode,
+  modelId,
+  prompt,
+  metadata,
+}: {
+  kind: string
+  mode: string
+  modelId: string
+  prompt: string
+  metadata?: Record<string, unknown>
+}): AssetStudioGenerateResponse {
+  return {
+    kind,
+    mode,
+    model_id: modelId,
+    assets: [],
+    primary_asset: null,
+    metadata: {
+      pending: true,
+      pending_message: '请求已提交，正在等待模型返回结果...',
+      prompt_preview: prompt.trim().slice(0, 120),
+      submitted_at: new Date().toISOString(),
+      requested_model_id: modelId,
+      ...(metadata || {}),
+    },
+  }
+}
+
 interface RuntimeCapabilityHints {
   max_reference_images?: number | null
   supports_camera_control?: boolean
@@ -434,6 +464,33 @@ const VIDEO_DURATION_OPTIONS_BY_MODEL: Record<string, DurationOption[]> = {
     { value: '10', label: '10 秒' },
   ],
   'doubao-seedance-1-5-pro': [
+    { value: '5', label: '5 秒' },
+    { value: '10', label: '10 秒' },
+  ],
+  'kling-v3-video-generation': [
+    { value: '3', label: '3 秒' },
+    { value: '5', label: '5 秒' },
+    { value: '10', label: '10 秒' },
+  ],
+  'kling-v3-omni-video-generation': [
+    { value: '3', label: '3 秒' },
+    { value: '5', label: '5 秒' },
+    { value: '10', label: '10 秒' },
+  ],
+  'pixverse-v6-t2v': [
+    { value: '3', label: '3 秒' },
+    { value: '5', label: '5 秒' },
+    { value: '10', label: '10 秒' },
+  ],
+  'vidu-q3-pro-text2video': [
+    { value: '5', label: '5 秒' },
+    { value: '10', label: '10 秒' },
+  ],
+  'vidu-q3-pro-img2video': [
+    { value: '5', label: '5 秒' },
+    { value: '10', label: '10 秒' },
+  ],
+  'vidu-q3-pro-start-end2video': [
     { value: '5', label: '5 秒' },
     { value: '10', label: '10 秒' },
   ],
@@ -1065,6 +1122,17 @@ function ResultCard({
   collectFeedback?: CollectFeedback | null
 }) {
   const primaryOutput = resolveResultAssetUrl(getPrimaryResultAsset(result))
+  const requestedModelId = typeof result?.metadata?.requested_model_id === 'string'
+    ? String(result.metadata.requested_model_id).trim()
+    : ''
+  const routingMessage = typeof result?.metadata?.routing_message === 'string'
+    ? String(result.metadata.routing_message).trim()
+    : ''
+  const hasRequestedModelMismatch = Boolean(
+    requestedModelId
+    && result?.model_id
+    && requestedModelId !== result.model_id,
+  )
 
   return (
     <Box
@@ -1081,6 +1149,29 @@ function ResultCard({
       {loading ? (
         <Stack spacing={1.2} alignItems="center" justifyContent="center" sx={{ minHeight: 160 }}>
           <CircularProgress size={28} sx={{ color: '#8eff4a' }} />
+          {result ? (
+            <>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap justifyContent="center">
+                <Chip size="small" label={`模式：${result.mode || 'unknown'}`} sx={{ color: 'white' }} variant="outlined" />
+                <Chip size="small" label={`模型：${result.model_id || 'unknown'}`} sx={{ color: 'white' }} variant="outlined" />
+                {hasRequestedModelMismatch ? (
+                  <Chip size="small" label={`请求模型：${requestedModelId}`} sx={{ color: 'white' }} variant="outlined" />
+                ) : null}
+              </Stack>
+              {typeof result.metadata?.prompt_preview === 'string' && result.metadata.prompt_preview ? (
+                <Typography
+                  sx={{
+                    color: 'rgba(255,255,255,0.6)',
+                    fontSize: '0.82rem',
+                    lineHeight: 1.7,
+                    textAlign: 'center',
+                  }}
+                >
+                  {String(result.metadata.prompt_preview)}
+                </Typography>
+              ) : null}
+            </>
+          ) : null}
           <Typography sx={{ color: 'rgba(255,255,255,0.74)', fontSize: '0.9rem' }}>正在调用模型生成资产...</Typography>
         </Stack>
       ) : error ? (
@@ -1120,7 +1211,15 @@ function ResultCard({
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
             <Chip size="small" label={`模式：${result?.mode || 'unknown'}`} sx={{ color: 'white' }} variant="outlined" />
             <Chip size="small" label={`模型：${result?.model_id || 'unknown'}`} sx={{ color: 'white' }} variant="outlined" />
+            {hasRequestedModelMismatch ? (
+              <Chip size="small" label={`请求模型：${requestedModelId}`} sx={{ color: 'white' }} variant="outlined" />
+            ) : null}
           </Stack>
+          {routingMessage ? (
+            <Alert severity="info" sx={{ borderRadius: 2 }}>
+              {routingMessage}
+            </Alert>
+          ) : null}
           {result?.metadata?.fallback_reason ? (
             <Alert severity="info" sx={{ borderRadius: 2 }}>
               {String(result.metadata.fallback_reason)}
@@ -1275,6 +1374,20 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const videoSizeOptions = filterSizeOptions(VIDEO_SIZE_OPTIONS, selectedVideoCatalogEntry?.runtime_task_constraints)
   const videoSupportsCameraControl = getSupportsCameraControl(videoModelId, selectedVideoCatalogEntry?.runtime_capability_hints)
   const selectedVideoCameraControl = CAMERA_CONTROL_OPTIONS.find((option) => option.value === videoCameraControl) || CAMERA_CONTROL_OPTIONS[0]
+  const pendingVideoResult = videoLoading
+    ? buildPendingGenerateResponse({
+        kind: 'video',
+        mode: videoUsesReferenceMode ? 'image_to_video' : 'text_to_video',
+        modelId: videoModelId,
+        prompt: videoPrompt,
+        metadata: {
+          has_reference_image: videoUsesReferenceMode,
+          camera_control: videoSupportsCameraControl && videoCameraControl ? videoCameraControl : null,
+          requested_duration: videoDuration,
+        },
+      })
+    : null
+  const displayedVideoResult = videoLoading ? pendingVideoResult : videoResult
 
   const sortedMotionModelOptions = sortModelOptionsByRoutingSignal(MOTION_MODEL_OPTIONS, catalogRuntimeEntries)
   const recommendedMotionModel = sortedMotionModelOptions[0] || MOTION_MODEL_OPTIONS[0] || null
@@ -1923,7 +2036,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
 
             <ResultCard
               title="视频结果"
-              result={videoResult}
+              result={displayedVideoResult}
               loading={videoLoading}
               error={videoError}
               mediaType="video"

@@ -1,6 +1,14 @@
 # 模型接入参考文档
 
-日期：`2026-04-18`
+初版：`2026-04-18`
+最近更新：`2026-04-21`
+
+本次更新重点：
+
+- 补充 `UnifiedMediaRuntime` 与媒体 adapter 的统一调用约定
+- 补充 Asset Studio 路由层的显式导入规范与输出物化链路约束
+- 补充本次调试中验证有效的最小回归测试集合
+- 补充长耗时生成请求的可观测性要求
 
 ## 1. 目标
 
@@ -446,6 +454,48 @@ BaseAdapter
 - Mureka 查询端点是 `/v1/instrumental/query/{task_id}`（不是 `/v1/instrumental/{task_id}`）。
 - 火山方舟 Seedance 的结果在 `content.video_url`，不是 `video_url`。
 
+### 6.7 `UnifiedMediaRuntime` 适配器调用约定（2026-04-21 补充）
+
+只要媒体模型会被 `core/unified_media_runtime.py` 调用，就必须满足下面的约定。
+
+首选签名：
+
+```python
+from adapters.base import GenerationResult
+from schemas.task_spec import TaskSpec
+
+
+def generate(self, task: TaskSpec) -> GenerationResult:
+    ...
+```
+
+原因：
+
+- `UnifiedMediaRuntime` 的主调用路径是 `adapter.generate(task)`
+- `TaskSpec` 已统一承载 prompt、尺寸、时长、引用图/视频、seed、quality、extra 等任务字段
+- 统一签名后，能力过滤、fallback、Asset Studio、smart-dispatch 可以共享同一套任务结构
+
+兼容策略：
+
+- 现有历史适配器如果仍是 `generate(prompt, **kwargs)`，运行时兼容层会先把 `TaskSpec` 转成基础类型 kwargs，再调用旧签名
+- 兼容层只用于遗留迁移，不建议新增模型继续采用旧签名
+- 不要把 `TaskSpec` 实例直接传给 `requests` 的 `json=`、日志序列化或其他 JSON 编码路径，否则会触发 `Object of type TaskSpec is not JSON serializable`
+
+兼容层当前会补齐的常见字段：
+
+- `prompt`
+- `negative_prompt`
+- `width` / `height` / `size`
+- `duration`
+- `image_path` / `video_path` / `reference_images`
+- `camera_control` / `motion_control`
+- `parameters`（视频模型常用 `duration`、`resolution`、`aspect_ratio` 等）
+
+建议：
+
+- 新接入模型优先直接实现 `generate(task)`
+- 如果确实要保留旧签名，至少增加一条 `UnifiedMediaRuntime` 兼容回归测试，确认从 `TaskSpec` 到旧 kwargs 的映射符合预期
+
 ## 7. 已验证模型清单（2026-04-18）
 
 以下 35 个模型已通过真实 API 调用验证：
@@ -636,6 +686,50 @@ python scripts/test_image_input_models.py
 - 后端服务
 - 相关 worker
 
+### 9.6 最小回归测试基线（2026-04-21 补充）
+
+这次调试暴露的问题，大多不是远程 API 不通，而是本地接入层缺少约束。新增模型或改动 Asset Studio / `UnifiedMediaRuntime` 后，至少执行以下回归：
+
+1. Asset Studio 路由 / helper / 常量绑定回归
+
+```powershell
+python -m pytest "backend/tests/test_asset_studio_runtime_constraints.py" -q
+```
+
+这组测试用于捕获：
+
+- 路由模块调用了私有 helper 但没有显式导入，例如 `_parse_optional_int`
+- `_helpers.py` 中使用了常量或响应类型，但模块命名空间里没有绑定，例如 `DEFAULT_OUTPUT_SUFFIXES`、`MEDIA_KIND_BY_RESULT_KIND`、`AssetStudioGenerateResponse`
+
+2. `UnifiedMediaRuntime` 兼容回归
+
+```powershell
+python -m pytest "tests/test_unified_media_runtime.py" -q
+```
+
+这组测试用于捕获：
+
+- `generate(task)` 与 `generate(prompt, **kwargs)` 的兼容断裂
+- 能力过滤、首选模型重排、fallback 与任务约束不一致
+- 旧式 adapter 收到 `TaskSpec` 后误入 JSON 序列化路径
+
+3. `requests` 导入卫生检查
+
+```powershell
+python -m pytest "tests/test_requests_import_hygiene.py" -q
+```
+
+这组测试用于捕获：
+
+- 适配器文件里使用了 `requests.`，但没有显式 `import requests`
+
+建议补充的快速语法 smoke check：
+
+```powershell
+python -m py_compile "backend/app/api/v1/asset_studio_api/routes_video.py"
+python -m py_compile "backend/app/api/v1/asset_studio_api/_helpers.py"
+```
+
 ## 10. 常见误区与踩坑记录
 
 ### 10.1 "只要 YAML 里有模型就一定能调用"
@@ -697,9 +791,51 @@ python scripts/test_image_input_models.py
 - 常见失败原因：内容审核（"Output data may contain inappropriate content"）、参数不合法
 - 必须轮询到 `SUCCEEDED` 状态才算真正成功
 
+### 10.9 "`from ... import *` 足够用了"
+
+不成立。
+
+- Python 的 `import *` 默认不会导入以下划线开头的私有 helper
+- 路由层只要使用 `_parse_optional_int`、`_save_upload_file` 这类私有函数，就必须显式导入
+- 新增接入时，不要依赖“某个共享模块已经顺带导入过”
+- 对 `backend/app/api/v1/asset_studio_api/routes_*.py` 这类 API 模块，建议显式列出实际使用的 helper
+
+### 10.10 "只要 adapter 能跑，签名是什么无所谓"
+
+不成立。
+
+- 新媒体 adapter 的首选签名应为 `generate(self, task: TaskSpec) -> GenerationResult`
+- 旧签名 `generate(prompt, **kwargs)` 只用于历史兼容，不应作为新接入默认方案
+- 一旦旧式 adapter 直接收到 `TaskSpec` 并进入 `json=` 或其他序列化路径，就会触发 `TaskSpec is not JSON serializable`
+- 如果必须保留旧签名，至少补一条 runtime 兼容回归测试
+
+### 10.11 "`requests` 在别处 import 过，这里就能用"
+
+不成立。
+
+- 只要当前文件出现 `requests.get(...)`、`requests.post(...)` 或 `requests.Session(...)`，就必须在当前文件顶部显式导入 `requests`
+- 不要依赖星号导入、间接导入或运行时副作用
+- 这类问题非常适合用静态测试一次性兜住，见 `tests/test_requests_import_hygiene.py`
+
+### 10.12 "结果生成链路里缺少常量或类型导入，运行时自然会发现"
+
+这类错误成本很高，应提前避免。
+
+- `asset_studio_api/_helpers.py` 里的输出物化逻辑直接依赖 `DEFAULT_OUTPUT_SUFFIXES`、`MEDIA_KIND_BY_RESULT_KIND`、`AssetStudioMediaAsset`、`AssetStudioGenerateResponse` 等常量与类型
+- 这些名称必须在当前模块显式可见，不要假设它们会通过别的模块间接注入
+- 任何改动 `_build_response(...)`、`_materialize_output_reference(...)`、`_build_media_asset_from_file(...)` 后，都应该立即跑 `backend/tests/test_asset_studio_runtime_constraints.py`
+
+### 10.13 "生成完成后再记录日志也够用"
+
+对长耗时模型不够用。
+
+- 视频 / 音频 / 异步媒体任务在提交时就应该记录 `accepted` 级别日志，在完成时再记录 `completed` 日志
+- 没有入口日志时，用户很容易误判为“前端显示生成中，但后端根本没发请求”
+- Asset Studio 这类交互式页面还应该在 loading 态先展示 pending 请求信息，例如模型、模式、提示词摘要或是否带参考图
+
 ## 11. TTS 模型接入经验总结（2026-04-20）
 
-本文档记录了 MiniMax TTS 和 Qwen TTS 接入百炼平台时的实际调试经验。
+本文档记录了 MiniMax、Qwen 与 CosyVoice TTS 接入百炼平台时的实际调试经验。
 
 ### 11.1 百炼 TTS 模型公共特性
 
@@ -709,6 +845,12 @@ python scripts/test_image_input_models.py
 | 鉴权方式 | `Authorization: Bearer {API_KEY}` |
 | Content-Type | `application/json` |
 | 超时建议 | 60秒以上 |
+
+#### 11.1.1 CosyVoice 当前接入基线（2026-04-21）
+
+- 当前仓库统一使用 `cosyvoice-v3.5-plus`，不再继续接入 `cosyvoice-v3-plus`
+- 任何默认 `model_id`、模型白名单、TTS 引擎默认值、前端模型选项、测试桩都应以 `cosyvoice-v3.5-plus` 为准
+- 做替换时不要只改模型 YAML；还要同步检查调用入口、clone / preview 接口、回归测试与文档
 
 ### 11.2 MiniMax TTS 接入要点
 
