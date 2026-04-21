@@ -1,10 +1,10 @@
 /**
  * 浏览器播放器组件
- * 
- * 用于播放有声书并同步显示文本高亮
- * 类似 Kindle Whispersync 或 Google Play Books read-along
+ *
+ * 用于播放有声书并同步显示文本高亮。
+ * 支持优先回读本地资产，并在刷新后恢复章节、进度和字幕状态。
  */
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Box,
   Typography,
@@ -36,6 +36,8 @@ import {
   Download,
 } from '@mui/icons-material'
 import { styled } from '@mui/material/styles'
+import { apiClient } from '@/services/api'
+import { getLocalAssetBlob, saveLocalAsset } from '@/utils/localAssetVault'
 
 const HighlightedText = styled('span')<{ active: boolean }>(({ theme, active }) => ({
   padding: '2px 4px',
@@ -46,15 +48,87 @@ const HighlightedText = styled('span')<{ active: boolean }>(({ theme, active }) 
   fontWeight: active ? 600 : 400,
 }))
 
+interface BrowserPlayerSegment {
+  text?: string
+  type?: string
+  character?: string
+  start_time?: number
+  end_time?: number
+}
+
+interface BrowserPlayerChapter {
+  chapter_id: number
+  chapter_number?: number
+  chapter_title?: string
+  audio_url: string
+  duration?: number
+  has_subtitle?: boolean
+  subtitle_url?: string | null
+  segments?: BrowserPlayerSegment[]
+}
+
+export interface BrowserPlayerProjectData {
+  project_id: number
+  project_title: string
+  chapters: BrowserPlayerChapter[]
+  total_duration: number
+}
+
 interface BrowserPlayerProps {
-  projectData: {
-    project_id: number
-    project_title: string
-    chapters: any[]
-    total_duration: number
-  }
+  projectData: BrowserPlayerProjectData
   open: boolean
   onClose: () => void
+}
+
+interface BrowserPlayerStateSnapshot {
+  currentChapterIndex: number
+  currentTime: number
+  volume: number
+  subtitleFormat: 'srt' | 'vtt' | 'ass'
+  showSubtitles: boolean
+  wasPlaying: boolean
+}
+
+const PLAYER_STATE_STORAGE_PREFIX = 'audiobook_browser_player_state_v1'
+const DEFAULT_PLAYER_STATE: BrowserPlayerStateSnapshot = {
+  currentChapterIndex: 0,
+  currentTime: 0,
+  volume: 1,
+  subtitleFormat: 'srt',
+  showSubtitles: true,
+  wasPlaying: false,
+}
+
+function buildPlayerStateKey(projectId: number): string {
+  return `${PLAYER_STATE_STORAGE_PREFIX}:${projectId}`
+}
+
+function buildAudiobookChapterAssetUuid(audiobookProjectId: number, chapterId: number): string {
+  return `audiobook-${audiobookProjectId}-${chapterId}`
+}
+
+function buildAudiobookSubtitleAssetUuid(
+  audiobookProjectId: number,
+  chapterId: number,
+  subtitleFormat: BrowserPlayerStateSnapshot['subtitleFormat'],
+): string {
+  return `audiobook-subtitle-${audiobookProjectId}-${chapterId}-${subtitleFormat}`
+}
+
+function triggerBlobDownload(blob: Blob, filename: string): void {
+  const url = window.URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  window.URL.revokeObjectURL(url)
+}
+
+function clampChapterIndex(index: number, total: number): number {
+  if (total <= 0) return 0
+  return Math.min(Math.max(index, 0), total - 1)
 }
 
 const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClose }) => {
@@ -66,11 +140,75 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
   const [subtitleFormat, setSubtitleFormat] = useState<'srt' | 'vtt' | 'ass'>('srt')
   const [showSubtitles, setShowSubtitles] = useState(true)
   const [highlightedSegmentIndex, setHighlightedSegmentIndex] = useState<number | null>(null)
+  const [usingLocalAsset, setUsingLocalAsset] = useState(false)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const textContainerRef = useRef<HTMLDivElement | null>(null)
+  const objectUrlRef = useRef<string | null>(null)
+  const restoreStateRef = useRef<BrowserPlayerStateSnapshot | null>(null)
 
   const currentChapter = projectData?.chapters?.[currentChapterIndex]
+  const persistedCurrentSecond = Math.floor(currentTime)
+
+  const revokeCurrentObjectUrl = useCallback(() => {
+    if (objectUrlRef.current) {
+      window.URL.revokeObjectURL(objectUrlRef.current)
+      objectUrlRef.current = null
+    }
+  }, [])
+
+  const persistSnapshot = useCallback(
+    (snapshot: BrowserPlayerStateSnapshot) => {
+      if (!projectData?.project_id) return
+      localStorage.setItem(buildPlayerStateKey(projectData.project_id), JSON.stringify(snapshot))
+    },
+    [projectData?.project_id],
+  )
+
+  const scrollToSegment = useCallback((index: number) => {
+    if (!textContainerRef.current) return
+
+    const element = textContainerRef.current.querySelector(`[data-segment-index="${index}"]`)
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [])
+
+  const updateHighlight = useCallback(
+    (time: number) => {
+      if (!currentChapter?.segments?.length) {
+        setHighlightedSegmentIndex(null)
+        return
+      }
+
+      for (let i = 0; i < currentChapter.segments.length; i += 1) {
+        const segment = currentChapter.segments[i]
+        if (segment.start_time === undefined || segment.end_time === undefined) {
+          continue
+        }
+        if (time >= segment.start_time && time < segment.end_time) {
+          setHighlightedSegmentIndex(i)
+          scrollToSegment(i)
+          return
+        }
+      }
+
+      setHighlightedSegmentIndex(null)
+    },
+    [currentChapter, scrollToSegment],
+  )
+
+  const handleNext = useCallback(() => {
+    if (currentChapterIndex < projectData.chapters.length - 1) {
+      setCurrentChapterIndex((prev) => prev + 1)
+    }
+  }, [currentChapterIndex, projectData.chapters.length])
+
+  const handlePrevious = useCallback(() => {
+    if (currentChapterIndex > 0) {
+      setCurrentChapterIndex((prev) => prev - 1)
+    }
+  }, [currentChapterIndex])
 
   useEffect(() => {
     if (!audioRef.current) {
@@ -78,6 +216,7 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
     }
 
     const audio = audioRef.current
+    audio.volume = volume
 
     const handleTimeUpdate = () => {
       setCurrentTime(audio.currentTime)
@@ -85,7 +224,35 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
     }
 
     const handleLoadedMetadata = () => {
-      setDuration(audio.duration)
+      const nextDuration = Number.isFinite(audio.duration) ? audio.duration : 0
+      setDuration(nextDuration)
+
+      const restoreState = restoreStateRef.current
+      if (restoreState && restoreState.currentChapterIndex === currentChapterIndex) {
+        const nextTime = Math.max(
+          0,
+          Math.min(restoreState.currentTime || 0, nextDuration || restoreState.currentTime || 0),
+        )
+
+        if (nextTime > 0) {
+          audio.currentTime = nextTime
+          setCurrentTime(nextTime)
+          updateHighlight(nextTime)
+        } else {
+          setCurrentTime(0)
+        }
+
+        const shouldResumePlayback = restoreState.wasPlaying
+        restoreStateRef.current = null
+
+        if (shouldResumePlayback && open) {
+          void audio.play().then(() => {
+            setIsPlaying(true)
+          }).catch(() => {
+            setIsPlaying(false)
+          })
+        }
+      }
     }
 
     const handleEnded = () => {
@@ -102,97 +269,254 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata)
       audio.removeEventListener('ended', handleEnded)
     }
-  }, [])
+  }, [currentChapterIndex, handleNext, open, updateHighlight, volume])
 
   useEffect(() => {
-    if (audioRef.current && currentChapter) {
-      audioRef.current.src = currentChapter.audio_url
-      audioRef.current.load()
-      setCurrentTime(0)
-      setDuration(0)
-      setHighlightedSegmentIndex(null)
+    if (!open || !projectData?.project_id) {
+      return
     }
-  }, [currentChapterIndex, currentChapter])
 
-  const updateHighlight = useCallback(
-    (time: number) => {
-      if (!currentChapter?.segments) return
+    const raw = localStorage.getItem(buildPlayerStateKey(projectData.project_id))
+    let nextState = DEFAULT_PLAYER_STATE
 
-      for (let i = 0; i < currentChapter.segments.length; i++) {
-        const segment = currentChapter.segments[i]
-        if (segment.start_time !== undefined && segment.end_time !== undefined) {
-          if (time >= segment.start_time && time < segment.end_time) {
-            setHighlightedSegmentIndex(i)
-            scrollToSegment(i)
-            return
-          }
+    if (raw) {
+      try {
+        const saved = JSON.parse(raw) as Partial<BrowserPlayerStateSnapshot>
+        nextState = {
+          currentChapterIndex: clampChapterIndex(
+            Number(saved.currentChapterIndex ?? DEFAULT_PLAYER_STATE.currentChapterIndex),
+            projectData.chapters.length,
+          ),
+          currentTime: Math.max(0, Number(saved.currentTime ?? DEFAULT_PLAYER_STATE.currentTime)),
+          volume: Math.min(1, Math.max(0, Number(saved.volume ?? DEFAULT_PLAYER_STATE.volume))),
+          subtitleFormat:
+            saved.subtitleFormat === 'vtt' || saved.subtitleFormat === 'ass'
+              ? saved.subtitleFormat
+              : 'srt',
+          showSubtitles: typeof saved.showSubtitles === 'boolean'
+            ? saved.showSubtitles
+            : DEFAULT_PLAYER_STATE.showSubtitles,
+          wasPlaying: Boolean(saved.wasPlaying),
         }
+      } catch {
+        nextState = DEFAULT_PLAYER_STATE
       }
-    },
-    [currentChapter]
-  )
-
-  const scrollToSegment = useCallback((index: number) => {
-    if (!textContainerRef.current) return
-
-    const element = textContainerRef.current.querySelector(`[data-segment-index="${index}"]`)
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
-  }, [])
 
-  const handlePlayPause = () => {
+    restoreStateRef.current = nextState
+    setCurrentChapterIndex(nextState.currentChapterIndex)
+    setCurrentTime(nextState.currentTime)
+    setVolume(nextState.volume)
+    setSubtitleFormat(nextState.subtitleFormat)
+    setShowSubtitles(nextState.showSubtitles)
+    setIsPlaying(false)
+  }, [open, projectData?.project_id, projectData.chapters.length])
+
+  useEffect(() => {
+    if (!audioRef.current || !currentChapter) {
+      return
+    }
+
+    let cancelled = false
+    const audio = audioRef.current
+
+    const loadAudioSource = async () => {
+      audio.pause()
+      setIsPlaying(false)
+      setHighlightedSegmentIndex(null)
+      revokeCurrentObjectUrl()
+
+      try {
+        const assetUuid = buildAudiobookChapterAssetUuid(projectData.project_id, currentChapter.chapter_id)
+        const localBlob = await getLocalAssetBlob(assetUuid).catch(() => null)
+        if (cancelled) return
+
+        if (localBlob) {
+          const localUrl = window.URL.createObjectURL(localBlob)
+          objectUrlRef.current = localUrl
+          audio.src = localUrl
+          setUsingLocalAsset(true)
+        } else {
+          const response = await apiClient.getAudiobookChapterAudioFile(
+            projectData.project_id,
+            currentChapter.chapter_id,
+          )
+          const remoteBlob = response.data as Blob
+          try {
+            await saveLocalAsset({
+              assetUuid,
+              mediaKind: 'audio',
+              blob: remoteBlob,
+              mimeType: remoteBlob.type || response.headers?.['content-type'] || 'audio/mpeg',
+              fileSize: remoteBlob.size,
+              sourceModule: 'audiobook',
+              title: currentChapter.chapter_title || `第${currentChapter.chapter_number || currentChapterIndex + 1}章 音频`,
+              sourceUri: currentChapter.audio_url,
+              previewUri: currentChapter.audio_url,
+              downloadUri: currentChapter.audio_url,
+              metadata: {
+                audiobook_project_id: projectData.project_id,
+                chapter_id: currentChapter.chapter_id,
+                chapter_number: currentChapter.chapter_number ?? currentChapterIndex + 1,
+                chapter_title: currentChapter.chapter_title || null,
+              },
+            })
+          } catch (cacheError) {
+            console.warn('缓存播放器音频失败，将继续使用远端音频:', cacheError)
+          }
+          if (cancelled) return
+          const remoteUrl = window.URL.createObjectURL(remoteBlob)
+          objectUrlRef.current = remoteUrl
+          audio.src = remoteUrl
+          setUsingLocalAsset(false)
+        }
+
+        audio.load()
+      } catch (error) {
+        console.error('加载播放器音频失败:', error)
+        audio.removeAttribute('src')
+        audio.load()
+        setUsingLocalAsset(false)
+        setDuration(0)
+        setCurrentTime(0)
+        return
+      }
+
+      const restoreState = restoreStateRef.current
+      if (!restoreState || restoreState.currentChapterIndex !== currentChapterIndex) {
+        setCurrentTime(0)
+      }
+
+      setDuration(Number.isFinite(currentChapter.duration) ? Number(currentChapter.duration) : 0)
+    }
+
+    void loadAudioSource()
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentChapter, currentChapterIndex, projectData.project_id, revokeCurrentObjectUrl])
+
+  useEffect(() => {
+    if (!audioRef.current) return
+    audioRef.current.volume = volume
+  }, [volume])
+
+  useEffect(() => {
+    if (!projectData?.project_id || !open) return
+
+    persistSnapshot({
+      currentChapterIndex,
+      currentTime: persistedCurrentSecond,
+      volume,
+      subtitleFormat,
+      showSubtitles,
+      wasPlaying: isPlaying,
+    })
+  }, [
+    currentChapterIndex,
+    isPlaying,
+    open,
+    persistSnapshot,
+    persistedCurrentSecond,
+    showSubtitles,
+    subtitleFormat,
+    volume,
+    projectData?.project_id,
+  ])
+
+  useEffect(() => {
+    if (open || !audioRef.current) return
+    audioRef.current.pause()
+    setIsPlaying(false)
+  }, [open])
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause()
+      }
+      revokeCurrentObjectUrl()
+    }
+  }, [revokeCurrentObjectUrl])
+
+  const handlePlayPause = async () => {
     if (!audioRef.current) return
 
-    if (isPlaying) {
-      audioRef.current.pause()
-    } else {
-      audioRef.current.play()
-    }
-    setIsPlaying(!isPlaying)
-  }
-
-  const handleNext = () => {
-    if (currentChapterIndex < projectData.chapters.length - 1) {
-      setCurrentChapterIndex((prev) => prev + 1)
-    }
-  }
-
-  const handlePrevious = () => {
-    if (currentChapterIndex > 0) {
-      setCurrentChapterIndex((prev) => prev - 1)
+    try {
+      if (audioRef.current.paused) {
+        await audioRef.current.play()
+        setIsPlaying(true)
+      } else {
+        audioRef.current.pause()
+        setIsPlaying(false)
+      }
+    } catch (error) {
+      console.error('播放失败:', error)
+      setIsPlaying(false)
     }
   }
 
   const handleSeek = (_event: Event, value: number | number[]) => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = value as number
-      setCurrentTime(value as number)
-    }
+    if (!audioRef.current) return
+
+    const nextTime = value as number
+    audioRef.current.currentTime = nextTime
+    setCurrentTime(nextTime)
+    updateHighlight(nextTime)
   }
 
   const handleVolumeChange = (_event: Event, value: number | number[]) => {
-    const newVolume = value as number
-    setVolume(newVolume)
-    if (audioRef.current) {
-      audioRef.current.volume = newVolume
-    }
+    setVolume(value as number)
   }
 
   const handleDownloadSubtitle = async () => {
     if (!currentChapter?.subtitle_url) return
 
     try {
-      const response = await fetch(`${currentChapter.subtitle_url}?format=${subtitleFormat}`)
-      const blob = await response.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `chapter_${currentChapter.chapter_id}.${subtitleFormat}`
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(url)
-      document.body.removeChild(a)
+      const assetUuid = buildAudiobookSubtitleAssetUuid(
+        projectData.project_id,
+        currentChapter.chapter_id,
+        subtitleFormat,
+      )
+      let subtitleBlob = await getLocalAssetBlob(assetUuid).catch(() => null)
+
+      if (!subtitleBlob) {
+        const response = await apiClient.getChapterSubtitle(
+          projectData.project_id,
+          currentChapter.chapter_id,
+          subtitleFormat,
+        )
+        subtitleBlob = response.data as Blob
+        try {
+          await saveLocalAsset({
+            assetUuid,
+            mediaKind: 'subtitle',
+            blob: subtitleBlob,
+            mimeType: subtitleBlob.type || response.headers?.['content-type'] || 'text/plain',
+            fileSize: subtitleBlob.size,
+            sourceModule: 'audiobook',
+            title: `${currentChapter.chapter_title || `chapter_${currentChapter.chapter_id}`}.${subtitleFormat}`,
+            sourceUri: `${currentChapter.subtitle_url}?format=${subtitleFormat}`,
+            previewUri: `${currentChapter.subtitle_url}?format=${subtitleFormat}`,
+            downloadUri: `${currentChapter.subtitle_url}?format=${subtitleFormat}`,
+            metadata: {
+              audiobook_project_id: projectData.project_id,
+              chapter_id: currentChapter.chapter_id,
+              chapter_number: currentChapter.chapter_number ?? currentChapterIndex + 1,
+              subtitle_format: subtitleFormat,
+            },
+          })
+        } catch (cacheError) {
+          console.warn('缓存字幕失败，将继续直接下载:', cacheError)
+        }
+      }
+
+      if (!subtitleBlob) {
+        throw new Error('subtitle unavailable')
+      }
+
+      triggerBlobDownload(subtitleBlob, `chapter_${currentChapter.chapter_id}.${subtitleFormat}`)
     } catch (error) {
       console.error('下载字幕失败:', error)
     }
@@ -236,7 +560,6 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
 
       <DialogContent dividers>
         <Box display="flex" gap={3} height="70vh">
-          {/* 左侧：章节列表 */}
           <Box width={280} sx={{ overflowY: 'auto', borderRight: 1, borderColor: 'divider', pr: 2 }}>
             <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
               章节列表
@@ -268,13 +591,14 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
             </List>
           </Box>
 
-          {/* 右侧：播放器和文本 */}
           <Box flex={1} display="flex" flexDirection="column">
-            {/* 当前章节信息 */}
             <Box sx={{ mb: 2 }}>
-              <Typography variant="h6">
-                第{currentChapter?.chapter_number || currentChapterIndex + 1}章：{currentChapter?.chapter_title || ''}
-              </Typography>
+              <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
+                <Typography variant="h6">
+                  第{currentChapter?.chapter_number || currentChapterIndex + 1}章：{currentChapter?.chapter_title || ''}
+                </Typography>
+                {usingLocalAsset && <Chip label="本地音频" size="small" color="success" variant="outlined" />}
+              </Box>
               {currentChapter?.has_subtitle && (
                 <Button
                   size="small"
@@ -287,14 +611,13 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
               )}
             </Box>
 
-            {/* 文本同步显示区域 */}
             {showSubtitles && currentChapter?.segments && (
               <Paper
                 ref={textContainerRef}
                 sx={{ p: 2, mb: 2, flex: 1, overflowY: 'auto', minHeight: 200 }}
               >
                 <Box>
-                  {currentChapter.segments.map((segment: any, index: number) => (
+                  {currentChapter.segments.map((segment, index) => (
                     <Box
                       key={index}
                       data-segment-index={index}
@@ -310,7 +633,7 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
                         />
                       )}
                       <HighlightedText active={highlightedSegmentIndex === index}>
-                        {segment.text}
+                        {segment.text || ''}
                       </HighlightedText>
                     </Box>
                   ))}
@@ -318,7 +641,6 @@ const BrowserPlayer: React.FC<BrowserPlayerProps> = ({ projectData, open, onClos
               </Paper>
             )}
 
-            {/* 播放控制 */}
             <Box sx={{ mt: 'auto' }}>
               <Slider
                 value={currentTime}

@@ -223,7 +223,7 @@ def test_narration_style_api_schema():
         speed_range={"min": 0.8, "max": 1.2, "default": 1.0},
         pitch_range={"min": -2, "max": 2, "default": 0},
         pause_multiplier=1.0,
-        supported_models=["qwen3-tts-flash"],
+        supported_models=["qwen3-tts-instruct-flash"],
     )
 
     assert preset.id == "test_style"

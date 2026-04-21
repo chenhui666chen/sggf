@@ -153,12 +153,12 @@
 
 ## 5. TTS 与语音模型
 
-### qwen3-tts-flash
+### qwen3-tts-instruct-flash
 
 - 定位：项目默认 TTS 模型
-- 适用：批量有声书合成、日更章节合成、低成本稳定朗读
-- 限制：当前项目接入不暴露更细粒度的 Instruct 情绪控制
-- 项目备注：项目里的音色目录、speaker 归一化和时间戳保留都围绕该模型实现
+- 适用：批量有声书合成、日更章节合成、低成本稳定朗读、需要自然语言 instructions 的标准旁白
+- 限制：当前项目链路重点支持 instructions，不建议输出 SSML
+- 项目备注：项目里的音色目录、speaker 归一化、instructions 映射和时间戳保留都围绕该模型实现
 - 官方资料：
   - https://help.aliyun.com/zh/model-studio/text-to-speech-syn
   - https://help.aliyun.com/zh/model-studio/getting-started/models
@@ -167,7 +167,7 @@
 
 - 定位：项目高表现力 TTS / 音色复刻模型
 - 适用：精品有声书、强情绪场景、角色差异化旁白、复刻音色
-- 限制：成本和操作复杂度高于 `qwen3-tts-flash`
+- 限制：成本和操作复杂度高于 `qwen3-tts-instruct-flash`
 - 项目备注：项目已提供 clone 创建、查询、删除等专用接口
 - 官方资料：
   - https://help.aliyun.com/zh/model-studio/text-to-speech-syn

@@ -486,19 +486,12 @@ export default function KnowledgeBasePage() {
 
     try {
       const stage = getCurrentStage()
-      const response = await fetch(`/api/v1/workflow/${projectId}/stage/${stage}/content`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          content: editedContent,
-          continue_workflow: false,
-        }),
+      const response = await apiClient.updateWorkflowStageContent(Number(projectId), stage, {
+        content: editedContent,
+        continue_workflow: false,
       })
 
-      if (response.ok) {
+      if (response.status >= 200 && response.status < 300) {
         switch (mainTabValue) {
           case 0: setWorldSetting(editedContent); break
           case 1: setCharacters(editedContent); break
@@ -508,8 +501,7 @@ export default function KnowledgeBasePage() {
         setIsEditing(false)
         showSnackbar('保存成功', 'success')
       } else {
-        const errorData = await response.json()
-        showSnackbar(errorData.detail || '保存失败', 'error')
+        showSnackbar(String(response.data?.detail || response.data?.error || '保存失败'), 'error')
       }
     } catch (err) {
       logger.error('保存失败:', err)

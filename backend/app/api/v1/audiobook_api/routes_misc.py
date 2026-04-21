@@ -100,6 +100,7 @@ from app.services.user_center_points_events import (
     record_audiobook_billing_freeze,
 )
 from app.utils.datetime_utils import utc_now
+from core.model_resolution import normalize_model_id
 from core.unified_media_runtime import synthesize_speech as runtime_synthesize_speech
 
 from app.api.v1.audiobook_api import router
@@ -136,7 +137,7 @@ async def stream_task_progress(
 async def generate_preview(
     text: str = Body(..., embed=True),
     voice_id: str = Body(..., embed=True),
-    tts_model: str = Body("qwen3-tts-flash", embed=True),
+    tts_model: str = Body("qwen3-tts-instruct-flash", embed=True),
     emotion: Optional[str] = Body(None, embed=True),
     speed: Optional[float] = Body(None, embed=True),
     current_user: User = Depends(get_current_user),
@@ -151,6 +152,7 @@ async def generate_preview(
         speed: 语速参数
     """
     try:
+        tts_model = normalize_model_id(tts_model or "qwen3-tts-instruct-flash") or "qwen3-tts-instruct-flash"
         # 初始化 TTS 引擎
         from app.services.audiobook import get_engine_instance, set_engine_instance
         from core.unified_llm_client import get_llm_client

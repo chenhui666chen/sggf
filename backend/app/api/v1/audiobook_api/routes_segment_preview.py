@@ -100,6 +100,7 @@ from app.services.user_center_points_events import (
     record_audiobook_billing_freeze,
 )
 from app.utils.datetime_utils import utc_now
+from core.model_resolution import normalize_model_id
 from core.unified_media_runtime import synthesize_speech as runtime_synthesize_speech
 
 from app.api.v1.audiobook_api import router
@@ -158,14 +159,14 @@ async def preview_script_segment_audio(
             detail="台词不能为空",
         )
 
-    tts_model = (request.tts_model or "qwen3-tts-flash").strip()
-    if tts_model not in {"qwen3-tts-flash", "cosyvoice-v3-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"}:
+    tts_model = normalize_model_id(request.tts_model or "qwen3-tts-instruct-flash") or "qwen3-tts-instruct-flash"
+    if tts_model not in {"qwen3-tts-instruct-flash", "cosyvoice-v3-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"}:
         if tts_model.startswith("minimax-speech"):
             tts_model = "minimax-speech-2.8-hd"
         elif tts_model.startswith("qwen3-tts"):
-            tts_model = "qwen3-tts-flash"
+            tts_model = "qwen3-tts-instruct-flash"
         else:
-            tts_model = "qwen3-tts-flash"
+            tts_model = "qwen3-tts-instruct-flash"
 
     preview_type = str(request.preview_type or "voice").strip().lower()
     if preview_type not in {"voice", "sfx", "bgm", "mix"}:

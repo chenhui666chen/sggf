@@ -15,7 +15,7 @@ def test_synthesize_speech_sync_returns_base64_audio_and_timestamps(
     captured: dict[str, object] = {}
 
     class FakeEngine:
-        model = "qwen3-tts-flash"
+        model = "qwen3-tts-instruct-flash"
 
         async def synthesize_with_metadata(self, text, voice_params, emotion):
             captured["text"] = text
@@ -43,7 +43,7 @@ def test_synthesize_speech_sync_returns_base64_audio_and_timestamps(
     )
 
     assert result.success is True
-    assert result.model_id == "qwen3-tts-flash"
+    assert result.model_id == "qwen3-tts-instruct-flash"
     assert result.binary == b"RIFF-demo"
     assert result.data["audio_data"] == base64.b64encode(b"RIFF-demo").decode("utf-8")
     assert result.data["tts_timestamps"] == [{"text": "hello", "start": 0, "end": 120}]
@@ -126,7 +126,7 @@ def test_qwen3_tts_adapter_delegates_to_sync_helper(
                 "metadata": {"source": "runtime"},
                 "cost": 1.25,
                 "message": "",
-                "model_id": "qwen3-tts-flash",
+                "model_id": "qwen3-tts-instruct-flash",
             },
         )()
 
@@ -154,7 +154,7 @@ def test_qwen3_tts_adapter_delegates_to_sync_helper(
     assert result.data["tts_timestamps"] == [{"text": "hi", "start": 0, "end": 80}]
     assert result.cost == 1.25
     assert result.metadata["source"] == "runtime"
-    assert result.metadata["model"] == "qwen3-tts-flash"
+    assert result.metadata["model"] == "qwen3-tts-instruct-flash"
     assert captured["text"] == "hi"
     assert captured["emotion"] == "happy"
     assert captured["model_id"] == "qwen3_tts"
@@ -264,7 +264,7 @@ def test_legacy_bridge_qwen3_tts_prefers_runtime_wrapper(
 
     wrapper = legacy_bridge.ModelAdapterFactory.create(
         "qwen3_tts",
-        model_name="qwen3-tts-flash",
+        model_name="qwen3-tts-instruct-flash",
     )
 
     assert wrapper is fake_wrapper

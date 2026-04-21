@@ -7,23 +7,39 @@ import random
 
 from .knowledge_base import NovelKnowledgeBase
 from .memory_manager import NovelMemoryManager
-from .agents import CreativeDirectorAgent, WorldArchitectAgent, CharacterDesignerAgent, ContentCreatorAgent, QualityReviewerAgent, OutlinePlanParserAgent
+from .agents import (
+    CharacterDesignerAgent,
+    ContentCreatorAgent,
+    ContentReviserAgent,
+    CreativeDirectorAgent,
+    EventValidatorAgent,
+    FinalReviewerAgent,
+    OutlinePlanParserAgent,
+    PlotArchitectAgent,
+    QualityReviewerAgent,
+    StyleOptimizerAgent,
+    WorldArchitectAgent,
+)
 from core.langchain_bridge import create_task_llm, create_model_llm
 from .intelligent_truncator import smart_truncate_for_context
 
 # 导入模块化提示词
 from app.services.prompts.stages.world_building import (
-    WorldBuildingPrompts,
-    CharacterDesignPrompts,
     get_genre_world_extension,
-    get_genre_character_fields
 )
 from app.services.prompts.base.format import get_output_format
 from app.services.prompts.stages.structure_design import (
-    StructureDesignPrompts,
     get_genre_rhythm_guide
 )
 from app.services.prompts.stages.content_creation import FirstChapterPrompts
+from app.services.prompts.workflow_runtime import (
+    build_first_chapter_review_prompts,
+    build_runtime_structure_prompts,
+    build_runtime_world_prompts,
+    build_streaming_character_prompts,
+    build_streaming_concept_prompts,
+    get_default_first_chapter_opening_and_ending,
+)
 from app.services.character_parser import (
     CharacterTextParser,
     convert_legacy_grouped_characters_to_cards,
@@ -237,8 +253,13 @@ class CreativeDirectorCoordinator:
         self.creative_director = CreativeDirectorAgent(knowledge_base=self.knowledge_base, memory_manager=self.memory_manager)
         self.world_architect = WorldArchitectAgent(knowledge_base=self.knowledge_base, memory_manager=self.memory_manager)
         self.character_designer = CharacterDesignerAgent(knowledge_base=self.knowledge_base, memory_manager=self.memory_manager)
+        self.plot_architect = PlotArchitectAgent(knowledge_base=self.knowledge_base, memory_manager=self.memory_manager)
+        self.event_validator = EventValidatorAgent(knowledge_base=self.knowledge_base, memory_manager=self.memory_manager)
         self.content_creator = ContentCreatorAgent(knowledge_base=self.knowledge_base, memory_manager=self.memory_manager)
+        self.style_optimizer = StyleOptimizerAgent(knowledge_base=self.knowledge_base, memory_manager=self.memory_manager)
+        self.content_reviser = ContentReviserAgent(knowledge_base=self.knowledge_base, memory_manager=self.memory_manager)
         self.quality_reviewer = QualityReviewerAgent(knowledge_base=self.knowledge_base, memory_manager=self.memory_manager)
+        self.final_reviewer = FinalReviewerAgent(knowledge_base=self.knowledge_base, memory_manager=self.memory_manager)
         self.outline_plan_parser = OutlinePlanParserAgent(knowledge_base=self.knowledge_base, memory_manager=self.memory_manager)
 
         # 项目上下文
@@ -248,7 +269,10 @@ class CreativeDirectorCoordinator:
             "world_setting": "",
             "characters": "",
             "plot_outline": "",
+            "event_validation": "",
             "content": "",
+            "draft_content": "",
+            "styled_content": "",
             "chapters": [],
             "review": "",
         }
@@ -278,7 +302,10 @@ class CreativeDirectorCoordinator:
                 "world_setting": "",
                 "characters": "",
                 "plot_outline": "",
+                "event_validation": "",
                 "content": "",
+                "draft_content": "",
+                "styled_content": "",
                 "chapters": [],
                 "review": "",
                 # 🔧 关键修复：不保留旧项目的配置，全部清空
@@ -307,8 +334,13 @@ class CreativeDirectorCoordinator:
             self.creative_director,
             self.world_architect,
             self.character_designer,
+            self.plot_architect,
+            self.event_validator,
             self.content_creator,
+            self.style_optimizer,
+            self.content_reviser,
             self.quality_reviewer,
+            self.final_reviewer,
             self.outline_plan_parser,
         ):
             agent.set_project_context(project_id)
@@ -707,76 +739,23 @@ class CreativeDirectorCoordinator:
                 genre=project_genre,
                 requirement=requirement,
             )
-            concept_prompt = f"""你是一名擅长网文结构设计的"创意总监"，需要为一个新项目生成【故事概念】和初步【世界观设定】。{regenerate_hint}
-
-【已知信息】
-- 项目题目：{project_title}
-- 题材类型：{project_genre}
-- 用户提供的初始想法（如有）：{requirement or "暂无"}
-
-{variation_profile}
-
-【执行偏好】
-- 在不违背用户需求的前提下，优先把上述“项目级差异化锚点”落实到主角驱动、世界机制、核心冲突中。
-- 除非用户明确要求，否则避免直接复用“废柴逆袭、系统开挂、宗门试炼、学院大比、捡到上古传承、退婚打脸”这类高频默认模板作为主轴。
-
-【强避重约束】
-{recent_project_avoidance or "（暂无近期项目避重清单，但仍需主动回避高频修仙模板。）"}
-- 除非用户明确要求，否则不要使用“林尘”作为主角名。
-- 除非用户明确要求，不要以“宗门杂役 / 杂役弟子 / 废灵根 / 无灵根少年濒死觉醒”作为标准开局。
-- 除非用户明确要求，不要使用“吞噬灵根 / 逆修系统 / 反向修炼系统 / 越被羞辱越变强”作为核心机制。
-- 除非用户明确要求，不要把世界命名为“九寰界 / 九寰界域”，也不要直接使用“九大仙宗 / 九大仙域 / 上中下三界”作为世界骨架。
-- 除非用户明确要求，不要直接复用“飞升骗局 / 高维收割 / 天外监察者 / 养蛊游戏”作为终局真相模板。
-- 如果你的方案与近期项目在“主角名、起点身份、核心能力、世界名称、势力骨架、终局真相”中重合达到 3 项及以上，视为不合格，必须先推翻再重想。
-
-{recent_project_signatures}
-
-【总体要求】
-1. 先完成“故事概念”六段标准输出，再给出一个与之匹配的高度概括版世界观（可简略）。
-2. 保持网文向：强调爽点潜力、冲突强度和持续升级空间。
-3. 若 context 中提供了已有大纲或人物设定（重生成场景），须确保新概念与它们在世界观与核心矛盾上相容。
-
-——————————
-一、请先生成【故事概念】，严格按以下六个部分输出（用 Markdown 粗体标记小标题）：
-
-1. **一句话卖点（Logline）**：
-- 用一句极具吸引力的网文式概括，包含主角类型、核心能力/优势、主要对手/系统，以及最具爽感的长期目标或爆点。
-- 优先使用“主角行动 + 意外结果”句式，例如：“档案修补员篡改禁城时序，反成帝国唯一合法继承人”，而不是单纯罗列设定。
-- 控制在 30–60 字之间。
-
-2. **日志标题（短标题）**：
-- 用 4–10 个字给出一个便于读者记忆的项目名，偏网文风格。
-
-3. **概念摘要（80–150字）**：
-- 简要交代主角身份、初始困境、长期目标、主要阻力，以及世界观的一个独特钩子。
-- 语气偏“介绍本书卖点”，而不是平铺剧情。
-
-4. **题材与流派（主题材/子流派）**：
-- 主题材例如：玄幻修真 / 反乌托邦科幻 / 历史权谋 / 都市奇能 等；
-- 子流派例如：系统流 / 科技修仙流 / 穿越流 / 言情权谋 / 无限流 等；
-- 用“主题材 / 子流派1+子流派2”的形式表述，保持网文分类习惯。
-
-5. **核心标签（3–6个）**：
-- 提炼最能体现本书差异化的关键词，如“末法时代、格物修真、底层逆袭、技术流打脸”；
-- 必须至少包含 1 个“反套路/细分创新”标签（例如：“修真+工业流水线”“系统是反派”“主角不想飞升只想活下去”），避免全是常规标签；
-- 避免只出现“热血、成长”这类无区分度的词语。
-
-6. **核心冲突与情感基调**：
-- 用 2–3 句话说明：
-  - 主线冲突是谁对谁，是什么利益/观念/系统矛盾；
-  - 整体情绪是偏爽文逆袭、黑暗现实、甜宠成长还是悬疑惊悚等（可以混合）。
-
-——————————
-二、在完成六段“故事概念”之后，请追加一个小节：
-
-7. **世界观高概摘要（可简略）**：
-- 用 3–5 句简要说明故事发生的时代背景、主要势力格局和核心规则特点；
-- 此处只做高度概括，详细世界观将在后续阶段展开。
-
-请严格按照上述顺序与小标题输出，不要添加其他额外说明。"""
+            compatibility_note = ""
+            if is_regenerate:
+                compatibility_note = "若 context 中提供了已有大纲或人物设定（重生成场景），须确保新概念与它们在世界观与核心矛盾上相容。"
+            concept_system_prompt, concept_user_prompt = build_streaming_concept_prompts(
+                project_title=project_title,
+                project_genre=project_genre,
+                requirement=requirement or "",
+                recent_project_avoidance=recent_project_avoidance,
+                recent_project_signatures=recent_project_signatures,
+                regenerate_hint=regenerate_hint.strip(),
+                variation_profile=variation_profile,
+                compatibility_note=compatibility_note,
+            )
             # 🎲 提高temperature增加创造性，避免相同题材生成重复内容
-            concept_result = self.creative_director.process(
-                concept_prompt,
+            concept_result = self.creative_director._process_with_system_prompt(
+                concept_user_prompt,
+                system_prompt=concept_system_prompt,
                 temperature=0.9  # 使用高温度增加随机性和创造性
             )
             concept = concept_result if isinstance(concept_result, str) else concept_result.get("output", requirement)
@@ -863,20 +842,18 @@ class CreativeDirectorCoordinator:
                 if current_genre not in ["都市", "纯文学", "悬疑", "言情", "耽美"]:
                     plan_constraint += f"\n- 关键术语：{genre_terms.get('key_terms', '')}"
             
-            # 🆕 使用模块化提示词生成世界观 prompt（引用式）
             genre_extra = genre_module.get('world_extra_sections', '') or get_genre_world_extension(current_genre)
-            world_prompt = WorldBuildingPrompts.get_world_prompt(
+            world_system_prompt, world_user_prompt = build_runtime_world_prompts(
                 genre=f"{self.project_context.get('genre') or self.project_context.get('project_genre') or '通用题材'}{genre_info}",
+                concept_text=concept or "",
                 requirement=requirement or "暂无特别要求",
                 genre_constraint=plan_constraint,
-                genre_extra_sections=genre_extra
+                genre_extra_sections=genre_extra,
             )
-            # 🔥 完整concept传入context,由_format_context智能截断
-            world_context = {
-                "concept": concept,
-                "requirement": requirement
-            }
-            world_result = self.world_architect.process(world_prompt, context=world_context)
+            world_result = self.world_architect._process_with_system_prompt(
+                world_user_prompt,
+                system_prompt=world_system_prompt,
+            )
             world = world_result if isinstance(world_result, str) else world_result.get("output", "世界观设定")
             logger.info(f"✅ 世界观生成完成，长度: {len(world)}")
         else:
@@ -891,19 +868,16 @@ class CreativeDirectorCoordinator:
         if should_generate_characters:
             logger.info("👥 人物设计师正在生成人物...")
             
-            # 🆕 使用模块化提示词生成人物设计 prompt（引用式）
-            char_extra = genre_module.get('character_extra_fields', '') or get_genre_character_fields(current_genre)
-            char_prompt = CharacterDesignPrompts.get_character_prompt(
-                requirement=requirement or "暂无特别要求",
-                genre_extra_fields=char_extra
+            char_system_prompt, char_user_prompt = build_streaming_character_prompts(
+                project_genre=current_genre,
+                requirement=requirement or "",
+                concept_text=concept,
+                world_setting_text=world,
             )
-            # 🔥 完整concept+world_setting传入context,由_format_context智能截断
-            char_context = {
-                "concept": concept,
-                "world_setting": world,
-                "requirement": requirement
-            }
-            char_result = self.character_designer.process(char_prompt, context=char_context)
+            char_result = self.character_designer._process_with_system_prompt(
+                char_user_prompt,
+                system_prompt=char_system_prompt,
+            )
             chars = char_result if isinstance(char_result, str) else char_result.get("output", "人物设定")
             chars = self._normalize_character_cards_if_needed(
                 chars,
@@ -930,7 +904,7 @@ class CreativeDirectorCoordinator:
     def _stage_two_structure_design(self, concept_result: Dict[str, Any]) -> Dict[str, Any]:
         """
         阶段2：结构设计 - 调用真实Agent生成
-        返回 keys：plot_outline
+        返回 keys：plot_outline, event_validation
         """
         logger.info(f"🎯 开始真实Agent结构设计...")
         
@@ -942,7 +916,7 @@ class CreativeDirectorCoordinator:
         current_genre = self.project_context.get("genre", "")
         genre_module = GENRE_PROMPT_MODULES.get(current_genre, DEFAULT_GENRE_MODULE)
         
-        logger.info("📝 创意总监正在生成网文卷结构大纲...")
+        logger.info("📝 情节架构师正在生成网文卷结构大纲...")
         
         # 🎆 使用分层摘要策略优化上下文
         from .layered_summarizer import LayeredSummarizer
@@ -978,11 +952,10 @@ class CreativeDirectorCoordinator:
         logger.info(f"   - 结构化记忆: {len(memory_text):,}字符 / {len(structured_memory)}类")
         logger.info(f"   - 目标tokens: {stats['total_tokens']:,} / {stats['target_tokens']:,}\n")
         
-        # 🆕 使用模块化提示词生成结构设计 prompt（方案A - 纯引用式）
         rhythm_guide = genre_module.get('outline_rhythm_guide', '') or get_genre_rhythm_guide(current_genre)
-        structure_prompt = StructureDesignPrompts.get_structure_prompt(
+        structure_system_prompt, structure_user_prompt = build_runtime_structure_prompts(
+            genre=current_genre or "通用",
             genre_rhythm_guide=rhythm_guide,
-            genre=current_genre or "通用"
         )
         
         # 🔥 只传optimized_context,避免与分层摘要冲突
@@ -997,28 +970,47 @@ class CreativeDirectorCoordinator:
 
 请优先遵循以上结构化记忆中的人物状态、关系边、伏笔和世界规则，不得随意覆盖或忽略。
 """ if memory_text else ""
-        # 🔄 临时切换创意总监到分层摘要器选择的模型
-        orig_llm = getattr(self.creative_director, "llm", None)
+        # 🔄 临时切换情节架构师到分层摘要器选择的模型
+        orig_llm = getattr(self.plot_architect, "llm", None)
         try:
             # 直接按选中的模型实例化，避免“选了A模型，实际又按task_type路由到B模型”
             structure_llm = create_model_llm(model=selected_model, temperature=0.7)
             logger.info(f"⚙️ [生效日志] 结构阶段按模型直连: {selected_model}")
             
-            self.creative_director.llm = structure_llm
-            structure_result = self.creative_director.process(
-                f"{structure_prompt}\n\n{memory_prompt_block}".strip(),
-                context=structure_context
+            self.plot_architect.llm = structure_llm
+            structure_result = self.plot_architect._process_with_system_prompt(
+                f"{structure_user_prompt}\n\n{memory_prompt_block}".strip(),
+                system_prompt=structure_system_prompt,
+                context=structure_context,
             )
         finally:
             if orig_llm is not None:
-                self.creative_director.llm = orig_llm
-                logger.info("🔄 [生效日志] 结构阶段结束，创意总监恢复原模型配置")
+                self.plot_architect.llm = orig_llm
+                logger.info("🔄 [生效日志] 结构阶段结束，情节架构师恢复原模型配置")
         
         outline = structure_result if isinstance(structure_result, str) else structure_result.get("output", "结构大纲")
         logger.info(f"✅ 结构大纲生成完成，长度: {len(outline)}")
-        
-        self.project_context.update({"plot_outline": outline})
-        return {"plot_outline": outline}
+
+        logger.info("🔎 事件验证官正在检查结构大纲的事件链...")
+        event_validation = self._run_event_validation(
+            outline,
+            concept=concept or "",
+            world_setting=world_setting or "",
+            characters=characters or "",
+            genre=current_genre or "",
+        )
+        if event_validation:
+            logger.info(f"✅ 事件验证完成，长度: {len(event_validation)}")
+        else:
+            logger.warning("⚠️ 事件验证未返回有效结果，保留原始结构大纲")
+
+        self.project_context.update(
+            {
+                "plot_outline": outline,
+                "event_validation": event_validation,
+            }
+        )
+        return {"plot_outline": outline, "event_validation": event_validation}
 
     def _extract_first_chapter_plan(self, plot_outline: str) -> str:
         """从完整大纲中提取第1章的规划内容
@@ -1072,10 +1064,102 @@ class CreativeDirectorCoordinator:
         logger.warning(f"⚠️ 无法识别第1章规划结构,使用大纲前1500字")
         return fallback
 
+    def _run_event_validation(
+        self,
+        outline: str,
+        *,
+        concept: str,
+        world_setting: str,
+        characters: str,
+        genre: str,
+    ) -> str:
+        validator = getattr(self, "event_validator", None)
+        normalized_outline = str(outline or "").strip()
+        if validator is None or not normalized_outline:
+            return ""
+
+        truncated_outline = smart_truncate_for_context(
+            content=normalized_outline,
+            max_tokens=18000,
+            content_type="outline",
+            preserve_ratio=0.85,
+        )
+
+        try:
+            validation_result = validator.validate_events(
+                truncated_outline,
+                context={
+                    "concept": concept,
+                    "world_setting": world_setting,
+                    "characters": characters,
+                    "genre": genre or "通用",
+                    "full_plot_outline": normalized_outline,
+                },
+            )
+        except Exception:
+            logger.exception("事件验证失败，保留原始结构大纲")
+            return ""
+
+        if isinstance(validation_result, str):
+            return validation_result.strip()
+        if isinstance(validation_result, dict):
+            return str(
+                validation_result.get("validation_result")
+                or validation_result.get("output")
+                or ""
+            ).strip()
+        return str(validation_result or "").strip()
+
+    def _run_style_optimization(
+        self,
+        draft_content: str,
+        *,
+        plot_outline: str,
+        concept: str,
+        world_setting: str,
+        characters: str,
+        genre: str,
+    ) -> str:
+        optimizer = getattr(self, "style_optimizer", None)
+        normalized_draft = str(draft_content or "").strip()
+        if optimizer is None or not normalized_draft:
+            return normalized_draft
+
+        try:
+            optimization_result = optimizer.optimize_style(
+                normalized_draft,
+                context={
+                    "plot_outline": plot_outline,
+                    "concept": concept,
+                    "world_setting": world_setting,
+                    "characters": characters,
+                    "genre": genre or "通用",
+                },
+            )
+        except Exception:
+            logger.exception("文风优化失败，保留原始章节草稿")
+            return normalized_draft
+
+        if isinstance(optimization_result, str):
+            optimized_content = optimization_result.strip()
+        elif isinstance(optimization_result, dict):
+            optimized_content = str(
+                optimization_result.get("optimized_content")
+                or optimization_result.get("output")
+                or ""
+            ).strip()
+        else:
+            optimized_content = str(optimization_result or "").strip()
+
+        if not optimized_content:
+            logger.warning("文风优化师返回空结果，回退原始章节草稿")
+            return normalized_draft
+        return optimized_content
+
     def _stage_three_content_creation(self, structure_result: Dict[str, Any]) -> Dict[str, Any]:
         """
         阶段3：内容创作 - 调用真实Agent生成
-        返回 keys：content 或 chapters
+        返回 keys：content, draft_content, styled_content
         """
         logger.info(f"🎯 开始真实Agent内容创作...")
         
@@ -1091,25 +1175,8 @@ class CreativeDirectorCoordinator:
         # 🔥 从大纲中提取第1章规划
         chapter_plan = self._extract_first_chapter_plan(plot_outline or '')
         
-        # 🆕 定义开头/结尾方式（与 workflow.py 保持同步）
-        opening_styles = {
-            "对话开头": ("对话开头", "直接进入冲突或紧张场景，用对话抽出矛盾", ""),
-            "动作开头": ("动作开头", "从正在发生的动态事件开始，制造紧迫感", ""),
-            "悬念开头": ("悬念开头", "抛出问题或异常现象，引发读者好奇，创造独特的开场", ""),
-            "场景开头": ("场景开头", "通过环境氛围描写快速建立情境，融入题材特色", ""),
-            "反转开头": ("反转开头", "与上章结尾形成对比或反差，制造意外效果", ""),
-        }
-        ending_styles = {
-            "悬念式": ("悬念式", "关键信息揭露一半，留下悬念让读者想继续阅读", ""),
-            "转折式": ("转折式", "意外事件发生，打破读者预期", ""),
-            "动作中断式": ("动作中断式", "危机时刻戈然而止，制造紧张感", ""),
-            "信息炸弹式": ("信息炸弹式", "揭露惊人真相或身份，制造震撼效果", ""),
-            "选择困境式": ("选择困境式", "主角面临艰难拉择，强化情绪张力", ""),
-        }
-        
-        # ✅ 第1章使用固定的开头/结尾方式（适合开篇）
-        selected_opening = opening_styles["悬念开头"]  # 第1章用悬念开头吸引读者
-        selected_ending = ending_styles["悬念式"]  # 第1章结尾留悬念
+        # ✅ 第一章使用统一的默认开头/结尾策略（适合开篇）
+        selected_opening, selected_ending = get_default_first_chapter_opening_and_ending()
         
         # 🆕 使用ChapterPromptBuilder（与生成下一章保持一致）
         from .chapter_prompt_builder import ChapterPromptBuilder
@@ -1128,16 +1195,38 @@ class CreativeDirectorCoordinator:
         )
         
         # ✅ 使用双prompt调用
-        content_result = self.content_creator.process(
-            prompt=content_user_prompt,
-            context=None,  # 不需要context
-            system_prompt=content_system_prompt  # 传入system_prompt
+        content_result = self.content_creator.create_chapter_from_prompts(
+            system_prompt=content_system_prompt,
+            user_prompt=content_user_prompt,
+            context=None,
         )
-        content = content_result if isinstance(content_result, str) else content_result.get("output", "章节内容")
-        logger.info(f"✅ 第1章创作完成，长度: {len(content)}")
-        
-        self.project_context.update({"content": content, "chapters": [content]})
-        return {"content": content}
+        draft_content = content_result if isinstance(content_result, str) else content_result.get("output", "章节内容")
+        logger.info(f"✅ 第1章草稿创作完成，长度: {len(draft_content)}")
+
+        logger.info("🎨 文风优化师正在统一章节文风...")
+        styled_content = self._run_style_optimization(
+            draft_content,
+            plot_outline=plot_outline or "",
+            concept=concept or "",
+            world_setting=world_setting or "",
+            characters=characters or "",
+            genre=current_genre or "",
+        )
+        logger.info(f"✅ 文风优化完成，长度: {len(styled_content)}")
+
+        self.project_context.update(
+            {
+                "draft_content": draft_content,
+                "styled_content": styled_content,
+                "content": styled_content,
+                "chapters": [styled_content],
+            }
+        )
+        return {
+            "content": styled_content,
+            "draft_content": draft_content,
+            "styled_content": styled_content,
+        }
 
     def _stage_four_quality_review(self, content_result: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1171,79 +1260,13 @@ class CreativeDirectorCoordinator:
         
         logger.info(f"📏 内容长度: {len(content)} → {len(truncated_content)}字符")
         
-        review_prompt = f"""你是一位专业的网络小说质量评审官。请使用【网文6维度评审体系】对以下内容进行评审：
-
-【待评审内容】
-{truncated_content}
-
-## 📊 网文6维度评审体系
-
-### 1. 爽点效果（权重25%）
-- 本章是否有明确的爽点或为后续爽点做了铺垫？
-- 是否成功吸引读者？
-
-### 2. 节奏把控（权重20%）
-- 信息密度是否适中？
-- 场景转换是否流畅？
-- 对话与叙述比例是否合理（建议30-50%对话）？
-
-### 3. 钩子效果（权重15%）
-- 章节开头是否吸引人？
-- 章节结尾是否有悬念/钩子？
-- 读者是否有“想点下一章”的冲动？
-
-### 4. 代入感（权重15%）
-- 主角视角是否清晰？
-- 是否有强烈的画面感与情感渲染？
-
-### 5. 文笔流畅度（权重10%）
-- 是否存在明显AI痕迹或机械感？
-- 对话是否自然、符合人物性格？
-- 描写是否生动有画面感？
-
-### 6. 内容一致性（权重15%）
-- 与人物设定、世界观规则是否一致？
-
-【输出格式】
-请使用以下格式输出评审报告：
-
-## 📊 网文质量评审报告
-
-**综合评分**：X/10分
-
-### 1. 爽点效果 ⭐⭐⭐
-- 评价：...
-- 问题：...
-
-### 2. 节奏把控 ⭐⭐⭐
-- 评价：...
-- 问题：...
-
-### 3. 钩子效果 ⭐⭐⭐
-- 开头评价：...
-- 结尾评价：...
-- 问题：...
-
-### 4. 代入感 ⭐⭐⭐
-- 评价：...
-- 问题：...
-
-### 5. 文笔流畅度 ⭐⭐⭐
-- 评价：...
-- 问题：...
-
-### 6. 内容一致性 ⭐⭐⭐
-- 评价：...
-- 问题：...
-
-### 🔧 具体修改建议（按优先级排序）
-1. 【必改】...
-2. 【建议】...
-3. 【可选】..."""
-        
-        # 🔥 prompt中已包含content[:3000],context不再重复传递
-        review_context = None
-        review_result = self.quality_reviewer.process(review_prompt, context=review_context)
+        review_system_prompt, review_user_prompt = build_first_chapter_review_prompts(
+            chapter_draft=truncated_content,
+        )
+        review_result = self.quality_reviewer._process_with_system_prompt(
+            review_user_prompt,
+            system_prompt=review_system_prompt,
+        )
         review = review_result if isinstance(review_result, str) else review_result.get("output", "评审报告")
         logger.info(f"✅ 质量评审完成，长度: {len(review)}")
         
@@ -1269,7 +1292,7 @@ class CreativeDirectorCoordinator:
             logger.info("✅ 内容无需修订，直接通过")
             return {"revised_content": original_content, "final_review": "内容质量达标，无需修订"}
         
-        logger.info("✏️ 内容创作师正在根据评审意见优化内容...")
+        logger.info("✏️ 内容修订师正在根据评审意见优化内容...")
         
         # 🆕 使用智能截断替代手动截断
         truncated_original = smart_truncate_for_context(
@@ -1289,31 +1312,16 @@ class CreativeDirectorCoordinator:
         logger.info(f"📏 原始内容: {len(original_content)} → {len(truncated_original)}字符")
         logger.info(f"📏 评审意见: {len(review)} → {len(truncated_review)}字符")
         
-        revision_prompt = f"""请根据以下评审意见优化内容：
-
-【原始内容】
-{truncated_original}
-
-【评审意见】
-{truncated_review}
-
-优化要求：
-1. 保持故事主线和人物设定不变
-2. 针对评审中指出的具体问题进行修改
-3. 优化语言表达和叙事节奏
-4. 增强细节描写和情感渲染
-5. 确保逻辑连贯性
-
-请输出优化后的完整内容。"""
-        
-        # 🔥 prompt中已包含original_content[:2000]和review[:1000],context不重复
-        revision_context = None
-        revision_result = self.content_creator.process(revision_prompt, context=revision_context)
+        revision_result = self.content_reviser.revise_content(
+            truncated_original,
+            truncated_review,
+            context=None,
+        )
         revised_content = revision_result if isinstance(revision_result, str) else revision_result.get("output", original_content)
         logger.info(f"✅ 内容优化完成，长度: {len(revised_content)}")
         
         # 最终评审
-        logger.info("🔍 质量评审官进行最终评审...")
+        logger.info("🔍 最终审核官进行最终评审...")
         
         # 🆕 使用智能截断
         truncated_revised = smart_truncate_for_context(
@@ -1325,20 +1333,10 @@ class CreativeDirectorCoordinator:
         
         logger.info(f"📏 优化后内容: {len(revised_content)} → {len(truncated_revised)}字符")
         
-        final_review_prompt = f"""请对优化后的内容进行最终评审：
-
-【优化后内容】
-{truncated_revised}
-
-Please confirm：
-1. 是否解决了之前指出的问题
-2. 整体质量是否达标
-3. 是否可以发布
-
-给出简短的最终评审意见。"""
-        
-        # 🔥 prompt中已包含revised_content[:2000],context不重复
-        final_review_result = self.quality_reviewer.process(final_review_prompt, context=None)
+        final_review_result = self.final_reviewer.review_final_content(
+            truncated_revised,
+            context=None,
+        )
         final_review = final_review_result if isinstance(final_review_result, str) else final_review_result.get("output", "最终评审完成")
         logger.info(f"✅ 最终评审完成，长度: {len(final_review)}")
         

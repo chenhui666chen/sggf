@@ -5,6 +5,8 @@ import time
 import json
 from typing import Any, Dict, List, Optional
 
+import requests
+
 from adapters.base import BaseAdapter, AdapterConfig, GenerationResult
 from adapters.registry import register_model
 from adapters._shared import DASHSCOPE_API_KEY, DASHSCOPE_BASE
@@ -91,9 +93,9 @@ class MiniMaxSpeechHDAdapter(MiniMaxSpeechTurboAdapter):
         )
 
 
-@register_model("qwen3-tts-flash")
-class Qwen3TTSFlashAdapter(BaseAdapter):
-    MODEL_ID = "qwen3-tts-flash"
+@register_model("qwen3-tts-instruct-flash")
+class Qwen3TTSInstructFlashAdapter(BaseAdapter):
+    MODEL_ID = "qwen3-tts-instruct-flash"
 
     def _map_task_to_request(self, task):
         return {"text": task.prompt}
@@ -109,19 +111,38 @@ class Qwen3TTSFlashAdapter(BaseAdapter):
         try:
             url = f"{DASHSCOPE_BASE}/api/v1/services/aigc/multimodal-generation/generation"
             headers = {"Authorization": f"Bearer {DASHSCOPE_API_KEY}", "Content-Type": "application/json"}
-            payload = {
+            voice_id = kwargs.get("voice_id", "Cherry")
+            payload: Dict[str, Any] = {
                 "model": self.MODEL_ID,
-                "input": {"text": prompt or "这是一段测试语音。"},
-                "parameters": {"voice": "Cherry"},
+                "input": {
+                    "text": prompt or "这是一段测试语音。",
+                    "voice": voice_id,
+                    "language_type": kwargs.get("language_type", "Auto"),
+                },
             }
+            instructions = str(kwargs.get("instructions") or "").strip()
+            if instructions:
+                payload["parameters"] = {
+                    "instructions": instructions,
+                    "optimize_instructions": bool(kwargs.get("optimize_instructions", True)),
+                }
             r = requests.post(url, json=payload, headers=headers, timeout=60)
             data = r.json()
 
-            audio_url = data.get("output", {}).get("audio", {}).get("url", "")
-            if audio_url:
+            audio_info = data.get("output", {}).get("audio")
+            if isinstance(audio_info, dict) and audio_info.get("url"):
                 return GenerationResult(
                     success=True, task_id="", model_id=self.spec.id,
-                    outputs=[audio_url], latency=time.time() - start,
+                    outputs=[audio_info["url"]], latency=time.time() - start,
+                )
+            if isinstance(audio_info, str) and audio_info:
+                return GenerationResult(
+                    success=True,
+                    task_id="",
+                    model_id=self.spec.id,
+                    outputs=[f"audio:{len(audio_info)} base64"],
+                    metadata={"audio_base64": audio_info},
+                    latency=time.time() - start,
                 )
             return GenerationResult(
                 success=False, task_id="", model_id=self.spec.id,
@@ -137,7 +158,7 @@ class Qwen3TTSFlashAdapter(BaseAdapter):
     @classmethod
     def get_model_spec(cls) -> ModelSpec:
         return ModelSpec(
-            id="qwen3-tts-flash", name="Qwen3 TTS Flash", provider="alibaba", version="v3",
+            id="qwen3-tts-instruct-flash", name="Qwen3 TTS Instruct Flash", provider="alibaba", version="v3",
             status=ModelStatus.ACTIVE, modality=["text_to_speech"], avg_latency_seconds=3.0,
         )
 

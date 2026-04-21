@@ -87,7 +87,7 @@ def _apply_project_audio_effects(*, engine, project: Optional[Project]) -> None:
 async def generate_audiobook_audio_from_scripts_background(
     audiobook_project_id: int,
     chapter_ids: List[int],
-    tts_model: str = "qwen3-tts-flash",
+    tts_model: str = "qwen3-tts-instruct-flash",
     tracker: Optional[StageTracker] = None,
 ) -> None:
     """后台生成有声书音频任务（基于已生成或人工审核后的剧本）。"""

@@ -100,6 +100,7 @@ from app.services.user_center_points_events import (
     record_audiobook_billing_freeze,
 )
 from app.utils.datetime_utils import utc_now
+from core.model_resolution import normalize_model_id
 from core.unified_media_runtime import synthesize_speech as runtime_synthesize_speech
 
 from app.api.v1.audiobook_api import router
@@ -161,7 +162,7 @@ async def regenerate_segment(
     segment = segments[segment_index]
     
     # 构建 TTS 请求参数
-    tts_model = request.tts_model or (chapter_audio.tts_model or "qwen3-tts-flash")
+    tts_model = normalize_model_id(request.tts_model or (chapter_audio.tts_model or "qwen3-tts-instruct-flash")) or "qwen3-tts-instruct-flash"
     voice_id = request.voice_id or segment.get("voice_id", "longxiaochun")
     emotion = request.emotion or segment.get("emotion", "neutral")
     

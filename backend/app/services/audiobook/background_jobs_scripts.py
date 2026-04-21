@@ -147,7 +147,7 @@ def _apply_script_stage_project_audio_config(
 async def generate_audiobook_scripts_background(
     audiobook_project_id: int,
     chapter_ids: List[int],
-    tts_model: str = "qwen3-tts-flash",
+    tts_model: str = "qwen3-tts-instruct-flash",
     force_regenerate: bool = False,
     tracker: Optional[StageTracker] = None,
 ) -> None:

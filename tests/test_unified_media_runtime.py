@@ -4,7 +4,7 @@ import json
 import pytest
 
 
-def test_media_runtime_balanced_tts_prefers_qwen3_tts_flash() -> None:
+def test_media_runtime_balanced_tts_prefers_qwen3_tts_instruct_flash() -> None:
     from core.unified_media_runtime import UnifiedMediaRuntime
 
     runtime = UnifiedMediaRuntime()
@@ -15,7 +15,7 @@ def test_media_runtime_balanced_tts_prefers_qwen3_tts_flash() -> None:
         strategy="balanced",
     )
 
-    assert spec.id == "qwen3-tts-flash"
+    assert spec.id == "qwen3-tts-instruct-flash"
 
 
 def test_media_runtime_quality_edit_prefers_max_variant() -> None:
@@ -592,7 +592,7 @@ def test_create_tts_engine_accepts_legacy_qwen3_tts_alias(monkeypatch: pytest.Mo
         max_concurrent=2,
     )
 
-    assert engine.model == "qwen3-tts-flash"
+    assert engine.model == "qwen3-tts-instruct-flash"
 
 
 @pytest.mark.asyncio
@@ -606,7 +606,7 @@ async def test_adapter_helper_synthesize_speech_returns_binary_payload(
         async def synthesize_speech_result(self, **kwargs):
             return UnifiedMediaResult(
                 success=True,
-                model_id="qwen3-tts-flash",
+                model_id="qwen3-tts-instruct-flash",
                 binary=b"RIFF-demo",
                 data={"audio_bytes": b"RIFF-demo", "format": "wav"},
             )
@@ -616,11 +616,11 @@ async def test_adapter_helper_synthesize_speech_returns_binary_payload(
     result = await adapter_helpers.synthesize_speech(
         text="hello",
         voice_params={"speaker": "longxiaochun"},
-        model_id="qwen3-tts-flash",
+        model_id="qwen3-tts-instruct-flash",
     )
 
     assert result.success is True
-    assert result.model_id == "qwen3-tts-flash"
+    assert result.model_id == "qwen3-tts-instruct-flash"
     assert result.binary == b"RIFF-demo"
     assert result.data["format"] == "wav"
 
@@ -634,7 +634,7 @@ async def test_synthesize_speech_result_preserves_engine_metadata(
     runtime = UnifiedMediaRuntime()
 
     class FakeEngine:
-        model = "qwen3-tts-flash"
+        model = "qwen3-tts-instruct-flash"
 
         async def synthesize_with_metadata(self, text, voice_params, emotion):
             assert text == "hello"
@@ -656,7 +656,7 @@ async def test_synthesize_speech_result_preserves_engine_metadata(
     )
 
     assert result.success is True
-    assert result.model_id == "qwen3-tts-flash"
+    assert result.model_id == "qwen3-tts-instruct-flash"
     assert result.binary == b"RIFF-demo"
     assert result.data["format"] == "wav"
     assert result.data["tts_timestamps"] == [{"text": "hello", "start": 0, "end": 120}]

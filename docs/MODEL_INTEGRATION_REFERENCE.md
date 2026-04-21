@@ -210,7 +210,7 @@ BaseAdapter
 ├── _DashScopeChatAdapter      # 百炼对话 (qwen3.5-omni-plus, qwen3.6-plus, qwen3-vl-plus)
 ├── _VolcengineChatAdapter     # 火山方舟对话 (doubao-seed-2-0-pro, doubao-seed-2-0-lite)
 ├── _DashScopeTTSAdapter       # 百炼TTS (MiniMax/speech-2.8-turbo, MiniMax/speech-2.8-hd)
-├── Qwen3TTSFlashAdapter       # 百炼TTS (qwen3-tts-flash)
+├── Qwen3TTSInstructFlashAdapter # 百炼TTS (qwen3-tts-instruct-flash)
 ├── CosyVoiceV3PlusAdapter     # CosyVoice WebSocket TTS
 ├── _ImageEditAdapter          # 百炼图片编辑 (qwen-image-edit-plus, qwen-image-edit-max)
 ├── _DashScopeT2VAdapter       # 百炼文生视频 (wan2.7-t2v, wan2.6-t2v-fast, vidu-q3-pro-text2video)
@@ -486,7 +486,7 @@ BaseAdapter
 | `MiniMax/speech-2.8-turbo` | 百炼 | 1.5s |
 | `MiniMax/speech-2.8-hd` | 百炼 | 1.3s |
 | `cosyvoice-v3-plus` | 百炼 | 0.6s |
-| `qwen3-tts-flash` | 百炼 | 0.7s |
+| `qwen3-tts-instruct-flash` | 百炼 | 0.7s |
 
 ### 视频生成 (15)
 
@@ -797,7 +797,7 @@ Qwen TTS 使用百炼标准模型 ID：
 
 | 注册 ID | 实际 MODEL_ID |
 | --- | --- |
-| `qwen3-tts-flash` | `qwen3-tts-flash` 或 `qwen3-tts-flash-2025-11-27` |
+| `qwen3-tts-instruct-flash` | `qwen3-tts-instruct-flash` |
 
 #### 11.3.2 请求体格式
 
@@ -805,11 +805,15 @@ Qwen TTS 的请求体比 MiniMax 简单：
 
 ```json
 {
-  "model": "qwen3-tts-flash",
+  "model": "qwen3-tts-instruct-flash",
   "input": {
     "text": "要合成的文本",
-    "voice": "Ryan",
-    "language_type": "Chinese"
+    "voice": "Neil",
+    "language_type": "Auto"
+  },
+  "parameters": {
+    "instructions": "用温和但克制的旁白语气讲述，情绪保持轻微紧张。",
+    "optimize_instructions": true
   }
 }
 ```
@@ -871,9 +875,9 @@ if isinstance(audio_info, dict):
 ```python
 # voice_manager.py
 PRESET_VOICES = {
-    "Ryan": {"tts_speaker_id": "Ryan", ...},
+    "Neil": {"tts_speaker_id": "Neil", ...},
     "Serena": {"tts_speaker_id": "Serena", ...},
-    "male_narrator": {"tts_speaker_id": "Ryan", ...},  # 别名
+    "male_narrator": {"tts_speaker_id": "Neil", ...},  # 别名
 }
 ```
 
@@ -884,7 +888,7 @@ PRESET_VOICES = {
 | 模型 | 语音 ID 示例 |
 | --- | --- |
 | MiniMax | `male-qn-qingse`, `Chinese (Mandarin)_News_Anchor` |
-| Qwen | `Ryan`, `Serena`, `Cherry` |
+| Qwen | `Neil`, `Serena`, `Cherry` |
 
 `_normalize_speaker_id` 方法应根据模型类型返回正确的语音 ID。
 
@@ -894,7 +898,7 @@ PRESET_VOICES = {
 
 1. **检查模型 ID 格式**
    - [ ] MiniMax 模型是否带 `MiniMax/` 前缀？
-   - [ ] Qwen 模型是否为 `qwen3-tts-flash` 或 `qwen3-tts-plus`？
+   - [ ] Qwen 模型是否为 `qwen3-tts-instruct-flash` 或 `qwen3-tts-plus`？
 
 2. **检查语音 ID**
    - [ ] 选择的语音是否在对应模型的可用列表中？

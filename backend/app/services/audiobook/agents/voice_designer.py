@@ -11,6 +11,8 @@ import logging
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 
+from app.services.audiobook.constants import normalize_speaker_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -103,6 +105,7 @@ class VoiceDesigner:
         
         # 2. 匹配TTS参数
         tts_params = self._match_tts_params(characteristics, character_info)
+        tts_params.speaker = normalize_speaker_id(tts_params.speaker)
         
         # 3. 差异化调整：如果与已有角色过于相似，调整pitch/rate
         tts_params = self._adjust_for_differentiation(character_name, tts_params, characteristics)

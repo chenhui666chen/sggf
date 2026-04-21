@@ -64,9 +64,12 @@ COSYVOICE_V3_PLUS_INSTRUCT_CHOICES = {
 # Windows/Linux 常见网络瞬断 errno（用于判定可重试）。
 _RETRYABLE_NETWORK_ERRNOS = {10053, 10054, 104, 110, 111}
 
-# Qwen3-TTS-Flash：stable 与 snapshot 支持的音色集合不同。
-# 默认指向 49 音色的快照版（与文档“qwen3-tts-flash-2025-11-27 音色列表”一致）。
-QWEN3_TTS_FLASH_MODEL_ID = os.getenv("QWEN3_TTS_FLASH_MODEL_ID", "qwen3-tts-flash-2025-11-27")
+# Qwen3-TTS Instruct Flash：优先读取新的 deployment 配置，并兼容历史环境变量。
+QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID = (
+    os.getenv("QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID")
+    or os.getenv("QWEN3_TTS_FLASH_MODEL_ID")
+    or "qwen3-tts-instruct-flash"
+)
 
 # 导入监控模块
 try:
@@ -88,7 +91,7 @@ class TTSEngineBase:
         self,
         enable_cache: bool = True,
         max_concurrent: int = 2,  # 提升到2个并发（低于3 RPS限制）
-        model: str = "qwen3-tts-flash",  # 高性价比版本，支持更多预设音色
+        model: str = "qwen3-tts-instruct-flash",  # 默认 Qwen Instruct Flash，兼顾成本与指令控制
         request_delay: float = 0.5,  # 优化为0.5秒（2 RPS，安全范围内）
         primary_provider: TTSProvider = TTSProvider.ALIYUN,  # 主提供商
         fallback_providers: Optional[List[TTSProvider]] = None,  # 备用提供商列表

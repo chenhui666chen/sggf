@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class AgentType(str, Enum):
     """Agent类型"""
     CREATIVE_DIRECTOR = "creative_director"
-    WORLDVIEW_ARCHITECT = "worldview_architect"
+    WORLD_ARCHITECT = "world_architect"
     CHARACTER_DESIGNER = "character_designer"
     PLOT_ARCHITECT = "plot_architect"
     EVENT_VALIDATOR = "event_validator"
@@ -234,7 +234,7 @@ class AgentCoordinator:
                 "role": "协调整个创作流程",
                 "stage": StageType.CONCEPT,
             },
-            AgentType.WORLDVIEW_ARCHITECT: {
+            AgentType.WORLD_ARCHITECT: {
                 "name": "世界观架构师",
                 "role": "设计故事世界观",
                 "stage": StageType.CONCEPT,
@@ -514,6 +514,7 @@ class AgentCoordinator:
                 result = real_coordinator._stage_two_structure_design(concept_result)
                 return {
                     "plot_outline": result.get("plot_outline", ""),
+                    "event_validation": result.get("event_validation", ""),
                     "structure": str(result),
                 }
             
@@ -523,6 +524,8 @@ class AgentCoordinator:
                 result = real_coordinator._stage_three_content_creation(structure_result)
                 return {
                     "content": result.get("content", ""),
+                    "draft_content": result.get("draft_content", ""),
+                    "styled_content": result.get("styled_content", ""),
                 }
             
             elif stage == StageType.REVIEW:

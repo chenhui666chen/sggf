@@ -49,6 +49,7 @@ from app.celery_app import celery_app
 from app.services.audiobook import AudiobookEngine
 from app.services.audiobook.audio_mixer import AudioMixer
 from app.services.audiobook.agents import SoundEffectDesigner
+from app.services.audiobook.constants import normalize_speaker_id
 from app.services.audiobook.tts_engine import RetryConfig
 from app.services.audiobook.voice_manager import VoiceManager
 from app.services.audiobook.voice_manager_factory import create_voice_manager
@@ -100,11 +101,20 @@ from app.services.user_center_points_events import (
     record_audiobook_billing_freeze,
 )
 from app.utils.datetime_utils import utc_now
+from core.model_resolution import normalize_model_id
 from core.unified_media_runtime import synthesize_speech as runtime_synthesize_speech
 
 from app.api.v1.audiobook_api import router
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_TTS_MODEL = "qwen3-tts-instruct-flash"
+SUPPORTED_TTS_MODELS = {
+    "qwen3-tts-instruct-flash",
+    "cosyvoice-v3-plus",
+    "minimax-speech-2.8-hd",
+    "minimax-speech-2.8-turbo",
+}
 
 @router.post("/tts/preview")
 async def tts_preview(
@@ -119,25 +129,19 @@ async def tts_preview(
     if len(text) > 200:
         text = text[:200]
 
-    # 选择模型：默认使用 qwen3-tts-flash，支持多种 TTS 模型
-    model_name = (request.model or "qwen3-tts-flash").strip()
-    supported_models = {
-        "qwen3-tts-flash",
-        "cosyvoice-v3-plus",
-        "minimax-speech-2.8-hd",
-        "minimax-speech-2.8-turbo",
-    }
-    if model_name not in supported_models:
-        model_name = "qwen3-tts-flash"
+    # 选择模型：默认使用 qwen3-tts-instruct-flash，并兼容历史 qwen3-tts-flash/qwen3_tts
+    model_name = normalize_model_id(request.model or DEFAULT_TTS_MODEL) or DEFAULT_TTS_MODEL
+    if model_name not in SUPPORTED_TTS_MODELS:
+        model_name = DEFAULT_TTS_MODEL
 
     # 试听场景优先“快速恢复”而非长时间等待：
     # - 额外多 1 次重试（应对偶发断连）
     # - 基础退避更小，避免前端等待过久
     preview_retry = RetryConfig(max_retries=4, base_delay=1.0, max_delay=8.0, exponential_base=2.0, jitter=True)
     # 将前端的 voice_id（如 'male_young_energetic'）映射为真实的 TTS 音色ID
-    if model_name == "qwen3-tts-flash":
+    if model_name.startswith("qwen3-tts"):
         preset = VoiceManager.PRESET_VOICES.get(request.voice_id)
-        speaker_id = preset["tts_speaker_id"] if preset else request.voice_id
+        speaker_id = normalize_speaker_id(preset["tts_speaker_id"] if preset else request.voice_id)
     else:
         entry = get_voice_entry(request.voice_id, model=model_name)
         speaker_id = entry.get("speaker") if entry else request.voice_id
@@ -207,7 +211,7 @@ async def list_tts_models(
 
 def _get_model_display_name(model: str) -> str:
     names = {
-        "qwen3-tts-flash": "Qwen3-TTS Flash",
+        "qwen3-tts-instruct-flash": "Qwen3-TTS Instruct Flash",
         "qwen3-tts-plus": "Qwen3-TTS Plus",
         "cosyvoice-v3-plus": "CosyVoice v3 Plus",
         "minimax-speech-2.8-hd": "MiniMax Speech 2.8 HD",
@@ -218,7 +222,7 @@ def _get_model_display_name(model: str) -> str:
 
 def _get_model_description(model: str) -> str:
     descriptions = {
-        "qwen3-tts-flash": "高性价比，49音色，适合批量生成",
+        "qwen3-tts-instruct-flash": "默认模型，49音色，支持自然语言 instructions",
         "qwen3-tts-plus": "高质量，支持SSML",
         "cosyvoice-v3-plus": "顶级音质，情绪控制，Instruct模式",
         "minimax-speech-2.8-hd": "最高音质，语气词标签，100+音色",
@@ -229,7 +233,7 @@ def _get_model_description(model: str) -> str:
 
 def _get_model_price(model: str) -> float:
     prices = {
-        "qwen3-tts-flash": 1.0,
+        "qwen3-tts-instruct-flash": 1.0,
         "qwen3-tts-plus": 2.0,
         "cosyvoice-v3-plus": 2.0,
         "minimax-speech-2.8-hd": 6.0,
@@ -240,7 +244,29 @@ def _get_model_price(model: str) -> float:
 
 def _get_model_features(model: str) -> list:
     features_map = {
-        "qwen3-tts-flash": ["高性价比", "49音色", "批量合成"],
+        "qwen3-tts-instruct-flash": ["默认模型", "49音色", "自然语言指令"],
+        "qwen3-tts-plus": ["高质量", "SSML支持"],
+        "cosyvoice-v3-plus": ["顶级音质", "情绪控制", "Instruct模式"],
+        "minimax-speech-2.8-hd": ["最高音质", "语气词标签", "100+音色", "混合音色"],
+        "minimax-speech-2.8-turbo": ["优秀音质", "高性价比", "高并发"],
+    }
+    return features_map.get(model, [])
+
+
+def _get_model_description_legacy(model: str) -> str:
+    descriptions = {
+        "qwen3-tts-instruct-flash": "默认模型，24音色，支持自然语言 instructions",
+        "qwen3-tts-plus": "高质量，支持SSML",
+        "cosyvoice-v3-plus": "顶级音质，情绪控制，Instruct模式",
+        "minimax-speech-2.8-hd": "最高音质，语气词标签，100+音色",
+        "minimax-speech-2.8-turbo": "优秀音质，高性价比，高并发",
+    }
+    return descriptions.get(model, "")
+
+
+def _get_model_features_legacy(model: str) -> list:
+    features_map = {
+        "qwen3-tts-instruct-flash": ["默认模型", "24音色", "自然语言指令"],
         "qwen3-tts-plus": ["高质量", "SSML支持"],
         "cosyvoice-v3-plus": ["顶级音质", "情绪控制", "Instruct模式"],
         "minimax-speech-2.8-hd": ["最高音质", "语气词标签", "100+音色", "混合音色"],
@@ -251,18 +277,18 @@ def _get_model_features(model: str) -> list:
 
 @router.get("/tts/voices")
 async def list_tts_voices(
-    model: str = "qwen3-tts-flash",
+    model: str = DEFAULT_TTS_MODEL,
     current_user: User = Depends(get_current_user),
 ):
     """Expose the supported voices to the frontend (model-specific)."""
-    model = (model or "qwen3-tts-flash").strip()
-    if model not in {"qwen3-tts-flash", "cosyvoice-v3-plus", "minimax-speech-2.8-hd", "minimax-speech-2.8-turbo"}:
+    model = normalize_model_id(model or DEFAULT_TTS_MODEL) or DEFAULT_TTS_MODEL
+    if model not in SUPPORTED_TTS_MODELS:
         if model.startswith("minimax-speech"):
             model = "minimax-speech-2.8-hd"
         elif model.startswith("qwen3-tts"):
-            model = "qwen3-tts-flash"
+            model = DEFAULT_TTS_MODEL
         else:
-            model = "qwen3-tts-flash"
+            model = DEFAULT_TTS_MODEL
     catalog = load_voice_catalog_for_model(model)
     meta = catalog.get("meta") or {}
     voices = list(catalog.get("voices") or [])
@@ -276,7 +302,7 @@ async def list_tts_voices(
             # 未配置 API Key 等情况下，不阻塞页面使用内置音色
             pass
     return {
-        "model": meta.get("model", "qwen3-tts-flash"),
+        "model": meta.get("model", DEFAULT_TTS_MODEL),
         "updated_at": meta.get("updated_at"),
         "source": meta.get("source"),
         "voice_count": len(voices),

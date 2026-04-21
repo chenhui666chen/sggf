@@ -26,7 +26,7 @@ TEST_CASES = {
     "MiniMax/speech-2.8-turbo": {"type": "tts", "prompt": "你好"},
     "MiniMax/speech-2.8-hd": {"type": "tts", "prompt": "你好"},
     "cosyvoice-v3-plus": {"type": "tts", "prompt": "你好"},
-    "qwen3-tts-flash": {"type": "tts", "prompt": "你好"},
+    "qwen3-tts-instruct-flash": {"type": "tts", "prompt": "你好"},
     "doubao-seedream-4-5": {"type": "image", "prompt": "a flower"},
     "doubao-seedream-5-0": {"type": "image", "prompt": "a cat"},
 
@@ -115,7 +115,7 @@ def main():
             "qwen-image-2.0", "qwen-image-2.0-pro", "wan2.7-image",
             "qwen3.5-omni-plus", "qwen3.6-plus",
             "MiniMax/speech-2.8-turbo", "MiniMax/speech-2.8-hd",
-            "cosyvoice-v3-plus", "qwen3-tts-flash",
+            "cosyvoice-v3-plus", "qwen3-tts-instruct-flash",
             "doubao-seedream-4-5", "doubao-seedream-5-0",
         ]
         models_to_test = [(m, TEST_CASES[m]) for m in quick_models if m in TEST_CASES]

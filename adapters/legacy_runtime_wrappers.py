@@ -357,7 +357,7 @@ class Wan27R2VRuntimeWrapper(_BaseLegacyRuntimeWrapper):
 
 
 class Qwen3TTSRuntimeWrapper(_BaseLegacyRuntimeWrapper):
-    TARGET_MODEL_ID = "qwen3-tts-flash"
+    TARGET_MODEL_ID = "qwen3-tts-instruct-flash"
 
     def generate(
         self,

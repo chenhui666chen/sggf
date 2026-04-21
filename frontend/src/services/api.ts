@@ -1045,23 +1045,6 @@ class ApiClient {
     return this.client.get(`/api/v1/model-catalog/entries/${encodeURIComponent(modelKey)}`)
   }
 
-  syncModelCatalog(payload?: {
-    force_refresh?: boolean
-    model_keys?: string[]
-  }) {
-    return this.client.post<{ status: string; task_id: string; message: string }>('/api/v1/model-catalog/sync', payload ?? {})
-  }
-
-  getSyncTaskStatus(taskId: string) {
-    return this.client.get<{ status: string; result?: any; error?: string }>(`/api/v1/model-catalog/sync/${taskId}`)
-  }
-
-  validateModelConfig(payload?: {
-    model_keys?: string[]
-  }) {
-    return this.client.post('/api/v1/model-catalog/validate-config', payload ?? {})
-  }
-
   updateProject(projectId: number, data: ProjectUpdatePayload) {
     return this.client.put<Project>(`/api/v1/projects/${projectId}`, data)
   }
@@ -1360,6 +1343,26 @@ class ApiClient {
     return this.client.get(`/api/v1/projects/${projectId}/techniques`)
   }
 
+  getCharacterAutoTrackedRelations(characterId: number) {
+    return this.client.get(`/api/v1/characters/${characterId}/auto-tracked-relations`)
+  }
+
+  getCharacterAppearanceTimeline(characterId: number) {
+    return this.client.get(`/api/v1/characters/${characterId}/appearance-timeline`)
+  }
+
+  syncCharactersToWorkflow(projectId: number) {
+    return this.client.post(`/api/v1/projects/${projectId}/sync-characters-to-workflow`)
+  }
+
+  getCharactersTextPreview(projectId: number) {
+    return this.client.get(`/api/v1/projects/${projectId}/characters-text-preview`)
+  }
+
+  getCharacterRelationshipGraph(projectId: number) {
+    return this.client.get(`/api/v1/projects/${projectId}/character-relationship-graph`)
+  }
+
   // 有声书 API
   getAudiobookProjectsByProject(projectId: number, params?: { include_chapter_audios?: boolean }) {
     return this.client.get(`/api/v1/audiobook/projects/by-project/${projectId}`, { params })
@@ -1494,7 +1497,11 @@ class ApiClient {
   // 获取章节字幕文件 API
   getChapterSubtitle(audiobookProjectId: number, chapterId: number, format: string = 'srt') {
     return this.client.get(
-      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/subtitle?format=${format}`
+      `/api/v1/audiobook/projects/${audiobookProjectId}/chapters/${chapterId}/subtitle?format=${format}`,
+      {
+        responseType: 'blob',
+        timeout: 30000,
+      },
     )
   }
 
@@ -1503,6 +1510,20 @@ class ApiClient {
     return this.client.get(
       `/api/v1/audiobook/projects/${audiobookProjectId}/browser-player`
     )
+  }
+
+  listAudiobookTasks() {
+    return this.client.get('/api/v1/audiobook/tasks', {
+      timeout: 15000,
+      validateStatus: () => true,
+    })
+  }
+
+  getAudiobookTaskStatus(taskId: string) {
+    return this.client.get(`/api/v1/audiobook/tasks/${taskId}/status`, {
+      timeout: 15000,
+      validateStatus: () => true,
+    })
   }
 
   // 智能分块预览 API
@@ -1639,6 +1660,102 @@ class ApiClient {
     return this.client.post(url, data, config)
   }
 
+  getLatestProjectMemory(projectId: number) {
+    return this.client.get(`/api/v1/projects/${projectId}/memories/latest`, {
+      timeout: 15000,
+      validateStatus: () => true,
+    })
+  }
+
+  saveProjectMemorySnapshot(projectId: number, payload: {
+    messages: any[]
+    current_chapter: number | null
+    current_scene: string
+    active_characters: any[]
+    writing_goal: string
+  }) {
+    return this.client.post(`/api/v1/projects/${projectId}/memories/auto-save`, payload, {
+      timeout: 15000,
+      validateStatus: () => true,
+    })
+  }
+
+  postWorkflowStageAsync(payload: {
+    projectId: number
+    stage: string
+    requirement?: string
+    enableStreaming?: boolean
+    regenerate?: boolean
+    targets?: string[]
+    feedback?: string
+  }) {
+    return this.client.post('/api/v1/workflow/execute-stage-async', {
+      project_id: payload.projectId,
+      stage: payload.stage,
+      requirement: payload.requirement,
+      enable_streaming: payload.enableStreaming,
+      regenerate: payload.regenerate,
+      targets: payload.targets,
+      feedback: payload.feedback,
+    }, {
+      timeout: 5000,
+      validateStatus: () => true,
+    })
+  }
+
+  getWorkflowTaskStatus(taskId: string) {
+    return this.client.get(`/api/v1/workflow/task/${taskId}`, {
+      timeout: 5000,
+      validateStatus: () => true,
+    })
+  }
+
+  getWorkflowAllStagesContent(projectId: number) {
+    return this.client.get(`/api/v1/workflow/${projectId}/all-stages-content`, {
+      timeout: 15000,
+      validateStatus: () => true,
+    })
+  }
+
+  getWorkflowRunningTasks(projectId: number) {
+    return this.client.get(`/api/v1/workflow/project/${projectId}/running-tasks`, {
+      timeout: 15000,
+      validateStatus: () => true,
+    })
+  }
+
+  getWorkflowStageStatus(projectId: number) {
+    return this.client.get(`/api/v1/workflow/${projectId}/stage-status`, {
+      timeout: 15000,
+      validateStatus: () => true,
+    })
+  }
+
+  getWorkflowStageContent(projectId: number, stage: string) {
+    return this.client.get(`/api/v1/workflow/${projectId}/stage/${stage}/content`, {
+      timeout: 15000,
+      validateStatus: () => true,
+    })
+  }
+
+  updateWorkflowStageContent(
+    projectId: number,
+    stage: string,
+    payload: { content: string; continue_workflow: boolean }
+  ) {
+    return this.client.put(`/api/v1/workflow/${projectId}/stage/${stage}/content`, payload, {
+      timeout: 15000,
+      validateStatus: () => true,
+    })
+  }
+
+  generateNextWorkflowChapter(projectId: number) {
+    return this.client.post(`/api/v1/workflow/${projectId}/generate-next-chapter`, undefined, {
+      timeout: 15000,
+      validateStatus: () => true,
+    })
+  }
+
   put(url: string, data?: any, config?: any) {
     return this.client.put(url, data, config)
   }
@@ -1694,21 +1811,6 @@ class ApiClient {
   }
 
   // AI生成任务API（异步）
-  executeStageAsync(projectId: number, stage: string, requirement?: string) {
-    return this.client.post(`/api/v1/workflow/execute-stage-async`, {
-      project_id: projectId,
-      stage: stage,
-      requirement: requirement,
-    }, {
-      timeout: 5000 // 提交任务快速返回
-    })
-  }
-
-  getTaskStatus(taskId: string) {
-    return this.client.get(`/api/v1/workflow/task/${taskId}`, {
-      timeout: 5000
-    })
-  }
 
   // 织梦映心流程（短剧生成）
   runDreamweaver(projectId: number, chapterIds: number[], options?: DreamweaverRunOptions) {

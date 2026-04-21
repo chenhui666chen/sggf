@@ -293,10 +293,10 @@ NGINX_SSL_KEY_PATH=/etc/letsencrypt/live/sggf.net/privkey.pem
 
 当前仓库默认集成阿里云 `Qwen3-TTS` 相关能力：
 
-- 默认模型：`qwen3-tts-flash`
+- 默认模型：`qwen3-tts-instruct-flash`
 - 凭证复用 `DASHSCOPE_API_KEY`
 - 可按项目切换到 `cosyvoice-v3-plus`
-- 历史别名 `qwen3_tts` 会统一归一化到 `qwen3-tts-flash`
+- 历史别名 `qwen3_tts` 与旧值 `qwen3-tts-flash` 会统一归一化到 `qwen3-tts-instruct-flash`
 - 统一 TTS 返回同时兼容 `audio_bytes`、`audio_data(base64)`、`tts_timestamps`、`phoneme_timestamps`
 - 前端音色配置主要位于 `frontend/src/pages/AudiobookPage.tsx`
 - 后端映射与预设位于 `backend/app/services/audiobook/voice_manager.py`

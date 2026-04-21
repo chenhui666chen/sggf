@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 
+import { apiClient } from '@/services/api'
 import { workflowWebSocket } from '@/services/websocket'
 import type {
   StoryExpansionAnalysis,
@@ -221,19 +222,16 @@ export function useStoryExpansionTask({
   }, [projectId])
 
   const fetchTaskStatus = useCallback(async (taskId: string): Promise<StoryTaskStatusResponse | null> => {
-    const token = localStorage.getItem('access_token')
-    if (!token || !taskId) {
+    if (!taskId) {
       return null
     }
 
     try {
-      const response = await fetch(`/api/v1/workflow/task/${taskId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!response.ok) {
+      const response = await apiClient.getWorkflowTaskStatus(taskId)
+      if (response.status < 200 || response.status >= 300) {
         return null
       }
-      return await response.json() as StoryTaskStatusResponse
+      return response.data as StoryTaskStatusResponse
     } catch {
       return null
     }

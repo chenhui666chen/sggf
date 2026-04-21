@@ -20,7 +20,7 @@ def get_audio_fx(config: Dict[str, Any]) -> Optional[dict]:
 
 
 def get_characters_for_model(config: Dict[str, Any], tts_model: str) -> List[dict]:
-    tts_model = (tts_model or "").strip() or "qwen3-tts-flash"
+    tts_model = (tts_model or "").strip() or "qwen3-tts-instruct-flash"
     tts_models = config.get("tts_models")
     if isinstance(tts_models, dict):
         model_cfg = tts_models.get(tts_model)
@@ -34,7 +34,7 @@ def get_characters_for_model(config: Dict[str, Any], tts_model: str) -> List[dic
 
 
 def set_characters_for_model(config: Dict[str, Any], tts_model: str, characters: List[dict]) -> Dict[str, Any]:
-    tts_model = (tts_model or "").strip() or "qwen3-tts-flash"
+    tts_model = (tts_model or "").strip() or "qwen3-tts-instruct-flash"
     tts_models = config.get("tts_models")
     if not isinstance(tts_models, dict):
         tts_models = {}
@@ -48,7 +48,7 @@ def set_characters_for_model(config: Dict[str, Any], tts_model: str, characters:
     model_cfg["characters"] = list(characters or [])
 
     # backward-compat: keep the default model mirrored at top-level
-    if tts_model == "qwen3-tts-flash":
+    if tts_model in {"qwen3-tts-instruct-flash", "qwen3-tts-flash"}:
         config["characters"] = list(characters or [])
 
     return config
@@ -60,4 +60,3 @@ def set_audio_fx(config: Dict[str, Any], audio_fx: Optional[dict]) -> Dict[str, 
         return config
     config["audio_fx"] = audio_fx
     return config
-

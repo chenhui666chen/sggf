@@ -33,9 +33,12 @@ from app.api.v1.workflow.lock_manager import _get_workflow_execution_lock
 from app.api.v1.workflow.helpers import *
 from app.api.v1.workflow.story_helpers import *
 from app.api.v1.workflow.story_resolve import *
-from app.api.v1.workflow.requirement import *
-from app.api.v1.workflow.execute_background import execute_stage_background
-from app.api.v1.workflow.execute_streaming import execute_stage_with_streaming
+from app.api.v1.workflow.requirement import _save_workflow_requirement
+from app.api.v1.workflow.execute_background import (
+    _run_execute_stage_background_serialized,
+    _run_execute_stage_with_streaming_serialized,
+    execute_stage_background,
+)
 
 @router.post("/start")
 async def start_workflow(
@@ -145,6 +148,26 @@ async def start_workflow(
                 project_id=project_id,
                 user_id=current_user.id,
                 requirement=requirement,
+            )
+
+            db.execute(
+                text(
+                    """
+                    UPDATE generation_history
+                    SET status = :status,
+                        error = :error,
+                        completed_at = :completed_at
+                    WHERE project_id = :project_id
+                      AND status = 'running'
+                      AND task_type LIKE 'workflow_stage_%'
+                    """
+                ),
+                {
+                    "status": "superseded",
+                    "error": "已被新的工作流启动请求替换",
+                    "completed_at": utc_now().isoformat(),
+                    "project_id": project_id,
+                },
             )
 
             # 🆕 同时更新 projects 表的 description 字段（关键修复！）

@@ -1116,7 +1116,7 @@ class ModelAdapterFactory:
         "QWEN_VL_PLUS": "qwen3-vl-plus",
         "QWEN_IMAGE_EDIT": "qwen-image-edit-plus",
         "QWEN_IMAGE_EDIT_MAX": "qwen-image-edit-max-2026-01-16",
-        "QWEN3_TTS": "qwen3-tts-flash",
+        "QWEN3_TTS": "qwen3-tts-instruct-flash",
     }
 
     def __init__(self) -> None:

@@ -8,9 +8,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .constants import QWEN3_TTS_INSTRUCT_SUPPORTED_VOICES
+
 logger = logging.getLogger(__name__)
 
 VOICE_FILENAMES_BY_MODEL = {
+    "qwen3-tts-instruct-flash": "qwen3_tts_voices.json",
     "qwen3-tts-flash": "qwen3_tts_voices.json",
     "cosyvoice-v3-plus": "cosyvoice_v3_plus_voices.json",
     "minimax-speech-2.8-hd": "minimax_speech_2_8_voices.json",
@@ -39,12 +42,25 @@ def _filename_for_model(model: str) -> str:
     if model.startswith("minimax-speech"):
         return VOICE_FILENAMES_BY_MODEL["minimax-speech-2.8-hd"]
     if model.startswith("qwen3-tts"):
-        return VOICE_FILENAMES_BY_MODEL["qwen3-tts-flash"]
-    return VOICE_FILENAMES_BY_MODEL["qwen3-tts-flash"]
+        return VOICE_FILENAMES_BY_MODEL["qwen3-tts-instruct-flash"]
+    return VOICE_FILENAMES_BY_MODEL["qwen3-tts-instruct-flash"]
 
 
 class VoiceCatalogError(RuntimeError):
     """Raised when the voice catalog cannot be loaded."""
+
+
+def _filter_voices_for_model(model: str, voices: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    normalized_model = (model or "").strip()
+    if normalized_model.startswith("qwen3-tts"):
+        supported = QWEN3_TTS_INSTRUCT_SUPPORTED_VOICES
+        return [
+            voice
+            for voice in voices
+            if (voice.get("id") or voice.get("speaker")) in supported
+            or voice.get("speaker") in supported
+        ]
+    return list(voices)
 
 
 def _read_catalog_for_model(model: str) -> Dict[str, Any]:
@@ -58,10 +74,11 @@ def _read_catalog_for_model(model: str) -> Dict[str, Any]:
     except Exception as exc:  # pragma: no cover - defensive guardrail
         raise VoiceCatalogError(f"Failed to parse {library_path}: {exc}") from exc
 
-    voices: List[Dict[str, Any]] = raw.get("voices") or []
+    raw_voices: List[Dict[str, Any]] = raw.get("voices") or []
+    voices = _filter_voices_for_model(model, raw_voices)
     voices_by_id: Dict[str, Dict[str, Any]] = {voice["id"]: voice for voice in voices if voice.get("id")}
     meta = {
-        "model": raw.get("model", model or "qwen3-tts-flash"),
+        "model": raw.get("model", model or "qwen3-tts-instruct-flash"),
         "updated_at": raw.get("updated_at"),
         "source": raw.get("source"),
         "voice_count": len(voices),
@@ -83,20 +100,20 @@ def load_voice_catalog_for_model(model: str) -> Dict[str, Any]:
 
 
 def load_voice_catalog() -> Dict[str, Any]:
-    """Backward-compatible default (Qwen3-TTS Flash)."""
-    return load_voice_catalog_for_model("qwen3-tts-flash")
+    """Backward-compatible default (Qwen3-TTS Instruct Flash)."""
+    return load_voice_catalog_for_model("qwen3-tts-instruct-flash")
 
 
-def list_supported_voices(model: str = "qwen3-tts-flash") -> List[Dict[str, Any]]:
+def list_supported_voices(model: str = "qwen3-tts-instruct-flash") -> List[Dict[str, Any]]:
     """Return the raw voice entries from the shared catalog."""
     return list(load_voice_catalog_for_model(model)["voices"])
 
 
-def get_voice_entry(voice_id: str, model: str = "qwen3-tts-flash") -> Optional[Dict[str, Any]]:
+def get_voice_entry(voice_id: str, model: str = "qwen3-tts-instruct-flash") -> Optional[Dict[str, Any]]:
     """Get a single voice entry by ID."""
     return load_voice_catalog_for_model(model)["voices_by_id"].get(voice_id)
 
 
-def get_voice_catalog_meta(model: str = "qwen3-tts-flash") -> Dict[str, Any]:
+def get_voice_catalog_meta(model: str = "qwen3-tts-instruct-flash") -> Dict[str, Any]:
     """Expose catalog metadata (model, updated_at, source, voice_count)."""
     return dict(load_voice_catalog_for_model(model)["meta"])

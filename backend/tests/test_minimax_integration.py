@@ -19,7 +19,7 @@ for m in VOICE_FILENAMES_BY_MODEL:
     print(f"  - {m}")
 
 print("\n=== 测试音色目录加载 ===")
-for model in ["qwen3-tts-flash", "cosyvoice-v3-plus", "minimax-speech-2.8-hd"]:
+for model in ["qwen3-tts-instruct-flash", "cosyvoice-v3-plus", "minimax-speech-2.8-hd"]:
     try:
         cat = catalog.load_voice_catalog_for_model(model)
         voices = cat.get("voices", [])

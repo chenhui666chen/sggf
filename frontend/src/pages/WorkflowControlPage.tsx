@@ -443,17 +443,10 @@ export default function WorkflowControlPage() {
 
     const loadLatestMemory = async () => {
       try {
-        const token = localStorage.getItem('access_token')
-        if (!token) return
+        const response = await apiClient.getLatestProjectMemory(Number(projectId))
 
-        const response = await fetch(`/api/v1/projects/${projectId}/memories/latest`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        })
-
-        if (response.ok) {
-          const memory = await response.json()
+        if (response.status >= 200 && response.status < 300) {
+          const memory = response.data
           if (memory) {
             // 恢复对话历史
             if (memory.messages && Array.isArray(memory.messages)) {
@@ -528,16 +521,13 @@ export default function WorkflowControlPage() {
       
       try {
         dispatch(fetchProject(Number(projectId)))
-        const token = localStorage.getItem('access_token')
-        const response = await fetch(`/api/v1/workflow/${projectId}/all-stages-content`, {
-          headers: { 'Authorization': `Bearer ${token}` },
-        })
-        
-        if (!response.ok) {
+        const response = await apiClient.getWorkflowAllStagesContent(Number(projectId))
+
+        if (response.status < 200 || response.status >= 300) {
           return
         }
-        
-        const batchData = await response.json()
+
+        const batchData = response.data
         const stages = batchData.stages || {}
         
         // 更新概念阶段状态
@@ -658,11 +648,11 @@ export default function WorkflowControlPage() {
           try {
             if (projectId) {
               dispatch(fetchProject(Number(projectId)))
-              const token = localStorage.getItem('access_token')
-              
-              fetch(`/api/v1/workflow/${projectId}/all-stages-content`, {
-                headers: { 'Authorization': `Bearer ${token}` },
-              }).then(res => res.json()).then(batchData => {
+              apiClient.getWorkflowAllStagesContent(Number(projectId)).then((response) => {
+                if (response.status < 200 || response.status >= 300) {
+                  throw new Error('load all stages failed')
+                }
+                const batchData = response.data
                 const stages = batchData.stages || {}
                 
                 // 更新本地state
@@ -837,10 +827,11 @@ export default function WorkflowControlPage() {
       if (isStoryExpansionTaskId(data.task_id)) {
         const result = storyExpansionResult ?? {}
         if (projectId) {
-          const token = localStorage.getItem('access_token')
-          fetch(`/api/v1/workflow/${projectId}/all-stages-content`, {
-            headers: { 'Authorization': `Bearer ${token}` },
-          }).then(res => res.json()).then(batchData => {
+          apiClient.getWorkflowAllStagesContent(Number(projectId)).then((response) => {
+            if (response.status < 200 || response.status >= 300) {
+              throw new Error('load all stages failed')
+            }
+            const batchData = response.data
             const stages = batchData.stages || {}
             if (stages.plot_outline) {
               setStructureContent(stages.plot_outline)
@@ -1127,11 +1118,6 @@ export default function WorkflowControlPage() {
     const timer = setTimeout(() => {
       const loadAllStageContents = async () => {
         try {
-          // 🔧 关键修复: 确保Token存在才执行请求
-          const token = localStorage.getItem('access_token')
-          if (!token) {
-            return
-          }
 
           // 🔧 关键修复：使用局部变量跟踪恢复状态，避免异步状态更新问题
           let hasRestoredRunningTask = false
@@ -1139,17 +1125,10 @@ export default function WorkflowControlPage() {
 
           // 🔔 步骤1：检查是否有正在运行的任务
           try {
-            const runningTasksResponse = await fetch(
-              `/api/v1/workflow/project/${projectId}/running-tasks`,
-              {
-                headers: {
-                  'Authorization': `Bearer ${token}`,
-                },
-              }
-            )
+            const runningTasksResponse = await apiClient.getWorkflowRunningTasks(Number(projectId))
 
-            if (runningTasksResponse.ok) {
-              const runningTasksData = await runningTasksResponse.json()
+            if (runningTasksResponse.status >= 200 && runningTasksResponse.status < 300) {
+              const runningTasksData = runningTasksResponse.data
               const runningTasks = runningTasksData.running_tasks || []
               const timeoutTasks = runningTasksData.timeout_tasks || []
 
@@ -1212,14 +1191,10 @@ export default function WorkflowControlPage() {
           }
 
           // ⚡ 步骤2：性能优化: 使用批量接口一次性获取所有阶段内容
-          const batchResponse = await fetch(`/api/v1/workflow/${projectId}/all-stages-content`, {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-            },
-          })
+          const batchResponse = await apiClient.getWorkflowAllStagesContent(Number(projectId))
 
-          if (batchResponse.ok) {
-            const batchData = await batchResponse.json()
+          if (batchResponse.status >= 200 && batchResponse.status < 300) {
+            const batchData = batchResponse.data
             const stages = batchData.stages || {}
 
             setConceptContent(stages.concept || '')
@@ -1246,14 +1221,10 @@ export default function WorkflowControlPage() {
 
           // 加载阶段状态
           try {
-            const statusResponse = await fetch(`/api/v1/workflow/${projectId}/stage-status`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-              },
-            })
+            const statusResponse = await apiClient.getWorkflowStageStatus(Number(projectId))
 
-            if (statusResponse.ok) {
-              const statusData = await statusResponse.json()
+            if (statusResponse.status >= 200 && statusResponse.status < 300) {
+              const statusData = statusResponse.data
 
               // 更新Redux store中的阶段状态
               const stageStatusMap: Record<string, StageType> = {
@@ -1434,17 +1405,10 @@ export default function WorkflowControlPage() {
         writing_goal: requirement || '创作小说',
       }
 
-      const response = await fetch(`/api/v1/projects/${projectId}/memories/auto-save`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(memoryData),
-      })
+      const response = await apiClient.saveProjectMemorySnapshot(Number(projectId), memoryData)
 
-      if (response.ok) {
-        const savedMemory = await response.json()
+      if (response.status >= 200 && response.status < 300) {
+        const savedMemory = response.data
         setLastSaveTime(new Date(savedMemory.updated_at))
 
         // 仅在手动保存时显示提示
@@ -1510,25 +1474,19 @@ export default function WorkflowControlPage() {
       }
 
 
-      const response = await fetch('/api/v1/workflow/execute-stage-async', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          project_id: parseInt(projectId),
-          stage: stage,
-          requirement: requirement || `创作一部小说`,
-          enable_streaming: enableStreaming,  // 🆕 启用流式输出
-        }),
+      const response = await apiClient.postWorkflowStageAsync({
+        projectId: parseInt(projectId),
+        stage,
+        requirement: requirement || '创作一部小说',
+        enableStreaming,
       })
 
-      if (!response.ok) {
-        throw new Error(`提交任务失败: ${response.status}`)
+      if (response.status < 200 || response.status >= 300) {
+        const errorData = response.data as { detail?: string; error?: string } | undefined
+        throw new Error(errorData?.detail || errorData?.error || ('提交任务失败: ' + response.status))
       }
 
-      const data = await response.json()
+      const data = response.data
       const taskId = data.task_id
 
       if (!taskId) {
@@ -1577,13 +1535,9 @@ export default function WorkflowControlPage() {
       try {
         pollCount++
 
-        const response = await fetch(`/api/v1/workflow/task/${taskId}`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-        })
+        const response = await apiClient.getWorkflowTaskStatus(taskId)
 
-        if (!response.ok) {
+        if (response.status < 200 || response.status >= 300) {
           // 🔧 处理404错误
           if (response.status === 404) {
             consecutiveErrors++
@@ -1612,7 +1566,7 @@ export default function WorkflowControlPage() {
         // 🔧 成功响应，重置错误计数
         consecutiveErrors = 0
 
-        const data = await response.json()
+        const data = response.data
 
         const progress = Math.min(95, pollCount * 3)
         setTaskProgress(progress)
@@ -1775,6 +1729,14 @@ export default function WorkflowControlPage() {
           clearExisting: isRestartMode,  // 🆕 传递清空标志
         })
       ).unwrap()
+      setCurrentTaskId(null)
+      setTaskProgress(0)
+      setTaskPollingInterval((currentInterval) => {
+        if (currentInterval) {
+          clearInterval(currentInterval)
+        }
+        return null
+      })
       setOpenDialog(false)
       setIsRunning(true)
       setIsStarting(false)  // 启动完成，隐藏加载状态
@@ -1957,6 +1919,32 @@ export default function WorkflowControlPage() {
 
 
 
+  const getWorkflowStageContent = async (stage: 'structure' | 'content' | 'review' | 'iteration') => {
+    if (!projectId) return null
+
+    const response = await apiClient.getWorkflowStageContent(Number(projectId), stage)
+    if (response.status < 200 || response.status >= 300) {
+      return null
+    }
+
+    return response.data as { content?: string }
+  }
+
+  const saveWorkflowStageContent = async (
+    stage: 'structure' | 'content' | 'review',
+    content: string,
+    continueWorkflow: boolean,
+  ) => {
+    if (!projectId) return null
+
+    const response = await apiClient.updateWorkflowStageContent(Number(projectId), stage, {
+      content,
+      continue_workflow: continueWorkflow,
+    })
+
+    return response
+  }
+
   // 🆕 点击故事概念按钮 - 切换预览区域显示
   const handleOpenConceptDialog = () => {
     setSelectedConceptView('concept')
@@ -1976,14 +1964,8 @@ export default function WorkflowControlPage() {
     setStructureLoading(true)
 
     try {
-      const response = await fetch(`/api/v1/workflow/${projectId}/stage/structure/content`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-
-      if (response.ok) {
-        const data = await response.json()
+      const data = await getWorkflowStageContent('structure')
+      if (data) {
         setStructureContent(data.content || '')
         setEditedStructureContent(data.content || '')
       } else {
@@ -2016,19 +1998,9 @@ export default function WorkflowControlPage() {
     setStructureSaving(true)
 
     try {
-      const response = await fetch(`/api/v1/workflow/${projectId}/stage/structure/content`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          content: editedStructureContent,
-          continue_workflow: false,
-        }),
-      })
+      const response = await saveWorkflowStageContent('structure', editedStructureContent, false)
 
-      if (response.ok) {
+      if (response && response.status >= 200 && response.status < 300) {
         // ✅ 更新state，保持已保存的内容
         setStructureContent(editedStructureContent)
 
@@ -2065,14 +2037,8 @@ export default function WorkflowControlPage() {
     setContentLoading(true)
 
     try {
-      const response = await fetch(`/api/v1/workflow/${projectId}/stage/content/content`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-
-      if (response.ok) {
-        const data = await response.json()
+      const data = await getWorkflowStageContent('content')
+      if (data) {
         const content = data.content || ''
         setContentDraftContent(content)
         setEditedContentDraftContent(content)
@@ -2111,14 +2077,8 @@ export default function WorkflowControlPage() {
     setReviewLoading(true)
 
     try {
-      const response = await fetch(`/api/v1/workflow/${projectId}/stage/review/content`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-
-      if (response.ok) {
-        const data = await response.json()
+      const data = await getWorkflowStageContent('review')
+      if (data) {
         const content = data.content || ''
         setReviewReportContent(content)
         setEditedReviewReportContent(content)
@@ -2149,26 +2109,16 @@ export default function WorkflowControlPage() {
     setReviewSaving(true)
 
     try {
-      const response = await fetch(`/api/v1/workflow/${projectId}/stage/review/content`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          content: editedReviewReportContent,
-          continue_workflow: false,
-        }),
-      })
+      const response = await saveWorkflowStageContent('review', editedReviewReportContent, false)
 
-      if (response.ok) {
+      if (response && response.status >= 200 && response.status < 300) {
         // 更新缓存
         setReviewReportContent(editedReviewReportContent)
         setSnackbarMessage('评审报告已保存')
         setSnackbarSeverity('success')
         setSnackbarOpen(true)
       } else {
-        const errorData = await response.json().catch(() => ({}))
+        const errorData = response?.data || {}
         setSnackbarMessage(errorData.detail || '保存失败')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
@@ -2190,27 +2140,17 @@ export default function WorkflowControlPage() {
 
     try {
       // 1. 保存内容并指示继续工作流
-      const saveResponse = await fetch(`/api/v1/workflow/${projectId}/stage/review/content`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          content: editedReviewReportContent,
-          continue_workflow: true,
-        }),
-      })
+      const saveResponse = await saveWorkflowStageContent('review', editedReviewReportContent, true)
 
-      if (!saveResponse.ok) {
-        const errorData = await saveResponse.json().catch(() => ({}))
+      if (!saveResponse || saveResponse.status < 200 || saveResponse.status >= 300) {
+        const errorData = saveResponse?.data || {}
         setSnackbarMessage(errorData.detail || '保存失败，请重试')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
         return
       }
 
-      const saveData = await saveResponse.json().catch(() => ({}))
+      const saveData = saveResponse.data || {}
 
       // ✅ 更新缓存
       setReviewReportContent(editedReviewReportContent)
@@ -2253,26 +2193,16 @@ export default function WorkflowControlPage() {
 
     try {
       // 1. 保存内容并指示继续工作流
-      const saveResponse = await fetch(`/api/v1/workflow/${projectId}/stage/content/content`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          content: editedContentDraftContent,
-          continue_workflow: true,  // 关键：设置为true以触发章节更新逻辑
-        }),
-      })
+      const saveResponse = await saveWorkflowStageContent('content', editedContentDraftContent, true)
 
-      if (!saveResponse.ok) {
+      if (!saveResponse || saveResponse.status < 200 || saveResponse.status >= 300) {
         setSnackbarMessage('保存失败，请重试')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
         return
       }
 
-      const saveData = await saveResponse.json();
+      const saveData = saveResponse.data || {}
 
       // ✅ 更新state，保持已保存的内容
       setContentDraftContent(editedContentDraftContent)
@@ -2316,19 +2246,9 @@ export default function WorkflowControlPage() {
     setContentSaving(true)
 
     try {
-      const response = await fetch(`/api/v1/workflow/${projectId}/stage/content/content`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          content: editedContentDraftContent,
-          continue_workflow: false,
-        }),
-      })
+      const response = await saveWorkflowStageContent('content', editedContentDraftContent, false)
 
-      if (response.ok) {
+      if (response && response.status >= 200 && response.status < 300) {
         // ✅ 更新state，保持已保存的内容
         setContentDraftContent(editedContentDraftContent)
 
@@ -2375,14 +2295,8 @@ export default function WorkflowControlPage() {
     setFinalVersionLoading(true)
 
     try {
-      const response = await fetch(`/api/v1/workflow/${projectId}/stage/iteration/content`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-
-      if (response.ok) {
-        const data = await response.json()
+      const data = await getWorkflowStageContent('iteration')
+      if (data) {
         const content = data.content || ''
         setFinalVersionContent(content)
         setEditedFinalVersionContent(content)
@@ -2407,17 +2321,10 @@ export default function WorkflowControlPage() {
     setGeneratingNextChapter(true)
 
     try {
+      const response = await apiClient.generateNextWorkflowChapter(Number(projectId))
 
-      const response = await fetch(`/api/v1/workflow/${projectId}/generate-next-chapter`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-      })
-
-      if (response.ok) {
-        const data = await response.json()
+      if (response.status >= 200 && response.status < 300) {
+        const data = response.data
 
         // 后端返回: { task_id, status, message, next_chapter_number }
         const { task_id, next_chapter_number } = data
@@ -2432,7 +2339,7 @@ export default function WorkflowControlPage() {
 
         // 注意：不再设置 setGeneratingNextChapter(false)，等待 WebSocket 完成事件
       } else {
-        const errorData = await response.json()
+        const errorData = response.data || {}
 
         setSnackbarMessage(errorData.detail || errorData.error || '创建生成任务失败，请重试')
         setSnackbarSeverity('error')
@@ -2463,30 +2370,22 @@ export default function WorkflowControlPage() {
       setIsRunning(true)
       const targets = regenerateTarget === 'both' ? ['story','world'] : (regenerateTarget === 'story' ? ['story'] : ['world'])
       const feedbackText = (regenerateFeedback && regenerateFeedback.trim()) ? regenerateFeedback : (autoInferFeedback ? '根据当前预览内容进行轻微优化，增强题材适配性与逻辑一致性' : '')
-      const response = await fetch('/api/v1/workflow/execute-stage-async', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          project_id: parseInt(projectId),
-          stage: 'concept',
-          regenerate: true,
-          targets,
-          feedback: feedbackText,
-          enable_streaming: false,
-        }),
+      const response = await apiClient.postWorkflowStageAsync({
+        projectId: parseInt(projectId),
+        stage: 'concept',
+        regenerate: true,
+        targets,
+        feedback: feedbackText,
+        enableStreaming: false,
       })
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}))
-        setSnackbarMessage(err.detail || err.error || '提交重新生成失败')
+      if (response.status < 200 || response.status >= 300) {
+        const err = response.data as { detail?: string; error?: string } | undefined
+        setSnackbarMessage(err?.detail || err?.error || '提交重新生成失败')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
         setIsRunning(false)
         return
       }
-      await response.json()
       setSnackbarMessage('已提交重新生成，请稍候完成')
       setSnackbarSeverity('success')
       setSnackbarOpen(true)

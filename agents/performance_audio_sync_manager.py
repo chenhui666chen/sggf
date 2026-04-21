@@ -157,7 +157,7 @@ class PerformanceAudioSyncManager:
                     "volume": 50,
                 },
                 emotion="neutral",
-                model_id="qwen3-tts-flash",
+                model_id="qwen3-tts-instruct-flash",
             )
             
             generation_time = time.time() - start_time

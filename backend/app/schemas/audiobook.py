@@ -13,7 +13,7 @@ class AudiobookProjectCreate(BaseModel):
     tts_provider: str = "aliyun"
     enable_cache: bool = True
     voice_config: Optional[List["CharacterVoiceConfig"]] = None
-    tts_model: Optional[str] = "qwen3-tts-flash"  # TTS 模型（qwen3-tts-flash / cosyvoice-v3-plus）
+    tts_model: Optional[str] = "qwen3-tts-instruct-flash"  # TTS 模型（qwen3-tts-instruct-flash / cosyvoice-v3-plus）
     generation_mode: str = "full"  # full: 直接生成音频; script_only: 仅生成剧本+评审
     force_regenerate_script: bool = False  # 🆕 是否强制重新生成剧本（覆盖已有剧本）
     narration_style: Optional[str] = "professional"  # 叙事风格: professional/dramatic/relaxing/expressive/custom
@@ -25,7 +25,7 @@ class AudiobookProjectCreate(BaseModel):
 class GenerateAudioFromScriptsRequest(BaseModel):
     """基于已生成剧本的音频生成请求（两阶段流程第2阶段）"""
     chapter_ids: Optional[List[int]] = None
-    tts_model: Optional[str] = "qwen3-tts-flash"  # TTS 模型（qwen3-tts-flash / cosyvoice-v3-plus）
+    tts_model: Optional[str] = "qwen3-tts-instruct-flash"  # TTS 模型（qwen3-tts-instruct-flash / cosyvoice-v3-plus）
     narration_style: Optional[str] = "professional"  # 叙事风格
     narration_style_prompt: Optional[str] = None  # 自定义叙事风格prompt
     output_format: Optional[str] = "mp3"  # mp3/wav/m4b
@@ -86,13 +86,13 @@ class TTSPreviewRequest(BaseModel):
     volume: int = 50
     speed: Optional[float] = None
     pitch: Optional[int] = None
-    model: Optional[str] = "qwen3-tts-flash"  # TTS 模型（默认 qwen3-tts-flash）
+    model: Optional[str] = "qwen3-tts-instruct-flash"  # TTS 模型（默认 qwen3-tts-instruct-flash）
 
 
 class ScriptSegmentPreviewRequest(BaseModel):
     """剧本片段单段音频试听请求"""
     segment: Dict[str, Any]
-    tts_model: Optional[str] = "qwen3-tts-flash"
+    tts_model: Optional[str] = "qwen3-tts-instruct-flash"
     preview_type: Optional[str] = "voice"  # voice/sfx/bgm/mix
 
 

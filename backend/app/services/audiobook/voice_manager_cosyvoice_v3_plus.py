@@ -40,7 +40,7 @@ class CosyVoiceV3PlusVoiceManager:
     CosyVoice v3-plus 专用 VoiceManager。
 
     目标：
-    - 声线 ID 空间与 qwen3-tts-flash 完全隔离（不做 legacy 映射）
+    - 声线 ID 空间与 qwen3-tts-instruct-flash 完全隔离（不做 legacy 映射）
     - 项目级音色配置按模型独立存取（由上层负责选择）
     """
 

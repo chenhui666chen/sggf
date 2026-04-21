@@ -100,6 +100,7 @@ from app.services.user_center_points_events import (
     record_audiobook_billing_freeze,
 )
 from app.utils.datetime_utils import utc_now
+from core.model_resolution import normalize_model_id
 from core.unified_media_runtime import synthesize_speech as runtime_synthesize_speech
 
 from app.api.v1.audiobook_api import router
@@ -142,7 +143,7 @@ async def create_audiobook_project(
         task_type=job_type,
         total_units=len(request.chapter_ids),
     )
-    tts_model = (request.tts_model or "qwen3-tts-flash").strip()
+    tts_model = normalize_model_id(request.tts_model or "qwen3-tts-instruct-flash") or "qwen3-tts-instruct-flash"
     if job_type == "script_only":
         signature = celery_app.signature(
             "audiobook.run_script_only",

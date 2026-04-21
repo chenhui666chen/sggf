@@ -275,18 +275,18 @@ profiles:
       - label: 视频编辑入口
         value: media_runtime.generate_video(model_id="wan2.7-videoedit", duration=5.0, ...)
 
-  qwen3-tts-flash:
-    role_summary: 当前模型是项目默认 TTS，适合大规模章节朗读、标准旁白和低成本批量语音合成。
+  qwen3-tts-instruct-flash:
+    role_summary: 当前模型是项目默认 TTS，适合大规模章节朗读、标准旁白以及需要自然语言 instructions 的低成本语音合成。
     prompt_patterns:
       - title: 标准朗读模板
         template: |
-          文本内容 + 音色 / speaker + 语速 + 停顿要求 + 是否返回时间戳
+          文本内容 + 音色 / speaker + instructions + 语速 + 停顿要求 + 是否返回时间戳
     router_rules:
       - when: 检测到标准有声书朗读、批量章节合成或成本敏感语音任务
-        action: 优先路由到 qwen3-tts-flash
+        action: 优先路由到 qwen3-tts-instruct-flash
         reason: 它是项目当前默认有声书 TTS。
     best_practice_tips:
-      - 适合批量合成与标准旁白，不适合情绪演绎要求特别高的场景。
+      - 适合批量合成、标准旁白以及用自然语言 instructions 描述情绪/场景的场景。
       - 如需更强表现力，可升级到 cosyvoice-v3-plus。
     tooling_badges:
       - 默认 TTS

@@ -59,7 +59,7 @@ def _apply_project_audio_effects(*, engine, audiobook_project: AudiobookProject,
 async def generate_audiobook_background(
     audiobook_project_id: int,
     chapter_ids: List[int],
-    tts_model: str = "qwen3-tts-flash",
+    tts_model: str = "qwen3-tts-instruct-flash",
     tracker: Optional[StageTracker] = None,
 ) -> None:
     """后台生成有声书任务。"""

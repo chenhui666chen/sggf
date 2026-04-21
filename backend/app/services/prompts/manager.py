@@ -13,9 +13,11 @@
     system_prompt = prompt_manager.get_agent_prompt("character_designer")
     user_prompt = prompt_manager.get_user_prompt("content_creator_scene", scene_name="xxx")
 """
+import copy
 import json
 import logging
 import os
+import tempfile
 import time
 from typing import Any, Dict, Optional
 
@@ -27,12 +29,20 @@ _DEFAULT_JSON_PATH = os.path.join(
     "agents.json",
 )
 
+_DEFAULT_OVERRIDES_JSON_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "agents.overrides.json",
+)
+
 
 class PromptManager:
     """提示词管理器 - 从 JSON 集中中管理提示词"""
 
-    def __init__(self, json_path: Optional[str] = None):
+    def __init__(self, json_path: Optional[str] = None, overrides_path: Optional[str] = None):
         self._json_path = json_path or _DEFAULT_JSON_PATH
+        self._overrides_path = overrides_path or _DEFAULT_OVERRIDES_JSON_PATH
+        self._base_data: Dict[str, Any] = {}
+        self._overrides_data: Dict[str, Any] = {}
         self._data: Dict[str, Any] = {}
         self._cache: Dict[str, str] = {}
         self._version: str = ""
@@ -60,21 +70,26 @@ class PromptManager:
             return True
 
         try:
-            with open(self._json_path, "r", encoding="utf-8") as f:
-                self._data = json.load(f)
+            self._base_data = self._read_json_file(self._json_path)
+            self._overrides_data = self._read_json_file(self._overrides_path, allow_missing=True)
+            self._data = self._merge_overrides(self._base_data, self._overrides_data)
 
-            self._version = self._data.get("version", "unknown")
+            self._version = self._base_data.get("version", "unknown")
             self._last_load_time = time.time()
             self._cache.clear()
             self._load_ok = True
 
             agent_count = len(self._data.get("agents", {}))
             prompt_count = len(self._data.get("user_prompts", {}))
+            override_agent_count = len(self._overrides_data.get("agents", {}))
+            override_prompt_count = len(self._overrides_data.get("user_prompts", {}))
             logger.info(
-                "PromptManager 加载成功: version=%s, agents=%d, user_prompts=%d",
+                "PromptManager 加载成功: version=%s, agents=%d, user_prompts=%d, override_agents=%d, override_user_prompts=%d",
                 self._version,
                 agent_count,
                 prompt_count,
+                override_agent_count,
+                override_prompt_count,
             )
             return True
         except Exception as e:
@@ -95,8 +110,7 @@ class PromptManager:
         """
         if force_default:
             try:
-                with open(self._json_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+                data = self._read_json_file(self._json_path)
                 agents = data.get("agents", {})
                 agent_config = agents.get(agent_key, {})
                 return agent_config.get("system_prompt", "")
@@ -139,8 +153,7 @@ class PromptManager:
         """
         if force_default:
             try:
-                with open(self._json_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+                data = self._read_json_file(self._json_path)
                 user_prompts = data.get("user_prompts", {})
                 prompt_config = user_prompts.get(prompt_key, {})
                 return prompt_config.get("template", "")
@@ -205,7 +218,7 @@ class PromptManager:
         return self.load(force=True)
 
     def update_agent_prompt(self, agent_key: str, new_prompt: str) -> bool:
-        """更新指定 Agent 的提示词（仅更新内存，不写入 JSON 文件）
+        """更新指定 Agent 的提示词（写入覆盖文件并刷新内存）
 
         Args:
             agent_key: Agent 标识
@@ -222,10 +235,16 @@ class PromptManager:
             logger.warning("Agent 不存在，无法更新: %s", agent_key)
             return False
 
-        agents[agent_key]["system_prompt"] = new_prompt
-        self._cache.pop(f"agent:{agent_key}", None)
-        logger.info("Agent [%s] 提示词已更新（内存）", agent_key)
-        return True
+        default_prompt = self.get_agent_prompt(agent_key, force_default=True)
+        override_agents = self._overrides_data.setdefault("agents", {})
+        if new_prompt == default_prompt:
+            override_agents.pop(agent_key, None)
+        else:
+            override_entry = override_agents.setdefault(agent_key, {})
+            override_entry["system_prompt"] = new_prompt
+
+        self._persist_overrides()
+        return self.reload()
 
     def get_agent_user_prompt_keys(self, agent_key: str) -> list:
         """获取指定 Agent 关联的 user prompt key 列表"""
@@ -236,7 +255,7 @@ class PromptManager:
         return mapping.get(agent_key, [])
 
     def update_user_prompt(self, prompt_key: str, new_template: str) -> bool:
-        """更新指定 user prompt 模板（仅更新内存）
+        """更新指定 user prompt 模板（写入覆盖文件并刷新内存）
 
         Args:
             prompt_key: prompt 标识
@@ -253,10 +272,99 @@ class PromptManager:
             logger.warning("User prompt 不存在，无法更新: %s", prompt_key)
             return False
 
-        user_prompts[prompt_key]["template"] = new_template
-        self._cache.pop(f"user:{prompt_key}", None)
-        logger.info("User prompt [%s] 已更新（内存）", prompt_key)
-        return True
+        default_template = self.get_user_prompt(prompt_key, force_default=True)
+        override_prompts = self._overrides_data.setdefault("user_prompts", {})
+        if new_template == default_template:
+            override_prompts.pop(prompt_key, None)
+        else:
+            override_entry = override_prompts.setdefault(prompt_key, {})
+            override_entry["template"] = new_template
+
+        self._persist_overrides()
+        return self.reload()
+
+    def reset_agent_prompt(self, agent_key: str) -> bool:
+        """移除指定 Agent 的覆盖配置并恢复默认值。"""
+        if not self._load_ok:
+            self.load()
+
+        if agent_key not in self._data.get("agents", {}):
+            logger.warning("Agent 不存在，无法重置: %s", agent_key)
+            return False
+
+        override_agents = self._overrides_data.setdefault("agents", {})
+        override_agents.pop(agent_key, None)
+        self._persist_overrides()
+        return self.reload()
+
+    def reset_user_prompt(self, prompt_key: str) -> bool:
+        """移除指定 user prompt 的覆盖配置并恢复默认值。"""
+        if not self._load_ok:
+            self.load()
+
+        if prompt_key not in self._data.get("user_prompts", {}):
+            logger.warning("User prompt 不存在，无法重置: %s", prompt_key)
+            return False
+
+        override_prompts = self._overrides_data.setdefault("user_prompts", {})
+        override_prompts.pop(prompt_key, None)
+        self._persist_overrides()
+        return self.reload()
+
+    @staticmethod
+    def _read_json_file(path: str, allow_missing: bool = False) -> Dict[str, Any]:
+        if allow_missing and not os.path.exists(path):
+            return {}
+
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    @staticmethod
+    def _merge_overrides(base_data: Dict[str, Any], overrides_data: Dict[str, Any]) -> Dict[str, Any]:
+        merged = copy.deepcopy(base_data)
+
+        base_agents = merged.setdefault("agents", {})
+        for agent_key, override in overrides_data.get("agents", {}).items():
+            if agent_key not in base_agents:
+                continue
+            base_agents[agent_key].update(override)
+
+        base_user_prompts = merged.setdefault("user_prompts", {})
+        for prompt_key, override in overrides_data.get("user_prompts", {}).items():
+            if prompt_key not in base_user_prompts:
+                continue
+            base_user_prompts[prompt_key].update(override)
+
+        return merged
+
+    def _persist_overrides(self) -> None:
+        overrides_payload = {
+            "version": self._base_data.get("version", "unknown"),
+            "agents": self._overrides_data.get("agents", {}),
+            "user_prompts": self._overrides_data.get("user_prompts", {}),
+        }
+        target_dir = os.path.dirname(self._overrides_path) or "."
+
+        if not overrides_payload["agents"] and not overrides_payload["user_prompts"]:
+            if os.path.exists(self._overrides_path):
+                os.remove(self._overrides_path)
+            return
+
+        os.makedirs(target_dir, exist_ok=True)
+        temp_fd, temp_path = tempfile.mkstemp(
+            prefix="agents.overrides.",
+            suffix=".json",
+            dir=target_dir,
+        )
+        try:
+            with os.fdopen(temp_fd, "w", encoding="utf-8") as temp_file:
+                json.dump(overrides_payload, temp_file, ensure_ascii=False, indent=2)
+                temp_file.write("\n")
+            os.replace(temp_path, self._overrides_path)
+            logger.info("Prompt overrides 已持久化: %s", self._overrides_path)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
 
     @staticmethod
     def _replace_variables(text: str, variables: Dict[str, str]) -> str:
@@ -288,11 +396,14 @@ class PromptManager:
 _prompt_manager: Optional[PromptManager] = None
 
 
-def get_prompt_manager(json_path: Optional[str] = None) -> PromptManager:
+def get_prompt_manager(
+    json_path: Optional[str] = None,
+    overrides_path: Optional[str] = None,
+) -> PromptManager:
     """获取 PromptManager 单例"""
     global _prompt_manager
     if _prompt_manager is None:
-        _prompt_manager = PromptManager(json_path)
+        _prompt_manager = PromptManager(json_path, overrides_path=overrides_path)
         _prompt_manager.load()
     return _prompt_manager
 

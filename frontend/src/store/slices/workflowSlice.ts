@@ -66,7 +66,7 @@ const initialStages: Record<StageType, Stage> = {
     progress: 0,
     agents: [
       { id: 'creative_director', name: '创意总监', status: 'idle', progress: 0, message: '' },
-      { id: 'worldview_architect', name: '世界观架构师', status: 'idle', progress: 0, message: '' },
+      { id: 'world_architect', name: '世界观架构师', status: 'idle', progress: 0, message: '' },
       { id: 'character_designer', name: '人物设计师', status: 'idle', progress: 0, message: '' },
     ],
   },
@@ -343,14 +343,19 @@ const workflowSlice = createSlice({
         message: string
       }>
     ) => {
-      const { stage, agentId, status, progress, message } = action.payload
+      const { stage, status, progress, message } = action.payload
+      const normalizedAgentId = (
+        action.payload.agentId === 'worldview_architect'
+          ? 'world_architect'
+          : action.payload.agentId.replace(/-/g, '_')
+      )
 
       const stageData = state.stages[stage]
       if (!stageData) {
         return
       }
 
-      const agent = stageData.agents.find((a) => a.id === agentId)
+      const agent = stageData.agents.find((a) => a.id === normalizedAgentId)
 
       if (agent) {
         agent.status = status

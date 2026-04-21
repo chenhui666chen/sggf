@@ -23,6 +23,12 @@ from app.utils.datetime_utils import parse_datetime_utc, utc_now
 from core.model_resolution import normalize_model_id
 from core.model_runtime import ensure_model_hub_initialized, resolve_model_for_task
 from app.services.prompts.stages.world_building import CharacterDesignPrompts, get_genre_character_fields
+from app.services.prompts.workflow_runtime import (
+    build_iteration_coordination_user_prompt,
+    get_iteration_coordination_system_prompt,
+    get_iteration_loop_review_system_prompt,
+    get_iteration_revision_system_prompt,
+)
 from app.services.auto_system_detector import auto_create_system_collections
 
 logger = logging.getLogger(__name__)
@@ -1104,37 +1110,8 @@ Genre-specific refinement (specific implementation of general planning requireme
             )
 
         # 🆕 构建迭代优化提示词
-        iteration_system_prompt = """你是一位资深的网络小说编辑。请根据评审意见对章节内容进行优化修改。
-
-优化要求：
-1. 保持原有故事框架和主要情节不变
-2. 改进语言表达，使文笔更加流畅
-3. 增强细节描写，提升画面感
-4. 优化对话内容，使其更符合人物性格
-5. 提升整体可读性和爽感
-6. 修正任何语病或不连贯之处
-7. 优化后的章节应完整保留原有情节发展，篇幅不应少于原稿字数的80%
-8. 如果提供了最近章节连续性资产，必须优先承接其中的场景目标、冲突推进、人物状态、结尾钩子与伏笔
-
-【输出格式要求】⚠️
-请直接输出优化后的章节内容，格式必须如下：
-
-第X章 章节标题
-
-章节正文内容...
-
-注意：
-- 第一行必须是章节标题，格式为"第X章 标题名称"（X为章节数字）
-- 如果原稿有章节标题则保留或优化，如果没有则根据内容新增一个
-- 不要包含任何评论、解释、优化说明等额外文字
-- 只输出：章节标题 + 章节正文内容"""
-
-        iteration_user_prompt = _build_iteration_revision_prompt(
-            chapter_number=next_chapter_number,
-            chapter_content=chapter_draft,
-            review_text=review_report,
-            recent_chapter_assets_summary=recent_chapter_assets_summary,
-        )
+        iteration_coordination_system_prompt = get_iteration_coordination_system_prompt()
+        iteration_system_prompt = get_iteration_revision_system_prompt()
 
         # 🆕 使用迭代优化（max改稿 + R1打分循环,达到阈值后再输出）
         try:
@@ -1217,7 +1194,7 @@ Genre-specific refinement (specific implementation of general planning requireme
                     project_id=project_id,
                     task_id=task_id,
                     progress=min(95, 70 + round_idx * 5),
-                    message=f"步骤 4/4: 正在迭代中（第{round_idx}/{effective_rounds}轮），请等待..."
+                    message=f"步骤 4/4: 第{round_idx}/{effective_rounds}轮，迭代协调官正在整理修改计划..."
                 )
                 # 第N轮：根据所有历史评审意见进行改稿
                 # 🆕 将所有评审意见汇总，按轮次展示
@@ -1248,10 +1225,39 @@ Genre-specific refinement (specific implementation of general planning requireme
                             "requested_model": selected_revision_model,
                         }
                     )
+                iteration_plan_text = ""
+                try:
+                    coordination_user_prompt = build_iteration_coordination_user_prompt(
+                        chapter_number=next_chapter_number,
+                        chapter_content=current_version,
+                        review_text=all_reviews_text,
+                        recent_chapter_assets_summary=recent_chapter_assets_summary,
+                        include_history_hint=True,
+                    )
+                    iteration_plan_text = await streaming_service.generate_chapter_streaming(
+                        prompt=coordination_user_prompt,
+                        system_prompt=iteration_coordination_system_prompt,
+                        on_chunk=noop_chunk,
+                        temperature=0.3,
+                        model=selected_revision_model,
+                    )
+                    logger.info(f"   ✓ 第{round_idx}轮迭代计划生成完成，长度: {len(iteration_plan_text)}")
+                except Exception as coordination_error:
+                    logger.warning(
+                        f"   ⚠️ 第{round_idx}轮迭代计划生成失败，将直接依据评审意见改稿: {coordination_error}"
+                    )
+
+                await ws_manager.send_task_progress(
+                    project_id=project_id,
+                    task_id=task_id,
+                    progress=min(95, 71 + round_idx * 5),
+                    message=f"步骤 4/4: 第{round_idx}/{effective_rounds}轮，内容修订师正在执行修改..."
+                )
                 iteration_user_prompt_round = _build_iteration_revision_prompt(
                     chapter_number=next_chapter_number,
                     chapter_content=current_version,
                     review_text=all_reviews_text,
+                    iteration_plan=iteration_plan_text,
                     recent_chapter_assets_summary=recent_chapter_assets_summary,
                     include_history_hint=True,
                 )
@@ -1274,7 +1280,7 @@ Genre-specific refinement (specific implementation of general planning requireme
                 )
 
                 # 评审打分（R1）
-                review_system_prompt_loop = """你是一位专业的网络小说质量评审官。请使用网文6维度对上面的章节进行评审，并特别检查它是否承接了最近章节连续性资产中的场景目标、冲突推进、人物状态、结尾钩子与伏笔。\n1) 综合评分：X/10分\n2) 最重要的3条修改建议。\n请严格包含“综合评分：X/10分”这一行。"""
+                review_system_prompt_loop = get_iteration_loop_review_system_prompt()
                 review_user_prompt_loop = _build_iteration_review_prompt(
                     chapter_number=next_chapter_number,
                     chapter_content=revised_version,

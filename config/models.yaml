@@ -1,4 +1,4 @@
-models:
+﻿models:
 - id: wan2.6-t2i
   name: Wan 2.6 Text-to-Image
   provider: alibaba
@@ -1730,8 +1730,8 @@ models:
   - realistic
   - portrait
   - product
-- id: qwen3-tts-flash
-  name: Qwen3-TTS-Flash
+- id: qwen3-tts-instruct-flash
+  name: Qwen3-TTS-Instruct-Flash
   provider: alibaba
   version: v1
   status: active
@@ -1773,16 +1773,17 @@ models:
     overall_score: 8.0
     prompt_adherence: 0.8
   avg_latency_seconds: 4.0
-  summary: 项目默认使用的 TTS 模型。阿里云百炼语音合成文档将 Qwen-TTS 定位为高吞吐、兼容 OpenAI 接口且预设音色较丰富的语音合成路径。
+  summary: 项目默认使用的 TTS 模型。阿里云百炼文档将 Qwen3-TTS Instruct Flash 定位为高吞吐、预设音色丰富且支持自然语言 instructions 的语音合成路径。
   recommended_scenarios:
   - 批量有声书合成
   - 对成本敏感的章节旁白
   - 标准音色预览与快速迭代
+  - 需要自然语言指令控制语气/场景的标准朗读
   limitations:
-  - 当前项目接入未在这条链路上暴露 instruct 风格的细粒度情绪控制
+  - 当前链路重点支持 instructions，不建议输出 SSML
   - 若需要更强的表现力控制，更适合使用 cosyvoice-v3-plus
   integration_notes:
-  - 项目当前将 qwen3-tts-flash 作为默认有声书 TTS
+  - 项目当前将 qwen3-tts-instruct-flash 作为默认有声书 TTS
   - 音色目录与说话人归一化逻辑已在 audiobook 服务中实现
   - 当提供商返回时间戳信息时，系统会原样保留
   documentation_url: https://help.aliyun.com/zh/model-studio/qwen-tts
@@ -1799,7 +1800,7 @@ models:
   detailed_specs:
     voice_synthesis:
       voice_catalog:
-        description: 预设音色库，适合标准朗读场景，不支持情绪控制
+        description: 预设音色库，适合标准朗读场景，可结合 instructions 做自然语言演绎控制
         categories:
         - name: 标准女声
           voices:
@@ -1859,19 +1860,20 @@ models:
         required: true
         example: "# Python 调用示例\nfrom core.unified_media_runtime import media_runtime\n\
           \naudio_bytes = await media_runtime.synthesize_speech(\n    model_id=\"\
-          qwen3-tts-flash\",\n    text=\"这是测试文本\",\n    speaker=\"zhitian\"\n)\n"
+          qwen3-tts-instruct-flash\",\n    text=\"这是测试文本\",\n    speaker=\"zhitian\"\n)\n"
       comparison_with_cosyvoice:
-        instruct_support: false
+        instruct_support: true
         voice_clone_support: false
         advantage:
         - 速度更快（4秒 vs 7秒）
         - 成本更低
         - 吞吐更高，适合批量合成
+        - 支持通过自然语言 instructions 调整情绪、场景与身份
         disadvantage:
-        - 不支持情绪控制（instruct）
+        - 表现力仍弱于 cosyvoice-v3-plus
         - 不支持语音克隆
-        - 音色表现力较弱
-        recommended_use: 批量合成、标准朗读、成本敏感场景
+        - 不建议走 SSML 工作流
+        recommended_use: 批量合成、标准朗读、成本敏感且需要 instructions 的场景
       timestamp_support:
         word_timestamps:
           enabled: true
@@ -1885,13 +1887,13 @@ models:
         python:
         - name: 基础语音合成
           code: "from core.unified_media_runtime import media_runtime\n\naudio_bytes\
-            \ = await media_runtime.synthesize_speech(\n    model_id=\"qwen3-tts-flash\"\
+            \ = await media_runtime.synthesize_speech(\n    model_id=\"qwen3-tts-instruct-flash\"\
             ,\n    text=\"欢迎收听本期节目，今天我们要聊的是人工智能的发展历程。\",\n    speaker=\"zhitian\"\n\
             )\n"
         - name: 批量章节合成
           code: "chapters = [\"第一章内容...\", \"第二章内容...\", \"第三章内容...\"]\n\nfor i, chapter\
             \ in enumerate(chapters):\n    audio = await media_runtime.synthesize_speech(\n\
-            \        model_id=\"qwen3-tts-flash\",\n        text=chapter,\n      \
+            \        model_id=\"qwen3-tts-instruct-flash\",\n        text=chapter,\n      \
             \  speaker=\"zhixiang\"\n    )\n    save_audio(f\"chapter_{i+1}.mp3\"\
             , audio)\n"
 - id: cosyvoice-v3-plus
@@ -1946,7 +1948,7 @@ models:
   - 语音克隆工作流
   - 角色化、表现力更强的旁白生成
   limitations:
-  - 成本更高、吞吐低于 qwen3-tts-flash
+  - 成本更高、吞吐低于 qwen3-tts-instruct-flash
   - 由于需要处理音色管理与克隆生命周期，运维复杂度更高
   integration_notes:
   - 项目已为该模型单独暴露克隆音色创建与管理接口
@@ -2795,7 +2797,7 @@ models:
     last_updated: 2025-04
     source: 阿里云百炼官方价格文档
     pricing_url: https://help.aliyun.com/zh/model-studio/pricing
-    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。
+    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
     verification_required: true
     verification_source: https://help.aliyun.com/zh/model-studio/pricing
   api_config:
@@ -2900,7 +2902,7 @@ models:
     last_updated: 2025-04
     source: 阿里云百炼官方价格文档
     pricing_url: https://help.aliyun.com/zh/model-studio/pricing
-    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。
+    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
     verification_required: true
     verification_source: https://help.aliyun.com/zh/model-studio/pricing
   api_config:
@@ -3000,7 +3002,7 @@ models:
     last_updated: 2025-04
     source: 阿里云百炼官方价格文档
     pricing_url: https://help.aliyun.com/zh/model-studio/pricing
-    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。
+    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
     verification_required: true
     verification_source: https://help.aliyun.com/zh/model-studio/pricing
   api_config:
@@ -3100,7 +3102,7 @@ models:
     last_updated: 2025-04
     source: 阿里云百炼官方价格文档
     pricing_url: https://help.aliyun.com/zh/model-studio/pricing
-    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。
+    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
     verification_required: true
     verification_source: https://help.aliyun.com/zh/model-studio/pricing
   api_config:
@@ -3202,7 +3204,7 @@ models:
     last_updated: 2025-04
     source: 阿里云百炼官方价格文档
     pricing_url: https://help.aliyun.com/zh/model-studio/pricing
-    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。
+    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
     verification_required: true
     verification_source: https://help.aliyun.com/zh/model-studio/pricing
   api_config:
@@ -3309,7 +3311,7 @@ models:
     last_updated: 2025-04
     source: 阿里云百炼官方价格文档
     pricing_url: https://help.aliyun.com/zh/model-studio/pricing
-    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。
+    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
     verification_required: true
     verification_source: https://help.aliyun.com/zh/model-studio/pricing
   api_config:
@@ -3416,7 +3418,7 @@ models:
     last_updated: 2025-04
     source: 阿里云百炼官方价格文档
     pricing_url: https://help.aliyun.com/zh/model-studio/pricing
-    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。
+    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
     verification_required: true
     verification_source: https://help.aliyun.com/zh/model-studio/pricing
   api_config:
@@ -3522,7 +3524,7 @@ models:
     last_updated: 2025-04
     source: 阿里云百炼官方价格文档
     pricing_url: https://help.aliyun.com/zh/model-studio/pricing
-    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。
+    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
     verification_required: true
     verification_source: https://help.aliyun.com/zh/model-studio/pricing
   api_config:
@@ -3628,7 +3630,7 @@ models:
     last_updated: 2025-04
     source: 阿里云百炼官方价格文档
     pricing_url: https://help.aliyun.com/zh/model-studio/pricing
-    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。
+    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
     verification_required: true
     verification_source: https://help.aliyun.com/zh/model-studio/pricing
   api_config:
@@ -3725,7 +3727,7 @@ models:
     last_updated: 2025-04
     source: 阿里云百炼官方价格文档
     pricing_url: https://help.aliyun.com/zh/model-studio/pricing
-    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。
+    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
     verification_required: true
     verification_source: https://help.aliyun.com/zh/model-studio/pricing
   api_config:
@@ -3828,7 +3830,7 @@ models:
     last_updated: 2025-04
     source: 阿里云百炼官方价格文档
     pricing_url: https://help.aliyun.com/zh/model-studio/pricing
-    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。
+    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
     verification_required: true
     verification_source: https://help.aliyun.com/zh/model-studio/pricing
   api_config:
@@ -3926,7 +3928,7 @@ models:
     last_updated: 2025-04
     source: 阿里云百炼官方价格文档
     pricing_url: https://help.aliyun.com/zh/model-studio/pricing
-    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。
+    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
     verification_required: true
     verification_source: https://help.aliyun.com/zh/model-studio/pricing
   api_config:
@@ -4031,7 +4033,7 @@ models:
     last_updated: 2025-04
     source: 阿里云百炼官方价格文档
     pricing_url: https://help.aliyun.com/zh/model-studio/pricing
-    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。
+    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
     verification_required: true
     verification_source: https://help.aliyun.com/zh/model-studio/pricing
   api_config:
@@ -4218,7 +4220,7 @@ models:
     last_updated: 2025-04
     source: 阿里云百炼官方价格文档
     pricing_url: https://help.aliyun.com/zh/model-studio/pricing
-    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。全量校验时会从官网重新获取。
+    note: ⚠️ 重要：价格可能调整，请以阿里云百炼平台实时价格为准。
     verification_required: true
     verification_source: https://help.aliyun.com/zh/model-studio/pricing
   api_config:

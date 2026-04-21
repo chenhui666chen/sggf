@@ -18,8 +18,9 @@ import {
   type TaskPointsPrecheckErrorDetail,
 } from '../services/api'
 import * as bookParserApi from '../services/bookParserApi'
+import BrowserPlayer, { type BrowserPlayerProjectData } from '../components/audiobook/BrowserPlayer'
 import TaskPointsPrecheckAlert from '../components/common/TaskPointsPrecheckAlert'
-import { saveLocalAsset } from '../utils/localAssetVault'
+import { getLocalAssetBlob, saveLocalAsset } from '../utils/localAssetVault'
 import {
   Box,
   Container,
@@ -88,7 +89,7 @@ interface Chapter {
 type StageStatus = 'pending' | 'running' | 'completed' | 'failed'
 type PreviewType = 'voice' | 'sfx' | 'bgm' | 'mix'
 type TtsModel =
-  | 'qwen3-tts-flash'
+  | 'qwen3-tts-instruct-flash'
   | 'cosyvoice-v3-plus'
   | 'minimax-speech-2.8-hd'
   | 'minimax-speech-2.8-turbo'
@@ -154,6 +155,15 @@ interface ProjectAudioConfig {
     emotion_tendency?: string | null  // 🆕 情感倾向
   }[]
   audio_fx?: AudioFxConfig | null
+}
+
+interface AudiobookSessionState {
+  projectId?: number | null
+  audiobookProjectId?: number | null
+  taskId?: string | null
+  activeStep?: number
+  generating?: boolean
+  ttsModel?: TtsModel
 }
 
 interface ScriptEditorDialogProps {
@@ -292,21 +302,21 @@ interface ScriptReviewDetail {
 }
 
 const DEFAULT_NARRATOR_BY_MODEL = {
-  'qwen3-tts-flash': 'Ryan',
+  'qwen3-tts-instruct-flash': 'Neil',
   'cosyvoice-v3-plus': 'longanyang',
   'minimax-speech-2.8-hd': 'male-qn-jingying',
   'minimax-speech-2.8-turbo': 'male-qn-jingying',
 } as const
 
 const TTS_MODEL_LABELS: Record<TtsModel, string> = {
-  'qwen3-tts-flash': 'Qwen3-TTS Flash',
+  'qwen3-tts-instruct-flash': 'Qwen3-TTS Instruct Flash',
   'cosyvoice-v3-plus': 'CosyVoice v3-plus',
   'minimax-speech-2.8-hd': 'MiniMax HD',
   'minimax-speech-2.8-turbo': 'MiniMax Turbo',
 }
 
 const isTtsModel = (value: unknown): value is TtsModel =>
-  value === 'qwen3-tts-flash'
+  value === 'qwen3-tts-instruct-flash'
   || value === 'cosyvoice-v3-plus'
   || value === 'minimax-speech-2.8-hd'
   || value === 'minimax-speech-2.8-turbo'
@@ -314,28 +324,56 @@ const isTtsModel = (value: unknown): value is TtsModel =>
 const getTtsModelLabel = (model: TtsModel) => TTS_MODEL_LABELS[model]
 
 const getDefaultNarratorId = (model: TtsModel) =>
-  DEFAULT_NARRATOR_BY_MODEL[model] || 'Ryan'
+  DEFAULT_NARRATOR_BY_MODEL[model] || 'Neil'
+
+const QWEN_FLASH_ONLY_TO_INSTRUCT: Record<string, string> = {
+  Aiden: 'Ethan',
+  Alek: 'Elias',
+  Andre: 'Neil',
+  Bodega: 'Ethan',
+  Dolce: 'Vincent',
+  Dylan: 'Ethan',
+  Ebona: 'Bellona',
+  Emilien: 'Ethan',
+  Eric: 'Nofish',
+  Jada: 'Mia',
+  Jennifer: 'Bellona',
+  Katerina: 'Vivian',
+  Kiki: 'Nini',
+  Lenn: 'Elias',
+  Li: 'Vincent',
+  Marcus: 'Vincent',
+  'Ono Anna': 'Nini',
+  Peter: 'Vincent',
+  'Radio Gol': 'Ethan',
+  Rocky: 'Kai',
+  Roy: 'Vincent',
+  Ryan: 'Neil',
+  Sohee: 'Serena',
+  Sonrisa: 'Stella',
+  Sunny: 'Mia',
+}
 
 const LEGACY_VOICE_ALIASES: Record<string, string> = {
   male_young_energetic: 'Ethan',
   male_young_gentle: 'Vincent',
-  male_adult_calm: 'Ryan',
-  male_adult_energetic: 'Aiden',
+  male_adult_calm: 'Neil',
+  male_adult_energetic: 'Ethan',
   male_elder_wise: 'Eldric Sage',
   male_warm: 'Vincent',
   male_customer_service: 'Kai',
   male_refreshing: 'Kai',
   male_monkey: 'Nofish',
-  male_narrator: 'Ryan',
-  male_villain_sinister: 'Aiden',
-  female_villain_cold: 'Jennifer',
-  female_villain_cunning: 'Katerina',
+  male_narrator: 'Neil',
+  male_villain_sinister: 'Vincent',
+  female_villain_cold: 'Bellona',
+  female_villain_cunning: 'Vivian',
   female_young_gentle: 'Cherry',
   female_young_energetic: 'Bunny',
   female_young_cute: 'Momo',
   female_adult_elegant: 'Bella',
   female_adult_intellectual: 'Vivian',
-  female_capable: 'Jennifer',
+  female_capable: 'Bellona',
   female_elder: 'Chelsie',
   female_intimate: 'Mochi',
   female_lively: 'Mia',
@@ -347,8 +385,9 @@ const normalizeVoiceId = (
   voiceId?: string | null,
 ) => {
   if (!voiceId) return ''
-  if (model === 'qwen3-tts-flash') {
-    return LEGACY_VOICE_ALIASES[voiceId] || voiceId
+  if (model === 'qwen3-tts-instruct-flash') {
+    const normalizedVoiceId = LEGACY_VOICE_ALIASES[voiceId] || voiceId
+    return QWEN_FLASH_ONLY_TO_INSTRUCT[normalizedVoiceId] || normalizedVoiceId
   }
   const cosyvoiceV3PlusLegacyAliases: Record<string, string> = {
     longanzhi_v3: 'longanyang',
@@ -1393,6 +1432,9 @@ const AudiobookPage = () => {
     music_density: 'medium',
   })
   const [audiobookProject, setAudiobookProject] = useState<any>(null)
+  const [browserPlayerOpen, setBrowserPlayerOpen] = useState(false)
+  const [browserPlayerLoading, setBrowserPlayerLoading] = useState(false)
+  const [browserPlayerData, setBrowserPlayerData] = useState<BrowserPlayerProjectData | null>(null)
   const [loadingCharacters, setLoadingCharacters] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [historyProjects, setHistoryProjects] = useState<any[]>([])
@@ -1445,13 +1487,13 @@ const AudiobookPage = () => {
   const [voiceLoading, setVoiceLoading] = useState(false)
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const [voicePresetsByModel, setVoicePresetsByModel] = useState<Record<TtsModel, VoicePreset[]>>({
-    'qwen3-tts-flash': [],
+    'qwen3-tts-instruct-flash': [],
     'cosyvoice-v3-plus': [],
     'minimax-speech-2.8-hd': [],
     'minimax-speech-2.8-turbo': [],
   })
   const [voiceCatalogMetaByModel, setVoiceCatalogMetaByModel] = useState<Record<TtsModel, VoiceCatalogMeta | null>>({
-    'qwen3-tts-flash': null,
+    'qwen3-tts-instruct-flash': null,
     'cosyvoice-v3-plus': null,
     'minimax-speech-2.8-hd': null,
     'minimax-speech-2.8-turbo': null,
@@ -1470,7 +1512,7 @@ const AudiobookPage = () => {
   const [creatingFromBook, setCreatingFromBook] = useState(false)
   const [lastGenerationMode, setLastGenerationMode] = useState<'full' | 'script_only'>('full')
   const [activeStep, setActiveStep] = useState(0)
-  const [ttsModel, setTtsModel] = useState<TtsModel>('qwen3-tts-flash')
+  const [ttsModel, setTtsModel] = useState<TtsModel>('qwen3-tts-instruct-flash')
   const outputFormat: AudioOutputFormat = 'mp3'
   const supportsTtsTuning = ttsModel === 'cosyvoice-v3-plus'
   const [narrationStyle, setNarrationStyle] = useState<string>('professional')
@@ -1482,12 +1524,27 @@ const AudiobookPage = () => {
   const [deletingChapter, setDeletingChapter] = useState(false)
 
   const audioRef = useMemo(() => new Audio(), [])
+  const playingAudioUrlRef = useRef<string | null>(null)
   const sessionHydratedRef = useRef(false)
+  const ttsModelRef = useRef<TtsModel>(ttsModel)
+  const handleSelectProjectRef = useRef<(project: Project, options?: SelectProjectOptions) => Promise<void>>(
+    async () => {},
+  )
   const cloneRecorderRef = useRef<MediaRecorder | null>(null)
   const cloneStreamRef = useRef<MediaStream | null>(null)
   const cloneChunksRef = useRef<Blob[]>([])
   const navigationTypeRef = useRef<NavigationType>(typeof window === 'undefined' ? null : detectNavigationType())
   const selectedProjectId = selectedProject?.id ?? null
+
+  useEffect(() => {
+    return () => {
+      if (playingAudioUrlRef.current) {
+        window.URL.revokeObjectURL(playingAudioUrlRef.current)
+        playingAudioUrlRef.current = null
+      }
+    }
+  }, [])
+
   const fetchChapterAudioFile = useCallback(
     async (chapterId: number) => {
       if (!audiobookProject) {
@@ -1558,77 +1615,104 @@ const AudiobookPage = () => {
     return currentVoicePresets.filter((preset) => preset.category === 'custom')
   }, [currentVoicePresets, ttsModel])
 
-  // 从URL参数加载项目（优先级最高，但会尝试保留会话状态）
+  // 从 URL 参数加载项目，并在刷新/回退时按顺序恢复会话
   useEffect(() => {
+    let cancelled = false
+
     const loadProjectFromUrl = async () => {
-      if (!projectId) {
+      sessionHydratedRef.current = false
+
+      if (!routeProjectId) {
         setSnackbar({ open: true, message: '缺少项目ID参数', severity: 'error' })
         navigate('/audiobook-dashboard')
         return
       }
 
-      // 检查是否需要清除会话缓存
-      const savedSession = localStorage.getItem(AUDIOBOOK_SESSION_STORAGE_KEY)
-      if (savedSession) {
-        try {
-          const saved = JSON.parse(savedSession)
-          // 如果URL中的projectId与保存的projectId相同，则不清除会话缓存
-          if (saved.projectId === parseInt(projectId)) {
-            // 恢复会话状态中的activeStep
-            if (typeof saved.activeStep === 'number') {
-              setActiveStep(saved.activeStep)
+      const navType = navigationTypeRef.current
+      const shouldRestore = navType === 'reload' || navType === 'back_forward' || isSamePathReferrer()
+      let savedSession: AudiobookSessionState | null = null
+
+      if (shouldRestore) {
+        const raw = localStorage.getItem(AUDIOBOOK_SESSION_STORAGE_KEY)
+        if (raw) {
+          try {
+            const saved = JSON.parse(raw) as AudiobookSessionState
+            if (saved.projectId === routeProjectId) {
+              savedSession = saved
+            } else {
+              localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
             }
-            if (saved.taskId) {
-              setCurrentTaskId(saved.taskId)
-              setGenerating(saved.generating ?? true)
-            }
-            if (isTtsModel(saved.ttsModel)) {
-              setTtsModel(saved.ttsModel)
-            }
-            // 恢复audiobookProject（如果存在）
-            if (saved.audiobookProjectId) {
-              setCurrentAudiobookProjectId(saved.audiobookProjectId)
-              // 异步加载audiobookProject
-              apiClient.getAudiobookProject(saved.audiobookProjectId)
-                .then(detailRes => {
-                  setAudiobookProject(detailRes.data)
-                })
-                .catch(() => {
-                  // 恢复有声书项目失败
-                })
-            }
-            // 设置标志，防止restoreSession effect重复执行
-            sessionHydratedRef.current = true
-          } else {
+          } catch {
             localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
-            sessionHydratedRef.current = true
           }
-        } catch {
-          localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
-          sessionHydratedRef.current = true
         }
       } else {
-        sessionHydratedRef.current = true
+        localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
+      }
+
+      const restoredTtsModel = isTtsModel(savedSession?.ttsModel) ? savedSession!.ttsModel : ttsModelRef.current
+      if (savedSession && restoredTtsModel !== ttsModelRef.current) {
+        setTtsModel(restoredTtsModel)
       }
 
       try {
-        const projectRes = await apiClient.getProject(parseInt(projectId))
+        const projectRes = await apiClient.getProject(routeProjectId)
+        if (cancelled) return
+
         const project = projectRes.data as Project
-        setSelectedProject(project)
-        await handleSelectProject(project, { skipStepReset: true })
+        await handleSelectProjectRef.current(project, {
+          skipStepReset: true,
+          preserveSessionState: Boolean(savedSession),
+          ttsModelOverride: restoredTtsModel,
+        })
+
+        if (cancelled || !savedSession) {
+          return
+        }
+
+        if (typeof savedSession.activeStep === 'number') {
+          setActiveStep(savedSession.activeStep)
+        }
+
+        if (savedSession.audiobookProjectId) {
+          setCurrentAudiobookProjectId(savedSession.audiobookProjectId)
+          try {
+            const detailRes = await apiClient.getAudiobookProject(savedSession.audiobookProjectId)
+            if (!cancelled) {
+              setAudiobookProject(detailRes.data)
+            }
+          } catch {
+            // 恢复有声书项目失败
+          }
+        }
+
+        if (!cancelled) {
+          setCurrentTaskId(savedSession.taskId ?? null)
+          setGenerating(Boolean(savedSession.taskId) ? (savedSession.generating ?? true) : false)
+        }
       } catch (error: any) {
         const msg = await extractApiErrorMessage(error, '加载项目失败')
-        setSnackbar({ open: true, message: msg, severity: 'error' })
-        navigate('/audiobook-dashboard')
+        if (!cancelled) {
+          setSnackbar({ open: true, message: msg, severity: 'error' })
+          navigate('/audiobook-dashboard')
+        }
+      } finally {
+        if (!cancelled) {
+          sessionHydratedRef.current = true
+        }
       }
     }
 
     loadProjectFromUrl()
-  }, [projectId])
+
+    return () => {
+      cancelled = true
+    }
+  }, [routeProjectId, navigate])
 
   // 页面初始化时加载所有模型的音色目录（并行加载）
   useEffect(() => {
-    const models: TtsModel[] = ['qwen3-tts-flash', 'cosyvoice-v3-plus', 'minimax-speech-2.8-hd', 'minimax-speech-2.8-turbo']
+    const models: TtsModel[] = ['qwen3-tts-instruct-flash', 'cosyvoice-v3-plus', 'minimax-speech-2.8-hd', 'minimax-speech-2.8-turbo']
 
     const loadAllVoiceCatalogs = async () => {
       setVoiceLoading(true)
@@ -1652,13 +1736,13 @@ const AudiobookPage = () => {
         )
 
         const newPresetsByModel: Record<TtsModel, VoicePreset[]> = {
-          'qwen3-tts-flash': [],
+          'qwen3-tts-instruct-flash': [],
           'cosyvoice-v3-plus': [],
           'minimax-speech-2.8-hd': [],
           'minimax-speech-2.8-turbo': [],
         }
         const newMetaByModel: Record<TtsModel, VoiceCatalogMeta | null> = {
-          'qwen3-tts-flash': null,
+          'qwen3-tts-instruct-flash': null,
           'cosyvoice-v3-plus': null,
           'minimax-speech-2.8-hd': null,
           'minimax-speech-2.8-turbo': null,
@@ -1905,6 +1989,8 @@ const AudiobookPage = () => {
       const res = await apiClient.getAudiobookProject(audiobookProjectId)
       const data = res.data
       setAudiobookProject(data)
+      setBrowserPlayerData(null)
+      setBrowserPlayerOpen(false)
       setCurrentAudiobookProjectId(data.id)
       setActiveStep(2) // 跳转到完成页面
       setShowHistory(false)
@@ -2018,22 +2104,34 @@ const AudiobookPage = () => {
   }
 
   // 选择项目
-  type SelectProjectOptions = { skipStepReset?: boolean }
+  type SelectProjectOptions = {
+    skipStepReset?: boolean
+    preserveSessionState?: boolean
+    ttsModelOverride?: TtsModel
+  }
 
   const handleSelectProject = useCallback(async (project: Project, options?: SelectProjectOptions) => {
+    const resolvedTtsModel = options?.ttsModelOverride ?? ttsModel
     setSelectedProject(project)
-    setCurrentAudiobookProjectId(null)
-    setCurrentTaskId(null)
     setTaskPointsPrecheckError(null)
-    setTaskStatuses({})
     setCharacterVoices([])
+    setBrowserPlayerData(null)
+    setBrowserPlayerOpen(false)
+
+    if (!options?.preserveSessionState) {
+      setCurrentAudiobookProjectId(null)
+      setCurrentTaskId(null)
+      setTaskStatuses({})
+      setAudiobookProject(null)
+      setGenerating(false)
+    }
 
     const baseNarratorVoice: CharacterVoiceSetting = {
       characterId: 0,
       name: '旁白',
       gender: '中性',
       role: '旁白',
-      voiceId: getDefaultNarratorId(ttsModel),
+      voiceId: getDefaultNarratorId(resolvedTtsModel),
       volume: 50,
       speed: 1.0,
       pitch: 50,
@@ -2055,7 +2153,7 @@ const AudiobookPage = () => {
         // 尝试读取项目级音频配置（角色音 + 音效/BGM）
         let projectAudioConfig: ProjectAudioConfig | null = null
         try {
-          const audioConfigRes = await apiClient.getProjectAudioConfig(project.id, ttsModel)
+          const audioConfigRes = await apiClient.getProjectAudioConfig(project.id, resolvedTtsModel)
           projectAudioConfig = audioConfigRes.data
         } catch {
           // 获取项目音频配置失败
@@ -2072,11 +2170,11 @@ const AudiobookPage = () => {
             name: c.name,
             gender: c.gender,
             role: c.role,
-            voiceId: normalizeVoiceId(ttsModel, saved?.voice_id),
+            voiceId: normalizeVoiceId(resolvedTtsModel, saved?.voice_id),
             volume: saved?.volume ?? 50,
             speed: saved?.speed ?? 1.0,
             pitch: saved?.pitch ?? 50,
-            ttsModel: saved?.tts_model || ttsModel,  // 🆕 从保存的配置中获取tts_model
+            ttsModel: saved?.tts_model || resolvedTtsModel,  // 🆕 从保存的配置中获取tts_model
             voiceType: saved?.voice_type || undefined,  // 🆕 从保存的配置中获取声音类型
             personality: saved?.personality || undefined,  // 🆕 从保存的配置中获取性格类型
             emotionTendency: saved?.emotion_tendency || undefined,  // 🆕 从保存的配置中获取情感倾向
@@ -2089,7 +2187,7 @@ const AudiobookPage = () => {
         )
         const narratorVoice: CharacterVoiceSetting = {
           ...baseNarratorVoice,
-          voiceId: normalizeVoiceId(ttsModel, narratorSaved?.voice_id) || baseNarratorVoice.voiceId,
+          voiceId: normalizeVoiceId(resolvedTtsModel, narratorSaved?.voice_id) || baseNarratorVoice.voiceId,
           volume: narratorSaved?.volume ?? baseNarratorVoice.volume,
           speed: narratorSaved?.speed ?? baseNarratorVoice.speed,
           pitch: narratorSaved?.pitch ?? baseNarratorVoice.pitch,
@@ -2130,6 +2228,47 @@ const AudiobookPage = () => {
       setSnackbar({ open: true, message: '网络错误，请重试', severity: 'error' })
     }
   }, [ttsModel, setCharacterVoicesForCurrentModel])
+
+  const handleOpenBrowserPlayer = useCallback(async () => {
+    if (!audiobookProject?.id) {
+      setSnackbar({ open: true, message: '请先生成或加载有声书项目', severity: 'warning' })
+      return
+    }
+
+    setBrowserPlayerLoading(true)
+    try {
+      const response = await apiClient.getBrowserPlayerData(audiobookProject.id)
+      const data = response.data as BrowserPlayerProjectData
+
+      if (!data?.chapters?.length) {
+        setSnackbar({ open: true, message: '当前项目暂无可播放章节', severity: 'warning' })
+        return
+      }
+
+      setBrowserPlayerData(data)
+      setBrowserPlayerOpen(true)
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: await extractApiErrorMessage(error, '加载浏览器播放器失败，请稍后重试'),
+        severity: 'error',
+      })
+    } finally {
+      setBrowserPlayerLoading(false)
+    }
+  }, [audiobookProject?.id])
+
+  const handleCloseBrowserPlayer = useCallback(() => {
+    setBrowserPlayerOpen(false)
+  }, [])
+
+  useEffect(() => {
+    ttsModelRef.current = ttsModel
+  }, [ttsModel])
+
+  useEffect(() => {
+    handleSelectProjectRef.current = handleSelectProject
+  }, [handleSelectProject])
 
   // 章节菜单相关处理函数
   const handleOpenChapterMenu = (event: React.MouseEvent<HTMLElement>, chapter: Chapter) => {
@@ -2208,81 +2347,6 @@ const AudiobookPage = () => {
     }
     localStorage.setItem(AUDIOBOOK_SESSION_STORAGE_KEY, JSON.stringify(payload))
   }, [selectedProjectId, currentAudiobookProjectId, currentTaskId, activeStep, generating, ttsModel])
-
-  useEffect(() => {
-    if (sessionHydratedRef.current) {
-      return
-    }
-
-    const navType = navigationTypeRef.current
-    const shouldRestore = navType === 'reload' || navType === 'back_forward' || isSamePathReferrer()
-    if (!shouldRestore) {
-      localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
-      sessionHydratedRef.current = true
-      return
-    }
-
-    let cancelled = false
-
-    const restoreSession = async () => {
-      const raw = localStorage.getItem(AUDIOBOOK_SESSION_STORAGE_KEY)
-      if (!raw) {
-        sessionHydratedRef.current = true
-        return
-      }
-
-      try {
-        const saved = JSON.parse(raw)
-
-        if (isTtsModel(saved.ttsModel) && saved.ttsModel !== ttsModel) {
-          setTtsModel(saved.ttsModel)
-        }
-
-        if (saved.projectId && !cancelled) {
-          try {
-            const projectRes = await apiClient.getProject(saved.projectId)
-            if (!cancelled) {
-              await handleSelectProject(projectRes.data, { skipStepReset: true })
-            }
-          } catch {
-            // 恢复项目失败
-          }
-        }
-
-        if (saved.audiobookProjectId && !cancelled) {
-          setCurrentAudiobookProjectId(saved.audiobookProjectId)
-          try {
-            const detailRes = await apiClient.getAudiobookProject(saved.audiobookProjectId)
-            if (!cancelled) {
-              setAudiobookProject(detailRes.data)
-            }
-          } catch {
-            // 恢复有声书项目失败
-          }
-        }
-
-        if (saved.taskId && !cancelled) {
-          setCurrentTaskId(saved.taskId)
-          setGenerating(saved.generating ?? true)
-          setActiveStep(saved.activeStep ?? 0)
-        } else if (typeof saved.activeStep === 'number' && !cancelled) {
-          setActiveStep(saved.activeStep)
-        }
-      } catch {
-        localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
-      } finally {
-        if (!cancelled) {
-          sessionHydratedRef.current = true
-        }
-      }
-    }
-
-    restoreSession()
-
-    return () => {
-      cancelled = true
-    }
-  }, [handleSelectProject, ttsModel])
 
   // 切换章节选择
   const handleToggleChapter = (chapterId: number) => {
@@ -2607,25 +2671,17 @@ const AudiobookPage = () => {
       
       // 暂停当前播放
       audioRef.pause()
-      
-      // 通过 fetch 获取音频数据（带 Authorization header）
-      const token = localStorage.getItem('access_token')
-      const response = await fetch(
-        `/api/v1/audiobook/stream/${audiobookProject.id}/${chapterId}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        }
-      )
-      
-      if (!response.ok) {
-        throw new Error('加载音频失败')
+
+      if (playingAudioUrlRef.current) {
+        window.URL.revokeObjectURL(playingAudioUrlRef.current)
+        playingAudioUrlRef.current = null
       }
-      
-      // 创建 Blob URL
-      const blob = await response.blob()
+
+      const assetUuid = buildAudiobookChapterAssetUuid(audiobookProject.id, chapterId)
+      const localBlob = await getLocalAssetBlob(assetUuid)
+      const blob = localBlob || (await fetchChapterAudioFile(chapterId)).blob
       const blobUrl = window.URL.createObjectURL(blob)
+      playingAudioUrlRef.current = blobUrl
       
       // 设置新的音频源
       audioRef.src = blobUrl
@@ -2637,7 +2693,10 @@ const AudiobookPage = () => {
       // 播放结束后重置状态并释放 Blob URL
       audioRef.onended = () => {
         setPlayingChapter(null)
-        window.URL.revokeObjectURL(blobUrl)
+        if (playingAudioUrlRef.current) {
+          window.URL.revokeObjectURL(playingAudioUrlRef.current)
+          playingAudioUrlRef.current = null
+        }
       }
       
         setSnackbar({ open: true, message: '开始播放', severity: 'success' })
@@ -3081,17 +3140,13 @@ const AudiobookPage = () => {
 
     const pollTaskList = async () => {
       try {
-        const response = await fetch('/api/v1/audiobook/tasks', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-        })
+        const response = await apiClient.listAudiobookTasks()
 
-        if (!response.ok) {
+        if (response.status < 200 || response.status >= 300) {
           return
         }
 
-        const rawTasks = await response.json()
+        const rawTasks = Array.isArray(response.data) ? response.data : []
         const normalizedTasks: TaskStatus[] = rawTasks.map((task: any) => normalizeTaskStatusResponse(task))
         const matched = normalizedTasks.find(
           (task) =>
@@ -3134,14 +3189,10 @@ const AudiobookPage = () => {
 
     const pollTaskStatus = async () => {
       try {
-        const response = await fetch(`/api/v1/audiobook/tasks/${currentTaskId}/status`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-        })
+        const response = await apiClient.getAudiobookTaskStatus(currentTaskId)
 
-        if (response.ok) {
-          const raw = await response.json()
+        if (response.status >= 200 && response.status < 300) {
+          const raw = response.data
           const normalized = normalizeTaskStatusResponse(raw)
           if (cancelled) return
           setTaskStatuses((prev) => ({
@@ -3443,11 +3494,11 @@ const AudiobookPage = () => {
             <Box sx={{ flex: 1, minWidth: 260 }}>
               {voiceCatalogMeta && (
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  {(voiceCatalogMeta.model || 'Qwen3-TTS Flash')}：官方 {voiceCatalogMeta.voice_count ?? currentVoicePresets.length} 种音色，最近更新 {voiceCatalogMeta.updated_at || '—'}，覆盖普通话/多语种/方言。
+                  {(voiceCatalogMeta.model || 'Qwen3-TTS Instruct Flash')}：官方 {voiceCatalogMeta.voice_count ?? currentVoicePresets.length} 种音色，最近更新 {voiceCatalogMeta.updated_at || '—'}，覆盖普通话/多语种/方言。
                 </Typography>
               )}
               <Alert severity="success" sx={{ mb: 1 }}>
-                Qwen3-TTS Flash 支持快速批量合成、指令式情感（Ethan/Sunny）与多语种/方言音色，适合整本生成；CosyVoice 保留为精品章节备用。
+                Qwen3-TTS Instruct Flash 支持快速批量合成、自然语言指令控制（Ethan/Neil）与多语种音色，适合整本生成；CosyVoice 保留为精品章节备用。
               </Alert>
               {ttsModel === 'cosyvoice-v3-plus' && (
                 <>
@@ -3992,9 +4043,9 @@ const AudiobookPage = () => {
                                     <em>跟随项目 ({getTtsModelLabel(ttsModel)})</em>
                                   </MenuItem>
                                   <Divider sx={{ my: 0.5 }} />
-                                  <MenuItem value="qwen3-tts-flash">
+                                  <MenuItem value="qwen3-tts-instruct-flash">
                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                      <span>Qwen3-TTS Flash</span>
+                                      <span>Qwen3-TTS Instruct Flash</span>
                                       <Chip label="低价" size="small" color="success" sx={{ height: 16, fontSize: '0.6rem' }} />
                                     </Box>
                                   </MenuItem>
@@ -4326,6 +4377,24 @@ const AudiobookPage = () => {
             )}
             
             <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
+              {audiobookProject && audiobookProject.chapter_audios && audiobookProject.chapter_audios.length > 0 && (
+                <Button
+                  variant="contained"
+                  startIcon={browserPlayerLoading ? <CircularProgress size={18} color="inherit" /> : <HeadphonesIcon />}
+                  onClick={handleOpenBrowserPlayer}
+                  disabled={browserPlayerLoading}
+                  sx={{
+                    background: 'linear-gradient(135deg, #3949ab 0%, #1e88e5 100%)',
+                    boxShadow: '0 6px 16px rgba(30, 136, 229, 0.28)',
+                    '&:hover': {
+                      background: 'linear-gradient(135deg, #303f9f 0%, #1976d2 100%)',
+                    },
+                  }}
+                >
+                  {browserPlayerLoading ? '加载播放器...' : '打开浏览器播放器'}
+                </Button>
+              )}
+
               {/* 下载按钮 - 支持分章节下载 */}
               {audiobookProject && audiobookProject.chapter_audios && audiobookProject.chapter_audios.length > 0 && (
                 <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', justifyContent: 'center', width: '100%', mb: 2 }}>
@@ -4747,6 +4816,14 @@ const AudiobookPage = () => {
             onViewHistory={handleViewHistory}
             onDeleteHistory={handleDeleteHistory}
           />
+
+      {browserPlayerData && (
+        <BrowserPlayer
+          projectData={browserPlayerData}
+          open={browserPlayerOpen}
+          onClose={handleCloseBrowserPlayer}
+        />
+      )}
 
       {/* 章节菜单 */}
       <Menu

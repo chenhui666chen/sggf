@@ -119,6 +119,15 @@ CONCEPT_SIMILARITY_PATTERN_GROUPS: Dict[str, list[str]] = {
     "高频终局真相": ["高维存在", "天外之眼", "监察者", "飞升骗局", "养蛊游戏", "轮回骗局", "历史被循环重置"],
 }
 
+RECENT_AVOIDANCE_GROUP_PRIORITY: Dict[str, int] = {
+    "已用世界名": 100,
+    "高频主角名": 90,
+    "高频终局真相": 80,
+    "高频金手指": 70,
+    "高频世界命名": 60,
+    "高频开局身份": 50,
+}
+
 
 def _safe_prompt_context_text(value: Any) -> str:
     if value is None:
@@ -214,6 +223,26 @@ def _clip_prompt_context(text_value: str, limit: int = 220) -> str:
     return f"{normalized[:limit]}..."
 
 
+def _prioritize_recent_avoidance_groups(
+    detected_groups: Dict[str, list[str]],
+    *,
+    max_groups: int = 3,
+) -> list[tuple[str, list[str]]]:
+    ranked_groups = sorted(
+        (
+            (group_name, items)
+            for group_name, items in detected_groups.items()
+            if items
+        ),
+        key=lambda item: (
+            -RECENT_AVOIDANCE_GROUP_PRIORITY.get(item[0], 0),
+            -len(item[1]),
+            item[0],
+        ),
+    )
+    return ranked_groups[:max_groups]
+
+
 def _build_recent_project_avoidance_context(
     db: Session,
     *,
@@ -256,7 +285,7 @@ def _build_recent_project_avoidance_context(
     signature_sections: list[str] = []
     combined_text_parts: list[str] = []
 
-    for idx, row in enumerate(selected_rows, start=1):
+    for idx, row in enumerate(selected_rows[:3], start=1):
         recent_title = row[1] or f"项目{row[0]}"
         recent_genre = row[2] or "未标注"
         concept_txt = _safe_prompt_context_text(row[3])
@@ -281,11 +310,11 @@ def _build_recent_project_avoidance_context(
             f"- 题材：{recent_genre}",
         ]
         if tag_candidates:
-            section_lines.append(f"- 核心标签：{'、'.join(tag_candidates[:4])}")
+            section_lines.append(f"- 核心标签：{'、'.join(tag_candidates[:3])}")
         if world_names:
-            section_lines.append(f"- 世界名：{'、'.join(world_names[:2])}")
+            section_lines.append(f"- 世界名：{'、'.join(world_names[:1])}")
         if pattern_hits:
-            section_lines.append(f"- 已出现元素：{'、'.join(pattern_hits[:3])}")
+            section_lines.append(f"- 已出现元素：{'、'.join(pattern_hits[:2])}")
 
         signature_sections.append("\n".join(section_lines))
 
@@ -309,14 +338,15 @@ def _build_recent_project_avoidance_context(
     recent_signatures = "【近期项目关键避重锚点（仅供避重，不可复写）】\n" + "\n".join(signature_sections)
     recent_avoidance = ""
     if detected_groups:
+        prioritized_groups = _prioritize_recent_avoidance_groups(detected_groups, max_groups=3)
         avoidance_lines = [
             f"- {group_name}：{'、'.join(items)}"
-            for group_name, items in detected_groups.items()
+            for group_name, items in prioritized_groups
             if items
         ]
         recent_avoidance = (
             "【近期项目避重清单】\n"
-            "- 以下元素在你最近生成的项目中已经出现，除非用户明确要求，否则默认禁止复用。\n"
+            "- 以下元素在你最近生成的项目中已经较高频出现，请优先回避直接复用；如确实需要使用，必须做出明显改写。\n"
             + "\n".join(avoidance_lines)
         )
 

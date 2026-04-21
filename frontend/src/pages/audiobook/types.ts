@@ -17,7 +17,7 @@ export type StageStatus = 'pending' | 'running' | 'completed' | 'failed'
 export type PreviewType = 'voice' | 'sfx' | 'bgm' | 'mix'
 
 export type TtsModel =
-  | 'qwen3-tts-flash'
+  | 'qwen3-tts-instruct-flash'
   | 'cosyvoice-v3-plus'
   | 'minimax-speech-2.8-hd'
   | 'minimax-speech-2.8-turbo'

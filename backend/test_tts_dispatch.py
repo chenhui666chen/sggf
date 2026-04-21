@@ -21,7 +21,7 @@ def test_model_registration():
     expected_models = [
         "MiniMax/speech-2.8-turbo",
         "MiniMax/speech-2.8-hd",
-        "qwen3-tts-flash",
+        "qwen3-tts-instruct-flash",
         "cosyvoice-v3-plus",
     ]
     

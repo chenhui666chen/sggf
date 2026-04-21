@@ -65,8 +65,12 @@ COSYVOICE_V3_PLUS_INSTRUCT_CHOICES = {
 _RETRYABLE_NETWORK_ERRNOS = {10053, 10054, 104, 110, 111}
 
 # Qwen3-TTS-Flash：stable 与 snapshot 支持的音色集合不同。
-# 默认指向 49 音色的快照版（与文档“qwen3-tts-flash-2025-11-27 音色列表”一致）。
-QWEN3_TTS_FLASH_MODEL_ID = os.getenv("QWEN3_TTS_FLASH_MODEL_ID", "qwen3-tts-flash-2025-11-27")
+# 默认优先走 qwen3-tts-instruct-flash，并兼容历史环境变量。
+QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID = (
+    os.getenv("QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID")
+    or os.getenv("QWEN3_TTS_FLASH_MODEL_ID")
+    or "qwen3-tts-instruct-flash"
+)
 
 # 导入监控模块
 try:

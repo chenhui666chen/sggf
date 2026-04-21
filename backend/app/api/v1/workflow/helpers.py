@@ -23,6 +23,10 @@ from app.utils.datetime_utils import parse_datetime_utc, utc_now
 from core.model_resolution import normalize_model_id
 from core.model_runtime import ensure_model_hub_initialized, resolve_model_for_task
 from app.services.prompts.stages.world_building import CharacterDesignPrompts, get_genre_character_fields
+from app.services.prompts.workflow_runtime import (
+    build_iteration_loop_review_user_prompt,
+    build_iteration_revision_user_prompt,
+)
 from app.services.auto_system_detector import auto_create_system_collections
 
 logger = logging.getLogger(__name__)
@@ -367,42 +371,18 @@ def _build_iteration_revision_prompt(
     chapter_number: int,
     chapter_content: str,
     review_text: str,
+    iteration_plan: str = "",
     recent_chapter_assets_summary: str = "",
     include_history_hint: bool = False,
 ) -> str:
-    review_section_title = "【必须执行的所有评审意见（包含历史轮次）】" if include_history_hint else "【评审意见】"
-    intro = (
-        f"【重要提示】请严格按照以下所有评审意见逐条修改第{chapter_number}章内容，不要遗漏或忽略任何一条建议。"
-        if include_history_hint
-        else f"请根据以下评审意见优化第{chapter_number}章："
+    return build_iteration_revision_user_prompt(
+        chapter_number=chapter_number,
+        chapter_content=chapter_content,
+        review_text=review_text,
+        iteration_plan=iteration_plan,
+        recent_chapter_assets_summary=recent_chapter_assets_summary,
+        include_history_hint=include_history_hint,
     )
-
-    continuity_block = (
-        recent_chapter_assets_summary
-        if recent_chapter_assets_summary
-        else "（最近章节没有可用的结构化连续性资产）"
-    )
-
-    return f"""{intro}
-
-【当前章节内容】
-{chapter_content}
-
-【最近章节连续性资产】（必须承接场景目标、冲突推进、人物状态、钩子与伏笔）
-{continuity_block}
-
-{review_section_title}
-{review_text}
-
-【修改要求】
-1. 必须逐条落实上述评审意见中的修改建议
-2. 优先延续最近章节连续性资产中的未完成冲突、人物状态变化、结尾钩子与伏笔
-3. 不得删改会影响后续章节衔接的关键细节
-4. 保持原章节的完整情节和篇幅（不少于原稿80%字数）
-5. 直接输出优化后的完整章节内容（第一行为章节标题）
-6. 不要附加任何修改说明、优化要点等额外内容
-
-请立即输出优化后的章节："""
 
 
 def _build_iteration_review_prompt(
@@ -412,23 +392,12 @@ def _build_iteration_review_prompt(
     chapter_plan: str,
     recent_chapter_assets_summary: str = "",
 ) -> str:
-    continuity_block = (
-        recent_chapter_assets_summary
-        if recent_chapter_assets_summary
-        else "（最近章节没有可用的结构化连续性资产）"
+    return build_iteration_loop_review_user_prompt(
+        chapter_number=chapter_number,
+        chapter_content=chapter_content,
+        chapter_plan=chapter_plan,
+        recent_chapter_assets_summary=recent_chapter_assets_summary,
     )
-
-    return f"""请评审以下第{chapter_number}章：
-
-【章节规划】
-{chapter_plan}
-
-【最近章节连续性资产】（重点检查是否承接场景目标、冲突推进、人物状态、钩子与伏笔）
-{continuity_block}
-
-【章节内容】
-{chapter_content}
-"""
 
 
 # 🆕 导入流式输出服务

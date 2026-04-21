@@ -162,7 +162,7 @@ class OptimizedAudioSyncManager:
                         "volume": 50,
                     },
                     emotion="neutral",
-                    model_id="qwen3-tts-flash",
+                    model_id="qwen3-tts-instruct-flash",
                 )
                 
                 if result.success and result.data:

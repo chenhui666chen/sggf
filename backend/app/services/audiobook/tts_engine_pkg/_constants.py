@@ -64,9 +64,12 @@ COSYVOICE_V3_PLUS_INSTRUCT_CHOICES = {
 # Windows/Linux 常见网络瞬断 errno（用于判定可重试）。
 _RETRYABLE_NETWORK_ERRNOS = {10053, 10054, 104, 110, 111}
 
-# Qwen3-TTS-Flash：stable 与 snapshot 支持的音色集合不同。
-# 默认指向 49 音色的快照版（与文档“qwen3-tts-flash-2025-11-27 音色列表”一致）。
-QWEN3_TTS_FLASH_MODEL_ID = os.getenv("QWEN3_TTS_FLASH_MODEL_ID", "qwen3-tts-flash-2025-11-27")
+# Qwen3-TTS Instruct Flash：优先读取新的 deployment 配置，并兼容历史环境变量。
+QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID = (
+    os.getenv("QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID")
+    or os.getenv("QWEN3_TTS_FLASH_MODEL_ID")
+    or "qwen3-tts-instruct-flash"
+)
 
 # 导入监控模块
 try:
@@ -90,8 +93,9 @@ class TTSProvider(str, Enum):
 
 # 前端显示用模型名 -> DashScope 实际模型 ID
 ALIYUN_MODEL_ALIASES: Dict[str, str] = {
-    # Qwen3-TTS Flash：应用侧保持使用 qwen3-tts-flash，提供商侧可切换到具体快照版本。
-    "qwen3-tts-flash": QWEN3_TTS_FLASH_MODEL_ID,
+    # 应用侧统一切到 qwen3-tts-instruct-flash，并兼容历史 qwen3-tts-flash 配置。
+    "qwen3-tts-instruct-flash": QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID,
+    "qwen3-tts-flash": QWEN3_TTS_INSTRUCT_FLASH_MODEL_ID,
     # 预留高阶版本；若未来官方启用真正的 qwen3-tts-plus，可在此更新
     "qwen3-tts-plus": "qwen3-tts-plus",
 }

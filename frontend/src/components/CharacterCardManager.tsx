@@ -44,6 +44,7 @@ import {
   buildCharacterRelationsPayload,
   parseCharacterRelations,
 } from '@/utils/characterRelations'
+import { apiClient, extractApiErrorMessage } from '@/services/api'
 
 interface CharacterCardManagerProps {
   projectId: number
@@ -111,15 +112,8 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
   const loadCharacters = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`/api/v1/projects/${projectId}/characters`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-      if (response.ok) {
-        const data = await response.json()
-        setCharacters(data)
-      }
+      const response = await apiClient.getCharacters(projectId)
+      setCharacters(response.data || [])
     } catch {
       // 加载角色列表失败
     } finally {
@@ -139,18 +133,8 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
       ]
 
       // 1. 获取项目所有设定集合
-      const collectionsRes = await fetch(`/api/v1/projects/${projectId}/setting-collections`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-
-      if (!collectionsRes.ok) {
-        setAvailableRealms([])
-        return
-      }
-
-      const collections = await collectionsRes.json()
+      const collectionsRes = await apiClient.getSettingCollections(projectId)
+      const collections = collectionsRes.data || []
 
       // 2. 筛选境界体系集合
       const realmCollections = collections.filter((c: any) =>
@@ -160,19 +144,13 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
       // 3. 获取所有境界项
       const realmItems: any[] = []
       for (const collection of realmCollections) {
-        const itemsRes = await fetch(`/api/v1/setting-collections/${collection.id}/items`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
+        const itemsRes = await apiClient.getSettingItems(collection.id)
+        const items = itemsRes.data || []
+        // 添加集合信息，便于显示分组
+        items.forEach((item: any) => {
+          item.collectionName = collection.name
         })
-        if (itemsRes.ok) {
-          const items = await itemsRes.json()
-          // 添加集合信息，便于显示分组
-          items.forEach((item: any) => {
-            item.collectionName = collection.name
-          })
-          realmItems.push(...items)
-        }
+        realmItems.push(...items)
       }
 
       setAvailableRealms(realmItems)
@@ -190,15 +168,8 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
   // 加载可用功法列表
   const loadAvailableTechniques = async () => {
     try {
-      const response = await fetch(`/api/v1/projects/${projectId}/techniques`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-      if (response.ok) {
-        const data = await response.json()
-        setAvailableTechniques(data)
-      }
+      const response = await apiClient.getProjectTechniques(projectId)
+      setAvailableTechniques(response.data || [])
     } catch {
       // 加载功法列表失败
     }
@@ -207,15 +178,8 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
   // 加载角色功法列表
   const loadCharacterTechniques = async (characterId: number) => {
     try {
-      const response = await fetch(`/api/v1/characters/${characterId}/techniques`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-      if (response.ok) {
-        const data = await response.json()
-        setCharacterTechniques(data)
-      }
+      const response = await apiClient.getCharacterTechniques(characterId)
+      setCharacterTechniques(response.data || [])
     } catch {
       // 加载角色功法失败
     }
@@ -225,15 +189,8 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
   const loadAutoTrackedData = async (characterId: number) => {
     setAutoTrackedLoading(true)
     try {
-      const response = await fetch(`/api/v1/characters/${characterId}/auto-tracked-relations`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-      if (response.ok) {
-        const data = await response.json()
-        setAutoTrackedData(data)
-      }
+      const response = await apiClient.getCharacterAutoTrackedRelations(characterId)
+      setAutoTrackedData(response.data)
     } catch {
       // 加载自动追踪数据失败
     } finally {
@@ -352,52 +309,30 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
       }
       
       let savedCharacter = dataToSave
-      const url = editingCharacter
-        ? `/api/v1/characters/${editingCharacter.id}`
-        : `/api/v1/projects/${projectId}/characters`
-      
-      const method = editingCharacter ? 'PUT' : 'POST'
-      
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(dataToSave),
-      })
-      
-      if (response.ok) {
-        savedCharacter = await response.json()
-        
-        // 保存功法列表（覆盖式）
-        if (savedCharacter.id) {
-          const techniquesPayload = {
-            techniques: characterTechniques.map((t: any) => ({
-              technique_item_id: t.technique_item_id,
-              proficiency: t.proficiency || null,
-              learned_at_chapter: t.learned_at_chapter ?? null,
-              notes: t.notes || null,
-            })),
-          }
-          await fetch(`/api/v1/characters/${savedCharacter.id}/techniques`, {
-            method: 'PUT',
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(techniquesPayload),
-          })
+
+      const response = editingCharacter
+        ? await apiClient.updateCharacter(editingCharacter.id, dataToSave)
+        : await apiClient.createCharacter(projectId, dataToSave)
+
+      savedCharacter = response.data
+
+      // 保存功法列表（覆盖式）
+      if (savedCharacter.id) {
+        const techniquesPayload = {
+          techniques: characterTechniques.map((t: any) => ({
+            technique_item_id: t.technique_item_id,
+            proficiency: t.proficiency || null,
+            learned_at_chapter: t.learned_at_chapter ?? null,
+            notes: t.notes || null,
+          })),
         }
-        
-        await loadCharacters()
-        handleCloseEditDialog()
-        onCharacterUpdate?.()
-        setSnackbar({ open: true, message: '保存成功', severity: 'success' })
-      } else {
-        const errorText = await response.text()
-        setSnackbar({ open: true, message: `保存失败: ${errorText}`, severity: 'error' })
+        await apiClient.updateCharacterTechniques(savedCharacter.id, techniquesPayload)
       }
+
+      await loadCharacters()
+      handleCloseEditDialog()
+      onCharacterUpdate?.()
+      setSnackbar({ open: true, message: '保存成功', severity: 'success' })
     } catch {
       setSnackbar({ open: true, message: '保存失败，请重试', severity: 'error' })
     } finally {
@@ -410,17 +345,9 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
     if (!confirm('确定要删除此角色吗？')) return
 
     try {
-      const response = await fetch(`/api/v1/characters/${characterId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-
-      if (response.ok) {
-        await loadCharacters()
-        onCharacterUpdate?.()
-      }
+      await apiClient.deleteCharacter(characterId)
+      await loadCharacters()
+      onCharacterUpdate?.()
     } catch {
       // 删除角色失败
     }
@@ -433,16 +360,8 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
     setTimelineData(null)
     
     try {
-      const response = await fetch(`/api/v1/characters/${character.id}/appearance-timeline`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-      
-      if (response.ok) {
-        const data = await response.json()
-        setTimelineData(data)
-      }
+      const response = await apiClient.getCharacterAppearanceTimeline(character.id)
+      setTimelineData(response.data)
     } catch {
       // 加载出场历程失败
     } finally {
@@ -457,16 +376,8 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
     setSyncPreview(null)
     
     try {
-      const response = await fetch(`/api/v1/projects/${projectId}/characters-text-preview`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-      
-      if (response.ok) {
-        const data = await response.json()
-        setSyncPreview(data)
-      }
+      const response = await apiClient.getCharactersTextPreview(projectId)
+      setSyncPreview(response.data)
     } catch {
       // 加载预览失败
     } finally {
@@ -479,23 +390,17 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
     setSyncing(true)
     
     try {
-      const response = await fetch(`/api/v1/projects/${projectId}/sync-characters-to-workflow`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
+      const response = await apiClient.syncCharactersToWorkflow(projectId)
+      const data = response.data
+      setSnackbar({ open: true, message: `✅ ${data.message}`, severity: 'success' })
+      setSyncDialogOpen(false)
+      onCharacterUpdate?.()
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: await extractApiErrorMessage(error, '同步失败，请重试'),
+        severity: 'error',
       })
-      
-      if (response.ok) {
-        const data = await response.json()
-        setSnackbar({ open: true, message: `✅ ${data.message}`, severity: 'success' })
-        setSyncDialogOpen(false)
-        onCharacterUpdate?.()
-      } else {
-        setSnackbar({ open: true, message: '同步失败，请重试', severity: 'error' })
-      }
-    } catch {
-      setSnackbar({ open: true, message: '同步失败，请重试', severity: 'error' })
     } finally {
       setSyncing(false)
     }
@@ -507,138 +412,131 @@ export default function CharacterCardManager({ projectId, onCharacterUpdate }: C
     setGraphLoading(true)
     
     try {
-      const response = await fetch(`/api/v1/projects/${projectId}/character-relationship-graph`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
+      const response = await apiClient.getCharacterRelationshipGraph(projectId)
+      const data = response.data
+        
+      // 转换为 React Flow 格式
+      // 🔧 优化：使用多层级布局算法防止节点重叠
+      
+      // 1. 构建BFS邻接表
+      const adjacency = new Map<string, Set<string>>()
+      data.nodes.forEach((node: any) => adjacency.set(node.id, new Set()))
+      data.edges.forEach((edge: any) => {
+        adjacency.get(edge.source)?.add(edge.target)
+        adjacency.get(edge.target)?.add(edge.source)
       })
       
-      if (response.ok) {
-        const data = await response.json()
+      // 2. BFS计算每个节点的层级（以度最高的节点为中心）
+      const centerNode = data.nodes.reduce((max: any, node: any) => {
+        const degree = (adjacency.get(node.id)?.size || 0)
+        return degree > (adjacency.get(max?.id)?.size || 0) ? node : max
+      }, data.nodes[0])
+      
+      const nodeLevels = new Map<string, number>()
+      nodeLevels.set(centerNode.id, 0)
+      
+      const queue = [centerNode.id]
+      const visited = new Set([centerNode.id])
+      
+      while (queue.length > 0) {
+        const current = queue.shift()!
+        const currentLevel = nodeLevels.get(current)!
         
-        // 转换为 React Flow 格式
-        // 🔧 优化：使用多层级布局算法防止节点重叠
-        
-        // 1. 构建BFS邻接表
-        const adjacency = new Map<string, Set<string>>()
-        data.nodes.forEach((node: any) => adjacency.set(node.id, new Set()))
-        data.edges.forEach((edge: any) => {
-          adjacency.get(edge.source)?.add(edge.target)
-          adjacency.get(edge.target)?.add(edge.source)
+        adjacency.get(current)?.forEach(neighbor => {
+          if (!visited.has(neighbor)) {
+            visited.add(neighbor)
+            nodeLevels.set(neighbor, currentLevel + 1)
+            queue.push(neighbor)
+          }
         })
+      }
+      
+      // 3. 按层级分组
+      const nodesByLevel = new Map<number, any[]>()
+      data.nodes.forEach((node: any) => {
+        const level = nodeLevels.get(node.id) ?? 3
+        if (!nodesByLevel.has(level)) nodesByLevel.set(level, [])
+        nodesByLevel.get(level)!.push(node)
+      })
+      
+      // 4. 布局参数
+      const centerX = 400
+      const centerY = 300
+      const baseRadius = 220
+      const radiusIncrement = 250
+      const minNodeSpacing = 180
+      
+      // 5. 计算节点位置
+      const flowNodes: Node[] = data.nodes.map((node: any) => {
+        const isCenter = node.id === centerNode.id
+        const level = nodeLevels.get(node.id) ?? 3
         
-        // 2. BFS计算每个节点的层级（以度最高的节点为中心）
-        const centerNode = data.nodes.reduce((max: any, node: any) => {
-          const degree = (adjacency.get(node.id)?.size || 0)
-          return degree > (adjacency.get(max?.id)?.size || 0) ? node : max
-        }, data.nodes[0])
+        let x = centerX
+        let y = centerY
         
-        const nodeLevels = new Map<string, number>()
-        nodeLevels.set(centerNode.id, 0)
-        
-        const queue = [centerNode.id]
-        const visited = new Set([centerNode.id])
-        
-        while (queue.length > 0) {
-          const current = queue.shift()!
-          const currentLevel = nodeLevels.get(current)!
+        if (!isCenter) {
+          const levelNodes = nodesByLevel.get(level) || []
+          const nodeIndex = levelNodes.findIndex((n: any) => n.id === node.id)
+          const nodesInLevel = levelNodes.length
           
-          adjacency.get(current)?.forEach(neighbor => {
-            if (!visited.has(neighbor)) {
-              visited.add(neighbor)
-              nodeLevels.set(neighbor, currentLevel + 1)
-              queue.push(neighbor)
-            }
-          })
+          const requiredCircumference = nodesInLevel * minNodeSpacing
+          const minRequiredRadius = requiredCircumference / (2 * Math.PI)
+          const radius = Math.max(baseRadius + (level - 1) * radiusIncrement, minRequiredRadius)
+          
+          const angleOffset = (level % 2) * (Math.PI / Math.max(nodesInLevel, 1))
+          const angle = (nodeIndex * 2 * Math.PI) / nodesInLevel + angleOffset
+          
+          x = centerX + radius * Math.cos(angle)
+          y = centerY + radius * Math.sin(angle)
         }
         
-        // 3. 按层级分组
-        const nodesByLevel = new Map<number, any[]>()
-        data.nodes.forEach((node: any) => {
-          const level = nodeLevels.get(node.id) ?? 3
-          if (!nodesByLevel.has(level)) nodesByLevel.set(level, [])
-          nodesByLevel.get(level)!.push(node)
-        })
-        
-        // 4. 布局参数
-        const centerX = 400
-        const centerY = 300
-        const baseRadius = 220
-        const radiusIncrement = 250
-        const minNodeSpacing = 180
-        
-        // 5. 计算节点位置
-        const flowNodes: Node[] = data.nodes.map((node: any) => {
-          const isCenter = node.id === centerNode.id
-          const level = nodeLevels.get(node.id) ?? 3
-          
-          let x = centerX
-          let y = centerY
-          
-          if (!isCenter) {
-            const levelNodes = nodesByLevel.get(level) || []
-            const nodeIndex = levelNodes.findIndex((n: any) => n.id === node.id)
-            const nodesInLevel = levelNodes.length
-            
-            const requiredCircumference = nodesInLevel * minNodeSpacing
-            const minRequiredRadius = requiredCircumference / (2 * Math.PI)
-            const radius = Math.max(baseRadius + (level - 1) * radiusIncrement, minRequiredRadius)
-            
-            const angleOffset = (level % 2) * (Math.PI / Math.max(nodesInLevel, 1))
-            const angle = (nodeIndex * 2 * Math.PI) / nodesInLevel + angleOffset
-            
-            x = centerX + radius * Math.cos(angle)
-            y = centerY + radius * Math.sin(angle)
-          }
-          
-          return {
-            id: node.id,
-            position: { x, y },
-            data: {
-              label: (
-                <Box sx={{ textAlign: 'center', p: 0.5, cursor: 'pointer' }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                    {node.name}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {node.importance}
-                  </Typography>
-                  <Typography variant="caption" sx={{ display: 'block', color: 'primary.main', fontSize: 10 }}>
-                    ↗ 点击过滤关系
-                  </Typography>
-                </Box>
-              ),
-              characterId: node.character_id,  // 🆕 储存人物ID
-              characterName: node.name,
-            },
-            style: {
-              background: node.color || '#fff',
-              border: `2px solid ${node.borderColor || '#333'}`,
-              borderRadius: 8,
-              padding: 8,
-              minWidth: 80,
-              cursor: 'pointer',
-            },
-          }
-        })
-        
-        const flowEdges: Edge[] = data.edges.map((edge: any) => ({
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
-          label: edge.label,
-          type: 'smoothstep',
-          animated: false,
-          style: { stroke: '#888' },
-          labelStyle: { fontSize: 10, fill: '#666' },
-        }))
-        
-        setNodes(flowNodes)
-        setAllEdges(flowEdges)  // 🆕 存储全部边
-        setEdges(flowEdges)
-        setSelectedNodeId(null)  // 🆕 重置选中状态
-        setGraphStats(data.stats)
-      }
+        return {
+          id: node.id,
+          position: { x, y },
+          data: {
+            label: (
+              <Box sx={{ textAlign: 'center', p: 0.5, cursor: 'pointer' }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                  {node.name}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {node.importance}
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block', color: 'primary.main', fontSize: 10 }}>
+                  ↗ 点击过滤关系
+                </Typography>
+              </Box>
+            ),
+            characterId: node.character_id,  // 🆕 储存人物ID
+            characterName: node.name,
+          },
+          style: {
+            background: node.color || '#fff',
+            border: `2px solid ${node.borderColor || '#333'}`,
+            borderRadius: 8,
+            padding: 8,
+            minWidth: 80,
+            cursor: 'pointer',
+          },
+        }
+      })
+      
+      const flowEdges: Edge[] = data.edges.map((edge: any) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        label: edge.label,
+        type: 'smoothstep',
+        animated: false,
+        style: { stroke: '#888' },
+        labelStyle: { fontSize: 10, fill: '#666' },
+      }))
+      
+      setNodes(flowNodes)
+      setAllEdges(flowEdges)  // 🆕 存储全部边
+      setEdges(flowEdges)
+      setSelectedNodeId(null)  // 🆕 重置选中状态
+      setGraphStats(data.stats)
     } catch {
       // 加载关系图失败
     } finally {

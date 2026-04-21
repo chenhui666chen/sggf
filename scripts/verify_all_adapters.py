@@ -19,7 +19,7 @@ TEST_CASES = [
     {"id": "MiniMax/speech-2.8-turbo", "type": "tts", "prompt": "你好，这是MiniMax语音测试。"},
     {"id": "MiniMax/speech-2.8-hd", "type": "tts", "prompt": "你好，这是MiniMax高清语音测试。"},
     {"id": "cosyvoice-v3-plus", "type": "tts", "prompt": "你好，这是CosyVoice测试。"},
-    {"id": "qwen3-tts-flash", "type": "tts", "prompt": "你好，这是Qwen3 TTS测试。"},
+    {"id": "qwen3-tts-instruct-flash", "type": "tts", "prompt": "你好，这是Qwen3 TTS测试。"},
     # 图像模型（百炼平台）
     {"id": "doubao-seedream-4-5", "type": "image", "prompt": "a flower garden"},
     {"id": "doubao-seedream-5-0", "type": "image", "prompt": "a flower garden"},

@@ -205,6 +205,22 @@ class BaseAgent(ABC):
     
     def process(self, user_input: str, context: Optional[Dict[str, Any]] = None,
                 temperature: Optional[float] = None) -> str:
+        """使用Agent默认系统提示词处理输入。"""
+        return self._process_with_system_prompt(
+            user_input,
+            system_prompt=self.get_system_prompt(),
+            context=context,
+            temperature=temperature,
+        )
+
+    def _process_with_system_prompt(
+        self,
+        user_input: str,
+        *,
+        system_prompt: str,
+        context: Optional[Dict[str, Any]] = None,
+        temperature: Optional[float] = None,
+    ) -> str:
         """处理输入并生成响应
 
         Args:
@@ -218,7 +234,7 @@ class BaseAgent(ABC):
         self.memory_manager.add_user_message(user_input)
 
         # 🔥 合并 system_prompt 和 context 为单个 SystemMessage,避免阿里云 API 报错
-        system_prompt = self.get_system_prompt()
+        system_prompt = system_prompt or self.get_system_prompt()
         if context:
             context_str = self._format_context(context)
             system_prompt = f"{system_prompt}\n\n{context_str}"
@@ -430,6 +446,22 @@ class ContentCreatorAgent(BaseAgent):
         from app.services.prompts.manager import prompt_manager
         return prompt_manager.get_agent_prompt("content_creator")
 
+    def create_chapter_from_prompts(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        context: Optional[Dict[str, Any]] = None,
+        temperature: Optional[float] = None,
+    ) -> str:
+        """使用显式双 Prompt 生成章节内容。"""
+        return self._process_with_system_prompt(
+            user_prompt,
+            system_prompt=system_prompt,
+            context=context,
+            temperature=temperature,
+        )
+
     def create_chapter(self, chapter_info: Dict[str, Any]) -> Dict[str, Any]:
         """创建新章节 - 使用上下文感知优化"""
 
@@ -626,8 +658,89 @@ class QualityReviewerAgent(BaseAgent):
         return summary
 
 
+class ContentReviserAgent(BaseAgent):
+    """内容修订师Agent - 根据评审反馈修订章节内容"""
+
+    def __init__(self, knowledge_base: Optional[NovelKnowledgeBase] = None,
+                 memory_manager: Optional[NovelMemoryManager] = None):
+        super().__init__("内容修订师", "content_reviser", knowledge_base, memory_manager, task_type="chapter")
+
+    def get_system_prompt(self) -> str:
+        from app.services.prompts.manager import prompt_manager
+        return prompt_manager.get_agent_prompt("content_reviser")
+
+    def revise_content(
+        self,
+        original_content: str,
+        review_feedback: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """根据评审意见修订内容。"""
+        from app.services.prompts.workflow_runtime import (
+            build_iteration_revision_user_prompt,
+            get_iteration_revision_system_prompt,
+        )
+
+        runtime_context = context or {}
+        revision_prompt = build_iteration_revision_user_prompt(
+            chapter_number=int(runtime_context.get("chapter_number") or 1),
+            chapter_content=original_content,
+            review_text=review_feedback,
+            iteration_plan=runtime_context.get("iteration_plan", ""),
+            recent_chapter_assets_summary=runtime_context.get("recent_chapter_assets_summary", ""),
+            include_history_hint=bool(runtime_context.get("include_history_hint", False)),
+        )
+        return self._process_with_system_prompt(
+            revision_prompt,
+            system_prompt=get_iteration_revision_system_prompt(),
+            context=context,
+        )
+
+
+class FinalReviewerAgent(BaseAgent):
+    """最终审核官Agent - 对修订后的章节进行最终审核"""
+
+    def __init__(self, knowledge_base: Optional[NovelKnowledgeBase] = None,
+                 memory_manager: Optional[NovelMemoryManager] = None):
+        super().__init__("最终审核官", "final_reviewer", knowledge_base, memory_manager, task_type="review")
+
+    def get_system_prompt(self) -> str:
+        from app.services.prompts.manager import prompt_manager
+        return prompt_manager.get_agent_prompt("final_reviewer")
+
+    def review_final_content(
+        self,
+        content: str,
+        chapter_number: int = 1,
+        chapter_plan: str = "",
+        recent_chapter_assets_summary: str = "",
+        context: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """对修订后的内容执行最终审核。"""
+        from app.services.prompts.workflow_runtime import (
+            build_iteration_loop_review_user_prompt,
+            get_iteration_loop_review_system_prompt,
+        )
+
+        runtime_context = context or {}
+        review_prompt = build_iteration_loop_review_user_prompt(
+            chapter_number=int(runtime_context.get("chapter_number") or chapter_number or 1),
+            chapter_content=content,
+            chapter_plan=runtime_context.get("chapter_plan", chapter_plan),
+            recent_chapter_assets_summary=runtime_context.get(
+                "recent_chapter_assets_summary",
+                recent_chapter_assets_summary,
+            ),
+        )
+        return self._process_with_system_prompt(
+            review_prompt,
+            system_prompt=get_iteration_loop_review_system_prompt(),
+            context=context,
+        )
+
+
 # ============================================================================
-# 新增的 Agent 实现（3个缺失的Agent）
+# 新增的辅助 Agent 实现
 # ============================================================================
 
 class EventValidatorAgent(BaseAgent):
@@ -695,12 +808,25 @@ class IterationCoordinatorAgent(BaseAgent):
 
     def coordinate_iteration(self, feedback: str, content: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """协调迭代优化"""
-        from app.services.prompts.manager import prompt_manager
-        coordination_prompt = prompt_manager.get_user_prompt(
-            "iteration_coordinator_coordinate", variables={"feedback": feedback, "content": content}
+        from app.services.prompts.workflow_runtime import (
+            build_iteration_coordination_user_prompt,
+            get_iteration_coordination_system_prompt,
         )
 
-        result = self.process(coordination_prompt, context)
+        runtime_context = context or {}
+        coordination_prompt = build_iteration_coordination_user_prompt(
+            chapter_number=int(runtime_context.get("chapter_number") or 1),
+            chapter_content=content,
+            review_text=feedback,
+            recent_chapter_assets_summary=runtime_context.get("recent_chapter_assets_summary", ""),
+            include_history_hint=bool(runtime_context.get("include_history_hint", False)),
+        )
+
+        result = self._process_with_system_prompt(
+            coordination_prompt,
+            system_prompt=get_iteration_coordination_system_prompt(),
+            context=context,
+        )
 
         return {
             "iteration_plan": result,

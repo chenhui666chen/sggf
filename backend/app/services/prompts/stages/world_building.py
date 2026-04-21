@@ -13,6 +13,11 @@ from app.services.prompts.genre_registry import (
     get_genre_character_fields as _get_genre_character_fields,
     resolve_genre,
 )
+from app.services.prompts.manager import prompt_manager
+
+
+def _join_prompt_sections(*sections: str) -> str:
+    return "\n\n".join(section.strip() for section in sections if section and section.strip())
 
 
 @dataclass
@@ -25,12 +30,17 @@ class WorldBuildingPrompts:
     def get_system_prompt(genre: str = "") -> str:
         """获取世界观构建的 system prompt"""
         genre_hint = f"，专注于{genre}题材" if genre else ""
-        return f"""你是一名专业的"世界观架构师"{genre_hint}。
-你擅长构建完整、自洽、有层次感的虚构世界，能够：
-- 设计有延展性的世界观体系
-- 为故事冲突提供充足的舞台
-- 确保设定服务于情节发展
-- 标注势力薄弱点供主角撬动"""
+        base_prompt = prompt_manager.get_agent_prompt("world_architect").strip()
+        return _join_prompt_sections(
+            base_prompt,
+            f"""你当前处于世界观构建阶段{genre_hint}，请把注意力放在“能直接支撑当前长篇网文主线”的设定上，而不是罗列百科全书式资料。
+
+阶段要求：
+- 优先写会影响卷一冲突、人物选择、升级成本和势力博弈的规则。
+- 任何体系都必须给出限制、代价、漏洞或势力薄弱点，避免万能设定。
+- 世界观既要能服务当前阶段，也要为后续地图扩张、势力升级、规则反转预留空间。
+- 只做世界观构建，不要替后续人物卡、大纲和章节正文代写内容。""",
+        )
 
     @staticmethod
     def get_world_prompt(
@@ -109,21 +119,17 @@ class CharacterDesignPrompts:
     def get_system_prompt(genre: str = "") -> str:
         """获取人物设计的 system prompt"""
         genre_hint = f"，专注于{genre}题材" if genre else ""
-        return f"""你是一名专业的"人物设计师"{genre_hint}。
-你擅长创造立体、鲜活、有成长空间的人物形象，能够：
-- 设计多层次的性格特点
-- 构建合理的人物关系网络
-- 规划清晰的成长弧线
-- 确保人物服务于情节发展
+        base_prompt = prompt_manager.get_agent_prompt("character_designer").strip()
+        return _join_prompt_sections(
+            base_prompt,
+            f"""你当前处于人物设计阶段{genre_hint}，目标是产出可直接被大纲扩展、章节生成和连续性维护复用的人物卡，而不是漂亮但不可调用的策划散文。
 
-输出时必须优先保证“标准人物卡”可解析：
-- 每个角色都必须以 `### 【姓名】：` 开头
-- 【故事立场】只能从“主角方 / 反派方 / 中立方 / 亦正亦邪”四选一
-- 【角色定位】必须是单一标签，不要写成“系统/辅助”“导师/情报角色”这类复合值
-- 【关键关系】必须写成“角色名：关系性质/当前张力”
-- 【关键关系】只保留当前阶段最关键的 3-5 条，不要把已解决、已退场、仅历史背景关系不断累加进去
-- 【主线绑定】只保留当前仍在驱动剧情的职责与线索，避免写成阶段总账
-- 不要输出“核心主角/核心盟友/核心反派/人物关系网/mermaid/总结”这类旧式策划结构"""
+阶段要求：
+- 人物卡优先服务主线矛盾、卷一冲突和后续成长路线，不写脱离主线的装饰性设定。
+- 每个人物都要写清楚可触发剧情的动机、限制、关系张力和主线职责。
+- 只输出标准人物卡正文，不输出关系总表、阶段总结、分组标题或 mermaid 图。
+- 如果运行时给出统一字段和格式，必须严格遵守，确保后续程序可解析。""",
+        )
 
     @staticmethod
     def get_character_prompt(

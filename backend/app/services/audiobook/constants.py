@@ -1,9 +1,67 @@
 """Shared constants for audiobook services."""
 
-# Qwen3-TTS currently doesn't expose dedicated "instruction" voices, so this set
-# remains empty. If future models reintroduce instruction-capable timbres,
-# populate this list with their speaker IDs to re-enable the special handling.
+# Qwen3-TTS Instruct Flash relies on model-level instructions rather than a
+# dedicated instruct speaker list, so this remains empty for now.
 INSTRUCT_SPEAKER_IDS: set[str] = set()
+
+QWEN3_TTS_INSTRUCT_SUPPORTED_VOICES = frozenset(
+    {
+        "Arthur",
+        "Bella",
+        "Bellona",
+        "Bunny",
+        "Chelsie",
+        "Cherry",
+        "Eldric Sage",
+        "Elias",
+        "Ethan",
+        "Kai",
+        "Maia",
+        "Mia",
+        "Mochi",
+        "Momo",
+        "Moon",
+        "Neil",
+        "Nini",
+        "Nofish",
+        "Pip",
+        "Seren",
+        "Serena",
+        "Stella",
+        "Vincent",
+        "Vivian",
+    }
+)
+
+# Flash-only Qwen voices are remapped to the closest instruct-flash voice so
+# old projects and cached selections keep working after the model upgrade.
+QWEN_FLASH_ONLY_TO_INSTRUCT = {
+    "Aiden": "Ethan",
+    "Alek": "Elias",
+    "Andre": "Neil",
+    "Bodega": "Ethan",
+    "Dolce": "Vincent",
+    "Dylan": "Ethan",
+    "Ebona": "Bellona",
+    "Emilien": "Ethan",
+    "Eric": "Nofish",
+    "Jada": "Mia",
+    "Jennifer": "Bellona",
+    "Katerina": "Vivian",
+    "Kiki": "Nini",
+    "Lenn": "Elias",
+    "Li": "Vincent",
+    "Marcus": "Vincent",
+    "Ono Anna": "Nini",
+    "Peter": "Vincent",
+    "Radio Gol": "Ethan",
+    "Rocky": "Kai",
+    "Roy": "Vincent",
+    "Ryan": "Neil",
+    "Sohee": "Serena",
+    "Sonrisa": "Stella",
+    "Sunny": "Mia",
+}
 
 # Legacy CosyVoice speaker IDs -> Qwen3-TTS voices.
 # Ensures old project configs continue working after the engine switch.
@@ -40,6 +98,10 @@ COSYVOICE_TO_QWEN = {
 
 
 def normalize_speaker_id(speaker_id: str) -> str:
-    """Map legacy CosyVoice IDs to the new Qwen3-TTS speakers if needed."""
+    """Map legacy CosyVoice and Flash-only Qwen voices to instruct-flash."""
     speaker_id = str(speaker_id).strip()
-    return COSYVOICE_TO_QWEN.get(speaker_id, speaker_id)
+    if not speaker_id:
+        return ""
+
+    normalized = COSYVOICE_TO_QWEN.get(speaker_id, speaker_id)
+    return QWEN_FLASH_ONLY_TO_INSTRUCT.get(normalized, normalized)

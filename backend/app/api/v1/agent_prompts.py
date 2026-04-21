@@ -13,8 +13,6 @@ from app.core.security import get_current_user
 from app.models.user import User
 from app.services.prompts.manager import (
     prompt_manager,
-    get_prompt_manager,
-    PromptManager,
 )
 
 logger = logging.getLogger(__name__)
@@ -154,7 +152,7 @@ async def reset_user_prompt(
     if not restored:
         raise HTTPException(status_code=404, detail=f"User prompt 默认模板未找到: {prompt_key}")
 
-    success = prompt_manager.update_user_prompt(prompt_key, restored)
+    success = prompt_manager.reset_user_prompt(prompt_key)
     if not success:
         raise HTTPException(status_code=500, detail="User prompt 重置失败")
 
@@ -199,7 +197,7 @@ async def reset_agent_prompt(
     if not restored_prompt:
         raise HTTPException(status_code=404, detail=f"Agent 默认提示词未找到: {agent_key}")
 
-    success = prompt_manager.update_agent_prompt(agent_key, restored_prompt)
+    success = prompt_manager.reset_agent_prompt(agent_key)
     if not success:
         raise HTTPException(status_code=500, detail="提示词重置失败")
 

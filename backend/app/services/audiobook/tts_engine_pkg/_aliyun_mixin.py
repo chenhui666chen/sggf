@@ -1,7 +1,7 @@
 """阿里云 TTS Mixin - 支持 Qwen 和 MiniMax 模型"""
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,15 @@ class AliyunMixin:
                 raw_speaker_id=raw_speaker_id,
             )
 
+        if self._is_cosyvoice_v3_plus():
+            return await self._synthesize_cosyvoice_v3_plus(
+                text=text,
+                voice_params=voice_params,
+                provider_model=provider_model,
+                api_key=api_key,
+                raw_speaker_id=raw_speaker_id,
+            )
+
         logger.error(f"不支持的模型: {self.model}")
         return None
 
@@ -60,10 +69,12 @@ class AliyunMixin:
             return ""
 
         if self._is_qwen_model():
+            from app.services.audiobook.constants import normalize_speaker_id
             from app.services.audiobook.voice_manager import VoiceManager
 
             preset = VoiceManager.PRESET_VOICES.get(raw_speaker_id)
-            return preset["tts_speaker_id"] if preset else raw_speaker_id
+            resolved_speaker = preset["tts_speaker_id"] if preset else raw_speaker_id
+            return normalize_speaker_id(resolved_speaker)
 
         if self._is_minimax_model():
             return raw_speaker_id
@@ -119,19 +130,300 @@ class AliyunMixin:
         preset = VoiceManager.PRESET_VOICES.get(raw_speaker_id)
         voice_id = preset["tts_speaker_id"] if preset else raw_speaker_id
 
-        voice_params["speaker"] = voice_id
+        voice_params["speaker"] = speaker_id
         logger.info(
             "调用阿里云 Qwen-TTS: model=%s, voice=%s",
             provider_model,
-            voice_id,
+            speaker_id,
         )
         return await self._call_dashscope_qwen_http(
             model=provider_model,
             api_key=api_key,
             text=text,
-            voice_id=voice_id,
+            voice_id=speaker_id,
             voice_params=voice_params,
         )
+
+    def _is_qwen_instruct_model(self, model: Optional[str] = None) -> bool:
+        """判断是否为 Qwen3-TTS Instruct Flash 模型。"""
+        return str(model or self.model).strip().lower() == "qwen3-tts-instruct-flash"
+
+    def _build_qwen_language_type(self, voice_params: Dict[str, Any]) -> str:
+        """Qwen TTS 默认使用 Auto，以保留多语种能力。"""
+        language_type = str(voice_params.get("language_type") or "").strip()
+        return language_type or "Auto"
+
+    def _build_qwen_instruction_payload(self, voice_params: Dict[str, Any]) -> Dict[str, Any]:
+        """根据结构化字段构建 Qwen Instruct 参数。"""
+        if not self._is_qwen_instruct_model():
+            return {}
+
+        explicit_instructions = str(voice_params.get("instructions") or "").strip()
+        if explicit_instructions:
+            return {
+                "instructions": explicit_instructions,
+                "optimize_instructions": bool(voice_params.get("optimize_instructions", True)),
+            }
+
+        parts: List[str] = []
+        segment_speaker = str(voice_params.get("segment_speaker") or "").strip()
+        segment_type = str(voice_params.get("segment_type") or "").strip()
+        instruct_role = str(voice_params.get("instruct_role") or "").strip()
+        instruct_identity = str(voice_params.get("instruct_identity") or "").strip()
+        instruct_scene = str(voice_params.get("instruct_scene") or "").strip()
+        instruct_emotion = str(voice_params.get("instruct_emotion") or "").strip()
+        performance_notes = str(voice_params.get("performance_notes") or "").strip()
+        fallback_emotion = str(voice_params.get("emotion") or "").strip()
+
+        if segment_speaker and segment_speaker != "旁白":
+            parts.append(f"说话角色：{segment_speaker}")
+        if segment_type:
+            parts.append(f"片段类型：{segment_type}")
+        if instruct_role:
+            parts.append(f"角色设定：{instruct_role}")
+        if instruct_identity:
+            parts.append(f"身份设定：{instruct_identity}")
+        if instruct_scene:
+            parts.append(f"场景氛围：{instruct_scene}")
+        if instruct_emotion:
+            parts.append(f"情绪目标：{instruct_emotion}")
+        elif fallback_emotion and fallback_emotion != "neutral":
+            parts.append(f"情绪目标：{fallback_emotion}")
+        if performance_notes:
+            parts.append(f"演绎要求：{performance_notes}")
+
+        instructions = "；".join(parts).strip("；")
+        if not instructions and not voice_params.get("use_instruct_mode"):
+            return {}
+
+        payload: Dict[str, Any] = {}
+        if instructions:
+            payload["instructions"] = instructions
+            payload["optimize_instructions"] = bool(voice_params.get("optimize_instructions", True))
+        return payload
+
+    async def _synthesize_cosyvoice_v3_plus(
+        self,
+        text: str,
+        voice_params: Dict[str, Any],
+        provider_model: str,
+        api_key: str,
+        raw_speaker_id: str,
+    ) -> Optional[bytes]:
+        """CosyVoice v3 Plus 合成，走 DashScope WebSocket。"""
+        speaker_id = self._normalize_speaker_id(raw_speaker_id, provider_model)
+        voice_params["speaker"] = speaker_id
+
+        logger.info(
+            "调用百炼 CosyVoice WebSocket TTS: model=%s, voice=%s",
+            provider_model,
+            speaker_id,
+        )
+        return await self._call_dashscope_cosyvoice_websocket(
+            model=provider_model,
+            api_key=api_key,
+            text=text,
+            voice=speaker_id,
+            voice_params=voice_params,
+        )
+
+    def _build_cosyvoice_websocket_parameters(
+        self,
+        text: str,
+        voice: str,
+        voice_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """构建 DashScope CosyVoice WebSocket 参数。"""
+
+        def _to_float(value: Any, default: float) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        def _to_int(value: Any, default: int) -> int:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+
+        rate = _to_float(voice_params.get("rate", voice_params.get("speed", 1.0)), 1.0)
+        rate = max(0.5, min(2.0, rate))
+
+        pitch = _to_float(voice_params.get("pitch", 1.0), 1.0)
+        if pitch > 10:
+            pitch = pitch / 50.0
+        pitch = max(0.5, min(2.0, pitch))
+
+        volume = _to_int(voice_params.get("volume", 50), 50)
+        volume = max(0, min(100, volume))
+
+        sample_rate = _to_int(voice_params.get("sample_rate", 22050), 22050)
+        if sample_rate not in {8000, 16000, 22050, 24000, 32000, 44100, 48000}:
+            sample_rate = 22050
+
+        audio_format = str(voice_params.get("format", "mp3") or "mp3").strip().lower()
+        if audio_format not in {"mp3", "wav", "pcm"}:
+            audio_format = "mp3"
+
+        return {
+            "text_type": "PlainText",
+            "voice": voice,
+            "format": audio_format,
+            "sample_rate": sample_rate,
+            "volume": volume,
+            "rate": rate,
+            "pitch": pitch,
+            "enable_ssml": self._is_ssml_text(text),
+        }
+
+    async def _call_dashscope_cosyvoice_websocket(
+        self,
+        model: str,
+        api_key: str,
+        text: str,
+        voice: str,
+        voice_params: Dict[str, Any],
+    ) -> bytes:
+        """异步包装 CosyVoice WebSocket 调用。"""
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self._run_dashscope_cosyvoice_websocket(
+                model=model,
+                api_key=api_key,
+                text=text,
+                voice=voice,
+                voice_params=voice_params,
+            ),
+        )
+
+    def _run_dashscope_cosyvoice_websocket(
+        self,
+        model: str,
+        api_key: str,
+        text: str,
+        voice: str,
+        voice_params: Dict[str, Any],
+    ) -> bytes:
+        """阻塞执行 CosyVoice WebSocket 请求。"""
+        import json
+        import uuid
+
+        import websocket
+
+        task_id = str(uuid.uuid4())
+        parameters = self._build_cosyvoice_websocket_parameters(text, voice, voice_params)
+        audio_chunks = []
+        state: Dict[str, Any] = {"error": None, "error_code": None}
+
+        def on_open(ws) -> None:
+            run_task_cmd = {
+                "header": {
+                    "action": "run-task",
+                    "task_id": task_id,
+                    "streaming": "duplex",
+                },
+                "payload": {
+                    "task_group": "audio",
+                    "task": "tts",
+                    "function": "SpeechSynthesizer",
+                    "model": model,
+                    "parameters": parameters,
+                    "input": {},
+                },
+            }
+            ws.send(json.dumps(run_task_cmd))
+
+        def on_message(ws, message) -> None:
+            if isinstance(message, (bytes, bytearray)):
+                audio_chunks.append(bytes(message))
+                return
+
+            try:
+                payload = json.loads(message)
+            except json.JSONDecodeError:
+                logger.warning("CosyVoice WebSocket 返回了非 JSON 消息: %s", message)
+                return
+
+            header = payload.get("header") or {}
+            event = header.get("event")
+
+            if event == "task-started":
+                continue_task_cmd = {
+                    "header": {
+                        "action": "continue-task",
+                        "task_id": task_id,
+                        "streaming": "duplex",
+                    },
+                    "payload": {"input": {"text": text}},
+                }
+                finish_task_cmd = {
+                    "header": {
+                        "action": "finish-task",
+                        "task_id": task_id,
+                        "streaming": "duplex",
+                    },
+                    "payload": {"input": {}},
+                }
+                ws.send(json.dumps(continue_task_cmd))
+                ws.send(json.dumps(finish_task_cmd))
+                return
+
+            if event == "task-failed":
+                state["error"] = (
+                    header.get("error_message")
+                    or header.get("event_info")
+                    or payload.get("payload", {}).get("message")
+                    or "CosyVoice websocket task failed"
+                )
+                state["error_code"] = header.get("error_code")
+                ws.close()
+                return
+
+            if event == "task-finished":
+                ws.close()
+
+        def on_error(ws, error) -> None:
+            state["error"] = str(error)
+
+        def on_close(ws, close_status_code, close_msg) -> None:
+            return None
+
+        ws = websocket.WebSocketApp(
+            "wss://dashscope.aliyuncs.com/api-ws/v1/inference/",
+            header={
+                "Authorization": f"bearer {api_key}",
+                "X-DashScope-DataInspection": "enable",
+            },
+            on_open=on_open,
+            on_message=on_message,
+            on_error=on_error,
+            on_close=on_close,
+        )
+        ws.run_forever()
+
+        if state["error"]:
+            error_code = state.get("error_code")
+            if error_code:
+                raise RuntimeError(f"CosyVoice websocket failed: {error_code} {state['error']}")
+            raise RuntimeError(f"CosyVoice websocket failed: {state['error']}")
+
+        if not audio_chunks:
+            raise RuntimeError("CosyVoice websocket returned no audio data")
+
+        self._set_last_synthesis_metadata(
+            {
+                "provider": "aliyun",
+                "provider_model": model,
+                "speaker": voice,
+                "transport": "websocket",
+                "enable_ssml": bool(parameters.get("enable_ssml")),
+            }
+        )
+        return b"".join(audio_chunks)
 
     async def _call_dashscope_minimax_http(
         self,
@@ -317,18 +609,26 @@ class AliyunMixin:
 
         # Qwen TTS API 端点（正确）
         endpoint = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
-        
-        # Qwen TTS 请求格式（根据阿里云官方文档）
+        language_type = self._build_qwen_language_type(voice_params)
         payload = {
             "model": model,
             "input": {
                 "text": text,
                 "voice": voice_id,
-                "language_type": "Chinese",  # 建议与文本语种一致
+                "language_type": language_type,
             },
         }
+        instruct_payload = self._build_qwen_instruction_payload(voice_params)
+        if instruct_payload:
+            payload["parameters"] = instruct_payload
 
-        logger.info(f"调用百炼 Qwen HTTP API: model={model}, voice={voice_id}")
+        logger.info(
+            "调用百炼 Qwen HTTP API: model=%s, voice=%s, language_type=%s, instructions=%s",
+            model,
+            voice_id,
+            language_type,
+            bool(instruct_payload.get("instructions")),
+        )
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
@@ -355,6 +655,17 @@ class AliyunMixin:
                 if isinstance(audio_info, str) and audio_info:
                     import base64
                     logger.info(f"解析到直接base64音频数据，长度: {len(audio_info)}")
+                    self._set_last_synthesis_metadata(
+                        {
+                            "provider": "aliyun",
+                            "provider_model": model,
+                            "speaker": voice_id,
+                            "transport": "http",
+                            "language_type": language_type,
+                            "instructions": instruct_payload.get("instructions", ""),
+                            "optimize_instructions": bool(instruct_payload.get("optimize_instructions")),
+                        }
+                    )
                     return base64.b64decode(audio_info)
                 
                 # 是对象的情况
@@ -364,12 +675,34 @@ class AliyunMixin:
                     if audio_url:
                         audio_response = await client.get(audio_url)
                         if audio_response.status_code == 200:
+                            self._set_last_synthesis_metadata(
+                                {
+                                    "provider": "aliyun",
+                                    "provider_model": model,
+                                    "speaker": voice_id,
+                                    "transport": "http",
+                                    "language_type": language_type,
+                                    "instructions": instruct_payload.get("instructions", ""),
+                                    "optimize_instructions": bool(instruct_payload.get("optimize_instructions")),
+                                }
+                            )
                             return audio_response.content
                     
                     # data 格式
                     audio_data = audio_info.get("data")
                     if audio_data:
                         import base64
+                        self._set_last_synthesis_metadata(
+                            {
+                                "provider": "aliyun",
+                                "provider_model": model,
+                                "speaker": voice_id,
+                                "transport": "http",
+                                "language_type": language_type,
+                                "instructions": instruct_payload.get("instructions", ""),
+                                "optimize_instructions": bool(instruct_payload.get("optimize_instructions")),
+                            }
+                        )
                         return base64.b64decode(audio_data)
 
             raise Exception(f"Qwen API response missing audio data: {str(data)[:200]}")

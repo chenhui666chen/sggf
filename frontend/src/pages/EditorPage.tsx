@@ -43,7 +43,19 @@ import {
   autoSaveChapter,
   clearDirty,
 } from '@/store/slices/editorSlice'
+import { apiClient } from '@/services/api'
 import SettingRecommendations from '@/components/SettingRecommendations'
+
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = window.URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  window.URL.revokeObjectURL(url)
+}
 
 
 export default function EditorPage() {
@@ -182,15 +194,8 @@ export default function EditorPage() {
     setHistoryDialogOpen(true)
     setLoadingRevisions(true)
     try {
-      const response = await fetch(`/api/v1/chapters/${chapterId}/revisions`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-      if (response.ok) {
-        const data = await response.json()
-        setRevisions(data)
-      }
+      const response = await apiClient.get(`/api/v1/chapters/${chapterId}/revisions`)
+      setRevisions(response.data)
     } catch {
       // 加载版本历史失败
     } finally {
@@ -216,26 +221,13 @@ export default function EditorPage() {
 
     setOptimizing(true)
     try {
-      const response = await fetch('/api/v1/workflow/optimize-chapter', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-        body: JSON.stringify({
-          project_id: parseInt(projectId),
-          chapter_id: parseInt(chapterId),
-          current_content: content,  // 使用当前编辑器中的内容
-          user_feedback: feedback,   // 🆕 用户额外意见
-        }),
+      const response = await apiClient.post('/api/v1/workflow/optimize-chapter', {
+        project_id: parseInt(projectId),
+        chapter_id: parseInt(chapterId),
+        current_content: content,
+        user_feedback: feedback,
       })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || '优化请求失败')
-      }
-
-      const data = await response.json()
+      const data = response.data
       setSaveMessage('✨ 已提交优化任务,正在后台处理...（预计30-60秒）')
 
       // 轮询任务状态
@@ -264,25 +256,12 @@ export default function EditorPage() {
 
     setRegenerating(true)
     try {
-      const response = await fetch('/api/v1/workflow/regenerate-chapter', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-        body: JSON.stringify({
-          project_id: parseInt(projectId),
-          chapter_id: parseInt(chapterId),
-          reason: reason,  // 重新生成的理由
-        }),
+      const response = await apiClient.post('/api/v1/workflow/regenerate-chapter', {
+        project_id: parseInt(projectId),
+        chapter_id: parseInt(chapterId),
+        reason,
       })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || '重新生成请求失败')
-      }
-
-      const data = await response.json()
+      const data = response.data
       setSaveMessage('🔄 已提交重新生成任务,正在后台处理...（预计60-120秒）')
 
       // 轮询任务状态
@@ -297,20 +276,16 @@ export default function EditorPage() {
   const pollRegenerateTaskStatus = async (taskId: string) => {
     const pollInterval = setInterval(async () => {
       try {
-        const response = await fetch(`/api/v1/workflow/task/${taskId}`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-        })
+        const response = await apiClient.getWorkflowTaskStatus(taskId)
 
-        if (!response.ok) {
+        if (response.status < 200 || response.status >= 300) {
           clearInterval(pollInterval)
           setRegenerating(false)
           setSaveError('获取任务状态失败')
           return
         }
 
-        const data = await response.json()
+        const data = response.data
 
         if (data.status === 'completed') {
           clearInterval(pollInterval)
@@ -357,20 +332,16 @@ export default function EditorPage() {
   const pollOptimizeTaskStatus = async (taskId: string) => {
     const pollInterval = setInterval(async () => {
       try {
-        const response = await fetch(`/api/v1/workflow/task/${taskId}`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-        })
-        
-        if (!response.ok) {
+        const response = await apiClient.getWorkflowTaskStatus(taskId)
+
+        if (response.status < 200 || response.status >= 300) {
           clearInterval(pollInterval)
           setOptimizing(false)
           setSaveError('获取任务状态失败')
           return
         }
-        
-        const data = await response.json()
+
+        const data = response.data
         
         if (data.status === 'completed') {
           clearInterval(pollInterval)
@@ -418,23 +389,11 @@ export default function EditorPage() {
     if (!chapterId || !projectId) return
     setCheckingLogic(true)
     try {
-      const response = await fetch('/api/v1/ai/check-chapter-logic', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-        body: JSON.stringify({
-          chapter_id: parseInt(chapterId),
-          project_id: parseInt(projectId),
-        }),
+      const response = await apiClient.post('/api/v1/ai/check-chapter-logic', {
+        chapter_id: parseInt(chapterId),
+        project_id: parseInt(projectId),
       })
-      if (!response.ok) {
-        setSaveError('章节逻辑检查失败，请稍后重试')
-        return
-      }
-      const data = await response.json()
-      setLogicCheckResult(data)
+      setLogicCheckResult(response.data)
       setLogicCheckDialogOpen(true)
     } catch {
       setSaveError('调用章节逻辑检查接口时出错，请检查网络连接')
@@ -455,25 +414,15 @@ export default function EditorPage() {
 
     setRestoringRevision(true)
     try {
-      const response = await fetch(`/api/v1/chapters/${chapterId}/revisions/${selectedRevision.id}/restore`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
-
-      if (response.ok) {
-        const chapter = await response.json()
-        dispatch(setContent(chapter.content))
-        dispatch(clearDirty())
-        setSaveMessage('✅ 已成功恢复到指定版本')
-        setConfirmDialogOpen(false)
-        setHistoryDialogOpen(false)
-        // 重新加载版本历史
-        setTimeout(() => handleOpenHistory(), 500)
-      } else {
-        setSaveError('❌ 恢复版本失败，请重试')
-      }
+      const response = await apiClient.post(`/api/v1/chapters/${chapterId}/revisions/${selectedRevision.id}/restore`)
+      const chapter = response.data
+      dispatch(setContent(chapter.content))
+      dispatch(clearDirty())
+      setSaveMessage('✅ 已成功恢复到指定版本')
+      setConfirmDialogOpen(false)
+      setHistoryDialogOpen(false)
+      // 重新加载版本历史
+      setTimeout(() => handleOpenHistory(), 500)
     } catch {
       setSaveError('恢复版本失败，请检查网络连接')
     } finally {
@@ -486,26 +435,11 @@ export default function EditorPage() {
     setExportAnchorEl(null)
     setExporting(true)
     try {
-      const response = await fetch(`/api/v1/chapters/${chapterId}/export/txt`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
+      const response = await apiClient.get(`/api/v1/chapters/${chapterId}/export/txt`, {
+        responseType: 'blob',
       })
-
-      if (response.ok) {
-        const blob = await response.blob()
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `${currentChapter?.title || '章节'}.txt`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        window.URL.revokeObjectURL(url)
-        setSaveMessage('📄 TXT文件导出成功')
-      } else {
-        setSaveError('❌ 导出TXT失败，请重试')
-      }
+      triggerBlobDownload(response.data as Blob, `${currentChapter?.title || '章节'}.txt`)
+      setSaveMessage('📄 TXT文件导出成功')
     } catch {
       setSaveError('导出TXT失败，请检查网络连接')
     } finally {
@@ -518,26 +452,11 @@ export default function EditorPage() {
     setExportAnchorEl(null)
     setExporting(true)
     try {
-      const response = await fetch(`/api/v1/chapters/${chapterId}/export/docx`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
+      const response = await apiClient.get(`/api/v1/chapters/${chapterId}/export/docx`, {
+        responseType: 'blob',
       })
-
-      if (response.ok) {
-        const blob = await response.blob()
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `${currentChapter?.title || '章节'}.docx`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        window.URL.revokeObjectURL(url)
-        setSaveMessage('📝 DOCX文件导出成功')
-      } else {
-        setSaveError('❌ 导出DOCX失败，请重试')
-      }
+      triggerBlobDownload(response.data as Blob, `${currentChapter?.title || '章节'}.docx`)
+      setSaveMessage('📝 DOCX文件导出成功')
     } catch {
       setSaveError('导出DOCX失败，请检查网络连接')
     } finally {

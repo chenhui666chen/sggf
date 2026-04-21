@@ -96,7 +96,7 @@ def test_interjection_injection():
     print(f"  Output: '{result2}'")
     assert "(sighs)" in result2, "Should inject (sighs) for 叹气"
     
-    parser_other = InterjectionParser(model="qwen3-tts-flash")
+    parser_other = InterjectionParser(model="qwen3-tts-instruct-flash")
     result3 = parser_other.inject_interjections(text1, "笑着说")
     print(f"  Non-MiniMax model: '{result3}'")
     assert result3 == text1, "Non-MiniMax model should not inject interjections"
@@ -110,7 +110,7 @@ def test_voice_model_auto_match():
     print("Test 3: Voice-Model Auto Matching")
     print("="*60)
     
-    qwen_catalog = load_voice_catalog("qwen3-tts-flash")
+    qwen_catalog = load_voice_catalog("qwen3-tts-instruct-flash")
     cosyvoice_catalog = load_voice_catalog("cosyvoice-v3-plus")
     minimax_catalog = load_voice_catalog("minimax-speech-2.8-hd")
     
@@ -126,7 +126,7 @@ def test_voice_model_auto_match():
     minimax_voice_id = minimax_voices[0]["id"]
     
     print(f"  Testing Qwen voice: {qwen_voice_id}")
-    qwen_lookup = load_voice_catalog("qwen3-tts-flash")
+    qwen_lookup = load_voice_catalog("qwen3-tts-instruct-flash")
     assert qwen_voice_id in qwen_lookup.get("voices_by_id", {}), "Qwen voice should exist"
     
     print(f"  Testing MiniMax voice: {minimax_voice_id}")

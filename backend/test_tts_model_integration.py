@@ -17,7 +17,7 @@ class VoiceProfile:
     gender: str
     age_group: str
     personality: str
-    tts_model: str = "qwen3-tts-flash"
+    tts_model: str = "qwen3-tts-instruct-flash"
     tts_speaker_id: str = ""
     pitch_base: int = 50
     speed_base: float = 1.0
@@ -62,7 +62,7 @@ def suggest_model_for_character(
         if importance in ["次要角色"]:
             if cost_priority == "high_quality":
                 return "qwen3-tts-plus"
-            return "qwen3-tts-flash"
+            return "qwen3-tts-instruct-flash"
         
         if importance in ["群众角色"]:
             return "minimax-speech-2.8-turbo"
@@ -72,7 +72,7 @@ def suggest_model_for_character(
     elif cost_priority == "low_cost":
         return "minimax-speech-2.8-turbo"
     
-    return "qwen3-tts-flash"
+    return "qwen3-tts-instruct-flash"
 
 
 class MockVoiceManager:
@@ -95,7 +95,7 @@ class MockVoiceManager:
             gender=voice_config.get("gender", "unknown"),
             age_group=voice_config.get("age_group", "unknown"),
             personality=voice_config.get("personality", "neutral"),
-            tts_model=tts_model or voice_config.get("tts_model", "qwen3-tts-flash"),
+            tts_model=tts_model or voice_config.get("tts_model", "qwen3-tts-instruct-flash"),
             pitch_base=voice_config.get("pitch_base", 50),
             speed_base=voice_config.get("speed_base", 1.0),
             volume_base=voice_config.get("volume_base", 50),
@@ -167,7 +167,7 @@ class MockVoiceManager:
                 "gender": profile.gender if profile.gender != "unknown" else None,
                 "age_group": profile.age_group if profile.age_group != "unknown" else None,
                 "personality": profile.personality,
-                "tts_model": profile.tts_model if profile.tts_model != "qwen3-tts-flash" else None,
+                "tts_model": profile.tts_model if profile.tts_model != "qwen3-tts-instruct-flash" else None,
             }
         return mapping
     
@@ -237,10 +237,10 @@ print("✅ 测试1通过：模型推荐正确")
 print("\n测试2：用户显式设置tts_model...")
 vm2 = MockVoiceManager()
 voice_mapping_with_model = {
-    "林风": {"voice_id": "male_young_energetic", "volume": 60, "tts_model": "qwen3-tts-flash"},
+    "林风": {"voice_id": "male_young_energetic", "volume": 60, "tts_model": "qwen3-tts-instruct-flash"},
 }
 vm2.apply_project_voice_mapping(voice_mapping_with_model, character_profiles)
-assert vm2.character_voices["林风"].tts_model == "qwen3-tts-flash", f"应该使用用户指定的模型，实际: {vm2.character_voices['林风'].tts_model}"
+assert vm2.character_voices["林风"].tts_model == "qwen3-tts-instruct-flash", f"应该使用用户指定的模型，实际: {vm2.character_voices['林风'].tts_model}"
 print("✅ 测试2通过：用户配置优先")
 
 # Test 3: export_to_db includes tts_model

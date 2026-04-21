@@ -205,16 +205,11 @@ export default function useAudiobookChapterDrawer({ onNotify }: { onNotify?: (pa
           audioBlobUrlRef.current = null
         }
 
-        const token = localStorage.getItem('access_token')
-        const response = await fetch(
-          `/api/v1/audiobook/stream/${mergedRef.audiobookProjectId}/${mergedRef.chapterAudio.chapter_id}`,
-          {
-            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-          },
+        const response = await apiClient.getAudiobookChapterAudioFile(
+          mergedRef.audiobookProjectId,
+          mergedRef.chapterAudio.chapter_id,
         )
-        if (!response.ok) throw new Error('加载音频失败')
-
-        const blob = await response.blob()
+        const blob = response.data as Blob
         const blobUrl = window.URL.createObjectURL(blob)
         audioBlobUrlRef.current = blobUrl
         audio.src = blobUrl
@@ -257,4 +252,3 @@ export default function useAudiobookChapterDrawer({ onNotify }: { onNotify?: (pa
     refresh,
   }
 }
-

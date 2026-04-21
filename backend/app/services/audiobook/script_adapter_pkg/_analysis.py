@@ -37,7 +37,7 @@ class AnalysisMixin:
             }
         """
         
-        model_name = (getattr(self, "tts_model", None) or "qwen3-tts-flash").strip()
+        model_name = (getattr(self, "tts_model", None) or "qwen3-tts-instruct-flash").strip()
         if "plus" in model_name:
             tts_block = "**当前TTS模型：CosyVoice v3-plus（精品模式）**\n- 适合：精品章节 / 情绪层次丰富场景\n- 特性：精细情感控制、停顿/重音/语调变化能力极强，音质最佳\n- 成本：相对更高，适合高光章节与关键桥段\n"
             instruct_block = (
@@ -46,10 +46,11 @@ class AnalysisMixin:
                 "- 请在 performance_notes 中写清角色身份、场景张力、目标语气（如【愤怒/紧张/平静】），便于后续注入 instruction\n"
             )
         else:
-            tts_block = "**当前TTS模型：Qwen3-TTS Flash（高性价比模式）**\n- 适合：长篇连载 / 日更章节\n- 特性：音色丰富、稳定性强、成本低，适合大体量文本\n- 限制：当前调用通道不支持 Instruct/SSML，且不暴露可控的情绪/语速/音调参数（仅使用 voice + language_type）\n"
+            tts_block = "**当前TTS模型：Qwen3-TTS Instruct Flash（默认模式）**\n- 适合：长篇连载 / 日更章节 / 需要低成本但仍要一定表现力的内容\n- 特性：49 音色、稳定性强、成本低，并支持通过 instructions / optimize_instructions 做自然语言演绎控制\n- 限制：当前链路重点是 instructions，不要输出 SSML 语法\n"
             instruct_block = (
-                "**Qwen3 备注提示**\n"
-                "- 仍可在 performance_notes / emotion 写【紧张/平静/激动】等中文情绪（用于编剧节奏与后续扩展），但请不要假设会直接影响 TTS\n"
+                "**Qwen3 Instruct 提示**\n"
+                "- 请把情绪、场景、身份、角色语气尽量结构化写到 instruct_emotion / instruct_scene / instruct_role / instruct_identity 中\n"
+                "- performance_notes 会一并映射到 Qwen instructions，请写成可直接执行的演绎要求\n"
             )
 
         def _build_analysis_sample(text: str, max_len: int = 6000) -> str:

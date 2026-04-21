@@ -432,7 +432,7 @@ def test_legacy_factory_qwen3_tts_generate_uses_sync_helper(
     assert result.metadata == {"source": "runtime"}
     assert captured["text"] == "hello"
     assert captured["emotion"] == "neutral"
-    assert captured["model_id"] == "qwen3-tts-flash"
+    assert captured["model_id"] == "qwen3-tts-instruct-flash"
     assert captured["voice_params"]["speaker"] == "longxiaochun"
     assert captured["voice_params"]["rate"] == 1.2
     assert captured["voice_params"]["pitch"] == 1.1
@@ -485,7 +485,7 @@ def test_qwen3_tts_runtime_wrapper_normalizes_legacy_tts_parameters(
     assert result.data["audio_data"] == "ZmFrZQ=="
     assert captured["text"] == "hello"
     assert captured["emotion"] == "happy"
-    assert captured["model_id"] == "qwen3-tts-flash"
+    assert captured["model_id"] == "qwen3-tts-instruct-flash"
     assert captured["voice_params"]["speaker"] == "longxiaochun"
     assert captured["voice_params"]["rate"] == 1.2
     assert captured["voice_params"]["pitch"] == 1.1
@@ -498,7 +498,7 @@ def test_normalize_model_id_returns_current_multimodal_ids() -> None:
     from adapters.legacy_runtime_wrappers import has_runtime_wrapper
 
     assert normalize_model_id("qwen3_vl_plus") == "qwen3-vl-plus"
-    assert normalize_model_id("qwen3_tts") == "qwen3-tts-flash"
+    assert normalize_model_id("qwen3_tts") == "qwen3-tts-instruct-flash"
     assert normalize_model_id("wan2.6-t2i") == "wan2.6-t2i"
     assert normalize_model_id("wan2.7-t2v") == "wan2.7-t2v"
     assert normalize_model_id("wan2.7-i2v") == "wan2.7-i2v"

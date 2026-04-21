@@ -57,6 +57,34 @@ import {
   isStoryExpansionTaskId,
 } from '@/utils/storyExpansionEvents'
 
+function extractFilenameFromContentDisposition(contentDisposition?: string | null, fallback: string = 'download.bin') {
+  const header = String(contentDisposition || '').trim()
+  if (!header) return fallback
+
+  const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1])
+    } catch {
+      return utf8Match[1]
+    }
+  }
+
+  const asciiMatch = header.match(/filename="?([^";]+)"?/i)
+  return asciiMatch?.[1]?.trim() || fallback
+}
+
+function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = window.URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  window.URL.revokeObjectURL(url)
+}
+
 export default function DashboardPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -185,14 +213,10 @@ export default function DashboardPage() {
         // 并发请求所有项目的概念内容
         const promises = projects.map(async (project) => {
           try {
-            const response = await fetch(`/api/v1/workflow/${project.id}/all-stages-content`, {
-              headers: {
-                'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-              },
-            })
+            const response = await apiClient.getWorkflowAllStagesContent(project.id)
 
-            if (response.ok) {
-              const data = await response.json()
+            if (response.status >= 200 && response.status < 300) {
+              const data = response.data || {}
               const hasConcept = !!(data.stages?.concept && data.stages.concept.trim())
               conceptStatus[project.id] = hasConcept
               logger.log(`✅ 项目 ${project.id} 概念状态: ${hasConcept ? '非空' : '空白'}`)
@@ -227,23 +251,13 @@ export default function DashboardPage() {
         // 并发请求所有项目的章节数据
         const promises = projects.map(async (project) => {
           try {
-            const response = await fetch(`/api/v1/projects/${project.id}/chapters`, {
-              headers: {
-                'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-              },
-            })
-
-            if (response.ok) {
-              const chapters = await response.json()
-              // 计算所有章节的总字数
-              const totalWords = Array.isArray(chapters) 
-                ? chapters.reduce((sum: number, ch: any) => sum + (ch.word_count || 0), 0)
-                : 0
-              wordCounts[project.id] = totalWords
-              logger.log(`✅ 项目 ${project.id} 章节总字数: ${totalWords}`)
-            } else {
-              wordCounts[project.id] = 0
-            }
+            const response = await apiClient.getChapters(project.id)
+            const chapters = response.data
+            const totalWords = Array.isArray(chapters)
+              ? chapters.reduce((sum: number, ch: any) => sum + (ch.word_count || 0), 0)
+              : 0
+            wordCounts[project.id] = totalWords
+            logger.log(`✅ 项目 ${project.id} 章节总字数: ${totalWords}`)
           } catch (error) {
             logger.error(`❌ 获取项目 ${project.id} 章节失败:`, error)
             wordCounts[project.id] = 0
@@ -621,16 +635,10 @@ export default function DashboardPage() {
     try {
       logger.log('📍 开始生成下一章（异步模式）...')
 
-      const response = await fetch(`/api/v1/workflow/${projectId}/generate-next-chapter`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-        },
-      })
+      const response = await apiClient.generateNextWorkflowChapter(projectId)
 
-      if (response.ok) {
-        const data = await response.json()
+      if (response.status >= 200 && response.status < 300) {
+        const data = response.data
         logger.log('✅ 异步任务已创建:', data)
 
         // 后端返回: { task_id, status, message, next_chapter_number }
@@ -650,10 +658,10 @@ export default function DashboardPage() {
           navigate(`/workflow/${projectId}`)
         }, 500)  // 等待500ms让用户看到提示
       } else {
-        const errorData = await response.json()
+        const errorData = response.data
         logger.error('❌ 创建生成任务失败:', errorData)
 
-        setSnackbarMessage(errorData.detail || errorData.error || '创建生成任务失败，请重试')
+        setSnackbarMessage(errorData?.detail || errorData?.error || '创建生成任务失败，请重试')
         setSnackbarSeverity('error')
         setSnackbarOpen(true)
         // 🔧 只在失败时重置状态
@@ -678,29 +686,20 @@ export default function DashboardPage() {
     setExportingChapter(chapter.id)
     
     try {
-      const response = await fetch(`/api/v1/chapters/${chapter.id}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-      })
+      const response = await apiClient.getChapter(chapter.id)
+      const data = response.data
+      localStorage.setItem('zhiwen_import_content', JSON.stringify({
+        fromProjectId: selectedProjectId,
+        chapterId: chapter.id,
+        title: data.title,
+        content: data.content,
+      }))
       
-      if (response.ok) {
-        const data = await response.json()
-        localStorage.setItem('zhiwen_import_content', JSON.stringify({
-          fromProjectId: selectedProjectId,
-          chapterId: chapter.id,
-          title: data.title,
-          content: data.content,
-        }))
-        
-        setSnackbarMessage('✨ 章节内容已准备，正在跳转到织文无迹...')
-        setSnackbarSeverity('info')
-        setSnackbarOpen(true)
-        // 跳转到织文无迹模块
-        setTimeout(() => navigate('/ai-trace'), 500)
-      } else {
-        throw new Error('获取章节内容失败')
-      }
+      setSnackbarMessage('✨ 章节内容已准备，正在跳转到织文无迹...')
+      setSnackbarSeverity('info')
+      setSnackbarOpen(true)
+      // 跳转到织文无迹模块
+      setTimeout(() => navigate('/ai-trace'), 500)
     } catch (error) {
       logger.error('❌ 导出到织文无迹失败:', error)
       setSnackbarMessage('导出失败，请重试')
@@ -718,37 +717,18 @@ export default function DashboardPage() {
     setExportingAll(true)
     
     try {
-      const response = await fetch(`/api/v1/projects/${selectedProjectId}/export/all/txt`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
+      const response = await apiClient.get(`/api/v1/projects/${selectedProjectId}/export/all/txt`, {
+        responseType: 'blob',
       })
-      
-      if (response.ok) {
-        const blob = await response.blob()
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        // 从 Content-Disposition 获取文件名，否则使用默认名
-        const contentDisposition = response.headers.get('Content-Disposition')
-        let filename = '小说全文.txt'
-        if (contentDisposition) {
-          const match = contentDisposition.match(/filename\*=UTF-8''(.+)/)
-          if (match) {
-            filename = decodeURIComponent(match[1])
-          }
-        }
-        a.download = filename
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        window.URL.revokeObjectURL(url)
-        setSnackbarMessage('📄 TXT文件导出成功')
-        setSnackbarSeverity('success')
-        setSnackbarOpen(true)
-      } else {
-        throw new Error('导出失败')
-      }
+      const blob = response.data as Blob
+      const filename = extractFilenameFromContentDisposition(
+        response.headers?.['content-disposition'],
+        '小说全文.txt',
+      )
+      triggerBlobDownload(blob, filename)
+      setSnackbarMessage('📄 TXT文件导出成功')
+      setSnackbarSeverity('success')
+      setSnackbarOpen(true)
     } catch (error) {
       logger.error('❗ 导出 TXT 失败:', error)
       setSnackbarMessage('导出失败，请重试')
@@ -766,37 +746,18 @@ export default function DashboardPage() {
     setExportingAll(true)
     
     try {
-      const response = await fetch(`/api/v1/projects/${selectedProjectId}/export/all/docx`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
+      const response = await apiClient.get(`/api/v1/projects/${selectedProjectId}/export/all/docx`, {
+        responseType: 'blob',
       })
-      
-      if (response.ok) {
-        const blob = await response.blob()
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        // 从 Content-Disposition 获取文件名
-        const contentDisposition = response.headers.get('Content-Disposition')
-        let filename = '小说全文.docx'
-        if (contentDisposition) {
-          const match = contentDisposition.match(/filename\*=UTF-8''(.+)/)
-          if (match) {
-            filename = decodeURIComponent(match[1])
-          }
-        }
-        a.download = filename
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        window.URL.revokeObjectURL(url)
-        setSnackbarMessage('📝 DOCX文件导出成功')
-        setSnackbarSeverity('success')
-        setSnackbarOpen(true)
-      } else {
-        throw new Error('导出失败')
-      }
+      const blob = response.data as Blob
+      const filename = extractFilenameFromContentDisposition(
+        response.headers?.['content-disposition'],
+        '小说全文.docx',
+      )
+      triggerBlobDownload(blob, filename)
+      setSnackbarMessage('📝 DOCX文件导出成功')
+      setSnackbarSeverity('success')
+      setSnackbarOpen(true)
     } catch (error) {
       logger.error('❗ 导出 DOCX 失败:', error)
       setSnackbarMessage('导出失败，请重试')

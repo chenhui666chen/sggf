@@ -9,8 +9,9 @@ from .voice_manager_minimax import MiniMaxVoiceManager
 
 # 模型 -> 音色目录文件的映射
 MODEL_VOICE_MAPPING = {
-    "qwen3-tts-flash": "qwen3-tts-flash",
-    "qwen3-tts-plus": "qwen3-tts-flash",
+    "qwen3-tts-instruct-flash": "qwen3-tts-instruct-flash",
+    "qwen3-tts-flash": "qwen3-tts-instruct-flash",
+    "qwen3-tts-plus": "qwen3-tts-instruct-flash",
     "cosyvoice-v3-plus": "cosyvoice-v3-plus",
     "minimax-speech-2.8-hd": "minimax-speech-2.8",
     "minimax-speech-2.8-turbo": "minimax-speech-2.8",
@@ -19,10 +20,15 @@ MODEL_VOICE_MAPPING = {
 
 # 模型成本和优先级配置
 MODEL_CONFIGS = {
+    "qwen3-tts-instruct-flash": {
+        "cost_level": "low",
+        "quality_level": "medium_high",
+        "priority": 3,  # 默认使用
+    },
     "qwen3-tts-flash": {
         "cost_level": "low",
-        "quality_level": "medium",
-        "priority": 3,  # 默认使用
+        "quality_level": "medium_high",
+        "priority": 3,
     },
     "qwen3-tts-plus": {
         "cost_level": "medium",
@@ -74,8 +80,8 @@ def get_model_for_voice(voice_id: str, preferred_model: str = None) -> str:
         except Exception:
             continue
     
-    # 默认返回 qwen3-tts-flash
-    return "qwen3-tts-flash"
+    # 默认返回 qwen3-tts-instruct-flash
+    return "qwen3-tts-instruct-flash"
 
 
 def suggest_model_for_character(
@@ -111,7 +117,7 @@ def suggest_model_for_character(
         if importance in ["次要角色"]:
             if cost_priority == "high_quality":
                 return "qwen3-tts-plus"
-            return "qwen3-tts-flash"
+            return "qwen3-tts-instruct-flash"
         
         # 群众角色 → 低成本模型
         if importance in ["群众角色"]:
@@ -123,7 +129,7 @@ def suggest_model_for_character(
     elif cost_priority == "low_cost":
         return "minimax-speech-2.8-turbo"
     else:
-        return "qwen3-tts-flash"
+        return "qwen3-tts-instruct-flash"
 
 
 def get_model_config(model: str) -> Dict[str, Any]:
@@ -137,16 +143,26 @@ def get_model_config(model: str) -> Dict[str, Any]:
 
 def list_supported_models() -> list:
     """列出所有支持的模型"""
-    return list(MODEL_VOICE_MAPPING.keys())
+    return [
+        "qwen3-tts-instruct-flash",
+        "qwen3-tts-plus",
+        "cosyvoice-v3-plus",
+        "minimax-speech-2.8-hd",
+        "minimax-speech-2.8-turbo",
+    ]
+
+
+def list_all_models() -> list:
+    """向后兼容 routes_tts 的旧函数名。"""
+    return list_supported_models()
 
 
 def create_voice_manager(tts_model: str, llm_client: Any = None):
     """根据TTS模型创建对应的声音管理器"""
-    tts_model = (tts_model or "").strip() or "qwen3-tts-flash"
+    tts_model = (tts_model or "").strip() or "qwen3-tts-instruct-flash"
     
     if tts_model == "cosyvoice-v3-plus":
         return CosyVoiceV3PlusVoiceManager()
     elif tts_model.startswith("minimax-speech"):
         return MiniMaxVoiceManager()
     return VoiceManager(llm_client=llm_client)
-

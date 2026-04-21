@@ -29,9 +29,16 @@ logger = logging.getLogger(__name__)
 
 from app.api.v1.workflow.lock_manager import _get_workflow_execution_lock
 from app.api.v1.workflow.helpers import *
+from app.api.v1.workflow.helpers import _sync_project_title_from_concept
 from app.api.v1.workflow.story_helpers import *
+from app.api.v1.workflow.story_helpers import (
+    _inject_recent_project_novelty_context,
+    _sync_real_coordinator_project_context,
+)
 from app.api.v1.workflow.story_resolve import *
-from app.api.v1.workflow.requirement import *
+from app.api.v1.workflow.story_resolve import _normalize_concept_stage_characters_for_storage
+from app.api.v1.workflow.requirement import _resolve_workflow_requirement
+from app.api.v1.workflow.execute_streaming import execute_stage_with_streaming
 async def _run_execute_stage_background_serialized(
     task_id: str,
     project_id: int,
@@ -232,7 +239,7 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
         STAGE_AGENTS = {
             'concept': [
                 {'id': 'creative_director', 'name': '创意总监'},
-                {'id': 'worldview_architect', 'name': '世界观架构师'},
+                {'id': 'world_architect', 'name': '世界观架构师'},
                 {'id': 'character_designer', 'name': '人物设计师'},
             ],
             'structure': [
@@ -262,7 +269,7 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
             if 'story' in target_set:
                 selected_ids.append('creative_director')
             if 'world' in target_set:
-                selected_ids.append('worldview_architect')
+                selected_ids.append('world_architect')
             stage_agents = [a for a in stage_agents if a['id'] in selected_ids]
         for agent in stage_agents:
             await ws_manager.send_agent_status(

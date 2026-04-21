@@ -19,11 +19,11 @@ class AudiobookScriptAgentBase:
     基于专业编剧工作流程，将小说文本改编为适合音频化的剧本
     """
     
-    def __init__(self, llm_client=None, tts_model: str = "qwen3-tts-flash", strategy: Optional[Any] = None):
+    def __init__(self, llm_client=None, tts_model: str = "qwen3-tts-instruct-flash", strategy: Optional[Any] = None):
         """
         Args:
             llm_client: LLM客户端（必需，支持UnifiedLLMClient或自定义）
-            tts_model: 当前使用的TTS模型（如 qwen3-tts-flash / cosyvoice-v3-plus）
+            tts_model: 当前使用的TTS模型（如 qwen3-tts-instruct-flash / cosyvoice-v3-plus）
             strategy: AudioDirector的AdaptationStrategy（包含语义完整性约束）
         """
         if llm_client is None:

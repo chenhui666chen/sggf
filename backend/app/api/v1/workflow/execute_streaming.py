@@ -22,15 +22,33 @@ from app.services.workflow_context_builder import WorkflowContextBuilder
 from app.utils.datetime_utils import parse_datetime_utc, utc_now
 from core.model_resolution import normalize_model_id
 from core.model_runtime import ensure_model_hub_initialized, resolve_model_for_task
-from app.services.prompts.stages.world_building import CharacterDesignPrompts, get_genre_character_fields
+from app.services.prompts.workflow_runtime import (
+    build_first_chapter_iteration_prompts,
+    build_first_chapter_review_prompts,
+    build_streaming_concept_prompts,
+    build_streaming_structure_prompts,
+    build_streaming_world_prompts,
+    get_default_first_chapter_opening_and_ending,
+)
 from app.services.auto_system_detector import auto_create_system_collections
 
 logger = logging.getLogger(__name__)
 
 from app.api.v1.workflow.lock_manager import _get_workflow_execution_lock
 from app.api.v1.workflow.helpers import *
+from app.api.v1.workflow.helpers import _sync_project_title_from_concept
 from app.api.v1.workflow.story_helpers import *
+from app.api.v1.workflow.story_helpers import (
+    _build_project_world_setting_context,
+    _inject_recent_project_novelty_context,
+    _sync_real_coordinator_project_context,
+)
 from app.api.v1.workflow.story_resolve import *
+from app.api.v1.workflow.story_resolve import (
+    _build_concept_stage_character_prompts,
+    _normalize_concept_stage_characters_for_storage,
+)
+from app.api.v1.workflow.requirement import _resolve_workflow_requirement
 async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum: StageType, user_id: int, db: Session):
     """
     🆕 使用流式输出执行阶段任务
@@ -133,25 +151,25 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
 
         STAGE_AGENTS_STREAMING = {
             'concept': [
-                {'id': 'creative-director', 'name': '创意总监'},
-                {'id': 'worldview-architect', 'name': '世界观架构师'},
-                {'id': 'character-designer', 'name': '人物设计师'},
+                {'id': 'creative_director', 'name': '创意总监'},
+                {'id': 'world_architect', 'name': '世界观架构师'},
+                {'id': 'character_designer', 'name': '人物设计师'},
             ],
             'structure': [
-                {'id': 'plot-architect', 'name': '情节架构师'},
-                {'id': 'event-validator', 'name': '事件验证官'},
+                {'id': 'plot_architect', 'name': '情节架构师'},
+                {'id': 'event_validator', 'name': '事件验证官'},
             ],
             'content': [
-                {'id': 'content-creator', 'name': '内容创作师'},
-                {'id': 'style-optimizer', 'name': '文风优化师'},
+                {'id': 'content_creator', 'name': '内容创作师'},
+                {'id': 'style_optimizer', 'name': '文风优化师'},
             ],
             'review': [
-                {'id': 'quality-reviewer', 'name': '质量评审官'},
+                {'id': 'quality_reviewer', 'name': '质量评审官'},
             ],
             'iteration': [
-                {'id': 'iteration-coordinator', 'name': '迭代协调官'},
-                {'id': 'content-reviser', 'name': '内容修订师'},
-                {'id': 'final-reviewer', 'name': '最终审核官'},
+                {'id': 'iteration_coordinator', 'name': '迭代协调官'},
+                {'id': 'content_reviser', 'name': '内容修订师'},
+                {'id': 'final_reviewer', 'name': '最终审核官'},
             ],
         }
 
@@ -221,94 +239,7 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                         world_setting,
                     )
                     world_setting = world_context.combined_world_setting
-                    # 🆕 开头/结尾方式定义（从头创作共享模块）
-                    opening_styles = {
-                        "对话开头": ("对话开头", "直接进入冲突或紧张场景，用对话抽出矛盾", ""),
-                        "动作开头": ("动作开头", "从正在发生的动态事件开始，制造紧迫感", ""),
-                        "悬念开头": ("悬念开头", "抛出问题或异常现象，引发读者好奇，创造独特的开场", ""),
-                        "场景开头": ("场景开头", "通过环境氛围描写快速建立情境，融入题材特色", ""),
-                        "反转开头": ("反转开头", "与上章结尾形成对比或反差，制造意外效果", ""),
-                        "内心独白开头": ("内心独白开头", "从人物内心思绪入手，展现心理冲突或决策过程", ""),
-                        "回忆插入开头": ("回忆插入开头", "通过回忆或闪回提供关键背景，丰富当前情节", ""),
-                        "疯狂开头": ("疯狂开头", "从激烈冲突或混乱场面开始，立即抽住读者注意力", ""),
-                        "对比开头": ("对比开头", "通过前后对比或境遇差异，强化情绪冲击", ""),
-                        "时间跳跃开头": ("时间跳跃开头", "直接跳转到事件后的关键时刻，略过过程增加节奏", ""),
-                    }
-                    ending_styles = {
-                        "悬念式": ("悬念式", "关键信息揭露一半，留下悬念让读者想继续阅读", ""),
-                        "转折式": ("转折式", "意外事件发生，打破读者预期", ""),
-                        "动作中断式": ("动作中断式", "危机时刻戈然而止，制造紧张感", ""),
-                        "信息炸弹式": ("信息炸弹式", "揭露惊人真相或身份，制造震撑效果", ""),
-                        "选择困境式": ("选择困境式", "主角面临艰难拉择，强化情绪张力", ""),
-                        "情感升华式": ("情感升华式", "通过情感浓度提升结束，留下余韵", ""),
-                        "环境渲染式": ("环境渲染式", "以环境气氛变化暗示危机或转机", ""),
-                        "对话留白式": ("对话留白式", "关键对话说一半留一半，制造疑问", ""),
-                        "时间压力式": ("时间压力式", "引入倒计时或期限，增加紧迫感", ""),
-                        "身份揭露式": ("身份揭露式", "暗示或半揭露人物真实身份，激发好奇", ""),
-                    }
-
-                    # 第一章使用固定的开头/结尾方式（适合开篇）
-                    selected_opening = opening_styles["悬念开头"]
-                    selected_ending = ending_styles["悬念式"]
-
-                    system_prompt = """你是一位经验丰富的网络小说作家。请根据提供的情节大纲、世界观设定和人物设定，创作精彩的第一章内容。
-
-创作要求：
-1. 语言生动，描写细腻，符合网文风格
-2. 对话自然，符合人物性格
-3. 情节紧凑，引人入胜，注意爽点节奏
-4. 场景描写要有画面感
-5. 注意段落分隔，便于阅读
-6. 第一章要快速建立世界观和主角形象
-7. 使用场景描写、对话、心理描写等多种手法
-
-【质量标准】
-- ✅ 人物性格和行为符合设定
-- ✅ 遵循已建立的世界观规则
-- ✅ 注重细节的合理性和真实感
-- ✅ 开头要有吸引力，结尾要有悬念
-
-【输出格式要求】⚠️
-请直接输出章节内容，格式必须如下：
-
-第一章 章节标题
-
-章节正文内容...
-
-注意：
-- 第一行必须是章节标题，格式为"第一章 标题名称"
-- 章节标题要简洁有力，能概括本章核心内容或悬念
-- 不要包含任何额外的说明文字、作者话语等"""
-
-                    user_prompt = f"""请创作第一章内容：
-
-【情节大纲】
-{plot_outline}
-
-【世界观设定】
-{world_setting}
-
-【人物设定】
-{characters}
-
-【用户需求】
-{requirement}
-
-【目标字数】约3000字
-
-【本章开头方式 - 建议】
-建议使用【{selected_opening[0]}】方式开头，快速抓住读者注意力
-- 技巧说明：{selected_opening[1]}
-
-❌ 禁止使用：用"XXX醒来/睁开眼睛/阳光照进房间"开头
-
-【本章结尾方式 - 建议】
-建议使用【{selected_ending[0]}】结尾，让读者想点下一章
-- 技巧说明：{selected_ending[1]}
-
-❌ 禁止使用：总结式内心独白 + 对未来的展望（如"她知道，从这一刻起...")）
-
-请开始创作第一章内容："""
+                    selected_opening, selected_ending = get_default_first_chapter_opening_and_ending()
 
                     from app.services.agents.chapter_prompt_builder import ChapterPromptBuilder
                     from app.services.agents.intelligent_truncator import smart_truncate_for_context
@@ -386,59 +317,13 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                     recent_project_signatures = project_context.get("recent_project_signatures") or ""
                     recent_project_avoidance = project_context.get("recent_project_avoidance") or ""
                     
-                    concept_system_prompt = f"""你是一名擅长网文结构设计的\"创意总监\"，需要为一个新项目生成【故事概念】和初步【世界观设定】。
-
-【已知信息】
-- 项目题目：{project_title}
-- 题材类型：{project_genre}
-
-【强避重约束】
-{recent_project_avoidance or "（暂无近期项目避重清单，但仍需主动回避高频修仙模板。）"}
-- 除非用户明确要求，否则不要使用“林尘”作为主角名。
-- 除非用户明确要求，不要以“宗门杂役 / 杂役弟子 / 废灵根 / 无灵根少年濒死觉醒”作为标准开局。
-- 除非用户明确要求，不要使用“吞噬灵根 / 逆修系统 / 反向修炼系统 / 越被羞辱越变强”作为核心机制。
-- 除非用户明确要求，不要把世界命名为“九寰界 / 九寰界域”，也不要直接使用“九大仙宗 / 九大仙域 / 上中下三界”作为世界骨架。
-- 除非用户明确要求，不要直接复用“飞升骗局 / 高维收割 / 天外监察者 / 养蛊游戏”作为终局真相模板。
-- 如果你的方案与近期项目在“主角名、起点身份、核心能力、世界名称、势力骨架、终局真相”中重合达到 3 项及以上，视为不合格，必须先推翻再重想。
-
-{recent_project_signatures}
-
-【总体要求】
-1. 先完成\"故事概念\"六段标准输出，再给出一个与之匹配的高度概括版世界观（可简略）。
-2. 保持网文向：强调爽点潜力、冲突强度和持续升级空间。
-
-——————————
-一、请先生成【故事概念】，严格按以下六个部分输出（用 Markdown 粗体标记小标题）：
-
-1. **一句话卖点（Logline）**：
-- 用一句极具吸引力的网文式概括，包含主角类型、核心能力/优势、主要对手/系统，以及最具爽感的长期目标或爆点。
-- 优先使用“主角行动 + 意外结果”句式，例如：“档案修补员篡改禁城时序，反成帝国唯一合法继承人”，而不是单纯罗列设定。
-
-2. **日志标题（短标题）**：
-- 用 4–10 个字给出一个便于读者记忆的项目名，偏网文风格。
-
-3. **概念摘要（80–150字）**：
-- 简要交代主角身份、初始困境、长期目标、主要阻力，以及世界观的一个独特钩子。
-
-4. **题材与流派（主题材/子流派）**：
-- 主题材例如：玄幻修真 / 反乌托邦科幻 / 历史权谋 / 都市奇能 等；
-
-5. **核心标签（3–6个）**：
-- 用 3–6 个标签概括作品的核心气质，例如：#系统流 #无敌流 #热血 #成长 #复仇 #智斗
-
-6. **核心冲突与情感基调**：
-- 用 100–200 字说明主角面临的长期核心冲突（如：弱小时被欺压 vs 强大后遭围剿），以及全文的整体情绪氛围（如：前期压抑但充满希望，后期高燃且快节奏）。
-
-二、接着生成【世界观设定】（简略版）
-- 用 100–200 字给出最核心的世界观设定，包括世界背景、基本规则、主要势力等。
-
-请严格按照上述顺序与小标题输出，不要添加其他额外说明。"""
-                    
-                    concept_user_prompt = f"""请为以下项目生成故事概念：
-
-【项目题目】：{project_title}
-【题材类型】：{project_genre}
-【用户初始想法】：{requirement or "暂无"}"""
+                    concept_system_prompt, concept_user_prompt = build_streaming_concept_prompts(
+                        project_title=project_title,
+                        project_genre=project_genre,
+                        requirement=requirement or "",
+                        recent_project_avoidance=recent_project_avoidance,
+                        recent_project_signatures=recent_project_signatures,
+                    )
                     
                     # 执行故事概念生成的流式调用
                     concept_result = ""
@@ -466,16 +351,9 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                     # 2. 世界观设定生成
                     await ws_manager.send_stream_start(project_id, stage_enum.value, "正在生成世界观设定...")
                     
-                    world_system_prompt = """你是一名\"世界观架构师\"，需要基于已有的故事概念，生成详细的世界观设定。
-
-【要求】
-1. 基于故事概念中的设定线索进行扩展
-2. 保持与故事概念的一致性
-3. 输出详细的世界观设定，包括世界背景、基本规则、主要势力等"""
-                    
-                    world_user_prompt = f"""请基于以下故事概念生成世界观设定：
-
-{concept_result}"""
+                    world_system_prompt, world_user_prompt = build_streaming_world_prompts(
+                        concept_text=concept_result,
+                    )
                     
                     # 执行世界观设定生成的流式调用
                     world_result = ""
@@ -555,44 +433,12 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                     
                     await ws_manager.send_stream_start(project_id, stage_enum.value, "正在生成情节大纲...")
                     
-                    structure_system_prompt = """你是一名"情节架构师"，需要基于故事概念、世界观和人物设定，设计详细的情节大纲。
-
-【要求】
-1. 基于已有的概念、世界观和人物设定进行大纲设计
-2. 保持与前期设定的一致性
-3. 设计清晰的情节线索和冲突发展
-4. 为第一章提供具体的情节指导
-5. 输出详细的情节大纲，包括主线情节、支线情节、关键节点等
-
-【输出格式】
-请按以下结构输出情节大纲：
-
-## 一、主线情节
-- 描述主要情节线索和发展脉络
-
-## 二、第一章大纲
-- 章节标题建议
-- 开场设定
-- 主要情节
-- 关键冲突
-- 章节结尾
-
-## 三、后续章节规划（可选）
-- 概述后续几章的大致发展方向"""
-                    
-                    structure_user_prompt = f"""请基于以下设定生成情节大纲：
-
-【故事概念】
-{concept_data}
-
-【世界观设定】
-{world_setting}
-
-【人物设定】
-{characters}
-
-【用户需求】
-{requirement}"""
+                    structure_system_prompt, structure_user_prompt = build_streaming_structure_prompts(
+                        concept_text=concept_data,
+                        world_setting=world_setting,
+                        characters=characters,
+                        requirement=requirement or "",
+                    )
                     
                     # 执行结构设计的流式调用
                     world_setting = _build_project_world_setting_context(
@@ -633,124 +479,19 @@ async def execute_stage_with_streaming(task_id: str, project_id: int, stage_enum
                     # 质量评审阶段
                     chapter_draft = stage_context.chapter_draft
 
-                    # 🆕 网文6维度评审体系（从头创作版本）
-                    system_prompt = """你是一位专业的网络小说质量评审官。请使用【网文6维度评审体系】对第一章内容进行评审。
-
-## 📊 网文6维度评审体系
-
-### 1. 爽点效果（权重25%）
-- 本章是否有明确的爽点或为后续爽点做了铺垫？
-- 第一章作为开篇，是否成功吸引读者？
-
-### 2. 节奏把控（权重20%）
-- 信息密度是否适中（不过载也不空洞）？
-- 场景转换是否流畅？
-- 对话与叙述比例是否合理（建议30-50%对话）？
-
-### 3. 钩子效果（权重15%）
-- 章节开头是否吸引人？（是否避免了\"醒来/阳光照进\"的套路开头）
-- 章节结尾是否有悬念/钩子？
-- 读者是否有\"想点下一章\"的冲动？
-
-### 4. 代入感（权重15%）
-- 主角视角是否清晰？
-- 读者能否代入主角的处境和情感？
-- 世界观建立是否自然、不突兀？
-
-### 5. 文笔流畅度（权重10%）
-- 是否有明显的AI痕迹或机械感？
-- 对话是否自然、符合人物性格？
-- 描写是否生动有画面感？
-
-### 6. 内容一致性（权重15%）
-- 人物设定是否与提供的设定一致？
-- 世界观规则是否与提供的设定一致？"""
-
-                    user_prompt = f"""请评审以下第一章内容：
-
-【章节内容】
-{chapter_draft}
-
----
-
-【输出格式】
-请使用以下格式输出评审报告：
-
-## 📊 网文质量评审报告
-
-**综合评分**：X/10分
-
-### 1. 爽点效果 ⭐⭐⭐
-- 评价：...
-- 问题：...
-
-### 2. 节奏把控 ⭐⭐⭐
-- 评价：...
-- 问题：...
-
-### 3. 钩子效果 ⭐⭐⭐
-- 开头评价：...
-- 结尾评价：...
-- 问题：...
-
-### 4. 代入感 ⭐⭐⭐
-- 评价：...
-- 问题：...
-
-### 5. 文笔流畅度 ⭐⭐⭐
-- 评价：...
-- 问题：...
-
-### 6. 内容一致性 ⭐⭐⭐
-- 评价：...
-- 问题：...
-
-### 🔧 具体修改建议（按优先级排序）
-1. 【必改】...
-2. 【建议】...
-3. 【可选】...
-
-### ✨ 亮点
-- ..."""
+                    system_prompt, user_prompt = build_first_chapter_review_prompts(
+                        chapter_draft=chapter_draft,
+                    )
 
                 elif stage_enum == StageType.ITERATION:
                     # 迭代优化阶段
                     chapter_draft = stage_context.chapter_draft
                     review_report = stage_context.review_report
 
-                    # 🆕 增强版迭代优化提示词
-                    system_prompt = """你是一位资深的网络小说编辑。请根据评审意见对第一章内容进行优化修改。
-
-优化要求：
-1. 保持原有故事框架和情节发展
-2. 改进语言表达，增强网文风格
-3. 增强细节描写，让场景更有画面感
-4. 优化对话内容，使其更自然、更符合人物性格
-5. 提升整体可读性和代入感
-6. 针对评审中标注【必改】的问题必须修改
-7. 标注【建议】的问题尽量修改
-
-【输出格式要求】⚠️
-请直接输出优化后的章节内容，格式必须如下：
-
-第一章 章节标题
-
-章节正文内容...
-
-注意：
-- 第一行必须是章节标题，格式为"第一章 标题名称"
-- 不要包含任何优化说明、修改说明等额外内容
-- 只输出优化后的纯净章节内容"""
-
-                    user_prompt = f"""请根据评审意见优化以下第一章：
-
-【原始章节】
-{chapter_draft}
-
-【评审意见】
-{review_report}
-
-请直接输出优化后的完整章节内容（第一行为章节标题）："""
+                    system_prompt, user_prompt = build_first_chapter_iteration_prompts(
+                        chapter_draft=chapter_draft,
+                        review_report=review_report,
+                    )
                 else:
                     # 其他阶段不使用流式输出，回退到原有逻辑
                     raise ValueError(f"阶段 {stage_enum.value} 不支持流式输出")

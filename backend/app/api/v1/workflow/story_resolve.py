@@ -22,7 +22,7 @@ from app.services.workflow_context_builder import WorkflowContextBuilder
 from app.utils.datetime_utils import parse_datetime_utc, utc_now
 from core.model_resolution import normalize_model_id
 from core.model_runtime import ensure_model_hub_initialized, resolve_model_for_task
-from app.services.prompts.stages.world_building import CharacterDesignPrompts, get_genre_character_fields
+from app.services.prompts.workflow_runtime import build_streaming_character_prompts
 from app.services.auto_system_detector import auto_create_system_collections
 
 logger = logging.getLogger(__name__)
@@ -303,20 +303,12 @@ def _build_concept_stage_character_prompts(
     concept_text: str,
     world_setting_text: str,
 ) -> tuple[str, str]:
-    genre_extra_fields = get_genre_character_fields(project_genre or "")
-    system_prompt = CharacterDesignPrompts.get_system_prompt(project_genre or "")
-    base_user_prompt = CharacterDesignPrompts.get_character_prompt(
-        requirement=requirement or "暂无特别要求",
-        genre_extra_fields=genre_extra_fields,
+    return build_streaming_character_prompts(
+        project_genre=project_genre,
+        requirement=requirement,
+        concept_text=concept_text,
+        world_setting_text=world_setting_text,
     )
-    user_prompt = f"""{base_user_prompt}
-
-【故事概念】
-{concept_text}
-
-【世界观设定】
-{world_setting_text}"""
-    return system_prompt, user_prompt
 
 
 def _select_story_character_sync_source(result: Any) -> tuple[str, str]:

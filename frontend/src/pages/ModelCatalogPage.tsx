@@ -22,7 +22,6 @@ import {
   Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
-import SyncIcon from '@mui/icons-material/Sync'
 import HubIcon from '@mui/icons-material/Hub'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
@@ -44,31 +43,6 @@ interface CatalogOverview {
   providers: Array<{ key: string; count: number }>
   last_verified_at?: string | null
   last_synced_at?: string | null
-}
-
-interface CatalogSyncResult {
-  processed: number
-  verified: number
-  partial: number
-  failed: number
-  skipped: number
-  skipped_up_to_date?: number
-  cache_hits?: number
-  network_requests?: number
-  cached_response_count?: number
-  updated_at?: string
-  model_keys?: string[]
-  config_validation?: ConfigValidationResult
-}
-
-interface ConfigValidationResult {
-  check_status: string
-  errors: string[]
-  warnings: string[]
-  fixes: string[]
-  is_consistent: boolean
-  error_count: number
-  warning_count: number
 }
 
 interface CatalogSource {
@@ -441,37 +415,23 @@ interface DetailedSpecs {
   }
 }
 
-type CategoryFilter = 'all' | 'text_llm' | 'image_gen' | 'audio_gen' | 'video_gen' | 'other'
+type CategoryFilter = 'all' | 'llm' | 'image' | 'audio' | 'video' | 'multimodal'
 
 const STATUS_META: Record<VerificationStatus, { color: 'success' | 'warning' | 'error' | 'default'; label: string }> = {
   verified: { color: 'success', label: '已验证' },
   partial: { color: 'warning', label: '部分验证' },
   failed: { color: 'error', label: '未通过' },
-  pending: { color: 'default', label: '待校验' },
+  pending: { color: 'default', label: '待手动验证' },
 }
 
 const CATEGORY_OPTIONS: { key: CategoryFilter; label: string; icon: ReactElement }[] = [
   { key: 'all', label: '全部', icon: <HubIcon fontSize="small" /> },
-  { key: 'text_llm', label: '文本LLM', icon: <HubIcon fontSize="small" /> },
-  { key: 'image_gen', label: '图像生成', icon: <HubIcon fontSize="small" /> },
-  { key: 'audio_gen', label: '音频生成', icon: <HubIcon fontSize="small" /> },
-  { key: 'video_gen', label: '视频生成', icon: <HubIcon fontSize="small" /> },
-  { key: 'other', label: '其他', icon: <HubIcon fontSize="small" /> },
+  { key: 'llm', label: '文本LLM', icon: <HubIcon fontSize="small" /> },
+  { key: 'image', label: '图像生成', icon: <HubIcon fontSize="small" /> },
+  { key: 'audio', label: '音频生成', icon: <HubIcon fontSize="small" /> },
+  { key: 'video', label: '视频生成', icon: <HubIcon fontSize="small" /> },
+  { key: 'multimodal', label: '多模态', icon: <HubIcon fontSize="small" /> },
 ]
-
-function formatSyncSummary(result: CatalogSyncResult): string {
-  const parts: string[] = [
-    `总处理 ${result.processed} 个模型`,
-    `通过 ${result.verified} 个`,
-    `部分 ${result.partial} 个`,
-    `未通过 ${result.failed} 个`,
-    `跳过 ${result.skipped} 个`,
-  ]
-  if (result.skipped_up_to_date) {
-    parts.push(`(其中 ${result.skipped_up_to_date} 个无需更新)`)
-  }
-  return parts.join('，')
-}
 
 function formatDateTime(iso?: string | null): string {
   if (!iso) return '—'
@@ -490,7 +450,7 @@ function formatDateTime(iso?: string | null): string {
 
 function normalizeCategoryFilter(raw: string | null): CategoryFilter {
   if (!raw || raw === 'all') return 'all'
-  const allowed: CategoryFilter[] = ['text_llm', 'image_gen', 'audio_gen', 'video_gen', 'other']
+  const allowed: CategoryFilter[] = ['llm', 'image', 'audio', 'video', 'multimodal']
   return allowed.includes(raw as CategoryFilter) ? (raw as CategoryFilter) : 'all'
 }
 
@@ -698,16 +658,13 @@ export default function ModelCatalogPage() {
   const [overview, setOverview] = useState<CatalogOverview | null>(null)
   const [entries, setEntries] = useState<CatalogEntry[]>([])
   const [loading, setLoading] = useState(true)
-  const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [syncSummary, setSyncSummary] = useState<string | null>(null)
   const [keyword, setKeyword] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<CategoryFilter>(() =>
     normalizeCategoryFilter(searchParams.get('category'))
   )
   const selectedProvider = 'all'
   const [selectedStatus, setSelectedStatus] = useState<'all' | VerificationStatus>('all')
-  const [autoSyncAttempted, setAutoSyncAttempted] = useState(false)
   const [selectedModelKey, setSelectedModelKey] = useState<string | null>(null)
   const [selectedEntry, setSelectedEntry] = useState<CatalogEntry | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -742,7 +699,7 @@ export default function ModelCatalogPage() {
     setSearchParams(nextSearchParams, { replace: true })
   }, [categoryParam, searchParams, selectedCategory, setSearchParams])
 
-  const fetchCatalog = async (allowAutoSync = true) => {
+  const fetchCatalog = async () => {
     setLoading(true)
     setError(null)
 
@@ -755,9 +712,9 @@ export default function ModelCatalogPage() {
       const nextOverview = overviewResponse.data as CatalogOverview
       const nextEntries = (entriesResponse.data?.items || []) as CatalogEntry[]
 
-      if (allowAutoSync && !autoSyncAttempted && nextOverview.total_entries === 0) {
-        setAutoSyncAttempted(true)
-        await performSync({ manual: false, forceRefresh: true })
+      if (nextOverview.total_entries === 0) {
+        setOverview(nextOverview)
+        setEntries(nextEntries)
         return
       }
 
@@ -767,58 +724,6 @@ export default function ModelCatalogPage() {
       setError(await extractApiErrorMessage(fetchError, '加载模型档案失败'))
     } finally {
       setLoading(false)
-    }
-  }
-
-  const performSync = async ({
-    manual = true,
-    forceRefresh = false,
-  }: {
-    manual?: boolean
-    forceRefresh?: boolean
-  } = {}) => {
-    setSyncing(true)
-    setSyncSummary(null)
-    if (manual) {
-      setError(null)
-    }
-
-    try {
-      const response = await apiClient.syncModelCatalog({
-        force_refresh: forceRefresh,
-      })
-      const { task_id } = response.data
-
-      let pollCount = 0
-      const maxPolls = 300
-      const pollInterval = 5000
-
-      while (pollCount < maxPolls) {
-        await new Promise((resolve) => setTimeout(resolve, pollInterval))
-        const statusResponse = await apiClient.getSyncTaskStatus(task_id)
-        const { status, result } = statusResponse.data
-
-        if (status === 'completed' && result) {
-          setSyncSummary(formatSyncSummary(result as CatalogSyncResult))
-          await fetchCatalog(false)
-          break
-        }
-
-        if (status === 'failed') {
-          setError('同步任务执行失败，请查看后端日志。')
-          break
-        }
-
-        pollCount++
-      }
-
-      if (pollCount >= maxPolls) {
-        setError('同步任务超时，请稍后重试。')
-      }
-    } catch (syncError) {
-      setError(await extractApiErrorMessage(syncError, '提交同步任务失败'))
-    } finally {
-      setSyncing(false)
     }
   }
 
@@ -858,7 +763,7 @@ export default function ModelCatalogPage() {
     return matchKeyword && matchCategory && matchProvider && matchStatus
   })
 
-  const visibleEntries = filteredEntries.length > 0 ? filteredEntries : entries
+  const visibleEntries = filteredEntries
 
   return (
     <Box sx={{ minHeight: '100vh', backgroundColor: '#f4f7fb', py: 3 }}>
@@ -879,12 +784,6 @@ export default function ModelCatalogPage() {
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
             {error}
-          </Alert>
-        )}
-
-        {syncSummary && (
-          <Alert severity="success" sx={{ mb: 2 }}>
-            {syncSummary}
           </Alert>
         )}
 
@@ -942,15 +841,6 @@ export default function ModelCatalogPage() {
               variant={selectedStatus === 'partial' ? 'filled' : 'outlined'}
             />
           </Stack>
-
-          <Button
-            variant="contained"
-            startIcon={<SyncIcon />}
-            disabled={syncing}
-            onClick={() => performSync({ manual: true, forceRefresh: true })}
-          >
-            {syncing ? '同步中...' : '全量校验'}
-          </Button>
         </Stack>
 
         {overview && (
@@ -998,8 +888,18 @@ export default function ModelCatalogPage() {
               </Grid>
               <Grid item xs={6} sm={2}>
                 <Stack spacing={0.5}>
-                  <Typography variant="caption" color="text.secondary">最近校验</Typography>
-                  <Typography variant="body2">{formatDateTime(overview.last_verified_at)}</Typography>
+                  <Typography variant="caption" color="text.secondary">待手动验证</Typography>
+                  <Typography variant="h6" sx={{ color: 'text.secondary', fontWeight: 700 }}>
+                    {overview.pending_entries}
+                  </Typography>
+                </Stack>
+              </Grid>
+              <Grid item xs={6} sm={2}>
+                <Stack spacing={0.5}>
+                  <Typography variant="caption" color="text.secondary">模型总数</Typography>
+                  <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                    {overview.total_entries}
+                  </Typography>
                 </Stack>
               </Grid>
             </Grid>
@@ -1061,17 +961,23 @@ export default function ModelCatalogPage() {
                     <Divider sx={{ my: 0.5 }} />
 
                     <Stack direction="row" justifyContent="space-between" alignItems="center">
-                      <Stack direction="row" spacing={1.5}>
+                      {entry.verification_status === 'pending' ? (
                         <Typography variant="caption" color="text.secondary">
-                          校验分数：{(entry.verification_score * 100).toFixed(0)}%
+                          待手动验证 · 来源信息已清理
                         </Typography>
+                      ) : (
+                        <Stack direction="row" spacing={1.5}>
+                          <Typography variant="caption" color="text.secondary">
+                            校验分数：{(entry.verification_score * 100).toFixed(0)}%
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            来源：{entry.verified_source_count}/{entry.total_source_count}
+                          </Typography>
+                        </Stack>
+                      )}
+                      {entry.verification_status !== 'pending' && entry.last_verified_at && (
                         <Typography variant="caption" color="text.secondary">
-                          来源：{entry.verified_source_count}/{entry.total_source_count}
-                        </Typography>
-                      </Stack>
-                      {entry.last_verified_at && (
-                        <Typography variant="caption" color="text.secondary">
-                          最近校验：{formatDateTime(entry.last_verified_at)}
+                          校验：{formatDateTime(entry.last_verified_at)}
                         </Typography>
                       )}
                     </Stack>
@@ -1537,20 +1443,26 @@ export default function ModelCatalogPage() {
                 {detailTab === 5 && (
                   <Stack spacing={2.5}>
                     <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
-                      <Grid container spacing={2} alignItems="center">
-                        <Grid item xs={12} sm={4}>
-                          <Typography variant="caption" color="text.secondary">校验分数</Typography>
-                          <Typography variant="h6">{(selectedEntry.verification_score * 100).toFixed(0)}%</Typography>
+                      {selectedEntry.verification_status === 'pending' ? (
+                        <Alert severity="info" variant="outlined">
+                          来源验证信息已清理，当前状态为待手动验证。全量校验功能已移除，模型信息将通过手动方式维护。
+                        </Alert>
+                      ) : (
+                        <Grid container spacing={2} alignItems="center">
+                          <Grid item xs={12} sm={4}>
+                            <Typography variant="caption" color="text.secondary">校验分数</Typography>
+                            <Typography variant="h6">{(selectedEntry.verification_score * 100).toFixed(0)}%</Typography>
+                          </Grid>
+                          <Grid item xs={12} sm={4}>
+                            <Typography variant="caption" color="text.secondary">来源验证</Typography>
+                            <Typography variant="body2">{selectedEntry.verified_source_count} / {selectedEntry.total_source_count}</Typography>
+                          </Grid>
+                          <Grid item xs={12} sm={4}>
+                            <Typography variant="caption" color="text.secondary">最近同步</Typography>
+                            <Typography variant="body2">{formatDateTime(selectedEntry.last_synced_at)}</Typography>
+                          </Grid>
                         </Grid>
-                        <Grid item xs={12} sm={4}>
-                          <Typography variant="caption" color="text.secondary">来源验证</Typography>
-                          <Typography variant="body2">{selectedEntry.verified_source_count} / {selectedEntry.total_source_count}</Typography>
-                        </Grid>
-                        <Grid item xs={12} sm={4}>
-                          <Typography variant="caption" color="text.secondary">最近同步</Typography>
-                          <Typography variant="body2">{formatDateTime(selectedEntry.last_synced_at)}</Typography>
-                        </Grid>
-                      </Grid>
+                      )}
                       {selectedEntry.verification_status === 'partial' && (
                         <Alert severity="warning" variant="outlined" sx={{ mt: 1.5 }}>
                           官方来源未出现与项目内部 ID 完全一致的模型名，可能是项目内部别名或版本包装名。

@@ -58,7 +58,7 @@ def test_model_registry_auto_loads_catalog_yaml() -> None:
     registry = ModelRegistry()
     registry.clear()
 
-    spec = registry.get_spec("qwen3-tts-flash")
+    spec = registry.get_spec("qwen3-tts-instruct-flash")
 
     assert spec is not None
     assert spec.documentation_url.startswith("https://help.aliyun.com/")

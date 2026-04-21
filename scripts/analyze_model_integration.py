@@ -60,7 +60,7 @@ NEW_ADAPTER_MODELS = {
     "doubao-seedance-2-0", "doubao-seedance-2-0-fast", "doubao-seedance-1-5-pro",
     "doubao-seed-2-0-pro", "doubao-seed-2-0-lite",
     "qwen3.5-omni-plus", "qwen3.6-plus",
-    "qwen3-tts-flash", "cosyvoice-v3-plus",
+    "qwen3-tts-instruct-flash", "cosyvoice-v3-plus",
     "MiniMax/speech-2.8-turbo", "MiniMax/speech-2.8-hd",
     "pixverse-c1-r2v", "pixverse-v6-t2v",
     "vidu-q3-pro-img2video", "vidu-q3-pro-text2video", "vidu-q3-pro-start-end2video",

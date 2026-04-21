@@ -1,6 +1,7 @@
 # 本地优先资产架构方案
 
 日期：`2026-04-19`
+更新：`2026-04-21`
 
 ## 1. 背景
 
@@ -25,23 +26,29 @@
 
 ## 2. 最终结论
 
-本项目的最优方案不是“完全改成纯云端代理模式”，而是：
+本项目的最优方案不是“完全改成纯云端代理模式”，也不是“继续把所有本地文件长期直接堆进 IndexedDB”，而是：
 
-**核心业务服务端权威 + 媒体资产 local-first + 后端代理与临时资产层**
+**核心业务服务端权威 + 媒体资产 local-first + 浏览器本地资产层分级演进 + 后端代理与临时资产层**
 
 具体原则如下：
 
 1. 用户、项目、章节、积分、订单、审核、RAG、Agent 编排保留服务端权威。
-2. 图片、视频、音频这类大文件结果不再作为长期服务端资产保存。
+2. 图片、视频、音频这类大文件结果不再作为长期服务端资产保存，服务端主要承担临时中转与轻量元数据登记。
 3. 后端仍然负责：
    - API Key 管理
    - 第三方模型调用
    - 鉴权、限流、风控
    - 临时结果物化与对外受控暴露
 4. 前端负责：
-   - 将可收录资产下载到本地 IndexedDB
+   - 通过统一 `localAssetVault` 管理本地资产
+   - 当前兼容层：`IndexedDB blob`
+   - 下一阶段默认层：`OPFS + IndexedDB 索引`
+   - 用户可选增强层：`File System Access API` 本地资料库目录
    - 优先展示本地副本
    - 仅将轻量元数据登记到服务端
+5. “刷新浏览器后是否丢失”需要区分两类目标：
+   - **同一站点内刷新 / 重开页面后尽量不丢缓存**：默认依赖 `OPFS + IndexedDB 索引`，并配合 `navigator.storage.persist()`
+   - **用户可见真实本地文件，清理站点数据后也尽量不受影响**：依赖用户授权的 `File System Access API` 目录
 
 这套方案兼顾了：
 
@@ -62,7 +69,8 @@
 ### 3.1 浏览器侧职责
 
 - 展示和交互
-- 本地资产库（IndexedDB）
+- 本地资产库（当前 `IndexedDB blob`，目标 `OPFS + IndexedDB 索引`）
+- 用户可选长期资料库目录（`File System Access API`）
 - 本地优先预览
 - 临时草稿与缓存
 
@@ -114,15 +122,16 @@
 ┌─────────────────────────────────────────────────────┐
 │                   用户浏览器                         │
 │                                                     │
-│  IndexedDB / Local Asset Vault                      │
-│  - 已收录图片                                       │
-│  - 已收录视频                                       │
-│  - 已收录音频                                       │
-│  - 本地 object URL 预览                             │
+│  Local Asset Vault 抽象                             │
+│  - 默认文件存储：OPFS                               │
+│  - 本地索引：IndexedDB                              │
+│  - 兼容回读：legacy IndexedDB blob                  │
+│  - 可选增强：File System Access API 用户目录         │
+│  - 本地 object URL / File 预览                      │
 │                                                     │
 │  前端应用状态                                       │
-│  - 编辑器 / 用户中心 / Asset Studio                 │
-│  - 本地优先读取资产                                 │
+│  - 编辑器 / 用户中心 / Asset Studio / Audiobook     │
+│  - 统一按 asset_uuid 读写本地资产                   │
 └─────────────────────────┬───────────────────────────┘
                           │ HTTPS
                           ▼
@@ -153,9 +162,13 @@
 ### 5.2 关键数据原则
 
 - **核心业务数据**：服务端权威
-- **媒体大文件**：本地优先
+- **媒体大文件**：浏览器 local-first
+- **浏览器默认本地文件层**：`OPFS`
+- **浏览器本地索引层**：`IndexedDB`，记录 `asset_uuid -> driver/path/metadata`
+- **用户可选长期资料库**：`File System Access API` 目录
 - **临时生成结果**：服务端短期存在，作为受控中转层
 - **长期可见资产目录**：服务端只保留元数据，不保留大文件本体
+- **storage_mode 的职责**：表达资产生命周期，不直接编码 `indexeddb / opfs / external_directory` 这类本地驱动细节
 
 ## 6. 数据模型设计
 
@@ -205,6 +218,15 @@
   - 资产已在用户浏览器完成本地镜像，同时仍保留服务端或临时端点兜底。
 - `local_only`
   - 资产仅存在于本地，服务端只保留登记元数据。
+
+补充说明：
+
+- 当前不建议为了区分 `IndexedDB / OPFS / File System Access API` 而扩展 `storage_mode` 枚举。
+- 本地驱动细节建议先写入 `metadata_json`，例如：
+  - `local_storage_driver`: `legacy_indexeddb` | `opfs` | `external_directory`
+  - `local_storage_path`
+  - `external_relative_path`
+  - `local_persist_level`: `best_effort` | `persistent_requested` | `user_directory`
 
 ### 6.3 当前采用策略
 
@@ -279,15 +301,17 @@ interface AssetStudioGenerateResponse {
 3. 如果第三方返回远端 URL，后端先拉取并物化到内部临时目录。
 4. 后端向前端返回内部资产描述对象 `assets / primary_asset`。
 5. 前端在用户点击“收录”时下载该资产 blob。
-6. 前端将 blob 存入 IndexedDB。
-7. 前端调用 `/api/v1/user-assets` 仅登记元数据。
+6. 前端将 blob 写入统一本地资产层。
+7. 当前实现仍为 `IndexedDB blob`，目标演进为 `OPFS + IndexedDB 索引`。
+8. 前端调用 `/api/v1/user-assets` 仅登记元数据。
 
 ### 8.2 用户中心预览链路
 
 1. 用户中心拉取 `user_asset_records`。
-2. 前端尝试按 `asset_uuid` 从本地资产库读取 blob。
-3. 若本地存在，则生成 object URL 预览。
-4. 若本地不存在，则退回：
+2. 前端尝试按 `asset_uuid` 通过 `localAssetVault` 读取本地资产。
+3. 目标读取顺序应为：`OPFS -> 用户目录 -> legacy IndexedDB blob`。
+4. 若本地存在，则生成 object URL 或 File 预览。
+5. 若本地不存在，则退回：
    - 受保护 DreamWeaver 文件接口
    - `preview_uri`
    - `source_uri`
@@ -319,7 +343,7 @@ interface AssetStudioGenerateResponse {
 ### 9.2 前端
 
 - API 类型定义已切到新 contract
-- 已新增 `localAssetVault`，基于 IndexedDB 保存本地资产 blob
+- 已新增 `localAssetVault`，当前基于 IndexedDB 保存本地资产 blob，并已经形成稳定的 `save / get` 抽象
 - `Asset Studio` 收录流程已改为：
   - 下载 blob
   - 写本地资产库
@@ -339,7 +363,14 @@ interface AssetStudioGenerateResponse {
   - `activeStep`
   - `generating`
   - `ttsModel`
-- 但 Audiobook 页面与 `BrowserPlayer` 仍未把“本地资产回读”“播放器状态持久化”接完整
+- `BrowserPlayer` 已接入：
+  - 章节音频本地优先回读
+  - 首次远端拉取后的本地缓存
+  - 字幕下载时的本地缓存
+  - `currentChapterIndex / currentTime / volume / subtitleFormat / showSubtitles / wasPlaying` 的 `localStorage` 持久化
+- Audiobook 页面行内播放也已支持优先回读本地音频
+- 但当前本地资产层仍是 `IndexedDB blob`，尚未升级到 `OPFS + IndexedDB 索引`
+- 也还没有用户可选的真实本地资料库目录
 
 ## 10. 当前未落地内容
 
@@ -404,10 +435,10 @@ Audiobook 相关数据应拆成四层：
 3. `checkpoint_json` 已开始写入，但当前主要是 `engine_task_id`、`output_path`、`tracker_detail` 等轻量信息，尚未达到 segment 级可恢复数据标准。
 4. `can_resume` 当前主要依赖 `completed_segment_indices / cached_audio_paths`，且把 `failed` run 排除在外，也没有按 `script_hash / voice_config_hash / audio_fx_hash / expires_at / 临时对象是否存在` 做完整校验。
 5. `ChapterAudio.task_id` 与 `ChapterAudio.generation_progress_json` 仍在使用，容易和最终章节结果耦合。
-6. 前端会话恢复仅覆盖极少数字段，不包含章节勾选、播放器进度、音量、弹窗状态、未保存编辑态等 UI 临时态。
+6. 前端页面级会话恢复仅覆盖极少数字段，不包含章节勾选、弹窗状态、未保存编辑态等大部分 UI 临时态；播放器进度与音量当前只在 `BrowserPlayer` 内部单独持久化。
 7. 当前 `AudiobookPage` 的恢复顺序存在竞争窗口：先恢复 `taskId / audiobookProjectId`，后续 `handleSelectProject` 又会清空它们，因此刷新恢复现在并不完全可靠。
-8. 最终章节音频目前只有在用户手动点击“收录”后才会进入 IndexedDB；未收录时，刷新后仍主要依赖服务端下载链路。
-9. `BrowserPlayer` 仍直接使用服务端 `audio_url`，没有接入 local-first 回读，也没有持久化 `currentChapterIndex / currentTime / volume / isPlaying`。
+8. 最终章节音频目前除了用户手动点击“收录”外，也可能在播放器播放或页面内试听时被写入本地缓存；但这仍不是统一的“自动收录”策略，未被缓存过的音频刷新后仍主要依赖服务端下载链路。
+9. `BrowserPlayer` 已形成单独的 local-first 播放闭环，并持久化了 `currentChapterIndex / currentTime / volume / subtitleFormat / showSubtitles / wasPlaying`；但这套恢复仍依赖浏览器本地存储，且自动续播仍受浏览器自动播放策略影响。
 10. TTS 的 `enable_cache` 不能等价视为“断点续传已经完成”。
 
 也就是说：
@@ -497,7 +528,7 @@ chapter_audio_runs
   "run_id": "uuid",
   "status": "running",
   "current_stage": "tts_synthesis",
-  "tts_model": "qwen3-tts-flash",
+  "tts_model": "qwen3-tts-instruct-flash",
   "output_format": "mp3",
   "script_hash": "sha256",
   "voice_config_hash": "sha256",
@@ -541,12 +572,12 @@ Audiobook 相关数据推荐按下表处理：
 | 数据类型 | 存储位置 | 说明 |
 | --- | --- | --- |
 | 页面恢复态 | 浏览器 `localStorage` / IndexedDB | 仅用于 UI 恢复，当前只部分实现 |
-| 播放器状态 | 浏览器本地 | 如需刷新后连续播放需单独持久化，当前未实现 |
+| 播放器状态 | 浏览器本地 | `BrowserPlayer` 已实现章节、进度、音量、字幕与上次播放态持久化，但页面级状态仍未统一 |
 | 任务状态 | 服务端数据库 | 以 `AudiobookTask` 或 `chapter_audio_runs` 为权威 |
 | 章节剧本/评审 | 服务端数据库 | 业务真相，不下放浏览器 |
 | 断点元数据 | 服务端数据库 | 必须跨设备、跨刷新、跨 worker 恢复 |
 | 中间片段音频 | 服务端临时对象层 | 仅用于恢复，不属于正式资产 |
-| 最终章节音频 | 用户本地资产库 + 服务端短时兜底 | 进入 local-first 资产链路；当前仅在“已手动收录”后进入本地资产库 |
+| 最终章节音频 | 用户本地资产库 + 服务端短时兜底 | 进入 local-first 资产链路；当前可由手动收录或播放缓存进入本地资产库，但仍缺统一自动收录策略 |
 
 不建议做的事情：
 
@@ -628,9 +659,9 @@ backend/data/tmp/audiobook_runs/{run_id}/segment_002.mp3
 
 当前状态校准：
 
-- Audiobook 只完成了“手动收录章节成品音频”的入口
-- 本地资产回读当前主要发生在用户中心
-- Audiobook 页面与 `BrowserPlayer` 还没有真正复用同一套本地优先读取逻辑
+- Audiobook 已完成“手动收录章节成品音频”的入口
+- 本地资产回读当前已经发生在用户中心、Audiobook 页面行内播放与 `BrowserPlayer`
+- 但这些调用当前仍共同落在 `IndexedDB blob` 兼容层上，尚未升级到 `OPFS` 驱动
 
 Audiobook 真正接入本地优先资产抽象时，建议只把 **最终章节音频** 纳入资产收录。
 
@@ -638,9 +669,11 @@ Audiobook 真正接入本地优先资产抽象时，建议只把 **最终章节�
 
 1. 后端完成章节音频生成
 2. 前端通过受控下载接口获取最终音频 blob
-3. 前端写入本地资产库（IndexedDB，后续可演进到 OPFS）
+3. 前端写入统一本地资产层（当前 IndexedDB，后续演进到 OPFS）
 4. 前端调用 `/api/v1/user-assets` 登记轻量元数据
 5. 用户中心优先显示本地副本
+
+这条链路与当前真实代码是对齐的，而且 [AudiobookPage](../frontend/src/pages/AudiobookPage.tsx) 与 [BrowserPlayer](../frontend/src/components/audiobook/BrowserPlayer.tsx) 已经是最适合第一批切换到 `OPFS` 的调用方，因为它们都围绕 `assetUuid + getLocalAssetBlob()/saveLocalAsset()` 工作。
 
 补充建议：
 
@@ -675,7 +708,7 @@ Audiobook 建议按以下顺序改造，而不是一次性大拆：
    - 保证用户完成后能把最终音频拿回本地
    - 让 Audiobook 页面与播放器也能优先读本地副本
 
-如果只做一件事，优先级最高的是：
+如果只做一件 **Audiobook 专项改造**，优先级最高的是：
 
 **先让“断点真相”真正收口到 `chapter_audio_runs`，并让 `resume-generation` 具备真实续跑能力。**
 
@@ -704,34 +737,116 @@ Audiobook 建议按以下顺序改造，而不是一次性大拆：
   - `generating`
   - `ttsModel`
 - 但这套恢复当前并不完全可靠，因为存在恢复顺序上的竞争窗口
-- 已手动收录到 IndexedDB 的章节成品音频，在同一浏览器刷新后通常不会丢
-- 未手动收录的章节成品音频，并没有完成本地镜像，刷新后仍依赖服务端下载链路
-- 以下状态当前刷新后会丢，或至少不会被稳定恢复：
-  - 章节勾选状态
-  - `BrowserPlayer` 当前章节
+- `BrowserPlayer` 当前已能恢复：
+  - 当前章节
   - 播放进度
   - 音量
-  - 播放中状态
+  - 字幕格式 / 显示状态
+  - 上次是否处于播放态
+- 但“自动续播”仍可能受浏览器自动播放策略影响，不能承诺绝对无感恢复
+- 已进入 `localAssetVault` 的章节成品音频，在同一浏览器、同一站点存储未被清理的前提下，刷新后通常不会丢
+- 但当前底层仍是 `IndexedDB blob`，如果浏览器清理站点数据、配额被回收、切换浏览器或重装环境，仍可能丢失本地副本
+- 未手动收录、也未被播放器或页面缓存过的章节成品音频，刷新后仍依赖服务端下载链路
+- 以下状态当前刷新后会丢，或至少不会被稳定恢复：
+  - 章节勾选状态
   - 弹窗开关
   - 未保存的编辑态
+  - 页面级任务恢复过程中的临时 UI 上下文
 
 因此，修正文档后的准确表述应是：
 
-- **方案方向本身可以做到“刷新后核心数据不丢”**
-- **但以当前代码状态看，还做不到“刷新后无感续跑、无感续播”**
+- **方案方向本身可以做到“刷新后核心数据不丢，已缓存资产尽量不丢”**
+- **但以当前代码状态看，还做不到“清站点数据后仍稳定保有本地副本”，也还做不到“刷新后任务恢复与播放恢复完全无感”**
 
-### 10.2 PWA / OPFS
+### 10.2 本地资产存储演进（IndexedDB -> OPFS -> 用户目录）
 
-当前本地资产层先基于 IndexedDB。
+先给结论：
 
-尚未做：
+- 当前工程已经落地的是：**`IndexedDB 直接存 Blob`**
+- 下一阶段默认方案应当是：**`OPFS 存文件 + IndexedDB 存索引`**
+- 用户如果希望拿到更接近“真实本地文件夹”的体验，应增加：**`File System Access API` 用户授权目录**
+- “下载到本地 + IndexedDB 索引”不适合作为主架构，只适合作为导出 / 备份能力
+
+#### 10.2.1 当前 IndexedDB 方案能解决什么、解决不了什么
+
+当前 `localAssetVault` 的优点是：
+
+- 已经接入现有业务代码，迁移成本最低
+- 同一浏览器内刷新、重开标签页后，通常还能命中本地副本
+- 非常适合做 local-first 第一阶段验证
+
+但它的边界也很明确：
+
+- 仍属于站点存储，受浏览器 quota 和清理策略影响
+- 用户清理站点数据后，本地副本会一起消失
+- 对大体积 blob 的长期读写、迁移、诊断都不够友好
+- 没有真正“用户可见文件”的概念
+
+因此，准确表述不应是“实现后刷新就绝对不会丢”，而应是：
+
+- **在同一浏览器、同一站点存储未被清理的前提下，刷新后通常不会丢**
+- **一旦站点数据被清理、浏览器换环境、或配额被回收，本地副本仍可能丢**
+
+#### 10.2.2 方案对比与推荐角色
+
+| 方案 | 角色定位 | 优点 | 限制 | 推荐级别 |
+| --- | --- | --- | --- | --- |
+| `IndexedDB blob` | 当前兼容层 / 迁移来源 | 已落地、接入成本低 | 大文件体验一般，仍易受站点清理影响 | 保留兼容，不作为长期目标 |
+| `OPFS + IndexedDB 索引` | 浏览器默认本地资产层 | 更适合文件式读写，适合大文件缓存主存储，可继续走 `asset_uuid` 抽象 | 仍受站点配额与清理策略影响，需要兼容性 fallback | **主方案** |
+| `File System Access API` 用户目录 | 用户可选长期资料库 | 真正落到用户可见目录，对“站点数据清理”更不敏感，适合长期保有 | 需要用户授权，浏览器支持不一致，需要处理重新授权与句柄失效 | **增强方案** |
+| 导出下载 + 本地索引 | 导出 / 备份 | 简单直观 | 依赖用户手动管理，不能自动作为统一资产主存储 | 辅助能力 |
+
+这里要特别避免两个误判：
+
+- 不要把 `OPFS` 描述成“几乎无限、不会被清理”的本地磁盘替代
+- 不要把“下载到本地”误当成统一资产系统，它更适合作为导出而不是运行态主存储
+
+#### 10.2.3 推荐数据结构方向
+
+为了不破坏当前后端 schema 与前端 contract，推荐：
+
+- 继续保留现有 `storage_mode` 四种语义：
+  - `temp_cloud`
+  - `durable_cloud`
+  - `local_mirror`
+  - `local_only`
+- 暂不把 `indexeddb / opfs / external_directory` 这种驱动类型塞进 `storage_mode`
+- 驱动细节先写入本地索引或服务端 `metadata_json`
+
+推荐字段方向：
+
+- `local_storage_driver`: `legacy_indexeddb` | `opfs` | `external_directory`
+- `local_storage_path`
+- `external_relative_path`
+- `local_persist_level`: `best_effort` | `persistent_requested` | `user_directory`
+
+这样可以在不改后端枚举的情况下，让本地资产层独立演进。
+
+#### 10.2.4 推荐迁移策略
+
+本项目最适合的演进方式不是“一次性切掉 IndexedDB”，而是渐进迁移：
+
+1. 提升 `localAssetVault` 的 `DB_VERSION`
+2. 保留 legacy `blob` 字段的兼容读取能力
+3. 新资产默认直接写入 `OPFS`
+4. 旧资产在读取命中时，按需迁移到 `OPFS`
+5. IndexedDB 只保留索引与少量兼容字段
+6. 同步接入 `navigator.storage.persist()` 申请更稳的站点存储策略
+7. 为存储失败、空间不足、句柄失效提供可见提示与回退逻辑
+
+对当前工程来说，最佳切入点就是先改 [localAssetVault](../frontend/src/utils/localAssetVault.ts)，而不是先改业务页面，因为 `Asset Studio`、用户中心、`AudiobookPage`、`BrowserPlayer` 已经都通过同一套抽象访问本地资产。
+
+### 10.3 PWA 与持久化增强
+
+当前本地资产层尚未做以下增强：
 
 - PWA 安装态
 - Service Worker
-- OPFS 文件级存储
+- `navigator.storage.persist()`
+- 存储空间 / quota 可视化
 - 离线包策略
 
-### 10.3 真正的纯流式代理
+### 10.4 真正的纯流式代理
 
 本轮 `Asset Studio` 对第三方远端 URL 的处理仍然是：
 
@@ -742,7 +857,7 @@ Audiobook 建议按以下顺序改造，而不是一次性大拆：
 
 但它还不是最终形态的“全程内存流式 pipe”。
 
-### 10.4 真实环境迁移执行与联调
+### 10.5 真实环境迁移执行与联调
 
 本轮完成的是：
 
@@ -788,42 +903,46 @@ Audiobook 建议按以下顺序改造，而不是一次性大拆：
 - 用户资产新模型
 - 用户中心本地优先预览
 - DreamWeaver 收录字段切换
+- `localAssetVault` 已形成统一前端抽象，但当前底层仍是 `IndexedDB blob`
 - Audiobook 运行态建模起步：
   - `chapter_audio_runs` 已建表
   - 章节成品音频已支持手动收录
   - 前端已有轻量会话恢复
+- `BrowserPlayer` 已接入章节音频本地优先回读、字幕缓存与播放器状态持久化
 
 ### 阶段 2：建议下一步
 
-1. 执行数据库迁移并完成联调
-2. 让 `chapter_audio_runs + checkpoint_json` 成为恢复能力的主来源，`generation_progress_json` 仅保留过渡兼容
-3. 打通 `resume-generation` 的真实续跑能力与恢复校验规则
-4. 修复 Audiobook 页面刷新恢复链路中的状态清空竞争问题
-5. 将 Audiobook 页面 / 播放器接入同一套本地优先资产回读抽象
-6. 为 Asset Studio 增加更明确的资产生命周期管理
+1. 先把 `localAssetVault` 重构为 `OPFS + IndexedDB 索引 + legacy IndexedDB blob 兼容`
+2. 升级 `DB_VERSION` 并做读取时的渐进迁移，而不是一次性全量搬迁
+3. 接入 `navigator.storage.persist()`，补齐空间不足与写入失败提示
+4. 保持 `storage_mode` 不扩枚举，把 `local_storage_driver / local_storage_path / local_persist_level` 先落到 `metadata_json`
+5. 执行数据库迁移并完成联调
+6. 让 `chapter_audio_runs + checkpoint_json` 成为恢复能力的主来源，`generation_progress_json` 仅保留过渡兼容
+7. 打通 `resume-generation` 的真实续跑能力与恢复校验规则
+8. 修复 Audiobook 页面刷新恢复链路中的状态清空竞争问题
 
 ### 阶段 3：中期增强
 
-1. 引入 PWA
-2. 评估 IndexedDB -> OPFS 的演进
-3. 增加本地资产导出 / 备份提示
-4. 增加本地资产缺失检测与重建策略
+1. 为用户中心 / Audiobook / 资产工作台增加 `File System Access API` 资料库目录模式
+2. 增加本地资产导出 / 备份提示
+3. 增加本地资产缺失检测与重建策略
+4. 引入 PWA 与离线增强能力
 
 ### 阶段 4：长期优化
 
 1. 将临时资产层从“下载落临时目录”演进为真正的流式代理
 2. 完善媒体清理策略与 TTL
-3. 将更多媒体产物纳入统一资产生命周期管理
+3. 将更多长期媒体产物纳入统一本地资产生命周期管理
 
 ## 13. 一句话结论
 
 本项目当前最优方案不是“全量改成纯云端代理模式”，而是：
 
-**让核心业务继续服务端权威，让媒体资产转向 local-first，并由后端承担受控代理与临时资产层。**
+**让核心业务继续服务端权威，让媒体资产转向 local-first，并把浏览器本地资产层从“IndexedDB 存 Blob”演进到“OPFS + IndexedDB 索引”，再用用户可选目录模式承接真正长期本地持有。**
 
 修正文档后需要明确两点：
 
 - 这套方案的**方向**仍然正确
-- 但以当前实现为准，浏览器刷新只能保证“核心业务数据与已收录本地资产尽量不丢”，还不能保证“播放器状态与断点续跑无感恢复”
+- 但以当前实现为准，只能保证“同一站点存储未被清理时，核心业务数据与已缓存本地资产尽量不丢”，还不能保证“清站点数据后本地文件仍稳定保留”，也还不能保证“任务恢复与播放恢复完全无感”
 
 也就是说，目标架构没有问题，当前要补的是 **Audiobook 运行态闭环** 与 **前端刷新恢复闭环**。

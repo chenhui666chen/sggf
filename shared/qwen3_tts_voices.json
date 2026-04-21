@@ -1,7 +1,7 @@
 {
-  "model": "qwen3-tts-flash",
-  "updated_at": "2025-11-27",
-  "source": "https://bailian.console.aliyun.com/?tab=doc#/doc/?type=model&url=2879134 | https://bailian.console.aliyun.com/?tab=api#/api/?type=model&url=2881635",
+  "model": "qwen3-tts-instruct-flash",
+  "updated_at": "2026-04-21",
+  "source": "https://help.aliyun.com/zh/model-studio/qwen-tts | https://help.aliyun.com/zh/model-studio/qwen-tts-api",
   "voices": [
     {
       "id": "Cherry",

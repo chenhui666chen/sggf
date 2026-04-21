@@ -348,7 +348,7 @@ async def delete_project(
 @router.get("/{project_id}/audio-config", response_model=ProjectAudioConfig)
 async def get_project_audio_config(
     project_id: int,
-    tts_model: str = Query("qwen3-tts-flash"),
+    tts_model: str = Query("qwen3-tts-instruct-flash"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectAudioConfig:
@@ -375,7 +375,7 @@ async def get_project_audio_config(
 async def update_project_audio_config(
     project_id: int,
     config: ProjectAudioConfig,
-    tts_model: str = Query("qwen3-tts-flash"),
+    tts_model: str = Query("qwen3-tts-instruct-flash"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectAudioConfig:
@@ -404,7 +404,7 @@ async def update_project_audio_config(
 @router.post("/{project_id}/audio-config/auto-voices", response_model=ProjectAudioConfig)
 async def auto_assign_project_audio_voices(
     project_id: int,
-    tts_model: str = Query("qwen3-tts-flash"),
+    tts_model: str = Query("qwen3-tts-instruct-flash"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectAudioConfig:

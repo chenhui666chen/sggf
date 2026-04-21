@@ -42,43 +42,33 @@ VOICE_PROFILE_OVERRIDES: Dict[str, Dict[str, Any]] = {
     "Momo": {"age_group": "young"},
     "Bunny": {"age_group": "young", "personality": "energetic"},
     "Kai": {"personality": "energetic"},
-    "Aiden": {"personality": "energetic"},
     "Vincent": {"personality": "calm"},
+    "Neil": {"personality": "calm"},
     "Mia": {"personality": "energetic"},
     "Eldric Sage": {"age_group": "elder", "personality": "serious"},
     # 方言音色（官方 voice 参数）
-    "Jada": {"personality": "dialect"},
-    "Dylan": {"personality": "dialect"},
-    "Li": {"personality": "dialect"},
-    "Marcus": {"personality": "dialect"},
-    "Roy": {"personality": "dialect"},
-    "Peter": {"personality": "dialect"},
-    "Sunny": {"personality": "dialect"},
-    "Eric": {"personality": "dialect"},
-    "Rocky": {"personality": "dialect"},
-    "Kiki": {"personality": "dialect"},
 }
 
 LEGACY_PRESET_ALIASES = {
     "male_young_energetic": "Ethan",
     "male_young_gentle": "Vincent",
-    "male_adult_calm": "Ryan",
-    "male_adult_energetic": "Aiden",
+    "male_adult_calm": "Neil",
+    "male_adult_energetic": "Ethan",
     "male_elder_wise": "Eldric Sage",
     "male_warm": "Vincent",
     "male_customer_service": "Kai",
     "male_refreshing": "Kai",
     "male_monkey": "Nofish",
-    "male_narrator": "Ryan",
-    "male_villain_sinister": "Aiden",
-    "female_villain_cold": "Jennifer",
-    "female_villain_cunning": "Katerina",
+    "male_narrator": "Neil",
+    "male_villain_sinister": "Vincent",
+    "female_villain_cold": "Bellona",
+    "female_villain_cunning": "Vivian",
     "female_young_gentle": "Cherry",
     "female_young_energetic": "Bunny",
     "female_young_cute": "Momo",
     "female_adult_elegant": "Bella",
     "female_adult_intellectual": "Vivian",
-    "female_capable": "Jennifer",
+    "female_capable": "Bellona",
     "female_elder": "Chelsie",
     "female_intimate": "Mochi",
     "female_lively": "Mia",
@@ -145,7 +135,7 @@ class VoiceProfile:
     personality: str  # "calm" | "energetic" | "gentle" | "cold" | "warm"
     
     # TTS参数
-    tts_model: str = "qwen3-tts-flash"  # 🆕 适用的TTS模型
+    tts_model: str = "qwen3-tts-instruct-flash"  # 🆕 适用的TTS模型
     tts_speaker_id: str = ""  # TTS服务的音色ID
     pitch_base: int = 50  # 基础音高 0-100
     speed_base: float = 1.0  # 基础语速 0.5-2.0
@@ -956,7 +946,7 @@ class VoiceManager:
             gender=voice_config["gender"],
             age_group=voice_config["age_group"],
             personality=voice_config["personality"],
-            tts_model=tts_model or voice_config.get("tts_model", "qwen3-tts-flash"),
+            tts_model=tts_model or voice_config.get("tts_model", "qwen3-tts-instruct-flash"),
             tts_speaker_id=voice_config["tts_speaker_id"],
             pitch_base=voice_config["pitch_base"],
             speed_base=voice_config["speed_base"],
@@ -1068,7 +1058,7 @@ class VoiceManager:
                     cost_priority="balanced",
                 )
             if not tts_model:
-                tts_model = "qwen3-tts-flash"
+                tts_model = "qwen3-tts-instruct-flash"
             
             voice_config["tts_model"] = tts_model
 
@@ -1184,7 +1174,7 @@ class VoiceManager:
                 "age_group": profile.age_group if profile.age_group != "unknown" else None,
                 "role_type": getattr(profile, 'role_type', None),
                 "personality": profile.personality,
-                "tts_model": profile.tts_model if profile.tts_model != "qwen3-tts-flash" else None,  # 🆕 TTS模型
+                "tts_model": profile.tts_model if profile.tts_model != "qwen3-tts-instruct-flash" else None,  # 🆕 TTS模型
             }
         return mapping
     

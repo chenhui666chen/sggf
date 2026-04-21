@@ -250,7 +250,7 @@ class AudiobookAppService:
         # 2. 验证章节
 
         # 3. 构建 voice_mapping
-        tts_model = (request.tts_model or "qwen3-tts-flash").strip()
+        tts_model = (request.tts_model or "qwen3-tts-instruct-flash").strip()
         voice_mapping_data = self._load_project_voice_mapping(project, tts_model)
         self._apply_request_voice_config(voice_mapping_data, request.voice_config)
         self._auto_assign_voices(project.id, voice_mapping_data, tts_model)

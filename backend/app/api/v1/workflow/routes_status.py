@@ -31,6 +31,10 @@ from app.api.v1.workflow import router
 from app.api.v1.workflow.schemas import *
 from app.api.v1.workflow.helpers import *
 from app.api.v1.workflow.story_helpers import *
+from app.api.v1.workflow.execute_background import (
+    _run_execute_stage_background_serialized,
+    _run_execute_stage_with_streaming_serialized,
+)
 
 @router.post("/regenerate-stage")
 async def regenerate_stage(

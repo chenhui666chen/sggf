@@ -41,7 +41,7 @@ VERIFIED_MODELS = {
     "MiniMax/speech-2.8-turbo",
     "MiniMax/speech-2.8-hd",
     "cosyvoice-v3-plus",
-    "qwen3-tts-flash",
+    "qwen3-tts-instruct-flash",
     # 音效 - Vidu平台
     "vidu-timing2audio",
     # 音乐 - Mureka平台
