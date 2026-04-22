@@ -1294,6 +1294,16 @@ class ApiClient {
     return this.client.post('/api/v1/audiobook/tts/voices/cosyvoice-v3.5-plus/clones', payload)
   }
 
+  createCosyVoiceV3PlusDesign(payload: {
+    name: string
+    voice_prompt: string
+    preview_text: string
+    sample_rate?: number
+    response_format?: string
+  }) {
+    return this.client.post('/api/v1/audiobook/tts/voices/cosyvoice-v3.5-plus/designs', payload)
+  }
+
   deleteCosyVoiceV3PlusClone(voiceId: string) {
     return this.client.delete(
       `/api/v1/audiobook/tts/voices/cosyvoice-v3.5-plus/clones/${encodeURIComponent(voiceId)}`

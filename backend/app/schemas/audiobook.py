@@ -132,6 +132,17 @@ class CosyVoiceCloneCreateRequest(BaseModel):
     prefix: Optional[str] = None
 
 
+class CosyVoiceDesignCreateRequest(BaseModel):
+    """CosyVoice v3.5-plus 澹伴煶璁捐璇锋眰銆?"""
+
+    name: str
+    voice_prompt: str
+    preview_text: str
+    prefix: Optional[str] = None
+    sample_rate: Optional[int] = 24000
+    response_format: Optional[str] = "wav"
+
+
 class AudiobookTaskStatus(BaseModel):
     """Celery 任务状态响应"""
     celery_task_id: Optional[str]

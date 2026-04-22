@@ -56,6 +56,49 @@ class ViduTiming2AudioGenerator:
             "Content-Type": "application/json",
             "Authorization": f"Token {self.api_key}"
         }
+
+    def _get_task_creations_url(self, task_id: str) -> str:
+        """获取任务生成物查询地址"""
+        return f"{self.base_url}/tasks/{task_id}/creations"
+
+    @staticmethod
+    def _extract_audio_url(payload: Optional[Dict[str, Any]]) -> Optional[str]:
+        """从 Vidu 查询结果中提取音频地址"""
+        if not isinstance(payload, dict):
+            return None
+
+        creations = payload.get("creations")
+        if isinstance(creations, list):
+            for creation in creations:
+                if isinstance(creation, dict):
+                    url = creation.get("url") or creation.get("audio_url")
+                    if url:
+                        return str(url)
+
+        result = payload.get("result")
+        if isinstance(result, dict):
+            url = result.get("audio_url") or result.get("url")
+            if url:
+                return str(url)
+
+        return None
+
+    def _normalize_query_response(self, task_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """统一查询结果结构，兼容 creations/url 与旧 result/audio_url 读取方式"""
+        normalized = dict(payload)
+        normalized.setdefault("task_id", task_id)
+
+        audio_url = self._extract_audio_url(normalized)
+        if audio_url:
+            result = normalized.get("result")
+            if not isinstance(result, dict):
+                result = {}
+            normalized["result"] = {
+                **result,
+                "audio_url": result.get("audio_url") or audio_url,
+            }
+
+        return normalized
     
     def _generate_task_id(self, timing_prompts: List[Dict], duration: float) -> str:
         """生成任务 ID"""
@@ -143,15 +186,15 @@ class ViduTiming2AudioGenerator:
         
         try:
             response = requests.get(
-                f"{self.base_url}/tasks/{task_id}",
+                self._get_task_creations_url(task_id),
                 headers=self._get_headers(),
                 timeout=10
             )
             response.raise_for_status()
             
-            data = response.json()
+            data = self._normalize_query_response(task_id, response.json())
             
-            if "task_id" in data:
+            if data.get("task_id") or data.get("state") or data.get("creations"):
                 return data
             else:
                 logger.error(f"❌ 查询任务失败：{data.get('message', 'Unknown error')}")
@@ -217,7 +260,7 @@ class ViduTiming2AudioGenerator:
             
             if state == "success":
                 # 任务成功，获取音频 URL
-                audio_url = result.get("result", {}).get("audio_url")
+                audio_url = self._extract_audio_url(result)
                 if audio_url:
                     logger.info(f"✅ 音效生成成功：{task_id}")
                     return ViduTiming2AudioResult(
@@ -319,16 +362,16 @@ class ViduTiming2AudioGenerator:
                 start_time = time.time()
                 while time.time() - start_time < max_wait:
                     response = await client.get(
-                        f"{self.base_url}/tasks/{task_id}",
+                        self._get_task_creations_url(task_id),
                         headers=self._get_headers()
                     )
                     response.raise_for_status()
                     
-                    data = response.json()
+                    data = self._normalize_query_response(task_id, response.json())
                     state = data.get("state")
                     
                     if state == "success":
-                        audio_url = data.get("result", {}).get("audio_url")
+                        audio_url = self._extract_audio_url(data)
                         if audio_url:
                             logger.info(f"✅ 音效生成成功：{task_id}")
                             return ViduTiming2AudioResult(

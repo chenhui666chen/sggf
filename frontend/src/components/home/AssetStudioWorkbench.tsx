@@ -75,7 +75,17 @@ interface CameraControlOption {
   helper: string
 }
 
-type AudioGenerationType = 'music' | 'sound-effect'
+interface SpeechVoicePreset {
+  id: string
+  speaker: string
+  label: string
+  category?: string
+  description?: string
+  customType?: 'clone' | 'design'
+  supportsInstruct?: boolean
+}
+
+type AudioGenerationType = 'music' | 'sound-effect' | 'speech'
 type AssetStudioMediaType = 'image' | 'video' | 'audio'
 type AssetCollectKey = 'image' | 'video' | 'motion' | 'audio'
 
@@ -546,6 +556,11 @@ const AUDIO_GENERATION_TYPE_OPTIONS: Array<{ value: AudioGenerationType; label: 
     label: '音效生成',
     helper: '适合环境音、动作音和短时音效草案。',
   },
+  {
+    value: 'speech',
+    label: '语音合成',
+    helper: '适合旁白、对白和角色试听，可直接选择 TTS 模型与音色。',
+  },
 ]
 
 const AUDIO_MODEL_OPTIONS_BY_TYPE: Record<AudioGenerationType, ModelOption[]> = {
@@ -562,10 +577,27 @@ const AUDIO_MODEL_OPTIONS_BY_TYPE: Record<AudioGenerationType, ModelOption[]> = 
       label: 'Vidu Timing2Audio',
       helper: '可控文生音效，支持通过时间轴控制多个音效事件，适合视频音效和有声小说音效。',
     },
+  ],
+  speech: [
     {
-      value: 'mureka-o1-instrumental',
-      label: 'mureka-o1-instrumental',
-      helper: '作为环境音和轻配乐回退链路，可在未配置 Vidu API Key 时继续出结果。',
+      value: 'qwen3-tts-instruct-flash',
+      label: 'Qwen3-TTS Instruct Flash',
+      helper: '速度快、出稿稳，适合旁白草稿、对白验证和大批量试听。',
+    },
+    {
+      value: 'cosyvoice-v3.5-plus',
+      label: 'CosyVoice v3.5-plus',
+      helper: '高表现力语音模型，支持 instruction，但必须先选择复刻或设计音色。',
+    },
+    {
+      value: 'minimax-speech-2.8-hd',
+      label: 'MiniMax Speech 2.8 HD',
+      helper: '音质优先，适合高保真语音样稿和更细腻的情感表达。',
+    },
+    {
+      value: 'minimax-speech-2.8-turbo',
+      label: 'MiniMax Speech 2.8 Turbo',
+      helper: '兼顾速度和质量，适合快速迭代语音草案。',
     },
   ],
 }
@@ -583,6 +615,7 @@ const AUDIO_DURATION_OPTIONS_BY_TYPE: Record<AudioGenerationType, DurationOption
     { value: '8', label: '8 秒' },
     { value: '10', label: '10 秒' },
   ],
+  speech: [],
 }
 
 const AUDIO_STYLE_OPTIONS = [
@@ -1340,6 +1373,13 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const [audioStyle, setAudioStyle] = useState('氛围')
   const [audioMood, setAudioMood] = useState('calm')
   const [audioTempo, setAudioTempo] = useState('medium')
+  const [audioVoiceId, setAudioVoiceId] = useState('')
+  const [audioInstruction, setAudioInstruction] = useState('')
+  const [audioRate, setAudioRate] = useState('1.0')
+  const [audioPitch, setAudioPitch] = useState('1.0')
+  const [audioVolume, setAudioVolume] = useState('50')
+  const [audioVoicePresets, setAudioVoicePresets] = useState<SpeechVoicePreset[]>([])
+  const [audioVoiceLoading, setAudioVoiceLoading] = useState(false)
   const [audioLoading, setAudioLoading] = useState(false)
   const [audioError, setAudioError] = useState<string | null>(null)
   const [audioResult, setAudioResult] = useState<AssetStudioGenerateResponse | null>(null)
@@ -1404,6 +1444,14 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const selectedAudioGenerationType =
     AUDIO_GENERATION_TYPE_OPTIONS.find((option) => option.value === audioGenerationType) || AUDIO_GENERATION_TYPE_OPTIONS[0]
   const audioDurationOptions = AUDIO_DURATION_OPTIONS_BY_TYPE[audioGenerationType]
+  const sortedAudioVoicePresets = [...audioVoicePresets].sort((left, right) => {
+    const leftCategory = left.category || 'general'
+    const rightCategory = right.category || 'general'
+    if (leftCategory !== rightCategory) {
+      return leftCategory.localeCompare(rightCategory, 'zh-CN')
+    }
+    return (left.label || left.id).localeCompare(right.label || right.id, 'zh-CN')
+  })
 
   const updateCollectState = (
     key: AssetCollectKey,
@@ -1647,6 +1695,58 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
     }
   }, [audioDuration, audioDurationOptions])
 
+  useEffect(() => {
+    if (audioGenerationType === 'speech') {
+      return
+    }
+    setAudioVoicePresets([])
+    setAudioVoiceId('')
+    setAudioVoiceLoading(false)
+  }, [audioGenerationType])
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (audioGenerationType !== 'speech') {
+      return () => {
+        cancelled = true
+      }
+    }
+
+    void (async () => {
+      setAudioVoiceLoading(true)
+      try {
+        const response = await apiClient.getTtsVoices(audioModelId)
+        const voices = Array.isArray(response.data?.voices)
+          ? (response.data?.voices as SpeechVoicePreset[])
+          : []
+        if (cancelled) {
+          return
+        }
+        setAudioVoicePresets(voices)
+        setAudioVoiceId((current) => {
+          if (voices.some((voice) => voice.id === current)) {
+            return current
+          }
+          return voices[0]?.id || ''
+        })
+      } catch {
+        if (!cancelled) {
+          setAudioVoicePresets([])
+          setAudioVoiceId('')
+        }
+      } finally {
+        if (!cancelled) {
+          setAudioVoiceLoading(false)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [audioGenerationType, audioModelId])
+
   const handleGenerateImage = async () => {
     if (!imagePrompt.trim()) {
       setImageError('请先填写图片提示词')
@@ -1742,6 +1842,38 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   }
 
   const handleGenerateAudio = async () => {
+    if (audioGenerationType === 'speech') {
+      if (!audioPrompt.trim()) {
+        setAudioError('请先填写语音文本')
+        return
+      }
+      if (!audioVoiceId) {
+        setAudioError(audioModelId === 'cosyvoice-v3.5-plus' ? '请先选择音色；CosyVoice 需要先创建复刻或设计音色。' : '请先选择音色')
+        return
+      }
+
+      setAudioLoading(true)
+      setAudioError(null)
+      try {
+        const formData = new FormData()
+        formData.append('prompt', audioPrompt.trim())
+        formData.append('generation_type', audioGenerationType)
+        formData.append('model_id', audioModelId)
+        formData.append('voice_id', audioVoiceId)
+        formData.append('instruction', audioInstruction.trim())
+        formData.append('rate', audioRate)
+        formData.append('pitch', audioPitch)
+        formData.append('volume', audioVolume)
+
+        const response = await apiClient.generateAssetStudioAudio(formData)
+        setAudioResult(response.data as AssetStudioGenerateResponse)
+      } catch (error) {
+        setAudioError(await extractApiErrorMessage(error, '语音合成失败'))
+      } finally {
+        setAudioLoading(false)
+      }
+      return
+    }
     if (!audioPrompt.trim()) {
       setAudioError(audioGenerationType === 'music' ? '请先填写配乐提示词' : '请先填写音效提示词')
       return
@@ -1854,7 +1986,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                     {selectedImageModel?.helper}
                   </FormHelperText>
                 </FormControl>
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.25 }}>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.25, display: audioGenerationType === 'speech' ? 'none' : 'flex' }}>
                   <Chip
                     size="small"
                     label={getRoutingStatusLabel(selectedImageRoutingSignal)}
@@ -1890,6 +2022,29 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 当前运行时模型约束允许最多 {imageReferenceLimit} 张参考图，超出部分会自动截断。
               </Typography>
 
+              {audioGenerationType === 'speech' ? (
+                <Alert severity={audioModelId === 'cosyvoice-v3.5-plus' && sortedAudioVoicePresets.length === 0 ? 'warning' : 'info'} sx={{ borderRadius: 3 }}>
+                  {audioModelId === 'cosyvoice-v3.5-plus'
+                    ? sortedAudioVoicePresets.length > 0
+                      ? 'CosyVoice v3.5-plus 已接入语音合成模式，可直接使用你在耳畔星河中创建的复刻/设计音色。'
+                      : 'CosyVoice v3.5-plus 没有系统音色，请先在耳畔星河中创建复刻或设计音色，再回到这里合成。'
+                    : '语音合成会复用统一 TTS 运行时，可直接切换模型、音色与基础说话参数。'}
+                </Alert>
+              ) : null}
+
+              {audioGenerationType === 'speech' ? (
+                <TextField
+                  multiline
+                  minRows={8}
+                  label="语音文本"
+                  value={audioPrompt}
+                  onChange={(event) => setAudioPrompt(event.target.value)}
+                  placeholder="例如：欢迎来到深夜电台，今晚我们继续讲述这座城市里那些沉默但温柔的瞬间。"
+                  InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
+                  sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
+                />
+              ) : null}
+
               <TextField
                 multiline
                 minRows={8}
@@ -1898,7 +2053,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 onChange={(event) => setImagePrompt(event.target.value)}
                 placeholder="可以直接描述想生成的图片内容，也可以配合参考图做一致性生成。"
                 InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
-                sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
+                sx={{ display: audioGenerationType === 'speech' ? 'none' : 'block', '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
               />
 
               <TextField
@@ -2237,10 +2392,22 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                     {selectedAudioGenerationType.helper}
                   </FormHelperText>
                 </FormControl>
-                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.25 }}>
+                <Stack
+                  direction="row"
+                  spacing={1}
+                  flexWrap="wrap"
+                  useFlexGap
+                  sx={{ mt: 1.25, display: audioGenerationType === 'speech' ? 'none' : 'flex' }}
+                >
                   <Chip size="small" label={audioGenerationType === 'music' ? '配乐主链路' : '音效主链路'} variant="outlined" sx={{ color: 'white' }} />
-                  <Chip size="small" label={audioGenerationType === 'music' ? 'Mureka 生成' : 'Kling 优先 / Mureka 回退'} variant="outlined" sx={{ color: 'white' }} />
+                  <Chip size="small" label={audioGenerationType === 'music' ? 'Mureka 生成' : 'Vidu Timing2Audio'} variant="outlined" sx={{ color: 'white' }} />
                 </Stack>
+                {audioGenerationType === 'speech' ? (
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.25 }}>
+                    <Chip size="small" label="语音主链路" variant="outlined" sx={{ color: 'white' }} />
+                    <Chip size="small" label="统一 TTS 运行时" variant="outlined" sx={{ color: 'white' }} />
+                  </Stack>
+                ) : null}
               </Box>
 
               <Box sx={{ p: 2, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
@@ -2261,8 +2428,8 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
 
               {audioGenerationType === 'sound-effect' ? (
                 <Alert severity="info" sx={{ borderRadius: 3 }}>
-                  当前音效链路使用 `Vidu Timing2Audio` 可控文生音效，支持通过时间轴控制多个音效事件。
-                  若未配置 Vidu API Key，后端会自动回退到 `mureka-o1-instrumental` 生成环境音草案。
+                  当前音效链路使用 `Vidu Timing2Audio` 进行可控文生音效生成，支持通过时间轴编排多个音效事件，
+                  适合动作、环境和叙事节点的精细化音效设计。
                 </Alert>
               ) : null}
 
@@ -2281,7 +2448,83 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                 sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
               />
 
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+              {audioGenerationType === 'speech' ? (
+                <Stack spacing={1.5}>
+                  <FormControl size="small" fullWidth>
+                    <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>音色</InputLabel>
+                    <Select
+                      value={audioVoiceId}
+                      label="音色"
+                      onChange={(event) => setAudioVoiceId(event.target.value)}
+                      sx={{ color: 'white' }}
+                      disabled={audioVoiceLoading || sortedAudioVoicePresets.length === 0}
+                    >
+                      {audioVoiceLoading ? (
+                        <MenuItem value="" disabled>
+                          正在加载音色...
+                        </MenuItem>
+                      ) : null}
+                      {!audioVoiceLoading && sortedAudioVoicePresets.length === 0 ? (
+                        <MenuItem value="" disabled>
+                          暂无可用音色
+                        </MenuItem>
+                      ) : null}
+                      {sortedAudioVoicePresets.map((voice) => (
+                        <MenuItem key={voice.id} value={voice.id}>
+                          {voice.label}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                    <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
+                      {sortedAudioVoicePresets.find((voice) => voice.id === audioVoiceId)?.description
+                        || (audioModelId === 'cosyvoice-v3.5-plus' ? 'CosyVoice 只展示你当前账号下可用的复刻/设计音色。' : '选择一个音色后即可直接合成。')}
+                    </FormHelperText>
+                  </FormControl>
+
+                  <TextField
+                    size="small"
+                    fullWidth
+                    label="语气指令（可选）"
+                    value={audioInstruction}
+                    onChange={(event) => setAudioInstruction(event.target.value)}
+                    placeholder="例如：沉稳克制，吐字清晰，句尾轻收，像深夜电台主持人。"
+                    InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
+                    sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
+                  />
+
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+                    <TextField
+                      size="small"
+                      fullWidth
+                      label="语速"
+                      value={audioRate}
+                      onChange={(event) => setAudioRate(event.target.value)}
+                      InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
+                      sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
+                    />
+                    <TextField
+                      size="small"
+                      fullWidth
+                      label="音调"
+                      value={audioPitch}
+                      onChange={(event) => setAudioPitch(event.target.value)}
+                      InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
+                      sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
+                    />
+                    <TextField
+                      size="small"
+                      fullWidth
+                      label="音量"
+                      value={audioVolume}
+                      onChange={(event) => setAudioVolume(event.target.value)}
+                      InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.62)' } }}
+                      sx={{ '& .MuiOutlinedInput-root': { color: 'white', backgroundColor: 'rgba(255,255,255,0.03)' } }}
+                    />
+                  </Stack>
+                </Stack>
+              ) : null}
+
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ display: audioGenerationType === 'speech' ? 'none' : 'flex' }}>
                 <FormControl size="small" fullWidth>
                   <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>时长</InputLabel>
                   <Select value={audioDuration} label="时长" onChange={(event) => setAudioDuration(event.target.value)} sx={{ color: 'white' }}>
@@ -2341,8 +2584,8 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                   result: audioResult,
                   assetKind: 'audio',
                   prompt: audioPrompt,
-                  fallbackTitle: audioGenerationType === 'music' ? '配乐资产' : '音效资产',
-                  tags: ['asset_studio', audioGenerationType === 'music' ? 'music' : 'sound-effect'],
+                  fallbackTitle: audioGenerationType === 'music' ? '配乐资产' : audioGenerationType === 'sound-effect' ? '音效资产' : '语音资产',
+                  tags: ['asset_studio', audioGenerationType === 'music' ? 'music' : audioGenerationType === 'sound-effect' ? 'sound-effect' : 'speech'],
                 })
               }
               collecting={collectStates.audio.loading}
@@ -2354,7 +2597,9 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
             <Typography sx={{ color: 'rgba(255,255,255,0.58)', fontSize: '0.84rem', lineHeight: 1.7 }}>
               {audioGenerationType === 'music'
                 ? '配乐模式会把风格、情绪和节奏一并传给后端音频服务。'
-                : '音效模式优先尝试 Kling 文生音频，如不可用则自动降级到 Mureka 环境音链路。'}
+                : audioGenerationType === 'sound-effect'
+                ? '音效模式使用 Vidu Timing2Audio 进行时间轴可控的音效生成。'
+                : '语音模式会调用统一 TTS 运行时，按所选模型、音色和说话参数直接输出语音资产。'}
             </Typography>
             <FooterAction loading={audioLoading} label="生成音频" onClick={handleGenerateAudio} />
           </Stack>

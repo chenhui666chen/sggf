@@ -25,6 +25,8 @@ _LEGACY_COSYVOICE_SYSTEM_VOICES = {
 }
 _DEFAULT_CACHE_TTL_SECONDS = 30.0
 _PREFIX_MAX_LEN = 10
+_VOICE_CUSTOMIZATION_URL = "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/customization"
+_VOICE_ENROLLMENT_MODEL = "voice-enrollment"
 
 
 class CosyVoiceCloneError(RuntimeError):
@@ -36,6 +38,69 @@ def _require_dashscope_api_key() -> str:
     if not api_key:
         raise CosyVoiceCloneError("未配置 DASHSCOPE_API_KEY")
     return api_key
+
+
+def _extract_dashscope_error_detail(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return (response.text or "").strip()
+
+    if isinstance(payload, dict):
+        output = payload.get("output")
+        if isinstance(output, dict):
+            for key in ("message", "msg", "code"):
+                value = output.get(key)
+                if value:
+                    return str(value).strip()
+        for key in ("message", "msg", "code", "request_id"):
+            value = payload.get(key)
+            if value:
+                return str(value).strip()
+    return (response.text or "").strip()
+
+
+def _post_voice_customization(
+    *,
+    input_payload: Dict[str, Any],
+    timeout: float = 30.0,
+    extra_headers: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    api_key = _require_dashscope_api_key()
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    if extra_headers:
+        headers.update({k: v for k, v in extra_headers.items() if k and v})
+
+    try:
+        response = httpx.post(
+            _VOICE_CUSTOMIZATION_URL,
+            json={
+                "model": _VOICE_ENROLLMENT_MODEL,
+                "input": input_payload,
+            },
+            headers=headers,
+            timeout=timeout,
+        )
+    except httpx.RequestError as exc:  # noqa: BLE001
+        raise CosyVoiceCloneError(f"调用 DashScope 声音定制接口失败: {exc}") from exc
+
+    if response.status_code != 200:
+        detail = _extract_dashscope_error_detail(response)
+        raise CosyVoiceCloneError(
+            f"DashScope 声音定制接口失败: {response.status_code} {detail}".strip()
+        )
+
+    try:
+        payload = response.json()
+    except ValueError as exc:  # noqa: BLE001
+        raise CosyVoiceCloneError("声音定制接口响应解析失败") from exc
+
+    if not isinstance(payload, dict):
+        raise CosyVoiceCloneError("声音定制接口响应格式无效")
+    return payload
 
 
 def is_cosyvoice_v35_plus_voice_id(voice_id: str) -> bool:
@@ -166,6 +231,17 @@ def get_clone_display_name(voice_id: str) -> Optional[str]:
     return str(value).strip() if value else None
 
 
+def remove_clone_display_name(voice_id: str) -> None:
+    voice_id = (voice_id or "").strip()
+    if not voice_id:
+        return
+    mapping = _load_clone_name_store()
+    if voice_id not in mapping:
+        return
+    mapping.pop(voice_id, None)
+    _save_clone_name_store(mapping)
+
+
 def _extract_prefix_from_voice_id(voice_id: str) -> str:
     voice_id = (voice_id or "").strip()
     known_prefix = ""
@@ -206,15 +282,78 @@ def _build_clone_voice_preset(
     }
 
 
+def _truncate_custom_voice_text(value: Optional[str], max_len: int = 36) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) <= max_len:
+        return text
+    return f"{text[:max_len].rstrip()}..."
+
+
+def _build_custom_voice_preset(
+    voice_id: str,
+    status: str,
+    gmt_create: Optional[str] = None,
+    display_name: Optional[str] = None,
+    *,
+    custom_type: Optional[str] = None,
+    voice_prompt: Optional[str] = None,
+    preview_text: Optional[str] = None,
+) -> Dict[str, Any]:
+    resolved_type = str(custom_type or "").strip().lower()
+    if resolved_type not in {"clone", "design"}:
+        resolved_type = "design" if str(voice_prompt or "").strip() or str(preview_text or "").strip() else "clone"
+
+    prefix = _extract_prefix_from_voice_id(voice_id) or resolved_type
+    display_name = (display_name or "").strip()
+    status_label = (status or "").strip() or "UNKNOWN"
+    short_kind_label = "设计" if resolved_type == "design" else "复刻"
+    long_kind_label = "设计音色" if resolved_type == "design" else "复刻音色"
+
+    desc_parts = [f"{long_kind_label}（状态: {status_label}）"]
+    if gmt_create:
+        desc_parts.append(f"创建时间: {gmt_create}")
+    if resolved_type == "design":
+        short_prompt = _truncate_custom_voice_text(voice_prompt)
+        short_preview = _truncate_custom_voice_text(preview_text)
+        if short_prompt:
+            desc_parts.append(f"音色描述: {short_prompt}")
+        if short_preview:
+            desc_parts.append(f"试听文本: {short_preview}")
+
+    return {
+        "id": voice_id,
+        "speaker": voice_id,
+        "label": f"{short_kind_label}-{display_name}" if display_name else f"{short_kind_label}-{prefix}",
+        "category": "custom",
+        "customType": resolved_type,
+        "description": "；".join(desc_parts),
+        "supportsInstruct": True,
+    }
+
+
 @dataclass(frozen=True)
 class CosyVoiceClone:
     voice_id: str
     status: str
     gmt_create: Optional[str] = None
     gmt_modified: Optional[str] = None
+    custom_type: str = "clone"
+    voice_prompt: Optional[str] = None
+    preview_text: Optional[str] = None
+    preview_audio: Optional[str] = None
 
     def to_voice_preset(self, display_name: Optional[str] = None) -> Dict[str, Any]:
-        return _build_clone_voice_preset(self.voice_id, self.status, self.gmt_create, display_name)
+        return _build_custom_voice_preset(
+            self.voice_id,
+            self.status,
+            self.gmt_create,
+            display_name,
+            custom_type=self.custom_type,
+            voice_prompt=self.voice_prompt,
+            preview_text=self.preview_text,
+        )
 
 
 class _CloneListCache:
@@ -444,6 +583,133 @@ def list_cosyvoice_v3_plus_clones(
     return clones, meta
 
 
+def create_cosyvoice_v3_plus_design(
+    *,
+    prefix: str,
+    voice_prompt: str,
+    preview_text: str,
+    sample_rate: int = 24000,
+    response_format: str = "wav",
+) -> Dict[str, Any]:
+    prefix = (prefix or "").strip()
+    voice_prompt = (voice_prompt or "").strip()
+    preview_text = (preview_text or "").strip()
+    response_format = (response_format or "wav").strip().lower() or "wav"
+
+    if not re.fullmatch(r"[A-Za-z0-9_]{1,10}", prefix):
+        raise CosyVoiceCloneError("prefix 仅支持大小写英文字母、数字和下划线，长度 1~10")
+    if not voice_prompt:
+        raise CosyVoiceCloneError("voice_prompt 不能为空")
+    if not preview_text:
+        raise CosyVoiceCloneError("preview_text 不能为空")
+    if response_format not in {"wav", "mp3", "pcm"}:
+        raise CosyVoiceCloneError("response_format 仅支持 wav / mp3 / pcm")
+    if sample_rate not in {8000, 16000, 22050, 24000, 32000, 44100, 48000}:
+        raise CosyVoiceCloneError("sample_rate 不在允许范围内")
+
+    payload = _post_voice_customization(
+        input_payload={
+            "action": "create_voice",
+            "target_model": COSYVOICE_V35_PLUS_MODEL_ID,
+            "prefix": prefix,
+            "voice_prompt": voice_prompt,
+            "preview_text": preview_text,
+            "parameters": {
+                "sample_rate": sample_rate,
+                "format": response_format,
+            },
+        },
+        timeout=45.0,
+    )
+    output = payload.get("output") if isinstance(payload, dict) else None
+    if not isinstance(output, dict):
+        raise CosyVoiceCloneError("创建设计音色失败：响应缺少 output")
+
+    voice_id = str(output.get("voice_id") or "").strip()
+    if not voice_id:
+        raise CosyVoiceCloneError("创建设计音色失败：未返回 voice_id")
+
+    invalidate_cosyvoice_clone_cache()
+    return {
+        "voice_id": voice_id,
+        "status": "DEPLOYING",
+        "preview_audio": output.get("preview_audio"),
+    }
+
+
+def _build_cosyvoice_custom_voice(item: Dict[str, Any]) -> Optional[CosyVoiceClone]:
+    voice_id = str(item.get("voice_id") or "").strip()
+    if not voice_id.startswith(COSYVOICE_V35_PLUS_VOICE_ID_PREFIX):
+        return None
+
+    voice_prompt = str(item.get("voice_prompt") or "").strip() or None
+    preview_text = str(item.get("preview_text") or "").strip() or None
+    preview_audio = str(item.get("preview_audio") or "").strip() or None
+    custom_type = "design" if voice_prompt or preview_text else "clone"
+
+    return CosyVoiceClone(
+        voice_id=voice_id,
+        status=str(item.get("status") or "").strip() or "UNKNOWN",
+        gmt_create=item.get("gmt_create"),
+        gmt_modified=item.get("gmt_modified"),
+        custom_type=custom_type,
+        voice_prompt=voice_prompt,
+        preview_text=preview_text,
+        preview_audio=preview_audio,
+    )
+
+
+def list_cosyvoice_v3_plus_clones(
+    *,
+    prefix: Optional[str] = None,
+    page_index: int = 1,
+    page_size: int = 50,
+    cache_ttl_seconds: float = _DEFAULT_CACHE_TTL_SECONDS,
+) -> Tuple[List[CosyVoiceClone], Dict[str, Any]]:
+    prefix = (prefix or "").strip() or None
+
+    if prefix and not re.fullmatch(r"[A-Za-z0-9_]{1,10}", prefix):
+        raise CosyVoiceCloneError("prefix 仅支持大小写英文字母、数字和下划线，长度 1~10")
+
+    cached = _CLONE_LIST_CACHE.get()
+    if cached is not None and not prefix and int(page_index) == 1 and int(page_size) == 50:
+        return cached, {"cached": True}
+
+    payload = _post_voice_customization(
+        input_payload={
+            "action": "list_voice",
+            "target_model": COSYVOICE_V35_PLUS_MODEL_ID,
+            "page_index": max(0, int(page_index) - 1),
+            "page_size": int(page_size),
+            **({"prefix": prefix} if prefix else {}),
+        },
+        timeout=30.0,
+    )
+    output = payload.get("output") if isinstance(payload, dict) else None
+    voice_list = output.get("voice_list") if isinstance(output, dict) else None
+    if not isinstance(voice_list, list):
+        voice_list = []
+
+    clones: List[CosyVoiceClone] = []
+    for item in voice_list:
+        if not isinstance(item, dict):
+            continue
+        parsed = _build_cosyvoice_custom_voice(item)
+        if parsed is not None:
+            clones.append(parsed)
+
+    meta = {
+        "page_index": int(page_index),
+        "page_size": int(page_size),
+        "cached": False,
+    }
+
+    if not prefix and int(page_index) == 1 and int(page_size) == 50:
+        _CLONE_LIST_CACHE.set(clones, cache_ttl_seconds)
+
+    return clones, meta
+
+
 def delete_cosyvoice_clone(*, voice_id: str) -> Dict[str, Any]:
     voice_id = (voice_id or "").strip()
     if not voice_id.startswith(COSYVOICE_V35_PLUS_VOICE_ID_PREFIX):
@@ -461,5 +727,6 @@ def delete_cosyvoice_clone(*, voice_id: str) -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         raise CosyVoiceCloneError(f"delete_voice 失败: {exc}") from exc
 
+    remove_clone_display_name(voice_id)
     invalidate_cosyvoice_clone_cache()
     return {"voice_id": voice_id, "deleted": True}

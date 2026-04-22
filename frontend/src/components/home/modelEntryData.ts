@@ -49,8 +49,8 @@ export const modelUseEntries: ModelUseEntry[] = [
   {
     id: 'audio',
     title: '音乐音效',
-    subtitle: '配乐 / 环境音 / 短音效',
-    description: '统一走资产工作台音频入口，支持配乐和音效生成，不再混入模型中心导航。',
+    subtitle: '配乐 / 音效 / 语音合成',
+    description: '统一走资产工作台音频入口，支持配乐、音效和语音合成，不再混入模型中心导航。',
     color: '#ff9d2e',
     icon: GraphicEqOutlinedIcon,
     status: 'ready',

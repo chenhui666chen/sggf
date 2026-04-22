@@ -34,6 +34,7 @@ from app.schemas.audiobook import (
     SegmentReviewRequest,
     AudiobookTaskStatus,
     CosyVoiceCloneCreateRequest,
+    CosyVoiceDesignCreateRequest,
     ChapterReviewStatus,
     NarrationStylePreset,
     SubtitleDownloadResponse,
@@ -63,6 +64,7 @@ from app.services.audiobook.cosyvoice_clone_client import (
     COSYVOICE_V35_PLUS_MODEL_ID,
     CosyVoiceCloneError,
     create_cosyvoice_v3_plus_clone,
+    create_cosyvoice_v3_plus_design,
     delete_cosyvoice_clone,
     get_clone_display_name,
     is_cosyvoice_v35_plus_voice_id,
@@ -136,6 +138,23 @@ def _validate_cosyvoice_v35_voice_id(voice_id: str) -> str:
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="cosyvoice-v3.5-plus 不提供系统音色，请先创建并选择复刻/设计音色",
     )
+
+def _build_cosyvoice_voice_prefix(display_name: str, current_user: User) -> str:
+    import hashlib
+    import re
+    import secrets
+
+    cleaned_name = (display_name or "").strip()
+    if not cleaned_name:
+        raise CosyVoiceCloneError("name 不能为空")
+
+    slug = re.sub(r"[^A-Za-z0-9_]+", "_", cleaned_name).strip("_").lower()
+    base = (slug[:4] if slug else "v").strip("_") or "v"
+    user_id = str(getattr(current_user, "id", "0"))
+    digest = hashlib.sha1(f"{user_id}:{cleaned_name}".encode("utf-8")).hexdigest()[:6]  # noqa: S324
+    suffix = secrets.token_hex(1)
+    return f"{base}{digest}{suffix}"[:10]
+
 
 @router.post("/tts/preview")
 async def tts_preview(
@@ -359,7 +378,7 @@ async def create_cosyvoice_v3_plus_voice_clone(
         if not display_name:
             raise CosyVoiceCloneError("name 不能为空")
 
-        prefix = (request.prefix or "").strip()
+        prefix = (request.prefix or "").strip() or _build_cosyvoice_voice_prefix(display_name, current_user)
         if not prefix:
             # 生成策略：
             # - 允许 name 任意字符（含中文），但 prefix 必须满足 SDK 要求：字母/数字/下划线，1~32
@@ -374,6 +393,31 @@ async def create_cosyvoice_v3_plus_voice_clone(
             prefix = f"{base}{h}{rand}"[:10]
 
         result = create_cosyvoice_v3_plus_clone(prefix=prefix, audio_url=request.url)
+        save_clone_display_name(voice_id=result.get("voice_id", ""), display_name=display_name)
+        result["display_name"] = display_name
+        return result
+    except CosyVoiceCloneError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/tts/voices/cosyvoice-v3.5-plus/designs")
+async def create_cosyvoice_v3_plus_voice_design(
+    request: CosyVoiceDesignCreateRequest,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        display_name = (request.name or "").strip()
+        if not display_name:
+            raise CosyVoiceCloneError("name 不能为空")
+
+        prefix = (request.prefix or "").strip() or _build_cosyvoice_voice_prefix(display_name, current_user)
+        result = create_cosyvoice_v3_plus_design(
+            prefix=prefix,
+            voice_prompt=request.voice_prompt,
+            preview_text=request.preview_text,
+            sample_rate=int(request.sample_rate or 24000),
+            response_format=str(request.response_format or "wav"),
+        )
         save_clone_display_name(voice_id=result.get("voice_id", ""), display_name=display_name)
         result["display_name"] = display_name
         return result
@@ -423,6 +467,11 @@ async def list_cosyvoice_v3_plus_voice_clones(
                     "status": c.status,
                     "gmt_create": c.gmt_create,
                     "gmt_modified": c.gmt_modified,
+                    "custom_type": c.custom_type,
+                    "voice_prompt": c.voice_prompt,
+                    "preview_text": c.preview_text,
+                    "preview_audio": c.preview_audio,
+                    "display_name": get_clone_display_name(c.voice_id),
                 }
                 for c in clones
             ],

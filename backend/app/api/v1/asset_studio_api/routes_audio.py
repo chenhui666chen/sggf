@@ -34,6 +34,7 @@ from app.api.v1.asset_studio_api._helpers import (
     _allocate_output_path,
     _build_audio_response,
     _copy_output_file,
+    _raise_for_failed_result,
     _resolve_music_style,
     _save_binary_output,
     _validate_audio_duration,
@@ -48,6 +49,12 @@ async def generate_audio_asset(
     style: str = Form(default="氛围"),
     mood: str = Form(default="calm"),
     tempo: str = Form(default="medium"),
+    voice_id: str = Form(default=""),
+    instruction: str = Form(default=""),
+    rate: float = Form(default=1.0),
+    pitch: float = Form(default=1.0),
+    volume: int = Form(default=50),
+    emotion: str = Form(default="neutral"),
     current_user: User = Depends(get_current_user),
 ):
     del current_user
@@ -57,11 +64,15 @@ async def generate_audio_asset(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="提示词不能为空")
 
     normalized_generation_type = str(generation_type or "").strip().lower()
-    if normalized_generation_type not in {"music", "sound-effect"}:
+    if normalized_generation_type not in {"music", "sound-effect", "speech"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的音频生成类型")
 
     requested_model_id = (model_id or "").strip() or (
-        "mureka-o1-instrumental" if normalized_generation_type == "music" else "vidu-timing2audio"
+        "mureka-o1-instrumental"
+        if normalized_generation_type == "music"
+        else "vidu-timing2audio"
+        if normalized_generation_type == "sound-effect"
+        else "qwen3-tts-instruct-flash"
     )
     normalized_mood = str(mood or "").strip() or "calm"
     normalized_tempo = str(tempo or "").strip() or "medium"
@@ -114,6 +125,72 @@ async def generate_audio_asset(
                 "mood": normalized_mood,
                 "tempo": normalized_tempo,
                 "cached": bool(music_result.cached),
+            },
+        )
+
+    if normalized_generation_type == "speech":
+        resolved_model_id = normalize_model_id(requested_model_id) or requested_model_id
+        supported_speech_models = {
+            "qwen3-tts-instruct-flash",
+            "cosyvoice-v3.5-plus",
+            "minimax-speech-2.8-hd",
+            "minimax-speech-2.8-turbo",
+        }
+        if resolved_model_id not in supported_speech_models:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"当前语音合成仅支持以下模型: {', '.join(sorted(supported_speech_models))}",
+            )
+
+        cleaned_voice_id = str(voice_id or "").strip()
+        if not cleaned_voice_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="语音合成需要选择音色")
+
+        voice_params: dict[str, Any] = {
+            "speaker": cleaned_voice_id,
+            "rate": float(rate or 1.0),
+            "pitch": float(pitch or 1.0),
+            "volume": int(volume),
+        }
+        cleaned_instruction = str(instruction or "").strip()
+        if cleaned_instruction:
+            voice_params["instruction"] = cleaned_instruction
+
+        speech_result = await media_runtime.synthesize_speech_result(
+            text=cleaned_prompt,
+            voice_params=voice_params,
+            emotion=str(emotion or "neutral").strip() or "neutral",
+            model_id=resolved_model_id,
+            enable_cache=False,
+            max_concurrent=1,
+            request_delay=0.0,
+        )
+        _raise_for_failed_result(speech_result, fallback_message="语音合成失败")
+
+        audio_bytes = speech_result.binary or b""
+        if not audio_bytes:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="语音合成成功，但未返回音频数据")
+
+        payload = speech_result.data if isinstance(speech_result.data, dict) else {}
+        format_hint = str(payload.get("format") or "").strip().lower()
+        suffix = ".wav" if format_hint == "wav" or audio_bytes.startswith(b"RIFF") else ".mp3"
+        output_path = _save_binary_output(audio_bytes, subdir="audio/speech", suffix=suffix)
+
+        return _build_audio_response(
+            mode="text_to_speech",
+            model_id=resolved_model_id,
+            output_path=output_path,
+            metadata={
+                "requested_model_id": requested_model_id,
+                "resolved_model_id": resolved_model_id,
+                "generation_type": normalized_generation_type,
+                "voice_id": cleaned_voice_id,
+                "instruction": cleaned_instruction or None,
+                "rate": float(rate or 1.0),
+                "pitch": float(pitch or 1.0),
+                "volume": int(volume),
+                "emotion": str(emotion or "neutral").strip() or "neutral",
+                "format": format_hint or suffix.lstrip("."),
             },
         )
 
@@ -207,7 +284,7 @@ async def generate_audio_asset(
             "style": MusicStyle.AMBIENT.value,
             "mood": normalized_mood,
             "tempo": normalized_tempo,
-            "fallback_used": requested_kling,
+            "fallback_used": requested_vidu,
             "fallback_reason": fallback_reason or None,
             "cached": bool(music_result.cached),
         },

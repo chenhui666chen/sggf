@@ -454,6 +454,27 @@ function normalizeCategoryFilter(raw: string | null): CategoryFilter {
   return allowed.includes(raw as CategoryFilter) ? (raw as CategoryFilter) : 'all'
 }
 
+const COSYVOICE_V35_PLUS_DISPLAY_NAME = 'CosyVoice v3.5 Plus'
+
+function getCatalogEntryDisplayName(entry?: Pick<CatalogEntry, 'model_key' | 'name'> | null): string {
+  if (!entry) return ''
+
+  const modelKey = String(entry.model_key || '').trim().toLowerCase()
+  const rawName = String(entry.name || '').trim()
+  const normalizedName = rawName.toLowerCase()
+
+  if (
+    modelKey === 'cosyvoice-v3.5-plus'
+    || modelKey === 'cosyvoice-v3-plus'
+    || normalizedName === 'cosyvoice v3 plus'
+    || normalizedName === 'cosyvoice v3-plus'
+  ) {
+    return COSYVOICE_V35_PLUS_DISPLAY_NAME
+  }
+
+  return rawName
+}
+
 // Helper components
 function LabeledValueSection({ title, items }: { title: string; items: LabeledValueItem[] }) {
   return (
@@ -752,7 +773,7 @@ export default function ModelCatalogPage() {
   const filteredEntries = entries.filter((entry) => {
     const matchKeyword =
       deferredKeyword === '' ||
-      entry.name.toLowerCase().includes(deferredKeyword) ||
+      getCatalogEntryDisplayName(entry).toLowerCase().includes(deferredKeyword) ||
       entry.provider.toLowerCase().includes(deferredKeyword) ||
       entry.model_key.toLowerCase().includes(deferredKeyword)
 
@@ -945,7 +966,7 @@ export default function ModelCatalogPage() {
                     </Stack>
 
                     <Typography variant="h6" sx={{ fontWeight: 700, color: '#113058' }}>
-                      {entry.name}
+                      {getCatalogEntryDisplayName(entry)}
                     </Typography>
 
                     <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.7 }}>
@@ -990,7 +1011,7 @@ export default function ModelCatalogPage() {
 
         <Dialog open={Boolean(selectedModelKey)} onClose={() => setSelectedModelKey(null)} maxWidth="lg" fullWidth>
           <DialogTitle sx={{ fontWeight: 800, pb: 0 }}>
-            {selectedEntry?.name || selectedModelKey || '模型详情'}
+            {getCatalogEntryDisplayName(selectedEntry) || selectedModelKey || '模型详情'}
           </DialogTitle>
           {selectedEntry && (
             <Tabs

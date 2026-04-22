@@ -244,6 +244,7 @@ interface VoicePreset {
   gender?: string
   style?: string
   category?: string
+  customType?: 'clone' | 'design'
   languages?: string[]
   description?: string
   recommended?: string[]
@@ -1527,6 +1528,12 @@ const AudiobookPage = () => {
   const [cloneDeletingId, setCloneDeletingId] = useState<string | null>(null)
   const [cloneError, setCloneError] = useState<string | null>(null)
   const [cloneSuccess, setCloneSuccess] = useState<string | null>(null)
+  const [designName, setDesignName] = useState('')
+  const [designPrompt, setDesignPrompt] = useState('')
+  const [designPreviewText, setDesignPreviewText] = useState('欢迎收听这段声音设计试听，我们从这里开始塑造角色的独特声线。')
+  const [designLoading, setDesignLoading] = useState(false)
+  const [designError, setDesignError] = useState<string | null>(null)
+  const [designSuccess, setDesignSuccess] = useState<string | null>(null)
   const [autoAssigningVoices, setAutoAssigningVoices] = useState(false)
   const [creatingFromBook, setCreatingFromBook] = useState(false)
   const [lastGenerationMode, setLastGenerationMode] = useState<'full' | 'script_only'>('full')
@@ -1627,7 +1634,7 @@ const AudiobookPage = () => {
     return sorted
   }, [voicePresets, ttsModel])
 
-  const cloneVoicePresets = useMemo(() => {
+  const customVoicePresets = useMemo(() => {
     if (ttsModel !== 'cosyvoice-v3.5-plus') {
       return []
     }
@@ -1647,7 +1654,7 @@ const AudiobookPage = () => {
     }
     setSnackbar({
       open: true,
-      message: 'CosyVoice v3.5-plus 没有系统音色，请先创建至少一个复刻音色再生成。',
+      message: 'CosyVoice v3.5-plus 没有系统音色，请先创建至少一个自定义音色再生成。',
       severity: 'error',
     })
     return false
@@ -1844,6 +1851,8 @@ const AudiobookPage = () => {
     setCloneLoading(true)
     setCloneError(null)
     setCloneSuccess(null)
+    setDesignError(null)
+    setDesignSuccess(null)
     try {
       const name = cloneName.trim()
       const url = cloneUrl.trim()
@@ -1861,24 +1870,55 @@ const AudiobookPage = () => {
     }
   }
 
-  const handleDeleteCloneVoice = async (voiceId: string, label?: string) => {
+  const handleCreateDesignVoice = async () => {
+    setDesignLoading(true)
+    setDesignError(null)
+    setDesignSuccess(null)
+    setCloneError(null)
+    setCloneSuccess(null)
+    try {
+      const name = designName.trim()
+      const voicePrompt = designPrompt.trim()
+      const previewText = designPreviewText.trim()
+      const res = await apiClient.createCosyVoiceV3PlusDesign({
+        name,
+        voice_prompt: voicePrompt,
+        preview_text: previewText,
+      })
+      const voiceId = (res.data?.voice_id as string) || ''
+      setDesignSuccess(voiceId ? `已提交声音设计任务：${voiceId}` : '已提交声音设计任务')
+      setDesignName('')
+      setDesignPrompt('')
+      setDesignPreviewText('欢迎收听这段声音设计试听，我们从这里开始塑造角色的独特声线。')
+      await refreshVoiceCatalog('cosyvoice-v3.5-plus')
+    } catch (error: any) {
+      const message = await extractApiErrorMessage(error, '创建设计音色失败')
+      setDesignError(message)
+    } finally {
+      setDesignLoading(false)
+    }
+  }
+
+  const handleDeleteCustomVoice = async (voiceId: string, label?: string) => {
     if (!voiceId || cloneDeletingId) return
     const displayName = label || voiceId
-    if (!confirm(`确定要删除复刻音色「${displayName}」吗？\n\n该操作会从当前账号移除该复刻音色，无法恢复。`)) {
+    if (!confirm(`确定要删除自定义音色「${displayName}」吗？\n\n该操作会从当前账号移除该音色，无法恢复。`)) {
       return
     }
     setCloneDeletingId(voiceId)
     setCloneError(null)
     setCloneSuccess(null)
+    setDesignError(null)
+    setDesignSuccess(null)
     try {
       await apiClient.deleteCosyVoiceV3PlusClone(voiceId)
       updateCharacterVoicesForCurrentModel((prev) =>
         prev.map((item) => (item.voiceId === voiceId ? { ...item, voiceId: '' } : item)),
       )
-      setCloneSuccess(`已删除复刻音色：${displayName}`)
+      setCloneSuccess(`已删除自定义音色：${displayName}`)
       await refreshVoiceCatalog('cosyvoice-v3.5-plus')
     } catch (error: any) {
-      const message = await extractApiErrorMessage(error, '删除复刻音色失败')
+      const message = await extractApiErrorMessage(error, '删除自定义音色失败')
       setCloneError(message)
     } finally {
       setCloneDeletingId(null)
@@ -3536,129 +3576,210 @@ const AudiobookPage = () => {
               {voiceCatalogMeta && (
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                   {ttsModel === 'cosyvoice-v3.5-plus'
-                    ? `${voiceCatalogMeta.model || 'CosyVoice v3.5-plus'}：官方无系统音色，当前展示 ${currentVoicePresets.length} 个可用复刻音色，最近同步 ${voiceCatalogMeta.updated_at || '—'}。`
+                    ? `${voiceCatalogMeta.model || 'CosyVoice v3.5-plus'}：官方无系统音色，当前展示 ${currentVoicePresets.length} 个可用自定义音色，最近同步 ${voiceCatalogMeta.updated_at || '—'}。`
                     : `${voiceCatalogMeta.model || 'Qwen3-TTS Instruct Flash'}：官方 ${voiceCatalogMeta.voice_count ?? currentVoicePresets.length} 种音色，最近更新 ${voiceCatalogMeta.updated_at || '—'}，覆盖普通话/多语种/方言。`}
                 </Typography>
               )}
               <Alert severity="success" sx={{ mb: 1 }}>
-                Qwen3-TTS Instruct Flash 适合整本批量生成；CosyVoice v3.5-plus 适合精品章节，但需要先准备复刻音色。
+                Qwen3-TTS Instruct Flash 适合整本批量生成；CosyVoice v3.5-plus 适合精品章节，但需要先准备复刻或设计音色。
               </Alert>
               {ttsModel === 'cosyvoice-v3.5-plus' && (
                 <>
                   <Paper variant="outlined" sx={{ mb: 1, p: 1.5 }}>
                     <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-                      声音复刻（CosyVoice v3.5-plus）
+                      自定义音色管理（CosyVoice v3.5-plus）
                     </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                      CosyVoice v3.5-plus 不提供系统音色。支持 http/https 或 oss:// 临时 URL（有效期 48 小时）；系统会自动生成合规 prefix（最长 10 个字符），并用你的“命名”在列表里展示为“复刻-命名”（状态 OK 后可用于合成）。
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                      CosyVoice v3.5-plus 不提供系统音色。你可以通过“声音复刻”导入真实样本，也可以通过“声音设计”用文字描述生成新声线；创建完成后会出现在下方音色列表中。
                     </Typography>
-                    <Grid container spacing={1}>
-                      <Grid item xs={12} md={4}>
-                        <TextField
-                          size="small"
-                          fullWidth
-                          label="声音名称"
-                          value={cloneName}
-                          onChange={(e) => setCloneName(e.target.value)}
-                          disabled={cloneLoading || cloneUploading || cloneRecording}
-                        />
-                      </Grid>
-                      <Grid item xs={12} md={6}>
-                        <TextField
-                          size="small"
-                          fullWidth
-                          label="音频 URL（http/https 或 oss://）"
-                          value={cloneUrl}
-                          onChange={(e) => setCloneUrl(e.target.value)}
-                          disabled={cloneLoading || cloneUploading || cloneRecording}
-                        />
-                      </Grid>
-                      <Grid item xs={12} md={2}>
-                        <Button
-                          fullWidth
-                          variant="contained"
-                          onClick={handleCreateCloneVoice}
-                          disabled={cloneLoading || cloneUploading || cloneRecording || !cloneName.trim() || !cloneUrl.trim()}
-                          sx={{ height: '100%' }}
-                        >
-                          {cloneLoading ? '提交中...' : '开始复刻'}
-                        </Button>
-                      </Grid>
-                      <Grid item xs={12}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                          <Button
-                            variant="outlined"
-                            onClick={handleOpenCloneRecordDialog}
-                            disabled={cloneLoading || cloneUploading || cloneRecording}
-                          >
-                            录音
-                          </Button>
-                          <Button
-                            variant="outlined"
-                            component="label"
-                            disabled={cloneLoading || cloneUploading || cloneRecording}
-                          >
-                            {cloneUploading ? '上传中...' : '上传音频获取临时URL'}
-                            <input
-                              type="file"
-                              hidden
-                              accept="audio/*"
-                              onChange={handleUploadCloneAudio}
-                            />
-                          </Button>
-                          <Typography variant="caption" color="text.secondary">
-                            录音或上传都会生成临时 URL（oss://），有效期 48 小时。点击“录音”可查看示例文本，也可以随机朗读其他内容。
+                    <Grid container spacing={1.5}>
+                      <Grid item xs={12} lg={6}>
+                        <Paper variant="outlined" sx={{ p: 1.5, height: '100%' }}>
+                          <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+                            声音复刻
                           </Typography>
-                        </Box>
+                          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                            支持 http/https 或 oss:// 临时 URL（有效期 48 小时）；系统会自动生成合规 prefix，并用你的“命名”在列表中展示。
+                          </Typography>
+                          <Grid container spacing={1}>
+                            <Grid item xs={12} md={4}>
+                              <TextField
+                                size="small"
+                                fullWidth
+                                label="声音名称"
+                                value={cloneName}
+                                onChange={(e) => setCloneName(e.target.value)}
+                                disabled={cloneLoading || cloneUploading || cloneRecording || designLoading}
+                              />
+                            </Grid>
+                            <Grid item xs={12} md={6}>
+                              <TextField
+                                size="small"
+                                fullWidth
+                                label="音频 URL（http/https 或 oss://）"
+                                value={cloneUrl}
+                                onChange={(e) => setCloneUrl(e.target.value)}
+                                disabled={cloneLoading || cloneUploading || cloneRecording || designLoading}
+                              />
+                            </Grid>
+                            <Grid item xs={12} md={2}>
+                              <Button
+                                fullWidth
+                                variant="contained"
+                                onClick={handleCreateCloneVoice}
+                                disabled={cloneLoading || cloneUploading || cloneRecording || designLoading || !cloneName.trim() || !cloneUrl.trim()}
+                                sx={{ height: '100%' }}
+                              >
+                                {cloneLoading ? '提交中...' : '开始复刻'}
+                              </Button>
+                            </Grid>
+                            <Grid item xs={12}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                                <Button
+                                  variant="outlined"
+                                  onClick={handleOpenCloneRecordDialog}
+                                  disabled={cloneLoading || cloneUploading || cloneRecording || designLoading}
+                                >
+                                  录音
+                                </Button>
+                                <Button
+                                  variant="outlined"
+                                  component="label"
+                                  disabled={cloneLoading || cloneUploading || cloneRecording || designLoading}
+                                >
+                                  {cloneUploading ? '上传中...' : '上传音频获取临时URL'}
+                                  <input
+                                    type="file"
+                                    hidden
+                                    accept="audio/*"
+                                    onChange={handleUploadCloneAudio}
+                                  />
+                                </Button>
+                                <Typography variant="caption" color="text.secondary">
+                                  录音或上传都会生成临时 URL（oss://），有效期 48 小时。点击“录音”可查看示例文本，也可以随机朗读其他内容。
+                                </Typography>
+                              </Box>
+                            </Grid>
+                          </Grid>
+                          {cloneError && (
+                            <Alert severity="warning" sx={{ mt: 1 }}>
+                              {cloneError}
+                            </Alert>
+                          )}
+                          {cloneSuccess && (
+                            <Alert severity="success" sx={{ mt: 1 }}>
+                              {cloneSuccess}
+                            </Alert>
+                          )}
+                        </Paper>
+                      </Grid>
+                      <Grid item xs={12} lg={6}>
+                        <Paper variant="outlined" sx={{ p: 1.5, height: '100%' }}>
+                          <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+                            声音设计
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                            用自然语言描述声线、年龄感、气质和情绪，再提供一段试听文本，即可生成新的设计音色。
+                          </Typography>
+                          <Grid container spacing={1}>
+                            <Grid item xs={12} md={4}>
+                              <TextField
+                                size="small"
+                                fullWidth
+                                label="设计名称"
+                                value={designName}
+                                onChange={(e) => setDesignName(e.target.value)}
+                                disabled={designLoading || cloneLoading || cloneUploading || cloneRecording}
+                              />
+                            </Grid>
+                            <Grid item xs={12} md={8}>
+                              <TextField
+                                size="small"
+                                fullWidth
+                                label="声音描述"
+                                placeholder="例如：青年女性，声线清透，带一点冷静与克制，适合悬疑旁白。"
+                                value={designPrompt}
+                                onChange={(e) => setDesignPrompt(e.target.value)}
+                                disabled={designLoading || cloneLoading || cloneUploading || cloneRecording}
+                              />
+                            </Grid>
+                            <Grid item xs={12} md={9}>
+                              <TextField
+                                size="small"
+                                fullWidth
+                                multiline
+                                minRows={2}
+                                label="试听文本"
+                                value={designPreviewText}
+                                onChange={(e) => setDesignPreviewText(e.target.value)}
+                                disabled={designLoading || cloneLoading || cloneUploading || cloneRecording}
+                              />
+                            </Grid>
+                            <Grid item xs={12} md={3}>
+                              <Button
+                                fullWidth
+                                variant="contained"
+                                onClick={handleCreateDesignVoice}
+                                disabled={designLoading || cloneLoading || cloneUploading || cloneRecording || !designName.trim() || !designPrompt.trim() || !designPreviewText.trim()}
+                                sx={{ height: '100%' }}
+                              >
+                                {designLoading ? '设计中...' : '开始设计'}
+                              </Button>
+                            </Grid>
+                          </Grid>
+                          {designError && (
+                            <Alert severity="warning" sx={{ mt: 1 }}>
+                              {designError}
+                            </Alert>
+                          )}
+                          {designSuccess && (
+                            <Alert severity="success" sx={{ mt: 1 }}>
+                              {designSuccess}
+                            </Alert>
+                          )}
+                        </Paper>
                       </Grid>
                     </Grid>
-                    {cloneError && (
-                      <Alert severity="warning" sx={{ mt: 1 }}>
-                        {cloneError}
-                      </Alert>
-                    )}
-                    {cloneSuccess && (
-                      <Alert severity="success" sx={{ mt: 1 }}>
-                        {cloneSuccess}
-                      </Alert>
-                    )}
-                    {cloneVoicePresets.length > 0 && (
-                      <Box sx={{ mt: 1 }}>
+                    {customVoicePresets.length > 0 && (
+                      <Box sx={{ mt: 1.5 }}>
                         <Divider sx={{ mb: 1 }} />
                         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                          已复刻音色（可删除）
+                          已创建自定义音色（可删除）
                         </Typography>
                         <List dense>
-                          {cloneVoicePresets.map((preset) => (
-                            <ListItem
-                              key={preset.id}
-                              secondaryAction={
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                  <Tooltip title="音色克隆：基于音频样本创建的专属音色">
-                                    <Chip
-                                      label="克隆"
+                          {customVoicePresets.map((preset) => {
+                            const isDesign = preset.customType === 'design'
+                            return (
+                              <ListItem
+                                key={preset.id}
+                                secondaryAction={
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <Tooltip title={isDesign ? '音色设计：通过文字描述生成新的声线' : '音色克隆：基于音频样本创建的专属音色'}>
+                                      <Chip
+                                        label={isDesign ? '设计' : '克隆'}
+                                        size="small"
+                                        color={isDesign ? 'warning' : 'success'}
+                                        sx={{ height: 18, fontSize: '0.65rem' }}
+                                      />
+                                    </Tooltip>
+                                    <Button
+                                      color="error"
                                       size="small"
-                                      color="success"
-                                      sx={{ height: 18, fontSize: '0.65rem' }}
-                                    />
-                                  </Tooltip>
-                                  <Button
-                                    color="error"
-                                    size="small"
-                                    disabled={cloneDeletingId === preset.id || cloneLoading || cloneUploading}
-                                    onClick={() => handleDeleteCloneVoice(preset.id, preset.label)}
-                                  >
-                                    {cloneDeletingId === preset.id ? '删除中...' : '删除'}
-                                  </Button>
-                                </Box>
-                              }
-                            >
-                              <ListItemText
-                                primary={preset.label || preset.id}
-                                secondary={preset.description || preset.id}
-                              />
-                            </ListItem>
-                          ))}
+                                      disabled={cloneDeletingId === preset.id || cloneLoading || cloneUploading || designLoading}
+                                      onClick={() => handleDeleteCustomVoice(preset.id, preset.label)}
+                                    >
+                                      {cloneDeletingId === preset.id ? '删除中...' : '删除'}
+                                    </Button>
+                                  </Box>
+                                }
+                              >
+                                <ListItemText
+                                  primary={preset.label || preset.id}
+                                  secondary={preset.description || preset.id}
+                                />
+                              </ListItem>
+                            )
+                          })}
                         </List>
                       </Box>
                     )}
@@ -4044,7 +4165,7 @@ const AudiobookPage = () => {
                                   )}
                                   {!voiceLoading && currentVoicePresets.length === 0 && (
                                     <MenuItem disabled value="__empty">
-                                      {ttsModel === 'cosyvoice-v3.5-plus' ? '暂无可用复刻音色，请先创建' : '暂无官方音色，请稍后重试'}
+                                      {ttsModel === 'cosyvoice-v3.5-plus' ? '暂无可用自定义音色，请先创建' : '暂无官方音色，请稍后重试'}
                                     </MenuItem>
                                   )}
                                   {currentVoicePresets.map((preset) => (
