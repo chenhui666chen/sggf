@@ -87,6 +87,62 @@ class TTSPreviewRequest(BaseModel):
     speed: Optional[float] = None
     pitch: Optional[int] = None
     model: Optional[str] = "qwen3-tts-instruct-flash"  # TTS 模型（默认 qwen3-tts-instruct-flash）
+    instruction: Optional[str] = None
+
+
+class TTSPreviewWithTimestampsRequest(TTSPreviewRequest):
+    """带时间戳的 TTS 试听请求"""
+    word_timestamp_enabled: bool = True
+    phoneme_timestamp_enabled: bool = False
+
+
+class TTSWordTimestamp(BaseModel):
+    """词级时间戳"""
+    text: str
+    begin_index: int
+    end_index: int
+    begin_time: int
+    end_time: int
+    sentence_index: Optional[int] = None
+
+
+class TTSPhonemeTimestamp(BaseModel):
+    """音素级时间戳"""
+    phoneme: str
+    begin_time: int
+    end_time: int
+    sentence_index: Optional[int] = None
+    word_text: Optional[str] = None
+    word_begin_index: Optional[int] = None
+    word_end_index: Optional[int] = None
+
+
+class TTSSentenceTimestamp(BaseModel):
+    """句级时间戳聚合"""
+    index: Optional[int] = None
+    type: Optional[str] = None
+    original_text: Optional[str] = None
+    words: List[TTSWordTimestamp] = Field(default_factory=list)
+
+
+class TTSPreviewWithTimestampsResponse(BaseModel):
+    """带时间戳的 TTS 试听响应"""
+    model: str
+    voice_id: str
+    audio_data_base64: str
+    audio_format: str
+    audio_mime_type: str
+    audio_size_bytes: int
+    provider: Optional[str] = None
+    provider_model: Optional[str] = None
+    transport: Optional[str] = None
+    word_timestamp_enabled: bool = False
+    phoneme_timestamp_enabled: bool = False
+    word_timestamps_available: bool = False
+    phoneme_timestamps_available: bool = False
+    tts_timestamps: List[TTSWordTimestamp] = Field(default_factory=list)
+    tts_timestamp_sentences: List[TTSSentenceTimestamp] = Field(default_factory=list)
+    phoneme_timestamps: List[TTSPhonemeTimestamp] = Field(default_factory=list)
 
 
 class ScriptSegmentPreviewRequest(BaseModel):

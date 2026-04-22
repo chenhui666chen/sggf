@@ -1272,6 +1272,20 @@ class ApiClient {
     return this.client.post('/api/v1/audiobook/tts/preview', payload, { responseType: 'blob' })
   }
 
+  previewTTSWithTimestamps(payload: {
+    text: string
+    voice_id: string
+    volume?: number
+    speed?: number
+    pitch?: number
+    model?: string
+    instruction?: string
+    word_timestamp_enabled?: boolean
+    phoneme_timestamp_enabled?: boolean
+  }) {
+    return this.client.post('/api/v1/audiobook/tts/preview-with-timestamps', payload)
+  }
+
   previewScriptSegmentAudio(
     audiobookProjectId: number,
     chapterId: number,

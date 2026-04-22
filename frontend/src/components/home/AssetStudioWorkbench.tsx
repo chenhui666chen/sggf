@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { ChangeEvent } from 'react'
 import AddPhotoAlternateOutlinedIcon from '@mui/icons-material/AddPhotoAlternateOutlined'
 import BoltOutlinedIcon from '@mui/icons-material/BoltOutlined'
 import {
@@ -7,6 +8,10 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControl,
   FormHelperText,
   InputLabel as MuiInputLabel,
@@ -238,6 +243,93 @@ const WORKBENCH_MENU_PROPS: SelectProps<string>['MenuProps'] = {
     sx: {
       py: 0.5,
     },
+  },
+}
+
+const WORKBENCH_DIALOG_PAPER_SX: SxProps<Theme> = {
+  color: 'white',
+  borderRadius: 4,
+  border: '1px solid rgba(255,255,255,0.12)',
+  background: 'linear-gradient(180deg, rgba(26,30,46,0.98) 0%, rgba(12,15,24,0.98) 100%)',
+  boxShadow: '0 28px 80px rgba(2,6,16,0.52)',
+  backdropFilter: 'blur(18px)',
+}
+
+const WORKBENCH_DIALOG_BACKDROP_SX: SxProps<Theme> = {
+  backgroundColor: 'rgba(5,8,16,0.76)',
+  backdropFilter: 'blur(10px)',
+}
+
+const WORKBENCH_DIALOG_TITLE_SX: SxProps<Theme> = {
+  px: 3,
+  py: 2.25,
+  color: 'white',
+  fontSize: '1.85rem',
+  fontWeight: 700,
+  borderBottom: '1px solid rgba(255,255,255,0.08)',
+}
+
+const WORKBENCH_DIALOG_CONTENT_SX: SxProps<Theme> = {
+  px: 3,
+  py: 2.5,
+  borderColor: 'rgba(255,255,255,0.08)',
+}
+
+const WORKBENCH_DIALOG_ACTIONS_SX: SxProps<Theme> = {
+  px: 3,
+  py: 2,
+  gap: 1,
+  borderTop: '1px solid rgba(255,255,255,0.08)',
+}
+
+const WORKBENCH_DIALOG_INFO_ALERT_SX: SxProps<Theme> = {
+  borderRadius: 2.5,
+  color: 'rgba(224,236,255,0.96)',
+  backgroundColor: 'rgba(74,115,255,0.14)',
+  border: '1px solid rgba(121,149,255,0.24)',
+  '& .MuiAlert-icon': {
+    color: '#9db4ff',
+  },
+}
+
+const WORKBENCH_DIALOG_FIELD_SX: SxProps<Theme> = {
+  '& .MuiInputLabel-root': {
+    color: 'rgba(255,255,255,0.66)',
+  },
+  '& .MuiInputLabel-root.Mui-focused': {
+    color: 'rgba(214,224,255,0.92)',
+  },
+  '& .MuiOutlinedInput-root': {
+    color: 'white',
+    borderRadius: 2.5,
+    backgroundColor: 'rgba(255,255,255,0.045)',
+    '& fieldset': {
+      borderColor: 'rgba(255,255,255,0.14)',
+    },
+    '&:hover fieldset': {
+      borderColor: 'rgba(167,186,255,0.3)',
+    },
+    '&.Mui-focused fieldset': {
+      borderColor: 'rgba(139,161,255,0.68)',
+    },
+  },
+}
+
+const WORKBENCH_SUBTLE_ACTION_BUTTON_SX: SxProps<Theme> = {
+  minHeight: 38,
+  px: 1.25,
+  color: 'rgba(235,241,255,0.92)',
+  borderColor: 'rgba(255,255,255,0.12)',
+  backgroundColor: 'rgba(255,255,255,0.03)',
+  whiteSpace: 'nowrap',
+  '&:hover': {
+    borderColor: 'rgba(138,158,255,0.36)',
+    backgroundColor: 'rgba(138,158,255,0.08)',
+  },
+  '&.Mui-disabled': {
+    color: 'rgba(255,255,255,0.28)',
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.02)',
   },
 }
 
@@ -1383,6 +1475,24 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const [audioLoading, setAudioLoading] = useState(false)
   const [audioError, setAudioError] = useState<string | null>(null)
   const [audioResult, setAudioResult] = useState<AssetStudioGenerateResponse | null>(null)
+  const [audioCloneDialogOpen, setAudioCloneDialogOpen] = useState(false)
+  const [audioCloneName, setAudioCloneName] = useState('')
+  const [audioCloneUrl, setAudioCloneUrl] = useState('')
+  const [audioCloneLoading, setAudioCloneLoading] = useState(false)
+  const [audioCloneUploading, setAudioCloneUploading] = useState(false)
+  const [audioCloneRecording, setAudioCloneRecording] = useState(false)
+  const [audioCloneRecordDialogOpen, setAudioCloneRecordDialogOpen] = useState(false)
+  const [audioCloneFeedback, setAudioCloneFeedback] = useState<CollectFeedback | null>(null)
+  const [audioDesignDialogOpen, setAudioDesignDialogOpen] = useState(false)
+  const [audioDesignName, setAudioDesignName] = useState('')
+  const [audioDesignPrompt, setAudioDesignPrompt] = useState('')
+  const [audioDesignPreviewText, setAudioDesignPreviewText] = useState('欢迎收听这段声音设计试听，我们从这里开始塑造角色的独特声线。')
+  const [audioDesignLoading, setAudioDesignLoading] = useState(false)
+  const [audioDesignFeedback, setAudioDesignFeedback] = useState<CollectFeedback | null>(null)
+  const [audioVoiceActionFeedback, setAudioVoiceActionFeedback] = useState<CollectFeedback | null>(null)
+  const audioCloneRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioCloneStreamRef = useRef<MediaStream | null>(null)
+  const audioCloneChunksRef = useRef<Blob[]>([])
 
   const [collectStates, setCollectStates] = useState<Record<AssetCollectKey, CollectState>>({
     image: { loading: false, feedback: null },
@@ -1452,6 +1562,245 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
     }
     return (left.label || left.id).localeCompare(right.label || right.id, 'zh-CN')
   })
+  const isCosyVoiceSpeechMode = audioGenerationType === 'speech' && audioModelId === 'cosyvoice-v3.5-plus'
+
+  const applyAudioVoicePresets = (voices: SpeechVoicePreset[], preferredVoiceId?: string) => {
+    setAudioVoicePresets(voices)
+    setAudioVoiceId((current) => {
+      if (preferredVoiceId && voices.some((voice) => voice.id === preferredVoiceId)) {
+        return preferredVoiceId
+      }
+      if (voices.some((voice) => voice.id === current)) {
+        return current
+      }
+      return voices[0]?.id || ''
+    })
+  }
+
+  const refreshAudioVoiceCatalog = async (modelId: string = audioModelId, preferredVoiceId?: string) => {
+    setAudioVoiceLoading(true)
+    try {
+      const response = await apiClient.getTtsVoices(modelId)
+      const voices = Array.isArray(response.data?.voices)
+        ? (response.data?.voices as SpeechVoicePreset[])
+        : []
+      applyAudioVoicePresets(voices, preferredVoiceId)
+      return voices
+    } catch (error) {
+      setAudioVoicePresets([])
+      setAudioVoiceId('')
+      throw error
+    } finally {
+      setAudioVoiceLoading(false)
+    }
+  }
+
+  const handleUploadAudioCloneSample = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) {
+      return
+    }
+
+    setAudioCloneUploading(true)
+    setAudioCloneFeedback(null)
+    setAudioVoiceActionFeedback(null)
+    try {
+      const response = await apiClient.uploadCosyVoiceV3PlusCloneSample(file)
+      const url = String(response.data?.url || '').trim()
+      if (!url) {
+        throw new Error('未返回临时 URL')
+      }
+      setAudioCloneUrl(url)
+      setAudioCloneFeedback({ type: 'success', text: '已上传音频并生成临时 URL（48 小时有效）。' })
+    } catch (error) {
+      const message = await extractApiErrorMessage(error, '上传复刻样本失败')
+      setAudioCloneFeedback({ type: 'error', text: message })
+    } finally {
+      setAudioCloneUploading(false)
+    }
+  }
+
+  const stopAudioCloneRecordingStream = () => {
+    if (audioCloneStreamRef.current) {
+      audioCloneStreamRef.current.getTracks().forEach((track) => track.stop())
+      audioCloneStreamRef.current = null
+    }
+  }
+
+  const discardAudioCloneRecording = () => {
+    const recorder = audioCloneRecorderRef.current
+    if (recorder) {
+      recorder.ondataavailable = null
+      recorder.onstop = null
+      recorder.onerror = null
+      try {
+        if (recorder.state !== 'inactive') {
+          recorder.stop()
+        }
+      } catch {
+        // 忽略录音清理失败
+      }
+    }
+    audioCloneRecorderRef.current = null
+    audioCloneChunksRef.current = []
+    setAudioCloneRecording(false)
+    stopAudioCloneRecordingStream()
+  }
+
+  const uploadRecordedAudioClone = async (blob: Blob) => {
+    setAudioCloneUploading(true)
+    setAudioCloneFeedback(null)
+    setAudioVoiceActionFeedback(null)
+    try {
+      const filename = `recording_${Date.now()}.webm`
+      const file = new File([blob], filename, { type: blob.type || 'audio/webm' })
+      const response = await apiClient.uploadCosyVoiceV3PlusCloneSample(file)
+      const url = String(response.data?.url || '').trim()
+      if (!url) {
+        throw new Error('未返回临时 URL')
+      }
+      setAudioCloneUrl(url)
+      setAudioCloneRecordDialogOpen(false)
+      setAudioCloneFeedback({ type: 'success', text: '录音已上传并生成临时 URL（48 小时有效）。' })
+    } catch (error) {
+      const message = await extractApiErrorMessage(error, '上传录音失败')
+      setAudioCloneFeedback({ type: 'error', text: message })
+    } finally {
+      setAudioCloneUploading(false)
+    }
+  }
+
+  const handleStartAudioCloneRecording = async () => {
+    if (audioCloneLoading || audioCloneUploading || audioCloneRecording) {
+      return
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setAudioCloneFeedback({ type: 'error', text: '当前浏览器不支持录音，请改用上传音频。' })
+      return
+    }
+
+    setAudioCloneFeedback(null)
+    setAudioVoiceActionFeedback(null)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      audioCloneStreamRef.current = stream
+      audioCloneChunksRef.current = []
+      const recorder = new MediaRecorder(stream)
+      audioCloneRecorderRef.current = recorder
+      recorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data && event.data.size > 0) {
+          audioCloneChunksRef.current.push(event.data)
+        }
+      }
+      recorder.onstop = () => {
+        const chunks = audioCloneChunksRef.current
+        audioCloneChunksRef.current = []
+        audioCloneRecorderRef.current = null
+        setAudioCloneRecording(false)
+        stopAudioCloneRecordingStream()
+        if (chunks.length === 0) {
+          setAudioCloneFeedback({ type: 'error', text: '未获取到录音数据，请重试。' })
+          return
+        }
+        const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' })
+        void uploadRecordedAudioClone(blob)
+      }
+      recorder.onerror = () => {
+        audioCloneRecorderRef.current = null
+        setAudioCloneRecording(false)
+        stopAudioCloneRecordingStream()
+        setAudioCloneFeedback({ type: 'error', text: '录音失败，请重试。' })
+      }
+      recorder.start()
+      setAudioCloneRecording(true)
+    } catch (error) {
+      stopAudioCloneRecordingStream()
+      setAudioCloneRecording(false)
+      const message = await extractApiErrorMessage(error, '无法访问麦克风，请检查权限')
+      setAudioCloneFeedback({ type: 'error', text: message })
+    }
+  }
+
+  const handleStopAudioCloneRecording = () => {
+    const recorder = audioCloneRecorderRef.current
+    if (!recorder) {
+      return
+    }
+    if (recorder.state === 'inactive') {
+      audioCloneRecorderRef.current = null
+      setAudioCloneRecording(false)
+      stopAudioCloneRecordingStream()
+      return
+    }
+    recorder.stop()
+  }
+
+  const handleOpenAudioCloneRecordDialog = () => {
+    setAudioCloneFeedback(null)
+    setAudioCloneRecordDialogOpen(true)
+  }
+
+  const handleCloseAudioCloneRecordDialog = () => {
+    if (audioCloneRecording) {
+      return
+    }
+    setAudioCloneRecordDialogOpen(false)
+  }
+
+  const handleCreateAudioClone = async () => {
+    setAudioCloneLoading(true)
+    setAudioCloneFeedback(null)
+    setAudioVoiceActionFeedback(null)
+    try {
+      const response = await apiClient.createCosyVoiceV3PlusClone({
+        name: audioCloneName.trim(),
+        url: audioCloneUrl.trim(),
+      })
+      const voiceId = String(response.data?.voice_id || '').trim()
+      await refreshAudioVoiceCatalog('cosyvoice-v3.5-plus', voiceId || undefined)
+      setAudioCloneName('')
+      setAudioCloneUrl('')
+      setAudioCloneDialogOpen(false)
+      setAudioVoiceActionFeedback({
+        type: 'success',
+        text: voiceId ? `已提交声音复刻任务：${voiceId}` : '已提交声音复刻任务，请稍后刷新音色列表。',
+      })
+    } catch (error) {
+      const message = await extractApiErrorMessage(error, '创建复刻音色失败')
+      setAudioCloneFeedback({ type: 'error', text: message })
+    } finally {
+      setAudioCloneLoading(false)
+    }
+  }
+
+  const handleCreateAudioDesign = async () => {
+    setAudioDesignLoading(true)
+    setAudioDesignFeedback(null)
+    setAudioVoiceActionFeedback(null)
+    try {
+      const response = await apiClient.createCosyVoiceV3PlusDesign({
+        name: audioDesignName.trim(),
+        voice_prompt: audioDesignPrompt.trim(),
+        preview_text: audioDesignPreviewText.trim(),
+      })
+      const voiceId = String(response.data?.voice_id || '').trim()
+      await refreshAudioVoiceCatalog('cosyvoice-v3.5-plus', voiceId || undefined)
+      setAudioDesignName('')
+      setAudioDesignPrompt('')
+      setAudioDesignPreviewText('欢迎收听这段声音设计试听，我们从这里开始塑造角色的独特声线。')
+      setAudioDesignDialogOpen(false)
+      setAudioVoiceActionFeedback({
+        type: 'success',
+        text: voiceId ? `已提交声音设计任务：${voiceId}` : '已提交声音设计任务，请稍后刷新音色列表。',
+      })
+    } catch (error) {
+      const message = await extractApiErrorMessage(error, '创建设计音色失败')
+      setAudioDesignFeedback({ type: 'error', text: message })
+    } finally {
+      setAudioDesignLoading(false)
+    }
+  }
 
   const updateCollectState = (
     key: AssetCollectKey,
@@ -1702,6 +2051,11 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
     setAudioVoicePresets([])
     setAudioVoiceId('')
     setAudioVoiceLoading(false)
+    setAudioCloneDialogOpen(false)
+    setAudioCloneRecordDialogOpen(false)
+    setAudioDesignDialogOpen(false)
+    setAudioCloneRecording(false)
+    discardAudioCloneRecording()
   }, [audioGenerationType])
 
   useEffect(() => {
@@ -1723,13 +2077,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
         if (cancelled) {
           return
         }
-        setAudioVoicePresets(voices)
-        setAudioVoiceId((current) => {
-          if (voices.some((voice) => voice.id === current)) {
-            return current
-          }
-          return voices[0]?.id || ''
-        })
+        applyAudioVoicePresets(voices)
       } catch {
         if (!cancelled) {
           setAudioVoicePresets([])
@@ -1746,6 +2094,26 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
       cancelled = true
     }
   }, [audioGenerationType, audioModelId])
+
+  useEffect(() => {
+    if (audioModelId === 'cosyvoice-v3.5-plus') {
+      return
+    }
+    setAudioCloneDialogOpen(false)
+    setAudioCloneRecordDialogOpen(false)
+    setAudioDesignDialogOpen(false)
+    setAudioCloneFeedback(null)
+    setAudioDesignFeedback(null)
+    setAudioVoiceActionFeedback(null)
+    setAudioCloneRecording(false)
+    discardAudioCloneRecording()
+  }, [audioModelId])
+
+  useEffect(() => {
+    return () => {
+      discardAudioCloneRecording()
+    }
+  }, [])
 
   const handleGenerateImage = async () => {
     if (!imagePrompt.trim()) {
@@ -2373,6 +2741,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
         <Box sx={{ p: { xs: 1.5, sm: 2.5 } }}>
           <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', xl: '1.1fr 0.9fr' } }}>
             <Stack spacing={2}>
+              <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' } }}>
               <Box sx={{ p: 2, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
                 <FormControl fullWidth size="small">
                   <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>生成类型</InputLabel>
@@ -2392,22 +2761,6 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                     {selectedAudioGenerationType.helper}
                   </FormHelperText>
                 </FormControl>
-                <Stack
-                  direction="row"
-                  spacing={1}
-                  flexWrap="wrap"
-                  useFlexGap
-                  sx={{ mt: 1.25, display: audioGenerationType === 'speech' ? 'none' : 'flex' }}
-                >
-                  <Chip size="small" label={audioGenerationType === 'music' ? '配乐主链路' : '音效主链路'} variant="outlined" sx={{ color: 'white' }} />
-                  <Chip size="small" label={audioGenerationType === 'music' ? 'Mureka 生成' : 'Vidu Timing2Audio'} variant="outlined" sx={{ color: 'white' }} />
-                </Stack>
-                {audioGenerationType === 'speech' ? (
-                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.25 }}>
-                    <Chip size="small" label="语音主链路" variant="outlined" sx={{ color: 'white' }} />
-                    <Chip size="small" label="统一 TTS 运行时" variant="outlined" sx={{ color: 'white' }} />
-                  </Stack>
-                ) : null}
               </Box>
 
               <Box sx={{ p: 2, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
@@ -2424,6 +2777,8 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
                     {selectedAudioModel?.helper}
                   </FormHelperText>
                 </FormControl>
+              </Box>
+
               </Box>
 
               {audioGenerationType === 'sound-effect' ? (
@@ -2450,36 +2805,85 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
 
               {audioGenerationType === 'speech' ? (
                 <Stack spacing={1.5}>
-                  <FormControl size="small" fullWidth>
-                    <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>音色</InputLabel>
-                    <Select
-                      value={audioVoiceId}
-                      label="音色"
-                      onChange={(event) => setAudioVoiceId(event.target.value)}
-                      sx={{ color: 'white' }}
-                      disabled={audioVoiceLoading || sortedAudioVoicePresets.length === 0}
-                    >
-                      {audioVoiceLoading ? (
-                        <MenuItem value="" disabled>
-                          正在加载音色...
-                        </MenuItem>
-                      ) : null}
-                      {!audioVoiceLoading && sortedAudioVoicePresets.length === 0 ? (
-                        <MenuItem value="" disabled>
-                          暂无可用音色
-                        </MenuItem>
-                      ) : null}
-                      {sortedAudioVoicePresets.map((voice) => (
-                        <MenuItem key={voice.id} value={voice.id}>
-                          {voice.label}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                    <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
-                      {sortedAudioVoicePresets.find((voice) => voice.id === audioVoiceId)?.description
-                        || (audioModelId === 'cosyvoice-v3.5-plus' ? 'CosyVoice 只展示你当前账号下可用的复刻/设计音色。' : '选择一个音色后即可直接合成。')}
-                    </FormHelperText>
-                  </FormControl>
+                  <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', md: isCosyVoiceSpeechMode ? 'repeat(2, minmax(0, 1fr))' : '1fr' } }}>
+                    <FormControl size="small" fullWidth>
+                      <InputLabel sx={{ color: 'rgba(255,255,255,0.68)' }}>音色</InputLabel>
+                      <Select
+                        value={audioVoiceId}
+                        label="音色"
+                        onChange={(event) => setAudioVoiceId(event.target.value)}
+                        sx={{ color: 'white' }}
+                        disabled={audioVoiceLoading || sortedAudioVoicePresets.length === 0}
+                      >
+                        {audioVoiceLoading ? (
+                          <MenuItem value="" disabled>
+                            正在加载音色...
+                          </MenuItem>
+                        ) : null}
+                        {!audioVoiceLoading && sortedAudioVoicePresets.length === 0 ? (
+                          <MenuItem value="" disabled>
+                            暂无可用音色
+                          </MenuItem>
+                        ) : null}
+                        {sortedAudioVoicePresets.map((voice) => (
+                          <MenuItem key={voice.id} value={voice.id}>
+                            {voice.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                      <FormHelperText sx={{ color: 'rgba(255,255,255,0.6)', mx: 0, mt: 1 }}>
+                        {sortedAudioVoicePresets.find((voice) => voice.id === audioVoiceId)?.description
+                          || (audioModelId === 'cosyvoice-v3.5-plus' ? 'CosyVoice 只展示你当前账号下可用的复刻/设计音色。' : '选择一个音色后即可直接合成。')}
+                      </FormHelperText>
+                    </FormControl>
+
+                    {isCosyVoiceSpeechMode ? (
+                      <Box sx={{ p: 1.5, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
+                        <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+                          <Button
+                            variant="outlined"
+                            sx={WORKBENCH_SUBTLE_ACTION_BUTTON_SX}
+                            onClick={() => {
+                              setAudioCloneFeedback(null)
+                              setAudioCloneDialogOpen(true)
+                            }}
+                            disabled={audioCloneLoading || audioCloneUploading || audioDesignLoading}
+                          >
+                            声音复刻
+                          </Button>
+                          <Button
+                            variant="outlined"
+                            sx={WORKBENCH_SUBTLE_ACTION_BUTTON_SX}
+                            onClick={() => {
+                              setAudioDesignFeedback(null)
+                              setAudioDesignDialogOpen(true)
+                            }}
+                            disabled={audioCloneLoading || audioCloneUploading || audioDesignLoading}
+                          >
+                            声音设计
+                          </Button>
+                          <Button
+                            variant="outlined"
+                            sx={WORKBENCH_SUBTLE_ACTION_BUTTON_SX}
+                            onClick={() => {
+                              void refreshAudioVoiceCatalog('cosyvoice-v3.5-plus').catch(async (error) => {
+                                const message = await extractApiErrorMessage(error, '刷新音色失败')
+                                setAudioVoiceActionFeedback({ type: 'error', text: message })
+                              })
+                            }}
+                            disabled={audioVoiceLoading || audioCloneLoading || audioCloneUploading || audioDesignLoading}
+                          >
+                            {audioVoiceLoading ? '同步中...' : '刷新音色'}
+                          </Button>
+                        </Box>
+                        {audioVoiceActionFeedback ? (
+                          <Alert severity={audioVoiceActionFeedback.type} sx={{ mt: 1.25, borderRadius: 2 }}>
+                            {audioVoiceActionFeedback.text}
+                          </Alert>
+                        ) : null}
+                      </Box>
+                    ) : null}
+                  </Box>
 
                   <TextField
                     size="small"
@@ -2605,6 +3009,225 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
           </Stack>
         </Box>
       ) : null}
+
+      <Dialog
+        open={audioCloneDialogOpen}
+        onClose={() => {
+          if (!audioCloneLoading && !audioCloneUploading && !audioCloneRecording && !audioCloneRecordDialogOpen) {
+            setAudioCloneDialogOpen(false)
+          }
+        }}
+        fullWidth
+        maxWidth="sm"
+        PaperProps={{ sx: WORKBENCH_DIALOG_PAPER_SX }}
+        BackdropProps={{ sx: WORKBENCH_DIALOG_BACKDROP_SX }}
+      >
+        <DialogTitle sx={WORKBENCH_DIALOG_TITLE_SX}>声音复刻</DialogTitle>
+        <DialogContent dividers sx={WORKBENCH_DIALOG_CONTENT_SX}>
+          <Stack spacing={1.5} sx={{ pt: 0.5 }}>
+            <Alert severity="info" sx={WORKBENCH_DIALOG_INFO_ALERT_SX}>
+              支持 `http/https` 或上传样本后获得的临时 URL；创建完成后会自动刷新当前 CosyVoice 音色列表。
+            </Alert>
+            <TextField
+              size="small"
+              fullWidth
+              label="声音名称"
+              value={audioCloneName}
+              onChange={(event) => setAudioCloneName(event.target.value)}
+              disabled={audioCloneLoading || audioCloneUploading}
+              sx={WORKBENCH_DIALOG_FIELD_SX}
+            />
+            <TextField
+              size="small"
+              fullWidth
+              label="音频 URL"
+              placeholder="支持 http/https 或 oss:// 临时地址"
+              value={audioCloneUrl}
+              onChange={(event) => setAudioCloneUrl(event.target.value)}
+              disabled={audioCloneLoading || audioCloneUploading}
+              sx={WORKBENCH_DIALOG_FIELD_SX}
+            />
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+              <Button
+                variant="outlined"
+                component="label"
+                disabled={audioCloneLoading || audioCloneUploading}
+                sx={{ alignSelf: 'flex-start', borderColor: 'rgba(138,158,255,0.42)', color: '#d7e1ff' }}
+              >
+                {audioCloneUploading ? '上传中...' : '上传音频获取临时 URL'}
+                <input hidden type="file" accept="audio/*" onChange={handleUploadAudioCloneSample} />
+              </Button>
+              <Button
+                variant="outlined"
+                onClick={handleOpenAudioCloneRecordDialog}
+                disabled={audioCloneLoading || audioCloneUploading || audioCloneRecording}
+                sx={{ alignSelf: 'flex-start', borderColor: 'rgba(138,158,255,0.42)', color: '#d7e1ff' }}
+              >
+                {audioCloneRecording ? '录音中...' : '录音获取临时 URL'}
+              </Button>
+              <Typography sx={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.78rem', lineHeight: 1.6 }}>
+                上传或录音后会自动把临时 URL 回填到上方输入框。
+              </Typography>
+            </Stack>
+            {audioCloneFeedback ? (
+              <Alert severity={audioCloneFeedback.type} sx={{ borderRadius: 2.5 }}>
+                {audioCloneFeedback.text}
+              </Alert>
+            ) : null}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={WORKBENCH_DIALOG_ACTIONS_SX}>
+          <Button
+            onClick={() => setAudioCloneDialogOpen(false)}
+            disabled={audioCloneLoading || audioCloneUploading || audioCloneRecording}
+            sx={{ color: 'rgba(214,224,255,0.9)' }}
+          >
+            取消
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              void handleCreateAudioClone()
+            }}
+            disabled={audioCloneLoading || audioCloneUploading || !audioCloneName.trim() || !audioCloneUrl.trim()}
+            sx={{
+              minWidth: 132,
+              borderRadius: 2.5,
+              background: 'linear-gradient(135deg, #6f86ff 0%, #4c66ff 100%)',
+              boxShadow: '0 12px 28px rgba(76,102,255,0.28)',
+            }}
+          >
+            {audioCloneLoading ? '提交中...' : '开始复刻'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={audioCloneRecordDialogOpen}
+        onClose={handleCloseAudioCloneRecordDialog}
+        fullWidth
+        maxWidth="xs"
+        disableEscapeKeyDown={audioCloneRecording}
+        PaperProps={{ sx: WORKBENCH_DIALOG_PAPER_SX }}
+        BackdropProps={{ sx: WORKBENCH_DIALOG_BACKDROP_SX }}
+      >
+        <DialogTitle sx={WORKBENCH_DIALOG_TITLE_SX}>录音朗读提示</DialogTitle>
+        <DialogContent dividers sx={WORKBENCH_DIALOG_CONTENT_SX}>
+          <Stack spacing={1.25}>
+            <Alert severity="info" sx={WORKBENCH_DIALOG_INFO_ALERT_SX}>
+              建议朗读约 10 秒，保持环境安静、音量稳定。录音完成后会自动上传并生成临时 URL。
+            </Alert>
+            <Box sx={{ p: 2, borderRadius: 3, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' }}>
+              <Typography sx={{ color: 'white', fontSize: '0.95rem', lineHeight: 1.8 }}>
+                示例朗读：“时间会缓和所有的悲伤，当你的悲伤被安抚以后，你就会因为认识过我而感到满足。”
+              </Typography>
+              <Typography sx={{ color: 'rgba(255,255,255,0.52)', fontSize: '0.78rem', mt: 1 }}>
+                也可以随机朗读其他内容，只要音质清晰、长度足够即可。
+              </Typography>
+            </Box>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={WORKBENCH_DIALOG_ACTIONS_SX}>
+          <Button onClick={handleCloseAudioCloneRecordDialog} disabled={audioCloneRecording || audioCloneUploading} sx={{ color: 'rgba(214,224,255,0.9)' }}>
+            关闭
+          </Button>
+          <Button
+            variant="contained"
+            color={audioCloneRecording ? 'error' : 'primary'}
+            onClick={audioCloneRecording ? handleStopAudioCloneRecording : () => void handleStartAudioCloneRecording()}
+            disabled={audioCloneLoading || audioCloneUploading}
+            sx={{
+              minWidth: 148,
+              borderRadius: 2.5,
+              background: audioCloneRecording
+                ? 'linear-gradient(135deg, #ff7b7b 0%, #ef4444 100%)'
+                : 'linear-gradient(135deg, #6f86ff 0%, #4c66ff 100%)',
+              boxShadow: audioCloneRecording
+                ? '0 12px 28px rgba(239,68,68,0.26)'
+                : '0 12px 28px rgba(76,102,255,0.28)',
+            }}
+          >
+            {audioCloneRecording ? '结束录音并上传' : '开始录音'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={audioDesignDialogOpen}
+        onClose={() => {
+          if (!audioDesignLoading) {
+            setAudioDesignDialogOpen(false)
+          }
+        }}
+        fullWidth
+        maxWidth="sm"
+        PaperProps={{ sx: WORKBENCH_DIALOG_PAPER_SX }}
+        BackdropProps={{ sx: WORKBENCH_DIALOG_BACKDROP_SX }}
+      >
+        <DialogTitle sx={WORKBENCH_DIALOG_TITLE_SX}>声音设计</DialogTitle>
+        <DialogContent dividers sx={WORKBENCH_DIALOG_CONTENT_SX}>
+          <Stack spacing={1.5} sx={{ pt: 0.5 }}>
+            <Alert severity="info" sx={WORKBENCH_DIALOG_INFO_ALERT_SX}>
+              用自然语言描述声线、年龄感、气质和情绪，再提供一段试听文本，即可生成新的设计音色。
+            </Alert>
+            <TextField
+              size="small"
+              fullWidth
+              label="设计名称"
+              value={audioDesignName}
+              onChange={(event) => setAudioDesignName(event.target.value)}
+              disabled={audioDesignLoading}
+              sx={WORKBENCH_DIALOG_FIELD_SX}
+            />
+            <TextField
+              size="small"
+              fullWidth
+              label="声音描述"
+              placeholder="例如：青年女性，声线清透冷静，带一点克制感，适合悬疑旁白。"
+              value={audioDesignPrompt}
+              onChange={(event) => setAudioDesignPrompt(event.target.value)}
+              disabled={audioDesignLoading}
+              sx={WORKBENCH_DIALOG_FIELD_SX}
+            />
+            <TextField
+              size="small"
+              fullWidth
+              multiline
+              minRows={3}
+              label="试听文本"
+              value={audioDesignPreviewText}
+              onChange={(event) => setAudioDesignPreviewText(event.target.value)}
+              disabled={audioDesignLoading}
+              sx={WORKBENCH_DIALOG_FIELD_SX}
+            />
+            {audioDesignFeedback ? (
+              <Alert severity={audioDesignFeedback.type} sx={{ borderRadius: 2.5 }}>
+                {audioDesignFeedback.text}
+              </Alert>
+            ) : null}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={WORKBENCH_DIALOG_ACTIONS_SX}>
+          <Button onClick={() => setAudioDesignDialogOpen(false)} disabled={audioDesignLoading} sx={{ color: 'rgba(214,224,255,0.9)' }}>
+            取消
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              void handleCreateAudioDesign()
+            }}
+            disabled={audioDesignLoading || !audioDesignName.trim() || !audioDesignPrompt.trim() || !audioDesignPreviewText.trim()}
+            sx={{
+              minWidth: 132,
+              borderRadius: 2.5,
+              background: 'linear-gradient(135deg, #6f86ff 0%, #4c66ff 100%)',
+              boxShadow: '0 12px 28px rgba(76,102,255,0.28)',
+            }}
+          >
+            {audioDesignLoading ? '提交中...' : '开始设计'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {activeTabId === 'vision-review' ? <AssetStudioVisionReviewPanel onUseResult={handleUseReviewedResult} /> : null}
 

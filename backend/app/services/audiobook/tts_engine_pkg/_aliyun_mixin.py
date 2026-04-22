@@ -1,9 +1,95 @@
 """阿里云 TTS Mixin - 支持 Qwen 和 MiniMax 模型"""
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _to_bool_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _extract_cosyvoice_timestamp_metadata(events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    sentence_timestamps: List[Dict[str, Any]] = []
+    word_timestamps: List[Dict[str, Any]] = []
+    phoneme_timestamps: List[Dict[str, Any]] = []
+    seen_signatures = set()
+
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+
+        output = event.get("payload", {}).get("output", {})
+        if not isinstance(output, dict) or str(output.get("type") or "").strip() != "sentence-end":
+            continue
+
+        sentence = output.get("sentence")
+        if not isinstance(sentence, dict):
+            continue
+
+        sentence_index = sentence.get("index")
+        original_text = output.get("original_text")
+        normalized_words: List[Dict[str, Any]] = []
+
+        for word in sentence.get("words") or []:
+            if not isinstance(word, dict):
+                continue
+
+            normalized_word = {
+                "text": str(word.get("text") or ""),
+                "begin_index": int(word.get("begin_index") or 0),
+                "end_index": int(word.get("end_index") or 0),
+                "begin_time": int(word.get("begin_time") or 0),
+                "end_time": int(word.get("end_time") or 0),
+            }
+            normalized_words.append(normalized_word)
+            word_timestamps.append(
+                {
+                    **normalized_word,
+                    "sentence_index": int(sentence_index) if isinstance(sentence_index, int) else None,
+                }
+            )
+
+            for phoneme in word.get("phonemes") or []:
+                if not isinstance(phoneme, dict):
+                    continue
+                phoneme_timestamps.append(
+                    {
+                        "phoneme": str(phoneme.get("phoneme") or phoneme.get("text") or ""),
+                        "begin_time": int(phoneme.get("begin_time") or 0),
+                        "end_time": int(phoneme.get("end_time") or 0),
+                        "sentence_index": int(sentence_index) if isinstance(sentence_index, int) else None,
+                        "word_text": normalized_word["text"],
+                        "word_begin_index": normalized_word["begin_index"],
+                        "word_end_index": normalized_word["end_index"],
+                    }
+                )
+
+        sentence_payload = {
+            "index": int(sentence_index) if isinstance(sentence_index, int) else None,
+            "type": "sentence-end",
+            "original_text": str(original_text or "") or None,
+            "words": normalized_words,
+        }
+        signature = json.dumps(sentence_payload, ensure_ascii=False, sort_keys=True)
+        if signature in seen_signatures:
+            continue
+        seen_signatures.add(signature)
+        sentence_timestamps.append(sentence_payload)
+
+    return {
+        "tts_timestamps": word_timestamps,
+        "tts_timestamp_sentences": sentence_timestamps,
+        "phoneme_timestamps": phoneme_timestamps,
+    }
 
 
 class AliyunMixin:
@@ -307,6 +393,10 @@ class AliyunMixin:
         language_hints = _normalize_language_hints(voice_params.get("language_hints"))
         if language_hints:
             parameters["language_hints"] = language_hints
+        if _to_bool_flag(voice_params.get("word_timestamp_enabled")):
+            parameters["word_timestamp_enabled"] = True
+        if _to_bool_flag(voice_params.get("phoneme_timestamp_enabled")):
+            parameters["phoneme_timestamp_enabled"] = True
         seed = voice_params.get("seed")
         if seed is not None:
             try:
@@ -396,7 +486,6 @@ class AliyunMixin:
         voice_params: Dict[str, Any],
     ) -> bytes:
         """阻塞执行 CosyVoice WebSocket 请求。"""
-        import json
         import uuid
 
         import websocket
@@ -404,6 +493,7 @@ class AliyunMixin:
         task_id = str(uuid.uuid4())
         parameters = self._build_cosyvoice_websocket_parameters(text, voice, voice_params)
         audio_chunks = []
+        json_events: List[Dict[str, Any]] = []
         state: Dict[str, Any] = {"error": None, "error_code": None}
 
         def on_open(ws) -> None:
@@ -435,6 +525,7 @@ class AliyunMixin:
                 logger.warning("CosyVoice WebSocket 返回了非 JSON 消息: %s", message)
                 return
 
+            json_events.append(payload)
             header = payload.get("header") or {}
             event = header.get("event")
 
@@ -501,6 +592,7 @@ class AliyunMixin:
         if not audio_chunks:
             raise RuntimeError("CosyVoice websocket returned no audio data")
 
+        timestamp_metadata = _extract_cosyvoice_timestamp_metadata(json_events)
         self._set_last_synthesis_metadata(
             {
                 "provider": "aliyun",
@@ -508,6 +600,9 @@ class AliyunMixin:
                 "speaker": voice,
                 "transport": "websocket",
                 "enable_ssml": bool(parameters.get("enable_ssml")),
+                "word_timestamp_enabled": bool(parameters.get("word_timestamp_enabled")),
+                "phoneme_timestamp_enabled": bool(parameters.get("phoneme_timestamp_enabled")),
+                **timestamp_metadata,
             }
         )
         return b"".join(audio_chunks)

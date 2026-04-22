@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
 import json
@@ -29,6 +30,8 @@ from app.schemas.audiobook import (
     ChapterAudioResponse,
     CharacterVoiceConfig,
     TTSPreviewRequest,
+    TTSPreviewWithTimestampsRequest,
+    TTSPreviewWithTimestampsResponse,
     ScriptSegmentPreviewRequest,
     SegmentRegenerateRequest,
     SegmentReviewRequest,
@@ -106,7 +109,10 @@ from app.services.user_center_points_events import (
 )
 from app.utils.datetime_utils import utc_now
 from core.model_resolution import normalize_model_id
-from core.unified_media_runtime import synthesize_speech as runtime_synthesize_speech
+from core.unified_media_runtime import (
+    create_tts_engine as runtime_create_tts_engine,
+    synthesize_speech as runtime_synthesize_speech,
+)
 
 from app.api.v1.audiobook_api import router
 
@@ -156,38 +162,35 @@ def _build_cosyvoice_voice_prefix(display_name: str, current_user: User) -> str:
     return f"{base}{digest}{suffix}"[:10]
 
 
-@router.post("/tts/preview")
-async def tts_preview(
-    request: TTSPreviewRequest,
-    current_user: User = Depends(get_current_user),
-):
-    """合成一小段音频用于前端试听"""
-    # 简单防护：限制文本长度
+def _resolve_preview_text(request: TTSPreviewRequest) -> str:
     text = (request.text or "").strip()
     if not text:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文本不能为空")
     if len(text) > 200:
         text = text[:200]
+    return text
 
-    # 选择模型：默认使用 qwen3-tts-instruct-flash，并兼容历史 qwen3-tts-flash/qwen3_tts
+
+def _resolve_preview_model_name(request: TTSPreviewRequest) -> str:
     model_name = normalize_model_id(request.model or DEFAULT_TTS_MODEL) or DEFAULT_TTS_MODEL
     if model_name not in SUPPORTED_TTS_MODELS:
         model_name = DEFAULT_TTS_MODEL
+    return model_name
 
-    # 试听场景优先“快速恢复”而非长时间等待：
-    # - 额外多 1 次重试（应对偶发断连）
-    # - 基础退避更小，避免前端等待过久
-    preview_retry = RetryConfig(max_retries=4, base_delay=1.0, max_delay=8.0, exponential_base=2.0, jitter=True)
-    # 将前端的 voice_id（如 'male_young_energetic'）映射为真实的 TTS 音色ID
+
+def _resolve_preview_speaker_id(request: TTSPreviewRequest, model_name: str) -> str:
     if model_name.startswith("qwen3-tts"):
         preset = VoiceManager.PRESET_VOICES.get(request.voice_id)
-        speaker_id = normalize_speaker_id(preset["tts_speaker_id"] if preset else request.voice_id)
-    else:
-        entry = get_voice_entry(request.voice_id, model=model_name)
-        speaker_id = entry.get("speaker") if entry else request.voice_id
-        if _is_cosyvoice_v35_model(model_name):
-            speaker_id = _validate_cosyvoice_v35_voice_id(speaker_id)
+        return normalize_speaker_id(preset["tts_speaker_id"] if preset else request.voice_id)
 
+    entry = get_voice_entry(request.voice_id, model=model_name)
+    speaker_id = entry.get("speaker") if entry else request.voice_id
+    if _is_cosyvoice_v35_model(model_name):
+        speaker_id = _validate_cosyvoice_v35_voice_id(speaker_id)
+    return speaker_id
+
+
+def _build_preview_voice_params(request: TTSPreviewRequest, speaker_id: str) -> dict:
     voice_params: dict = {
         "speaker": speaker_id,
         "volume": request.volume,
@@ -196,6 +199,55 @@ async def tts_preview(
         voice_params["rate"] = request.speed
     if request.pitch is not None:
         voice_params["pitch"] = request.pitch
+
+    instruction = str(getattr(request, "instruction", "") or "").strip()
+    if instruction:
+        voice_params["instruction"] = instruction
+
+    if getattr(request, "word_timestamp_enabled", False):
+        voice_params["word_timestamp_enabled"] = True
+    if getattr(request, "phoneme_timestamp_enabled", False):
+        voice_params["phoneme_timestamp_enabled"] = True
+
+    return voice_params
+
+
+def _build_preview_retry_config() -> RetryConfig:
+    return RetryConfig(max_retries=4, base_delay=1.0, max_delay=8.0, exponential_base=2.0, jitter=True)
+
+
+async def _synthesize_preview_payload(
+    *,
+    text: str,
+    model_name: str,
+    voice_params: dict,
+    retry_config: RetryConfig,
+) -> dict:
+    engine = runtime_create_tts_engine(
+        model_id=model_name,
+        strategy="balanced",
+        enable_cache=False,
+        max_concurrent=1,
+        request_delay=0.0,
+        retry_config=retry_config,
+    )
+    payload = await engine.synthesize_with_metadata(text, voice_params, "neutral")
+    if not isinstance(payload, dict):
+        raise RuntimeError("TTS 试听未返回有效 payload")
+    return payload
+
+
+@router.post("/tts/preview")
+async def tts_preview(
+    request: TTSPreviewRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """合成一小段音频用于前端试听"""
+    text = _resolve_preview_text(request)
+    model_name = _resolve_preview_model_name(request)
+    preview_retry = _build_preview_retry_config()
+    speaker_id = _resolve_preview_speaker_id(request, model_name)
+    voice_params = _build_preview_voice_params(request, speaker_id)
 
     try:
         audio_bytes = await runtime_synthesize_speech(
@@ -221,6 +273,77 @@ async def tts_preview(
 
     media_type = "audio/wav" if audio_bytes.startswith(b"RIFF") else "audio/mpeg"
     return Response(content=audio_bytes, media_type=media_type)
+
+
+@router.post("/tts/preview-with-timestamps", response_model=TTSPreviewWithTimestampsResponse)
+async def tts_preview_with_timestamps(
+    request: TTSPreviewWithTimestampsRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """合成短音频并返回可消费的词级时间戳。当前仅支持 CosyVoice v3.5 Plus。"""
+    text = _resolve_preview_text(request)
+    model_name = _resolve_preview_model_name(request)
+    if not _is_cosyvoice_v35_model(model_name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="当前时间戳试听接口仅支持 cosyvoice-v3.5-plus",
+        )
+
+    preview_retry = _build_preview_retry_config()
+    speaker_id = _resolve_preview_speaker_id(request, model_name)
+    voice_params = _build_preview_voice_params(request, speaker_id)
+
+    try:
+        payload = await _synthesize_preview_payload(
+            text=text,
+            model_name=model_name,
+            voice_params=voice_params,
+            retry_config=preview_retry,
+        )
+    except Exception as exc:
+        logger.warning("带时间戳的 TTS 试听失败: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": "TTS服务暂时不可用，请稍后重试", "retryable": True},
+        ) from exc
+
+    audio_bytes = payload.get("audio_bytes")
+    if isinstance(audio_bytes, bytearray):
+        audio_bytes = bytes(audio_bytes)
+    if not isinstance(audio_bytes, bytes) or not audio_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": "TTS服务暂时不可用，请稍后重试", "retryable": True},
+        )
+
+    audio_format = str(payload.get("format") or ("wav" if audio_bytes.startswith(b"RIFF") else "mp3")).strip().lower()
+    audio_mime_type = "audio/wav" if audio_format == "wav" or audio_bytes.startswith(b"RIFF") else "audio/mpeg"
+    tts_timestamps = payload.get("tts_timestamps") if isinstance(payload.get("tts_timestamps"), list) else []
+    tts_timestamp_sentences = (
+        payload.get("tts_timestamp_sentences")
+        if isinstance(payload.get("tts_timestamp_sentences"), list)
+        else []
+    )
+    phoneme_timestamps = payload.get("phoneme_timestamps") if isinstance(payload.get("phoneme_timestamps"), list) else []
+
+    return TTSPreviewWithTimestampsResponse(
+        model=model_name,
+        voice_id=speaker_id,
+        audio_data_base64=base64.b64encode(audio_bytes).decode("utf-8"),
+        audio_format=audio_format,
+        audio_mime_type=audio_mime_type,
+        audio_size_bytes=len(audio_bytes),
+        provider=str(payload.get("provider") or "") or None,
+        provider_model=str(payload.get("provider_model") or "") or None,
+        transport=str(payload.get("transport") or "") or None,
+        word_timestamp_enabled=bool(payload.get("word_timestamp_enabled")),
+        phoneme_timestamp_enabled=bool(payload.get("phoneme_timestamp_enabled")),
+        word_timestamps_available=bool(tts_timestamps),
+        phoneme_timestamps_available=bool(phoneme_timestamps),
+        tts_timestamps=tts_timestamps,
+        tts_timestamp_sentences=tts_timestamp_sentences,
+        phoneme_timestamps=phoneme_timestamps,
+    )
 
 
 @router.get("/tts/models")
