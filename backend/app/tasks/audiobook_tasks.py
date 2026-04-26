@@ -130,3 +130,17 @@ def run_audio_from_scripts_task(
         logger.exception("Audio-from-scripts task failed: %s", exc)
         tracker.mark_failed(str(exc))
         raise
+
+
+@celery_app.task(name="audiobook.cleanup_expired_temp_assets")
+def cleanup_expired_temp_assets_task(limit: int = 100) -> dict:
+    """Clean expired resumable temp segment assets and invalidate their checkpoints."""
+    from app.services.audiobook.temp_segment_janitor import cleanup_expired_temp_segments
+
+    result = cleanup_expired_temp_segments(limit=limit)
+    logger.info(
+        "Expired audiobook temp assets cleanup finished: runs=%s, files=%s",
+        result.get("processed_runs"),
+        result.get("removed_temp_files"),
+    )
+    return result

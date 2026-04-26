@@ -2,6 +2,14 @@ import type {
   StoryExpansionFrameworkMetadata,
   StoryExpansionMode,
 } from '@/types/storyExpansion'
+import {
+  buildConventionalCollaborationLimitMessage,
+  CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS,
+  EPIC_FRAMEWORK_MAX_TOTAL_CHAPTERS,
+  EPIC_FRAMEWORK_MIN_TOTAL_CHAPTERS,
+  VOLUME_DETAIL_MAX_CHAPTERS,
+  VOLUME_DETAIL_MIN_CHAPTERS,
+} from './storyExpansionPolicy'
 
 export interface StoryExpansionPlanningInput {
   expansionMode: StoryExpansionMode
@@ -33,11 +41,6 @@ export interface StoryExpansionRequestPlan {
 export interface StoryExpansionValidationInput extends StoryExpansionPlanningInput {
   hasStoryContext: boolean
 }
-
-const CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS = 300
-const EPIC_FRAMEWORK_MIN_TOTAL_CHAPTERS = 300
-const VOLUME_DETAIL_MIN_CHAPTERS = 20
-const VOLUME_DETAIL_MAX_CHAPTERS = 100
 
 function isConfiguredNumber(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value)
@@ -101,7 +104,7 @@ export function buildStoryExpansionRequestPlan(
     && isConfiguredNumber(input.totalChaptersMin)
     && isConfiguredNumber(input.totalChaptersMax)
     && input.totalChaptersMin >= EPIC_FRAMEWORK_MIN_TOTAL_CHAPTERS
-    && input.totalChaptersMax <= 5000
+    && input.totalChaptersMax <= EPIC_FRAMEWORK_MAX_TOTAL_CHAPTERS
     && input.totalChaptersMin <= input.totalChaptersMax
     && input.totalChaptersMax > input.currentChapterCount
   const hasDelta = isVolumeDetailMode
@@ -160,10 +163,10 @@ export function getStoryExpansionValidationError(
       !isConfiguredNumber(input.totalChaptersMin)
       || !isConfiguredNumber(input.totalChaptersMax)
       || input.totalChaptersMin < EPIC_FRAMEWORK_MIN_TOTAL_CHAPTERS
-      || input.totalChaptersMax > 5000
+      || input.totalChaptersMax > EPIC_FRAMEWORK_MAX_TOTAL_CHAPTERS
       || input.totalChaptersMin > input.totalChaptersMax
     ) {
-      return '长篇框架协同需要有效的总章节范围（300-5000）'
+      return `长篇框架协同需要有效的总章节范围（${EPIC_FRAMEWORK_MIN_TOTAL_CHAPTERS}-${EPIC_FRAMEWORK_MAX_TOTAL_CHAPTERS}）`
     }
   }
 
@@ -202,12 +205,12 @@ export function getStoryExpansionValidationError(
       plan.requestedTargetChapterCount ?? input.currentChapterCount,
     ) > getConventionalCollaborationMaxTargetChapterCount()
   ) {
-    return '常规协同仅支持总规模不超过300个细化章节；超过300章后必须改用长篇框架协同'
+    return buildConventionalCollaborationLimitMessage()
   }
 
   if (
     input.expansionMode === 'epic_framework'
-    && (plan.requestedTargetChapterCount ?? 0) > Math.max(5000, input.currentChapterCount)
+    && (plan.requestedTargetChapterCount ?? 0) > Math.max(EPIC_FRAMEWORK_MAX_TOTAL_CHAPTERS, input.currentChapterCount)
   ) {
     return '长篇框架协同当前目标超出章节规划上限，请缩小目标范围'
   }
@@ -253,7 +256,7 @@ export function shouldSkipStoryExpansionAnalysisRequest(
 
   if (
     input.expansionMode === 'epic_framework'
-    && (plan.requestedTargetChapterCount ?? 0) > Math.max(5000, input.currentChapterCount)
+    && (plan.requestedTargetChapterCount ?? 0) > Math.max(EPIC_FRAMEWORK_MAX_TOTAL_CHAPTERS, input.currentChapterCount)
   ) {
     return true
   }

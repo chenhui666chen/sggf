@@ -230,7 +230,7 @@ def create_user_asset(
     *,
     user_id: int,
     title: str,
-    file_url: str,
+    source_uri: str,
     asset_class: str = "reusable",
     archived_at: datetime | None = None,
     created_at: datetime | None = None,
@@ -238,14 +238,18 @@ def create_user_asset(
 ) -> UserAssetRecord:
     db = session_factory()
     try:
+        asset_uuid = f"asset-studio-{abs(hash((user_id, title, source_uri)))}"
         asset = UserAssetRecord(
             user_id=user_id,
             source_module="asset_studio",
             asset_kind="image",
             asset_class=asset_class,
+            asset_uuid=asset_uuid,
+            storage_mode="durable_cloud",
             title=title,
-            file_url=file_url,
-            preview_url=file_url,
+            source_uri=source_uri,
+            preview_uri=source_uri,
+            download_uri=source_uri,
             tags=[],
             metadata_json={},
             source_payload_json={},
@@ -486,7 +490,7 @@ def test_points_overview_returns_rule_based_account_and_admin_benefits():
         session_factory,
         user_id=owner.id,
         title="资产 A",
-        file_url="https://example.com/assets/a.png",
+        source_uri="https://example.com/assets/a.png",
         created_at=now - timedelta(days=25),
         updated_at=now - timedelta(days=25),
     )
@@ -494,7 +498,7 @@ def test_points_overview_returns_rule_based_account_and_admin_benefits():
         session_factory,
         user_id=owner.id,
         title="资产 B",
-        file_url="https://example.com/assets/b.png",
+        source_uri="https://example.com/assets/b.png",
         archived_at=now,
         created_at=now,
         updated_at=now,
@@ -503,7 +507,7 @@ def test_points_overview_returns_rule_based_account_and_admin_benefits():
         session_factory,
         user_id=other_user.id,
         title="其他资产",
-        file_url="https://example.com/assets/other.png",
+        source_uri="https://example.com/assets/other.png",
     )
 
     audiobook_paid = create_audiobook_project(
@@ -670,7 +674,7 @@ def test_points_overview_uses_latest_admin_rule_snapshot_and_points_entries():
         session_factory,
         user_id=user.id,
         title="长期资产",
-        file_url="https://example.com/assets/rules.png",
+        source_uri="https://example.com/assets/rules.png",
         created_at=now - timedelta(days=55),
         updated_at=now - timedelta(days=55),
     )
@@ -741,7 +745,7 @@ def test_points_overview_exposes_frozen_points_for_running_tasks():
         session_factory,
         user_id=user.id,
         title="运行中资产",
-        file_url="https://example.com/assets/running.png",
+        source_uri="https://example.com/assets/running.png",
         created_at=now,
         updated_at=now,
     )
@@ -925,7 +929,7 @@ def test_points_overview_prefers_formal_billing_events_for_freeze_and_settlement
         session_factory,
         user_id=user.id,
         title="正式资产",
-        file_url="https://example.com/assets/formal.png",
+        source_uri="https://example.com/assets/formal.png",
         created_at=now,
         updated_at=now,
     )

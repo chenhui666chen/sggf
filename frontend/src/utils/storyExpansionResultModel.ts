@@ -1,4 +1,5 @@
 import type {
+  StoryExpansionCompletionStatus,
   StoryExpansionCharacterSync,
   StoryExpansionExecutionRound,
   StoryExpansionOutlineOperation,
@@ -27,6 +28,10 @@ function asNumber(value: unknown): number | undefined {
 function asInteger(value: unknown): number | undefined {
   const numberValue = asNumber(value)
   return typeof numberValue === 'number' ? Math.trunc(numberValue) : undefined
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined
 }
 
 function coerceStringArray(value: unknown): string[] {
@@ -83,8 +88,11 @@ function coerceValidationStats(value: unknown): StoryExpansionValidationStats | 
     score: asNumber(record.score),
     coverage_ratio: asNumber(record.coverage_ratio),
     unreferenced_characters: coerceStringArray(record.unreferenced_characters),
+    referenced_characters: coerceStringArray(record.referenced_characters),
     chapter_count: asInteger(record.chapter_count),
     character_count: asInteger(record.character_count),
+    suggestions: coerceStringArray(record.suggestions),
+    validation_stage: asString(record.validation_stage),
   }
 }
 
@@ -161,12 +169,16 @@ function coerceCharacterSync(value: unknown): StoryExpansionCharacterSync | unde
 
 export interface StoryExpansionResultView {
   result: StoryExpansionResult
+  completionStatus: StoryExpansionCompletionStatus | string
+  goalReached: boolean
   chapterBefore: number
   chapterAfter: number
   chapterTarget: number
+  remainingChapterCount: number
   characterBefore: number
   characterAfter: number
   characterTarget: number
+  remainingCharacterCount: number
   scoreBefore: number
   scoreAfter: number
   executionRounds: StoryExpansionExecutionRound[]
@@ -233,6 +245,8 @@ export function coerceStoryExpansionResult(value: unknown): StoryExpansionResult
     expansion_analysis: expansionAnalysis ? (expansionAnalysis as StoryExpansionResult['expansion_analysis']) : undefined,
     epic_total_volumes: asInteger(record.epic_total_volumes) ?? null,
     epic_chapter_range: coerceNumberArray(record.epic_chapter_range) ?? null,
+    completion_status: asString(record.completion_status),
+    goal_reached: asBoolean(record.goal_reached),
     message: asString(record.message),
   }
 }
@@ -248,20 +262,32 @@ export function createStoryExpansionResultView(
   const chapterBefore = normalized.validation_before?.chapter_count ?? 0
   const chapterAfter = normalized.current_chapter_count ?? 0
   const chapterTarget = normalized.target_chapter_count ?? chapterAfter
+  const remainingChapterCount = Math.max(0, chapterTarget - chapterAfter)
   const characterBefore = normalized.validation_before?.character_count ?? 0
   const characterAfter = normalized.current_character_count ?? 0
   const characterTarget = normalized.target_character_count ?? characterAfter
+  const remainingCharacterCount = Math.max(0, characterTarget - characterAfter)
+  const inferredGoalReached = remainingChapterCount <= 0 && remainingCharacterCount <= 0
+  const goalReached = typeof normalized.goal_reached === 'boolean'
+    ? normalized.goal_reached
+    : inferredGoalReached
+  const completionStatus = normalized.completion_status?.trim()
+    || (goalReached ? 'completed' : 'partial')
   const scoreBefore = normalized.validation_before?.score ?? 0
   const scoreAfter = normalized.validation_after?.score ?? 0
 
   return {
     result: normalized,
+    completionStatus,
+    goalReached,
     chapterBefore,
     chapterAfter,
     chapterTarget,
+    remainingChapterCount,
     characterBefore,
     characterAfter,
     characterTarget,
+    remainingCharacterCount,
     scoreBefore,
     scoreAfter,
     executionRounds: normalized.execution_rounds ?? [],

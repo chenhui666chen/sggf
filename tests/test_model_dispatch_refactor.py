@@ -22,7 +22,7 @@ async def test_unified_llm_client_normalizes_aliases() -> None:
         new=AsyncMock(
             return_value=LLMResult(
                 success=True,
-                model_id="deepseek-reasoner",
+                model_id="deepseek-v4-pro",
                 content="ok",
             )
         ),
@@ -35,7 +35,7 @@ async def test_unified_llm_client_normalizes_aliases() -> None:
 
     assert content == "ok"
     assert mocked_call.await_args.kwargs["task_type"] == "chapter"
-    assert mocked_call.await_args.kwargs["model"] == "deepseek-reasoner"
+    assert mocked_call.await_args.kwargs["model"] == "deepseek-v4-pro"
 
 
 def test_agents_llm_client_forwards_timeout_to_chat() -> None:

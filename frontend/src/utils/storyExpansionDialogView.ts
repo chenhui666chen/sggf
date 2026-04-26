@@ -4,6 +4,16 @@ import type {
   StoryExpansionMode,
 } from '@/types/storyExpansion'
 import { buildStoryExpansionRequestPlan } from './storyExpansionPlanning'
+import {
+  buildConventionalCollaborationLimitMessage,
+  buildConventionalCollaborationRecommendationMessage,
+  CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS,
+  CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS,
+  EPIC_FRAMEWORK_MAX_TOTAL_CHAPTERS,
+  EPIC_FRAMEWORK_MIN_TOTAL_CHAPTERS,
+  FRAMEWORK_PREFERRED_TOTAL_FROM,
+  VOLUME_DETAIL_MAX_CHAPTERS,
+} from './storyExpansionPolicy'
 import { formatStoryExpansionDurationRange } from './storyExpansionTiming'
 import {
   getStoryExpansionExecutionModeLabel,
@@ -73,7 +83,7 @@ export interface StoryExpansionDialogConfigAlertView {
   text: string
 }
 
-const VOLUME_DETAIL_INPUT_MAX_CHAPTERS = 100
+const VOLUME_DETAIL_INPUT_MAX_CHAPTERS = VOLUME_DETAIL_MAX_CHAPTERS
 
 export type StoryExpansionDialogConfigBlock =
   | {
@@ -139,10 +149,6 @@ export interface StoryExpansionDialogViewModel {
   configBlocks: StoryExpansionDialogConfigBlock[]
 }
 
-const CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS = 300
-const CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS = 300
-const EPIC_FRAMEWORK_MIN_TOTAL_CHAPTERS = 300
-
 function isConfiguredNumber(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
@@ -176,14 +182,18 @@ function filterModeSuitabilityBands(
 
   const preferredKeys = (
     requestBand === 'recommended'
-      ? ['recommended', 'forbidden']
+      ? ['recommended', 'caution', 'forbidden']
       : (
-        requestBand === 'forbidden'
-          ? ['forbidden']
+        requestBand === 'caution'
+          ? ['caution', 'forbidden']
           : (
-            requestBand === 'framework_preferred'
-              ? ['framework_preferred', 'epic']
-              : (requestBand === 'epic' ? ['epic'] : [])
+            requestBand === 'forbidden'
+              ? ['forbidden']
+              : (
+                requestBand === 'framework_preferred'
+                  ? ['framework_preferred', 'epic']
+                  : (requestBand === 'epic' ? ['epic'] : [])
+              )
           )
       )
   )
@@ -707,7 +717,7 @@ export function createStoryExpansionDialogView(
   const compactModeSuitabilityView = analysis?.mode_suitability?.mode === 'total'
     ? {
       chips: modeSuitabilityView?.chips || [],
-      summary: `常规协同支持总规模 1-${CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS} 章；超过 ${CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS} 章必须切换到长篇框架协同。`,
+      summary: buildConventionalCollaborationRecommendationMessage(),
       reason: '',
       bands: [],
     }
@@ -750,12 +760,12 @@ export function createStoryExpansionDialogView(
         }),
         createField('totalChaptersMin', '总章范围最小值', '建议 300-5000 章', {
           min: EPIC_FRAMEWORK_MIN_TOTAL_CHAPTERS,
-          max: 5000,
+          max: EPIC_FRAMEWORK_MAX_TOTAL_CHAPTERS,
           flex: '1 1 180px',
         }),
         createField('totalChaptersMax', '总章范围最大值', '会作为框架规模上限', {
           min: EPIC_FRAMEWORK_MIN_TOTAL_CHAPTERS,
-          max: 5000,
+          max: EPIC_FRAMEWORK_MAX_TOTAL_CHAPTERS,
           flex: '1 1 180px',
         }),
       ],
@@ -801,7 +811,7 @@ export function createStoryExpansionDialogView(
           max: VOLUME_DETAIL_INPUT_MAX_CHAPTERS,
           flex: '1 1 180px',
         }),
-        createField('volumeChaptersMax', '本卷最多章节', '建议尽量控制在 80 章内；必要时可放宽到 100 章', {
+        createField('volumeChaptersMax', '本卷最多章节', '建议尽量控制在 80 章内；必要时可放宽到 120 章', {
           min: 20,
           max: VOLUME_DETAIL_INPUT_MAX_CHAPTERS,
           flex: '1 1 180px',
@@ -849,15 +859,32 @@ export function createStoryExpansionDialogView(
         alert: {
           key: 'total-epic-recommendation-alert',
           severity: 'warning',
-          text: '当前项目按篇幅规划更适合“长篇框架协同”。若本轮只是补少量细化章节或人物，且总规模仍不超过300章，可以继续常规协同；若准备推进 301 章及以上主线，请先切换到长篇框架协同。',
+          text: `当前项目按篇幅规划更适合“长篇框架协同”。若本轮只是补少量细化章节或人物，且总规模仍不超过${CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS}章，可以继续常规协同；若准备推进 ${FRAMEWORK_PREFERRED_TOTAL_FROM} 章及以上主线，请优先切换到长篇框架协同。`,
         },
       })
     }
 
-    const isConventionalCollaborationForbidden = (
+    const isConventionalCollaborationCaution = (
       input.expansionMode === 'total'
       && Math.max(input.currentChapterCount, targetChapterCountForWarnings) > CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS
+      && Math.max(input.currentChapterCount, targetChapterCountForWarnings) <= CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS
     )
+    const isConventionalCollaborationForbidden = (
+      input.expansionMode === 'total'
+      && Math.max(input.currentChapterCount, targetChapterCountForWarnings) > CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS
+    )
+
+    if (isConventionalCollaborationCaution) {
+      configBlocks.push({
+        kind: 'alert',
+        key: 'total-conventional-caution-alert',
+        alert: {
+          key: 'total-conventional-caution-alert',
+          severity: 'warning',
+          text: buildConventionalCollaborationRecommendationMessage(),
+        },
+      })
+    }
 
     if (isConventionalCollaborationForbidden) {
       configBlocks.push({
@@ -866,7 +893,7 @@ export function createStoryExpansionDialogView(
         alert: {
           key: 'total-conventional-range-alert',
           severity: 'warning',
-          text: `当前总规模已超过常规协同上限 ${toDetailedChapterCountLabel(CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS)}。超过300章后禁止继续使用“常规协同”，请改选“长篇框架协同”。`,
+          text: `当前总规模已超过常规协同上限 ${toDetailedChapterCountLabel(CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS)}。请改选“长篇框架协同”。`,
         },
       })
     }
@@ -879,11 +906,15 @@ export function createStoryExpansionDialogView(
           'targetChapterCount',
           '目标细化章节数',
           isConventionalCollaborationForbidden
-            ? '当前总规模已超过常规协同上限300个细化章节，必须改用长篇框架协同。'
+            ? buildConventionalCollaborationLimitMessage()
             : (
-              input.targetChapterCount == null
-                ? '请至少填写目标细化章节数或目标人物数其中一项，另一项可留空自动估算。常规协同仅支持总规模不超过300个细化章节；达到上限后必须改用长篇框架协同。'
-                : '常规协同仅支持总规模不超过300个细化章节；达到上限后必须改用长篇框架协同。'
+              isConventionalCollaborationCaution
+                ? buildConventionalCollaborationRecommendationMessage()
+                : (
+                  input.targetChapterCount == null
+                    ? `请至少填写目标细化章节数或目标人物数其中一项，另一项可留空自动估算。${buildConventionalCollaborationRecommendationMessage()}`
+                    : buildConventionalCollaborationRecommendationMessage()
+                )
             ),
           {
             placeholder: '留空则由系统自动估算',

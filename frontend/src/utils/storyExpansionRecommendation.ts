@@ -1,4 +1,8 @@
 import type { Project } from '@/types/project'
+import {
+  CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS,
+  EPIC_RECOMMENDATION_CHAPTER_THRESHOLD,
+} from './storyExpansionPolicy'
 
 export type StoryExpansionRecommendedMode = 'total' | 'epic_framework'
 
@@ -22,9 +26,6 @@ const DEFAULT_STORY_EXPANSION_RECOMMENDATION: StoryExpansionRecommendation = {
   recommendedChaptersPerVolumeMax: 30,
   recommendationReason: '',
 }
-const CONVENTIONAL_COLLABORATION_MAX_CHAPTERS = 300
-const EPIC_RECOMMENDATION_CHAPTER_THRESHOLD = 800
-
 function clampRecommendationVolumeCount(
   value: number,
   maxVolumes: number,
@@ -155,7 +156,7 @@ export function resolveStoryExpansionRecommendation(
     }
   }
 
-  if (lengthType === 'long' || maxChapters > CONVENTIONAL_COLLABORATION_MAX_CHAPTERS) {
+  if (lengthType === 'long' || maxChapters > CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS) {
     const {
       estimatedVolumes,
       chaptersPerVolumeMin,
@@ -197,7 +198,7 @@ export function resolveStoryExpansionRecommendation(
       `• 篇幅：中篇（${maxChapters}章）`,
       '• 优势：精细控制，随时调整',
       '• 适用：探索性写作，多线并进',
-      '• 建议步长：每轮新增15个细化章节左右，质量与速度更均衡',
+      '• 建议步长：每轮新增20-60个细化章节左右，质量与效率更均衡',
     ]),
   }
 }

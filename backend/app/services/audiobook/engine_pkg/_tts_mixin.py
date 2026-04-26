@@ -13,6 +13,7 @@ from ..script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructu
 from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
+from app.services.audiobook.temp_segment_store import load_cached_segment_audio
 from core.unified_media_runtime import create_tts_engine
 
 try:
@@ -39,7 +40,8 @@ class TTSMixin:
         self,
         script_segments,
         debug_save_segments: bool = False,
-        debug_output_dir: Optional[str] = None
+        debug_output_dir: Optional[str] = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> List[bytes]:
         """批量合成剧本片段"""
         # 准备批量数据
@@ -58,10 +60,203 @@ class TTSMixin:
             batch_size=10,  # 每批10个片段
             batch_interval=0,  # 批次间0秒（取消节流）
             debug_save_segments=debug_save_segments,
-            debug_output_dir=debug_output_dir
+            debug_output_dir=debug_output_dir,
+            progress_callback=progress_callback,
         )
         
         return audio_list
+
+    def _build_resume_audio_plan(
+        self,
+        script_segments,
+        *,
+        resume_checkpoint: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        total_segments = len(script_segments or [])
+        empty_plan = {
+            "audio_by_index": {},
+            "reused_indices": [],
+            "missing_indices": list(range(total_segments)),
+            "resume_source": None,
+        }
+        if total_segments <= 0 or not isinstance(resume_checkpoint, dict) or not resume_checkpoint:
+            return empty_plan
+
+        checkpoint_candidates = [("current_checkpoint", resume_checkpoint)]
+        source_checkpoint = resume_checkpoint.get("source_checkpoint")
+        if isinstance(source_checkpoint, dict) and source_checkpoint:
+            checkpoint_candidates.append(("source_checkpoint", source_checkpoint))
+
+        merged_audio_by_index: Dict[int, bytes] = {}
+        used_sources: List[str] = []
+        for source_name, checkpoint_candidate in checkpoint_candidates:
+            raw_total_segments = checkpoint_candidate.get("total_segments")
+            try:
+                checkpoint_total_segments = int(raw_total_segments) if raw_total_segments is not None else None
+            except Exception:
+                checkpoint_total_segments = None
+
+            if checkpoint_total_segments not in {None, 0, total_segments}:
+                logger.info(
+                    "Skip resume cache from %s due to total_segments mismatch: checkpoint=%s current=%s",
+                    source_name,
+                    checkpoint_total_segments,
+                    total_segments,
+                )
+                continue
+
+            audio_by_index = load_cached_segment_audio(
+                checkpoint_candidate,
+                max_segment_count=total_segments,
+            )
+            if not audio_by_index:
+                continue
+
+            for index, audio_bytes in audio_by_index.items():
+                merged_audio_by_index.setdefault(index, audio_bytes)
+            used_sources.append(source_name)
+
+        if merged_audio_by_index:
+            reused_indices = sorted(merged_audio_by_index.keys())
+            missing_indices = [index for index in range(total_segments) if index not in merged_audio_by_index]
+            return {
+                "audio_by_index": merged_audio_by_index,
+                "reused_indices": reused_indices,
+                "missing_indices": missing_indices,
+                "resume_source": "+".join(used_sources),
+            }
+
+        return empty_plan
+
+    async def _synthesize_segments_with_resume(
+        self,
+        script_segments,
+        *,
+        resume_checkpoint: Optional[Dict[str, Any]] = None,
+        debug_save_segments: bool = False,
+        debug_output_dir: Optional[str] = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
+        resume_plan = self._build_resume_audio_plan(
+            script_segments,
+            resume_checkpoint=resume_checkpoint,
+        )
+        audio_by_index = dict(resume_plan.get("audio_by_index") or {})
+        missing_indices = list(resume_plan.get("missing_indices") or [])
+        synthesized_indices: List[int] = []
+
+        def emit_progress_payload(
+            *,
+            batch_index: Optional[int] = None,
+            num_batches: Optional[int] = None,
+            start_idx: Optional[int] = None,
+            end_idx: Optional[int] = None,
+        ) -> None:
+            if not progress_callback:
+                return
+            try:
+                progress_callback(
+                    {
+                        "total_segments": len(script_segments or []),
+                        "completed_segment_indices": sorted(audio_by_index.keys()),
+                        "audio_by_index": dict(audio_by_index),
+                        "resume_source": resume_plan.get("resume_source"),
+                        "reused_indices": list(resume_plan.get("reused_indices") or []),
+                        "reused_count": len(resume_plan.get("reused_indices") or []),
+                        "synthesized_indices": list(synthesized_indices),
+                        "synthesized_count": len(synthesized_indices),
+                        "progress": (
+                            len(audio_by_index) / len(script_segments)
+                            if script_segments
+                            else 1.0
+                        ),
+                        "batch_index": batch_index,
+                        "num_batches": num_batches,
+                        "start_idx": start_idx,
+                        "end_idx": end_idx,
+                    }
+                )
+            except Exception as callback_exc:
+                logger.warning("TTS resume progress callback failed: %s", callback_exc)
+
+        if audio_by_index:
+            emit_progress_payload()
+
+        if missing_indices:
+            missing_segments = [script_segments[index] for index in missing_indices]
+            missing_audio_by_index: Dict[int, bytes] = {}
+
+            def handle_missing_progress(payload: Dict[str, Any]) -> None:
+                event_type = str(payload.get("event") or "").strip().lower()
+                start_idx = int(payload.get("start_idx") or 0)
+
+                if event_type == "segment":
+                    segment_index = int(payload.get("segment_index") or 0)
+                    if segment_index < 0 or segment_index >= len(missing_indices):
+                        return
+                    global_index = missing_indices[segment_index]
+                    payload_bytes = bytes(payload.get("audio_bytes") or b"")
+                    if payload_bytes:
+                        missing_audio_by_index[global_index] = payload_bytes
+                        audio_by_index[global_index] = payload_bytes
+                    synthesized_indices.clear()
+                    synthesized_indices.extend(sorted(missing_audio_by_index.keys()))
+                    emit_progress_payload(
+                        batch_index=payload.get("batch_index"),
+                        num_batches=payload.get("num_batches"),
+                        start_idx=segment_index,
+                        end_idx=segment_index + 1,
+                    )
+                    return
+
+                if event_type == "batch_completed":
+                    return
+
+                batch_audio_list = payload.get("batch_audio_list") or []
+                end_idx = int(payload.get("end_idx") or start_idx)
+                relative_indices = missing_indices[start_idx:end_idx]
+                for global_index, audio_bytes in zip(relative_indices, batch_audio_list):
+                    payload_bytes = bytes(audio_bytes or b"")
+                    if not payload_bytes:
+                        continue
+                    missing_audio_by_index[global_index] = payload_bytes
+                    audio_by_index[global_index] = payload_bytes
+                synthesized_indices.clear()
+                synthesized_indices.extend(sorted(missing_audio_by_index.keys()))
+                emit_progress_payload(
+                    batch_index=payload.get("batch_index"),
+                    num_batches=payload.get("num_batches"),
+                    start_idx=start_idx,
+                    end_idx=end_idx,
+                )
+
+            synthesized_audio_list = await self._synthesize_segments(
+                missing_segments,
+                debug_save_segments=debug_save_segments,
+                debug_output_dir=debug_output_dir,
+                progress_callback=handle_missing_progress,
+            )
+            for index, audio_bytes in zip(missing_indices, synthesized_audio_list):
+                payload_bytes = bytes(audio_bytes or b"")
+                if not payload_bytes:
+                    continue
+                audio_by_index[index] = payload_bytes
+                if index not in synthesized_indices:
+                    synthesized_indices.append(index)
+
+        synthesized_indices = sorted(set(synthesized_indices))
+        if progress_callback and (audio_by_index or not missing_indices):
+            emit_progress_payload()
+
+        audio_list = [bytes(audio_by_index.get(index, b"")) for index in range(len(script_segments or []))]
+        return {
+            "audio_list": audio_list,
+            "resume_source": resume_plan.get("resume_source"),
+            "reused_indices": list(resume_plan.get("reused_indices") or []),
+            "reused_count": len(resume_plan.get("reused_indices") or []),
+            "synthesized_indices": synthesized_indices,
+            "synthesized_count": len(synthesized_indices),
+        }
 
     def get_tts_dispatch_models(self) -> List[Dict[str, Any]]:
         """获取已注册的 TTS 智能调度模型列表"""

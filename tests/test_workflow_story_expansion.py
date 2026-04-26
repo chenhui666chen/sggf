@@ -19,8 +19,12 @@ for path in (PROJECT_ROOT, PROJECT_ROOT / "backend"):
 import app.db.base as db_base
 import app.services.character_parser as character_parser
 import app.services.vector_sync as vector_sync
+import app.services.agents.written_chapters_handler as written_chapters_handler
 import backend.app.api.v1.workflow as workflow
+import backend.app.api.v1.workflow.routes_status as workflow_status
+import backend.app.api.v1.workflow.story_resolve as workflow_story_resolve
 import backend.app.services.outline_merger as outline_merger
+from app.schemas.story_expansion import StoryExpansionAnalysisPayload
 
 
 class _FakeQuery:
@@ -82,6 +86,19 @@ class _FrameworkGuardDBSession(_FakeDBSession):
         return SimpleNamespace(fetchone=lambda: None)
 
 
+class _TaskStatusDBSession(_FakeDBSession):
+    def __init__(self, task_row: Any) -> None:
+        super().__init__()
+        self.task_row = task_row
+
+    def execute(self, query: Any, params: Any = None) -> Any:
+        self.execute_calls.append((query, params))
+        query_text = str(query)
+        if "FROM generation_history gh" in query_text and "WHERE gh.task_id = :task_id AND p.user_id = :user_id" in query_text:
+            return SimpleNamespace(fetchone=lambda: self.task_row)
+        return SimpleNamespace(fetchone=lambda: None)
+
+
 class _VolumeDetailConfigDBSession(_FakeDBSession):
     def __init__(self, *, epic_framework: str, epic_volumes_detail: str) -> None:
         super().__init__()
@@ -139,6 +156,28 @@ def test_expand_story_request_rejects_unknown_fields() -> None:
         )
 
 
+def test_story_expansion_analysis_payload_accepts_runtime_model_timeout_fields() -> None:
+    payload = StoryExpansionAnalysisPayload.model_validate(
+        {
+            "execution_mode": "delta",
+            "model_plan": {
+                "coordinator_planner_model": "qwen3.6-plus",
+                "coordinator_writer_model": "deepseek-v4-pro",
+                "coordinator_planner_max_tokens": 9879,
+                "coordinator_writer_max_tokens": 26857,
+                "coordinator_planner_timeout_seconds": 572,
+                "coordinator_writer_timeout_seconds": 1701,
+                "coordinator_planner_estimated_output_tokens": 8820,
+                "coordinator_writer_estimated_output_tokens": 22760,
+            },
+        }
+    )
+
+    assert payload.model_plan is not None
+    assert payload.model_plan.coordinator_planner_timeout_seconds == 572
+    assert payload.model_plan.coordinator_writer_timeout_seconds == 1701
+
+
 def test_build_story_execution_task_kwargs_maps_story_request_fields() -> None:
     request = workflow.ExpandStoryRequest(
         project_id=1,
@@ -179,6 +218,60 @@ def test_build_story_execution_task_kwargs_maps_story_request_fields() -> None:
     assert result["volume_character_increment"] == 2
     assert result["preserve_written_mode"] == "preserve_written"
     assert result["reset_epic_framework"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_task_status_parses_json_result_payload() -> None:
+    fake_db = _TaskStatusDBSession(
+        (
+            "expand-story-task-1",
+            "completed",
+            json.dumps({"message": "完成", "current_chapter_count": 22}, ensure_ascii=False),
+            None,
+            "2026-04-25T00:00:00+00:00",
+            "2026-04-25T00:05:00+00:00",
+        )
+    )
+
+    result = await workflow_status.get_task_status(
+        "expand-story-task-1",
+        current_user=SimpleNamespace(id=1),
+        db=fake_db,
+    )
+
+    assert result["task_id"] == "expand-story-task-1"
+    assert result["status"] == "completed"
+    assert result["progress"] == 100
+    assert result["result"] == {
+        "message": "完成",
+        "current_chapter_count": 22,
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_task_status_keeps_plain_text_result_when_payload_is_not_json() -> None:
+    fake_db = _TaskStatusDBSession(
+        (
+            "workflow-task-plain",
+            "failed",
+            "任务执行中断：上游服务无响应",
+            "上游超时",
+            "2026-04-25T00:00:00+00:00",
+            "2026-04-25T00:03:00+00:00",
+        )
+    )
+
+    result = await workflow_status.get_task_status(
+        "workflow-task-plain",
+        current_user=SimpleNamespace(id=1),
+        db=fake_db,
+    )
+
+    assert result["task_id"] == "workflow-task-plain"
+    assert result["status"] == "failed"
+    assert result["progress"] == 0
+    assert result["result"] == "任务执行中断：上游服务无响应"
+    assert result["error"] == "上游超时"
 
 
 def test_resolve_story_volume_detail_config_estimates_start_chapter_from_framework_summary() -> None:
@@ -410,14 +503,14 @@ def test_validate_expand_story_request_rejects_total_mode_beyond_conventional_to
         characters="### 【姓名】：林舟\n【角色定位】：主角",
         current_chapter_count=20,
         current_character_count=3,
-        target_total_chapters=301,
+        target_total_chapters=601,
         expansion_mode="total",
     )
 
     with pytest.raises(workflow.HTTPException) as exc_info:
         workflow._validate_expand_story_request(request)
 
-    assert exc_info.value.detail == "常规协同仅支持总规模不超过 300 个细化章节；超过 300 章后必须改用长篇框架协同"
+    assert exc_info.value.detail == "常规协同仅支持总规模不超过 600 个细化章节；451 章起建议优先改用长篇框架协同，超过 600 章后必须切换。"
 
 
 def test_validate_expand_story_request_rejects_total_mode_when_current_scale_already_exceeds_ceiling() -> None:
@@ -426,7 +519,7 @@ def test_validate_expand_story_request_rejects_total_mode_when_current_scale_alr
         current_outline="第1章：雨夜入城",
         world_setting="蒸汽仙侠世界",
         characters="### 【姓名】：林舟\n【角色定位】：主角",
-        current_chapter_count=320,
+        current_chapter_count=620,
         current_character_count=12,
         target_total_characters=15,
         expansion_mode="total",
@@ -435,7 +528,7 @@ def test_validate_expand_story_request_rejects_total_mode_when_current_scale_alr
     with pytest.raises(workflow.HTTPException) as exc_info:
         workflow._validate_expand_story_request(request)
 
-    assert exc_info.value.detail == "常规协同仅支持总规模不超过 300 个细化章节；超过 300 章后必须改用长篇框架协同"
+    assert exc_info.value.detail == "常规协同仅支持总规模不超过 600 个细化章节；451 章起建议优先改用长篇框架协同，超过 600 章后必须切换。"
 
 
 def test_validate_expand_story_request_accepts_20_chapter_volume_detail_lower_bound() -> None:
@@ -455,7 +548,7 @@ def test_validate_expand_story_request_accepts_20_chapter_volume_detail_lower_bo
     workflow._validate_expand_story_request(request)
 
 
-def test_validate_expand_story_request_accepts_100_chapter_volume_detail_upper_bound() -> None:
+def test_validate_expand_story_request_accepts_120_chapter_volume_detail_upper_bound() -> None:
     request = workflow.ExpandStoryRequest(
         project_id=1,
         current_outline="## 分卷概要",
@@ -466,13 +559,13 @@ def test_validate_expand_story_request_accepts_100_chapter_volume_detail_upper_b
         expansion_mode="volume_detail",
         target_volume_index=4,
         volume_chapters_min=60,
-        volume_chapters_max=100,
+        volume_chapters_max=120,
     )
 
     workflow._validate_expand_story_request(request)
 
 
-def test_validate_expand_story_request_rejects_volume_detail_above_100_chapters() -> None:
+def test_validate_expand_story_request_rejects_volume_detail_above_120_chapters() -> None:
     request = workflow.ExpandStoryRequest(
         project_id=1,
         current_outline="## 分卷概要",
@@ -483,13 +576,13 @@ def test_validate_expand_story_request_rejects_volume_detail_above_100_chapters(
         expansion_mode="volume_detail",
         target_volume_index=4,
         volume_chapters_min=60,
-        volume_chapters_max=101,
+        volume_chapters_max=121,
     )
 
     with pytest.raises(workflow.HTTPException) as exc_info:
         workflow._validate_expand_story_request(request)
 
-    assert exc_info.value.detail == "单卷细化协同需要有效的本卷章节范围 (20-100)"
+    assert exc_info.value.detail == "单卷细化协同需要有效的本卷章节范围 (20-120)"
 
 
 def test_select_text_model_by_input_tokens_uses_dynamic_model_budget() -> None:
@@ -704,6 +797,104 @@ async def test_analyze_expand_story_includes_written_chapter_preview_context(
     assert "检测到已写正文" in " ".join(result["analysis"]["warnings"])
 
 
+def test_build_story_written_chapter_preview_merges_existing_outline_with_written_context() -> None:
+    class _PreviewResult:
+        def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+            self._rows = list(rows)
+
+        def fetchall(self) -> list[tuple[Any, ...]]:
+            return list(self._rows)
+
+    class _PreviewDB:
+        def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+            self._rows = list(rows)
+
+        def execute(self, query: Any, params: Any = None) -> _PreviewResult:
+            return _PreviewResult(self._rows)
+
+    preview = workflow._build_story_written_chapter_preview(
+        workflow.ExpandStoryRequest(
+            project_id=1,
+            current_outline="旧大纲\n第1章：雨夜入城\n第22章：风雪夜归",
+            world_setting="蒸汽仙侠世界",
+            characters="### 【姓名】：林舟\n【角色定位】：主角",
+            current_chapter_count=22,
+            target_total_chapters=60,
+            preserve_written_mode="extract_extend",
+        ),
+        _PreviewDB(
+            [
+                (
+                    1,
+                    "雨夜入城",
+                    "正文片段不应直接覆盖原始大纲",
+                    "",
+                    json.dumps(
+                        {
+                            "scene_goal": "主角入城并观察局势",
+                            "key_events": ["抵达青石城", "察觉有人跟踪"],
+                            "ending_hook": {"content": "巷口出现陌生纸灯"},
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+            ]
+        ),
+    )
+
+    assert preview["applied"] is True
+    assert preview["effective_current_chapter_count"] == 22
+    assert "旧大纲" in preview["effective_outline"]
+    assert "已写章节摘要预览" in preview["effective_outline"]
+    assert "主角入城并观察局势" in preview["effective_outline"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_story_execution_request_keeps_larger_outline_chapter_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = workflow.ExpandStoryRequest(
+        project_id=1,
+        current_outline="旧大纲\n第1章：雨夜入城\n第22章：风雪夜归",
+        world_setting="蒸汽仙侠世界",
+        characters="### 【姓名】：林舟\n【角色定位】：主角",
+        current_chapter_count=22,
+        current_character_count=3,
+        target_total_chapters=60,
+        preserve_written_mode="extract_extend",
+    )
+
+    def fake_preview(_: workflow.ExpandStoryRequest, db: Any) -> dict[str, Any]:
+        return {
+            "effective_outline": "旧大纲\n\n【已写章节摘要预览（用于连续性约束）】\n第1章：已写开场",
+            "effective_current_chapter_count": 22,
+            "written_chapter_count": 1,
+            "written_outline_context": "第1章：已写开场\n- 已写摘要：主角入城。",
+            "warnings": ["检测到已写正文，预检阶段先按摘要预览。"],
+            "applied": True,
+        }
+
+    async def fake_process_written_chapters(**kwargs: Any) -> tuple[int, str]:
+        return 1, "### 第1章：已写开场\n- 场景目标：主角入城并观察局势。"
+
+    monkeypatch.setattr(workflow_story_resolve, "_build_story_written_chapter_preview", fake_preview)
+    monkeypatch.setattr(workflow_story_resolve, "_build_project_world_setting_context", lambda *args, **kwargs: "蒸汽仙侠世界")
+    monkeypatch.setattr(
+        workflow_story_resolve,
+        "_create_project_outline_expander",
+        lambda *args, **kwargs: {"expander": SimpleNamespace(llm=object()), "genre": "修仙"},
+    )
+    monkeypatch.setattr(written_chapters_handler, "process_written_chapters", fake_process_written_chapters)
+
+    result = await workflow_story_resolve._prepare_story_execution_request(request, _FakeDBSession())
+
+    prepared_request = result["request"]
+    assert prepared_request.current_chapter_count == 22
+    assert "旧大纲" in prepared_request.current_outline
+    assert "已写章节提炼细纲" in prepared_request.current_outline
+    assert "### 已写章节 1：已写开场" in prepared_request.current_outline
+
+
 @pytest.mark.asyncio
 async def test_execute_expand_story_task_uses_analysis_effective_targets_and_reports_analysis(
     monkeypatch: pytest.MonkeyPatch,
@@ -854,7 +1045,9 @@ async def test_execute_expand_story_task_uses_analysis_effective_targets_and_rep
     assert result["expansion_analysis"]["effective_target_character_count"] == analysis["effective_target_character_count"]
     assert result["expansion_analysis"]["auto_supplement"]["character_plan"] == analysis["auto_supplement"]["character_plan"]
     assert result["character_sync"]["relationships"]["saved"] == 1
-    assert result["message"].startswith("✅ 协同拓展完成！")
+    assert result["completion_status"] == "partial"
+    assert result["goal_reached"] is False
+    assert result["message"].startswith("⚠️ 协同拓展已阶段性完成")
     project_settings_updates = [
         params
         for query, params in fake_db.execute_calls
@@ -966,7 +1159,208 @@ async def test_execute_expand_story_task_reconciles_final_counts_from_result_tex
     result = complete_events[0]["result"]
     assert result["current_chapter_count"] == 16
     assert result["current_character_count"] == 2
-    assert result["message"].endswith("人物 0 → 2")
+    assert result["message"].startswith("⚠️ 协同拓展已阶段性完成")
+    assert "人物 0 → 2" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_execute_expand_story_task_marks_partial_completion_when_goal_not_reached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_db = _FakeDBSession()
+    complete_events: list[dict[str, Any]] = []
+
+    analysis = {
+        "effective_target_chapter_count": 20,
+        "effective_target_character_count": 4,
+        "effective_strategy": "plot_first",
+        "effective_intent": "outline_led",
+        "effective_expansion_mode": "total",
+        "execution_mode": "delta",
+        "execution_mode_reason": "单轮协同。",
+        "warnings": [],
+    }
+
+    class _FakeCoordinator:
+        def execute(self, **kwargs: Any) -> dict[str, Any]:
+            return {
+                "plot_outline": "\n\n".join(
+                    f"第{index}章：章节{index}\n- 主要内容：推进第{index}章剧情。"
+                    for index in range(1, 13)
+                ),
+                "characters": "### 【姓名】：林舟\n【角色定位】：主角",
+                "execution_mode": "delta",
+                "execution_mode_reason": "单轮协同。",
+                "execution_rounds": [],
+                "strategy": "plot_first",
+                "coordination_summary": "已完成单轮扩展。",
+                "current_chapter_count": 12,
+                "current_character_count": 1,
+                "validation_before": {"chapter_count": 8, "character_count": 1},
+                "validation_after": {"chapter_count": 12, "character_count": 1},
+                "stop_reasons": [],
+            }
+
+    def fake_build_story_expansion_analysis(*, request: workflow.ExpandStoryRequest, db: Any) -> dict[str, Any]:
+        return {
+            "coordinator": _FakeCoordinator(),
+            "combined_world_setting": "蒸汽仙侠世界",
+            "analysis": analysis,
+        }
+
+    async def fake_send_task_progress(**kwargs: Any) -> None:
+        return None
+
+    async def fake_send_task_complete(**kwargs: Any) -> None:
+        complete_events.append(kwargs)
+
+    async def fake_send_task_error(**kwargs: Any) -> None:
+        raise AssertionError(f"unexpected error event: {kwargs}")
+
+    async def fake_to_thread(func: Any, /, *args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(workflow, "_build_story_expansion_analysis", fake_build_story_expansion_analysis)
+    monkeypatch.setattr(db_base, "SessionLocal", lambda: fake_db)
+    monkeypatch.setattr(character_parser, "parse_and_sync_characters", lambda **kwargs: {"parsed": 0, "created": 0, "updated": 0, "skipped": 0})
+    monkeypatch.setattr(vector_sync, "sync_to_vector_db", lambda **kwargs: None)
+    monkeypatch.setattr(vector_sync, "upsert_character_to_vector_db", lambda **kwargs: None)
+    monkeypatch.setattr(workflow.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(workflow.ws_manager, "send_task_progress", fake_send_task_progress)
+    monkeypatch.setattr(workflow.ws_manager, "send_task_complete", fake_send_task_complete)
+    monkeypatch.setattr(workflow.ws_manager, "send_task_error", fake_send_task_error)
+
+    await workflow.execute_expand_story_task(
+        task_id="expand-story-partial",
+        project_id=1,
+        user_id=99,
+        current_outline="\n\n".join(
+            f"第{index}章：旧章节{index}\n- 主要内容：旧剧情。"
+            for index in range(1, 9)
+        ),
+        world_setting="蒸汽仙侠世界",
+        characters="### 【姓名】：林舟\n【角色定位】：主角",
+        current_chapter_count=8,
+        current_character_count=1,
+        target_total_chapters=20,
+        target_total_characters=4,
+        strategy="auto",
+        intent="auto",
+        enable_auto_supplement=False,
+        expansion_mode="total",
+        total_volumes=None,
+        total_chapters_min=None,
+        total_chapters_max=None,
+        target_volume_index=None,
+        volume_chapters_min=None,
+        volume_chapters_max=None,
+        preserve_written_mode="extract_extend",
+    )
+
+    result = complete_events[0]["result"]
+    assert result["completion_status"] == "partial"
+    assert result["goal_reached"] is False
+    assert result["stop_reasons"] == [
+        "章节尚差 8 章，需继续发起下一次协同。",
+        "人物尚差 3 人，需继续发起下一次协同。",
+    ]
+    assert "本次协同已完成当前可确认增量" in result["coordination_summary"]
+    assert result["message"].startswith("⚠️ 协同拓展已阶段性完成")
+
+
+@pytest.mark.asyncio
+async def test_execute_expand_story_task_reconciles_initial_counts_for_completion_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_db = _FakeDBSession()
+    complete_events: list[dict[str, Any]] = []
+
+    analysis = {
+        "effective_target_chapter_count": 22,
+        "effective_target_character_count": 19,
+        "effective_strategy": "plot_first",
+        "effective_intent": "outline_led",
+        "effective_expansion_mode": "total",
+        "execution_mode": "delta",
+        "execution_mode_reason": "单轮协同。",
+        "warnings": [],
+    }
+
+    class _FakeCoordinator:
+        def execute(self, **kwargs: Any) -> dict[str, Any]:
+            return {
+                "plot_outline": "\n\n".join(
+                    f"第{index}章：章节{index}\n- 主要内容：推进第{index}章剧情。"
+                    for index in range(1, 23)
+                ),
+                "characters": "### 【姓名】：林舟\n【角色定位】：主角",
+                "execution_mode": "delta",
+                "execution_mode_reason": "单轮协同。",
+                "execution_rounds": [],
+                "strategy": "plot_first",
+                "coordination_summary": "已完成单轮扩展。",
+                "current_chapter_count": 22,
+                "current_character_count": 19,
+                "validation_before": {"chapter_count": 1, "character_count": 1},
+                "validation_after": {"chapter_count": 22, "character_count": 19},
+                "stop_reasons": [],
+            }
+
+    def fake_build_story_expansion_analysis(*, request: workflow.ExpandStoryRequest, db: Any) -> dict[str, Any]:
+        return {
+            "coordinator": _FakeCoordinator(),
+            "combined_world_setting": "蒸汽仙侠世界",
+            "analysis": analysis,
+        }
+
+    async def fake_send_task_progress(**kwargs: Any) -> None:
+        return None
+
+    async def fake_send_task_complete(**kwargs: Any) -> None:
+        complete_events.append(kwargs)
+
+    async def fake_send_task_error(**kwargs: Any) -> None:
+        raise AssertionError(f"unexpected error event: {kwargs}")
+
+    async def fake_to_thread(func: Any, /, *args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(workflow, "_build_story_expansion_analysis", fake_build_story_expansion_analysis)
+    monkeypatch.setattr(db_base, "SessionLocal", lambda: fake_db)
+    monkeypatch.setattr(character_parser, "parse_and_sync_characters", lambda **kwargs: {"parsed": 0, "created": 0, "updated": 0, "skipped": 0})
+    monkeypatch.setattr(vector_sync, "sync_to_vector_db", lambda **kwargs: None)
+    monkeypatch.setattr(vector_sync, "upsert_character_to_vector_db", lambda **kwargs: None)
+    monkeypatch.setattr(workflow.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(workflow.ws_manager, "send_task_progress", fake_send_task_progress)
+    monkeypatch.setattr(workflow.ws_manager, "send_task_complete", fake_send_task_complete)
+    monkeypatch.setattr(workflow.ws_manager, "send_task_error", fake_send_task_error)
+
+    await workflow.execute_expand_story_task(
+        task_id="expand-story-initial-count-message",
+        project_id=1,
+        user_id=99,
+        current_outline="第1章：旧开场\n- 主要内容：旧剧情。",
+        world_setting="蒸汽仙侠世界",
+        characters="### 【姓名】：林舟\n【角色定位】：主角",
+        current_chapter_count=20,
+        current_character_count=18,
+        target_total_chapters=22,
+        target_total_characters=19,
+        strategy="auto",
+        intent="auto",
+        enable_auto_supplement=True,
+        expansion_mode="total",
+        total_volumes=None,
+        total_chapters_min=None,
+        total_chapters_max=None,
+        target_volume_index=None,
+        volume_chapters_min=None,
+        volume_chapters_max=None,
+        preserve_written_mode="extract_extend",
+    )
+
+    result = complete_events[0]["result"]
+    assert result["message"] == "✅ 协同拓展完成！章节 20 → 22，人物 18 → 19"
 
 
 @pytest.mark.asyncio

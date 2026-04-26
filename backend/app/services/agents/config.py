@@ -21,7 +21,7 @@ class Config:
     """System configuration."""
 
     # DeepSeek model routing settings (served through DashScope compatible API)
-    MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-reasoner")
+    MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-v4-pro")
 
     # DashScope settings
     DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")

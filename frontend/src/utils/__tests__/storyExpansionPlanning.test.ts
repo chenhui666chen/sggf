@@ -106,12 +106,12 @@ describe('storyExpansionPlanning', () => {
         },
         targetVolumeIndex: 2,
         volumeChaptersMin: 20,
-        volumeChaptersMax: 101,
+        volumeChaptersMax: 121,
       }),
-    ).toBe('请输入有效的本卷细化章节范围（20-100）')
+    ).toBe('请输入有效的本卷细化章节范围（20-120）')
   })
 
-  it('允许单卷细化将本卷上限设置到 100 章', () => {
+  it('允许单卷细化将本卷上限设置到 120 章', () => {
     expect(
       getStoryExpansionValidationError({
         expansionMode: 'volume_detail',
@@ -126,7 +126,7 @@ describe('storyExpansionPlanning', () => {
         },
         targetVolumeIndex: 2,
         volumeChaptersMin: 20,
-        volumeChaptersMax: 100,
+        volumeChaptersMax: 120,
       }),
     ).toBeNull()
   })
@@ -137,22 +137,22 @@ describe('storyExpansionPlanning', () => {
         expansionMode: 'total',
         currentChapterCount: 20,
         currentCharacterCount: 8,
-        targetChapterCount: 301,
+        targetChapterCount: 601,
         hasStoryContext: true,
       }),
-    ).toBe('常规协同仅支持总规模不超过300个细化章节；超过300章后必须改用长篇框架协同')
+    ).toBe('常规协同仅支持总规模不超过600个细化章节；451章起建议优先改用长篇框架协同，超过600章后必须切换。')
   })
 
-  it('当前章节数已经超过300章时禁止继续使用常规协同', () => {
+  it('当前章节数已经超过600章时禁止继续使用常规协同', () => {
     expect(
       getStoryExpansionValidationError({
         expansionMode: 'total',
-        currentChapterCount: 320,
+        currentChapterCount: 620,
         currentCharacterCount: 12,
         targetCharacterCount: 15,
         hasStoryContext: true,
       }),
-    ).toBe('常规协同仅支持总规模不超过300个细化章节；超过300章后必须改用长篇框架协同')
+    ).toBe('常规协同仅支持总规模不超过600个细化章节；451章起建议优先改用长篇框架协同，超过600章后必须切换。')
   })
 
   it('能识别目标卷是否会覆盖已有卷细纲', () => {
@@ -240,7 +240,7 @@ describe('storyExpansionPlanning', () => {
         expansionMode: 'total',
         currentChapterCount: 20,
         currentCharacterCount: 8,
-        targetChapterCount: 301,
+        targetChapterCount: 601,
         hasStoryContext: true,
       }),
     ).toBe(true)

@@ -256,9 +256,27 @@ export function StoryExpansionOverviewSection({
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
               {resultDisplay.executionModeReasonText}
             </Typography>
+            <Typography
+              variant="body2"
+              sx={{
+                mt: 0.75,
+                fontWeight: 600,
+                color: resultDisplay.completionStatusTone === 'warning' ? '#b45309' : '#0f766e',
+              }}
+            >
+              {resultDisplay.completionStatusDescription}
+            </Typography>
           </Box>
 
           <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+            <Chip
+              label={resultDisplay.completionStatusLabel}
+              color={resultDisplay.completionStatusTone}
+              variant="filled"
+            />
+            {resultDisplay.remainingGoalChipLabel ? (
+              <Chip label={resultDisplay.remainingGoalChipLabel} color="warning" variant="outlined" />
+            ) : null}
             <Chip label={`策略：${strategyLabel}`} color="primary" variant="outlined" />
             <Chip label={`意图：${intentLabel}`} color="secondary" variant="outlined" />
             <Chip label={`正文处理：${preserveWrittenModeLabel}`} variant="outlined" />
@@ -411,10 +429,17 @@ export function StoryExpansionSummarySection({
 
 interface StoryExpansionChangeCardsSectionProps {
   cards: StoryExpansionChangeCardView[]
+  autoImproveAction?: {
+    label: string
+    hint?: string | null
+    loading: boolean
+    onClick: () => void
+  } | null
 }
 
 export function StoryExpansionChangeCardsSection({
   cards,
+  autoImproveAction,
 }: StoryExpansionChangeCardsSectionProps) {
   return (
     <Grid container spacing={2}>
@@ -460,6 +485,24 @@ export function StoryExpansionChangeCardsSection({
                       </Typography>
                     </Paper>
                   ))}
+                  {card.key === 'score-improvements' && autoImproveAction ? (
+                    <Box sx={{ pt: 0.5 }}>
+                      <Button
+                        variant="contained"
+                        color="warning"
+                        onClick={autoImproveAction.onClick}
+                        disabled={autoImproveAction.loading}
+                        sx={{ borderRadius: 2, textTransform: 'none' }}
+                      >
+                        {autoImproveAction.loading ? '自动改进中...' : autoImproveAction.label}
+                      </Button>
+                      {autoImproveAction.hint ? (
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.9 }}>
+                          {autoImproveAction.hint}
+                        </Typography>
+                      ) : null}
+                    </Box>
+                  ) : null}
                 </Stack>
               ) : null}
 

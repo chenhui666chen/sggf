@@ -77,9 +77,16 @@ export interface StoryExpansionAnalysis extends StoryExpansionDurationEstimate {
   model_plan?: {
     coordinator_planner_model?: string
     coordinator_writer_model?: string
+    coordinator_planner_max_tokens?: number
+    coordinator_writer_max_tokens?: number
+    coordinator_planner_estimated_output_tokens?: number
+    coordinator_writer_estimated_output_tokens?: number
     outline_expansion_model?: string
     character_expansion_model?: string
     estimated_rounds?: number
+    selection_reason?: string
+    selection_quality_guard?: string
+    selection_cost_hint?: string
     notes?: string[]
   }
   mode_suitability?: {
@@ -119,8 +126,11 @@ export interface StoryExpansionValidationStats {
   score?: number
   coverage_ratio?: number
   unreferenced_characters?: string[]
+  referenced_characters?: string[]
   chapter_count?: number
   character_count?: number
+  suggestions?: string[]
+  validation_stage?: string
 }
 
 export interface StoryExpansionOutlineOperation {
@@ -165,6 +175,8 @@ export interface StoryExpansionCharacterSync {
   }
 }
 
+export type StoryExpansionCompletionStatus = 'completed' | 'partial'
+
 export interface StoryExpansionResult {
   expanded_outline?: string
   all_characters?: string
@@ -197,6 +209,8 @@ export interface StoryExpansionResult {
   expansion_analysis?: StoryExpansionAnalysis
   epic_total_volumes?: number | null
   epic_chapter_range?: number[] | null
+  completion_status?: StoryExpansionCompletionStatus | string
+  goal_reached?: boolean
   message?: string
 }
 
@@ -232,5 +246,17 @@ export interface StoryExpansionAnalysisResponse {
 export interface StoryExpansionStartResponse {
   success?: boolean
   task_id?: string | null
+  message?: string
+}
+
+export interface StoryExpansionRepairRequestPayload {
+  project_id: number
+  story_expansion_mode?: StoryExpansionMode | string
+  volume_index?: number | null
+}
+
+export interface StoryExpansionRepairResponse {
+  success?: boolean
+  result?: StoryExpansionResult | null
   message?: string
 }

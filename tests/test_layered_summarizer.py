@@ -177,6 +177,16 @@ def test_prepare_context_reuses_persisted_structured_memory_across_rounds(tmp_pa
     assert "夜禁期间城门不会无故开启" in merged_rules
 
 
+def test_estimate_selected_model_matches_current_capability_tiers():
+    assert LayeredSummarizer.REDUCE_SUMMARY_MODEL == "qwen3.6-plus"
+    assert LayeredSummarizer.estimate_selected_model("chapter_generation", 20) == "qwen3.6-plus"
+    assert LayeredSummarizer.estimate_selected_model("chapter_generation", 120) == "qwen3.5-plus"
+    assert LayeredSummarizer.estimate_selected_model("chapter_generation", 500) == "qwen3.5-plus"
+    assert LayeredSummarizer.estimate_selected_model("structure_design", 20) == "qwen3.6-plus"
+    assert LayeredSummarizer.estimate_selected_model("outline_expand", 30) == "qwen3.6-plus"
+    assert LayeredSummarizer.estimate_selected_model("character_expand", 180) == "qwen3.5-plus"
+
+
 def test_summarize_chapter_block_prefers_standardized_outline_fields():
     summarizer = LayeredSummarizer()
 

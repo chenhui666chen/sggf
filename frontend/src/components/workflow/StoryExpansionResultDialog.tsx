@@ -42,6 +42,8 @@ export interface StoryExpansionResultDialogProps {
   preserveWrittenModeLabel: string
   writtenContextLabel?: string
   summary: StoryExpansionSummary | null
+  repairingAutoImprove?: boolean
+  onAutoImprove?: () => void
   onClose: () => void
   onCopied: (message: string) => void
 }
@@ -55,6 +57,8 @@ export default function StoryExpansionResultDialog({
   preserveWrittenModeLabel,
   writtenContextLabel,
   summary,
+  repairingAutoImprove = false,
+  onAutoImprove,
   onClose,
   onCopied,
 }: StoryExpansionResultDialogProps) {
@@ -95,6 +99,25 @@ export default function StoryExpansionResultDialog({
       targetRef: sectionRefs[item.key],
     })),
     [resultDisplay.quickJumpItems, sectionRefs],
+  )
+  const autoImproveAction = useMemo(
+    () => (
+      onAutoImprove && resultDisplay.canAutoImprove
+        ? {
+          label: resultDisplay.autoImproveActionLabel || '一键自动改进',
+          hint: resultDisplay.autoImproveHint,
+          loading: repairingAutoImprove,
+          onClick: onAutoImprove,
+        }
+        : null
+    ),
+    [
+      onAutoImprove,
+      repairingAutoImprove,
+      resultDisplay.autoImproveActionLabel,
+      resultDisplay.autoImproveHint,
+      resultDisplay.canAutoImprove,
+    ],
   )
 
   const handleCopy = async (text: string, message: string) => {
@@ -139,7 +162,10 @@ export default function StoryExpansionResultDialog({
 
             {resultDisplay.hasChangesSection ? (
               <Box ref={changesRef}>
-                <StoryExpansionChangeCardsSection cards={resultDisplay.changeCardViews} />
+                <StoryExpansionChangeCardsSection
+                  cards={resultDisplay.changeCardViews}
+                  autoImproveAction={autoImproveAction}
+                />
               </Box>
             ) : null}
 
@@ -166,6 +192,17 @@ export default function StoryExpansionResultDialog({
         )}
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2 }}>
+        {autoImproveAction ? (
+          <Button
+            onClick={autoImproveAction.onClick}
+            variant="outlined"
+            color="warning"
+            disabled={autoImproveAction.loading}
+            sx={{ borderRadius: 2 }}
+          >
+            {autoImproveAction.loading ? '自动改进中...' : autoImproveAction.label}
+          </Button>
+        ) : null}
         <Button onClick={onClose} variant="contained" sx={{ borderRadius: 2 }}>
           关闭
         </Button>

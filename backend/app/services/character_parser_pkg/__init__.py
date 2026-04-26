@@ -14,6 +14,7 @@ from ._utils import (
     infer_story_stance_from_text_evidence,
     _build_ability_and_limit_text,
     _build_mainline_binding_text,
+    _merge_parsed_character,
     _build_personality_anchor_text,
 )
 from ._dataclasses import ParsedCharacter
@@ -34,6 +35,7 @@ __all__ = [
     "infer_story_stance_from_text_evidence",
     "_build_ability_and_limit_text",
     "_build_mainline_binding_text",
+    "_merge_parsed_character",
     "_build_personality_anchor_text",
     "ParsedCharacter",
     "CharacterTextParser",

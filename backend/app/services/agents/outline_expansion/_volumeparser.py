@@ -30,11 +30,24 @@ from ...character_parser import (
 from ...character_runtime_context import build_character_prompt_context_from_text
 from ._constants import *
 
+def _resolve_chapter_renumberer():
+    try:
+        from .. import outline_expander as outline_expander_module
+
+        factory = getattr(outline_expander_module, "get_chapter_renumberer", None)
+        if callable(factory):
+            return factory()
+    except Exception:
+        pass
+    return get_chapter_renumberer()
+
+
 class VolumeParserMixin:
+    @staticmethod
     def _story_count_rendered_volume_detail_chapters(volume_content: str) -> int:
         if not volume_content or not volume_content.strip():
             return 0
-        return len(OutlineExpander._story_extract_rendered_volume_detail_chapter_numbers(volume_content))
+        return len(VolumeParserMixin._story_extract_rendered_volume_detail_chapter_numbers(volume_content))
 
     @staticmethod
     def _story_extract_volume_detail_main_section(volume_content: str) -> str:
@@ -315,7 +328,7 @@ class VolumeParserMixin:
         *,
         min_chapter_number: int = 1,
     ) -> str:
-        block_map = OutlineExpander._story_extract_volume_detail_chapter_block_map(
+        block_map = VolumeParserMixin._story_extract_volume_detail_chapter_block_map(
             volume_content,
             min_chapter_number=min_chapter_number,
         )
@@ -352,7 +365,7 @@ class VolumeParserMixin:
                 )
             except Exception:
                 expected_max_count = 20
-            renumber_result = get_chapter_renumberer().detect_and_fix(
+            renumber_result = _resolve_chapter_renumberer().detect_and_fix(
                 content=supplement_text,
                 expected_start=next_chapter_number,
                 expected_count_range=(1, expected_max_count),

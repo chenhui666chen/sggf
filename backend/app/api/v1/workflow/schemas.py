@@ -88,5 +88,5 @@ VALID_STORY_EXPANSION_INTENTS = {"auto", "outline_led", "character_led", "balanc
 VALID_STORY_EXPANSION_MODES = {"auto", "total", "epic_framework", "volume_detail"}
 VALID_PRESERVE_WRITTEN_MODES = {"extract_extend", "preserve_written", "regenerate_all"}
 VOLUME_DETAIL_MIN_CHAPTERS = 20
-VOLUME_DETAIL_MAX_CHAPTERS = 100
+VOLUME_DETAIL_MAX_CHAPTERS = 120
 

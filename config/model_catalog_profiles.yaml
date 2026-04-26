@@ -99,7 +99,7 @@ profiles:
       - 预处理
       - 低成本
 
-  deepseek-reasoner:
+  deepseek-v4-pro:
     role_summary: 当前模型是项目的严谨推理与复审入口，主要承担逻辑审校、结构检查、世界观约束和高难度判断。
     system_role: 你是严谨的推理审校专家，优先处理复杂规则、结构一致性、逻辑漏洞和多约束决策。
     prompt_patterns:
@@ -114,12 +114,12 @@ profiles:
       - title: 编程工具识别模板
         template: |
           当任务包含 review / quality_review / structure_plot / reasoning 时，
-          优先识别为 deepseek-reasoner。
+          优先识别为 deepseek-v4-pro。
           注意：当前项目不会向该模型开放 temperature、timeout 和 max_retries 参数。
     router_rules:
       - when: 检测到复杂逻辑审校、世界观约束、人物动机复核或质量复审
-        action: 优先路由到 deepseek-reasoner
-        reason: 该模型在项目中承担“第二判断层”和高强度复审职责。
+        action: 优先路由到 deepseek-v4-pro
+        reason: 该模型在项目中承担"第二判断层"和高强度复审职责。
     best_practice_tips:
       - 更适合审校与判断，不适合高频流式互动。
       - 提示词要明确评估标准，否则容易给出冗长推理。

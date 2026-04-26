@@ -35,7 +35,8 @@ class EpicFrameworkMixin:
                                total_volumes: int, total_chapters_range: tuple[int, int]) -> Dict[str, Any]:
         """生成史诗框架（超长网文总体规划）
         
-        为1000+章的超长网文生成宏观框架，每卷仅200-300字概要
+        为1000+章的超长网文生成宏观框架，充分利用 deepseek-v4-pro 的 384K 输出能力
+        每卷可生成 800-1500 字的饱满概要，包含场景列表
         
         Args:
             world_setting: 世界观设定
@@ -63,10 +64,10 @@ class EpicFrameworkMixin:
 {world_setting}
 
 主要人物：
-{characters[:1000] if characters else '待完善'}
+{characters[:8000] if characters else '待完善'}
 
 【输出要求】
-⚠️ 这是史诗框架，不是详细大纲！每卷仅需200-300字概要
+✅ 充分利用 deepseek-v4-pro 的 384K 超长输出能力，每卷概要 800-1500 字，信息密度要高
 
 ## 一、整体叙事节奏
 分为前中后三期，每期占多少卷，预计章节数：
@@ -102,14 +103,16 @@ class EpicFrameworkMixin:
 ⚠️ 关键：不要固定“有5卷一个大境界”，而是根据题材和总章数灵活调整！
 
 ## 三、{total_volumes}卷概要
-❗️❗️ 每卷最多{VOLUME_DETAIL_MAX_CHAPTERS}章！如果内容多就增加卷数，不要让单卷超过{VOLUME_DETAIL_MAX_CHAPTERS}章 ❗️❗️
+✅ 每卷 800-1500 字饱满概要，章节数上限 {VOLUME_DETAIL_MAX_CHAPTERS}；内容多可适当增加卷数，但无需强制压缩
 
 每卷格式：
-【第X卷】卷名（预计30-{VOLUME_DETAIL_MAX_CHAPTERS}章，不得超过{VOLUME_DETAIL_MAX_CHAPTERS}章）
-- 核心：本卷主题/目标
+【第X卷】卷名（预计章节数，上限 {VOLUME_DETAIL_MAX_CHAPTERS}）
+- 核心：本卷主题/目标（100-150 字）
 - 境界：主角境界范围（如：炼气3层→7层）
-- 主要敌人：本卷Boss
-- 卷末高潮：关键事件
+- 主要敌人：本卷 Boss 及其威胁层级
+- 关键场景列表：列出 4-8 个重要场景/事件及其递进关系
+- 卷末高潮：关键事件（100-150 字）
+- 卷间衔接：本卷结尾如何驱动下一卷
 
 ## 四、关键伏笔布局
 | 伏笔 | 埋设位置 | 铺垫卷 | 揭秘卷 |

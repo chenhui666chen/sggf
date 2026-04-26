@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Accordion,
@@ -31,6 +31,8 @@ import {
   extractTaskPointsPrecheckErrorDetail,
   type TaskPointsPrecheckErrorDetail,
 } from '@/services/api'
+import { buildDreamWeaverMergedVideoAssetMetadataContract } from '@/contracts/userAssetMetadataBuilders'
+import { buildDreamWeaverMergedVideoSourcePayload } from '@/contracts/userAssetSourcePayloadBuilders'
 import { workflowWebSocket } from '@/services/websocket'
 import TaskPointsPrecheckAlert from '@/components/common/TaskPointsPrecheckAlert'
 import {
@@ -74,6 +76,10 @@ import {
   writePersistedDreamWeaverRun,
   stageToPreviewStep,
 } from '@/utils/dreamweaver'
+import {
+  buildDreamweaverRunSourceNavigationPlan,
+  readUserAssetSourceRunId,
+} from '@/utils/userAssetSourceNavigation'
 import type {
   BulkDeleteProgress,
   BulkDeleteResult,
@@ -456,6 +462,7 @@ function toStringArray(value: unknown): string[] {
 export default function DreamWeaverRunPage() {
   const navigate = useNavigate()
   const { projectId: projectIdParam } = useParams()
+  const [searchParams] = useSearchParams()
   const theme = useTheme()
   const smDown = useMediaQuery(theme.breakpoints.down('sm'))
   const mdDown = useMediaQuery(theme.breakpoints.down('md'))
@@ -797,6 +804,7 @@ export default function DreamWeaverRunPage() {
   const autoLoadedLibraryRef = useRef(false)
   const restoredProjectIdRef = useRef<number | null>(null)
   const lockedGenerationConfigReqIdRef = useRef(0)
+  const handledSourceRunKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
     libraryPreviewsRef.current = libraryPreviews
@@ -925,6 +933,7 @@ export default function DreamWeaverRunPage() {
     if (!projectIdParam || !Number.isFinite(parsed)) return null
     return parsed
   }, [projectIdParam])
+  const requestedRunId = useMemo(() => readUserAssetSourceRunId(searchParams), [searchParams])
 
   const selectedProject = useMemo(() => {
     if (!selectedProjectId) return null
@@ -2025,6 +2034,17 @@ export default function DreamWeaverRunPage() {
   }, [handleSelectProject, lockedProjectId, selectedProjectId])
 
   useEffect(() => {
+    const restorePlan = buildDreamweaverRunSourceNavigationPlan({
+      selectedProjectId,
+      requestedRunId,
+      handledRestoreKey: handledSourceRunKeyRef.current,
+    })
+    if (!restorePlan) return
+    handledSourceRunKeyRef.current = restorePlan.restoreKey
+    handleViewHistoryRun(restorePlan.runId)
+  }, [requestedRunId, selectedProjectId])
+
+  useEffect(() => {
     if (!lockedProjectId) return
     if (autoOpenedConfigDialogRef.current) return
     if (running) return
@@ -2729,18 +2749,17 @@ export default function DreamWeaverRunPage() {
         mime_type: 'video/mp4',
         generation_mode: 'merged_video',
         tags: ['dreamweaver', 'deliverable', 'merged-video'],
-        metadata_json: {
-          run_id: currentRunId,
-          project_id: selectedProjectId,
-          project_title: selectedProject?.title || null,
-          merged_video_path: mergedPath,
-        },
-        source_payload_json: {
-          run_id: currentRunId,
-          project_id: selectedProjectId,
-          type: 'merged_video',
+        metadata_json: buildDreamWeaverMergedVideoAssetMetadataContract({
+          runId: currentRunId,
+          projectId: selectedProjectId,
+          projectTitle: selectedProject?.title || null,
+          mergedVideoPath: mergedPath,
+        }),
+        source_payload_json: buildDreamWeaverMergedVideoSourcePayload({
+          runId: currentRunId,
+          projectId: selectedProjectId,
           path: mergedPath,
-        },
+        }),
       })
       setMergedVideoCollectFeedback({ type: 'success', text: '合成视频已归档到用户中心' })
     } catch (collectError) {

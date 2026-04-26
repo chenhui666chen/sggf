@@ -20,6 +20,7 @@ os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/test_db")
 
 from app.db.base import Base, get_db
+from app.core.security import get_current_user
 from app.models.admin_log import AdminOperationLog
 from app.models.audiobook import AudiobookProject
 from app.models.dreamweaver import DreamweaverProject
@@ -27,6 +28,7 @@ from app.models.project import Chapter, Project
 from app.models.role import Role, user_roles
 from app.models.user import User
 from app.models.user_asset_record import UserAssetRecord
+from app.api.v1.dreamweaver_api import routes_run as dreamweaver_routes_run
 
 
 def load_dreamweaver_module():
@@ -134,7 +136,6 @@ def build_test_client() -> tuple[CompatTestClient, sessionmaker, FastAPI]:
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
-    app.dependency_overrides[dreamweaver.get_db] = override_get_db
     return CompatTestClient(app), testing_session_local, app
 
 
@@ -205,7 +206,7 @@ def test_dreamweaver_run_blocks_on_negative_margin_before_pipeline_starts(monkey
 
     user = create_user(session_factory, username="dw_route_margin_user", email="dw_route_margin@example.com")
     operator = create_user(session_factory, username="dw_route_margin_admin", email="dw_route_margin_admin@example.com")
-    app.dependency_overrides[dreamweaver.get_current_user] = lambda: user
+    app.dependency_overrides[get_current_user] = lambda: user
 
     project = create_project(session_factory, user_id=user.id, display_no=1, title="短剧路由负毛利项目")
     chapter = create_chapter(
@@ -219,7 +220,7 @@ def test_dreamweaver_run_blocks_on_negative_margin_before_pipeline_starts(monkey
         session_factory,
         user_id=user.id,
         title="短剧路由高余额资产",
-        file_url="https://example.com/dw-route-margin.png",
+        source_uri="https://example.com/dw-route-margin.png",
         created_at=now,
         updated_at=now,
     )
@@ -236,7 +237,7 @@ def test_dreamweaver_run_blocks_on_negative_margin_before_pipeline_starts(monkey
     def _should_not_continue(*args, **kwargs):
         raise AssertionError("预检失败后不应继续执行短剧主流程")
 
-    monkeypatch.setattr(dreamweaver, "enrich_payload_with_library", _should_not_continue)
+    monkeypatch.setattr(dreamweaver_routes_run, "enrich_payload_with_library", _should_not_continue)
 
     response = client.post(
         "/api/v1/dreamweaver/run",
@@ -266,7 +267,7 @@ def test_dreamweaver_run_async_blocks_on_insufficient_points_before_queueing(mon
 
     user = create_user(session_factory, username="dw_route_low_user", email="dw_route_low@example.com")
     operator = create_user(session_factory, username="dw_route_low_admin", email="dw_route_low_admin@example.com")
-    app.dependency_overrides[dreamweaver.get_current_user] = lambda: user
+    app.dependency_overrides[get_current_user] = lambda: user
 
     project = create_project(session_factory, user_id=user.id, display_no=1, title="短剧路由余额不足项目")
     chapter = create_chapter(
@@ -280,7 +281,7 @@ def test_dreamweaver_run_async_blocks_on_insufficient_points_before_queueing(mon
         session_factory,
         user_id=user.id,
         title="短剧路由低余额资产",
-        file_url="https://example.com/dw-route-low.png",
+        source_uri="https://example.com/dw-route-low.png",
         created_at=now,
         updated_at=now,
     )
@@ -295,7 +296,7 @@ def test_dreamweaver_run_async_blocks_on_insufficient_points_before_queueing(mon
     def _should_not_queue() -> str:
         raise AssertionError("预检失败后不应创建排队信息")
 
-    monkeypatch.setattr(dreamweaver, "_dreamweaver_celery_queue", _should_not_queue)
+    monkeypatch.setattr(dreamweaver_routes_run, "_dreamweaver_celery_queue", _should_not_queue)
 
     response = client.post(
         "/api/v1/dreamweaver/run-async",

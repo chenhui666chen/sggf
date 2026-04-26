@@ -54,6 +54,8 @@ describe('storyExpansionResultModel', () => {
       expansion_analysis: undefined,
       epic_total_volumes: null,
       epic_chapter_range: null,
+      completion_status: undefined,
+      goal_reached: undefined,
       message: undefined,
     })
   })
@@ -94,12 +96,16 @@ describe('storyExpansionResultModel', () => {
     })
 
     expect(view).toMatchObject({
+      completionStatus: 'partial',
+      goalReached: false,
       chapterBefore: 2,
       chapterAfter: 3,
       chapterTarget: 3,
+      remainingChapterCount: 0,
       characterBefore: 4,
       characterAfter: 5,
       characterTarget: 6,
+      remainingCharacterCount: 1,
       scoreBefore: 82,
       scoreAfter: 89,
       addedChapterCount: 1,
@@ -154,6 +160,61 @@ describe('storyExpansionResultModel', () => {
           },
         },
       },
+    })
+  })
+
+  it('保留协同校验中的引用人物与建议字段', () => {
+    expect(
+      coerceStoryExpansionResult({
+        validation_before: {
+          score: 78,
+          coverage_ratio: 0.75,
+          referenced_characters: ['顾晚', '沈砚'],
+          unreferenced_characters: ['陈昭'],
+          suggestions: ['存在未被大纲引用的人物，优先为这些角色补充登场章节或职责。'],
+          validation_stage: 'chapter_level',
+        },
+        validation_after: {
+          score: 86,
+          coverage_ratio: 1,
+          referenced_characters: ['顾晚', '沈砚', '陈昭'],
+          unreferenced_characters: [],
+          suggestions: ['当前人物与大纲的基础协同正常，适合继续做增量扩展。'],
+          validation_stage: 'chapter_level',
+        },
+      }),
+    ).toMatchObject({
+      validation_before: {
+        score: 78,
+        coverage_ratio: 0.75,
+        referenced_characters: ['顾晚', '沈砚'],
+        unreferenced_characters: ['陈昭'],
+        suggestions: ['存在未被大纲引用的人物，优先为这些角色补充登场章节或职责。'],
+        validation_stage: 'chapter_level',
+      },
+      validation_after: {
+        score: 86,
+        coverage_ratio: 1,
+        referenced_characters: ['顾晚', '沈砚', '陈昭'],
+        unreferenced_characters: [],
+        suggestions: ['当前人物与大纲的基础协同正常，适合继续做增量扩展。'],
+        validation_stage: 'chapter_level',
+      },
+    })
+  })
+  it('保留阶段性完成与目标达成字段', () => {
+    expect(
+      coerceStoryExpansionResult({
+        completion_status: 'partial',
+        goal_reached: false,
+        current_chapter_count: 38,
+        target_chapter_count: 60,
+      }),
+    ).toMatchObject({
+      completion_status: 'partial',
+      goal_reached: false,
+      current_chapter_count: 38,
+      target_chapter_count: 60,
     })
   })
 })

@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 from ..agents import CreativeDirectorAgent, PlotArchitectAgent, CharacterDesignerAgent
 from core.langchain_bridge import create_task_llm, create_model_llm
+from core.model_runtime import estimate_model_timeout_seconds
 from ..knowledge_base import NovelKnowledgeBase
 from ..memory_manager import NovelMemoryManager
 from ..agent_coordinator import GENRE_PROMPT_MODULES, DEFAULT_GENRE_MODULE, REALM_SPAN_WARNING_THRESHOLD, REALM_SPAN_RECOMMEND_SUBDIVISION
@@ -56,33 +57,55 @@ class OutlineExpanderBase:
         self.plot_architect = PlotArchitectAgent(self.knowledge_base, self.memory_manager)
         self.character_designer = CharacterDesignerAgent(self.knowledge_base, self.memory_manager)
 
-        # 🔔 为扩展大纲固定使用 qwen3.5-plus
-        self.llm = create_task_llm(task_type="outline_expand")
+        # 🚀 协同扩展全链路统一使用 deepseek-v4-pro（384K 超长输出）
+        # 旧的 qwen3.5-plus / DeepSeek-R1 / qwen-long 分级路由已废弃：
+        # V4 Pro 一次可输出约 58–65 万汉字，单卷乃至整本细纲均可一次生成，
+        # 无需再依章节数动态切换，也无需再对输出进行二次裁剪。
+        outline_expand_max_tokens = 32768
+        outline_expand_timeout = estimate_model_timeout_seconds(
+            "qwen3.5-plus",
+            outline_expand_max_tokens,
+        )
+        self.llm = create_task_llm(
+            task_type="outline_expand",
+            max_tokens=outline_expand_max_tokens,
+            timeout=outline_expand_timeout,
+        )
 
-        # 🎆 为单卷详细扩展使用 DeepSeek-R1（深度推理能力 + 64K超长输出）
-        # 官方最新能力：max_output_tokens=64K，足够生成70章大纲（约31,000字）
+        # 以下三个属性保留字段名以兼容既有调用点（_volumedetail / _incrementalexpansion / 测试），
+        # 但均指向同一份 deepseek-v4-pro 实例，不再做能力分级。
+        volume_detail_max_tokens = 64000
+        volume_detail_timeout = estimate_model_timeout_seconds(
+            "deepseek-v4-pro",
+            volume_detail_max_tokens,
+        )
         r1_llm = create_task_llm(
             task_type="volume_detail_expand",
-            max_tokens=64000  # 🔥 明确设置64K输出限制
+            max_tokens=volume_detail_max_tokens,
+            timeout=volume_detail_timeout,
         )
         self.plot_architect_r1 = PlotArchitectAgent(self.knowledge_base, self.memory_manager, llm=r1_llm)
 
-        # 81-100章优先切到 qwen3.5-plus，避免大卷被较紧的输出窗口截断。
+        plus_max_tokens = 32768
+        plus_timeout = estimate_model_timeout_seconds(
+            "qwen3.5-plus",
+            plus_max_tokens,
+        )
         plus_llm = create_task_llm(
             model="qwen3.5-plus",
-            max_tokens=32768,
+            max_tokens=plus_max_tokens,
+            timeout=plus_timeout,
         )
         self.plot_architect_plus = PlotArchitectAgent(self.knowledge_base, self.memory_manager, llm=plus_llm)
 
-        # 大卷场景也固定使用 qwen3.5-plus，严禁回退到 qwen-long
         large_volume_llm = create_task_llm(
             model="qwen3.5-plus",
-            max_tokens=32768,
+            max_tokens=plus_max_tokens,
+            timeout=plus_timeout,
         )
         self.plot_architect_large = PlotArchitectAgent(self.knowledge_base, self.memory_manager, llm=large_volume_llm)
 
-        logger.debug("🎆 单卷扩展使用 DeepSeek-R1 模型（64K超长输出能力）")
-        logger.debug("🎆 单卷扩展在章节上限超过80章时固定切换到 qwen3.5-plus")
+        logger.debug("🚀 协同扩展统一使用 deepseek-v4-pro 模型（384K 超长输出）")
         
         # 🎆 初始化分层摘要器
         self.layered_summarizer = LayeredSummarizer(

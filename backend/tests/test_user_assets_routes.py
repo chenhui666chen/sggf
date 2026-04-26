@@ -5,9 +5,11 @@ from datetime import datetime, timezone
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
+import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -34,6 +36,7 @@ def load_user_assets_module():
         raise RuntimeError("无法加载用户资产路由模块")
 
     module = module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -157,30 +160,37 @@ def create_asset(
     asset_class: str = "reusable",
     title: str = "测试资产",
     description: str | None = None,
-    file_url: str = "https://example.com/assets/demo.png",
-    preview_url: str | None = None,
+    asset_uuid: str | None = None,
+    storage_mode: str = "durable_cloud",
+    source_uri: str = "https://example.com/assets/demo.png",
+    preview_uri: str | None = None,
     model_id: str | None = None,
     generation_mode: str | None = None,
     tags: list[str] | None = None,
     is_favorite: bool = False,
     archived_at: datetime | None = None,
+    metadata_json: dict | None = None,
 ) -> UserAssetRecord:
     db = session_factory()
     try:
+        resolved_asset_uuid = asset_uuid or f"{source_module}-{asset_kind}-{abs(hash((user_id, title, source_uri)))}"
         asset = UserAssetRecord(
             user_id=user_id,
             project_id=project_id,
             source_module=source_module,
             asset_kind=asset_kind,
             asset_class=asset_class,
+            asset_uuid=resolved_asset_uuid,
+            storage_mode=storage_mode,
             title=title,
             description=description,
-            file_url=file_url,
-            preview_url=preview_url or file_url,
+            source_uri=source_uri,
+            preview_uri=preview_uri or source_uri,
+            download_uri=source_uri,
             model_id=model_id,
             generation_mode=generation_mode,
             tags=list(tags or []),
-            metadata_json={},
+            metadata_json=dict(metadata_json or {}),
             source_payload_json={},
             is_favorite=is_favorite,
             archived_at=archived_at,
@@ -198,7 +208,7 @@ def build_auth_headers(user_id: int) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_list_user_assets_only_returns_current_users_active_assets():
+def test_list_user_assets_only_returns_paginated_current_users_active_assets():
     client, session_factory = build_test_client()
     current_user = create_user(session_factory, username="asset_owner", email="asset_owner@example.com")
     other_user = create_user(session_factory, username="other_owner", email="other_owner@example.com")
@@ -206,21 +216,21 @@ def test_list_user_assets_only_returns_current_users_active_assets():
     create_asset(
         session_factory,
         user_id=current_user.id,
-        title="当前用户可见资产",
-        file_url="https://example.com/assets/visible.png",
+        title="visible asset",
+        source_uri="https://example.com/assets/visible.png",
     )
     create_asset(
         session_factory,
         user_id=current_user.id,
-        title="当前用户已归档资产",
-        file_url="https://example.com/assets/archived.png",
+        title="archived asset",
+        source_uri="https://example.com/assets/archived.png",
         archived_at=datetime.now(timezone.utc),
     )
     create_asset(
         session_factory,
         user_id=other_user.id,
-        title="其他用户资产",
-        file_url="https://example.com/assets/other.png",
+        title="other users asset",
+        source_uri="https://example.com/assets/other.png",
     )
 
     response = client.get(
@@ -230,12 +240,126 @@ def test_list_user_assets_only_returns_current_users_active_assets():
 
     assert response.status_code == 200
     payload = response.json()
-    assert len(payload) == 1
-    assert payload[0]["title"] == "当前用户可见资产"
-    assert payload[0]["user_id"] == current_user.id
+    assert payload["total"] == 1
+    assert payload["page"] == 1
+    assert payload["page_size"] == 24
+    assert payload["total_pages"] == 1
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["title"] == "visible asset"
+    assert payload["items"][0]["user_id"] == current_user.id
+    assert payload["summary"] == {
+        "total_assets": 2,
+        "active_asset_count": 1,
+        "archived_asset_count": 1,
+        "favorite_asset_count": 0,
+        "reusable_asset_count": 1,
+        "deliverable_asset_count": 0,
+    }
+    assert payload["filter_options"] == {
+        "asset_kinds": ["image"],
+        "source_modules": ["asset_studio"],
+        "tags": [],
+    }
 
 
-def test_create_user_asset_persists_record_and_uses_file_url_as_preview_by_default():
+def test_list_user_assets_supports_server_side_filters_and_pagination():
+    client, session_factory = build_test_client()
+    current_user = create_user(session_factory, username="paged_owner", email="paged_owner@example.com")
+    other_user = create_user(session_factory, username="paged_other", email="paged_other@example.com")
+
+    create_asset(
+        session_factory,
+        user_id=current_user.id,
+        title="asset final active",
+        source_module="asset_studio",
+        asset_kind="image",
+        asset_class="reusable",
+        source_uri="https://example.com/assets/final-active.png",
+        tags=["final"],
+        is_favorite=True,
+    )
+    create_asset(
+        session_factory,
+        user_id=current_user.id,
+        title="asset final archived",
+        source_module="asset_studio",
+        asset_kind="image",
+        asset_class="reusable",
+        source_uri="https://example.com/assets/final-archived.png",
+        tags=["final"],
+        archived_at=datetime.now(timezone.utc),
+    )
+    create_asset(
+        session_factory,
+        user_id=current_user.id,
+        title="asset hero active",
+        source_module="asset_studio",
+        asset_kind="image",
+        asset_class="reusable",
+        source_uri="https://example.com/assets/hero-active.png",
+        tags=["hero"],
+    )
+    create_asset(
+        session_factory,
+        user_id=current_user.id,
+        title="run final active",
+        source_module="dreamweaver_run",
+        asset_kind="video",
+        asset_class="deliverable",
+        source_uri="https://example.com/assets/run-final.png",
+        tags=["final"],
+    )
+    create_asset(
+        session_factory,
+        user_id=other_user.id,
+        title="other final active",
+        source_module="asset_studio",
+        asset_kind="image",
+        asset_class="reusable",
+        source_uri="https://example.com/assets/other-final.png",
+        tags=["final"],
+        is_favorite=True,
+    )
+
+    response = client.get(
+        "/api/v1/user-assets?source_module=asset_studio&tag=final&archive_filter=all&page=2&page_size=1",
+        headers=build_auth_headers(current_user.id),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 2
+    assert payload["page"] == 2
+    assert payload["page_size"] == 1
+    assert payload["total_pages"] == 2
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["title"] == "asset final archived"
+    assert payload["summary"] == {
+        "total_assets": 4,
+        "active_asset_count": 3,
+        "archived_asset_count": 1,
+        "favorite_asset_count": 1,
+        "reusable_asset_count": 2,
+        "deliverable_asset_count": 1,
+    }
+    assert payload["filter_options"] == {
+        "asset_kinds": ["image", "video"],
+        "source_modules": ["asset_studio", "dreamweaver_run"],
+        "tags": ["final", "hero"],
+    }
+
+    favorites_response = client.get(
+        "/api/v1/user-assets?favorites_only=true&asset_class=reusable",
+        headers=build_auth_headers(current_user.id),
+    )
+
+    assert favorites_response.status_code == 200
+    favorites_payload = favorites_response.json()
+    assert favorites_payload["total"] == 1
+    assert favorites_payload["items"][0]["title"] == "asset final active"
+
+
+def test_create_user_asset_persists_record_and_uses_source_uri_as_preview_and_download_default():
     client, session_factory = build_test_client()
     user = create_user(session_factory, username="asset_writer", email="asset_writer@example.com")
     project = create_project(
@@ -253,9 +377,11 @@ def test_create_user_asset_persists_record_and_uses_file_url_as_preview_by_defau
             "source_module": "asset_studio",
             "asset_kind": "image",
             "asset_class": "reusable",
+            "asset_uuid": "asset-cover-001",
+            "storage_mode": "durable_cloud",
             "title": "封面图",
             "description": "主视觉封面",
-            "file_url": "https://example.com/assets/cover.png",
+            "source_uri": "https://example.com/assets/cover.png",
             "model_id": "demo-image-model",
             "generation_mode": "text_to_image",
             "tags": ["封面", "视觉"],
@@ -266,7 +392,10 @@ def test_create_user_asset_persists_record_and_uses_file_url_as_preview_by_defau
     payload = response.json()
     assert payload["title"] == "封面图"
     assert payload["project_id"] == project.id
-    assert payload["preview_url"] == "https://example.com/assets/cover.png"
+    assert payload["asset_uuid"] == "asset-cover-001"
+    assert payload["source_uri"] == "https://example.com/assets/cover.png"
+    assert payload["preview_uri"] == "https://example.com/assets/cover.png"
+    assert payload["download_uri"] == "https://example.com/assets/cover.png"
     assert payload["tags"] == ["封面", "视觉"]
 
 
@@ -289,8 +418,10 @@ def test_create_user_asset_rejects_project_not_owned_by_current_user():
             "source_module": "asset_studio",
             "asset_kind": "image",
             "asset_class": "reusable",
+            "asset_uuid": "asset-blocked-001",
+            "storage_mode": "durable_cloud",
             "title": "不应收录成功",
-            "file_url": "https://example.com/assets/blocked.png",
+            "source_uri": "https://example.com/assets/blocked.png",
         },
     )
 
@@ -298,7 +429,7 @@ def test_create_user_asset_rejects_project_not_owned_by_current_user():
     assert response.json()["detail"] == "Project not found"
 
 
-def test_create_user_asset_upserts_existing_record_by_source_kind_and_file_url():
+def test_create_user_asset_upserts_existing_record_by_source_kind_and_asset_uuid():
     client, session_factory = build_test_client()
     user = create_user(session_factory, username="upsert_user", email="upsert_user@example.com")
     project = create_project(
@@ -314,9 +445,10 @@ def test_create_user_asset_upserts_existing_record_by_source_kind_and_file_url()
         source_module="asset_studio",
         asset_kind="image",
         asset_class="reusable",
+        asset_uuid="asset-reuse-001",
         title="旧标题",
         description="旧描述",
-        file_url="https://example.com/assets/reuse.png",
+        source_uri="https://example.com/assets/reuse.png",
         tags=["旧标签"],
         is_favorite=False,
     )
@@ -329,10 +461,13 @@ def test_create_user_asset_upserts_existing_record_by_source_kind_and_file_url()
             "source_module": "asset_studio",
             "asset_kind": "image",
             "asset_class": "deliverable",
+            "asset_uuid": "asset-reuse-001",
+            "storage_mode": "local_mirror",
             "title": "新标题",
             "description": "新描述",
-            "file_url": "https://example.com/assets/reuse.png",
-            "preview_url": "https://example.com/assets/reuse-preview.png",
+            "source_uri": "https://example.com/assets/reuse.png",
+            "preview_uri": "https://example.com/assets/reuse-preview.png",
+            "download_uri": "https://example.com/assets/reuse-download.png",
             "tags": ["重点", "海报"],
             "is_favorite": True,
         },
@@ -343,8 +478,10 @@ def test_create_user_asset_upserts_existing_record_by_source_kind_and_file_url()
     assert payload["id"] == existing.id
     assert payload["title"] == "新标题"
     assert payload["asset_class"] == "deliverable"
+    assert payload["storage_mode"] == "local_mirror"
     assert payload["is_favorite"] is True
-    assert payload["preview_url"] == "https://example.com/assets/reuse-preview.png"
+    assert payload["preview_uri"] == "https://example.com/assets/reuse-preview.png"
+    assert payload["download_uri"] == "https://example.com/assets/reuse-download.png"
 
     db = session_factory()
     try:
@@ -352,8 +489,231 @@ def test_create_user_asset_upserts_existing_record_by_source_kind_and_file_url()
         assert len(rows) == 1
         assert rows[0].title == "新标题"
         assert rows[0].tags == ["重点", "海报"]
+        assert rows[0].asset_uuid == "asset-reuse-001"
+        assert rows[0].storage_mode == "local_mirror"
     finally:
         db.close()
+
+
+def test_active_user_asset_identity_is_unique_but_archived_duplicates_are_allowed():
+    _, session_factory = build_test_client()
+    user = create_user(session_factory, username="unique_asset_user", email="unique_asset_user@example.com")
+
+    create_asset(
+        session_factory,
+        user_id=user.id,
+        source_module="asset_studio",
+        asset_kind="image",
+        asset_uuid="asset-unique-001",
+        title="活跃资产",
+        source_uri="https://example.com/assets/unique.png",
+    )
+
+    with pytest.raises(IntegrityError):
+        create_asset(
+            session_factory,
+            user_id=user.id,
+            source_module="asset_studio",
+            asset_kind="image",
+            asset_uuid="asset-unique-001",
+            title="重复活跃资产",
+            source_uri="https://example.com/assets/unique-dup.png",
+        )
+
+    archived = create_asset(
+        session_factory,
+        user_id=user.id,
+        source_module="asset_studio",
+        asset_kind="image",
+        asset_uuid="asset-unique-001",
+        title="归档重复资产",
+        source_uri="https://example.com/assets/unique-archived.png",
+        archived_at=datetime.now(timezone.utc),
+    )
+    assert archived.archived_at is not None
+
+
+def test_create_user_asset_recovers_from_duplicate_insert_race(monkeypatch):
+    client, session_factory = build_test_client()
+    user = create_user(session_factory, username="race_asset_user", email="race_asset_user@example.com")
+
+    original_commit = session_factory.class_.commit
+    race_state = {"triggered": False}
+
+    def commit_with_duplicate_race(self):  # noqa: ANN001
+        pending_asset = next(
+            (
+                item
+                for item in getattr(self, "new", ())
+                if isinstance(item, UserAssetRecord) and item.asset_uuid == "asset-race-001"
+            ),
+            None,
+        )
+        if pending_asset is None or race_state["triggered"]:
+            return original_commit(self)
+
+        race_state["triggered"] = True
+        concurrent_session = session_factory()
+        try:
+            concurrent_asset = UserAssetRecord(
+                user_id=user.id,
+                source_module="asset_studio",
+                asset_kind="image",
+                asset_uuid="asset-race-001",
+                project_id=None,
+                asset_class="reusable",
+                storage_mode="durable_cloud",
+                title="并发写入旧标题",
+                description="旧描述",
+                source_uri="https://example.com/assets/race-existing.png",
+                preview_uri="https://example.com/assets/race-existing.png",
+                download_uri="https://example.com/assets/race-existing.png",
+                tags=["旧标签"],
+                metadata_json={},
+                source_payload_json={},
+                is_favorite=False,
+            )
+            concurrent_session.add(concurrent_asset)
+            original_commit(concurrent_session)
+        finally:
+            concurrent_session.close()
+
+        raise IntegrityError("INSERT INTO user_asset_records ...", {}, Exception("duplicate key"))
+
+    monkeypatch.setattr(session_factory.class_, "commit", commit_with_duplicate_race)
+
+    response = client.post(
+        "/api/v1/user-assets",
+        headers=build_auth_headers(user.id),
+        json={
+            "source_module": "asset_studio",
+            "asset_kind": "image",
+            "asset_class": "deliverable",
+            "asset_uuid": "asset-race-001",
+            "storage_mode": "local_mirror",
+            "title": "并发写入新标题",
+            "description": "新描述",
+            "source_uri": "https://example.com/assets/race-new.png",
+            "preview_uri": "https://example.com/assets/race-new-preview.png",
+            "download_uri": "https://example.com/assets/race-new-download.png",
+            "tags": ["新标签"],
+            "is_favorite": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["asset_uuid"] == "asset-race-001"
+    assert payload["title"] == "并发写入新标题"
+    assert payload["storage_mode"] == "local_mirror"
+    assert payload["is_favorite"] is True
+    assert payload["preview_uri"] == "https://example.com/assets/race-new-preview.png"
+    assert payload["download_uri"] == "https://example.com/assets/race-new-download.png"
+
+    db = session_factory()
+    try:
+        rows = (
+            db.query(UserAssetRecord)
+            .filter(
+                UserAssetRecord.user_id == user.id,
+                UserAssetRecord.source_module == "asset_studio",
+                UserAssetRecord.asset_kind == "image",
+                UserAssetRecord.asset_uuid == "asset-race-001",
+            )
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].title == "并发写入新标题"
+        assert rows[0].description == "新描述"
+        assert rows[0].storage_mode == "local_mirror"
+        assert rows[0].preview_uri == "https://example.com/assets/race-new-preview.png"
+        assert rows[0].download_uri == "https://example.com/assets/race-new-download.png"
+        assert rows[0].tags == ["新标签"]
+        assert rows[0].is_favorite is True
+    finally:
+        db.close()
+
+
+def test_create_user_asset_accepts_local_storage_metadata_contract():
+    client, session_factory = build_test_client()
+    user = create_user(session_factory, username="metadata_user", email="metadata_user@example.com")
+
+    response = client.post(
+        "/api/v1/user-assets",
+        headers=build_auth_headers(user.id),
+        json={
+            "source_module": "asset_studio",
+            "asset_kind": "image",
+            "asset_class": "reusable",
+            "asset_uuid": "asset-meta-001",
+            "storage_mode": "local_mirror",
+            "title": "本地镜像资产",
+            "source_uri": "https://example.com/assets/meta.png",
+            "metadata_json": {
+                "local_storage_driver": "OPFS",
+                "local_storage_path": " local_asset_vault/image/asset-meta-001 ",
+                "local_persist_level": "PERSISTENT_REQUESTED",
+                "extra_flag": True,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["metadata_json"]["local_storage_driver"] == "opfs"
+    assert payload["metadata_json"]["local_storage_path"] == "local_asset_vault/image/asset-meta-001"
+    assert payload["metadata_json"]["local_persist_level"] == "persistent_requested"
+    assert payload["metadata_json"]["extra_flag"] is True
+
+
+def test_create_user_asset_rejects_invalid_local_storage_driver():
+    client, session_factory = build_test_client()
+    user = create_user(session_factory, username="driver_user", email="driver_user@example.com")
+
+    response = client.post(
+        "/api/v1/user-assets",
+        headers=build_auth_headers(user.id),
+        json={
+            "source_module": "asset_studio",
+            "asset_kind": "image",
+            "asset_class": "reusable",
+            "asset_uuid": "asset-invalid-driver-001",
+            "storage_mode": "local_mirror",
+            "title": "非法驱动资产",
+            "source_uri": "https://example.com/assets/invalid-driver.png",
+            "metadata_json": {
+                "local_storage_driver": "nas_share",
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    assert "metadata_json.local_storage_driver" in response.text
+
+
+def test_create_user_asset_rejects_invalid_local_persist_level():
+    client, session_factory = build_test_client()
+    user = create_user(session_factory, username="persist_user", email="persist_user@example.com")
+
+    response = client.post(
+        "/api/v1/user-assets",
+        headers=build_auth_headers(user.id),
+        json={
+            "source_module": "asset_studio",
+            "asset_kind": "image",
+            "asset_class": "reusable",
+            "asset_uuid": "asset-invalid-persist-001",
+            "storage_mode": "local_mirror",
+            "title": "非法持久化级别资产",
+            "source_uri": "https://example.com/assets/invalid-persist.png",
+            "metadata_json": {
+                "local_persist_level": "pinned_forever",
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    assert "metadata_json.local_persist_level" in response.text
 
 
 def test_update_user_asset_supports_favorite_deliverable_and_archive_flags():
@@ -363,7 +723,7 @@ def test_update_user_asset_supports_favorite_deliverable_and_archive_flags():
         session_factory,
         user_id=user.id,
         title="待更新资产",
-        file_url="https://example.com/assets/editable.png",
+        source_uri="https://example.com/assets/editable.png",
     )
 
     archive_response = client.patch(
@@ -405,7 +765,7 @@ def test_update_user_asset_rejects_non_owner_access():
         session_factory,
         user_id=owner.id,
         title="私有资产",
-        file_url="https://example.com/assets/private.png",
+        source_uri="https://example.com/assets/private.png",
     )
 
     response = client.patch(
@@ -425,14 +785,14 @@ def test_batch_update_user_assets_updates_multiple_records_in_one_request():
         session_factory,
         user_id=user.id,
         title="批量资产 A",
-        file_url="https://example.com/assets/batch-a.png",
+        source_uri="https://example.com/assets/batch-a.png",
         tags=["初始"],
     )
     second_asset = create_asset(
         session_factory,
         user_id=user.id,
         title="批量资产 B",
-        file_url="https://example.com/assets/batch-b.png",
+        source_uri="https://example.com/assets/batch-b.png",
         tags=["旧标签"],
     )
 
@@ -482,14 +842,14 @@ def test_batch_update_user_assets_rejects_non_owned_asset_and_keeps_existing_dat
         session_factory,
         user_id=owner.id,
         title="所有者资产",
-        file_url="https://example.com/assets/owner-batch.png",
+        source_uri="https://example.com/assets/owner-batch.png",
         is_favorite=False,
     )
     foreign_asset = create_asset(
         session_factory,
         user_id=intruder.id,
         title="他人资产",
-        file_url="https://example.com/assets/foreign-batch.png",
+        source_uri="https://example.com/assets/foreign-batch.png",
         is_favorite=False,
     )
 

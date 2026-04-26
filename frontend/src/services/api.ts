@@ -14,6 +14,8 @@ import type {
 } from '@/types/settings'
 import type {
   StoryExpansionAnalysisResponse,
+  StoryExpansionRepairRequestPayload,
+  StoryExpansionRepairResponse,
   StoryExpansionRequestPayload,
   StoryExpansionStartResponse,
 } from '@/types/storyExpansion'
@@ -23,6 +25,8 @@ import type {
   RunResult,
   TaskStatus,
 } from '@/types/dreamweaver'
+import { normalizeUserAssetMetadataContract } from '@/contracts/userAssetLocalStorageContract'
+import type { UserAssetMetadata } from '@/types/userAsset'
 
 // 在开发环境中直接连接到后端，不使用Vite代理
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
@@ -229,12 +233,37 @@ export interface UserAssetRecord {
   model_id?: string | null
   generation_mode?: string | null
   tags: string[]
-  metadata_json?: Record<string, any>
+  metadata_json?: UserAssetMetadata
   source_payload_json?: Record<string, any>
   is_favorite: boolean
   archived_at?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface UserAssetListSummary {
+  total_assets: number
+  active_asset_count: number
+  archived_asset_count: number
+  favorite_asset_count: number
+  reusable_asset_count: number
+  deliverable_asset_count: number
+}
+
+export interface UserAssetListFilterOptions {
+  asset_kinds: string[]
+  source_modules: string[]
+  tags: string[]
+}
+
+export interface UserAssetListResponse {
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+  items: UserAssetRecord[]
+  summary: UserAssetListSummary
+  filter_options: UserAssetListFilterOptions
 }
 
 export interface UserAssetRecordCreatePayload {
@@ -256,7 +285,7 @@ export interface UserAssetRecordCreatePayload {
   model_id?: string | null
   generation_mode?: string | null
   tags?: string[]
-  metadata_json?: Record<string, any>
+  metadata_json?: UserAssetMetadata
   source_payload_json?: Record<string, any>
   is_favorite?: boolean
 }
@@ -1437,6 +1466,7 @@ class ApiClient {
     voice_config?: any[]
     tts_model?: string
     generation_mode?: 'full' | 'script_only'
+    narration_style?: string
   }) {
     return this.client.post('/api/v1/audiobook/projects', payload)
   }
@@ -1620,15 +1650,27 @@ class ApiClient {
   listUserAssets(params?: {
     asset_kind?: string
     asset_class?: string
+    source_module?: string
+    tag?: string
     favorites_only?: boolean
     include_archived?: boolean
+    archive_filter?: 'active' | 'archived' | 'all'
+    page?: number
+    page_size?: number
     limit?: number
   }) {
-    return this.client.get<UserAssetRecord[]>('/api/v1/user-assets', { params })
+    return this.client.get<UserAssetListResponse>('/api/v1/user-assets', { params })
   }
 
   createUserAsset(payload: UserAssetRecordCreatePayload) {
-    return this.client.post<UserAssetRecord>('/api/v1/user-assets', payload)
+    const normalizedPayload =
+      payload.metadata_json === undefined
+        ? payload
+        : {
+            ...payload,
+            metadata_json: normalizeUserAssetMetadataContract(payload.metadata_json),
+          }
+    return this.client.post<UserAssetRecord>('/api/v1/user-assets', normalizedPayload)
   }
 
   updateUserAsset(assetId: number, payload: UserAssetRecordUpdatePayload) {
@@ -2118,6 +2160,10 @@ class ApiClient {
 
   expandStory(payload: StoryExpansionRequestPayload) {
     return this.client.post<StoryExpansionStartResponse>('/api/v1/workflow/expand-story', payload)
+  }
+
+  repairExpandStoryScore(payload: StoryExpansionRepairRequestPayload) {
+    return this.client.post<StoryExpansionRepairResponse>('/api/v1/workflow/expand-story/repair-score', payload)
   }
 }
 

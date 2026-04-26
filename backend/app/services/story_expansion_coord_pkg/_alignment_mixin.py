@@ -52,6 +52,7 @@ from app.services.story_expansion_coord_pkg._standalone import (
 logger = logging.getLogger(__name__)
 
 class AlignmentMixin:
+    @staticmethod
     def _collect_new_character_names(existing_characters: str, merged_characters: str) -> List[str]:
         before = {normalize_character_name(name) for name in extract_character_names(existing_characters or "")}
         after_names = extract_character_names(merged_characters or "")
@@ -392,6 +393,80 @@ class AlignmentMixin:
         if outline_text.strip():
             return f"{outline_text.rstrip()}\n\n{repaired_text}", missing_names
         return repaired_text, missing_names
+
+    @staticmethod
+    def _rank_outline_blocks_for_reference_repair(blocks: List[OutlineBlock]) -> List[int]:
+        ranked: List[Tuple[int, int, int]] = []
+
+        for index, block in enumerate(blocks):
+            fields, _ = _extract_outline_body_fields(block.body)
+            involved_value = _normalize_outline_character_list(fields.get("involved_characters", ""))
+            involved_names = [
+                item for item in involved_value.split("、")
+                if item and item != "待补充"
+            ]
+            ranked.append((len(involved_names), -index, index))
+
+        ranked.sort()
+        return [item[2] for item in ranked]
+
+    @classmethod
+    def _repair_outline_character_references(
+        cls,
+        outline_text: str,
+        target_character_names: List[str],
+        *,
+        characters_text: str = "",
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        if not outline_text or not target_character_names:
+            return outline_text or "", []
+
+        prefix, blocks = parse_outline_blocks(outline_text or "")
+        if not blocks:
+            return normalize_outline_text(outline_text or "", characters_text), []
+
+        deduped_names: List[str] = []
+        seen = set()
+        for name in target_character_names:
+            normalized = normalize_character_name(name)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            deduped_names.append(normalized)
+
+        if not deduped_names:
+            return normalize_outline_text(outline_text or "", characters_text), []
+
+        candidate_indexes = cls._rank_outline_blocks_for_reference_repair(blocks)
+        if not candidate_indexes:
+            return normalize_outline_text(outline_text or "", characters_text), []
+
+        repairs: List[Dict[str, Any]] = []
+        for offset, name in enumerate(deduped_names):
+            block_index = candidate_indexes[offset % len(candidate_indexes)]
+            target_block = blocks[block_index]
+            if name in target_block.title or name in target_block.body:
+                continue
+
+            addition_line = f"- 涉及人物：{name}"
+            if target_block.body and target_block.body.strip():
+                target_block.body = f"{target_block.body.rstrip()}\n{addition_line}".rstrip()
+            else:
+                target_block.body = addition_line
+
+            repairs.append(
+                {
+                    "character_name": name,
+                    "chapter_number": int(target_block.original_number or block_index + 1),
+                    "chapter_title": normalize_outline_title(target_block.title) or f"第{int(target_block.original_number or block_index + 1)}章",
+                }
+            )
+
+        repaired_outline = normalize_outline_text(
+            render_outline(prefix, blocks),
+            characters_text,
+        )
+        return repaired_outline, repairs
 
     @staticmethod
     def _select_balanced_round_order(

@@ -90,6 +90,7 @@ from app.services.audiobook.repository import (
 from app.services.audiobook.task_support import (
     build_generation_checkpoint_payload as _build_generation_checkpoint_payload,
     build_task_status_response,
+    enqueue_audiobook_task as _enqueue_audiobook_task,
     enqueue_chapter_runs as _enqueue_chapter_runs,
     ensure_audiobook_points_precheck_passed as _ensure_audiobook_points_precheck_passed,
 )
@@ -136,47 +137,17 @@ async def create_audiobook_project(
         _ensure_audiobook_points_precheck_passed(precheck)
 
     audiobook_project = service.create_audiobook_project(request, prepared=prepared_request)
-    task_record = AudiobookTaskRepository.create_task(
-        db,
-        audiobook_project_id=audiobook_project.id,
-        chapter_id=None,
-        task_type=job_type,
-        total_units=len(request.chapter_ids),
-    )
     tts_model = normalize_model_id(request.tts_model or "qwen3-tts-instruct-flash") or "qwen3-tts-instruct-flash"
-    if job_type == "script_only":
-        signature = celery_app.signature(
-            "audiobook.run_script_only",
-            args=[
-                task_record.id,
-                audiobook_project.id,
-                request.chapter_ids,
-                tts_model,
-                request.force_regenerate_script,
-            ],
-        )
-    else:
-        signature = celery_app.signature(
-            "audiobook.run_full",
-            args=[
-                task_record.id,
-                audiobook_project.id,
-                request.chapter_ids,
-                tts_model,
-            ],
-        )
-    async_result = signature.delay()
-    AudiobookTaskRepository.attach_celery_id(db, task_record.id, async_result.id)
-    _enqueue_chapter_runs(
+    _, async_result = _enqueue_audiobook_task(
         db,
         audiobook_project_id=audiobook_project.id,
         chapter_ids=list(request.chapter_ids or []),
-        run_type=job_type,
-        celery_task_id=async_result.id,
+        job_type=job_type,
         tts_model=tts_model,
         output_format=request.output_format,
         narration_style=request.narration_style,
         narration_style_prompt=request.narration_style_prompt,
+        force_regenerate_script=request.force_regenerate_script,
     )
 
     if job_type != "script_only":
@@ -199,6 +170,109 @@ async def create_audiobook_project(
         "task_type": job_type,
         "message": "有声书生成任务已进入队列",
         "total_chapters": len(request.chapter_ids),
+    }
+
+
+@router.post("/projects/{audiobook_project_id:int}/generate-audio-from-scripts", response_model=dict)
+async def generate_audio_from_scripts(
+    audiobook_project_id: int,
+    request: GenerateAudioFromScriptsRequest,
+    raw_request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """为指定有声书项目按已存在剧本排队生成章节音频。"""
+    audiobook_project = AudiobookProjectRepository.get_by_id(db, audiobook_project_id)
+    if not audiobook_project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="有声书项目不存在")
+
+    project = ProjectRepository.get_user_project(db, current_user.id, audiobook_project.project_id)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限访问")
+
+    requested_chapter_ids = [chapter_id for chapter_id in dict.fromkeys(request.chapter_ids or []) if chapter_id is not None]
+    if not requested_chapter_ids:
+        requested_chapter_ids = [
+            chapter_audio.chapter_id
+            for chapter_audio in db.query(ChapterAudio)
+            .filter(
+                ChapterAudio.audiobook_project_id == audiobook_project_id,
+                ChapterAudio.script_json.isnot(None),
+                ChapterAudio.script_status == "approved",
+                ChapterAudio.deleted_at.is_(None),
+            )
+            .all()
+        ]
+
+    if not requested_chapter_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="没有可生成音频的已审批剧本章节",
+        )
+
+    chapter_audio_rows = (
+        db.query(ChapterAudio)
+        .filter(
+            ChapterAudio.audiobook_project_id == audiobook_project_id,
+            ChapterAudio.chapter_id.in_(requested_chapter_ids),
+            ChapterAudio.deleted_at.is_(None),
+        )
+        .all()
+    )
+    approved_chapter_ids = {
+        chapter_audio.chapter_id
+        for chapter_audio in chapter_audio_rows
+        if chapter_audio.script_json and str(chapter_audio.script_status or "").strip().lower() == "approved"
+    }
+    invalid_chapter_ids = [chapter_id for chapter_id in requested_chapter_ids if chapter_id not in approved_chapter_ids]
+    if invalid_chapter_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"以下章节缺少已审批剧本，无法直接生成音频: {invalid_chapter_ids}",
+        )
+
+    tts_model = normalize_model_id(request.tts_model or "qwen3-tts-instruct-flash") or "qwen3-tts-instruct-flash"
+    precheck = build_audiobook_task_points_precheck(
+        db=db,
+        user_id=current_user.id,
+        project_id=project.id,
+        project_title=project.title,
+        chapter_ids=requested_chapter_ids,
+        tts_provider=audiobook_project.tts_provider or "aliyun",
+    )
+    _ensure_audiobook_points_precheck_passed(precheck)
+
+    _, async_result = _enqueue_audiobook_task(
+        db,
+        audiobook_project_id=audiobook_project_id,
+        chapter_ids=requested_chapter_ids,
+        job_type="audio_from_scripts",
+        tts_model=tts_model,
+        output_format=request.output_format,
+        narration_style=request.narration_style,
+        narration_style_prompt=request.narration_style_prompt,
+    )
+
+    try:
+        record_audiobook_billing_freeze(
+            db=db,
+            actor_user_id=current_user.id,
+            actor_username=current_user.username,
+            audiobook_project_id=audiobook_project_id,
+            chapter_ids=requested_chapter_ids,
+            request_context=raw_request,
+        )
+    except Exception as exc:
+        logger.warning("记录有声书积分冻结失败 audiobook_project_id=%s: %s", audiobook_project_id, exc)
+
+    return {
+        "success": True,
+        "audiobook_project_id": audiobook_project_id,
+        "job_id": async_result.id,
+        "task_type": "audio_from_scripts",
+        "message": "章节音频生成任务已进入队列",
+        "total_chapters": len(requested_chapter_ids),
+        "chapter_ids": requested_chapter_ids,
     }
 
 
@@ -257,7 +331,6 @@ async def get_audiobook_project(
 	                "id": ca.id,
 	                "chapter_id": ca.chapter_id,
 	                "chapter_number": chapter_number_by_id.get(ca.chapter_id),
-	                "task_id": ca.task_id,  # 新增：返回task_id
 	                "audio_path": ca.audio_path,
 	                "duration": ca.duration,
 	                "file_size": ca.file_size,
@@ -347,7 +420,6 @@ async def list_audiobook_projects(
                         "id": ca.id,
                         "chapter_id": ca.chapter_id,
                         "chapter_number": chapter_number_by_id.get(ca.chapter_id),
-                        "task_id": ca.task_id,
                         "audio_path": ca.audio_path,
                         "duration": ca.duration,
                         "file_size": ca.file_size,

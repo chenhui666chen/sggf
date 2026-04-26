@@ -1161,3 +1161,9 @@ def _build_dreamweaver_runtime_config_from_request(request: RunRequest) -> Dict[
     runtime_config["video_config"] = resolve_video_generation_controls(video_cfg)
 
     return runtime_config
+
+
+# routes_run/routes_script/routes_video 等模块依赖 `from ..._helpers import *`
+# 且会直接使用以下划线开头的内部 helper。显式声明 `__all__`，避免这些名字
+# 因 Python 的星号导入规则被静默排除，导致运行期 NameError。
+__all__ = [name for name in globals() if not name.startswith("__")]

@@ -93,6 +93,8 @@ describe('storyExpansionStorage', () => {
       },
       epic_total_volumes: null,
       epic_chapter_range: null,
+      completion_status: undefined,
+      goal_reached: undefined,
       message: undefined,
     })
   })
@@ -141,6 +143,8 @@ describe('storyExpansionStorage', () => {
       expansion_analysis: undefined,
       epic_total_volumes: null,
       epic_chapter_range: null,
+      completion_status: undefined,
+      goal_reached: undefined,
       message: undefined,
     })
   })

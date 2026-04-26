@@ -1,247 +1,207 @@
-# 快速开始指南 - AI痕迹降低方案
+# 快速开始
 
-## 🎯 5分钟快速了解
+这份文档只描述**当前代码主线**的启动方式，不再沿用旧版“AI 痕迹降低方案”说明。当前仓库实际是一套小说创作平台，主线包括：
 
-### 问题
-AI生成的小说显得机械、生硬、缺乏"作者灵魂"
+- 创作首页与编辑工作流
+- Asset Studio 图片 / 视频 / 音频生成
+- DreamWeaver 短剧生成与素材库
+- Audiobook 有声书生成
+- User Assets 本地优先资产归档
+- User Center、Model Catalog、AI Trace、Admin
 
-### 解决方案
-四层精修体系 + 3个核心模块
+## 5 分钟跑起来
 
-### 效果
-将AI生成的文本转化为具有真实感和文学性的作品
+### 1. 安装依赖
 
----
+后端依赖在 `backend/requirements.txt`，不是仓库根目录。
 
-## 📦 3个核心模块
-
-### 1️⃣ AI痕迹降低处理器
-**文件**：`ai_trace_reduction_processor.py`
-**作用**：对生成的文本进行四层精修
-
-**最简单的使用方式**：
-```python
-from ai_trace_reduction_processor import reduce_ai_traces
-
-# 对AI生成的内容进行精修
-original = "这是AI生成的文本..."
-refined = reduce_ai_traces(original)
-print(refined)  # 输出精修后的文本
+```powershell
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r backend/requirements.txt
+cd frontend
+npm install
+cd ..
 ```
 
-**四层精修过程**：
-1. 注入作者灵魂 → 添加价值观和道德立场
-2. 优化叙事结构 → 打破完美情节，引入随机性
-3. 增强对话真实性 → 添加潜台词、打断、废话
-4. 精修语言细节 → 优化词汇、句式、五感
+### 2. 准备环境变量
 
----
-
-### 2️⃣ 作者腔调系统
-**文件**：`author_voice_system.py`
-**作用**：定义和管理作者的独特风格
-
-**最简单的使用方式**：
-```python
-from author_voice_system import create_voice_profile, get_voice_manager
-
-# 创建作者腔调档案（使用预定义模板）
-profile = create_voice_profile(
-    project_id=1,
-    template_name="冷静克制"  # 或 "诗意浪漫" 或 "激情澎湃"
-)
-
-# 获取管理器
-manager = get_voice_manager()
-
-# 将腔调应用到提示词
-enhanced_prompt = manager.apply_voice_to_prompt(original_prompt, profile)
+```powershell
+Copy-Item ".env.example" ".env"
 ```
 
-**3个预定义模板**：
-- **冷静克制**：黑色幽默，质疑权威，相对主义
-- **诗意浪漫**：充满意象，相信美好，强调救赎
-- **激情澎湃**：充满能量，正义必胜，强调成长
+环境变量实际加载顺序由 `backend/app/core/env_loader.py` 决定：
 
-**自定义腔调**：
-```python
-profile = create_voice_profile(
-    project_id=1,
-    custom_config={
-        "narrative_style": "你的风格描述",
-        "value_system": {
-            "人性观": "你的观点",
-            "道德观": "你的观点"
-        },
-        "unique_traits": ["特征1", "特征2"],
-        "forbidden_patterns": ["禁止词1", "禁止词2"]
-    }
-)
+1. 进程环境变量
+2. `backend/.env`
+3. 根目录 `.env`
+
+建议本地开发只维护一份根目录 `.env`。如果同时维护 `backend/.env`，后端会优先吃到它的值。
+
+### 3. 启动 PostgreSQL 与 Redis
+
+后端当前是 PostgreSQL-only，`backend/app/db/base.py` 会拒绝非 PostgreSQL 的 `DATABASE_URL`。
+
+```powershell
+docker compose up -d postgres redis
 ```
 
----
+### 4. 一键启动开发环境
 
-### 3️⃣ 对话真实性模块
-**文件**：`dialogue_authenticity_module.py`
-**作用**：增强对话的真实感和潜台词
-
-**最简单的使用方式**：
-```python
-from dialogue_authenticity_module import optimize_dialogue_rhythm
-
-# 优化对话节奏
-original = "对话内容..."
-optimized = optimize_dialogue_rhythm(original)
-print(optimized)  # 输出优化后的对话
+```powershell
+.\dev.bat
 ```
 
-**对话真实性分析**：
-```python
-from dialogue_authenticity_module import analyze_dialogue_authenticity
+`dev.bat` 会打开 4 个窗口：
 
-# 分析对话的真实性
-result = analyze_dialogue_authenticity(content)
-print(f"真实性评分：{result['authenticity_score']}")
-print(f"问题：{result['issues']}")
-print(f"建议：{result['suggestions']}")
+- FastAPI 后端
+- Celery Worker（`audiobook` 队列）
+- Celery Worker（`dreamweaver` 队列）
+- Vite 前端
+
+默认访问地址：
+
+- 前端：`http://localhost:5173`
+- 后端：`http://127.0.0.1:8000`
+- API 文档：`http://127.0.0.1:8000/docs`
+- 健康检查：`http://127.0.0.1:8000/health`
+
+## 手动启动方式
+
+### 后端
+
+```powershell
+.\.venv\Scripts\activate
+cd backend
+python -m uvicorn app.main:application --host 0.0.0.0 --port 8000 --reload
 ```
 
----
+### Celery Worker
 
-## 🔄 集成到现有工作流程
-
-### 方案A：最小化集成（推荐）
-在 `agent_coordinator.py` 的 `_stage_three_content_creation()` 后添加：
-
-```python
-# 第三阶段：内容创建
-content = self._stage_three_content_creation()
-
-# 新增：应用AI痕迹降低处理
-from ai_trace_reduction_processor import reduce_ai_traces
-content = reduce_ai_traces(content, self.project_context)
-
-# 继续后续阶段...
+```powershell
+.\.venv\Scripts\activate
+cd backend
+celery -A app.celery_app.celery_app worker -P solo -Q audiobook -l info
 ```
 
-### 方案B：完整集成
-1. 在项目初始化时创建作者腔调
-2. 在Prompt中应用腔调
-3. 在内容生成后应用精修
-4. 在质量评审中检查一致性
-
----
-
-## 📊 效果对比
-
-### 使用前
-```
-"她是一位杰出的女性，拥有优美的气质和完美的品格。
-她的眼睛闪闪发光，充满了智慧。
-她说道：'我已经做好了准备。'"
+```powershell
+.\.venv\Scripts\activate
+cd backend
+celery -A app.celery_app.celery_app worker -P solo -Q dreamweaver -l info
 ```
 
-### 使用后
-```
-"她不太像人们期待的那样。有时候她会显得冷漠，
-有时候又过于热情。她的眼神在灯光下显得有些疲惫。
-她停顿了一下，才缓缓说道：'我...我想我已经准备好了。
-不过...'"
-```
+### 前端
 
----
-
-## 🎓 学习路径
-
-### 初级（5分钟）
-1. 阅读本文档
-2. 运行最简单的示例
-
-### 中级（30分钟）
-1. 阅读 `EXECUTION_SUMMARY.md`
-2. 理解四层精修体系
-3. 尝试自定义腔调
-
-### 高级（1小时）
-1. 阅读 `IMPROVEMENT_DETAILED_PLAN.md`
-2. 理解集成点
-3. 修改现有代码
-
----
-
-## ❓ 常见问题
-
-### Q1: 这些模块会影响性能吗？
-**A**: 会有一定影响（每次调用LLM需要额外时间），但可以通过缓存优化。
-
-### Q2: 可以只使用其中某些模块吗？
-**A**: 完全可以！每个模块都是独立的，可以单独使用。
-
-### Q3: 如何自定义作者腔调？
-**A**: 使用 `create_voice_profile()` 的 `custom_config` 参数。
-
-### Q4: 对话优化会改变对话的意思吗？
-**A**: 不会。只改变表达方式，保留核心意思。
-
-### Q5: 如何评估效果？
-**A**: 使用各模块的分析方法（如 `analyze_dialogue_authenticity()`）。
-
----
-
-## 🚀 下一步
-
-### 立即可做
-- [ ] 复制3个新模块到项目
-- [ ] 运行示例代码
-- [ ] 测试效果
-
-### 本周可做
-- [ ] 集成到工作流程
-- [ ] 修改现有Prompt
-- [ ] 进行质量评估
-
-### 本月可做
-- [ ] 创建P2优先级的模块
-- [ ] 优化性能
-- [ ] 完善文档
-
----
-
-## 📞 获取帮助
-
-### 查看详细文档
-- `FINAL_REPORT.md` - 完整分析报告
-- `IMPROVEMENT_DETAILED_PLAN.md` - 详细改进方案
-- `IMPLEMENTATION_ROADMAP.md` - 实施路线图
-
-### 查看源代码
-- 每个模块都有详细的文档字符串
-- 每个方法都有使用示例
-- 查看 `__doc__` 获取帮助
-
-### 示例代码
-```python
-# 查看模块的帮助信息
-from ai_trace_reduction_processor import AITraceReductionProcessor
-help(AITraceReductionProcessor)
-
-# 查看方法的帮助信息
-help(AITraceReductionProcessor.reduce_ai_traces)
+```powershell
+cd frontend
+npm run dev
 ```
 
----
+## 主要页面与模块对照
 
-## ✨ 总结
+### 前端页面
 
-| 模块 | 用途 | 使用难度 | 效果 |
-|------|------|--------|------|
-| ai_trace_reduction_processor | 四层精修 | ⭐ 简单 | ⭐⭐⭐⭐⭐ |
-| author_voice_system | 腔调管理 | ⭐⭐ 中等 | ⭐⭐⭐⭐ |
-| dialogue_authenticity_module | 对话优化 | ⭐⭐ 中等 | ⭐⭐⭐⭐ |
+- `/home`：创作模块首页
+- `/asset-studio`：统一资产生成工作台
+- `/model-catalog`：模型目录中心
+- `/user-center`：用户中心、资产与积分概览
+- `/ai-trace`：AI Trace 页面
+- `/audiobook-dashboard`、`/audiobook/:projectId`：有声书项目
+- `/drama`、`/drama/:projectId`、`/drama/:projectId/library`：DreamWeaver 短剧与素材库
+- `/admin/*`：管理后台
 
-**推荐使用顺序**：
-1. 先用 `reduce_ai_traces()` 快速体验效果
-2. 再用 `create_voice_profile()` 定制风格
-3. 最后用 `optimize_dialogue_rhythm()` 精细调整
+### 后端 API 前缀
 
+- `/api/v1/asset-studio`
+- `/api/v1/dreamweaver`
+- `/api/v1/audiobook`
+- `/api/v1/user-assets`
+- `/api/v1/user-center`
+- `/api/v1/admin`
 
+## 前端请求与代理
+
+当前代码同时存在“直连后端”和“相对路径代理”两种用法：
+
+- `frontend/src/services/api.ts` 默认把 HTTP 请求发到 `http://127.0.0.1:8000`
+- `frontend/src/services/websocket.ts` 默认走当前站点的 `/socket.io`
+- `frontend/vite.config.ts` 已配置代理：
+  - `/api/workflow` -> `/api/v1/workflow`
+  - `/api` -> 后端
+  - `/socket.io` -> 后端 Socket.IO
+
+如果你把 `VITE_API_URL=/api`、`VITE_WS_URL=/socket.io` 写入环境变量，前端会更接近生产反向代理模式。
+
+## 本地优先资产链路
+
+当前用户资产的主线已经不是“服务端永久存大文件”，而是：
+
+1. Asset Studio、DreamWeaver、Audiobook 先产生受控访问结果。
+2. 前端通过 `localAssetVault` 保存本地副本。
+3. 当前本地写入优先级为：
+   - `external_directory`
+   - `opfs`
+   - `legacy IndexedDB blob`
+4. 服务端 `user_asset_records` 保存轻量元数据与来源信息。
+
+关键代码位置：
+
+- `frontend/src/utils/localAssetVault.ts`
+- `backend/app/api/v1/user_assets.py`
+- `backend/app/schemas/user_asset.py`
+- `frontend/src/contracts/userAssetLocalStorageContract.ts`
+
+## 最小验证清单
+
+启动后，至少做下面几项检查：
+
+### 页面检查
+
+- 打开 `http://localhost:5173/home`
+- 进入 `/asset-studio`，确认页面能加载
+- 进入 `/drama`、`/audiobook-dashboard`、`/user-center`
+- 如果有管理员账号，再检查 `/admin/dashboard`
+
+### 服务检查
+
+- 访问 `http://127.0.0.1:8000/health`
+- 打开 `http://127.0.0.1:8000/docs`
+- 观察 `dev.bat` 打开的 2 个 Celery Worker 是否都已连接
+
+### 契约与前端检查
+
+```powershell
+python scripts/generate_user_asset_local_storage_contract.py --check
+python -m pytest backend/tests/test_user_asset_metadata_contract.py -q
+cd frontend
+npm run test
+npm run type-check
+```
+
+## 常见问题
+
+### 1. 为什么不能用 SQLite？
+
+因为 `backend/app/db/base.py` 已经在运行时强制要求 `postgresql://...`。即使历史注释里提过 SQLite，本轮代码已经不支持。
+
+### 2. WebSocket 应该连哪个路径？
+
+当前 Socket.IO 路径是 `/socket.io`，不是旧文档里常见的 `/ws`。
+
+### 3. 为什么前端有时走 8000，有时走 5173 代理？
+
+这取决于你有没有显式设置 `VITE_API_URL` 和 `VITE_WS_URL`：
+
+- 不设置时：API 默认直连 `127.0.0.1:8000`
+- 设为相对路径时：通过 Vite / Nginx 代理转发
+
+### 4. 生产环境能直接用当前默认配置吗？
+
+不能。`docker-compose.yml` 和 `backend/app/core/config.py` 里仍有开发默认密码和密钥占位值，生产环境必须通过环境变量覆盖。
+
+## 相关文档
+
+- `README.md`
+- `docs/LOCAL_FIRST_ASSET_ARCHITECTURE_PLAN_20260419.md`
+- `docs/POSTGRESQL_DEPLOYMENT.md`
+- `DEPLOY_GUIDE.md`

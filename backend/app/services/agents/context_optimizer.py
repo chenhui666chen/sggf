@@ -29,7 +29,7 @@ class ContextOptimizer:
         'qwen-plus': 1000000,   # 100万tokens
         'qwen-turbo': 1000000,  # 100万tokens (Qwen2.5-Turbo)
         'qwen-long': 10000000,  # 1000万tokens
-        'deepseek-r1': 128000,  # 约12.8万tokens
+        'deepseek-v4-pro': 1000000,  # 100万tokens
     }
     
     # 🆕 智能模型选择策略（根据章节数）

@@ -102,7 +102,7 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
                 params[key] = value
 
         timeout = self._build_request_timeout(extra_kwargs.get("timeout"))
-        if timeout is not None and self.spec.constraints.supports_timeout_param:
+        if timeout is not None:
             params["timeout"] = timeout
 
         return params
@@ -280,9 +280,9 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
             )
 
         start_time = time.time()
+        effective_max_tokens = self._normalize_requested_max_tokens(max_tokens)
 
         try:
-            effective_max_tokens = self._normalize_requested_max_tokens(max_tokens)
 
             params = self._build_completion_params(messages, temperature, effective_max_tokens, kwargs)
 
@@ -636,17 +636,17 @@ class QwenTurboAdapter(OpenAICompatibleAdapter):
 
 
 @register_llm_model(
-    model_id="deepseek-reasoner",
-    name="DeepSeek R1",
+    model_id="deepseek-v4-pro",
+    name="DeepSeek V4 Pro",
     provider="deepseek",
     capabilities=["reasoning", "logic", "analysis", "planning"],
     task_types=["worldview", "character", "character_expand", "volume_detail_expand", "structure_plot", "review", "reasoning"],
-    max_context_tokens=64000,
-    max_output_tokens=8192,
-    quality_score=9.0,
+    max_context_tokens=1000000,
+    max_output_tokens=384000,
+    quality_score=9.5,
     avg_latency_seconds=15.0,
-    cost_per_1k_input_tokens=0.014,
-    cost_per_1k_output_tokens=0.014,
+    cost_per_1k_input_tokens=0.012,
+    cost_per_1k_output_tokens=0.024,
     api_key_env="DASHSCOPE_API_KEY",
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     supports_streaming=False,
@@ -654,11 +654,11 @@ class QwenTurboAdapter(OpenAICompatibleAdapter):
     supports_max_retries=False,
     priority=1,
     fallback_models=["qwen3.5-plus"],
-    default_params={"request_model": "deepseek-r1"},
+    default_params={"request_model": "deepseek-v4-pro"},
     tags=["reasoning", "logic"],
 )
-class DeepSeekReasonerAdapter(OpenAICompatibleAdapter):
-    """DeepSeek R1 适配器 - 深度推理模型"""
+class DeepSeekV4ProAdapter(OpenAICompatibleAdapter):
+    """DeepSeek V4 Pro 适配器 - 深度推理模型"""
 
     async def generate(
         self,
@@ -667,7 +667,7 @@ class DeepSeekReasonerAdapter(OpenAICompatibleAdapter):
         max_tokens: Optional[int] = None,
         **kwargs
     ) -> "LLMResult":
-        """生成响应 - R1 特殊处理"""
+        """生成响应 - V4 Pro 特殊处理"""
         from schemas.unified_model_spec import LLMResult
 
         client = self._get_client_for_current_context()
@@ -710,7 +710,7 @@ class DeepSeekReasonerAdapter(OpenAICompatibleAdapter):
             )
 
             logger.debug(
-                f"✅ DeepSeek R1调用成功 | 延迟: {latency:.2f}s | Tokens: {usage.get('total_tokens', 0)}"
+                f"✅ DeepSeek V4 Pro调用成功 | 延迟: {latency:.2f}s | Tokens: {usage.get('total_tokens', 0)}"
             )
 
             return LLMResult(
@@ -729,7 +729,15 @@ class DeepSeekReasonerAdapter(OpenAICompatibleAdapter):
             if error_code in {"network_error", "timeout"}:
                 self._reset_current_context_client(reason=error_code)
 
-            logger.error(f"❌ DeepSeek R1调用失败 | 错误码: {error_code} | 错误: {e}")
+            logger.error(f"❌ DeepSeek V4 Pro调用失败 | 错误码: {error_code} | 错误: {e}")
+
+            logger.error(
+                "DeepSeek V4 Pro调用失败补充信息 | 错误码: %s | 耗时: %.2fs | requested_max_tokens=%s | normalized_max_tokens=%s",
+                error_code,
+                latency,
+                max_tokens,
+                effective_max_tokens,
+            )
 
             return LLMResult(
                 success=False,
@@ -738,6 +746,34 @@ class DeepSeekReasonerAdapter(OpenAICompatibleAdapter):
                 error_code=error_code,
                 latency=latency,
             )
+
+
+@register_llm_model(
+    model_id="deepseek-v4-flash",
+    name="DeepSeek V4 Flash",
+    provider="deepseek",
+    capabilities=["reasoning", "chat", "fast"],
+    task_types=["chat", "rewrite", "fast", "ai_trace", "simple"],
+    max_context_tokens=1000000,
+    max_output_tokens=65536,
+    quality_score=8.5,
+    avg_latency_seconds=2.0,
+    cost_per_1k_input_tokens=0.001,
+    cost_per_1k_output_tokens=0.002,
+    api_key_env="DASHSCOPE_API_KEY",
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    supports_streaming=True,
+    supports_timeout_param=True,
+    supports_max_retries=True,
+    priority=2,
+    fallback_models=["qwen3.5-plus"],
+    default_params={"request_model": "deepseek-v4-flash"},
+    tags=["reasoning", "fast"],
+)
+class DeepSeekV4FlashAdapter(OpenAICompatibleAdapter):
+    """DeepSeek V4 Flash 适配器 - 轻量快速推理模型"""
+
+    pass
 
 
 @register_llm_model(

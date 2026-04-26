@@ -1,0 +1,68 @@
+name: contracts
+
+on:
+  push:
+    paths:
+      - 'frontend/src/contracts/userAssetLocalStorage*'
+      - 'frontend/src/contracts/userAssetLocalStorageContract*'
+      - 'frontend/src/contracts/__tests__/userAssetLocalStorageContract.test.ts'
+      - 'backend/app/schemas/user_asset.py'
+      - 'backend/app/schemas/user_asset_local_storage_contract_generated.py'
+      - 'backend/tests/test_user_asset_metadata_contract.py'
+      - 'backend/requirements-contract.txt'
+      - 'scripts/generate_user_asset_local_storage_contract.py'
+      - '.github/workflows/contracts.yml'
+  pull_request:
+    paths:
+      - 'frontend/src/contracts/userAssetLocalStorage*'
+      - 'frontend/src/contracts/userAssetLocalStorageContract*'
+      - 'frontend/src/contracts/__tests__/userAssetLocalStorageContract.test.ts'
+      - 'backend/app/schemas/user_asset.py'
+      - 'backend/app/schemas/user_asset_local_storage_contract_generated.py'
+      - 'backend/tests/test_user_asset_metadata_contract.py'
+      - 'backend/requirements-contract.txt'
+      - 'scripts/generate_user_asset_local_storage_contract.py'
+      - '.github/workflows/contracts.yml'
+  workflow_dispatch:
+
+jobs:
+  verify-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装后端依赖（仅契约测试所需，锚定 backend/requirements-contract.txt）
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements-contract.txt
+
+      - name: 校验派生产物与 schema 是否同步
+        run: python scripts/generate_user_asset_local_storage_contract.py --check
+
+      - name: 运行后端契约测试
+        run: python -m pytest backend/tests/test_user_asset_metadata_contract.py -q
+
+      - name: 安装前端依赖
+        working-directory: frontend
+        run: npm ci
+
+      - name: 运行前端契约测试
+        working-directory: frontend
+        run: npx vitest run src/contracts/__tests__/userAssetLocalStorageContract.test.ts
+
+      - name: 前端类型检查
+        working-directory: frontend
+        run: npm run type-check

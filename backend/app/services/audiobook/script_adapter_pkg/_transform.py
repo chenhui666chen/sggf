@@ -278,7 +278,7 @@ class TransformMixin:
         try:
             from core.model_resolution import TaskType
             
-            # 使用AUDIOBOOK_SCRIPT任务类型（自动选择deepseek-reasoner）
+            # 使用AUDIOBOOK_SCRIPT任务类型（自动选择deepseek-v4-pro）
             # 剧本转化可能输出很长的JSON数组，需要设置足够大的max_tokens
             max_tokens_value = 32000
             logger.info(f"🔧 [段落转化] 请求 max_tokens: {max_tokens_value}, 段落长度: {len(paragraph)} 字")
@@ -340,7 +340,7 @@ class TransformMixin:
                     # 修复失败，再抛出原始错误
                     raise RuntimeError(f"LLM返回的JSON格式错误: {json_err}")
             
-            # 修复：将中文字段名转换为英文（deepseek-reasoner可能返回中文字段）
+            # 修复：将中文字段名转换为英文（deepseek-v4-pro可能返回中文字段）
             field_mapping = {
                 '类型': 'type',
                 '文本': 'text',

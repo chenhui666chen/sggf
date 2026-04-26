@@ -68,7 +68,7 @@ def test_qwen35_plus_has_adapter_and_outline_expand_routes_to_plus() -> None:
 
     assert resolve_model_for_task("outline_expand", None) == "qwen3.5-plus"
     assert resolve_model_for_task("book_synthesis", None) == "qwen-long"
-    assert resolve_model_for_task("review", None) == "deepseek-reasoner"
+    assert resolve_model_for_task("review", None) == "deepseek-v4-pro"
 
 
 def test_qwen36_plus_has_adapter_for_verification_workflow() -> None:
@@ -94,22 +94,22 @@ def test_story_expansion_routes_only_to_deepseek_and_qwen35_plus() -> None:
     expected_routes = {
         "concept": "qwen3.5-plus",
         "outline_expand": "qwen3.5-plus",
-        "character": "deepseek-reasoner",
-        "character_expand": "deepseek-reasoner",
-        "volume_detail_expand": "deepseek-reasoner",
+        "character": "deepseek-v4-pro",
+        "character_expand": "deepseek-v4-pro",
+        "volume_detail_expand": "deepseek-v4-pro",
     }
 
     for task_type, expected_model in expected_routes.items():
         assert resolve_model_for_task(task_type, None) == expected_model
 
     qwen35_spec = model_hub.registry.get_spec("qwen3.5-plus")
-    deepseek_reasoner_spec = model_hub.registry.get_spec("deepseek-reasoner")
+    deepseek_v4_pro_spec = model_hub.registry.get_spec("deepseek-v4-pro")
     deepseek_chat_spec = model_hub.registry.get_spec("deepseek-chat")
     qwen_max_spec = model_hub.registry.get_spec("qwen3-max")
     qwen_long_spec = model_hub.registry.get_spec("qwen-long")
 
     assert qwen35_spec is not None
-    assert deepseek_reasoner_spec is not None
+    assert deepseek_v4_pro_spec is not None
     assert deepseek_chat_spec is not None
     assert qwen_max_spec is not None
     assert qwen_long_spec is not None

@@ -4,7 +4,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -56,3 +56,15 @@ class UserAssetRecord(Base):
             f"<UserAssetRecord id={self.id} user_id={self.user_id} "
             f"kind={self.asset_kind} asset_uuid={self.asset_uuid}>"
         )
+
+
+Index(
+    "uq_user_asset_records_active_identity",
+    UserAssetRecord.user_id,
+    UserAssetRecord.source_module,
+    UserAssetRecord.asset_kind,
+    UserAssetRecord.asset_uuid,
+    unique=True,
+    sqlite_where=UserAssetRecord.archived_at.is_(None),
+    postgresql_where=UserAssetRecord.archived_at.is_(None),
+)

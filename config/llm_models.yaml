@@ -88,7 +88,7 @@ llm_models:
       - 对话润色、语气统一和风格保持
       - 需要 JSON 输出的创作辅助流程
     limitations:
-      - 并非项目内最强推理模型，严谨审校任务仍优先 deepseek-reasoner
+      - 并非项目内最强推理模型，严谨审校任务仍优先 deepseek-v4-pro
       - 成本高于 qwen-turbo，低价值提取任务不建议优先使用
       - 超长整书上下文处理能力不如 qwen-long
     integration_notes:
@@ -488,7 +488,7 @@ llm_models:
       - 批量低成本预处理任务
     limitations:
       - 复杂创作质量不如 qwen3-max
-      - 严谨推理与多步分析不如 deepseek-reasoner
+      - 严谨推理与多步分析不如 deepseek-v4-pro
       - 在长上下文整书任务中不应替代 qwen-long
     integration_notes:
       - 内部 task_type=entity_extract、summarize 默认优先路由到该模型
@@ -509,8 +509,8 @@ llm_models:
       - chinese
       - alibaba
 
-  - id: deepseek-reasoner
-    name: DeepSeek R1
+  - id: deepseek-v4-pro
+    name: DeepSeek V4 Pro
     provider: deepseek
     model_type: llm
     version: v1
@@ -535,16 +535,18 @@ llm_models:
         description: 适合结构规划、质量评审和策略决策
 
     constraints:
-      max_context_tokens: 128000  # 🔥 官方最新：128K上下文（2025-12-01更新）
-      max_output_tokens: 64000  # 🔥 官方最新：默认32K，最大64K（2025-12-01更新）
+      max_context_tokens: 1000000
+      max_output_tokens: 384000
+      max_thinking_chain_tokens: 393216
       supports_streaming: false
-      supports_function_call: true  # 🔥 官方最新：支持Tool Calls
+      supports_function_call: true
       supports_timeout_param: false
       supports_max_retries: false
       supports_temperature: false
       supports_system_prompt: true
       supports_multi_turn: true
-      supports_json_mode: true  # 🔥 官方最新：支持JSON输出
+      supports_json_mode: true
+      supports_context_caching: true
 
     api_config:
       api_key_env: DASHSCOPE_API_KEY
@@ -552,12 +554,12 @@ llm_models:
       default_timeout: 300
 
     performance:
-      quality_score: 9.0
+      quality_score: 9.5
       avg_latency_seconds: 15.0
       p95_latency_seconds: 45.0
       tokens_per_second: 30
-      cost_per_1k_input_tokens: 0.014
-      cost_per_1k_output_tokens: 0.014
+      cost_per_1k_input_tokens: 0.012
+      cost_per_1k_output_tokens: 0.024
       currency: CNY
 
     routing:
@@ -579,9 +581,9 @@ llm_models:
       enabled: true
 
     default_params:
-      request_model: deepseek-r1
+      request_model: deepseek-v4-pro
 
-    summary: 项目中的高强度推理模型。DeepSeek 官方文档将 Reasoner 系列定位为强化推理模型，适合复杂分析、数学逻辑和多步骤决策；项目中主要承担结构审校、人物逻辑和质量复审。
+    summary: 项目中的高强度推理模型。DeepSeek V4 Pro 定位于强化推理模型，适合复杂分析、数学逻辑和多步骤决策；项目中主要承担结构审校、人物逻辑和质量复审。
     recommended_scenarios:
       - 世界观规则设计
       - 人物逻辑与动机审校
@@ -607,6 +609,96 @@ llm_models:
     tags:
       - reasoning
       - logic
+      - deepseek
+
+  - id: deepseek-v4-flash
+    name: DeepSeek V4 Flash
+    provider: deepseek
+    model_type: llm
+    version: v1
+    status: active
+
+    capabilities:
+      - name: reasoning
+        level: native
+        score: 0.88
+        description: 轻量级推理能力，适合快速分析
+      - name: chat
+        level: native
+        score: 0.85
+        description: 适合日常对话和多轮交互
+      - name: fast
+        level: native
+        score: 0.9
+        description: 极低延迟，适合快速响应场景
+
+    constraints:
+      max_context_tokens: 1000000
+      max_output_tokens: 65536
+      supports_streaming: true
+      supports_function_call: true
+      supports_timeout_param: true
+      supports_max_retries: true
+      supports_temperature: true
+      supports_system_prompt: true
+      supports_multi_turn: true
+      supports_json_mode: true
+      supports_context_caching: true
+
+    api_config:
+      api_key_env: DASHSCOPE_API_KEY
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      default_timeout: 60
+
+    performance:
+      quality_score: 8.5
+      avg_latency_seconds: 2.0
+      p95_latency_seconds: 5.0
+      tokens_per_second: 60
+      cost_per_1k_input_tokens: 0.001
+      cost_per_1k_output_tokens: 0.002
+      currency: CNY
+
+    routing:
+      task_types:
+        - chat
+        - rewrite
+        - fast
+        - ai_trace
+        - simple
+      priority: 2
+      fallback_models:
+        - qwen3.5-plus
+      enabled: true
+
+    default_params:
+      request_model: deepseek-v4-flash
+
+    summary: 项目中的轻量快速推理模型。DeepSeek V4 Flash 定位于高性价比快速推理，适合需要推理能力但对延迟敏感的场景。
+    recommended_scenarios:
+      - 快速对话和交互
+      - AI 痕迹处理
+      - 轻量级逻辑分析和推理
+      - 需要低延迟的实时交互
+    limitations:
+      - 深度推理质量不如 deepseek-v4-pro
+      - 长文本生成质量略低于 V4 Pro
+    integration_notes:
+      - 内部 task_type=fast、ai_trace、simple 等优先使用
+      - 适合作为统一中心中的"快速推理通道模型"
+      - 与 deepseek-v4-pro 形成质量/速度互补关系
+    best_practice_tips:
+      - 快速响应任务首选
+      - 成本极低，适合作为高频调用模型
+      - AI 痕迹处理与快速改写推荐使用
+    documentation_url: https://help.aliyun.com/zh/model-studio/deepseek-api
+    source_urls:
+      - https://help.aliyun.com/zh/model-studio/deepseek-api
+      - https://help.aliyun.com/zh/model-studio/models
+
+    tags:
+      - reasoning
+      - fast
       - deepseek
 
   - id: deepseek-chat
@@ -673,7 +765,7 @@ llm_models:
       - 日常对话与低延迟交互
       - 轻量创作辅助与说明文整理
     limitations:
-      - 深度推理、严格逻辑评审不如 deepseek-reasoner
+      - 深度推理、严格逻辑评审不如 deepseek-v4-pro
       - 最终文学性正文质量一般不应替代 qwen3-max
       - 长篇整体上下文能力不应替代 qwen-long
     integration_notes:

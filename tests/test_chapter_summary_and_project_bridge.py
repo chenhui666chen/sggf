@@ -91,6 +91,99 @@ def test_get_or_generate_summary_can_force_regenerate(monkeypatch: pytest.Monkey
     assert save_calls == [(2, generated_summary)]
 
 
+def test_parse_summary_result_extracts_extended_structured_fields() -> None:
+    summarizer = _make_bare_summarizer()
+    summary_text = """【核心事件摘要】
+林舟与顾晚潜入书库确认旧卷去向，途中遭遇守卫逼近。顾晚负责转移注意，林舟带着旧卷从密道撤离，最终确认密道另一端已经有人先一步进入。
+
+【场景目标】
+潜入书库查卷并确认密道是否仍可通行。
+
+【关键人物】
+- 林舟：潜入书库并带走旧卷
+- 顾晚：临时分散守卫注意
+
+【核心事件】
+- 潜入书库并锁定旧卷位置
+- 守卫巡查逼近，顾晚临时应变
+- 林舟带着旧卷撤入密道
+
+【重要地点】
+- 旧书库：查卷与冲突发生地点
+- 密道：撤离与新线索出现地点
+
+【冲突弧】
+- 触发：守卫巡查逼近
+- 升级：顾晚必须强行拖住守卫
+- 结果：林舟险逃，但确认密道已有异动
+
+【情绪曲线】
+压抑→紧绷→脱险未稳
+
+【高光设计】
+- 类型：reveal
+- 描述：密道尽头传来并不属于两人的脚步声
+
+【本章收获】
+- 人物收获：林舟对顾晚的信任明显提升
+- 剧情推进：确认旧卷和密道线索已经汇合
+
+【情节推进】
+旧卷线与密道线正式并轨，幕后势力提前介入。
+
+【结尾钩子】
+- 类型：suspense
+- 内容：密道深处传来更近的脚步声
+
+【悬念/伏笔】
+- 先一步进入密道的人是谁
+- 旧卷缺页是否已被对方带走
+"""
+
+    parsed = ChapterSummarizer._parse_summary_result(summarizer, summary_text)
+
+    assert parsed["scene_goal"] == "潜入书库查卷并确认密道是否仍可通行。"
+    assert parsed["appearing_characters"] == ["林舟", "顾晚"]
+    assert parsed["conflict_arc"]["trigger"] == "守卫巡查逼近"
+    assert parsed["highlight"]["type"] == "reveal"
+    assert parsed["gains"]["plot_progress"] == "确认旧卷和密道线索已经汇合"
+    assert parsed["ending_hook"]["content"] == "密道深处传来更近的脚步声"
+    assert "先一步进入密道的人是谁" in parsed["foreshadowing"]
+    assert parsed["hooks"][0] == "密道深处传来更近的脚步声"
+
+
+def test_build_summary_payload_enriches_chapter_assets() -> None:
+    summarizer = _make_bare_summarizer()
+    payload = ChapterSummarizer._build_summary_payload(
+        summarizer,
+        {
+            "chapter_number": 12,
+            "chapter_title": "迷雾重重",
+            "full_summary": "完整摘要",
+            "core_summary": "林舟与顾晚潜入书库并带走旧卷。",
+            "scene_goal": "潜入书库查卷",
+            "key_characters": ["林舟：潜入者", "顾晚：支援者"],
+            "appearing_characters": ["林舟", "顾晚"],
+            "key_events": ["潜入书库", "取得旧卷"],
+            "key_locations": ["书库", "密道"],
+            "conflict_arc": {"trigger": "守卫逼近", "result": "险逃"},
+            "emotion_curve": "潜伏→紧张→脱险",
+            "highlight": {"type": "reveal", "description": "密道异响"},
+            "gains": {"character_gains": "信任提升", "plot_progress": "锁定密道"},
+            "plot_advancement": "旧卷线索推进到密道。",
+            "ending_hook": {"type": "suspense", "content": "密道深处传来脚步声"},
+            "foreshadowing": ["先一步进入密道的人是谁"],
+            "hooks": ["密道深处传来脚步声"],
+        },
+    )
+
+    assert payload["scene_goal"] == "潜入书库查卷"
+    assert payload["appearing_characters"] == ["林舟", "顾晚"]
+    assert payload["ending_hook"]["content"] == "密道深处传来脚步声"
+    assert payload["audio_adaptation_hint"]["voice_cast"] == ["林舟", "顾晚"]
+    assert payload["drama_adaptation_hint"]["scene_objective"] == "潜入书库查卷"
+
+
 class _FakeQuery:
     def __init__(self, items):
         self._items = list(items)

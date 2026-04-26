@@ -32,10 +32,34 @@ from app.api.v1.workflow.schemas import *
 from app.api.v1.workflow.helpers import *
 from app.api.v1.workflow.story_helpers import *
 from app.api.v1.workflow.story_resolve import *
+from app.api.v1.workflow.story_helpers import (
+    _build_task_start_response,
+    _create_story_expansion_history_record,
+    _enqueue_story_expansion_task,
+    _ensure_project_owned,
+    _normalize_story_request_text_fields,
+)
+from app.api.v1.workflow.story_resolve import (
+    _build_story_expansion_analysis,
+    _build_story_written_chapter_preview,
+    _estimate_character_count_from_text,
+    _estimate_chapter_count_from_text,
+    _normalize_story_character_sync_result,
+    _normalize_story_result_outline_ops,
+    _prepare_story_execution_request,
+    _resolve_story_epic_config,
+    _resolve_story_result_count,
+    _select_story_character_sync_source,
+    _update_story_expansion_history_record,
+    _validate_expand_story_request,
+    _validate_story_framework_mode_switch,
+)
 
 from app.schemas.story_expansion import (
     StoryExpansionAnalysisPayload,
     StoryExpansionAnalysisRouteResponse,
+    StoryExpansionRepairRequest,
+    StoryExpansionRepairResponse,
     StoryExpansionStartResponse,
     StoryExpansionTaskResultResponse,
 )
@@ -158,6 +182,40 @@ async def get_epic_framework_state(
         )
 
 
+def _build_story_score_repair_messages(repairs: List[Dict[str, Any]]) -> List[str]:
+    messages: List[str] = []
+    for item in repairs:
+        name = str(item.get("character_name") or "").strip()
+        chapter_number = int(item.get("chapter_number") or 0)
+        if not name:
+            continue
+
+        chapter_label = f"第{chapter_number}章" if chapter_number > 0 else "当前章节"
+        messages.append(f"{chapter_label}已补入人物 {name} 的章节承接。")
+
+    return list(dict.fromkeys(messages))
+
+
+def _sync_story_repaired_outline_to_vector(project_id: int, plot_outline: str) -> None:
+    if not plot_outline or not plot_outline.strip():
+        return
+
+    try:
+        from app.services.vector_sync import sync_to_vector_db
+
+        sync_to_vector_db(
+            kb_type="plot",
+            name=f"project_{project_id}_plot_outline",
+            content=plot_outline,
+            metadata={
+                "project_id": str(project_id),
+                "type": "plot_outline",
+            },
+        )
+    except Exception as vector_error:
+        logger.warning(f"⚠️ 评分修复后同步向量库失败: {vector_error}")
+
+
 @router.post("/expand-story/analysis", response_model=StoryExpansionAnalysisRouteResponse)
 async def analyze_expand_story(
     request: ExpandStoryRequest,
@@ -207,6 +265,189 @@ async def analyze_expand_story(
         raise
     except Exception as e:
         logger.error(f"❌ 协同扩展预检分析失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+
+
+@router.post("/expand-story/repair-score", response_model=StoryExpansionRepairResponse)
+async def repair_expand_story_score(
+    request: StoryExpansionRepairRequest,
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """修复当前协同结果里导致评分下降的人物承接缺口，不启动新一轮协同扩展。"""
+    try:
+        _ensure_project_owned(request.project_id, current_user.id, db)
+
+        from app.services.story_expansion_coordinator import (
+            StoryExpansionCoordinator,
+            evaluate_story_coordination,
+        )
+
+        context_builder = WorkflowContextBuilder(db)
+        stage_context = context_builder.load_stage_text_context(request.project_id)
+        epic_framework_state = context_builder.load_epic_framework_state(request.project_id)
+
+        characters_text = (stage_context.characters or "").strip()
+        current_plot_outline = (
+            stage_context.plot_outline
+            or epic_framework_state.plot_outline
+            or epic_framework_state.epic_framework
+            or ""
+        ).strip()
+        if not current_plot_outline:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="当前项目缺少可修复的大纲内容",
+            )
+        if not characters_text:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="当前项目缺少人物设定，无法执行评分修复",
+            )
+
+        validation_before = evaluate_story_coordination(current_plot_outline, characters_text)
+        target_character_names = list(validation_before.get("unreferenced_characters") or [])
+
+        repaired_outline = current_plot_outline
+        repaired_outline_delta = ""
+        repair_records: List[Dict[str, Any]] = []
+        update_fields: Dict[str, Any] = {}
+        repair_scope = str(request.story_expansion_mode or "total").strip() or "total"
+        epic_total_volumes: Optional[int] = None
+
+        if repair_scope == "volume_detail" and request.volume_index:
+            from app.services.outline_merger import (
+                get_volume_state,
+                merge_volumes_to_outline,
+                parse_epic_volumes_json,
+                update_volume_detail,
+            )
+
+            volumes_data = parse_epic_volumes_json(epic_framework_state.epic_volumes_detail or "")
+            volume_entry = (
+                (volumes_data.get("volumes") or {}).get(str(request.volume_index))
+                if isinstance(volumes_data, dict)
+                else None
+            )
+            detail_content = str((volume_entry or {}).get("detail") or "").strip()
+            if not detail_content:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="当前卷缺少可修复的细纲内容",
+                )
+
+            repaired_detail, repair_records = StoryExpansionCoordinator._repair_outline_character_references(
+                detail_content,
+                target_character_names,
+                characters_text=characters_text,
+            )
+            if repair_records:
+                chapter_range = list((volume_entry or {}).get("chapters_range") or [0, 0])
+                volumes_data = update_volume_detail(
+                    volumes_data,
+                    int(request.volume_index),
+                    repaired_detail,
+                    chapter_range,
+                )
+                repaired_outline = merge_volumes_to_outline(volumes_data)
+                repaired_outline_delta = repaired_detail
+                update_fields.update(
+                    {
+                        "plot_outline": repaired_outline,
+                        "epic_volumes_detail": json.dumps(volumes_data, ensure_ascii=False),
+                    }
+                )
+                epic_total_volumes = int(get_volume_state(volumes_data).get("totalVolumes") or 0)
+        else:
+            repair_source_outline = (
+                epic_framework_state.epic_framework.strip()
+                if repair_scope == "epic_framework" and epic_framework_state.epic_framework
+                else current_plot_outline
+            )
+            repaired_outline, repair_records = StoryExpansionCoordinator._repair_outline_character_references(
+                repair_source_outline,
+                target_character_names,
+                characters_text=characters_text,
+            )
+            repaired_outline_delta = StoryExpansionCoordinator._extract_outline_delta_text(
+                repair_source_outline,
+                repaired_outline,
+            )
+            if repair_records:
+                update_fields["plot_outline"] = repaired_outline
+                if repair_scope == "epic_framework" and epic_framework_state.epic_framework:
+                    update_fields["epic_framework"] = repaired_outline
+
+        if update_fields:
+            context_builder.update_project_settings_fields(request.project_id, **update_fields)
+            _sync_story_repaired_outline_to_vector(request.project_id, repaired_outline)
+
+        validation_after = evaluate_story_coordination(repaired_outline, characters_text)
+        alignment_repairs = _build_story_score_repair_messages(repair_records)
+        remaining_unreferenced = list(validation_after.get("unreferenced_characters") or [])
+        alignment_warnings = (
+            [f"仍有未完成承接的人物：{'、'.join(remaining_unreferenced[:5])}"]
+            if remaining_unreferenced
+            else []
+        )
+
+        if repair_records:
+            coordination_summary = (
+                f"已针对协同评分下降项补齐 {len(repair_records)} 处人物承接，"
+                f"评分 {validation_before.get('score', 0)} → {validation_after.get('score', 0)}。"
+            )
+            message = "协同评分下降项已完成定向修复"
+        elif target_character_names:
+            coordination_summary = "已尝试修复评分下降项，但当前大纲中没有可安全补入的章节字段。"
+            message = "当前评分下降项暂未产生可落地修复"
+        else:
+            coordination_summary = "当前结果没有发现可直接修复的人物承接缺口。"
+            message = "当前协同结果无需执行评分修复"
+
+        result_payload = StoryExpansionTaskResultResponse.model_validate(
+            {
+                "expanded_outline": repaired_outline,
+                "all_characters": characters_text,
+                "outline_delta": repaired_outline_delta or "",
+                "character_delta": "",
+                "character_relationships": "",
+                "outline_ops": [],
+                "execution_mode": "repair",
+                "execution_mode_reason": "定向修复当前协同结果中的人物承接缺口，不新增章节或人物。",
+                "execution_rounds": [],
+                "new_characters": [],
+                "alignment_repairs": alignment_repairs,
+                "story_strategy": "auto",
+                "story_intent": "balanced",
+                "story_expansion_mode": repair_scope,
+                "story_preserve_written_mode": "extract_extend",
+                "coordination_summary": coordination_summary,
+                "current_chapter_count": validation_after.get("chapter_count"),
+                "target_chapter_count": validation_after.get("chapter_count"),
+                "current_character_count": validation_after.get("character_count"),
+                "target_character_count": validation_after.get("character_count"),
+                "validation_before": validation_before,
+                "validation_after": validation_after,
+                "alignment_warnings": alignment_warnings,
+                "epic_total_volumes": epic_total_volumes,
+                "message": message,
+            }
+        )
+
+        return StoryExpansionRepairResponse.model_validate(
+            {
+                "success": True,
+                "result": result_payload,
+                "message": message,
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 协同评分修复失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
@@ -550,6 +791,19 @@ async def execute_expand_story_task(
 
         before_stats = result.get("validation_before") or {}
         after_stats = result.get("validation_after") or {}
+        # 起始计数与最终计数保持同一解析口径，避免框架大纲下 validation_before 低估。
+        initial_chapter_count = _resolve_story_result_count(
+            reported_count=prepared_request.current_chapter_count,
+            parsed_count=_estimate_chapter_count_from_text(prepared_request.current_outline or ""),
+            validation_count=before_stats.get("chapter_count"),
+            fallback_count=current_chapter_count,
+        )
+        initial_character_count = _resolve_story_result_count(
+            reported_count=prepared_request.current_character_count,
+            parsed_count=_estimate_character_count_from_text(prepared_request.characters or ""),
+            validation_count=before_stats.get("character_count"),
+            fallback_count=current_character_count,
+        )
         final_chapter_count = _resolve_story_result_count(
             reported_count=result.get("current_chapter_count"),
             parsed_count=_estimate_chapter_count_from_text(result.get("plot_outline", "")),
@@ -567,6 +821,59 @@ async def execute_expand_story_task(
         alignment_warnings.extend(character_sync_warnings)
         alignment_warnings = list(dict.fromkeys(str(item).strip() for item in alignment_warnings if str(item).strip()))
         result_plan = result.get("plan") or {}
+        target_chapter_count = (
+            result_plan.get("target_chapter_count")
+            or effective_target_total_chapters
+            or target_total_chapters
+            or final_chapter_count
+        )
+        target_character_count = (
+            result_plan.get("target_character_count")
+            or effective_target_total_characters
+            or target_total_characters
+            or final_character_count
+        )
+        goal_reached = (
+            final_chapter_count >= int(target_chapter_count or 0)
+            and final_character_count >= int(target_character_count or 0)
+        )
+        stop_reasons = list(
+            dict.fromkeys(
+                str(item).strip()
+                for item in (result.get("stop_reasons") or [])
+                if str(item).strip()
+            )
+        )
+        pending_parts: list[str] = []
+        if final_chapter_count < int(target_chapter_count or 0):
+            chapter_gap = int(target_chapter_count or 0) - final_chapter_count
+            pending_parts.append(f"章节尚差 {chapter_gap} 章")
+            stop_reasons.append(f"章节尚差 {chapter_gap} 章，需继续发起下一次协同。")
+        if final_character_count < int(target_character_count or 0):
+            character_gap = int(target_character_count or 0) - final_character_count
+            pending_parts.append(f"人物尚差 {character_gap} 人")
+            stop_reasons.append(f"人物尚差 {character_gap} 人，需继续发起下一次协同。")
+        stop_reasons = list(dict.fromkeys(stop_reasons))
+        completion_status = "completed" if goal_reached else "partial"
+        coordination_summary = str(result.get("coordination_summary") or "").strip()
+        if pending_parts:
+            partial_summary = f"本次协同已完成当前可确认增量，{'，'.join(pending_parts)}。"
+            if not coordination_summary:
+                coordination_summary = partial_summary
+            elif all(keyword not in coordination_summary for keyword in ("阶段性", "尚差", "继续发起下一次协同")):
+                coordination_summary = f"{partial_summary} {coordination_summary}"
+        task_message = (
+            f"✅ 协同拓展完成！章节 {initial_chapter_count}"
+            f" → {final_chapter_count}，人物 {initial_character_count}"
+            f" → {final_character_count}"
+            if goal_reached
+            else (
+                f"⚠️ 协同拓展已阶段性完成：章节 {initial_chapter_count}"
+                f" → {final_chapter_count}，人物 {initial_character_count}"
+                f" → {final_character_count}"
+                f"；{'，'.join(pending_parts)}"
+            )
+        )
 
         task_result_payload = StoryExpansionTaskResultResponse.model_validate(
             {
@@ -588,34 +895,22 @@ async def execute_expand_story_task(
                 "written_chapter_context": written_chapter_context,
                 "volume_index": result.get("volume_index"),
                 "volume_chapter_range": result.get("volume_chapter_range"),
-                "coordination_summary": result.get("coordination_summary", ""),
+                "coordination_summary": coordination_summary,
                 "current_chapter_count": final_chapter_count,
-                "target_chapter_count": (
-                    result_plan.get("target_chapter_count")
-                    or effective_target_total_chapters
-                    or target_total_chapters
-                    or final_chapter_count
-                ),
+                "target_chapter_count": target_chapter_count,
                 "current_character_count": final_character_count,
-                "target_character_count": (
-                    result_plan.get("target_character_count")
-                    or effective_target_total_characters
-                    or target_total_characters
-                    or final_character_count
-                ),
+                "target_character_count": target_character_count,
                 "validation_before": before_stats,
                 "validation_after": after_stats,
                 "alignment_warnings": alignment_warnings,
                 "character_sync": normalized_character_sync,
-                "stop_reasons": result.get("stop_reasons", []),
+                "stop_reasons": stop_reasons,
                 "expansion_analysis": analysis,
                 "epic_total_volumes": result.get("epic_total_volumes"),
                 "epic_chapter_range": result.get("epic_chapter_range"),
-                "message": (
-                    f"✅ 协同拓展完成！章节 {before_stats.get('chapter_count', prepared_request.current_chapter_count)}"
-                    f" → {final_chapter_count}，人物 {before_stats.get('character_count', current_character_count)}"
-                    f" → {final_character_count}"
-                ),
+                "completion_status": completion_status,
+                "goal_reached": goal_reached,
+                "message": task_message,
             }
         ).model_dump(mode="python", exclude_none=True)
 

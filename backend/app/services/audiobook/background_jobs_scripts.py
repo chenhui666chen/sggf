@@ -278,7 +278,6 @@ async def generate_audiobook_scripts_background(
                     )
                     db.add(chapter_audio)
 
-                chapter_audio.task_id = result.get("task_id")
                 stats = result.get("stats", {})
                 parse_stats = stats.get("parse_stats", {})
 

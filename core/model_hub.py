@@ -188,12 +188,20 @@ class ModelHub:
         if not self.registry._is_available(model_id):
             fallback_id = self._select_fallback_model(spec, attempted)
             if fallback_id:
+                fallback_max_tokens = self._normalize_max_tokens_for_model(fallback_id, max_tokens)
+                self._log_fallback_model_switch(
+                    source_model=model_id,
+                    target_model=fallback_id,
+                    reason="model_unavailable",
+                    requested_max_tokens=max_tokens,
+                    fallback_max_tokens=fallback_max_tokens,
+                )
                 logger.warning(f"⚠️ 模型 {model_id} 不可用，切换到回退模型 {fallback_id}")
                 return await self._execute_call(
                     model_id=fallback_id,
                     messages=messages,
                     temperature=temperature,
-                    max_tokens=max_tokens,
+                    max_tokens=fallback_max_tokens,
                     stream=stream,
                     on_chunk=on_chunk,
                     attempted_models=attempted,
@@ -303,7 +311,7 @@ class ModelHub:
                     await asyncio.sleep(wait_time)
 
         # 内容安全回退链路：换用不同安全策略的模型重试
-        _CONTENT_SAFETY_FALLBACK_CHAIN = ["deepseek-reasoner", "qwen3.5-plus"]
+        _CONTENT_SAFETY_FALLBACK_CHAIN = ["deepseek-v4-pro", "qwen3.5-plus"]
         if last_result and last_result.error_code == "content_safety":
             tried = set(attempted)
             strip_kwargs = {k: v for k, v in kwargs.items() if k != "max_retries"}
@@ -314,11 +322,19 @@ class ModelHub:
                 logger.warning(
                     f"⚠️ 模型 {model_id} 触发内容安全审查，尝试换用 {alt_id} 重试"
                 )
+                alt_max_tokens = self._normalize_max_tokens_for_model(alt_id, max_tokens)
+                self._log_fallback_model_switch(
+                    source_model=model_id,
+                    target_model=alt_id,
+                    reason="content_safety",
+                    requested_max_tokens=max_tokens,
+                    fallback_max_tokens=alt_max_tokens,
+                )
                 alt_result = await self._execute_call(
                     model_id=alt_id,
                     messages=messages,
                     temperature=temperature,
-                    max_tokens=max_tokens,
+                    max_tokens=alt_max_tokens,
                     stream=stream,
                     on_chunk=on_chunk,
                     attempted_models=tried,
@@ -331,12 +347,20 @@ class ModelHub:
 
         fallback_id = self._select_fallback_model(spec, attempted)
         if fallback_id:
+            fallback_max_tokens = self._normalize_max_tokens_for_model(fallback_id, max_tokens)
+            self._log_fallback_model_switch(
+                source_model=model_id,
+                target_model=fallback_id,
+                reason=(last_result.error_code if last_result else "call_failed"),
+                requested_max_tokens=max_tokens,
+                fallback_max_tokens=fallback_max_tokens,
+            )
             logger.warning(f"⚠️ 模型 {model_id} 调用失败，尝试回退模型 {fallback_id}")
             return await self._execute_call(
                 model_id=fallback_id,
                 messages=messages,
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_tokens=fallback_max_tokens,
                 stream=stream,
                 on_chunk=on_chunk,
                 attempted_models=attempted,
@@ -440,6 +464,55 @@ class ModelHub:
 
         return None
 
+    def _normalize_max_tokens_for_model(
+        self,
+        model_id: str,
+        max_tokens: Optional[int],
+    ) -> Optional[int]:
+        normalized = self._safe_positive_int(max_tokens)
+        if normalized is None:
+            return max_tokens
+
+        spec = self.registry.get_spec(model_id)
+        if spec is None:
+            return normalized
+
+        model_limit = self._safe_positive_int(
+            getattr(spec.constraints, "max_output_tokens", None),
+        )
+        if model_limit is None:
+            return normalized
+
+        return min(normalized, model_limit)
+
+    def _log_fallback_model_switch(
+        self,
+        *,
+        source_model: str,
+        target_model: str,
+        reason: str,
+        requested_max_tokens: Optional[int],
+        fallback_max_tokens: Optional[int],
+    ) -> None:
+        if requested_max_tokens != fallback_max_tokens:
+            logger.warning(
+                "Fallback max_tokens normalized | from=%s to=%s reason=%s requested_max_tokens=%s normalized_max_tokens=%s",
+                source_model,
+                target_model,
+                reason,
+                requested_max_tokens,
+                fallback_max_tokens,
+            )
+            return
+
+        logger.warning(
+            "Fallback model switch | from=%s to=%s reason=%s max_tokens=%s",
+            source_model,
+            target_model,
+            reason,
+            fallback_max_tokens,
+        )
+
     def _increase_retry_timeout_budget(
         self,
         spec: "UnifiedModelSpec",
@@ -447,9 +520,6 @@ class ModelHub:
         *,
         max_tokens: Optional[int],
     ) -> tuple[Optional[int], Optional[int]]:
-        if not spec.constraints.supports_timeout_param:
-            return None, None
-
         previous_timeout = self._safe_positive_int(kwargs.get("timeout"))
         if previous_timeout is None:
             previous_timeout = self._safe_positive_int(spec.api_config.default_timeout) or 120

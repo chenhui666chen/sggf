@@ -13,6 +13,7 @@ from ..script_adapter import AudiobookScriptAgent, ScriptSegment, ChapterStructu
 from ..voice_manager_factory import create_voice_manager
 from ..audio_mixer import AudioMixer
 from app.services.chapter_adaptation_assets import build_audio_adaptation_hint
+from app.services.audiobook.temp_segment_store import save_segment_audio_batch, save_segment_audio_map
 from core.unified_media_runtime import create_tts_engine
 
 try:
@@ -45,6 +46,8 @@ class AudioFromScriptMixin:
         novel_theme: str = "未知主题",
         enable_quality_review: bool = True,
         audiobook_project_id: Optional[int] = None,
+        resume_checkpoint: Optional[Dict[str, Any]] = None,
+        tts_progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
         """使用已经生成/人工编辑后的剧本片段生成章节音频。
 
@@ -166,18 +169,98 @@ class AudioFromScriptMixin:
             import os
             debug_save_segments = os.getenv("TTS_DEBUG_SAVE_SEGMENTS", "false").lower() == "true"
             
-            audio_list = await self._synthesize_segments(
+            temp_segment_cache: Optional[Dict[str, Any]] = None
+
+            def handle_tts_progress(progress_payload: Dict[str, Any]) -> None:
+                nonlocal temp_segment_cache
+                audio_by_index = progress_payload.get("audio_by_index") or {}
+                if not isinstance(audio_by_index, dict):
+                    return
+
+                temp_segment_cache = save_segment_audio_map(
+                    run_id=task_id,
+                    chapter_id=chapter_id,
+                    audio_map=audio_by_index,
+                    format="mp3",
+                )
+                completed_segment_indices = sorted(
+                    int(index)
+                    for index in (progress_payload.get("completed_segment_indices") or [])
+                    if isinstance(index, int) or (isinstance(index, str) and str(index).isdigit())
+                )
+                total_segments = int(progress_payload.get("total_segments") or len(script_segments) or 0)
+                progress_value = float(progress_payload.get("progress") or 0.0)
+                tts_metrics_snapshot = {
+                    "tts_stats": self.tts_engine.get_cost_stats(),
+                    "total_segments": total_segments,
+                    "completed_segment_count": len(completed_segment_indices),
+                    "completed_segment_indices": completed_segment_indices,
+                    "reused_segment_count": int(progress_payload.get("reused_count") or 0),
+                    "synthesized_segment_count": int(progress_payload.get("synthesized_count") or 0),
+                    "resume_source": progress_payload.get("resume_source"),
+                    "temp_segment_cache": temp_segment_cache,
+                }
+                self.task_tracker.update_stage_progress(
+                    task_id,
+                    StageType.TTS_SYNTHESIS,
+                    progress_value,
+                    tts_metrics_snapshot,
+                )
+                if tts_progress_callback:
+                    tts_progress_callback(
+                        {
+                            **progress_payload,
+                            "task_id": task_id,
+                            "chapter_id": chapter_id,
+                            "temp_segment_cache": temp_segment_cache,
+                            "tts_stats": tts_metrics_snapshot["tts_stats"],
+                        }
+                    )
+
+            synthesis_result = await self._synthesize_segments_with_resume(
                 script_segments,
+                resume_checkpoint=resume_checkpoint,
                 debug_save_segments=debug_save_segments,
-                debug_output_dir=f"backend/data/tts_debug/chapter_{chapter_id}"
+                debug_output_dir=f"backend/data/tts_debug/chapter_{chapter_id}",
+                progress_callback=handle_tts_progress,
             )
+            audio_list = synthesis_result["audio_list"]
+            reused_segment_indices = synthesis_result.get("reused_indices") or []
+            if reused_segment_indices:
+                logger.info(
+                    "♻️ 剧本音频阶段断点复用命中: chapter_id=%s reused=%s synthesized=%s source=%s",
+                    chapter_id,
+                    len(reused_segment_indices),
+                    synthesis_result.get("synthesized_count", 0),
+                    synthesis_result.get("resume_source"),
+                )
+            if not temp_segment_cache or len(temp_segment_cache.get("cached_audio_paths") or {}) < len(
+                [audio_bytes for audio_bytes in audio_list if audio_bytes]
+            ):
+                try:
+                    temp_segment_cache = save_segment_audio_batch(
+                        run_id=task_id,
+                        chapter_id=chapter_id,
+                        audio_list=audio_list,
+                        format="mp3",
+                    )
+                except Exception as cache_err:
+                    logger.warning("⚠️ 保存临时分段音频失败: %s", cache_err)
 
             tts_stats = self.tts_engine.get_cost_stats()
 
             self.task_tracker.complete_stage(
                 task_id,
                 StageType.TTS_SYNTHESIS,
-                metrics={"tts_stats": tts_stats},
+                metrics={
+                    "tts_stats": tts_stats,
+                    "temp_segment_count": temp_segment_cache.get("segment_count", 0)
+                    if temp_segment_cache
+                    else 0,
+                    "reused_segment_count": len(reused_segment_indices),
+                    "synthesized_segment_count": synthesis_result.get("synthesized_count", len(script_segments)),
+                    "resume_source": synthesis_result.get("resume_source"),
+                },
             )
 
             # 基于真实音频时长对齐音效/配乐时间线
@@ -262,6 +345,7 @@ class AudioFromScriptMixin:
                 "audio_data": final_audio,
                 "duration": audio_info.get("duration_seconds", 0),
                 "file_size": len(final_audio),
+                "temp_segment_cache": temp_segment_cache,
                 "stats": {
                     "generation_time": f"{elapsed_time:.1f}秒",
                     "mode": "script_only_pipeline",
@@ -312,15 +396,35 @@ class AudioFromScriptMixin:
                             )
                             break
 
-            return {
+            failure_stats: Dict[str, Any] = {
+                "generation_time": f"{elapsed_time:.1f}秒",
+            }
+            if "script_segments" in locals():
+                failure_dialogue_count = 0
+                failure_narration_count = 0
+                for seg in script_segments:
+                    seg_type = getattr(seg, "type", "")
+                    if seg_type == "dialogue":
+                        failure_dialogue_count += 1
+                    elif seg_type == "narration":
+                        failure_narration_count += 1
+                failure_stats["parse_stats"] = {
+                    "total_segments": len(script_segments),
+                    "dialogue_count": failure_dialogue_count,
+                    "narration_count": failure_narration_count,
+                }
+                failure_stats["script_segments"] = len(script_segments)
+
+            failure_result = {
                 "success": False,
                 "task_id": task_id if "task_id" in locals() else None,
                 "error": str(e),
                 "audio_data": None,
                 "duration": 0,
                 "file_size": 0,
-                "stats": {
-                    "generation_time": f"{elapsed_time:.1f}秒",
-                },
+                "stats": failure_stats,
             }
+            if "temp_segment_cache" in locals() and temp_segment_cache:
+                failure_result["temp_segment_cache"] = temp_segment_cache
+            return failure_result
 

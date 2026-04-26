@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novel-writing-agent.local/contracts/user-asset-source-payload.schema.json",
+  "title": "UserAssetSourcePayload",
+  "description": "User Asset `source_payload_json` 四类来源形状草案。当前仅作为形状备忘录的结构化镜像，**不参与 `--check` 派生产物校验**，也不绑定 runtime 校验；写入侧的 runtime 归一化仍由 `frontend/src/contracts/userAssetSourcePayloadBuilders.ts` 负责。升格流程见 `docs/contracts/USER_ASSET_SOURCE_PAYLOAD_SHAPES.md` §4。",
+  "x-contract-id": "user-asset-source-payload",
+  "x-contract-version": "draft-2026-04-24",
+  "x-contract-compat-level": "non-binding-draft",
+  "x-contract-doc": "docs/contracts/USER_ASSET_SOURCE_PAYLOAD_SHAPES.md",
+  "x-contract-owner": "user-assets/local-first",
+  "x-contract-status": "draft",
+  "x-runtime-enforced": false,
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/AssetStudioCollectedSourcePayload" },
+    { "$ref": "#/$defs/AudiobookChapterAudioSourcePayload" },
+    { "$ref": "#/$defs/DreamWeaverLibrarySourcePayload" },
+    { "$ref": "#/$defs/DreamWeaverMergedVideoSourcePayload" }
+  ],
+  "$defs": {
+    "AssetStudioMediaAsset": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "uri": { "type": ["string", "null"] },
+        "mime_type": { "type": ["string", "null"] },
+        "label": { "type": ["string", "null"] }
+      }
+    },
+    "AssetStudioCollectedSourcePayload": {
+      "type": "object",
+      "description": "Asset Studio 本地收录 — buildAssetStudioCollectedSourcePayload 产出",
+      "additionalProperties": true,
+      "properties": {
+        "kind": { "type": ["string", "null"] },
+        "mode": { "type": ["string", "null"] },
+        "model_id": { "type": ["string", "null"] },
+        "assets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AssetStudioMediaAsset" }
+        },
+        "primary_asset": {
+          "oneOf": [
+            { "$ref": "#/$defs/AssetStudioMediaAsset" },
+            { "type": "null" }
+          ]
+        },
+        "metadata": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "AudiobookChapterAudioSourcePayload": {
+      "type": "object",
+      "description": "Audiobook 章节成品音频 — buildAudiobookChapterAudioSourcePayload 产出；builder 显式剔除 `local_storage_driver / local_storage_path / local_persist_level / external_relative_path`，本地副本驱动细节必须继续仅写入 `metadata_json.local_storage_*`。",
+      "required": ["type"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "const": "chapter_audio" },
+        "audiobook_project_id": { "type": ["integer", "string", "null"] },
+        "chapter_id": { "type": ["integer", "string", "null"] },
+        "run_id": { "type": ["string", "null"] }
+      },
+      "not": {
+        "anyOf": [
+          { "required": ["local_storage_driver"] },
+          { "required": ["local_storage_path"] },
+          { "required": ["local_persist_level"] },
+          { "required": ["external_relative_path"] }
+        ]
+      }
+    },
+    "DreamWeaverLibrarySourcePayload": {
+      "type": "object",
+      "description": "DreamWeaver 资料库素材 — buildDreamWeaverLibrarySourcePayload 产出",
+      "required": ["project_id", "asset_id"],
+      "additionalProperties": true,
+      "properties": {
+        "project_id": { "type": "integer" },
+        "asset_id": { "type": ["string", "integer"] },
+        "role": { "type": ["string", "null"] },
+        "uri": { "type": ["string", "null"] },
+        "entity_type": { "type": ["string", "null"] },
+        "entity_id": { "type": ["string", "integer", "null"] },
+        "view": { "type": ["string", "null"] },
+        "approved": { "type": "boolean" }
+      }
+    },
+    "DreamWeaverMergedVideoSourcePayload": {
+      "type": "object",
+      "description": "DreamWeaver 最终合成视频 — buildDreamWeaverMergedVideoSourcePayload 产出",
+      "required": ["run_id", "type"],
+      "additionalProperties": true,
+      "properties": {
+        "run_id": { "type": "string" },
+        "project_id": { "type": ["integer", "null"] },
+        "type": { "const": "merged_video" },
+        "path": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

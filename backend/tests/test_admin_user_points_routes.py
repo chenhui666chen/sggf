@@ -164,20 +164,24 @@ def create_user_asset(
     *,
     user_id: int,
     title: str,
-    file_url: str,
+    source_uri: str,
     created_at: datetime | None = None,
     updated_at: datetime | None = None,
 ) -> UserAssetRecord:
     db = session_factory()
     try:
+        asset_uuid = f"asset-studio-{abs(hash((user_id, title, source_uri)))}"
         asset = UserAssetRecord(
             user_id=user_id,
             source_module="asset_studio",
             asset_kind="image",
             asset_class="reusable",
+            asset_uuid=asset_uuid,
+            storage_mode="durable_cloud",
             title=title,
-            file_url=file_url,
-            preview_url=file_url,
+            source_uri=source_uri,
+            preview_uri=source_uri,
+            download_uri=source_uri,
             tags=[],
             metadata_json={},
             source_payload_json={},
@@ -719,7 +723,7 @@ def test_manual_points_adjustment_is_reflected_in_user_center_points_account():
         session_factory,
         user_id=target_user.id,
         title="基础资产",
-        file_url="https://example.com/assets/base.png",
+        source_uri="https://example.com/assets/base.png",
         created_at=now,
         updated_at=now,
     )

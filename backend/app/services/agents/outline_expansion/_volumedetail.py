@@ -30,6 +30,30 @@ from ...character_parser import (
 from ...character_runtime_context import build_character_prompt_context_from_text
 from ._constants import *
 
+def _resolve_chapter_renumberer():
+    try:
+        from .. import outline_expander as outline_expander_module
+
+        factory = getattr(outline_expander_module, "get_chapter_renumberer", None)
+        if callable(factory):
+            return factory()
+    except Exception:
+        pass
+    return get_chapter_renumberer()
+
+
+def _resolve_consistency_validator(*, strict_mode: bool = True):
+    try:
+        from .. import outline_expander as outline_expander_module
+
+        factory = getattr(outline_expander_module, "get_consistency_validator", None)
+        if callable(factory):
+            return factory(strict_mode=strict_mode)
+    except Exception:
+        pass
+    return get_consistency_validator(strict_mode=strict_mode)
+
+
 class VolumeDetailMixin:
     def _legacy_expand_volume_detail(self, framework_content: str, target_volume_index: int,
                             world_setting: str, characters: str,
@@ -76,21 +100,20 @@ class VolumeDetailMixin:
         logger.debug(f"📖 【单卷详细扩展】第{target_volume_index}卷，从第{start_chapter_num}章开始，生成{chapters_count_range[0]}-{chapters_count_range[1]}章")
         logger.debug(f"{'='*70}\n")
 
-        # 🔥 智能模型选择：根据章节数量自动选择最合适的模型
+        # 🚀 统一使用 deepseek-v4-pro（384K 超长输出），不再按章节数切换模型
         avg_chapters = (chapters_count_range[0] + chapters_count_range[1]) // 2
         estimated_words = avg_chapters * 450  # 每章约450字
-
-        if avg_chapters > 80:
-            # 超大卷（>80章）：固定使用 qwen3.5-plus
-            selected_architect = self.plot_architect_large
-            model_name = "qwen3.5-plus"
-            logger.debug(f"🔄 检测到超大卷（{avg_chapters}章，约{estimated_words}字），固定使用 qwen3.5-plus 模型")
-            logger.debug("   💡 已禁用 qwen-long 回退，大卷仍只允许 qwen3.5-plus / DeepSeek")
-        else:
-            # 常规卷（≤80章）：使用 DeepSeek-R1（64K输出，质量更高）
-            selected_architect = self.plot_architect_r1
-            model_name = "deepseek-r1"
-            logger.debug(f"✅ 使用 DeepSeek-R1 模型（{avg_chapters}章，约{estimated_words}字，64K输出能力）")
+        model_name = self.estimate_volume_detail_model(chapters_count_range)
+        selected_architect = self.plot_architect_plus if model_name == "qwen3.5-plus" else self.plot_architect_r1
+        logger.debug(
+            "Volume detail runtime model selected | model=%s avg_chapters=%s estimated_words=%s",
+            model_name,
+            avg_chapters,
+            estimated_words,
+        )
+        logger.debug(
+            f"✅ 单卷详细扩展统一使用 deepseek-v4-pro（{avg_chapters}章，约{estimated_words}字，384K 输出）"
+        )
 
         # 🛡️ 临时修复：清空历史记忆，避免旧消息导致API错误
         logger.debug("🧹 清空历史记忆，避免旧消息影响...")
@@ -178,15 +201,15 @@ class VolumeDetailMixin:
             global_constraints_section = "\n【🌟 全局约束（必须严格遵循）】\n"
             
             if framework_header:
-                # 提取头部关键信息（限制长度避免提示词过长）
-                header_excerpt = framework_header[:2000] if len(framework_header) > 2000 else framework_header
+                # deepseek-v4-pro 384K 输出下放宽头部截断
+                header_excerpt = framework_header[:12000] if len(framework_header) > 12000 else framework_header
                 global_constraints_section += f"""\n**1⃣ 整体叙事节奏与境界体系**（本卷必须符合）：
 {header_excerpt}
 """
             
             if framework_footer:
-                # 提取尾部关键信息（限制长度避免提示词过长）
-                footer_excerpt = framework_footer[:2000] if len(framework_footer) > 2000 else framework_footer
+                # deepseek-v4-pro 384K 输出下放宽尾部截断
+                footer_excerpt = framework_footer[:12000] if len(framework_footer) > 12000 else framework_footer
                 global_constraints_section += f"""\n**2️⃣ 伏笔布局与人物周期**（本卷需配合）：
 {footer_excerpt}
 
@@ -208,7 +231,7 @@ class VolumeDetailMixin:
 {world_setting}
 
 【人物设定】
-{characters[:2000] if characters else '待完善'}
+{characters[:12000] if characters else '待完善'}
 
 【扩展要求】
 本卷章节编号从第{start_chapter_num}章开始，必须生成{chapters_count_range[0]}-{chapters_count_range[1]}章的详细大纲。
@@ -321,7 +344,7 @@ Please输出完整的、重新整合后的网文大纲：
         
         # ✅ 三层体系整合：章节编号自动修正
         logger.debug(f"\n🔧 【章节编号修正器】检测第{target_volume_index}卷章节编号...")
-        renumberer = get_chapter_renumberer()
+        renumberer = _resolve_chapter_renumberer()
         renumber_result = renumberer.detect_and_fix(
             content=volume_content,
             expected_start=start_chapter_num,
@@ -346,7 +369,7 @@ Please输出完整的、重新整合后的网文大纲：
         
         # ✅ 三层体系整合：一致性校验（严格模式）
         logger.debug(f"\n🔍 【一致性校验器】开始校验第{target_volume_index}卷...")
-        validator = get_consistency_validator(strict_mode=True)
+        validator = _resolve_consistency_validator(strict_mode=True)
         validation_result = validator.validate(
             volume_content=volume_content,
             volume_index=target_volume_index,

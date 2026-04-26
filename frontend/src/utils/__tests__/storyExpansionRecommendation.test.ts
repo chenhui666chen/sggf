@@ -71,17 +71,17 @@ describe('storyExpansionRecommendation', () => {
     expect(recommendation.recommendedMode).toBe('total')
     expect(recommendation.recommendationReason).toContain('渐进式扩展')
     expect(recommendation.recommendationReason).toContain('中篇（72章）')
-    expect(recommendation.recommendationReason).toContain('每轮新增15个细化章节左右')
+    expect(recommendation.recommendationReason).toContain('每轮新增20-60个细化章节左右')
   })
 
-  it('未显式标记长篇时，300章以内项目仍优先常规协同', () => {
+  it('未显式标记长篇时，450章以内项目仍优先常规协同', () => {
     const recommendation = resolveStoryExpansionRecommendation({
       genre: '玄幻',
       planned_length_type: '',
-      planned_chapters_max: 280,
+      planned_chapters_max: 420,
     })
 
     expect(recommendation.recommendedMode).toBe('total')
-    expect(recommendation.recommendationReason).toContain('中篇（280章）')
+    expect(recommendation.recommendationReason).toContain('中篇（420章）')
   })
 })

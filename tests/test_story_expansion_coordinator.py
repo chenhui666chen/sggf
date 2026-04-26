@@ -478,7 +478,7 @@ class _IterativeRoundTargetCoordinator(StoryExpansionCoordinator):
         }
 
 
-def test_iterative_mode_uses_current_plus_step_as_round_target():
+def test_iterative_mode_uses_single_round_target_when_goal_fits_current_step():
     coordinator = _IterativeRoundTargetCoordinator()
 
     result = coordinator._execute_iterative_mode(
@@ -499,7 +499,7 @@ def test_iterative_mode_uses_current_plus_step_as_round_target():
         },
     )
 
-    assert coordinator.round_targets == [15, 30, 40]
+    assert coordinator.round_targets == [40]
     assert result["current_chapter_count"] == 40
 
 
@@ -522,7 +522,7 @@ class _IterativeRoundContinueFalseCoordinator(StoryExpansionCoordinator):
         }
 
 
-def test_iterative_mode_keeps_running_after_growth_even_when_single_round_target_is_reached():
+def test_iterative_mode_respects_single_round_completion_when_goal_is_within_step():
     coordinator = _IterativeRoundContinueFalseCoordinator()
 
     result = coordinator._execute_iterative_mode(
@@ -543,7 +543,7 @@ def test_iterative_mode_keeps_running_after_growth_even_when_single_round_target
         },
     )
 
-    assert coordinator.round_targets == [15, 30, 40]
+    assert coordinator.round_targets == [40]
     assert result["current_chapter_count"] == 40
 
 
@@ -584,7 +584,7 @@ class _IterativeNoExtraEmptyRoundCoordinator(StoryExpansionCoordinator):
         }
 
 
-def test_iterative_mode_stops_without_extra_empty_round_once_targets_are_reached():
+def test_iterative_mode_stops_without_extra_empty_round_once_single_round_targets_are_reached():
     coordinator = _IterativeNoExtraEmptyRoundCoordinator()
 
     result = coordinator._execute_iterative_mode(
@@ -605,9 +605,9 @@ def test_iterative_mode_stops_without_extra_empty_round_once_targets_are_reached
         },
     )
 
-    assert coordinator.plot_calls == 2
+    assert coordinator.plot_calls == 1
     assert coordinator.character_calls == 1
-    assert len(result["execution_rounds"]) == 2
+    assert len(result["execution_rounds"]) == 1
     assert result["current_chapter_count"] == 30
     assert result["stop_reasons"] == ["人物扩展未产生新增内容，为避免空转已提前停止。"]
 
@@ -832,7 +832,7 @@ class _IterativeDynamicAutoCharacterCoordinator(StoryExpansionCoordinator):
         }
 
 
-def test_iterative_mode_can_raise_auto_character_target_with_chapter_progress():
+def test_iterative_mode_can_jump_directly_to_task_character_target_when_chapter_goal_fits_single_round():
     current_characters = "\n\n".join(
         f"### 【姓名】：角色{index}\n【角色定位】：配角"
         for index in range(1, 11)
@@ -863,7 +863,7 @@ def test_iterative_mode_can_raise_auto_character_target_with_chapter_progress():
         },
     )
 
-    assert coordinator.character_targets == [20, 21, 22]
+    assert coordinator.character_targets == [22, 22]
     assert result["current_character_count"] == 22
     assert result["plan"]["target_character_count"] == 22
     assert result["execution_rounds"][-1]["character"]["target_character_count"] == 22
@@ -984,6 +984,96 @@ def test_plot_first_strategy_executes_outline_before_character_delta():
     assert result["execution_mode"] == "delta"
 
 
+class _DeltaUnstructuredOutlineCoordinator(StoryExpansionCoordinator):
+    def __init__(self, generated_count: int):
+        self.project_id = None
+        self.genre = ""
+        self.planned_chapters_max = 0
+        self.generated_count = generated_count
+
+    def build_story_expansion_plan(self, *args, **kwargs):
+        return {
+            "strategy": "plot_first",
+            "summary": "单轮协同已按计划补剧情。",
+            "outline_ops": [],
+            "character_ops": [],
+            "relationship_ops": [],
+            "chapters_needed": 38,
+            "characters_needed": 0,
+        }
+
+    def generate_outline_delta(self, *args, **kwargs):
+        generated_outline = "\n\n".join(
+            f"第{index}章：新增章节{index}\n- 场景目标：推进第{index}章剧情。"
+            for index in range(1, self.generated_count + 1)
+        )
+        return {
+            "plot_outline": f"{kwargs['current_outline']}\n\n{generated_outline}".strip(),
+            "outline_delta": generated_outline,
+            "outline_ops": [
+                {
+                    "action": "append",
+                    "requested_count": 38,
+                    "generated_count": self.generated_count,
+                    "generated_titles": [f"新增章节{index}" for index in range(1, self.generated_count + 1)],
+                }
+            ],
+            "current_chapter_count": self.generated_count,
+        }
+
+    def generate_character_delta(self, *args, **kwargs):
+        return {
+            "character_delta": "",
+            "character_relationships": "",
+            "new_characters": [],
+        }
+
+
+def test_delta_mode_preserves_baseline_chapter_count_for_unstructured_outline():
+    coordinator = _DeltaUnstructuredOutlineCoordinator(generated_count=38)
+
+    result = coordinator._execute_delta_mode(
+        current_outline="【前情总览】当前项目已完成前二十二章，但原文并非标准章节格式。",
+        characters="### 【姓名】：林舟\n【角色定位】：主角",
+        world_setting="蒸汽仙侠世界",
+        target_total_chapters=60,
+        target_total_characters=1,
+        strategy="plot_first",
+        mode_info={
+            "reason": "test",
+            "current_chapter_count": 22,
+            "current_character_count": 1,
+        },
+    )
+
+    assert result["current_chapter_count"] == 60
+    assert result["plan"]["target_chapter_count"] == 60
+    assert result["stop_reasons"] == []
+    assert "章节尚差" not in result["coordination_summary"]
+
+
+def test_delta_mode_reports_partial_gap_when_single_round_output_is_insufficient():
+    coordinator = _DeltaUnstructuredOutlineCoordinator(generated_count=10)
+
+    result = coordinator._execute_delta_mode(
+        current_outline="【前情总览】当前项目已完成前二十二章，但原文并非标准章节格式。",
+        characters="### 【姓名】：林舟\n【角色定位】：主角",
+        world_setting="蒸汽仙侠世界",
+        target_total_chapters=60,
+        target_total_characters=1,
+        strategy="plot_first",
+        mode_info={
+            "reason": "test",
+            "current_chapter_count": 22,
+            "current_character_count": 1,
+        },
+    )
+
+    assert result["current_chapter_count"] == 32
+    assert result["stop_reasons"] == ["章节尚差 28 章，需继续发起下一次协同。"]
+    assert "章节尚差 28 章" in result["coordination_summary"]
+
+
 class _AnalysisCoordinator(StoryExpansionCoordinator):
     def __init__(self, planned_chapters_max: int = 0):
         self.project_id = None
@@ -991,6 +1081,116 @@ class _AnalysisCoordinator(StoryExpansionCoordinator):
         self.planned_chapters_max = planned_chapters_max
         self.planner_llm = type("LLM", (), {"model_name": "qwen-long"})()
         self.writer_llm = type("LLM", (), {"model_name": "qwen-long"})()
+
+
+def test_story_expansion_runtime_selection_prefers_qwen35_for_low_risk_case():
+    coordinator = _AnalysisCoordinator()
+
+    selection = coordinator._select_story_expansion_runtime_models(
+        current_outline="第1章：雨夜入城\n- 涉及人物：林舟、顾晚",
+        characters=(
+            "### 【姓名】：林舟\n【角色定位】：主角\n\n"
+            "### 【姓名】：顾晚\n【角色定位】：盟友"
+        ),
+        world_setting="蒸汽江湖",
+        validation={
+            "score": 88,
+            "coverage_ratio": 1.0,
+            "unreferenced_characters": [],
+        },
+        mode_info={
+            "mode": "delta",
+            "current_chapter_count": 20,
+            "target_chapter_count": 32,
+            "current_character_count": 4,
+            "target_character_count": 4,
+        },
+        estimated_rounds=1,
+        expansion_mode="total",
+    )
+
+    assert selection["planner_model"] == "qwen3.5-plus"
+    assert selection["writer_model"] == "qwen3.5-plus"
+    assert "综合成本最低" in selection["planner"]["selection_basis"]
+    assert "质量与输出门槛过滤" in selection["selection_reason"]
+    assert selection["planner"]["timeout_seconds"] >= 180
+    assert selection["writer"]["timeout_seconds"] >= 180
+
+
+def test_story_expansion_runtime_selection_upgrades_to_qwen36_for_medium_risk_case():
+    coordinator = _AnalysisCoordinator()
+
+    selection = coordinator._select_story_expansion_runtime_models(
+        current_outline="第1章：雨夜入城\n- 涉及人物：林舟、顾晚",
+        characters=(
+            "### 【姓名】：林舟\n【角色定位】：主角\n\n"
+            "### 【姓名】：顾晚\n【角色定位】：盟友\n\n"
+            "### 【姓名】：沈砚\n【角色定位】：对手"
+        ),
+        world_setting="蒸汽江湖",
+        validation={
+            "score": 72,
+            "coverage_ratio": 0.82,
+            "unreferenced_characters": ["沈砚"],
+        },
+        mode_info={
+            "mode": "iterative",
+            "current_chapter_count": 24,
+            "target_chapter_count": 85,
+            "current_character_count": 3,
+            "target_character_count": 3,
+        },
+        estimated_rounds=2,
+        expansion_mode="total",
+    )
+
+    assert selection["planner_model"] == "qwen3.6-plus"
+    assert selection["writer_model"] == "qwen3.6-plus"
+    assert selection["planner"]["quality_floor"] == 9.0
+    assert selection["writer"]["quality_floor"] == 9.0
+
+
+def test_story_expansion_runtime_selection_uses_deepseek_for_high_risk_case():
+    coordinator = _AnalysisCoordinator()
+
+    selection = coordinator._select_story_expansion_runtime_models(
+        current_outline="第1章：雨夜入城\n- 涉及人物：林舟",
+        characters=(
+            "### 【姓名】：林舟\n【角色定位】：主角\n\n"
+            "### 【姓名】：顾晚\n【角色定位】：盟友\n\n"
+            "### 【姓名】：沈砚\n【角色定位】：对手\n\n"
+            "### 【姓名】：宋临\n【角色定位】：导师\n\n"
+            "### 【姓名】：白烬\n【角色定位】：反派"
+        ),
+        world_setting="蒸汽江湖",
+        validation={
+            "score": 47,
+            "coverage_ratio": 0.42,
+            "unreferenced_characters": ["顾晚", "沈砚", "宋临", "白烬"],
+        },
+        mode_info={
+            "mode": "volume_detail",
+            "current_chapter_count": 20,
+            "target_chapter_count": 60,
+            "current_character_count": 5,
+            "target_character_count": 10,
+        },
+        estimated_rounds=1,
+        expansion_mode="volume_detail",
+        volume_detail_config={
+            "chapters_count_range": (30, 40),
+            "expected_chapter_range": (21, 60),
+            "expected_total_chapter_count": 60,
+            "current_total_chapter_count": 20,
+        },
+    )
+
+    assert selection["planner_model"] == "deepseek-v4-pro"
+    assert selection["writer_model"] == "deepseek-v4-pro"
+    assert selection["planner"]["quality_floor"] == 9.5
+    assert selection["writer"]["quality_floor"] == 9.5
+    assert selection["planner"]["timeout_seconds"] > 300
+    assert selection["writer"]["timeout_seconds"] > selection["planner"]["timeout_seconds"]
 
 
 class _EpicConfigCoordinator(_AnalysisCoordinator):
@@ -1100,7 +1300,7 @@ def test_analyze_expansion_request_can_auto_add_supporting_characters():
     assert analysis["effective_target_character_count"] > 1
     assert analysis["auto_supplement_applied"] is True
     assert analysis["mode_suitability"]["request_band"] == "recommended"
-    assert analysis["mode_suitability"]["recommended_total_chapters_max"] == 300
+    assert analysis["mode_suitability"]["recommended_total_chapters_max"] == 450
 
 
 def test_analyze_expansion_request_uses_chapter_scale_to_raise_character_floor():
@@ -1197,6 +1397,38 @@ def test_analyze_expansion_request_can_auto_add_supporting_plot_hooks():
     assert analysis["auto_supplement_applied"] is True
 
 
+def test_analyze_expansion_request_includes_runtime_model_selection_reason():
+    coordinator = _AnalysisCoordinator()
+
+    analysis = coordinator.analyze_expansion_request(
+        current_outline="第1章：雨夜入城\n- 涉及人物：林舟、顾晚",
+        characters=(
+            "### 【姓名】：林舟\n【角色定位】：主角\n\n"
+            "### 【姓名】：顾晚\n【角色定位】：盟友"
+        ),
+        world_setting="蒸汽江湖",
+        target_total_chapters=24,
+        target_total_characters=2,
+        strategy="auto",
+        intent="auto",
+        enable_auto_supplement=False,
+        expansion_mode="total",
+    )
+
+    assert analysis["model_plan"]["coordinator_planner_model"] == "qwen3.5-plus"
+    assert analysis["model_plan"]["coordinator_writer_model"] == "qwen3.5-plus"
+    assert analysis["model_plan"]["coordinator_planner_max_tokens"] == coordinator.planner_llm.max_tokens
+    assert analysis["model_plan"]["coordinator_writer_max_tokens"] == coordinator.writer_llm.max_tokens
+    assert analysis["model_plan"]["coordinator_planner_timeout_seconds"] == coordinator.planner_llm.runtime_options["timeout"]
+    assert analysis["model_plan"]["coordinator_writer_timeout_seconds"] == coordinator.writer_llm.runtime_options["timeout"]
+    assert analysis["model_plan"]["coordinator_planner_estimated_output_tokens"] is not None
+    assert analysis["model_plan"]["coordinator_writer_estimated_output_tokens"] is not None
+    assert "质量与输出门槛过滤" in analysis["model_plan"]["selection_reason"]
+    assert "基础门槛为 1M 上下文" in analysis["model_plan"]["selection_quality_guard"]
+    assert coordinator.planner_llm.max_tokens < 65536
+    assert coordinator.writer_llm.max_tokens < 65536
+
+
 def test_analyze_expansion_request_reports_epic_mode_and_model_plan():
     coordinator = _AnalysisCoordinator(planned_chapters_max=1200)
 
@@ -1235,20 +1467,40 @@ def test_analyze_expansion_request_keeps_total_mode_suitability_for_large_reques
     assert analysis["execution_mode"] == "iterative"
     assert analysis["effective_expansion_mode"] == "total"
     assert analysis["mode_suitability"]["request_band"] == "recommended"
-    assert analysis["mode_suitability"]["framework_preferred_total_from"] == 301
-    assert analysis["mode_suitability"]["single_round_delta_limit"] == 30
+    assert analysis["mode_suitability"]["framework_preferred_total_from"] == 451
+    assert analysis["mode_suitability"]["single_round_delta_limit"] == 60
     assert any("当前会走分轮扩展" in warning for warning in analysis["warnings"])
     assert any("自动连续执行多轮" in warning for warning in analysis["warnings"])
 
 
-def test_analyze_expansion_request_marks_total_mode_as_forbidden_above_300_chapters():
-    coordinator = _AnalysisCoordinator(planned_chapters_max=360)
+def test_analyze_expansion_request_marks_total_mode_as_caution_between_451_and_600_chapters():
+    coordinator = _AnalysisCoordinator(planned_chapters_max=520)
 
     analysis = coordinator.analyze_expansion_request(
         current_outline="第1章：雨夜入城\n- 场景目标：主角抵达青石城。",
         characters="### 【姓名】：林舟\n【角色定位】：主角",
         world_setting="",
-        target_total_chapters=360,
+        target_total_chapters=520,
+        target_total_characters=12,
+        strategy="auto",
+        intent="auto",
+        enable_auto_supplement=False,
+        expansion_mode="total",
+    )
+
+    assert analysis["mode_suitability"]["request_band"] == "caution"
+    assert analysis["mode_suitability"]["request_band_label"] == "可执行但建议转框架"
+    assert "更建议先切换到长篇框架协同" in analysis["mode_suitability"]["request_band_reason"]
+
+
+def test_analyze_expansion_request_marks_total_mode_as_forbidden_above_600_chapters():
+    coordinator = _AnalysisCoordinator(planned_chapters_max=660)
+
+    analysis = coordinator.analyze_expansion_request(
+        current_outline="第1章：雨夜入城\n- 场景目标：主角抵达青石城。",
+        characters="### 【姓名】：林舟\n【角色定位】：主角",
+        world_setting="",
+        target_total_chapters=660,
         target_total_characters=12,
         strategy="auto",
         intent="auto",

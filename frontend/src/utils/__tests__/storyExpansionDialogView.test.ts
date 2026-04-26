@@ -249,11 +249,11 @@ describe('storyExpansionDialogView', () => {
             {
               key: 'targetChapterCount',
               label: '目标细化章节数',
-              helperText: '常规协同仅支持总规模不超过300个细化章节；达到上限后必须改用长篇框架协同。',
+              helperText: '常规协同推荐总规模不超过450个细化章节；451-600章仍可执行，但更建议先切换到长篇框架协同。',
               placeholder: '留空则由系统自动估算',
               fullWidth: true,
               min: 20,
-              max: 300,
+              max: 600,
             },
           ],
         },
@@ -281,7 +281,7 @@ describe('storyExpansionDialogView', () => {
       createStoryExpansionDialogView({
         currentChapterCount: 180,
         currentCharacterCount: 12,
-        targetChapterCount: 320,
+        targetChapterCount: 620,
         targetCharacterCount: 14,
         expansionMode: 'total',
         totalVolumes: null,
@@ -302,7 +302,7 @@ describe('storyExpansionDialogView', () => {
           alert: {
             key: 'total-conventional-range-alert',
             severity: 'warning',
-            text: '当前总规模已超过常规协同上限 300个细化章节。超过300章后禁止继续使用“常规协同”，请改选“长篇框架协同”。',
+            text: '当前总规模已超过常规协同上限 600个细化章节。请改选“长篇框架协同”。',
           },
         },
         {
@@ -451,7 +451,7 @@ describe('storyExpansionDialogView', () => {
           { key: 'preferred-step', label: '建议步长 8个细化章节', color: 'default' },
           { key: 'single-round-limit', label: '单轮上限 12个细化章节', color: 'default' },
         ],
-        summary: '常规协同支持总规模 1-300 章；超过 300 章必须切换到长篇框架协同。',
+        summary: '常规协同推荐总规模不超过450个细化章节；451-600章仍可执行，但更建议先切换到长篇框架协同。',
         reason: '',
         bands: [],
       },
@@ -501,19 +501,25 @@ describe('storyExpansionDialogView', () => {
             request_band_reason: '当前目标仍在常规协同的稳定工作带内，适合直接进行单轮或分轮扩展。',
             preferred_iterative_step: 15,
             single_round_delta_limit: 30,
-            summary: '常规协同仅支持总规模不超过 300 章的项目；301 章及以上禁止继续使用常规协同，必须切换到长篇框架协同。',
+            summary: '常规协同推荐总规模不超过450个细化章节；451-600章仍可执行，但更建议先切换到长篇框架协同。',
             bands: [
               {
                 key: 'recommended',
                 label: '推荐区间',
-                range_text: '总规模 1-300 章',
+                range_text: '总规模 1-450 章',
                 detail: '单次新增建议按 15 章左右推进，质量和稳定性更均衡。',
+              },
+              {
+                key: 'caution',
+                label: '谨慎区间',
+                range_text: '总规模 451-600 章',
+                detail: '仍可继续常规协同，但更建议优先切换到长篇框架协同统一规划。',
               },
               {
                 key: 'forbidden',
                 label: '禁止常规协同',
-                range_text: '总规模 >= 301 章',
-                detail: '超过 300 章后必须改用长篇框架协同，不能继续走常规协同。',
+                range_text: '总规模 >= 601 章',
+                detail: '超过 600 章后必须改用长篇框架协同，不能继续走常规协同。',
               },
             ],
           },
@@ -685,8 +691,8 @@ describe('storyExpansionDialogView', () => {
           key: 'volume-detail-fields',
           fields: [
             { key: 'targetVolumeIndex', label: '目标卷编号', helperText: '范围 1-6', min: 1, max: 6, flex: '1 1 160px' },
-            { key: 'volumeChaptersMin', label: '本卷最少章节', helperText: '建议 60-80 章', min: 20, max: 100, flex: '1 1 180px' },
-            { key: 'volumeChaptersMax', label: '本卷最多章节', helperText: '建议尽量控制在 80 章内；必要时可放宽到 100 章', min: 20, max: 100, flex: '1 1 180px' },
+            { key: 'volumeChaptersMin', label: '本卷最少章节', helperText: '建议 60-80 章', min: 20, max: 120, flex: '1 1 180px' },
+            { key: 'volumeChaptersMax', label: '本卷最多章节', helperText: '建议尽量控制在 80 章内；必要时可放宽到 120 章', min: 20, max: 120, flex: '1 1 180px' },
           ],
         },
         {
@@ -828,7 +834,48 @@ describe('storyExpansionDialogView', () => {
           alert: {
             key: 'total-epic-recommendation-alert',
             severity: 'warning',
-            text: '当前项目按篇幅规划更适合“长篇框架协同”。若本轮只是补少量细化章节或人物，且总规模仍不超过300章，可以继续常规协同；若准备推进 301 章及以上主线，请先切换到长篇框架协同。',
+            text: '当前项目按篇幅规划更适合“长篇框架协同”。若本轮只是补少量细化章节或人物，且总规模仍不超过450章，可以继续常规协同；若准备推进 451 章及以上主线，请优先切换到长篇框架协同。',
+          },
+        },
+        {
+          kind: 'fields',
+          key: 'total-fields',
+        },
+        {
+          kind: 'fields',
+          key: 'total-target-character',
+        },
+      ],
+    })
+  })
+
+  it('常规协同进入 451-600 章谨慎区间时展示切换建议', () => {
+    expect(
+      createStoryExpansionDialogView({
+        currentChapterCount: 320,
+        currentCharacterCount: 12,
+        targetChapterCount: 520,
+        targetCharacterCount: 14,
+        expansionMode: 'total',
+        totalVolumes: null,
+        totalChaptersMin: null,
+        totalChaptersMax: null,
+        frameworkMetadata: null,
+        targetVolumeIndex: null,
+        volumeChaptersMin: null,
+        volumeChaptersMax: null,
+        volumeCharacterIncrement: null,
+        analysis: null,
+      }),
+    ).toMatchObject({
+      configBlocks: [
+        {
+          kind: 'alert',
+          key: 'total-conventional-caution-alert',
+          alert: {
+            key: 'total-conventional-caution-alert',
+            severity: 'warning',
+            text: '常规协同推荐总规模不超过450个细化章节；451-600章仍可执行，但更建议先切换到长篇框架协同。',
           },
         },
         {

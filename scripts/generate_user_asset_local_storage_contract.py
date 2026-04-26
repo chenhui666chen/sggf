@@ -1,0 +1,306 @@
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SCHEMA_RELATIVE_PATH = "frontend/src/contracts/userAssetLocalStorage.schema.json"
+TS_OUTPUT_RELATIVE_PATH = "frontend/src/contracts/userAssetLocalStorageContract.generated.ts"
+PY_OUTPUT_RELATIVE_PATH = "backend/app/schemas/user_asset_local_storage_contract_generated.py"
+
+
+def _load_schema() -> dict[str, Any]:
+    schema_path = REPO_ROOT / SCHEMA_RELATIVE_PATH
+    return json.loads(schema_path.read_text(encoding="utf-8"))
+
+
+def _get_property(schema: dict[str, Any], property_name: str) -> dict[str, Any]:
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        raise ValueError("contract schema 缺少 properties")
+
+    property_schema = properties.get(property_name)
+    if not isinstance(property_schema, dict):
+        raise ValueError(f"contract schema 缺少 {property_name}")
+
+    return property_schema
+
+
+def _get_root_string(schema: dict[str, Any], field_name: str, fallback: str) -> str:
+    value = schema.get(field_name)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return fallback
+
+
+def _get_string_enum(schema: dict[str, Any], property_name: str) -> list[str]:
+    property_schema = _get_property(schema, property_name)
+    raw_enum = property_schema.get("enum")
+    if not isinstance(raw_enum, list):
+        raise ValueError(f"{property_name}.enum 缺失")
+
+    values = [value for value in raw_enum if isinstance(value, str)]
+    if not values:
+        raise ValueError(f"{property_name}.enum 不能为空")
+    return values
+
+
+def _get_max_length(schema: dict[str, Any], property_name: str) -> int:
+    property_schema = _get_property(schema, property_name)
+    max_length = property_schema.get("maxLength")
+    if not isinstance(max_length, int) or max_length <= 0:
+        raise ValueError(f"{property_name}.maxLength 非法")
+    return max_length
+
+
+def _get_description(schema: dict[str, Any], property_name: str) -> str:
+    property_schema = _get_property(schema, property_name)
+    description = property_schema.get("description")
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError(f"{property_name}.description 缺失")
+    return description.strip()
+
+
+def _get_reserved_values(schema: dict[str, Any], property_name: str) -> list[str]:
+    property_schema = _get_property(schema, property_name)
+    raw = property_schema.get("x-reserved-values")
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(f"{property_name}.x-reserved-values 必须是数组")
+    values = [value for value in raw if isinstance(value, str)]
+    return values
+
+
+def _quote(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _render_ts(schema: dict[str, Any]) -> str:
+    contract_id = _get_root_string(
+        schema,
+        "$id",
+        "novel-writing-agent://contracts/user-asset-local-storage-metadata/v1",
+    )
+    contract_version = _get_root_string(schema, "x-contract-version", "unknown")
+    contract_doc_path = _get_root_string(
+        schema,
+        "x-contract-doc",
+        "docs/contracts/USER_ASSET_LOCAL_STORAGE_METADATA_CONTRACT.md",
+    )
+    contract_owner = _get_root_string(schema, "x-contract-owner", "user-assets/local-first")
+    contract_compat_level = _get_root_string(schema, "x-contract-compat-level", "unknown")
+    drivers = _get_string_enum(schema, "local_storage_driver")
+    persist_levels = _get_string_enum(schema, "local_persist_level")
+    local_storage_path_max_length = _get_max_length(schema, "local_storage_path")
+    external_relative_path_max_length = _get_max_length(schema, "external_relative_path")
+    local_storage_driver_description = _get_description(schema, "local_storage_driver")
+    local_storage_path_description = _get_description(schema, "local_storage_path")
+    local_persist_level_description = _get_description(schema, "local_persist_level")
+    external_relative_path_description = _get_description(schema, "external_relative_path")
+
+    drivers_items = ", ".join(_quote(item) for item in drivers)
+    persist_levels_items = ", ".join(_quote(item) for item in persist_levels)
+    reserved_drivers = _get_reserved_values(schema, "local_storage_driver")
+    reserved_persist_levels = _get_reserved_values(schema, "local_persist_level")
+    reserved_drivers_items = ", ".join(_quote(item) for item in reserved_drivers)
+    reserved_persist_levels_items = ", ".join(_quote(item) for item in reserved_persist_levels)
+    active_drivers = [item for item in drivers if item not in reserved_drivers]
+    active_persist_levels = [item for item in persist_levels if item not in reserved_persist_levels]
+    active_drivers_items = ", ".join(_quote(item) for item in active_drivers)
+    active_persist_levels_items = ", ".join(_quote(item) for item in active_persist_levels)
+
+    return f"""// Generated by scripts/generate_user_asset_local_storage_contract.py from {SCHEMA_RELATIVE_PATH}.
+// Do not edit this file directly.
+
+export const USER_ASSET_LOCAL_STORAGE_METADATA_CONTRACT_ID = {_quote(contract_id)}
+export const USER_ASSET_LOCAL_STORAGE_METADATA_CONTRACT_VERSION = {_quote(contract_version)}
+export const USER_ASSET_LOCAL_STORAGE_METADATA_CONTRACT_COMPAT_LEVEL = {_quote(contract_compat_level)}
+export const USER_ASSET_LOCAL_STORAGE_METADATA_CONTRACT_DOC_PATH = {_quote(contract_doc_path)}
+export const USER_ASSET_LOCAL_STORAGE_METADATA_CONTRACT_OWNER = {_quote(contract_owner)}
+
+export const USER_ASSET_LOCAL_STORAGE_DRIVERS = [{drivers_items}] as const
+export type UserAssetLocalStorageDriver = (typeof USER_ASSET_LOCAL_STORAGE_DRIVERS)[number]
+
+export const USER_ASSET_LOCAL_PERSIST_LEVELS = [{persist_levels_items}] as const
+export type UserAssetLocalPersistLevel = (typeof USER_ASSET_LOCAL_PERSIST_LEVELS)[number]
+
+export const USER_ASSET_RESERVED_LOCAL_STORAGE_DRIVERS = [{reserved_drivers_items}] as const
+export const USER_ASSET_RESERVED_LOCAL_PERSIST_LEVELS = [{reserved_persist_levels_items}] as const
+
+export const USER_ASSET_ACTIVE_LOCAL_STORAGE_DRIVERS = [{active_drivers_items}] as const
+export type UserAssetActiveLocalStorageDriver = (typeof USER_ASSET_ACTIVE_LOCAL_STORAGE_DRIVERS)[number]
+
+export const USER_ASSET_ACTIVE_LOCAL_PERSIST_LEVELS = [{active_persist_levels_items}] as const
+export type UserAssetActiveLocalPersistLevel = (typeof USER_ASSET_ACTIVE_LOCAL_PERSIST_LEVELS)[number]
+
+export const USER_ASSET_LOCAL_STORAGE_PATH_MAX_LENGTH = {local_storage_path_max_length}
+export const USER_ASSET_EXTERNAL_RELATIVE_PATH_MAX_LENGTH = {external_relative_path_max_length}
+
+export const USER_ASSET_LOCAL_STORAGE_DRIVER_DESCRIPTION = {_quote(local_storage_driver_description)}
+export const USER_ASSET_LOCAL_STORAGE_PATH_DESCRIPTION = {_quote(local_storage_path_description)}
+export const USER_ASSET_LOCAL_PERSIST_LEVEL_DESCRIPTION = {_quote(local_persist_level_description)}
+export const USER_ASSET_EXTERNAL_RELATIVE_PATH_DESCRIPTION = {_quote(external_relative_path_description)}
+
+export interface UserAssetLocalStorageMetadata {{
+  local_storage_driver?: UserAssetLocalStorageDriver | null
+  local_storage_path?: string | null
+  local_persist_level?: UserAssetLocalPersistLevel | null
+  external_relative_path?: string | null
+}}
+
+export interface UserAssetMetadata extends UserAssetLocalStorageMetadata {{
+  [key: string]: any
+}}
+"""
+
+
+def _render_python(schema: dict[str, Any]) -> str:
+    contract_id = _get_root_string(
+        schema,
+        "$id",
+        "novel-writing-agent://contracts/user-asset-local-storage-metadata/v1",
+    )
+    contract_version = _get_root_string(schema, "x-contract-version", "unknown")
+    contract_doc_path = _get_root_string(
+        schema,
+        "x-contract-doc",
+        "docs/contracts/USER_ASSET_LOCAL_STORAGE_METADATA_CONTRACT.md",
+    )
+    contract_owner = _get_root_string(schema, "x-contract-owner", "user-assets/local-first")
+    contract_compat_level = _get_root_string(schema, "x-contract-compat-level", "unknown")
+    drivers = _get_string_enum(schema, "local_storage_driver")
+    persist_levels = _get_string_enum(schema, "local_persist_level")
+    local_storage_path_max_length = _get_max_length(schema, "local_storage_path")
+    external_relative_path_max_length = _get_max_length(schema, "external_relative_path")
+    local_storage_driver_description = _get_description(schema, "local_storage_driver")
+    local_storage_path_description = _get_description(schema, "local_storage_path")
+    local_persist_level_description = _get_description(schema, "local_persist_level")
+    external_relative_path_description = _get_description(schema, "external_relative_path")
+
+    drivers_tuple_items = ", ".join(_quote(item) for item in drivers)
+    persist_levels_tuple_items = ", ".join(_quote(item) for item in persist_levels)
+    driver_literal_items = ", ".join(_quote(item) for item in drivers)
+    persist_literal_items = ", ".join(_quote(item) for item in persist_levels)
+    reserved_drivers = _get_reserved_values(schema, "local_storage_driver")
+    reserved_persist_levels = _get_reserved_values(schema, "local_persist_level")
+    reserved_drivers_tuple_items = ", ".join(_quote(item) for item in reserved_drivers)
+    if len(reserved_drivers) == 1:
+        reserved_drivers_tuple_items += ","
+    reserved_persist_levels_tuple_items = ", ".join(_quote(item) for item in reserved_persist_levels)
+    if len(reserved_persist_levels) == 1:
+        reserved_persist_levels_tuple_items += ","
+    active_drivers = [item for item in drivers if item not in reserved_drivers]
+    active_persist_levels = [item for item in persist_levels if item not in reserved_persist_levels]
+    active_drivers_tuple_items = ", ".join(_quote(item) for item in active_drivers)
+    if len(active_drivers) == 1:
+        active_drivers_tuple_items += ","
+    active_persist_levels_tuple_items = ", ".join(_quote(item) for item in active_persist_levels)
+    if len(active_persist_levels) == 1:
+        active_persist_levels_tuple_items += ","
+    active_driver_literal_items = ", ".join(_quote(item) for item in active_drivers)
+    active_persist_literal_items = ", ".join(_quote(item) for item in active_persist_levels)
+
+    return f'''"""
+Generated by scripts/generate_user_asset_local_storage_contract.py from {SCHEMA_RELATIVE_PATH}.
+Do not edit this file directly.
+"""
+from __future__ import annotations
+
+from typing import Literal
+
+
+USER_ASSET_LOCAL_STORAGE_METADATA_CONTRACT_PATH = {_quote(SCHEMA_RELATIVE_PATH)}
+USER_ASSET_LOCAL_STORAGE_METADATA_CONTRACT_ID = {_quote(contract_id)}
+USER_ASSET_LOCAL_STORAGE_METADATA_CONTRACT_VERSION = {_quote(contract_version)}
+USER_ASSET_LOCAL_STORAGE_METADATA_CONTRACT_COMPAT_LEVEL = {_quote(contract_compat_level)}
+USER_ASSET_LOCAL_STORAGE_METADATA_CONTRACT_DOC_PATH = {_quote(contract_doc_path)}
+USER_ASSET_LOCAL_STORAGE_METADATA_CONTRACT_OWNER = {_quote(contract_owner)}
+
+USER_ASSET_LOCAL_STORAGE_DRIVERS = ({drivers_tuple_items})
+UserAssetLocalStorageDriver = Literal[{driver_literal_items}]
+
+USER_ASSET_LOCAL_PERSIST_LEVELS = ({persist_levels_tuple_items})
+UserAssetLocalPersistLevel = Literal[{persist_literal_items}]
+
+USER_ASSET_RESERVED_LOCAL_STORAGE_DRIVERS = ({reserved_drivers_tuple_items})
+USER_ASSET_RESERVED_LOCAL_PERSIST_LEVELS = ({reserved_persist_levels_tuple_items})
+
+USER_ASSET_ACTIVE_LOCAL_STORAGE_DRIVERS = ({active_drivers_tuple_items})
+UserAssetActiveLocalStorageDriver = Literal[{active_driver_literal_items}]
+
+USER_ASSET_ACTIVE_LOCAL_PERSIST_LEVELS = ({active_persist_levels_tuple_items})
+UserAssetActiveLocalPersistLevel = Literal[{active_persist_literal_items}]
+
+USER_ASSET_LOCAL_STORAGE_PATH_MAX_LENGTH = {local_storage_path_max_length}
+USER_ASSET_EXTERNAL_RELATIVE_PATH_MAX_LENGTH = {external_relative_path_max_length}
+
+USER_ASSET_LOCAL_STORAGE_DRIVER_DESCRIPTION = {_quote(local_storage_driver_description)}
+USER_ASSET_LOCAL_STORAGE_PATH_DESCRIPTION = {_quote(local_storage_path_description)}
+USER_ASSET_LOCAL_PERSIST_LEVEL_DESCRIPTION = {_quote(local_persist_level_description)}
+USER_ASSET_EXTERNAL_RELATIVE_PATH_DESCRIPTION = {_quote(external_relative_path_description)}
+'''
+
+
+def _write_if_changed(relative_path: str, content: str) -> None:
+    target_path = REPO_ROOT / relative_path
+    if target_path.exists() and target_path.read_text(encoding="utf-8") == content:
+        return
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(content, encoding="utf-8", newline="\n")
+
+
+def _check_matches(relative_path: str, content: str) -> list[str]:
+    target_path = REPO_ROOT / relative_path
+    if not target_path.exists():
+        return [f"缺失派生产物：{relative_path}"]
+    actual = target_path.read_text(encoding="utf-8")
+    if actual != content:
+        return [
+            f"派生产物与 schema 不一致：{relative_path}（请运行 python scripts/generate_user_asset_local_storage_contract.py 重新生成）"
+        ]
+    return []
+
+
+def _build_outputs() -> list[tuple[str, str]]:
+    schema = _load_schema()
+    return [
+        (TS_OUTPUT_RELATIVE_PATH, _render_ts(schema)),
+        (PY_OUTPUT_RELATIVE_PATH, _render_python(schema)),
+    ]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Generate or verify user-asset local-storage contract artifacts.",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="仅校验派生产物是否与 schema 同步，不写入文件。不同步时以非零退出码退出。",
+    )
+    args = parser.parse_args()
+
+    outputs = _build_outputs()
+
+    if args.check:
+        errors: list[str] = []
+        for relative_path, content in outputs:
+            errors.extend(_check_matches(relative_path, content))
+        if errors:
+            for message in errors:
+                print(message, file=sys.stderr)
+            sys.exit(1)
+        return
+
+    for relative_path, content in outputs:
+        _write_if_changed(relative_path, content)
+
+
+if __name__ == "__main__":
+    main()

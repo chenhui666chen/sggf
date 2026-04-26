@@ -31,6 +31,7 @@ export const STORY_EXPANSION_EXECUTION_MODE_LABELS: Record<string, string> = {
   iterative: '分轮协同',
   epic: '长篇框架',
   volume_detail: '单卷细化',
+  repair: '定向修复',
 }
 
 function resolveLabel(

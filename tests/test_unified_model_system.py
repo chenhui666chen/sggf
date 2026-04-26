@@ -482,15 +482,15 @@ class TestLLMAdapters:
         fake_httpx = types.SimpleNamespace(AsyncClient=FakeAsyncClient, Timeout=FakeTimeout)
 
         spec = UnifiedModelSpec(
-            id="deepseek-reasoner",
-            name="DeepSeek R1",
+            id="deepseek-v4-pro",
+            name="DeepSeek V4 Pro",
             provider="deepseek",
             model_type=ModelType.LLM,
             api_config=APIConfig(
                 api_key_env="TEST_API_KEY",
                 base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             ),
-            default_params={"request_model": "deepseek-r1"},
+            default_params={"request_model": "deepseek-v4-pro"},
         )
 
         with patch.dict('os.environ', {'TEST_API_KEY': 'test-key'}):
@@ -502,8 +502,71 @@ class TestLLMAdapters:
                 )
 
         assert result.success is True
-        assert captured_request_kwargs["model"] == "deepseek-r1"
+        assert captured_request_kwargs["model"] == "deepseek-v4-pro"
         assert "request_model" not in captured_request_kwargs.get("extra_body", {})
+
+    @pytest.mark.asyncio
+    async def test_adapter_passes_sdk_timeout_even_when_model_disables_timeout_param(self):
+        from core.llm_adapters import OpenAICompatibleAdapter
+        from schemas.unified_model_spec import UnifiedModelSpec, ModelType, APIConfig, LLMConstraints
+
+        captured_request_kwargs = {}
+
+        class FakeCompletions:
+            async def create(self, **kwargs):
+                captured_request_kwargs.update(kwargs)
+                return types.SimpleNamespace(
+                    choices=[types.SimpleNamespace(message=types.SimpleNamespace(content="ok"))],
+                    usage=None,
+                )
+
+        class FakeChat:
+            def __init__(self):
+                self.completions = FakeCompletions()
+
+        class FakeAsyncOpenAI:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+                self.chat = FakeChat()
+
+        class FakeTimeout:
+            def __init__(self, *args, **kwargs):
+                self.args = args
+                self.kwargs = kwargs
+
+        class FakeAsyncClient:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        fake_openai = types.SimpleNamespace(AsyncOpenAI=FakeAsyncOpenAI)
+        fake_httpx = types.SimpleNamespace(AsyncClient=FakeAsyncClient, Timeout=FakeTimeout)
+
+        spec = UnifiedModelSpec(
+            id="deepseek-v4-pro",
+            name="DeepSeek V4 Pro",
+            provider="deepseek",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(
+                api_key_env="TEST_API_KEY",
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            ),
+            constraints=LLMConstraints(max_output_tokens=384000, supports_timeout_param=False),
+            default_params={"request_model": "deepseek-v4-pro"},
+        )
+
+        with patch.dict("os.environ", {"TEST_API_KEY": "test-key"}):
+            with patch.dict("sys.modules", {"openai": fake_openai, "httpx": fake_httpx}):
+                adapter = OpenAICompatibleAdapter(spec)
+                result = await adapter.generate(
+                    messages=[{"role": "user", "content": "hello"}],
+                    temperature=0.7,
+                    max_tokens=384000,
+                    timeout=1234,
+                )
+
+        assert result.success is True
+        assert captured_request_kwargs["max_tokens"] == 384000
+        assert captured_request_kwargs["timeout"].args[0] == 1234
 
 
 class TestModelHub:
@@ -870,6 +933,92 @@ class TestModelHub:
         assert fallback_adapter.generate.await_count == 1
 
     @pytest.mark.asyncio
+    async def test_model_hub_clamps_max_tokens_before_fallback_call(self):
+        from core.model_hub import model_hub
+        from core.unified_registry import UnifiedModelRegistry
+        from schemas.unified_model_spec import (
+            UnifiedModelSpec,
+            ModelType,
+            APIConfig,
+            RoutingConfig,
+            LLMConstraints,
+            LLMResult,
+        )
+
+        registry = UnifiedModelRegistry()
+        registry.clear()
+
+        primary_spec = UnifiedModelSpec(
+            id="primary-fallback-clamp",
+            name="Primary Fallback Clamp",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(api_key_env="TEST_API_KEY", base_url="https://api.test.com/v1"),
+            constraints=LLMConstraints(max_output_tokens=384000, supports_max_retries=False),
+            routing=RoutingConfig(task_types=["fallback_test"], fallback_models=["fallback-small-output"]),
+        )
+        fallback_spec = UnifiedModelSpec(
+            id="fallback-small-output",
+            name="Fallback Small Output",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(api_key_env="TEST_API_KEY", base_url="https://api.test.com/v1"),
+            constraints=LLMConstraints(max_output_tokens=65536, supports_max_retries=False),
+            routing=RoutingConfig(task_types=["fallback_test"]),
+        )
+        registry.register(primary_spec)
+        registry.register(fallback_spec)
+
+        primary_adapter = Mock()
+        primary_adapter.generate = AsyncMock(
+            return_value=LLMResult(
+                success=False,
+                model_id="primary-fallback-clamp",
+                error="Request timed out.",
+                error_code="timeout",
+            )
+        )
+
+        fallback_max_tokens_seen = {}
+
+        async def _fallback_generate(*, max_tokens=None, **kwargs):
+            fallback_max_tokens_seen["value"] = max_tokens
+            return LLMResult(
+                success=True,
+                model_id="fallback-small-output",
+                content="ok",
+            )
+
+        fallback_adapter = Mock()
+        fallback_adapter.generate = AsyncMock(side_effect=_fallback_generate)
+
+        def get_adapter(model_id: str):
+            if model_id == "primary-fallback-clamp":
+                return primary_adapter
+            if model_id == "fallback-small-output":
+                return fallback_adapter
+            return None
+
+        original_registry = model_hub.registry
+        model_hub.registry = registry
+        try:
+            with patch.object(registry, "get_adapter", side_effect=get_adapter):
+                result = await model_hub._execute_call(
+                    model_id="primary-fallback-clamp",
+                    messages=[{"role": "user", "content": "hello"}],
+                    temperature=0.7,
+                    max_tokens=384000,
+                    stream=False,
+                    on_chunk=None,
+                )
+        finally:
+            model_hub.registry = original_registry
+
+        assert result.success is True
+        assert result.model_id == "fallback-small-output"
+        assert fallback_max_tokens_seen["value"] == 65536
+
+    @pytest.mark.asyncio
     async def test_model_hub_reroutes_failed_catalog_model_when_healthier_candidate_exists(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -1023,7 +1172,7 @@ class TestCompatibility:
         """测试历史模型别名映射。"""
         from core.model_resolution import normalize_model_id
 
-        assert normalize_model_id("deepseek-r1") == "deepseek-reasoner"
+        assert normalize_model_id("deepseek-r1") == "deepseek-v4-pro"
         assert normalize_model_id("qwen-plus") == "qwen-long"
         assert normalize_model_id("qwen-max") == "qwen3-max"
 
@@ -1058,12 +1207,12 @@ class TestYAMLConfiguration:
         assert qwen_spec is not None
         assert qwen_spec.provider == "alibaba"
 
-        deepseek_spec = registry.get_spec("deepseek-reasoner")
+        deepseek_spec = registry.get_spec("deepseek-v4-pro")
         assert deepseek_spec is not None
         assert deepseek_spec.provider == "deepseek"
         assert deepseek_spec.api_config.api_key_env == "DASHSCOPE_API_KEY"
         assert deepseek_spec.api_config.base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        assert deepseek_spec.default_params["request_model"] == "deepseek-r1"
+        assert deepseek_spec.default_params["request_model"] == "deepseek-v4-pro"
 
         deepseek_chat_spec = registry.get_spec("deepseek-chat")
         assert deepseek_chat_spec is not None

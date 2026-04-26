@@ -32,31 +32,31 @@ class LayeredSummarizer:
 
     DEFAULT_MODEL_LIMIT = 32000
     DEFAULT_TARGET_TOKENS = 2048
+    # 分块摘要优先控制成本，归并摘要优先控制质量。
     CHUNK_SUMMARY_MODEL = "qwen3.5-plus"
-    REDUCE_SUMMARY_MODEL = "qwen3.5-plus"
+    REDUCE_SUMMARY_MODEL = "qwen3.6-plus"
 
     # 模型选择只决定“最终任务用什么模型更合适”，上下文是否压缩由 mode 再决定
     MODEL_SELECTION_RULES = {
         "outline_expand": [
-            ((0, 40), ("qwen3.5-plus", 0.70)),
-            ((40, 150), ("qwen3.5-plus", 0.65)),
-            ((150, 9999), ("qwen3.5-plus", 0.28)),
+            ((0, 80), ("qwen3.6-plus", 0.80)),
+            ((80, 220), ("qwen3.5-plus", 0.72)),
+            ((220, 9999), ("qwen3.5-plus", 0.60)),
         ],
         "character_expand": [
-            ((0, 15), ("qwen3.5-plus", 0.65)),
-            ((15, 60), ("qwen3.5-plus", 0.60)),
-            ((60, 200), ("qwen3.5-plus", 0.55)),
-            ((200, 9999), ("qwen3.5-plus", 0.28)),
+            ((0, 30), ("qwen3.6-plus", 0.78)),
+            ((30, 120), ("qwen3.5-plus", 0.70)),
+            ((120, 9999), ("qwen3.5-plus", 0.58)),
         ],
         "chapter_generation": [
-            ((0, 40), ("qwen3-max", 0.78)),
-            ((40, 150), ("qwen3.5-plus", 0.70)),
-            ((150, 9999), ("qwen-long", 0.35)),
+            ((0, 60), ("qwen3.6-plus", 0.78)),
+            ((60, 260), ("qwen3.5-plus", 0.72)),
+            ((260, 9999), ("qwen3.5-plus", 0.62)),
         ],
         "structure_design": [
-            ((0, 60), ("deepseek-reasoner", 0.70)),
-            ((60, 200), ("qwen3.5-plus", 0.65)),
-            ((200, 9999), ("qwen-long", 0.32)),
+            ((0, 40), ("qwen3.6-plus", 0.80)),
+            ((40, 180), ("qwen3.5-plus", 0.72)),
+            ((180, 9999), ("qwen3.5-plus", 0.60)),
         ],
     }
 

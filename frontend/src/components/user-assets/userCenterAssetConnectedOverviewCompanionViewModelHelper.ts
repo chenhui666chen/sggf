@@ -1,0 +1,26 @@
+import {
+  buildUserCenterAssetConnectedOverviewPointsRulesCompanionContentOptionsFromInput,
+  buildUserCenterAssetConnectedOverviewStrategyCompanionContentOptionsFromInput,
+  type BuildUserCenterAssetConnectedOverviewPointsRulesCompanionContentOptionsFromInputOptions,
+} from './userCenterAssetConnectedOverviewCompanionInputHelper'
+import type {
+  UserCenterAssetConnectedOverviewPointsRulesCompanionContentOptions,
+  UserCenterAssetConnectedOverviewStrategyCompanionContentOptions,
+} from './UserCenterAssetConnectedOverviewCompanion'
+
+export type UserCenterAssetConnectedOverviewCompanionViewModel = {
+  strategyCompanionContentOptions: UserCenterAssetConnectedOverviewStrategyCompanionContentOptions
+  pointsRulesCompanionContentOptions: UserCenterAssetConnectedOverviewPointsRulesCompanionContentOptions
+}
+
+export type BuildUserCenterAssetConnectedOverviewCompanionViewModelOptions =
+  BuildUserCenterAssetConnectedOverviewPointsRulesCompanionContentOptionsFromInputOptions
+
+export function buildUserCenterAssetConnectedOverviewCompanionViewModel(
+  options: BuildUserCenterAssetConnectedOverviewCompanionViewModelOptions,
+): UserCenterAssetConnectedOverviewCompanionViewModel {
+  return {
+    strategyCompanionContentOptions: buildUserCenterAssetConnectedOverviewStrategyCompanionContentOptionsFromInput(),
+    pointsRulesCompanionContentOptions: buildUserCenterAssetConnectedOverviewPointsRulesCompanionContentOptionsFromInput(options),
+  }
+}

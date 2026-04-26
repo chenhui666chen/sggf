@@ -40,6 +40,24 @@ from app.services.setting_templates import (
 from app.services.setting_auto_merge import SettingAutoMergeService
 from app.services.setting_consistency import SettingConsistencyService
 from app.services.workflow_context_builder import WorkflowContextBuilder
+from app.api.v1.settings_api._helpers import (
+    _build_item_structure,
+    _collect_descendants,
+    _delete_setting_vectors,
+    _ensure_project_owned,
+    _item_to_schema,
+    _normalize_item_path,
+    _normalize_parent_path,
+    _rebase_collection_item_paths,
+    _relocate_item_subtree,
+    _serialize_relations,
+    _serialize_tags,
+    _split_path_segments,
+    _sync_setting_vector,
+    _sync_setting_vectors_for_items,
+    _validate_collection_name,
+    _validate_item_name,
+)
 
 from app.api.v1.settings_api import router
 

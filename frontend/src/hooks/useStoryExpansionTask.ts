@@ -44,6 +44,7 @@ interface UseStoryExpansionTaskReturn {
   beginStoryExpansionRequest: (analysis?: StoryExpansionAnalysis | null) => void
   handleStoryExpansionTaskStarted: (taskId: string | null | undefined) => void
   handleStoryExpansionTaskFailure: (message: string) => void
+  replaceStoryExpansionResult: (result: StoryExpansionResult) => void
 }
 
 interface StoryTaskStatusResponse {
@@ -179,6 +180,13 @@ export function useStoryExpansionTask({
     }
     showSnackbarRef.current(message, 'error')
   }, [projectId, resetStoryExpansionTaskTracking])
+
+  const replaceStoryExpansionResult = useCallback((result: StoryExpansionResult) => {
+    setStoryExpansionResult(result)
+    if (projectId) {
+      storeStoryExpansionResult(projectId, result)
+    }
+  }, [projectId])
 
   const beginStoryExpansionRequest = useCallback((analysis?: StoryExpansionAnalysis | null) => {
     const startedAt = Date.now()
@@ -446,5 +454,6 @@ export function useStoryExpansionTask({
     beginStoryExpansionRequest,
     handleStoryExpansionTaskStarted,
     handleStoryExpansionTaskFailure,
+    replaceStoryExpansionResult,
   }
 }

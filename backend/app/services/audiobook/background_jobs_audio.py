@@ -8,9 +8,14 @@ from app.db.base import SessionLocal
 from app.models.audiobook import AudiobookProject, ChapterAudio
 from app.models.project import Chapter, Project
 from app.services.audiobook.background_jobs_shared import (
+    build_checkpoint_patch_from_generation_result,
     create_background_engine,
+    get_latest_run_checkpoint_json,
     parse_duration_seconds,
     parse_estimated_cost,
+    persist_chapter_run_tts_progress,
+    prune_completed_run_temp_assets,
+    refresh_audiobook_project_audio_totals,
 )
 from app.services.audiobook.task_support import (
     StageTracker,
@@ -109,10 +114,12 @@ async def generate_audiobook_audio_from_scripts_background(
             return
 
         audiobook_project.status = "processing"
-        audiobook_project.completed_chapters = 0
-        audiobook_project.failed_chapters = 0
-        audiobook_project.total_duration = 0.0
-        audiobook_project.total_cost = 0.0
+        current_run_failed_chapters = 0
+        refresh_audiobook_project_audio_totals(
+            db,
+            audiobook_project=audiobook_project,
+            failed_chapters=current_run_failed_chapters,
+        )
         db.commit()
 
         engine = create_background_engine(
@@ -140,9 +147,6 @@ async def generate_audiobook_audio_from_scripts_background(
 
         _apply_project_audio_effects(engine=engine, project=project)
 
-        total_duration = 0.0
-        total_cost = 0.0
-
         for index, chapter_id in enumerate(chapter_ids, 1):
             try:
                 logger.info(
@@ -161,7 +165,7 @@ async def generate_audiobook_audio_from_scripts_background(
                         "⚠️ 章节 %s 缺少剧本数据(script_json为空)，跳过该章节",
                         chapter_id,
                     )
-                    audiobook_project.failed_chapters += 1
+                    current_run_failed_chapters += 1
                     _update_chapter_run_state(
                         db,
                         audiobook_project_id=audiobook_project_id,
@@ -171,6 +175,11 @@ async def generate_audiobook_audio_from_scripts_background(
                         current_stage="failed",
                         progress=0.0,
                         error_message="script_missing",
+                    )
+                    refresh_audiobook_project_audio_totals(
+                        db,
+                        audiobook_project=audiobook_project,
+                        failed_chapters=current_run_failed_chapters,
                     )
                     db.commit()
                     continue
@@ -182,7 +191,7 @@ async def generate_audiobook_audio_from_scripts_background(
                         chapter_id,
                         chapter_audio.script_status,
                     )
-                    audiobook_project.failed_chapters += 1
+                    current_run_failed_chapters += 1
                     _update_chapter_run_state(
                         db,
                         audiobook_project_id=audiobook_project_id,
@@ -193,13 +202,18 @@ async def generate_audiobook_audio_from_scripts_background(
                         progress=0.0,
                         error_message=f"script_not_approved:{chapter_audio.script_status}",
                     )
+                    refresh_audiobook_project_audio_totals(
+                        db,
+                        audiobook_project=audiobook_project,
+                        failed_chapters=current_run_failed_chapters,
+                    )
                     db.commit()
                     continue
 
                 chapter = db.query(Chapter).filter(Chapter.id == chapter_id).first()
                 if not chapter:
                     logger.warning("⚠️ 章节不存在: %s", chapter_id)
-                    audiobook_project.failed_chapters += 1
+                    current_run_failed_chapters += 1
                     _update_chapter_run_state(
                         db,
                         audiobook_project_id=audiobook_project_id,
@@ -209,6 +223,11 @@ async def generate_audiobook_audio_from_scripts_background(
                         current_stage="failed",
                         progress=0.0,
                         error_message="chapter_not_found",
+                    )
+                    refresh_audiobook_project_audio_totals(
+                        db,
+                        audiobook_project=audiobook_project,
+                        failed_chapters=current_run_failed_chapters,
                     )
                     db.commit()
                     continue
@@ -221,7 +240,7 @@ async def generate_audiobook_audio_from_scripts_background(
                         chapter_id,
                         parse_err,
                     )
-                    audiobook_project.failed_chapters += 1
+                    current_run_failed_chapters += 1
                     _update_chapter_run_state(
                         db,
                         audiobook_project_id=audiobook_project_id,
@@ -232,6 +251,11 @@ async def generate_audiobook_audio_from_scripts_background(
                         progress=0.0,
                         error_message=f"invalid_script_json:{parse_err}",
                     )
+                    refresh_audiobook_project_audio_totals(
+                        db,
+                        audiobook_project=audiobook_project,
+                        failed_chapters=current_run_failed_chapters,
+                    )
                     db.commit()
                     continue
 
@@ -241,7 +265,7 @@ async def generate_audiobook_audio_from_scripts_background(
                         chapter_id,
                         type(script_segments_data),
                     )
-                    audiobook_project.failed_chapters += 1
+                    current_run_failed_chapters += 1
                     _update_chapter_run_state(
                         db,
                         audiobook_project_id=audiobook_project_id,
@@ -252,6 +276,11 @@ async def generate_audiobook_audio_from_scripts_background(
                         progress=0.0,
                         error_message=f"invalid_script_payload:{type(script_segments_data)}",
                     )
+                    refresh_audiobook_project_audio_totals(
+                        db,
+                        audiobook_project=audiobook_project,
+                        failed_chapters=current_run_failed_chapters,
+                    )
                     db.commit()
                     continue
 
@@ -259,6 +288,24 @@ async def generate_audiobook_audio_from_scripts_background(
                     f"audiobooks/project_{audiobook_project.project_id}"
                     f"/chapter_{chapter.chapter_number:03d}.mp3"
                 )
+                resume_checkpoint = get_latest_run_checkpoint_json(
+                    db,
+                    audiobook_project_id=audiobook_project_id,
+                    chapter_id=chapter_id,
+                    run_type="audio_from_scripts",
+                )
+                def handle_tts_progress(progress_payload):
+                    persist_chapter_run_tts_progress(
+                        db,
+                        audiobook_project_id=audiobook_project_id,
+                        chapter_id=chapter_id,
+                        run_type="audio_from_scripts",
+                        task_id=progress_payload.get("task_id"),
+                        total_segment_count=int(progress_payload.get("total_segments") or 0),
+                        completed_segment_indices=progress_payload.get("completed_segment_indices") or [],
+                        temp_segment_cache=progress_payload.get("temp_segment_cache"),
+                    )
+
                 result = await engine.generate_chapter_audio_from_script(
                     script_segments_data=script_segments_data,
                     chapter_id=chapter_id,
@@ -267,6 +314,8 @@ async def generate_audiobook_audio_from_scripts_background(
                     novel_theme=novel_theme,
                     enable_quality_review=True,
                     audiobook_project_id=audiobook_project_id,
+                    resume_checkpoint=resume_checkpoint,
+                    tts_progress_callback=handle_tts_progress,
                 )
 
                 task_id = result.get("task_id")
@@ -277,7 +326,6 @@ async def generate_audiobook_audio_from_scripts_background(
                     parse_stats = stats.get("parse_stats") or {}
                     tts_stats = stats.get("tts_stats") or {}
 
-                    chapter_audio.task_id = task_id
                     chapter_audio.audio_path = output_path
                     chapter_audio.duration = result.get("duration") or 0.0
                     chapter_audio.file_size = result.get("file_size") or 0
@@ -318,11 +366,6 @@ async def generate_audiobook_audio_from_scripts_background(
                                 dump_err,
                             )
 
-                    audiobook_project.completed_chapters += 1
-                    total_duration += result.get("duration") or 0.0
-                    if cost is not None:
-                        total_cost += cost
-
                     _update_chapter_run_state(
                         db,
                         audiobook_project_id=audiobook_project_id,
@@ -339,15 +382,37 @@ async def generate_audiobook_audio_from_scripts_background(
                             "total_segments",
                             chapter_audio.segment_count or 0,
                         ),
-                        checkpoint_patch={
-                            "engine_task_id": task_id,
-                            "output_path": output_path,
-                        },
+                        checkpoint_patch=build_checkpoint_patch_from_generation_result(
+                            result=result,
+                            task_id=task_id,
+                            output_path=output_path,
+                        ),
                     )
+                    cleanup_summary = prune_completed_run_temp_assets(
+                        db,
+                        audiobook_project_id=audiobook_project_id,
+                        chapter_id=chapter_id,
+                        run_type="audio_from_scripts",
+                    )
+                    if cleanup_summary.get("cleanup_skipped"):
+                        logger.warning(
+                            "Completed run temp cleanup skipped: chapter_id=%s, reason=%s",
+                            chapter_id,
+                            cleanup_summary.get("cleanup_skipped"),
+                        )
+                    else:
+                        logger.info(
+                            "Completed run temp assets pruned: chapter_id=%s, run_id=%s, removed_temp_files=%s",
+                            chapter_id,
+                            cleanup_summary.get("run_id"),
+                            cleanup_summary.get("removed_temp_files"),
+                        )
                     logger.info("✅ 章节 %s 音频生成成功", chapter_id)
                 else:
-                    audiobook_project.failed_chapters += 1
+                    current_run_failed_chapters += 1
                     logger.error("❌ 章节 %s 音频生成失败: %s", chapter_id, result.get("error"))
+                    failure_stats = result.get("stats") or {}
+                    failure_parse_stats = failure_stats.get("parse_stats") or {}
                     _update_chapter_run_state(
                         db,
                         audiobook_project_id=audiobook_project_id,
@@ -356,16 +421,24 @@ async def generate_audiobook_audio_from_scripts_background(
                         status="failed",
                         current_stage="failed",
                         progress=0.0,
+                        total_segment_count=failure_parse_stats.get("total_segments"),
+                        checkpoint_patch=build_checkpoint_patch_from_generation_result(
+                            result=result,
+                            task_id=task_id,
+                        ),
                         error_message=str(result.get("error") or "audio_generation_failed"),
                     )
 
-                audiobook_project.total_duration = total_duration
-                audiobook_project.total_cost = total_cost
+                refresh_audiobook_project_audio_totals(
+                    db,
+                    audiobook_project=audiobook_project,
+                    failed_chapters=current_run_failed_chapters,
+                )
                 db.commit()
 
             except Exception as exc:
                 logger.error("❌ 章节 %s 音频阶段处理异常: %s", chapter_id, exc)
-                audiobook_project.failed_chapters += 1
+                current_run_failed_chapters += 1
                 _update_chapter_run_state(
                     db,
                     audiobook_project_id=audiobook_project_id,
@@ -376,14 +449,22 @@ async def generate_audiobook_audio_from_scripts_background(
                     progress=0.0,
                     error_message=str(exc),
                 )
+                refresh_audiobook_project_audio_totals(
+                    db,
+                    audiobook_project=audiobook_project,
+                    failed_chapters=current_run_failed_chapters,
+                )
                 db.commit()
                 import traceback
 
                 traceback.print_exc()
 
         audiobook_project.status = "completed"
-        audiobook_project.total_duration = total_duration
-        audiobook_project.total_cost = total_cost
+        final_totals = refresh_audiobook_project_audio_totals(
+            db,
+            audiobook_project=audiobook_project,
+            failed_chapters=current_run_failed_chapters,
+        )
         db.commit()
 
         try:
@@ -401,8 +482,8 @@ async def generate_audiobook_audio_from_scripts_background(
             audiobook_project.completed_chapters,
             audiobook_project.total_chapters,
         )
-        logger.info("   - 总时长: %.1f秒", total_duration)
-        logger.info("   - 总成本: ¥%.2f", total_cost)
+        logger.info("   - 总时长: %.1f秒", final_totals.total_duration)
+        logger.info("   - 总成本: ¥%.2f", final_totals.total_cost)
     except Exception as exc:
         logger.error("❌ 基于剧本的后台生成任务失败: %s", exc)
         import traceback

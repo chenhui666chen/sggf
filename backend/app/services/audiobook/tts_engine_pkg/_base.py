@@ -301,7 +301,8 @@ class TTSEngineBase:
         batch_size: int = 10,  # 每批处理数量
         batch_interval: int = 0,  # 批次间隔（秒）- 优化：取消节流等待
         debug_save_segments: bool = False,  # 调试：是否保存每个片段的原始音频
-        debug_output_dir: Optional[str] = None  # 调试：保存目录
+        debug_output_dir: Optional[str] = None,  # 调试：保存目录
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> List[bytes]:
         """
         批量合成（分批处理，避免阿里云配额限制）
@@ -324,6 +325,7 @@ class TTSEngineBase:
         
         # 分批处理
         audio_list = []
+        success_count = 0
         num_batches = (total + batch_size - 1) // batch_size  # 向上取整
         
         for batch_idx in range(num_batches):
@@ -339,8 +341,8 @@ class TTSEngineBase:
                 end_idx,
             )
             
-            # 串行处理当前批次（避免并发创建WebSocket连接）
-            batch_results = []
+            batch_success = 0
+            batch_audio_list: List[bytes] = []
             for i, seg in enumerate(batch_segments):
                 global_idx = start_idx + i
                 try:
@@ -349,34 +351,74 @@ class TTSEngineBase:
                         voice_params=seg["voice_params"],
                         emotion=seg.get("emotion", "neutral")
                     )
-                    batch_results.append(result)
                 except Exception as e:
                     logger.error("片段 %s 异常: %s", global_idx + 1, e)
-                    batch_results.append(Exception(str(e)))
-            
-            # 处理当前批次结果
-            batch_success = 0
-            for i, result in enumerate(batch_results):
-                global_idx = start_idx + i
+                    result = Exception(str(e))
+
                 if isinstance(result, Exception):
                     logger.error("片段 %s 失败: %s", global_idx + 1, result)
-                    audio_list.append(b"")  # 空音频
+                    audio_bytes = b""
+                    audio_list.append(audio_bytes)
+                    batch_audio_list.append(audio_bytes)
                 elif result and len(result) > 0:
-                    logger.debug("片段 %s 成功: %s字节", global_idx + 1, len(result))
-                    audio_list.append(result)
+                    audio_bytes = bytes(result)
+                    logger.debug("片段 %s 成功: %s字节", global_idx + 1, len(audio_bytes))
+                    audio_list.append(audio_bytes)
+                    batch_audio_list.append(audio_bytes)
                     batch_success += 1
+                    success_count += 1
                 else:
                     logger.warning("片段 %s 返回空", global_idx + 1)
-                    audio_list.append(b"")
+                    audio_bytes = b""
+                    audio_list.append(audio_bytes)
+                    batch_audio_list.append(audio_bytes)
+
+                if progress_callback:
+                    try:
+                        progress_callback(
+                            {
+                                "event": "segment",
+                                "batch_index": batch_idx,
+                                "num_batches": num_batches,
+                                "start_idx": start_idx,
+                                "end_idx": end_idx,
+                                "segment_offset": i,
+                                "segment_index": global_idx,
+                                "audio_bytes": audio_bytes,
+                                "completed_segments": len(audio_list),
+                                "total_segments": total,
+                                "successful_segments": success_count,
+                            }
+                        )
+                    except Exception as callback_exc:
+                        logger.warning("TTS segment progress callback failed: %s", callback_exc)
             
             logger.info(f"   批次完成: {batch_success}/{len(batch_segments)} 成功")
+
+            if progress_callback:
+                try:
+                    progress_callback(
+                        {
+                            "event": "batch_completed",
+                            "batch_index": batch_idx,
+                            "num_batches": num_batches,
+                            "start_idx": start_idx,
+                            "end_idx": end_idx,
+                            "batch_audio_list": batch_audio_list,
+                            "completed_segments": len(audio_list),
+                            "total_segments": total,
+                            "successful_segments": success_count,
+                            "batch_successful_segments": batch_success,
+                        }
+                    )
+                except Exception as callback_exc:
+                    logger.warning("TTS batch progress callback failed: %s", callback_exc)
             
             # 批次间暂停（除了最后一批）
             if batch_idx < num_batches - 1:
                 logger.info("暂停%s秒，避免触发配额限制...", batch_interval)
                 await asyncio.sleep(batch_interval)
         
-        success_count = len([a for a in audio_list if a])
         logger.info("批量合成完成: %s/%s 成功", success_count, total)
         
         # 调试模式：保存每个片段的原始音频和文本

@@ -30,7 +30,10 @@ import {
   type AssetStudioGenerateResponse,
   type AssetStudioMediaAsset,
 } from '@/services/api'
-import { saveLocalAsset } from '@/utils/localAssetVault'
+import { buildAssetStudioCollectedAssetMetadataContract } from '@/contracts/userAssetMetadataBuilders'
+import { buildAssetStudioCollectedSourcePayload } from '@/contracts/userAssetSourcePayloadBuilders'
+import { extractLocalAssetStorageMetadata } from '@/utils/localAssetVault'
+import { saveExplicitLocalUserAsset } from '@/utils/userAssetExplicitLocalCollection'
 
 import AssetStudioVisionReviewPanel from './AssetStudioVisionReviewPanel'
 import type { AssetStudioVisionReusePayload } from './AssetStudioVisionReviewPanel'
@@ -1891,8 +1894,10 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
       const resolvedMimeType = primaryAsset.mime_type || assetBlob.type || null
       const resolvedFileSize = primaryAsset.file_size ?? assetBlob.size ?? null
       const assetTitle = buildAssetTitle(options.prompt, options.fallbackTitle)
-
-      await saveLocalAsset({
+      const {
+        localAssetRecord,
+        didFallbackToBrowserStorage,
+      } = await saveExplicitLocalUserAsset({
         assetUuid: primaryAsset.asset_uuid,
         mediaKind: primaryAsset.media_kind,
         blob: assetBlob,
@@ -1929,19 +1934,25 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
         model_id: options.result.model_id || null,
         generation_mode: options.result.mode || null,
         tags: options.tags || [],
-        metadata_json: options.result.metadata || {},
-        source_payload_json: {
+        metadata_json: buildAssetStudioCollectedAssetMetadataContract(
+          options.result.metadata,
+          extractLocalAssetStorageMetadata(localAssetRecord),
+        ),
+        source_payload_json: buildAssetStudioCollectedSourcePayload({
           kind: options.result.kind,
           mode: options.result.mode,
-          model_id: options.result.model_id,
+          modelId: options.result.model_id,
           assets: options.result.assets || [],
-          primary_asset: options.result.primary_asset || null,
+          primaryAsset: options.result.primary_asset || null,
           metadata: options.result.metadata || {},
-        },
+        }),
       })
+      const successText = didFallbackToBrowserStorage
+        ? '已收录到用户资产，但用户目录当前不可用，文件已回退保存到浏览器本地存储'
+        : '已保存到本地并收录到用户资产'
       updateCollectState(key, {
         loading: false,
-        feedback: { type: 'success', text: '已保存到本地并收录到用户资产' },
+        feedback: { type: 'success', text: successText },
       })
     } catch (error) {
       updateCollectState(key, {

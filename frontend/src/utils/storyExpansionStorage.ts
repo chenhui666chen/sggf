@@ -31,6 +31,8 @@ const CURRENT_STORY_EXPANSION_RESULT_KEYS = [
   'target_chapter_count',
   'current_character_count',
   'target_character_count',
+  'completion_status',
+  'goal_reached',
   'expansion_analysis',
   'message',
 ] as const

@@ -212,7 +212,7 @@ def create_user_asset(
     *,
     user_id: int,
     title: str,
-    file_url: str,
+    source_uri: str,
     asset_class: str = "reusable",
     archived_at: datetime | None = None,
     created_at: datetime | None = None,
@@ -220,14 +220,18 @@ def create_user_asset(
 ) -> UserAssetRecord:
     db = session_factory()
     try:
+        asset_uuid = f"asset-studio-{abs(hash((user_id, title, source_uri)))}"
         asset = UserAssetRecord(
             user_id=user_id,
             source_module="asset_studio",
             asset_kind="image",
             asset_class=asset_class,
+            asset_uuid=asset_uuid,
+            storage_mode="durable_cloud",
             title=title,
-            file_url=file_url,
-            preview_url=file_url,
+            source_uri=source_uri,
+            preview_uri=source_uri,
+            download_uri=source_uri,
             tags=[],
             metadata_json={},
             source_payload_json={},

@@ -36,6 +36,26 @@ from app.api.v1.workflow.execute_background import (
     _run_execute_stage_with_streaming_serialized,
 )
 
+
+def _normalize_generation_history_result_payload(raw_result: Any) -> Any:
+    """将 generation_history.result 统一规范为可直接返回给前端的 Python 值。"""
+    if raw_result is None:
+        return None
+    if isinstance(raw_result, (dict, list)):
+        return raw_result
+    if not isinstance(raw_result, str):
+        return raw_result
+
+    result_text = raw_result.strip()
+    if not result_text:
+        return raw_result
+
+    try:
+        return json.loads(result_text)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Failed to parse workflow task result payload: %s", exc)
+        return raw_result
+
 @router.post("/regenerate-stage")
 async def regenerate_stage(
     request: RegenerateStageRequest,
@@ -541,7 +561,7 @@ async def get_task_status(
             "task_id": result[0],
             "status": result[1],
             "progress": progress,
-            "result": result[2],
+            "result": _normalize_generation_history_result_payload(result[2]),
             "error": result[3],
             "created_at": result[4],
             "completed_at": result[5]

@@ -98,7 +98,7 @@ def test_audiobook_precheck_blocks_when_available_points_insufficient():
         session_factory,
         user_id=user.id,
         title="低余额资产",
-        file_url="https://example.com/asset-low.png",
+        source_uri="https://example.com/asset-low.png",
         created_at=now,
         updated_at=now,
     )
@@ -149,7 +149,7 @@ def test_audiobook_precheck_blocks_when_negative_margin_policy_is_hit():
         session_factory,
         user_id=user.id,
         title="高余额资产",
-        file_url="https://example.com/asset-margin.png",
+        source_uri="https://example.com/asset-margin.png",
         created_at=now,
         updated_at=now,
     )
@@ -201,7 +201,7 @@ def test_audiobook_precheck_reuses_existing_formal_freeze_amount():
         session_factory,
         user_id=user.id,
         title="正式冻结资产",
-        file_url="https://example.com/asset-formal.png",
+        source_uri="https://example.com/asset-formal.png",
         created_at=now,
         updated_at=now,
     )
@@ -280,7 +280,7 @@ def test_audiobook_precheck_reclaims_current_running_frozen_points_for_existing_
         session_factory,
         user_id=user.id,
         title="在途冻结资产",
-        file_url="https://example.com/asset-running.png",
+        source_uri="https://example.com/asset-running.png",
         created_at=now,
         updated_at=now,
     )
@@ -342,7 +342,7 @@ def test_dreamweaver_precheck_blocks_when_available_points_insufficient():
         session_factory,
         user_id=user.id,
         title="短剧低余额资产",
-        file_url="https://example.com/dw-asset-low.png",
+        source_uri="https://example.com/dw-asset-low.png",
         created_at=now,
         updated_at=now,
     )
@@ -397,7 +397,7 @@ def test_dreamweaver_precheck_blocks_when_negative_margin_policy_is_hit():
         session_factory,
         user_id=user.id,
         title="短剧高余额资产",
-        file_url="https://example.com/dw-asset-margin.png",
+        source_uri="https://example.com/dw-asset-margin.png",
         created_at=now,
         updated_at=now,
     )
@@ -450,7 +450,7 @@ def test_dreamweaver_precheck_passes_when_available_points_are_sufficient():
         session_factory,
         user_id=user.id,
         title="短剧可启动资产",
-        file_url="https://example.com/dw-asset-ok.png",
+        source_uri="https://example.com/dw-asset-ok.png",
         created_at=now,
         updated_at=now,
     )

@@ -15,6 +15,7 @@ import {
   formatStoryExpansionDurationRange,
   formatStoryExpansionElapsedDuration,
 } from '@/utils/storyExpansionTiming'
+import { apiClient, extractApiErrorMessage } from '@/services/api'
 import { useStoryExpansionComposer } from '@/hooks/useStoryExpansionComposer'
 import { useStoryExpansionSubmit } from '@/hooks/useStoryExpansionSubmit'
 import { useStoryExpansionTask } from '@/hooks/useStoryExpansionTask'
@@ -89,12 +90,14 @@ export function useStoryExpansionController({
     beginStoryExpansionRequest,
     handleStoryExpansionTaskStarted,
     handleStoryExpansionTaskFailure,
+    replaceStoryExpansionResult,
   } = useStoryExpansionTask({
     projectId,
     refreshWorkflowData,
     refreshFramework: loadEpicFramework,
     showSnackbar,
   })
+  const [autoImprovingStoryIssues, setAutoImprovingStoryIssues] = useState(false)
 
   const resolveStoryExpansionConfirm = useCallback((confirmed: boolean) => {
     const pendingResolver = storyExpansionConfirmResolverRef.current
@@ -110,6 +113,11 @@ export function useStoryExpansionController({
       setStoryExpansionConfirmDialog(confirmDialog)
     })
   ), [])
+
+  const refreshRepairContext = useCallback(() => {
+    void Promise.resolve(refreshWorkflowData()).catch(() => undefined)
+    void Promise.resolve(loadEpicFramework()).catch(() => undefined)
+  }, [loadEpicFramework, refreshWorkflowData])
 
   useEffect(() => () => {
     storyExpansionConfirmResolverRef.current?.(false)
@@ -157,6 +165,44 @@ export function useStoryExpansionController({
   const openStoryExpansionResultDialog = useCallback(() => {
     setShowStoryExpansionResultDialog(true)
   }, [setShowStoryExpansionResultDialog])
+
+  const autoImproveStoryExpansionIssues = useCallback(async () => {
+    const numericProjectId = Number.parseInt(projectId || '', 10)
+    if (!Number.isFinite(numericProjectId) || !storyExpansionResult || autoImprovingStoryIssues) {
+      return
+    }
+
+    try {
+      setAutoImprovingStoryIssues(true)
+      const response = await apiClient.repairExpandStoryScore({
+        project_id: numericProjectId,
+        story_expansion_mode: storyExpansionResult.story_expansion_mode,
+        volume_index: storyExpansionResult.volume_index ?? null,
+      })
+
+      const repairedResult = response.data?.result
+      if (!repairedResult) {
+        showSnackbar('自动改进已完成，但未返回可展示结果', 'error')
+        return
+      }
+
+      replaceStoryExpansionResult(repairedResult)
+      refreshRepairContext()
+      showSnackbar(response.data?.message?.trim() || repairedResult.message || '协同问题已自动改进', 'success')
+    } catch (error) {
+      const errorMessage = await extractApiErrorMessage(error, '协同自动改进失败')
+      showSnackbar(errorMessage, 'error')
+    } finally {
+      setAutoImprovingStoryIssues(false)
+    }
+  }, [
+    autoImprovingStoryIssues,
+    projectId,
+    refreshRepairContext,
+    replaceStoryExpansionResult,
+    showSnackbar,
+    storyExpansionResult,
+  ])
 
   const storyExpansionWaitInfo = useMemo(() => {
     if (!expandingStory) {
@@ -233,6 +279,10 @@ export function useStoryExpansionController({
     preserveWrittenModeLabel: resultLabels.preserveWrittenModeLabel,
     writtenContextLabel: resultLabels.writtenContextLabel,
     summary,
+    repairingAutoImprove: autoImprovingStoryIssues,
+    onAutoImprove: () => {
+      void autoImproveStoryExpansionIssues()
+    },
     onClose: () => setShowStoryExpansionResultDialog(false),
     onCopied: (message) => showSnackbar(message, 'success'),
   }), [
@@ -241,6 +291,8 @@ export function useStoryExpansionController({
     resultLabels.preserveWrittenModeLabel,
     resultLabels.strategyLabel,
     resultLabels.writtenContextLabel,
+    autoImproveStoryExpansionIssues,
+    autoImprovingStoryIssues,
     setShowStoryExpansionResultDialog,
     showSnackbar,
     showStoryExpansionResultDialog,

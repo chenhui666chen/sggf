@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Box,
@@ -32,6 +32,8 @@ import MovieIcon from '@mui/icons-material/Movie'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
+import { buildDreamWeaverLibraryAssetMetadataContract } from '@/contracts/userAssetMetadataBuilders'
+import { buildDreamWeaverLibrarySourcePayload } from '@/contracts/userAssetSourcePayloadBuilders'
 import LibraryRegenerateDialog from '@/components/dreamweaver/LibraryRegenerateDialog'
 import {
   CHARACTER_VIEW_ORDER,
@@ -41,6 +43,11 @@ import {
   type CharacterView,
 } from '@/utils/dreamweaverLibraryRole'
 import { hasRenderableLibraryImage, resolveLibraryAssetImageState } from '@/utils/dreamweaverLibraryAssetState'
+import {
+  buildDreamweaverLibrarySourceActivationPlan,
+  buildDreamweaverLibrarySourceScrollPlan,
+  readUserAssetSourceLibraryAssetId,
+} from '@/utils/userAssetSourceNavigation'
 import {
   STYLE_PRESETS,
   IMAGE_RATIOS,
@@ -154,6 +161,7 @@ const LIBRARY_CARD_GROUP_ORDER: ReadonlyArray<{ key: LibraryCardGroupKey; label:
 export default function DreamWeaverLibraryPage() {
   const navigate = useNavigate()
   const params = useParams()
+  const [searchParams] = useSearchParams()
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
   const isTablet = useMediaQuery(theme.breakpoints.down('md'))
@@ -164,6 +172,10 @@ export default function DreamWeaverLibraryPage() {
     const id = Number.parseInt(raw, 10)
     return Number.isFinite(id) && id > 0 ? id : 0
   }, [params.projectId])
+  const requestedLibraryAssetId = useMemo(
+    () => readUserAssetSourceLibraryAssetId(searchParams),
+    [searchParams],
+  )
 
   const [library, setLibrary] = useState<LibraryPayload | null>(null)
   const [loading, setLoading] = useState(false)
@@ -184,6 +196,8 @@ export default function DreamWeaverLibraryPage() {
   const [regenError, setRegenError] = useState<string | null>(null)
   const regenSuggestRequestIdRef = useRef(0)
   const previewUrlsRef = useRef<Set<string>>(new Set())
+  const handledSourceAssetKeyRef = useRef<string | null>(null)
+  const handledSourceAssetScrollKeyRef = useRef<string | null>(null)
   const [characterViewsOpen, setCharacterViewsOpen] = useState(false)
   const [characterViewsEntityId, setCharacterViewsEntityId] = useState<number | null>(null)
   const [collectStates, setCollectStates] = useState<Record<number, CollectState>>({})
@@ -471,6 +485,15 @@ export default function DreamWeaverLibraryPage() {
   }
 
   const assets = Array.isArray(library?.assets) ? library!.assets : []
+  const requestedLibraryAsset = useMemo(
+    () => (requestedLibraryAssetId ? assets.find((asset) => asset.id === requestedLibraryAssetId) || null : null),
+    [assets, requestedLibraryAssetId],
+  )
+  const requestedCharacterEntityId = useMemo(() => {
+    if (!requestedLibraryAsset) return null
+    const parsed = parseLibraryRole(String(requestedLibraryAsset.role || '').trim())
+    return parsed.entityType === 'character' && parsed.entityId ? parsed.entityId : null
+  }, [requestedLibraryAsset])
   const approvedCount = assets.filter((a) => Boolean(a?.meta?.approved)).length
   const missingCount = Array.isArray(library?.review?.missing_roles) ? library!.review!.missing_roles.length : 0
   const unapprovedCount = Array.isArray(library?.review?.unapproved_roles) ? library!.review!.unapproved_roles.length : 0
@@ -637,6 +660,46 @@ export default function DreamWeaverLibraryPage() {
     setCharacterViewsEntityId(null)
   }
 
+  useEffect(() => {
+    const activationPlan = buildDreamweaverLibrarySourceActivationPlan({
+      projectId,
+      requestedLibraryAssetId,
+      requestedCharacterEntityId,
+      loading,
+      handledFocusKey: handledSourceAssetKeyRef.current,
+    })
+    if (!activationPlan) return
+    handledSourceAssetKeyRef.current = activationPlan.focusKey
+    setShowAllCards(true)
+    if (activationPlan.shouldOpenCharacterViews && activationPlan.characterEntityId) {
+      setCharacterViewsEntityId(activationPlan.characterEntityId)
+      setCharacterViewsOpen(true)
+    }
+  }, [loading, projectId, requestedCharacterEntityId, requestedLibraryAssetId])
+
+  useEffect(() => {
+    const scrollPlan = buildDreamweaverLibrarySourceScrollPlan({
+      projectId,
+      requestedLibraryAssetId,
+      requestedCharacterEntityId,
+      characterViewsOpen,
+      loading,
+      domAvailable: typeof document !== 'undefined' && typeof window !== 'undefined',
+      handledScrollKey: handledSourceAssetScrollKeyRef.current,
+    })
+    if (!scrollPlan) return
+
+    const target =
+      (scrollPlan.targetSelector ? document.querySelector<HTMLElement>(scrollPlan.targetSelector) : null)
+      || (scrollPlan.fallbackSelector ? document.querySelector<HTMLElement>(scrollPlan.fallbackSelector) : null)
+
+    if (!target) return
+    handledSourceAssetScrollKeyRef.current = scrollPlan.scrollKey
+    window.requestAnimationFrame(() => {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+    })
+  }, [characterViewsOpen, loading, projectId, requestedCharacterEntityId, requestedLibraryAssetId])
+
   const updateCollectState = useCallback((assetId: number, patch: Partial<CollectState>) => {
     setCollectStates((prev) => ({
       ...prev,
@@ -708,27 +771,27 @@ export default function DreamWeaverLibraryPage() {
             String(asset?.meta?.model_id || asset?.meta?.model || asset?.meta?.image_model || '').trim() || null,
           generation_mode: 'library_asset',
           tags,
-          metadata_json: {
-            ...asset.meta,
-            project_id: projectId,
-            library_asset_id: assetId,
-            library_role: asset.role,
-            library_uri: asset.uri,
-            entity_type: parsed.entityType,
-            entity_id: parsed.entityId ?? null,
+          metadata_json: buildDreamWeaverLibraryAssetMetadataContract({
+            baseMetadata: asset.meta,
+            projectId,
+            libraryAssetId: assetId,
+            libraryRole: asset.role,
+            libraryUri: asset.uri,
+            entityType: parsed.entityType,
+            entityId: parsed.entityId ?? null,
             view: parsed.view ?? null,
             approved,
-          },
-          source_payload_json: {
-            project_id: projectId,
-            asset_id: assetId,
+          }),
+          source_payload_json: buildDreamWeaverLibrarySourcePayload({
+            projectId,
+            assetId,
             role: asset.role,
             uri: asset.uri,
-            entity_type: parsed.entityType,
-            entity_id: parsed.entityId ?? null,
+            entityType: parsed.entityType,
+            entityId: parsed.entityId ?? null,
             view: parsed.view ?? null,
             approved,
-          },
+          }),
         })
         updateCollectState(assetId, {
           loading: false,
@@ -785,13 +848,21 @@ export default function DreamWeaverLibraryPage() {
       return (
         <ImageListItem
           key={`character:${card.entityId}`}
+          data-library-character-entity-id={card.entityId}
           sx={{
-            border: '1px solid rgba(255,255,255,0.14)',
+            border:
+              requestedCharacterEntityId === card.entityId
+                ? '1px solid rgba(255, 215, 64, 0.95)'
+                : '1px solid rgba(255,255,255,0.14)',
             borderRadius: 2,
             overflow: 'hidden',
             bgcolor: 'rgba(255,255,255,0.06)',
             breakInside: 'avoid',
             cursor: 'pointer',
+            boxShadow:
+              requestedCharacterEntityId === card.entityId
+                ? '0 0 0 2px rgba(255, 215, 64, 0.18)'
+                : 'none',
             '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' },
           }}
           onClick={() => openCharacterViews(card)}
@@ -884,12 +955,20 @@ export default function DreamWeaverLibraryPage() {
     return (
       <ImageListItem
         key={asset.id}
+        data-library-asset-id={asset.id}
         sx={{
-          border: '1px solid rgba(255,255,255,0.14)',
+          border:
+            requestedLibraryAssetId === asset.id
+              ? '1px solid rgba(255, 215, 64, 0.95)'
+              : '1px solid rgba(255,255,255,0.14)',
           borderRadius: 2,
           overflow: 'hidden',
           bgcolor: 'rgba(255,255,255,0.06)',
           breakInside: 'avoid',
+          boxShadow:
+            requestedLibraryAssetId === asset.id
+              ? '0 0 0 2px rgba(255, 215, 64, 0.18)'
+              : 'none',
         }}
       >
         <Box sx={{ width: '100%', aspectRatio, bgcolor: 'rgba(0,0,0,0.25)', position: 'relative' }}>
@@ -1250,11 +1329,19 @@ export default function DreamWeaverLibraryPage() {
               return (
                 <Box
                   key={view}
+                  data-library-asset-id={asset?.id}
                   sx={{
-                    border: '1px solid rgba(0,0,0,0.12)',
+                    border:
+                      requestedLibraryAssetId && asset?.id === requestedLibraryAssetId
+                        ? '1px solid rgba(255, 215, 64, 0.95)'
+                        : '1px solid rgba(0,0,0,0.12)',
                     borderRadius: 2,
                     overflow: 'hidden',
                     bgcolor: 'rgba(0,0,0,0.02)',
+                    boxShadow:
+                      requestedLibraryAssetId && asset?.id === requestedLibraryAssetId
+                        ? '0 0 0 2px rgba(255, 215, 64, 0.18)'
+                        : 'none',
                   }}
                 >
                   <Box sx={{ width: '100%', aspectRatio, bgcolor: 'rgba(0,0,0,0.08)', position: 'relative' }}>

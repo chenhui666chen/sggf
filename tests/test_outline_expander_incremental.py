@@ -1035,7 +1035,76 @@ def test_story_normalize_volume_detail_response_strips_preamble_before_story_hea
 
 def test_estimate_volume_detail_model_prefers_plus_when_upper_bound_exceeds_80():
     assert OutlineExpander.estimate_volume_detail_model((60, 100)) == "qwen3.5-plus"
-    assert OutlineExpander.estimate_volume_detail_model((20, 80)) == "deepseek-reasoner"
+    assert OutlineExpander.estimate_volume_detail_model((20, 80)) == "deepseek-v4-pro"
+
+
+def test_outline_expander_initializes_dynamic_timeouts(monkeypatch):
+    import backend.app.services.agents.outline_expansion._base as base_module
+
+    captured_calls = []
+
+    class _DummyKnowledgeBase:
+        pass
+
+    class _DummyMemoryManager:
+        def __init__(self):
+            self.persist_directory = ""
+
+    class _DummyAgent:
+        def __init__(self, _knowledge_base=None, memory_manager=None, llm=None):
+            self.memory_manager = memory_manager or _DummyMemoryManager()
+            self.llm = llm
+
+    class _DummySummarizer:
+        def __init__(self, *_args, **_kwargs):
+            return None
+
+    class _DummyRecognizer:
+        pass
+
+    class _DummyPlotValidator:
+        pass
+
+    def fake_create_task_llm(*, task_type=None, model=None, max_tokens=None, timeout=None, **kwargs):
+        runtime_options = dict(kwargs)
+        runtime_options["timeout"] = timeout
+        llm = type("DummyLLM", (), {})()
+        llm.model_name = model or task_type
+        llm.max_tokens = max_tokens
+        llm.runtime_options = runtime_options
+        captured_calls.append(
+            {
+                "task_type": task_type,
+                "model": model,
+                "max_tokens": max_tokens,
+                "timeout": timeout,
+            }
+        )
+        return llm
+
+    def fake_estimate_timeout(model_id, requested_max_tokens, minimum_timeout=None):
+        _ = requested_max_tokens, minimum_timeout
+        return 480 if model_id == "deepseek-v4-pro" else 240
+
+    monkeypatch.setattr(base_module, "NovelKnowledgeBase", _DummyKnowledgeBase)
+    monkeypatch.setattr(base_module, "NovelMemoryManager", _DummyMemoryManager)
+    monkeypatch.setattr(base_module, "CreativeDirectorAgent", _DummyAgent)
+    monkeypatch.setattr(base_module, "PlotArchitectAgent", _DummyAgent)
+    monkeypatch.setattr(base_module, "CharacterDesignerAgent", _DummyAgent)
+    monkeypatch.setattr(base_module, "LayeredSummarizer", _DummySummarizer)
+    monkeypatch.setattr(base_module, "CharacterRecognizer", _DummyRecognizer)
+    monkeypatch.setattr(base_module, "CharacterPlotValidator", _DummyPlotValidator)
+    monkeypatch.setattr(base_module, "create_task_llm", fake_create_task_llm)
+    monkeypatch.setattr(base_module, "estimate_model_timeout_seconds", fake_estimate_timeout)
+
+    expander = OutlineExpander()
+
+    assert expander.llm.runtime_options["timeout"] == 240
+    assert expander.plot_architect_plus.llm.runtime_options["timeout"] == 240
+    assert expander.plot_architect_large.llm.runtime_options["timeout"] == 240
+    assert expander.plot_architect_r1.llm.runtime_options["timeout"] == 480
+    assert any(call["task_type"] == "outline_expand" and call["timeout"] == 240 for call in captured_calls)
+    assert any(call["task_type"] == "volume_detail_expand" and call["timeout"] == 480 for call in captured_calls)
 
 
 def test_expand_volume_detail_uses_r1_chunk_supplement_after_large_volume_range_summary(monkeypatch):

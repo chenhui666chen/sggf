@@ -108,6 +108,13 @@ from adapters.adapter_helpers import (
 from app.api.v1.dreamweaver_api import router
 from app.api.v1.dreamweaver_api._schemas import *
 from app.api.v1.dreamweaver_api._helpers import *
+from app.api.v1.dreamweaver_api._helpers import (
+    _dreamweaver_celery_queue,
+    _ensure_run_not_running,
+    _find_latest_generation_history_for_run,
+    _normalize_run_id,
+    _parse_generation_history_result_payload,
+)
 
 logger = logging.getLogger(__name__)
 

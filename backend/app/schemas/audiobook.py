@@ -283,6 +283,12 @@ class GenerationCheckpointResponse(BaseModel):
     current_stage: Optional[str] = None
     celery_task_id: Optional[str] = None
     checkpoint_source: Optional[str] = None
+    checkpoint_schema_version: Optional[int] = None
+    checkpoint_updated_at: Optional[str] = None
+    checkpoint_expires_at: Optional[str] = None
+    resume_validation_mode: Optional[str] = None
+    resume_blockers: List[str] = Field(default_factory=list)
+    resume_validation: Dict[str, Any] = Field(default_factory=dict)
     estimated_remaining_time: Optional[float] = None  # 预估剩余时间（秒）
 
 

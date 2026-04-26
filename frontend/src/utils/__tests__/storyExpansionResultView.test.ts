@@ -64,6 +64,13 @@ describe('storyExpansionResultView', () => {
     })
 
     expect(display).toMatchObject({
+      completionStatusLabel: '阶段性完成',
+      completionStatusTone: 'warning',
+      completionStatusDescription: '本次协同已完成当前可确认增量，仍差 2 章 / 1 人。',
+      remainingGoalChipLabel: '仍差 2 章 / 1 人',
+      canAutoImprove: false,
+      autoImproveActionLabel: null,
+      autoImproveHint: null,
       executionModeReasonText: '按人物与情节交替推进',
       chapterMetricValue: '10 → 12 / 目标 14',
       characterMetricValue: '4 → 5 / 目标 6',
@@ -215,6 +222,76 @@ describe('storyExpansionResultView', () => {
     ])
   })
 
+  it('评分下降时展示明确原因与可执行修复建议', () => {
+    const view = createStoryExpansionResultView({
+      expanded_outline: '修复前后大纲',
+      all_characters: '顾晚\n沈砚\n陈昭',
+      validation_before: {
+        chapter_count: 12,
+        character_count: 3,
+        score: 88,
+        coverage_ratio: 1,
+        referenced_characters: ['顾晚', '沈砚', '陈昭'],
+      },
+      validation_after: {
+        chapter_count: 15,
+        character_count: 3,
+        score: 71,
+        coverage_ratio: 0.667,
+        referenced_characters: ['顾晚', '沈砚'],
+        unreferenced_characters: ['陈昭'],
+        suggestions: [
+          '存在未被大纲引用的人物，优先为这些角色补充登场章节或职责。',
+          '人物与章节覆盖率偏低，新增章节时需要明确写出涉及人物与关系推进。',
+        ],
+      },
+      current_chapter_count: 15,
+      current_character_count: 3,
+    })
+
+    const display = createStoryExpansionResultDisplayView({
+      view,
+      repairedMessages: [],
+      advisoryMessages: [],
+    })
+
+    expect(display.scoreMetricValue).toBe('88 → 71')
+    expect(display.scoreMetricHelperText).toBe('下降 17 分。仍有未被章节正式承接的人物：陈昭。')
+    expect(display.canAutoImprove).toBe(true)
+    expect(display.autoImproveActionLabel).toBe('一键自动改进')
+    expect(display.autoImproveHint).toBe('系统会根据当前协同结果自动补齐人物承接与章节挂接，不会开启下一轮协同。')
+    expect(display.hasChangesSection).toBe(true)
+    expect(display.changeCardViews).toEqual([
+      {
+        key: 'score-regression-reasons',
+        title: '评分下降原因',
+        kind: 'messages',
+        tone: 'warning',
+        messages: [
+          '仍有未被章节正式承接的人物：陈昭。',
+          '人物覆盖率从 100% 降到 67%，新增内容对人物挂接不足。',
+          '章节数增加了，但被正式挂接的人物没有同步增加，说明本轮偏向扩剧情、弱化了人物承接。',
+        ],
+        chips: [],
+        outlineOperations: [],
+      },
+      {
+        key: 'score-improvements',
+        title: '建议优先修复',
+        kind: 'messages',
+        tone: 'default',
+        messages: [
+          '优先把 陈昭 补进对应章节的“涉及人物”字段，并明确这些角色在该章承担的剧情职责。',
+          '存在未被大纲引用的人物，优先为这些角色补充登场章节或职责。',
+          '人物与章节覆盖率偏低，新增章节时需要明确写出涉及人物与关系推进。',
+          '先修复当前章节的人物承接，再决定是否继续追加新章节或新角色。',
+        ],
+        chips: [],
+        outlineOperations: [],
+      },
+    ])
+  })
+
   it('在缺省结果下提供稳定的默认展示', () => {
     const view = createStoryExpansionResultView({
       current_chapter_count: 3,
@@ -228,6 +305,13 @@ describe('storyExpansionResultView', () => {
     })
 
     expect(display).toMatchObject({
+      completionStatusLabel: '已达目标',
+      completionStatusTone: 'success',
+      completionStatusDescription: '本次协同已达到当前设定的章节与人物目标。',
+      remainingGoalChipLabel: null,
+      canAutoImprove: false,
+      autoImproveActionLabel: null,
+      autoImproveHint: null,
       executionModeReasonText: '本次结果已按可扫描的摘要、增量和最终内容分区展示。',
       chapterMetricValue: '0 → 3 / 目标 3',
       characterMetricValue: '0 → 2 / 目标 2',
@@ -260,6 +344,30 @@ describe('storyExpansionResultView', () => {
         },
       ],
     })
+  })
+
+  it('定向修复结果显示为修复完成而不是下一轮协同', () => {
+    const view = createStoryExpansionResultView({
+      execution_mode: 'repair',
+      current_chapter_count: 60,
+      target_chapter_count: 60,
+      current_character_count: 20,
+      target_character_count: 20,
+    })
+
+    const display = createStoryExpansionResultDisplayView({
+      view,
+      repairedMessages: ['修复人物承接'],
+      advisoryMessages: [],
+    })
+
+    expect(display.completionStatusLabel).toBe('修复完成')
+    expect(display.completionStatusTone).toBe('success')
+    expect(display.completionStatusDescription).toBe('当前结果来自定向修复，不会自动开启下一轮协同扩展。')
+    expect(display.remainingGoalChipLabel).toBeNull()
+    expect(display.canAutoImprove).toBe(false)
+    expect(display.autoImproveActionLabel).toBeNull()
+    expect(display.autoImproveHint).toBeNull()
   })
 
   it('顶部提醒统计与协同提醒卡片使用统一口径', () => {

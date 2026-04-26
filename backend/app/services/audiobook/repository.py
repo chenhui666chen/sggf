@@ -172,7 +172,6 @@ class AudiobookProjectRepository:
                     'id': audio.id,
                     'audiobook_project_id': audio.audiobook_project_id,
                     'chapter_id': audio.chapter_id,
-                    'task_id': audio.task_id,
                     'audio_path': audio.audio_path,
                     'duration': audio.duration,
                     'file_size': audio.file_size,
@@ -381,7 +380,6 @@ class ChapterAudioRepository:
                 'id': chapter_audio.id,
                 'audiobook_project_id': chapter_audio.audiobook_project_id,
                 'chapter_id': chapter_audio.chapter_id,
-                'task_id': chapter_audio.task_id,
                 'audio_path': chapter_audio.audio_path,
                 'duration': chapter_audio.duration,
                 'file_size': chapter_audio.file_size,
@@ -624,6 +622,24 @@ class ChapterAudioRunRepository:
                 ChapterAudioRun.chapter_id == chapter_id,
             )
             .order_by(ChapterAudioRun.created_at.desc(), ChapterAudioRun.id.desc())
+            .limit(limit)
+            .all()
+        )
+
+    @staticmethod
+    def list_expired_resumable_runs(
+        db: Session,
+        *,
+        limit: int = 100,
+    ) -> List[ChapterAudioRun]:
+        return (
+            db.query(ChapterAudioRun)
+            .filter(
+                ChapterAudioRun.expires_at.is_not(None),
+                ChapterAudioRun.expires_at <= utc_now(),
+                ChapterAudioRun.resumable.is_(True),
+            )
+            .order_by(ChapterAudioRun.expires_at.asc(), ChapterAudioRun.id.asc())
             .limit(limit)
             .all()
         )

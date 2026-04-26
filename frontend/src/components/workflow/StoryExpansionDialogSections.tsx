@@ -25,13 +25,21 @@ import type {
   StoryExpansionDialogViewModel,
 } from '@/utils/storyExpansionDialogView'
 import { STORY_PRESERVE_WRITTEN_MODE_LABELS } from '@/utils/storyExpansionLabels'
+import {
+  CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS,
+  CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS,
+} from '@/utils/storyExpansionPolicy'
 
 const EXPANSION_MODE_OPTIONS: Array<{
   value: StoryExpansionMode
   label: string
   description: string
 }> = [
-  { value: 'total', label: '常规协同', description: '按目标细化章节数和人物数扩展，仅支持总规模不超过300章。' },
+  {
+    value: 'total',
+    label: '常规协同',
+    description: `按目标细化章节数和人物数扩展，推荐总规模不超过${CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS}章；超过后建议切换长篇框架，${CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS}章后必须切换。`,
+  },
   { value: 'epic_framework', label: '长篇框架协同', description: '优先生成总卷框架，再让人物体系与长篇结构对齐。' },
   { value: 'volume_detail', label: '单卷细化协同', description: '基于已有长篇框架细化某一卷，并同步补齐该卷相关人物。' },
 ]
@@ -59,7 +67,7 @@ const PRESERVE_WRITTEN_MODE_OPTIONS: Array<{
 ]
 
 const EXPANSION_MODE_TOOLTIP_LINES = [
-  '常规协同：仅适合总规模不超过300章的短中篇创作',
+  `常规协同：推荐总规模不超过${CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS}章，${CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS}章后必须切换`,
   '长篇框架协同：先规划总卷结构',
   '单卷细化协同：基于已有框架细化',
 ]

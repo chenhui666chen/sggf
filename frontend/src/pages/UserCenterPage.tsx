@@ -8,17 +8,11 @@ import {
   Button,
   Card,
   CardContent,
-  Checkbox,
   Chip,
   CircularProgress,
   Container,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   Divider,
   Grid,
-  MenuItem,
   Paper,
   Stack,
   Tab,
@@ -35,17 +29,18 @@ import MovieIcon from '@mui/icons-material/Movie'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import SaveIcon from '@mui/icons-material/Save'
 import SecurityOutlinedIcon from '@mui/icons-material/SecurityOutlined'
-import StarsOutlinedIcon from '@mui/icons-material/StarsOutlined'
 import { RootState, AppDispatch } from '@/store/store'
 import { logout } from '@/store/slices/authSlice'
 import {
   apiClient,
   extractApiErrorMessage,
-  type UserAssetRecord,
   type UserCenterPointsOverviewResponse,
 } from '@/services/api'
+import { useUserCenterAssetConnectedOverviewRowsFromInput } from '@/hooks/useUserCenterAssetConnectedOverviewRowsFromInput'
+import { useUserCenterOverviewTabMetrics } from '@/hooks/useUserCenterOverviewTabMetrics'
+import UserAssetWorkspaceContent from '@/components/user-assets/UserAssetWorkspaceContent'
+import { useUserAssetWorkspaceViewModel } from '@/hooks/useUserAssetWorkspaceViewModel'
 import type { AudiobookProjectSummary, DeletedAudiobookProject } from '@/types/audiobook'
-import { getLocalAssetBlob } from '@/utils/localAssetVault'
 
 interface ProjectRecord {
   id: number
@@ -76,36 +71,11 @@ interface DreamweaverRunSummary {
 }
 
 type UserCenterTab = 'overview' | 'creation' | 'assets' | 'points' | 'records' | 'security'
-type AssetViewFilter = 'all' | 'favorites' | 'deliverable' | 'reusable'
-type AssetArchiveFilter = 'active' | 'archived' | 'all'
 
 type FeedbackState = {
   type: 'success' | 'error'
   text: string
 }
-
-type UserAssetUpdatePayload = {
-  title?: string
-  description?: string | null
-  tags?: string[]
-  asset_class?: string
-  is_favorite?: boolean
-  archived?: boolean
-}
-
-type UserAssetSourceInfo = {
-  label: string
-  summary: string
-  traceLabel?: string | null
-  projectLabel?: string | null
-  backPath?: string | null
-  backLabel?: string | null
-}
-
-type ProtectedAssetRef =
-  | { kind: 'dreamweaver_library'; libraryAssetId: number }
-  | { kind: 'dreamweaver_run'; runId: string }
-  | { kind: 'audiobook'; audiobookProjectId: number; chapterId: number }
 
 type ProjectAggregate = ProjectRecord & {
   audiobookCount: number
@@ -222,105 +192,6 @@ function getProjectTimestamp(project: ProjectRecord) {
   return new Date(project.updated_at || project.created_at || 0).getTime()
 }
 
-function getUserAssetSourceModule(asset: UserAssetRecord): string {
-  return String(asset.source_module || '').trim().toLowerCase()
-}
-
-function extractDreamweaverLibraryAssetId(asset: UserAssetRecord): number | null {
-  if (getUserAssetSourceModule(asset) !== 'dreamweaver_library') return null
-
-  const payloadAssetId = Number.parseInt(String(asset.source_payload_json?.asset_id || ''), 10)
-  if (Number.isFinite(payloadAssetId) && payloadAssetId > 0) {
-    return payloadAssetId
-  }
-
-  const metadataAssetId = Number.parseInt(String(asset.metadata_json?.library_asset_id || ''), 10)
-  if (Number.isFinite(metadataAssetId) && metadataAssetId > 0) {
-    return metadataAssetId
-  }
-
-  return null
-}
-
-function extractDreamweaverMergedRunId(asset: UserAssetRecord): string | null {
-  if (getUserAssetSourceModule(asset) !== 'dreamweaver_run') return null
-
-  const payloadRunId = String(asset.source_payload_json?.run_id || '').trim()
-  if (payloadRunId) return payloadRunId
-
-  const metadataRunId = String(asset.metadata_json?.run_id || '').trim()
-  return metadataRunId || null
-}
-
-function extractAudiobookChapterAssetRef(
-  asset: UserAssetRecord,
-): { audiobookProjectId: number; chapterId: number } | null {
-  if (getUserAssetSourceModule(asset) !== 'audiobook') return null
-
-  const audiobookProjectId = Number.parseInt(
-    String(asset.source_payload_json?.audiobook_project_id || asset.metadata_json?.audiobook_project_id || ''),
-    10,
-  )
-  const chapterId = Number.parseInt(
-    String(asset.source_payload_json?.chapter_id || asset.metadata_json?.chapter_id || ''),
-    10,
-  )
-
-  if (!Number.isFinite(audiobookProjectId) || audiobookProjectId <= 0) return null
-  if (!Number.isFinite(chapterId) || chapterId <= 0) return null
-
-  return { audiobookProjectId, chapterId }
-}
-
-function getProtectedAssetRef(asset: UserAssetRecord): ProtectedAssetRef | null {
-  const libraryAssetId = extractDreamweaverLibraryAssetId(asset)
-  if (libraryAssetId) return { kind: 'dreamweaver_library', libraryAssetId }
-
-  const runId = extractDreamweaverMergedRunId(asset)
-  if (runId) return { kind: 'dreamweaver_run', runId }
-
-  const audiobookRef = extractAudiobookChapterAssetRef(asset)
-  if (audiobookRef) return { kind: 'audiobook', ...audiobookRef }
-
-  return null
-}
-
-function isProtectedUserAsset(asset: UserAssetRecord): boolean {
-  return getProtectedAssetRef(asset) !== null
-}
-
-function formatDreamweaverViewLabel(view: string | null | undefined): string | null {
-  const normalized = String(view || '').trim().toLowerCase()
-  if (!normalized) return null
-  if (normalized === 'front') return '正面'
-  if (normalized === 'side') return '侧面'
-  if (normalized === 'back') return '背面'
-  if (normalized === 'bust_front') return '半身正面'
-  if (normalized === 'bust_three_quarter') return '半身四分之三侧'
-  if (normalized === 'bust_side') return '半身侧面'
-  return normalized
-}
-
-function parseAssetTagsInput(value: string): string[] {
-  const parts = String(value || '')
-    .split(/[\n,，、]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-
-  const nextTags: string[] = []
-  const seen = new Set<string>()
-
-  parts.forEach((tag) => {
-    const normalized = tag.slice(0, 30)
-    const key = normalized.toLowerCase()
-    if (!normalized || seen.has(key) || nextTags.length >= 12) return
-    seen.add(key)
-    nextTags.push(normalized)
-  })
-
-  return nextTags
-}
-
 function MetricCard(props: { title: string; value: string | number; helper: string; color: string }) {
   const { title, value, helper, color } = props
   return (
@@ -355,28 +226,10 @@ export default function UserCenterPage() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [assetListError, setAssetListError] = useState<string | null>(null)
-  const [assetListLoading, setAssetListLoading] = useState(false)
-  const [userAssets, setUserAssets] = useState<UserAssetRecord[]>([])
-  const [localAssetUrls, setLocalAssetUrls] = useState<Record<number, string>>({})
-  const [localAssetUrlsReady, setLocalAssetUrlsReady] = useState(false)
-  const [protectedAssetUrls, setProtectedAssetUrls] = useState<Record<number, string>>({})
   const [feedback, setFeedback] = useState<FeedbackState | null>(null)
   const [restoringKey, setRestoringKey] = useState<string | null>(null)
-  const [assetActionKey, setAssetActionKey] = useState<string | null>(null)
-  const [assetBatchSubmitting, setAssetBatchSubmitting] = useState(false)
   const [passwordSubmitting, setPasswordSubmitting] = useState(false)
   const [passwordData, setPasswordData] = useState({ old_password: '', new_password: '', confirm_password: '' })
-  const [assetViewFilter, setAssetViewFilter] = useState<AssetViewFilter>('all')
-  const [assetKindFilter, setAssetKindFilter] = useState<string>('all')
-  const [assetArchiveFilter, setAssetArchiveFilter] = useState<AssetArchiveFilter>('active')
-  const [assetSourceFilter, setAssetSourceFilter] = useState<string>('all')
-  const [assetTagFilter, setAssetTagFilter] = useState<string>('all')
-  const [assetEditorOpen, setAssetEditorOpen] = useState(false)
-  const [editingAsset, setEditingAsset] = useState<UserAssetRecord | null>(null)
-  const [assetEditorSubmitting, setAssetEditorSubmitting] = useState(false)
-  const [selectedAssetIds, setSelectedAssetIds] = useState<number[]>([])
-  const [assetEditorData, setAssetEditorData] = useState({ title: '', description: '', tagsText: '' })
 
   const hasAdminRole = user?.roles?.some((role) => role.code === 'admin' || role.code === 'super_admin') ?? false
   const userDisplayName = user?.full_name?.trim() || user?.username || '未命名用户'
@@ -384,6 +237,7 @@ export default function UserCenterPage() {
   const userAvatarFallback = userDisplayName.slice(0, 1).toUpperCase()
   const roleNames = (user?.roles || []).map((role) => role.name).filter(Boolean)
   const activeTab = normalizeUserCenterTab(searchParams.get('tab'))
+  const assetWorkspaceEnabled = activeTab === 'assets'
 
   const handleTabChange = useCallback(
     (nextTab: UserCenterTab) => {
@@ -406,19 +260,6 @@ export default function UserCenterPage() {
     nextSearchParams.delete('tab')
     setSearchParams(nextSearchParams, { replace: true })
   }, [searchParams, setSearchParams])
-
-  const loadUserAssets = useCallback(async (silent = false) => {
-    if (!silent) setAssetListLoading(true)
-    try {
-      const response = await apiClient.listUserAssets({ limit: 100, include_archived: true })
-      setUserAssets(Array.isArray(response.data) ? response.data : [])
-      setAssetListError(null)
-    } catch (loadError) {
-      setAssetListError(await extractApiErrorMessage(loadError, '加载用户资产失败'))
-    } finally {
-      if (!silent) setAssetListLoading(false)
-    }
-  }, [])
 
   const loadUserCenterData = useCallback(async (silent = false) => {
     if (silent) {
@@ -500,10 +341,6 @@ export default function UserCenterPage() {
     void loadUserCenterData()
   }, [loadUserCenterData])
 
-  useEffect(() => {
-    void loadUserAssets()
-  }, [loadUserAssets])
-
   const projectAggregates = useMemo<ProjectAggregate[]>(() => {
     return [...projects]
       .map((project) => ({
@@ -514,10 +351,17 @@ export default function UserCenterPage() {
       .sort((a, b) => getProjectTimestamp(b) - getProjectTimestamp(a))
   }, [audiobookMap, dreamweaverMap, projects])
 
-  const projectTitleMap = useMemo(
-    () => new Map(projects.map((project) => [project.id, project.title?.trim() || `项目 #${project.id}`] as const)),
-    [projects],
-  )
+  const {
+    assetFacade,
+  } = useUserAssetWorkspaceViewModel({
+    projects,
+    pointsOverview,
+    publishFeedback: (nextFeedback) => setFeedback(nextFeedback),
+    refreshUserCenterData: loadUserCenterData,
+    navigateToPath: navigate,
+    fallbackPath: '/user-center',
+    enabled: assetWorkspaceEnabled,
+  })
 
   const overviewMetrics = useMemo(() => {
     let audiobookProjects = 0
@@ -557,14 +401,7 @@ export default function UserCenterPage() {
   }, [audiobookMap, deletedAudiobookProjects.length, deletedChapters.length, dreamweaverMap, projectAggregates, projects.length])
 
   const recentProjects = projectAggregates.slice(0, 4)
-  const activeUserAssets = useMemo(() => userAssets.filter((asset) => !asset.archived_at), [userAssets])
-  const archivedUserAssetCount = userAssets.length - activeUserAssets.length
-  const favoriteAssetCount = activeUserAssets.filter((asset) => asset.is_favorite).length
-  const deliverableAssetCount = activeUserAssets.filter((asset) => asset.asset_class === 'deliverable').length
-  const reusableAssetCount = activeUserAssets.filter((asset) => asset.asset_class !== 'deliverable').length
 
-  const totalAudiobookCost = pointsOverview?.connected_overview.audiobook_total_cost ?? 0
-  const totalDreamweaverRuns = pointsOverview?.connected_overview.dreamweaver_run_count ?? 0
   const connectedBenefitItems = pointsOverview?.benefits.connected_items ?? []
   const plannedBenefitItems = pointsOverview?.benefits.planned_items ?? []
   const audiobookBillingEntries =
@@ -586,15 +423,6 @@ export default function UserCenterPage() {
       actionLabel: signal.action_label,
     })) ?? []
 
-  const connectedLedgerSourceCount = pointsOverview?.points_account.connected_source_count ?? 0
-  const pendingLedgerSourceCount =
-    pointsOverview?.points_account.pending_source_count ?? pendingLedgerSignals.length
-  const pointsAccountStatus = pointsOverview?.points_account.status ?? 'planned'
-  const pointsAccountBalance = pointsOverview?.points_account.balance ?? null
-  const pointsAccountFrozen = pointsOverview?.points_account.frozen ?? null
-  const pointsAccountExpiringSoon = pointsOverview?.points_account.expiring_soon ?? null
-  const pointsRules = pointsOverview?.points_rules ?? null
-  const pricingPolicy = pointsOverview?.pricing_policy ?? null
   const pointsEntries =
     pointsOverview?.points_entries.map((entry) => ({
       ...entry,
@@ -605,7 +433,16 @@ export default function UserCenterPage() {
       statusMeta: getPointsEntryStatusMeta(entry.status),
       directionMeta: getPointsEntryDirectionMeta(entry.direction),
     })) ?? []
-  const pointsConnectedOverview = pointsOverview?.connected_overview ?? null
+  const assetConnectedOverviewRows = useUserCenterAssetConnectedOverviewRowsFromInput({
+    pointsOverview,
+    projects,
+    userAssetCount: assetFacade.userAssetCount,
+    overviewMetrics,
+    formatCurrencyLabel: formatCurrency,
+    formatPointsValueLabel: formatAccountMetric,
+    formatUpdatedAtLabel: formatDateTime,
+    getSourceLabel: getPointsRuleSourceLabel,
+  })
   const taskBillingOverview = pointsOverview?.task_billing ?? null
   const taskBillingItems =
     pointsOverview?.task_billing.items.map((item) => ({
@@ -618,436 +455,22 @@ export default function UserCenterPage() {
   const activePointsEntryCount = pointsEntries.filter((entry) => entry.status === 'active').length
   const frozenPointsEntryCount = pointsEntries.filter((entry) => entry.status === 'frozen').length
   const expiredPointsEntryCount = pointsEntries.filter((entry) => entry.status === 'expired').length
-  const pointsRuleSummaryItems = pointsRules
-    ? [
-        { label: '复用资产奖励', value: `${formatAccountMetric(pointsRules.reusable_asset_reward)} 积分` },
-        { label: '交付资产奖励', value: `${formatAccountMetric(pointsRules.deliverable_asset_reward)} 积分` },
-        { label: '有声书完成奖励', value: `${formatAccountMetric(pointsRules.audiobook_completion_reward)} 积分` },
-        { label: '短剧完成奖励', value: `${formatAccountMetric(pointsRules.dreamweaver_completion_reward)} 积分` },
-        { label: '有声书运行冻结', value: `${formatAccountMetric(pointsRules.running_audiobook_frozen)} 积分` },
-        { label: '短剧运行冻结', value: `${formatAccountMetric(pointsRules.running_dreamweaver_frozen)} 积分` },
-        { label: '奖励有效期', value: `${pointsRules.reward_ttl_days} 天` },
-        { label: '到期提醒窗口', value: `${pointsRules.expiring_notice_days} 天` },
-      ]
-    : []
-  const pricingPolicySummaryItems = pricingPolicy
-    ? [
-        { label: '积分汇率', value: `1 元 = ${pricingPolicy.points_per_yuan} 积分` },
-        { label: '用户计价基准', value: getPricingBasisLabel(pricingPolicy.user_price_basis) },
-        { label: '用户计价系数', value: `${pricingPolicy.user_price_rate.toFixed(2)} ×` },
-        { label: '冻结缓冲', value: formatPercentRate(pricingPolicy.freeze_buffer_rate) },
-      ]
-    : []
-
-  const pointsAccountStatusMeta = useMemo(() => {
-    if (pointsAccountStatus === 'partial') {
-      return {
-        label: '已接入账本',
-        description: '已有真实积分账本与任务计费链路接入用户中心，后续会继续扩展更多消费和权益来源。',
-        color: 'info' as const,
-      }
-    }
-    return {
-      label: '逐步扩展',
-      description: '积分账户结构已就绪，当前已支持积分预检和部分任务计费，更多权益与消费来源会继续接入。',
-      color: 'warning' as const,
-    }
-  }, [pointsAccountStatus])
-
-  const assetKindOptions = useMemo(
-    () =>
-      Array.from(new Set(userAssets.map((asset) => String(asset.asset_kind || '').trim()).filter(Boolean))).sort(
-        (left, right) => left.localeCompare(right),
-      ),
-    [userAssets],
-  )
-
-  const assetTagOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          userAssets.flatMap((asset) => asset.tags.map((tag) => String(tag || '').trim()).filter(Boolean)),
-        ),
-      ).sort((left, right) => left.localeCompare(right, 'zh-CN')),
-    [userAssets],
-  )
-
-  const resolveUserAssetProjectId = useCallback((asset: UserAssetRecord) => {
-    const directProjectId = Number(asset.project_id)
-    if (Number.isFinite(directProjectId) && directProjectId > 0) return directProjectId
-
-    const payloadProjectId = Number.parseInt(String(asset.source_payload_json?.project_id || ''), 10)
-    if (Number.isFinite(payloadProjectId) && payloadProjectId > 0) return payloadProjectId
-
-    const metadataProjectId = Number.parseInt(String(asset.metadata_json?.project_id || ''), 10)
-    if (Number.isFinite(metadataProjectId) && metadataProjectId > 0) return metadataProjectId
-
-    return null
-  }, [])
-
-  const getUserAssetSourceInfo = useCallback(
-    (asset: UserAssetRecord): UserAssetSourceInfo => {
-      const sourceModule = getUserAssetSourceModule(asset)
-      const projectId = resolveUserAssetProjectId(asset)
-      const projectLabel = projectId ? projectTitleMap.get(projectId) || `项目 #${projectId}` : null
-
-      if (sourceModule === 'asset_studio') {
-        return {
-          label: '资产工坊',
-          summary: projectLabel ? `来自资产工坊，关联项目：${projectLabel}。` : '来自资产工坊。',
-          projectLabel,
-          backPath: '/asset-studio',
-          backLabel: '前往资产工坊',
-        }
-      }
-
-      if (sourceModule === 'dreamweaver_library') {
-        const entityType = String(
-          asset.metadata_json?.entity_type || asset.source_payload_json?.entity_type || '',
-        ).trim()
-        const entityTypeLabel =
-          entityType === 'character' ? '角色' : entityType === 'scene' ? '场景' : entityType === 'prop' ? '道具' : '素材'
-        const viewLabel = formatDreamweaverViewLabel(
-          String(asset.metadata_json?.view || asset.source_payload_json?.view || '').trim() || null,
-        )
-        return {
-          label: '短剧素材库',
-          summary: projectLabel ? `来自短剧素材库，沉淀于项目 ${projectLabel}。` : '来自短剧素材库。',
-          traceLabel: viewLabel ? `${entityTypeLabel} · ${viewLabel}` : entityTypeLabel,
-          projectLabel,
-          backPath: projectId ? `/drama/${projectId}/library` : '/drama',
-          backLabel: projectId ? '前往素材库' : '前往短剧模块',
-        }
-      }
-
-      if (sourceModule === 'dreamweaver_run') {
-        const runId = extractDreamweaverMergedRunId(asset)
-        return {
-          label: '短剧成片',
-          summary: projectLabel ? `来自短剧运行结果，关联项目：${projectLabel}。` : '来自短剧运行结果。',
-          traceLabel: runId ? `run_id ${runId}` : '运行结果',
-          projectLabel,
-          backPath: projectId ? `/drama/${projectId}` : '/drama',
-          backLabel: projectId ? '回到短剧项目' : '前往短剧模块',
-        }
-      }
-
-      if (sourceModule === 'audiobook') {
-        const chapterId = Number.parseInt(
-          String(asset.source_payload_json?.chapter_id || asset.metadata_json?.chapter_id || ''),
-          10,
-        )
-        const chapterNumber = Number.parseInt(
-          String(asset.source_payload_json?.chapter_number || asset.metadata_json?.chapter_number || ''),
-          10,
-        )
-        const chapterTitle = String(
-          asset.source_payload_json?.chapter_title || asset.metadata_json?.chapter_title || '',
-        ).trim()
-        const traceLabel = chapterNumber
-          ? `第${chapterNumber}章${chapterTitle ? ` · ${chapterTitle}` : ''}`
-          : chapterTitle || (Number.isFinite(chapterId) && chapterId > 0 ? `章节 #${chapterId}` : '章节音频')
-
-        return {
-          label: '有声书音频',
-          summary: projectLabel ? `来自有声书章节成品，关联项目：${projectLabel}。` : '来自有声书章节成品。',
-          traceLabel,
-          projectLabel,
-          backPath: projectId ? `/audiobook/${projectId}` : '/audiobook-dashboard',
-          backLabel: projectId ? '回到有声书项目' : '前往有声书模块',
-        }
-      }
-
-      return {
-        label: asset.source_module || '未分类来源',
-        summary: '该资产已进入用户中心统一治理，具体生产仍建议回到原模块处理。',
-        projectLabel,
-      }
-    },
-    [projectTitleMap, resolveUserAssetProjectId],
-  )
-
-  const assetSourceOptions = useMemo(
-    () =>
-      Array.from(
-        new Map(
-          userAssets
-            .map((asset) => [String(asset.source_module || '').trim(), getUserAssetSourceInfo(asset).label] as const)
-            .filter(([value]) => Boolean(value)),
-        ).entries(),
-      )
-        .sort((left, right) => left[1].localeCompare(right[1], 'zh-CN'))
-        .map(([value, label]) => ({ value, label })),
-    [getUserAssetSourceInfo, userAssets],
-  )
-
-  const filteredUserAssets = useMemo(() => {
-    let nextAssets = [...userAssets]
-    if (assetArchiveFilter === 'active') nextAssets = nextAssets.filter((asset) => !asset.archived_at)
-    if (assetArchiveFilter === 'archived') nextAssets = nextAssets.filter((asset) => Boolean(asset.archived_at))
-    if (assetViewFilter === 'favorites') nextAssets = nextAssets.filter((asset) => asset.is_favorite)
-    if (assetViewFilter === 'deliverable') nextAssets = nextAssets.filter((asset) => asset.asset_class === 'deliverable')
-    if (assetViewFilter === 'reusable') nextAssets = nextAssets.filter((asset) => asset.asset_class !== 'deliverable')
-    if (assetKindFilter !== 'all') nextAssets = nextAssets.filter((asset) => asset.asset_kind === assetKindFilter)
-    if (assetSourceFilter !== 'all') nextAssets = nextAssets.filter((asset) => asset.source_module === assetSourceFilter)
-    if (assetTagFilter !== 'all') nextAssets = nextAssets.filter((asset) => asset.tags.includes(assetTagFilter))
-    return nextAssets
-  }, [assetArchiveFilter, assetKindFilter, assetSourceFilter, assetTagFilter, assetViewFilter, userAssets])
-
-  const selectedAssetIdSet = useMemo(() => new Set(selectedAssetIds), [selectedAssetIds])
-  const selectedFilteredAssets = useMemo(
-    () => filteredUserAssets.filter((asset) => selectedAssetIdSet.has(asset.id)),
-    [filteredUserAssets, selectedAssetIdSet],
-  )
-  const allFilteredAssetsSelected =
-    filteredUserAssets.length > 0 && filteredUserAssets.every((asset) => selectedAssetIdSet.has(asset.id))
-
-  useEffect(() => {
-    let revoked = false
-    const objectUrls: string[] = []
-
-    const loadLocalAssetUrls = async () => {
-      setLocalAssetUrlsReady(false)
-      const localAssets = userAssets
-        .map((asset) => {
-          const assetUuid = String(asset.asset_uuid || '').trim()
-          if (!assetUuid) return null
-          return { assetId: asset.id, assetUuid }
-        })
-        .filter(Boolean) as Array<{ assetId: number; assetUuid: string }>
-
-      if (!localAssets.length) {
-        setLocalAssetUrls({})
-        setLocalAssetUrlsReady(true)
-        return
-      }
-
-      const entries = await Promise.all(
-        localAssets.map(async (item) => {
-          try {
-            const blob = await getLocalAssetBlob(item.assetUuid)
-            if (!blob) return [item.assetId, ''] as const
-            const objectUrl = URL.createObjectURL(blob)
-            objectUrls.push(objectUrl)
-            return [item.assetId, objectUrl] as const
-          } catch {
-            return [item.assetId, ''] as const
-          }
-        }),
-      )
-
-      if (revoked) return
-      const nextUrls: Record<number, string> = {}
-      entries.forEach(([assetId, url]) => {
-        if (url) nextUrls[assetId] = url
-      })
-      setLocalAssetUrls(nextUrls)
-      setLocalAssetUrlsReady(true)
-    }
-
-    void loadLocalAssetUrls()
-
-    return () => {
-      revoked = true
-      objectUrls.forEach((url) => {
-        try {
-          URL.revokeObjectURL(url)
-        } catch {
-          // ignore
-        }
-      })
-    }
-  }, [userAssets])
-
-  useEffect(() => {
-    let revoked = false
-    const objectUrls: string[] = []
-
-    const loadProtectedAssetUrls = async () => {
-      if (!localAssetUrlsReady) {
-        setProtectedAssetUrls({})
-        return
-      }
-
-      const protectedAssets = userAssets
-        .map((asset) => {
-          const protectedRef = getProtectedAssetRef(asset)
-          if (!protectedRef) return null
-          if (localAssetUrls[asset.id]) return null
-          return { assetId: asset.id, ...protectedRef }
-        })
-        .filter(Boolean) as Array<{ assetId: number } & ProtectedAssetRef>
-
-      if (!protectedAssets.length) {
-        setProtectedAssetUrls({})
-        return
-      }
-
-      const entries = await Promise.all(
-        protectedAssets.map(async (item) => {
-          try {
-            const response =
-              item.kind === 'dreamweaver_library'
-                ? await apiClient.getDreamweaverLibraryAssetFile(item.libraryAssetId)
-                : item.kind === 'dreamweaver_run'
-                  ? await apiClient.getDreamweaverMergedVideoFile(item.runId)
-                  : await apiClient.getAudiobookChapterAudioFile(item.audiobookProjectId, item.chapterId)
-            const objectUrl = URL.createObjectURL(response.data)
-            objectUrls.push(objectUrl)
-            return [item.assetId, objectUrl] as const
-          } catch {
-            return [item.assetId, ''] as const
-          }
-        }),
-      )
-
-      if (revoked) return
-      const nextUrls: Record<number, string> = {}
-      entries.forEach(([assetId, url]) => {
-        if (url) nextUrls[assetId] = url
-      })
-      setProtectedAssetUrls(nextUrls)
-    }
-
-    void loadProtectedAssetUrls()
-
-    return () => {
-      revoked = true
-      objectUrls.forEach((url) => {
-        try {
-          URL.revokeObjectURL(url)
-        } catch {
-          // ignore
-        }
-      })
-    }
-  }, [localAssetUrls, localAssetUrlsReady, userAssets])
-
-  useEffect(() => {
-    const visibleAssetIds = new Set(filteredUserAssets.map((asset) => asset.id))
-    setSelectedAssetIds((prev) => {
-      const next = prev.filter((assetId) => visibleAssetIds.has(assetId))
-      return next.length === prev.length ? prev : next
-    })
-  }, [filteredUserAssets])
-
-  const resolveUserAssetMediaUrl = useCallback(
-    (asset: UserAssetRecord) => {
-      const localUrl = localAssetUrls[asset.id]
-      if (localUrl) return localUrl
-
-      const protectedUrl = protectedAssetUrls[asset.id]
-      if (protectedUrl) return protectedUrl
-
-      if (isProtectedUserAsset(asset)) return ''
-
-      return asset.preview_uri || asset.source_uri || asset.download_uri || ''
-    },
-    [localAssetUrls, protectedAssetUrls],
-  )
-
-  const handleUpdateUserAsset = async (assetId: number, payload: UserAssetUpdatePayload) => {
-    setAssetActionKey(`asset-${assetId}`)
-    try {
-      await apiClient.updateUserAsset(assetId, payload)
-      await loadUserAssets(true)
-      setFeedback({ type: 'success', text: '资产信息已更新' })
-    } catch (updateError) {
-      setFeedback({
-        type: 'error',
-        text: await extractApiErrorMessage(updateError, '更新用户资产失败'),
-      })
-    } finally {
-      setAssetActionKey(null)
-    }
-  }
-
-  const handleToggleAssetSelection = useCallback((assetId: number) => {
-    setSelectedAssetIds((prev) =>
-      prev.includes(assetId) ? prev.filter((currentId) => currentId !== assetId) : [...prev, assetId],
-    )
-  }, [])
-
-  const handleToggleSelectAllFilteredAssets = useCallback(() => {
-    if (allFilteredAssetsSelected) {
-      setSelectedAssetIds([])
-      return
-    }
-    setSelectedAssetIds(filteredUserAssets.map((asset) => asset.id))
-  }, [allFilteredAssetsSelected, filteredUserAssets])
-
-  const handleBatchUpdateUserAssets = async (payload: UserAssetUpdatePayload, actionLabel: string) => {
-    if (!selectedFilteredAssets.length) return
-
-    setAssetBatchSubmitting(true)
-    try {
-      const response = await apiClient.batchUpdateUserAssets({
-        asset_ids: selectedFilteredAssets.map((asset) => asset.id),
-        updates: payload,
-      })
-      const updatedIds = Array.isArray(response.data?.asset_ids)
-        ? response.data.asset_ids
-        : selectedFilteredAssets.map((asset) => asset.id)
-      const updatedCount = Number(response.data?.updated_count) || updatedIds.length
-      await loadUserAssets(true)
-      setSelectedAssetIds((prev) => prev.filter((assetId) => !updatedIds.includes(assetId)))
-      setFeedback({ type: 'success', text: `${actionLabel}，共处理 ${updatedCount} 项资产` })
-    } catch (batchError) {
-      setFeedback({
-        type: 'error',
-        text: await extractApiErrorMessage(batchError, `${actionLabel}失败`),
-      })
-    } finally {
-      setAssetBatchSubmitting(false)
-    }
-  }
-
-  const handleOpenAssetEditor = (asset: UserAssetRecord) => {
-    setEditingAsset(asset)
-    setAssetEditorData({
-      title: asset.title || '',
-      description: asset.description || '',
-      tagsText: asset.tags.join(', '),
-    })
-    setAssetEditorOpen(true)
-  }
-
-  const handleCloseAssetEditor = () => {
-    if (assetEditorSubmitting) return
-    setAssetEditorOpen(false)
-    setEditingAsset(null)
-    setAssetEditorData({ title: '', description: '', tagsText: '' })
-  }
-
-  const handleSaveAssetEditor = async () => {
-    if (!editingAsset) return
-    const normalizedTitle = assetEditorData.title.trim()
-    if (!normalizedTitle) {
-      setFeedback({ type: 'error', text: '资产标题不能为空' })
-      return
-    }
-
-    setAssetEditorSubmitting(true)
-    try {
-      await apiClient.updateUserAsset(editingAsset.id, {
-        title: normalizedTitle,
-        description: assetEditorData.description.trim() || null,
-        tags: parseAssetTagsInput(assetEditorData.tagsText),
-      })
-      await loadUserAssets(true)
-      setFeedback({ type: 'success', text: '资产内容已保存' })
-      setAssetEditorOpen(false)
-      setEditingAsset(null)
-      setAssetEditorData({ title: '', description: '', tagsText: '' })
-    } catch (saveError) {
-      setFeedback({
-        type: 'error',
-        text: await extractApiErrorMessage(saveError, '保存资产失败'),
-      })
-    } finally {
-      setAssetEditorSubmitting(false)
-    }
-  }
+  const overviewTabMetrics = useUserCenterOverviewTabMetrics({
+    pointsOverview,
+    pendingLedgerSignalCount: pendingLedgerSignals.length,
+    getPricingBasisLabel,
+    formatPercentRate,
+    formatUpdatedAtLabel: formatDateTime,
+  })
+  const {
+    connectedLedgerSourceCount,
+    pendingLedgerSourceCount,
+    pointsAccountBalance,
+    pointsAccountFrozen,
+    pointsAccountExpiringSoon,
+    pointsAccountStatusMeta,
+    pricingPolicyPresentation,
+  } = overviewTabMetrics
 
   const handleRestoreChapter = async (chapterId: number) => {
     setRestoringKey(`chapter-${chapterId}`)
@@ -1112,68 +535,6 @@ export default function UserCenterPage() {
   const handleLogout = () => {
     dispatch(logout())
     navigate('/login')
-  }
-
-  const renderUserAssetPreview = (asset: UserAssetRecord) => {
-    const previewUrl = resolveUserAssetMediaUrl(asset)
-    const isProtectedAssetPending = isProtectedUserAsset(asset) && !previewUrl
-
-    if (!previewUrl) {
-      return (
-        <Box
-          sx={{
-            height: 180,
-            borderRadius: 2.5,
-            bgcolor: 'rgba(15, 23, 42, 0.04)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Typography variant="body2" color="text.secondary">
-            {isProtectedAssetPending ? '受保护资源加载中...' : '暂无预览'}
-          </Typography>
-        </Box>
-      )
-    }
-
-    if (asset.asset_kind === 'video') {
-      return (
-        <Box
-          component="video"
-          src={previewUrl}
-          controls
-          sx={{ width: '100%', height: 180, objectFit: 'cover', borderRadius: 2.5, bgcolor: 'black' }}
-        />
-      )
-    }
-
-    if (asset.asset_kind === 'audio') {
-      return (
-        <Box
-          sx={{
-            height: 180,
-            borderRadius: 2.5,
-            bgcolor: 'rgba(15, 23, 42, 0.04)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            p: 2,
-          }}
-        >
-          <Box component="audio" src={previewUrl} controls sx={{ width: '100%' }} />
-        </Box>
-      )
-    }
-
-    return (
-      <Box
-        component="img"
-        src={previewUrl}
-        alt={asset.title}
-        sx={{ width: '100%', height: 180, objectFit: 'cover', borderRadius: 2.5, bgcolor: 'black' }}
-      />
-    )
   }
 
   const renderProjectGrid = (items: ProjectAggregate[]) => {
@@ -1272,7 +633,6 @@ export default function UserCenterPage() {
           />
         </Grid>
       </Grid>
-
       <Grid container spacing={2}>
         <Grid item xs={12} md={6}>
           <Card variant="outlined" sx={{ height: '100%', borderRadius: 3 }}>
@@ -1388,269 +748,7 @@ export default function UserCenterPage() {
     </Stack>
   )
 
-  const assetsContent = (
-    <Stack spacing={2.5}>
-      <Grid container spacing={2}>
-        <Grid item xs={12} md={4}>
-          <MetricCard
-            title="活跃资产"
-            value={activeUserAssets.length}
-            helper="用户中心负责汇总、筛选和归档，不替代模块内工作台。"
-            color="#2563eb"
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <MetricCard
-            title="可复用素材"
-            value={`${reusableAssetCount} / ${deliverableAssetCount}`}
-            helper="优先沉淀可跨项目复用的稳定素材。"
-            color="#7c3aed"
-          />
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <MetricCard
-            title="重点 / 归档"
-            value={`${favoriteAssetCount} / ${archivedUserAssetCount}`}
-            helper="重点资产用于快速复用，归档资产用于沉淀历史成果。"
-            color="#f97316"
-          />
-        </Grid>
-      </Grid>
-
-      {assetListError ? <Alert severity="warning">{assetListError}</Alert> : null}
-
-      <Card variant="outlined" sx={{ borderRadius: 3 }}>
-        <CardContent>
-          <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} justifyContent="space-between">
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} flexWrap="wrap">
-              <TextField
-                select
-                size="small"
-                label="资产视角"
-                value={assetViewFilter}
-                onChange={(event) => setAssetViewFilter(event.target.value as AssetViewFilter)}
-                sx={{ minWidth: { xs: '100%', sm: 180 } }}
-              >
-                <MenuItem value="all">全部资产</MenuItem>
-                <MenuItem value="favorites">仅看重点</MenuItem>
-                <MenuItem value="deliverable">仅看成品</MenuItem>
-                <MenuItem value="reusable">仅看可复用</MenuItem>
-              </TextField>
-              <TextField
-                select
-                size="small"
-                label="资产类型"
-                value={assetKindFilter}
-                onChange={(event) => setAssetKindFilter(event.target.value)}
-                sx={{ minWidth: { xs: '100%', sm: 180 } }}
-              >
-                <MenuItem value="all">全部类型</MenuItem>
-                {assetKindOptions.map((option) => (
-                  <MenuItem key={`asset-kind-${option}`} value={option}>
-                    {option}
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                select
-                size="small"
-                label="来源模块"
-                value={assetSourceFilter}
-                onChange={(event) => setAssetSourceFilter(event.target.value)}
-                sx={{ minWidth: { xs: '100%', sm: 180 } }}
-              >
-                <MenuItem value="all">全部来源</MenuItem>
-                {assetSourceOptions.map((option) => (
-                  <MenuItem key={`asset-source-${option.value}`} value={option.value}>
-                    {option.label}
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                select
-                size="small"
-                label="归档范围"
-                value={assetArchiveFilter}
-                onChange={(event) => setAssetArchiveFilter(event.target.value as AssetArchiveFilter)}
-                sx={{ minWidth: { xs: '100%', sm: 180 } }}
-              >
-                <MenuItem value="active">活跃资产</MenuItem>
-                <MenuItem value="archived">已归档</MenuItem>
-                <MenuItem value="all">全部</MenuItem>
-              </TextField>
-              <TextField
-                select
-                size="small"
-                label="标签"
-                value={assetTagFilter}
-                onChange={(event) => setAssetTagFilter(event.target.value)}
-                sx={{ minWidth: { xs: '100%', sm: 180 } }}
-              >
-                <MenuItem value="all">全部标签</MenuItem>
-                {assetTagOptions.map((option) => (
-                  <MenuItem key={`asset-tag-filter-${option}`} value={option}>
-                    {option}
-                  </MenuItem>
-                ))}
-              </TextField>
-            </Stack>
-
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
-              <Chip size="small" color="primary" variant="outlined" label={`当前结果 ${filteredUserAssets.length}`} />
-              <Button variant="outlined" startIcon={<RefreshIcon />} onClick={() => void loadUserAssets()} disabled={assetListLoading}>
-                刷新资产
-              </Button>
-            </Stack>
-          </Stack>
-        </CardContent>
-      </Card>
-
-      {filteredUserAssets.length > 0 ? (
-        <Card variant="outlined" sx={{ borderRadius: 3 }}>
-          <CardContent>
-            <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} justifyContent="space-between">
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} flexWrap="wrap">
-                <Chip
-                  size="small"
-                  color={selectedFilteredAssets.length > 0 ? 'primary' : 'default'}
-                  variant={selectedFilteredAssets.length > 0 ? 'filled' : 'outlined'}
-                  label={`已选 ${selectedFilteredAssets.length}`}
-                />
-                <Chip size="small" variant="outlined" label={allFilteredAssetsSelected ? '当前结果已全选' : `可选 ${filteredUserAssets.length} 项`} />
-              </Stack>
-
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} flexWrap="wrap">
-                <Button size="small" variant="outlined" onClick={handleToggleSelectAllFilteredAssets} disabled={assetBatchSubmitting}>
-                  {allFilteredAssetsSelected ? '取消全选' : '全选当前结果'}
-                </Button>
-                <Button size="small" variant="outlined" onClick={() => setSelectedAssetIds([])} disabled={assetBatchSubmitting || selectedFilteredAssets.length === 0}>
-                  清空选择
-                </Button>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => void handleBatchUpdateUserAssets({ is_favorite: true }, '已批量设为重点')}
-                  disabled={assetBatchSubmitting || selectedFilteredAssets.length === 0}
-                >
-                  设为重点
-                </Button>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => void handleBatchUpdateUserAssets({ archived: true }, '已批量归档')}
-                  disabled={assetBatchSubmitting || selectedFilteredAssets.length === 0}
-                >
-                  归档
-                </Button>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => void handleBatchUpdateUserAssets({ archived: false }, '已批量恢复为活跃')}
-                  disabled={assetBatchSubmitting || selectedFilteredAssets.length === 0}
-                >
-                  恢复活跃
-                </Button>
-              </Stack>
-            </Stack>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {assetListLoading ? (
-        <Box sx={{ py: 4, display: 'flex', justifyContent: 'center' }}>
-          <CircularProgress />
-        </Box>
-      ) : userAssets.length === 0 ? (
-        <Alert severity="info">还没有收录到用户中心的资产，后续可以从各生成模块纳入稳定成果。</Alert>
-      ) : filteredUserAssets.length === 0 ? (
-        <Alert severity="info">当前筛选条件下没有匹配资产，可以切换筛选项查看其他结果。</Alert>
-      ) : (
-        <Grid container spacing={2}>
-          {filteredUserAssets.map((asset) => {
-            const sourceInfo = getUserAssetSourceInfo(asset)
-            const isSubmitting = assetActionKey === `asset-${asset.id}`
-            return (
-              <Grid item xs={12} md={6} lg={4} key={`user-asset-${asset.id}`}>
-                <Card variant="outlined" sx={{ height: '100%', borderRadius: 3 }}>
-                  <CardContent>
-                    {renderUserAssetPreview(asset)}
-                    <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', rowGap: 1 }}>
-                      <Chip size="small" label={asset.asset_kind} />
-                      <Chip size="small" color={asset.asset_class === 'deliverable' ? 'warning' : 'secondary'} label={asset.asset_class === 'deliverable' ? '成品资产' : '可复用素材'} />
-                      <Chip size="small" variant="outlined" label={`来源：${sourceInfo.label}`} />
-                      {asset.is_favorite ? <Chip size="small" color="primary" label="重点资产" /> : null}
-                      {asset.archived_at ? <Chip size="small" variant="outlined" label="已归档" /> : null}
-                    </Stack>
-
-                    <Stack direction="row" justifyContent="flex-end" alignItems="center" sx={{ mt: 0.25 }}>
-                      <Typography variant="caption" color="text.secondary">
-                        纳入批量操作
-                      </Typography>
-                      <Checkbox
-                        size="small"
-                        checked={selectedAssetIdSet.has(asset.id)}
-                        onChange={() => handleToggleAssetSelection(asset.id)}
-                        disabled={assetBatchSubmitting}
-                      />
-                    </Stack>
-
-                    <Typography variant="h6" sx={{ mt: 1.5, fontWeight: 700 }}>
-                      {asset.title}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
-                      {asset.description?.trim() || '当前资产尚未补充说明，可以在用户中心内完善标题、描述和标签。'}
-                    </Typography>
-                    <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 1 }}>
-                      {sourceInfo.summary}
-                    </Typography>
-
-                    <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', rowGap: 1 }}>
-                      {sourceInfo.projectLabel ? <Chip size="small" variant="outlined" label={sourceInfo.projectLabel} /> : null}
-                      {sourceInfo.traceLabel ? <Chip size="small" variant="outlined" label={sourceInfo.traceLabel} /> : null}
-                      {asset.tags.slice(0, 3).map((tag) => (
-                        <Chip key={`asset-tag-${asset.id}-${tag}`} size="small" variant="outlined" label={tag} />
-                      ))}
-                    </Stack>
-
-                    <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 1.5 }}>
-                      收录时间：{formatDateTime(asset.created_at)}
-                    </Typography>
-
-                    <Stack direction="row" spacing={1} sx={{ mt: 2, flexWrap: 'wrap', rowGap: 1 }}>
-                      {sourceInfo.backPath ? (
-                        <Button size="small" variant="outlined" onClick={() => navigate(sourceInfo.backPath || '/user-center')}>
-                          {sourceInfo.backLabel || '查看来源'}
-                        </Button>
-                      ) : null}
-                      <Button size="small" variant="outlined" onClick={() => handleOpenAssetEditor(asset)}>
-                        编辑信息
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        disabled={isSubmitting}
-                        onClick={() => void handleUpdateUserAsset(asset.id, { is_favorite: !asset.is_favorite })}
-                      >
-                        {asset.is_favorite ? '取消重点' : '设为重点'}
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        disabled={isSubmitting}
-                        onClick={() => void handleUpdateUserAsset(asset.id, { archived: !asset.archived_at })}
-                      >
-                        {asset.archived_at ? '恢复活跃' : '归档'}
-                      </Button>
-                    </Stack>
-                  </CardContent>
-                </Card>
-              </Grid>
-            )
-          })}
-        </Grid>
-      )}
-    </Stack>
-  )
+  const assetsContent = <UserAssetWorkspaceContent {...assetFacade.workspaceContentProps} />
 
   const pointsContent = (
     <Stack spacing={3}>
@@ -1683,57 +781,7 @@ export default function UserCenterPage() {
         </CardContent>
       </Card>
 
-      <Grid container spacing={2}>
-        <Grid item xs={12} md={6}>
-          <Card variant="outlined" sx={{ height: '100%', borderRadius: 3 }}>
-            <CardContent>
-              <Stack direction="row" spacing={1} alignItems="center">
-                <StarsOutlinedIcon color="primary" />
-                <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                  已接入概览
-                </Typography>
-              </Stack>
-              <Stack spacing={1.25} sx={{ mt: 2 }}>
-                <Typography variant="body2" color="text.secondary">
-                  项目数：{pointsConnectedOverview?.project_count ?? projects.length}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  用户资产数：{pointsConnectedOverview?.user_asset_count ?? userAssets.length}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  有声书项目数：{pointsConnectedOverview?.audiobook_project_count ?? overviewMetrics.audiobookProjects}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  有声书累计成本：{formatCurrency(totalAudiobookCost)}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  短剧运行次数：{totalDreamweaverRuns}
-                </Typography>
-              </Stack>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <Card variant="outlined" sx={{ height: '100%', borderRadius: 3 }}>
-            <CardContent>
-              <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                资产接入策略
-              </Typography>
-              <Stack spacing={1.25} sx={{ mt: 2 }}>
-                <Typography variant="body2" color="text.secondary">
-                  1. 过程态资产继续保留在生成模块，避免用户中心承接复杂上下文操作。
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  2. 稳定素材、成片和跨模块复用结果进入用户中心，便于统一检索、标记和权益联动。
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  3. 不同类型资产采取不同策略，生成链路负责生产，用户中心负责汇总与治理。
-                </Typography>
-              </Stack>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      {assetConnectedOverviewRows.strategyRowSlot}
 
       <Grid container spacing={2}>
         <Grid item xs={12} md={6}>
@@ -1742,21 +790,21 @@ export default function UserCenterPage() {
               <Typography variant="h6" sx={{ fontWeight: 700 }}>
                 当前消费定价
               </Typography>
-              {pricingPolicy ? (
+              {pricingPolicyPresentation ? (
                 <Stack spacing={1.5} sx={{ mt: 2 }}>
                   <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1 }}>
                     <Chip
                       size="small"
-                      color={pricingPolicy.source === 'admin_log' ? 'primary' : 'default'}
-                      label={pricingPolicy.source === 'admin_log' ? '后台定价快照' : '系统默认定价'}
+                      color={pricingPolicyPresentation.sourceColor}
+                      label={pricingPolicyPresentation.sourceLabel}
                     />
-                    <Chip size="small" variant="outlined" label={`用户按 ${getPricingBasisLabel(pricingPolicy.user_price_basis)} 计点`} />
+                    <Chip size="small" variant="outlined" label={pricingPolicyPresentation.userPriceBasisLabel} />
                   </Stack>
                   <Typography variant="body2" color="text.secondary">
-                    用户侧按公开价或内部标准价折算积分，不额外加价；运行中任务会按当前缓冲比例预留建议冻结值。
+                    {pricingPolicyPresentation.description}
                   </Typography>
                   <Box sx={{ display: 'grid', gap: 1.25, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
-                    {pricingPolicySummaryItems.map((item) => (
+                    {pricingPolicyPresentation.summaryItems.map((item) => (
                       <Box
                         key={item.label}
                         sx={{ p: 1.5, border: '1px solid rgba(15, 23, 42, 0.08)', borderRadius: 2 }}
@@ -1769,7 +817,7 @@ export default function UserCenterPage() {
                     ))}
                   </Box>
                   <Typography variant="caption" color="text.secondary">
-                    最近调整：{pricingPolicy.updated_at ? formatDateTime(pricingPolicy.updated_at) : '尚未人工调整'}
+                    {pricingPolicyPresentation.updatedAtLabel}
                   </Typography>
                 </Stack>
               ) : (
@@ -2086,85 +1134,7 @@ export default function UserCenterPage() {
         </CardContent>
       </Card>
 
-      <Grid container spacing={2}>
-        <Grid item xs={12} md={6}>
-          <Card variant="outlined" sx={{ height: '100%', borderRadius: 3 }}>
-            <CardContent>
-              <Stack direction="row" spacing={1} alignItems="center">
-                <StarsOutlinedIcon color="primary" />
-                <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                  已接入概览
-                </Typography>
-              </Stack>
-              <Stack spacing={1.25} sx={{ mt: 2 }}>
-                <Typography variant="body2" color="text.secondary">
-                  项目数：{pointsConnectedOverview?.project_count ?? projects.length}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  用户资产数：{pointsConnectedOverview?.user_asset_count ?? userAssets.length}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  有声书项目数：{pointsConnectedOverview?.audiobook_project_count ?? overviewMetrics.audiobookProjects}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  有声书累计成本：{formatCurrency(totalAudiobookCost)}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  短剧运行次数：{totalDreamweaverRuns}
-                </Typography>
-              </Stack>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <Card variant="outlined" sx={{ height: '100%', borderRadius: 3 }}>
-            <CardContent>
-              <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                当前积分规则
-              </Typography>
-              {pointsRules ? (
-                <Stack spacing={1.5} sx={{ mt: 2 }}>
-                  <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1 }}>
-                    <Chip
-                      size="small"
-                      color={pointsRules.source === 'admin_log' ? 'primary' : 'default'}
-                      label={getPointsRuleSourceLabel(pointsRules.source)}
-                    />
-                    <Chip
-                      size="small"
-                      variant="outlined"
-                      label={pointsRules.updated_at ? `最近更新：${formatDateTime(pointsRules.updated_at)}` : '尚未人工调整'}
-                    />
-                  </Stack>
-                  <Typography variant="body2" color="text.secondary">
-                    这里展示当前积分读模型实际采用的奖励、冻结和过期规则。
-                  </Typography>
-                  <Box sx={{ display: 'grid', gap: 1.25, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
-                    {pointsRuleSummaryItems.map((item) => (
-                      <Box
-                        key={item.label}
-                        sx={{ p: 1.5, border: '1px solid rgba(15, 23, 42, 0.08)', borderRadius: 2 }}
-                      >
-                        <Typography variant="caption" color="text.secondary">
-                          {item.label}
-                        </Typography>
-                        <Typography sx={{ mt: 0.5, fontWeight: 600 }}>{item.value}</Typography>
-                      </Box>
-                    ))}
-                  </Box>
-                  <Typography variant="caption" color="text.secondary">
-                    最近操作人：{pointsRules.updated_by_username || '系统默认'}
-                  </Typography>
-                </Stack>
-              ) : (
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-                  暂无可展示的积分规则快照。
-                </Typography>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      {assetConnectedOverviewRows.pointsRulesRowSlot}
 
       <Grid container spacing={2}>
         <Grid item xs={12} md={6}>
@@ -2620,10 +1590,7 @@ export default function UserCenterPage() {
               ) : null}
               <Button
                 startIcon={refreshing ? <CircularProgress size={16} color="inherit" /> : <RefreshIcon />}
-                onClick={() => {
-                  void loadUserCenterData(true)
-                  void loadUserAssets(true)
-                }}
+                onClick={assetFacade.refreshUserCenterAssets}
                 disabled={refreshing}
                 variant="contained"
                 sx={{ bgcolor: 'rgba(255,255,255,0.16)', boxShadow: 'none' }}
@@ -2675,56 +1642,6 @@ export default function UserCenterPage() {
         </Paper>
       </Container>
 
-      <Dialog open={assetEditorOpen} onClose={handleCloseAssetEditor} fullWidth maxWidth="sm">
-        <DialogTitle>编辑资产信息</DialogTitle>
-        <DialogContent dividers>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <TextField
-              fullWidth
-              required
-              label="资产标题"
-              value={assetEditorData.title}
-              onChange={(event) => setAssetEditorData((prev) => ({ ...prev, title: event.target.value }))}
-              disabled={assetEditorSubmitting}
-            />
-            <TextField
-              fullWidth
-              multiline
-              minRows={3}
-              maxRows={6}
-              label="补充说明"
-              value={assetEditorData.description}
-              onChange={(event) => setAssetEditorData((prev) => ({ ...prev, description: event.target.value }))}
-              disabled={assetEditorSubmitting}
-            />
-            <TextField
-              fullWidth
-              multiline
-              minRows={2}
-              maxRows={4}
-              label="标签"
-              placeholder="可使用逗号、中文逗号、顿号或换行分隔"
-              value={assetEditorData.tagsText}
-              onChange={(event) => setAssetEditorData((prev) => ({ ...prev, tagsText: event.target.value }))}
-              helperText="最多保留 12 个标签，每个标签最多 30 个字符。"
-              disabled={assetEditorSubmitting}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, py: 2 }}>
-          <Button onClick={handleCloseAssetEditor} disabled={assetEditorSubmitting}>
-            取消
-          </Button>
-          <Button
-            variant="contained"
-            onClick={() => void handleSaveAssetEditor()}
-            disabled={assetEditorSubmitting || !editingAsset}
-            startIcon={assetEditorSubmitting ? <CircularProgress size={16} color="inherit" /> : <SaveIcon />}
-          >
-            {assetEditorSubmitting ? '保存中...' : '保存'}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   )
 }

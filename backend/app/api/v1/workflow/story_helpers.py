@@ -417,8 +417,12 @@ def _enqueue_story_expansion_task(
     request: ExpandStoryRequest,
     user_id: int,
 ) -> None:
+    task_runner = globals().get("execute_expand_story_task")
+    if not callable(task_runner):
+        from app.api.v1.workflow.routes_expand import execute_expand_story_task as task_runner
+
     asyncio.create_task(
-        execute_expand_story_task(
+        task_runner(
             **_build_story_execution_task_kwargs(
                 task_id=task_id,
                 request=request,

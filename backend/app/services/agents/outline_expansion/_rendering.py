@@ -31,6 +31,7 @@ from ...character_runtime_context import build_character_prompt_context_from_tex
 from ._constants import *
 
 class RenderingMixin:
+    @staticmethod
     def _story_is_valid_volume_detail_chapter_count(
         chapter_count: int,
         chapters_count_range: Tuple[int, int],

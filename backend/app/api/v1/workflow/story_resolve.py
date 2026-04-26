@@ -27,7 +27,20 @@ from app.services.auto_system_detector import auto_create_system_collections
 
 logger = logging.getLogger(__name__)
 
-from app.api.v1.workflow.schemas import ExpandStoryRequest
+from app.api.v1.workflow.schemas import (
+    ExpandStoryRequest,
+    VALID_PRESERVE_WRITTEN_MODES,
+    VALID_STORY_EXPANSION_INTENTS,
+    VALID_STORY_EXPANSION_MODES,
+    VALID_STORY_EXPANSION_STRATEGIES,
+)
+from app.api.v1.workflow.story_helpers import (
+    _build_project_world_setting_context,
+    _create_project_outline_expander,
+    _get_conventional_collaboration_max_target_chapters,
+    _get_project_expansion_profile,
+    _normalize_story_request_text_fields,
+)
 
 def _update_story_expansion_history_record(
     db: Session,
@@ -679,6 +692,35 @@ def _resolve_story_target_characters(request: ExpandStoryRequest) -> Optional[in
     return request.target_total_characters
 
 
+def _merge_outline_with_written_context(
+    base_outline: str,
+    written_context: str,
+    *,
+    section_title: str,
+) -> str:
+    base_text = str(base_outline or "").strip()
+    written_text = str(written_context or "").strip()
+
+    if not written_text:
+        return base_text
+    if not base_text:
+        return written_text
+
+    return f"{base_text}\n\n【{section_title}】\n{written_text}"
+
+
+def _neutralize_written_context_chapter_labels(written_context: str) -> str:
+    text = str(written_context or "")
+    if not text.strip():
+        return ""
+
+    return re.sub(
+        r"(?m)^(\s*#{0,6}\s*)?第\s*(\d+)\s*章",
+        lambda match: f"{match.group(1) or ''}已写章节 {match.group(2)}",
+        text,
+    )
+
+
 def _build_story_written_chapter_preview(
     request: ExpandStoryRequest,
     db: Session,
@@ -687,6 +729,7 @@ def _build_story_written_chapter_preview(
         "effective_outline": request.current_outline or "",
         "effective_current_chapter_count": int(request.current_chapter_count or 0),
         "written_chapter_count": 0,
+        "written_outline_context": "",
         "warnings": [],
         "applied": False,
     }
@@ -731,10 +774,16 @@ def _build_story_written_chapter_preview(
             summary_data=chapter_summary_data,
         )
         preview_sections.append(
-            f"第{chapter_number}章：{chapter_title}\n- 已写摘要：{preview_text}"
+            f"已写章节 {chapter_number}：{chapter_title}\n- 已写摘要：{preview_text}"
         )
 
-    result["effective_outline"] = "\n\n".join(preview_sections)
+    written_preview_outline = "\n\n".join(preview_sections)
+    result["written_outline_context"] = written_preview_outline
+    result["effective_outline"] = _merge_outline_with_written_context(
+        request.current_outline,
+        written_preview_outline,
+        section_title="已写章节摘要预览（用于连续性约束）",
+    )
     result["effective_current_chapter_count"] = max(
         int(request.current_chapter_count or 0),
         written_count,
@@ -784,10 +833,31 @@ async def _prepare_story_execution_request(
         extractor_llm=expander.llm,
     )
 
-    effective_outline = extracted_outline_text or preview["effective_outline"] or request.current_outline
-    effective_chapter_count = int(preview["effective_current_chapter_count"] or request.current_chapter_count or 0)
-    if written_count > 0 and request.preserve_written_mode in {"extract_extend", "preserve_written"}:
-        effective_chapter_count = written_count
+    written_outline_context = str(
+        extracted_outline_text
+        or preview.get("written_outline_context")
+        or ""
+    ).strip()
+    if written_outline_context:
+        written_outline_context = _neutralize_written_context_chapter_labels(written_outline_context)
+        section_title = (
+            "已写章节提炼细纲（执行前自动抽取）"
+            if extracted_outline_text
+            else "已写章节摘要预览（执行前回退）"
+        )
+        effective_outline = _merge_outline_with_written_context(
+            request.current_outline,
+            written_outline_context,
+            section_title=section_title,
+        )
+    else:
+        effective_outline = preview["effective_outline"] or request.current_outline
+
+    effective_chapter_count = max(
+        int(request.current_chapter_count or 0),
+        int(preview["effective_current_chapter_count"] or 0),
+        int(written_count or 0),
+    )
 
     warnings = list(preview.get("warnings") or [])
     if written_count > 0 and request.preserve_written_mode == "extract_extend":
@@ -813,6 +883,8 @@ def _validate_expand_story_request(
     *,
     allow_empty_targets_for_analysis: bool = False,
 ) -> None:
+    from app.services.story_expansion_coordinator import StoryExpansionCoordinator
+
     if request.target_total_chapters is None and request.target_total_characters is None:
         if request.expansion_mode not in {"epic_framework", "volume_detail"} and not allow_empty_targets_for_analysis:
             raise HTTPException(
@@ -872,25 +944,35 @@ def _validate_expand_story_request(
         if effective_total_chapters > max_target_chapters:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="常规协同仅支持总规模不超过 300 个细化章节；超过 300 章后必须改用长篇框架协同",
+                detail=StoryExpansionCoordinator.build_conventional_collaboration_limit_message(),
             )
 
     if request.expansion_mode == "epic_framework":
-        if request.total_volumes is None or request.total_volumes < 3 or request.total_volumes > 50:
+        if (
+            request.total_volumes is None
+            or request.total_volumes < StoryExpansionCoordinator.EPIC_MIN_VOLUMES
+            or request.total_volumes > StoryExpansionCoordinator.EPIC_MAX_VOLUMES
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="长篇框架协同需要有效的总卷数 (3-50)",
+                detail=(
+                    "长篇框架协同需要有效的总卷数 "
+                    f"({StoryExpansionCoordinator.EPIC_MIN_VOLUMES}-{StoryExpansionCoordinator.EPIC_MAX_VOLUMES})"
+                ),
             )
         if (
             request.total_chapters_min is None
             or request.total_chapters_max is None
-            or request.total_chapters_min < 300
-            or request.total_chapters_max > 5000
+            or request.total_chapters_min < StoryExpansionCoordinator.EPIC_FRAMEWORK_MIN_TOTAL_CHAPTERS
+            or request.total_chapters_max > StoryExpansionCoordinator.EPIC_FRAMEWORK_MAX_TOTAL_CHAPTERS
             or request.total_chapters_min > request.total_chapters_max
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="长篇框架协同需要有效的总章节范围 (300-5000)",
+                detail=(
+                    "长篇框架协同需要有效的总章节范围 "
+                    f"({StoryExpansionCoordinator.build_epic_framework_total_range_text()})"
+                ),
             )
 
     if request.expansion_mode == "volume_detail":
@@ -902,13 +984,16 @@ def _validate_expand_story_request(
         if (
             request.volume_chapters_min is None
             or request.volume_chapters_max is None
-            or request.volume_chapters_min < VOLUME_DETAIL_MIN_CHAPTERS
-            or request.volume_chapters_max > VOLUME_DETAIL_MAX_CHAPTERS
+            or request.volume_chapters_min < StoryExpansionCoordinator.VOLUME_DETAIL_MIN_CHAPTERS
+            or request.volume_chapters_max > StoryExpansionCoordinator.VOLUME_DETAIL_MAX_CHAPTERS
             or request.volume_chapters_min > request.volume_chapters_max
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"单卷细化协同需要有效的本卷章节范围 ({VOLUME_DETAIL_MIN_CHAPTERS}-{VOLUME_DETAIL_MAX_CHAPTERS})",
+                detail=(
+                    "单卷细化协同需要有效的本卷章节范围 "
+                    f"({StoryExpansionCoordinator.build_volume_detail_chapter_range_text()})"
+                ),
             )
 
 

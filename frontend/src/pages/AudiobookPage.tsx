@@ -8,8 +8,8 @@
  * 4. 进度监控
  * 5. 音频播放与下载
  */
-import { useState, useEffect, useMemo, useRef, useCallback, ChangeEvent } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, ChangeEvent } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   apiClient,
   describeTaskPointsPrecheckErrorDetail,
@@ -17,10 +17,17 @@ import {
   extractTaskPointsPrecheckErrorDetail,
   type TaskPointsPrecheckErrorDetail,
 } from '../services/api'
+import { buildAudiobookChapterAudioAssetMetadataContract } from '../contracts/userAssetMetadataBuilders'
+import { buildAudiobookChapterAudioSourcePayload } from '../contracts/userAssetSourcePayloadBuilders'
 import * as bookParserApi from '../services/bookParserApi'
 import BrowserPlayer, { type BrowserPlayerProjectData } from '../components/audiobook/BrowserPlayer'
 import TaskPointsPrecheckAlert from '../components/common/TaskPointsPrecheckAlert'
-import { getLocalAssetBlob, saveLocalAsset } from '../utils/localAssetVault'
+import { extractLocalAssetStorageMetadata, getLocalAssetBlob } from '../utils/localAssetVault'
+import {
+  buildAudiobookSourceFocusPlan,
+  readUserAssetSourceAudiobookRouteRequest,
+} from '../utils/userAssetSourceNavigation'
+import { saveExplicitLocalUserAsset } from '../utils/userAssetExplicitLocalCollection'
 import {
   Box,
   Container,
@@ -94,6 +101,7 @@ type TtsModel =
   | 'minimax-speech-2.8-hd'
   | 'minimax-speech-2.8-turbo'
 type AudioOutputFormat = 'mp3' | 'wav' | 'm4b'
+type NarrationStyleId = 'professional' | 'dramatic' | 'relaxing' | 'expressive'
 
 interface StageInfo {
   status: StageStatus
@@ -109,6 +117,7 @@ interface TaskStatus {
   task_id: string
   audiobook_project_id: number
   chapter_id?: number | null
+  task_type?: string | null
   status: StageStatus
   current_stage?: string | null
   progress: number
@@ -161,9 +170,31 @@ interface AudiobookSessionState {
   projectId?: number | null
   audiobookProjectId?: number | null
   taskId?: string | null
+  activeTasks?: Array<{
+    taskId: string
+    audiobookProjectId: number
+  }>
+  selectedChapterIds?: number[]
   activeStep?: number
   generating?: boolean
   ttsModel?: TtsModel
+  updatedAt?: string
+  writerTabId?: string
+}
+
+interface GenerationCheckpoint {
+  chapter_id: number
+  total_segments: number
+  completed_segments: number
+  completed_segment_indices?: number[]
+  cached_audio_paths?: Record<string, string>
+  can_resume: boolean
+  run_id?: number | null
+  run_status?: string | null
+  current_stage?: string | null
+  celery_task_id?: string | null
+  checkpoint_source?: string | null
+  estimated_remaining_time?: number | null
 }
 
 interface ScriptEditorDialogProps {
@@ -194,6 +225,9 @@ interface ScriptEditorDialogProps {
   reviewMode: boolean
   onToggleReviewMode: () => void
   regeneratingSegments: Set<number>
+  editorConflict: AudiobookEditorSessionState | null
+  onApplyIncomingDraft: () => void
+  onKeepLocalDraft: () => void
 }
 
 interface HistoryDialogProps {
@@ -302,12 +336,113 @@ interface ScriptReviewDetail {
   issues?: ScriptReviewIssue[]
 }
 
+interface ScriptEditorChapterRef {
+  chapterId: number
+  title: string
+}
+
+interface ScriptEditorStateData {
+  scriptStatus: string
+  scriptSegments: any[]
+  scriptReview: ScriptReviewDetail | null
+}
+
+interface AudiobookEditorSessionState {
+  projectId?: number | null
+  audiobookProjectId?: number | null
+  chapterId?: number | null
+  reviewMode?: boolean
+  openSegmentDetailIndices?: number[]
+  segmentReviews?: Record<number, { quality_score?: number; needs_regenerate?: boolean }>
+  data?: ScriptEditorStateData | null
+  updatedAt?: string
+  writerTabId?: string
+}
+
+interface EditorConflictFieldDiffPreview {
+  key: string
+  label: string
+  currentValue: string
+  incomingValue: string
+}
+
+interface EditorConflictSegmentDiffPreview {
+  index: number
+  speaker: string
+  changeType: 'modified' | 'added' | 'removed'
+  fieldDiffs: EditorConflictFieldDiffPreview[]
+}
+
+interface EditorConflictDiffPreview {
+  fieldDiffs: EditorConflictFieldDiffPreview[]
+  segmentDiffs: EditorConflictSegmentDiffPreview[]
+}
+
+interface AudiobookEditorSyncRegistry {
+  entries?: Record<string, AudiobookEditorSessionState>
+}
+
+interface DeleteChapterSessionTarget {
+  id: number
+  chapterNumber: number
+  title: string
+  contentPreview: string
+}
+
+interface AudiobookPageSessionState {
+  projectId?: number | null
+  audiobookProjectId?: number | null
+  browserPlayerOpen?: boolean
+  showHistory?: boolean
+  scriptOnlyMode?: boolean
+  narrationStyle?: NarrationStyleId
+  scriptReviewDialogOpen?: boolean
+  scriptReviewData?: {
+    report: ScriptReviewDetail | null
+    segments: any[]
+  } | null
+  stageMetricsDialogOpen?: boolean
+  stageMetricsData?: {
+    stageKey: StageKey
+    info: StageInfo
+  } | null
+  deleteChapterDialogOpen?: boolean
+  deleteChapterTarget?: DeleteChapterSessionTarget | null
+  deleteChapterReason?: string
+  deleteChapterFiles?: boolean
+  cloneRecordDialogOpen?: boolean
+  cloneName?: string
+  cloneUrl?: string
+  designName?: string
+  designPrompt?: string
+  designPreviewText?: string
+  newProjectDialogOpen?: boolean
+  newProjectTitle?: string
+  newProjectText?: string
+  updatedAt?: string
+}
+
 const DEFAULT_NARRATOR_BY_MODEL = {
   'qwen3-tts-instruct-flash': 'Neil',
   'cosyvoice-v3.5-plus': '',
   'minimax-speech-2.8-hd': 'male-qn-jingying',
   'minimax-speech-2.8-turbo': 'male-qn-jingying',
 } as const
+
+const DEFAULT_DESIGN_PREVIEW_TEXT = '欢迎收听这段声音设计试听，我们从这里开始塑造角色的独特声线。'
+const DEFAULT_NARRATION_STYLE: NarrationStyleId = 'professional'
+
+const NARRATION_STYLE_OPTIONS = [
+  { id: 'professional', name: '专业播报', desc: '标准新闻播报风格，适合严肃题材', color: '#9c27b0' },
+  { id: 'dramatic', name: '戏剧表演', desc: '富有表现力的戏剧化朗读，适合情感丰富的故事', color: '#f57c00' },
+  { id: 'relaxing', name: '轻松舒缓', desc: '温柔舒缓的讲述方式，适合治愈系内容', color: '#4caf50' },
+  { id: 'expressive', name: '生动表现', desc: '活泼生动的表达方式，适合儿童或轻喜剧', color: '#2196f3' },
+] as const satisfies ReadonlyArray<{
+  id: NarrationStyleId
+  name: string
+  desc: string
+  color: string
+}>
 
 const TTS_MODEL_LABELS: Record<TtsModel, string> = {
   'qwen3-tts-instruct-flash': 'Qwen3-TTS Instruct Flash',
@@ -322,12 +457,41 @@ const isTtsModel = (value: unknown): value is TtsModel =>
   || value === 'minimax-speech-2.8-hd'
   || value === 'minimax-speech-2.8-turbo'
 
+const isNarrationStyleId = (value: unknown): value is NarrationStyleId =>
+  value === 'professional'
+  || value === 'dramatic'
+  || value === 'relaxing'
+  || value === 'expressive'
+
 const normalizeTtsModelValue = (value: unknown): TtsModel | null => {
   if (value === 'cosyvoice-v3-plus') {
     return 'cosyvoice-v3.5-plus'
   }
   return isTtsModel(value) ? value : null
 }
+
+const normalizeNarrationStyleValue = (value: unknown): NarrationStyleId => {
+  if (value === 'relaxed') {
+    return 'relaxing'
+  }
+  if (value === 'vivid') {
+    return 'expressive'
+  }
+  return isNarrationStyleId(value) ? value : DEFAULT_NARRATION_STYLE
+}
+
+const hasCustomDesignPreviewText = (value: unknown): boolean => {
+  if (typeof value !== 'string') {
+    return false
+  }
+  const trimmedValue = value.trim()
+  return Boolean(trimmedValue) && trimmedValue !== DEFAULT_DESIGN_PREVIEW_TEXT.trim()
+}
+
+const resolveDesignPreviewTextDraft = (value: unknown): string =>
+  typeof value === 'string' && value.trim()
+    ? value
+    : DEFAULT_DESIGN_PREVIEW_TEXT
 
 const getTtsModelLabel = (model: TtsModel) => TTS_MODEL_LABELS[model]
 
@@ -500,6 +664,7 @@ const normalizeTaskStatusResponse = (payload: any): TaskStatus => {
     task_id: taskId,
     audiobook_project_id: payload?.audiobook_project_id,
     chapter_id: payload?.chapter_id ?? null,
+    task_type: typeof payload?.task_type === 'string' ? payload.task_type : null,
     status: coerceStageStatus(payload?.status),
     current_stage: currentStage,
     progress: typeof payload?.progress === 'number' ? payload.progress : 0,
@@ -511,7 +676,265 @@ const normalizeTaskStatusResponse = (payload: any): TaskStatus => {
   }
 }
 
+const isActiveAudiobookTask = (task: TaskStatus | null | undefined): task is TaskStatus =>
+  Boolean(task && (task.status === 'pending' || task.status === 'running'))
+
+const getTaskSortTimestamp = (task: Pick<TaskStatus, 'updated_at' | 'created_at'>): number => {
+  const raw = task.updated_at || task.created_at
+  if (!raw) return 0
+  const parsed = Date.parse(raw)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+const compareTaskByRecency = (left: TaskStatus, right: TaskStatus): number =>
+  getTaskSortTimestamp(right) - getTaskSortTimestamp(left)
+
+const dedupeSessionTaskRefs = (
+  taskRefs: AudiobookSessionState['activeTasks'],
+): Array<{ taskId: string; audiobookProjectId: number }> => {
+  const seen = new Set<string>()
+  const normalized: Array<{ taskId: string; audiobookProjectId: number }> = []
+
+  for (const item of taskRefs || []) {
+    const taskId = typeof item?.taskId === 'string' ? item.taskId.trim() : ''
+    const audiobookProjectId = Number(item?.audiobookProjectId)
+    if (!taskId || !Number.isFinite(audiobookProjectId) || audiobookProjectId <= 0) {
+      continue
+    }
+    if (seen.has(taskId)) {
+      continue
+    }
+    seen.add(taskId)
+    normalized.push({
+      taskId,
+      audiobookProjectId,
+    })
+  }
+
+  return normalized
+}
+
+const normalizeSelectedChapterIds = (
+  chapterIds: unknown,
+  options?: {
+    allowedIds?: number[]
+    fallbackIds?: number[]
+  },
+): number[] => {
+  const allowedIdSet = Array.isArray(options?.allowedIds)
+    ? new Set(
+        options.allowedIds
+          .map((item) => Number(item))
+          .filter((item) => Number.isFinite(item) && item > 0),
+      )
+    : null
+
+  const normalized = Array.isArray(chapterIds)
+    ? Array.from(
+        new Set(
+          chapterIds
+            .map((item) => Number(item))
+            .filter((item) => Number.isFinite(item) && item > 0)
+            .filter((item) => !allowedIdSet || allowedIdSet.has(item)),
+        ),
+      )
+    : []
+
+  if (normalized.length > 0) {
+    return normalized
+  }
+
+  return Array.isArray(options?.fallbackIds) ? options.fallbackIds : []
+}
+
+const buildPendingTaskStatus = ({
+  taskId,
+  audiobookProjectId,
+  taskType,
+  chapterId = null,
+}: {
+  taskId: string
+  audiobookProjectId: number
+  taskType?: string | null
+  chapterId?: number | null
+}): TaskStatus => {
+  const now = new Date().toISOString()
+  return {
+    task_id: taskId,
+    audiobook_project_id: audiobookProjectId,
+    chapter_id: chapterId,
+    task_type: taskType || null,
+    status: 'pending',
+    current_stage: null,
+    progress: 0,
+    stages: createEmptyStageMap(),
+    created_at: now,
+    updated_at: now,
+    detail: {},
+    overall_progress: 0,
+  }
+}
+
 const AUDIOBOOK_SESSION_STORAGE_KEY = 'audiobook_active_session_v1'
+const AUDIOBOOK_EDITOR_SESSION_STORAGE_KEY = 'audiobook_editor_session_v1'
+const AUDIOBOOK_EDITOR_SYNC_STORAGE_KEY = 'audiobook_editor_sync_v1'
+const AUDIOBOOK_PAGE_SESSION_STORAGE_KEY = 'audiobook_page_session_v1'
+const AUDIOBOOK_SESSION_TAB_ID_KEY = 'audiobook_session_tab_id_v1'
+const AUDIOBOOK_EDITOR_SYNC_TTL_MS = 10 * 60 * 1000
+const AUDIOBOOK_EDITOR_SYNC_HEARTBEAT_MS = 30 * 1000
+const SCRIPT_EDITOR_CONFLICT_SEGMENT_PREVIEW_LIMIT = 6
+const SCRIPT_EDITOR_CONFLICT_FIELD_DETAIL_LIMIT = 3
+const SCRIPT_EDITOR_CONFLICT_SEGMENT_FIELDS = [
+  { key: 'text', label: '文本', maxLength: 96 },
+  { key: 'performance_notes', label: '表演提示', maxLength: 72 },
+  { key: 'pause_before', label: '前停顿', maxLength: 24 },
+  { key: 'pause_after', label: '后停顿', maxLength: 24 },
+  { key: 'instruct_emotion', label: '情绪指令', maxLength: 48 },
+  { key: 'instruct_scene', label: '场景指令', maxLength: 48 },
+  { key: 'instruct_role', label: '角色指令', maxLength: 48 },
+  { key: 'instruct_identity', label: '身份指令', maxLength: 48 },
+  { key: 'voice_params', label: '音色参数', maxLength: 72 },
+  { key: 'sound_effects_simple', label: '简易音效', maxLength: 72 },
+  { key: 'sound_effects', label: '详细音效', maxLength: 72 },
+  { key: 'music_cue_simple', label: '简易配乐', maxLength: 56 },
+  { key: 'music_cue', label: '详细配乐', maxLength: 72 },
+] as const
+const SCRIPT_STATUS_LABELS: Record<string, string> = {
+  pending: '待处理',
+  generated: '已生成',
+  reviewed: '已审查',
+  approved: '已通过',
+}
+
+const createEphemeralSessionId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `tab_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+const getOrCreateAudiobookSessionTabId = (): string => {
+  if (typeof window === 'undefined' || typeof sessionStorage === 'undefined') {
+    return createEphemeralSessionId()
+  }
+
+  try {
+    const existing = sessionStorage.getItem(AUDIOBOOK_SESSION_TAB_ID_KEY)
+    if (existing) {
+      return existing
+    }
+
+    const nextId = createEphemeralSessionId()
+    sessionStorage.setItem(AUDIOBOOK_SESSION_TAB_ID_KEY, nextId)
+    return nextId
+  } catch {
+    return createEphemeralSessionId()
+  }
+}
+
+const parseSessionTimestamp = (value: unknown): number => {
+  if (typeof value !== 'string' || !value.trim()) {
+    return 0
+  }
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+const pruneAudiobookEditorSyncEntries = (
+  entries: Record<string, AudiobookEditorSessionState>,
+  nowMs: number = Date.now(),
+): Record<string, AudiobookEditorSessionState> => {
+  const nextEntries: Record<string, AudiobookEditorSessionState> = {}
+
+  for (const [entryKey, entry] of Object.entries(entries)) {
+    const updatedAtMs = parseSessionTimestamp(entry.updatedAt)
+    if (updatedAtMs <= 0) {
+      continue
+    }
+    if (nowMs - updatedAtMs > AUDIOBOOK_EDITOR_SYNC_TTL_MS) {
+      continue
+    }
+    nextEntries[entryKey] = entry
+  }
+
+  return nextEntries
+}
+
+const normalizePositiveId = (value: unknown): number | null => {
+  const id = Number(value)
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+const normalizeSegmentDetailIndices = (value: unknown): number[] =>
+  Array.isArray(value)
+    ? Array.from(
+        new Set(
+          value
+            .map((item) => Number(item))
+            .filter((item) => Number.isFinite(item) && item >= 0),
+        ),
+      ).sort((left, right) => left - right)
+    : []
+
+const buildSegmentDetailsOpenState = (indices: number[]): Record<number, boolean> => {
+  const nextState: Record<number, boolean> = {}
+  for (const index of indices) {
+    nextState[index] = true
+  }
+  return nextState
+}
+
+const extractOpenSegmentDetailIndices = (segmentDetailsOpen: Record<number, boolean>): number[] =>
+  Object.entries(segmentDetailsOpen)
+    .filter(([, open]) => Boolean(open))
+    .map(([index]) => Number(index))
+    .filter((index) => Number.isFinite(index) && index >= 0)
+    .sort((left, right) => left - right)
+
+const normalizeSegmentReviews = (
+  reviews: unknown,
+): Record<number, { quality_score?: number; needs_regenerate?: boolean }> => {
+  if (!reviews || typeof reviews !== 'object') {
+    return {}
+  }
+
+  const normalized: Record<number, { quality_score?: number; needs_regenerate?: boolean }> = {}
+  for (const [rawIndex, rawReview] of Object.entries(reviews as Record<string, unknown>)) {
+    const index = Number(rawIndex)
+    if (!Number.isFinite(index) || index < 0 || !rawReview || typeof rawReview !== 'object') {
+      continue
+    }
+
+    const review = rawReview as Record<string, unknown>
+    const nextReview: { quality_score?: number; needs_regenerate?: boolean } = {}
+
+    if (typeof review.quality_score === 'number' && !Number.isNaN(review.quality_score)) {
+      nextReview.quality_score = review.quality_score
+    }
+    if (typeof review.needs_regenerate === 'boolean') {
+      nextReview.needs_regenerate = review.needs_regenerate
+    }
+
+    if (Object.keys(nextReview).length > 0) {
+      normalized[index] = nextReview
+    }
+  }
+
+  return normalized
+}
+
+const buildComparableAudiobookSessionPayload = (
+  session: Partial<AudiobookSessionState> | null | undefined,
+) => ({
+  projectId: normalizePositiveId(session?.projectId),
+  audiobookProjectId: normalizePositiveId(session?.audiobookProjectId),
+  taskId: typeof session?.taskId === 'string' && session.taskId.trim() ? session.taskId.trim() : null,
+  activeTasks: dedupeSessionTaskRefs(session?.activeTasks),
+  selectedChapterIds: normalizeSelectedChapterIds(session?.selectedChapterIds),
+  activeStep: typeof session?.activeStep === 'number' ? session.activeStep : undefined,
+  generating: Boolean(session?.generating),
+  ttsModel: normalizeTtsModelValue(session?.ttsModel) || undefined,
+})
 
 type NavigationType = PerformanceNavigationTiming['type'] | 'navigate' | 'reload' | 'back_forward'
 
@@ -592,6 +1015,579 @@ const normalizeScriptReview = (raw: any): ScriptReviewDetail | null => {
     revision_suggestions: Array.isArray(raw.revision_suggestions) ? raw.revision_suggestions : [],
     issues: safeIssues,
   }
+}
+
+const normalizeScriptEditorStateData = (raw: unknown): ScriptEditorStateData | null => {
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+
+  const data = raw as Partial<ScriptEditorStateData>
+  return {
+    scriptStatus:
+      typeof data.scriptStatus === 'string' && data.scriptStatus.trim()
+        ? data.scriptStatus
+        : 'pending',
+    scriptSegments: Array.isArray(data.scriptSegments) ? data.scriptSegments : [],
+    scriptReview: normalizeScriptReview(data.scriptReview),
+  }
+}
+
+const normalizeAudiobookEditorSessionState = (raw: unknown): AudiobookEditorSessionState | null => {
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+
+  const session = raw as AudiobookEditorSessionState
+  return {
+    projectId: normalizePositiveId(session.projectId),
+    audiobookProjectId: normalizePositiveId(session.audiobookProjectId),
+    chapterId: normalizePositiveId(session.chapterId),
+    reviewMode: Boolean(session.reviewMode),
+    openSegmentDetailIndices: normalizeSegmentDetailIndices(session.openSegmentDetailIndices),
+    segmentReviews: normalizeSegmentReviews(session.segmentReviews),
+    data: normalizeScriptEditorStateData(session.data),
+    updatedAt: typeof session.updatedAt === 'string' ? session.updatedAt : undefined,
+    writerTabId: typeof session.writerTabId === 'string' && session.writerTabId.trim()
+      ? session.writerTabId.trim()
+      : undefined,
+  }
+}
+
+const normalizeAudiobookEditorSyncRegistry = (
+  raw: unknown,
+): Record<string, AudiobookEditorSessionState> => {
+  if (!raw || typeof raw !== 'object') {
+    return {}
+  }
+
+  const registry = raw as AudiobookEditorSyncRegistry
+  const rawEntries = registry.entries
+  if (!rawEntries || typeof rawEntries !== 'object') {
+    return {}
+  }
+
+  const normalizedEntries: Record<string, AudiobookEditorSessionState> = {}
+  for (const [entryKey, entryValue] of Object.entries(rawEntries)) {
+    if (!entryKey.trim()) {
+      continue
+    }
+    const normalizedEntry = normalizeAudiobookEditorSessionState(entryValue)
+    if (!normalizedEntry?.writerTabId) {
+      continue
+    }
+    normalizedEntries[entryKey] = normalizedEntry
+  }
+
+  return normalizedEntries
+}
+
+const normalizeDeleteChapterSessionTarget = (raw: unknown): DeleteChapterSessionTarget | null => {
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+
+  const target = raw as Partial<DeleteChapterSessionTarget>
+  const targetId = normalizePositiveId(target.id)
+  if (!targetId) {
+    return null
+  }
+
+  return {
+    id: targetId,
+    chapterNumber:
+      typeof target.chapterNumber === 'number' && Number.isFinite(target.chapterNumber)
+        ? Math.max(0, Math.trunc(target.chapterNumber))
+        : 0,
+    title: typeof target.title === 'string' ? target.title : '',
+    contentPreview: typeof target.contentPreview === 'string' ? target.contentPreview : '',
+  }
+}
+
+const buildDeleteChapterSessionTarget = (
+  chapter: Chapter | null | undefined,
+): DeleteChapterSessionTarget | null => {
+  if (!chapter?.id) {
+    return null
+  }
+
+  return {
+    id: chapter.id,
+    chapterNumber: chapter.chapter_number,
+    title: chapter.title || '',
+    contentPreview: chapter.content ? chapter.content.slice(0, 100) : '',
+  }
+}
+
+const normalizeAudiobookPageSessionState = (raw: unknown): AudiobookPageSessionState | null => {
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+
+  const session = raw as AudiobookPageSessionState
+  const normalizedDeleteChapterTarget = normalizeDeleteChapterSessionTarget(session.deleteChapterTarget)
+  const normalizedScriptReviewData =
+    session.scriptReviewData && typeof session.scriptReviewData === 'object'
+      ? {
+          report: normalizeScriptReview(session.scriptReviewData.report),
+          segments: Array.isArray(session.scriptReviewData.segments)
+            ? session.scriptReviewData.segments
+            : [],
+        }
+      : null
+
+  const rawStageMetricsData = session.stageMetricsData
+  const normalizedStageMetricsData =
+    rawStageMetricsData
+    && typeof rawStageMetricsData === 'object'
+    && typeof rawStageMetricsData.stageKey === 'string'
+    && STAGE_KEYS.includes(rawStageMetricsData.stageKey as StageKey)
+      ? {
+          stageKey: rawStageMetricsData.stageKey as StageKey,
+          info: normalizeStageEntry(rawStageMetricsData.info),
+        }
+      : null
+
+  return {
+    projectId: normalizePositiveId(session.projectId),
+    audiobookProjectId: normalizePositiveId(session.audiobookProjectId),
+    browserPlayerOpen: Boolean(session.browserPlayerOpen),
+    showHistory: Boolean(session.showHistory),
+    scriptOnlyMode: Boolean(session.scriptOnlyMode),
+    narrationStyle: normalizeNarrationStyleValue(session.narrationStyle),
+    scriptReviewDialogOpen: Boolean(session.scriptReviewDialogOpen),
+    scriptReviewData: normalizedScriptReviewData,
+    stageMetricsDialogOpen: Boolean(session.stageMetricsDialogOpen),
+    stageMetricsData: normalizedStageMetricsData,
+    deleteChapterDialogOpen: Boolean(session.deleteChapterDialogOpen),
+    deleteChapterTarget: normalizedDeleteChapterTarget,
+    deleteChapterReason: typeof session.deleteChapterReason === 'string' ? session.deleteChapterReason : '',
+    deleteChapterFiles: Boolean(session.deleteChapterFiles),
+    cloneRecordDialogOpen: Boolean(session.cloneRecordDialogOpen),
+    cloneName: typeof session.cloneName === 'string' ? session.cloneName : '',
+    cloneUrl: typeof session.cloneUrl === 'string' ? session.cloneUrl : '',
+    designName: typeof session.designName === 'string' ? session.designName : '',
+    designPrompt: typeof session.designPrompt === 'string' ? session.designPrompt : '',
+    designPreviewText: typeof session.designPreviewText === 'string' ? session.designPreviewText : '',
+    newProjectDialogOpen: Boolean(session.newProjectDialogOpen),
+    newProjectTitle: typeof session.newProjectTitle === 'string' ? session.newProjectTitle : '',
+    newProjectText: typeof session.newProjectText === 'string' ? session.newProjectText : '',
+    updatedAt: typeof session.updatedAt === 'string' ? session.updatedAt : undefined,
+  }
+}
+
+const buildComparableAudiobookEditorSessionPayload = (
+  session: Partial<AudiobookEditorSessionState> | null | undefined,
+) => {
+  const normalizedSession = normalizeAudiobookEditorSessionState(session)
+
+  return {
+    projectId: normalizedSession?.projectId ?? null,
+    audiobookProjectId: normalizedSession?.audiobookProjectId ?? null,
+    chapterId: normalizedSession?.chapterId ?? null,
+    reviewMode: normalizedSession?.reviewMode ?? false,
+    openSegmentDetailIndices: normalizedSession?.openSegmentDetailIndices ?? [],
+    segmentReviews: normalizedSession?.segmentReviews ?? {},
+    data: normalizedSession?.data ?? null,
+  }
+}
+
+const buildAudiobookEditorConflictSignature = (
+  session: Partial<AudiobookEditorSessionState> | null | undefined,
+) => {
+  const normalizedSession = normalizeAudiobookEditorSessionState(session)
+  if (!normalizedSession?.writerTabId) {
+    return null
+  }
+  return `${normalizedSession.writerTabId}:${normalizedSession.updatedAt || ''}`
+}
+
+const normalizeEditorDiffComparableValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeEditorDiffComparableValue(item))
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.keys(value as Record<string, unknown>)
+      .sort((left, right) => left.localeCompare(right))
+      .reduce<Record<string, unknown>>((acc, key) => {
+        const normalizedValue = normalizeEditorDiffComparableValue(
+          (value as Record<string, unknown>)[key],
+        )
+        if (typeof normalizedValue !== 'undefined') {
+          acc[key] = normalizedValue
+        }
+        return acc
+      }, {})
+  }
+
+  if (typeof value === 'undefined') {
+    return null
+  }
+
+  return value
+}
+
+const isDiffValueEqual = (left: unknown, right: unknown): boolean =>
+  JSON.stringify(normalizeEditorDiffComparableValue(left))
+  === JSON.stringify(normalizeEditorDiffComparableValue(right))
+
+const hasMeaningfulDiffValue = (value: unknown): boolean => {
+  if (value === null || typeof value === 'undefined') {
+    return false
+  }
+
+  if (typeof value === 'string') {
+    return value.trim().length > 0
+  }
+
+  if (Array.isArray(value)) {
+    return value.length > 0
+  }
+
+  if (typeof value === 'object') {
+    return Object.keys(value as Record<string, unknown>).length > 0
+  }
+
+  return true
+}
+
+const formatDiffPreviewText = (value: unknown, maxLength: number = 72): string => {
+  if (value === null || typeof value === 'undefined') {
+    return '—'
+  }
+
+  let text = ''
+  if (typeof value === 'string') {
+    text = value
+  } else if (typeof value === 'number' || typeof value === 'boolean') {
+    text = String(value)
+  } else {
+    try {
+      text = JSON.stringify(value)
+    } catch {
+      text = String(value)
+    }
+  }
+
+  const normalizedText = text.replace(/\s+/g, ' ').trim()
+  if (!normalizedText) {
+    return '—'
+  }
+
+  return normalizedText.length > maxLength
+    ? `${normalizedText.slice(0, maxLength).trimEnd()}...`
+    : normalizedText
+}
+
+const buildEditorConflictFieldDiffPreview = ({
+  key,
+  label,
+  currentValue,
+  incomingValue,
+  maxLength = 72,
+}: {
+  key: string
+  label: string
+  currentValue: unknown
+  incomingValue: unknown
+  maxLength?: number
+}): EditorConflictFieldDiffPreview => ({
+  key,
+  label,
+  currentValue: formatDiffPreviewText(currentValue, maxLength),
+  incomingValue: formatDiffPreviewText(incomingValue, maxLength),
+})
+
+const formatScriptStatusPreviewText = (value: unknown): string => {
+  if (typeof value !== 'string' || !value.trim()) {
+    return '—'
+  }
+
+  return SCRIPT_STATUS_LABELS[value.trim()] || value.trim()
+}
+
+const formatReviewModePreviewText = (value: unknown): string =>
+  value ? '审查模式' : '普通编辑'
+
+const formatOpenSegmentDetailIndicesSummary = (value: unknown): string => {
+  const indices = normalizeSegmentDetailIndices(value)
+  if (indices.length === 0) {
+    return '无展开详情'
+  }
+
+  const preview = indices.slice(0, 4).map((index) => `#${index + 1}`).join('、')
+  return indices.length > 4
+    ? `${preview} 等 ${indices.length} 个片段已展开`
+    : `${preview} 已展开`
+}
+
+const formatSegmentReviewSummary = (
+  reviews: unknown,
+): string => {
+  const normalizedReviews = normalizeSegmentReviews(reviews)
+  const entries = Object.entries(normalizedReviews)
+    .map(([rawIndex, review]) => ({
+      index: Number(rawIndex),
+      review,
+    }))
+    .sort((left, right) => left.index - right.index)
+
+  if (entries.length === 0) {
+    return '无审查结果'
+  }
+
+  const ratedCount = entries.filter(({ review }) => typeof review.quality_score === 'number').length
+  const regenerateCount = entries.filter(({ review }) => review.needs_regenerate).length
+  const previewIndices = entries.slice(0, 4).map(({ index }) => `#${index + 1}`).join('、')
+
+  return entries.length > 4
+    ? `评分 ${ratedCount} 条，待重生成 ${regenerateCount} 条，涉及 ${previewIndices} 等 ${entries.length} 个片段`
+    : `评分 ${ratedCount} 条，待重生成 ${regenerateCount} 条，涉及 ${previewIndices}`
+}
+
+const resolveScriptSegmentSpeaker = (segment: any): string => {
+  const speaker =
+    segment?.speaker
+    || segment?.speaker_name
+    || segment?.character_name
+    || segment?.role_name
+
+  return typeof speaker === 'string' && speaker.trim() ? speaker.trim() : '旁白'
+}
+
+const buildAudiobookEditorConflictPreview = (
+  localSession: Partial<AudiobookEditorSessionState> | null | undefined,
+  incomingSession: Partial<AudiobookEditorSessionState> | null | undefined,
+): EditorConflictDiffPreview | null => {
+  const normalizedLocalSession = normalizeAudiobookEditorSessionState(localSession)
+  const normalizedIncomingSession = normalizeAudiobookEditorSessionState(incomingSession)
+
+  if (!normalizedLocalSession?.data || !normalizedIncomingSession?.data) {
+    return null
+  }
+
+  const fieldDiffs: EditorConflictFieldDiffPreview[] = []
+  if (!isDiffValueEqual(normalizedLocalSession.data.scriptStatus, normalizedIncomingSession.data.scriptStatus)) {
+    fieldDiffs.push(
+      buildEditorConflictFieldDiffPreview({
+        key: 'scriptStatus',
+        label: '剧本状态',
+        currentValue: formatScriptStatusPreviewText(normalizedLocalSession.data.scriptStatus),
+        incomingValue: formatScriptStatusPreviewText(normalizedIncomingSession.data.scriptStatus),
+        maxLength: 32,
+      }),
+    )
+  }
+  if (!isDiffValueEqual(normalizedLocalSession.reviewMode, normalizedIncomingSession.reviewMode)) {
+    fieldDiffs.push(
+      buildEditorConflictFieldDiffPreview({
+        key: 'reviewMode',
+        label: '编辑模式',
+        currentValue: formatReviewModePreviewText(normalizedLocalSession.reviewMode),
+        incomingValue: formatReviewModePreviewText(normalizedIncomingSession.reviewMode),
+        maxLength: 24,
+      }),
+    )
+  }
+  if (
+    !isDiffValueEqual(
+      normalizedLocalSession.openSegmentDetailIndices,
+      normalizedIncomingSession.openSegmentDetailIndices,
+    )
+  ) {
+    fieldDiffs.push(
+      buildEditorConflictFieldDiffPreview({
+        key: 'openSegmentDetailIndices',
+        label: '详情展开',
+        currentValue: formatOpenSegmentDetailIndicesSummary(normalizedLocalSession.openSegmentDetailIndices),
+        incomingValue: formatOpenSegmentDetailIndicesSummary(normalizedIncomingSession.openSegmentDetailIndices),
+        maxLength: 56,
+      }),
+    )
+  }
+  if (!isDiffValueEqual(normalizedLocalSession.segmentReviews, normalizedIncomingSession.segmentReviews)) {
+    fieldDiffs.push(
+      buildEditorConflictFieldDiffPreview({
+        key: 'segmentReviews',
+        label: '片段审查',
+        currentValue: formatSegmentReviewSummary(normalizedLocalSession.segmentReviews),
+        incomingValue: formatSegmentReviewSummary(normalizedIncomingSession.segmentReviews),
+        maxLength: 80,
+      }),
+    )
+  }
+
+  const localSegments = Array.isArray(normalizedLocalSession.data.scriptSegments)
+    ? normalizedLocalSession.data.scriptSegments
+    : []
+  const incomingSegments = Array.isArray(normalizedIncomingSession.data.scriptSegments)
+    ? normalizedIncomingSession.data.scriptSegments
+    : []
+
+  const segmentDiffs: EditorConflictSegmentDiffPreview[] = []
+  const totalSegments = Math.max(localSegments.length, incomingSegments.length)
+
+  for (let index = 0; index < totalSegments; index += 1) {
+    const localSegment = localSegments[index]
+    const incomingSegment = incomingSegments[index]
+
+    if (!localSegment && !incomingSegment) {
+      continue
+    }
+
+    const changeType: EditorConflictSegmentDiffPreview['changeType'] =
+      !localSegment
+        ? 'added'
+        : !incomingSegment
+          ? 'removed'
+          : 'modified'
+
+    const segmentFieldDiffs = SCRIPT_EDITOR_CONFLICT_SEGMENT_FIELDS.reduce<EditorConflictFieldDiffPreview[]>(
+      (acc, field) => {
+        const currentValue = localSegment?.[field.key]
+        const nextValue = incomingSegment?.[field.key]
+
+        if (changeType === 'modified' && isDiffValueEqual(currentValue, nextValue)) {
+          return acc
+        }
+
+        if (changeType === 'added' && !hasMeaningfulDiffValue(nextValue)) {
+          return acc
+        }
+
+        if (changeType === 'removed' && !hasMeaningfulDiffValue(currentValue)) {
+          return acc
+        }
+
+        acc.push(
+          buildEditorConflictFieldDiffPreview({
+            key: field.key,
+            label: field.label,
+            currentValue,
+            incomingValue: nextValue,
+            maxLength: field.maxLength,
+          }),
+        )
+        return acc
+      },
+      [],
+    )
+
+    if (segmentFieldDiffs.length === 0) {
+      if (changeType === 'modified') {
+        continue
+      }
+
+      segmentFieldDiffs.push(
+        buildEditorConflictFieldDiffPreview({
+          key: 'segment_presence',
+          label: '片段存在状态',
+          currentValue: localSegment ? '本页存在' : '本页缺失',
+          incomingValue: incomingSegment ? '对方存在' : '对方缺失',
+          maxLength: 24,
+        }),
+      )
+    }
+
+    segmentDiffs.push({
+      index,
+      speaker: resolveScriptSegmentSpeaker(incomingSegment || localSegment),
+      changeType,
+      fieldDiffs: segmentFieldDiffs,
+    })
+  }
+
+  if (fieldDiffs.length === 0 && segmentDiffs.length === 0) {
+    return null
+  }
+
+  return {
+    fieldDiffs,
+    segmentDiffs,
+  }
+}
+
+const buildComparableAudiobookPageSessionPayload = (
+  session: Partial<AudiobookPageSessionState> | null | undefined,
+) => {
+  const normalizedSession = normalizeAudiobookPageSessionState(session)
+  const normalizedDeleteChapterTarget = normalizedSession?.deleteChapterTarget ?? null
+  const hasDeleteChapterDialogState = Boolean(
+    normalizedSession?.deleteChapterDialogOpen && normalizedDeleteChapterTarget,
+  )
+  const hasVoiceWorkbenchDraftState = Boolean(
+    normalizedSession?.cloneRecordDialogOpen
+      || normalizedSession?.cloneName
+      || normalizedSession?.cloneUrl
+      || normalizedSession?.designName
+      || normalizedSession?.designPrompt
+      || hasCustomDesignPreviewText(normalizedSession?.designPreviewText),
+  )
+
+  return {
+    projectId: normalizedSession?.projectId ?? null,
+    audiobookProjectId: normalizedSession?.audiobookProjectId ?? null,
+    browserPlayerOpen: normalizedSession?.browserPlayerOpen ?? false,
+    showHistory: normalizedSession?.showHistory ?? false,
+    scriptOnlyMode: normalizedSession?.scriptOnlyMode ?? false,
+    narrationStyle: normalizedSession?.narrationStyle ?? DEFAULT_NARRATION_STYLE,
+    scriptReviewDialogOpen:
+      Boolean(normalizedSession?.scriptReviewDialogOpen && normalizedSession?.scriptReviewData),
+    scriptReviewData:
+      normalizedSession?.scriptReviewDialogOpen && normalizedSession?.scriptReviewData
+        ? normalizedSession.scriptReviewData
+        : null,
+    stageMetricsDialogOpen:
+      Boolean(normalizedSession?.stageMetricsDialogOpen && normalizedSession?.stageMetricsData),
+    stageMetricsData:
+      normalizedSession?.stageMetricsDialogOpen && normalizedSession?.stageMetricsData
+        ? normalizedSession.stageMetricsData
+        : null,
+    deleteChapterDialogOpen: hasDeleteChapterDialogState,
+    deleteChapterTarget: hasDeleteChapterDialogState ? normalizedDeleteChapterTarget : null,
+    deleteChapterReason: hasDeleteChapterDialogState ? normalizedSession?.deleteChapterReason ?? '' : '',
+    deleteChapterFiles: Boolean(hasDeleteChapterDialogState && normalizedSession?.deleteChapterFiles),
+    cloneRecordDialogOpen: hasVoiceWorkbenchDraftState ? normalizedSession?.cloneRecordDialogOpen ?? false : false,
+    cloneName: hasVoiceWorkbenchDraftState ? normalizedSession?.cloneName ?? '' : '',
+    cloneUrl: hasVoiceWorkbenchDraftState ? normalizedSession?.cloneUrl ?? '' : '',
+    designName: hasVoiceWorkbenchDraftState ? normalizedSession?.designName ?? '' : '',
+    designPrompt: hasVoiceWorkbenchDraftState ? normalizedSession?.designPrompt ?? '' : '',
+    designPreviewText: hasVoiceWorkbenchDraftState
+      ? resolveDesignPreviewTextDraft(normalizedSession?.designPreviewText)
+      : '',
+    newProjectDialogOpen: normalizedSession?.newProjectDialogOpen ?? false,
+    newProjectTitle: normalizedSession?.newProjectTitle ?? '',
+    newProjectText: normalizedSession?.newProjectText ?? '',
+  }
+}
+
+const hasPersistableAudiobookPageSession = (
+  session: Partial<AudiobookPageSessionState> | null | undefined,
+) => {
+  const normalizedSession = normalizeAudiobookPageSessionState(session)
+  if (!normalizedSession) {
+    return false
+  }
+
+  return Boolean(
+    normalizedSession.browserPlayerOpen
+      || normalizedSession.showHistory
+      || normalizedSession.scriptOnlyMode
+      || normalizedSession.narrationStyle !== DEFAULT_NARRATION_STYLE
+      || (normalizedSession.scriptReviewDialogOpen && normalizedSession.scriptReviewData)
+      || (normalizedSession.stageMetricsDialogOpen && normalizedSession.stageMetricsData)
+      || (normalizedSession.deleteChapterDialogOpen && normalizedSession.deleteChapterTarget)
+      || normalizedSession.cloneRecordDialogOpen
+      || normalizedSession.cloneName
+      || normalizedSession.cloneUrl
+      || normalizedSession.designName
+      || normalizedSession.designPrompt
+      || hasCustomDesignPreviewText(normalizedSession.designPreviewText)
+      || normalizedSession.newProjectDialogOpen
+      || normalizedSession.newProjectTitle
+      || normalizedSession.newProjectText,
+  )
 }
 
 const formatTenScale = (value?: number) => {
@@ -847,6 +1843,9 @@ function ScriptEditorDialog({
   reviewMode,
   onToggleReviewMode,
   regeneratingSegments,
+  editorConflict,
+  onApplyIncomingDraft,
+  onKeepLocalDraft,
 }: ScriptEditorDialogProps) {
   const parseFloatValue = (value: string) => {
     const parsed = Number(value)
@@ -858,6 +1857,40 @@ function ScriptEditorDialog({
       .split(',')
       .map((item) => item.trim())
       .filter((item) => item.length > 0)
+
+  const editorConflictTimeLabel =
+    editorConflict?.updatedAt
+      ? new Date(editorConflict.updatedAt).toLocaleString('zh-CN', {
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        })
+      : null
+
+  const editorConflictPreview = useMemo(
+    () => buildAudiobookEditorConflictPreview(
+      {
+        chapterId: chapter?.chapterId,
+        reviewMode,
+        openSegmentDetailIndices: extractOpenSegmentDetailIndices(segmentDetailsOpen),
+        segmentReviews,
+        data,
+      },
+      editorConflict,
+    ),
+    [chapter?.chapterId, data, editorConflict, reviewMode, segmentDetailsOpen, segmentReviews],
+  )
+
+  const visibleEditorConflictSegmentDiffs = editorConflictPreview?.segmentDiffs.slice(
+    0,
+    SCRIPT_EDITOR_CONFLICT_SEGMENT_PREVIEW_LIMIT,
+  ) || []
+  const hiddenEditorConflictSegmentDiffCount = Math.max(
+    0,
+    (editorConflictPreview?.segmentDiffs.length || 0) - visibleEditorConflictSegmentDiffs.length,
+  )
 
   const updateVoiceParams = (index: number, patch: Record<string, any>) => {
     if (!data) return
@@ -883,7 +1916,197 @@ function ScriptEditorDialog({
             暂无剧本数据，请先生成剧本。
           </Typography>
         ) : (
-          <Box sx={{ display: 'flex', gap: 2 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {editorConflict && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+                <Alert
+                  severity="warning"
+                  action={(
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                      <Button size="small" color="inherit" onClick={onApplyIncomingDraft}>
+                        载入对方草稿
+                      </Button>
+                      <Button size="small" color="inherit" onClick={onKeepLocalDraft}>
+                        保留本页草稿
+                      </Button>
+                    </Box>
+                  )}
+                >
+                  检测到另一个标签页刚刚更新了同一章节的未保存草稿
+                  {editorConflictTimeLabel ? `（${editorConflictTimeLabel}）` : ''}。
+                  你可以先查看字段级差异，再决定载入对方草稿，或继续保留当前标签页的内容。
+                </Alert>
+                {editorConflictPreview && (
+                  <Paper
+                    variant="outlined"
+                    sx={{
+                      p: 1.5,
+                      borderColor: 'warning.light',
+                      backgroundColor: 'rgba(255, 248, 225, 0.6)',
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 1,
+                        flexWrap: 'wrap',
+                        mb: 1,
+                      }}
+                    >
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                        字段级差异预览
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        顶层 {editorConflictPreview.fieldDiffs.length} 项 · 片段 {editorConflictPreview.segmentDiffs.length} 个
+                      </Typography>
+                    </Box>
+
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          顶层状态
+                        </Typography>
+                        {editorConflictPreview.fieldDiffs.length > 0 ? (
+                          editorConflictPreview.fieldDiffs.map((fieldDiff) => (
+                            <Box
+                              key={fieldDiff.key}
+                              sx={{
+                                p: 1,
+                                borderRadius: 1,
+                                backgroundColor: 'rgba(255,255,255,0.75)',
+                                border: '1px solid rgba(0,0,0,0.08)',
+                              }}
+                            >
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                {fieldDiff.label}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary" component="div">
+                                当前：{fieldDiff.currentValue}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary" component="div">
+                                对方：{fieldDiff.incomingValue}
+                              </Typography>
+                            </Box>
+                          ))
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">
+                            顶层字段无差异，当前冲突主要集中在片段内容。
+                          </Typography>
+                        )}
+                      </Box>
+
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          片段差异
+                        </Typography>
+                        {visibleEditorConflictSegmentDiffs.length > 0 ? (
+                          visibleEditorConflictSegmentDiffs.map((segmentDiff) => {
+                            const visibleFieldDiffs = segmentDiff.fieldDiffs.slice(
+                              0,
+                              SCRIPT_EDITOR_CONFLICT_FIELD_DETAIL_LIMIT,
+                            )
+                            const hiddenFieldDiffCount = Math.max(
+                              0,
+                              segmentDiff.fieldDiffs.length - visibleFieldDiffs.length,
+                            )
+
+                            return (
+                              <Box
+                                key={`${segmentDiff.index}-${segmentDiff.changeType}`}
+                                sx={{
+                                  p: 1,
+                                  borderRadius: 1,
+                                  backgroundColor: 'rgba(255,255,255,0.75)',
+                                  border: '1px dashed rgba(0,0,0,0.18)',
+                                }}
+                              >
+                                <Box
+                                  sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 0.75,
+                                    flexWrap: 'wrap',
+                                    mb: 0.75,
+                                  }}
+                                >
+                                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                    片段 #{segmentDiff.index + 1} · {segmentDiff.speaker}
+                                  </Typography>
+                                  <Chip
+                                    size="small"
+                                    variant="outlined"
+                                    color={
+                                      segmentDiff.changeType === 'added'
+                                        ? 'success'
+                                        : segmentDiff.changeType === 'removed'
+                                          ? 'info'
+                                          : 'warning'
+                                    }
+                                    label={
+                                      segmentDiff.changeType === 'added'
+                                        ? '对方新增'
+                                        : segmentDiff.changeType === 'removed'
+                                          ? '对方已删除'
+                                          : '字段变更'
+                                    }
+                                  />
+                                  {segmentDiff.fieldDiffs.slice(0, 4).map((fieldDiff) => (
+                                    <Chip
+                                      key={`${segmentDiff.index}-${fieldDiff.key}`}
+                                      size="small"
+                                      label={fieldDiff.label}
+                                      variant="outlined"
+                                    />
+                                  ))}
+                                  {segmentDiff.fieldDiffs.length > 4 && (
+                                    <Typography variant="caption" color="text.secondary">
+                                      等 {segmentDiff.fieldDiffs.length} 项
+                                    </Typography>
+                                  )}
+                                </Box>
+
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                                  {visibleFieldDiffs.map((fieldDiff) => (
+                                    <Box key={`${segmentDiff.index}-${fieldDiff.key}-detail`}>
+                                      <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                                        {fieldDiff.label}
+                                      </Typography>
+                                      <Typography variant="caption" color="text.secondary" component="div">
+                                        当前：{fieldDiff.currentValue}
+                                      </Typography>
+                                      <Typography variant="caption" color="text.secondary" component="div">
+                                        对方：{fieldDiff.incomingValue}
+                                      </Typography>
+                                    </Box>
+                                  ))}
+                                  {hiddenFieldDiffCount > 0 && (
+                                    <Typography variant="caption" color="text.secondary">
+                                      其余 {hiddenFieldDiffCount} 个字段差异已折叠。
+                                    </Typography>
+                                  )}
+                                </Box>
+                              </Box>
+                            )
+                          })
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">
+                            片段内容无差异，当前冲突主要集中在顶层状态。
+                          </Typography>
+                        )}
+                        {hiddenEditorConflictSegmentDiffCount > 0 && (
+                          <Typography variant="caption" color="text.secondary">
+                            其余 {hiddenEditorConflictSegmentDiffCount} 个片段差异已折叠，避免在确认前把弹窗拉得过长。
+                          </Typography>
+                        )}
+                      </Box>
+                    </Box>
+                  </Paper>
+                )}
+              </Box>
+            )}
+            <Box sx={{ display: 'flex', gap: 2 }}>
             {/* 左侧：剧本可编辑列表 */}
             <Box sx={{ flex: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
               <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
@@ -1218,6 +2441,7 @@ function ScriptEditorDialog({
               </Typography>
             </Box>
           </Box>
+          </Box>
         )}
       </DialogContent>
       <DialogActions>
@@ -1436,10 +2660,18 @@ const steps = ['配置音色', '生成有声书', '完成']
 const AudiobookPage = () => {
   const navigate = useNavigate()
   const { projectId } = useParams<{ projectId: string }>()
+  const [searchParams] = useSearchParams()
   const routeProjectId = useMemo(() => {
     const id = Number(projectId)
     return Number.isFinite(id) ? id : null
   }, [projectId])
+  const sourceRouteRequest = useMemo(
+    () => readUserAssetSourceAudiobookRouteRequest(searchParams),
+    [searchParams],
+  )
+  const requestedAudiobookProjectId = sourceRouteRequest.audiobookProjectId
+  const requestedSourceChapterId = sourceRouteRequest.chapterId
+  const requestedSourceFocus = sourceRouteRequest.focus
 
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
@@ -1460,20 +2692,17 @@ const AudiobookPage = () => {
   const [historyProjects, setHistoryProjects] = useState<any[]>([])
   const [showHistory, setShowHistory] = useState(false)
   const [scriptReviewDialogOpen, setScriptReviewDialogOpen] = useState(false)
-  const [scriptReviewData, setScriptReviewData] = useState<{ report: ScriptReviewDetail; segments: any[] } | null>(null)
+  const [scriptReviewData, setScriptReviewData] = useState<{ report: ScriptReviewDetail | null; segments: any[] } | null>(null)
   const [stageMetricsDialogOpen, setStageMetricsDialogOpen] = useState(false)
   const [stageMetricsData, setStageMetricsData] = useState<{
     stage: StageConfig
     info: StageInfo
   } | null>(null)
   const [scriptEditorDialogOpen, setScriptEditorDialogOpen] = useState(false)
-  const [scriptEditorChapter, setScriptEditorChapter] = useState<{ chapterId: number; title: string } | null>(null)
-  const [scriptEditorData, setScriptEditorData] = useState<{
-    scriptStatus: string
-    scriptSegments: any[]
-    scriptReview: any | null
-  } | null>(null)
+  const [scriptEditorChapter, setScriptEditorChapter] = useState<ScriptEditorChapterRef | null>(null)
+  const [scriptEditorData, setScriptEditorData] = useState<ScriptEditorStateData | null>(null)
   const [scriptEditorLoading, setScriptEditorLoading] = useState(false)
+  const [editorCrossTabConflict, setEditorCrossTabConflict] = useState<AudiobookEditorSessionState | null>(null)
   const [segmentPreviewingIndex, setSegmentPreviewingIndex] = useState<number | null>(null)
   const [segmentPreviewingType, setSegmentPreviewingType] = useState<PreviewType | null>(null)
   const [segmentAudioUrls, setSegmentAudioUrls] = useState<Record<number, string>>({})
@@ -1489,6 +2718,9 @@ const AudiobookPage = () => {
   const [taskStatuses, setTaskStatuses] = useState<Record<string, TaskStatus>>({})
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
   const [currentAudiobookProjectId, setCurrentAudiobookProjectId] = useState<number | null>(null)
+  const [resumeCheckpoints, setResumeCheckpoints] = useState<Record<number, GenerationCheckpoint>>({})
+  const [resumeCheckpointLoading, setResumeCheckpointLoading] = useState(false)
+  const [resumingChapterId, setResumingChapterId] = useState<number | null>(null)
   const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false)
   const [newProjectTitle, setNewProjectTitle] = useState('')
   const [newProjectText, setNewProjectText] = useState('')
@@ -1530,7 +2762,7 @@ const AudiobookPage = () => {
   const [cloneSuccess, setCloneSuccess] = useState<string | null>(null)
   const [designName, setDesignName] = useState('')
   const [designPrompt, setDesignPrompt] = useState('')
-  const [designPreviewText, setDesignPreviewText] = useState('欢迎收听这段声音设计试听，我们从这里开始塑造角色的独特声线。')
+  const [designPreviewText, setDesignPreviewText] = useState(DEFAULT_DESIGN_PREVIEW_TEXT)
   const [designLoading, setDesignLoading] = useState(false)
   const [designError, setDesignError] = useState<string | null>(null)
   const [designSuccess, setDesignSuccess] = useState<string | null>(null)
@@ -1541,7 +2773,7 @@ const AudiobookPage = () => {
   const [ttsModel, setTtsModel] = useState<TtsModel>('qwen3-tts-instruct-flash')
   const outputFormat: AudioOutputFormat = 'mp3'
   const supportsTtsTuning = ttsModel === 'cosyvoice-v3.5-plus'
-  const [narrationStyle, setNarrationStyle] = useState<string>('professional')
+  const [narrationStyle, setNarrationStyle] = useState<NarrationStyleId>(DEFAULT_NARRATION_STYLE)
   const [chapterMenuAnchor, setChapterMenuAnchor] = useState<null | HTMLElement>(null)
   const [selectedChapterForMenu, setSelectedChapterForMenu] = useState<Chapter | null>(null)
   const [deleteChapterDialogOpen, setDeleteChapterDialogOpen] = useState(false)
@@ -1552,6 +2784,14 @@ const AudiobookPage = () => {
   const audioRef = useMemo(() => new Audio(), [])
   const playingAudioUrlRef = useRef<string | null>(null)
   const sessionHydratedRef = useRef(false)
+  const sessionTabIdRef = useRef<string>(getOrCreateAudiobookSessionTabId())
+  const lastSessionTimestampRef = useRef(0)
+  const restoredEditorSessionKeyRef = useRef<string | null>(null)
+  const restoredPageSessionProjectRef = useRef<number | null>(null)
+  const restoredProjectBoundPageSessionKeyRef = useRef<string | null>(null)
+  const handledSourceChapterKeyRef = useRef<string | null>(null)
+  const skipNextPageSessionPersistRef = useRef(false)
+  const dismissedEditorConflictSignatureRef = useRef<string | null>(null)
   const ttsModelRef = useRef<TtsModel>(ttsModel)
   const handleSelectProjectRef = useRef<(project: Project, options?: SelectProjectOptions) => Promise<void>>(
     async () => {},
@@ -1592,19 +2832,98 @@ const AudiobookPage = () => {
     },
     [audiobookProject, outputFormat],
   )
+
+  const trackedAudiobookProjectIds = useMemo(() => {
+    const ids = new Set<number>()
+
+    for (const project of historyProjects) {
+      const projectId = Number(project?.id)
+      if (Number.isFinite(projectId) && projectId > 0) {
+        ids.add(projectId)
+      }
+    }
+
+    const currentIds = [audiobookProject?.id, currentAudiobookProjectId]
+    for (const candidate of currentIds) {
+      const projectId = Number(candidate)
+      if (Number.isFinite(projectId) && projectId > 0) {
+        ids.add(projectId)
+      }
+    }
+
+    return Array.from(ids)
+  }, [historyProjects, audiobookProject?.id, currentAudiobookProjectId])
+
+  const trackedAudiobookProjectIdKey = useMemo(
+    () => trackedAudiobookProjectIds.slice().sort((left, right) => left - right).join(','),
+    [trackedAudiobookProjectIds],
+  )
+
+  const activeProjectTasks = useMemo(() => {
+    const trackedIds = new Set(trackedAudiobookProjectIds)
+    return Object.values(taskStatuses)
+      .filter((task) => trackedIds.size === 0 || trackedIds.has(task.audiobook_project_id))
+      .filter((task) => isActiveAudiobookTask(task))
+      .sort(compareTaskByRecency)
+  }, [taskStatuses, trackedAudiobookProjectIds])
+
+  const persistedActiveTaskRefs = useMemo(
+    () =>
+      activeProjectTasks.map((task) => ({
+        taskId: task.task_id,
+        audiobookProjectId: task.audiobook_project_id,
+      })),
+    [activeProjectTasks],
+  )
+
   const activeTaskStatus = useMemo(() => {
     if (currentTaskId && taskStatuses[currentTaskId]) {
       return taskStatuses[currentTaskId]
     }
-    const first = Object.values(taskStatuses)[0]
+    if (activeProjectTasks.length > 0) {
+      return activeProjectTasks[0]
+    }
+    const first = Object.values(taskStatuses).sort(compareTaskByRecency)[0]
     return first || null
-  }, [currentTaskId, taskStatuses])
+  }, [currentTaskId, taskStatuses, activeProjectTasks])
 
   const setCharacterVoicesForCurrentModel = useCallback(
     (next: CharacterVoiceSetting[]) => {
       setCharacterVoices(next)
     },
     [],
+  )
+
+  const clearActiveGenerationState = useCallback(() => {
+    setCurrentAudiobookProjectId(null)
+    setCurrentTaskId(null)
+    setTaskStatuses({})
+    setGenerating(false)
+  }, [])
+
+  const formatActiveTaskLabel = useCallback(
+    (task: TaskStatus) => {
+      const chapter = task.chapter_id
+        ? chapters.find((item) => item.id === task.chapter_id)
+        : null
+      const chapterLabel = chapter
+        ? `第${chapter.chapter_number}章`
+        : task.chapter_id
+        ? `章节${task.chapter_id}`
+        : '批量任务'
+
+      switch (task.task_type) {
+        case 'script_only':
+          return `${chapterLabel} 剧本`
+        case 'audio_from_scripts':
+          return `${chapterLabel} 音频`
+        case 'full':
+          return `${chapterLabel} 全流程`
+        default:
+          return chapterLabel
+      }
+    },
+    [chapters],
   )
 
   const updateCharacterVoicesForCurrentModel = (
@@ -1660,12 +2979,118 @@ const AudiobookPage = () => {
     return false
   }, [cosyvoiceHasUsableVoice, ttsModel])
 
+  const refreshAudiobookProjectDetail = useCallback(async (audiobookProjectId: number) => {
+    const response = await apiClient.getAudiobookProject(audiobookProjectId)
+    const data = response.data
+    setAudiobookProject(data)
+    return data
+  }, [])
+
+  const focusAudiobookTask = useCallback(
+    async (
+      task: TaskStatus,
+      options?: {
+        loadProjectDetail?: boolean
+        forceGenerating?: boolean
+        activateProgressView?: boolean
+      },
+    ) => {
+      setCurrentTaskId(task.task_id)
+      setCurrentAudiobookProjectId(task.audiobook_project_id)
+
+      if (options?.forceGenerating ?? isActiveAudiobookTask(task)) {
+        setGenerating(true)
+      }
+
+      if (options?.activateProgressView) {
+        setActiveStep(1)
+      } else if (options?.forceGenerating ?? isActiveAudiobookTask(task)) {
+        setActiveStep((prev) => (prev === 0 ? 1 : prev))
+      }
+
+      if (
+        options?.loadProjectDetail !== false
+        && task.audiobook_project_id
+        && audiobookProject?.id !== task.audiobook_project_id
+      ) {
+        try {
+          await refreshAudiobookProjectDetail(task.audiobook_project_id)
+        } catch {
+          // 切换任务焦点时刷新有声书项目详情失败
+        }
+      }
+    },
+    [audiobookProject?.id, refreshAudiobookProjectDetail],
+  )
+
+  const activateQueuedAudiobookTask = useCallback(
+    async (
+      audiobookProjectId: number,
+      jobId: string,
+      options?: {
+        generationMode?: 'full' | 'script_only'
+        successMessage?: string
+      },
+    ) => {
+      const nextTaskType = options?.generationMode || 'full'
+      setTaskStatuses((prev) => ({
+        ...prev,
+        [jobId]: buildPendingTaskStatus({
+          taskId: jobId,
+          audiobookProjectId,
+          taskType: nextTaskType,
+        }),
+      }))
+      setLastGenerationMode(nextTaskType)
+
+      await focusAudiobookTask(
+        buildPendingTaskStatus({
+          taskId: jobId,
+          audiobookProjectId,
+          taskType: nextTaskType,
+        }),
+        {
+          forceGenerating: true,
+          activateProgressView: true,
+        },
+      )
+
+      if (options?.successMessage) {
+        setSnackbar({
+          open: true,
+          message: options.successMessage,
+          severity: 'success',
+        })
+      }
+    },
+    [focusAudiobookTask],
+  )
+
+  const resumableChapterEntries = useMemo(() => {
+    const chapterAudios = Array.isArray(audiobookProject?.chapter_audios) ? audiobookProject.chapter_audios : []
+    return chapterAudios
+      .map((chapterAudio: any) => {
+        const checkpoint = resumeCheckpoints[chapterAudio.chapter_id]
+        const chapter = chapters.find((item) => item.id === chapterAudio.chapter_id)
+        return {
+          chapterAudio,
+          checkpoint,
+          chapter,
+        }
+      })
+      .filter((entry: { checkpoint?: GenerationCheckpoint }) => Boolean(entry.checkpoint?.can_resume))
+  }, [audiobookProject, chapters, resumeCheckpoints])
+
   // 从 URL 参数加载项目，并在刷新/回退时按顺序恢复会话
   useEffect(() => {
     let cancelled = false
 
     const loadProjectFromUrl = async () => {
       sessionHydratedRef.current = false
+      restoredEditorSessionKeyRef.current = null
+      restoredPageSessionProjectRef.current = null
+      restoredProjectBoundPageSessionKeyRef.current = null
+      lastSessionTimestampRef.current = 0
 
       if (!routeProjectId) {
         setSnackbar({ open: true, message: '缺少项目ID参数', severity: 'error' })
@@ -1691,11 +3116,49 @@ const AudiobookPage = () => {
             localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
           }
         }
+
+        const editorRaw = sessionStorage.getItem(AUDIOBOOK_EDITOR_SESSION_STORAGE_KEY)
+        if (editorRaw) {
+          try {
+            const savedEditorSession = JSON.parse(editorRaw) as AudiobookEditorSessionState
+            if (savedEditorSession.projectId !== routeProjectId) {
+              sessionStorage.removeItem(AUDIOBOOK_EDITOR_SESSION_STORAGE_KEY)
+            }
+          } catch {
+            sessionStorage.removeItem(AUDIOBOOK_EDITOR_SESSION_STORAGE_KEY)
+          }
+        }
+
+        const pageRaw = sessionStorage.getItem(AUDIOBOOK_PAGE_SESSION_STORAGE_KEY)
+        if (pageRaw) {
+          try {
+            const savedPageSession = JSON.parse(pageRaw) as AudiobookPageSessionState
+            if (savedPageSession.projectId !== routeProjectId) {
+              sessionStorage.removeItem(AUDIOBOOK_PAGE_SESSION_STORAGE_KEY)
+            }
+          } catch {
+            sessionStorage.removeItem(AUDIOBOOK_PAGE_SESSION_STORAGE_KEY)
+          }
+        }
       } else {
         localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
+        sessionStorage.removeItem(AUDIOBOOK_EDITOR_SESSION_STORAGE_KEY)
+        sessionStorage.removeItem(AUDIOBOOK_PAGE_SESSION_STORAGE_KEY)
       }
 
       const restoredTtsModel = normalizeTtsModelValue(savedSession?.ttsModel) || ttsModelRef.current
+      const restoredActiveTasks = dedupeSessionTaskRefs(savedSession?.activeTasks)
+      const restoredSelectedChapterIds = normalizeSelectedChapterIds(savedSession?.selectedChapterIds)
+      const restoredTaskId = savedSession?.taskId
+        || restoredActiveTasks[0]?.taskId
+        || null
+      const restoredAudiobookProjectId = savedSession?.audiobookProjectId
+        || restoredActiveTasks.find((item) => item.taskId === restoredTaskId)?.audiobookProjectId
+        || restoredActiveTasks[0]?.audiobookProjectId
+        || null
+
+      lastSessionTimestampRef.current = parseSessionTimestamp(savedSession?.updatedAt)
+
       if (savedSession && restoredTtsModel !== ttsModelRef.current) {
         setTtsModel(restoredTtsModel)
       }
@@ -1709,6 +3172,7 @@ const AudiobookPage = () => {
           skipStepReset: true,
           preserveSessionState: Boolean(savedSession),
           ttsModelOverride: restoredTtsModel,
+          selectedChapterIds: restoredSelectedChapterIds,
         })
 
         if (cancelled || !savedSession) {
@@ -1719,10 +3183,25 @@ const AudiobookPage = () => {
           setActiveStep(savedSession.activeStep)
         }
 
-        if (savedSession.audiobookProjectId) {
-          setCurrentAudiobookProjectId(savedSession.audiobookProjectId)
+        if (restoredActiveTasks.length > 0) {
+          setTaskStatuses((prev) => {
+            const next = { ...prev }
+            for (const taskRef of restoredActiveTasks) {
+              if (!next[taskRef.taskId]) {
+                next[taskRef.taskId] = buildPendingTaskStatus({
+                  taskId: taskRef.taskId,
+                  audiobookProjectId: taskRef.audiobookProjectId,
+                })
+              }
+            }
+            return next
+          })
+        }
+
+        if (restoredAudiobookProjectId) {
+          setCurrentAudiobookProjectId(restoredAudiobookProjectId)
           try {
-            const detailRes = await apiClient.getAudiobookProject(savedSession.audiobookProjectId)
+            const detailRes = await apiClient.getAudiobookProject(restoredAudiobookProjectId)
             if (!cancelled) {
               setAudiobookProject(detailRes.data)
             }
@@ -1732,8 +3211,12 @@ const AudiobookPage = () => {
         }
 
         if (!cancelled) {
-          setCurrentTaskId(savedSession.taskId ?? null)
-          setGenerating(Boolean(savedSession.taskId) ? (savedSession.generating ?? true) : false)
+          setCurrentTaskId(restoredTaskId)
+          setGenerating(
+            restoredTaskId || restoredActiveTasks.length > 0
+              ? (savedSession.generating ?? true)
+              : false,
+          )
         }
       } catch (error: any) {
         const msg = await extractApiErrorMessage(error, '加载项目失败')
@@ -1889,7 +3372,7 @@ const AudiobookPage = () => {
       setDesignSuccess(voiceId ? `已提交声音设计任务：${voiceId}` : '已提交声音设计任务')
       setDesignName('')
       setDesignPrompt('')
-      setDesignPreviewText('欢迎收听这段声音设计试听，我们从这里开始塑造角色的独特声线。')
+      setDesignPreviewText(DEFAULT_DESIGN_PREVIEW_TEXT)
       await refreshVoiceCatalog('cosyvoice-v3.5-plus')
     } catch (error: any) {
       const message = await extractApiErrorMessage(error, '创建设计音色失败')
@@ -2047,25 +3530,50 @@ const AudiobookPage = () => {
   }
 
   // 新增：获取历史记录
-  const fetchHistory = async () => {
-    if (!selectedProject) return
+  const fetchHistory = useCallback(
+    async (options?: { projectId?: number | null; showLoading?: boolean }) => {
+      const targetProjectId = options?.projectId ?? selectedProjectId
+      if (!targetProjectId) {
+        setHistoryProjects([])
+        return []
+      }
 
-    setLoadingHistory(true)
-    try {
-      const res = await apiClient.getAudiobookProjectsByProject(selectedProject.id)
-      setHistoryProjects(res.data)
-    } catch {
-      // 获取历史记录失败
-    } finally {
-      setLoadingHistory(false)
+      const shouldShowLoading = options?.showLoading ?? true
+      if (shouldShowLoading) {
+        setLoadingHistory(true)
+      }
+
+      try {
+        const res = await apiClient.getAudiobookProjectsByProject(targetProjectId)
+        const nextProjects = Array.isArray(res.data) ? res.data : []
+        setHistoryProjects(nextProjects)
+        return nextProjects
+      } catch {
+        return []
+      } finally {
+        if (shouldShowLoading) {
+          setLoadingHistory(false)
+        }
+      }
+    },
+    [selectedProjectId],
+  )
+
+  useEffect(() => {
+    if (!selectedProjectId) {
+      setHistoryProjects([])
+      return
     }
-  }
+
+    void fetchHistory({ projectId: selectedProjectId, showLoading: false })
+  }, [selectedProjectId, fetchHistory])
   
   // 新增：查看历史项目详情
   const handleViewHistory = async (audiobookProjectId: number) => {
     try {
       const res = await apiClient.getAudiobookProject(audiobookProjectId)
       const data = res.data
+      clearActiveGenerationState()
       setAudiobookProject(data)
       setBrowserPlayerData(null)
       setBrowserPlayerOpen(false)
@@ -2083,7 +3591,7 @@ const AudiobookPage = () => {
       await apiClient.deleteAudiobookProject(audiobookProjectId, { delete_files: true })
       setSnackbar({ open: true, message: '项目已删除', severity: 'success' })
       // 重新获取历史记录以更新列表
-      await fetchHistory()
+      await fetchHistory({ showLoading: false })
     } catch (error: any) {
       const errorMessage = error?.response?.status === 404 
         ? '项目不存在或已被删除' 
@@ -2147,7 +3655,7 @@ const AudiobookPage = () => {
       try {
         const projectRes = await apiClient.getProject(importResult.project_id)
         const project = projectRes.data as Project
-        setSelectedProject(project)
+        await handleSelectProject(project, { skipStepReset: true })
       } catch (e) {
         // 回退：如果获取单个项目失败，至少构造一个最小的项目对象
         const fallbackProject: Project = {
@@ -2156,7 +3664,7 @@ const AudiobookPage = () => {
           description: undefined,
           genre: undefined,
         }
-        setSelectedProject(fallbackProject)
+        await handleSelectProject(fallbackProject, { skipStepReset: true })
       }
 
       setActiveStep(0)
@@ -2186,6 +3694,7 @@ const AudiobookPage = () => {
     skipStepReset?: boolean
     preserveSessionState?: boolean
     ttsModelOverride?: TtsModel
+    selectedChapterIds?: number[]
   }
 
   const handleSelectProject = useCallback(async (project: Project, options?: SelectProjectOptions) => {
@@ -2195,13 +3704,15 @@ const AudiobookPage = () => {
     setCharacterVoices([])
     setBrowserPlayerData(null)
     setBrowserPlayerOpen(false)
+    setChapterMenuAnchor(null)
+    setSelectedChapterForMenu(null)
+    setDeleteChapterDialogOpen(false)
+    setDeleteChapterReason('')
+    setDeleteChapterFiles(false)
 
     if (!options?.preserveSessionState) {
-      setCurrentAudiobookProjectId(null)
-      setCurrentTaskId(null)
-      setTaskStatuses({})
+      clearActiveGenerationState()
       setAudiobookProject(null)
-      setGenerating(false)
     }
 
     const baseNarratorVoice: CharacterVoiceSetting = {
@@ -2220,7 +3731,12 @@ const AudiobookPage = () => {
       const chaptersRes = await apiClient.getChapters(project.id)
       const chaptersData = chaptersRes.data
       setChapters(chaptersData)
-      setSelectedChapters(chaptersData.map((c: Chapter) => c.id))  // 默认全选
+      setSelectedChapters(
+        normalizeSelectedChapterIds(options?.selectedChapterIds, {
+          allowedIds: chaptersData.map((c: Chapter) => c.id),
+          fallbackIds: chaptersData.map((c: Chapter) => c.id),
+        }),
+      )
 
       // 获取角色列表（用于音频配置）
       setLoadingCharacters(true)
@@ -2305,7 +3821,7 @@ const AudiobookPage = () => {
     } catch {
       setSnackbar({ open: true, message: '网络错误，请重试', severity: 'error' })
     }
-  }, [setCharacterVoicesForCurrentModel, ttsModel, voicePresetsByModel])
+  }, [clearActiveGenerationState, setCharacterVoicesForCurrentModel, ttsModel, voicePresetsByModel])
 
   const handleOpenBrowserPlayer = useCallback(async () => {
     if (!audiobookProject?.id) {
@@ -2344,9 +3860,257 @@ const AudiobookPage = () => {
     ttsModelRef.current = ttsModel
   }, [ttsModel])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     handleSelectProjectRef.current = handleSelectProject
   }, [handleSelectProject])
+
+  const writeEditorSyncEntries = useCallback((
+    entries: Record<string, AudiobookEditorSessionState>,
+  ) => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const nextEntries = pruneAudiobookEditorSyncEntries(entries)
+    if (Object.keys(nextEntries).length === 0) {
+      localStorage.removeItem(AUDIOBOOK_EDITOR_SYNC_STORAGE_KEY)
+      return
+    }
+
+    localStorage.setItem(
+      AUDIOBOOK_EDITOR_SYNC_STORAGE_KEY,
+      JSON.stringify({ entries: nextEntries } satisfies AudiobookEditorSyncRegistry),
+    )
+  }, [])
+
+  const readEditorSyncEntries = useCallback((rawRegistry?: string | null) => {
+    if (typeof window === 'undefined') {
+      return {}
+    }
+
+    const serializedRegistry = rawRegistry ?? localStorage.getItem(AUDIOBOOK_EDITOR_SYNC_STORAGE_KEY)
+    if (!serializedRegistry) {
+      return {}
+    }
+
+    const currentEntries = normalizeAudiobookEditorSyncRegistry(
+      JSON.parse(serializedRegistry) as AudiobookEditorSyncRegistry,
+    )
+    const nextEntries = pruneAudiobookEditorSyncEntries(currentEntries)
+
+    if (Object.keys(nextEntries).length !== Object.keys(currentEntries).length) {
+      writeEditorSyncEntries(nextEntries)
+    }
+
+    return nextEntries
+  }, [writeEditorSyncEntries])
+
+  const buildCurrentEditorSyncEntry = useCallback((updatedAt: string) => {
+    if (
+      !selectedProjectId
+      || !audiobookProject?.id
+      || !scriptEditorChapter
+      || !scriptEditorData
+    ) {
+      return null
+    }
+
+    return {
+      projectId: selectedProjectId,
+      audiobookProjectId: audiobookProject.id,
+      chapterId: scriptEditorChapter.chapterId,
+      reviewMode,
+      openSegmentDetailIndices: extractOpenSegmentDetailIndices(segmentDetailsOpen),
+      segmentReviews,
+      data: scriptEditorData,
+      updatedAt,
+      writerTabId: sessionTabIdRef.current,
+    } satisfies AudiobookEditorSessionState
+  }, [
+    selectedProjectId,
+    audiobookProject?.id,
+    scriptEditorChapter,
+    scriptEditorData,
+    reviewMode,
+    segmentDetailsOpen,
+    segmentReviews,
+  ])
+
+  const upsertCurrentEditorSyncEntry = useCallback((options?: { forceTouch?: boolean }) => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const writerTabId = sessionTabIdRef.current
+    const updatedAt = new Date().toISOString()
+    const nextEntry = buildCurrentEditorSyncEntry(updatedAt)
+    if (!nextEntry) {
+      return
+    }
+
+    try {
+      const currentEntries = readEditorSyncEntries()
+      const currentSelfEntry = currentEntries[writerTabId]
+      const currentSelfComparablePayload = currentSelfEntry
+        ? JSON.stringify(buildComparableAudiobookEditorSessionPayload(currentSelfEntry))
+        : null
+      const nextComparablePayload = JSON.stringify(
+        buildComparableAudiobookEditorSessionPayload(nextEntry),
+      )
+      const currentSelfUpdatedAtMs = parseSessionTimestamp(currentSelfEntry?.updatedAt)
+      const shouldRefreshHeartbeat = Boolean(
+        options?.forceTouch
+        || !currentSelfEntry
+        || currentSelfUpdatedAtMs <= 0
+        || Date.now() - currentSelfUpdatedAtMs >= AUDIOBOOK_EDITOR_SYNC_HEARTBEAT_MS,
+      )
+
+      if (
+        currentSelfComparablePayload === nextComparablePayload
+        && !shouldRefreshHeartbeat
+      ) {
+        return
+      }
+
+      writeEditorSyncEntries({
+        ...currentEntries,
+        [writerTabId]: nextEntry,
+      })
+    } catch {
+      // localStorage 不可用或容量不足时忽略跨标签页草稿同步元数据
+    }
+  }, [buildCurrentEditorSyncEntry, readEditorSyncEntries, writeEditorSyncEntries])
+
+  const removeCurrentEditorSyncEntry = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const writerTabId = sessionTabIdRef.current
+    try {
+      const currentEntries = readEditorSyncEntries()
+      if (!currentEntries[writerTabId]) {
+        return
+      }
+
+      const nextEntries = { ...currentEntries }
+      delete nextEntries[writerTabId]
+      writeEditorSyncEntries(nextEntries)
+    } catch {
+      // 忽略跨标签页草稿同步元数据清理失败
+    }
+  }, [readEditorSyncEntries, writeEditorSyncEntries])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const handleBeforeUnload = () => {
+      removeCurrentEditorSyncEntry()
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+      removeCurrentEditorSyncEntry()
+    }
+  }, [removeCurrentEditorSyncEntry])
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined'
+      || !sessionHydratedRef.current
+      || !scriptEditorDialogOpen
+      || !scriptEditorChapter
+      || !scriptEditorData
+    ) {
+      return
+    }
+
+    const intervalId = window.setInterval(() => {
+      upsertCurrentEditorSyncEntry({ forceTouch: true })
+    }, AUDIOBOOK_EDITOR_SYNC_HEARTBEAT_MS)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [
+    scriptEditorDialogOpen,
+    scriptEditorChapter,
+    scriptEditorData,
+    upsertCurrentEditorSyncEntry,
+  ])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadResumeCheckpoints = async () => {
+      const targetAudiobookProjectId = audiobookProject?.id
+      const chapterAudios = Array.isArray(audiobookProject?.chapter_audios) ? audiobookProject.chapter_audios : []
+
+      if (!targetAudiobookProjectId || chapterAudios.length === 0) {
+        setResumeCheckpoints({})
+        setResumeCheckpointLoading(false)
+        return
+      }
+
+      const candidateChapterIds: number[] = Array.from(
+        new Set<number>(
+          chapterAudios
+            .filter((chapterAudio: any) => !chapterAudio?.audio_path)
+            .map((chapterAudio: any) => Number(chapterAudio.chapter_id))
+            .filter((chapterId: number) => Number.isFinite(chapterId) && chapterId > 0),
+        ),
+      )
+
+      if (candidateChapterIds.length === 0) {
+        setResumeCheckpoints({})
+        setResumeCheckpointLoading(false)
+        return
+      }
+
+      setResumeCheckpointLoading(true)
+
+      try {
+        const checkpointEntries = await Promise.all(
+          candidateChapterIds.map(async (chapterId) => {
+            try {
+              const response = await apiClient.getGenerationCheckpoint(targetAudiobookProjectId, chapterId)
+              const checkpoint = response.data as GenerationCheckpoint
+              if (!checkpoint || typeof checkpoint.chapter_id !== 'number') {
+                return null
+              }
+              return [chapterId, checkpoint] as const
+            } catch {
+              return null
+            }
+          }),
+        )
+
+        if (cancelled) return
+
+        const nextCheckpoints = checkpointEntries.reduce((acc, entry: readonly [number, GenerationCheckpoint] | null) => {
+          if (entry) {
+            acc[entry[0]] = entry[1]
+          }
+          return acc
+        }, {} as Record<number, GenerationCheckpoint>)
+
+        setResumeCheckpoints(nextCheckpoints)
+      } finally {
+        if (!cancelled) {
+          setResumeCheckpointLoading(false)
+        }
+      }
+    }
+
+    loadResumeCheckpoints()
+
+    return () => {
+      cancelled = true
+    }
+  }, [audiobookProject])
 
   // 章节菜单相关处理函数
   const handleOpenChapterMenu = (event: React.MouseEvent<HTMLElement>, chapter: Chapter) => {
@@ -2361,7 +4125,11 @@ const AudiobookPage = () => {
   }
 
   const handleOpenDeleteChapterDialog = () => {
-    handleCloseChapterMenu()
+    if (!selectedChapterForMenu) {
+      setChapterMenuAnchor(null)
+      return
+    }
+    setChapterMenuAnchor(null)
     setDeleteChapterDialogOpen(true)
     setDeleteChapterReason('')
     setDeleteChapterFiles(false)
@@ -2371,6 +4139,7 @@ const AudiobookPage = () => {
     setDeleteChapterDialogOpen(false)
     setDeleteChapterReason('')
     setDeleteChapterFiles(false)
+    setSelectedChapterForMenu(null)
   }
 
   const handleDeleteChapter = async () => {
@@ -2412,19 +4181,662 @@ const AudiobookPage = () => {
 
     if (!selectedProjectId && !currentAudiobookProjectId && !currentTaskId) {
       localStorage.removeItem(AUDIOBOOK_SESSION_STORAGE_KEY)
+      lastSessionTimestampRef.current = 0
       return
     }
 
-    const payload = {
+    const comparablePayload = buildComparableAudiobookSessionPayload({
       projectId: selectedProjectId,
       audiobookProjectId: currentAudiobookProjectId,
       taskId: currentTaskId,
+      activeTasks: persistedActiveTaskRefs,
+      selectedChapterIds: selectedChapters,
       activeStep,
       generating,
       ttsModel,
+    })
+    let comparableStoredPayload: string | null = null
+    const currentStoredPayload = localStorage.getItem(AUDIOBOOK_SESSION_STORAGE_KEY)
+
+    if (currentStoredPayload) {
+      try {
+        comparableStoredPayload = JSON.stringify(
+          buildComparableAudiobookSessionPayload(JSON.parse(currentStoredPayload) as AudiobookSessionState),
+        )
+      } catch {
+        comparableStoredPayload = null
+      }
     }
+
+    const serializedComparablePayload = JSON.stringify(comparablePayload)
+    if (comparableStoredPayload === serializedComparablePayload) {
+      return
+    }
+
+    const updatedAt = new Date().toISOString()
+    const payload: AudiobookSessionState = {
+      ...comparablePayload,
+      updatedAt,
+      writerTabId: sessionTabIdRef.current,
+    }
+
     localStorage.setItem(AUDIOBOOK_SESSION_STORAGE_KEY, JSON.stringify(payload))
-  }, [selectedProjectId, currentAudiobookProjectId, currentTaskId, activeStep, generating, ttsModel])
+    lastSessionTimestampRef.current = parseSessionTimestamp(updatedAt)
+  }, [
+    selectedProjectId,
+    currentAudiobookProjectId,
+    currentTaskId,
+    persistedActiveTaskRefs,
+    selectedChapters,
+    activeStep,
+    generating,
+    ttsModel,
+  ])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !sessionHydratedRef.current || !selectedProjectId) {
+      return
+    }
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== AUDIOBOOK_SESSION_STORAGE_KEY || !event.newValue) {
+        return
+      }
+
+      try {
+        const incomingSession = JSON.parse(event.newValue) as AudiobookSessionState
+        if (incomingSession.projectId !== selectedProjectId) {
+          return
+        }
+        if (incomingSession.writerTabId && incomingSession.writerTabId === sessionTabIdRef.current) {
+          return
+        }
+
+        const incomingSessionTimestamp = parseSessionTimestamp(incomingSession.updatedAt)
+        if (incomingSessionTimestamp > 0 && incomingSessionTimestamp < lastSessionTimestampRef.current) {
+          return
+        }
+
+        const incomingActiveTasks = dedupeSessionTaskRefs(incomingSession.activeTasks)
+        const incomingTaskId = incomingSession.taskId
+          || incomingActiveTasks[0]?.taskId
+          || null
+        const incomingAudiobookProjectId = incomingSession.audiobookProjectId
+          || incomingActiveTasks.find((item) => item.taskId === incomingTaskId)?.audiobookProjectId
+          || incomingActiveTasks[0]?.audiobookProjectId
+          || null
+        const normalizedChapterIds = normalizeSelectedChapterIds(incomingSession.selectedChapterIds, {
+          allowedIds: chapters.map((chapter) => chapter.id),
+          fallbackIds: chapters.map((chapter) => chapter.id),
+        })
+        const incomingTtsModel = normalizeTtsModelValue(incomingSession.ttsModel)
+
+        if (incomingTtsModel && incomingTtsModel !== ttsModelRef.current) {
+          setTtsModel(incomingTtsModel)
+        }
+
+        if (Array.isArray(incomingSession.selectedChapterIds)) {
+          setSelectedChapters((prev) => {
+            const sameLength = prev.length === normalizedChapterIds.length
+            const sameItems = sameLength && prev.every((chapterId, index) => chapterId === normalizedChapterIds[index])
+            return sameItems ? prev : normalizedChapterIds
+          })
+        }
+
+        if (typeof incomingSession.activeStep === 'number') {
+          setActiveStep(incomingSession.activeStep)
+        }
+
+        if (incomingActiveTasks.length > 0) {
+          setTaskStatuses((prev) => {
+            const next = { ...prev }
+            for (const taskRef of incomingActiveTasks) {
+              if (!next[taskRef.taskId]) {
+                next[taskRef.taskId] = buildPendingTaskStatus({
+                  taskId: taskRef.taskId,
+                  audiobookProjectId: taskRef.audiobookProjectId,
+                })
+              }
+            }
+            return next
+          })
+        }
+
+        setCurrentTaskId((prev) => prev === incomingTaskId ? prev : incomingTaskId)
+        setCurrentAudiobookProjectId((prev) =>
+          prev === incomingAudiobookProjectId ? prev : incomingAudiobookProjectId
+        )
+        setGenerating(
+          incomingTaskId || incomingActiveTasks.length > 0
+            ? (incomingSession.generating ?? true)
+            : false,
+        )
+        if (incomingSessionTimestamp > 0) {
+          lastSessionTimestampRef.current = incomingSessionTimestamp
+        }
+
+        if (
+          incomingAudiobookProjectId
+          && incomingAudiobookProjectId !== audiobookProject?.id
+        ) {
+          void refreshAudiobookProjectDetail(incomingAudiobookProjectId)
+        }
+      } catch {
+        // 忽略其它标签页同步的无效会话数据
+      }
+    }
+
+    window.addEventListener('storage', handleStorage)
+    return () => {
+      window.removeEventListener('storage', handleStorage)
+    }
+  }, [selectedProjectId, chapters, audiobookProject?.id, refreshAudiobookProjectDetail])
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined'
+      || !sessionHydratedRef.current
+      || !routeProjectId
+    ) {
+      return
+    }
+
+    if (restoredPageSessionProjectRef.current === routeProjectId) {
+      return
+    }
+
+    const raw = sessionStorage.getItem(AUDIOBOOK_PAGE_SESSION_STORAGE_KEY)
+    if (!raw) {
+      restoredPageSessionProjectRef.current = routeProjectId
+      return
+    }
+
+    let savedPageSession: AudiobookPageSessionState | null = null
+    try {
+      savedPageSession = normalizeAudiobookPageSessionState(
+        JSON.parse(raw) as AudiobookPageSessionState,
+      )
+    } catch {
+      sessionStorage.removeItem(AUDIOBOOK_PAGE_SESSION_STORAGE_KEY)
+      restoredPageSessionProjectRef.current = routeProjectId
+      return
+    }
+
+    if (!savedPageSession || savedPageSession.projectId !== routeProjectId) {
+      sessionStorage.removeItem(AUDIOBOOK_PAGE_SESSION_STORAGE_KEY)
+      restoredPageSessionProjectRef.current = routeProjectId
+      return
+    }
+
+    const shouldRestoreRouteScopedPageSession = Boolean(
+      savedPageSession.showHistory
+      || savedPageSession.scriptOnlyMode
+      || savedPageSession.narrationStyle !== DEFAULT_NARRATION_STYLE
+      || savedPageSession.cloneRecordDialogOpen
+      || savedPageSession.cloneName
+      || savedPageSession.cloneUrl
+      || savedPageSession.designName
+      || savedPageSession.designPrompt
+      || hasCustomDesignPreviewText(savedPageSession.designPreviewText)
+      || savedPageSession.newProjectDialogOpen
+      || savedPageSession.newProjectTitle
+      || savedPageSession.newProjectText,
+    )
+    if (shouldRestoreRouteScopedPageSession) {
+      skipNextPageSessionPersistRef.current = true
+    }
+
+    setShowHistory(Boolean(savedPageSession.showHistory))
+    setScriptOnlyMode(Boolean(savedPageSession.scriptOnlyMode))
+    setNarrationStyle(normalizeNarrationStyleValue(savedPageSession.narrationStyle))
+    setCloneRecordDialogOpen(Boolean(savedPageSession.cloneRecordDialogOpen))
+    setCloneName(savedPageSession.cloneName || '')
+    setCloneUrl(savedPageSession.cloneUrl || '')
+    setDesignName(savedPageSession.designName || '')
+    setDesignPrompt(savedPageSession.designPrompt || '')
+    setDesignPreviewText(resolveDesignPreviewTextDraft(savedPageSession.designPreviewText))
+    setNewProjectDialogOpen(Boolean(savedPageSession.newProjectDialogOpen))
+    setNewProjectTitle(savedPageSession.newProjectTitle || '')
+    setNewProjectText(savedPageSession.newProjectText || '')
+    restoredPageSessionProjectRef.current = routeProjectId
+  }, [routeProjectId, selectedProjectId])
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined'
+      || !sessionHydratedRef.current
+      || !routeProjectId
+      || !audiobookProject?.id
+    ) {
+      return
+    }
+
+    const restoreKey = `${routeProjectId}:${audiobookProject.id}`
+    if (restoredProjectBoundPageSessionKeyRef.current === restoreKey) {
+      return
+    }
+
+    const raw = sessionStorage.getItem(AUDIOBOOK_PAGE_SESSION_STORAGE_KEY)
+    if (!raw) {
+      restoredProjectBoundPageSessionKeyRef.current = restoreKey
+      return
+    }
+
+    let savedPageSession: AudiobookPageSessionState | null = null
+    try {
+      savedPageSession = normalizeAudiobookPageSessionState(
+        JSON.parse(raw) as AudiobookPageSessionState,
+      )
+    } catch {
+      sessionStorage.removeItem(AUDIOBOOK_PAGE_SESSION_STORAGE_KEY)
+      restoredProjectBoundPageSessionKeyRef.current = restoreKey
+      return
+    }
+
+    if (
+      !savedPageSession
+      || savedPageSession.projectId !== routeProjectId
+      || (
+        savedPageSession.audiobookProjectId
+        && savedPageSession.audiobookProjectId !== audiobookProject.id
+      )
+    ) {
+      restoredProjectBoundPageSessionKeyRef.current = restoreKey
+      return
+    }
+
+    const shouldRestoreDeleteChapterDialog = Boolean(
+      savedPageSession.deleteChapterDialogOpen && savedPageSession.deleteChapterTarget,
+    )
+    const shouldRestoreProjectBoundPageSession = Boolean(
+      (savedPageSession.scriptReviewDialogOpen && savedPageSession.scriptReviewData)
+      || (savedPageSession.stageMetricsDialogOpen && savedPageSession.stageMetricsData)
+      || savedPageSession.browserPlayerOpen
+      || shouldRestoreDeleteChapterDialog,
+    )
+    if (shouldRestoreProjectBoundPageSession) {
+      skipNextPageSessionPersistRef.current = true
+    }
+
+    if (savedPageSession.scriptReviewDialogOpen && savedPageSession.scriptReviewData) {
+      setScriptReviewData(savedPageSession.scriptReviewData)
+      setScriptReviewDialogOpen(true)
+    }
+
+    if (savedPageSession.stageMetricsDialogOpen && savedPageSession.stageMetricsData) {
+      const stage = STAGE_CONFIG.find((item) => item.key === savedPageSession.stageMetricsData?.stageKey)
+      if (stage) {
+        setStageMetricsData({
+          stage,
+          info: savedPageSession.stageMetricsData.info,
+        })
+        setStageMetricsDialogOpen(true)
+      }
+    }
+
+    if (savedPageSession.browserPlayerOpen && !browserPlayerOpen) {
+      void handleOpenBrowserPlayer()
+    }
+
+    if (shouldRestoreDeleteChapterDialog && savedPageSession.deleteChapterTarget) {
+      const targetChapter = chapters.find((chapter) => chapter.id === savedPageSession.deleteChapterTarget?.id)
+      setSelectedChapterForMenu(
+        targetChapter ?? {
+          id: savedPageSession.deleteChapterTarget.id,
+          chapter_number: savedPageSession.deleteChapterTarget.chapterNumber,
+          title: savedPageSession.deleteChapterTarget.title,
+          content: savedPageSession.deleteChapterTarget.contentPreview,
+        },
+      )
+      setDeleteChapterReason(savedPageSession.deleteChapterReason || '')
+      setDeleteChapterFiles(Boolean(savedPageSession.deleteChapterFiles))
+      setDeleteChapterDialogOpen(true)
+    }
+
+    restoredProjectBoundPageSessionKeyRef.current = restoreKey
+  }, [routeProjectId, audiobookProject?.id, chapters, browserPlayerOpen, handleOpenBrowserPlayer])
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined'
+      || !sessionHydratedRef.current
+      || !selectedProjectId
+      || !audiobookProject?.id
+    ) {
+      return
+    }
+
+    const restoreKey = `${selectedProjectId}:${audiobookProject.id}`
+    if (restoredEditorSessionKeyRef.current === restoreKey) {
+      return
+    }
+    restoredEditorSessionKeyRef.current = restoreKey
+
+    if (scriptEditorDialogOpen) {
+      return
+    }
+
+    const raw = sessionStorage.getItem(AUDIOBOOK_EDITOR_SESSION_STORAGE_KEY)
+    if (!raw) {
+      return
+    }
+
+    let savedEditorSession: AudiobookEditorSessionState | null = null
+    try {
+      savedEditorSession = normalizeAudiobookEditorSessionState(
+        JSON.parse(raw) as AudiobookEditorSessionState,
+      )
+    } catch {
+      sessionStorage.removeItem(AUDIOBOOK_EDITOR_SESSION_STORAGE_KEY)
+      return
+    }
+
+    if (!savedEditorSession) {
+      sessionStorage.removeItem(AUDIOBOOK_EDITOR_SESSION_STORAGE_KEY)
+      return
+    }
+
+    if (
+      savedEditorSession.projectId !== selectedProjectId
+      || savedEditorSession.audiobookProjectId !== audiobookProject.id
+      || !savedEditorSession.chapterId
+      || !savedEditorSession.data
+    ) {
+      return
+    }
+
+    const chapter = chapters.find((item) => item.id === savedEditorSession?.chapterId)
+    setScriptEditorChapter(
+      chapter
+        ? {
+            chapterId: savedEditorSession.chapterId,
+            title: `第${chapter.chapter_number}章 - ${chapter.title}`,
+          }
+        : {
+            chapterId: savedEditorSession.chapterId,
+            title: `章节 ${savedEditorSession.chapterId}`,
+          },
+    )
+    setScriptEditorData(savedEditorSession.data)
+    setReviewMode(Boolean(savedEditorSession.reviewMode))
+    setSegmentReviews(savedEditorSession.segmentReviews || {})
+    setSegmentDetailsOpen(
+      buildSegmentDetailsOpenState(savedEditorSession.openSegmentDetailIndices || []),
+    )
+    setScriptEditorLoading(false)
+    setScriptEditorDialogOpen(true)
+  }, [selectedProjectId, audiobookProject?.id, chapters, scriptEditorDialogOpen])
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined'
+      || !sessionHydratedRef.current
+      || !routeProjectId
+    ) {
+      return
+    }
+
+    if (skipNextPageSessionPersistRef.current) {
+      skipNextPageSessionPersistRef.current = false
+      return
+    }
+
+    const comparablePayload = buildComparableAudiobookPageSessionPayload({
+      projectId: routeProjectId,
+      audiobookProjectId: currentAudiobookProjectId ?? audiobookProject?.id,
+      browserPlayerOpen,
+      showHistory,
+      scriptOnlyMode,
+      narrationStyle,
+      scriptReviewDialogOpen,
+      scriptReviewData,
+      stageMetricsDialogOpen,
+      stageMetricsData: stageMetricsData
+        ? {
+            stageKey: stageMetricsData.stage.key,
+            info: stageMetricsData.info,
+          }
+        : null,
+      deleteChapterDialogOpen,
+      deleteChapterTarget: buildDeleteChapterSessionTarget(selectedChapterForMenu),
+      deleteChapterReason,
+      deleteChapterFiles,
+      cloneRecordDialogOpen,
+      cloneName,
+      cloneUrl,
+      designName,
+      designPrompt,
+      designPreviewText,
+      newProjectDialogOpen,
+      newProjectTitle,
+      newProjectText,
+    })
+
+    if (!hasPersistableAudiobookPageSession(comparablePayload)) {
+      sessionStorage.removeItem(AUDIOBOOK_PAGE_SESSION_STORAGE_KEY)
+      return
+    }
+
+    let comparableStoredPayload: string | null = null
+    const currentStoredPayload = sessionStorage.getItem(AUDIOBOOK_PAGE_SESSION_STORAGE_KEY)
+    if (currentStoredPayload) {
+      try {
+        comparableStoredPayload = JSON.stringify(
+          buildComparableAudiobookPageSessionPayload(
+            JSON.parse(currentStoredPayload) as AudiobookPageSessionState,
+          ),
+        )
+      } catch {
+        comparableStoredPayload = null
+      }
+    }
+
+    const serializedComparablePayload = JSON.stringify(comparablePayload)
+    if (comparableStoredPayload === serializedComparablePayload) {
+      return
+    }
+
+    try {
+      sessionStorage.setItem(
+        AUDIOBOOK_PAGE_SESSION_STORAGE_KEY,
+        JSON.stringify({
+          ...comparablePayload,
+          updatedAt: new Date().toISOString(),
+        } satisfies AudiobookPageSessionState),
+      )
+    } catch {
+      // sessionStorage 不可用或容量不足时忽略页面级 UI 状态持久化
+    }
+  }, [
+    routeProjectId,
+    currentAudiobookProjectId,
+    audiobookProject?.id,
+    browserPlayerOpen,
+    showHistory,
+    scriptOnlyMode,
+    narrationStyle,
+    scriptReviewDialogOpen,
+    scriptReviewData,
+    stageMetricsDialogOpen,
+    stageMetricsData,
+    deleteChapterDialogOpen,
+    selectedChapterForMenu,
+    deleteChapterReason,
+    deleteChapterFiles,
+    cloneRecordDialogOpen,
+    cloneName,
+    cloneUrl,
+    designName,
+    designPrompt,
+    designPreviewText,
+    newProjectDialogOpen,
+    newProjectTitle,
+    newProjectText,
+  ])
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined'
+      || !sessionHydratedRef.current
+      || !selectedProjectId
+      || !audiobookProject?.id
+    ) {
+      return
+    }
+
+    const restoreKey = `${selectedProjectId}:${audiobookProject.id}`
+    if (restoredEditorSessionKeyRef.current !== restoreKey) {
+      return
+    }
+
+    if (!scriptEditorDialogOpen || !scriptEditorChapter || !scriptEditorData) {
+      sessionStorage.removeItem(AUDIOBOOK_EDITOR_SESSION_STORAGE_KEY)
+      removeCurrentEditorSyncEntry()
+      return
+    }
+
+    const comparablePayload = buildComparableAudiobookEditorSessionPayload({
+      projectId: selectedProjectId,
+      audiobookProjectId: audiobookProject.id,
+      chapterId: scriptEditorChapter.chapterId,
+      reviewMode,
+      openSegmentDetailIndices: extractOpenSegmentDetailIndices(segmentDetailsOpen),
+      segmentReviews,
+      data: scriptEditorData,
+    })
+
+    let comparableStoredPayload: string | null = null
+    const currentStoredPayload = sessionStorage.getItem(AUDIOBOOK_EDITOR_SESSION_STORAGE_KEY)
+    if (currentStoredPayload) {
+      try {
+        comparableStoredPayload = JSON.stringify(
+          buildComparableAudiobookEditorSessionPayload(
+            JSON.parse(currentStoredPayload) as AudiobookEditorSessionState,
+          ),
+        )
+      } catch {
+        comparableStoredPayload = null
+      }
+    }
+
+    const serializedComparablePayload = JSON.stringify(comparablePayload)
+    const updatedAt = new Date().toISOString()
+
+    if (comparableStoredPayload !== serializedComparablePayload) {
+      try {
+        sessionStorage.setItem(
+          AUDIOBOOK_EDITOR_SESSION_STORAGE_KEY,
+          JSON.stringify({
+            ...comparablePayload,
+            updatedAt,
+          } satisfies AudiobookEditorSessionState),
+        )
+      } catch {
+        // sessionStorage 不可用或容量不足时忽略编辑器草稿持久化
+      }
+    }
+
+    upsertCurrentEditorSyncEntry()
+  }, [
+    selectedProjectId,
+    audiobookProject?.id,
+    scriptEditorDialogOpen,
+    scriptEditorChapter,
+    scriptEditorData,
+    reviewMode,
+    segmentDetailsOpen,
+    segmentReviews,
+    removeCurrentEditorSyncEntry,
+    upsertCurrentEditorSyncEntry,
+  ])
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined'
+      || !sessionHydratedRef.current
+      || !selectedProjectId
+      || !audiobookProject?.id
+      || !scriptEditorDialogOpen
+      || !scriptEditorChapter
+      || !scriptEditorData
+    ) {
+      setEditorCrossTabConflict(null)
+      dismissedEditorConflictSignatureRef.current = null
+      return
+    }
+
+    const evaluateIncomingEditorDraft = (rawRegistry: string | null) => {
+      const currentEntries = readEditorSyncEntries(rawRegistry)
+      const incomingEntry = Object.values(currentEntries)
+        .filter((entry) => entry.writerTabId && entry.writerTabId !== sessionTabIdRef.current)
+        .filter((entry) => entry.projectId === selectedProjectId)
+        .filter((entry) => entry.audiobookProjectId === audiobookProject.id)
+        .filter((entry) => entry.chapterId === scriptEditorChapter.chapterId)
+        .sort((left, right) => parseSessionTimestamp(right.updatedAt) - parseSessionTimestamp(left.updatedAt))[0] || null
+
+      if (!incomingEntry) {
+        setEditorCrossTabConflict(null)
+        dismissedEditorConflictSignatureRef.current = null
+        return
+      }
+
+      const localComparablePayload = buildComparableAudiobookEditorSessionPayload({
+        projectId: selectedProjectId,
+        audiobookProjectId: audiobookProject.id,
+        chapterId: scriptEditorChapter.chapterId,
+        reviewMode,
+        openSegmentDetailIndices: extractOpenSegmentDetailIndices(segmentDetailsOpen),
+        segmentReviews,
+        data: scriptEditorData,
+      })
+      const incomingComparablePayload = buildComparableAudiobookEditorSessionPayload(incomingEntry)
+
+      if (JSON.stringify(localComparablePayload) === JSON.stringify(incomingComparablePayload)) {
+        setEditorCrossTabConflict(null)
+        dismissedEditorConflictSignatureRef.current = null
+        return
+      }
+
+      const incomingSignature = buildAudiobookEditorConflictSignature(incomingEntry)
+      if (incomingSignature && dismissedEditorConflictSignatureRef.current === incomingSignature) {
+        return
+      }
+
+      setEditorCrossTabConflict(incomingEntry)
+    }
+
+    try {
+      evaluateIncomingEditorDraft(localStorage.getItem(AUDIOBOOK_EDITOR_SYNC_STORAGE_KEY))
+    } catch {
+      setEditorCrossTabConflict(null)
+    }
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== AUDIOBOOK_EDITOR_SYNC_STORAGE_KEY) {
+        return
+      }
+      try {
+        evaluateIncomingEditorDraft(event.newValue)
+      } catch {
+        // 忽略其它标签页广播的无效编辑器草稿同步数据
+      }
+    }
+
+    window.addEventListener('storage', handleStorage)
+    return () => {
+      window.removeEventListener('storage', handleStorage)
+    }
+  }, [
+    selectedProjectId,
+    audiobookProject?.id,
+    scriptEditorDialogOpen,
+    scriptEditorChapter,
+    scriptEditorData,
+    reviewMode,
+    segmentDetailsOpen,
+    segmentReviews,
+    readEditorSyncEntries,
+  ])
 
   // 切换章节选择
   const handleToggleChapter = (chapterId: number) => {
@@ -2686,7 +5098,10 @@ const AudiobookPage = () => {
         audio_path: chapterAudio.audio_path || null,
       }
 
-      await saveLocalAsset({
+      const {
+        localAssetRecord,
+        didFallbackToBrowserStorage,
+      } = await saveExplicitLocalUserAsset({
         assetUuid,
         mediaKind: 'audio',
         blob,
@@ -2716,14 +5131,20 @@ const AudiobookPage = () => {
         file_size: blob.size,
         generation_mode: 'chapter_audio',
         tags: ['audiobook', 'deliverable', 'chapter-audio'],
-        metadata_json: assetMetadata,
-        source_payload_json: {
-          ...assetMetadata,
-          type: 'chapter_audio',
-        },
+        metadata_json: buildAudiobookChapterAudioAssetMetadataContract(
+          assetMetadata,
+          extractLocalAssetStorageMetadata(localAssetRecord),
+        ),
+        source_payload_json: buildAudiobookChapterAudioSourcePayload(assetMetadata),
       })
 
-      setSnackbar({ open: true, message: '章节音频已收录到用户资产', severity: 'success' })
+      setSnackbar({
+        open: true,
+        message: didFallbackToBrowserStorage
+          ? '章节音频已收录到用户资产，但用户目录当前不可用，文件已回退保存到浏览器本地存储'
+          : '章节音频已收录到用户资产',
+        severity: 'success',
+      })
     } catch (error) {
       setSnackbar({
         open: true,
@@ -2817,6 +5238,7 @@ const AudiobookPage = () => {
 
   const handleCloseScriptReviewDialog = () => {
     setScriptReviewDialogOpen(false)
+    setScriptReviewData(null)
   }
 
   const handleOpenStageMetricsDialog = (stage: StageConfig, stageInfo: StageInfo) => {
@@ -2938,7 +5360,7 @@ const AudiobookPage = () => {
   }
 
   // 打开章节剧本编辑器
-  const handleOpenScriptEditor = async (chapterId: number) => {
+  const handleOpenScriptEditor = useCallback(async (chapterId: number) => {
     if (!audiobookProject) {
       setSnackbar({ open: true, message: '请先创建有声书项目', severity: 'error' })
       return
@@ -2953,6 +5375,12 @@ const AudiobookPage = () => {
 
     try {
       resetSegmentPreviewState()
+      setEditorCrossTabConflict(null)
+      dismissedEditorConflictSignatureRef.current = null
+      setReviewMode(false)
+      setSegmentReviews({})
+      setSegmentDetailsOpen({})
+      setRegeneratingSegments(new Set())
       setScriptEditorLoading(true)
 
       const res = await apiClient.getAudiobookChapterScript(audiobookProject.id, chapterId)
@@ -2969,14 +5397,113 @@ const AudiobookPage = () => {
     } finally {
       setScriptEditorLoading(false)
     }
-  }
+  }, [audiobookProject, chapters, resetSegmentPreviewState])
+
+  useEffect(() => {
+    const focusPlan = buildAudiobookSourceFocusPlan({
+      selectedProjectId,
+      requestedAudiobookProjectId,
+      requestedSourceChapterId,
+      requestedSourceFocus,
+      loadedAudiobookProjectId: audiobookProject?.id ?? null,
+      currentAudiobookProjectId,
+      handledFocusKey: handledSourceChapterKeyRef.current,
+    })
+    if (!focusPlan) return
+
+    let cancelled = false
+
+    const focusSourceChapter = async () => {
+      setActiveStep(2)
+      setShowHistory(false)
+      setBrowserPlayerOpen(false)
+      setBrowserPlayerData(null)
+      clearActiveGenerationState()
+      setCurrentAudiobookProjectId(focusPlan.targetAudiobookProjectId)
+
+      if (focusPlan.shouldRefreshProject) {
+        try {
+          await refreshAudiobookProjectDetail(focusPlan.targetAudiobookProjectId)
+        } catch (error: unknown) {
+          if (!cancelled) {
+            handledSourceChapterKeyRef.current = focusPlan.focusKey
+            setSnackbar({
+              open: true,
+              message: await extractApiErrorMessage(error, '加载有声书项目失败'),
+              severity: 'error',
+            })
+          }
+        }
+        return
+      }
+
+      handledSourceChapterKeyRef.current = focusPlan.focusKey
+      await handleOpenScriptEditor(focusPlan.chapterId)
+    }
+
+    void focusSourceChapter()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    audiobookProject?.id,
+    clearActiveGenerationState,
+    currentAudiobookProjectId,
+    handleOpenScriptEditor,
+    refreshAudiobookProjectDetail,
+    requestedAudiobookProjectId,
+    requestedSourceChapterId,
+    requestedSourceFocus,
+    selectedProjectId,
+  ])
 
   const handleCloseScriptEditorDialog = () => {
     resetSegmentPreviewState()
     audioRef.pause()
+    removeCurrentEditorSyncEntry()
     setScriptEditorDialogOpen(false)
     setScriptEditorData(null)
     setScriptEditorChapter(null)
+    setEditorCrossTabConflict(null)
+    dismissedEditorConflictSignatureRef.current = null
+    setReviewMode(false)
+    setSegmentReviews({})
+    setSegmentDetailsOpen({})
+    setRegeneratingSegments(new Set())
+  }
+
+  const handleApplyIncomingEditorDraft = () => {
+    if (!editorCrossTabConflict?.data) {
+      return
+    }
+
+    setScriptEditorData(editorCrossTabConflict.data)
+    setReviewMode(Boolean(editorCrossTabConflict.reviewMode))
+    setSegmentReviews(editorCrossTabConflict.segmentReviews || {})
+    setSegmentDetailsOpen(
+      buildSegmentDetailsOpenState(editorCrossTabConflict.openSegmentDetailIndices || []),
+    )
+    dismissedEditorConflictSignatureRef.current = null
+    setEditorCrossTabConflict(null)
+    setSnackbar({
+      open: true,
+      message: '已载入另一标签页的最新草稿',
+      severity: 'info',
+    })
+  }
+
+  const handleKeepLocalEditorDraft = () => {
+    const conflictSignature = buildAudiobookEditorConflictSignature(editorCrossTabConflict)
+    if (conflictSignature) {
+      dismissedEditorConflictSignatureRef.current = conflictSignature
+    }
+    setEditorCrossTabConflict(null)
+    setSnackbar({
+      open: true,
+      message: '已保留当前标签页草稿；如另一标签页继续修改，会再次提醒',
+      severity: 'warning',
+    })
   }
 
   const handleChangeScriptSegmentText = (index: number, value: string) => {
@@ -3019,15 +5546,24 @@ const AudiobookPage = () => {
         payload
       )
 
-      setSnackbar({ open: true, message: '剧本已保存', severity: 'success' })
-
-      // 可选：保存并生成该章节音频
       if (options.generateAudio) {
-        await apiClient.generateAudioFromScripts(audiobookProject.id, {
+        const queueResponse = await apiClient.generateAudioFromScripts(audiobookProject.id, {
           chapter_ids: [scriptEditorChapter.chapterId],
           tts_model: ttsModel,
+          narration_style: narrationStyle,
         })
-        setSnackbar({ open: true, message: '已触发该章节音频生成', severity: 'success' })
+
+        const queueData = queueResponse.data || {}
+        if (!queueData?.job_id) {
+          throw new Error('音频生成任务未返回 job_id')
+        }
+
+        await activateQueuedAudiobookTask(audiobookProject.id, queueData.job_id, {
+          generationMode: 'full',
+          successMessage: '剧本已保存，并已触发该章节音频生成',
+        })
+      } else {
+        setSnackbar({ open: true, message: '剧本已保存', severity: 'success' })
       }
 
       // 保存后不自动关闭，方便继续修改；如需可在此关闭
@@ -3053,22 +5589,27 @@ const AudiobookPage = () => {
       setSnackbar({ open: true, message: '请先完成剧本生成', severity: 'error' })
       return
     }
+    if (generating) {
+      setSnackbar({ open: true, message: '当前已有任务在执行，请稍候', severity: 'warning' })
+      return
+    }
     if (!ensureCurrentTtsModelReady()) return
 
     try {
       setTaskPointsPrecheckError(null)
       const res = await apiClient.generateAudioFromScripts(audiobookProject.id, {
         tts_model: ttsModel,
+        narration_style: narrationStyle,
       })
 
-      if (res.status !== 200) {
+      const data = res.data || {}
+      if (!data?.job_id) {
         throw new Error('触发音频生成失败')
       }
 
-      setSnackbar({
-        open: true,
-        message: '已触发所有已审批章节的音频生成，请稍候在历史记录或本页刷新查看结果',
-        severity: 'success',
+      await activateQueuedAudiobookTask(audiobookProject.id, data.job_id, {
+        generationMode: 'full',
+        successMessage: '已将已审批章节加入音频生成队列',
       })
     } catch (err: any) {
       const precheckDetail = await extractTaskPointsPrecheckErrorDetail(err)
@@ -3104,7 +5645,6 @@ const AudiobookPage = () => {
     setGenerating(true)
     setActiveStep(1)
     setLastGenerationMode(scriptOnlyMode ? 'script_only' : 'full')
-    setTaskStatuses({})  // 清空之前的状态
 
     try {
       // 调用生成API
@@ -3154,6 +5694,7 @@ const AudiobookPage = () => {
         voice_config: voiceConfigPayload,
         tts_model: ttsModel,
         generation_mode: scriptOnlyMode ? 'script_only' : 'full',
+        narration_style: narrationStyle,
       })
 
       const data = response.data
@@ -3162,6 +5703,16 @@ const AudiobookPage = () => {
       }
       if (data?.job_id) {
         setCurrentTaskId(data.job_id)
+        if (data?.audiobook_project_id) {
+          setTaskStatuses((prev) => ({
+            ...prev,
+            [data.job_id]: buildPendingTaskStatus({
+              taskId: data.job_id,
+              audiobookProjectId: data.audiobook_project_id,
+              taskType: scriptOnlyMode ? 'script_only' : 'full',
+            }),
+          }))
+        }
       }
       // 不立即设置audiobookProject，因为createAudiobookProject返回的数据不包含chapter_audios
       // 等待轮询获取完整数据后再设置
@@ -3211,9 +5762,64 @@ const AudiobookPage = () => {
     }
   }
   
-  // 新增：轮询任务列表以获取当前任务ID（避免依赖 chapter_audios）
+  const handleResumeChapterGeneration = async (chapterId: number) => {
+    if (!audiobookProject?.id) {
+      return
+    }
+    if (generating) {
+      setSnackbar({ open: true, message: '当前已有任务在执行，请稍候', severity: 'warning' })
+      return
+    }
+
+    try {
+      setTaskPointsPrecheckError(null)
+      setResumingChapterId(chapterId)
+
+      const response = await apiClient.resumeChapterGeneration(audiobookProject.id, chapterId)
+      const data = response.data || {}
+      if (!data?.job_id) {
+        throw new Error('恢复任务未返回 job_id')
+      }
+
+      setResumeCheckpoints((prev) => {
+        const current = prev[chapterId]
+        if (!current) {
+          return prev
+        }
+        return {
+          ...prev,
+          [chapterId]: {
+            ...current,
+            can_resume: false,
+            run_status: 'queued',
+            celery_task_id: data.job_id,
+          },
+        }
+      })
+
+      await activateQueuedAudiobookTask(audiobookProject.id, data.job_id, {
+        generationMode: data.task_type === 'script_only' ? 'script_only' : 'full',
+        successMessage: '继续生成任务已进入队列',
+      })
+    } catch (error: any) {
+      const precheckDetail = await extractTaskPointsPrecheckErrorDetail(error)
+      setTaskPointsPrecheckError(precheckDetail)
+      const message = precheckDetail
+        ? describeTaskPointsPrecheckErrorDetail(precheckDetail)
+        : await extractApiErrorMessage(error, '继续生成失败，请稍后重试')
+      setSnackbar({
+        open: true,
+        message: message || '继续生成失败，请稍后重试',
+        severity: 'error',
+      })
+    } finally {
+      setResumingChapterId(null)
+    }
+  }
+
+  // 轮询当前项目下的任务列表，支持刷新后自动恢复多个活跃任务
   useEffect(() => {
-    if (currentTaskId || !currentAudiobookProjectId || !generating) {
+    if (!selectedProjectId) {
       return
     }
 
@@ -3227,42 +5833,90 @@ const AudiobookPage = () => {
           return
         }
 
-        const rawTasks = Array.isArray(response.data) ? response.data : []
-        const normalizedTasks: TaskStatus[] = rawTasks.map((task: any) => normalizeTaskStatusResponse(task))
-        const matched = normalizedTasks.find(
-          (task) =>
-            task.audiobook_project_id === currentAudiobookProjectId &&
-            (task.status === 'running' || task.status === 'pending')
-        )
+        const trackedIds = new Set(trackedAudiobookProjectIds)
+        if (trackedIds.size === 0) {
+          return
+        }
 
-        if (matched && !cancelled) {
+        const rawTasks = Array.isArray(response.data) ? response.data : []
+        const normalizedTasks: TaskStatus[] = rawTasks
+          .map((task: any) => normalizeTaskStatusResponse(task))
+          .filter((task) => trackedIds.has(task.audiobook_project_id))
+
+        if (cancelled) {
+          return
+        }
+
+        if (normalizedTasks.length > 0) {
+          const nextTaskMap = normalizedTasks.reduce((acc, task) => {
+            acc[task.task_id] = task
+            return acc
+          }, {} as Record<string, TaskStatus>)
+
           setTaskStatuses((prev) => ({
             ...prev,
-            [matched.task_id]: matched,
+            ...nextTaskMap,
           }))
-          setCurrentTaskId(matched.task_id)
+        }
+
+        const activeTasks = normalizedTasks
+          .filter((task) => isActiveAudiobookTask(task))
+          .sort(compareTaskByRecency)
+
+        if (activeTasks.length > 0) {
+          const shouldAutofocusActiveTask =
+            Boolean(currentTaskId)
+            || generating
+            || activeStep === 0
+            || activeStep === 1
+
+          if (shouldAutofocusActiveTask) {
+            const preferredTask = activeTasks.find((task) => task.task_id === currentTaskId) || activeTasks[0]
+
+            if (
+              preferredTask.task_id !== currentTaskId
+              || preferredTask.audiobook_project_id !== currentAudiobookProjectId
+              || audiobookProject?.id !== preferredTask.audiobook_project_id
+            ) {
+              await focusAudiobookTask(preferredTask, {
+                forceGenerating: true,
+                activateProgressView: true,
+                loadProjectDetail: audiobookProject?.id !== preferredTask.audiobook_project_id,
+              })
+            } else {
+              setGenerating(true)
+              setActiveStep((prev) => (prev === 0 ? 1 : prev))
+            }
+          }
         }
       } catch {
         // 查询任务列表异常
       }
     }
 
-    pollTaskList()
-    const intervalId = setInterval(pollTaskList, 2000)
+    void pollTaskList()
+    const intervalId = setInterval(() => {
+      void pollTaskList()
+    }, 2000)
 
     return () => {
       cancelled = true
       clearInterval(intervalId)
     }
-  }, [generating, currentTaskId, currentAudiobookProjectId])
+  }, [
+    selectedProjectId,
+    trackedAudiobookProjectIdKey,
+    currentTaskId,
+    currentAudiobookProjectId,
+    generating,
+    activeStep,
+    audiobookProject?.id,
+    focusAudiobookTask,
+  ])
   
   // 新增：轮询单个任务状态（用于实时显示8个阶段）
   useEffect(() => {
     if (!currentTaskId) {
-      return
-    }
-
-    if (activeTaskStatus && (activeTaskStatus.status === 'completed' || activeTaskStatus.status === 'failed')) {
       return
     }
 
@@ -3283,20 +5937,73 @@ const AudiobookPage = () => {
           if (!currentAudiobookProjectId && normalized.audiobook_project_id) {
             setCurrentAudiobookProjectId(normalized.audiobook_project_id)
           }
+          const resolvedAudiobookProjectId = currentAudiobookProjectId || normalized.audiobook_project_id || null
+          const mergedTaskStatuses = {
+            ...taskStatuses,
+            [normalized.task_id]: normalized,
+          }
+          const nextActiveTask = Object.values(mergedTaskStatuses)
+            .filter((task) => task.task_id !== normalized.task_id)
+            .filter((task) => isActiveAudiobookTask(task))
+            .sort(compareTaskByRecency)[0]
+
           if (normalized.status === 'completed') {
+            if (nextActiveTask) {
+              await focusAudiobookTask(nextActiveTask, {
+                forceGenerating: true,
+                activateProgressView: true,
+              })
+              return
+            }
+
             setGenerating(false)
             setActiveStep(2)
+            if (resolvedAudiobookProjectId) {
+              try {
+                await refreshAudiobookProjectDetail(resolvedAudiobookProjectId)
+              } catch {
+                // 刷新有声书项目详情失败
+              }
+            }
             setSnackbar({ open: true, message: '生成完成！', severity: 'success' })
             setCurrentTaskId(null)
           } else if (normalized.status === 'failed') {
+            if (nextActiveTask) {
+              await focusAudiobookTask(nextActiveTask, {
+                forceGenerating: true,
+                activateProgressView: true,
+              })
+              return
+            }
+
             setGenerating(false)
             setActiveStep(0)
+            if (resolvedAudiobookProjectId) {
+              try {
+                await refreshAudiobookProjectDetail(resolvedAudiobookProjectId)
+              } catch {
+                // 刷新有声书项目详情失败
+              }
+            }
             setSnackbar({ open: true, message: '生成失败，请重试', severity: 'error' })
             setCurrentTaskId(null)
           } else {
             setGenerating(true)
           }
         } else if (response.status === 404) {
+          const nextActiveTask = Object.values(taskStatuses)
+            .filter((task) => task.task_id !== currentTaskId)
+            .filter((task) => isActiveAudiobookTask(task))
+            .sort(compareTaskByRecency)[0]
+
+          if (nextActiveTask) {
+            await focusAudiobookTask(nextActiveTask, {
+              forceGenerating: true,
+              activateProgressView: true,
+            })
+            return
+          }
+
           setGenerating(false)
           setCurrentTaskId(null)
         }
@@ -3312,7 +6019,13 @@ const AudiobookPage = () => {
       cancelled = true
       clearInterval(intervalId)
     }
-  }, [currentTaskId, activeTaskStatus?.status, currentAudiobookProjectId])
+  }, [
+    currentTaskId,
+    currentAudiobookProjectId,
+    refreshAudiobookProjectDetail,
+    focusAudiobookTask,
+    taskStatuses,
+  ])
   
   // 新增：渲染阶段详情
   const renderStageDetails = (taskStatus: TaskStatus) => {
@@ -3539,6 +6252,111 @@ const AudiobookPage = () => {
             onClose={() => setTaskPointsPrecheckError(null)}
             sx={{ mb: 3 }}
           />
+        )}
+
+        {activeProjectTasks.length > 0 && activeStep !== 1 && (
+          <Alert severity="info" sx={{ mb: 3, alignItems: 'flex-start' }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <Box>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  当前项目下有 {activeProjectTasks.length} 个任务仍在后台运行
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  刷新后这些任务会继续被自动发现与轮询。你可以随时切回进度页查看任一任务。
+                </Typography>
+              </Box>
+
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                {activeProjectTasks.map((task) => (
+                  <Button
+                    key={task.task_id}
+                    variant="outlined"
+                    size="small"
+                    onClick={() => {
+                      void focusAudiobookTask(task, {
+                        forceGenerating: true,
+                        activateProgressView: true,
+                      })
+                    }}
+                    sx={{
+                      borderColor: '#1976d2',
+                      color: '#1565c0',
+                      '&:hover': {
+                        borderColor: '#1565c0',
+                        backgroundColor: 'rgba(25, 118, 210, 0.08)',
+                      },
+                    }}
+                  >
+                    {formatActiveTaskLabel(task)}
+                  </Button>
+                ))}
+              </Box>
+            </Box>
+          </Alert>
+        )}
+
+        {!generating && resumableChapterEntries.length > 0 && (
+          <Alert
+            severity="warning"
+            icon={<WarningIcon fontSize="inherit" />}
+            sx={{ mb: 3, alignItems: 'flex-start' }}
+          >
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <Box>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  检测到 {resumableChapterEntries.length} 个章节存在可继续生成的进度
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  页面只负责发现入口，是否可恢复与如何入队由服务端 checkpoint 规则判定。
+                </Typography>
+              </Box>
+
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                {resumableChapterEntries.slice(0, 3).map((entry: any) => {
+                  const chapterLabel = entry.chapter
+                    ? `继续第${entry.chapter.chapter_number}章`
+                    : `继续章节${entry.chapterAudio.chapter_id}`
+
+                  return (
+                    <Button
+                      key={entry.chapterAudio.chapter_id}
+                      variant="outlined"
+                      size="small"
+                      onClick={() => handleResumeChapterGeneration(entry.chapterAudio.chapter_id)}
+                      disabled={resumingChapterId !== null}
+                      startIcon={
+                        resumingChapterId === entry.chapterAudio.chapter_id
+                          ? <CircularProgress size={14} color="inherit" />
+                          : undefined
+                      }
+                      sx={{
+                        borderColor: '#ef6c00',
+                        color: '#e65100',
+                        '&:hover': {
+                          borderColor: '#e65100',
+                          backgroundColor: 'rgba(239, 108, 0, 0.08)',
+                        },
+                      }}
+                    >
+                      {resumingChapterId === entry.chapterAudio.chapter_id ? '提交中...' : chapterLabel}
+                    </Button>
+                  )
+                })}
+
+                {resumableChapterEntries.length > 3 && (
+                  <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
+                    其余章节可在下方结果区继续生成
+                  </Typography>
+                )}
+
+                {resumeCheckpointLoading && (
+                  <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
+                    正在同步最新断点信息...
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+          </Alert>
         )}
 
         {/* 步骤1: 配置音色（章节选择 + 角色音频设置） */}
@@ -3843,12 +6661,7 @@ const AudiobookPage = () => {
                 选择旁白的朗读风格，影响AI的情感表达和语调
               </Typography>
               <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                {[
-                  { id: 'professional', name: '专业播报', desc: '标准新闻播报风格，适合严肃题材', color: '#9c27b0' },
-                  { id: 'dramatic', name: '戏剧表演', desc: '富有表现力的戏剧化朗读，适合情感丰富的故事', color: '#f57c00' },
-                  { id: 'relaxed', name: '轻松舒缓', desc: '温柔舒缓的讲述方式，适合治愈系内容', color: '#4caf50' },
-                  { id: 'vivid', name: '生动表现', desc: '活泼生动的表达方式，适合儿童或轻喜剧', color: '#2196f3' },
-                ].map((style) => (
+                {NARRATION_STYLE_OPTIONS.map((style) => (
                   <Tooltip key={style.id} title={style.desc} arrow>
                     <Box
                       onClick={() => setNarrationStyle(style.id)}
@@ -3878,9 +6691,9 @@ const AudiobookPage = () => {
                   </Tooltip>
                 ))}
               </Box>
-              {narrationStyle !== 'professional' && (
+              {narrationStyle !== DEFAULT_NARRATION_STYLE && (
                 <Chip
-                  label={`已选择: ${narrationStyle === 'dramatic' ? '戏剧表演' : narrationStyle === 'relaxed' ? '轻松舒缓' : '生动表现'}`}
+                  label={`已选择: ${NARRATION_STYLE_OPTIONS.find((style) => style.id === narrationStyle)?.name || '自定义风格'}`}
                   size="small"
                   color="primary"
                   variant="outlined"
@@ -4411,6 +7224,57 @@ const AudiobookPage = () => {
         {activeStep === 1 && (
           <Paper sx={{ p: 4, backgroundColor: 'rgba(255,255,255,0.95)' }}>
             {/* 顶部整体进度条和文字已移除，改为仅展示阶段卡片状态 */}
+
+            {activeProjectTasks.length > 0 && (
+              <Alert severity="info" sx={{ mb: 3, alignItems: 'flex-start' }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  <Box>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      已恢复 {activeProjectTasks.length} 个进行中的任务
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      当前展示的是焦点任务，你可以在这里切换查看不同章节或不同批次任务的阶段进度。
+                    </Typography>
+                  </Box>
+
+                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    {activeProjectTasks.map((task) => {
+                      const isFocused = task.task_id === activeTaskStatus?.task_id
+                      return (
+                        <Button
+                          key={task.task_id}
+                          size="small"
+                          variant={isFocused ? 'contained' : 'outlined'}
+                          onClick={() => {
+                            void focusAudiobookTask(task, {
+                              forceGenerating: true,
+                              activateProgressView: true,
+                            })
+                          }}
+                          sx={
+                            isFocused
+                              ? {
+                                  backgroundColor: '#9c27b0',
+                                  '&:hover': { backgroundColor: '#7b1fa2' },
+                                }
+                              : {
+                                  borderColor: '#9c27b0',
+                                  color: '#9c27b0',
+                                  '&:hover': {
+                                    borderColor: '#7b1fa2',
+                                    backgroundColor: 'rgba(156, 39, 176, 0.08)',
+                                  },
+                                }
+                          }
+                        >
+                          {formatActiveTaskLabel(task)}
+                        </Button>
+                      )
+                    })}
+                  </Box>
+                </Box>
+              </Alert>
+            )}
             
             {/* 新增：8个阶段详细展示 */}
             {(() => {
@@ -4568,6 +7432,8 @@ const AudiobookPage = () => {
                     const chapter = chapters.find(c => c.id === chapterAudio.chapter_id)
                     const isPlaying = playingChapter === chapterAudio.chapter_id
                     const isCollecting = collectingChapterId === chapterAudio.chapter_id
+                    const resumeCheckpoint = resumeCheckpoints[chapterAudio.chapter_id]
+                    const canResume = Boolean(resumeCheckpoint?.can_resume)
                     
                     return (
                       <Box key={chapterAudio.id} sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
@@ -4647,6 +7513,32 @@ const AudiobookPage = () => {
                               编辑剧本/提示词
                             </Button>
                           </Tooltip>
+
+                          {canResume && (
+                            <Tooltip title="按服务端断点信息重新排队当前章节">
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={() => handleResumeChapterGeneration(chapterAudio.chapter_id)}
+                                disabled={generating || resumingChapterId !== null}
+                                startIcon={
+                                  resumingChapterId === chapterAudio.chapter_id
+                                    ? <CircularProgress size={14} color="inherit" />
+                                    : undefined
+                                }
+                                sx={{
+                                  borderColor: '#ef6c00',
+                                  color: '#e65100',
+                                  '&:hover': {
+                                    borderColor: '#e65100',
+                                    backgroundColor: 'rgba(239, 108, 0, 0.08)',
+                                  },
+                                }}
+                              >
+                                {resumingChapterId === chapterAudio.chapter_id ? '提交中...' : '继续生成'}
+                              </Button>
+                            </Tooltip>
+                          )}
                         </Box>
                         <Box sx={{ display: 'flex', gap: 1, mt: 0.5, flexWrap: 'wrap' }}>
                           {(() => {
@@ -4685,6 +7577,22 @@ const AudiobookPage = () => {
                               />
                             )
                           })()}
+                          {canResume && (
+                            <Chip
+                              label={
+                                resumeCheckpoint && resumeCheckpoint.total_segments > 0
+                                  ? `断点：${resumeCheckpoint.completed_segments}/${resumeCheckpoint.total_segments}`
+                                  : '断点：可继续生成'
+                              }
+                              size="small"
+                              sx={{
+                                backgroundColor: 'rgba(239, 108, 0, 0.12)',
+                                color: '#e65100',
+                                fontSize: '0.75rem',
+                                height: 22,
+                              }}
+                            />
+                          )}
                           <Chip
                             label={chapterAudio.audio_path ? '音频：已生成' : '音频：未生成'}
                             size="small"
@@ -4741,9 +7649,13 @@ const AudiobookPage = () => {
               <Button
                 variant="contained"
                 onClick={() => {
+                  clearActiveGenerationState()
                   setActiveStep(0)
                   setSelectedProject(null)
                   setAudiobookProject(null)
+                  setTaskPointsPrecheckError(null)
+                  setBrowserPlayerData(null)
+                  setBrowserPlayerOpen(false)
                   audioRef.pause() // 清理播放状态
                   setPlayingChapter(null)
                 }}
@@ -4970,6 +7882,9 @@ const AudiobookPage = () => {
         reviewMode={reviewMode}
         onToggleReviewMode={handleToggleReviewMode}
         regeneratingSegments={regeneratingSegments}
+        editorConflict={editorCrossTabConflict}
+        onApplyIncomingDraft={handleApplyIncomingEditorDraft}
+        onKeepLocalDraft={handleKeepLocalEditorDraft}
       />
       
       {/* 新增：历史记录对话框 */}

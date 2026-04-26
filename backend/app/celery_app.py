@@ -5,6 +5,7 @@ import os
 import sys
 
 from celery import Celery
+from celery.schedules import crontab
 from app.core.env_loader import get_project_root, load_project_env
 
 # 允许 Celery worker 直接 import 项目根目录下的轻量模块（如：pipeline/agents/adapters）
@@ -44,6 +45,13 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     broker_connection_retry_on_startup=True,
+    beat_schedule={
+        "audiobook-cleanup-expired-temp-assets-hourly": {
+            "task": "audiobook.cleanup_expired_temp_assets",
+            "schedule": crontab(minute=17),
+            "args": (100,),
+        },
+    },
 )
 
 # Windows 下 Celery 无法使用 prefork 池，会触发 WinError 5。

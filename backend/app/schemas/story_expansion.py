@@ -33,9 +33,18 @@ class StoryExpansionValidationStatsResponse(_StrictModel):
 class StoryExpansionModelPlanResponse(_StrictModel):
     coordinator_planner_model: Optional[str] = None
     coordinator_writer_model: Optional[str] = None
+    coordinator_planner_max_tokens: Optional[int] = None
+    coordinator_writer_max_tokens: Optional[int] = None
+    coordinator_planner_timeout_seconds: Optional[int] = None
+    coordinator_writer_timeout_seconds: Optional[int] = None
+    coordinator_planner_estimated_output_tokens: Optional[int] = None
+    coordinator_writer_estimated_output_tokens: Optional[int] = None
     outline_expansion_model: Optional[str] = None
     character_expansion_model: Optional[str] = None
     estimated_rounds: Optional[int] = None
+    selection_reason: Optional[str] = None
+    selection_quality_guard: Optional[str] = None
+    selection_cost_hint: Optional[str] = None
     notes: list[str] = Field(default_factory=list)
 
 
@@ -148,6 +157,18 @@ class StoryExpansionStartResponse(_StrictModel):
     message: str
 
 
+class StoryExpansionRepairRequest(_StrictModel):
+    project_id: int
+    story_expansion_mode: Optional[str] = None
+    volume_index: Optional[int] = None
+
+
+class StoryExpansionRepairResponse(_StrictModel):
+    success: bool
+    result: "StoryExpansionTaskResultResponse"
+    message: str
+
+
 class StoryExpansionOutlineOperationResponse(_StrictModel):
     action: Optional[str] = None
     after_chapter: Optional[int] = None
@@ -226,4 +247,9 @@ class StoryExpansionTaskResultResponse(_StrictModel):
     expansion_analysis: Optional[StoryExpansionAnalysisPayload] = None
     epic_total_volumes: Optional[int] = None
     epic_chapter_range: Optional[list[int]] = None
+    completion_status: Optional[str] = None
+    goal_reached: Optional[bool] = None
     message: str
+
+
+StoryExpansionRepairResponse.model_rebuild()

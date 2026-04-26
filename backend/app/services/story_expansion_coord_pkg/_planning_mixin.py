@@ -61,14 +61,23 @@ class PlanningMixin:
         execution_mode: str,
     ) -> Dict[str, Any]:
         recommended_upper = cls.CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS
+        caution_lower = cls.FRAMEWORK_PREFERRED_CHAPTER_THRESHOLD
+        absolute_upper = cls.CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS
         effective_total = max(current_chapter_count, target_chapter_count)
 
-        if effective_total > recommended_upper:
+        if effective_total > absolute_upper:
             request_band = "forbidden"
             request_band_label = "禁止常规协同"
             request_band_reason = (
-                f"当前目标已超过常规协同上限 {recommended_upper} 章。"
-                "超过 300 章后必须改用长篇框架协同。"
+                f"当前目标已超过常规协同硬上限 {absolute_upper} 章。"
+                "必须改用长篇框架协同。"
+            )
+        elif effective_total >= caution_lower:
+            request_band = "caution"
+            request_band_label = "可执行但建议转框架"
+            request_band_reason = (
+                f"当前目标已进入 {caution_lower}-{absolute_upper} 章区间。"
+                "常规协同仍可执行，但更建议先切换到长篇框架协同，再按卷滚动细化。"
             )
         else:
             request_band = "recommended"
@@ -76,8 +85,9 @@ class PlanningMixin:
             request_band_reason = "当前目标仍在常规协同的稳定工作带内，适合直接进行单轮或分轮扩展。"
 
         summary = (
-            f"常规协同仅支持总规模不超过 {recommended_upper} 章的项目；"
-            f"{cls.FRAMEWORK_PREFERRED_CHAPTER_THRESHOLD} 章及以上禁止继续使用常规协同，必须切换到长篇框架协同。"
+            f"常规协同推荐总规模不超过 {recommended_upper} 章；"
+            f"{caution_lower}-{absolute_upper} 章仍可执行，但更建议先切换到长篇框架协同；"
+            f"超过 {absolute_upper} 章后必须切换。"
         )
 
         return {
@@ -90,9 +100,9 @@ class PlanningMixin:
             "chapters_needed": chapters_needed,
             "execution_mode": execution_mode,
             "recommended_total_chapters_max": recommended_upper,
-            "caution_total_chapters_min": None,
-            "caution_total_chapters_max": None,
-            "framework_preferred_total_from": cls.FRAMEWORK_PREFERRED_CHAPTER_THRESHOLD,
+            "caution_total_chapters_min": caution_lower,
+            "caution_total_chapters_max": absolute_upper,
+            "framework_preferred_total_from": caution_lower,
             "epic_auto_switch_total_from": cls.EPIC_CHAPTER_THRESHOLD,
             "preferred_iterative_step": cls.ITERATIVE_CHAPTER_STEP,
             "single_round_delta_limit": cls.SHORT_CHAPTER_DELTA_LIMIT,
@@ -105,10 +115,16 @@ class PlanningMixin:
                     "detail": f"单次新增建议按 {cls.ITERATIVE_CHAPTER_STEP} 章左右推进，质量和稳定性更均衡。",
                 },
                 {
+                    "key": "caution",
+                    "label": "可执行但建议转框架",
+                    "range_text": f"总规模 {caution_lower}-{absolute_upper} 章",
+                    "detail": "仍可直接发起常规协同，但更建议先切换到长篇框架协同，再按卷滚动细化。",
+                },
+                {
                     "key": "forbidden",
                     "label": "禁止常规协同",
-                    "range_text": f"总规模 >= {cls.FRAMEWORK_PREFERRED_CHAPTER_THRESHOLD} 章",
-                    "detail": "超过 300 章后必须改用长篇框架协同，不能继续走常规协同。",
+                    "range_text": f"总规模 >= {absolute_upper + 1} 章",
+                    "detail": f"超过 {absolute_upper} 章后必须改用长篇框架协同，不能继续走常规协同。",
                 },
             ],
         }
@@ -121,7 +137,7 @@ class PlanningMixin:
 
         if mode == "volume_detail":
             character_rounds = (characters_needed + cls.ITERATIVE_CHARACTER_STEP - 1) // cls.ITERATIVE_CHARACTER_STEP
-            return max(1, 1 + character_rounds)
+            return min(cls.ITERATIVE_MAX_ROUNDS, max(1, 1 + character_rounds))
         if mode == "epic":
             # 长篇框架协同在一次任务内完成框架生成与必要的人物补足，
             # 不应按“分轮协同”展示为多轮任务。
@@ -129,7 +145,7 @@ class PlanningMixin:
         if mode == "iterative":
             chapter_rounds = (chapters_needed + cls.ITERATIVE_CHAPTER_STEP - 1) // cls.ITERATIVE_CHAPTER_STEP
             character_rounds = (characters_needed + cls.ITERATIVE_CHARACTER_STEP - 1) // cls.ITERATIVE_CHARACTER_STEP
-            return max(1, max(chapter_rounds, character_rounds))
+            return min(cls.ITERATIVE_MAX_ROUNDS, max(1, max(chapter_rounds, character_rounds)))
         return 1
 
     @classmethod
@@ -605,6 +621,17 @@ class PlanningMixin:
             )
         )
 
+        runtime_model_selection = self._configure_story_expansion_runtime_models(
+            current_outline=current_outline,
+            characters=characters,
+            world_setting=world_setting,
+            validation=validation,
+            mode_info=effective_mode_info,
+            estimated_rounds=estimated_rounds,
+            expansion_mode=effective_expansion_mode,
+            volume_detail_config=normalized_volume_detail_config,
+        )
+
         outline_plan_model = self._estimate_outline_model_for_plan(
             execution_mode=execution_mode,
             target_chapter_count=target_chapter_count,
@@ -615,9 +642,18 @@ class PlanningMixin:
         model_plan = {
             "coordinator_planner_model": self._get_llm_model_name(getattr(self, "planner_llm", None), "unknown"),
             "coordinator_writer_model": self._get_llm_model_name(getattr(self, "writer_llm", None), "unknown"),
+            "coordinator_planner_max_tokens": runtime_model_selection.get("planner", {}).get("requested_max_tokens"),
+            "coordinator_writer_max_tokens": runtime_model_selection.get("writer", {}).get("requested_max_tokens"),
+            "coordinator_planner_timeout_seconds": runtime_model_selection.get("planner", {}).get("timeout_seconds"),
+            "coordinator_writer_timeout_seconds": runtime_model_selection.get("writer", {}).get("timeout_seconds"),
+            "coordinator_planner_estimated_output_tokens": runtime_model_selection.get("planner", {}).get("estimated_output_tokens"),
+            "coordinator_writer_estimated_output_tokens": runtime_model_selection.get("writer", {}).get("estimated_output_tokens"),
             "outline_expansion_model": outline_plan_model,
             "character_expansion_model": character_plan_model,
             "estimated_rounds": estimated_rounds,
+            "selection_reason": runtime_model_selection.get("selection_reason"),
+            "selection_quality_guard": runtime_model_selection.get("selection_quality_guard"),
+            "selection_cost_hint": runtime_model_selection.get("selection_cost_hint"),
             "notes": [],
         }
 
@@ -632,12 +668,29 @@ class PlanningMixin:
         if intent in {"outline_led", "character_led", "balanced"} and intent != recommended_intent:
             warnings.append("当前执行方向与系统建议不同，可能影响协同效率与结果稳定性。")
         if execution_mode == "iterative":
-            warnings.append("当前会走分轮扩展；点击一次开始后，系统会在同一次任务里自动连续执行多轮，逐步逼近目标，而不是只执行首轮。")
+            warnings.append(
+                f"当前会走分轮扩展；点击一次开始后，系统会在同一次任务里自动连续执行多轮，"
+                f"单次任务最多自动推进 {self.ITERATIVE_MAX_ROUNDS} 轮，逐步逼近目标，而不是只执行首轮。"
+            )
+            if (
+                int(effective_mode_info.get("chapters_needed") or 0) > self.ITERATIVE_CHAPTER_STEP * self.ITERATIVE_MAX_ROUNDS
+                or int(effective_mode_info.get("characters_needed") or 0) > self.ITERATIVE_CHARACTER_STEP * self.ITERATIVE_MAX_ROUNDS
+            ):
+                warnings.append(
+                    f"当前目标已超过单次后台任务的自动分轮上限（最多 {self.ITERATIVE_MAX_ROUNDS} 轮）；"
+                    "本次会先推进可安全完成的部分，如仍有缺口可继续发起下一次协同。"
+                )
         if execution_mode == "epic":
             warnings.append("当前会先生成长篇框架，再逐步细化，不会一次性产出完整卷级细纲。")
             model_plan["outline_expansion_model"] = self._estimate_stage_model("concept", outline_plan_model)
+            estimated_volume_model = self._estimate_volume_detail_outline_model(
+                normalized_volume_detail_config.get("chapters_count_range")
+            )
             model_plan["notes"].append(
-                f"长篇框架阶段预计使用 {model_plan['outline_expansion_model']} 生成总卷框架，后续卷级细化会按单卷规模在 deepseek-reasoner / qwen3.5-plus 之间切换。"
+                f"卷级细化会按单次章节规模在 deepseek-v4-pro 与 qwen3.5-plus 之间动态选择，当前预估为 {estimated_volume_model}。"
+            )
+            model_plan["notes"].append(
+                f"长篇框架阶段预计使用 {model_plan['outline_expansion_model']} 生成总卷框架，再进入后续卷级细化。"
             )
             if (
                 normalized_expansion_mode == "auto"

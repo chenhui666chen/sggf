@@ -20,6 +20,7 @@ os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@127.0.0.1:5432/test_db")
 
 from app.db.base import Base, get_db
+from app.core.security import get_current_user
 from app.models.admin_log import AdminOperationLog
 from app.models.audiobook import AudiobookProject, ChapterAudio
 from app.models.audiobook_task import AudiobookTask
@@ -28,6 +29,7 @@ from app.models.project import Chapter, Project
 from app.models.role import Role, user_roles
 from app.models.user import User
 from app.models.user_asset_record import UserAssetRecord
+from app.api.v1.audiobook_api import routes_projects as audiobook_routes_projects
 
 
 def load_audiobook_module():
@@ -119,7 +121,6 @@ def build_test_client() -> tuple[CompatTestClient, sessionmaker, FastAPI]:
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
-    app.dependency_overrides[audiobook.get_db] = override_get_db
     return CompatTestClient(app), testing_session_local, app
 
 
@@ -190,7 +191,7 @@ def test_audiobook_create_project_blocks_with_structured_precheck_error(monkeypa
 
     user = create_user(session_factory, username="ab_route_low_user", email="ab_route_low@example.com")
     operator = create_user(session_factory, username="ab_route_low_admin", email="ab_route_low_admin@example.com")
-    app.dependency_overrides[audiobook.get_current_user] = lambda: user
+    app.dependency_overrides[get_current_user] = lambda: user
 
     project = create_project(session_factory, user_id=user.id, display_no=1, title="有声书路由余额不足项目")
     chapter = create_chapter(
@@ -204,7 +205,7 @@ def test_audiobook_create_project_blocks_with_structured_precheck_error(monkeypa
         session_factory,
         user_id=user.id,
         title="有声书路由低余额资产",
-        file_url="https://example.com/ab-route-low.png",
+        source_uri="https://example.com/ab-route-low.png",
         created_at=now,
         updated_at=now,
     )
@@ -219,7 +220,11 @@ def test_audiobook_create_project_blocks_with_structured_precheck_error(monkeypa
     def _should_not_create_project(self, request, *, prepared=None):
         raise AssertionError("预检失败后不应继续创建有声书项目")
 
-    monkeypatch.setattr(audiobook.AudiobookAppService, "create_audiobook_project", _should_not_create_project)
+    monkeypatch.setattr(
+        audiobook_routes_projects.AudiobookAppService,
+        "create_audiobook_project",
+        _should_not_create_project,
+    )
 
     response = client.post(
         "/api/v1/audiobook/projects",

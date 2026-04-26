@@ -8,6 +8,7 @@ import { RootState, AppDispatch } from '@/store/store'
 import { getCurrentUser } from '@/store/slices/authSlice'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import AdminProtectedRoute from '@/components/admin/AdminProtectedRoute'
+import LocalAssetHealthBanner from '@/components/user-assets/LocalAssetHealthBanner'
 
 const cache = createCache({
   key: 'css',
@@ -106,6 +107,7 @@ function App() {
             v7_relativeSplatPath: true,
           }}
         >
+          <LocalAssetHealthBanner />
           <Suspense fallback={<LoadingFallback />}>
             <Routes>
               <Route path="/login" element={<LoginPage />} />

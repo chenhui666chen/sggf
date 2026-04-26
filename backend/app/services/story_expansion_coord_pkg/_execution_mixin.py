@@ -818,6 +818,12 @@ class ExecutionMixin:
                 stop_reasons.append(reason or "人物侧模型建议停止继续扩展。")
                 break
 
+        if current_count < target_total_characters and len(rounds) >= self.ITERATIVE_MAX_ROUNDS:
+            stop_reasons.append(
+                f"已达到单次任务的自动分轮上限（最多 {self.ITERATIVE_MAX_ROUNDS} 轮），"
+                "剩余人物目标需继续发起下一次协同。"
+            )
+
         return {
             "characters_text": characters_text,
             "current_character_count": current_count,
@@ -838,6 +844,15 @@ class ExecutionMixin:
         mode_info: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         validation_before = evaluate_story_coordination(current_outline or "", characters or "")
+        initial_chapter_count = max(
+            self._coerce_non_negative_int((mode_info or {}).get("current_chapter_count")),
+            self._coerce_non_negative_int(validation_before.get("chapter_count")),
+        )
+        initial_character_count = max(
+            self._coerce_non_negative_int((mode_info or {}).get("current_character_count")),
+            self._coerce_non_negative_int(validation_before.get("character_count")),
+            len(extract_character_names(characters or "")),
+        )
         plan = self.build_story_expansion_plan(
             current_outline=current_outline,
             characters=characters,
@@ -849,6 +864,14 @@ class ExecutionMixin:
 
         chapters_needed = int(plan.get("chapters_needed") or 0)
         characters_needed = int(plan.get("characters_needed") or 0)
+        target_chapter_count = max(
+            initial_chapter_count,
+            self._coerce_non_negative_int(target_total_chapters),
+        )
+        target_character_count = max(
+            initial_character_count,
+            self._coerce_non_negative_int(target_total_characters),
+        )
         resolved_strategy = self._resolve_strategy(
             strategy=strategy,
             validation=validation_before,
@@ -858,9 +881,13 @@ class ExecutionMixin:
         plan["strategy"] = resolved_strategy
 
         if chapters_needed > self.SHORT_CHAPTER_DELTA_LIMIT:
-            raise ValueError("协同拓展一次最多新增 30 章，请切换为分轮模式执行。")
+            raise ValueError(
+                f"协同拓展一次最多新增 {self.SHORT_CHAPTER_DELTA_LIMIT} 章，请切换为分轮模式执行。"
+            )
         if characters_needed > self.SHORT_CHARACTER_DELTA_LIMIT:
-            raise ValueError("协同拓展一次最多新增 10 个角色，请切换为分轮模式执行。")
+            raise ValueError(
+                f"协同拓展一次最多新增 {self.SHORT_CHARACTER_DELTA_LIMIT} 个角色，请切换为分轮模式执行。"
+            )
         if chapters_needed <= 0 and characters_needed <= 0:
             raise ValueError("目标章节数和目标人物数均不高于当前内容，无需协同拓展。")
 
@@ -905,8 +932,27 @@ class ExecutionMixin:
                 new_character_cards=character_delta["character_delta"],
             )
 
-        current_character_count = len(extract_character_names(merged_characters))
         new_characters = self._collect_new_character_names(characters or "", merged_characters)
+        generated_chapter_count = sum(
+            self._coerce_non_negative_int(item.get("generated_count"))
+            for item in outline_delta["outline_ops"]
+            if isinstance(item, dict)
+        )
+        chapter_count_floor = (
+            initial_chapter_count + generated_chapter_count
+            if generated_chapter_count > 0
+            else initial_chapter_count
+        )
+        current_chapter_count = self._resolve_outline_count(
+            outline_delta["plot_outline"],
+            outline_delta.get("current_chapter_count"),
+            chapter_count_floor,
+        )
+        current_character_count = self._resolve_character_count(
+            merged_characters,
+            initial_character_count + len(new_characters),
+            initial_character_count,
+        )
         repaired_plot_outline, alignment_repairs = self._auto_repair_character_alignment(
             outline_delta["plot_outline"],
             new_characters,
@@ -927,13 +973,40 @@ class ExecutionMixin:
             outline_delta["outline_delta"] = normalize_outline_text(
                 outline_delta["outline_delta"],
                 merged_characters,
-            )
+        )
         validation_after = evaluate_story_coordination(
             outline_delta["plot_outline"],
             merged_characters,
         )
+        current_chapter_count = self._resolve_outline_count(
+            outline_delta["plot_outline"],
+            validation_after.get("chapter_count"),
+            current_chapter_count,
+        )
+        current_character_count = self._resolve_character_count(
+            merged_characters,
+            validation_after.get("character_count"),
+            current_character_count,
+        )
         alignment_warnings = self._build_alignment_warnings(new_characters, validation_after)
-        coordination_summary = plan["summary"]
+        pending_parts: List[str] = []
+        stop_reasons: List[str] = []
+        if current_chapter_count < target_chapter_count:
+            chapter_gap = target_chapter_count - current_chapter_count
+            pending_parts.append(f"章节尚差 {chapter_gap} 章")
+            stop_reasons.append(f"章节尚差 {chapter_gap} 章，需继续发起下一次协同。")
+        if current_character_count < target_character_count:
+            character_gap = target_character_count - current_character_count
+            pending_parts.append(f"人物尚差 {character_gap} 人")
+            stop_reasons.append(f"人物尚差 {character_gap} 人，需继续发起下一次协同。")
+        goal_reached = len(pending_parts) <= 0
+        plan["target_chapter_count"] = target_chapter_count
+        plan["target_character_count"] = target_character_count
+        coordination_summary = (
+            plan["summary"]
+            if goal_reached
+            else f"单轮协同已完成当前可确认增量，{'，'.join(pending_parts)}。"
+        )
         repair_note = self._build_alignment_repair_note(alignment_repairs)
         if repair_note:
             coordination_summary = f"{coordination_summary} {repair_note}"
@@ -966,11 +1039,12 @@ class ExecutionMixin:
             ],
             "new_characters": new_characters,
             "alignment_repairs": alignment_repairs,
-            "current_chapter_count": outline_delta["current_chapter_count"],
+            "current_chapter_count": current_chapter_count,
             "current_character_count": current_character_count,
             "validation_before": validation_before,
             "validation_after": validation_after,
             "alignment_warnings": alignment_warnings,
+            "stop_reasons": stop_reasons,
         }
 
     def _execute_iterative_mode(
@@ -1231,6 +1305,18 @@ class ExecutionMixin:
 
             if not outline_active and not character_active:
                 break
+
+        if (
+            (outline_active or character_active)
+            and (
+                current_chapter_count < target_chapter_count
+                or current_character_count < target_character_count
+            )
+        ):
+            stop_reasons.append(
+                f"已达到单次任务的自动分轮上限（最多 {self.ITERATIVE_MAX_ROUNDS} 轮），"
+                "剩余目标需继续发起下一次协同。"
+            )
 
         new_character_names = self._collect_new_character_names(characters or "", current_characters)
         current_outline_text, alignment_repairs = self._auto_repair_character_alignment(
@@ -1705,10 +1791,35 @@ class ExecutionMixin:
             epic_config=epic_config,
             volume_detail_config=volume_detail_config,
         )
+        estimated_rounds = self._estimate_execution_rounds_from_mode_info(mode_info)
+        validation = evaluate_story_coordination(current_outline or "", characters or "")
+        normalized_volume_detail_config = self._normalize_volume_detail_config(volume_detail_config)
+        effective_expansion_mode = (
+            "epic_framework"
+            if str(mode_info.get("mode") or "").strip() == "epic"
+            else (
+                "volume_detail"
+                if str(mode_info.get("mode") or "").strip() == "volume_detail"
+                else (
+                    expansion_mode
+                    if expansion_mode in {"total", "epic_framework", "volume_detail"}
+                    else "total"
+                )
+            )
+        )
+        self._configure_story_expansion_runtime_models(
+            current_outline=current_outline,
+            characters=characters,
+            world_setting=world_setting,
+            validation=validation,
+            mode_info=mode_info,
+            estimated_rounds=estimated_rounds,
+            expansion_mode=effective_expansion_mode,
+            volume_detail_config=normalized_volume_detail_config,
+        )
 
         chapters_needed = int(mode_info.get("chapters_needed") or 0)
         characters_needed = int(mode_info.get("characters_needed") or 0)
-        normalized_volume_detail_config = self._normalize_volume_detail_config(volume_detail_config)
         allow_volume_regeneration = (
             mode_info.get("mode") == "volume_detail"
             and bool(normalized_volume_detail_config.get("existing_volume_detail"))

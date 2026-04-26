@@ -114,6 +114,16 @@ class AudiobookJobTracker:
             run.progress = max(float(progress or 0.0), float(run.progress or 0.0))
             run.status = status or detail.get("status") or task.status or run.status or "running"
             run.error_message = error_message
+            checkpoint_payload["schema_version"] = checkpoint_payload.get("schema_version") or 1
+            checkpoint_payload["status"] = run.status
+            checkpoint_payload["current_stage"] = stage
+            checkpoint_payload["total_segments"] = max(
+                int(checkpoint_payload.get("total_segments") or 0),
+                int(run.total_segment_count or 0),
+            )
+            checkpoint_payload["checkpoint_updated_at"] = utc_now().isoformat()
+            if error_message:
+                checkpoint_payload["last_error"] = error_message
             run.checkpoint_json = checkpoint_payload
 
             if run.started_at is None:

@@ -30,6 +30,30 @@ from ...character_parser import (
 from ...character_runtime_context import build_character_prompt_context_from_text
 from ._constants import *
 
+def _resolve_chapter_renumberer():
+    try:
+        from .. import outline_expander as outline_expander_module
+
+        factory = getattr(outline_expander_module, "get_chapter_renumberer", None)
+        if callable(factory):
+            return factory()
+    except Exception:
+        pass
+    return get_chapter_renumberer()
+
+
+def _resolve_consistency_validator(*, strict_mode: bool = True):
+    try:
+        from .. import outline_expander as outline_expander_module
+
+        factory = getattr(outline_expander_module, "get_consistency_validator", None)
+        if callable(factory):
+            return factory(strict_mode=strict_mode)
+    except Exception:
+        pass
+    return get_consistency_validator(strict_mode=strict_mode)
+
+
 class IncrementalExpansionMixin:
     def expand_plot_outline(self, current_outline: str, world_setting: str,
                           characters: str, target_chapters: int = 50) -> Dict[str, Any]:
@@ -963,7 +987,7 @@ class IncrementalExpansionMixin:
                 pending_foreshadowings=pending_foreshadowings,
             )
 
-        renumberer = get_chapter_renumberer()
+        renumberer = _resolve_chapter_renumberer()
         renumber_result = renumberer.detect_and_fix(
             content=volume_content,
             expected_start=start_chapter_num,
@@ -1204,7 +1228,7 @@ class IncrementalExpansionMixin:
                 f"目标范围为 {chapters_count_range[0]}-{chapters_count_range[1]} 章。"
             )
 
-        validator = get_consistency_validator(strict_mode=True)
+        validator = _resolve_consistency_validator(strict_mode=True)
         validation_result = validator.validate(
             volume_content=volume_content,
             volume_index=target_volume_index,

@@ -131,11 +131,11 @@ async def generate_next_chapter(
         # 5. 生成已完成章节摘要，并为内容创作准备结构化的上一章信息
         def summarize_chapters(chapters):
             """生成已完成章节的摘要，并构造供内容生成使用的高层摘要列表。
-            
-            策略：2章最近章节全文 + 8章更靠前章节的摘要
-            - 最近2章：使用完整内容（保证衔接自然）
-            - 往前8章：使用结构化摘要（覆盖更长历史）
-            - 更早章节：使用简要摘要（节省token）
+
+            策略：按预计模型预算与章节长度动态决定
+            - 最近若干章：使用扩展正文摘录，保证连续性
+            - 再往前若干章：使用结构化摘要，覆盖更长历史
+            - 更早章节：使用简要摘要，控制成本
             """
             if not chapters:
                 return "这是第一章，之前没有章节。", [], ""
@@ -153,9 +153,14 @@ async def generate_next_chapter(
                 logger.error(f"   ⚠️ 创建章节摘要生成器失败，将回退到内容前200字: {e}")
 
             total = len(chapters)
-            RECENT_FULL_COUNT = 2  # 最近2章使用全文
-            SUMMARY_COUNT = 8      # 往前8章使用详细摘要
-            RECENT_ASSET_COUNT = 4  # 最近4章优先提取结构化连续性资产
+            context_strategy = _select_previous_chapter_context_strategy(
+                chapters,
+                next_chapter_number=next_chapter_number,
+            )
+            recent_full_count = int(context_strategy.get("recent_full_count") or 0)
+            detailed_summary_count = int(context_strategy.get("detailed_summary_count") or 0)
+            recent_asset_count = int(context_strategy.get("recent_asset_count") or 0)
+            recent_full_excerpt_chars = int(context_strategy.get("recent_full_excerpt_chars") or 1200)
 
             for idx, chapter in enumerate(chapters):
                 chapter_id, chapter_num, title, content, existing_summary = chapter
@@ -167,10 +172,13 @@ async def generate_next_chapter(
                 # 计算当前章节距离最后一章的距离
                 distance_from_end = total - idx
 
-                # 判断是否需要生成详细摘要（最近2章之后的8章）
-                needs_detailed_summary = (distance_from_end > RECENT_FULL_COUNT and 
-                                        distance_from_end <= RECENT_FULL_COUNT + SUMMARY_COUNT)
-                needs_recent_assets = distance_from_end <= RECENT_ASSET_COUNT
+                # 动态判断该章节的上下文层级
+                use_recent_full_context = distance_from_end <= recent_full_count
+                needs_detailed_summary = (
+                    distance_from_end > recent_full_count
+                    and distance_from_end <= recent_full_count + detailed_summary_count
+                )
+                needs_recent_assets = distance_from_end <= recent_asset_count
 
                 if summarizer and (needs_detailed_summary or needs_recent_assets):
                     try:
@@ -181,26 +189,41 @@ async def generate_next_chapter(
                     except Exception as e:
                         logger.warning(f"   ⚠️ 读取第{chapter_num}章缓存摘要失败，将继续使用已有内容: {e}")
 
-                if summarizer and needs_detailed_summary and not summary_data:
-                    # 对需要详细摘要的章节，生成200字结构化摘要
+                if summarizer and (needs_detailed_summary or needs_recent_assets) and not summary_data:
+                    # 对详细摘要区和最近连续性资产区补齐结构化摘要
                     try:
                         summary_data = summarizer.get_or_generate_summary(
                             chapter_id=chapter_id,
                             chapter_number=chapter_num,
                             chapter_title=title or f"第{chapter_num}章",
                             chapter_content=content,
-                            summary_length=200,
+                            summary_length=220,
                         )
                         summary_text = summary_data.get("core_summary", "").strip() or summary_text
-                        logger.info(f"   ✅ 第{chapter_num}章使用详细摘要（距离末尾{distance_from_end}章）")
+                        logger.info(f"   ✅ 第{chapter_num}章补齐结构化摘要资产（距离末尾{distance_from_end}章）")
                     except Exception as e:
                         logger.error(f"   ⚠️ 生成第{chapter_num}章摘要失败，将回退简要摘要: {e}")
 
-                # 如果没有摘要，使用前200字作为简要摘要
-                if not summary_text:
-                    summary_text = content[:200] if content and len(content) > 200 else content
+                if use_recent_full_context:
+                    # 最近章节优先保留更长的上下文摘录，而不是只保留摘要句。
+                    summary_text = _build_recent_full_chapter_excerpt(
+                        content,
+                        max_chars=recent_full_excerpt_chars,
+                    ) or summary_text
+                    context_mode = "recent_full"
+                elif needs_detailed_summary:
+                    if not summary_text:
+                        summary_text = content[:220] if content and len(content) > 220 else content
+                    context_mode = "detailed_summary"
+                else:
+                    if not summary_text:
+                        summary_text = content[:200] if content and len(content) > 200 else content
+                    context_mode = "brief_summary"
 
-                summaries.append(f"第{chapter_num}章 《{title}》: {summary_text}...")
+                if context_mode == "recent_full":
+                    summaries.append(f"第{chapter_num}章 《{title}》:\n{summary_text}")
+                else:
+                    summaries.append(f"第{chapter_num}章 《{title}》: {summary_text}...")
                 previous_chapters_payload.append(
                     {
                         "chapter_number": chapter_num,
@@ -208,21 +231,36 @@ async def generate_next_chapter(
                         "content": content,
                         "summary": summary_text,
                         "summary_data": summary_data,
+                        "summary_mode": context_mode,
                     }
                 )
 
             # 输出策略统计
             if total > 0:
-                recent_full_range = f"第{max(1, total-RECENT_FULL_COUNT+1)}-{total}章" if total > RECENT_FULL_COUNT else f"第1-{total}章"
-                summary_range_start = max(1, total - RECENT_FULL_COUNT - SUMMARY_COUNT + 1)
-                summary_range_end = max(0, total - RECENT_FULL_COUNT)
+                recent_full_range = (
+                    f"第{max(1, total - recent_full_count + 1)}-{total}章"
+                    if total > recent_full_count else f"第1-{total}章"
+                )
+                summary_range_start = max(1, total - recent_full_count - detailed_summary_count + 1)
+                summary_range_end = max(0, total - recent_full_count)
                 
                 logger.info(f"   📊 上下文策略：")
-                logger.info(f"      - 最近{min(RECENT_FULL_COUNT, total)}章全文: {recent_full_range}")
+                logger.info(
+                    f"      - 预计规划模型: {context_strategy.get('selected_model', 'unknown')} "
+                    f"(历史预算约 {context_strategy.get('history_budget_tokens', 0)} tokens)"
+                )
+                logger.info(f"      - 最近{min(recent_full_count, total)}章扩展正文摘录: {recent_full_range}")
                 if summary_range_end > 0:
-                    logger.info(f"      - 往前{min(SUMMARY_COUNT, summary_range_end)}章摘要: 第{summary_range_start}-{summary_range_end}章")
-                if total > RECENT_FULL_COUNT + SUMMARY_COUNT:
-                    logger.info(f"      - 更早{total - RECENT_FULL_COUNT - SUMMARY_COUNT}章简要摘要: 第1-{total-RECENT_FULL_COUNT-SUMMARY_COUNT}章")
+                    logger.info(
+                        f"      - 往前{min(detailed_summary_count, summary_range_end)}章结构化摘要: "
+                        f"第{summary_range_start}-{summary_range_end}章"
+                    )
+                if total > recent_full_count + detailed_summary_count:
+                    logger.info(
+                        f"      - 更早{total - recent_full_count - detailed_summary_count}章简要摘要: "
+                        f"第1-{total - recent_full_count - detailed_summary_count}章"
+                    )
+                logger.info(f"      - 最近连续性资产窗口: {min(recent_asset_count, total)}章")
 
             recent_chapter_assets_summary = _build_recent_chapter_assets_summary(previous_chapters_payload)
             return "\n\n".join(summaries), previous_chapters_payload, recent_chapter_assets_summary

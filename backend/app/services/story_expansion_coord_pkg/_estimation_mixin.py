@@ -141,7 +141,7 @@ class EstimationMixin:
     @staticmethod
     def _estimate_context_model(scenario: str, current_count: int, fallback: str = "unknown") -> str:
         try:
-            from .agents.layered_summarizer import LayeredSummarizer
+            from app.services.agents.layered_summarizer import LayeredSummarizer
 
             return LayeredSummarizer.estimate_selected_model(scenario, current_count)
         except Exception:
@@ -161,10 +161,10 @@ class EstimationMixin:
     @staticmethod
     def _estimate_volume_detail_outline_model(
         chapters_count_range: Optional[Tuple[int, int]],
-        fallback: str = "deepseek-reasoner",
+        fallback: str = "deepseek-v4-pro",
     ) -> str:
         try:
-            from .agents.outline_expander import OutlineExpander
+            from app.services.agents.outline_expander import OutlineExpander
 
             return OutlineExpander.estimate_volume_detail_model(chapters_count_range or (0, 0))
         except Exception:
@@ -187,7 +187,7 @@ class EstimationMixin:
         return self._estimate_context_model("outline_expand", target_chapter_count, "qwen3.5-plus")
 
     def _estimate_character_model_for_plan(self, target_character_count: int) -> str:
-        return self._estimate_context_model("character_expand", target_character_count, "deepseek-reasoner")
+        return self._estimate_context_model("character_expand", target_character_count, "deepseek-v4-pro")
 
     def _estimate_character_density_multiplier(self) -> float:
         genre_text = normalize_story_text(self.genre or "").lower()
@@ -318,9 +318,12 @@ class EstimationMixin:
             )
         return max(2, min(self.AUTO_CHARACTER_INCREMENT_SOFT_CAP, int(math.ceil(effective_delta / 6))))
 
-    @staticmethod
-    def _resolve_volume_detail_target_span(volume_detail_config: Optional[Dict[str, Any]]) -> int:
-        normalized = StoryExpansionCoordinator._normalize_volume_detail_config(volume_detail_config)
+    @classmethod
+    def _resolve_volume_detail_target_span(
+        cls,
+        volume_detail_config: Optional[Dict[str, Any]],
+    ) -> int:
+        normalized = cls._normalize_volume_detail_config(volume_detail_config)
         chapter_window = normalized.get("chapters_count_range")
         if isinstance(chapter_window, tuple) and len(chapter_window) == 2:
             try:

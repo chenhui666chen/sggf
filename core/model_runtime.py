@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import threading
 from pathlib import Path
 from typing import Awaitable, Callable, Optional, TypeVar
@@ -11,6 +12,84 @@ T = TypeVar("T")
 
 _hub_lock = threading.Lock()
 _hub_initialized = False
+
+
+def _safe_positive_int(value: object) -> Optional[int]:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return None
+    if normalized <= 0:
+        return None
+    return normalized
+
+
+def _safe_positive_float(value: object) -> Optional[float]:
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError):
+        return None
+    if normalized <= 0:
+        return None
+    return normalized
+
+
+def estimate_model_timeout_seconds(
+    model_id: Optional[str],
+    requested_max_tokens: Optional[int] = None,
+    *,
+    minimum_timeout: Optional[int] = None,
+) -> Optional[int]:
+    """根据模型吞吐与本次输出预算估算更合理的请求超时时间。"""
+
+    normalized_model = normalize_model_id(model_id)
+    if normalized_model is None and isinstance(model_id, str):
+        normalized_model = model_id.strip() or None
+    if not normalized_model:
+        return _safe_positive_int(minimum_timeout)
+
+    ensure_model_hub_initialized()
+    from core.model_hub import model_hub
+
+    spec = model_hub.registry.get_spec(normalized_model)
+    minimum_timeout_value = _safe_positive_int(minimum_timeout)
+    if spec is None:
+        return minimum_timeout_value
+
+    default_timeout = (
+        _safe_positive_int(getattr(spec.api_config, "default_timeout", None))
+        or minimum_timeout_value
+        or 120
+    )
+    requested_tokens = _safe_positive_int(requested_max_tokens)
+    if requested_tokens is None:
+        requested_tokens = _safe_positive_int((getattr(spec, "default_params", {}) or {}).get("max_tokens"))
+    if requested_tokens is None:
+        return max(default_timeout, minimum_timeout_value or 0)
+
+    performance = getattr(spec, "performance", None)
+    tokens_per_second = _safe_positive_float(getattr(performance, "tokens_per_second", None))
+    if tokens_per_second is None:
+        return max(default_timeout, minimum_timeout_value or 0)
+
+    p95_latency_seconds = _safe_positive_float(getattr(performance, "p95_latency_seconds", None)) or 0.0
+    avg_latency_seconds = _safe_positive_float(getattr(performance, "avg_latency_seconds", None)) or 0.0
+    latency_buffer_seconds = max(15.0, p95_latency_seconds, avg_latency_seconds * 1.5)
+
+    if requested_tokens >= 131072:
+        safety_factor = 1.35
+    elif requested_tokens >= 65536:
+        safety_factor = 1.30
+    elif requested_tokens >= 32768:
+        safety_factor = 1.25
+    else:
+        safety_factor = 1.20
+
+    estimated_timeout = int(
+        math.ceil((requested_tokens / tokens_per_second) * safety_factor + latency_buffer_seconds)
+    )
+
+    return max(default_timeout, estimated_timeout, minimum_timeout_value or 0)
 
 
 def ensure_model_hub_initialized() -> None:

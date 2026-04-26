@@ -309,7 +309,7 @@ class BaseAgent(ABC):
             'qwen-plus': 1000000,       # 1M tokens
             'qwen-long': 10000000,      # 10M tokens
             'qwen-turbo': 8000,         # 8K tokens
-            'deepseek-reasoner': 128000, # R1: 128K tokens
+            'deepseek-v4-pro': 1000000, # V4 Pro: 1M tokens
             'deepseek-chat': 64000,     # V3: 64K tokens
         }
         

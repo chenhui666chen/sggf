@@ -1,6 +1,7 @@
 import type {
   StoryExpansionExecutionRound,
   StoryExpansionOutlineOperation,
+  StoryExpansionValidationStats,
 } from '@/types/storyExpansion'
 import type { StoryExpansionContentKind } from './storyExpansionResultFormatter'
 import type { StoryExpansionResultView } from './storyExpansionResultModel'
@@ -69,6 +70,13 @@ export interface StoryExpansionResultDisplayInput {
 }
 
 export interface StoryExpansionResultDisplayView {
+  completionStatusLabel: string
+  completionStatusTone: 'success' | 'warning' | 'default'
+  completionStatusDescription: string
+  remainingGoalChipLabel: string | null
+  canAutoImprove: boolean
+  autoImproveActionLabel: string | null
+  autoImproveHint: string | null
   executionModeReasonText: string
   chapterMetricValue: string
   characterMetricValue: string
@@ -150,6 +158,65 @@ export function formatCountDelta(before: number, after: number, target: number):
   }
 
   return base
+}
+
+function formatRemainingGoalText(chapterGap: number, characterGap: number): string {
+  const parts: string[] = []
+  if (chapterGap > 0) {
+    parts.push(`${chapterGap} 章`)
+  }
+  if (characterGap > 0) {
+    parts.push(`${characterGap} 人`)
+  }
+  return parts.length > 0 ? `仍差 ${parts.join(' / ')}` : ''
+}
+
+function resolveCompletionStatusPresentation(view: StoryExpansionResultView | null): {
+  label: string
+  tone: 'success' | 'warning' | 'default'
+  description: string
+  remainingGoalChipLabel: string | null
+} {
+  if (!view) {
+    return {
+      label: '结果待确认',
+      tone: 'default',
+      description: '当前结果将根据目标达成情况自动标记为已达目标或阶段性完成。',
+      remainingGoalChipLabel: null,
+    }
+  }
+
+  if (view.result.execution_mode === 'repair') {
+    return {
+      label: '修复完成',
+      tone: 'success',
+      description: '当前结果来自定向修复，不会自动开启下一轮协同扩展。',
+      remainingGoalChipLabel: null,
+    }
+  }
+
+  const remainingGoalText = formatRemainingGoalText(
+    view.remainingChapterCount,
+    view.remainingCharacterCount,
+  )
+
+  if (!view.goalReached || view.completionStatus === 'partial') {
+    return {
+      label: '阶段性完成',
+      tone: 'warning',
+      description: remainingGoalText
+        ? `本次协同已完成当前可确认增量，${remainingGoalText}。`
+        : '本次协同已阶段性收口，但仍需结合结果判断是否继续补齐目标。',
+      remainingGoalChipLabel: remainingGoalText || null,
+    }
+  }
+
+  return {
+    label: '已达目标',
+    tone: 'success',
+    description: '本次协同已达到当前设定的章节与人物目标。',
+    remainingGoalChipLabel: null,
+  }
 }
 
 function createOutlineOperationViews(
@@ -245,7 +312,168 @@ function createCharacterPhaseMessages(view: StoryExpansionResultView | null): st
   return messages
 }
 
+function collectUniqueMessages(messages: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+
+  for (const raw of messages) {
+    if (!hasText(raw)) {
+      continue
+    }
+
+    const text = raw!.trim()
+    if (seen.has(text)) {
+      continue
+    }
+
+    seen.add(text)
+    result.push(text)
+  }
+
+  return result
+}
+
+function normalizeSuggestionText(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return ''
+  }
+
+  return trimmed
+    .replace(/^[\-\*•·]\s*/u, '')
+    .replace(/^\d+[\.\)\]、．]\s*/u, '')
+    .trim()
+}
+
+function formatPercent(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return '0%'
+  }
+
+  const normalized = value <= 1 ? value * 100 : value
+  return `${Math.round(normalized)}%`
+}
+
+function formatCharacterList(names: string[], limit = 4): string {
+  if (names.length <= 0) {
+    return '相关人物'
+  }
+
+  if (names.length <= limit) {
+    return names.join('、')
+  }
+
+  return `${names.slice(0, limit).join('、')} 等 ${names.length} 人`
+}
+
+function getValidationSuggestions(validation: StoryExpansionValidationStats | undefined): string[] {
+  return collectUniqueMessages(
+    (validation?.suggestions ?? []).map((item) => normalizeSuggestionText(item)),
+  ).filter((item) => item !== '当前人物与大纲的基础协同正常，适合继续做增量扩展。')
+}
+
+function createScoreRegressionReasonLines(view: StoryExpansionResultView | null): string[] {
+  const before = view?.result.validation_before
+  const after = view?.result.validation_after
+  const scoreBefore = view?.scoreBefore ?? 0
+  const scoreAfter = view?.scoreAfter ?? 0
+
+  if (!after || scoreAfter >= scoreBefore) {
+    return []
+  }
+
+  const reasons: string[] = []
+  const unreferencedCharacters = after.unreferenced_characters ?? []
+  if (unreferencedCharacters.length > 0) {
+    reasons.push(`仍有未被章节正式承接的人物：${formatCharacterList(unreferencedCharacters)}。`)
+  }
+
+  const coverageBefore = typeof before?.coverage_ratio === 'number' ? before.coverage_ratio : null
+  const coverageAfter = typeof after.coverage_ratio === 'number' ? after.coverage_ratio : null
+  if (
+    coverageBefore != null
+    && coverageAfter != null
+    && coverageAfter < coverageBefore
+  ) {
+    reasons.push(
+      `人物覆盖率从 ${formatPercent(coverageBefore)} 降到 ${formatPercent(coverageAfter)}，新增内容对人物挂接不足。`,
+    )
+  }
+
+  const referencedBefore = before?.referenced_characters?.length ?? 0
+  const referencedAfter = after.referenced_characters?.length ?? 0
+  const chapterBefore = before?.chapter_count ?? view?.chapterBefore ?? 0
+  const chapterAfter = after.chapter_count ?? view?.chapterAfter ?? 0
+  if (chapterAfter > chapterBefore && referencedAfter <= referencedBefore) {
+    reasons.push('章节数增加了，但被正式挂接的人物没有同步增加，说明本轮偏向扩剧情、弱化了人物承接。')
+  }
+
+  if (reasons.length > 0) {
+    return collectUniqueMessages(reasons)
+  }
+
+  const fallbackSuggestions = getValidationSuggestions(after)
+  if (fallbackSuggestions.length > 0) {
+    return [`评分回落后，当前最优先修补项是：${fallbackSuggestions[0]}`]
+  }
+
+  return ['协同评分下降，说明新增章节与人物设定之间出现了新的挂接缺口。']
+}
+
+function createActionableImprovementLines(view: StoryExpansionResultView | null): string[] {
+  const after = view?.result.validation_after
+  if (!after) {
+    return []
+  }
+
+  const improvements: string[] = []
+  const unreferencedCharacters = after.unreferenced_characters ?? []
+  if (unreferencedCharacters.length > 0) {
+    improvements.push(
+      `优先把 ${formatCharacterList(unreferencedCharacters)} 补进对应章节的“涉及人物”字段，并明确这些角色在该章承担的剧情职责。`,
+    )
+  }
+
+  const suggestions = getValidationSuggestions(after)
+  improvements.push(...suggestions)
+
+  const coverageRatio = typeof after.coverage_ratio === 'number' ? after.coverage_ratio : null
+  if (coverageRatio != null && coverageRatio < 0.6) {
+    improvements.push('复查新增章节的“涉及人物”“人物推进”“情节作用”三项，避免只有事件推进、没有人物挂接。')
+  }
+
+  if ((after.referenced_characters?.length ?? 0) <= 0 && (after.character_count ?? 0) > 0) {
+    improvements.push('至少先让关键角色进入章节正文字段，再继续做后续内容扩写。')
+  }
+
+  const scoreBefore = view?.scoreBefore ?? 0
+  const scoreAfter = view?.scoreAfter ?? 0
+  if (scoreAfter < scoreBefore) {
+    improvements.push('先修复当前章节的人物承接，再决定是否继续追加新章节或新角色。')
+  }
+
+  return collectUniqueMessages(improvements)
+}
+
+function createScoreMetricHelperText(view: StoryExpansionResultView | null): string {
+  const scoreBefore = view?.scoreBefore ?? 0
+  const scoreAfter = view?.scoreAfter ?? 0
+  if (scoreAfter >= scoreBefore) {
+    return '本轮评分保持或提升。'
+  }
+
+  const diff = Math.max(0, scoreBefore - scoreAfter)
+  const reasons = createScoreRegressionReasonLines(view)
+  if (reasons.length > 0) {
+    return `下降 ${diff} 分。${reasons[0]}`
+  }
+
+  return `下降 ${diff} 分，建议先修复人物与章节的挂接缺口。`
+}
+
 function createChangeCardViews(input: {
+  scoreRegressionReasonLines: string[]
+  actionableImprovementLines: string[]
   repairedMessages: string[]
   advisoryMessages: string[]
   characterPhaseMessages: string[]
@@ -254,6 +482,30 @@ function createChangeCardViews(input: {
   outlineOperationViews: StoryExpansionOutlineOperationView[]
 }): StoryExpansionChangeCardView[] {
   const cards: StoryExpansionChangeCardView[] = []
+
+  if (input.scoreRegressionReasonLines.length > 0) {
+    cards.push({
+      key: 'score-regression-reasons',
+      title: '评分下降原因',
+      kind: 'messages',
+      tone: 'warning',
+      messages: input.scoreRegressionReasonLines,
+      chips: [],
+      outlineOperations: [],
+    })
+  }
+
+  if (input.actionableImprovementLines.length > 0) {
+    cards.push({
+      key: 'score-improvements',
+      title: '建议优先修复',
+      kind: 'messages',
+      tone: 'default',
+      messages: input.actionableImprovementLines,
+      chips: [],
+      outlineOperations: [],
+    })
+  }
 
   if (input.repairedMessages.length > 0) {
     cards.push({
@@ -406,9 +658,13 @@ export function createStoryExpansionResultDisplayView(
   const repairedMessages = input.repairedMessages
   const advisoryMessages = input.advisoryMessages
   const characterPhaseMessages = createCharacterPhaseMessages(view)
+  const scoreRegressionReasonLines = createScoreRegressionReasonLines(view)
+  const actionableImprovementLines = createActionableImprovementLines(view)
   const outlineOperationViews = createOutlineOperationViews(outlineOps)
   const executionRoundViews = createExecutionRoundViews(executionRounds, view)
   const changeCardViews = createChangeCardViews({
+    scoreRegressionReasonLines,
+    actionableImprovementLines,
     repairedMessages,
     advisoryMessages,
     characterPhaseMessages,
@@ -418,6 +674,12 @@ export function createStoryExpansionResultDisplayView(
   })
   const deltaSectionViews = createDeltaSectionViews(view)
   const finalSectionViews = createFinalSectionViews(view)
+  const completionStatusPresentation = resolveCompletionStatusPresentation(view)
+  const isRepairResult = view?.result.execution_mode === 'repair'
+  const canAutoImprove = !isRepairResult && (
+    scoreRegressionReasonLines.length > 0
+    || actionableImprovementLines.length > 0
+  )
   const executionModeReasonText = hasText(view?.executionModeReason)
     ? view!.executionModeReason.trim()
     : '本次结果已按可扫描的摘要、增量和最终内容分区展示。'
@@ -448,11 +710,20 @@ export function createStoryExpansionResultDisplayView(
     })
 
   return {
+    completionStatusLabel: completionStatusPresentation.label,
+    completionStatusTone: completionStatusPresentation.tone,
+    completionStatusDescription: completionStatusPresentation.description,
+    remainingGoalChipLabel: completionStatusPresentation.remainingGoalChipLabel,
+    canAutoImprove,
+    autoImproveActionLabel: canAutoImprove ? '一键自动改进' : null,
+    autoImproveHint: canAutoImprove
+      ? '系统会根据当前协同结果自动补齐人物承接与章节挂接，不会开启下一轮协同。'
+      : null,
     executionModeReasonText,
     chapterMetricValue: formatCountDelta(chapterBefore, chapterAfter, chapterTarget),
     characterMetricValue: formatCountDelta(characterBefore, characterAfter, characterTarget),
     scoreMetricValue: `${scoreBefore} → ${scoreAfter}`,
-    scoreMetricHelperText: scoreAfter >= scoreBefore ? '本轮评分保持或提升。' : '建议复查新增内容的一致性。',
+    scoreMetricHelperText: createScoreMetricHelperText(view),
     roundsMetricValue: `${getRoundCount(view)} 轮`,
     roundsMetricHelperText: input.writtenContextLabel
       ? `正文处理策略：${input.writtenContextLabel}`

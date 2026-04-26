@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "novel-writing-agent://contracts/user-asset-local-storage-metadata/v1",
+  "title": "UserAssetLocalStorageMetadata",
+  "description": "UserAssetRecord.metadata_json 中与 local-first 本地存储相关的共享契约字段。",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "local_storage_driver": {
+      "description": "本地副本当前使用的存储驱动。`external_directory` 表示用户授权的外部目录（File System Access API）存储。",
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "legacy_indexeddb",
+        "opfs",
+        "external_directory",
+        null
+      ]
+    },
+    "local_storage_path": {
+      "description": "本地副本的可迁移逻辑路径，例如 OPFS 路径。",
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 1000
+    },
+    "local_persist_level": {
+      "description": "本地副本当前申请到的持久化级别。`user_directory` 表示资产已写入用户授权的外部目录。",
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "best_effort",
+        "persistent_requested",
+        "user_directory",
+        null
+      ]
+    },
+    "external_relative_path": {
+      "description": "当使用用户目录等外部存储时，对应的相对路径。仅在 `local_storage_driver = external_directory` 时有意义。",
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 1000
+    }
+  },
+  "x-contract-version": "2026-04-24.6",
+  "x-contract-compat-level": "backward_compatible",
+  "x-contract-doc": "docs/contracts/USER_ASSET_LOCAL_STORAGE_METADATA_CONTRACT.md",
+  "x-contract-owner": "user-assets/local-first"
+}

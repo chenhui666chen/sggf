@@ -109,8 +109,8 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "./uploads"
 
     # DeepSeek API配置
-    DEEPSEEK_MODEL: str = "deepseek-reasoner"
-    MODEL_NAME: str = "deepseek-reasoner"
+    DEEPSEEK_MODEL: str = "deepseek-v4-pro"
+    MODEL_NAME: str = "deepseek-v4-pro"
     
     # 阿里云百炼 API配置
     DASHSCOPE_API_KEY: str = "your-dashscope-api-key"

@@ -73,6 +73,99 @@ def _select_text_model_by_input_tokens(
     return selected, safe_budget
 
 
+def _build_recent_full_chapter_excerpt(content: str, *, max_chars: int = 1200) -> str:
+    text = str(content or "").strip()
+    if not text:
+        return ""
+    if len(text) <= max_chars:
+        return text
+
+    head_chars = max(80, int(max_chars * 0.35))
+    tail_chars = max_chars - head_chars - 5
+    if tail_chars < 80:
+        tail_chars = 80
+        head_chars = max(60, max_chars - tail_chars - 5)
+    return f"{text[:head_chars].rstrip()}\n...\n{text[-tail_chars:].lstrip()}"
+
+
+def _select_previous_chapter_context_strategy(
+    chapters: List[tuple[Any, ...]] | List[Dict[str, Any]],
+    *,
+    next_chapter_number: int,
+    preferred_model: Optional[str] = None,
+) -> Dict[str, Any]:
+    """根据预计模型预算与章节长度，动态决定最近全文/详细摘要/连续性资产窗口。"""
+    total = len(chapters or [])
+    if total <= 0:
+        return {
+            "selected_model": preferred_model or "unknown",
+            "safe_input_budget": 0,
+            "history_budget_tokens": 0,
+            "recent_full_count": 0,
+            "detailed_summary_count": 0,
+            "recent_asset_count": 0,
+            "recent_full_excerpt_chars": 800,
+        }
+
+    selected_model = preferred_model
+    if not selected_model:
+        try:
+            from app.services.agents.layered_summarizer import LayeredSummarizer
+
+            selected_model = LayeredSummarizer.estimate_selected_model("chapter_generation", next_chapter_number)
+        except Exception:
+            selected_model = "qwen3.5-plus"
+
+    safe_input_budget = _get_safe_input_token_budget(
+        selected_model,
+        usage_ratio=0.68,
+        prompt_overhead_tokens=1200,
+    )
+    history_budget_tokens = max(2800, min(18000, int(safe_input_budget * 0.12)))
+    recent_full_budget = max(1200, int(history_budget_tokens * 0.55))
+
+    def _extract_content(row: tuple[Any, ...] | Dict[str, Any]) -> str:
+        if isinstance(row, dict):
+            return str(row.get("content", "") or "")
+        if len(row) >= 4:
+            return str(row[3] or "")
+        return ""
+
+    recent_full_count = 0
+    used_recent_full_budget = 0
+    for row in reversed(list(chapters)[-6:]):
+        content = _extract_content(row)
+        estimated_tokens = max(220, _estimate_tokens_by_chars(content))
+        if recent_full_count < 6 and used_recent_full_budget + estimated_tokens <= recent_full_budget:
+            recent_full_count += 1
+            used_recent_full_budget += estimated_tokens
+        else:
+            break
+
+    recent_full_count = min(total, max(1, recent_full_count))
+    remaining_chapters = max(0, total - recent_full_count)
+    summary_budget = max(1000, history_budget_tokens - min(used_recent_full_budget, recent_full_budget))
+    detailed_summary_count = min(
+        remaining_chapters,
+        max(0, min(24, max(4 if remaining_chapters else 0, int(summary_budget / 260)))),
+    )
+    recent_asset_count = min(total, max(4, min(8, recent_full_count + 2)))
+    recent_full_excerpt_chars = max(
+        700,
+        min(2600, int((recent_full_budget / max(recent_full_count, 1)) * 1.2)),
+    )
+
+    return {
+        "selected_model": selected_model,
+        "safe_input_budget": safe_input_budget,
+        "history_budget_tokens": history_budget_tokens,
+        "recent_full_count": recent_full_count,
+        "detailed_summary_count": detailed_summary_count,
+        "recent_asset_count": recent_asset_count,
+        "recent_full_excerpt_chars": recent_full_excerpt_chars,
+    }
+
+
 def _shrink_prompt_text(value: Any, max_length: int = 80) -> str:
     text = re.sub(r"\s+", " ", str(value or "")).strip()
     if len(text) <= max_length:

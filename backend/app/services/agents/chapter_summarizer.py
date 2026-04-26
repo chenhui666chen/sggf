@@ -4,12 +4,14 @@
 from typing import Dict, Any, List, Optional
 import json
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 from .agents import CreativeDirectorAgent
 from core.langchain_bridge import create_task_llm
 from .knowledge_base import NovelKnowledgeBase
 from .memory_manager import NovelMemoryManager
+from app.services.chapter_adaptation_assets import attach_cross_media_adaptation_hints, load_summary_data
 
 
 class ChapterSummarizer:
@@ -21,6 +23,17 @@ class ChapterSummarizer:
     3. 生成新章节时使用摘要而非全文
     4. 大幅减少AI上下文长度，支持更长的小说
     """
+
+    EXTENDED_SUMMARY_DEFAULTS = {
+        "scene_goal": "",
+        "appearing_characters": [],
+        "conflict_arc": {},
+        "emotion_curve": "",
+        "highlight": {},
+        "gains": {},
+        "ending_hook": {},
+        "foreshadowing": [],
+    }
     
     def __init__(self, knowledge_base: Optional[NovelKnowledgeBase] = None,
                  memory_manager: Optional[NovelMemoryManager] = None,
@@ -63,8 +76,8 @@ class ChapterSummarizer:
         """
         logger.debug(f"\n【章节摘要生成器】正在为第{chapter_number}章生成摘要...")
         
-        # 生成核心摘要
-        summary_prompt = f"""你是一位专业的内容提炼专家。请为以下章节生成精炼的核心事件摘要。
+        # 生成可复用的结构化章节资产
+        summary_prompt = f"""你是一位专业的长篇小说章节资产整理专家。请为以下章节生成高密度、可复用的结构化摘要。
 
 【章节信息】
 - 章节编号：第{chapter_number}章
@@ -73,61 +86,58 @@ class ChapterSummarizer:
 【完整章节内容】
 {chapter_content}
 
-请生成约{summary_length}字的核心事件摘要，包括：
+请严格按以下结构输出，并尽量补齐信息：
 
-1. **核心事件摘要**（{summary_length}字以内）
-   - 本章发生了什么（主线情节）
-   - 人物做了什么重要决定或行动
-   - 情节如何推进
-
-2. **关键人物**（列出3-5个本章出场的重要人物）
-   - 格式：人物名 - 在本章的作用
-
-3. **核心事件**（列出2-4个关键事件）
-   - 格式：事件描述（一句话）
-
-4. **重要地点**（列出1-3个重要场景）
-   - 格式：地点名 - 发生了什么
-
-5. **情节推进**（一句话说明本章如何推动整体故事）
-
-6. **悬念/伏笔**（如果有，列出1-2个）
-   - 格式：悬念描述
-
-要求：
-- 摘要要精炼，突出核心事件
-- 忽略次要细节和环境描写
-- 保留关键对话内容（如果有重要信息）
-- 标注重要转折点
-- 用客观叙述的方式，不要有"本章""这一章"等字眼
-
-示例格式：
 【核心事件摘要】
-主角接到神秘任务，前往某交易市场调查黑客组织。在交易大厅遇到了旧识，从对方口中得知组织内部出现叛徒。主角决定潜入组织内部查明真相，但发现自己的记忆被篡改过。章节结尾，神秘人出现并警告主角不要深入调查。
+用{summary_length}字以内概括本章真正推进了什么，重点写主线推进、人物动作、冲突变化和阶段性结果。
+
+【场景目标】
+用一句话写清本章最核心的剧情目标。
 
 【关键人物】
-- 主角：接受任务并展开调查
-- 旧识：提供关键情报
-- 神秘人：未知身份，发出警告
+- 人物名：本章作用/状态变化
 
 【核心事件】
-- 接到调查黑客组织的任务
-- 在交易市场遇到旧识
-- 发现自己的记忆被篡改
-- 神秘人出现并警告
+- 事件描述
 
 【重要地点】
-- 交易市场：主角与旧识会面的地方
-- 实验室：发现记忆篡改的地点
+- 地点名：该地点发生了什么
+
+【冲突弧】
+- 触发：冲突因何产生
+- 升级：冲突如何升级
+- 结果：冲突阶段性结果
+
+【情绪曲线】
+用短语概括，如“压抑→试探→反击→余震”。
+
+【高光设计】
+- 类型：如揭示/反转/爽点/情感爆发/动作高潮
+- 描述：本章最值得保留的高光时刻
+
+【本章收获】
+- 人物收获：人物关系、状态、认知或能力上的变化
+- 剧情推进：主线或支线被推进到什么位置
 
 【情节推进】
-揭示了主角记忆被篡改的真相，为后续调查埋下伏笔
+一句话说明本章对整体故事的功能。
+
+【结尾钩子】
+- 类型：悬念/危机/揭示/反转/情感/伏笔
+- 内容：结尾留下的继续阅读动力
 
 【悬念/伏笔】
-- 神秘人的真实身份和目的
-- 谁篡改了主角的记忆
+- 尚未回收的线索或后续必须承接的信息
 
-请严格按照以上格式生成摘要：
+输出要求：
+- 只保留后续创作、协同扩展、连续性承接真正需要的信息
+- 忽略次要描写、重复对话和纯氛围文字
+- 人物名保持稳定，不要用“主角”“反派”替代真实称呼
+- 如果某项确实没有内容，保留标题并写“无”或留空，不要编造
+- 关键人物与出场人物要尽量覆盖本章实际推进剧情的人物
+- 结尾钩子、伏笔、冲突弧必须优先准确，不要写成泛泛总结
+
+请直接按上述标题输出：
 """
         
         # 调用AI生成摘要
@@ -141,14 +151,28 @@ class ChapterSummarizer:
             "chapter_title": chapter_title,
             "full_summary": summary_result,
             "core_summary": parsed_summary.get("core_summary", ""),
+            "scene_goal": parsed_summary.get("scene_goal", ""),
             "key_characters": parsed_summary.get("key_characters", []),
+            "appearing_characters": parsed_summary.get("appearing_characters", []),
             "key_events": parsed_summary.get("key_events", []),
             "key_locations": parsed_summary.get("key_locations", []),
+            "conflict_arc": parsed_summary.get("conflict_arc", {}),
+            "emotion_curve": parsed_summary.get("emotion_curve", ""),
+            "highlight": parsed_summary.get("highlight", {}),
+            "gains": parsed_summary.get("gains", {}),
             "plot_advancement": parsed_summary.get("plot_advancement", ""),
+            "ending_hook": parsed_summary.get("ending_hook", {}),
+            "foreshadowing": parsed_summary.get("foreshadowing", []),
             "hooks": parsed_summary.get("hooks", []),
             "summary_length": len(summary_result)
         }
         
+        result = attach_cross_media_adaptation_hints(
+            result,
+            chapter_title=chapter_title,
+            chapter_summary=result.get("core_summary", ""),
+        )
+
         logger.debug(f"✅ 第{chapter_number}章摘要生成完成（{result['summary_length']}字）")
         logger.debug(f"   - 核心摘要：{len(result['core_summary'])}字")
         logger.debug(f"   - 关键人物：{len(result['key_characters'])}个")
@@ -371,78 +395,299 @@ class ChapterSummarizer:
         logger.debug(f"\n{'='*70}\n")
 
 
-    def _parse_summary_result(self, summary_text: str) -> Dict[str, Any]:
-        """解析AI生成的摘要文本，提取结构化信息
-        
-        Args:
-            summary_text: AI生成的完整摘要文本
-            
-        Returns:
-            结构化的摘要字典
-        """
-        parsed = {
-            "core_summary": "",
-            "key_characters": [],
-            "key_events": [],
-            "key_locations": [],
-            "plot_advancement": "",
-            "hooks": []
+    def _extract_section(self, summary_text: str, title: str) -> str:
+        pattern = rf"【\s*{re.escape(title)}\s*】\s*(.*?)(?=\n\s*【[^】]+】|\Z)"
+        match = re.search(pattern, summary_text, re.DOTALL)
+        return match.group(1).strip() if match else ""
+
+    def _clean_scalar_text(self, value: Any, *, max_length: int = 200) -> str:
+        text = " ".join(str(value or "").split()).strip()
+        if not text or text in {"无", "暂无", "待补充", "无明显内容"}:
+            return ""
+        if len(text) > max_length:
+            return text[: max_length - 3].rstrip() + "..."
+        return text
+
+    def _deduplicate_items(self, items: List[str]) -> List[str]:
+        deduplicated: List[str] = []
+        seen = set()
+        for item in items:
+            text = self._clean_scalar_text(item)
+            if not text or text in seen:
+                continue
+            deduplicated.append(text)
+            seen.add(text)
+        return deduplicated
+
+    def _parse_list_section(self, content: str) -> List[str]:
+        if not content.strip():
+            return []
+
+        items: List[str] = []
+        for raw_line in content.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if re.match(r"^[-*•]\s*", line):
+                line = re.sub(r"^[-*•]\s*", "", line).strip()
+            elif re.match(r"^\d+[.)、]\s*", line):
+                line = re.sub(r"^\d+[.)、]\s*", "", line).strip()
+            text = self._clean_scalar_text(line)
+            if text:
+                items.append(text)
+
+        if not items:
+            inline_text = self._clean_scalar_text(content)
+            if inline_text:
+                items.append(inline_text)
+
+        return self._deduplicate_items(items)
+
+    def _parse_kv_section(self, content: str, label_map: Dict[str, str]) -> Dict[str, str]:
+        parsed: Dict[str, str] = {}
+        if not content.strip():
+            return parsed
+
+        for raw_line in content.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            line = re.sub(r"^[-*•]\s*", "", line)
+            line = re.sub(r"^\d+[.)、]\s*", "", line)
+            if "：" in line:
+                key, value = line.split("：", 1)
+            elif ":" in line:
+                key, value = line.split(":", 1)
+            else:
+                continue
+
+            normalized_key = label_map.get(key.strip())
+            normalized_value = self._clean_scalar_text(value)
+            if normalized_key and normalized_value:
+                parsed[normalized_key] = normalized_value
+
+        if not parsed:
+            fallback_text = self._clean_scalar_text(content)
+            if fallback_text:
+                first_key = next(iter(label_map.values()))
+                parsed[first_key] = fallback_text
+
+        return parsed
+
+    def _extract_character_names(self, key_characters: List[str]) -> List[str]:
+        names: List[str] = []
+        for item in key_characters:
+            text = self._clean_scalar_text(item, max_length=80)
+            if not text:
+                continue
+            name = re.split(r"[:：\-（(]", text, maxsplit=1)[0].strip()
+            if 0 < len(name) <= 20:
+                names.append(name)
+        return self._deduplicate_items(names)
+
+    def _merge_hook_items(self, ending_hook: Dict[str, Any], foreshadowing: List[str], hooks: List[str]) -> List[str]:
+        merged: List[str] = []
+        ending_text = self._clean_scalar_text(ending_hook.get("content"), max_length=120)
+        if ending_text:
+            merged.append(ending_text)
+        merged.extend(self._deduplicate_items(foreshadowing))
+        merged.extend(self._deduplicate_items(hooks))
+        return self._deduplicate_items(merged)
+
+    def _build_summary_payload(self, summary: Dict[str, Any]) -> Dict[str, Any]:
+        raw_payload = {
+            "core_summary": self._clean_scalar_text(summary.get("core_summary"), max_length=600),
+            "scene_goal": self._clean_scalar_text(summary.get("scene_goal"), max_length=120),
+            "key_characters": self._deduplicate_items(list(summary.get("key_characters") or [])),
+            "appearing_characters": self._deduplicate_items(list(summary.get("appearing_characters") or [])),
+            "key_events": self._deduplicate_items(list(summary.get("key_events") or [])),
+            "key_locations": self._deduplicate_items(list(summary.get("key_locations") or [])),
+            "conflict_arc": summary.get("conflict_arc") if isinstance(summary.get("conflict_arc"), dict) else {},
+            "emotion_curve": self._clean_scalar_text(summary.get("emotion_curve"), max_length=80),
+            "highlight": summary.get("highlight") if isinstance(summary.get("highlight"), dict) else {},
+            "gains": summary.get("gains") if isinstance(summary.get("gains"), dict) else {},
+            "plot_advancement": self._clean_scalar_text(summary.get("plot_advancement"), max_length=160),
+            "ending_hook": summary.get("ending_hook") if isinstance(summary.get("ending_hook"), dict) else {},
+            "foreshadowing": self._deduplicate_items(list(summary.get("foreshadowing") or [])),
+            "hooks": self._deduplicate_items(list(summary.get("hooks") or [])),
         }
-        
+        normalized = self._normalize_summary_dict(
+            raw_payload,
+            chapter_number=summary.get("chapter_number"),
+            chapter_title=summary.get("chapter_title", ""),
+            full_summary=summary.get("full_summary", ""),
+        )
+        return attach_cross_media_adaptation_hints(
+            normalized,
+            chapter_title=summary.get("chapter_title", "") or "",
+            chapter_summary=normalized.get("core_summary", ""),
+        )
+
+    def _normalize_summary_dict(
+        self,
+        payload: Dict[str, Any],
+        *,
+        chapter_number: Optional[int] = None,
+        chapter_title: str = "",
+        full_summary: str = "",
+    ) -> Dict[str, Any]:
+        summary_payload = load_summary_data(payload)
+        normalized: Dict[str, Any] = {
+            "chapter_number": chapter_number,
+            "chapter_title": chapter_title,
+            "full_summary": full_summary or self._clean_scalar_text(summary_payload.get("full_summary"), max_length=4000),
+            "core_summary": self._clean_scalar_text(summary_payload.get("core_summary"), max_length=600),
+            "key_characters": self._deduplicate_items(list(summary_payload.get("key_characters") or [])),
+            "key_events": self._deduplicate_items(list(summary_payload.get("key_events") or [])),
+            "key_locations": self._deduplicate_items(list(summary_payload.get("key_locations") or [])),
+            "plot_advancement": self._clean_scalar_text(summary_payload.get("plot_advancement"), max_length=160),
+            "hooks": self._deduplicate_items(list(summary_payload.get("hooks") or [])),
+        }
+        normalized.update(
+            {
+                key: value.copy() if isinstance(value, (list, dict)) else value
+                for key, value in self.EXTENDED_SUMMARY_DEFAULTS.items()
+            }
+        )
+
+        normalized["scene_goal"] = self._clean_scalar_text(summary_payload.get("scene_goal"), max_length=120)
+        normalized["appearing_characters"] = self._deduplicate_items(
+            list(summary_payload.get("appearing_characters") or [])
+        )
+        normalized["emotion_curve"] = self._clean_scalar_text(summary_payload.get("emotion_curve"), max_length=80)
+        normalized["foreshadowing"] = self._deduplicate_items(list(summary_payload.get("foreshadowing") or []))
+
+        conflict_arc = summary_payload.get("conflict_arc")
+        if isinstance(conflict_arc, dict):
+            normalized["conflict_arc"] = {
+                key: self._clean_scalar_text(value, max_length=120)
+                for key, value in conflict_arc.items()
+                if self._clean_scalar_text(value, max_length=120)
+            }
+        elif self._clean_scalar_text(conflict_arc, max_length=120):
+            normalized["conflict_arc"] = {"description": self._clean_scalar_text(conflict_arc, max_length=120)}
+
+        highlight = summary_payload.get("highlight")
+        if isinstance(highlight, dict):
+            normalized["highlight"] = {
+                key: self._clean_scalar_text(value, max_length=120)
+                for key, value in highlight.items()
+                if self._clean_scalar_text(value, max_length=120)
+            }
+        elif self._clean_scalar_text(highlight, max_length=120):
+            normalized["highlight"] = {"description": self._clean_scalar_text(highlight, max_length=120)}
+
+        gains = summary_payload.get("gains")
+        if isinstance(gains, dict):
+            normalized["gains"] = {
+                key: self._clean_scalar_text(value, max_length=120)
+                for key, value in gains.items()
+                if self._clean_scalar_text(value, max_length=120)
+            }
+
+        ending_hook = summary_payload.get("ending_hook")
+        if isinstance(ending_hook, dict):
+            normalized["ending_hook"] = {
+                key: self._clean_scalar_text(value, max_length=120)
+                for key, value in ending_hook.items()
+                if self._clean_scalar_text(value, max_length=120)
+            }
+        elif self._clean_scalar_text(ending_hook, max_length=120):
+            normalized["ending_hook"] = {"content": self._clean_scalar_text(ending_hook, max_length=120)}
+
+        if not normalized["appearing_characters"]:
+            normalized["appearing_characters"] = self._extract_character_names(normalized["key_characters"])
+
+        if not normalized["scene_goal"]:
+            normalized["scene_goal"] = (
+                self._clean_scalar_text(normalized.get("plot_advancement"), max_length=120)
+                or (normalized["key_events"][0] if normalized["key_events"] else "")
+                or self._clean_scalar_text(normalized["core_summary"], max_length=120)
+            )
+
+        if not normalized["plot_advancement"]:
+            normalized["plot_advancement"] = (
+                self._clean_scalar_text(normalized.get("scene_goal"), max_length=160)
+                or self._clean_scalar_text(normalized["core_summary"], max_length=160)
+            )
+
+        if not normalized["ending_hook"] and normalized["hooks"]:
+            normalized["ending_hook"] = {"content": normalized["hooks"][0]}
+
+        if not normalized["foreshadowing"] and normalized["hooks"]:
+            ending_content = self._clean_scalar_text(normalized["ending_hook"].get("content"), max_length=120)
+            normalized["foreshadowing"] = [
+                item for item in normalized["hooks"]
+                if item and item != ending_content
+            ]
+
+        normalized["hooks"] = self._merge_hook_items(
+            normalized.get("ending_hook", {}),
+            normalized.get("foreshadowing", []),
+            normalized.get("hooks", []),
+        )
+
+        for key, value in summary_payload.items():
+            if key in normalized:
+                continue
+            if value in (None, "", [], {}):
+                continue
+            normalized[key] = value
+
+        normalized["summary_length"] = len(normalized["full_summary"] or normalized["core_summary"] or "")
+        return normalized
+
+    def _parse_summary_result(self, summary_text: str) -> Dict[str, Any]:
+        """解析AI生成的摘要文本，提取结构化信息"""
+        parsed = {
+            "core_summary": self._extract_section(summary_text, "核心事件摘要"),
+            "scene_goal": self._extract_section(summary_text, "场景目标"),
+            "key_characters": self._parse_list_section(self._extract_section(summary_text, "关键人物")),
+            "key_events": self._parse_list_section(self._extract_section(summary_text, "核心事件")),
+            "key_locations": self._parse_list_section(self._extract_section(summary_text, "重要地点")),
+            "conflict_arc": self._parse_kv_section(
+                self._extract_section(summary_text, "冲突弧"),
+                {"触发": "trigger", "升级": "escalation", "结果": "result", "描述": "description"},
+            ),
+            "emotion_curve": self._extract_section(summary_text, "情绪曲线"),
+            "highlight": self._parse_kv_section(
+                self._extract_section(summary_text, "高光设计"),
+                {"类型": "type", "描述": "description", "内容": "description"},
+            ),
+            "gains": self._parse_kv_section(
+                self._extract_section(summary_text, "本章收获"),
+                {"人物收获": "character_gains", "剧情推进": "plot_progress"},
+            ),
+            "plot_advancement": self._extract_section(summary_text, "情节推进"),
+            "ending_hook": self._parse_kv_section(
+                self._extract_section(summary_text, "结尾钩子"),
+                {"类型": "type", "内容": "content", "描述": "content"},
+            ),
+            "foreshadowing": self._parse_list_section(self._extract_section(summary_text, "悬念/伏笔")),
+        }
+
+        parsed["appearing_characters"] = self._extract_character_names(parsed["key_characters"])
+        parsed["hooks"] = self._merge_hook_items(
+            parsed.get("ending_hook", {}),
+            parsed.get("foreshadowing", []),
+            [],
+        )
+
         try:
-            # 提取核心事件摘要
-            if "【核心事件摘要】" in summary_text:
-                parts = summary_text.split("【核心事件摘要】")
-                if len(parts) > 1:
-                    content = parts[1].split("【")[0].strip()
-                    parsed["core_summary"] = content
-            
-            # 提取关键人物
-            if "【关键人物】" in summary_text:
-                parts = summary_text.split("【关键人物】")
-                if len(parts) > 1:
-                    content = parts[1].split("【")[0].strip()
-                    # 按行分割，过滤空行和标题行
-                    lines = [line.strip() for line in content.split("\n") if line.strip() and line.strip().startswith("-")]
-                    parsed["key_characters"] = [line.lstrip("- ").strip() for line in lines]
-            
-            # 提取核心事件
-            if "【核心事件】" in summary_text:
-                parts = summary_text.split("【核心事件】")
-                if len(parts) > 1:
-                    content = parts[1].split("【")[0].strip()
-                    lines = [line.strip() for line in content.split("\n") if line.strip() and line.strip().startswith("-")]
-                    parsed["key_events"] = [line.lstrip("- ").strip() for line in lines]
-            
-            # 提取重要地点
-            if "【重要地点】" in summary_text:
-                parts = summary_text.split("【重要地点】")
-                if len(parts) > 1:
-                    content = parts[1].split("【")[0].strip()
-                    lines = [line.strip() for line in content.split("\n") if line.strip() and line.strip().startswith("-")]
-                    parsed["key_locations"] = [line.lstrip("- ").strip() for line in lines]
-            
-            # 提取情节推进
-            if "【情节推进】" in summary_text:
-                parts = summary_text.split("【情节推进】")
-                if len(parts) > 1:
-                    content = parts[1].split("【")[0].strip()
-                    parsed["plot_advancement"] = content
-            
-            # 提取悬念/伏笔
-            if "【悬念/伏笔】" in summary_text:
-                parts = summary_text.split("【悬念/伏笔】")
-                if len(parts) > 1:
-                    content = parts[1].strip()
-                    lines = [line.strip() for line in content.split("\n") if line.strip() and line.strip().startswith("-")]
-                    parsed["hooks"] = [line.lstrip("- ").strip() for line in lines]
-        
+            return self._normalize_summary_dict(
+                parsed,
+                full_summary=summary_text,
+            )
         except Exception as e:
             logger.debug(f"⚠️ 解析摘要时出现错误：{e}")
-            logger.debug(f"   将使用完整摘要作为核心摘要")
-            parsed["core_summary"] = summary_text
-        
-        return parsed
+            logger.debug("   将使用完整摘要作为核心摘要回退")
+            return self._normalize_summary_dict(
+                {
+                    "core_summary": self._clean_scalar_text(summary_text, max_length=600),
+                    "full_summary": summary_text,
+                },
+                full_summary=summary_text,
+            )
     
     def save_summary_to_db(self, chapter_id: int, summary: Dict[str, Any]) -> bool:
         """保存摘要到数据库
@@ -469,17 +714,11 @@ class ChapterSummarizer:
                 WHERE id = :chapter_id
             """)
             
-            # 将结构化数据转为JSON保存
-            summary_data = {
-                "key_characters": summary.get("key_characters", []),
-                "key_events": summary.get("key_events", []),
-                "key_locations": summary.get("key_locations", []),
-                "plot_advancement": summary.get("plot_advancement", ""),
-                "hooks": summary.get("hooks", [])
-            }
+            # 将结构化数据转为统一的章节资产 schema 保存
+            summary_data = self._build_summary_payload(summary)
             
             result = self.db_session.execute(update_query, {
-                "summary": summary.get("core_summary", ""),
+                "summary": summary_data.get("core_summary", ""),
                 "summary_data": json.dumps(summary_data, ensure_ascii=False),
                 "chapter_id": chapter_id
             })
@@ -540,20 +779,39 @@ class ChapterSummarizer:
             if summary_data_json:
                 try:
                     summary_data = json.loads(summary_data_json)
-                    summary_dict.update(summary_data)
+                    summary_dict.update(
+                        self._normalize_summary_dict(
+                            summary_data,
+                            chapter_number=chapter_number,
+                            chapter_title=title,
+                            full_summary=summary,
+                        )
+                    )
                 except Exception:
-                    pass
+                    summary_dict.update(
+                        self._normalize_summary_dict(
+                            {"core_summary": summary},
+                            chapter_number=chapter_number,
+                            chapter_title=title,
+                            full_summary=summary,
+                        )
+                    )
             else:
-                # 如果没有结构化数据，使用默认值
-                summary_dict.update({
-                    "key_characters": [],
-                    "key_events": [],
-                    "key_locations": [],
-                    "plot_advancement": "",
-                    "hooks": []
-                })
+                # 如果没有结构化数据，回退到最小可用结构
+                summary_dict.update(
+                    self._normalize_summary_dict(
+                        {"core_summary": summary},
+                        chapter_number=chapter_number,
+                        chapter_title=title,
+                        full_summary=summary,
+                    )
+                )
             
-            return summary_dict
+            return attach_cross_media_adaptation_hints(
+                summary_dict,
+                chapter_title=title or "",
+                chapter_summary=summary or "",
+            )
             
         except Exception as e:
             logger.debug(f"⚠️ 从数据库加载摘要时出错：{e}")
@@ -617,4 +875,3 @@ def create_chapter_summarizer(knowledge_base: Optional[NovelKnowledgeBase] = Non
         配置好的ChapterSummarizer实例
     """
     return ChapterSummarizer(knowledge_base, memory_manager, db_session)
-

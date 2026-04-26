@@ -31,6 +31,7 @@ from ...character_runtime_context import build_character_prompt_context_from_tex
 from ._constants import *
 
 class StoryHelperMixin:
+    @staticmethod
     def estimate_volume_detail_model(chapters_count_range: Tuple[int, int]) -> str:
         """根据单卷章节规模估算更合适的细化模型。"""
         lower = 0
@@ -44,7 +45,11 @@ class StoryHelperMixin:
                 upper = max(lower, int(chapters_count_range[1] or 0))
             except Exception:
                 upper = lower
-        return "qwen3.5-plus" if upper > VOLUME_DETAIL_MODEL_SWITCH_THRESHOLD else "deepseek-reasoner"
+        # 🚀 统一使用 deepseek-v4-pro（384K 输出），不再按卷规模切换
+        _ = upper  # 保留参数兼容性
+        if upper > VOLUME_DETAIL_MODEL_SWITCH_THRESHOLD:
+            return "qwen3.5-plus"
+        return "deepseek-v4-pro"
 
     @staticmethod
     def _story_trim_volume_detail_preamble(volume_content: str) -> str:
