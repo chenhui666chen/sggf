@@ -150,7 +150,7 @@ export function resolveStoryExpansionRecommendation(
         `• 题材：${projectGenre || '通用'}`,
         `• 篇幅：超长篇（${maxChapters}章）`,
         `• 推荐卷数：${estimatedVolumes}卷`,
-        '• 单卷细化默认预填：60-80章',
+        '• 单卷细化默认预填：60-100章',
         '• 扩展方式：先生成总纲、阶段路线图和分卷框架，再按卷滚动细化',
       ]),
     }
@@ -171,7 +171,7 @@ export function resolveStoryExpansionRecommendation(
       `• 题材：${genreLabel}`,
       `• 篇幅：${scenarioLabel}（${maxChapters}章）`,
       `• 推荐卷数：${estimatedVolumes}卷`,
-      '• 单卷细化默认预填：60-80章',
+      '• 单卷细化默认预填：60-100章',
       '• 扩展方式：先生成总纲、阶段路线图和分卷框架，再按卷滚动细化',
     ]
 

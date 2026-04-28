@@ -15,6 +15,7 @@ import {
   formatStoryExpansionDurationRange,
   formatStoryExpansionElapsedDuration,
 } from '@/utils/storyExpansionTiming'
+import { mergeStoryExpansionRepairResult } from '@/utils/storyExpansionResultModel'
 import { apiClient, extractApiErrorMessage } from '@/services/api'
 import { useStoryExpansionComposer } from '@/hooks/useStoryExpansionComposer'
 import { useStoryExpansionSubmit } from '@/hooks/useStoryExpansionSubmit'
@@ -66,6 +67,7 @@ export function useStoryExpansionController({
     closeStoryExpansionDialog,
     openStoryExpansion,
     loadEpicFramework,
+    applyStoryExpansionRepairResult,
     dialogContext,
     dialogForm,
     dialogFormHandlers,
@@ -180,13 +182,17 @@ export function useStoryExpansionController({
         volume_index: storyExpansionResult.volume_index ?? null,
       })
 
-      const repairedResult = response.data?.result
+      const repairedResult = mergeStoryExpansionRepairResult(
+        storyExpansionResult,
+        response.data?.result,
+      )
       if (!repairedResult) {
         showSnackbar('自动改进已完成，但未返回可展示结果', 'error')
         return
       }
 
       replaceStoryExpansionResult(repairedResult)
+      applyStoryExpansionRepairResult(repairedResult)
       refreshRepairContext()
       showSnackbar(response.data?.message?.trim() || repairedResult.message || '协同问题已自动改进', 'success')
     } catch (error) {
@@ -197,6 +203,7 @@ export function useStoryExpansionController({
     }
   }, [
     autoImprovingStoryIssues,
+    applyStoryExpansionRepairResult,
     projectId,
     refreshRepairContext,
     replaceStoryExpansionResult,
@@ -228,7 +235,7 @@ export function useStoryExpansionController({
         elapsedText ? `已等待 ${elapsedText}` : '',
         durationText ? `预估区间 ${durationText}` : '',
         waitHint,
-        '刷新页面后会继续尝试恢复任务状态',
+        '页面会定期自动复查任务状态，刷新后也会继续尝试恢复任务状态',
       ].filter(Boolean).join('，'),
     }
   }, [

@@ -9,6 +9,8 @@ from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from .agent_registry import get_main_workflow_agent_definitions
+
 logger = logging.getLogger(__name__)
 
 class AgentType(str, Enum):
@@ -227,72 +229,16 @@ class AgentCoordinator:
                 self._coordinator_factory = None
                 logger.warning("⚠️  已回退到模拟协调器模式")
         
-        # Agent配置映射
-        agents_config = {
-            AgentType.CREATIVE_DIRECTOR: {
-                "name": "创意总监",
-                "role": "协调整个创作流程",
-                "stage": StageType.CONCEPT,
-            },
-            AgentType.WORLD_ARCHITECT: {
-                "name": "世界观架构师",
-                "role": "设计故事世界观",
-                "stage": StageType.CONCEPT,
-            },
-            AgentType.CHARACTER_DESIGNER: {
-                "name": "人物设计师",
-                "role": "设计故事人物",
-                "stage": StageType.CONCEPT,
-            },
-            AgentType.PLOT_ARCHITECT: {
-                "name": "情节架构师",
-                "role": "设计故事情节",
-                "stage": StageType.STRUCTURE,
-            },
-            AgentType.EVENT_VALIDATOR: {
-                "name": "事件验证官",
-                "role": "验证事件序列质量",
-                "stage": StageType.STRUCTURE,
-            },
-            AgentType.CONTENT_CREATOR: {
-                "name": "内容创作师",
-                "role": "创作章节内容",
-                "stage": StageType.CONTENT,
-            },
-            AgentType.STYLE_OPTIMIZER: {
-                "name": "文风优化师",
-                "role": "优化文风和语言",
-                "stage": StageType.CONTENT,
-            },
-            AgentType.QUALITY_REVIEWER: {
-                "name": "质量评审官",
-                "role": "评审内容质量",
-                "stage": StageType.REVIEW,
-            },
-            AgentType.ITERATION_COORDINATOR: {
-                "name": "迭代协调官",
-                "role": "分析反馈制定改进计划",
-                "stage": StageType.ITERATION,
-            },
-            AgentType.CONTENT_REVISER: {
-                "name": "内容修订师",
-                "role": "执行内容修订优化",
-                "stage": StageType.ITERATION,
-            },
-            AgentType.FINAL_REVIEWER: {
-                "name": "最终审核官",
-                "role": "最终审核确认",
-                "stage": StageType.ITERATION,
-            },
-        }
-
         self._agent_templates = {}
-        for agent_type, config in agents_config.items():
-            self._agent_templates[agent_type.value] = {
-                "id": agent_type.value,
-                "name": config["name"],
-                "role": config["role"],
-                "stage": config["stage"],
+        for definition in get_main_workflow_agent_definitions():
+            self._agent_templates[definition.id] = {
+                "id": definition.id,
+                "name": definition.name,
+                "role": definition.role,
+                "stage": StageType(definition.stage),
+                "is_runtime_agent": definition.is_runtime_agent,
+                "is_prompt_editable": definition.is_prompt_editable,
+                "default_enabled": definition.default_enabled,
                 "status": AgentStatus.IDLE,
                 "progress": 0,
                 "message": "",

@@ -23,7 +23,11 @@ from app.services.character_runtime_context import (
 )
 from app.services.character_parser import CharacterTextParser, infer_story_stance_from_text_evidence
 from app.services.character_text_generator import CharacterTextGenerator
-from app.services.story_expansion_coordinator import extract_character_names, parse_outline_blocks
+from app.services.story_expansion_coordinator import (
+    extract_character_names,
+    normalize_outline_text,
+    parse_outline_blocks,
+)
 
 
 def test_character_text_parser_supports_dreamweaver_heading_cards() -> None:

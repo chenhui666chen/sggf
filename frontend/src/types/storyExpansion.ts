@@ -36,6 +36,13 @@ export interface StoryExpansionAnalysis extends StoryExpansionDurationEstimate {
   requested_expansion_mode?: StoryExpansionMode | string
   effective_expansion_mode?: StoryExpansionMode | string
   estimated_rounds?: number
+  duration_estimate_base_minutes_min?: number | null
+  duration_estimate_base_minutes_max?: number | null
+  duration_estimate_source?: string | null
+  duration_estimate_confidence?: string | null
+  duration_estimate_sample_count?: number | null
+  duration_estimate_calibration_ratio?: number | null
+  duration_estimate_reason?: string | null
   auto_supplement_applied?: boolean
   analysis_summary?: string
   warnings?: string[]
@@ -146,6 +153,7 @@ export interface StoryExpansionExecutionRound {
   round?: number
   stage?: string
   strategy?: string
+  tail_supplement?: boolean
   before_chapter_count?: number
   after_chapter_count?: number
   before_character_count?: number

@@ -115,7 +115,7 @@ def test_story_expansion_routes_only_to_deepseek_and_qwen35_plus() -> None:
     assert qwen_long_spec is not None
 
     assert qwen35_spec.routing.fallback_models == ["deepseek-chat"]
-    assert deepseek_reasoner_spec.routing.fallback_models == ["qwen3.5-plus"]
+    assert deepseek_v4_pro_spec.routing.fallback_models == ["qwen3.5-plus"]
     assert deepseek_chat_spec.routing.fallback_models == ["qwen3.5-plus"]
     assert "concept" not in qwen_max_spec.routing.task_types
     assert "outline_expand" not in qwen_long_spec.routing.task_types
@@ -166,6 +166,16 @@ def test_openai_adapter_maps_connection_error_to_network_error() -> None:
         OpenAICompatibleAdapter._map_error_code(object(), Exception("Connection error."))
         == "network_error"
     )
+
+
+def test_openai_adapter_maps_service_overload_throttle_error_to_rate_limit() -> None:
+    from core.llm_adapters import OpenAICompatibleAdapter
+
+    error = Exception(
+        "Error code: 500 - {'error': {'message': '[Too many requests. Your requests are being throttled due to system capacity limits. Please try again later.]', 'type': 'ServiceUnavailable'}}"
+    )
+
+    assert OpenAICompatibleAdapter._map_error_code(object(), error) == "rate_limit"
 
 
 class _FlakyNetworkAdapter:

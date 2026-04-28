@@ -210,6 +210,29 @@ function trimText(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function getDurationEstimateSourceLabel(source: string): string {
+  if (source === 'history_calibrated') {
+    return '历史校准'
+  }
+  if (source === 'static') {
+    return '任务规模预估'
+  }
+  return source || '任务规模预估'
+}
+
+function getDurationEstimateChipColor(source: string, confidence: string): StoryExpansionDialogChipColor {
+  if (source !== 'history_calibrated') {
+    return 'default'
+  }
+  if (confidence === 'high') {
+    return 'success'
+  }
+  if (confidence === 'low') {
+    return 'warning'
+  }
+  return 'info'
+}
+
 function toSafePositiveInt(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
 }
@@ -494,6 +517,10 @@ export function createStoryExpansionDialogView(
   const effectiveStrategy = trimText(analysis?.effective_strategy) || trimText(analysis?.recommended_strategy)
   const effectiveExpansionMode = trimText(analysis?.effective_expansion_mode)
   const estimatedRounds = analysis?.estimated_rounds ?? analysis?.model_plan?.estimated_rounds ?? 1
+  const durationEstimateSource = trimText(analysis?.duration_estimate_source)
+  const durationEstimateConfidence = trimText(analysis?.duration_estimate_confidence)
+  const durationEstimateSampleCount = toSafePositiveInt(analysis?.duration_estimate_sample_count)
+  const durationEstimateReason = trimText(analysis?.duration_estimate_reason)
   const estimatedDurationText = formatStoryExpansionDurationRange(
     analysis?.estimated_duration_minutes_min ?? null,
     analysis?.estimated_duration_minutes_max ?? null,
@@ -555,6 +582,16 @@ export function createStoryExpansionDialogView(
       key: 'estimated-duration',
       label: `预计耗时 ${estimatedDurationText}`,
       color: 'default',
+    })
+  }
+  if (durationEstimateSource && precheckChips.length > 0) {
+    const sourceLabel = getDurationEstimateSourceLabel(durationEstimateSource)
+    precheckChips.splice(Math.max(0, precheckChips.length - 1), 0, {
+      key: 'duration-estimate-source',
+      label: durationEstimateSampleCount != null
+        ? `估时 ${sourceLabel} · ${durationEstimateSampleCount} 样本`
+        : `估时 ${sourceLabel}`,
+      color: getDurationEstimateChipColor(durationEstimateSource, durationEstimateConfidence),
     })
   }
 
@@ -714,6 +751,11 @@ export function createStoryExpansionDialogView(
 
     return []
   })()
+  const finalAutoEstimateHints = (
+    durationEstimateSource === 'history_calibrated' && durationEstimateReason
+      ? [...compactAutoEstimateHints, durationEstimateReason]
+      : compactAutoEstimateHints
+  )
   const compactModeSuitabilityView = analysis?.mode_suitability?.mode === 'total'
     ? {
       chips: modeSuitabilityView?.chips || [],
@@ -806,12 +848,12 @@ export function createStoryExpansionDialogView(
           max: Math.max(1, input.frameworkMetadata?.metadata?.total_volumes || 50),
           flex: '1 1 160px',
         }),
-        createField('volumeChaptersMin', '本卷最少章节', '建议 60-80 章', {
+        createField('volumeChaptersMin', '本卷最少章节', '建议 60-100 章', {
           min: 20,
           max: VOLUME_DETAIL_INPUT_MAX_CHAPTERS,
           flex: '1 1 180px',
         }),
-        createField('volumeChaptersMax', '本卷最多章节', '建议尽量控制在 80 章内；必要时可放宽到 120 章', {
+        createField('volumeChaptersMax', '本卷最多章节', '建议尽量控制在 100 章内；必要时可放宽到 120 章', {
           min: 20,
           max: VOLUME_DETAIL_INPUT_MAX_CHAPTERS,
           flex: '1 1 180px',
@@ -981,7 +1023,7 @@ export function createStoryExpansionDialogView(
     characterDeltaChipLabel,
     hasDelta: requestPlan.hasDelta,
     analysisWarnings: [],
-    autoEstimateHints: compactAutoEstimateHints,
+    autoEstimateHints: finalAutoEstimateHints,
     hasAnalysis: !!analysis,
     precheckChips,
     analysisSummaryText: compactAnalysisSummaryText,

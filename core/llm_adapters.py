@@ -471,7 +471,17 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
         error_str = str(error).lower()
         error_type = type(error).__name__.lower()
 
-        if "rate limit" in error_str or "429" in error_str:
+        if any(
+            marker in error_str
+            for marker in (
+                "rate limit",
+                "429",
+                "too many requests",
+                "throttled",
+                "capacity limits",
+                "serviceunavailable",
+            )
+        ):
             return "rate_limit"
         if "timeout" in error_str or "timed out" in error_str:
             return "timeout"

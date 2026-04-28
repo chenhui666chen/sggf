@@ -49,7 +49,7 @@ export interface StoryExpansionDialogDefaults extends StoryExpansionDefaults {
 
 const MIN_EPIC_TOTAL_CHAPTERS = 300
 const DEFAULT_VOLUME_DETAIL_CHAPTERS_MIN = 60
-const DEFAULT_VOLUME_DETAIL_CHAPTERS_MAX = 80
+const DEFAULT_VOLUME_DETAIL_CHAPTERS_MAX = 100
 
 function getSafeConfiguredNumber(value: number, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? value : fallback

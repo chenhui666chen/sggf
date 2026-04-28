@@ -60,6 +60,7 @@ MODEL_ALIASES = {
     "qwen_image_edit_max": "qwen-image-edit-max",
     "qwen_multiperson_fusion": "qwen-image-edit-plus",
     "wan_image_edit": "qwen-image-edit-plus",
+    "kling-v3-image-generation": "kling/kling-v3-image-generation",
     # MiniMax TTS 模型别名（前端使用短横线格式，注册中心使用斜杠格式）
     "minimax-speech-2.8-turbo": "MiniMax/speech-2.8-turbo",
     "minimax-speech-2.8-hd": "MiniMax/speech-2.8-hd",

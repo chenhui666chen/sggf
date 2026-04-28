@@ -36,19 +36,14 @@
   - `backend/app/services/audiobook/README.md`
   - `backend/app/services/audiobook/README_AI_MUSIC.md`
 
-当前仓库里即使文件名包含 `REPORT`、`TEST_REPORT`、`SUMMARY`，也**不代表它是临时文件**。实际扫描中，以下文档已经被根目录 README 引用，属于正式资料，默认保留：
+当前仓库里即使文件名包含 `REPORT`、`TEST_REPORT`、`SUMMARY`，也**不代表它是临时文件**。但历史扫描结论可能随 README 与文档导航调整而过期，实际清理前必须重新做引用确认。
 
-- `docs/MODEL_DISPATCH_REFACTOR_TEST_REPORT_FINAL_20260315.md`
-- `docs/UNIFIED_MEDIA_RUNTIME_TEST_REPORT_20260315.md`
-- `docs/MODEL_KNOWLEDGE_BASE_20260315.md`
-- `docs/MODEL_INTEGRATION_REFERENCE.md`
-- `docs/MODEL_ROUTING_OPTIMIZATION_PLAN_20260417.md`
-- `docs/POSTGRESQL_DEPLOYMENT.md`
-- `docs/AUDIOBOOK_TASK_QUEUE.md`
+历史扫描中曾被视为正式资料的文档包括模型知识库、模型接入参考、路由优化计划、PostgreSQL 部署说明、有声书任务队列说明等。清理前应以当前 README、docs 导航、脚本和代码引用为准，不保留过期的测试报告路径。
 
 补充说明：
 
 - 当前仓库中部分正式文档存在编码损坏/乱码现象，这属于“内容修复问题”，**不是删除依据**。
+- 若 `TEST_REPORT` / `REPORT` 文档在当前快照中仅被本清理规则提到，且已有更新的指南或正式测试覆盖相同结论，可进入“临时测试文档/重复报告”候选池。
 
 ### 2.3 正式脚本、部署与配置文件
 
@@ -220,6 +215,7 @@
 - `/docs/**` 默认保留
 - `README` 中已引用的测试报告、方案文档默认保留
 - 即使文件名包含 `REPORT`、`SUMMARY`、`TEST_REPORT`，**也不自动删除**
+- 根目录下非 `README` / 非 `*_GUIDE.md` 的一次性分析报告，如果无 README、docs 导航、脚本或代码引用，可进入候选池。
 
 ### 4.4 `scripts/` 目录中的输出产物
 
@@ -257,11 +253,11 @@
 
 ### 5.1 文档类保留例外
 
-- `docs/MODEL_DISPATCH_REFACTOR_TEST_REPORT_FINAL_20260315.md`
-- `docs/UNIFIED_MEDIA_RUNTIME_TEST_REPORT_20260315.md`
 - `docs/MODEL_INTEGRATION_REFERENCE.md`
 - `docs/LOCAL_FIRST_ASSET_ARCHITECTURE_PLAN_20260419.md`
 - `docs/AUDIOBOOK_TASK_QUEUE.md`
+
+说明：历史测试报告不再作为固定保留例外。如果当前引用检查显示某个测试报告仅被本清理规则引用，可按“临时测试文档/重复报告”处理。
 
 ### 5.2 脚本类保留例外
 
@@ -500,6 +496,8 @@ python -m pytest backend/tests -q -k "相关模块关键词"
 - 根目录 `test_*.py`
 - `backend/test_*.py`
 - `frontend/test_ui_features.py`
+- 当前无正式引用的 `TEST_REPORT` / `REPORT` 类 Markdown 文档
+- 根目录一次性分析报告 Markdown
 - `scripts/*.json` 报告产物
 - `scripts/model_test_report.md`
 

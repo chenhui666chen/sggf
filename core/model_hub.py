@@ -426,7 +426,12 @@ class ModelHub:
         spec: "UnifiedModelSpec",
         kwargs: Dict[str, Any],
     ) -> int:
-        """解析本次调用的重试次数，优先使用模型配置。"""
+        """解析本次调用的重试次数，优先使用模型配置。
+
+        这里的重试预算是 ModelHub 的应用层重试，不等同于底层 SDK/provider
+        是否原生支持 `max_retries` 参数透传。因此即便模型不支持透传重试参数，
+        只要配置里显式声明了默认重试次数，仍允许由 ModelHub 在外层执行退避重试。
+        """
         explicit_value = kwargs.get("max_retries")
         if explicit_value is not None:
             try:
@@ -434,17 +439,20 @@ class ModelHub:
             except (TypeError, ValueError):
                 logger.warning(f"⚠️ 非法 max_retries={explicit_value!r}，回退到模型默认配置")
 
-        if not spec.constraints.supports_max_retries:
-            return 1
-
         configured_retries = spec.api_config.default_max_retries
         try:
-            return max(1, int(configured_retries))
+            normalized_retries = max(1, int(configured_retries))
         except (TypeError, ValueError):
-            logger.warning(
-                f"⚠️ 模型 {spec.id} 的 default_max_retries={configured_retries!r} 非法，使用默认值 1"
-            )
-            return 1
+            normalized_retries = 1
+            if configured_retries is not None:
+                logger.warning(
+                    f"⚠️ 模型 {spec.id} 的 default_max_retries={configured_retries!r} 非法，使用默认值 1"
+                )
+
+        if spec.constraints.supports_max_retries:
+            return normalized_retries
+
+        return normalized_retries if configured_retries is not None else 1
 
     def _select_fallback_model(
         self,

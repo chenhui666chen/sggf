@@ -13,6 +13,7 @@ from sqlalchemy import inspect, text
 
 from app.db.base import get_db, SessionLocal
 from app.services.agent_coordinator import coordinator, StageType, AgentStatus
+from app.services.agent_registry import get_stage_agents_map
 from app.core.security import get_current_user
 from app.models.project import Project, Chapter
 from app.models.setting import SettingCollection
@@ -235,30 +236,8 @@ async def execute_stage_background(task_id: str, project_id: int, stage_enum: St
         )
         logger.info(f"   📡 已发送任务开始进度: {task_id}")
 
-        # 🆕 定义每个阶段的 Agent 配置（使用 snake_case 命名规范）
-        STAGE_AGENTS = {
-            'concept': [
-                {'id': 'creative_director', 'name': '创意总监'},
-                {'id': 'world_architect', 'name': '世界观架构师'},
-                {'id': 'character_designer', 'name': '人物设计师'},
-            ],
-            'structure': [
-                {'id': 'plot_architect', 'name': '情节架构师'},
-                {'id': 'event_validator', 'name': '事件验证官'},
-            ],
-            'content': [
-                {'id': 'content_creator', 'name': '内容创作师'},
-                {'id': 'style_optimizer', 'name': '文风优化师'},
-            ],
-            'review': [
-                {'id': 'quality_reviewer', 'name': '质量评审官'},
-            ],
-            'iteration': [
-                {'id': 'iteration_coordinator', 'name': '迭代协调官'},
-                {'id': 'content_reviser', 'name': '内容修订师'},
-                {'id': 'final_reviewer', 'name': '最终审核官'},
-            ],
-        }
+        # 🆕 每个阶段的 Agent 配置统一来自注册表，避免状态推送和协调器清单漂移
+        STAGE_AGENTS = get_stage_agents_map()
 
         # 🆕 推送 Agent 开始工作状态
         stage_agents = STAGE_AGENTS.get(stage_enum.value, [])

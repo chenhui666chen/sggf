@@ -33,22 +33,8 @@ from ._constants import *
 class StoryHelperMixin:
     @staticmethod
     def estimate_volume_detail_model(chapters_count_range: Tuple[int, int]) -> str:
-        """根据单卷章节规模估算更合适的细化模型。"""
-        lower = 0
-        upper = 0
-        if isinstance(chapters_count_range, (list, tuple)) and len(chapters_count_range) >= 2:
-            try:
-                lower = max(0, int(chapters_count_range[0] or 0))
-            except Exception:
-                lower = 0
-            try:
-                upper = max(lower, int(chapters_count_range[1] or 0))
-            except Exception:
-                upper = lower
-        # 🚀 统一使用 deepseek-v4-pro（384K 输出），不再按卷规模切换
-        _ = upper  # 保留参数兼容性
-        if upper > VOLUME_DETAIL_MODEL_SWITCH_THRESHOLD:
-            return "qwen3.5-plus"
+        """卷细化统一使用 deepseek-v4-pro，避免超长输出时中途收缩。"""
+        _ = chapters_count_range
         return "deepseek-v4-pro"
 
     @staticmethod

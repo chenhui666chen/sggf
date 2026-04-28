@@ -19,6 +19,9 @@ from app.models.setting import SettingCollection
 from app.websocket.manager import ws_manager
 from app.services.character_runtime_context import build_character_prompt_context_from_text
 from app.services.workflow_context_builder import WorkflowContextBuilder
+from app.services.story_expansion_duration_estimator import (
+    apply_story_expansion_duration_history_calibration,
+)
 from app.utils.datetime_utils import parse_datetime_utc, utc_now
 from core.model_resolution import normalize_model_id
 from core.model_runtime import ensure_model_hub_initialized, resolve_model_for_task
@@ -63,6 +66,29 @@ from app.schemas.story_expansion import (
     StoryExpansionStartResponse,
     StoryExpansionTaskResultResponse,
 )
+
+
+def _apply_story_expansion_duration_calibration_safely(
+    db: Session,
+    *,
+    user_id: int,
+    project_id: int,
+    analysis: Dict[str, Any],
+) -> Dict[str, Any]:
+    try:
+        return apply_story_expansion_duration_history_calibration(
+            db,
+            user_id=user_id,
+            project_id=project_id,
+            analysis=analysis,
+        )
+    except Exception as estimate_error:
+        logger.warning(
+            "协同扩展历史耗时校准失败，回退静态估时：project_id=%s, error=%s",
+            project_id,
+            estimate_error,
+        )
+        return analysis
 
 @router.get("/epic-framework-state/{project_id}")
 async def get_epic_framework_state(
@@ -250,6 +276,12 @@ async def analyze_expand_story(
             "written_chapter_count": int(preview.get("written_chapter_count") or 0),
             "preserve_written_mode": request.preserve_written_mode,
         }
+        analysis = _apply_story_expansion_duration_calibration_safely(
+            db,
+            user_id=int(current_user.id),
+            project_id=request.project_id,
+            analysis=analysis,
+        )
 
         response_payload = StoryExpansionAnalysisRouteResponse.model_validate(
             {
@@ -614,6 +646,12 @@ async def execute_expand_story_task(
         warnings.extend(execution_context_warnings)
         analysis["warnings"] = list(dict.fromkeys(item for item in warnings if item))
         analysis["written_chapter_context"] = written_chapter_context
+        analysis = _apply_story_expansion_duration_calibration_safely(
+            db,
+            user_id=user_id,
+            project_id=project_id,
+            analysis=analysis,
+        )
         analysis = StoryExpansionAnalysisPayload.model_validate(analysis).model_dump(
             mode="python",
             exclude_none=True,
@@ -833,6 +871,18 @@ async def execute_expand_story_task(
             or target_total_characters
             or final_character_count
         )
+        if result.get("execution_mode") == "volume_detail":
+            volume_count_range = result.get("volume_chapter_count_range") or result_plan.get("volume_chapter_count_range")
+            volume_chapter_count = result.get("volume_chapter_count") or result_plan.get("volume_chapter_count")
+            if isinstance(volume_count_range, (list, tuple)) and len(volume_count_range) == 2:
+                try:
+                    lower = max(1, int(volume_count_range[0] or 1))
+                    upper = max(lower, int(volume_count_range[1] or lower))
+                    actual = int(volume_chapter_count or 0)
+                    if lower <= actual <= upper:
+                        target_chapter_count = final_chapter_count
+                except Exception:
+                    pass
         goal_reached = (
             final_chapter_count >= int(target_chapter_count or 0)
             and final_character_count >= int(target_character_count or 0)

@@ -35,6 +35,7 @@ import { buildDreamWeaverMergedVideoAssetMetadataContract } from '@/contracts/us
 import { buildDreamWeaverMergedVideoSourcePayload } from '@/contracts/userAssetSourcePayloadBuilders'
 import { workflowWebSocket } from '@/services/websocket'
 import TaskPointsPrecheckAlert from '@/components/common/TaskPointsPrecheckAlert'
+import { useAssetStudioModelCatalog } from '@/hooks/useAssetStudioModelCatalog'
 import {
   CHARACTER_VIEW_ORDER,
   CHARACTER_VIEW_RANK,
@@ -236,6 +237,11 @@ type LibraryDisplayGroup = {
   label: string
   items: LibraryDisplayItem[]
   summary: LibraryGroupSummary
+}
+
+type DreamweaverModelOption = {
+  value: string
+  label: string
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -459,6 +465,20 @@ function toStringArray(value: unknown): string[] {
     .filter(Boolean)
 }
 
+function mapCatalogOptionToDreamweaverOption(option: { model_id: string; label: string }): DreamweaverModelOption {
+  return {
+    value: option.model_id,
+    label: option.label,
+  }
+}
+
+function resolvePreferredDreamweaverOption(
+  options: DreamweaverModelOption[],
+  preferredModelId: string,
+): DreamweaverModelOption | null {
+  return options.find((option) => option.value === preferredModelId) || options[0] || null
+}
+
 export default function DreamWeaverRunPage() {
   const navigate = useNavigate()
   const { projectId: projectIdParam } = useParams()
@@ -466,8 +486,13 @@ export default function DreamWeaverRunPage() {
   const theme = useTheme()
   const smDown = useMediaQuery(theme.breakpoints.down('sm'))
   const mdDown = useMediaQuery(theme.breakpoints.down('md'))
+  const { catalog: assetStudioModelCatalog } = useAssetStudioModelCatalog()
   const configDialogFullScreen = smDown
   const libraryGridCols = smDown ? 1 : mdDown ? 2 : 3
+  const dreamweaverImageDefaultModelId = assetStudioModelCatalog?.defaults.dreamweaver_image || 'qwen-image-2.0-pro'
+  const dreamweaverVideoDefaultModelId = assetStudioModelCatalog?.defaults.dreamweaver_video || 'wan2.7-t2v'
+  const dreamweaverVideoEditDefaultModelId = assetStudioModelCatalog?.defaults.dreamweaver_video_edit || 'wan2.7-videoedit'
+  const dreamweaverVisionDefaultModelId = assetStudioModelCatalog?.defaults.dreamweaver_vision || 'qwen3-vl-plus'
   const [projects, setProjects] = useState<Project[]>([])
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null)
@@ -559,6 +584,64 @@ export default function DreamWeaverRunPage() {
   const [regenPreferImageEdit, setRegenPreferImageEdit] = useState(false)
   const [regenSuggesting, setRegenSuggesting] = useState(false)
   const [regenSuggestError, setRegenSuggestError] = useState<string | null>(null)
+
+  const dreamweaverImageModelOptions = useMemo(
+    () =>
+      assetStudioModelCatalog?.groups.dreamweaver_image?.map(mapCatalogOptionToDreamweaverOption) || IMAGE_MODEL_OPTIONS,
+    [assetStudioModelCatalog],
+  )
+  const dreamweaverVideoModelOptions = useMemo(
+    () =>
+      assetStudioModelCatalog?.groups.dreamweaver_video?.map(mapCatalogOptionToDreamweaverOption) || VIDEO_MODEL_OPTIONS,
+    [assetStudioModelCatalog],
+  )
+  const dreamweaverVideoEditModelOptions = useMemo(
+    () =>
+      assetStudioModelCatalog?.groups.dreamweaver_video_edit?.map(mapCatalogOptionToDreamweaverOption) ||
+      VIDEO_EDIT_MODEL_OPTIONS,
+    [assetStudioModelCatalog],
+  )
+  const dreamweaverVisionModelOptions = useMemo(
+    () =>
+      assetStudioModelCatalog?.groups.dreamweaver_vision?.map(mapCatalogOptionToDreamweaverOption) || VISION_MODEL_OPTIONS,
+    [assetStudioModelCatalog],
+  )
+
+  useEffect(() => {
+    if (!dreamweaverImageModelOptions.some((option) => option.value === imageModel)) {
+      setImageModel(
+        resolvePreferredDreamweaverOption(dreamweaverImageModelOptions, dreamweaverImageDefaultModelId)?.value ||
+          dreamweaverImageDefaultModelId,
+      )
+    }
+  }, [dreamweaverImageDefaultModelId, dreamweaverImageModelOptions, imageModel])
+
+  useEffect(() => {
+    if (!dreamweaverVideoModelOptions.some((option) => option.value === videoModel)) {
+      setVideoModel(
+        resolvePreferredDreamweaverOption(dreamweaverVideoModelOptions, dreamweaverVideoDefaultModelId)?.value ||
+          dreamweaverVideoDefaultModelId,
+      )
+    }
+  }, [dreamweaverVideoDefaultModelId, dreamweaverVideoModelOptions, videoModel])
+
+  useEffect(() => {
+    if (!dreamweaverVideoEditModelOptions.some((option) => option.value === videoEditModel)) {
+      setVideoEditModel(
+        resolvePreferredDreamweaverOption(dreamweaverVideoEditModelOptions, dreamweaverVideoEditDefaultModelId)?.value ||
+          dreamweaverVideoEditDefaultModelId,
+      )
+    }
+  }, [dreamweaverVideoEditDefaultModelId, dreamweaverVideoEditModelOptions, videoEditModel])
+
+  useEffect(() => {
+    if (!dreamweaverVisionModelOptions.some((option) => option.value === visionModel)) {
+      setVisionModel(
+        resolvePreferredDreamweaverOption(dreamweaverVisionModelOptions, dreamweaverVisionDefaultModelId)?.value ||
+          dreamweaverVisionDefaultModelId,
+      )
+    }
+  }, [dreamweaverVisionDefaultModelId, dreamweaverVisionModelOptions, visionModel])
   const [regenSmartPromptTriggered, setRegenSmartPromptTriggered] = useState(false)
   const [regenSubmitting, setRegenSubmitting] = useState(false)
   const [regenError, setRegenError] = useState<string | null>(null)
@@ -5889,16 +5972,16 @@ export default function DreamWeaverRunPage() {
       visualFieldsDisabled={running || lockedGenerationConfigLoading || generationConfigLocked}
       imageModelValue={imageModel}
       onImageModelChange={setImageModel}
-      imageModelOptions={IMAGE_MODEL_OPTIONS}
+      imageModelOptions={dreamweaverImageModelOptions}
       videoModelValue={videoModel}
       onVideoModelChange={setVideoModel}
-      videoModelOptions={VIDEO_MODEL_OPTIONS}
+      videoModelOptions={dreamweaverVideoModelOptions}
       videoEditModelValue={videoEditModel}
       onVideoEditModelChange={setVideoEditModel}
-      videoEditModelOptions={VIDEO_EDIT_MODEL_OPTIONS}
+      videoEditModelOptions={dreamweaverVideoEditModelOptions}
       visionModelValue={visionModel}
       onVisionModelChange={setVisionModel}
-      visionModelOptions={VISION_MODEL_OPTIONS}
+      visionModelOptions={dreamweaverVisionModelOptions}
       enableVideoEdit={enableVideoEdit}
       onEnableVideoEditChange={setEnableVideoEdit}
       enableVisionReview={enableVisionReview}

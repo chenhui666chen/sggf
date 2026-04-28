@@ -47,10 +47,9 @@ def test_total_mode_suitability_uses_new_recommended_and_framework_thresholds() 
         execution_mode="iterative",
     )
 
-    assert suitability["recommended_total_chapters_max"] == 300
-    assert suitability["framework_preferred_total_from"] == 301
-    assert suitability["request_band"] == "forbidden"
-    assert "禁止继续使用常规协同" in suitability["summary"]
+    assert suitability["recommended_total_chapters_max"] == StoryExpansionCoordinator.CONVENTIONAL_COLLABORATION_RECOMMENDED_MAX_CHAPTERS
+    assert suitability["framework_preferred_total_from"] == StoryExpansionCoordinator.FRAMEWORK_PREFERRED_CHAPTER_THRESHOLD
+    assert suitability["request_band"] == "recommended"
 
 
 def test_character_only_target_estimates_total_chapters_from_character_scale() -> None:
@@ -101,8 +100,8 @@ def test_character_only_target_respects_total_mode_chapter_cap() -> None:
     )
 
     assert analysis["effective_target_character_count"] == 190
-    assert analysis["effective_target_chapter_count"] == 300
-    assert analysis["auto_supplement"]["suggested_target_chapters"] == 300
+    assert analysis["effective_target_chapter_count"] == StoryExpansionCoordinator.CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS
+    assert analysis["auto_supplement"]["suggested_target_chapters"] == StoryExpansionCoordinator.CONVENTIONAL_COLLABORATION_MAX_TOTAL_CHAPTERS
 
 
 def test_epic_framework_analysis_uses_single_round_and_minute_level_estimate() -> None:
@@ -131,3 +130,28 @@ def test_epic_framework_analysis_uses_single_round_and_minute_level_estimate() -
     assert analysis["estimated_rounds"] == 1
     assert analysis["estimated_duration_minutes_min"] < analysis["estimated_duration_minutes_max"]
     assert analysis["estimated_duration_minutes_max"] <= 25
+
+
+def test_volume_detail_uses_planned_midpoint_instead_of_range_upper() -> None:
+    coordinator = StoryExpansionCoordinator()
+    volume_detail_config = {
+        "target_volume_index": 1,
+        "chapters_count_range": (60, 100),
+        "start_chapter_num": 1,
+        "current_total_chapter_count": 0,
+    }
+
+    mode_info = coordinator.determine_execution_mode(
+        current_outline="",
+        characters="",
+        target_total_chapters=None,
+        target_total_characters=None,
+        expansion_mode="volume_detail",
+        volume_detail_config=volume_detail_config,
+    )
+
+    assert mode_info["mode"] == "volume_detail"
+    assert mode_info["target_chapter_count"] == 80
+    assert mode_info["chapters_needed"] == 80
+    assert mode_info["volume_chapter_range"] == (1, 80)
+    assert coordinator._resolve_volume_detail_target_span(volume_detail_config) == 80

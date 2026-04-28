@@ -1171,6 +1171,126 @@ class RenderingMixin:
 
         return "\n".join(parts).strip(), count
 
+    @staticmethod
+    def _story_find_volume_detail_section_bounds(content: str, title: str) -> Optional[Tuple[int, int]]:
+        section_pattern = re.compile(
+            rf"(?m)^\s*##\s*(?:\*\*)?\s*(?:[一二三四五六七八九十0-9]+[、.．]\s*)?{re.escape(title)}\s*(?:\*\*)?\s*$"
+        )
+        match = section_pattern.search(content or "")
+        if not match:
+            return None
+        next_match = re.search(r"(?m)^\s*##\s+", content[match.end():])
+        if not next_match:
+            return match.start(), len(content)
+        return match.start(), match.end() + next_match.start()
+
+    @staticmethod
+    def _story_extract_last_field_value(content: str, label: str) -> str:
+        pattern = re.compile(
+            rf"(?m)^\s*[-*]?\s*(?:✅\s*)?(?:\*\*)?{re.escape(label)}(?:\*\*)?\s*[：:]\s*(?P<value>.+?)\s*$"
+        )
+        matches = [match.group("value").strip() for match in pattern.finditer(content or "") if match.group("value")]
+        return matches[-1] if matches else ""
+
+    @classmethod
+    def _story_build_volume_detail_fallback_foreshadow_lines(
+        cls,
+        content: str,
+        pending_foreshadowings: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[str]:
+        lines: List[str] = []
+        if pending_foreshadowings:
+            for item in pending_foreshadowings:
+                if not isinstance(item, dict):
+                    continue
+                action = str(item.get("action") or "处理").strip()
+                foreshadowing_content = str(item.get("content") or "").strip()
+                if foreshadowing_content:
+                    lines.append(f"- 待定章节：{action} {foreshadowing_content}")
+        if lines:
+            return lines
+
+        foreshadowing_matches = re.findall(
+            r"(?m)^\s*[-*]\s*(?:\*\*)?伏笔事项(?:\*\*)?\s*[：:]\s*(.+?)\s*$",
+            content or "",
+        )
+        for item in foreshadowing_matches[:3]:
+            text = str(item or "").strip()
+            if text:
+                lines.append(f"- 待定章节：埋设 {text}")
+
+        return lines or ["- 当前卷暂无强制伏笔任务。"]
+
+    @classmethod
+    def _story_ensure_volume_detail_tail_sections(
+        cls,
+        content: str,
+        *,
+        pending_foreshadowings: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        normalized_content = str(content or "").strip()
+        if not normalized_content:
+            return ""
+
+        foreshadowing_bounds = cls._story_find_volume_detail_section_bounds(
+            normalized_content,
+            "伏笔埋设检查",
+        )
+        if foreshadowing_bounds is None:
+            foreshadowing_lines = cls._story_build_volume_detail_fallback_foreshadow_lines(
+                normalized_content,
+                pending_foreshadowings=pending_foreshadowings,
+            )
+            normalized_content = (
+                normalized_content.rstrip()
+                + "\n\n## 三、伏笔埋设检查\n"
+                + "\n".join(foreshadowing_lines)
+            ).strip()
+
+        connection_bounds = cls._story_find_volume_detail_section_bounds(
+            normalized_content,
+            "卷尾衔接检查",
+        )
+        last_plot_function = cls._story_extract_last_field_value(normalized_content, "情节作用")
+        last_chapter_hook = cls._story_extract_last_field_value(normalized_content, "结尾钩子")
+        fallback_completion = last_plot_function or "完成当前卷阶段推进，并将主线稳定交接到下一阶段。"
+        fallback_hook = last_chapter_hook or "当前卷已在末章留下新的推进入口。"
+        fallback_next_opening = (
+            f"承接“{fallback_hook}”直接切入下一阶段行动。"
+            if fallback_hook
+            else "承接本卷末章局势，直接切入下一阶段行动。"
+        )
+
+        required_connection_lines: List[str] = []
+        connection_text = ""
+        if connection_bounds is not None:
+            connection_text = normalized_content[connection_bounds[0]:connection_bounds[1]]
+        if "本卷任务完成" not in connection_text and "本卷任务完成情况" not in connection_text:
+            required_connection_lines.append(f"✅ 本卷任务完成：{fallback_completion}")
+        if "下卷开局场景" not in connection_text:
+            required_connection_lines.append(f"✅ 下卷开局场景：{fallback_next_opening}")
+        if "卷尾钩子" not in connection_text:
+            required_connection_lines.append(f"✅ 卷尾钩子：{fallback_hook}")
+
+        if connection_bounds is None:
+            normalized_content = (
+                normalized_content.rstrip()
+                + "\n\n## 四、卷尾衔接检查\n"
+                + "\n".join(required_connection_lines or ["✅ 当前卷已形成基本承接结构。"])
+            ).strip()
+        elif required_connection_lines:
+            insert_at = connection_bounds[1]
+            before = normalized_content[:insert_at].rstrip()
+            after = normalized_content[insert_at:].lstrip("\n")
+            normalized_content = (
+                before
+                + "\n"
+                + "\n".join(required_connection_lines)
+                + ("\n\n" + after if after else "")
+            ).strip()
+
+        return normalized_content
+
     @classmethod
     def _story_normalize_volume_detail_response(
         cls,
@@ -1196,5 +1316,8 @@ class RenderingMixin:
             )
             return cls._story_trim_volume_detail_preamble(rendered_content or content)
 
-        return content
+        return cls._story_ensure_volume_detail_tail_sections(
+            content,
+            pending_foreshadowings=pending_foreshadowings,
+        )
 

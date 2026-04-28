@@ -13,6 +13,7 @@ from sqlalchemy import inspect, text
 
 from app.db.base import get_db, SessionLocal
 from app.services.agent_coordinator import coordinator, StageType, AgentStatus
+from app.services.agent_registry import get_stage_agents_map
 from app.core.security import get_current_user
 from app.models.project import Project, Chapter
 from app.models.setting import SettingCollection
@@ -373,29 +374,32 @@ async def execute_generate_next_chapter_task(
     # 创建独立的数据库会话
     db = SessionLocal()
 
-    # 🆕 定义四个步骤对应的 Agent 列表
-    STEP_AGENTS = {
-        'structure': [  # 步骤1：章节规划
-            {'id': 'plot_architect', 'name': '情节架构师', 'stage': 'structure'},
-            {'id': 'event_validator', 'name': '事件验证官', 'stage': 'structure'},
-        ],
-        'content': [  # 步骤2：内容创作
-            {'id': 'content_creator', 'name': '内容创作师', 'stage': 'content'},
-            {'id': 'style_optimizer', 'name': '文风优化师', 'stage': 'content'},
-        ],
-        'review': [  # 步骤3：质量评审
-            {'id': 'quality_reviewer', 'name': '质量评审官', 'stage': 'review'},
-        ],
-        'iteration': [  # 步骤4：迭代优化
-            {'id': 'iteration_coordinator', 'name': '迭代协调官', 'stage': 'iteration'},
-            {'id': 'content_reviser', 'name': '内容修订师', 'stage': 'iteration'},
-            {'id': 'final_reviewer', 'name': '最终审核官', 'stage': 'iteration'},
-        ],
-    }
+    # 🆕 定义四个步骤对应的 Agent 列表，统一来自后端 Agent 注册表
+    STEP_AGENTS = get_stage_agents_map(include_stage=True)
 
     try:
         workflow_context_builder = WorkflowContextBuilder(db)
         project_profile = workflow_context_builder.get_project_profile(project_id)
+        chapter_generation_context = workflow_context_builder.build_chapter_generation_context(
+            project_id,
+            next_chapter_number,
+            plot_outline=plot_outline or "",
+            characters=characters or "",
+        )
+        if chapter_generation_context.outline_source:
+            logger.info(
+                "   📌 当前章细纲命中：source=%s, chapter=%s, length=%s",
+                chapter_generation_context.outline_source,
+                next_chapter_number,
+                len(chapter_generation_context.current_chapter_outline or ""),
+            )
+        else:
+            logger.info("   📌 当前章细纲未命中结构化章节块，将依赖章节窗口上下文推断")
+        if chapter_generation_context.focus_character_names:
+            logger.info(
+                "   👥 当前章优先人物：%s",
+                "、".join(chapter_generation_context.focus_character_names),
+            )
         # ==================== 步骤1：章节规划（真流式） ====================
         # 🆕 推送步骤1的 Agent 开始工作状态
         step1_agents = STEP_AGENTS['structure']
@@ -480,9 +484,14 @@ async def execute_generate_next_chapter_task(
         
         # 🎆 使用分层摘要策略优化上下文
         layered_summarizer = LayeredSummarizer()
+        plan_character_context = (
+            chapter_generation_context.planning_character_prompt_context
+            or chapter_generation_context.content_character_context
+            or ""
+        )
         plan_context_result = layered_summarizer.prepare_context_for_expansion(
             outline=plot_outline or "",
-            characters=characters or "",
+            characters=plan_character_context,
             worldview=world_setting or "",
             scenario="chapter_generation",
             current_count=next_chapter_number,  # 使用当前章节数选择模型
@@ -499,11 +508,12 @@ async def execute_generate_next_chapter_task(
         
         logger.info(f"   📊 上下文优化（章节规划 - 分层摘要）:")
         logger.info(f"      - 选择模型: {selected_plan_model}")
-        logger.info(f"      - 原始总长: {len(plot_outline or '') + len(characters or '') + len(world_setting or ''):,}字符")
+        logger.info(f"      - 原始总长: {len(plot_outline or '') + len(plan_character_context) + len(world_setting or ''):,}字符")
         logger.info(f"      - 优化后: {len(plan_optimized_context_text):,}字符 (压缩{(1-plan_stats['compression_ratio'])*100:.1f}%)")
         logger.info(f"      - 结构化记忆: {len(plan_memory_text):,}字符 / {len(plan_structured_memory)}类")
         logger.info(f"      - Token使用: {plan_stats['total_tokens']:,} / {plan_stats['target_tokens']:,}")
         logger.info(f"      - 聚焦范围: 第{max(1, next_chapter_number - 5)}-{next_chapter_number + 5}章")
+        logger.info(f"      - 人物输入: {len(plan_character_context):,}字符（按当前章筛选后的候选摘要）")
         resolved_plan_model = resolve_model_for_task(None, selected_plan_model) or selected_plan_model
         
         # 构建包含各部分的上下文字典（用于后续提示词构建）
@@ -537,6 +547,24 @@ async def execute_generate_next_chapter_task(
 
 【整本书信息 - 智能优化上下文】
 - 故事概念：{plan_optimized_context.get('project_concept', concept)}
+
+【当前章节精确细纲】（如存在，最高优先级承接）
+{chapter_generation_context.current_chapter_outline or '（未提取到当前章节精确细纲，将回退到章节窗口推断）'}
+
+【当前卷上下文】（用于保持卷目标、卷节奏与卷内推进方向）
+{chapter_generation_context.current_volume_context or '（无可用卷级上下文）'}
+
+【核心角色锚点】（始终保留主角/核心对手/关键驱动者的长期目标与叙事职责）
+{chapter_generation_context.core_character_anchor_context or '（无可用核心角色锚点）'}
+
+【焦点人物关系】（优先承接本章相关人物之间正在变化的关系与博弈）
+{chapter_generation_context.focus_character_relationship_context or '（无可用焦点人物关系摘要）'}
+
+【人物规划候选摘要】（用于本章规划阶段决定出场与推进，不直接灌入全量人物）
+{chapter_generation_context.planning_character_prompt_context or chapter_generation_context.character_prompt_context or '（无可用人物规划候选摘要）'}
+
+【长篇框架约束】（用于保持跨卷一致性）
+{chapter_generation_context.epic_framework_context or '（无额外长篇框架约束）'}
 
 【优化后的核心上下文】（已通过分层摘要策略压缩，聚焦第{max(1, next_chapter_number - 5)}-{next_chapter_number + 5}章）
 {plan_optimized_context.get('plot_outline', plot_outline)}
@@ -589,7 +617,10 @@ async def execute_generate_next_chapter_task(
 
 要求：
 - 确保与整本书的情节大纲保持一致
+- 如果提供了“当前章节精确细纲”，必须优先落实其中的场景目标、关键事件、人物出场、冲突推进、结尾钩子和伏笔，除非它与已发生章节连续性冲突
 - 确保与前面章节的剧情连贯
+- 如果提供了“当前卷上下文”或“长篇框架约束”，本章推进必须服务卷目标，并且不能破坏跨卷设定一致性
+- 人物动机、关系和主线绑定优先以“人物运行态摘要”为准，不要被冗长人物背景带偏
 - 优先遵循结构化记忆中的人物状态、关系边、伏笔和世界规则
 - 如果最近章节连续性资产中已经明确了场景目标、冲突推进、人物出场、结尾钩子或伏笔，必须优先承接，不要丢失
 - 推进故事发展，不能原地踏步
@@ -622,9 +653,17 @@ Genre-specific refinement (specific implementation of general planning requireme
                     real_coordinator.generate_chapter_plan,
                     chapter_number=next_chapter_number,
                     project_concept=concept,
-                    plot_outline=plot_outline,
+                    plot_outline="\n\n".join(
+                        part
+                        for part in (
+                            chapter_generation_context.current_chapter_outline,
+                            chapter_generation_context.current_volume_context,
+                            plot_outline,
+                        )
+                        if part and part.strip()
+                    ),
                     world_setting=world_setting,
-                    characters=characters,
+                    characters=chapter_generation_context.character_prompt_context or characters,
                     previous_chapters_summary=previous_chapters_summary,
                     previous_ending=previous_ending
                 )
@@ -817,9 +856,22 @@ Genre-specific refinement (specific implementation of general planning requireme
         # 🆕 Typed-RAG（按类型检索并注入提示）
         rag_character_context = ""
         rag_world_context = ""
+        rag_query_text = "\n\n".join(
+            part
+            for part in (
+                chapter_plan,
+                chapter_generation_context.rag_query_text,
+                (
+                    f"相关人物：{'、'.join(chapter_generation_context.focus_character_names)}"
+                    if chapter_generation_context.focus_character_names
+                    else ""
+                ),
+            )
+            if part and part.strip()
+        )
         rag_bundle = workflow_context_builder.build_typed_rag_context(
             project_id,
-            chapter_plan,
+            rag_query_text or chapter_plan,
             fallback_max_content_length=200,
         )
         rag_character_context = rag_bundle.rag_character_context
@@ -855,6 +907,12 @@ Genre-specific refinement (specific implementation of general planning requireme
             rag_world_context=rag_world_context,
             selected_opening=selected_opening,
             selected_ending=selected_ending,
+            current_chapter_outline=chapter_generation_context.current_chapter_outline,
+            current_volume_context=chapter_generation_context.current_volume_context,
+            core_character_anchor_context=chapter_generation_context.core_character_anchor_context,
+            focus_character_relationship_context=chapter_generation_context.focus_character_relationship_context,
+            character_runtime_context=chapter_generation_context.character_prompt_context,
+            epic_framework_context=chapter_generation_context.epic_framework_context,
         )
         
         # 📊 输出精简版 prompt 统计
@@ -889,7 +947,9 @@ Genre-specific refinement (specific implementation of general planning requireme
                         chapter_number=next_chapter_number,
                         chapter_plan=chapter_plan,
                         world_setting=world_setting,
-                        characters=characters,
+                        characters=chapter_generation_context.content_character_context
+                        or chapter_generation_context.character_prompt_context
+                        or characters,
                         previous_ending=previous_ending,
                         target_word_count=3000,
                         previous_chapters=previous_chapters_payload,

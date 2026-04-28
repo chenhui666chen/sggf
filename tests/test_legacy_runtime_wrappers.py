@@ -500,6 +500,7 @@ def test_normalize_model_id_returns_current_multimodal_ids() -> None:
     assert normalize_model_id("qwen3_vl_plus") == "qwen3-vl-plus"
     assert normalize_model_id("qwen3_tts") == "qwen3-tts-instruct-flash"
     assert normalize_model_id("wan2.6-t2i") == "wan2.6-t2i"
+    assert normalize_model_id("kling-v3-image-generation") == "kling/kling-v3-image-generation"
     assert normalize_model_id("wan2.7-t2v") == "wan2.7-t2v"
     assert normalize_model_id("wan2.7-i2v") == "wan2.7-i2v"
     assert normalize_model_id("qwen_multiperson_fusion") == "qwen-image-edit-plus"

@@ -4,7 +4,7 @@
  */
 import React from 'react'
 import { Box, SxProps, Theme } from '@mui/material'
-import { smartFormat } from '../../utils/formatContent'
+import MarkdownRenderer from '../MarkdownRenderer'
 import { normalizeMarkdownContent } from '../../utils/normalizeMarkdownContent'
 
 interface FormattedContentProps {
@@ -22,48 +22,20 @@ interface FormattedContentProps {
  * ```
  */
 export default function FormattedContent({ content, sx, className }: FormattedContentProps) {
-  const formattedHtml = React.useMemo(() => {
+  const normalizedContent = React.useMemo(() => {
     if (!content) return ''
-    
+
     // 前端展示排除开发说明：移除全角括号及其中内容
     let text = normalizeMarkdownContent(content).replace(/（[^）]*）/g, '')
-    
-    // 🌟 保护 details/summary 标签块，避免被 smartFormat 转义
-    const detailsBlocks: string[] = []
-    
-    // 情况1：保护原始的 <details> 块
-    text = text.replace(/<details[^>]*>[\s\S]*?<\/details>/gi, (match) => {
-      detailsBlocks.push(match)
-      return `___DETAILS_BLOCK_${detailsBlocks.length - 1}___`
-    })
-    
-    // 情况2：处理已经转义的 &lt;details&gt; 块（后端可能存储的就是转义后的）
-    text = text.replace(/&lt;details[^&]*&gt;[\s\S]*?&lt;\/details&gt;/gi, (match) => {
-      // 解码转义的标签
-      const decoded = match
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-      detailsBlocks.push(decoded)
-      return `___DETAILS_BLOCK_${detailsBlocks.length - 1}___`
-    })
-    
-    // 执行 Markdown 格式化（此时 details 块已被保护）
-    let html = smartFormat(text)
-    
-    // 🌟 恢复 details 块（并确保内部标签被解码）
-    detailsBlocks.forEach((block, index) => {
-      // 解码块内部可能存在的转义字符
-      const decodedBlock = block
+
+    text = text.replace(/&lt;details[^&]*&gt;[\s\S]*?&lt;\/details&gt;/gi, (match) =>
+      match
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>')
         .replace(/&amp;/g, '&')
-      html = html.replace(`___DETAILS_BLOCK_${index}___`, decodedBlock)
-    })
-    
-    // 🌟 清理可能的包裹问题
-    html = html.replace(/<p[^>]*>\s*(<details[\s\S]*?<\/details>)\s*<\/p>/gi, '$1')
-    
-    return html
+    )
+
+    return text
   }, [content])
 
   return (
@@ -142,8 +114,9 @@ export default function FormattedContent({ content, sx, className }: FormattedCo
         },
         ...sx,
       }}
-      dangerouslySetInnerHTML={{ __html: formattedHtml }}
-    />
+    >
+      <MarkdownRenderer content={normalizedContent} />
+    </Box>
   )
 }
 

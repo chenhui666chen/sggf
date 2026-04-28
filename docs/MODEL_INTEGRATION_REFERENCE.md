@@ -1,12 +1,13 @@
 # 模型接入参考文档
 
 初版：`2026-04-18`
-最近更新：`2026-04-21`
+最近更新：`2026-04-28`
 
 本次更新重点：
 
 - 补充 `UnifiedMediaRuntime` 与媒体 adapter 的统一调用约定
 - 补充 Asset Studio 路由层的显式导入规范与输出物化链路约束
+- 补充 Asset Studio / DreamWeaver 统一模型清单的事实源与维护入口
 - 补充本次调试中验证有效的最小回归测试集合
 - 补充长耗时生成请求的可观测性要求
 
@@ -194,6 +195,34 @@
 - `adapters/model_adapters.py`
 - `adapters/legacy_runtime_wrappers.py`
 - 可选：`adapters/legacy_bridge.py`
+
+### 5.4 Asset Studio / DreamWeaver 模型选项
+
+如果你的目标不只是“模型能被后端调起”，而是“Asset Studio / DreamWeaver 前端可直接选到并回填正确文案”，还要额外更新统一模型清单链路：
+
+- `backend/app/services/asset_studio_model_catalog.py`
+- `backend/app/api/v1/asset_studio_api/routes_model_catalog.py`
+- `frontend/src/hooks/useAssetStudioModelCatalog.ts`
+- `frontend/src/components/home/AssetStudioWorkbench.tsx`
+- `frontend/src/pages/DreamWeaverRunPage.tsx`
+
+维护规则：
+
+1. `config/models.yaml` 仍然是媒体模型 metadata 的主事实源。
+2. Asset Studio / DreamWeaver 的模型下拉、默认值、时长档位现在优先来自 `/api/v1/asset-studio/model-catalog`。
+3. 不要再分别手改多个前端数组作为主入口；前端常量只保留 fallback。
+4. 如果“公开模型 ID”和 `config/models.yaml` 中的真实注册 ID 不一致，要同时补 `core/model_resolution.py` 的映射，确保统一清单和运行时都能归一解析。
+5. 模型中心列表与详情现在按“当前配置实时投影 + 数据库存验证状态覆盖”返回；也就是说，名称、摘要、约束等基础 metadata 以当前配置为准，数据库主要承载验证状态、来源校验结果与时间戳。
+6. 如果你希望把数据库中的模型中心快照也同步到当前集成模型集合，请运行：
+
+```powershell
+python -m backend.app.scripts.bootstrap_model_catalog_cards --prune-stale
+```
+
+说明：
+
+- 不带 `--prune-stale` 时，会更新当前集成模型并报告数据库里的历史残留卡片，但不会删除它们。
+- 带 `--prune-stale` 时，会额外删除已不在当前集成模型集合中的历史卡片，用于测试期或结构调整后的数据库收敛。
 
 ## 6. 媒体适配器架构详解
 
@@ -417,6 +446,7 @@ BaseAdapter
 | `vidu-q3-pro-img2video` | `vidu/viduq3-pro_img2video` | 百炼要求带 `vidu/` 前缀，且用下划线 |
 | `vidu-q3-pro-text2video` | `vidu/viduq3-pro_text2video` | 同上 |
 | `vidu-q3-pro-start-end2video` | `vidu/viduq3-pro_start-end2video` | 同上 |
+| `kling-v3-image-generation` | `kling/kling-v3-image-generation` | 统一清单和业务侧沿用短 ID，实际配置记录带 `kling/` 前缀 |
 | `doubao-seedream-4-5` | `doubao-seedream-4-5-251128` | 火山方舟要求带日期后缀 |
 | `doubao-seedream-5-0` | `doubao-seedream-5-0-260128` | 同上 |
 | `doubao-seed-2-0-pro` | `doubao-seed-2-0-pro-260215` | 同上 |
@@ -729,6 +759,19 @@ python -m pytest "tests/test_requests_import_hygiene.py" -q
 python -m py_compile "backend/app/api/v1/asset_studio_api/routes_video.py"
 python -m py_compile "backend/app/api/v1/asset_studio_api/_helpers.py"
 ```
+
+4. Asset Studio 统一模型清单回归
+
+```powershell
+python -m pytest "tests/test_asset_studio_model_catalog.py" -q
+```
+
+这组测试用于捕获：
+
+- `config/models.yaml` 最新名称没有正确透传到统一清单
+- 公开模型 ID 与配置 ID 的 alias 丢失，导致前端回填成旧版本或错误模型
+- 默认模型不在所属 group 中，导致页面加载后自动回退
+- 视频时长档位继续依赖旧前端手写常量，而不是 `models.yaml`
 
 ## 10. 常见误区与踩坑记录
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   coerceStoryExpansionResult,
   createStoryExpansionResultView,
+  mergeStoryExpansionRepairResult,
 } from '../storyExpansionResultModel'
 
 describe('storyExpansionResultModel', () => {
@@ -215,6 +216,99 @@ describe('storyExpansionResultModel', () => {
       goal_reached: false,
       current_chapter_count: 38,
       target_chapter_count: 60,
+    })
+  })
+
+  it('保留执行轮次中的尾差补章标记', () => {
+    const view = createStoryExpansionResultView({
+      execution_rounds: [
+        {
+          round: 3,
+          tail_supplement: true,
+          before_chapter_count: 58,
+          after_chapter_count: 60,
+        },
+      ],
+      current_chapter_count: 60,
+      target_chapter_count: 60,
+      current_character_count: 12,
+      target_character_count: 12,
+    })
+
+    expect(view?.executionRounds).toEqual([
+      {
+        round: 3,
+        tail_supplement: true,
+        before_chapter_count: 58,
+        after_chapter_count: 60,
+        stage: undefined,
+        strategy: undefined,
+        before_character_count: undefined,
+        after_character_count: undefined,
+        plot: undefined,
+        character: undefined,
+      },
+    ])
+  })
+
+  it('自动修复后会同步新评分并保留原有可复用上下文', () => {
+    expect(
+      mergeStoryExpansionRepairResult(
+        {
+          expanded_outline: '旧大纲',
+          all_characters: '旧人物',
+          execution_mode: 'volume_detail',
+          execution_rounds: [{ round: 1, after_chapter_count: 32 }],
+          outline_ops: [{ action: 'append', generated_count: 4 }],
+          new_characters: ['陈昭'],
+          story_strategy: 'balanced',
+          story_intent: 'balanced',
+          story_expansion_mode: 'volume_detail',
+          story_preserve_written_mode: 'preserve_written',
+          written_chapter_context: {
+            applied: true,
+            written_chapter_count: 12,
+            preserve_written_mode: 'preserve_written',
+          },
+          expansion_analysis: {
+            validation: { score: 71 },
+            analysis_summary: '旧摘要',
+          },
+          validation_before: { score: 88 },
+          validation_after: { score: 71 },
+        },
+        {
+          expanded_outline: '修复后大纲',
+          all_characters: '旧人物',
+          execution_mode: 'repair',
+          alignment_repairs: ['已补齐陈昭的出场承接'],
+          validation_before: { score: 71 },
+          validation_after: { score: 86 },
+          coordination_summary: '评分 71 → 86',
+        },
+      ),
+    ).toMatchObject({
+      expanded_outline: '修复后大纲',
+      execution_mode: 'repair',
+      execution_rounds: [{ round: 1, after_chapter_count: 32 }],
+      outline_ops: [{ action: 'append', generated_count: 4 }],
+      new_characters: ['陈昭'],
+      story_strategy: 'balanced',
+      story_intent: 'balanced',
+      story_expansion_mode: 'volume_detail',
+      story_preserve_written_mode: 'preserve_written',
+      written_chapter_context: {
+        applied: true,
+        written_chapter_count: 12,
+        preserve_written_mode: 'preserve_written',
+      },
+      validation_before: { score: 71 },
+      validation_after: { score: 86 },
+      alignment_repairs: ['已补齐陈昭的出场承接'],
+      expansion_analysis: {
+        validation: { score: 86 },
+        analysis_summary: '旧摘要',
+      },
     })
   })
 })

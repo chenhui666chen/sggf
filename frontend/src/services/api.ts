@@ -212,6 +212,25 @@ export interface AssetStudioVisionReviewResponse {
   metadata?: Record<string, any>
 }
 
+export interface AssetStudioModelCatalogOption {
+  model_id: string
+  catalog_model_key: string
+  label: string
+  helper: string
+  provider: string
+  category: string
+  status: string
+  modalities: string[]
+  tags: string[]
+  duration_options: number[]
+}
+
+export interface AssetStudioModelCatalogResponse {
+  catalog_version: string
+  defaults: Record<string, string>
+  groups: Record<string, AssetStudioModelCatalogOption[]>
+}
+
 export interface UserAssetRecord {
   id: number
   user_id: number
@@ -1874,6 +1893,10 @@ class ApiClient {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 300000,
     })
+  }
+
+  getAssetStudioModelCatalog() {
+    return this.client.get<AssetStudioModelCatalogResponse>('/api/v1/asset-studio/model-catalog')
   }
 
   // AI生成任务API（异步）

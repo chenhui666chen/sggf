@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -11,7 +13,11 @@ for path in (PROJECT_ROOT, PROJECT_ROOT / "backend"):
         sys.path.insert(0, path_str)
 
 from backend.app.services.agents.outline_expander import OutlineExpander
-from backend.app.services.character_parser import CharacterTextParser, has_parseable_character_cards
+from backend.app.services.character_parser import (
+    CharacterTextParser,
+    has_parseable_character_cards,
+    parse_and_sync_relationships,
+)
 
 
 def test_character_text_parser_supports_formal_story_expansion_labels() -> None:
@@ -150,3 +156,50 @@ def test_has_parseable_character_cards_accepts_loose_card_blocks() -> None:
 
     assert has_parseable_character_cards(loose_cards) is True
     assert has_parseable_character_cards(relation_patch_only) is False
+
+
+def test_parse_and_sync_relationships_supports_story_expansion_relation_lines() -> None:
+    class _FakeQuery:
+        def __init__(self, items: list[SimpleNamespace]) -> None:
+            self._items = items
+
+        def filter(self, *args: object, **kwargs: object) -> "_FakeQuery":
+            return self
+
+        def all(self) -> list[SimpleNamespace]:
+            return list(self._items)
+
+    class _FakeDBSession:
+        def __init__(self, items: list[SimpleNamespace]) -> None:
+            self._items = items
+            self.committed = False
+
+        def query(self, model: object) -> _FakeQuery:
+            return _FakeQuery(self._items)
+
+        def commit(self) -> None:
+            self.committed = True
+
+    characters = [
+        SimpleNamespace(id=1, name="林舟", relations=None),
+        SimpleNamespace(id=2, name="顾晚", relations=None),
+    ]
+    fake_db = _FakeDBSession(characters)
+
+    result = parse_and_sync_relationships(
+        project_id=1,
+        relationships_text="- 林舟 ↔ 顾晚：盟友（共同调查旧案）",
+        db_session=fake_db,
+    )
+
+    assert result == {
+        "parsed": 1,
+        "saved": 1,
+        "characters_updated": 1,
+    }
+    assert fake_db.committed is True
+
+    relations_payload = json.loads(characters[0].relations)
+    assert len(relations_payload["items"]) == 1
+    assert relations_payload["items"][0]["target"] == "顾晚"
+    assert relations_payload["items"][0]["type"] == "盟友"

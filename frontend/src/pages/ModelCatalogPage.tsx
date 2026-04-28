@@ -600,6 +600,8 @@ function normalizeCatalogEntryForDisplay(entry: CatalogEntry): CatalogEntry {
     return entry
   }
 
+  const keepPendingVerification = entry.verification_status === 'pending'
+
   const primaryStrengths = mergeUniqueStrings(
     ['高表现力 TTS', 'Instruction 控制', '声音复刻', '声音设计'],
     entry.primary_strengths,
@@ -647,12 +649,20 @@ function normalizeCatalogEntryForDisplay(entry: CatalogEntry): CatalogEntry {
 
   return {
     ...entry,
-    verification_status: 'verified',
-    verification_scope: entry.verification_scope || 'manual_runtime_verified',
-    verification_score: 1,
-    total_source_count: Math.max(intOrZero(entry.total_source_count), officialSources.length),
-    reachable_source_count: Math.max(intOrZero(entry.reachable_source_count), officialSources.length),
-    verified_source_count: Math.max(intOrZero(entry.verified_source_count), officialSources.length),
+    verification_status: keepPendingVerification ? 'pending' : 'verified',
+    verification_scope: keepPendingVerification
+      ? (entry.verification_scope || 'bootstrap_pending')
+      : (entry.verification_scope || 'manual_runtime_verified'),
+    verification_score: keepPendingVerification ? intOrZero(entry.verification_score) : 1,
+    total_source_count: keepPendingVerification
+      ? intOrZero(entry.total_source_count)
+      : Math.max(intOrZero(entry.total_source_count), officialSources.length),
+    reachable_source_count: keepPendingVerification
+      ? intOrZero(entry.reachable_source_count)
+      : Math.max(intOrZero(entry.reachable_source_count), officialSources.length),
+    verified_source_count: keepPendingVerification
+      ? intOrZero(entry.verified_source_count)
+      : Math.max(intOrZero(entry.verified_source_count), officialSources.length),
     verification_notes:
       '已在 2026-04-22 完成文档核对与真实运行时校验。词级时间戳已实测可用；音素级时间戳默认按不支持处理。',
     last_verified_at: entry.last_verified_at || '2026-04-22T12:00:00+08:00',
@@ -1650,7 +1660,7 @@ export default function ModelCatalogPage() {
           <Button
             variant="outlined"
             startIcon={<ArrowBackIcon />}
-            onClick={() => navigate('/dashboard')}
+            onClick={() => navigate('/home')}
           >
             返回工作台
           </Button>

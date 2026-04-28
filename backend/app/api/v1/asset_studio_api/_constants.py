@@ -21,6 +21,12 @@ from pydantic import BaseModel, Field
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.audiobook.ai_music import MusicGenerationRequest, MusicStyle, create_music_generator
+from app.services.asset_studio_model_catalog import (
+    get_asset_studio_audio_duration_options,
+    get_asset_studio_default_model_id,
+    get_asset_studio_model_sets,
+    get_asset_studio_video_duration_options,
+)
 from core.model_catalog_runtime import get_model_catalog_runtime_index
 from core.model_resolution import normalize_model_id
 from core.unified_media_runtime import UnifiedMediaResult, media_runtime
@@ -31,39 +37,29 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 ASSET_STUDIO_UPLOAD_DIR = PROJECT_ROOT / "backend" / "data" / "asset_studio_uploads"
 ASSET_STUDIO_OUTPUT_DIR = PROJECT_ROOT / "backend" / "data" / "asset_studio_outputs"
 
-IMAGE_GENERATION_MODELS = {"wan2.6-t2i", "qwen-image-2.0", "qwen-image-2.0-pro", "wan2.7-image", "doubao-seedream-4-5", "doubao-seedream-5-0", "kling-v3-image-generation", "kling-v3-omni-image-generation"}
-IMAGE_EDIT_MODELS = {"qwen-image-edit-plus", "qwen-image-edit-max"}
-VIDEO_MODELS = {
-    "wan2.7-t2v", "wan2.6-t2v-fast", "wan2.7-i2v", "wan2.7-r2v", "wan2.7-videoedit",
-    "doubao-seedance-2-0", "doubao-seedance-2-0-fast", "doubao-seedance-1-5-pro",
-    "kling-v3-video-generation", "kling-v3-omni-video-generation",
-    "pixverse-v6-t2v",
-    "vidu-q3-pro-img2video", "vidu-q3-pro-text2video", "vidu-q3-pro-start-end2video",
-}
-VIDEO_EDIT_MODELS = {"wan2.7-videoedit", "doubao-seedance-2-0", "kling-v3-video-generation"}
+_MODEL_SETS = get_asset_studio_model_sets()
+
+IMAGE_GENERATION_MODELS = set(_MODEL_SETS["image_generation"])
+IMAGE_EDIT_MODELS = set(_MODEL_SETS["image_edit"])
+VIDEO_GENERATION_MODELS = set(_MODEL_SETS["video_generation"])
+MOTION_MODELS = set(_MODEL_SETS["motion"])
+VIDEO_EDIT_MODELS = set(_MODEL_SETS["video_edit"])
+VIDEO_MODELS = set(VIDEO_GENERATION_MODELS | MOTION_MODELS | VIDEO_EDIT_MODELS)
 VIDEO_EDIT_FEATURES = {"style-transfer", "video-extend", "video-remix"}
-VISION_REVIEW_MODELS = {"qwen3-vl-plus", "qwen3.5-omni-plus"}
-AUDIO_MODELS = {"mureka-o1-instrumental", "vidu-timing2audio"}
-VIDEO_DURATION_OPTIONS: dict[str, tuple[float, ...]] = {
-    "wan2.7-t2v": (3.0, 5.0, 10.0, 15.0),
-    "wan2.6-t2v-fast": (3.0, 5.0),
-    "wan2.7-i2v": (3.0, 5.0, 10.0),
-    "wan2.7-r2v": (3.0, 5.0, 10.0, 15.0),
-    "wan2.7-videoedit": (3.0, 5.0, 10.0),
-    "doubao-seedance-2-0": (3.0, 5.0, 10.0),
-    "doubao-seedance-2-0-fast": (3.0, 5.0, 10.0),
-    "doubao-seedance-1-5-pro": (3.0, 5.0, 10.0),
-    "kling-v3-video-generation": (3.0, 5.0, 10.0),
-    "kling-v3-omni-video-generation": (3.0, 5.0, 10.0),
-    "pixverse-v6-t2v": (3.0, 5.0, 10.0),
-    "vidu-q3-pro-text2video": (5.0, 10.0),
-    "vidu-q3-pro-img2video": (5.0, 10.0),
-    "vidu-q3-pro-start-end2video": (5.0, 10.0),
-}
-AUDIO_DURATION_OPTIONS: dict[str, tuple[int, ...]] = {
-    "music": (15, 30, 45, 60),
-    "sound-effect": (3, 5, 8, 10),
-}
+VISION_REVIEW_MODELS = set(_MODEL_SETS["vision_review"])
+AUDIO_MODELS = set(_MODEL_SETS["audio_music"] | _MODEL_SETS["audio_sound_effect"])
+SPEECH_MODELS = set(_MODEL_SETS["audio_speech"])
+VIDEO_DURATION_OPTIONS: dict[str, tuple[float, ...]] = get_asset_studio_video_duration_options()
+AUDIO_DURATION_OPTIONS: dict[str, tuple[int, ...]] = get_asset_studio_audio_duration_options()
+DEFAULT_IMAGE_GENERATION_MODEL_ID = get_asset_studio_default_model_id("asset_studio_image_generation", "wan2.7-image")
+DEFAULT_IMAGE_EDIT_MODEL_ID = get_asset_studio_default_model_id("asset_studio_image_edit", "qwen-image-edit-plus")
+DEFAULT_VIDEO_GENERATION_MODEL_ID = get_asset_studio_default_model_id("asset_studio_video_generation", "wan2.7-t2v")
+DEFAULT_VIDEO_EDIT_MODEL_ID = get_asset_studio_default_model_id("asset_studio_video_edit", "wan2.7-videoedit")
+DEFAULT_MOTION_MODEL_ID = get_asset_studio_default_model_id("asset_studio_motion", "wan2.7-i2v")
+DEFAULT_AUDIO_MUSIC_MODEL_ID = get_asset_studio_default_model_id("asset_studio_audio_music", "mureka-o1-instrumental")
+DEFAULT_AUDIO_SOUND_EFFECT_MODEL_ID = get_asset_studio_default_model_id("asset_studio_audio_sound_effect", "vidu-timing2audio")
+DEFAULT_AUDIO_SPEECH_MODEL_ID = get_asset_studio_default_model_id("asset_studio_audio_speech", "qwen3-tts-instruct-flash")
+DEFAULT_VISION_REVIEW_MODEL_ID = get_asset_studio_default_model_id("asset_studio_vision_review", "qwen3-vl-plus")
 IMAGE_FILE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
 VIDEO_FILE_SUFFIXES = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
 ALLOWED_OUTPUT_FILE_SUFFIXES = {

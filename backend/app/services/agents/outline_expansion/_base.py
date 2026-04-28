@@ -57,10 +57,9 @@ class OutlineExpanderBase:
         self.plot_architect = PlotArchitectAgent(self.knowledge_base, self.memory_manager)
         self.character_designer = CharacterDesignerAgent(self.knowledge_base, self.memory_manager)
 
-        # 🚀 协同扩展全链路统一使用 deepseek-v4-pro（384K 超长输出）
-        # 旧的 qwen3.5-plus / DeepSeek-R1 / qwen-long 分级路由已废弃：
-        # V4 Pro 一次可输出约 58–65 万汉字，单卷乃至整本细纲均可一次生成，
-        # 无需再依章节数动态切换，也无需再对输出进行二次裁剪。
+        # 常规协同主 llm 保持现有默认配置；
+        # 卷细化专用 agent 会在下方统一切到 deepseek-v4-pro，
+        # 避免超长逐章输出时中途收缩成范围摘要或解释性废话。
         outline_expand_max_tokens = 32768
         outline_expand_timeout = estimate_model_timeout_seconds(
             "qwen3.5-plus",
@@ -73,7 +72,7 @@ class OutlineExpanderBase:
         )
 
         # 以下三个属性保留字段名以兼容既有调用点（_volumedetail / _incrementalexpansion / 测试），
-        # 但均指向同一份 deepseek-v4-pro 实例，不再做能力分级。
+        # 但均统一切到 deepseek-v4-pro，不再做能力分级。
         volume_detail_max_tokens = 64000
         volume_detail_timeout = estimate_model_timeout_seconds(
             "deepseek-v4-pro",
@@ -86,26 +85,23 @@ class OutlineExpanderBase:
         )
         self.plot_architect_r1 = PlotArchitectAgent(self.knowledge_base, self.memory_manager, llm=r1_llm)
 
-        plus_max_tokens = 32768
-        plus_timeout = estimate_model_timeout_seconds(
-            "qwen3.5-plus",
-            plus_max_tokens,
-        )
+        plus_max_tokens = volume_detail_max_tokens
+        plus_timeout = volume_detail_timeout
         plus_llm = create_task_llm(
-            model="qwen3.5-plus",
+            model="deepseek-v4-pro",
             max_tokens=plus_max_tokens,
             timeout=plus_timeout,
         )
         self.plot_architect_plus = PlotArchitectAgent(self.knowledge_base, self.memory_manager, llm=plus_llm)
 
         large_volume_llm = create_task_llm(
-            model="qwen3.5-plus",
+            model="deepseek-v4-pro",
             max_tokens=plus_max_tokens,
             timeout=plus_timeout,
         )
         self.plot_architect_large = PlotArchitectAgent(self.knowledge_base, self.memory_manager, llm=large_volume_llm)
 
-        logger.debug("🚀 协同扩展统一使用 deepseek-v4-pro 模型（384K 超长输出）")
+        logger.debug("🚀 卷细化协同统一使用 deepseek-v4-pro 模型（384K 超长输出）")
         
         # 🎆 初始化分层摘要器
         self.layered_summarizer = LayeredSummarizer(

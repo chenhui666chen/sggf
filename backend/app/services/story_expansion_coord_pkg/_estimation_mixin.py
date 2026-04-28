@@ -324,12 +324,28 @@ class EstimationMixin:
         volume_detail_config: Optional[Dict[str, Any]],
     ) -> int:
         normalized = cls._normalize_volume_detail_config(volume_detail_config)
+        planned_count = normalized.get("planned_chapter_count")
+        if planned_count is not None:
+            try:
+                return max(1, int(planned_count))
+            except Exception:
+                pass
+
+        planned_range = normalized.get("planned_chapter_range")
+        if isinstance(planned_range, tuple) and len(planned_range) == 2:
+            try:
+                start = int(planned_range[0])
+                end = int(planned_range[1])
+                return max(1, end - start + 1)
+            except Exception:
+                pass
+
         chapter_window = normalized.get("chapters_count_range")
         if isinstance(chapter_window, tuple) and len(chapter_window) == 2:
             try:
                 lower = max(1, int(chapter_window[0]))
                 upper = max(lower, int(chapter_window[1]))
-                return upper
+                return max(lower, min(upper, lower + max(0, (upper - lower) // 2)))
             except Exception:
                 pass
 

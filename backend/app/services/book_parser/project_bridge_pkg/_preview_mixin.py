@@ -19,6 +19,7 @@ from app.services.character_parser import (
     _build_personality_anchor_text,
     infer_story_stance_from_text_evidence,
 )
+from app.services.story_text_utils import split_story_event_items
 from app.services.setting_templates import get_hierarchy_config_json
 from app.utils.datetime_utils import utc_now
 
@@ -151,6 +152,13 @@ class PreviewMixin:
         if len(cleaned) > max_length:
             return cleaned[: max_length - 3].rstrip() + "..."
         return cleaned
+
+    @classmethod
+    def _normalize_plot_outline_key_events(cls, value: Any, *, limit: int = 5) -> List[str]:
+        items = split_story_event_items(value, limit=limit)
+        if items:
+            return cls._deduplicate_memory_items(items, limit=limit)
+        return cls._normalize_plot_outline_item_list(value, limit=limit)
 
     @classmethod
     def _deduplicate_memory_items(cls, items: List[str], limit: int) -> List[str]:
@@ -375,7 +383,7 @@ class PreviewMixin:
             outline_data = outline_data if isinstance(outline_data, dict) else {}
 
             summary = self._normalize_memory_text(chapter.summary)
-            key_events = self._normalize_plot_outline_item_list(
+            key_events = self._normalize_plot_outline_key_events(
                 self._decode_json_field(chapter.key_events, [])
             )
             appearing_characters = self._normalize_plot_outline_item_list(
@@ -691,16 +699,14 @@ class PreviewMixin:
                 block.get("title"),
                 default=f"章节推进{chapter_number}",
             )
-            key_events = self._normalize_plot_outline_item_list(
+            key_events = self._normalize_plot_outline_key_events(
                 block.get("key_events"),
                 limit=5,
             ) or ["待补充"]
             parts.append(f"第{chapter_number}章：{title}")
             parts.append(f"- 场景目标：{self._normalize_memory_text(block.get('scene_goal')) or '待补充'}")
             parts.append(f"- 冲突设计：{self._normalize_memory_text(block.get('conflict_design')) or '待补充'}")
-            parts.append("- 关键事件：")
-            for event_index, event in enumerate(key_events, start=1):
-                parts.append(f"  {event_index}. {event}")
+            parts.append(f"- 关键事件：{'；'.join(key_events)}")
             parts.append(f"- 涉及人物：{self._normalize_memory_text(block.get('involved_characters')) or '待补充'}")
             parts.append(f"- 人物推进：{self._normalize_memory_text(block.get('character_progress')) or '待补充'}")
             parts.append(f"- 情节作用：{self._normalize_memory_text(block.get('plot_function')) or '待补充'}")

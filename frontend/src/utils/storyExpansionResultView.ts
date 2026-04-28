@@ -54,6 +54,7 @@ export interface StoryExpansionExecutionRoundView {
   key: string
   title: string
   strategyLabel: string | null
+  tailSupplementLabel?: string
   chapterRangeText: string
   characterRangeText: string
   plotIncrementText: string | null
@@ -247,6 +248,7 @@ function createExecutionRoundViews(
     key: `${round?.round || round?.stage || 'round'}-${index}`,
     title: getExecutionRoundTitle(round, index),
     strategyLabel: hasText(round?.strategy) ? `策略：${round.strategy!.trim()}` : null,
+    ...(round?.tail_supplement ? { tailSupplementLabel: '尾差补章' } : {}),
     chapterRangeText: `细化章节：${round?.before_chapter_count ?? fallbackChapterBefore} → ${round?.after_chapter_count ?? fallbackChapterAfter}`,
     characterRangeText: `人物：${round?.before_character_count ?? fallbackCharacterBefore} → ${round?.after_character_count ?? fallbackCharacterAfter}`,
     plotIncrementText:

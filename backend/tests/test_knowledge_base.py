@@ -26,6 +26,19 @@ class _FakeChroma:
         self.kwargs = kwargs
 
 
+class _FakeSplitter:
+    def split_text(self, text):
+        return [text]
+
+
+class _FakeVectorstoreForAdd:
+    def __init__(self):
+        self.added_documents = []
+
+    def add_documents(self, documents):
+        self.added_documents.extend(documents)
+
+
 def _install_fake_chromadb(monkeypatch, persistent_client_cls):
     fake_chromadb = types.ModuleType("chromadb")
     fake_chromadb.PersistentClient = persistent_client_cls
@@ -69,3 +82,19 @@ def test_knowledge_base_falls_back_to_in_memory_after_all_persistent_attempts_fa
     assert kb.active_persist_directory is None
     assert "client" not in kb.vectorstore.kwargs
     assert kb.vectorstore.kwargs["collection_name"] == "novel_knowledge"
+
+
+def test_add_plot_outline_preserves_plot_outline_type():
+    kb = object.__new__(knowledge_base_module.NovelKnowledgeBase)
+    kb.text_splitter = _FakeSplitter()
+    kb.vectorstore = _FakeVectorstoreForAdd()
+
+    kb.add_plot_outline(
+        "project_15_plot_outline",
+        "第17章：进入遗迹",
+        {"project_id": "15", "type": "chapter"},
+    )
+
+    assert len(kb.vectorstore.added_documents) == 1
+    assert kb.vectorstore.added_documents[0].metadata["type"] == "plot_outline"
+    assert kb.vectorstore.added_documents[0].metadata["project_id"] == "15"

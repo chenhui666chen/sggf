@@ -125,6 +125,7 @@ function coerceExecutionRound(value: unknown): StoryExpansionExecutionRound | nu
     round: asInteger(record.round),
     stage: asString(record.stage),
     strategy: asString(record.strategy),
+    tail_supplement: asBoolean(record.tail_supplement),
     before_chapter_count: asInteger(record.before_chapter_count),
     after_chapter_count: asInteger(record.after_chapter_count),
     before_character_count: asInteger(record.before_character_count),
@@ -249,6 +250,54 @@ export function coerceStoryExpansionResult(value: unknown): StoryExpansionResult
     goal_reached: asBoolean(record.goal_reached),
     message: asString(record.message),
   }
+}
+
+export function mergeStoryExpansionRepairResult(
+  previousResult: StoryExpansionResult | null | undefined,
+  repairedResult: unknown,
+): StoryExpansionResult | null {
+  const previous = coerceStoryExpansionResult(previousResult)
+  const repaired = coerceStoryExpansionResult(repairedResult)
+
+  if (!repaired) {
+    return null
+  }
+
+  const baseAnalysis = repaired.expansion_analysis ?? previous?.expansion_analysis
+  const synchronizedAnalysis = baseAnalysis
+    ? {
+      ...baseAnalysis,
+      validation: repaired.validation_after
+        ?? repaired.validation_before
+        ?? baseAnalysis.validation,
+    }
+    : undefined
+
+  return coerceStoryExpansionResult({
+    ...previous,
+    ...repaired,
+    execution_rounds: repaired.execution_rounds?.length
+      ? repaired.execution_rounds
+      : (previous?.execution_rounds ?? []),
+    outline_ops: repaired.outline_ops?.length
+      ? repaired.outline_ops
+      : (previous?.outline_ops ?? []),
+    new_characters: repaired.new_characters?.length
+      ? repaired.new_characters
+      : (previous?.new_characters ?? []),
+    story_strategy: repaired.story_strategy ?? previous?.story_strategy,
+    story_intent: repaired.story_intent ?? previous?.story_intent,
+    story_expansion_mode: repaired.story_expansion_mode ?? previous?.story_expansion_mode,
+    story_preserve_written_mode:
+      repaired.story_preserve_written_mode ?? previous?.story_preserve_written_mode,
+    written_chapter_context: repaired.written_chapter_context ?? previous?.written_chapter_context,
+    character_sync: repaired.character_sync ?? previous?.character_sync,
+    volume_index: repaired.volume_index ?? previous?.volume_index ?? null,
+    volume_chapter_range: repaired.volume_chapter_range ?? previous?.volume_chapter_range ?? null,
+    epic_total_volumes: repaired.epic_total_volumes ?? previous?.epic_total_volumes ?? null,
+    epic_chapter_range: repaired.epic_chapter_range ?? previous?.epic_chapter_range ?? null,
+    expansion_analysis: synchronizedAnalysis,
+  })
 }
 
 export function createStoryExpansionResultView(

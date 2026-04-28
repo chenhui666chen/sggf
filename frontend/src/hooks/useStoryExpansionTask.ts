@@ -54,6 +54,7 @@ interface StoryTaskStatusResponse {
 }
 
 const STORY_EXPANSION_RECOVERY_MISSING_TASK_ID_MESSAGE = '协同扩展任务无法恢复，请重新发起'
+const STORY_EXPANSION_STATUS_POLL_INTERVAL_MS = 30_000
 
 export function useStoryExpansionTask({
   projectId,
@@ -277,6 +278,47 @@ export function useStoryExpansionTask({
     handleStoryExpansionTaskSuccess,
     resolveStoryExpansionResult,
   ])
+
+  useEffect(() => {
+    if (!expandingStory) {
+      return
+    }
+
+    let disposed = false
+    let polling = false
+
+    const pollTaskStatus = async () => {
+      const activeTaskId = activeTaskIdRef.current
+      if (!activeTaskId || disposed || polling) {
+        return
+      }
+
+      polling = true
+      try {
+        const statusData = await fetchTaskStatus(activeTaskId)
+        if (!statusData || disposed) {
+          return
+        }
+
+        applyRecoveredTaskStatus(statusData, {
+          successMessage: '协同扩展完成',
+          parseFailureMessage: '协同扩展已完成，但结果解析失败，已刷新最新数据',
+        })
+      } finally {
+        polling = false
+      }
+    }
+
+    void pollTaskStatus()
+    const intervalId = window.setInterval(() => {
+      void pollTaskStatus()
+    }, STORY_EXPANSION_STATUS_POLL_INTERVAL_MS)
+
+    return () => {
+      disposed = true
+      window.clearInterval(intervalId)
+    }
+  }, [applyRecoveredTaskStatus, expandingStory, fetchTaskStatus])
 
   useEffect(() => {
     if (!projectId) {

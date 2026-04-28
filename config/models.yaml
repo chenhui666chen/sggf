@@ -130,9 +130,9 @@
   - book_cover
   - storyboard
 - id: wan2.7-t2v
-  name: Wan 2.6 Text-to-Video
+  name: Wan 2.7 Text-to-Video
   provider: alibaba
-  version: v2.6
+  version: v2.7
   status: active
   modality:
   - text_to_video
@@ -244,7 +244,7 @@
     priority: 2
   endpoint: /api/v1/services/aigc/video-generation/video-synthesis
   auth_method: bearer
-  summary: 项目当前归档的主力文生视频模型。阿里云百炼视频生成文档将 Wan 2.6 定位为更偏高质量的生成路径，适合镜头控制、参考约束和电影化短片生成。
+  summary: 项目当前归档的主力文生视频模型。当前接入版本为 Wan 2.7，适合镜头控制、参考约束和电影化短片生成。
   recommended_scenarios:
   - DreamWeaver 分镜镜头生成
   - 预告片与 teaser 短片制作
@@ -623,9 +623,9 @@
   - short_video
   - storyboard
 - id: wan2.7-i2v
-  name: Wan 2.6 Image-to-Video
+  name: Wan 2.7 Image-to-Video
   provider: alibaba
-  version: v2.6
+  version: v2.7
   status: active
   modality:
   - image_to_video
@@ -726,7 +726,7 @@
     priority: 2
   endpoint: /api/v1/services/aigc/video-generation/video-synthesis
   auth_method: bearer
-  summary: 图生视频模型，将静态图片转换为短视频。适合角色立绘动画化、场景动画化等场景。
+  summary: 图生视频模型，将静态图片转换为短视频。当前接入版本为 Wan 2.7，适合角色立绘动画化、场景动画化等场景。
   recommended_scenarios:
   - 角色立绘动画化
   - 场景概念图动画化
@@ -947,9 +947,9 @@
             ,\n    prompt=\"水面泛起涟漪，云朵缓慢移动，光线变化\",\n    reference_image=\"landscape.png\"\
             ,\n    duration=8\n)\n"
 - id: wan2.7-r2v
-  name: Wan 2.6 Reference-to-Video
+  name: Wan 2.7 Reference-to-Video
   provider: alibaba
-  version: v2.6
+  version: v2.7
   status: active
   modality:
   - video_to_video
@@ -1078,7 +1078,7 @@
     priority: 2
   endpoint: /api/v1/services/aigc/video-generation/video-synthesis
   auth_method: bearer
-  summary: 参考生视频模型，支持多参考输入和首尾帧控制。适合需要精确控制视频起始/结束画面、保持角色一致性的场景。
+  summary: 参考生视频模型，支持多参考输入和首尾帧控制。当前接入版本为 Wan 2.7，适合需要精确控制视频起始/结束画面、保持角色一致性的场景。
   recommended_scenarios:
   - 角色一致性视频生成
   - 首尾帧动画过渡

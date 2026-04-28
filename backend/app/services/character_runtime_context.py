@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 
 RELATION_LABEL_PREFIXES = (
@@ -83,6 +83,21 @@ MAINLINE_RESOLVED_KEYWORDS = (
     "\u5df2\u88ab\u5904\u7406",
     "\u5df2\u89e3\u51b3",
     "\u6b7b\u4ea1\u63ed\u793a",
+)
+CORE_CHARACTER_KEYWORDS = (
+    "\u4e3b\u89d2",
+    "\u7537\u4e3b",
+    "\u5973\u4e3b",
+    "\u4e3b\u4eba\u516c",
+    "\u6838\u5fc3",
+    "\u5173\u952e",
+    "\u4e3b\u8981",
+    "\u53cd\u6d3e",
+    "\u5bf9\u624b",
+    "\u5bbf\u654c",
+    "\u5bfc\u5e08",
+    "\u642d\u6863",
+    "\u9886\u8896",
 )
 
 _INLINE_SPLIT_PATTERN = re.compile(r"[;\uff1b\n]+")
@@ -718,23 +733,257 @@ def build_character_runtime_metadata(name: str, profile_text: Any) -> dict[str, 
     }
 
 
+def _parse_characters_from_text(characters_text: Any) -> tuple[str, list[Any]]:
+    from app.services.character_parser import CharacterTextParser
+
+    content = str(characters_text or "").strip()
+    if not content:
+        return "", []
+
+    parser = CharacterTextParser()
+    parsed_characters = parser.parse_all_characters(content) or []
+    return content, parsed_characters
+
+
+def _dedupe_names(values: Iterable[Any]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for raw_value in values:
+        normalized = _clean_text(raw_value)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(normalized)
+    return ordered
+
+
+def _prioritize_characters(
+    parsed_characters: list[Any],
+    preferred_names: Optional[list[str]] = None,
+) -> list[Any]:
+    normalized_preferred_names = _dedupe_names(preferred_names or [])
+    if not normalized_preferred_names:
+        return list(parsed_characters)
+
+    preferred_order = {
+        name: index
+        for index, name in enumerate(normalized_preferred_names)
+    }
+    prioritized = []
+    remaining = []
+    for character in parsed_characters:
+        normalized_name = _clean_text(getattr(character, "name", ""))
+        if normalized_name in preferred_order:
+            prioritized.append((preferred_order[normalized_name], character))
+        else:
+            remaining.append(character)
+    prioritized.sort(key=lambda item: item[0])
+    return [character for _, character in prioritized] + remaining
+
+
+def _is_core_character(character: Any) -> bool:
+    role_hints = " ".join(
+        part
+        for part in (
+            _clean_text(getattr(character, "role", "")),
+            _clean_text(getattr(character, "role_position", "")),
+            _clean_text(getattr(character, "importance_level", "")),
+        )
+        if part
+    )
+    if not role_hints:
+        return False
+    return any(keyword in role_hints for keyword in CORE_CHARACTER_KEYWORDS)
+
+
+def _select_core_characters(
+    parsed_characters: list[Any],
+    *,
+    preferred_names: Optional[list[str]] = None,
+    max_characters: int = 4,
+) -> list[Any]:
+    if max_characters <= 0:
+        return []
+
+    normalized_preferred_names = set(_dedupe_names(preferred_names or []))
+    prioritized_characters = _prioritize_characters(parsed_characters, preferred_names)
+
+    preferred_core: list[Any] = []
+    remaining_core: list[Any] = []
+    preferred_other: list[Any] = []
+    remaining_other: list[Any] = []
+
+    for character in prioritized_characters:
+        normalized_name = _clean_text(getattr(character, "name", ""))
+        is_preferred = normalized_name in normalized_preferred_names
+        is_core = _is_core_character(character)
+        if is_preferred and is_core:
+            preferred_core.append(character)
+        elif is_core:
+            remaining_core.append(character)
+        elif is_preferred:
+            preferred_other.append(character)
+        else:
+            remaining_other.append(character)
+
+    ordered = preferred_core + remaining_core + preferred_other + remaining_other
+    selected: list[Any] = []
+    seen_names: set[str] = set()
+    for character in ordered:
+        normalized_name = _clean_text(getattr(character, "name", ""))
+        if not normalized_name or normalized_name in seen_names:
+            continue
+        seen_names.add(normalized_name)
+        selected.append(character)
+        if len(selected) >= max_characters:
+            break
+    return selected
+
+
+def extract_core_character_names_from_text(
+    characters_text: Any,
+    *,
+    preferred_names: Optional[list[str]] = None,
+    max_characters: int = 4,
+) -> list[str]:
+    _, parsed_characters = _parse_characters_from_text(characters_text)
+    if not parsed_characters:
+        return []
+
+    return [
+        _clean_text(getattr(character, "name", ""))
+        for character in _select_core_characters(
+            parsed_characters,
+            preferred_names=preferred_names,
+            max_characters=max_characters,
+        )
+        if _clean_text(getattr(character, "name", ""))
+    ]
+
+
+def build_core_character_anchor_context_from_text(
+    characters_text: Any,
+    *,
+    preferred_names: Optional[list[str]] = None,
+    max_characters: int = 4,
+    detail_limit: int = 720,
+) -> str:
+    content, parsed_characters = _parse_characters_from_text(characters_text)
+    if not content:
+        return ""
+    if not parsed_characters:
+        return _truncate_text(content, detail_limit)
+
+    selected_characters = _select_core_characters(
+        parsed_characters,
+        preferred_names=preferred_names,
+        max_characters=max_characters,
+    )
+    if not selected_characters:
+        return ""
+
+    lines: list[str] = []
+    current_length = 0
+    truncated = False
+    for character in selected_characters:
+        brief = build_character_runtime_brief(
+            name=character.name,
+            role=character.role,
+            role_position=character.role_position,
+            faction=character.faction,
+            motivation=character.motivation,
+            relationships=character.relationships,
+            mainline_role=character.mainline_role,
+            mainline_clues=character.mainline_clues,
+            max_length=180,
+        )
+        if not brief:
+            continue
+        candidate = f"- {brief}"
+        projected_length = current_length + len(candidate) + (1 if lines else 0)
+        if lines and projected_length > detail_limit:
+            truncated = True
+            break
+        if not lines and len(candidate) > detail_limit:
+            lines.append(_truncate_text(candidate, detail_limit))
+            truncated = True
+            current_length = len(lines[0])
+            break
+        lines.append(candidate)
+        current_length = projected_length
+
+    if len(selected_characters) > len(lines):
+        truncated = True
+
+    if not lines:
+        return ""
+
+    if truncated:
+        lines.append("\uff08\u5df2\u622a\u65ad\uff0c\u4ec5\u4fdd\u7559\u6838\u5fc3\u89d2\u8272\u951a\u70b9\uff09")
+
+    return "\u3010\u6838\u5fc3\u89d2\u8272\u951a\u70b9\u3011\n" + "\n".join(lines)
+
+
+def build_focus_character_relationship_context_from_text(
+    characters_text: Any,
+    *,
+    focus_names: Optional[list[str]] = None,
+    fallback_names: Optional[list[str]] = None,
+    max_characters: int = 4,
+    detail_limit: int = 520,
+) -> str:
+    _, parsed_characters = _parse_characters_from_text(characters_text)
+    if not parsed_characters or max_characters <= 0:
+        return ""
+
+    preferred_names = _dedupe_names((focus_names or []) + (fallback_names or []))
+    prioritized_characters = _prioritize_characters(parsed_characters, preferred_names)
+
+    lines: list[str] = []
+    current_length = 0
+    for character in prioritized_characters:
+        name = _clean_text(getattr(character, "name", ""))
+        relationship_text = build_current_relationship_summary(
+            getattr(character, "relationships", ""),
+            max_items=3,
+            max_chars=128,
+        )
+        if not name or not relationship_text:
+            continue
+
+        candidate = f"- {name}\uff1a{relationship_text}"
+        projected_length = current_length + len(candidate) + (1 if lines else 0)
+        if lines and projected_length > detail_limit:
+            break
+        if not lines and len(candidate) > detail_limit:
+            lines.append(_truncate_text(candidate, detail_limit))
+            break
+        lines.append(candidate)
+        current_length = projected_length
+        if len(lines) >= max_characters:
+            break
+
+    if not lines:
+        return ""
+
+    return "\u3010\u7126\u70b9\u4eba\u7269\u5173\u7cfb\u3011\n" + "\n".join(lines)
+
+
 def build_character_prompt_context_from_text(
     characters_text: Any,
     *,
     detail_limit: int,
     summary_limit: int = 1800,
     max_characters: int = 8,
+    preferred_names: Optional[list[str]] = None,
 ) -> str:
-    from app.services.character_parser import CharacterTextParser
-
-    content = str(characters_text or "").strip()
+    content, parsed_characters = _parse_characters_from_text(characters_text)
     if not content:
         return ""
-
-    parser = CharacterTextParser()
-    parsed_characters = parser.parse_all_characters(content)
     if not parsed_characters:
         return _truncate_text(content, max(detail_limit, summary_limit))
+
+    parsed_characters = _prioritize_characters(parsed_characters, preferred_names)
 
     roster_lines: list[str] = []
     for index, character in enumerate(parsed_characters[:max_characters], 1):

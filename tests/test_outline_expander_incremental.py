@@ -999,6 +999,100 @@ def test_expand_volume_detail_prefers_structured_json_payloads(monkeypatch):
     assert result["validation_passed"] is True
 
 
+def test_expand_volume_detail_normalizes_malformed_table_fields_before_return(monkeypatch):
+    expander = _make_base_expander()
+    expander.llm = object()
+    expander.plot_architect = _QueueAgent([])
+    expander.creative_director = _QueueAgent([])
+    expander.plot_architect_r1 = _QueueAgent(
+        [
+            """## 一、故事概述
+- 苏璃与顾长庚闯入黑门试炼，开始接触封印室外围。
+
+## 二、第2卷详细规划（预计2-3章，从第31章开始）
+
+### 第31章：《黑门试炼》
+| 字段 | 内容 |
+| --- | --- |
+| 场景目标 | 解开关于苏璃家族债务的石碑试炼并穿透迷宫，抵达封印室前最后一区域 |
+| 冲突设计 | 苏璃内心对家族罪感的毁灭性崩塌 vs 以逻辑漏洞绕过天庄规则完成通透 |
+| 关键事件 | ① 碑文清楚写明苏璃所在家族曾出力开发系统 |
+| **涉及人物】 顾长庚、苏璃、丹丘生 | |
+| 人物推进 | 苏璃开始主动承担家族秘密带来的代价 |
+| **情节作用】 第二道试炼完结；直通封印室进入多路争夺 | |
+| **结尾钩子】 丹丘生推开黑门，从二人视线中消失 | |
+
+### 第32章：《夜潮回响》
+- **场景目标**：顾长庚与苏璃进入封印室外围，确认多方势力已经逼近。
+- **冲突设计**：丹丘生消失后留下的误导痕迹，让二人必须在信任与怀疑之间做出选择。
+- **关键事件**：
+1. 顾长庚在封印纹路中找到旧案坐标
+2. 苏璃意识到家族隐瞒的不只是债务
+- **涉及人物**：顾长庚、苏璃
+- **人物推进**：顾长庚开始把关键线索主动共享给苏璃。
+- **情节作用**：把卷级主线从试炼推进到封印室争夺战前夜。
+- **结尾钩子**：封印室深处传来第三次钟鸣。
+
+## 三、伏笔埋设检查
+- 黑塔钟声第二次广播，暗示追讨范围进一步扩大。
+
+## 四、卷尾衔接检查
+- 结尾必须把内城议会的追索线索抛给下一卷。
+"""
+        ]
+    )
+    expander.plot_architect_plus = _QueueAgent([])
+
+    monkeypatch.setattr(
+        outline_expander_module,
+        "get_chapter_renumberer",
+        lambda: _DummyRenumberer(),
+    )
+    monkeypatch.setattr(
+        outline_expander_module,
+        "get_consistency_validator",
+        lambda strict_mode=True: _DummyConsistencyValidator(),
+    )
+
+    result = expander.expand_volume_detail(
+        framework_content="""## 一、整体叙事节奏
+- 前期（第1-2卷）：黑门试炼与封印室争夺并行推进
+
+## 三、2卷概要
+【第2卷】黑门回响
+- 核心：试炼推进至封印室外围，旧案线索开始与家族隐秘交叉
+""",
+        target_volume_index=2,
+        world_setting="修真世界，多方势力围绕封印室与旧案残卷展开争夺。",
+        characters="### 【姓名】：顾长庚\n【角色定位】：主角\n\n### 【姓名】：苏璃\n【角色定位】：核心同伴\n\n### 【姓名】：丹丘生\n【角色定位】：搅局者",
+        start_chapter_num=31,
+        chapters_count_range=(2, 3),
+        prev_volume_summary={
+            "core_plot_completed": "主角确认黑门试炼与旧案线索相关",
+            "ending_hook": "黑门背后通向封印室外围",
+            "next_volume_target": "进入封印室外围并确认争夺各方",
+            "character_status_update": "顾长庚与苏璃建立脆弱同盟",
+            "new_foreshadowings": ["丹丘生的真实目的"],
+        },
+        pending_foreshadowings=[
+            {"action": "plant", "content": "黑塔钟声与封印室追索同步升级", "reveal_volume": 3},
+        ],
+    )
+
+    volume_text = result["expanded_outline"]
+    assert "| 字段 | 内容 |" not in volume_text
+    assert "**涉及人物】" not in volume_text
+    assert "**情节作用】" not in volume_text
+    assert "### 第31章：《黑门试炼》" in volume_text
+    assert "- **涉及人物**：顾长庚、苏璃、丹丘生" in volume_text
+    assert "- **情节作用**：第二道试炼完结；直通封印室进入多路争夺" in volume_text
+    assert "- **结尾钩子**：丹丘生推开黑门，从二人视线中消失" in volume_text
+    assert volume_text.count("## 三、伏笔埋设检查") == 1
+    assert volume_text.count("## 四、卷尾衔接检查") == 1
+    assert result["chapter_count"] == 2
+    assert result["validation_passed"] is True
+
+
 def test_story_count_rendered_volume_detail_chapters_supports_emphasized_markdown_headings():
     volume_text = """## 二、第2卷详细规划（预计2-3章，从第31章开始）
 
@@ -1033,9 +1127,99 @@ def test_story_normalize_volume_detail_response_strips_preamble_before_story_hea
     assert "好的，作为精通叙事的情节架构师" not in normalized
 
 
-def test_estimate_volume_detail_model_prefers_plus_when_upper_bound_exceeds_80():
-    assert OutlineExpander.estimate_volume_detail_model((60, 100)) == "qwen3.5-plus"
+def test_expand_volume_detail_backfills_tail_sections_when_model_omits_them(monkeypatch):
+    expander = _make_base_expander()
+    expander.llm = object()
+    expander.plot_architect = _QueueAgent([])
+    expander.creative_director = _QueueAgent([])
+    expander.plot_architect_r1 = _QueueAgent(
+        [
+            """## 一、故事概述
+- 第二卷承接上一卷，转入宗门旧案调查。
+
+## 二、第2卷详细规划（预计2-3章，从第31章开始）
+
+### 第31章：《入局宗门》
+- **场景目标**：主角潜入宗门并锁定旧阁入口
+- **冲突设计**：执事临时盘查，主角必须补齐身份漏洞
+- **关键事件**：取得外门通行资格
+- **涉及人物**：林舟、顾晚
+- **人物推进**：两人从试探转向初步默契
+- **情节作用**：打开宗门旧案调查入口
+- **结尾钩子**：旧阁方向传来异常钟声
+
+### 第32章：《旧阁夜探》
+- **场景目标**：夜探旧阁并找到残缺案卷
+- **冲突设计**：旧阁内部存在延迟警报节点
+- **关键事件**：确认卷宗缺页指向内门暗线
+- **涉及人物**：林舟、顾晚
+- **人物推进**：顾晚开始主动接管撤离节奏
+- **情节作用**：将调查线推进到内门旧案层
+- **结尾钩子**：缺页卷宗提到了更深层的旧案入口
+"""
+        ]
+    )
+    expander.plot_architect_plus = _QueueAgent([])
+
+    monkeypatch.setattr(
+        outline_expander_module,
+        "get_chapter_renumberer",
+        lambda: _DummyRenumberer(),
+    )
+    monkeypatch.setattr(
+        outline_expander_module,
+        "get_consistency_validator",
+        lambda strict_mode=True: _DummyConsistencyValidator(),
+    )
+
+    result = expander.expand_volume_detail(
+        framework_content="【第2卷】青石余烬\n- 核心：宗门旧案调查升级",
+        target_volume_index=2,
+        world_setting="修仙世界，宗门与旧案暗线交织。",
+        characters="### 【姓名】：林舟\n【角色定位】：主角\n\n### 【姓名】：顾晚\n【角色定位】：盟友",
+        start_chapter_num=31,
+        chapters_count_range=(2, 3),
+        pending_foreshadowings=[
+            {"action": "埋设", "content": "旧阁缺页与内门旧案的关联", "reveal_volume": 3},
+        ],
+    )
+
+    volume_text = result["expanded_outline"]
+    assert "## 三、伏笔埋设检查" in volume_text
+    assert "- 待定章节：埋设 旧阁缺页与内门旧案的关联" in volume_text
+    assert "## 四、卷尾衔接检查" in volume_text
+    assert "✅ 本卷任务完成：" in volume_text
+    assert "✅ 下卷开局场景：" in volume_text
+    assert "✅ 卷尾钩子：缺页卷宗提到了更深层的旧案入口" in volume_text
+
+
+def test_estimate_volume_detail_model_always_prefers_deepseek_v4_pro():
+    assert OutlineExpander.estimate_volume_detail_model((60, 100)) == "deepseek-v4-pro"
     assert OutlineExpander.estimate_volume_detail_model((20, 80)) == "deepseek-v4-pro"
+
+
+def test_story_should_chunk_volume_detail_when_upper_bound_reaches_80():
+    assert OutlineExpander._story_should_chunk_volume_detail((60, 79)) is False
+    assert OutlineExpander._story_should_chunk_volume_detail((60, 80)) is True
+
+
+def test_story_resolve_volume_detail_chunk_size_uses_larger_default_for_large_volume():
+    assert OutlineExpander._story_resolve_volume_detail_chunk_size((20, 20)) == 20
+    assert OutlineExpander._story_resolve_volume_detail_chunk_size((60, 80)) == 36
+    assert OutlineExpander._story_resolve_volume_detail_chunk_size((60, 100)) == 36
+
+
+def test_story_resolve_volume_detail_primary_target_count_uses_midpoint_in_range():
+    assert OutlineExpander._story_resolve_volume_detail_primary_target_count((60, 100)) == 80
+    assert OutlineExpander._story_resolve_volume_detail_primary_target_count((20, 80)) == 50
+
+
+def test_story_build_volume_detail_chunk_ranges_split_explicit_target_count():
+    assert OutlineExpander._story_build_volume_detail_chunk_ranges(
+        start_chapter_num=31,
+        target_chapter_count=60,
+        chunk_size=36,
+    ) == [(31, 66), (67, 90)]
 
 
 def test_outline_expander_initializes_dynamic_timeouts(monkeypatch):
@@ -1100,11 +1284,143 @@ def test_outline_expander_initializes_dynamic_timeouts(monkeypatch):
     expander = OutlineExpander()
 
     assert expander.llm.runtime_options["timeout"] == 240
-    assert expander.plot_architect_plus.llm.runtime_options["timeout"] == 240
-    assert expander.plot_architect_large.llm.runtime_options["timeout"] == 240
+    assert expander.plot_architect_plus.llm.runtime_options["timeout"] == 480
+    assert expander.plot_architect_large.llm.runtime_options["timeout"] == 480
     assert expander.plot_architect_r1.llm.runtime_options["timeout"] == 480
     assert any(call["task_type"] == "outline_expand" and call["timeout"] == 240 for call in captured_calls)
     assert any(call["task_type"] == "volume_detail_expand" and call["timeout"] == 480 for call in captured_calls)
+    assert any(call["model"] == "deepseek-v4-pro" and call["timeout"] == 480 for call in captured_calls)
+
+
+def test_expand_volume_detail_uses_chunked_generation_when_volume_is_large(monkeypatch):
+    expander = _make_base_expander()
+    expander.llm = object()
+    expander.plot_architect = _QueueAgent([])
+    expander.creative_director = _QueueAgent([])
+    expander.plot_architect_plus = _QueueAgent([])
+    expander.plot_architect_r1 = _CapturingQueueAgent(
+        [
+            """
+            {
+              "story_overview": "第二卷承接黑门试炼余波，前半段先完成撤离与整编，后半段把主线推进到封印室外围争夺前夜。",
+              "volume_positioning": {
+                "stage_goal": "完成黑狱脱身并建立下一阶段潜入条件",
+                "main_conflict": "重伤撤离压力与外部清扫追索同时逼近"
+              },
+              "chapter_groups": [
+                {
+                  "arc": "撤离与整编",
+                  "chapter_span": "31-34",
+                  "stage_task": "完成黑狱撤离并接入外部支援",
+                  "conflict_upgrade": "从内场崩塌升级到外部清扫追索",
+                  "character_focus": "顾长庚、苏璃",
+                  "foreshadowing_task": "把封印室争夺线索前置"
+                }
+              ],
+              "chapters": [
+                {
+                  "chapter_number": 31,
+                  "title": "引爆之决",
+                  "scene_goal": "借铁面的爆破窗口脱离黑狱主结构",
+                  "conflict_design": "铁面必须用牺牲换取生路，顾长庚被迫接受撤离现实",
+                  "key_events": "铁面引爆支撑柱；顾长庚带着苏璃冲入排污管；陆南柯被坍塌吞没",
+                  "character_progress": "顾长庚第一次正面接过铁面留下的责任与日志",
+                  "plot_function": "完成黑狱篇章的爆点收束并打开逃亡段落",
+                  "ending_hook": "排污管道在爆炸余波中整体失衡",
+                  "involved_characters": ["顾长庚", "苏璃", "铁面"]
+                },
+                {
+                  "chapter_number": 32,
+                  "title": "管道逃亡",
+                  "scene_goal": "在失控排污通道中保住苏璃并找到出口",
+                  "conflict_design": "重伤、缺氧与追兵扫描残波同步逼近，顾长庚必须一边护人一边辨认路线",
+                  "key_events": "顾长庚拆开维护闸门；苏璃短暂苏醒指认旧标识；二人被激流卷出暗潭",
+                  "character_progress": "苏璃开始主动参与逃亡决策，不再只被动依赖顾长庚",
+                  "plot_function": "把卷内主线从黑狱内场切换到外部荒野求生",
+                  "ending_hook": "远处天庄净化白光开始覆盖整片山域",
+                  "involved_characters": ["顾长庚", "苏璃"]
+                }
+              ],
+              "foreshadowing_checks": [
+                {
+                  "chapter": "第31章",
+                  "action": "埋设",
+                  "content": "铁面日志中藏有倒悬之塔中继站结构图"
+                }
+              ],
+              "volume_connection_check": {
+                "core_task_completion": "完成黑狱脱身并带出关键日志",
+                "next_volume_opening": "借外部支援整编后转入封印室外围潜入",
+                "ending_hook": "日志里的结构图指向更大的监控核心"
+              }
+            }
+            """,
+            """### 第33章：《天降净罚》
+- **场景目标**：在荒山净化打击中找到临时掩体并避开追索扫描
+- **冲突设计**：白光净化覆盖地形，顾长庚必须顶着伤势拖着苏璃绕开扫描波峰
+- **关键事件**：净化白光抹平黑狱周边；顾长庚躲入塌陷废坑；苏璃记录净化节奏漏洞
+- **涉及人物**：顾长庚、苏璃
+- **人物推进**：顾长庚对“活下去”从被动坚持转为主动规划，苏璃开始补位技术侧判断
+- **情节作用**：把卷内逃亡压力升级为体系级追索，并埋下后续利用扫描漏洞的抓手
+- **结尾钩子**：灵盟旧频段在废坑中闪过极弱回应
+
+### 第34章：《沉默之履》
+- **场景目标**：沿结晶荒野转移并接入第一支可信外援
+- **冲突设计**：顾长庚必须判断求援信号真假，避免把自己和苏璃送进第二个包围圈
+- **关键事件**：两人穿越结晶荒野；顾长庚用铁面留下的密钥校验信号；魏青率47队接应成功
+- **涉及人物**：顾长庚、苏璃、魏青
+- **人物推进**：顾长庚开始把“孤身硬扛”转为有选择地建立协作链，苏璃重新建立对外沟通信心
+- **情节作用**：完成逃亡段落收束，把剧情送入整编与反击筹备阶段
+- **结尾钩子**：魏青带来万寿殿寿宴与续命丹的最新情报
+""",
+        ]
+    )
+    expander._story_should_chunk_volume_detail = lambda _chapters_count_range: True
+    expander._story_resolve_volume_detail_chunk_size = lambda _chapters_count_range: 2
+
+    monkeypatch.setattr(
+        outline_expander_module,
+        "get_chapter_renumberer",
+        lambda: _DummyRenumberer(),
+    )
+    monkeypatch.setattr(
+        outline_expander_module,
+        "get_consistency_validator",
+        lambda strict_mode=True: _DummyConsistencyValidator(),
+    )
+
+    result = expander.expand_volume_detail(
+        framework_content="【第2卷】黑门回响\n- 核心：黑狱脱身后转入外部荒野逃亡与整编。",
+        target_volume_index=2,
+        world_setting="修真世界，天庄以净化舰队执行高压清扫，外部荒野遍布结晶污染区。",
+        characters="### 【姓名】：顾长庚\n【角色定位】：主角\n\n### 【姓名】：苏璃\n【角色定位】：核心同伴\n\n### 【姓名】：魏青\n【角色定位】：外部接应者",
+        start_chapter_num=31,
+        chapters_count_range=(4, 4),
+        prev_volume_summary={
+            "core_plot_completed": "主角与苏璃闯入黑狱深层并逼近核心试炼",
+            "ending_hook": "铁面决定启动最终爆破预案",
+            "next_volume_target": "借爆破窗口逃出黑狱并活着把日志带出去",
+        },
+        pending_foreshadowings=[
+            {"action": "plant", "content": "倒悬之塔中继站结构图将在后续潜入中起关键作用", "reveal_volume": 3},
+        ],
+    )
+
+    assert len(expander.plot_architect_r1.prompts) == 2
+    assert "本次只展开第31章到第32章" in expander.plot_architect_r1.prompts[0]
+    assert "本次只补写第33章到第34章" in expander.plot_architect_r1.prompts[1]
+    assert "系统当前按约 4 章" in expander.plot_architect_r1.prompts[0]
+    assert "严禁重写第33章之前的任何章节" in expander.plot_architect_r1.prompts[1]
+    assert "不得重新从第31章起叙述" in expander.plot_architect_r1.prompts[1]
+    assert result["chapter_count"] == 4
+    assert result["chapters_start"] == 31
+    assert result["chapters_end"] == 34
+    assert "### 第31章：《引爆之决》" in result["expanded_outline"]
+    assert "### 第32章：《管道逃亡》" in result["expanded_outline"]
+    assert "### 第33章：《天降净罚》" in result["expanded_outline"]
+    assert "### 第34章：《沉默之履》" in result["expanded_outline"]
+    assert "## 三、伏笔埋设检查" in result["expanded_outline"]
+    assert "## 四、卷尾衔接检查" in result["expanded_outline"]
 
 
 def test_expand_volume_detail_uses_r1_chunk_supplement_after_large_volume_range_summary(monkeypatch):

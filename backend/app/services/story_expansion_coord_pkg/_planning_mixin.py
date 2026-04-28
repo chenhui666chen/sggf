@@ -52,6 +52,7 @@ from app.services.story_expansion_coord_pkg._standalone import (
 logger = logging.getLogger(__name__)
 
 class PlanningMixin:
+    @classmethod
     def _build_total_mode_suitability(
         cls,
         *,
@@ -263,6 +264,9 @@ class PlanningMixin:
             "volumes_data": None,
             "previous_volume_detail": "",
             "existing_volume_detail": "",
+            "planned_chapter_count": None,
+            "planned_chapter_range": None,
+            "planned_total_chapter_count": None,
             "expected_chapter_range": None,
             "expected_total_chapter_count": None,
             "current_total_chapter_count": None,
@@ -281,6 +285,8 @@ class PlanningMixin:
         for int_key in [
             "target_volume_index",
             "start_chapter_num",
+            "planned_chapter_count",
+            "planned_total_chapter_count",
             "expected_total_chapter_count",
             "current_total_chapter_count",
             "total_volumes",
@@ -293,7 +299,7 @@ class PlanningMixin:
             except Exception:
                 normalized[int_key] = None
 
-        for tuple_key in ["chapters_count_range", "expected_chapter_range"]:
+        for tuple_key in ["chapters_count_range", "planned_chapter_range", "expected_chapter_range"]:
             value = volume_detail_config.get(tuple_key)
             if isinstance(value, (list, tuple)) and len(value) == 2:
                 try:
@@ -302,6 +308,37 @@ class PlanningMixin:
                     normalized[tuple_key] = (lower, upper)
                 except Exception:
                     normalized[tuple_key] = None
+
+        chapter_window = normalized.get("chapters_count_range")
+        start_chapter_num = normalized.get("start_chapter_num")
+        if isinstance(chapter_window, tuple) and start_chapter_num:
+            lower = max(1, int(chapter_window[0] or 1))
+            upper = max(lower, int(chapter_window[1] or lower))
+            planned_count = normalized.get("planned_chapter_count")
+            try:
+                planned_count = int(planned_count or 0)
+            except Exception:
+                planned_count = 0
+            planned_range = normalized.get("planned_chapter_range")
+            if planned_count <= 0 and isinstance(planned_range, tuple):
+                planned_count = max(1, int(planned_range[1]) - int(planned_range[0]) + 1)
+            if planned_count <= 0:
+                planned_count = lower + max(0, (upper - lower) // 2)
+            normalized["planned_chapter_count"] = max(lower, min(upper, planned_count))
+
+            if not isinstance(normalized.get("planned_chapter_range"), tuple):
+                start = max(1, int(start_chapter_num))
+                normalized["planned_chapter_range"] = (
+                    start,
+                    start + int(normalized["planned_chapter_count"]) - 1,
+                )
+
+            if normalized.get("planned_total_chapter_count") is None:
+                current_total = int(normalized.get("current_total_chapter_count") or 0)
+                normalized["planned_total_chapter_count"] = max(
+                    current_total,
+                    int(normalized["planned_chapter_range"][1]),
+                )
 
         return normalized
 
@@ -872,10 +909,18 @@ class PlanningMixin:
         framework_reference = max(target_chapter_count, self.planned_chapters_max or 0)
 
         if normalized_expansion_mode == "volume_detail":
-            volume_range = normalized_volume_detail_config.get("expected_chapter_range")
+            volume_range = (
+                normalized_volume_detail_config.get("planned_chapter_range")
+                or normalized_volume_detail_config.get("expected_chapter_range")
+            )
             current_total_count = int(normalized_volume_detail_config.get("current_total_chapter_count") or current_chapter_count)
-            expected_total_count = int(normalized_volume_detail_config.get("expected_total_chapter_count") or target_chapter_count or current_total_count)
-            target_chapter_count = max(target_chapter_count, expected_total_count)
+            planned_total_count = int(
+                normalized_volume_detail_config.get("planned_total_chapter_count")
+                or normalized_volume_detail_config.get("expected_total_chapter_count")
+                or target_chapter_count
+                or current_total_count
+            )
+            target_chapter_count = max(target_chapter_count, planned_total_count)
             current_chapter_count = max(current_chapter_count, current_total_count)
             chapters_needed = max(0, target_chapter_count - current_chapter_count)
             characters_needed = max(0, target_character_count - current_character_count)

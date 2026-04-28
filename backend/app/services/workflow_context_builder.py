@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.services.character_runtime_context import build_character_prompt_context_from_text
+from app.services.character_runtime_context import (
+    build_character_prompt_context_from_text,
+    build_core_character_anchor_context_from_text,
+    build_focus_character_relationship_context_from_text,
+    extract_core_character_names_from_text,
+)
 from app.services.setting_templates import (
     build_project_settings_summary,
     extract_relevant_categories_from_text,
@@ -92,6 +98,24 @@ class WorkflowEpicFrameworkState:
     framework_generated_at: Any = None
     plot_outline: str = ""
     epic_volumes_detail: str = ""
+
+
+@dataclass
+class WorkflowChapterGenerationContext:
+    project_id: int
+    chapter_number: int
+    current_chapter_outline: str = ""
+    current_volume_context: str = ""
+    epic_framework_context: str = ""
+    planning_character_prompt_context: str = ""
+    character_prompt_context: str = ""
+    core_character_anchor_context: str = ""
+    focus_character_relationship_context: str = ""
+    content_character_context: str = ""
+    outline_source: str = ""
+    rag_query_text: str = ""
+    focus_character_names: List[str] = field(default_factory=list)
+    core_character_names: List[str] = field(default_factory=list)
 
 
 WORKFLOW_STAGE_FIELD_MAP: dict[str, str] = {
@@ -300,6 +324,363 @@ def _merge_distinct_text_blocks(primary: str, secondary: str) -> tuple[str, bool
     return f"{primary_text}\n\n{secondary_text}", False
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _truncate_context_block(value: Any, max_chars: int = 1600) -> str:
+    text = _decode_prompt_text(value).strip()
+    if not text:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return f"{text[: max_chars - 9].rstrip()}\n...(已截断)"
+
+
+def _parse_chapter_number(raw: Any) -> Optional[int]:
+    text_value = str(raw or "").strip()
+    if not text_value:
+        return None
+    if text_value.isdigit():
+        number = int(text_value)
+        return number if number > 0 else None
+
+    digit_map = {
+        "零": 0,
+        "〇": 0,
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+    }
+    unit_map = {"十": 10, "百": 100, "千": 1000, "万": 10000}
+
+    total = 0
+    current = 0
+    has_number_token = False
+    for char in text_value:
+        if char in digit_map:
+            current = digit_map[char]
+            has_number_token = True
+        elif char in unit_map:
+            unit = unit_map[char]
+            has_number_token = True
+            if current == 0:
+                current = 1
+            total += current * unit
+            current = 0
+
+    if not has_number_token:
+        return None
+
+    total += current
+    return total if total > 0 else None
+
+
+_CHAPTER_HEADING_PATTERNS = (
+    re.compile(
+        r"^\s*(?:#+\s*)?第\s*([0-9一二三四五六七八九十百千万零两〇]+)\s*"
+        r"[章节回幕集部篇](?:\s*[:：\-—]?\s*.*)?$",
+        re.IGNORECASE,
+    ),
+    re.compile(r"^\s*Chapter\s+(\d+)\b.*$", re.IGNORECASE),
+)
+
+
+def _match_chapter_heading(line: str) -> Optional[int]:
+    for pattern in _CHAPTER_HEADING_PATTERNS:
+        match = pattern.search(str(line or ""))
+        if not match:
+            continue
+        number = _parse_chapter_number(match.group(1))
+        if number is not None:
+            return number
+    return None
+
+
+def _extract_chapter_blocks(text_value: Any) -> list[dict[str, Any]]:
+    content = _decode_prompt_text(text_value).strip()
+    if not content:
+        return []
+
+    blocks: list[dict[str, Any]] = []
+    current_number: Optional[int] = None
+    current_lines: list[str] = []
+
+    for raw_line in content.splitlines():
+        chapter_number = _match_chapter_heading(raw_line)
+        if chapter_number is not None:
+            if current_number is not None and current_lines:
+                block_text = "\n".join(current_lines).strip()
+                if block_text:
+                    blocks.append({"number": current_number, "text": block_text})
+            current_number = chapter_number
+            current_lines = [raw_line]
+            continue
+
+        if current_number is not None:
+            current_lines.append(raw_line)
+
+    if current_number is not None and current_lines:
+        block_text = "\n".join(current_lines).strip()
+        if block_text:
+            blocks.append({"number": current_number, "text": block_text})
+
+    return blocks
+
+
+def _extract_exact_chapter_outline(text_value: Any, chapter_number: int) -> str:
+    for block in _extract_chapter_blocks(text_value):
+        if block.get("number") == chapter_number:
+            return str(block.get("text") or "").strip()
+    return ""
+
+
+MERGED_VOLUME_OUTLINE_HEADING_PATTERN = re.compile(
+    r"(?m)^\s*#{1,6}\s*【第\s*\d+\s*卷】"
+)
+MERGED_VOLUME_OUTLINE_DETAIL_SUMMARY_PATTERN = re.compile(
+    r"(?m)^\s*<summary>📖 第\d+卷详细章节"
+)
+
+
+def _looks_like_merged_volume_outline(text: str) -> bool:
+    content = str(text or "").strip()
+    if not content:
+        return False
+
+    if "## 📚 分卷概要" in content:
+        return True
+
+    heading_matches = list(MERGED_VOLUME_OUTLINE_HEADING_PATTERN.finditer(content))
+    if len(heading_matches) >= 2:
+        return True
+
+    if heading_matches and (
+        "<details" in content or MERGED_VOLUME_OUTLINE_DETAIL_SUMMARY_PATTERN.search(content)
+    ):
+        return True
+
+    return False
+
+
+def _normalize_plot_outline_text(text: str, *, characters_text: str = "") -> str:
+    content = str(text or "").strip()
+    if not content:
+        return ""
+    if _looks_like_merged_volume_outline(content):
+        return content
+    if not _extract_chapter_blocks(content):
+        return content
+
+    try:
+        from app.services.story_expansion_coord_pkg._standalone import normalize_outline_text
+
+        normalized = normalize_outline_text(content, characters_text or "")
+        return normalized.strip() or content
+    except Exception:
+        return content
+
+
+def _decode_plot_outline_prompt_text(value: Any, *, characters_text: str = "") -> str:
+    decoded = _decode_prompt_text(value)
+    return _normalize_plot_outline_text(decoded, characters_text=characters_text)
+
+
+def _decode_plot_outline_storage_text(
+    value: Any,
+    *,
+    characters_text: str = "",
+    pretty_json: bool = False,
+) -> str:
+    decoded = _decode_storage_text(value, pretty_json=pretty_json)
+    if pretty_json:
+        return decoded
+    return _normalize_plot_outline_text(decoded, characters_text=characters_text)
+
+
+def _rebuild_plot_outline_from_epic_volumes_detail(
+    plot_outline: str,
+    epic_volumes_detail: str,
+) -> tuple[str, str]:
+    normalized_plot_outline = str(plot_outline or "")
+    normalized_epic_volumes_detail = str(epic_volumes_detail or "")
+    if not normalized_epic_volumes_detail.strip():
+        return normalized_plot_outline, normalized_epic_volumes_detail
+
+    try:
+        from app.services.outline_merger import (
+            build_epic_volumes_json,
+            merge_volumes_to_outline,
+            normalize_volume_detail_layout,
+            parse_epic_volumes_json,
+        )
+
+        volumes_data = parse_epic_volumes_json(normalized_epic_volumes_detail)
+        if not volumes_data.get("volumes"):
+            return normalized_plot_outline, normalized_epic_volumes_detail
+
+        normalized_volumes = normalize_volume_detail_layout(
+            volumes_data,
+            rewrite_detail_content=True,
+        )
+        merged_plot_outline = merge_volumes_to_outline(normalized_volumes)
+        if merged_plot_outline.strip():
+            normalized_plot_outline = merged_plot_outline
+        normalized_epic_volumes_detail = build_epic_volumes_json(normalized_volumes)
+    except Exception as exc:
+        logger.warning("根据 epic_volumes_detail 重建 plot_outline 失败: %s", exc)
+
+    return normalized_plot_outline, normalized_epic_volumes_detail
+
+
+def _find_volume_match(
+    volumes_data: dict[str, Any],
+    chapter_number: int,
+) -> tuple[Optional[int], dict[str, Any]]:
+    if not isinstance(volumes_data, dict):
+        return None, {}
+
+    volumes = volumes_data.get("volumes")
+    if not isinstance(volumes, dict):
+        return None, {}
+
+    for raw_key, raw_value in volumes.items():
+        if not isinstance(raw_value, dict):
+            continue
+        chapters_range = raw_value.get("chapters_range") or []
+        start = _safe_int(chapters_range[0], 0) if len(chapters_range) >= 1 else 0
+        end = _safe_int(chapters_range[1], 0) if len(chapters_range) >= 2 else 0
+        if start > 0 and end >= start and start <= chapter_number <= end:
+            return _safe_int(raw_key, 0) or None, raw_value
+
+    for raw_key, raw_value in volumes.items():
+        if not isinstance(raw_value, dict):
+            continue
+        detail_text = _decode_prompt_text(raw_value.get("detail")).strip()
+        if detail_text and _extract_exact_chapter_outline(detail_text, chapter_number):
+            return _safe_int(raw_key, 0) or None, raw_value
+
+    return None, {}
+
+
+def _build_volume_context_text(
+    *,
+    volume_number: Optional[int],
+    volume_data: dict[str, Any],
+    chapter_number: int,
+) -> str:
+    if not volume_data:
+        return ""
+
+    lines: list[str] = []
+    title = _decode_prompt_text(volume_data.get("title")).strip()
+    volume_label = f"第{volume_number}卷" if volume_number else "当前卷"
+    if title:
+        lines.append(f"{volume_label}《{title}》")
+    else:
+        lines.append(volume_label)
+
+    chapters_range = volume_data.get("chapters_range") or []
+    start = _safe_int(chapters_range[0], 0) if len(chapters_range) >= 1 else 0
+    end = _safe_int(chapters_range[1], 0) if len(chapters_range) >= 2 else 0
+    if start > 0 and end >= start:
+        lines.append(f"- 覆盖章节：第{start}-{end}章（当前生成第{chapter_number}章）")
+
+    chapter_count = _safe_int(volume_data.get("chapter_count"), 0)
+    if chapter_count > 0:
+        lines.append(f"- 卷内章节规模：约{chapter_count}章")
+
+    summary_text = _truncate_context_block(volume_data.get("summary"), max_chars=700)
+    if summary_text:
+        if summary_text.startswith(("-", "1.", "2.", "3.", "4.", "5.")):
+            lines.append(summary_text)
+        else:
+            lines.append(f"- 卷目标/卷摘要：{summary_text}")
+
+    return "\n".join(line for line in lines if str(line).strip())
+
+
+def _build_epic_framework_context_text(volumes_data: dict[str, Any]) -> str:
+    if not isinstance(volumes_data, dict):
+        return ""
+
+    parts: list[str] = []
+    framework_header = _truncate_context_block(volumes_data.get("framework_header"), max_chars=900)
+    framework_footer = _truncate_context_block(volumes_data.get("framework_footer"), max_chars=900)
+
+    if framework_header:
+        parts.append(f"【长篇框架前置约束】\n{framework_header}")
+    if framework_footer:
+        parts.append(f"【长篇框架后置约束】\n{framework_footer}")
+
+    return "\n\n".join(parts)
+
+
+def _extract_focus_character_names(
+    characters_text: str,
+    reference_text: str,
+    *,
+    limit: int = 6,
+) -> list[str]:
+    content = str(characters_text or "").strip()
+    reference = str(reference_text or "").strip()
+    if not content or not reference:
+        return []
+
+    try:
+        from app.services.character_parser import CharacterTextParser
+    except Exception:
+        return []
+
+    parser = CharacterTextParser()
+    parsed_characters = parser.parse_all_characters(content)
+    if not parsed_characters:
+        return []
+
+    focus_names: list[str] = []
+    for character in parsed_characters:
+        normalized_name = _decode_prompt_text(getattr(character, "name", "")).strip()
+        if not normalized_name or normalized_name not in reference:
+            continue
+        if normalized_name in focus_names:
+            continue
+        focus_names.append(normalized_name)
+        if len(focus_names) >= limit:
+            break
+
+    return focus_names
+
+
+def _dedupe_names(values: list[str]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for raw_value in values:
+        normalized = _decode_prompt_text(raw_value).strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(normalized)
+    return ordered
+
+
+def _join_context_sections(*sections: str) -> str:
+    return "\n\n".join(
+        section.strip()
+        for section in sections
+        if section and section.strip()
+    )
+
+
 def _get_character_doc_identity(doc: Any) -> str:
     metadata = getattr(doc, "metadata", {}) or {}
     for key in ("character_id", "character_name", "name", "title"):
@@ -440,6 +821,7 @@ class WorkflowContextBuilder:
             text(
                 """
                 SELECT concept, world_setting, characters, plot_outline,
+                       epic_volumes_detail,
                        chapter_draft, review_report, final_version
                 FROM project_settings
                 WHERE project_id = :project_id
@@ -451,15 +833,25 @@ class WorkflowContextBuilder:
         if not row:
             return WorkflowStageTextContext(project_id=project_id)
 
+        characters_text = _decode_character_prompt_text(row[2])
+        plot_outline = _decode_plot_outline_prompt_text(
+            row[3],
+            characters_text=characters_text,
+        )
+        plot_outline, _ = _rebuild_plot_outline_from_epic_volumes_detail(
+            plot_outline,
+            _decode_storage_text(row[4]),
+        )
+
         return WorkflowStageTextContext(
             project_id=project_id,
             concept=_decode_prompt_text(row[0]),
             world_setting=_decode_prompt_text(row[1]),
-            characters=_decode_character_prompt_text(row[2]),
-            plot_outline=_decode_prompt_text(row[3]),
-            chapter_draft=_decode_prompt_text(row[4]),
-            review_report=_decode_prompt_text(row[5]),
-            final_version=_decode_prompt_text(row[6]),
+            characters=characters_text,
+            plot_outline=plot_outline,
+            chapter_draft=_decode_prompt_text(row[5]),
+            review_report=_decode_prompt_text(row[6]),
+            final_version=_decode_prompt_text(row[7]),
         )
 
     def load_concept_storage_state(self, project_id: int) -> WorkflowConceptStorageState:
@@ -499,12 +891,21 @@ class WorkflowContextBuilder:
         if not row:
             return WorkflowEpicFrameworkState(project_id=project_id)
 
+        epic_framework = _decode_storage_text(row[0])
+        framework_generated_at = row[1]
+        plot_outline = _decode_plot_outline_storage_text(row[2])
+        epic_volumes_detail = _decode_storage_text(row[3])
+        plot_outline, epic_volumes_detail = _rebuild_plot_outline_from_epic_volumes_detail(
+            plot_outline,
+            epic_volumes_detail,
+        )
+
         return WorkflowEpicFrameworkState(
             project_id=project_id,
-            epic_framework=_decode_storage_text(row[0]),
-            framework_generated_at=row[1],
-            plot_outline=_decode_storage_text(row[2]),
-            epic_volumes_detail=_decode_storage_text(row[3]),
+            epic_framework=epic_framework,
+            framework_generated_at=framework_generated_at,
+            plot_outline=plot_outline,
+            epic_volumes_detail=epic_volumes_detail,
         )
 
     def read_stage_content(
@@ -518,19 +919,39 @@ class WorkflowContextBuilder:
         if not field_name:
             raise ValueError(f"Unsupported workflow stage: {stage}")
 
-        row = self.db.execute(
-            text(
-                f"""
-                SELECT {field_name}
-                FROM project_settings
-                WHERE project_id = :project_id
-                """
-            ),
-            {"project_id": project_id},
-        ).fetchone()
+        if field_name == "plot_outline":
+            row = self.db.execute(
+                text(
+                    """
+                    SELECT plot_outline, epic_volumes_detail
+                    FROM project_settings
+                    WHERE project_id = :project_id
+                    """
+                ),
+                {"project_id": project_id},
+            ).fetchone()
+        else:
+            row = self.db.execute(
+                text(
+                    f"""
+                    SELECT {field_name}
+                    FROM project_settings
+                    WHERE project_id = :project_id
+                    """
+                ),
+                {"project_id": project_id},
+            ).fetchone()
 
         if not row:
             return ""
+
+        if field_name == "plot_outline":
+            plot_outline = _decode_plot_outline_storage_text(row[0], pretty_json=pretty_json)
+            plot_outline, _ = _rebuild_plot_outline_from_epic_volumes_detail(
+                plot_outline,
+                _decode_storage_text(row[1]),
+            )
+            return plot_outline
 
         value = row[0]
         if pretty_json:
@@ -550,6 +971,7 @@ class WorkflowContextBuilder:
             text(
                 """
                 SELECT concept, world_setting, characters, plot_outline,
+                       epic_volumes_detail,
                        chapter_draft, review_report, final_version
                 FROM project_settings
                 WHERE project_id = :project_id
@@ -571,13 +993,30 @@ class WorkflowContextBuilder:
             return {field_name: "" for field_name in field_names}
 
         snapshot: dict[str, str] = {}
+        characters_text = _decode_character_prompt_text(row[2])
+        plot_outline_value = _decode_plot_outline_storage_text(
+            row[3],
+            characters_text=characters_text,
+            pretty_json=pretty_json,
+        )
+        plot_outline_value, _ = _rebuild_plot_outline_from_epic_volumes_detail(
+            plot_outline_value,
+            _decode_storage_text(row[4]),
+        )
         for index, field_name in enumerate(field_names):
             if pretty_json:
-                snapshot[field_name] = _decode_storage_text(row[index], pretty_json=True)
+                if field_name == "plot_outline":
+                    snapshot[field_name] = plot_outline_value
+                else:
+                    source_index = index if index < 3 else index + 1
+                    snapshot[field_name] = _decode_storage_text(row[source_index], pretty_json=True)
             elif field_name == "characters":
-                snapshot[field_name] = _decode_character_prompt_text(row[index])
+                snapshot[field_name] = characters_text
+            elif field_name == "plot_outline":
+                snapshot[field_name] = plot_outline_value
             else:
-                snapshot[field_name] = _decode_prompt_text(row[index])
+                source_index = index if index < 3 else index + 1
+                snapshot[field_name] = _decode_prompt_text(row[source_index])
         return snapshot
 
     def load_stage_status_snapshot(self, project_id: int) -> dict[str, str]:
@@ -614,13 +1053,64 @@ class WorkflowContextBuilder:
 
         self.ensure_project_settings_record(project_id)
 
+        normalized_fields = dict(fields)
+        if "epic_volumes_detail" in normalized_fields and normalized_fields["epic_volumes_detail"] is not None:
+            normalized_fields["epic_volumes_detail"] = _decode_storage_text(
+                normalized_fields["epic_volumes_detail"]
+            )
+
+        if "plot_outline" in normalized_fields:
+            characters_value = normalized_fields.get("characters")
+            if characters_value is None:
+                character_row = self.db.execute(
+                    text(
+                        """
+                        SELECT characters
+                        FROM project_settings
+                        WHERE project_id = :project_id
+                        """
+                    ),
+                    {"project_id": project_id},
+                ).fetchone()
+                characters_value = character_row[0] if character_row else ""
+
+            normalized_fields["plot_outline"] = _decode_plot_outline_prompt_text(
+                normalized_fields.get("plot_outline"),
+                characters_text=_decode_character_prompt_text(characters_value),
+            )
+
+        epic_volumes_detail_value = normalized_fields.get("epic_volumes_detail")
+        if isinstance(epic_volumes_detail_value, str) and epic_volumes_detail_value.strip():
+            base_plot_outline = normalized_fields.get("plot_outline")
+            if base_plot_outline is None:
+                current_outline_row = self.db.execute(
+                    text(
+                        """
+                        SELECT plot_outline
+                        FROM project_settings
+                        WHERE project_id = :project_id
+                        """
+                    ),
+                    {"project_id": project_id},
+                ).fetchone()
+                base_plot_outline = _decode_plot_outline_storage_text(
+                    current_outline_row[0] if current_outline_row else ""
+                )
+
+            rebuilt_plot_outline, rebuilt_epic_volumes_detail = _rebuild_plot_outline_from_epic_volumes_detail(
+                _decode_prompt_text(base_plot_outline),
+                epic_volumes_detail_value,
+            )
+            normalized_fields["plot_outline"] = rebuilt_plot_outline
+            normalized_fields["epic_volumes_detail"] = rebuilt_epic_volumes_detail
+
         params = {
             "project_id": project_id,
             "updated_at": utc_now().isoformat(),
-            **fields,
+            **normalized_fields,
         }
         assignments = ", ".join(
-            [f"{field_name} = :{field_name}" for field_name in fields] + ["updated_at = :updated_at"]
+            [f"{field_name} = :{field_name}" for field_name in normalized_fields] + ["updated_at = :updated_at"]
         )
         self.db.execute(
             text(
@@ -665,6 +1155,155 @@ class WorkflowContextBuilder:
             settings_summary=settings_summary,
             combined_world_setting=combined_world_setting,
             summary_already_embedded=summary_already_embedded,
+        )
+
+    def build_chapter_generation_context(
+        self,
+        project_id: int,
+        chapter_number: int,
+        *,
+        plot_outline: Any = "",
+        characters: Any = "",
+    ) -> WorkflowChapterGenerationContext:
+        normalized_characters = _decode_character_prompt_text(characters)
+        normalized_outline = _decode_plot_outline_prompt_text(
+            plot_outline,
+            characters_text=normalized_characters,
+        )
+        epic_framework_state = self.load_epic_framework_state(project_id)
+
+        volumes_data: dict[str, Any] = {}
+        try:
+            from app.services.outline_merger import parse_epic_volumes_json
+
+            volumes_data = parse_epic_volumes_json(epic_framework_state.epic_volumes_detail or "")
+        except Exception as exc:
+            logger.warning("章节生成上下文解析 epic_volumes_detail 失败: %s", exc)
+
+        outline_source = ""
+        current_chapter_outline = ""
+
+        volume_number, volume_data = _find_volume_match(volumes_data, chapter_number)
+        if volume_data:
+            current_chapter_outline = _extract_exact_chapter_outline(
+                volume_data.get("detail"),
+                chapter_number,
+            )
+            if current_chapter_outline:
+                outline_source = (
+                    f"epic_volumes_detail.volume_{volume_number}"
+                    if volume_number
+                    else "epic_volumes_detail"
+                )
+
+        if not current_chapter_outline and normalized_outline:
+            current_chapter_outline = _extract_exact_chapter_outline(normalized_outline, chapter_number)
+            if current_chapter_outline:
+                outline_source = "plot_outline"
+
+        if (
+            not current_chapter_outline
+            and epic_framework_state.plot_outline
+            and epic_framework_state.plot_outline != normalized_outline
+        ):
+            current_chapter_outline = _extract_exact_chapter_outline(
+                epic_framework_state.plot_outline,
+                chapter_number,
+            )
+            if current_chapter_outline:
+                outline_source = "epic_framework.plot_outline"
+
+        current_volume_context = _build_volume_context_text(
+            volume_number=volume_number,
+            volume_data=volume_data,
+            chapter_number=chapter_number,
+        )
+        epic_framework_context = _build_epic_framework_context_text(volumes_data)
+
+        focus_reference_text = "\n\n".join(
+            part
+            for part in (
+                current_chapter_outline,
+                current_volume_context,
+                normalized_outline,
+            )
+            if part and part.strip()
+        )
+        focus_character_names = _extract_focus_character_names(
+            normalized_characters,
+            focus_reference_text,
+        )
+        core_character_names = extract_core_character_names_from_text(
+            normalized_characters,
+            preferred_names=focus_character_names,
+            max_characters=4,
+        )
+        prioritized_character_names = _dedupe_names(
+            focus_character_names + core_character_names
+        )
+        character_prompt_context = build_character_prompt_context_from_text(
+            normalized_characters,
+            detail_limit=1200,
+            summary_limit=360,
+            max_characters=12,
+            preferred_names=prioritized_character_names,
+        )
+        planning_character_prompt_context = build_character_prompt_context_from_text(
+            normalized_characters,
+            detail_limit=1800,
+            summary_limit=520,
+            max_characters=15,
+            preferred_names=prioritized_character_names,
+        )
+        core_character_anchor_context = build_core_character_anchor_context_from_text(
+            normalized_characters,
+            preferred_names=prioritized_character_names,
+            max_characters=4,
+            detail_limit=720,
+        )
+        focus_character_relationship_context = (
+            build_focus_character_relationship_context_from_text(
+                normalized_characters,
+                focus_names=focus_character_names,
+                fallback_names=core_character_names,
+                max_characters=4,
+                detail_limit=520,
+            )
+        )
+        content_character_context = _join_context_sections(
+            core_character_anchor_context,
+            focus_character_relationship_context,
+            character_prompt_context,
+        )
+
+        rag_query_parts = []
+        if current_chapter_outline:
+            rag_query_parts.append(current_chapter_outline)
+        if current_volume_context:
+            rag_query_parts.append(current_volume_context)
+        if focus_character_names:
+            rag_query_parts.append(f"相关人物：{'、'.join(focus_character_names)}")
+        if not focus_character_names and core_character_names:
+            rag_query_parts.append(f"相关人物：{'、'.join(core_character_names)}")
+        rag_query_text = "\n\n".join(
+            part for part in rag_query_parts if part and part.strip()
+        ).strip()
+
+        return WorkflowChapterGenerationContext(
+            project_id=project_id,
+            chapter_number=chapter_number,
+            current_chapter_outline=current_chapter_outline,
+            current_volume_context=current_volume_context,
+            epic_framework_context=epic_framework_context,
+            planning_character_prompt_context=planning_character_prompt_context,
+            character_prompt_context=character_prompt_context,
+            core_character_anchor_context=core_character_anchor_context,
+            focus_character_relationship_context=focus_character_relationship_context,
+            content_character_context=content_character_context,
+            outline_source=outline_source,
+            rag_query_text=rag_query_text,
+            focus_character_names=focus_character_names,
+            core_character_names=core_character_names,
         )
 
     def build_typed_rag_context(

@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.services.story_text_utils import (
     normalize_story_text,
     parse_chapter_number_token,
+    split_story_event_items,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,9 +44,27 @@ OUTLINE_FIELD_LINE_PATTERN = re.compile(
     + "|".join(re.escape(label) for label in OUTLINE_FIELD_ALIASES)
     + r")(?:\*\*)?\s*[：:]\s*(?P<value>.*)$"
 )
+OUTLINE_LOOSE_FIELD_LINE_PATTERN = re.compile(
+    r"^\s*(?:[-*]\s*)?(?:\*\*)?(?P<label>"
+    + "|".join(re.escape(label) for label in OUTLINE_FIELD_ALIASES)
+    + r")(?:\*\*)?\s*[：:】]\s*(?P<value>.*)$"
+)
 OUTLINE_UNKNOWN_FIELD_LINE_PATTERN = re.compile(
     r"^\s*(?:[-*]\s*)?(?:\*\*)?[^：:\n]{1,16}(?:\*\*)?\s*[：:]\s*.*$"
 )
+OUTLINE_TAIL_SECTION_HEADING_PATTERN = re.compile(
+    r"(?m)^\s*##\s*(?:\*\*)?\s*(?:[一二三四五六七八九十0-9]+[、.．]\s*)?"
+    r"(?P<title>伏笔埋设检查|卷尾衔接检查|协同角色承接待补|人物承接待补)\s*(?:\*\*)?\s*$"
+)
+ALIGNMENT_PLACEHOLDER_FRAGMENT_PATTERN = re.compile(
+    r"(?:^|\s)[\-*]?\s*(?:人物承接待补|协同角色承接待补)[：:]\s*"
+    r"[^。\n]+?需在后续章节中正式出场，并与当前主线形成明确关联。?"
+)
+LEGACY_ALIGNMENT_PLACEHOLDER_FRAGMENT_PATTERN = re.compile(
+    r"(?:^|\s)[\-*]?\s*(?:人物承接|协同角色承接)[：:]\s*"
+    r"[^。\n]+?在本章正式出场，并与当前主线形成明确关联。?"
+)
+OUTLINE_TABLE_SEPARATOR_CELL_PATTERN = re.compile(r"^:?-{3,}:?$")
 
 
 @dataclass
@@ -141,6 +160,51 @@ def render_outline_with_original_numbers(prefix: str, blocks: List[OutlineBlock]
     return "\n\n".join(part for part in parts if part and part.strip())
 
 
+def extract_outline_tail_sections(text: str) -> List[str]:
+    normalized_text = normalize_story_text(text)
+    if not normalized_text or not normalized_text.strip():
+        return []
+
+    matches = list(OUTLINE_TAIL_SECTION_HEADING_PATTERN.finditer(normalized_text))
+    if not matches:
+        return []
+
+    sections: List[str] = []
+    for index, match in enumerate(matches):
+        section_end = matches[index + 1].start() if index + 1 < len(matches) else len(normalized_text)
+        section_text = normalized_text[match.start():section_end].strip()
+        if section_text:
+            sections.append(section_text)
+    return sections
+
+
+def append_preserved_outline_tail_sections(text: str, tail_sections: List[str]) -> str:
+    base_text = normalize_story_text(text).strip()
+    if not tail_sections:
+        return base_text
+
+    existing_titles = {
+        match.group("title")
+        for match in OUTLINE_TAIL_SECTION_HEADING_PATTERN.finditer(base_text)
+        if match.group("title")
+    }
+    parts: List[str] = [base_text] if base_text else []
+
+    for section in tail_sections:
+        normalized_section = normalize_story_text(section).strip()
+        if not normalized_section:
+            continue
+        heading_match = OUTLINE_TAIL_SECTION_HEADING_PATTERN.search(normalized_section)
+        title = heading_match.group("title") if heading_match else ""
+        if title and title in existing_titles:
+            continue
+        parts.append(normalized_section)
+        if title:
+            existing_titles.add(title)
+
+    return "\n\n".join(part for part in parts if part)
+
+
 def normalize_outline_title(title: str) -> str:
     value = normalize_story_text(title or "").strip()
     if not value:
@@ -160,6 +224,91 @@ def _same_outline_value(left: str, right: str) -> bool:
     return bool(normalized_left) and normalized_left == normalized_right
 
 
+def _normalize_outline_field_label(label: str) -> str:
+    value = normalize_story_text(label or "").strip().strip("|").strip()
+    if not value:
+        return ""
+    value = re.sub(r"^\*+|\*+$", "", value).strip()
+    value = re.sub(r"[：:】]+$", "", value).strip()
+    value = re.sub(r"\s+", "", value)
+    return value if value in OUTLINE_FIELD_ALIASES else ""
+
+
+def _split_outline_table_cells(line: str) -> List[str]:
+    stripped = normalize_story_text(line or "").strip()
+    if not stripped.startswith("|"):
+        return []
+    inner = stripped[1:]
+    if inner.endswith("|"):
+        inner = inner[:-1]
+    return [cell.strip() for cell in inner.split("|")]
+
+
+def _is_outline_table_separator_row(cells: List[str]) -> bool:
+    return bool(cells) and all(
+        not cell or OUTLINE_TABLE_SEPARATOR_CELL_PATTERN.match(cell)
+        for cell in cells
+    )
+
+
+def _parse_loose_outline_field_line(line: str) -> Optional[Tuple[str, str]]:
+    match = OUTLINE_LOOSE_FIELD_LINE_PATTERN.match(normalize_story_text(line or "").strip())
+    if not match:
+        return None
+    label = _normalize_outline_field_label(match.group("label"))
+    if not label:
+        return None
+    return OUTLINE_FIELD_ALIASES[label], str(match.group("value") or "").strip()
+
+
+def _parse_outline_table_field_line(line: str) -> Optional[Tuple[str, str]]:
+    cells = _split_outline_table_cells(line)
+    if not cells or _is_outline_table_separator_row(cells):
+        return None
+
+    label = _normalize_outline_field_label(cells[0])
+    if label:
+        value = " | ".join(cell for cell in cells[1:] if str(cell).strip()).strip()
+        return OUTLINE_FIELD_ALIASES[label], value
+
+    return _parse_loose_outline_field_line(cells[0])
+
+
+def _strip_alignment_placeholder_fragments(value: str) -> str:
+    text = normalize_story_text(value or "").strip()
+    if not text:
+        return ""
+    text = ALIGNMENT_PLACEHOLDER_FRAGMENT_PATTERN.sub(" ", text)
+    text = LEGACY_ALIGNMENT_PLACEHOLDER_FRAGMENT_PATTERN.sub(" ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    repeated_match = re.match(r"^(.{8,}?)(?:\s+\1)+$", text)
+    if repeated_match:
+        return repeated_match.group(1).strip()
+    return text
+
+
+def _append_outline_field_part(fields: Dict[str, List[str]], key: str, value: str) -> None:
+    cleaned = _strip_alignment_placeholder_fragments(value)
+    if not cleaned:
+        return
+    fields.setdefault(key, []).append(cleaned)
+
+
+def _dedupe_outline_field_parts(parts: List[str]) -> str:
+    deduped: List[str] = []
+    seen = set()
+    for part in parts:
+        cleaned = _strip_alignment_placeholder_fragments(part)
+        if not cleaned:
+            continue
+        key = re.sub(r"\s+", "", cleaned)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(cleaned)
+    return "\n".join(deduped).strip()
+
+
 def _extract_outline_body_fields(body: str) -> Tuple[Dict[str, str], List[str]]:
     fields: Dict[str, List[str]] = {}
     extra_lines: List[str] = []
@@ -169,8 +318,34 @@ def _extract_outline_body_fields(body: str) -> Tuple[Dict[str, str], List[str]]:
         stripped = raw_line.strip()
         if not stripped:
             continue
+        if is_character_alignment_placeholder_line(stripped):
+            current_key = None
+            continue
         if OUTLINE_ROUND_SECTION_HEADING_PATTERN.match(stripped):
             current_key = None
+            continue
+
+        table_cells = _split_outline_table_cells(stripped)
+        if table_cells:
+            normalized_cells = [normalize_story_text(cell).strip() for cell in table_cells]
+            if _is_outline_table_separator_row(table_cells):
+                current_key = None
+                continue
+            if len(normalized_cells) >= 2 and normalized_cells[0] == "字段" and normalized_cells[1] == "内容":
+                current_key = None
+                continue
+
+            parsed_table_field = _parse_outline_table_field_line(stripped)
+            if parsed_table_field:
+                current_key, value = parsed_table_field
+                fields.setdefault(current_key, [])
+                _append_outline_field_part(fields, current_key, value)
+                continue
+
+            current_key = None
+            cleaned = _strip_alignment_placeholder_fragments(stripped)
+            if cleaned:
+                extra_lines.append(cleaned)
             continue
 
         match = OUTLINE_FIELD_LINE_PATTERN.match(stripped)
@@ -178,22 +353,32 @@ def _extract_outline_body_fields(body: str) -> Tuple[Dict[str, str], List[str]]:
             current_key = OUTLINE_FIELD_ALIASES[match.group("label")]
             fields.setdefault(current_key, [])
             value = str(match.group("value") or "").strip()
-            if value:
-                fields[current_key].append(value)
+            _append_outline_field_part(fields, current_key, value)
+            continue
+
+        parsed_loose_field = _parse_loose_outline_field_line(stripped)
+        if parsed_loose_field:
+            current_key, value = parsed_loose_field
+            fields.setdefault(current_key, [])
+            _append_outline_field_part(fields, current_key, value)
             continue
 
         if OUTLINE_UNKNOWN_FIELD_LINE_PATTERN.match(stripped):
             current_key = None
-            extra_lines.append(stripped)
+            cleaned = _strip_alignment_placeholder_fragments(stripped)
+            if cleaned:
+                extra_lines.append(cleaned)
             continue
 
         if current_key:
-            fields.setdefault(current_key, []).append(stripped)
+            _append_outline_field_part(fields, current_key, stripped)
         else:
-            extra_lines.append(stripped)
+            cleaned = _strip_alignment_placeholder_fragments(stripped)
+            if cleaned:
+                extra_lines.append(cleaned)
 
     return (
-        {key: "\n".join(part for part in parts if str(part).strip()).strip() for key, parts in fields.items()},
+        {key: _dedupe_outline_field_parts(parts) for key, parts in fields.items()},
         extra_lines,
     )
 
@@ -241,7 +426,7 @@ def _extract_outline_involved_characters(
 
     return "、".join(matches)
 
-
+r'''Temporarily quarantined corrupted legacy key-event normalization block.
 def _normalize_key_event_lines(value: str) -> List[str]:
     items: List[str] = []
     for raw_line in normalize_story_text(value or "").splitlines():
@@ -264,11 +449,28 @@ def _summarize_key_events(value: str) -> str:
     return summary[:120].rstrip("；")
 
 
+def _normalize_key_event_lines(value: str) -> List[str]:
+    items = split_story_event_items(value, limit=5)
+    return [f"{index}. {item}" for index, item in enumerate(items, start=1)]
+
+
+def _summarize_key_events(value: str) -> str:
+    items = split_story_event_items(value, limit=3)
+    if not items:
+        return ""
+    summary = "锛?.join(items[:3])
+    return summary[:120].rstrip("锛?)
+
+
 def normalize_outline_text(text: str, characters_text: str = "") -> str:
     sanitized_text = sanitize_outline_alignment_placeholders(text or "")
-    prefix, blocks = parse_outline_blocks(sanitized_text)
+    tail_sections = extract_outline_tail_sections(sanitized_text)
+    tail_match = OUTLINE_TAIL_SECTION_HEADING_PATTERN.search(sanitized_text)
+    body_text = sanitized_text[:tail_match.start()].rstrip() if tail_match else sanitized_text
+
+    prefix, blocks = parse_outline_blocks(body_text)
     if not blocks:
-        return sanitized_text.strip()
+        return append_preserved_outline_tail_sections(body_text.strip(), tail_sections)
 
     known_character_names = extract_character_names(characters_text or "")
     normalized_blocks: List[OutlineBlock] = []
@@ -327,6 +529,20 @@ def normalize_outline_text(text: str, characters_text: str = "") -> str:
         if foreshadowing_item:
             body_lines.append(f"- 伏笔事项：{foreshadowing_item}")
 
+        key_events_text = _summarize_key_events(fields.get("key_events", "")) or "寰呰ˉ鍏?"
+        base_body_lines = body_lines[:6]
+        remaining_body_lines = body_lines[7 + len(key_events_lines):] if key_events_lines else body_lines[7:]
+        body_lines = [
+            base_body_lines[0],
+            base_body_lines[1],
+            f"- 鍏抽敭浜嬩欢锛歿key_events_text}",
+            base_body_lines[2],
+            base_body_lines[3],
+            base_body_lines[4],
+            base_body_lines[5],
+            *remaining_body_lines,
+        ]
+
         normalized_blocks.append(
             OutlineBlock(
                 original_number=int(block.original_number or 0),
@@ -343,7 +559,116 @@ def normalize_outline_text(text: str, characters_text: str = "") -> str:
         for line in normalize_story_text(prefix or "").splitlines()
         if not OUTLINE_ROUND_SECTION_HEADING_PATTERN.match(line.strip())
     ).strip()
-    return render_outline_with_original_numbers(cleaned_prefix, normalized_blocks)
+    normalized_text = render_outline_with_original_numbers(cleaned_prefix, normalized_blocks)
+    return append_preserved_outline_tail_sections(normalized_text, tail_sections)
+
+'''
+
+
+def _normalize_key_event_lines(value: str) -> List[str]:
+    items = split_story_event_items(value, limit=5)
+    return [f"{index}. {item}" for index, item in enumerate(items, start=1)]
+
+
+def _summarize_key_events(value: str, *, limit: int = 3, max_length: int = 120) -> str:
+    items = split_story_event_items(value, limit=limit)
+    if not items:
+        return ""
+    summary = "；".join(items[:limit]).strip()
+    return summary[:max_length].rstrip("；")
+
+
+def _resolve_key_events_summary(raw_value: str, extra_lines: List[str]) -> str:
+    summary = _summarize_key_events(raw_value)
+    if summary:
+        return summary
+
+    fallback_text = " ".join(line.strip() for line in extra_lines if str(line).strip()).strip()
+    fallback_items = split_story_event_items(fallback_text, limit=3)
+    if len(fallback_items) >= 2:
+        return "；".join(fallback_items).rstrip("；")
+    return ""
+
+
+def normalize_outline_text(text: str, characters_text: str = "") -> str:
+    sanitized_text = sanitize_outline_alignment_placeholders(text or "")
+    tail_sections = extract_outline_tail_sections(sanitized_text)
+    tail_match = OUTLINE_TAIL_SECTION_HEADING_PATTERN.search(sanitized_text)
+    body_text = sanitized_text[:tail_match.start()].rstrip() if tail_match else sanitized_text
+
+    prefix, blocks = parse_outline_blocks(body_text)
+    if not blocks:
+        return append_preserved_outline_tail_sections(body_text.strip(), tail_sections)
+
+    known_character_names = extract_character_names(characters_text or "")
+    normalized_blocks: List[OutlineBlock] = []
+
+    for block in blocks:
+        title = normalize_outline_title(block.title) or f"第{int(block.original_number or 0) or 1}章"
+        fields, extra_lines = _extract_outline_body_fields(block.body)
+        raw_summary = " ".join(extra_lines).strip()
+        key_events_text = _resolve_key_events_summary(fields.get("key_events", ""), extra_lines)
+
+        scene_goal = str(fields.get("scene_goal") or raw_summary or "").strip()
+        if not scene_goal:
+            scene_goal = f"围绕《{title}》推进本章主线，并完成阶段性目标。"
+
+        conflict_design = str(fields.get("conflict_design") or "").strip()
+        if not conflict_design or _same_outline_value(conflict_design, scene_goal):
+            conflict_design = key_events_text or f"主角在推进《{title}》时遭遇新阻碍，并在冲突升级后完成阶段性突破。"
+
+        highlight_type = str(fields.get("highlight_type") or "").strip()
+        involved_characters = _extract_outline_involved_characters(title, fields, known_character_names) or "待补充"
+
+        character_progress = str(fields.get("character_progress") or "").strip()
+        if not character_progress:
+            if involved_characters != "待补充":
+                character_progress = f"{involved_characters}在本章中的立场、关系或状态出现推进。"
+            else:
+                character_progress = "主角与关键角色状态发生变化，为后续冲突积累势能。"
+
+        plot_function = str(fields.get("plot_function") or "").strip()
+        if not plot_function:
+            plot_function = f"承接《{title}》并推动阶段矛盾继续升级。"
+
+        ending_hook = str(fields.get("ending_hook") or "").strip()
+        if not ending_hook or _same_outline_value(ending_hook, highlight_type):
+            ending_hook = f"新的危机与线索同步出现，把主线推进到《{title}》之后的下一阶段。"
+
+        foreshadowing_item = str(fields.get("foreshadowing_item") or "").strip()
+
+        body_lines = [
+            f"- 场景目标：{scene_goal}",
+            f"- 冲突设计：{conflict_design}",
+            f"- 关键事件：{key_events_text or '待补充'}",
+            f"- 涉及人物：{involved_characters}",
+            f"- 人物推进：{character_progress}",
+            f"- 情节作用：{plot_function}",
+            f"- 结尾钩子：{ending_hook}",
+        ]
+        if highlight_type:
+            body_lines.append(f"- 爽点类型：{highlight_type}")
+        if foreshadowing_item:
+            body_lines.append(f"- 伏笔事项：{foreshadowing_item}")
+
+        normalized_blocks.append(
+            OutlineBlock(
+                original_number=int(block.original_number or 0),
+                title=title,
+                body="\n".join(body_lines).strip(),
+                locked=block.locked,
+                source=block.source,
+                anchor_after=block.anchor_after,
+            )
+        )
+
+    cleaned_prefix = "\n".join(
+        line
+        for line in normalize_story_text(prefix or "").splitlines()
+        if not OUTLINE_ROUND_SECTION_HEADING_PATTERN.match(line.strip())
+    ).strip()
+    normalized_text = render_outline_with_original_numbers(cleaned_prefix, normalized_blocks)
+    return append_preserved_outline_tail_sections(normalized_text, tail_sections)
 
 
 def extract_character_names(text: str) -> List[str]:

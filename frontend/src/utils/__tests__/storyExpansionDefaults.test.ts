@@ -94,7 +94,7 @@ describe('storyExpansionDefaults', () => {
       totalChaptersMin: 480,
       totalChaptersMax: 640,
       volumeChaptersMin: 60,
-      volumeChaptersMax: 80,
+      volumeChaptersMax: 100,
       volumeCharacterIncrement: null,
     })
   })
@@ -126,7 +126,7 @@ describe('storyExpansionDefaults', () => {
       totalChaptersMin: 600,
       totalChaptersMax: 840,
       volumeChaptersMin: 60,
-      volumeChaptersMax: 80,
+      volumeChaptersMax: 100,
       volumeCharacterIncrement: null,
     })
   })
@@ -152,7 +152,7 @@ describe('storyExpansionDefaults', () => {
       totalChaptersMin: 300,
       totalChaptersMax: 420,
       volumeChaptersMin: 60,
-      volumeChaptersMax: 80,
+      volumeChaptersMax: 100,
       volumeCharacterIncrement: null,
     })
   })
@@ -178,7 +178,7 @@ describe('storyExpansionDefaults', () => {
       totalChaptersMin: 2000,
       totalChaptersMax: 2500,
       volumeChaptersMin: 60,
-      volumeChaptersMax: 80,
+      volumeChaptersMax: 100,
       volumeCharacterIncrement: null,
     })
   })
@@ -210,7 +210,7 @@ describe('storyExpansionDefaults', () => {
       totalChaptersMin: 2000,
       totalChaptersMax: 2500,
       volumeChaptersMin: 60,
-      volumeChaptersMax: 80,
+      volumeChaptersMax: 100,
       volumeCharacterIncrement: null,
     })
   })
@@ -242,7 +242,7 @@ describe('storyExpansionDefaults', () => {
       totalChaptersMin: 600,
       totalChaptersMax: 800,
       volumeChaptersMin: 60,
-      volumeChaptersMax: 80,
+      volumeChaptersMax: 100,
       volumeCharacterIncrement: null,
     })
   })

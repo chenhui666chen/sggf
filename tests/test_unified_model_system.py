@@ -674,6 +674,92 @@ class TestModelHub:
         assert adapter.generate.await_count == 2
 
     @pytest.mark.asyncio
+    async def test_model_hub_uses_application_retry_budget_even_without_passthrough_retry_support(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """测试不支持透传 max_retries 的模型仍可使用 ModelHub 外层重试预算。"""
+        import importlib
+        from core.model_hub import model_hub
+        from core.unified_registry import UnifiedModelRegistry
+        from schemas.unified_model_spec import (
+            UnifiedModelSpec,
+            ModelType,
+            APIConfig,
+            RoutingConfig,
+            LLMConstraints,
+            LLMResult,
+        )
+
+        model_hub_module = importlib.import_module("core.model_hub")
+
+        async def _noop_sleep(_: float) -> None:
+            return
+
+        monkeypatch.setattr(model_hub_module.asyncio, "sleep", _noop_sleep)
+
+        registry = UnifiedModelRegistry()
+        registry.clear()
+
+        spec = UnifiedModelSpec(
+            id="app-retry-only-model",
+            name="App Retry Only Model",
+            provider="test",
+            model_type=ModelType.LLM,
+            api_config=APIConfig(
+                api_key_env="TEST_API_KEY",
+                base_url="https://api.test.com/v1",
+                default_max_retries=3,
+            ),
+            constraints=LLMConstraints(supports_max_retries=False),
+            routing=RoutingConfig(task_types=["retry_test"]),
+        )
+        registry.register(spec)
+
+        call_count = 0
+
+        async def _generate(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                return LLMResult(
+                    success=False,
+                    model_id="app-retry-only-model",
+                    error="Too many requests. Please try again later.",
+                    error_code="rate_limit",
+                )
+            return LLMResult(
+                success=True,
+                model_id="app-retry-only-model",
+                content="ok",
+                usage={},
+                latency=0.0,
+                cost=0.0,
+            )
+
+        adapter = Mock()
+        adapter.generate = AsyncMock(side_effect=_generate)
+
+        original_registry = model_hub.registry
+        model_hub.registry = registry
+        try:
+            with patch.object(registry, "get_adapter", return_value=adapter):
+                result = await model_hub._execute_call(
+                    model_id="app-retry-only-model",
+                    messages=[{"role": "user", "content": "hello"}],
+                    temperature=0.7,
+                    max_tokens=None,
+                    stream=False,
+                    on_chunk=None,
+                )
+        finally:
+            model_hub.registry = original_registry
+
+        assert result.success is True
+        assert call_count == 3
+        assert adapter.generate.await_count == 3
+
+    @pytest.mark.asyncio
     async def test_model_hub_increases_timeout_budget_after_timeout(self, monkeypatch: pytest.MonkeyPatch):
         import importlib
         from core.model_hub import model_hub
@@ -847,7 +933,7 @@ class TestModelHub:
 
     @pytest.mark.asyncio
     async def test_model_hub_disables_retry_for_models_without_retry_support(self):
-        """测试不支持重试的模型仅尝试一次后立即回退。"""
+        """测试未配置应用层重试预算的模型仅尝试一次后立即回退。"""
         from core.model_hub import model_hub
         from core.unified_registry import UnifiedModelRegistry
         from schemas.unified_model_spec import (
@@ -871,7 +957,7 @@ class TestModelHub:
             api_config=APIConfig(
                 api_key_env="TEST_API_KEY",
                 base_url="https://api.test.com/v1",
-                default_max_retries=5,
+                default_max_retries=1,
             ),
             constraints=LLMConstraints(supports_max_retries=False),
             routing=RoutingConfig(task_types=["fallback_test"], fallback_models=["fallback-model"]),
@@ -1221,7 +1307,7 @@ class TestYAMLConfiguration:
         assert deepseek_chat_spec.default_params["request_model"] == "deepseek-v3"
 
     def test_yaml_audio_model_loading(self):
-        """测试音乐音效模型已纳入统一模型注册中心。"""
+        """测试当前 YAML 中的音频模型已纳入统一模型注册中心。"""
         from core.unified_registry import UnifiedModelRegistry
         from core.model_hub import model_hub
         from schemas.unified_model_spec import ModelType
@@ -1240,17 +1326,11 @@ class TestYAMLConfiguration:
         assert music_spec.model_type == ModelType.AUDIO
         assert "asset_music" in music_spec.routing.task_types
 
-        sfx_spec = registry.get_spec("vidu-timing2audio")
-        assert sfx_spec is not None
-        assert sfx_spec.model_type == ModelType.AUDIO
-        assert sfx_spec.get_fallback_model() == "mureka-o1-instrumental"
-
         audio_specs = registry.get_specs_by_type("audio")
         audio_ids = {spec.id for spec in audio_specs}
-        assert {"mureka-o1-instrumental", "vidu-timing2audio"} <= audio_ids
+        assert "mureka-o1-instrumental" in audio_ids
 
         assert registry.select_best_model("asset_music").id == "mureka-o1-instrumental"
-        assert registry.select_best_model("asset_sfx").id == "vidu-timing2audio"
 
     def test_yaml_task_type_mapping(self):
         """测试 YAML 任务类型映射"""

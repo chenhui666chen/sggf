@@ -132,6 +132,13 @@ class StoryExpansionAnalysisPayload(_StrictModel):
     estimated_rounds: Optional[int] = None
     estimated_duration_minutes_min: Optional[int] = None
     estimated_duration_minutes_max: Optional[int] = None
+    duration_estimate_base_minutes_min: Optional[int] = None
+    duration_estimate_base_minutes_max: Optional[int] = None
+    duration_estimate_source: Optional[str] = None
+    duration_estimate_confidence: Optional[str] = None
+    duration_estimate_sample_count: Optional[int] = None
+    duration_estimate_calibration_ratio: Optional[float] = None
+    duration_estimate_reason: Optional[str] = None
     auto_supplement_applied: Optional[bool] = None
     analysis_summary: Optional[str] = None
     warnings: list[str] = Field(default_factory=list)

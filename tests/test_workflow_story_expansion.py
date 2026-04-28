@@ -2,6 +2,7 @@
 
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -90,12 +91,16 @@ class _TaskStatusDBSession(_FakeDBSession):
     def __init__(self, task_row: Any) -> None:
         super().__init__()
         self.task_row = task_row
+        self.updated_rows: list[dict[str, Any]] = []
 
     def execute(self, query: Any, params: Any = None) -> Any:
         self.execute_calls.append((query, params))
         query_text = str(query)
         if "FROM generation_history gh" in query_text and "WHERE gh.task_id = :task_id AND p.user_id = :user_id" in query_text:
             return SimpleNamespace(fetchone=lambda: self.task_row)
+        if "UPDATE generation_history" in query_text:
+            self.updated_rows.append(dict(params or {}))
+            return SimpleNamespace()
         return SimpleNamespace(fetchone=lambda: None)
 
 
@@ -111,6 +116,81 @@ class _VolumeDetailConfigDBSession(_FakeDBSession):
         if "SELECT epic_framework, epic_framework_generated_at, plot_outline, epic_volumes_detail" in query_text:
             return SimpleNamespace(fetchone=lambda: (self.epic_framework, None, None, self.epic_volumes_detail))
         return SimpleNamespace()
+
+
+class _StageContentDBSession(_FakeDBSession):
+    def __init__(
+        self,
+        *,
+        plot_outline: str,
+        epic_volumes_detail: str,
+        concept: str = "故事概念",
+        world_setting: str = "世界设定",
+        characters: str = "### 【姓名】：顾长庚\n【角色定位】：主角",
+        chapter_draft: str = "章节初稿",
+        review_report: str = "评审报告",
+        final_version: str = "终稿",
+    ) -> None:
+        super().__init__()
+        self.stage_row = (
+            concept,
+            world_setting,
+            characters,
+            plot_outline,
+            epic_volumes_detail,
+            chapter_draft,
+            review_report,
+            final_version,
+        )
+        self.plot_outline = plot_outline
+        self.epic_volumes_detail = epic_volumes_detail
+
+    def execute(self, query: Any, params: Any = None) -> Any:
+        self.execute_calls.append((query, params))
+        query_text = str(query)
+        if "SELECT concept, world_setting, characters, plot_outline," in query_text:
+            return SimpleNamespace(fetchone=lambda: self.stage_row)
+        if "SELECT plot_outline, epic_volumes_detail" in query_text:
+            return SimpleNamespace(fetchone=lambda: (self.plot_outline, self.epic_volumes_detail))
+        if "SELECT epic_framework, epic_framework_generated_at, plot_outline, epic_volumes_detail" in query_text:
+            return SimpleNamespace(fetchone=lambda: (None, None, self.plot_outline, self.epic_volumes_detail))
+        return SimpleNamespace(fetchone=lambda: None)
+
+
+class _UpdateProjectSettingsDBSession(_FakeDBSession):
+    def __init__(
+        self,
+        *,
+        plot_outline: str = "",
+        epic_volumes_detail: str = "",
+        characters: str = "### 【姓名】：顾长庚\n【角色定位】：主角",
+    ) -> None:
+        super().__init__()
+        self.plot_outline = plot_outline
+        self.epic_volumes_detail = epic_volumes_detail
+        self.characters = characters
+        self.updated_rows: list[dict[str, Any]] = []
+
+    def execute(self, query: Any, params: Any = None) -> Any:
+        self.execute_calls.append((query, params))
+        query_text = str(query)
+        if "SELECT id FROM project_settings WHERE project_id = :project_id" in query_text:
+            return SimpleNamespace(fetchone=lambda: (1,))
+        if "SELECT characters" in query_text:
+            return SimpleNamespace(fetchone=lambda: (self.characters,))
+        if "SELECT plot_outline" in query_text and "FROM project_settings" in query_text:
+            return SimpleNamespace(fetchone=lambda: (self.plot_outline,))
+        if "UPDATE project_settings" in query_text:
+            payload = dict(params or {})
+            self.updated_rows.append(payload)
+            if "plot_outline" in payload:
+                self.plot_outline = payload["plot_outline"]
+            if "epic_volumes_detail" in payload:
+                self.epic_volumes_detail = payload["epic_volumes_detail"]
+            if "characters" in payload:
+                self.characters = payload["characters"]
+            return SimpleNamespace()
+        return SimpleNamespace(fetchone=lambda: None)
 
 
 def _build_volume_detail_text(*, volume_index: int, start: int, end: int) -> str:
@@ -129,6 +209,26 @@ def _build_volume_detail_text(*, volume_index: int, start: int, end: int) -> str
         f"{chapter_blocks}\n\n"
         "## 三、伏笔埋设检查\n"
         f"- 第{start}-{min(start + 4, end)}章：完成第一轮伏笔铺垫。"
+    )
+
+
+def _build_volume_detail_without_tail(*, volume_index: int, start: int, end: int) -> str:
+    chapter_blocks = "\n\n".join(
+        (
+            f"### 第{chapter_number}章：《卷{volume_index}章节{chapter_number - start + 1}》\n"
+            f"- 场景目标：承接第{chapter_number - 1}章并推进本章矛盾。\n"
+            f"- 关键事件：第{chapter_number}章发生关键转折。\n"
+            f"- 情节作用：完成第{chapter_number}章的阶段推进。\n"
+            f"- 结尾钩子：第{chapter_number}章留下下一步行动线索。\n"
+            f"- 伏笔事项：第{chapter_number}章埋下后续回收线索。"
+        )
+        for chapter_number in range(start, end + 1)
+    )
+    return (
+        "## 一、故事概述\n"
+        f"- 承接第{start - 1}章的尾声冲突，展开本卷主线。\n\n"
+        f"## 二、第{volume_index}卷详细规划（预计{end - start + 1}章，从第{start}章开始）\n\n"
+        f"{chapter_blocks}"
     )
 
 
@@ -225,6 +325,7 @@ async def test_get_task_status_parses_json_result_payload() -> None:
     fake_db = _TaskStatusDBSession(
         (
             "expand-story-task-1",
+            "expand_story",
             "completed",
             json.dumps({"message": "完成", "current_chapter_count": 22}, ensure_ascii=False),
             None,
@@ -253,6 +354,7 @@ async def test_get_task_status_keeps_plain_text_result_when_payload_is_not_json(
     fake_db = _TaskStatusDBSession(
         (
             "workflow-task-plain",
+            "workflow_stage_content",
             "failed",
             "任务执行中断：上游服务无响应",
             "上游超时",
@@ -272,6 +374,94 @@ async def test_get_task_status_keeps_plain_text_result_when_payload_is_not_json(
     assert result["progress"] == 0
     assert result["result"] == "任务执行中断：上游服务无响应"
     assert result["error"] == "上游超时"
+
+
+@pytest.mark.asyncio
+async def test_get_task_status_marks_stale_expand_story_task_as_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_db = _TaskStatusDBSession(
+        (
+            "expand-story-timeout",
+            "expand_story",
+            "running",
+            None,
+            None,
+            "2026-04-24T00:00:00+00:00",
+            None,
+        )
+    )
+    timeout_now = datetime(2026, 4, 24, 4, 30, tzinfo=timezone.utc)
+    monkeypatch.setattr(workflow_status, "utc_now", lambda: timeout_now)
+    monkeypatch.setattr(
+        workflow_status,
+        "WORKFLOW_STATUS_PROCESS_STARTED_AT",
+        datetime(2026, 4, 23, 23, 50, tzinfo=timezone.utc),
+    )
+
+    result = await workflow_status.get_task_status(
+        "expand-story-timeout",
+        current_user=SimpleNamespace(id=1),
+        db=fake_db,
+    )
+
+    assert result["task_id"] == "expand-story-timeout"
+    assert result["status"] == "timeout"
+    assert result["progress"] == 0
+    assert result["error"] == "协同扩展任务超时（运行超过180分钟）"
+    assert result["completed_at"] == timeout_now.isoformat()
+    assert fake_db.committed is True
+    assert fake_db.updated_rows == [
+        {
+            "task_id": "expand-story-timeout",
+            "error": "协同扩展任务超时（运行超过180分钟）",
+            "completed_at": timeout_now.isoformat(),
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_task_status_marks_orphaned_expand_story_task_as_failed_after_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_db = _TaskStatusDBSession(
+        (
+            "expand-story-orphan",
+            "expand_story",
+            "running",
+            None,
+            None,
+            "2026-04-27T01:17:36+00:00",
+            None,
+        )
+    )
+    interrupted_now = datetime(2026, 4, 27, 3, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(workflow_status, "utc_now", lambda: interrupted_now)
+    monkeypatch.setattr(
+        workflow_status,
+        "WORKFLOW_STATUS_PROCESS_STARTED_AT",
+        datetime(2026, 4, 27, 2, 48, 58, tzinfo=timezone.utc),
+    )
+
+    result = await workflow_status.get_task_status(
+        "expand-story-orphan",
+        current_user=SimpleNamespace(id=1),
+        db=fake_db,
+    )
+
+    assert result["task_id"] == "expand-story-orphan"
+    assert result["status"] == "failed"
+    assert result["progress"] == 0
+    assert result["error"] == "协同扩展任务因服务重启或热重载中断，请重新发起"
+    assert result["completed_at"] == interrupted_now.isoformat()
+    assert fake_db.committed is True
+    assert fake_db.updated_rows == [
+        {
+            "task_id": "expand-story-orphan",
+            "error": "协同扩展任务因服务重启或热重载中断，请重新发起",
+            "completed_at": interrupted_now.isoformat(),
+        }
+    ]
 
 
 def test_resolve_story_volume_detail_config_estimates_start_chapter_from_framework_summary() -> None:
@@ -476,6 +666,358 @@ def test_merge_volumes_to_outline_recalculates_following_detail_ranges_and_headi
     assert "### 第130章：《卷2章节60》" in merged
     assert "### 第61章：《卷2章节1》" not in merged
     assert "承接第70章" in merged
+
+
+def test_parse_framework_to_volumes_restores_merged_outline_without_losing_following_summaries() -> None:
+    volumes_data = {
+        "total_volumes": 3,
+        "framework_generated_at": "2026-04-15T00:00:00",
+        "framework_header": "## 故事总纲\n- 主线：推翻天庄",
+        "framework_footer": "## 关键伏笔\n- 倒悬之塔中继站将在后续卷回收",
+        "volumes": {
+            "1": {
+                "type": "framework",
+                "title": "锈镇求生",
+                "summary": "- 章节规模：1-30章\n- 卷定位：开篇立足\n- 核心目标：活下来",
+                "detail": None,
+                "chapters_range": [0, 0],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+            "2": {
+                "type": "detail",
+                "title": "黑狱逃生",
+                "summary": "- 章节规模：31-60章\n- 卷定位：突破黑狱\n- 核心目标：逃出生天",
+                "detail": _build_volume_detail_text(volume_index=2, start=31, end=60),
+                "chapters_range": [31, 60],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+            "3": {
+                "type": "framework",
+                "title": "万法潜行",
+                "summary": "- 章节规模：61-90章\n- 卷定位：潜入万法城\n- 核心目标：夺取节点",
+                "detail": None,
+                "chapters_range": [0, 0],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+        },
+    }
+
+    merged = outline_merger.merge_volumes_to_outline(volumes_data)
+    reparsed = outline_merger.parse_framework_to_volumes(merged, 3)
+
+    assert reparsed["framework_header"] == "## 故事总纲\n- 主线：推翻天庄"
+    assert reparsed["framework_footer"] == "## 关键伏笔\n- 倒悬之塔中继站将在后续卷回收"
+    assert reparsed["volumes"]["1"]["summary"] == "- 章节规模：1-30章\n- 卷定位：开篇立足\n- 核心目标：活下来"
+    assert reparsed["volumes"]["2"]["type"] == "detail"
+    assert reparsed["volumes"]["2"]["chapters_range"] == [31, 60]
+    assert "## 二、第2卷详细规划（预计30章，从第31章开始）" in reparsed["volumes"]["2"]["detail"]
+    assert reparsed["volumes"]["3"]["summary"] == "- 章节规模：61-90章\n- 卷定位：潜入万法城\n- 核心目标：夺取节点"
+
+
+def test_merge_volumes_to_outline_repairs_legacy_detail_tail_sections_and_collapses_details() -> None:
+    volumes_data = {
+        "total_volumes": 3,
+        "framework_generated_at": "2026-04-27T00:00:00",
+        "framework_header": "## 故事总纲",
+        "framework_footer": "## 关键伏笔",
+        "volumes": {
+            "1": {
+                "type": "detail",
+                "title": "锈镇求生",
+                "summary": "- 章节规模：1-30章\n- 卷定位：开篇立足",
+                "detail": _build_volume_detail_without_tail(volume_index=1, start=1, end=30),
+                "chapters_range": [1, 30],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+            "2": {
+                "type": "framework",
+                "title": "黑狱突围",
+                "summary": "- 章节规模：31-60章\n- 卷定位：突破黑狱",
+                "detail": None,
+                "chapters_range": [0, 0],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+            "3": {
+                "type": "framework",
+                "title": "万法潜行",
+                "summary": "- 章节规模：61-90章\n- 卷定位：潜入万法城",
+                "detail": None,
+                "chapters_range": [0, 0],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+        },
+    }
+
+    merged = outline_merger.merge_volumes_to_outline(volumes_data)
+
+    assert "<details>" in merged
+    assert "<details open>" not in merged
+    assert "## 三、伏笔埋设检查" in merged
+    assert "## 四、卷尾衔接检查" in merged
+    assert "✅ 下卷开局场景：" in merged
+    assert "### 【第2卷】《黑狱突围》" in merged
+    assert "### 【第3卷】《万法潜行》" in merged
+
+
+def test_load_epic_framework_state_rebuilds_plot_outline_from_epic_volumes_detail() -> None:
+    from app.services.workflow_context_builder import WorkflowContextBuilder
+
+    volumes_data = {
+        "total_volumes": 3,
+        "framework_generated_at": "2026-04-27T00:00:00",
+        "framework_header": "## 故事总纲\n- 主线：推翻天庄",
+        "framework_footer": "## 关键伏笔\n- 倒悬之塔将在后续卷回收",
+        "volumes": {
+            "1": {
+                "type": "detail",
+                "title": "锈镇求生",
+                "summary": "- 章节规模：1-30章\n- 卷定位：开篇立足",
+                "detail": _build_volume_detail_without_tail(volume_index=1, start=1, end=30),
+                "chapters_range": [1, 30],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+            "2": {
+                "type": "framework",
+                "title": "黑狱突围",
+                "summary": "- 章节规模：31-60章\n- 卷定位：突破黑狱",
+                "detail": None,
+                "chapters_range": [0, 0],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+            "3": {
+                "type": "framework",
+                "title": "万法潜行",
+                "summary": "- 章节规模：61-90章\n- 卷定位：潜入万法城",
+                "detail": None,
+                "chapters_range": [0, 0],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+        },
+    }
+    fake_db = _VolumeDetailConfigDBSession(
+        epic_framework="## 五、分卷规划（共3卷）\n### 【第1卷】《旧文本》",
+        epic_volumes_detail=json.dumps(volumes_data, ensure_ascii=False),
+    )
+
+    state = WorkflowContextBuilder(fake_db).load_epic_framework_state(1)
+
+    assert "### 【第2卷】《黑狱突围》" in state.plot_outline
+    assert "### 【第3卷】《万法潜行》" in state.plot_outline
+    assert "## 三、伏笔埋设检查" in state.plot_outline
+    assert "## 四、卷尾衔接检查" in state.plot_outline
+    assert "<details open>" not in state.plot_outline
+
+
+def test_load_stage_contents_snapshot_rebuilds_plot_outline_from_epic_volumes_detail() -> None:
+    from app.services.workflow_context_builder import WorkflowContextBuilder
+
+    volumes_data = {
+        "total_volumes": 3,
+        "framework_generated_at": "2026-04-27T00:00:00",
+        "framework_header": "## 故事总纲\n- 主线：推翻天庄",
+        "framework_footer": "## 关键伏笔\n- 倒悬之塔将在后续卷回收",
+        "volumes": {
+            "1": {
+                "type": "detail",
+                "title": "锈镇求生",
+                "summary": "- 章节规模：1-30章\n- 卷定位：开篇立足",
+                "detail": _build_volume_detail_without_tail(volume_index=1, start=1, end=30),
+                "chapters_range": [1, 30],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+            "2": {
+                "type": "framework",
+                "title": "黑狱突围",
+                "summary": "- 章节规模：31-60章\n- 卷定位：突破黑狱",
+                "detail": None,
+                "chapters_range": [0, 0],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+            "3": {
+                "type": "framework",
+                "title": "万法潜行",
+                "summary": "- 章节规模：61-90章\n- 卷定位：潜入万法城",
+                "detail": None,
+                "chapters_range": [0, 0],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+        },
+    }
+    fake_db = _StageContentDBSession(
+        plot_outline="### 【第1卷】《旧文本》\n<details open>",
+        epic_volumes_detail=json.dumps(volumes_data, ensure_ascii=False),
+    )
+
+    snapshot = WorkflowContextBuilder(fake_db).load_stage_contents_snapshot(1, pretty_json=True)
+
+    assert "### 【第2卷】《黑狱突围》" in snapshot["plot_outline"]
+    assert "### 【第3卷】《万法潜行》" in snapshot["plot_outline"]
+    assert "## 三、伏笔埋设检查" in snapshot["plot_outline"]
+    assert "## 四、卷尾衔接检查" in snapshot["plot_outline"]
+    assert "<details open>" not in snapshot["plot_outline"]
+
+
+def test_read_stage_content_returns_rebuilt_plot_outline_for_structure_stage() -> None:
+    from app.services.workflow_context_builder import WorkflowContextBuilder
+
+    volumes_data = {
+        "total_volumes": 2,
+        "framework_generated_at": "2026-04-27T00:00:00",
+        "framework_header": "## 故事总纲",
+        "framework_footer": "## 关键伏笔",
+        "volumes": {
+            "1": {
+                "type": "detail",
+                "title": "锈镇求生",
+                "summary": "- 章节规模：1-30章\n- 卷定位：开篇立足",
+                "detail": _build_volume_detail_without_tail(volume_index=1, start=1, end=30),
+                "chapters_range": [1, 30],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+            "2": {
+                "type": "framework",
+                "title": "黑狱突围",
+                "summary": "- 章节规模：31-60章\n- 卷定位：突破黑狱",
+                "detail": None,
+                "chapters_range": [0, 0],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+        },
+    }
+    fake_db = _StageContentDBSession(
+        plot_outline="### 【第1卷】《旧文本》\n<details open>",
+        epic_volumes_detail=json.dumps(volumes_data, ensure_ascii=False),
+    )
+
+    content = WorkflowContextBuilder(fake_db).read_stage_content(1, "structure", pretty_json=True)
+
+    assert "### 【第2卷】《黑狱突围》" in content
+    assert "## 三、伏笔埋设检查" in content
+    assert "## 四、卷尾衔接检查" in content
+    assert "<details open>" not in content
+
+
+def test_update_project_settings_fields_preserves_merged_plot_outline_when_only_plot_outline_is_written() -> None:
+    from app.services.workflow_context_builder import WorkflowContextBuilder
+
+    volumes_data = {
+        "total_volumes": 2,
+        "framework_generated_at": "2026-04-27T00:00:00",
+        "framework_header": "## 故事总纲",
+        "framework_footer": "## 关键伏笔",
+        "volumes": {
+            "1": {
+                "type": "detail",
+                "title": "锈镇求生",
+                "summary": "- 章节规模：1-30章\n- 卷定位：开篇立足",
+                "detail": _build_volume_detail_without_tail(volume_index=1, start=1, end=30),
+                "chapters_range": [1, 30],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+            "2": {
+                "type": "framework",
+                "title": "黑狱突围",
+                "summary": "- 章节规模：31-60章\n- 卷定位：突破黑狱",
+                "detail": None,
+                "chapters_range": [0, 0],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+        },
+    }
+    merged_outline = outline_merger.merge_volumes_to_outline(volumes_data)
+    fake_db = _UpdateProjectSettingsDBSession()
+
+    WorkflowContextBuilder(fake_db).update_project_settings_fields(
+        1,
+        plot_outline=merged_outline,
+    )
+
+    assert fake_db.committed is True
+    assert len(fake_db.updated_rows) == 1
+    persisted_plot_outline = fake_db.updated_rows[0]["plot_outline"]
+    assert persisted_plot_outline == merged_outline
+    assert "<details>" in persisted_plot_outline
+    assert "<details open>" not in persisted_plot_outline
+    assert "### 【第2卷】《黑狱突围》" in persisted_plot_outline
+
+
+def test_update_project_settings_fields_rebuilds_plot_outline_from_epic_volumes_detail_on_write() -> None:
+    from app.services.workflow_context_builder import WorkflowContextBuilder
+
+    volumes_data = {
+        "total_volumes": 3,
+        "framework_generated_at": "2026-04-27T00:00:00",
+        "framework_header": "## 故事总纲\n- 主线：推翻天庄",
+        "framework_footer": "## 关键伏笔\n- 倒悬之塔将在后续卷回收",
+        "volumes": {
+            "1": {
+                "type": "detail",
+                "title": "锈镇求生",
+                "summary": "- 章节规模：1-30章\n- 卷定位：开篇立足",
+                "detail": _build_volume_detail_without_tail(volume_index=1, start=1, end=30),
+                "chapters_range": [1, 30],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+            "2": {
+                "type": "framework",
+                "title": "黑狱突围",
+                "summary": "- 章节规模：31-60章\n- 卷定位：突破黑狱",
+                "detail": None,
+                "chapters_range": [0, 0],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+            "3": {
+                "type": "framework",
+                "title": "万法潜行",
+                "summary": "- 章节规模：61-90章\n- 卷定位：潜入万法城",
+                "detail": None,
+                "chapters_range": [0, 0],
+                "chapter_count": 30,
+                "expanded_at": None,
+            },
+        },
+    }
+    fake_db = _UpdateProjectSettingsDBSession(
+        plot_outline="### 【第1卷】《旧文本》\n<details open>",
+    )
+
+    WorkflowContextBuilder(fake_db).update_project_settings_fields(
+        1,
+        plot_outline="### 【第1卷】《旧文本》\n<details open>",
+        epic_volumes_detail=json.dumps(volumes_data, ensure_ascii=False),
+    )
+
+    assert fake_db.committed is True
+    assert len(fake_db.updated_rows) == 1
+    persisted_plot_outline = fake_db.updated_rows[0]["plot_outline"]
+    persisted_epic_volumes_detail = fake_db.updated_rows[0]["epic_volumes_detail"]
+    assert "### 【第2卷】《黑狱突围》" in persisted_plot_outline
+    assert "### 【第3卷】《万法潜行》" in persisted_plot_outline
+    assert "## 三、伏笔埋设检查" in persisted_plot_outline
+    assert "## 四、卷尾衔接检查" in persisted_plot_outline
+    assert "<details open>" not in persisted_plot_outline
+    persisted_volumes = json.loads(persisted_epic_volumes_detail)
+    persisted_detail = persisted_volumes["volumes"]["1"]["detail"]
+    assert "## 三、伏笔埋设检查" in persisted_detail
+    assert "## 四、卷尾衔接检查" in persisted_detail
 
 
 def test_validate_expand_story_request_accepts_layered_epic_framework_thresholds() -> None:

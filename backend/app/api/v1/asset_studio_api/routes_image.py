@@ -42,7 +42,7 @@ from app.api.v1.asset_studio_api._helpers import (
 def generate_image_asset(
     prompt: str = Form(...),
     negative_prompt: str = Form(default=""),
-    model_id: str = Form(default="wan2.6-t2i"),
+    model_id: str = Form(default=DEFAULT_IMAGE_GENERATION_MODEL_ID),
     width: int = Form(default=1024),
     height: int = Form(default=1024),
     quality: str = Form(default="standard"),
@@ -73,7 +73,7 @@ def generate_image_asset(
             request_label="图片",
         )
         normalized_model_id = normalize_model_id(model_id) or ""
-        resolved_model_id = normalized_model_id if normalized_model_id in IMAGE_EDIT_MODELS else "qwen-image-edit-plus"
+        resolved_model_id = normalized_model_id if normalized_model_id in IMAGE_EDIT_MODELS else DEFAULT_IMAGE_EDIT_MODEL_ID
         result = media_runtime.edit_image(
             image_path=str(saved_reference_paths[0]),
             edit_prompt=cleaned_prompt,
@@ -109,7 +109,7 @@ def generate_image_asset(
         request_label="图片",
     )
     normalized_model_id = normalize_model_id(model_id) or ""
-    resolved_model_id = normalized_model_id if normalized_model_id in IMAGE_GENERATION_MODELS else "wan2.6-t2i"
+    resolved_model_id = normalized_model_id if normalized_model_id in IMAGE_GENERATION_MODELS else DEFAULT_IMAGE_GENERATION_MODEL_ID
     result = media_runtime.generate_image(
         prompt=cleaned_prompt,
         negative_prompt=negative_prompt.strip(),

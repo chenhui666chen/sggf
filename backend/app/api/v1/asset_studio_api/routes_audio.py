@@ -44,7 +44,7 @@ from app.api.v1.asset_studio_api._helpers import (
 async def generate_audio_asset(
     prompt: str = Form(...),
     generation_type: str = Form(default="music"),
-    model_id: str = Form(default="mureka-o1-instrumental"),
+    model_id: str = Form(default=DEFAULT_AUDIO_MUSIC_MODEL_ID),
     duration: int = Form(default=30),
     style: str = Form(default="氛围"),
     mood: str = Form(default="calm"),
@@ -68,18 +68,18 @@ async def generate_audio_asset(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的音频生成类型")
 
     requested_model_id = (model_id or "").strip() or (
-        "mureka-o1-instrumental"
+        DEFAULT_AUDIO_MUSIC_MODEL_ID
         if normalized_generation_type == "music"
-        else "vidu-timing2audio"
+        else DEFAULT_AUDIO_SOUND_EFFECT_MODEL_ID
         if normalized_generation_type == "sound-effect"
-        else "qwen3-tts-instruct-flash"
+        else DEFAULT_AUDIO_SPEECH_MODEL_ID
     )
     normalized_mood = str(mood or "").strip() or "calm"
     normalized_tempo = str(tempo or "").strip() or "medium"
 
     if normalized_generation_type == "music":
         resolved_duration = _validate_audio_duration("music", duration)
-        resolved_model_id = "mureka-o1-instrumental"
+        resolved_model_id = DEFAULT_AUDIO_MUSIC_MODEL_ID
         music_generator = create_music_generator(enable_cache=True)
         music_result = await music_generator.client.generate_music(
             MusicGenerationRequest(
@@ -130,12 +130,7 @@ async def generate_audio_asset(
 
     if normalized_generation_type == "speech":
         resolved_model_id = normalize_model_id(requested_model_id) or requested_model_id
-        supported_speech_models = {
-            "qwen3-tts-instruct-flash",
-            "cosyvoice-v3.5-plus",
-            "minimax-speech-2.8-hd",
-            "minimax-speech-2.8-turbo",
-        }
+        supported_speech_models = SPEECH_MODELS
         if resolved_model_id not in supported_speech_models:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -197,7 +192,7 @@ async def generate_audio_asset(
     resolved_duration = _validate_audio_duration("sound-effect", duration)
     from app.services.audiobook.vidu_timing2audio_generator import ViduTiming2AudioGenerator
     
-    requested_vidu = requested_model_id == "vidu-timing2audio"
+    requested_vidu = requested_model_id == DEFAULT_AUDIO_SOUND_EFFECT_MODEL_ID
     vidu_generator = ViduTiming2AudioGenerator() if requested_vidu else None
     vidu_available = bool(vidu_generator and vidu_generator.api_key)
 
@@ -222,11 +217,11 @@ async def generate_audio_asset(
             output_path = Path(vidu_result.local_file_path)
             return _build_audio_response(
                 mode="text_to_sound_effect",
-                model_id="vidu-timing2audio",
+                model_id=DEFAULT_AUDIO_SOUND_EFFECT_MODEL_ID,
                 output_path=output_path,
                 metadata={
                     "requested_model_id": requested_model_id,
-                    "resolved_model_id": "vidu-timing2audio",
+                    "resolved_model_id": DEFAULT_AUDIO_SOUND_EFFECT_MODEL_ID,
                     "generation_type": normalized_generation_type,
                     "duration_seconds": resolved_duration,
                     "fallback_used": False,
@@ -274,11 +269,11 @@ async def generate_audio_asset(
 
     return _build_audio_response(
         mode="text_to_sound_effect",
-        model_id="mureka-o1-instrumental",
+        model_id=DEFAULT_AUDIO_MUSIC_MODEL_ID,
         output_path=output_path,
         metadata={
             "requested_model_id": requested_model_id,
-            "resolved_model_id": "mureka-o1-instrumental",
+            "resolved_model_id": DEFAULT_AUDIO_MUSIC_MODEL_ID,
             "generation_type": normalized_generation_type,
             "duration_seconds": resolved_duration,
             "style": MusicStyle.AMBIENT.value,

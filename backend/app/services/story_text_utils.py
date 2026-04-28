@@ -106,6 +106,101 @@ def normalize_story_text(value: Any) -> str:
     return repair_story_text_payload(value).replace("\r\n", "\n").replace("\r", "\n")
 
 
+_INLINE_EVENT_MARKER_PATTERN = re.compile(
+    r"(^|[\s；;。！？!?：:])(?P<marker>[①②③④⑤⑥⑦⑧⑨⑩⑪⑫]|\d{1,2}[\.、]|[一二三四五六七八九十]{1,3}[、.])\s*"
+)
+_STRONG_EVENT_SEPARATOR_PATTERN = re.compile(r"\s*(?:；|;|[—–-]{2,})\s*")
+
+
+def _clean_story_event_item(value: str) -> str:
+    text = normalize_story_text(value or "").strip()
+    if not text:
+        return ""
+
+    text = re.sub(r"^[\-\*\u2022•]+\s*", "", text)
+    text = re.sub(r"^(?:[①②③④⑤⑥⑦⑧⑨⑩⑪⑫]|\d{1,2}[\.、]|[一二三四五六七八九十]{1,3}[、.])\s*", "", text)
+    text = text.strip("；;—–- ")
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _split_story_event_text_by_markers(text: str) -> List[str]:
+    matches = list(_INLINE_EVENT_MARKER_PATTERN.finditer(text))
+    if len(matches) < 2:
+        return []
+
+    items: List[str] = []
+    for index, match in enumerate(matches):
+        start = match.start("marker")
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        item = _clean_story_event_item(text[start:end])
+        if item:
+            items.append(item)
+    return items
+
+
+def split_story_event_items(value: Any, *, limit: Optional[int] = None) -> List[str]:
+    """Split dense story-event text into stable event items."""
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        items: List[str] = []
+        for item in value:
+            items.extend(split_story_event_items(item))
+            if limit is not None and len(items) >= limit:
+                return items[:limit]
+        return items[:limit] if limit is not None else items
+
+    if isinstance(value, dict):
+        for key in ("content", "description", "summary", "event", "name"):
+            text = split_story_event_items(value.get(key), limit=limit)
+            if text:
+                return text
+        return []
+
+    text = normalize_story_text(value).strip()
+    if not text:
+        return []
+
+    if text.startswith("[") and text.endswith("]"):
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            parsed = None
+        if parsed is not None:
+            return split_story_event_items(parsed, limit=limit)
+
+    raw_items: List[str] = []
+    marker_items = _split_story_event_text_by_markers(text)
+    if marker_items:
+        raw_items.extend(marker_items)
+    else:
+        lines = [_clean_story_event_item(line) for line in text.splitlines()]
+        raw_items.extend(line for line in lines if line)
+
+        if len(raw_items) <= 1:
+            separator_items = [
+                _clean_story_event_item(part)
+                for part in _STRONG_EVENT_SEPARATOR_PATTERN.split(text)
+            ]
+            separator_items = [part for part in separator_items if part]
+            if 2 <= len(separator_items) <= 8:
+                raw_items = separator_items
+
+    deduped: List[str] = []
+    seen = set()
+    for item in raw_items:
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+        if limit is not None and len(deduped) >= limit:
+            break
+
+    return deduped[:limit] if limit is not None else deduped
+
+
 def parse_chapter_number_token(token: str) -> Optional[int]:
     if token is None:
         return None

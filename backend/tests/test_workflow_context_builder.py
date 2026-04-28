@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 from pathlib import Path
@@ -115,6 +116,62 @@ def test_load_epic_framework_state_decodes_framework_fields() -> None:
     assert "volume_number" in state.epic_volumes_detail
 
 
+def test_load_stage_text_context_normalizes_historical_plot_outline() -> None:
+    legacy_outline = (
+        "第44章：城寨暗流\n"
+        "关键事件：\n"
+        "苏璃以自由灵盟技术人员身份接近城寨卫队技术官获取二寨主近期活动情报\n"
+        "四天前秘密出城与斗篷人接头\n"
+        "发现其自身因果线被巧妙动过\n"
+        "涉及人物：顾长庚、苏璃\n"
+    )
+    db = DummySession(
+        rows=[
+            (
+                "",
+                "",
+                '["顾长庚","苏璃"]',
+                legacy_outline,
+                "",
+                "",
+                "",
+            )
+        ]
+    )
+
+    builder = WorkflowContextBuilder(db)
+    state = builder.load_stage_text_context(21)
+
+    assert "- 关键事件：苏璃以自由灵盟技术人员身份接近城寨卫队技术官获取二寨主近期活动情报；四天前秘密出城与斗篷人接头；发现其自身因果线被巧妙动过" in state.plot_outline
+    assert state.plot_outline.index("- 冲突设计") < state.plot_outline.index("- 关键事件")
+    assert state.plot_outline.index("- 关键事件") < state.plot_outline.index("- 涉及人物")
+
+
+def test_load_epic_framework_state_normalizes_plot_outline() -> None:
+    legacy_outline = (
+        "第17章：灯下问局\n"
+        "关键事件：\n"
+        "顾长歌潜入偏殿确认假印来源\n"
+        "试探苏晚晴\n"
+        "发现第二枚假印\n"
+    )
+    db = DummySession(
+        rows=[
+            (
+                '"长篇框架正文"',
+                "2026-04-13T10:00:00",
+                json.dumps(legacy_outline, ensure_ascii=False),
+                '{"volumes":[{"volume_number":1}]}',
+            )
+        ]
+    )
+
+    builder = WorkflowContextBuilder(db)
+    state = builder.load_epic_framework_state(18)
+
+    assert "- 关键事件：顾长歌潜入偏殿确认假印来源；试探苏晚晴；发现第二枚假印" in state.plot_outline
+
+
 def test_read_stage_content_flattens_character_cards_for_prompt_usage() -> None:
     db = DummySession(rows=[('["林岩","扳手"]',)])
 
@@ -143,6 +200,28 @@ def test_update_project_settings_fields_records_allowed_fields_and_commits() -> 
     assert params["plot_outline"] == "大纲正文"
     assert params["stage_two_status"] == "completed"
     assert "updated_at" in params
+
+
+def test_update_project_settings_fields_normalizes_plot_outline_before_persisting() -> None:
+    db = DummySession(rows=[(1,)])
+    legacy_outline = (
+        "第44章：城寨暗流\n"
+        "关键事件：\n"
+        "苏璃以自由灵盟技术人员身份接近城寨卫队技术官获取二寨主近期活动情报\n"
+        "四天前秘密出城与斗篷人接头\n"
+        "发现其自身因果线被巧妙动过\n"
+    )
+
+    builder = WorkflowContextBuilder(db)
+    builder.update_project_settings_fields(
+        9,
+        plot_outline=legacy_outline,
+        characters='["顾长庚","苏璃"]',
+    )
+
+    sql, params = db.executed[-1]
+    assert "UPDATE project_settings" in sql
+    assert "- 关键事件：苏璃以自由灵盟技术人员身份接近城寨卫队技术官获取二寨主近期活动情报；四天前秘密出城与斗篷人接头；发现其自身因果线被巧妙动过" in params["plot_outline"]
 
 
 def test_update_project_settings_fields_auto_creates_settings_record_when_missing() -> None:

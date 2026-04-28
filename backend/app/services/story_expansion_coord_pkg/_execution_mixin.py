@@ -734,6 +734,79 @@ class ExecutionMixin:
             target_total_characters=target_total_characters,
         )
 
+    def _run_iterative_tail_chapter_supplement(
+        self,
+        *,
+        current_outline_text: str,
+        current_characters: str,
+        world_setting: str,
+        current_chapter_count: int,
+        current_character_count: int,
+        initial_chapter_count: int,
+        target_chapter_count: int,
+        resolved_strategy: str,
+        next_round_number: int,
+    ) -> Dict[str, Any]:
+        chapter_gap = max(0, target_chapter_count - current_chapter_count)
+        if (
+            chapter_gap <= 0
+            or chapter_gap > self.ITERATIVE_TAIL_CHAPTER_GAP
+            or current_chapter_count <= initial_chapter_count
+        ):
+            return {"applied": False}
+
+        result = self._run_outline_round(
+            current_outline=current_outline_text,
+            world_setting=world_setting,
+            characters=current_characters,
+            current_chapter_count=current_chapter_count,
+            increment=chapter_gap,
+            target_total_chapters=current_chapter_count + chapter_gap,
+            overall_target_chapters=target_chapter_count,
+        )
+        next_outline_text, round_outline_delta = self._resolve_iterative_outline_round_text(
+            current_outline_text,
+            result,
+            current_chapter_count,
+        )
+        next_chapter_count = self._resolve_outline_count(
+            next_outline_text,
+            result.get("current_chapter_count"),
+            current_chapter_count,
+        )
+
+        stop_reason = ""
+        if next_chapter_count <= current_chapter_count and not round_outline_delta:
+            stop_reason = "尾差补章未产生新增章节，为避免空转已停止。"
+
+        round_record: Dict[str, Any] = {
+            "round": next_round_number,
+            "mode": "iterative",
+            "strategy": resolved_strategy,
+            "tail_supplement": True,
+            "before_chapter_count": current_chapter_count,
+            "before_character_count": current_character_count,
+            "plot": {
+                "increment_requested": chapter_gap,
+                "after_chapter_count": next_chapter_count,
+                "outline_delta": round_outline_delta,
+                "continue_reason": result.get("continue_reason", ""),
+            },
+            "character": None,
+            "after_chapter_count": next_chapter_count,
+            "after_character_count": current_character_count,
+            "validation": evaluate_story_coordination(next_outline_text, current_characters),
+        }
+
+        return {
+            "applied": True,
+            "next_outline_text": next_outline_text,
+            "next_chapter_count": next_chapter_count,
+            "outline_delta": round_outline_delta,
+            "stop_reason": stop_reason,
+            "round_record": round_record,
+        }
+
     def _expand_characters_to_target(
         self,
         current_characters: str,
@@ -1082,6 +1155,8 @@ class ExecutionMixin:
         character_delta_parts: List[str] = []
         outline_active = target_chapter_count > current_chapter_count
         character_active = target_character_count > current_character_count
+        force_next_round_plot_first = False
+        outline_retry_after_character_growth_used = False
         dynamic_character_task_target = self._coerce_non_negative_int(
             ((auto_supplement_plan or {}).get("character_plan") or {}).get("task_target_characters"),
         )
@@ -1115,7 +1190,10 @@ class ExecutionMixin:
                 break
 
             round_strategy = resolved_strategy
-            if round_strategy == "balanced":
+            if force_next_round_plot_first and outline_active:
+                round_strategy = "plot_first"
+                force_next_round_plot_first = False
+            elif round_strategy == "balanced":
                 round_strategy = self._select_balanced_round_order(
                     remaining_chapters=remaining_chapters,
                     target_chapter_count=target_chapter_count,
@@ -1132,9 +1210,12 @@ class ExecutionMixin:
                 "before_chapter_count": before_chapter_count,
                 "before_character_count": before_character_count,
             }
+            round_outline_no_growth_reason = ""
+            round_outline_no_growth_stop_index: Optional[int] = None
 
             def run_plot_side() -> Optional[Dict[str, Any]]:
                 nonlocal current_outline_text, current_chapter_count, outline_active
+                nonlocal round_outline_no_growth_reason, round_outline_no_growth_stop_index
                 if not outline_active:
                     return None
                 before_round_chapter_count = current_chapter_count
@@ -1166,28 +1247,28 @@ class ExecutionMixin:
                 )
                 if current_chapter_count <= before_round_chapter_count and not round_outline_delta:
                     outline_active = False
-                    stop_reasons.append(
-                        self._normalize_outline_stop_reason(
-                            str(result.get("continue_reason") or ""),
-                            before_chapter_count=before_round_chapter_count,
-                            after_chapter_count=current_chapter_count,
-                            outline_delta=round_outline_delta,
-                        )
+                    round_outline_no_growth_reason = self._normalize_outline_stop_reason(
+                        str(result.get("continue_reason") or ""),
+                        before_chapter_count=before_round_chapter_count,
+                        after_chapter_count=current_chapter_count,
+                        outline_delta=round_outline_delta,
                     )
+                    round_outline_no_growth_stop_index = len(stop_reasons)
+                    stop_reasons.append(round_outline_no_growth_reason)
                 elif (
                     not result.get("should_continue", True)
                     and current_chapter_count < target_chapter_count
                     and current_chapter_count <= before_round_chapter_count
                 ):
                     outline_active = False
-                    stop_reasons.append(
-                        self._normalize_outline_stop_reason(
-                            str(result.get("continue_reason") or ""),
-                            before_chapter_count=before_round_chapter_count,
-                            after_chapter_count=current_chapter_count,
-                            outline_delta=round_outline_delta,
-                        )
+                    round_outline_no_growth_reason = self._normalize_outline_stop_reason(
+                        str(result.get("continue_reason") or ""),
+                        before_chapter_count=before_round_chapter_count,
+                        after_chapter_count=current_chapter_count,
+                        outline_delta=round_outline_delta,
                     )
+                    round_outline_no_growth_stop_index = len(stop_reasons)
+                    stop_reasons.append(round_outline_no_growth_reason)
                 return {
                     "increment_requested": increment,
                     "after_chapter_count": current_chapter_count,
@@ -1289,6 +1370,28 @@ class ExecutionMixin:
             round_record["after_chapter_count"] = current_chapter_count
             round_record["after_character_count"] = current_character_count
 
+            character_grew_this_round = current_character_count > before_character_count
+            if (
+                round_outline_no_growth_reason
+                and character_grew_this_round
+                and current_chapter_count < target_chapter_count
+                and not outline_retry_after_character_growth_used
+            ):
+                outline_active = True
+                force_next_round_plot_first = True
+                outline_retry_after_character_growth_used = True
+                plot_record = round_record.get("plot")
+                if isinstance(plot_record, dict):
+                    plot_record["retry_after_character_growth"] = True
+                    plot_record["retry_reason"] = (
+                        "本轮新增了角色，下一轮将优先补这些角色的章节承接。"
+                    )
+                if round_outline_no_growth_stop_index is not None:
+                    try:
+                        stop_reasons.pop(round_outline_no_growth_stop_index)
+                    except IndexError:
+                        pass
+
             if (
                 current_chapter_count == before_chapter_count
                 and current_character_count == before_character_count
@@ -1305,6 +1408,26 @@ class ExecutionMixin:
 
             if not outline_active and not character_active:
                 break
+
+        tail_supplement = self._run_iterative_tail_chapter_supplement(
+            current_outline_text=current_outline_text,
+            current_characters=current_characters,
+            world_setting=world_setting,
+            current_chapter_count=current_chapter_count,
+            current_character_count=current_character_count,
+            initial_chapter_count=initial_chapter_count,
+            target_chapter_count=target_chapter_count,
+            resolved_strategy=resolved_strategy,
+            next_round_number=len(rounds) + 1,
+        )
+        if tail_supplement.get("applied"):
+            self._append_unique_text(outline_delta_parts, tail_supplement.get("outline_delta") or "")
+            current_outline_text = str(tail_supplement.get("next_outline_text") or current_outline_text)
+            current_chapter_count = int(tail_supplement.get("next_chapter_count") or current_chapter_count)
+            rounds.append(tail_supplement["round_record"])
+            if tail_supplement.get("stop_reason"):
+                stop_reasons.append(str(tail_supplement["stop_reason"]))
+            outline_active = current_chapter_count < target_chapter_count and not bool(tail_supplement.get("stop_reason"))
 
         if (
             (outline_active or character_active)
@@ -1720,6 +1843,10 @@ class ExecutionMixin:
             chapters_end,
             self._estimate_total_chapters_from_volumes_data(volumes_data),
         )
+        volume_chapter_count = int(
+            volume_result.get("chapter_count")
+            or max(0, chapters_end - chapters_start + 1)
+        )
 
         summary = (
             f"已细化第{target_volume_index}卷，生成第{chapters_start}-{chapters_end}章的卷级细纲，"
@@ -1745,6 +1872,11 @@ class ExecutionMixin:
                 "mode": "volume_detail",
                 "target_volume_index": target_volume_index,
                 "chapter_range": [chapters_start, chapters_end],
+                "target_chapter_count": total_chapter_count,
+                "target_character_count": target_character_count,
+                "volume_chapter_count": volume_chapter_count,
+                "volume_chapter_count_range": list(chapters_count_range),
+                "planned_volume_chapter_count": normalized_volume_detail_config.get("planned_chapter_count"),
             },
             "plot_outline": plot_outline,
             "characters": current_characters,
@@ -1765,6 +1897,9 @@ class ExecutionMixin:
             "epic_total_volumes": normalized_volume_detail_config.get("total_volumes"),
             "volume_index": target_volume_index,
             "volume_chapter_range": [chapters_start, chapters_end],
+            "volume_chapter_count": volume_chapter_count,
+            "volume_chapter_count_range": list(chapters_count_range),
+            "planned_volume_chapter_count": normalized_volume_detail_config.get("planned_chapter_count"),
             "stop_reasons": stop_reasons,
         }
 

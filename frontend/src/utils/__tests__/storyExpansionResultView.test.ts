@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { createStoryExpansionResultView } from '../storyExpansionResultModel'
+import {
+  createStoryExpansionResultView,
+  mergeStoryExpansionRepairResult,
+} from '../storyExpansionResultModel'
 import {
   createStoryExpansionResultDisplayView,
   formatCountDelta,
@@ -292,6 +295,48 @@ describe('storyExpansionResultView', () => {
     ])
   })
 
+  it('尾差补章轮次会在结果页显示独立标识', () => {
+    const view = createStoryExpansionResultView({
+      execution_rounds: [
+        {
+          round: 4,
+          stage: 'volume_detail',
+          strategy: 'balanced',
+          tail_supplement: true,
+          before_chapter_count: 198,
+          after_chapter_count: 200,
+          before_character_count: 32,
+          after_character_count: 32,
+          plot: { increment_requested: 2 },
+        },
+      ],
+      current_chapter_count: 200,
+      target_chapter_count: 200,
+      current_character_count: 32,
+      target_character_count: 32,
+    })
+
+    const display = createStoryExpansionResultDisplayView({
+      view,
+      repairedMessages: [],
+      advisoryMessages: [],
+    })
+
+    expect(display.executionRoundViews).toEqual([
+      {
+        key: '4-0',
+        title: '第 4 轮协同',
+        strategyLabel: '策略：balanced',
+        tailSupplementLabel: '尾差补章',
+        chapterRangeText: '细化章节：198 → 200',
+        characterRangeText: '人物：32 → 32',
+        plotIncrementText: '本轮新增目标：2个细化章节',
+        characterIncrementText: null,
+        postValidationScoreText: null,
+      },
+    ])
+  })
+
   it('在缺省结果下提供稳定的默认展示', () => {
     const view = createStoryExpansionResultView({
       current_chapter_count: 3,
@@ -368,6 +413,48 @@ describe('storyExpansionResultView', () => {
     expect(display.canAutoImprove).toBe(false)
     expect(display.autoImproveActionLabel).toBeNull()
     expect(display.autoImproveHint).toBeNull()
+  })
+
+  it('自动修复后展示层读取修复后的新评分', () => {
+    const repairedResult = mergeStoryExpansionRepairResult(
+      {
+        execution_mode: 'volume_detail',
+        execution_rounds: [{ round: 2, after_chapter_count: 48 }],
+        outline_ops: [{ action: 'append', generated_count: 6 }],
+        new_characters: ['陈昭'],
+        validation_before: { score: 88 },
+        validation_after: {
+          score: 71,
+          unreferenced_characters: ['陈昭'],
+        },
+        expansion_analysis: {
+          validation: { score: 71 },
+          analysis_summary: '旧评分摘要',
+          warnings: ['仍需补入陈昭'],
+        },
+      },
+      {
+        execution_mode: 'repair',
+        alignment_repairs: ['已补齐陈昭的出场承接'],
+        coordination_summary: '评分 71 → 86',
+        validation_before: { score: 71 },
+        validation_after: { score: 86 },
+        alignment_warnings: [],
+      },
+    )
+
+    const view = createStoryExpansionResultView(repairedResult)
+    const display = createStoryExpansionResultDisplayView({
+      view,
+      repairedMessages: repairedResult?.alignment_repairs ?? [],
+      advisoryMessages: repairedResult?.alignment_warnings ?? [],
+    })
+
+    expect(display.scoreMetricValue).toBe('71 → 86')
+    expect(display.scoreMetricHelperText).toBe('本轮评分保持或提升。')
+    expect(display.canAutoImprove).toBe(false)
+    expect(display.autoImproveActionLabel).toBeNull()
+    expect(display.alignmentRepairsChipLabel).toBe('已自动修复 1 处人物承接')
   })
 
   it('顶部提醒统计与协同提醒卡片使用统一口径', () => {

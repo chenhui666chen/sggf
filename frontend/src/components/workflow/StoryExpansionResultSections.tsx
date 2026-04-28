@@ -590,6 +590,14 @@ export function StoryExpansionExecutionRoundsSection({
                 <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
                   {round.title}
                 </Typography>
+                {round.tailSupplementLabel ? (
+                  <Chip
+                    size="small"
+                    label={round.tailSupplementLabel}
+                    color="warning"
+                    variant="outlined"
+                  />
+                ) : null}
                 {round.strategyLabel ? (
                   <Chip size="small" label={round.strategyLabel} variant="outlined" />
                 ) : null}

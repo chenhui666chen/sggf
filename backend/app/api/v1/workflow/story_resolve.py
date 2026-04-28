@@ -547,6 +547,12 @@ def _estimate_story_volume_chapter_count(vol_data: Dict[str, Any]) -> int:
     return 0
 
 
+def _resolve_story_volume_detail_planned_chapter_count(chapters_min: int, chapters_max: int) -> int:
+    lower = max(1, int(chapters_min or 1))
+    upper = max(lower, int(chapters_max or lower))
+    return max(lower, min(upper, lower + max(0, (upper - lower) // 2)))
+
+
 def _resolve_story_volume_detail_config(
     request: ExpandStoryRequest,
     db: Session,
@@ -618,16 +624,25 @@ def _resolve_story_volume_detail_config(
         existing_volume_detail = target_volume.get("detail")
 
     start_chapter_num = accumulated_chapters + 1
+    planned_chapter_count = _resolve_story_volume_detail_planned_chapter_count(chapters_min, chapters_max)
+    planned_chapter_range = (
+        start_chapter_num,
+        start_chapter_num + planned_chapter_count - 1,
+    )
     expected_chapter_range = (
         start_chapter_num,
         start_chapter_num + chapters_max - 1,
     )
+    planned_total_chapter_count = max(current_total_chapter_count, planned_chapter_range[1])
     expected_total_chapter_count = max(current_total_chapter_count, expected_chapter_range[1])
 
     return {
         "framework_content": framework_content,
         "target_volume_index": target_volume_index,
         "chapters_count_range": (chapters_min, chapters_max),
+        "planned_chapter_count": planned_chapter_count,
+        "planned_chapter_range": planned_chapter_range,
+        "planned_total_chapter_count": planned_total_chapter_count,
         "start_chapter_num": start_chapter_num,
         "framework_header": volumes_data.get("framework_header", ""),
         "framework_footer": volumes_data.get("framework_footer", ""),
@@ -1024,9 +1039,9 @@ def _build_story_expansion_analysis(
     epic_config = _resolve_story_epic_config(request)
     volume_detail_config = _resolve_story_volume_detail_config(request, db)
     if volume_detail_config is not None:
-        expected_total = int(volume_detail_config.get("expected_total_chapter_count") or 0)
-        if expected_total > 0:
-            target_total_chapters = max(target_total_chapters or 0, expected_total)
+        planned_total = int(volume_detail_config.get("planned_total_chapter_count") or 0)
+        if planned_total > 0:
+            target_total_chapters = max(target_total_chapters or 0, planned_total)
     analysis = coordinator.analyze_expansion_request(
         current_outline=request.current_outline,
         characters=request.characters,

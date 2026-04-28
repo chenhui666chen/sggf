@@ -41,12 +41,12 @@ from app.api.v1.asset_studio_api._helpers import (
 def review_vision_asset(
     asset_file: UploadFile = File(...),
     original_prompt: str = Form(default=""),
-    model_id: str = Form(default="qwen3-vl-plus"),
+    model_id: str = Form(default=DEFAULT_VISION_REVIEW_MODEL_ID),
     current_user: User = Depends(get_current_user),
 ):
     del current_user
 
-    resolved_model_id = (model_id or "").strip() or "qwen3-vl-plus"
+    resolved_model_id = (model_id or "").strip() or DEFAULT_VISION_REVIEW_MODEL_ID
     if resolved_model_id not in VISION_REVIEW_MODELS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

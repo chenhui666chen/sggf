@@ -56,6 +56,76 @@ def _normalize_generation_history_result_payload(raw_result: Any) -> Any:
         logger.debug("Failed to parse workflow task result payload: %s", exc)
         return raw_result
 
+
+DEFAULT_TASK_TIMEOUT_MINUTES = 30
+EXPAND_STORY_TASK_TIMEOUT_MINUTES = 180
+WORKFLOW_STATUS_PROCESS_STARTED_AT = utc_now()
+
+IN_MEMORY_WORKFLOW_TASK_TYPES = {
+    "expand_story",
+    "optimize_chapter",
+    "regenerate_chapter",
+    "generate_next_chapter",
+    "review",
+    "chapter",
+}
+IN_MEMORY_WORKFLOW_TASK_TYPE_PREFIXES = (
+    "workflow_stage_",
+)
+
+
+def _resolve_task_timeout_minutes(task_type: Any) -> int:
+    normalized_task_type = str(task_type or "").strip().lower()
+    if normalized_task_type == "expand_story":
+        return EXPAND_STORY_TASK_TIMEOUT_MINUTES
+    return DEFAULT_TASK_TIMEOUT_MINUTES
+
+
+def _build_task_timeout_error(task_type: Any, timeout_minutes: int) -> str:
+    normalized_task_type = str(task_type or "").strip().lower()
+    if normalized_task_type == "expand_story":
+        return f"协同扩展任务超时（运行超过{timeout_minutes}分钟）"
+    return f"任务超时（运行超过{timeout_minutes}分钟）"
+
+
+def _normalize_task_type(task_type: Any) -> str:
+    return str(task_type or "").strip().lower()
+
+
+def _is_in_memory_workflow_task(task_type: Any) -> bool:
+    normalized_task_type = _normalize_task_type(task_type)
+    if normalized_task_type in IN_MEMORY_WORKFLOW_TASK_TYPES:
+        return True
+    return any(
+        normalized_task_type.startswith(prefix)
+        for prefix in IN_MEMORY_WORKFLOW_TASK_TYPE_PREFIXES
+    )
+
+
+def _can_sync_task_completed_from_stage_state(task_type: Any) -> bool:
+    return _normalize_task_type(task_type).startswith("workflow_stage_")
+
+
+def _build_task_interrupted_error(task_type: Any) -> str:
+    normalized_task_type = _normalize_task_type(task_type)
+    if normalized_task_type == "expand_story":
+        return "协同扩展任务因服务重启或热重载中断，请重新发起"
+    if normalized_task_type == "optimize_chapter":
+        return "章节优化任务因服务重启或热重载中断，请重新发起"
+    if normalized_task_type == "regenerate_chapter":
+        return "章节重写任务因服务重启或热重载中断，请重新发起"
+    if normalized_task_type == "generate_next_chapter":
+        return "生成下一章任务因服务重启或热重载中断，请重新发起"
+    if normalized_task_type.startswith("workflow_stage_"):
+        return "工作流阶段任务因服务重启或热重载中断，请重新发起"
+    return "后台任务因服务重启或热重载中断，请重新发起"
+
+
+def _should_mark_task_as_interrupted(task_type: Any, created_at: datetime) -> bool:
+    if not _is_in_memory_workflow_task(task_type):
+        return False
+    return created_at < WORKFLOW_STATUS_PROCESS_STARTED_AT
+
 @router.post("/regenerate-stage")
 async def regenerate_stage(
     request: RegenerateStageRequest,
@@ -531,7 +601,7 @@ async def get_task_status(
 
         # ✅ 查询任务状态并验证项目所有权
         query = text("""
-            SELECT gh.task_id, gh.status, gh.result, gh.error, gh.created_at, gh.completed_at
+            SELECT gh.task_id, gh.task_type, gh.status, gh.result, gh.error, gh.created_at, gh.completed_at
             FROM generation_history gh
             INNER JOIN projects p ON gh.project_id = p.id
             WHERE gh.task_id = :task_id AND p.user_id = :user_id
@@ -548,23 +618,81 @@ async def get_task_status(
                 detail=f"Task {task_id} not found or access denied"
             )
 
+        task_id_value = result[0]
+        task_type_value = result[1]
+        status_value = result[2]
+        result_value = result[3]
+        error_value = result[4]
+        created_at_value = result[5]
+        completed_at_value = result[6]
+
+        if status_value == "running":
+            now = utc_now()
+            created_at = parse_datetime_utc(created_at_value, default=now) or now
+            task_timeout_minutes = _resolve_task_timeout_minutes(task_type_value)
+            task_age_minutes = max(0.0, (now - created_at).total_seconds() / 60)
+
+            if _should_mark_task_as_interrupted(task_type_value, created_at):
+                interrupted_error = _build_task_interrupted_error(task_type_value)
+
+                update_query = text("""
+                    UPDATE generation_history
+                    SET status = 'failed',
+                        error = :error,
+                        completed_at = :completed_at
+                    WHERE task_id = :task_id AND status = 'running'
+                """)
+
+                db.execute(update_query, {
+                    "task_id": task_id_value,
+                    "error": interrupted_error,
+                    "completed_at": now.isoformat(),
+                })
+                db.commit()
+
+                status_value = "failed"
+                error_value = interrupted_error
+                completed_at_value = now.isoformat()
+
+            elif task_age_minutes > task_timeout_minutes:
+                timeout_error = _build_task_timeout_error(task_type_value, task_timeout_minutes)
+
+                update_query = text("""
+                    UPDATE generation_history
+                    SET status = 'timeout',
+                        error = :error,
+                        completed_at = :completed_at
+                    WHERE task_id = :task_id AND status = 'running'
+                """)
+
+                db.execute(update_query, {
+                    "task_id": task_id_value,
+                    "error": timeout_error,
+                    "completed_at": now.isoformat(),
+                })
+                db.commit()
+
+                status_value = "timeout"
+                error_value = timeout_error
+                completed_at_value = now.isoformat()
+
         # 计算进度
         progress = 0
-        if result[1] == "completed":
+        if status_value == "completed":
             progress = 100
-        elif result[1] == "running":
+        elif status_value == "running":
             progress = 50
-        elif result[1] == "failed":
+        elif status_value == "failed":
             progress = 0
 
         return {
-            "task_id": result[0],
-            "status": result[1],
+            "task_id": task_id_value,
+            "status": status_value,
             "progress": progress,
-            "result": _normalize_generation_history_result_payload(result[2]),
-            "error": result[3],
-            "created_at": result[4],
-            "completed_at": result[5]
+            "result": _normalize_generation_history_result_payload(result_value),
+            "error": error_value,
+            "created_at": created_at_value,
+            "completed_at": completed_at_value
         }
     except HTTPException:
         raise
@@ -605,16 +733,6 @@ async def get_running_tasks(
     from sqlalchemy import text
     logger = logging.getLogger("uvicorn.error")
 
-    # 🔧 超时阈值：30分钟
-    DEFAULT_TASK_TIMEOUT_MINUTES = 30
-    EXPAND_STORY_TASK_TIMEOUT_MINUTES = 180
-
-    def resolve_task_timeout_minutes(task_type: Any) -> int:
-        normalized_task_type = str(task_type or "").strip().lower()
-        if normalized_task_type == "expand_story":
-            return EXPAND_STORY_TASK_TIMEOUT_MINUTES
-        return DEFAULT_TASK_TIMEOUT_MINUTES
-
     try:
         logger.info(f"🔍 查询项目 {project_id} 的正在运行任务...")
 
@@ -650,6 +768,7 @@ async def get_running_tasks(
         running_tasks = []
         timeout_tasks = []
         stale_tasks = []  # 🆕 已过时的任务（stage 已完成但任务状态仍为 running）
+        interrupted_tasks = []  # 🆕 服务重启/热重载后丢失执行体的孤儿任务
         now = utc_now()
 
         for row in results:
@@ -657,7 +776,7 @@ async def get_running_tasks(
             task_type = row[1]
             status = row[2]
             created_at_str = row[3]
-            task_timeout_minutes = resolve_task_timeout_minutes(task_type)
+            task_timeout_minutes = _resolve_task_timeout_minutes(task_type)
 
             # 解析创建时间
             created_at = parse_datetime_utc(created_at_str, default=now) or now
@@ -666,7 +785,7 @@ async def get_running_tasks(
             task_age_minutes = max(0.0, (now - created_at).total_seconds() / 60)
 
             # 🆕 优先检查：如果所有 stage 都已完成，将 running 任务标记为 completed（状态不一致修复）
-            if all_stages_completed:
+            if all_stages_completed and _can_sync_task_completed_from_stage_state(task_type):
                 logger.warning(f"🔄 检测到过时任务: {task_id}（所有阶段已完成，但任务仍为 running）")
 
                 update_query = text("""
@@ -693,6 +812,36 @@ async def get_running_tasks(
 
                 logger.info(f"   ✅ 已将过时任务 {task_id} 标记为 completed")
 
+            elif _should_mark_task_as_interrupted(task_type, created_at):
+                interrupted_error = _build_task_interrupted_error(task_type)
+                logger.warning(f"🧯 检测到孤儿任务: {task_id}（服务已重启，原执行体不存在）")
+
+                update_query = text("""
+                    UPDATE generation_history
+                    SET status = 'failed',
+                        error = :error,
+                        completed_at = :completed_at
+                    WHERE task_id = :task_id
+                """)
+
+                db.execute(update_query, {
+                    "error": interrupted_error,
+                    "completed_at": now.isoformat(),
+                    "task_id": task_id
+                })
+                db.commit()
+
+                interrupted_tasks.append({
+                    "task_id": task_id,
+                    "task_type": task_type,
+                    "status": "failed",
+                    "created_at": created_at_str,
+                    "age_minutes": round(task_age_minutes, 1),
+                    "reason": interrupted_error,
+                })
+
+                logger.info(f"   ✅ 已将孤儿任务 {task_id} 标记为 failed")
+
             elif task_age_minutes > task_timeout_minutes:
                 # 标记为超时
                 logger.warning(f"⏰ 检测到超时任务: {task_id}, 运行时间: {task_age_minutes:.1f}分钟")
@@ -706,7 +855,7 @@ async def get_running_tasks(
                 """)
 
                 db.execute(update_query, {
-                    "error": f"任务超时（运行超过{task_timeout_minutes}分钟）",
+                    "error": _build_task_timeout_error(task_type, task_timeout_minutes),
                     "completed_at": now.isoformat(),
                     "task_id": task_id
                 })
@@ -730,12 +879,17 @@ async def get_running_tasks(
                     "age_minutes": round(task_age_minutes, 1)
                 })
 
-        logger.info(f"   ✅ 找到 {len(running_tasks)} 个正在运行的任务, {len(timeout_tasks)} 个超时任务, {len(stale_tasks)} 个已同步的过时任务")
+        logger.info(
+            f"   ✅ 找到 {len(running_tasks)} 个正在运行的任务, "
+            f"{len(timeout_tasks)} 个超时任务, {len(stale_tasks)} 个已同步的过时任务, "
+            f"{len(interrupted_tasks)} 个已清理的孤儿任务"
+        )
 
         return {
             "running_tasks": running_tasks,
             "timeout_tasks": timeout_tasks,
-            "stale_tasks": stale_tasks  # 🆕 已同步的过时任务
+            "stale_tasks": stale_tasks,  # 🆕 已同步的过时任务
+            "interrupted_tasks": interrupted_tasks,
         }
 
     except Exception as e:

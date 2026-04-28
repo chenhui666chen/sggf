@@ -14,6 +14,7 @@ from .agents import (
     CreativeDirectorAgent,
     EventValidatorAgent,
     FinalReviewerAgent,
+    IterationCoordinatorAgent,
     OutlinePlanParserAgent,
     PlotArchitectAgent,
     QualityReviewerAgent,
@@ -259,6 +260,7 @@ class CreativeDirectorCoordinator:
         self.style_optimizer = StyleOptimizerAgent(knowledge_base=self.knowledge_base, memory_manager=self.memory_manager)
         self.content_reviser = ContentReviserAgent(knowledge_base=self.knowledge_base, memory_manager=self.memory_manager)
         self.quality_reviewer = QualityReviewerAgent(knowledge_base=self.knowledge_base, memory_manager=self.memory_manager)
+        self.iteration_coordinator = IterationCoordinatorAgent(knowledge_base=self.knowledge_base, memory_manager=self.memory_manager)
         self.final_reviewer = FinalReviewerAgent(knowledge_base=self.knowledge_base, memory_manager=self.memory_manager)
         self.outline_plan_parser = OutlinePlanParserAgent(knowledge_base=self.knowledge_base, memory_manager=self.memory_manager)
 
@@ -340,6 +342,7 @@ class CreativeDirectorCoordinator:
             self.style_optimizer,
             self.content_reviser,
             self.quality_reviewer,
+            self.iteration_coordinator,
             self.final_reviewer,
             self.outline_plan_parser,
         ):
@@ -1290,7 +1293,11 @@ class CreativeDirectorCoordinator:
         
         if not needs_revision:
             logger.info("✅ 内容无需修订，直接通过")
-            return {"revised_content": original_content, "final_review": "内容质量达标，无需修订"}
+            return {
+                "revised_content": original_content,
+                "iteration_plan": "",
+                "final_review": "内容质量达标，无需修订",
+            }
         
         logger.info("✏️ 内容修订师正在根据评审意见优化内容...")
         
@@ -1311,11 +1318,44 @@ class CreativeDirectorCoordinator:
         
         logger.info(f"📏 原始内容: {len(original_content)} → {len(truncated_original)}字符")
         logger.info(f"📏 评审意见: {len(review)} → {len(truncated_review)}字符")
+
+        logger.info("🧭 迭代协调官正在整理修订计划...")
+        iteration_plan = ""
+        iteration_coordinator = getattr(self, "iteration_coordinator", None)
+        if iteration_coordinator is not None:
+            try:
+                coordination_result = iteration_coordinator.coordinate_iteration(
+                    truncated_review,
+                    truncated_original,
+                    context={
+                        "chapter_number": 1,
+                        "recent_chapter_assets_summary": "",
+                        "include_history_hint": False,
+                    },
+                )
+                if isinstance(coordination_result, str):
+                    iteration_plan = coordination_result.strip()
+                elif isinstance(coordination_result, dict):
+                    iteration_plan = str(
+                        coordination_result.get("iteration_plan")
+                        or coordination_result.get("output")
+                        or ""
+                    ).strip()
+                else:
+                    iteration_plan = str(coordination_result or "").strip()
+            except Exception:
+                logger.exception("迭代协调失败，直接使用评审意见修订")
+        else:
+            logger.warning("⚠️ 迭代协调官未初始化，直接使用评审意见修订")
+
+        revision_context = {"iteration_plan": iteration_plan} if iteration_plan else None
+        if iteration_plan:
+            logger.info(f"✅ 迭代计划完成，长度: {len(iteration_plan)}")
         
         revision_result = self.content_reviser.revise_content(
             truncated_original,
             truncated_review,
-            context=None,
+            context=revision_context,
         )
         revised_content = revision_result if isinstance(revision_result, str) else revision_result.get("output", original_content)
         logger.info(f"✅ 内容优化完成，长度: {len(revised_content)}")
@@ -1341,5 +1381,9 @@ class CreativeDirectorCoordinator:
         logger.info(f"✅ 最终评审完成，长度: {len(final_review)}")
         
         self.project_context.update({"content": revised_content})
-        return {"revised_content": revised_content, "final_review": final_review}
+        return {
+            "revised_content": revised_content,
+            "iteration_plan": iteration_plan,
+            "final_review": final_review,
+        }
 

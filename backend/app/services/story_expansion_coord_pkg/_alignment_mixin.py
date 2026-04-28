@@ -19,6 +19,8 @@ from app.services.story_text_utils import (
 )
 from app.services.story_expansion_coord_pkg._standalone import (
     OutlineBlock,
+    append_preserved_outline_tail_sections,
+    extract_outline_tail_sections,
     normalize_character_name,
     parse_outline_blocks,
     render_outline,
@@ -346,6 +348,42 @@ class AlignmentMixin:
         return f"已记录新增角色 {display_names} 的承接待补提示。"
 
     @staticmethod
+    def _append_character_alignment_reminder_section(outline_text: str, names: List[str]) -> str:
+        clean_names = []
+        seen = set()
+        for name in names:
+            normalized = normalize_character_name(name)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            clean_names.append(str(name).strip())
+
+        if not clean_names:
+            return outline_text or ""
+
+        reminder_lines = ["## 协同角色承接待补"]
+        for name in clean_names:
+            reminder_lines.append(f"- 协同角色承接待补：{name} 需在后续章节中正式出场，并与当前主线形成明确关联。")
+
+        base_text = (outline_text or "").rstrip()
+        if not base_text:
+            return "\n".join(reminder_lines)
+
+        heading_pattern = re.compile(r"(?m)^\s*##\s*(?:\*\*)?\s*(?:协同角色承接待补|人物承接待补)\s*(?:\*\*)?\s*$")
+        matches = list(heading_pattern.finditer(base_text))
+        if matches:
+            match = matches[-1]
+            next_heading = re.search(r"(?m)^\s*##\s+", base_text[match.end():])
+            insert_at = match.end() + next_heading.start() if next_heading else len(base_text)
+            new_lines = "\n".join(reminder_lines[1:])
+            return (
+                f"{base_text[:insert_at].rstrip()}\n{new_lines}\n\n"
+                f"{base_text[insert_at:].lstrip()}"
+            ).rstrip()
+
+        return f"{base_text}\n\n{chr(10).join(reminder_lines)}"
+
+    @staticmethod
     def _auto_repair_character_alignment(
         outline_text: str,
         new_character_names: List[str],
@@ -353,6 +391,7 @@ class AlignmentMixin:
         if not outline_text or not new_character_names:
             return outline_text or "", []
 
+        preserved_tail_sections = extract_outline_tail_sections(outline_text or "")
         deduped_names: List[str] = []
         seen = set()
         for name in new_character_names:
@@ -368,28 +407,18 @@ class AlignmentMixin:
 
         prefix, blocks = parse_outline_blocks(outline_text or "")
         if blocks:
-            candidate_count = min(len(blocks), max(1, len(missing_names)))
-            candidate_indexes = list(range(len(blocks) - candidate_count, len(blocks)))
-            repaired_names: List[str] = []
+            repaired_outline = render_outline(prefix, blocks)
+            repaired_outline = append_preserved_outline_tail_sections(
+                repaired_outline,
+                preserved_tail_sections,
+            )
+            repaired_outline = AlignmentMixin._append_character_alignment_reminder_section(
+                repaired_outline,
+                missing_names,
+            )
+            return repaired_outline, missing_names
 
-            for index, name in enumerate(missing_names):
-                target_block = blocks[candidate_indexes[index % len(candidate_indexes)]]
-                if name in target_block.title or name in target_block.body:
-                    continue
-                note_line = f"- 人物承接待补：{name} 需在后续章节中正式出场，并与当前主线形成明确关联。"
-                if target_block.body and target_block.body.strip():
-                    target_block.body = f"{target_block.body.rstrip()}\n{note_line}".rstrip()
-                else:
-                    target_block.body = note_line
-                repaired_names.append(name)
-
-            return render_outline(prefix, blocks), repaired_names
-
-        reminder_lines = ["## 协同角色承接待补"]
-        for name in missing_names:
-            reminder_lines.append(f"- {name}：需在后续章节或卷级细纲中正式出场，并承担明确剧情职责。")
-
-        repaired_text = "\n".join(reminder_lines)
+        repaired_text = AlignmentMixin._append_character_alignment_reminder_section("", missing_names)
         if outline_text.strip():
             return f"{outline_text.rstrip()}\n\n{repaired_text}", missing_names
         return repaired_text, missing_names
@@ -421,6 +450,7 @@ class AlignmentMixin:
         if not outline_text or not target_character_names:
             return outline_text or "", []
 
+        preserved_tail_sections = extract_outline_tail_sections(outline_text or "")
         prefix, blocks = parse_outline_blocks(outline_text or "")
         if not blocks:
             return normalize_outline_text(outline_text or "", characters_text), []
@@ -465,6 +495,10 @@ class AlignmentMixin:
         repaired_outline = normalize_outline_text(
             render_outline(prefix, blocks),
             characters_text,
+        )
+        repaired_outline = append_preserved_outline_tail_sections(
+            repaired_outline,
+            preserved_tail_sections,
         )
         return repaired_outline, repairs
 

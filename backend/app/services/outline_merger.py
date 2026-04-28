@@ -15,6 +15,16 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 MAX_CHAPTERS_PER_VOLUME = 100
+MERGED_VOLUME_HEADING_PATTERN = re.compile(
+    r'^\s*#{1,6}\s*【第\s*(?P<number>\d+)\s*卷】(?:\s*[《](?P<title>[^》\n]*)[》])?\s*$'
+)
+MERGED_VOLUME_HEADING_FALLBACK_PATTERN = re.compile(
+    r'^\s*#{1,6}\s*【第\s*(?P<number>\d+)\s*卷】\s*(?P<title>[^\n]*)$'
+)
+MERGED_DETAIL_SUMMARY_PATTERN = re.compile(
+    r'^\s*<summary>📖 第(?P<number>\d+)卷详细章节（第(?P<start>\d+)-(?P<end>\d+)章'
+)
+MERGED_OUTLINE_STATS_PATTERN = re.compile(r'^\s*_✅ 共\d+卷 .*_$')
 CHAPTER_RANGE_LABEL_PATTERN = re.compile(
     r'(?P<label>覆盖章节|章节范围|章节区间|章节：)\s*[：:]\s*(?P<start>\d+)\s*[-~—至到]+\s*(?P<end>\d+)(?P<suffix>\s*章?)'
 )
@@ -24,6 +34,9 @@ CHAPTER_RANGE_PATTERN = re.compile(
 CHAPTER_NUMBER_PATTERN = re.compile(r'第\s*(?P<number>\d+)\s*章')
 VOLUME_DETAIL_CHAPTER_HEADING_PATTERN = re.compile(
     r'(?m)^(?:#{1,6}\s*)?(?:\*\*)?\s*第\s*(?P<number>\d+)\s*章(?:\s*[：:、\-]\s*|\s+)?'
+)
+VOLUME_DETAIL_SECTION_HEADING_PATTERN_TEMPLATE = (
+    r'(?m)^(?P<prefix>\s*(?:#{{1,6}}\s*)?(?:[一二三四1234][、.．，,]?\s*)?){title}\s*$'
 )
 
 
@@ -107,6 +120,108 @@ def _estimate_volume_chapter_count(vol_data: Dict[str, any]) -> int:
     return 0
 
 
+def _find_volume_detail_section_bounds(content: str, title: str) -> Optional[Tuple[int, int]]:
+    if not content or not title:
+        return None
+
+    pattern = re.compile(
+        VOLUME_DETAIL_SECTION_HEADING_PATTERN_TEMPLATE.format(title=re.escape(title))
+    )
+    match = pattern.search(content)
+    if not match:
+        return None
+
+    start = match.start()
+    next_match = pattern.search(content, match.end())
+    if next_match:
+        return start, next_match.start()
+
+    next_heading_pattern = re.compile(r'(?m)^\s*#{1,6}\s*[一二三四五六七八九十1234567890]+[、.．，,]?\s*')
+    next_heading = next_heading_pattern.search(content, match.end())
+    if next_heading:
+        return start, next_heading.start()
+
+    return start, len(content)
+
+
+def _extract_last_volume_detail_field_value(content: str, label: str) -> str:
+    if not content or not label:
+        return ""
+
+    pattern = re.compile(
+        rf"(?m)^\s*(?:[-*]\s*)?(?:✅\s*)?(?:\*\*)?{re.escape(label)}(?:\*\*)?\s*[：:]\s*(?P<value>.+?)\s*$"
+    )
+    matches = [match.group("value").strip() for match in pattern.finditer(content) if match.group("value")]
+    return matches[-1] if matches else ""
+
+
+def _build_volume_detail_fallback_foreshadow_lines(content: str) -> List[str]:
+    lines: List[str] = []
+    foreshadowing_matches = re.findall(
+        r"(?m)^\s*[-*]\s*(?:\*\*)?伏笔事项(?:\*\*)?\s*[：:]\s*(.+?)\s*$",
+        content or "",
+    )
+    for item in foreshadowing_matches[:3]:
+        text = str(item or "").strip()
+        if text:
+            lines.append(f"- 待定章节：埋设 {text}")
+
+    return lines or ["- 当前卷暂无强制伏笔任务。"]
+
+
+def _ensure_volume_detail_tail_sections(content: str) -> str:
+    normalized_content = str(content or "").strip()
+    if not normalized_content:
+        return ""
+
+    foreshadowing_bounds = _find_volume_detail_section_bounds(normalized_content, "伏笔埋设检查")
+    if foreshadowing_bounds is None:
+        normalized_content = (
+            normalized_content.rstrip()
+            + "\n\n## 三、伏笔埋设检查\n"
+            + "\n".join(_build_volume_detail_fallback_foreshadow_lines(normalized_content))
+        ).strip()
+
+    connection_bounds = _find_volume_detail_section_bounds(normalized_content, "卷尾衔接检查")
+    last_plot_function = _extract_last_volume_detail_field_value(normalized_content, "情节作用")
+    last_chapter_hook = _extract_last_volume_detail_field_value(normalized_content, "结尾钩子")
+    fallback_completion = last_plot_function or "完成当前卷阶段推进，并将主线稳定交接到下一阶段。"
+    fallback_hook = last_chapter_hook or "当前卷已在末章留下新的推进入口。"
+    fallback_next_opening = (
+        f"承接“{fallback_hook}”直接切入下一阶段行动。"
+        if fallback_hook
+        else "承接本卷末章局势，直接切入下一阶段行动。"
+    )
+
+    required_connection_lines: List[str] = []
+    connection_text = normalized_content[connection_bounds[0]:connection_bounds[1]] if connection_bounds else ""
+    if "本卷任务完成" not in connection_text and "本卷任务完成情况" not in connection_text:
+        required_connection_lines.append(f"✅ 本卷任务完成：{fallback_completion}")
+    if "下卷开局场景" not in connection_text:
+        required_connection_lines.append(f"✅ 下卷开局场景：{fallback_next_opening}")
+    if "卷尾钩子" not in connection_text:
+        required_connection_lines.append(f"✅ 卷尾钩子：{fallback_hook}")
+
+    if connection_bounds is None:
+        normalized_content = (
+            normalized_content.rstrip()
+            + "\n\n## 四、卷尾衔接检查\n"
+            + "\n".join(required_connection_lines or ["✅ 当前卷已形成基本承接结构。"])
+        ).strip()
+    elif required_connection_lines:
+        insert_at = connection_bounds[1]
+        before = normalized_content[:insert_at].rstrip()
+        after = normalized_content[insert_at:].lstrip("\n")
+        normalized_content = (
+            before
+            + "\n"
+            + "\n".join(required_connection_lines)
+            + ("\n\n" + after if after else "")
+        ).strip()
+
+    return normalized_content
+
+
 def _shift_chapter_references(text: str, delta: int) -> str:
     if not text or delta == 0:
         return text
@@ -183,6 +298,10 @@ def normalize_volume_detail_layout(
             continue
 
         chapter_count = _estimate_volume_chapter_count(vol_data)
+        detail_text = str(vol_data.get("detail") or "").strip()
+        if vol_data.get("type") == "detail" and detail_text:
+            vol_data["detail"] = _ensure_volume_detail_tail_sections(detail_text)
+            detail_text = str(vol_data.get("detail") or "").strip()
         if chapter_count <= 0:
             continue
 
@@ -194,12 +313,13 @@ def normalize_volume_detail_layout(
         vol_data["chapter_count"] = chapter_count
         if vol_data.get("type") == "detail":
             vol_data["chapters_range"] = [expected_start, expected_end]
-            if rewrite_detail_content and vol_data.get("detail"):
+            if rewrite_detail_content and detail_text:
                 vol_data["detail"] = _renumber_volume_detail_content(
-                    str(vol_data.get("detail") or ""),
+                    detail_text,
                     expected_start=expected_start,
                     original_start=original_start,
                 )
+                vol_data["detail"] = _ensure_volume_detail_tail_sections(str(vol_data.get("detail") or ""))
 
         running_chapter_end = expected_end
 
@@ -805,6 +925,153 @@ def build_epic_volumes_json(data: Dict[str, any]) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
+def _clean_outline_section_lines(lines: List[str]) -> str:
+    cleaned_lines = list(lines)
+    while cleaned_lines and not cleaned_lines[0].strip():
+        cleaned_lines.pop(0)
+    while cleaned_lines and not cleaned_lines[-1].strip():
+        cleaned_lines.pop()
+    while cleaned_lines and cleaned_lines[0].strip() == "---":
+        cleaned_lines.pop(0)
+        while cleaned_lines and not cleaned_lines[0].strip():
+            cleaned_lines.pop(0)
+    while cleaned_lines and cleaned_lines[-1].strip() == "---":
+        cleaned_lines.pop()
+        while cleaned_lines and not cleaned_lines[-1].strip():
+            cleaned_lines.pop()
+    return "\n".join(cleaned_lines).strip()
+
+
+def _match_merged_volume_heading(line: str) -> Optional[re.Match[str]]:
+    return MERGED_VOLUME_HEADING_PATTERN.match(line) or MERGED_VOLUME_HEADING_FALLBACK_PATTERN.match(line)
+
+
+def _extract_merged_outline_title(match: re.Match[str], volume_num: int) -> str:
+    title = str(match.groupdict().get("title") or "").strip()
+    title = title.strip("《》").strip()
+    return title or f"第{volume_num}卷"
+
+
+def _parse_merged_outline_to_volumes(framework_content: str, total_volumes: int) -> Optional[Dict[str, any]]:
+    lines = framework_content.split('\n')
+    volume_positions: List[Tuple[int, str, int]] = []
+    overview_start_idx: Optional[int] = None
+
+    for idx, line in enumerate(lines):
+        if overview_start_idx is None and line.strip() == "## 📚 分卷概要":
+            overview_start_idx = idx
+        heading_match = _match_merged_volume_heading(line)
+        if not heading_match:
+            continue
+        volume_num = _safe_int(heading_match.group("number"), 0)
+        if volume_num <= 0:
+            continue
+        volume_positions.append(
+            (volume_num, _extract_merged_outline_title(heading_match, volume_num), idx)
+        )
+
+    if not volume_positions:
+        return None
+
+    stats_line_idx: Optional[int] = None
+    for idx in range(len(lines) - 1, -1, -1):
+        if MERGED_OUTLINE_STATS_PATTERN.match(lines[idx].strip()):
+            stats_line_idx = idx
+            break
+
+    header_end_idx = overview_start_idx if overview_start_idx is not None else volume_positions[0][2]
+    framework_header = _clean_outline_section_lines(lines[:header_end_idx])
+    effective_end_idx = stats_line_idx if stats_line_idx is not None else len(lines)
+    footer_lines: List[str] = []
+    volumes: Dict[str, any] = {}
+
+    for idx, (volume_num, title, line_idx) in enumerate(volume_positions):
+        next_line_idx = (
+            volume_positions[idx + 1][2]
+            if idx + 1 < len(volume_positions)
+            else effective_end_idx
+        )
+        block_lines = lines[line_idx + 1:next_line_idx]
+
+        if idx == len(volume_positions) - 1:
+            divider_idx = next(
+                (block_idx for block_idx, block_line in enumerate(block_lines) if block_line.strip() == "---"),
+                None,
+            )
+            if divider_idx is not None:
+                footer_lines = block_lines[divider_idx + 1:]
+                block_lines = block_lines[:divider_idx]
+
+        detail_start_idx = next(
+            (block_idx for block_idx, block_line in enumerate(block_lines) if block_line.strip().startswith("<details")),
+            None,
+        )
+        detail_content = None
+        summary = ""
+        chapter_range = [0, 0]
+        chapter_count = None
+
+        if detail_start_idx is not None:
+            detail_end_idx = next(
+                (
+                    block_idx
+                    for block_idx in range(detail_start_idx, len(block_lines))
+                    if block_lines[block_idx].strip() == "</details>"
+                ),
+                None,
+            )
+            summary = _clean_outline_section_lines(block_lines[:detail_start_idx])
+            if detail_end_idx is not None:
+                detail_summary_idx = next(
+                    (
+                        block_idx
+                        for block_idx in range(detail_start_idx, detail_end_idx + 1)
+                        if MERGED_DETAIL_SUMMARY_PATTERN.match(block_lines[block_idx].strip())
+                    ),
+                    None,
+                )
+                if detail_summary_idx is not None:
+                    detail_summary_match = MERGED_DETAIL_SUMMARY_PATTERN.match(
+                        block_lines[detail_summary_idx].strip()
+                    )
+                    chapter_range = [
+                        _safe_int(detail_summary_match.group("start"), 0),
+                        _safe_int(detail_summary_match.group("end"), 0),
+                    ]
+                    if chapter_range[0] > 0 and chapter_range[1] >= chapter_range[0]:
+                        chapter_count = chapter_range[1] - chapter_range[0] + 1
+                    detail_content = _clean_outline_section_lines(
+                        block_lines[detail_summary_idx + 1:detail_end_idx]
+                    )
+                else:
+                    detail_content = _clean_outline_section_lines(
+                        block_lines[detail_start_idx + 1:detail_end_idx]
+                    )
+            else:
+                detail_content = _clean_outline_section_lines(block_lines[detail_start_idx + 1:])
+        else:
+            summary = _clean_outline_section_lines(block_lines)
+
+        volumes[str(volume_num)] = create_volume_entry(
+            volume_num=volume_num,
+            title=title,
+            summary=summary if summary else f"（第{volume_num}卷概要待填充）",
+            chapters_range=chapter_range,
+            chapter_count=chapter_count,
+            detail=detail_content,
+            expanded_at=None,
+        )
+
+    framework_footer = _clean_outline_section_lines(footer_lines)
+    return {
+        "total_volumes": total_volumes or len(volumes),
+        "framework_generated_at": datetime.now().isoformat(),
+        "framework_header": framework_header,
+        "framework_footer": framework_footer,
+        "volumes": volumes,
+    }
+
+
 def parse_framework_to_volumes(framework_content: str, total_volumes: int) -> Dict[str, any]:
     """
     🌟 解析AI生成的框架内容，提取头部、尾部和每卷内容
@@ -821,6 +1088,14 @@ def parse_framework_to_volumes(framework_content: str, total_volumes: int) -> Di
     Returns:
         新结构的字典，包含 framework_header, framework_footer, volumes
     """
+    merged_outline_result = _parse_merged_outline_to_volumes(framework_content, total_volumes)
+    if merged_outline_result and merged_outline_result.get("volumes"):
+        logger.info(
+            "✅ 识别到拼接后的分卷概要格式，已恢复 %s 卷数据",
+            len(merged_outline_result.get("volumes") or {}),
+        )
+        return merged_outline_result
+
     volumes = {}
     framework_header = ""
     framework_footer = ""
@@ -832,7 +1107,7 @@ def parse_framework_to_volumes(framework_content: str, total_volumes: int) -> Di
     # 🌟 卷标题匹配模式
     volume_title_patterns = [
         # 【第1卷】《标题》 或 【第1卷】标题
-        re.compile(r'^\s*【第\s*(\d+)\s*卷】\s*[《》]?([^《》\n]*)', re.MULTILINE),
+        re.compile(r'^\s*(?:#{1,6}\s*)?【第\s*(\d+)\s*卷】\s*[《》]?([^《》\n]*)', re.MULTILINE),
         # ## 第1卷：标题 或 ## 第1卷:标题
         re.compile(r'^(#+)\s*第\s*(\d+)\s*卷\s*[：:](.*)', re.MULTILINE),
         # ## 第1卷 标题
@@ -859,7 +1134,7 @@ def parse_framework_to_volumes(framework_content: str, total_volumes: int) -> Di
         '十六': 16, '十七': 17, '十八': 18, '十九': 19, '二十': 20
     }
     cn_volume_patterns = [
-        re.compile(r'^\s*【第([\u4e00-\u9fa5]+)卷】\s*[《》]?([^《》\n]*)', re.MULTILINE),
+        re.compile(r'^\s*(?:#{1,6}\s*)?【第([\u4e00-\u9fa5]+)卷】\s*[《》]?([^《》\n]*)', re.MULTILINE),
         re.compile(r'^(#+)?\s*第([\u4e00-\u9fa5]+)卷\s*[：:](.*)', re.MULTILINE),
         re.compile(r'^(#+)?\s*第([\u4e00-\u9fa5]+)卷\s+(.+)', re.MULTILINE),
     ]
@@ -1128,7 +1403,7 @@ def merge_volumes_to_outline(volumes_data: Dict[str, any]) -> str:
         if vol_type == "detail" and vol_data.get("detail"):
             # 已展开：显示细纲（可折叠）
             chapters_range = vol_data.get("chapters_range", [0, 0])
-            result.append(f'<details open>')
+            result.append(f'<details>')
             result.append(f'<summary>📖 第{vol_num}卷详细章节（第{chapters_range[0]}-{chapters_range[1]}章，点击收起/展开）</summary>')
             result.append('')
             result.append(vol_data["detail"])

@@ -18,6 +18,7 @@ from ...foreshadowing_tracker import ForeshadowingTracker
 from ...consistency_validator import ConsistencyValidator, get_consistency_validator, get_chapter_renumberer
 from ..character_recognizer import CharacterRecognizer
 from ..character_plot_validator import CharacterPlotValidator
+from ...story_expansion_coord_pkg import normalize_outline_text
 from ...character_parser import (
     CharacterTextParser,
     ParsedCharacter,
@@ -29,6 +30,32 @@ from ...character_parser import (
 )
 from ...character_runtime_context import build_character_prompt_context_from_text
 from ._constants import *
+
+
+OUTLINE_PLAIN_FIELD_LINE_PATTERN = re.compile(
+    r"^\s*-\s*(场景目标|冲突设计|关键事件|涉及人物|人物推进|情节作用|结尾钩子|爽点类型|伏笔事项)\s*[：:]\s*(.*)$"
+)
+
+
+def _render_normalized_outline_as_markdown(text: str) -> str:
+    lines: List[str] = []
+    for raw_line in str(text or "").splitlines():
+        stripped = raw_line.strip()
+        if re.match(r"^第\s*\d+\s*章\s*[：:]", stripped):
+            lines.append(f"### {stripped}")
+            continue
+
+        field_match = OUTLINE_PLAIN_FIELD_LINE_PATTERN.match(stripped)
+        if field_match:
+            label = field_match.group(1)
+            value = field_match.group(2)
+            lines.append(f"- **{label}**：{value}")
+            continue
+
+        lines.append(raw_line)
+
+    return "\n".join(lines).strip()
+
 
 def _resolve_chapter_renumberer():
     try:
@@ -802,6 +829,180 @@ class IncrementalExpansionMixin:
             "estimated_chapters": (chapter_lower + chapter_upper) // 2,
         }
 
+    @staticmethod
+    def _story_should_chunk_volume_detail(chapters_count_range: Tuple[int, int]) -> bool:
+        try:
+            upper = max(0, int(chapters_count_range[1] or 0))
+        except Exception:
+            upper = 0
+        return upper >= VOLUME_DETAIL_CHUNKING_THRESHOLD
+
+    @staticmethod
+    def _story_resolve_volume_detail_chunk_size(chapters_count_range: Tuple[int, int]) -> int:
+        try:
+            upper = max(1, int(chapters_count_range[1] or 1))
+        except Exception:
+            upper = 1
+        return max(1, min(VOLUME_DETAIL_CHUNK_SIZE, upper))
+
+    @staticmethod
+    def _story_resolve_volume_detail_primary_target_count(
+        chapters_count_range: Tuple[int, int],
+    ) -> int:
+        try:
+            lower = max(1, int(chapters_count_range[0] or 1))
+        except Exception:
+            lower = 1
+        try:
+            upper = max(lower, int(chapters_count_range[1] or lower))
+        except Exception:
+            upper = lower
+        return max(lower, min(upper, lower + max(0, (upper - lower) // 2)))
+
+    @classmethod
+    def _story_build_volume_detail_chunk_ranges(
+        cls,
+        *,
+        start_chapter_num: int,
+        target_chapter_count: int,
+        chunk_size: int,
+    ) -> List[Tuple[int, int]]:
+        ranges: List[Tuple[int, int]] = []
+        current_start = max(1, int(start_chapter_num or 1))
+        normalized_target_count = max(1, int(target_chapter_count or 1))
+        normalized_chunk_size = max(1, int(chunk_size or 1))
+        target_end = current_start + normalized_target_count - 1
+        while current_start <= target_end:
+            current_end = min(target_end, current_start + normalized_chunk_size - 1)
+            ranges.append((current_start, current_end))
+            current_start = current_end + 1
+        return ranges
+
+    def _story_generate_chunked_volume_detail(
+        self,
+        *,
+        selected_architect: Any,
+        detail_prompt: str,
+        target_volume_index: int,
+        start_chapter_num: int,
+        chapters_count_range: Tuple[int, int],
+        volume_outline_excerpt: str,
+        prev_volume_text: str,
+        pending_foreshadowings_text: str,
+        core_storyline_text: str,
+        pending_foreshadowings: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        target_chapter_count = self._story_resolve_volume_detail_primary_target_count(chapters_count_range)
+        target_end_chapter = max(1, int(start_chapter_num or 1)) + target_chapter_count - 1
+        chunk_ranges = self._story_build_volume_detail_chunk_ranges(
+            start_chapter_num=start_chapter_num,
+            target_chapter_count=target_chapter_count,
+            chunk_size=self._story_resolve_volume_detail_chunk_size(chapters_count_range),
+        )
+        if not chunk_ranges:
+            return ""
+
+        chunk_size = self._story_resolve_volume_detail_chunk_size(chapters_count_range)
+        logger.info(
+            "📚 单卷细化进入分块模式：第%s卷从第%s章开始，目标范围 %s-%s 章，系统规划约 %s 章（到第%s章），共 %s 轮，每轮最多 %s 章",
+            target_volume_index,
+            start_chapter_num,
+            chapters_count_range[0],
+            chapters_count_range[1],
+            target_chapter_count,
+            target_end_chapter,
+            len(chunk_ranges),
+            chunk_size,
+        )
+        first_start, first_end = chunk_ranges[0]
+        logger.info(
+            "🧩 单卷细化分块生成：第%s卷第 1/%s 轮，输出第%s章到第%s章",
+            target_volume_index,
+            len(chunk_ranges),
+            first_start,
+            first_end,
+        )
+        first_prompt = f"""{detail_prompt}
+
+【分块输出要求】
+1. 本卷章节规模较大，请先完成整卷规划，但本次只展开第{first_start}章到第{first_end}章。
+2. 本卷总要求仍是至少 {chapters_count_range[0]} 章、最多 {chapters_count_range[1]} 章。系统当前按约 {target_chapter_count} 章（到第{target_end_chapter}章）规划分块，但只要整体落在区间内且结构完整即可，不要机械凑满上限。
+3. `story_overview`、`volume_positioning`、`chapter_groups`、`foreshadowing_checks`、`volume_connection_check` 仍需面向整卷填写。
+4. `chapters` 里只能保留第{first_start}章到第{first_end}章，章节号必须连续，不得越界。
+5. 不要提前输出第{first_end + 1}章及之后的章节正文块，后续章节将分段继续补写。
+6. 如果输出任何小于第{first_start}章或大于第{first_end}章的 `chapter_number`，该批输出视为无效。
+"""
+        first_response = selected_architect.process(first_prompt, {})
+        first_payload = self._story_extract_json(first_response)
+        if isinstance(first_payload, dict) and first_payload:
+            volume_content, _ = self._story_render_volume_detail(
+                first_payload,
+                target_volume_index=target_volume_index,
+                start_chapter_num=start_chapter_num,
+                chapters_count_range=chapters_count_range,
+                pending_foreshadowings=pending_foreshadowings,
+            )
+        else:
+            volume_content = self._story_normalize_volume_detail_response(
+                first_response,
+                target_volume_index=target_volume_index,
+                start_chapter_num=start_chapter_num,
+                chapters_count_range=chapters_count_range,
+                pending_foreshadowings=pending_foreshadowings,
+            )
+
+        for chunk_index, (chunk_start, chunk_end) in enumerate(chunk_ranges[1:], start=2):
+            logger.info(
+                "🧩 单卷细化分块生成：第%s卷第 %s/%s 轮，补写第%s章到第%s章",
+                target_volume_index,
+                chunk_index,
+                len(chunk_ranges),
+                chunk_start,
+                chunk_end,
+            )
+            main_section_excerpt = self._story_truncate_text(
+                self._story_extract_volume_detail_main_section(volume_content),
+                limit=6500,
+            ) or "（当前已生成章节摘录为空，请严格承接已规划卷结构继续补写。）"
+            chunk_prompt = f"""你正在分块补写第{target_volume_index}卷细纲。本卷总要求仍为从第{start_chapter_num}章开始、至少 {chapters_count_range[0]} 章、最多 {chapters_count_range[1]} 章；系统当前按约 {target_chapter_count} 章（到第{target_end_chapter}章）规划分块，但最终只要落在区间内且结构完整即可。
+
+本次只补写第{chunk_start}章到第{chunk_end}章：
+- 只输出这一段章节区块
+- 严禁重写第{chunk_start}章之前的任何章节
+- 严禁输出第{chunk_end}章之后的任何章节
+- 如果输出的 `chapter_number` 小于 {chunk_start} 或大于 {chunk_end}，该输出视为无效
+- 不要重复已写章节
+- 不要输出“故事概述 / 伏笔埋设检查 / 卷尾衔接检查 / 解释 / 代码块”
+- 每章必须包含：场景目标、冲突设计、关键事件、涉及人物、人物推进、情节作用、结尾钩子；可选补充爽点类型、伏笔事项
+- 第{chunk_start}章必须紧接前文推进，不得重新从第{start_chapter_num}章起叙述
+- 第{chunk_end}章需要为下一段保留承接空间
+
+【全书核心主线】
+{core_storyline_text}
+
+【当前卷框架摘要】
+{volume_outline_excerpt}
+
+【上一卷承接信息】
+{prev_volume_text}
+
+【本卷待处理伏笔】
+{pending_foreshadowings_text}
+
+【当前已生成正文规划区摘录】
+{main_section_excerpt}
+"""
+            supplemented_content = self._story_merge_volume_detail_supplement(
+                volume_content,
+                selected_architect.process(chunk_prompt, {}),
+                next_chapter_number=chunk_start,
+                max_chapter_number=chunk_end,
+            )
+            if supplemented_content != volume_content:
+                volume_content = supplemented_content
+
+        return volume_content
+
     def expand_volume_detail(self, framework_content: str, target_volume_index: int,
                             world_setting: str, characters: str,
                             start_chapter_num: int,
@@ -890,6 +1091,7 @@ class IncrementalExpansionMixin:
 - 目标卷：第{target_volume_index}卷
 - 章节编号：从第{start_chapter_num}章开始
 - 章节数量：至少{chapters_count_range[0]}章，最多{chapters_count_range[1]}章
+- 章节规划原则：系统需在该范围内自主判断合适章数，既不要机械压到最小值，也不要默认凑满到上限
 - 当前目标：讲清一个完整故事阶段，并和上一卷、下一卷无缝衔接
 
 【硬性要求】
@@ -901,6 +1103,7 @@ class IncrementalExpansionMixin:
 6. 每章必须写清：关键事件、人物推进、情节作用，避免只有情绪描述没有结构职责。
 7. 若新增人物，必须让其承担清晰剧情职责，不能为“凑人物卡”而出现。
 8. 必须严格服从全书主线、当前卷摘要、上一卷承接与伏笔任务，避免长篇漂移。
+9. 章节总数只要落在范围内即可，不要为了对齐某个边界值而生硬拉长或压缩剧情。
 
 【全书核心主线】
 {core_storyline_text}
@@ -930,18 +1133,42 @@ class IncrementalExpansionMixin:
 {schema}
 """
 
-        payload = self._story_invoke_agent_json(
-            selected_architect,
-            detail_prompt,
-            fallback={},
-        )
-        volume_content, chapter_count = self._story_render_volume_detail(
-            payload,
-            target_volume_index=target_volume_index,
-            start_chapter_num=start_chapter_num,
-            chapters_count_range=chapters_count_range,
-            pending_foreshadowings=pending_foreshadowings,
-        )
+        volume_content = ""
+        chapter_count = 0
+        if self._story_should_chunk_volume_detail(chapters_count_range):
+            volume_content = self._story_generate_chunked_volume_detail(
+                selected_architect=selected_architect,
+                detail_prompt=detail_prompt,
+                target_volume_index=target_volume_index,
+                start_chapter_num=start_chapter_num,
+                chapters_count_range=chapters_count_range,
+                volume_outline_excerpt=volume_outline_excerpt,
+                prev_volume_text=prev_volume_text,
+                pending_foreshadowings_text=pending_foreshadowings_text,
+                core_storyline_text=core_storyline_text,
+                pending_foreshadowings=pending_foreshadowings,
+            )
+            chapter_count = self._story_count_rendered_volume_detail_chapters(volume_content)
+        else:
+            initial_response = selected_architect.process(detail_prompt, {})
+            initial_payload = self._story_extract_json(initial_response)
+            if isinstance(initial_payload, dict) and initial_payload:
+                volume_content, chapter_count = self._story_render_volume_detail(
+                    initial_payload,
+                    target_volume_index=target_volume_index,
+                    start_chapter_num=start_chapter_num,
+                    chapters_count_range=chapters_count_range,
+                    pending_foreshadowings=pending_foreshadowings,
+                )
+            else:
+                volume_content = self._story_normalize_volume_detail_response(
+                    initial_response,
+                    target_volume_index=target_volume_index,
+                    start_chapter_num=start_chapter_num,
+                    chapters_count_range=chapters_count_range,
+                    pending_foreshadowings=pending_foreshadowings,
+                )
+                chapter_count = self._story_count_rendered_volume_detail_chapters(volume_content)
         fallback_prompt = f"""请详细扩展第{target_volume_index}卷，并严格按以下结构输出 Markdown：
 
 ## 一、故事概述
@@ -949,7 +1176,7 @@ class IncrementalExpansionMixin:
 
 ## 二、第{target_volume_index}卷详细规划（预计{chapters_count_range[0]}-{chapters_count_range[1]}章，从第{start_chapter_num}章开始）
 - 可先写本卷剧情段落设计
-- 然后从第{start_chapter_num}章起逐章输出，直到本卷结尾
+- 然后从第{start_chapter_num}章起逐章输出，由系统在 {chapters_count_range[0]}-{chapters_count_range[1]} 章之间自主判断合适总量；只要结构完整即可，不必机械贴边到最小值或最大值
 - 每章必须包含：场景目标、冲突设计、关键事件、涉及人物、人物推进、情节作用、结尾钩子；可选补充爽点类型、伏笔事项
 
 ## 三、伏笔埋设检查
@@ -1227,6 +1454,15 @@ class IncrementalExpansionMixin:
                 f"单卷细化生成章节数不足：第{target_volume_index}卷最终仅识别到 {actual_chapter_count} 章，"
                 f"目标范围为 {chapters_count_range[0]}-{chapters_count_range[1]} 章。"
             )
+
+        volume_content = _render_normalized_outline_as_markdown(
+            normalize_outline_text(volume_content, characters or "")
+        )
+        volume_content = self._story_ensure_volume_detail_tail_sections(
+            volume_content,
+            pending_foreshadowings=pending_foreshadowings,
+        )
+        actual_chapter_count = self._story_count_rendered_volume_detail_chapters(volume_content)
 
         validator = _resolve_consistency_validator(strict_mode=True)
         validation_result = validator.validate(

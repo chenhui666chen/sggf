@@ -35,6 +35,47 @@ describe('storyExpansionDialogView', () => {
       },
     ]))
   })
+
+  it('展示历史校准估时来源与样本数', () => {
+    const view = createStoryExpansionDialogView({
+      currentChapterCount: 20,
+      currentCharacterCount: 6,
+      targetChapterCount: 300,
+      targetCharacterCount: 18,
+      expansionMode: 'total',
+      totalVolumes: null,
+      totalChaptersMin: null,
+      totalChaptersMax: null,
+      frameworkMetadata: null,
+      targetVolumeIndex: null,
+      volumeChaptersMin: null,
+      volumeChaptersMax: null,
+      volumeCharacterIncrement: null,
+      analysis: {
+        effective_target_chapter_count: 300,
+        effective_target_character_count: 18,
+        estimated_rounds: 20,
+        estimated_duration_minutes_min: 60,
+        estimated_duration_minutes_max: 95,
+        duration_estimate_source: 'history_calibrated',
+        duration_estimate_confidence: 'medium',
+        duration_estimate_sample_count: 6,
+        duration_estimate_reason: '基于 6 条同模式、相近轮次、相近章节与人物增量的历史协同扩展任务校准。',
+      },
+    })
+
+    expect(view.precheckChips).toEqual(expect.arrayContaining([
+      {
+        key: 'duration-estimate-source',
+        label: '估时 历史校准 · 6 样本',
+        color: 'info',
+      },
+    ]))
+    expect(view.autoEstimateHints).toContain(
+      '基于 6 条同模式、相近轮次、相近章节与人物增量的历史协同扩展任务校准。',
+    )
+  })
+
   it('常规协同在目标留空且分析给出建议时展示系统估算提示', () => {
     expect(
       createStoryExpansionDialogView({
@@ -691,8 +732,8 @@ describe('storyExpansionDialogView', () => {
           key: 'volume-detail-fields',
           fields: [
             { key: 'targetVolumeIndex', label: '目标卷编号', helperText: '范围 1-6', min: 1, max: 6, flex: '1 1 160px' },
-            { key: 'volumeChaptersMin', label: '本卷最少章节', helperText: '建议 60-80 章', min: 20, max: 120, flex: '1 1 180px' },
-            { key: 'volumeChaptersMax', label: '本卷最多章节', helperText: '建议尽量控制在 80 章内；必要时可放宽到 120 章', min: 20, max: 120, flex: '1 1 180px' },
+            { key: 'volumeChaptersMin', label: '本卷最少章节', helperText: '建议 60-100 章', min: 20, max: 120, flex: '1 1 180px' },
+            { key: 'volumeChaptersMax', label: '本卷最多章节', helperText: '建议尽量控制在 100 章内；必要时可放宽到 120 章', min: 20, max: 120, flex: '1 1 180px' },
           ],
         },
         {

@@ -41,7 +41,7 @@ from app.api.v1.asset_studio_api._helpers import (
 @router.post("/video-edit", response_model=AssetStudioGenerateResponse)
 async def generate_video_edit_asset(
     prompt: str = Form(...),
-    model_id: str = Form(default="wan2.7-videoedit"),
+    model_id: str = Form(default=DEFAULT_VIDEO_EDIT_MODEL_ID),
     width: int = Form(default=1280),
     height: int = Form(default=720),
     duration: float = Form(default=5.0),
@@ -67,7 +67,7 @@ async def generate_video_edit_asset(
             detail=f"不支持的编辑功能：{edit_feature}，可选值为 {', '.join(VIDEO_EDIT_FEATURES)}",
         )
 
-    resolved_model_id = model_id if model_id in VIDEO_EDIT_MODELS else "wan2.7-videoedit"
+    resolved_model_id = model_id if model_id in VIDEO_EDIT_MODELS else DEFAULT_VIDEO_EDIT_MODEL_ID
     reference_video_path = _save_upload_file(reference_video, subdir="video_edit")
 
     saved_reference_image_paths = [

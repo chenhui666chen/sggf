@@ -28,10 +28,12 @@ import {
   apiClient,
   extractApiErrorMessage,
   type AssetStudioGenerateResponse,
+  type AssetStudioModelCatalogOption,
   type AssetStudioMediaAsset,
 } from '@/services/api'
 import { buildAssetStudioCollectedAssetMetadataContract } from '@/contracts/userAssetMetadataBuilders'
 import { buildAssetStudioCollectedSourcePayload } from '@/contracts/userAssetSourcePayloadBuilders'
+import { useAssetStudioModelCatalog } from '@/hooks/useAssetStudioModelCatalog'
 import { extractLocalAssetStorageMetadata } from '@/utils/localAssetVault'
 import { saveExplicitLocalUserAsset } from '@/utils/userAssetExplicitLocalCollection'
 
@@ -105,6 +107,60 @@ interface CollectFeedback {
 interface CollectState {
   loading: boolean
   feedback: CollectFeedback | null
+}
+
+function mapCatalogOptionToModelOption(option: AssetStudioModelCatalogOption): ModelOption {
+  return {
+    value: option.model_id,
+    label: option.label,
+    helper: option.helper,
+  }
+}
+
+function mapDurationValuesToOptions(values: number[] | undefined | null): DurationOption[] {
+  if (!Array.isArray(values) || values.length === 0) {
+    return []
+  }
+
+  const normalizedValues = Array.from(
+    new Set(
+      values
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value)),
+    ),
+  ).sort((left, right) => left - right)
+
+  return normalizedValues.map((value) => {
+    const normalized = normalizeDurationValue(value)
+    return {
+      value: normalized,
+      label: `${normalized} 秒`,
+    }
+  })
+}
+
+function buildCatalogDurationOptionsByModel(
+  groups: Record<string, AssetStudioModelCatalogOption[]> | undefined,
+): Record<string, DurationOption[]> {
+  if (!groups) {
+    return {}
+  }
+
+  const result: Record<string, DurationOption[]> = {}
+  const groupKeys = ['video_generation', 'video_edit', 'motion'] as const
+  for (const groupKey of groupKeys) {
+    for (const option of groups[groupKey] || []) {
+      const durationOptions = mapDurationValuesToOptions(option.duration_options)
+      if (durationOptions.length > 0) {
+        result[option.model_id] = durationOptions
+      }
+    }
+  }
+  return result
+}
+
+function resolvePreferredModelOption(options: ModelOption[], preferredModelId: string): ModelOption | null {
+  return options.find((option) => option.value === preferredModelId) || options[0] || null
 }
 
 function getPrimaryResultAsset(result: AssetStudioGenerateResponse | null | undefined): AssetStudioMediaAsset | null {
@@ -182,6 +238,10 @@ interface CatalogRuntimeEntry {
   runtime_capability_hints?: RuntimeCapabilityHints | null
   runtime_task_constraints?: RuntimeTaskConstraints | null
   runtime_routing_signal?: RuntimeRoutingSignal | null
+}
+
+const MODEL_CATALOG_ENTRY_ALIASES: Record<string, string[]> = {
+  'kling/kling-v3-image-generation': ['kling-v3-image-generation'],
 }
 
 const WORKBENCH_INPUT_LABEL_SX: SxProps<Theme> = {
@@ -411,12 +471,6 @@ const IMAGE_EDIT_MODEL_OPTIONS: ModelOption[] = [
   },
 ]
 
-const ALL_IMAGE_MODEL_OPTIONS: (ModelOption | { value: '---divider---'; label: string })[] = [
-  ...IMAGE_GENERATION_MODEL_OPTIONS,
-  { value: '---divider---', label: '── 图像编辑 ──' },
-  ...IMAGE_EDIT_MODEL_OPTIONS,
-]
-
 const VIDEO_GENERATION_MODEL_OPTIONS: ModelOption[] = [
   {
     value: 'wan2.7-t2v',
@@ -496,12 +550,6 @@ const VIDEO_EDIT_MODEL_OPTIONS: ModelOption[] = [
     label: 'Kling V3（编辑）',
     helper: '可灵视频编辑与融合，适合高质量视频创作。',
   },
-]
-
-const ALL_VIDEO_MODEL_OPTIONS: (ModelOption | { value: '---divider---'; label: string })[] = [
-  ...VIDEO_GENERATION_MODEL_OPTIONS,
-  { value: '---divider---', label: '── 视频编辑 ──' },
-  ...VIDEO_EDIT_MODEL_OPTIONS,
 ]
 
 const MOTION_MODEL_OPTIONS: ModelOption[] = [
@@ -737,7 +785,14 @@ const AUDIO_TEMPO_OPTIONS = [
   { value: 'fast', label: '快速' },
 ]
 
-const getFallbackDurationOptions = function(modelId: string): DurationOption[] {
+const getFallbackDurationOptions = function(
+  modelId: string,
+  catalogDurationOptionsByModel?: Record<string, DurationOption[]>,
+): DurationOption[] {
+  const catalogOptions = catalogDurationOptionsByModel?.[modelId]
+  if (catalogOptions && catalogOptions.length > 0) {
+    return catalogOptions
+  }
   return VIDEO_DURATION_OPTIONS_BY_MODEL[modelId] || VIDEO_DURATION_OPTIONS_BY_MODEL['wan2.7-t2v']
 }
 
@@ -768,6 +823,7 @@ function normalizeDurationValue(value: number): string {
 function getRuntimeDurationOptions(
   modelId: string,
   runtimeTaskConstraints?: RuntimeTaskConstraints | null,
+  catalogDurationOptionsByModel?: Record<string, DurationOption[]>,
 ): DurationOption[] {
   const durationValues = Array.isArray(runtimeTaskConstraints?.duration_values)
     ? runtimeTaskConstraints.duration_values
@@ -776,7 +832,7 @@ function getRuntimeDurationOptions(
     : []
 
   if (!durationValues.length) {
-    return getFallbackDurationOptions(modelId)
+    return getFallbackDurationOptions(modelId, catalogDurationOptionsByModel)
   }
 
   const uniqueSortedValues = Array.from(new Set(durationValues)).sort((left, right) => left - right)
@@ -1430,10 +1486,26 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const activeEntry = entries.find((entry) => entry.id === activeTabId) || entries[0]
   const ActiveIcon = activeEntry.icon
   const [catalogRuntimeEntries, setCatalogRuntimeEntries] = useState<Record<string, CatalogRuntimeEntry>>({})
+  const { catalog: assetStudioModelCatalog } = useAssetStudioModelCatalog()
+
+  const assetStudioImageGenerationDefaultModelId =
+    assetStudioModelCatalog?.defaults.asset_studio_image_generation || 'wan2.7-image'
+  const assetStudioImageEditDefaultModelId =
+    assetStudioModelCatalog?.defaults.asset_studio_image_edit || 'qwen-image-edit-plus'
+  const assetStudioVideoGenerationDefaultModelId =
+    assetStudioModelCatalog?.defaults.asset_studio_video_generation || 'wan2.7-t2v'
+  const assetStudioMotionDefaultModelId =
+    assetStudioModelCatalog?.defaults.asset_studio_motion || 'wan2.7-i2v'
+  const assetStudioAudioMusicDefaultModelId =
+    assetStudioModelCatalog?.defaults.asset_studio_audio_music || 'mureka-o1-instrumental'
+  const assetStudioAudioSoundEffectDefaultModelId =
+    assetStudioModelCatalog?.defaults.asset_studio_audio_sound_effect || 'vidu-timing2audio'
+  const assetStudioAudioSpeechDefaultModelId =
+    assetStudioModelCatalog?.defaults.asset_studio_audio_speech || 'qwen3-tts-instruct-flash'
 
   const [imagePrompt, setImagePrompt] = useState('')
   const [imageNegativePrompt, setImageNegativePrompt] = useState('')
-  const [imageModelId, setImageModelId] = useState('wan2.6-t2i')
+  const [imageModelId, setImageModelId] = useState('wan2.7-image')
   const [imageSize, setImageSize] = useState(IMAGE_SIZE_OPTIONS[0].value)
   const [imageReferenceFiles, setImageReferenceFiles] = useState<File[]>([])
   const [imageLoading, setImageLoading] = useState(false)
@@ -1505,10 +1577,24 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   })
 
   const imageUsesReferenceMode = imageReferenceFiles.length > 0
-  const imageModelOptions = imageUsesReferenceMode ? ALL_IMAGE_MODEL_OPTIONS : ALL_IMAGE_MODEL_OPTIONS
+  const catalogDurationOptionsByModel = buildCatalogDurationOptionsByModel(assetStudioModelCatalog?.groups)
+  const imageGenerationModelOptions =
+    assetStudioModelCatalog?.groups.image_generation?.map(mapCatalogOptionToModelOption) || IMAGE_GENERATION_MODEL_OPTIONS
+  const imageEditModelOptions =
+    assetStudioModelCatalog?.groups.image_edit?.map(mapCatalogOptionToModelOption) || IMAGE_EDIT_MODEL_OPTIONS
+  const imageModelOptions =
+    imageEditModelOptions.length > 0
+      ? [...imageGenerationModelOptions, { value: '---divider---' as const, label: '── 图像编辑 ──' }, ...imageEditModelOptions]
+      : imageGenerationModelOptions
   const imageRealModelOptions = imageModelOptions.filter((opt): opt is ModelOption => opt.value !== '---divider---')
   const sortedImageModelOptions = sortModelOptionsByRoutingSignal(imageRealModelOptions, catalogRuntimeEntries)
   const recommendedImageModel = sortedImageModelOptions[0] || imageRealModelOptions[0] || null
+  const preferredImageGenerationModel = resolvePreferredModelOption(
+    imageGenerationModelOptions,
+    assetStudioImageGenerationDefaultModelId,
+  )
+  const preferredImageEditModel = resolvePreferredModelOption(imageEditModelOptions, assetStudioImageEditDefaultModelId)
+  const imageEditModelIds = new Set(imageEditModelOptions.map((option) => option.value))
   const selectedImageCatalogEntry = catalogRuntimeEntries[imageModelId]
   const selectedImageRoutingSignal = selectedImageCatalogEntry?.runtime_routing_signal
   const imageSizeOptions = filterSizeOptions(IMAGE_SIZE_OPTIONS, selectedImageCatalogEntry?.runtime_task_constraints)
@@ -1516,14 +1602,33 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
   const selectedImageModel = sortedImageModelOptions.find((option) => option.value === imageModelId) || sortedImageModelOptions[0]
 
   const videoUsesReferenceMode = Boolean(videoReferenceFile)
-  const videoModelOptions = videoUsesReferenceMode ? ALL_VIDEO_MODEL_OPTIONS : ALL_VIDEO_MODEL_OPTIONS
+  const videoGenerationModelOptions =
+    assetStudioModelCatalog?.groups.video_generation?.map(mapCatalogOptionToModelOption) || VIDEO_GENERATION_MODEL_OPTIONS
+  const videoEditModelOptions =
+    assetStudioModelCatalog?.groups.video_edit?.map(mapCatalogOptionToModelOption) || VIDEO_EDIT_MODEL_OPTIONS
+  const videoModelOptions =
+    videoEditModelOptions.length > 0
+      ? [...videoGenerationModelOptions, { value: '---divider---' as const, label: '── 视频编辑 ──' }, ...videoEditModelOptions]
+      : videoGenerationModelOptions
   const videoRealModelOptions = videoModelOptions.filter((opt): opt is ModelOption => opt.value !== '---divider---')
   const sortedVideoModelOptions = sortModelOptionsByRoutingSignal(videoRealModelOptions, catalogRuntimeEntries)
   const recommendedVideoModel = sortedVideoModelOptions[0] || videoRealModelOptions[0] || null
+  const preferredVideoGenerationModel = resolvePreferredModelOption(
+    videoGenerationModelOptions,
+    assetStudioVideoGenerationDefaultModelId,
+  )
+  const preferredVideoReferenceModel = resolvePreferredModelOption(
+    videoGenerationModelOptions,
+    assetStudioMotionDefaultModelId,
+  )
   const selectedVideoCatalogEntry = catalogRuntimeEntries[videoModelId]
   const selectedVideoRoutingSignal = selectedVideoCatalogEntry?.runtime_routing_signal
   const selectedVideoModel = sortedVideoModelOptions.find((option) => option.value === videoModelId) || sortedVideoModelOptions[0]
-  const videoDurationOptions = getRuntimeDurationOptions(videoModelId, selectedVideoCatalogEntry?.runtime_task_constraints)
+  const videoDurationOptions = getRuntimeDurationOptions(
+    videoModelId,
+    selectedVideoCatalogEntry?.runtime_task_constraints,
+    catalogDurationOptionsByModel,
+  )
   const videoSizeOptions = filterSizeOptions(VIDEO_SIZE_OPTIONS, selectedVideoCatalogEntry?.runtime_task_constraints)
   const videoSupportsCameraControl = getSupportsCameraControl(videoModelId, selectedVideoCatalogEntry?.runtime_capability_hints)
   const selectedVideoCameraControl = CAMERA_CONTROL_OPTIONS.find((option) => option.value === videoCameraControl) || CAMERA_CONTROL_OPTIONS[0]
@@ -1542,17 +1647,31 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
     : null
   const displayedVideoResult = videoLoading ? pendingVideoResult : videoResult
 
-  const sortedMotionModelOptions = sortModelOptionsByRoutingSignal(MOTION_MODEL_OPTIONS, catalogRuntimeEntries)
-  const recommendedMotionModel = sortedMotionModelOptions[0] || MOTION_MODEL_OPTIONS[0] || null
+  const motionModelOptions =
+    assetStudioModelCatalog?.groups.motion?.map(mapCatalogOptionToModelOption) || MOTION_MODEL_OPTIONS
+  const sortedMotionModelOptions = sortModelOptionsByRoutingSignal(motionModelOptions, catalogRuntimeEntries)
+  const recommendedMotionModel = sortedMotionModelOptions[0] || motionModelOptions[0] || null
+  const preferredMotionModel = resolvePreferredModelOption(motionModelOptions, assetStudioMotionDefaultModelId)
   const selectedMotionCatalogEntry = catalogRuntimeEntries[motionModelId]
   const selectedMotionRoutingSignal = selectedMotionCatalogEntry?.runtime_routing_signal
   const selectedMotionModel = sortedMotionModelOptions.find((option) => option.value === motionModelId) || sortedMotionModelOptions[0]
-  const motionDurationOptions = getRuntimeDurationOptions(motionModelId, selectedMotionCatalogEntry?.runtime_task_constraints)
+  const motionDurationOptions = getRuntimeDurationOptions(
+    motionModelId,
+    selectedMotionCatalogEntry?.runtime_task_constraints,
+    catalogDurationOptionsByModel,
+  )
   const motionSizeOptions = filterSizeOptions(VIDEO_SIZE_OPTIONS, selectedMotionCatalogEntry?.runtime_task_constraints)
   const motionSupportsCameraControl = getSupportsCameraControl(motionModelId, selectedMotionCatalogEntry?.runtime_capability_hints)
   const selectedMotionCameraControl = CAMERA_CONTROL_OPTIONS.find((option) => option.value === motionCameraControl) || CAMERA_CONTROL_OPTIONS[0]
 
-  const audioModelOptions = AUDIO_MODEL_OPTIONS_BY_TYPE[audioGenerationType]
+  const audioModelOptionsByType: Record<AudioGenerationType, ModelOption[]> = {
+    music: assetStudioModelCatalog?.groups.audio_music?.map(mapCatalogOptionToModelOption) || AUDIO_MODEL_OPTIONS_BY_TYPE.music,
+    'sound-effect':
+      assetStudioModelCatalog?.groups.audio_sound_effect?.map(mapCatalogOptionToModelOption) ||
+      AUDIO_MODEL_OPTIONS_BY_TYPE['sound-effect'],
+    speech: assetStudioModelCatalog?.groups.audio_speech?.map(mapCatalogOptionToModelOption) || AUDIO_MODEL_OPTIONS_BY_TYPE.speech,
+  }
+  const audioModelOptions = audioModelOptionsByType[audioGenerationType]
   const selectedAudioModel = audioModelOptions.find((option) => option.value === audioModelId) || audioModelOptions[0]
   const selectedAudioGenerationType =
     AUDIO_GENERATION_TYPE_OPTIONS.find((option) => option.value === audioGenerationType) || AUDIO_GENERATION_TYPE_OPTIONS[0]
@@ -1842,7 +1961,7 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
             continue
           }
 
-          nextEntries[modelKey] = {
+          const runtimeEntry: CatalogRuntimeEntry = {
             model_key: modelKey,
             runtime_capability_hints:
               typeof (item as CatalogRuntimeEntry).runtime_capability_hints === 'object'
@@ -1856,6 +1975,11 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
               typeof (item as CatalogRuntimeEntry).runtime_routing_signal === 'object'
                 ? (item as CatalogRuntimeEntry).runtime_routing_signal
                 : null,
+          }
+
+          nextEntries[modelKey] = runtimeEntry
+          for (const aliasKey of MODEL_CATALOG_ENTRY_ALIASES[modelKey] || []) {
+            nextEntries[aliasKey] = runtimeEntry
           }
         }
         setCatalogRuntimeEntries(nextEntries)
@@ -1970,25 +2094,84 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
 
   useEffect(() => {
     if (activeTabId !== 'image') return
-    if (imageUsesReferenceMode && !imageModelId.startsWith('qwen-image-edit')) {
-      setImageModelId(recommendedImageModel?.value || 'qwen-image-edit-plus')
+    if (imageUsesReferenceMode && !imageEditModelIds.has(imageModelId)) {
+      setImageModelId(preferredImageEditModel?.value || assetStudioImageEditDefaultModelId)
       return
     }
-    if (!imageUsesReferenceMode && imageModelId.startsWith('qwen-image-edit')) {
-      setImageModelId(recommendedImageModel?.value || 'wan2.6-t2i')
+    if (!imageUsesReferenceMode && imageEditModelIds.has(imageModelId)) {
+      setImageModelId(preferredImageGenerationModel?.value || assetStudioImageGenerationDefaultModelId)
     }
-  }, [activeTabId, imageModelId, imageUsesReferenceMode, recommendedImageModel])
+  }, [
+    activeTabId,
+    assetStudioImageEditDefaultModelId,
+    assetStudioImageGenerationDefaultModelId,
+    imageEditModelIds,
+    imageModelId,
+    imageUsesReferenceMode,
+    preferredImageEditModel,
+    preferredImageGenerationModel,
+  ])
+
+  useEffect(() => {
+    if (!imageRealModelOptions.some((option) => option.value === imageModelId)) {
+      setImageModelId(
+        imageUsesReferenceMode
+          ? preferredImageEditModel?.value || assetStudioImageEditDefaultModelId
+          : preferredImageGenerationModel?.value || assetStudioImageGenerationDefaultModelId,
+      )
+    }
+  }, [
+    assetStudioImageEditDefaultModelId,
+    assetStudioImageGenerationDefaultModelId,
+    imageModelId,
+    imageRealModelOptions,
+    imageUsesReferenceMode,
+    preferredImageEditModel,
+    preferredImageGenerationModel,
+  ])
 
   useEffect(() => {
     if (activeTabId !== 'video') return
-    if (videoUsesReferenceMode && videoModelId !== 'wan2.7-i2v') {
-      setVideoModelId(recommendedVideoModel?.value || 'wan2.7-i2v')
+    if (videoUsesReferenceMode && videoModelId !== assetStudioMotionDefaultModelId) {
+      setVideoModelId(preferredVideoReferenceModel?.value || assetStudioMotionDefaultModelId)
       return
     }
-    if (!videoUsesReferenceMode && videoModelId === 'wan2.7-i2v') {
-      setVideoModelId(recommendedVideoModel?.value || 'wan2.7-t2v')
+    if (!videoUsesReferenceMode && videoModelId === assetStudioMotionDefaultModelId) {
+      setVideoModelId(preferredVideoGenerationModel?.value || assetStudioVideoGenerationDefaultModelId)
     }
-  }, [activeTabId, recommendedVideoModel, videoModelId, videoUsesReferenceMode])
+  }, [
+    activeTabId,
+    assetStudioMotionDefaultModelId,
+    assetStudioVideoGenerationDefaultModelId,
+    preferredVideoGenerationModel,
+    preferredVideoReferenceModel,
+    videoModelId,
+    videoUsesReferenceMode,
+  ])
+
+  useEffect(() => {
+    if (!videoRealModelOptions.some((option) => option.value === videoModelId)) {
+      setVideoModelId(
+        videoUsesReferenceMode
+          ? preferredVideoReferenceModel?.value || assetStudioMotionDefaultModelId
+          : preferredVideoGenerationModel?.value || assetStudioVideoGenerationDefaultModelId,
+      )
+    }
+  }, [
+    assetStudioMotionDefaultModelId,
+    assetStudioVideoGenerationDefaultModelId,
+    preferredVideoGenerationModel,
+    preferredVideoReferenceModel,
+    videoModelId,
+    videoRealModelOptions,
+    videoUsesReferenceMode,
+  ])
+
+  useEffect(() => {
+    if (!motionModelOptions.some((option) => option.value === motionModelId)) {
+      setMotionModelId(preferredMotionModel?.value || assetStudioMotionDefaultModelId)
+    }
+  }, [assetStudioMotionDefaultModelId, motionModelId, motionModelOptions, preferredMotionModel])
 
   useEffect(() => {
     if (imageReferenceFiles.length > imageReferenceLimit) {
@@ -2045,9 +2228,26 @@ export default function AssetStudioWorkbench({ activeTabId, entries, onRequestTa
 
   useEffect(() => {
     if (!audioModelOptions.some((option) => option.value === audioModelId)) {
-      setAudioModelId(audioModelOptions[0]?.value || 'mureka-o1-instrumental')
+      const preferredAudioModelId =
+        audioGenerationType === 'music'
+          ? assetStudioAudioMusicDefaultModelId
+          : audioGenerationType === 'sound-effect'
+            ? assetStudioAudioSoundEffectDefaultModelId
+            : assetStudioAudioSpeechDefaultModelId
+      setAudioModelId(
+        audioModelOptions.find((option) => option.value === preferredAudioModelId)?.value ||
+          audioModelOptions[0]?.value ||
+          preferredAudioModelId,
+      )
     }
-  }, [audioGenerationType, audioModelId, audioModelOptions])
+  }, [
+    assetStudioAudioMusicDefaultModelId,
+    assetStudioAudioSoundEffectDefaultModelId,
+    assetStudioAudioSpeechDefaultModelId,
+    audioGenerationType,
+    audioModelId,
+    audioModelOptions,
+  ])
 
   useEffect(() => {
     if (!audioDurationOptions.some((option) => option.value === audioDuration)) {

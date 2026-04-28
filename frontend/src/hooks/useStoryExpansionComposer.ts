@@ -6,6 +6,7 @@ import type {
   StoryExpansionFrameworkMetadata,
   StoryExpansionMode,
   StoryPreserveWrittenMode,
+  StoryExpansionResult,
 } from '@/types/storyExpansion'
 import type {
   StoryExpansionDialogContextState,
@@ -24,6 +25,7 @@ import {
   createStoryExpansionRequestPayloadFromForm,
   createStoryExpansionRequestPlanFromForm,
 } from '@/utils/storyExpansionFormRequest'
+import { coerceStoryExpansionResult } from '@/utils/storyExpansionResultModel'
 import { shouldSkipStoryExpansionAnalysisRequest } from '@/utils/storyExpansionPlanning'
 import type { StoryExpansionRecommendation } from '@/utils/storyExpansionRecommendation'
 
@@ -44,6 +46,7 @@ interface UseStoryExpansionComposerReturn {
   closeStoryExpansionDialog: () => void
   openStoryExpansion: (entryPoint?: StoryExpansionEntryPoint) => Promise<void>
   loadEpicFramework: () => Promise<StoryExpansionFrameworkMetadata | null>
+  applyStoryExpansionRepairResult: (result: StoryExpansionResult | null | undefined) => void
   dialogContext: StoryExpansionDialogContextState
   dialogForm: StoryExpansionDialogFormState
   dialogFormHandlers: StoryExpansionDialogFormHandlers
@@ -263,6 +266,38 @@ export function useStoryExpansionComposer({
     setShowStoryExpansionDialog(false)
   }, [])
 
+  const applyStoryExpansionRepairResult = useCallback((
+    result: StoryExpansionResult | null | undefined,
+  ) => {
+    const normalizedResult = coerceStoryExpansionResult(result)
+    if (!normalizedResult) {
+      return
+    }
+
+    setStoryExpansionAnalysis((previous) => {
+      if (!previous) {
+        return previous
+      }
+
+      const nextValidation = normalizedResult.validation_after
+        ?? normalizedResult.validation_before
+        ?? previous.validation
+      const nextAnalysisSummary = normalizedResult.coordination_summary?.trim()
+        || previous.analysis_summary
+      const repairedWarnings = normalizedResult.alignment_warnings ?? []
+      const nextWarnings = repairedWarnings.length > 0
+        ? repairedWarnings
+        : previous.warnings
+
+      return {
+        ...previous,
+        validation: nextValidation,
+        analysis_summary: nextAnalysisSummary,
+        warnings: nextWarnings,
+      }
+    })
+  }, [])
+
   const applyStoryExpansionDialogDefaults = useCallback((defaults: StoryExpansionDialogDefaults) => {
     setStoryExpansionMode(defaults.expansionMode)
     setStoryTargetChapterCount(defaults.targetChapterCount)
@@ -412,6 +447,7 @@ export function useStoryExpansionComposer({
     closeStoryExpansionDialog,
     openStoryExpansion,
     loadEpicFramework,
+    applyStoryExpansionRepairResult,
     dialogContext,
     dialogForm,
     dialogFormHandlers,

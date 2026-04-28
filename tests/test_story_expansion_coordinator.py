@@ -319,6 +319,136 @@ def test_normalize_outline_text_preserves_character_progress_and_plot_function()
     assert "- 信息落地：" not in normalized
 
 
+def test_normalize_outline_text_does_not_promote_alignment_placeholders_to_scene_goal():
+    outline = """第1章：章节标题建议
+场景目标： - 人物承接待补：高力士 需在后续章节中正式出场，并与当前主线形成明确关联。 - 人物承接待补：杨国忠 需在后续章节中正式出场，并与当前主线形成明确关联。
+冲突设计：主角在推进本章时遭遇新阻碍。
+
+第2章：猎场惊马
+场景目标：通过救驾反被诬陷确立沈离可见气数的能力。 通过救驾反被诬陷确立沈离可见气数的能力。
+人物推进：沈离确认自己无法独善其身。 沈离确认自己无法独善其身。"""
+
+    normalized = normalize_outline_text(outline, "### 【姓名】：沈离\n### 【姓名】：高力士\n### 【姓名】：杨国忠")
+
+    first_block = parse_outline_blocks(normalized)[1][0]
+    assert "人物承接待补" not in first_block.body
+    assert "- 场景目标：围绕《章节标题建议》推进本章主线，并完成阶段性目标。" in first_block.body
+    assert normalized.count("通过救驾反被诬陷确立沈离可见气数的能力") == 1
+    assert normalized.count("沈离确认自己无法独善其身") == 1
+
+
+def test_normalize_outline_text_repairs_malformed_table_fields_and_preserves_tail_sections():
+    outline = """第17章：黑门试炼
+| 字段 | 内容 |
+| --- | --- |
+| 场景目标 | 解开关于苏璃家族债务的石碑试炼并穿透迷宫，抵达封印室前最后一区域 |
+| 冲突设计 | 苏璃内心对家族罪感的毁灭性崩塌 vs 以逻辑漏洞绕过天庄规则完成通透 |
+| 关键事件 | ① 碑文清楚写明苏璃所在家族曾出力开发系统 |
+| **涉及人物】 顾长庚、苏璃、丹丘生 | |
+| 人物推进 | 苏璃开始主动承担家族秘密带来的代价 |
+| **情节作用】 第二道试炼完结；直通封印室进入多路争夺 | |
+| **结尾钩子】 丹丘生推开黑门，从二人视线中消失 | |
+
+## 三、伏笔埋设检查
+- 黑塔钟声第二次广播，暗示追讨范围进一步扩大。
+
+## 四、卷尾衔接检查
+- 结尾必须把内城议会的追索线索抛给下一卷。
+"""
+
+    normalized = normalize_outline_text(outline, "### 【姓名】：顾长庚\n### 【姓名】：苏璃\n### 【姓名】：丹丘生")
+
+    assert "| 字段 | 内容 |" not in normalized
+    assert "**涉及人物】" not in normalized
+    assert "**情节作用】" not in normalized
+    assert "**结尾钩子】" not in normalized
+    assert "- 涉及人物：顾长庚、苏璃、丹丘生" in normalized
+    assert "- 情节作用：第二道试炼完结；直通封印室进入多路争夺" in normalized
+    assert "- 结尾钩子：丹丘生推开黑门，从二人视线中消失" in normalized
+    assert normalized.count("## 三、伏笔埋设检查") == 1
+    assert normalized.count("## 四、卷尾衔接检查") == 1
+    assert "黑塔钟声第二次广播" in normalized
+    assert "内城议会的追索线索" in normalized
+
+
+def test_auto_repair_character_alignment_preserves_tail_sections():
+    outline = """## 第二卷细纲
+
+第1章：无声的绞索
+- 场景目标：苏离确认追捕网已经收紧。
+- 涉及人物：苏离
+
+第2章：诱饵与直觉
+- 场景目标：苏离借假线索试探殷无疆。
+- 涉及人物：苏离、殷无疆
+
+## 三、伏笔埋设检查
+- 黑塔钟声第二次广播，暗示追讨范围进一步扩大。
+
+## 四、卷尾衔接检查
+- 结尾必须把内城议会的追索线索抛给下一卷。"""
+
+    repaired_outline, repaired_names = StoryExpansionCoordinator._auto_repair_character_alignment(
+        outline,
+        ["顾晚"],
+    )
+
+    assert repaired_names == ["顾晚"]
+    assert repaired_outline.count("## 三、伏笔埋设检查") == 1
+    assert repaired_outline.count("## 四、卷尾衔接检查") == 1
+    assert "黑塔钟声第二次广播" in repaired_outline
+    assert "内城议会的追索线索" in repaired_outline
+    assert "协同角色承接待补：顾晚" in repaired_outline
+
+    normalized = normalize_outline_text(
+        repaired_outline,
+        "### 【姓名】：苏离\n### 【姓名】：殷无疆\n### 【姓名】：顾晚",
+    )
+    first_block = parse_outline_blocks(normalized)[1][0]
+    assert "承接待补：顾晚" not in first_block.body
+    assert "## 协同角色承接待补" in normalized
+
+
+def test_repair_outline_character_references_preserves_tail_sections_without_duplication():
+    outline = """## 第二卷细纲
+
+### 第17章：无声的绞索
+- 场景目标：苏离确认追捕网已经收紧。
+- 涉及人物：苏离
+
+### 第18章：诱饵与直觉
+- 场景目标：苏离借假线索试探殷无疆。
+- 涉及人物：苏离、殷无疆
+
+## 三、伏笔埋设检查
+- 第17章：黑塔钟声第二次广播，暗示追讨范围进一步扩大。
+
+## 四、卷尾衔接检查
+- 第18章结尾必须把内城议会的追索线索抛给下一卷。"""
+
+    characters = """### 【姓名】：苏离
+【角色定位】：主角
+
+### 【姓名】：殷无疆
+【角色定位】：对手
+
+### 【姓名】：顾晚
+【角色定位】：情报盟友"""
+
+    repaired_outline, repairs = StoryExpansionCoordinator._repair_outline_character_references(
+        outline,
+        ["顾晚"],
+        characters_text=characters,
+    )
+
+    assert repairs
+    assert repaired_outline.count("## 三、伏笔埋设检查") == 1
+    assert repaired_outline.count("## 四、卷尾衔接检查") == 1
+    assert "黑塔钟声第二次广播" in repaired_outline
+    assert "内城议会的追索线索" in repaired_outline
+    assert "顾晚" in repaired_outline
+
+
 def test_render_structured_chapter_blocks_requires_scene_goal_field_instead_of_legacy_main_content():
     rendered = StoryExpansionCoordinator._render_structured_chapter_blocks(
         [
@@ -785,6 +915,87 @@ def test_iterative_mode_uses_chapter_breakdown_when_outline_overview_has_no_pars
     assert "大纲扩展未产生新增章节" not in result["coordination_summary"]
 
 
+class _IterativeCharacterHandoffCoordinator(StoryExpansionCoordinator):
+    def __init__(self):
+        self.project_id = None
+        self.genre = ""
+        self.planned_chapters_max = 0
+        self.plot_calls = 0
+
+    def _run_outline_round(self, **kwargs):
+        self.plot_calls += 1
+        if self.plot_calls == 1:
+            return {
+                "expanded_outline": kwargs["current_outline"],
+                "outline_delta": "",
+                "current_chapter_count": kwargs["current_chapter_count"],
+                "should_continue": False,
+                "continue_reason": "本轮缺少新角色承接信息，暂不能补章。",
+            }
+
+        target_total_chapters = int(kwargs["target_total_chapters"])
+        outline = "\n\n".join(
+            f"第{index}章：章节{index}\n- 场景目标：推进第{index}章剧情。\n- 涉及人物：林舟、顾晚"
+            for index in range(1, target_total_chapters + 1)
+        )
+        return {
+            "expanded_outline": outline,
+            "outline_delta": (
+                f"第{target_total_chapters}章：章节{target_total_chapters}\n"
+                "- 场景目标：顾晚正式接入主线。"
+            ),
+            "current_chapter_count": target_total_chapters,
+            "should_continue": True,
+            "continue_reason": "",
+        }
+
+    def _resolve_iterative_outline_round_text(self, current_outline, result, current_chapter_count):
+        return result["expanded_outline"], result.get("outline_delta", "")
+
+    def _run_character_round(self, **kwargs):
+        return {
+            "all_characters": (
+                kwargs["current_characters"].rstrip()
+                + "\n\n### 【姓名】：顾晚\n【角色定位】：情报盟友"
+            ),
+            "character_relationships": "",
+            "current_character_count": 2,
+            "post_validation_score": 80,
+            "should_continue": False,
+            "continue_reason": "本轮已补足关键承接角色。",
+            "recognized_new_character_count": 1,
+            "recognized_new_character_names": ["顾晚"],
+        }
+
+
+def test_iterative_mode_retries_plot_after_character_growth() -> None:
+    coordinator = _IterativeCharacterHandoffCoordinator()
+
+    result = coordinator._execute_iterative_mode(
+        current_outline="第1章：开篇\n- 场景目标：林舟卷入旧案。",
+        characters="### 【姓名】：林舟\n【角色定位】：主角",
+        world_setting="悬疑仙侠世界",
+        target_total_chapters=4,
+        target_total_characters=2,
+        strategy="plot_first",
+        mode_info={
+            "reason": "test",
+            "current_chapter_count": 1,
+            "current_character_count": 1,
+            "target_chapter_count": 4,
+            "target_character_count": 2,
+            "chapters_needed": 3,
+            "characters_needed": 1,
+        },
+    )
+
+    assert coordinator.plot_calls == 2
+    assert result["current_chapter_count"] == 4
+    assert "顾晚正式接入主线" in result["outline_delta"]
+    assert result["execution_rounds"][0]["plot"]["retry_after_character_growth"] is True
+    assert "大纲扩展未产生新增章节" not in result["coordination_summary"]
+
+
 class _IterativeDynamicAutoCharacterCoordinator(StoryExpansionCoordinator):
     def __init__(self):
         self.project_id = None
@@ -916,6 +1127,63 @@ def test_iterative_mode_can_reach_total_task_character_target_for_blank_total_mo
     assert character_round_targets[-1] == 38
     assert max(coordinator.character_targets) == 38
     assert coordinator.character_targets[0] > 18
+
+
+class _IterativeTailSupplementCoordinator(StoryExpansionCoordinator):
+    def __init__(self):
+        self.project_id = None
+        self.genre = ""
+        self.planned_chapters_max = 0
+        self.outline_calls: List[Dict[str, Any]] = []
+
+    def _run_outline_round(self, **kwargs):
+        self.outline_calls.append(dict(kwargs))
+        sequence = [10, 20, 30, 40, 50, 60, 70, 80, 90, 98, 100]
+        next_count = sequence[len(self.outline_calls) - 1]
+        outline = "\n\n".join(
+            f"第{index}章：章节{index}\n- 场景目标：推进第{index}章剧情。"
+            for index in range(1, next_count + 1)
+        )
+        return {
+            "expanded_outline": outline,
+            "outline_delta": (
+                f"第{next_count}章：章节{next_count}\n"
+                f"- 场景目标：推进第{next_count}章剧情。"
+            ),
+            "current_chapter_count": next_count,
+            "should_continue": True,
+            "continue_reason": "",
+        }
+
+
+def test_iterative_mode_runs_tail_chapter_supplement_within_same_task():
+    coordinator = _IterativeTailSupplementCoordinator()
+
+    result = coordinator._execute_iterative_mode(
+        current_outline="",
+        characters="### 【姓名】：林舟\n【角色定位】：主角",
+        world_setting="修真世界",
+        target_total_chapters=100,
+        target_total_characters=1,
+        strategy="plot_first",
+        mode_info={
+            "reason": "test",
+            "current_chapter_count": 0,
+            "current_character_count": 1,
+            "target_chapter_count": 100,
+            "target_character_count": 1,
+            "chapters_needed": 100,
+            "characters_needed": 0,
+        },
+    )
+
+    assert len(coordinator.outline_calls) == 11
+    assert coordinator.outline_calls[-1]["increment"] == 2
+    assert coordinator.outline_calls[-1]["target_total_chapters"] == 100
+    assert result["current_chapter_count"] == 100
+    assert result["execution_rounds"][-1]["tail_supplement"] is True
+    assert result["stop_reasons"] == []
+    assert "章节尚差" not in result["coordination_summary"]
 
 
 def test_normalize_character_stop_reason_rewrites_false_no_growth_claim_after_real_growth():
@@ -1619,7 +1887,7 @@ def test_analyze_expansion_request_supports_volume_detail_mode():
     assert analysis["execution_mode"] == "volume_detail"
     assert analysis["effective_expansion_mode"] == "volume_detail"
     assert analysis["volume_detail"]["target_volume_index"] == 2
-    assert analysis["volume_detail"]["chapter_range"] == [21, 60]
+    assert analysis["volume_detail"]["chapter_range"] == [21, 55]
 
 
 def test_analyze_expansion_request_can_auto_estimate_volume_detail_characters():

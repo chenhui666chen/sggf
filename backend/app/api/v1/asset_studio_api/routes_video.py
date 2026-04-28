@@ -45,7 +45,7 @@ from app.api.v1.asset_studio_api._helpers import (
 def generate_video_asset(
     prompt: str = Form(...),
     negative_prompt: str = Form(default=""),
-    model_id: str = Form(default="wan2.7-t2v"),
+    model_id: str = Form(default=DEFAULT_VIDEO_GENERATION_MODEL_ID),
     width: int = Form(default=1280),
     height: int = Form(default=720),
     duration: float = Form(default=5.0),
@@ -60,17 +60,17 @@ def generate_video_asset(
     if not cleaned_prompt:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="提示词不能为空")
 
-    requested_model_id = (model_id or "").strip() or "wan2.7-t2v"
+    requested_model_id = (model_id or "").strip() or DEFAULT_VIDEO_GENERATION_MODEL_ID
     seed_value = _parse_optional_int(seed)
     reference_path = (
         _save_upload_file(reference_image, subdir="video")
         if reference_image and reference_image.filename
         else None
     )
-    resolved_model_id = requested_model_id if requested_model_id in VIDEO_MODELS else "wan2.7-t2v"
-    if reference_path and resolved_model_id not in {"wan2.7-i2v"}:
-        resolved_model_id = "wan2.7-i2v"
-    if resolved_model_id == "wan2.7-i2v" and not reference_path:
+    resolved_model_id = requested_model_id if requested_model_id in VIDEO_MODELS else DEFAULT_VIDEO_GENERATION_MODEL_ID
+    if reference_path and resolved_model_id not in {DEFAULT_MOTION_MODEL_ID}:
+        resolved_model_id = DEFAULT_MOTION_MODEL_ID
+    if resolved_model_id == DEFAULT_MOTION_MODEL_ID and not reference_path:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="wan2.7-i2v 需要上传首帧参考图",
@@ -131,7 +131,7 @@ def generate_video_asset(
 @router.post("/motion", response_model=AssetStudioGenerateResponse)
 def generate_motion_asset(
     prompt: str = Form(...),
-    model_id: str = Form(default="wan2.7-i2v"),
+    model_id: str = Form(default=DEFAULT_MOTION_MODEL_ID),
     width: int = Form(default=1280),
     height: int = Form(default=720),
     duration: float = Form(default=5.0),
@@ -150,12 +150,12 @@ def generate_motion_asset(
     if not cleaned_prompt:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="动作描述不能为空")
 
-    requested_model_id = (model_id or "").strip() or "wan2.7-i2v"
+    requested_model_id = (model_id or "").strip() or DEFAULT_MOTION_MODEL_ID
     seed_value = _parse_optional_int(seed)
     reference_path = _save_upload_file(reference_image, subdir="motion")
-    resolved_model_id = requested_model_id if requested_model_id in VIDEO_MODELS else "wan2.7-i2v"
+    resolved_model_id = requested_model_id if requested_model_id in MOTION_MODELS else DEFAULT_MOTION_MODEL_ID
     resolved_width, resolved_height = _validate_dimensions_for_models(
-        VIDEO_MODELS,
+        MOTION_MODELS,
         width,
         height,
         request_label="视频",

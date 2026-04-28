@@ -120,6 +120,14 @@
 
 - 模型中心卡片
   - `frontend/src/pages/ModelCatalogPage.tsx`
+- Asset Studio / DreamWeaver 统一模型清单
+  - `backend/app/services/asset_studio_model_catalog.py`
+  - `backend/app/api/v1/asset_studio_api/routes_model_catalog.py`
+  - `frontend/src/hooks/useAssetStudioModelCatalog.ts`
+- 模型中心实时投影层
+  - `backend/app/services/model_catalog_projection.py`
+  - `backend/app/api/v1/model_catalog.py`
+  - `backend/app/scripts/bootstrap_model_catalog_cards.py`
 - 领域/语义侧配置
   - `config/intent_domains.yaml`
   - `core/semantic_matcher.py`
@@ -128,7 +136,15 @@
 - 项目参考文档
   - `docs/MODEL_INTEGRATION_REFERENCE.md`
 
-如果只改了卡片，没有改接入参考文档，后续继续接模型的人会重复踩坑。
+如果只改了卡片，没有改统一模型清单和接入参考文档，后续继续接模型的人会重复踩坑，而且 Asset Studio / DreamWeaver 会继续显示旧选项。
+
+如果这次变更涉及模型中心数据库快照，还应在合适时机执行：
+
+```powershell
+python -m backend.app.scripts.bootstrap_model_catalog_cards --prune-stale
+```
+
+这样可以把数据库中的模型中心条目收敛到当前集成模型集合，避免遗留测试卡片或历史废弃模型继续占库。
 
 ## 4. 状态判定标准
 
@@ -273,13 +289,14 @@
 
 ## 8. 验证结束后的最小回写清单
 
-完成一次模型能力校验后，至少检查下面 6 项：
+完成一次模型能力校验后，至少检查下面 7 项：
 
 - 模型卡状态是否更新为正确的 `已验证 / 部分验证 / 待手动验证`
 - 推荐场景是否改成真实适用场景
 - 限制项是否写清楚
 - API 调用页是否补了关键参数和返回结构
 - AI 设计页是否只保留真正高价值的信息
+- Asset Studio / DreamWeaver 统一模型清单是否同步了最新模型名称、默认值和可选项
 - 参考文档是否同步到 `docs/MODEL_INTEGRATION_REFERENCE.md`
 
-如果这 6 项没做完，就不算完成一次真正可复用的模型校验。
+如果这 7 项没做完，就不算完成一次真正可复用的模型校验。
